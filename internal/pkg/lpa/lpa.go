@@ -169,7 +169,7 @@ func (l *LPA) Delete(id sgp22.ICCID) error {
 	for _, n := range deletionNotifications {
 		if n.SequenceNumber > lastSeq && bytes.Equal(n.ICCID, id) {
 			slog.Info("sending deletion notification", "sequence", n.SequenceNumber)
-			if err := l.SendNotification(n, false); err != nil {
+			if err := l.SendNotification(n.SequenceNumber, false); err != nil {
 				errs = errors.Join(errs, err)
 			}
 		}
