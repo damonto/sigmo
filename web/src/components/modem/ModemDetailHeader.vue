@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { Info } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
+import ModemStickyTopBar from '@/components/modem/ModemStickyTopBar.vue'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useStickyTopBar } from '@/composables/useStickyTopBar'
 
 import type { Modem } from '@/types/modem'
 
@@ -28,6 +30,12 @@ const { t } = useI18n()
 const router = useRouter()
 
 const titleClickCount = ref(0)
+const backButtonRef = ref<HTMLElement | null>(null)
+const { isStickyVisible } = useStickyTopBar(backButtonRef)
+const topBarTitle = computed(() => {
+  if (props.isLoading) return '...'
+  return props.modem?.name ?? t('modemDetail.unknown')
+})
 
 const handleTitleClick = () => {
   if (!props.modem?.id || !props.modem.supportsEsim) return
@@ -40,16 +48,39 @@ const handleTitleClick = () => {
 
 <template>
   <div class="space-y-4">
+    <ModemStickyTopBar
+      :show="isStickyVisible"
+      :title="topBarTitle"
+      :back-label="t('modemDetail.back')"
+      back-to="/"
+    >
+      <template #right>
+        <Button
+          v-if="props.showDetailsAction"
+          variant="ghost"
+          size="icon"
+          type="button"
+          :aria-label="t('modemDetail.tabs.detail')"
+          :title="t('modemDetail.tabs.detail')"
+          @click="emit('open-details')"
+        >
+          <Info class="size-4 text-muted-foreground" />
+        </Button>
+      </template>
+    </ModemStickyTopBar>
+
     <div class="flex items-center justify-between gap-3">
-      <Button
-        variant="ghost"
-        size="sm"
-        type="button"
-        class="px-0 text-muted-foreground"
-        @click="router.push('/')"
-      >
-        ← {{ t('modemDetail.back') }}
-      </Button>
+      <div ref="backButtonRef" class="inline-flex">
+        <Button
+          variant="ghost"
+          size="sm"
+          type="button"
+          class="px-0 text-muted-foreground"
+          @click="router.push('/')"
+        >
+          &larr; {{ t('modemDetail.back') }}
+        </Button>
+      </div>
       <Button
         v-if="props.showDetailsAction"
         variant="ghost"
@@ -78,5 +109,6 @@ const handleTitleClick = () => {
         {{ t('modemDetail.subtitle') }}
       </p>
     </header>
+
   </div>
 </template>
