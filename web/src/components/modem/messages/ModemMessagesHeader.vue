@@ -37,7 +37,7 @@ const { isStickyVisible } = useStickyTopBar(backButtonRef)
 
     <div class="flex items-center justify-between gap-3">
       <div class="space-y-1">
-        <div ref="backButtonRef" class="inline-flex">
+        <div ref="backButtonRef" class="inline-flex" :class="{ invisible: isStickyVisible }">
           <Button as-child variant="ghost" size="sm" class="px-0 text-muted-foreground">
             <RouterLink to="/">
               &larr; {{ t('modemDetail.back') }}

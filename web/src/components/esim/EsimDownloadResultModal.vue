@@ -38,12 +38,14 @@ const iconComponent = computed(() => (isError.value ? CircleX : CheckCircle2))
 <template>
   <AlertDialog :open="props.open">
     <AlertDialogContent>
-      <AlertDialogHeader class="items-center text-center">
+      <AlertDialogHeader class="min-w-0 w-full items-center text-center">
         <AlertDialogTitle>{{ title }}</AlertDialogTitle>
         <div :class="iconWrapperClass">
           <component :is="iconComponent" class="size-8" :class="iconClass" />
         </div>
-        <AlertDialogDescription :class="messageClass">
+        <AlertDialogDescription
+          :class="[messageClass, 'min-w-0 w-full whitespace-pre-wrap wrap-break-word']"
+        >
           {{ message }}
         </AlertDialogDescription>
       </AlertDialogHeader>

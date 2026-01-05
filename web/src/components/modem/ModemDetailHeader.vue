@@ -69,7 +69,7 @@ const handleTitleClick = () => {
       </template>
     </ModemStickyTopBar>
 
-    <div class="flex items-center justify-between gap-3">
+    <div class="flex items-center justify-between gap-3" :class="{ invisible: isStickyVisible }">
       <div ref="backButtonRef" class="inline-flex">
         <Button
           variant="ghost"

@@ -125,7 +125,8 @@ const scanFormats: BarcodeFormat[] = ['qr_code']
 const parseLpaCode = (raw: string) => {
   const trimmed = raw.trim()
   const parts = trimmed.split('$')
-  if (parts.length < 3 || !parts?.[0]?.startsWith('LPA:')) {
+  const prefix = parts?.[0]?.toUpperCase() ?? ''
+  if (parts.length < 3 || !prefix.startsWith('LPA:')) {
     return null
   }
   const smdp = parts[1] ?? ''
@@ -159,7 +160,7 @@ const handleSmdpInput = (event: Event) => {
   const target = event.target
   if (!(target instanceof HTMLInputElement)) return
   const value = target.value.trim()
-  if (!value.startsWith('LPA:1')) return
+  if (!value.toUpperCase().startsWith('LPA:1')) return
   const parsed = parseLpaCode(value)
   if (!parsed) return
   applyLpaPayload(parsed)

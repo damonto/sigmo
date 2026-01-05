@@ -41,9 +41,11 @@ const handleClose = () => {
 <template>
   <AlertDialog v-model:open="open">
     <AlertDialogContent>
-      <AlertDialogHeader>
+      <AlertDialogHeader class="min-w-0 w-full">
         <AlertDialogTitle>{{ title }}</AlertDialogTitle>
-        <AlertDialogDescription>{{ message }}</AlertDialogDescription>
+        <AlertDialogDescription class="min-w-0 w-full whitespace-pre-wrap wrap-break-word">
+          {{ message }}
+        </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
         <AlertDialogAction @click="handleClose">OK</AlertDialogAction>
