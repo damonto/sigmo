@@ -106,6 +106,21 @@ be writable by the Sigmo process.
     bot_token = "Your Telegram Bot Token"
     recipients = [123456789]
 
+  [channels.bark]
+    endpoint = "https://api.day.app/push"
+    recipients = ["your_device_key"]
+    subject = "Sigmo Notification"
+
+  [channels.gotify]
+    endpoint = "https://push.example.de/message"
+    recipients = ["your_app_token"]
+    subject = "Sigmo Notification"
+    priority = 5
+
+  [channels.sc3]
+    endpoint = "https://123.push.ft07.com/send/your_sendkey.send"
+    subject = "Sigmo Notification"
+
   [channels.http]
     endpoint = "https://httpbin.org/post"
     [channels.http.headers]
@@ -134,9 +149,14 @@ Notes:
 
 - `app.environment` is used to decide log verbosity (`production` keeps logs quieter).
 - `app.listen_address` is the bind address for the HTTP server.
-- `app.auth_providers` selects which channels are allowed for OTP login (`telegram`, `http`, `email`).
+- `app.auth_providers` selects which channels are allowed for OTP login (`telegram`, `bark`, `gotify`, `sc3`, `http`, `email`).
 - `channels.*` are also used for SMS forwarding. If no channels are configured, OTP
   login and SMS forwarding are disabled.
+- `channels.bark.endpoint` defaults to `https://api.day.app/push` when empty; `channels.bark.recipients` are Bark device keys (multiple keys are sent one by one).
+- `channels.bark.subject` maps to Bark `title`.
+- `channels.gotify.endpoint` should point to the Gotify `/message` endpoint; `channels.gotify.recipients` are app tokens (sent one by one).
+- `channels.gotify.subject` maps to Gotify `title`, and `channels.gotify.priority` maps to Gotify `priority`.
+- `channels.sc3.endpoint` should include the sendkey path (for example `https://123.push.ft07.com/send/your_sendkey.send`); `channels.sc3.subject` maps to `title`.
 - `channels.email.tls_policy` supports `mandatory` (default), `opportunistic`, and `none`; set `channels.email.ssl = true` for SMTPS on port 465.
 - `modems` is keyed by ModemManager EquipmentIdentifier (the modem ID shown by the UI).
 - `modems.*.alias` is the display name shown in the UI.

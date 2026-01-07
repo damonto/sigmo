@@ -19,9 +19,6 @@ type Email struct {
 }
 
 func NewEmail(cfg *config.Channel) (*Email, error) {
-	if cfg == nil {
-		return nil, errors.New("email config is required")
-	}
 	host := strings.TrimSpace(cfg.SMTPHost)
 	if host == "" {
 		return nil, errors.New("email smtp_host is required")

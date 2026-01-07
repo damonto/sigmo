@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"path"
 	"strings"
 	"time"
@@ -32,22 +31,12 @@ type telegramMessage struct {
 }
 
 func NewTelegram(cfg *config.Channel) (*Telegram, error) {
-	if cfg == nil {
-		return nil, errors.New("telegram config is required")
-	}
 	if strings.TrimSpace(cfg.BotToken) == "" {
 		return nil, errors.New("telegram bot token is required")
 	}
-	endpoint := strings.TrimSpace(cfg.Endpoint)
-	if endpoint == "" {
-		endpoint = defaultTelegramEndpoint
-	}
-	baseURL, err := url.Parse(endpoint)
+	baseURL, err := parseEndpoint("telegram", cfg.Endpoint, defaultTelegramEndpoint)
 	if err != nil {
-		return nil, fmt.Errorf("parsing telegram endpoint: %w", err)
-	}
-	if baseURL.Scheme == "" || baseURL.Host == "" {
-		return nil, errors.New("telegram endpoint must include scheme and host")
+		return nil, err
 	}
 	recipients, err := cfg.Recipients.Int64s()
 	if err != nil {

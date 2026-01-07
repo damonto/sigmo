@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -21,22 +20,13 @@ type HTTP struct {
 }
 
 func NewHTTP(cfg *config.Channel) (*HTTP, error) {
-	if cfg == nil {
-		return nil, errors.New("http config is required")
-	}
-	if strings.TrimSpace(cfg.Endpoint) == "" {
-		return nil, errors.New("http endpoint is required")
-	}
-	parsed, err := url.Parse(cfg.Endpoint)
+	parsed, err := parseEndpoint("http", cfg.Endpoint, "")
 	if err != nil {
-		return nil, fmt.Errorf("parsing http endpoint: %w", err)
-	}
-	if parsed.Scheme == "" || parsed.Host == "" {
-		return nil, errors.New("http endpoint must include scheme and host")
+		return nil, err
 	}
 	return &HTTP{
 		client:   &http.Client{Timeout: 10 * time.Second},
-		endpoint: cfg.Endpoint,
+		endpoint: parsed.String(),
 		headers:  cfg.Headers,
 	}, nil
 }

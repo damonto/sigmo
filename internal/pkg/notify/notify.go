@@ -61,6 +61,12 @@ func createSender(name string, channel config.Channel) (Sender, error) {
 		return NewHTTP(&channel)
 	case "email":
 		return NewEmail(&channel)
+	case "bark":
+		return NewBark(&channel)
+	case "gotify":
+		return NewGotify(&channel)
+	case "sc3":
+		return NewSC3(&channel)
 	default:
 		return nil, fmt.Errorf("unsupported channel type: %s", name)
 	}

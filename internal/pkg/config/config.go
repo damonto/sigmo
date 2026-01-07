@@ -43,6 +43,9 @@ type Channel struct {
 	Subject      string `toml:"subject"`
 	TLSPolicy    string `toml:"tls_policy"`
 	SSL          bool   `toml:"ssl"`
+
+	// Gotify
+	Priority int    `toml:"priority"`
 }
 
 type Modem struct {

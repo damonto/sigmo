@@ -9,6 +9,21 @@
     bot_token = "Your Telegram Bot Token"
     recipients = [1231321]
 
+  [channels.bark]
+    endpoint = "https://api.day.app/push"
+    recipients = ["your_device_key"]
+    subject = "Sigmo Notification"
+
+  [channels.gotify]
+    endpoint = "https://push.example.de/message"
+    recipients = ["your_app_token"]
+    subject = "Sigmo Notification"
+    priority = 5
+
+  [channels.sc3]
+    endpoint = "https://123.push.ft07.com/send/your_sendkey.send"
+    subject = "Sigmo Notification"
+
   [channels.http]
     endpoint = "https://httpbin.org/post"
 
