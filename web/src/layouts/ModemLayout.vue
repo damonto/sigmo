@@ -15,6 +15,7 @@ const tabItems = computed(() => [
   {
     key: 'detail',
     routeName: 'modem-detail',
+    activeRouteNames: ['modem-notifications'],
     to: { name: 'modem-detail', params: { id: modemId.value } },
     label: t('modemDetail.tabs.detail'),
     icon: Info,
