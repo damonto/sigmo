@@ -353,7 +353,7 @@ watch(renameOpen, (value) => {
         <DialogTitle>{{ t('modemDetail.actions.rename') }}</DialogTitle>
       </DialogHeader>
       <form class="space-y-4" @submit="confirmRename">
-        <FormField v-slot="{ componentField }" name="name">
+        <FormField v-slot="{ componentField }" name="name" :validateOnBlur="false">
           <FormItem>
             <FormLabel>{{ t('modemDetail.esim.nickname') }}</FormLabel>
             <FormControl>

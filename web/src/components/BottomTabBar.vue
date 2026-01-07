@@ -38,7 +38,7 @@ const tabs = computed(() =>
 <template>
   <nav
     aria-label="Primary navigation"
-    class="fixed bottom-0 left-0 right-0 z-20 h-16 w-full border-t border-white/40 bg-white/70 px-6 py-2 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-2xl dark:border-white/10 dark:bg-slate-950/60"
+    class="fixed bottom-0 left-0 right-0 z-20 h-16 w-full border-t border-white/40 bg-white/60 px-6 py-2 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-2xl backdrop-saturate-125 dark:border-white/10 dark:bg-slate-950/50"
   >
     <div class="mx-auto flex h-full w-full items-center" :class="props.containerClass">
       <div v-for="item in tabs" :key="item.key" class="flex flex-1 justify-center">

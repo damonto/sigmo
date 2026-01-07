@@ -15,7 +15,7 @@ const props = defineProps<{
 
 <template>
   <div
-    class="fixed inset-x-0 top-0 z-30 border-b border-border bg-background/95 backdrop-blur transition duration-200"
+    class="fixed inset-x-0 top-0 z-30 border-b border-border bg-background/90 backdrop-blur backdrop-saturate-125 transition duration-200"
     :class="props.show ? 'translate-y-0 opacity-100' : '-translate-y-2 opacity-0 pointer-events-none'"
   >
     <div class="mx-auto w-full max-w-4xl px-6">
