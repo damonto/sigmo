@@ -218,11 +218,11 @@ Entries are keyed by the ModemManager **Equipment Identifier**.
     mss = 240
 ```
 
-| Parameter        | Type    | Default | Description                                                                                                                                                                                                                                                 |
-| :--------------- | :------ | :------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`alias`**      | String  | (None)  | **Custom Name**. Displayed in the Web UI to help identify specific modems/SIMs.                                                                                                                                                                             |
-| **`compatible`** | Boolean | `false` | **Compatibility Mode**. Some older modems lose network connectivity after switching eSIM profiles unless fully rebooted. If enabled, Sigmo will try to restart the modem device after profile operations.                                                   |
-| **`mss`**        | Int     | `240`   | **Max Segment Size**. Controls the APDU payload size (range 64-254) for SIM communication.<br>• If you experience errors during profile download/enable, try lowering this value (e.g., 128 or 64).<br>• Most modern modems work fine with the default 240. |
+| Parameter        | Type    | Default | Description                                                                                                                                                                                                                                          |
+| :--------------- | :------ | :------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`alias`**      | String  | (None)  | **Custom Name**. Displayed in the Web UI to help identify specific modems/SIMs.                                                                                                                                                                      |
+| **`compatible`** | Boolean | `false` | **Compatibility Mode**. Some older modems lose network connectivity after switching eSIM profiles unless fully rebooted. If enabled, Sigmo will try to restart the modem device after profile operations.                                            |
+| **`mss`**        | Int     | `240`   | **Max Segment Size**. Controls the APDU payload size (range 64-254) for SIM communication.<br>• If you experience errors during profile download, try lowering this value (e.g., 128 or 64).<br>• Most modern modems work fine with the default 240. |
 
 ---
 
