@@ -102,8 +102,8 @@ watch(
 </script>
 
 <template>
-  <div class="min-h-[100dvh] bg-background">
-    <div class="mx-auto flex min-h-[100dvh] w-full max-w-5xl items-center justify-center px-6 py-12">
+  <div class="min-h-dvh bg-background">
+    <div class="mx-auto flex min-h-dvh w-full max-w-5xl items-center justify-center px-6 py-12">
       <div class="w-full max-w-lg space-y-10">
         <header class="space-y-4 text-center">
           <p class="text-xs uppercase tracking-[0.45em] text-muted-foreground">
@@ -124,11 +124,7 @@ watch(
           <div class="flex justify-center">
             <InputOTP v-model="pin" :maxlength="CODE_LENGTH" :disabled="authStore.isVerifying">
               <InputOTPGroup>
-                <InputOTPSlot
-                  v-for="index in CODE_LENGTH"
-                  :key="index"
-                  :index="index - 1"
-                />
+                <InputOTPSlot v-for="index in CODE_LENGTH" :key="index" :index="index - 1" />
               </InputOTPGroup>
             </InputOTP>
           </div>
