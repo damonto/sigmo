@@ -77,12 +77,14 @@ func (m *Modem) Restart(compatible bool) error {
 
 	// Some legacy modems require the modem to be disabled and enabled to take effect.
 	if e := m.dbusObject.Call(ModemInterface+".Simple.GetStatus", 0).Err; e == nil {
+		slog.Info("try to disable and enable modem", "modem", m.EquipmentIdentifier)
 		err = errors.Join(err, m.Disable(), m.Enable())
 	}
 
 	// Inhibiting the device will cause the ModemManager to reload the device.
 	// This workaround is needed for some modems that don't properly reload.
 	if compatible {
+		slog.Info("try to inhibit and uninhibit modem", "modem", m.EquipmentIdentifier, "compatible", compatible)
 		time.Sleep(200 * time.Millisecond)
 		if e := m.dbusObject.Call(ModemInterface+".Simple.GetStatus", 0).Err; e == nil {
 			err = errors.Join(err, m.mmgr.InhibitDevice(m.Device, true), m.mmgr.InhibitDevice(m.Device, false))
@@ -113,6 +115,7 @@ func qmicliRepowerSimCard(m *Modem) error {
 		slog.Error("failed to power off sim", "error", err, "result", string(result))
 		return err
 	}
+	slog.Info("sim powered off", "modem", m.EquipmentIdentifier, "slot", slot)
 	if result, err := exec.Command(
 		bin,
 		"-d", m.PrimaryPort,
@@ -122,6 +125,7 @@ func qmicliRepowerSimCard(m *Modem) error {
 		slog.Error("failed to power on sim", "error", err, "result", string(result))
 		return err
 	}
+	slog.Info("sim powered on", "modem", m.EquipmentIdentifier, "slot", slot)
 	return nil
 }
 
