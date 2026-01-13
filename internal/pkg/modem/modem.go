@@ -81,13 +81,13 @@ func (m *Modem) Restart(compatible bool) error {
 
 	// This workaround is needed for some modems that don't properly reload.
 	if compatible {
-		// Try to activate provisioning session if SIM is missing.
-		err = errors.Join(err, qmicliActivateProvisioningIfSimMissing(m))
-
 		// Inhibiting the device will cause the ModemManager to reload the device.
-		slog.Info("try to inhibit and uninhibit modem", "modem", m.EquipmentIdentifier, "compatible", compatible)
 		time.Sleep(200 * time.Millisecond)
 		if e := m.dbusObject.Call(ModemInterface+".Simple.GetStatus", 0).Err; e == nil {
+			// Try to activate provisioning session if SIM is missing.
+			err = errors.Join(err, qmicliActivateProvisioningIfSimMissing(m))
+
+			slog.Info("try to inhibit and uninhibit modem", "modem", m.EquipmentIdentifier, "compatible", compatible)
 			err = errors.Join(err, m.mmgr.InhibitDevice(m.Device, true), m.mmgr.InhibitDevice(m.Device, false))
 		}
 		return err
