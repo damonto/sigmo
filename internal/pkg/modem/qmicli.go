@@ -92,6 +92,7 @@ func qmicliIsSimMissing(status string, slot uint32) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	slog.Info("personalization state", "state", state)
 	return !strings.EqualFold(state, "ready"), nil
 }
 
