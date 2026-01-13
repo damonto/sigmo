@@ -2,9 +2,7 @@ package modem
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
-	"os/exec"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -81,9 +79,12 @@ func (m *Modem) Restart(compatible bool) error {
 		err = errors.Join(err, m.Disable(), m.Enable())
 	}
 
-	// Inhibiting the device will cause the ModemManager to reload the device.
 	// This workaround is needed for some modems that don't properly reload.
 	if compatible {
+		// Try to activate provisioning session if SIM is missing.
+		err = errors.Join(err, qmicliActivateProvisioningIfSimMissing(m))
+
+		// Inhibiting the device will cause the ModemManager to reload the device.
 		slog.Info("try to inhibit and uninhibit modem", "modem", m.EquipmentIdentifier, "compatible", compatible)
 		time.Sleep(200 * time.Millisecond)
 		if e := m.dbusObject.Call(ModemInterface+".Simple.GetStatus", 0).Err; e == nil {
@@ -92,41 +93,6 @@ func (m *Modem) Restart(compatible bool) error {
 		return err
 	}
 	return err
-}
-
-func qmicliRepowerSimCard(m *Modem) error {
-	bin, err := exec.LookPath("qmicli")
-	if err != nil {
-		slog.Error("qmicli not found in PATH", "error", err)
-		return err
-	}
-	// If multiple SIM slots aren't supported, this property will report value 0.
-	// On QMI based modems the SIM slot is 1 based.
-	var slot uint32 = 1
-	if m.PrimarySimSlot > 0 {
-		slot = m.PrimarySimSlot
-	}
-	if result, err := exec.Command(
-		bin,
-		"-d", m.PrimaryPort,
-		"-p",
-		fmt.Sprintf("--uim-sim-power-off=%d", slot),
-	).Output(); err != nil {
-		slog.Error("failed to power off sim", "error", err, "result", string(result))
-		return err
-	}
-	slog.Info("sim powered off", "modem", m.EquipmentIdentifier, "slot", slot)
-	if result, err := exec.Command(
-		bin,
-		"-d", m.PrimaryPort,
-		"-p",
-		fmt.Sprintf("--uim-sim-power-on=%d", slot),
-	).Output(); err != nil {
-		slog.Error("failed to power on sim", "error", err, "result", string(result))
-		return err
-	}
-	slog.Info("sim powered on", "modem", m.EquipmentIdentifier, "slot", slot)
-	return nil
 }
 
 func (m *Modem) PrimaryPortType() ModemPortType {
