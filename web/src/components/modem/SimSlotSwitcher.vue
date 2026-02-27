@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { AcceptableValue } from 'reka-ui'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -40,9 +41,10 @@ const openDialog = (identifier: string) => {
   dialogOpen.value = true
 }
 
-const handleSelect = (identifier: string) => {
-  if (identifier === selectedIdentifier.value) return
-  openDialog(identifier)
+const handleSelect = (payload: AcceptableValue) => {
+  if (typeof payload !== 'string') return
+  if (payload === selectedIdentifier.value) return
+  openDialog(payload)
 }
 
 const closeDialog = () => {
