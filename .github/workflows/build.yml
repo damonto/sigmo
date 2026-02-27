@@ -59,7 +59,7 @@ jobs:
           CGO_ENABLED=0 GOARCH=${{ matrix.target.arch }} go build -trimpath -ldflags="-w -s -X main.BuildVersion=$BUILD_VERSION" -o sigmo-${{ matrix.target.name }}
 
       - name: Upload ${{ matrix.target.name }} to Artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: sigmo-${{ matrix.target.name }}
           path: sigmo-${{ matrix.target.name }}
