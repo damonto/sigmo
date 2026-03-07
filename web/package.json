@@ -27,7 +27,7 @@
     "flag-icons": "^7.5.0",
     "lucide-vue-next": "^0.575.0",
     "pinia": "^3.0.4",
-    "reka-ui": "^2.8.2",
+    "reka-ui": "^2.9.0",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.1",
     "vee-validate": "^4.15.1",
