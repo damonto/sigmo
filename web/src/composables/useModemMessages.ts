@@ -56,7 +56,7 @@ export const useModemMessages = (modemId: ComputedRef<string>) => {
     isLoading.value = true
     try {
       const { data } = await messageApi.getMessages(targetId)
-      conversations.value = data.value?.data ?? []
+      conversations.value = data.value ?? []
     } finally {
       isLoading.value = false
     }

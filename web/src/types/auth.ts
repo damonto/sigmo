@@ -1,12 +1,10 @@
-import type { ApiResponse } from '@/types/api'
-
-export type AuthVerifyResponse = ApiResponse<{
+export type AuthVerifyResponse = {
   token: string
-}>
+}
 
-export type AuthOtpRequirementResponse = ApiResponse<{
+export type AuthOtpRequirementResponse = {
   otpRequired: boolean
-}>
+}
 
 export type AuthVerifyPayload = {
   code: string

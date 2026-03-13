@@ -1,5 +1,3 @@
-import type { ApiResponse } from '@/types/api'
-
 export type EuiccApiResponse = {
   eid: string
   freeSpace: number
@@ -7,5 +5,5 @@ export type EuiccApiResponse = {
   certificates: string[]
 }
 
-export type EuiccDetailResponse = ApiResponse<EuiccApiResponse>
-export type EuiccResponse = ApiResponse<EuiccApiResponse>
+export type EuiccDetailResponse = EuiccApiResponse
+export type EuiccResponse = EuiccApiResponse

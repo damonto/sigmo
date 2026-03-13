@@ -33,7 +33,7 @@ export const useAuthStore = defineStore('auth', {
         return this.otpRequired
       }
 
-      const required = data.value?.data?.otpRequired
+      const required = data.value?.otpRequired
       this.otpRequired = required ?? true
       return this.otpRequired
     },
@@ -61,7 +61,7 @@ export const useAuthStore = defineStore('auth', {
         const { data, error } = await useAuthApi().verifyCode({ code })
         if (error.value) return null
 
-        const token = data.value?.data?.token
+        const token = data.value?.token
         if (!token) return null
 
         this.setToken(token)

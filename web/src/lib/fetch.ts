@@ -51,19 +51,18 @@ export const useFetch = createFetch({
       }
 
       if (response) {
-        handleResponseError(response, data)
+        const handledError = handleResponseError(response, data)
         if (response.status === 401 && router.currentRoute.value.name !== 'auth') {
           router.replace({ name: 'auth' })
         }
         console.error('[API] Response error:', response.status, data)
+        throw handledError
       } else {
         // Unified network error handling
         handleError(error, 'Network error occurred')
         console.error('[API] Network error:', error)
+        throw error || new Error('Request failed')
       }
-
-      // Throw error to make it catchable by try-catch
-      throw error || new Error('Request failed')
     },
   },
   fetchOptions: {

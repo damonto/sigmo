@@ -1,5 +1,3 @@
-import type { ApiResponse } from '@/types/api'
-
 export type NotificationResponse = {
   sequenceNumber: string
   iccid: string
@@ -7,4 +5,4 @@ export type NotificationResponse = {
   operation: string
 }
 
-export type NotificationsResponse = ApiResponse<NotificationResponse[]>
+export type NotificationsResponse = NotificationResponse[]

@@ -43,7 +43,7 @@ export const useModemNotifications = (modemId: ComputedRef<string>) => {
     isLoading.value = true
     try {
       const { data } = await notificationApi.getNotifications(targetId)
-      notifications.value = data.value?.data ?? []
+      notifications.value = data.value ?? []
     } finally {
       isLoading.value = false
     }

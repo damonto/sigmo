@@ -7,7 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/damonto/sigmo/internal/app/auth"
-	"github.com/damonto/sigmo/internal/app/handler"
+	"github.com/damonto/sigmo/internal/app/httpapi"
 )
 
 const bearerPrefix = "Bearer "
@@ -24,10 +24,7 @@ func Auth(store *auth.Store) echo.MiddlewareFunc {
 				token = strings.TrimSpace(c.QueryParam("token"))
 			}
 			if token == "" || !store.ValidateToken(token) {
-				return c.JSON(http.StatusUnauthorized, handler.HTTPError{
-					Code:    http.StatusUnauthorized,
-					Message: "missing or invalid token",
-				})
+				return httpapi.Error(c, http.StatusUnauthorized, "invalid_token", "missing or invalid token")
 			}
 			return next(c)
 		}

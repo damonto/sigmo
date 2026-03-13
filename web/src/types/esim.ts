@@ -1,5 +1,3 @@
-import type { ApiResponse } from '@/types/api'
-
 export type EsimProfileApiResponse = {
   name: string
   serviceProviderName: string
@@ -9,14 +7,14 @@ export type EsimProfileApiResponse = {
   regionCode?: string
 }
 
-export type EsimProfilesResponse = ApiResponse<EsimProfileApiResponse[]>
+export type EsimProfilesResponse = EsimProfileApiResponse[]
 
 export type EsimDiscoverItem = {
   eventId: string
   address: string
 }
 
-export type EsimDiscoverResponse = ApiResponse<EsimDiscoverItem[]>
+export type EsimDiscoverResponse = EsimDiscoverItem[]
 
 export type EsimProfile = {
   id: string

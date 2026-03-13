@@ -42,7 +42,7 @@ export const useEsimDiscover = ({ modemId, installDialogOpen, applyDiscoverAddre
         discoverDialogOpen.value = false
         return
       }
-      discoverOptions.value = data.value?.data ?? []
+      discoverOptions.value = data.value ?? []
     } finally {
       isDiscoverLoading.value = false
     }

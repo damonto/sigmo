@@ -72,7 +72,7 @@ export const useModemMessageThread = ({
     isLoading.value = true
     try {
       const { data } = await messageApi.getMessagesByParticipant(id, target)
-      threadMessages.value = data.value?.data ?? []
+      threadMessages.value = data.value ?? []
     } finally {
       isLoading.value = false
     }

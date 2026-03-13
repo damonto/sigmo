@@ -13,7 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 
-	"github.com/damonto/sigmo/internal/app/handler"
+	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/carrier"
 	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
@@ -21,11 +21,32 @@ import (
 )
 
 type Handler struct {
-	handler.Handler
 	cfg     *config.Config
 	manager *mmodem.Manager
 	service *Service
 }
+
+const (
+	errorCodeModemNotFound                    = "modem_not_found"
+	errorCodeEuiccNotSupported                = "euicc_not_supported"
+	errorCodeListESIMsFailed                  = "list_esims_failed"
+	errorCodeDiscoverESIMsFailed              = "discover_esims_failed"
+	errorCodeICCIDRequired                    = "iccid_required"
+	errorCodeInvalidICCID                     = "invalid_iccid"
+	errorCodeEnableESIMTimeout                = "esim_enable_timeout"
+	errorCodeEnableESIMFailed                 = "enable_esim_failed"
+	errorCodeDeleteESIMFailed                 = "delete_esim_failed"
+	errorCodeDownloadESIMFailed               = "download_esim_failed"
+	errorCodeUpdateESIMNicknameInvalidRequest = "update_esim_nickname_invalid_request"
+	errorCodeInvalidNickname                  = "invalid_nickname"
+	errorCodeUpdateESIMNicknameFailed         = "update_esim_nickname_failed"
+)
+
+var (
+	errModemNotFound = errors.New("modem not found")
+	errICCIDRequired = errors.New("iccid is required")
+	errInvalidICCID  = errors.New("invalid iccid")
+)
 
 var wsUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
@@ -58,83 +79,89 @@ func New(cfg *config.Config, manager *mmodem.Manager) *Handler {
 }
 
 func (h *Handler) List(c echo.Context) error {
-	modem, err := h.FindModem(h.manager, c.Param("id"))
+	modem, err := h.findModem(c.Param("id"))
 	if err != nil {
-		return h.NotFound(c, err)
+		return h.modemLookupError(c, err, errorCodeListESIMsFailed)
 	}
 	response, err := h.service.List(modem)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return h.NotFound(c, err)
+			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
-		return h.InternalServerError(c, err)
+		return httpapi.Internal(c, errorCodeListESIMsFailed)
 	}
-	return h.Respond(c, response)
+	return c.JSON(http.StatusOK, response)
 }
 
 func (h *Handler) Discover(c echo.Context) error {
-	modem, err := h.FindModem(h.manager, c.Param("id"))
+	modem, err := h.findModem(c.Param("id"))
 	if err != nil {
-		return h.NotFound(c, err)
+		return h.modemLookupError(c, err, errorCodeDiscoverESIMsFailed)
 	}
 	response, err := h.service.Discover(modem)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return h.NotFound(c, err)
+			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
-		return h.InternalServerError(c, err)
+		return httpapi.Internal(c, errorCodeDiscoverESIMsFailed)
 	}
-	return h.Respond(c, response)
+	return c.JSON(http.StatusOK, response)
 }
 
 func (h *Handler) Enable(c echo.Context) error {
-	modem, err := h.FindModem(h.manager, c.Param("id"))
+	modem, err := h.findModem(c.Param("id"))
 	if err != nil {
-		return h.NotFound(c, err)
+		return h.modemLookupError(c, err, errorCodeEnableESIMFailed)
 	}
 	iccid, err := iccidFromParam(c)
 	if err != nil {
-		return h.BadRequest(c, err)
+		if errors.Is(err, errICCIDRequired) {
+			return httpapi.BadRequest(c, errorCodeICCIDRequired, err)
+		}
+		return httpapi.BadRequest(c, errorCodeInvalidICCID, err)
 	}
 	ctx, cancel := context.WithTimeout(c.Request().Context(), enableTimeout)
 	defer cancel()
 	if err := h.service.Enable(ctx, modem, iccid); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return h.Error(c, http.StatusRequestTimeout, errEnableTimeout)
+			return httpapi.RequestTimeout(c, errorCodeEnableESIMTimeout, errEnableTimeout)
 		}
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return h.NotFound(c, err)
+			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
-		return h.InternalServerError(c, err)
+		return httpapi.Internal(c, errorCodeEnableESIMFailed)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
 func (h *Handler) Delete(c echo.Context) error {
-	modem, err := h.FindModem(h.manager, c.Param("id"))
+	modem, err := h.findModem(c.Param("id"))
 	if err != nil {
-		return h.NotFound(c, err)
+		return h.modemLookupError(c, err, errorCodeDeleteESIMFailed)
 	}
 	iccid, err := iccidFromParam(c)
 	if err != nil {
-		return h.BadRequest(c, err)
+		if errors.Is(err, errICCIDRequired) {
+			return httpapi.BadRequest(c, errorCodeICCIDRequired, err)
+		}
+		return httpapi.BadRequest(c, errorCodeInvalidICCID, err)
 	}
 	if err := h.service.Delete(modem, iccid); err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return h.NotFound(c, err)
+			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
-		return h.InternalServerError(c, err)
+		return httpapi.Internal(c, errorCodeDeleteESIMFailed)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
 func (h *Handler) Download(c echo.Context) error {
-	modem, err := h.FindModem(h.manager, c.Param("id"))
+	modem, err := h.findModem(c.Param("id"))
 	if err != nil {
-		return h.NotFound(c, err)
+		return h.modemLookupError(c, err, errorCodeDownloadESIMFailed)
 	}
 
 	conn, err := wsUpgrader.Upgrade(c.Response(), c.Request(), nil)
@@ -196,26 +223,29 @@ func (h *Handler) Download(c echo.Context) error {
 }
 
 func (h *Handler) UpdateNickname(c echo.Context) error {
-	modem, err := h.FindModem(h.manager, c.Param("id"))
+	modem, err := h.findModem(c.Param("id"))
 	if err != nil {
-		return h.NotFound(c, err)
+		return h.modemLookupError(c, err, errorCodeUpdateESIMNicknameFailed)
 	}
 	iccid, err := iccidFromParam(c)
 	if err != nil {
-		return h.BadRequest(c, err)
+		if errors.Is(err, errICCIDRequired) {
+			return httpapi.BadRequest(c, errorCodeICCIDRequired, err)
+		}
+		return httpapi.BadRequest(c, errorCodeInvalidICCID, err)
 	}
 	var req UpdateNicknameRequest
-	if err := h.BindAndValidate(c, &req); err != nil {
+	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateESIMNicknameInvalidRequest); err != nil {
 		return err
 	}
 	if err := h.service.UpdateNickname(modem, iccid, req.Nickname); err != nil {
 		if errors.Is(err, errInvalidNickname) {
-			return h.BadRequest(c, err)
+			return httpapi.BadRequest(c, errorCodeInvalidNickname, err)
 		}
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return h.NotFound(c, err)
+			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
-		return h.InternalServerError(c, err)
+		return httpapi.Internal(c, errorCodeUpdateESIMNicknameFailed)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -223,11 +253,11 @@ func (h *Handler) UpdateNickname(c echo.Context) error {
 func iccidFromParam(c echo.Context) (sgp22.ICCID, error) {
 	iccidParam := c.Param("iccid")
 	if iccidParam == "" {
-		return nil, errors.New("iccid is required")
+		return nil, errICCIDRequired
 	}
 	iccid, err := sgp22.NewICCID(iccidParam)
 	if err != nil {
-		return nil, fmt.Errorf("invalid iccid %q: %w", iccidParam, err)
+		return nil, fmt.Errorf("%w %q: %w", errInvalidICCID, iccidParam, err)
 	}
 	return iccid, nil
 }
@@ -244,6 +274,26 @@ func readStartMessage(conn *websocket.Conn) (downloadClientMessage, error) {
 		return downloadClientMessage{}, errors.New("smdp is required")
 	}
 	return start, nil
+}
+
+func (h *Handler) modemLookupError(c echo.Context, err error, internalErrorCode string) error {
+	if errors.Is(err, errModemNotFound) {
+		return httpapi.NotFound(c, errorCodeModemNotFound, err)
+	}
+	return httpapi.Internal(c, internalErrorCode)
+}
+
+func (h *Handler) findModem(id string) (*mmodem.Modem, error) {
+	modems, err := h.manager.Modems()
+	if err != nil {
+		return nil, fmt.Errorf("listing modems: %w", err)
+	}
+	for _, modem := range modems {
+		if modem.EquipmentIdentifier == id {
+			return modem, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: %s", errModemNotFound, id)
 }
 
 func profilePreviewFrom(info *sgp22.ProfileInfo) downloadProfilePreview {

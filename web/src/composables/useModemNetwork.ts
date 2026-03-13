@@ -38,7 +38,7 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
     isNetworkLoading.value = true
     try {
       const { data } = await networkApi.scanNetworks(targetId)
-      availableNetworks.value = data.value?.data ?? []
+      availableNetworks.value = data.value ?? []
     } catch (err) {
       console.error('[useModemNetwork] Failed to scan networks:', err)
       availableNetworks.value = []

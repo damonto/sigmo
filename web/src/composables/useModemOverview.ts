@@ -35,7 +35,7 @@ export const useModemOverview = (modemId: ComputedRef<string>) => {
     isModemLoading.value = true
     try {
       const { data } = await modemApi.getModem(id)
-      modem.value = data.value?.data ?? null
+      modem.value = data.value ?? null
     } finally {
       isModemLoading.value = false
     }

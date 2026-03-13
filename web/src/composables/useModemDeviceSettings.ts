@@ -35,7 +35,7 @@ export const useModemDeviceSettings = ({ modemId, onSuccess }: Options) => {
     isSettingsLoading.value = true
     try {
       const { data } = await modemApi.getSettings(id)
-      const payload: ModemSettings | undefined = data.value?.data
+      const payload: ModemSettings | undefined = data.value
       settingsAlias.value = payload?.alias ?? ''
       settingsMss.value = payload?.mss ? String(payload.mss) : ''
       settingsCompatible.value = payload?.compatible ?? false

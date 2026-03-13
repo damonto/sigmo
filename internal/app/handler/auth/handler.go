@@ -7,14 +7,21 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/damonto/sigmo/internal/app/auth"
-	"github.com/damonto/sigmo/internal/app/handler"
+	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/config"
 )
 
 type Handler struct {
-	handler.Handler
 	service *Service
 }
+
+const (
+	errorCodeOTPCooldown             = "otp_cooldown"
+	errorCodeInvalidVerifyOTPRequest = "verify_otp_invalid_request"
+	errorCodeInvalidOTP              = "invalid_otp"
+	errorCodeSendOTPFailed           = "send_otp_failed"
+	errorCodeVerifyOTPFailed         = "verify_otp_failed"
+)
 
 func New(cfg *config.Config, store *auth.Store) *Handler {
 	return &Handler{
@@ -23,30 +30,30 @@ func New(cfg *config.Config, store *auth.Store) *Handler {
 }
 
 func (h *Handler) OTPRequirement(c echo.Context) error {
-	return h.Respond(c, OTPRequirementResponse{OTPRequired: h.service.OTPRequired()})
+	return c.JSON(http.StatusOK, OTPRequirementResponse{OTPRequired: h.service.OTPRequired()})
 }
 
 func (h *Handler) SendOTP(c echo.Context) error {
 	if err := h.service.SendOTP(); err != nil {
 		if errors.Is(err, auth.ErrOTPCooldown) {
-			return h.Error(c, http.StatusTooManyRequests, err)
+			return httpapi.TooManyRequests(c, errorCodeOTPCooldown, err)
 		}
-		return h.InternalServerError(c, err)
+		return httpapi.Internal(c, errorCodeSendOTPFailed)
 	}
 	return c.NoContent(http.StatusCreated)
 }
 
 func (h *Handler) VerifyOTP(c echo.Context) error {
 	var req VerifyOTPRequest
-	if err := h.BindAndValidate(c, &req); err != nil {
+	if err := httpapi.BindAndValidate(c, &req, errorCodeInvalidVerifyOTPRequest); err != nil {
 		return err
 	}
 	token, err := h.service.VerifyOTP(req.Code)
 	if err != nil {
 		if errors.Is(err, errInvalidOTP) {
-			return h.Unauthorized(c, err)
+			return httpapi.Unauthorized(c, errorCodeInvalidOTP, err)
 		}
-		return h.InternalServerError(c, err)
+		return httpapi.Internal(c, errorCodeVerifyOTPFailed)
 	}
-	return h.Respond(c, VerifyOTPResponse{Token: token})
+	return c.JSON(http.StatusOK, VerifyOTPResponse{Token: token})
 }

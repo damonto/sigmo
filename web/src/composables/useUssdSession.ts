@@ -67,7 +67,7 @@ export const useUssdSession = (modemId: ComputedRef<string>) => {
     isSending.value = true
     try {
       const { data } = await ussdApi.executeUssd(targetId, action, code)
-      const reply = data.value?.data?.reply
+      const reply = data.value?.reply
       if (reply) {
         entries.value.push(createEntry(reply, true))
       }

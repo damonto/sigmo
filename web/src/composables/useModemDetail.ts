@@ -38,7 +38,7 @@ export const useModemDetail = () => {
       const { data } = await euiccApi.getEuicc(id)
 
       if (data.value) {
-        euicc.value = data.value.data
+        euicc.value = data.value
       }
     } catch (err) {
       console.error('[useModemDetail] Failed to fetch eUICC info:', err)
@@ -52,8 +52,8 @@ export const useModemDetail = () => {
     isEsimProfilesLoading.value = true
     try {
       const { data } = await esimApi.getEsims(id)
-      if (data.value?.data) {
-        esimProfiles.value = data.value.data.map(mapEsimProfile)
+      if (data.value) {
+        esimProfiles.value = data.value.map(mapEsimProfile)
       } else {
         esimProfiles.value = []
       }
@@ -77,8 +77,8 @@ export const useModemDetail = () => {
     try {
       const { data } = await modemApi.getModem(id)
 
-      if (data.value?.data) {
-        modem.value = data.value.data
+      if (data.value) {
+        modem.value = data.value
 
         if (modem.value?.supportsEsim) {
           void fetchEuicc(id)

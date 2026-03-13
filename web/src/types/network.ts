@@ -1,5 +1,3 @@
-import type { ApiResponse } from '@/types/api'
-
 export type NetworkResponse = {
   status: string
   operatorName: string
@@ -8,4 +6,4 @@ export type NetworkResponse = {
   accessTechnologies: string[]
 }
 
-export type NetworksResponse = ApiResponse<NetworkResponse[]>
+export type NetworksResponse = NetworkResponse[]

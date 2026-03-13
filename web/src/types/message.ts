@@ -1,5 +1,3 @@
-import type { ApiResponse } from '@/types/api'
-
 export type MessageResponse = {
   id: number
   sender: string
@@ -10,4 +8,4 @@ export type MessageResponse = {
   incoming: boolean
 }
 
-export type MessagesResponse = ApiResponse<MessageResponse[]>
+export type MessagesResponse = MessageResponse[]

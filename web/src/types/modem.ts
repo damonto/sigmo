@@ -1,5 +1,3 @@
-import type { ApiResponse } from '@/types/api'
-
 export type SlotInfo = {
   active: boolean
   operatorName: string
@@ -29,8 +27,8 @@ export type ModemApiResponse = {
   supportsEsim: boolean
 }
 
-export type ModemListResponse = ApiResponse<ModemApiResponse[]>
-export type ModemDetailResponse = ApiResponse<ModemApiResponse>
+export type ModemListResponse = ModemApiResponse[]
+export type ModemDetailResponse = ModemApiResponse
 
 export type Modem = ModemApiResponse
 
@@ -40,4 +38,4 @@ export type ModemSettings = {
   mss: number
 }
 
-export type ModemSettingsResponse = ApiResponse<ModemSettings>
+export type ModemSettingsResponse = ModemSettings
