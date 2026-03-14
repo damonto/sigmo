@@ -63,7 +63,7 @@
     "typescript": "~5.9.3",
     "vite": "npm:rolldown-vite@latest",
     "vite-plugin-vue-devtools": "^8.1.0",
-    "vitest": "^4.0.18",
+    "vitest": "^4.1.0",
     "vue-tsc": "^3.2.5"
   }
 }
