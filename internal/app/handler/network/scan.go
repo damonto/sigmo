@@ -1,16 +1,12 @@
 package network
 
 import (
-	"errors"
 	"log/slog"
-	"strings"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
 type Service struct{}
-
-var errOperatorCodeRequired = errors.New("operator code is required")
 
 func NewService() *Service {
 	return &Service{}
@@ -34,18 +30,6 @@ func (s *Service) List(modem *mmodem.Modem) ([]NetworkResponse, error) {
 		})
 	}
 	return response, nil
-}
-
-func (s *Service) Register(modem *mmodem.Modem, operatorCode string) error {
-	operatorCode = strings.TrimSpace(operatorCode)
-	if operatorCode == "" {
-		return errOperatorCodeRequired
-	}
-	if err := modem.ThreeGPP().RegisterNetwork(operatorCode); err != nil {
-		slog.Error("failed to register network", "modem", modem.EquipmentIdentifier, "operator", operatorCode, "error", err)
-		return err
-	}
-	return nil
 }
 
 func accessTechnologyStrings(access []mmodem.ModemAccessTechnology) []string {

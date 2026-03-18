@@ -14,8 +14,6 @@ type Service struct{}
 
 var (
 	errParticipantRequired = errors.New("participant is required")
-	errRecipientRequired   = errors.New("recipient is required")
-	errTextRequired        = errors.New("text is required")
 )
 
 func NewService() *Service {
@@ -82,21 +80,6 @@ func (s *Service) ListByParticipant(modem *mmodem.Modem, participant string) ([]
 		return 1
 	})
 	return response, nil
-}
-
-func (s *Service) Send(modem *mmodem.Modem, to string, text string) error {
-	if strings.TrimSpace(to) == "" {
-		return errRecipientRequired
-	}
-	if strings.TrimSpace(text) == "" {
-		return errTextRequired
-	}
-	_, err := modem.Messaging().Send(to, text)
-	if err != nil {
-		slog.Error("failed to send SMS", "modem", modem.EquipmentIdentifier, "to", to, "error", err)
-		return err
-	}
-	return nil
 }
 
 func (s *Service) DeleteByParticipant(modem *mmodem.Modem, participant string) error {
