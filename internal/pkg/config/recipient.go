@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/pelletier/go-toml/v2/unstable"
 )
 
 type Recipient string
@@ -39,12 +41,13 @@ func (r Recipients) Strings() []string {
 	return values
 }
 
-func (r *Recipients) UnmarshalTOML(data any) error {
-	switch value := data.(type) {
-	case []any:
-		recipients := make([]Recipient, 0, len(value))
-		for i, item := range value {
-			recipient, err := parseRecipient(item)
+func (r *Recipients) UnmarshalTOML(node *unstable.Node) error {
+	switch node.Kind {
+	case unstable.Array:
+		recipients := make([]Recipient, 0)
+		it := node.Children()
+		for i := 0; it.Next(); i++ {
+			recipient, err := parseRecipientNode(it.Node())
 			if err != nil {
 				return fmt.Errorf("recipients[%d]: %w", i, err)
 			}
@@ -52,52 +55,36 @@ func (r *Recipients) UnmarshalTOML(data any) error {
 		}
 		*r = recipients
 		return nil
-	case []string:
-		recipients := make([]Recipient, 0, len(value))
-		for i, item := range value {
-			recipient, err := parseRecipient(item)
-			if err != nil {
-				return fmt.Errorf("recipients[%d]: %w", i, err)
-			}
-			recipients = append(recipients, recipient)
-		}
-		*r = recipients
-		return nil
-	case []int64:
-		recipients := make([]Recipient, 0, len(value))
-		for i, item := range value {
-			recipient, err := parseRecipient(item)
-			if err != nil {
-				return fmt.Errorf("recipients[%d]: %w", i, err)
-			}
-			recipients = append(recipients, recipient)
-		}
-		*r = recipients
-		return nil
-	case string, int64, int:
-		recipient, err := parseRecipient(value)
+	case unstable.String, unstable.Integer:
+		recipient, err := parseRecipientNode(node)
 		if err != nil {
 			return err
 		}
 		*r = []Recipient{recipient}
 		return nil
 	default:
-		return fmt.Errorf("recipients must be strings or integers")
+		return errors.New("recipients must be strings or integers")
 	}
 }
 
-func parseRecipient(value interface{}) (Recipient, error) {
-	switch v := value.(type) {
-	case string:
-		trimmed := strings.TrimSpace(v)
-		if trimmed == "" {
+func parseRecipientNode(node *unstable.Node) (Recipient, error) {
+	switch node.Kind {
+	case unstable.String:
+		value := strings.TrimSpace(string(node.Data))
+		if value == "" {
 			return "", errors.New("recipient cannot be empty")
 		}
-		return Recipient(trimmed), nil
-	case int64:
-		return Recipient(strconv.FormatInt(v, 10)), nil
-	case int:
-		return Recipient(strconv.FormatInt(int64(v), 10)), nil
+		return Recipient(value), nil
+	case unstable.Integer:
+		value := strings.TrimSpace(string(node.Data))
+		if value == "" {
+			return "", errors.New("recipient cannot be empty")
+		}
+		id, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return "", fmt.Errorf("recipient must be a string or integer: %w", err)
+		}
+		return Recipient(strconv.FormatInt(id, 10)), nil
 	default:
 		return "", errors.New("recipient must be a string or integer")
 	}

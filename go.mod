@@ -3,7 +3,6 @@ module github.com/damonto/sigmo
 go 1.25.5
 
 require (
-	github.com/BurntSushi/toml v1.6.0
 	github.com/damonto/euicc-go v1.1.2
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
@@ -11,6 +10,7 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.0.4
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/wneessen/go-mail v0.7.2
 	golang.org/x/sys v0.42.0
 )

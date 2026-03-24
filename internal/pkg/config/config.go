@@ -5,9 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
-	"github.com/BurntSushi/toml"
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Config represents the application configuration
@@ -26,26 +25,26 @@ type App struct {
 }
 
 type Channel struct {
-	Endpoint string `toml:"endpoint"`
+	Endpoint string `toml:"endpoint,omitempty"`
 
 	// Telegram
-	BotToken   string     `toml:"bot_token"`
-	Recipients Recipients `toml:"recipients"`
+	BotToken   string     `toml:"bot_token,omitempty"`
+	Recipients Recipients `toml:"recipients,omitempty"`
 
 	// HTTP
-	Headers map[string]string `toml:"headers"`
+	Headers map[string]string `toml:"headers,omitempty"`
 
 	// Email
-	SMTPHost     string `toml:"smtp_host"`
-	SMTPPort     int    `toml:"smtp_port"`
-	SMTPUsername string `toml:"smtp_username"`
-	SMTPPassword string `toml:"smtp_password"`
-	From         string `toml:"from"`
-	TLSPolicy    string `toml:"tls_policy"`
-	SSL          bool   `toml:"ssl"`
+	SMTPHost     string `toml:"smtp_host,omitempty"`
+	SMTPPort     int    `toml:"smtp_port,omitempty"`
+	SMTPUsername string `toml:"smtp_username,omitempty"`
+	SMTPPassword string `toml:"smtp_password,omitempty"`
+	From         string `toml:"from,omitempty"`
+	TLSPolicy    string `toml:"tls_policy,omitempty"`
+	SSL          bool   `toml:"ssl,omitempty"`
 
 	// Gotify
-	Priority int `toml:"priority"`
+	Priority int `toml:"priority,omitempty"`
 }
 
 type Modem struct {
@@ -56,24 +55,15 @@ type Modem struct {
 
 // Load reads and parses the configuration from the given file path
 func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("reading config file: %w", err)
+		return nil, fmt.Errorf("open config: %w", err)
 	}
+	defer file.Close()
+
 	var config Config
-	meta, err := toml.Decode(string(data), &config)
-	if err != nil {
-		return nil, fmt.Errorf("parsing config file: %w", err)
-	}
-	if undecoded := meta.Undecoded(); len(undecoded) > 0 {
-		unknown := make([]string, 0, len(undecoded))
-		for _, key := range undecoded {
-			unknown = append(unknown, key.String())
-		}
-		return nil, fmt.Errorf("unknown config fields: %s", strings.Join(unknown, ", "))
-	}
-	if !meta.IsDefined("app", "otp_required") {
-		config.App.OTPRequired = true
+	if err := toml.NewDecoder(file).DisallowUnknownFields().EnableUnmarshalerInterface().Decode(&config); err != nil {
+		return nil, fmt.Errorf("decode config: %w", err)
 	}
 	config.Path = path
 	return &config, nil
