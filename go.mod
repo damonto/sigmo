@@ -12,7 +12,7 @@ require (
 	github.com/labstack/echo/v5 v5.1.0
 	github.com/pelletier/go-toml/v2 v2.3.0
 	github.com/wneessen/go-mail v0.7.2
-	golang.org/x/sys v0.42.0
+	golang.org/x/sys v0.43.0
 )
 
 require (
