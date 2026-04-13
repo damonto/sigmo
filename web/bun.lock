@@ -31,7 +31,7 @@
         "@types/jsdom": "^28.0.1",
         "@vitejs/plugin-vue": "^6.0.5",
         "@vitejs/plugin-vue-jsx": "^5.1.5",
-        "@vitest/eslint-plugin": "^1.6.14",
+        "@vitest/eslint-plugin": "^1.6.15",
         "@vue/eslint-config-prettier": "^10.2.0",
         "@vue/eslint-config-typescript": "^14.7.0",
         "@vue/test-utils": "^2.4.6",
@@ -525,7 +525,7 @@
 
     "@vitejs/plugin-vue-jsx": ["@vitejs/plugin-vue-jsx@5.1.5", "", { "dependencies": { "@babel/core": "^7.29.0", "@babel/plugin-syntax-typescript": "^7.28.6", "@babel/plugin-transform-typescript": "^7.28.6", "@rolldown/pluginutils": "^1.0.0-rc.2", "@vue/babel-plugin-jsx": "^2.0.1" }, "peerDependencies": { "vite": "^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0", "vue": "^3.0.0" } }, "sha512-jIAsvHOEtWpslLOI2MeElGFxH7M8pM83BU/Tor4RLyiwH0FM4nUW3xdvbw20EeU9wc5IspQwMq225K3CMnJEpA=="],
 
-    "@vitest/eslint-plugin": ["@vitest/eslint-plugin@1.6.14", "", { "dependencies": { "@typescript-eslint/scope-manager": "^8.58.0", "@typescript-eslint/utils": "^8.58.0" }, "peerDependencies": { "@typescript-eslint/eslint-plugin": "*", "eslint": ">=8.57.0", "typescript": ">=5.0.0", "vitest": "*" }, "optionalPeers": ["@typescript-eslint/eslint-plugin", "typescript", "vitest"] }, "sha512-PXZ5ysw4eHU9h8nDtBvVcGC7Z2C/T9CFdheqSw1NNXFYqViojub0V9bgdYI67iBTOcra2mwD0EYldlY9bGPf2Q=="],
+    "@vitest/eslint-plugin": ["@vitest/eslint-plugin@1.6.15", "", { "dependencies": { "@typescript-eslint/scope-manager": "^8.58.0", "@typescript-eslint/utils": "^8.58.0" }, "peerDependencies": { "@typescript-eslint/eslint-plugin": "*", "eslint": ">=8.57.0", "typescript": ">=5.0.0", "vitest": "*" }, "optionalPeers": ["@typescript-eslint/eslint-plugin", "typescript", "vitest"] }, "sha512-dTMjrdngmcB+DxomlKQ+SUubCTvd0m2hQQFpv5sx+GRodmeoxr2PVbphk57SVp250vpxphk9Ccwyv6fQ6+2gkA=="],
 
     "@vitest/expect": ["@vitest/expect@4.1.4", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "@types/chai": "^5.2.2", "@vitest/spy": "4.1.4", "@vitest/utils": "4.1.4", "chai": "^6.2.2", "tinyrainbow": "^3.1.0" } }, "sha512-iPBpra+VDuXmBFI3FMKHSFXp3Gx5HfmSCE8X67Dn+bwephCnQCaB7qWK2ldHa+8ncN8hJU8VTMcxjPpyMkUjww=="],
 
