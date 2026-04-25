@@ -35,7 +35,7 @@
     "vue-i18n": "^11.2.8",
     "vue-input-otp": "^0.3.2",
     "vue-qrcode-reader": "^5.7.3",
-    "vue-router": "^5.0.4",
+    "vue-router": "^5.0.6",
     "vue-sonner": "^2.0.9",
     "zod": "^4.3.6"
   },
