@@ -16,6 +16,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/carrier"
 	"github.com/damonto/sigmo/internal/pkg/config"
+	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
@@ -25,6 +26,7 @@ type Handler struct {
 	profile      *profile
 	provisioning *provisioning
 	lifecycle    *lifecycle
+	internet     *internet.Connector
 }
 
 const (
@@ -36,7 +38,10 @@ const (
 	errorCodeInvalidICCID                     = "invalid_iccid"
 	errorCodeEnableESIMTimeout                = "esim_enable_timeout"
 	errorCodeEnableESIMFailed                 = "enable_esim_failed"
+	errorCodeESIMProfileNotFound              = "esim_profile_not_found"
+	errorCodeESIMProfileAlreadyActive         = "esim_profile_already_active"
 	errorCodeDeleteESIMFailed                 = "delete_esim_failed"
+	errorCodeActiveESIMProfile                = "active_esim_profile"
 	errorCodeDownloadESIMFailed               = "download_esim_failed"
 	errorCodeUpdateESIMNicknameInvalidRequest = "update_esim_nickname_invalid_request"
 	errorCodeInvalidNickname                  = "invalid_nickname"
@@ -71,12 +76,13 @@ const (
 	wsTypeError                    = "error"
 )
 
-func New(cfg *config.Config, manager *mmodem.Manager) *Handler {
+func New(cfg *config.Config, manager *mmodem.Manager, internetConnector *internet.Connector) *Handler {
 	return &Handler{
 		manager:      manager,
 		profile:      newProfile(cfg),
 		provisioning: newProvisioning(cfg),
 		lifecycle:    newLifecycle(cfg, manager),
+		internet:     internetConnector,
 	}
 }
 
@@ -122,21 +128,40 @@ func (h *Handler) Enable(c *echo.Context) error {
 		}
 		return httpapi.BadRequest(c, errorCodeInvalidICCID, err)
 	}
-	ctx, cancel := context.WithTimeout(c.Request().Context(), enableTimeout)
-	defer cancel()
-	if err := h.lifecycle.Enable(ctx, modem, iccid); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return httpapi.RequestTimeout(c, errorCodeEnableESIMTimeout, errEnableTimeout)
-		}
-		if errors.Is(err, context.Canceled) {
-			return nil
-		}
-		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
-		}
+	session, err := h.lifecycle.PrepareEnable(modem, iccid)
+	if err != nil {
+		return enableError(c, err)
+	}
+	defer session.Close()
+
+	if err := h.internet.Restore(modem); err != nil {
 		return httpapi.Internal(c, errorCodeEnableESIMFailed)
 	}
+	ctx, cancel := context.WithTimeout(c.Request().Context(), enableTimeout)
+	defer cancel()
+	if err := session.Enable(ctx); err != nil {
+		return enableError(c, err)
+	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+func enableError(c *echo.Context, err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return httpapi.RequestTimeout(c, errorCodeEnableESIMTimeout, errEnableTimeout)
+	}
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+	if errors.Is(err, lpa.ErrNoSupportedAID) {
+		return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
+	}
+	if errors.Is(err, errProfileNotFound) {
+		return httpapi.BadRequest(c, errorCodeESIMProfileNotFound, err)
+	}
+	if errors.Is(err, errProfileAlreadyActive) {
+		return httpapi.BadRequest(c, errorCodeESIMProfileAlreadyActive, err)
+	}
+	return httpapi.Internal(c, errorCodeEnableESIMFailed)
 }
 
 func (h *Handler) Delete(c *echo.Context) error {
@@ -154,6 +179,9 @@ func (h *Handler) Delete(c *echo.Context) error {
 	if err := h.lifecycle.Delete(modem, iccid); err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
+		}
+		if errors.Is(err, errActiveProfileCannotDelete) {
+			return httpapi.BadRequest(c, errorCodeActiveESIMProfile, err)
 		}
 		return httpapi.Internal(c, errorCodeDeleteESIMFailed)
 	}

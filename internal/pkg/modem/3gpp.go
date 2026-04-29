@@ -27,7 +27,7 @@ func (g *ThreeGPP) IMEI() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return variant.Value().(string), nil
+	return stringFromVariant(variant), nil
 }
 
 func (g *ThreeGPP) RegistrationState() (Modem3gppRegistrationState, error) {
@@ -35,7 +35,7 @@ func (g *ThreeGPP) RegistrationState() (Modem3gppRegistrationState, error) {
 	if err != nil {
 		return 0, err
 	}
-	return Modem3gppRegistrationState(variant.Value().(uint32)), nil
+	return Modem3gppRegistrationState(uintFromVariant[uint32](variant)), nil
 }
 
 func (g *ThreeGPP) OperatorCode() (string, error) {
@@ -43,7 +43,7 @@ func (g *ThreeGPP) OperatorCode() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return variant.Value().(string), nil
+	return stringFromVariant(variant), nil
 }
 
 func (g *ThreeGPP) OperatorName() (string, error) {
@@ -51,7 +51,7 @@ func (g *ThreeGPP) OperatorName() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return variant.Value().(string), nil
+	return stringFromVariant(variant), nil
 }
 
 func (g *ThreeGPP) ScanNetworks() ([]*ThreeGPPNetwork, error) {
@@ -64,16 +64,12 @@ func (g *ThreeGPP) ScanNetworks() ([]*ThreeGPPNetwork, error) {
 	for i, result := range results {
 		var accessTechnology ModemAccessTechnology
 		n := ThreeGPPNetwork{
-			Status:           Modem3gppNetworkAvailability(result["status"].Value().(uint32)),
-			OperatorCode:     result["operator-code"].Value().(string),
-			AccessTechnology: accessTechnology.UnmarshalBitmask(result["access-technology"].Value().(uint32)),
+			Status:           Modem3gppNetworkAvailability(variantUint[uint32](result, "status")),
+			OperatorCode:     variantString(result, "operator-code"),
+			AccessTechnology: accessTechnology.UnmarshalBitmask(variantUint[uint32](result, "access-technology")),
 		}
-		if name, ok := result["operator-long"]; ok {
-			n.OperatorName = name.Value().(string)
-		}
-		if shortName, ok := result["operator-short"]; ok {
-			n.OperatorShortName = shortName.Value().(string)
-		}
+		n.OperatorName = variantString(result, "operator-long")
+		n.OperatorShortName = variantString(result, "operator-short")
 		networks[i] = &n
 	}
 	return networks, nil

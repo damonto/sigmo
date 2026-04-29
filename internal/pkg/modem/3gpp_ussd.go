@@ -29,10 +29,13 @@ func (u *USSD) State() (Modem3gppUssdSessionState, error) {
 	if err != nil {
 		return 0, err
 	}
-	return Modem3gppUssdSessionState(variant.Value().(uint32)), nil
+	return Modem3gppUssdSessionState(uintFromVariant[uint32](variant)), nil
 }
 
 func (u *USSD) NetworkRequest() (string, error) {
 	variant, err := u.modem.dbusObject.GetProperty(Modem3GPPInterface + ".Ussd.NetworkRequest")
-	return variant.Value().(string), err
+	if err != nil {
+		return "", err
+	}
+	return stringFromVariant(variant), nil
 }

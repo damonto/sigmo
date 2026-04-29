@@ -1,5 +1,6 @@
 export * from './esim'
 export * from './euicc'
+export * from './internet'
 export * from './message'
 export * from './modem'
 export * from './network'

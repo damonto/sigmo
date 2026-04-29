@@ -52,7 +52,7 @@ func (m *Modem) AccessTechnologies() ([]ModemAccessTechnology, error) {
 	if err != nil {
 		return nil, err
 	}
-	bitmask := variant.Value().(uint32)
+	bitmask := uintFromVariant[uint32](variant)
 	return ModemAccessTechnology(bitmask).UnmarshalBitmask(bitmask), nil
 }
 
@@ -61,8 +61,13 @@ func (m *Modem) SignalQuality() (percent uint32, recent bool, err error) {
 	if err != nil {
 		return 0, false, err
 	}
-	values := variant.Value().([]any)
-	return values[0].(uint32), values[1].(bool), nil
+	values := anySliceFromVariant(variant)
+	if len(values) < 2 {
+		return 0, false, nil
+	}
+	percent, _ = values[0].(uint32)
+	recent, _ = values[1].(bool)
+	return percent, recent, nil
 }
 
 func (m *Modem) Restart(compatible bool) error {

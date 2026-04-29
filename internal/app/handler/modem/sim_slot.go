@@ -23,26 +23,22 @@ func newSIMSlot(manager *mmodem.Manager) *simSlot {
 	return &simSlot{manager: manager}
 }
 
-func (s *simSlot) Switch(ctx context.Context, modem *mmodem.Modem, identifier string) error {
-	if identifier == "" {
-		return errSimIdentifierRequired
-	}
-	slotIndex, err := s.findIndex(modem, identifier)
-	if err != nil {
-		return err
-	}
+func (s *simSlot) Switch(ctx context.Context, modem *mmodem.Modem, slotIndex uint32) error {
 	if err := modem.SetPrimarySimSlot(slotIndex); err != nil {
 		slog.Error("failed to set primary SIM slot", "modem", modem.EquipmentIdentifier, "error", err)
 		return err
 	}
-	_, err = s.manager.WaitForModem(ctx, modem)
+	_, err := s.manager.WaitForModem(ctx, modem)
 	if err != nil {
 		slog.Error("failed to wait for modem", "modem", modem.EquipmentIdentifier, "error", err)
 	}
 	return err
 }
 
-func (s *simSlot) findIndex(modem *mmodem.Modem, identifier string) (uint32, error) {
+func (s *simSlot) targetIndex(modem *mmodem.Modem, identifier string) (uint32, error) {
+	if identifier == "" {
+		return 0, errSimIdentifierRequired
+	}
 	if len(modem.SimSlots) == 0 {
 		return 0, errSimSlotsUnavailable
 	}
@@ -52,9 +48,13 @@ func (s *simSlot) findIndex(modem *mmodem.Modem, identifier string) (uint32, err
 			slog.Error("failed to fetch SIM for slot", "modem", modem.EquipmentIdentifier, "slot", slotPath, "error", err)
 			return 0, err
 		}
-		if sim.Identifier == identifier && !sim.Active {
-			return uint32(index + 1), nil
+		if sim.Identifier != identifier {
+			continue
 		}
+		if sim.Active {
+			return 0, errSimSlotAlreadyActive
+		}
+		return uint32(index + 1), nil
 	}
 	return 0, errSimSlotNotFound
 }

@@ -46,36 +46,36 @@ func (sims *SIMs) Get(path dbus.ObjectPath) (*SIM, error) {
 	if err != nil {
 		return nil, err
 	}
-	sim.Active = variant.Value().(bool)
+	sim.Active = boolFromVariant(variant)
 
 	variant, err = dbusObject.GetProperty(ModemSimInterface + ".SimIdentifier")
 	if err != nil {
 		return nil, err
 	}
-	sim.Identifier = variant.Value().(string)
+	sim.Identifier = stringFromVariant(variant)
 
 	variant, err = dbusObject.GetProperty(ModemSimInterface + ".Eid")
 	if err != nil {
 		return nil, err
 	}
-	sim.Eid = variant.Value().(string)
+	sim.Eid = stringFromVariant(variant)
 
 	variant, err = dbusObject.GetProperty(ModemSimInterface + ".Imsi")
 	if err != nil {
 		return nil, err
 	}
-	sim.Imsi = variant.Value().(string)
+	sim.Imsi = stringFromVariant(variant)
 
 	variant, err = dbusObject.GetProperty(ModemSimInterface + ".OperatorIdentifier")
 	if err != nil {
 		return nil, err
 	}
-	sim.OperatorIdentifier = variant.Value().(string)
+	sim.OperatorIdentifier = stringFromVariant(variant)
 
 	variant, err = dbusObject.GetProperty(ModemSimInterface + ".OperatorName")
 	if err != nil {
 		return nil, err
 	}
-	sim.OperatorName = variant.Value().(string)
+	sim.OperatorName = stringFromVariant(variant)
 	return sim, nil
 }

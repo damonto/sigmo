@@ -10,6 +10,7 @@ import (
 	hauth "github.com/damonto/sigmo/internal/app/handler/auth"
 	"github.com/damonto/sigmo/internal/app/handler/esim"
 	"github.com/damonto/sigmo/internal/app/handler/euicc"
+	hinternet "github.com/damonto/sigmo/internal/app/handler/internet"
 	"github.com/damonto/sigmo/internal/app/handler/message"
 	hmodem "github.com/damonto/sigmo/internal/app/handler/modem"
 	"github.com/damonto/sigmo/internal/app/handler/network"
@@ -17,6 +18,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/handler/ussd"
 	appmiddleware "github.com/damonto/sigmo/internal/app/middleware"
 	"github.com/damonto/sigmo/internal/pkg/config"
+	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/web"
 )
@@ -43,9 +45,10 @@ func Register(e *echo.Echo, cfg *config.Config, manager *modem.Manager) {
 	if cfg.App.OTPRequired {
 		protected.Use(appmiddleware.Auth(authStore))
 	}
+	internetConnector := pinternet.NewConnector()
 
 	{
-		h := hmodem.New(cfg, manager)
+		h := hmodem.New(cfg, manager, internetConnector)
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
 		protected.PUT("/modems/:id/sim-slots/:identifier", h.SwitchSimSlot)
@@ -73,12 +76,20 @@ func Register(e *echo.Echo, cfg *config.Config, manager *modem.Manager) {
 		}
 
 		{
+			h := hinternet.NewWithConnector(manager, internetConnector)
+			protected.GET("/modems/:id/internet-connections/current", h.Current)
+			protected.GET("/modems/:id/internet-connections/public", h.Public)
+			protected.POST("/modems/:id/internet-connections", h.Connect)
+			protected.DELETE("/modems/:id/internet-connections/current", h.Disconnect)
+		}
+
+		{
 			h := euicc.New(cfg, manager)
 			protected.GET("/modems/:id/euicc", h.Get)
 		}
 
 		{
-			h := esim.New(cfg, manager)
+			h := esim.New(cfg, manager, internetConnector)
 			protected.GET("/modems/:id/esims", h.List)
 			protected.GET("/modems/:id/esims/discover", h.Discover)
 			protected.GET("/modems/:id/esims/download", h.Download)

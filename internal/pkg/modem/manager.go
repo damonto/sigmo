@@ -109,20 +109,25 @@ func (m *Manager) Modems() (map[dbus.ObjectPath]*Modem, error) {
 }
 
 func (m *Manager) createModem(objectPath dbus.ObjectPath, data map[string]dbus.Variant) (*Modem, error) {
+	drivers := variantStrings(data, "Drivers")
+	driver := ""
+	if len(drivers) > 0 {
+		driver = drivers[0]
+	}
 	modem := Modem{
 		mmgr:                m,
 		objectPath:          objectPath,
 		dbusObject:          m.dbusConn.Object(ModemManagerInterface, objectPath),
-		Device:              data["Device"].Value().(string),
-		Manufacturer:        data["Manufacturer"].Value().(string),
-		EquipmentIdentifier: data["EquipmentIdentifier"].Value().(string),
-		Driver:              data["Drivers"].Value().([]string)[0],
-		Model:               data["Model"].Value().(string),
-		FirmwareRevision:    data["Revision"].Value().(string),
-		HardwareRevision:    data["HardwareRevision"].Value().(string),
-		State:               ModemState(data["State"].Value().(int32)),
-		PrimaryPort:         fmt.Sprintf("/dev/%s", data["PrimaryPort"].Value().(string)),
-		PrimarySimSlot:      data["PrimarySimSlot"].Value().(uint32),
+		Device:              variantString(data, "Device"),
+		Manufacturer:        variantString(data, "Manufacturer"),
+		EquipmentIdentifier: variantString(data, "EquipmentIdentifier"),
+		Driver:              driver,
+		Model:               variantString(data, "Model"),
+		FirmwareRevision:    variantString(data, "Revision"),
+		HardwareRevision:    variantString(data, "HardwareRevision"),
+		State:               ModemState(variantInt32(data, "State")),
+		PrimaryPort:         fmt.Sprintf("/dev/%s", variantString(data, "PrimaryPort")),
+		PrimarySimSlot:      variantUint[uint32](data, "PrimarySimSlot"),
 	}
 	if modem.State == ModemStateDisabled {
 		slog.Info("enabling modem", "path", objectPath)
@@ -132,20 +137,25 @@ func (m *Manager) createModem(objectPath dbus.ObjectPath, data map[string]dbus.V
 		}
 	}
 	var err error
-	modem.Sim, err = modem.SIMs().Get(data["Sim"].Value().(dbus.ObjectPath))
+	modem.Sim, err = modem.SIMs().Get(variantObjectPath(data, "Sim"))
 	if err != nil {
 		return nil, err
 	}
-	if numbers := data["OwnNumbers"].Value().([]string); len(numbers) > 0 {
+	if numbers := variantStrings(data, "OwnNumbers"); len(numbers) > 0 {
 		modem.Number = numbers[0]
 	}
-	for _, port := range data["Ports"].Value().([][]any) {
+	for _, port := range variantAnySlices(data, "Ports") {
+		if len(port) < 2 {
+			continue
+		}
+		name, _ := port[0].(string)
+		portType, _ := port[1].(uint32)
 		modem.Ports = append(modem.Ports, ModemPort{
-			PortType: ModemPortType(port[1].(uint32)),
-			Device:   fmt.Sprintf("/dev/%s", port[0]),
+			PortType: ModemPortType(portType),
+			Device:   fmt.Sprintf("/dev/%s", name),
 		})
 	}
-	for _, slot := range data["SimSlots"].Value().([]dbus.ObjectPath) {
+	for _, slot := range variantObjectPaths(data, "SimSlots") {
 		if slot != "/" {
 			modem.SimSlots = append(modem.SimSlots, slot)
 		}

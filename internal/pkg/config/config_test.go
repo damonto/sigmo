@@ -28,7 +28,7 @@ listen_address = "127.0.0.1:9527"
 
 [channels.telegram]
 bot_token = "token"
-recipients = [123456]
+recipients = ["123456"]
 `,
 			wantOTPDefault: false,
 		},
@@ -88,6 +88,55 @@ subject = "deprecated"
 	}
 }
 
+func TestFindModem(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		config Config
+		id     string
+		want   Modem
+	}{
+		{
+			name: "default modem settings",
+			id:   "missing",
+			want: Modem{
+				Compatible: false,
+				MSS:        240,
+			},
+		},
+		{
+			name: "configured modem settings",
+			config: Config{
+				Modems: map[string]Modem{
+					"123": {
+						Alias:      "Office",
+						Compatible: true,
+						MSS:        128,
+					},
+				},
+			},
+			id: "123",
+			want: Modem{
+				Alias:      "Office",
+				Compatible: true,
+				MSS:        128,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := tt.config.FindModem(tt.id); got != tt.want {
+				t.Fatalf("FindModem() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSave(t *testing.T) {
 	t.Parallel()
 
@@ -126,6 +175,8 @@ func TestSave(t *testing.T) {
 				"ssl =",
 				"priority =",
 				"endpoint =",
+				"apn =",
+				"internet_default_route =",
 				"[channels.telegram.headers]",
 			},
 		},

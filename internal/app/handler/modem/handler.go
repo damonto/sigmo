@@ -11,6 +11,7 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/config"
+	"github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
@@ -20,6 +21,7 @@ type Handler struct {
 	simSlot  *simSlot
 	msisdn   *msisdn
 	settings *settings
+	internet *internet.Connector
 }
 
 const (
@@ -52,13 +54,14 @@ var (
 	errUpdateMSISDNTimeout  = errors.New("updating MSISDN timed out, please refresh to confirm the active slot")
 )
 
-func New(cfg *config.Config, manager *mmodem.Manager) *Handler {
+func New(cfg *config.Config, manager *mmodem.Manager, internetConnector *internet.Connector) *Handler {
 	return &Handler{
 		manager:  manager,
 		catalog:  newCatalog(cfg, manager),
 		simSlot:  newSIMSlot(manager),
 		msisdn:   newMSISDN(cfg, manager),
 		settings: newSettings(cfg),
+		internet: internetConnector,
 	}
 }
 
@@ -87,21 +90,8 @@ func (h *Handler) SwitchSimSlot(c *echo.Context) error {
 	if err != nil {
 		return h.modemLookupError(c, err, errorCodeSwitchSimSlotFailed)
 	}
-	identifier := c.Param("identifier")
-	if identifier == "" {
-		return httpapi.BadRequest(c, errorCodeSimIdentifierRequired, errSimIdentifierRequired)
-	}
-
-	ctx, cancel := context.WithTimeout(c.Request().Context(), switchSimSlotTimeout)
-	defer cancel()
-
-	if err := h.simSlot.Switch(ctx, modem, identifier); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return httpapi.RequestTimeout(c, errorCodeSimSlotSwitchTimeout, errSwitchSimSlotTimeout)
-		}
-		if errors.Is(err, context.Canceled) {
-			return nil
-		}
+	slotIndex, err := h.simSlot.targetIndex(modem, c.Param("identifier"))
+	if err != nil {
 		if errors.Is(err, errSimIdentifierRequired) {
 			return httpapi.BadRequest(c, errorCodeSimIdentifierRequired, err)
 		}
@@ -113,6 +103,22 @@ func (h *Handler) SwitchSimSlot(c *echo.Context) error {
 		}
 		if errors.Is(err, errSimSlotAlreadyActive) {
 			return httpapi.BadRequest(c, errorCodeSimSlotAlreadyActive, err)
+		}
+		return httpapi.Internal(c, errorCodeSwitchSimSlotFailed)
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request().Context(), switchSimSlotTimeout)
+	defer cancel()
+
+	if err := h.internet.Restore(modem); err != nil {
+		return httpapi.Internal(c, errorCodeSwitchSimSlotFailed)
+	}
+	if err := h.simSlot.Switch(ctx, modem, slotIndex); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return httpapi.RequestTimeout(c, errorCodeSimSlotSwitchTimeout, errSwitchSimSlotTimeout)
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil
 		}
 		return httpapi.Internal(c, errorCodeSwitchSimSlotFailed)
 	}

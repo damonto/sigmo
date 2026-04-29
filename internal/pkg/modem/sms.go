@@ -30,25 +30,25 @@ func (msg *Messaging) Retrieve(objectPath dbus.ObjectPath) (*SMS, error) {
 	if err != nil {
 		return nil, err
 	}
-	sms.State = SMSState(variant.Value().(uint32))
+	sms.State = SMSState(uintFromVariant[uint32](variant))
 
 	variant, err = dbusObject.GetProperty(ModemSMSInterface + ".Number")
 	if err != nil {
 		return nil, err
 	}
-	sms.Number = variant.Value().(string)
+	sms.Number = stringFromVariant(variant)
 
 	variant, err = dbusObject.GetProperty(ModemSMSInterface + ".Text")
 	if err != nil {
 		return nil, err
 	}
-	sms.Text = variant.Value().(string)
+	sms.Text = stringFromVariant(variant)
 
 	variant, err = dbusObject.GetProperty(ModemSMSInterface + ".Timestamp")
 	if err != nil {
 		return nil, err
 	}
-	if t := variant.Value().(string); t != "" {
+	if t := stringFromVariant(variant); t != "" {
 		if len(t) >= 3 && (t[len(t)-3] == '+' || t[len(t)-3] == '-') {
 			t = t + ":00"
 		}
