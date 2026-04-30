@@ -20,6 +20,8 @@ const (
 type DefaultRoute struct {
 	Interface string
 	Family    int
+	Protocol  int
+	Scope     int
 	Gateway   netip.Addr
 	Metric    int
 }
@@ -27,18 +29,21 @@ type DefaultRoute struct {
 var ErrDefaultRouteExists = errors.New("default route already exists")
 
 func DefaultRoutes() ([]DefaultRoute, error) {
-	messages, err := routeDump(unix.AF_UNSPEC)
-	if err != nil {
-		return nil, err
-	}
 	var routes []DefaultRoute
-	for _, msg := range messages {
-		if msg.Header.Type != unix.RTM_NEWROUTE {
-			continue
+	for _, family := range []int{unix.AF_UNSPEC, FamilyIPv4, FamilyIPv6} {
+		messages, err := routeDump(family)
+		if err != nil {
+			return nil, err
 		}
-		route, ok := parseDefaultRoute(msg.Data)
-		if ok {
-			routes = append(routes, route)
+		for _, msg := range messages {
+			if msg.Header.Type != unix.RTM_NEWROUTE {
+				continue
+			}
+			for _, route := range parseDefaultRoutes(msg.Data) {
+				if !defaultRouteExists(route, routes) {
+					routes = append(routes, route)
+				}
+			}
 		}
 	}
 	return routes, nil
@@ -150,8 +155,8 @@ func changeDefaultRoute(msgType uint16, flags uint16, route DefaultRoute) error 
 	msg := make([]byte, unix.SizeofRtMsg)
 	msg[0] = byte(route.Family)
 	msg[4] = unix.RT_TABLE_MAIN
-	msg[5] = unix.RTPROT_STATIC
-	msg[6] = unix.RT_SCOPE_UNIVERSE
+	msg[5] = byte(routeProtocol(route))
+	msg[6] = byte(route.Scope)
 	msg[7] = unix.RTN_UNICAST
 
 	oif := make([]byte, 4)
@@ -174,6 +179,31 @@ func changeDefaultRoute(msgType uint16, flags uint16, route DefaultRoute) error 
 	}
 
 	return send(msgType, unix.NLM_F_REQUEST|unix.NLM_F_ACK|flags, msg)
+}
+
+func routeProtocol(route DefaultRoute) int {
+	if route.Protocol != 0 {
+		return route.Protocol
+	}
+	return unix.RTPROT_STATIC
+}
+
+func defaultRouteExists(route DefaultRoute, routes []DefaultRoute) bool {
+	for _, existing := range routes {
+		if sameDefaultRoute(route, existing) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameDefaultRoute(a, b DefaultRoute) bool {
+	return a.Interface == b.Interface &&
+		a.Family == b.Family &&
+		routeProtocol(a) == routeProtocol(b) &&
+		a.Scope == b.Scope &&
+		a.Gateway == b.Gateway &&
+		a.Metric == b.Metric
 }
 
 func send(msgType uint16, flags uint16, payload []byte) error {
@@ -202,63 +232,15 @@ func send(msgType uint16, flags uint16, payload []byte) error {
 }
 
 func routeDump(family int) ([]syscall.NetlinkMessage, error) {
-	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
+	data, err := syscall.NetlinkRIB(int(unix.RTM_GETROUTE), family)
 	if err != nil {
-		return nil, fmt.Errorf("open netlink socket: %w", err)
+		return nil, fmt.Errorf("read netlink route dump: %w", err)
 	}
-	defer unix.Close(fd)
-
-	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return nil, fmt.Errorf("bind netlink socket: %w", err)
+	messages, err := syscall.ParseNetlinkMessage(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse netlink route dump: %w", err)
 	}
-
-	seq := uint32(time.Now().UnixNano())
-	payload := make([]byte, unix.SizeofRtMsg)
-	payload[0] = byte(family)
-
-	req := make([]byte, unix.SizeofNlMsghdr+len(payload))
-	binary.NativeEndian.PutUint32(req[0:4], uint32(len(req)))
-	binary.NativeEndian.PutUint16(req[4:6], unix.RTM_GETROUTE)
-	binary.NativeEndian.PutUint16(req[6:8], unix.NLM_F_REQUEST|unix.NLM_F_DUMP)
-	binary.NativeEndian.PutUint32(req[8:12], seq)
-	copy(req[unix.SizeofNlMsghdr:], payload)
-
-	if err := unix.Sendto(fd, req, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
-		return nil, fmt.Errorf("send netlink route dump request: %w", err)
-	}
-
-	var messages []syscall.NetlinkMessage
-	buf := make([]byte, 32768)
-	for {
-		n, _, err := unix.Recvfrom(fd, buf, 0)
-		if err != nil {
-			return nil, fmt.Errorf("receive netlink route dump: %w", err)
-		}
-		batch, err := syscall.ParseNetlinkMessage(buf[:n])
-		if err != nil {
-			return nil, fmt.Errorf("parse netlink route dump: %w", err)
-		}
-		for _, msg := range batch {
-			if msg.Header.Seq != seq {
-				continue
-			}
-			switch msg.Header.Type {
-			case unix.NLMSG_DONE:
-				return messages, nil
-			case unix.NLMSG_ERROR:
-				if len(msg.Data) < 4 {
-					return nil, errors.New("netlink route dump error response is truncated")
-				}
-				code := int32(binary.NativeEndian.Uint32(msg.Data[:4]))
-				if code == 0 {
-					continue
-				}
-				return nil, unix.Errno(-code)
-			default:
-				messages = append(messages, msg)
-			}
-		}
-	}
+	return messages, nil
 }
 
 func receiveACK(fd int, seq uint32) error {
@@ -293,41 +275,92 @@ func receiveACK(fd int, seq uint32) error {
 	}
 }
 
-func parseDefaultRoute(data []byte) (DefaultRoute, bool) {
+func parseDefaultRoutes(data []byte) []DefaultRoute {
 	if len(data) < unix.SizeofRtMsg {
-		return DefaultRoute{}, false
+		return nil
 	}
 	family := int(data[0])
 	if family != FamilyIPv4 && family != FamilyIPv6 {
-		return DefaultRoute{}, false
+		return nil
 	}
-	if data[1] != 0 || data[7] != unix.RTN_UNICAST {
-		return DefaultRoute{}, false
+	dstLen := data[1]
+	routeType := data[7]
+	if dstLen != 0 || routeType != unix.RTN_UNICAST {
+		return nil
 	}
 	attrs := parseAttrs(data[unix.SizeofRtMsg:])
 	if table := attrUint32(attrs[unix.RTA_TABLE]); table != 0 {
 		if table != unix.RT_TABLE_MAIN {
-			return DefaultRoute{}, false
+			return nil
 		}
 	} else if data[4] != unix.RT_TABLE_MAIN {
-		return DefaultRoute{}, false
+		return nil
 	}
 
 	index := int(attrUint32(attrs[unix.RTA_OIF]))
-	if index == 0 {
-		return DefaultRoute{}, false
+	gateway := attrRouteGateway(family, attrs)
+	metric := int(attrUint32(attrs[unix.RTA_PRIORITY]))
+	route := DefaultRoute{
+		Family:   family,
+		Protocol: int(data[5]),
+		Scope:    int(data[6]),
+		Gateway:  gateway,
+		Metric:   metric,
 	}
-	ifi, err := net.InterfaceByIndex(index)
-	if err != nil {
-		return DefaultRoute{}, false
+	if index != 0 {
+		ifi, err := net.InterfaceByIndex(index)
+		if err != nil {
+			return nil
+		}
+		route.Interface = ifi.Name
 	}
+	if multipath := attrs[unix.RTA_MULTIPATH]; len(multipath) > 0 {
+		return parseMultipathDefaultRoutes(route, multipath)
+	}
+	if route.Interface == "" {
+		return nil
+	}
+	return []DefaultRoute{route}
+}
 
-	return DefaultRoute{
-		Interface: ifi.Name,
-		Family:    family,
-		Gateway:   attrAddr(family, attrs[unix.RTA_GATEWAY]),
-		Metric:    int(attrUint32(attrs[unix.RTA_PRIORITY])),
-	}, true
+func parseMultipathDefaultRoutes(route DefaultRoute, data []byte) []DefaultRoute {
+	var routes []DefaultRoute
+	for len(data) >= unix.SizeofRtNexthop {
+		length := int(binary.NativeEndian.Uint16(data[:2]))
+		if length < unix.SizeofRtNexthop || length > len(data) {
+			break
+		}
+		aligned := rtaAlign(length)
+		if aligned > len(data) {
+			break
+		}
+		nexthop := route
+		index := int(int32(binary.NativeEndian.Uint32(data[4:8])))
+		if index != 0 {
+			ifi, err := net.InterfaceByIndex(index)
+			if err != nil {
+				data = data[aligned:]
+				continue
+			}
+			nexthop.Interface = ifi.Name
+		}
+		attrs := parseAttrs(data[unix.SizeofRtNexthop:length])
+		if gateway := attrRouteGateway(route.Family, attrs); gateway.IsValid() {
+			nexthop.Gateway = gateway
+		}
+		if nexthop.Interface != "" {
+			routes = append(routes, nexthop)
+		}
+		data = data[aligned:]
+	}
+	return routes
+}
+
+func attrRouteGateway(family int, attrs map[uint16][]byte) netip.Addr {
+	if gateway := attrAddr(family, attrs[unix.RTA_GATEWAY]); gateway.IsValid() {
+		return gateway
+	}
+	return attrViaAddr(attrs[unix.RTA_VIA])
 }
 
 func parseAttrs(data []byte) map[uint16][]byte {
@@ -374,6 +407,14 @@ func attrAddr(family int, value []byte) netip.Addr {
 	default:
 		return netip.Addr{}
 	}
+}
+
+func attrViaAddr(value []byte) netip.Addr {
+	if len(value) < 2 {
+		return netip.Addr{}
+	}
+	family := int(binary.NativeEndian.Uint16(value[:2]))
+	return attrAddr(family, value[2:])
 }
 
 func appendAttr(msg []byte, attrType uint16, value []byte) []byte {

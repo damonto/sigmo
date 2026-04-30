@@ -6,6 +6,9 @@ After=network.target ModemManager.service
 [Service]
 Type=simple
 User=root
+RuntimeDirectory=sigmo
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
 Restart=on-failure
 ExecStart=/usr/local/bin/sigmo --config=/etc/sigmo/config.toml
 RestartSec=10s

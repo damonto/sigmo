@@ -74,7 +74,6 @@ func (h *Handler) Connect(c *echo.Context) error {
 		APN:          req.APN,
 		DefaultRoute: req.DefaultRoute,
 	}
-
 	response, err := h.connector.Connect(modem, prefs)
 	if err != nil {
 		return internetError(c, err, errorCodeConnectInternetFailed)
