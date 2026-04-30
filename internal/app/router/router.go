@@ -92,8 +92,8 @@ func Register(e *echo.Echo, cfg *config.Config, manager *modem.Manager) {
 			h := esim.New(cfg, manager, internetConnector)
 			protected.GET("/modems/:id/esims", h.List)
 			protected.GET("/modems/:id/esims/discover", h.Discover)
-			protected.GET("/modems/:id/esims/download", h.Download)
-			protected.POST("/modems/:id/esims/:iccid/enabling", h.Enable)
+			protected.GET("/modems/:id/esims/download-sessions", h.Download)
+			protected.PUT("/modems/:id/esims/:iccid/activation", h.Enable)
 			protected.PUT("/modems/:id/esims/:iccid/nickname", h.UpdateNickname)
 			protected.DELETE("/modems/:id/esims/:iccid", h.Delete)
 		}
@@ -101,7 +101,7 @@ func Register(e *echo.Echo, cfg *config.Config, manager *modem.Manager) {
 		{
 			h := notification.New(cfg, manager)
 			protected.GET("/modems/:id/notifications", h.List)
-			protected.POST("/modems/:id/notifications/:sequence/resend", h.Resend)
+			protected.POST("/modems/:id/notifications/:sequence/deliveries", h.Resend)
 			protected.DELETE("/modems/:id/notifications/:sequence", h.Delete)
 		}
 	}

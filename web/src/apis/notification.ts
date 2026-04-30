@@ -8,7 +8,7 @@ export const useNotificationApi = () => {
   }
 
   const resendNotification = (id: string, sequence: string) => {
-    return useFetch<void>(`modems/${id}/notifications/${sequence}/resend`, {
+    return useFetch<void>(`modems/${id}/notifications/${sequence}/deliveries`, {
       method: 'POST',
     }).json()
   }

@@ -3,7 +3,6 @@ package modem
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -30,7 +29,6 @@ const (
 )
 
 const (
-	errorCodeModemNotFound                = "modem_not_found"
 	errorCodeListModemsFailed             = "list_modems_failed"
 	errorCodeGetModemFailed               = "get_modem_failed"
 	errorCodeSwitchSimSlotFailed          = "switch_sim_slot_failed"
@@ -49,7 +47,6 @@ const (
 )
 
 var (
-	errModemNotFound        = errors.New("modem not found")
 	errSwitchSimSlotTimeout = errors.New("switching SIM slot timed out, please refresh to confirm the active slot")
 	errUpdateMSISDNTimeout  = errors.New("updating MSISDN timed out, please refresh to confirm the active slot")
 )
@@ -74,9 +71,9 @@ func (h *Handler) List(c *echo.Context) error {
 }
 
 func (h *Handler) Get(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeGetModemFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeGetModemFailed)
 	}
 	response, err := h.catalog.Get(modem)
 	if err != nil {
@@ -86,9 +83,9 @@ func (h *Handler) Get(c *echo.Context) error {
 }
 
 func (h *Handler) SwitchSimSlot(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeSwitchSimSlotFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeSwitchSimSlotFailed)
 	}
 	slotIndex, err := h.simSlot.targetIndex(modem, c.Param("identifier"))
 	if err != nil {
@@ -126,9 +123,9 @@ func (h *Handler) SwitchSimSlot(c *echo.Context) error {
 }
 
 func (h *Handler) UpdateMSISDN(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeUpdateMSISDNFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeUpdateMSISDNFailed)
 	}
 	var req UpdateMSISDNRequest
 	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateMSISDNInvalidRequest); err != nil {
@@ -151,9 +148,9 @@ func (h *Handler) UpdateMSISDN(c *echo.Context) error {
 }
 
 func (h *Handler) UpdateSettings(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeUpdateSettingsFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeUpdateSettingsFailed)
 	}
 	var req UpdateModemSettingsRequest
 	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateSettingsInvalidRequest); err != nil {
@@ -169,30 +166,10 @@ func (h *Handler) UpdateSettings(c *echo.Context) error {
 }
 
 func (h *Handler) GetSettings(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeGetSettingsFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeGetSettingsFailed)
 	}
 	response := h.settings.Get(modem.EquipmentIdentifier)
 	return c.JSON(http.StatusOK, response)
-}
-
-func (h *Handler) modemLookupError(c *echo.Context, err error, internalErrorCode string) error {
-	if errors.Is(err, errModemNotFound) {
-		return httpapi.NotFound(c, errorCodeModemNotFound, err)
-	}
-	return httpapi.Internal(c, internalErrorCode)
-}
-
-func (h *Handler) findModem(id string) (*mmodem.Modem, error) {
-	modems, err := h.manager.Modems()
-	if err != nil {
-		return nil, fmt.Errorf("listing modems: %w", err)
-	}
-	for _, modem := range modems {
-		if modem.EquipmentIdentifier == id {
-			return modem, nil
-		}
-	}
-	return nil, fmt.Errorf("%w: %s", errModemNotFound, id)
 }

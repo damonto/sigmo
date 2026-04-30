@@ -17,6 +17,7 @@ type Handler struct {
 
 const (
 	errorCodeOTPCooldown             = "otp_cooldown"
+	errorCodeOTPNotRequired          = "otp_not_required"
 	errorCodeInvalidVerifyOTPRequest = "verify_otp_invalid_request"
 	errorCodeInvalidOTP              = "invalid_otp"
 	errorCodeSendOTPFailed           = "send_otp_failed"
@@ -50,6 +51,9 @@ func (h *Handler) VerifyOTP(c *echo.Context) error {
 	}
 	token, err := h.otp.Verify(req.Code)
 	if err != nil {
+		if errors.Is(err, errOTPNotRequired) {
+			return httpapi.BadRequest(c, errorCodeOTPNotRequired, err)
+		}
 		if errors.Is(err, errInvalidOTP) {
 			return httpapi.Unauthorized(c, errorCodeInvalidOTP, err)
 		}

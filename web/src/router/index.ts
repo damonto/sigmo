@@ -61,7 +61,6 @@ const router = createRouter({
 })
 
 const AUTH_ROUTE_NAME = 'auth'
-const FALLBACK_CODE = '000000'
 
 router.beforeEach(async (to) => {
   const token = getStoredToken()
@@ -76,13 +75,10 @@ router.beforeEach(async (to) => {
   const authStore = useAuthStore()
   const otpRequired = await authStore.fetchOtpRequirement()
   if (!otpRequired) {
-    const issuedToken = await authStore.verifyCode(FALLBACK_CODE)
-    if (issuedToken) {
-      if (to.name === AUTH_ROUTE_NAME) {
-        return { name: 'home' }
-      }
-      return
+    if (to.name === AUTH_ROUTE_NAME) {
+      return { name: 'home' }
     }
+    return
   }
 
   if (to.name !== AUTH_ROUTE_NAME) {

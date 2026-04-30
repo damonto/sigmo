@@ -49,9 +49,7 @@ func (s *session) executeInitialize(ctx context.Context, modem *mmodem.Modem, us
 			return nil, err
 		}
 	}
-	reply, err := executeWithTimeout(ctx, func() (string, error) {
-		return ussd.Initiate(code)
-	})
+	reply, err := ussd.Initiate(ctx, code)
 	if err != nil {
 		slog.Error("failed to initiate ussd", "modem", modem.EquipmentIdentifier, "code", code, "error", err)
 		return nil, err
@@ -71,32 +69,10 @@ func (s *session) executeReply(ctx context.Context, modem *mmodem.Modem, ussd *m
 	if state != mmodem.Modem3gppUssdSessionStateUserResponse {
 		return nil, errSessionNotReady
 	}
-	reply, err := executeWithTimeout(ctx, func() (string, error) {
-		return ussd.Respond(code)
-	})
+	reply, err := ussd.Respond(ctx, code)
 	if err != nil {
 		slog.Error("failed to respond to ussd", "modem", modem.EquipmentIdentifier, "code", code, "error", err)
 		return nil, err
 	}
 	return &ExecuteResponse{Reply: reply}, nil
-}
-
-type executeResult struct {
-	reply string
-	err   error
-}
-
-func executeWithTimeout(ctx context.Context, fn func() (string, error)) (string, error) {
-	resultCh := make(chan executeResult, 1)
-	go func() {
-		reply, err := fn()
-		resultCh <- executeResult{reply: reply, err: err}
-	}()
-
-	select {
-	case result := <-resultCh:
-		return result.reply, result.err
-	case <-ctx.Done():
-		return "", ctx.Err()
-	}
 }

@@ -22,7 +22,6 @@ type Handler struct {
 }
 
 const (
-	errorCodeModemNotFound            = "modem_not_found"
 	errorCodeEuiccNotSupported        = "euicc_not_supported"
 	errorCodeListNotificationsFailed  = "list_notifications_failed"
 	errorCodeSequenceNumberRequired   = "sequence_number_required"
@@ -32,7 +31,6 @@ const (
 )
 
 var (
-	errModemNotFound    = errors.New("modem not found")
 	errSequenceRequired = errors.New("sequence number is required")
 	errInvalidSequence  = errors.New("invalid sequence number")
 )
@@ -45,9 +43,9 @@ func New(cfg *config.Config, manager *mmodem.Manager) *Handler {
 }
 
 func (h *Handler) List(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeListNotificationsFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeListNotificationsFailed)
 	}
 	response, err := h.notifications.List(modem)
 	if err != nil {
@@ -60,9 +58,9 @@ func (h *Handler) List(c *echo.Context) error {
 }
 
 func (h *Handler) Resend(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeResendNotificationFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeResendNotificationFailed)
 	}
 	sequence, err := sequenceFromParam(c)
 	if err != nil {
@@ -81,9 +79,9 @@ func (h *Handler) Resend(c *echo.Context) error {
 }
 
 func (h *Handler) Delete(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeDeleteNotificationFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeDeleteNotificationFailed)
 	}
 	sequence, err := sequenceFromParam(c)
 	if err != nil {
@@ -111,24 +109,4 @@ func sequenceFromParam(c *echo.Context) (sgp22.SequenceNumber, error) {
 		return 0, fmt.Errorf("%w %q: %w", errInvalidSequence, raw, err)
 	}
 	return sgp22.SequenceNumber(value), nil
-}
-
-func (h *Handler) modemLookupError(c *echo.Context, err error, internalErrorCode string) error {
-	if errors.Is(err, errModemNotFound) {
-		return httpapi.NotFound(c, errorCodeModemNotFound, err)
-	}
-	return httpapi.Internal(c, internalErrorCode)
-}
-
-func (h *Handler) findModem(id string) (*mmodem.Modem, error) {
-	modems, err := h.manager.Modems()
-	if err != nil {
-		return nil, fmt.Errorf("listing modems: %w", err)
-	}
-	for _, modem := range modems {
-		if modem.EquipmentIdentifier == id {
-			return modem, nil
-		}
-	}
-	return nil, fmt.Errorf("%w: %s", errModemNotFound, id)
 }

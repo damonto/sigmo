@@ -2,7 +2,6 @@ package internet
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -18,7 +17,6 @@ type Handler struct {
 }
 
 const (
-	errorCodeModemNotFound                    = "modem_not_found"
 	errorCodeCurrentInternetConnectionFailed  = "current_internet_connection_failed"
 	errorCodeInternetPublicFailed             = "internet_public_failed"
 	errorCodeConnectInternetInvalidRequest    = "connect_internet_invalid_request"
@@ -26,8 +24,6 @@ const (
 	errorCodeDisconnectInternetFailed         = "disconnect_internet_failed"
 	errorCodeUnsupportedInternetConfiguration = "internet_connection_unsupported_ip_method"
 )
-
-var errModemNotFound = errors.New("modem not found")
 
 func New(manager *mmodem.Manager) *Handler {
 	return NewWithConnector(manager, internetcore.NewConnector())
@@ -41,9 +37,9 @@ func NewWithConnector(manager *mmodem.Manager, connector *internetcore.Connector
 }
 
 func (h *Handler) Current(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeCurrentInternetConnectionFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeCurrentInternetConnectionFailed)
 	}
 	response, err := h.connector.Current(modem)
 	if err != nil {
@@ -53,9 +49,9 @@ func (h *Handler) Current(c *echo.Context) error {
 }
 
 func (h *Handler) Public(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeInternetPublicFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeInternetPublicFailed)
 	}
 	info, err := h.connector.Public(c.Request().Context(), modem)
 	if err != nil {
@@ -65,9 +61,9 @@ func (h *Handler) Public(c *echo.Context) error {
 }
 
 func (h *Handler) Connect(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeConnectInternetFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeConnectInternetFailed)
 	}
 
 	var req ConnectRequest
@@ -87,21 +83,14 @@ func (h *Handler) Connect(c *echo.Context) error {
 }
 
 func (h *Handler) Disconnect(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeDisconnectInternetFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeDisconnectInternetFailed)
 	}
 	if err := h.connector.Disconnect(modem); err != nil {
 		return httpapi.Internal(c, errorCodeDisconnectInternetFailed)
 	}
 	return c.NoContent(http.StatusNoContent)
-}
-
-func (h *Handler) modemLookupError(c *echo.Context, err error, internalErrorCode string) error {
-	if errors.Is(err, errModemNotFound) {
-		return httpapi.NotFound(c, errorCodeModemNotFound, err)
-	}
-	return httpapi.Internal(c, internalErrorCode)
 }
 
 func internetError(c *echo.Context, err error, internalErrorCode string) error {
@@ -134,17 +123,4 @@ func responseFromPublic(info internetcore.IPInfo) PublicResponse {
 		Country:      info.Country,
 		Organization: info.Organization,
 	}
-}
-
-func (h *Handler) findModem(id string) (*mmodem.Modem, error) {
-	modems, err := h.manager.Modems()
-	if err != nil {
-		return nil, fmt.Errorf("listing modems: %w", err)
-	}
-	for _, modem := range modems {
-		if modem.EquipmentIdentifier == id {
-			return modem, nil
-		}
-	}
-	return nil, fmt.Errorf("%w: %s", errModemNotFound, id)
 }

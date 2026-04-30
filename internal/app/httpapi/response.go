@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
+
+	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
 type ErrorResponse struct {
@@ -30,6 +33,13 @@ func Unauthorized(c *echo.Context, errorCode string, err error) error {
 
 func NotFound(c *echo.Context, errorCode string, err error) error {
 	return Error(c, http.StatusNotFound, errorCode, err.Error())
+}
+
+func ModemLookupError(c *echo.Context, err error, internalErrorCode string) error {
+	if errors.Is(err, mmodem.ErrNotFound) {
+		return NotFound(c, "modem_not_found", err)
+	}
+	return Internal(c, internalErrorCode)
 }
 
 func RequestTimeout(c *echo.Context, errorCode string, err error) error {

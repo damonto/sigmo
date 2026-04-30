@@ -2,7 +2,6 @@ package network
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -17,13 +16,10 @@ type Handler struct {
 }
 
 const (
-	errorCodeModemNotFound         = "modem_not_found"
 	errorCodeListNetworksFailed    = "list_networks_failed"
 	errorCodeRegisterNetworkFailed = "register_network_failed"
 	errorCodeOperatorCodeRequired  = "operator_code_required"
 )
-
-var errModemNotFound = errors.New("modem not found")
 
 func New(manager *mmodem.Manager) *Handler {
 	return &Handler{
@@ -33,9 +29,9 @@ func New(manager *mmodem.Manager) *Handler {
 }
 
 func (h *Handler) List(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeListNetworksFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeListNetworksFailed)
 	}
 	response, err := h.networks.List(modem)
 	if err != nil {
@@ -45,9 +41,9 @@ func (h *Handler) List(c *echo.Context) error {
 }
 
 func (h *Handler) Register(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeRegisterNetworkFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeRegisterNetworkFailed)
 	}
 	operatorCode := c.Param("operatorCode")
 	if err := h.networks.Register(modem, operatorCode); err != nil {
@@ -57,24 +53,4 @@ func (h *Handler) Register(c *echo.Context) error {
 		return httpapi.Internal(c, errorCodeRegisterNetworkFailed)
 	}
 	return c.NoContent(http.StatusNoContent)
-}
-
-func (h *Handler) modemLookupError(c *echo.Context, err error, internalErrorCode string) error {
-	if errors.Is(err, errModemNotFound) {
-		return httpapi.NotFound(c, errorCodeModemNotFound, err)
-	}
-	return httpapi.Internal(c, internalErrorCode)
-}
-
-func (h *Handler) findModem(id string) (*mmodem.Modem, error) {
-	modems, err := h.manager.Modems()
-	if err != nil {
-		return nil, fmt.Errorf("listing modems: %w", err)
-	}
-	for _, modem := range modems {
-		if modem.EquipmentIdentifier == id {
-			return modem, nil
-		}
-	}
-	return nil, fmt.Errorf("%w: %s", errModemNotFound, id)
 }

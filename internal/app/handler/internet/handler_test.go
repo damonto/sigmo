@@ -9,7 +9,9 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/damonto/sigmo/internal/app/httpapi"
 	internetcore "github.com/damonto/sigmo/internal/pkg/internet"
+	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
 func TestModemLookupError(t *testing.T) {
@@ -24,10 +26,10 @@ func TestModemLookupError(t *testing.T) {
 	}{
 		{
 			name:       "not found",
-			err:        errModemNotFound,
+			err:        mmodem.ErrNotFound,
 			code:       "current_failed",
 			wantStatus: http.StatusNotFound,
-			wantBody:   errorCodeModemNotFound,
+			wantBody:   "modem_not_found",
 		},
 		{
 			name:       "internal",
@@ -47,10 +49,9 @@ func TestModemLookupError(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
-			h := &Handler{}
 
-			if err := h.modemLookupError(c, tt.err, tt.code); err != nil {
-				t.Fatalf("modemLookupError() error = %v", err)
+			if err := httpapi.ModemLookupError(c, tt.err, tt.code); err != nil {
+				t.Fatalf("ModemLookupError() error = %v", err)
 			}
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)

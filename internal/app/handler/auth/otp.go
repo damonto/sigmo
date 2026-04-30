@@ -13,6 +13,7 @@ import (
 
 var (
 	errAuthProviderRequired = errors.New("auth provider is required")
+	errOTPNotRequired       = errors.New("otp is not required")
 	errInvalidOTP           = errors.New("invalid otp")
 )
 
@@ -57,7 +58,10 @@ func (o *otp) Send(ctx context.Context) error {
 }
 
 func (o *otp) Verify(code string) (string, error) {
-	if o.Required() && !o.store.VerifyOTP(code) {
+	if !o.Required() {
+		return "", errOTPNotRequired
+	}
+	if !o.store.VerifyOTP(code) {
 		return "", errInvalidOTP
 	}
 	token, _, err := o.store.IssueToken()

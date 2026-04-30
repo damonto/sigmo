@@ -31,7 +31,10 @@ type Manager struct {
 	subscribe  sync.Once
 }
 
-var errModemRequired = errors.New("modem is required")
+var (
+	ErrNotFound      = errors.New("modem not found")
+	errModemRequired = errors.New("modem is required")
+)
 
 type ModemEventType int
 
@@ -106,6 +109,19 @@ func (m *Manager) Modems() (map[dbus.ObjectPath]*Modem, error) {
 	snapshot := m.copyModemsLocked()
 	m.mu.Unlock()
 	return snapshot, nil
+}
+
+func (m *Manager) Find(id string) (*Modem, error) {
+	modems, err := m.Modems()
+	if err != nil {
+		return nil, fmt.Errorf("listing modems: %w", err)
+	}
+	for _, modem := range modems {
+		if modem.EquipmentIdentifier == id {
+			return modem, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
 }
 
 func (m *Manager) createModem(objectPath dbus.ObjectPath, data map[string]dbus.Variant) (*Modem, error) {

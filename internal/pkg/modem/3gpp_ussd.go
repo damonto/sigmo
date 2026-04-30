@@ -1,5 +1,7 @@
 package modem
 
+import "context"
+
 type USSD struct {
 	modem *Modem
 }
@@ -8,15 +10,15 @@ func (g *ThreeGPP) USSD() *USSD {
 	return &USSD{modem: g.modem}
 }
 
-func (u *USSD) Initiate(command string) (string, error) {
+func (u *USSD) Initiate(ctx context.Context, command string) (string, error) {
 	var reply string
-	err := u.modem.dbusObject.Call(Modem3GPPInterface+".Ussd.Initiate", 0, command).Store(&reply)
+	err := u.modem.dbusObject.CallWithContext(ctx, Modem3GPPInterface+".Ussd.Initiate", 0, command).Store(&reply)
 	return reply, err
 }
 
-func (u *USSD) Respond(response string) (string, error) {
+func (u *USSD) Respond(ctx context.Context, response string) (string, error) {
 	var reply string
-	err := u.modem.dbusObject.Call(Modem3GPPInterface+".Ussd.Respond", 0, response).Store(&reply)
+	err := u.modem.dbusObject.CallWithContext(ctx, Modem3GPPInterface+".Ussd.Respond", 0, response).Store(&reply)
 	return reply, err
 }
 

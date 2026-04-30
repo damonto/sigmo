@@ -134,7 +134,7 @@ export const useEsimDownload = (modemId: Ref<string>, options?: Options) => {
     const base = rawBase && rawBase.trim().length > 0 ? rawBase.replace(/\/$/, '') : '/api/v1'
     const apiUrl = new URL(base, window.location.origin)
     apiUrl.protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:'
-    apiUrl.pathname = `${apiUrl.pathname.replace(/\/$/, '')}/modems/${id}/esims/download`
+    apiUrl.pathname = `${apiUrl.pathname.replace(/\/$/, '')}/modems/${id}/esims/download-sessions`
     const token = getStoredToken()
     if (token) {
       apiUrl.searchParams.set('token', token)

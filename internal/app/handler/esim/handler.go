@@ -30,7 +30,6 @@ type Handler struct {
 }
 
 const (
-	errorCodeModemNotFound                    = "modem_not_found"
 	errorCodeEuiccNotSupported                = "euicc_not_supported"
 	errorCodeListESIMsFailed                  = "list_esims_failed"
 	errorCodeDiscoverESIMsFailed              = "discover_esims_failed"
@@ -39,7 +38,6 @@ const (
 	errorCodeEnableESIMTimeout                = "esim_enable_timeout"
 	errorCodeEnableESIMFailed                 = "enable_esim_failed"
 	errorCodeESIMProfileNotFound              = "esim_profile_not_found"
-	errorCodeESIMProfileAlreadyActive         = "esim_profile_already_active"
 	errorCodeDeleteESIMFailed                 = "delete_esim_failed"
 	errorCodeActiveESIMProfile                = "active_esim_profile"
 	errorCodeDownloadESIMFailed               = "download_esim_failed"
@@ -49,7 +47,6 @@ const (
 )
 
 var (
-	errModemNotFound = errors.New("modem not found")
 	errICCIDRequired = errors.New("iccid is required")
 	errInvalidICCID  = errors.New("invalid iccid")
 )
@@ -87,9 +84,9 @@ func New(cfg *config.Config, manager *mmodem.Manager, internetConnector *interne
 }
 
 func (h *Handler) List(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeListESIMsFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeListESIMsFailed)
 	}
 	response, err := h.profile.List(modem)
 	if err != nil {
@@ -102,9 +99,9 @@ func (h *Handler) List(c *echo.Context) error {
 }
 
 func (h *Handler) Discover(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeDiscoverESIMsFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeDiscoverESIMsFailed)
 	}
 	response, err := h.provisioning.Discover(modem)
 	if err != nil {
@@ -117,9 +114,9 @@ func (h *Handler) Discover(c *echo.Context) error {
 }
 
 func (h *Handler) Enable(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeEnableESIMFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeEnableESIMFailed)
 	}
 	iccid, err := iccidFromParam(c)
 	if err != nil {
@@ -130,7 +127,7 @@ func (h *Handler) Enable(c *echo.Context) error {
 	}
 	session, err := h.lifecycle.PrepareEnable(modem, iccid)
 	if err != nil {
-		return enableError(c, err)
+		return enablePrepareError(c, err)
 	}
 	defer session.Close()
 
@@ -143,6 +140,13 @@ func (h *Handler) Enable(c *echo.Context) error {
 		return enableError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+func enablePrepareError(c *echo.Context, err error) error {
+	if errors.Is(err, errProfileAlreadyActive) {
+		return c.NoContent(http.StatusNoContent)
+	}
+	return enableError(c, err)
 }
 
 func enableError(c *echo.Context, err error) error {
@@ -158,16 +162,13 @@ func enableError(c *echo.Context, err error) error {
 	if errors.Is(err, errProfileNotFound) {
 		return httpapi.BadRequest(c, errorCodeESIMProfileNotFound, err)
 	}
-	if errors.Is(err, errProfileAlreadyActive) {
-		return httpapi.BadRequest(c, errorCodeESIMProfileAlreadyActive, err)
-	}
 	return httpapi.Internal(c, errorCodeEnableESIMFailed)
 }
 
 func (h *Handler) Delete(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeDeleteESIMFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeDeleteESIMFailed)
 	}
 	iccid, err := iccidFromParam(c)
 	if err != nil {
@@ -189,9 +190,9 @@ func (h *Handler) Delete(c *echo.Context) error {
 }
 
 func (h *Handler) Download(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeDownloadESIMFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeDownloadESIMFailed)
 	}
 
 	conn, err := wsUpgrader.Upgrade(c.Response(), c.Request(), nil)
@@ -253,9 +254,9 @@ func (h *Handler) Download(c *echo.Context) error {
 }
 
 func (h *Handler) UpdateNickname(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeUpdateESIMNicknameFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeUpdateESIMNicknameFailed)
 	}
 	iccid, err := iccidFromParam(c)
 	if err != nil {
@@ -304,26 +305,6 @@ func readStartMessage(conn *websocket.Conn) (downloadClientMessage, error) {
 		return downloadClientMessage{}, errors.New("smdp is required")
 	}
 	return start, nil
-}
-
-func (h *Handler) modemLookupError(c *echo.Context, err error, internalErrorCode string) error {
-	if errors.Is(err, errModemNotFound) {
-		return httpapi.NotFound(c, errorCodeModemNotFound, err)
-	}
-	return httpapi.Internal(c, internalErrorCode)
-}
-
-func (h *Handler) findModem(id string) (*mmodem.Modem, error) {
-	modems, err := h.manager.Modems()
-	if err != nil {
-		return nil, fmt.Errorf("listing modems: %w", err)
-	}
-	for _, modem := range modems {
-		if modem.EquipmentIdentifier == id {
-			return modem, nil
-		}
-	}
-	return nil, fmt.Errorf("%w: %s", errModemNotFound, id)
 }
 
 func profilePreviewFrom(info *sgp22.ProfileInfo) downloadProfilePreview {

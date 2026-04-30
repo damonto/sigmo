@@ -19,8 +19,8 @@ export const useEsimApi = () => {
   }
 
   const enableEsim = (id: string, iccid: string) => {
-    return useFetch<void>(`modems/${id}/esims/${iccid}/enabling`, {
-      method: 'POST',
+    return useFetch<void>(`modems/${id}/esims/${iccid}/activation`, {
+      method: 'PUT',
     }).json()
   }
 

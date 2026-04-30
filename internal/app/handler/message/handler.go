@@ -18,7 +18,6 @@ type Handler struct {
 }
 
 const (
-	errorCodeModemNotFound             = "modem_not_found"
 	errorCodeListMessagesFailed        = "list_messages_failed"
 	errorCodeListMessageThreadFailed   = "list_message_thread_failed"
 	errorCodeParticipantRequired       = "participant_required"
@@ -30,8 +29,6 @@ const (
 	errorCodeDeleteMessageThreadFailed = "delete_message_thread_failed"
 )
 
-var errModemNotFound = errors.New("modem not found")
-
 func New(manager *mmodem.Manager) *Handler {
 	return &Handler{
 		manager:  manager,
@@ -40,9 +37,9 @@ func New(manager *mmodem.Manager) *Handler {
 }
 
 func (h *Handler) List(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeListMessagesFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeListMessagesFailed)
 	}
 	response, err := h.messages.ListConversations(modem)
 	if err != nil {
@@ -52,9 +49,9 @@ func (h *Handler) List(c *echo.Context) error {
 }
 
 func (h *Handler) ListByParticipant(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeListMessageThreadFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeListMessageThreadFailed)
 	}
 	participant, err := participantFromParam(c)
 	if err != nil {
@@ -74,9 +71,9 @@ func (h *Handler) ListByParticipant(c *echo.Context) error {
 }
 
 func (h *Handler) Send(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeSendMessageFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeSendMessageFailed)
 	}
 	var req SendMessageRequest
 	if err := httpapi.BindAndValidate(c, &req, errorCodeSendMessageInvalidRequest); err != nil {
@@ -95,9 +92,9 @@ func (h *Handler) Send(c *echo.Context) error {
 }
 
 func (h *Handler) DeleteByParticipant(c *echo.Context) error {
-	modem, err := h.findModem(c.Param("id"))
+	modem, err := h.manager.Find(c.Param("id"))
 	if err != nil {
-		return h.modemLookupError(c, err, errorCodeDeleteMessageThreadFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeDeleteMessageThreadFailed)
 	}
 	participant, err := participantFromParam(c)
 	if err != nil {
@@ -125,24 +122,4 @@ func participantFromParam(c *echo.Context) (string, error) {
 		return "", fmt.Errorf("invalid participant %q: %w", raw, err)
 	}
 	return participant, nil
-}
-
-func (h *Handler) modemLookupError(c *echo.Context, err error, internalErrorCode string) error {
-	if errors.Is(err, errModemNotFound) {
-		return httpapi.NotFound(c, errorCodeModemNotFound, err)
-	}
-	return httpapi.Internal(c, internalErrorCode)
-}
-
-func (h *Handler) findModem(id string) (*mmodem.Modem, error) {
-	modems, err := h.manager.Modems()
-	if err != nil {
-		return nil, fmt.Errorf("listing modems: %w", err)
-	}
-	for _, modem := range modems {
-		if modem.EquipmentIdentifier == id {
-			return modem, nil
-		}
-	}
-	return nil, fmt.Errorf("%w: %s", errModemNotFound, id)
 }
