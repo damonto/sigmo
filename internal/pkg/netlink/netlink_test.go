@@ -22,6 +22,7 @@ func TestParseDefaultRoute(t *testing.T) {
 	metric := make([]byte, 4)
 	binary.NativeEndian.PutUint32(metric, 10)
 	gateway := netip.MustParseAddr("10.0.0.1").As4()
+	source := netip.MustParseAddr("10.0.0.2").As4()
 
 	msg := make([]byte, unix.SizeofRtMsg)
 	msg[0] = FamilyIPv4
@@ -31,6 +32,7 @@ func TestParseDefaultRoute(t *testing.T) {
 	msg = appendAttr(msg, unix.RTA_OIF, oif)
 	msg = appendAttr(msg, unix.RTA_PRIORITY, metric)
 	msg = appendAttr(msg, unix.RTA_GATEWAY, gateway[:])
+	msg = appendAttr(msg, unix.RTA_PREFSRC, source[:])
 
 	routes := parseDefaultRoutes(msg)
 	if len(routes) != 1 {
@@ -48,6 +50,9 @@ func TestParseDefaultRoute(t *testing.T) {
 	}
 	if got.Gateway != netip.MustParseAddr("10.0.0.1") {
 		t.Fatalf("Gateway = %s, want 10.0.0.1", got.Gateway)
+	}
+	if got.Source != netip.MustParseAddr("10.0.0.2") {
+		t.Fatalf("Source = %s, want 10.0.0.2", got.Source)
 	}
 	if got.Metric != 10 {
 		t.Fatalf("Metric = %d, want 10", got.Metric)

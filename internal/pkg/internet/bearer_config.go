@@ -167,6 +167,7 @@ func addressesAndRoutesWithMetric(interfaceName string, metric int, includeRoute
 				Interface: interfaceName,
 				Family:    netlink.FamilyIPv4,
 				Gateway:   addrFromString(ip4.Gateway),
+				Source:    address.Addr(),
 				Metric:    metric,
 			})
 		}
@@ -181,6 +182,7 @@ func addressesAndRoutesWithMetric(interfaceName string, metric int, includeRoute
 				Interface: interfaceName,
 				Family:    netlink.FamilyIPv6,
 				Gateway:   addrFromString(ip6.Gateway),
+				Source:    address.Addr(),
 				Metric:    metric,
 			})
 		}

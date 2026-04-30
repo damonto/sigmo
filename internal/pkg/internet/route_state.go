@@ -39,6 +39,7 @@ type routeStateRoute struct {
 	Protocol  int    `json:"protocol"`
 	Scope     int    `json:"scope"`
 	Gateway   string `json:"gateway,omitempty"`
+	Source    string `json:"source,omitempty"`
 	Metric    int    `json:"metric"`
 }
 
@@ -255,6 +256,9 @@ func routeStateRouteFromDefault(route netlink.DefaultRoute) routeStateRoute {
 	if route.Gateway.IsValid() {
 		state.Gateway = route.Gateway.String()
 	}
+	if route.Source.IsValid() {
+		state.Source = route.Source.String()
+	}
 	return state
 }
 
@@ -267,12 +271,24 @@ func defaultRouteFromState(state routeStateRoute) (netlink.DefaultRoute, error) 
 		Metric:    state.Metric,
 	}
 	if state.Gateway == "" {
-		return route, nil
+		return routeWithStateSource(route, state.Source)
 	}
 	gateway, err := netip.ParseAddr(state.Gateway)
 	if err != nil {
 		return netlink.DefaultRoute{}, fmt.Errorf("parse route state gateway: %w", err)
 	}
 	route.Gateway = gateway
+	return routeWithStateSource(route, state.Source)
+}
+
+func routeWithStateSource(route netlink.DefaultRoute, source string) (netlink.DefaultRoute, error) {
+	if source == "" {
+		return route, nil
+	}
+	addr, err := netip.ParseAddr(source)
+	if err != nil {
+		return netlink.DefaultRoute{}, fmt.Errorf("parse route state source: %w", err)
+	}
+	route.Source = addr
 	return route, nil
 }

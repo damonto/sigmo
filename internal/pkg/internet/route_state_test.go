@@ -27,6 +27,7 @@ func TestRouteState(t *testing.T) {
 			Interface: "wws27u1i4",
 			Family:    netlink.FamilyIPv4,
 			Gateway:   netip.MustParseAddr("10.9.15.132"),
+			Source:    netip.MustParseAddr("10.9.15.131"),
 			Metric:    defaultRouteMetric,
 		},
 	}
@@ -37,6 +38,7 @@ func TestRouteState(t *testing.T) {
 				Family:    netlink.FamilyIPv4,
 				Protocol:  4,
 				Gateway:   netip.MustParseAddr("10.10.10.201"),
+				Source:    netip.MustParseAddr("10.10.10.200"),
 				Metric:    0,
 			},
 			Replacement: netlink.DefaultRoute{
@@ -44,6 +46,7 @@ func TestRouteState(t *testing.T) {
 				Family:    netlink.FamilyIPv4,
 				Protocol:  4,
 				Gateway:   netip.MustParseAddr("10.10.10.201"),
+				Source:    netip.MustParseAddr("10.10.10.200"),
 				Metric:    defaultRouteMetric + 1,
 			},
 		},
@@ -223,6 +226,33 @@ func TestLoadRouteStateRejectsBadGateway(t *testing.T) {
             "interface": "ens18",
             "family": 2,
             "gateway": "not-an-ip",
+            "metric": 0
+          },
+          "replacement": {
+            "interface": "ens18",
+            "family": 2,
+            "gateway": "10.10.10.201",
+            "metric": 11
+          }
+        }
+      ]
+    }
+  }
+}`,
+		},
+		{
+			name: "bad original source",
+			content: `{
+  "version": 1,
+  "interfaces": {
+    "wws0": {
+      "changes": [
+        {
+          "original": {
+            "interface": "ens18",
+            "family": 2,
+            "gateway": "10.10.10.201",
+            "source": "not-an-ip",
             "metric": 0
           },
           "replacement": {

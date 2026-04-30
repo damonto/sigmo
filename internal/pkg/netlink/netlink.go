@@ -23,6 +23,7 @@ type DefaultRoute struct {
 	Protocol  int
 	Scope     int
 	Gateway   netip.Addr
+	Source    netip.Addr
 	Metric    int
 }
 
@@ -177,6 +178,16 @@ func changeDefaultRoute(msgType uint16, flags uint16, route DefaultRoute) error 
 		}
 		msg = appendAttr(msg, unix.RTA_GATEWAY, raw)
 	}
+	if route.Source.IsValid() {
+		family, raw, err := ipFamilyBytes(route.Source)
+		if err != nil {
+			return err
+		}
+		if family != route.Family {
+			return errors.New("route source family does not match route family")
+		}
+		msg = appendAttr(msg, unix.RTA_PREFSRC, raw)
+	}
 
 	return send(msgType, unix.NLM_F_REQUEST|unix.NLM_F_ACK|flags, msg)
 }
@@ -203,6 +214,7 @@ func sameDefaultRoute(a, b DefaultRoute) bool {
 		routeProtocol(a) == routeProtocol(b) &&
 		a.Scope == b.Scope &&
 		a.Gateway == b.Gateway &&
+		a.Source == b.Source &&
 		a.Metric == b.Metric
 }
 
@@ -299,12 +311,14 @@ func parseDefaultRoutes(data []byte) []DefaultRoute {
 
 	index := int(attrUint32(attrs[unix.RTA_OIF]))
 	gateway := attrRouteGateway(family, attrs)
+	source := attrAddr(family, attrs[unix.RTA_PREFSRC])
 	metric := int(attrUint32(attrs[unix.RTA_PRIORITY]))
 	route := DefaultRoute{
 		Family:   family,
 		Protocol: int(data[5]),
 		Scope:    int(data[6]),
 		Gateway:  gateway,
+		Source:   source,
 		Metric:   metric,
 	}
 	if index != 0 {

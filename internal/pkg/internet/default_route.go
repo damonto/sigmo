@@ -310,6 +310,7 @@ func sameDefaultRoute(a, b netlink.DefaultRoute) bool {
 		routeProtocol(a) == routeProtocol(b) &&
 		a.Scope == b.Scope &&
 		a.Gateway == b.Gateway &&
+		a.Source == b.Source &&
 		a.Metric == b.Metric
 }
 
