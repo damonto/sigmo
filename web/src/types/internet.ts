@@ -4,6 +4,8 @@ export type InternetConnectionResponse = {
   status: InternetConnectionStatus
   apn: string
   defaultRoute: boolean
+  proxyEnabled: boolean
+  proxy: InternetProxy
   interfaceName?: string
   bearer?: string
   ipv4Addresses: string[]
@@ -21,7 +23,16 @@ export type InternetPublicResponse = {
   organization?: string
 }
 
+export type InternetProxy = {
+  enabled: boolean
+  username?: string
+  password?: string
+  httpAddress?: string
+  socks5Address?: string
+}
+
 export type ConnectInternetPayload = {
   apn: string
   defaultRoute: boolean
+  proxyEnabled: boolean
 }

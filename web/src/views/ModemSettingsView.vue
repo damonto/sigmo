@@ -74,6 +74,7 @@ const {
   internetPublicInfo,
   internetAPN,
   internetDefaultRoute,
+  internetProxyEnabled,
   isInternetLoading,
   isInternetConnecting,
   isInternetDisconnecting,
@@ -126,6 +127,7 @@ const {
         <ModemInternetSection
           v-model:apn="internetAPN"
           v-model:default-route="internetDefaultRoute"
+          v-model:proxy-enabled="internetProxyEnabled"
           :connection="internetConnection"
           :public-info="internetPublicInfo"
           :is-loading="isInternetLoading"

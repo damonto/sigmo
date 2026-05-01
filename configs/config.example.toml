@@ -4,6 +4,12 @@
   otp_required = true
   auth_providers = ["telegram"]
 
+[proxy]
+  listen_address = "127.0.0.1"
+  http_port = 8080
+  socks5_port = 1080
+  password = "change_me"
+
 [channels]
   [channels.telegram]
     bot_token = "Your Telegram Bot Token"

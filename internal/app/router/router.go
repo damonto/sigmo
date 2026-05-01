@@ -23,7 +23,7 @@ import (
 	"github.com/damonto/sigmo/web"
 )
 
-func Register(e *echo.Echo, cfg *config.Config, manager *modem.Manager) {
+func Register(e *echo.Echo, cfg *config.Config, manager *modem.Manager, internetConnector *pinternet.Connector) {
 	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
 		Filesystem: web.Root(),
 		Index:      "index.html",
@@ -45,8 +45,6 @@ func Register(e *echo.Echo, cfg *config.Config, manager *modem.Manager) {
 	if cfg.App.OTPRequired {
 		protected.Use(appmiddleware.Auth(authStore))
 	}
-	internetConnector := pinternet.NewConnector()
-
 	{
 		h := hmodem.New(cfg, manager, internetConnector)
 		protected.GET("/modems", h.List)

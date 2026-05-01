@@ -3,12 +3,15 @@ package internet
 type ConnectRequest struct {
 	APN          string `json:"apn" validate:"omitempty,max=100"`
 	DefaultRoute bool   `json:"defaultRoute"`
+	ProxyEnabled bool   `json:"proxyEnabled"`
 }
 
 type ConnectionResponse struct {
 	Status          string   `json:"status"`
 	APN             string   `json:"apn"`
 	DefaultRoute    bool     `json:"defaultRoute"`
+	ProxyEnabled    bool     `json:"proxyEnabled"`
+	Proxy           Proxy    `json:"proxy"`
 	InterfaceName   string   `json:"interfaceName,omitempty"`
 	Bearer          string   `json:"bearer,omitempty"`
 	IPv4Addresses   []string `json:"ipv4Addresses"`
@@ -24,4 +27,12 @@ type PublicResponse struct {
 	IP           string `json:"ip,omitempty"`
 	Country      string `json:"country,omitempty"`
 	Organization string `json:"organization,omitempty"`
+}
+
+type Proxy struct {
+	Enabled       bool   `json:"enabled"`
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	HTTPAddress   string `json:"httpAddress,omitempty"`
+	SOCKS5Address string `json:"socks5Address,omitempty"`
 }

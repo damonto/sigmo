@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	"github.com/damonto/sigmo/internal/app/router"
 	"github.com/damonto/sigmo/internal/pkg/config"
+	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/validator"
 )
@@ -61,7 +63,11 @@ func main() {
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch, http.MethodHead, http.MethodOptions},
 		AllowHeaders: []string{"*"},
 	}))
-	router.Register(server, cfg, manager)
+	internetConnector := newInternetConnector(cfg)
+	if err := recoverInternetConnections(manager, internetConnector); err != nil {
+		slog.Error("recover internet connections", "error", err)
+	}
+	router.Register(server, cfg, manager, internetConnector)
 
 	relay, err := forwarder.New(cfg, manager)
 	if err != nil {
@@ -90,4 +96,27 @@ func main() {
 		slog.Error("http server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func newInternetConnector(cfg *config.Config) *internet.Connector {
+	proxyConfig := cfg.ProxySettings()
+	proxy := internet.NewProxy(internet.ProxyConfig{
+		ListenAddress: proxyConfig.ListenAddress,
+		HTTPPort:      proxyConfig.HTTPPort,
+		SOCKS5Port:    proxyConfig.SOCKS5Port,
+		Password:      proxyConfig.Password,
+	})
+	return internet.NewConnectorWithProxy(proxy)
+}
+
+func recoverInternetConnections(manager *modem.Manager, connector *internet.Connector) error {
+	modemMap, err := manager.Modems()
+	if err != nil {
+		return fmt.Errorf("list modems: %w", err)
+	}
+	modems := make([]*modem.Modem, 0, len(modemMap))
+	for _, modem := range modemMap {
+		modems = append(modems, modem)
+	}
+	return connector.Recover(modems)
 }

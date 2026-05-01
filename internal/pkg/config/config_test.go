@@ -137,6 +137,68 @@ func TestFindModem(t *testing.T) {
 	}
 }
 
+func TestProxySettings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		config Config
+		want   Proxy
+	}{
+		{
+			name:   "defaults listen address when proxy is omitted",
+			config: Config{},
+			want: Proxy{
+				ListenAddress: "127.0.0.1",
+				HTTPPort:      8080,
+				SOCKS5Port:    1080,
+			},
+		},
+		{
+			name: "keeps configured proxy",
+			config: Config{
+				Proxy: &Proxy{
+					ListenAddress: "0.0.0.0",
+					HTTPPort:      8080,
+					SOCKS5Port:    1080,
+					Password:      "secret",
+				},
+			},
+			want: Proxy{
+				ListenAddress: "0.0.0.0",
+				HTTPPort:      8080,
+				SOCKS5Port:    1080,
+				Password:      "secret",
+			},
+		},
+		{
+			name: "defaults blank listener settings",
+			config: Config{
+				Proxy: &Proxy{
+					Password: "secret",
+				},
+			},
+			want: Proxy{
+				ListenAddress: "127.0.0.1",
+				HTTPPort:      8080,
+				SOCKS5Port:    1080,
+				Password:      "secret",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := tt.config.ProxySettings(); got != tt.want {
+				t.Fatalf("ProxySettings() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSave(t *testing.T) {
 	t.Parallel()
 
@@ -177,6 +239,7 @@ func TestSave(t *testing.T) {
 				"endpoint =",
 				"apn =",
 				"internet_default_route =",
+				"[proxy]",
 				"[channels.telegram.headers]",
 			},
 		},

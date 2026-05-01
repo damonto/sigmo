@@ -6,20 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
-	"syscall"
 	"time"
-
-	"golang.org/x/sys/unix"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
 const (
 	ipInfoURL     = "https://ipinfo.io/json"
-	dnsServer     = "1.1.1.1:53"
 	ipInfoTimeout = 4 * time.Second
 )
 
@@ -62,7 +57,7 @@ func fetchIPInfo(ctx context.Context, interfaceName string) (IPInfo, error) {
 func requestIPInfo(ctx context.Context, interfaceName string) (IPInfo, error) {
 	client := &http.Client{
 		Timeout:   ipInfoTimeout,
-		Transport: boundTransport(interfaceName),
+		Transport: boundTransportWithTimeout(interfaceName, ipInfoTimeout),
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ipInfoURL, nil)
 	if err != nil {
@@ -89,49 +84,4 @@ func requestIPInfo(ctx context.Context, interfaceName string) (IPInfo, error) {
 		Country:      country,
 		Organization: strings.TrimSpace(payload.Org),
 	}, nil
-}
-
-func boundResolver(interfaceName string) *net.Resolver {
-	return &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			return rawBoundDialer(interfaceName).DialContext(ctx, dnsNetwork(network), dnsServer)
-		},
-	}
-}
-
-func dnsNetwork(network string) string {
-	if strings.HasPrefix(network, "tcp") {
-		return "tcp4"
-	}
-	return "udp4"
-}
-
-func boundTransport(interfaceName string) *http.Transport {
-	return &http.Transport{
-		Proxy:       nil,
-		DialContext: boundDialer(interfaceName).DialContext,
-	}
-}
-
-func boundDialer(interfaceName string) *net.Dialer {
-	dialer := rawBoundDialer(interfaceName)
-	dialer.Resolver = boundResolver(interfaceName)
-	return dialer
-}
-
-func rawBoundDialer(interfaceName string) *net.Dialer {
-	dialer := &net.Dialer{
-		Timeout: ipInfoTimeout,
-		Control: func(network, address string, connection syscall.RawConn) error {
-			var controlErr error
-			if err := connection.Control(func(fd uintptr) {
-				controlErr = unix.SetsockoptString(int(fd), unix.SOL_SOCKET, unix.SO_BINDTODEVICE, interfaceName)
-			}); err != nil {
-				return err
-			}
-			return controlErr
-		},
-	}
-	return dialer
 }

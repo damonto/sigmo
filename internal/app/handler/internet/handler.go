@@ -23,6 +23,8 @@ const (
 	errorCodeConnectInternetFailed            = "connect_internet_failed"
 	errorCodeDisconnectInternetFailed         = "disconnect_internet_failed"
 	errorCodeUnsupportedInternetConfiguration = "internet_connection_unsupported_ip_method"
+	errorCodeInternetProxyInvalidConfig       = "internet_proxy_invalid_config"
+	errorCodeInternetProxyStartFailed         = "internet_proxy_start_failed"
 )
 
 func New(manager *mmodem.Manager) *Handler {
@@ -73,6 +75,7 @@ func (h *Handler) Connect(c *echo.Context) error {
 	prefs := internetcore.Preferences{
 		APN:          req.APN,
 		DefaultRoute: req.DefaultRoute,
+		ProxyEnabled: req.ProxyEnabled,
 	}
 	response, err := h.connector.Connect(modem, prefs)
 	if err != nil {
@@ -96,6 +99,12 @@ func internetError(c *echo.Context, err error, internalErrorCode string) error {
 	if errors.Is(err, internetcore.ErrUnsupportedIPMethod) {
 		return httpapi.UnprocessableEntity(c, errorCodeUnsupportedInternetConfiguration, internetcore.ErrUnsupportedIPMethod)
 	}
+	if errors.Is(err, internetcore.ErrProxyPasswordRequired) {
+		return httpapi.UnprocessableEntity(c, errorCodeInternetProxyInvalidConfig, internetcore.ErrProxyPasswordRequired)
+	}
+	if errors.Is(err, internetcore.ErrProxyStart) {
+		return httpapi.UnprocessableEntity(c, errorCodeInternetProxyStartFailed, err)
+	}
 	return httpapi.Internal(c, internalErrorCode)
 }
 
@@ -104,6 +113,8 @@ func responseFromConnection(connection *internetcore.Connection) ConnectionRespo
 		Status:          connection.Status,
 		APN:             connection.APN,
 		DefaultRoute:    connection.DefaultRoute,
+		ProxyEnabled:    connection.ProxyEnabled,
+		Proxy:           responseFromProxy(connection.Proxy),
 		InterfaceName:   connection.InterfaceName,
 		Bearer:          connection.Bearer,
 		IPv4Addresses:   connection.IPv4Addresses,
@@ -113,6 +124,16 @@ func responseFromConnection(connection *internetcore.Connection) ConnectionRespo
 		TXBytes:         connection.TXBytes,
 		RXBytes:         connection.RXBytes,
 		RouteMetric:     connection.RouteMetric,
+	}
+}
+
+func responseFromProxy(proxy internetcore.ProxyStatus) Proxy {
+	return Proxy{
+		Enabled:       proxy.Enabled,
+		Username:      proxy.Username,
+		Password:      proxy.Password,
+		HTTPAddress:   proxy.HTTPAddress,
+		SOCKS5Address: proxy.SOCKS5Address,
 	}
 }
 

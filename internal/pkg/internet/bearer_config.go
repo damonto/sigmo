@@ -264,6 +264,7 @@ func connectionFromBearer(bearer *mmodem.Bearer, prefs Preferences, metric int) 
 		Status:          StatusConnected,
 		APN:             prefs.APN,
 		DefaultRoute:    prefs.DefaultRoute,
+		ProxyEnabled:    prefs.ProxyEnabled,
 		InterfaceName:   interfaceName,
 		Bearer:          string(bearer.Path()),
 		IPv4Addresses:   ipv4Addresses,
@@ -326,6 +327,7 @@ func disconnectedConnection(prefs Preferences) *Connection {
 		Status:          StatusDisconnected,
 		APN:             prefs.APN,
 		DefaultRoute:    prefs.DefaultRoute,
+		ProxyEnabled:    prefs.ProxyEnabled,
 		IPv4Addresses:   []string{},
 		IPv6Addresses:   []string{},
 		DNS:             []string{},
@@ -374,6 +376,13 @@ func recoverTrackedConnection(modemID string, bearer *mmodem.Bearer, fallback Pr
 		prefs.DefaultRoute = state.DefaultRoute
 	} else {
 		metric = 0
+	}
+	proxyEnabled, proxyStateFound, err := loadProxyStateForModem(proxyStatePath, modemID, interfaceName)
+	if err != nil {
+		return trackedConnection{}, 0, false, fmt.Errorf("load proxy state: %w", err)
+	}
+	if proxyStateFound {
+		prefs.ProxyEnabled = proxyEnabled
 	}
 
 	addresses, routes, err := addressesAndRoutesWithMetric(interfaceName, metric, includeRoutes, ip4, ip6)

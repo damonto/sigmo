@@ -9,11 +9,18 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+const (
+	defaultProxyListenAddress = "127.0.0.1"
+	defaultProxyHTTPPort      = 8080
+	defaultProxySOCKS5Port    = 1080
+)
+
 // Config represents the application configuration
 type Config struct {
 	App      App                `toml:"app"`
 	Channels map[string]Channel `toml:"channels"`
 	Modems   map[string]Modem   `toml:"modems"`
+	Proxy    *Proxy             `toml:"proxy,omitempty"`
 	Path     string             `toml:"-"`
 }
 
@@ -53,6 +60,13 @@ type Modem struct {
 	MSS        int    `toml:"mss"`
 }
 
+type Proxy struct {
+	ListenAddress string `toml:"listen_address"`
+	HTTPPort      int    `toml:"http_port"`
+	SOCKS5Port    int    `toml:"socks5_port"`
+	Password      string `toml:"password"`
+}
+
 // Load reads and parses the configuration from the given file path
 func Load(path string) (*Config, error) {
 	file, err := os.Open(path)
@@ -81,6 +95,27 @@ func (c *Config) FindModem(id string) Modem {
 		Compatible: false,
 		MSS:        240,
 	}
+}
+
+func (c *Config) ProxySettings() Proxy {
+	if c.Proxy == nil {
+		return Proxy{
+			ListenAddress: defaultProxyListenAddress,
+			HTTPPort:      defaultProxyHTTPPort,
+			SOCKS5Port:    defaultProxySOCKS5Port,
+		}
+	}
+	proxy := *c.Proxy
+	if proxy.ListenAddress == "" {
+		proxy.ListenAddress = defaultProxyListenAddress
+	}
+	if proxy.HTTPPort == 0 {
+		proxy.HTTPPort = defaultProxyHTTPPort
+	}
+	if proxy.SOCKS5Port == 0 {
+		proxy.SOCKS5Port = defaultProxySOCKS5Port
+	}
+	return proxy
 }
 
 func (c *Config) Save() error {

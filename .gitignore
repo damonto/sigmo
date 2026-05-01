@@ -38,3 +38,6 @@ AGENTS*.md
 CLAUDE.md
 .claude
 .codex
+
+# Tests
+tools/
