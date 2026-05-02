@@ -44,7 +44,7 @@ Sigmo focuses on advanced eSIM operations, SMS management, and network control.
 **System Requirements:**
 
 - **OS**: Linux.
-- **Service**: `ModemManager` running on the system D-Bus.
+- **Service**: `ModemManager` running on the system D-Bus when using the binary directly. The Docker image includes `ModemManager` and starts it inside the container.
 - **Permissions**: Root access or proper `udev` rules to access modem device nodes.
 
 ---
@@ -83,6 +83,32 @@ Start the service.
 ```
 
 Visit `http://localhost:9527` to access the UI.
+
+### Docker Compose
+
+The Docker image includes the embedded Vue frontend and installs `dbus`, `ModemManager`, `qmi-utils`, and `libmbim-tools` in the runtime image.
+
+1.  **Create Config**:
+
+    ```bash
+    cp configs/config.example.toml configs/config.toml
+    ```
+
+    Edit `configs/config.toml` before starting the container. The file is mounted read-write because Sigmo saves modem aliases and settings back to it.
+
+2.  **Start**:
+
+    ```bash
+    docker compose pull
+    docker compose up -d
+    ```
+
+3.  **Open UI**:
+    Visit `http://localhost:9527`, or the port configured by `[app].listen_address`.
+
+The compose setup uses `network_mode: host` because Sigmo's internet connection feature configures the modem network interface and host routes. Docker port publishing is disabled in this mode; use `[app].listen_address` in `config.toml` to choose the listening address and port.
+
+The container runs with `privileged: true` so Sigmo and ModemManager can access modem devices. `/run` is mounted as tmpfs so stale D-Bus sockets cannot survive container restarts. On hosts with strict Docker or udev policies, keep `/dev`, `/run/udev`, and `/sys` mounted as shown in `compose.yaml`.
 
 ---
 
@@ -251,10 +277,17 @@ If you wish to contribute or modify the source:
     cd web && bun install && bun run build
     ```
 4.  **Run Backend**:
+
     ```bash
     go run ./ -config config.toml
     ```
+
     _Or for frontend hot-reload:_ `cd web && bun run dev`
+
+5.  **Build Docker Image**:
+    ```bash
+    docker build -t sigmo:local .
+    ```
 
 ---
 
