@@ -37,7 +37,7 @@
     "vue-qrcode-reader": "^5.7.3",
     "vue-router": "^5.0.6",
     "vue-sonner": "^2.0.9",
-    "zod": "^4.3.6"
+    "zod": "^4.4.2"
   },
   "devDependencies": {
     "@prettier/plugin-oxc": "^0.1.3",
