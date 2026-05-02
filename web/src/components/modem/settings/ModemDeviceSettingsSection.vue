@@ -68,7 +68,12 @@ const isActionDisabled = computed(() => !props.isValid || props.isUpdating)
 
     <div class="space-y-2">
       <div class="flex items-center justify-between gap-3">
-        <Label for="modem-compatible">{{ t('modemDetail.settings.compatibleLabel') }}</Label>
+        <div class="min-w-0 flex-1 space-y-1">
+          <Label for="modem-compatible">{{ t('modemDetail.settings.compatibleLabel') }}</Label>
+          <p class="text-xs leading-5 text-muted-foreground">
+            {{ t('modemDetail.settings.compatibleDescription') }}
+          </p>
+        </div>
         <Switch
           id="modem-compatible"
           :model-value="compatible"
@@ -76,9 +81,6 @@ const isActionDisabled = computed(() => !props.isValid || props.isUpdating)
           @update:model-value="(value: boolean) => (compatible = value)"
         />
       </div>
-      <p class="text-xs text-muted-foreground">
-        {{ t('modemDetail.settings.compatibleDescription') }}
-      </p>
     </div>
     <div class="flex justify-end">
       <Button
