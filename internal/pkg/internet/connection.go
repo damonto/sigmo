@@ -93,6 +93,7 @@ func (c *Connector) Current(modem *mmodem.Modem) (*Connection, error) {
 					}
 					delete(c.connections, modem.EquipmentIdentifier)
 					prefs := bearerPreferences(bearer, tracked.prefs)
+					prefs.APN = apnForModem(modem, "", "", prefs.APN)
 					c.preferences[modem.EquipmentIdentifier] = prefs
 					return disconnectedConnection(prefs), nil
 				}
@@ -115,6 +116,7 @@ func (c *Connector) Current(modem *mmodem.Modem) (*Connection, error) {
 		if err := c.cleanupStaleConnectionState(modem.EquipmentIdentifier, staleInterfaces...); err != nil {
 			return nil, err
 		}
+		prefs.APN = apnForModem(modem, "", "", prefs.APN)
 		return disconnectedConnection(prefs), nil
 	}
 	if !current.connected {
@@ -125,6 +127,7 @@ func (c *Connector) Current(modem *mmodem.Modem) (*Connection, error) {
 			return nil, err
 		}
 		prefs = bearerPreferences(current.bearer, prefs)
+		prefs.APN = apnForModem(modem, "", "", prefs.APN)
 		c.preferences[modem.EquipmentIdentifier] = prefs
 		return disconnectedConnection(prefs), nil
 	}
@@ -187,10 +190,7 @@ func (c *Connector) Connect(modem *mmodem.Modem, prefs Preferences) (*Connection
 		if err != nil {
 			return nil, err
 		}
-		prefs.APN = apn
-	}
-	if prefs.APN == "" {
-		prefs.APN = c.preference(modem.EquipmentIdentifier).APN
+		prefs.APN = apnForModem(modem, "", apn, c.preference(modem.EquipmentIdentifier).APN)
 	}
 	if err := c.disconnectLocked(modem); err != nil {
 		return nil, fmt.Errorf("disconnect previous bearer: %w", err)

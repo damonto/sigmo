@@ -322,6 +322,23 @@ func apnFromBearers(modem *mmodem.Modem) (string, error) {
 	return strings.TrimSpace(apn), nil
 }
 
+func modemOperatorIdentifier(modem *mmodem.Modem) string {
+	if modem == nil || modem.Sim == nil {
+		return ""
+	}
+	return strings.TrimSpace(modem.Sim.OperatorIdentifier)
+}
+
+func apnForModem(modem *mmodem.Modem, requested, bearer, remembered string) string {
+	return selectAPN(apnSelection{
+		Requested:          requested,
+		Bearer:             bearer,
+		Remembered:         remembered,
+		OperatorIdentifier: modemOperatorIdentifier(modem),
+		DefaultAPNs:        defaultAPNs,
+	})
+}
+
 func disconnectedConnection(prefs Preferences) *Connection {
 	return &Connection{
 		Status:          StatusDisconnected,
