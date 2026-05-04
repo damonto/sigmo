@@ -9,6 +9,7 @@ import type { InternetConnectionResponse, InternetPublicResponse } from '@/types
 const apn = defineModel<string>('apn', { required: true })
 const defaultRoute = defineModel<boolean>('defaultRoute', { required: true })
 const proxyEnabled = defineModel<boolean>('proxyEnabled', { required: true })
+const alwaysOn = defineModel<boolean>('alwaysOn', { required: true })
 
 const props = defineProps<{
   connection: InternetConnectionResponse | null
@@ -35,6 +36,7 @@ const shouldShowProxyInfo = computed(
     v-model:apn="apn"
     v-model:default-route="defaultRoute"
     v-model:proxy-enabled="proxyEnabled"
+    v-model:always-on="alwaysOn"
     :connection="props.connection"
     :is-loading="props.isLoading"
     :is-connecting="props.isConnecting"

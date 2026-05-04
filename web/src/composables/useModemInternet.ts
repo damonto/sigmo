@@ -25,6 +25,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
   const internetAPN = ref('')
   const internetDefaultRoute = ref(false)
   const internetProxyEnabled = ref(false)
+  const internetAlwaysOn = ref(false)
   const isInternetLoading = ref(false)
   const isInternetConnecting = ref(false)
   const isInternetDisconnecting = ref(false)
@@ -57,6 +58,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
     internetAPN.value = ''
     internetDefaultRoute.value = false
     internetProxyEnabled.value = false
+    internetAlwaysOn.value = false
   }
 
   const connectionKey = (connection: InternetConnectionResponse | null) => {
@@ -74,6 +76,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
     internetAPN.value = connection?.apn ?? ''
     internetDefaultRoute.value = connection?.defaultRoute ?? false
     internetProxyEnabled.value = connection?.proxyEnabled ?? false
+    internetAlwaysOn.value = connection?.alwaysOn ?? false
     if (connection?.status !== 'connected' || publicConnectionKey.value !== key) {
       internetPublicInfo.value = null
       publicConnectionKey.value = ''
@@ -134,6 +137,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
         apn: internetAPN.value.trim(),
         defaultRoute: internetDefaultRoute.value,
         proxyEnabled: internetProxyEnabled.value,
+        alwaysOn: internetAlwaysOn.value,
       })
       const connection = data.value ?? null
       applyConnection(connection)
@@ -196,6 +200,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
     internetAPN,
     internetDefaultRoute,
     internetProxyEnabled,
+    internetAlwaysOn,
     isInternetLoading,
     isInternetConnecting,
     isInternetDisconnecting,

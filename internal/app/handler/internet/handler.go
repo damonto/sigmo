@@ -76,6 +76,7 @@ func (h *Handler) Connect(c *echo.Context) error {
 		APN:          req.APN,
 		DefaultRoute: req.DefaultRoute,
 		ProxyEnabled: req.ProxyEnabled,
+		AlwaysOn:     req.AlwaysOn,
 	}
 	response, err := h.connector.Connect(modem, prefs)
 	if err != nil {
@@ -114,6 +115,7 @@ func responseFromConnection(connection *internetcore.Connection) ConnectionRespo
 		APN:             connection.APN,
 		DefaultRoute:    connection.DefaultRoute,
 		ProxyEnabled:    connection.ProxyEnabled,
+		AlwaysOn:        connection.AlwaysOn,
 		Proxy:           responseFromProxy(connection.Proxy),
 		InterfaceName:   connection.InterfaceName,
 		Bearer:          connection.Bearer,

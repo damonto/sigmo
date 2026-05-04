@@ -75,6 +75,7 @@ const {
   internetAPN,
   internetDefaultRoute,
   internetProxyEnabled,
+  internetAlwaysOn,
   isInternetLoading,
   isInternetConnecting,
   isInternetDisconnecting,
@@ -128,6 +129,7 @@ const {
           v-model:apn="internetAPN"
           v-model:default-route="internetDefaultRoute"
           v-model:proxy-enabled="internetProxyEnabled"
+          v-model:always-on="internetAlwaysOn"
           :connection="internetConnection"
           :public-info="internetPublicInfo"
           :is-loading="isInternetLoading"

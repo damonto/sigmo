@@ -199,6 +199,8 @@ const en = {
       internetDefaultRouteDescription: 'Use this modem as the system default internet route.',
       internetProxyLabel: 'Proxy service',
       internetProxyDescription: 'Expose HTTP and SOCKS5 proxies after connecting.',
+      internetAlwaysOnLabel: 'Always On',
+      internetAlwaysOnDescription: 'Reconnect with these settings after an unexpected disconnect.',
       internetConnect: 'Connect',
       internetDisconnect: 'Disconnect',
       internetConnected: 'Connected',

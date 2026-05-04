@@ -20,6 +20,7 @@ type Preferences struct {
 	APN          string
 	DefaultRoute bool
 	ProxyEnabled bool
+	AlwaysOn     bool
 }
 
 type Connection struct {
@@ -27,6 +28,7 @@ type Connection struct {
 	APN             string
 	DefaultRoute    bool
 	ProxyEnabled    bool
+	AlwaysOn        bool
 	Proxy           ProxyStatus
 	InterfaceName   string
 	Bearer          string
@@ -40,10 +42,11 @@ type Connection struct {
 }
 
 type Connector struct {
-	mu          sync.Mutex
-	connections map[string]trackedConnection
-	preferences map[string]Preferences
-	proxy       *Proxy
+	mu           sync.Mutex
+	connections  map[string]trackedConnection
+	preferences  map[string]Preferences
+	proxy        *Proxy
+	alwaysOnPath string
 }
 
 func NewConnector() *Connector {
@@ -52,9 +55,10 @@ func NewConnector() *Connector {
 
 func NewConnectorWithProxy(proxy *Proxy) *Connector {
 	return &Connector{
-		connections: make(map[string]trackedConnection),
-		preferences: make(map[string]Preferences),
-		proxy:       proxy,
+		connections:  make(map[string]trackedConnection),
+		preferences:  make(map[string]Preferences),
+		proxy:        proxy,
+		alwaysOnPath: alwaysOnStatePath,
 	}
 }
 
@@ -78,7 +82,7 @@ func (c *Connector) Current(modem *mmodem.Modem) (*Connection, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	prefs := c.preference(modem.EquipmentIdentifier)
+	prefs := c.preferenceWithAlwaysOn(modem.EquipmentIdentifier)
 	var staleInterfaces []string
 	if tracked, ok := c.connections[modem.EquipmentIdentifier]; ok {
 		bearer, err := modem.Bearer(tracked.bearerPath)
@@ -145,7 +149,7 @@ func (c *Connector) Current(modem *mmodem.Modem) (*Connection, error) {
 }
 
 func (c *Connector) recoverLocked(modem *mmodem.Modem) error {
-	prefs := c.preference(modem.EquipmentIdentifier)
+	prefs := c.preferenceWithAlwaysOn(modem.EquipmentIdentifier)
 	current, err := currentBearer(modem)
 	if err != nil {
 		return err
@@ -184,15 +188,19 @@ func (c *Connector) Connect(modem *mmodem.Modem, prefs Preferences) (*Connection
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	return c.connectLocked(modem, prefs, true)
+}
+
+func (c *Connector) connectLocked(modem *mmodem.Modem, prefs Preferences, clearAlwaysOnBefore bool) (*Connection, error) {
 	prefs.APN = strings.TrimSpace(prefs.APN)
 	if prefs.APN == "" {
 		apn, err := apnFromBearers(modem)
 		if err != nil {
 			return nil, err
 		}
-		prefs.APN = apnForModem(modem, "", apn, c.preference(modem.EquipmentIdentifier).APN)
+		prefs.APN = apnForModem(modem, "", apn, c.preferenceWithAlwaysOn(modem.EquipmentIdentifier).APN)
 	}
-	if err := c.disconnectLocked(modem); err != nil {
+	if err := c.disconnectLocked(modem, clearAlwaysOnBefore); err != nil {
 		return nil, fmt.Errorf("disconnect previous bearer: %w", err)
 	}
 
@@ -230,6 +238,11 @@ func (c *Connector) Connect(modem *mmodem.Modem, prefs Preferences) (*Connection
 		disconnectErr := bearer.Disconnect()
 		return nil, errors.Join(err, cleanupErr, disconnectErr)
 	}
+	if err := c.syncAlwaysOnState(modem.EquipmentIdentifier, prefs); err != nil {
+		cleanupErr := c.cleanupTracked(tracked)
+		disconnectErr := bearer.Disconnect()
+		return nil, errors.Join(fmt.Errorf("sync always on state: %w", err), cleanupErr, disconnectErr)
+	}
 	c.connections[modem.EquipmentIdentifier] = tracked
 	c.preferences[modem.EquipmentIdentifier] = prefs
 
@@ -240,25 +253,31 @@ func (c *Connector) Disconnect(modem *mmodem.Modem) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	return c.disconnectLocked(modem)
+	return c.disconnectLocked(modem, true)
 }
 
 func (c *Connector) Restore(modem *mmodem.Modem) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	err := c.disconnectLocked(modem)
+	err := c.disconnectLocked(modem, true)
 	delete(c.connections, modem.EquipmentIdentifier)
 	delete(c.preferences, modem.EquipmentIdentifier)
 	return err
 }
 
-func (c *Connector) disconnectLocked(modem *mmodem.Modem) error {
+func (c *Connector) disconnectLocked(modem *mmodem.Modem, clearAlwaysOn bool) error {
+	var result error
+	if clearAlwaysOn {
+		result = errors.Join(result, c.clearAlwaysOnStateLocked(modem.EquipmentIdentifier))
+	}
+
 	if tracked, ok := c.connections[modem.EquipmentIdentifier]; ok {
 		err := c.cleanupTracked(tracked)
 		err = errors.Join(err, modem.DisconnectBearer(tracked.bearerPath))
 		err = errors.Join(err, restoreStaleDefaultRouteStatesForModem(modem.EquipmentIdentifier))
 		delete(c.connections, modem.EquipmentIdentifier)
+		err = errors.Join(result, err)
 		if err != nil {
 			return fmt.Errorf("disconnect bearer: %w", err)
 		}
@@ -267,17 +286,27 @@ func (c *Connector) disconnectLocked(modem *mmodem.Modem) error {
 
 	current, err := currentBearer(modem)
 	if err != nil {
-		return err
+		err = errors.Join(result, err)
+		return fmt.Errorf("disconnect bearer: %w", err)
 	}
 	if !current.connected {
 		if current.bearer == nil {
-			return c.cleanupStaleConnectionState(modem.EquipmentIdentifier)
+			err := errors.Join(result, c.cleanupStaleConnectionState(modem.EquipmentIdentifier))
+			if err != nil {
+				return fmt.Errorf("disconnect bearer: %w", err)
+			}
+			return nil
 		}
 		interfaceName, err := current.bearer.Interface()
 		if err != nil {
-			return fmt.Errorf("read bearer interface: %w", err)
+			err = errors.Join(result, fmt.Errorf("read bearer interface: %w", err))
+			return fmt.Errorf("disconnect bearer: %w", err)
 		}
-		return c.cleanupStaleConnectionState(modem.EquipmentIdentifier, interfaceName)
+		err = errors.Join(result, c.cleanupStaleConnectionState(modem.EquipmentIdentifier, interfaceName))
+		if err != nil {
+			return fmt.Errorf("disconnect bearer: %w", err)
+		}
+		return nil
 	}
 	bearer := current.bearer
 	prefs := recoverPreferences(bearer, c.preference(modem.EquipmentIdentifier))
@@ -293,6 +322,7 @@ func (c *Connector) disconnectLocked(modem *mmodem.Modem) error {
 	}
 	err = errors.Join(err, bearer.Disconnect())
 	err = errors.Join(err, restoreStaleDefaultRouteStatesForModem(modem.EquipmentIdentifier))
+	err = errors.Join(result, err)
 	if err != nil {
 		return fmt.Errorf("disconnect bearer: %w", err)
 	}
@@ -315,6 +345,33 @@ func (c *Connector) preference(modemID string) Preferences {
 		return prefs
 	}
 	return Preferences{}
+}
+
+func (c *Connector) preferenceWithAlwaysOn(modemID string) Preferences {
+	prefs := c.preference(modemID)
+	alwaysOn, ok, err := loadAlwaysOnStateForModem(c.alwaysOnPath, modemID)
+	if err != nil || !ok {
+		return prefs
+	}
+	return alwaysOn
+}
+
+func (c *Connector) syncAlwaysOnState(modemID string, prefs Preferences) error {
+	if prefs.AlwaysOn {
+		return saveAlwaysOnStateForModem(c.alwaysOnPath, modemID, prefs)
+	}
+	return deleteAlwaysOnStateForModem(c.alwaysOnPath, modemID)
+}
+
+func (c *Connector) clearAlwaysOnStateLocked(modemID string) error {
+	prefs := c.preferenceWithAlwaysOn(modemID)
+	prefs.AlwaysOn = false
+	if strings.TrimSpace(prefs.APN) != "" || prefs.DefaultRoute || prefs.ProxyEnabled {
+		c.preferences[modemID] = prefs
+	} else {
+		delete(c.preferences, modemID)
+	}
+	return deleteAlwaysOnStateForModem(c.alwaysOnPath, modemID)
 }
 
 func (c *Connector) connectionFromBearer(bearer *mmodem.Bearer, prefs Preferences, metric int) (*Connection, error) {

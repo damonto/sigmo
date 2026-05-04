@@ -199,6 +199,8 @@ const zh = {
       internetDefaultRouteDescription: '把这个模块作为系统默认上网出口。',
       internetProxyLabel: '代理服务',
       internetProxyDescription: '连接后暴露 HTTP 和 SOCKS5 代理。',
+      internetAlwaysOnLabel: 'Always On',
+      internetAlwaysOnDescription: '异常断开后自动按本次连接参数恢复。',
       internetConnect: '连接',
       internetDisconnect: '断开',
       internetConnected: '已连接',

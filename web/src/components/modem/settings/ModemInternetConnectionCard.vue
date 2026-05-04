@@ -14,6 +14,7 @@ import type { InternetConnectionResponse } from '@/types/internet'
 const apn = defineModel<string>('apn', { required: true })
 const defaultRoute = defineModel<boolean>('defaultRoute', { required: true })
 const proxyEnabled = defineModel<boolean>('proxyEnabled', { required: true })
+const alwaysOn = defineModel<boolean>('alwaysOn', { required: true })
 
 const props = defineProps<{
   connection: InternetConnectionResponse | null
@@ -174,6 +175,25 @@ const formatBytes = (bytes: number) => {
             :model-value="proxyEnabled"
             :disabled="isInputDisabled"
             @update:model-value="(value: boolean) => (proxyEnabled = value)"
+          />
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0 flex-1 space-y-1">
+            <Label for="modem-internet-always-on">
+              {{ t('modemDetail.settings.internetAlwaysOnLabel') }}
+            </Label>
+            <p class="text-xs leading-5 text-muted-foreground">
+              {{ t('modemDetail.settings.internetAlwaysOnDescription') }}
+            </p>
+          </div>
+          <Switch
+            id="modem-internet-always-on"
+            :model-value="alwaysOn"
+            :disabled="isInputDisabled"
+            @update:model-value="(value: boolean) => (alwaysOn = value)"
           />
         </div>
       </div>

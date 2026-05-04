@@ -5,6 +5,7 @@ export type InternetConnectionResponse = {
   apn: string
   defaultRoute: boolean
   proxyEnabled: boolean
+  alwaysOn: boolean
   proxy: InternetProxy
   interfaceName?: string
   bearer?: string
@@ -35,4 +36,5 @@ export type ConnectInternetPayload = {
   apn: string
   defaultRoute: boolean
   proxyEnabled: boolean
+  alwaysOn: boolean
 }

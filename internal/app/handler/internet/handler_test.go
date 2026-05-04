@@ -160,6 +160,7 @@ func TestResponseFromConnection(t *testing.T) {
 				APN:             "internet",
 				DefaultRoute:    true,
 				ProxyEnabled:    true,
+				AlwaysOn:        true,
 				Proxy:           internetcore.ProxyStatus{Enabled: true, Username: "wwan0", Password: "secret", HTTPAddress: "127.0.0.1:8080", SOCKS5Address: "127.0.0.1:1080"},
 				InterfaceName:   "wwan0",
 				Bearer:          "/bearer/1",
@@ -176,6 +177,7 @@ func TestResponseFromConnection(t *testing.T) {
 				APN:             "internet",
 				DefaultRoute:    true,
 				ProxyEnabled:    true,
+				AlwaysOn:        true,
 				Proxy:           Proxy{Enabled: true, Username: "wwan0", Password: "secret", HTTPAddress: "127.0.0.1:8080", SOCKS5Address: "127.0.0.1:1080"},
 				InterfaceName:   "wwan0",
 				Bearer:          "/bearer/1",
@@ -200,6 +202,7 @@ func TestResponseFromConnection(t *testing.T) {
 				got.APN != tt.want.APN ||
 				got.DefaultRoute != tt.want.DefaultRoute ||
 				got.ProxyEnabled != tt.want.ProxyEnabled ||
+				got.AlwaysOn != tt.want.AlwaysOn ||
 				got.Proxy != tt.want.Proxy ||
 				got.InterfaceName != tt.want.InterfaceName ||
 				got.Bearer != tt.want.Bearer ||

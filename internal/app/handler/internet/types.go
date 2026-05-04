@@ -4,6 +4,7 @@ type ConnectRequest struct {
 	APN          string `json:"apn" validate:"omitempty,max=100"`
 	DefaultRoute bool   `json:"defaultRoute"`
 	ProxyEnabled bool   `json:"proxyEnabled"`
+	AlwaysOn     bool   `json:"alwaysOn"`
 }
 
 type ConnectionResponse struct {
@@ -11,6 +12,7 @@ type ConnectionResponse struct {
 	APN             string   `json:"apn"`
 	DefaultRoute    bool     `json:"defaultRoute"`
 	ProxyEnabled    bool     `json:"proxyEnabled"`
+	AlwaysOn        bool     `json:"alwaysOn"`
 	Proxy           Proxy    `json:"proxy"`
 	InterfaceName   string   `json:"interfaceName,omitempty"`
 	Bearer          string   `json:"bearer,omitempty"`
