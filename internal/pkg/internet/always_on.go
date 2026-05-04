@@ -12,10 +12,6 @@ import (
 const alwaysOnMonitorInterval = 10 * time.Second
 
 func (c *Connector) RunAlwaysOn(ctx context.Context, manager *mmodem.Manager) {
-	if manager == nil {
-		return
-	}
-
 	c.restoreAlwaysOnModems(ctx, manager)
 
 	ticker := time.NewTicker(alwaysOnMonitorInterval)
