@@ -57,7 +57,7 @@ var wsUpgrader = websocket.Upgrader{
 	},
 }
 
-const enableTimeout = time.Minute
+const enableTimeout = 2 * time.Minute
 
 var errEnableTimeout = errors.New("enabling timed out, please refresh to confirm whether the profile is active")
 

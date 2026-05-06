@@ -40,16 +40,22 @@ func qmicliActivateProvisioningIfSimMissing(m *Modem) error {
 func qmicliRepowerSimCard(m *Modem) error {
 	slot := qmicliSimSlot(m)
 	if result, err := qmicliRun(m, fmt.Sprintf("--uim-sim-power-off=%d", slot)); err != nil {
-		slog.Error("failed to power off sim", "error", err, "result", string(result))
-		return err
+		return qmicliOutputError("power off sim", err, result)
 	}
 	slog.Info("sim powered off", "modem", m.EquipmentIdentifier, "slot", slot)
 	if result, err := qmicliRun(m, fmt.Sprintf("--uim-sim-power-on=%d", slot)); err != nil {
-		slog.Error("failed to power on sim", "error", err, "result", string(result))
-		return err
+		return qmicliOutputError("power on sim", err, result)
 	}
 	slog.Info("sim powered on", "modem", m.EquipmentIdentifier, "slot", slot)
 	return nil
+}
+
+func qmicliOutputError(action string, err error, result []byte) error {
+	output := strings.TrimSpace(string(result))
+	if output == "" {
+		return fmt.Errorf("%s: %w", action, err)
+	}
+	return fmt.Errorf("%s: %w: %s", action, err, output)
 }
 
 func qmicliCardStatus(m *Modem) (string, error) {

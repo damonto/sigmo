@@ -12,7 +12,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Spinner } from '@/components/ui/spinner'
@@ -127,26 +126,26 @@ const confirmTitle = computed(() => {
         <AlertDialogHeader>
           <AlertDialogTitle>{{ confirmTitle }}</AlertDialogTitle>
         </AlertDialogHeader>
-        <Card v-if="pendingSlot" class="border-0 shadow-sm">
-          <CardContent class="flex items-center gap-3 p-3">
-            <div
-              class="flex size-12 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30"
-            >
-              <span class="rounded-sm text-[18px]">
-                <span v-if="pendingRegionFlagClass" :class="pendingRegionFlagClass" />
-                <span v-else class="text-xs font-semibold text-muted-foreground">
-                  {{ pendingRegionCode }}
-                </span>
+        <div v-if="pendingSlot" class="flex min-w-0 items-center gap-2.5">
+          <div
+            class="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30"
+          >
+            <span class="rounded-sm text-base">
+              <span v-if="pendingRegionFlagClass" :class="pendingRegionFlagClass" />
+              <span v-else class="text-xs font-semibold text-muted-foreground">
+                {{ pendingRegionCode }}
               </span>
-            </div>
-            <div class="min-w-0">
-              <p class="truncate text-sm font-semibold text-foreground">
-                {{ pendingOperatorName }}
-              </p>
-              <p class="truncate text-xs text-muted-foreground">{{ pendingIdentifierValue }}</p>
-            </div>
-          </CardContent>
-        </Card>
+            </span>
+          </div>
+          <div class="min-w-0">
+            <p class="truncate text-sm font-semibold leading-tight text-foreground">
+              {{ pendingOperatorName }}
+            </p>
+            <p class="truncate text-xs leading-tight text-muted-foreground">
+              {{ pendingIdentifierValue }}
+            </p>
+          </div>
+        </div>
         <AlertDialogFooter>
           <AlertDialogCancel @click="closeDialog" :disabled="isSwitching">
             {{ t('modemDetail.actions.cancel') }}
