@@ -11,26 +11,22 @@ import (
 var errCompatibleRequired = errors.New("compatible is required")
 
 type settings struct {
-	cfg *config.Config
+	store *config.Store
 }
 
-func newSettings(cfg *config.Config) *settings {
-	return &settings{cfg: cfg}
+func newSettings(store *config.Store) *settings {
+	return &settings{store: store}
 }
 
 func (s *settings) Update(modemID string, req UpdateModemSettingsRequest) error {
 	if req.Compatible == nil {
 		return errCompatibleRequired
 	}
-	modem := s.cfg.FindModem(modemID)
+	modem := s.store.FindModem(modemID)
 	modem.Alias = strings.TrimSpace(req.Alias)
 	modem.Compatible = *req.Compatible
 	modem.MSS = req.MSS
-	if s.cfg.Modems == nil {
-		s.cfg.Modems = make(map[string]config.Modem)
-	}
-	s.cfg.Modems[modemID] = modem
-	if err := s.cfg.Save(); err != nil {
+	if err := s.store.UpdateModem(modemID, modem); err != nil {
 		slog.Error("failed to save config", "modem", modemID, "error", err)
 		return err
 	}
@@ -38,7 +34,7 @@ func (s *settings) Update(modemID string, req UpdateModemSettingsRequest) error 
 }
 
 func (s *settings) Get(modemID string) *ModemSettingsResponse {
-	modem := s.cfg.FindModem(modemID)
+	modem := s.store.FindModem(modemID)
 	return &ModemSettingsResponse{
 		Alias:      modem.Alias,
 		Compatible: modem.Compatible,

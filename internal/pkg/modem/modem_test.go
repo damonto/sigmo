@@ -210,10 +210,12 @@ type fakeBusObject struct {
 	path   dbus.ObjectPath
 	errors map[string][]error
 	calls  []string
+	args   [][]any
 }
 
-func (f *fakeBusObject) Call(method string, _ dbus.Flags, _ ...any) *dbus.Call {
+func (f *fakeBusObject) Call(method string, _ dbus.Flags, args ...any) *dbus.Call {
 	f.calls = append(f.calls, method)
+	f.args = append(f.args, append([]any(nil), args...))
 	var err error
 	if queue := f.errors[method]; len(queue) > 0 {
 		err = queue[0]

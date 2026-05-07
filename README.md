@@ -66,20 +66,16 @@ sudo install -m 0755 sigmo-linux-amd64 /usr/local/bin/sigmo
 
 ### 2. Configure
 
-Create the configuration directory and file.
-
-```bash
-sudo mkdir -p /etc/sigmo
-# Download example config
-curl -L https://raw.githubusercontent.com/damonto/sigmo/main/configs/config.example.toml | sudo tee /etc/sigmo/config.toml >/dev/null
-```
+Sigmo can start without a config file. If `--config` is not provided, it creates
+`$HOME/.config/sigmo/config.toml` with safe defaults. You can also pass an
+explicit config path if you prefer managing the file yourself.
 
 ### 3. Run
 
 Start the service.
 
 ```bash
-/usr/local/bin/sigmo -config /etc/sigmo/config.toml
+/usr/local/bin/sigmo
 ```
 
 Visit `http://localhost:9527` to access the UI.
@@ -88,13 +84,10 @@ Visit `http://localhost:9527` to access the UI.
 
 The Docker image includes the embedded Vue frontend and installs `dbus`, `ModemManager`, `qmi-utils`, and `libmbim-tools` in the runtime image.
 
-1.  **Create Config**:
+1.  **Config**:
 
-    ```bash
-    cp configs/config.example.toml configs/config.toml
-    ```
-
-    Edit `configs/config.toml` before starting the container. The file is mounted read-write because Sigmo saves modem aliases and settings back to it.
+    The compose setup mounts `./config` to the container config directory.
+    Sigmo creates `./config/config.toml` on first start if it does not exist.
 
 2.  **Start**:
 
@@ -114,7 +107,7 @@ The container runs with `privileged: true` so Sigmo and ModemManager can access 
 
 ## ⚙️ Configuration Reference
 
-Sigmo runs using a TOML configuration file (default: `/etc/sigmo/config.toml`).
+Sigmo runs using a TOML configuration file. When `--config` is omitted, the default is `$HOME/.config/sigmo/config.toml`.
 
 > **⚠️ Important**: This file is **Read-Write**.
 > When you update modem aliases or settings via the Web UI, Sigmo **writes the changes back** to this file. Ensure the Sigmo process has **write permissions** to the config file.
@@ -142,16 +135,18 @@ Controls the core application behavior, network binding, and security policies.
 
 Configures channels used for receiving **Login OTPs** and **Forwarded SMS**.
 
-> **Note**: If no channels are configured, OTP login and SMS forwarding features will be automatically disabled.
+> **Note**: Each channel supports `enabled`. Existing configs without this option are treated as enabled. Set `enabled = false` to keep channel settings while disabling OTP and SMS delivery for that channel.
 
 #### Telegram
 
 ```toml
 [channels.telegram]
+  enabled = true
   bot_token = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
   recipients = ["123456789", "987654321"]
 ```
 
+- `enabled`: Enable this channel. Set to `false` to keep the settings but stop using it.
 - `bot_token`: The token received from @BotFather.
 - `recipients`: Array of Strings Chat IDs authorized to receive messages.
 

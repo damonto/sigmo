@@ -11,7 +11,8 @@ import (
 )
 
 func (p *provisioning) Download(ctx context.Context, modem *mmodem.Modem, activationCode *elpa.ActivationCode, opts *elpa.DownloadOptions) error {
-	client, err := lpa.New(modem, p.cfg)
+	cfg := p.store.Snapshot()
+	client, err := lpa.New(modem, &cfg)
 	if err != nil {
 		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
 		return err

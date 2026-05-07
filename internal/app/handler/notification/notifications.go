@@ -12,15 +12,16 @@ import (
 )
 
 type notification struct {
-	cfg *config.Config
+	store *config.Store
 }
 
-func newNotification(cfg *config.Config) *notification {
-	return &notification{cfg: cfg}
+func newNotification(store *config.Store) *notification {
+	return &notification{store: store}
 }
 
 func (n *notification) List(modem *mmodem.Modem) ([]NotificationResponse, error) {
-	client, err := lpa.New(modem, n.cfg)
+	cfg := n.store.Snapshot()
+	client, err := lpa.New(modem, &cfg)
 	if err != nil {
 		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
 		return nil, err
@@ -48,7 +49,8 @@ func (n *notification) List(modem *mmodem.Modem) ([]NotificationResponse, error)
 }
 
 func (n *notification) Resend(modem *mmodem.Modem, sequence sgp22.SequenceNumber) error {
-	client, err := lpa.New(modem, n.cfg)
+	cfg := n.store.Snapshot()
+	client, err := lpa.New(modem, &cfg)
 	if err != nil {
 		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
 		return err
@@ -66,7 +68,8 @@ func (n *notification) Resend(modem *mmodem.Modem, sequence sgp22.SequenceNumber
 }
 
 func (n *notification) Delete(modem *mmodem.Modem, sequence sgp22.SequenceNumber) error {
-	client, err := lpa.New(modem, n.cfg)
+	cfg := n.store.Snapshot()
+	client, err := lpa.New(modem, &cfg)
 	if err != nil {
 		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
 		return err

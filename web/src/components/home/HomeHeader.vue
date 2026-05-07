@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { RefreshCw } from 'lucide-vue-next'
+import { RefreshCw, Settings } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 
 import { Button } from '@/components/ui/button'
 
@@ -27,17 +28,28 @@ const { t } = useI18n()
           {{ props.subtitle }}
         </p>
       </div>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        class="shrink-0"
-        :disabled="props.isLoading"
-        :title="t('home.refresh')"
-        @click="emit('refresh')"
-      >
-        <RefreshCw class="size-5" :class="{ 'animate-spin': props.isLoading }" />
-      </Button>
+      <div class="flex shrink-0 items-center gap-2">
+        <Button
+          as-child
+          variant="outline"
+          size="icon"
+          :title="t('home.config')"
+        >
+          <RouterLink :to="{ name: 'config' }">
+            <Settings class="size-5" />
+          </RouterLink>
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          :disabled="props.isLoading"
+          :title="t('home.refresh')"
+          @click="emit('refresh')"
+        >
+          <RefreshCw class="size-5" :class="{ 'animate-spin': props.isLoading }" />
+        </Button>
+      </div>
     </div>
   </header>
 </template>

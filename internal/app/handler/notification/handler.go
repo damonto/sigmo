@@ -35,10 +35,10 @@ var (
 	errInvalidSequence  = errors.New("invalid sequence number")
 )
 
-func New(cfg *config.Config, manager *mmodem.Manager) *Handler {
+func New(store *config.Store, manager *mmodem.Manager) *Handler {
 	return &Handler{
 		manager:       manager,
-		notifications: newNotification(cfg),
+		notifications: newNotification(store),
 	}
 }
 

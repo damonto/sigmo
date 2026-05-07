@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,7 +85,112 @@ subject = "deprecated"
 			if got.App.OTPRequired != tt.wantOTPDefault {
 				t.Fatalf("OTPRequired = %v, want %v", got.App.OTPRequired, tt.wantOTPDefault)
 			}
+			if channel, ok := got.Channels["telegram"]; ok && !channel.IsEnabled() {
+				t.Fatal("legacy telegram channel is disabled, want enabled")
+			}
 		})
+	}
+}
+
+func TestLoadOrCreate(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		setup   func(*testing.T) string
+		wantErr bool
+	}{
+		{
+			name: "creates missing default file",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				return filepath.Join(t.TempDir(), "sigmo", "config.toml")
+			},
+		},
+		{
+			name: "loads existing file",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				path := filepath.Join(t.TempDir(), "config.toml")
+				content := `
+[app]
+listen_address = "127.0.0.1:9527"
+`
+				if err := os.WriteFile(path, []byte(strings.TrimSpace(content)), 0o644); err != nil {
+					t.Fatalf("WriteFile() error = %v", err)
+				}
+				return path
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := tt.setup(t)
+			got, err := LoadOrCreate(path)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("LoadOrCreate() error = nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadOrCreate() error = %v", err)
+			}
+			if got.Path != path {
+				t.Fatalf("Path = %q, want %q", got.Path, path)
+			}
+			if got.App.Environment != "production" {
+				t.Fatalf("Environment = %q, want production", got.App.Environment)
+			}
+			if got.App.ListenAddress == "" {
+				t.Fatal("ListenAddress is empty")
+			}
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("Stat() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestDefaultPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	got, err := DefaultPath()
+	if err != nil {
+		t.Fatalf("DefaultPath() error = %v", err)
+	}
+	want := filepath.Join(dir, "sigmo", "config.toml")
+	if got != want {
+		t.Fatalf("DefaultPath() = %q, want %q", got, want)
+	}
+}
+
+func TestSaveUsesExclusiveTempFile(t *testing.T) {
+	t.Parallel()
+
+	cfg := Default()
+	cfg.Path = filepath.Join(t.TempDir(), "config.toml")
+	predictableTempPath := fmt.Sprintf("%s.%d.tmp", cfg.Path, os.Getpid())
+	const sentinel = "do not touch"
+	if err := os.WriteFile(predictableTempPath, []byte(sentinel), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	data, err := os.ReadFile(predictableTempPath)
+	if err != nil {
+		t.Fatalf("ReadFile() predictable temp error = %v", err)
+	}
+	if got := string(data); got != sentinel {
+		t.Fatalf("predictable temp = %q, want %q", got, sentinel)
 	}
 }
 
@@ -224,6 +330,7 @@ func TestSave(t *testing.T) {
 			},
 			wantContain: []string{
 				"[channels.telegram]",
+				"enabled = true",
 				`bot_token = 'token'`,
 				`recipients = ['123456']`,
 			},
@@ -243,6 +350,47 @@ func TestSave(t *testing.T) {
 				"[channels.telegram.headers]",
 			},
 		},
+		{
+			name: "default config omits empty optional tables",
+			config: Config{
+				App: App{
+					Environment:   "production",
+					ListenAddress: "0.0.0.0:9527",
+				},
+			},
+			wantContain: []string{
+				"[app]",
+				`environment = 'production'`,
+				`listen_address = '0.0.0.0:9527'`,
+			},
+			wantAbsent: []string{
+				"[proxy]",
+				"[channels]",
+				"[modems]",
+			},
+		},
+		{
+			name: "disabled channel keeps settings",
+			config: Config{
+				App: App{
+					Environment:   "production",
+					ListenAddress: "0.0.0.0:9527",
+				},
+				Channels: map[string]Channel{
+					"telegram": {
+						Enabled:    new(false),
+						BotToken:   "token",
+						Recipients: Recipients{"123456"},
+					},
+				},
+			},
+			wantContain: []string{
+				"[channels.telegram]",
+				"enabled = false",
+				`bot_token = 'token'`,
+				`recipients = ['123456']`,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -260,6 +408,13 @@ func TestSave(t *testing.T) {
 			data, err := os.ReadFile(cfg.Path)
 			if err != nil {
 				t.Fatalf("ReadFile() error = %v", err)
+			}
+			info, err := os.Stat(cfg.Path)
+			if err != nil {
+				t.Fatalf("Stat() error = %v", err)
+			}
+			if mode := info.Mode().Perm(); mode != 0o600 {
+				t.Fatalf("config mode = %v, want 0600", mode)
 			}
 			got := string(data)
 

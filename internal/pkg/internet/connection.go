@@ -62,6 +62,18 @@ func NewConnectorWithProxy(proxy *Proxy) *Connector {
 	}
 }
 
+func (c *Connector) UpdateProxyConfig(cfg ProxyConfig) error {
+	c.mu.Lock()
+	if c.proxy == nil {
+		c.proxy = NewProxy(cfg)
+		c.mu.Unlock()
+		return nil
+	}
+	proxy := c.proxy
+	c.mu.Unlock()
+	return proxy.UpdateConfig(cfg)
+}
+
 func (c *Connector) Recover(modems []*mmodem.Modem) error {
 	var result error
 	for _, modem := range modems {

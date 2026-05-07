@@ -23,12 +23,6 @@ type Sender interface {
 	Send(ctx context.Context, event notifyevent.Event) error
 }
 
-type SenderFunc func(ctx context.Context, event notifyevent.Event) error
-
-func (f SenderFunc) Send(ctx context.Context, event notifyevent.Event) error {
-	return f(ctx, event)
-}
-
 // Notifier manages multiple notification channels.
 type Notifier struct {
 	channels map[string]Sender
@@ -36,14 +30,11 @@ type Notifier struct {
 
 // New creates a new Notifier from the given configuration.
 func New(cfg *config.Config) (*Notifier, error) {
-	if cfg == nil || len(cfg.Channels) == 0 {
-		return &Notifier{
-			channels: make(map[string]Sender),
-		}, nil
-	}
-
-	channels := make(map[string]Sender)
+	channels := make(map[string]Sender, len(cfg.Channels))
 	for name, channel := range cfg.Channels {
+		if !channel.IsEnabled() {
+			continue
+		}
 		channelName := strings.ToLower(name)
 		sender, err := createSender(channelName, channel)
 		if err != nil {
@@ -113,10 +104,4 @@ func (n *Notifier) Send(ctx context.Context, event notifyevent.Event, channels .
 	}
 	wg.Wait()
 	return combined
-}
-
-// SendTo sends an event to a specific sender.
-// Use this when you need to send to a single, manually created sender.
-func SendTo(ctx context.Context, sender Sender, event notifyevent.Event) error {
-	return sender.Send(ctx, event)
 }

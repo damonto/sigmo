@@ -61,6 +61,39 @@ func (s SMSState) String() string {
 	}
 }
 
+type SMSStorage uint32
+
+const (
+	SMSStorageUnknown SMSStorage = iota // Storage unknown.
+	SMSStorageSM                        // SIM card storage area.
+	SMSStorageME                        // Mobile equipment storage area.
+	SMSStorageMT                        // Sum of SIM and Mobile equipment storages.
+	SMSStorageSR                        // Status report message storage area.
+	SMSStorageBM                        // Broadcast message storage area.
+	SMSStorageTA                        // Terminal adaptor message storage area.
+)
+
+func (s SMSStorage) String() string {
+	switch s {
+	case SMSStorageUnknown:
+		return "unknown"
+	case SMSStorageSM:
+		return "sm"
+	case SMSStorageME:
+		return "me"
+	case SMSStorageMT:
+		return "mt"
+	case SMSStorageSR:
+		return "sr"
+	case SMSStorageBM:
+		return "bm"
+	case SMSStorageTA:
+		return "ta"
+	default:
+		return "unknown"
+	}
+}
+
 type Modem3gppRegistrationState uint32
 
 const (

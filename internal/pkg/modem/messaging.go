@@ -46,6 +46,10 @@ func (msg *Messaging) Delete(path dbus.ObjectPath) error {
 	return msg.modem.dbusObject.Call(ModemMessagingInterface+".Delete", 0, path).Err
 }
 
+func (msg *Messaging) SetDefaultStorage(storage SMSStorage) error {
+	return msg.modem.dbusObject.Call(ModemMessagingInterface+".SetDefaultStorage", 0, uint32(storage)).Err
+}
+
 func (msg *Messaging) Subscribe(ctx context.Context, subscriber func(message *SMS) error) error {
 	dbusConn, err := systemBusPrivate()
 	if err != nil {

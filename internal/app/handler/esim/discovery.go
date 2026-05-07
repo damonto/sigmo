@@ -11,15 +11,16 @@ import (
 )
 
 type provisioning struct {
-	cfg *config.Config
+	store *config.Store
 }
 
-func newProvisioning(cfg *config.Config) *provisioning {
-	return &provisioning{cfg: cfg}
+func newProvisioning(store *config.Store) *provisioning {
+	return &provisioning{store: store}
 }
 
 func (p *provisioning) Discover(modem *mmodem.Modem) ([]DiscoverResponse, error) {
-	client, err := lpa.New(modem, p.cfg)
+	cfg := p.store.Snapshot()
+	client, err := lpa.New(modem, &cfg)
 	if err != nil {
 		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
 		return nil, err

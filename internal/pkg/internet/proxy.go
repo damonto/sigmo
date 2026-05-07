@@ -82,16 +82,46 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 }
 
 func newProxyWithDial(cfg ProxyConfig, dialFunc proxyDialFunc) *Proxy {
-	cfg.ListenAddress = strings.TrimSpace(cfg.ListenAddress)
-	if cfg.ListenAddress == "" {
-		cfg.ListenAddress = "127.0.0.1"
-	}
 	return &Proxy{
 		cfg:      cfg,
 		active:   make(map[string]struct{}),
 		sessions: make(map[string]map[proxySession]struct{}),
 		dialFunc: dialFunc,
 	}
+}
+
+func (p *Proxy) UpdateConfig(cfg ProxyConfig) error {
+	p.mu.Lock()
+	if p.cfg == cfg {
+		p.mu.Unlock()
+		return nil
+	}
+
+	oldCfg := p.cfg
+	sessions := p.takeAllSessionsLocked()
+	err := p.stopLocked()
+	p.cfg = cfg
+	if len(p.active) > 0 && strings.TrimSpace(cfg.Password) != "" {
+		if startErr := p.startLocked(); startErr != nil {
+			cleanupErr := p.stopLocked()
+			p.cfg = oldCfg
+			var restoreErr error
+			if strings.TrimSpace(oldCfg.Password) != "" {
+				restoreErr = p.startLocked()
+			}
+			p.mu.Unlock()
+			closeErr := closeProxySessions(sessions)
+			return errors.Join(
+				err,
+				fmt.Errorf("start proxy with new config: %w", startErr),
+				cleanupErr,
+				restoreErr,
+				closeErr,
+			)
+		}
+	}
+	p.mu.Unlock()
+	return errors.Join(err, closeProxySessions(sessions))
 }
 
 func (p *Proxy) Register(interfaceName string) (ProxyStatus, error) {
@@ -265,10 +295,13 @@ func (p *Proxy) validCredential(username string, password string) bool {
 	if username == "" {
 		return false
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if subtle.ConstantTimeCompare([]byte(password), []byte(p.cfg.Password)) != 1 {
 		return false
 	}
-	return p.interfaceActive(username)
+	_, ok := p.active[username]
+	return ok
 }
 
 func (p *Proxy) interfaceActive(interfaceName string) bool {

@@ -13,7 +13,6 @@ import (
 )
 
 type Handler struct {
-	cfg     *config.Config
 	manager *mmodem.Manager
 	euicc   *euicc
 }
@@ -23,11 +22,10 @@ const (
 	errorCodeGetEUICCFailed    = "get_euicc_failed"
 )
 
-func New(cfg *config.Config, manager *mmodem.Manager) *Handler {
+func New(store *config.Store, manager *mmodem.Manager) *Handler {
 	return &Handler{
-		cfg:     cfg,
 		manager: manager,
-		euicc:   newEUICC(cfg),
+		euicc:   newEUICC(store),
 	}
 }
 

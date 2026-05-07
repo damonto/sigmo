@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/pkg/config"
@@ -12,49 +14,79 @@ import (
 )
 
 var (
-	errAuthProviderRequired = errors.New("auth provider is required")
-	errOTPNotRequired       = errors.New("otp is not required")
-	errInvalidOTP           = errors.New("invalid otp")
+	errAuthProviderRequired    = errors.New("auth provider is required")
+	errAuthProviderUnavailable = errors.New("auth provider must be an enabled channel")
+	errOTPNotRequired          = errors.New("otp is not required")
+	errInvalidOTP              = errors.New("invalid otp")
 )
 
 type otp struct {
-	cfg   *config.Config
-	store *auth.Store
+	configStore *config.Store
+	store       *auth.Store
 }
 
-func newOTP(cfg *config.Config, store *auth.Store) *otp {
+func newOTP(configStore *config.Store, store *auth.Store) *otp {
 	return &otp{
-		cfg:   cfg,
-		store: store,
+		configStore: configStore,
+		store:       store,
 	}
 }
 
 func (o *otp) Required() bool {
-	return o.cfg.App.OTPRequired
+	return o.configStore.OTPRequired()
 }
 
 func (o *otp) Send(ctx context.Context) error {
-	if !o.Required() {
+	cfg := o.configStore.Snapshot()
+	if !cfg.App.OTPRequired {
 		return nil
 	}
-	if len(o.cfg.App.AuthProviders) == 0 {
-		return errAuthProviderRequired
+	authProviders, err := enabledAuthProviders(cfg)
+	if err != nil {
+		return err
+	}
+	notifier, err := notify.New(&cfg)
+	if err != nil {
+		slog.Error("create notifier", "error", err)
+		return err
 	}
 	code, _, err := o.store.IssueOTP()
 	if err != nil {
-		slog.Error("failed to issue OTP", "error", err)
+		slog.Error("issue OTP", "error", err)
 		return err
 	}
-	notifier, err := notify.New(o.cfg)
-	if err != nil {
-		slog.Error("failed to create notifier", "error", err)
-		return err
-	}
-	if err := notifier.Send(ctx, notifyevent.OTPEvent{Code: code}, o.cfg.App.AuthProviders...); err != nil {
-		slog.Error("failed to send OTP notification", "error", err)
+	if err := notifier.Send(ctx, notifyevent.OTPEvent{Code: code}, authProviders...); err != nil {
+		slog.Error("send OTP notification", "error", err)
 		return err
 	}
 	return nil
+}
+
+func enabledAuthProviders(cfg config.Config) ([]string, error) {
+	if len(cfg.App.AuthProviders) == 0 {
+		return nil, errAuthProviderRequired
+	}
+	providers := make([]string, 0, len(cfg.App.AuthProviders))
+	for _, provider := range cfg.App.AuthProviders {
+		name := strings.ToLower(strings.TrimSpace(provider))
+		if name == "" {
+			return nil, errAuthProviderRequired
+		}
+		if !channelEnabled(cfg.Channels, name) {
+			return nil, fmt.Errorf("%w: %s", errAuthProviderUnavailable, name)
+		}
+		providers = append(providers, name)
+	}
+	return providers, nil
+}
+
+func channelEnabled(channels map[string]config.Channel, target string) bool {
+	for name, channel := range channels {
+		if strings.EqualFold(strings.TrimSpace(name), target) {
+			return channel.IsEnabled()
+		}
+	}
+	return false
 }
 
 func (o *otp) Verify(code string) (string, error) {
@@ -66,7 +98,7 @@ func (o *otp) Verify(code string) (string, error) {
 	}
 	token, _, err := o.store.IssueToken()
 	if err != nil {
-		slog.Error("failed to issue token", "error", err)
+		slog.Error("issue token", "error", err)
 		return "", err
 	}
 	return token, nil

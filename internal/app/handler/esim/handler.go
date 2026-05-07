@@ -73,12 +73,12 @@ const (
 	wsTypeError                    = "error"
 )
 
-func New(cfg *config.Config, manager *mmodem.Manager, internetConnector *internet.Connector) *Handler {
+func New(store *config.Store, manager *mmodem.Manager, internetConnector *internet.Connector) *Handler {
 	return &Handler{
 		manager:      manager,
-		profile:      newProfile(cfg),
-		provisioning: newProvisioning(cfg),
-		lifecycle:    newLifecycle(cfg, manager),
+		profile:      newProfile(store),
+		provisioning: newProvisioning(store),
+		lifecycle:    newLifecycle(store, manager),
 		internet:     internetConnector,
 	}
 }

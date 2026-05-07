@@ -7,7 +7,9 @@ import (
 	"github.com/labstack/echo/v5/middleware"
 
 	"github.com/damonto/sigmo/internal/app/auth"
+	"github.com/damonto/sigmo/internal/app/forwarder"
 	hauth "github.com/damonto/sigmo/internal/app/handler/auth"
+	hconfig "github.com/damonto/sigmo/internal/app/handler/config"
 	"github.com/damonto/sigmo/internal/app/handler/esim"
 	"github.com/damonto/sigmo/internal/app/handler/euicc"
 	hinternet "github.com/damonto/sigmo/internal/app/handler/internet"
@@ -23,7 +25,7 @@ import (
 	"github.com/damonto/sigmo/web"
 )
 
-func Register(e *echo.Echo, cfg *config.Config, manager *modem.Manager, internetConnector *pinternet.Connector) {
+func Register(e *echo.Echo, store *config.Store, manager *modem.Manager, internetConnector *pinternet.Connector, relay *forwarder.Relay) {
 	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
 		Filesystem: web.Root(),
 		Index:      "index.html",
@@ -37,16 +39,20 @@ func Register(e *echo.Echo, cfg *config.Config, manager *modem.Manager, internet
 	v1 := e.Group("/api/v1")
 
 	authStore := auth.NewStore()
-	authHandler := hauth.New(cfg, authStore)
+	authHandler := hauth.New(store, authStore)
 	v1.GET("/auth/otp/required", authHandler.OTPRequirement)
 	v1.POST("/auth/otp", authHandler.SendOTP)
 	v1.POST("/auth/otp/verify", authHandler.VerifyOTP)
 	protected := v1.Group("")
-	if cfg.App.OTPRequired {
-		protected.Use(appmiddleware.Auth(authStore))
-	}
+	protected.Use(appmiddleware.Auth(authStore, store))
 	{
-		h := hmodem.New(cfg, manager, internetConnector)
+		{
+			h := hconfig.New(store, internetConnector, relay)
+			protected.GET("/config", h.Get)
+			protected.PUT("/config", h.Update)
+		}
+
+		h := hmodem.New(store, manager, internetConnector)
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
 		protected.PUT("/modems/:id/sim-slots/:identifier", h.SwitchSimSlot)
@@ -82,12 +88,12 @@ func Register(e *echo.Echo, cfg *config.Config, manager *modem.Manager, internet
 		}
 
 		{
-			h := euicc.New(cfg, manager)
+			h := euicc.New(store, manager)
 			protected.GET("/modems/:id/euicc", h.Get)
 		}
 
 		{
-			h := esim.New(cfg, manager, internetConnector)
+			h := esim.New(store, manager, internetConnector)
 			protected.GET("/modems/:id/esims", h.List)
 			protected.GET("/modems/:id/esims/discover", h.Discover)
 			protected.GET("/modems/:id/esims/download-sessions", h.Download)
@@ -97,7 +103,7 @@ func Register(e *echo.Echo, cfg *config.Config, manager *modem.Manager, internet
 		}
 
 		{
-			h := notification.New(cfg, manager)
+			h := notification.New(store, manager)
 			protected.GET("/modems/:id/notifications", h.List)
 			protected.POST("/modems/:id/notifications/:sequence/deliveries", h.Resend)
 			protected.DELETE("/modems/:id/notifications/:sequence", h.Delete)

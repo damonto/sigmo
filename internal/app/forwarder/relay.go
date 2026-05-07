@@ -18,7 +18,7 @@ import (
 )
 
 type Relay struct {
-	cfg       *config.Config
+	store     *config.Store
 	manager   *modem.Manager
 	notifier  *notify.Notifier
 	mu        sync.Mutex
@@ -27,13 +27,14 @@ type Relay struct {
 	modems    map[dbus.ObjectPath]string
 }
 
-func New(cfg *config.Config, manager *modem.Manager) (*Relay, error) {
-	notifier, err := notify.New(cfg)
+func New(store *config.Store, manager *modem.Manager) (*Relay, error) {
+	cfg := store.Snapshot()
+	notifier, err := notify.New(&cfg)
 	if err != nil {
 		return nil, fmt.Errorf("creating notifier: %w", err)
 	}
 	return &Relay{
-		cfg:       cfg,
+		store:     store,
 		manager:   manager,
 		notifier:  notifier,
 		cancels:   make(map[dbus.ObjectPath]context.CancelFunc),
@@ -42,17 +43,19 @@ func New(cfg *config.Config, manager *modem.Manager) (*Relay, error) {
 	}, nil
 }
 
-func (r *Relay) Enabled() bool {
-	return len(r.cfg.Channels) > 0
+func (r *Relay) Reload() error {
+	cfg := r.store.Snapshot()
+	notifier, err := notify.New(&cfg)
+	if err != nil {
+		return fmt.Errorf("creating notifier: %w", err)
+	}
+	r.mu.Lock()
+	r.notifier = notifier
+	r.mu.Unlock()
+	return nil
 }
 
 func (r *Relay) Run(ctx context.Context) error {
-	if len(r.cfg.Channels) == 0 {
-		slog.Info("message relay disabled; no channels configured")
-		<-ctx.Done()
-		return nil
-	}
-
 	modems, err := r.manager.Modems()
 	if err != nil {
 		return fmt.Errorf("listing modems: %w", err)
@@ -157,7 +160,10 @@ func (r *Relay) forward(ctx context.Context, m *modem.Modem, message *modem.SMS)
 		slog.Info("skipping SMS notification older than 30 minutes", "timestamp", message.Timestamp, "modem", m.EquipmentIdentifier)
 		return nil
 	}
-	return r.notifier.Send(ctx, r.formatMessage(m, message))
+	r.mu.Lock()
+	notifier := r.notifier
+	r.mu.Unlock()
+	return notifier.Send(ctx, r.formatMessage(m, message))
 }
 
 func (r *Relay) formatMessage(m *modem.Modem, message *modem.SMS) notifyevent.SMSEvent {
@@ -177,7 +183,7 @@ func (r *Relay) formatMessage(m *modem.Modem, message *modem.SMS) notifyevent.SM
 }
 
 func (r *Relay) modemName(m *modem.Modem) string {
-	if alias := strings.TrimSpace(r.cfg.FindModem(m.EquipmentIdentifier).Alias); alias != "" {
+	if alias := strings.TrimSpace(r.store.FindModem(m.EquipmentIdentifier).Alias); alias != "" {
 		return alias
 	}
 	return strings.TrimSpace(m.Model)

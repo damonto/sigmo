@@ -15,17 +15,18 @@ import (
 )
 
 type profile struct {
-	cfg *config.Config
+	store *config.Store
 }
 
 var errInvalidNickname = errors.New("nickname must be valid utf-8 and 64 bytes or fewer")
 
-func newProfile(cfg *config.Config) *profile {
-	return &profile{cfg: cfg}
+func newProfile(store *config.Store) *profile {
+	return &profile{store: store}
 }
 
 func (p *profile) List(modem *mmodem.Modem) ([]ProfileResponse, error) {
-	client, err := lpa.New(modem, p.cfg)
+	cfg := p.store.Snapshot()
+	client, err := lpa.New(modem, &cfg)
 	if err != nil {
 		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
 		return nil, err
@@ -70,7 +71,8 @@ func (p *profile) UpdateNickname(modem *mmodem.Modem, iccid sgp22.ICCID, nicknam
 	if err := validateNickname(nickname); err != nil {
 		return err
 	}
-	client, err := lpa.New(modem, p.cfg)
+	cfg := p.store.Snapshot()
+	client, err := lpa.New(modem, &cfg)
 	if err != nil {
 		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
 		return err

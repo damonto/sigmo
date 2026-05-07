@@ -16,6 +16,12 @@ import (
 	notifywebhook "github.com/damonto/sigmo/internal/pkg/notify/webhook"
 )
 
+type senderFunc func(ctx context.Context, event notifyevent.Event) error
+
+func (f senderFunc) Send(ctx context.Context, event notifyevent.Event) error {
+	return f(ctx, event)
+}
+
 func TestNotifierSend(t *testing.T) {
 	t.Parallel()
 
@@ -28,13 +34,13 @@ func TestNotifierSend(t *testing.T) {
 		)
 		notifier := &Notifier{
 			channels: map[string]Sender{
-				"email": SenderFunc(func(ctx context.Context, event notifyevent.Event) error {
+				"email": senderFunc(func(ctx context.Context, event notifyevent.Event) error {
 					mu.Lock()
 					called = append(called, "email")
 					mu.Unlock()
 					return nil
 				}),
-				"telegram": SenderFunc(func(ctx context.Context, event notifyevent.Event) error {
+				"telegram": senderFunc(func(ctx context.Context, event notifyevent.Event) error {
 					mu.Lock()
 					called = append(called, "telegram")
 					mu.Unlock()
@@ -60,7 +66,7 @@ func TestNotifierSend(t *testing.T) {
 		var called []string
 		notifier := &Notifier{
 			channels: map[string]Sender{
-				"email": SenderFunc(func(ctx context.Context, event notifyevent.Event) error {
+				"email": senderFunc(func(ctx context.Context, event notifyevent.Event) error {
 					called = append(called, "email")
 					return nil
 				}),
@@ -81,7 +87,7 @@ func TestNotifierSend(t *testing.T) {
 		wantErr := errors.New("boom")
 		notifier := &Notifier{
 			channels: map[string]Sender{
-				"email": SenderFunc(func(ctx context.Context, event notifyevent.Event) error {
+				"email": senderFunc(func(ctx context.Context, event notifyevent.Event) error {
 					return wantErr
 				}),
 			},
@@ -104,7 +110,7 @@ func TestNotifierSend(t *testing.T) {
 
 		notifier := &Notifier{
 			channels: map[string]Sender{
-				"email": SenderFunc(func(ctx context.Context, event notifyevent.Event) error {
+				"email": senderFunc(func(ctx context.Context, event notifyevent.Event) error {
 					return ctx.Err()
 				}),
 			},
@@ -117,6 +123,26 @@ func TestNotifierSend(t *testing.T) {
 			t.Fatalf("Send() error = %v, want %v", err, context.Canceled)
 		}
 	})
+}
+
+func TestNewSkipsDisabledChannels(t *testing.T) {
+	t.Parallel()
+
+	enabled := false
+	notifier, err := New(&config.Config{
+		Channels: map[string]config.Channel{
+			"telegram": {
+				Enabled:  &enabled,
+				BotToken: "draft-token",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if len(notifier.channels) != 0 {
+		t.Fatalf("channels = %d, want 0", len(notifier.channels))
+	}
 }
 
 func TestHTTPSend(t *testing.T) {

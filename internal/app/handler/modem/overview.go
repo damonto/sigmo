@@ -13,13 +13,13 @@ import (
 )
 
 type catalog struct {
-	cfg     *config.Config
+	store   *config.Store
 	manager *mmodem.Manager
 }
 
-func newCatalog(cfg *config.Config, manager *mmodem.Manager) *catalog {
+func newCatalog(store *config.Store, manager *mmodem.Manager) *catalog {
 	return &catalog{
-		cfg:     cfg,
+		store:   store,
 		manager: manager,
 	}
 }
@@ -91,7 +91,7 @@ func (c *catalog) buildResponse(device *mmodem.Modem) (*ModemResponse, error) {
 	}
 
 	carrierInfo := carrier.Lookup(sim.OperatorIdentifier)
-	supportsEsim, err := supportsEsim(device, c.cfg)
+	supportsEsim, err := supportsEsim(device, c.store)
 	if err != nil {
 		slog.Error("failed to detect eSIM support", "modem", device.EquipmentIdentifier, "error", err)
 		return nil, err
@@ -103,7 +103,7 @@ func (c *catalog) buildResponse(device *mmodem.Modem) (*ModemResponse, error) {
 		return nil, err
 	}
 
-	alias := c.cfg.FindModem(device.EquipmentIdentifier).Alias
+	alias := c.store.FindModem(device.EquipmentIdentifier).Alias
 	name := device.Model
 	if alias != "" {
 		name = alias
@@ -165,8 +165,9 @@ func (c *catalog) buildSlotsResponse(device *mmodem.Modem) ([]SlotResponse, erro
 	return simSlots, nil
 }
 
-func supportsEsim(m *mmodem.Modem, cfg *config.Config) (bool, error) {
-	client, err := lpa.New(m, cfg)
+func supportsEsim(m *mmodem.Modem, store *config.Store) (bool, error) {
+	cfg := store.Snapshot()
+	client, err := lpa.New(m, &cfg)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return false, nil

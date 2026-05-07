@@ -18,6 +18,7 @@ import (
 
 type lifecycle struct {
 	cfg             *config.Config
+	store           *config.Store
 	newClient       lifecycleClientFactory
 	findModem       func(string) (*mmodem.Modem, error)
 	restartModem    func(*mmodem.Modem, bool) error
@@ -57,9 +58,9 @@ var (
 
 const enableConfirmInterval = time.Second
 
-func newLifecycle(cfg *config.Config, manager *mmodem.Manager) *lifecycle {
+func newLifecycle(store *config.Store, manager *mmodem.Manager) *lifecycle {
 	return &lifecycle{
-		cfg:       cfg,
+		store:     store,
 		newClient: newLifecycleClient,
 		findModem: manager.Find,
 		restartModem: func(modem *mmodem.Modem, compatible bool) error {
@@ -73,8 +74,30 @@ func newLifecycleClient(modem *mmodem.Modem, cfg *config.Config) (lifecycleClien
 	return lpa.New(modem, cfg)
 }
 
+func (l *lifecycle) configSnapshot() *config.Config {
+	if l.store != nil {
+		cfg := l.store.Snapshot()
+		return &cfg
+	}
+	if l.cfg != nil {
+		return l.cfg
+	}
+	return config.Default()
+}
+
+func (l *lifecycle) findModemConfig(id string) config.Modem {
+	if l.store != nil {
+		return l.store.FindModem(id)
+	}
+	if l.cfg != nil {
+		return l.cfg.FindModem(id)
+	}
+	return config.Default().FindModem(id)
+}
+
 func (l *lifecycle) PrepareEnable(modem *mmodem.Modem, iccid sgp22.ICCID) (*enableSession, error) {
-	client, err := l.newClient(modem, l.cfg)
+	cfg := l.configSnapshot()
+	client, err := l.newClient(modem, cfg)
 	if err != nil {
 		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
 		return nil, err
@@ -124,7 +147,7 @@ func (s *enableSession) Enable(ctx context.Context) error {
 
 	s.Close()
 
-	if err := s.l.restartModem(s.modem, s.l.cfg.FindModem(s.modem.EquipmentIdentifier).Compatible); err != nil {
+	if err := s.l.restartModem(s.modem, s.l.findModemConfig(s.modem.EquipmentIdentifier).Compatible); err != nil {
 		slog.Warn("restart modem after enabling profile", "modem", s.modem.EquipmentIdentifier, "error", err)
 		return s.confirmEnableResult(ctx, err)
 	}
@@ -246,7 +269,8 @@ func (s *enableSession) Close() {
 }
 
 func (l *lifecycle) Delete(modem *mmodem.Modem, iccid sgp22.ICCID) error {
-	client, err := l.newClient(modem, l.cfg)
+	cfg := l.configSnapshot()
+	client, err := l.newClient(modem, cfg)
 	if err != nil {
 		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
 		return err
@@ -274,7 +298,8 @@ func (l *lifecycle) Delete(modem *mmodem.Modem, iccid sgp22.ICCID) error {
 }
 
 func (l *lifecycle) profileEnabled(modem *mmodem.Modem, iccid sgp22.ICCID) (bool, error) {
-	client, err := l.newClient(modem, l.cfg)
+	cfg := l.configSnapshot()
+	client, err := l.newClient(modem, cfg)
 	if err != nil {
 		return false, fmt.Errorf("create LPA client: %w", err)
 	}
@@ -309,7 +334,8 @@ func profileByICCID(profiles []*sgp22.ProfileInfo, iccid sgp22.ICCID) (*sgp22.Pr
 }
 
 func (l *lifecycle) sendPendingNotifications(modem *mmodem.Modem, lastSeq sgp22.SequenceNumber) error {
-	client, err := l.newClient(modem, l.cfg)
+	cfg := l.configSnapshot()
+	client, err := l.newClient(modem, cfg)
 	if err != nil {
 		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
 		return err

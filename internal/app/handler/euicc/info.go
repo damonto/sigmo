@@ -10,17 +10,18 @@ import (
 )
 
 type euicc struct {
-	cfg *config.Config
+	store *config.Store
 }
 
-func newEUICC(cfg *config.Config) *euicc {
+func newEUICC(store *config.Store) *euicc {
 	return &euicc{
-		cfg: cfg,
+		store: store,
 	}
 }
 
 func (e *euicc) Get(modem *mmodem.Modem) (*EuiccResponse, error) {
-	client, err := lpa.New(modem, e.cfg)
+	cfg := e.store.Snapshot()
+	client, err := lpa.New(modem, &cfg)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return nil, err

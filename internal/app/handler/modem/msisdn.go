@@ -17,13 +17,13 @@ var errMSISDNInvalidNumber = errors.New("invalid phone number")
 var msisdnPhoneRE = regexp.MustCompile(`^\+?[0-9]{1,15}$`)
 
 type msisdn struct {
-	cfg     *config.Config
+	store   *config.Store
 	manager *mmodem.Manager
 }
 
-func newMSISDN(cfg *config.Config, manager *mmodem.Manager) *msisdn {
+func newMSISDN(store *config.Store, manager *mmodem.Manager) *msisdn {
 	return &msisdn{
-		cfg:     cfg,
+		store:   store,
 		manager: manager,
 	}
 }
@@ -52,7 +52,7 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 		slog.Error("failed to update MSISDN", "modem", modem.EquipmentIdentifier, "error", err)
 		return err
 	}
-	if err := modem.Restart(m.cfg.FindModem(modem.EquipmentIdentifier).Compatible); err != nil {
+	if err := modem.Restart(m.store.FindModem(modem.EquipmentIdentifier).Compatible); err != nil {
 		slog.Error("failed to restart modem", "modem", modem.EquipmentIdentifier, "error", err)
 		return err
 	}

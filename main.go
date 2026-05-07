@@ -29,19 +29,24 @@ var (
 )
 
 func init() {
-	flag.StringVar(&configPath, "config", "config.toml", "path to config file")
+	flag.StringVar(&configPath, "config", "", "path to config file")
 }
 
 func main() {
 	flag.Parse()
-	cfg, err := config.Load(configPath)
+	configExplicit := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "config" {
+			configExplicit = true
+		}
+	})
+	cfg, err := loadConfig(configPath, configExplicit)
 	if err != nil {
 		slog.Error("unable to load config", "error", err)
 		os.Exit(1)
 	}
-	if !cfg.IsProduction() {
-		slog.SetLogLoggerLevel(slog.LevelDebug)
-	}
+	store := config.NewStore(cfg)
+	applyLogLevel(store)
 	slog.Info("server starting", "version", BuildVersion)
 
 	manager, err := modem.NewManager()
@@ -53,7 +58,7 @@ func main() {
 	server := echo.New()
 	server.Logger = slog.Default()
 	server.Validator = validator.New()
-	if !cfg.IsProduction() {
+	if !store.IsProduction() {
 		server.Use(middleware.RequestLogger())
 	}
 	server.Use(middleware.RequestID())
@@ -63,34 +68,37 @@ func main() {
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch, http.MethodHead, http.MethodOptions},
 		AllowHeaders: []string{"*"},
 	}))
-	internetConnector := newInternetConnector(cfg)
+	internetConnector := newInternetConnector(store)
 	if err := recoverInternetConnections(manager, internetConnector); err != nil {
 		slog.Error("recover internet connections", "error", err)
 	}
-	router.Register(server, cfg, manager, internetConnector)
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	go internetConnector.RunAlwaysOn(ctx, manager)
-
-	relay, err := forwarder.New(cfg, manager)
+	relay, err := forwarder.New(store, manager)
 	if err != nil {
 		slog.Error("unable to configure message relay", "error", err)
 		os.Exit(1)
 	}
+	router.Register(server, store, manager, internetConnector, relay)
 
-	if relay.Enabled() {
-		go func() {
-			if err := relay.Run(ctx); err != nil {
-				slog.Error("message relay stopped", "error", err)
-				stop()
-			}
-		}()
-	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		if err := manager.RunSMSStorageDefaults(ctx, modem.SMSStorageME); err != nil {
+			slog.Error("SMS storage defaults stopped", "error", err)
+		}
+	}()
+
+	go internetConnector.RunAlwaysOn(ctx, manager)
+
+	go func() {
+		if err := relay.Run(ctx); err != nil {
+			slog.Error("message relay stopped", "error", err)
+			stop()
+		}
+	}()
 
 	startConfig := echo.StartConfig{
-		Address:         cfg.App.ListenAddress,
+		Address:         store.Snapshot().App.ListenAddress,
 		HideBanner:      true,
 		GracefulTimeout: 5 * time.Second,
 	}
@@ -100,8 +108,27 @@ func main() {
 	}
 }
 
-func newInternetConnector(cfg *config.Config) *internet.Connector {
-	proxyConfig := cfg.ProxySettings()
+func loadConfig(path string, explicit bool) (*config.Config, error) {
+	if explicit {
+		return config.Load(path)
+	}
+	defaultPath, err := config.DefaultPath()
+	if err != nil {
+		return nil, err
+	}
+	return config.LoadOrCreate(defaultPath)
+}
+
+func applyLogLevel(store *config.Store) {
+	if store.IsProduction() {
+		slog.SetLogLoggerLevel(slog.LevelInfo)
+		return
+	}
+	slog.SetLogLoggerLevel(slog.LevelDebug)
+}
+
+func newInternetConnector(store *config.Store) *internet.Connector {
+	proxyConfig := store.ProxySettings()
 	proxy := internet.NewProxy(internet.ProxyConfig{
 		ListenAddress: proxyConfig.ListenAddress,
 		HTTPPort:      proxyConfig.HTTPPort,

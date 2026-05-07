@@ -8,7 +8,7 @@ services:
     tmpfs:
       - /run
     volumes:
-      - ./config.toml:/app/config.toml
+      - ./config:/root/.config/sigmo
       - /dev:/dev
       - /run/udev:/run/udev:ro
       - /sys:/sys:ro

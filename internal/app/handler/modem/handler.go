@@ -51,13 +51,13 @@ var (
 	errUpdateMSISDNTimeout  = errors.New("updating MSISDN timed out, please refresh to confirm the active slot")
 )
 
-func New(cfg *config.Config, manager *mmodem.Manager, internetConnector *internet.Connector) *Handler {
+func New(store *config.Store, manager *mmodem.Manager, internetConnector *internet.Connector) *Handler {
 	return &Handler{
 		manager:  manager,
-		catalog:  newCatalog(cfg, manager),
+		catalog:  newCatalog(store, manager),
 		simSlot:  newSIMSlot(manager),
-		msisdn:   newMSISDN(cfg, manager),
-		settings: newSettings(cfg),
+		msisdn:   newMSISDN(store, manager),
+		settings: newSettings(store),
 		internet: internetConnector,
 	}
 }

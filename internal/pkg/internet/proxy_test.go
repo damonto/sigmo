@@ -191,6 +191,147 @@ func TestProxyStatusDoesNotStartListeners(t *testing.T) {
 	}
 }
 
+func TestProxyUpdateConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		start      ProxyConfig
+		update     ProxyConfig
+		wantOldOK  bool
+		wantNewOK  bool
+		wantActive bool
+	}{
+		{
+			name: "updates active proxy password",
+			start: ProxyConfig{
+				ListenAddress: "127.0.0.1",
+				HTTPPort:      0,
+				SOCKS5Port:    0,
+				Password:      "old",
+			},
+			update: ProxyConfig{
+				ListenAddress: "127.0.0.1",
+				HTTPPort:      0,
+				SOCKS5Port:    0,
+				Password:      "new",
+			},
+			wantNewOK:  true,
+			wantActive: true,
+		},
+		{
+			name: "blank password stops active listeners",
+			start: ProxyConfig{
+				ListenAddress: "127.0.0.1",
+				HTTPPort:      0,
+				SOCKS5Port:    0,
+				Password:      "old",
+			},
+			update: ProxyConfig{
+				ListenAddress: "127.0.0.1",
+				HTTPPort:      0,
+				SOCKS5Port:    0,
+			},
+			wantOldOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			proxy := newProxyWithDial(tt.start, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+				return nil, errors.New("dial should not be called")
+			})
+			if _, err := proxy.Register("wwan0"); err != nil {
+				t.Fatalf("Register() error = %v", err)
+			}
+			t.Cleanup(func() {
+				if err := proxy.Unregister("wwan0"); err != nil {
+					t.Fatalf("Unregister() error = %v", err)
+				}
+			})
+
+			if err := proxy.UpdateConfig(tt.update); err != nil {
+				t.Fatalf("UpdateConfig() error = %v", err)
+			}
+
+			if got := proxy.validCredential("wwan0", "old"); got != tt.wantOldOK {
+				t.Fatalf("valid old credential = %v, want %v", got, tt.wantOldOK)
+			}
+			if got := proxy.validCredential("wwan0", "new"); got != tt.wantNewOK {
+				t.Fatalf("valid new credential = %v, want %v", got, tt.wantNewOK)
+			}
+			if got := proxy.Status("wwan0").Enabled; got != tt.wantActive {
+				t.Fatalf("proxy active = %v, want %v", got, tt.wantActive)
+			}
+		})
+	}
+}
+
+func TestProxyUpdateConfigRestoresOldListenersOnStartError(t *testing.T) {
+	t.Parallel()
+
+	occupied, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := occupied.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+	occupiedPort := occupied.Addr().(*net.TCPAddr).Port
+
+	proxy := newProxyWithDial(ProxyConfig{
+		ListenAddress: "127.0.0.1",
+		HTTPPort:      0,
+		SOCKS5Port:    0,
+		Password:      "old",
+	}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+		return nil, errors.New("dial should not be called")
+	})
+	if _, err := proxy.Register("wwan0"); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := proxy.Unregister("wwan0"); err != nil {
+			t.Fatalf("Unregister() error = %v", err)
+		}
+	})
+
+	err = proxy.UpdateConfig(ProxyConfig{
+		ListenAddress: "127.0.0.1",
+		HTTPPort:      occupiedPort,
+		SOCKS5Port:    0,
+		Password:      "new",
+	})
+	if err == nil {
+		t.Fatal("UpdateConfig() error = nil")
+	}
+	if got := proxy.validCredential("wwan0", "old"); !got {
+		t.Fatal("old credential is invalid after failed update")
+	}
+	if got := proxy.validCredential("wwan0", "new"); got {
+		t.Fatal("new credential is valid after failed update")
+	}
+	status := proxy.Status("wwan0")
+	if !status.Enabled {
+		t.Fatal("proxy is disabled after failed update")
+	}
+	if status.Password != "old" {
+		t.Fatalf("Status().Password = %q, want old", status.Password)
+	}
+	conn, err := net.DialTimeout("tcp", status.HTTPAddress, time.Second)
+	if err != nil {
+		t.Fatalf("DialTimeout() restored HTTP proxy error = %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
 func TestProxyUnregisterClosesInterfaceSessions(t *testing.T) {
 	t.Parallel()
 

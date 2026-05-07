@@ -20,13 +20,14 @@ const (
 	errorCodeOTPNotRequired          = "otp_not_required"
 	errorCodeInvalidVerifyOTPRequest = "verify_otp_invalid_request"
 	errorCodeInvalidOTP              = "invalid_otp"
+	errorCodeAuthProviderInvalid     = "auth_provider_invalid"
 	errorCodeSendOTPFailed           = "send_otp_failed"
 	errorCodeVerifyOTPFailed         = "verify_otp_failed"
 )
 
-func New(cfg *config.Config, store *auth.Store) *Handler {
+func New(configStore *config.Store, store *auth.Store) *Handler {
 	return &Handler{
-		otp: newOTP(cfg, store),
+		otp: newOTP(configStore, store),
 	}
 }
 
@@ -38,6 +39,9 @@ func (h *Handler) SendOTP(c *echo.Context) error {
 	if err := h.otp.Send(c.Request().Context()); err != nil {
 		if errors.Is(err, auth.ErrOTPCooldown) {
 			return httpapi.TooManyRequests(c, errorCodeOTPCooldown, err)
+		}
+		if errors.Is(err, errAuthProviderRequired) || errors.Is(err, errAuthProviderUnavailable) {
+			return httpapi.UnprocessableEntity(c, errorCodeAuthProviderInvalid, err)
 		}
 		return httpapi.Internal(c, errorCodeSendOTPFailed)
 	}
