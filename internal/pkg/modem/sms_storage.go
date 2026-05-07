@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -124,7 +125,7 @@ func (manager *Manager) RunSMSStorageDefaults(ctx context.Context, storage SMSSt
 func setDefaultSMSStorage(ctx context.Context, m *Modem, storage SMSStorage) {
 	warned := false
 	for {
-		if err := m.Messaging().SetDefaultStorage(storage); err != nil {
+		if err := setDefaultSMSStorageOnce(m, storage); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
@@ -141,7 +142,33 @@ func setDefaultSMSStorage(ctx context.Context, m *Modem, storage SMSStorage) {
 			}
 			continue
 		}
-		slog.Info("SMS default storage set", "modem", m.EquipmentIdentifier, "storage", storage.String())
 		return
 	}
+}
+
+func setDefaultSMSStorageOnce(m *Modem, storage SMSStorage) error {
+	messaging := m.Messaging()
+	supported, err := messaging.SupportedStorages()
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(supported, storage) {
+		slog.Info("SMS default storage unsupported", "modem", m.EquipmentIdentifier, "storage", storage.String(), "supported", supported)
+		return nil
+	}
+
+	current, err := messaging.DefaultStorage()
+	if err != nil {
+		return err
+	}
+	if current == storage {
+		slog.Debug("SMS default storage already configured", "modem", m.EquipmentIdentifier, "storage", storage.String())
+		return nil
+	}
+
+	if err := messaging.SetDefaultStorage(storage); err != nil {
+		return err
+	}
+	slog.Info("SMS default storage set", "modem", m.EquipmentIdentifier, "storage", storage.String())
+	return nil
 }

@@ -3,6 +3,7 @@ package modem
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
@@ -207,10 +208,13 @@ func TestWaitForModem(t *testing.T) {
 }
 
 type fakeBusObject struct {
-	path   dbus.ObjectPath
-	errors map[string][]error
-	calls  []string
-	args   [][]any
+	path           dbus.ObjectPath
+	errors         map[string][]error
+	properties     map[string]dbus.Variant
+	propertyErrors map[string][]error
+	calls          []string
+	propertyCalls  []string
+	args           [][]any
 }
 
 func (f *fakeBusObject) Call(method string, _ dbus.Flags, args ...any) *dbus.Call {
@@ -244,8 +248,20 @@ func (f *fakeBusObject) RemoveMatchSignal(string, string, ...dbus.MatchOption) *
 	panic("unexpected RemoveMatchSignal")
 }
 
-func (f *fakeBusObject) GetProperty(string) (dbus.Variant, error) {
-	panic("unexpected GetProperty")
+func (f *fakeBusObject) GetProperty(name string) (dbus.Variant, error) {
+	f.propertyCalls = append(f.propertyCalls, name)
+	if queue := f.propertyErrors[name]; len(queue) > 0 {
+		err := queue[0]
+		f.propertyErrors[name] = queue[1:]
+		if err != nil {
+			return dbus.Variant{}, err
+		}
+	}
+	variant, ok := f.properties[name]
+	if !ok {
+		return dbus.Variant{}, fmt.Errorf("missing property %s", name)
+	}
+	return variant, nil
 }
 
 func (f *fakeBusObject) StoreProperty(string, any) error {

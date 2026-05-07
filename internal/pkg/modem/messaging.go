@@ -2,6 +2,7 @@ package modem
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -48,6 +49,34 @@ func (msg *Messaging) Delete(path dbus.ObjectPath) error {
 
 func (msg *Messaging) SetDefaultStorage(storage SMSStorage) error {
 	return msg.modem.dbusObject.Call(ModemMessagingInterface+".SetDefaultStorage", 0, uint32(storage)).Err
+}
+
+func (msg *Messaging) SupportedStorages() ([]SMSStorage, error) {
+	variant, err := msg.modem.dbusObject.GetProperty(ModemMessagingInterface + ".SupportedStorages")
+	if err != nil {
+		return nil, fmt.Errorf("read supported SMS storages: %w", err)
+	}
+	return smsStoragesFromVariant(variant), nil
+}
+
+func (msg *Messaging) DefaultStorage() (SMSStorage, error) {
+	variant, err := msg.modem.dbusObject.GetProperty(ModemMessagingInterface + ".DefaultStorage")
+	if err != nil {
+		return SMSStorageUnknown, fmt.Errorf("read default SMS storage: %w", err)
+	}
+	return SMSStorage(uintFromVariant[uint32](variant)), nil
+}
+
+func smsStoragesFromVariant(variant dbus.Variant) []SMSStorage {
+	values, ok := variant.Value().([]uint32)
+	if !ok {
+		return nil
+	}
+	storages := make([]SMSStorage, len(values))
+	for i, value := range values {
+		storages[i] = SMSStorage(value)
+	}
+	return storages
 }
 
 func (msg *Messaging) Subscribe(ctx context.Context, subscriber func(message *SMS) error) error {
