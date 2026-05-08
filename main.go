@@ -58,9 +58,16 @@ func main() {
 	server := echo.New()
 	server.Logger = slog.Default()
 	server.Validator = validator.New()
-	if !store.IsProduction() {
-		server.Use(middleware.RequestLogger())
-	}
+	requestLogger := middleware.RequestLogger()
+	server.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		logged := requestLogger(next)
+		return func(c *echo.Context) error {
+			if store.IsProduction() {
+				return next(c)
+			}
+			return logged(c)
+		}
+	})
 	server.Use(middleware.RequestID())
 	server.Use(middleware.Recover())
 	server.Use(middleware.CORSWithConfig(middleware.CORSConfig{
