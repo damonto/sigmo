@@ -51,6 +51,7 @@ const handleSelect = (modem: Modem) => {
         class="group inline-flex max-w-full items-center gap-2 text-left text-3xl font-semibold tracking-tight text-foreground"
         :aria-label="t('modemDetail.switchModem')"
         :title="t('modemDetail.switchModem')"
+        @click="emit('title-click')"
       >
         <span class="min-w-0 truncate">
           {{ title }}

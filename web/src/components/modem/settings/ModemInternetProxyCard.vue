@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { writeClipboardText } from '@/lib/clipboard'
 import type { InternetConnectionResponse } from '@/types/internet'
 
 const props = defineProps<{
@@ -60,29 +61,6 @@ const markProxyURLCopied = (kind: 'http' | 'socks5') => {
     copiedProxyURL.value = ''
     copyTimer.value = undefined
   }, 1200)
-}
-
-const writeClipboardText = async (value: string) => {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value)
-    return
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = value
-  textarea.setAttribute('readonly', '')
-  textarea.style.position = 'fixed'
-  textarea.style.left = '-9999px'
-  textarea.style.top = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  try {
-    if (!document.execCommand('copy')) {
-      throw new Error('copy command was rejected')
-    }
-  } finally {
-    document.body.removeChild(textarea)
-  }
 }
 
 const copyProxyURL = async (kind: 'http' | 'socks5', value: string | null) => {

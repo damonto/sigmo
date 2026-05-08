@@ -145,6 +145,7 @@ const zh = {
       resend: '重发',
       cancel: '取消',
       confirm: '确认',
+      copy: '复制',
       update: '更新',
       loading: '加载中',
     },
@@ -160,7 +161,10 @@ const zh = {
     messages: {
       title: '短信',
       subtitle: '查看当前 Modem 的短信会话。',
+      searchPlaceholder: '搜索短信',
+      clearSearch: '清空搜索',
       empty: '暂无短信内容。',
+      noSearchResults: '没有匹配的短信。',
       incoming: '来自',
       outgoing: '发送',
       newRecipientPlaceholder: '输入发送对象手机号',

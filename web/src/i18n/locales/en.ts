@@ -145,6 +145,7 @@ const en = {
       resend: 'Resend',
       cancel: 'Cancel',
       confirm: 'Confirm',
+      copy: 'Copy',
       update: 'Update',
       loading: 'Loading',
     },
@@ -160,7 +161,10 @@ const en = {
     messages: {
       title: 'Messages',
       subtitle: 'SMS conversations for this modem.',
+      searchPlaceholder: 'Search messages',
+      clearSearch: 'Clear search',
       empty: 'No messages yet.',
+      noSearchResults: 'No messages match your search.',
       incoming: 'From',
       outgoing: 'To',
       newRecipientPlaceholder: 'Enter recipient number',

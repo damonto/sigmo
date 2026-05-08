@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 import { useMessageApi } from '@/apis/message'
+import { formatMessageTimestamp } from '@/lib/datetime'
 import type { MessageResponse } from '@/types/message'
 
 export type ThreadMessageItem = {
@@ -11,13 +12,6 @@ export type ThreadMessageItem = {
   text: string
   timestampLabel: string
   status: string
-}
-
-const formatTimestamp = (value: string) => {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
 }
 
 export const useModemMessageThread = ({
@@ -54,7 +48,7 @@ export const useModemMessageThread = ({
       key: `${message.sender}-${message.recipient}-${message.timestamp}`,
       incoming: message.incoming,
       text: message.text,
-      timestampLabel: formatTimestamp(message.timestamp),
+      timestampLabel: formatMessageTimestamp(message.timestamp),
       status: message.status,
     })),
   )

@@ -24,7 +24,7 @@ const isSendDisabled = computed(() => props.isSending || !hasDraft.value)
 
 <template>
   <form
-    class="mt-auto shrink-0 space-y-2 border-t border-border pt-3 pb-3"
+    class="mt-auto shrink-0 space-y-2 border-t border-border px-1 pt-3 pb-3"
     @submit.prevent="emit('submit')"
   >
     <div class="flex items-stretch gap-2">

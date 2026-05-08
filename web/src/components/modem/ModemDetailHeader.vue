@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { Info } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -33,7 +33,9 @@ const router = useRouter()
 const route = useRoute()
 const { modems, fetchModems } = useModems()
 
+const titleClickWindowMs = 1200
 const titleClickCount = ref(0)
+const lastTitleClickAt = ref(0)
 const backButtonRef = ref<HTMLElement | null>(null)
 const { isStickyVisible } = useStickyTopBar(backButtonRef)
 const topBarTitle = computed(() => {
@@ -44,11 +46,19 @@ const currentModemId = computed(() => props.modem?.id ?? '')
 
 const handleTitleClick = () => {
   if (!props.modem?.id || !props.modem.supportsEsim) return
-  titleClickCount.value += 1
+  const now = Date.now()
+  titleClickCount.value = now - lastTitleClickAt.value > titleClickWindowMs ? 1 : titleClickCount.value + 1
+  lastTitleClickAt.value = now
   if (titleClickCount.value < 7) return
   titleClickCount.value = 0
+  lastTitleClickAt.value = 0
   void router.push({ name: 'modem-notifications', params: { id: props.modem.id } })
 }
+
+watch(currentModemId, () => {
+  titleClickCount.value = 0
+  lastTitleClickAt.value = 0
+})
 
 const switchRouteName = computed(() => {
   if (route.name === 'modem-message-thread') return 'modem-messages'

@@ -3,6 +3,7 @@ import type { AcceptableValue } from 'reka-ui'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -11,7 +12,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -41,12 +41,14 @@ const showSignalStatus = computed(
 )
 
 const openDialog = (identifier: string) => {
+  if (!hasMultipleSlots.value) return
   if (identifier === selectedIdentifier.value) return
   pendingIdentifier.value = identifier
   dialogOpen.value = true
 }
 
 const handleSelect = (payload: AcceptableValue) => {
+  if (!hasMultipleSlots.value) return
   if (typeof payload !== 'string') return
   if (payload === selectedIdentifier.value) return
   openDialog(payload)
@@ -77,8 +79,8 @@ const confirmSwitch = async () => {
   }
 }
 
-const getSlotLabel = (slot: SlotInfo, index: number) => {
-  return slot.active ? 'Active' : `SIM ${index + 1}`
+const getSlotLabel = (index: number) => {
+  return `SIM ${index + 1}`
 }
 
 const pendingSlot = computed(() => {
@@ -91,50 +93,61 @@ const pendingSlotIndex = computed(() => {
   return props.slots.findIndex((slot) => slot.identifier === pendingIdentifier.value)
 })
 
-const pendingSimLabel = computed(() => {
-  const index = pendingSlotIndex.value
-  if (index < 0) return 'SIM'
-  return `SIM ${index + 1}`
-})
-
-const pendingOperatorName = computed(() => pendingSlot.value?.operatorName || pendingSimLabel.value)
+const pendingOperatorName = computed(() => pendingSlot.value?.operatorName ?? '')
 const pendingIdentifierValue = computed(() => pendingSlot.value?.identifier ?? '')
 const pendingRegionCode = computed(() => pendingSlot.value?.regionCode ?? '')
 const pendingRegionFlagClass = computed(() => flagClass(pendingRegionCode.value))
 
 const confirmTitle = computed(() => {
-  return `请确认是否切换至 "${pendingSimLabel.value}"`
+  return t('modemDetail.sim.confirm', { sim: pendingSlotIndex.value + 1 })
 })
 </script>
 
 <template>
-  <div v-if="hasMultipleSlots && slots.length > 0">
-    <!-- SIM Slot Switcher -->
-    <div class="flex flex-wrap items-center justify-between gap-3">
+  <div v-if="slots.length > 0">
+    <div
+      class="flex min-w-0 items-center gap-2 rounded-xl border border-white/70 bg-card/90 px-3 py-2 shadow-[0_4px_16px_rgba(15,23,42,0.06)] backdrop-blur-xl dark:border-white/10 dark:bg-card/70 dark:shadow-none"
+    >
       <RadioGroup
         :model-value="selectedIdentifier"
-        class="flex min-w-0 flex-1 flex-wrap gap-4"
+        :disabled="!hasMultipleSlots"
+        class="inline-flex min-w-0 shrink-0 items-center gap-0.5 overflow-x-auto"
         @update:model-value="handleSelect"
       >
-        <div v-for="(slot, index) in slots" :key="slot.identifier" class="flex items-center gap-2">
-          <RadioGroupItem :id="`sim-slot-${slot.identifier}`" :value="slot.identifier" />
+        <div
+          v-for="(slot, index) in slots"
+          :key="slot.identifier"
+          class="relative flex items-center gap-1.5"
+        >
+          <RadioGroupItem
+            :id="`sim-slot-${slot.identifier}`"
+            :value="slot.identifier"
+            class="sr-only"
+          />
           <Label
             :for="`sim-slot-${slot.identifier}`"
-            class="text-[10px] font-semibold uppercase tracking-[0.16em]"
+            class="inline-flex h-6 min-w-12 items-center justify-center rounded-full px-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] transition"
+            :class="[
+              slot.identifier === selectedIdentifier
+                ? 'bg-primary/10 text-primary shadow-xs ring-1 ring-primary/10 dark:bg-primary/15 dark:ring-primary/20'
+                : 'text-muted-foreground hover:text-foreground',
+              hasMultipleSlots ? 'cursor-pointer' : 'cursor-default',
+            ]"
           >
-            {{ getSlotLabel(slot, index) }}
+            {{ getSlotLabel(index) }}
           </Label>
         </div>
       </RadioGroup>
+
       <ModemSignalStatus
         v-if="showSignalStatus"
         :signal-quality="props.signalQuality ?? 0"
         :registration-state="props.registrationState ?? ''"
         size="sm"
+        class="ml-auto"
       />
     </div>
 
-    <!-- Confirmation Dialog -->
     <AlertDialog v-model:open="dialogOpen">
       <AlertDialogContent>
         <AlertDialogHeader>

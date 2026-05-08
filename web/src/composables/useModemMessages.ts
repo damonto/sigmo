@@ -2,6 +2,7 @@ import { computed, ref, watch, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useMessageApi } from '@/apis/message'
+import { formatMessageTimestamp } from '@/lib/datetime'
 import type { MessageResponse } from '@/types/message'
 
 export type ConversationItem = {
@@ -10,13 +11,6 @@ export type ConversationItem = {
   participantValue: string
   preview: string
   timestampLabel: string
-}
-
-const formatTimestamp = (value: string) => {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
 }
 
 export const useModemMessages = (modemId: ComputedRef<string>) => {
@@ -45,7 +39,7 @@ export const useModemMessages = (modemId: ComputedRef<string>) => {
       participantValue: getParticipantValue(message),
       participantLabel: getParticipantLabel(message),
       preview: message.text,
-      timestampLabel: formatTimestamp(message.timestamp),
+      timestampLabel: formatMessageTimestamp(message.timestamp),
     })),
   )
 

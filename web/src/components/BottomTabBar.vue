@@ -48,7 +48,9 @@ const tabs = computed(() =>
           size="icon"
           class="size-10 rounded-full"
           :class="
-            item.isActive ? 'bg-muted text-foreground dark:bg-white/10' : 'text-muted-foreground'
+            item.isActive
+              ? 'bg-primary/10 text-primary dark:bg-primary/15'
+              : 'text-muted-foreground'
           "
         >
           <RouterLink :to="item.to" :aria-current="item.isActive ? 'page' : undefined">

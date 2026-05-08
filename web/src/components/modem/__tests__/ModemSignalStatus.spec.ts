@@ -99,7 +99,47 @@ const headerStubs = {
   },
 }
 
+const simSlotStubs = {
+  AlertDialog: {
+    template: '<div><slot /></div>',
+  },
+  AlertDialogCancel: {
+    template: '<button type="button"><slot /></button>',
+  },
+  AlertDialogContent: {
+    template: '<div><slot /></div>',
+  },
+  AlertDialogFooter: {
+    template: '<div><slot /></div>',
+  },
+  AlertDialogHeader: {
+    template: '<div><slot /></div>',
+  },
+  AlertDialogTitle: {
+    template: '<p><slot /></p>',
+  },
+  Button: {
+    template: '<button type="button"><slot /></button>',
+  },
+  Label: {
+    props: ['for'],
+    template: '<label :for="$props.for"><slot /></label>',
+  },
+  RadioGroup: {
+    props: ['modelValue', 'disabled'],
+    template: `<div role="radiogroup" :aria-disabled="disabled ? 'true' : undefined"><slot /></div>`,
+  },
+  RadioGroupItem: {
+    props: ['id', 'value'],
+    template: '<button :id="id" type="button" role="radio" />',
+  },
+  Spinner: {
+    template: '<span />',
+  },
+}
+
 beforeEach(() => {
+  vi.useRealTimers()
   router.push.mockClear()
   route.name = 'modem-detail'
   modemHarness.modems = []
@@ -181,6 +221,119 @@ describe('ModemDetailHeader', () => {
       params: { id: 'modem-2' },
     })
   })
+
+  it('keeps the seven-click notifications shortcut when the title is a modem switcher', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    const current = modem()
+    modemHarness.modems = [
+      current,
+      {
+        ...modem('Registered'),
+        id: 'modem-2',
+        name: 'Modem 2',
+      },
+    ]
+
+    const wrapper = mount(ModemDetailHeader, {
+      props: {
+        modem: current,
+        isLoading: false,
+        showDetailsAction: true,
+      },
+      global: {
+        stubs: headerStubs,
+      },
+    })
+
+    const titleButton = wrapper.find('button[aria-label="modemDetail.switchModem"]')
+    expect(titleButton.exists()).toBe(true)
+    for (let count = 0; count < 7; count += 1) {
+      await titleButton.trigger('click')
+      vi.advanceTimersByTime(100)
+    }
+
+    expect(router.push).toHaveBeenCalledWith({
+      name: 'modem-notifications',
+      params: { id: 'modem-1' },
+    })
+  })
+
+  it('does not count slow title clicks toward the notifications shortcut', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    const current = modem()
+    modemHarness.modems = [
+      current,
+      {
+        ...modem('Registered'),
+        id: 'modem-2',
+        name: 'Modem 2',
+      },
+    ]
+
+    const wrapper = mount(ModemDetailHeader, {
+      props: {
+        modem: current,
+        isLoading: false,
+        showDetailsAction: true,
+      },
+      global: {
+        stubs: headerStubs,
+      },
+    })
+
+    const titleButton = wrapper.find('button[aria-label="modemDetail.switchModem"]')
+    expect(titleButton.exists()).toBe(true)
+    for (let count = 0; count < 7; count += 1) {
+      await titleButton.trigger('click')
+      vi.advanceTimersByTime(1300)
+    }
+
+    expect(router.push).not.toHaveBeenCalledWith({
+      name: 'modem-notifications',
+      params: { id: 'modem-1' },
+    })
+  })
+
+  it('resets the seven-click shortcut count when the current modem changes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    const current = modem()
+    const next = {
+      ...modem('Registered'),
+      id: 'modem-2',
+      name: 'Modem 2',
+    }
+    modemHarness.modems = [current, next]
+
+    const wrapper = mount(ModemDetailHeader, {
+      props: {
+        modem: current,
+        isLoading: false,
+        showDetailsAction: true,
+      },
+      global: {
+        stubs: headerStubs,
+      },
+    })
+
+    let titleButton = wrapper.find('button[aria-label="modemDetail.switchModem"]')
+    expect(titleButton.exists()).toBe(true)
+    for (let count = 0; count < 6; count += 1) {
+      await titleButton.trigger('click')
+      vi.advanceTimersByTime(100)
+    }
+
+    await wrapper.setProps({ modem: next })
+    titleButton = wrapper.find('button[aria-label="modemDetail.switchModem"]')
+    await titleButton.trigger('click')
+
+    expect(router.push).not.toHaveBeenCalledWith({
+      name: 'modem-notifications',
+      params: { id: 'modem-2' },
+    })
+  })
 })
 
 describe('SimSlotSwitcher', () => {
@@ -208,44 +361,7 @@ describe('SimSlotSwitcher', () => {
         registrationState: 'Roaming',
       },
       global: {
-        stubs: {
-          AlertDialog: {
-            template: '<div><slot /></div>',
-          },
-          AlertDialogCancel: {
-            template: '<button type="button"><slot /></button>',
-          },
-          AlertDialogContent: {
-            template: '<div><slot /></div>',
-          },
-          AlertDialogFooter: {
-            template: '<div><slot /></div>',
-          },
-          AlertDialogHeader: {
-            template: '<div><slot /></div>',
-          },
-          AlertDialogTitle: {
-            template: '<p><slot /></p>',
-          },
-          Button: {
-            template: '<button type="button"><slot /></button>',
-          },
-          Label: {
-            props: ['for'],
-            template: '<label :for="$props.for"><slot /></label>',
-          },
-          RadioGroup: {
-            props: ['modelValue'],
-            template: '<div role="radiogroup"><slot /></div>',
-          },
-          RadioGroupItem: {
-            props: ['id', 'value'],
-            template: '<button :id="id" type="button" role="radio" />',
-          },
-          Spinner: {
-            template: '<span />',
-          },
-        },
+        stubs: simSlotStubs,
       },
     })
 
@@ -253,5 +369,30 @@ describe('SimSlotSwitcher', () => {
     expect(status.exists()).toBe(true)
     expect(status.text()).toContain('R')
     expect(status.text()).toContain('67%')
+  })
+
+  it('renders the SIM row for a single slot without enabling switching', () => {
+    const wrapper = mount(SimSlotSwitcher, {
+      props: {
+        modelValue: 'slot-1',
+        slots: [
+          {
+            active: true,
+            operatorName: 'Carrier',
+            operatorIdentifier: '00101',
+            regionCode: 'us',
+            identifier: 'slot-1',
+          },
+        ],
+      },
+      global: {
+        stubs: simSlotStubs,
+      },
+    })
+
+    expect(wrapper.find('[role="radiogroup"]').exists()).toBe(true)
+    expect(wrapper.find('[role="radiogroup"]').attributes('aria-disabled')).toBe('true')
+    expect(wrapper.text()).toContain('SIM 1')
+    expect(wrapper.text()).not.toContain('ACTIVE')
   })
 })

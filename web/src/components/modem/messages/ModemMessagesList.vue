@@ -10,6 +10,7 @@ const props = defineProps<{
   items: ConversationItem[]
   modemId: string
   isLoading: boolean
+  emptyLabel?: string
 }>()
 
 const emit = defineEmits<{
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const hasItems = computed(() => props.items.length > 0)
+const emptyStateLabel = computed(() => props.emptyLabel || t('modemDetail.messages.empty'))
 </script>
 
 <template>
@@ -39,7 +41,7 @@ const hasItems = computed(() => props.items.length > 0)
       v-else
       class="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground"
     >
-      {{ t('modemDetail.messages.empty') }}
+      {{ emptyStateLabel }}
     </div>
   </section>
 </template>
