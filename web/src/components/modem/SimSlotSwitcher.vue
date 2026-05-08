@@ -115,7 +115,7 @@ const slotOptionClass = (slot: SlotInfo) => {
 
 <template>
   <div
-    class="flex min-w-0 items-center gap-2 rounded-lg border border-white/70 bg-card/90 px-3 py-2 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-card/70 dark:shadow-none"
+    class="flex min-w-0 items-center gap-2 rounded-lg bg-card/90 px-3 py-2 shadow-sm backdrop-blur-xl dark:bg-card/70 dark:shadow-none"
   >
     <RadioGroup
       :model-value="selectedIdentifier"
