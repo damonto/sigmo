@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
@@ -202,6 +203,67 @@ func TestWaitForModem(t *testing.T) {
 			}
 			if modem == nil || modem.objectPath != tt.wantPath {
 				t.Fatalf("WaitForModem() path = %v, want %v", modem.objectPath, tt.wantPath)
+			}
+		})
+	}
+}
+
+func TestSIMSlotPaths(t *testing.T) {
+	tests := []struct {
+		name           string
+		data           map[string]dbus.Variant
+		primarySIMPath dbus.ObjectPath
+		want           []dbus.ObjectPath
+	}{
+		{
+			name:           "fallback to primary SIM when slots missing",
+			data:           map[string]dbus.Variant{},
+			primarySIMPath: "/org/freedesktop/ModemManager1/SIM/1",
+			want:           []dbus.ObjectPath{"/org/freedesktop/ModemManager1/SIM/1"},
+		},
+		{
+			name: "use real slots when available",
+			data: map[string]dbus.Variant{
+				"SimSlots": dbus.MakeVariant([]dbus.ObjectPath{
+					"/org/freedesktop/ModemManager1/SIM/2",
+					"/org/freedesktop/ModemManager1/SIM/3",
+				}),
+			},
+			primarySIMPath: "/org/freedesktop/ModemManager1/SIM/1",
+			want: []dbus.ObjectPath{
+				"/org/freedesktop/ModemManager1/SIM/2",
+				"/org/freedesktop/ModemManager1/SIM/3",
+			},
+		},
+		{
+			name: "filter empty slot path",
+			data: map[string]dbus.Variant{
+				"SimSlots": dbus.MakeVariant([]dbus.ObjectPath{
+					"/",
+					"/org/freedesktop/ModemManager1/SIM/2",
+				}),
+			},
+			primarySIMPath: "/org/freedesktop/ModemManager1/SIM/1",
+			want:           []dbus.ObjectPath{"/org/freedesktop/ModemManager1/SIM/2"},
+		},
+		{
+			name:           "keep empty when primary SIM path missing",
+			data:           map[string]dbus.Variant{},
+			primarySIMPath: "",
+			want:           nil,
+		},
+		{
+			name:           "keep empty when primary SIM path is root",
+			data:           map[string]dbus.Variant{},
+			primarySIMPath: "/",
+			want:           nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := simSlotPaths(tt.data, tt.primarySIMPath); !slices.Equal(got, tt.want) {
+				t.Fatalf("simSlotPaths() = %v, want %v", got, tt.want)
 			}
 		})
 	}

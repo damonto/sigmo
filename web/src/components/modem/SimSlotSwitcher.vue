@@ -101,6 +101,16 @@ const pendingRegionFlagClass = computed(() => flagClass(pendingRegionCode.value)
 const confirmTitle = computed(() => {
   return t('modemDetail.sim.confirm', { sim: pendingSlotIndex.value + 1 })
 })
+
+const slotOptionClass = (slot: SlotInfo) => {
+  if (!hasMultipleSlots.value) {
+    return 'cursor-default text-muted-foreground'
+  }
+  if (slot.identifier === selectedIdentifier.value) {
+    return 'cursor-default text-primary'
+  }
+  return 'cursor-pointer text-muted-foreground hover:text-foreground'
+}
 </script>
 
 <template>
@@ -110,29 +120,20 @@ const confirmTitle = computed(() => {
     <RadioGroup
       :model-value="selectedIdentifier"
       :disabled="!hasMultipleSlots"
-      class="inline-flex min-w-0 shrink-0 items-center gap-0.5 overflow-x-auto"
+      class="inline-flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto"
       @update:model-value="handleSelect"
     >
-      <div
-        v-for="(slot, index) in slots"
-        :key="slot.identifier"
-        class="relative flex items-center gap-1.5"
-      >
-        <RadioGroupItem
-          :id="`sim-slot-${slot.identifier}`"
-          :value="slot.identifier"
-          class="sr-only"
-        />
+      <div v-for="(slot, index) in slots" :key="slot.identifier" class="relative flex items-center">
         <Label
           :for="`sim-slot-${slot.identifier}`"
-          class="inline-flex h-6 min-w-12 items-center justify-center rounded-full px-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] transition"
-          :class="[
-            slot.identifier === selectedIdentifier
-              ? 'bg-primary/10 text-primary shadow-xs ring-1 ring-primary/10 dark:bg-primary/15 dark:ring-primary/20'
-              : 'text-muted-foreground hover:text-foreground',
-            hasMultipleSlots ? 'cursor-pointer' : 'cursor-default',
-          ]"
+          class="inline-flex h-7 select-none items-center gap-2 rounded-md px-2 text-xs font-semibold uppercase transition-colors"
+          :class="slotOptionClass(slot)"
         >
+          <RadioGroupItem
+            :id="`sim-slot-${slot.identifier}`"
+            :value="slot.identifier"
+            class="size-3.5"
+          />
           {{ getSlotLabel(index) }}
         </Label>
       </div>

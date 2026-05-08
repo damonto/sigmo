@@ -153,7 +153,8 @@ func (m *Manager) createModem(objectPath dbus.ObjectPath, data map[string]dbus.V
 		}
 	}
 	var err error
-	modem.Sim, err = modem.SIMs().Get(variantObjectPath(data, "Sim"))
+	primarySIMPath := variantObjectPath(data, "Sim")
+	modem.Sim, err = modem.SIMs().Get(primarySIMPath)
 	if err != nil {
 		return nil, err
 	}
@@ -171,12 +172,30 @@ func (m *Manager) createModem(objectPath dbus.ObjectPath, data map[string]dbus.V
 			Device:   fmt.Sprintf("/dev/%s", name),
 		})
 	}
-	for _, slot := range variantObjectPaths(data, "SimSlots") {
-		if slot != "/" {
-			modem.SimSlots = append(modem.SimSlots, slot)
-		}
-	}
+	modem.SimSlots = simSlotPaths(data, primarySIMPath)
 	return &modem, nil
+}
+
+func simSlotPaths(data map[string]dbus.Variant, primarySIMPath dbus.ObjectPath) []dbus.ObjectPath {
+	slots := variantObjectPaths(data, "SimSlots")
+	paths := make([]dbus.ObjectPath, 0, len(slots))
+	for _, slot := range slots {
+		if !validSIMObjectPath(slot) {
+			continue
+		}
+		paths = append(paths, slot)
+	}
+	if len(paths) > 0 {
+		return paths
+	}
+	if !validSIMObjectPath(primarySIMPath) {
+		return nil
+	}
+	return []dbus.ObjectPath{primarySIMPath}
+}
+
+func validSIMObjectPath(path dbus.ObjectPath) bool {
+	return path != "" && path != "/"
 }
 
 func (m *Manager) Subscribe(subscriber func(ModemEvent) error) (func(), error) {
