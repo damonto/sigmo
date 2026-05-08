@@ -3,6 +3,11 @@ import { ChevronDown } from 'lucide-vue-next'
 
 import ConfigField from '@/components/config/ConfigField.vue'
 import ConfigKeyValueField from '@/components/config/ConfigKeyValueField.vue'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { Switch } from '@/components/ui/switch'
 import type { ConfigChannel, ConfigChannelSchema } from '@/types/config'
 
@@ -51,35 +56,43 @@ const isWideField = (control: string) => {
     </div>
 
     <div class="divide-y border-y">
-      <div v-for="channel in schemas" :key="channel.key" class="py-4">
+      <Collapsible
+        v-for="channel in schemas"
+        :key="channel.key"
+        :open="isChannelEnabled(channel.key) && isChannelExpanded(channel.key)"
+        :disabled="disabled || !isChannelEnabled(channel.key)"
+        class="py-4"
+        @update:open="emit('toggle-details', channel.key)"
+      >
         <div class="flex items-center gap-3">
-          <button
-            type="button"
-            class="flex min-w-0 flex-1 items-center gap-3 text-left"
-            :class="isChannelEnabled(channel.key) ? 'cursor-pointer' : 'cursor-default'"
-            :aria-expanded="isChannelExpanded(channel.key)"
-            :aria-controls="fieldID('details', channel.key)"
-            @click="emit('toggle-details', channel.key)"
-          >
-            <ChevronDown
-              class="size-4 shrink-0 text-muted-foreground transition-transform"
-              :class="{
-                'rotate-180': isChannelExpanded(channel.key),
-                'opacity-30': !isChannelEnabled(channel.key),
-              }"
-            />
-            <span class="min-w-0 space-y-1">
-              <span class="block text-sm font-medium text-foreground">
-                {{ channel.label }}
+          <CollapsibleTrigger as-child>
+            <button
+              type="button"
+              class="flex min-w-0 flex-1 items-center gap-3 text-left"
+              :class="isChannelEnabled(channel.key) ? 'cursor-pointer' : 'cursor-default'"
+              :disabled="disabled || !isChannelEnabled(channel.key)"
+              :aria-controls="fieldID('details', channel.key)"
+            >
+              <ChevronDown
+                class="size-4 shrink-0 text-muted-foreground transition-transform"
+                :class="{
+                  'rotate-180': isChannelExpanded(channel.key),
+                  'opacity-30': !isChannelEnabled(channel.key),
+                }"
+              />
+              <span class="min-w-0 space-y-1">
+                <span class="block text-sm font-medium text-foreground">
+                  {{ channel.label }}
+                </span>
+                <span
+                  v-if="channel.description"
+                  class="block text-xs leading-5 text-muted-foreground"
+                >
+                  {{ channel.description }}
+                </span>
               </span>
-              <span
-                v-if="channel.description"
-                class="block text-xs leading-5 text-muted-foreground"
-              >
-                {{ channel.description }}
-              </span>
-            </span>
-          </button>
+            </button>
+          </CollapsibleTrigger>
 
           <div class="shrink-0" @click.stop>
             <Switch
@@ -91,8 +104,7 @@ const isWideField = (control: string) => {
           </div>
         </div>
 
-        <div
-          v-if="isChannelEnabled(channel.key) && isChannelExpanded(channel.key)"
+        <CollapsibleContent
           :id="fieldID('details', channel.key)"
           class="mt-4 grid gap-4 sm:grid-cols-2"
         >
@@ -118,8 +130,8 @@ const isWideField = (control: string) => {
               @update:model-value="emit('update-field', channel.key, field.key, $event)"
             />
           </div>
-        </div>
-      </div>
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   </section>
 </template>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 
 import HomeHeader from '@/components/home/HomeHeader.vue'
 import HomeModemList from '@/components/home/HomeModemList.vue'
@@ -8,6 +9,7 @@ import { useModems } from '@/composables/useModems'
 import type { HomeModemItem } from '@/types/home'
 
 const { t } = useI18n()
+const router = useRouter()
 
 const { modems, isLoading, fetchModems } = useModems()
 
@@ -30,12 +32,21 @@ const modemItems = computed<HomeModemItem[]>(() =>
   })),
 )
 
+const loadModems = async () => {
+  await fetchModems()
+
+  const [modemItem] = modemItems.value
+  if (modemItems.value.length !== 1 || !modemItem) return
+
+  await router.replace({ name: 'modem-detail', params: { id: modemItem.id } })
+}
+
 const handleRefresh = () => {
-  fetchModems()
+  void loadModems()
 }
 
 onMounted(() => {
-  fetchModems()
+  void loadModems()
 })
 </script>
 

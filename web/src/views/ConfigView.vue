@@ -196,11 +196,12 @@ const selectSection = (section: ConfigSectionKey) => {
         <div class="grid gap-8 md:grid-cols-[11rem_minmax(0,1fr)]">
           <aside class="hidden md:block">
             <nav class="sticky top-8 space-y-1" aria-label="Configuration sections">
-              <button
+              <Button
                 v-for="section in sections"
                 :key="section.key"
                 type="button"
-                class="flex w-full flex-col rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
+                variant="ghost"
+                class="flex h-auto w-full flex-col items-start justify-start rounded-md px-3 py-2 text-left text-sm whitespace-normal transition-colors hover:bg-muted"
                 :class="
                   activeSection === section.key
                     ? 'bg-muted text-foreground'
@@ -212,7 +213,7 @@ const selectSection = (section: ConfigSectionKey) => {
                 <span class="mt-1 line-clamp-2 text-xs text-muted-foreground">
                   {{ section.description }}
                 </span>
-              </button>
+              </Button>
             </nav>
           </aside>
 

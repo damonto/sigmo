@@ -11,6 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -20,6 +21,8 @@ import type { SlotInfo } from '@/types/modem'
 
 const props = defineProps<{
   slots: SlotInfo[]
+  registrationState?: string
+  signalQuality?: number
   onSwitch?: (identifier: string) => Promise<void>
 }>()
 
@@ -33,6 +36,9 @@ const dialogOpen = ref(false)
 const isSwitching = ref(false)
 
 const hasMultipleSlots = computed(() => props.slots.length > 1)
+const showSignalStatus = computed(
+  () => props.registrationState !== undefined && props.signalQuality !== undefined,
+)
 
 const openDialog = (identifier: string) => {
   if (identifier === selectedIdentifier.value) return
@@ -104,21 +110,29 @@ const confirmTitle = computed(() => {
 <template>
   <div v-if="hasMultipleSlots && slots.length > 0">
     <!-- SIM Slot Switcher -->
-    <RadioGroup
-      :model-value="selectedIdentifier"
-      class="flex flex-wrap gap-4"
-      @update:model-value="handleSelect"
-    >
-      <div v-for="(slot, index) in slots" :key="slot.identifier" class="flex items-center gap-2">
-        <RadioGroupItem :id="`sim-slot-${slot.identifier}`" :value="slot.identifier" />
-        <Label
-          :for="`sim-slot-${slot.identifier}`"
-          class="text-[10px] font-semibold uppercase tracking-[0.16em]"
-        >
-          {{ getSlotLabel(slot, index) }}
-        </Label>
-      </div>
-    </RadioGroup>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <RadioGroup
+        :model-value="selectedIdentifier"
+        class="flex min-w-0 flex-1 flex-wrap gap-4"
+        @update:model-value="handleSelect"
+      >
+        <div v-for="(slot, index) in slots" :key="slot.identifier" class="flex items-center gap-2">
+          <RadioGroupItem :id="`sim-slot-${slot.identifier}`" :value="slot.identifier" />
+          <Label
+            :for="`sim-slot-${slot.identifier}`"
+            class="text-[10px] font-semibold uppercase tracking-[0.16em]"
+          >
+            {{ getSlotLabel(slot, index) }}
+          </Label>
+        </div>
+      </RadioGroup>
+      <ModemSignalStatus
+        v-if="showSignalStatus"
+        :signal-quality="props.signalQuality ?? 0"
+        :registration-state="props.registrationState ?? ''"
+        size="sm"
+      />
+    </div>
 
     <!-- Confirmation Dialog -->
     <AlertDialog v-model:open="dialogOpen">

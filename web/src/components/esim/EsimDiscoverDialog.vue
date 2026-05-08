@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Spinner } from '@/components/ui/spinner'
 import type { EsimDiscoverItem } from '@/types/esim'
 
@@ -41,7 +42,7 @@ const { t } = useI18n()
         </DialogDescription>
       </DialogHeader>
 
-      <div class="max-h-[60vh] overflow-y-auto pr-1">
+      <ScrollArea class="max-h-[60vh] pr-1">
         <div v-if="props.isLoading" class="flex items-center justify-center py-10">
           <Spinner class="size-6 text-muted-foreground" />
           <span class="sr-only">{{ t('modemDetail.actions.loading') }}</span>
@@ -75,7 +76,7 @@ const { t } = useI18n()
         <p v-else class="text-sm text-center text-muted-foreground">
           {{ t('modemDetail.esim.discoverEmpty') }}
         </p>
-      </div>
+      </ScrollArea>
 
       <DialogFooter>
         <Button variant="ghost" type="button" @click="open = false">

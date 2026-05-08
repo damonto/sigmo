@@ -3,6 +3,13 @@ import { computed } from 'vue'
 
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import {
   TagsInput,
@@ -51,8 +58,9 @@ const cleanList = (value: unknown[]) => {
   return value.map((line) => String(line).trim()).filter((line) => line.length > 0)
 }
 
-const eventValue = (event: Event) => {
-  return (event.target as HTMLSelectElement).value
+const updateSelection = (value: unknown) => {
+  if (typeof value !== 'string') return
+  emit('update:modelValue', value)
 }
 </script>
 
@@ -74,17 +82,20 @@ const eventValue = (event: Event) => {
 
   <div v-else-if="field.control === 'select'" class="space-y-2">
     <Label :for="id">{{ field.label }}</Label>
-    <select
-      :id="id"
-      class="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-3 text-sm outline-none focus-visible:ring-[3px]"
-      :value="stringValue(modelValue)"
+    <Select
+      :model-value="stringValue(modelValue)"
       :disabled="disabled"
-      @change="emit('update:modelValue', eventValue($event))"
+      @update:model-value="updateSelection"
     >
-      <option v-for="option in field.options" :key="option.value" :value="option.value">
-        {{ option.label }}
-      </option>
-    </select>
+      <SelectTrigger :id="id" class="w-full">
+        <SelectValue :placeholder="field.placeholder || field.label" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem v-for="option in field.options" :key="option.value" :value="option.value">
+          {{ option.label }}
+        </SelectItem>
+      </SelectContent>
+    </Select>
     <p v-if="field.description" class="text-xs text-muted-foreground">
       {{ field.description }}
     </p>

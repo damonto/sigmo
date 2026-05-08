@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { SignalHigh } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
 import { useModemDisplay } from '@/composables/useModemDisplay'
 
 const props = defineProps<{
@@ -21,17 +21,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-const {
-  flagClass,
-  formatSignal,
-  signalIcon,
-  signalTone,
-  registrationStateIcon,
-  registrationStateLabel,
-  registrationStateTone,
-  shouldShowRegistrationIcon,
-  getSignalColorOverride,
-} = useModemDisplay()
+const { flagClass } = useModemDisplay()
 
 const getTech = (accessTechnology: string | null): '4G' | '5G' => {
   if (!accessTechnology) return '4G'
@@ -53,23 +43,6 @@ const displayName = computed(() =>
   props.name.trim().length > 0 ? props.name : props.operatorName,
 )
 const displayNumber = computed(() => (props.number.trim() ? props.number : t('home.noNumber')))
-const isSearching = computed(() => props.registrationState.trim() === 'Searching')
-const signalValue = computed(() => formatSignal(props.signalQuality))
-const signalIconComponent = computed(() =>
-  isSearching.value ? SignalHigh : signalIcon(props.signalQuality),
-)
-const signalToneClass = computed(() => {
-  if (isSearching.value) return 'text-amber-500'
-  const override = getSignalColorOverride(props.registrationState)
-  return override ?? signalTone(props.signalQuality)
-})
-const signalTitle = computed(() => `${t('labels.signal')}: ${signalValue.value}`)
-const showRegistrationIcon = computed(() =>
-  shouldShowRegistrationIcon(props.registrationState),
-)
-const registrationIcon = computed(() => registrationStateIcon(props.registrationState))
-const registrationLabel = computed(() => registrationStateLabel(props.registrationState))
-const registrationToneClass = computed(() => registrationStateTone(props.registrationState))
 </script>
 
 <template>
@@ -119,37 +92,11 @@ const registrationToneClass = computed(() => registrationStateTone(props.registr
           <p class="truncate text-xs text-muted-foreground">
             {{ displayNumber }}
           </p>
-          <div class="flex items-center gap-1">
-            <component
-              :is="signalIconComponent"
-              class="size-4 shrink-0"
-              :class="[signalToneClass, isSearching && 'animate-pulse']"
-              :title="signalTitle"
-            />
-            <component
-              v-if="showRegistrationIcon && registrationIcon"
-              :is="registrationIcon"
-              class="size-4 shrink-0"
-              :class="registrationToneClass"
-              :aria-label="props.registrationState"
-              :title="props.registrationState"
-            />
-            <Badge
-              v-else-if="showRegistrationIcon && registrationLabel"
-              variant="secondary"
-              class="h-4 px-1.5 text-xs font-semibold"
-              :class="registrationToneClass"
-              :aria-label="props.registrationState"
-              :title="props.registrationState"
-            >
-              {{ registrationLabel }}
-            </Badge>
-            <span
-              class="inline-flex h-4 min-w-6 items-center justify-end text-right font-mono text-xs text-muted-foreground tabular-nums"
-            >
-              {{ signalValue }}
-            </span>
-          </div>
+          <ModemSignalStatus
+            :signal-quality="props.signalQuality"
+            :registration-state="props.registrationState"
+            size="sm"
+          />
         </div>
       </div>
     </CardContent>

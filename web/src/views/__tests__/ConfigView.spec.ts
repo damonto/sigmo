@@ -151,6 +151,7 @@ const response = (): ConfigResponse => ({
             options: [
               { label: 'Required', value: 'required' },
               { label: 'Opportunistic', value: 'opportunistic' },
+              { label: 'None', value: 'none' },
             ],
           },
         ],
@@ -252,17 +253,39 @@ describe('ConfigView', () => {
     const wrapper = await mountView()
 
     expect(wrapper.text()).toContain('/tmp/sigmo/config.toml')
-    expect(wrapper.find('select#config-app-environment').exists()).toBe(true)
+    const environment = wrapper.find('#config-app-environment[data-slot="select-trigger"]')
+    expect(environment.exists()).toBe(true)
+    expect(environment.attributes('role')).toBe('combobox')
     expect(wrapper.find('input#config-app-listenAddress').exists()).toBe(true)
     expect(wrapper.find('button#config-app-otpRequired[role="switch"]').exists()).toBe(true)
     expect(wrapper.find('#config-channel-telegram-recipients[role="listbox"]').exists()).toBe(true)
-    expect(wrapper.find('select#config-channel-email-tlsPolicy').exists()).toBe(false)
+    expect(wrapper.find('#config-channel-email-tlsPolicy[data-slot="select-trigger"]').exists()).toBe(
+      false,
+    )
+    expect(wrapper.find('select').exists()).toBe(false)
 
     const authProviders = wrapper.findAll('[role="checkbox"]')
     expect(authProviders).toHaveLength(1)
     const authProvider = authProviders[0]
     expect(authProvider?.attributes('aria-checked')).toBe('false')
     expect(wrapper.text()).toContain('Telegram')
+  })
+
+  it('renders multi-option select fields with shadcn select', async () => {
+    const config = response()
+    config.values.channels = {
+      email: {
+        enabled: true,
+        tlsPolicy: 'opportunistic',
+      },
+    }
+
+    const wrapper = await mountView(config)
+
+    const trigger = wrapper.find('#config-channel-email-tlsPolicy[data-slot="select-trigger"]')
+    expect(trigger.exists()).toBe(true)
+    expect(trigger.attributes('role')).toBe('combobox')
+    expect(wrapper.find('select').exists()).toBe(false)
   })
 
   it('selects the desktop nav item for the visible section while scrolling', async () => {

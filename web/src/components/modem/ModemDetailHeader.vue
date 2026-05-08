@@ -81,17 +81,18 @@ const handleTitleClick = () => {
           &larr; {{ t('modemDetail.back') }}
         </Button>
       </div>
-      <Button
-        v-if="props.showDetailsAction"
-        variant="ghost"
-        size="icon"
-        type="button"
-        :aria-label="t('modemDetail.tabs.detail')"
-        :title="t('modemDetail.tabs.detail')"
-        @click="emit('open-details')"
-      >
-        <Info class="size-4 text-muted-foreground" />
-      </Button>
+      <div v-if="props.showDetailsAction" class="flex items-center gap-1.5">
+        <Button
+          variant="ghost"
+          size="icon"
+          type="button"
+          :aria-label="t('modemDetail.tabs.detail')"
+          :title="t('modemDetail.tabs.detail')"
+          @click="emit('open-details')"
+        >
+          <Info class="size-4 text-muted-foreground" />
+        </Button>
+      </div>
     </div>
 
     <header class="space-y-2">

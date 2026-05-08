@@ -18,6 +18,7 @@ import ModemDetailCard from '@/components/modem/ModemDetailCard.vue'
 import ModemDetailHeader from '@/components/modem/ModemDetailHeader.vue'
 import SimSlotSwitcher from '@/components/modem/SimSlotSwitcher.vue'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { useEsimDiscover } from '@/composables/useEsimDiscover'
 import { useEsimDownload } from '@/composables/useEsimDownload'
 import { useModemDetail } from '@/composables/useModemDetail'
@@ -218,6 +219,8 @@ const handleResultConfirm = () => {
     v-if="modem"
     v-model="currentSimIdentifier"
     :slots="simSlots"
+    :signal-quality="modem.signalQuality"
+    :registration-state="modem.registrationState"
     :on-switch="handleSimSwitch"
   />
 
@@ -243,9 +246,9 @@ const handleResultConfirm = () => {
       <DialogHeader>
         <DialogTitle>{{ t('modemDetail.tabs.detail') }}</DialogTitle>
       </DialogHeader>
-      <div class="max-h-[70vh] overflow-y-auto pr-2">
+      <ScrollArea class="max-h-[70vh] pr-2">
         <ModemDetailCard :modem="modem" :euicc="euicc" />
-      </div>
+      </ScrollArea>
     </DialogContent>
   </Dialog>
 
