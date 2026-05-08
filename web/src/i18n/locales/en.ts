@@ -65,6 +65,8 @@ const en = {
     kicker: 'Sigmo',
     subtitle: 'Manage modem details and eSIM profiles.',
     unknown: 'Unknown Modem',
+    switchModem: 'Switch modem',
+    currentModem: 'Current modem',
     tabs: {
       detail: 'Detail',
       messages: 'Messages',

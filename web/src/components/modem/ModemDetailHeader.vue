@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Info } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import ModemStickyTopBar from '@/components/modem/ModemStickyTopBar.vue'
+import ModemTitleSwitcher from '@/components/modem/ModemTitleSwitcher.vue'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useModems } from '@/composables/useModems'
 import { useStickyTopBar } from '@/composables/useStickyTopBar'
 
 import type { Modem } from '@/types/modem'
@@ -28,6 +30,8 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
+const { modems, fetchModems } = useModems()
 
 const titleClickCount = ref(0)
 const backButtonRef = ref<HTMLElement | null>(null)
@@ -36,6 +40,7 @@ const topBarTitle = computed(() => {
   if (props.isLoading) return '...'
   return props.modem?.name ?? t('modemDetail.unknown')
 })
+const currentModemId = computed(() => props.modem?.id ?? '')
 
 const handleTitleClick = () => {
   if (!props.modem?.id || !props.modem.supportsEsim) return
@@ -44,6 +49,22 @@ const handleTitleClick = () => {
   titleClickCount.value = 0
   void router.push({ name: 'modem-notifications', params: { id: props.modem.id } })
 }
+
+const switchRouteName = computed(() => {
+  if (route.name === 'modem-message-thread') return 'modem-messages'
+  if (typeof route.name === 'string' && route.name.startsWith('modem-')) return route.name
+  return 'modem-detail'
+})
+
+const handleModemSwitch = (modem: Modem) => {
+  if (modem.id === currentModemId.value) return
+  void router.push({ name: switchRouteName.value, params: { id: modem.id } })
+}
+
+onMounted(() => {
+  if (modems.value.length > 0) return
+  void fetchModems()
+})
 </script>
 
 <template>
@@ -97,13 +118,14 @@ const handleTitleClick = () => {
 
     <header class="space-y-2">
       <div class="flex flex-wrap items-center gap-3">
-        <h1
-          v-if="!props.isLoading"
-          class="text-3xl font-semibold tracking-tight text-foreground"
-          @click="handleTitleClick"
-        >
-          {{ props.modem?.name ?? t('modemDetail.unknown') }}
-        </h1>
+        <template v-if="!props.isLoading">
+          <ModemTitleSwitcher
+            :current-modem="props.modem"
+            :modems="modems"
+            @select="handleModemSwitch"
+            @title-click="handleTitleClick"
+          />
+        </template>
         <Skeleton v-else class="h-9 w-48 rounded bg-muted" />
       </div>
       <p class="text-sm text-muted-foreground">

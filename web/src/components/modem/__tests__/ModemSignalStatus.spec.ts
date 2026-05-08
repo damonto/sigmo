@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ModemDetailHeader from '@/components/modem/ModemDetailHeader.vue'
 import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
@@ -10,12 +10,34 @@ const router = vi.hoisted(() => ({
   push: vi.fn(),
 }))
 
+const route = vi.hoisted(() => ({
+  name: 'modem-detail' as string | null,
+}))
+
+const modemHarness = vi.hoisted(() => ({
+  modems: [] as Modem[],
+  fetchModems: vi.fn(),
+}))
+
 vi.mock('vue-router', async () => {
   const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
 
   return {
     ...actual,
+    useRoute: () => route,
     useRouter: () => router,
+  }
+})
+
+vi.mock('@/composables/useModems', async () => {
+  const { computed } = await vi.importActual<typeof import('vue')>('vue')
+
+  return {
+    useModems: () => ({
+      modems: computed(() => modemHarness.modems),
+      isLoading: computed(() => false),
+      fetchModems: modemHarness.fetchModems,
+    }),
   }
 })
 
@@ -48,6 +70,41 @@ const modem = (registrationState = 'Roaming'): Modem => ({
   },
   signalQuality: 67,
   supportsEsim: true,
+})
+
+const headerStubs = {
+  Button: {
+    props: ['type'],
+    template: '<button :type="type || \'button\'" v-bind="$attrs"><slot /></button>',
+  },
+  DropdownMenu: {
+    template: '<div><slot /></div>',
+  },
+  DropdownMenuContent: {
+    template: '<div><slot /></div>',
+  },
+  DropdownMenuItem: {
+    props: ['disabled'],
+    template: '<button type="button" :disabled="disabled"><slot /></button>',
+  },
+  DropdownMenuTrigger: {
+    template: '<div><slot /></div>',
+  },
+  ModemStickyTopBar: {
+    props: ['title', 'backLabel', 'backTo', 'show'],
+    template: '<div data-testid="sticky-top-bar"><slot name="right" /></div>',
+  },
+  Skeleton: {
+    template: '<span />',
+  },
+}
+
+beforeEach(() => {
+  router.push.mockClear()
+  route.name = 'modem-detail'
+  modemHarness.modems = []
+  modemHarness.fetchModems.mockReset()
+  modemHarness.fetchModems.mockResolvedValue(undefined)
 })
 
 describe('ModemSignalStatus', () => {
@@ -84,25 +141,45 @@ describe('ModemDetailHeader', () => {
         showDetailsAction: true,
       },
       global: {
-        stubs: {
-          Button: {
-            props: ['type'],
-            template: '<button :type="type || \'button\'" v-bind="$attrs"><slot /></button>',
-          },
-          ModemStickyTopBar: {
-            props: ['title', 'backLabel', 'backTo', 'show'],
-            template: '<div data-testid="sticky-top-bar"><slot name="right" /></div>',
-          },
-          Skeleton: {
-            template: '<span />',
-          },
-        },
+        stubs: headerStubs,
       },
     })
 
     const statuses = wrapper.findAll('[data-testid="modem-signal-status"]')
     expect(statuses).toHaveLength(0)
     expect(wrapper.findAll('button[aria-label="modemDetail.tabs.detail"]')).toHaveLength(2)
+  })
+
+  it('switches to another modem from the title menu', async () => {
+    const current = modem()
+    const next = {
+      ...modem('Registered'),
+      id: 'modem-2',
+      name: 'Modem 2',
+      signalQuality: 72,
+    }
+    modemHarness.modems = [current, next]
+
+    const wrapper = mount(ModemDetailHeader, {
+      props: {
+        modem: current,
+        isLoading: false,
+        showDetailsAction: true,
+      },
+      global: {
+        stubs: headerStubs,
+      },
+    })
+
+    expect(wrapper.find('button[aria-label="modemDetail.switchModem"]').exists()).toBe(true)
+    const nextButton = wrapper.findAll('button').find((button) => button.text().includes('Modem 2'))
+    expect(nextButton).toBeDefined()
+    await nextButton?.trigger('click')
+
+    expect(router.push).toHaveBeenCalledWith({
+      name: 'modem-detail',
+      params: { id: 'modem-2' },
+    })
   })
 })
 
