@@ -69,7 +69,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <Card class="gap-0 rounded-xl border-0 bg-card/90 py-0 shadow-sm backdrop-blur-xl dark:bg-card/70">
+  <Card
+    class="gap-0 rounded-lg border-0 bg-card/90 py-0 shadow-sm backdrop-blur-xl dark:bg-card/70"
+  >
     <CardContent class="space-y-3 px-4 py-3 text-sm">
       <div class="flex items-center justify-between gap-3">
         <div class="flex min-w-0 shrink-0 items-center gap-2">
@@ -106,7 +108,9 @@ onUnmounted(() => {
           </span>
         </div>
         <div class="flex min-w-0 flex-1 items-start justify-end gap-1">
-          <span class="min-w-0 flex-1 break-all text-right font-mono text-xs font-medium leading-5 text-foreground">
+          <span
+            class="min-w-0 flex-1 break-all text-right font-mono text-xs font-medium leading-5 text-foreground"
+          >
             {{ eid }}
           </span>
           <Button

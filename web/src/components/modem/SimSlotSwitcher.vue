@@ -104,88 +104,86 @@ const confirmTitle = computed(() => {
 </script>
 
 <template>
-  <div v-if="slots.length > 0">
-    <div
-      class="flex min-w-0 items-center gap-2 rounded-xl border border-white/70 bg-card/90 px-3 py-2 shadow-[0_4px_16px_rgba(15,23,42,0.06)] backdrop-blur-xl dark:border-white/10 dark:bg-card/70 dark:shadow-none"
+  <div
+    class="flex min-w-0 items-center gap-2 rounded-lg border border-white/70 bg-card/90 px-3 py-2 shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-card/70 dark:shadow-none"
+  >
+    <RadioGroup
+      :model-value="selectedIdentifier"
+      :disabled="!hasMultipleSlots"
+      class="inline-flex min-w-0 shrink-0 items-center gap-0.5 overflow-x-auto"
+      @update:model-value="handleSelect"
     >
-      <RadioGroup
-        :model-value="selectedIdentifier"
-        :disabled="!hasMultipleSlots"
-        class="inline-flex min-w-0 shrink-0 items-center gap-0.5 overflow-x-auto"
-        @update:model-value="handleSelect"
+      <div
+        v-for="(slot, index) in slots"
+        :key="slot.identifier"
+        class="relative flex items-center gap-1.5"
       >
-        <div
-          v-for="(slot, index) in slots"
-          :key="slot.identifier"
-          class="relative flex items-center gap-1.5"
+        <RadioGroupItem
+          :id="`sim-slot-${slot.identifier}`"
+          :value="slot.identifier"
+          class="sr-only"
+        />
+        <Label
+          :for="`sim-slot-${slot.identifier}`"
+          class="inline-flex h-6 min-w-12 items-center justify-center rounded-full px-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] transition"
+          :class="[
+            slot.identifier === selectedIdentifier
+              ? 'bg-primary/10 text-primary shadow-xs ring-1 ring-primary/10 dark:bg-primary/15 dark:ring-primary/20'
+              : 'text-muted-foreground hover:text-foreground',
+            hasMultipleSlots ? 'cursor-pointer' : 'cursor-default',
+          ]"
         >
-          <RadioGroupItem
-            :id="`sim-slot-${slot.identifier}`"
-            :value="slot.identifier"
-            class="sr-only"
-          />
-          <Label
-            :for="`sim-slot-${slot.identifier}`"
-            class="inline-flex h-6 min-w-12 items-center justify-center rounded-full px-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] transition"
-            :class="[
-              slot.identifier === selectedIdentifier
-                ? 'bg-primary/10 text-primary shadow-xs ring-1 ring-primary/10 dark:bg-primary/15 dark:ring-primary/20'
-                : 'text-muted-foreground hover:text-foreground',
-              hasMultipleSlots ? 'cursor-pointer' : 'cursor-default',
-            ]"
-          >
-            {{ getSlotLabel(index) }}
-          </Label>
-        </div>
-      </RadioGroup>
+          {{ getSlotLabel(index) }}
+        </Label>
+      </div>
+    </RadioGroup>
 
-      <ModemSignalStatus
-        v-if="showSignalStatus"
-        :signal-quality="props.signalQuality ?? 0"
-        :registration-state="props.registrationState ?? ''"
-        size="sm"
-        class="ml-auto"
-      />
-    </div>
-
-    <AlertDialog v-model:open="dialogOpen">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{{ confirmTitle }}</AlertDialogTitle>
-        </AlertDialogHeader>
-        <div v-if="pendingSlot" class="flex min-w-0 items-center gap-2.5">
-          <div
-            class="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30"
-          >
-            <span class="rounded-sm text-base">
-              <span v-if="pendingRegionFlagClass" :class="pendingRegionFlagClass" />
-              <span v-else class="text-xs font-semibold text-muted-foreground">
-                {{ pendingRegionCode }}
-              </span>
-            </span>
-          </div>
-          <div class="min-w-0">
-            <p class="truncate text-sm font-semibold leading-tight text-foreground">
-              {{ pendingOperatorName }}
-            </p>
-            <p class="truncate text-xs leading-tight text-muted-foreground">
-              {{ pendingIdentifierValue }}
-            </p>
-          </div>
-        </div>
-        <AlertDialogFooter>
-          <AlertDialogCancel @click="closeDialog" :disabled="isSwitching">
-            {{ t('modemDetail.actions.cancel') }}
-          </AlertDialogCancel>
-          <Button type="button" @click="confirmSwitch" :disabled="isSwitching">
-            <span v-if="isSwitching" class="inline-flex items-center gap-2">
-              <Spinner class="size-4" />
-              {{ t('modemDetail.actions.confirm') }}
-            </span>
-            <span v-else>{{ t('modemDetail.actions.confirm') }}</span>
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ModemSignalStatus
+      v-if="showSignalStatus"
+      :signal-quality="props.signalQuality ?? 0"
+      :registration-state="props.registrationState ?? ''"
+      size="sm"
+      class="ml-auto"
+    />
   </div>
+
+  <AlertDialog v-model:open="dialogOpen">
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>{{ confirmTitle }}</AlertDialogTitle>
+      </AlertDialogHeader>
+      <div v-if="pendingSlot" class="flex min-w-0 items-center gap-2.5">
+        <div
+          class="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30"
+        >
+          <span class="rounded-sm text-base">
+            <span v-if="pendingRegionFlagClass" :class="pendingRegionFlagClass" />
+            <span v-else class="text-xs font-semibold text-muted-foreground">
+              {{ pendingRegionCode }}
+            </span>
+          </span>
+        </div>
+        <div class="min-w-0">
+          <p class="truncate text-sm font-semibold leading-tight text-foreground">
+            {{ pendingOperatorName }}
+          </p>
+          <p class="truncate text-xs leading-tight text-muted-foreground">
+            {{ pendingIdentifierValue }}
+          </p>
+        </div>
+      </div>
+      <AlertDialogFooter>
+        <AlertDialogCancel @click="closeDialog" :disabled="isSwitching">
+          {{ t('modemDetail.actions.cancel') }}
+        </AlertDialogCancel>
+        <Button type="button" @click="confirmSwitch" :disabled="isSwitching">
+          <span v-if="isSwitching" class="inline-flex items-center gap-2">
+            <Spinner class="size-4" />
+            {{ t('modemDetail.actions.confirm') }}
+          </span>
+          <span v-else>{{ t('modemDetail.actions.confirm') }}</span>
+        </Button>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
 </template>
