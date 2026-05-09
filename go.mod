@@ -13,7 +13,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/things-go/go-socks5 v0.1.1
 	github.com/wneessen/go-mail v0.7.2
-	golang.org/x/sys v0.43.0
+	golang.org/x/sys v0.44.0
 )
 
 require (
