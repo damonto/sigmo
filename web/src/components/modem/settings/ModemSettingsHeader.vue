@@ -13,7 +13,7 @@ const { isStickyVisible } = useStickyTopBar(backButtonRef)
 </script>
 
 <template>
-  <header class="space-y-3 pb-3">
+  <header class="space-y-3">
     <ModemStickyTopBar
       :show="isStickyVisible"
       :title="t('modemDetail.settings.title')"

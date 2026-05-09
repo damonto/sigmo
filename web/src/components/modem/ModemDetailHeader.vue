@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
 import { Info } from 'lucide-vue-next'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -47,7 +47,8 @@ const currentModemId = computed(() => props.modem?.id ?? '')
 const handleTitleClick = () => {
   if (!props.modem?.id || !props.modem.supportsEsim) return
   const now = Date.now()
-  titleClickCount.value = now - lastTitleClickAt.value > titleClickWindowMs ? 1 : titleClickCount.value + 1
+  titleClickCount.value =
+    now - lastTitleClickAt.value > titleClickWindowMs ? 1 : titleClickCount.value + 1
   lastTitleClickAt.value = now
   if (titleClickCount.value < 7) return
   titleClickCount.value = 0
@@ -126,7 +127,7 @@ onMounted(() => {
       </div>
     </div>
 
-    <header class="space-y-2">
+    <header class="space-y-3">
       <div class="flex flex-wrap items-center gap-3">
         <template v-if="!props.isLoading">
           <ModemTitleSwitcher
@@ -142,6 +143,5 @@ onMounted(() => {
         {{ t('modemDetail.subtitle') }}
       </p>
     </header>
-
   </div>
 </template>
