@@ -23,7 +23,7 @@ const emit = defineEmits<{
     as-child
     variant="ghost"
     size="sm"
-    :class="cn('px-3 text-muted-foreground', props.class)"
+    :class="cn('px-0 text-muted-foreground', props.class)"
   >
     <RouterLink :to="props.to ?? '/'"> &larr; {{ props.label }} </RouterLink>
   </Button>
@@ -32,7 +32,7 @@ const emit = defineEmits<{
     variant="ghost"
     size="sm"
     type="button"
-    :class="cn('px-3 text-muted-foreground', props.class)"
+    :class="cn('px-0 text-muted-foreground', props.class)"
     @click="emit('click', $event)"
   >
     &larr; {{ props.label }}
