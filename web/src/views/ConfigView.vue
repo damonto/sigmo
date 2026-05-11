@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { ArrowLeft } from 'lucide-vue-next'
 import { computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
 import { toast } from 'vue-sonner'
 
+import BackButton from '@/components/BackButton.vue'
 import ConfigAuthSection from '@/components/config/ConfigAuthSection.vue'
 import ConfigChannelsSection from '@/components/config/ConfigChannelsSection.vue'
 import ConfigRootSection from '@/components/config/ConfigRootSection.vue'
@@ -148,12 +147,7 @@ const selectSection = (section: ConfigSectionKey) => {
       class="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pb-28 pt-6 sm:px-6 md:pb-10 md:pt-8 lg:pt-10"
     >
       <header class="flex flex-col gap-5 border-b pb-5 md:pb-6">
-        <Button as-child variant="ghost" size="sm" class="w-fit px-0 text-muted-foreground">
-          <RouterLink to="/">
-            <ArrowLeft class="size-4" />
-            {{ t('config.back') }}
-          </RouterLink>
-        </Button>
+        <BackButton to="/" :label="t('config.back')" class="w-fit" />
 
         <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div class="min-w-0 space-y-2">

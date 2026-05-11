@@ -4,6 +4,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
+import BackButton from '@/components/BackButton.vue'
 import ModemStickyTopBar from '@/components/modem/ModemStickyTopBar.vue'
 import ModemTitleSwitcher from '@/components/modem/ModemTitleSwitcher.vue'
 import { Button } from '@/components/ui/button'
@@ -67,6 +68,10 @@ const switchRouteName = computed(() => {
   return 'modem-detail'
 })
 
+const handleBack = () => {
+  void router.push('/')
+}
+
 const handleModemSwitch = (modem: Modem) => {
   if (modem.id === currentModemId.value) return
   void router.push({ name: switchRouteName.value, params: { id: modem.id } })
@@ -103,15 +108,7 @@ onMounted(() => {
 
     <div class="flex items-center justify-between gap-3" :class="{ invisible: isStickyVisible }">
       <div ref="backButtonRef" class="inline-flex">
-        <Button
-          variant="ghost"
-          size="sm"
-          type="button"
-          class="px-0 text-muted-foreground"
-          @click="router.push('/')"
-        >
-          &larr; {{ t('modemDetail.back') }}
-        </Button>
+        <BackButton :label="t('modemDetail.back')" @click="handleBack" />
       </div>
       <div v-if="props.showDetailsAction" class="flex items-center gap-1.5">
         <Button

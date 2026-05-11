@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
 
+import BackButton from '@/components/BackButton.vue'
 import ModemStickyTopBar from '@/components/modem/ModemStickyTopBar.vue'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { useStickyTopBar } from '@/composables/useStickyTopBar'
 
 const props = defineProps<{
@@ -38,9 +37,7 @@ const { isStickyVisible } = useStickyTopBar(backButtonRef)
     <div class="flex items-center justify-between gap-3">
       <div class="space-y-1">
         <div ref="backButtonRef" class="inline-flex" :class="{ invisible: isStickyVisible }">
-          <Button as-child variant="ghost" size="sm" class="px-0 text-muted-foreground">
-            <RouterLink to="/"> &larr; {{ t('modemDetail.back') }} </RouterLink>
-          </Button>
+          <BackButton to="/" :label="t('modemDetail.back')" />
         </div>
         <div class="space-y-1">
           <h1 class="text-2xl font-semibold text-foreground">

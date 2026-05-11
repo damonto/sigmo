@@ -22,11 +22,6 @@ const router = createRouter({
       component: () => import('@/views/ConfigView.vue'),
     },
     {
-      path: '/messages',
-      name: 'messages',
-      component: () => import('@/views/MessagesView.vue'),
-    },
-    {
       path: '/modems/:id',
       component: () => import('@/layouts/ModemLayout.vue'),
       children: [
