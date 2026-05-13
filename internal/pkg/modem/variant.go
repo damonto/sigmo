@@ -95,27 +95,6 @@ func int32FromVariant(variant dbus.Variant) int32 {
 	}
 }
 
-func float64FromVariant(variant dbus.Variant) float64 {
-	switch value := variant.Value().(type) {
-	case float64:
-		return value
-	case float32:
-		return float64(value)
-	case int:
-		return float64(value)
-	case int32:
-		return float64(value)
-	case int64:
-		return float64(value)
-	case uint32:
-		return float64(value)
-	case uint64:
-		return float64(value)
-	default:
-		return 0
-	}
-}
-
 func objectPathFromVariant(variant dbus.Variant) dbus.ObjectPath {
 	value, ok := variant.Value().(dbus.ObjectPath)
 	if !ok {
