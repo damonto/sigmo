@@ -23,6 +23,8 @@ const props = defineProps<{
   slots: SlotInfo[]
   registrationState?: string
   signalQuality?: number
+  accessTechnology?: string | null
+  registeredOperatorName?: string | null
   onSwitch?: (identifier: string) => Promise<void>
 }>()
 
@@ -143,6 +145,8 @@ const slotOptionClass = (slot: SlotInfo) => {
       v-if="showSignalStatus"
       :signal-quality="props.signalQuality ?? 0"
       :registration-state="props.registrationState ?? ''"
+      :access-technology="props.accessTechnology"
+      :registered-operator-name="props.registeredOperatorName"
       size="sm"
       class="ml-auto"
     />

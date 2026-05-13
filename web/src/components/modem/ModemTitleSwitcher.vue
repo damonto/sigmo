@@ -86,13 +86,12 @@ const handleSelect = (modem: Modem) => {
           <p class="truncate text-sm font-semibold leading-tight text-foreground">
             {{ displayModemName(item) }}
           </p>
-          <p class="truncate text-xs leading-tight text-muted-foreground">
-            {{ item.sim.operatorName }}
-          </p>
         </div>
         <ModemSignalStatus
           :signal-quality="item.signalQuality"
           :registration-state="item.registrationState"
+          :access-technology="item.accessTechnology"
+          :show-signal-value="false"
           size="sm"
         />
         <Check

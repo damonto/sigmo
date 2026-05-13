@@ -95,6 +95,7 @@ const displayNumber = computed(() => (props.number.trim() ? props.number : t('ho
           <ModemSignalStatus
             :signal-quality="props.signalQuality"
             :registration-state="props.registrationState"
+            :access-technology="props.accessTechnology"
             size="sm"
           />
         </div>

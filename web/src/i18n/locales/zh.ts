@@ -11,6 +11,8 @@ const zh = {
     psim: 'pSIM',
     roaming: '漫游',
     signal: '信号强度',
+    accessTech: '接入制式',
+    registeredOperator: '注册运营商',
   },
   home: {
     kicker: 'Sigmo',

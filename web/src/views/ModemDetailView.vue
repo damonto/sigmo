@@ -221,6 +221,8 @@ const handleResultConfirm = () => {
     :slots="simSlots"
     :signal-quality="modem.signalQuality"
     :registration-state="modem.registrationState"
+    :access-technology="modem.accessTechnology"
+    :registered-operator-name="modem.registeredOperator.name"
     :on-switch="handleSimSwitch"
   />
 

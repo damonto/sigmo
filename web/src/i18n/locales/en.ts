@@ -11,6 +11,8 @@ const en = {
     psim: 'pSIM',
     roaming: 'Roaming',
     signal: 'Signal Quality',
+    accessTech: 'Access Tech',
+    registeredOperator: 'Registered Operator',
   },
   home: {
     kicker: 'Sigmo',

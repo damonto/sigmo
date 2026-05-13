@@ -52,6 +52,8 @@ const { flagClass } = useModemDisplay()
         <ModemSignalStatus
           :signal-quality="props.modem.signalQuality"
           :registration-state="props.modem.registrationState"
+          :access-technology="props.modem.accessTechnology"
+          :registered-operator-name="props.modem.registeredOperator.name"
           size="md"
         />
       </div>

@@ -170,6 +170,59 @@ describe('ModemSignalStatus', () => {
 
     expect(wrapper.text().trim()).toBe('72%')
   })
+
+  it('can hide the signal percentage while keeping status details', () => {
+    const wrapper = mount(ModemSignalStatus, {
+      props: {
+        signalQuality: 72,
+        registrationState: 'Registered',
+        accessTechnology: 'LTE',
+        showSignalValue: false,
+      },
+    })
+
+    expect(wrapper.text()).not.toContain('72%')
+    expect(wrapper.text()).toContain('LTE')
+  })
+
+  it('shows access technology next to the signal percentage', () => {
+    const wrapper = mount(ModemSignalStatus, {
+      props: {
+        signalQuality: 72,
+        registrationState: 'Registered',
+        accessTechnology: 'LTE',
+      },
+    })
+
+    expect(wrapper.text()).toContain('72%')
+    expect(wrapper.text()).toContain('LTE')
+  })
+
+  it('hides empty access technology values', () => {
+    const wrapper = mount(ModemSignalStatus, {
+      props: {
+        signalQuality: 72,
+        registrationState: 'Registered',
+        accessTechnology: '   ',
+      },
+    })
+
+    expect(wrapper.text().trim()).toBe('72%')
+  })
+
+  it('shows the registered operator name when provided', () => {
+    const wrapper = mount(ModemSignalStatus, {
+      props: {
+        signalQuality: 72,
+        registrationState: 'Registered',
+        accessTechnology: 'LTE',
+        registeredOperatorName: 'Carrier',
+      },
+    })
+
+    expect(wrapper.text()).toContain('LTE')
+    expect(wrapper.text()).toContain('Carrier')
+  })
 })
 
 describe('ModemDetailHeader', () => {
@@ -359,6 +412,8 @@ describe('SimSlotSwitcher', () => {
         ],
         signalQuality: 67,
         registrationState: 'Roaming',
+        accessTechnology: 'LTE',
+        registeredOperatorName: 'Carrier',
       },
       global: {
         stubs: simSlotStubs,
@@ -369,6 +424,8 @@ describe('SimSlotSwitcher', () => {
     expect(status.exists()).toBe(true)
     expect(status.text()).toContain('R')
     expect(status.text()).toContain('67%')
+    expect(status.text()).toContain('LTE')
+    expect(status.text()).toContain('Carrier')
   })
 
   it('renders the SIM row for a single slot without enabling switching', () => {
