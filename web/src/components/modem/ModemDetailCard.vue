@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import RegionFlag from '@/components/RegionFlag.vue'
 import { Badge } from '@/components/ui/badge'
 import type { EuiccApiResponse } from '@/types/euicc'
 import type { Modem } from '@/types/modem'
@@ -21,18 +22,9 @@ const formatBytes = (bytes?: number) => {
 
 const storageRemaining = computed(() => formatBytes(props.euicc?.freeSpace))
 const eid = computed(() => props.euicc?.eid || 'N/A')
-const sasUp = computed(() => props.euicc?.sasUp || 'N/A')
+const sasUpName = computed(() => props.euicc?.sasUp?.name || 'N/A')
+const sasUpRegion = computed(() => props.euicc?.sasUp?.region ?? '')
 const certificates = computed(() => props.euicc?.certificates ?? [])
-
-const regionEmoji = computed(() => {
-  const code = props.modem.sim.regionCode?.trim().toUpperCase()
-  if (!code || code.length !== 2 || !/^[A-Z]{2}$/.test(code)) return ''
-  const base = 0x1f1e6
-  const offset = 'A'.codePointAt(0) ?? 65
-  const [first, second] = [code.codePointAt(0), code.codePointAt(1)]
-  if (first === undefined || second === undefined) return ''
-  return String.fromCodePoint(base + (first - offset), base + (second - offset))
-})
 </script>
 
 <template>
@@ -83,7 +75,10 @@ const regionEmoji = computed(() => {
         </div>
         <div class="flex items-center justify-between gap-4">
           <span class="text-muted-foreground">SAS Accreditation</span>
-          <span class="text-right">{{ sasUp }}</span>
+          <span class="flex items-center justify-end gap-2 text-right">
+            <span>{{ sasUpName }}</span>
+            <RegionFlag :region-code="sasUpRegion" class="rounded-sm text-base" />
+          </span>
         </div>
         <div class="flex flex-col gap-2">
           <span class="text-muted-foreground">Certificates</span>
@@ -116,8 +111,7 @@ const regionEmoji = computed(() => {
         <div class="flex justify-between">
           <span class="text-muted-foreground">Region</span>
           <span class="flex items-center gap-2 font-mono">
-            {{ modem.sim.regionCode }}
-            <span v-if="regionEmoji" class="text-base">{{ regionEmoji }}</span>
+            <RegionFlag :region-code="modem.sim.regionCode" class="rounded-sm text-base" />
           </span>
         </div>
         <div class="flex justify-between">

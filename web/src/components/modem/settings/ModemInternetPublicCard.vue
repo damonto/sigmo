@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import RegionFlag from '@/components/RegionFlag.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import type { InternetPublicResponse } from '@/types/internet'
 
@@ -12,22 +13,11 @@ const props = defineProps<{
 const { t } = useI18n()
 
 const publicIPLabel = computed(() => props.publicInfo?.ip || t('modemDetail.settings.internetNone'))
-const publicRegionLabel = computed(() => {
-  const country = props.publicInfo?.country?.trim().toUpperCase()
-  const flag = countryFlag(country)
-  if (!flag && !country) return t('modemDetail.settings.internetNone')
-  return [flag, country].filter(Boolean).join(' ')
-})
+const publicCountry = computed(() => props.publicInfo?.country?.trim().toUpperCase() ?? '')
+const publicRegionMissing = computed(() => !publicCountry.value)
 const publicOrganizationLabel = computed(() => {
   return props.publicInfo?.organization || t('modemDetail.settings.internetNone')
 })
-
-const countryFlag = (country?: string) => {
-  if (!country || !/^[A-Z]{2}$/.test(country)) return ''
-  return String.fromCodePoint(
-    ...country.split('').map((letter) => 0x1f1e6 + letter.charCodeAt(0) - 65),
-  )
-}
 </script>
 
 <template>
@@ -45,9 +35,18 @@ const countryFlag = (country?: string) => {
       </div>
       <div class="flex items-center justify-between gap-4">
         <span class="text-muted-foreground">{{ t('modemDetail.settings.internetRegion') }}</span>
-        <span class="break-all text-right font-medium text-foreground">{{
-          publicRegionLabel
-        }}</span>
+        <span
+          v-if="publicRegionMissing"
+          class="break-all text-right font-medium text-foreground"
+        >
+          {{ t('modemDetail.settings.internetNone') }}
+        </span>
+        <span
+          v-else
+          class="flex items-center justify-end gap-2 text-right font-medium text-foreground"
+        >
+          <RegionFlag :region-code="publicCountry" class="rounded-sm text-base" />
+        </span>
       </div>
       <div class="flex items-center justify-between gap-4">
         <span class="text-muted-foreground">{{

@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
-import { useModemDisplay } from '@/composables/useModemDisplay'
+import RegionFlag from '@/components/RegionFlag.vue'
 
 const props = defineProps<{
   name: string
@@ -21,7 +21,6 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-const { flagClass } = useModemDisplay()
 
 const getTech = (accessTechnology: string | null): '4G' | '5G' => {
   if (!accessTechnology) return '4G'
@@ -32,7 +31,6 @@ const getTech = (accessTechnology: string | null): '4G' | '5G' => {
   return '4G'
 }
 
-const regionFlagClass = computed(() => flagClass(props.regionCode))
 const tech = computed(() => getTech(props.accessTechnology))
 const techVariant = computed(() => (tech.value === '5G' ? 'default' : 'secondary'))
 const isRoaming = computed(() => props.registrationState === 'Roaming')
@@ -49,21 +47,7 @@ const displayNumber = computed(() => (props.number.trim() ? props.number : t('ho
   <Card class="h-full border-0 py-4 shadow-sm transition duration-300 group-hover:-translate-y-0.5">
     <CardContent class="flex items-center gap-3 px-4">
       <div class="flex size-12 shrink-0 items-center justify-center rounded-xl border bg-background">
-        <span
-          v-if="regionFlagClass"
-          :class="regionFlagClass"
-          class="rounded-sm text-xl"
-          :aria-label="props.regionCode"
-          :title="props.regionCode"
-        />
-        <span
-          v-else
-          class="rounded-sm text-base font-semibold text-muted-foreground"
-          :aria-label="props.regionCode"
-          :title="props.regionCode"
-        >
-          {{ props.regionCode }}
-        </span>
+        <RegionFlag :region-code="props.regionCode" class="rounded-sm text-xl" />
       </div>
       <div class="flex min-w-0 flex-1 flex-col gap-0.5">
         <div class="flex items-center justify-between gap-2">

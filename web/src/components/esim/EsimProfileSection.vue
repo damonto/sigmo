@@ -42,7 +42,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { useEsimApi } from '@/apis/esim'
-import { useModemDisplay } from '@/composables/useModemDisplay'
+import RegionFlag from '@/components/RegionFlag.vue'
 import type { EsimProfile } from '@/types/esim'
 
 const profiles = defineModel<EsimProfile[]>('profiles', { required: true })
@@ -62,7 +62,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const esimApi = useEsimApi()
-const { flagClass } = useModemDisplay()
 
 const profileCount = computed(() => profiles.value.length)
 const hasProfiles = computed(() => profiles.value.length > 0)
@@ -279,12 +278,7 @@ watch(renameOpen, (value) => {
               :alt="`${profile.name} logo`"
               class="size-6 object-contain"
             />
-            <span v-else class="rounded-sm text-[18px]">
-              <span v-if="flagClass(profile.regionCode)" :class="flagClass(profile.regionCode)" />
-              <span v-else class="text-xs font-semibold text-muted-foreground">
-                {{ profile.regionCode }}
-              </span>
-            </span>
+            <RegionFlag v-else :region-code="profile.regionCode" class="rounded-sm text-[18px]" />
           </div>
           <div class="min-w-0">
             <p class="truncate text-sm font-semibold text-foreground">

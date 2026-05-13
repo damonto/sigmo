@@ -83,16 +83,7 @@ export const useModemDisplay = () => {
     )
   }
 
-  const flagClass = (regionCode: string) => {
-    const normalized = regionCode.trim().toLowerCase()
-    if (!/^[a-z]{2}$/.test(normalized)) {
-      return null
-    }
-    return `fi fi-${normalized}`
-  }
-
   return {
-    flagClass,
     formatSignal,
     signalIcon,
     signalTone,

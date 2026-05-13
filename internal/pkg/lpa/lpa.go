@@ -36,7 +36,7 @@ type LPA struct {
 type Info struct {
 	EID          string
 	FreeSpace    int32
-	SASUP        string
+	SASUP        euicc.SASUP
 	Certificates []string
 }
 

@@ -4,6 +4,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
+import RegionFlag from '@/components/RegionFlag.vue'
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -16,7 +17,6 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Spinner } from '@/components/ui/spinner'
-import { useModemDisplay } from '@/composables/useModemDisplay'
 import type { SlotInfo } from '@/types/modem'
 
 const props = defineProps<{
@@ -31,7 +31,6 @@ const props = defineProps<{
 const selectedIdentifier = defineModel<string>({ required: true })
 
 const { t } = useI18n()
-const { flagClass } = useModemDisplay()
 
 const pendingIdentifier = ref<string | null>(null)
 const dialogOpen = ref(false)
@@ -98,7 +97,6 @@ const pendingSlotIndex = computed(() => {
 const pendingOperatorName = computed(() => pendingSlot.value?.operatorName ?? '')
 const pendingIdentifierValue = computed(() => pendingSlot.value?.identifier ?? '')
 const pendingRegionCode = computed(() => pendingSlot.value?.regionCode ?? '')
-const pendingRegionFlagClass = computed(() => flagClass(pendingRegionCode.value))
 
 const confirmTitle = computed(() => {
   return t('modemDetail.sim.confirm', { sim: pendingSlotIndex.value + 1 })
@@ -161,12 +159,7 @@ const slotOptionClass = (slot: SlotInfo) => {
         <div
           class="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30"
         >
-          <span class="rounded-sm text-base">
-            <span v-if="pendingRegionFlagClass" :class="pendingRegionFlagClass" />
-            <span v-else class="text-xs font-semibold text-muted-foreground">
-              {{ pendingRegionCode }}
-            </span>
-          </span>
+          <RegionFlag :region-code="pendingRegionCode" class="rounded-sm text-base" />
         </div>
         <div class="min-w-0">
           <p class="truncate text-sm font-semibold leading-tight text-foreground">

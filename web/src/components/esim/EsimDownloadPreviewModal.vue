@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+import RegionFlag from '@/components/RegionFlag.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -11,7 +12,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { useModemDisplay } from '@/composables/useModemDisplay'
 
 type DownloadProfilePreview = {
   iccid: string
@@ -37,8 +37,6 @@ const emit = defineEmits<{
   (event: 'cancel'): void
 }>()
 
-const { flagClass } = useModemDisplay()
-
 const profileName = computed(() => {
   return props.profile?.profileName || props.profile?.serviceProviderName || ''
 })
@@ -47,7 +45,6 @@ const profileSubtitle = computed(() => props.profile?.iccid ?? '')
 
 const logoUrl = computed(() => props.profile?.icon ?? '')
 const regionCode = computed(() => props.profile?.regionCode ?? '')
-const regionFlagClass = computed(() => flagClass(regionCode.value))
 
 const handleOpenChange = (nextOpen: boolean) => {
   if (!nextOpen) emit('cancel')
@@ -67,12 +64,7 @@ const handleOpenChange = (nextOpen: boolean) => {
             class="flex size-12 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30"
           >
             <img v-if="logoUrl" :src="logoUrl" class="size-7 object-contain" />
-            <span v-else class="rounded-sm text-[18px]">
-              <span v-if="regionFlagClass" :class="regionFlagClass" />
-              <span v-else class="text-xs font-semibold text-muted-foreground">
-                {{ regionCode }}
-              </span>
-            </span>
+            <RegionFlag v-else :region-code="regionCode" class="rounded-sm text-[18px]" />
           </div>
           <div class="min-w-0">
             <p class="truncate text-sm font-semibold text-foreground">{{ profileName }}</p>

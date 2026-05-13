@@ -3,7 +3,7 @@ import { useI18n } from 'vue-i18n'
 
 import { Card, CardContent } from '@/components/ui/card'
 import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
-import { useModemDisplay } from '@/composables/useModemDisplay'
+import RegionFlag from '@/components/RegionFlag.vue'
 import type { Modem } from '@/types/modem'
 
 const props = defineProps<{
@@ -11,7 +11,6 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
-const { flagClass } = useModemDisplay()
 </script>
 
 <template>
@@ -61,15 +60,7 @@ const { flagClass } = useModemDisplay()
         <span class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
           {{ t('modemDetail.fields.flag') }}
         </span>
-        <span class="rounded-sm text-[18px]">
-          <span
-            v-if="flagClass(props.modem.sim.regionCode)"
-            :class="flagClass(props.modem.sim.regionCode)"
-          />
-          <span v-else class="text-xs font-semibold text-muted-foreground">
-            {{ props.modem.sim.regionCode }}
-          </span>
-        </span>
+        <RegionFlag :region-code="props.modem.sim.regionCode" class="rounded-sm text-[18px]" />
       </div>
       <div class="flex items-center justify-between gap-4">
         <span class="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">

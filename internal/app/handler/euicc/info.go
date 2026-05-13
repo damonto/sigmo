@@ -41,9 +41,12 @@ func (e *euicc) Get(modem *mmodem.Modem) (*EuiccResponse, error) {
 		return nil, err
 	}
 	return &EuiccResponse{
-		EID:          info.EID,
-		FreeSpace:    info.FreeSpace,
-		SASUP:        info.SASUP,
+		EID:       info.EID,
+		FreeSpace: info.FreeSpace,
+		SASUP: SASUPResponse{
+			Name:   info.SASUP.Name,
+			Region: info.SASUP.Region,
+		},
 		Certificates: info.Certificates,
 	}, nil
 }

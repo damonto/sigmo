@@ -6,7 +6,6 @@ package euicc
 import (
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -37,6 +36,11 @@ type CertificateIssuer struct {
 	Name    string `json:"name"`
 }
 
+type SASUP struct {
+	Name   string
+	Region string
+}
+
 var (
 	issuers []CertificateIssuer
 	sites   Accredited
@@ -60,19 +64,22 @@ func LookupCertificateIssuer(keyID string) string {
 	return keyID
 }
 
-func LookupSASUP(eid, sasAccreditationNumber string) string {
+func LookupSASUP(eid, sasAccreditationNumber string) SASUP {
+	if len(eid) < 8 {
+		return SASUP{Name: sasAccreditationNumber}
+	}
+
 	eum := eid[:8]
 	for _, supplier := range sites.Suppliers {
 		if slices.Contains(supplier.EUM, eum) {
-			fallback := fmt.Sprintf("%s (%s)", supplier.Name, string(0x1F1E6+rune(supplier.Region[0])-'A')+string(0x1F1E6+rune(supplier.Region[1])-'A'))
 			if len(sasAccreditationNumber) < 5 {
-				return fallback
+				return SASUP{Name: supplier.Name, Region: supplier.Region}
 			}
 			if value, ok := supplier.Locations[sasAccreditationNumber[:5]]; ok {
-				return fmt.Sprintf("%s (%s)", supplier.Name, string(0x1F1E6+rune(value[0])-'A')+string(0x1F1E6+rune(value[1])-'A'))
+				return SASUP{Name: supplier.Name, Region: value}
 			}
-			return fallback
+			return SASUP{Name: supplier.Name, Region: supplier.Region}
 		}
 	}
-	return sasAccreditationNumber
+	return SASUP{Name: sasAccreditationNumber}
 }

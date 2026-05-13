@@ -4,13 +4,13 @@ import { Check, ChevronDown } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
+import RegionFlag from '@/components/RegionFlag.vue'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useModemDisplay } from '@/composables/useModemDisplay'
 import type { Modem } from '@/types/modem'
 
 const props = defineProps<{
@@ -24,7 +24,6 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { flagClass } = useModemDisplay()
 
 const currentModemId = computed(() => props.currentModem?.id ?? '')
 const canSwitchModems = computed(() => Boolean(props.currentModem) && props.modems.length > 1)
@@ -71,16 +70,7 @@ const handleSelect = (modem: Modem) => {
         <div
           class="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30"
         >
-          <span
-            v-if="flagClass(item.sim.regionCode)"
-            :class="flagClass(item.sim.regionCode)"
-            class="rounded-sm text-base"
-            :aria-label="item.sim.regionCode"
-            :title="item.sim.regionCode"
-          />
-          <span v-else class="text-xs font-semibold text-muted-foreground">
-            {{ item.sim.regionCode }}
-          </span>
+          <RegionFlag :region-code="item.sim.regionCode" class="rounded-sm text-base" />
         </div>
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-semibold leading-tight text-foreground">

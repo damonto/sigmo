@@ -1,7 +1,12 @@
+export type SasUp = {
+  name: string
+  region?: string
+}
+
 export type EuiccApiResponse = {
   eid: string
   freeSpace: number
-  sasUp: string
+  sasUp: SasUp
   certificates: string[]
 }
 
