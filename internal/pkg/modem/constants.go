@@ -1,5 +1,7 @@
 package modem
 
+import "fmt"
+
 type ModemState int32
 
 const (
@@ -251,6 +253,179 @@ func (m ModemAccessTechnology) String() string {
 		return "LTE NB-IoT"
 	case ModemAccessTechnologyAny:
 		return "Any"
+	default:
+		return "Unknown"
+	}
+}
+
+type ModemMode uint32
+
+const (
+	ModemModeNone ModemMode = 0
+	ModemModeCS   ModemMode = 1 << 0
+	ModemMode2G   ModemMode = 1 << 1
+	ModemMode3G   ModemMode = 1 << 2
+	ModemMode4G   ModemMode = 1 << 3
+	ModemMode5G   ModemMode = 1 << 4
+	ModemModeAny  ModemMode = 0xFFFFFFFF
+)
+
+type ModemModePair struct {
+	Allowed   ModemMode
+	Preferred ModemMode
+}
+
+func (m ModemMode) String() string {
+	switch m {
+	case ModemModeNone:
+		return "None"
+	case ModemModeCS:
+		return "CS"
+	case ModemMode2G:
+		return "2G"
+	case ModemMode3G:
+		return "3G"
+	case ModemMode4G:
+		return "4G"
+	case ModemMode5G:
+		return "5G"
+	case ModemModeAny:
+		return "Any"
+	default:
+		return "Unknown"
+	}
+}
+
+func (m ModemMode) Label() string {
+	if m == ModemModeAny || m == ModemModeNone {
+		return m.String()
+	}
+	parts := make([]string, 0, 5)
+	for _, mode := range []ModemMode{ModemModeCS, ModemMode2G, ModemMode3G, ModemMode4G, ModemMode5G} {
+		if m&mode != 0 {
+			parts = append(parts, mode.String())
+		}
+	}
+	if len(parts) == 0 {
+		return "Unknown"
+	}
+	label := parts[0]
+	for _, part := range parts[1:] {
+		label += " + " + part
+	}
+	return label
+}
+
+type ModemBand uint32
+
+const (
+	ModemBandUnknown ModemBand = 0
+	ModemBandAny     ModemBand = 256
+)
+
+func (b ModemBand) String() string {
+	switch b {
+	case ModemBandUnknown:
+		return "Unknown"
+	case ModemBandAny:
+		return "Any"
+	}
+	if label, ok := modemBandLabels[b]; ok {
+		return label
+	}
+	if b >= 31 && b <= 115 {
+		if b == 115 {
+			return "LTE B85"
+		}
+		return fmt.Sprintf("LTE B%d", b-30)
+	}
+	if b >= 301 && b < 600 {
+		return fmt.Sprintf("NR n%d", b-300)
+	}
+	return fmt.Sprintf("Band %d", b)
+}
+
+var modemBandLabels = map[ModemBand]string{
+	1:   "GSM EGSM 900",
+	2:   "GSM DCS 1800",
+	3:   "GSM PCS 1900",
+	4:   "GSM 850",
+	5:   "UMTS band 1",
+	6:   "UMTS band 3",
+	7:   "UMTS band 4",
+	8:   "UMTS band 6",
+	9:   "UMTS band 5",
+	10:  "UMTS band 8",
+	11:  "UMTS band 9",
+	12:  "UMTS band 2",
+	13:  "UMTS band 7",
+	14:  "GSM 450",
+	15:  "GSM 480",
+	16:  "GSM 750",
+	17:  "GSM 380",
+	18:  "GSM 410",
+	19:  "GSM 710",
+	20:  "GSM 810",
+	128: "CDMA BC0",
+	129: "CDMA BC1",
+	130: "CDMA BC2",
+	131: "CDMA BC3",
+	132: "CDMA BC4",
+	134: "CDMA BC5",
+	135: "CDMA BC6",
+	136: "CDMA BC7",
+	137: "CDMA BC8",
+	138: "CDMA BC9",
+	139: "CDMA BC10",
+	140: "CDMA BC11",
+	141: "CDMA BC12",
+	142: "CDMA BC13",
+	143: "CDMA BC14",
+	144: "CDMA BC15",
+	145: "CDMA BC16",
+	146: "CDMA BC17",
+	147: "CDMA BC18",
+	148: "CDMA BC19",
+	210: "UMTS band 10",
+	211: "UMTS band 11",
+	212: "UMTS band 12",
+	213: "UMTS band 13",
+	214: "UMTS band 14",
+	219: "UMTS band 19",
+	220: "UMTS band 20",
+	221: "UMTS band 21",
+	222: "UMTS band 22",
+	225: "UMTS band 25",
+	226: "UMTS band 26",
+	232: "UMTS band 32",
+}
+
+type CellType uint32
+
+const (
+	CellTypeUnknown CellType = iota
+	CellTypeCDMA
+	CellTypeGSM
+	CellTypeUMTS
+	CellTypeTDSCDMA
+	CellTypeLTE
+	CellType5GNR
+)
+
+func (c CellType) String() string {
+	switch c {
+	case CellTypeCDMA:
+		return "CDMA"
+	case CellTypeGSM:
+		return "GSM"
+	case CellTypeUMTS:
+		return "UMTS"
+	case CellTypeTDSCDMA:
+		return "TDSCDMA"
+	case CellTypeLTE:
+		return "LTE"
+	case CellType5GNR:
+		return "5GNR"
 	default:
 		return "Unknown"
 	}

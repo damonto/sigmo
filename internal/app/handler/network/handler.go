@@ -19,6 +19,17 @@ const (
 	errorCodeListNetworksFailed    = "list_networks_failed"
 	errorCodeRegisterNetworkFailed = "register_network_failed"
 	errorCodeOperatorCodeRequired  = "operator_code_required"
+	errorCodeGetModesFailed        = "get_modes_failed"
+	errorCodeSetModesFailed        = "set_modes_failed"
+	errorCodeSetModesInvalid       = "set_modes_invalid_request"
+	errorCodeUnsupportedMode       = "unsupported_mode"
+	errorCodeGetBandsFailed        = "get_bands_failed"
+	errorCodeSetBandsFailed        = "set_bands_failed"
+	errorCodeSetBandsInvalid       = "set_bands_invalid_request"
+	errorCodeBandsRequired         = "bands_required"
+	errorCodeUnsupportedBand       = "unsupported_band"
+	errorCodeAnyBandExclusive      = "any_band_exclusive"
+	errorCodeGetCellsFailed        = "get_cells_failed"
 )
 
 func New(manager *mmodem.Manager) *Handler {
@@ -53,4 +64,82 @@ func (h *Handler) Register(c *echo.Context) error {
 		return httpapi.Internal(c, errorCodeRegisterNetworkFailed)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *Handler) Modes(c *echo.Context) error {
+	modem, err := h.manager.Find(c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeGetModesFailed)
+	}
+	response, err := h.networks.Modes(modem)
+	if err != nil {
+		return httpapi.Internal(c, errorCodeGetModesFailed)
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
+func (h *Handler) SetCurrentModes(c *echo.Context) error {
+	modem, err := h.manager.Find(c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeSetModesFailed)
+	}
+	var req SetCurrentModesRequest
+	if err := c.Bind(&req); err != nil {
+		return httpapi.BadRequest(c, errorCodeSetModesInvalid, err)
+	}
+	if err := h.networks.SetCurrentModes(modem, req); err != nil {
+		if errors.Is(err, errUnsupportedMode) {
+			return httpapi.BadRequest(c, errorCodeUnsupportedMode, err)
+		}
+		return httpapi.Internal(c, errorCodeSetModesFailed)
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *Handler) Bands(c *echo.Context) error {
+	modem, err := h.manager.Find(c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeGetBandsFailed)
+	}
+	response, err := h.networks.Bands(modem)
+	if err != nil {
+		return httpapi.Internal(c, errorCodeGetBandsFailed)
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
+func (h *Handler) SetCurrentBands(c *echo.Context) error {
+	modem, err := h.manager.Find(c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeSetBandsFailed)
+	}
+	var req SetCurrentBandsRequest
+	if err := c.Bind(&req); err != nil {
+		return httpapi.BadRequest(c, errorCodeSetBandsInvalid, err)
+	}
+	if err := h.networks.SetCurrentBands(modem, req); err != nil {
+		switch {
+		case errors.Is(err, errBandsRequired):
+			return httpapi.BadRequest(c, errorCodeBandsRequired, err)
+		case errors.Is(err, errUnsupportedBand):
+			return httpapi.BadRequest(c, errorCodeUnsupportedBand, err)
+		case errors.Is(err, errAnyBandExclusive):
+			return httpapi.BadRequest(c, errorCodeAnyBandExclusive, err)
+		default:
+			return httpapi.Internal(c, errorCodeSetBandsFailed)
+		}
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *Handler) Cells(c *echo.Context) error {
+	modem, err := h.manager.Find(c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeGetCellsFailed)
+	}
+	response, err := h.networks.Cells(modem)
+	if err != nil {
+		return httpapi.Internal(c, errorCodeGetCellsFailed)
+	}
+	return c.JSON(http.StatusOK, response)
 }

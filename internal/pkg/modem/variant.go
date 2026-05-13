@@ -1,6 +1,10 @@
 package modem
 
-import "github.com/godbus/dbus/v5"
+import (
+	"fmt"
+
+	"github.com/godbus/dbus/v5"
+)
 
 type variantUnsigned interface {
 	~uint32 | ~uint64
@@ -91,6 +95,27 @@ func int32FromVariant(variant dbus.Variant) int32 {
 	}
 }
 
+func float64FromVariant(variant dbus.Variant) float64 {
+	switch value := variant.Value().(type) {
+	case float64:
+		return value
+	case float32:
+		return float64(value)
+	case int:
+		return float64(value)
+	case int32:
+		return float64(value)
+	case int64:
+		return float64(value)
+	case uint32:
+		return float64(value)
+	case uint64:
+		return float64(value)
+	default:
+		return 0
+	}
+}
+
 func objectPathFromVariant(variant dbus.Variant) dbus.ObjectPath {
 	value, ok := variant.Value().(dbus.ObjectPath)
 	if !ok {
@@ -137,4 +162,100 @@ func variantMapFromVariant(variant dbus.Variant) map[string]dbus.Variant {
 		return nil
 	}
 	return value
+}
+
+func modePairsFromVariant(variant dbus.Variant) ([]ModemModePair, error) {
+	var raw []dbusModePair
+	if err := variant.Store(&raw); err == nil {
+		pairs := make([]ModemModePair, 0, len(raw))
+		for _, pair := range raw {
+			pairs = append(pairs, ModemModePair{
+				Allowed:   ModemMode(pair.Allowed),
+				Preferred: ModemMode(pair.Preferred),
+			})
+		}
+		return pairs, nil
+	}
+
+	values, ok := variant.Value().([][]any)
+	if !ok {
+		return nil, fmt.Errorf("parse mode pairs: unexpected variant type %T", variant.Value())
+	}
+	pairs := make([]ModemModePair, 0, len(values))
+	for _, value := range values {
+		pairs = append(pairs, modePairFromValues(value))
+	}
+	return pairs, nil
+}
+
+func modePairFromVariant(variant dbus.Variant) (ModemModePair, error) {
+	var raw dbusModePair
+	if err := variant.Store(&raw); err == nil {
+		return ModemModePair{
+			Allowed:   ModemMode(raw.Allowed),
+			Preferred: ModemMode(raw.Preferred),
+		}, nil
+	}
+	values := anySliceFromVariant(variant)
+	if len(values) == 0 {
+		return ModemModePair{}, fmt.Errorf("parse mode pair: unexpected variant type %T", variant.Value())
+	}
+	return modePairFromValues(values), nil
+}
+
+func modePairFromValues(values []any) ModemModePair {
+	if len(values) < 2 {
+		return ModemModePair{}
+	}
+	return ModemModePair{
+		Allowed:   ModemMode(uintFromAny(values[0])),
+		Preferred: ModemMode(uintFromAny(values[1])),
+	}
+}
+
+func bandsFromVariant(variant dbus.Variant) ([]ModemBand, error) {
+	var raw []uint32
+	if err := variant.Store(&raw); err == nil {
+		bands := make([]ModemBand, 0, len(raw))
+		for _, band := range raw {
+			bands = append(bands, ModemBand(band))
+		}
+		return bands, nil
+	}
+
+	values, ok := variant.Value().([]any)
+	if !ok {
+		return nil, fmt.Errorf("parse bands: unexpected variant type %T", variant.Value())
+	}
+	bands := make([]ModemBand, 0, len(values))
+	for _, value := range values {
+		bands = append(bands, ModemBand(uintFromAny(value)))
+	}
+	return bands, nil
+}
+
+func uintFromAny(value any) uint32 {
+	switch v := value.(type) {
+	case uint32:
+		return v
+	case uint64:
+		return uint32(v)
+	case int:
+		if v < 0 {
+			return 0
+		}
+		return uint32(v)
+	case int32:
+		if v < 0 {
+			return 0
+		}
+		return uint32(v)
+	case int64:
+		if v < 0 {
+			return 0
+		}
+		return uint32(v)
+	default:
+		return 0
+	}
 }

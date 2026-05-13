@@ -272,6 +272,7 @@ func TestSIMSlotPaths(t *testing.T) {
 type fakeBusObject struct {
 	path           dbus.ObjectPath
 	errors         map[string][]error
+	outputs        map[string][]any
 	properties     map[string]dbus.Variant
 	propertyErrors map[string][]error
 	calls          []string
@@ -287,7 +288,7 @@ func (f *fakeBusObject) Call(method string, _ dbus.Flags, args ...any) *dbus.Cal
 		err = queue[0]
 		f.errors[method] = queue[1:]
 	}
-	return &dbus.Call{Err: err}
+	return &dbus.Call{Err: err, Body: f.outputs[method]}
 }
 
 func (f *fakeBusObject) CallWithContext(context.Context, string, dbus.Flags, ...any) *dbus.Call {

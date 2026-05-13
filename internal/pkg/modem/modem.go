@@ -35,6 +35,11 @@ type ModemPort struct {
 	Device   string
 }
 
+type dbusModePair struct {
+	Allowed   uint32
+	Preferred uint32
+}
+
 func (m *Modem) Enable() error {
 	return m.dbusObject.Call(ModemInterface+".Enable", 0, true).Err
 }
@@ -45,6 +50,61 @@ func (m *Modem) Disable() error {
 
 func (m *Modem) SetPrimarySimSlot(slot uint32) error {
 	return m.dbusObject.Call(ModemInterface+".SetPrimarySimSlot", 0, slot).Err
+}
+
+func (m *Modem) SupportedModes() ([]ModemModePair, error) {
+	variant, err := m.dbusObject.GetProperty(ModemInterface + ".SupportedModes")
+	if err != nil {
+		return nil, err
+	}
+	return modePairsFromVariant(variant)
+}
+
+func (m *Modem) CurrentModes() (ModemModePair, error) {
+	variant, err := m.dbusObject.GetProperty(ModemInterface + ".CurrentModes")
+	if err != nil {
+		return ModemModePair{}, err
+	}
+	return modePairFromVariant(variant)
+}
+
+func (m *Modem) SetCurrentModes(modes ModemModePair) error {
+	return m.dbusObject.Call(ModemInterface+".SetCurrentModes", 0, dbusModePair{
+		Allowed:   uint32(modes.Allowed),
+		Preferred: uint32(modes.Preferred),
+	}).Err
+}
+
+func (m *Modem) SupportedBands() ([]ModemBand, error) {
+	variant, err := m.dbusObject.GetProperty(ModemInterface + ".SupportedBands")
+	if err != nil {
+		return nil, err
+	}
+	return bandsFromVariant(variant)
+}
+
+func (m *Modem) CurrentBands() ([]ModemBand, error) {
+	variant, err := m.dbusObject.GetProperty(ModemInterface + ".CurrentBands")
+	if err != nil {
+		return nil, err
+	}
+	return bandsFromVariant(variant)
+}
+
+func (m *Modem) SetCurrentBands(bands []ModemBand) error {
+	values := make([]uint32, 0, len(bands))
+	for _, band := range bands {
+		values = append(values, uint32(band))
+	}
+	return m.dbusObject.Call(ModemInterface+".SetCurrentBands", 0, values).Err
+}
+
+func (m *Modem) GetCellInfo() ([]map[string]dbus.Variant, error) {
+	var cells []map[string]dbus.Variant
+	if err := m.dbusObject.Call(ModemInterface+".GetCellInfo", 0).Store(&cells); err != nil {
+		return nil, err
+	}
+	return cells, nil
 }
 
 func (m *Modem) AccessTechnologies() ([]ModemAccessTechnology, error) {
