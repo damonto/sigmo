@@ -258,7 +258,7 @@ func prefixFromIPConfig(cfg mmodem.BearerIPConfig, family int) (netip.Prefix, bo
 }
 
 func connectionFromBearer(bearer *mmodem.Bearer, prefs Preferences, metric int) (*Connection, error) {
-	prefs = bearerPreferences(bearer, prefs)
+	prefs = normalizePreferences(bearerPreferences(bearer, prefs))
 
 	connected, err := bearer.Connected()
 	if err != nil {
@@ -297,6 +297,10 @@ func connectionFromBearer(bearer *mmodem.Bearer, prefs Preferences, metric int) 
 	return &Connection{
 		Status:          StatusConnected,
 		APN:             prefs.APN,
+		IPType:          prefs.IPType,
+		APNUsername:     prefs.APNUsername,
+		APNPassword:     prefs.APNPassword,
+		APNAuth:         prefs.APNAuth,
 		DefaultRoute:    prefs.DefaultRoute,
 		ProxyEnabled:    prefs.ProxyEnabled,
 		AlwaysOn:        prefs.AlwaysOn,
@@ -374,10 +378,40 @@ func apnForModem(modem *mmodem.Modem, requested, bearer, remembered string) stri
 	})
 }
 
+func preferencesWithSelectedAPN(modem *mmodem.Modem, prefs Preferences) Preferences {
+	prefs.APN = apnForModem(modem, "", "", prefs.APN)
+	return preferencesWithDefaultAPNCredentials(modem, prefs)
+}
+
+func preferencesWithDefaultAPNCredentials(modem *mmodem.Modem, prefs Preferences) Preferences {
+	profile := defaultAPNProfileFrom(defaultAPNs, modemOperatorIdentifier(modem))
+	if profile.APN == "" || !strings.EqualFold(strings.TrimSpace(prefs.APN), profile.APN) {
+		return normalizePreferences(prefs)
+	}
+	if strings.TrimSpace(prefs.IPType) == "" {
+		prefs.IPType = profile.IPType
+	}
+	if strings.TrimSpace(prefs.APNUsername) == "" {
+		prefs.APNUsername = profile.Username
+	}
+	if prefs.APNPassword == "" {
+		prefs.APNPassword = profile.Password
+	}
+	if strings.TrimSpace(prefs.APNAuth) == "" {
+		prefs.APNAuth = profile.Auth
+	}
+	return normalizePreferences(prefs)
+}
+
 func disconnectedConnection(prefs Preferences) *Connection {
+	prefs = normalizePreferences(prefs)
 	return &Connection{
 		Status:          StatusDisconnected,
 		APN:             prefs.APN,
+		IPType:          prefs.IPType,
+		APNUsername:     prefs.APNUsername,
+		APNPassword:     prefs.APNPassword,
+		APNAuth:         prefs.APNAuth,
 		DefaultRoute:    prefs.DefaultRoute,
 		ProxyEnabled:    prefs.ProxyEnabled,
 		AlwaysOn:        prefs.AlwaysOn,
@@ -392,12 +426,27 @@ func disconnectedConnection(prefs Preferences) *Connection {
 }
 
 func bearerPreferences(bearer *mmodem.Bearer, fallback Preferences) Preferences {
-	fallback.APN = strings.TrimSpace(fallback.APN)
-	apn, err := bearer.APN()
-	if err != nil || strings.TrimSpace(apn) == "" {
+	fallback = normalizePreferences(fallback)
+
+	properties, err := bearer.Properties()
+	if err != nil {
 		return fallback
 	}
-	fallback.APN = strings.TrimSpace(apn)
+	if properties.APN != "" {
+		fallback.APN = properties.APN
+	}
+	if properties.IPType != "" {
+		fallback.IPType = properties.IPType
+	}
+	if properties.Username != "" {
+		fallback.APNUsername = properties.Username
+	}
+	if properties.Password != "" {
+		fallback.APNPassword = properties.Password
+	}
+	if properties.AllowedAuth != "" {
+		fallback.APNAuth = properties.AllowedAuth
+	}
 	return fallback
 }
 

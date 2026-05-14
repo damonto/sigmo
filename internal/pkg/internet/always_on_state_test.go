@@ -24,6 +24,10 @@ func TestAlwaysOnStateForModem(t *testing.T) {
 
 				want := Preferences{
 					APN:          "internet",
+					IPType:       "ipv4",
+					APNUsername:  "user",
+					APNPassword:  "secret",
+					APNAuth:      "pap",
 					DefaultRoute: true,
 					ProxyEnabled: true,
 					AlwaysOn:     true,

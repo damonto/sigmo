@@ -20,10 +20,22 @@ type apnDocument struct {
 }
 
 type apnEntry struct {
-	MCC  string `xml:"mcc,attr"`
-	MNC  string `xml:"mnc,attr"`
-	APN  string `xml:"apn,attr"`
-	Type string `xml:"type,attr"`
+	MCC      string `xml:"mcc,attr"`
+	MNC      string `xml:"mnc,attr"`
+	APN      string `xml:"apn,attr"`
+	Type     string `xml:"type,attr"`
+	Protocol string `xml:"protocol,attr"`
+	User     string `xml:"user,attr"`
+	Password string `xml:"password,attr"`
+	AuthType string `xml:"authtype,attr"`
+}
+
+type apnProfile struct {
+	APN      string
+	IPType   string
+	Username string
+	Password string
+	Auth     string
 }
 
 type apnSelection struct {
@@ -31,10 +43,10 @@ type apnSelection struct {
 	Bearer             string
 	Remembered         string
 	OperatorIdentifier string
-	DefaultAPNs        map[string]string
+	DefaultAPNs        map[string]apnProfile
 }
 
-func mustDefaultAPNs(data []byte) map[string]string {
+func mustDefaultAPNs(data []byte) map[string]apnProfile {
 	apns, err := defaultAPNsFromXML(data)
 	if err != nil {
 		panic(err)
@@ -42,13 +54,13 @@ func mustDefaultAPNs(data []byte) map[string]string {
 	return apns
 }
 
-func defaultAPNsFromXML(data []byte) (map[string]string, error) {
+func defaultAPNsFromXML(data []byte) (map[string]apnProfile, error) {
 	var document apnDocument
 	if err := xml.Unmarshal(data, &document); err != nil {
 		return nil, fmt.Errorf("parse apn xml: %w", err)
 	}
 
-	apns := make(map[string]string)
+	apns := make(map[string]apnProfile)
 	for _, entry := range document.APNs {
 		apn := strings.TrimSpace(entry.APN)
 		operatorIdentifier := strings.TrimSpace(entry.MCC) + strings.TrimSpace(entry.MNC)
@@ -58,7 +70,13 @@ func defaultAPNsFromXML(data []byte) (map[string]string, error) {
 		if _, exists := apns[operatorIdentifier]; exists {
 			continue
 		}
-		apns[operatorIdentifier] = apn
+		apns[operatorIdentifier] = apnProfile{
+			APN:      apn,
+			IPType:   androidProtocol(entry.Protocol),
+			Username: strings.TrimSpace(entry.User),
+			Password: entry.Password,
+			Auth:     androidAuthType(entry.AuthType),
+		}
 	}
 	return apns, nil
 }
@@ -70,8 +88,30 @@ func selectAPN(selection apnSelection) string {
 	return defaultAPNFrom(selection.DefaultAPNs, selection.OperatorIdentifier)
 }
 
-func defaultAPNFrom(apns map[string]string, operatorIdentifier string) string {
-	return strings.TrimSpace(apns[strings.TrimSpace(operatorIdentifier)])
+func defaultAPNFrom(apns map[string]apnProfile, operatorIdentifier string) string {
+	return defaultAPNProfileFrom(apns, operatorIdentifier).APN
+}
+
+func defaultAPNProfileFrom(apns map[string]apnProfile, operatorIdentifier string) apnProfile {
+	profile := apns[strings.TrimSpace(operatorIdentifier)]
+	profile.APN = strings.TrimSpace(profile.APN)
+	profile.IPType = strings.ToLower(strings.TrimSpace(profile.IPType))
+	profile.Username = strings.TrimSpace(profile.Username)
+	profile.Auth = strings.ToLower(strings.TrimSpace(profile.Auth))
+	return profile
+}
+
+func androidProtocol(value string) string {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "IP":
+		return "ipv4"
+	case "IPV6":
+		return "ipv6"
+	case "IPV4V6":
+		return "ipv4v6"
+	default:
+		return ""
+	}
 }
 
 func firstAPN(values ...string) string {
@@ -90,4 +130,19 @@ func hasAPNType(value, want string) bool {
 		}
 	}
 	return false
+}
+
+func androidAuthType(value string) string {
+	switch strings.TrimSpace(value) {
+	case "0":
+		return "none"
+	case "1":
+		return "pap"
+	case "2":
+		return "chap"
+	case "3":
+		return "pap|chap"
+	default:
+		return ""
+	}
 }

@@ -96,6 +96,28 @@ func AddAddress(interfaceName string, prefix netip.Prefix) error {
 	return changeAddress(unix.RTM_NEWADDR, unix.NLM_F_CREATE|unix.NLM_F_REPLACE, interfaceName, prefix)
 }
 
+func FlushAddresses(interfaceName string) error {
+	ifi, err := net.InterfaceByName(interfaceName)
+	if err != nil {
+		return fmt.Errorf("find interface: %w", err)
+	}
+	addrs, err := ifi.Addrs()
+	if err != nil {
+		return fmt.Errorf("list addresses: %w", err)
+	}
+
+	var result error
+	for _, addr := range addrs {
+		prefix, err := prefixFromAddr(addr)
+		if err != nil {
+			result = errors.Join(result, err)
+			continue
+		}
+		result = errors.Join(result, DeleteAddress(interfaceName, prefix))
+	}
+	return result
+}
+
 func DeleteAddress(interfaceName string, prefix netip.Prefix) error {
 	err := changeAddress(unix.RTM_DELADDR, 0, interfaceName, prefix)
 	if errors.Is(err, unix.EADDRNOTAVAIL) || errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESRCH) {
@@ -118,6 +140,14 @@ func DeleteDefaultRoute(route DefaultRoute) error {
 		return nil
 	}
 	return err
+}
+
+func prefixFromAddr(addr net.Addr) (netip.Prefix, error) {
+	prefix, err := netip.ParsePrefix(addr.String())
+	if err != nil {
+		return netip.Prefix{}, fmt.Errorf("parse address %q: %w", addr.String(), err)
+	}
+	return prefix, nil
 }
 
 func changeAddress(msgType uint16, flags uint16, interfaceName string, prefix netip.Prefix) error {

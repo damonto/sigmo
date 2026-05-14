@@ -20,6 +20,10 @@ var ErrUnsupportedIPMethod = errors.New("only static bearer IP configuration is 
 
 type Preferences struct {
 	APN          string
+	IPType       string
+	APNUsername  string
+	APNPassword  string
+	APNAuth      string
 	DefaultRoute bool
 	ProxyEnabled bool
 	AlwaysOn     bool
@@ -28,6 +32,10 @@ type Preferences struct {
 type Connection struct {
 	Status          string
 	APN             string
+	IPType          string
+	APNUsername     string
+	APNPassword     string
+	APNAuth         string
 	DefaultRoute    bool
 	ProxyEnabled    bool
 	AlwaysOn        bool
@@ -114,11 +122,15 @@ func (c *Connector) Current(modem *mmodem.Modem) (*Connection, error) {
 					}
 					delete(c.connections, modem.EquipmentIdentifier)
 					prefs := bearerPreferences(bearer, tracked.prefs)
-					prefs.APN = apnForModem(modem, "", "", prefs.APN)
+					prefs = preferencesWithSelectedAPN(modem, prefs)
 					c.preferences[modem.EquipmentIdentifier] = prefs
 					return disconnectedConnection(prefs), nil
 				}
-				connection, err := c.connectionFromBearer(modem.EquipmentIdentifier, bearer, tracked.prefs, tracked.routeMetric)
+				prefs := preferencesWithDefaultAPNCredentials(modem, tracked.prefs)
+				tracked.prefs = prefs
+				c.connections[modem.EquipmentIdentifier] = tracked
+				c.preferences[modem.EquipmentIdentifier] = prefs
+				connection, err := c.connectionFromBearer(modem.EquipmentIdentifier, bearer, prefs, tracked.routeMetric)
 				if err == nil {
 					return connection, nil
 				}
@@ -137,7 +149,7 @@ func (c *Connector) Current(modem *mmodem.Modem) (*Connection, error) {
 		if err := c.cleanupStaleConnectionState(modem.EquipmentIdentifier, staleInterfaces...); err != nil {
 			return nil, err
 		}
-		prefs.APN = apnForModem(modem, "", "", prefs.APN)
+		prefs = preferencesWithSelectedAPN(modem, prefs)
 		return disconnectedConnection(prefs), nil
 	}
 	if !current.connected {
@@ -148,7 +160,7 @@ func (c *Connector) Current(modem *mmodem.Modem) (*Connection, error) {
 			return nil, err
 		}
 		prefs = bearerPreferences(current.bearer, prefs)
-		prefs.APN = apnForModem(modem, "", "", prefs.APN)
+		prefs = preferencesWithSelectedAPN(modem, prefs)
 		c.preferences[modem.EquipmentIdentifier] = prefs
 		return disconnectedConnection(prefs), nil
 	}
@@ -158,6 +170,7 @@ func (c *Connector) Current(modem *mmodem.Modem) (*Connection, error) {
 		return nil, err
 	}
 	if ok {
+		tracked.prefs = preferencesWithDefaultAPNCredentials(modem, tracked.prefs)
 		c.connections[modem.EquipmentIdentifier] = tracked
 		c.preferences[modem.EquipmentIdentifier] = tracked.prefs
 		return c.connectionFromBearer(modem.EquipmentIdentifier, bearer, tracked.prefs, metric)
@@ -182,7 +195,7 @@ func (c *Connector) recoverLocked(modem *mmodem.Modem) error {
 		if err := c.cleanupStaleConnectionState(modem.EquipmentIdentifier, staleInterfaces...); err != nil {
 			return err
 		}
-		c.preferences[modem.EquipmentIdentifier] = bearerPreferences(current.bearer, prefs)
+		c.preferences[modem.EquipmentIdentifier] = preferencesWithSelectedAPN(modem, bearerPreferences(current.bearer, prefs))
 		return nil
 	}
 
@@ -193,6 +206,7 @@ func (c *Connector) recoverLocked(modem *mmodem.Modem) error {
 	if !ok {
 		return ErrUnsupportedIPMethod
 	}
+	tracked.prefs = preferencesWithDefaultAPNCredentials(modem, tracked.prefs)
 	if err := c.syncProxyPreference(modem.EquipmentIdentifier, tracked.interfaceName, tracked.prefs); err != nil {
 		return err
 	}
@@ -209,7 +223,7 @@ func (c *Connector) Connect(modem *mmodem.Modem, prefs Preferences) (*Connection
 }
 
 func (c *Connector) connectLocked(modem *mmodem.Modem, prefs Preferences, clearAlwaysOnBefore bool) (*Connection, error) {
-	prefs.APN = strings.TrimSpace(prefs.APN)
+	prefs = normalizePreferences(prefs)
 	if prefs.APN == "" {
 		apn, err := apnFromBearers(modem)
 		if err != nil {
@@ -217,13 +231,17 @@ func (c *Connector) connectLocked(modem *mmodem.Modem, prefs Preferences, clearA
 		}
 		prefs.APN = apnForModem(modem, "", apn, c.preferenceWithAlwaysOn(modem.EquipmentIdentifier).APN)
 	}
+	prefs = preferencesWithDefaultAPNCredentials(modem, prefs)
 	if err := c.disconnectLocked(modem, clearAlwaysOnBefore); err != nil {
 		return nil, fmt.Errorf("disconnect previous bearer: %w", err)
 	}
 
-	bearer, err := modem.ConnectBearer(prefs.APN)
+	bearer, err := modem.ConnectBearer(bearerPropertiesFromPreferences(prefs))
 	if err != nil {
-		return nil, fmt.Errorf("connect bearer: %w", err)
+		bearer, err = c.connectBearerAfterRecovery(modem, prefs, err)
+		if err != nil {
+			return nil, err
+		}
 	}
 	prefs = bearerPreferences(bearer, prefs)
 
@@ -579,8 +597,7 @@ func restoreTrackedRoute(tracked *trackedConnection, change defaultRouteChange) 
 
 func (c *Connector) preference(modemID string) Preferences {
 	if prefs, ok := c.preferences[modemID]; ok {
-		prefs.APN = strings.TrimSpace(prefs.APN)
-		return prefs
+		return normalizePreferences(prefs)
 	}
 	return Preferences{}
 }
@@ -604,12 +621,31 @@ func (c *Connector) syncAlwaysOnState(modemID string, prefs Preferences) error {
 func (c *Connector) clearAlwaysOnStateLocked(modemID string) error {
 	prefs := c.preferenceWithAlwaysOn(modemID)
 	prefs.AlwaysOn = false
-	if strings.TrimSpace(prefs.APN) != "" || prefs.DefaultRoute || prefs.ProxyEnabled {
+	if hasInternetPreference(prefs) {
 		c.preferences[modemID] = prefs
 	} else {
 		delete(c.preferences, modemID)
 	}
 	return deleteAlwaysOnStateForModem(c.alwaysOnPath, modemID)
+}
+
+func normalizePreferences(prefs Preferences) Preferences {
+	prefs.APN = strings.TrimSpace(prefs.APN)
+	prefs.IPType = strings.ToLower(strings.TrimSpace(prefs.IPType))
+	prefs.APNUsername = strings.TrimSpace(prefs.APNUsername)
+	prefs.APNAuth = strings.ToLower(strings.TrimSpace(prefs.APNAuth))
+	return prefs
+}
+
+func hasInternetPreference(prefs Preferences) bool {
+	prefs = normalizePreferences(prefs)
+	return prefs.APN != "" ||
+		(prefs.IPType != "" && prefs.IPType != "ipv4v6") ||
+		prefs.APNUsername != "" ||
+		prefs.APNPassword != "" ||
+		prefs.APNAuth != "" ||
+		prefs.DefaultRoute ||
+		prefs.ProxyEnabled
 }
 
 func (c *Connector) connectionFromBearer(modemID string, bearer *mmodem.Bearer, prefs Preferences, metric int) (*Connection, error) {
@@ -669,5 +705,87 @@ func (c *Connector) cleanupStaleConnectionState(modemID string, interfaceNames .
 	err := c.cleanupProxyInterfaces(modemID, interfaceNames)
 	err = errors.Join(err, c.cleanupProxyForModem(modemID))
 	err = errors.Join(err, restoreStaleDefaultRouteStatesForModem(modemID, interfaceNames...))
+	for _, interfaceName := range interfaceNames {
+		if strings.TrimSpace(interfaceName) == "" {
+			continue
+		}
+		err = errors.Join(err, netlink.FlushAddresses(interfaceName))
+	}
 	return err
+}
+
+func (c *Connector) connectBearerAfterRecovery(modem *mmodem.Modem, prefs Preferences, connectErr error) (*mmodem.Bearer, error) {
+	recoverErr := c.cleanupConnectFailure(modem)
+	if recoverErr != nil {
+		return nil, errors.Join(fmt.Errorf("connect bearer: %w", connectErr), recoverErr)
+	}
+	bearer, err := modem.ConnectBearer(bearerPropertiesFromPreferences(prefs))
+	if err == nil {
+		return bearer, nil
+	}
+
+	resetErr := c.resetConnectFailure(modem)
+	if resetErr == nil {
+		bearer, err = modem.ConnectBearer(bearerPropertiesFromPreferences(prefs))
+		if err == nil {
+			return bearer, nil
+		}
+	}
+	return nil, errors.Join(fmt.Errorf("connect bearer: %w", err), resetErr)
+}
+
+func bearerPropertiesFromPreferences(prefs Preferences) mmodem.BearerProperties {
+	return mmodem.BearerProperties{
+		APN:         prefs.APN,
+		IPType:      prefs.IPType,
+		Username:    prefs.APNUsername,
+		Password:    prefs.APNPassword,
+		AllowedAuth: prefs.APNAuth,
+	}
+}
+
+func (c *Connector) cleanupConnectFailure(modem *mmodem.Modem) error {
+	interfaceNames, err := c.deleteDisconnectedBearers(modem)
+	err = errors.Join(err, c.cleanupStaleConnectionState(modem.EquipmentIdentifier, interfaceNames...))
+	return err
+}
+
+func (c *Connector) resetConnectFailure(modem *mmodem.Modem) error {
+	err := c.cleanupConnectFailure(modem)
+	if err != nil {
+		return err
+	}
+	if err := modem.Restart(false); err != nil {
+		return fmt.Errorf("restart modem: %w", err)
+	}
+	return c.cleanupConnectFailure(modem)
+}
+
+func (c *Connector) deleteDisconnectedBearers(modem *mmodem.Modem) ([]string, error) {
+	bearers, err := modem.Bearers()
+	if err != nil {
+		return nil, fmt.Errorf("list bearers: %w", err)
+	}
+	var result error
+	var interfaceNames []string
+	for _, bearer := range bearers {
+		connected, err := bearer.Connected()
+		if err != nil {
+			result = errors.Join(result, fmt.Errorf("read bearer state: %w", err))
+			continue
+		}
+		if connected {
+			continue
+		}
+		if interfaceName, err := bearer.Interface(); err == nil && strings.TrimSpace(interfaceName) != "" {
+			interfaceName = strings.TrimSpace(interfaceName)
+			if !slices.Contains(interfaceNames, interfaceName) {
+				interfaceNames = append(interfaceNames, interfaceName)
+			}
+		}
+		if err := modem.DeleteBearer(bearer.Path()); err != nil {
+			result = errors.Join(result, fmt.Errorf("delete bearer %s: %w", bearer.Path(), err))
+		}
+	}
+	return interfaceNames, result
 }

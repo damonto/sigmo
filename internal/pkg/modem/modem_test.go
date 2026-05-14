@@ -161,6 +161,49 @@ func TestModemRestart(t *testing.T) {
 	}
 }
 
+func TestModemDeleteBearer(t *testing.T) {
+	object := &fakeBusObject{path: "/org/freedesktop/ModemManager1/Modem/1"}
+	modem := &Modem{dbusObject: object}
+
+	if err := modem.DeleteBearer("/org/freedesktop/ModemManager1/Bearer/7"); err != nil {
+		t.Fatalf("DeleteBearer() error = %v", err)
+	}
+	if got, want := object.calls, []string{ModemInterface + ".DeleteBearer"}; !slices.Equal(got, want) {
+		t.Fatalf("calls = %#v, want %#v", got, want)
+	}
+	if len(object.args) != 1 || len(object.args[0]) != 1 || object.args[0][0] != dbus.ObjectPath("/org/freedesktop/ModemManager1/Bearer/7") {
+		t.Fatalf("args = %#v, want bearer path", object.args)
+	}
+}
+
+func TestBearerDBusProperties(t *testing.T) {
+	properties, err := bearerDBusProperties(BearerProperties{
+		APN:         " wap.vodafone.co.uk ",
+		IPType:      "ipv4",
+		Username:    " wap ",
+		Password:    "*wap",
+		AllowedAuth: "pap",
+	})
+	if err != nil {
+		t.Fatalf("bearerDBusProperties() error = %v", err)
+	}
+	if got := properties["apn"].Value(); got != "wap.vodafone.co.uk" {
+		t.Fatalf("apn = %#v, want trimmed APN", got)
+	}
+	if got := properties["user"].Value(); got != "wap" {
+		t.Fatalf("user = %#v, want trimmed username", got)
+	}
+	if got := properties["password"].Value(); got != "*wap" {
+		t.Fatalf("password = %#v, want password", got)
+	}
+	if got := properties["ip-type"].Value(); got != bearerIPFamilyIPv4 {
+		t.Fatalf("ip-type = %#v, want IPv4", got)
+	}
+	if got := properties["allowed-auth"].Value(); got != bearerAllowedAuthPAP {
+		t.Fatalf("allowed-auth = %#v, want PAP", got)
+	}
+}
+
 func TestWaitForModem(t *testing.T) {
 	withWaitForModemRefreshInterval(t, time.Microsecond)
 

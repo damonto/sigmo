@@ -2,6 +2,10 @@ package internet
 
 type ConnectRequest struct {
 	APN          string `json:"apn" validate:"omitempty,max=100"`
+	IPType       string `json:"ipType" validate:"omitempty,max=20"`
+	APNUsername  string `json:"apnUsername" validate:"omitempty,max=100"`
+	APNPassword  string `json:"apnPassword" validate:"omitempty,max=100"`
+	APNAuth      string `json:"apnAuth" validate:"omitempty,max=50"`
 	DefaultRoute bool   `json:"defaultRoute"`
 	ProxyEnabled bool   `json:"proxyEnabled"`
 	AlwaysOn     bool   `json:"alwaysOn"`
@@ -10,6 +14,10 @@ type ConnectRequest struct {
 type ConnectionResponse struct {
 	Status          string   `json:"status"`
 	APN             string   `json:"apn"`
+	IPType          string   `json:"ipType"`
+	APNUsername     string   `json:"apnUsername"`
+	APNPassword     string   `json:"apnPassword"`
+	APNAuth         string   `json:"apnAuth"`
 	DefaultRoute    bool     `json:"defaultRoute"`
 	ProxyEnabled    bool     `json:"proxyEnabled"`
 	AlwaysOn        bool     `json:"alwaysOn"`

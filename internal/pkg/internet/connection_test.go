@@ -1,6 +1,7 @@
 package internet
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -9,6 +10,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unsafe"
+
+	"github.com/godbus/dbus/v5"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
@@ -35,6 +39,42 @@ func TestRouteMetric(t *testing.T) {
 				t.Fatalf("routeMetric() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCurrentReturnsDefaultAPNCredentials(t *testing.T) {
+	t.Parallel()
+
+	modem := testModemWithBusObject(
+		t,
+		&internetFakeBusObject{
+			path: "/org/freedesktop/ModemManager1/Modem/1",
+			properties: map[string]dbus.Variant{
+				mmodem.ModemInterface + ".Bearers": dbus.MakeVariant([]dbus.ObjectPath{}),
+			},
+		},
+	)
+	modem.EquipmentIdentifier = "860588043408833"
+	modem.Sim = &mmodem.SIM{OperatorIdentifier: "23415"}
+
+	connector := NewConnector()
+	connector.alwaysOnPath = filepath.Join(t.TempDir(), "internet-always-on.json")
+
+	got, err := connector.Current(modem)
+	if err != nil {
+		t.Fatalf("Current() error = %v", err)
+	}
+	if got.Status != StatusDisconnected {
+		t.Fatalf("Current() Status = %q, want %q", got.Status, StatusDisconnected)
+	}
+	if got.APN != "wap.vodafone.co.uk" {
+		t.Fatalf("Current() APN = %q, want Vodafone APN", got.APN)
+	}
+	if got.IPType != "ipv4v6" {
+		t.Fatalf("Current() IPType = %q, want ipv4v6", got.IPType)
+	}
+	if got.APNUsername != "wap" || got.APNPassword != "*wap" || got.APNAuth != "pap" {
+		t.Fatalf("Current() credentials = %q/%q/%q, want wap/*wap/pap", got.APNUsername, got.APNPassword, got.APNAuth)
 	}
 }
 
@@ -811,6 +851,70 @@ func TestTakeoverDefaultRoutesKeepsStateWhenRollbackFails(t *testing.T) {
 			}
 		})
 	}
+}
+
+type internetFakeBusObject struct {
+	path       dbus.ObjectPath
+	properties map[string]dbus.Variant
+}
+
+func (f *internetFakeBusObject) Call(string, dbus.Flags, ...any) *dbus.Call {
+	panic("unexpected Call")
+}
+
+func (f *internetFakeBusObject) CallWithContext(context.Context, string, dbus.Flags, ...any) *dbus.Call {
+	panic("unexpected CallWithContext")
+}
+
+func (f *internetFakeBusObject) Go(string, dbus.Flags, chan *dbus.Call, ...any) *dbus.Call {
+	panic("unexpected Go")
+}
+
+func (f *internetFakeBusObject) GoWithContext(context.Context, string, dbus.Flags, chan *dbus.Call, ...any) *dbus.Call {
+	panic("unexpected GoWithContext")
+}
+
+func (f *internetFakeBusObject) AddMatchSignal(string, string, ...dbus.MatchOption) *dbus.Call {
+	panic("unexpected AddMatchSignal")
+}
+
+func (f *internetFakeBusObject) RemoveMatchSignal(string, string, ...dbus.MatchOption) *dbus.Call {
+	panic("unexpected RemoveMatchSignal")
+}
+
+func (f *internetFakeBusObject) GetProperty(name string) (dbus.Variant, error) {
+	variant, ok := f.properties[name]
+	if !ok {
+		return dbus.Variant{}, fmt.Errorf("missing property %s", name)
+	}
+	return variant, nil
+}
+
+func (f *internetFakeBusObject) StoreProperty(string, any) error {
+	panic("unexpected StoreProperty")
+}
+
+func (f *internetFakeBusObject) SetProperty(string, any) error {
+	panic("unexpected SetProperty")
+}
+
+func (f *internetFakeBusObject) Destination() string {
+	return mmodem.ModemManagerInterface
+}
+
+func (f *internetFakeBusObject) Path() dbus.ObjectPath {
+	return f.path
+}
+
+func testModemWithBusObject(t *testing.T, object dbus.BusObject) *mmodem.Modem {
+	t.Helper()
+
+	modem := &mmodem.Modem{}
+	field := reflect.ValueOf(modem).Elem().FieldByName("dbusObject")
+	// Modem intentionally keeps its DBus object private. This test needs a fake
+	// object so Connector.Current can run without touching the system bus.
+	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(object))
+	return modem
 }
 
 func TestTakeoverDefaultRoutesReportsStateCleanupError(t *testing.T) {

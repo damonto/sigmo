@@ -105,3 +105,92 @@ func TestBearerStatsFromVariants(t *testing.T) {
 		})
 	}
 }
+
+func TestBearerPropertiesFromVariants(t *testing.T) {
+	t.Parallel()
+
+	raw := map[string]dbus.Variant{
+		"apn":          dbus.MakeVariant(" wap.vodafone.co.uk "),
+		"ip-type":      dbus.MakeVariant(bearerIPFamilyIPv4V6),
+		"user":         dbus.MakeVariant(" wap "),
+		"password":     dbus.MakeVariant("*wap"),
+		"allowed-auth": dbus.MakeVariant(bearerAllowedAuthPAP | bearerAllowedAuthCHAP),
+	}
+
+	got := bearerPropertiesFromVariants(raw)
+	want := BearerProperties{
+		APN:         "wap.vodafone.co.uk",
+		IPType:      "ipv4v6",
+		Username:    "wap",
+		Password:    "*wap",
+		AllowedAuth: "pap|chap",
+	}
+	if got != want {
+		t.Fatalf("bearerPropertiesFromVariants() = %#v, want %#v", got, want)
+	}
+}
+
+func TestBearerIPFamily(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		ipType  string
+		want    uint32
+		wantErr bool
+	}{
+		{name: "default", ipType: "", want: bearerIPFamilyIPv4V6},
+		{name: "ipv4", ipType: "ipv4", want: bearerIPFamilyIPv4},
+		{name: "ipv6", ipType: "ipv6", want: bearerIPFamilyIPv6},
+		{name: "ipv4v6", ipType: " ipv4v6 ", want: bearerIPFamilyIPv4V6},
+		{name: "unsupported", ipType: "ppp", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := BearerIPFamily(tt.ipType)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("BearerIPFamily() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("BearerIPFamily() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBearerAllowedAuth(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		auth    string
+		want    uint32
+		wantErr bool
+	}{
+		{name: "empty", auth: "", want: 0},
+		{name: "single", auth: "pap", want: bearerAllowedAuthPAP},
+		{name: "multiple", auth: " pap|chap ", want: bearerAllowedAuthPAP | bearerAllowedAuthCHAP},
+		{name: "comma separated", auth: "mschap,mschapv2", want: bearerAllowedAuthMSCHAP | bearerAllowedAuthMSCHAPV2},
+		{name: "none combined", auth: "none|pap", wantErr: true},
+		{name: "unsupported", auth: "token", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := BearerAllowedAuth(tt.auth)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("BearerAllowedAuth() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("BearerAllowedAuth() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

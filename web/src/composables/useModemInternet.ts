@@ -15,6 +15,8 @@ type FetchConnectionOptions = {
 }
 
 const pollIntervalMs = 5000
+const defaultAPNAuth = 'default'
+const defaultIPType = 'ipv4v6'
 
 export const useModemInternet = ({ modemId, onSuccess }: Options) => {
   const { t } = useI18n()
@@ -23,6 +25,10 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
   const internetConnection = ref<InternetConnectionResponse | null>(null)
   const internetPublicInfo = ref<InternetPublicResponse | null>(null)
   const internetAPN = ref('')
+  const internetIPType = ref(defaultIPType)
+  const internetAPNUsername = ref('')
+  const internetAPNPassword = ref('')
+  const internetAPNAuth = ref(defaultAPNAuth)
   const internetDefaultRoute = ref(false)
   const internetProxyEnabled = ref(false)
   const internetAlwaysOn = ref(false)
@@ -56,6 +62,10 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
     internetPublicInfo.value = null
     publicConnectionKey.value = ''
     internetAPN.value = ''
+    internetIPType.value = defaultIPType
+    internetAPNUsername.value = ''
+    internetAPNPassword.value = ''
+    internetAPNAuth.value = defaultAPNAuth
     internetDefaultRoute.value = false
     internetProxyEnabled.value = false
     internetAlwaysOn.value = false
@@ -74,6 +84,10 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
     const key = connectionKey(connection)
     internetConnection.value = connection
     internetAPN.value = connection?.apn ?? ''
+    internetIPType.value = connection?.ipType || defaultIPType
+    internetAPNUsername.value = connection?.apnUsername ?? ''
+    internetAPNPassword.value = connection?.apnPassword ?? ''
+    internetAPNAuth.value = connection?.apnAuth || defaultAPNAuth
     internetDefaultRoute.value = connection?.defaultRoute ?? false
     internetProxyEnabled.value = connection?.proxyEnabled ?? false
     internetAlwaysOn.value = connection?.alwaysOn ?? false
@@ -135,6 +149,10 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
     try {
       const { data } = await internetApi.connect(targetId, {
         apn: internetAPN.value.trim(),
+        ipType: internetIPType.value.trim(),
+        apnUsername: internetAPNUsername.value.trim(),
+        apnPassword: internetAPNPassword.value,
+        apnAuth: internetAPNAuth.value === defaultAPNAuth ? '' : internetAPNAuth.value.trim(),
         defaultRoute: internetDefaultRoute.value,
         proxyEnabled: internetProxyEnabled.value,
         alwaysOn: internetAlwaysOn.value,
@@ -198,6 +216,10 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
     internetConnection,
     internetPublicInfo,
     internetAPN,
+    internetIPType,
+    internetAPNUsername,
+    internetAPNPassword,
+    internetAPNAuth,
     internetDefaultRoute,
     internetProxyEnabled,
     internetAlwaysOn,

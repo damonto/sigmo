@@ -25,6 +25,8 @@ const (
 	errorCodeUnsupportedInternetConfiguration = "internet_connection_unsupported_ip_method"
 	errorCodeInternetProxyInvalidConfig       = "internet_proxy_invalid_config"
 	errorCodeInternetProxyStartFailed         = "internet_proxy_start_failed"
+	errorCodeInternetAuthInvalidConfig        = "internet_auth_invalid_config"
+	errorCodeInternetIPTypeInvalidConfig      = "internet_ip_type_invalid_config"
 )
 
 func New(manager *mmodem.Manager) *Handler {
@@ -72,8 +74,18 @@ func (h *Handler) Connect(c *echo.Context) error {
 	if err := httpapi.BindAndValidate(c, &req, errorCodeConnectInternetInvalidRequest); err != nil {
 		return err
 	}
+	if _, err := mmodem.BearerAllowedAuth(req.APNAuth); err != nil {
+		return httpapi.UnprocessableEntity(c, errorCodeInternetAuthInvalidConfig, err)
+	}
+	if _, err := mmodem.BearerIPFamily(req.IPType); err != nil {
+		return httpapi.UnprocessableEntity(c, errorCodeInternetIPTypeInvalidConfig, err)
+	}
 	prefs := internetcore.Preferences{
 		APN:          req.APN,
+		IPType:       req.IPType,
+		APNUsername:  req.APNUsername,
+		APNPassword:  req.APNPassword,
+		APNAuth:      req.APNAuth,
 		DefaultRoute: req.DefaultRoute,
 		ProxyEnabled: req.ProxyEnabled,
 		AlwaysOn:     req.AlwaysOn,
@@ -106,6 +118,12 @@ func internetError(c *echo.Context, err error, internalErrorCode string) error {
 	if errors.Is(err, internetcore.ErrProxyStart) {
 		return httpapi.UnprocessableEntity(c, errorCodeInternetProxyStartFailed, err)
 	}
+	if errors.Is(err, mmodem.ErrUnsupportedBearerAuth) {
+		return httpapi.UnprocessableEntity(c, errorCodeInternetAuthInvalidConfig, err)
+	}
+	if errors.Is(err, mmodem.ErrUnsupportedBearerIPType) {
+		return httpapi.UnprocessableEntity(c, errorCodeInternetIPTypeInvalidConfig, err)
+	}
 	return httpapi.Internal(c, internalErrorCode, err)
 }
 
@@ -113,6 +131,10 @@ func responseFromConnection(connection *internetcore.Connection) ConnectionRespo
 	return ConnectionResponse{
 		Status:          connection.Status,
 		APN:             connection.APN,
+		IPType:          connection.IPType,
+		APNUsername:     connection.APNUsername,
+		APNPassword:     connection.APNPassword,
+		APNAuth:         connection.APNAuth,
 		DefaultRoute:    connection.DefaultRoute,
 		ProxyEnabled:    connection.ProxyEnabled,
 		AlwaysOn:        connection.AlwaysOn,

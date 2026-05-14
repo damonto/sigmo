@@ -7,6 +7,10 @@ import ModemInternetPublicCard from './ModemInternetPublicCard.vue'
 import type { InternetConnectionResponse, InternetPublicResponse } from '@/types/internet'
 
 const apn = defineModel<string>('apn', { required: true })
+const ipType = defineModel<string>('ipType', { required: true })
+const apnUsername = defineModel<string>('apnUsername', { required: true })
+const apnPassword = defineModel<string>('apnPassword', { required: true })
+const apnAuth = defineModel<string>('apnAuth', { required: true })
 const defaultRoute = defineModel<boolean>('defaultRoute', { required: true })
 const proxyEnabled = defineModel<boolean>('proxyEnabled', { required: true })
 const alwaysOn = defineModel<boolean>('alwaysOn', { required: true })
@@ -34,6 +38,10 @@ const shouldShowProxyInfo = computed(
 <template>
   <ModemInternetConnectionCard
     v-model:apn="apn"
+    v-model:ip-type="ipType"
+    v-model:apn-username="apnUsername"
+    v-model:apn-password="apnPassword"
+    v-model:apn-auth="apnAuth"
     v-model:default-route="defaultRoute"
     v-model:proxy-enabled="proxyEnabled"
     v-model:always-on="alwaysOn"

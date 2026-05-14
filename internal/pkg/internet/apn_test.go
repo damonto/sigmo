@@ -13,21 +13,34 @@ func TestDefaultAPNsFromXML(t *testing.T) {
 	tests := []struct {
 		name string
 		xml  string
-		want map[string]string
+		want map[string]apnProfile
 	}{
 		{
 			name: "mcc mnc default apn",
 			xml: `<apns>
 				<apn mcc="001" mnc="01" apn="phone" type="default,ia,mms"/>
 			</apns>`,
-			want: map[string]string{"00101": "phone"},
+			want: map[string]apnProfile{"00101": {APN: "phone"}},
 		},
 		{
 			name: "trim fields and default type",
 			xml: `<apns>
 				<apn mcc=" 310 " mnc=" 260 " apn=" fast.t-mobile.com " type=" ia, default ,supl"/>
 			</apns>`,
-			want: map[string]string{"310260": "fast.t-mobile.com"},
+			want: map[string]apnProfile{"310260": {APN: "fast.t-mobile.com"}},
+		},
+		{
+			name: "default apn credentials",
+			xml: `<apns>
+				<apn mcc="234" mnc="15" apn="wap.vodafone.co.uk" protocol="IPV4V6" user="wap" password="*wap" authtype="1" type="default"/>
+			</apns>`,
+			want: map[string]apnProfile{"23415": {
+				APN:      "wap.vodafone.co.uk",
+				IPType:   "ipv4v6",
+				Username: "wap",
+				Password: "*wap",
+				Auth:     "pap",
+			}},
 		},
 		{
 			name: "ignore non default apns",
@@ -36,7 +49,7 @@ func TestDefaultAPNsFromXML(t *testing.T) {
 				<apn mcc="001" mnc="01" apn="dun" type="dun"/>
 				<apn mcc="001" mnc="01" apn="empty"/>
 			</apns>`,
-			want: map[string]string{},
+			want: map[string]apnProfile{},
 		},
 		{
 			name: "keep first default apn",
@@ -44,7 +57,7 @@ func TestDefaultAPNsFromXML(t *testing.T) {
 				<apn mcc="001" mnc="01" apn="first" type="default"/>
 				<apn mcc="001" mnc="01" apn="second" type="default"/>
 			</apns>`,
-			want: map[string]string{"00101": "first"},
+			want: map[string]apnProfile{"00101": {APN: "first"}},
 		},
 	}
 
@@ -75,8 +88,8 @@ func TestDefaultAPNsFromXMLInvalid(t *testing.T) {
 func TestSelectAPN(t *testing.T) {
 	t.Parallel()
 
-	defaults := map[string]string{
-		"00101": "xml",
+	defaults := map[string]apnProfile{
+		"00101": {APN: "xml"},
 	}
 	tests := []struct {
 		name      string
@@ -136,6 +149,53 @@ func TestSelectAPN(t *testing.T) {
 				t.Fatalf("selectAPN() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPreferencesWithDefaultAPNCredentials(t *testing.T) {
+	t.Parallel()
+
+	modem := &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23415"}}
+	prefs := Preferences{APN: "wap.vodafone.co.uk"}
+
+	got := preferencesWithDefaultAPNCredentials(modem, prefs)
+	if got.APNUsername != "wap" || got.APNPassword != "*wap" || got.APNAuth != "pap" {
+		t.Fatalf("preferencesWithDefaultAPNCredentials() = %#v, want Vodafone credentials", got)
+	}
+	if got.IPType != "ipv4v6" {
+		t.Fatalf("preferencesWithDefaultAPNCredentials() IPType = %q, want ipv4v6", got.IPType)
+	}
+
+	manual := Preferences{
+		APN:         "wap.vodafone.co.uk",
+		IPType:      "ipv4",
+		APNUsername: "custom",
+		APNPassword: "secret",
+		APNAuth:     "chap",
+	}
+	got = preferencesWithDefaultAPNCredentials(modem, manual)
+	if got.APNUsername != "custom" || got.APNPassword != "secret" || got.APNAuth != "chap" {
+		t.Fatalf("preferencesWithDefaultAPNCredentials() = %#v, want manual credentials", got)
+	}
+	if got.IPType != "ipv4" {
+		t.Fatalf("preferencesWithDefaultAPNCredentials() IPType = %q, want ipv4", got.IPType)
+	}
+}
+
+func TestPreferencesWithSelectedAPN(t *testing.T) {
+	t.Parallel()
+
+	modem := &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23415"}}
+
+	got := preferencesWithSelectedAPN(modem, Preferences{})
+	if got.APN != "wap.vodafone.co.uk" {
+		t.Fatalf("preferencesWithSelectedAPN() APN = %q, want Vodafone APN", got.APN)
+	}
+	if got.APNUsername != "wap" || got.APNPassword != "*wap" || got.APNAuth != "pap" {
+		t.Fatalf("preferencesWithSelectedAPN() = %#v, want Vodafone credentials", got)
+	}
+	if got.IPType != "ipv4v6" {
+		t.Fatalf("preferencesWithSelectedAPN() IPType = %q, want ipv4v6", got.IPType)
 	}
 }
 

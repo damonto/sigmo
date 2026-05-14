@@ -15,7 +15,23 @@ const (
 )
 
 const (
+	bearerIPFamilyIPv4   uint32 = 1 << 0
+	bearerIPFamilyIPv6   uint32 = 1 << 1
 	bearerIPFamilyIPv4V6 uint32 = 1 << 2
+)
+
+const (
+	bearerAllowedAuthNone     uint32 = 1 << 0
+	bearerAllowedAuthPAP      uint32 = 1 << 1
+	bearerAllowedAuthCHAP     uint32 = 1 << 2
+	bearerAllowedAuthMSCHAP   uint32 = 1 << 3
+	bearerAllowedAuthMSCHAPV2 uint32 = 1 << 4
+	bearerAllowedAuthEAP      uint32 = 1 << 5
+)
+
+var (
+	ErrUnsupportedBearerAuth   = errors.New("bearer authentication method is unsupported")
+	ErrUnsupportedBearerIPType = errors.New("bearer IP type is unsupported")
 )
 
 type BearerIPMethod uint32
@@ -64,12 +80,18 @@ type BearerStats struct {
 	Duration uint32
 }
 
-func (m *Modem) ConnectBearer(apn string) (*Bearer, error) {
-	properties := map[string]dbus.Variant{
-		"ip-type": dbus.MakeVariant(bearerIPFamilyIPv4V6),
-	}
-	if apn = strings.TrimSpace(apn); apn != "" {
-		properties["apn"] = dbus.MakeVariant(apn)
+type BearerProperties struct {
+	APN         string
+	IPType      string
+	Username    string
+	Password    string
+	AllowedAuth string
+}
+
+func (m *Modem) ConnectBearer(prefs BearerProperties) (*Bearer, error) {
+	properties, err := bearerDBusProperties(prefs)
+	if err != nil {
+		return nil, err
 	}
 
 	var path dbus.ObjectPath
@@ -79,8 +101,39 @@ func (m *Modem) ConnectBearer(apn string) (*Bearer, error) {
 	return m.Bearer(path)
 }
 
+func bearerDBusProperties(prefs BearerProperties) (map[string]dbus.Variant, error) {
+	ipType, err := BearerIPFamily(prefs.IPType)
+	if err != nil {
+		return nil, err
+	}
+	properties := map[string]dbus.Variant{
+		"ip-type": dbus.MakeVariant(ipType),
+	}
+	if apn := strings.TrimSpace(prefs.APN); apn != "" {
+		properties["apn"] = dbus.MakeVariant(apn)
+	}
+	if username := strings.TrimSpace(prefs.Username); username != "" {
+		properties["user"] = dbus.MakeVariant(username)
+	}
+	if prefs.Password != "" {
+		properties["password"] = dbus.MakeVariant(prefs.Password)
+	}
+	if auth := strings.TrimSpace(prefs.AllowedAuth); auth != "" {
+		allowedAuth, err := BearerAllowedAuth(auth)
+		if err != nil {
+			return nil, err
+		}
+		properties["allowed-auth"] = dbus.MakeVariant(allowedAuth)
+	}
+	return properties, nil
+}
+
 func (m *Modem) DisconnectBearer(path dbus.ObjectPath) error {
 	return m.dbusObject.Call(ModemSimpleInterface+".Disconnect", 0, path).Err
+}
+
+func (m *Modem) DeleteBearer(path dbus.ObjectPath) error {
+	return m.dbusObject.Call(ModemInterface+".DeleteBearer", 0, path).Err
 }
 
 func (m *Modem) Bearers() ([]*Bearer, error) {
@@ -154,11 +207,19 @@ func (b *Bearer) Stats() (BearerStats, error) {
 }
 
 func (b *Bearer) APN() (string, error) {
-	variant, err := b.dbusObject.GetProperty(BearerInterface + ".Properties")
+	properties, err := b.Properties()
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(variantString(variantMapFromVariant(variant), "apn")), nil
+	return properties.APN, nil
+}
+
+func (b *Bearer) Properties() (BearerProperties, error) {
+	variant, err := b.dbusObject.GetProperty(BearerInterface + ".Properties")
+	if err != nil {
+		return BearerProperties{}, err
+	}
+	return bearerPropertiesFromVariants(variantMapFromVariant(variant)), nil
 }
 
 func (b *Bearer) Disconnect() error {
@@ -191,10 +252,104 @@ func bearerIPConfigFromVariants(raw map[string]dbus.Variant) BearerIPConfig {
 	return cfg
 }
 
+func bearerPropertiesFromVariants(raw map[string]dbus.Variant) BearerProperties {
+	return BearerProperties{
+		APN:         strings.TrimSpace(variantString(raw, "apn")),
+		IPType:      bearerIPFamilyString(variantUint[uint32](raw, "ip-type")),
+		Username:    strings.TrimSpace(variantString(raw, "user")),
+		Password:    variantString(raw, "password"),
+		AllowedAuth: bearerAllowedAuthString(variantUint[uint32](raw, "allowed-auth")),
+	}
+}
+
 func bearerStatsFromVariants(raw map[string]dbus.Variant) BearerStats {
 	return BearerStats{
 		RXBytes:  variantUint[uint64](raw, "rx-bytes"),
 		TXBytes:  variantUint[uint64](raw, "tx-bytes"),
 		Duration: variantUint[uint32](raw, "duration"),
 	}
+}
+
+func BearerIPFamily(ipType string) (uint32, error) {
+	switch strings.ToLower(strings.TrimSpace(ipType)) {
+	case "", "ipv4v6":
+		return bearerIPFamilyIPv4V6, nil
+	case "ipv4":
+		return bearerIPFamilyIPv4, nil
+	case "ipv6":
+		return bearerIPFamilyIPv6, nil
+	default:
+		return 0, fmt.Errorf("%w: %s", ErrUnsupportedBearerIPType, ipType)
+	}
+}
+
+func bearerIPFamilyString(ipType uint32) string {
+	switch ipType {
+	case bearerIPFamilyIPv4:
+		return "ipv4"
+	case bearerIPFamilyIPv6:
+		return "ipv6"
+	case bearerIPFamilyIPv4V6:
+		return "ipv4v6"
+	default:
+		return ""
+	}
+}
+
+func BearerAllowedAuth(auth string) (uint32, error) {
+	auth = strings.ToLower(strings.TrimSpace(auth))
+	if auth == "" {
+		return 0, nil
+	}
+
+	var result uint32
+	for _, part := range strings.FieldsFunc(auth, func(r rune) bool {
+		return r == '|' || r == ',' || r == ' '
+	}) {
+		switch strings.TrimSpace(part) {
+		case "":
+			continue
+		case "none":
+			result |= bearerAllowedAuthNone
+		case "pap":
+			result |= bearerAllowedAuthPAP
+		case "chap":
+			result |= bearerAllowedAuthCHAP
+		case "mschap":
+			result |= bearerAllowedAuthMSCHAP
+		case "mschapv2":
+			result |= bearerAllowedAuthMSCHAPV2
+		case "eap":
+			result |= bearerAllowedAuthEAP
+		default:
+			return 0, fmt.Errorf("%w: %s", ErrUnsupportedBearerAuth, part)
+		}
+	}
+	if result&bearerAllowedAuthNone != 0 && result != bearerAllowedAuthNone {
+		return 0, fmt.Errorf("%w: none cannot be combined with other methods", ErrUnsupportedBearerAuth)
+	}
+	return result, nil
+}
+
+func bearerAllowedAuthString(auth uint32) string {
+	if auth == 0 {
+		return ""
+	}
+	parts := make([]string, 0, 6)
+	for _, item := range []struct {
+		mask uint32
+		name string
+	}{
+		{bearerAllowedAuthNone, "none"},
+		{bearerAllowedAuthPAP, "pap"},
+		{bearerAllowedAuthCHAP, "chap"},
+		{bearerAllowedAuthMSCHAP, "mschap"},
+		{bearerAllowedAuthMSCHAPV2, "mschapv2"},
+		{bearerAllowedAuthEAP, "eap"},
+	} {
+		if auth&item.mask != 0 {
+			parts = append(parts, item.name)
+		}
+	}
+	return strings.Join(parts, "|")
 }

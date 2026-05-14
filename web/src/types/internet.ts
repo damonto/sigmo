@@ -3,6 +3,10 @@ export type InternetConnectionStatus = 'connected' | 'disconnected'
 export type InternetConnectionResponse = {
   status: InternetConnectionStatus
   apn: string
+  ipType: string
+  apnUsername: string
+  apnPassword: string
+  apnAuth: string
   defaultRoute: boolean
   proxyEnabled: boolean
   alwaysOn: boolean
@@ -34,6 +38,10 @@ export type InternetProxy = {
 
 export type ConnectInternetPayload = {
   apn: string
+  ipType: string
+  apnUsername: string
+  apnPassword: string
+  apnAuth: string
   defaultRoute: boolean
   proxyEnabled: boolean
   alwaysOn: boolean

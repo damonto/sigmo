@@ -85,6 +85,10 @@ const {
   internetConnection,
   internetPublicInfo,
   internetAPN,
+  internetIPType,
+  internetAPNUsername,
+  internetAPNPassword,
+  internetAPNAuth,
   internetDefaultRoute,
   internetProxyEnabled,
   internetAlwaysOn,
@@ -151,6 +155,10 @@ const {
       <TabsContent value="internet" class="space-y-3">
         <ModemInternetSection
           v-model:apn="internetAPN"
+          v-model:ip-type="internetIPType"
+          v-model:apn-username="internetAPNUsername"
+          v-model:apn-password="internetAPNPassword"
+          v-model:apn-auth="internetAPNAuth"
           v-model:default-route="internetDefaultRoute"
           v-model:proxy-enabled="internetProxyEnabled"
           v-model:always-on="internetAlwaysOn"

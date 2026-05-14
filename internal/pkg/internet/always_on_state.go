@@ -21,6 +21,10 @@ type alwaysOnStateFile struct {
 
 type alwaysOnStateEntry struct {
 	APN          string `json:"apn"`
+	IPType       string `json:"ipType,omitempty"`
+	APNUsername  string `json:"apnUsername,omitempty"`
+	APNPassword  string `json:"apnPassword,omitempty"`
+	APNAuth      string `json:"apnAuth,omitempty"`
 	DefaultRoute bool   `json:"defaultRoute"`
 	ProxyEnabled bool   `json:"proxyEnabled"`
 	AlwaysOn     bool   `json:"alwaysOn"`
@@ -72,6 +76,10 @@ func saveAlwaysOnStateForModem(path string, modemID string, prefs Preferences) e
 	}
 	store.Modems[modemID] = alwaysOnStateEntry{
 		APN:          strings.TrimSpace(prefs.APN),
+		IPType:       strings.ToLower(strings.TrimSpace(prefs.IPType)),
+		APNUsername:  strings.TrimSpace(prefs.APNUsername),
+		APNPassword:  prefs.APNPassword,
+		APNAuth:      strings.ToLower(strings.TrimSpace(prefs.APNAuth)),
 		DefaultRoute: prefs.DefaultRoute,
 		ProxyEnabled: prefs.ProxyEnabled,
 		AlwaysOn:     true,
@@ -159,6 +167,10 @@ func writeAlwaysOnState(path string, store alwaysOnStateFile) error {
 func preferencesFromAlwaysOnState(entry alwaysOnStateEntry) Preferences {
 	return Preferences{
 		APN:          strings.TrimSpace(entry.APN),
+		IPType:       strings.ToLower(strings.TrimSpace(entry.IPType)),
+		APNUsername:  strings.TrimSpace(entry.APNUsername),
+		APNPassword:  entry.APNPassword,
+		APNAuth:      strings.ToLower(strings.TrimSpace(entry.APNAuth)),
 		DefaultRoute: entry.DefaultRoute,
 		ProxyEnabled: entry.ProxyEnabled,
 		AlwaysOn:     true,

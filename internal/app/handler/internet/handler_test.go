@@ -84,6 +84,18 @@ func TestInternetError(t *testing.T) {
 			wantStatus: http.StatusInternalServerError,
 			wantBody:   errorCodeConnectInternetFailed,
 		},
+		{
+			name:       "unsupported auth",
+			err:        mmodem.ErrUnsupportedBearerAuth,
+			wantStatus: http.StatusUnprocessableEntity,
+			wantBody:   errorCodeInternetAuthInvalidConfig,
+		},
+		{
+			name:       "unsupported ip type",
+			err:        mmodem.ErrUnsupportedBearerIPType,
+			wantStatus: http.StatusUnprocessableEntity,
+			wantBody:   errorCodeInternetIPTypeInvalidConfig,
+		},
 	}
 
 	for _, tt := range tests {
@@ -158,6 +170,10 @@ func TestResponseFromConnection(t *testing.T) {
 			connection: &internetcore.Connection{
 				Status:          internetcore.StatusConnected,
 				APN:             "internet",
+				IPType:          "ipv4",
+				APNUsername:     "user",
+				APNPassword:     "secret",
+				APNAuth:         "pap",
 				DefaultRoute:    true,
 				ProxyEnabled:    true,
 				AlwaysOn:        true,
@@ -175,6 +191,10 @@ func TestResponseFromConnection(t *testing.T) {
 			want: ConnectionResponse{
 				Status:          internetcore.StatusConnected,
 				APN:             "internet",
+				IPType:          "ipv4",
+				APNUsername:     "user",
+				APNPassword:     "secret",
+				APNAuth:         "pap",
 				DefaultRoute:    true,
 				ProxyEnabled:    true,
 				AlwaysOn:        true,
@@ -200,6 +220,10 @@ func TestResponseFromConnection(t *testing.T) {
 			got := responseFromConnection(tt.connection)
 			if got.Status != tt.want.Status ||
 				got.APN != tt.want.APN ||
+				got.IPType != tt.want.IPType ||
+				got.APNUsername != tt.want.APNUsername ||
+				got.APNPassword != tt.want.APNPassword ||
+				got.APNAuth != tt.want.APNAuth ||
 				got.DefaultRoute != tt.want.DefaultRoute ||
 				got.ProxyEnabled != tt.want.ProxyEnabled ||
 				got.AlwaysOn != tt.want.AlwaysOn ||

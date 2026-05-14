@@ -1,17 +1,33 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { Plug, Unplug } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { ChevronDown, Plug, Unplug } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import type { InternetConnectionResponse } from '@/types/internet'
 
 const apn = defineModel<string>('apn', { required: true })
+const ipType = defineModel<string>('ipType', { required: true })
+const apnUsername = defineModel<string>('apnUsername', { required: true })
+const apnPassword = defineModel<string>('apnPassword', { required: true })
+const apnAuth = defineModel<string>('apnAuth', { required: true })
 const defaultRoute = defineModel<boolean>('defaultRoute', { required: true })
 const proxyEnabled = defineModel<boolean>('proxyEnabled', { required: true })
 const alwaysOn = defineModel<boolean>('alwaysOn', { required: true })
@@ -31,6 +47,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const advancedOpen = ref(false)
 
 const isInputDisabled = computed(() => props.isLoading || props.isConnecting || props.isConnected)
 const isActionLoading = computed(
@@ -55,6 +72,21 @@ const dnsLabel = computed(() => formatList(props.connection?.dns))
 const durationLabel = computed(() => formatDuration(props.connection?.durationSeconds ?? 0))
 const txLabel = computed(() => formatBytes(props.connection?.txBytes ?? 0))
 const rxLabel = computed(() => formatBytes(props.connection?.rxBytes ?? 0))
+const ipTypeOptions = computed(() => [
+  { value: 'ipv4v6', label: 'IPv4v6' },
+  { value: 'ipv4', label: 'IPv4' },
+  { value: 'ipv6', label: 'IPv6' },
+])
+const authOptions = computed(() => [
+  { value: 'default', label: t('modemDetail.settings.internetAuthDefault') },
+  { value: 'none', label: t('modemDetail.settings.internetAuthNone') },
+  { value: 'pap', label: 'PAP' },
+  { value: 'chap', label: 'CHAP' },
+  { value: 'pap|chap', label: 'PAP / CHAP' },
+  { value: 'mschap', label: 'MS-CHAP' },
+  { value: 'mschapv2', label: 'MS-CHAP v2' },
+  { value: 'eap', label: 'EAP' },
+])
 const routeMetricLabel = computed(() => {
   const metric = props.connection?.routeMetric ?? 0
   if (metric === 0) return t('modemDetail.settings.internetNone')
@@ -140,6 +172,95 @@ const formatBytes = (bytes: number) => {
           :placeholder="t('modemDetail.settings.internetAPNPlaceholder')"
         />
       </div>
+
+      <Collapsible v-model:open="advancedOpen" class="space-y-3">
+        <CollapsibleTrigger
+          class="flex w-full items-center justify-between gap-3 rounded-md text-left outline-none transition-colors hover:text-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        >
+          <span class="min-w-0 space-y-1">
+            <span class="block text-sm font-medium text-foreground">
+              {{ t('modemDetail.settings.internetAdvancedTitle') }}
+            </span>
+            <span class="block text-xs leading-5 text-muted-foreground">
+              {{ t('modemDetail.settings.internetAdvancedDescription') }}
+            </span>
+          </span>
+          <ChevronDown
+            class="size-4 shrink-0 transition-transform"
+            :class="advancedOpen ? 'rotate-180' : ''"
+          />
+        </CollapsibleTrigger>
+        <CollapsibleContent class="space-y-3">
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div class="space-y-2">
+              <Label for="modem-internet-ip-type">
+                {{ t('modemDetail.settings.internetIPTypeLabel') }}
+              </Label>
+              <Select v-model="ipType" :disabled="isInputDisabled">
+                <SelectTrigger id="modem-internet-ip-type" class="w-full">
+                  <SelectValue :placeholder="t('modemDetail.settings.internetIPTypePlaceholder')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="option in ipTypeOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div class="space-y-2">
+              <Label for="modem-internet-apn-auth">
+                {{ t('modemDetail.settings.internetAPNAuthLabel') }}
+              </Label>
+              <Select v-model="apnAuth" :disabled="isInputDisabled">
+                <SelectTrigger id="modem-internet-apn-auth" class="w-full">
+                  <SelectValue :placeholder="t('modemDetail.settings.internetAPNAuthPlaceholder')" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="option in authOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div class="space-y-2">
+              <Label for="modem-internet-apn-username">
+                {{ t('modemDetail.settings.internetAPNUsernameLabel') }}
+              </Label>
+              <Input
+                id="modem-internet-apn-username"
+                v-model="apnUsername"
+                :disabled="isInputDisabled"
+                :placeholder="t('modemDetail.settings.internetAPNUsernamePlaceholder')"
+              />
+            </div>
+
+            <div class="space-y-2">
+              <Label for="modem-internet-apn-password">
+                {{ t('modemDetail.settings.internetAPNPasswordLabel') }}
+              </Label>
+              <Input
+                id="modem-internet-apn-password"
+                v-model="apnPassword"
+                type="password"
+                :disabled="isInputDisabled"
+                :placeholder="t('modemDetail.settings.internetAPNPasswordPlaceholder')"
+              />
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
 
       <div class="space-y-2">
         <div class="flex items-center justify-between gap-3">
