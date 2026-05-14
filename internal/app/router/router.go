@@ -80,7 +80,6 @@ func Register(e *echo.Echo, store *config.Store, manager *modem.Manager, interne
 			protected.PUT("/modems/:id/networks/current-modes", h.SetCurrentModes)
 			protected.GET("/modems/:id/networks/bands", h.Bands)
 			protected.PUT("/modems/:id/networks/current-bands", h.SetCurrentBands)
-			protected.GET("/modems/:id/networks/cells", h.Cells)
 			protected.PUT("/modems/:id/networks/:operatorCode", h.Register)
 		}
 

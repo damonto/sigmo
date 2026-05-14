@@ -99,8 +99,7 @@ func (l *lifecycle) PrepareEnable(modem *mmodem.Modem, iccid sgp22.ICCID) (*enab
 	cfg := l.configSnapshot()
 	client, err := l.newClient(modem, cfg)
 	if err != nil {
-		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("create LPA client: %w", err)
 	}
 	session := &enableSession{
 		l:      l,
@@ -108,32 +107,33 @@ func (l *lifecycle) PrepareEnable(modem *mmodem.Modem, iccid sgp22.ICCID) (*enab
 		iccid:  iccid,
 		client: client,
 	}
-	cleanup := func(err error) (*enableSession, error) {
-		session.Close()
-		return nil, err
-	}
+	release := false
+	defer func() {
+		if !release {
+			session.Close()
+		}
+	}()
 
 	profiles, err := client.ListProfile(nil, nil)
 	if err != nil {
-		slog.Error("failed to list profiles", "modem", modem.EquipmentIdentifier, "error", err)
-		return cleanup(err)
+		return nil, fmt.Errorf("list profiles: %w", err)
 	}
 	profile, ok := profileByICCID(profiles, iccid)
 	if !ok {
-		return cleanup(errProfileNotFound)
+		return nil, errProfileNotFound
 	}
 	if profile.ProfileState == sgp22.ProfileEnabled {
-		return cleanup(errProfileAlreadyActive)
+		return nil, errProfileAlreadyActive
 	}
 
 	notifications, err := client.ListNotification()
 	if err != nil {
-		slog.Error("failed to list notifications", "modem", modem.EquipmentIdentifier, "error", err)
-		return cleanup(err)
+		return nil, fmt.Errorf("list notifications: %w", err)
 	}
 	for _, notification := range notifications {
 		session.lastSeq = max(session.lastSeq, notification.SequenceNumber)
 	}
+	release = true
 	return session, nil
 }
 
@@ -141,8 +141,7 @@ func (s *enableSession) Enable(ctx context.Context) error {
 	defer s.Close()
 
 	if err := s.client.EnableProfile(s.iccid, true); err != nil {
-		slog.Error("failed to enable profile", "modem", s.modem.EquipmentIdentifier, "iccid", s.iccid.String(), "error", err)
-		return s.confirmEnableResult(ctx, err)
+		return s.confirmEnableResult(ctx, fmt.Errorf("enable profile %s: %w", s.iccid.String(), err))
 	}
 
 	s.Close()
@@ -154,13 +153,7 @@ func (s *enableSession) Enable(ctx context.Context) error {
 
 	target, state, err := s.l.waitForEnabledProfile(ctx, s.modem.EquipmentIdentifier, s.iccid)
 	if err != nil {
-		slog.Error(
-			"confirm enabled profile",
-			"modem", s.modem.EquipmentIdentifier,
-			"error", err,
-			"last_confirm_failure", state.lastConfirmFailure,
-		)
-		return err
+		return confirmEnabledProfileError(err, state)
 	}
 	if err := s.l.sendPendingNotifications(target, s.lastSeq); err != nil {
 		slog.Warn("failed to handle modem notifications", "error", err, "modem", s.modem.EquipmentIdentifier)
@@ -177,14 +170,7 @@ func (s *enableSession) confirmEnableResult(ctx context.Context, cause error) er
 			return err
 		}
 		if state.modemUnavailable && errors.Is(err, context.DeadlineExceeded) {
-			slog.Error(
-				"timed out waiting for modem to return",
-				"modem", s.modem.EquipmentIdentifier,
-				"error", err,
-				"reload_observed", state.reloadObserved,
-				"last_confirm_failure", state.lastConfirmFailure,
-			)
-			return err
+			return confirmEnabledProfileError(err, state)
 		}
 		if state.lastConfirmFailure != nil {
 			slog.Warn(
@@ -200,6 +186,13 @@ func (s *enableSession) confirmEnableResult(ctx context.Context, cause error) er
 		slog.Warn("failed to handle modem notifications", "error", err, "modem", s.modem.EquipmentIdentifier)
 	}
 	return nil
+}
+
+func confirmEnabledProfileError(err error, state enableConfirmState) error {
+	if state.lastConfirmFailure == nil {
+		return fmt.Errorf("confirm enabled profile: %w", err)
+	}
+	return fmt.Errorf("confirm enabled profile: %w: last confirmation: %v", err, state.lastConfirmFailure)
 }
 
 func (l *lifecycle) waitForEnabledProfile(ctx context.Context, modemID string, iccid sgp22.ICCID) (*mmodem.Modem, enableConfirmState, error) {
@@ -272,8 +265,7 @@ func (l *lifecycle) Delete(modem *mmodem.Modem, iccid sgp22.ICCID) error {
 	cfg := l.configSnapshot()
 	client, err := l.newClient(modem, cfg)
 	if err != nil {
-		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("create LPA client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
@@ -283,16 +275,14 @@ func (l *lifecycle) Delete(modem *mmodem.Modem, iccid sgp22.ICCID) error {
 
 	profiles, err := client.ListProfile(nil, nil)
 	if err != nil {
-		slog.Error("failed to list profiles", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("list profiles: %w", err)
 	}
 	if activeProfile(profiles, iccid) {
 		return errActiveProfileCannotDelete
 	}
 
 	if err := client.Delete(iccid); err != nil {
-		slog.Error("failed to delete profile", "modem", modem.EquipmentIdentifier, "iccid", iccid.String(), "error", err)
-		return err
+		return fmt.Errorf("delete profile %s: %w", iccid.String(), err)
 	}
 	return nil
 }
@@ -337,8 +327,7 @@ func (l *lifecycle) sendPendingNotifications(modem *mmodem.Modem, lastSeq sgp22.
 	cfg := l.configSnapshot()
 	client, err := l.newClient(modem, cfg)
 	if err != nil {
-		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("create LPA client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
@@ -347,8 +336,7 @@ func (l *lifecycle) sendPendingNotifications(modem *mmodem.Modem, lastSeq sgp22.
 	}()
 	notifications, err := client.ListNotification()
 	if err != nil {
-		slog.Error("failed to list notifications", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("list notifications: %w", err)
 	}
 	var errs error
 	for _, notification := range notifications {
@@ -356,8 +344,7 @@ func (l *lifecycle) sendPendingNotifications(modem *mmodem.Modem, lastSeq sgp22.
 			continue
 		}
 		if err := client.SendNotification(notification.SequenceNumber, true); err != nil {
-			slog.Error("failed to send notification", "sequence", notification.SequenceNumber, "error", err)
-			errs = errors.Join(errs, err)
+			errs = errors.Join(errs, fmt.Errorf("send notification %d: %w", notification.SequenceNumber, err))
 		}
 	}
 	return errs

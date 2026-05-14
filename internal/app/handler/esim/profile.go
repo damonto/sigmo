@@ -28,19 +28,17 @@ func (p *profile) List(modem *mmodem.Modem) ([]ProfileResponse, error) {
 	cfg := p.store.Snapshot()
 	client, err := lpa.New(modem, &cfg)
 	if err != nil {
-		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("create LPA client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("failed to close LPA client", "error", cerr)
+			slog.Warn("close LPA client", "error", cerr)
 		}
 	}()
 
 	profiles, err := client.ListProfile(nil, nil)
 	if err != nil {
-		slog.Error("failed to list profiles", "modem", modem.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("list profiles: %w", err)
 	}
 
 	response := make([]ProfileResponse, 0, len(profiles))
@@ -74,18 +72,16 @@ func (p *profile) UpdateNickname(modem *mmodem.Modem, iccid sgp22.ICCID, nicknam
 	cfg := p.store.Snapshot()
 	client, err := lpa.New(modem, &cfg)
 	if err != nil {
-		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("create LPA client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("failed to close LPA client", "error", cerr)
+			slog.Warn("close LPA client", "error", cerr)
 		}
 	}()
 
 	if err := client.SetNickname(iccid, nickname); err != nil {
-		slog.Error("failed to set nickname", "modem", modem.EquipmentIdentifier, "iccid", iccid.String(), "error", err)
-		return err
+		return fmt.Errorf("set nickname for %s: %w", iccid.String(), err)
 	}
 	return nil
 }

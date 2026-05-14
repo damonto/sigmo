@@ -3,7 +3,7 @@ package ussd
 import (
 	"context"
 	"errors"
-	"log/slog"
+	"fmt"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
@@ -40,19 +40,16 @@ func (s *session) Execute(ctx context.Context, modem *mmodem.Modem, action strin
 func (s *session) executeInitialize(ctx context.Context, modem *mmodem.Modem, ussd *mmodem.USSD, code string) (*ExecuteResponse, error) {
 	state, err := ussd.State()
 	if err != nil {
-		slog.Error("failed to read ussd state", "modem", modem.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("read ussd state: %w", err)
 	}
 	if state != mmodem.Modem3gppUssdSessionStateIdle {
 		if err := ussd.Cancel(); err != nil {
-			slog.Error("failed to cancel ussd session", "modem", modem.EquipmentIdentifier, "error", err)
-			return nil, err
+			return nil, fmt.Errorf("cancel ussd session: %w", err)
 		}
 	}
 	reply, err := ussd.Initiate(ctx, code)
 	if err != nil {
-		slog.Error("failed to initiate ussd", "modem", modem.EquipmentIdentifier, "code", code, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("initiate ussd: %w", err)
 	}
 	return &ExecuteResponse{Reply: reply}, nil
 }
@@ -60,8 +57,7 @@ func (s *session) executeInitialize(ctx context.Context, modem *mmodem.Modem, us
 func (s *session) executeReply(ctx context.Context, modem *mmodem.Modem, ussd *mmodem.USSD, code string) (*ExecuteResponse, error) {
 	state, err := ussd.State()
 	if err != nil {
-		slog.Error("failed to read ussd state", "modem", modem.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("read ussd state: %w", err)
 	}
 	if state == mmodem.Modem3gppUssdSessionStateUnknown {
 		return nil, errUnknownSessionStatus
@@ -71,8 +67,7 @@ func (s *session) executeReply(ctx context.Context, modem *mmodem.Modem, ussd *m
 	}
 	reply, err := ussd.Respond(ctx, code)
 	if err != nil {
-		slog.Error("failed to respond to ussd", "modem", modem.EquipmentIdentifier, "code", code, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("respond to ussd: %w", err)
 	}
 	return &ExecuteResponse{Reply: reply}, nil
 }

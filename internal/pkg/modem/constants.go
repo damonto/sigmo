@@ -400,37 +400,6 @@ var modemBandLabels = map[ModemBand]string{
 	232: "UMTS band 32",
 }
 
-type CellType uint32
-
-const (
-	CellTypeUnknown CellType = iota
-	CellTypeCDMA
-	CellTypeGSM
-	CellTypeUMTS
-	CellTypeTDSCDMA
-	CellTypeLTE
-	CellType5GNR
-)
-
-func (c CellType) String() string {
-	switch c {
-	case CellTypeCDMA:
-		return "CDMA"
-	case CellTypeGSM:
-		return "GSM"
-	case CellTypeUMTS:
-		return "UMTS"
-	case CellTypeTDSCDMA:
-		return "TDSCDMA"
-	case CellTypeLTE:
-		return "LTE"
-	case CellType5GNR:
-		return "5GNR"
-	default:
-		return "Unknown"
-	}
-}
-
 type Modem3gppNetworkAvailability uint32
 
 const (

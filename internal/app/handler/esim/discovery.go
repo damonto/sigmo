@@ -1,6 +1,7 @@
 package esim
 
 import (
+	"fmt"
 	"log/slog"
 
 	sgp22 "github.com/damonto/euicc-go/v2"
@@ -22,30 +23,26 @@ func (p *provisioning) Discover(modem *mmodem.Modem) ([]DiscoverResponse, error)
 	cfg := p.store.Snapshot()
 	client, err := lpa.New(modem, &cfg)
 	if err != nil {
-		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("create LPA client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("failed to close LPA client", "error", cerr)
+			slog.Warn("close LPA client", "error", cerr)
 		}
 	}()
 
 	imeiValue, err := modem.ThreeGPP().IMEI()
 	if err != nil {
-		slog.Error("failed to read modem IMEI", "modem", modem.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("read modem IMEI: %w", err)
 	}
 	imei, err := sgp22.NewIMEI(imeiValue)
 	if err != nil {
-		slog.Error("invalid IMEI", "modem", modem.EquipmentIdentifier, "imei", imeiValue, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("parse modem IMEI %s: %w", imeiValue, err)
 	}
 
 	entries, err := client.Discover(imei)
 	if err != nil {
-		slog.Error("failed to discover profiles", "modem", modem.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("discover profiles: %w", err)
 	}
 
 	response := make([]DiscoverResponse, 0, len(entries))

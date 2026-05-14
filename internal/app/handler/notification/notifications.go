@@ -23,8 +23,7 @@ func (n *notification) List(modem *mmodem.Modem) ([]NotificationResponse, error)
 	cfg := n.store.Snapshot()
 	client, err := lpa.New(modem, &cfg)
 	if err != nil {
-		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("create LPA client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
@@ -33,8 +32,7 @@ func (n *notification) List(modem *mmodem.Modem) ([]NotificationResponse, error)
 	}()
 	notifications, err := client.ListNotification()
 	if err != nil {
-		slog.Error("failed to list notifications", "modem", modem.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("list notifications: %w", err)
 	}
 	response := make([]NotificationResponse, 0, len(notifications))
 	for _, notification := range notifications {
@@ -52,8 +50,7 @@ func (n *notification) Resend(modem *mmodem.Modem, sequence sgp22.SequenceNumber
 	cfg := n.store.Snapshot()
 	client, err := lpa.New(modem, &cfg)
 	if err != nil {
-		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("create LPA client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
@@ -61,8 +58,7 @@ func (n *notification) Resend(modem *mmodem.Modem, sequence sgp22.SequenceNumber
 		}
 	}()
 	if err := client.SendNotification(sequence, false); err != nil {
-		slog.Error("failed to resend notification", "modem", modem.EquipmentIdentifier, "sequence", sequence, "error", err)
-		return err
+		return fmt.Errorf("resend notification %d: %w", sequence, err)
 	}
 	return nil
 }
@@ -71,8 +67,7 @@ func (n *notification) Delete(modem *mmodem.Modem, sequence sgp22.SequenceNumber
 	cfg := n.store.Snapshot()
 	client, err := lpa.New(modem, &cfg)
 	if err != nil {
-		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("create LPA client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
@@ -80,8 +75,7 @@ func (n *notification) Delete(modem *mmodem.Modem, sequence sgp22.SequenceNumber
 		}
 	}()
 	if err := client.RemoveNotificationFromList(sequence); err != nil {
-		slog.Error("failed to remove notification", "modem", modem.EquipmentIdentifier, "sequence", sequence, "error", err)
-		return err
+		return fmt.Errorf("remove notification %d: %w", sequence, err)
 	}
 	return nil
 }

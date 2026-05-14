@@ -2,7 +2,7 @@ package message
 
 import (
 	"errors"
-	"log/slog"
+	"fmt"
 	"strings"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -22,8 +22,7 @@ func (m *message) Send(modem *mmodem.Modem, to string, text string) error {
 	}
 	_, err := modem.Messaging().Send(to, text)
 	if err != nil {
-		slog.Error("failed to send SMS", "modem", modem.EquipmentIdentifier, "to", to, "error", err)
-		return err
+		return fmt.Errorf("send SMS to %s: %w", to, err)
 	}
 	return nil
 }

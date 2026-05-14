@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/labstack/echo/v5"
 
@@ -13,6 +15,12 @@ type ErrorResponse struct {
 	ErrorCode string `json:"error_code"`
 	Message   string `json:"message"`
 	RequestID string `json:"request_id"`
+}
+
+var exposeInternalErrors atomic.Bool
+
+func SetExposeInternalErrors(expose bool) {
+	exposeInternalErrors.Store(expose)
 }
 
 func Error(c *echo.Context, status int, errorCode, message string) error {
@@ -39,7 +47,7 @@ func ModemLookupError(c *echo.Context, err error, internalErrorCode string) erro
 	if errors.Is(err, mmodem.ErrNotFound) {
 		return NotFound(c, "modem_not_found", err)
 	}
-	return Internal(c, internalErrorCode)
+	return Internal(c, internalErrorCode, err)
 }
 
 func RequestTimeout(c *echo.Context, errorCode string, err error) error {
@@ -54,8 +62,27 @@ func UnprocessableEntity(c *echo.Context, errorCode string, err error) error {
 	return Error(c, http.StatusUnprocessableEntity, errorCode, err.Error())
 }
 
-func Internal(c *echo.Context, errorCode string) error {
-	return Error(c, http.StatusInternalServerError, errorCode, "internal server error")
+func Internal(c *echo.Context, errorCode string, err error) error {
+	message := "internal server error"
+	if exposeInternalErrors.Load() && err != nil {
+		message = err.Error()
+	}
+	logInternalError(c, errorCode, err)
+	return Error(c, http.StatusInternalServerError, errorCode, message)
+}
+
+func logInternalError(c *echo.Context, errorCode string, err error) {
+	req := c.Request()
+	slog.Error("http internal error",
+		"error", err,
+		"error_code", errorCode,
+		"request_id", requestID(c),
+		"method", req.Method,
+		"uri", req.URL.RequestURI(),
+		"host", req.Host,
+		"remote_ip", c.RealIP(),
+		"modem", c.Param("id"),
+	)
 }
 
 func BindAndValidate[T any](c *echo.Context, dst *T, errorCode string) error {

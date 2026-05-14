@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/damonto/sigmo/internal/app/auth"
@@ -47,17 +46,14 @@ func (o *otp) Send(ctx context.Context) error {
 	}
 	notifier, err := notify.New(&cfg)
 	if err != nil {
-		slog.Error("create notifier", "error", err)
-		return err
+		return fmt.Errorf("create notifier: %w", err)
 	}
 	code, _, err := o.store.IssueOTP()
 	if err != nil {
-		slog.Error("issue OTP", "error", err)
-		return err
+		return fmt.Errorf("issue OTP: %w", err)
 	}
 	if err := notifier.Send(ctx, notifyevent.OTPEvent{Code: code}, authProviders...); err != nil {
-		slog.Error("send OTP notification", "error", err)
-		return err
+		return fmt.Errorf("send OTP notification: %w", err)
 	}
 	return nil
 }
@@ -98,8 +94,7 @@ func (o *otp) Verify(code string) (string, error) {
 	}
 	token, _, err := o.store.IssueToken()
 	if err != nil {
-		slog.Error("issue token", "error", err)
-		return "", err
+		return "", fmt.Errorf("issue token: %w", err)
 	}
 	return token, nil
 }

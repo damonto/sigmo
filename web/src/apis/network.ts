@@ -2,7 +2,6 @@ import { useFetch } from '@/lib/fetch'
 
 import type {
   BandsResponse,
-  CellInfoListResponse,
   ModesResponse,
   NetworksResponse,
   SetCurrentBandsRequest,
@@ -43,10 +42,6 @@ export const useNetworkApi = () => {
     }).json()
   }
 
-  const getCells = (id: string) => {
-    return useFetch<CellInfoListResponse>(`modems/${id}/networks/cells`).get().json()
-  }
-
   return {
     scanNetworks,
     registerNetwork,
@@ -54,6 +49,5 @@ export const useNetworkApi = () => {
     setCurrentModes,
     getBands,
     setCurrentBands,
-    getCells,
   }
 }

@@ -91,7 +91,7 @@ func (h *Handler) Disconnect(c *echo.Context) error {
 		return httpapi.ModemLookupError(c, err, errorCodeDisconnectInternetFailed)
 	}
 	if err := h.connector.Disconnect(modem); err != nil {
-		return httpapi.Internal(c, errorCodeDisconnectInternetFailed)
+		return httpapi.Internal(c, errorCodeDisconnectInternetFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -106,7 +106,7 @@ func internetError(c *echo.Context, err error, internalErrorCode string) error {
 	if errors.Is(err, internetcore.ErrProxyStart) {
 		return httpapi.UnprocessableEntity(c, errorCodeInternetProxyStartFailed, err)
 	}
-	return httpapi.Internal(c, internalErrorCode)
+	return httpapi.Internal(c, internalErrorCode, err)
 }
 
 func responseFromConnection(connection *internetcore.Connection) ConnectionResponse {

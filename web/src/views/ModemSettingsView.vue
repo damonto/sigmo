@@ -61,21 +61,17 @@ const {
   selectedMode,
   supportedBands,
   selectedBands,
-  cellInfo,
   isNetworkLoading,
   isNetworkRegistering,
   isNetworkSettingsLoading,
   isModeUpdating,
   isBandUpdating,
-  isCellInfoLoading,
   hasAvailableNetworks,
   hasNetworkSelection,
-  hasCells,
   canUpdateMode,
   canUpdateBands,
   openNetworkDialog,
   handleNetworkRegister,
-  refreshCellInfo,
   handleModeUpdate,
   toggleBand,
   handleBandUpdate,
@@ -140,19 +136,15 @@ const {
           :mode-options="modeOptions"
           :supported-bands="supportedBands"
           :selected-bands="selectedBands"
-          :cell-info="cellInfo"
           :is-settings-loading="isNetworkSettingsLoading"
           :is-mode-updating="isModeUpdating"
           :is-band-updating="isBandUpdating"
-          :is-cell-info-loading="isCellInfoLoading"
           :can-update-mode="canUpdateMode"
           :can-update-bands="canUpdateBands"
-          :has-cells="hasCells"
           @scan="openNetworkDialog"
           @toggle-band="toggleBand"
           @update-mode="handleModeUpdate"
           @update-bands="handleBandUpdate"
-          @refresh-cells="refreshCellInfo"
         />
       </TabsContent>
 

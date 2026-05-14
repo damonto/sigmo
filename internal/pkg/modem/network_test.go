@@ -69,16 +69,6 @@ func TestModemNetworkWrappers(t *testing.T) {
 			}),
 			ModemInterface + ".CurrentBands": dbus.MakeVariant([]uint32{71}),
 		},
-		outputs: map[string][]any{
-			ModemInterface + ".GetCellInfo": {
-				[]map[string]dbus.Variant{
-					{
-						"cell-type":   dbus.MakeVariant(uint32(CellTypeLTE)),
-						"operator-id": dbus.MakeVariant("310260"),
-					},
-				},
-			},
-		},
 	}
 	modem := &Modem{dbusObject: object, objectPath: object.path}
 
@@ -125,13 +115,6 @@ func TestModemNetworkWrappers(t *testing.T) {
 		t.Fatalf("SetCurrentBands() args = %#v", got)
 	}
 
-	cells, err := modem.GetCellInfo()
-	if err != nil {
-		t.Fatalf("GetCellInfo() error = %v", err)
-	}
-	if len(cells) != 1 || stringFromVariant(cells[0]["operator-id"]) != "310260" {
-		t.Fatalf("GetCellInfo() = %#v", cells)
-	}
 }
 
 func TestModemNetworkWrapperParseErrors(t *testing.T) {

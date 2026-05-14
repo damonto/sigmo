@@ -3,6 +3,7 @@ package modem
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -35,13 +36,11 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 	}
 	port, err := modem.Port(mmodem.ModemPortTypeAt)
 	if err != nil {
-		slog.Error("failed to find AT port", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("find AT port: %w", err)
 	}
 	client, err := msisdnclient.New(port.Device)
 	if err != nil {
-		slog.Error("failed to open MSISDN client", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("open MSISDN client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
@@ -49,16 +48,14 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 		}
 	}()
 	if err := client.Update("", number); err != nil {
-		slog.Error("failed to update MSISDN", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("update MSISDN: %w", err)
 	}
 	if err := modem.Restart(m.store.FindModem(modem.EquipmentIdentifier).Compatible); err != nil {
-		slog.Error("failed to restart modem", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("restart modem: %w", err)
 	}
 	_, err = m.manager.WaitForModem(ctx, modem)
 	if err != nil {
-		slog.Error("failed to wait for modem", "modem", modem.EquipmentIdentifier, "error", err)
+		return fmt.Errorf("wait for modem: %w", err)
 	}
-	return err
+	return nil
 }

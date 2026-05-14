@@ -80,18 +80,16 @@ func (h *Handler) Update(c *echo.Context) error {
 		return nil
 	})
 	if err != nil {
-		slog.Error("save config", "error", err)
-		return httpapi.Internal(c, errorCodeUpdateConfigFailed)
+		return httpapi.Internal(c, errorCodeUpdateConfigFailed, fmt.Errorf("save config: %w", err))
 	}
 
 	applyLogLevel(saved)
+	httpapi.SetExposeInternalErrors(!saved.IsProduction())
 	if err := h.internetConnector.UpdateProxyConfig(proxyConfig(saved)); err != nil {
-		slog.Error("reload proxy config", "error", err)
-		return httpapi.Error(c, http.StatusInternalServerError, errorCodeReloadProxyConfigFailed, fmt.Sprintf("saved config, reload proxy config: %v", err))
+		return httpapi.Internal(c, errorCodeReloadProxyConfigFailed, fmt.Errorf("saved config, reload proxy config: %w", err))
 	}
 	if err := h.relay.Reload(); err != nil {
-		slog.Error("reload notification relay", "error", err)
-		return httpapi.Error(c, http.StatusInternalServerError, errorCodeReloadRelayFailed, fmt.Sprintf("saved config, reload notification relay: %v", err))
+		return httpapi.Internal(c, errorCodeReloadRelayFailed, fmt.Errorf("saved config, reload notification relay: %w", err))
 	}
 
 	return c.JSON(http.StatusOK, responseFromConfig(saved, restartRequiredFields))

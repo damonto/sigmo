@@ -29,7 +29,6 @@ const (
 	errorCodeBandsRequired         = "bands_required"
 	errorCodeUnsupportedBand       = "unsupported_band"
 	errorCodeAnyBandExclusive      = "any_band_exclusive"
-	errorCodeGetCellsFailed        = "get_cells_failed"
 )
 
 func New(manager *mmodem.Manager) *Handler {
@@ -46,7 +45,7 @@ func (h *Handler) List(c *echo.Context) error {
 	}
 	response, err := h.networks.List(modem)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeListNetworksFailed)
+		return httpapi.Internal(c, errorCodeListNetworksFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -61,7 +60,7 @@ func (h *Handler) Register(c *echo.Context) error {
 		if errors.Is(err, errOperatorCodeRequired) {
 			return httpapi.BadRequest(c, errorCodeOperatorCodeRequired, err)
 		}
-		return httpapi.Internal(c, errorCodeRegisterNetworkFailed)
+		return httpapi.Internal(c, errorCodeRegisterNetworkFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -73,7 +72,7 @@ func (h *Handler) Modes(c *echo.Context) error {
 	}
 	response, err := h.networks.Modes(modem)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeGetModesFailed)
+		return httpapi.Internal(c, errorCodeGetModesFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -91,7 +90,7 @@ func (h *Handler) SetCurrentModes(c *echo.Context) error {
 		if errors.Is(err, errUnsupportedMode) {
 			return httpapi.BadRequest(c, errorCodeUnsupportedMode, err)
 		}
-		return httpapi.Internal(c, errorCodeSetModesFailed)
+		return httpapi.Internal(c, errorCodeSetModesFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -103,7 +102,7 @@ func (h *Handler) Bands(c *echo.Context) error {
 	}
 	response, err := h.networks.Bands(modem)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeGetBandsFailed)
+		return httpapi.Internal(c, errorCodeGetBandsFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -126,20 +125,8 @@ func (h *Handler) SetCurrentBands(c *echo.Context) error {
 		case errors.Is(err, errAnyBandExclusive):
 			return httpapi.BadRequest(c, errorCodeAnyBandExclusive, err)
 		default:
-			return httpapi.Internal(c, errorCodeSetBandsFailed)
+			return httpapi.Internal(c, errorCodeSetBandsFailed, err)
 		}
 	}
 	return c.NoContent(http.StatusNoContent)
-}
-
-func (h *Handler) Cells(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeGetCellsFailed)
-	}
-	response, err := h.networks.Cells(modem)
-	if err != nil {
-		return httpapi.Internal(c, errorCodeGetCellsFailed)
-	}
-	return c.JSON(http.StatusOK, response)
 }

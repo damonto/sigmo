@@ -72,6 +72,22 @@ func saveRouteStateForModem(path string, modemID string, interfaceName string, p
 	return writeRouteState(path, store)
 }
 
+func putRouteStateForModem(path string, modemID string, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error {
+	if interfaceName == "" {
+		return errors.New("interface name is empty")
+	}
+	store, err := readRouteState(path)
+	if err != nil {
+		return err
+	}
+	store.Interfaces[interfaceName] = routeStateEntry{
+		Modem:     modemID,
+		Preferred: routeStateRoutes(preferred),
+		Changes:   routeStateChanges(changes),
+	}
+	return writeRouteState(path, store)
+}
+
 func loadRouteStateForModem(path string, modemID string, interfaceName string) ([]defaultRouteChange, bool, error) {
 	return loadRouteStateMatching(path, modemID, interfaceName, true)
 }

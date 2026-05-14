@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { useNetworkApi } from '@/apis/network'
 import type {
   BandResponse,
-  CellInfoResponse,
   ModeResponse,
   NetworkResponse,
   SetCurrentModesRequest,
@@ -27,23 +26,19 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
   const selectedMode = ref('')
   const supportedBands = ref<BandResponse[]>([])
   const selectedBands = ref<number[]>([])
-  const cellInfo = ref<CellInfoResponse[]>([])
   const isNetworkLoading = ref(false)
   const isNetworkRegistering = ref(false)
   const isNetworkSettingsLoading = ref(false)
   const isModeUpdating = ref(false)
   const isBandUpdating = ref(false)
-  const isCellInfoLoading = ref(false)
 
   const hasAvailableNetworks = computed(() => availableNetworks.value.length > 0)
   const hasNetworkSelection = computed(() => selectedNetwork.value.trim().length > 0)
   const hasModeSelection = computed(() => selectedMode.value.trim().length > 0)
   const hasBandSelection = computed(() => selectedBands.value.length > 0)
-  const hasCells = computed(() => cellInfo.value.length > 0)
   const canUpdateMode = computed(() => hasModeSelection.value && !isModeUpdating.value)
   const canUpdateBands = computed(() => hasBandSelection.value && !isBandUpdating.value)
   let networkSettingsRequestID = 0
-  let cellInfoRequestID = 0
 
   const resetNetworks = () => {
     networkDialogOpen.value = false
@@ -53,22 +48,22 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
     selectedMode.value = ''
     supportedBands.value = []
     selectedBands.value = []
-    cellInfo.value = []
   }
 
   const openNetworkDialog = async () => {
     const targetId = modemId.value
     if (!targetId || targetId === 'unknown') return
     if (isNetworkLoading.value) return
-    networkDialogOpen.value = true
     selectedNetwork.value = ''
     isNetworkLoading.value = true
     try {
       const { data } = await networkApi.scanNetworks(targetId)
       availableNetworks.value = data.value ?? []
+      networkDialogOpen.value = true
     } catch (err) {
       console.error('[useModemNetwork] Failed to scan networks:', err)
       availableNetworks.value = []
+      networkDialogOpen.value = false
     } finally {
       isNetworkLoading.value = false
     }
@@ -97,10 +92,9 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
     const requestId = ++networkSettingsRequestID
     isNetworkSettingsLoading.value = true
     try {
-      const [modes, bands, cells] = await Promise.allSettled([
+      const [modes, bands] = await Promise.allSettled([
         networkApi.getModes(targetId),
         networkApi.getBands(targetId),
-        networkApi.getCells(targetId),
       ])
       if (requestId !== networkSettingsRequestID || modemId.value !== targetId) return
 
@@ -123,13 +117,6 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
         supportedBands.value = []
         selectedBands.value = []
       }
-
-      if (cells.status === 'fulfilled') {
-        cellInfo.value = cells.value.data.value ?? []
-      } else {
-        console.error('[useModemNetwork] Failed to load cell info:', cells.reason)
-        cellInfo.value = []
-      }
     } catch (err) {
       if (requestId !== networkSettingsRequestID || modemId.value !== targetId) return
       console.error('[useModemNetwork] Failed to load network settings:', err)
@@ -137,30 +124,9 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
       selectedMode.value = ''
       supportedBands.value = []
       selectedBands.value = []
-      cellInfo.value = []
     } finally {
       if (requestId === networkSettingsRequestID) {
         isNetworkSettingsLoading.value = false
-      }
-    }
-  }
-
-  const refreshCellInfo = async () => {
-    const targetId = modemId.value
-    if (!targetId || targetId === 'unknown') return
-    const requestId = ++cellInfoRequestID
-    isCellInfoLoading.value = true
-    try {
-      const { data } = await networkApi.getCells(targetId)
-      if (requestId !== cellInfoRequestID || modemId.value !== targetId) return
-      cellInfo.value = data.value ?? []
-    } catch (err) {
-      if (requestId !== cellInfoRequestID || modemId.value !== targetId) return
-      console.error('[useModemNetwork] Failed to load cell info:', err)
-      cellInfo.value = []
-    } finally {
-      if (requestId === cellInfoRequestID) {
-        isCellInfoLoading.value = false
       }
     }
   }
@@ -234,24 +200,20 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
     selectedMode,
     supportedBands,
     selectedBands,
-    cellInfo,
     isNetworkLoading,
     isNetworkRegistering,
     isNetworkSettingsLoading,
     isModeUpdating,
     isBandUpdating,
-    isCellInfoLoading,
     hasAvailableNetworks,
     hasNetworkSelection,
     hasModeSelection,
     hasBandSelection,
-    hasCells,
     canUpdateMode,
     canUpdateBands,
     openNetworkDialog,
     handleNetworkRegister,
     refreshNetworkSettings,
-    refreshCellInfo,
     handleModeUpdate,
     toggleBand,
     handleBandUpdate,

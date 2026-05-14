@@ -2,7 +2,7 @@ package network
 
 import (
 	"errors"
-	"log/slog"
+	"fmt"
 	"strings"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -16,8 +16,7 @@ func (n *network) Register(modem *mmodem.Modem, operatorCode string) error {
 		return errOperatorCodeRequired
 	}
 	if err := modem.ThreeGPP().RegisterNetwork(operatorCode); err != nil {
-		slog.Error("failed to register network", "modem", modem.EquipmentIdentifier, "operator", operatorCode, "error", err)
-		return err
+		return fmt.Errorf("register network %s: %w", operatorCode, err)
 	}
 	return nil
 }

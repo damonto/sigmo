@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v5/middleware"
 
 	"github.com/damonto/sigmo/internal/app/forwarder"
+	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/app/router"
 	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/internet"
@@ -47,6 +48,7 @@ func main() {
 	}
 	store := config.NewStore(cfg)
 	applyLogLevel(store)
+	httpapi.SetExposeInternalErrors(!store.IsProduction())
 	slog.Info("server starting", "version", BuildVersion)
 
 	manager, err := modem.NewManager()

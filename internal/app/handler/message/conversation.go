@@ -2,7 +2,7 @@ package message
 
 import (
 	"errors"
-	"log/slog"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,8 +23,7 @@ func newMessage() *message {
 func (m *message) ListConversations(modem *mmodem.Modem) ([]MessageResponse, error) {
 	messages, err := modem.Messaging().List()
 	if err != nil {
-		slog.Error("failed to list messages", "modem", modem.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("list messages: %w", err)
 	}
 
 	latest := make(map[string]*mmodem.SMS, len(messages))
@@ -59,8 +58,7 @@ func (m *message) ListByParticipant(modem *mmodem.Modem, participant string) ([]
 	}
 	messages, err := modem.Messaging().List()
 	if err != nil {
-		slog.Error("failed to list messages", "modem", modem.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("list messages: %w", err)
 	}
 
 	response := make([]MessageResponse, 0, len(messages))
@@ -88,8 +86,7 @@ func (m *message) DeleteByParticipant(modem *mmodem.Modem, participant string) e
 	}
 	messages, err := modem.Messaging().List()
 	if err != nil {
-		slog.Error("failed to list messages", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("list messages: %w", err)
 	}
 	messaging := modem.Messaging()
 	for _, sms := range messages {
@@ -97,8 +94,7 @@ func (m *message) DeleteByParticipant(modem *mmodem.Modem, participant string) e
 			continue
 		}
 		if err := messaging.Delete(sms.Path()); err != nil {
-			slog.Error("failed to delete message", "modem", modem.EquipmentIdentifier, "participant", participant, "error", err)
-			return err
+			return fmt.Errorf("delete message for %s: %w", participant, err)
 		}
 	}
 	return nil

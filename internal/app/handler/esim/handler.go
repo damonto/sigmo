@@ -93,7 +93,7 @@ func (h *Handler) List(c *echo.Context) error {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
-		return httpapi.Internal(c, errorCodeListESIMsFailed)
+		return httpapi.Internal(c, errorCodeListESIMsFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -108,7 +108,7 @@ func (h *Handler) Discover(c *echo.Context) error {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
-		return httpapi.Internal(c, errorCodeDiscoverESIMsFailed)
+		return httpapi.Internal(c, errorCodeDiscoverESIMsFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -132,7 +132,7 @@ func (h *Handler) Enable(c *echo.Context) error {
 	defer session.Close()
 
 	if err := h.internet.Restore(modem); err != nil {
-		return httpapi.Internal(c, errorCodeEnableESIMFailed)
+		return httpapi.Internal(c, errorCodeEnableESIMFailed, err)
 	}
 	ctx, cancel := context.WithTimeout(c.Request().Context(), enableTimeout)
 	defer cancel()
@@ -162,7 +162,7 @@ func enableError(c *echo.Context, err error) error {
 	if errors.Is(err, errProfileNotFound) {
 		return httpapi.BadRequest(c, errorCodeESIMProfileNotFound, err)
 	}
-	return httpapi.Internal(c, errorCodeEnableESIMFailed)
+	return httpapi.Internal(c, errorCodeEnableESIMFailed, err)
 }
 
 func (h *Handler) Delete(c *echo.Context) error {
@@ -184,7 +184,7 @@ func (h *Handler) Delete(c *echo.Context) error {
 		if errors.Is(err, errActiveProfileCannotDelete) {
 			return httpapi.BadRequest(c, errorCodeActiveESIMProfile, err)
 		}
-		return httpapi.Internal(c, errorCodeDeleteESIMFailed)
+		return httpapi.Internal(c, errorCodeDeleteESIMFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -276,7 +276,7 @@ func (h *Handler) UpdateNickname(c *echo.Context) error {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
-		return httpapi.Internal(c, errorCodeUpdateESIMNicknameFailed)
+		return httpapi.Internal(c, errorCodeUpdateESIMNicknameFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

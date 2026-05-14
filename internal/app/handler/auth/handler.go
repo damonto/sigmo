@@ -43,7 +43,7 @@ func (h *Handler) SendOTP(c *echo.Context) error {
 		if errors.Is(err, errAuthProviderRequired) || errors.Is(err, errAuthProviderUnavailable) {
 			return httpapi.UnprocessableEntity(c, errorCodeAuthProviderInvalid, err)
 		}
-		return httpapi.Internal(c, errorCodeSendOTPFailed)
+		return httpapi.Internal(c, errorCodeSendOTPFailed, err)
 	}
 	return c.NoContent(http.StatusCreated)
 }
@@ -61,7 +61,7 @@ func (h *Handler) VerifyOTP(c *echo.Context) error {
 		if errors.Is(err, errInvalidOTP) {
 			return httpapi.Unauthorized(c, errorCodeInvalidOTP, err)
 		}
-		return httpapi.Internal(c, errorCodeVerifyOTPFailed)
+		return httpapi.Internal(c, errorCodeVerifyOTPFailed, err)
 	}
 	return c.JSON(http.StatusOK, VerifyOTPResponse{Token: token})
 }

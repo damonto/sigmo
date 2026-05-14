@@ -67,7 +67,7 @@ func (h *Handler) Execute(c *echo.Context) error {
 		if errors.Is(err, errUnknownSessionStatus) {
 			return httpapi.BadRequest(c, errorCodeUnknownSessionStatus, err)
 		}
-		return httpapi.Internal(c, errorCodeExecuteUSDDFailed)
+		return httpapi.Internal(c, errorCodeExecuteUSDDFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
 }

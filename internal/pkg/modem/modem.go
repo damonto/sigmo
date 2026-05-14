@@ -99,14 +99,6 @@ func (m *Modem) SetCurrentBands(bands []ModemBand) error {
 	return m.dbusObject.Call(ModemInterface+".SetCurrentBands", 0, values).Err
 }
 
-func (m *Modem) GetCellInfo() ([]map[string]dbus.Variant, error) {
-	var cells []map[string]dbus.Variant
-	if err := m.dbusObject.Call(ModemInterface+".GetCellInfo", 0).Store(&cells); err != nil {
-		return nil, err
-	}
-	return cells, nil
-}
-
 func (m *Modem) AccessTechnologies() ([]ModemAccessTechnology, error) {
 	variant, err := m.dbusObject.GetProperty(ModemInterface + ".AccessTechnologies")
 	if err != nil {

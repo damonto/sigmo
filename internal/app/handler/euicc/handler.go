@@ -39,7 +39,7 @@ func (h *Handler) Get(c *echo.Context) error {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
-		return httpapi.Internal(c, errorCodeGetEUICCFailed)
+		return httpapi.Internal(c, errorCodeGetEUICCFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
 }

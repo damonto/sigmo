@@ -2,7 +2,7 @@ package modem
 
 import (
 	"errors"
-	"log/slog"
+	"fmt"
 	"strings"
 
 	"github.com/damonto/sigmo/internal/pkg/config"
@@ -27,8 +27,7 @@ func (s *settings) Update(modemID string, req UpdateModemSettingsRequest) error 
 	modem.Compatible = *req.Compatible
 	modem.MSS = req.MSS
 	if err := s.store.UpdateModem(modemID, modem); err != nil {
-		slog.Error("failed to save config", "modem", modemID, "error", err)
-		return err
+		return fmt.Errorf("save modem config: %w", err)
 	}
 	return nil
 }

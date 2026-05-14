@@ -437,8 +437,6 @@ func TestUpdate(t *testing.T) {
 }
 
 func TestUpdatePersistsConfigWhenProxyReloadFails(t *testing.T) {
-	t.Parallel()
-
 	occupied, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -513,8 +511,8 @@ func TestUpdatePersistsConfigWhenProxyReloadFails(t *testing.T) {
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusInternalServerError, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "saved config, reload proxy config") {
-		t.Fatalf("body = %s, want saved reload error", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "internal server error") {
+		t.Fatalf("body = %s, want generic internal error", rec.Body.String())
 	}
 	snapshot := store.Snapshot()
 	if got := snapshot.ProxySettings().HTTPPort; got != occupiedPort {

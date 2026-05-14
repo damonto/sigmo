@@ -38,6 +38,83 @@ func TestRouteMetric(t *testing.T) {
 	}
 }
 
+func TestSecondaryRouteMetricFor(t *testing.T) {
+	t.Parallel()
+
+	ipv4Route := netlink.DefaultRoute{
+		Interface: "wws27u2i4",
+		Family:    netlink.FamilyIPv4,
+		Gateway:   netip.MustParseAddr("10.9.15.132"),
+		Metric:    secondaryRouteMetric,
+	}
+	ipv6Route := netlink.DefaultRoute{
+		Interface: "wws27u2i4",
+		Family:    netlink.FamilyIPv6,
+		Gateway:   netip.MustParseAddr("2001:db8::1"),
+		Metric:    secondaryRouteMetric,
+	}
+
+	tests := []struct {
+		name    string
+		routes  []netlink.DefaultRoute
+		current []netlink.DefaultRoute
+		want    int
+	}{
+		{
+			name:   "keeps default secondary metric when unused",
+			routes: []netlink.DefaultRoute{ipv4Route},
+			current: []netlink.DefaultRoute{
+				{Interface: "eth0", Family: netlink.FamilyIPv4, Metric: defaultRouteMetric},
+			},
+			want: secondaryRouteMetric,
+		},
+		{
+			name:   "skips occupied ipv4 metric",
+			routes: []netlink.DefaultRoute{ipv4Route},
+			current: []netlink.DefaultRoute{
+				{Interface: "wws27u1i4", Family: netlink.FamilyIPv4, Metric: secondaryRouteMetric},
+			},
+			want: secondaryRouteMetric + 1,
+		},
+		{
+			name:   "ignores occupied metric in unrelated family",
+			routes: []netlink.DefaultRoute{ipv4Route},
+			current: []netlink.DefaultRoute{
+				{Interface: "wws27u1i4", Family: netlink.FamilyIPv6, Metric: secondaryRouteMetric},
+			},
+			want: secondaryRouteMetric,
+		},
+		{
+			name:   "dual stack skips when either family is occupied",
+			routes: []netlink.DefaultRoute{ipv4Route, ipv6Route},
+			current: []netlink.DefaultRoute{
+				{Interface: "wws27u1i4", Family: netlink.FamilyIPv6, Metric: secondaryRouteMetric},
+			},
+			want: secondaryRouteMetric + 1,
+		},
+		{
+			name:   "skips consecutive occupied metrics",
+			routes: []netlink.DefaultRoute{ipv4Route},
+			current: []netlink.DefaultRoute{
+				{Interface: "wws27u1i4", Family: netlink.FamilyIPv4, Metric: secondaryRouteMetric},
+				{Interface: "wws27u3i4", Family: netlink.FamilyIPv4, Metric: secondaryRouteMetric + 1},
+			},
+			want: secondaryRouteMetric + 2,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := secondaryRouteMetricFor(tt.routes, tt.current); got != tt.want {
+				t.Fatalf("secondaryRouteMetricFor() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDNSNetwork(t *testing.T) {
 	t.Parallel()
 
@@ -436,6 +513,231 @@ func TestDefaultRouteChanges(t *testing.T) {
 
 			if got := defaultRouteChanges(tt.current, tt.preferred); !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("defaultRouteChanges() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
+	t.Parallel()
+
+	originalGatewayRoute := netlink.DefaultRoute{
+		Interface: "eth0",
+		Family:    netlink.FamilyIPv4,
+		Gateway:   netip.MustParseAddr("10.20.0.1"),
+		Metric:    0,
+	}
+	demotedGatewayRoute := originalGatewayRoute
+	demotedGatewayRoute.Metric = defaultRouteMetric + 1
+	oldDefaultRoute := netlink.DefaultRoute{
+		Interface: "wws27u1i4",
+		Family:    netlink.FamilyIPv4,
+		Gateway:   netip.MustParseAddr("10.9.15.132"),
+		Metric:    defaultRouteMetric,
+	}
+	demotedOldRoute := oldDefaultRoute
+	demotedOldRoute.Metric = defaultRouteMetric + 2
+	newDefaultRoute := netlink.DefaultRoute{
+		Interface: "wws27u2i4",
+		Family:    netlink.FamilyIPv4,
+		Gateway:   netip.MustParseAddr("10.8.15.132"),
+		Metric:    defaultRouteMetric,
+	}
+	oldGatewayChange := defaultRouteChange{
+		Original:    originalGatewayRoute,
+		Replacement: demotedGatewayRoute,
+	}
+	oldRouteChange := defaultRouteChange{
+		Original:    oldDefaultRoute,
+		Replacement: demotedOldRoute,
+	}
+
+	tests := []struct {
+		name string
+	}{
+		{name: "new default takes over previous default route state"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "internet-routes.json")
+			if err := saveRouteStateForModem(path, "old-modem", "wws27u1i4", []netlink.DefaultRoute{oldDefaultRoute}, []defaultRouteChange{oldGatewayChange}); err != nil {
+				t.Fatalf("save old route state: %v", err)
+			}
+			if err := saveRouteStateForModem(path, "new-modem", "wws27u2i4", []netlink.DefaultRoute{newDefaultRoute}, []defaultRouteChange{oldRouteChange}); err != nil {
+				t.Fatalf("save new route state: %v", err)
+			}
+			alwaysOnPath := filepath.Join(t.TempDir(), "internet-always-on.json")
+			if err := saveAlwaysOnStateForModem(alwaysOnPath, "old-modem", Preferences{DefaultRoute: true, AlwaysOn: true}); err != nil {
+				t.Fatalf("save old always-on state: %v", err)
+			}
+			c := &Connector{
+				connections: map[string]trackedConnection{
+					"old-modem": {
+						interfaceName: "wws27u1i4",
+						prefs:         Preferences{DefaultRoute: true, AlwaysOn: true},
+						routeMetric:   defaultRouteMetric,
+						routes:        []netlink.DefaultRoute{oldDefaultRoute},
+						routeChanges:  []defaultRouteChange{oldGatewayChange},
+					},
+				},
+				preferences: map[string]Preferences{
+					"old-modem": {DefaultRoute: true, AlwaysOn: true},
+				},
+				alwaysOnPath: alwaysOnPath,
+			}
+			tracked := trackedConnection{
+				interfaceName: "wws27u2i4",
+				prefs:         Preferences{DefaultRoute: true},
+				routeMetric:   defaultRouteMetric,
+				routes:        []netlink.DefaultRoute{newDefaultRoute},
+				routeChanges:  []defaultRouteChange{oldRouteChange},
+			}
+
+			if err := c.syncDefaultRouteTakeover(path, "new-modem", &tracked); err != nil {
+				t.Fatalf("syncDefaultRouteTakeover() error = %v", err)
+			}
+
+			oldTracked := c.connections["old-modem"]
+			if oldTracked.prefs.DefaultRoute {
+				t.Fatal("old tracked DefaultRoute = true, want false")
+			}
+			if oldTracked.routeMetric != demotedOldRoute.Metric {
+				t.Fatalf("old tracked routeMetric = %d, want %d", oldTracked.routeMetric, demotedOldRoute.Metric)
+			}
+			if !reflect.DeepEqual(oldTracked.routes, []netlink.DefaultRoute{demotedOldRoute}) {
+				t.Fatalf("old tracked routes = %#v, want %#v", oldTracked.routes, []netlink.DefaultRoute{demotedOldRoute})
+			}
+			if !reflect.DeepEqual(oldTracked.routeChanges, []defaultRouteChange{oldGatewayChange}) {
+				t.Fatalf("old tracked routeChanges = %#v, want %#v", oldTracked.routeChanges, []defaultRouteChange{oldGatewayChange})
+			}
+			if c.preferences["old-modem"].DefaultRoute {
+				t.Fatal("old preference DefaultRoute = true, want false")
+			}
+			oldAlwaysOn, ok, err := loadAlwaysOnStateForModem(alwaysOnPath, "old-modem")
+			if err != nil || !ok || oldAlwaysOn.DefaultRoute {
+				t.Fatalf("load old always-on after takeover = %#v, ok = %t, err = %v; want non-default", oldAlwaysOn, ok, err)
+			}
+			if !reflect.DeepEqual(tracked.routeChanges, []defaultRouteChange{oldRouteChange}) {
+				t.Fatalf("new tracked routeChanges = %#v, want %#v", tracked.routeChanges, []defaultRouteChange{oldRouteChange})
+			}
+			gotOldChanges, ok, err := loadRouteStateForModem(path, "old-modem", "wws27u1i4")
+			if err != nil || !ok || !reflect.DeepEqual(gotOldChanges, []defaultRouteChange{oldGatewayChange}) {
+				t.Fatalf("loadRouteStateForModem(old) = %#v, ok = %t, err = %v; want %#v, true, nil", gotOldChanges, ok, err, []defaultRouteChange{oldGatewayChange})
+			}
+			gotChanges, ok, err := loadRouteStateForModem(path, "new-modem", "wws27u2i4")
+			if err != nil || !ok || !reflect.DeepEqual(gotChanges, []defaultRouteChange{oldRouteChange}) {
+				t.Fatalf("loadRouteStateForModem(new) = %#v, ok = %t, err = %v; want %#v, true, nil", gotChanges, ok, err, []defaultRouteChange{oldRouteChange})
+			}
+
+			if err := c.syncDefaultRouteRestore(tracked.routeChanges); err != nil {
+				t.Fatalf("syncDefaultRouteRestore() error = %v", err)
+			}
+			oldTracked = c.connections["old-modem"]
+			if !oldTracked.prefs.DefaultRoute {
+				t.Fatal("old tracked DefaultRoute after restore = false, want true")
+			}
+			if oldTracked.routeMetric != oldDefaultRoute.Metric {
+				t.Fatalf("old tracked routeMetric after restore = %d, want %d", oldTracked.routeMetric, oldDefaultRoute.Metric)
+			}
+			if !reflect.DeepEqual(oldTracked.routes, []netlink.DefaultRoute{oldDefaultRoute}) {
+				t.Fatalf("old tracked routes after restore = %#v, want %#v", oldTracked.routes, []netlink.DefaultRoute{oldDefaultRoute})
+			}
+			oldAlwaysOn, ok, err = loadAlwaysOnStateForModem(alwaysOnPath, "old-modem")
+			if err != nil || !ok || !oldAlwaysOn.DefaultRoute {
+				t.Fatalf("load old always-on after restore = %#v, ok = %t, err = %v; want default", oldAlwaysOn, ok, err)
+			}
+		})
+	}
+}
+
+func TestSyncDefaultRouteRemovalTransfersOriginalRouteState(t *testing.T) {
+	t.Parallel()
+
+	originalGatewayRoute := netlink.DefaultRoute{
+		Interface: "eth0",
+		Family:    netlink.FamilyIPv4,
+		Gateway:   netip.MustParseAddr("10.20.0.1"),
+		Metric:    0,
+	}
+	demotedGatewayRoute := originalGatewayRoute
+	demotedGatewayRoute.Metric = defaultRouteMetric + 1
+	oldDefaultRoute := netlink.DefaultRoute{
+		Interface: "wws27u1i4",
+		Family:    netlink.FamilyIPv4,
+		Gateway:   netip.MustParseAddr("10.9.15.132"),
+		Metric:    defaultRouteMetric,
+	}
+	demotedOldRoute := oldDefaultRoute
+	demotedOldRoute.Metric = defaultRouteMetric + 2
+	newDefaultRoute := netlink.DefaultRoute{
+		Interface: "wws27u2i4",
+		Family:    netlink.FamilyIPv4,
+		Gateway:   netip.MustParseAddr("10.8.15.132"),
+		Metric:    defaultRouteMetric,
+	}
+	oldGatewayChange := defaultRouteChange{
+		Original:    originalGatewayRoute,
+		Replacement: demotedGatewayRoute,
+	}
+	oldRouteChange := defaultRouteChange{
+		Original:    oldDefaultRoute,
+		Replacement: demotedOldRoute,
+	}
+
+	tests := []struct {
+		name string
+	}{
+		{name: "active default inherits removed demoted route state"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "internet-routes.json")
+			if err := saveRouteStateForModem(path, "new-modem", "wws27u2i4", []netlink.DefaultRoute{newDefaultRoute}, []defaultRouteChange{oldRouteChange}); err != nil {
+				t.Fatalf("save new route state: %v", err)
+			}
+			removed := trackedConnection{
+				interfaceName: "wws27u1i4",
+				prefs:         Preferences{AlwaysOn: true},
+				routeMetric:   demotedOldRoute.Metric,
+				routes:        []netlink.DefaultRoute{demotedOldRoute},
+				routeChanges:  []defaultRouteChange{oldGatewayChange},
+			}
+			c := &Connector{
+				connections: map[string]trackedConnection{
+					"old-modem": removed,
+					"new-modem": {
+						interfaceName: "wws27u2i4",
+						prefs:         Preferences{DefaultRoute: true},
+						routeMetric:   defaultRouteMetric,
+						routes:        []netlink.DefaultRoute{newDefaultRoute},
+						routeChanges:  []defaultRouteChange{oldRouteChange},
+					},
+				},
+				preferences: map[string]Preferences{
+					"old-modem": {AlwaysOn: true},
+					"new-modem": {DefaultRoute: true},
+				},
+			}
+
+			if err := c.syncDefaultRouteRemoval(path, removed); err != nil {
+				t.Fatalf("syncDefaultRouteRemoval() error = %v", err)
+			}
+
+			newTracked := c.connections["new-modem"]
+			if !reflect.DeepEqual(newTracked.routeChanges, []defaultRouteChange{oldGatewayChange}) {
+				t.Fatalf("new tracked routeChanges = %#v, want %#v", newTracked.routeChanges, []defaultRouteChange{oldGatewayChange})
+			}
+			gotChanges, ok, err := loadRouteStateForModem(path, "new-modem", "wws27u2i4")
+			if err != nil || !ok || !reflect.DeepEqual(gotChanges, []defaultRouteChange{oldGatewayChange}) {
+				t.Fatalf("loadRouteStateForModem(new) = %#v, ok = %t, err = %v; want %#v, true, nil", gotChanges, ok, err, []defaultRouteChange{oldGatewayChange})
 			}
 		})
 	}

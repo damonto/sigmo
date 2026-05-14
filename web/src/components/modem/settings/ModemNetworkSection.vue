@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import ModemNetworkBandsCard from '@/components/modem/settings/ModemNetworkBandsCard.vue'
-import ModemNetworkCellInfoCard from '@/components/modem/settings/ModemNetworkCellInfoCard.vue'
 import ModemNetworkModeCard from '@/components/modem/settings/ModemNetworkModeCard.vue'
 import ModemNetworkOverviewCard from '@/components/modem/settings/ModemNetworkOverviewCard.vue'
-import type { BandResponse, CellInfoResponse, ModeResponse } from '@/types/network'
+import type { BandResponse, ModeResponse } from '@/types/network'
 
 const selectedMode = defineModel<string>('selectedMode', { required: true })
 
@@ -15,14 +14,11 @@ const props = defineProps<{
   modeOptions: ModeResponse[]
   supportedBands: BandResponse[]
   selectedBands: number[]
-  cellInfo: CellInfoResponse[]
   isSettingsLoading: boolean
   isModeUpdating: boolean
   isBandUpdating: boolean
-  isCellInfoLoading: boolean
   canUpdateMode: boolean
   canUpdateBands: boolean
-  hasCells: boolean
 }>()
 
 const emit = defineEmits<{
@@ -30,7 +26,6 @@ const emit = defineEmits<{
   (event: 'toggleBand', value: number, checked: boolean): void
   (event: 'updateMode'): void
   (event: 'updateBands'): void
-  (event: 'refreshCells'): void
 }>()
 
 const handleToggleBand = (value: number, checked: boolean) => {
@@ -65,13 +60,6 @@ const handleToggleBand = (value: number, checked: boolean) => {
       :can-update-bands="props.canUpdateBands"
       @toggle-band="handleToggleBand"
       @update-bands="emit('updateBands')"
-    />
-
-    <ModemNetworkCellInfoCard
-      :cell-info="props.cellInfo"
-      :is-cell-info-loading="props.isCellInfoLoading"
-      :has-cells="props.hasCells"
-      @refresh-cells="emit('refreshCells')"
     />
   </div>
 </template>

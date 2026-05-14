@@ -55,6 +55,18 @@ func configureBearer(modemID string, bearer *mmodem.Bearer, prefs Preferences) (
 	if err != nil {
 		return tracked, err
 	}
+	tracked.routeMetric = routeMetric(prefs.DefaultRoute)
+	if len(routes) > 0 {
+		tracked.routeMetric = routes[0].Metric
+	}
+	if !prefs.DefaultRoute && len(routes) > 0 {
+		current, err := netlink.DefaultRoutes()
+		if err != nil {
+			return tracked, fmt.Errorf("list default routes: %w", err)
+		}
+		tracked.routeMetric = secondaryRouteMetricFor(routes, current)
+		setRouteMetric(routes, tracked.routeMetric)
+	}
 
 	if err := netlink.SetUp(interfaceName); err != nil {
 		return tracked, err
@@ -63,37 +75,37 @@ func configureBearer(modemID string, bearer *mmodem.Bearer, prefs Preferences) (
 		return tracked, err
 	}
 
-	cleanup := func() {
-		// Best effort: the original netlink error is returned to the caller.
-		_ = cleanupApplied(tracked)
-	}
+	release := false
+	defer func() {
+		if !release {
+			// Best effort: the original netlink error is returned to the caller.
+			_ = cleanupApplied(tracked)
+		}
+	}()
 	for _, address := range addresses {
 		if err := netlink.AddAddress(interfaceName, address); err != nil {
-			cleanup()
 			return tracked, fmt.Errorf("add address: %w", err)
 		}
 		tracked.addresses = append(tracked.addresses, address)
 	}
 	if prefs.DefaultRoute {
 		if err := restoreStaleDefaultRouteStatesForModem(modemID, interfaceName); err != nil {
-			cleanup()
 			return tracked, fmt.Errorf("restore previous default route state: %w", err)
 		}
 		changes, err := takeoverDefaultRoutes(modemID, interfaceName, routes)
 		tracked.routeChanges = changes
 		if err != nil {
-			cleanup()
 			return tracked, fmt.Errorf("take over default route: %w", err)
 		}
 	}
 	for _, route := range routes {
 		if err := netlink.AddDefaultRoute(route); err != nil {
-			cleanup()
 			return tracked, fmt.Errorf("add default route: %w", err)
 		}
 		tracked.routes = append(tracked.routes, route)
 	}
 
+	release = true
 	return tracked, nil
 }
 
@@ -192,6 +204,28 @@ func addressesAndRoutesWithMetric(interfaceName string, metric int, includeRoute
 		return nil, nil, ErrUnsupportedIPMethod
 	}
 	return addresses, routes, nil
+}
+
+func secondaryRouteMetricFor(routes, current []netlink.DefaultRoute) int {
+	metric := secondaryRouteMetric
+	for routeMetricInUse(routes, current, metric) {
+		metric++
+	}
+	return metric
+}
+
+func routeMetricInUse(routes, current []netlink.DefaultRoute, metric int) bool {
+	return slices.ContainsFunc(routes, func(route netlink.DefaultRoute) bool {
+		return slices.ContainsFunc(current, func(existing netlink.DefaultRoute) bool {
+			return existing.Family == route.Family && existing.Metric == metric
+		})
+	})
+}
+
+func setRouteMetric(routes []netlink.DefaultRoute, metric int) {
+	for i := range routes {
+		routes[i].Metric = metric
+	}
 }
 
 func prefixFromIPConfig(cfg mmodem.BearerIPConfig, family int) (netip.Prefix, bool, error) {

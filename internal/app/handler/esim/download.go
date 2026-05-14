@@ -2,6 +2,7 @@ package esim
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	elpa "github.com/damonto/euicc-go/lpa"
@@ -14,18 +15,16 @@ func (p *provisioning) Download(ctx context.Context, modem *mmodem.Modem, activa
 	cfg := p.store.Snapshot()
 	client, err := lpa.New(modem, &cfg)
 	if err != nil {
-		slog.Error("failed to create LPA client", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("create LPA client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("failed to close LPA client", "error", cerr)
+			slog.Warn("close LPA client", "error", cerr)
 		}
 	}()
 
 	if err := client.Download(ctx, activationCode, opts); err != nil {
-		slog.Error("failed to download profile", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("download profile: %w", err)
 	}
 	return nil
 }

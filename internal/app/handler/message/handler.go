@@ -43,7 +43,7 @@ func (h *Handler) List(c *echo.Context) error {
 	}
 	response, err := h.messages.ListConversations(modem)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeListMessagesFailed)
+		return httpapi.Internal(c, errorCodeListMessagesFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -65,7 +65,7 @@ func (h *Handler) ListByParticipant(c *echo.Context) error {
 		if errors.Is(err, errParticipantRequired) {
 			return httpapi.BadRequest(c, errorCodeParticipantRequired, err)
 		}
-		return httpapi.Internal(c, errorCodeListMessageThreadFailed)
+		return httpapi.Internal(c, errorCodeListMessageThreadFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -86,7 +86,7 @@ func (h *Handler) Send(c *echo.Context) error {
 		if errors.Is(err, errTextRequired) {
 			return httpapi.BadRequest(c, errorCodeTextRequired, err)
 		}
-		return httpapi.Internal(c, errorCodeSendMessageFailed)
+		return httpapi.Internal(c, errorCodeSendMessageFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -107,7 +107,7 @@ func (h *Handler) DeleteByParticipant(c *echo.Context) error {
 		if errors.Is(err, errParticipantRequired) {
 			return httpapi.BadRequest(c, errorCodeParticipantRequired, err)
 		}
-		return httpapi.Internal(c, errorCodeDeleteMessageThreadFailed)
+		return httpapi.Internal(c, errorCodeDeleteMessageThreadFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

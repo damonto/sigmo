@@ -3,7 +3,7 @@ package modem
 import (
 	"context"
 	"errors"
-	"log/slog"
+	"fmt"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
@@ -25,14 +25,13 @@ func newSIMSlot(manager *mmodem.Manager) *simSlot {
 
 func (s *simSlot) Switch(ctx context.Context, modem *mmodem.Modem, slotIndex uint32) error {
 	if err := modem.SetPrimarySimSlot(slotIndex); err != nil {
-		slog.Error("failed to set primary SIM slot", "modem", modem.EquipmentIdentifier, "error", err)
-		return err
+		return fmt.Errorf("set primary SIM slot: %w", err)
 	}
 	_, err := s.manager.WaitForModem(ctx, modem)
 	if err != nil {
-		slog.Error("failed to wait for modem", "modem", modem.EquipmentIdentifier, "error", err)
+		return fmt.Errorf("wait for modem: %w", err)
 	}
-	return err
+	return nil
 }
 
 func (s *simSlot) targetIndex(modem *mmodem.Modem, identifier string) (uint32, error) {
@@ -45,8 +44,7 @@ func (s *simSlot) targetIndex(modem *mmodem.Modem, identifier string) (uint32, e
 	for index, slotPath := range modem.SimSlots {
 		sim, err := modem.SIMs().Get(slotPath)
 		if err != nil {
-			slog.Error("failed to fetch SIM for slot", "modem", modem.EquipmentIdentifier, "slot", slotPath, "error", err)
-			return 0, err
+			return 0, fmt.Errorf("fetch SIM for slot %s: %w", slotPath, err)
 		}
 		if sim.Identifier != identifier {
 			continue

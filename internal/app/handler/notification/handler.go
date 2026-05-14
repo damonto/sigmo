@@ -52,7 +52,7 @@ func (h *Handler) List(c *echo.Context) error {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
-		return httpapi.Internal(c, errorCodeListNotificationsFailed)
+		return httpapi.Internal(c, errorCodeListNotificationsFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -73,7 +73,7 @@ func (h *Handler) Resend(c *echo.Context) error {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
-		return httpapi.Internal(c, errorCodeResendNotificationFailed)
+		return httpapi.Internal(c, errorCodeResendNotificationFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -94,7 +94,7 @@ func (h *Handler) Delete(c *echo.Context) error {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
 		}
-		return httpapi.Internal(c, errorCodeDeleteNotificationFailed)
+		return httpapi.Internal(c, errorCodeDeleteNotificationFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

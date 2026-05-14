@@ -47,9 +47,6 @@ const stubs = {
   Spinner: {
     template: '<span />',
   },
-  RefreshCw: {
-    template: '<span />',
-  },
 }
 
 const mountSection = () =>
@@ -74,23 +71,11 @@ const mountSection = () =>
         { value: 71, label: 'LTE B41', current: true },
       ],
       selectedBands: [71],
-      cellInfo: [
-        {
-          type: 'LTE',
-          typeValue: 5,
-          serving: true,
-          operatorId: '310260',
-          cellId: 'abcdef',
-          earfcn: 39150,
-        },
-      ],
       isSettingsLoading: false,
       isModeUpdating: false,
       isBandUpdating: false,
-      isCellInfoLoading: false,
       canUpdateMode: true,
       canUpdateBands: true,
-      hasCells: true,
     },
     global: {
       stubs,
@@ -98,13 +83,11 @@ const mountSection = () =>
   })
 
 describe('ModemNetworkSection', () => {
-  it('renders supported modes, bands, and cell info', () => {
+  it('renders supported modes and bands', () => {
     const wrapper = mountSection()
 
     expect(wrapper.text()).toContain('4G')
     expect(wrapper.text()).toContain('LTE B41')
-    expect(wrapper.text()).toContain('310260')
-    expect(wrapper.text()).toContain('abcdef')
   })
 
   it('emits band toggle events', async () => {
@@ -113,13 +96,5 @@ describe('ModemNetworkSection', () => {
     await wrapper.find('#band-256').setValue(true)
 
     expect(wrapper.emitted('toggleBand')).toEqual([[256, true]])
-  })
-
-  it('shows an empty cell info state', async () => {
-    const wrapper = mountSection()
-
-    await wrapper.setProps({ cellInfo: [], hasCells: false })
-
-    expect(wrapper.text()).toContain('modemDetail.settings.cellInfoEmpty')
   })
 })

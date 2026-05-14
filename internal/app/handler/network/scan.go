@@ -1,7 +1,7 @@
 package network
 
 import (
-	"log/slog"
+	"fmt"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
@@ -15,8 +15,7 @@ func newNetwork() *network {
 func (n *network) List(modem *mmodem.Modem) ([]NetworkResponse, error) {
 	networks, err := modem.ThreeGPP().ScanNetworks()
 	if err != nil {
-		slog.Error("failed to scan networks", "modem", modem.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("scan networks: %w", err)
 	}
 
 	response := make([]NetworkResponse, 0, len(networks))

@@ -2,6 +2,7 @@ package modem
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -27,8 +28,7 @@ func newCatalog(store *config.Store, manager *mmodem.Manager) *catalog {
 func (c *catalog) List() ([]*ModemResponse, error) {
 	modems, err := c.manager.Modems()
 	if err != nil {
-		slog.Error("failed to list modems", "error", err)
-		return nil, err
+		return nil, fmt.Errorf("list modems: %w", err)
 	}
 	response := make([]*ModemResponse, 0, len(modems))
 	for _, device := range modems {
@@ -55,52 +55,44 @@ func (c *catalog) Get(modem *mmodem.Modem) (*ModemResponse, error) {
 func (c *catalog) buildResponse(device *mmodem.Modem) (*ModemResponse, error) {
 	sim, err := device.SIMs().Primary()
 	if err != nil {
-		slog.Error("failed to fetch SIM", "modem", device.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("fetch primary SIM: %w", err)
 	}
 
 	percent, _, err := device.SignalQuality()
 	if err != nil {
-		slog.Error("failed to fetch signal quality", "modem", device.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("fetch signal quality: %w", err)
 	}
 
 	access, err := device.AccessTechnologies()
 	if err != nil {
-		slog.Error("failed to fetch access technologies", "modem", device.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("fetch access technologies: %w", err)
 	}
 
 	threeGpp := device.ThreeGPP()
 	registrationState, err := threeGpp.RegistrationState()
 	if err != nil {
-		slog.Error("failed to fetch registration state", "modem", device.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("fetch registration state: %w", err)
 	}
 
 	registeredOperatorName, err := threeGpp.OperatorName()
 	if err != nil {
-		slog.Error("failed to fetch operator name", "modem", device.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("fetch operator name: %w", err)
 	}
 
 	operatorCode, err := threeGpp.OperatorCode()
 	if err != nil {
-		slog.Error("failed to fetch operator code", "modem", device.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("fetch operator code: %w", err)
 	}
 
 	carrierInfo := carrier.Lookup(sim.OperatorIdentifier)
 	supportsEsim, err := supportsEsim(device, c.store)
 	if err != nil {
-		slog.Error("failed to detect eSIM support", "modem", device.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("detect eSIM support: %w", err)
 	}
 
 	simSlots, err := c.buildSlotsResponse(device)
 	if err != nil {
-		slog.Error("failed to fetch SIM slots", "modem", device.EquipmentIdentifier, "error", err)
-		return nil, err
+		return nil, fmt.Errorf("fetch SIM slots: %w", err)
 	}
 
 	alias := c.store.FindModem(device.EquipmentIdentifier).Alias
@@ -146,8 +138,7 @@ func (c *catalog) buildSlotsResponse(device *mmodem.Modem) ([]SlotResponse, erro
 	for _, slotPath := range device.SimSlots {
 		sim, err := device.SIMs().Get(slotPath)
 		if err != nil {
-			slog.Error("failed to fetch SIM for slot", "modem", device.EquipmentIdentifier, "slot", slotPath, "error", err)
-			return nil, err
+			return nil, fmt.Errorf("fetch SIM for slot %s: %w", slotPath, err)
 		}
 		carrierInfo := carrier.Lookup(sim.OperatorIdentifier)
 		operatorName := carrierInfo.Name
@@ -172,8 +163,7 @@ func supportsEsim(m *mmodem.Modem, store *config.Store) (bool, error) {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return false, nil
 		}
-		slog.Error("failed to create LPA client", "modem", m.EquipmentIdentifier, "error", err)
-		return false, err
+		return false, fmt.Errorf("create LPA client: %w", err)
 	}
 	defer func() {
 		if cerr := client.Close(); cerr != nil {

@@ -65,7 +65,7 @@ func New(store *config.Store, manager *mmodem.Manager, internetConnector *intern
 func (h *Handler) List(c *echo.Context) error {
 	response, err := h.catalog.List()
 	if err != nil {
-		return httpapi.Internal(c, errorCodeListModemsFailed)
+		return httpapi.Internal(c, errorCodeListModemsFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -77,7 +77,7 @@ func (h *Handler) Get(c *echo.Context) error {
 	}
 	response, err := h.catalog.Get(modem)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeGetModemFailed)
+		return httpapi.Internal(c, errorCodeGetModemFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -101,14 +101,14 @@ func (h *Handler) SwitchSimSlot(c *echo.Context) error {
 		if errors.Is(err, errSimSlotAlreadyActive) {
 			return httpapi.BadRequest(c, errorCodeSimSlotAlreadyActive, err)
 		}
-		return httpapi.Internal(c, errorCodeSwitchSimSlotFailed)
+		return httpapi.Internal(c, errorCodeSwitchSimSlotFailed, err)
 	}
 
 	ctx, cancel := context.WithTimeout(c.Request().Context(), switchSimSlotTimeout)
 	defer cancel()
 
 	if err := h.internet.Restore(modem); err != nil {
-		return httpapi.Internal(c, errorCodeSwitchSimSlotFailed)
+		return httpapi.Internal(c, errorCodeSwitchSimSlotFailed, err)
 	}
 	if err := h.simSlot.Switch(ctx, modem, slotIndex); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -117,7 +117,7 @@ func (h *Handler) SwitchSimSlot(c *echo.Context) error {
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}
-		return httpapi.Internal(c, errorCodeSwitchSimSlotFailed)
+		return httpapi.Internal(c, errorCodeSwitchSimSlotFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -142,7 +142,7 @@ func (h *Handler) UpdateMSISDN(c *echo.Context) error {
 		if errors.Is(err, errMSISDNInvalidNumber) {
 			return httpapi.BadRequest(c, errorCodeInvalidPhoneNumber, err)
 		}
-		return httpapi.Internal(c, errorCodeUpdateMSISDNFailed)
+		return httpapi.Internal(c, errorCodeUpdateMSISDNFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -160,7 +160,7 @@ func (h *Handler) UpdateSettings(c *echo.Context) error {
 		if errors.Is(err, errCompatibleRequired) {
 			return httpapi.BadRequest(c, errorCodeCompatibleRequired, err)
 		}
-		return httpapi.Internal(c, errorCodeUpdateSettingsFailed)
+		return httpapi.Internal(c, errorCodeUpdateSettingsFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

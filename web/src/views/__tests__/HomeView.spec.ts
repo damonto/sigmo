@@ -4,10 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import HomeView from '@/views/HomeView.vue'
 import type { Modem } from '@/types/modem'
 
-const router = vi.hoisted(() => ({
-  replace: vi.fn(),
-}))
-
 const modemHarness = vi.hoisted(() => ({
   nextModems: [] as Modem[],
   fetchModems: vi.fn(),
@@ -33,15 +29,6 @@ vi.mock('@/composables/useModems', async () => {
         }
       },
     }),
-  }
-})
-
-vi.mock('vue-router', async () => {
-  const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
-
-  return {
-    ...actual,
-    useRouter: () => router,
   }
 })
 
@@ -100,7 +87,6 @@ const mountView = async () => {
 
 describe('HomeView', () => {
   beforeEach(() => {
-    router.replace.mockClear()
     modemHarness.fetchModems.mockReset()
     modemHarness.fetchModems.mockResolvedValue(undefined)
     modemHarness.nextModems = []
@@ -110,27 +96,16 @@ describe('HomeView', () => {
     vi.restoreAllMocks()
   })
 
-  it('replaces the current route with modem detail when exactly one modem is loaded', async () => {
-    modemHarness.nextModems = [modem('modem-1')]
-
-    await mountView()
-
-    expect(modemHarness.fetchModems).toHaveBeenCalledTimes(1)
-    expect(router.replace).toHaveBeenCalledWith({
-      name: 'modem-detail',
-      params: { id: 'modem-1' },
-    })
-  })
-
   it.each([
-    { name: 'no modems', modems: [] },
-    { name: 'multiple modems', modems: [modem('modem-1'), modem('modem-2')] },
-  ])('does not redirect when $name are loaded', async ({ modems }) => {
+    { name: 'no modems', modems: [], wantCount: '0' },
+    { name: 'one modem', modems: [modem('modem-1')], wantCount: '1' },
+    { name: 'multiple modems', modems: [modem('modem-1'), modem('modem-2')], wantCount: '2' },
+  ])('loads and renders $name', async ({ modems, wantCount }) => {
     modemHarness.nextModems = modems
 
-    await mountView()
+    const wrapper = await mountView()
 
     expect(modemHarness.fetchModems).toHaveBeenCalledTimes(1)
-    expect(router.replace).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="modem-list"]').text()).toBe(wantCount)
   })
 })
