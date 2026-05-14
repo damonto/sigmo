@@ -72,8 +72,17 @@ func TestConfigSchema(t *testing.T) {
 			if field.Control != tt.wantKind {
 				t.Fatalf("Control = %q, want %q", field.Control, tt.wantKind)
 			}
+			if !strings.HasPrefix(field.Label, "config.schema.") {
+				t.Fatalf("Label = %q, want translation key", field.Label)
+			}
+			if field.Description != "" && !strings.HasPrefix(field.Description, "config.schema.") {
+				t.Fatalf("Description = %q, want translation key", field.Description)
+			}
 			if tt.wantField == "tlsPolicy" && len(field.Options) != 3 {
 				t.Fatalf("tlsPolicy options = %d, want 3", len(field.Options))
+			}
+			if tt.wantField == "tlsPolicy" && !strings.HasPrefix(field.Options[0].Label, "config.schema.") {
+				t.Fatalf("tlsPolicy first option Label = %q, want translation key", field.Options[0].Label)
 			}
 		})
 	}

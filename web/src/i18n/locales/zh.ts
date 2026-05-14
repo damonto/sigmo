@@ -36,7 +36,7 @@ const zh = {
     authDescription: '登录验证码与验证码发送渠道。',
     proxyTitle: '代理',
     proxyDescription: 'Internet 连接启用代理时使用。',
-    channelsTitle: 'Channels',
+    channelsTitle: '渠道',
     channelsDescription: '用于登录验证码和短信转发。',
     noEnabledChannels: '请先启用至少一个渠道。',
     addHeader: '添加',
@@ -45,6 +45,165 @@ const zh = {
     save: '保存',
     saveSuccess: '配置已保存。',
     restartRequired: '配置已保存，监听地址需要重启后生效。',
+    schema: {
+      app: {
+        environment: {
+          label: '运行环境',
+          description: '服务运行模式。',
+          options: {
+            production: '生产环境',
+            development: '开发环境',
+          },
+        },
+        listenAddress: {
+          label: '监听地址',
+          description: 'HTTP 绑定地址，保存后需要重启服务。',
+          placeholder: '0.0.0.0:9527',
+        },
+        otpRequired: {
+          label: '启用 OTP',
+          description: '使用 API 前要求一次性验证码验证。',
+        },
+        authProviders: {
+          label: '认证渠道',
+          description: '允许发送登录验证码的已启用渠道。',
+        },
+      },
+      proxy: {
+        listenAddress: {
+          label: '监听地址',
+          description: '代理服务监听地址。',
+          placeholder: '127.0.0.1',
+        },
+        httpPort: {
+          label: 'HTTP 端口',
+          description: 'HTTP 代理端口。',
+        },
+        socks5Port: {
+          label: 'SOCKS5 端口',
+          description: 'SOCKS5 代理端口。',
+        },
+        password: {
+          label: '密码',
+          description: '代理密码，用户名使用 Modem 的 Equipment Identifier。',
+        },
+      },
+      channels: {
+        telegram: {
+          label: 'Telegram',
+          description: '使用 Telegram Bot 发送 OTP 和短信通知。',
+          endpoint: {
+            label: 'Endpoint',
+            description: 'Telegram API 地址。留空时使用官方 API。',
+            placeholder: 'https://api.telegram.org',
+          },
+          botToken: {
+            label: 'Bot Token',
+            description: '从 BotFather 获取的 Token。',
+          },
+          recipients: {
+            label: '接收人',
+            description: '每个标签填写一个 Telegram chat ID。',
+          },
+        },
+        bark: {
+          label: 'Bark',
+          description: '向 iOS Bark 发送通知。',
+          endpoint: {
+            label: 'Endpoint',
+            description: 'Bark 服务地址。留空时使用官方 API。',
+            placeholder: 'https://api.day.app',
+          },
+          recipients: {
+            label: '接收人',
+            description: '每个标签填写一个设备 key。',
+          },
+        },
+        gotify: {
+          label: 'Gotify',
+          description: '向 Gotify 服务发送通知。',
+          endpoint: {
+            label: 'Endpoint',
+            description: 'Gotify 服务基础 URL。',
+            placeholder: 'https://push.example.com',
+          },
+          recipients: {
+            label: '应用 Token',
+            description: '每个标签填写一个 Gotify 应用 Token。',
+          },
+          priority: {
+            label: '优先级',
+            description: '消息优先级。',
+          },
+        },
+        sc3: {
+          label: 'ServerChan',
+          description: '使用 ServerChan sendkey URL 发送通知。',
+          endpoint: {
+            label: 'Endpoint',
+            description: '完整的 ServerChan sendkey URL。',
+            placeholder: 'https://uid.push.ft07.com/send/key.send',
+          },
+        },
+        http: {
+          label: 'HTTP Webhook',
+          description: '将通知事件 POST 到自定义 webhook。',
+          endpoint: {
+            label: 'Endpoint',
+            description: 'Webhook URL。',
+            placeholder: 'https://example.com/webhook',
+          },
+          headers: {
+            label: 'Headers',
+            description: '可选 HTTP 请求头。',
+          },
+        },
+        email: {
+          label: 'Email',
+          description: '通过 SMTP 发送通知。',
+          smtpHost: {
+            label: 'SMTP 主机',
+            description: 'SMTP 服务器主机名。',
+            placeholder: 'smtp.example.com',
+          },
+          smtpPort: {
+            label: 'SMTP 端口',
+            description: 'SMTP 服务器端口。',
+          },
+          smtpUsername: {
+            label: 'SMTP 用户名',
+            description: 'SMTP 用户名。',
+            placeholder: 'user@example.com',
+          },
+          smtpPassword: {
+            label: 'SMTP 密码',
+            description: 'SMTP 密码或应用专用密码。',
+          },
+          from: {
+            label: '发件人',
+            description: '发件人地址。',
+            placeholder: 'Sigmo <sigmo@example.com>',
+          },
+          recipients: {
+            label: '接收人',
+            description: '每个标签填写一个收件邮箱。',
+          },
+          tlsPolicy: {
+            label: 'TLS 策略',
+            description: 'STARTTLS 策略。',
+            options: {
+              mandatory: '强制',
+              opportunistic: '机会性',
+              none: '不使用',
+            },
+          },
+          ssl: {
+            label: 'SSL',
+            description: '使用隐式 SSL，通常用于 465 端口。',
+          },
+        },
+      },
+    },
   },
   messages: {
     title: '设备短信',

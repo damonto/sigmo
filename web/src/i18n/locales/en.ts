@@ -45,6 +45,165 @@ const en = {
     save: 'Save',
     saveSuccess: 'Configuration saved.',
     restartRequired: 'Configuration saved. Listen address changes require restart.',
+    schema: {
+      app: {
+        environment: {
+          label: 'Environment',
+          description: 'Runtime mode.',
+          options: {
+            production: 'Production',
+            development: 'Development',
+          },
+        },
+        listenAddress: {
+          label: 'Listen address',
+          description: 'HTTP bind address. Changes require restart.',
+          placeholder: '0.0.0.0:9527',
+        },
+        otpRequired: {
+          label: 'OTP required',
+          description: 'Require one-time password verification before using the API.',
+        },
+        authProviders: {
+          label: 'Auth providers',
+          description: 'Enabled channels allowed to send login OTPs.',
+        },
+      },
+      proxy: {
+        listenAddress: {
+          label: 'Listen address',
+          description: 'Proxy listener address.',
+          placeholder: '127.0.0.1',
+        },
+        httpPort: {
+          label: 'HTTP port',
+          description: 'HTTP proxy port.',
+        },
+        socks5Port: {
+          label: 'SOCKS5 port',
+          description: 'SOCKS5 proxy port.',
+        },
+        password: {
+          label: 'Password',
+          description: 'Proxy password used with the modem Equipment Identifier as username.',
+        },
+      },
+      channels: {
+        telegram: {
+          label: 'Telegram',
+          description: 'Send OTP and SMS notifications with a Telegram bot.',
+          endpoint: {
+            label: 'Endpoint',
+            description: 'Telegram API endpoint. Leave empty for the official API.',
+            placeholder: 'https://api.telegram.org',
+          },
+          botToken: {
+            label: 'Bot token',
+            description: 'Token from BotFather.',
+          },
+          recipients: {
+            label: 'Recipients',
+            description: 'Add one Telegram chat ID per tag.',
+          },
+        },
+        bark: {
+          label: 'Bark',
+          description: 'Send notifications to Bark on iOS.',
+          endpoint: {
+            label: 'Endpoint',
+            description: 'Bark server URL. Leave empty for the official API.',
+            placeholder: 'https://api.day.app',
+          },
+          recipients: {
+            label: 'Recipients',
+            description: 'Add one device key per tag.',
+          },
+        },
+        gotify: {
+          label: 'Gotify',
+          description: 'Send notifications to a Gotify server.',
+          endpoint: {
+            label: 'Endpoint',
+            description: 'Gotify server base URL.',
+            placeholder: 'https://push.example.com',
+          },
+          recipients: {
+            label: 'Application tokens',
+            description: 'Add one Gotify application token per tag.',
+          },
+          priority: {
+            label: 'Priority',
+            description: 'Message priority.',
+          },
+        },
+        sc3: {
+          label: 'ServerChan',
+          description: 'Send notifications with a ServerChan sendkey URL.',
+          endpoint: {
+            label: 'Endpoint',
+            description: 'Full ServerChan sendkey URL.',
+            placeholder: 'https://uid.push.ft07.com/send/key.send',
+          },
+        },
+        http: {
+          label: 'HTTP webhook',
+          description: 'POST notification events to a custom webhook.',
+          endpoint: {
+            label: 'Endpoint',
+            description: 'Webhook URL.',
+            placeholder: 'https://example.com/webhook',
+          },
+          headers: {
+            label: 'Headers',
+            description: 'Optional HTTP headers.',
+          },
+        },
+        email: {
+          label: 'Email',
+          description: 'Send notifications through SMTP.',
+          smtpHost: {
+            label: 'SMTP host',
+            description: 'SMTP server hostname.',
+            placeholder: 'smtp.example.com',
+          },
+          smtpPort: {
+            label: 'SMTP port',
+            description: 'SMTP server port.',
+          },
+          smtpUsername: {
+            label: 'SMTP username',
+            description: 'SMTP username.',
+            placeholder: 'user@example.com',
+          },
+          smtpPassword: {
+            label: 'SMTP password',
+            description: 'SMTP password or app password.',
+          },
+          from: {
+            label: 'From',
+            description: 'Sender address.',
+            placeholder: 'Sigmo <sigmo@example.com>',
+          },
+          recipients: {
+            label: 'Recipients',
+            description: 'Add one recipient email per tag.',
+          },
+          tlsPolicy: {
+            label: 'TLS policy',
+            description: 'STARTTLS policy.',
+            options: {
+              mandatory: 'Mandatory',
+              opportunistic: 'Opportunistic',
+              none: 'None',
+            },
+          },
+          ssl: {
+            label: 'SSL',
+            description: 'Use implicit SSL, usually for port 465.',
+          },
+        },
+      },
+    },
   },
   messages: {
     title: 'Device Messages',

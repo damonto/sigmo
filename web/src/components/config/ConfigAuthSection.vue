@@ -22,8 +22,12 @@ const emit = defineEmits<{
   'update-field': [key: string, value: unknown]
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const authProviders = computed(() => props.app?.authProviders ?? [])
+
+const schemaText = (value: string | undefined) => {
+  return value && te(value) ? t(value) : (value ?? '')
+}
 
 const fieldID = (key: string, channel = '') => {
   return channel ? `config-app-${channel}-${key}` : `config-app-${key}`
@@ -62,7 +66,7 @@ const toggleAuthProvider = (channel: string, enabled: boolean) => {
 
     <div v-for="field in fields" :key="field.key" class="space-y-2">
       <div v-if="field.control === 'channelList'" class="space-y-3">
-        <Label>{{ field.label }}</Label>
+        <Label>{{ schemaText(field.label) }}</Label>
         <div v-if="enabledChannels.length > 0" class="grid gap-3 sm:grid-cols-3">
           <div
             v-for="channel in enabledChannels"
@@ -79,7 +83,7 @@ const toggleAuthProvider = (channel: string, enabled: boolean) => {
               :for="fieldID('auth_provider', channel.key)"
               class="cursor-pointer text-sm font-normal"
             >
-              {{ channel.label }}
+              {{ schemaText(channel.label) }}
             </Label>
           </div>
         </div>

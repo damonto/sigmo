@@ -17,6 +17,7 @@ vi.mock('@/apis/config', () => ({
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string) => key,
+    te: (key: string) => !key.includes('missing'),
   }),
 }))
 
@@ -269,6 +270,47 @@ describe('ConfigView', () => {
     const authProvider = authProviders[0]
     expect(authProvider?.attributes('aria-checked')).toBe('false')
     expect(wrapper.text()).toContain('Telegram')
+  })
+
+  it('renders localized schema text when i18n keys are present', async () => {
+    const config = response()
+    const environmentField = config.schema.app[0]
+    const telegramChannel = config.schema.channels[0]
+    if (!environmentField || !telegramChannel) {
+      throw new Error('test fixture missing schema entries')
+    }
+    config.schema.app[0] = {
+      ...environmentField,
+      label: 'config.schema.app.environment.label',
+      description: 'config.schema.app.environment.description',
+      options: environmentField.options?.map((option) => ({
+        ...option,
+        label: `config.schema.app.environment.options.${option.value}`,
+      })),
+    }
+    config.schema.channels[0] = {
+      ...telegramChannel,
+      label: 'config.schema.channels.telegram.label',
+      description: 'config.schema.channels.telegram.description',
+      fields: telegramChannel.fields.map((field) =>
+        field.key === 'headers'
+          ? {
+              ...field,
+              label: 'config.schema.channels.http.headers.label',
+              description: 'config.schema.channels.http.headers.description',
+            }
+          : field,
+      ),
+    }
+
+    const wrapper = await mountView(config)
+
+    expect(wrapper.text()).toContain('config.schema.app.environment.label')
+    expect(wrapper.text()).toContain('config.schema.app.environment.description')
+    expect(wrapper.text()).toContain('config.schema.channels.telegram.label')
+    expect(wrapper.text()).toContain('config.schema.channels.telegram.description')
+    expect(wrapper.text()).toContain('config.schema.channels.http.headers.label')
+    expect(wrapper.text()).toContain('config.schema.channels.http.headers.description')
   })
 
   it('renders multi-option select fields with shadcn select', async () => {

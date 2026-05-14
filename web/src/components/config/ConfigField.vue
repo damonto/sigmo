@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -31,8 +32,15 @@ const emit = defineEmits<{
   'update:modelValue': [value: unknown]
 }>()
 
+const { t, te } = useI18n()
 const tagsInputDelimiter = /[,\n\r\t]+/
 const inputType = computed(() => (props.field.control === 'password' ? 'password' : 'text'))
+const schemaText = (value: string | undefined) => {
+  return value && te(value) ? t(value) : (value ?? '')
+}
+const fieldLabel = computed(() => schemaText(props.field.label))
+const fieldDescription = computed(() => schemaText(props.field.description))
+const fieldPlaceholder = computed(() => schemaText(props.field.placeholder))
 
 const stringValue = (value: unknown) => {
   if (value === null || value === undefined) return ''
@@ -67,9 +75,9 @@ const updateSelection = (value: unknown) => {
 <template>
   <div v-if="field.control === 'switch'" class="flex items-center justify-between gap-4">
     <div class="min-w-0 space-y-1">
-      <Label :for="id">{{ field.label }}</Label>
-      <p v-if="field.description" class="text-xs leading-5 text-muted-foreground">
-        {{ field.description }}
+      <Label :for="id">{{ fieldLabel }}</Label>
+      <p v-if="fieldDescription" class="text-xs leading-5 text-muted-foreground">
+        {{ fieldDescription }}
       </p>
     </div>
     <Switch
@@ -81,28 +89,28 @@ const updateSelection = (value: unknown) => {
   </div>
 
   <div v-else-if="field.control === 'select'" class="space-y-2">
-    <Label :for="id">{{ field.label }}</Label>
+    <Label :for="id">{{ fieldLabel }}</Label>
     <Select
       :model-value="stringValue(modelValue)"
       :disabled="disabled"
       @update:model-value="updateSelection"
     >
       <SelectTrigger :id="id" class="w-full">
-        <SelectValue :placeholder="field.placeholder || field.label" />
+        <SelectValue :placeholder="fieldPlaceholder || fieldLabel" />
       </SelectTrigger>
       <SelectContent>
         <SelectItem v-for="option in field.options" :key="option.value" :value="option.value">
-          {{ option.label }}
+          {{ schemaText(option.label) }}
         </SelectItem>
       </SelectContent>
     </Select>
-    <p v-if="field.description" class="text-xs text-muted-foreground">
-      {{ field.description }}
+    <p v-if="fieldDescription" class="text-xs text-muted-foreground">
+      {{ fieldDescription }}
     </p>
   </div>
 
   <div v-else class="space-y-2">
-    <Label :for="id">{{ field.label }}</Label>
+    <Label :for="id">{{ fieldLabel }}</Label>
     <Input
       v-if="field.control === 'number'"
       :id="id"
@@ -128,20 +136,20 @@ const updateSelection = (value: unknown) => {
         <TagsInputItemText />
         <TagsInputItemDelete />
       </TagsInputItem>
-      <TagsInputInput :placeholder="field.placeholder" class="min-w-24" />
+      <TagsInputInput :placeholder="fieldPlaceholder" class="min-w-24" />
     </TagsInput>
     <Input
       v-else-if="field.control === 'text' || field.control === 'password'"
       :id="id"
       :type="inputType"
-      :placeholder="field.placeholder"
+      :placeholder="fieldPlaceholder"
       :model-value="stringValue(modelValue)"
       :disabled="disabled"
       @update:model-value="emit('update:modelValue', String($event))"
     />
     <p v-else class="text-xs text-destructive">Unsupported control: {{ field.control }}</p>
-    <p v-if="field.description" class="text-xs text-muted-foreground">
-      {{ field.description }}
+    <p v-if="fieldDescription" class="text-xs text-muted-foreground">
+      {{ fieldDescription }}
     </p>
   </div>
 </template>

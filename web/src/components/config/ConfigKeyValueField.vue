@@ -18,8 +18,13 @@ const emit = defineEmits<{
   'update:modelValue': [value: Record<string, string>]
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 
+const schemaText = (value: string | undefined) => {
+  return value && te(value) ? t(value) : (value ?? '')
+}
+const fieldLabel = computed(() => schemaText(props.field.label))
+const fieldDescription = computed(() => schemaText(props.field.description))
 const entries = computed(() =>
   Object.entries(keyValueMap()).map(([key, value]) => ({
     key,
@@ -75,7 +80,7 @@ const removeEntry = (key: string) => {
 <template>
   <div class="space-y-2">
     <div class="flex items-center justify-between gap-3">
-      <Label>{{ field.label }}</Label>
+      <Label>{{ fieldLabel }}</Label>
       <Button type="button" variant="outline" size="sm" :disabled="disabled" @click="addEntry">
         <Plus class="size-4" />
         {{ t('config.addHeader') }}
@@ -106,8 +111,8 @@ const removeEntry = (key: string) => {
         </Button>
       </div>
     </div>
-    <p v-if="field.description" class="text-xs text-muted-foreground">
-      {{ field.description }}
+    <p v-if="fieldDescription" class="text-xs text-muted-foreground">
+      {{ fieldDescription }}
     </p>
   </div>
 </template>

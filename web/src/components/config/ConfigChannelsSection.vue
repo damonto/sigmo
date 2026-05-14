@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ChevronDown } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 
 import ConfigField from '@/components/config/ConfigField.vue'
 import ConfigKeyValueField from '@/components/config/ConfigKeyValueField.vue'
@@ -26,6 +27,12 @@ const emit = defineEmits<{
   'toggle-details': [channel: string]
   'update-field': [channel: string, key: string, value: unknown]
 }>()
+
+const { t, te } = useI18n()
+
+const schemaText = (value: string | undefined) => {
+  return value && te(value) ? t(value) : (value ?? '')
+}
 
 const fieldID = (key: string, channel: string) => {
   return `config-channel-${channel}-${key}`
@@ -82,13 +89,13 @@ const isWideField = (control: string) => {
               />
               <span class="min-w-0 space-y-1">
                 <span class="block text-sm font-medium text-foreground">
-                  {{ channel.label }}
+                  {{ schemaText(channel.label) }}
                 </span>
                 <span
-                  v-if="channel.description"
+                  v-if="schemaText(channel.description)"
                   class="block text-xs leading-5 text-muted-foreground"
                 >
-                  {{ channel.description }}
+                  {{ schemaText(channel.description) }}
                 </span>
               </span>
             </button>
