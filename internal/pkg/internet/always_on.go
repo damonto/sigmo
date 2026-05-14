@@ -95,7 +95,7 @@ func (c *Connector) recoverAlwaysOnLocked(modem *mmodem.Modem, bearer *mmodem.Be
 		return ErrUnsupportedIPMethod
 	}
 	tracked.prefs.AlwaysOn = true
-	if err := c.syncProxyPreference(tracked.interfaceName, tracked.prefs); err != nil {
+	if err := c.syncProxyPreference(modem.EquipmentIdentifier, tracked.interfaceName, tracked.prefs); err != nil {
 		return err
 	}
 	if err := c.syncAlwaysOnState(modem.EquipmentIdentifier, tracked.prefs); err != nil {

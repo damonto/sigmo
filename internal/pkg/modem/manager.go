@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -20,6 +22,8 @@ const (
 	ModemManagerInterfacesAdded   = "org.freedesktop.DBus.ObjectManager.InterfacesAdded"
 	ModemManagerInterfacesRemoved = "org.freedesktop.DBus.ObjectManager.InterfacesRemoved"
 )
+
+var waitForModemRefreshInterval = time.Second
 
 type Manager struct {
 	dbusConn   *dbus.Conn
@@ -238,22 +242,34 @@ func (m *Manager) Subscribe(subscriber func(ModemEvent) error) (func(), error) {
 }
 
 func (m *Manager) WaitForModem(ctx context.Context, current *Modem) (*Modem, error) {
+	return m.WaitForModemAfter(ctx, current, nil)
+}
+
+func (m *Manager) WaitForModemAfter(ctx context.Context, current *Modem, action func() error) (*Modem, error) {
 	if current == nil {
 		return nil, errModemRequired
 	}
 	ready := make(chan *Modem, 1)
+	reload := newModemReloadState()
 	notify := func(event ModemEvent) error {
-		if event.Type != ModemEventAdded || event.Modem == nil {
+		switch event.Type {
+		case ModemEventRemoved:
+			if isCurrentModemEvent(current, event) {
+				reload.mark()
+			}
 			return nil
-		}
-		if !isReplacementModem(current, event.Modem) {
+		case ModemEventAdded:
+			if !readyModemEvent(current, event.Modem, reload.observed()) {
+				return nil
+			}
+			select {
+			case ready <- event.Modem:
+			default:
+			}
 			return nil
-		}
-		select {
-		case ready <- event.Modem:
 		default:
+			return nil
 		}
-		return nil
 	}
 
 	unsubscribe, err := m.Subscribe(notify)
@@ -262,37 +278,171 @@ func (m *Manager) WaitForModem(ctx context.Context, current *Modem) (*Modem, err
 	}
 	defer unsubscribe()
 
-	if modem := m.findReplacementModem(current); modem != nil {
+	if action != nil {
+		if err := action(); err != nil {
+			if !isReloadStarted(err) {
+				return nil, err
+			}
+			reload.mark()
+			slog.Info("waiting for modem after reload started", "modem", current.EquipmentIdentifier, "error", err)
+		}
+	} else if modem := m.findReadyModem(current, reload.observed()); modem != nil {
 		return modem, nil
 	}
 
-	select {
-	case modem := <-ready:
-		return modem, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return m.waitForReadyModem(ctx, current, ready, reload)
 }
 
-func (m *Manager) findReplacementModem(current *Modem) *Modem {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for _, modem := range m.modems {
-		if isReplacementModem(current, modem) {
-			return modem
+type modemReloadState struct {
+	mu       sync.RWMutex
+	reloaded bool
+}
+
+func newModemReloadState() *modemReloadState {
+	return &modemReloadState{}
+}
+
+func (s *modemReloadState) mark() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloaded = true
+}
+
+func (s *modemReloadState) observed() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.reloaded
+}
+
+func (m *Manager) waitForReadyModem(ctx context.Context, current *Modem, ready <-chan *Modem, reload *modemReloadState) (*Modem, error) {
+	ticker := time.NewTicker(waitForModemRefreshInterval)
+	defer ticker.Stop()
+
+	for {
+		if modem := m.findReadyModem(current, reload.observed()); modem != nil {
+			return modem, nil
+		}
+
+		select {
+		case modem := <-ready:
+			return modem, nil
+		case <-ticker.C:
+			modem, missing, err := m.refreshReadyModem(current, reload.observed())
+			if err != nil {
+				slog.Warn("refresh modem while waiting", "modem", current.EquipmentIdentifier, "error", err)
+				continue
+			}
+			if missing {
+				reload.mark()
+				continue
+			}
+			if modem != nil {
+				return modem, nil
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
 	}
-	return nil
 }
 
-func isReplacementModem(current *Modem, candidate *Modem) bool {
+func (m *Manager) findReadyModem(current *Modem, reloadObserved bool) *Modem {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	modem, _ := readyModemIn(current, m.modems, reloadObserved)
+	return modem
+}
+
+func (m *Manager) refreshReadyModem(current *Modem, reloadObserved bool) (*Modem, bool, error) {
+	if m.dbusObject == nil {
+		m.mu.RLock()
+		defer m.mu.RUnlock()
+		modem, found := readyModemIn(current, m.modems, reloadObserved)
+		return modem, !found, nil
+	}
+	modems, err := m.Modems()
+	if err != nil {
+		return nil, false, err
+	}
+	modem, found := readyModemIn(current, modems, reloadObserved)
+	return modem, !found, nil
+}
+
+func readyModemIn(current *Modem, modems map[dbus.ObjectPath]*Modem, reloadObserved bool) (*Modem, bool) {
+	found := false
+	for _, modem := range modems {
+		if !sameEquipmentIdentifier(current, modem) {
+			continue
+		}
+		found = true
+		if reloadObserved && modem != current {
+			return modem, true
+		}
+		if !reloadObserved && isReplacementObjectPath(current, modem) {
+			return modem, true
+		}
+	}
+	return nil, found
+}
+
+func readyModemEvent(current *Modem, candidate *Modem, reloadObserved bool) bool {
+	if reloadObserved {
+		return sameEquipmentIdentifier(current, candidate) && candidate != current
+	}
+	return isReplacementObjectPath(current, candidate)
+}
+
+func isReplacementObjectPath(current *Modem, candidate *Modem) bool {
+	if !sameEquipmentIdentifier(current, candidate) {
+		return false
+	}
+	return current.objectPath != "" && candidate.objectPath != "" && candidate.objectPath != current.objectPath
+}
+
+func sameEquipmentIdentifier(current *Modem, candidate *Modem) bool {
 	if current == nil || candidate == nil {
 		return false
 	}
-	if candidate.EquipmentIdentifier != current.EquipmentIdentifier {
+	id := strings.TrimSpace(current.EquipmentIdentifier)
+	return id != "" && strings.TrimSpace(candidate.EquipmentIdentifier) == id
+}
+
+func isCurrentModemEvent(current *Modem, event ModemEvent) bool {
+	if current == nil {
 		return false
 	}
-	return candidate != current
+	if event.Modem != nil && sameEquipmentIdentifier(current, event.Modem) {
+		return true
+	}
+	return event.Path != "" && event.Path == current.objectPath
+}
+
+type reloadStartedError struct {
+	err error
+}
+
+// ReloadStarted marks an action error as evidence that ModemManager started replacing the modem.
+func ReloadStarted(err error) error {
+	if err == nil {
+		return nil
+	}
+	return reloadStartedError{err: err}
+}
+
+func (e reloadStartedError) Error() string {
+	return e.err.Error()
+}
+
+func (e reloadStartedError) Unwrap() error {
+	return e.err
+}
+
+func (e reloadStartedError) reloadStarted() {}
+
+func isReloadStarted(err error) bool {
+	var target interface {
+		reloadStarted()
+	}
+	return errors.As(err, &target)
 }
 
 func (m *Manager) deleteAndUpdate(modem *Modem) {

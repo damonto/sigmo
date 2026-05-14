@@ -20,6 +20,7 @@ const proxyDialTimeout = 30 * time.Second
 var (
 	ErrProxyPasswordRequired  = errors.New("proxy password is required")
 	ErrProxyInterfaceRequired = errors.New("proxy interface is required")
+	ErrProxyUsernameRequired  = errors.New("proxy username is required")
 	ErrProxyStart             = errors.New("proxy start")
 )
 
@@ -38,12 +39,17 @@ type ProxyStatus struct {
 	SOCKS5Address string
 }
 
+type ProxyBinding struct {
+	Username      string
+	InterfaceName string
+}
+
 type proxyDialFunc func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error)
 
 type Proxy struct {
 	mu       sync.Mutex
 	cfg      ProxyConfig
-	active   map[string]struct{}
+	active   map[string]string
 	sessions map[string]map[proxySession]struct{}
 	dialFunc proxyDialFunc
 
@@ -84,7 +90,7 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 func newProxyWithDial(cfg ProxyConfig, dialFunc proxyDialFunc) *Proxy {
 	return &Proxy{
 		cfg:      cfg,
-		active:   make(map[string]struct{}),
+		active:   make(map[string]string),
 		sessions: make(map[string]map[proxySession]struct{}),
 		dialFunc: dialFunc,
 	}
@@ -124,36 +130,53 @@ func (p *Proxy) UpdateConfig(cfg ProxyConfig) error {
 	return errors.Join(err, closeProxySessions(sessions))
 }
 
-func (p *Proxy) Register(interfaceName string) (ProxyStatus, error) {
-	interfaceName = strings.TrimSpace(interfaceName)
-	if interfaceName == "" {
+func (p *Proxy) Register(binding ProxyBinding) (ProxyStatus, error) {
+	binding.Username = strings.TrimSpace(binding.Username)
+	binding.InterfaceName = strings.TrimSpace(binding.InterfaceName)
+	if binding.Username == "" {
+		return ProxyStatus{}, ErrProxyUsernameRequired
+	}
+	if binding.InterfaceName == "" {
 		return ProxyStatus{}, ErrProxyInterfaceRequired
 	}
 
 	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	if strings.TrimSpace(p.cfg.Password) == "" {
+		p.mu.Unlock()
 		return ProxyStatus{}, ErrProxyPasswordRequired
 	}
-	p.active[interfaceName] = struct{}{}
+	oldInterfaceName, oldActive := p.active[binding.Username]
+	p.active[binding.Username] = binding.InterfaceName
 	if err := p.ensureStartedLocked(); err != nil {
-		delete(p.active, interfaceName)
+		if oldActive {
+			p.active[binding.Username] = oldInterfaceName
+		} else {
+			delete(p.active, binding.Username)
+		}
+		p.mu.Unlock()
 		return ProxyStatus{}, err
 	}
-	return p.statusLocked(interfaceName), nil
+	var sessions []proxySession
+	if oldInterfaceName != "" && oldInterfaceName != binding.InterfaceName {
+		sessions = p.takeUserSessionsLocked(binding.Username)
+	}
+	status := p.statusLocked(binding.Username)
+	p.mu.Unlock()
+
+	return status, closeProxySessions(sessions)
 }
 
-func (p *Proxy) Unregister(interfaceName string) error {
-	interfaceName = strings.TrimSpace(interfaceName)
-	if interfaceName == "" {
+func (p *Proxy) Unregister(username string) error {
+	username = strings.TrimSpace(username)
+	if username == "" {
 		return nil
 	}
 
 	p.mu.Lock()
 
-	delete(p.active, interfaceName)
-	sessions := p.takeInterfaceSessionsLocked(interfaceName)
+	delete(p.active, username)
+	sessions := p.takeUserSessionsLocked(username)
 	var stopErr error
 	if len(p.active) == 0 {
 		sessions = append(sessions, p.takeAllSessionsLocked()...)
@@ -164,15 +187,15 @@ func (p *Proxy) Unregister(interfaceName string) error {
 	return errors.Join(stopErr, closeProxySessions(sessions))
 }
 
-func (p *Proxy) Status(interfaceName string) ProxyStatus {
-	interfaceName = strings.TrimSpace(interfaceName)
-	if interfaceName == "" {
+func (p *Proxy) Status(username string) ProxyStatus {
+	username = strings.TrimSpace(username)
+	if username == "" {
 		return ProxyStatus{}
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.statusLocked(interfaceName)
+	return p.statusLocked(username)
 }
 
 func (p *Proxy) startedLocked() bool {
@@ -195,14 +218,14 @@ func (p *Proxy) ensureStartedLocked() error {
 	return p.startLocked()
 }
 
-func (p *Proxy) statusLocked(interfaceName string) ProxyStatus {
-	_, active := p.active[interfaceName]
+func (p *Proxy) statusLocked(username string) ProxyStatus {
+	_, active := p.active[username]
 	if !active {
 		return ProxyStatus{}
 	}
 	return ProxyStatus{
 		Enabled:       p.startedLocked(),
-		Username:      interfaceName,
+		Username:      username,
 		Password:      p.cfg.Password,
 		HTTPAddress:   p.httpAddress,
 		SOCKS5Address: p.socksAddress,
@@ -278,12 +301,13 @@ func ignoreProxyCloseError(err error) error {
 func (p *Proxy) dial(ctx context.Context, username string, network string, address string) (net.Conn, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
-		return nil, ErrProxyInterfaceRequired
+		return nil, ErrProxyUsernameRequired
 	}
-	if !p.interfaceActive(username) {
-		return nil, fmt.Errorf("proxy interface %s is not active", username)
+	interfaceName, ok := p.interfaceForUser(username)
+	if !ok {
+		return nil, fmt.Errorf("proxy username %s is not active", username)
 	}
-	conn, err := p.dialFunc(ctx, username, network, address)
+	conn, err := p.dialFunc(ctx, interfaceName, network, address)
 	if err != nil {
 		return nil, err
 	}
@@ -304,69 +328,69 @@ func (p *Proxy) validCredential(username string, password string) bool {
 	return ok
 }
 
-func (p *Proxy) interfaceActive(interfaceName string) bool {
+func (p *Proxy) interfaceForUser(username string) (string, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_, ok := p.active[interfaceName]
-	return ok
+	interfaceName, ok := p.active[username]
+	return interfaceName, ok
 }
 
-func (p *Proxy) trackConn(interfaceName string, conn net.Conn) (net.Conn, error) {
+func (p *Proxy) trackConn(username string, conn net.Conn) (net.Conn, error) {
 	if conn == nil {
 		return nil, errors.New("proxy dial returned nil connection")
 	}
 	tracked := &proxyConn{Conn: conn}
 	tracked.onClose = func(conn *proxyConn) {
-		p.removeSession(interfaceName, conn)
+		p.removeSession(username, conn)
 	}
 
-	if err := p.trackSession(interfaceName, tracked); err != nil {
+	if err := p.trackSession(username, tracked); err != nil {
 		closeErr := conn.Close()
 		return nil, errors.Join(err, closeErr)
 	}
 	return tracked, nil
 }
 
-func (p *Proxy) trackSession(interfaceName string, session proxySession) error {
-	interfaceName = strings.TrimSpace(interfaceName)
-	if interfaceName == "" {
-		return ErrProxyInterfaceRequired
+func (p *Proxy) trackSession(username string, session proxySession) error {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return ErrProxyUsernameRequired
 	}
 
 	p.mu.Lock()
-	if _, ok := p.active[interfaceName]; !ok {
+	if _, ok := p.active[username]; !ok {
 		p.mu.Unlock()
-		return fmt.Errorf("proxy interface %s is not active", interfaceName)
+		return fmt.Errorf("proxy username %s is not active", username)
 	}
-	if p.sessions[interfaceName] == nil {
-		p.sessions[interfaceName] = make(map[proxySession]struct{})
+	if p.sessions[username] == nil {
+		p.sessions[username] = make(map[proxySession]struct{})
 	}
-	p.sessions[interfaceName][session] = struct{}{}
+	p.sessions[username][session] = struct{}{}
 	p.mu.Unlock()
 	return nil
 }
 
-func (p *Proxy) removeSession(interfaceName string, session proxySession) {
-	interfaceName = strings.TrimSpace(interfaceName)
-	if interfaceName == "" {
+func (p *Proxy) removeSession(username string, session proxySession) {
+	username = strings.TrimSpace(username)
+	if username == "" {
 		return
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	sessions := p.sessions[interfaceName]
+	sessions := p.sessions[username]
 	if sessions == nil {
 		return
 	}
 	delete(sessions, session)
 	if len(sessions) == 0 {
-		delete(p.sessions, interfaceName)
+		delete(p.sessions, username)
 	}
 }
 
-func (p *Proxy) takeInterfaceSessionsLocked(interfaceName string) []proxySession {
-	sessions := p.sessions[interfaceName]
+func (p *Proxy) takeUserSessionsLocked(username string) []proxySession {
+	sessions := p.sessions[username]
 	if len(sessions) == 0 {
 		return nil
 	}
@@ -374,7 +398,7 @@ func (p *Proxy) takeInterfaceSessionsLocked(interfaceName string) []proxySession
 	for session := range sessions {
 		result = append(result, session)
 	}
-	delete(p.sessions, interfaceName)
+	delete(p.sessions, username)
 	return result
 }
 

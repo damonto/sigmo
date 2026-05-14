@@ -470,7 +470,7 @@ func TestUpdatePersistsConfigWhenProxyReloadFails(t *testing.T) {
 		SOCKS5Port:    0,
 		Password:      "old",
 	})
-	if _, err := proxy.Register("wwan0"); err != nil {
+	if _, err := proxy.Register(internet.ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"}); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
 	t.Cleanup(func() {

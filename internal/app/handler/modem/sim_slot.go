@@ -24,12 +24,21 @@ func newSIMSlot(manager *mmodem.Manager) *simSlot {
 }
 
 func (s *simSlot) Switch(ctx context.Context, modem *mmodem.Modem, slotIndex uint32) error {
-	if err := modem.SetPrimarySimSlot(slotIndex); err != nil {
-		return fmt.Errorf("set primary SIM slot: %w", err)
-	}
-	_, err := s.manager.WaitForModem(ctx, modem)
+	_, err := s.manager.WaitForModemAfter(ctx, modem, func() error {
+		if err := modem.SetPrimarySimSlot(slotIndex); err != nil {
+			err = fmt.Errorf("set primary SIM slot: %w", err)
+			if mmodem.IsTransientRestartError(err) {
+				return mmodem.ReloadStarted(err)
+			}
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("wait for modem: %w", err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("wait for modem: %w", err)
+		}
+		return err
 	}
 	return nil
 }

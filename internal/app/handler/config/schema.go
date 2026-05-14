@@ -36,7 +36,7 @@ func configSchema() Schema {
 			textField("listenAddress", "Listen address", "Proxy listener address.", "127.0.0.1", true),
 			numberField("httpPort", "HTTP port", "HTTP proxy port.", 1, 65535, true),
 			numberField("socks5Port", "SOCKS5 port", "SOCKS5 proxy port.", 1, 65535, true),
-			passwordField("password", "Password", "Proxy password used with the modem interface name as username.", false),
+			passwordField("password", "Password", "Proxy password used with the modem Equipment Identifier as username.", false),
 		},
 		Channels: []ChannelSchema{
 			{

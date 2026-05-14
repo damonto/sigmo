@@ -75,7 +75,7 @@ func TestProxyRegister(t *testing.T) {
 	tests := []struct {
 		name    string
 		cfg     ProxyConfig
-		iface   string
+		binding ProxyBinding
 		wantErr error
 	}{
 		{
@@ -83,8 +83,17 @@ func TestProxyRegister(t *testing.T) {
 			cfg: ProxyConfig{
 				ListenAddress: "127.0.0.1",
 			},
-			iface:   "wwan0",
+			binding: ProxyBinding{Username: "354015820228039", InterfaceName: "wwan0"},
 			wantErr: ErrProxyPasswordRequired,
+		},
+		{
+			name: "missing username",
+			cfg: ProxyConfig{
+				ListenAddress: "127.0.0.1",
+				Password:      "secret",
+			},
+			binding: ProxyBinding{InterfaceName: "wwan0"},
+			wantErr: ErrProxyUsernameRequired,
 		},
 		{
 			name: "missing interface",
@@ -92,6 +101,7 @@ func TestProxyRegister(t *testing.T) {
 				ListenAddress: "127.0.0.1",
 				Password:      "secret",
 			},
+			binding: ProxyBinding{Username: "354015820228039"},
 			wantErr: ErrProxyInterfaceRequired,
 		},
 		{
@@ -100,7 +110,7 @@ func TestProxyRegister(t *testing.T) {
 				ListenAddress: "127.0.0.1",
 				Password:      "secret",
 			},
-			iface: "wwan0",
+			binding: ProxyBinding{Username: "354015820228039", InterfaceName: "wwan0"},
 		},
 	}
 
@@ -113,12 +123,12 @@ func TestProxyRegister(t *testing.T) {
 				return nil, errors.New("dial unused")
 			})
 			t.Cleanup(func() {
-				if err := proxy.Unregister(tt.iface); err != nil {
+				if err := proxy.Unregister(tt.binding.Username); err != nil {
 					t.Fatalf("Unregister() error = %v", err)
 				}
 			})
 
-			got, err := proxy.Register(tt.iface)
+			got, err := proxy.Register(tt.binding)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("Register() error = %v, want %v", err, tt.wantErr)
@@ -131,8 +141,8 @@ func TestProxyRegister(t *testing.T) {
 			if !got.Enabled {
 				t.Fatal("Register() status enabled = false, want true")
 			}
-			if got.Username != tt.iface {
-				t.Fatalf("Register() username = %q, want %q", got.Username, tt.iface)
+			if got.Username != tt.binding.Username {
+				t.Fatalf("Register() username = %q, want %q", got.Username, tt.binding.Username)
 			}
 			if got.Password != tt.cfg.Password {
 				t.Fatalf("Register() password = %q, want %q", got.Password, tt.cfg.Password)
@@ -168,7 +178,7 @@ func TestProxyStatusDoesNotStartListeners(t *testing.T) {
 				return nil, errors.New("dial unused")
 			})
 			proxy.mu.Lock()
-			proxy.active["wwan0"] = struct{}{}
+			proxy.active["wwan0"] = "wwan0"
 			proxy.mu.Unlock()
 
 			status := proxy.Status("wwan0")
@@ -244,7 +254,7 @@ func TestProxyUpdateConfig(t *testing.T) {
 			proxy := newProxyWithDial(tt.start, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
 				return nil, errors.New("dial should not be called")
 			})
-			if _, err := proxy.Register("wwan0"); err != nil {
+			if _, err := proxy.Register(ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"}); err != nil {
 				t.Fatalf("Register() error = %v", err)
 			}
 			t.Cleanup(func() {
@@ -292,7 +302,7 @@ func TestProxyUpdateConfigRestoresOldListenersOnStartError(t *testing.T) {
 	}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
 		return nil, errors.New("dial should not be called")
 	})
-	if _, err := proxy.Register("wwan0"); err != nil {
+	if _, err := proxy.Register(ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"}); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
 	t.Cleanup(func() {
@@ -360,7 +370,7 @@ func TestProxyUnregisterClosesInterfaceSessions(t *testing.T) {
 				mu.Unlock()
 				return local, nil
 			})
-			if _, err := proxy.Register("wwan0"); err != nil {
+			if _, err := proxy.Register(ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"}); err != nil {
 				t.Fatalf("Register() error = %v", err)
 			}
 			t.Cleanup(func() {
@@ -411,7 +421,7 @@ func TestProxyRestartsAfterUnexpectedListenerExit(t *testing.T) {
 			}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
 				return nil, errors.New("dial unused")
 			})
-			if _, err := proxy.Register("wwan0"); err != nil {
+			if _, err := proxy.Register(ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"}); err != nil {
 				t.Fatalf("Register() error = %v", err)
 			}
 			t.Cleanup(func() {
@@ -450,22 +460,24 @@ func TestHTTPProxyAuthentication(t *testing.T) {
 		username   string
 		password   string
 		wantStatus int
+		wantIface  string
 	}{
 		{
 			name:       "valid credentials",
-			username:   "wwan0",
+			username:   "354015820228039",
 			password:   "secret",
 			wantStatus: http.StatusOK,
+			wantIface:  "wwan0",
 		},
 		{
-			name:       "unknown interface",
-			username:   "wwan1",
+			name:       "unknown username",
+			username:   "354015820228040",
 			password:   "secret",
 			wantStatus: http.StatusProxyAuthRequired,
 		},
 		{
 			name:       "wrong password",
-			username:   "wwan0",
+			username:   "354015820228039",
 			password:   "wrong",
 			wantStatus: http.StatusProxyAuthRequired,
 		},
@@ -494,12 +506,12 @@ func TestHTTPProxyAuthentication(t *testing.T) {
 				var dialer net.Dialer
 				return dialer.DialContext(ctx, network, address)
 			})
-			status, err := proxy.Register("wwan0")
+			status, err := proxy.Register(ProxyBinding{Username: "354015820228039", InterfaceName: "wwan0"})
 			if err != nil {
 				t.Fatalf("Register() error = %v", err)
 			}
 			t.Cleanup(func() {
-				if err := proxy.Unregister("wwan0"); err != nil {
+				if err := proxy.Unregister("354015820228039"); err != nil {
 					t.Fatalf("Unregister() error = %v", err)
 				}
 			})
@@ -530,8 +542,8 @@ func TestHTTPProxyAuthentication(t *testing.T) {
 			}
 			if tt.wantStatus == http.StatusOK {
 				mu.Lock()
-				if gotIface != tt.username {
-					t.Fatalf("dial interface = %q, want %q", gotIface, tt.username)
+				if gotIface != tt.wantIface {
+					t.Fatalf("dial interface = %q, want %q", gotIface, tt.wantIface)
 				}
 				mu.Unlock()
 			}
@@ -551,20 +563,20 @@ func TestSOCKS5ProxyAuthentication(t *testing.T) {
 	}{
 		{
 			name:      "valid credentials",
-			username:  "wwan0",
+			username:  "354015820228039",
 			password:  "secret",
 			wantAuth:  0,
 			wantIface: "wwan0",
 		},
 		{
-			name:     "unknown interface",
-			username: "wwan1",
+			name:     "unknown username",
+			username: "354015820228040",
 			password: "secret",
 			wantAuth: 1,
 		},
 		{
 			name:     "wrong password",
-			username: "wwan0",
+			username: "354015820228039",
 			password: "wrong",
 			wantAuth: 1,
 		},
@@ -593,12 +605,12 @@ func TestSOCKS5ProxyAuthentication(t *testing.T) {
 				var dialer net.Dialer
 				return dialer.DialContext(ctx, network, address)
 			})
-			status, err := proxy.Register("wwan0")
+			status, err := proxy.Register(ProxyBinding{Username: "354015820228039", InterfaceName: "wwan0"})
 			if err != nil {
 				t.Fatalf("Register() error = %v", err)
 			}
 			t.Cleanup(func() {
-				if err := proxy.Unregister("wwan0"); err != nil {
+				if err := proxy.Unregister("354015820228039"); err != nil {
 					t.Fatalf("Unregister() error = %v", err)
 				}
 			})
@@ -662,7 +674,7 @@ func TestSOCKS5ProxyDefersDomainResolutionToBoundDialer(t *testing.T) {
 				var dialer net.Dialer
 				return dialer.DialContext(ctx, network, address)
 			})
-			status, err := proxy.Register("wwan0")
+			status, err := proxy.Register(ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"})
 			if err != nil {
 				t.Fatalf("Register() error = %v", err)
 			}
@@ -731,7 +743,7 @@ func TestSOCKS5ProxyUDPAssociate(t *testing.T) {
 					},
 				}, nil
 			})
-			status, err := proxy.Register("wwan0")
+			status, err := proxy.Register(ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"})
 			if err != nil {
 				t.Fatalf("Register() error = %v", err)
 			}
@@ -791,7 +803,7 @@ func TestSOCKS5ProxyUDPAssociatePinsClientSource(t *testing.T) {
 				var dialer net.Dialer
 				return dialer.DialContext(ctx, network, address)
 			})
-			status, err := proxy.Register("wwan0")
+			status, err := proxy.Register(ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"})
 			if err != nil {
 				t.Fatalf("Register() error = %v", err)
 			}
@@ -855,7 +867,7 @@ func TestSOCKS5ProxyUDPAssociateClosesOnUnregister(t *testing.T) {
 				var dialer net.Dialer
 				return dialer.DialContext(ctx, network, address)
 			})
-			status, err := proxy.Register("wwan0")
+			status, err := proxy.Register(ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"})
 			if err != nil {
 				t.Fatalf("Register() error = %v", err)
 			}
@@ -908,7 +920,7 @@ func TestSOCKS5ProxyUDPAssociateClosesAfterIdle(t *testing.T) {
 				var dialer net.Dialer
 				return dialer.DialContext(ctx, network, address)
 			})
-			status, err := proxy.Register("wwan0")
+			status, err := proxy.Register(ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"})
 			if err != nil {
 				t.Fatalf("Register() error = %v", err)
 			}

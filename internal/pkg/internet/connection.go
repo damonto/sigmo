@@ -104,7 +104,7 @@ func (c *Connector) Current(modem *mmodem.Modem) (*Connection, error) {
 			connected, err := bearer.Connected()
 			if err == nil {
 				if !connected {
-					err := c.cleanupTracked(tracked)
+					err := c.cleanupTracked(modem.EquipmentIdentifier, tracked)
 					if err == nil {
 						err = c.syncCleanedUpDefaultRouteState(tracked)
 					}
@@ -118,7 +118,7 @@ func (c *Connector) Current(modem *mmodem.Modem) (*Connection, error) {
 					c.preferences[modem.EquipmentIdentifier] = prefs
 					return disconnectedConnection(prefs), nil
 				}
-				connection, err := c.connectionFromBearer(bearer, tracked.prefs, tracked.routeMetric)
+				connection, err := c.connectionFromBearer(modem.EquipmentIdentifier, bearer, tracked.prefs, tracked.routeMetric)
 				if err == nil {
 					return connection, nil
 				}
@@ -160,7 +160,7 @@ func (c *Connector) Current(modem *mmodem.Modem) (*Connection, error) {
 	if ok {
 		c.connections[modem.EquipmentIdentifier] = tracked
 		c.preferences[modem.EquipmentIdentifier] = tracked.prefs
-		return c.connectionFromBearer(bearer, tracked.prefs, metric)
+		return c.connectionFromBearer(modem.EquipmentIdentifier, bearer, tracked.prefs, metric)
 	}
 	return nil, ErrUnsupportedIPMethod
 }
@@ -193,7 +193,7 @@ func (c *Connector) recoverLocked(modem *mmodem.Modem) error {
 	if !ok {
 		return ErrUnsupportedIPMethod
 	}
-	if err := c.syncProxyPreference(tracked.interfaceName, tracked.prefs); err != nil {
+	if err := c.syncProxyPreference(modem.EquipmentIdentifier, tracked.interfaceName, tracked.prefs); err != nil {
 		return err
 	}
 	c.connections[modem.EquipmentIdentifier] = tracked
@@ -235,32 +235,32 @@ func (c *Connector) connectLocked(modem *mmodem.Modem, prefs Preferences, clearA
 	tracked.bearerPath = bearer.Path()
 	tracked.prefs = prefs
 
-	if err := c.syncProxyPreference(tracked.interfaceName, prefs); err != nil {
-		cleanupErr := c.cleanupTracked(tracked)
+	if err := c.syncProxyPreference(modem.EquipmentIdentifier, tracked.interfaceName, prefs); err != nil {
+		cleanupErr := c.cleanupTracked(modem.EquipmentIdentifier, tracked)
 		disconnectErr := bearer.Disconnect()
 		return nil, errors.Join(err, cleanupErr, disconnectErr)
 	}
 	if prefs.ProxyEnabled {
 		if err := saveProxyStateForModem(proxyStatePath, modem.EquipmentIdentifier, tracked.interfaceName); err != nil {
-			cleanupErr := c.cleanupTracked(tracked)
+			cleanupErr := c.cleanupTracked(modem.EquipmentIdentifier, tracked)
 			disconnectErr := bearer.Disconnect()
 			return nil, errors.Join(fmt.Errorf("save proxy state: %w", err), cleanupErr, disconnectErr)
 		}
 	}
 
-	connection, err := c.connectionFromBearer(bearer, prefs, tracked.routeMetric)
+	connection, err := c.connectionFromBearer(modem.EquipmentIdentifier, bearer, prefs, tracked.routeMetric)
 	if err != nil {
-		cleanupErr := c.cleanupTracked(tracked)
+		cleanupErr := c.cleanupTracked(modem.EquipmentIdentifier, tracked)
 		disconnectErr := bearer.Disconnect()
 		return nil, errors.Join(err, cleanupErr, disconnectErr)
 	}
 	if err := c.syncAlwaysOnState(modem.EquipmentIdentifier, prefs); err != nil {
-		cleanupErr := c.cleanupTracked(tracked)
+		cleanupErr := c.cleanupTracked(modem.EquipmentIdentifier, tracked)
 		disconnectErr := bearer.Disconnect()
 		return nil, errors.Join(fmt.Errorf("sync always on state: %w", err), cleanupErr, disconnectErr)
 	}
 	if err := c.syncDefaultRouteTakeover(defaultRouteStatePath, modem.EquipmentIdentifier, &tracked); err != nil {
-		cleanupErr := c.cleanupTracked(tracked)
+		cleanupErr := c.cleanupTracked(modem.EquipmentIdentifier, tracked)
 		disconnectErr := bearer.Disconnect()
 		return nil, errors.Join(fmt.Errorf("sync default route takeover: %w", err), cleanupErr, disconnectErr)
 	}
@@ -294,7 +294,7 @@ func (c *Connector) disconnectLocked(modem *mmodem.Modem, clearAlwaysOn bool) er
 	}
 
 	if tracked, ok := c.connections[modem.EquipmentIdentifier]; ok {
-		err := c.cleanupTracked(tracked)
+		err := c.cleanupTracked(modem.EquipmentIdentifier, tracked)
 		if err == nil {
 			err = c.syncCleanedUpDefaultRouteState(tracked)
 		}
@@ -340,7 +340,7 @@ func (c *Connector) disconnectLocked(modem *mmodem.Modem, clearAlwaysOn bool) er
 		err = deleteRouteState(defaultRouteStatePath, interfaceName)
 	}
 	if interfaceErr == nil {
-		err = errors.Join(err, c.cleanupProxy(interfaceName))
+		err = errors.Join(err, c.cleanupProxy(modem.EquipmentIdentifier, interfaceName))
 	} else {
 		err = errors.Join(err, c.cleanupProxyForModem(modem.EquipmentIdentifier))
 	}
@@ -353,8 +353,8 @@ func (c *Connector) disconnectLocked(modem *mmodem.Modem, clearAlwaysOn bool) er
 	return nil
 }
 
-func (c *Connector) cleanupTracked(tracked trackedConnection) error {
-	err := c.cleanupProxy(tracked.interfaceName)
+func (c *Connector) cleanupTracked(modemID string, tracked trackedConnection) error {
+	err := c.cleanupProxy(modemID, tracked.interfaceName)
 	cleanup := tracked
 	if !tracked.prefs.DefaultRoute {
 		cleanup.routeChanges = nil
@@ -612,18 +612,18 @@ func (c *Connector) clearAlwaysOnStateLocked(modemID string) error {
 	return deleteAlwaysOnStateForModem(c.alwaysOnPath, modemID)
 }
 
-func (c *Connector) connectionFromBearer(bearer *mmodem.Bearer, prefs Preferences, metric int) (*Connection, error) {
+func (c *Connector) connectionFromBearer(modemID string, bearer *mmodem.Bearer, prefs Preferences, metric int) (*Connection, error) {
 	connection, err := connectionFromBearer(bearer, prefs, metric)
 	if err != nil {
 		return nil, err
 	}
 	if c.proxy != nil && strings.TrimSpace(connection.InterfaceName) != "" {
-		connection.Proxy = c.proxy.Status(connection.InterfaceName)
+		connection.Proxy = c.proxy.Status(modemID)
 	}
 	return connection, nil
 }
 
-func (c *Connector) syncProxyPreference(interfaceName string, prefs Preferences) error {
+func (c *Connector) syncProxyPreference(modemID string, interfaceName string, prefs Preferences) error {
 	if c.proxy == nil {
 		if prefs.ProxyEnabled {
 			return ErrProxyPasswordRequired
@@ -631,24 +631,24 @@ func (c *Connector) syncProxyPreference(interfaceName string, prefs Preferences)
 		return nil
 	}
 	if !prefs.ProxyEnabled {
-		return c.cleanupProxy(interfaceName)
+		return c.cleanupProxy(modemID, interfaceName)
 	}
-	_, err := c.proxy.Register(interfaceName)
+	_, err := c.proxy.Register(ProxyBinding{Username: modemID, InterfaceName: interfaceName})
 	return err
 }
 
-func (c *Connector) cleanupProxy(interfaceName string) error {
+func (c *Connector) cleanupProxy(modemID string, interfaceName string) error {
 	err := deleteProxyState(proxyStatePath, interfaceName)
 	if c.proxy != nil {
-		err = errors.Join(err, c.proxy.Unregister(interfaceName))
+		err = errors.Join(err, c.proxy.Unregister(modemID))
 	}
 	return err
 }
 
-func (c *Connector) cleanupProxyInterfaces(interfaceNames []string) error {
+func (c *Connector) cleanupProxyInterfaces(modemID string, interfaceNames []string) error {
 	var result error
 	for _, interfaceName := range interfaceNames {
-		result = errors.Join(result, c.cleanupProxy(interfaceName))
+		result = errors.Join(result, c.cleanupProxy(modemID, interfaceName))
 	}
 	return result
 }
@@ -658,11 +658,15 @@ func (c *Connector) cleanupProxyForModem(modemID string) error {
 	if err != nil {
 		return err
 	}
-	return c.cleanupProxyInterfaces(interfaceNames)
+	err = c.cleanupProxyInterfaces(modemID, interfaceNames)
+	if c.proxy != nil {
+		err = errors.Join(err, c.proxy.Unregister(modemID))
+	}
+	return err
 }
 
 func (c *Connector) cleanupStaleConnectionState(modemID string, interfaceNames ...string) error {
-	err := c.cleanupProxyInterfaces(interfaceNames)
+	err := c.cleanupProxyInterfaces(modemID, interfaceNames)
 	err = errors.Join(err, c.cleanupProxyForModem(modemID))
 	err = errors.Join(err, restoreStaleDefaultRouteStatesForModem(modemID, interfaceNames...))
 	return err

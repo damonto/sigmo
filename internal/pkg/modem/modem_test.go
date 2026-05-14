@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -79,6 +80,10 @@ func TestIsTransientRestartError(t *testing.T) {
 		{
 			name: "other error",
 			err:  errors.New("permission denied"),
+			want: false,
+		},
+		{
+			name: "nil",
 			want: false,
 		},
 	}
@@ -157,26 +162,153 @@ func TestModemRestart(t *testing.T) {
 }
 
 func TestWaitForModem(t *testing.T) {
+	withWaitForModemRefreshInterval(t, time.Microsecond)
+
+	current := &Modem{
+		objectPath:          "/org/freedesktop/ModemManager1/Modem/1",
+		EquipmentIdentifier: "354015820228039",
+	}
+	replacement := &Modem{
+		objectPath:          "/org/freedesktop/ModemManager1/Modem/2",
+		EquipmentIdentifier: current.EquipmentIdentifier,
+	}
+	samePathReplacement := &Modem{
+		objectPath:          current.objectPath,
+		EquipmentIdentifier: current.EquipmentIdentifier,
+	}
+	transientActionErr := errors.New("Object does not exist at path \"/org/freedesktop/ModemManager1/Modem/1\"")
+
 	tests := []struct {
-		name     string
-		current  *Modem
-		modems   map[dbus.ObjectPath]*Modem
-		wantErr  error
-		wantPath dbus.ObjectPath
+		name       string
+		current    *Modem
+		modems     map[dbus.ObjectPath]*Modem
+		action     func(*Manager) error
+		ctxTimeout time.Duration
+		wantErr    error
+		wantPath   dbus.ObjectPath
 	}{
 		{
-			name: "return replacement already present",
+			name:    "return replacement already present",
+			current: current,
+			modems: map[dbus.ObjectPath]*Modem{
+				replacement.objectPath: replacement,
+			},
+			wantPath: replacement.objectPath,
+		},
+		{
+			name:    "same path replacement without reload evidence times out",
+			current: current,
+			modems: map[dbus.ObjectPath]*Modem{
+				samePathReplacement.objectPath: samePathReplacement,
+			},
+			ctxTimeout: time.Millisecond,
+			wantErr:    context.DeadlineExceeded,
+		},
+		{
+			name:    "return unmarked action error",
+			current: current,
+			modems: map[dbus.ObjectPath]*Modem{
+				replacement.objectPath: replacement,
+			},
+			action: func(*Manager) error {
+				return transientActionErr
+			},
+			wantErr: transientActionErr,
+		},
+		{
+			name:    "wait after marked reload action error",
+			current: current,
+			modems: map[dbus.ObjectPath]*Modem{
+				replacement.objectPath: replacement,
+			},
+			action: func(*Manager) error {
+				return ReloadStarted(transientActionErr)
+			},
+			wantPath: replacement.objectPath,
+		},
+		{
+			name:    "wait after marked reload action error returns same path replacement",
+			current: current,
+			modems: map[dbus.ObjectPath]*Modem{
+				samePathReplacement.objectPath: samePathReplacement,
+			},
+			action: func(*Manager) error {
+				return ReloadStarted(transientActionErr)
+			},
+			wantPath: samePathReplacement.objectPath,
+		},
+		{
+			name:    "event removed then added during action",
+			current: current,
+			modems: map[dbus.ObjectPath]*Modem{
+				current.objectPath: current,
+			},
+			action: func(manager *Manager) error {
+				publishModemEvent(t, manager, ModemEvent{
+					Type:  ModemEventRemoved,
+					Modem: current,
+					Path:  current.objectPath,
+				})
+				publishModemEvent(t, manager, ModemEvent{
+					Type:  ModemEventAdded,
+					Modem: replacement,
+					Path:  replacement.objectPath,
+				})
+				return nil
+			},
+			wantPath: replacement.objectPath,
+		},
+		{
+			name:    "ignore duplicate added event without reload evidence",
+			current: current,
+			modems: map[dbus.ObjectPath]*Modem{
+				current.objectPath: current,
+			},
+			action: func(manager *Manager) error {
+				publishModemEvent(t, manager, ModemEvent{
+					Type:  ModemEventAdded,
+					Modem: current,
+					Path:  current.objectPath,
+				})
+				return nil
+			},
+			ctxTimeout: time.Millisecond,
+			wantErr:    context.DeadlineExceeded,
+		},
+		{
+			name: "empty equipment identifier does not match replacement",
 			current: &Modem{
-				objectPath:          "/org/freedesktop/ModemManager1/Modem/1",
-				EquipmentIdentifier: "354015820228039",
+				objectPath: "/org/freedesktop/ModemManager1/Modem/1",
 			},
 			modems: map[dbus.ObjectPath]*Modem{
 				"/org/freedesktop/ModemManager1/Modem/2": {
-					objectPath:          "/org/freedesktop/ModemManager1/Modem/2",
-					EquipmentIdentifier: "354015820228039",
+					objectPath: "/org/freedesktop/ModemManager1/Modem/2",
 				},
 			},
-			wantPath: "/org/freedesktop/ModemManager1/Modem/2",
+			ctxTimeout: time.Millisecond,
+			wantErr:    context.DeadlineExceeded,
+		},
+		{
+			name:    "poll until modem reappears after not found window",
+			current: current,
+			modems:  map[dbus.ObjectPath]*Modem{},
+			action: func(manager *Manager) error {
+				go func() {
+					time.Sleep(100 * time.Microsecond)
+					manager.mu.Lock()
+					defer manager.mu.Unlock()
+					manager.modems[replacement.objectPath] = replacement
+				}()
+				return nil
+			},
+			wantPath: replacement.objectPath,
+		},
+		{
+			name:       "timeout while modem remains unavailable",
+			current:    current,
+			modems:     map[dbus.ObjectPath]*Modem{},
+			ctxTimeout: time.Millisecond,
+			wantErr:    context.DeadlineExceeded,
 		},
 		{
 			name:    "reject nil modem",
@@ -191,7 +323,19 @@ func TestWaitForModem(t *testing.T) {
 			}
 			manager.subscribe.Do(func() {})
 
-			modem, err := manager.WaitForModem(context.Background(), tt.current)
+			ctx := context.Background()
+			var cancel context.CancelFunc
+			if tt.ctxTimeout > 0 {
+				ctx, cancel = context.WithTimeout(ctx, tt.ctxTimeout)
+				defer cancel()
+			}
+
+			modem, err := manager.WaitForModemAfter(ctx, tt.current, func() error {
+				if tt.action == nil {
+					return nil
+				}
+				return tt.action(manager)
+			})
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("WaitForModem() error = %v, want %v", err, tt.wantErr)
@@ -205,6 +349,27 @@ func TestWaitForModem(t *testing.T) {
 				t.Fatalf("WaitForModem() path = %v, want %v", modem.objectPath, tt.wantPath)
 			}
 		})
+	}
+}
+
+func withWaitForModemRefreshInterval(t *testing.T, interval time.Duration) {
+	t.Helper()
+	original := waitForModemRefreshInterval
+	waitForModemRefreshInterval = interval
+	t.Cleanup(func() {
+		waitForModemRefreshInterval = original
+	})
+}
+
+func publishModemEvent(t *testing.T, manager *Manager, event ModemEvent) {
+	t.Helper()
+	manager.mu.RLock()
+	subscribers := append([]subscription(nil), manager.subs...)
+	manager.mu.RUnlock()
+	for _, subscriber := range subscribers {
+		if err := subscriber.fn(event); err != nil {
+			t.Fatalf("publish modem event: %v", err)
+		}
 	}
 }
 
