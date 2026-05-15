@@ -1,6 +1,7 @@
 package internet
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +10,87 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
+
+func TestAlwaysOnStatePathFromEnv(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		env     map[string]string
+		home    string
+		homeErr error
+		want    string
+		wantErr string
+	}{
+		{
+			name: "xdg state home",
+			env:  map[string]string{"XDG_STATE_HOME": "/var/lib/sigmo-state"},
+			home: "/home/sigmo",
+			want: "/var/lib/sigmo-state/sigmo/internet-always-on.json",
+		},
+		{
+			name: "home default",
+			env:  map[string]string{},
+			home: "/home/sigmo",
+			want: "/home/sigmo/.local/state/sigmo/internet-always-on.json",
+		},
+		{
+			name:    "relative xdg state home",
+			env:     map[string]string{"XDG_STATE_HOME": "state"},
+			home:    "/home/sigmo",
+			wantErr: "XDG_STATE_HOME",
+		},
+		{
+			name:    "home error",
+			env:     map[string]string{},
+			homeErr: errors.New("home missing"),
+			wantErr: "resolve user home dir",
+		},
+		{
+			name:    "empty home",
+			env:     map[string]string{},
+			wantErr: "user home dir is empty",
+		},
+		{
+			name:    "relative home",
+			env:     map[string]string{},
+			home:    "home/sigmo",
+			wantErr: "user home dir",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			lookupEnv := func(key string) (string, bool) {
+				value, ok := tt.env[key]
+				return value, ok
+			}
+			userHomeDir := func() (string, error) {
+				return tt.home, tt.homeErr
+			}
+
+			got, err := alwaysOnStatePathFromEnv(lookupEnv, userHomeDir)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatal("alwaysOnStatePathFromEnv() error = nil, want error")
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("alwaysOnStatePathFromEnv() error = %v, want it to contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("alwaysOnStatePathFromEnv() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("alwaysOnStatePathFromEnv() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestAlwaysOnStateForModem(t *testing.T) {
 	t.Parallel()
@@ -21,6 +103,10 @@ func TestAlwaysOnStateForModem(t *testing.T) {
 			name: "save and load modem",
 			run: func(t *testing.T, path string) {
 				t.Helper()
+				dir := filepath.Dir(path)
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatalf("os.MkdirAll() error = %v", err)
+				}
 
 				want := Preferences{
 					APN:          "internet",
@@ -34,6 +120,20 @@ func TestAlwaysOnStateForModem(t *testing.T) {
 				}
 				if err := saveAlwaysOnStateForModem(path, "modem-1", want); err != nil {
 					t.Fatalf("saveAlwaysOnStateForModem() error = %v", err)
+				}
+				info, err := os.Stat(path)
+				if err != nil {
+					t.Fatalf("os.Stat() error = %v", err)
+				}
+				if got := info.Mode().Perm(); got != 0o600 {
+					t.Fatalf("state file mode = %#o, want %#o", got, os.FileMode(0o600))
+				}
+				info, err = os.Stat(dir)
+				if err != nil {
+					t.Fatalf("os.Stat(dir) error = %v", err)
+				}
+				if got := info.Mode().Perm(); got != 0o700 {
+					t.Fatalf("state directory mode = %#o, want %#o", got, os.FileMode(0o700))
 				}
 
 				got, ok, err := loadAlwaysOnStateForModem(path, "modem-1")
@@ -244,8 +344,7 @@ func TestConnectorAlwaysOnStatePolicy(t *testing.T) {
 			t.Parallel()
 
 			path := filepath.Join(t.TempDir(), "internet-always-on.json")
-			c := NewConnector()
-			c.alwaysOnPath = path
+			c := NewConnectorWithProxyStatePath(nil, path)
 			tt.run(t, c, path)
 
 			_, ok, err := loadAlwaysOnStateForModem(path, modemID)
@@ -268,8 +367,7 @@ func TestRestoreAlwaysOnSkipsStaleSnapshotAfterManualClear(t *testing.T) {
 	const modemID = "modem-1"
 
 	path := filepath.Join(t.TempDir(), "internet-always-on.json")
-	c := NewConnector()
-	c.alwaysOnPath = path
+	c := NewConnectorWithProxyStatePath(nil, path)
 	prefs := Preferences{APN: "internet", DefaultRoute: true, AlwaysOn: true}
 	if err := saveAlwaysOnStateForModem(path, modemID, prefs); err != nil {
 		t.Fatalf("saveAlwaysOnStateForModem() error = %v", err)

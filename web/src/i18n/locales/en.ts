@@ -410,7 +410,8 @@ const en = {
       internetProxyLabel: 'Proxy service',
       internetProxyDescription: 'Expose HTTP and SOCKS5 proxies after connecting.',
       internetAlwaysOnLabel: 'Always On',
-      internetAlwaysOnDescription: 'Reconnect with these settings after an unexpected disconnect.',
+      internetAlwaysOnDescription:
+        'Reconnect with these settings after an unexpected disconnect or system restart.',
       internetConnect: 'Connect',
       internetDisconnect: 'Disconnect',
       internetConnected: 'Connected',

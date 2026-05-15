@@ -29,11 +29,7 @@ const (
 	errorCodeInternetIPTypeInvalidConfig      = "internet_ip_type_invalid_config"
 )
 
-func New(manager *mmodem.Manager) *Handler {
-	return NewWithConnector(manager, internetcore.NewConnector())
-}
-
-func NewWithConnector(manager *mmodem.Manager, connector *internetcore.Connector) *Handler {
+func New(manager *mmodem.Manager, connector *internetcore.Connector) *Handler {
 	return &Handler{
 		manager:   manager,
 		connector: connector,

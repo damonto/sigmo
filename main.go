@@ -77,7 +77,11 @@ func main() {
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch, http.MethodHead, http.MethodOptions},
 		AllowHeaders: []string{"*"},
 	}))
-	internetConnector := newInternetConnector(store)
+	internetConnector, err := newInternetConnector(store)
+	if err != nil {
+		slog.Error("configure internet connector", "error", err)
+		os.Exit(1)
+	}
 	if err := recoverInternetConnections(manager, internetConnector); err != nil {
 		slog.Error("recover internet connections", "error", err)
 	}
@@ -136,7 +140,7 @@ func applyLogLevel(store *config.Store) {
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 }
 
-func newInternetConnector(store *config.Store) *internet.Connector {
+func newInternetConnector(store *config.Store) (*internet.Connector, error) {
 	proxyConfig := store.ProxySettings()
 	proxy := internet.NewProxy(internet.ProxyConfig{
 		ListenAddress: proxyConfig.ListenAddress,

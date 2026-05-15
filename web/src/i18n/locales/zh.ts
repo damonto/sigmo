@@ -410,7 +410,7 @@ const zh = {
       internetProxyLabel: '代理服务',
       internetProxyDescription: '连接后暴露 HTTP 和 SOCKS5 代理。',
       internetAlwaysOnLabel: 'Always On',
-      internetAlwaysOnDescription: '异常断开后自动按本次连接参数恢复。',
+      internetAlwaysOnDescription: '异常断开或系统重启后，自动按本次连接参数恢复。',
       internetConnect: '连接',
       internetDisconnect: '断开',
       internetConnected: '已连接',

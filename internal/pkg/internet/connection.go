@@ -59,16 +59,24 @@ type Connector struct {
 	alwaysOnPath string
 }
 
-func NewConnector() *Connector {
+func NewConnector() (*Connector, error) {
 	return NewConnectorWithProxy(nil)
 }
 
-func NewConnectorWithProxy(proxy *Proxy) *Connector {
+func NewConnectorWithProxy(proxy *Proxy) (*Connector, error) {
+	path, err := defaultAlwaysOnStatePath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve always on state path: %w", err)
+	}
+	return NewConnectorWithProxyStatePath(proxy, path), nil
+}
+
+func NewConnectorWithProxyStatePath(proxy *Proxy, path string) *Connector {
 	return &Connector{
 		connections:  make(map[string]trackedConnection),
 		preferences:  make(map[string]Preferences),
 		proxy:        proxy,
-		alwaysOnPath: alwaysOnStatePath,
+		alwaysOnPath: path,
 	}
 }
 

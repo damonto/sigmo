@@ -57,8 +57,7 @@ func TestCurrentReturnsDefaultAPNCredentials(t *testing.T) {
 	modem.EquipmentIdentifier = "860588043408833"
 	modem.Sim = &mmodem.SIM{OperatorIdentifier: "23415"}
 
-	connector := NewConnector()
-	connector.alwaysOnPath = filepath.Join(t.TempDir(), "internet-always-on.json")
+	connector := NewConnectorWithProxyStatePath(nil, filepath.Join(t.TempDir(), "internet-always-on.json"))
 
 	got, err := connector.Current(modem)
 	if err != nil {

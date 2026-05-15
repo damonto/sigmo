@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	alwaysOnStatePath    = "/run/sigmo/internet-always-on.json"
-	alwaysOnStateVersion = 1
+	alwaysOnStateDirName  = "sigmo"
+	alwaysOnStateFileName = "internet-always-on.json"
+	alwaysOnStateVersion  = 1
 )
 
 type alwaysOnStateFile struct {
@@ -28,6 +29,31 @@ type alwaysOnStateEntry struct {
 	DefaultRoute bool   `json:"defaultRoute"`
 	ProxyEnabled bool   `json:"proxyEnabled"`
 	AlwaysOn     bool   `json:"alwaysOn"`
+}
+
+func defaultAlwaysOnStatePath() (string, error) {
+	return alwaysOnStatePathFromEnv(os.LookupEnv, os.UserHomeDir)
+}
+
+func alwaysOnStatePathFromEnv(lookupEnv func(string) (string, bool), userHomeDir func() (string, error)) (string, error) {
+	if stateHome, ok := lookupEnv("XDG_STATE_HOME"); ok && stateHome != "" {
+		if !filepath.IsAbs(stateHome) {
+			return "", fmt.Errorf("XDG_STATE_HOME %q is relative", stateHome)
+		}
+		return filepath.Join(stateHome, alwaysOnStateDirName, alwaysOnStateFileName), nil
+	}
+
+	home, err := userHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user home dir: %w", err)
+	}
+	if home == "" {
+		return "", errors.New("user home dir is empty")
+	}
+	if !filepath.IsAbs(home) {
+		return "", fmt.Errorf("user home dir %q is relative", home)
+	}
+	return filepath.Join(home, ".local", "state", alwaysOnStateDirName, alwaysOnStateFileName), nil
 }
 
 func loadAlwaysOnStates(path string) (map[string]Preferences, error) {
@@ -151,6 +177,9 @@ func writeAlwaysOnState(path string, store alwaysOnStateFile) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create always on state directory: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("secure always on state directory: %w", err)
 	}
 	tempPath := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
 	if err := os.WriteFile(tempPath, data, 0o600); err != nil {

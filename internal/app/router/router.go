@@ -84,7 +84,7 @@ func Register(e *echo.Echo, store *config.Store, manager *modem.Manager, interne
 		}
 
 		{
-			h := hinternet.NewWithConnector(manager, internetConnector)
+			h := hinternet.New(manager, internetConnector)
 			protected.GET("/modems/:id/internet-connections/current", h.Current)
 			protected.GET("/modems/:id/internet-connections/public", h.Public)
 			protected.POST("/modems/:id/internet-connections", h.Connect)
