@@ -28,13 +28,14 @@ const (
 	errorCodeSetBandsInvalid       = "set_bands_invalid_request"
 	errorCodeBandsRequired         = "bands_required"
 	errorCodeUnsupportedBand       = "unsupported_band"
+	errorCodeDuplicateBand         = "duplicate_band"
 	errorCodeAnyBandExclusive      = "any_band_exclusive"
 )
 
-func New(manager *mmodem.Manager) *Handler {
+func New(manager *mmodem.Manager, preferences *mmodem.NetworkPreferences) *Handler {
 	return &Handler{
 		manager:  manager,
-		networks: newNetwork(),
+		networks: newNetwork(preferences),
 	}
 }
 
@@ -122,6 +123,8 @@ func (h *Handler) SetCurrentBands(c *echo.Context) error {
 			return httpapi.BadRequest(c, errorCodeBandsRequired, err)
 		case errors.Is(err, errUnsupportedBand):
 			return httpapi.BadRequest(c, errorCodeUnsupportedBand, err)
+		case errors.Is(err, errDuplicateBand):
+			return httpapi.BadRequest(c, errorCodeDuplicateBand, err)
 		case errors.Is(err, errAnyBandExclusive):
 			return httpapi.BadRequest(c, errorCodeAnyBandExclusive, err)
 		default:

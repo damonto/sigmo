@@ -6,10 +6,12 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
-type network struct{}
+type network struct {
+	preferences *mmodem.NetworkPreferences
+}
 
-func newNetwork() *network {
-	return &network{}
+func newNetwork(preferences *mmodem.NetworkPreferences) *network {
+	return &network{preferences: preferences}
 }
 
 func (n *network) List(modem *mmodem.Modem) ([]NetworkResponse, error) {

@@ -90,7 +90,18 @@ func main() {
 		slog.Error("unable to configure message relay", "error", err)
 		os.Exit(1)
 	}
-	router.Register(server, store, manager, internetConnector, relay)
+	networkPreferences, err := modem.NewNetworkPreferences()
+	if err != nil {
+		slog.Error("configure network preferences", "error", err)
+		os.Exit(1)
+	}
+	router.Register(server, router.RegisterConfig{
+		Store:              store,
+		Modems:             manager,
+		Internet:           internetConnector,
+		Relay:              relay,
+		NetworkPreferences: networkPreferences,
+	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -102,6 +113,12 @@ func main() {
 	}()
 
 	go internetConnector.RunAlwaysOn(ctx, manager)
+
+	go func() {
+		if err := networkPreferences.Run(ctx, manager); err != nil {
+			slog.Error("network preferences restore stopped", "error", err)
+		}
+	}()
 
 	go func() {
 		if err := relay.Run(ctx); err != nil {

@@ -103,7 +103,7 @@ The compose setup uses `network_mode: host` because Sigmo's internet connection 
 
 The container runs with `privileged: true` so Sigmo and ModemManager can access modem devices. `/run` is mounted as tmpfs so stale D-Bus sockets cannot survive container restarts. On hosts with strict Docker or udev policies, keep `/dev`, `/run/udev`, and `/sys` mounted as shown in `compose.yaml`.
 
-If you enable **Always On** for an internet connection, Sigmo stores the last connection settings in the XDG state directory (`$XDG_STATE_HOME/sigmo/internet-always-on.json`, or `$HOME/.local/state/sigmo/internet-always-on.json`). In the Docker image, the default state directory is `/root/.local/state/sigmo`; mount that directory as a volume if you want Docker container recreation to preserve boot-time internet auto-connect settings.
+If you enable **Always On** for an internet connection, Sigmo stores the last connection settings in the XDG state directory (`$XDG_STATE_HOME/sigmo/internet-always-on.json`, or `$HOME/.local/state/sigmo/internet-always-on.json`). Sigmo also stores modem network Mode/Bands preferences in the same state directory (`network-preferences.json`) so they can be restored after modem reloads, program restarts, and system reboots. In the Docker image, the default state directory is `/root/.local/state/sigmo`; mount that directory as a volume if you want Docker container recreation to preserve boot-time internet auto-connect settings and network preferences.
 
 ---
 

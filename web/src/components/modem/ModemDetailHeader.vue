@@ -43,6 +43,10 @@ const topBarTitle = computed(() => {
   if (props.isLoading) return '...'
   return props.modem?.name ?? t('modemDetail.unknown')
 })
+const subtitle = computed(() => {
+  if (!props.modem || props.modem.supportsEsim) return t('modemDetail.subtitle')
+  return t('modemDetail.subtitlePhysical')
+})
 const currentModemId = computed(() => props.modem?.id ?? '')
 
 const handleTitleClick = () => {
@@ -137,7 +141,7 @@ onMounted(() => {
         <Skeleton v-else class="h-9 w-48 rounded bg-muted" />
       </div>
       <p class="text-sm text-muted-foreground">
-        {{ t('modemDetail.subtitle') }}
+        {{ subtitle }}
       </p>
     </header>
   </div>

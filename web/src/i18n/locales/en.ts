@@ -225,6 +225,7 @@ const en = {
     back: 'Back',
     kicker: 'Sigmo',
     subtitle: 'Manage modem details and eSIM profiles.',
+    subtitlePhysical: 'Manage modem details and physical SIM information.',
     unknown: 'Unknown Modem',
     switchModem: 'Switch modem',
     currentModem: 'Current modem',

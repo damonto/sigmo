@@ -225,6 +225,7 @@ const zh = {
     back: '返回列表',
     kicker: 'Sigmo',
     subtitle: '查看 Modem 详情与 eSIM 配置。',
+    subtitlePhysical: '查看 Modem 详情与实体 SIM 信息。',
     unknown: '未知 Modem',
     switchModem: '切换 Modem',
     currentModem: '当前 Modem',

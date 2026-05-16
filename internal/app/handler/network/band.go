@@ -11,6 +11,7 @@ import (
 var (
 	errBandsRequired    = errors.New("bands are required")
 	errUnsupportedBand  = errors.New("unsupported band")
+	errDuplicateBand    = errors.New("duplicate band")
 	errAnyBandExclusive = errors.New("any band cannot be combined with other bands")
 )
 
@@ -44,16 +45,21 @@ func (n *network) SetCurrentBands(modem *mmodem.Modem, req SetCurrentBandsReques
 	for _, band := range req.Bands {
 		bands = append(bands, mmodem.ModemBand(band))
 	}
-	if err := validateBands(modem, bands); err != nil {
+	if err := n.validateBands(modem, bands); err != nil {
 		return err
 	}
 	if err := modem.SetCurrentBands(bands); err != nil {
 		return fmt.Errorf("set current bands: %w", err)
 	}
+	if n.preferences != nil {
+		if err := n.preferences.SaveBands(modem.EquipmentIdentifier, bands); err != nil {
+			return fmt.Errorf("save current bands: %w", err)
+		}
+	}
 	return nil
 }
 
-func validateBands(modem *mmodem.Modem, bands []mmodem.ModemBand) error {
+func (n *network) validateBands(modem *mmodem.Modem, bands []mmodem.ModemBand) error {
 	supported, err := modem.SupportedBands()
 	if err != nil {
 		return fmt.Errorf("read supported bands: %w", err)
@@ -65,13 +71,18 @@ func validateBandValues(supported []mmodem.ModemBand, bands []mmodem.ModemBand) 
 	if len(bands) == 0 {
 		return errBandsRequired
 	}
-	if slices.Contains(bands, mmodem.ModemBandAny) && len(bands) > 1 {
-		return errAnyBandExclusive
-	}
+	seen := make(map[mmodem.ModemBand]struct{}, len(bands))
 	for _, band := range bands {
+		if _, ok := seen[band]; ok {
+			return errDuplicateBand
+		}
+		seen[band] = struct{}{}
 		if !slices.Contains(supported, band) {
 			return errUnsupportedBand
 		}
+	}
+	if slices.Contains(bands, mmodem.ModemBandAny) && len(bands) > 1 {
+		return errAnyBandExclusive
 	}
 	return nil
 }

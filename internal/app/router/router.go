@@ -25,7 +25,15 @@ import (
 	"github.com/damonto/sigmo/web"
 )
 
-func Register(e *echo.Echo, store *config.Store, manager *modem.Manager, internetConnector *pinternet.Connector, relay *forwarder.Relay) {
+type RegisterConfig struct {
+	Store              *config.Store
+	Modems             *modem.Manager
+	Internet           *pinternet.Connector
+	Relay              *forwarder.Relay
+	NetworkPreferences *modem.NetworkPreferences
+}
+
+func Register(e *echo.Echo, cfg RegisterConfig) {
 	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
 		Filesystem: web.Root(),
 		Index:      "index.html",
@@ -39,20 +47,20 @@ func Register(e *echo.Echo, store *config.Store, manager *modem.Manager, interne
 	v1 := e.Group("/api/v1")
 
 	authStore := auth.NewStore()
-	authHandler := hauth.New(store, authStore)
+	authHandler := hauth.New(cfg.Store, authStore)
 	v1.GET("/auth/otp/required", authHandler.OTPRequirement)
 	v1.POST("/auth/otp", authHandler.SendOTP)
 	v1.POST("/auth/otp/verify", authHandler.VerifyOTP)
 	protected := v1.Group("")
-	protected.Use(appmiddleware.Auth(authStore, store))
+	protected.Use(appmiddleware.Auth(authStore, cfg.Store))
 	{
 		{
-			h := hconfig.New(store, internetConnector, relay)
+			h := hconfig.New(cfg.Store, cfg.Internet, cfg.Relay)
 			protected.GET("/config", h.Get)
 			protected.PUT("/config", h.Update)
 		}
 
-		h := hmodem.New(store, manager, internetConnector)
+		h := hmodem.New(cfg.Store, cfg.Modems, cfg.Internet)
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
 		protected.PUT("/modems/:id/sim-slots/:identifier", h.SwitchSimSlot)
@@ -61,7 +69,7 @@ func Register(e *echo.Echo, store *config.Store, manager *modem.Manager, interne
 		protected.PUT("/modems/:id/settings", h.UpdateSettings)
 
 		{
-			h := message.New(manager)
+			h := message.New(cfg.Modems)
 			protected.GET("/modems/:id/messages", h.List)
 			protected.GET("/modems/:id/messages/:participant", h.ListByParticipant)
 			protected.POST("/modems/:id/messages", h.Send)
@@ -69,12 +77,12 @@ func Register(e *echo.Echo, store *config.Store, manager *modem.Manager, interne
 		}
 
 		{
-			h := ussd.New(manager)
+			h := ussd.New(cfg.Modems)
 			protected.POST("/modems/:id/ussd", h.Execute)
 		}
 
 		{
-			h := network.New(manager)
+			h := network.New(cfg.Modems, cfg.NetworkPreferences)
 			protected.GET("/modems/:id/networks", h.List)
 			protected.GET("/modems/:id/networks/modes", h.Modes)
 			protected.PUT("/modems/:id/networks/current-modes", h.SetCurrentModes)
@@ -84,7 +92,7 @@ func Register(e *echo.Echo, store *config.Store, manager *modem.Manager, interne
 		}
 
 		{
-			h := hinternet.New(manager, internetConnector)
+			h := hinternet.New(cfg.Modems, cfg.Internet)
 			protected.GET("/modems/:id/internet-connections/current", h.Current)
 			protected.GET("/modems/:id/internet-connections/public", h.Public)
 			protected.POST("/modems/:id/internet-connections", h.Connect)
@@ -92,12 +100,12 @@ func Register(e *echo.Echo, store *config.Store, manager *modem.Manager, interne
 		}
 
 		{
-			h := euicc.New(store, manager)
+			h := euicc.New(cfg.Store, cfg.Modems)
 			protected.GET("/modems/:id/euicc", h.Get)
 		}
 
 		{
-			h := esim.New(store, manager, internetConnector)
+			h := esim.New(cfg.Store, cfg.Modems, cfg.Internet)
 			protected.GET("/modems/:id/esims", h.List)
 			protected.GET("/modems/:id/esims/discover", h.Discover)
 			protected.GET("/modems/:id/esims/download-sessions", h.Download)
@@ -107,7 +115,7 @@ func Register(e *echo.Echo, store *config.Store, manager *modem.Manager, interne
 		}
 
 		{
-			h := notification.New(store, manager)
+			h := notification.New(cfg.Store, cfg.Modems)
 			protected.GET("/modems/:id/notifications", h.List)
 			protected.POST("/modems/:id/notifications/:sequence/deliveries", h.Resend)
 			protected.DELETE("/modems/:id/notifications/:sequence", h.Delete)

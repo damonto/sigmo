@@ -31,6 +31,18 @@ func TestValidateBandValues(t *testing.T) {
 			wantErr:   errUnsupportedBand,
 		},
 		{
+			name:      "reject duplicate",
+			supported: []mmodem.ModemBand{mmodem.ModemBandAny, 71},
+			bands:     []mmodem.ModemBand{71, 71},
+			wantErr:   errDuplicateBand,
+		},
+		{
+			name:      "reject duplicate any",
+			supported: []mmodem.ModemBand{mmodem.ModemBandAny, 71},
+			bands:     []mmodem.ModemBand{mmodem.ModemBandAny, mmodem.ModemBandAny},
+			wantErr:   errDuplicateBand,
+		},
+		{
 			name:      "reject any with other bands",
 			supported: []mmodem.ModemBand{mmodem.ModemBandAny, 71},
 			bands:     []mmodem.ModemBand{mmodem.ModemBandAny, 71},
