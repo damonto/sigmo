@@ -12,7 +12,7 @@ require (
 	github.com/labstack/echo/v5 v5.1.1
 	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/things-go/go-socks5 v0.1.1
-	github.com/wneessen/go-mail v0.7.2
+	github.com/wneessen/go-mail v0.7.3
 	golang.org/x/sys v0.44.0
 )
 
@@ -20,6 +20,6 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	golang.org/x/crypto v0.49.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 )
