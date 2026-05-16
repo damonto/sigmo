@@ -32,7 +32,7 @@
     "tailwindcss": "^4.2.2",
     "vee-validate": "^4.15.1",
     "vue": "^3.5.34",
-    "vue-i18n": "^11.2.8",
+    "vue-i18n": "^11.4.2",
     "vue-input-otp": "^0.3.2",
     "vue-qrcode-reader": "^5.7.3",
     "vue-router": "^5.0.6",
