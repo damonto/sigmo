@@ -1,6 +1,7 @@
 package modem
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,25 +15,25 @@ import (
 )
 
 type catalog struct {
-	store   *config.Store
-	manager *mmodem.Manager
+	store    *config.Store
+	registry *mmodem.Registry
 }
 
-func newCatalog(store *config.Store, manager *mmodem.Manager) *catalog {
+func newCatalog(store *config.Store, registry *mmodem.Registry) *catalog {
 	return &catalog{
-		store:   store,
-		manager: manager,
+		store:    store,
+		registry: registry,
 	}
 }
 
-func (c *catalog) List() ([]*ModemResponse, error) {
-	modems, err := c.manager.Modems()
+func (c *catalog) List(ctx context.Context) ([]*ModemResponse, error) {
+	modems, err := c.registry.Modems(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list modems: %w", err)
 	}
 	response := make([]*ModemResponse, 0, len(modems))
 	for _, device := range modems {
-		modemResp, err := c.buildResponse(device)
+		modemResp, err := c.buildResponse(ctx, device)
 		if err != nil {
 			return nil, err
 		}
@@ -44,42 +45,42 @@ func (c *catalog) List() ([]*ModemResponse, error) {
 	return response, nil
 }
 
-func (c *catalog) Get(modem *mmodem.Modem) (*ModemResponse, error) {
-	resp, err := c.buildResponse(modem)
+func (c *catalog) Get(ctx context.Context, modem *mmodem.Modem) (*ModemResponse, error) {
+	resp, err := c.buildResponse(ctx, modem)
 	if err != nil {
 		return nil, err
 	}
 	return resp, nil
 }
 
-func (c *catalog) buildResponse(device *mmodem.Modem) (*ModemResponse, error) {
-	sim, err := device.SIMs().Primary()
+func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*ModemResponse, error) {
+	sim, err := device.SIMs().Primary(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch primary SIM: %w", err)
 	}
 
-	percent, _, err := device.SignalQuality()
+	percent, _, err := device.SignalQuality(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch signal quality: %w", err)
 	}
 
-	access, err := device.AccessTechnologies()
+	access, err := device.AccessTechnologies(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch access technologies: %w", err)
 	}
 
 	threeGpp := device.ThreeGPP()
-	registrationState, err := threeGpp.RegistrationState()
+	registrationState, err := threeGpp.RegistrationState(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch registration state: %w", err)
 	}
 
-	registeredOperatorName, err := threeGpp.OperatorName()
+	registeredOperatorName, err := threeGpp.OperatorName(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch operator name: %w", err)
 	}
 
-	operatorCode, err := threeGpp.OperatorCode()
+	operatorCode, err := threeGpp.OperatorCode(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch operator code: %w", err)
 	}
@@ -90,7 +91,7 @@ func (c *catalog) buildResponse(device *mmodem.Modem) (*ModemResponse, error) {
 		return nil, fmt.Errorf("detect eSIM support: %w", err)
 	}
 
-	simSlots, err := c.buildSlotsResponse(device)
+	simSlots, err := c.buildSlotsResponse(ctx, device)
 	if err != nil {
 		return nil, fmt.Errorf("fetch SIM slots: %w", err)
 	}
@@ -130,13 +131,13 @@ func (c *catalog) buildResponse(device *mmodem.Modem) (*ModemResponse, error) {
 	}, nil
 }
 
-func (c *catalog) buildSlotsResponse(device *mmodem.Modem) ([]SlotResponse, error) {
+func (c *catalog) buildSlotsResponse(ctx context.Context, device *mmodem.Modem) ([]SlotResponse, error) {
 	if len(device.SimSlots) == 0 {
 		return []SlotResponse{}, nil
 	}
 	simSlots := make([]SlotResponse, 0, len(device.SimSlots))
 	for _, slotPath := range device.SimSlots {
-		sim, err := device.SIMs().Get(slotPath)
+		sim, err := device.SIMs().Get(ctx, slotPath)
 		if err != nil {
 			return nil, fmt.Errorf("fetch SIM for slot %s: %w", slotPath, err)
 		}

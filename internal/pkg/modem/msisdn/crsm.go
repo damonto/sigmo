@@ -3,7 +3,7 @@ package msisdn
 import "github.com/damonto/sigmo/internal/pkg/modem/at"
 
 type CRSM struct {
-	commander at.ATCommand
+	commander commandRunner
 }
 
 func NewCRSM(conn *at.AT) Runner {

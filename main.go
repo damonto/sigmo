@@ -51,11 +51,19 @@ func main() {
 	httpapi.SetExposeInternalErrors(!store.IsProduction())
 	slog.Info("server starting", "version", BuildVersion)
 
-	manager, err := modem.NewManager()
+	registry, err := modem.NewRegistry()
 	if err != nil {
-		slog.Error("unable to connect modem manager", "error", err)
+		slog.Error("unable to connect modem registry", "error", err)
 		os.Exit(1)
 	}
+	defer func() {
+		if err := registry.Close(); err != nil {
+			slog.Warn("close modem registry", "error", err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	server := echo.New()
 	server.Logger = slog.Default()
@@ -82,10 +90,15 @@ func main() {
 		slog.Error("configure internet connector", "error", err)
 		os.Exit(1)
 	}
-	if err := recoverInternetConnections(manager, internetConnector); err != nil {
+	startupCtx, cancelStartup := context.WithTimeout(ctx, 15*time.Second)
+	if err := modem.EnableDisabled(startupCtx, registry); err != nil {
+		slog.Error("enable disabled modems", "error", err)
+	}
+	if err := recoverInternetConnections(startupCtx, registry, internetConnector); err != nil {
 		slog.Error("recover internet connections", "error", err)
 	}
-	relay, err := forwarder.New(store, manager)
+	cancelStartup()
+	relay, err := forwarder.New(store, registry)
 	if err != nil {
 		slog.Error("unable to configure message relay", "error", err)
 		os.Exit(1)
@@ -97,25 +110,28 @@ func main() {
 	}
 	router.Register(server, router.RegisterConfig{
 		Store:              store,
-		Modems:             manager,
+		Registry:           registry,
 		Internet:           internetConnector,
 		Relay:              relay,
 		NetworkPreferences: networkPreferences,
 	})
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	go func() {
+		if err := modem.RunEnableDisabled(ctx, registry); err != nil {
+			slog.Error("modem enable runner stopped", "error", err)
+		}
+	}()
 
 	go func() {
-		if err := manager.RunSMSStorageDefaults(ctx, modem.SMSStorageME); err != nil {
+		if err := modem.RunSMSStorageDefaults(ctx, registry, modem.SMSStorageME); err != nil {
 			slog.Error("SMS storage defaults stopped", "error", err)
 		}
 	}()
 
-	go internetConnector.RunAlwaysOn(ctx, manager)
+	go internetConnector.RunAlwaysOn(ctx, registry)
 
 	go func() {
-		if err := networkPreferences.Run(ctx, manager); err != nil {
+		if err := networkPreferences.Run(ctx, registry); err != nil {
 			slog.Error("network preferences restore stopped", "error", err)
 		}
 	}()
@@ -165,11 +181,11 @@ func newInternetConnector(store *config.Store) (*internet.Connector, error) {
 		SOCKS5Port:    proxyConfig.SOCKS5Port,
 		Password:      proxyConfig.Password,
 	})
-	return internet.NewConnectorWithProxy(proxy)
+	return internet.NewConnector(internet.ConnectorConfig{Proxy: proxy})
 }
 
-func recoverInternetConnections(manager *modem.Manager, connector *internet.Connector) error {
-	modemMap, err := manager.Modems()
+func recoverInternetConnections(ctx context.Context, registry *modem.Registry, connector *internet.Connector) error {
+	modemMap, err := registry.Modems(ctx)
 	if err != nil {
 		return fmt.Errorf("list modems: %w", err)
 	}
@@ -177,5 +193,5 @@ func recoverInternetConnections(manager *modem.Manager, connector *internet.Conn
 	for _, modem := range modemMap {
 		modems = append(modems, modem)
 	}
-	return connector.Recover(modems)
+	return connector.Recover(ctx, modems)
 }

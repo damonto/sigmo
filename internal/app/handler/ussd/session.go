@@ -38,12 +38,12 @@ func (s *session) Execute(ctx context.Context, modem *mmodem.Modem, action strin
 }
 
 func (s *session) executeInitialize(ctx context.Context, modem *mmodem.Modem, ussd *mmodem.USSD, code string) (*ExecuteResponse, error) {
-	state, err := ussd.State()
+	state, err := ussd.State(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read ussd state: %w", err)
 	}
-	if state != mmodem.Modem3gppUssdSessionStateIdle {
-		if err := ussd.Cancel(); err != nil {
+	if state != mmodem.Modem3GPPUSSDSessionStateIdle {
+		if err := ussd.Cancel(ctx); err != nil {
 			return nil, fmt.Errorf("cancel ussd session: %w", err)
 		}
 	}
@@ -55,14 +55,14 @@ func (s *session) executeInitialize(ctx context.Context, modem *mmodem.Modem, us
 }
 
 func (s *session) executeReply(ctx context.Context, modem *mmodem.Modem, ussd *mmodem.USSD, code string) (*ExecuteResponse, error) {
-	state, err := ussd.State()
+	state, err := ussd.State(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read ussd state: %w", err)
 	}
-	if state == mmodem.Modem3gppUssdSessionStateUnknown {
+	if state == mmodem.Modem3GPPUSSDSessionStateUnknown {
 		return nil, errUnknownSessionStatus
 	}
-	if state != mmodem.Modem3gppUssdSessionStateUserResponse {
+	if state != mmodem.Modem3GPPUSSDSessionStateUserResponse {
 		return nil, errSessionNotReady
 	}
 	reply, err := ussd.Respond(ctx, code)

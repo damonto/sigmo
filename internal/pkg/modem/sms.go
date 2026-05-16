@@ -1,6 +1,7 @@
 package modem
 
 import (
+	"context"
 	"time"
 
 	"github.com/godbus/dbus/v5"
@@ -20,31 +21,31 @@ func (sms *SMS) Path() dbus.ObjectPath {
 	return sms.objectPath
 }
 
-func (msg *Messaging) Retrieve(objectPath dbus.ObjectPath) (*SMS, error) {
+func (msg *Messaging) Retrieve(ctx context.Context, objectPath dbus.ObjectPath) (*SMS, error) {
 	dbusObject, err := systemBusObject(objectPath)
 	if err != nil {
 		return nil, err
 	}
 	sms := SMS{objectPath: objectPath}
-	variant, err := dbusObject.GetProperty(ModemSMSInterface + ".State")
+	variant, err := dbusProperty(ctx, dbusObject, ModemSMSInterface, "State")
 	if err != nil {
 		return nil, err
 	}
 	sms.State = SMSState(uintFromVariant[uint32](variant))
 
-	variant, err = dbusObject.GetProperty(ModemSMSInterface + ".Number")
+	variant, err = dbusProperty(ctx, dbusObject, ModemSMSInterface, "Number")
 	if err != nil {
 		return nil, err
 	}
 	sms.Number = stringFromVariant(variant)
 
-	variant, err = dbusObject.GetProperty(ModemSMSInterface + ".Text")
+	variant, err = dbusProperty(ctx, dbusObject, ModemSMSInterface, "Text")
 	if err != nil {
 		return nil, err
 	}
 	sms.Text = stringFromVariant(variant)
 
-	variant, err = dbusObject.GetProperty(ModemSMSInterface + ".Timestamp")
+	variant, err = dbusProperty(ctx, dbusObject, ModemSMSInterface, "Timestamp")
 	if err != nil {
 		return nil, err
 	}
@@ -60,8 +61,8 @@ func (msg *Messaging) Retrieve(objectPath dbus.ObjectPath) (*SMS, error) {
 	return &sms, nil
 }
 
-func (msg *Messaging) Send(to string, text string) (*SMS, error) {
-	path, err := msg.Create(to, text)
+func (msg *Messaging) Send(ctx context.Context, to string, text string) (*SMS, error) {
+	path, err := msg.Create(ctx, to, text)
 	if err != nil {
 		return nil, err
 	}
@@ -69,8 +70,8 @@ func (msg *Messaging) Send(to string, text string) (*SMS, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := dbusObject.Call(ModemSMSInterface+".Send", 0).Err; err != nil {
+	if err := dbusObject.CallWithContext(ctx, ModemSMSInterface+".Send", 0).Err; err != nil {
 		return nil, err
 	}
-	return msg.Retrieve(path)
+	return msg.Retrieve(ctx, path)
 }

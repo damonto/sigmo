@@ -1,6 +1,7 @@
 package modem
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -88,17 +89,17 @@ type BearerProperties struct {
 	AllowedAuth string
 }
 
-func (m *Modem) ConnectBearer(prefs BearerProperties) (*Bearer, error) {
+func (m *Modem) ConnectBearer(ctx context.Context, prefs BearerProperties) (*Bearer, error) {
 	properties, err := bearerDBusProperties(prefs)
 	if err != nil {
 		return nil, err
 	}
 
 	var path dbus.ObjectPath
-	if err := m.dbusObject.Call(ModemSimpleInterface+".Connect", 0, properties).Store(&path); err != nil {
+	if err := m.dbusObject.CallWithContext(ctx, ModemSimpleInterface+".Connect", 0, properties).Store(&path); err != nil {
 		return nil, err
 	}
-	return m.Bearer(path)
+	return m.Bearer(ctx, path)
 }
 
 func bearerDBusProperties(prefs BearerProperties) (map[string]dbus.Variant, error) {
@@ -128,23 +129,23 @@ func bearerDBusProperties(prefs BearerProperties) (map[string]dbus.Variant, erro
 	return properties, nil
 }
 
-func (m *Modem) DisconnectBearer(path dbus.ObjectPath) error {
-	return m.dbusObject.Call(ModemSimpleInterface+".Disconnect", 0, path).Err
+func (m *Modem) DisconnectBearer(ctx context.Context, path dbus.ObjectPath) error {
+	return m.dbusObject.CallWithContext(ctx, ModemSimpleInterface+".Disconnect", 0, path).Err
 }
 
-func (m *Modem) DeleteBearer(path dbus.ObjectPath) error {
-	return m.dbusObject.Call(ModemInterface+".DeleteBearer", 0, path).Err
+func (m *Modem) DeleteBearer(ctx context.Context, path dbus.ObjectPath) error {
+	return m.dbusObject.CallWithContext(ctx, ModemInterface+".DeleteBearer", 0, path).Err
 }
 
-func (m *Modem) Bearers() ([]*Bearer, error) {
-	variant, err := m.dbusObject.GetProperty(ModemInterface + ".Bearers")
+func (m *Modem) Bearers(ctx context.Context) ([]*Bearer, error) {
+	variant, err := dbusProperty(ctx, m.dbusObject, ModemInterface, "Bearers")
 	if err != nil {
 		return nil, err
 	}
 	paths := objectPathsFromVariant(variant)
 	bearers := make([]*Bearer, 0, len(paths))
 	for _, path := range paths {
-		bearer, err := m.Bearer(path)
+		bearer, err := m.Bearer(ctx, path)
 		if err != nil {
 			return nil, err
 		}
@@ -153,14 +154,17 @@ func (m *Modem) Bearers() ([]*Bearer, error) {
 	return bearers, nil
 }
 
-func (m *Modem) Bearer(path dbus.ObjectPath) (*Bearer, error) {
+func (m *Modem) Bearer(ctx context.Context, path dbus.ObjectPath) (*Bearer, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if path == "" || path == "/" {
 		return nil, errors.New("bearer path is required")
 	}
-	if m.mmgr != nil && m.mmgr.dbusConn != nil {
+	if m.dbusConn != nil {
 		return &Bearer{
 			objectPath: path,
-			dbusObject: m.mmgr.dbusConn.Object(ModemManagerInterface, path),
+			dbusObject: m.dbusConn.Object(ModemManagerInterface, path),
 		}, nil
 	}
 	object, err := systemBusObject(path)
@@ -174,60 +178,60 @@ func (b *Bearer) Path() dbus.ObjectPath {
 	return b.objectPath
 }
 
-func (b *Bearer) Interface() (string, error) {
-	variant, err := b.dbusObject.GetProperty(BearerInterface + ".Interface")
+func (b *Bearer) Interface(ctx context.Context) (string, error) {
+	variant, err := dbusProperty(ctx, b.dbusObject, BearerInterface, "Interface")
 	if err != nil {
 		return "", err
 	}
 	return stringFromVariant(variant), nil
 }
 
-func (b *Bearer) Connected() (bool, error) {
-	variant, err := b.dbusObject.GetProperty(BearerInterface + ".Connected")
+func (b *Bearer) Connected(ctx context.Context) (bool, error) {
+	variant, err := dbusProperty(ctx, b.dbusObject, BearerInterface, "Connected")
 	if err != nil {
 		return false, err
 	}
 	return boolFromVariant(variant), nil
 }
 
-func (b *Bearer) IP4Config() (BearerIPConfig, error) {
-	return b.ipConfig("Ip4Config")
+func (b *Bearer) IP4Config(ctx context.Context) (BearerIPConfig, error) {
+	return b.ipConfig(ctx, "Ip4Config")
 }
 
-func (b *Bearer) IP6Config() (BearerIPConfig, error) {
-	return b.ipConfig("Ip6Config")
+func (b *Bearer) IP6Config(ctx context.Context) (BearerIPConfig, error) {
+	return b.ipConfig(ctx, "Ip6Config")
 }
 
-func (b *Bearer) Stats() (BearerStats, error) {
-	variant, err := b.dbusObject.GetProperty(BearerInterface + ".Stats")
+func (b *Bearer) Stats(ctx context.Context) (BearerStats, error) {
+	variant, err := dbusProperty(ctx, b.dbusObject, BearerInterface, "Stats")
 	if err != nil {
 		return BearerStats{}, err
 	}
 	return bearerStatsFromVariants(variantMapFromVariant(variant)), nil
 }
 
-func (b *Bearer) APN() (string, error) {
-	properties, err := b.Properties()
+func (b *Bearer) APN(ctx context.Context) (string, error) {
+	properties, err := b.Properties(ctx)
 	if err != nil {
 		return "", err
 	}
 	return properties.APN, nil
 }
 
-func (b *Bearer) Properties() (BearerProperties, error) {
-	variant, err := b.dbusObject.GetProperty(BearerInterface + ".Properties")
+func (b *Bearer) Properties(ctx context.Context) (BearerProperties, error) {
+	variant, err := dbusProperty(ctx, b.dbusObject, BearerInterface, "Properties")
 	if err != nil {
 		return BearerProperties{}, err
 	}
 	return bearerPropertiesFromVariants(variantMapFromVariant(variant)), nil
 }
 
-func (b *Bearer) Disconnect() error {
-	return b.dbusObject.Call(BearerInterface+".Disconnect", 0).Err
+func (b *Bearer) Disconnect(ctx context.Context) error {
+	return b.dbusObject.CallWithContext(ctx, BearerInterface+".Disconnect", 0).Err
 }
 
-func (b *Bearer) ipConfig(name string) (BearerIPConfig, error) {
-	variant, err := b.dbusObject.GetProperty(BearerInterface + "." + name)
+func (b *Bearer) ipConfig(ctx context.Context, name string) (BearerIPConfig, error) {
+	variant, err := dbusProperty(ctx, b.dbusObject, BearerInterface, name)
 	if err != nil {
 		return BearerIPConfig{}, err
 	}

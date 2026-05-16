@@ -42,7 +42,7 @@ func TestMessagingSetDefaultStorage(t *testing.T) {
 			}
 			modem := &Modem{dbusObject: object}
 
-			err := modem.Messaging().SetDefaultStorage(tt.storage)
+			err := modem.Messaging().SetDefaultStorage(context.Background(), tt.storage)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("SetDefaultStorage() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -99,7 +99,7 @@ func TestMessagingSupportedStorages(t *testing.T) {
 			}
 			modem := &Modem{dbusObject: object}
 
-			got, err := modem.Messaging().SupportedStorages()
+			got, err := modem.Messaging().SupportedStorages(context.Background())
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("SupportedStorages() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -153,7 +153,7 @@ func TestMessagingDefaultStorage(t *testing.T) {
 			}
 			modem := &Modem{dbusObject: object}
 
-			got, err := modem.Messaging().DefaultStorage()
+			got, err := modem.Messaging().DefaultStorage(context.Background())
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("DefaultStorage() error = %v, wantErr %v", err, tt.wantErr)
 			}

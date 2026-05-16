@@ -70,7 +70,10 @@ func TestMSISDNUpdate(t *testing.T) {
 					}
 					return client, nil
 				},
-				restartModem: func(modem *mmodem.Modem, compatible bool) error {
+				restartModem: func(ctx context.Context, modem *mmodem.Modem, compatible bool) error {
+					if ctx == nil {
+						t.Fatal("ctx is nil")
+					}
 					restartCalled = true
 					if modem != current {
 						t.Fatalf("restart modem = %p, want %p", modem, current)

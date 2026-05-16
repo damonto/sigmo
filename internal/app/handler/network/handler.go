@@ -11,7 +11,7 @@ import (
 )
 
 type Handler struct {
-	manager  *mmodem.Manager
+	registry *mmodem.Registry
 	networks *network
 }
 
@@ -32,19 +32,20 @@ const (
 	errorCodeAnyBandExclusive      = "any_band_exclusive"
 )
 
-func New(manager *mmodem.Manager, preferences *mmodem.NetworkPreferences) *Handler {
+func New(registry *mmodem.Registry, preferences *mmodem.NetworkPreferences) *Handler {
 	return &Handler{
-		manager:  manager,
+		registry: registry,
 		networks: newNetwork(preferences),
 	}
 }
 
 func (h *Handler) List(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeListNetworksFailed)
 	}
-	response, err := h.networks.List(modem)
+	response, err := h.networks.List(ctx, modem)
 	if err != nil {
 		return httpapi.Internal(c, errorCodeListNetworksFailed, err)
 	}
@@ -52,12 +53,13 @@ func (h *Handler) List(c *echo.Context) error {
 }
 
 func (h *Handler) Register(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeRegisterNetworkFailed)
 	}
 	operatorCode := c.Param("operatorCode")
-	if err := h.networks.Register(modem, operatorCode); err != nil {
+	if err := h.networks.Register(ctx, modem, operatorCode); err != nil {
 		if errors.Is(err, errOperatorCodeRequired) {
 			return httpapi.BadRequest(c, errorCodeOperatorCodeRequired, err)
 		}
@@ -67,11 +69,12 @@ func (h *Handler) Register(c *echo.Context) error {
 }
 
 func (h *Handler) Modes(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeGetModesFailed)
 	}
-	response, err := h.networks.Modes(modem)
+	response, err := h.networks.Modes(ctx, modem)
 	if err != nil {
 		return httpapi.Internal(c, errorCodeGetModesFailed, err)
 	}
@@ -79,7 +82,8 @@ func (h *Handler) Modes(c *echo.Context) error {
 }
 
 func (h *Handler) SetCurrentModes(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeSetModesFailed)
 	}
@@ -87,7 +91,7 @@ func (h *Handler) SetCurrentModes(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return httpapi.BadRequest(c, errorCodeSetModesInvalid, err)
 	}
-	if err := h.networks.SetCurrentModes(modem, req); err != nil {
+	if err := h.networks.SetCurrentModes(ctx, modem, req); err != nil {
 		if errors.Is(err, errUnsupportedMode) {
 			return httpapi.BadRequest(c, errorCodeUnsupportedMode, err)
 		}
@@ -97,11 +101,12 @@ func (h *Handler) SetCurrentModes(c *echo.Context) error {
 }
 
 func (h *Handler) Bands(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeGetBandsFailed)
 	}
-	response, err := h.networks.Bands(modem)
+	response, err := h.networks.Bands(ctx, modem)
 	if err != nil {
 		return httpapi.Internal(c, errorCodeGetBandsFailed, err)
 	}
@@ -109,7 +114,8 @@ func (h *Handler) Bands(c *echo.Context) error {
 }
 
 func (h *Handler) SetCurrentBands(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeSetBandsFailed)
 	}
@@ -117,7 +123,7 @@ func (h *Handler) SetCurrentBands(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return httpapi.BadRequest(c, errorCodeSetBandsInvalid, err)
 	}
-	if err := h.networks.SetCurrentBands(modem, req); err != nil {
+	if err := h.networks.SetCurrentBands(ctx, modem, req); err != nil {
 		switch {
 		case errors.Is(err, errBandsRequired):
 			return httpapi.BadRequest(c, errorCodeBandsRequired, err)

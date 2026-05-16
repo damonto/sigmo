@@ -2,29 +2,39 @@ package modem
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/godbus/dbus/v5"
 )
 
-type presenceRunner struct {
-	manager *Manager
-	start   func(context.Context, *Modem)
+type presenceTask struct {
+	registry *Registry
+	start    func(context.Context, *Modem)
 }
 
-func newPresenceRunner(manager *Manager, start func(context.Context, *Modem)) *presenceRunner {
-	return &presenceRunner{
-		manager: manager,
-		start:   start,
+func newPresenceTask(registry *Registry, start func(context.Context, *Modem)) *presenceTask {
+	return &presenceTask{
+		registry: registry,
+		start:    start,
 	}
 }
 
-func (r *presenceRunner) Run(ctx context.Context) error {
+func (t *presenceTask) Run(ctx context.Context) error {
+	if t.registry == nil {
+		return errors.New("modem registry is required")
+	}
+	if t.start == nil {
+		return errors.New("modem start function is required")
+	}
+
 	var mu sync.Mutex
+	var wg sync.WaitGroup
 	cancels := make(map[dbus.ObjectPath]context.CancelFunc)
 	equipment := make(map[string]dbus.ObjectPath)
 	modems := make(map[dbus.ObjectPath]string)
+	stopped := false
 
 	addModem := func(path dbus.ObjectPath, m *Modem) {
 		if ctx.Err() != nil || m == nil {
@@ -35,6 +45,11 @@ func (r *presenceRunner) Run(ctx context.Context) error {
 		var oldCancels []context.CancelFunc
 
 		mu.Lock()
+		if stopped {
+			mu.Unlock()
+			cancel()
+			return
+		}
 		if existingCancel, ok := cancels[path]; ok {
 			oldCancels = append(oldCancels, existingCancel)
 			delete(cancels, path)
@@ -58,12 +73,16 @@ func (r *presenceRunner) Run(ctx context.Context) error {
 			equipment[m.EquipmentIdentifier] = path
 			modems[path] = m.EquipmentIdentifier
 		}
+		wg.Add(1)
 		mu.Unlock()
 
 		for _, oldCancel := range oldCancels {
 			oldCancel()
 		}
-		go r.start(modemCtx, m)
+		go func() {
+			defer wg.Done()
+			t.start(modemCtx, m)
+		}()
 	}
 
 	removeModem := func(path dbus.ObjectPath) {
@@ -83,6 +102,7 @@ func (r *presenceRunner) Run(ctx context.Context) error {
 
 	stopAll := func() {
 		mu.Lock()
+		stopped = true
 		allCancels := make([]context.CancelFunc, 0, len(cancels))
 		for _, cancel := range cancels {
 			allCancels = append(allCancels, cancel)
@@ -97,7 +117,7 @@ func (r *presenceRunner) Run(ctx context.Context) error {
 		}
 	}
 
-	unsubscribe, err := r.manager.Subscribe(func(event ModemEvent) error {
+	unsubscribe, err := t.registry.Subscribe(func(event ModemEvent) error {
 		switch event.Type {
 		case ModemEventAdded:
 			addModem(event.Path, event.Modem)
@@ -108,13 +128,16 @@ func (r *presenceRunner) Run(ctx context.Context) error {
 	})
 	if err != nil {
 		stopAll()
-		return fmt.Errorf("subscribe modem manager: %w", err)
+		return fmt.Errorf("subscribe modem registry: %w", err)
 	}
-	defer unsubscribe()
-
-	modemMap, err := r.manager.Modems()
-	if err != nil {
+	defer func() {
+		unsubscribe()
 		stopAll()
+		wg.Wait()
+	}()
+
+	modemMap, err := t.registry.Modems(ctx)
+	if err != nil {
 		return fmt.Errorf("list modems: %w", err)
 	}
 	for path, m := range modemMap {

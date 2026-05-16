@@ -22,20 +22,20 @@ func (u *USSD) Respond(ctx context.Context, response string) (string, error) {
 	return reply, err
 }
 
-func (u *USSD) Cancel() error {
-	return u.modem.dbusObject.Call(Modem3GPPInterface+".Ussd.Cancel", 0).Err
+func (u *USSD) Cancel(ctx context.Context) error {
+	return u.modem.dbusObject.CallWithContext(ctx, Modem3GPPInterface+".Ussd.Cancel", 0).Err
 }
 
-func (u *USSD) State() (Modem3gppUssdSessionState, error) {
-	variant, err := u.modem.dbusObject.GetProperty(Modem3GPPInterface + ".Ussd.State")
+func (u *USSD) State(ctx context.Context) (Modem3GPPUSSDSessionState, error) {
+	variant, err := dbusProperty(ctx, u.modem.dbusObject, Modem3GPPInterface+".Ussd", "State")
 	if err != nil {
 		return 0, err
 	}
-	return Modem3gppUssdSessionState(uintFromVariant[uint32](variant)), nil
+	return Modem3GPPUSSDSessionState(uintFromVariant[uint32](variant)), nil
 }
 
-func (u *USSD) NetworkRequest() (string, error) {
-	variant, err := u.modem.dbusObject.GetProperty(Modem3GPPInterface + ".Ussd.NetworkRequest")
+func (u *USSD) NetworkRequest(ctx context.Context) (string, error) {
+	variant, err := dbusProperty(ctx, u.modem.dbusObject, Modem3GPPInterface+".Ussd", "NetworkRequest")
 	if err != nil {
 		return "", err
 	}

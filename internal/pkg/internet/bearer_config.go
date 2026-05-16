@@ -1,6 +1,7 @@
 package internet
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -30,10 +31,10 @@ type trackedConnection struct {
 	routeChanges  []defaultRouteChange
 }
 
-func configureBearer(modemID string, bearer *mmodem.Bearer, prefs Preferences) (trackedConnection, error) {
+func configureBearer(ctx context.Context, routePath string, modemID string, bearer *mmodem.Bearer, prefs Preferences) (trackedConnection, error) {
 	var tracked trackedConnection
 
-	interfaceName, err := bearer.Interface()
+	interfaceName, err := bearer.Interface(ctx)
 	if err != nil {
 		return tracked, fmt.Errorf("read bearer interface: %w", err)
 	}
@@ -42,11 +43,11 @@ func configureBearer(modemID string, bearer *mmodem.Bearer, prefs Preferences) (
 	}
 	tracked.interfaceName = interfaceName
 
-	ip4, err := bearer.IP4Config()
+	ip4, err := bearer.IP4Config(ctx)
 	if err != nil {
 		return tracked, fmt.Errorf("read ipv4 config: %w", err)
 	}
-	ip6, err := bearer.IP6Config()
+	ip6, err := bearer.IP6Config(ctx)
 	if err != nil {
 		return tracked, fmt.Errorf("read ipv6 config: %w", err)
 	}
@@ -79,7 +80,7 @@ func configureBearer(modemID string, bearer *mmodem.Bearer, prefs Preferences) (
 	defer func() {
 		if !release {
 			// Best effort: the original netlink error is returned to the caller.
-			_ = cleanupApplied(tracked)
+			_ = cleanupApplied(ctx, routePath, tracked)
 		}
 	}()
 	for _, address := range addresses {
@@ -89,10 +90,10 @@ func configureBearer(modemID string, bearer *mmodem.Bearer, prefs Preferences) (
 		tracked.addresses = append(tracked.addresses, address)
 	}
 	if prefs.DefaultRoute {
-		if err := restoreStaleDefaultRouteStatesForModem(modemID, interfaceName); err != nil {
+		if err := restoreStaleDefaultRouteStatesWithState(routePath, routeStateRestoreTarget{modemID: modemID, interfaceNames: []string{interfaceName}}, netlinkDefaultRouteOps); err != nil {
 			return tracked, fmt.Errorf("restore previous default route state: %w", err)
 		}
-		changes, err := takeoverDefaultRoutes(modemID, interfaceName, routes)
+		changes, err := takeoverDefaultRoutesWithState(routePath, modemID, interfaceName, routes, netlinkDefaultRouteOps)
 		tracked.routeChanges = changes
 		if err != nil {
 			return tracked, fmt.Errorf("take over default route: %w", err)
@@ -109,16 +110,16 @@ func configureBearer(modemID string, bearer *mmodem.Bearer, prefs Preferences) (
 	return tracked, nil
 }
 
-func cleanupBearer(modemID string, bearer *mmodem.Bearer, prefs Preferences) error {
-	interfaceName, err := bearer.Interface()
+func cleanupBearer(ctx context.Context, routePath string, modemID string, bearer *mmodem.Bearer, prefs Preferences) error {
+	interfaceName, err := bearer.Interface(ctx)
 	if err != nil {
 		return fmt.Errorf("read bearer interface: %w", err)
 	}
-	ip4, err := bearer.IP4Config()
+	ip4, err := bearer.IP4Config(ctx)
 	if err != nil {
 		return fmt.Errorf("read ipv4 config: %w", err)
 	}
-	ip6, err := bearer.IP6Config()
+	ip6, err := bearer.IP6Config(ctx)
 	if err != nil {
 		return fmt.Errorf("read ipv6 config: %w", err)
 	}
@@ -136,11 +137,11 @@ func cleanupBearer(modemID string, bearer *mmodem.Bearer, prefs Preferences) err
 		}
 		return err
 	}
-	routeChanges, _, err := loadDefaultRouteStateForModem(modemID, interfaceName)
+	routeChanges, _, err := loadRouteStateForModem(routePath, modemID, interfaceName)
 	if err != nil {
 		return fmt.Errorf("load default route state: %w", err)
 	}
-	return cleanupApplied(trackedConnection{
+	return cleanupApplied(ctx, routePath, trackedConnection{
 		interfaceName: interfaceName,
 		addresses:     addresses,
 		routes:        routes,
@@ -148,12 +149,15 @@ func cleanupBearer(modemID string, bearer *mmodem.Bearer, prefs Preferences) err
 	})
 }
 
-func cleanupApplied(tracked trackedConnection) error {
+func cleanupApplied(ctx context.Context, routePath string, tracked trackedConnection) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var err error
 	for i := len(tracked.routes) - 1; i >= 0; i-- {
 		err = errors.Join(err, netlink.DeleteDefaultRoute(tracked.routes[i]))
 	}
-	err = errors.Join(err, cleanupDefaultRouteChanges(defaultRouteStatePath, tracked.interfaceName, tracked.routeChanges, netlinkDefaultRouteOps))
+	err = errors.Join(err, cleanupDefaultRouteChanges(routePath, tracked.interfaceName, tracked.routeChanges, netlinkDefaultRouteOps))
 	for i := len(tracked.addresses) - 1; i >= 0; i-- {
 		err = errors.Join(err, netlink.DeleteAddress(tracked.interfaceName, tracked.addresses[i]))
 	}
@@ -257,10 +261,10 @@ func prefixFromIPConfig(cfg mmodem.BearerIPConfig, family int) (netip.Prefix, bo
 	return prefix, true, nil
 }
 
-func connectionFromBearer(bearer *mmodem.Bearer, prefs Preferences, metric int) (*Connection, error) {
-	prefs = normalizePreferences(bearerPreferences(bearer, prefs))
+func connectionFromBearer(ctx context.Context, bearer *mmodem.Bearer, prefs Preferences, metric int) (*Connection, error) {
+	prefs = normalizePreferences(bearerPreferences(ctx, bearer, prefs))
 
-	connected, err := bearer.Connected()
+	connected, err := bearer.Connected(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read bearer state: %w", err)
 	}
@@ -268,19 +272,19 @@ func connectionFromBearer(bearer *mmodem.Bearer, prefs Preferences, metric int) 
 		return disconnectedConnection(prefs), nil
 	}
 
-	interfaceName, err := bearer.Interface()
+	interfaceName, err := bearer.Interface(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read bearer interface: %w", err)
 	}
-	ip4, err := bearer.IP4Config()
+	ip4, err := bearer.IP4Config(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read ipv4 config: %w", err)
 	}
-	ip6, err := bearer.IP6Config()
+	ip6, err := bearer.IP6Config(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read ipv6 config: %w", err)
 	}
-	stats, err := bearer.Stats()
+	stats, err := bearer.Stats(ctx)
 	if err != nil {
 		// Some devices omit Stats while the bearer is otherwise usable.
 		stats = mmodem.BearerStats{}
@@ -321,14 +325,14 @@ type bearerState struct {
 	connected bool
 }
 
-func currentBearer(modem *mmodem.Modem) (bearerState, error) {
-	bearers, err := modem.Bearers()
+func currentBearer(ctx context.Context, modem internetModem) (bearerState, error) {
+	bearers, err := modem.bearers(ctx)
 	if err != nil {
 		return bearerState{}, fmt.Errorf("list bearers: %w", err)
 	}
 	var fallback *mmodem.Bearer
 	for _, bearer := range bearers {
-		connected, err := bearer.Connected()
+		connected, err := bearer.Connected(ctx)
 		if err != nil {
 			return bearerState{}, fmt.Errorf("read bearer state: %w", err)
 		}
@@ -338,7 +342,7 @@ func currentBearer(modem *mmodem.Modem) (bearerState, error) {
 		if fallback != nil {
 			continue
 		}
-		apn, err := bearer.APN()
+		apn, err := bearer.APN(ctx)
 		if err == nil && strings.TrimSpace(apn) != "" {
 			fallback = bearer
 		}
@@ -346,29 +350,26 @@ func currentBearer(modem *mmodem.Modem) (bearerState, error) {
 	return bearerState{bearer: fallback}, nil
 }
 
-func apnFromBearers(modem *mmodem.Modem) (string, error) {
-	current, err := currentBearer(modem)
+func apnFromBearers(ctx context.Context, modem internetModem) (string, error) {
+	current, err := currentBearer(ctx, modem)
 	if err != nil {
 		return "", err
 	}
 	if current.bearer == nil {
 		return "", nil
 	}
-	apn, err := current.bearer.APN()
+	apn, err := current.bearer.APN(ctx)
 	if err != nil {
 		return "", nil
 	}
 	return strings.TrimSpace(apn), nil
 }
 
-func modemOperatorIdentifier(modem *mmodem.Modem) string {
-	if modem == nil || modem.Sim == nil {
-		return ""
-	}
-	return strings.TrimSpace(modem.Sim.OperatorIdentifier)
+func modemOperatorIdentifier(modem internetModem) string {
+	return strings.TrimSpace(modem.operatorIdentifier())
 }
 
-func apnForModem(modem *mmodem.Modem, requested, bearer, remembered string) string {
+func apnForModem(modem internetModem, requested, bearer, remembered string) string {
 	return selectAPN(apnSelection{
 		Requested:          requested,
 		Bearer:             bearer,
@@ -378,12 +379,12 @@ func apnForModem(modem *mmodem.Modem, requested, bearer, remembered string) stri
 	})
 }
 
-func preferencesWithSelectedAPN(modem *mmodem.Modem, prefs Preferences) Preferences {
+func preferencesWithSelectedAPN(modem internetModem, prefs Preferences) Preferences {
 	prefs.APN = apnForModem(modem, "", "", prefs.APN)
 	return preferencesWithDefaultAPNCredentials(modem, prefs)
 }
 
-func preferencesWithDefaultAPNCredentials(modem *mmodem.Modem, prefs Preferences) Preferences {
+func preferencesWithDefaultAPNCredentials(modem internetModem, prefs Preferences) Preferences {
 	profile := defaultAPNProfileFrom(defaultAPNs, modemOperatorIdentifier(modem))
 	if profile.APN == "" || !strings.EqualFold(strings.TrimSpace(prefs.APN), profile.APN) {
 		return normalizePreferences(prefs)
@@ -425,10 +426,10 @@ func disconnectedConnection(prefs Preferences) *Connection {
 	}
 }
 
-func bearerPreferences(bearer *mmodem.Bearer, fallback Preferences) Preferences {
+func bearerPreferences(ctx context.Context, bearer *mmodem.Bearer, fallback Preferences) Preferences {
 	fallback = normalizePreferences(fallback)
 
-	properties, err := bearer.Properties()
+	properties, err := bearer.Properties(ctx)
 	if err != nil {
 		return fallback
 	}
@@ -450,11 +451,11 @@ func bearerPreferences(bearer *mmodem.Bearer, fallback Preferences) Preferences 
 	return fallback
 }
 
-func recoverTrackedConnection(modemID string, bearer *mmodem.Bearer, fallback Preferences) (trackedConnection, int, bool, error) {
-	prefs := recoverPreferences(bearer, fallback)
+func recoverTrackedConnection(ctx context.Context, proxyPath string, routePath string, modemID string, bearer *mmodem.Bearer, fallback Preferences) (trackedConnection, int, bool, error) {
+	prefs := recoverPreferences(ctx, bearer, fallback)
 	metric := 0
 
-	interfaceName, err := bearer.Interface()
+	interfaceName, err := bearer.Interface(ctx)
 	if err != nil {
 		return trackedConnection{}, 0, false, fmt.Errorf("read bearer interface: %w", err)
 	}
@@ -462,11 +463,11 @@ func recoverTrackedConnection(modemID string, bearer *mmodem.Bearer, fallback Pr
 		return trackedConnection{}, 0, false, nil
 	}
 
-	ip4, err := bearer.IP4Config()
+	ip4, err := bearer.IP4Config(ctx)
 	if err != nil {
 		return trackedConnection{}, 0, false, fmt.Errorf("read ipv4 config: %w", err)
 	}
-	ip6, err := bearer.IP6Config()
+	ip6, err := bearer.IP6Config(ctx)
 	if err != nil {
 		return trackedConnection{}, 0, false, fmt.Errorf("read ipv6 config: %w", err)
 	}
@@ -479,7 +480,7 @@ func recoverTrackedConnection(modemID string, bearer *mmodem.Bearer, fallback Pr
 	} else {
 		metric = 0
 	}
-	proxyEnabled, proxyStateFound, err := loadProxyStateForModem(proxyStatePath, modemID, interfaceName)
+	proxyEnabled, proxyStateFound, err := loadProxyStateForModem(proxyPath, modemID, interfaceName)
 	if err != nil {
 		return trackedConnection{}, 0, false, fmt.Errorf("load proxy state: %w", err)
 	}
@@ -494,13 +495,13 @@ func recoverTrackedConnection(modemID string, bearer *mmodem.Bearer, fallback Pr
 		}
 		return trackedConnection{}, 0, false, err
 	}
-	routeChanges, routeStateFound, err := loadDefaultRouteStateForModem(modemID, interfaceName)
+	routeChanges, routeStateFound, err := loadRouteStateForModem(routePath, modemID, interfaceName)
 	if err != nil {
 		return trackedConnection{}, 0, false, fmt.Errorf("load default route state: %w", err)
 	}
 	if prefs.DefaultRoute && !routeStateFound {
 		slog.Debug("recovering connected bearer default route takeover", "modem", modemID, "interface", interfaceName)
-		routeChanges, err = takeoverDefaultRoutes(modemID, interfaceName, routes)
+		routeChanges, err = takeoverDefaultRoutesWithState(routePath, modemID, interfaceName, routes, netlinkDefaultRouteOps)
 		if err != nil {
 			return trackedConnection{}, 0, false, fmt.Errorf("take over recovered default route: %w", err)
 		}
@@ -517,9 +518,9 @@ func recoverTrackedConnection(modemID string, bearer *mmodem.Bearer, fallback Pr
 	}, metric, true, nil
 }
 
-func recoverPreferences(bearer *mmodem.Bearer, fallback Preferences) Preferences {
-	prefs := bearerPreferences(bearer, fallback)
-	interfaceName, err := bearer.Interface()
+func recoverPreferences(ctx context.Context, bearer *mmodem.Bearer, fallback Preferences) Preferences {
+	prefs := bearerPreferences(ctx, bearer, fallback)
+	interfaceName, err := bearer.Interface(ctx)
 	if err != nil || strings.TrimSpace(interfaceName) == "" {
 		return prefs
 	}

@@ -17,7 +17,7 @@ import (
 )
 
 type Handler struct {
-	manager       *mmodem.Manager
+	registry      *mmodem.Registry
 	notifications *notification
 }
 
@@ -35,15 +35,15 @@ var (
 	errInvalidSequence  = errors.New("invalid sequence number")
 )
 
-func New(store *config.Store, manager *mmodem.Manager) *Handler {
+func New(store *config.Store, registry *mmodem.Registry) *Handler {
 	return &Handler{
-		manager:       manager,
+		registry:      registry,
 		notifications: newNotification(store),
 	}
 }
 
 func (h *Handler) List(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeListNotificationsFailed)
 	}
@@ -58,7 +58,7 @@ func (h *Handler) List(c *echo.Context) error {
 }
 
 func (h *Handler) Resend(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeResendNotificationFailed)
 	}
@@ -79,7 +79,7 @@ func (h *Handler) Resend(c *echo.Context) error {
 }
 
 func (h *Handler) Delete(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeDeleteNotificationFailed)
 	}

@@ -153,9 +153,73 @@ func TestModemRestart(t *testing.T) {
 				EquipmentIdentifier: "354015820228039",
 			}
 
-			err := modem.Restart(false)
+			err := modem.Restart(context.Background(), false)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Restart() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestModemRestartReturnsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	modem := &Modem{
+		dbusObject:          &fakeBusObject{path: "/org/freedesktop/ModemManager1/Modem/1"},
+		objectPath:          "/org/freedesktop/ModemManager1/Modem/1",
+		EquipmentIdentifier: "354015820228039",
+	}
+
+	if err := modem.Restart(ctx, false); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Restart() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestEnableDisabledModem(t *testing.T) {
+	tests := []struct {
+		name    string
+		state   ModemState
+		err     error
+		wantRun bool
+		wantErr bool
+	}{
+		{
+			name:    "enable disabled modem",
+			state:   ModemStateDisabled,
+			wantRun: true,
+		},
+		{
+			name:  "skip enabled modem",
+			state: ModemStateEnabled,
+		},
+		{
+			name:    "return enable error",
+			state:   ModemStateDisabled,
+			err:     errors.New("permission denied"),
+			wantRun: true,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			object := &fakeBusObject{
+				errors: map[string][]error{
+					ModemInterface + ".Enable": {tt.err},
+				},
+			}
+			modem := &Modem{
+				dbusObject: object,
+				State:      tt.state,
+			}
+
+			err := enableDisabledModem(context.Background(), modem)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("enableDisabledModem() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got := len(object.calls) > 0; got != tt.wantRun {
+				t.Fatalf("enable called = %v, want %v", got, tt.wantRun)
 			}
 		})
 	}
@@ -165,7 +229,7 @@ func TestModemDeleteBearer(t *testing.T) {
 	object := &fakeBusObject{path: "/org/freedesktop/ModemManager1/Modem/1"}
 	modem := &Modem{dbusObject: object}
 
-	if err := modem.DeleteBearer("/org/freedesktop/ModemManager1/Bearer/7"); err != nil {
+	if err := modem.DeleteBearer(context.Background(), "/org/freedesktop/ModemManager1/Bearer/7"); err != nil {
 		t.Fatalf("DeleteBearer() error = %v", err)
 	}
 	if got, want := object.calls, []string{ModemInterface + ".DeleteBearer"}; !slices.Equal(got, want) {
@@ -225,7 +289,7 @@ func TestWaitForModem(t *testing.T) {
 		name       string
 		current    *Modem
 		modems     map[dbus.ObjectPath]*Modem
-		action     func(*Manager) error
+		action     func(*Registry) error
 		ctxTimeout time.Duration
 		wantErr    error
 		wantPath   dbus.ObjectPath
@@ -253,7 +317,7 @@ func TestWaitForModem(t *testing.T) {
 			modems: map[dbus.ObjectPath]*Modem{
 				replacement.objectPath: replacement,
 			},
-			action: func(*Manager) error {
+			action: func(*Registry) error {
 				return transientActionErr
 			},
 			wantErr: transientActionErr,
@@ -264,7 +328,7 @@ func TestWaitForModem(t *testing.T) {
 			modems: map[dbus.ObjectPath]*Modem{
 				replacement.objectPath: replacement,
 			},
-			action: func(*Manager) error {
+			action: func(*Registry) error {
 				return ReloadStarted(transientActionErr)
 			},
 			wantPath: replacement.objectPath,
@@ -275,7 +339,7 @@ func TestWaitForModem(t *testing.T) {
 			modems: map[dbus.ObjectPath]*Modem{
 				samePathReplacement.objectPath: samePathReplacement,
 			},
-			action: func(*Manager) error {
+			action: func(*Registry) error {
 				return ReloadStarted(transientActionErr)
 			},
 			wantPath: samePathReplacement.objectPath,
@@ -286,13 +350,13 @@ func TestWaitForModem(t *testing.T) {
 			modems: map[dbus.ObjectPath]*Modem{
 				current.objectPath: current,
 			},
-			action: func(manager *Manager) error {
-				publishModemEvent(t, manager, ModemEvent{
+			action: func(registry *Registry) error {
+				publishModemEvent(t, registry, ModemEvent{
 					Type:  ModemEventRemoved,
 					Modem: current,
 					Path:  current.objectPath,
 				})
-				publishModemEvent(t, manager, ModemEvent{
+				publishModemEvent(t, registry, ModemEvent{
 					Type:  ModemEventAdded,
 					Modem: replacement,
 					Path:  replacement.objectPath,
@@ -307,8 +371,8 @@ func TestWaitForModem(t *testing.T) {
 			modems: map[dbus.ObjectPath]*Modem{
 				current.objectPath: current,
 			},
-			action: func(manager *Manager) error {
-				publishModemEvent(t, manager, ModemEvent{
+			action: func(registry *Registry) error {
+				publishModemEvent(t, registry, ModemEvent{
 					Type:  ModemEventAdded,
 					Modem: current,
 					Path:  current.objectPath,
@@ -335,16 +399,16 @@ func TestWaitForModem(t *testing.T) {
 			name:    "poll until modem reappears after not found window",
 			current: current,
 			modems:  map[dbus.ObjectPath]*Modem{},
-			action: func(manager *Manager) error {
+			action: func(registry *Registry) error {
 				go func() {
-					time.Sleep(100 * time.Microsecond)
-					manager.mu.Lock()
-					defer manager.mu.Unlock()
-					manager.modems[replacement.objectPath] = replacement
+					registry.mu.Lock()
+					defer registry.mu.Unlock()
+					registry.modems[replacement.objectPath] = replacement
 				}()
 				return nil
 			},
-			wantPath: replacement.objectPath,
+			ctxTimeout: time.Second,
+			wantPath:   replacement.objectPath,
 		},
 		{
 			name:       "timeout while modem remains unavailable",
@@ -361,10 +425,10 @@ func TestWaitForModem(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			manager := &Manager{
+			registry := &Registry{
 				modems: tt.modems,
 			}
-			manager.subscribe.Do(func() {})
+			registry.subscribed = true
 
 			ctx := context.Background()
 			var cancel context.CancelFunc
@@ -373,11 +437,11 @@ func TestWaitForModem(t *testing.T) {
 				defer cancel()
 			}
 
-			modem, err := manager.WaitForModemAfter(ctx, tt.current, func() error {
+			modem, err := registry.WaitForModemAfter(ctx, tt.current, func() error {
 				if tt.action == nil {
 					return nil
 				}
-				return tt.action(manager)
+				return tt.action(registry)
 			})
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
@@ -404,11 +468,11 @@ func withWaitForModemRefreshInterval(t *testing.T, interval time.Duration) {
 	})
 }
 
-func publishModemEvent(t *testing.T, manager *Manager, event ModemEvent) {
+func publishModemEvent(t *testing.T, registry *Registry, event ModemEvent) {
 	t.Helper()
-	manager.mu.RLock()
-	subscribers := append([]subscription(nil), manager.subs...)
-	manager.mu.RUnlock()
+	registry.mu.RLock()
+	subscribers := append([]subscription(nil), registry.subs...)
+	registry.mu.RUnlock()
 	for _, subscriber := range subscribers {
 		if err := subscriber.fn(event); err != nil {
 			t.Fatalf("publish modem event: %v", err)
@@ -477,6 +541,140 @@ func TestSIMSlotPaths(t *testing.T) {
 	}
 }
 
+func TestRegistryDeleteAndUpdate(t *testing.T) {
+	tests := []struct {
+		name  string
+		start map[dbus.ObjectPath]*Modem
+		modem *Modem
+		want  map[dbus.ObjectPath]string
+	}{
+		{
+			name: "replace duplicate equipment identifier",
+			start: map[dbus.ObjectPath]*Modem{
+				"/old": {objectPath: "/old", EquipmentIdentifier: "imei-1"},
+			},
+			modem: &Modem{objectPath: "/new", EquipmentIdentifier: "imei-1"},
+			want: map[dbus.ObjectPath]string{
+				"/new": "imei-1",
+			},
+		},
+		{
+			name: "empty equipment identifier does not delete unrelated empty identifiers",
+			start: map[dbus.ObjectPath]*Modem{
+				"/old": {objectPath: "/old"},
+			},
+			modem: &Modem{objectPath: "/new"},
+			want: map[dbus.ObjectPath]string{
+				"/old": "",
+				"/new": "",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := &Registry{modems: tt.start}
+			registry.deleteAndUpdate(tt.modem)
+			if len(registry.modems) != len(tt.want) {
+				t.Fatalf("modems length = %d, want %d", len(registry.modems), len(tt.want))
+			}
+			for path, wantID := range tt.want {
+				modem, ok := registry.modems[path]
+				if !ok {
+					t.Fatalf("modem %s missing", path)
+				}
+				if modem.EquipmentIdentifier != wantID {
+					t.Fatalf("modem %s EquipmentIdentifier = %q, want %q", path, modem.EquipmentIdentifier, wantID)
+				}
+			}
+		})
+	}
+}
+
+func TestSignalParsing(t *testing.T) {
+	tests := []struct {
+		name         string
+		signal       *dbus.Signal
+		wantPath     dbus.ObjectPath
+		wantReceived bool
+		wantOK       bool
+	}{
+		{
+			name: "message received",
+			signal: &dbus.Signal{
+				Body: []any{dbus.ObjectPath("/org/freedesktop/ModemManager1/SMS/1"), true},
+			},
+			wantPath:     "/org/freedesktop/ModemManager1/SMS/1",
+			wantReceived: true,
+			wantOK:       true,
+		},
+		{
+			name: "message stored but not received",
+			signal: &dbus.Signal{
+				Body: []any{dbus.ObjectPath("/org/freedesktop/ModemManager1/SMS/1"), false},
+			},
+			wantPath: "/org/freedesktop/ModemManager1/SMS/1",
+			wantOK:   true,
+		},
+		{
+			name: "short body",
+			signal: &dbus.Signal{
+				Body: []any{dbus.ObjectPath("/org/freedesktop/ModemManager1/SMS/1")},
+			},
+		},
+		{
+			name: "wrong path type",
+			signal: &dbus.Signal{
+				Body: []any{"not-a-path", true},
+			},
+		},
+		{
+			name: "wrong received type",
+			signal: &dbus.Signal{
+				Body: []any{dbus.ObjectPath("/org/freedesktop/ModemManager1/SMS/1"), "true"},
+			},
+		},
+		{
+			name: "nil signal",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPath, gotReceived, gotOK := receivedMessageSignal(tt.signal)
+			if gotOK != tt.wantOK {
+				t.Fatalf("receivedMessageSignal() ok = %v, want %v", gotOK, tt.wantOK)
+			}
+			if gotPath != tt.wantPath {
+				t.Fatalf("receivedMessageSignal() path = %v, want %v", gotPath, tt.wantPath)
+			}
+			if gotReceived != tt.wantReceived {
+				t.Fatalf("receivedMessageSignal() received = %v, want %v", gotReceived, tt.wantReceived)
+			}
+		})
+	}
+}
+
+func TestDevicePath(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty", raw: "  "},
+		{name: "device name", raw: "ttyUSB0", want: "/dev/ttyUSB0"},
+		{name: "absolute path", raw: "/dev/cdc-wdm0", want: "/dev/cdc-wdm0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := devicePath(tt.raw); got != tt.want {
+				t.Fatalf("devicePath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 type fakeBusObject struct {
 	path           dbus.ObjectPath
 	errors         map[string][]error
@@ -489,6 +687,20 @@ type fakeBusObject struct {
 }
 
 func (f *fakeBusObject) Call(method string, _ dbus.Flags, args ...any) *dbus.Call {
+	if method == dbusPropertiesGet {
+		if len(args) != 2 {
+			return &dbus.Call{Err: fmt.Errorf("property get args = %#v", args)}
+		}
+		iface, ok := args[0].(string)
+		if !ok {
+			return &dbus.Call{Err: fmt.Errorf("property get interface = %#v", args[0])}
+		}
+		name, ok := args[1].(string)
+		if !ok {
+			return &dbus.Call{Err: fmt.Errorf("property get name = %#v", args[1])}
+		}
+		return f.property(iface + "." + name)
+	}
 	f.calls = append(f.calls, method)
 	f.args = append(f.args, append([]any(nil), args...))
 	var err error
@@ -499,8 +711,11 @@ func (f *fakeBusObject) Call(method string, _ dbus.Flags, args ...any) *dbus.Cal
 	return &dbus.Call{Err: err, Body: f.outputs[method]}
 }
 
-func (f *fakeBusObject) CallWithContext(context.Context, string, dbus.Flags, ...any) *dbus.Call {
-	panic("unexpected CallWithContext")
+func (f *fakeBusObject) CallWithContext(ctx context.Context, method string, flags dbus.Flags, args ...any) *dbus.Call {
+	if err := ctx.Err(); err != nil {
+		return &dbus.Call{Err: err}
+	}
+	return f.Call(method, flags, args...)
 }
 
 func (f *fakeBusObject) Go(string, dbus.Flags, chan *dbus.Call, ...any) *dbus.Call {
@@ -520,19 +735,27 @@ func (f *fakeBusObject) RemoveMatchSignal(string, string, ...dbus.MatchOption) *
 }
 
 func (f *fakeBusObject) GetProperty(name string) (dbus.Variant, error) {
+	call := f.property(name)
+	if call.Err != nil {
+		return dbus.Variant{}, call.Err
+	}
+	return call.Body[0].(dbus.Variant), nil
+}
+
+func (f *fakeBusObject) property(name string) *dbus.Call {
 	f.propertyCalls = append(f.propertyCalls, name)
 	if queue := f.propertyErrors[name]; len(queue) > 0 {
 		err := queue[0]
 		f.propertyErrors[name] = queue[1:]
 		if err != nil {
-			return dbus.Variant{}, err
+			return &dbus.Call{Err: err}
 		}
 	}
 	variant, ok := f.properties[name]
 	if !ok {
-		return dbus.Variant{}, fmt.Errorf("missing property %s", name)
+		return &dbus.Call{Err: fmt.Errorf("missing property %s", name)}
 	}
-	return variant, nil
+	return &dbus.Call{Body: []any{variant}}
 }
 
 func (f *fakeBusObject) StoreProperty(string, any) error {

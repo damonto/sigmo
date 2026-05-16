@@ -30,6 +30,8 @@ func boundResolverWithTimeout(interfaceName string, timeout time.Duration) *net.
 	return &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			// Use a fixed resolver to avoid local DNS hijacking while still binding
+			// the DNS socket to the selected modem interface.
 			return rawBoundDialerWithTimeout(interfaceName, timeout).DialContext(ctx, dnsNetwork(network), dnsServer)
 		},
 	}

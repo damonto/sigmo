@@ -12,7 +12,7 @@ import (
 )
 
 type Handler struct {
-	manager   *mmodem.Manager
+	registry  *mmodem.Registry
 	connector *internetcore.Connector
 }
 
@@ -29,19 +29,20 @@ const (
 	errorCodeInternetIPTypeInvalidConfig      = "internet_ip_type_invalid_config"
 )
 
-func New(manager *mmodem.Manager, connector *internetcore.Connector) *Handler {
+func New(registry *mmodem.Registry, connector *internetcore.Connector) *Handler {
 	return &Handler{
-		manager:   manager,
+		registry:  registry,
 		connector: connector,
 	}
 }
 
 func (h *Handler) Current(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeCurrentInternetConnectionFailed)
 	}
-	response, err := h.connector.Current(modem)
+	response, err := h.connector.Current(ctx, modem)
 	if err != nil {
 		return internetError(c, err, errorCodeCurrentInternetConnectionFailed)
 	}
@@ -49,11 +50,12 @@ func (h *Handler) Current(c *echo.Context) error {
 }
 
 func (h *Handler) Public(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeInternetPublicFailed)
 	}
-	info, err := h.connector.Public(c.Request().Context(), modem)
+	info, err := h.connector.Public(ctx, modem)
 	if err != nil {
 		return internetError(c, err, errorCodeInternetPublicFailed)
 	}
@@ -61,7 +63,8 @@ func (h *Handler) Public(c *echo.Context) error {
 }
 
 func (h *Handler) Connect(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeConnectInternetFailed)
 	}
@@ -86,7 +89,7 @@ func (h *Handler) Connect(c *echo.Context) error {
 		ProxyEnabled: req.ProxyEnabled,
 		AlwaysOn:     req.AlwaysOn,
 	}
-	response, err := h.connector.Connect(modem, prefs)
+	response, err := h.connector.Connect(ctx, modem, prefs)
 	if err != nil {
 		return internetError(c, err, errorCodeConnectInternetFailed)
 	}
@@ -94,11 +97,12 @@ func (h *Handler) Connect(c *echo.Context) error {
 }
 
 func (h *Handler) Disconnect(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeDisconnectInternetFailed)
 	}
-	if err := h.connector.Disconnect(modem); err != nil {
+	if err := h.connector.Disconnect(ctx, modem); err != nil {
 		return httpapi.Internal(c, errorCodeDisconnectInternetFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)

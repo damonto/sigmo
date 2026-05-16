@@ -177,7 +177,13 @@ func TestEnableSessionEnable(t *testing.T) {
 					factoryClients = factoryClients[1:]
 					return client, nil
 				},
-				findModem: func(string) (*mmodem.Modem, error) {
+				findModem: func(ctx context.Context, id string) (*mmodem.Modem, error) {
+					if ctx == nil {
+						t.Fatal("ctx is nil")
+					}
+					if id == "" {
+						t.Fatal("id is empty")
+					}
 					findCalls++
 					if len(tt.findResults) == 0 {
 						return current, nil
@@ -186,7 +192,14 @@ func TestEnableSessionEnable(t *testing.T) {
 					result := tt.findResults[index]
 					return result.modem, result.err
 				},
-				restartModem: func(*mmodem.Modem, bool) error {
+				restartModem: func(ctx context.Context, modem *mmodem.Modem, compatible bool) error {
+					if ctx == nil {
+						t.Fatal("ctx is nil")
+					}
+					if modem == nil {
+						t.Fatal("modem is nil")
+					}
+					_ = compatible
 					restartCalled = true
 					return tt.restartErr
 				},

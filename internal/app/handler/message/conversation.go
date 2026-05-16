@@ -1,6 +1,7 @@
 package message
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -20,8 +21,8 @@ func newMessage() *message {
 	return &message{}
 }
 
-func (m *message) ListConversations(modem *mmodem.Modem) ([]MessageResponse, error) {
-	messages, err := modem.Messaging().List()
+func (m *message) ListConversations(ctx context.Context, modem *mmodem.Modem) ([]MessageResponse, error) {
+	messages, err := modem.Messaging().List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
@@ -52,11 +53,11 @@ func (m *message) ListConversations(modem *mmodem.Modem) ([]MessageResponse, err
 	return response, nil
 }
 
-func (m *message) ListByParticipant(modem *mmodem.Modem, participant string) ([]MessageResponse, error) {
+func (m *message) ListByParticipant(ctx context.Context, modem *mmodem.Modem, participant string) ([]MessageResponse, error) {
 	if strings.TrimSpace(participant) == "" {
 		return nil, errParticipantRequired
 	}
-	messages, err := modem.Messaging().List()
+	messages, err := modem.Messaging().List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
@@ -80,11 +81,11 @@ func (m *message) ListByParticipant(modem *mmodem.Modem, participant string) ([]
 	return response, nil
 }
 
-func (m *message) DeleteByParticipant(modem *mmodem.Modem, participant string) error {
+func (m *message) DeleteByParticipant(ctx context.Context, modem *mmodem.Modem, participant string) error {
 	if strings.TrimSpace(participant) == "" {
 		return errParticipantRequired
 	}
-	messages, err := modem.Messaging().List()
+	messages, err := modem.Messaging().List(ctx)
 	if err != nil {
 		return fmt.Errorf("list messages: %w", err)
 	}
@@ -93,7 +94,7 @@ func (m *message) DeleteByParticipant(modem *mmodem.Modem, participant string) e
 		if strings.TrimSpace(sms.Number) != participant {
 			continue
 		}
-		if err := messaging.Delete(sms.Path()); err != nil {
+		if err := messaging.Delete(ctx, sms.Path()); err != nil {
 			return fmt.Errorf("delete message for %s: %w", participant, err)
 		}
 	}

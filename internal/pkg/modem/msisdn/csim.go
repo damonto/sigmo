@@ -3,7 +3,7 @@ package msisdn
 import "github.com/damonto/sigmo/internal/pkg/modem/at"
 
 type CSIM struct {
-	commander at.ATCommand
+	commander commandRunner
 }
 
 func NewCSIM(conn *at.AT) Runner {

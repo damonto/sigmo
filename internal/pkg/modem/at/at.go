@@ -6,12 +6,16 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
 
+var commandTimeout = 10 * time.Second
+
 type AT struct {
 	f          *os.File
+	reader     *bufio.Reader
 	oldTermios *unix.Termios
 	mutex      sync.Mutex
 }
@@ -26,6 +30,7 @@ func Open(device string) (*AT, error) {
 		_ = at.f.Close()
 		return nil, err
 	}
+	at.reader = bufio.NewReader(at.f)
 	return &at, nil
 }
 
@@ -35,15 +40,14 @@ func (a *AT) setTermios() error {
 	if a.oldTermios, err = unix.IoctlGetTermios(fd, unix.TCGETS); err != nil {
 		return err
 	}
-	t := unix.Termios{
-		Ispeed: unix.B9600,
-		Ospeed: unix.B9600,
-	}
+	t := *a.oldTermios
+	t.Ispeed = unix.B9600
+	t.Ospeed = unix.B9600
 	t.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP | unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON
 	t.Oflag &^= unix.OPOST
 	t.Lflag &^= unix.ECHO | unix.ECHONL | unix.ICANON | unix.ISIG | unix.IEXTEN
 	t.Cflag &^= unix.CSIZE | unix.PARENB
-	t.Cflag |= unix.CS8
+	t.Cflag |= unix.CS8 | unix.CREAD | unix.CLOCAL
 	t.Cc[unix.VMIN] = 1
 	t.Cc[unix.VTIME] = 0
 	return unix.IoctlSetTermios(fd, unix.TCSETS, &t)
@@ -52,10 +56,22 @@ func (a *AT) setTermios() error {
 func (a *AT) Run(command string) (string, error) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
+	if err := a.f.SetDeadline(time.Now().Add(commandTimeout)); err != nil {
+		if !errors.Is(err, os.ErrNoDeadline) {
+			return "", err
+		}
+	} else {
+		defer func() {
+			_ = a.f.SetDeadline(time.Time{})
+		}()
+	}
 	if _, err := a.f.WriteString(command + "\r\n"); err != nil {
 		return "", err
 	}
-	reader := bufio.NewReader(a.f)
+	return readResponse(a.reader, command)
+}
+
+func readResponse(reader *bufio.Reader, command string) (string, error) {
 	var sb strings.Builder
 	for {
 		line, err := reader.ReadString('\n')
@@ -63,14 +79,27 @@ func (a *AT) Run(command string) (string, error) {
 			return "", err
 		}
 		line = strings.TrimSpace(line)
+		if line == "" || line == command {
+			continue
+		}
 		switch {
-		case strings.Contains(line, "OK"):
+		case line == "OK":
 			return strings.TrimSpace(sb.String()), nil
-		case strings.Contains(line, "ERR"):
+		case terminalError(line):
 			return "", errors.New(line)
 		default:
-			sb.WriteString(line + "\n")
+			sb.WriteString(line)
+			sb.WriteByte('\n')
 		}
+	}
+}
+
+func terminalError(line string) bool {
+	switch line {
+	case "ERROR", "NO CARRIER", "NO DIALTONE", "BUSY", "NO ANSWER":
+		return true
+	default:
+		return strings.HasPrefix(line, "+CME ERROR:") || strings.HasPrefix(line, "+CMS ERROR:")
 	}
 }
 
@@ -80,12 +109,9 @@ func (a *AT) Support(command string) bool {
 }
 
 func (a *AT) Close() error {
-	if err := unix.IoctlSetTermios(int(a.f.Fd()), unix.TCSETS, a.oldTermios); err != nil {
-		return err
+	var restoreErr error
+	if a.oldTermios != nil {
+		restoreErr = unix.IoctlSetTermios(int(a.f.Fd()), unix.TCSETS, a.oldTermios)
 	}
-	return a.f.Close()
-}
-
-type ATCommand interface {
-	Run(command []byte) ([]byte, error)
+	return errors.Join(restoreErr, a.f.Close())
 }

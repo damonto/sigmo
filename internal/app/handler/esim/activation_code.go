@@ -1,6 +1,7 @@
 package esim
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -11,13 +12,13 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
-func buildActivationCode(modem *mmodem.Modem, start downloadClientMessage) (*elpa.ActivationCode, error) {
+func buildActivationCode(ctx context.Context, modem *mmodem.Modem, start downloadClientMessage) (*elpa.ActivationCode, error) {
 	smdpURL, err := parseSMDP(start.SMDP)
 	if err != nil {
 		return nil, err
 	}
 	matchingID := strings.TrimSpace(start.ActivationCode)
-	imei, err := modem.ThreeGPP().IMEI()
+	imei, err := modem.ThreeGPP().IMEI(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reading modem IMEI: %w", err)
 	}

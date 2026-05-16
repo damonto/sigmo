@@ -27,7 +27,7 @@ import (
 
 type RegisterConfig struct {
 	Store              *config.Store
-	Modems             *modem.Manager
+	Registry           *modem.Registry
 	Internet           *pinternet.Connector
 	Relay              *forwarder.Relay
 	NetworkPreferences *modem.NetworkPreferences
@@ -60,7 +60,7 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 			protected.PUT("/config", h.Update)
 		}
 
-		h := hmodem.New(cfg.Store, cfg.Modems, cfg.Internet)
+		h := hmodem.New(cfg.Store, cfg.Registry, cfg.Internet)
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
 		protected.PUT("/modems/:id/sim-slots/:identifier", h.SwitchSimSlot)
@@ -69,7 +69,7 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 		protected.PUT("/modems/:id/settings", h.UpdateSettings)
 
 		{
-			h := message.New(cfg.Modems)
+			h := message.New(cfg.Registry)
 			protected.GET("/modems/:id/messages", h.List)
 			protected.GET("/modems/:id/messages/:participant", h.ListByParticipant)
 			protected.POST("/modems/:id/messages", h.Send)
@@ -77,12 +77,12 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 		}
 
 		{
-			h := ussd.New(cfg.Modems)
+			h := ussd.New(cfg.Registry)
 			protected.POST("/modems/:id/ussd", h.Execute)
 		}
 
 		{
-			h := network.New(cfg.Modems, cfg.NetworkPreferences)
+			h := network.New(cfg.Registry, cfg.NetworkPreferences)
 			protected.GET("/modems/:id/networks", h.List)
 			protected.GET("/modems/:id/networks/modes", h.Modes)
 			protected.PUT("/modems/:id/networks/current-modes", h.SetCurrentModes)
@@ -92,7 +92,7 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 		}
 
 		{
-			h := hinternet.New(cfg.Modems, cfg.Internet)
+			h := hinternet.New(cfg.Registry, cfg.Internet)
 			protected.GET("/modems/:id/internet-connections/current", h.Current)
 			protected.GET("/modems/:id/internet-connections/public", h.Public)
 			protected.POST("/modems/:id/internet-connections", h.Connect)
@@ -100,12 +100,12 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 		}
 
 		{
-			h := euicc.New(cfg.Store, cfg.Modems)
+			h := euicc.New(cfg.Store, cfg.Registry)
 			protected.GET("/modems/:id/euicc", h.Get)
 		}
 
 		{
-			h := esim.New(cfg.Store, cfg.Modems, cfg.Internet)
+			h := esim.New(cfg.Store, cfg.Registry, cfg.Internet)
 			protected.GET("/modems/:id/esims", h.List)
 			protected.GET("/modems/:id/esims/discover", h.Discover)
 			protected.GET("/modems/:id/esims/download-sessions", h.Download)
@@ -115,7 +115,7 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 		}
 
 		{
-			h := notification.New(cfg.Store, cfg.Modems)
+			h := notification.New(cfg.Store, cfg.Registry)
 			protected.GET("/modems/:id/notifications", h.List)
 			protected.POST("/modems/:id/notifications/:sequence/deliveries", h.Resend)
 			protected.DELETE("/modems/:id/notifications/:sequence", h.Delete)

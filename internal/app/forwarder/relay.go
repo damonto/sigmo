@@ -19,7 +19,7 @@ import (
 
 type Relay struct {
 	store     *config.Store
-	manager   *modem.Manager
+	registry  *modem.Registry
 	notifier  *notify.Notifier
 	mu        sync.Mutex
 	cancels   map[dbus.ObjectPath]context.CancelFunc
@@ -27,7 +27,7 @@ type Relay struct {
 	modems    map[dbus.ObjectPath]string
 }
 
-func New(store *config.Store, manager *modem.Manager) (*Relay, error) {
+func New(store *config.Store, registry *modem.Registry) (*Relay, error) {
 	cfg := store.Snapshot()
 	notifier, err := notify.New(&cfg)
 	if err != nil {
@@ -35,7 +35,7 @@ func New(store *config.Store, manager *modem.Manager) (*Relay, error) {
 	}
 	return &Relay{
 		store:     store,
-		manager:   manager,
+		registry:  registry,
 		notifier:  notifier,
 		cancels:   make(map[dbus.ObjectPath]context.CancelFunc),
 		equipment: make(map[string]dbus.ObjectPath),
@@ -56,7 +56,7 @@ func (r *Relay) Reload() error {
 }
 
 func (r *Relay) Run(ctx context.Context) error {
-	modems, err := r.manager.Modems()
+	modems, err := r.registry.Modems(ctx)
 	if err != nil {
 		return fmt.Errorf("listing modems: %w", err)
 	}
@@ -64,7 +64,7 @@ func (r *Relay) Run(ctx context.Context) error {
 		r.addModem(ctx, path, m)
 	}
 
-	unsubscribe, err := r.manager.Subscribe(func(event modem.ModemEvent) error {
+	unsubscribe, err := r.registry.Subscribe(func(event modem.ModemEvent) error {
 		switch event.Type {
 		case modem.ModemEventAdded:
 			if event.Modem == nil {
@@ -77,7 +77,7 @@ func (r *Relay) Run(ctx context.Context) error {
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("subscribing to modem manager: %w", err)
+		return fmt.Errorf("subscribing to modem registry: %w", err)
 	}
 	defer unsubscribe()
 

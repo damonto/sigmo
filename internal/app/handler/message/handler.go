@@ -13,7 +13,7 @@ import (
 )
 
 type Handler struct {
-	manager  *mmodem.Manager
+	registry *mmodem.Registry
 	messages *message
 }
 
@@ -29,19 +29,20 @@ const (
 	errorCodeDeleteMessageThreadFailed = "delete_message_thread_failed"
 )
 
-func New(manager *mmodem.Manager) *Handler {
+func New(registry *mmodem.Registry) *Handler {
 	return &Handler{
-		manager:  manager,
+		registry: registry,
 		messages: newMessage(),
 	}
 }
 
 func (h *Handler) List(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeListMessagesFailed)
 	}
-	response, err := h.messages.ListConversations(modem)
+	response, err := h.messages.ListConversations(ctx, modem)
 	if err != nil {
 		return httpapi.Internal(c, errorCodeListMessagesFailed, err)
 	}
@@ -49,7 +50,8 @@ func (h *Handler) List(c *echo.Context) error {
 }
 
 func (h *Handler) ListByParticipant(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeListMessageThreadFailed)
 	}
@@ -60,7 +62,7 @@ func (h *Handler) ListByParticipant(c *echo.Context) error {
 		}
 		return httpapi.BadRequest(c, errorCodeInvalidParticipant, err)
 	}
-	response, err := h.messages.ListByParticipant(modem, participant)
+	response, err := h.messages.ListByParticipant(ctx, modem, participant)
 	if err != nil {
 		if errors.Is(err, errParticipantRequired) {
 			return httpapi.BadRequest(c, errorCodeParticipantRequired, err)
@@ -71,7 +73,8 @@ func (h *Handler) ListByParticipant(c *echo.Context) error {
 }
 
 func (h *Handler) Send(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeSendMessageFailed)
 	}
@@ -79,7 +82,7 @@ func (h *Handler) Send(c *echo.Context) error {
 	if err := httpapi.BindAndValidate(c, &req, errorCodeSendMessageInvalidRequest); err != nil {
 		return err
 	}
-	if err := h.messages.Send(modem, req.To, req.Text); err != nil {
+	if err := h.messages.Send(ctx, modem, req.To, req.Text); err != nil {
 		if errors.Is(err, errRecipientRequired) {
 			return httpapi.BadRequest(c, errorCodeRecipientRequired, err)
 		}
@@ -92,7 +95,8 @@ func (h *Handler) Send(c *echo.Context) error {
 }
 
 func (h *Handler) DeleteByParticipant(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeDeleteMessageThreadFailed)
 	}
@@ -103,7 +107,7 @@ func (h *Handler) DeleteByParticipant(c *echo.Context) error {
 		}
 		return httpapi.BadRequest(c, errorCodeInvalidParticipant, err)
 	}
-	if err := h.messages.DeleteByParticipant(modem, participant); err != nil {
+	if err := h.messages.DeleteByParticipant(ctx, modem, participant); err != nil {
 		if errors.Is(err, errParticipantRequired) {
 			return httpapi.BadRequest(c, errorCodeParticipantRequired, err)
 		}

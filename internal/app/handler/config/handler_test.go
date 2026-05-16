@@ -404,7 +404,13 @@ func TestUpdate(t *testing.T) {
 			if err != nil {
 				t.Fatalf("forwarder.New() error = %v", err)
 			}
-			internetConnector := internet.NewConnectorWithProxyStatePath(internet.NewProxy(internet.ProxyConfig{}), filepath.Join(t.TempDir(), "internet-always-on.json"))
+			internetConnector, err := internet.NewConnector(internet.ConnectorConfig{
+				Proxy:        internet.NewProxy(internet.ProxyConfig{}),
+				AlwaysOnPath: filepath.Join(t.TempDir(), "internet-always-on.json"),
+			})
+			if err != nil {
+				t.Fatalf("internet.NewConnector() error = %v", err)
+			}
 			h := New(store, internetConnector, relay)
 
 			body, err := json.Marshal(tt.request)
@@ -488,7 +494,13 @@ func TestUpdatePersistsConfigWhenProxyReloadFails(t *testing.T) {
 			t.Fatalf("Unregister() error = %v", err)
 		}
 	})
-	internetConnector := internet.NewConnectorWithProxyStatePath(proxy, filepath.Join(t.TempDir(), "internet-always-on.json"))
+	internetConnector, err := internet.NewConnector(internet.ConnectorConfig{
+		Proxy:        proxy,
+		AlwaysOnPath: filepath.Join(t.TempDir(), "internet-always-on.json"),
+	})
+	if err != nil {
+		t.Fatalf("internet.NewConnector() error = %v", err)
+	}
 	h := New(store, internetConnector, relay)
 
 	reqBody := UpdateRequest{

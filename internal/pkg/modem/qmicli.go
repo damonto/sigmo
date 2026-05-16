@@ -2,6 +2,7 @@ package modem
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,8 +10,8 @@ import (
 	"strings"
 )
 
-func qmicliActivateProvisioningIfSimMissing(m *Modem) error {
-	status, err := qmicliCardStatus(m)
+func qmicliActivateProvisioningIfSimMissing(ctx context.Context, m *Modem) error {
+	status, err := qmicliCardStatus(ctx, m)
 	if err != nil {
 		return err
 	}
@@ -28,22 +29,23 @@ func qmicliActivateProvisioningIfSimMissing(m *Modem) error {
 	}
 	slog.Info("sim missing, activate provisioning session", "modem", m.EquipmentIdentifier, "slot", slot)
 	if result, err := qmicliRun(
+		ctx,
 		m,
 		fmt.Sprintf("--uim-change-provisioning-session=slot=%d,activate=yes,session-type=primary-gw-provisioning,aid=%s", slot, aid),
 	); err != nil {
-		slog.Error("failed to activate provisioning session", "error", err, "result", string(result))
-		return err
+		slog.Error("activate provisioning session", "error", err, "result", string(result))
+		return qmicliOutputError("activate provisioning session", err, result)
 	}
 	return nil
 }
 
-func qmicliRepowerSimCard(m *Modem) error {
+func qmicliRepowerSimCard(ctx context.Context, m *Modem) error {
 	slot := qmicliSimSlot(m)
-	if result, err := qmicliRun(m, fmt.Sprintf("--uim-sim-power-off=%d", slot)); err != nil {
+	if result, err := qmicliRun(ctx, m, fmt.Sprintf("--uim-sim-power-off=%d", slot)); err != nil {
 		return qmicliOutputError("power off sim", err, result)
 	}
 	slog.Info("sim powered off", "modem", m.EquipmentIdentifier, "slot", slot)
-	if result, err := qmicliRun(m, fmt.Sprintf("--uim-sim-power-on=%d", slot)); err != nil {
+	if result, err := qmicliRun(ctx, m, fmt.Sprintf("--uim-sim-power-on=%d", slot)); err != nil {
 		return qmicliOutputError("power on sim", err, result)
 	}
 	slog.Info("sim powered on", "modem", m.EquipmentIdentifier, "slot", slot)
@@ -58,10 +60,10 @@ func qmicliOutputError(action string, err error, result []byte) error {
 	return fmt.Errorf("%s: %w: %s", action, err, output)
 }
 
-func qmicliCardStatus(m *Modem) (string, error) {
-	result, err := qmicliRun(m, "--uim-get-card-status")
+func qmicliCardStatus(ctx context.Context, m *Modem) (string, error) {
+	result, err := qmicliRun(ctx, m, "--uim-get-card-status")
 	if err != nil {
-		slog.Error("failed to get card status", "error", err, "result", string(result))
+		slog.Error("get card status", "error", err, "result", string(result))
 		return "", err
 	}
 	return string(result), nil
@@ -110,14 +112,14 @@ func qmicliSimSlot(m *Modem) uint32 {
 	return 1
 }
 
-func qmicliRun(m *Modem, args ...string) ([]byte, error) {
+func qmicliRun(ctx context.Context, m *Modem, args ...string) ([]byte, error) {
 	bin, err := exec.LookPath("qmicli")
 	if err != nil {
 		slog.Error("qmicli not found in PATH", "error", err)
 		return nil, err
 	}
 	commandArgs := append([]string{"-d", m.PrimaryPort, "-p"}, args...)
-	return exec.Command(bin, commandArgs...).Output()
+	return exec.CommandContext(ctx, bin, commandArgs...).CombinedOutput()
 }
 
 func qmicliPersonalizationState(status string, slot uint32) (string, error) {

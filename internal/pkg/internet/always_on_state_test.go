@@ -1,10 +1,11 @@
 package internet
 
 import (
+	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -222,7 +223,7 @@ func TestAlwaysOnStateForModem(t *testing.T) {
 				want := map[string]Preferences{
 					"modem-1": {APN: "internet", AlwaysOn: true},
 				}
-				if !reflect.DeepEqual(got, want) {
+				if !maps.Equal(got, want) {
 					t.Fatalf("loadAlwaysOnStates() = %#v, want %#v", got, want)
 				}
 			},
@@ -314,8 +315,8 @@ func TestConnectorAlwaysOnStatePolicy(t *testing.T) {
 				if err := saveAlwaysOnStateForModem(path, modemID, prefs); err != nil {
 					t.Fatalf("saveAlwaysOnStateForModem() error = %v", err)
 				}
-				if err := c.clearAlwaysOnStateLocked(modemID); err != nil {
-					t.Fatalf("clearAlwaysOnStateLocked() error = %v", err)
+				if err := c.clearAlwaysOnState(modemID); err != nil {
+					t.Fatalf("clearAlwaysOnState() error = %v", err)
 				}
 			},
 			wantPrefs: Preferences{APN: "internet", DefaultRoute: true, ProxyEnabled: true},
@@ -344,7 +345,10 @@ func TestConnectorAlwaysOnStatePolicy(t *testing.T) {
 			t.Parallel()
 
 			path := filepath.Join(t.TempDir(), "internet-always-on.json")
-			c := NewConnectorWithProxyStatePath(nil, path)
+			c, err := NewConnector(ConnectorConfig{AlwaysOnPath: path})
+			if err != nil {
+				t.Fatalf("NewConnector() error = %v", err)
+			}
 			tt.run(t, c, path)
 
 			_, ok, err := loadAlwaysOnStateForModem(path, modemID)
@@ -367,7 +371,10 @@ func TestRestoreAlwaysOnSkipsStaleSnapshotAfterManualClear(t *testing.T) {
 	const modemID = "modem-1"
 
 	path := filepath.Join(t.TempDir(), "internet-always-on.json")
-	c := NewConnectorWithProxyStatePath(nil, path)
+	c, err := NewConnector(ConnectorConfig{AlwaysOnPath: path})
+	if err != nil {
+		t.Fatalf("NewConnector() error = %v", err)
+	}
 	prefs := Preferences{APN: "internet", DefaultRoute: true, AlwaysOn: true}
 	if err := saveAlwaysOnStateForModem(path, modemID, prefs); err != nil {
 		t.Fatalf("saveAlwaysOnStateForModem() error = %v", err)
@@ -377,11 +384,11 @@ func TestRestoreAlwaysOnSkipsStaleSnapshotAfterManualClear(t *testing.T) {
 		t.Fatalf("loadAlwaysOnStates() error = %v", err)
 	}
 	stale := states[modemID]
-	if err := c.clearAlwaysOnStateLocked(modemID); err != nil {
-		t.Fatalf("clearAlwaysOnStateLocked() error = %v", err)
+	if err := c.clearAlwaysOnState(modemID); err != nil {
+		t.Fatalf("clearAlwaysOnState() error = %v", err)
 	}
 
-	if err := c.restoreAlwaysOn(&mmodem.Modem{EquipmentIdentifier: modemID}, stale); err != nil {
+	if err := c.restoreAlwaysOn(context.Background(), modemAccess{modem: &mmodem.Modem{EquipmentIdentifier: modemID}}, stale); err != nil {
 		t.Fatalf("restoreAlwaysOn() error = %v", err)
 	}
 	_, ok, err := loadAlwaysOnStateForModem(path, modemID)

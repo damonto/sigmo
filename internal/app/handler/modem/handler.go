@@ -15,7 +15,7 @@ import (
 )
 
 type Handler struct {
-	manager  *mmodem.Manager
+	registry *mmodem.Registry
 	catalog  *catalog
 	simSlot  *simSlot
 	msisdn   *msisdn
@@ -51,19 +51,19 @@ var (
 	errUpdateMSISDNTimeout  = errors.New("updating MSISDN timed out, please refresh to confirm the active slot")
 )
 
-func New(store *config.Store, manager *mmodem.Manager, internetConnector *internet.Connector) *Handler {
+func New(store *config.Store, registry *mmodem.Registry, internetConnector *internet.Connector) *Handler {
 	return &Handler{
-		manager:  manager,
-		catalog:  newCatalog(store, manager),
-		simSlot:  newSIMSlot(manager),
-		msisdn:   newMSISDN(store, manager),
+		registry: registry,
+		catalog:  newCatalog(store, registry),
+		simSlot:  newSIMSlot(registry),
+		msisdn:   newMSISDN(store, registry),
 		settings: newSettings(store),
 		internet: internetConnector,
 	}
 }
 
 func (h *Handler) List(c *echo.Context) error {
-	response, err := h.catalog.List()
+	response, err := h.catalog.List(c.Request().Context())
 	if err != nil {
 		return httpapi.Internal(c, errorCodeListModemsFailed, err)
 	}
@@ -71,11 +71,12 @@ func (h *Handler) List(c *echo.Context) error {
 }
 
 func (h *Handler) Get(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeGetModemFailed)
 	}
-	response, err := h.catalog.Get(modem)
+	response, err := h.catalog.Get(ctx, modem)
 	if err != nil {
 		return httpapi.Internal(c, errorCodeGetModemFailed, err)
 	}
@@ -83,11 +84,12 @@ func (h *Handler) Get(c *echo.Context) error {
 }
 
 func (h *Handler) SwitchSimSlot(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	requestCtx := c.Request().Context()
+	modem, err := h.registry.Find(requestCtx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeSwitchSimSlotFailed)
 	}
-	slotIndex, err := h.simSlot.targetIndex(modem, c.Param("identifier"))
+	slotIndex, err := h.simSlot.targetIndex(requestCtx, modem, c.Param("identifier"))
 	if err != nil {
 		if errors.Is(err, errSimIdentifierRequired) {
 			return httpapi.BadRequest(c, errorCodeSimIdentifierRequired, err)
@@ -107,7 +109,7 @@ func (h *Handler) SwitchSimSlot(c *echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), switchSimSlotTimeout)
 	defer cancel()
 
-	if err := h.internet.Restore(modem); err != nil {
+	if err := h.internet.Restore(ctx, modem); err != nil {
 		return httpapi.Internal(c, errorCodeSwitchSimSlotFailed, err)
 	}
 	if err := h.simSlot.Switch(ctx, modem, slotIndex); err != nil {
@@ -123,7 +125,7 @@ func (h *Handler) SwitchSimSlot(c *echo.Context) error {
 }
 
 func (h *Handler) UpdateMSISDN(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeUpdateMSISDNFailed)
 	}
@@ -148,7 +150,7 @@ func (h *Handler) UpdateMSISDN(c *echo.Context) error {
 }
 
 func (h *Handler) UpdateSettings(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeUpdateSettingsFailed)
 	}
@@ -166,7 +168,7 @@ func (h *Handler) UpdateSettings(c *echo.Context) error {
 }
 
 func (h *Handler) GetSettings(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeGetSettingsFailed)
 	}

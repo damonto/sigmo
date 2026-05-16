@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 )
 
@@ -20,7 +21,7 @@ const (
 
 type CRSM struct{ at *AT }
 
-func NewCRSM(at *AT) ATCommand { return &CRSM{at: at} }
+func NewCRSM(at *AT) *CRSM { return &CRSM{at: at} }
 
 type CRSMCommand struct {
 	Instruction CRSMInstruction
@@ -45,10 +46,33 @@ func (c *CRSM) Run(command []byte) ([]byte, error) {
 	return c.sw(response)
 }
 
-func (c *CRSM) sw(sw string) ([]byte, error) {
-	if !strings.Contains(sw, "+CRSM: 144") {
-		return nil, fmt.Errorf("unexpected response: %s", sw)
+func (c *CRSM) sw(response string) ([]byte, error) {
+	index := strings.Index(response, "+CRSM:")
+	if index < 0 {
+		return nil, fmt.Errorf("unexpected response: %s", response)
 	}
-	data := strings.Replace(sw, "+CRSM: 144,0,", "", 1)
-	return hex.DecodeString(data[1 : len(data)-1])
+	parts := strings.SplitN(strings.TrimSpace(response[index+len("+CRSM:"):]), ",", 3)
+	if len(parts) < 3 {
+		return nil, fmt.Errorf("unexpected response: %s", response)
+	}
+	sw1, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return nil, fmt.Errorf("parse CRSM sw1: %w", err)
+	}
+	sw2, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return nil, fmt.Errorf("parse CRSM sw2: %w", err)
+	}
+	if sw1 != 144 || sw2 != 0 {
+		return nil, fmt.Errorf("unexpected response status: %d,%d", sw1, sw2)
+	}
+	data := strings.Trim(strings.TrimSpace(parts[2]), "\"")
+	if data == "" {
+		return nil, nil
+	}
+	decoded, err := hex.DecodeString(data)
+	if err != nil {
+		return nil, fmt.Errorf("decode CRSM data: %w", err)
+	}
+	return decoded, nil
 }

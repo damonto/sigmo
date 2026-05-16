@@ -25,7 +25,7 @@ type IPInfo struct {
 }
 
 func (c *Connector) Public(ctx context.Context, modem *mmodem.Modem) (IPInfo, error) {
-	connection, err := c.Current(modem)
+	connection, err := c.Current(ctx, modem)
 	if err != nil {
 		return IPInfo{}, err
 	}
@@ -59,6 +59,8 @@ func requestIPInfo(ctx context.Context, interfaceName string) (IPInfo, error) {
 		Timeout:   ipInfoTimeout,
 		Transport: boundTransportWithTimeout(interfaceName, ipInfoTimeout),
 	}
+	defer client.CloseIdleConnections()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ipInfoURL, nil)
 	if err != nil {
 		return IPInfo{}, fmt.Errorf("create ipinfo request: %w", err)

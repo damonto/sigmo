@@ -1,6 +1,7 @@
 package network
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -15,12 +16,12 @@ var (
 	errAnyBandExclusive = errors.New("any band cannot be combined with other bands")
 )
 
-func (n *network) Bands(modem *mmodem.Modem) (*BandsResponse, error) {
-	supported, err := modem.SupportedBands()
+func (n *network) Bands(ctx context.Context, modem *mmodem.Modem) (*BandsResponse, error) {
+	supported, err := modem.SupportedBands(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read supported bands: %w", err)
 	}
-	current, err := modem.CurrentBands()
+	current, err := modem.CurrentBands(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read current bands: %w", err)
 	}
@@ -40,15 +41,15 @@ func (n *network) Bands(modem *mmodem.Modem) (*BandsResponse, error) {
 	return response, nil
 }
 
-func (n *network) SetCurrentBands(modem *mmodem.Modem, req SetCurrentBandsRequest) error {
+func (n *network) SetCurrentBands(ctx context.Context, modem *mmodem.Modem, req SetCurrentBandsRequest) error {
 	bands := make([]mmodem.ModemBand, 0, len(req.Bands))
 	for _, band := range req.Bands {
 		bands = append(bands, mmodem.ModemBand(band))
 	}
-	if err := n.validateBands(modem, bands); err != nil {
+	if err := n.validateBands(ctx, modem, bands); err != nil {
 		return err
 	}
-	if err := modem.SetCurrentBands(bands); err != nil {
+	if err := modem.SetCurrentBands(ctx, bands); err != nil {
 		return fmt.Errorf("set current bands: %w", err)
 	}
 	if n.preferences != nil {
@@ -59,8 +60,8 @@ func (n *network) SetCurrentBands(modem *mmodem.Modem, req SetCurrentBandsReques
 	return nil
 }
 
-func (n *network) validateBands(modem *mmodem.Modem, bands []mmodem.ModemBand) error {
-	supported, err := modem.SupportedBands()
+func (n *network) validateBands(ctx context.Context, modem *mmodem.Modem, bands []mmodem.ModemBand) error {
+	supported, err := modem.SupportedBands(ctx)
 	if err != nil {
 		return fmt.Errorf("read supported bands: %w", err)
 	}

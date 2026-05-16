@@ -1,6 +1,7 @@
 package modem
 
 import (
+	"context"
 	"slices"
 	"testing"
 
@@ -72,7 +73,8 @@ func TestModemNetworkWrappers(t *testing.T) {
 	}
 	modem := &Modem{dbusObject: object, objectPath: object.path}
 
-	modes, err := modem.SupportedModes()
+	ctx := context.Background()
+	modes, err := modem.SupportedModes(ctx)
 	if err != nil {
 		t.Fatalf("SupportedModes() error = %v", err)
 	}
@@ -84,7 +86,7 @@ func TestModemNetworkWrappers(t *testing.T) {
 		t.Fatalf("SupportedModes() = %#v, want %#v", modes, wantModes)
 	}
 
-	current, err := modem.CurrentModes()
+	current, err := modem.CurrentModes(ctx)
 	if err != nil {
 		t.Fatalf("CurrentModes() error = %v", err)
 	}
@@ -92,14 +94,14 @@ func TestModemNetworkWrappers(t *testing.T) {
 		t.Fatalf("CurrentModes() = %#v, want %#v", current, wantModes[0])
 	}
 
-	if err := modem.SetCurrentModes(wantModes[1]); err != nil {
+	if err := modem.SetCurrentModes(ctx, wantModes[1]); err != nil {
 		t.Fatalf("SetCurrentModes() error = %v", err)
 	}
 	if got := object.calls[len(object.calls)-1]; got != ModemInterface+".SetCurrentModes" {
 		t.Fatalf("Call() = %q, want SetCurrentModes", got)
 	}
 
-	bands, err := modem.SupportedBands()
+	bands, err := modem.SupportedBands(ctx)
 	if err != nil {
 		t.Fatalf("SupportedBands() error = %v", err)
 	}
@@ -108,7 +110,7 @@ func TestModemNetworkWrappers(t *testing.T) {
 		t.Fatalf("SupportedBands() = %#v, want %#v", bands, wantBands)
 	}
 
-	if err := modem.SetCurrentBands([]ModemBand{71, 378}); err != nil {
+	if err := modem.SetCurrentBands(ctx, []ModemBand{71, 378}); err != nil {
 		t.Fatalf("SetCurrentBands() error = %v", err)
 	}
 	if got := object.args[len(object.args)-1][0]; !slices.Equal(got.([]uint32), []uint32{71, 378}) {
@@ -127,7 +129,7 @@ func TestModemNetworkWrapperParseErrors(t *testing.T) {
 			name:     "supported modes",
 			property: ModemInterface + ".SupportedModes",
 			call: func(modem *Modem) error {
-				_, err := modem.SupportedModes()
+				_, err := modem.SupportedModes(context.Background())
 				return err
 			},
 		},
@@ -135,7 +137,7 @@ func TestModemNetworkWrapperParseErrors(t *testing.T) {
 			name:     "current modes",
 			property: ModemInterface + ".CurrentModes",
 			call: func(modem *Modem) error {
-				_, err := modem.CurrentModes()
+				_, err := modem.CurrentModes(context.Background())
 				return err
 			},
 		},
@@ -143,7 +145,7 @@ func TestModemNetworkWrapperParseErrors(t *testing.T) {
 			name:     "supported bands",
 			property: ModemInterface + ".SupportedBands",
 			call: func(modem *Modem) error {
-				_, err := modem.SupportedBands()
+				_, err := modem.SupportedBands(context.Background())
 				return err
 			},
 		},
@@ -151,7 +153,7 @@ func TestModemNetworkWrapperParseErrors(t *testing.T) {
 			name:     "current bands",
 			property: ModemInterface + ".CurrentBands",
 			call: func(modem *Modem) error {
-				_, err := modem.CurrentBands()
+				_, err := modem.CurrentBands(context.Background())
 				return err
 			},
 		},

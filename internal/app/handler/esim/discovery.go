@@ -1,6 +1,7 @@
 package esim
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 
@@ -19,7 +20,7 @@ func newProvisioning(store *config.Store) *provisioning {
 	return &provisioning{store: store}
 }
 
-func (p *provisioning) Discover(modem *mmodem.Modem) ([]DiscoverResponse, error) {
+func (p *provisioning) Discover(ctx context.Context, modem *mmodem.Modem) ([]DiscoverResponse, error) {
 	cfg := p.store.Snapshot()
 	client, err := lpa.New(modem, &cfg)
 	if err != nil {
@@ -31,7 +32,7 @@ func (p *provisioning) Discover(modem *mmodem.Modem) ([]DiscoverResponse, error)
 		}
 	}()
 
-	imeiValue, err := modem.ThreeGPP().IMEI()
+	imeiValue, err := modem.ThreeGPP().IMEI(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read modem IMEI: %w", err)
 	}

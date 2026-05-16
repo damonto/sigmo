@@ -20,6 +20,7 @@ const proxyDialTimeout = 30 * time.Second
 var (
 	ErrProxyPasswordRequired  = errors.New("proxy password is required")
 	ErrProxyInterfaceRequired = errors.New("proxy interface is required")
+	ErrProxyNotConfigured     = errors.New("proxy is not configured")
 	ErrProxyUsernameRequired  = errors.New("proxy username is required")
 	ErrProxyStart             = errors.New("proxy start")
 )

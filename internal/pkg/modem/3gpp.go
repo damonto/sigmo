@@ -1,9 +1,13 @@
 package modem
 
 import (
+	"context"
+
 	"github.com/godbus/dbus/v5"
 )
 
+// ModemManager spells the DBus interface as "Modem3gpp". Keep Go names as 3GPP,
+// but never leak that Go casing into DBus calls.
 const Modem3GPPInterface = ModemInterface + ".Modem3gpp"
 
 type ThreeGPP struct {
@@ -15,48 +19,48 @@ func (m *Modem) ThreeGPP() *ThreeGPP {
 }
 
 type ThreeGPPNetwork struct {
-	Status            Modem3gppNetworkAvailability
+	Status            Modem3GPPNetworkAvailability
 	OperatorName      string
 	OperatorShortName string
 	OperatorCode      string
 	AccessTechnology  []ModemAccessTechnology
 }
 
-func (g *ThreeGPP) IMEI() (string, error) {
-	variant, err := g.modem.dbusObject.GetProperty(Modem3GPPInterface + ".Imei")
+func (g *ThreeGPP) IMEI(ctx context.Context) (string, error) {
+	variant, err := dbusProperty(ctx, g.modem.dbusObject, Modem3GPPInterface, "Imei")
 	if err != nil {
 		return "", err
 	}
 	return stringFromVariant(variant), nil
 }
 
-func (g *ThreeGPP) RegistrationState() (Modem3gppRegistrationState, error) {
-	variant, err := g.modem.dbusObject.GetProperty(Modem3GPPInterface + ".RegistrationState")
+func (g *ThreeGPP) RegistrationState(ctx context.Context) (Modem3GPPRegistrationState, error) {
+	variant, err := dbusProperty(ctx, g.modem.dbusObject, Modem3GPPInterface, "RegistrationState")
 	if err != nil {
 		return 0, err
 	}
-	return Modem3gppRegistrationState(uintFromVariant[uint32](variant)), nil
+	return Modem3GPPRegistrationState(uintFromVariant[uint32](variant)), nil
 }
 
-func (g *ThreeGPP) OperatorCode() (string, error) {
-	variant, err := g.modem.dbusObject.GetProperty(Modem3GPPInterface + ".OperatorCode")
+func (g *ThreeGPP) OperatorCode(ctx context.Context) (string, error) {
+	variant, err := dbusProperty(ctx, g.modem.dbusObject, Modem3GPPInterface, "OperatorCode")
 	if err != nil {
 		return "", err
 	}
 	return stringFromVariant(variant), nil
 }
 
-func (g *ThreeGPP) OperatorName() (string, error) {
-	variant, err := g.modem.dbusObject.GetProperty(Modem3GPPInterface + ".OperatorName")
+func (g *ThreeGPP) OperatorName(ctx context.Context) (string, error) {
+	variant, err := dbusProperty(ctx, g.modem.dbusObject, Modem3GPPInterface, "OperatorName")
 	if err != nil {
 		return "", err
 	}
 	return stringFromVariant(variant), nil
 }
 
-func (g *ThreeGPP) ScanNetworks() ([]*ThreeGPPNetwork, error) {
+func (g *ThreeGPP) ScanNetworks(ctx context.Context) ([]*ThreeGPPNetwork, error) {
 	var results []map[string]dbus.Variant
-	err := g.modem.dbusObject.Call(Modem3GPPInterface+".Scan", 0).Store(&results)
+	err := g.modem.dbusObject.CallWithContext(ctx, Modem3GPPInterface+".Scan", 0).Store(&results)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +68,7 @@ func (g *ThreeGPP) ScanNetworks() ([]*ThreeGPPNetwork, error) {
 	for i, result := range results {
 		var accessTechnology ModemAccessTechnology
 		n := ThreeGPPNetwork{
-			Status:           Modem3gppNetworkAvailability(variantUint[uint32](result, "status")),
+			Status:           Modem3GPPNetworkAvailability(variantUint[uint32](result, "status")),
 			OperatorCode:     variantString(result, "operator-code"),
 			AccessTechnology: accessTechnology.UnmarshalBitmask(variantUint[uint32](result, "access-technology")),
 		}
@@ -75,6 +79,6 @@ func (g *ThreeGPP) ScanNetworks() ([]*ThreeGPPNetwork, error) {
 	return networks, nil
 }
 
-func (g *ThreeGPP) RegisterNetwork(operatorCode string) error {
-	return g.modem.dbusObject.Call(Modem3GPPInterface+".Register", 0, operatorCode).Err
+func (g *ThreeGPP) RegisterNetwork(ctx context.Context, operatorCode string) error {
+	return g.modem.dbusObject.CallWithContext(ctx, Modem3GPPInterface+".Register", 0, operatorCode).Err
 }

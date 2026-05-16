@@ -20,8 +20,8 @@ type lifecycle struct {
 	cfg             *config.Config
 	store           *config.Store
 	newClient       lifecycleClientFactory
-	findModem       func(string) (*mmodem.Modem, error)
-	restartModem    func(*mmodem.Modem, bool) error
+	findModem       func(context.Context, string) (*mmodem.Modem, error)
+	restartModem    func(context.Context, *mmodem.Modem, bool) error
 	confirmInterval time.Duration
 }
 
@@ -58,13 +58,13 @@ var (
 
 const enableConfirmInterval = time.Second
 
-func newLifecycle(store *config.Store, manager *mmodem.Manager) *lifecycle {
+func newLifecycle(store *config.Store, registry *mmodem.Registry) *lifecycle {
 	return &lifecycle{
 		store:     store,
 		newClient: newLifecycleClient,
-		findModem: manager.Find,
-		restartModem: func(modem *mmodem.Modem, compatible bool) error {
-			return modem.Restart(compatible)
+		findModem: registry.Find,
+		restartModem: func(ctx context.Context, modem *mmodem.Modem, compatible bool) error {
+			return modem.Restart(ctx, compatible)
 		},
 		confirmInterval: enableConfirmInterval,
 	}
@@ -146,7 +146,7 @@ func (s *enableSession) Enable(ctx context.Context) error {
 
 	s.Close()
 
-	if err := s.l.restartModem(s.modem, s.l.findModemConfig(s.modem.EquipmentIdentifier).Compatible); err != nil {
+	if err := s.l.restartModem(ctx, s.modem, s.l.findModemConfig(s.modem.EquipmentIdentifier).Compatible); err != nil {
 		slog.Warn("restart modem after enabling profile", "modem", s.modem.EquipmentIdentifier, "error", err)
 		return s.confirmEnableResult(ctx, err)
 	}
@@ -202,10 +202,12 @@ func (l *lifecycle) waitForEnabledProfile(ctx context.Context, modemID string, i
 	}
 	var state enableConfirmState
 	wait := func() error {
+		timer := time.NewTimer(interval)
+		defer timer.Stop()
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(interval):
+		case <-timer.C:
 			return nil
 		}
 	}
@@ -216,7 +218,7 @@ func (l *lifecycle) waitForEnabledProfile(ctx context.Context, modemID string, i
 		default:
 		}
 
-		modem, err := l.findModem(modemID)
+		modem, err := l.findModem(ctx, modemID)
 		if err != nil {
 			if errors.Is(err, mmodem.ErrNotFound) {
 				state.reloadObserved = true

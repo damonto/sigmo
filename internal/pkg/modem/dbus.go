@@ -1,6 +1,7 @@
 package modem
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -11,6 +12,7 @@ const (
 	dbusErrUnknownObject = "org.freedesktop.DBus.Error.UnknownObject"
 	dbusErrCanceled      = "org.freedesktop.DBus.Error.Canceled"
 	dbusErrCancelled     = "org.freedesktop.DBus.Error.Cancelled"
+	dbusPropertiesGet    = "org.freedesktop.DBus.Properties.Get"
 )
 
 func systemBusObject(objectPath dbus.ObjectPath) (dbus.BusObject, error) {
@@ -35,6 +37,15 @@ func systemBusPrivate() (*dbus.Conn, error) {
 		return nil, err
 	}
 	return dbusConn, nil
+}
+
+func dbusProperty(ctx context.Context, object dbus.BusObject, iface string, property string) (dbus.Variant, error) {
+	if iface == "" || property == "" {
+		return dbus.Variant{}, errors.New("dbus property name is invalid")
+	}
+	var variant dbus.Variant
+	err := object.CallWithContext(ctx, dbusPropertiesGet, 0, iface, property).Store(&variant)
+	return variant, err
 }
 
 func isUnknownObjectError(err error) bool {

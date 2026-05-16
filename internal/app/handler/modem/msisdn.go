@@ -20,7 +20,7 @@ var msisdnPhoneRE = regexp.MustCompile(`^\+?[0-9]{1,15}$`)
 type msisdn struct {
 	store        *config.Store
 	newClient    msisdnClientFactory
-	restartModem func(*mmodem.Modem, bool) error
+	restartModem func(context.Context, *mmodem.Modem, bool) error
 	waitForModem func(context.Context, *mmodem.Modem, func() error) (*mmodem.Modem, error)
 }
 
@@ -31,16 +31,16 @@ type msisdnClient interface {
 
 type msisdnClientFactory func(string) (msisdnClient, error)
 
-func newMSISDN(store *config.Store, manager *mmodem.Manager) *msisdn {
+func newMSISDN(store *config.Store, registry *mmodem.Registry) *msisdn {
 	return &msisdn{
 		store: store,
 		newClient: func(device string) (msisdnClient, error) {
 			return msisdnclient.New(device)
 		},
-		restartModem: func(modem *mmodem.Modem, compatible bool) error {
-			return modem.Restart(compatible)
+		restartModem: func(ctx context.Context, modem *mmodem.Modem, compatible bool) error {
+			return modem.Restart(ctx, compatible)
 		},
-		waitForModem: manager.WaitForModemAfter,
+		waitForModem: registry.WaitForModemAfter,
 	}
 }
 
@@ -76,7 +76,7 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 			return fmt.Errorf("update MSISDN: %w", err)
 		}
 		closeClient()
-		if err := m.restartModem(modem, m.store.FindModem(modem.EquipmentIdentifier).Compatible); err != nil {
+		if err := m.restartModem(ctx, modem, m.store.FindModem(modem.EquipmentIdentifier).Compatible); err != nil {
 			err = fmt.Errorf("restart modem: %w", err)
 			if mmodem.IsTransientRestartError(err) {
 				return mmodem.ReloadStarted(err)

@@ -16,16 +16,16 @@ var (
 )
 
 type simSlot struct {
-	manager *mmodem.Manager
+	registry *mmodem.Registry
 }
 
-func newSIMSlot(manager *mmodem.Manager) *simSlot {
-	return &simSlot{manager: manager}
+func newSIMSlot(registry *mmodem.Registry) *simSlot {
+	return &simSlot{registry: registry}
 }
 
 func (s *simSlot) Switch(ctx context.Context, modem *mmodem.Modem, slotIndex uint32) error {
-	_, err := s.manager.WaitForModemAfter(ctx, modem, func() error {
-		if err := modem.SetPrimarySimSlot(slotIndex); err != nil {
+	_, err := s.registry.WaitForModemAfter(ctx, modem, func() error {
+		if err := modem.SetPrimarySimSlot(ctx, slotIndex); err != nil {
 			err = fmt.Errorf("set primary SIM slot: %w", err)
 			if mmodem.IsTransientRestartError(err) {
 				return mmodem.ReloadStarted(err)
@@ -43,7 +43,7 @@ func (s *simSlot) Switch(ctx context.Context, modem *mmodem.Modem, slotIndex uin
 	return nil
 }
 
-func (s *simSlot) targetIndex(modem *mmodem.Modem, identifier string) (uint32, error) {
+func (s *simSlot) targetIndex(ctx context.Context, modem *mmodem.Modem, identifier string) (uint32, error) {
 	if identifier == "" {
 		return 0, errSimIdentifierRequired
 	}
@@ -51,7 +51,7 @@ func (s *simSlot) targetIndex(modem *mmodem.Modem, identifier string) (uint32, e
 		return 0, errSimSlotsUnavailable
 	}
 	for index, slotPath := range modem.SimSlots {
-		sim, err := modem.SIMs().Get(slotPath)
+		sim, err := modem.SIMs().Get(ctx, slotPath)
 		if err != nil {
 			return 0, fmt.Errorf("fetch SIM for slot %s: %w", slotPath, err)
 		}

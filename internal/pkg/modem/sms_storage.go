@@ -9,17 +9,17 @@ import (
 
 const smsStorageRetryInterval = 5 * time.Second
 
-func (manager *Manager) RunSMSStorageDefaults(ctx context.Context, storage SMSStorage) error {
-	runner := newPresenceRunner(manager, func(modemCtx context.Context, m *Modem) {
+func RunSMSStorageDefaults(ctx context.Context, registry *Registry, storage SMSStorage) error {
+	task := newPresenceTask(registry, func(modemCtx context.Context, m *Modem) {
 		setDefaultSMSStorage(modemCtx, m, storage)
 	})
-	return runner.Run(ctx)
+	return task.Run(ctx)
 }
 
 func setDefaultSMSStorage(ctx context.Context, m *Modem, storage SMSStorage) {
 	warned := false
 	for {
-		if err := setDefaultSMSStorageOnce(m, storage); err != nil {
+		if err := setDefaultSMSStorageOnce(ctx, m, storage); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
@@ -29,10 +29,8 @@ func setDefaultSMSStorage(ctx context.Context, m *Modem, storage SMSStorage) {
 				slog.Warn("set SMS default storage", "modem", m.EquipmentIdentifier, "storage", storage.String(), "error", err)
 				warned = true
 			}
-			select {
-			case <-ctx.Done():
+			if err := sleepContext(ctx, smsStorageRetryInterval); err != nil {
 				return
-			case <-time.After(smsStorageRetryInterval):
 			}
 			continue
 		}
@@ -40,9 +38,9 @@ func setDefaultSMSStorage(ctx context.Context, m *Modem, storage SMSStorage) {
 	}
 }
 
-func setDefaultSMSStorageOnce(m *Modem, storage SMSStorage) error {
+func setDefaultSMSStorageOnce(ctx context.Context, m *Modem, storage SMSStorage) error {
 	messaging := m.Messaging()
-	supported, err := messaging.SupportedStorages()
+	supported, err := messaging.SupportedStorages(ctx)
 	if err != nil {
 		return err
 	}
@@ -51,7 +49,7 @@ func setDefaultSMSStorageOnce(m *Modem, storage SMSStorage) error {
 		return nil
 	}
 
-	current, err := messaging.DefaultStorage()
+	current, err := messaging.DefaultStorage(ctx)
 	if err != nil {
 		return err
 	}
@@ -60,7 +58,7 @@ func setDefaultSMSStorageOnce(m *Modem, storage SMSStorage) error {
 		return nil
 	}
 
-	if err := messaging.SetDefaultStorage(storage); err != nil {
+	if err := messaging.SetDefaultStorage(ctx, storage); err != nil {
 		return err
 	}
 	slog.Info("SMS default storage set", "modem", m.EquipmentIdentifier, "storage", storage.String())

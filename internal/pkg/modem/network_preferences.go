@@ -120,15 +120,15 @@ func (p *NetworkPreferences) SaveBands(modemID string, bands []ModemBand) error 
 	return writeNetworkPreferencesState(p.path, store)
 }
 
-func (p *NetworkPreferences) Run(ctx context.Context, manager *Manager) error {
-	runner := newPresenceRunner(manager, p.restoreWithRetry)
-	return runner.Run(ctx)
+func (p *NetworkPreferences) Run(ctx context.Context, registry *Registry) error {
+	task := newPresenceTask(registry, p.restoreWithRetry)
+	return task.Run(ctx)
 }
 
 func (p *NetworkPreferences) restoreWithRetry(ctx context.Context, m *Modem) {
 	warned := false
 	for {
-		retry, err := p.restoreOnce(m)
+		retry, err := p.restoreOnce(ctx, m)
 		if err == nil {
 			return
 		}
@@ -145,15 +145,13 @@ func (p *NetworkPreferences) restoreWithRetry(ctx context.Context, m *Modem) {
 			slog.Warn("restore network preferences", "modem", m.EquipmentIdentifier, "error", err)
 			warned = true
 		}
-		select {
-		case <-ctx.Done():
+		if err := sleepContext(ctx, networkPreferencesRetryInterval); err != nil {
 			return
-		case <-time.After(networkPreferencesRetryInterval):
 		}
 	}
 }
 
-func (p *NetworkPreferences) restoreOnce(m *Modem) (bool, error) {
+func (p *NetworkPreferences) restoreOnce(ctx context.Context, m *Modem) (bool, error) {
 	prefs, ok, err := p.loadForModem(m.EquipmentIdentifier)
 	if err != nil {
 		return false, fmt.Errorf("load network preferences: %w", err)
@@ -169,14 +167,14 @@ func (p *NetworkPreferences) restoreOnce(m *Modem) (bool, error) {
 			Allowed:   prefs.Mode.Allowed,
 			Preferred: prefs.Mode.Preferred,
 		}
-		nextRetry, err := restoreModePreference(m, mode)
+		nextRetry, err := restoreModePreference(ctx, m, mode)
 		if err != nil {
 			result = errors.Join(result, err)
 			retry = retry || nextRetry
 		}
 	}
 	if prefs.Bands != nil {
-		nextRetry, err := restoreBandPreference(m, prefs.Bands)
+		nextRetry, err := restoreBandPreference(ctx, m, prefs.Bands)
 		if err != nil {
 			result = errors.Join(result, err)
 			retry = retry || nextRetry
@@ -205,8 +203,8 @@ func (p *NetworkPreferences) loadForModem(modemID string) (savedNetworkPreferenc
 	return entry, true, nil
 }
 
-func restoreModePreference(m *Modem, mode ModemModePair) (bool, error) {
-	supported, err := m.SupportedModes()
+func restoreModePreference(ctx context.Context, m *Modem, mode ModemModePair) (bool, error) {
+	supported, err := m.SupportedModes(ctx)
 	if err != nil {
 		return isTransientRestartError(err), fmt.Errorf("read supported modes: %w", err)
 	}
@@ -214,21 +212,21 @@ func restoreModePreference(m *Modem, mode ModemModePair) (bool, error) {
 		return false, fmt.Errorf("saved mode unsupported: allowed=%d preferred=%d", mode.Allowed, mode.Preferred)
 	}
 
-	current, err := m.CurrentModes()
+	current, err := m.CurrentModes(ctx)
 	if err != nil {
 		return isTransientRestartError(err), fmt.Errorf("read current modes: %w", err)
 	}
 	if current == mode {
 		return false, nil
 	}
-	if err := m.SetCurrentModes(mode); err != nil {
+	if err := m.SetCurrentModes(ctx, mode); err != nil {
 		return isTransientRestartError(err), fmt.Errorf("set current modes: %w", err)
 	}
 	slog.Info("network mode restored", "modem", m.EquipmentIdentifier, "allowed", mode.Allowed, "preferred", mode.Preferred)
 	return false, nil
 }
 
-func restoreBandPreference(m *Modem, bands []ModemBand) (bool, error) {
+func restoreBandPreference(ctx context.Context, m *Modem, bands []ModemBand) (bool, error) {
 	if len(bands) == 0 {
 		return false, errors.New("saved bands are empty")
 	}
@@ -239,7 +237,7 @@ func restoreBandPreference(m *Modem, bands []ModemBand) (bool, error) {
 		return false, errors.New("saved bands combine any with other bands")
 	}
 
-	supported, err := m.SupportedBands()
+	supported, err := m.SupportedBands(ctx)
 	if err != nil {
 		return isTransientRestartError(err), fmt.Errorf("read supported bands: %w", err)
 	}
@@ -249,14 +247,14 @@ func restoreBandPreference(m *Modem, bands []ModemBand) (bool, error) {
 		}
 	}
 
-	current, err := m.CurrentBands()
+	current, err := m.CurrentBands(ctx)
 	if err != nil {
 		return isTransientRestartError(err), fmt.Errorf("read current bands: %w", err)
 	}
 	if sameBands(current, bands) {
 		return false, nil
 	}
-	if err := m.SetCurrentBands(bands); err != nil {
+	if err := m.SetCurrentBands(ctx, bands); err != nil {
 		return isTransientRestartError(err), fmt.Errorf("set current bands: %w", err)
 	}
 	slog.Info("network bands restored", "modem", m.EquipmentIdentifier, "bands", bands)
@@ -334,14 +332,31 @@ func writeNetworkPreferencesState(path string, store networkPreferencesStateFile
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return fmt.Errorf("secure network preferences state directory: %w", err)
 	}
-	tempPath := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
-	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
-		_ = os.Remove(tempPath)
+	tempFile, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create network preferences state temp file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	removeTemp := true
+	defer func() {
+		if removeTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if _, err := tempFile.Write(data); err != nil {
+		_ = tempFile.Close()
 		return fmt.Errorf("write network preferences state temp file: %w", err)
 	}
+	if err := tempFile.Chmod(0o600); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("secure network preferences state temp file: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("close network preferences state temp file: %w", err)
+	}
 	if err := os.Rename(tempPath, path); err != nil {
-		_ = os.Remove(tempPath)
 		return fmt.Errorf("replace network preferences state file: %w", err)
 	}
+	removeTemp = false
 	return nil
 }

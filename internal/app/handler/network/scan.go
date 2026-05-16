@@ -1,6 +1,7 @@
 package network
 
 import (
+	"context"
 	"fmt"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -14,8 +15,8 @@ func newNetwork(preferences *mmodem.NetworkPreferences) *network {
 	return &network{preferences: preferences}
 }
 
-func (n *network) List(modem *mmodem.Modem) ([]NetworkResponse, error) {
-	networks, err := modem.ThreeGPP().ScanNetworks()
+func (n *network) List(ctx context.Context, modem *mmodem.Modem) ([]NetworkResponse, error) {
+	networks, err := modem.ThreeGPP().ScanNetworks(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("scan networks: %w", err)
 	}

@@ -22,7 +22,7 @@ import (
 )
 
 type Handler struct {
-	manager      *mmodem.Manager
+	registry     *mmodem.Registry
 	profile      *profile
 	provisioning *provisioning
 	lifecycle    *lifecycle
@@ -73,18 +73,18 @@ const (
 	wsTypeError                    = "error"
 )
 
-func New(store *config.Store, manager *mmodem.Manager, internetConnector *internet.Connector) *Handler {
+func New(store *config.Store, registry *mmodem.Registry, internetConnector *internet.Connector) *Handler {
 	return &Handler{
-		manager:      manager,
+		registry:     registry,
 		profile:      newProfile(store),
 		provisioning: newProvisioning(store),
-		lifecycle:    newLifecycle(store, manager),
+		lifecycle:    newLifecycle(store, registry),
 		internet:     internetConnector,
 	}
 }
 
 func (h *Handler) List(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeListESIMsFailed)
 	}
@@ -99,11 +99,12 @@ func (h *Handler) List(c *echo.Context) error {
 }
 
 func (h *Handler) Discover(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeDiscoverESIMsFailed)
 	}
-	response, err := h.provisioning.Discover(modem)
+	response, err := h.provisioning.Discover(ctx, modem)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
@@ -114,7 +115,7 @@ func (h *Handler) Discover(c *echo.Context) error {
 }
 
 func (h *Handler) Enable(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeEnableESIMFailed)
 	}
@@ -131,11 +132,11 @@ func (h *Handler) Enable(c *echo.Context) error {
 	}
 	defer session.Close()
 
-	if err := h.internet.Restore(modem); err != nil {
-		return httpapi.Internal(c, errorCodeEnableESIMFailed, err)
-	}
 	ctx, cancel := context.WithTimeout(c.Request().Context(), enableTimeout)
 	defer cancel()
+	if err := h.internet.Restore(ctx, modem); err != nil {
+		return httpapi.Internal(c, errorCodeEnableESIMFailed, err)
+	}
 	if err := session.Enable(ctx); err != nil {
 		return enableError(c, err)
 	}
@@ -166,7 +167,7 @@ func enableError(c *echo.Context, err error) error {
 }
 
 func (h *Handler) Delete(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeDeleteESIMFailed)
 	}
@@ -190,7 +191,7 @@ func (h *Handler) Delete(c *echo.Context) error {
 }
 
 func (h *Handler) Download(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeDownloadESIMFailed)
 	}
@@ -207,13 +208,13 @@ func (h *Handler) Download(c *echo.Context) error {
 		return nil
 	}
 
-	activationCode, err := buildActivationCode(modem, start)
+	activationCode, err := buildActivationCode(c.Request().Context(), modem, start)
 	if err != nil {
 		_ = conn.WriteJSON(downloadServerMessage{Type: wsTypeError, Message: err.Error()})
 		return nil
 	}
 
-	downloadCtx, cancel := context.WithCancel(context.Background())
+	downloadCtx, cancel := context.WithCancel(c.Request().Context())
 	defer cancel()
 
 	session := newDownloadSession(conn, cancel)
@@ -254,7 +255,7 @@ func (h *Handler) Download(c *echo.Context) error {
 }
 
 func (h *Handler) UpdateNickname(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeUpdateESIMNicknameFailed)
 	}

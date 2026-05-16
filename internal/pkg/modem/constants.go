@@ -96,58 +96,58 @@ func (s SMSStorage) String() string {
 	}
 }
 
-type Modem3gppRegistrationState uint32
+type Modem3GPPRegistrationState uint32
 
 const (
-	Modem3gppRegistrationStateIdle                    Modem3gppRegistrationState = iota // Not registered, not searching for new operator to register.
-	Modem3gppRegistrationStateHome                                                      // Registered on home network.
-	Modem3gppRegistrationStateSearching                                                 // Not registered, searching for new operator to register with.
-	Modem3gppRegistrationStateDenied                                                    // Registration denied.
-	Modem3gppRegistrationStateUnknown                                                   // Unknown registration status.
-	Modem3gppRegistrationStateRoaming                                                   // Registered on a roaming network.
-	Modem3gppRegistrationStateHomeSmsOnly                                               // Registered for "SMS only", home network (applicable only when on LTE).
-	Modem3gppRegistrationStateRoamingSmsOnly                                            // Registered for "SMS only", roaming network (applicable only when on LTE).
-	Modem3gppRegistrationStateEmergencyOnly                                             // Emergency services only.
-	Modem3gppRegistrationStateHomeCsfbNotPreferred                                      // Registered for "CSFB not preferred", home network (applicable only when on LTE).
-	Modem3gppRegistrationStateRoamingCsfbNotPreferred                                   // Registered for "CSFB not preferred", roaming network (applicable only when on LTE).
+	Modem3GPPRegistrationStateIdle                    Modem3GPPRegistrationState = iota // Not registered, not searching for new operator to register.
+	Modem3GPPRegistrationStateHome                                                      // Registered on home network.
+	Modem3GPPRegistrationStateSearching                                                 // Not registered, searching for new operator to register with.
+	Modem3GPPRegistrationStateDenied                                                    // Registration denied.
+	Modem3GPPRegistrationStateUnknown                                                   // Unknown registration status.
+	Modem3GPPRegistrationStateRoaming                                                   // Registered on a roaming network.
+	Modem3GPPRegistrationStateHomeSmsOnly                                               // Registered for "SMS only", home network (applicable only when on LTE).
+	Modem3GPPRegistrationStateRoamingSmsOnly                                            // Registered for "SMS only", roaming network (applicable only when on LTE).
+	Modem3GPPRegistrationStateEmergencyOnly                                             // Emergency services only.
+	Modem3GPPRegistrationStateHomeCsfbNotPreferred                                      // Registered for "CSFB not preferred", home network (applicable only when on LTE).
+	Modem3GPPRegistrationStateRoamingCsfbNotPreferred                                   // Registered for "CSFB not preferred", roaming network (applicable only when on LTE).
 )
 
-func (m Modem3gppRegistrationState) String() string {
+func (m Modem3GPPRegistrationState) String() string {
 	switch m {
-	case Modem3gppRegistrationStateIdle:
+	case Modem3GPPRegistrationStateIdle:
 		return "Idle"
-	case Modem3gppRegistrationStateHome:
+	case Modem3GPPRegistrationStateHome:
 		return "Home"
-	case Modem3gppRegistrationStateSearching:
+	case Modem3GPPRegistrationStateSearching:
 		return "Searching"
-	case Modem3gppRegistrationStateDenied:
+	case Modem3GPPRegistrationStateDenied:
 		return "Denied"
-	case Modem3gppRegistrationStateUnknown:
+	case Modem3GPPRegistrationStateUnknown:
 		return "Unknown"
-	case Modem3gppRegistrationStateRoaming:
+	case Modem3GPPRegistrationStateRoaming:
 		return "Roaming"
-	case Modem3gppRegistrationStateHomeSmsOnly:
+	case Modem3GPPRegistrationStateHomeSmsOnly:
 		return "Home SMS Only"
-	case Modem3gppRegistrationStateRoamingSmsOnly:
+	case Modem3GPPRegistrationStateRoamingSmsOnly:
 		return "Roaming SMS Only"
-	case Modem3gppRegistrationStateEmergencyOnly:
+	case Modem3GPPRegistrationStateEmergencyOnly:
 		return "Emergency Only"
-	case Modem3gppRegistrationStateHomeCsfbNotPreferred:
+	case Modem3GPPRegistrationStateHomeCsfbNotPreferred:
 		return "Home CSFB Not Preferred"
-	case Modem3gppRegistrationStateRoamingCsfbNotPreferred:
+	case Modem3GPPRegistrationStateRoamingCsfbNotPreferred:
 		return "Roaming CSFB Not Preferred"
 	default:
 		return "Undefined"
 	}
 }
 
-type Modem3gppUssdSessionState uint32
+type Modem3GPPUSSDSessionState uint32
 
 const (
-	Modem3gppUssdSessionStateUnknown      Modem3gppUssdSessionState = iota // Unknown state.
-	Modem3gppUssdSessionStateIdle                                          // No active session.
-	Modem3gppUssdSessionStateActive                                        // A session is active and the mobile is waiting for a response.
-	Modem3gppUssdSessionStateUserResponse                                  // The network is waiting for the client's response.
+	Modem3GPPUSSDSessionStateUnknown      Modem3GPPUSSDSessionState = iota // Unknown state.
+	Modem3GPPUSSDSessionStateIdle                                          // No active session.
+	Modem3GPPUSSDSessionStateActive                                        // A session is active and the mobile is waiting for a response.
+	Modem3GPPUSSDSessionStateUserResponse                                  // The network is waiting for the client's response.
 )
 
 type ModemAccessTechnology uint32
@@ -400,24 +400,24 @@ var modemBandLabels = map[ModemBand]string{
 	232: "UMTS band 32",
 }
 
-type Modem3gppNetworkAvailability uint32
+type Modem3GPPNetworkAvailability uint32
 
 const (
-	Modem3gppNetworkAvailabilityUnknown   Modem3gppNetworkAvailability = iota // Unknown.
-	Modem3gppNetworkAvailabilityAvailable                                     // Network available.
-	Modem3gppNetworkAvailabilityCurrent                                       // Network is the current one.
-	Modem3gppNetworkAvailabilityForbidden                                     // Network is forbidden.
+	Modem3GPPNetworkAvailabilityUnknown   Modem3GPPNetworkAvailability = iota // Unknown.
+	Modem3GPPNetworkAvailabilityAvailable                                     // Network available.
+	Modem3GPPNetworkAvailabilityCurrent                                       // Network is the current one.
+	Modem3GPPNetworkAvailabilityForbidden                                     // Network is forbidden.
 )
 
-func (m Modem3gppNetworkAvailability) String() string {
+func (m Modem3GPPNetworkAvailability) String() string {
 	switch m {
-	case Modem3gppNetworkAvailabilityUnknown:
+	case Modem3GPPNetworkAvailabilityUnknown:
 		return "Unknown"
-	case Modem3gppNetworkAvailabilityAvailable:
+	case Modem3GPPNetworkAvailabilityAvailable:
 		return "Available"
-	case Modem3gppNetworkAvailabilityCurrent:
+	case Modem3GPPNetworkAvailabilityCurrent:
 		return "Current"
-	case Modem3gppNetworkAvailabilityForbidden:
+	case Modem3GPPNetworkAvailabilityForbidden:
 		return "Forbidden"
 	default:
 		return "Undefined"

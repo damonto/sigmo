@@ -155,7 +155,7 @@ func TestSelectAPN(t *testing.T) {
 func TestPreferencesWithDefaultAPNCredentials(t *testing.T) {
 	t.Parallel()
 
-	modem := &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23415"}}
+	modem := modemAccess{modem: &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23415"}}}
 	prefs := Preferences{APN: "wap.vodafone.co.uk"}
 
 	got := preferencesWithDefaultAPNCredentials(modem, prefs)
@@ -185,7 +185,7 @@ func TestPreferencesWithDefaultAPNCredentials(t *testing.T) {
 func TestPreferencesWithSelectedAPN(t *testing.T) {
 	t.Parallel()
 
-	modem := &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23415"}}
+	modem := modemAccess{modem: &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23415"}}}
 
 	got := preferencesWithSelectedAPN(modem, Preferences{})
 	if got.APN != "wap.vodafone.co.uk" {
@@ -235,7 +235,7 @@ func TestAPNForModem(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := apnForModem(tt.modem, "", "", tt.remembered); got != tt.want {
+			if got := apnForModem(modemAccess{modem: tt.modem}, "", "", tt.remembered); got != tt.want {
 				t.Fatalf("apnForModem() = %q, want %q", got, tt.want)
 			}
 		})

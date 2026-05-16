@@ -7,10 +7,9 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
-	"unsafe"
 
 	"github.com/godbus/dbus/v5"
 
@@ -45,21 +44,22 @@ func TestRouteMetric(t *testing.T) {
 func TestCurrentReturnsDefaultAPNCredentials(t *testing.T) {
 	t.Parallel()
 
-	modem := testModemWithBusObject(
-		t,
-		&internetFakeBusObject{
-			path: "/org/freedesktop/ModemManager1/Modem/1",
-			properties: map[string]dbus.Variant{
-				mmodem.ModemInterface + ".Bearers": dbus.MakeVariant([]dbus.ObjectPath{}),
-			},
-		},
-	)
-	modem.EquipmentIdentifier = "860588043408833"
-	modem.Sim = &mmodem.SIM{OperatorIdentifier: "23415"}
+	modem := fakeInternetModem{
+		modemID:    "860588043408833",
+		operatorID: "23415",
+	}
 
-	connector := NewConnectorWithProxyStatePath(nil, filepath.Join(t.TempDir(), "internet-always-on.json"))
+	stateDir := t.TempDir()
+	connector, err := NewConnector(ConnectorConfig{
+		AlwaysOnPath: filepath.Join(stateDir, "internet-always-on.json"),
+		ProxyPath:    filepath.Join(stateDir, "internet-proxies.json"),
+		RoutePath:    filepath.Join(stateDir, "internet-routes.json"),
+	})
+	if err != nil {
+		t.Fatalf("NewConnector() error = %v", err)
+	}
 
-	got, err := connector.Current(modem)
+	got, err := connector.current(context.Background(), modem)
 	if err != nil {
 		t.Fatalf("Current() error = %v", err)
 	}
@@ -275,10 +275,10 @@ func TestAddressesAndRoutes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("addressesAndRoutes() error = %v", err)
 			}
-			if !reflect.DeepEqual(gotAddrs, tt.wantAddrs) {
+			if !slices.Equal(gotAddrs, tt.wantAddrs) {
 				t.Fatalf("addressesAndRoutes() addresses = %#v, want %#v", gotAddrs, tt.wantAddrs)
 			}
-			if !reflect.DeepEqual(gotRoutes, tt.wantRoutes) {
+			if !slices.Equal(gotRoutes, tt.wantRoutes) {
 				t.Fatalf("addressesAndRoutes() routes = %#v, want %#v", gotRoutes, tt.wantRoutes)
 			}
 		})
@@ -330,7 +330,7 @@ func TestAddressesAndRoutesWithMetric(t *testing.T) {
 			if err != nil {
 				t.Fatalf("addressesAndRoutesWithMetric() error = %v", err)
 			}
-			if !reflect.DeepEqual(gotRoutes, tt.wantRoutes) {
+			if !slices.Equal(gotRoutes, tt.wantRoutes) {
 				t.Fatalf("addressesAndRoutesWithMetric() routes = %#v, want %#v", gotRoutes, tt.wantRoutes)
 			}
 		})
@@ -550,7 +550,7 @@ func TestDefaultRouteChanges(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := defaultRouteChanges(tt.current, tt.preferred); !reflect.DeepEqual(got, tt.want) {
+			if got := defaultRouteChanges(tt.current, tt.preferred); !slices.Equal(got, tt.want) {
 				t.Fatalf("defaultRouteChanges() = %#v, want %#v", got, tt.want)
 			}
 		})
@@ -647,10 +647,10 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 			if oldTracked.routeMetric != demotedOldRoute.Metric {
 				t.Fatalf("old tracked routeMetric = %d, want %d", oldTracked.routeMetric, demotedOldRoute.Metric)
 			}
-			if !reflect.DeepEqual(oldTracked.routes, []netlink.DefaultRoute{demotedOldRoute}) {
+			if !slices.Equal(oldTracked.routes, []netlink.DefaultRoute{demotedOldRoute}) {
 				t.Fatalf("old tracked routes = %#v, want %#v", oldTracked.routes, []netlink.DefaultRoute{demotedOldRoute})
 			}
-			if !reflect.DeepEqual(oldTracked.routeChanges, []defaultRouteChange{oldGatewayChange}) {
+			if !slices.Equal(oldTracked.routeChanges, []defaultRouteChange{oldGatewayChange}) {
 				t.Fatalf("old tracked routeChanges = %#v, want %#v", oldTracked.routeChanges, []defaultRouteChange{oldGatewayChange})
 			}
 			if c.preferences["old-modem"].DefaultRoute {
@@ -660,15 +660,15 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 			if err != nil || !ok || oldAlwaysOn.DefaultRoute {
 				t.Fatalf("load old always-on after takeover = %#v, ok = %t, err = %v; want non-default", oldAlwaysOn, ok, err)
 			}
-			if !reflect.DeepEqual(tracked.routeChanges, []defaultRouteChange{oldRouteChange}) {
+			if !slices.Equal(tracked.routeChanges, []defaultRouteChange{oldRouteChange}) {
 				t.Fatalf("new tracked routeChanges = %#v, want %#v", tracked.routeChanges, []defaultRouteChange{oldRouteChange})
 			}
 			gotOldChanges, ok, err := loadRouteStateForModem(path, "old-modem", "wws27u1i4")
-			if err != nil || !ok || !reflect.DeepEqual(gotOldChanges, []defaultRouteChange{oldGatewayChange}) {
+			if err != nil || !ok || !slices.Equal(gotOldChanges, []defaultRouteChange{oldGatewayChange}) {
 				t.Fatalf("loadRouteStateForModem(old) = %#v, ok = %t, err = %v; want %#v, true, nil", gotOldChanges, ok, err, []defaultRouteChange{oldGatewayChange})
 			}
 			gotChanges, ok, err := loadRouteStateForModem(path, "new-modem", "wws27u2i4")
-			if err != nil || !ok || !reflect.DeepEqual(gotChanges, []defaultRouteChange{oldRouteChange}) {
+			if err != nil || !ok || !slices.Equal(gotChanges, []defaultRouteChange{oldRouteChange}) {
 				t.Fatalf("loadRouteStateForModem(new) = %#v, ok = %t, err = %v; want %#v, true, nil", gotChanges, ok, err, []defaultRouteChange{oldRouteChange})
 			}
 
@@ -682,7 +682,7 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 			if oldTracked.routeMetric != oldDefaultRoute.Metric {
 				t.Fatalf("old tracked routeMetric after restore = %d, want %d", oldTracked.routeMetric, oldDefaultRoute.Metric)
 			}
-			if !reflect.DeepEqual(oldTracked.routes, []netlink.DefaultRoute{oldDefaultRoute}) {
+			if !slices.Equal(oldTracked.routes, []netlink.DefaultRoute{oldDefaultRoute}) {
 				t.Fatalf("old tracked routes after restore = %#v, want %#v", oldTracked.routes, []netlink.DefaultRoute{oldDefaultRoute})
 			}
 			oldAlwaysOn, ok, err = loadAlwaysOnStateForModem(alwaysOnPath, "old-modem")
@@ -771,11 +771,11 @@ func TestSyncDefaultRouteRemovalTransfersOriginalRouteState(t *testing.T) {
 			}
 
 			newTracked := c.connections["new-modem"]
-			if !reflect.DeepEqual(newTracked.routeChanges, []defaultRouteChange{oldGatewayChange}) {
+			if !slices.Equal(newTracked.routeChanges, []defaultRouteChange{oldGatewayChange}) {
 				t.Fatalf("new tracked routeChanges = %#v, want %#v", newTracked.routeChanges, []defaultRouteChange{oldGatewayChange})
 			}
 			gotChanges, ok, err := loadRouteStateForModem(path, "new-modem", "wws27u2i4")
-			if err != nil || !ok || !reflect.DeepEqual(gotChanges, []defaultRouteChange{oldGatewayChange}) {
+			if err != nil || !ok || !slices.Equal(gotChanges, []defaultRouteChange{oldGatewayChange}) {
 				t.Fatalf("loadRouteStateForModem(new) = %#v, ok = %t, err = %v; want %#v, true, nil", gotChanges, ok, err, []defaultRouteChange{oldGatewayChange})
 			}
 		})
@@ -850,70 +850,6 @@ func TestTakeoverDefaultRoutesKeepsStateWhenRollbackFails(t *testing.T) {
 			}
 		})
 	}
-}
-
-type internetFakeBusObject struct {
-	path       dbus.ObjectPath
-	properties map[string]dbus.Variant
-}
-
-func (f *internetFakeBusObject) Call(string, dbus.Flags, ...any) *dbus.Call {
-	panic("unexpected Call")
-}
-
-func (f *internetFakeBusObject) CallWithContext(context.Context, string, dbus.Flags, ...any) *dbus.Call {
-	panic("unexpected CallWithContext")
-}
-
-func (f *internetFakeBusObject) Go(string, dbus.Flags, chan *dbus.Call, ...any) *dbus.Call {
-	panic("unexpected Go")
-}
-
-func (f *internetFakeBusObject) GoWithContext(context.Context, string, dbus.Flags, chan *dbus.Call, ...any) *dbus.Call {
-	panic("unexpected GoWithContext")
-}
-
-func (f *internetFakeBusObject) AddMatchSignal(string, string, ...dbus.MatchOption) *dbus.Call {
-	panic("unexpected AddMatchSignal")
-}
-
-func (f *internetFakeBusObject) RemoveMatchSignal(string, string, ...dbus.MatchOption) *dbus.Call {
-	panic("unexpected RemoveMatchSignal")
-}
-
-func (f *internetFakeBusObject) GetProperty(name string) (dbus.Variant, error) {
-	variant, ok := f.properties[name]
-	if !ok {
-		return dbus.Variant{}, fmt.Errorf("missing property %s", name)
-	}
-	return variant, nil
-}
-
-func (f *internetFakeBusObject) StoreProperty(string, any) error {
-	panic("unexpected StoreProperty")
-}
-
-func (f *internetFakeBusObject) SetProperty(string, any) error {
-	panic("unexpected SetProperty")
-}
-
-func (f *internetFakeBusObject) Destination() string {
-	return mmodem.ModemManagerInterface
-}
-
-func (f *internetFakeBusObject) Path() dbus.ObjectPath {
-	return f.path
-}
-
-func testModemWithBusObject(t *testing.T, object dbus.BusObject) *mmodem.Modem {
-	t.Helper()
-
-	modem := &mmodem.Modem{}
-	field := reflect.ValueOf(modem).Elem().FieldByName("dbusObject")
-	// Modem intentionally keeps its DBus object private. This test needs a fake
-	// object so Connector.Current can run without touching the system bus.
-	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(object))
-	return modem
 }
 
 func TestTakeoverDefaultRoutesReportsStateCleanupError(t *testing.T) {
@@ -1063,7 +999,7 @@ func TestTakeoverDefaultRoutesKeepsUnrestoredChangeInCleanup(t *testing.T) {
 			if err == nil {
 				t.Fatal("takeoverDefaultRoutesWithState() error = nil, want error")
 			}
-			if !reflect.DeepEqual(gotChanges, wantChanges) {
+			if !slices.Equal(gotChanges, wantChanges) {
 				t.Fatalf("takeoverDefaultRoutesWithState() changes = %#v, want %#v", gotChanges, wantChanges)
 			}
 
@@ -1137,7 +1073,7 @@ func TestRestoreDefaultRoutesKeepsReplacementWhenOriginalRestoreFails(t *testing
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("restoreDefaultRoutesWithOps() error = %v, want error %t", err, tt.wantErr)
 			}
-			if !reflect.DeepEqual(deleted, tt.wantDeleted) {
+			if !slices.Equal(deleted, tt.wantDeleted) {
 				t.Fatalf("deleted routes = %#v, want %#v", deleted, tt.wantDeleted)
 			}
 		})
@@ -1249,10 +1185,10 @@ func TestRestoreStaleDefaultRouteStates(t *testing.T) {
 			if err := restoreStaleDefaultRouteStatesWithState(path, tt.target, ops); err != nil {
 				t.Fatalf("restoreStaleDefaultRouteStatesWithState() error = %v", err)
 			}
-			if !reflect.DeepEqual(deleted, tt.wantDeleted) {
+			if !slices.Equal(deleted, tt.wantDeleted) {
 				t.Fatalf("deleted routes = %#v, want %#v", deleted, tt.wantDeleted)
 			}
-			if !reflect.DeepEqual(added, tt.wantAdded) {
+			if !slices.Equal(added, tt.wantAdded) {
 				t.Fatalf("added routes = %#v, want %#v", added, tt.wantAdded)
 			}
 			_, ok, err := loadRouteState(path, "wws27u1i4")
@@ -1374,11 +1310,11 @@ func TestRestoreStaleDefaultRouteStatesScopesModem(t *testing.T) {
 				t.Fatalf("restoreStaleDefaultRouteStatesWithState() error = %v", err)
 			}
 			wantDeleted := []netlink.DefaultRoute{firstPreferred[0], firstReplacement, secondPreferred[0], secondReplacement}
-			if !reflect.DeepEqual(deleted, wantDeleted) {
+			if !slices.Equal(deleted, wantDeleted) {
 				t.Fatalf("deleted routes = %#v, want %#v", deleted, wantDeleted)
 			}
 			wantAdded := []netlink.DefaultRoute{firstOriginal, secondOriginal}
-			if !reflect.DeepEqual(added, wantAdded) {
+			if !slices.Equal(added, wantAdded) {
 				t.Fatalf("added routes = %#v, want %#v", added, wantAdded)
 			}
 			if _, ok, err := loadRouteState(path, "wws0"); err != nil || ok {
@@ -1387,7 +1323,7 @@ func TestRestoreStaleDefaultRouteStatesScopesModem(t *testing.T) {
 			if _, ok, err := loadRouteState(path, "wws1"); err != nil || ok {
 				t.Fatalf("loadRouteState(wws1) ok = %t, err = %v; want false, nil", ok, err)
 			}
-			if got, ok, err := loadRouteState(path, "wws2"); err != nil || !ok || !reflect.DeepEqual(got, otherChanges) {
+			if got, ok, err := loadRouteState(path, "wws2"); err != nil || !ok || !slices.Equal(got, otherChanges) {
 				t.Fatalf("loadRouteState(wws2) = %#v, ok = %t, err = %v; want %#v, true, nil", got, ok, err, otherChanges)
 			}
 		})
@@ -1474,16 +1410,16 @@ func TestRestoreStaleDefaultRouteStatesScopesInterfaces(t *testing.T) {
 			if err := restoreStaleDefaultRouteStatesWithState(path, routeStateRestoreTarget{interfaceNames: []string{"wws0"}}, ops); err != nil {
 				t.Fatalf("restoreStaleDefaultRouteStatesWithState() error = %v", err)
 			}
-			if want := []netlink.DefaultRoute{firstPreferred[0], firstReplacement}; !reflect.DeepEqual(deleted, want) {
+			if want := []netlink.DefaultRoute{firstPreferred[0], firstReplacement}; !slices.Equal(deleted, want) {
 				t.Fatalf("deleted routes = %#v, want %#v", deleted, want)
 			}
-			if want := []netlink.DefaultRoute{firstOriginal}; !reflect.DeepEqual(added, want) {
+			if want := []netlink.DefaultRoute{firstOriginal}; !slices.Equal(added, want) {
 				t.Fatalf("added routes = %#v, want %#v", added, want)
 			}
 			if _, ok, err := loadRouteState(path, "wws0"); err != nil || ok {
 				t.Fatalf("loadRouteState(wws0) ok = %t, err = %v; want false, nil", ok, err)
 			}
-			if got, ok, err := loadRouteState(path, "wws1"); err != nil || !ok || !reflect.DeepEqual(got, secondChanges) {
+			if got, ok, err := loadRouteState(path, "wws1"); err != nil || !ok || !slices.Equal(got, secondChanges) {
 				t.Fatalf("loadRouteState(wws1) = %#v, ok = %t, err = %v; want %#v, true, nil", got, ok, err, secondChanges)
 			}
 		})
@@ -1557,10 +1493,10 @@ func TestRestoreStaleDefaultRouteStateDeletesPreferredBeforeRestore(t *testing.T
 			if err := restoreStaleDefaultRouteStatesWithState(path, routeStateRestoreTarget{interfaceNames: []string{"wws27u1i4"}}, ops); err != nil {
 				t.Fatalf("restoreStaleDefaultRouteStatesWithState() error = %v", err)
 			}
-			if want := []netlink.DefaultRoute{preferred[0], replacement}; !reflect.DeepEqual(deleted, want) {
+			if want := []netlink.DefaultRoute{preferred[0], replacement}; !slices.Equal(deleted, want) {
 				t.Fatalf("deleted routes = %#v, want %#v", deleted, want)
 			}
-			if want := []netlink.DefaultRoute{original}; !reflect.DeepEqual(added, want) {
+			if want := []netlink.DefaultRoute{original}; !slices.Equal(added, want) {
 				t.Fatalf("added routes = %#v, want %#v", added, want)
 			}
 			_, ok, err := loadRouteState(path, "wws27u1i4")
@@ -1687,10 +1623,10 @@ func TestConnectionAddressStrings(t *testing.T) {
 			if err != nil {
 				t.Fatalf("connectionAddressStrings() error = %v", err)
 			}
-			if !reflect.DeepEqual(gotIPv4, tt.wantIPv4) {
+			if !slices.Equal(gotIPv4, tt.wantIPv4) {
 				t.Fatalf("connectionAddressStrings() ipv4 = %#v, want %#v", gotIPv4, tt.wantIPv4)
 			}
-			if !reflect.DeepEqual(gotIPv6, tt.wantIPv6) {
+			if !slices.Equal(gotIPv6, tt.wantIPv6) {
 				t.Fatalf("connectionAddressStrings() ipv6 = %#v, want %#v", gotIPv6, tt.wantIPv6)
 			}
 		})
@@ -1747,4 +1683,98 @@ func TestRouteStateFromRoutes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConnectorRequiresModem(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		run  func(context.Context, *Connector) error
+	}{
+		{
+			name: "current",
+			run: func(ctx context.Context, connector *Connector) error {
+				_, err := connector.Current(ctx, nil)
+				return err
+			},
+		},
+		{
+			name: "connect",
+			run: func(ctx context.Context, connector *Connector) error {
+				_, err := connector.Connect(ctx, nil, Preferences{})
+				return err
+			},
+		},
+		{
+			name: "disconnect",
+			run: func(ctx context.Context, connector *Connector) error {
+				return connector.Disconnect(ctx, nil)
+			},
+		},
+		{
+			name: "restore",
+			run: func(ctx context.Context, connector *Connector) error {
+				return connector.Restore(ctx, nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			stateDir := t.TempDir()
+			connector, err := NewConnector(ConnectorConfig{
+				AlwaysOnPath: filepath.Join(stateDir, "internet-always-on.json"),
+				ProxyPath:    filepath.Join(stateDir, "internet-proxies.json"),
+				RoutePath:    filepath.Join(stateDir, "internet-routes.json"),
+			})
+			if err != nil {
+				t.Fatalf("NewConnector() error = %v", err)
+			}
+			if err := tt.run(context.Background(), connector); !errors.Is(err, ErrModemRequired) {
+				t.Fatalf("%s error = %v, want %v", tt.name, err, ErrModemRequired)
+			}
+		})
+	}
+}
+
+type fakeInternetModem struct {
+	modemID    string
+	operatorID string
+	bearerList []*mmodem.Bearer
+}
+
+func (m fakeInternetModem) id() string {
+	return m.modemID
+}
+
+func (m fakeInternetModem) operatorIdentifier() string {
+	return m.operatorID
+}
+
+func (m fakeInternetModem) bearer(context.Context, dbus.ObjectPath) (*mmodem.Bearer, error) {
+	return nil, errors.New("bearer lookup unused")
+}
+
+func (m fakeInternetModem) bearers(context.Context) ([]*mmodem.Bearer, error) {
+	return m.bearerList, nil
+}
+
+func (m fakeInternetModem) connectBearer(context.Context, mmodem.BearerProperties) (*mmodem.Bearer, error) {
+	return nil, errors.New("connect bearer unused")
+}
+
+func (m fakeInternetModem) disconnectBearer(context.Context, dbus.ObjectPath) error {
+	return errors.New("disconnect bearer unused")
+}
+
+func (m fakeInternetModem) deleteBearer(context.Context, dbus.ObjectPath) error {
+	return errors.New("delete bearer unused")
+}
+
+func (m fakeInternetModem) restart(context.Context, bool) error {
+	return errors.New("restart unused")
 }

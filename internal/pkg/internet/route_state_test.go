@@ -5,7 +5,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/damonto/sigmo/internal/pkg/netlink"
@@ -69,7 +69,7 @@ func TestRouteState(t *testing.T) {
 				if !ok {
 					t.Fatal("loadRouteState() ok = false, want true")
 				}
-				if !reflect.DeepEqual(got, changes) {
+				if !slices.Equal(got, changes) {
 					t.Fatalf("loadRouteState() = %#v, want %#v", got, changes)
 				}
 				if err := deleteRouteState(path, "wws27u1i4"); err != nil {
@@ -95,7 +95,7 @@ func TestRouteState(t *testing.T) {
 				if _, ok, err := loadRouteState(path, "wws0"); err != nil || ok {
 					t.Fatalf("loadRouteState(wws0) = ok %t, err %v; want false, nil", ok, err)
 				}
-				if got, ok, err := loadRouteState(path, "wws1"); err != nil || !ok || !reflect.DeepEqual(got, changes) {
+				if got, ok, err := loadRouteState(path, "wws1"); err != nil || !ok || !slices.Equal(got, changes) {
 					t.Fatalf("loadRouteState(wws1) = %#v, ok %t, err %v; want %#v, true, nil", got, ok, err, changes)
 				}
 			},
@@ -143,7 +143,7 @@ func TestRouteState(t *testing.T) {
 				if !ok {
 					t.Fatal("loadRouteStateForModem() ok = false, want true")
 				}
-				if !reflect.DeepEqual(got, changes) {
+				if !slices.Equal(got, changes) {
 					t.Fatalf("loadRouteStateForModem() = %#v, want %#v", got, changes)
 				}
 			},
@@ -179,7 +179,7 @@ func TestRouteState(t *testing.T) {
 				if !ok {
 					t.Fatal("loadRouteStateForModem() ok = false, want true")
 				}
-				if !reflect.DeepEqual(got, changes) {
+				if !slices.Equal(got, changes) {
 					t.Fatalf("loadRouteStateForModem() = %#v, want %#v", got, changes)
 				}
 			},

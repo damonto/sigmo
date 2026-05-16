@@ -1,6 +1,7 @@
 package modem
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -293,7 +294,7 @@ func TestRestoreModePreference(t *testing.T) {
 			}
 			modem := &Modem{dbusObject: object, objectPath: object.path, EquipmentIdentifier: "modem-1"}
 
-			retry, err := restoreModePreference(modem, tt.want)
+			retry, err := restoreModePreference(context.Background(), modem, tt.want)
 			assertRestoreResult(t, retry, err, tt.wantRetry, tt.wantErr)
 			assertCallPresence(t, object.calls, ModemInterface+".SetCurrentModes", tt.wantSetCall)
 		})
@@ -374,7 +375,7 @@ func TestRestoreBandPreference(t *testing.T) {
 			}
 			modem := &Modem{dbusObject: object, objectPath: object.path, EquipmentIdentifier: "modem-1"}
 
-			retry, err := restoreBandPreference(modem, tt.want)
+			retry, err := restoreBandPreference(context.Background(), modem, tt.want)
 			assertRestoreResult(t, retry, err, tt.wantRetry, tt.wantErr)
 			assertCallPresence(t, object.calls, ModemInterface+".SetCurrentBands", tt.wantSetCall)
 		})

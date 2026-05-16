@@ -1,6 +1,7 @@
 package modem
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"time"
@@ -11,7 +12,8 @@ import (
 const ModemInterface = ModemManagerInterface + ".Modem"
 
 type Modem struct {
-	mmgr                *Manager
+	dbusConn            *dbus.Conn
+	inhibitDevice       func(context.Context, string, bool) error
 	objectPath          dbus.ObjectPath
 	dbusObject          dbus.BusObject
 	Device              string
@@ -40,67 +42,67 @@ type dbusModePair struct {
 	Preferred uint32
 }
 
-func (m *Modem) Enable() error {
-	return m.dbusObject.Call(ModemInterface+".Enable", 0, true).Err
+func (m *Modem) Enable(ctx context.Context) error {
+	return m.dbusObject.CallWithContext(ctx, ModemInterface+".Enable", 0, true).Err
 }
 
-func (m *Modem) Disable() error {
-	return m.dbusObject.Call(ModemInterface+".Enable", 0, false).Err
+func (m *Modem) Disable(ctx context.Context) error {
+	return m.dbusObject.CallWithContext(ctx, ModemInterface+".Enable", 0, false).Err
 }
 
-func (m *Modem) SetPrimarySimSlot(slot uint32) error {
-	return m.dbusObject.Call(ModemInterface+".SetPrimarySimSlot", 0, slot).Err
+func (m *Modem) SetPrimarySimSlot(ctx context.Context, slot uint32) error {
+	return m.dbusObject.CallWithContext(ctx, ModemInterface+".SetPrimarySimSlot", 0, slot).Err
 }
 
-func (m *Modem) SupportedModes() ([]ModemModePair, error) {
-	variant, err := m.dbusObject.GetProperty(ModemInterface + ".SupportedModes")
+func (m *Modem) SupportedModes(ctx context.Context) ([]ModemModePair, error) {
+	variant, err := dbusProperty(ctx, m.dbusObject, ModemInterface, "SupportedModes")
 	if err != nil {
 		return nil, err
 	}
 	return modePairsFromVariant(variant)
 }
 
-func (m *Modem) CurrentModes() (ModemModePair, error) {
-	variant, err := m.dbusObject.GetProperty(ModemInterface + ".CurrentModes")
+func (m *Modem) CurrentModes(ctx context.Context) (ModemModePair, error) {
+	variant, err := dbusProperty(ctx, m.dbusObject, ModemInterface, "CurrentModes")
 	if err != nil {
 		return ModemModePair{}, err
 	}
 	return modePairFromVariant(variant)
 }
 
-func (m *Modem) SetCurrentModes(modes ModemModePair) error {
-	return m.dbusObject.Call(ModemInterface+".SetCurrentModes", 0, dbusModePair{
+func (m *Modem) SetCurrentModes(ctx context.Context, modes ModemModePair) error {
+	return m.dbusObject.CallWithContext(ctx, ModemInterface+".SetCurrentModes", 0, dbusModePair{
 		Allowed:   uint32(modes.Allowed),
 		Preferred: uint32(modes.Preferred),
 	}).Err
 }
 
-func (m *Modem) SupportedBands() ([]ModemBand, error) {
-	variant, err := m.dbusObject.GetProperty(ModemInterface + ".SupportedBands")
+func (m *Modem) SupportedBands(ctx context.Context) ([]ModemBand, error) {
+	variant, err := dbusProperty(ctx, m.dbusObject, ModemInterface, "SupportedBands")
 	if err != nil {
 		return nil, err
 	}
 	return bandsFromVariant(variant)
 }
 
-func (m *Modem) CurrentBands() ([]ModemBand, error) {
-	variant, err := m.dbusObject.GetProperty(ModemInterface + ".CurrentBands")
+func (m *Modem) CurrentBands(ctx context.Context) ([]ModemBand, error) {
+	variant, err := dbusProperty(ctx, m.dbusObject, ModemInterface, "CurrentBands")
 	if err != nil {
 		return nil, err
 	}
 	return bandsFromVariant(variant)
 }
 
-func (m *Modem) SetCurrentBands(bands []ModemBand) error {
+func (m *Modem) SetCurrentBands(ctx context.Context, bands []ModemBand) error {
 	values := make([]uint32, 0, len(bands))
 	for _, band := range bands {
 		values = append(values, uint32(band))
 	}
-	return m.dbusObject.Call(ModemInterface+".SetCurrentBands", 0, values).Err
+	return m.dbusObject.CallWithContext(ctx, ModemInterface+".SetCurrentBands", 0, values).Err
 }
 
-func (m *Modem) AccessTechnologies() ([]ModemAccessTechnology, error) {
-	variant, err := m.dbusObject.GetProperty(ModemInterface + ".AccessTechnologies")
+func (m *Modem) AccessTechnologies(ctx context.Context) ([]ModemAccessTechnology, error) {
+	variant, err := dbusProperty(ctx, m.dbusObject, ModemInterface, "AccessTechnologies")
 	if err != nil {
 		return nil, err
 	}
@@ -108,8 +110,8 @@ func (m *Modem) AccessTechnologies() ([]ModemAccessTechnology, error) {
 	return ModemAccessTechnology(bitmask).UnmarshalBitmask(bitmask), nil
 }
 
-func (m *Modem) SignalQuality() (percent uint32, recent bool, err error) {
-	variant, err := m.dbusObject.GetProperty(ModemInterface + ".SignalQuality")
+func (m *Modem) SignalQuality(ctx context.Context) (percent uint32, recent bool, err error) {
+	variant, err := dbusProperty(ctx, m.dbusObject, ModemInterface, "SignalQuality")
 	if err != nil {
 		return 0, false, err
 	}
@@ -122,47 +124,66 @@ func (m *Modem) SignalQuality() (percent uint32, recent bool, err error) {
 	return percent, recent, nil
 }
 
-func (m *Modem) Restart(compatible bool) error {
+func (m *Modem) Restart(ctx context.Context, compatible bool) error {
 	var err error
 	if m.PrimaryPortType() == ModemPortTypeQmi {
-		err = errors.Join(err, qmicliRepowerSimCard(m))
+		err = errors.Join(err, qmicliRepowerSimCard(ctx, m))
 		// Wait for the SIM card to be ready.
-		time.Sleep(1 * time.Second)
+		if e := sleepContext(ctx, time.Second); e != nil {
+			return errors.Join(err, e)
+		}
 	}
 
 	// Try to activate provisioning session if SIM is missing.
 	if compatible {
-		err = errors.Join(err, qmicliActivateProvisioningIfSimMissing(m))
+		err = errors.Join(err, qmicliActivateProvisioningIfSimMissing(ctx, m))
 	}
 
 	// Some legacy modems require the modem to be disabled and enabled to take effect.
-	if e := m.dbusObject.Call(ModemInterface+".Simple.GetStatus", 0).Err; e == nil {
+	if e := m.simpleStatus(ctx); e == nil {
 		slog.Info("try to disable and enable modem", "modem", m.EquipmentIdentifier)
-		err = errors.Join(err, m.togglePower())
+		err = errors.Join(err, m.togglePower(ctx))
+	} else if ctx.Err() != nil {
+		return errors.Join(err, ctx.Err())
 	}
 
 	// This workaround is needed for some modems that don't properly reload.
 	if compatible {
 		// Inhibiting the device will cause the ModemManager to reload the device.
-		time.Sleep(1 * time.Second)
-		if e := m.dbusObject.Call(ModemInterface+".Simple.GetStatus", 0).Err; e == nil {
+		if e := sleepContext(ctx, time.Second); e != nil {
+			return errors.Join(err, e)
+		}
+		if e := m.simpleStatus(ctx); e == nil {
+			if m.inhibitDevice == nil {
+				return errors.Join(err, errors.New("modem inhibit function is required"))
+			}
 			slog.Info("try to inhibit and uninhibit modem", "modem", m.EquipmentIdentifier, "compatible", compatible)
-			err = errors.Join(err, m.mmgr.InhibitDevice(m.Device, true), m.mmgr.InhibitDevice(m.Device, false))
+			err = errors.Join(
+				err,
+				m.inhibitDevice(ctx, m.Device, true),
+				m.inhibitDevice(ctx, m.Device, false),
+			)
+		} else if ctx.Err() != nil {
+			return errors.Join(err, ctx.Err())
 		}
 		return err
 	}
 	return err
 }
 
-func (m *Modem) togglePower() error {
-	if err := m.Disable(); err != nil {
+func (m *Modem) simpleStatus(ctx context.Context) error {
+	return m.dbusObject.CallWithContext(ctx, ModemInterface+".Simple.GetStatus", 0).Err
+}
+
+func (m *Modem) togglePower(ctx context.Context) error {
+	if err := m.Disable(ctx); err != nil {
 		if !isTransientRestartError(err) {
 			return err
 		}
 		// Some modems disappear from DBus or cancel in-flight calls while ModemManager is replacing the object.
 		slog.Info("ignoring transient restart error", "modem", m.EquipmentIdentifier, "path", m.objectPath, "action", "disabling", "error", err)
 	}
-	if err := m.Enable(); err != nil {
+	if err := m.Enable(ctx); err != nil {
 		if !isTransientRestartError(err) {
 			return err
 		}
@@ -170,6 +191,17 @@ func (m *Modem) togglePower() error {
 		slog.Info("ignoring transient restart error", "modem", m.EquipmentIdentifier, "path", m.objectPath, "action", "enabling", "error", err)
 	}
 	return nil
+}
+
+func sleepContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (m *Modem) PrimaryPortType() ModemPortType {

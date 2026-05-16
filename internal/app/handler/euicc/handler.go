@@ -13,8 +13,8 @@ import (
 )
 
 type Handler struct {
-	manager *mmodem.Manager
-	euicc   *euicc
+	registry *mmodem.Registry
+	euicc    *euicc
 }
 
 const (
@@ -22,15 +22,15 @@ const (
 	errorCodeGetEUICCFailed    = "get_euicc_failed"
 )
 
-func New(store *config.Store, manager *mmodem.Manager) *Handler {
+func New(store *config.Store, registry *mmodem.Registry) *Handler {
 	return &Handler{
-		manager: manager,
-		euicc:   newEUICC(store),
+		registry: registry,
+		euicc:    newEUICC(store),
 	}
 }
 
 func (h *Handler) Get(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeGetEUICCFailed)
 	}

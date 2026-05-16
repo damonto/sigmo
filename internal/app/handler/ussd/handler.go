@@ -13,8 +13,8 @@ import (
 )
 
 type Handler struct {
-	manager *mmodem.Manager
-	session *session
+	registry *mmodem.Registry
+	session  *session
 }
 
 const executeTimeout = time.Minute
@@ -30,15 +30,15 @@ const (
 
 var errExecuteTimeout = errors.New("ussd request timed out, please retry")
 
-func New(manager *mmodem.Manager) *Handler {
+func New(registry *mmodem.Registry) *Handler {
 	return &Handler{
-		manager: manager,
-		session: newSession(),
+		registry: registry,
+		session:  newSession(),
 	}
 }
 
 func (h *Handler) Execute(c *echo.Context) error {
-	modem, err := h.manager.Find(c.Param("id"))
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeExecuteUSDDFailed)
 	}

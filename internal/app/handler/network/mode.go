@@ -1,6 +1,7 @@
 package network
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -10,12 +11,12 @@ import (
 
 var errUnsupportedMode = errors.New("unsupported mode")
 
-func (n *network) Modes(modem *mmodem.Modem) (*ModesResponse, error) {
-	supported, err := modem.SupportedModes()
+func (n *network) Modes(ctx context.Context, modem *mmodem.Modem) (*ModesResponse, error) {
+	supported, err := modem.SupportedModes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read supported modes: %w", err)
 	}
-	current, err := modem.CurrentModes()
+	current, err := modem.CurrentModes(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read current modes: %w", err)
 	}
@@ -30,19 +31,19 @@ func (n *network) Modes(modem *mmodem.Modem) (*ModesResponse, error) {
 	return response, nil
 }
 
-func (n *network) SetCurrentModes(modem *mmodem.Modem, req SetCurrentModesRequest) error {
+func (n *network) SetCurrentModes(ctx context.Context, modem *mmodem.Modem, req SetCurrentModesRequest) error {
 	want := mmodem.ModemModePair{
 		Allowed:   mmodem.ModemMode(req.Allowed),
 		Preferred: mmodem.ModemMode(req.Preferred),
 	}
-	supported, err := modem.SupportedModes()
+	supported, err := modem.SupportedModes(ctx)
 	if err != nil {
 		return fmt.Errorf("read supported modes: %w", err)
 	}
 	if !slices.Contains(supported, want) {
 		return errUnsupportedMode
 	}
-	if err := modem.SetCurrentModes(want); err != nil {
+	if err := modem.SetCurrentModes(ctx, want); err != nil {
 		return fmt.Errorf("set current modes: %w", err)
 	}
 	if n.preferences != nil {

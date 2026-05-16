@@ -85,7 +85,7 @@ func (m *MSISDN) recordLen() (int, error) {
 		return 0, err
 	}
 	data := m.findTag(b, 0x82)
-	if data == nil {
+	if len(data) < 6 {
 		return 0, fmt.Errorf("unexpected response: %X", b)
 	}
 	return int(data[4])<<8 + int(data[5]), nil
@@ -118,9 +118,15 @@ func (m *MSISDN) padRight(value []byte, length int) []byte {
 }
 
 func (m *MSISDN) findTag(bs []byte, tag byte) []byte {
+	if len(bs) < 2 {
+		return nil
+	}
 	bs = bs[2:]
-	for len(bs) > 0 {
+	for len(bs) >= 2 {
 		n := int(bs[1])
+		if len(bs) < 2+n {
+			return nil
+		}
 		if bs[0] == tag {
 			return bs[:2+n]
 		}
