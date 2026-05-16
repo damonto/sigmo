@@ -43,7 +43,7 @@
     "@prettier/plugin-oxc": "^0.1.4",
     "@tsconfig/node24": "^24.0.4",
     "@types/jsdom": "^28.0.1",
-    "@vitejs/plugin-vue": "^6.0.5",
+    "@vitejs/plugin-vue": "^6.0.7",
     "@vitejs/plugin-vue-jsx": "^5.1.5",
     "@vitest/eslint-plugin": "^1.6.17",
     "@vue/eslint-config-prettier": "^10.2.0",
