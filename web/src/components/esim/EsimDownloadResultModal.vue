@@ -44,7 +44,7 @@ const iconComponent = computed(() => (isError.value ? CircleX : CheckCircle2))
           <component :is="iconComponent" class="size-8" :class="iconClass" />
         </div>
         <AlertDialogDescription
-          :class="[messageClass, 'min-w-0 w-full whitespace-pre-wrap wrap-break-word']"
+          :class="[messageClass, 'min-w-0 w-full whitespace-pre-wrap wrap-break-word text-center']"
         >
           {{ message }}
         </AlertDialogDescription>
