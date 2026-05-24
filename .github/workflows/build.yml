@@ -33,8 +33,6 @@ jobs:
           - { arch: amd64, name: linux-amd64 }
           - { arch: arm, name: linux-armhf }
           - { arch: arm64, name: linux-arm64 }
-          - { arch: ppc64le, name: linux-ppc64le }
-          - { arch: s390x, name: linux-s390x }
           - { arch: riscv64, name: linux-riscv64 }
 
     steps:
