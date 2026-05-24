@@ -25,6 +25,7 @@ const props = defineProps<{
   signalQuality?: number
   accessTechnology?: string | null
   registeredOperatorName?: string | null
+  wifiCallingConnected?: boolean
   onSwitch?: (identifier: string) => Promise<void>
 }>()
 
@@ -145,6 +146,7 @@ const slotOptionClass = (slot: SlotInfo) => {
       :registration-state="props.registrationState ?? ''"
       :access-technology="props.accessTechnology"
       :registered-operator-name="props.registeredOperatorName"
+      :wifi-calling-connected="props.wifiCallingConnected"
       size="sm"
       class="ml-auto"
     />

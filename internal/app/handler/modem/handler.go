@@ -12,15 +12,17 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 type Handler struct {
-	registry *mmodem.Registry
-	catalog  *catalog
-	simSlot  *simSlot
-	msisdn   *msisdn
-	settings *settings
-	internet *internet.Connector
+	registry    *mmodem.Registry
+	catalog     *catalog
+	simSlot     *simSlot
+	msisdn      *msisdn
+	settings    *settings
+	internet    *internet.Connector
+	wifiCalling wificalling.Coordinator
 }
 
 const (
@@ -29,21 +31,24 @@ const (
 )
 
 const (
-	errorCodeListModemsFailed             = "list_modems_failed"
-	errorCodeGetModemFailed               = "get_modem_failed"
-	errorCodeSwitchSimSlotFailed          = "switch_sim_slot_failed"
-	errorCodeSimIdentifierRequired        = "sim_identifier_required"
-	errorCodeSimSlotsUnavailable          = "sim_slots_unavailable"
-	errorCodeSimSlotNotFound              = "sim_slot_not_found"
-	errorCodeSimSlotAlreadyActive         = "sim_slot_already_active"
-	errorCodeSimSlotSwitchTimeout         = "sim_slot_switch_timeout"
-	errorCodeUpdateMSISDNInvalidRequest   = "update_msisdn_invalid_request"
-	errorCodeUpdateMSISDNFailed           = "update_msisdn_failed"
-	errorCodeInvalidPhoneNumber           = "invalid_phone_number"
-	errorCodeUpdateSettingsInvalidRequest = "update_settings_invalid_request"
-	errorCodeUpdateSettingsFailed         = "update_settings_failed"
-	errorCodeCompatibleRequired           = "compatible_required"
-	errorCodeGetSettingsFailed            = "get_settings_failed"
+	errorCodeListModemsFailed                        = "list_modems_failed"
+	errorCodeGetModemFailed                          = "get_modem_failed"
+	errorCodeSwitchSimSlotFailed                     = "switch_sim_slot_failed"
+	errorCodeSimIdentifierRequired                   = "sim_identifier_required"
+	errorCodeSimSlotsUnavailable                     = "sim_slots_unavailable"
+	errorCodeSimSlotNotFound                         = "sim_slot_not_found"
+	errorCodeSimSlotAlreadyActive                    = "sim_slot_already_active"
+	errorCodeSimSlotSwitchTimeout                    = "sim_slot_switch_timeout"
+	errorCodeUpdateMSISDNInvalidRequest              = "update_msisdn_invalid_request"
+	errorCodeUpdateMSISDNFailed                      = "update_msisdn_failed"
+	errorCodeInvalidPhoneNumber                      = "invalid_phone_number"
+	errorCodeUpdateSettingsInvalidRequest            = "update_settings_invalid_request"
+	errorCodeUpdateSettingsFailed                    = "update_settings_failed"
+	errorCodeCompatibleRequired                      = "compatible_required"
+	errorCodeGetSettingsFailed                       = "get_settings_failed"
+	errorCodeGetWiFiCallingSettingsFailed            = "get_wifi_calling_settings_failed"
+	errorCodeUpdateWiFiCallingSettingsInvalidRequest = "update_wifi_calling_settings_invalid_request"
+	errorCodeUpdateWiFiCallingSettingsFailed         = "update_wifi_calling_settings_failed"
 )
 
 var (
@@ -51,14 +56,15 @@ var (
 	errUpdateMSISDNTimeout  = errors.New("updating MSISDN timed out, please refresh to confirm the active slot")
 )
 
-func New(store *config.Store, registry *mmodem.Registry, internetConnector *internet.Connector) *Handler {
+func New(store *config.Store, registry *mmodem.Registry, internetConnector *internet.Connector, wifiCalling wificalling.Coordinator) *Handler {
 	return &Handler{
-		registry: registry,
-		catalog:  newCatalog(store, registry),
-		simSlot:  newSIMSlot(registry),
-		msisdn:   newMSISDN(store, registry),
-		settings: newSettings(store),
-		internet: internetConnector,
+		registry:    registry,
+		catalog:     newCatalog(store, registry, wifiCalling),
+		simSlot:     newSIMSlot(registry),
+		msisdn:      newMSISDN(store, registry),
+		settings:    newSettings(store),
+		internet:    internetConnector,
+		wifiCalling: wifiCalling,
 	}
 }
 
@@ -158,7 +164,7 @@ func (h *Handler) UpdateSettings(c *echo.Context) error {
 	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateSettingsInvalidRequest); err != nil {
 		return err
 	}
-	if err := h.settings.Update(modem.EquipmentIdentifier, req); err != nil {
+	if err := h.settings.Update(modem, req); err != nil {
 		if errors.Is(err, errCompatibleRequired) {
 			return httpapi.BadRequest(c, errorCodeCompatibleRequired, err)
 		}
@@ -172,6 +178,39 @@ func (h *Handler) GetSettings(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeGetSettingsFailed)
 	}
-	response := h.settings.Get(modem.EquipmentIdentifier)
+	response := h.settings.Get(modem)
 	return c.JSON(http.StatusOK, response)
+}
+
+func (h *Handler) UpdateWiFiCallingSettings(c *echo.Context) error {
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeUpdateWiFiCallingSettingsFailed)
+	}
+	var req UpdateWiFiCallingSettingsRequest
+	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateWiFiCallingSettingsInvalidRequest); err != nil {
+		return err
+	}
+	if err := h.wifiCalling.UpdateSettings(c.Request().Context(), modem, wificalling.Settings{
+		Enabled:   req.Enabled,
+		Preferred: req.Preferred,
+	}); err != nil {
+		return httpapi.Internal(c, errorCodeUpdateWiFiCallingSettingsFailed, err)
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *Handler) GetWiFiCallingSettings(c *echo.Context) error {
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeGetWiFiCallingSettingsFailed)
+	}
+	settings, err := h.wifiCalling.Settings(c.Request().Context(), modem)
+	if err != nil {
+		return httpapi.Internal(c, errorCodeGetWiFiCallingSettingsFailed, err)
+	}
+	return c.JSON(http.StatusOK, WiFiCallingSettingsResponse{
+		Enabled:   settings.Enabled,
+		Preferred: settings.Preferred,
+	})
 }

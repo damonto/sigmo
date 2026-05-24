@@ -2,8 +2,6 @@ module github.com/damonto/sigmo
 
 go 1.26.0
 
-replace github.com/damonto/euicc-go => ../euicc-go
-
 require (
 	github.com/damonto/euicc-go v1.1.2
 	github.com/go-playground/locales v0.14.1
@@ -12,6 +10,7 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.1.1
+	github.com/ncruces/go-sqlite3 v0.34.2
 	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/things-go/go-socks5 v0.1.1
 	github.com/wneessen/go-mail v0.7.3
@@ -19,9 +18,20 @@ require (
 )
 
 require (
+	github.com/ElMostafaIdrassi/goscard v1.0.0 // indirect
+	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
-	golang.org/x/crypto v0.49.0 // indirect
+	github.com/ncruces/go-sqlite3-wasm/v2 v2.4.35301 // indirect
+	github.com/ncruces/julianday v1.0.0 // indirect
+	github.com/yuin/goldmark v1.8.2 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/mod v0.36.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/telemetry v0.0.0-20260519152614-eab6ae52b5e2 // indirect
 	golang.org/x/text v0.37.0 // indirect
-	golang.org/x/time v0.14.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
+	golang.org/x/tools v0.45.0 // indirect
 )

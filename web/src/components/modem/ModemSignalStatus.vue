@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { SignalHigh } from 'lucide-vue-next'
+import { SignalHigh, Wifi } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 import { Badge } from '@/components/ui/badge'
@@ -12,6 +12,7 @@ const props = withDefaults(
     registrationState: string
     accessTechnology?: string | null
     registeredOperatorName?: string | null
+    wifiCallingConnected?: boolean
     showSignalValue?: boolean
     size?: 'sm' | 'md'
     variant?: 'inline' | 'pill'
@@ -46,9 +47,7 @@ const signalToneClass = computed(() => {
   return override ?? signalTone(props.signalQuality)
 })
 const signalTitle = computed(() => `${t('labels.signal')}: ${signalValue.value}`)
-const showRegistrationIcon = computed(() =>
-  shouldShowRegistrationIcon(props.registrationState),
-)
+const showRegistrationIcon = computed(() => shouldShowRegistrationIcon(props.registrationState))
 const registrationIcon = computed(() => registrationStateIcon(props.registrationState))
 const registrationLabel = computed(() => registrationStateLabel(props.registrationState))
 const registrationToneClass = computed(() => registrationStateTone(props.registrationState))
@@ -99,6 +98,13 @@ const rootClass = computed(() =>
     <span v-if="props.showSignalValue" :class="numberClass">
       {{ signalValue }}
     </span>
+    <Wifi
+      v-if="props.wifiCallingConnected"
+      class="shrink-0 text-sky-500"
+      :class="iconSizeClass"
+      title="Wi-Fi Calling"
+      aria-label="Wi-Fi Calling"
+    />
     <component
       v-if="showRegistrationIcon && registrationIcon"
       :is="registrationIcon"

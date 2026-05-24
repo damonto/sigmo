@@ -288,13 +288,13 @@ func TestConnectorAlwaysOnStatePolicy(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		run       func(t *testing.T, c *Connector, path string)
+		run       func(t *testing.T, c *Connector)
 		wantState bool
 		wantPrefs Preferences
 	}{
 		{
 			name: "sync enabled writes state",
-			run: func(t *testing.T, c *Connector, path string) {
+			run: func(t *testing.T, c *Connector) {
 				t.Helper()
 
 				prefs := Preferences{APN: "internet", DefaultRoute: true, ProxyEnabled: true, AlwaysOn: true}
@@ -308,12 +308,12 @@ func TestConnectorAlwaysOnStatePolicy(t *testing.T) {
 		},
 		{
 			name: "manual clear deletes state and keeps disabled preferences",
-			run: func(t *testing.T, c *Connector, path string) {
+			run: func(t *testing.T, c *Connector) {
 				t.Helper()
 
 				prefs := Preferences{APN: "internet", DefaultRoute: true, ProxyEnabled: true, AlwaysOn: true}
-				if err := saveAlwaysOnStateForModem(path, modemID, prefs); err != nil {
-					t.Fatalf("saveAlwaysOnStateForModem() error = %v", err)
+				if err := c.syncAlwaysOnState(modemID, prefs); err != nil {
+					t.Fatalf("syncAlwaysOnState() error = %v", err)
 				}
 				if err := c.clearAlwaysOnState(modemID); err != nil {
 					t.Fatalf("clearAlwaysOnState() error = %v", err)
@@ -323,12 +323,12 @@ func TestConnectorAlwaysOnStatePolicy(t *testing.T) {
 		},
 		{
 			name: "sync disabled deletes state",
-			run: func(t *testing.T, c *Connector, path string) {
+			run: func(t *testing.T, c *Connector) {
 				t.Helper()
 
 				prefs := Preferences{APN: "internet", AlwaysOn: true}
-				if err := saveAlwaysOnStateForModem(path, modemID, prefs); err != nil {
-					t.Fatalf("saveAlwaysOnStateForModem() error = %v", err)
+				if err := c.syncAlwaysOnState(modemID, prefs); err != nil {
+					t.Fatalf("syncAlwaysOnState() setup error = %v", err)
 				}
 				if err := c.syncAlwaysOnState(modemID, Preferences{APN: "internet"}); err != nil {
 					t.Fatalf("syncAlwaysOnState() error = %v", err)
@@ -344,14 +344,13 @@ func TestConnectorAlwaysOnStatePolicy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "internet-always-on.json")
-			c, err := NewConnector(ConnectorConfig{AlwaysOnPath: path})
+			c, err := NewConnector(ConnectorConfig{State: testStore(t)})
 			if err != nil {
 				t.Fatalf("NewConnector() error = %v", err)
 			}
-			tt.run(t, c, path)
+			tt.run(t, c)
 
-			_, ok, err := loadAlwaysOnStateForModem(path, modemID)
+			_, ok, err := c.loadAlwaysOnStateForModem(context.Background(), modemID)
 			if err != nil {
 				t.Fatalf("loadAlwaysOnStateForModem() error = %v", err)
 			}
@@ -370,16 +369,15 @@ func TestRestoreAlwaysOnSkipsStaleSnapshotAfterManualClear(t *testing.T) {
 
 	const modemID = "modem-1"
 
-	path := filepath.Join(t.TempDir(), "internet-always-on.json")
-	c, err := NewConnector(ConnectorConfig{AlwaysOnPath: path})
+	c, err := NewConnector(ConnectorConfig{State: testStore(t)})
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
 	prefs := Preferences{APN: "internet", DefaultRoute: true, AlwaysOn: true}
-	if err := saveAlwaysOnStateForModem(path, modemID, prefs); err != nil {
-		t.Fatalf("saveAlwaysOnStateForModem() error = %v", err)
+	if err := c.syncAlwaysOnState(modemID, prefs); err != nil {
+		t.Fatalf("syncAlwaysOnState() error = %v", err)
 	}
-	states, err := loadAlwaysOnStates(path)
+	states, err := c.loadAlwaysOnStates(context.Background())
 	if err != nil {
 		t.Fatalf("loadAlwaysOnStates() error = %v", err)
 	}
@@ -391,7 +389,7 @@ func TestRestoreAlwaysOnSkipsStaleSnapshotAfterManualClear(t *testing.T) {
 	if err := c.restoreAlwaysOn(context.Background(), modemAccess{modem: &mmodem.Modem{EquipmentIdentifier: modemID}}, stale); err != nil {
 		t.Fatalf("restoreAlwaysOn() error = %v", err)
 	}
-	_, ok, err := loadAlwaysOnStateForModem(path, modemID)
+	_, ok, err := c.loadAlwaysOnStateForModem(context.Background(), modemID)
 	if err != nil {
 		t.Fatalf("loadAlwaysOnStateForModem() error = %v", err)
 	}

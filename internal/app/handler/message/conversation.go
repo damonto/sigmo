@@ -5,42 +5,41 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
+	"github.com/godbus/dbus/v5"
+
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/storage"
+	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
-type message struct{}
+type message struct {
+	store       *storage.Store
+	wifiCalling wificalling.Coordinator
+}
 
 var (
 	errParticipantRequired = errors.New("participant is required")
 )
 
-func newMessage() *message {
-	return &message{}
+func newMessage(store *storage.Store, wifiCalling wificalling.Coordinator) *message {
+	return &message{store: store, wifiCalling: wifiCalling}
 }
 
 func (m *message) ListConversations(ctx context.Context, modem *mmodem.Modem) ([]MessageResponse, error) {
-	messages, err := modem.Messaging().List(ctx)
+	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list messages: %w", err)
+		return nil, err
 	}
-
-	latest := make(map[string]*mmodem.SMS, len(messages))
-	for _, sms := range messages {
-		key := strings.TrimSpace(sms.Number)
-		existing, ok := latest[key]
-		if !ok || sms.Timestamp.After(existing.Timestamp) {
-			latest[key] = sms
-		}
+	if err := m.SyncModemMessages(ctx, modem, profileID); err != nil {
+		return nil, err
 	}
-
-	response := make([]MessageResponse, 0, len(latest))
-	for _, sms := range latest {
-		response = append(response, buildMessageResponse(sms))
+	messages, err := m.store.ListConversations(ctx, profileID)
+	if err != nil {
+		return nil, err
 	}
-
+	response := buildMessageResponses(messages)
 	slices.SortFunc(response, func(a, b MessageResponse) int {
 		if a.ID == b.ID {
 			return 0
@@ -57,18 +56,18 @@ func (m *message) ListByParticipant(ctx context.Context, modem *mmodem.Modem, pa
 	if strings.TrimSpace(participant) == "" {
 		return nil, errParticipantRequired
 	}
-	messages, err := modem.Messaging().List(ctx)
+	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list messages: %w", err)
+		return nil, err
 	}
-
-	response := make([]MessageResponse, 0, len(messages))
-	for _, sms := range messages {
-		if strings.TrimSpace(sms.Number) != participant {
-			continue
-		}
-		response = append(response, buildMessageResponse(sms))
+	if err := m.SyncModemMessages(ctx, modem, profileID); err != nil {
+		return nil, err
 	}
+	messages, err := m.store.ListByParticipant(ctx, profileID, participant)
+	if err != nil {
+		return nil, err
+	}
+	response := buildMessageResponses(messages)
 	slices.SortFunc(response, func(a, b MessageResponse) int {
 		if a.ID == b.ID {
 			return 0
@@ -85,48 +84,79 @@ func (m *message) DeleteByParticipant(ctx context.Context, modem *mmodem.Modem, 
 	if strings.TrimSpace(participant) == "" {
 		return errParticipantRequired
 	}
-	messages, err := modem.Messaging().List(ctx)
+	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
-		return fmt.Errorf("list messages: %w", err)
+		return err
+	}
+	messages, err := m.store.DeleteByParticipant(ctx, profileID, participant)
+	if err != nil {
+		return err
 	}
 	messaging := modem.Messaging()
-	for _, sms := range messages {
-		if strings.TrimSpace(sms.Number) != participant {
+	for _, msg := range messages {
+		if msg.Source != storage.MessageSourceModem {
 			continue
 		}
-		if err := messaging.Delete(ctx, sms.Path()); err != nil {
+		if err := messaging.Delete(ctx, dbus.ObjectPath(msg.ExternalKey)); err != nil {
 			return fmt.Errorf("delete message for %s: %w", participant, err)
 		}
 	}
 	return nil
 }
 
-func buildMessageResponse(sms *mmodem.SMS) MessageResponse {
-	incoming := sms.State == mmodem.SMSStateReceived || sms.State == mmodem.SMSStateReceiving
-	remote := strings.TrimSpace(sms.Number)
+func (m *message) SyncModemMessages(ctx context.Context, modem *mmodem.Modem, profileID string) error {
+	messages, err := modem.Messaging().List(ctx)
+	if err != nil {
+		return fmt.Errorf("list messages: %w", err)
+	}
+	for _, sms := range messages {
+		if sms == nil {
+			continue
+		}
+		if _, err := m.store.InsertMessage(ctx, messageFromModemSMS(modem, profileID, sms)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func buildMessageResponses(messages []storage.Message) []MessageResponse {
+	response := make([]MessageResponse, 0, len(messages))
+	for _, msg := range messages {
+		response = append(response, buildMessageResponse(msg))
+	}
+	return response
+}
+
+func buildMessageResponse(msg storage.Message) MessageResponse {
 	return MessageResponse{
-		ID:        messageID(sms),
-		Sender:    remote,
-		Recipient: remote,
-		Text:      sms.Text,
-		Timestamp: sms.Timestamp,
-		Status:    strings.ToLower(sms.State.String()),
-		Incoming:  incoming,
+		ID:          msg.ID,
+		Sender:      msg.Sender,
+		Recipient:   msg.Recipient,
+		Text:        msg.Text,
+		Timestamp:   msg.Timestamp,
+		Status:      msg.Status,
+		Incoming:    msg.Incoming,
+		WiFiCalling: msg.WiFiCalling,
 	}
 }
 
-func messageID(sms *mmodem.SMS) int64 {
-	path := string(sms.Path())
-	if path == "" {
-		return 0
+func messageFromModemSMS(modem *mmodem.Modem, profileID string, sms *mmodem.SMS) storage.Message {
+	incoming := sms.State == mmodem.SMSStateReceived || sms.State == mmodem.SMSStateReceiving
+	remote := strings.TrimSpace(sms.Number)
+	sender, recipient := modem.Number, remote
+	if incoming {
+		sender, recipient = remote, modem.Number
 	}
-	idx := strings.LastIndex(path, "/")
-	if idx == -1 || idx+1 >= len(path) {
-		return 0
+	return storage.Message{
+		ProfileID:   profileID,
+		Source:      storage.MessageSourceModem,
+		ExternalKey: string(sms.Path()),
+		Sender:      sender,
+		Recipient:   recipient,
+		Text:        sms.Text,
+		Timestamp:   sms.Timestamp,
+		Status:      strings.ToLower(sms.State.String()),
+		Incoming:    incoming,
 	}
-	id, err := strconv.ParseInt(path[idx+1:], 10, 64)
-	if err != nil {
-		return 0
-	}
-	return id
 }

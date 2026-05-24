@@ -1,6 +1,6 @@
 //go:build esim_transfer
 
-package esim
+package esimtransfer
 
 import (
 	"context"
@@ -20,27 +20,33 @@ import (
 	"github.com/damonto/ts43-go/ts43"
 )
 
-func TestTransferCandidateSupport(t *testing.T) {
+var testWSUpgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+func TestCandidateSupport(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name      string
-		candidate transferProfileCandidate
+		candidate profileCandidate
 		wantOK    bool
 	}{
 		{
 			name:      "enabled esim with entitlement",
-			candidate: esimTransferCandidate(testTransferProfile(sgp22.ProfileEnabled)),
+			candidate: esimCandidate(testProfile(sgp22.ProfileEnabled)),
 			wantOK:    true,
 		},
 		{
 			name:      "disabled esim with entitlement is transferable",
-			candidate: esimTransferCandidate(testTransferProfile(sgp22.ProfileDisabled)),
+			candidate: esimCandidate(testProfile(sgp22.ProfileDisabled)),
 			wantOK:    true,
 		},
 		{
 			name: "physical sim with entitlement",
-			candidate: physicalTransferCandidate(sim.Identity{
+			candidate: physicalCandidate(sim.Identity{
 				ICCID: "8900000000000000000",
 				MCC:   "204",
 				MNC:   "08",
@@ -49,11 +55,11 @@ func TestTransferCandidateSupport(t *testing.T) {
 		},
 		{
 			name:      "esim without entitlement is unsupported",
-			candidate: esimTransferCandidate(testUnsupportedTransferProfile()),
+			candidate: esimCandidate(testUnsupportedProfile()),
 		},
 		{
 			name: "physical sim without entitlement is unsupported",
-			candidate: physicalTransferCandidate(sim.Identity{
+			candidate: physicalCandidate(sim.Identity{
 				ICCID: "8900000000000000000",
 				MCC:   "999",
 				MNC:   "99",
@@ -70,27 +76,27 @@ func TestTransferCandidateSupport(t *testing.T) {
 	}
 }
 
-func TestValidateTransferStartRequiresCCIDIMEI(t *testing.T) {
+func TestValidateStartRequiresCCIDIMEI(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name    string
-		start   transferStart
+		start   Start
 		wantErr error
 	}{
 		{
 			name: "ccid requires source imei when transfer starts",
-			start: transferStart{
-				SourceType: transferSourceCCID,
+			start: Start{
+				SourceType: SourceCCID,
 				SourceID:   "reader-1",
 				ProfileID:  "profile-1",
 			},
-			wantErr: errSourceIMEIRequired,
+			wantErr: ErrSourceIMEIRequired,
 		},
 		{
 			name: "ccid with source imei",
-			start: transferStart{
-				SourceType: transferSourceCCID,
+			start: Start{
+				SourceType: SourceCCID,
 				SourceID:   "reader-1",
 				ProfileID:  "profile-1",
 				SourceIMEI: "123456789012345",
@@ -98,8 +104,8 @@ func TestValidateTransferStartRequiresCCIDIMEI(t *testing.T) {
 		},
 		{
 			name: "modem source does not require extra imei input",
-			start: transferStart{
-				SourceType: transferSourceModem,
+			start: Start{
+				SourceType: SourceModem,
 				SourceID:   "modem-1",
 				ProfileID:  "profile-1",
 			},
@@ -108,49 +114,49 @@ func TestValidateTransferStartRequiresCCIDIMEI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateTransferStart(tt.start)
+			err := validateStart(tt.start)
 			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("validateTransferStart() error = %v, want %v", err, tt.wantErr)
+				t.Fatalf("validateStart() error = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-func TestValidateTransferTargetRejectsSourceTargetModem(t *testing.T) {
+func TestValidateTargetRejectsSourceTargetModem(t *testing.T) {
 	t.Parallel()
 
 	target := &mmodem.Modem{EquipmentIdentifier: "target-imei"}
 	tests := []struct {
 		name    string
-		start   transferStart
+		start   Start
 		wantErr error
 	}{
 		{
 			name:    "same modem source and target",
-			start:   transferStart{SourceType: transferSourceModem, SourceID: "target-imei"},
-			wantErr: errTransferSourceIsTarget,
+			start:   Start{SourceType: SourceModem, SourceID: "target-imei"},
+			wantErr: ErrSourceIsTarget,
 		},
 		{
 			name:  "different modem source",
-			start: transferStart{SourceType: transferSourceModem, SourceID: "source-imei"},
+			start: Start{SourceType: SourceModem, SourceID: "source-imei"},
 		},
 		{
 			name:  "ccid source can target modem",
-			start: transferStart{SourceType: transferSourceCCID, SourceID: "target-imei"},
+			start: Start{SourceType: SourceCCID, SourceID: "target-imei"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateTransferTarget(target, tt.start)
+			err := validateTarget(target, tt.start)
 			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("validateTransferTarget() error = %v, want %v", err, tt.wantErr)
+				t.Fatalf("validateTarget() error = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-func TestTransferModemName(t *testing.T) {
+func TestModemName(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -193,8 +199,8 @@ func TestTransferModemName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := transferModemName(&tt.cfg, tt.modem); got != tt.want {
-				t.Fatalf("transferModemName() = %q, want %q", got, tt.want)
+			if got := modemName(&tt.cfg, tt.modem); got != tt.want {
+				t.Fatalf("modemName() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -252,11 +258,11 @@ func TestSourceEndpointCloseOnce(t *testing.T) {
 	}
 }
 
-func TestActiveTransferCloseAllowsMissingTargetClient(t *testing.T) {
+func TestActiveSessionCloseAllowsMissingTargetClient(t *testing.T) {
 	t.Parallel()
 
 	calls := 0
-	transfer := &activeTransfer{
+	active := &activeSession{
 		source: &sourceEndpoint{
 			release: func() {
 				calls++
@@ -264,20 +270,20 @@ func TestActiveTransferCloseAllowsMissingTargetClient(t *testing.T) {
 		},
 	}
 
-	transfer.Close()
-	transfer.Close()
+	active.Close()
+	active.Close()
 
 	if calls != 1 {
 		t.Fatalf("source release calls = %d, want 1", calls)
 	}
 }
 
-func TestTransferSessionCancelCancelsContext(t *testing.T) {
+func TestSessionCancelCancelsContext(t *testing.T) {
 	t.Parallel()
 
 	done := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := wsUpgrader.Upgrade(w, r, nil)
+		conn, err := testWSUpgrader.Upgrade(w, r, nil)
 		if err != nil {
 			done <- err
 			return
@@ -286,7 +292,7 @@ func TestTransferSessionCancelCancelsContext(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		_ = newTransferSession(conn, cancel)
+		_ = newSession(conn, cancel)
 
 		select {
 		case <-ctx.Done():
@@ -297,8 +303,8 @@ func TestTransferSessionCancelCancelsContext(t *testing.T) {
 	}))
 	defer server.Close()
 
-	conn := dialTransferTestWebSocket(t, server.URL)
-	if err := conn.WriteJSON(transferClientMessage{Type: wsTypeCancel}); err != nil {
+	conn := dialTestWebSocket(t, server.URL)
+	if err := conn.WriteJSON(clientMessage{Type: wsTypeCancel}); err != nil {
 		t.Fatalf("WriteJSON() error = %v", err)
 	}
 	if err := conn.Close(); err != nil {
@@ -310,12 +316,12 @@ func TestTransferSessionCancelCancelsContext(t *testing.T) {
 	}
 }
 
-func TestTransferSessionWaitForStartStopsOnDisconnect(t *testing.T) {
+func TestSessionWaitForStartStopsOnDisconnect(t *testing.T) {
 	t.Parallel()
 
 	done := make(chan bool, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := wsUpgrader.Upgrade(w, r, nil)
+		conn, err := testWSUpgrader.Upgrade(w, r, nil)
 		if err != nil {
 			done <- true
 			return
@@ -324,13 +330,13 @@ func TestTransferSessionWaitForStartStopsOnDisconnect(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		session := newTransferSession(conn, cancel)
+		session := newSession(conn, cancel)
 		_, ok := session.waitForStart(ctx)
 		done <- ok
 	}))
 	defer server.Close()
 
-	conn := dialTransferTestWebSocket(t, server.URL)
+	conn := dialTestWebSocket(t, server.URL)
 	if err := conn.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
@@ -340,7 +346,7 @@ func TestTransferSessionWaitForStartStopsOnDisconnect(t *testing.T) {
 	}
 }
 
-func dialTransferTestWebSocket(t *testing.T, rawURL string) *websocket.Conn {
+func dialTestWebSocket(t *testing.T, rawURL string) *websocket.Conn {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(rawURL, "http")
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -355,11 +361,11 @@ func TestTS43SourceSIMType(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		profileType transferProfileType
+		profileType ProfileType
 		want        ts43.SIMType
 	}{
-		{name: "eSIM source", profileType: transferProfileESIM, want: ts43.SIMTypeESIM},
-		{name: "pSIM source", profileType: transferProfilePhysical, want: ts43.SIMTypePSIM},
+		{name: "eSIM source", profileType: ProfileESIM, want: ts43.SIMTypeESIM},
+		{name: "pSIM source", profileType: ProfilePhysical, want: ts43.SIMTypePSIM},
 	}
 
 	for _, tt := range tests {
@@ -414,7 +420,7 @@ func TestSMDSDiscoveryEventFromDelayedDownload(t *testing.T) {
 	}
 }
 
-func testTransferProfile(state sgp22.ProfileState) *sgp22.ProfileInfo {
+func testProfile(state sgp22.ProfileState) *sgp22.ProfileInfo {
 	return &sgp22.ProfileInfo{
 		ICCID:               sgp22.ICCID{0x98, 0x10},
 		ProfileState:        state,
@@ -427,8 +433,8 @@ func testTransferProfile(state sgp22.ProfileState) *sgp22.ProfileInfo {
 	}
 }
 
-func testUnsupportedTransferProfile() *sgp22.ProfileInfo {
-	profile := testTransferProfile(sgp22.ProfileEnabled)
+func testUnsupportedProfile() *sgp22.ProfileInfo {
+	profile := testProfile(sgp22.ProfileEnabled)
 	profile.ProfileOwner = sgp22.OperatorId{
 		PLMN: []byte{0x99, 0xf9, 0x99},
 	}

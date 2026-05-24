@@ -25,6 +25,9 @@ export type ModemApiResponse = {
   registeredOperator: RegisteredOperator
   signalQuality: number
   supportsEsim: boolean
+  wifiCallingEnabled?: boolean
+  wifiCallingPreferred?: boolean
+  wifiCallingConnected?: boolean
 }
 
 export type ModemListResponse = ModemApiResponse[]
@@ -39,3 +42,10 @@ export type ModemSettings = {
 }
 
 export type ModemSettingsResponse = ModemSettings
+
+export type WiFiCallingSettings = {
+  enabled: boolean
+  preferred: boolean
+}
+
+export type WiFiCallingSettingsResponse = WiFiCallingSettings

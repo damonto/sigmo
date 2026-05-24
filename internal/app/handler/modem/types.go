@@ -29,18 +29,31 @@ type ModemSettingsResponse struct {
 	MSS        int    `json:"mss"`
 }
 
+type UpdateWiFiCallingSettingsRequest struct {
+	Enabled   bool `json:"enabled"`
+	Preferred bool `json:"preferred"`
+}
+
+type WiFiCallingSettingsResponse struct {
+	Enabled   bool `json:"enabled"`
+	Preferred bool `json:"preferred"`
+}
+
 type ModemResponse struct {
-	Manufacturer       string                     `json:"manufacturer"`
-	ID                 string                     `json:"id"`
-	FirmwareRevision   string                     `json:"firmwareRevision"`
-	HardwareRevision   string                     `json:"hardwareRevision"`
-	Name               string                     `json:"name"`
-	Number             string                     `json:"number,omitempty"`
-	SIM                SlotResponse               `json:"sim"`
-	Slots              []SlotResponse             `json:"slots"`
-	AccessTechnology   string                     `json:"accessTechnology"`
-	RegistrationState  string                     `json:"registrationState"`
-	RegisteredOperator RegisteredOperatorResponse `json:"registeredOperator"`
-	SignalQuality      uint32                     `json:"signalQuality"`
-	SupportsEsim       bool                       `json:"supportsEsim"`
+	Manufacturer         string                     `json:"manufacturer"`
+	ID                   string                     `json:"id"`
+	FirmwareRevision     string                     `json:"firmwareRevision"`
+	HardwareRevision     string                     `json:"hardwareRevision"`
+	Name                 string                     `json:"name"`
+	Number               string                     `json:"number,omitempty"`
+	SIM                  SlotResponse               `json:"sim"`
+	Slots                []SlotResponse             `json:"slots"`
+	AccessTechnology     string                     `json:"accessTechnology"`
+	RegistrationState    string                     `json:"registrationState"`
+	RegisteredOperator   RegisteredOperatorResponse `json:"registeredOperator"`
+	SignalQuality        uint32                     `json:"signalQuality"`
+	SupportsEsim         bool                       `json:"supportsEsim"`
+	WiFiCallingEnabled   bool                       `json:"wifiCallingEnabled"`
+	WiFiCallingPreferred bool                       `json:"wifiCallingPreferred"`
+	WiFiCallingConnected bool                       `json:"wifiCallingConnected"`
 }

@@ -1,6 +1,6 @@
 //go:build esim_transfer
 
-package esim
+package esimtransfer
 
 import (
 	"context"
@@ -22,14 +22,14 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
-func (h *Handler) openSource(ctx context.Context, cfg *config.Config, start transferStart) (*sourceEndpoint, error) {
+func (s *Service) openSource(ctx context.Context, cfg *config.Config, start Start) (*sourceEndpoint, error) {
 	switch start.SourceType {
-	case transferSourceModem:
-		modem, err := h.registry.Find(ctx, start.SourceID)
+	case SourceModem:
+		modem, err := s.registry.Find(ctx, start.SourceID)
 		if err != nil {
 			return nil, err
 		}
-		channel, release, err := openModemTransferSource(modem)
+		channel, release, err := openModemSource(modem)
 		if err != nil {
 			return nil, err
 		}
@@ -38,13 +38,13 @@ func (h *Handler) openSource(ctx context.Context, cfg *config.Config, start tran
 			release()
 			return nil, fmt.Errorf("read source IMEI: %w", err)
 		}
-		device := ts43TransferDevice(imei)
+		device := ts43Device(imei)
 		return &sourceEndpoint{
 			channel: channel,
 			release: release,
 			device:  device,
 		}, nil
-	case transferSourceCCID:
+	case SourceCCID:
 		reader, err := tccid.NewWithReader(start.SourceID)
 		if err != nil {
 			return nil, fmt.Errorf("open CCID reader: %w", err)
@@ -56,14 +56,14 @@ func (h *Handler) openSource(ctx context.Context, cfg *config.Config, start tran
 					slog.Debug("disconnect CCID reader", "error", err)
 				}
 			},
-			device: ts43TransferDevice(start.SourceIMEI),
+			device: ts43Device(start.SourceIMEI),
 		}, nil
 	default:
-		return nil, errTransferSourceUnsupported
+		return nil, ErrSourceUnsupported
 	}
 }
 
-func openModemTransferSource(modem *mmodem.Modem) (ts43.Channel, func(), error) {
+func openModemSource(modem *mmodem.Modem) (ts43.Channel, func(), error) {
 	slot := uint8(1)
 	if modem.PrimarySimSlot > 0 {
 		slot = uint8(modem.PrimarySimSlot)
@@ -74,13 +74,13 @@ func openModemTransferSource(modem *mmodem.Modem) (ts43.Channel, func(), error) 
 		if err != nil {
 			return nil, nil, err
 		}
-		return ch, releaseTransferSource(ch), nil
+		return ch, releaseSource(ch), nil
 	case mmodem.ModemPortTypeMbim:
 		ch, err := tmbim.New(modem.PrimaryPort, slot)
 		if err != nil {
 			return nil, nil, err
 		}
-		return ch, releaseTransferSource(ch), nil
+		return ch, releaseSource(ch), nil
 	default:
 		port, err := modem.Port(mmodem.ModemPortTypeAt)
 		if err != nil {
@@ -90,15 +90,15 @@ func openModemTransferSource(modem *mmodem.Modem) (ts43.Channel, func(), error) 
 		if err != nil {
 			return nil, nil, err
 		}
-		return ch, releaseTransferSource(ch), nil
+		return ch, releaseSource(ch), nil
 	}
 }
 
-type transferSourceCloser interface {
+type sourceCloser interface {
 	Disconnect() error
 }
 
-func releaseTransferSource(ch transferSourceCloser) func() {
+func releaseSource(ch sourceCloser) func() {
 	return func() {
 		if err := ch.Disconnect(); err != nil {
 			slog.Debug("disconnect transfer source", "error", err)
@@ -106,8 +106,8 @@ func releaseTransferSource(ch transferSourceCloser) func() {
 	}
 }
 
-func (h *Handler) activateSourceProfile(ctx context.Context, cfg *config.Config, start transferStart, candidate transferProfileCandidate) error {
-	if candidate.response.Type == transferProfilePhysical {
+func (s *Service) activateSourceProfile(ctx context.Context, cfg *config.Config, start Start, candidate profileCandidate) error {
+	if candidate.response.Type == ProfilePhysical {
 		return nil
 	}
 	iccid, err := sgp22.NewICCID(candidate.response.ICCID)
@@ -115,33 +115,20 @@ func (h *Handler) activateSourceProfile(ctx context.Context, cfg *config.Config,
 		return fmt.Errorf("parse source ICCID: %w", err)
 	}
 	switch start.SourceType {
-	case transferSourceModem:
-		modem, err := h.registry.Find(ctx, start.SourceID)
+	case SourceModem:
+		modem, err := s.registry.Find(ctx, start.SourceID)
 		if err != nil {
 			return err
 		}
-		session, err := h.lifecycle.PrepareEnable(modem, iccid)
-		if err != nil {
-			if errors.Is(err, errProfileAlreadyActive) {
-				return nil
-			}
-			return err
-		}
-		defer session.Close()
-		sessionCtx, cancel := context.WithTimeout(ctx, enableTimeout)
-		defer cancel()
-		if err := h.internet.Restore(sessionCtx, modem); err != nil {
-			return err
-		}
-		return session.Enable(sessionCtx)
-	case transferSourceCCID:
+		return s.enableModemSourceProfile(ctx, modem, iccid)
+	case SourceCCID:
 		return enableCCIDSourceProfile(cfg, start, iccid)
 	default:
-		return errTransferSourceUnsupported
+		return ErrSourceUnsupported
 	}
 }
 
-func enableCCIDSourceProfile(cfg *config.Config, start transferStart, iccid sgp22.ICCID) error {
+func enableCCIDSourceProfile(cfg *config.Config, start Start, iccid sgp22.ICCID) error {
 	reader, err := openCCIDLPAReader(start.SourceID)
 	if err != nil {
 		return fmt.Errorf("open CCID reader: %w", err)
@@ -168,26 +155,26 @@ func enableCCIDSourceProfile(cfg *config.Config, start transferStart, iccid sgp2
 	return nil
 }
 
-func (h *Handler) deleteSourceProfile(ctx context.Context, cfg *config.Config, start transferStart, rawICCID string) error {
+func (s *Service) deleteSourceProfile(ctx context.Context, cfg *config.Config, start Start, rawICCID string) error {
 	iccid, err := sgp22.NewICCID(rawICCID)
 	if err != nil {
 		return fmt.Errorf("parse source ICCID: %w", err)
 	}
-	if strings.HasPrefix(start.ProfileID, string(transferProfilePhysical)+":") {
+	if strings.HasPrefix(start.ProfileID, string(ProfilePhysical)+":") {
 		return errPhysicalSourceDeletion
 	}
 	switch start.SourceType {
-	case transferSourceModem:
-		return h.deleteModemSourceProfile(ctx, cfg, start, iccid)
-	case transferSourceCCID:
+	case SourceModem:
+		return s.deleteModemSourceProfile(ctx, cfg, start, iccid)
+	case SourceCCID:
 		return deleteCCIDSourceProfile(cfg, start, iccid)
 	default:
-		return errTransferSourceUnsupported
+		return ErrSourceUnsupported
 	}
 }
 
-func (h *Handler) deleteModemSourceProfile(ctx context.Context, cfg *config.Config, start transferStart, iccid sgp22.ICCID) error {
-	modem, err := h.registry.Find(ctx, start.SourceID)
+func (s *Service) deleteModemSourceProfile(ctx context.Context, cfg *config.Config, start Start, iccid sgp22.ICCID) error {
+	modem, err := s.registry.Find(ctx, start.SourceID)
 	if err != nil {
 		return err
 	}
@@ -196,14 +183,14 @@ func (h *Handler) deleteModemSourceProfile(ctx context.Context, cfg *config.Conf
 		return err
 	}
 	if fallback, ok := fallbackProfile(profiles, iccid); ok {
-		if err := h.enableModemSourceProfile(ctx, modem, fallback.ICCID); err != nil {
+		if err := s.enableModemSourceProfile(ctx, modem, fallback.ICCID); err != nil {
 			return err
 		}
-		modem, err = h.registry.Find(ctx, start.SourceID)
+		modem, err = s.registry.Find(ctx, start.SourceID)
 		if err != nil {
 			return err
 		}
-		return h.lifecycle.Delete(modem, iccid)
+		return s.deleteModemProfile(ctx, modem, iccid)
 	}
 	client, err := ilpa.New(modem, cfg)
 	if err != nil {
@@ -237,24 +224,21 @@ func sourceModemProfiles(modem *mmodem.Modem, cfg *config.Config) ([]*sgp22.Prof
 	return profiles, nil
 }
 
-func (h *Handler) enableModemSourceProfile(ctx context.Context, modem *mmodem.Modem, iccid sgp22.ICCID) error {
-	session, err := h.lifecycle.PrepareEnable(modem, iccid)
-	if err != nil {
-		if errors.Is(err, errProfileAlreadyActive) {
-			return nil
-		}
-		return err
+func (s *Service) enableModemSourceProfile(ctx context.Context, modem *mmodem.Modem, iccid sgp22.ICCID) error {
+	if s.enableProfile == nil {
+		return errors.New("enable profile dependency is missing")
 	}
-	defer session.Close()
-	sessionCtx, cancel := context.WithTimeout(ctx, enableTimeout)
-	defer cancel()
-	if err := h.internet.Restore(sessionCtx, modem); err != nil {
-		return err
-	}
-	return session.Enable(sessionCtx)
+	return s.enableProfile(ctx, modem, iccid)
 }
 
-func deleteCCIDSourceProfile(cfg *config.Config, start transferStart, iccid sgp22.ICCID) error {
+func (s *Service) deleteModemProfile(ctx context.Context, modem *mmodem.Modem, iccid sgp22.ICCID) error {
+	if s.deleteProfile == nil {
+		return errors.New("delete profile dependency is missing")
+	}
+	return s.deleteProfile(ctx, modem, iccid)
+}
+
+func deleteCCIDSourceProfile(cfg *config.Config, start Start, iccid sgp22.ICCID) error {
 	reader, err := openCCIDLPAReader(start.SourceID)
 	if err != nil {
 		return fmt.Errorf("open CCID reader: %w", err)
@@ -293,6 +277,16 @@ func fallbackProfile(profiles []*sgp22.ProfileInfo, source sgp22.ICCID) (*sgp22.
 	return nil, false
 }
 
+func activeProfile(profiles []*sgp22.ProfileInfo, iccid sgp22.ICCID) bool {
+	for _, profile := range profiles {
+		if profile == nil || profile.ICCID.String() != iccid.String() {
+			continue
+		}
+		return profile.ProfileState == sgp22.ProfileEnabled
+	}
+	return false
+}
+
 func listCCIDReaders() ([]string, error) {
 	reader, err := tccid.New()
 	if err != nil {
@@ -318,11 +312,11 @@ func listCCIDReaders() ([]string, error) {
 	return readers, nil
 }
 
-func sourceLockKey(sourceType transferSourceType, sourceID string) string {
+func sourceLockKey(sourceType SourceType, sourceID string) string {
 	return string(sourceType) + ":" + sourceID
 }
 
-func transferModemName(cfg *config.Config, modem *mmodem.Modem) string {
+func modemName(cfg *config.Config, modem *mmodem.Modem) string {
 	if alias := cfg.FindModem(modem.EquipmentIdentifier).Alias; alias != "" {
 		return alias
 	}

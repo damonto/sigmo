@@ -5,6 +5,8 @@ import type {
   ModemListResponse,
   ModemSettings,
   ModemSettingsResponse,
+  WiFiCallingSettings,
+  WiFiCallingSettingsResponse,
 } from '@/types/modem'
 
 /**
@@ -68,6 +70,27 @@ export const useModemApi = () => {
     }).json()
   }
 
+  /**
+   * Fetch Wi-Fi Calling settings
+   * GET /api/v1/modems/:id/wifi-calling-settings
+   */
+  const getWiFiCallingSettings = (id: string) => {
+    return useFetch<WiFiCallingSettingsResponse>(`modems/${id}/wifi-calling-settings`)
+      .get()
+      .json()
+  }
+
+  /**
+   * Update Wi-Fi Calling settings
+   * PUT /api/v1/modems/:id/wifi-calling-settings
+   */
+  const updateWiFiCallingSettings = (id: string, payload: WiFiCallingSettings) => {
+    return useFetch<void>(`modems/${id}/wifi-calling-settings`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }).json()
+  }
+
   return {
     getModems,
     getModem,
@@ -75,5 +98,7 @@ export const useModemApi = () => {
     updateMsisdn,
     getSettings,
     updateSettings,
+    getWiFiCallingSettings,
+    updateWiFiCallingSettings,
   }
 }

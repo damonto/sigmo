@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
@@ -9,13 +9,16 @@ import ModemMsisdnSection from '@/components/modem/settings/ModemMsisdnSection.v
 import ModemNetworkDialog from '@/components/modem/settings/ModemNetworkDialog.vue'
 import ModemNetworkSection from '@/components/modem/settings/ModemNetworkSection.vue'
 import ModemSettingsHeader from '@/components/modem/settings/ModemSettingsHeader.vue'
+import ModemWiFiCallingSettingsCard from '@/components/modem/settings/ModemWiFiCallingSettingsCard.vue'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 import { useFeedbackBanner } from '@/composables/useFeedbackBanner'
 import { useModemInternet } from '@/composables/useModemInternet'
 import { useModemDeviceSettings } from '@/composables/useModemDeviceSettings'
 import { useModemMsisdn } from '@/composables/useModemMsisdn'
 import { useModemNetwork } from '@/composables/useModemNetwork'
 import { useModemOverview } from '@/composables/useModemOverview'
+import { useModemWiFiCallingSettings } from '@/composables/useModemWiFiCallingSettings'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -23,6 +26,8 @@ const { t } = useI18n()
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
 
 const { showFeedback } = useFeedbackBanner()
+const { hasFeature, fetchCapabilities } = useCapabilities()
+const canUseWiFiCalling = computed(() => hasFeature(FEATURE.wifiCalling))
 
 const {
   modem,
@@ -50,6 +55,18 @@ const {
   handleSettingsUpdate,
 } = useModemDeviceSettings({
   modemId,
+  onSuccess: showFeedback,
+})
+
+const {
+  settingsWiFiCallingEnabled,
+  settingsWiFiCallingPreferred,
+  isWiFiCallingSettingsLoading,
+  isWiFiCallingSettingsUpdating,
+  handleWiFiCallingUpdate,
+} = useModemWiFiCallingSettings({
+  modemId,
+  enabled: canUseWiFiCalling,
   onSuccess: showFeedback,
 })
 
@@ -102,6 +119,10 @@ const {
 } = useModemInternet({
   modemId,
   onSuccess: showFeedback,
+})
+
+onMounted(() => {
+  void fetchCapabilities()
 })
 </script>
 
@@ -175,6 +196,15 @@ const {
       </TabsContent>
 
       <TabsContent value="device" class="space-y-3">
+        <ModemWiFiCallingSettingsCard
+          v-if="canUseWiFiCalling"
+          v-model:enabled="settingsWiFiCallingEnabled"
+          v-model:preferred="settingsWiFiCallingPreferred"
+          :is-loading="isWiFiCallingSettingsLoading"
+          :is-updating="isWiFiCallingSettingsUpdating"
+          @update="handleWiFiCallingUpdate"
+        />
+
         <ModemDeviceSettingsSection
           v-model:alias="settingsAlias"
           v-model:mss="settingsMss"

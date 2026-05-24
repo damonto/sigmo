@@ -3,13 +3,17 @@ package modem
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/godbus/dbus/v5"
 )
 
 const ModemInterface = ModemManagerInterface + ".Modem"
+
+var ErrProfileIDMissing = errors.New("profile id is missing")
 
 type Modem struct {
 	dbusConn            *dbus.Conn
@@ -35,6 +39,28 @@ type Modem struct {
 type ModemPort struct {
 	PortType ModemPortType
 	Device   string
+}
+
+func (m *Modem) Path() dbus.ObjectPath {
+	if m == nil {
+		return ""
+	}
+	return m.objectPath
+}
+
+func (m *Modem) ProfileID(ctx context.Context) (string, error) {
+	if m == nil {
+		return "", errors.New("modem is required")
+	}
+	sim, err := m.SIMs().Primary(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read primary SIM: %w", err)
+	}
+	profileID := strings.TrimSpace(sim.Identifier)
+	if profileID == "" {
+		return "", ErrProfileIDMissing
+	}
+	return profileID, nil
 }
 
 type dbusModePair struct {

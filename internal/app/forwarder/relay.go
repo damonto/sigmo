@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/godbus/dbus/v5"
 
@@ -15,19 +14,25 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/notify"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	"github.com/damonto/sigmo/internal/pkg/storage"
+	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 type Relay struct {
 	store     *config.Store
 	registry  *modem.Registry
 	notifier  *notify.Notifier
+	messages  *storage.Store
 	mu        sync.Mutex
 	cancels   map[dbus.ObjectPath]context.CancelFunc
 	equipment map[string]dbus.ObjectPath
 	modems    map[dbus.ObjectPath]string
 }
 
-func New(store *config.Store, registry *modem.Registry) (*Relay, error) {
+func New(store *config.Store, registry *modem.Registry, messages *storage.Store) (*Relay, error) {
+	if messages == nil {
+		return nil, errors.New("message storage is required")
+	}
 	cfg := store.Snapshot()
 	notifier, err := notify.New(&cfg)
 	if err != nil {
@@ -37,6 +42,7 @@ func New(store *config.Store, registry *modem.Registry) (*Relay, error) {
 		store:     store,
 		registry:  registry,
 		notifier:  notifier,
+		messages:  messages,
 		cancels:   make(map[dbus.ObjectPath]context.CancelFunc),
 		equipment: make(map[string]dbus.ObjectPath),
 		modems:    make(map[dbus.ObjectPath]string),
@@ -115,7 +121,7 @@ func (r *Relay) addModem(ctx context.Context, path dbus.ObjectPath, m *modem.Mod
 
 	go func() {
 		if err := m.Messaging().Subscribe(modemCtx, func(message *modem.SMS) error {
-			return r.forward(modemCtx, m, message)
+			return r.forwardModemSMS(modemCtx, m, message)
 		}); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Error("modem message subscription stopped", "error", err, "modem", m.EquipmentIdentifier)
 		}
@@ -154,37 +160,75 @@ func (r *Relay) stopAll() {
 	}
 }
 
-func (r *Relay) forward(ctx context.Context, m *modem.Modem, message *modem.SMS) error {
-	incoming := message.State == modem.SMSStateReceived || message.State == modem.SMSStateReceiving
-	if incoming && !message.Timestamp.IsZero() && time.Since(message.Timestamp) > 30*time.Minute {
-		slog.Info("skipping SMS notification older than 30 minutes", "timestamp", message.Timestamp, "modem", m.EquipmentIdentifier)
+func (r *Relay) ForwardWiFiCallingSMS(ctx context.Context, incoming wificalling.IncomingSMS) error {
+	inserted, err := r.messages.InsertMessage(ctx, incoming.Message)
+	if err != nil {
+		return err
+	}
+	if !inserted {
+		slog.Debug("skipping known Wi-Fi Calling SMS", "modem", incoming.ModemID, "externalKey", incoming.Message.ExternalKey)
 		return nil
 	}
 	r.mu.Lock()
 	notifier := r.notifier
 	r.mu.Unlock()
-	return notifier.Send(ctx, r.formatMessage(m, message))
+	return notifier.Send(ctx, r.formatStoredMessage(incoming.ModemID, incoming.Message))
 }
 
-func (r *Relay) formatMessage(m *modem.Modem, message *modem.SMS) notifyevent.SMSEvent {
-	incoming := message.State == modem.SMSStateReceived || message.State == modem.SMSStateReceiving
-	sender, recipient := message.Number, m.Number
-	if !incoming {
-		sender, recipient = recipient, sender
+func (r *Relay) forwardModemSMS(ctx context.Context, m *modem.Modem, message *modem.SMS) error {
+	profileID, err := m.ProfileID(ctx)
+	if err != nil {
+		return err
 	}
+	stored := storageMessageFromModemSMS(m, profileID, message)
+	inserted, err := r.messages.InsertMessage(ctx, stored)
+	if err != nil {
+		return err
+	}
+	if !inserted {
+		slog.Debug("skipping known modem SMS", "modem", m.EquipmentIdentifier, "path", message.Path())
+		return nil
+	}
+	r.mu.Lock()
+	notifier := r.notifier
+	r.mu.Unlock()
+	return notifier.Send(ctx, r.formatStoredMessage(m.EquipmentIdentifier, stored))
+}
+
+func (r *Relay) formatStoredMessage(modemID string, message storage.Message) notifyevent.SMSEvent {
 	return notifyevent.SMSEvent{
-		Modem:    r.modemName(m),
-		From:     sender,
-		To:       recipient,
+		Modem:    r.modemLabel(modemID),
+		From:     message.Sender,
+		To:       message.Recipient,
 		Time:     message.Timestamp,
 		Text:     strings.TrimSpace(message.Text),
-		Incoming: incoming,
+		Incoming: message.Incoming,
 	}
 }
 
-func (r *Relay) modemName(m *modem.Modem) string {
-	if alias := strings.TrimSpace(r.store.FindModem(m.EquipmentIdentifier).Alias); alias != "" {
+func (r *Relay) modemLabel(modemID string) string {
+	if alias := strings.TrimSpace(r.store.FindModem(modemID).Alias); alias != "" {
 		return alias
 	}
-	return strings.TrimSpace(m.Model)
+	return strings.TrimSpace(modemID)
+}
+
+func storageMessageFromModemSMS(m *modem.Modem, profileID string, sms *modem.SMS) storage.Message {
+	incoming := sms.State == modem.SMSStateReceived || sms.State == modem.SMSStateReceiving
+	remote := strings.TrimSpace(sms.Number)
+	sender, recipient := m.Number, remote
+	if incoming {
+		sender, recipient = remote, m.Number
+	}
+	return storage.Message{
+		ProfileID:   profileID,
+		Source:      storage.MessageSourceModem,
+		ExternalKey: string(sms.Path()),
+		Sender:      sender,
+		Recipient:   recipient,
+		Text:        sms.Text,
+		Timestamp:   sms.Timestamp,
+		Status:      strings.ToLower(sms.State.String()),
+		Incoming:    incoming,
+	}
 }

@@ -10,6 +10,8 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/storage"
+	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 type Handler struct {
@@ -29,10 +31,10 @@ const (
 	errorCodeDeleteMessageThreadFailed = "delete_message_thread_failed"
 )
 
-func New(registry *mmodem.Registry) *Handler {
+func New(registry *mmodem.Registry, store *storage.Store, wifiCalling wificalling.Coordinator) *Handler {
 	return &Handler{
 		registry: registry,
-		messages: newMessage(),
+		messages: newMessage(store, wifiCalling),
 	}
 }
 

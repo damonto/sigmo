@@ -12,17 +12,20 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 type catalog struct {
-	store    *config.Store
-	registry *mmodem.Registry
+	store       *config.Store
+	registry    *mmodem.Registry
+	wifiCalling wificalling.Coordinator
 }
 
-func newCatalog(store *config.Store, registry *mmodem.Registry) *catalog {
+func newCatalog(store *config.Store, registry *mmodem.Registry, wifiCalling wificalling.Coordinator) *catalog {
 	return &catalog{
-		store:    store,
-		registry: registry,
+		store:       store,
+		registry:    registry,
+		wifiCalling: wifiCalling,
 	}
 }
 
@@ -95,6 +98,10 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 	if err != nil {
 		return nil, fmt.Errorf("fetch SIM slots: %w", err)
 	}
+	wifiStatus, err := c.wifiCalling.Status(ctx, device)
+	if err != nil && !errors.Is(err, mmodem.ErrProfileIDMissing) {
+		return nil, fmt.Errorf("fetch Wi-Fi Calling status: %w", err)
+	}
 
 	alias := c.store.FindModem(device.EquipmentIdentifier).Alias
 	name := device.Model
@@ -126,8 +133,11 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 			Name: registeredOperatorName,
 			Code: operatorCode,
 		},
-		SignalQuality: percent,
-		SupportsEsim:  supportsEsim,
+		SignalQuality:        percent,
+		SupportsEsim:         supportsEsim,
+		WiFiCallingEnabled:   wifiStatus.Enabled,
+		WiFiCallingPreferred: wifiStatus.Preferred,
+		WiFiCallingConnected: wifiStatus.Connected,
 	}, nil
 }
 

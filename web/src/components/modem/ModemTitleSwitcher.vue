@@ -81,6 +81,7 @@ const handleSelect = (modem: Modem) => {
           :signal-quality="item.signalQuality"
           :registration-state="item.registrationState"
           :access-technology="item.accessTechnology"
+          :wifi-calling-connected="item.wifiCallingConnected"
           :show-signal-value="false"
           size="sm"
         />

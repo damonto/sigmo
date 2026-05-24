@@ -27,6 +27,9 @@ func TestLoad(t *testing.T) {
 environment = "development"
 listen_address = "127.0.0.1:9527"
 
+[storage]
+database_path = "sigmo.db"
+
 [channels.telegram]
 bot_token = "token"
 recipients = ["123456"]
@@ -39,6 +42,9 @@ recipients = ["123456"]
 [app]
 environment = "development"
 listen_address = "127.0.0.1:9527"
+
+[storage]
+database_path = "sigmo.db"
 
 [channels.bark]
 endpoint = "https://api.day.app"
@@ -108,6 +114,22 @@ func TestLoadOrCreate(t *testing.T) {
 			},
 		},
 		{
+			name:    "rejects existing file without storage path",
+			wantErr: true,
+			setup: func(t *testing.T) string {
+				t.Helper()
+				path := filepath.Join(t.TempDir(), "config.toml")
+				content := `
+[app]
+listen_address = "127.0.0.1:9527"
+`
+				if err := os.WriteFile(path, []byte(strings.TrimSpace(content)), 0o644); err != nil {
+					t.Fatalf("WriteFile() error = %v", err)
+				}
+				return path
+			},
+		},
+		{
 			name: "loads existing file",
 			setup: func(t *testing.T) string {
 				t.Helper()
@@ -115,6 +137,9 @@ func TestLoadOrCreate(t *testing.T) {
 				content := `
 [app]
 listen_address = "127.0.0.1:9527"
+
+[storage]
+database_path = "sigmo.db"
 `
 				if err := os.WriteFile(path, []byte(strings.TrimSpace(content)), 0o644); err != nil {
 					t.Fatalf("WriteFile() error = %v", err)
@@ -151,6 +176,54 @@ listen_address = "127.0.0.1:9527"
 			}
 			if _, err := os.Stat(path); err != nil {
 				t.Fatalf("Stat() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestDatabasePath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{
+			name: "relative path resolves from config directory",
+			cfg: Config{
+				Path:    filepath.Join(t.TempDir(), "config.toml"),
+				Storage: Storage{DatabasePath: "state/sigmo.db"},
+			},
+			want: "state/sigmo.db",
+		},
+		{
+			name: "absolute path is used directly",
+			cfg: Config{
+				Path:    filepath.Join(t.TempDir(), "config.toml"),
+				Storage: Storage{DatabasePath: filepath.Join(t.TempDir(), "sigmo.db")},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := tt.cfg.DatabasePath()
+			if err != nil {
+				t.Fatalf("DatabasePath() error = %v", err)
+			}
+			if filepath.IsAbs(tt.cfg.Storage.DatabasePath) {
+				if got != tt.cfg.Storage.DatabasePath {
+					t.Fatalf("DatabasePath() = %q, want %q", got, tt.cfg.Storage.DatabasePath)
+				}
+				return
+			}
+			want := filepath.Join(filepath.Dir(tt.cfg.Path), tt.want)
+			if got != want {
+				t.Fatalf("DatabasePath() = %q, want %q", got, want)
 			}
 		})
 	}

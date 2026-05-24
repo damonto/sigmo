@@ -35,7 +35,7 @@ export const useModemMessages = (modemId: ComputedRef<string>) => {
 
   const items = computed<ConversationItem[]>(() =>
     conversations.value.map((message) => ({
-      key: `${message.sender}-${message.recipient}-${message.timestamp}`,
+      key: String(message.id),
       participantValue: getParticipantValue(message),
       participantLabel: getParticipantLabel(message),
       preview: message.text,

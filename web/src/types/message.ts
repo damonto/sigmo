@@ -6,6 +6,7 @@ export type MessageResponse = {
   timestamp: string
   status: string
   incoming: boolean
+  wifiCalling: boolean
 }
 
 export type MessagesResponse = MessageResponse[]

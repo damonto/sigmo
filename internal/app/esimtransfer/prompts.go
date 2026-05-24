@@ -1,6 +1,6 @@
 //go:build esim_transfer
 
-package esim
+package esimtransfer
 
 import (
 	"context"
@@ -8,11 +8,11 @@ import (
 	"github.com/damonto/ts43-go/ts43"
 )
 
-func (s *transferSession) userInput(ctx context.Context, event ts43.UserInputEvent) (*ts43.UserInputResult, error) {
+func (s *session) userInput(ctx context.Context, event ts43.UserInputEvent) (*ts43.UserInputResult, error) {
 	message := event.Message
-	if err := s.send(transferServerMessage{
-		Type: wsTypeTransferUserInput,
-		Input: &transferUserInputMessage{
+	if err := s.send(serverMessage{
+		Type: wsTypeUserInput,
+		Input: &userInputMessage{
 			Text:         message.Text,
 			AcceptLabel:  message.AcceptButtonLabel,
 			RejectLabel:  message.RejectButtonLabel,
@@ -33,8 +33,8 @@ func (s *transferSession) userInput(ctx context.Context, event ts43.UserInputEve
 	return result, nil
 }
 
-func (s *transferSession) confirmSourceDeletion(ctx context.Context, iccid string) error {
-	if err := s.send(transferServerMessage{Type: wsTypeTransferSourceDeletion, ICCID: iccid}); err != nil {
+func (s *session) confirmSourceDeletion(ctx context.Context, iccid string) error {
+	if err := s.send(serverMessage{Type: wsTypeSourceDeletion, ICCID: iccid}); err != nil {
 		return err
 	}
 	msg, ok := s.waitForSourceDeletion(ctx)

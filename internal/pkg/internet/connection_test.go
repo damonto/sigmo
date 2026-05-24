@@ -49,11 +49,8 @@ func TestCurrentReturnsDefaultAPNCredentials(t *testing.T) {
 		operatorID: "23491",
 	}
 
-	stateDir := t.TempDir()
 	connector, err := NewConnector(ConnectorConfig{
-		AlwaysOnPath: filepath.Join(stateDir, "internet-always-on.json"),
-		ProxyPath:    filepath.Join(stateDir, "internet-proxies.json"),
-		RoutePath:    filepath.Join(stateDir, "internet-routes.json"),
+		State: testStore(t),
 	})
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
@@ -609,10 +606,7 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 			if err := saveRouteStateForModem(path, "new-modem", "wws27u2i4", []netlink.DefaultRoute{newDefaultRoute}, []defaultRouteChange{oldRouteChange}); err != nil {
 				t.Fatalf("save new route state: %v", err)
 			}
-			alwaysOnPath := filepath.Join(t.TempDir(), "internet-always-on.json")
-			if err := saveAlwaysOnStateForModem(alwaysOnPath, "old-modem", Preferences{DefaultRoute: true, AlwaysOn: true}); err != nil {
-				t.Fatalf("save old always-on state: %v", err)
-			}
+			store := testStore(t)
 			c := &Connector{
 				connections: map[string]trackedConnection{
 					"old-modem": {
@@ -626,7 +620,8 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 				preferences: map[string]Preferences{
 					"old-modem": {DefaultRoute: true, AlwaysOn: true},
 				},
-				alwaysOnPath: alwaysOnPath,
+				state:       store,
+				persistence: fileConnectionState{routePath: path},
 			}
 			tracked := trackedConnection{
 				interfaceName: "wws27u2i4",
@@ -636,7 +631,10 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 				routeChanges:  []defaultRouteChange{oldRouteChange},
 			}
 
-			if err := c.syncDefaultRouteTakeover(path, "new-modem", &tracked); err != nil {
+			if err := c.syncAlwaysOnState("old-modem", Preferences{DefaultRoute: true, AlwaysOn: true}); err != nil {
+				t.Fatalf("sync old always-on state: %v", err)
+			}
+			if err := c.syncDefaultRouteTakeover("new-modem", &tracked); err != nil {
 				t.Fatalf("syncDefaultRouteTakeover() error = %v", err)
 			}
 
@@ -656,7 +654,7 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 			if c.preferences["old-modem"].DefaultRoute {
 				t.Fatal("old preference DefaultRoute = true, want false")
 			}
-			oldAlwaysOn, ok, err := loadAlwaysOnStateForModem(alwaysOnPath, "old-modem")
+			oldAlwaysOn, ok, err := c.loadAlwaysOnStateForModem(context.Background(), "old-modem")
 			if err != nil || !ok || oldAlwaysOn.DefaultRoute {
 				t.Fatalf("load old always-on after takeover = %#v, ok = %t, err = %v; want non-default", oldAlwaysOn, ok, err)
 			}
@@ -685,7 +683,7 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 			if !slices.Equal(oldTracked.routes, []netlink.DefaultRoute{oldDefaultRoute}) {
 				t.Fatalf("old tracked routes after restore = %#v, want %#v", oldTracked.routes, []netlink.DefaultRoute{oldDefaultRoute})
 			}
-			oldAlwaysOn, ok, err = loadAlwaysOnStateForModem(alwaysOnPath, "old-modem")
+			oldAlwaysOn, ok, err = c.loadAlwaysOnStateForModem(context.Background(), "old-modem")
 			if err != nil || !ok || !oldAlwaysOn.DefaultRoute {
 				t.Fatalf("load old always-on after restore = %#v, ok = %t, err = %v; want default", oldAlwaysOn, ok, err)
 			}
@@ -764,9 +762,10 @@ func TestSyncDefaultRouteRemovalTransfersOriginalRouteState(t *testing.T) {
 					"old-modem": {AlwaysOn: true},
 					"new-modem": {DefaultRoute: true},
 				},
+				persistence: fileConnectionState{routePath: path},
 			}
 
-			if err := c.syncDefaultRouteRemoval(path, removed); err != nil {
+			if err := c.syncDefaultRouteRemoval(removed); err != nil {
 				t.Fatalf("syncDefaultRouteRemoval() error = %v", err)
 			}
 
@@ -1725,11 +1724,8 @@ func TestConnectorRequiresModem(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			stateDir := t.TempDir()
 			connector, err := NewConnector(ConnectorConfig{
-				AlwaysOnPath: filepath.Join(stateDir, "internet-always-on.json"),
-				ProxyPath:    filepath.Join(stateDir, "internet-proxies.json"),
-				RoutePath:    filepath.Join(stateDir, "internet-routes.json"),
+				State: testStore(t),
 			})
 			if err != nil {
 				t.Fatalf("NewConnector() error = %v", err)

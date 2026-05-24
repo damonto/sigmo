@@ -237,6 +237,7 @@ void fetchCapabilities()
     :registration-state="modem.registrationState"
     :access-technology="modem.accessTechnology"
     :registered-operator-name="modem.registeredOperator.name"
+    :wifi-calling-connected="modem.wifiCallingConnected"
     :on-switch="handleSimSwitch"
   />
 

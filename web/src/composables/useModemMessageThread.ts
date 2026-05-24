@@ -12,6 +12,7 @@ export type ThreadMessageItem = {
   text: string
   timestampLabel: string
   status: string
+  wifiCalling: boolean
 }
 
 export const useModemMessageThread = ({
@@ -45,11 +46,12 @@ export const useModemMessageThread = ({
 
   const items = computed<ThreadMessageItem[]>(() =>
     threadMessages.value.map((message) => ({
-      key: `${message.sender}-${message.recipient}-${message.timestamp}`,
+      key: String(message.id),
       incoming: message.incoming,
       text: message.text,
       timestampLabel: formatMessageTimestamp(message.timestamp),
       status: message.status,
+      wifiCalling: message.wifiCalling,
     })),
   )
 

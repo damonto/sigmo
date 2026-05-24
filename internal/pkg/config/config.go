@@ -21,11 +21,13 @@ const (
 	defaultProxySOCKS5Port    = 1080
 	defaultConfigDirName      = "sigmo"
 	defaultConfigFileName     = "config.toml"
+	defaultDatabaseFileName   = "sigmo.db"
 )
 
 // Config represents the application configuration
 type Config struct {
 	App      App                `toml:"app" json:"app"`
+	Storage  Storage            `toml:"storage" json:"storage"`
 	Channels map[string]Channel `toml:"channels,omitempty" json:"channels"`
 	Modems   map[string]Modem   `toml:"modems,omitempty" json:"modems"`
 	Proxy    *Proxy             `toml:"proxy,omitempty" json:"proxy,omitempty"`
@@ -37,6 +39,10 @@ type App struct {
 	ListenAddress string   `toml:"listen_address" json:"listenAddress"`
 	AuthProviders []string `toml:"auth_providers" json:"authProviders"`
 	OTPRequired   bool     `toml:"otp_required" json:"otpRequired"`
+}
+
+type Storage struct {
+	DatabasePath string `toml:"database_path" json:"databasePath"`
 }
 
 type Channel struct {
@@ -94,6 +100,9 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
 	config.Path = path
+	if strings.TrimSpace(config.Storage.DatabasePath) == "" {
+		return nil, errors.New("storage database_path is required")
+	}
 	config.ApplyDefaults()
 	return &config, nil
 }
@@ -123,7 +132,9 @@ func DefaultPath() (string, error) {
 }
 
 func Default() *Config {
-	cfg := &Config{}
+	cfg := &Config{
+		Storage: Storage{DatabasePath: defaultDatabaseFileName},
+	}
 	cfg.ApplyDefaults()
 	return cfg
 }
@@ -151,6 +162,21 @@ func (c *Config) ApplyDefaults() {
 	if c.Modems == nil {
 		c.Modems = map[string]Modem{}
 	}
+}
+
+func (c *Config) DatabasePath() (string, error) {
+	path := strings.TrimSpace(c.Storage.DatabasePath)
+	if path == "" {
+		return "", errors.New("storage database_path is required")
+	}
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+	base := filepath.Dir(c.Path)
+	if c.Path == "" || base == "." {
+		return "", errors.New("config path is required to resolve relative database_path")
+	}
+	return filepath.Join(base, path), nil
 }
 
 func (c *Config) IsProduction() bool {
@@ -196,6 +222,7 @@ func (c *Config) Clone() Config {
 			AuthProviders: slices.Clone(c.App.AuthProviders),
 			OTPRequired:   c.App.OTPRequired,
 		},
+		Storage:  c.Storage,
 		Channels: make(map[string]Channel, len(c.Channels)),
 		Modems:   maps.Clone(c.Modems),
 		Path:     c.Path,

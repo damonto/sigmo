@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/damonto/sigmo/internal/pkg/config"
+	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
 var errCompatibleRequired = errors.New("compatible is required")
@@ -18,25 +19,26 @@ func newSettings(store *config.Store) *settings {
 	return &settings{store: store}
 }
 
-func (s *settings) Update(modemID string, req UpdateModemSettingsRequest) error {
+func (s *settings) Update(modem *mmodem.Modem, req UpdateModemSettingsRequest) error {
 	if req.Compatible == nil {
 		return errCompatibleRequired
 	}
-	modem := s.store.FindModem(modemID)
-	modem.Alias = strings.TrimSpace(req.Alias)
-	modem.Compatible = *req.Compatible
-	modem.MSS = req.MSS
-	if err := s.store.UpdateModem(modemID, modem); err != nil {
+	modemID := modem.EquipmentIdentifier
+	cfg := s.store.FindModem(modemID)
+	cfg.Alias = strings.TrimSpace(req.Alias)
+	cfg.Compatible = *req.Compatible
+	cfg.MSS = req.MSS
+	if err := s.store.UpdateModem(modemID, cfg); err != nil {
 		return fmt.Errorf("save modem config: %w", err)
 	}
 	return nil
 }
 
-func (s *settings) Get(modemID string) *ModemSettingsResponse {
-	modem := s.store.FindModem(modemID)
+func (s *settings) Get(modem *mmodem.Modem) *ModemSettingsResponse {
+	cfg := s.store.FindModem(modem.EquipmentIdentifier)
 	return &ModemSettingsResponse{
-		Alias:      modem.Alias,
-		Compatible: modem.Compatible,
-		MSS:        modem.MSS,
+		Alias:      cfg.Alias,
+		Compatible: cfg.Compatible,
+		MSS:        cfg.MSS,
 	}
 }

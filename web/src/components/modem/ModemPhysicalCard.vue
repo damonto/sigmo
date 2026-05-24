@@ -53,6 +53,7 @@ const { t } = useI18n()
           :registration-state="props.modem.registrationState"
           :access-technology="props.modem.accessTechnology"
           :registered-operator-name="props.modem.registeredOperator.name"
+          :wifi-calling-connected="props.modem.wifiCallingConnected"
           size="md"
         />
       </div>

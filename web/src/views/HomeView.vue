@@ -27,6 +27,7 @@ const modemItems = computed<HomeModemItem[]>(() =>
     supportsEsim: modem.supportsEsim,
     number: modem.number ?? '',
     signalQuality: modem.signalQuality,
+    wifiCallingConnected: modem.wifiCallingConnected ?? false,
   })),
 )
 

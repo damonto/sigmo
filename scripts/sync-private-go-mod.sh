@@ -35,13 +35,13 @@ read_private_modules() {
 	local modules=()
 	local module
 
-	while IFS= read -r module; do
+	for module in ${PRIVATE_GO_MODULES:-}; do
 		module="$(trim_space "${module}")"
 		if [ -z "${module}" ]; then
 			continue
 		fi
 		modules+=("${module}")
-	done <<< "${PRIVATE_GO_MODULES:-}"
+	done
 
 	if [ "${#modules[@]}" -eq 0 ]; then
 		echo "PRIVATE_GO_MODULES must contain at least one module." >&2

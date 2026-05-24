@@ -3,6 +3,7 @@ package features
 import "slices"
 
 const EsimTransfer = "esimTransfer"
+const WiFiCalling = "wifiCalling"
 
 var registered []string
 

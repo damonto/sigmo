@@ -1,6 +1,6 @@
 //go:build esim_transfer
 
-package esim
+package esimtransfer
 
 import (
 	"context"

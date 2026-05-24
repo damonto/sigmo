@@ -1,45 +1,48 @@
 [app]
-  environment = "development"
-  listen_address = "0.0.0.0:9527"
-  otp_required = true
-  auth_providers = ["telegram"]
+environment = "development"
+listen_address = "0.0.0.0:9527"
+otp_required = true
+auth_providers = ["telegram"]
+
+[storage]
+database_path = "sigmo.db"
 
 [proxy]
-  listen_address = "127.0.0.1"
-  http_port = 8080
-  socks5_port = 1080
-  password = "change_me"
+listen_address = "127.0.0.1"
+http_port = 8080
+socks5_port = 1080
+password = "change_me"
 
 [channels]
-  [channels.telegram]
-    bot_token = "Your Telegram Bot Token"
-    recipients = ["1231321"]
+[channels.telegram]
+bot_token = "Your Telegram Bot Token"
+recipients = ["1231321"]
 
-  [channels.bark]
-    endpoint = "https://api.day.app"
-    recipients = ["your_device_key"]
+[channels.bark]
+endpoint = "https://api.day.app"
+recipients = ["your_device_key"]
 
-  [channels.gotify]
-    endpoint = "https://push.example.de"
-    recipients = ["your_app_token"]
-    priority = 5
+[channels.gotify]
+endpoint = "https://push.example.de"
+recipients = ["your_app_token"]
+priority = 5
 
-  [channels.sc3]
-    endpoint = "https://123.push.ft07.com/send/your_sendkey.send"
+[channels.sc3]
+endpoint = "https://123.push.ft07.com/send/your_sendkey.send"
 
-  [channels.http]
-    endpoint = "https://httpbin.org/post"
+[channels.http]
+endpoint = "https://httpbin.org/post"
 
-    [channels.http.headers]
-      Authorization = "Bearer 1234567890"
-      Content-Type = "application/json"
+[channels.http.headers]
+Authorization = "Bearer 1234567890"
+Content-Type = "application/json"
 
-  [channels.email]
-    smtp_host = "smtp.example.com"
-    smtp_port = 587
-    smtp_username = "user@example.com"
-    smtp_password = "app_password"
-    from = "sigmo@example.com"
-    recipients = ["ops@example.com"]
-    tls_policy = "mandatory"
-    ssl = false
+[channels.email]
+smtp_host = "smtp.example.com"
+smtp_port = 587
+smtp_username = "user@example.com"
+smtp_password = "app_password"
+from = "sigmo@example.com"
+recipients = ["ops@example.com"]
+tls_policy = "mandatory"
+ssl = false

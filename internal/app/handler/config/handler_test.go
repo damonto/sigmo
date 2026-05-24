@@ -17,6 +17,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	pkgconfig "github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/internet"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 	appvalidator "github.com/damonto/sigmo/internal/pkg/validator"
 )
 
@@ -400,13 +401,13 @@ func TestUpdate(t *testing.T) {
 				t.Fatalf("Save() error = %v", err)
 			}
 			store := pkgconfig.NewStore(cfg)
-			relay, err := forwarder.New(store, nil)
+			relay, err := forwarder.New(store, nil, testStorage(t))
 			if err != nil {
 				t.Fatalf("forwarder.New() error = %v", err)
 			}
 			internetConnector, err := internet.NewConnector(internet.ConnectorConfig{
-				Proxy:        internet.NewProxy(internet.ProxyConfig{}),
-				AlwaysOnPath: filepath.Join(t.TempDir(), "internet-always-on.json"),
+				Proxy: internet.NewProxy(internet.ProxyConfig{}),
+				State: testStorage(t),
 			})
 			if err != nil {
 				t.Fatalf("internet.NewConnector() error = %v", err)
@@ -476,7 +477,7 @@ func TestUpdatePersistsConfigWhenProxyReloadFails(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 	store := pkgconfig.NewStore(cfg)
-	relay, err := forwarder.New(store, nil)
+	relay, err := forwarder.New(store, nil, testStorage(t))
 	if err != nil {
 		t.Fatalf("forwarder.New() error = %v", err)
 	}
@@ -495,8 +496,8 @@ func TestUpdatePersistsConfigWhenProxyReloadFails(t *testing.T) {
 		}
 	})
 	internetConnector, err := internet.NewConnector(internet.ConnectorConfig{
-		Proxy:        proxy,
-		AlwaysOnPath: filepath.Join(t.TempDir(), "internet-always-on.json"),
+		Proxy: proxy,
+		State: testStorage(t),
 	})
 	if err != nil {
 		t.Fatalf("internet.NewConnector() error = %v", err)
@@ -555,6 +556,20 @@ func TestUpdatePersistsConfigWhenProxyReloadFails(t *testing.T) {
 	if status.Password != "old" {
 		t.Fatalf("proxy password = %q, want old", status.Password)
 	}
+}
+
+func testStorage(t *testing.T) *storage.Store {
+	t.Helper()
+	store, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
+	if err != nil {
+		t.Fatalf("storage.Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+	return store
 }
 
 func channelSchema(schema Schema, key string) (ChannelSchema, bool) {

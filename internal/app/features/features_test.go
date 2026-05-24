@@ -1,4 +1,4 @@
-//go:build !esim_transfer
+//go:build !esim_transfer && !wifi_calling
 
 package features
 

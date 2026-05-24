@@ -21,7 +21,9 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/validator"
+	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 var (
@@ -50,6 +52,22 @@ func main() {
 	applyLogLevel(store)
 	httpapi.SetExposeInternalErrors(!store.IsProduction())
 	slog.Info("server starting", "version", BuildVersion)
+
+	dbPath, err := cfg.DatabasePath()
+	if err != nil {
+		slog.Error("configure storage", "error", err)
+		os.Exit(1)
+	}
+	db, err := storage.Open(context.Background(), dbPath)
+	if err != nil {
+		slog.Error("configure storage", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			slog.Warn("close storage", "error", err)
+		}
+	}()
 
 	registry, err := modem.NewRegistry()
 	if err != nil {
@@ -85,7 +103,7 @@ func main() {
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch, http.MethodHead, http.MethodOptions},
 		AllowHeaders: []string{"*"},
 	}))
-	internetConnector, err := newInternetConnector(store)
+	internetConnector, err := newInternetConnector(store, db)
 	if err != nil {
 		slog.Error("configure internet connector", "error", err)
 		os.Exit(1)
@@ -98,22 +116,24 @@ func main() {
 		slog.Error("recover internet connections", "error", err)
 	}
 	cancelStartup()
-	relay, err := forwarder.New(store, registry)
+	relay, err := forwarder.New(store, registry, db)
 	if err != nil {
 		slog.Error("unable to configure message relay", "error", err)
 		os.Exit(1)
 	}
-	networkPreferences, err := modem.NewNetworkPreferences()
-	if err != nil {
-		slog.Error("configure network preferences", "error", err)
-		os.Exit(1)
-	}
+	wifiCalling := wificalling.New(wificalling.Config{
+		Store:      db,
+		OnIncoming: relay.ForwardWiFiCallingSMS,
+	})
+	networkPreferences := modem.NewNetworkPreferencesWithStore(db)
 	router.Register(server, router.RegisterConfig{
 		Store:              store,
 		Registry:           registry,
 		Internet:           internetConnector,
 		Relay:              relay,
 		NetworkPreferences: networkPreferences,
+		Storage:            db,
+		WiFiCalling:        wifiCalling,
 	})
 
 	go func() {
@@ -139,6 +159,13 @@ func main() {
 	go func() {
 		if err := relay.Run(ctx); err != nil {
 			slog.Error("message relay stopped", "error", err)
+			stop()
+		}
+	}()
+
+	go func() {
+		if err := wifiCalling.Run(ctx, registry); err != nil {
+			slog.Error("Wi-Fi Calling coordinator stopped", "error", err)
 			stop()
 		}
 	}()
@@ -173,7 +200,7 @@ func applyLogLevel(store *config.Store) {
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 }
 
-func newInternetConnector(store *config.Store) (*internet.Connector, error) {
+func newInternetConnector(store *config.Store, db *storage.Store) (*internet.Connector, error) {
 	proxyConfig := store.ProxySettings()
 	proxy := internet.NewProxy(internet.ProxyConfig{
 		ListenAddress: proxyConfig.ListenAddress,
@@ -181,7 +208,7 @@ func newInternetConnector(store *config.Store) (*internet.Connector, error) {
 		SOCKS5Port:    proxyConfig.SOCKS5Port,
 		Password:      proxyConfig.Password,
 	})
-	return internet.NewConnector(internet.ConnectorConfig{Proxy: proxy})
+	return internet.NewConnector(internet.ConnectorConfig{Proxy: proxy, State: db})
 }
 
 func recoverInternetConnections(ctx context.Context, registry *modem.Registry, connector *internet.Connector) error {

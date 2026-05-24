@@ -12,6 +12,7 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 const (
@@ -58,22 +59,19 @@ type Connection struct {
 }
 
 type Connector struct {
-	mu           sync.Mutex
-	operationMu  sync.Mutex
-	connections  map[string]trackedConnection
-	preferences  map[string]Preferences
-	operations   map[string]*sync.Mutex
-	proxy        *Proxy
-	alwaysOnPath string
-	proxyPath    string
-	routePath    string
+	mu          sync.Mutex
+	operationMu sync.Mutex
+	connections map[string]trackedConnection
+	preferences map[string]Preferences
+	operations  map[string]*sync.Mutex
+	proxy       *Proxy
+	state       *storage.Store
+	persistence connectionStateStore
 }
 
 type ConnectorConfig struct {
-	Proxy        *Proxy
-	AlwaysOnPath string
-	ProxyPath    string
-	RoutePath    string
+	Proxy *Proxy
+	State *storage.Store
 }
 
 type internetModem interface {
@@ -148,27 +146,16 @@ func (m modemAccess) restart(ctx context.Context, compatible bool) error {
 }
 
 func NewConnector(cfg ConnectorConfig) (*Connector, error) {
-	if cfg.AlwaysOnPath == "" {
-		path, err := defaultAlwaysOnStatePath()
-		if err != nil {
-			return nil, fmt.Errorf("resolve always on state path: %w", err)
-		}
-		cfg.AlwaysOnPath = path
-	}
-	if cfg.ProxyPath == "" {
-		cfg.ProxyPath = proxyStatePath
-	}
-	if cfg.RoutePath == "" {
-		cfg.RoutePath = defaultRouteStatePath
+	if cfg.State == nil {
+		return nil, errors.New("storage is required")
 	}
 	return &Connector{
-		connections:  make(map[string]trackedConnection),
-		preferences:  make(map[string]Preferences),
-		operations:   make(map[string]*sync.Mutex),
-		proxy:        cfg.Proxy,
-		alwaysOnPath: cfg.AlwaysOnPath,
-		proxyPath:    cfg.ProxyPath,
-		routePath:    cfg.RoutePath,
+		connections: make(map[string]trackedConnection),
+		preferences: make(map[string]Preferences),
+		operations:  make(map[string]*sync.Mutex),
+		proxy:       cfg.Proxy,
+		state:       cfg.State,
+		persistence: dbConnectionState{store: cfg.State},
 	}, nil
 }
 
@@ -221,7 +208,7 @@ func (c *Connector) current(ctx context.Context, modem internetModem) (*Connecti
 					if err == nil {
 						err = c.syncCleanedUpDefaultRouteState(tracked)
 					}
-					err = errors.Join(err, restoreStaleDefaultRouteStatesWithState(c.routePath, routeStateRestoreTarget{modemID: modemID}, netlinkDefaultRouteOps))
+					err = errors.Join(err, restoreStaleDefaultRouteStatesWithStore(c.persistence, routeStateRestoreTarget{modemID: modemID}, netlinkDefaultRouteOps))
 					if err != nil {
 						return nil, fmt.Errorf("cleanup disconnected bearer: %w", err)
 					}
@@ -269,7 +256,7 @@ func (c *Connector) current(ctx context.Context, modem internetModem) (*Connecti
 		return disconnectedConnection(prefs), nil
 	}
 	bearer := current.bearer
-	tracked, metric, ok, err := recoverTrackedConnection(ctx, c.proxyPath, c.routePath, modemID, bearer, prefs)
+	tracked, metric, ok, err := recoverTrackedConnection(ctx, c.persistence, modemID, bearer, prefs)
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +290,7 @@ func (c *Connector) recover(ctx context.Context, modem internetModem) error {
 		return nil
 	}
 
-	tracked, _, ok, err := recoverTrackedConnection(ctx, c.proxyPath, c.routePath, modemID, current.bearer, prefs)
+	tracked, _, ok, err := recoverTrackedConnection(ctx, c.persistence, modemID, current.bearer, prefs)
 	if err != nil {
 		return err
 	}
@@ -349,7 +336,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 	}
 	prefs = bearerPreferences(ctx, bearer, prefs)
 
-	tracked, err := configureBearer(ctx, c.routePath, modemID, bearer, prefs)
+	tracked, err := configureBearer(ctx, c.persistence, modemID, bearer, prefs)
 	if err != nil {
 		disconnectErr := bearer.Disconnect(ctx)
 		return nil, errors.Join(err, disconnectErr)
@@ -363,7 +350,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 		return nil, errors.Join(err, cleanupErr, disconnectErr)
 	}
 	if prefs.ProxyEnabled {
-		if err := saveProxyStateForModem(c.proxyPath, modemID, tracked.interfaceName); err != nil {
+		if err := c.persistence.saveProxyStateForModem(modemID, tracked.interfaceName); err != nil {
 			cleanupErr := c.cleanupTracked(ctx, modemID, tracked)
 			disconnectErr := bearer.Disconnect(ctx)
 			return nil, errors.Join(fmt.Errorf("save proxy state: %w", err), cleanupErr, disconnectErr)
@@ -381,7 +368,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 		disconnectErr := bearer.Disconnect(ctx)
 		return nil, errors.Join(fmt.Errorf("sync always on state: %w", err), cleanupErr, disconnectErr)
 	}
-	if err := c.syncDefaultRouteTakeover(c.routePath, modemID, &tracked); err != nil {
+	if err := c.syncDefaultRouteTakeover(modemID, &tracked); err != nil {
 		cleanupErr := c.cleanupTracked(ctx, modemID, tracked)
 		disconnectErr := bearer.Disconnect(ctx)
 		return nil, errors.Join(fmt.Errorf("sync default route takeover: %w", err), cleanupErr, disconnectErr)
@@ -420,7 +407,7 @@ func (c *Connector) disconnect(ctx context.Context, modem internetModem, clearAl
 			err = c.syncCleanedUpDefaultRouteState(tracked)
 		}
 		err = errors.Join(err, modem.disconnectBearer(ctx, tracked.bearerPath))
-		err = errors.Join(err, restoreStaleDefaultRouteStatesWithState(c.routePath, routeStateRestoreTarget{modemID: modemID}, netlinkDefaultRouteOps))
+		err = errors.Join(err, restoreStaleDefaultRouteStatesWithStore(c.persistence, routeStateRestoreTarget{modemID: modemID}, netlinkDefaultRouteOps))
 		c.deleteConnection(modemID)
 		err = errors.Join(result, err)
 		if err != nil {
@@ -456,9 +443,9 @@ func (c *Connector) disconnect(ctx context.Context, modem internetModem, clearAl
 	bearer := current.bearer
 	prefs := recoverPreferences(ctx, bearer, c.preference(modemID))
 	interfaceName, interfaceErr := bearer.Interface(ctx)
-	err = cleanupBearer(ctx, c.routePath, modemID, bearer, prefs)
+	err = cleanupBearer(ctx, c.persistence, modemID, bearer, prefs)
 	if err == nil && interfaceErr == nil {
-		err = deleteRouteState(c.routePath, interfaceName)
+		err = c.persistence.deleteRouteState(interfaceName)
 	}
 	if interfaceErr == nil {
 		err = errors.Join(err, c.cleanupProxy(modemID, interfaceName))
@@ -466,7 +453,7 @@ func (c *Connector) disconnect(ctx context.Context, modem internetModem, clearAl
 		err = errors.Join(err, c.cleanupProxyForModem(modemID))
 	}
 	err = errors.Join(err, bearer.Disconnect(ctx))
-	err = errors.Join(err, restoreStaleDefaultRouteStatesWithState(c.routePath, routeStateRestoreTarget{modemID: modemID}, netlinkDefaultRouteOps))
+	err = errors.Join(err, restoreStaleDefaultRouteStatesWithStore(c.persistence, routeStateRestoreTarget{modemID: modemID}, netlinkDefaultRouteOps))
 	err = errors.Join(result, err)
 	if err != nil {
 		return fmt.Errorf("disconnect bearer: %w", err)
@@ -480,15 +467,15 @@ func (c *Connector) cleanupTracked(ctx context.Context, modemID string, tracked 
 	if !tracked.prefs.DefaultRoute {
 		cleanup.routeChanges = nil
 	}
-	cleanupErr := cleanupApplied(ctx, c.routePath, cleanup)
+	cleanupErr := cleanupApplied(ctx, c.persistence, cleanup)
 	if cleanupErr == nil {
-		cleanupErr = deleteRouteState(c.routePath, tracked.interfaceName)
+		cleanupErr = c.persistence.deleteRouteState(tracked.interfaceName)
 	}
 	err = errors.Join(err, cleanupErr)
 	return err
 }
 
-func (c *Connector) syncDefaultRouteTakeover(path string, modemID string, tracked *trackedConnection) error {
+func (c *Connector) syncDefaultRouteTakeover(modemID string, tracked *trackedConnection) error {
 	if tracked == nil || len(tracked.routeChanges) == 0 {
 		return nil
 	}
@@ -518,7 +505,7 @@ func (c *Connector) syncDefaultRouteTakeover(path string, modemID string, tracke
 		return nil
 	}
 
-	if err := putRouteStateForModem(path, modemID, tracked.interfaceName, tracked.routes, tracked.routeChanges); err != nil {
+	if err := c.persistence.putRouteStateForModem(modemID, tracked.interfaceName, tracked.routes, tracked.routeChanges); err != nil {
 		return fmt.Errorf("save takeover route state: %w", err)
 	}
 	for ownerID := range affected {
@@ -584,10 +571,10 @@ func (c *Connector) syncCleanedUpDefaultRouteState(tracked trackedConnection) er
 	if tracked.prefs.DefaultRoute {
 		return c.syncDefaultRouteRestore(tracked.routeChanges)
 	}
-	return c.syncDefaultRouteRemoval(c.routePath, tracked)
+	return c.syncDefaultRouteRemoval(tracked)
 }
 
-func (c *Connector) syncDefaultRouteRemoval(path string, removed trackedConnection) error {
+func (c *Connector) syncDefaultRouteRemoval(removed trackedConnection) error {
 	if len(removed.routes) == 0 {
 		return nil
 	}
@@ -613,10 +600,10 @@ func (c *Connector) syncDefaultRouteRemoval(path string, removed trackedConnecti
 
 	for ownerID, owner := range affected {
 		if len(owner.routeChanges) > 0 {
-			if err := putRouteStateForModem(path, ownerID, owner.interfaceName, owner.routes, owner.routeChanges); err != nil {
+			if err := c.persistence.putRouteStateForModem(ownerID, owner.interfaceName, owner.routes, owner.routeChanges); err != nil {
 				return fmt.Errorf("save inherited route state for %s: %w", owner.interfaceName, err)
 			}
-		} else if err := deleteRouteState(path, owner.interfaceName); err != nil {
+		} else if err := c.persistence.deleteRouteState(owner.interfaceName); err != nil {
 			return fmt.Errorf("delete empty route state for %s: %w", owner.interfaceName, err)
 		}
 	}
@@ -720,7 +707,7 @@ func (c *Connector) preference(modemID string) Preferences {
 
 func (c *Connector) preferenceWithAlwaysOn(modemID string) Preferences {
 	prefs := c.preference(modemID)
-	alwaysOn, ok, err := loadAlwaysOnStateForModem(c.alwaysOnPath, modemID)
+	alwaysOn, ok, err := c.loadAlwaysOnStateForModem(context.Background(), modemID)
 	if err != nil || !ok {
 		return prefs
 	}
@@ -729,9 +716,9 @@ func (c *Connector) preferenceWithAlwaysOn(modemID string) Preferences {
 
 func (c *Connector) syncAlwaysOnState(modemID string, prefs Preferences) error {
 	if prefs.AlwaysOn {
-		return saveAlwaysOnStateForModem(c.alwaysOnPath, modemID, prefs)
+		return c.state.Put(context.Background(), modemScope(modemID), alwaysOnKVKey, prefs)
 	}
-	return deleteAlwaysOnStateForModem(c.alwaysOnPath, modemID)
+	return c.state.Delete(context.Background(), modemScope(modemID), alwaysOnKVKey)
 }
 
 func (c *Connector) clearAlwaysOnState(modemID string) error {
@@ -742,7 +729,7 @@ func (c *Connector) clearAlwaysOnState(modemID string) error {
 	} else {
 		c.deletePreference(modemID)
 	}
-	return deleteAlwaysOnStateForModem(c.alwaysOnPath, modemID)
+	return c.state.Delete(context.Background(), modemScope(modemID), alwaysOnKVKey)
 }
 
 func (c *Connector) lockModem(modemID string) func() {
@@ -857,7 +844,7 @@ func (c *Connector) syncProxyPreference(modemID string, interfaceName string, pr
 }
 
 func (c *Connector) cleanupProxy(modemID string, interfaceName string) error {
-	err := deleteProxyState(c.proxyPath, interfaceName)
+	err := c.persistence.deleteProxyState(interfaceName)
 	if proxy := c.proxyInstance(); proxy != nil {
 		err = errors.Join(err, proxy.Unregister(modemID))
 	}
@@ -873,7 +860,7 @@ func (c *Connector) cleanupProxyInterfaces(modemID string, interfaceNames []stri
 }
 
 func (c *Connector) cleanupProxyForModem(modemID string) error {
-	interfaceNames, err := proxyInterfacesForModem(c.proxyPath, modemID)
+	interfaceNames, err := c.persistence.proxyInterfacesForModem(modemID)
 	if err != nil {
 		return err
 	}
@@ -887,7 +874,7 @@ func (c *Connector) cleanupProxyForModem(modemID string) error {
 func (c *Connector) cleanupStaleConnectionState(modemID string, interfaceNames ...string) error {
 	err := c.cleanupProxyInterfaces(modemID, interfaceNames)
 	err = errors.Join(err, c.cleanupProxyForModem(modemID))
-	err = errors.Join(err, restoreStaleDefaultRouteStatesWithState(c.routePath, routeStateRestoreTarget{modemID: modemID, interfaceNames: interfaceNames}, netlinkDefaultRouteOps))
+	err = errors.Join(err, restoreStaleDefaultRouteStatesWithStore(c.persistence, routeStateRestoreTarget{modemID: modemID, interfaceNames: interfaceNames}, netlinkDefaultRouteOps))
 	for _, interfaceName := range interfaceNames {
 		if strings.TrimSpace(interfaceName) == "" {
 			continue

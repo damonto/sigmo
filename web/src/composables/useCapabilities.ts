@@ -4,7 +4,7 @@ import { useCapabilityApi } from '@/apis/capability'
 
 export const FEATURE = {
   esimTransfer: 'esimTransfer',
-  vowifi: 'vowifi',
+  wifiCalling: 'wifiCalling',
 } as const
 
 export const useCapabilities = () => {

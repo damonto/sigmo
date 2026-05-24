@@ -31,7 +31,7 @@ type trackedConnection struct {
 	routeChanges  []defaultRouteChange
 }
 
-func configureBearer(ctx context.Context, routePath string, modemID string, bearer *mmodem.Bearer, prefs Preferences) (trackedConnection, error) {
+func configureBearer(ctx context.Context, stateStore connectionStateStore, modemID string, bearer *mmodem.Bearer, prefs Preferences) (trackedConnection, error) {
 	var tracked trackedConnection
 
 	interfaceName, err := bearer.Interface(ctx)
@@ -80,7 +80,7 @@ func configureBearer(ctx context.Context, routePath string, modemID string, bear
 	defer func() {
 		if !release {
 			// Best effort: the original netlink error is returned to the caller.
-			_ = cleanupApplied(ctx, routePath, tracked)
+			_ = cleanupApplied(ctx, stateStore, tracked)
 		}
 	}()
 	for _, address := range addresses {
@@ -90,10 +90,10 @@ func configureBearer(ctx context.Context, routePath string, modemID string, bear
 		tracked.addresses = append(tracked.addresses, address)
 	}
 	if prefs.DefaultRoute {
-		if err := restoreStaleDefaultRouteStatesWithState(routePath, routeStateRestoreTarget{modemID: modemID, interfaceNames: []string{interfaceName}}, netlinkDefaultRouteOps); err != nil {
+		if err := restoreStaleDefaultRouteStatesWithStore(stateStore, routeStateRestoreTarget{modemID: modemID, interfaceNames: []string{interfaceName}}, netlinkDefaultRouteOps); err != nil {
 			return tracked, fmt.Errorf("restore previous default route state: %w", err)
 		}
-		changes, err := takeoverDefaultRoutesWithState(routePath, modemID, interfaceName, routes, netlinkDefaultRouteOps)
+		changes, err := takeoverDefaultRoutesWithStore(stateStore, modemID, interfaceName, routes, netlinkDefaultRouteOps)
 		tracked.routeChanges = changes
 		if err != nil {
 			return tracked, fmt.Errorf("take over default route: %w", err)
@@ -110,7 +110,7 @@ func configureBearer(ctx context.Context, routePath string, modemID string, bear
 	return tracked, nil
 }
 
-func cleanupBearer(ctx context.Context, routePath string, modemID string, bearer *mmodem.Bearer, prefs Preferences) error {
+func cleanupBearer(ctx context.Context, stateStore connectionStateStore, modemID string, bearer *mmodem.Bearer, prefs Preferences) error {
 	interfaceName, err := bearer.Interface(ctx)
 	if err != nil {
 		return fmt.Errorf("read bearer interface: %w", err)
@@ -137,11 +137,11 @@ func cleanupBearer(ctx context.Context, routePath string, modemID string, bearer
 		}
 		return err
 	}
-	routeChanges, _, err := loadRouteStateForModem(routePath, modemID, interfaceName)
+	routeChanges, _, err := stateStore.loadRouteStateForModem(modemID, interfaceName)
 	if err != nil {
 		return fmt.Errorf("load default route state: %w", err)
 	}
-	return cleanupApplied(ctx, routePath, trackedConnection{
+	return cleanupApplied(ctx, stateStore, trackedConnection{
 		interfaceName: interfaceName,
 		addresses:     addresses,
 		routes:        routes,
@@ -149,7 +149,7 @@ func cleanupBearer(ctx context.Context, routePath string, modemID string, bearer
 	})
 }
 
-func cleanupApplied(ctx context.Context, routePath string, tracked trackedConnection) error {
+func cleanupApplied(ctx context.Context, stateStore connectionStateStore, tracked trackedConnection) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -157,7 +157,7 @@ func cleanupApplied(ctx context.Context, routePath string, tracked trackedConnec
 	for i := len(tracked.routes) - 1; i >= 0; i-- {
 		err = errors.Join(err, netlink.DeleteDefaultRoute(tracked.routes[i]))
 	}
-	err = errors.Join(err, cleanupDefaultRouteChanges(routePath, tracked.interfaceName, tracked.routeChanges, netlinkDefaultRouteOps))
+	err = errors.Join(err, cleanupDefaultRouteChangesWithStore(stateStore, tracked.interfaceName, tracked.routeChanges, netlinkDefaultRouteOps))
 	for i := len(tracked.addresses) - 1; i >= 0; i-- {
 		err = errors.Join(err, netlink.DeleteAddress(tracked.interfaceName, tracked.addresses[i]))
 	}
@@ -451,7 +451,7 @@ func bearerPreferences(ctx context.Context, bearer *mmodem.Bearer, fallback Pref
 	return fallback
 }
 
-func recoverTrackedConnection(ctx context.Context, proxyPath string, routePath string, modemID string, bearer *mmodem.Bearer, fallback Preferences) (trackedConnection, int, bool, error) {
+func recoverTrackedConnection(ctx context.Context, stateStore connectionStateStore, modemID string, bearer *mmodem.Bearer, fallback Preferences) (trackedConnection, int, bool, error) {
 	prefs := recoverPreferences(ctx, bearer, fallback)
 	metric := 0
 
@@ -480,7 +480,7 @@ func recoverTrackedConnection(ctx context.Context, proxyPath string, routePath s
 	} else {
 		metric = 0
 	}
-	proxyEnabled, proxyStateFound, err := loadProxyStateForModem(proxyPath, modemID, interfaceName)
+	proxyEnabled, proxyStateFound, err := stateStore.loadProxyStateForModem(modemID, interfaceName)
 	if err != nil {
 		return trackedConnection{}, 0, false, fmt.Errorf("load proxy state: %w", err)
 	}
@@ -495,13 +495,13 @@ func recoverTrackedConnection(ctx context.Context, proxyPath string, routePath s
 		}
 		return trackedConnection{}, 0, false, err
 	}
-	routeChanges, routeStateFound, err := loadRouteStateForModem(routePath, modemID, interfaceName)
+	routeChanges, routeStateFound, err := stateStore.loadRouteStateForModem(modemID, interfaceName)
 	if err != nil {
 		return trackedConnection{}, 0, false, fmt.Errorf("load default route state: %w", err)
 	}
 	if prefs.DefaultRoute && !routeStateFound {
 		slog.Debug("recovering connected bearer default route takeover", "modem", modemID, "interface", interfaceName)
-		routeChanges, err = takeoverDefaultRoutesWithState(routePath, modemID, interfaceName, routes, netlinkDefaultRouteOps)
+		routeChanges, err = takeoverDefaultRoutesWithStore(stateStore, modemID, interfaceName, routes, netlinkDefaultRouteOps)
 		if err != nil {
 			return trackedConnection{}, 0, false, fmt.Errorf("take over recovered default route: %w", err)
 		}

@@ -1,6 +1,6 @@
 //go:build esim_transfer
 
-package esim
+package esimtransfer
 
 import (
 	"context"
@@ -13,79 +13,63 @@ import (
 	sgp22 "github.com/damonto/euicc-go/v2"
 	"github.com/damonto/ts43-go/sim"
 	"github.com/damonto/ts43-go/ts43"
-	"github.com/labstack/echo/v5"
 
-	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/carrier"
 	"github.com/damonto/sigmo/internal/pkg/config"
 	ilpa "github.com/damonto/sigmo/internal/pkg/lpa"
-	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
-func transferProfileError(c *echo.Context, err error) error {
-	if errors.Is(err, errSourceIMEIRequired) {
-		return httpapi.BadRequest(c, errorCodeTransferSourceIMEIRequired, err)
-	}
-	if errors.Is(err, mmodem.ErrNotFound) {
-		return httpapi.NotFound(c, errorCodeTransferSourceNotFound, err)
-	}
-	if errors.Is(err, errTransferSourceUnsupported) {
-		return httpapi.BadRequest(c, errorCodeTransferSourceUnsupported, err)
-	}
-	return httpapi.Internal(c, errorCodeListTransferProfilesFailed, err)
-}
-
-func (h *Handler) transferProfiles(ctx context.Context, cfg *config.Config, req TransferProfilesRequest) ([]TransferProfileResponse, error) {
-	candidates, err := h.transferProfileCandidates(ctx, cfg, req)
+func (s *Service) profileResponses(ctx context.Context, cfg *config.Config, req ProfilesRequest) ([]ProfileResponse, error) {
+	candidates, err := s.profileCandidates(ctx, cfg, req)
 	if err != nil {
 		return nil, err
 	}
-	response := make([]TransferProfileResponse, 0, len(candidates))
+	response := make([]ProfileResponse, 0, len(candidates))
 	for _, candidate := range candidates {
 		response = append(response, candidate.response)
 	}
 	return response, nil
 }
 
-func (h *Handler) transferProfileCandidates(ctx context.Context, cfg *config.Config, req TransferProfilesRequest) ([]transferProfileCandidate, error) {
+func (s *Service) profileCandidates(ctx context.Context, cfg *config.Config, req ProfilesRequest) ([]profileCandidate, error) {
 	switch req.SourceType {
-	case transferSourceModem:
-		return h.modemTransferProfileCandidates(ctx, cfg, req)
-	case transferSourceCCID:
-		return h.ccidTransferProfileCandidates(ctx, cfg, req)
+	case SourceModem:
+		return s.modemProfileCandidates(ctx, cfg, req)
+	case SourceCCID:
+		return s.ccidProfileCandidates(ctx, cfg, req)
 	default:
-		return nil, errTransferSourceUnsupported
+		return nil, ErrSourceUnsupported
 	}
 }
 
-func (h *Handler) modemTransferProfileCandidates(ctx context.Context, cfg *config.Config, req TransferProfilesRequest) ([]transferProfileCandidate, error) {
-	modem, err := h.registry.Find(ctx, req.SourceID)
+func (s *Service) modemProfileCandidates(ctx context.Context, cfg *config.Config, req ProfilesRequest) ([]profileCandidate, error) {
+	modem, err := s.registry.Find(ctx, req.SourceID)
 	if err != nil {
 		return nil, err
 	}
 	profiles, err := sourceModemProfiles(modem, cfg)
 	if err == nil {
-		return esimTransferCandidates(profiles), nil
+		return esimCandidates(profiles), nil
 	}
 	if !errors.Is(err, ilpa.ErrNoSupportedAID) {
 		return nil, err
 	}
-	return h.physicalTransferProfileCandidates(ctx, cfg, req)
+	return s.physicalProfileCandidates(ctx, cfg, req)
 }
 
-func (h *Handler) ccidTransferProfileCandidates(ctx context.Context, cfg *config.Config, req TransferProfilesRequest) ([]transferProfileCandidate, error) {
+func (s *Service) ccidProfileCandidates(ctx context.Context, cfg *config.Config, req ProfilesRequest) ([]profileCandidate, error) {
 	profiles, err := sourceCCIDProfiles(cfg, req.SourceID)
 	if err == nil {
-		return esimTransferCandidates(profiles), nil
+		return esimCandidates(profiles), nil
 	}
 	if !errors.Is(err, ilpa.ErrNoSupportedAID) {
 		return nil, err
 	}
-	return h.physicalTransferProfileCandidates(ctx, cfg, req)
+	return s.physicalProfileCandidates(ctx, cfg, req)
 }
 
-func (h *Handler) physicalTransferProfileCandidates(ctx context.Context, cfg *config.Config, req TransferProfilesRequest) ([]transferProfileCandidate, error) {
-	source, err := h.openSource(ctx, cfg, transferStart{
+func (s *Service) physicalProfileCandidates(ctx context.Context, cfg *config.Config, req ProfilesRequest) ([]profileCandidate, error) {
+	source, err := s.openSource(ctx, cfg, Start{
 		SourceType: req.SourceType,
 		SourceID:   req.SourceID,
 		SourceIMEI: req.SourceIMEI,
@@ -99,8 +83,8 @@ func (h *Handler) physicalTransferProfileCandidates(ctx context.Context, cfg *co
 	if err != nil {
 		return nil, fmt.Errorf("read source SIM identity: %w", err)
 	}
-	candidate := physicalTransferCandidate(*identity)
-	return []transferProfileCandidate{candidate}, nil
+	candidate := physicalCandidate(*identity)
+	return []profileCandidate{candidate}, nil
 }
 
 func sourceCCIDProfiles(cfg *config.Config, sourceID string) ([]*sgp22.ProfileInfo, error) {
@@ -108,7 +92,7 @@ func sourceCCIDProfiles(cfg *config.Config, sourceID string) ([]*sgp22.ProfileIn
 	if err != nil {
 		return nil, fmt.Errorf("open CCID reader: %w", err)
 	}
-	client, err := ilpa.NewWithChannel(sourceLockKey(transferSourceCCID, sourceID), "", reader, cfg)
+	client, err := ilpa.NewWithChannel(sourceLockKey(SourceCCID, sourceID), "", reader, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create source LPA client: %w", err)
 	}
@@ -124,25 +108,25 @@ func sourceCCIDProfiles(cfg *config.Config, sourceID string) ([]*sgp22.ProfileIn
 	return profiles, nil
 }
 
-func esimTransferCandidates(profiles []*sgp22.ProfileInfo) []transferProfileCandidate {
-	response := make([]transferProfileCandidate, 0, len(profiles))
+func esimCandidates(profiles []*sgp22.ProfileInfo) []profileCandidate {
+	response := make([]profileCandidate, 0, len(profiles))
 	for _, profile := range profiles {
-		response = append(response, esimTransferCandidate(profile))
+		response = append(response, esimCandidate(profile))
 	}
 	return response
 }
 
-func esimTransferCandidate(profile *sgp22.ProfileInfo) transferProfileCandidate {
+func esimCandidate(profile *sgp22.ProfileInfo) profileCandidate {
 	mcc := profile.ProfileOwner.MCC()
 	mnc := profile.ProfileOwner.MNC()
 	gid1 := strings.ToUpper(hex.EncodeToString(profile.ProfileOwner.GID1))
 	enabled := profile.ProfileState == sgp22.ProfileEnabled
-	supported, reason := transferSupport(sim.Identity{MCC: mcc, MNC: mnc, GID1: gid1}, ts43.SIMTypeESIM, "eSIM")
-	carrierName := transferCarrierName(mcc + mnc)
-	return transferProfileCandidate{
-		response: TransferProfileResponse{
+	supported, reason := support(sim.Identity{MCC: mcc, MNC: mnc, GID1: gid1}, ts43.SIMTypeESIM, "eSIM")
+	carrierName := carrierName(mcc + mnc)
+	return profileCandidate{
+		response: ProfileResponse{
 			ID:                  profile.ICCID.String(),
-			Type:                transferProfileESIM,
+			Type:                ProfileESIM,
 			Name:                profileDisplayName(profile),
 			ServiceProviderName: profile.ServiceProviderName,
 			ICCID:               profile.ICCID.String(),
@@ -156,9 +140,9 @@ func esimTransferCandidate(profile *sgp22.ProfileInfo) transferProfileCandidate 
 	}
 }
 
-func physicalTransferCandidate(identity sim.Identity) transferProfileCandidate {
+func physicalCandidate(identity sim.Identity) profileCandidate {
 	carrierInfo := carrier.Lookup(identity.MCCMNC())
-	supported, reason := transferSupport(identity, ts43.SIMTypePSIM, "pSIM")
+	supported, reason := support(identity, ts43.SIMTypePSIM, "pSIM")
 	name := carrierInfo.Name
 	if name == "" || name == "Unknown" {
 		name = identity.MCCMNC()
@@ -167,10 +151,10 @@ func physicalTransferCandidate(identity sim.Identity) transferProfileCandidate {
 	if carrierInfo.Name == "Unknown" {
 		carrierName = ""
 	}
-	return transferProfileCandidate{
-		response: TransferProfileResponse{
+	return profileCandidate{
+		response: ProfileResponse{
 			ID:                "physical:" + identity.ICCID,
-			Type:              transferProfilePhysical,
+			Type:              ProfilePhysical,
 			Name:              name,
 			ICCID:             identity.ICCID,
 			RegionCode:        carrierInfo.Region,
@@ -182,7 +166,7 @@ func physicalTransferCandidate(identity sim.Identity) transferProfileCandidate {
 	}
 }
 
-func transferSupport(identity sim.Identity, sourceSIMType ts43.SIMType, label string) (bool, string) {
+func support(identity sim.Identity, sourceSIMType ts43.SIMType, label string) (bool, string) {
 	if _, err := ts43.DiscoverEntitlement(identity, sourceSIMType); err != nil {
 		if errors.Is(err, ts43.ErrEntitlementAmbiguous) {
 			return false, "carrier entitlement config is ambiguous"
@@ -195,7 +179,7 @@ func transferSupport(identity sim.Identity, sourceSIMType ts43.SIMType, label st
 	return true, ""
 }
 
-func transferCarrierName(mccmnc string) string {
+func carrierName(mccmnc string) string {
 	carrierInfo := carrier.Lookup(mccmnc)
 	if carrierInfo.Name == "Unknown" {
 		return ""
@@ -203,12 +187,12 @@ func transferCarrierName(mccmnc string) string {
 	return carrierInfo.Name
 }
 
-func findTransferCandidate(profiles []transferProfileCandidate, id string) (transferProfileCandidate, bool) {
+func findCandidate(profiles []profileCandidate, id string) (profileCandidate, bool) {
 	for _, profile := range profiles {
 		if profile.response.ID != id {
 			continue
 		}
 		return profile, true
 	}
-	return transferProfileCandidate{}, false
+	return profileCandidate{}, false
 }

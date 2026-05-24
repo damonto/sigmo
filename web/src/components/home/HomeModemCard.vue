@@ -18,6 +18,7 @@ const props = defineProps<{
   supportsEsim: boolean
   number: string
   signalQuality: number
+  wifiCallingConnected: boolean
 }>()
 
 const { t } = useI18n()
@@ -37,16 +38,16 @@ const isRoaming = computed(() => props.registrationState === 'Roaming')
 const showRoamingLabel = computed(() => isRoaming.value && Boolean(props.registeredOperatorCode))
 const roamingLabel = computed(() => props.registeredOperatorName || props.registeredOperatorCode)
 const esimLabel = computed(() => (props.supportsEsim ? t('labels.esim') : t('labels.psim')))
-const displayName = computed(() =>
-  props.name.trim().length > 0 ? props.name : props.operatorName,
-)
+const displayName = computed(() => (props.name.trim().length > 0 ? props.name : props.operatorName))
 const displayNumber = computed(() => (props.number.trim() ? props.number : t('home.noNumber')))
 </script>
 
 <template>
   <Card class="h-full border-0 py-4 shadow-sm transition duration-300 group-hover:-translate-y-0.5">
     <CardContent class="flex items-center gap-3 px-4">
-      <div class="flex size-12 shrink-0 items-center justify-center rounded-xl border bg-background">
+      <div
+        class="flex size-12 shrink-0 items-center justify-center rounded-xl border bg-background"
+      >
         <RegionFlag :region-code="props.regionCode" class="rounded-sm text-xl" />
       </div>
       <div class="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -80,6 +81,7 @@ const displayNumber = computed(() => (props.number.trim() ? props.number : t('ho
             :signal-quality="props.signalQuality"
             :registration-state="props.registrationState"
             :access-technology="props.accessTechnology"
+            :wifi-calling-connected="props.wifiCallingConnected"
             size="sm"
           />
         </div>

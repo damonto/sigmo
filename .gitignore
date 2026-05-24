@@ -41,3 +41,6 @@ CLAUDE.md
 
 # Tests
 tools/
+
+# Others
+configs/sigmo.db*

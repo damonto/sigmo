@@ -10,11 +10,13 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 type Handler struct {
-	registry *mmodem.Registry
-	session  *session
+	registry    *mmodem.Registry
+	session     *session
+	wifiCalling wificalling.Coordinator
 }
 
 const executeTimeout = time.Minute
@@ -30,10 +32,11 @@ const (
 
 var errExecuteTimeout = errors.New("ussd request timed out, please retry")
 
-func New(registry *mmodem.Registry) *Handler {
+func New(registry *mmodem.Registry, wifiCalling wificalling.Coordinator) *Handler {
 	return &Handler{
-		registry: registry,
-		session:  newSession(),
+		registry:    registry,
+		session:     newSession(),
+		wifiCalling: wifiCalling,
 	}
 }
 
@@ -50,7 +53,7 @@ func (h *Handler) Execute(c *echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), executeTimeout)
 	defer cancel()
 
-	response, err := h.session.Execute(ctx, modem, req.Action, req.Code)
+	response, err := h.execute(ctx, modem, req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return httpapi.RequestTimeout(c, errorCodeUSSDTimeout, errExecuteTimeout)
@@ -70,4 +73,29 @@ func (h *Handler) Execute(c *echo.Context) error {
 		return httpapi.Internal(c, errorCodeExecuteUSDDFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
+}
+
+func (h *Handler) execute(ctx context.Context, modem *mmodem.Modem, req ExecuteRequest) (*ExecuteResponse, error) {
+	status, err := h.wifiCalling.Status(ctx, modem)
+	if err != nil && !errors.Is(err, wificalling.ErrUnavailable) {
+		return nil, err
+	}
+	if status.Preferred && status.Connected {
+		reply, err := h.wifiCalling.ExecuteUSSD(ctx, modem, req.Action, req.Code)
+		if err != nil {
+			return nil, err
+		}
+		return &ExecuteResponse{Reply: reply}, nil
+	}
+	response, err := h.session.Execute(ctx, modem, req.Action, req.Code)
+	if err == nil {
+		return response, nil
+	}
+	if status.Connected {
+		reply, werr := h.wifiCalling.ExecuteUSSD(ctx, modem, req.Action, req.Code)
+		if werr == nil {
+			return &ExecuteResponse{Reply: reply}, nil
+		}
+	}
+	return nil, err
 }

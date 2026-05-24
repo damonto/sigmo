@@ -23,6 +23,8 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/config"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/storage"
+	"github.com/damonto/sigmo/internal/pkg/wificalling"
 	"github.com/damonto/sigmo/web"
 )
 
@@ -32,6 +34,8 @@ type RegisterConfig struct {
 	Internet           *pinternet.Connector
 	Relay              *forwarder.Relay
 	NetworkPreferences *modem.NetworkPreferences
+	Storage            *storage.Store
+	WiFiCalling        wificalling.Coordinator
 }
 
 func Register(e *echo.Echo, cfg RegisterConfig) {
@@ -64,16 +68,18 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 			protected.PUT("/config", h.Update)
 		}
 
-		h := hmodem.New(cfg.Store, cfg.Registry, cfg.Internet)
+		h := hmodem.New(cfg.Store, cfg.Registry, cfg.Internet, cfg.WiFiCalling)
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
 		protected.PUT("/modems/:id/sim-slots/:identifier", h.SwitchSimSlot)
 		protected.PUT("/modems/:id/msisdn", h.UpdateMSISDN)
 		protected.GET("/modems/:id/settings", h.GetSettings)
 		protected.PUT("/modems/:id/settings", h.UpdateSettings)
+		protected.GET("/modems/:id/wifi-calling-settings", h.GetWiFiCallingSettings)
+		protected.PUT("/modems/:id/wifi-calling-settings", h.UpdateWiFiCallingSettings)
 
 		{
-			h := message.New(cfg.Registry)
+			h := message.New(cfg.Registry, cfg.Storage, cfg.WiFiCalling)
 			protected.GET("/modems/:id/messages", h.List)
 			protected.GET("/modems/:id/messages/:participant", h.ListByParticipant)
 			protected.POST("/modems/:id/messages", h.Send)
@@ -81,7 +87,7 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 		}
 
 		{
-			h := ussd.New(cfg.Registry)
+			h := ussd.New(cfg.Registry, cfg.WiFiCalling)
 			protected.POST("/modems/:id/ussd", h.Execute)
 		}
 

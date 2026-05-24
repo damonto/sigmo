@@ -44,16 +44,16 @@ export const useModemDeviceSettings = ({ modemId, onSuccess }: Options) => {
     }
   }
 
-  const handleSettingsUpdate = async () => {
+  const saveSettings = async (mss: number) => {
     const targetId = modemId.value
     if (!targetId || targetId === 'unknown') return
-    if (!isMssValid.value || isSettingsUpdating.value) return
+    if (isSettingsUpdating.value) return
     isSettingsUpdating.value = true
     try {
       const payload: ModemSettings = {
         alias: settingsAlias.value.trim(),
         compatible: settingsCompatible.value,
-        mss: mssValue.value,
+        mss,
       }
       await modemApi.updateSettings(targetId, payload)
       await fetchSettings(targetId)
@@ -63,6 +63,11 @@ export const useModemDeviceSettings = ({ modemId, onSuccess }: Options) => {
     } finally {
       isSettingsUpdating.value = false
     }
+  }
+
+  const handleSettingsUpdate = async () => {
+    if (!isMssValid.value) return
+    await saveSettings(mssValue.value)
   }
 
   watch(

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 const (
@@ -23,8 +25,9 @@ const (
 var networkPreferencesRetryInterval = 5 * time.Second
 
 type NetworkPreferences struct {
-	path string
-	mu   sync.Mutex
+	path  string
+	store *storage.Store
+	mu    sync.Mutex
 }
 
 type networkPreferenceMode struct {
@@ -52,6 +55,10 @@ func NewNetworkPreferences() (*NetworkPreferences, error) {
 
 func NewNetworkPreferencesWithPath(path string) *NetworkPreferences {
 	return &NetworkPreferences{path: path}
+}
+
+func NewNetworkPreferencesWithStore(store *storage.Store) *NetworkPreferences {
+	return &NetworkPreferences{store: store}
 }
 
 func defaultNetworkPreferencesPath() (string, error) {
@@ -88,17 +95,15 @@ func (p *NetworkPreferences) SaveMode(modemID string, mode ModemModePair) error 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	store, err := readNetworkPreferencesState(p.path)
+	entry, _, err := p.loadForModemLocked(context.Background(), modemID)
 	if err != nil {
 		return err
 	}
-	entry := store.Modems[modemID]
 	entry.Mode = &networkPreferenceMode{
 		Allowed:   mode.Allowed,
 		Preferred: mode.Preferred,
 	}
-	store.Modems[modemID] = entry
-	return writeNetworkPreferencesState(p.path, store)
+	return p.saveForModemLocked(context.Background(), modemID, entry)
 }
 
 func (p *NetworkPreferences) SaveBands(modemID string, bands []ModemBand) error {
@@ -110,14 +115,12 @@ func (p *NetworkPreferences) SaveBands(modemID string, bands []ModemBand) error 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	store, err := readNetworkPreferencesState(p.path)
+	entry, _, err := p.loadForModemLocked(context.Background(), modemID)
 	if err != nil {
 		return err
 	}
-	entry := store.Modems[modemID]
 	entry.Bands = slices.Clone(bands)
-	store.Modems[modemID] = entry
-	return writeNetworkPreferencesState(p.path, store)
+	return p.saveForModemLocked(context.Background(), modemID, entry)
 }
 
 func (p *NetworkPreferences) Run(ctx context.Context, registry *Registry) error {
@@ -192,6 +195,21 @@ func (p *NetworkPreferences) loadForModem(modemID string) (savedNetworkPreferenc
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	return p.loadForModemLocked(context.Background(), modemID)
+}
+
+func (p *NetworkPreferences) loadForModemLocked(ctx context.Context, modemID string) (savedNetworkPreferences, bool, error) {
+	if p.store != nil {
+		var entry savedNetworkPreferences
+		err := p.store.Get(ctx, "modem:"+modemID, "network.preferences", &entry)
+		if errors.Is(err, storage.ErrNotFound) {
+			return savedNetworkPreferences{}, false, nil
+		}
+		if err != nil {
+			return savedNetworkPreferences{}, false, err
+		}
+		return entry, true, nil
+	}
 	store, err := readNetworkPreferencesState(p.path)
 	if err != nil {
 		return savedNetworkPreferences{}, false, err
@@ -201,6 +219,18 @@ func (p *NetworkPreferences) loadForModem(modemID string) (savedNetworkPreferenc
 		return savedNetworkPreferences{}, false, nil
 	}
 	return entry, true, nil
+}
+
+func (p *NetworkPreferences) saveForModemLocked(ctx context.Context, modemID string, entry savedNetworkPreferences) error {
+	if p.store != nil {
+		return p.store.Put(ctx, "modem:"+modemID, "network.preferences", entry)
+	}
+	store, err := readNetworkPreferencesState(p.path)
+	if err != nil {
+		return err
+	}
+	store.Modems[modemID] = entry
+	return writeNetworkPreferencesState(p.path, store)
 }
 
 func restoreModePreference(ctx context.Context, m *Modem, mode ModemModePair) (bool, error) {

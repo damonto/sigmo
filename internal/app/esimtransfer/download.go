@@ -1,6 +1,6 @@
 //go:build esim_transfer
 
-package esim
+package esimtransfer
 
 import (
 	"context"
@@ -16,26 +16,26 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
-func (h *Handler) downloadEnableAndComplete(ctx context.Context, session *transferSession, transfer *activeTransfer, result *ts43.Result, cfg ts43.DownloadConfig) (*ts43.Result, error) {
-	iccid, err := h.downloadTransferProfile(ctx, session, transfer.target, transfer.targetClient, cfg)
-	transfer.CloseTarget()
+func (s *Service) downloadEnableAndComplete(ctx context.Context, session *session, active *activeSession, result *ts43.Result, cfg ts43.DownloadConfig) (*ts43.Result, error) {
+	iccid, err := s.downloadProfile(ctx, session, active.target, active.targetClient, cfg)
+	active.CloseTarget()
 	if err != nil {
 		return result, err
 	}
-	session.sendIfConnected(transferServerMessage{Type: wsTypeProgress, Stage: transferStageEnabling})
-	if err := h.enableTransferredProfile(ctx, transfer.target, iccid); err != nil {
+	session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stageEnabling})
+	if err := s.enableTargetProfile(ctx, active.target, iccid); err != nil {
 		return result, err
 	}
-	session.sendIfConnected(transferServerMessage{Type: wsTypeProgress, Stage: transferStageCompleting})
-	next, err := transfer.client.CompleteActivation(ctx, result, ts43.ActivationResult{ICCID: iccid.String()})
+	session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stageCompleting})
+	next, err := active.client.CompleteActivation(ctx, result, ts43.ActivationResult{ICCID: iccid.String()})
 	if err != nil {
 		slog.Warn("complete TS.43 activation", "iccid", iccid.String(), "error", err)
 	}
 	return next, err
 }
 
-func (h *Handler) downloadTransferProfile(ctx context.Context, session *transferSession, target *mmodem.Modem, client *ilpa.LPA, cfg ts43.DownloadConfig) (sgp22.ICCID, error) {
-	ac, err := transferActivationCode(cfg)
+func (s *Service) downloadProfile(ctx context.Context, session *session, target *mmodem.Modem, client *ilpa.LPA, cfg ts43.DownloadConfig) (sgp22.ICCID, error) {
+	ac, err := activationCode(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -46,14 +46,14 @@ func (h *Handler) downloadTransferProfile(ctx context.Context, session *transfer
 		}
 		ac.IMEI = imei
 	}
-	session.sendIfConnected(transferServerMessage{Type: wsTypeProgress, Stage: transferStageDownloading})
+	session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stageDownloading})
 	result, err := client.DownloadProfile(ctx, ac, &elpa.DownloadOptions{
 		OnProgress: func(stage elpa.DownloadStage) {
-			session.sendIfConnected(transferServerMessage{Type: wsTypeProgress, Stage: stage.String()})
+			session.sendIfConnected(serverMessage{Type: wsTypeProgress, Stage: stage.String()})
 		},
 		OnConfirm: func(info *sgp22.ProfileInfo) bool {
 			preview := profilePreviewFrom(info)
-			session.sendIfConnected(transferServerMessage{
+			session.sendIfConnected(serverMessage{
 				Type:    wsTypePreview,
 				Profile: &preview,
 			})
@@ -85,24 +85,14 @@ func (h *Handler) downloadTransferProfile(ctx context.Context, session *transfer
 	return iccid, nil
 }
 
-func (h *Handler) enableTransferredProfile(ctx context.Context, target *mmodem.Modem, iccid sgp22.ICCID) error {
-	session, err := h.lifecycle.PrepareEnable(target, iccid)
-	if err != nil {
-		if errors.Is(err, errProfileAlreadyActive) {
-			return nil
-		}
-		return err
+func (s *Service) enableTargetProfile(ctx context.Context, target *mmodem.Modem, iccid sgp22.ICCID) error {
+	if s.enableProfile == nil {
+		return errors.New("enable profile dependency is missing")
 	}
-	defer session.Close()
-	sessionCtx, cancel := context.WithTimeout(ctx, enableTimeout)
-	defer cancel()
-	if err := h.internet.Restore(sessionCtx, target); err != nil {
-		return err
-	}
-	return session.Enable(sessionCtx)
+	return s.enableProfile(ctx, target, iccid)
 }
 
-func transferActivationCode(cfg ts43.DownloadConfig) (*elpa.ActivationCode, error) {
+func activationCode(cfg ts43.DownloadConfig) (*elpa.ActivationCode, error) {
 	if cfg.ActivationCode != "" {
 		var ac elpa.ActivationCode
 		if err := ac.UnmarshalText([]byte(cfg.ActivationCode)); err != nil {
