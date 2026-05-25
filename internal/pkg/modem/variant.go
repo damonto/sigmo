@@ -30,6 +30,10 @@ func variantStrings(raw map[string]dbus.Variant, key string) []string {
 	return stringsFromVariant(raw[key])
 }
 
+func variantBytes(raw map[string]dbus.Variant, key string) []byte {
+	return bytesFromVariant(raw[key])
+}
+
 func variantObjectPaths(raw map[string]dbus.Variant, key string) []dbus.ObjectPath {
 	return objectPathsFromVariant(raw[key])
 }
@@ -109,6 +113,14 @@ func stringsFromVariant(variant dbus.Variant) []string {
 		return nil
 	}
 	return value
+}
+
+func bytesFromVariant(variant dbus.Variant) []byte {
+	value, ok := variant.Value().([]byte)
+	if ok {
+		return value
+	}
+	return nil
 }
 
 func objectPathsFromVariant(variant dbus.Variant) []dbus.ObjectPath {

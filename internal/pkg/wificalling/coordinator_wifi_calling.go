@@ -52,6 +52,7 @@ var retryDelays = []time.Duration{
 	120 * time.Second,
 	240 * time.Second,
 	300 * time.Second,
+	600 * time.Second,
 }
 
 func New(cfg Config) Coordinator {

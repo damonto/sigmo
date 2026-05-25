@@ -1,6 +1,7 @@
 package modem
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
@@ -57,6 +58,45 @@ func TestVariantUint(t *testing.T) {
 			}
 			if got := variantUint[uint64](tt.raw, "value"); got != tt.want64 {
 				t.Fatalf("variantUint[uint64]() = %d, want %d", got, tt.want64)
+			}
+		})
+	}
+}
+
+func TestVariantBytes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  map[string]dbus.Variant
+		want []byte
+	}{
+		{
+			name: "byte array",
+			raw: map[string]dbus.Variant{
+				"value": dbus.MakeVariant([]byte{0xA0, 0x01}),
+			},
+			want: []byte{0xA0, 0x01},
+		},
+		{
+			name: "missing value",
+			raw:  map[string]dbus.Variant{},
+		},
+		{
+			name: "wrong type",
+			raw: map[string]dbus.Variant{
+				"value": dbus.MakeVariant("A001"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := variantBytes(tt.raw, "value"); !bytes.Equal(got, tt.want) {
+				t.Fatalf("variantBytes() = %v, want %v", got, tt.want)
 			}
 		})
 	}

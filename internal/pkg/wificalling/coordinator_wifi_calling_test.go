@@ -4,6 +4,7 @@ package wificalling
 
 import (
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -42,6 +43,32 @@ func TestIncomingMessageKey(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := incomingMessageKey(tt.msg); got != tt.want {
 				t.Fatalf("incomingMessageKey() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRetryDelays(t *testing.T) {
+	tests := []struct {
+		name string
+		want []time.Duration
+	}{
+		{
+			name: "wifi calling connect backoff",
+			want: []time.Duration{
+				30 * time.Second,
+				60 * time.Second,
+				120 * time.Second,
+				240 * time.Second,
+				300 * time.Second,
+				600 * time.Second,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !slices.Equal(retryDelays, tt.want) {
+				t.Fatalf("retryDelays = %v, want %v", retryDelays, tt.want)
 			}
 		})
 	}

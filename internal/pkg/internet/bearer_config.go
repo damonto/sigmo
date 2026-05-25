@@ -365,16 +365,26 @@ func apnFromBearers(ctx context.Context, modem internetModem) (string, error) {
 	return strings.TrimSpace(apn), nil
 }
 
-func modemOperatorIdentifier(modem internetModem) string {
-	return strings.TrimSpace(modem.operatorIdentifier())
+func modemAPNCriteria(modem internetModem) apnCriteria {
+	return apnCriteria{
+		GID1:  strings.TrimSpace(modem.gid1()),
+		SPN:   strings.TrimSpace(modem.spn()),
+		ICCID: strings.TrimSpace(modem.iccid()),
+		IMSI:  strings.TrimSpace(modem.imsi()),
+	}
 }
 
 func apnForModem(modem internetModem, requested, bearer, remembered string) string {
+	criteria := modemAPNCriteria(modem)
 	return selectAPN(apnSelection{
 		Requested:          requested,
 		Bearer:             bearer,
 		Remembered:         remembered,
-		OperatorIdentifier: modemOperatorIdentifier(modem),
+		OperatorIdentifier: strings.TrimSpace(modem.operatorIdentifier()),
+		GID1:               criteria.GID1,
+		SPN:                criteria.SPN,
+		ICCID:              criteria.ICCID,
+		IMSI:               criteria.IMSI,
 		DefaultAPNs:        defaultAPNs,
 	})
 }
@@ -385,7 +395,7 @@ func preferencesWithSelectedAPN(modem internetModem, prefs Preferences) Preferen
 }
 
 func preferencesWithDefaultAPNCredentials(modem internetModem, prefs Preferences) Preferences {
-	profile := defaultAPNProfileFrom(defaultAPNs, modemOperatorIdentifier(modem))
+	profile := defaultAPNProfileFrom(defaultAPNs, strings.TrimSpace(modem.operatorIdentifier()), modemAPNCriteria(modem))
 	if profile.APN == "" || !strings.EqualFold(strings.TrimSpace(prefs.APN), profile.APN) {
 		return normalizePreferences(prefs)
 	}

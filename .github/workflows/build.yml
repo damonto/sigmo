@@ -31,8 +31,11 @@ jobs:
         target:
           - { arch: 386, name: linux-i386 }
           - { arch: amd64, name: linux-amd64 }
+          - { arch: amd64, name: linux-amd64-musl, musl: true, libc: libc.musl-x86_64.so.1, interp: /lib/ld-musl-x86_64.so.1 }
           - { arch: arm, name: linux-armhf }
+          - { arch: arm, arm: 7, variant: v7, name: linux-armv7-musl, musl: true, libc: libc.musl-armv7.so.1, interp: /lib/ld-musl-armhf.so.1 }
           - { arch: arm64, name: linux-arm64 }
+          - { arch: arm64, name: linux-arm64-musl, musl: true, libc: libc.musl-aarch64.so.1, interp: /lib/ld-musl-aarch64.so.1 }
           - { arch: riscv64, name: linux-riscv64 }
 
     steps:
@@ -62,13 +65,69 @@ jobs:
           bun run build --mode prod
 
       - name: Build for ${{ matrix.target.name }}
+        env:
+          TARGET_ARCH: ${{ matrix.target.arch }}
+          TARGET_ARM: ${{ matrix.target.arm }}
+          TARGET_VARIANT: ${{ matrix.target.variant }}
+          TARGET_MUSL: ${{ matrix.target.musl }}
+          PUREGO_MUSL_LIBC: ${{ matrix.target.libc }}
+          MUSL_INTERPRETER: ${{ matrix.target.interp }}
         run: |
+          set -eu
+
           go generate ./...
           BUILD_VERSION=$(git describe --always --tags --match "v*" --dirty="-dev")
+          modfile="go.mod"
+          sumfile="go.sum"
+          tags_arg=""
           if [ "${{ github.event_name }}" != "pull_request" ] && [ "${{ vars.SIGMO_PRIVATE_FEATURES }}" = "true" ]; then
-            CGO_ENABLED=0 GOARCH=${{ matrix.target.arch }} go build -tags="${PRIVATE_GO_TAGS}" -modfile="${PRIVATE_GO_MODFILE}" -trimpath -ldflags="-w -s -X main.BuildVersion=$BUILD_VERSION" -o sigmo-${{ matrix.target.name }}
-          else
-            CGO_ENABLED=0 GOARCH=${{ matrix.target.arch }} go build -trimpath -ldflags="-w -s -X main.BuildVersion=$BUILD_VERSION" -o sigmo-${{ matrix.target.name }}
+            modfile="${PRIVATE_GO_MODFILE}"
+            sumfile="${PRIVATE_GO_MODFILE%.mod}.sum"
+            tags_arg="-tags=${PRIVATE_GO_TAGS}"
+          fi
+
+          ldflags="-w -s -X main.BuildVersion=${BUILD_VERSION}"
+          rebuild_arg=""
+
+          if [ "${TARGET_MUSL:-}" = "true" ]; then
+            go mod download -modfile="${modfile}"
+
+            purego_tmp="$(mktemp -d)"
+            cp -R "$(go list -modfile="${modfile}" -m -f '{{.Dir}}' github.com/ebitengine/purego)" "${purego_tmp}/purego"
+
+            mkdir -p build
+            musl_modfile="build/go.${{ matrix.target.name }}.mod"
+            musl_sumfile="${musl_modfile%.mod}.sum"
+            cp "${modfile}" "${musl_modfile}"
+            cp "${sumfile}" "${musl_sumfile}"
+            go mod edit -modfile="${musl_modfile}" -replace=github.com/ebitengine/purego="${purego_tmp}/purego"
+
+            TARGETARCH="${TARGET_ARCH}" TARGETVARIANT="${TARGET_VARIANT:-}" PUREGO_MUSL_LIBC="${PUREGO_MUSL_LIBC:-}" scripts/patch-purego-musl.sh "${musl_modfile}"
+
+            modfile="${musl_modfile}"
+            ldflags="-I ${MUSL_INTERPRETER} ${ldflags}"
+            rebuild_arg="-a"
+          fi
+
+          goarm_arg=""
+          if [ -n "${TARGET_ARM:-}" ]; then
+            goarm_arg="GOARM=${TARGET_ARM}"
+          fi
+
+          env GOOS=linux GOARCH="${TARGET_ARCH}" ${goarm_arg} CGO_ENABLED=0 \
+            go build ${rebuild_arg} ${tags_arg} -modfile="${modfile}" -trimpath \
+              -ldflags="${ldflags}" \
+              -o sigmo-${{ matrix.target.name }}
+
+      - name: Verify musl dynamic imports
+        if: matrix.target.musl == true
+        run: |
+          file sigmo-${{ matrix.target.name }}
+          readelf -l sigmo-${{ matrix.target.name }} | grep -F "Requesting program interpreter: ${{ matrix.target.interp }}"
+          readelf -d sigmo-${{ matrix.target.name }} | grep -F "Shared library: [${{ matrix.target.libc }}]"
+          if readelf -d sigmo-${{ matrix.target.name }} | grep -E 'libc\.so\.6|libdl\.so\.2|libpthread\.so\.0'; then
+            echo "glibc dynamic import remains in musl binary" >&2
+            exit 1
           fi
 
       - name: Upload ${{ matrix.target.name }} to Artifact

@@ -1740,6 +1740,10 @@ func TestConnectorRequiresModem(t *testing.T) {
 type fakeInternetModem struct {
 	modemID    string
 	operatorID string
+	gid1Value  string
+	spnValue   string
+	iccidValue string
+	imsiValue  string
 	bearerList []*mmodem.Bearer
 }
 
@@ -1749,6 +1753,22 @@ func (m fakeInternetModem) id() string {
 
 func (m fakeInternetModem) operatorIdentifier() string {
 	return m.operatorID
+}
+
+func (m fakeInternetModem) gid1() string {
+	return m.gid1Value
+}
+
+func (m fakeInternetModem) spn() string {
+	return m.spnValue
+}
+
+func (m fakeInternetModem) iccid() string {
+	return m.iccidValue
+}
+
+func (m fakeInternetModem) imsi() string {
+	return m.imsiValue
 }
 
 func (m fakeInternetModem) bearer(context.Context, dbus.ObjectPath) (*mmodem.Bearer, error) {

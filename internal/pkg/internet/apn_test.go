@@ -53,6 +53,23 @@ func TestDefaultAPNsFromJSON(t *testing.T) {
 			}},
 		},
 		{
+			name: "restricted entries keep separate apns",
+			json: `[
+				{"mcc": "001", "mnc": "01", "apn": "generic"},
+				{"mcc": "001", "mnc": "01", "gid1": " a0 ", "apn": "branded"},
+				{"mcc": "001", "mnc": "01", "spn": " Example ", "apn": "spn"},
+				{"mcc": "001", "mnc": "01", "iccid": " 894410 ", "apn": "iccid"},
+				{"mcc": "001", "mnc": "01", "imsi": " 21670xx1 ", "apn": "imsi"}
+			]`,
+			want: map[string]apnProfile{
+				"00101":               {APN: "generic"},
+				"00101|gid1=A0":       {APN: "branded"},
+				"00101|spn=EXAMPLE":   {APN: "spn"},
+				"00101|iccid=894410":  {APN: "iccid"},
+				"00101|imsi=21670XX1": {APN: "imsi"},
+			},
+		},
+		{
 			name: "skip incomplete entries",
 			json: `[
 				{"mcc": "", "mnc": "01", "apn": "missing-mcc"},
@@ -80,11 +97,19 @@ func TestDefaultAPNsFromJSON(t *testing.T) {
 			if err != nil {
 				t.Fatalf("defaultAPNsFromJSON() error = %v", err)
 			}
-			if !maps.Equal(got, tt.want) {
+			if got := apnProfilesByKey(got); !maps.Equal(got, tt.want) {
 				t.Fatalf("defaultAPNsFromJSON() = %#v, want %#v", got, tt.want)
 			}
 		})
 	}
+}
+
+func apnProfilesByKey(records []apnRecord) map[string]apnProfile {
+	profiles := make(map[string]apnProfile, len(records))
+	for _, record := range records {
+		profiles[apnKey(record.OperatorIdentifier, record.Criteria)] = record.Profile
+	}
+	return profiles
 }
 
 func TestDefaultAPNsFromJSONInvalid(t *testing.T) {
@@ -130,8 +155,27 @@ func intPtr(value int) *int {
 func TestSelectAPN(t *testing.T) {
 	t.Parallel()
 
-	defaults := map[string]apnProfile{
-		"00101": {APN: "json"},
+	defaults := []apnRecord{
+		{OperatorIdentifier: "00101", Profile: apnProfile{APN: "json"}},
+		{OperatorIdentifier: "00101", Criteria: apnCriteria{GID1: "A0"}, Profile: apnProfile{APN: "gid"}},
+		{OperatorIdentifier: "00101", Criteria: apnCriteria{SPN: "ESIM GO"}, Profile: apnProfile{APN: "spn"}},
+		{OperatorIdentifier: "00101", Criteria: apnCriteria{ICCID: "894410"}, Profile: apnProfile{APN: "iccid"}},
+		{OperatorIdentifier: "00101", Criteria: apnCriteria{IMSI: "21670XX1"}, Profile: apnProfile{APN: "imsi"}},
+		{
+			OperatorIdentifier: "00101",
+			Criteria:           apnCriteria{GID1: "A0", SPN: "ESIM GO"},
+			Profile:            apnProfile{APN: "gid-spn"},
+		},
+		{
+			OperatorIdentifier: "00101",
+			Criteria:           apnCriteria{GID1: "A0", ICCID: "894410"},
+			Profile:            apnProfile{APN: "gid-iccid"},
+		},
+		{
+			OperatorIdentifier: "00101",
+			Criteria:           apnCriteria{SPN: "ESIM GO", ICCID: "894410"},
+			Profile:            apnProfile{APN: "spn-iccid"},
+		},
 	}
 	tests := []struct {
 		name      string
@@ -171,6 +215,57 @@ func TestSelectAPN(t *testing.T) {
 				OperatorIdentifier: "00101",
 			},
 			want: "json",
+		},
+		{
+			name: "gid1 exact match wins over operator default",
+			selection: apnSelection{
+				OperatorIdentifier: "00101",
+				GID1:               " a0 ",
+			},
+			want: "gid",
+		},
+		{
+			name: "spn exact match wins over operator default",
+			selection: apnSelection{
+				OperatorIdentifier: "00101",
+				SPN:                " eSIM Go ",
+			},
+			want: "spn",
+		},
+		{
+			name: "iccid prefix match wins over operator default",
+			selection: apnSelection{
+				OperatorIdentifier: "00101",
+				ICCID:              "89441000400308655036",
+			},
+			want: "iccid",
+		},
+		{
+			name: "imsi wildcard match wins over operator default",
+			selection: apnSelection{
+				OperatorIdentifier: "00101",
+				IMSI:               "21670191",
+			},
+			want: "imsi",
+		},
+		{
+			name: "gid1 and spn wins over gid1",
+			selection: apnSelection{
+				OperatorIdentifier: "00101",
+				GID1:               "A0",
+				SPN:                "eSIM Go",
+			},
+			want: "gid-spn",
+		},
+		{
+			name: "iccid combination wins over gid1 and spn",
+			selection: apnSelection{
+				OperatorIdentifier: "00101",
+				GID1:               "A0",
+				SPN:                "eSIM Go",
+				ICCID:              "89441000400308655036",
+			},
+			want: "gid-iccid",
 		},
 		{
 			name: "missing default keeps empty",
@@ -222,6 +317,13 @@ func TestPreferencesWithDefaultAPNCredentials(t *testing.T) {
 	if got.IPType != "ipv4" {
 		t.Fatalf("preferencesWithDefaultAPNCredentials() IPType = %q, want ipv4", got.IPType)
 	}
+
+	gid1Modem := modemAccess{modem: &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23415", GID1: "A0"}}}
+	gid1Prefs := Preferences{APN: "MY.INTERNET"}
+	got = preferencesWithDefaultAPNCredentials(gid1Modem, gid1Prefs)
+	if got.APNUsername != "wap" || got.APNPassword != "wap" || got.APNAuth != "pap" {
+		t.Fatalf("preferencesWithDefaultAPNCredentials() = %#v, want ASDA credentials", got)
+	}
 }
 
 func TestPreferencesWithSelectedAPN(t *testing.T) {
@@ -238,6 +340,16 @@ func TestPreferencesWithSelectedAPN(t *testing.T) {
 	}
 	if got.IPType != "ipv4v6" {
 		t.Fatalf("preferencesWithSelectedAPN() IPType = %q, want ipv4v6", got.IPType)
+	}
+
+	vodafone := modemAccess{modem: &mmodem.Modem{Sim: &mmodem.SIM{
+		Identifier:         "89441000400308655036",
+		OperatorIdentifier: "23415",
+		GID1:               "E1",
+	}}}
+	got = preferencesWithSelectedAPN(vodafone, Preferences{})
+	if got.APN != "wap.vodafone.co.uk" {
+		t.Fatalf("preferencesWithSelectedAPN() APN = %q, want Vodafone APN", got.APN)
 	}
 }
 
@@ -264,6 +376,13 @@ func TestAPNForModem(t *testing.T) {
 				Sim: &mmodem.SIM{OperatorIdentifier: "00101"},
 			},
 			want: "default",
+		},
+		{
+			name: "gid1 exact match from sim",
+			modem: &mmodem.Modem{
+				Sim: &mmodem.SIM{OperatorIdentifier: "23415", GID1: "A1"},
+			},
+			want: "MY.INTERNET",
 		},
 		{
 			name:  "missing sim keeps empty",

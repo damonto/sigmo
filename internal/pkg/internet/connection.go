@@ -77,6 +77,10 @@ type ConnectorConfig struct {
 type internetModem interface {
 	id() string
 	operatorIdentifier() string
+	gid1() string
+	spn() string
+	iccid() string
+	imsi() string
 	bearer(context.Context, dbus.ObjectPath) (*mmodem.Bearer, error)
 	bearers(context.Context) ([]*mmodem.Bearer, error)
 	connectBearer(context.Context, mmodem.BearerProperties) (*mmodem.Bearer, error)
@@ -101,6 +105,34 @@ func (m modemAccess) operatorIdentifier() string {
 		return ""
 	}
 	return strings.TrimSpace(m.modem.Sim.OperatorIdentifier)
+}
+
+func (m modemAccess) gid1() string {
+	if m.modem == nil || m.modem.Sim == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.modem.Sim.GID1)
+}
+
+func (m modemAccess) spn() string {
+	if m.modem == nil || m.modem.Sim == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.modem.Sim.OperatorName)
+}
+
+func (m modemAccess) iccid() string {
+	if m.modem == nil || m.modem.Sim == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.modem.Sim.Identifier)
+}
+
+func (m modemAccess) imsi() string {
+	if m.modem == nil || m.modem.Sim == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.modem.Sim.Imsi)
 }
 
 func (m modemAccess) bearer(ctx context.Context, path dbus.ObjectPath) (*mmodem.Bearer, error) {

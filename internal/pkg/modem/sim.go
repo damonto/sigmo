@@ -2,7 +2,9 @@ package modem
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
+	"strings"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -25,6 +27,7 @@ type SIM struct {
 	Imsi               string
 	OperatorIdentifier string
 	OperatorName       string
+	GID1               string
 }
 
 func (s *SIMs) Primary(ctx context.Context) (*SIM, error) {
@@ -86,5 +89,9 @@ func (sims *SIMs) Get(ctx context.Context, path dbus.ObjectPath) (*SIM, error) {
 		return nil, err
 	}
 	sim.OperatorName = stringFromVariant(variant)
+
+	if variant, err = dbusProperty(ctx, dbusObject, ModemSimInterface, "Gid1"); err == nil {
+		sim.GID1 = strings.ToUpper(hex.EncodeToString(bytesFromVariant(variant)))
+	}
 	return sim, nil
 }
