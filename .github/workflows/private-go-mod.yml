@@ -22,7 +22,8 @@ jobs:
     env:
       PRIVATE_GO_MODULES: |
         github.com/damonto/ts43-go
-      PRIVATE_GO_TAGS: esim_transfer
+        github.com/damonto/ims-client
+      PRIVATE_GO_TAGS: esim_transfer,wifi_calling
       PRIVATE_GO_MODFILE: go.private.mod
       PRIVATE_GOPRIVATE: github.com/damonto/*
       PRIVATE_MODULE_TOKEN: ${{ secrets.SIGMO_PRIVATE_MODULE_TOKEN }}
