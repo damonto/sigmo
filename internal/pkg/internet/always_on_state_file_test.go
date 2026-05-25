@@ -31,10 +31,6 @@ type alwaysOnStateEntry struct {
 	AlwaysOn     bool   `json:"alwaysOn"`
 }
 
-func defaultAlwaysOnStatePath() (string, error) {
-	return alwaysOnStatePathFromEnv(os.LookupEnv, os.UserHomeDir)
-}
-
 func alwaysOnStatePathFromEnv(lookupEnv func(string) (string, bool), userHomeDir func() (string, error)) (string, error) {
 	if stateHome, ok := lookupEnv("XDG_STATE_HOME"); ok && stateHome != "" {
 		if !filepath.IsAbs(stateHome) {

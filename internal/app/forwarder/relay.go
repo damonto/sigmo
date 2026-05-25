@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 
@@ -17,6 +18,8 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
+
+const incomingSMSFreshnessWindow = 30 * time.Minute
 
 type Relay struct {
 	store     *config.Store
@@ -161,6 +164,10 @@ func (r *Relay) stopAll() {
 }
 
 func (r *Relay) ForwardWiFiCallingSMS(ctx context.Context, incoming wificalling.IncomingSMS) error {
+	if !freshIncomingMessage(incoming.Message, time.Now()) {
+		slog.Debug("skipping stale Wi-Fi Calling SMS", "modem", incoming.ModemID, "externalKey", incoming.Message.ExternalKey, "timestamp", incoming.Message.Timestamp)
+		return nil
+	}
 	inserted, err := r.messages.InsertMessage(ctx, incoming.Message)
 	if err != nil {
 		return err
@@ -181,6 +188,10 @@ func (r *Relay) forwardModemSMS(ctx context.Context, m *modem.Modem, message *mo
 		return err
 	}
 	stored := storageMessageFromModemSMS(m, profileID, message)
+	if !freshIncomingMessage(stored, time.Now()) {
+		slog.Debug("skipping stale modem SMS", "modem", m.EquipmentIdentifier, "path", message.Path(), "timestamp", message.Timestamp)
+		return nil
+	}
 	inserted, err := r.messages.InsertMessage(ctx, stored)
 	if err != nil {
 		return err
@@ -193,6 +204,17 @@ func (r *Relay) forwardModemSMS(ctx context.Context, m *modem.Modem, message *mo
 	notifier := r.notifier
 	r.mu.Unlock()
 	return notifier.Send(ctx, r.formatStoredMessage(m.EquipmentIdentifier, stored))
+}
+
+func freshIncomingMessage(message storage.Message, now time.Time) bool {
+	if !message.Incoming || message.Timestamp.IsZero() {
+		return true
+	}
+	diff := now.Sub(message.Timestamp)
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff <= incomingSMSFreshnessWindow
 }
 
 func (r *Relay) formatStoredMessage(modemID string, message storage.Message) notifyevent.SMSEvent {
@@ -221,6 +243,7 @@ func storageMessageFromModemSMS(m *modem.Modem, profileID string, sms *modem.SMS
 		sender, recipient = remote, m.Number
 	}
 	return storage.Message{
+		ModemID:     m.EquipmentIdentifier,
 		ProfileID:   profileID,
 		Source:      storage.MessageSourceModem,
 		ExternalKey: string(sms.Path()),

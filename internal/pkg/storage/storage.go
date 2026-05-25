@@ -65,6 +65,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 			profile_id TEXT NOT NULL,
 			source TEXT NOT NULL,
 			external_key TEXT NOT NULL,
+			fingerprint TEXT NOT NULL DEFAULT '',
 			sender TEXT NOT NULL,
 			recipient TEXT NOT NULL,
 			text TEXT NOT NULL,
@@ -84,7 +85,66 @@ func (s *Store) Migrate(ctx context.Context) error {
 			return fmt.Errorf("migrate database: %w", err)
 		}
 	}
+	if err := s.migrateMessageFingerprints(ctx); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_fingerprint ON messages(fingerprint) WHERE fingerprint <> ''`); err != nil {
+		return fmt.Errorf("migrate message fingerprint index: %w", err)
+	}
 	return nil
+}
+
+func (s *Store) migrateMessageFingerprints(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("start message fingerprint migration: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	hasFingerprint, err := messageColumnExists(ctx, tx, "fingerprint")
+	if err != nil {
+		return err
+	}
+	if !hasFingerprint {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE messages ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add message fingerprint column: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit message fingerprint migration: %w", err)
+	}
+	committed = true
+	return nil
+}
+
+func messageColumnExists(ctx context.Context, tx *sql.Tx, name string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(messages)`)
+	if err != nil {
+		return false, fmt.Errorf("read message columns: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var columnName, columnType string
+		var notNull, primaryKey int
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &columnName, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, fmt.Errorf("scan message column: %w", err)
+		}
+		if columnName == name {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("read message columns: %w", err)
+	}
+	return false, nil
 }
 
 func nowText() string {

@@ -149,6 +149,7 @@ func messageFromModemSMS(modem *mmodem.Modem, profileID string, sms *mmodem.SMS)
 		sender, recipient = remote, modem.Number
 	}
 	return storage.Message{
+		ModemID:     modem.EquipmentIdentifier,
 		ProfileID:   profileID,
 		Source:      storage.MessageSourceModem,
 		ExternalKey: string(sms.Path()),

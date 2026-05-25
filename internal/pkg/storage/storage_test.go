@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"database/sql"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -50,6 +52,7 @@ func TestMessages(t *testing.T) {
 		{
 			name: "new modem message",
 			message: Message{
+				ModemID:     "modem-a",
 				ProfileID:   "891",
 				Source:      MessageSourceModem,
 				ExternalKey: "/sms/1",
@@ -65,6 +68,7 @@ func TestMessages(t *testing.T) {
 		{
 			name: "duplicate modem message",
 			message: Message{
+				ModemID:     "modem-a",
 				ProfileID:   "891",
 				Source:      MessageSourceModem,
 				ExternalKey: "/sms/1",
@@ -78,8 +82,41 @@ func TestMessages(t *testing.T) {
 			wantInsert: false,
 		},
 		{
+			name: "duplicate modem message with new profile and path",
+			message: Message{
+				ModemID:     "modem-a",
+				ProfileID:   "892",
+				Source:      MessageSourceModem,
+				ExternalKey: "/sms/2",
+				Sender:      "+100",
+				Recipient:   "+999",
+				Text:        "hello",
+				Timestamp:   base,
+				Status:      "received",
+				Incoming:    true,
+			},
+			wantInsert: false,
+		},
+		{
+			name: "same content on different modem",
+			message: Message{
+				ModemID:     "modem-b",
+				ProfileID:   "893",
+				Source:      MessageSourceModem,
+				ExternalKey: "/sms/3",
+				Sender:      "+100",
+				Recipient:   "+999",
+				Text:        "hello",
+				Timestamp:   base,
+				Status:      "received",
+				Incoming:    true,
+			},
+			wantInsert: true,
+		},
+		{
 			name: "wifi calling message",
 			message: Message{
+				ModemID:     "modem-a",
 				ProfileID:   "891",
 				Source:      MessageSourceWiFiCalling,
 				ExternalKey: "sms-1",
@@ -131,6 +168,159 @@ func TestMessages(t *testing.T) {
 			t.Fatalf("thread order = %q, %q; want hello, reply", messages[0].Text, messages[1].Text)
 		}
 	})
+}
+
+func TestMigrateMessageFingerprints(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sigmo.db")
+	dsn := (&url.URL{Scheme: "file", Path: path}).String()
+	db, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	store := &Store{db: db}
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE messages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			profile_id TEXT NOT NULL,
+			source TEXT NOT NULL,
+			external_key TEXT NOT NULL,
+			sender TEXT NOT NULL,
+			recipient TEXT NOT NULL,
+			text TEXT NOT NULL,
+			timestamp TEXT NOT NULL,
+			status TEXT NOT NULL,
+			incoming INTEGER NOT NULL,
+			wifi_calling INTEGER NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE (profile_id, source, external_key)
+		)
+	`)
+	if err != nil {
+		t.Fatalf("create old messages table: %v", err)
+	}
+
+	base := time.Date(2026, 5, 24, 10, 0, 0, 0, time.UTC)
+	now := nowText()
+	for _, msg := range []Message{
+		{
+			ProfileID:   "891",
+			Source:      MessageSourceModem,
+			ExternalKey: "/sms/1",
+			Sender:      "+100",
+			Text:        "hello",
+			Timestamp:   base,
+			Status:      "received",
+			Incoming:    true,
+		},
+		{
+			ProfileID:   "892",
+			Source:      MessageSourceModem,
+			ExternalKey: "/sms/2",
+			Sender:      "+100",
+			Recipient:   "+999",
+			Text:        "hello",
+			Timestamp:   base,
+			Status:      "received",
+			Incoming:    true,
+		},
+	} {
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO messages (
+				profile_id, source, external_key, sender, recipient, text,
+				timestamp, status, incoming, wifi_calling, created_at, updated_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, msg.ProfileID, msg.Source, msg.ExternalKey, msg.Sender, msg.Recipient, msg.Text,
+			timeText(msg.Timestamp), msg.Status, boolInt(msg.Incoming), boolInt(msg.WiFiCalling), now, now)
+		if err != nil {
+			t.Fatalf("insert old message: %v", err)
+		}
+	}
+
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages`).Scan(&count); err != nil {
+		t.Fatalf("count messages: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("message count = %d, want 2", count)
+	}
+
+	var emptyFingerprints int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE fingerprint = ''`).Scan(&emptyFingerprints); err != nil {
+		t.Fatalf("count empty fingerprints: %v", err)
+	}
+	if emptyFingerprints != 2 {
+		t.Fatalf("empty fingerprints = %d, want 2", emptyFingerprints)
+	}
+
+	inserted, err := store.InsertMessage(ctx, Message{
+		ModemID:     "modem-a",
+		ProfileID:   "893",
+		Source:      MessageSourceModem,
+		ExternalKey: "/sms/3",
+		Sender:      "+100",
+		Recipient:   "+888",
+		Text:        "hello",
+		Timestamp:   base,
+		Status:      "received",
+		Incoming:    true,
+	})
+	if err != nil {
+		t.Fatalf("InsertMessage() error = %v", err)
+	}
+	if !inserted {
+		t.Fatal("InsertMessage() = false, want true for first fingerprinted insert after migration")
+	}
+
+	inserted, err = store.InsertMessage(ctx, Message{
+		ModemID:     "modem-a",
+		ProfileID:   "894",
+		Source:      MessageSourceModem,
+		ExternalKey: "/sms/4",
+		Sender:      "+100",
+		Recipient:   "+777",
+		Text:        "hello",
+		Timestamp:   base,
+		Status:      "received",
+		Incoming:    true,
+	})
+	if err != nil {
+		t.Fatalf("InsertMessage() duplicate error = %v", err)
+	}
+	if inserted {
+		t.Fatal("InsertMessage() inserted duplicate fingerprint, want false")
+	}
+
+	inserted, err = store.InsertMessage(ctx, Message{
+		ModemID:     "modem-b",
+		ProfileID:   "895",
+		Source:      MessageSourceModem,
+		ExternalKey: "/sms/5",
+		Sender:      "+100",
+		Recipient:   "+777",
+		Text:        "hello",
+		Timestamp:   base,
+		Status:      "received",
+		Incoming:    true,
+	})
+	if err != nil {
+		t.Fatalf("InsertMessage() different modem error = %v", err)
+	}
+	if !inserted {
+		t.Fatal("InsertMessage() = false, want true for same SMS content on different modem")
+	}
 }
 
 func testStore(t *testing.T) *Store {

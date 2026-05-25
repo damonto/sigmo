@@ -2,7 +2,9 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -17,9 +19,11 @@ const (
 
 type Message struct {
 	ID          int64
+	ModemID     string
 	ProfileID   string
 	Source      string
 	ExternalKey string
+	Fingerprint string
 	Sender      string
 	Recipient   string
 	Text        string
@@ -37,12 +41,12 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 	now := nowText()
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO messages (
-			profile_id, source, external_key, sender, recipient, text,
+			profile_id, source, external_key, fingerprint, sender, recipient, text,
 			timestamp, status, incoming, wifi_calling, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(profile_id, source, external_key) DO NOTHING
-	`, msg.ProfileID, msg.Source, msg.ExternalKey, msg.Sender, msg.Recipient, msg.Text,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT DO NOTHING
+	`, msg.ProfileID, msg.Source, msg.ExternalKey, msg.Fingerprint, msg.Sender, msg.Recipient, msg.Text,
 		timeText(msg.Timestamp), msg.Status, boolInt(msg.Incoming), boolInt(msg.WiFiCalling), now, now)
 	if err != nil {
 		return false, fmt.Errorf("insert message: %w", err)
@@ -60,7 +64,7 @@ func (s *Store) ListConversations(ctx context.Context, profileID string) ([]Mess
 		return nil, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, profile_id, source, external_key, sender, recipient, text, timestamp, status, incoming, wifi_calling
+		SELECT id, profile_id, source, external_key, fingerprint, sender, recipient, text, timestamp, status, incoming, wifi_calling
 		FROM messages
 		WHERE profile_id = ?
 		ORDER BY timestamp DESC, id DESC
@@ -107,7 +111,7 @@ func (s *Store) ListByParticipant(ctx context.Context, profileID string, partici
 		return nil, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, profile_id, source, external_key, sender, recipient, text, timestamp, status, incoming, wifi_calling
+		SELECT id, profile_id, source, external_key, fingerprint, sender, recipient, text, timestamp, status, incoming, wifi_calling
 		FROM messages
 		WHERE profile_id = ? AND (sender = ? OR recipient = ?)
 		ORDER BY timestamp ASC, id ASC
@@ -139,13 +143,18 @@ func (s *Store) DeleteByParticipant(ctx context.Context, profileID string, parti
 
 func normalizeMessage(msg Message) Message {
 	msg.ProfileID = strings.TrimSpace(msg.ProfileID)
+	msg.ModemID = strings.TrimSpace(msg.ModemID)
 	msg.Source = strings.TrimSpace(msg.Source)
 	msg.ExternalKey = strings.TrimSpace(msg.ExternalKey)
+	msg.Fingerprint = strings.TrimSpace(msg.Fingerprint)
 	msg.Sender = strings.TrimSpace(msg.Sender)
 	msg.Recipient = strings.TrimSpace(msg.Recipient)
 	msg.Status = strings.ToLower(strings.TrimSpace(msg.Status))
 	if msg.Timestamp.IsZero() {
 		msg.Timestamp = time.Now()
+	}
+	if msg.Fingerprint == "" {
+		msg.Fingerprint = MessageFingerprint(msg)
 	}
 	return msg
 }
@@ -191,6 +200,7 @@ func scanMessage(row messageScanner) (Message, error) {
 		&msg.ProfileID,
 		&msg.Source,
 		&msg.ExternalKey,
+		&msg.Fingerprint,
 		&msg.Sender,
 		&msg.Recipient,
 		&msg.Text,
@@ -205,6 +215,25 @@ func scanMessage(row messageScanner) (Message, error) {
 	msg.Incoming = incoming != 0
 	msg.WiFiCalling = wifiCalling != 0
 	return msg, nil
+}
+
+func MessageFingerprint(msg Message) string {
+	direction := "out"
+	counterparty := msg.Recipient
+	if msg.Incoming {
+		direction = "in"
+		counterparty = msg.Sender
+	}
+	parts := []string{
+		strings.TrimSpace(msg.ModemID),
+		strings.TrimSpace(msg.Source),
+		direction,
+		strings.TrimSpace(counterparty),
+		msg.Text,
+		timeText(msg.Timestamp),
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(sum[:])
 }
 
 func (m Message) Counterparty() string {

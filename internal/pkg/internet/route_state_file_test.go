@@ -11,18 +11,11 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/netlink"
 )
 
-const (
-	defaultRouteStatePath = "/run/sigmo/internet-routes.json"
-	routeStateVersion     = 1
-)
+const routeStateVersion = 1
 
 type routeStateFile struct {
 	Version    int                        `json:"version"`
 	Interfaces map[string]routeStateEntry `json:"interfaces"`
-}
-
-func loadDefaultRouteStateForModem(modemID string, interfaceName string) ([]defaultRouteChange, bool, error) {
-	return loadRouteStateForModem(defaultRouteStatePath, modemID, interfaceName)
 }
 
 func saveRouteStateForModem(path string, modemID string, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error {

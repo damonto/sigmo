@@ -10,10 +10,7 @@ import (
 	"strings"
 )
 
-const (
-	proxyStatePath    = "/run/sigmo/internet-proxies.json"
-	proxyStateVersion = 1
-)
+const proxyStateVersion = 1
 
 type proxyStateFile struct {
 	Version    int                        `json:"version"`

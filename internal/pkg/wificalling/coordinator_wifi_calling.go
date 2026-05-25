@@ -140,6 +140,7 @@ func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to strin
 		return storage.Message{}, err
 	}
 	return storage.Message{
+		ModemID:     modem.EquipmentIdentifier,
 		ProfileID:   profileID,
 		Source:      storage.MessageSourceWiFiCalling,
 		ExternalKey: submission.ID,
@@ -335,6 +336,7 @@ func (c *coordinator) forwardIncoming(ctx context.Context, modem *mmodem.Modem, 
 		return
 	}
 	stored := storage.Message{
+		ModemID:     modem.EquipmentIdentifier,
 		ProfileID:   profileID,
 		Source:      storage.MessageSourceWiFiCalling,
 		ExternalKey: incomingMessageKey(msg),
