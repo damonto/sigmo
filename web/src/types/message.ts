@@ -10,3 +10,7 @@ export type MessageResponse = {
 }
 
 export type MessagesResponse = MessageResponse[]
+
+export type SendMessageResponse = {
+  to: string
+}

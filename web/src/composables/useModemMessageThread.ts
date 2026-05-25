@@ -55,9 +55,9 @@ export const useModemMessageThread = ({
     })),
   )
 
-  const fetchThreadMessages = async (id: string, target: string) => {
+  const fetchThreadMessages = async (id: string, target: string, force = false) => {
     if (isLoading.value) return
-    if (isNewConversation.value) {
+    if (isNewConversation.value && !force) {
       threadMessages.value = []
       return
     }
@@ -99,15 +99,16 @@ export const useModemMessageThread = ({
     messageDraft.value = ''
     isSending.value = true
     try {
-      await messageApi.sendMessage(targetId, target, text)
+      const { data } = await messageApi.sendMessage(targetId, target, text)
+      const sentTo = data.value?.to?.trim() || target
       if (isNewConversation.value) {
         await router.replace({
           name: 'modem-message-thread',
-          params: { id: targetId, participant: target },
+          params: { id: targetId, participant: sentTo },
         })
         newRecipient.value = ''
       }
-      await fetchThreadMessages(targetId, target)
+      await fetchThreadMessages(targetId, sentTo, true)
     } catch (err) {
       console.error('[useModemMessageThread] Failed to send message:', err)
     } finally {

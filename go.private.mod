@@ -13,6 +13,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.1.1
 	github.com/ncruces/go-sqlite3 v0.34.2
+	github.com/nyaruka/phonenumbers v1.7.4
 	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/things-go/go-socks5 v0.1.1
 	github.com/wneessen/go-mail v0.7.3
@@ -30,4 +31,5 @@ require (
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 )

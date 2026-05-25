@@ -1,6 +1,6 @@
 import { useFetch } from '@/lib/fetch'
 
-import type { MessagesResponse } from '@/types/message'
+import type { MessagesResponse, SendMessageResponse } from '@/types/message'
 
 export const useMessageApi = () => {
   const getMessages = (id: string) => {
@@ -20,7 +20,7 @@ export const useMessageApi = () => {
   }
 
   const sendMessage = (id: string, to: string, text: string) => {
-    return useFetch<void>(`modems/${id}/messages`, {
+    return useFetch<SendMessageResponse>(`modems/${id}/messages`, {
       method: 'POST',
       body: JSON.stringify({ to, text }),
     }).json()

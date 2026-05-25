@@ -26,6 +26,7 @@ const (
 	errorCodeInvalidParticipant        = "invalid_participant"
 	errorCodeSendMessageInvalidRequest = "send_message_invalid_request"
 	errorCodeRecipientRequired         = "recipient_required"
+	errorCodeRecipientInvalid          = "invalid_recipient"
 	errorCodeTextRequired              = "text_required"
 	errorCodeSendMessageFailed         = "send_message_failed"
 	errorCodeDeleteMessageThreadFailed = "delete_message_thread_failed"
@@ -84,16 +85,24 @@ func (h *Handler) Send(c *echo.Context) error {
 	if err := httpapi.BindAndValidate(c, &req, errorCodeSendMessageInvalidRequest); err != nil {
 		return err
 	}
-	if err := h.messages.Send(ctx, modem, req.To, req.Text); err != nil {
-		if errors.Is(err, errRecipientRequired) {
-			return httpapi.BadRequest(c, errorCodeRecipientRequired, err)
-		}
-		if errors.Is(err, errTextRequired) {
-			return httpapi.BadRequest(c, errorCodeTextRequired, err)
-		}
-		return httpapi.Internal(c, errorCodeSendMessageFailed, err)
+	to, err := h.messages.Send(ctx, modem, req.To, req.Text)
+	if err != nil {
+		return writeSendMessageError(c, err)
 	}
-	return c.NoContent(http.StatusNoContent)
+	return c.JSON(http.StatusOK, SendMessageResponse{To: to})
+}
+
+func writeSendMessageError(c *echo.Context, err error) error {
+	if errors.Is(err, errRecipientRequired) {
+		return httpapi.BadRequest(c, errorCodeRecipientRequired, err)
+	}
+	if errors.Is(err, errRecipientInvalid) {
+		return httpapi.BadRequest(c, errorCodeRecipientInvalid, err)
+	}
+	if errors.Is(err, errTextRequired) {
+		return httpapi.BadRequest(c, errorCodeTextRequired, err)
+	}
+	return httpapi.Internal(c, errorCodeSendMessageFailed, err)
 }
 
 func (h *Handler) DeleteByParticipant(c *echo.Context) error {

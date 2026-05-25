@@ -17,3 +17,7 @@ type SendMessageRequest struct {
 	To   string `json:"to"`
 	Text string `json:"text"`
 }
+
+type SendMessageResponse struct {
+	To string `json:"to"`
+}
