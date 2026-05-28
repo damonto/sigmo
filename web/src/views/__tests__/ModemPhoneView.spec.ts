@@ -258,6 +258,24 @@ describe('ModemPhoneView phone interactions', () => {
     expect(phoneHarness.dial).toHaveBeenCalledWith('+12242255559')
   })
 
+  it('shrinks the phone input text for long numbers', async () => {
+    const wrapper = mountView()
+
+    await wrapper.get('button[aria-label="Open dialpad"]').trigger('click')
+    const input = wrapper.get('input[type="tel"]')
+
+    expect(input.classes()).toContain('text-3xl')
+
+    await input.setValue('+12242255559')
+    expect(input.classes()).toContain('text-2xl')
+
+    await input.setValue('+122422555591234')
+    expect(input.classes()).toContain('text-xl')
+
+    await input.setValue('+122422555591234567890')
+    expect(input.classes()).toContain('text-lg')
+  })
+
   it('keeps the USSD dialog dismissible after a request error', async () => {
     ussdHarness.executeUssd.mockRejectedValueOnce(new Error('network timeout'))
     const wrapper = mountView()

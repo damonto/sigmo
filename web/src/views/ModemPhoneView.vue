@@ -22,7 +22,6 @@ import { useModemCallSession } from '@/composables/useModemCallSession'
 import { useStickyTopBar } from '@/composables/useStickyTopBar'
 import { hasBrowserAmrCodec } from '@/lib/browserAmrCodec'
 import { formatListTimestamp } from '@/lib/datetime'
-import type { CallRecord } from '@/types/call'
 import type { UssdAction } from '@/types/ussd'
 
 const route = useRoute()
@@ -79,6 +78,13 @@ const keys = [
 
 const normalizedDigits = computed(() => digits.value.trim())
 const canDial = computed(() => normalizedDigits.value.length > 0 && !isDialing.value)
+const dialInputClass = computed(() => {
+  const length = normalizedDigits.value.length
+  if (length > 20) return 'text-lg'
+  if (length > 15) return 'text-xl'
+  if (length > 10) return 'text-2xl'
+  return 'text-3xl'
+})
 
 const isUssd = (value: string) => value.startsWith('*') || value.startsWith('#')
 
@@ -331,7 +337,8 @@ watch(dialpadOpen, async (open) => {
               type="tel"
               inputmode="tel"
               autocomplete="tel"
-              class="h-20 w-full bg-transparent px-12 text-center text-3xl font-semibold tracking-normal outline-none"
+              class="h-20 w-full bg-transparent text-center font-semibold tracking-normal outline-none"
+              :class="dialInputClass"
               :aria-label="t('modemDetail.phone.numberPlaceholder')"
               @keydown.enter.prevent="startDial"
             />
@@ -366,17 +373,17 @@ watch(dialpadOpen, async (open) => {
             </button>
           </div>
 
-          <div class="flex items-center justify-center">
-            <Button
-              size="icon-lg"
-              class="size-11 touch-manipulation rounded-full bg-emerald-600 hover:bg-emerald-700"
+          <div class="mx-auto grid w-full max-w-60 grid-cols-3 gap-4">
+            <button
+              type="button"
+              class="col-start-2 flex aspect-square min-h-0 touch-manipulation items-center justify-center rounded-full bg-emerald-600 text-white transition hover:bg-emerald-700 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
               :disabled="!canDial"
               :aria-label="t('modemDetail.phone.call')"
               @click="startDial"
             >
               <PhoneCall v-if="!isDialing" class="size-5" />
               <Spinner v-else class="size-6" />
-            </Button>
+            </button>
           </div>
         </div>
       </DialogContent>
