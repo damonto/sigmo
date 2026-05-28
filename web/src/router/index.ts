@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-import { getStoredToken } from '@/lib/auth-storage'
+import { getStoredToken } from '@/lib/authStorage'
 import { useAuthStore } from '@/stores/auth'
 
 const router = createRouter({

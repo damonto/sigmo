@@ -27,6 +27,7 @@ const (
 	errorCodeInternetProxyStartFailed         = "internet_proxy_start_failed"
 	errorCodeInternetAuthInvalidConfig        = "internet_auth_invalid_config"
 	errorCodeInternetIPTypeInvalidConfig      = "internet_ip_type_invalid_config"
+	errorCodeInternetProfileIDRequired        = "internet_profile_id_required"
 )
 
 func New(registry *mmodem.Registry, connector *internetcore.Connector) *Handler {
@@ -117,6 +118,9 @@ func internetError(c *echo.Context, err error, internalErrorCode string) error {
 	}
 	if errors.Is(err, internetcore.ErrProxyStart) {
 		return httpapi.UnprocessableEntity(c, errorCodeInternetProxyStartFailed, err)
+	}
+	if errors.Is(err, internetcore.ErrProfileIDRequired) {
+		return httpapi.UnprocessableEntity(c, errorCodeInternetProfileIDRequired, err)
 	}
 	if errors.Is(err, mmodem.ErrUnsupportedBearerAuth) {
 		return httpapi.UnprocessableEntity(c, errorCodeInternetAuthInvalidConfig, err)

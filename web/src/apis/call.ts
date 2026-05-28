@@ -1,7 +1,7 @@
 import { shallowRef, type Ref } from 'vue'
 
-import { clearStoredToken, getStoredToken } from '@/lib/auth-storage'
-import { handleError } from '@/lib/error-handler'
+import { clearStoredToken, getStoredToken } from '@/lib/authStorage'
+import { handleError } from '@/lib/errorHandler'
 
 import type { ApiErrorResponse } from '@/types/api'
 import type { CallRecord, DialCallRequest, UpdateCallRequest } from '@/types/call'
@@ -69,7 +69,11 @@ export const buildCallEventsUrl = (id: string) => buildCallWebSocketUrl(id, '/ev
 export const buildCallMediaUrl = (id: string, callID: string) =>
   buildCallWebSocketUrl(id, `/${encodeURIComponent(callID)}/media`)
 
-const requestCallApi = async <T>(id: string, path: string, init: RequestInit = {}): Promise<CallApiResult<T>> => {
+const requestCallApi = async <T>(
+  id: string,
+  path: string,
+  init: RequestInit = {},
+): Promise<CallApiResult<T>> => {
   const headers = new Headers(init.headers)
   const token = getStoredToken()
   if (token) {

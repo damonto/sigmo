@@ -11,6 +11,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
+	pcall "github.com/damonto/sigmo/internal/pkg/call"
 	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/notify"
@@ -19,17 +20,18 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
-const incomingSMSFreshnessWindow = 30 * time.Minute
+const incomingNotificationFreshnessWindow = 30 * time.Minute
 
 type Relay struct {
-	store     *config.Store
-	registry  *modem.Registry
-	notifier  *notify.Notifier
-	messages  *storage.Store
-	mu        sync.Mutex
-	cancels   map[dbus.ObjectPath]context.CancelFunc
-	equipment map[string]dbus.ObjectPath
-	modems    map[dbus.ObjectPath]string
+	store         *config.Store
+	registry      *modem.Registry
+	notifier      *notify.Notifier
+	messages      *storage.Store
+	mu            sync.Mutex
+	cancels       map[dbus.ObjectPath]context.CancelFunc
+	equipment     map[string]dbus.ObjectPath
+	modems        map[dbus.ObjectPath]string
+	notifiedCalls map[string]struct{}
 }
 
 func New(store *config.Store, registry *modem.Registry, messages *storage.Store) (*Relay, error) {
@@ -42,13 +44,14 @@ func New(store *config.Store, registry *modem.Registry, messages *storage.Store)
 		return nil, fmt.Errorf("creating notifier: %w", err)
 	}
 	return &Relay{
-		store:     store,
-		registry:  registry,
-		notifier:  notifier,
-		messages:  messages,
-		cancels:   make(map[dbus.ObjectPath]context.CancelFunc),
-		equipment: make(map[string]dbus.ObjectPath),
-		modems:    make(map[dbus.ObjectPath]string),
+		store:         store,
+		registry:      registry,
+		notifier:      notifier,
+		messages:      messages,
+		cancels:       make(map[dbus.ObjectPath]context.CancelFunc),
+		equipment:     make(map[string]dbus.ObjectPath),
+		modems:        make(map[dbus.ObjectPath]string),
+		notifiedCalls: make(map[string]struct{}),
 	}, nil
 }
 
@@ -182,6 +185,44 @@ func (r *Relay) ForwardWiFiCallingSMS(ctx context.Context, incoming wificalling.
 	return notifier.Send(ctx, r.formatStoredMessage(incoming.ModemID, incoming.Message))
 }
 
+func (r *Relay) ForwardCalls(ctx context.Context, calls *pcall.Service) error {
+	if calls == nil {
+		return errors.New("call service is required")
+	}
+	events, unsubscribe := calls.Subscribe(16)
+	defer unsubscribe()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case event := <-events:
+			if err := r.ForwardCall(ctx, event.Call); err != nil {
+				slog.Warn("forward call notification", "call_id", event.Call.ID, "modem", event.Call.ModemID, "error", err)
+			}
+		}
+	}
+}
+
+func (r *Relay) ForwardCall(ctx context.Context, call storage.Call) error {
+	if !freshIncomingCall(call, time.Now()) {
+		return nil
+	}
+	if !r.reserveCallNotification(call.ID) {
+		slog.Debug("skipping known incoming call", "modem", call.ModemID, "call_id", call.ID)
+		return nil
+	}
+
+	r.mu.Lock()
+	notifier := r.notifier
+	r.mu.Unlock()
+	if err := notifier.Send(ctx, r.formatStoredCall(call)); err != nil {
+		r.releaseCallNotification(call.ID)
+		return err
+	}
+	return nil
+}
+
 func (r *Relay) forwardModemSMS(ctx context.Context, m *modem.Modem, message *modem.SMS) error {
 	profileID, err := m.ProfileID(ctx)
 	if err != nil {
@@ -214,7 +255,25 @@ func freshIncomingMessage(message storage.Message, now time.Time) bool {
 	if diff < 0 {
 		diff = -diff
 	}
-	return diff <= incomingSMSFreshnessWindow
+	return diff <= incomingNotificationFreshnessWindow
+}
+
+func freshIncomingCall(call storage.Call, now time.Time) bool {
+	if call.Direction != pcall.DirectionIncoming || call.State != pcall.StateRinging {
+		return false
+	}
+	timestamp := call.StartedAt
+	if timestamp.IsZero() {
+		timestamp = call.UpdatedAt
+	}
+	if timestamp.IsZero() {
+		return true
+	}
+	diff := now.Sub(timestamp)
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff <= incomingNotificationFreshnessWindow
 }
 
 func (r *Relay) formatStoredMessage(modemID string, message storage.Message) notifyevent.SMSEvent {
@@ -226,6 +285,36 @@ func (r *Relay) formatStoredMessage(modemID string, message storage.Message) not
 		Text:     strings.TrimSpace(message.Text),
 		Incoming: message.Incoming,
 	}
+}
+
+func (r *Relay) formatStoredCall(call storage.Call) notifyevent.CallEvent {
+	return notifyevent.CallEvent{
+		Modem:    r.modemLabel(call.ModemID),
+		From:     strings.TrimSpace(call.Number),
+		Time:     call.StartedAt,
+		State:    call.State,
+		Incoming: call.Direction == pcall.DirectionIncoming,
+	}
+}
+
+func (r *Relay) reserveCallNotification(callID string) bool {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return true
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.notifiedCalls[callID]; ok {
+		return false
+	}
+	r.notifiedCalls[callID] = struct{}{}
+	return true
+}
+
+func (r *Relay) releaseCallNotification(callID string) {
+	r.mu.Lock()
+	delete(r.notifiedCalls, strings.TrimSpace(callID))
+	r.mu.Unlock()
 }
 
 func (r *Relay) modemLabel(modemID string) string {

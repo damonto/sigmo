@@ -1,3 +1,5 @@
+import type { ApiErrorResponse } from '@/types/api'
+
 export type CallRoute = 'auto' | 'wifi_calling' | 'modem'
 export type StoredCallRoute = Exclude<CallRoute, 'auto'>
 export type CallDirection = 'incoming' | 'outgoing'
@@ -5,7 +7,9 @@ export type CallState =
   | 'dialing'
   | 'ringing'
   | 'answering'
+  | 'early_media'
   | 'active'
+  | 'confirmed'
   | 'ending'
   | 'ended'
   | 'failed'
@@ -52,4 +56,9 @@ export type CallMediaInfo = {
 export type CallMediaReadyMessage = {
   type: 'ready'
   media: CallMediaInfo
+}
+
+export type CallMediaErrorMessage = {
+  type: 'error'
+  error: ApiErrorResponse
 }

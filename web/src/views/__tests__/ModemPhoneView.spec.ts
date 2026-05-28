@@ -52,6 +52,7 @@ const labels: Record<string, string> = {
   'modemDetail.phone.backspace': 'Delete digit',
   'modemDetail.phone.incoming': 'Incoming',
   'modemDetail.phone.outgoing': 'Outgoing',
+  'modemDetail.phone.duration': 'Duration',
   'modemDetail.phone.durationEmpty': '0:00',
   'modemDetail.phone.ussdTitle': 'USSD',
   'modemDetail.phone.ussdDescription': 'Continue the USSD session in this dialog.',
@@ -60,7 +61,9 @@ const labels: Record<string, string> = {
   'modemDetail.phone.states.dialing': 'Dialing',
   'modemDetail.phone.states.ringing': 'Ringing',
   'modemDetail.phone.states.answering': 'Answering',
+  'modemDetail.phone.states.earlyMedia': 'Early media',
   'modemDetail.phone.states.active': 'In call',
+  'modemDetail.phone.states.confirmed': 'Connected',
   'modemDetail.phone.states.ended': 'Ended',
   'modemDetail.phone.states.failed': 'Failed',
   'modemDetail.phone.title': 'Phone',
@@ -68,6 +71,7 @@ const labels: Record<string, string> = {
   'modemDetail.phone.empty': 'No recent calls.',
   'modemDetail.phone.answer': 'Answer',
   'modemDetail.phone.reject': 'Reject',
+  'modemDetail.back': 'Back',
   'modemDetail.actions.cancel': 'Cancel',
   'modemDetail.ussd.send': 'Send',
   'home.refresh': 'Refresh',
@@ -132,12 +136,23 @@ const mountView = () =>
       stubs: {
         DraggableFab: {
           emits: ['click'],
-          template: '<button type="button" aria-label="Open dialpad" @click="$emit(\'click\')"><slot /></button>',
+          template:
+            '<button type="button" aria-label="Open dialpad" @click="$emit(\'click\')"><slot /></button>',
+        },
+        BackButton: {
+          props: ['label'],
+          template: '<a><slot />{{ label }}</a>',
+        },
+        ModemStickyTopBar: {
+          props: ['title', 'show'],
+          template:
+            '<div data-testid="sticky-top-bar" :data-show="show"><span>{{ title }}</span><slot name="right" /></div>',
         },
         Button: {
           props: ['disabled'],
           emits: ['click'],
-          template: '<button type="button" v-bind="$attrs" :disabled="disabled" @click="$emit(\'click\', $event)"><slot /></button>',
+          template:
+            '<button type="button" v-bind="$attrs" :disabled="disabled" @click="$emit(\'click\', $event)"><slot /></button>',
         },
         Dialog: {
           props: ['open'],
@@ -160,6 +175,14 @@ const clickKey = async (wrapper: ReturnType<typeof mountView>, key: string) => {
 
 const callButton = (wrapper: ReturnType<typeof mountView>) =>
   wrapper.findAll('button').find((item) => item.attributes('aria-label') === 'Call')
+
+const deferredCall = () => {
+  let resolve!: (call: CallRecord | null) => void
+  const promise = new Promise<CallRecord | null>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
 
 describe('ModemPhoneView phone interactions', () => {
   beforeEach(() => {
@@ -205,10 +228,34 @@ describe('ModemPhoneView phone interactions', () => {
     expect(wrapper.text()).toContain('Balance: 1')
     expect(wrapper.find('input').element.value).toBe('')
 
-    await wrapper.findAll('button').find((item) => item.text() === 'Cancel')?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((item) => item.text() === 'Cancel')
+      ?.trigger('click')
     await wrapper.get('button[aria-label="Open dialpad"]').trigger('click')
 
     expect(wrapper.text()).toContain('Number')
+  })
+
+  it('keeps the USSD dialog dismissible after a request error', async () => {
+    ussdHarness.executeUssd.mockRejectedValueOnce(new Error('network timeout'))
+    const wrapper = mountView()
+
+    await wrapper.get('button[aria-label="Open dialpad"]').trigger('click')
+    await clickKey(wrapper, '*')
+    await clickKey(wrapper, '1')
+    await callButton(wrapper)?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('USSD')
+    expect(wrapper.text()).not.toContain('Balance: 1')
+
+    await wrapper
+      .findAll('button')
+      .find((item) => item.text() === 'Cancel')
+      ?.trigger('click')
+
+    expect(wrapper.text()).not.toContain('USSD')
   })
 
   it('renders call direction, duration, and calls back from recent records', async () => {
@@ -243,9 +290,13 @@ describe('ModemPhoneView phone interactions', () => {
     expect(wrapper.text()).toContain('Outgoing')
     expect(wrapper.text()).toContain('Incoming')
     expect(wrapper.text()).toContain('1:05')
-    expect(wrapper.text()).toContain('0:09')
+    expect(wrapper.text()).not.toContain('0:09')
+    expect(wrapper.text()).not.toContain('0:00')
 
-    await wrapper.findAll('button').find((item) => item.attributes('aria-label') === 'Call back')?.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((item) => item.attributes('aria-label') === 'Call back')
+      ?.trigger('click')
     await flushPromises()
 
     expect(phoneHarness.dial).toHaveBeenCalledWith('+12242255559')
@@ -315,6 +366,25 @@ describe('ModemPhoneView phone interactions', () => {
     expect(phoneHarness.dial).toHaveBeenCalledWith('12')
   })
 
+  it('hides the dialpad as soon as dialing starts', async () => {
+    const pendingDial = deferredCall()
+    phoneHarness.dial.mockReturnValueOnce(pendingDial.promise)
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.get('button[aria-label="Open dialpad"]').trigger('click')
+    await clickKey(wrapper, '1')
+    await clickKey(wrapper, '2')
+    expect(wrapper.text()).toContain('Dialpad')
+
+    await callButton(wrapper)?.trigger('click')
+
+    expect(phoneHarness.dial).toHaveBeenCalledWith('12')
+    expect(wrapper.text()).not.toContain('Dialpad')
+    pendingDial.resolve(null)
+    await flushPromises()
+  })
+
   it('releases prepared outgoing audio when dialing does not create a call', async () => {
     browserCodecHarness.hasCodec = true
     modemApiHarness.getWiFiCallingSettings.mockResolvedValue({
@@ -334,114 +404,43 @@ describe('ModemPhoneView phone interactions', () => {
     expect(callAudioHarness.stop).toHaveBeenCalled()
   })
 
-  it('shows incoming call actions in the floating banner', async () => {
-    const incoming = {
-      callID: 'call-in',
-      route: 'wifi_calling',
-      direction: 'incoming',
-      number: '+12242255559',
-      state: 'ringing',
-      reason: '',
-      startedAt: '2026-05-27T00:00:00Z',
-      answeredAt: '',
-      endedAt: '',
-      updatedAt: '2026-05-27T00:00:00Z',
-    } satisfies CallRecord
-    phoneHarness.incomingCall = incoming
-    const wrapper = mountView()
-
-    expect(wrapper.text()).toContain('+12242255559')
-    await wrapper.get('button[aria-label="Answer"]').trigger('click')
-    await wrapper.get('button[aria-label="Reject"]').trigger('click')
-
-    expect(phoneHarness.answer).toHaveBeenCalledWith(incoming)
-    expect(phoneHarness.reject).toHaveBeenCalledWith(incoming)
-  })
-
-  it('prepares browser audio from the answer user gesture when a codec is available', async () => {
-    const incoming = {
-      callID: 'call-in',
-      route: 'wifi_calling',
-      direction: 'incoming',
-      number: '+12242255559',
-      state: 'ringing',
-      reason: '',
-      startedAt: '2026-05-27T00:00:00Z',
-      answeredAt: '',
-      endedAt: '',
-      updatedAt: '2026-05-27T00:00:00Z',
-    } satisfies CallRecord
+  it('starts browser audio for a confirmed Wi-Fi Calling session', () => {
     browserCodecHarness.hasCodec = true
-    phoneHarness.incomingCall = incoming
-    const wrapper = mountView()
-
-    await wrapper.get('button[aria-label="Answer"]').trigger('click')
-    await flushPromises()
-
-    expect(callAudioHarness.prepare).toHaveBeenCalled()
-    expect(phoneHarness.answer).toHaveBeenCalledWith(incoming)
-  })
-
-  it('does not answer when browser audio preparation fails', async () => {
-    const incoming = {
-      callID: 'call-in',
-      route: 'wifi_calling',
-      direction: 'incoming',
-      number: '+12242255559',
-      state: 'ringing',
-      reason: '',
-      startedAt: '2026-05-27T00:00:00Z',
-      answeredAt: '',
-      endedAt: '',
-      updatedAt: '2026-05-27T00:00:00Z',
-    } satisfies CallRecord
-    browserCodecHarness.hasCodec = true
-    phoneHarness.incomingCall = incoming
-    callAudioHarness.prepare.mockResolvedValue(false)
-    const wrapper = mountView()
-
-    await wrapper.get('button[aria-label="Answer"]').trigger('click')
-    await flushPromises()
-
-    expect(callAudioHarness.prepare).toHaveBeenCalled()
-    expect(phoneHarness.answer).not.toHaveBeenCalled()
-  })
-
-  it('shows active call audio codec requirements when no codec module is installed', () => {
     phoneHarness.activeCall = {
-      callID: 'call-active',
+      callID: 'call-confirmed',
       route: 'wifi_calling',
       direction: 'outgoing',
       number: '+12242255559',
-      state: 'active',
+      state: 'confirmed',
       reason: '',
       startedAt: '2026-05-27T00:00:00Z',
-      answeredAt: '2026-05-27T00:00:05Z',
+      answeredAt: '',
       endedAt: '',
       updatedAt: '2026-05-27T00:00:05Z',
     }
 
-    const wrapper = mountView()
+    mountView()
 
-    expect(wrapper.text()).toContain('Call audio requires an AMR/AMR-WB codec module.')
+    expect(callAudioHarness.start).toHaveBeenCalledWith('call-confirmed')
   })
 
-  it('renders the answering call state instead of treating it as ended', () => {
+  it('starts browser audio for an early media Wi-Fi Calling session', () => {
+    browserCodecHarness.hasCodec = true
     phoneHarness.activeCall = {
-      callID: 'call-answering',
+      callID: 'call-early',
       route: 'wifi_calling',
-      direction: 'incoming',
+      direction: 'outgoing',
       number: '+12242255559',
-      state: 'answering',
+      state: 'early_media',
       reason: '',
       startedAt: '2026-05-27T00:00:00Z',
-      answeredAt: '2026-05-27T00:00:05Z',
+      answeredAt: '',
       endedAt: '',
       updatedAt: '2026-05-27T00:00:05Z',
     }
 
-    const wrapper = mountView()
+    mountView()
 
-    expect(wrapper.text()).toContain('Answering')
+    expect(callAudioHarness.start).toHaveBeenCalledWith('call-early')
   })
 })

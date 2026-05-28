@@ -52,11 +52,16 @@ func (c *Connector) restoreAlwaysOnModems(ctx context.Context, registry *mmodem.
 		if modem == nil {
 			continue
 		}
-		prefs, ok := states[modem.EquipmentIdentifier]
+		access := modemAccess{modem: modem}
+		profileID := access.profileID()
+		if profileID == "" {
+			continue
+		}
+		prefs, ok := states[profileID]
 		if !ok || !prefs.AlwaysOn {
 			continue
 		}
-		if err := c.restoreAlwaysOn(ctx, modemAccess{modem: modem}, prefs); err != nil {
+		if err := c.restoreAlwaysOn(ctx, access, prefs); err != nil {
 			slog.Warn("restore internet always on connection", "modem", modem.EquipmentIdentifier, "error", err)
 		}
 	}
@@ -66,7 +71,11 @@ func (c *Connector) restoreAlwaysOn(ctx context.Context, modem internetModem, pr
 	modemID := modem.id()
 	defer c.lockModem(modemID)()
 
-	latest, ok, err := c.loadAlwaysOnStateForModem(ctx, modemID)
+	profileID := modem.profileID()
+	if profileID == "" {
+		return nil
+	}
+	latest, ok, err := c.loadAlwaysOnStateForProfile(ctx, profileID)
 	if err != nil {
 		return fmt.Errorf("load always on state: %w", err)
 	}
@@ -91,14 +100,14 @@ func (c *Connector) restoreAlwaysOn(ctx context.Context, modem internetModem, pr
 }
 
 const alwaysOnKVKey = "internet.always_on"
-const modemScopePrefix = "modem:"
+const profileScopePrefix = "profile:"
 
-func modemScope(modemID string) string {
-	return modemScopePrefix + strings.TrimSpace(modemID)
+func profileScope(profileID string) string {
+	return profileScopePrefix + strings.TrimSpace(profileID)
 }
 
 func (c *Connector) loadAlwaysOnStates(ctx context.Context) (map[string]Preferences, error) {
-	raw, err := c.state.ListRaw(ctx, modemScopePrefix, alwaysOnKVKey)
+	raw, err := c.state.ListRaw(ctx, profileScopePrefix, alwaysOnKVKey)
 	if err != nil {
 		return nil, err
 	}
@@ -111,17 +120,21 @@ func (c *Connector) loadAlwaysOnStates(ctx context.Context) (map[string]Preferen
 		if !prefs.AlwaysOn {
 			continue
 		}
-		modemID := strings.TrimPrefix(scope, modemScopePrefix)
-		if strings.TrimSpace(modemID) != "" {
-			states[modemID] = prefs
+		profileID := strings.TrimPrefix(scope, profileScopePrefix)
+		if strings.TrimSpace(profileID) != "" {
+			states[profileID] = prefs
 		}
 	}
 	return states, nil
 }
 
-func (c *Connector) loadAlwaysOnStateForModem(ctx context.Context, modemID string) (Preferences, bool, error) {
+func (c *Connector) loadAlwaysOnStateForProfile(ctx context.Context, profileID string) (Preferences, bool, error) {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return Preferences{}, false, nil
+	}
 	var prefs Preferences
-	err := c.state.Get(ctx, modemScope(modemID), alwaysOnKVKey, &prefs)
+	err := c.state.Get(ctx, profileScope(profileID), alwaysOnKVKey, &prefs)
 	if errors.Is(err, storage.ErrNotFound) {
 		return Preferences{}, false, nil
 	}
@@ -136,6 +149,7 @@ func (c *Connector) loadAlwaysOnStateForModem(ctx context.Context, modemID strin
 
 func (c *Connector) recoverAlwaysOn(ctx context.Context, modem internetModem, bearer *mmodem.Bearer, prefs Preferences) error {
 	modemID := modem.id()
+	profileID := modem.profileID()
 	tracked, _, ok, err := recoverTrackedConnection(ctx, c.persistence, modemID, bearer, prefs)
 	if err != nil {
 		return err
@@ -143,11 +157,12 @@ func (c *Connector) recoverAlwaysOn(ctx context.Context, modem internetModem, be
 	if !ok {
 		return ErrUnsupportedIPMethod
 	}
+	tracked.profileID = profileID
 	tracked.prefs.AlwaysOn = true
 	if err := c.syncProxyPreference(modemID, tracked.interfaceName, tracked.prefs); err != nil {
 		return err
 	}
-	if err := c.syncAlwaysOnState(modemID, tracked.prefs); err != nil {
+	if err := c.syncAlwaysOnState(profileID, tracked.prefs); err != nil {
 		return fmt.Errorf("sync always on state: %w", err)
 	}
 	c.setConnectionAndPreference(modemID, tracked, tracked.prefs)

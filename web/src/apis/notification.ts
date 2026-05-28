@@ -1,22 +1,22 @@
-import { useFetch } from '@/lib/fetch'
+import { fetchJson } from '@/lib/fetch'
 
 import type { NotificationsResponse } from '@/types/notification'
 
 export const useNotificationApi = () => {
   const getNotifications = (id: string) => {
-    return useFetch<NotificationsResponse>(`modems/${id}/notifications`).get().json()
+    return fetchJson<NotificationsResponse>(`modems/${id}/notifications`)
   }
 
   const resendNotification = (id: string, sequence: string) => {
-    return useFetch<void>(`modems/${id}/notifications/${sequence}/deliveries`, {
+    return fetchJson<void>(`modems/${id}/notifications/${sequence}/deliveries`, {
       method: 'POST',
-    }).json()
+    })
   }
 
   const deleteNotification = (id: string, sequence: string) => {
-    return useFetch<void>(`modems/${id}/notifications/${sequence}`, {
+    return fetchJson<void>(`modems/${id}/notifications/${sequence}`, {
       method: 'DELETE',
-    }).json()
+    })
   }
 
   return {

@@ -215,6 +215,31 @@ describe('usePhoneCalls', () => {
     expect(phone.activeCall.value?.state).toBe('answering')
   })
 
+  it('restores early media and confirmed calls from the initial call list', async () => {
+    api.listCalls.mockResolvedValue({
+      data: ref([
+        call({
+          callID: 'call-confirmed',
+          direction: 'outgoing',
+          state: 'confirmed',
+          updatedAt: '2026-05-27T00:00:20Z',
+        }),
+        call({
+          callID: 'call-early',
+          direction: 'outgoing',
+          state: 'early_media',
+          updatedAt: '2026-05-27T00:00:10Z',
+        }),
+      ]),
+    })
+
+    const { phone } = mountComposable()
+    await flushPromises()
+
+    expect(phone.incomingCall.value).toBeNull()
+    expect(phone.activeCall.value?.callID).toBe('call-confirmed')
+  })
+
   it('closes stale incoming notifications when refreshed calls are no longer ringing', async () => {
     FakeNotification.permission = 'granted'
     api.listCalls.mockResolvedValueOnce({ data: ref([call()]) })
@@ -331,6 +356,30 @@ describe('usePhoneCalls', () => {
 
     expect(phone.incomingCall.value).toBeNull()
     expect(phone.activeCall.value?.state).toBe('answering')
+  })
+
+  it('keeps the current call visible during early media and confirmed states', async () => {
+    const { phone } = mountComposable()
+    await flushPromises()
+
+    FakeWebSocket.instances[0]?.message({
+      type: 'call',
+      call: call({ state: 'early_media', direction: 'outgoing' }),
+    })
+    await nextTick()
+    expect(phone.activeCall.value?.state).toBe('early_media')
+
+    FakeWebSocket.instances[0]?.message({
+      type: 'call',
+      call: call({
+        state: 'confirmed',
+        direction: 'outgoing',
+        updatedAt: '2026-05-27T00:00:20Z',
+      }),
+    })
+    await nextTick()
+
+    expect(phone.activeCall.value?.state).toBe('confirmed')
   })
 
   it('closes incoming notifications when the call leaves ringing state', async () => {

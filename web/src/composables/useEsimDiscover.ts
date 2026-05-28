@@ -36,13 +36,11 @@ export const useEsimDiscover = ({ modemId, installDialogOpen, applyDiscoverAddre
     resetDiscoverState()
     isDiscoverLoading.value = true
     try {
-      const { data, error } = await esimApi.discoverEsims(targetId)
+      const { data } = await esimApi.discoverEsims(targetId)
       if (!discoverDialogOpen.value) return
-      if (error.value) {
-        discoverDialogOpen.value = false
-        return
-      }
       discoverOptions.value = data.value ?? []
+    } catch {
+      discoverDialogOpen.value = false
     } finally {
       isDiscoverLoading.value = false
     }

@@ -343,6 +343,75 @@ func TestMapWiFiCallingMediaError(t *testing.T) {
 	}
 }
 
+func TestEndUnavailableWiFiCallingMediaClosesStoredCall(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	service := New(store, fakeWiFiCalling{})
+	events, unsubscribe := service.Subscribe(1)
+	defer unsubscribe()
+
+	startedAt := time.Date(2026, 5, 28, 13, 10, 0, 0, time.UTC)
+	call := storage.Call{
+		ID:        "call-media-gone",
+		ProfileID: "profile-a",
+		ModemID:   "modem-1",
+		Route:     RouteWiFiCalling,
+		Direction: DirectionIncoming,
+		Number:    "+12242255559",
+		State:     StateActive,
+		StartedAt: startedAt,
+		UpdatedAt: startedAt,
+	}
+	if err := store.SaveCall(ctx, call); err != nil {
+		t.Fatalf("SaveCall() error = %v", err)
+	}
+
+	service.endUnavailableWiFiCallingMedia(ctx, call)
+
+	stored, err := store.GetCall(ctx, call.ID)
+	if err != nil {
+		t.Fatalf("GetCall() error = %v", err)
+	}
+	if stored.State != StateEnded || stored.Reason != ErrMediaUnavailable.Error() {
+		t.Fatalf("stored call state = %q/%q, want ended/media unavailable", stored.State, stored.Reason)
+	}
+	if stored.EndedAt.IsZero() || stored.UpdatedAt.Before(startedAt) {
+		t.Fatalf("stored call times = ended %v updated %v, want closed after %v", stored.EndedAt, stored.UpdatedAt, startedAt)
+	}
+
+	select {
+	case event := <-events:
+		if event.Call.ID != call.ID || event.Call.State != StateEnded {
+			t.Fatalf("event = %+v, want ended call", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ended call event")
+	}
+}
+
+func TestEndUnavailableWiFiCallingMediaIgnoresTerminalCall(t *testing.T) {
+	store := testStore(t)
+	service := New(store, fakeWiFiCalling{})
+	events, unsubscribe := service.Subscribe(1)
+	defer unsubscribe()
+
+	service.endUnavailableWiFiCallingMedia(context.Background(), storage.Call{
+		ID:        "call-ended",
+		ProfileID: "profile-a",
+		ModemID:   "modem-1",
+		Route:     RouteWiFiCalling,
+		Direction: DirectionIncoming,
+		Number:    "+12242255559",
+		State:     StateEnded,
+	})
+
+	select {
+	case event := <-events:
+		t.Fatalf("event = %+v, want no event for terminal call", event)
+	default:
+	}
+}
+
 func TestUpdateRejectsUnsupportedState(t *testing.T) {
 	service := New(nil, fakeWiFiCalling{})
 	_, err := service.Update(context.Background(), nil, "call-1", StateFailed, "")

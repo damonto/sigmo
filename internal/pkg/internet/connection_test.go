@@ -607,10 +607,12 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 				t.Fatalf("save new route state: %v", err)
 			}
 			store := testStore(t)
+			const oldProfileID = "8901000000000000001"
 			c := &Connector{
 				connections: map[string]trackedConnection{
 					"old-modem": {
 						interfaceName: "wws27u1i4",
+						profileID:     oldProfileID,
 						prefs:         Preferences{DefaultRoute: true, AlwaysOn: true},
 						routeMetric:   defaultRouteMetric,
 						routes:        []netlink.DefaultRoute{oldDefaultRoute},
@@ -625,13 +627,14 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 			}
 			tracked := trackedConnection{
 				interfaceName: "wws27u2i4",
+				profileID:     "8901000000000000002",
 				prefs:         Preferences{DefaultRoute: true},
 				routeMetric:   defaultRouteMetric,
 				routes:        []netlink.DefaultRoute{newDefaultRoute},
 				routeChanges:  []defaultRouteChange{oldRouteChange},
 			}
 
-			if err := c.syncAlwaysOnState("old-modem", Preferences{DefaultRoute: true, AlwaysOn: true}); err != nil {
+			if err := c.syncAlwaysOnState(oldProfileID, Preferences{DefaultRoute: true, AlwaysOn: true}); err != nil {
 				t.Fatalf("sync old always-on state: %v", err)
 			}
 			if err := c.syncDefaultRouteTakeover("new-modem", &tracked); err != nil {
@@ -654,7 +657,7 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 			if c.preferences["old-modem"].DefaultRoute {
 				t.Fatal("old preference DefaultRoute = true, want false")
 			}
-			oldAlwaysOn, ok, err := c.loadAlwaysOnStateForModem(context.Background(), "old-modem")
+			oldAlwaysOn, ok, err := c.loadAlwaysOnStateForProfile(context.Background(), oldProfileID)
 			if err != nil || !ok || oldAlwaysOn.DefaultRoute {
 				t.Fatalf("load old always-on after takeover = %#v, ok = %t, err = %v; want non-default", oldAlwaysOn, ok, err)
 			}
@@ -683,7 +686,7 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 			if !slices.Equal(oldTracked.routes, []netlink.DefaultRoute{oldDefaultRoute}) {
 				t.Fatalf("old tracked routes after restore = %#v, want %#v", oldTracked.routes, []netlink.DefaultRoute{oldDefaultRoute})
 			}
-			oldAlwaysOn, ok, err = c.loadAlwaysOnStateForModem(context.Background(), "old-modem")
+			oldAlwaysOn, ok, err = c.loadAlwaysOnStateForProfile(context.Background(), oldProfileID)
 			if err != nil || !ok || !oldAlwaysOn.DefaultRoute {
 				t.Fatalf("load old always-on after restore = %#v, ok = %t, err = %v; want default", oldAlwaysOn, ok, err)
 			}
@@ -1761,6 +1764,10 @@ func (m fakeInternetModem) gid1() string {
 
 func (m fakeInternetModem) spn() string {
 	return m.spnValue
+}
+
+func (m fakeInternetModem) profileID() string {
+	return m.iccidValue
 }
 
 func (m fakeInternetModem) iccid() string {

@@ -1,4 +1,4 @@
-import { useFetch } from '@/lib/fetch'
+import { fetchJson } from '@/lib/fetch'
 
 import type {
   BandsResponse,
@@ -10,36 +10,36 @@ import type {
 
 export const useNetworkApi = () => {
   const scanNetworks = (id: string) => {
-    return useFetch<NetworksResponse>(`modems/${id}/networks`).get().json()
+    return fetchJson<NetworksResponse>(`modems/${id}/networks`)
   }
 
   const registerNetwork = (id: string, operatorCode: string) => {
     const encoded = encodeURIComponent(operatorCode)
-    return useFetch<void>(`modems/${id}/networks/${encoded}`, {
+    return fetchJson<void>(`modems/${id}/networks/${encoded}`, {
       method: 'PUT',
-    }).json()
+    })
   }
 
   const getModes = (id: string) => {
-    return useFetch<ModesResponse>(`modems/${id}/networks/modes`).get().json()
+    return fetchJson<ModesResponse>(`modems/${id}/networks/modes`)
   }
 
   const setCurrentModes = (id: string, payload: SetCurrentModesRequest) => {
-    return useFetch<void>(`modems/${id}/networks/current-modes`, {
+    return fetchJson<void>(`modems/${id}/networks/current-modes`, {
       method: 'PUT',
       body: JSON.stringify(payload),
-    }).json()
+    })
   }
 
   const getBands = (id: string) => {
-    return useFetch<BandsResponse>(`modems/${id}/networks/bands`).get().json()
+    return fetchJson<BandsResponse>(`modems/${id}/networks/bands`)
   }
 
   const setCurrentBands = (id: string, payload: SetCurrentBandsRequest) => {
-    return useFetch<void>(`modems/${id}/networks/current-bands`, {
+    return fetchJson<void>(`modems/${id}/networks/current-bands`, {
       method: 'PUT',
       body: JSON.stringify(payload),
-    }).json()
+    })
   }
 
   return {

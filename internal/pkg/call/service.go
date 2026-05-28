@@ -24,13 +24,15 @@ const (
 	DirectionIncoming = "incoming"
 	DirectionOutgoing = "outgoing"
 
-	StateDialing   = "dialing"
-	StateRinging   = "ringing"
-	StateAnswering = "answering"
-	StateActive    = "active"
-	StateEnding    = "ending"
-	StateEnded     = "ended"
-	StateFailed    = "failed"
+	StateDialing    = "dialing"
+	StateRinging    = "ringing"
+	StateAnswering  = "answering"
+	StateEarlyMedia = "early_media"
+	StateActive     = "active"
+	StateConfirmed  = "confirmed"
+	StateEnding     = "ending"
+	StateEnded      = "ended"
+	StateFailed     = "failed"
 
 	ReasonBusy = "busy"
 )
@@ -253,6 +255,9 @@ func (s *Service) OpenMedia(ctx context.Context, modem *mmodem.Modem, callID str
 	switch call.Route {
 	case RouteWiFiCalling:
 		session, err := s.wifiCalling.OpenCallMedia(ctx, modem, call.ID)
+		if errors.Is(err, wificalling.ErrUnavailable) {
+			s.endUnavailableWiFiCallingMedia(ctx, call)
+		}
 		if err := mapWiFiCallingMediaError(err); err != nil {
 			return nil, err
 		}
@@ -262,6 +267,31 @@ func (s *Service) OpenMedia(ctx context.Context, modem *mmodem.Modem, callID str
 	default:
 		return nil, ErrInvalidRoute
 	}
+}
+
+func (s *Service) endUnavailableWiFiCallingMedia(ctx context.Context, call storage.Call) {
+	if isTerminalCallState(call.State) {
+		return
+	}
+	now := time.Now()
+	call.State = StateEnded
+	call.Reason = ErrMediaUnavailable.Error()
+	call.EndedAt = now
+	call.UpdatedAt = now
+	if err := s.store.SaveCall(ctx, call); err != nil {
+		slog.Warn("save Wi-Fi Calling call after media became unavailable",
+			"call_id", call.ID,
+			"modem_id", call.ModemID,
+			"profile_id", call.ProfileID,
+			"error", err,
+		)
+		return
+	}
+	s.publish(Event{Call: call})
+}
+
+func isTerminalCallState(state string) bool {
+	return state == StateEnded || state == StateFailed
 }
 
 func mapWiFiCallingMediaError(err error) error {

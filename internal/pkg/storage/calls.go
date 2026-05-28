@@ -44,11 +44,14 @@ func (s *Store) SaveCall(ctx context.Context, call Call) error {
 			state = excluded.state,
 			reason = excluded.reason,
 			started_at = excluded.started_at,
-			answered_at = excluded.answered_at,
+			answered_at = CASE
+				WHEN excluded.answered_at = ? THEN calls.answered_at
+				ELSE excluded.answered_at
+			END,
 			ended_at = excluded.ended_at,
 			updated_at = excluded.updated_at
 	`, call.ID, call.ProfileID, call.ModemID, call.Route, call.Direction, call.Number, call.State, call.Reason,
-		timeText(call.StartedAt), timeText(call.AnsweredAt), timeText(call.EndedAt), timeText(call.UpdatedAt))
+		timeText(call.StartedAt), timeText(call.AnsweredAt), timeText(call.EndedAt), timeText(call.UpdatedAt), timeText(time.Time{}))
 	if err != nil {
 		return fmt.Errorf("save call: %w", err)
 	}

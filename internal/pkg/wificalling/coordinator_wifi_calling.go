@@ -13,12 +13,13 @@ import (
 	"sync"
 	"time"
 
-	imsclient "github.com/damonto/ims-client"
-	"github.com/damonto/ims-client/driver/at"
-	"github.com/damonto/ims-client/driver/mbim"
-	"github.com/damonto/ims-client/driver/qmi"
-	imscall "github.com/damonto/ims-client/ims/call"
-	usimreader "github.com/damonto/ims-client/usim/reader"
+	vowifi "github.com/damonto/vowifi-go"
+	"github.com/damonto/vowifi-go/driver/at"
+	"github.com/damonto/vowifi-go/driver/mbim"
+	"github.com/damonto/vowifi-go/driver/qmi"
+	imssip "github.com/damonto/vowifi-go/ims/sip"
+	imsvoice "github.com/damonto/vowifi-go/ims/voice"
+	usimreader "github.com/damonto/vowifi-go/usim/reader"
 	"github.com/godbus/dbus/v5"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -46,8 +47,8 @@ type coordinator struct {
 type sessionState struct {
 	cancel      context.CancelFunc
 	done        <-chan struct{}
-	client      *imsclient.Client
-	ussd        *imsclient.Session
+	client      *vowifi.Client
+	ussd        *vowifi.Session
 	calls       map[string]*voiceCallState
 	pendingDial *pendingVoiceDial
 	modemPath   dbus.ObjectPath
@@ -57,7 +58,7 @@ type sessionState struct {
 }
 
 type voiceCallState struct {
-	call      *imscall.Call
+	call      *imsvoice.Call
 	info      VoiceCall
 	updatedAt time.Time
 }
@@ -256,7 +257,7 @@ func (c *coordinator) DialCall(ctx context.Context, modem *mmodem.Modem, to stri
 	}
 	pending := c.setPendingVoiceDial(modem.EquipmentIdentifier, profileID, to)
 	defer c.clearPendingVoiceDial(modem.EquipmentIdentifier, pending)
-	call, err := client.Voice().Dial(ctx, imscall.Request{To: to, Media: browserVoiceMediaOffer()})
+	call, err := client.Voice().Dial(ctx, imsvoice.DialRequest{To: to, Media: browserVoiceMediaOffer()})
 	if err != nil {
 		err = normalizeVoiceError(err)
 		if errors.Is(err, ErrNotConnected) {
@@ -273,11 +274,15 @@ func (c *coordinator) DialCall(ctx context.Context, modem *mmodem.Modem, to stri
 	return info, nil
 }
 
-func initialDialedVoiceCallState(info VoiceCall, state imscall.State) VoiceCall {
-	if state == imscall.StateActive && info.AnsweredAt.IsZero() {
+func initialDialedVoiceCallState(info VoiceCall, state imsvoice.CallState) VoiceCall {
+	if isAnsweredVoiceState(state) && info.AnsweredAt.IsZero() {
 		info.AnsweredAt = info.UpdatedAt
 	}
 	return info
+}
+
+func isAnsweredVoiceState(state imsvoice.CallState) bool {
+	return state == imsvoice.CallStateActive
 }
 
 func failedOutgoingVoiceCall(modemID string, profileID string, to string, err error) VoiceCall {
@@ -294,9 +299,9 @@ func failedOutgoingVoiceCallAt(modemID string, profileID string, to string, err 
 		ID:        failedVoiceCallID(modemID, profileID, number, at),
 		ModemID:   modemID,
 		ProfileID: profileID,
-		Direction: string(imscall.DirectionOutgoing),
+		Direction: string(imsvoice.CallDirectionOutgoing),
 		Number:    number,
-		State:     string(imscall.StateFailed),
+		State:     string(imsvoice.CallStateFailed),
 		Reason:    reason,
 		StartedAt: at,
 		EndedAt:   at,
@@ -309,28 +314,28 @@ func failedVoiceCallID(modemID string, profileID string, number string, at time.
 	return "failed:" + hex.EncodeToString(sum[:12])
 }
 
-func browserVoiceMediaOffer() imscall.MediaOffer {
-	return imscall.MediaOffer{
-		Codecs: []imscall.AudioCodec{imscall.CodecAMR, imscall.CodecPCMU},
+func browserVoiceMediaOffer() imsvoice.MediaOffer {
+	return imsvoice.MediaOffer{
+		Codecs: []imsvoice.AudioCodec{imsvoice.CodecAMR, imsvoice.CodecPCMU},
 	}
 }
 
-func browserVoiceConfig() imscall.Config {
-	return imscall.Config{
-		Codecs: []imscall.AudioCodecConfig{
+func browserVoiceConfig() imsvoice.Config {
+	return imsvoice.Config{
+		Codecs: []imsvoice.AudioCodecConfig{
 			{
-				Name:         imscall.CodecAMR,
+				Name:         imsvoice.CodecAMR,
 				PayloadTypes: []int{102},
 				ClockRate:    8000,
 				ModeSet:      "0,2,4,7",
 			},
 			{
-				Name:         imscall.CodecTelephoneEvent,
+				Name:         imsvoice.CodecTelephoneEvent,
 				PayloadTypes: []int{101},
 				ClockRate:    8000,
 			},
 			{
-				Name:         imscall.CodecPCMU,
+				Name:         imsvoice.CodecPCMU,
 				PayloadTypes: []int{0},
 				ClockRate:    8000,
 			},
@@ -401,8 +406,8 @@ func (c *coordinator) OpenCallMedia(ctx context.Context, modem *mmodem.Modem, ca
 	return callMediaSession{call: call, media: media}, nil
 }
 
-func isSupportedCallMediaCodec(codec imscall.AudioCodec) bool {
-	return codec == imscall.CodecAMR || codec == imscall.CodecPCMU
+func isSupportedCallMediaCodec(codec imsvoice.AudioCodec) bool {
+	return codec == imsvoice.CodecAMR || codec == imsvoice.CodecPCMU
 }
 
 func (c *coordinator) SubscribeVoiceEvents(fn VoiceEventFunc) func() {
@@ -422,15 +427,24 @@ func (c *coordinator) SubscribeVoiceEvents(fn VoiceEventFunc) func() {
 }
 
 func normalizeVoiceError(err error) error {
-	if errors.Is(err, imsclient.ErrClientNotConnected) {
+	if errors.Is(err, vowifi.ErrClientNotConnected) {
 		return ErrNotConnected
+	}
+	var responseErr *imssip.ResponseError
+	if errors.As(err, &responseErr) {
+		if text := strings.TrimSpace(responseErr.WarningText()); text != "" {
+			return errors.New(text)
+		}
+		if text := strings.TrimSpace(responseErr.Error()); text != "" {
+			return errors.New(text)
+		}
 	}
 	return err
 }
 
 type callMediaSession struct {
-	call  *imscall.Call
-	media imscall.NegotiatedMedia
+	call  *imsvoice.Call
+	media imsvoice.NegotiatedMedia
 }
 
 func (s callMediaSession) Info() MediaInfo {
@@ -458,7 +472,7 @@ func (s callMediaSession) WritePacket(ctx context.Context, packet []byte) error 
 	return s.call.WriteRTP(ctx, packet)
 }
 
-func (c *coordinator) lookupVoiceCall(ctx context.Context, modem *mmodem.Modem, callID string) (*imscall.Call, VoiceCall, error) {
+func (c *coordinator) lookupVoiceCall(ctx context.Context, modem *mmodem.Modem, callID string) (*imsvoice.Call, VoiceCall, error) {
 	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
 		return nil, VoiceCall{}, err
@@ -477,7 +491,7 @@ func (c *coordinator) lookupVoiceCall(ctx context.Context, modem *mmodem.Modem, 
 	return state.call, state.info, nil
 }
 
-func (c *coordinator) storeVoiceCall(modemID string, profileID string, call *imscall.Call, number string, direction string, state string, reason string) VoiceCall {
+func (c *coordinator) storeVoiceCall(modemID string, profileID string, call *imsvoice.Call, number string, direction string, state string, reason string) VoiceCall {
 	now := time.Now()
 	info := VoiceCall{
 		ID:        call.ID(),
@@ -547,7 +561,7 @@ func (c *coordinator) updateVoiceCall(modemID string, callID string, info VoiceC
 	c.updateVoiceCallWithPointer(modemID, callID, nil, info)
 }
 
-func (c *coordinator) updateVoiceCallWithPointer(modemID string, callID string, call *imscall.Call, info VoiceCall) {
+func (c *coordinator) updateVoiceCallWithPointer(modemID string, callID string, call *imsvoice.Call, info VoiceCall) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modemID]
@@ -582,17 +596,17 @@ func (c *coordinator) publishVoiceEvent(call VoiceCall) {
 	}
 }
 
-func (c *coordinator) ussdSession(modemID string) (*imsclient.Session, error) {
+func (c *coordinator) ussdSession(modemID string) (*vowifi.Session, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modemID]
 	if session == nil || session.ussd == nil {
-		return nil, imsclient.ErrUSSDNotStarted
+		return nil, vowifi.ErrUSSDNotStarted
 	}
 	return session.ussd, nil
 }
 
-func (c *coordinator) setUSSDSession(modemID string, ussd *imsclient.Session, closed bool) {
+func (c *coordinator) setUSSDSession(modemID string, ussd *vowifi.Session, closed bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modemID]
@@ -670,7 +684,7 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 		if ctx.Err() != nil {
 			return
 		}
-		if errors.Is(err, imsclient.ErrWFCEntitlementUserActionRequired) {
+		if errors.Is(err, vowifi.ErrWFCEntitlementUserActionRequired) {
 			slog.Warn("Wi-Fi Calling requires carrier websheet", "modem", modem.EquipmentIdentifier, "error", err)
 			if err := c.waitForWebsheet(ctx, modem.EquipmentIdentifier); err != nil {
 				if errors.Is(err, ErrWebsheetDismissed) {
@@ -694,15 +708,15 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 	}
 }
 
-func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem) (*imsclient.Client, error) {
+func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem) (*vowifi.Client, error) {
 	reader, err := openReader(ctx, modem)
 	if err != nil {
 		return nil, err
 	}
-	client, err := imsclient.New(reader, &imsclient.Config{
+	client, err := vowifi.New(reader, &vowifi.Config{
 		IMEI:   modem.EquipmentIdentifier,
 		Logger: slog.Default(),
-		IMS: imsclient.IMSConfig{
+		IMS: vowifi.IMSConfig{
 			Voice: browserVoiceConfig(),
 		},
 	})
@@ -725,10 +739,10 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem) (*im
 }
 
 func (c *coordinator) wfcWebsheetRequest(err error) (websheet.Request, bool) {
-	if c.websheets == nil || !errors.Is(err, imsclient.ErrWFCEntitlementUserActionRequired) {
+	if c.websheets == nil || !errors.Is(err, vowifi.ErrWFCEntitlementUserActionRequired) {
 		return websheet.Request{}, false
 	}
-	var nsdsErr *imsclient.NSDSWFCEntitlementError
+	var nsdsErr *vowifi.NSDSWFCEntitlementError
 	if errors.As(err, &nsdsErr) {
 		return websheet.Request{
 			URL:         strings.TrimSpace(nsdsErr.Websheet.URL),
@@ -737,7 +751,7 @@ func (c *coordinator) wfcWebsheetRequest(err error) (websheet.Request, bool) {
 			Title:       firstNonEmpty(nsdsErr.Websheet.Title, "Wi-Fi Calling"),
 		}, true
 	}
-	var ts43Err *imsclient.WFCEntitlementError
+	var ts43Err *vowifi.WFCEntitlementError
 	if errors.As(err, &ts43Err) {
 		return websheet.Request{
 			URL:   wfcUserActionURL(ts43Err.Status.ServiceFlowURL, ts43Err.Status.ServiceFlowUserData),
@@ -840,7 +854,7 @@ func normalizeWebsheetCallbackKey(value string) string {
 	return b.String()
 }
 
-func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, profileID string, client *imsclient.Client) {
+func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, profileID string, client *vowifi.Client) {
 	events := client.Events()
 	defer events.Close()
 	smsEvents := client.SMS().Events()
@@ -872,7 +886,7 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 				c.markDisconnected(modem.EquipmentIdentifier, client)
 				return
 			}
-			if state == imsclient.StateFailed || state == imsclient.StateClosed {
+			if state == vowifi.StateFailed || state == vowifi.StateClosed {
 				_ = client.Close()
 				c.markDisconnected(modem.EquipmentIdentifier, client)
 				return
@@ -885,7 +899,7 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 	}
 }
 
-func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string, incoming imsclient.IncomingCall) {
+func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string, incoming vowifi.IncomingCall) {
 	if incoming.Call == nil {
 		return
 	}
@@ -898,7 +912,7 @@ func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string,
 	c.publishVoiceEvent(info)
 }
 
-func (c *coordinator) forwardCallEvent(modemID string, event imsclient.CallEvent) {
+func (c *coordinator) forwardCallEvent(modemID string, event vowifi.CallEvent) {
 	c.mu.Lock()
 	session := c.sessions[modemID]
 	var info VoiceCall
@@ -909,7 +923,7 @@ func (c *coordinator) forwardCallEvent(modemID string, event imsclient.CallEvent
 				ID:        event.CallID,
 				ModemID:   modemID,
 				ProfileID: session.pendingDial.profileID,
-				Direction: string(imscall.DirectionOutgoing),
+				Direction: string(imsvoice.CallDirectionOutgoing),
 				Number:    session.pendingDial.number,
 				StartedAt: session.pendingDial.startedAt,
 			}
@@ -917,6 +931,9 @@ func (c *coordinator) forwardCallEvent(modemID string, event imsclient.CallEvent
 			session.calls[event.CallID] = state
 		}
 		if state != nil {
+			if event.Call != nil {
+				state.call = event.Call
+			}
 			info = state.info
 			info.State = string(event.State)
 			info.Reason = event.Cause
@@ -924,10 +941,10 @@ func (c *coordinator) forwardCallEvent(modemID string, event imsclient.CallEvent
 			if info.UpdatedAt.IsZero() {
 				info.UpdatedAt = time.Now()
 			}
-			if event.State == imscall.StateActive && info.AnsweredAt.IsZero() {
+			if isAnsweredVoiceState(event.State) && info.AnsweredAt.IsZero() {
 				info.AnsweredAt = info.UpdatedAt
 			}
-			if event.State == imscall.StateEnded || event.State == imscall.StateFailed {
+			if event.State == imsvoice.CallStateEnded || event.State == imsvoice.CallStateFailed {
 				info.EndedAt = info.UpdatedAt
 			}
 			state.info = info
@@ -940,7 +957,7 @@ func (c *coordinator) forwardCallEvent(modemID string, event imsclient.CallEvent
 	}
 }
 
-func (c *coordinator) forwardIncoming(ctx context.Context, modem *mmodem.Modem, profileID string, msg imsclient.SMS) {
+func (c *coordinator) forwardIncoming(ctx context.Context, modem *mmodem.Modem, profileID string, msg vowifi.SMS) {
 	if c.onIncoming == nil {
 		return
 	}
@@ -962,7 +979,7 @@ func (c *coordinator) forwardIncoming(ctx context.Context, modem *mmodem.Modem, 
 	}
 }
 
-func (c *coordinator) connectedClient(modemID string, profileID string) (*imsclient.Client, error) {
+func (c *coordinator) connectedClient(modemID string, profileID string) (*vowifi.Client, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modemID]
@@ -972,7 +989,7 @@ func (c *coordinator) connectedClient(modemID string, profileID string) (*imscli
 	return session.client, nil
 }
 
-func (c *coordinator) markConnected(modemID string, client *imsclient.Client) {
+func (c *coordinator) markConnected(modemID string, client *vowifi.Client) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if session := c.sessions[modemID]; session != nil {
@@ -981,7 +998,7 @@ func (c *coordinator) markConnected(modemID string, client *imsclient.Client) {
 	}
 }
 
-func (c *coordinator) markDisconnected(modemID string, client *imsclient.Client) {
+func (c *coordinator) markDisconnected(modemID string, client *vowifi.Client) {
 	c.mu.Lock()
 	session := c.sessions[modemID]
 	if session == nil || session.client != client {
@@ -1008,7 +1025,7 @@ func disconnectedCallEvents(session *sessionState) []VoiceCall {
 		if state == nil || state.info.ID == "" || isTerminalVoiceCallState(state.info.State) {
 			continue
 		}
-		state.info.State = string(imscall.StateFailed)
+		state.info.State = string(imsvoice.CallStateFailed)
 		state.info.Reason = "wifi calling disconnected"
 		state.info.EndedAt = now
 		state.info.UpdatedAt = now
@@ -1019,7 +1036,7 @@ func disconnectedCallEvents(session *sessionState) []VoiceCall {
 }
 
 func isTerminalVoiceCallState(state string) bool {
-	return state == string(imscall.StateEnded) || state == string(imscall.StateFailed)
+	return state == string(imsvoice.CallStateEnded) || state == string(imsvoice.CallStateFailed)
 }
 
 func (c *coordinator) stop(modemID string) {
@@ -1171,7 +1188,7 @@ func readerPortTypeName(portType mmodem.ModemPortType) string {
 	}
 }
 
-func incomingMessageKey(msg imsclient.SMS) string {
+func incomingMessageKey(msg vowifi.SMS) string {
 	if callID := strings.TrimSpace(msg.CallID); callID != "" {
 		return callID
 	}

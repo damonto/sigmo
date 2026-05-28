@@ -1,5 +1,6 @@
-import { ref } from 'vue'
+import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useCallAudioSession } from '@/composables/useCallAudioSession'
@@ -47,6 +48,14 @@ const audioContext = () =>
     close: vi.fn(),
   }) as unknown as AudioContext
 
+const deferred = () => {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
 describe('call audio session', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -93,6 +102,44 @@ describe('call audio session', () => {
     expect(getUserMedia).toHaveBeenCalledWith({ audio: true })
     expect(session.status.value).toBe('idle')
     expect(session.mediaStatus.value).toBe('idle')
+  })
+
+  it('does not read a cleared audio context when unmounted during output resume', async () => {
+    const resume = deferred()
+    let audioState: AudioContextState = 'suspended'
+    const audioContext = {
+      get state() {
+        return audioState
+      },
+      currentTime: 0,
+      resume: vi.fn(async () => {
+        await resume.promise
+        audioState = 'running'
+      }),
+      close: vi.fn(),
+    } as unknown as AudioContext
+    let session!: ReturnType<typeof useCallAudioSession>
+    const wrapper = mount({
+      template: '<div />',
+      setup() {
+        session = useCallAudioSession(ref('modem-1'), {
+          codecFactory,
+          deps: {
+            createAudioContext: () => audioContext,
+            getUserMedia: vi.fn(),
+          },
+        })
+        return {}
+      },
+    })
+
+    const prepare = session.prepare()
+    wrapper.unmount()
+    resume.resolve()
+
+    await expect(prepare).resolves.toBe(false)
+    expect(session.status.value).toBe('closed')
+    expect(audioContext.close).toHaveBeenCalled()
   })
 
   it('blocks call audio preparation when microphone capture is blocked', async () => {
@@ -157,6 +204,29 @@ describe('call audio session', () => {
     expect(session.status.value).toBe('error')
     expect(session.errorMessage.value).toBe('Call media connection failed')
     expect(stop).toHaveBeenCalled()
+  })
+
+  it('clears stale media errors when call audio is stopped', async () => {
+    const stop = vi.fn()
+    const session = useCallAudioSession(ref('modem-1'), {
+      codecFactory,
+      deps: {
+        createAudioContext: audioContext,
+        getUserMedia: vi.fn(async () => ({
+          getTracks: () => [{ stop }],
+        } as unknown as MediaStream)),
+      },
+    })
+
+    await expect(session.start('call-1')).resolves.toBe(true)
+    FakeWebSocket.instances[0]?.error()
+    await nextTick()
+    expect(session.errorMessage.value).toBe('Call media connection failed')
+
+    session.stop()
+
+    expect(session.status.value).toBe('closed')
+    expect(session.errorMessage.value).toBe('')
   })
 
   it('closes call audio when the media websocket closes before the handshake', async () => {

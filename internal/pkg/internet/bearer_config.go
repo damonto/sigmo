@@ -24,6 +24,7 @@ type recoveredRoute struct {
 type trackedConnection struct {
 	bearerPath    dbus.ObjectPath
 	interfaceName string
+	profileID     string
 	prefs         Preferences
 	routeMetric   int
 	addresses     []netip.Prefix

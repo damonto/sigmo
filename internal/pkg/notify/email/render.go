@@ -45,6 +45,23 @@ func render(ev notifyevent.Event) (content, error) {
 			),
 			HTMLBody: smsHTML(ev),
 		}, nil
+	case notifyevent.CallEvent:
+		target := ev.Counterparty()
+		subject := fmt.Sprintf("Outgoing call to %s", target)
+		if ev.Incoming {
+			subject = fmt.Sprintf("Incoming call from %s", target)
+		}
+		return content{
+			Subject: subject,
+			TextBody: fmt.Sprintf(
+				"%s\n\nFrom : %s\nModem: %s\nTime : %s",
+				ev.DirectionLabel(),
+				strings.TrimSpace(ev.From),
+				strings.TrimSpace(ev.Modem),
+				ev.DisplayTimestamp(),
+			),
+			HTMLBody: callHTML(ev),
+		}, nil
 	default:
 		return content{}, fmt.Errorf("rendering email content for %q: unsupported event", ev.Kind())
 	}
@@ -83,5 +100,24 @@ func smsHTML(ev notifyevent.SMSEvent) string {
 		html.EscapeString(strings.TrimSpace(ev.Modem)),
 		html.EscapeString(ev.DisplayTimestamp()),
 		html.EscapeString(ev.DisplayText()),
+	)
+}
+
+func callHTML(ev notifyevent.CallEvent) string {
+	return fmt.Sprintf(
+		"<div style=\"background:#f5f7fb;padding:24px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;\">"+
+			"<div style=\"max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #dbe2ea;border-radius:16px;padding:28px;\">"+
+			"<p style=\"margin:0 0 8px;color:#6b7280;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;\">Sigmo Notification</p>"+
+			"<h1 style=\"margin:0 0 18px;font-size:24px;line-height:1.2;\">%s</h1>"+
+			"<div style=\"padding:16px 18px;border:1px solid #e5e7eb;border-radius:12px;background:#f9fafb;font-size:14px;line-height:1.7;\">"+
+			"<strong>From:</strong> %s<br>"+
+			"<strong>Modem:</strong> %s<br>"+
+			"<strong>Time:</strong> %s"+
+			"</div>"+
+			"</div></div>",
+		html.EscapeString(ev.DirectionLabel()),
+		html.EscapeString(strings.TrimSpace(ev.From)),
+		html.EscapeString(strings.TrimSpace(ev.Modem)),
+		html.EscapeString(ev.DisplayTimestamp()),
 	)
 }

@@ -33,6 +33,18 @@ func TestRender(t *testing.T) {
 				Body:  "(empty message)",
 			},
 		},
+		{
+			name: "incoming call uses caller in title",
+			ev: notifyevent.CallEvent{
+				Modem:    "Office SIM",
+				From:     "15550002",
+				Incoming: true,
+			},
+			want: content{
+				Title: "Incoming Call from 15550002",
+				Body:  "Modem: Office SIM\nTime: unknown",
+			},
+		},
 	}
 
 	for _, tt := range tests {

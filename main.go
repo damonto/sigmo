@@ -150,62 +150,55 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if err := modem.RunEnableDisabled(ctx, registry); err != nil {
 			slog.Error("modem enable runner stopped", "error", err)
 		}
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if err := modem.RunSMSStorageDefaults(ctx, registry, modem.SMSStorageME); err != nil {
 			slog.Error("SMS storage defaults stopped", "error", err)
 		}
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		internetConnector.RunAlwaysOn(ctx, registry)
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if err := networkPreferences.Run(ctx, registry); err != nil {
 			slog.Error("network preferences restore stopped", "error", err)
 		}
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if err := relay.Run(ctx); err != nil {
 			slog.Error("message relay stopped", "error", err)
 			stop()
 		}
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
+		if err := relay.ForwardCalls(ctx, callService); err != nil {
+			slog.Error("call notification relay stopped", "error", err)
+			stop()
+		}
+	})
+
+	wg.Go(func() {
 		if err := wifiCalling.Run(ctx, registry); err != nil {
 			slog.Error("Wi-Fi Calling coordinator stopped", "error", err)
 			stop()
 		}
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if err := callService.Run(ctx); err != nil {
 			slog.Error("call service stopped", "error", err)
 			stop()
 		}
-	}()
+	})
 
 	startConfig := echo.StartConfig{
 		Address:         store.Snapshot().App.ListenAddress,

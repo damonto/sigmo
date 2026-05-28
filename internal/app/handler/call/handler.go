@@ -211,22 +211,24 @@ func (h *Handler) Events(c *echo.Context) error {
 }
 
 func (h *Handler) Media(c *echo.Context) error {
-	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeCallMediaUnavailable)
-	}
-	media, err := h.calls.OpenMedia(c.Request().Context(), modem, callIDParam(c))
-	if err != nil {
-		return callMediaError(c, err)
-	}
 	conn, err := callWSUpgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return writeMediaError(conn, modemLookupMediaError(c, err))
+	}
+	media, err := h.calls.OpenMedia(c.Request().Context(), modem, callIDParam(c))
+	if err != nil {
+		return writeMediaError(conn, callMediaErrorResponse(c, err))
+	}
+
 	conn.SetReadLimit(64 * 1024)
-	if err := conn.WriteJSON(MediaMessage{Type: "ready", Media: buildMediaInfoResponse(media.Info())}); err != nil {
+	info := buildMediaInfoResponse(media.Info())
+	if err := conn.WriteJSON(MediaMessage{Type: "ready", Media: &info}); err != nil {
 		return nil
 	}
 
@@ -292,6 +294,23 @@ func deliverMediaError(ctx context.Context, errCh chan<- error, err error) {
 	}
 }
 
+func writeMediaError(conn *websocket.Conn, response mediaErrorResponse) error {
+	message := MediaMessage{
+		Type: "error",
+		Error: &httpapi.ErrorResponse{
+			ErrorCode: response.code,
+			Message:   response.message,
+			RequestID: response.requestID,
+		},
+	}
+	if err := conn.WriteJSON(message); err != nil {
+		return nil
+	}
+	closeMessage := websocket.FormatCloseMessage(websocket.CloseUnsupportedData, response.message)
+	_ = conn.WriteControl(websocket.CloseMessage, closeMessage, time.Now().Add(time.Second))
+	return nil
+}
+
 func writeCallEvent(conn *websocket.Conn, call storage.Call) error {
 	if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		return err
@@ -343,9 +362,20 @@ func callActionError(c *echo.Context, err error, fallback string) error {
 		return httpapi.NotFound(c, errorCodeCallNotFound, err)
 	case errors.Is(err, pcall.ErrInvalidCallState):
 		return httpapi.BadRequest(c, errorCodeInvalidCallState, err)
+	case fallback == errorCodeDialCallFailed:
+		return httpapi.Error(c, http.StatusBadGateway, errorCodeDialCallFailed, callActionMessage(err))
 	default:
 		return httpapi.Internal(c, fallback, err)
 	}
+}
+
+func callActionMessage(err error) string {
+	message := strings.TrimSpace(err.Error())
+	message = strings.TrimPrefix(message, "dial Wi-Fi Calling: ")
+	if message == "" {
+		return "call failed"
+	}
+	return message
 }
 
 func callMediaError(c *echo.Context, err error) error {
@@ -356,6 +386,50 @@ func callMediaError(c *echo.Context, err error) error {
 		return httpapi.Error(c, http.StatusServiceUnavailable, errorCodeCallMediaUnavailable, err.Error())
 	default:
 		return callActionError(c, err, errorCodeCallMediaUnavailable)
+	}
+}
+
+type mediaErrorResponse struct {
+	code      string
+	message   string
+	requestID string
+}
+
+func modemLookupMediaError(c *echo.Context, err error) mediaErrorResponse {
+	if errors.Is(err, mmodem.ErrNotFound) {
+		return newMediaErrorResponse(c, "modem_not_found", err.Error())
+	}
+	return newMediaErrorResponse(c, errorCodeCallMediaUnavailable, "internal server error")
+}
+
+func callMediaErrorResponse(c *echo.Context, err error) mediaErrorResponse {
+	switch {
+	case errors.Is(err, pcall.ErrUnsupportedCodec):
+		return newMediaErrorResponse(c, errorCodeCallMediaUnsupportedCodec, err.Error())
+	case errors.Is(err, pcall.ErrMediaUnavailable):
+		return newMediaErrorResponse(c, errorCodeCallMediaUnavailable, err.Error())
+	case errors.Is(err, pcall.ErrWiFiCallingNotConnected):
+		return newMediaErrorResponse(c, errorCodeWiFiCallingNotConnected, err.Error())
+	case errors.Is(err, pcall.ErrModemCallingUnavailable):
+		return newMediaErrorResponse(c, errorCodeModemCallingUnavailable, err.Error())
+	case errors.Is(err, pcall.ErrCallNotFound):
+		return newMediaErrorResponse(c, errorCodeCallNotFound, err.Error())
+	case errors.Is(err, pcall.ErrInvalidCallState):
+		return newMediaErrorResponse(c, errorCodeInvalidCallState, err.Error())
+	default:
+		return newMediaErrorResponse(c, errorCodeCallMediaUnavailable, "internal server error")
+	}
+}
+
+func newMediaErrorResponse(c *echo.Context, code string, message string) mediaErrorResponse {
+	requestID := c.Response().Header().Get(echo.HeaderXRequestID)
+	if requestID == "" {
+		requestID = c.Request().Header.Get(echo.HeaderXRequestID)
+	}
+	return mediaErrorResponse{
+		code:      code,
+		message:   message,
+		requestID: requestID,
 	}
 }
 

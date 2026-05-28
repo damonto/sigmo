@@ -38,6 +38,7 @@ AGENTS*.md
 CLAUDE.md
 .claude
 .codex
+.cache/
 
 # Tests
 tools/

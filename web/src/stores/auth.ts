@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 
 import { useAuthApi } from '@/apis/auth'
-import { clearStoredToken, getStoredToken, setStoredToken } from '@/lib/auth-storage'
+import { clearStoredToken, getStoredToken, setStoredToken } from '@/lib/authStorage'
 
 const RESEND_COOLDOWN_MS = 60_000
 const CODE_LENGTH = 6
@@ -27,15 +27,15 @@ export const useAuthStore = defineStore('auth', {
       clearStoredToken()
     },
     async fetchOtpRequirement() {
-      const { data, error } = await useAuthApi().getOtpRequirement()
-      if (error.value) {
+      try {
+        const { data } = await useAuthApi().getOtpRequirement()
+        const required = data.value?.otpRequired
+        this.otpRequired = required ?? true
+        return this.otpRequired
+      } catch {
         this.otpRequired = true
         return this.otpRequired
       }
-
-      const required = data.value?.otpRequired
-      this.otpRequired = required ?? true
-      return this.otpRequired
     },
     async sendCode() {
       if (this.isSending) return
@@ -44,10 +44,10 @@ export const useAuthStore = defineStore('auth', {
 
       this.isSending = true
       try {
-        const { error } = await useAuthApi().sendCode()
-        if (error.value) return
-
+        await useAuthApi().sendCode()
         this.resendAvailableAt = Date.now() + RESEND_COOLDOWN_MS
+      } catch {
+        return
       } finally {
         this.isSending = false
       }
@@ -58,14 +58,14 @@ export const useAuthStore = defineStore('auth', {
 
       this.isVerifying = true
       try {
-        const { data, error } = await useAuthApi().verifyCode({ code })
-        if (error.value) return null
-
+        const { data } = await useAuthApi().verifyCode({ code })
         const token = data.value?.token
         if (!token) return null
 
         this.setToken(token)
         return token
+      } catch {
+        return null
       } finally {
         this.isVerifying = false
       }

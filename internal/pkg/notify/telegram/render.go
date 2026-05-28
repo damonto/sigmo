@@ -38,6 +38,17 @@ func render(ev notifyevent.Event) (content, error) {
 			),
 			ParseMode: parseModeMarkdownV2,
 		}, nil
+	case notifyevent.CallEvent:
+		return content{
+			Text: fmt.Sprintf(
+				"*%s*\n\n*From:* %s\n*Modem:* %s\n*Time:* %s",
+				escapeMarkdownV2(ev.DirectionLabel()),
+				escapeMarkdownV2(strings.TrimSpace(ev.From)),
+				escapeMarkdownV2(strings.TrimSpace(ev.Modem)),
+				escapeMarkdownV2(ev.DisplayTimestamp()),
+			),
+			ParseMode: parseModeMarkdownV2,
+		}, nil
 	default:
 		return content{}, fmt.Errorf("rendering telegram content for %q: unsupported event", ev.Kind())
 	}

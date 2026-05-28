@@ -35,15 +35,20 @@ Sigmo forwards IMS RTP media to the browser. Browsers do not provide native
 AMR/AMR-WB voice codecs, so Sigmo includes a browser codec adapter in
 `src/lib/builtInAmrCodec.ts`.
 
-The built-in first-batch codec supports full-duplex AMR-NB calls:
+The built-in codec supports full-duplex AMR-NB and AMR-WB calls through a
+single OpenCORE AMR WebAssembly module:
 
-- AMR-NB decode: `@audio/decode-amr`
-- AMR-NB encode: a local worker adapted from the MIT-licensed
-  `benz-amr-recorder` AMR-NB worker
+- AMR-NB decode/encode: OpenCORE AMR
+- AMR-WB decode: OpenCORE AMR
+- AMR-WB encode: VisualOn `vo-amrwbenc`
 
-AMR-WB encode is not available in the built-in adapter yet. Sigmo currently
-offers AMR-NB for browser voice calls so negotiated media is full-duplex. EVS is
-intentionally unsupported in the first batch.
+Build the WASM module after installing Emscripten:
+
+```sh
+scripts/build-opencore-amr-wasm.sh
+```
+
+EVS remains intentionally unsupported in the browser adapter.
 
 `media` is the negotiated call media object from the backend:
 
@@ -74,10 +79,10 @@ type PcmFrame = {
 }
 ```
 
-The browser pipeline already handles RTP packetization, octet-aligned AMR
-payload parsing/building, microphone capture, playback scheduling, and mono
-resampling. The codec adapter only converts AMR-NB frames to PCM and PCM to
-AMR-NB frames.
+The browser pipeline already handles RTP packetization, AMR payload
+parsing/building, microphone capture, playback scheduling, and mono resampling.
+The codec adapter only converts AMR speech frames to PCM and PCM to AMR speech
+frames.
 
 ### Compile and Hot-Reload for Development
 

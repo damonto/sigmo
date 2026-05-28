@@ -1,4 +1,4 @@
-import { useFetch } from '@/lib/fetch'
+import { fetchJson } from '@/lib/fetch'
 
 import type {
   ModemDetailResponse,
@@ -20,7 +20,7 @@ export const useModemApi = () => {
    * GET /api/v1/modems
    */
   const getModems = () => {
-    return useFetch<ModemListResponse>('modems').get().json()
+    return fetchJson<ModemListResponse>('modems')
   }
 
   /**
@@ -28,7 +28,7 @@ export const useModemApi = () => {
    * GET /api/v1/modems/:id
    */
   const getModem = (id: string) => {
-    return useFetch<ModemDetailResponse>(`modems/${id}`).get().json()
+    return fetchJson<ModemDetailResponse>(`modems/${id}`)
   }
 
   /**
@@ -36,9 +36,9 @@ export const useModemApi = () => {
    * PUT /api/v1/modems/:id/sim-slots/:identifier
    */
   const switchSimSlot = (id: string, identifier: string) => {
-    return useFetch<void>(`modems/${id}/sim-slots/${identifier}`, {
+    return fetchJson<void>(`modems/${id}/sim-slots/${identifier}`, {
       method: 'PUT',
-    }).json()
+    })
   }
 
   /**
@@ -46,10 +46,10 @@ export const useModemApi = () => {
    * PUT /api/v1/modems/:id/msisdn
    */
   const updateMsisdn = (id: string, number: string) => {
-    return useFetch<void>(`modems/${id}/msisdn`, {
+    return fetchJson<void>(`modems/${id}/msisdn`, {
       method: 'PUT',
       body: JSON.stringify({ number }),
-    }).json()
+    })
   }
 
   /**
@@ -57,7 +57,7 @@ export const useModemApi = () => {
    * GET /api/v1/modems/:id/settings
    */
   const getSettings = (id: string) => {
-    return useFetch<ModemSettingsResponse>(`modems/${id}/settings`).get().json()
+    return fetchJson<ModemSettingsResponse>(`modems/${id}/settings`)
   }
 
   /**
@@ -65,10 +65,10 @@ export const useModemApi = () => {
    * PUT /api/v1/modems/:id/settings
    */
   const updateSettings = (id: string, payload: ModemSettings) => {
-    return useFetch<void>(`modems/${id}/settings`, {
+    return fetchJson<void>(`modems/${id}/settings`, {
       method: 'PUT',
       body: JSON.stringify(payload),
-    }).json()
+    })
   }
 
   /**
@@ -76,9 +76,7 @@ export const useModemApi = () => {
    * GET /api/v1/modems/:id/wifi-calling-settings
    */
   const getWiFiCallingSettings = (id: string) => {
-    return useFetch<WiFiCallingSettingsResponse>(`modems/${id}/wifi-calling-settings`)
-      .get()
-      .json()
+    return fetchJson<WiFiCallingSettingsResponse>(`modems/${id}/wifi-calling-settings`)
   }
 
   /**
@@ -86,16 +84,16 @@ export const useModemApi = () => {
    * PUT /api/v1/modems/:id/wifi-calling-settings
    */
   const updateWiFiCallingSettings = (id: string, payload: WiFiCallingSettings) => {
-    return useFetch<void>(`modems/${id}/wifi-calling-settings`, {
+    return fetchJson<void>(`modems/${id}/wifi-calling-settings`, {
       method: 'PUT',
       body: JSON.stringify(payload),
-    }).json()
+    })
   }
 
   const startWiFiCallingWebsheet = (id: string) => {
-    return useFetch<WiFiCallingWebsheetResponse>(`modems/${id}/wifi-calling-websheets`, {
+    return fetchJson<WiFiCallingWebsheetResponse>(`modems/${id}/wifi-calling-websheets`, {
       method: 'POST',
-    }).json()
+    })
   }
 
   return {

@@ -8,8 +8,9 @@ import (
 type Kind string
 
 const (
-	KindOTP Kind = "otp"
-	KindSMS Kind = "sms"
+	KindOTP  Kind = "otp"
+	KindSMS  Kind = "sms"
+	KindCall Kind = "call"
 )
 
 type Event interface {
@@ -35,6 +36,40 @@ type SMSEvent struct {
 
 func (SMSEvent) Kind() Kind {
 	return KindSMS
+}
+
+type CallEvent struct {
+	Modem    string    `json:"modem"`
+	From     string    `json:"from"`
+	To       string    `json:"to,omitempty"`
+	Time     time.Time `json:"timestamp,omitempty"`
+	State    string    `json:"state"`
+	Incoming bool      `json:"incoming"`
+}
+
+func (CallEvent) Kind() Kind {
+	return KindCall
+}
+
+func (e CallEvent) DirectionLabel() string {
+	if e.Incoming {
+		return "Incoming Call"
+	}
+	return "Outgoing Call"
+}
+
+func (e CallEvent) DisplayTimestamp() string {
+	if e.Time.IsZero() {
+		return "unknown"
+	}
+	return e.Time.Format(time.RFC3339)
+}
+
+func (e CallEvent) Counterparty() string {
+	if e.Incoming {
+		return strings.TrimSpace(e.From)
+	}
+	return strings.TrimSpace(e.To)
 }
 
 func (e SMSEvent) DirectionLabel() string {

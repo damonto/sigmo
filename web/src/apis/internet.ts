@@ -1,4 +1,4 @@
-import { useFetch } from '@/lib/fetch'
+import { fetchJson } from '@/lib/fetch'
 
 import type {
   ConnectInternetPayload,
@@ -8,28 +8,24 @@ import type {
 
 export const useInternetApi = () => {
   const getCurrentConnection = (id: string) => {
-    return useFetch<InternetConnectionResponse>(`modems/${id}/internet-connections/current`)
-      .get()
-      .json()
+    return fetchJson<InternetConnectionResponse>(`modems/${id}/internet-connections/current`)
   }
 
   const getPublic = (id: string) => {
-    return useFetch<InternetPublicResponse>(`modems/${id}/internet-connections/public`)
-      .get()
-      .json()
+    return fetchJson<InternetPublicResponse>(`modems/${id}/internet-connections/public`)
   }
 
   const connect = (id: string, payload: ConnectInternetPayload) => {
-    return useFetch<InternetConnectionResponse>(`modems/${id}/internet-connections`, {
+    return fetchJson<InternetConnectionResponse>(`modems/${id}/internet-connections`, {
       method: 'POST',
       body: JSON.stringify(payload),
-    }).json()
+    })
   }
 
   const disconnect = (id: string) => {
-    return useFetch<void>(`modems/${id}/internet-connections/current`, {
+    return fetchJson<void>(`modems/${id}/internet-connections/current`, {
       method: 'DELETE',
-    }).json()
+    })
   }
 
   return {

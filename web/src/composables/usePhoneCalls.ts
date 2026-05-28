@@ -4,7 +4,15 @@ import { buildCallEventsUrl, useCallApi } from '@/apis/call'
 import type { CallEventMessage, CallRecord, CallRoute } from '@/types/call'
 
 const terminalStates = new Set(['ended', 'failed'])
-const currentStates = new Set(['dialing', 'ringing', 'answering', 'active', 'ending'])
+const currentStates = new Set([
+  'dialing',
+  'ringing',
+  'answering',
+  'early_media',
+  'active',
+  'confirmed',
+  'ending',
+])
 
 const mergeCall = (items: CallRecord[], call: CallRecord) => {
   const index = items.findIndex((item) => item.callID === call.callID)

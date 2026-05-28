@@ -1,17 +1,18 @@
-import { createFetch } from '@vueuse/core'
+import { createFetch, type UseFetchReturn } from '@vueuse/core'
+import type { Ref } from 'vue'
 
 import router from '@/router'
 
-import { getStoredToken } from './auth-storage'
-import { handleError, handleResponseError } from './error-handler'
+import { getStoredToken } from './authStorage'
+import { handleError, handleResponseError } from './errorHandler'
 
 const rawBaseUrl = import.meta.env.VITE_API_BASE_URL
 const baseUrl =
   rawBaseUrl && rawBaseUrl.trim().length > 0 ? rawBaseUrl.replace(/\/$/, '') : '/api/v1'
 
 /**
- * Custom fetch instance with global configuration
- * Unified error handling - no need to handle errors in callers
+ * Custom fetch instance with global configuration.
+ * Unified error handling - no need to handle errors in callers.
  */
 export const useFetch = createFetch({
   baseUrl,
@@ -69,3 +70,29 @@ export const useFetch = createFetch({
     mode: 'cors',
   },
 })
+
+export type ApiFetchReturn<T> = Omit<UseFetchReturn<string>, 'data'> & {
+  data: Ref<T | undefined>
+}
+
+const parseResponseText = <T>(value: string | null) => {
+  if (!value?.trim()) return undefined
+  return JSON.parse(value) as T
+}
+
+export const fetchJson = async <T>(
+  url: string,
+  options?: RequestInit,
+): Promise<ApiFetchReturn<T>> => {
+  const request = options
+    ? useFetch<string>(url, options, { immediate: false }).text()
+    : useFetch<string>(url, { immediate: false }).text()
+
+  await request.execute(true)
+
+  const text = request.data.value
+  const data = request.data as unknown as Ref<T | undefined>
+  data.value = parseResponseText<T>(text)
+
+  return request as unknown as ApiFetchReturn<T>
+}

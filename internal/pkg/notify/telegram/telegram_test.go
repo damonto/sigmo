@@ -36,6 +36,18 @@ func TestRender(t *testing.T) {
 				ParseMode: parseModeMarkdownV2,
 			},
 		},
+		{
+			name: "incoming call renders caller and modem",
+			ev: notifyevent.CallEvent{
+				Modem:    "M_1",
+				From:     "+1(23)",
+				Incoming: true,
+			},
+			want: content{
+				Text:      "*Incoming Call*\n\n*From:* \\+1\\(23\\)\n*Modem:* M\\_1\n*Time:* unknown",
+				ParseMode: parseModeMarkdownV2,
+			},
+		},
 	}
 
 	for _, tt := range tests {

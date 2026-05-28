@@ -2,7 +2,7 @@
   const callbackURL = {{CALLBACK_URL}};
   const absolutePathProxyPrefix = {{ABSOLUTE_PATH_PROXY_PREFIX}};
   const odsaStorageKey = "ts43-go.odsa.callbacks";
-  const vowifiStorageKey = "ims-client.vowifi.callbacks";
+  const vowifiStorageKey = "vowifi-go.vowifi.callbacks";
 
   function rewriteCarrierPath(value) {
     if (!absolutePathProxyPrefix || typeof value !== "string") return value;

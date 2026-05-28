@@ -12,9 +12,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Spinner } from '@/components/ui/spinner'
-import { getStoredToken } from '@/lib/auth-storage'
-import { resolveAPIURL } from '@/lib/api-url'
-import { useFetch } from '@/lib/fetch'
+import { getStoredToken } from '@/lib/authStorage'
+import { resolveAPIURL } from '@/lib/apiUrl'
+import { fetchJson } from '@/lib/fetch'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 
 const props = defineProps<{
@@ -42,16 +42,14 @@ const iframeSrc = computed(() => {
   return u.toString()
 })
 
-const title = computed(
-  () => props.websheet?.title || t('modemDetail.esim.carrierWebsheetTitle'),
-)
+const title = computed(() => props.websheet?.title || t('modemDetail.esim.carrierWebsheetTitle'))
 
 const complete = async () => {
   const id = props.websheet?.id
   if (!id || completing.value) return
   completing.value = true
   try {
-    await useFetch<void>(`websheets/${id}/done`, { method: 'POST' }).json()
+    await fetchJson<void>(`websheets/${id}/done`, { method: 'POST' })
     emit('done')
   } finally {
     completing.value = false
@@ -90,7 +88,9 @@ watch(
 
 <template>
   <Dialog :open="props.open">
-    <EsimPersistentDialogContent class="flex h-[85dvh] max-h-180 flex-col overflow-hidden sm:max-w-4xl">
+    <EsimPersistentDialogContent
+      class="flex h-[85dvh] max-h-180 flex-col overflow-hidden sm:max-w-[24rem]"
+    >
       <DialogHeader class="shrink-0">
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription class="sr-only">{{ title }}</DialogDescription>
@@ -115,10 +115,20 @@ watch(
       </div>
 
       <DialogFooter class="shrink-0 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Button variant="outline" type="button" class="order-2 w-full sm:order-1" @click="emit('cancel')">
+        <Button
+          variant="outline"
+          type="button"
+          class="order-2 w-full sm:order-1"
+          @click="emit('cancel')"
+        >
           {{ t('modemDetail.actions.cancel') }}
         </Button>
-        <Button type="button" class="order-1 w-full sm:order-2" :disabled="completing" @click="complete">
+        <Button
+          type="button"
+          class="order-1 w-full sm:order-2"
+          :disabled="completing"
+          @click="complete"
+        >
           <span v-if="completing" class="inline-flex items-center gap-2">
             <Spinner class="size-4" />
             {{ t('modemDetail.actions.confirm') }}

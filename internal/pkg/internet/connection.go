@@ -22,6 +22,7 @@ const (
 
 var (
 	ErrModemRequired       = errors.New("modem is required")
+	ErrProfileIDRequired   = errors.New("profile id is required")
 	ErrUnsupportedIPMethod = errors.New("only static bearer IP configuration is supported")
 )
 
@@ -79,6 +80,7 @@ type internetModem interface {
 	operatorIdentifier() string
 	gid1() string
 	spn() string
+	profileID() string
 	iccid() string
 	imsi() string
 	bearer(context.Context, dbus.ObjectPath) (*mmodem.Bearer, error)
@@ -119,6 +121,10 @@ func (m modemAccess) spn() string {
 		return ""
 	}
 	return strings.TrimSpace(m.modem.Sim.OperatorName)
+}
+
+func (m modemAccess) profileID() string {
+	return m.iccid()
 }
 
 func (m modemAccess) iccid() string {
@@ -228,7 +234,7 @@ func (c *Connector) current(ctx context.Context, modem internetModem) (*Connecti
 	modemID := modem.id()
 	defer c.lockModem(modemID)()
 
-	prefs := c.preferenceWithAlwaysOn(modemID)
+	prefs := c.preferenceWithAlwaysOn(ctx, modem)
 	var staleInterfaces []string
 	if tracked, ok := c.connection(modemID); ok {
 		bearer, err := modem.bearer(ctx, tracked.bearerPath)
@@ -294,6 +300,7 @@ func (c *Connector) current(ctx context.Context, modem internetModem) (*Connecti
 	}
 	if ok {
 		tracked.prefs = preferencesWithDefaultAPNCredentials(modem, tracked.prefs)
+		tracked.profileID = modem.profileID()
 		c.setConnectionAndPreference(modemID, tracked, tracked.prefs)
 		return c.connectionFromBearer(ctx, modemID, bearer, tracked.prefs, metric)
 	}
@@ -302,7 +309,8 @@ func (c *Connector) current(ctx context.Context, modem internetModem) (*Connecti
 
 func (c *Connector) recover(ctx context.Context, modem internetModem) error {
 	modemID := modem.id()
-	prefs := c.preferenceWithAlwaysOn(modemID)
+	profileID := modem.profileID()
+	prefs := c.preferenceWithAlwaysOn(ctx, modem)
 	current, err := currentBearer(ctx, modem)
 	if err != nil {
 		return err
@@ -330,6 +338,7 @@ func (c *Connector) recover(ctx context.Context, modem internetModem) error {
 		return ErrUnsupportedIPMethod
 	}
 	tracked.prefs = preferencesWithDefaultAPNCredentials(modem, tracked.prefs)
+	tracked.profileID = profileID
 	if err := c.syncProxyPreference(modemID, tracked.interfaceName, tracked.prefs); err != nil {
 		return err
 	}
@@ -346,13 +355,17 @@ func (c *Connector) Connect(ctx context.Context, modem *mmodem.Modem, prefs Pref
 
 func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Preferences, clearAlwaysOnBefore bool) (*Connection, error) {
 	modemID := modem.id()
+	profileID := modem.profileID()
 	prefs = normalizePreferences(prefs)
+	if prefs.AlwaysOn && profileID == "" {
+		return nil, ErrProfileIDRequired
+	}
 	if prefs.APN == "" {
 		apn, err := apnFromBearers(ctx, modem)
 		if err != nil {
 			return nil, err
 		}
-		prefs.APN = apnForModem(modem, "", apn, c.preferenceWithAlwaysOn(modemID).APN)
+		prefs.APN = apnForModem(modem, "", apn, c.preferenceWithAlwaysOn(ctx, modem).APN)
 	}
 	prefs = preferencesWithDefaultAPNCredentials(modem, prefs)
 	if err := c.disconnect(ctx, modem, clearAlwaysOnBefore); err != nil {
@@ -374,6 +387,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 		return nil, errors.Join(err, disconnectErr)
 	}
 	tracked.bearerPath = bearer.Path()
+	tracked.profileID = profileID
 	tracked.prefs = prefs
 
 	if err := c.syncProxyPreference(modemID, tracked.interfaceName, prefs); err != nil {
@@ -395,7 +409,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 		disconnectErr := bearer.Disconnect(ctx)
 		return nil, errors.Join(err, cleanupErr, disconnectErr)
 	}
-	if err := c.syncAlwaysOnState(modemID, prefs); err != nil {
+	if err := c.syncAlwaysOnState(profileID, prefs); err != nil {
 		cleanupErr := c.cleanupTracked(ctx, modemID, tracked)
 		disconnectErr := bearer.Disconnect(ctx)
 		return nil, errors.Join(fmt.Errorf("sync always on state: %w", err), cleanupErr, disconnectErr)
@@ -421,7 +435,7 @@ func (c *Connector) Restore(ctx context.Context, modem *mmodem.Modem) error {
 	access := modemAccess{modem: modem}
 	defer c.lockModem(access.id())()
 
-	err := c.disconnect(ctx, access, true)
+	err := c.disconnect(ctx, access, false)
 	c.deleteConnectionAndPreference(access.id())
 	return err
 }
@@ -430,7 +444,7 @@ func (c *Connector) disconnect(ctx context.Context, modem internetModem, clearAl
 	modemID := modem.id()
 	var result error
 	if clearAlwaysOn {
-		result = errors.Join(result, c.clearAlwaysOnState(modemID))
+		result = errors.Join(result, c.clearAlwaysOnState(ctx, modem))
 	}
 
 	if tracked, ok := c.connection(modemID); ok {
@@ -543,7 +557,7 @@ func (c *Connector) syncDefaultRouteTakeover(modemID string, tracked *trackedCon
 	for ownerID := range affected {
 		owner := owners[ownerID]
 		if owner.prefs.AlwaysOn {
-			if err := c.syncAlwaysOnState(ownerID, owner.prefs); err != nil {
+			if err := c.syncAlwaysOnState(owner.profileID, owner.prefs); err != nil {
 				return fmt.Errorf("sync demoted always-on state for %s: %w", ownerID, err)
 			}
 		}
@@ -593,7 +607,7 @@ func (c *Connector) syncDefaultRouteRestore(changes []defaultRouteChange) error 
 		c.connections[ownerID] = owner
 		c.preferences[ownerID] = owner.prefs
 		if owner.prefs.AlwaysOn {
-			result = errors.Join(result, c.syncAlwaysOnState(ownerID, owner.prefs))
+			result = errors.Join(result, c.syncAlwaysOnState(owner.profileID, owner.prefs))
 		}
 	}
 	return result
@@ -737,31 +751,48 @@ func (c *Connector) preference(modemID string) Preferences {
 	return Preferences{}
 }
 
-func (c *Connector) preferenceWithAlwaysOn(modemID string) Preferences {
+func (c *Connector) preferenceWithAlwaysOn(ctx context.Context, modem internetModem) Preferences {
+	modemID := modem.id()
 	prefs := c.preference(modemID)
-	alwaysOn, ok, err := c.loadAlwaysOnStateForModem(context.Background(), modemID)
+	profileID := modem.profileID()
+	if profileID == "" {
+		return prefs
+	}
+	alwaysOn, ok, err := c.loadAlwaysOnStateForProfile(ctx, profileID)
 	if err != nil || !ok {
 		return prefs
 	}
 	return alwaysOn
 }
 
-func (c *Connector) syncAlwaysOnState(modemID string, prefs Preferences) error {
+func (c *Connector) syncAlwaysOnState(profileID string, prefs Preferences) error {
+	profileID = strings.TrimSpace(profileID)
 	if prefs.AlwaysOn {
-		return c.state.Put(context.Background(), modemScope(modemID), alwaysOnKVKey, prefs)
+		if profileID == "" {
+			return ErrProfileIDRequired
+		}
+		return c.state.Put(context.Background(), profileScope(profileID), alwaysOnKVKey, prefs)
 	}
-	return c.state.Delete(context.Background(), modemScope(modemID), alwaysOnKVKey)
+	if profileID == "" {
+		return nil
+	}
+	return c.state.Delete(context.Background(), profileScope(profileID), alwaysOnKVKey)
 }
 
-func (c *Connector) clearAlwaysOnState(modemID string) error {
-	prefs := c.preferenceWithAlwaysOn(modemID)
+func (c *Connector) clearAlwaysOnState(ctx context.Context, modem internetModem) error {
+	modemID := modem.id()
+	profileID := modem.profileID()
+	prefs := c.preferenceWithAlwaysOn(ctx, modem)
 	prefs.AlwaysOn = false
 	if hasInternetPreference(prefs) {
 		c.setPreference(modemID, prefs)
 	} else {
 		c.deletePreference(modemID)
 	}
-	return c.state.Delete(context.Background(), modemScope(modemID), alwaysOnKVKey)
+	if profileID == "" {
+		return nil
+	}
+	return c.state.Delete(context.Background(), profileScope(profileID), alwaysOnKVKey)
 }
 
 func (c *Connector) lockModem(modemID string) func() {

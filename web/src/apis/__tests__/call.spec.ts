@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useCallApi } from '@/apis/call'
-import { getStoredToken, setStoredToken } from '@/lib/auth-storage'
+import { getStoredToken, setStoredToken } from '@/lib/authStorage'
 
 describe('useCallApi', () => {
   beforeEach(() => {

@@ -10,6 +10,8 @@ PUBLIC_SUMFILE="${PUBLIC_SUMFILE:-go.sum}"
 PRIVATE_MODFILE="${PRIVATE_MODFILE:-${PRIVATE_GO_MODFILE}}"
 PRIVATE_SUMFILE="${PRIVATE_SUMFILE:-go.private.sum}"
 PRIVATE_GOPRIVATE="${PRIVATE_GOPRIVATE:-github.com/damonto/*}"
+SSH_DIR="${SIGMO_SSH_DIR:-${HOME}/.ssh}"
+SSH_KEY="${SIGMO_SSH_KEY:-${SSH_DIR}/id_ed25519}"
 
 cleanup_files=()
 
@@ -53,21 +55,81 @@ read_private_modules() {
 
 configure_private_module_auth() {
 	local module="$1"
-
-	if [ -z "${PRIVATE_MODULE_TOKEN:-}" ]; then
-		return
-	fi
+	local path
+	local owner
 
 	case "${module}" in
 		github.com/*/*)
-			git config --global --add \
-				url."https://x-access-token:${PRIVATE_MODULE_TOKEN}@${module}".insteadOf \
-				"https://${module}"
+			path="${module#github.com/}"
+			owner="${path%%/*}"
+			git config --global \
+				url."git@github.com:${owner}/".insteadOf \
+				"https://github.com/${owner}/"
 			;;
 		*)
-			echo "skip token rewrite for unsupported private module host: ${module}" >&2
+			echo "skip SSH rewrite for unsupported private module host: ${module}" >&2
 			;;
 	esac
+}
+
+private_module_version() {
+	local module="$1"
+
+	awk -v module="${module}" '$1 == module { print $2; exit }' "${PRIVATE_MODFILE}"
+}
+
+github_repo_url() {
+	local module="$1"
+	local path
+	local owner
+	local rest
+	local repo
+
+	case "${module}" in
+		github.com/*/*)
+			path="${module#github.com/}"
+			owner="${path%%/*}"
+			rest="${path#*/}"
+			repo="${rest%%/*}"
+			printf 'git@github.com:%s/%s.git' "${owner}" "${repo}"
+			;;
+		*)
+			echo "unsupported private module host: ${module}" >&2
+			return 1
+			;;
+	esac
+}
+
+resolve_head_version() {
+	local module="$1"
+	local repo_url
+	local commit
+
+	repo_url="$(github_repo_url "${module}")"
+	commit="$(git ls-remote "${repo_url}" HEAD | awk '{print $1}')"
+	if [ -z "${commit}" ]; then
+		echo "could not resolve HEAD for ${module}" >&2
+		return 1
+	fi
+
+	go list -modfile="${PRIVATE_MODFILE}" -m -f '{{ .Version }}' "${module}@${commit}"
+}
+
+resolve_private_module_version() {
+	local module="$1"
+	local version
+
+	version="$(private_module_version "${module}")"
+	if [ -z "${version}" ]; then
+		echo "${module} is missing from ${PRIVATE_MODFILE}." >&2
+		return 1
+	fi
+	if [ "${version}" = "v0.0.0" ]; then
+		resolve_head_version "${module}"
+		return
+	fi
+
+	printf '%s\n' "${version}"
 }
 
 main() {
@@ -83,28 +145,34 @@ main() {
 	local tmp_mod
 	local tmp_sum
 	local tmp_git_config
+	local ssh_cmd=()
+	local git_ssh_command
 
 	mapfile -t modules < <(read_private_modules)
 
-	export GOPRIVATE="${PRIVATE_GOPRIVATE}"
-
-	if [ -n "${PRIVATE_MODULE_TOKEN:-}" ]; then
-		if [ -z "${GIT_CONFIG_GLOBAL:-}" ]; then
-			tmp_git_config="$(mktemp)"
-			add_cleanup_file "${tmp_git_config}"
-			export GIT_CONFIG_GLOBAL="${tmp_git_config}"
-		fi
+	ssh_cmd=(ssh)
+	if [ -f "${SSH_KEY}" ]; then
+		ssh_cmd+=(-i "${SSH_KEY}" -o IdentitiesOnly=yes)
 	fi
+	if [ -f "${SSH_DIR}/config" ]; then
+		ssh_cmd+=(-F "${SSH_DIR}/config")
+	fi
+	if [ -f "${SSH_DIR}/known_hosts" ]; then
+		ssh_cmd+=(-o "UserKnownHostsFile=${SSH_DIR}/known_hosts")
+	fi
+	printf -v git_ssh_command '%q ' "${ssh_cmd[@]}"
+
+	tmp_git_config="$(mktemp)"
+	add_cleanup_file "${tmp_git_config}"
+	export GIT_CONFIG_GLOBAL="${tmp_git_config}"
+	export GIT_SSH_COMMAND="${git_ssh_command}"
+	export GOPRIVATE="${PRIVATE_GOPRIVATE}"
+	export GONOSUMDB="${GONOSUMDB:-${PRIVATE_GOPRIVATE}}"
 
 	for module in "${modules[@]}"; do
 		configure_private_module_auth "${module}"
 
-		version="$(go list -modfile="${PRIVATE_MODFILE}" -m -f '{{ .Version }}' "${module}")"
-		if [ -z "${version}" ]; then
-			echo "${module} is missing from ${PRIVATE_MODFILE}." >&2
-			return 1
-		fi
-
+		version="$(resolve_private_module_version "${module}")"
 		pinned_modules+=("${module}@${version}")
 	done
 

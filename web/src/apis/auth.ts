@@ -1,4 +1,4 @@
-import { useFetch } from '@/lib/fetch'
+import { fetchJson } from '@/lib/fetch'
 import type {
   AuthOtpRequirementResponse,
   AuthVerifyPayload,
@@ -7,20 +7,20 @@ import type {
 
 export const useAuthApi = () => {
   const sendCode = () => {
-    return useFetch<void>('auth/otp', {
+    return fetchJson<void>('auth/otp', {
       method: 'POST',
-    }).json()
+    })
   }
 
   const getOtpRequirement = () => {
-    return useFetch<AuthOtpRequirementResponse>('auth/otp/required').get().json()
+    return fetchJson<AuthOtpRequirementResponse>('auth/otp/required')
   }
 
   const verifyCode = (payload: AuthVerifyPayload) => {
-    return useFetch<AuthVerifyResponse>('auth/otp/verify', {
+    return fetchJson<AuthVerifyResponse>('auth/otp/verify', {
       method: 'POST',
       body: JSON.stringify(payload),
-    }).json()
+    })
   }
 
   return {

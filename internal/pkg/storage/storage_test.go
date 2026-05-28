@@ -268,6 +268,64 @@ func TestCallsPersistAndListByModem(t *testing.T) {
 	}
 }
 
+func TestSaveCallPreservesAnsweredAtOnSparseUpdates(t *testing.T) {
+	ctx := context.Background()
+	base := time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name   string
+		update Call
+		want   time.Time
+	}{
+		{
+			name: "ended event keeps previous answer time",
+			update: Call{
+				ID:        "call-1",
+				ProfileID: "profile-a",
+				ModemID:   "modem-1",
+				Route:     "wifi_calling",
+				Direction: "outgoing",
+				Number:    "+12242255559",
+				State:     "ended",
+				StartedAt: base,
+				EndedAt:   base.Add(2 * time.Minute),
+				UpdatedAt: base.Add(2 * time.Minute),
+			},
+			want: base.Add(30 * time.Second),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := testStore(t)
+			answered := Call{
+				ID:         "call-1",
+				ProfileID:  "profile-a",
+				ModemID:    "modem-1",
+				Route:      "wifi_calling",
+				Direction:  "outgoing",
+				Number:     "+12242255559",
+				State:      "active",
+				StartedAt:  base,
+				AnsweredAt: base.Add(30 * time.Second),
+				UpdatedAt:  base.Add(30 * time.Second),
+			}
+			if err := store.SaveCall(ctx, answered); err != nil {
+				t.Fatalf("SaveCall(answered) error = %v", err)
+			}
+			if err := store.SaveCall(ctx, tt.update); err != nil {
+				t.Fatalf("SaveCall(update) error = %v", err)
+			}
+
+			got, err := store.GetCall(ctx, "call-1")
+			if err != nil {
+				t.Fatalf("GetCall() error = %v", err)
+			}
+			if !got.AnsweredAt.Equal(tt.want) {
+				t.Fatalf("AnsweredAt = %v, want %v", got.AnsweredAt, tt.want)
+			}
+		})
+	}
+}
+
 func TestMigrateMessageFingerprints(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "sigmo.db")

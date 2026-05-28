@@ -1,7 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { createBrowserAmrCodec, hasBrowserAmrCodec } from '@/lib/browserAmrCodec'
+import type { AmrCodecAdapter } from '@/lib/callMediaPipeline'
 import type { CallMediaInfo } from '@/types/call'
+
+import {
+  installGeneratedOpenCoreAmrFactory,
+  uninstallGeneratedOpenCoreAmrFactory,
+} from './opencoreAmrWasm'
 
 const media = (codec: string): CallMediaInfo => ({
   codec,
@@ -15,13 +21,23 @@ const media = (codec: string): CallMediaInfo => ({
 })
 
 describe('browser AMR codec loader', () => {
-  it('loads the built-in AMR-NB codec', async () => {
+  beforeAll(async () => {
+    await installGeneratedOpenCoreAmrFactory()
+  })
+
+  afterAll(() => {
+    uninstallGeneratedOpenCoreAmrFactory()
+  })
+
+  it('routes AMR-NB to the built-in WASM codec', async () => {
     expect(hasBrowserAmrCodec()).toBe(true)
-    await expect(createBrowserAmrCodec(media('AMR'))).resolves.toEqual({
-      decode: expect.any(Function),
-      encode: expect.any(Function),
-      close: expect.any(Function),
-    })
+    const codec = (await createBrowserAmrCodec(media('AMR'))) as AmrCodecAdapter
+    try {
+      const frames = await codec.encode(new Float32Array(160), 8000)
+      expect(frames[0]).toMatchObject({ frameType: 7, quality: true })
+    } finally {
+      await codec.close?.()
+    }
   })
 
   it('accepts PCMU without loading an AMR module', async () => {
@@ -31,10 +47,14 @@ describe('browser AMR codec loader', () => {
     })
   })
 
-  it('rejects codecs that the built-in adapter cannot encode', async () => {
+  it('routes AMR-WB to the built-in WASM codec', async () => {
     expect(hasBrowserAmrCodec()).toBe(true)
-    await expect(createBrowserAmrCodec(media('AMR-WB'))).rejects.toThrow(
-      'AMR-WB codec is not available',
-    )
+    const codec = (await createBrowserAmrCodec(media('AMR-WB'))) as AmrCodecAdapter
+    try {
+      const frames = await codec.encode(new Float32Array(320), 16000)
+      expect(frames[0]).toMatchObject({ frameType: 8, quality: true })
+    } finally {
+      await codec.close?.()
+    }
   })
 })

@@ -26,7 +26,20 @@ func render(ev notifyevent.Event) (content, error) {
 			Title: ev.Counterparty(),
 			Body:  ev.DisplayText(),
 		}, nil
+	case notifyevent.CallEvent:
+		return content{
+			Title: callTitle(ev),
+			Body:  fmt.Sprintf("Modem: %s\nTime: %s", strings.TrimSpace(ev.Modem), ev.DisplayTimestamp()),
+		}, nil
 	default:
 		return content{}, fmt.Errorf("rendering bark content for %q: unsupported event", ev.Kind())
 	}
+}
+
+func callTitle(ev notifyevent.CallEvent) string {
+	number := ev.Counterparty()
+	if number == "" {
+		return ev.DirectionLabel()
+	}
+	return fmt.Sprintf("%s from %s", ev.DirectionLabel(), number)
 }

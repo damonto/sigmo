@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { resolveAPIURL } from '@/lib/api-url'
+import { resolveAPIURL } from '@/lib/apiUrl'
 
 describe('resolveAPIURL', () => {
   afterEach(() => {

@@ -96,6 +96,12 @@ func TestInternetError(t *testing.T) {
 			wantStatus: http.StatusUnprocessableEntity,
 			wantBody:   errorCodeInternetIPTypeInvalidConfig,
 		},
+		{
+			name:       "profile required",
+			err:        internetcore.ErrProfileIDRequired,
+			wantStatus: http.StatusUnprocessableEntity,
+			wantBody:   errorCodeInternetProfileIDRequired,
+		},
 	}
 
 	for _, tt := range tests {

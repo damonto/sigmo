@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { buildCallMediaUrl } from '@/apis/call'
 import { useCallMediaSession } from '@/composables/useCallMediaSession'
-import { clearStoredToken, setStoredToken } from '@/lib/auth-storage'
+import { clearStoredToken, setStoredToken } from '@/lib/authStorage'
 
 class FakeWebSocket {
   static OPEN = 1
@@ -152,6 +152,29 @@ describe('call media session', () => {
 
     expect(session.status.value).toBe('error')
     expect(session.errorMessage.value).toBe('Invalid media response')
+  })
+
+  it('uses backend media error messages from the socket handshake', () => {
+    const session = useCallMediaSession(ref('modem-1'))
+
+    session.connect('call-1')
+    const ws = FakeWebSocket.instances[0]
+    expect(ws).toBeDefined()
+    if (!ws) return
+
+    ws.message(
+      JSON.stringify({
+        type: 'error',
+        error: {
+          error_code: 'call_media_unavailable',
+          message: 'call media is not available',
+          request_id: 'req-1',
+        },
+      }),
+    )
+
+    expect(session.status.value).toBe('error')
+    expect(session.errorMessage.value).toBe('call media is not available')
   })
 
   it('enters error state when the media socket fails', () => {

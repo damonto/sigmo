@@ -5,37 +5,39 @@ package wificalling
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
-	imsclient "github.com/damonto/ims-client"
-	imscall "github.com/damonto/ims-client/ims/call"
-	usimreader "github.com/damonto/ims-client/usim/reader"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/websheet"
 	"github.com/damonto/ts43-go/ts43"
+	vowifi "github.com/damonto/vowifi-go"
+	imssip "github.com/damonto/vowifi-go/ims/sip"
+	imsvoice "github.com/damonto/vowifi-go/ims/voice"
+	usimreader "github.com/damonto/vowifi-go/usim/reader"
 	"github.com/godbus/dbus/v5"
 )
 
 func TestIncomingMessageKey(t *testing.T) {
 	tests := []struct {
 		name string
-		msg  imsclient.SMS
+		msg  vowifi.SMS
 		want string
 	}{
 		{
 			name: "uses SIP call id",
-			msg: imsclient.SMS{
+			msg: vowifi.SMS{
 				CallID: " sms-call-id ",
 			},
 			want: "sms-call-id",
 		},
 		{
 			name: "falls back to stable content hash",
-			msg: imsclient.SMS{
+			msg: vowifi.SMS{
 				From:          "+100",
 				To:            "+200",
 				ServiceCenter: "+300",
@@ -89,18 +91,18 @@ func TestConnectedClientRequiresSameProfile(t *testing.T) {
 	}{
 		{
 			name:      "same profile",
-			session:   &sessionState{client: &imsclient.Client{}, profileID: "profile-a", connected: true},
+			session:   &sessionState{client: &vowifi.Client{}, profileID: "profile-a", connected: true},
 			profileID: "profile-a",
 		},
 		{
 			name:      "different profile",
-			session:   &sessionState{client: &imsclient.Client{}, profileID: "profile-a", connected: true},
+			session:   &sessionState{client: &vowifi.Client{}, profileID: "profile-a", connected: true},
 			profileID: "profile-b",
 			wantErr:   ErrNotConnected,
 		},
 		{
 			name:      "disconnected",
-			session:   &sessionState{client: &imsclient.Client{}, profileID: "profile-a"},
+			session:   &sessionState{client: &vowifi.Client{}, profileID: "profile-a"},
 			profileID: "profile-a",
 			wantErr:   ErrNotConnected,
 		},
@@ -121,14 +123,31 @@ func TestNormalizeVoiceErrorMapsClientNotConnected(t *testing.T) {
 		name    string
 		err     error
 		wantErr error
+		want    string
 	}{
-		{name: "client not connected", err: imsclient.ErrClientNotConnected, wantErr: ErrNotConnected},
-		{name: "wrapped client not connected", err: errors.Join(errors.New("dialing call"), imsclient.ErrClientNotConnected), wantErr: ErrNotConnected},
+		{name: "client not connected", err: vowifi.ErrClientNotConnected, wantErr: ErrNotConnected},
+		{name: "wrapped client not connected", err: errors.Join(errors.New("dialing call"), vowifi.ErrClientNotConnected), wantErr: ErrNotConnected},
+		{
+			name: "sip warning text",
+			err: fmt.Errorf("dialing call: %w", imssip.NewResponseError(imssip.Message{
+				StartLine: "SIP/2.0 403 Forbidden",
+				Headers: imssip.Headers{
+					{Name: "Warning", Value: `399 anonymous.invalid "Credit limit reached"`},
+				},
+			})),
+			want: "Credit limit reached",
+		},
 		{name: "keeps other errors", err: errors.New("sip rejected"), wantErr: nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := normalizeVoiceError(tt.err)
+			if tt.want != "" {
+				if err == nil || err.Error() != tt.want {
+					t.Fatalf("normalizeVoiceError() error = %v, want %q", err, tt.want)
+				}
+				return
+			}
 			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
 				t.Fatalf("normalizeVoiceError() error = %v, want %v", err, tt.wantErr)
 			}
@@ -167,7 +186,7 @@ func TestFailedOutgoingVoiceCall(t *testing.T) {
 			if call.ModemID != tt.modemID || call.ProfileID != tt.profileID {
 				t.Fatalf("call identity = %+v, want modem/profile set", call)
 			}
-			if call.Direction != string(imscall.DirectionOutgoing) || call.State != string(imscall.StateFailed) {
+			if call.Direction != string(imsvoice.CallDirectionOutgoing) || call.State != string(imsvoice.CallStateFailed) {
 				t.Fatalf("call state = direction %q state %q, want outgoing failed", call.Direction, call.State)
 			}
 			if call.Number != strings.TrimSpace(tt.number) || call.Reason != tt.err.Error() {
@@ -185,25 +204,35 @@ func TestInitialDialedVoiceCallState(t *testing.T) {
 	tests := []struct {
 		name         string
 		call         VoiceCall
-		state        imscall.State
+		state        imsvoice.CallState
 		wantAnswered time.Time
 	}{
 		{
 			name:         "active call is marked answered",
-			call:         VoiceCall{ID: "call-1", State: string(imscall.StateActive), UpdatedAt: at},
-			state:        imscall.StateActive,
+			call:         VoiceCall{ID: "call-1", State: string(imsvoice.CallStateActive), UpdatedAt: at},
+			state:        imsvoice.CallStateActive,
 			wantAnswered: at,
 		},
 		{
 			name:         "keeps existing answer time",
-			call:         VoiceCall{ID: "call-1", State: string(imscall.StateActive), UpdatedAt: at, AnsweredAt: at.Add(-time.Second)},
-			state:        imscall.StateActive,
+			call:         VoiceCall{ID: "call-1", State: string(imsvoice.CallStateActive), UpdatedAt: at, AnsweredAt: at.Add(-time.Second)},
+			state:        imsvoice.CallStateActive,
 			wantAnswered: at.Add(-time.Second),
 		},
 		{
 			name:  "dialing call is not marked answered",
-			call:  VoiceCall{ID: "call-1", State: string(imscall.StateDialing), UpdatedAt: at},
-			state: imscall.StateDialing,
+			call:  VoiceCall{ID: "call-1", State: string(imsvoice.CallStateDialing), UpdatedAt: at},
+			state: imsvoice.CallStateDialing,
+		},
+		{
+			name:  "early media call is not marked answered",
+			call:  VoiceCall{ID: "call-1", State: "early_media", UpdatedAt: at},
+			state: imsvoice.CallState("early_media"),
+		},
+		{
+			name:  "confirmed call is not marked answered",
+			call:  VoiceCall{ID: "call-1", State: "confirmed", UpdatedAt: at},
+			state: imsvoice.CallState("confirmed"),
 		},
 	}
 	for _, tt := range tests {
@@ -219,15 +248,23 @@ func TestInitialDialedVoiceCallState(t *testing.T) {
 func TestForwardCallEventCreatesPendingOutgoingCall(t *testing.T) {
 	tests := []struct {
 		name  string
-		event imsclient.CallEvent
+		event vowifi.CallEvent
 	}{
 		{
 			name: "dial event before DialCall returns",
-			event: imsclient.CallEvent{
+			event: vowifi.CallEvent{
 				CallID: "call-1",
-				State:  imscall.StateDialing,
+				State:  imsvoice.CallStateDialing,
 				Cause:  "early dialog terminated",
 				At:     time.Date(2026, 5, 28, 1, 21, 0, 0, time.UTC),
+			},
+		},
+		{
+			name: "confirmed event before DialCall returns",
+			event: vowifi.CallEvent{
+				CallID: "call-2",
+				State:  imsvoice.CallState("confirmed"),
+				At:     time.Date(2026, 5, 28, 1, 22, 0, 0, time.UTC),
 			},
 		},
 	}
@@ -259,7 +296,7 @@ func TestForwardCallEventCreatesPendingOutgoingCall(t *testing.T) {
 			if call.ModemID != "modem-1" || call.ProfileID != "profile-1" || call.ID != tt.event.CallID {
 				t.Fatalf("call identity = %+v, want modem/profile/call id", call)
 			}
-			if call.Direction != string(imscall.DirectionOutgoing) || call.Number != "+12242255559" {
+			if call.Direction != string(imsvoice.CallDirectionOutgoing) || call.Number != "+12242255559" {
 				t.Fatalf("call route = direction %q number %q, want outgoing trimmed number", call.Direction, call.Number)
 			}
 			if call.State != string(tt.event.State) || call.Reason != tt.event.Cause {
@@ -267,6 +304,9 @@ func TestForwardCallEventCreatesPendingOutgoingCall(t *testing.T) {
 			}
 			if call.StartedAt.IsZero() || !call.UpdatedAt.Equal(tt.event.At) {
 				t.Fatalf("call times = started %v updated %v, want started set and updated %v", call.StartedAt, call.UpdatedAt, tt.event.At)
+			}
+			if !call.AnsweredAt.IsZero() {
+				t.Fatalf("AnsweredAt = %v, want zero", call.AnsweredAt)
 			}
 			if len(events) != 1 || events[0].Call.ID != tt.event.CallID {
 				t.Fatalf("events = %+v, want one pending call event", events)
@@ -280,12 +320,53 @@ func TestForwardCallEventCreatesPendingOutgoingCall(t *testing.T) {
 	}
 }
 
+func TestForwardCallEventStoresCallPointer(t *testing.T) {
+	tests := []struct {
+		name  string
+		event vowifi.CallEvent
+	}{
+		{
+			name: "early media event before DialCall returns",
+			event: vowifi.CallEvent{
+				Call:   &imsvoice.Call{},
+				CallID: "call-1",
+				State:  imsvoice.CallStateEarlyMedia,
+				At:     time.Date(2026, 5, 28, 1, 23, 0, 0, time.UTC),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &coordinator{
+				sessions: map[string]*sessionState{
+					"modem-1": {
+						profileID:   "profile-1",
+						calls:       make(map[string]*voiceCallState),
+						pendingDial: &pendingVoiceDial{profileID: "profile-1", number: "+12242255559", startedAt: tt.event.At},
+					},
+				},
+				voiceSubscribers: make(map[uint64]VoiceEventFunc),
+			}
+
+			c.forwardCallEvent("modem-1", tt.event)
+
+			state := c.sessions["modem-1"].calls[tt.event.CallID]
+			if state == nil {
+				t.Fatal("pending outgoing call was not stored")
+			}
+			if state.call != tt.event.Call {
+				t.Fatalf("call pointer = %p, want %p", state.call, tt.event.Call)
+			}
+		})
+	}
+}
+
 func TestBrowserVoiceMediaOfferUsesFullDuplexCodec(t *testing.T) {
 	tests := []struct {
 		name string
-		want []imscall.AudioCodec
+		want []imsvoice.AudioCodec
 	}{
-		{name: "browser codecs", want: []imscall.AudioCodec{imscall.CodecAMR, imscall.CodecPCMU}},
+		{name: "browser codecs", want: []imsvoice.AudioCodec{imsvoice.CodecAMR, imsvoice.CodecPCMU}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -300,14 +381,14 @@ func TestBrowserVoiceMediaOfferUsesFullDuplexCodec(t *testing.T) {
 func TestBrowserVoiceConfigUsesFullDuplexCodec(t *testing.T) {
 	tests := []struct {
 		name       string
-		wantCodecs []imscall.AudioCodecConfig
+		wantCodecs []imsvoice.AudioCodecConfig
 	}{
 		{
 			name: "browser codecs with dtmf",
-			wantCodecs: []imscall.AudioCodecConfig{
-				{Name: imscall.CodecAMR, PayloadTypes: []int{102}, ClockRate: 8000, ModeSet: "0,2,4,7"},
-				{Name: imscall.CodecTelephoneEvent, PayloadTypes: []int{101}, ClockRate: 8000},
-				{Name: imscall.CodecPCMU, PayloadTypes: []int{0}, ClockRate: 8000},
+			wantCodecs: []imsvoice.AudioCodecConfig{
+				{Name: imsvoice.CodecAMR, PayloadTypes: []int{102}, ClockRate: 8000, ModeSet: "0,2,4,7"},
+				{Name: imsvoice.CodecTelephoneEvent, PayloadTypes: []int{101}, ClockRate: 8000},
+				{Name: imsvoice.CodecPCMU, PayloadTypes: []int{0}, ClockRate: 8000},
 			},
 		},
 	}
@@ -333,14 +414,14 @@ func TestBrowserVoiceConfigUsesFullDuplexCodec(t *testing.T) {
 func TestIsSupportedCallMediaCodec(t *testing.T) {
 	tests := []struct {
 		name  string
-		codec imscall.AudioCodec
+		codec imsvoice.AudioCodec
 		want  bool
 	}{
-		{name: "amr", codec: imscall.CodecAMR, want: true},
-		{name: "amr wb", codec: imscall.CodecAMRWB, want: false},
-		{name: "pcmu", codec: imscall.CodecPCMU, want: true},
-		{name: "evs", codec: imscall.CodecEVS, want: false},
-		{name: "telephone event", codec: imscall.CodecTelephoneEvent, want: false},
+		{name: "amr", codec: imsvoice.CodecAMR, want: true},
+		{name: "amr wb", codec: imsvoice.CodecAMRWB, want: false},
+		{name: "pcmu", codec: imsvoice.CodecPCMU, want: true},
+		{name: "evs", codec: imsvoice.CodecEVS, want: false},
+		{name: "telephone event", codec: imsvoice.CodecTelephoneEvent, want: false},
 		{name: "empty", codec: "", want: false},
 	}
 	for _, tt := range tests {
@@ -354,8 +435,8 @@ func TestIsSupportedCallMediaCodec(t *testing.T) {
 
 func TestCallMediaSessionInfoIncludesPayloadFormat(t *testing.T) {
 	session := callMediaSession{
-		media: imscall.NegotiatedMedia{
-			Codec:           imscall.CodecAMR,
+		media: imsvoice.NegotiatedMedia{
+			Codec:           imsvoice.CodecAMR,
 			PayloadType:     102,
 			ClockRate:       8000,
 			Channels:        1,
@@ -367,7 +448,7 @@ func TestCallMediaSessionInfoIncludesPayloadFormat(t *testing.T) {
 	}
 
 	info := session.Info()
-	if info.Codec != string(imscall.CodecAMR) || info.PayloadType != 102 || info.ClockRate != 8000 {
+	if info.Codec != string(imsvoice.CodecAMR) || info.PayloadType != 102 || info.ClockRate != 8000 {
 		t.Fatalf("Info() = %+v, want AMR payload 102 clock 8000", info)
 	}
 	if info.OctetAlign {
@@ -493,7 +574,7 @@ func TestOpenReaderReturnsJoinedCandidateErrors(t *testing.T) {
 }
 
 func TestMarkDisconnectedFailsOpenCalls(t *testing.T) {
-	client := &imsclient.Client{}
+	client := &vowifi.Client{}
 	c := &coordinator{
 		sessions: map[string]*sessionState{
 			"modem-1": {
@@ -501,16 +582,16 @@ func TestMarkDisconnectedFailsOpenCalls(t *testing.T) {
 				connected: true,
 				calls: map[string]*voiceCallState{
 					"ringing": {
-						info: VoiceCall{ID: "ringing", State: string(imscall.StateRinging)},
+						info: VoiceCall{ID: "ringing", State: string(imsvoice.CallStateRinging)},
 					},
 					"answering": {
-						info: VoiceCall{ID: "answering", State: string(imscall.StateAnswering)},
+						info: VoiceCall{ID: "answering", State: string(imsvoice.CallStateAnswering)},
 					},
 					"active": {
-						info: VoiceCall{ID: "active", State: string(imscall.StateActive)},
+						info: VoiceCall{ID: "active", State: string(imsvoice.CallStateActive)},
 					},
 					"ended": {
-						info: VoiceCall{ID: "ended", State: string(imscall.StateEnded)},
+						info: VoiceCall{ID: "ended", State: string(imsvoice.CallStateEnded)},
 					},
 				},
 			},
@@ -531,7 +612,7 @@ func TestMarkDisconnectedFailsOpenCalls(t *testing.T) {
 	}
 	for _, id := range []string{"ringing", "answering", "active"} {
 		call := session.calls[id].info
-		if call.State != string(imscall.StateFailed) {
+		if call.State != string(imsvoice.CallStateFailed) {
 			t.Fatalf("call %s state = %q, want failed", id, call.State)
 		}
 		if call.Reason != "wifi calling disconnected" {
@@ -541,7 +622,7 @@ func TestMarkDisconnectedFailsOpenCalls(t *testing.T) {
 			t.Fatalf("call %s times = ended %v updated %v, want set", id, call.EndedAt, call.UpdatedAt)
 		}
 	}
-	if got := session.calls["ended"].info.State; got != string(imscall.StateEnded) {
+	if got := session.calls["ended"].info.State; got != string(imsvoice.CallStateEnded) {
 		t.Fatalf("ended call state = %q, want ended", got)
 	}
 
@@ -559,24 +640,24 @@ func TestMarkDisconnectedIgnoresStaleClient(t *testing.T) {
 	c := &coordinator{
 		sessions: map[string]*sessionState{
 			"modem-1": {
-				client:    &imsclient.Client{},
+				client:    &vowifi.Client{},
 				connected: true,
 				calls: map[string]*voiceCallState{
 					"active": {
-						info: VoiceCall{ID: "active", State: string(imscall.StateActive)},
+						info: VoiceCall{ID: "active", State: string(imsvoice.CallStateActive)},
 					},
 				},
 			},
 		},
 		voiceSubscribers: make(map[uint64]VoiceEventFunc),
 	}
-	c.markDisconnected("modem-1", &imsclient.Client{})
+	c.markDisconnected("modem-1", &vowifi.Client{})
 
 	session := c.sessions["modem-1"]
 	if !session.connected {
 		t.Fatal("stale client disconnected the active session")
 	}
-	if got := session.calls["active"].info.State; got != string(imscall.StateActive) {
+	if got := session.calls["active"].info.State; got != string(imsvoice.CallStateActive) {
 		t.Fatalf("active call state = %q, want active", got)
 	}
 }
@@ -589,11 +670,11 @@ func TestStopFailsOpenCallsBeforeRemovingSession(t *testing.T) {
 				cancel: func() {
 					cancelled = true
 				},
-				client:    &imsclient.Client{},
+				client:    &vowifi.Client{},
 				connected: true,
 				calls: map[string]*voiceCallState{
 					"active": {
-						info: VoiceCall{ID: "active", State: string(imscall.StateActive)},
+						info: VoiceCall{ID: "active", State: string(imsvoice.CallStateActive)},
 					},
 				},
 			},
@@ -617,7 +698,7 @@ func TestStopFailsOpenCallsBeforeRemovingSession(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("events = %d, want 1", len(events))
 	}
-	if events[0].Call.ID != "active" || events[0].Call.State != string(imscall.StateFailed) {
+	if events[0].Call.ID != "active" || events[0].Call.State != string(imsvoice.CallStateFailed) {
 		t.Fatalf("event = %+v, want failed active call", events[0])
 	}
 }
@@ -681,10 +762,10 @@ func TestWFCWebsheetRequestFromEntitlementErrors(t *testing.T) {
 	}{
 		{
 			name: "nsds",
-			err: &imsclient.NSDSWFCEntitlementError{
-				Err:     imsclient.ErrWFCEntitlementUserActionRequired,
+			err: &vowifi.NSDSWFCEntitlementError{
+				Err:     vowifi.ErrWFCEntitlementUserActionRequired,
 				Carrier: "Carrier",
-				Websheet: imsclient.WFCWebsheet{
+				Websheet: vowifi.WFCWebsheet{
 					URL:   "https://example.com/nsds",
 					Data:  "token=abc",
 					Title: "Wi-Fi Calling",
@@ -696,8 +777,8 @@ func TestWFCWebsheetRequestFromEntitlementErrors(t *testing.T) {
 		},
 		{
 			name: "ts43",
-			err: &imsclient.WFCEntitlementError{
-				Err:    imsclient.ErrWFCEntitlementUserActionRequired,
+			err: &vowifi.WFCEntitlementError{
+				Err:    vowifi.ErrWFCEntitlementUserActionRequired,
 				Config: ts43.WFCConfig{CarrierName: "Carrier"},
 				Status: ts43.WFCStatus{
 					ServiceFlowURL:      "https://example.com/ts43?existing=1",

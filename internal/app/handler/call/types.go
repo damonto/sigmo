@@ -1,5 +1,7 @@
 package call
 
+import "github.com/damonto/sigmo/internal/app/httpapi"
+
 type DialRequest struct {
 	To    string `json:"to"`
 	Route string `json:"route"`
@@ -40,6 +42,7 @@ type MediaInfoResponse struct {
 }
 
 type MediaMessage struct {
-	Type  string            `json:"type"`
-	Media MediaInfoResponse `json:"media"`
+	Type  string                 `json:"type"`
+	Media *MediaInfoResponse     `json:"media,omitempty"`
+	Error *httpapi.ErrorResponse `json:"error,omitempty"`
 }

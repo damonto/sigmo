@@ -2,7 +2,7 @@ import {
   TRANSFER_CLIENT_ERROR,
   TRANSFER_MESSAGE,
 } from '@/constants/esimTransfer'
-import { getStoredToken } from '@/lib/auth-storage'
+import { getStoredToken } from '@/lib/authStorage'
 import type { EsimDownloadPreview } from '@/types/esim'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 

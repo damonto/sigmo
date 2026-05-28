@@ -1,6 +1,6 @@
 import { computed, onBeforeUnmount, ref, type Ref } from 'vue'
 
-import { getStoredToken } from '@/lib/auth-storage'
+import { getStoredToken } from '@/lib/authStorage'
 import type { EsimDownloadPreview } from '@/types/esim'
 
 export type EsimDownloadState =

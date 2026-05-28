@@ -1,18 +1,21 @@
 import type { ApiErrorResponse } from '@/types/api'
 
-import { clearStoredToken } from './auth-storage'
+import { clearStoredToken } from './authStorage'
+import { notifyError } from './notify'
 
 export type ApiError = ApiErrorResponse & {
   status?: number
 }
 
-/**
- * Global error handler interface
- * Will be initialized by useErrorHandler
- */
-let showErrorFunction: ((message: string, title?: string) => void) | null = null
-
 const extractErrorResponse = (data: unknown): ApiErrorResponse | null => {
+  if (typeof data === 'string' && data.trim()) {
+    try {
+      return extractErrorResponse(JSON.parse(data) as unknown)
+    } catch {
+      return null
+    }
+  }
+
   if (data && typeof data === 'object') {
     const record = data as Record<string, unknown>
     if (
@@ -76,23 +79,13 @@ const resolveErrorInfo = (error: unknown, defaultMessage: string) => {
 }
 
 /**
- * Register the global error handler
- * Called from App.vue to initialize error handling
- */
-export const registerErrorHandler = (showError: (message: string, title?: string) => void) => {
-  showErrorFunction = showError
-}
-
-/**
  * Error handler for API errors
  * Shows error messages to users
  */
 export const handleError = (error: unknown, defaultMessage = 'An error occurred') => {
   const { message, title, requestId } = resolveErrorInfo(error, defaultMessage)
 
-  if (showErrorFunction) {
-    showErrorFunction(message, title)
-  }
+  notifyError(title, message)
 
   // Log to console for debugging
   console.error('[Error]', requestId ? { requestId, error } : error)

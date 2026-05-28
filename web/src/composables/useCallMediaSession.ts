@@ -1,7 +1,7 @@
 import { computed, getCurrentInstance, onBeforeUnmount, ref, type Ref } from 'vue'
 
 import { buildCallMediaUrl } from '@/apis/call'
-import type { CallMediaInfo, CallMediaReadyMessage } from '@/types/call'
+import type { CallMediaErrorMessage, CallMediaInfo, CallMediaReadyMessage } from '@/types/call'
 
 type MediaStatus = 'idle' | 'connecting' | 'ready' | 'closed' | 'error'
 
@@ -15,6 +15,16 @@ const isReadyMessage = (value: unknown): value is CallMediaReadyMessage => {
   if (!value || typeof value !== 'object') return false
   const record = value as Record<string, unknown>
   return record.type === 'ready' && typeof record.media === 'object' && record.media !== null
+}
+
+const isErrorMessage = (value: unknown): value is CallMediaErrorMessage => {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  if (record.type !== 'error' || typeof record.error !== 'object' || record.error === null) {
+    return false
+  }
+  const error = record.error as Record<string, unknown>
+  return typeof error.message === 'string'
 }
 
 const dataAsArrayBuffer = async (data: unknown) => {
@@ -78,6 +88,12 @@ export const useCallMediaSession = (
         } catch (err) {
           console.error('[useCallMediaSession] parse media message:', err)
           errorMessage.value = 'Invalid media response'
+          status.value = 'error'
+          disconnect()
+          return
+        }
+        if (isErrorMessage(message)) {
+          errorMessage.value = message.error.message
           status.value = 'error'
           disconnect()
           return

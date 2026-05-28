@@ -2,12 +2,10 @@ module github.com/damonto/sigmo
 
 go 1.26.3
 
-replace github.com/damonto/ims-client => ../ims-client
-
 require (
 	github.com/damonto/euicc-go v1.1.2
-	github.com/damonto/ims-client v0.0.0-20260526093808-49c61bc0057a
-	github.com/damonto/ts43-go v0.0.0-20260526064631-7fd2520a29c7
+	github.com/damonto/ts43-go v0.0.0-20260528070422-3165eba3bd74
+	github.com/damonto/vowifi-go v0.0.0-20260528142640-df546ba34a05
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
 	github.com/go-playground/validator/v10 v10.30.2

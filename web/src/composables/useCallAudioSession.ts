@@ -31,7 +31,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   let muteNode: GainNode | null = null
   let pipeline: CallMediaPipeline | null = null
   let nextPlaybackTime = 0
-  let inputPromise: Promise<void> | null = null
+  let inputPromise: Promise<boolean> | null = null
 
   const media = useCallMediaSession(modemId, {
     onRtpPacket: (packet) => {
@@ -77,12 +77,17 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     })
   }
 
+  const createAudioContext = () => options.deps?.createAudioContext?.() ?? new AudioContext()
+
   const ensureAudioOutput = async () => {
-    audioContext ??= options.deps?.createAudioContext?.() ?? new AudioContext()
-    if (audioContext.state === 'suspended') {
-      await audioContext.resume()
+    const ctx = audioContext ?? createAudioContext()
+    audioContext = ctx
+    if (ctx.state === 'suspended') {
+      await ctx.resume()
     }
-    nextPlaybackTime = audioContext.currentTime
+    if (audioContext !== ctx) return false
+    nextPlaybackTime = ctx.currentTime
+    return true
   }
 
   const ensureAudioInput = async () => {
@@ -92,22 +97,32 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       return Boolean(stream)
     }
     inputPromise = (async () => {
-      audioContext ??= options.deps?.createAudioContext?.() ?? new AudioContext()
-      if (audioContext.state === 'suspended') {
-        await audioContext.resume()
+      const ctx = audioContext ?? createAudioContext()
+      audioContext = ctx
+      if (ctx.state === 'suspended') {
+        await ctx.resume()
       }
+      if (audioContext !== ctx) return false
       if (!stream) {
         const getUserMedia = options.deps?.getUserMedia ?? navigator.mediaDevices?.getUserMedia.bind(navigator.mediaDevices)
         if (!getUserMedia) {
           throw new Error('Microphone capture is not available')
         }
-        stream = await getUserMedia({ audio: true })
+        const nextStream = await getUserMedia({ audio: true })
+        if (audioContext !== ctx) {
+          for (const track of nextStream.getTracks()) {
+            track.stop()
+          }
+          return false
+        }
+        stream = nextStream
       }
-      nextPlaybackTime = audioContext.currentTime
+      if (audioContext !== ctx) return false
+      nextPlaybackTime = ctx.currentTime
+      return true
     })()
     try {
-      await inputPromise
-      return true
+      return await inputPromise
     } catch (err) {
       captureUnavailable(err)
       return false
@@ -181,11 +196,16 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       return false
     }
 
-      status.value = 'preparing'
+    status.value = 'preparing'
     try {
-      await ensureAudioOutput()
-      if (!await ensureAudioInput()) {
-        activeCallID.value = ''
+      if (!(await ensureAudioOutput())) return false
+      if (!(await ensureAudioInput())) {
+        if (activeCallID.value === callID) {
+          activeCallID.value = ''
+        }
+        return false
+      }
+      if (activeCallID.value !== callID) {
         return false
       }
       status.value = 'connecting'
@@ -209,8 +229,8 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     }
     status.value = 'preparing'
     try {
-      await ensureAudioOutput()
-      if (!await ensureAudioInput()) {
+      if (!(await ensureAudioOutput())) return false
+      if (!(await ensureAudioInput())) {
         return false
       }
       if (!activeCallID.value && status.value === 'preparing') {
@@ -248,7 +268,8 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   const stop = () => {
     cleanup()
     activeCallID.value = ''
-    status.value = status.value === 'error' ? 'error' : 'closed'
+    errorMessage.value = ''
+    status.value = 'closed'
   }
 
   watch(media.mediaInfo, (info) => {

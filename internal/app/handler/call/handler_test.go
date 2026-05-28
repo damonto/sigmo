@@ -25,6 +25,7 @@ func TestCallActionErrorMapsExpectedFailures(t *testing.T) {
 		err        error
 		wantStatus int
 		wantCode   string
+		wantMsg    string
 	}{
 		{name: "ussd dial string", err: pcall.ErrUSSDDialString, wantStatus: http.StatusBadRequest, wantCode: errorCodeUSSDDialString},
 		{name: "invalid number", err: pcall.ErrInvalidNumber, wantStatus: http.StatusBadRequest, wantCode: errorCodeCallNumberInvalid},
@@ -33,6 +34,7 @@ func TestCallActionErrorMapsExpectedFailures(t *testing.T) {
 		{name: "modem calling unavailable", err: pcall.ErrModemCallingUnavailable, wantStatus: http.StatusNotImplemented, wantCode: errorCodeModemCallingUnavailable},
 		{name: "invalid call state", err: pcall.ErrInvalidCallState, wantStatus: http.StatusBadRequest, wantCode: errorCodeInvalidCallState},
 		{name: "wrapped wifi calling disconnected", err: errors.Join(errors.New("dial route"), pcall.ErrWiFiCallingNotConnected), wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeWiFiCallingNotConnected},
+		{name: "dial rejection", err: errors.New("dial Wi-Fi Calling: Credit limit reached"), wantStatus: http.StatusBadGateway, wantCode: errorCodeDialCallFailed, wantMsg: "Credit limit reached"},
 	}
 
 	for _, tt := range tests {
@@ -55,6 +57,9 @@ func TestCallActionErrorMapsExpectedFailures(t *testing.T) {
 			}
 			if got.ErrorCode != tt.wantCode {
 				t.Fatalf("error_code = %q, want %q", got.ErrorCode, tt.wantCode)
+			}
+			if tt.wantMsg != "" && got.Message != tt.wantMsg {
+				t.Fatalf("message = %q, want %q", got.Message, tt.wantMsg)
 			}
 		})
 	}
@@ -257,6 +262,64 @@ func TestReadBrowserMediaWritesBinaryRTPPackets(t *testing.T) {
 	}
 }
 
+func TestWriteMediaErrorSendsStructuredError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  mediaErrorResponse
+		want string
+	}{
+		{
+			name: "media unavailable",
+			err: mediaErrorResponse{
+				code:      errorCodeCallMediaUnavailable,
+				message:   "call media is not available",
+				requestID: "req-1",
+			},
+			want: "call media is not available",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Skipf("listen for websocket media error test: %v", err)
+			}
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				conn, err := callWSUpgrader.Upgrade(w, r, nil)
+				if err != nil {
+					t.Errorf("Upgrade() error = %v", err)
+					return
+				}
+				defer conn.Close()
+				if err := writeMediaError(conn, tt.err); err != nil {
+					t.Errorf("writeMediaError() error = %v", err)
+				}
+			}))
+			server.Listener = listener
+			server.Start()
+			defer server.Close()
+
+			conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+			if err != nil {
+				t.Fatalf("Dial() error = %v", err)
+			}
+			defer conn.Close()
+
+			var got MediaMessage
+			if err := conn.ReadJSON(&got); err != nil {
+				t.Fatalf("ReadJSON() error = %v", err)
+			}
+			if got.Type != "error" {
+				t.Fatalf("message type = %q, want error", got.Type)
+			}
+			if got.Error == nil || got.Error.Message != tt.want {
+				t.Fatalf("message error = %+v, want %q", got.Error, tt.want)
+			}
+		})
+	}
+}
+
 func TestCurrentCallEventsFiltersTerminalAndOtherModemCalls(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -269,13 +332,15 @@ func TestCurrentCallEventsFiltersTerminalAndOtherModemCalls(t *testing.T) {
 				{ID: "dialing", ModemID: "modem-1", State: pcall.StateDialing},
 				{ID: "ringing", ModemID: "modem-1", State: pcall.StateRinging},
 				{ID: "answering", ModemID: "modem-1", State: pcall.StateAnswering},
+				{ID: "early-media", ModemID: "modem-1", State: pcall.StateEarlyMedia},
 				{ID: "active", ModemID: "modem-1", State: pcall.StateActive},
+				{ID: "confirmed", ModemID: "modem-1", State: pcall.StateConfirmed},
 				{ID: "ending", ModemID: "modem-1", State: pcall.StateEnding},
 				{ID: "ended", ModemID: "modem-1", State: pcall.StateEnded},
 				{ID: "failed", ModemID: "modem-1", State: pcall.StateFailed},
 				{ID: "other", ModemID: "modem-2", State: pcall.StateActive},
 			},
-			want: []string{"dialing", "ringing", "answering", "active", "ending"},
+			want: []string{"dialing", "ringing", "answering", "early-media", "active", "confirmed", "ending"},
 		},
 		{
 			name: "empty",
