@@ -33,6 +33,7 @@ type MediaInfoResponse struct {
 	PayloadType     int    `json:"payloadType"`
 	ClockRate       int    `json:"clockRate"`
 	Channels        int    `json:"channels"`
+	OctetAlign      bool   `json:"octetAlign"`
 	DTMFPayloadType int    `json:"dtmfPayloadType"`
 	DTMFClockRate   int    `json:"dtmfClockRate"`
 	PTimeMillis     int    `json:"ptimeMillis"`

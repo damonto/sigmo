@@ -12,6 +12,7 @@ const media = (codec: string): CallMediaInfo => ({
   payloadType: codec === 'AMR' ? 102 : 104,
   clockRate: codec === 'AMR' ? 8000 : 16000,
   channels: 1,
+  octetAlign: true,
   dtmfPayloadType: 101,
   dtmfClockRate: 8000,
   ptimeMillis: 20,
@@ -43,7 +44,9 @@ describe('built-in AMR codec adapter', () => {
   })
 
   it('rejects AMR data without a file header', () => {
-    expect(() => parseAmrStorageFrames(new Uint8Array([0x3c]))).toThrow('AMR data is missing a file header')
+    expect(() => parseAmrStorageFrames(new Uint8Array([0x3c]))).toThrow(
+      'AMR data is missing a file header',
+    )
   })
 
   it('reports when the encoder worker is unavailable', async () => {

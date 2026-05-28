@@ -10,6 +10,7 @@ import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogC
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'

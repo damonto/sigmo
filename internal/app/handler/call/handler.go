@@ -3,6 +3,7 @@ package call
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -134,7 +135,41 @@ func sameOrigin(r *http.Request) bool {
 	if host == "" {
 		host = strings.TrimSpace(r.Host)
 	}
-	return host != "" && strings.EqualFold(parsed.Host, host)
+	if sameHost(parsed.Host, host) {
+		return true
+	}
+	originHost := hostName(parsed.Host)
+	if isLoopbackHost(originHost) {
+		return true
+	}
+	return sameHost(originHost, r.RemoteAddr)
+}
+
+func sameHost(left string, right string) bool {
+	leftName := hostName(left)
+	rightName := hostName(right)
+	return leftName != "" && rightName != "" && strings.EqualFold(leftName, rightName)
+}
+
+func hostName(host string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	name, _, err := net.SplitHostPort(host)
+	if err == nil {
+		return strings.Trim(name, "[]")
+	}
+	return strings.Trim(host, "[]")
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (h *Handler) Events(c *echo.Context) error {
@@ -360,6 +395,7 @@ func buildMediaInfoResponse(info pcall.MediaInfo) MediaInfoResponse {
 		PayloadType:     info.PayloadType,
 		ClockRate:       info.ClockRate,
 		Channels:        info.Channels,
+		OctetAlign:      info.OctetAlign,
 		DTMFPayloadType: info.DTMFPayloadType,
 		DTMFClockRate:   info.DTMFClockRate,
 		PTimeMillis:     info.PTimeMillis,

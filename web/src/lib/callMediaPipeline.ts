@@ -1,8 +1,10 @@
 import type { CallMediaInfo } from '@/types/call'
 
 import {
+  buildAmrBandwidthEfficientPayload,
   buildAmrOctetAlignedPayload,
   buildRtpPacket,
+  parseAmrBandwidthEfficientPayload,
   parseAmrOctetAlignedPayload,
   parseRtpPacket,
   type AmrCodec,
@@ -16,7 +18,10 @@ export type PcmFrame = {
 
 export type AmrCodecAdapter = {
   decode(frame: AmrFrame): PcmFrame | Promise<PcmFrame>
-  encode(samples: Float32Array<ArrayBufferLike>, sampleRate: number): AmrFrame[] | Promise<AmrFrame[]>
+  encode(
+    samples: Float32Array<ArrayBufferLike>,
+    sampleRate: number,
+  ): AmrFrame[] | Promise<AmrFrame[]>
   close?: () => void | Promise<void>
 }
 
@@ -53,7 +58,11 @@ const normalizePipelineCodec = (value: string): PipelineCodec => {
   return normalizeAmrCodec(codec)
 }
 
-export const resampleMono = (input: Float32Array<ArrayBufferLike>, fromRate: number, toRate: number) => {
+export const resampleMono = (
+  input: Float32Array<ArrayBufferLike>,
+  fromRate: number,
+  toRate: number,
+) => {
   if (fromRate <= 0 || toRate <= 0) {
     throw new Error('sample rates must be positive')
   }
@@ -101,7 +110,9 @@ export class CallMediaPipeline {
     this.sendRtpPacket = options.sendRtpPacket
     this.samplesPerPacket = Math.max(
       1,
-      Math.round((options.media.clockRate * (options.media.ptimeMillis || defaultPTimeMillis)) / 1000),
+      Math.round(
+        (options.media.clockRate * (options.media.ptimeMillis || defaultPTimeMillis)) / 1000,
+      ),
     )
     this.sequenceNumber = options.initialSequenceNumber ?? random16()
     this.timestamp = options.initialTimestamp ?? random32()
@@ -122,7 +133,9 @@ export class CallMediaPipeline {
     if (!this.codec) {
       throw new Error(`${this.codecName} codec is not available`)
     }
-    const payload = parseAmrOctetAlignedPayload(this.codecName, rtp.payload)
+    const payload = this.media.octetAlign
+      ? parseAmrOctetAlignedPayload(this.codecName, rtp.payload)
+      : parseAmrBandwidthEfficientPayload(this.codecName, rtp.payload)
     for (const frame of payload.frames) {
       if (!frame.quality || frame.data.byteLength === 0) {
         continue
@@ -151,7 +164,9 @@ export class CallMediaPipeline {
         if (frames.length === 0) {
           continue
         }
-        payload = buildAmrOctetAlignedPayload(this.codecName, frames)
+        payload = this.media.octetAlign
+          ? buildAmrOctetAlignedPayload(this.codecName, frames)
+          : buildAmrBandwidthEfficientPayload(this.codecName, frames)
       }
       const packet = buildRtpPacket({
         payloadType: this.media.payloadType,
@@ -182,7 +197,7 @@ export class CallMediaPipeline {
 export const decodePCMU = (payload: Uint8Array<ArrayBufferLike>) => {
   const out = new Float32Array(payload.byteLength)
   for (let i = 0; i < payload.byteLength; i++) {
-    const value = (~payload[i]) & 0xff
+    const value = ~payload[i] & 0xff
     const sign = value & 0x80
     const exponent = (value >> 4) & 0x07
     const mantissa = value & 0x0f
@@ -208,12 +223,15 @@ export const encodePCMU = (samples: Float32Array<ArrayBufferLike>) => {
       exponent--
     }
     const mantissa = (sample >> (exponent + 3)) & 0x0f
-    out[i] = (~(sign | (exponent << 4) | mantissa)) & 0xff
+    out[i] = ~(sign | (exponent << 4) | mantissa) & 0xff
   }
   return out
 }
 
-const appendSamples = (left: Float32Array<ArrayBufferLike>, right: Float32Array<ArrayBufferLike>) => {
+const appendSamples = (
+  left: Float32Array<ArrayBufferLike>,
+  right: Float32Array<ArrayBufferLike>,
+) => {
   if (left.length === 0) {
     return right
   }

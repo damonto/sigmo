@@ -9,8 +9,10 @@ import {
   type PcmFrame,
 } from '@/lib/callMediaPipeline'
 import {
+  buildAmrBandwidthEfficientPayload,
   buildAmrOctetAlignedPayload,
   buildRtpPacket,
+  parseAmrBandwidthEfficientPayload,
   parseAmrOctetAlignedPayload,
   parseRtpPacket,
   type AmrFrame,
@@ -22,6 +24,7 @@ const media: CallMediaInfo = {
   payloadType: 102,
   clockRate: 8000,
   channels: 1,
+  octetAlign: true,
   dtmfPayloadType: 101,
   dtmfClockRate: 8000,
   ptimeMillis: 20,
@@ -31,6 +34,11 @@ const frame = (value: number): AmrFrame => ({
   frameType: 8,
   quality: true,
   data: new Uint8Array([value, value, value, value, value]),
+})
+
+const bandwidthEfficientFrame = (value: number): AmrFrame => ({
+  ...frame(value),
+  data: new Uint8Array([value, value, value, value, value & 0xfe]),
 })
 
 const codec = (decoded: PcmFrame = { samples: new Float32Array([0.1, 0.2]), sampleRate: 8000 }) => {
@@ -68,7 +76,10 @@ describe('call media pipeline', () => {
     await expect(pipeline.receiveRtpPacket(packet)).resolves.toBe(true)
 
     expect(adapter.decode).toHaveBeenCalledWith(frame(3))
-    expect(onRemotePcm).toHaveBeenCalledWith({ samples: new Float32Array([0.1, 0.2]), sampleRate: 8000 })
+    expect(onRemotePcm).toHaveBeenCalledWith({
+      samples: new Float32Array([0.1, 0.2]),
+      sampleRate: 8000,
+    })
   })
 
   it('ignores RTP packets for another payload type', async () => {
@@ -159,6 +170,48 @@ describe('call media pipeline', () => {
     expect(rtp.ssrc).toBe(55)
     expect(rtp.marker).toBe(true)
     expect(parseAmrOctetAlignedPayload('AMR', rtp.payload).frames).toEqual([frame(9)])
+  })
+
+  it('uses bandwidth-efficient AMR when negotiated', async () => {
+    const sent: Uint8Array<ArrayBuffer>[] = []
+    const adapter = codec()
+    const pipeline = new CallMediaPipeline({
+      media: { ...media, octetAlign: false },
+      codec: adapter,
+      onRemotePcm: vi.fn(),
+      sendRtpPacket: (packet) => {
+        sent.push(packet)
+        return true
+      },
+      initialSequenceNumber: 10,
+      initialTimestamp: 1000,
+      ssrc: 55,
+    })
+    const onRemotePcm = vi.fn()
+    const receiver = new CallMediaPipeline({
+      media: { ...media, octetAlign: false },
+      codec: adapter,
+      onRemotePcm,
+      sendRtpPacket: vi.fn(),
+    })
+    const payload = buildAmrBandwidthEfficientPayload('AMR', [frame(3)])
+    const packet = buildRtpPacket({
+      payloadType: media.payloadType,
+      sequenceNumber: 1,
+      timestamp: 2,
+      ssrc: 3,
+      marker: false,
+      payload,
+    })
+
+    await expect(receiver.receiveRtpPacket(packet)).resolves.toBe(true)
+    await expect(pipeline.sendPcm(new Float32Array(160), 8000)).resolves.toBe(1)
+
+    const rtp = parseRtpPacket(sent[0]!)
+    expect(parseAmrBandwidthEfficientPayload('AMR', rtp.payload).frames).toEqual([
+      bandwidthEfficientFrame(9),
+    ])
+    expect(onRemotePcm).toHaveBeenCalled()
   })
 
   it('decodes matching PCMU RTP packets into PCM frames', async () => {

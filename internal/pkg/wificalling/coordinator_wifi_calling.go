@@ -44,21 +44,28 @@ type coordinator struct {
 }
 
 type sessionState struct {
-	cancel    context.CancelFunc
-	done      <-chan struct{}
-	client    *imsclient.Client
-	ussd      *imsclient.Session
-	calls     map[string]*voiceCallState
-	modemPath dbus.ObjectPath
-	profileID string
-	connected bool
-	websheet  *websheet.Session
+	cancel      context.CancelFunc
+	done        <-chan struct{}
+	client      *imsclient.Client
+	ussd        *imsclient.Session
+	calls       map[string]*voiceCallState
+	pendingDial *pendingVoiceDial
+	modemPath   dbus.ObjectPath
+	profileID   string
+	connected   bool
+	websheet    *websheet.Session
 }
 
 type voiceCallState struct {
 	call      *imscall.Call
 	info      VoiceCall
 	updatedAt time.Time
+}
+
+type pendingVoiceDial struct {
+	profileID string
+	number    string
+	startedAt time.Time
 }
 
 var retryDelays = []time.Duration{
@@ -247,6 +254,8 @@ func (c *coordinator) DialCall(ctx context.Context, modem *mmodem.Modem, to stri
 	if err != nil {
 		return VoiceCall{}, err
 	}
+	pending := c.setPendingVoiceDial(modem.EquipmentIdentifier, profileID, to)
+	defer c.clearPendingVoiceDial(modem.EquipmentIdentifier, pending)
 	call, err := client.Voice().Dial(ctx, imscall.Request{To: to, Media: browserVoiceMediaOffer()})
 	if err != nil {
 		err = normalizeVoiceError(err)
@@ -393,7 +402,7 @@ func (c *coordinator) OpenCallMedia(ctx context.Context, modem *mmodem.Modem, ca
 }
 
 func isSupportedCallMediaCodec(codec imscall.AudioCodec) bool {
-	return codec == imscall.CodecAMR || codec == imscall.CodecAMRWB || codec == imscall.CodecPCMU
+	return codec == imscall.CodecAMR || codec == imscall.CodecPCMU
 }
 
 func (c *coordinator) SubscribeVoiceEvents(fn VoiceEventFunc) func() {
@@ -430,6 +439,7 @@ func (s callMediaSession) Info() MediaInfo {
 		PayloadType:     s.media.PayloadType,
 		ClockRate:       s.media.ClockRate,
 		Channels:        s.media.Channels,
+		OctetAlign:      s.media.OctetAlign,
 		DTMFPayloadType: s.media.DTMFPayloadType,
 		DTMFClockRate:   s.media.DTMFClockRate,
 		PTimeMillis:     int(s.media.PTime / time.Millisecond),
@@ -480,8 +490,57 @@ func (c *coordinator) storeVoiceCall(modemID string, profileID string, call *ims
 		StartedAt: now,
 		UpdatedAt: now,
 	}
+	if existing := c.voiceCallInfo(modemID, call.ID()); existing.ID != "" {
+		info.StartedAt = existing.StartedAt
+		if info.StartedAt.IsZero() {
+			info.StartedAt = now
+		}
+		if !existing.AnsweredAt.IsZero() {
+			info.AnsweredAt = existing.AnsweredAt
+		}
+	}
 	c.updateVoiceCallWithPointer(modemID, call.ID(), call, info)
 	return info
+}
+
+func (c *coordinator) voiceCallInfo(modemID string, callID string) VoiceCall {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	session := c.sessions[modemID]
+	if session == nil || session.calls == nil {
+		return VoiceCall{}
+	}
+	state := session.calls[callID]
+	if state == nil {
+		return VoiceCall{}
+	}
+	return state.info
+}
+
+func (c *coordinator) setPendingVoiceDial(modemID string, profileID string, number string) pendingVoiceDial {
+	pending := pendingVoiceDial{
+		profileID: profileID,
+		number:    strings.TrimSpace(number),
+		startedAt: time.Now(),
+	}
+	c.mu.Lock()
+	if session := c.sessions[modemID]; session != nil {
+		session.pendingDial = &pending
+	}
+	c.mu.Unlock()
+	return pending
+}
+
+func (c *coordinator) clearPendingVoiceDial(modemID string, pending pendingVoiceDial) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	session := c.sessions[modemID]
+	if session == nil || session.pendingDial == nil {
+		return
+	}
+	if *session.pendingDial == pending {
+		session.pendingDial = nil
+	}
 }
 
 func (c *coordinator) updateVoiceCall(modemID string, callID string, info VoiceCall) {
@@ -830,7 +889,7 @@ func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string,
 	if incoming.Call == nil {
 		return
 	}
-	info := c.storeVoiceCall(modem.EquipmentIdentifier, profileID, incoming.Call, incoming.From, string(incoming.Call.Direction()), string(incoming.Call.State()), "")
+	info := c.storeVoiceCall(modem.EquipmentIdentifier, profileID, incoming.Call, incoming.FromNumber, string(incoming.Call.Direction()), string(incoming.Call.State()), "")
 	if !incoming.ReceivedAt.IsZero() {
 		info.StartedAt = incoming.ReceivedAt
 		info.UpdatedAt = incoming.ReceivedAt
@@ -844,7 +903,20 @@ func (c *coordinator) forwardCallEvent(modemID string, event imsclient.CallEvent
 	session := c.sessions[modemID]
 	var info VoiceCall
 	if session != nil && session.calls != nil {
-		if state := session.calls[event.CallID]; state != nil {
+		state := session.calls[event.CallID]
+		if state == nil && session.pendingDial != nil {
+			info = VoiceCall{
+				ID:        event.CallID,
+				ModemID:   modemID,
+				ProfileID: session.pendingDial.profileID,
+				Direction: string(imscall.DirectionOutgoing),
+				Number:    session.pendingDial.number,
+				StartedAt: session.pendingDial.startedAt,
+			}
+			state = &voiceCallState{info: info, updatedAt: info.StartedAt}
+			session.calls[event.CallID] = state
+		}
+		if state != nil {
 			info = state.info
 			info.State = string(event.State)
 			info.Reason = event.Cause

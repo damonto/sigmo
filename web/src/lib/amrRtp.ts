@@ -19,6 +19,8 @@ const rtpHeaderSize = 12
 const rtpVersion = 2
 const noModeRequest = 15
 
+const amrFrameBits = [95, 103, 118, 134, 148, 159, 204, 244, 39]
+const amrWbFrameBits = [132, 177, 253, 285, 317, 365, 397, 461, 477, 40]
 const amrFrameBytes = [12, 13, 15, 17, 19, 20, 26, 31, 5]
 const amrWbFrameBytes = [17, 23, 32, 36, 40, 46, 50, 58, 60, 5]
 
@@ -41,6 +43,16 @@ const frameBytes = (codec: AmrCodec, frameType: number) => {
   return table[frameType] ?? -1
 }
 
+const frameBits = (codec: AmrCodec, frameType: number) => {
+  if (frameType === 15 || (codec === 'AMR-WB' && frameType === 14)) {
+    return 0
+  }
+  const table = codec === 'AMR-WB' ? amrWbFrameBits : amrFrameBits
+  return table[frameType] ?? -1
+}
+
+const bytesForBits = (bits: number) => Math.ceil(bits / 8)
+
 export const parseRtpPacket = (packet: ArrayBuffer | Uint8Array<ArrayBuffer>): RtpPacket => {
   const data = toUint8(packet)
   if (data.byteLength < rtpHeaderSize) {
@@ -62,7 +74,10 @@ export const parseRtpPacket = (packet: ArrayBuffer | Uint8Array<ArrayBuffer>): R
   const timestamp =
     byteAt(data, 4) * 0x1000000 + (byteAt(data, 5) << 16) + (byteAt(data, 6) << 8) + byteAt(data, 7)
   const ssrc =
-    byteAt(data, 8) * 0x1000000 + (byteAt(data, 9) << 16) + (byteAt(data, 10) << 8) + byteAt(data, 11)
+    byteAt(data, 8) * 0x1000000 +
+    (byteAt(data, 9) << 16) +
+    (byteAt(data, 10) << 8) +
+    byteAt(data, 11)
 
   let offset = rtpHeaderSize + csrcCount * 4
   if (offset > data.byteLength) {
@@ -98,7 +113,9 @@ export const parseRtpPacket = (packet: ArrayBuffer | Uint8Array<ArrayBuffer>): R
   }
 }
 
-export const buildRtpPacket = (packet: Omit<RtpPacket, 'payload'> & { payload: Uint8Array<ArrayBuffer> }) => {
+export const buildRtpPacket = (
+  packet: Omit<RtpPacket, 'payload'> & { payload: Uint8Array<ArrayBuffer> },
+) => {
   const out = new Uint8Array(rtpHeaderSize + packet.payload.byteLength)
   out[0] = rtpVersion << 6
   out[1] = packet.payloadType & 0x7f
@@ -191,4 +208,121 @@ export const buildAmrOctetAlignedPayload = (
     offset += frame.data.byteLength
   }
   return out
+}
+
+export const parseAmrBandwidthEfficientPayload = (
+  codec: AmrCodec,
+  payload: Uint8Array<ArrayBuffer>,
+) => {
+  const reader = new BitReader(payload)
+  const cmr = reader.readBits(4)
+  const frames: AmrFrame[] = []
+  let hasMore = true
+  while (hasMore) {
+    const f = reader.readBits(1)
+    const frameType = reader.readBits(4)
+    const quality = reader.readBits(1) !== 0
+    const bits = frameBits(codec, frameType)
+    if (bits < 0) {
+      throw new Error('amr frame type is not supported')
+    }
+    frames.push({ frameType, quality, data: new Uint8Array(bytesForBits(bits)) })
+    hasMore = f !== 0
+  }
+  for (const frame of frames) {
+    const bits = frameBits(codec, frame.frameType)
+    frame.data.set(reader.readBytes(bits))
+  }
+  return { cmr, frames }
+}
+
+export const buildAmrBandwidthEfficientPayload = (
+  codec: AmrCodec,
+  frames: AmrFrame[],
+  cmr = noModeRequest,
+) => {
+  if (frames.length === 0) {
+    throw new Error('amr payload requires at least one frame')
+  }
+  const writer = new BitWriter()
+  writer.writeBits(cmr & 0x0f, 4)
+  for (const [index, frame] of frames.entries()) {
+    const bits = frameBits(codec, frame.frameType)
+    if (bits < 0) {
+      throw new Error('amr frame type is not supported')
+    }
+    if (frame.data.byteLength !== bytesForBits(bits)) {
+      throw new Error('amr frame size does not match frame type')
+    }
+    writer.writeBits(index < frames.length - 1 ? 1 : 0, 1)
+    writer.writeBits(frame.frameType & 0x0f, 4)
+    writer.writeBits(frame.quality ? 1 : 0, 1)
+  }
+  for (const frame of frames) {
+    writer.writeBytes(frame.data, frameBits(codec, frame.frameType))
+  }
+  return writer.bytes()
+}
+
+class BitReader {
+  private position = 0
+
+  constructor(private readonly data: Uint8Array<ArrayBuffer>) {}
+
+  readBits(count: number) {
+    if (count < 0 || this.position + count > this.data.byteLength * 8) {
+      throw new Error('amr payload is truncated')
+    }
+    let value = 0
+    for (let i = 0; i < count; i++) {
+      const byteIndex = Math.floor(this.position / 8)
+      const bitIndex = 7 - (this.position % 8)
+      value = (value << 1) | ((byteAt(this.data, byteIndex) >> bitIndex) & 1)
+      this.position += 1
+    }
+    return value
+  }
+
+  readBytes(bits: number) {
+    const out = new Uint8Array(bytesForBits(bits))
+    for (let i = 0; i < bits; i++) {
+      if (this.readBits(1) !== 0) {
+        out[Math.floor(i / 8)] |= 1 << (7 - (i % 8))
+      }
+    }
+    return out
+  }
+}
+
+class BitWriter {
+  private readonly data: number[] = []
+  private position = 0
+
+  writeBits(value: number, count: number) {
+    for (let i = count - 1; i >= 0; i--) {
+      this.writeBit(((value >> i) & 1) !== 0)
+    }
+  }
+
+  writeBytes(bytes: Uint8Array<ArrayBuffer>, bits: number) {
+    for (let i = 0; i < bits; i++) {
+      const bit = (byteAt(bytes, Math.floor(i / 8)) & (1 << (7 - (i % 8)))) !== 0
+      this.writeBit(bit)
+    }
+  }
+
+  bytes() {
+    return new Uint8Array(this.data)
+  }
+
+  private writeBit(value: boolean) {
+    const byteIndex = Math.floor(this.position / 8)
+    if (this.data[byteIndex] === undefined) {
+      this.data[byteIndex] = 0
+    }
+    if (value) {
+      this.data[byteIndex] |= 1 << (7 - (this.position % 8))
+    }
+    this.position += 1
+  }
 }

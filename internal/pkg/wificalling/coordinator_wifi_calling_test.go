@@ -216,6 +216,70 @@ func TestInitialDialedVoiceCallState(t *testing.T) {
 	}
 }
 
+func TestForwardCallEventCreatesPendingOutgoingCall(t *testing.T) {
+	tests := []struct {
+		name  string
+		event imsclient.CallEvent
+	}{
+		{
+			name: "dial event before DialCall returns",
+			event: imsclient.CallEvent{
+				CallID: "call-1",
+				State:  imscall.StateDialing,
+				Cause:  "early dialog terminated",
+				At:     time.Date(2026, 5, 28, 1, 21, 0, 0, time.UTC),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &coordinator{
+				sessions: map[string]*sessionState{
+					"modem-1": {
+						profileID: "profile-1",
+						calls:     make(map[string]*voiceCallState),
+					},
+				},
+				voiceSubscribers: make(map[uint64]VoiceEventFunc),
+			}
+			pending := c.setPendingVoiceDial("modem-1", "profile-1", " +12242255559 ")
+			var events []VoiceEvent
+			unsubscribe := c.SubscribeVoiceEvents(func(event VoiceEvent) {
+				events = append(events, event)
+			})
+			defer unsubscribe()
+
+			c.forwardCallEvent("modem-1", tt.event)
+
+			state := c.sessions["modem-1"].calls[tt.event.CallID]
+			if state == nil {
+				t.Fatal("pending outgoing call was not stored")
+			}
+			call := state.info
+			if call.ModemID != "modem-1" || call.ProfileID != "profile-1" || call.ID != tt.event.CallID {
+				t.Fatalf("call identity = %+v, want modem/profile/call id", call)
+			}
+			if call.Direction != string(imscall.DirectionOutgoing) || call.Number != "+12242255559" {
+				t.Fatalf("call route = direction %q number %q, want outgoing trimmed number", call.Direction, call.Number)
+			}
+			if call.State != string(tt.event.State) || call.Reason != tt.event.Cause {
+				t.Fatalf("call state = %q/%q, want %q/%q", call.State, call.Reason, tt.event.State, tt.event.Cause)
+			}
+			if call.StartedAt.IsZero() || !call.UpdatedAt.Equal(tt.event.At) {
+				t.Fatalf("call times = started %v updated %v, want started set and updated %v", call.StartedAt, call.UpdatedAt, tt.event.At)
+			}
+			if len(events) != 1 || events[0].Call.ID != tt.event.CallID {
+				t.Fatalf("events = %+v, want one pending call event", events)
+			}
+
+			c.clearPendingVoiceDial("modem-1", pending)
+			if got := c.sessions["modem-1"].pendingDial; got != nil {
+				t.Fatalf("pendingDial = %+v, want nil", got)
+			}
+		})
+	}
+}
+
 func TestBrowserVoiceMediaOfferUsesFullDuplexCodec(t *testing.T) {
 	tests := []struct {
 		name string
@@ -273,7 +337,7 @@ func TestIsSupportedCallMediaCodec(t *testing.T) {
 		want  bool
 	}{
 		{name: "amr", codec: imscall.CodecAMR, want: true},
-		{name: "amr wb", codec: imscall.CodecAMRWB, want: true},
+		{name: "amr wb", codec: imscall.CodecAMRWB, want: false},
 		{name: "pcmu", codec: imscall.CodecPCMU, want: true},
 		{name: "evs", codec: imscall.CodecEVS, want: false},
 		{name: "telephone event", codec: imscall.CodecTelephoneEvent, want: false},
@@ -285,6 +349,29 @@ func TestIsSupportedCallMediaCodec(t *testing.T) {
 				t.Fatalf("isSupportedCallMediaCodec(%q) = %v, want %v", tt.codec, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCallMediaSessionInfoIncludesPayloadFormat(t *testing.T) {
+	session := callMediaSession{
+		media: imscall.NegotiatedMedia{
+			Codec:           imscall.CodecAMR,
+			PayloadType:     102,
+			ClockRate:       8000,
+			Channels:        1,
+			OctetAlign:      false,
+			DTMFPayloadType: 101,
+			DTMFClockRate:   8000,
+			PTime:           20 * time.Millisecond,
+		},
+	}
+
+	info := session.Info()
+	if info.Codec != string(imscall.CodecAMR) || info.PayloadType != 102 || info.ClockRate != 8000 {
+		t.Fatalf("Info() = %+v, want AMR payload 102 clock 8000", info)
+	}
+	if info.OctetAlign {
+		t.Fatal("Info().OctetAlign = true, want false for bandwidth-efficient AMR")
 	}
 }
 

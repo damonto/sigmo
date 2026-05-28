@@ -67,6 +67,7 @@ type MediaInfo struct {
 	PayloadType     int
 	ClockRate       int
 	Channels        int
+	OctetAlign      bool
 	DTMFPayloadType int
 	DTMFClockRate   int
 	PTimeMillis     int
@@ -319,6 +320,7 @@ func (s wifiCallingMediaSession) Info() MediaInfo {
 		PayloadType:     info.PayloadType,
 		ClockRate:       info.ClockRate,
 		Channels:        info.Channels,
+		OctetAlign:      info.OctetAlign,
 		DTMFPayloadType: info.DTMFPayloadType,
 		DTMFClockRate:   info.DTMFClockRate,
 		PTimeMillis:     info.PTimeMillis,

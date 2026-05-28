@@ -1,7 +1,14 @@
 export type CallRoute = 'auto' | 'wifi_calling' | 'modem'
 export type StoredCallRoute = Exclude<CallRoute, 'auto'>
 export type CallDirection = 'incoming' | 'outgoing'
-export type CallState = 'dialing' | 'ringing' | 'answering' | 'active' | 'ending' | 'ended' | 'failed'
+export type CallState =
+  | 'dialing'
+  | 'ringing'
+  | 'answering'
+  | 'active'
+  | 'ending'
+  | 'ended'
+  | 'failed'
 
 export type CallRecord = {
   callID: string
@@ -36,6 +43,7 @@ export type CallMediaInfo = {
   payloadType: number
   clockRate: number
   channels: number
+  octetAlign: boolean
   dtmfPayloadType: number
   dtmfClockRate: number
   ptimeMillis: number

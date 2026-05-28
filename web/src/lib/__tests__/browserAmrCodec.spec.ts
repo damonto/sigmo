@@ -8,6 +8,7 @@ const media = (codec: string): CallMediaInfo => ({
   payloadType: codec === 'AMR' ? 102 : 104,
   clockRate: codec === 'AMR' ? 8000 : 16000,
   channels: 1,
+  octetAlign: true,
   dtmfPayloadType: 101,
   dtmfClockRate: 8000,
   ptimeMillis: 20,
@@ -32,6 +33,8 @@ describe('browser AMR codec loader', () => {
 
   it('rejects codecs that the built-in adapter cannot encode', async () => {
     expect(hasBrowserAmrCodec()).toBe(true)
-    await expect(createBrowserAmrCodec(media('AMR-WB'))).rejects.toThrow('AMR-WB codec is not available')
+    await expect(createBrowserAmrCodec(media('AMR-WB'))).rejects.toThrow(
+      'AMR-WB codec is not available',
+    )
   })
 })

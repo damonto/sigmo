@@ -99,13 +99,17 @@ func TestCallMediaErrorMapsExpectedFailures(t *testing.T) {
 
 func TestSameOrigin(t *testing.T) {
 	tests := []struct {
-		name   string
-		host   string
-		origin string
-		want   bool
+		name       string
+		host       string
+		origin     string
+		remoteAddr string
+		want       bool
 	}{
 		{name: "non browser client", host: "sigmo.local", want: true},
 		{name: "same host", host: "sigmo.local", origin: "http://sigmo.local", want: true},
+		{name: "same host different port", host: "10.10.10.101:9527", origin: "http://10.10.10.101:5173", want: true},
+		{name: "loopback dev origin", host: "10.10.10.101:9527", origin: "http://localhost:5173", want: true},
+		{name: "remote dev origin", host: "10.10.10.101:9527", origin: "http://10.10.10.200:5173", remoteAddr: "10.10.10.200:60123", want: true},
 		{name: "same forwarded host", host: "127.0.0.1:8080", origin: "https://sigmo.example", want: true},
 		{name: "different host", host: "sigmo.local", origin: "https://evil.example", want: false},
 		{name: "invalid origin", host: "sigmo.local", origin: "://bad", want: false},
@@ -115,6 +119,7 @@ func TestSameOrigin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/modems/test/calls/events", nil)
 			req.Host = tt.host
+			req.RemoteAddr = tt.remoteAddr
 			if tt.origin != "" {
 				req.Header.Set("Origin", tt.origin)
 			}
@@ -149,6 +154,26 @@ func TestBuildCallResponseFormatsUnsetTimesAsEmptyStrings(t *testing.T) {
 	}
 	if response.AnsweredAt != "" || response.EndedAt != "" {
 		t.Fatalf("unset times = answered %q ended %q, want empty strings", response.AnsweredAt, response.EndedAt)
+	}
+}
+
+func TestBuildMediaInfoResponseIncludesPayloadFormat(t *testing.T) {
+	response := buildMediaInfoResponse(pcall.MediaInfo{
+		Codec:           "AMR-WB",
+		PayloadType:     104,
+		ClockRate:       16000,
+		Channels:        1,
+		OctetAlign:      false,
+		DTMFPayloadType: 101,
+		DTMFClockRate:   8000,
+		PTimeMillis:     20,
+	})
+
+	if response.Codec != "AMR-WB" || response.PayloadType != 104 || response.ClockRate != 16000 {
+		t.Fatalf("media response = %+v, want AMR-WB payload 104 clock 16000", response)
+	}
+	if response.OctetAlign {
+		t.Fatal("OctetAlign = true, want false for bandwidth-efficient AMR")
 	}
 }
 
