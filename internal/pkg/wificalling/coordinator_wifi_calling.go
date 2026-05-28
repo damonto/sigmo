@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/damonto/ims-client/driver/at"
 	"github.com/damonto/ims-client/driver/mbim"
 	"github.com/damonto/ims-client/driver/qmi"
+	imscall "github.com/damonto/ims-client/ims/call"
 	usimreader "github.com/damonto/ims-client/usim/reader"
 	"github.com/godbus/dbus/v5"
 
@@ -37,18 +37,28 @@ type coordinator struct {
 	onIncoming IncomingSMSFunc
 	websheets  *websheet.Broker
 
-	mu       sync.Mutex
-	sessions map[string]*sessionState
+	mu               sync.Mutex
+	sessions         map[string]*sessionState
+	voiceSubscribers map[uint64]VoiceEventFunc
+	nextVoiceSubID   uint64
 }
 
 type sessionState struct {
 	cancel    context.CancelFunc
+	done      <-chan struct{}
 	client    *imsclient.Client
 	ussd      *imsclient.Session
+	calls     map[string]*voiceCallState
 	modemPath dbus.ObjectPath
 	profileID string
 	connected bool
 	websheet  *websheet.Session
+}
+
+type voiceCallState struct {
+	call      *imscall.Call
+	info      VoiceCall
+	updatedAt time.Time
 }
 
 var retryDelays = []time.Duration{
@@ -62,10 +72,11 @@ var retryDelays = []time.Duration{
 
 func New(cfg Config) Coordinator {
 	return &coordinator{
-		settings:   NewSettingsStore(cfg.Store),
-		onIncoming: cfg.OnIncoming,
-		websheets:  cfg.Websheets,
-		sessions:   make(map[string]*sessionState),
+		settings:         NewSettingsStore(cfg.Store),
+		onIncoming:       cfg.OnIncoming,
+		websheets:        cfg.Websheets,
+		sessions:         make(map[string]*sessionState),
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
 	}
 }
 
@@ -227,6 +238,291 @@ func (c *coordinator) ExecuteUSSD(ctx context.Context, modem *mmodem.Modem, acti
 	}
 }
 
+func (c *coordinator) DialCall(ctx context.Context, modem *mmodem.Modem, to string) (VoiceCall, error) {
+	profileID, err := modem.ProfileID(ctx)
+	if err != nil {
+		return VoiceCall{}, err
+	}
+	client, err := c.connectedClient(modem.EquipmentIdentifier, profileID)
+	if err != nil {
+		return VoiceCall{}, err
+	}
+	call, err := client.Voice().Dial(ctx, imscall.Request{To: to, Media: browserVoiceMediaOffer()})
+	if err != nil {
+		err = normalizeVoiceError(err)
+		if errors.Is(err, ErrNotConnected) {
+			return VoiceCall{}, err
+		}
+		return failedOutgoingVoiceCall(modem.EquipmentIdentifier, profileID, to, err), err
+	}
+	info := c.storeVoiceCall(modem.EquipmentIdentifier, profileID, call, strings.TrimSpace(to), string(call.Direction()), string(call.State()), "")
+	info = initialDialedVoiceCallState(info, call.State())
+	if !info.AnsweredAt.IsZero() {
+		c.updateVoiceCall(modem.EquipmentIdentifier, info.ID, info)
+	}
+	c.publishVoiceEvent(info)
+	return info, nil
+}
+
+func initialDialedVoiceCallState(info VoiceCall, state imscall.State) VoiceCall {
+	if state == imscall.StateActive && info.AnsweredAt.IsZero() {
+		info.AnsweredAt = info.UpdatedAt
+	}
+	return info
+}
+
+func failedOutgoingVoiceCall(modemID string, profileID string, to string, err error) VoiceCall {
+	return failedOutgoingVoiceCallAt(modemID, profileID, to, err, time.Now())
+}
+
+func failedOutgoingVoiceCallAt(modemID string, profileID string, to string, err error, at time.Time) VoiceCall {
+	number := strings.TrimSpace(to)
+	reason := ""
+	if err != nil {
+		reason = err.Error()
+	}
+	return VoiceCall{
+		ID:        failedVoiceCallID(modemID, profileID, number, at),
+		ModemID:   modemID,
+		ProfileID: profileID,
+		Direction: string(imscall.DirectionOutgoing),
+		Number:    number,
+		State:     string(imscall.StateFailed),
+		Reason:    reason,
+		StartedAt: at,
+		EndedAt:   at,
+		UpdatedAt: at,
+	}
+}
+
+func failedVoiceCallID(modemID string, profileID string, number string, at time.Time) string {
+	sum := sha256.Sum256([]byte(modemID + "\x00" + profileID + "\x00" + number + "\x00" + at.UTC().Format(time.RFC3339Nano)))
+	return "failed:" + hex.EncodeToString(sum[:12])
+}
+
+func browserVoiceMediaOffer() imscall.MediaOffer {
+	return imscall.MediaOffer{
+		Codecs: []imscall.AudioCodec{imscall.CodecAMR, imscall.CodecPCMU},
+	}
+}
+
+func browserVoiceConfig() imscall.Config {
+	return imscall.Config{
+		Codecs: []imscall.AudioCodecConfig{
+			{
+				Name:         imscall.CodecAMR,
+				PayloadTypes: []int{102},
+				ClockRate:    8000,
+				ModeSet:      "0,2,4,7",
+			},
+			{
+				Name:         imscall.CodecTelephoneEvent,
+				PayloadTypes: []int{101},
+				ClockRate:    8000,
+			},
+			{
+				Name:         imscall.CodecPCMU,
+				PayloadTypes: []int{0},
+				ClockRate:    8000,
+			},
+		},
+		PTime:    20 * time.Millisecond,
+		MaxPTime: 240 * time.Millisecond,
+	}
+}
+
+func (c *coordinator) AnswerCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
+	call, info, err := c.lookupVoiceCall(ctx, modem, callID)
+	if err != nil {
+		return VoiceCall{}, err
+	}
+	if err := call.Answer(ctx, browserVoiceMediaOffer()); err != nil {
+		return VoiceCall{}, normalizeVoiceError(err)
+	}
+	info.State = string(call.State())
+	info.AnsweredAt = time.Now()
+	info.UpdatedAt = info.AnsweredAt
+	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
+	c.publishVoiceEvent(info)
+	return info, nil
+}
+
+func (c *coordinator) RejectCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
+	call, info, err := c.lookupVoiceCall(ctx, modem, callID)
+	if err != nil {
+		return VoiceCall{}, err
+	}
+	if err := call.Reject(ctx, 486, "Busy Here"); err != nil {
+		return VoiceCall{}, normalizeVoiceError(err)
+	}
+	info.State = string(call.State())
+	info.Reason = "Busy Here"
+	info.EndedAt = time.Now()
+	info.UpdatedAt = info.EndedAt
+	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
+	c.publishVoiceEvent(info)
+	return info, nil
+}
+
+func (c *coordinator) HangupCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
+	call, info, err := c.lookupVoiceCall(ctx, modem, callID)
+	if err != nil {
+		return VoiceCall{}, err
+	}
+	if err := call.Hangup(ctx); err != nil {
+		return VoiceCall{}, normalizeVoiceError(err)
+	}
+	info.State = string(call.State())
+	info.EndedAt = time.Now()
+	info.UpdatedAt = info.EndedAt
+	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
+	c.publishVoiceEvent(info)
+	return info, nil
+}
+
+func (c *coordinator) OpenCallMedia(ctx context.Context, modem *mmodem.Modem, callID string) (MediaSession, error) {
+	call, _, err := c.lookupVoiceCall(ctx, modem, callID)
+	if err != nil {
+		return nil, err
+	}
+	media := call.Media()
+	if !isSupportedCallMediaCodec(media.Codec) {
+		return nil, ErrUnsupportedCodec
+	}
+	return callMediaSession{call: call, media: media}, nil
+}
+
+func isSupportedCallMediaCodec(codec imscall.AudioCodec) bool {
+	return codec == imscall.CodecAMR || codec == imscall.CodecAMRWB || codec == imscall.CodecPCMU
+}
+
+func (c *coordinator) SubscribeVoiceEvents(fn VoiceEventFunc) func() {
+	if fn == nil {
+		return func() {}
+	}
+	c.mu.Lock()
+	c.nextVoiceSubID++
+	id := c.nextVoiceSubID
+	c.voiceSubscribers[id] = fn
+	c.mu.Unlock()
+	return func() {
+		c.mu.Lock()
+		delete(c.voiceSubscribers, id)
+		c.mu.Unlock()
+	}
+}
+
+func normalizeVoiceError(err error) error {
+	if errors.Is(err, imsclient.ErrClientNotConnected) {
+		return ErrNotConnected
+	}
+	return err
+}
+
+type callMediaSession struct {
+	call  *imscall.Call
+	media imscall.NegotiatedMedia
+}
+
+func (s callMediaSession) Info() MediaInfo {
+	return MediaInfo{
+		Codec:           string(s.media.Codec),
+		PayloadType:     s.media.PayloadType,
+		ClockRate:       s.media.ClockRate,
+		Channels:        s.media.Channels,
+		DTMFPayloadType: s.media.DTMFPayloadType,
+		DTMFClockRate:   s.media.DTMFClockRate,
+		PTimeMillis:     int(s.media.PTime / time.Millisecond),
+	}
+}
+
+func (s callMediaSession) ReadPacket(ctx context.Context) ([]byte, error) {
+	packet, _, err := s.call.ReadRTP(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return packet, nil
+}
+
+func (s callMediaSession) WritePacket(ctx context.Context, packet []byte) error {
+	return s.call.WriteRTP(ctx, packet)
+}
+
+func (c *coordinator) lookupVoiceCall(ctx context.Context, modem *mmodem.Modem, callID string) (*imscall.Call, VoiceCall, error) {
+	profileID, err := modem.ProfileID(ctx)
+	if err != nil {
+		return nil, VoiceCall{}, err
+	}
+	callID = strings.TrimSpace(callID)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	session := c.sessions[modem.EquipmentIdentifier]
+	if session == nil || session.profileID != profileID || session.calls == nil {
+		return nil, VoiceCall{}, ErrNotConnected
+	}
+	state := session.calls[callID]
+	if state == nil || state.call == nil {
+		return nil, VoiceCall{}, ErrUnavailable
+	}
+	return state.call, state.info, nil
+}
+
+func (c *coordinator) storeVoiceCall(modemID string, profileID string, call *imscall.Call, number string, direction string, state string, reason string) VoiceCall {
+	now := time.Now()
+	info := VoiceCall{
+		ID:        call.ID(),
+		ModemID:   modemID,
+		ProfileID: profileID,
+		Direction: direction,
+		Number:    number,
+		State:     state,
+		Reason:    reason,
+		StartedAt: now,
+		UpdatedAt: now,
+	}
+	c.updateVoiceCallWithPointer(modemID, call.ID(), call, info)
+	return info
+}
+
+func (c *coordinator) updateVoiceCall(modemID string, callID string, info VoiceCall) {
+	c.updateVoiceCallWithPointer(modemID, callID, nil, info)
+}
+
+func (c *coordinator) updateVoiceCallWithPointer(modemID string, callID string, call *imscall.Call, info VoiceCall) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	session := c.sessions[modemID]
+	if session == nil {
+		return
+	}
+	if session.calls == nil {
+		session.calls = make(map[string]*voiceCallState)
+	}
+	state := session.calls[callID]
+	if state == nil {
+		state = &voiceCallState{}
+		session.calls[callID] = state
+	}
+	if call != nil {
+		state.call = call
+	}
+	state.info = info
+	state.updatedAt = info.UpdatedAt
+}
+
+func (c *coordinator) publishVoiceEvent(call VoiceCall) {
+	c.mu.Lock()
+	subscribers := make([]VoiceEventFunc, 0, len(c.voiceSubscribers))
+	for _, fn := range c.voiceSubscribers {
+		subscribers = append(subscribers, fn)
+	}
+	c.mu.Unlock()
+	event := VoiceEvent{Call: call}
+	for _, fn := range subscribers {
+		fn(event)
+	}
+}
+
 func (c *coordinator) ussdSession(modemID string) (*imsclient.Session, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -289,9 +585,19 @@ func (c *coordinator) start(modem *mmodem.Modem, profileID string) {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	c.sessions[modemID] = &sessionState{cancel: cancel, modemPath: modem.Path(), profileID: profileID}
+	done := make(chan struct{})
+	c.sessions[modemID] = &sessionState{
+		cancel:    cancel,
+		done:      done,
+		modemPath: modem.Path(),
+		profileID: profileID,
+		calls:     make(map[string]*voiceCallState),
+	}
 	c.mu.Unlock()
-	go c.connectLoop(ctx, modem, profileID)
+	go func() {
+		defer close(done)
+		c.connectLoop(ctx, modem, profileID)
+	}()
 }
 
 func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, profileID string) {
@@ -310,7 +616,7 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 			if err := c.waitForWebsheet(ctx, modem.EquipmentIdentifier); err != nil {
 				if errors.Is(err, ErrWebsheetDismissed) {
 					slog.Info("Wi-Fi Calling carrier websheet dismissed", "modem", modem.EquipmentIdentifier)
-					c.stop(modem.EquipmentIdentifier)
+					c.stopAsync(modem.EquipmentIdentifier)
 				}
 				return
 			}
@@ -337,6 +643,9 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem) (*im
 	client, err := imsclient.New(reader, &imsclient.Config{
 		IMEI:   modem.EquipmentIdentifier,
 		Logger: slog.Default(),
+		IMS: imsclient.IMSConfig{
+			Voice: browserVoiceConfig(),
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -363,8 +672,10 @@ func (c *coordinator) wfcWebsheetRequest(err error) (websheet.Request, bool) {
 	var nsdsErr *imsclient.NSDSWFCEntitlementError
 	if errors.As(err, &nsdsErr) {
 		return websheet.Request{
-			URL:   wfcUserActionURL(nsdsErr.Websheet.URL, nsdsErr.Websheet.Data),
-			Title: firstNonEmpty(nsdsErr.Websheet.Title, "Wi-Fi Calling"),
+			URL:         strings.TrimSpace(nsdsErr.Websheet.URL),
+			UserData:    wfcUserActionData(nsdsErr.Websheet.Data),
+			ContentType: "application/x-www-form-urlencoded",
+			Title:       firstNonEmpty(nsdsErr.Websheet.Title, "Wi-Fi Calling"),
 		}, true
 	}
 	var ts43Err *imsclient.WFCEntitlementError
@@ -375,39 +686,6 @@ func (c *coordinator) wfcWebsheetRequest(err error) (websheet.Request, bool) {
 		}, true
 	}
 	return websheet.Request{}, false
-}
-
-func wfcUserActionURL(rawURL, rawData string) string {
-	rawURL = strings.TrimSpace(rawURL)
-	rawData = strings.TrimSpace(rawData)
-	if rawURL == "" || rawData == "" {
-		return rawURL
-	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return appendRawQuery(rawURL, rawData)
-	}
-	data := strings.TrimLeft(rawData, "?&")
-	values, err := url.ParseQuery(data)
-	if err != nil {
-		return appendRawQuery(rawURL, data)
-	}
-	query := parsed.Query()
-	for key, items := range values {
-		for _, item := range items {
-			query.Add(key, item)
-		}
-	}
-	parsed.RawQuery = query.Encode()
-	return parsed.String()
-}
-
-func appendRawQuery(rawURL, data string) string {
-	separator := "?"
-	if strings.Contains(rawURL, "?") {
-		separator = "&"
-	}
-	return rawURL + separator + data
 }
 
 func firstNonEmpty(values ...string) string {
@@ -482,7 +760,7 @@ func wfcWebsheetCallbackResult(callback websheet.Callback) wfcWebsheetCallbackAc
 		return wfcWebsheetCallbackDismiss
 	case strings.Contains(method, "cancel") || strings.Contains(method, "closewebview"):
 		return wfcWebsheetCallbackDismiss
-	case event == "entitlementchanged" || event == "finishflow" || event == "done" || result == "success":
+	case event == "entitlementchanged" || event == "finishflow" || event == "done" || event == "phoneservicesaccountstatuschanged" || result == "success":
 		return wfcWebsheetCallbackRetry
 	default:
 		return wfcWebsheetCallbackWait
@@ -508,6 +786,8 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 	defer events.Close()
 	smsEvents := client.SMS().Events()
 	defer smsEvents.Close()
+	voiceEvents := client.Voice().Events()
+	defer voiceEvents.Close()
 	for {
 		select {
 		case msg, ok := <-smsEvents.Incoming:
@@ -516,6 +796,18 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 				return
 			}
 			c.forwardIncoming(ctx, modem, profileID, msg)
+		case incoming, ok := <-voiceEvents.Incoming:
+			if !ok {
+				c.markDisconnected(modem.EquipmentIdentifier, client)
+				return
+			}
+			c.forwardIncomingCall(modem, profileID, incoming)
+		case event, ok := <-voiceEvents.Events:
+			if !ok {
+				c.markDisconnected(modem.EquipmentIdentifier, client)
+				return
+			}
+			c.forwardCallEvent(modem.EquipmentIdentifier, event)
 		case state, ok := <-events.State:
 			if !ok {
 				c.markDisconnected(modem.EquipmentIdentifier, client)
@@ -531,6 +823,48 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 			c.markDisconnected(modem.EquipmentIdentifier, client)
 			return
 		}
+	}
+}
+
+func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string, incoming imsclient.IncomingCall) {
+	if incoming.Call == nil {
+		return
+	}
+	info := c.storeVoiceCall(modem.EquipmentIdentifier, profileID, incoming.Call, incoming.From, string(incoming.Call.Direction()), string(incoming.Call.State()), "")
+	if !incoming.ReceivedAt.IsZero() {
+		info.StartedAt = incoming.ReceivedAt
+		info.UpdatedAt = incoming.ReceivedAt
+		c.updateVoiceCall(modem.EquipmentIdentifier, info.ID, info)
+	}
+	c.publishVoiceEvent(info)
+}
+
+func (c *coordinator) forwardCallEvent(modemID string, event imsclient.CallEvent) {
+	c.mu.Lock()
+	session := c.sessions[modemID]
+	var info VoiceCall
+	if session != nil && session.calls != nil {
+		if state := session.calls[event.CallID]; state != nil {
+			info = state.info
+			info.State = string(event.State)
+			info.Reason = event.Cause
+			info.UpdatedAt = event.At
+			if info.UpdatedAt.IsZero() {
+				info.UpdatedAt = time.Now()
+			}
+			if event.State == imscall.StateActive && info.AnsweredAt.IsZero() {
+				info.AnsweredAt = info.UpdatedAt
+			}
+			if event.State == imscall.StateEnded || event.State == imscall.StateFailed {
+				info.EndedAt = info.UpdatedAt
+			}
+			state.info = info
+			state.updatedAt = info.UpdatedAt
+		}
+	}
+	c.mu.Unlock()
+	if info.ID != "" {
+		c.publishVoiceEvent(info)
 	}
 }
 
@@ -577,26 +911,73 @@ func (c *coordinator) markConnected(modemID string, client *imsclient.Client) {
 
 func (c *coordinator) markDisconnected(modemID string, client *imsclient.Client) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	session := c.sessions[modemID]
 	if session == nil || session.client != client {
+		c.mu.Unlock()
 		return
 	}
 	session.client = nil
 	session.connected = false
+	events := disconnectedCallEvents(session)
+	c.mu.Unlock()
+
+	for _, call := range events {
+		c.publishVoiceEvent(call)
+	}
+}
+
+func disconnectedCallEvents(session *sessionState) []VoiceCall {
+	if session == nil || len(session.calls) == 0 {
+		return nil
+	}
+	now := time.Now()
+	events := make([]VoiceCall, 0, len(session.calls))
+	for _, state := range session.calls {
+		if state == nil || state.info.ID == "" || isTerminalVoiceCallState(state.info.State) {
+			continue
+		}
+		state.info.State = string(imscall.StateFailed)
+		state.info.Reason = "wifi calling disconnected"
+		state.info.EndedAt = now
+		state.info.UpdatedAt = now
+		state.updatedAt = now
+		events = append(events, state.info)
+	}
+	return events
+}
+
+func isTerminalVoiceCallState(state string) bool {
+	return state == string(imscall.StateEnded) || state == string(imscall.StateFailed)
 }
 
 func (c *coordinator) stop(modemID string) {
+	c.stopSession(modemID, true)
+}
+
+func (c *coordinator) stopAsync(modemID string) {
+	c.stopSession(modemID, false)
+}
+
+func (c *coordinator) stopSession(modemID string, wait bool) {
 	c.mu.Lock()
 	session := c.sessions[modemID]
 	delete(c.sessions, modemID)
+	events := disconnectedCallEvents(session)
 	c.mu.Unlock()
 	if session == nil {
 		return
 	}
-	session.cancel()
+	if session.cancel != nil {
+		session.cancel()
+	}
 	if session.client != nil {
 		_ = session.client.Close()
+	}
+	if wait && session.done != nil {
+		<-session.done
+	}
+	for _, call := range events {
+		c.publishVoiceEvent(call)
 	}
 }
 
@@ -630,28 +1011,91 @@ func (c *coordinator) stopByPath(path dbus.ObjectPath) {
 }
 
 func openReader(ctx context.Context, modem *mmodem.Modem) (usimreader.Reader, error) {
+	return openReaderWith(ctx, modem, openReaderCandidate)
+}
+
+type readerCandidate struct {
+	portType mmodem.ModemPortType
+	device   string
+}
+
+type readerOpener func(context.Context, readerCandidate, int) (usimreader.Reader, error)
+
+func openReaderWith(ctx context.Context, modem *mmodem.Modem, open readerOpener) (usimreader.Reader, error) {
 	slot := 1
 	if modem.PrimarySimSlot > 0 {
 		slot = int(modem.PrimarySimSlot)
 	}
-	switch modem.PrimaryPortType() {
-	case mmodem.ModemPortTypeQmi:
-		return qmi.Open(ctx, modem.PrimaryPort, slot)
-	case mmodem.ModemPortTypeMbim:
-		return mbim.Open(ctx, modem.PrimaryPort, slot)
-	case mmodem.ModemPortTypeAt:
-		return at.New(modem.PrimaryPort, 0)
-	default:
-		if port, err := modem.Port(mmodem.ModemPortTypeQmi); err == nil {
-			return qmi.Open(ctx, port.Device, slot)
-		}
-		if port, err := modem.Port(mmodem.ModemPortTypeMbim); err == nil {
-			return mbim.Open(ctx, port.Device, slot)
-		}
-		if port, err := modem.Port(mmodem.ModemPortTypeAt); err == nil {
-			return at.New(port.Device, 0)
-		}
+	candidates := readerCandidates(modem)
+	if len(candidates) == 0 {
 		return nil, errors.New("Wi-Fi Calling requires QMI, MBIM, or AT modem port")
+	}
+	var result error
+	for _, candidate := range candidates {
+		reader, err := open(ctx, candidate, slot)
+		if err == nil {
+			return reader, nil
+		}
+		result = errors.Join(result, fmt.Errorf("open %s reader on %s: %w", readerPortTypeName(candidate.portType), candidate.device, err))
+	}
+	return nil, result
+}
+
+func readerCandidates(modem *mmodem.Modem) []readerCandidate {
+	if modem == nil {
+		return nil
+	}
+	var candidates []readerCandidate
+	add := func(portType mmodem.ModemPortType, device string) {
+		device = strings.TrimSpace(device)
+		if device == "" || !supportedReaderPort(portType) {
+			return
+		}
+		for _, candidate := range candidates {
+			if candidate.portType == portType && candidate.device == device {
+				return
+			}
+		}
+		candidates = append(candidates, readerCandidate{portType: portType, device: device})
+	}
+	add(modem.PrimaryPortType(), modem.PrimaryPort)
+	for _, portType := range []mmodem.ModemPortType{mmodem.ModemPortTypeQmi, mmodem.ModemPortTypeMbim, mmodem.ModemPortTypeAt} {
+		for _, port := range modem.Ports {
+			if port.PortType == portType {
+				add(portType, port.Device)
+			}
+		}
+	}
+	return candidates
+}
+
+func supportedReaderPort(portType mmodem.ModemPortType) bool {
+	return portType == mmodem.ModemPortTypeQmi || portType == mmodem.ModemPortTypeMbim || portType == mmodem.ModemPortTypeAt
+}
+
+func openReaderCandidate(ctx context.Context, candidate readerCandidate, slot int) (usimreader.Reader, error) {
+	switch candidate.portType {
+	case mmodem.ModemPortTypeQmi:
+		return qmi.Open(ctx, candidate.device, slot)
+	case mmodem.ModemPortTypeMbim:
+		return mbim.Open(ctx, candidate.device, slot)
+	case mmodem.ModemPortTypeAt:
+		return at.New(candidate.device, 0)
+	default:
+		return nil, errors.New("reader port type is unsupported")
+	}
+}
+
+func readerPortTypeName(portType mmodem.ModemPortType) string {
+	switch portType {
+	case mmodem.ModemPortTypeQmi:
+		return "QMI"
+	case mmodem.ModemPortTypeMbim:
+		return "MBIM"
+	case mmodem.ModemPortTypeAt:
+		return "AT"
+	default:
+		return "unknown"
 	}
 }
 

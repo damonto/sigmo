@@ -65,3 +65,27 @@ func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to strin
 func (c *coordinator) ExecuteUSSD(ctx context.Context, modem *mmodem.Modem, action string, code string) (string, error) {
 	return "", ErrUnavailable
 }
+
+func (c *coordinator) DialCall(ctx context.Context, modem *mmodem.Modem, to string) (VoiceCall, error) {
+	return VoiceCall{}, ErrUnavailable
+}
+
+func (c *coordinator) AnswerCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
+	return VoiceCall{}, ErrUnavailable
+}
+
+func (c *coordinator) RejectCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
+	return VoiceCall{}, ErrUnavailable
+}
+
+func (c *coordinator) HangupCall(ctx context.Context, modem *mmodem.Modem, callID string) (VoiceCall, error) {
+	return VoiceCall{}, ErrUnavailable
+}
+
+func (c *coordinator) OpenCallMedia(ctx context.Context, modem *mmodem.Modem, callID string) (MediaSession, error) {
+	return nil, ErrUnavailable
+}
+
+func (c *coordinator) SubscribeVoiceEvents(fn VoiceEventFunc) func() {
+	return func() {}
+}

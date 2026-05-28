@@ -79,6 +79,21 @@ func (s *Store) Migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_profile_timestamp ON messages(profile_id, timestamp)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_profile_participants ON messages(profile_id, sender, recipient)`,
+		`CREATE TABLE IF NOT EXISTS calls (
+			id TEXT PRIMARY KEY,
+			profile_id TEXT NOT NULL,
+			modem_id TEXT NOT NULL,
+			route TEXT NOT NULL,
+			direction TEXT NOT NULL,
+			number TEXT NOT NULL,
+			state TEXT NOT NULL,
+			reason TEXT NOT NULL,
+			started_at TEXT NOT NULL,
+			answered_at TEXT NOT NULL,
+			ended_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_calls_profile_modem_updated ON calls(profile_id, modem_id, updated_at)`,
 	}
 	for _, stmt := range statements {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {

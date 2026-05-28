@@ -1,7 +1,42 @@
 (function(){
   const callbackURL = {{CALLBACK_URL}};
+  const absolutePathProxyPrefix = {{ABSOLUTE_PATH_PROXY_PREFIX}};
   const odsaStorageKey = "ts43-go.odsa.callbacks";
   const vowifiStorageKey = "ims-client.vowifi.callbacks";
+
+  function rewriteCarrierPath(value) {
+    if (!absolutePathProxyPrefix || typeof value !== "string") return value;
+    if (value.charAt(0) !== "/" || value.indexOf("//") === 0) return value;
+    if (value.indexOf("/api/v1/websheets/") === 0) return value;
+    return absolutePathProxyPrefix + value;
+  }
+
+  function installRequestRewriter() {
+    try {
+      const originalOpen = window.XMLHttpRequest && window.XMLHttpRequest.prototype && window.XMLHttpRequest.prototype.open;
+      if (originalOpen) {
+        window.XMLHttpRequest.prototype.open = function(method, url) {
+          const args = Array.prototype.slice.call(arguments);
+          args[1] = rewriteCarrierPath(url);
+          return originalOpen.apply(this, args);
+        };
+      }
+    } catch (_) {}
+
+    try {
+      const originalFetch = window.fetch;
+      if (originalFetch) {
+        window.fetch = function(input, init) {
+          if (typeof input === "string") {
+            input = rewriteCarrierPath(input);
+          }
+          return originalFetch.call(this, input, init);
+        };
+      }
+    } catch (_) {}
+  }
+
+  installRequestRewriter();
 
   function notifyParent(payload) {
     try {

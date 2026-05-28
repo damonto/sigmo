@@ -170,6 +170,104 @@ func TestMessages(t *testing.T) {
 	})
 }
 
+func TestCallsPersistAndListByModem(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	base := time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC)
+
+	calls := []Call{
+		{
+			ID:        "call-old",
+			ProfileID: "profile-a",
+			ModemID:   "modem-1",
+			Route:     "wifi_calling",
+			Direction: "outgoing",
+			Number:    "+12242255559",
+			State:     "dialing",
+			StartedAt: base,
+			UpdatedAt: base,
+		},
+		{
+			ID:         "call-new",
+			ProfileID:  "profile-a",
+			ModemID:    "modem-1",
+			Route:      "modem",
+			Direction:  "incoming",
+			Number:     "+15551234567",
+			State:      "ended",
+			Reason:     "Busy Here",
+			StartedAt:  base.Add(time.Minute),
+			AnsweredAt: base.Add(2 * time.Minute),
+			EndedAt:    base.Add(3 * time.Minute),
+			UpdatedAt:  base.Add(3 * time.Minute),
+		},
+		{
+			ID:        "call-other-profile",
+			ProfileID: "profile-b",
+			ModemID:   "modem-2",
+			Route:     "wifi_calling",
+			Direction: "outgoing",
+			Number:    "+100",
+			State:     "ended",
+			StartedAt: base.Add(4 * time.Minute),
+			UpdatedAt: base.Add(4 * time.Minute),
+		},
+		{
+			ID:        "call-other-modem",
+			ProfileID: "profile-a",
+			ModemID:   "modem-2",
+			Route:     "wifi_calling",
+			Direction: "outgoing",
+			Number:    "+101",
+			State:     "ended",
+			StartedAt: base.Add(5 * time.Minute),
+			UpdatedAt: base.Add(5 * time.Minute),
+		},
+	}
+	for _, call := range calls {
+		if err := store.SaveCall(ctx, call); err != nil {
+			t.Fatalf("SaveCall(%s) error = %v", call.ID, err)
+		}
+	}
+
+	got, err := store.ListCalls(ctx, "profile-a", "modem-1", 10)
+	if err != nil {
+		t.Fatalf("ListCalls() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ListCalls() len = %d, want 2", len(got))
+	}
+	if got[0].ID != "call-new" || got[1].ID != "call-old" {
+		t.Fatalf("ListCalls() order = [%s %s], want [call-new call-old]", got[0].ID, got[1].ID)
+	}
+	if got[0].Route != "modem" || got[1].Route != "wifi_calling" {
+		t.Fatalf("ListCalls() routes = [%s %s], want [modem wifi_calling]", got[0].Route, got[1].Route)
+	}
+
+	calls[0].State = "active"
+	calls[0].AnsweredAt = base.Add(30 * time.Second)
+	calls[0].UpdatedAt = base.Add(5 * time.Minute)
+	if err := store.SaveCall(ctx, calls[0]); err != nil {
+		t.Fatalf("SaveCall(update) error = %v", err)
+	}
+
+	updated, err := store.GetCall(ctx, "call-old")
+	if err != nil {
+		t.Fatalf("GetCall() error = %v", err)
+	}
+	if updated.State != "active" || updated.AnsweredAt.IsZero() {
+		t.Fatalf("GetCall() = %+v, want active with answered_at", updated)
+	}
+
+	got, err = store.ListCalls(ctx, "profile-a", "modem-1", 1)
+	if err != nil {
+		t.Fatalf("ListCalls(limit) error = %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "call-old" {
+		t.Fatalf("ListCalls(limit) = %+v, want updated call-old first", got)
+	}
+}
+
 func TestMigrateMessageFingerprints(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "sigmo.db")

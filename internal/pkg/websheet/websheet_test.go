@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -166,6 +167,155 @@ func TestProxyRewritesHTMLAndStripsFrameHeaders(t *testing.T) {
 	}
 	if !strings.Contains(body, "mode: \"no-cors\"") {
 		t.Fatalf("proxied body missing no-cors callback fetch: %s", body)
+	}
+}
+
+func TestProxyRewritesHTMLWithRedirectTargetBase(t *testing.T) {
+	t.Parallel()
+
+	carrier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/start":
+			http.Redirect(w, r, "/flow/index.html", http.StatusFound)
+		case "/flow/index.html":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<html><head><script src="app.js"></script></head><body></body></html>`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer carrier.Close()
+
+	broker := New(Config{AllowPrivateHosts: true})
+	session, err := broker.Create(context.Background(), Request{URL: carrier.URL + "/start"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/proxy?target="+url.QueryEscape(carrier.URL+"/start"), nil)
+	rec := httptest.NewRecorder()
+	if err := session.Proxy(rec, req); err != nil {
+		t.Fatalf("Proxy() error = %v", err)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "/proxy/http/"+strings.TrimPrefix(carrier.URL, "http://")+"/flow/app.js") {
+		t.Fatalf("proxied body did not resolve asset against redirect target: %s", body)
+	}
+}
+
+func TestProxyRewritesHTMLUsingCarrierBaseElement(t *testing.T) {
+	t.Parallel()
+
+	carrier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><head><base href="/softphone/"></head><body><script src="js/lib/jquery.js"></script><script src="runtime.js" type="module"></script></body></html>`))
+	}))
+	defer carrier.Close()
+
+	broker := New(Config{AllowPrivateHosts: true})
+	session, err := broker.Create(context.Background(), Request{URL: carrier.URL + "/softphone/primary/reseller/r017"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/proxy?target="+url.QueryEscape(carrier.URL+"/softphone/primary/reseller/r017"), nil)
+	req.Host = "sigmo.test"
+	rec := httptest.NewRecorder()
+	if err := session.Proxy(rec, req); err != nil {
+		t.Fatalf("Proxy() error = %v", err)
+	}
+	body := rec.Body.String()
+	hostPath := "/proxy/http/" + strings.TrimPrefix(carrier.URL, "http://") + "/softphone/"
+	for _, want := range []string{hostPath + "js/lib/jquery.js", hostPath + "runtime.js"} {
+		if !strings.Contains(body, "http://sigmo.test/api/v1/websheets/"+session.Info().ID+want) {
+			t.Fatalf("proxied body missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "/softphone/primary/reseller/js/lib/jquery.js") {
+		t.Fatalf("proxied body resolved against reseller path instead of base element: %s", body)
+	}
+}
+
+func TestProxyDoesNotInjectBridgeIntoXHRHTML(t *testing.T) {
+	t.Parallel()
+
+	carrier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<div><a href="/next">Next</a></div>`))
+	}))
+	defer carrier.Close()
+
+	broker := New(Config{AllowPrivateHosts: true})
+	session, err := broker.Create(context.Background(), Request{URL: carrier.URL})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/proxy?target="+url.QueryEscape(carrier.URL), nil)
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	rec := httptest.NewRecorder()
+	if err := session.Proxy(rec, req); err != nil {
+		t.Fatalf("Proxy() error = %v", err)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "ODSAServiceFlow") || strings.Contains(body, "absolutePathProxyPrefix") {
+		t.Fatalf("XHR HTML contains injected bridge: %s", body)
+	}
+	if !strings.Contains(body, "/api/v1/websheets/"+session.Info().ID+"/proxy") {
+		t.Fatalf("XHR HTML missing rewritten URL: %s", body)
+	}
+}
+
+func TestProxyNormalizesCarrierRequestHeaders(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		method     string
+		body       string
+		wantOrigin bool
+	}{
+		{name: "get strips browser origin", method: http.MethodGet},
+		{name: "post sends carrier origin", method: http.MethodPost, body: "token=abc", wantOrigin: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotHeader http.Header
+			carrier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotHeader = r.Header.Clone()
+				w.Header().Set("Content-Type", "application/javascript")
+				_, _ = w.Write([]byte(`window.ok = true;`))
+			}))
+			defer carrier.Close()
+
+			broker := New(Config{AllowPrivateHosts: true})
+			session, err := broker.Create(context.Background(), Request{URL: carrier.URL})
+			if err != nil {
+				t.Fatalf("Create() error = %v", err)
+			}
+
+			req := httptest.NewRequest(tt.method, "/proxy?target="+url.QueryEscape(carrier.URL), strings.NewReader(tt.body))
+			req.Header.Set("Origin", "http://localhost:5173")
+			req.Header.Set("Referer", "http://localhost:5173/settings")
+			req.Header.Set("Sec-Fetch-Site", "same-origin")
+			rec := httptest.NewRecorder()
+			if err := session.Proxy(rec, req); err != nil {
+				t.Fatalf("Proxy() error = %v", err)
+			}
+
+			if got := gotHeader.Get("Referer"); got != carrier.URL+"/" {
+				t.Fatalf("Referer = %q, want %q", got, carrier.URL+"/")
+			}
+			if got := gotHeader.Get("Sec-Fetch-Site"); got != "" {
+				t.Fatalf("Sec-Fetch-Site = %q, want empty", got)
+			}
+			if got := gotHeader.Get("Origin"); tt.wantOrigin && got != carrier.URL {
+				t.Fatalf("Origin = %q, want %q", got, carrier.URL)
+			} else if !tt.wantOrigin && got != "" {
+				t.Fatalf("Origin = %q, want empty", got)
+			}
+		})
 	}
 }
 

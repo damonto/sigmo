@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/app/router"
+	pcall "github.com/damonto/sigmo/internal/pkg/call"
 	"github.com/damonto/sigmo/internal/pkg/config"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/modem"
@@ -128,6 +130,7 @@ func main() {
 		OnIncoming: relay.ForwardWiFiCallingSMS,
 		Websheets:  websheets,
 	})
+	callService := pcall.New(db, wifiCalling)
 	networkPreferences := modem.NewNetworkPreferencesWithStore(db)
 	router.Register(server, router.RegisterConfig{
 		Store:              store,
@@ -137,39 +140,65 @@ func main() {
 		NetworkPreferences: networkPreferences,
 		Storage:            db,
 		WiFiCalling:        wifiCalling,
+		Calls:              callService,
 		Websheets:          websheets,
 	})
 
+	var wg sync.WaitGroup
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := modem.RunEnableDisabled(ctx, registry); err != nil {
 			slog.Error("modem enable runner stopped", "error", err)
 		}
 	}()
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := modem.RunSMSStorageDefaults(ctx, registry, modem.SMSStorageME); err != nil {
 			slog.Error("SMS storage defaults stopped", "error", err)
 		}
 	}()
 
-	go internetConnector.RunAlwaysOn(ctx, registry)
-
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+		internetConnector.RunAlwaysOn(ctx, registry)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		if err := networkPreferences.Run(ctx, registry); err != nil {
 			slog.Error("network preferences restore stopped", "error", err)
 		}
 	}()
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := relay.Run(ctx); err != nil {
 			slog.Error("message relay stopped", "error", err)
 			stop()
 		}
 	}()
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := wifiCalling.Run(ctx, registry); err != nil {
 			slog.Error("Wi-Fi Calling coordinator stopped", "error", err)
+			stop()
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := callService.Run(ctx); err != nil {
+			slog.Error("call service stopped", "error", err)
 			stop()
 		}
 	}()
@@ -183,6 +212,7 @@ func main() {
 		slog.Error("http server stopped", "error", err)
 		os.Exit(1)
 	}
+	wg.Wait()
 }
 
 func loadConfig(path string, explicit bool) (*config.Config, error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/websheet"
@@ -31,6 +32,7 @@ const (
 var (
 	ErrUnavailable        = errors.New("wifi calling is unavailable")
 	ErrNotConnected       = errors.New("wifi calling is not connected")
+	ErrUnsupportedCodec   = errors.New("wifi calling voice codec is not supported")
 	ErrWebsheetNotPending = errors.New("wifi calling websheet is not pending")
 	ErrWebsheetDismissed  = errors.New("wifi calling websheet was dismissed")
 )
@@ -54,6 +56,42 @@ type IncomingSMS struct {
 
 type IncomingSMSFunc func(context.Context, IncomingSMS) error
 
+type VoiceCall struct {
+	ID         string
+	ModemID    string
+	ProfileID  string
+	Direction  string
+	Number     string
+	State      string
+	Reason     string
+	StartedAt  time.Time
+	AnsweredAt time.Time
+	EndedAt    time.Time
+	UpdatedAt  time.Time
+}
+
+type VoiceEvent struct {
+	Call VoiceCall
+}
+
+type VoiceEventFunc func(VoiceEvent)
+
+type MediaInfo struct {
+	Codec           string
+	PayloadType     int
+	ClockRate       int
+	Channels        int
+	DTMFPayloadType int
+	DTMFClockRate   int
+	PTimeMillis     int
+}
+
+type MediaSession interface {
+	Info() MediaInfo
+	ReadPacket(context.Context) ([]byte, error)
+	WritePacket(context.Context, []byte) error
+}
+
 type Coordinator interface {
 	Run(context.Context, *mmodem.Registry) error
 	Settings(context.Context, *mmodem.Modem) (Settings, error)
@@ -62,6 +100,12 @@ type Coordinator interface {
 	StartWebsheet(context.Context, *mmodem.Modem) (websheet.Info, error)
 	SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error)
 	ExecuteUSSD(context.Context, *mmodem.Modem, string, string) (string, error)
+	DialCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
+	AnswerCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
+	RejectCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
+	HangupCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
+	OpenCallMedia(context.Context, *mmodem.Modem, string) (MediaSession, error)
+	SubscribeVoiceEvents(VoiceEventFunc) func()
 }
 
 type SettingsStore struct {

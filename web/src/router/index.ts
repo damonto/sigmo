@@ -46,9 +46,9 @@ const router = createRouter({
           component: () => import('@/views/ModemNotificationsView.vue'),
         },
         {
-          path: 'ussd',
-          name: 'modem-ussd',
-          component: () => import('@/views/ModemUssdView.vue'),
+          path: 'phone',
+          name: 'modem-phone',
+          component: () => import('@/views/ModemPhoneView.vue'),
         },
         {
           path: 'settings',

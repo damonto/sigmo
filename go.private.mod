@@ -2,6 +2,8 @@ module github.com/damonto/sigmo
 
 go 1.26.3
 
+replace github.com/damonto/ims-client => ../ims-client
+
 require (
 	github.com/damonto/euicc-go v1.1.2
 	github.com/damonto/ims-client v0.0.0-20260526093808-49c61bc0057a

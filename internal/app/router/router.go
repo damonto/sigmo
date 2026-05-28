@@ -9,6 +9,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	hauth "github.com/damonto/sigmo/internal/app/handler/auth"
+	hcall "github.com/damonto/sigmo/internal/app/handler/call"
 	"github.com/damonto/sigmo/internal/app/handler/capability"
 	hconfig "github.com/damonto/sigmo/internal/app/handler/config"
 	"github.com/damonto/sigmo/internal/app/handler/esim"
@@ -21,6 +22,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/handler/ussd"
 	hwebsheet "github.com/damonto/sigmo/internal/app/handler/websheet"
 	appmiddleware "github.com/damonto/sigmo/internal/app/middleware"
+	pcall "github.com/damonto/sigmo/internal/pkg/call"
 	"github.com/damonto/sigmo/internal/pkg/config"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/modem"
@@ -38,6 +40,7 @@ type RegisterConfig struct {
 	NetworkPreferences *modem.NetworkPreferences
 	Storage            *storage.Store
 	WiFiCalling        wificalling.Coordinator
+	Calls              *pcall.Service
 	Websheets          *pwebsheet.Broker
 }
 
@@ -90,6 +93,16 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 			protected.GET("/modems/:id/messages/:participant", h.ListByParticipant)
 			protected.POST("/modems/:id/messages", h.Send)
 			protected.DELETE("/modems/:id/messages/:participant", h.DeleteByParticipant)
+		}
+
+		{
+			h := hcall.New(cfg.Registry, cfg.Calls)
+			protected.GET("/modems/:id/calls", h.List)
+			protected.POST("/modems/:id/calls", h.Dial)
+			protected.GET("/modems/:id/calls/events", h.Events)
+			protected.GET("/modems/:id/calls/:callID/media", h.Media)
+			protected.PATCH("/modems/:id/calls/:callID", h.Update)
+			protected.DELETE("/modems/:id/calls/:callID", h.Hangup)
 		}
 
 		{

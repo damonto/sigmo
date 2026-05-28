@@ -29,10 +29,10 @@ const tabItems = computed(() => [
     icon: MessageSquare,
   },
   {
-    key: 'ussd',
-    routeName: 'modem-ussd',
-    to: { name: 'modem-ussd', params: { id: modemId.value } },
-    label: t('modemDetail.tabs.ussd'),
+    key: 'phone',
+    routeName: 'modem-phone',
+    to: { name: 'modem-phone', params: { id: modemId.value } },
+    label: t('modemDetail.tabs.phone'),
     icon: Phone,
   },
   {

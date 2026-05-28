@@ -4,9 +4,16 @@ import { useI18n } from 'vue-i18n'
 
 import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogContent.vue'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Spinner } from '@/components/ui/spinner'
 import { getStoredToken } from '@/lib/auth-storage'
+import { resolveAPIURL } from '@/lib/api-url'
 import { useFetch } from '@/lib/fetch'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 
@@ -27,7 +34,7 @@ const iframeEl = ref<HTMLIFrameElement | null>(null)
 
 const iframeSrc = computed(() => {
   if (!props.websheet?.embedUrl) return ''
-  const u = new URL(props.websheet.embedUrl, window.location.origin)
+  const u = new URL(resolveAPIURL(props.websheet.embedUrl))
   const token = getStoredToken()
   if (token) {
     u.searchParams.set('token', token)
@@ -86,6 +93,7 @@ watch(
     <EsimPersistentDialogContent class="flex h-[85dvh] max-h-180 flex-col overflow-hidden sm:max-w-4xl">
       <DialogHeader class="shrink-0">
         <DialogTitle>{{ title }}</DialogTitle>
+        <DialogDescription class="sr-only">{{ title }}</DialogDescription>
       </DialogHeader>
 
       <div class="relative min-h-0 flex-1 overflow-hidden rounded-md border bg-background">
