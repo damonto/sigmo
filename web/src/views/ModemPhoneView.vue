@@ -332,6 +332,7 @@ watch(
               v-if="digits"
               size="icon"
               variant="ghost"
+              class="touch-manipulation"
               :aria-label="t('modemDetail.phone.backspace')"
               @click="backspace"
             >
@@ -339,12 +340,12 @@ watch(
             </Button>
           </div>
 
-          <div class="mx-auto grid max-w-56 grid-cols-3 gap-2">
+          <div class="mx-auto grid w-full max-w-72 grid-cols-3 gap-2 sm:max-w-56">
             <button
               v-for="key in keys"
               :key="key.value"
               type="button"
-              class="flex aspect-square min-h-0 flex-col items-center justify-center rounded-full bg-muted text-xl font-semibold transition hover:bg-muted/70 active:scale-95"
+              class="flex aspect-square min-h-0 touch-manipulation select-none flex-col items-center justify-center rounded-full bg-muted text-xl font-semibold transition hover:bg-muted/70 active:scale-95"
               @click="appendKey(key.value)"
               @pointerdown="startPlusLongPress(key.value)"
               @pointerup="clearPlusLongPress"
@@ -361,7 +362,7 @@ watch(
           <div class="flex items-center justify-center">
             <Button
               size="icon-lg"
-              class="size-16 rounded-full bg-emerald-600 hover:bg-emerald-700"
+              class="size-16 touch-manipulation rounded-full bg-emerald-600 hover:bg-emerald-700"
               :disabled="!canDial"
               :aria-label="t('modemDetail.phone.call')"
               @click="startDial"
