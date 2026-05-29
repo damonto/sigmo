@@ -43,3 +43,25 @@ func TestNormalizeForRegion(t *testing.T) {
 		})
 	}
 }
+
+func TestDisplay(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "us number", value: "+12223334444", want: "+1 (222) 333-4444"},
+		{name: "china mobile", value: "+8613344445555", want: "+86 133 4444 5555"},
+		{name: "short code", value: "10086", want: "10086"},
+		{name: "invalid remains unchanged", value: "+1", want: "+1"},
+		{name: "empty remains empty", value: " ", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Display(tt.value); got != tt.want {
+				t.Fatalf("Display() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

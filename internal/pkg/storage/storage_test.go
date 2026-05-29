@@ -266,6 +266,16 @@ func TestCallsPersistAndListByModem(t *testing.T) {
 	if len(got) != 1 || got[0].ID != "call-old" {
 		t.Fatalf("ListCalls(limit) = %+v, want updated call-old first", got)
 	}
+
+	if err := store.DeleteCall(ctx, "profile-a", "modem-1", "call-old"); err != nil {
+		t.Fatalf("DeleteCall() error = %v", err)
+	}
+	if _, err := store.GetCall(ctx, "call-old"); err == nil {
+		t.Fatal("GetCall(deleted) error = nil, want not found")
+	}
+	if err := store.DeleteCall(ctx, "profile-a", "modem-1", "call-other-profile"); err == nil {
+		t.Fatal("DeleteCall(other profile) error = nil, want not found")
+	}
 }
 
 func TestSaveCallPreservesAnsweredAtOnSparseUpdates(t *testing.T) {

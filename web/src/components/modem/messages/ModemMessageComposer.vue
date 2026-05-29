@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
+import { formatPhoneInput } from '@/lib/phoneNumberInput'
 
 const message = defineModel<string>('message', { required: true })
 const recipient = defineModel<string>('recipient')
@@ -14,6 +15,7 @@ const props = defineProps<{
   isNewConversation: boolean
   isSending: boolean
   isLoading: boolean
+  defaultCountry?: string
 }>()
 
 const emit = defineEmits<{
@@ -25,6 +27,11 @@ const { t } = useI18n()
 const messageLength = computed(() => message.value.length)
 const hasMessage = computed(() => message.value.trim().length > 0)
 const isSendDisabled = computed(() => props.isSending || props.isLoading || !hasMessage.value)
+
+const updateRecipient = (event: Event) => {
+  const target = event.target as HTMLInputElement | null
+  recipient.value = formatPhoneInput(target?.value ?? '', props.defaultCountry)
+}
 </script>
 
 <template>
@@ -34,7 +41,7 @@ const isSendDisabled = computed(() => props.isSending || props.isLoading || !has
   >
     <div v-if="props.isNewConversation" class="flex items-stretch gap-2">
       <Input
-        v-model="recipient"
+        :model-value="recipient"
         type="tel"
         inputmode="tel"
         autocomplete="tel"
@@ -42,6 +49,7 @@ const isSendDisabled = computed(() => props.isSending || props.isLoading || !has
         :placeholder="t('modemDetail.messages.newRecipientPlaceholder')"
         :aria-label="t('modemDetail.messages.newRecipientPlaceholder')"
         :disabled="props.isSending || props.isLoading"
+        @input="updateRecipient"
       />
     </div>
     <div class="flex items-stretch gap-2">

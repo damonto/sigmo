@@ -28,6 +28,10 @@ vi.mock('@/composables/useModemCallSession', () => ({
   provideModemCallSession,
 }))
 
+vi.mock('@/composables/useModemPhoneCountry', () => ({
+  useModemPhoneCountry: () => ({ phoneCountry: { value: 'US' } }),
+}))
+
 describe('App', () => {
   it('renders the call banner at the app shell level', () => {
     const wrapper = mount(App, {

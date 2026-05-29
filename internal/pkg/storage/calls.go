@@ -79,6 +79,30 @@ func (s *Store) GetCall(ctx context.Context, id string) (Call, error) {
 	return call, nil
 }
 
+func (s *Store) DeleteCall(ctx context.Context, profileID string, modemID string, id string) error {
+	profileID = strings.TrimSpace(profileID)
+	modemID = strings.TrimSpace(modemID)
+	id = strings.TrimSpace(id)
+	if profileID == "" || modemID == "" || id == "" {
+		return ErrNotFound
+	}
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM calls
+		WHERE id = ? AND profile_id = ? AND modem_id = ?
+	`, id, profileID, modemID)
+	if err != nil {
+		return fmt.Errorf("delete call: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete call: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListCalls(ctx context.Context, profileID string, modemID string, limit int) ([]Call, error) {
 	profileID = strings.TrimSpace(profileID)
 	modemID = strings.TrimSpace(modemID)

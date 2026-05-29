@@ -3,6 +3,8 @@ package event
 import (
 	"strings"
 	"time"
+
+	"github.com/damonto/sigmo/internal/pkg/phonenumber"
 )
 
 type Kind string
@@ -72,6 +74,21 @@ func (e CallEvent) Counterparty() string {
 	return strings.TrimSpace(e.To)
 }
 
+func (e CallEvent) DisplayFrom() string {
+	return phonenumber.Display(e.From)
+}
+
+func (e CallEvent) DisplayTo() string {
+	return phonenumber.Display(e.To)
+}
+
+func (e CallEvent) DisplayCounterparty() string {
+	if e.Incoming {
+		return e.DisplayFrom()
+	}
+	return e.DisplayTo()
+}
+
 func (e SMSEvent) DirectionLabel() string {
 	if e.Incoming {
 		return "Incoming SMS"
@@ -99,4 +116,19 @@ func (e SMSEvent) Counterparty() string {
 		return strings.TrimSpace(e.From)
 	}
 	return strings.TrimSpace(e.To)
+}
+
+func (e SMSEvent) DisplayFrom() string {
+	return phonenumber.Display(e.From)
+}
+
+func (e SMSEvent) DisplayTo() string {
+	return phonenumber.Display(e.To)
+}
+
+func (e SMSEvent) DisplayCounterparty() string {
+	if e.Incoming {
+		return e.DisplayFrom()
+	}
+	return e.DisplayTo()
 }

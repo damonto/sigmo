@@ -30,8 +30,8 @@ func render(ev notifyevent.Event) (content, error) {
 			Text: fmt.Sprintf(
 				"*%s*\n\n*From:* %s\n*To:* %s\n*Modem:* %s\n*Time:* %s\n\n*Message:*\n%s",
 				escapeMarkdownV2(ev.DirectionLabel()),
-				escapeMarkdownV2(strings.TrimSpace(ev.From)),
-				escapeMarkdownV2(strings.TrimSpace(ev.To)),
+				escapeMarkdownV2(ev.DisplayFrom()),
+				escapeMarkdownV2(ev.DisplayTo()),
 				escapeMarkdownV2(strings.TrimSpace(ev.Modem)),
 				escapeMarkdownV2(ev.DisplayTimestamp()),
 				escapeMarkdownV2(ev.DisplayText()),
@@ -43,7 +43,7 @@ func render(ev notifyevent.Event) (content, error) {
 			Text: fmt.Sprintf(
 				"*%s*\n\n*From:* %s\n*Modem:* %s\n*Time:* %s",
 				escapeMarkdownV2(ev.DirectionLabel()),
-				escapeMarkdownV2(strings.TrimSpace(ev.From)),
+				escapeMarkdownV2(ev.DisplayFrom()),
 				escapeMarkdownV2(strings.TrimSpace(ev.Modem)),
 				escapeMarkdownV2(ev.DisplayTimestamp()),
 			),

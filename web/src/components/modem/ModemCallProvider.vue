@@ -4,10 +4,12 @@ import { useRoute } from 'vue-router'
 
 import ModemCallBanner from '@/components/modem/ModemCallBanner.vue'
 import { provideModemCallSession } from '@/composables/useModemCallSession'
+import { useModemPhoneCountry } from '@/composables/useModemPhoneCountry'
 
 const route = useRoute()
 const activeModemId = ref('unknown')
 const modemId = computed(() => activeModemId.value)
+const { phoneCountry } = useModemPhoneCountry(modemId)
 
 watch(
   () => route.params.id,
@@ -19,7 +21,7 @@ watch(
   { immediate: true },
 )
 
-const callSession = provideModemCallSession(modemId)
+const callSession = provideModemCallSession(modemId, phoneCountry)
 </script>
 
 <template>

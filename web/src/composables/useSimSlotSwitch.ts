@@ -6,7 +6,7 @@ import type { Modem } from '@/types/modem'
 
 type Options = {
   modemId: ComputedRef<string>
-  modem: Ref<Modem | null>
+  modem: Readonly<Ref<Modem | null>>
   refreshModem: () => Promise<void>
   onSuccess?: (message: string) => void
 }

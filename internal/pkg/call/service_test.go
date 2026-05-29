@@ -420,6 +420,62 @@ func TestUpdateRejectsUnsupportedState(t *testing.T) {
 	}
 }
 
+func TestDeleteRemovesTerminalCallRecords(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	service := New(store, fakeWiFiCalling{})
+	call := storage.Call{
+		ID:        "call-ended",
+		ProfileID: "profile-a",
+		ModemID:   "modem-1",
+		Route:     RouteWiFiCalling,
+		Direction: DirectionOutgoing,
+		Number:    "+12242255559",
+		State:     StateEnded,
+		StartedAt: time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC),
+		EndedAt:   time.Date(2026, 5, 27, 10, 1, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 5, 27, 10, 1, 0, 0, time.UTC),
+	}
+	if err := store.SaveCall(ctx, call); err != nil {
+		t.Fatalf("SaveCall() error = %v", err)
+	}
+
+	if err := service.deleteCall(ctx, call); err != nil {
+		t.Fatalf("deleteCall() error = %v", err)
+	}
+	if _, err := store.GetCall(ctx, call.ID); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("GetCall(deleted) error = %v, want %v", err, storage.ErrNotFound)
+	}
+}
+
+func TestDeleteRejectsActiveCallRecords(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	service := New(store, fakeWiFiCalling{})
+	call := storage.Call{
+		ID:        "call-active",
+		ProfileID: "profile-a",
+		ModemID:   "modem-1",
+		Route:     RouteWiFiCalling,
+		Direction: DirectionOutgoing,
+		Number:    "+12242255559",
+		State:     StateActive,
+		StartedAt: time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC),
+	}
+	if err := store.SaveCall(ctx, call); err != nil {
+		t.Fatalf("SaveCall() error = %v", err)
+	}
+
+	err := service.deleteCall(ctx, call)
+	if !errors.Is(err, ErrCallRecordActive) {
+		t.Fatalf("deleteCall() error = %v, want %v", err, ErrCallRecordActive)
+	}
+	if _, err := store.GetCall(ctx, call.ID); err != nil {
+		t.Fatalf("GetCall(active) error = %v", err)
+	}
+}
+
 func TestSubscribeUnsubscribeLeavesChannelOpen(t *testing.T) {
 	service := New(nil, fakeWiFiCalling{})
 	events, unsubscribe := service.Subscribe(1)

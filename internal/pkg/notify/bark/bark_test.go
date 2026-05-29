@@ -25,11 +25,11 @@ func TestRender(t *testing.T) {
 		{
 			name: "incoming sms uses sender as title and empty fallback body",
 			ev: notifyevent.SMSEvent{
-				From:     "15550001",
+				From:     "+12223334444",
 				Incoming: true,
 			},
 			want: content{
-				Title: "15550001",
+				Title: "+1 (222) 333-4444",
 				Body:  "(empty message)",
 			},
 		},
@@ -37,11 +37,11 @@ func TestRender(t *testing.T) {
 			name: "incoming call uses caller in title",
 			ev: notifyevent.CallEvent{
 				Modem:    "Office SIM",
-				From:     "15550002",
+				From:     "+8613344445555",
 				Incoming: true,
 			},
 			want: content{
-				Title: "Incoming Call from 15550002",
+				Title: "Incoming Call from +86 133 4444 5555",
 				Body:  "Modem: Office SIM\nTime: unknown",
 			},
 		},

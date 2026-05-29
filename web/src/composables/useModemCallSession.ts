@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useCallAudioSession } from '@/composables/useCallAudioSession'
 import { usePhoneCalls } from '@/composables/usePhoneCalls'
 import { createBrowserAmrCodec, hasBrowserAmrCodec } from '@/lib/browserAmrCodec'
+import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
 import type { CallRecord } from '@/types/call'
 
 const liveDurationStates = new Set<CallRecord['state']>([
@@ -20,9 +21,12 @@ const terminalStates = new Set<CallRecord['state']>(['ended', 'failed'])
 
 const modemCallSessionKey = Symbol('modem-call-session')
 
-const createModemCallSession = (modemId: ComputedRef<string>) => {
+const createModemCallSession = (
+  modemId: ComputedRef<string>,
+  defaultCountry?: ComputedRef<string>,
+) => {
   const { t } = useI18n()
-  const phoneCalls = usePhoneCalls(modemId)
+  const phoneCalls = usePhoneCalls(modemId, defaultCountry)
   const callAudio = useCallAudioSession(modemId, { codecFactory: createBrowserAmrCodec })
 
   const durationTick = ref(Date.now())
@@ -63,7 +67,8 @@ const createModemCallSession = (modemId: ComputedRef<string>) => {
     }
   }
 
-  const primaryLine = (call: CallRecord) => call.number || t('modemDetail.phone.unknownNumber')
+  const primaryLine = (call: CallRecord) =>
+    formatPhoneDisplay(call.number, defaultCountry?.value) || t('modemDetail.phone.unknownNumber')
 
   const callStartedAt = (call: CallRecord) => Date.parse(call.answeredAt)
 
@@ -178,11 +183,18 @@ const createModemCallSession = (modemId: ComputedRef<string>) => {
 
 export type ModemCallSession = ReturnType<typeof createModemCallSession>
 
-export const provideModemCallSession = (modemId: ComputedRef<string>) => {
-  const session = createModemCallSession(modemId)
+export const provideModemCallSession = (
+  modemId: ComputedRef<string>,
+  defaultCountry?: ComputedRef<string>,
+) => {
+  const session = createModemCallSession(modemId, defaultCountry)
   provide(modemCallSessionKey, session)
   return session
 }
 
-export const useModemCallSession = (modemId: ComputedRef<string>) =>
-  inject<ModemCallSession | null>(modemCallSessionKey, null) ?? createModemCallSession(modemId)
+export const useModemCallSession = (
+  modemId: ComputedRef<string>,
+  defaultCountry?: ComputedRef<string>,
+) =>
+  inject<ModemCallSession | null>(modemCallSessionKey, null) ??
+  createModemCallSession(modemId, defaultCountry)

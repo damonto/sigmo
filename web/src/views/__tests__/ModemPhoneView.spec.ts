@@ -11,11 +11,13 @@ const phoneHarness = vi.hoisted(() => ({
   incomingCall: null as CallRecord | null,
   isLoading: false,
   isDialing: false,
+  isDeletingCallID: '',
   errorMessage: '',
   dial: vi.fn(),
   answer: vi.fn(),
   reject: vi.fn(),
   hangup: vi.fn(),
+  deleteRecord: vi.fn(),
   loadCalls: vi.fn(),
 }))
 
@@ -25,6 +27,7 @@ const ussdHarness = vi.hoisted(() => ({
 
 const modemApiHarness = vi.hoisted(() => ({
   getWiFiCallingSettings: vi.fn(),
+  getModem: vi.fn(),
 }))
 
 const callAudioHarness = vi.hoisted(() => ({
@@ -58,6 +61,20 @@ const labels: Record<string, string> = {
   'modemDetail.phone.outgoing': 'Outgoing',
   'modemDetail.phone.duration': 'Duration',
   'modemDetail.phone.durationEmpty': '0:00',
+  'modemDetail.phone.deleteRecord': 'Delete record',
+  'modemDetail.phone.deleteTitle': 'Delete this call record?',
+  'modemDetail.phone.deleteDescription':
+    'This only removes the local call record. It does not affect carrier billing or an active call.',
+  'modemDetail.phone.details.direction': 'Direction',
+  'modemDetail.phone.details.state': 'State',
+  'modemDetail.phone.details.route': 'Route',
+  'modemDetail.phone.details.duration': 'Duration',
+  'modemDetail.phone.details.startedAt': 'Started',
+  'modemDetail.phone.details.answeredAt': 'Answered',
+  'modemDetail.phone.details.endedAt': 'Ended',
+  'modemDetail.phone.details.reason': 'Reason',
+  'modemDetail.phone.details.notAnswered': 'Not answered',
+  'modemDetail.phone.details.inProgress': 'In progress',
   'modemDetail.phone.ussdTitle': 'USSD',
   'modemDetail.phone.ussdDescription': 'Continue the USSD session in this dialog.',
   'modemDetail.phone.ussdPlaceholder': 'Reply',
@@ -77,6 +94,7 @@ const labels: Record<string, string> = {
   'modemDetail.phone.reject': 'Reject',
   'modemDetail.back': 'Back',
   'modemDetail.actions.cancel': 'Cancel',
+  'modemDetail.actions.delete': 'Delete',
   'modemDetail.ussd.send': 'Send',
   'home.refresh': 'Refresh',
 }
@@ -103,11 +121,14 @@ vi.mock('@/composables/usePhoneCalls', () => ({
     incomingCall: computed(() => phoneHarness.incomingCall),
     isLoading: computed(() => phoneHarness.isLoading),
     isDialing: computed(() => phoneHarness.isDialing),
+    isDeletingCallID: computed(() => phoneHarness.isDeletingCallID),
     errorMessage: computed(() => phoneHarness.errorMessage),
+    terminalStates: new Set(['ended', 'failed']),
     dial: phoneHarness.dial,
     answer: phoneHarness.answer,
     reject: phoneHarness.reject,
     hangup: phoneHarness.hangup,
+    deleteRecord: phoneHarness.deleteRecord,
     loadCalls: phoneHarness.loadCalls,
   }),
 }))
@@ -134,6 +155,7 @@ vi.mock('lucide-vue-next', () => ({
   PhoneOff: { template: '<span />' },
   PhoneOutgoing: { template: '<span />' },
   RefreshCw: { template: '<span />' },
+  Trash2: { template: '<span />' },
 }))
 
 const passthrough = { template: '<div><slot /></div>' }
@@ -142,6 +164,21 @@ const mountView = () =>
   mount(ModemPhoneView, {
     global: {
       stubs: {
+        AlertDialog: {
+          props: ['open'],
+          template: '<div v-if="open"><slot /></div>',
+        },
+        AlertDialogCancel: {
+          props: ['disabled'],
+          emits: ['click'],
+          template:
+            '<button type="button" :disabled="disabled" @click="$emit(\'click\', $event)"><slot /></button>',
+        },
+        AlertDialogContent: passthrough,
+        AlertDialogDescription: { template: '<p><slot /></p>' },
+        AlertDialogFooter: passthrough,
+        AlertDialogHeader: passthrough,
+        AlertDialogTitle: { template: '<h2><slot /></h2>' },
         DraggableFab: {
           emits: ['click'],
           template:
@@ -199,12 +236,15 @@ describe('ModemPhoneView phone interactions', () => {
     phoneHarness.incomingCall = null
     phoneHarness.isLoading = false
     phoneHarness.isDialing = false
+    phoneHarness.isDeletingCallID = ''
     phoneHarness.errorMessage = ''
     phoneHarness.dial.mockReset()
     phoneHarness.dial.mockResolvedValue(null)
     phoneHarness.answer.mockReset()
     phoneHarness.reject.mockReset()
     phoneHarness.hangup.mockReset()
+    phoneHarness.deleteRecord.mockReset()
+    phoneHarness.deleteRecord.mockResolvedValue(true)
     phoneHarness.loadCalls.mockReset()
     phoneHarness.loadCalls.mockResolvedValue(undefined)
     callAudioHarness.errorMessage.value = ''
@@ -218,6 +258,10 @@ describe('ModemPhoneView phone interactions', () => {
     modemApiHarness.getWiFiCallingSettings.mockReset()
     modemApiHarness.getWiFiCallingSettings.mockResolvedValue({
       data: ref({ enabled: true, preferred: true, connected: false, state: 'disconnected' }),
+    })
+    modemApiHarness.getModem.mockReset()
+    modemApiHarness.getModem.mockResolvedValue({
+      data: ref({ sim: { regionCode: 'US' } }),
     })
     ussdHarness.executeUssd.mockReset()
     ussdHarness.executeUssd.mockResolvedValue({ data: ref({ reply: 'Balance: 1' }) })
@@ -325,9 +369,11 @@ describe('ModemPhoneView phone interactions', () => {
       },
     ]
     const wrapper = mountView()
+    await flushPromises()
 
     expect(wrapper.text()).not.toContain('Outgoing')
     expect(wrapper.text()).not.toContain('Incoming')
+    expect(wrapper.text()).toContain('(224) 225-5559')
     expect(wrapper.text()).toContain('short 2026-05-27T00:01:15Z')
     expect(datetimeHarness.formatListTimestamp).toHaveBeenCalledWith('2026-05-27T00:01:15Z')
     expect(wrapper.text()).toContain('1:05')
@@ -341,6 +387,46 @@ describe('ModemPhoneView phone interactions', () => {
     await flushPromises()
 
     expect(phoneHarness.dial).toHaveBeenCalledWith('+12242255559')
+  })
+
+  it('expands a terminal call record and confirms deletion', async () => {
+    phoneHarness.recentCalls = [
+      {
+        callID: 'call-out',
+        route: 'wifi_calling',
+        direction: 'outgoing',
+        number: '+12242255559',
+        state: 'ended',
+        reason: 'remote bye',
+        startedAt: '2026-05-27T00:00:00Z',
+        answeredAt: '2026-05-27T00:00:10Z',
+        endedAt: '2026-05-27T00:01:15Z',
+        updatedAt: '2026-05-27T00:01:15Z',
+      },
+    ]
+    const wrapper = mountView()
+
+    await wrapper.get('[role="button"][aria-expanded="false"]').trigger('click')
+
+    expect(wrapper.text()).toContain('Direction')
+    expect(wrapper.text()).toContain('Outgoing')
+    expect(wrapper.text()).toContain('remote bye')
+    expect(wrapper.text()).not.toContain('call-out')
+
+    await wrapper
+      .findAll('button')
+      .find((item) => item.text() === 'Delete record')
+      ?.trigger('click')
+
+    expect(wrapper.text()).toContain('Delete this call record?')
+
+    await wrapper
+      .findAll('button')
+      .find((item) => item.text() === 'Delete')
+      ?.trigger('click')
+    await flushPromises()
+
+    expect(phoneHarness.deleteRecord).toHaveBeenCalledWith(phoneHarness.recentCalls[0])
   })
 
   it('prepares browser audio from the outgoing dial user gesture when a codec is available', async () => {

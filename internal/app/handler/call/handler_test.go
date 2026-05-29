@@ -33,6 +33,7 @@ func TestCallActionErrorMapsExpectedFailures(t *testing.T) {
 		{name: "wifi calling disconnected", err: pcall.ErrWiFiCallingNotConnected, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeWiFiCallingNotConnected},
 		{name: "modem calling unavailable", err: pcall.ErrModemCallingUnavailable, wantStatus: http.StatusNotImplemented, wantCode: errorCodeModemCallingUnavailable},
 		{name: "invalid call state", err: pcall.ErrInvalidCallState, wantStatus: http.StatusBadRequest, wantCode: errorCodeInvalidCallState},
+		{name: "active call record delete", err: pcall.ErrCallRecordActive, wantStatus: http.StatusConflict, wantCode: errorCodeCallRecordActive},
 		{name: "wrapped wifi calling disconnected", err: errors.Join(errors.New("dial route"), pcall.ErrWiFiCallingNotConnected), wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeWiFiCallingNotConnected},
 		{name: "dial rejection", err: errors.New("dial Wi-Fi Calling: Credit limit reached"), wantStatus: http.StatusBadGateway, wantCode: errorCodeDialCallFailed, wantMsg: "Credit limit reached"},
 	}
@@ -153,6 +154,9 @@ func TestBuildCallResponseFormatsUnsetTimesAsEmptyStrings(t *testing.T) {
 
 	if response.StartedAt != "2026-05-27T10:00:00.000000123Z" {
 		t.Fatalf("StartedAt = %q, want RFC3339Nano timestamp", response.StartedAt)
+	}
+	if response.Number != "+12242255559" {
+		t.Fatalf("Number = %q, want raw number", response.Number)
 	}
 	if response.UpdatedAt != response.StartedAt {
 		t.Fatalf("UpdatedAt = %q, want %q", response.UpdatedAt, response.StartedAt)

@@ -23,7 +23,7 @@ func render(ev notifyevent.Event) (content, error) {
 		}, nil
 	case notifyevent.SMSEvent:
 		return content{
-			Title: ev.Counterparty(),
+			Title: ev.DisplayCounterparty(),
 			Body:  ev.DisplayText(),
 		}, nil
 	case notifyevent.CallEvent:
@@ -37,7 +37,7 @@ func render(ev notifyevent.Event) (content, error) {
 }
 
 func callTitle(ev notifyevent.CallEvent) string {
-	number := ev.Counterparty()
+	number := ev.DisplayCounterparty()
 	if number == "" {
 		return ev.DirectionLabel()
 	}

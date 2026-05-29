@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 
 import { useMessageApi } from '@/apis/message'
 import { formatListTimestamp } from '@/lib/datetime'
+import { formatPhoneDisplay, phoneNumberChars } from '@/lib/phoneNumberInput'
 import type { MessageResponse } from '@/types/message'
 
 export type ThreadMessageItem = {
@@ -19,10 +20,12 @@ export const useModemMessageThread = ({
   modemId,
   participant,
   isNewConversation,
+  defaultCountry,
 }: {
   modemId: ComputedRef<string>
   participant: ComputedRef<string>
   isNewConversation: ComputedRef<boolean>
+  defaultCountry?: ComputedRef<string>
 }) => {
   const { t } = useI18n()
   const router = useRouter()
@@ -38,10 +41,13 @@ export const useModemMessageThread = ({
   const participantLabel = computed(() => {
     if (isNewConversation.value) {
       const value = newRecipient.value.trim()
-      return value.length > 0 ? value : t('modemDetail.messages.newConversation')
+      return value.length > 0
+        ? formatPhoneDisplay(value, defaultCountry?.value)
+        : t('modemDetail.messages.newConversation')
     }
     const value = participant.value.trim()
-    return value.length > 0 ? value : t('modemDetail.messages.unknownParticipant')
+    if (!value) return t('modemDetail.messages.unknownParticipant')
+    return formatPhoneDisplay(value, defaultCountry?.value)
   })
 
   const items = computed<ThreadMessageItem[]>(() =>
@@ -93,7 +99,9 @@ export const useModemMessageThread = ({
   const sendMessage = async () => {
     const targetId = modemId.value
     if (!targetId || targetId === 'unknown') return
-    const target = isNewConversation.value ? newRecipient.value.trim() : participant.value.trim()
+    const target = isNewConversation.value
+      ? phoneNumberChars(newRecipient.value)
+      : participant.value.trim()
     const text = messageDraft.value.trim()
     if (!target || !text || isSending.value) return
     messageDraft.value = ''

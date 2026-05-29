@@ -47,6 +47,7 @@ var (
 	ErrModemCallingUnavailable = errors.New("modem calling is not available in this version")
 	ErrCallNotFound            = errors.New("call not found")
 	ErrInvalidCallState        = errors.New("call state must be active or ended")
+	ErrCallRecordActive        = errors.New("active calls cannot be deleted")
 	ErrMediaUnavailable        = errors.New("call media is not available")
 	ErrUnsupportedCodec        = errors.New("call media codec is not supported")
 )
@@ -245,6 +246,27 @@ func (s *Service) Hangup(ctx context.Context, modem *mmodem.Modem, callID string
 	default:
 		return storage.Call{}, ErrInvalidRoute
 	}
+}
+
+func (s *Service) Delete(ctx context.Context, modem *mmodem.Modem, callID string) error {
+	call, err := s.callForAction(ctx, modem, callID)
+	if err != nil {
+		return err
+	}
+	return s.deleteCall(ctx, call)
+}
+
+func (s *Service) deleteCall(ctx context.Context, call storage.Call) error {
+	if !isTerminalCallState(call.State) {
+		return ErrCallRecordActive
+	}
+	if err := s.store.DeleteCall(ctx, call.ProfileID, call.ModemID, call.ID); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return ErrCallNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Service) OpenMedia(ctx context.Context, modem *mmodem.Modem, callID string) (MediaSession, error) {

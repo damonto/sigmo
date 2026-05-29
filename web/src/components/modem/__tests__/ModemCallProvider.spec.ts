@@ -69,6 +69,10 @@ vi.mock('@/composables/useCallAudioSession', () => ({
   useCallAudioSession: callsHarness.useCallAudioSession,
 }))
 
+vi.mock('@/composables/useModemPhoneCountry', () => ({
+  useModemPhoneCountry: () => ({ phoneCountry: computed(() => 'US') }),
+}))
+
 vi.mock('@/lib/browserAmrCodec', () => ({
   createBrowserAmrCodec: vi.fn(),
   hasBrowserAmrCodec: () => false,
@@ -142,8 +146,8 @@ describe('ModemCallProvider', () => {
     const wrapper = mountProvider()
 
     expect(callsHarness.usePhoneCalls).toHaveBeenCalledTimes(1)
-    expect(wrapper.get('[data-testid="consumer"]').text()).toBe('+12242255559')
-    expect(wrapper.text()).toContain('+12242255559')
+    expect(wrapper.get('[data-testid="consumer"]').text()).toBe('(224) 225-5559')
+    expect(wrapper.text()).toContain('(224) 225-5559')
     expect(wrapper.text()).toContain('Wi-Fi Calling')
   })
 })

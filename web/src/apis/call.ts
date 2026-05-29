@@ -138,7 +138,11 @@ export const useCallApi = () => {
   }
 
   const hangupCall = (id: string, callID: string) => {
-    return requestCallApi<CallRecord>(id, `/${encodeURIComponent(callID)}`, { method: 'DELETE' })
+    return updateCall(id, callID, { state: 'ended' })
+  }
+
+  const deleteCall = (id: string, callID: string) => {
+    return requestCallApi<void>(id, `/${encodeURIComponent(callID)}`, { method: 'DELETE' })
   }
 
   return {
@@ -148,5 +152,6 @@ export const useCallApi = () => {
     answerCall,
     rejectCall,
     hangupCall,
+    deleteCall,
   }
 }

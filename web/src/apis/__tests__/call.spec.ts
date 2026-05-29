@@ -85,4 +85,27 @@ describe('useCallApi', () => {
       }),
     )
   })
+
+  it('hangs up calls with PATCH and deletes records with DELETE', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const api = useCallApi()
+
+    await api.hangupCall('modem-1', 'call/1')
+    await api.deleteCall('modem-1', 'call/1')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('/api/v1/modems/modem-1/calls/call%2F1'),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ state: 'ended' }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('/api/v1/modems/modem-1/calls/call%2F1'),
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
 })

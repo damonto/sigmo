@@ -32,7 +32,7 @@ const makeSession = (state: {
     activeCallDurationLabel: computed(() => state.duration ?? ''),
     audioMessage: computed(() => state.audioMessage ?? ''),
     terminalStates: new Set<CallRecord['state']>(['ended', 'failed']),
-    primaryLine: (item: CallRecord) => item.number || 'Unknown number',
+    primaryLine: (item: CallRecord) => (item.number ? '(224) 225-5559' : 'Unknown number'),
     routeLabel: () => 'Wi-Fi Calling',
     stateLabel: (value: string) => (value === 'answering' ? 'Answering' : 'In call'),
     answerIncoming: vi.fn(),
@@ -81,7 +81,7 @@ describe('ModemCallBanner', () => {
     const session = makeSession({ incomingCall: incoming })
     const wrapper = mountBanner(session)
 
-    expect(wrapper.text()).toContain('+12242255559')
+    expect(wrapper.text()).toContain('(224) 225-5559')
     expect(wrapper.text()).toContain('Wi-Fi Calling')
 
     await wrapper.get('button[aria-label="Answer"]').trigger('click')
@@ -104,7 +104,7 @@ describe('ModemCallBanner', () => {
     })
     const wrapper = mountBanner(session)
 
-    expect(wrapper.text()).toContain('+12242255559')
+    expect(wrapper.text()).toContain('(224) 225-5559')
     expect(wrapper.text()).toContain('In call')
     expect(wrapper.text()).toContain('Duration')
     expect(wrapper.text()).toContain('1:05')

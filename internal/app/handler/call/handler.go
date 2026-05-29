@@ -38,7 +38,9 @@ const (
 	errorCodeModemCallingUnavailable   = "modem_calling_unavailable"
 	errorCodeCallNotFound              = "call_not_found"
 	errorCodeInvalidCallState          = "invalid_call_state"
+	errorCodeCallRecordActive          = "call_record_active"
 	errorCodeHangupCallFailed          = "hangup_call_failed"
+	errorCodeDeleteCallFailed          = "delete_call_failed"
 	errorCodeCallMediaUnavailable      = "call_media_unavailable"
 	errorCodeCallMediaUnsupportedCodec = "call_media_unsupported_codec"
 	errorCodeSubscribeCallEventsFailed = "subscribe_call_events_failed"
@@ -108,6 +110,17 @@ func (h *Handler) Hangup(c *echo.Context) error {
 		return callActionError(c, err, errorCodeHangupCallFailed)
 	}
 	return c.JSON(http.StatusOK, buildCallResponse(call))
+}
+
+func (h *Handler) Delete(c *echo.Context) error {
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeDeleteCallFailed)
+	}
+	if err := h.calls.Delete(c.Request().Context(), modem, callIDParam(c)); err != nil {
+		return callActionError(c, err, errorCodeDeleteCallFailed)
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 func callIDParam(c *echo.Context) string {
@@ -362,6 +375,8 @@ func callActionError(c *echo.Context, err error, fallback string) error {
 		return httpapi.NotFound(c, errorCodeCallNotFound, err)
 	case errors.Is(err, pcall.ErrInvalidCallState):
 		return httpapi.BadRequest(c, errorCodeInvalidCallState, err)
+	case errors.Is(err, pcall.ErrCallRecordActive):
+		return httpapi.Error(c, http.StatusConflict, errorCodeCallRecordActive, err.Error())
 	case fallback == errorCodeDialCallFailed:
 		return httpapi.Error(c, http.StatusBadGateway, errorCodeDialCallFailed, callActionMessage(err))
 	default:

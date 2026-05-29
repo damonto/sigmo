@@ -102,7 +102,7 @@ func Register(e *echo.Echo, cfg RegisterConfig) {
 			protected.GET("/modems/:id/calls/events", h.Events)
 			protected.GET("/modems/:id/calls/:callID/media", h.Media)
 			protected.PATCH("/modems/:id/calls/:callID", h.Update)
-			protected.DELETE("/modems/:id/calls/:callID", h.Hangup)
+			protected.DELETE("/modems/:id/calls/:callID", h.Delete)
 		}
 
 		{

@@ -7,6 +7,7 @@ import ModemMessageThreadDeleteDialog from '@/components/modem/messages/ModemMes
 import ModemMessageThreadHeader from '@/components/modem/messages/ModemMessageThreadHeader.vue'
 import ModemMessageThreadList from '@/components/modem/messages/ModemMessageThreadList.vue'
 import { useModemMessageThread } from '@/composables/useModemMessageThread'
+import { useModemPhoneCountry } from '@/composables/useModemPhoneCountry'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,6 +17,7 @@ const participant = computed(() => (route.params.participant ?? '') as string)
 const isNewConversation = computed(
   () => route.query.new === '1' || participant.value.trim() === 'new',
 )
+const { phoneCountry } = useModemPhoneCountry(modemId)
 
 const {
   items,
@@ -27,7 +29,12 @@ const {
   participantLabel,
   sendMessage,
   deleteThread,
-} = useModemMessageThread({ modemId, participant, isNewConversation })
+} = useModemMessageThread({
+  modemId,
+  participant,
+  isNewConversation,
+  defaultCountry: phoneCountry,
+})
 
 const deleteOpen = ref(false)
 const messagesContainerRef = ref<HTMLElement | null>(null)
@@ -90,6 +97,7 @@ watch(
       :is-new-conversation="isNewConversation"
       :is-sending="isSending"
       :is-loading="isLoading"
+      :default-country="phoneCountry"
       @submit="sendMessage"
     />
   </div>

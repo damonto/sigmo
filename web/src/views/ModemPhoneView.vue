@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Delete, Phone, PhoneCall, PhoneIncoming, PhoneOutgoing } from 'lucide-vue-next'
+import { Delete, Phone, PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2 } from 'lucide-vue-next'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -9,6 +9,15 @@ import { useUssdApi } from '@/apis/ussd'
 import BackButton from '@/components/BackButton.vue'
 import DraggableFab from '@/components/fab/DraggableFab.vue'
 import ModemStickyTopBar from '@/components/modem/ModemStickyTopBar.vue'
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -19,9 +28,12 @@ import {
 } from '@/components/ui/dialog'
 import { Spinner } from '@/components/ui/spinner'
 import { useModemCallSession } from '@/composables/useModemCallSession'
+import { useModemPhoneCountry } from '@/composables/useModemPhoneCountry'
 import { useStickyTopBar } from '@/composables/useStickyTopBar'
 import { hasBrowserAmrCodec } from '@/lib/browserAmrCodec'
 import { formatListTimestamp } from '@/lib/datetime'
+import { dialStringChars, formatDialInput, isDialServiceCode } from '@/lib/phoneNumberInput'
+import type { CallRecord } from '@/types/call'
 import type { UssdAction } from '@/types/ussd'
 
 const route = useRoute()
@@ -33,6 +45,7 @@ const dialInputRef = ref<HTMLInputElement | null>(null)
 const { isStickyVisible } = useStickyTopBar(backButtonRef)
 
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
+const { phoneCountry } = useModemPhoneCountry(modemId)
 
 const {
   recentCalls,
@@ -46,11 +59,17 @@ const {
   stateLabel,
   primaryLine,
   callDurationLabel,
+  terminalStates,
+  isDeletingCallID,
   dial,
+  deleteRecord,
   loadCalls,
-} = useModemCallSession(modemId)
+} = useModemCallSession(modemId, phoneCountry)
 
 const dialpadOpen = ref(false)
+const expandedCallID = ref('')
+const deleteDialogOpen = ref(false)
+const deleteTarget = ref<CallRecord | null>(null)
 const digits = ref('')
 const plusLongPressTimer = ref<number | null>(null)
 const suppressNextZeroClick = ref(false)
@@ -76,7 +95,7 @@ const keys = [
   { value: '#', letters: '' },
 ]
 
-const normalizedDigits = computed(() => digits.value.trim())
+const normalizedDigits = computed(() => dialStringChars(digits.value))
 const canDial = computed(() => normalizedDigits.value.length > 0 && !isDialing.value)
 const dialInputClass = computed(() => {
   const length = normalizedDigits.value.length
@@ -86,17 +105,21 @@ const dialInputClass = computed(() => {
   return 'text-3xl'
 })
 
-const isUssd = (value: string) => value.startsWith('*') || value.startsWith('#')
+const isUssd = (value: string) => isDialServiceCode(value)
 
 const shouldPrepareOutgoingAudio = () => hasBrowserAmrCodec() && wifiCallingConnected.value
 
+const setDigits = (value: string) => {
+  digits.value = formatDialInput(value, phoneCountry.value)
+}
+
 const appendDigit = (value: string) => {
-  digits.value += value
+  setDigits(`${digits.value}${value}`)
 }
 
 const appendPlus = () => {
-  if (digits.value.includes('+')) return
-  digits.value = digits.value.length === 0 ? '+' : `${digits.value}+`
+  if (dialStringChars(digits.value)) return
+  setDigits('+')
 }
 
 const clearPlusLongPress = () => {
@@ -125,7 +148,12 @@ const appendKey = (value: string) => {
 }
 
 const backspace = () => {
-  digits.value = digits.value.slice(0, -1)
+  setDigits(dialStringChars(digits.value).slice(0, -1))
+}
+
+const updateDialInput = (event: Event) => {
+  const target = event.target as HTMLInputElement | null
+  setDigits(target?.value ?? '')
 }
 
 const openUssdDialog = (code: string) => {
@@ -161,7 +189,7 @@ const startDial = async () => {
 }
 
 const dialNumber = async (number: string) => {
-  digits.value = number
+  setDigits(number)
   await startDial()
 }
 
@@ -208,13 +236,56 @@ const pageErrorMessage = computed(
   () => errorMessage.value || (!activeCall.value ? callAudio.errorMessage.value : ''),
 )
 
+const formatDetailTimestamp = (value: string) => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  }).format(date)
+}
+
+const toggleCallDetails = (call: CallRecord) => {
+  expandedCallID.value = expandedCallID.value === call.callID ? '' : call.callID
+}
+
+const openDeleteDialog = (call: CallRecord) => {
+  deleteTarget.value = call
+  deleteDialogOpen.value = true
+}
+
+const confirmDeleteRecord = async () => {
+  if (!deleteTarget.value) return
+  const callID = deleteTarget.value.callID
+  const deleted = await deleteRecord(deleteTarget.value)
+  if (!deleted) return
+  if (expandedCallID.value === callID) {
+    expandedCallID.value = ''
+  }
+  deleteDialogOpen.value = false
+  deleteTarget.value = null
+}
+
 watch(
   modemId,
   () => {
+    expandedCallID.value = ''
+    deleteDialogOpen.value = false
+    deleteTarget.value = null
     void loadWiFiCallingStatus()
   },
   { immediate: true },
 )
+
+watch(phoneCountry, () => {
+  setDigits(digits.value)
+})
+
+watch(deleteDialogOpen, (open) => {
+  if (open) return
+  deleteTarget.value = null
+})
 
 watch(dialpadOpen, async (open) => {
   if (!open) return
@@ -266,6 +337,12 @@ watch(dialpadOpen, async (open) => {
         v-for="call in recentCalls"
         :key="call.callID"
         class="group rounded-lg bg-card px-4 py-3 shadow-sm transition hover:shadow-md"
+        role="button"
+        tabindex="0"
+        :aria-expanded="expandedCallID === call.callID"
+        @click="toggleCallDetails(call)"
+        @keydown.enter.prevent="toggleCallDetails(call)"
+        @keydown.space.prevent="toggleCallDetails(call)"
       >
         <div class="flex items-center gap-3">
           <span
@@ -306,10 +383,89 @@ watch(dialpadOpen, async (open) => {
             class="size-8 shrink-0 rounded-full opacity-100 transition"
             :disabled="!call.number"
             :aria-label="t('modemDetail.phone.callBack')"
-            @click="dialNumber(call.number)"
+            @click.stop="dialNumber(call.number)"
           >
             <PhoneCall class="size-4" />
           </Button>
+        </div>
+
+        <div v-if="expandedCallID === call.callID" class="mt-4 border-t pt-4" @click.stop>
+          <dl class="grid grid-cols-2 gap-3 text-sm">
+            <div class="space-y-1">
+              <dt class="text-xs font-medium text-muted-foreground">
+                {{ t('modemDetail.phone.details.direction') }}
+              </dt>
+              <dd>{{ t(`modemDetail.phone.${call.direction}`) }}</dd>
+            </div>
+            <div class="space-y-1">
+              <dt class="text-xs font-medium text-muted-foreground">
+                {{ t('modemDetail.phone.details.state') }}
+              </dt>
+              <dd>{{ stateLabel(call.state) }}</dd>
+            </div>
+            <div class="space-y-1">
+              <dt class="text-xs font-medium text-muted-foreground">
+                {{ t('modemDetail.phone.details.route') }}
+              </dt>
+              <dd>{{ routeLabel(call.route) }}</dd>
+            </div>
+            <div class="space-y-1">
+              <dt class="text-xs font-medium text-muted-foreground">
+                {{ t('modemDetail.phone.details.duration') }}
+              </dt>
+              <dd>{{ callDurationLabel(call) || t('modemDetail.phone.durationEmpty') }}</dd>
+            </div>
+            <div class="space-y-1">
+              <dt class="text-xs font-medium text-muted-foreground">
+                {{ t('modemDetail.phone.details.startedAt') }}
+              </dt>
+              <dd>{{ formatDetailTimestamp(call.startedAt) }}</dd>
+            </div>
+            <div class="space-y-1">
+              <dt class="text-xs font-medium text-muted-foreground">
+                {{ t('modemDetail.phone.details.answeredAt') }}
+              </dt>
+              <dd>
+                {{
+                  call.answeredAt
+                    ? formatDetailTimestamp(call.answeredAt)
+                    : t('modemDetail.phone.details.notAnswered')
+                }}
+              </dd>
+            </div>
+            <div class="space-y-1">
+              <dt class="text-xs font-medium text-muted-foreground">
+                {{ t('modemDetail.phone.details.endedAt') }}
+              </dt>
+              <dd>
+                {{
+                  call.endedAt
+                    ? formatDetailTimestamp(call.endedAt)
+                    : t('modemDetail.phone.details.inProgress')
+                }}
+              </dd>
+            </div>
+            <div v-if="call.reason" class="space-y-1">
+              <dt class="text-xs font-medium text-muted-foreground">
+                {{ t('modemDetail.phone.details.reason') }}
+              </dt>
+              <dd>{{ call.reason }}</dd>
+            </div>
+          </dl>
+
+          <div v-if="terminalStates.has(call.state)" class="mt-4 flex justify-end">
+            <Button
+              variant="destructive"
+              size="sm"
+              class="w-full gap-2 sm:w-auto"
+              :disabled="isDeletingCallID === call.callID"
+              @click="openDeleteDialog(call)"
+            >
+              <Spinner v-if="isDeletingCallID === call.callID" class="size-4" />
+              <Trash2 v-else class="size-4" />
+              {{ t('modemDetail.phone.deleteRecord') }}
+            </Button>
+          </div>
         </div>
       </div>
     </section>
@@ -333,13 +489,14 @@ watch(dialpadOpen, async (open) => {
           <div class="relative flex min-h-24 items-center">
             <input
               ref="dialInputRef"
-              v-model="digits"
+              :value="digits"
               type="tel"
               inputmode="tel"
               autocomplete="tel"
               class="h-20 w-full bg-transparent text-center font-semibold tracking-normal outline-none"
               :class="dialInputClass"
               :aria-label="t('modemDetail.phone.numberPlaceholder')"
+              @input="updateDialInput"
               @keydown.enter.prevent="startDial"
             />
             <Button
@@ -419,5 +576,33 @@ watch(dialpadOpen, async (open) => {
         </div>
       </DialogContent>
     </Dialog>
+
+    <AlertDialog v-model:open="deleteDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{{ t('modemDetail.phone.deleteTitle') }}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {{ t('modemDetail.phone.deleteDescription') }}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel :disabled="!!isDeletingCallID">
+            {{ t('modemDetail.actions.cancel') }}
+          </AlertDialogCancel>
+          <Button
+            variant="destructive"
+            type="button"
+            :disabled="!!isDeletingCallID"
+            @click="confirmDeleteRecord"
+          >
+            <span v-if="isDeletingCallID" class="inline-flex items-center gap-2">
+              <Spinner class="size-4" />
+              {{ t('modemDetail.actions.delete') }}
+            </span>
+            <span v-else>{{ t('modemDetail.actions.delete') }}</span>
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>

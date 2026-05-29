@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/nyaruka/phonenumbers"
@@ -75,6 +76,35 @@ func NormalizeForRegion(value string, region string) (string, error) {
 		return "", ErrInvalid
 	}
 	return e164, nil
+}
+
+func Display(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || shortCodeRE.MatchString(value) {
+		return value
+	}
+	if formatted := formatNANPString(value); formatted != "" {
+		return formatted
+	}
+	number, err := phonenumbers.Parse(value, "ZZ")
+	if err != nil || !phonenumbers.IsValidNumber(number) {
+		return value
+	}
+	return phonenumbers.Format(number, phonenumbers.INTERNATIONAL)
+}
+
+func formatNANPString(value string) string {
+	national, ok := strings.CutPrefix(value, "+1")
+	if !ok {
+		return ""
+	}
+	if len(national) != 10 {
+		return ""
+	}
+	if _, err := strconv.Atoi(national); err != nil {
+		return ""
+	}
+	return fmt.Sprintf("+1 (%s) %s-%s", national[:3], national[3:6], national[6:])
 }
 
 func Region(ctx context.Context, modem *mmodem.Modem) (string, error) {

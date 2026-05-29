@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, ref, watch, type ComputedRef } from 'vue'
 
 import { buildCallEventsUrl, useCallApi } from '@/apis/call'
+import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
 import type { CallEventMessage, CallRecord, CallRoute } from '@/types/call'
 
 const terminalStates = new Set(['ended', 'failed'])
@@ -24,13 +25,14 @@ const mergeCall = (items: CallRecord[], call: CallRecord) => {
   return next.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
 }
 
-export const usePhoneCalls = (modemId: ComputedRef<string>) => {
+export const usePhoneCalls = (modemId: ComputedRef<string>, defaultCountry?: ComputedRef<string>) => {
   const callApi = useCallApi()
   const calls = ref<CallRecord[]>([])
   const activeCall = ref<CallRecord | null>(null)
   const incomingCall = ref<CallRecord | null>(null)
   const isLoading = ref(false)
   const isDialing = ref(false)
+  const isDeletingCallID = ref('')
   const errorMessage = ref('')
 
   let ws: WebSocket | null = null
@@ -121,7 +123,7 @@ export const usePhoneCalls = (modemId: ComputedRef<string>) => {
     if (incomingNotifications.has(call.callID)) return
     try {
       const notification = new Notification('Incoming call', {
-        body: call.number,
+        body: formatPhoneDisplay(call.number, defaultCountry?.value),
         tag: call.callID,
       })
       incomingNotifications.set(call.callID, notification)
@@ -284,6 +286,31 @@ export const usePhoneCalls = (modemId: ComputedRef<string>) => {
     }
   }
 
+  const deleteRecord = async (call: CallRecord) => {
+    const id = modemId.value
+    if (!id || id === 'unknown' || isDeletingCallID.value) return false
+    isDeletingCallID.value = call.callID
+    errorMessage.value = ''
+    try {
+      await callApi.deleteCall(id, call.callID)
+      calls.value = calls.value.filter((item) => item.callID !== call.callID)
+      if (incomingCall.value?.callID === call.callID) {
+        incomingCall.value = null
+        stopRing()
+        closeIncomingNotification(call.callID)
+      }
+      if (activeCall.value?.callID === call.callID) {
+        activeCall.value = null
+      }
+      return true
+    } catch (err) {
+      errorMessage.value = err instanceof Error ? err.message : 'Delete failed'
+      return false
+    } finally {
+      isDeletingCallID.value = ''
+    }
+  }
+
   watch(
     modemId,
     () => {
@@ -311,11 +338,13 @@ export const usePhoneCalls = (modemId: ComputedRef<string>) => {
     incomingCall,
     isLoading,
     isDialing,
+    isDeletingCallID,
     errorMessage,
     dial,
     answer,
     reject,
     hangup,
+    deleteRecord,
     loadCalls,
   }
 }

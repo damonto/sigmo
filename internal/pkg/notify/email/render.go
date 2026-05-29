@@ -27,7 +27,7 @@ func render(ev notifyevent.Event) (content, error) {
 			HTMLBody: otpHTML(code),
 		}, nil
 	case notifyevent.SMSEvent:
-		target := ev.Counterparty()
+		target := ev.DisplayCounterparty()
 		subject := fmt.Sprintf("Outgoing SMS to %s", target)
 		if ev.Incoming {
 			subject = fmt.Sprintf("Incoming SMS from %s", target)
@@ -37,8 +37,8 @@ func render(ev notifyevent.Event) (content, error) {
 			TextBody: fmt.Sprintf(
 				"%s\n\nFrom : %s\nTo   : %s\nModem: %s\nTime : %s\n\nMessage\n-------\n%s",
 				ev.DirectionLabel(),
-				strings.TrimSpace(ev.From),
-				strings.TrimSpace(ev.To),
+				ev.DisplayFrom(),
+				ev.DisplayTo(),
 				strings.TrimSpace(ev.Modem),
 				ev.DisplayTimestamp(),
 				ev.DisplayText(),
@@ -46,7 +46,7 @@ func render(ev notifyevent.Event) (content, error) {
 			HTMLBody: smsHTML(ev),
 		}, nil
 	case notifyevent.CallEvent:
-		target := ev.Counterparty()
+		target := ev.DisplayCounterparty()
 		subject := fmt.Sprintf("Outgoing call to %s", target)
 		if ev.Incoming {
 			subject = fmt.Sprintf("Incoming call from %s", target)
@@ -56,7 +56,7 @@ func render(ev notifyevent.Event) (content, error) {
 			TextBody: fmt.Sprintf(
 				"%s\n\nFrom : %s\nModem: %s\nTime : %s",
 				ev.DirectionLabel(),
-				strings.TrimSpace(ev.From),
+				ev.DisplayFrom(),
 				strings.TrimSpace(ev.Modem),
 				ev.DisplayTimestamp(),
 			),
@@ -95,8 +95,8 @@ func smsHTML(ev notifyevent.SMSEvent) string {
 			"<div style=\"padding:16px 18px;border:1px solid #dbe2ea;border-radius:12px;background:#ffffff;font-size:15px;line-height:1.7;white-space:pre-wrap;\">%s</div>"+
 			"</div></div>",
 		html.EscapeString(ev.DirectionLabel()),
-		html.EscapeString(strings.TrimSpace(ev.From)),
-		html.EscapeString(strings.TrimSpace(ev.To)),
+		html.EscapeString(ev.DisplayFrom()),
+		html.EscapeString(ev.DisplayTo()),
 		html.EscapeString(strings.TrimSpace(ev.Modem)),
 		html.EscapeString(ev.DisplayTimestamp()),
 		html.EscapeString(ev.DisplayText()),
@@ -116,7 +116,7 @@ func callHTML(ev notifyevent.CallEvent) string {
 			"</div>"+
 			"</div></div>",
 		html.EscapeString(ev.DirectionLabel()),
-		html.EscapeString(strings.TrimSpace(ev.From)),
+		html.EscapeString(ev.DisplayFrom()),
 		html.EscapeString(strings.TrimSpace(ev.Modem)),
 		html.EscapeString(ev.DisplayTimestamp()),
 	)

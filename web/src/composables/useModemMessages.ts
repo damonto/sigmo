@@ -3,17 +3,19 @@ import { useI18n } from 'vue-i18n'
 
 import { useMessageApi } from '@/apis/message'
 import { formatListTimestamp } from '@/lib/datetime'
+import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
 import type { MessageResponse } from '@/types/message'
 
 export type ConversationItem = {
   key: string
   participantLabel: string
   participantValue: string
+  participantSearchValue: string
   preview: string
   timestampLabel: string
 }
 
-export const useModemMessages = (modemId: ComputedRef<string>) => {
+export const useModemMessages = (modemId: ComputedRef<string>, defaultCountry?: ComputedRef<string>) => {
   const { t } = useI18n()
   const messageApi = useMessageApi()
 
@@ -30,7 +32,16 @@ export const useModemMessages = (modemId: ComputedRef<string>) => {
 
   const getParticipantLabel = (message: MessageResponse) => {
     const participant = getParticipantValue(message)
-    return participant || t('modemDetail.messages.unknownParticipant')
+    return (
+      formatPhoneDisplay(participant, defaultCountry?.value) ||
+      t('modemDetail.messages.unknownParticipant')
+    )
+  }
+
+  const getParticipantSearchValue = (message: MessageResponse) => {
+    const participant = getParticipantValue(message)
+    const display = formatPhoneDisplay(participant, defaultCountry?.value)
+    return [display, participant].join(' ').trim()
   }
 
   const items = computed<ConversationItem[]>(() =>
@@ -38,6 +49,7 @@ export const useModemMessages = (modemId: ComputedRef<string>) => {
       key: String(message.id),
       participantValue: getParticipantValue(message),
       participantLabel: getParticipantLabel(message),
+      participantSearchValue: getParticipantSearchValue(message),
       preview: message.text,
       timestampLabel: formatListTimestamp(message.timestamp),
     })),

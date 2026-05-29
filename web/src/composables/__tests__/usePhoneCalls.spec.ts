@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   answerCall: vi.fn(),
   rejectCall: vi.fn(),
   hangupCall: vi.fn(),
+  deleteCall: vi.fn(),
 }))
 
 vi.mock('@/apis/call', () => ({
@@ -115,15 +116,19 @@ const call = (patch: Partial<CallRecord> = {}): CallRecord => ({
 
 const mountComposable = () => {
   const modemId = ref('modem-1')
+  const phoneCountry = ref('US')
   let phone!: ReturnType<typeof usePhoneCalls>
   const wrapper = mount({
     template: '<div />',
     setup() {
-      phone = usePhoneCalls(computed(() => modemId.value))
+      phone = usePhoneCalls(
+        computed(() => modemId.value),
+        computed(() => phoneCountry.value),
+      )
       return {}
     },
   })
-  return { wrapper, modemId, phone }
+  return { wrapper, modemId, phone, phoneCountry }
 }
 
 describe('usePhoneCalls', () => {
@@ -142,6 +147,7 @@ describe('usePhoneCalls', () => {
     api.answerCall.mockResolvedValue({ data: ref(call({ state: 'active', answeredAt: '2026-05-27T00:00:10Z' })) })
     api.rejectCall.mockResolvedValue({ data: ref(call({ state: 'ended', endedAt: '2026-05-27T00:00:10Z' })) })
     api.hangupCall.mockResolvedValue({ data: ref(call({ state: 'ended', endedAt: '2026-05-27T00:00:10Z' })) })
+    api.deleteCall.mockResolvedValue({ data: ref(undefined) })
   })
 
   it('opens call events and surfaces incoming calls with a foreground notification', async () => {
@@ -158,7 +164,7 @@ describe('usePhoneCalls', () => {
     expect(phone.activeCall.value).toBeNull()
     expect(notifications).toHaveLength(1)
     expect(notifications[0]?.title).toBe('Incoming call')
-    expect(notifications[0]?.options).toEqual({ body: '+12242255559', tag: 'call-1' })
+    expect(notifications[0]?.options).toEqual({ body: '(224) 225-5559', tag: 'call-1' })
   })
 
   it('reconnects call events after an unexpected socket close', async () => {
@@ -324,6 +330,20 @@ describe('usePhoneCalls', () => {
     expect(api.answerCall).toHaveBeenCalledWith('modem-1', 'call-1')
     expect(api.rejectCall).toHaveBeenCalledWith('modem-1', 'call-1')
     expect(api.hangupCall).toHaveBeenCalledWith('modem-1', 'call-1')
+  })
+
+  it('deletes terminal records from the local list', async () => {
+    api.listCalls.mockResolvedValueOnce({
+      data: ref([call({ state: 'ended', endedAt: '2026-05-27T00:00:10Z' })]),
+    })
+    const { phone } = mountComposable()
+    await flushPromises()
+
+    const deleted = await phone.deleteRecord(phone.recentCalls.value[0]!)
+
+    expect(deleted).toBe(true)
+    expect(api.deleteCall).toHaveBeenCalledWith('modem-1', 'call-1')
+    expect(phone.recentCalls.value).toHaveLength(0)
   })
 
   it('clears the incoming banner when an incoming call becomes active', async () => {

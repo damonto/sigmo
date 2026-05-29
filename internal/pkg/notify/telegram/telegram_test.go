@@ -26,13 +26,13 @@ func TestRender(t *testing.T) {
 			name: "sms renders markdown with escaped values",
 			ev: notifyevent.SMSEvent{
 				Modem:    "M_1",
-				From:     "+1(23)",
-				To:       "desk#1",
+				From:     "+12223334444",
+				To:       "+8613344445555",
 				Text:     "Hello_world!",
 				Incoming: true,
 			},
 			want: content{
-				Text:      "*Incoming SMS*\n\n*From:* \\+1\\(23\\)\n*To:* desk\\#1\n*Modem:* M\\_1\n*Time:* unknown\n\n*Message:*\nHello\\_world\\!",
+				Text:      "*Incoming SMS*\n\n*From:* \\+1 \\(222\\) 333\\-4444\n*To:* \\+86 133 4444 5555\n*Modem:* M\\_1\n*Time:* unknown\n\n*Message:*\nHello\\_world\\!",
 				ParseMode: parseModeMarkdownV2,
 			},
 		},
@@ -40,11 +40,11 @@ func TestRender(t *testing.T) {
 			name: "incoming call renders caller and modem",
 			ev: notifyevent.CallEvent{
 				Modem:    "M_1",
-				From:     "+1(23)",
+				From:     "+12223334444",
 				Incoming: true,
 			},
 			want: content{
-				Text:      "*Incoming Call*\n\n*From:* \\+1\\(23\\)\n*Modem:* M\\_1\n*Time:* unknown",
+				Text:      "*Incoming Call*\n\n*From:* \\+1 \\(222\\) 333\\-4444\n*Modem:* M\\_1\n*Time:* unknown",
 				ParseMode: parseModeMarkdownV2,
 			},
 		},

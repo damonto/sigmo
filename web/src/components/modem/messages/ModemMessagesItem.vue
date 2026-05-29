@@ -46,7 +46,7 @@ const avatarTone = computed(() => {
 </script>
 
 <template>
-  <div class="group rounded-lg bg-card px-4 py-3 shadow-sm transition hover:shadow-md">
+  <div class="rounded-lg bg-card px-4 py-3 shadow-sm transition hover:shadow-md">
     <div class="flex items-center gap-3">
       <RouterLink :to="threadRoute" class="flex min-w-0 flex-1 items-center gap-3">
         <span
@@ -76,7 +76,7 @@ const avatarTone = computed(() => {
         variant="ghost"
         size="icon"
         type="button"
-        class="size-8 shrink-0 opacity-80 transition hover:text-destructive focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+        class="size-8 shrink-0 opacity-80 transition hover:text-destructive focus-visible:opacity-100"
         :aria-label="t('modemDetail.actions.delete')"
         @click.stop.prevent="emit('delete', props.item)"
       >

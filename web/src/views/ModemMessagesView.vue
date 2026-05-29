@@ -8,6 +8,7 @@ import ModemMessagesFab from '@/components/modem/messages/ModemMessagesFab.vue'
 import ModemMessagesHeader from '@/components/modem/messages/ModemMessagesHeader.vue'
 import ModemMessagesList from '@/components/modem/messages/ModemMessagesList.vue'
 import ModemMessagesSearch from '@/components/modem/messages/ModemMessagesSearch.vue'
+import { useModemPhoneCountry } from '@/composables/useModemPhoneCountry'
 import { useModemMessages, type ConversationItem } from '@/composables/useModemMessages'
 
 const route = useRoute()
@@ -15,8 +16,9 @@ const router = useRouter()
 const { t } = useI18n()
 
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
+const { phoneCountry } = useModemPhoneCountry(modemId)
 
-const { items, count, isLoading, deleteConversation } = useModemMessages(modemId)
+const { items, count, isLoading, deleteConversation } = useModemMessages(modemId, phoneCountry)
 
 const searchQuery = ref('')
 const deleteOpen = ref(false)
@@ -32,8 +34,8 @@ const filteredItems = computed(() => {
   if (!query) return items.value
 
   return items.value.filter((item) =>
-    [item.participantLabel, item.participantValue, item.preview].some((value) =>
-      value.toLocaleLowerCase().includes(query),
+    [item.participantLabel, item.participantValue, item.participantSearchValue, item.preview].some(
+      (value) => value.toLocaleLowerCase().includes(query),
     ),
   )
 })

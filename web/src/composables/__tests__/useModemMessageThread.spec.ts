@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { computed } from 'vue'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 
@@ -59,5 +59,40 @@ describe('useModemMessageThread', () => {
       params: { id: 'modem-1', participant: '+8613800138000' },
     })
     expect(api.getMessagesByParticipant).toHaveBeenCalledWith('modem-1', '+8613800138000')
+  })
+
+  it('uses the participant display number from fetched thread messages', async () => {
+    api.getMessagesByParticipant.mockResolvedValueOnce({
+      data: {
+        value: [
+          {
+            id: 1,
+            sender: '+12223334444',
+            recipient: '+8613344445555',
+            text: 'hello',
+            timestamp: '2026-05-29T10:00:00Z',
+            status: 'received',
+            incoming: true,
+            wifiCalling: false,
+          },
+        ],
+      },
+    })
+    let thread!: ReturnType<typeof useModemMessageThread>
+    mount({
+      template: '<div />',
+      setup() {
+        thread = useModemMessageThread({
+          modemId: computed(() => 'modem-1'),
+          participant: computed(() => '+12223334444'),
+          isNewConversation: computed(() => false),
+          defaultCountry: computed(() => 'US'),
+        })
+      },
+    })
+
+    await flushPromises()
+
+    expect(thread.participantLabel.value).toBe('(222) 333-4444')
   })
 })
