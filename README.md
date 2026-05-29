@@ -6,12 +6,14 @@
 
 **Sigmo** is a modern, self-hosted web UI and API for managing ModemManager-based cellular modems. It ships as a single binary with an embedded Vue 3 frontend, designed to be lightweight and easy to deploy.
 
-Sigmo focuses on advanced eSIM operations, SMS management, and network control.
+Sigmo focuses on advanced eSIM operations, eSIM Quick Transfer, SMS management, Wi-Fi Calling (VoWiFi), and network control.
 
 ## ✨ Features
 
 - **📱 eSIM Management**: List, download (SM-DP+), enable, rename, and delete eSIM profiles.
+- **🔁 eSIM Quick Transfer**: Transfer supported physical SIM or eSIM lines from another modem or CCID reader to the target eUICC through TS.43 carrier flows.
 - **📩 SMS Center**: Full conversational view for SMS, send/delete capability, and USSD session support.
+- **📶 Wi-Fi Calling (VoWiFi)**: Connect supported profiles to carrier IMS over Wi-Fi, complete carrier websheets, and route SMS, USSD, and calls through Wi-Fi Calling when available.
 - **⚙️ Modem Control**: SIM slot switching, network scanning, manual registration, and preference configuration (Alias, MSS).
 - **🔒 Secure Access**: OTP-based login system via Telegram, HTTP, Email, and more.
 - **🔔 Notifications**: Forward incoming SMS and login tokens to Telegram, Bark, Gotify, Email, etc.
@@ -46,6 +48,8 @@ Sigmo focuses on advanced eSIM operations, SMS management, and network control.
 - **OS**: Linux.
 - **Service**: `ModemManager` running on the system D-Bus when using the binary directly. The Docker image includes `ModemManager` and starts it inside the container.
 - **Permissions**: Root access or proper `udev` rules to access modem device nodes.
+- **eSIM Quick Transfer**: Requires a build with the `esim_transfer` feature, a target modem with eUICC support, a separate source modem or CCID reader, and carrier TS.43 transfer support for the source line.
+- **Wi-Fi Calling**: Requires a build with the `wifi_calling` feature, an active SIM/eSIM profile with carrier VoWiFi support, a reachable carrier ePDG/IMS service, and modem SIM access through QMI, MBIM, or AT ports.
 
 ---
 
@@ -104,6 +108,61 @@ The compose setup uses `network_mode: host` because Sigmo's internet connection 
 The container runs with `privileged: true` so Sigmo and ModemManager can access modem devices. `/run` is mounted as tmpfs so stale D-Bus sockets cannot survive container restarts. On hosts with strict Docker or udev policies, keep `/dev`, `/run/udev`, and `/sys` mounted as shown in `compose.yaml`.
 
 If you enable **Always On** for an internet connection, Sigmo stores the last connection settings in the XDG state directory (`$XDG_STATE_HOME/sigmo/internet-always-on.json`, or `$HOME/.local/state/sigmo/internet-always-on.json`). Sigmo also stores modem network Mode/Bands preferences in the same state directory (`network-preferences.json`) so they can be restored after modem reloads, program restarts, and system reboots. In the Docker image, the default state directory is `/root/.local/state/sigmo`; mount that directory as a volume if you want Docker container recreation to preserve boot-time internet auto-connect settings and network preferences.
+
+---
+
+## 🔁 eSIM Quick Transfer
+
+eSIM Quick Transfer is exposed only when the running build reports the
+`esimTransfer` capability from `/api/v1/capabilities`. Private builds enable it
+with the `esim_transfer` Go build tag.
+
+What it adds:
+
+- A transfer entry in the eSIM install dialog.
+- Source discovery from other connected modems and CCID readers.
+- Transferable line discovery for supported physical SIM and eSIM sources.
+- Carrier TS.43 transfer progress, including user prompts, carrier Websheets, SM-DS discovery, profile download, profile enablement, and completion.
+- Source profile deletion confirmation when the carrier requires it.
+
+Usage flow:
+
+1. Open the target modem's eSIM page and choose **Transfer from another device**.
+2. Select a source modem or CCID reader. CCID sources require the original device IMEI.
+3. Load transferable lines and select the line to transfer.
+4. Confirm the transfer warning. The original SIM or eSIM may become invalid after the carrier accepts the transfer.
+5. Keep both source and target devices connected until Sigmo finishes downloading and enabling the transferred profile.
+
+The source and target must be different devices. If the carrier does not expose
+a TS.43 transfer entitlement for that line, Sigmo marks it as unsupported before
+the transfer starts.
+
+---
+
+## 📶 Wi-Fi Calling (VoWiFi)
+
+Wi-Fi Calling is exposed only when the running build reports the `wifiCalling`
+capability from `/api/v1/capabilities`. Private builds enable it with the
+`wifi_calling` Go build tag.
+
+What it adds:
+
+- Per-profile Wi-Fi Calling settings in the modem settings page.
+- Carrier setup through an embedded Websheet when the carrier requires entitlement confirmation.
+- Wi-Fi Calling status on modem cards and SIM/profile selectors.
+- SMS, USSD, and voice calls over Wi-Fi Calling when the profile is connected.
+- A preference toggle to use Wi-Fi Calling for messages, USSD, and calls when it is available.
+
+Usage flow:
+
+1. Open the modem's settings page.
+2. Enable **Wi-Fi Calling** for the active SIM/eSIM profile.
+3. If Sigmo shows that carrier setup is required, open the carrier Websheet and complete the flow.
+4. Wait for the status to become connected.
+5. Send SMS, run USSD, or place calls as usual. When the preference toggle is enabled and Wi-Fi Calling is connected, Sigmo routes those actions through Wi-Fi Calling.
+
+Wi-Fi Calling settings are stored per profile in Sigmo's application database.
+They are not written to the `[modems]` section of `config.toml`.
 
 ---
 
@@ -285,8 +344,9 @@ If you wish to contribute or modify the source:
 
 5.  **Private feature build**:
 
-    The public module does not build eSIM Transfer by default. Private builds use
-    `go.private.mod` and download the private TS.43 module through normal Go module auth:
+    The public module does not build eSIM Transfer or Wi-Fi Calling by default.
+    Private builds use `go.private.mod` and download the private TS.43 and VoWiFi
+    modules through normal Go module auth:
 
     ```bash
     export GOPRIVATE=github.com/damonto/*
@@ -317,9 +377,9 @@ If you wish to contribute or modify the source:
     ```
 
     Use the private tags and modfile from `scripts/private-features.env` for private
-    builds and tests. Future private features should use their own build tag and
-    register a capability so the frontend can discover them from
-    `/api/v1/capabilities`.
+    builds and tests. It currently enables `esim_transfer,wifi_calling`. Future
+    private features should use their own build tag and register a capability so
+    the frontend can discover them from `/api/v1/capabilities`.
 
     GitHub Actions enables private features only when the repository variable
     `SIGMO_PRIVATE_FEATURES` is set to `true`. Private Go module access uses the
