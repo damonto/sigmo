@@ -147,6 +147,7 @@ const slotOptionClass = (slot: SlotInfo) => {
       :access-technology="props.accessTechnology"
       :registered-operator-name="props.registeredOperatorName"
       :wifi-calling-connected="props.wifiCallingConnected"
+      :show-signal-value="false"
       size="sm"
       class="ml-auto"
     />

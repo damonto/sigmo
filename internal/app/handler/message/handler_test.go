@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
+	pmessage "github.com/damonto/sigmo/internal/pkg/message"
 )
 
 func TestWriteSendMessageError(t *testing.T) {
@@ -22,19 +23,19 @@ func TestWriteSendMessageError(t *testing.T) {
 	}{
 		{
 			name:          "invalid recipient",
-			err:           errRecipientInvalid,
+			err:           pmessage.ErrRecipientInvalid,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorCode: errorCodeRecipientInvalid,
 		},
 		{
 			name:          "recipient required",
-			err:           errRecipientRequired,
+			err:           pmessage.ErrRecipientRequired,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorCode: errorCodeRecipientRequired,
 		},
 		{
 			name:          "text required",
-			err:           errTextRequired,
+			err:           pmessage.ErrTextRequired,
 			wantStatus:    http.StatusBadRequest,
 			wantErrorCode: errorCodeTextRequired,
 		},

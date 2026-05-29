@@ -390,7 +390,7 @@ describe('ModemDetailHeader', () => {
 })
 
 describe('SimSlotSwitcher', () => {
-  it('shows signal status on the SIM row', () => {
+  it('shows signal status on the SIM row without the signal percentage', () => {
     const wrapper = mount(SimSlotSwitcher, {
       props: {
         modelValue: 'slot-1',
@@ -423,7 +423,7 @@ describe('SimSlotSwitcher', () => {
     const status = wrapper.find('[data-testid="modem-signal-status"]')
     expect(status.exists()).toBe(true)
     expect(status.text()).toContain('R')
-    expect(status.text()).toContain('67%')
+    expect(status.text()).not.toContain('67%')
     expect(status.text()).toContain('LTE')
     expect(status.text()).toContain('Carrier')
   })

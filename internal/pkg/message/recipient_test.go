@@ -53,13 +53,13 @@ func TestNormalizeRecipientForRegion(t *testing.T) {
 			name:    "invalid local number",
 			to:      "1234567",
 			region:  "CN",
-			wantErr: errRecipientInvalid,
+			wantErr: ErrRecipientInvalid,
 		},
 		{
 			name:    "unknown region rejects local number",
 			to:      "13800138000",
 			region:  "UN",
-			wantErr: errRecipientInvalid,
+			wantErr: ErrRecipientInvalid,
 		},
 		{
 			name:   "unknown region accepts international number",
@@ -71,7 +71,7 @@ func TestNormalizeRecipientForRegion(t *testing.T) {
 			name:    "empty recipient",
 			to:      " ",
 			region:  "CN",
-			wantErr: errRecipientRequired,
+			wantErr: ErrRecipientRequired,
 		},
 	}
 

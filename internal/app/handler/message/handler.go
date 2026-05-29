@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
+	pmessage "github.com/damonto/sigmo/internal/pkg/message"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/wificalling"
@@ -16,7 +17,7 @@ import (
 
 type Handler struct {
 	registry *mmodem.Registry
-	messages *message
+	messages *pmessage.Service
 }
 
 const (
@@ -35,7 +36,7 @@ const (
 func New(registry *mmodem.Registry, store *storage.Store, wifiCalling wificalling.Coordinator) *Handler {
 	return &Handler{
 		registry: registry,
-		messages: newMessage(store, wifiCalling),
+		messages: pmessage.New(store, wifiCalling),
 	}
 }
 
@@ -49,7 +50,7 @@ func (h *Handler) List(c *echo.Context) error {
 	if err != nil {
 		return httpapi.Internal(c, errorCodeListMessagesFailed, err)
 	}
-	return c.JSON(http.StatusOK, response)
+	return c.JSON(http.StatusOK, buildConversationResponses(response))
 }
 
 func (h *Handler) ListByParticipant(c *echo.Context) error {
@@ -60,19 +61,19 @@ func (h *Handler) ListByParticipant(c *echo.Context) error {
 	}
 	participant, err := participantFromParam(c)
 	if err != nil {
-		if errors.Is(err, errParticipantRequired) {
+		if errors.Is(err, pmessage.ErrParticipantRequired) {
 			return httpapi.BadRequest(c, errorCodeParticipantRequired, err)
 		}
 		return httpapi.BadRequest(c, errorCodeInvalidParticipant, err)
 	}
 	response, err := h.messages.ListByParticipant(ctx, modem, participant)
 	if err != nil {
-		if errors.Is(err, errParticipantRequired) {
+		if errors.Is(err, pmessage.ErrParticipantRequired) {
 			return httpapi.BadRequest(c, errorCodeParticipantRequired, err)
 		}
 		return httpapi.Internal(c, errorCodeListMessageThreadFailed, err)
 	}
-	return c.JSON(http.StatusOK, response)
+	return c.JSON(http.StatusOK, buildThreadResponses(response))
 }
 
 func (h *Handler) Send(c *echo.Context) error {
@@ -93,13 +94,13 @@ func (h *Handler) Send(c *echo.Context) error {
 }
 
 func writeSendMessageError(c *echo.Context, err error) error {
-	if errors.Is(err, errRecipientRequired) {
+	if errors.Is(err, pmessage.ErrRecipientRequired) {
 		return httpapi.BadRequest(c, errorCodeRecipientRequired, err)
 	}
-	if errors.Is(err, errRecipientInvalid) {
+	if errors.Is(err, pmessage.ErrRecipientInvalid) {
 		return httpapi.BadRequest(c, errorCodeRecipientInvalid, err)
 	}
-	if errors.Is(err, errTextRequired) {
+	if errors.Is(err, pmessage.ErrTextRequired) {
 		return httpapi.BadRequest(c, errorCodeTextRequired, err)
 	}
 	return httpapi.Internal(c, errorCodeSendMessageFailed, err)
@@ -113,13 +114,13 @@ func (h *Handler) DeleteByParticipant(c *echo.Context) error {
 	}
 	participant, err := participantFromParam(c)
 	if err != nil {
-		if errors.Is(err, errParticipantRequired) {
+		if errors.Is(err, pmessage.ErrParticipantRequired) {
 			return httpapi.BadRequest(c, errorCodeParticipantRequired, err)
 		}
 		return httpapi.BadRequest(c, errorCodeInvalidParticipant, err)
 	}
 	if err := h.messages.DeleteByParticipant(ctx, modem, participant); err != nil {
-		if errors.Is(err, errParticipantRequired) {
+		if errors.Is(err, pmessage.ErrParticipantRequired) {
 			return httpapi.BadRequest(c, errorCodeParticipantRequired, err)
 		}
 		return httpapi.Internal(c, errorCodeDeleteMessageThreadFailed, err)
@@ -130,7 +131,7 @@ func (h *Handler) DeleteByParticipant(c *echo.Context) error {
 func participantFromParam(c *echo.Context) (string, error) {
 	raw := c.Param("participant")
 	if raw == "" {
-		return "", errParticipantRequired
+		return "", pmessage.ErrParticipantRequired
 	}
 	participant, err := url.PathUnescape(raw)
 	if err != nil {
