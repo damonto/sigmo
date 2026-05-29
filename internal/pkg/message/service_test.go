@@ -143,6 +143,48 @@ func TestDeleteByParticipantDeletesOnlyModemMessagesFromBackend(t *testing.T) {
 	}
 }
 
+func TestListConversationsPassesSearchQueryToStorage(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	device := &fakeModemDevice{profile: "profile-a"}
+	service := New(store, &fakeWiFiCalling{})
+	messages := []storage.Message{
+		{
+			ProfileID:   "profile-a",
+			Source:      storage.MessageSourceWiFiCalling,
+			ExternalKey: "wifi-message-1",
+			Sender:      "+12025550199",
+			Recipient:   "777",
+			Text:        "balance",
+			Timestamp:   time.Date(2026, 5, 29, 11, 0, 0, 0, time.UTC),
+			WiFiCalling: true,
+		},
+		{
+			ProfileID:   "profile-a",
+			Source:      storage.MessageSourceWiFiCalling,
+			ExternalKey: "wifi-message-2",
+			Sender:      "+12025550199",
+			Recipient:   "888",
+			Text:        "promo",
+			Timestamp:   time.Date(2026, 5, 29, 11, 1, 0, 0, time.UTC),
+			WiFiCalling: true,
+		},
+	}
+	for _, msg := range messages {
+		if _, err := store.InsertMessage(ctx, msg); err != nil {
+			t.Fatalf("InsertMessage() error = %v", err)
+		}
+	}
+
+	got, err := service.listConversations(ctx, device, "balance")
+	if err != nil {
+		t.Fatalf("listConversations() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Recipient != "777" {
+		t.Fatalf("listConversations() = %+v, want only 777 balance conversation", got)
+	}
+}
+
 type fakeModemDevice struct {
 	id        string
 	profile   string

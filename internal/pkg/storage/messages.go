@@ -58,17 +58,34 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 	return affected > 0, nil
 }
 
-func (s *Store) ListConversations(ctx context.Context, profileID string) ([]Message, error) {
+func (s *Store) ListConversations(ctx context.Context, profileID string, query string) ([]Message, error) {
 	profileID = strings.TrimSpace(profileID)
 	if profileID == "" {
 		return nil, nil
 	}
+	terms := searchTerms(query)
+	args := []any{profileID}
+	searchSQL := ""
+	if len(terms) > 0 {
+		clauses := make([]string, 0, len(terms))
+		for _, term := range terms {
+			pattern := likePattern(term.value)
+			if term.phoneOnly {
+				clauses = append(clauses, `(sender LIKE ? ESCAPE '\' OR recipient LIKE ? ESCAPE '\')`)
+				args = append(args, pattern, pattern)
+				continue
+			}
+			clauses = append(clauses, `(sender LIKE ? ESCAPE '\' OR recipient LIKE ? ESCAPE '\' OR text LIKE ? ESCAPE '\')`)
+			args = append(args, pattern, pattern, pattern)
+		}
+		searchSQL = " AND (" + strings.Join(clauses, " OR ") + ")"
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, profile_id, source, external_key, fingerprint, sender, recipient, text, timestamp, status, incoming, wifi_calling
 		FROM messages
-		WHERE profile_id = ?
+		WHERE profile_id = ?`+searchSQL+`
 		ORDER BY timestamp DESC, id DESC
-	`, profileID)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}

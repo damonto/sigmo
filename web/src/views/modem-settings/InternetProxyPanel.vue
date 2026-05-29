@@ -69,7 +69,7 @@ const copyProxyURL = async (kind: 'http' | 'socks5', value: string | null) => {
     await writeClipboardText(value)
     markProxyURLCopied(kind)
   } catch (err) {
-    console.error('[ModemInternetProxyCard] Failed to copy proxy URL:', err)
+    console.error('[InternetProxyPanel] Failed to copy proxy URL:', err)
   }
 }
 

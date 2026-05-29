@@ -25,7 +25,7 @@ func TestOTPSend(t *testing.T) {
 		{
 			name: "rejects missing auth providers",
 			settings: settings.Settings{
-				App: settings.App{
+				Auth: settings.Auth{
 					OTPRequired: true,
 				},
 			},
@@ -34,7 +34,7 @@ func TestOTPSend(t *testing.T) {
 		{
 			name: "rejects disabled auth provider",
 			settings: settings.Settings{
-				App: settings.App{
+				Auth: settings.Auth{
 					OTPRequired:   true,
 					AuthProviders: []string{"telegram"},
 				},
@@ -51,7 +51,7 @@ func TestOTPSend(t *testing.T) {
 		{
 			name: "rejects missing configured channel",
 			settings: settings.Settings{
-				App: settings.App{
+				Auth: settings.Auth{
 					OTPRequired:   true,
 					AuthProviders: []string{"telegram"},
 				},
@@ -91,7 +91,7 @@ func TestEnabledAuthProviders(t *testing.T) {
 		{
 			name: "normalizes provider names",
 			settings: settings.Settings{
-				App: settings.App{
+				Auth: settings.Auth{
 					AuthProviders: []string{" Telegram "},
 				},
 				Channels: map[string]settings.Channel{
@@ -105,7 +105,7 @@ func TestEnabledAuthProviders(t *testing.T) {
 		{
 			name: "matches channel names case-insensitively",
 			settings: settings.Settings{
-				App: settings.App{
+				Auth: settings.Auth{
 					AuthProviders: []string{"telegram"},
 				},
 				Channels: map[string]settings.Channel{
@@ -138,7 +138,7 @@ func TestSendOTPRejectsInvalidAuthProviderConfig(t *testing.T) {
 	t.Parallel()
 
 	h := New(settings.NewMemoryStore(&settings.Settings{
-		App: settings.App{
+		Auth: settings.Auth{
 			OTPRequired:   true,
 			AuthProviders: []string{"telegram"},
 		},
@@ -208,7 +208,7 @@ func TestOTPVerify(t *testing.T) {
 				code = issued
 			}
 
-			settingsStore := settings.NewMemoryStore(&settings.Settings{App: settings.App{OTPRequired: tt.required}})
+			settingsStore := settings.NewMemoryStore(&settings.Settings{Auth: settings.Auth{OTPRequired: tt.required}})
 			otp := newOTP(settingsStore, store)
 			token, err := otp.Verify(code)
 			if !errors.Is(err, tt.wantErr) {

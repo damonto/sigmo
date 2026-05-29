@@ -55,6 +55,20 @@ describe('useCallApi', () => {
     expect(getStoredToken()).toBeNull()
   })
 
+  it('adds encoded search queries to call list requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await useCallApi().listCalls('modem-1', '(224) 225')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/modems/modem-1/calls?q=%28224%29+225'),
+      expect.any(Object),
+    )
+  })
+
   it('updates call state with PATCH requests', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

@@ -49,7 +49,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
 
   const handleWiFiCallingUpdate = async () => {
     const targetId = modemId.value
-    if (!enabled.value || !targetId || targetId === 'unknown') return
+    if (!enabled.value || !targetId) return
     if (isWiFiCallingSettingsUpdating.value) return
     isWiFiCallingSettingsUpdating.value = true
     try {
@@ -68,7 +68,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
 
   const startWiFiCallingWebsheet = async () => {
     const targetId = modemId.value
-    if (!enabled.value || !targetId || targetId === 'unknown') return
+    if (!enabled.value || !targetId) return
     if (isWiFiCallingWebsheetStarting.value) return
     isWiFiCallingWebsheetStarting.value = true
     try {
@@ -82,14 +82,14 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
   const completeWiFiCallingWebsheet = async () => {
     const targetId = modemId.value
     settingsWiFiCallingWebsheet.value = null
-    if (!targetId || targetId === 'unknown') return
+    if (!targetId) return
     await fetchSettings(targetId)
   }
 
   watch(
     [modemId, enabled],
     async ([id, canUseWiFiCalling]) => {
-      if (!canUseWiFiCalling || !id || id === 'unknown') {
+      if (!canUseWiFiCalling || !id) {
         resetSettings()
         return
       }

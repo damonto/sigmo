@@ -118,12 +118,12 @@ func (s *Service) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) List(ctx context.Context, modem *mmodem.Modem) ([]storage.Call, error) {
+func (s *Service) List(ctx context.Context, modem *mmodem.Modem, query string) ([]storage.Call, error) {
 	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return s.store.ListCalls(ctx, profileID, modem.EquipmentIdentifier, 50)
+	return s.store.ListCalls(ctx, profileID, modem.EquipmentIdentifier, 50, query)
 }
 
 func (s *Service) Dial(ctx context.Context, modem *mmodem.Modem, number string, route string) (storage.Call, error) {

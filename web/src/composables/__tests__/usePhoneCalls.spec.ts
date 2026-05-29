@@ -114,9 +114,18 @@ const call = (patch: Partial<CallRecord> = {}): CallRecord => ({
   ...patch,
 })
 
-const mountComposable = () => {
+const deferredList = () => {
+  let resolve!: (value: { data: ReturnType<typeof ref<CallRecord[]>> }) => void
+  const promise = new Promise<{ data: ReturnType<typeof ref<CallRecord[]>> }>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
+const mountComposable = (initialSearch = '') => {
   const modemId = ref('modem-1')
   const phoneCountry = ref('US')
+  const searchQuery = ref(initialSearch)
   let phone!: ReturnType<typeof usePhoneCalls>
   const wrapper = mount({
     template: '<div />',
@@ -124,11 +133,12 @@ const mountComposable = () => {
       phone = usePhoneCalls(
         computed(() => modemId.value),
         computed(() => phoneCountry.value),
+        computed(() => searchQuery.value),
       )
       return {}
     },
   })
-  return { wrapper, modemId, phone, phoneCountry }
+  return { wrapper, modemId, phone, phoneCountry, searchQuery }
 }
 
 describe('usePhoneCalls', () => {
@@ -305,6 +315,70 @@ describe('usePhoneCalls', () => {
     expect(api.dialCall).toHaveBeenCalledWith('modem-1', { to: '+12242255559', route: 'auto' })
     expect(result?.number).toBe('+12242255559')
     expect(FakeNotification.requestPermission).toHaveBeenCalled()
+  })
+
+  it('reloads calls with the search query and keeps nonmatching socket events out of the list', async () => {
+    api.listCalls.mockResolvedValueOnce({
+      data: ref([call({ callID: 'matched-call', number: '+12242255559', state: 'ended' })]),
+    })
+    const { phone } = mountComposable('(224) 225')
+    await flushPromises()
+
+    expect(api.listCalls).toHaveBeenCalledWith('modem-1', '(224) 225')
+    expect(phone.recentCalls.value).toHaveLength(1)
+
+    FakeWebSocket.instances[0]?.message({
+      type: 'call',
+      call: call({ callID: 'other-call', number: '+15551234567', state: 'ended' }),
+    })
+    await nextTick()
+
+    expect(phone.recentCalls.value.map((item) => item.callID)).toEqual(['matched-call'])
+  })
+
+  it('keeps active calls while showing filtered search results', async () => {
+    const { phone, searchQuery } = mountComposable()
+    await flushPromises()
+
+    FakeWebSocket.instances[0]?.message({
+      type: 'call',
+      call: call({
+        callID: 'active-call',
+        number: '+15551234567',
+        direction: 'outgoing',
+        state: 'active',
+      }),
+    })
+    await nextTick()
+    expect(phone.activeCall.value?.callID).toBe('active-call')
+
+    searchQuery.value = '(224) 225'
+    await flushPromises()
+
+    expect(api.listCalls).toHaveBeenLastCalledWith('modem-1', '(224) 225')
+    expect(phone.recentCalls.value).toEqual([])
+    expect(phone.activeCall.value?.callID).toBe('active-call')
+  })
+
+  it('ignores stale call list responses after the search query changes', async () => {
+    const first = deferredList()
+    const second = deferredList()
+    api.listCalls.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+
+    const { phone, searchQuery } = mountComposable()
+    await flushPromises()
+
+    searchQuery.value = '224'
+    await flushPromises()
+
+    second.resolve({ data: ref([call({ callID: 'new-search', number: '+12242255559', state: 'ended' })]) })
+    await flushPromises()
+    expect(phone.recentCalls.value.map((item) => item.callID)).toEqual(['new-search'])
+
+    first.resolve({ data: ref([call({ callID: 'old-search', number: '+15551234567', state: 'ended' })]) })
+    await flushPromises()
+
+    expect(phone.recentCalls.value.map((item) => item.callID)).toEqual(['new-search'])
   })
 
   it('keeps dial API failures handled inside the composable', async () => {

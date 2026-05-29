@@ -1,30 +1,23 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { Globe2, Phone, RadioTower, Smartphone } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
-import CarrierWebsheetDialog from '@/components/CarrierWebsheetDialog.vue'
-import ModemDeviceSettingsSection from '@/components/modem/settings/ModemDeviceSettingsSection.vue'
-import ModemInternetSection from '@/components/modem/settings/ModemInternetSection.vue'
-import ModemMsisdnSection from '@/components/modem/settings/ModemMsisdnSection.vue'
-import ModemNetworkDialog from '@/components/modem/settings/ModemNetworkDialog.vue'
-import ModemNetworkSection from '@/components/modem/settings/ModemNetworkSection.vue'
+import ModemLineMsisdnDialog from '@/components/modem/settings/ModemLineMsisdnDialog.vue'
+import ModemLineSummaryCard from '@/components/modem/settings/ModemLineSummaryCard.vue'
+import ModemSettingsCategoryCard from '@/components/modem/settings/ModemSettingsCategoryCard.vue'
 import ModemSettingsHeader from '@/components/modem/settings/ModemSettingsHeader.vue'
-import ModemWiFiCallingSettingsCard from '@/components/modem/settings/ModemWiFiCallingSettingsCard.vue'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 import { useFeedbackBanner } from '@/composables/useFeedbackBanner'
-import { useModemInternet } from '@/composables/useModemInternet'
-import { useModemDeviceSettings } from '@/composables/useModemDeviceSettings'
 import { useModemMsisdn } from '@/composables/useModemMsisdn'
-import { useModemNetwork } from '@/composables/useModemNetwork'
 import { useModemOverview } from '@/composables/useModemOverview'
-import { useModemWiFiCallingSettings } from '@/composables/useModemWiFiCallingSettings'
 
 const route = useRoute()
 const { t } = useI18n()
 
-const modemId = computed(() => (route.params.id ?? 'unknown') as string)
+const modemId = computed(() => route.params.id as string)
+const msisdnDialogOpen = ref(false)
 
 const { showFeedback } = useFeedbackBanner()
 const { hasFeature, fetchCapabilities } = useCapabilities()
@@ -33,8 +26,6 @@ const canUseWiFiCalling = computed(() => hasFeature(FEATURE.wifiCalling))
 const {
   modem,
   isModemLoading,
-  currentOperatorLabel,
-  currentRegistrationState,
   currentAccessTechnology,
   fetchModem,
 } = useModemOverview(modemId)
@@ -46,207 +37,98 @@ const { msisdnInput, isMsisdnUpdating, isMsisdnValid, handleMsisdnUpdate } = use
   onSuccess: showFeedback,
 })
 
-const {
-  settingsAlias,
-  settingsMss,
-  settingsCompatible,
-  isSettingsLoading,
-  isSettingsUpdating,
-  isMssValid,
-  handleSettingsUpdate,
-} = useModemDeviceSettings({
-  modemId,
-  onSuccess: showFeedback,
+const lineOperatorLabel = computed(() => {
+  const registeredName = modem.value?.registeredOperator?.name?.trim() ?? ''
+  if (registeredName) return registeredName
+  const simName = modem.value?.sim?.operatorName?.trim() ?? ''
+  return simName || t('modemDetail.settings.networkUnknown')
 })
 
-const {
-  settingsWiFiCallingEnabled,
-  settingsWiFiCallingPreferred,
-  settingsWiFiCallingState,
-  settingsWiFiCallingWebsheet,
-  isWiFiCallingSettingsLoading,
-  isWiFiCallingSettingsUpdating,
-  isWiFiCallingWebsheetStarting,
-  handleWiFiCallingUpdate,
-  startWiFiCallingWebsheet,
-  completeWiFiCallingWebsheet,
-} = useModemWiFiCallingSettings({
-  modemId,
-  enabled: canUseWiFiCalling,
-  onSuccess: showFeedback,
+const categoryCards = computed(() => {
+  const cards = [
+    {
+      key: 'network',
+      title: t('modemDetail.settings.networkTitle'),
+      description: t('modemDetail.settings.networkCategoryDescription'),
+      icon: RadioTower,
+      to: { name: 'modem-settings-network', params: { id: modemId.value } },
+    },
+    {
+      key: 'internet',
+      title: t('modemDetail.settings.internetTitle'),
+      description: t('modemDetail.settings.internetCategoryDescription'),
+      icon: Globe2,
+      to: { name: 'modem-settings-internet', params: { id: modemId.value } },
+    },
+    {
+      key: 'wifi-calling',
+      title: t('modemDetail.settings.wifiCallingTitle'),
+      description: t('modemDetail.settings.wifiCallingCategoryDescription'),
+      icon: Phone,
+      to: { name: 'modem-settings-wifi-calling', params: { id: modemId.value } },
+    },
+    {
+      key: 'device',
+      title: t('modemDetail.settings.deviceTitle'),
+      description: t('modemDetail.settings.deviceCategoryDescription'),
+      icon: Smartphone,
+      to: { name: 'modem-settings-device', params: { id: modemId.value } },
+    },
+  ]
+
+  if (canUseWiFiCalling.value) return cards
+  return cards.filter((card) => card.key !== 'wifi-calling')
 })
 
-const {
-  networkDialogOpen,
-  availableNetworks,
-  selectedNetwork,
-  modeOptions,
-  selectedMode,
-  supportedBands,
-  selectedBands,
-  isNetworkLoading,
-  isNetworkRegistering,
-  isNetworkSettingsLoading,
-  isModeUpdating,
-  isBandUpdating,
-  hasAvailableNetworks,
-  hasNetworkSelection,
-  canUpdateMode,
-  canUpdateBands,
-  openNetworkDialog,
-  handleNetworkRegister,
-  handleModeUpdate,
-  toggleBand,
-  handleBandUpdate,
-} = useModemNetwork({
-  modemId,
-  onRegistered: fetchModem,
-  onSuccess: showFeedback,
-})
+const openMsisdnDialog = () => {
+  msisdnInput.value = modem.value?.number ?? ''
+  msisdnDialogOpen.value = true
+}
 
-const {
-  internetConnection,
-  internetPublicInfo,
-  internetAPN,
-  internetIPType,
-  internetAPNUsername,
-  internetAPNPassword,
-  internetAPNAuth,
-  internetDefaultRoute,
-  internetProxyEnabled,
-  internetAlwaysOn,
-  isInternetLoading,
-  isInternetConnecting,
-  isInternetDisconnecting,
-  isInternetConnected,
-  canConnectInternet,
-  handleInternetConnect,
-  handleInternetDisconnect,
-} = useModemInternet({
-  modemId,
-  onSuccess: showFeedback,
-})
+const saveMsisdn = async () => {
+  const updated = await handleMsisdnUpdate()
+  if (updated) {
+    msisdnDialogOpen.value = false
+  }
+}
 
 onMounted(() => {
   void fetchCapabilities()
 })
-
-const closeWiFiCallingWebsheet = () => {
-  settingsWiFiCallingWebsheet.value = null
-}
 </script>
 
 <template>
-  <div class="space-y-3">
+  <div class="space-y-4">
     <ModemSettingsHeader />
 
-    <Tabs default-value="network" class="space-y-3">
-      <TabsList class="grid w-full grid-cols-3">
-        <TabsTrigger value="network">
-          {{ t('modemDetail.settings.networkTitle') }}
-        </TabsTrigger>
-        <TabsTrigger value="internet">
-          {{ t('modemDetail.settings.internetTitle') }}
-        </TabsTrigger>
-        <TabsTrigger value="device">
-          {{ t('modemDetail.settings.deviceTitle') }}
-        </TabsTrigger>
-      </TabsList>
+    <ModemLineSummaryCard
+      :modem="modem"
+      :operator-label="lineOperatorLabel"
+      :access-technology="currentAccessTechnology"
+      @edit="openMsisdnDialog"
+    />
 
-      <TabsContent value="network" class="space-y-3">
-        <ModemMsisdnSection
-          v-model="msisdnInput"
-          :is-loading="isModemLoading"
-          :is-updating="isMsisdnUpdating"
-          :is-valid="isMsisdnValid"
-          @update="handleMsisdnUpdate"
-        />
+    <ModemLineMsisdnDialog
+      v-model:open="msisdnDialogOpen"
+      v-model:msisdn="msisdnInput"
+      :is-updating="isMsisdnUpdating"
+      :is-valid="isMsisdnValid"
+      @save="saveMsisdn"
+    />
 
-        <ModemNetworkSection
-          v-model:selected-mode="selectedMode"
-          :operator-label="currentOperatorLabel"
-          :registration-state="currentRegistrationState"
-          :access-technology="currentAccessTechnology"
-          :is-scanning="isNetworkLoading"
-          :mode-options="modeOptions"
-          :supported-bands="supportedBands"
-          :selected-bands="selectedBands"
-          :is-settings-loading="isNetworkSettingsLoading"
-          :is-mode-updating="isModeUpdating"
-          :is-band-updating="isBandUpdating"
-          :can-update-mode="canUpdateMode"
-          :can-update-bands="canUpdateBands"
-          @scan="openNetworkDialog"
-          @toggle-band="toggleBand"
-          @update-mode="handleModeUpdate"
-          @update-bands="handleBandUpdate"
-        />
-      </TabsContent>
+    <div v-if="!modem && !isModemLoading" class="rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
+      {{ t('modemDetail.unknown') }}
+    </div>
 
-      <TabsContent value="internet" class="space-y-3">
-        <ModemInternetSection
-          v-model:apn="internetAPN"
-          v-model:ip-type="internetIPType"
-          v-model:apn-username="internetAPNUsername"
-          v-model:apn-password="internetAPNPassword"
-          v-model:apn-auth="internetAPNAuth"
-          v-model:default-route="internetDefaultRoute"
-          v-model:proxy-enabled="internetProxyEnabled"
-          v-model:always-on="internetAlwaysOn"
-          :connection="internetConnection"
-          :public-info="internetPublicInfo"
-          :is-loading="isInternetLoading"
-          :is-connecting="isInternetConnecting"
-          :is-disconnecting="isInternetDisconnecting"
-          :is-connected="isInternetConnected"
-          :can-connect="canConnectInternet"
-          @connect="handleInternetConnect"
-          @disconnect="handleInternetDisconnect"
-        />
-      </TabsContent>
-
-      <TabsContent value="device" class="space-y-3">
-        <ModemWiFiCallingSettingsCard
-          v-if="canUseWiFiCalling"
-          v-model:enabled="settingsWiFiCallingEnabled"
-          v-model:preferred="settingsWiFiCallingPreferred"
-          :is-loading="isWiFiCallingSettingsLoading"
-          :is-updating="isWiFiCallingSettingsUpdating"
-          :is-websheet-starting="isWiFiCallingWebsheetStarting"
-          :state="settingsWiFiCallingState"
-          :websheet="settingsWiFiCallingWebsheet"
-          @update="handleWiFiCallingUpdate"
-          @start-websheet="startWiFiCallingWebsheet"
-        />
-
-        <ModemDeviceSettingsSection
-          v-model:alias="settingsAlias"
-          v-model:mss="settingsMss"
-          v-model:compatible="settingsCompatible"
-          :is-loading="isSettingsLoading"
-          :is-updating="isSettingsUpdating"
-          :is-valid="isMssValid"
-          @update="handleSettingsUpdate"
-        />
-      </TabsContent>
-    </Tabs>
+    <div class="space-y-3">
+      <ModemSettingsCategoryCard
+        v-for="card in categoryCards"
+        :key="card.key"
+        :title="card.title"
+        :description="card.description"
+        :icon="card.icon"
+        :to="card.to"
+      />
+    </div>
   </div>
-
-  <ModemNetworkDialog
-    v-model:open="networkDialogOpen"
-    v-model:selected-network="selectedNetwork"
-    :networks="availableNetworks"
-    :is-loading="isNetworkLoading"
-    :is-registering="isNetworkRegistering"
-    :has-available-networks="hasAvailableNetworks"
-    :has-selection="hasNetworkSelection"
-    @register="handleNetworkRegister"
-  />
-
-  <CarrierWebsheetDialog
-    :open="settingsWiFiCallingWebsheet !== null"
-    :websheet="settingsWiFiCallingWebsheet"
-    @cancel="closeWiFiCallingWebsheet"
-    @done="completeWiFiCallingWebsheet"
-  />
 </template>

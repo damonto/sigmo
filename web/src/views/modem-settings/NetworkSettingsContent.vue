@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import ModemNetworkBandsCard from '@/components/modem/settings/ModemNetworkBandsCard.vue'
-import ModemNetworkModeCard from '@/components/modem/settings/ModemNetworkModeCard.vue'
-import ModemNetworkOverviewCard from '@/components/modem/settings/ModemNetworkOverviewCard.vue'
+import NetworkBandsPanel from './NetworkBandsPanel.vue'
+import NetworkModePanel from './NetworkModePanel.vue'
+import NetworkOverviewPanel from './NetworkOverviewPanel.vue'
 import type { BandResponse, ModeResponse } from '@/types/network'
 
 const selectedMode = defineModel<string>('selectedMode', { required: true })
@@ -35,7 +35,7 @@ const handleToggleBand = (value: number, checked: boolean) => {
 
 <template>
   <div class="space-y-3">
-    <ModemNetworkOverviewCard
+    <NetworkOverviewPanel
       :operator-label="props.operatorLabel"
       :registration-state="props.registrationState"
       :access-technology="props.accessTechnology"
@@ -43,7 +43,7 @@ const handleToggleBand = (value: number, checked: boolean) => {
       @scan="emit('scan')"
     />
 
-    <ModemNetworkModeCard
+    <NetworkModePanel
       v-model:selected-mode="selectedMode"
       :mode-options="props.modeOptions"
       :is-settings-loading="props.isSettingsLoading"
@@ -52,7 +52,7 @@ const handleToggleBand = (value: number, checked: boolean) => {
       @update-mode="emit('updateMode')"
     />
 
-    <ModemNetworkBandsCard
+    <NetworkBandsPanel
       :supported-bands="props.supportedBands"
       :selected-bands="props.selectedBands"
       :is-settings-loading="props.isSettingsLoading"

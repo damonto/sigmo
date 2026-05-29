@@ -18,9 +18,8 @@ const { t } = useI18n()
 const { settings, values, isLoading, isSaving, fetchSettings, saveSettings } = useSettings()
 const {
   activeSection,
-  appFields,
-  appValues,
   authFields,
+  authValues,
   channels,
   channelSchemas,
   enabledChannelSchemas,
@@ -29,6 +28,7 @@ const {
   isReady,
   proxyFields,
   proxyValues,
+  setAuthValue,
   setChannelValue,
   setRootValue,
   toggleChannel,
@@ -36,7 +36,7 @@ const {
 } = useSettingsForm(settings, values)
 
 const sections = computed(() => [
-  { key: 'app' as const, label: t('settings.appTitle'), description: t('settings.appDescription') },
+  { key: 'auth' as const, label: t('settings.authTitle'), description: t('settings.authDescription') },
   {
     key: 'proxy' as const,
     label: t('settings.proxyTitle'),
@@ -101,7 +101,7 @@ const updateActiveSectionFromScroll = () => {
     return
   }
 
-  let currentSection: SettingsSectionKey = 'app'
+  let currentSection: SettingsSectionKey = 'auth'
   for (const section of sections.value) {
     const element = document.getElementById(sectionID(section.key))
     if (!element) continue
@@ -200,25 +200,14 @@ const selectSection = (section: SettingsSectionKey) => {
           </aside>
 
           <div class="space-y-8 md:space-y-10">
-            <SettingsRootSection
-              :id="sectionID('app')"
-              section="app"
-              :title="t('settings.appTitle')"
-              :description="t('settings.appDescription')"
-              :fields="appFields"
-              :values="appValues"
-              :disabled="isSaving"
-              :class="activeSection === 'app' ? 'block' : 'hidden md:block'"
-              @update-field="(key, value) => setRootValue('app', key, value)"
-            />
-
             <SettingsAuthSection
-              :app="appValues"
+              :id="sectionID('auth')"
+              :auth="authValues"
               :enabled-channels="enabledChannelSchemas"
               :fields="authFields"
               :disabled="isSaving"
-              :class="activeSection === 'app' ? 'block' : 'hidden md:block'"
-              @update-field="(key, value) => setRootValue('app', key, value)"
+              :class="activeSection === 'auth' ? 'block' : 'hidden md:block'"
+              @update-field="setAuthValue"
             />
 
             <SettingsRootSection

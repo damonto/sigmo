@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { refDebounced } from '@vueuse/core'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -18,27 +19,21 @@ const { t } = useI18n()
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
 const { phoneCountry } = useModemPhoneCountry(modemId)
 
-const { items, count, isLoading, deleteConversation } = useModemMessages(modemId, phoneCountry)
-
 const searchQuery = ref('')
+const normalizedSearchQuery = computed(() => searchQuery.value.trim())
+const debouncedSearchQuery = refDebounced(normalizedSearchQuery, 250)
+const { items, count, isLoading, deleteConversation } = useModemMessages(
+  modemId,
+  phoneCountry,
+  debouncedSearchQuery,
+)
 const deleteOpen = ref(false)
 const deleteLoading = ref(false)
 const deleteTarget = ref<ConversationItem | null>(null)
 
 const deleteTargetLabel = computed(() => deleteTarget.value?.participantLabel ?? '')
 const isFabDisabled = computed(() => modemId.value === 'unknown')
-const normalizedSearchQuery = computed(() => searchQuery.value.trim().toLocaleLowerCase())
-const isSearching = computed(() => normalizedSearchQuery.value.length > 0)
-const filteredItems = computed(() => {
-  const query = normalizedSearchQuery.value
-  if (!query) return items.value
-
-  return items.value.filter((item) =>
-    [item.participantLabel, item.participantValue, item.participantSearchValue, item.preview].some(
-      (value) => value.toLocaleLowerCase().includes(query),
-    ),
-  )
-})
+const isSearching = computed(() => debouncedSearchQuery.value.length > 0)
 const emptyLabel = computed(() =>
   isSearching.value ? t('modemDetail.messages.noSearchResults') : t('modemDetail.messages.empty'),
 )
@@ -83,7 +78,7 @@ const startConversation = async () => {
     <ModemMessagesSearch v-model="searchQuery" />
 
     <ModemMessagesList
-      :items="filteredItems"
+      :items="items"
       :modem-id="modemId"
       :is-loading="isLoading"
       :empty-label="emptyLabel"

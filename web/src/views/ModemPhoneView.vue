@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { refDebounced } from '@vueuse/core'
 import { Delete, Phone, PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2 } from 'lucide-vue-next'
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
@@ -8,6 +9,7 @@ import { useModemApi } from '@/apis/modem'
 import { useUssdApi } from '@/apis/ussd'
 import BackButton from '@/components/BackButton.vue'
 import DraggableFab from '@/components/fab/DraggableFab.vue'
+import ModemSearchInput from '@/components/modem/ModemSearchInput.vue'
 import ModemStickyTopBar from '@/components/modem/ModemStickyTopBar.vue'
 import {
   AlertDialog,
@@ -46,6 +48,9 @@ const { isStickyVisible } = useStickyTopBar(backButtonRef)
 
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
 const { phoneCountry } = useModemPhoneCountry(modemId)
+const searchQuery = ref('')
+const normalizedSearchQuery = computed(() => searchQuery.value.trim())
+const debouncedSearchQuery = refDebounced(normalizedSearchQuery, 250)
 
 const {
   recentCalls,
@@ -64,6 +69,7 @@ const {
   dial,
   deleteRecord,
   loadCalls,
+  setSearchQuery,
 } = useModemCallSession(modemId, phoneCountry)
 
 const dialpadOpen = ref(false)
@@ -235,6 +241,10 @@ const loadWiFiCallingStatus = async () => {
 const pageErrorMessage = computed(
   () => errorMessage.value || (!activeCall.value ? callAudio.errorMessage.value : ''),
 )
+const isSearching = computed(() => debouncedSearchQuery.value.length > 0)
+const emptyLabel = computed(() =>
+  isSearching.value ? t('modemDetail.phone.noSearchResults') : t('modemDetail.phone.empty'),
+)
 
 const formatDetailTimestamp = (value: string) => {
   if (!value) return ''
@@ -278,6 +288,18 @@ watch(
   { immediate: true },
 )
 
+watch(
+  debouncedSearchQuery,
+  (query) => {
+    setSearchQuery(query)
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  setSearchQuery('')
+})
+
 watch(phoneCountry, () => {
   setDigits(digits.value)
 })
@@ -320,6 +342,12 @@ watch(dialpadOpen, async (open) => {
       {{ pageErrorMessage }}
     </p>
 
+    <ModemSearchInput
+      v-model="searchQuery"
+      :placeholder="t('modemDetail.phone.searchPlaceholder')"
+      :clear-label="t('modemDetail.phone.clearSearch')"
+    />
+
     <div v-if="isLoading" class="flex flex-1 items-center justify-center">
       <Spinner class="size-6" />
     </div>
@@ -329,7 +357,7 @@ watch(dialpadOpen, async (open) => {
       class="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed px-6 py-12 text-center"
     >
       <Phone class="mb-3 size-10 text-muted-foreground" />
-      <p class="font-medium">{{ t('modemDetail.phone.empty') }}</p>
+      <p class="font-medium">{{ emptyLabel }}</p>
     </div>
 
     <section v-else class="space-y-3">

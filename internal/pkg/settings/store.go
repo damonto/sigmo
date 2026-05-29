@@ -13,7 +13,7 @@ import (
 
 const (
 	globalScopeKey      = "global"
-	appSettingsKey      = "auth.settings"
+	authSettingsKey     = "auth.settings"
 	channelSettingsKey  = "notification.channels"
 	proxySettingsKey    = "proxy.settings"
 	modemSettingsKey    = "modem.settings"
@@ -55,7 +55,7 @@ func (s *Store) Snapshot() Settings {
 func (s *Store) OTPRequired() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.current.App.OTPRequired
+	return s.current.Auth.OTPRequired
 }
 
 func (s *Store) FindModem(id string) Modem {
@@ -105,11 +105,11 @@ func (s *Store) UpdateModem(ctx context.Context, id string, modem Modem) error {
 func load(ctx context.Context, db *storage.Store) (Settings, error) {
 	current := Default().Clone()
 
-	var app App
-	if ok, err := get(ctx, db, globalScopeKey, appSettingsKey, &app); err != nil {
+	var auth Auth
+	if ok, err := get(ctx, db, globalScopeKey, authSettingsKey, &auth); err != nil {
 		return Settings{}, err
 	} else if ok {
-		current.App = app
+		current.Auth = auth
 	}
 
 	var channels map[string]Channel
@@ -162,7 +162,7 @@ func (s *Store) save(ctx context.Context, current Settings) error {
 	if s.db == nil {
 		return errStorageRequired
 	}
-	if err := s.db.Put(ctx, globalScopeKey, appSettingsKey, current.App); err != nil {
+	if err := s.db.Put(ctx, globalScopeKey, authSettingsKey, current.Auth); err != nil {
 		return err
 	}
 	if err := s.db.Put(ctx, globalScopeKey, channelSettingsKey, current.Channels); err != nil {

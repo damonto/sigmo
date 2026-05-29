@@ -7,32 +7,25 @@ import type {
   SettingsValues,
 } from '@/types/settings'
 
-export type SettingsRootSection = 'app' | 'proxy'
-export type SettingsSectionKey = SettingsRootSection | 'channels'
-
-const authFieldKeys = new Set(['otpRequired', 'authProviders'])
+export type SettingsRootSection = 'proxy'
+export type SettingsSectionKey = 'auth' | SettingsRootSection | 'channels'
 
 export const useSettingsForm = (
   settings: Ref<SettingsResponse | null>,
   values: Ref<SettingsValues | null>,
 ) => {
-  const activeSection = ref<SettingsSectionKey>('app')
+  const activeSection = ref<SettingsSectionKey>('auth')
   const expandedChannels = ref<Record<string, boolean>>({})
 
   const schema = computed(() => settings.value?.schema)
-  const appFields = computed(() =>
-    (schema.value?.app ?? []).filter((field) => !authFieldKeys.has(field.key)),
-  )
-  const authFields = computed(() =>
-    (schema.value?.app ?? []).filter((field) => authFieldKeys.has(field.key)),
-  )
+  const authFields = computed(() => schema.value?.auth ?? [])
   const proxyFields = computed(() => schema.value?.proxy ?? [])
   const channelSchemas = computed(() => schema.value?.channels ?? [])
   const enabledChannelSchemas = computed(() =>
     channelSchemas.value.filter((channel) => isChannelEnabled(channel.key)),
   )
   const isReady = computed(() => values.value !== null && schema.value !== undefined)
-  const appValues = computed(() => values.value?.app ?? null)
+  const authValues = computed(() => values.value?.auth ?? null)
   const proxyValues = computed(() => values.value?.proxy ?? null)
   const channels = computed(() => values.value?.channels ?? {})
 
@@ -44,6 +37,12 @@ export const useSettingsForm = (
   const setRootValue = (section: SettingsRootSection, key: string, value: unknown) => {
     const record = rootRecord(section)
     if (!record) return
+    record[key] = value
+  }
+
+  const setAuthValue = (key: string, value: unknown) => {
+    if (!values.value) return
+    const record = values.value.auth as unknown as Record<string, unknown>
     record[key] = value
   }
 
@@ -82,7 +81,7 @@ export const useSettingsForm = (
 
   const removeAuthProvider = (channel: string) => {
     if (!values.value) return
-    values.value.app.authProviders = values.value.app.authProviders.filter(
+    values.value.auth.authProviders = values.value.auth.authProviders.filter(
       (item) => item !== channel,
     )
   }
@@ -111,9 +110,8 @@ export const useSettingsForm = (
 
   return {
     activeSection,
-    appFields,
-    appValues,
     authFields,
+    authValues,
     channels,
     channelSchemas,
     enabledChannelSchemas,
@@ -122,6 +120,7 @@ export const useSettingsForm = (
     isReady,
     proxyFields,
     proxyValues,
+    setAuthValue,
     setChannelValue,
     setRootValue,
     toggleChannel,

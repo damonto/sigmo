@@ -46,7 +46,7 @@ func (h *Handler) List(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeListMessagesFailed)
 	}
-	response, err := h.messages.ListConversations(ctx, modem)
+	response, err := h.messages.ListConversations(ctx, modem, c.QueryParam("q"))
 	if err != nil {
 		return httpapi.Internal(c, errorCodeListMessagesFailed, err)
 	}

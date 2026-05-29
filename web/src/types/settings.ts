@@ -1,4 +1,4 @@
-export type SettingsApp = {
+export type SettingsAuth = {
   authProviders: string[]
   otpRequired: boolean
 }
@@ -27,7 +27,7 @@ export type SettingsChannel = {
 }
 
 export type SettingsValues = {
-  app: SettingsApp
+  auth: SettingsAuth
   proxy: SettingsProxy
   channels: Record<string, SettingsChannel>
 }
@@ -68,7 +68,7 @@ export type SettingsChannelSchema = {
 }
 
 export type SettingsSchema = {
-  app: SettingsField[]
+  auth: SettingsField[]
   proxy: SettingsField[]
   channels: SettingsChannelSchema[]
 }

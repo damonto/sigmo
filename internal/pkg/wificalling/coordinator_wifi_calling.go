@@ -78,6 +78,12 @@ var retryDelays = []time.Duration{
 	600 * time.Second,
 }
 
+const (
+	terminalVendor          = "Google"
+	terminalModel           = "Pixel 8 Pro"
+	terminalSoftwareVersion = "15/AP3A.240905.015"
+)
+
 func New(cfg Config) Coordinator {
 	return &coordinator{
 		settings:         NewSettingsStore(cfg.Store),
@@ -282,7 +288,7 @@ func initialDialedVoiceCallState(info VoiceCall, state imsvoice.CallState) Voice
 }
 
 func isAnsweredVoiceState(state imsvoice.CallState) bool {
-	return state == imsvoice.CallStateActive
+	return state == imsvoice.CallStateActive || state == imsvoice.CallStateConfirmed
 }
 
 func failedOutgoingVoiceCall(modemID string, profileID string, to string, err error) VoiceCall {
@@ -718,9 +724,13 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem) (*vo
 	if err != nil {
 		return nil, err
 	}
+	imei, err := modem.ThreeGPP().IMEI(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read modem IMEI: %w", err)
+	}
 	client, err := vowifi.New(reader, &vowifi.Config{
-		IMEI:   modem.EquipmentIdentifier,
-		Logger: slog.Default(),
+		Logger:   slog.Default(),
+		Terminal: terminalInfo(imei),
 		IMS: vowifi.IMSConfig{
 			Voice: browserVoiceConfig(),
 		},
@@ -741,6 +751,15 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem) (*vo
 		return nil, err
 	}
 	return client, nil
+}
+
+func terminalInfo(imei string) vowifi.TerminalInfo {
+	return vowifi.TerminalInfo{
+		ID:              imei,
+		Vendor:          terminalVendor,
+		Model:           terminalModel,
+		SoftwareVersion: terminalSoftwareVersion,
+	}
 }
 
 func (c *coordinator) wfcWebsheetRequest(err error) (websheet.Request, bool) {

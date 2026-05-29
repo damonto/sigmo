@@ -31,15 +31,17 @@ export const useModemMsisdn = ({ modemId, modem, refreshModem, onSuccess }: Opti
 
   const handleMsisdnUpdate = async () => {
     const targetId = modemId.value
-    if (!targetId || targetId === 'unknown') return
-    if (!isMsisdnValid.value || isMsisdnUpdating.value) return
+    if (!targetId) return false
+    if (!isMsisdnValid.value || isMsisdnUpdating.value) return false
     isMsisdnUpdating.value = true
     try {
       await modemApi.updateMsisdn(targetId, msisdnValue.value)
       await refreshModem(targetId)
       onSuccess?.(t('modemDetail.settings.msisdnSuccess'))
+      return true
     } catch (err) {
       console.error('[useModemMsisdn] Failed to update MSISDN:', err)
+      return false
     } finally {
       isMsisdnUpdating.value = false
     }

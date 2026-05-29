@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref, watch, type ComputedRef } from 'vue'
+import { computed, onBeforeUnmount, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 import { buildCallEventsUrl, useCallApi } from '@/apis/call'
 import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
@@ -25,11 +25,14 @@ const mergeCall = (items: CallRecord[], call: CallRecord) => {
   return next.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
 }
 
-export const usePhoneCalls = (modemId: ComputedRef<string>, defaultCountry?: ComputedRef<string>) => {
+export const usePhoneCalls = (
+  modemId: ComputedRef<string>,
+  defaultCountry?: ComputedRef<string>,
+  searchQuery?: Readonly<Ref<string>>,
+) => {
   const callApi = useCallApi()
   const calls = ref<CallRecord[]>([])
-  const activeCall = ref<CallRecord | null>(null)
-  const incomingCall = ref<CallRecord | null>(null)
+  const liveCalls = ref<CallRecord[]>([])
   const isLoading = ref(false)
   const isDialing = ref(false)
   const isDeletingCallID = ref('')
@@ -40,10 +43,46 @@ export const usePhoneCalls = (modemId: ComputedRef<string>, defaultCountry?: Com
   let ringTimer: number | null = null
   let eventReconnectTimer: number | null = null
   let eventReconnectAttempt = 0
+  let loadRequestID = 0
   const incomingNotifications = new Map<string, Notification>()
 
   const recentCalls = computed(() => calls.value)
   const hasRecentCalls = computed(() => recentCalls.value.length > 0)
+  const incomingCall = computed(
+    () =>
+      liveCalls.value.find((call) => call.state === 'ringing' && call.direction === 'incoming') ??
+      null,
+  )
+  const activeCall = computed(
+    () =>
+      liveCalls.value.find(
+        (call) =>
+          currentStates.has(call.state) &&
+          !(call.state === 'ringing' && call.direction === 'incoming'),
+      ) ?? null,
+  )
+
+  const currentSearchQuery = () => searchQuery?.value.trim() ?? ''
+
+  const phoneDigits = (value: string) => {
+    let result = ''
+    for (const char of value) {
+      if (char >= '0' && char <= '9') {
+        result += char
+      }
+    }
+    return result
+  }
+
+  const callMatchesSearch = (call: CallRecord) => {
+    const query = currentSearchQuery()
+    if (!query) return true
+    const number = call.number.toLocaleLowerCase()
+    const normalizedQuery = query.toLocaleLowerCase()
+    if (number.includes(normalizedQuery)) return true
+    const queryDigits = phoneDigits(query)
+    return queryDigits.length > 0 && phoneDigits(call.number).includes(queryDigits)
+  }
 
   const closeEvents = () => {
     if (eventReconnectTimer !== null) {
@@ -129,7 +168,7 @@ export const usePhoneCalls = (modemId: ComputedRef<string>, defaultCountry?: Com
       incomingNotifications.set(call.callID, notification)
       notification.onclick = () => {
         window.focus()
-        incomingCall.value = call
+        liveCalls.value = mergeCall(liveCalls.value, call)
       }
       notification.onclose = () => {
         incomingNotifications.delete(call.callID)
@@ -149,49 +188,67 @@ export const usePhoneCalls = (modemId: ComputedRef<string>, defaultCountry?: Com
   }
 
   const setCallState = (call: CallRecord) => {
-    calls.value = mergeCall(calls.value, call)
+    const previousIncoming = incomingCall.value
+    const previousActive = activeCall.value
+    calls.value = callMatchesSearch(call)
+      ? mergeCall(calls.value, call)
+      : calls.value.filter((item) => item.callID !== call.callID)
+    liveCalls.value = mergeCall(liveCalls.value, call)
     if (call.state === 'ringing' && call.direction === 'incoming') {
-      incomingCall.value = call
       startRing()
       maybeNotifyIncoming(call)
       return
     }
-    if (activeCall.value?.callID === call.callID || currentStates.has(call.state)) {
-      activeCall.value = call
-    }
-    if (incomingCall.value?.callID === call.callID && call.state !== 'ringing') {
-      incomingCall.value = null
+    if (previousIncoming?.callID === call.callID && call.state !== 'ringing') {
       stopRing()
       closeIncomingNotification(call.callID)
     }
-    if (activeCall.value?.callID === call.callID && terminalStates.has(call.state)) {
-      activeCall.value = null
+    if (previousActive?.callID === call.callID && terminalStates.has(call.state)) {
       stopRing()
       closeIncomingNotification(call.callID)
     }
   }
 
+  const seedLiveCalls = (items: CallRecord[]) => {
+    liveCalls.value = items
+    const ringingCall = incomingCall.value
+    if (ringingCall) {
+      startRing()
+      maybeNotifyIncoming(ringingCall)
+      return
+    }
+    stopRing()
+    closeIncomingNotifications()
+  }
+
   const loadCalls = async () => {
     const id = modemId.value
     if (!id || id === 'unknown') return
+    const query = currentSearchQuery()
+    const currentRequestID = ++loadRequestID
     isLoading.value = true
     errorMessage.value = ''
     try {
-      const { data } = await callApi.listCalls(id)
-      calls.value = data.value ?? []
-      const currentCall = calls.value.find((call) => currentStates.has(call.state)) ?? null
-      if (currentCall?.state === 'ringing' && currentCall.direction === 'incoming') {
-        setCallState(currentCall)
-      } else {
-        activeCall.value = currentCall
-        incomingCall.value = null
-        stopRing()
-        closeIncomingNotifications()
+      const { data } = await callApi.listCalls(id, query)
+      const nextCalls = data.value ?? []
+      if (currentRequestID !== loadRequestID) return
+      calls.value = nextCalls
+      if (!query) {
+        seedLiveCalls(nextCalls)
+        return
+      }
+      for (const call of nextCalls) {
+        if (currentStates.has(call.state)) {
+          setCallState(call)
+        }
       }
     } catch (err) {
+      if (currentRequestID !== loadRequestID) return
       errorMessage.value = err instanceof Error ? err.message : 'Loading calls failed'
     } finally {
-      isLoading.value = false
+      if (currentRequestID === loadRequestID) {
+        isLoading.value = false
+      }
     }
   }
 
@@ -292,15 +349,13 @@ export const usePhoneCalls = (modemId: ComputedRef<string>, defaultCountry?: Com
     isDeletingCallID.value = call.callID
     errorMessage.value = ''
     try {
+      const wasIncoming = incomingCall.value?.callID === call.callID
       await callApi.deleteCall(id, call.callID)
       calls.value = calls.value.filter((item) => item.callID !== call.callID)
-      if (incomingCall.value?.callID === call.callID) {
-        incomingCall.value = null
+      liveCalls.value = liveCalls.value.filter((item) => item.callID !== call.callID)
+      if (wasIncoming) {
         stopRing()
         closeIncomingNotification(call.callID)
-      }
-      if (activeCall.value?.callID === call.callID) {
-        activeCall.value = null
       }
       return true
     } catch (err) {
@@ -315,14 +370,21 @@ export const usePhoneCalls = (modemId: ComputedRef<string>, defaultCountry?: Com
     modemId,
     () => {
       calls.value = []
-      activeCall.value = null
-      incomingCall.value = null
+      liveCalls.value = []
       stopRing()
       closeIncomingNotifications()
       void loadCalls()
       openEvents()
     },
     { immediate: true },
+  )
+
+  watch(
+    () => currentSearchQuery(),
+    () => {
+      calls.value = []
+      void loadCalls()
+    },
   )
 
   onBeforeUnmount(() => {

@@ -15,9 +15,12 @@ export const useModemOverview = (modemId: ComputedRef<string>) => {
     const unknown = t('modemDetail.settings.networkUnknown')
     const name = modem.value?.registeredOperator?.name?.trim() ?? ''
     const code = modem.value?.registeredOperator?.code?.trim() ?? ''
-    if (!name && !code) return unknown
     if (name && code) return `${name} (${code})`
-    return name || code || unknown
+    if (name || code) return name || code
+    const simName = modem.value?.sim?.operatorName?.trim() ?? ''
+    const simCode = modem.value?.sim?.operatorIdentifier?.trim() ?? ''
+    if (simName && simCode) return `${simName} (${simCode})`
+    return simName || simCode || unknown
   })
 
   const currentRegistrationState = computed(() => {
@@ -44,7 +47,7 @@ export const useModemOverview = (modemId: ComputedRef<string>) => {
   watch(
     modemId,
     async (id) => {
-      if (!id || id === 'unknown') {
+      if (!id) {
         modem.value = null
         return
       }

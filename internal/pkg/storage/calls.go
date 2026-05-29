@@ -103,7 +103,7 @@ func (s *Store) DeleteCall(ctx context.Context, profileID string, modemID string
 	return nil
 }
 
-func (s *Store) ListCalls(ctx context.Context, profileID string, modemID string, limit int) ([]Call, error) {
+func (s *Store) ListCalls(ctx context.Context, profileID string, modemID string, limit int, query string) ([]Call, error) {
 	profileID = strings.TrimSpace(profileID)
 	modemID = strings.TrimSpace(modemID)
 	if profileID == "" || modemID == "" {
@@ -112,14 +112,26 @@ func (s *Store) ListCalls(ctx context.Context, profileID string, modemID string,
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
+	terms := searchTerms(query)
+	args := []any{profileID, modemID}
+	searchSQL := ""
+	if len(terms) > 0 {
+		clauses := make([]string, 0, len(terms))
+		for _, term := range terms {
+			clauses = append(clauses, `number LIKE ? ESCAPE '\'`)
+			args = append(args, likePattern(term.value))
+		}
+		searchSQL = " AND (" + strings.Join(clauses, " OR ") + ")"
+	}
+	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, profile_id, modem_id, route, direction, number, state, reason,
 			started_at, answered_at, ended_at, updated_at
 		FROM calls
-		WHERE profile_id = ? AND modem_id = ?
+		WHERE profile_id = ? AND modem_id = ?`+searchSQL+`
 		ORDER BY updated_at DESC
 		LIMIT ?
-	`, profileID, modemID, limit)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list calls: %w", err)
 	}

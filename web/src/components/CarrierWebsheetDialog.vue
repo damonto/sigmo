@@ -12,8 +12,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Spinner } from '@/components/ui/spinner'
-import { getStoredToken } from '@/lib/authStorage'
 import { resolveAPIURL } from '@/lib/apiUrl'
+import { getStoredToken } from '@/lib/authStorage'
 import { fetchJson } from '@/lib/fetch'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 
@@ -56,6 +56,19 @@ const complete = async () => {
   }
 }
 
+const sendCallback = async (callback: unknown) => {
+  const id = props.websheet?.id
+  if (!id || !callback || typeof callback !== 'object') return
+  try {
+    await fetchJson<void>(`websheets/${id}/callback`, {
+      method: 'POST',
+      body: JSON.stringify(callback),
+    })
+  } catch (err) {
+    console.error('[CarrierWebsheetDialog] Failed to relay websheet callback:', err)
+  }
+}
+
 const isTerminalCallback = (callback: unknown) => {
   if (!callback || typeof callback !== 'object') return true
   const record = callback as { event?: unknown; method?: unknown; resultCode?: unknown }
@@ -69,6 +82,7 @@ const onMessage = (event: MessageEvent) => {
   if (event.source !== iframeEl.value?.contentWindow) return
   const data = event.data as { type?: unknown; callback?: unknown } | null
   if (!data || data.type !== 'sigmo-websheet-callback') return
+  void sendCallback(data.callback)
   if (isTerminalCallback(data.callback)) {
     emit('done')
   }
@@ -109,7 +123,7 @@ watch(
           :key="iframeSrc"
           :src="iframeSrc"
           class="size-full border-0"
-          sandbox="allow-forms allow-scripts allow-popups"
+          sandbox="allow-forms allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"
           @load="loaded = true"
         />
       </div>

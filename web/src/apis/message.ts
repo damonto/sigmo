@@ -2,9 +2,20 @@ import { fetchJson } from '@/lib/fetch'
 
 import type { MessagesResponse, SendMessageResponse } from '@/types/message'
 
+const messagesPath = (id: string, query?: string) => {
+  const path = `modems/${id}/messages`
+  const params = new URLSearchParams()
+  const trimmed = query?.trim()
+  if (trimmed) {
+    params.set('q', trimmed)
+  }
+  const search = params.toString()
+  return search ? `${path}?${search}` : path
+}
+
 export const useMessageApi = () => {
-  const getMessages = (id: string) => {
-    return fetchJson<MessagesResponse>(`modems/${id}/messages`)
+  const getMessages = (id: string, query?: string) => {
+    return fetchJson<MessagesResponse>(messagesPath(id, query))
   }
 
   const getMessagesByParticipant = (id: string, participant: string) => {

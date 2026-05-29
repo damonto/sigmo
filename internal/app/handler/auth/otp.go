@@ -37,7 +37,7 @@ func (o *otp) Required() bool {
 
 func (o *otp) Send(ctx context.Context) error {
 	current := o.settingsStore.Snapshot()
-	if !current.App.OTPRequired {
+	if !current.Auth.OTPRequired {
 		return nil
 	}
 	authProviders, err := enabledAuthProviders(current)
@@ -59,11 +59,11 @@ func (o *otp) Send(ctx context.Context) error {
 }
 
 func enabledAuthProviders(current settings.Settings) ([]string, error) {
-	if len(current.App.AuthProviders) == 0 {
+	if len(current.Auth.AuthProviders) == 0 {
 		return nil, errAuthProviderRequired
 	}
-	providers := make([]string, 0, len(current.App.AuthProviders))
-	for _, provider := range current.App.AuthProviders {
+	providers := make([]string, 0, len(current.Auth.AuthProviders))
+	for _, provider := range current.Auth.AuthProviders {
 		name := strings.ToLower(strings.TrimSpace(provider))
 		if name == "" {
 			return nil, errAuthProviderRequired

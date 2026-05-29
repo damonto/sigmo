@@ -1,4 +1,4 @@
-import { computed, ref, watch, type ComputedRef } from 'vue'
+import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useMessageApi } from '@/apis/message'
@@ -15,12 +15,17 @@ export type ConversationItem = {
   timestampLabel: string
 }
 
-export const useModemMessages = (modemId: ComputedRef<string>, defaultCountry?: ComputedRef<string>) => {
+export const useModemMessages = (
+  modemId: ComputedRef<string>,
+  defaultCountry?: ComputedRef<string>,
+  searchQuery?: Readonly<Ref<string>>,
+) => {
   const { t } = useI18n()
   const messageApi = useMessageApi()
 
   const conversations = ref<MessageResponse[]>([])
   const isLoading = ref(false)
+  let requestID = 0
 
   const count = computed(() => conversations.value.length)
   const hasMessages = computed(() => conversations.value.length > 0)
@@ -55,16 +60,23 @@ export const useModemMessages = (modemId: ComputedRef<string>, defaultCountry?: 
     })),
   )
 
-  const fetchMessages = async (id?: string) => {
+  const currentSearchQuery = () => searchQuery?.value.trim() ?? ''
+
+  const fetchMessages = async (id?: string, query?: string) => {
     const targetId = id ?? modemId.value
     if (!targetId || targetId === 'unknown') return
-    if (isLoading.value) return
+    const targetQuery = query ?? currentSearchQuery()
+    const currentRequestID = ++requestID
     isLoading.value = true
     try {
-      const { data } = await messageApi.getMessages(targetId)
-      conversations.value = data.value ?? []
+      const { data } = await messageApi.getMessages(targetId, targetQuery)
+      if (currentRequestID === requestID) {
+        conversations.value = data.value ?? []
+      }
     } finally {
-      isLoading.value = false
+      if (currentRequestID === requestID) {
+        isLoading.value = false
+      }
     }
   }
 
@@ -73,14 +85,14 @@ export const useModemMessages = (modemId: ComputedRef<string>, defaultCountry?: 
     if (!targetId || targetId === 'unknown') return
     if (!participantValue.trim()) return
     await messageApi.deleteMessagesByParticipant(targetId, participantValue)
-    await fetchMessages(targetId)
+    await fetchMessages(targetId, currentSearchQuery())
   }
 
   watch(
-    modemId,
-    async (id) => {
+    [modemId, () => currentSearchQuery()],
+    async ([id, query]) => {
       if (!id || id === 'unknown') return
-      await fetchMessages(id)
+      await fetchMessages(id, query)
     },
     { immediate: true },
   )

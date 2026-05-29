@@ -6,12 +6,12 @@ type Response struct {
 }
 
 type Values struct {
-	App      AppValues                `json:"app" validate:"required"`
+	Auth     AuthValues               `json:"auth" validate:"required"`
 	Proxy    ProxyValues              `json:"proxy" validate:"required"`
 	Channels map[string]ChannelValues `json:"channels" validate:"omitempty,dive"`
 }
 
-type AppValues struct {
+type AuthValues struct {
 	AuthProviders []string `json:"authProviders" validate:"omitempty,dive,required"`
 	OTPRequired   bool     `json:"otpRequired"`
 }
@@ -45,7 +45,7 @@ type ChannelValues struct {
 }
 
 type Schema struct {
-	App      []Field         `json:"app"`
+	Auth     []Field         `json:"auth"`
 	Proxy    []Field         `json:"proxy"`
 	Channels []ChannelSchema `json:"channels"`
 }

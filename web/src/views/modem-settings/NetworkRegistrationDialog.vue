@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 
-import ModemNetworkOption from '@/components/modem/settings/ModemNetworkOption.vue'
+import NetworkOption from './NetworkOption.vue'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -52,7 +52,7 @@ const { t } = useI18n()
 
         <div v-else-if="props.hasAvailableNetworks" class="space-y-2">
           <RadioGroup v-model="selectedNetwork" class="gap-2">
-            <ModemNetworkOption
+            <NetworkOption
               v-for="network in props.networks"
               :key="network.operatorCode"
               :network="network"

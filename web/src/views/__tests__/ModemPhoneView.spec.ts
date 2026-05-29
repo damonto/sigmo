@@ -19,6 +19,8 @@ const phoneHarness = vi.hoisted(() => ({
   hangup: vi.fn(),
   deleteRecord: vi.fn(),
   loadCalls: vi.fn(),
+  setSearchQuery: vi.fn(),
+  sessionSearchQuery: null as { value: string } | null,
 }))
 
 const ussdHarness = vi.hoisted(() => ({
@@ -89,7 +91,10 @@ const labels: Record<string, string> = {
   'modemDetail.phone.states.failed': 'Failed',
   'modemDetail.phone.title': 'Phone',
   'modemDetail.phone.subtitle': 'Recent calls for this modem.',
+  'modemDetail.phone.searchPlaceholder': 'Search calls',
+  'modemDetail.phone.clearSearch': 'Clear search',
   'modemDetail.phone.empty': 'No recent calls.',
+  'modemDetail.phone.noSearchResults': 'No calls match your search.',
   'modemDetail.phone.answer': 'Answer',
   'modemDetail.phone.reject': 'Reject',
   'modemDetail.back': 'Back',
@@ -114,23 +119,26 @@ vi.mock('@/apis/modem', () => ({
 }))
 
 vi.mock('@/composables/usePhoneCalls', () => ({
-  usePhoneCalls: () => ({
-    recentCalls: computed(() => phoneHarness.recentCalls),
-    hasRecentCalls: computed(() => phoneHarness.recentCalls.length > 0),
-    activeCall: computed(() => phoneHarness.activeCall),
-    incomingCall: computed(() => phoneHarness.incomingCall),
-    isLoading: computed(() => phoneHarness.isLoading),
-    isDialing: computed(() => phoneHarness.isDialing),
-    isDeletingCallID: computed(() => phoneHarness.isDeletingCallID),
-    errorMessage: computed(() => phoneHarness.errorMessage),
-    terminalStates: new Set(['ended', 'failed']),
-    dial: phoneHarness.dial,
-    answer: phoneHarness.answer,
-    reject: phoneHarness.reject,
-    hangup: phoneHarness.hangup,
-    deleteRecord: phoneHarness.deleteRecord,
-    loadCalls: phoneHarness.loadCalls,
-  }),
+  usePhoneCalls: (_modemId: unknown, _country: unknown, searchQuery: { value: string }) => {
+    phoneHarness.sessionSearchQuery = searchQuery
+    return {
+      recentCalls: computed(() => phoneHarness.recentCalls),
+      hasRecentCalls: computed(() => phoneHarness.recentCalls.length > 0),
+      activeCall: computed(() => phoneHarness.activeCall),
+      incomingCall: computed(() => phoneHarness.incomingCall),
+      isLoading: computed(() => phoneHarness.isLoading),
+      isDialing: computed(() => phoneHarness.isDialing),
+      isDeletingCallID: computed(() => phoneHarness.isDeletingCallID),
+      errorMessage: computed(() => phoneHarness.errorMessage),
+      terminalStates: new Set(['ended', 'failed']),
+      dial: phoneHarness.dial,
+      answer: phoneHarness.answer,
+      reject: phoneHarness.reject,
+      hangup: phoneHarness.hangup,
+      deleteRecord: phoneHarness.deleteRecord,
+      loadCalls: phoneHarness.loadCalls,
+    }
+  },
 }))
 
 vi.mock('@/composables/useCallAudioSession', () => ({
@@ -155,7 +163,9 @@ vi.mock('lucide-vue-next', () => ({
   PhoneOff: { template: '<span />' },
   PhoneOutgoing: { template: '<span />' },
   RefreshCw: { template: '<span />' },
+  Search: { template: '<span />' },
   Trash2: { template: '<span />' },
+  X: { template: '<span />' },
 }))
 
 const passthrough = { template: '<div><slot /></div>' }
@@ -247,6 +257,8 @@ describe('ModemPhoneView phone interactions', () => {
     phoneHarness.deleteRecord.mockResolvedValue(true)
     phoneHarness.loadCalls.mockReset()
     phoneHarness.loadCalls.mockResolvedValue(undefined)
+    phoneHarness.setSearchQuery.mockReset()
+    phoneHarness.sessionSearchQuery = null
     callAudioHarness.errorMessage.value = ''
     callAudioHarness.prepare.mockReset()
     callAudioHarness.prepare.mockResolvedValue(true)
@@ -300,6 +312,26 @@ describe('ModemPhoneView phone interactions', () => {
     await flushPromises()
 
     expect(phoneHarness.dial).toHaveBeenCalledWith('+12242255559')
+  })
+
+  it('renders search and uses a search empty state', async () => {
+    vi.useFakeTimers()
+    try {
+      const wrapper = mountView()
+
+      const input = wrapper.get('input[role="searchbox"]')
+      expect(input.attributes('aria-label')).toBe('Search calls')
+      expect(wrapper.text()).toContain('No recent calls.')
+
+      await input.setValue('224')
+      await vi.advanceTimersByTimeAsync(250)
+      await flushPromises()
+
+      expect(phoneHarness.sessionSearchQuery?.value).toBe('224')
+      expect(wrapper.text()).toContain('No calls match your search.')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shrinks the phone input text for long numbers', async () => {

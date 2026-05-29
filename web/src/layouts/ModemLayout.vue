@@ -38,6 +38,12 @@ const tabItems = computed(() => [
   {
     key: 'settings',
     routeName: 'modem-settings',
+    activeRouteNames: [
+      'modem-settings-network',
+      'modem-settings-internet',
+      'modem-settings-device',
+      'modem-settings-wifi-calling',
+    ],
     to: { name: 'modem-settings', params: { id: modemId.value } },
     label: t('modemDetail.tabs.settings'),
     icon: Settings,

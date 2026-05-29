@@ -100,7 +100,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
   const fetchInternetPublic = async (connection: InternetConnectionResponse | null) => {
     const targetId = modemId.value
     const targetKey = connectionKey(connection)
-    if (!targetId || targetId === 'unknown' || connection?.status !== 'connected' || !targetKey) {
+    if (!targetId || connection?.status !== 'connected' || !targetKey) {
       internetPublicInfo.value = null
       publicConnectionKey.value = ''
       return
@@ -118,7 +118,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
 
   const fetchInternetConnection = async (options?: FetchConnectionOptions) => {
     const targetId = modemId.value
-    if (!targetId || targetId === 'unknown') {
+    if (!targetId) {
       resetInternet()
       return
     }
@@ -143,7 +143,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
 
   const handleInternetConnect = async () => {
     const targetId = modemId.value
-    if (!targetId || targetId === 'unknown') return
+    if (!targetId) return
     if (!canConnectInternet.value) return
     isInternetConnecting.value = true
     try {
@@ -172,7 +172,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
 
   const handleInternetDisconnect = async () => {
     const targetId = modemId.value
-    if (!targetId || targetId === 'unknown') return
+    if (!targetId) return
     if (isInternetDisconnecting.value) return
     isInternetDisconnecting.value = true
     try {
@@ -189,7 +189,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
   watch(
     modemId,
     async (id) => {
-      if (!id || id === 'unknown') {
+      if (!id) {
         resetInternet()
         return
       }

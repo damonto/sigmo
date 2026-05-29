@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
-import ModemNetworkSection from '@/components/modem/settings/ModemNetworkSection.vue'
+import NetworkSettingsContent from '@/views/modem-settings/NetworkSettingsContent.vue'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -50,7 +50,7 @@ const stubs = {
 }
 
 const mountSection = () =>
-  mount(ModemNetworkSection, {
+  mount(NetworkSettingsContent, {
     props: {
       operatorLabel: 'Carrier',
       registrationState: 'Registered',
@@ -82,7 +82,7 @@ const mountSection = () =>
     },
   })
 
-describe('ModemNetworkSection', () => {
+describe('NetworkSettingsContent', () => {
   it('renders supported modes and bands', () => {
     const wrapper = mountSection()
 

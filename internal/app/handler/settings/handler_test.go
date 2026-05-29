@@ -136,7 +136,7 @@ func TestUpdate(t *testing.T) {
 		{
 			name: "rejects auth provider without enabled channel",
 			request: UpdateRequest{
-				App: AppValues{AuthProviders: []string{"telegram"}},
+				Auth: AuthValues{AuthProviders: []string{"telegram"}},
 				Proxy: ProxyValues{
 					ListenAddress: "127.0.0.1",
 					HTTPPort:      8080,
@@ -148,7 +148,7 @@ func TestUpdate(t *testing.T) {
 		{
 			name: "rejects auth provider with disabled channel",
 			request: UpdateRequest{
-				App: AppValues{AuthProviders: []string{"telegram"}},
+				Auth: AuthValues{AuthProviders: []string{"telegram"}},
 				Proxy: ProxyValues{
 					ListenAddress: "127.0.0.1",
 					HTTPPort:      8080,
@@ -215,7 +215,7 @@ func TestUpdate(t *testing.T) {
 		{
 			name: "saves editable settings and preserves modems",
 			request: UpdateRequest{
-				App: AppValues{
+				Auth: AuthValues{
 					OTPRequired:   true,
 					AuthProviders: []string{"telegram"},
 				},
@@ -268,8 +268,8 @@ func TestUpdate(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 				t.Fatalf("Unmarshal() error = %v", err)
 			}
-			if len(resp.Values.App.AuthProviders) > 0 && !slices.IsSorted(resp.Values.App.AuthProviders) {
-				t.Fatalf("AuthProviders = %#v, want sorted", resp.Values.App.AuthProviders)
+			if len(resp.Values.Auth.AuthProviders) > 0 && !slices.IsSorted(resp.Values.Auth.AuthProviders) {
+				t.Fatalf("AuthProviders = %#v, want sorted", resp.Values.Auth.AuthProviders)
 			}
 		})
 	}

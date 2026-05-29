@@ -55,6 +55,26 @@ const router = createRouter({
           name: 'modem-settings',
           component: () => import('@/views/ModemSettingsView.vue'),
         },
+        {
+          path: 'settings/network',
+          name: 'modem-settings-network',
+          component: () => import('@/views/ModemSettingsNetworkView.vue'),
+        },
+        {
+          path: 'settings/internet',
+          name: 'modem-settings-internet',
+          component: () => import('@/views/ModemSettingsInternetView.vue'),
+        },
+        {
+          path: 'settings/device',
+          name: 'modem-settings-device',
+          component: () => import('@/views/ModemSettingsDeviceView.vue'),
+        },
+        {
+          path: 'settings/wifi-calling',
+          name: 'modem-settings-wifi-calling',
+          component: () => import('@/views/ModemSettingsWiFiCallingView.vue'),
+        },
       ],
     },
   ],

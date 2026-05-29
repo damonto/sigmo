@@ -144,7 +144,7 @@ func TestMessages(t *testing.T) {
 	}
 
 	t.Run("conversation latest", func(t *testing.T) {
-		conversations, err := store.ListConversations(ctx, "891")
+		conversations, err := store.ListConversations(ctx, "891", "")
 		if err != nil {
 			t.Fatalf("ListConversations() error = %v", err)
 		}
@@ -166,6 +166,57 @@ func TestMessages(t *testing.T) {
 		}
 		if messages[0].Text != "hello" || messages[1].Text != "reply" {
 			t.Fatalf("thread order = %q, %q; want hello, reply", messages[0].Text, messages[1].Text)
+		}
+	})
+
+	t.Run("conversation search", func(t *testing.T) {
+		inserted, err := store.InsertMessage(ctx, Message{
+			ModemID:     "modem-a",
+			ProfileID:   "891",
+			Source:      MessageSourceModem,
+			ExternalKey: "/sms/escaped",
+			Sender:      "+300",
+			Recipient:   "+200",
+			Text:        "100% done",
+			Timestamp:   base.Add(2 * time.Minute),
+			Status:      "received",
+			Incoming:    true,
+		})
+		if err != nil {
+			t.Fatalf("InsertMessage(search) error = %v", err)
+		}
+		if !inserted {
+			t.Fatal("InsertMessage(search) = false, want true")
+		}
+
+		tests := []struct {
+			name     string
+			query    string
+			wantLen  int
+			wantText string
+		}{
+			{name: "empty query keeps latest conversations", wantLen: 2, wantText: "100% done"},
+			{name: "body text", query: "hello", wantLen: 1, wantText: "hello"},
+			{name: "formatted number", query: "(300)", wantLen: 1, wantText: "100% done"},
+			{name: "escaped percent", query: "%", wantLen: 1, wantText: "100% done"},
+			{name: "digits from mixed text do not broaden body search", query: "hello 123", wantLen: 0},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				conversations, err := store.ListConversations(ctx, "891", tt.query)
+				if err != nil {
+					t.Fatalf("ListConversations() error = %v", err)
+				}
+				if len(conversations) != tt.wantLen {
+					t.Fatalf("ListConversations() length = %d, want %d", len(conversations), tt.wantLen)
+				}
+				if tt.wantLen == 0 {
+					return
+				}
+				if conversations[0].Text != tt.wantText {
+					t.Fatalf("ListConversations()[0].Text = %q, want %q", conversations[0].Text, tt.wantText)
+				}
+			})
 		}
 	})
 }
@@ -230,7 +281,7 @@ func TestCallsPersistAndListByModem(t *testing.T) {
 		}
 	}
 
-	got, err := store.ListCalls(ctx, "profile-a", "modem-1", 10)
+	got, err := store.ListCalls(ctx, "profile-a", "modem-1", 10, "")
 	if err != nil {
 		t.Fatalf("ListCalls() error = %v", err)
 	}
@@ -259,13 +310,42 @@ func TestCallsPersistAndListByModem(t *testing.T) {
 		t.Fatalf("GetCall() = %+v, want active with answered_at", updated)
 	}
 
-	got, err = store.ListCalls(ctx, "profile-a", "modem-1", 1)
+	got, err = store.ListCalls(ctx, "profile-a", "modem-1", 1, "")
 	if err != nil {
 		t.Fatalf("ListCalls(limit) error = %v", err)
 	}
 	if len(got) != 1 || got[0].ID != "call-old" {
 		t.Fatalf("ListCalls(limit) = %+v, want updated call-old first", got)
 	}
+
+	t.Run("call search", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			query   string
+			wantIDs []string
+		}{
+			{name: "empty query", wantIDs: []string{"call-old", "call-new"}},
+			{name: "formatted number", query: "(224) 225", wantIDs: []string{"call-old"}},
+			{name: "plain digits", query: "555123", wantIDs: []string{"call-new"}},
+			{name: "no match", query: "999", wantIDs: []string{}},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				calls, err := store.ListCalls(ctx, "profile-a", "modem-1", 10, tt.query)
+				if err != nil {
+					t.Fatalf("ListCalls() error = %v", err)
+				}
+				if len(calls) != len(tt.wantIDs) {
+					t.Fatalf("ListCalls() length = %d, want %d", len(calls), len(tt.wantIDs))
+				}
+				for i, wantID := range tt.wantIDs {
+					if calls[i].ID != wantID {
+						t.Fatalf("ListCalls()[%d].ID = %q, want %q", i, calls[i].ID, wantID)
+					}
+				}
+			})
+		}
+	})
 
 	if err := store.DeleteCall(ctx, "profile-a", "modem-1", "call-old"); err != nil {
 		t.Fatalf("DeleteCall() error = %v", err)

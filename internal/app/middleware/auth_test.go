@@ -43,7 +43,7 @@ func TestAuth(t *testing.T) {
 			t.Parallel()
 
 			authStore := auth.NewStore()
-			settingsStore := settings.NewMemoryStore(&settings.Settings{App: settings.App{OTPRequired: tt.required}})
+			settingsStore := settings.NewMemoryStore(&settings.Settings{Auth: settings.Auth{OTPRequired: tt.required}})
 			token := ""
 			if tt.withToken {
 				issued, _, err := authStore.IssueToken()

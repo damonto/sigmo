@@ -61,7 +61,7 @@ func (h *Handler) List(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeListCallsFailed)
 	}
-	calls, err := h.calls.List(c.Request().Context(), modem)
+	calls, err := h.calls.List(c.Request().Context(), modem, c.QueryParam("q"))
 	if err != nil {
 		return httpapi.Internal(c, errorCodeListCallsFailed, err)
 	}
@@ -192,7 +192,7 @@ func (h *Handler) Events(c *echo.Context) error {
 	}
 	events, unsubscribe := h.calls.Subscribe(16)
 	defer unsubscribe()
-	currentCalls, err := h.calls.List(c.Request().Context(), modem)
+	currentCalls, err := h.calls.List(c.Request().Context(), modem, "")
 	if err != nil {
 		return httpapi.Internal(c, errorCodeSubscribeCallEventsFailed, err)
 	}

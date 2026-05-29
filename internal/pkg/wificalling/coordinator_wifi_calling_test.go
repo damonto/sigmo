@@ -82,6 +82,32 @@ func TestRetryDelays(t *testing.T) {
 	}
 }
 
+func TestTerminalInfo(t *testing.T) {
+	tests := []struct {
+		name string
+		imei string
+		want vowifi.TerminalInfo
+	}{
+		{
+			name: "uses real device imei and transfer device shape",
+			imei: "123456789012345",
+			want: vowifi.TerminalInfo{
+				ID:              "123456789012345",
+				Vendor:          "Google",
+				Model:           "Pixel 8 Pro",
+				SoftwareVersion: "15/AP3A.240905.015",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := terminalInfo(tt.imei); got != tt.want {
+				t.Fatalf("terminalInfo() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConnectedClientRequiresSameProfile(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -230,9 +256,10 @@ func TestInitialDialedVoiceCallState(t *testing.T) {
 			state: imsvoice.CallState("early_media"),
 		},
 		{
-			name:  "confirmed call is not marked answered",
-			call:  VoiceCall{ID: "call-1", State: "confirmed", UpdatedAt: at},
-			state: imsvoice.CallState("confirmed"),
+			name:         "confirmed call is marked answered",
+			call:         VoiceCall{ID: "call-1", State: string(imsvoice.CallStateConfirmed), UpdatedAt: at},
+			state:        imsvoice.CallStateConfirmed,
+			wantAnswered: at,
 		},
 	}
 	for _, tt := range tests {
@@ -247,8 +274,9 @@ func TestInitialDialedVoiceCallState(t *testing.T) {
 
 func TestForwardCallEventCreatesPendingOutgoingCall(t *testing.T) {
 	tests := []struct {
-		name  string
-		event vowifi.CallEvent
+		name         string
+		event        vowifi.CallEvent
+		wantAnswered bool
 	}{
 		{
 			name: "dial event before DialCall returns",
@@ -263,9 +291,10 @@ func TestForwardCallEventCreatesPendingOutgoingCall(t *testing.T) {
 			name: "confirmed event before DialCall returns",
 			event: vowifi.CallEvent{
 				CallID: "call-2",
-				State:  imsvoice.CallState("confirmed"),
+				State:  imsvoice.CallStateConfirmed,
 				At:     time.Date(2026, 5, 28, 1, 22, 0, 0, time.UTC),
 			},
+			wantAnswered: true,
 		},
 	}
 	for _, tt := range tests {
@@ -305,7 +334,11 @@ func TestForwardCallEventCreatesPendingOutgoingCall(t *testing.T) {
 			if call.StartedAt.IsZero() || !call.UpdatedAt.Equal(tt.event.At) {
 				t.Fatalf("call times = started %v updated %v, want started set and updated %v", call.StartedAt, call.UpdatedAt, tt.event.At)
 			}
-			if !call.AnsweredAt.IsZero() {
+			if tt.wantAnswered {
+				if !call.AnsweredAt.Equal(tt.event.At) {
+					t.Fatalf("AnsweredAt = %v, want %v", call.AnsweredAt, tt.event.At)
+				}
+			} else if !call.AnsweredAt.IsZero() {
 				t.Fatalf("AnsweredAt = %v, want zero", call.AnsweredAt)
 			}
 			if len(events) != 1 || events[0].Call.ID != tt.event.CallID {

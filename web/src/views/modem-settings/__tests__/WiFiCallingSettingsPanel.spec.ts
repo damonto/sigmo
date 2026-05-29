@@ -2,7 +2,7 @@ import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { describe, expect, it } from 'vitest'
 
-import ModemWiFiCallingSettingsCard from '@/components/modem/settings/ModemWiFiCallingSettingsCard.vue'
+import WiFiCallingSettingsPanel from '@/views/modem-settings/WiFiCallingSettingsPanel.vue'
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
 
@@ -46,7 +46,7 @@ const mountCard = (locale: 'en' | 'zh') => {
     messages: { en, zh },
   })
 
-  return mount(ModemWiFiCallingSettingsCard, {
+  return mount(WiFiCallingSettingsPanel, {
     props: {
       enabled: true,
       preferred: true,
@@ -63,7 +63,7 @@ const mountCard = (locale: 'en' | 'zh') => {
   })
 }
 
-describe('ModemWiFiCallingSettingsCard', () => {
+describe('WiFiCallingSettingsPanel', () => {
   it('renders the English preferred Wi-Fi Calling copy for calls', () => {
     const wrapper = mountCard('en')
 

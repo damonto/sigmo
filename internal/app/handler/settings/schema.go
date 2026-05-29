@@ -13,17 +13,17 @@ const (
 
 func settingsSchema() Schema {
 	return Schema{
-		App: []Field{
+		Auth: []Field{
 			{
 				Key:         "otpRequired",
-				Label:       "settings.schema.app.otpRequired.label",
-				Description: "settings.schema.app.otpRequired.description",
+				Label:       "settings.schema.auth.otpRequired.label",
+				Description: "settings.schema.auth.otpRequired.description",
 				Control:     controlSwitch,
 			},
 			{
 				Key:         "authProviders",
-				Label:       "settings.schema.app.authProviders.label",
-				Description: "settings.schema.app.authProviders.description",
+				Label:       "settings.schema.auth.authProviders.label",
+				Description: "settings.schema.auth.authProviders.description",
 				Control:     controlChannelList,
 			},
 		},

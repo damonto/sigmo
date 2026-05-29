@@ -132,7 +132,7 @@ func TestStorePersistsSettings(t *testing.T) {
 
 	enabled := true
 	_, err = store.Update(ctx, func(current *Settings) error {
-		current.App = App{
+		current.Auth = Auth{
 			OTPRequired:   true,
 			AuthProviders: []string{"telegram"},
 		}
@@ -163,11 +163,11 @@ func TestStorePersistsSettings(t *testing.T) {
 		t.Fatalf("NewStore() reload error = %v", err)
 	}
 	got := reloaded.Snapshot()
-	if !got.App.OTPRequired {
+	if !got.Auth.OTPRequired {
 		t.Fatal("OTPRequired = false, want true")
 	}
-	if got.App.AuthProviders[0] != "telegram" {
-		t.Fatalf("AuthProviders = %#v, want telegram", got.App.AuthProviders)
+	if got.Auth.AuthProviders[0] != "telegram" {
+		t.Fatalf("AuthProviders = %#v, want telegram", got.Auth.AuthProviders)
 	}
 	if got.Channels["telegram"].BotToken != "token" {
 		t.Fatalf("telegram bot token = %q, want token", got.Channels["telegram"].BotToken)
@@ -189,7 +189,7 @@ func TestStoreDefaultsEmptyDatabase(t *testing.T) {
 	}
 
 	got := store.Snapshot()
-	if got.App.OTPRequired {
+	if got.Auth.OTPRequired {
 		t.Fatal("OTPRequired = true, want false")
 	}
 	if len(got.Channels) != 0 {

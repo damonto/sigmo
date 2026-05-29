@@ -59,7 +59,7 @@ const stubDesktopViewport = () => {
 }
 
 const values = (): SettingsValues => ({
-  app: {
+  auth: {
     authProviders: [],
     otpRequired: false,
   },
@@ -83,7 +83,7 @@ const values = (): SettingsValues => ({
 
 const response = (): SettingsResponse => ({
   schema: {
-    app: [
+    auth: [
       {
         key: 'otpRequired',
         label: 'OTP required',
@@ -236,7 +236,7 @@ describe('SettingsView', () => {
   it('renders fields from schema and auth providers as checkboxes', async () => {
     const wrapper = await mountView()
 
-    expect(wrapper.find('button#settings-app-otpRequired[role="switch"]').exists()).toBe(true)
+    expect(wrapper.find('button#settings-auth-otpRequired[role="switch"]').exists()).toBe(true)
     expect(wrapper.find('#settings-channel-telegram-recipients[role="listbox"]').exists()).toBe(true)
     expect(wrapper.find('#settings-channel-email-tlsPolicy[data-slot="select-trigger"]').exists()).toBe(
       false,
@@ -252,15 +252,15 @@ describe('SettingsView', () => {
 
   it('renders localized schema text when i18n keys are present', async () => {
     const settings = response()
-    const otpField = settings.schema.app[0]
+    const otpField = settings.schema.auth[0]
     const telegramChannel = settings.schema.channels[0]
     if (!otpField || !telegramChannel) {
       throw new Error('test fixture missing schema entries')
     }
-    settings.schema.app[0] = {
+    settings.schema.auth[0] = {
       ...otpField,
-      label: 'settings.schema.app.otpRequired.label',
-      description: 'settings.schema.app.otpRequired.description',
+      label: 'settings.schema.auth.otpRequired.label',
+      description: 'settings.schema.auth.otpRequired.description',
     }
     settings.schema.channels[0] = {
       ...telegramChannel,
@@ -279,8 +279,8 @@ describe('SettingsView', () => {
 
     const wrapper = await mountView(settings)
 
-    expect(wrapper.text()).toContain('settings.schema.app.otpRequired.label')
-    expect(wrapper.text()).toContain('settings.schema.app.otpRequired.description')
+    expect(wrapper.text()).toContain('settings.schema.auth.otpRequired.label')
+    expect(wrapper.text()).toContain('settings.schema.auth.otpRequired.description')
     expect(wrapper.text()).toContain('settings.schema.channels.telegram.label')
     expect(wrapper.text()).toContain('settings.schema.channels.telegram.description')
     expect(wrapper.text()).toContain('settings.schema.channels.http.headers.label')
@@ -311,7 +311,7 @@ describe('SettingsView', () => {
     const wrapper = await mountView(response(), root)
 
     vi.spyOn(
-      wrapper.find('#settings-section-app').element,
+      wrapper.find('#settings-section-auth').element,
       'getBoundingClientRect',
     ).mockReturnValue(sectionRect(-360))
     vi.spyOn(
@@ -395,7 +395,7 @@ describe('SettingsView', () => {
 
     expect(api.updateSettings).toHaveBeenCalledTimes(1)
     const payload = api.updateSettings.mock.calls[0]?.[0] as SettingsValues
-    expect(payload.app.authProviders).toEqual(['telegram'])
+    expect(payload.auth.authProviders).toEqual(['telegram'])
   })
 
   it('saves updated tag lists as arrays', async () => {
@@ -475,7 +475,7 @@ describe('SettingsView', () => {
 
   it('does not render unsupported controls as editable inputs', async () => {
     const settings = response()
-    settings.schema.app.push({
+    settings.schema.auth.push({
       key: 'mystery',
       label: 'Mystery',
       control: 'unsupported' as never,
@@ -484,12 +484,12 @@ describe('SettingsView', () => {
     const wrapper = await mountView(settings)
 
     expect(wrapper.text()).toContain('Unsupported control: unsupported')
-    expect(wrapper.find('input#settings-app-mystery').exists()).toBe(false)
+    expect(wrapper.find('input#settings-auth-mystery').exists()).toBe(false)
   })
 
   it('shows unsupported auth controls instead of dropping them', async () => {
     const settings = response()
-    settings.schema.app = settings.schema.app.map((field) =>
+    settings.schema.auth = settings.schema.auth.map((field) =>
       field.key === 'authProviders' ? { ...field, control: 'unsupported' as never } : field,
     )
 

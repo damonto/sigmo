@@ -59,7 +59,7 @@ func (h *Handler) Update(c *echo.Context) error {
 	}
 
 	next := h.store.Snapshot()
-	next.App = appSettingsFromValues(req.App)
+	next.Auth = authSettingsFromValues(req.Auth)
 	next.Channels = normalizeChannels(req.Channels)
 	next.Proxy = proxySettingsFromValues(req.Proxy)
 
@@ -71,7 +71,7 @@ func (h *Handler) Update(c *echo.Context) error {
 	}
 
 	saved, err := h.store.Update(c.Request().Context(), func(current *appsettings.Settings) error {
-		current.App = next.App
+		current.Auth = next.Auth
 		current.Proxy = next.Proxy
 		current.Channels = next.Channels
 		return nil
@@ -99,35 +99,35 @@ func responseFromSettings(current appsettings.Settings) Response {
 
 func valuesFromSettings(current appsettings.Settings) Values {
 	return Values{
-		App:      appValuesFromSettings(current.App),
+		Auth:     authValuesFromSettings(current.Auth),
 		Proxy:    proxyValuesFromSettings(current.ProxySettings()),
 		Channels: channelValuesFromSettings(current.Channels),
 	}
 }
 
 func normalizeRequest(req UpdateRequest) UpdateRequest {
-	req.App = normalizeAppValues(req.App)
+	req.Auth = normalizeAuthValues(req.Auth)
 	req.Proxy = normalizeProxyValues(req.Proxy)
 	req.Channels = filterChannelValues(normalizeChannelValues(req.Channels))
 	return req
 }
 
-func normalizeAppValues(app AppValues) AppValues {
-	app.AuthProviders = trimNames(app.AuthProviders)
-	return app
+func normalizeAuthValues(auth AuthValues) AuthValues {
+	auth.AuthProviders = trimNames(auth.AuthProviders)
+	return auth
 }
 
-func appSettingsFromValues(app AppValues) appsettings.App {
-	return appsettings.App{
-		AuthProviders: normalizeNames(app.AuthProviders),
-		OTPRequired:   app.OTPRequired,
+func authSettingsFromValues(auth AuthValues) appsettings.Auth {
+	return appsettings.Auth{
+		AuthProviders: normalizeNames(auth.AuthProviders),
+		OTPRequired:   auth.OTPRequired,
 	}
 }
 
-func appValuesFromSettings(app appsettings.App) AppValues {
-	return AppValues{
-		AuthProviders: slices.Clone(app.AuthProviders),
-		OTPRequired:   app.OTPRequired,
+func authValuesFromSettings(auth appsettings.Auth) AuthValues {
+	return AuthValues{
+		AuthProviders: slices.Clone(auth.AuthProviders),
+		OTPRequired:   auth.OTPRequired,
 	}
 }
 
@@ -366,10 +366,10 @@ func validateSettings(current appsettings.Settings) error {
 			return fmt.Errorf("unsupported channel %q", name)
 		}
 	}
-	if current.App.OTPRequired && len(current.App.AuthProviders) == 0 {
+	if current.Auth.OTPRequired && len(current.Auth.AuthProviders) == 0 {
 		return errAuthProvidersRequired
 	}
-	for _, provider := range current.App.AuthProviders {
+	for _, provider := range current.Auth.AuthProviders {
 		channel, ok := current.Channels[provider]
 		if !ok || !channel.IsEnabled() {
 			return fmt.Errorf("auth provider %q must be an enabled channel", provider)

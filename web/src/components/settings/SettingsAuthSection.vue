@@ -6,13 +6,14 @@ import SettingsField from '@/components/settings/SettingsField.vue'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import type {
-  SettingsApp,
+  SettingsAuth,
   SettingsChannelSchema,
   SettingsField as SettingsFieldSchema,
 } from '@/types/settings'
 
 const props = defineProps<{
-  app: SettingsApp | null
+  id: string
+  auth: SettingsAuth | null
   enabledChannels: SettingsChannelSchema[]
   fields: SettingsFieldSchema[]
   disabled?: boolean
@@ -23,19 +24,19 @@ const emit = defineEmits<{
 }>()
 
 const { t, te } = useI18n()
-const authProviders = computed(() => props.app?.authProviders ?? [])
+const authProviders = computed(() => props.auth?.authProviders ?? [])
 
 const schemaText = (value: string | undefined) => {
   return value && te(value) ? t(value) : (value ?? '')
 }
 
 const fieldID = (key: string, channel = '') => {
-  return channel ? `settings-app-${channel}-${key}` : `settings-app-${key}`
+  return channel ? `settings-auth-${channel}-${key}` : `settings-auth-${key}`
 }
 
 const fieldValue = (key: string) => {
-  if (!props.app) return undefined
-  return (props.app as unknown as Record<string, unknown>)[key]
+  if (!props.auth) return undefined
+  return (props.auth as unknown as Record<string, unknown>)[key]
 }
 
 const isAuthProvider = (channel: string) => {
@@ -58,9 +59,9 @@ const toggleAuthProvider = (channel: string, enabled: boolean) => {
 </script>
 
 <template>
-  <div class="space-y-4 border-t pt-5">
+  <section :id="id" class="scroll-mt-8 space-y-4">
     <div>
-      <h3 class="text-sm font-semibold text-foreground">{{ t('settings.authTitle') }}</h3>
+      <h2 class="text-lg font-semibold text-foreground">{{ t('settings.authTitle') }}</h2>
       <p class="text-sm text-muted-foreground">{{ t('settings.authDescription') }}</p>
     </div>
 
@@ -101,5 +102,5 @@ const toggleAuthProvider = (channel: string, enabled: boolean) => {
         @update:model-value="emit('update-field', field.key, $event)"
       />
     </div>
-  </div>
+  </section>
 </template>

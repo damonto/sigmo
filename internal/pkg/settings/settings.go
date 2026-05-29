@@ -12,13 +12,13 @@ const (
 )
 
 type Settings struct {
-	App      App                `json:"app"`
+	Auth     Auth               `json:"auth"`
 	Channels map[string]Channel `json:"channels"`
 	Modems   map[string]Modem   `json:"modems"`
 	Proxy    *Proxy             `json:"proxy,omitempty"`
 }
 
-type App struct {
+type Auth struct {
 	AuthProviders []string `json:"authProviders"`
 	OTPRequired   bool     `json:"otpRequired"`
 }
@@ -83,8 +83,8 @@ func DefaultProxy() Proxy {
 }
 
 func (c *Settings) ApplyDefaults() {
-	if c.App.AuthProviders == nil {
-		c.App.AuthProviders = []string{}
+	if c.Auth.AuthProviders == nil {
+		c.Auth.AuthProviders = []string{}
 	}
 	if c.Channels == nil {
 		c.Channels = map[string]Channel{}
@@ -127,9 +127,9 @@ func (c *Settings) ProxySettings() Proxy {
 
 func (c *Settings) Clone() Settings {
 	clone := Settings{
-		App: App{
-			AuthProviders: slices.Clone(c.App.AuthProviders),
-			OTPRequired:   c.App.OTPRequired,
+		Auth: Auth{
+			AuthProviders: slices.Clone(c.Auth.AuthProviders),
+			OTPRequired:   c.Auth.OTPRequired,
 		},
 		Channels: make(map[string]Channel, len(c.Channels)),
 		Modems:   maps.Clone(c.Modems),

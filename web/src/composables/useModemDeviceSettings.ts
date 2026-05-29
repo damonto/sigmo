@@ -46,7 +46,7 @@ export const useModemDeviceSettings = ({ modemId, onSuccess }: Options) => {
 
   const saveSettings = async (mss: number) => {
     const targetId = modemId.value
-    if (!targetId || targetId === 'unknown') return
+    if (!targetId) return
     if (isSettingsUpdating.value) return
     isSettingsUpdating.value = true
     try {
@@ -73,7 +73,7 @@ export const useModemDeviceSettings = ({ modemId, onSuccess }: Options) => {
   watch(
     modemId,
     async (id) => {
-      if (!id || id === 'unknown') {
+      if (!id) {
         resetSettings()
         return
       }

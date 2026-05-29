@@ -46,9 +46,13 @@ const apiBase = () => {
   return rawBase && rawBase.trim().length > 0 ? rawBase.replace(/\/$/, '') : '/api/v1'
 }
 
-const buildCallHttpUrl = (id: string, path: string) => {
+const buildCallHttpUrl = (id: string, path: string, query?: string) => {
   const apiUrl = new URL(apiBase(), window.location.origin)
   apiUrl.pathname = `${apiUrl.pathname.replace(/\/$/, '')}/modems/${id}/calls${path}`
+  const trimmed = query?.trim()
+  if (trimmed) {
+    apiUrl.searchParams.set('q', trimmed)
+  }
   return apiUrl.toString()
 }
 
@@ -73,6 +77,7 @@ const requestCallApi = async <T>(
   id: string,
   path: string,
   init: RequestInit = {},
+  query?: string,
 ): Promise<CallApiResult<T>> => {
   const headers = new Headers(init.headers)
   const token = getStoredToken()
@@ -86,7 +91,7 @@ const requestCallApi = async <T>(
   let response: Response
   let data: unknown
   try {
-    response = await fetch(buildCallHttpUrl(id, path), {
+    response = await fetch(buildCallHttpUrl(id, path, query), {
       ...init,
       headers,
       mode: 'cors',
@@ -111,8 +116,8 @@ const requestCallApi = async <T>(
 }
 
 export const useCallApi = () => {
-  const listCalls = (id: string) => {
-    return requestCallApi<CallRecord[]>(id, '')
+  const listCalls = (id: string, query?: string) => {
+    return requestCallApi<CallRecord[]>(id, '', {}, query)
   }
 
   const dialCall = (id: string, payload: DialCallRequest) => {

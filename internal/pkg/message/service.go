@@ -36,11 +36,11 @@ func New(store *storage.Store, wifiCalling wificalling.Coordinator) *Service {
 	return &Service{store: store, wifiCalling: wifiCalling}
 }
 
-func (s *Service) ListConversations(ctx context.Context, modem *mmodem.Modem) ([]storage.Message, error) {
-	return s.listConversations(ctx, realModemDevice{modemRef: modem})
+func (s *Service) ListConversations(ctx context.Context, modem *mmodem.Modem, query string) ([]storage.Message, error) {
+	return s.listConversations(ctx, realModemDevice{modemRef: modem}, query)
 }
 
-func (s *Service) listConversations(ctx context.Context, device modemDevice) ([]storage.Message, error) {
+func (s *Service) listConversations(ctx context.Context, device modemDevice, query string) ([]storage.Message, error) {
 	profileID, err := device.profileID(ctx)
 	if err != nil {
 		return nil, err
@@ -48,7 +48,7 @@ func (s *Service) listConversations(ctx context.Context, device modemDevice) ([]
 	if err := s.syncModemMessages(ctx, device, profileID); err != nil {
 		return nil, err
 	}
-	return s.store.ListConversations(ctx, profileID)
+	return s.store.ListConversations(ctx, profileID, query)
 }
 
 func (s *Service) ListByParticipant(ctx context.Context, modem *mmodem.Modem, participant string) ([]storage.Message, error) {

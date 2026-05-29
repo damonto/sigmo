@@ -52,7 +52,7 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
 
   const openNetworkDialog = async () => {
     const targetId = modemId.value
-    if (!targetId || targetId === 'unknown') return
+    if (!targetId) return
     if (isNetworkLoading.value) return
     selectedNetwork.value = ''
     isNetworkLoading.value = true
@@ -71,7 +71,7 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
 
   const handleNetworkRegister = async () => {
     const targetId = modemId.value
-    if (!targetId || targetId === 'unknown') return
+    if (!targetId) return
     if (!hasNetworkSelection.value || isNetworkRegistering.value) return
     isNetworkRegistering.value = true
     try {
@@ -88,7 +88,7 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
 
   const refreshNetworkSettings = async () => {
     const targetId = modemId.value
-    if (!targetId || targetId === 'unknown') return
+    if (!targetId) return
     const requestId = ++networkSettingsRequestID
     isNetworkSettingsLoading.value = true
     try {
@@ -134,7 +134,7 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
   const handleModeUpdate = async () => {
     const targetId = modemId.value
     const mode = modeFromKey(selectedMode.value)
-    if (!targetId || targetId === 'unknown' || !mode) return
+    if (!targetId || !mode) return
     if (isModeUpdating.value) return
     isModeUpdating.value = true
     try {
@@ -166,7 +166,7 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
 
   const handleBandUpdate = async () => {
     const targetId = modemId.value
-    if (!targetId || targetId === 'unknown') return
+    if (!targetId) return
     if (!hasBandSelection.value || isBandUpdating.value) return
     isBandUpdating.value = true
     try {
@@ -183,7 +183,7 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
   watch(
     modemId,
     async (id) => {
-      if (!id || id === 'unknown') {
+      if (!id) {
         resetNetworks()
         return
       }
