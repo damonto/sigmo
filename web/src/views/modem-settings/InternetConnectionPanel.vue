@@ -122,7 +122,7 @@ const formatBytes = (bytes: number) => {
 <template>
   <div class="space-y-3">
     <Card
-      class="overflow-hidden rounded-2xl py-0 shadow-sm"
+      class="overflow-hidden py-0 shadow-sm"
       :class="
         props.isConnected
           ? 'border-emerald-500/20 bg-emerald-50/40 dark:bg-emerald-950/10'
@@ -186,7 +186,7 @@ const formatBytes = (bytes: number) => {
       </CardContent>
     </Card>
 
-    <Card class="gap-4 rounded-2xl border-0 py-4 shadow-sm">
+    <Card class="gap-4 border-0 py-4 shadow-sm">
       <CardHeader class="px-4">
         <CardTitle class="text-base">
           {{ t('modemDetail.settings.internetAPNProfileTitle') }}
@@ -205,7 +205,7 @@ const formatBytes = (bytes: number) => {
       </CardContent>
     </Card>
 
-    <Card class="gap-4 rounded-2xl border-0 py-4 shadow-sm">
+    <Card class="gap-4 border-0 py-4 shadow-sm">
       <CardContent class="space-y-4 px-4">
         <Collapsible v-model:open="advancedOpen" class="space-y-3">
           <CollapsibleTrigger
@@ -298,7 +298,7 @@ const formatBytes = (bytes: number) => {
       </CardContent>
     </Card>
 
-    <Card class="gap-4 rounded-2xl border-0 py-4 shadow-sm">
+    <Card class="gap-4 border-0 py-4 shadow-sm">
       <CardHeader class="px-4">
         <CardTitle class="text-base">
           {{ t('modemDetail.settings.internetPreferencesTitle') }}
@@ -364,7 +364,7 @@ const formatBytes = (bytes: number) => {
       </CardContent>
     </Card>
 
-    <Card class="gap-4 rounded-2xl border-0 py-4 shadow-sm">
+    <Card class="gap-4 border-0 py-4 shadow-sm">
       <CardHeader class="px-4">
         <CardTitle class="text-base">
           {{ t('modemDetail.settings.internetIPInfoTitle') }}

@@ -21,6 +21,9 @@ const modem = (id: string, regionCode = 'US'): Modem => ({
   hardwareRevision: '1',
   name: id,
   number: '+12242255559',
+  state: 'registered',
+  unlockRequired: 'none',
+  unlockSupported: false,
   sim: {
     active: true,
     operatorName: 'Carrier',

@@ -17,7 +17,11 @@ export const useSimSlotSwitch = ({ modemId, modem, refreshModem, onSuccess }: Op
 
   const currentSimIdentifier = ref('')
 
-  const simSlots = computed(() => modem.value?.slots ?? [])
+  const modemSlots = (value: Modem | null) => {
+    return Array.isArray(value?.slots) ? value.slots : []
+  }
+
+  const simSlots = computed(() => modemSlots(modem.value))
 
   const getSimLabel = (identifier: string) => {
     const index = simSlots.value.findIndex((slot) => slot.identifier === identifier)
@@ -48,8 +52,9 @@ export const useSimSlotSwitch = ({ modemId, modem, refreshModem, onSuccess }: Op
         currentSimIdentifier.value = ''
         return
       }
-      const activeSlot = newModem.slots.find((slot) => slot.active)
-      currentSimIdentifier.value = activeSlot?.identifier ?? newModem.slots[0]?.identifier ?? ''
+      const slots = modemSlots(newModem)
+      const activeSlot = slots.find((slot) => slot.active)
+      currentSimIdentifier.value = activeSlot?.identifier ?? slots[0]?.identifier ?? ''
     },
     { immediate: true },
   )

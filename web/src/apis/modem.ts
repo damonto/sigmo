@@ -6,6 +6,7 @@ import type {
   ModemSettings,
   ModemSettingsResponse,
   WiFiCallingSettings,
+  WiFiCallingEmergencyAddressWebsheetResponse,
   WiFiCallingSettingsResponse,
   WiFiCallingWebsheetResponse,
 } from '@/types/modem'
@@ -29,6 +30,13 @@ export const useModemApi = () => {
    */
   const getModem = (id: string) => {
     return fetchJson<ModemDetailResponse>(`modems/${id}`)
+  }
+
+  const unlockSim = (id: string, pin: string) => {
+    return fetchJson<void>(`modems/${id}/sim-unlocks`, {
+      method: 'POST',
+      body: JSON.stringify({ pin }),
+    })
   }
 
   /**
@@ -96,9 +104,19 @@ export const useModemApi = () => {
     })
   }
 
+  const startWiFiCallingEmergencyAddressWebsheet = (id: string) => {
+    return fetchJson<WiFiCallingEmergencyAddressWebsheetResponse>(
+      `modems/${id}/wifi-calling-emergency-address-websheets`,
+      {
+        method: 'POST',
+      },
+    )
+  }
+
   return {
     getModems,
     getModem,
+    unlockSim,
     switchSimSlot,
     updateMsisdn,
     getSettings,
@@ -106,5 +124,6 @@ export const useModemApi = () => {
     getWiFiCallingSettings,
     updateWiFiCallingSettings,
     startWiFiCallingWebsheet,
+    startWiFiCallingEmergencyAddressWebsheet,
   }
 }

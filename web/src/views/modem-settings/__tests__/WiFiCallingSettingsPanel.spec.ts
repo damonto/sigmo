@@ -53,6 +53,7 @@ const mountCard = (locale: 'en' | 'zh') => {
       isLoading: false,
       isUpdating: false,
       isWebsheetStarting: false,
+      isEmergencyAddressStarting: false,
       state: 'connected',
       websheet: null,
     },

@@ -37,7 +37,7 @@ const signalIconComponent = computed(() => signalIcon(props.modem?.signalQuality
 
 <template>
   <Card
-    class="overflow-hidden rounded-2xl border-primary/15 bg-primary/5 py-0 shadow-sm dark:bg-primary/10"
+    class="overflow-hidden border-primary/15 bg-primary/5 py-0 shadow-sm dark:bg-primary/10"
   >
     <CardContent class="p-0">
       <div class="flex items-center gap-3 border-b border-primary/10 p-3.5">

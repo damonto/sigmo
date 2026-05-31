@@ -46,6 +46,9 @@ const modem = (id: string): Modem => ({
   hardwareRevision: '1.0',
   name: `Modem ${id}`,
   number: '',
+  state: 'registered',
+  unlockRequired: 'none',
+  unlockSupported: false,
   sim: {
     active: true,
     operatorName: 'Carrier',

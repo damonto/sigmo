@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { X } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogContent.vue'
@@ -17,10 +18,20 @@ import { getStoredToken } from '@/lib/authStorage'
 import { fetchJson } from '@/lib/fetch'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 
-const props = defineProps<{
-  open: boolean
-  websheet: CarrierWebsheetInfo | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    open: boolean
+    websheet: CarrierWebsheetInfo | null
+    browserFrame?: boolean
+    showFooter?: boolean
+    closeOnStatusChange?: boolean
+  }>(),
+  {
+    browserFrame: true,
+    showFooter: false,
+    closeOnStatusChange: false,
+  },
+)
 
 const emit = defineEmits<{
   (event: 'cancel'): void
@@ -74,7 +85,7 @@ const isTerminalCallback = (callback: unknown) => {
   const record = callback as { event?: unknown; method?: unknown; resultCode?: unknown }
   const value = String(record.event ?? record.method ?? record.resultCode ?? '').toLowerCase()
   if (!value) return true
-  if (value.includes('phoneservicesaccountstatuschanged')) return false
+  if (value.includes('phoneservicesaccountstatuschanged')) return props.closeOnStatusChange
   return true
 }
 
@@ -103,14 +114,43 @@ watch(
 <template>
   <Dialog :open="props.open">
     <EsimPersistentDialogContent
-      class="flex h-[85dvh] max-h-180 flex-col overflow-hidden sm:max-w-[24rem]"
+      :show-close-button="!props.browserFrame"
+      :class="[
+        'flex flex-col overflow-hidden',
+        props.browserFrame
+          ? 'h-[88dvh] max-h-184 gap-0! rounded-lg border-0! p-0! sm:max-w-2xl'
+          : 'h-[85dvh] max-h-180 sm:max-w-[24rem]',
+      ]"
     >
-      <DialogHeader class="shrink-0">
+      <template v-if="props.browserFrame">
+        <div class="grid shrink-0 grid-cols-[minmax(0,1fr)_2.25rem] items-center gap-2 border-b bg-muted/40 px-2 py-2">
+          <div class="min-w-0 rounded-md border bg-background px-3 py-1.5 text-center text-xs text-muted-foreground shadow-xs">
+            <span class="block truncate">{{ title }}</span>
+          </div>
+          <button
+            type="button"
+            class="inline-flex size-8 items-center justify-center justify-self-end rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden"
+            :aria-label="t('modemDetail.actions.cancel')"
+            @click="emit('cancel')"
+          >
+            <X class="size-4" aria-hidden="true" />
+          </button>
+        </div>
+        <DialogTitle class="sr-only">{{ title }}</DialogTitle>
+        <DialogDescription class="sr-only">{{ title }}</DialogDescription>
+      </template>
+
+      <DialogHeader v-else class="shrink-0">
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription class="sr-only">{{ title }}</DialogDescription>
       </DialogHeader>
 
-      <div class="relative min-h-0 flex-1 overflow-hidden rounded-md border bg-background">
+      <div
+        :class="[
+          'relative min-h-0 w-full flex-1 overflow-hidden bg-background',
+          props.browserFrame ? '' : 'rounded-md border',
+        ]"
+      >
         <div
           v-if="!loaded"
           class="absolute inset-0 z-10 flex items-center justify-center bg-background/80"
@@ -122,13 +162,16 @@ watch(
           ref="iframeEl"
           :key="iframeSrc"
           :src="iframeSrc"
-          class="size-full border-0"
+          class="block size-full border-0"
           sandbox="allow-forms allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"
           @load="loaded = true"
         />
       </div>
 
-      <DialogFooter class="shrink-0 grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <DialogFooter
+        v-if="props.showFooter"
+        class="shrink-0 grid grid-cols-1 gap-3 sm:grid-cols-2"
+      >
         <Button
           variant="outline"
           type="button"

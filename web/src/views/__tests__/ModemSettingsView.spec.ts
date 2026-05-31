@@ -20,6 +20,9 @@ const modem: Modem = {
   hardwareRevision: 'A',
   name: 'RM520N',
   number: '+12242255559',
+  state: 'registered',
+  unlockRequired: 'none',
+  unlockSupported: false,
   sim: {
     active: true,
     operatorName: 'T-Mobile',

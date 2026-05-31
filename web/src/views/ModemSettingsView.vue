@@ -116,7 +116,7 @@ onMounted(() => {
       @save="saveMsisdn"
     />
 
-    <div v-if="!modem && !isModemLoading" class="rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
+    <div v-if="!modem && !isModemLoading" class="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
       {{ t('modemDetail.unknown') }}
     </div>
 

@@ -54,6 +54,9 @@ const modem = (registrationState = 'Roaming'): Modem => ({
   hardwareRevision: '1.0',
   name: 'Modem 1',
   number: '',
+  state: 'registered',
+  unlockRequired: 'none',
+  unlockSupported: false,
   sim: {
     active: true,
     operatorName: 'Carrier',

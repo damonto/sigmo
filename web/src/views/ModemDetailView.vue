@@ -17,9 +17,13 @@ import EsimTransferDialog from '@/components/esim/EsimTransferDialog.vue'
 import DraggableFab from '@/components/fab/DraggableFab.vue'
 import ModemDetailCard from '@/components/modem/ModemDetailCard.vue'
 import ModemDetailHeader from '@/components/modem/ModemDetailHeader.vue'
+import SimPinUnlockDialog from '@/components/modem/SimPinUnlockDialog.vue'
 import SimSlotSwitcher from '@/components/modem/SimSlotSwitcher.vue'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { useModemApi } from '@/apis/modem'
 import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 import { useEsimDiscover } from '@/composables/useEsimDiscover'
 import { useEsimDownload } from '@/composables/useEsimDownload'
@@ -29,6 +33,7 @@ import { useSimSlotSwitch } from '@/composables/useSimSlotSwitch'
 const route = useRoute()
 const { t } = useI18n()
 const { hasFeature, fetchCapabilities } = useCapabilities()
+const modemApi = useModemApi()
 
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
 const canTransferEsim = computed(() => hasFeature(FEATURE.esimTransfer))
@@ -49,6 +54,11 @@ const installDialogRef = ref<{ applyDiscoverAddress: (address: string) => void }
 const installDialogOpen = ref(false)
 const transferDialogOpen = ref(false)
 const detailDialogOpen = ref(false)
+const pinUnlockDialogOpen = ref(false)
+const pinUnlockInput = ref('')
+const pinUnlockError = ref('')
+const pinUnlockDismissedFor = ref('')
+const isPinUnlocking = ref(false)
 const confirmationCode = ref('')
 const resultState = ref<'completed' | 'error' | null>(null)
 const resultErrorMessage = ref('')
@@ -128,6 +138,40 @@ const refreshModem = async () => {
   await fetchModemDetail(modemId.value)
 }
 
+const needsPinUnlock = computed(() => {
+  return modem.value?.state === 'locked' && modem.value.unlockSupported
+})
+
+const handlePinUnlockCancel = () => {
+  pinUnlockDismissedFor.value = modemId.value
+  pinUnlockError.value = ''
+}
+
+const openPinUnlockDialog = () => {
+  pinUnlockDismissedFor.value = ''
+  pinUnlockError.value = ''
+  pinUnlockDialogOpen.value = true
+}
+
+const handlePinUnlockSubmit = async () => {
+  if (!modemId.value || modemId.value === 'unknown' || isPinUnlocking.value) return
+
+  isPinUnlocking.value = true
+  pinUnlockError.value = ''
+  try {
+    await modemApi.unlockSim(modemId.value, pinUnlockInput.value)
+    pinUnlockDismissedFor.value = ''
+    pinUnlockDialogOpen.value = false
+    pinUnlockInput.value = ''
+    toast.success(t('modemDetail.unlock.success'))
+    await refreshModem()
+  } catch (err) {
+    pinUnlockError.value = err instanceof Error ? err.message : t('modemDetail.unlock.error')
+  } finally {
+    isPinUnlocking.value = false
+  }
+}
+
 const showSuccess = (message: string) => {
   toast.success(message)
 }
@@ -177,6 +221,22 @@ watch(downloadState, (value) => {
   }
 })
 
+watch(
+  [needsPinUnlock, modemId],
+  ([needsUnlock, id]) => {
+    if (!needsUnlock) {
+      pinUnlockDialogOpen.value = false
+      pinUnlockDismissedFor.value = ''
+      pinUnlockError.value = ''
+      return
+    }
+    if (pinUnlockDismissedFor.value !== id) {
+      pinUnlockDialogOpen.value = true
+    }
+  },
+  { immediate: true },
+)
+
 // Fetch modem detail when route changes or on mount
 watch(
   modemId,
@@ -221,6 +281,17 @@ void fetchCapabilities()
     @open-details="detailDialogOpen = true"
   />
 
+  <SimPinUnlockDialog
+    v-if="modem"
+    v-model:open="pinUnlockDialogOpen"
+    v-model:pin="pinUnlockInput"
+    :is-submitting="isPinUnlocking"
+    :error="pinUnlockError"
+    :lock-type="modem.unlockRequired"
+    @submit="handlePinUnlockSubmit"
+    @cancel="handlePinUnlockCancel"
+  />
+
   <div
     v-if="!modem && !isLoading"
     class="rounded-2xl border border-dashed border-border p-8 text-sm text-muted-foreground"
@@ -228,9 +299,19 @@ void fetchCapabilities()
     {{ t('modemDetail.unknown') }}
   </div>
 
+  <Alert v-if="needsPinUnlock && !pinUnlockDialogOpen">
+    <AlertTitle>{{ t('modemDetail.unlock.lockedTitle') }}</AlertTitle>
+    <AlertDescription class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <span>{{ t('modemDetail.unlock.lockedDescription') }}</span>
+      <Button type="button" size="sm" class="w-full sm:w-auto" @click="openPinUnlockDialog">
+        {{ t('modemDetail.unlock.submit') }}
+      </Button>
+    </AlertDescription>
+  </Alert>
+
   <!-- SIM Slot Switcher -->
   <SimSlotSwitcher
-    v-if="modem"
+    v-if="modem && !needsPinUnlock"
     v-model="currentSimIdentifier"
     :slots="simSlots"
     :signal-quality="modem.signalQuality"

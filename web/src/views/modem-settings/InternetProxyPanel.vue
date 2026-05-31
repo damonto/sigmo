@@ -81,7 +81,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <Card class="gap-4 rounded-2xl border-0 py-4 shadow-sm">
+  <Card class="gap-4 border-0 py-4 shadow-sm">
     <CardHeader class="flex grid-cols-none flex-row items-center justify-between gap-4 px-4">
       <CardTitle class="text-base">
         {{ t('modemDetail.settings.internetProxyInfoTitle') }}

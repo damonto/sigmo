@@ -20,6 +20,9 @@ export type ModemApiResponse = {
   hardwareRevision: string
   name: string
   number: string
+  state: string
+  unlockRequired: string
+  unlockSupported: boolean
   sim: SlotInfo
   slots: SlotInfo[]
   accessTechnology: string | null
@@ -53,7 +56,11 @@ export type WiFiCallingSettings = {
 export type WiFiCallingSettingsResponse = WiFiCallingSettings & {
   connected: boolean
   state: string
+  durationSeconds: number
+  emergencyAddressUpdateAvailable: boolean
   websheet?: CarrierWebsheetInfo
 }
 
 export type WiFiCallingWebsheetResponse = CarrierWebsheetInfo
+
+export type WiFiCallingEmergencyAddressWebsheetResponse = CarrierWebsheetInfo

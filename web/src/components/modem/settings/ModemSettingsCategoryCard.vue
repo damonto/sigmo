@@ -14,9 +14,9 @@ const props = defineProps<{
 </script>
 
 <template>
-  <RouterLink :to="props.to" class="block rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring">
+  <RouterLink :to="props.to" class="block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring">
     <Card
-      class="group gap-0 rounded-2xl border-0 py-0 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+      class="group gap-0 border-0 py-0 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
     >
       <CardContent class="flex items-center gap-3 p-3.5">
         <div

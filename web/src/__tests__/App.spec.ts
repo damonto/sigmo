@@ -15,6 +15,11 @@ const sessionHarness = vi.hoisted(() => ({
       number: '+12242255559',
     },
   },
+  callAudio: {
+    remoteStream: {
+      value: null,
+    },
+  },
 }))
 
 const provideModemCallSession = vi.hoisted(() => vi.fn(() => sessionHarness))

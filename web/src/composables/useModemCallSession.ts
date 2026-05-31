@@ -1,9 +1,17 @@
-import { computed, inject, onBeforeUnmount, provide, ref, watch, type ComputedRef, type Ref } from 'vue'
+import {
+  computed,
+  inject,
+  onBeforeUnmount,
+  provide,
+  ref,
+  watch,
+  type ComputedRef,
+  type Ref,
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useCallAudioSession } from '@/composables/useCallAudioSession'
 import { usePhoneCalls } from '@/composables/usePhoneCalls'
-import { createBrowserAmrCodec, hasBrowserAmrCodec } from '@/lib/browserAmrCodec'
 import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
 import type { CallRecord } from '@/types/call'
 
@@ -26,22 +34,22 @@ const createModemCallSession = (
   defaultCountry?: ComputedRef<string>,
   searchQuery?: Readonly<Ref<string>>,
 ) => {
-	const { t } = useI18n()
-	const sessionSearchQuery = ref(searchQuery?.value ?? '')
-	if (searchQuery) {
-		watch(
-			searchQuery,
-			(value) => {
-				sessionSearchQuery.value = value.trim()
-			},
-			{ immediate: true },
-		)
-	}
-	const setSearchQuery = (value: string) => {
-		sessionSearchQuery.value = value.trim()
-	}
-	const phoneCalls = usePhoneCalls(modemId, defaultCountry, sessionSearchQuery)
-  const callAudio = useCallAudioSession(modemId, { codecFactory: createBrowserAmrCodec })
+  const { t } = useI18n()
+  const sessionSearchQuery = ref(searchQuery?.value ?? '')
+  if (searchQuery) {
+    watch(
+      searchQuery,
+      (value) => {
+        sessionSearchQuery.value = value.trim()
+      },
+      { immediate: true },
+    )
+  }
+  const setSearchQuery = (value: string) => {
+    sessionSearchQuery.value = value.trim()
+  }
+  const phoneCalls = usePhoneCalls(modemId, defaultCountry, sessionSearchQuery)
+  const callAudio = useCallAudioSession(modemId)
 
   const durationTick = ref(Date.now())
   const audioCallID = ref('')
@@ -117,15 +125,6 @@ const createModemCallSession = (
 
   const audioMessage = computed(() => {
     if (callAudio.errorMessage.value) return callAudio.errorMessage.value
-    const call = phoneCalls.activeCall.value
-    if (
-      call &&
-      mediaSessionStates.has(call.state) &&
-      call.route === 'wifi_calling' &&
-      !hasBrowserAmrCodec()
-    ) {
-      return t('modemDetail.phone.audioCodecUnavailable')
-    }
     return ''
   })
 
@@ -144,7 +143,7 @@ const createModemCallSession = (
   }
 
   const answerIncoming = async (call: CallRecord) => {
-    if (call.route === 'wifi_calling' && hasBrowserAmrCodec()) {
+    if (call.route === 'wifi_calling') {
       const ready = await callAudio.prepare()
       if (!ready) return
     }
@@ -160,12 +159,7 @@ const createModemCallSession = (
         stopDurationTimer()
       }
 
-      if (
-        call &&
-        mediaSessionStates.has(call.state) &&
-        call.route === 'wifi_calling' &&
-        hasBrowserAmrCodec()
-      ) {
+      if (call && mediaSessionStates.has(call.state) && call.route === 'wifi_calling') {
         if (audioCallID.value === call.callID) return
         audioCallID.value = call.callID
         void callAudio.start(call.callID)
@@ -189,11 +183,11 @@ const createModemCallSession = (
     primaryLine,
     callDurationLabel,
     activeCallDurationLabel,
-		audioMessage,
-		answerIncoming,
-		setSearchQuery,
-		terminalStates,
-	}
+    audioMessage,
+    answerIncoming,
+    setSearchQuery,
+    terminalStates,
+  }
 }
 
 export type ModemCallSession = ReturnType<typeof createModemCallSession>

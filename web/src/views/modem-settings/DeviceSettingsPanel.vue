@@ -29,7 +29,7 @@ const isActionDisabled = computed(() => !props.isValid || props.isUpdating)
 </script>
 
 <template>
-  <section class="space-y-4 rounded-2xl bg-card p-4 shadow-sm">
+  <section class="space-y-4 rounded-xl bg-card p-4 shadow-sm">
     <div class="flex items-center justify-between gap-4">
       <h2 class="text-base font-semibold text-foreground">
         {{ t('modemDetail.settings.deviceTitle') }}
