@@ -4,6 +4,14 @@
 # https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
 
 version: 2
+
+registries:
+  github-damonto:
+    type: git
+    url: https://github.com
+    username: x-access-token
+    password: ${{secrets.SIGMO_PRIVATE_MODULE_TOKEN}}
+
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -17,5 +25,7 @@ updates:
 
   - package-ecosystem: "gomod" # See documentation for possible values
     directory: "/" # Location of package manifests
+    registries:
+      - github-damonto
     schedule:
       interval: "weekly"
