@@ -119,13 +119,27 @@ jobs:
               -ldflags="${ldflags}" \
               -o sigmo-${{ matrix.target.name }}
 
-      - name: Verify musl dynamic imports
+      - name: Verify musl linkage
         if: matrix.target.musl == true
         run: |
-          file sigmo-${{ matrix.target.name }}
-          readelf -l sigmo-${{ matrix.target.name }} | grep -F "Requesting program interpreter: ${{ matrix.target.interp }}"
-          readelf -d sigmo-${{ matrix.target.name }} | grep -F "Shared library: [${{ matrix.target.libc }}]"
-          if readelf -d sigmo-${{ matrix.target.name }} | grep -E 'libc\.so\.6|libdl\.so\.2|libpthread\.so\.0'; then
+          binary="sigmo-${{ matrix.target.name }}"
+          file "${binary}"
+          readelf -l "${binary}" > program-headers.txt
+          readelf -d "${binary}" > dynamic-section.txt || true
+
+          if grep -Fq "Requesting program interpreter:" program-headers.txt; then
+            grep -F "Requesting program interpreter: ${{ matrix.target.interp }}" program-headers.txt
+          else
+            echo "musl binary is statically linked; no program interpreter"
+          fi
+
+          if grep -Fq "Shared library:" dynamic-section.txt; then
+            grep -F "Shared library: [${{ matrix.target.libc }}]" dynamic-section.txt
+          else
+            echo "musl binary has no dynamic shared libraries"
+          fi
+
+          if grep -E 'libc\.so\.6|libdl\.so\.2|libpthread\.so\.0' dynamic-section.txt; then
             echo "glibc dynamic import remains in musl binary" >&2
             exit 1
           fi
