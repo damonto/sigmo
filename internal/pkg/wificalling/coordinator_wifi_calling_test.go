@@ -514,6 +514,258 @@ func TestInitialDialedVoiceCallState(t *testing.T) {
 	}
 }
 
+func TestAdvanceVoiceCall(t *testing.T) {
+	at := time.Date(2026, 5, 29, 9, 0, 0, 0, time.UTC)
+	base := VoiceCall{
+		ID:        "call-1",
+		State:     string(imsvoice.CallStateDialing),
+		Hold:      string(imsvoice.CallHoldNone),
+		Reason:    "previous",
+		StartedAt: at.Add(-time.Minute),
+		UpdatedAt: at.Add(-time.Minute),
+	}
+	tests := []struct {
+		name         string
+		call         VoiceCall
+		transition   voiceCallTransition
+		wantState    string
+		wantHold     string
+		wantReason   string
+		wantAnswered time.Time
+		wantEnded    time.Time
+		wantUpdated  time.Time
+		wantChanged  bool
+	}{
+		{
+			name: "active marks answered and preserves reason",
+			call: base,
+			transition: voiceCallTransition{
+				state: string(imsvoice.CallStateActive),
+				hold:  string(imsvoice.CallHoldNone),
+				at:    at,
+			},
+			wantState:    string(imsvoice.CallStateActive),
+			wantHold:     string(imsvoice.CallHoldNone),
+			wantReason:   "previous",
+			wantAnswered: at,
+			wantUpdated:  at,
+			wantChanged:  true,
+		},
+		{
+			name: "answer action marks answered before active",
+			call: base,
+			transition: voiceCallTransition{
+				state:    string(imsvoice.CallStateAnswering),
+				answered: true,
+				at:       at,
+			},
+			wantState:    string(imsvoice.CallStateAnswering),
+			wantHold:     string(imsvoice.CallHoldNone),
+			wantReason:   "previous",
+			wantAnswered: at,
+			wantUpdated:  at,
+			wantChanged:  true,
+		},
+		{
+			name: "terminal marks ended and records reason",
+			call: base,
+			transition: voiceCallTransition{
+				state:     string(imsvoice.CallStateFailed),
+				reason:    "network closed",
+				reasonSet: true,
+				at:        at,
+			},
+			wantState:   string(imsvoice.CallStateFailed),
+			wantHold:    string(imsvoice.CallHoldNone),
+			wantReason:  "network closed",
+			wantEnded:   at,
+			wantUpdated: at,
+			wantChanged: true,
+		},
+		{
+			name: "end action marks ended before terminal",
+			call: base,
+			transition: voiceCallTransition{
+				state: string(imsvoice.CallStateEnding),
+				ended: true,
+				at:    at,
+			},
+			wantState:   string(imsvoice.CallStateEnding),
+			wantHold:    string(imsvoice.CallHoldNone),
+			wantReason:  "previous",
+			wantEnded:   at,
+			wantUpdated: at,
+			wantChanged: true,
+		},
+		{
+			name: "terminal call ignores later active event",
+			call: VoiceCall{
+				ID:        "call-1",
+				State:     string(imsvoice.CallStateEnded),
+				Reason:    "done",
+				StartedAt: at.Add(-time.Minute),
+				EndedAt:   at.Add(-time.Second),
+				UpdatedAt: at.Add(-time.Second),
+			},
+			transition: voiceCallTransition{
+				state: string(imsvoice.CallStateActive),
+				at:    at,
+			},
+			wantState:   string(imsvoice.CallStateEnded),
+			wantReason:  "done",
+			wantEnded:   at.Add(-time.Second),
+			wantUpdated: at.Add(-time.Second),
+		},
+		{
+			name: "empty call id is ignored",
+			call: VoiceCall{State: string(imsvoice.CallStateDialing)},
+			transition: voiceCallTransition{
+				state: string(imsvoice.CallStateActive),
+				at:    at,
+			},
+			wantState: string(imsvoice.CallStateDialing),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, changed := advanceVoiceCall(tt.call, tt.transition)
+			if changed != tt.wantChanged {
+				t.Fatalf("changed = %v, want %v", changed, tt.wantChanged)
+			}
+			if got.State != tt.wantState || got.Hold != tt.wantHold || got.Reason != tt.wantReason {
+				t.Fatalf("call state = state %q hold %q reason %q, want %q/%q/%q", got.State, got.Hold, got.Reason, tt.wantState, tt.wantHold, tt.wantReason)
+			}
+			if !got.AnsweredAt.Equal(tt.wantAnswered) {
+				t.Fatalf("AnsweredAt = %v, want %v", got.AnsweredAt, tt.wantAnswered)
+			}
+			if !got.EndedAt.Equal(tt.wantEnded) {
+				t.Fatalf("EndedAt = %v, want %v", got.EndedAt, tt.wantEnded)
+			}
+			if !got.UpdatedAt.Equal(tt.wantUpdated) {
+				t.Fatalf("UpdatedAt = %v, want %v", got.UpdatedAt, tt.wantUpdated)
+			}
+		})
+	}
+}
+
+func TestStatusFromSession(t *testing.T) {
+	now := time.Date(2026, 5, 29, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name          string
+		settings      Settings
+		session       *sessionState
+		profileID     string
+		wantState     string
+		wantConnected bool
+		wantDuration  int64
+	}{
+		{
+			name:      "idle when disabled without session",
+			profileID: "profile-1",
+			wantState: StateIdle,
+		},
+		{
+			name:      "disconnected when enabled without session",
+			settings:  Settings{Enabled: true},
+			profileID: "profile-1",
+			wantState: StateDisconnected,
+		},
+		{
+			name: "connecting session",
+			session: &sessionState{
+				phase:     sessionPhaseConnecting,
+				profileID: "profile-1",
+			},
+			profileID: "profile-1",
+			wantState: StateConnecting,
+		},
+		{
+			name: "websheet required session",
+			session: &sessionState{
+				phase:     sessionPhaseWebsheetRequired,
+				profileID: "profile-1",
+			},
+			profileID: "profile-1",
+			wantState: StateWebsheetRequired,
+		},
+		{
+			name: "connected session",
+			session: &sessionState{
+				phase:       sessionPhaseConnected,
+				client:      &vowifi.Client{},
+				profileID:   "profile-1",
+				connectedAt: now.Add(-2 * time.Minute),
+			},
+			profileID:     "profile-1",
+			wantState:     StateConnected,
+			wantConnected: true,
+			wantDuration:  120,
+		},
+		{
+			name: "profile mismatch uses settings state",
+			settings: Settings{
+				Enabled: true,
+			},
+			session: &sessionState{
+				phase:     sessionPhaseConnected,
+				client:    &vowifi.Client{},
+				profileID: "profile-2",
+			},
+			profileID: "profile-1",
+			wantState: StateDisconnected,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := statusFromSession(tt.settings, tt.session, tt.profileID, now)
+			if got.State != tt.wantState {
+				t.Fatalf("State = %q, want %q", got.State, tt.wantState)
+			}
+			if got.Connected != tt.wantConnected {
+				t.Fatalf("Connected = %v, want %v", got.Connected, tt.wantConnected)
+			}
+			if got.DurationSeconds != tt.wantDuration {
+				t.Fatalf("DurationSeconds = %d, want %d", got.DurationSeconds, tt.wantDuration)
+			}
+		})
+	}
+}
+
+func TestMarkConnectingResetsDisconnectedSession(t *testing.T) {
+	now := time.Date(2026, 5, 29, 10, 0, 0, 0, time.UTC)
+	c := &coordinator{
+		sessions: map[string]*sessionState{
+			"modem-1": {
+				client:      &vowifi.Client{},
+				connected:   true,
+				connectedAt: now,
+				phase:       sessionPhaseDisconnected,
+				profileID:   "profile-1",
+			},
+		},
+	}
+
+	c.markConnecting("modem-1")
+
+	session := c.sessions["modem-1"]
+	if session.client != nil {
+		t.Fatal("client is set, want nil")
+	}
+	if session.connected {
+		t.Fatal("connected = true, want false")
+	}
+	if !session.connectedAt.IsZero() {
+		t.Fatalf("connectedAt = %v, want zero", session.connectedAt)
+	}
+	if session.phase != sessionPhaseConnecting {
+		t.Fatalf("phase = %q, want %q", session.phase, sessionPhaseConnecting)
+	}
+	got := statusFromSession(Settings{Enabled: true}, session, "profile-1", now)
+	if got.State != StateConnecting {
+		t.Fatalf("State = %q, want %q", got.State, StateConnecting)
+	}
+}
+
 func TestForwardCallEventCreatesPendingOutgoingCall(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -656,6 +908,17 @@ func TestFinishFailedPendingVoiceDialReusesEventCall(t *testing.T) {
 			err:       errors.New("487 Request Terminated"),
 			wantState: string(imsvoice.CallStateFailed),
 			wantCause: "Request Terminated",
+		},
+		{
+			name: "failed event without cause uses dial error",
+			event: vowifi.CallEvent{
+				CallID: "sip-call-487-empty-cause",
+				State:  imsvoice.CallStateFailed,
+				At:     at.Add(time.Second),
+			},
+			err:       errors.New("487 Request Terminated"),
+			wantState: string(imsvoice.CallStateFailed),
+			wantCause: "487 Request Terminated",
 		},
 		{
 			name: "dialing event before dial failure",
@@ -1003,6 +1266,9 @@ func TestMarkDisconnectedFailsOpenCalls(t *testing.T) {
 	session := c.sessions["modem-1"]
 	if session.connected || session.client != nil {
 		t.Fatalf("session connected = %v client nil = %v, want disconnected", session.connected, session.client == nil)
+	}
+	if session.phase != sessionPhaseDisconnected {
+		t.Fatalf("session phase = %q, want %q", session.phase, sessionPhaseDisconnected)
 	}
 	for _, id := range []string{"ringing", "answering", "active"} {
 		call := session.calls[id].info

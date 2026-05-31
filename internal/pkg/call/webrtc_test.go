@@ -109,6 +109,29 @@ func TestShouldCloseDisconnectedBridge(t *testing.T) {
 	}
 }
 
+func TestBridgeActionForPeerState(t *testing.T) {
+	tests := []struct {
+		name  string
+		state webrtc.PeerConnectionState
+		want  webRTCBridgeAction
+	}{
+		{name: "new", state: webrtc.PeerConnectionStateNew, want: webRTCBridgeActionNone},
+		{name: "checking", state: webrtc.PeerConnectionStateConnecting, want: webRTCBridgeActionNone},
+		{name: "connected", state: webrtc.PeerConnectionStateConnected, want: webRTCBridgeActionReady},
+		{name: "disconnected", state: webrtc.PeerConnectionStateDisconnected, want: webRTCBridgeActionGraceClose},
+		{name: "failed", state: webrtc.PeerConnectionStateFailed, want: webRTCBridgeActionCloseNow},
+		{name: "closed", state: webrtc.PeerConnectionStateClosed, want: webRTCBridgeActionCloseNow},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bridgeActionForPeerState(tt.state); got != tt.want {
+				t.Fatalf("bridgeActionForPeerState(%s) = %v, want %v", tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHasICECandidate(t *testing.T) {
 	tests := []struct {
 		name string

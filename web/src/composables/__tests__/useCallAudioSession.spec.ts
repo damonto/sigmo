@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { useCallAudioSession } from '@/composables/useCallAudioSession'
+import { reduceAudioStatus, useCallAudioSession } from '@/composables/useCallAudioSession'
 
 const createWebRTCAnswer = vi.hoisted(() => vi.fn())
 
@@ -376,5 +376,21 @@ describe('call audio session', () => {
 
     expect(session.status.value).toBe('error')
     expect(session.errorMessage.value).toBe('Audio capture is blocked')
+  })
+})
+
+describe('reduceAudioStatus', () => {
+  it('maps session events to audio states', () => {
+    expect(reduceAudioStatus('idle', { type: 'prepare' })).toBe('preparing')
+    expect(reduceAudioStatus('preparing', { type: 'idle_after_prepare' })).toBe('idle')
+    expect(reduceAudioStatus('preparing', { type: 'connect' })).toBe('connecting')
+    expect(reduceAudioStatus('connecting', { type: 'ready' })).toBe('ready')
+    expect(reduceAudioStatus('ready', { type: 'closed' })).toBe('closed')
+    expect(reduceAudioStatus('ready', { type: 'error' })).toBe('error')
+  })
+
+  it('keeps an error state when the peer closes during cleanup', () => {
+    expect(reduceAudioStatus('error', { type: 'peer_closed' })).toBe('error')
+    expect(reduceAudioStatus('ready', { type: 'peer_closed' })).toBe('closed')
   })
 })

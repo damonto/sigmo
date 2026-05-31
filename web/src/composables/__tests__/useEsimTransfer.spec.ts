@@ -1,8 +1,13 @@
 import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { useEsimTransfer } from '@/composables/useEsimTransfer'
-import { TRANSFER_CLIENT_ERROR, TRANSFER_MESSAGE, TRANSFER_STATE } from '@/constants/esimTransfer'
+import { reduceEsimTransferStatus, useEsimTransfer } from '@/composables/useEsimTransfer'
+import {
+  TRANSFER_CLIENT_ERROR,
+  TRANSFER_MESSAGE,
+  TRANSFER_STAGE,
+  TRANSFER_STATE,
+} from '@/constants/esimTransfer'
 
 const api = vi.hoisted(() => ({
   getTransferSources: vi.fn(),
@@ -229,5 +234,69 @@ describe('useEsimTransfer', () => {
 
     expect(transfer.state.value).toBe(TRANSFER_STATE.error)
     expect(transfer.errorMessage.value).toBe(TRANSFER_CLIENT_ERROR.invalidResponse)
+  })
+})
+
+describe('reduceEsimTransferStatus', () => {
+  it('maps events to transfer states and progress', () => {
+    const initial = {
+      state: TRANSFER_STATE.idle,
+      stage: '',
+      progress: 0,
+      errorMessage: '',
+    }
+
+    const connecting = reduceEsimTransferStatus(initial, { type: 'connecting' })
+    expect(connecting).toMatchObject({
+      state: TRANSFER_STATE.connecting,
+      stage: TRANSFER_STAGE.preparing,
+      progress: 10,
+      errorMessage: '',
+    })
+
+    const downloading = reduceEsimTransferStatus(connecting, {
+      type: 'progress',
+      stage: TRANSFER_STAGE.downloading,
+    })
+    expect(downloading).toMatchObject({
+      state: TRANSFER_STATE.progress,
+      stage: TRANSFER_STAGE.downloading,
+      progress: 45,
+    })
+
+    const completed = reduceEsimTransferStatus(downloading, { type: 'completed' })
+    expect(completed).toMatchObject({
+      state: TRANSFER_STATE.completed,
+      progress: 100,
+      errorMessage: '',
+    })
+  })
+
+  it('ignores late errors after terminal or idle states', () => {
+    const completed = {
+      state: TRANSFER_STATE.completed,
+      stage: TRANSFER_STAGE.completing,
+      progress: 100,
+      errorMessage: '',
+    }
+    expect(
+      reduceEsimTransferStatus(completed, {
+        type: 'error',
+        message: TRANSFER_CLIENT_ERROR.connectionClosed,
+      }),
+    ).toEqual(completed)
+
+    const idle = {
+      state: TRANSFER_STATE.idle,
+      stage: '',
+      progress: 0,
+      errorMessage: '',
+    }
+    expect(
+      reduceEsimTransferStatus(idle, {
+        type: 'error',
+        message: TRANSFER_CLIENT_ERROR.connectionClosed,
+      }),
+    ).toEqual(idle)
   })
 })

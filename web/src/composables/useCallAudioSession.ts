@@ -2,7 +2,16 @@ import { computed, getCurrentInstance, onBeforeUnmount, ref, shallowRef, type Re
 
 import { useCallApi } from '@/apis/call'
 
-type AudioStatus = 'idle' | 'preparing' | 'connecting' | 'ready' | 'closed' | 'error'
+export type AudioStatus = 'idle' | 'preparing' | 'connecting' | 'ready' | 'closed' | 'error'
+
+export type AudioStatusEvent =
+  | { type: 'prepare' }
+  | { type: 'idle_after_prepare' }
+  | { type: 'connect' }
+  | { type: 'ready' }
+  | { type: 'closed' }
+  | { type: 'error' }
+  | { type: 'peer_closed' }
 
 type AudioDeps = {
   createPeerConnection?: (configuration: RTCConfiguration) => RTCPeerConnection
@@ -24,6 +33,25 @@ const microphoneConstraints: MediaTrackConstraints = {
 const iceGatheringTimeoutMs = 20000
 const disconnectedGraceMs = 5000
 
+export const reduceAudioStatus = (current: AudioStatus, event: AudioStatusEvent): AudioStatus => {
+  switch (event.type) {
+    case 'prepare':
+      return 'preparing'
+    case 'idle_after_prepare':
+      return current === 'preparing' ? 'idle' : current
+    case 'connect':
+      return 'connecting'
+    case 'ready':
+      return 'ready'
+    case 'closed':
+      return 'closed'
+    case 'error':
+      return 'error'
+    case 'peer_closed':
+      return current === 'error' ? 'error' : 'closed'
+  }
+}
+
 export const useCallAudioSession = (modemId: Ref<string>, options: Options = {}) => {
   const status = ref<AudioStatus>('idle')
   const mediaStatus = computed(() => status.value)
@@ -42,9 +70,13 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
 
   const isReady = computed(() => status.value === 'ready')
 
+  const applyStatus = (event: AudioStatusEvent) => {
+    status.value = reduceAudioStatus(status.value, event)
+  }
+
   const fail = (err: unknown) => {
     errorMessage.value = errorText(err)
-    status.value = 'error'
+    applyStatus({ type: 'error' })
     cleanup()
   }
 
@@ -98,12 +130,12 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   const prepare = async () => {
     if (preparePromise) return await preparePromise
     errorMessage.value = ''
-    status.value = 'preparing'
+    applyStatus({ type: 'prepare' })
     preparePromise = (async () => {
       try {
         await openAudioInput()
         if (!activeCallID && status.value === 'preparing') {
-          status.value = 'idle'
+          applyStatus({ type: 'idle_after_prepare' })
         }
         return true
       } catch (err) {
@@ -123,12 +155,12 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     sessionAbort = nextAbort
     activeCallID = callID
     errorMessage.value = ''
-    status.value = 'preparing'
+    applyStatus({ type: 'prepare' })
 
     try {
       const localStream = await ensureAudioInput(nextAbort)
       if (!isCurrentSession(nextAbort)) return false
-      status.value = 'connecting'
+      applyStatus({ type: 'connect' })
       const nextPC = createPeerConnection({ iceServers: defaultIceServers })
       pc = nextPC
       nextPC.ontrack = (event) => {
@@ -139,7 +171,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
         switch (nextPC.connectionState) {
           case 'connected':
             clearConnectionLossTimer()
-            status.value = 'ready'
+            applyStatus({ type: 'ready' })
             break
           case 'failed':
             clearConnectionLossTimer()
@@ -156,7 +188,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
             break
           case 'closed':
             clearConnectionLossTimer()
-            status.value = status.value === 'error' ? 'error' : 'closed'
+            applyStatus({ type: 'peer_closed' })
             break
         }
       }
@@ -184,7 +216,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       if (!isCurrentSession(nextAbort)) return false
       await nextPC.setRemoteDescription(answer)
       if (pc === nextPC && status.value === 'connecting') {
-        status.value = 'ready'
+        applyStatus({ type: 'ready' })
       }
       return true
     } catch (err) {
@@ -215,7 +247,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     cleanup()
     activeCallID = ''
     errorMessage.value = ''
-    status.value = 'closed'
+    applyStatus({ type: 'closed' })
   }
 
   const setInputEnabled = (enabled: boolean) => {

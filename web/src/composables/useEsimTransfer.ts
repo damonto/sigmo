@@ -22,6 +22,89 @@ type Options = {
   onCompleted?: () => void
 }
 
+export type TransferStatus = {
+  state: EsimTransferState
+  stage: string
+  progress: number
+  errorMessage: string
+}
+
+export type TransferEvent =
+  | { type: 'reset' }
+  | { type: 'loading_sources' }
+  | { type: 'loading_profiles' }
+  | { type: 'ready' }
+  | { type: 'connecting' }
+  | { type: 'progress'; stage?: string }
+  | { type: 'user_input' }
+  | { type: 'source_deletion' }
+  | { type: 'websheet' }
+  | { type: 'completed' }
+  | { type: 'error'; message: string }
+
+const initialTransferStatus = (): TransferStatus => ({
+  state: TRANSFER_STATE.idle,
+  stage: '',
+  progress: 0,
+  errorMessage: '',
+})
+
+export const reduceEsimTransferStatus = (
+  current: TransferStatus,
+  event: TransferEvent,
+): TransferStatus => {
+  switch (event.type) {
+    case 'reset':
+      return initialTransferStatus()
+    case 'loading_sources':
+      return { ...initialTransferStatus(), state: TRANSFER_STATE.loadingSources }
+    case 'loading_profiles':
+      return { ...current, state: TRANSFER_STATE.loadingProfiles, errorMessage: '' }
+    case 'ready':
+      return { ...current, state: TRANSFER_STATE.ready, errorMessage: '' }
+    case 'connecting':
+      return {
+        ...current,
+        state: TRANSFER_STATE.connecting,
+        stage: TRANSFER_STAGE.preparing,
+        progress: transferStageProgress[TRANSFER_STAGE.preparing],
+        errorMessage: '',
+      }
+    case 'progress': {
+      const stage = event.stage ?? current.stage
+      return {
+        ...current,
+        state: TRANSFER_STATE.progress,
+        stage,
+        progress: progressForStage(stage, current.progress),
+      }
+    }
+    case 'user_input':
+      return { ...current, state: TRANSFER_STATE.userInput }
+    case 'source_deletion':
+      return { ...current, state: TRANSFER_STATE.sourceDeletion }
+    case 'websheet':
+      return { ...current, state: TRANSFER_STATE.websheet }
+    case 'completed':
+      return { ...current, state: TRANSFER_STATE.completed, progress: 100, errorMessage: '' }
+    case 'error':
+      if (
+        current.state === TRANSFER_STATE.completed ||
+        current.state === TRANSFER_STATE.error ||
+        current.state === TRANSFER_STATE.idle
+      ) {
+        return current
+      }
+      return { ...current, state: TRANSFER_STATE.error, errorMessage: event.message }
+  }
+}
+
+const progressForStage = (stage: string, current: number) => {
+  const next = transferStageProgress[stage]
+  if (next === undefined) return current
+  return Math.min(Math.max(next, 0), 100)
+}
+
 export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Options) => {
   const esimApi = useEsimApi()
   const state = ref<EsimTransferState>(TRANSFER_STATE.idle)
@@ -80,54 +163,49 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
     resetSelection()
   }
 
-  const setProgress = (value: number) => {
-    progress.value = Math.min(Math.max(value, 0), 100)
-  }
-
-  const setStage = (nextStage: string) => {
-    stage.value = nextStage
-    const nextProgress = transferStageProgress[nextStage]
-    if (nextProgress === undefined) return
-    setProgress(nextProgress)
+  const applyTransferEvent = (event: TransferEvent) => {
+    const next = reduceEsimTransferStatus(
+      {
+        state: state.value,
+        stage: stage.value,
+        progress: progress.value,
+        errorMessage: errorMessage.value,
+      },
+      event,
+    )
+    state.value = next.state
+    stage.value = next.stage
+    progress.value = next.progress
+    errorMessage.value = next.errorMessage
   }
 
   const session = useEsimTransferSession({
     onProgress: (nextStage) => {
-      state.value = TRANSFER_STATE.progress
-      setStage(nextStage)
+      applyTransferEvent({ type: 'progress', stage: nextStage })
     },
     onPreview: (profile) => {
       previewProfile.value = profile ?? previewProfile.value
-      state.value = TRANSFER_STATE.progress
+      applyTransferEvent({ type: 'progress' })
     },
     onUserInput: (input) => {
       userInput.value = input
       userInputResponse.value = ''
-      state.value = TRANSFER_STATE.userInput
+      applyTransferEvent({ type: 'user_input' })
     },
     onSourceDeletion: (iccid) => {
       sourceDeletionICCID.value = iccid
-      state.value = TRANSFER_STATE.sourceDeletion
+      applyTransferEvent({ type: 'source_deletion' })
     },
     onWebsheet: (websheet) => {
       carrierWebsheet.value = websheet
-      state.value = TRANSFER_STATE.websheet
+      applyTransferEvent({ type: 'websheet' })
     },
     onCompleted: () => {
-      state.value = TRANSFER_STATE.completed
-      setProgress(100)
+      applyTransferEvent({ type: 'completed' })
       options?.onCompleted?.()
     },
     onError: (message) => {
-      if (
-        state.value === TRANSFER_STATE.completed ||
-        state.value === TRANSFER_STATE.error ||
-        state.value === TRANSFER_STATE.idle
-      ) {
-        return
-      }
-      state.value = TRANSFER_STATE.error
-      errorMessage.value = message
+      applyTransferEvent({ type: 'error', message })
     },
   })
 
@@ -136,15 +214,14 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
     if (!targetId || targetId === 'unknown') return
     session.close()
     resetAll()
-    state.value = TRANSFER_STATE.loadingSources
+    applyTransferEvent({ type: 'loading_sources' })
     try {
       const { data } = await esimApi.getTransferSources(targetId)
       sources.value = data.value?.sources ?? []
       ccidError.value = data.value?.ccidError ?? ''
-      state.value = TRANSFER_STATE.ready
+      applyTransferEvent({ type: 'ready' })
     } catch (err) {
-      state.value = TRANSFER_STATE.error
-      errorMessage.value = err instanceof Error ? err.message : ''
+      applyTransferEvent({ type: 'error', message: err instanceof Error ? err.message : '' })
     }
   }
 
@@ -158,7 +235,7 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
     const targetId = modemId.value
     const source = selectedSource.value
     if (!targetId || targetId === 'unknown' || !source) return
-    state.value = TRANSFER_STATE.loadingProfiles
+    applyTransferEvent({ type: 'loading_profiles' })
     resetSelection()
     try {
       const { data } = await esimApi.getTransferProfiles(targetId, {
@@ -167,10 +244,9 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
         sourceImei: sourceImei.value.trim(),
       })
       profiles.value = data.value ?? []
-      state.value = TRANSFER_STATE.ready
+      applyTransferEvent({ type: 'ready' })
     } catch (err) {
-      state.value = TRANSFER_STATE.error
-      errorMessage.value = err instanceof Error ? err.message : ''
+      applyTransferEvent({ type: 'error', message: err instanceof Error ? err.message : '' })
     }
   }
 
@@ -180,9 +256,7 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
     const profile = selectedProfile.value
     if (!targetId || targetId === 'unknown' || !source || !profile?.supported) return
     session.close()
-    state.value = TRANSFER_STATE.connecting
-    setStage(TRANSFER_STAGE.preparing)
-    errorMessage.value = ''
+    applyTransferEvent({ type: 'connecting' })
     previewProfile.value = null
     session.start(targetId, {
       sourceType: source.type,
@@ -194,16 +268,16 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
 
   const submitUserInput = (accept: boolean) => {
     session.submitUserInput(accept, userInputResponse.value.trim())
-    state.value = TRANSFER_STATE.progress
+    applyTransferEvent({ type: 'progress' })
   }
 
   const confirmSourceDeletion = (accept: boolean) => {
     session.confirmSourceDeletion(accept)
-    state.value = TRANSFER_STATE.progress
+    applyTransferEvent({ type: 'progress' })
   }
 
   const completeWebsheet = () => {
-    state.value = TRANSFER_STATE.progress
+    applyTransferEvent({ type: 'progress' })
   }
 
   const cancelTransfer = () => {

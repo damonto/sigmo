@@ -189,6 +189,15 @@ type bridgeCodec struct {
 	pcmu bool
 }
 
+type webRTCBridgeAction int
+
+const (
+	webRTCBridgeActionNone webRTCBridgeAction = iota
+	webRTCBridgeActionReady
+	webRTCBridgeActionGraceClose
+	webRTCBridgeActionCloseNow
+)
+
 func newWebRTCBridge(media MediaSession, factory *voicecodec.AMRCodecFactory, codec bridgeCodec) (*webRTCBridge, error) {
 	info := media.Info()
 	if codec.amr != "" && factory == nil {
@@ -253,13 +262,13 @@ func newWebRTCBridge(media MediaSession, factory *voicecodec.AMRCodecFactory, co
 		cancel:  cancel,
 	}
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		switch state {
-		case webrtc.PeerConnectionStateConnected:
+		switch bridgeActionForPeerState(state) {
+		case webRTCBridgeActionReady:
 			bridge.cancelDisconnectTimer()
 			bridge.startDownlink()
-		case webrtc.PeerConnectionStateDisconnected:
+		case webRTCBridgeActionGraceClose:
 			bridge.closeAfterDisconnectGrace()
-		case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
+		case webRTCBridgeActionCloseNow:
 			go bridge.close()
 		}
 	})
@@ -608,6 +617,19 @@ func rewriteRTPPacket(in rtp.Packet, payloadType uint8, sequenceNumber uint16, t
 
 func shouldCloseDisconnectedBridge(state webrtc.PeerConnectionState) bool {
 	return state == webrtc.PeerConnectionStateDisconnected
+}
+
+func bridgeActionForPeerState(state webrtc.PeerConnectionState) webRTCBridgeAction {
+	switch state {
+	case webrtc.PeerConnectionStateConnected:
+		return webRTCBridgeActionReady
+	case webrtc.PeerConnectionStateDisconnected:
+		return webRTCBridgeActionGraceClose
+	case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
+		return webRTCBridgeActionCloseNow
+	default:
+		return webRTCBridgeActionNone
+	}
 }
 
 func hasICECandidate(sdp string) bool {

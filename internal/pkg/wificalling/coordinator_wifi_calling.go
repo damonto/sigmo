@@ -52,6 +52,7 @@ type coordinator struct {
 type sessionState struct {
 	cancel      context.CancelFunc
 	done        <-chan struct{}
+	phase       sessionPhase
 	client      *vowifi.Client
 	ussd        *vowifi.Session
 	calls       map[string]*voiceCallState
@@ -63,10 +64,29 @@ type sessionState struct {
 	websheet    *websheet.Session
 }
 
+type sessionPhase string
+
+const (
+	sessionPhaseConnecting       sessionPhase = "connecting"
+	sessionPhaseConnected        sessionPhase = "connected"
+	sessionPhaseWebsheetRequired sessionPhase = "websheet_required"
+	sessionPhaseDisconnected     sessionPhase = "disconnected"
+)
+
 type voiceCallState struct {
 	call      *imsvoice.Call
 	info      VoiceCall
 	updatedAt time.Time
+}
+
+type voiceCallTransition struct {
+	state     string
+	hold      string
+	reason    string
+	reasonSet bool
+	answered  bool
+	ended     bool
+	at        time.Time
 }
 
 type pendingVoiceDial struct {
@@ -185,33 +205,45 @@ func (c *coordinator) Status(ctx context.Context, modem *mmodem.Modem) (Status, 
 	}
 	c.mu.Lock()
 	session := c.sessions[modem.EquipmentIdentifier]
-	connected := session != nil && session.connected && session.profileID == profileID
-	durationSeconds := int64(0)
-	if connected && !session.connectedAt.IsZero() {
-		durationSeconds = max(0, int64(time.Since(session.connectedAt).Seconds()))
-	}
-	state := StateIdle
-	var pending *websheet.Info
-	switch {
-	case connected:
-		state = StateConnected
-	case session != nil && session.websheet != nil:
-		state = StateWebsheetRequired
-		info := session.websheet.Info()
-		pending = &info
-	case session != nil:
-		state = StateConnecting
-	case settings.Enabled:
-		state = StateDisconnected
-	}
+	status := statusFromSession(settings, session, profileID, time.Now())
 	c.mu.Unlock()
-	return Status{
-		Settings:        settings,
-		Connected:       connected,
-		State:           state,
-		DurationSeconds: durationSeconds,
-		Websheet:        pending,
-	}, nil
+	return status, nil
+}
+
+func statusFromSession(settings Settings, session *sessionState, profileID string, now time.Time) Status {
+	status := Status{
+		Settings: settings,
+		State:    StateIdle,
+	}
+	if session == nil || session.profileID != profileID {
+		if settings.Enabled {
+			status.State = StateDisconnected
+		}
+		return status
+	}
+	switch session.phase {
+	case sessionPhaseConnected:
+		status.Connected = session.client != nil
+		if status.Connected {
+			status.State = StateConnected
+			if !session.connectedAt.IsZero() {
+				status.DurationSeconds = max(0, int64(now.Sub(session.connectedAt).Seconds()))
+			}
+			return status
+		}
+		status.State = StateDisconnected
+	case sessionPhaseWebsheetRequired:
+		status.State = StateWebsheetRequired
+		if session.websheet != nil {
+			info := session.websheet.Info()
+			status.Websheet = &info
+		}
+	case sessionPhaseDisconnected:
+		status.State = StateDisconnected
+	default:
+		status.State = StateConnecting
+	}
+	return status
 }
 
 func (c *coordinator) StartWebsheet(ctx context.Context, modem *mmodem.Modem) (websheet.Info, error) {
@@ -407,14 +439,51 @@ func (c *coordinator) DialCall(ctx context.Context, modem *mmodem.Modem, to stri
 }
 
 func initialDialedVoiceCallState(info VoiceCall, state imsvoice.CallState) VoiceCall {
-	if isAnsweredVoiceState(state) && info.AnsweredAt.IsZero() {
-		info.AnsweredAt = info.UpdatedAt
-	}
-	return info
+	next, _ := advanceVoiceCall(info, voiceCallTransition{state: string(state), at: info.UpdatedAt})
+	return next
 }
 
-func isAnsweredVoiceState(state imsvoice.CallState) bool {
-	return state == imsvoice.CallStateActive || state == imsvoice.CallStateConfirmed
+func advanceVoiceCall(info VoiceCall, transition voiceCallTransition) (VoiceCall, bool) {
+	if info.ID == "" {
+		return info, false
+	}
+	if isTerminalVoiceCallState(info.State) {
+		return info, false
+	}
+	next := info
+	if transition.state != "" {
+		next.State = transition.state
+	}
+	if transition.hold != "" {
+		next.Hold = transition.hold
+	}
+	if transition.reasonSet {
+		next.Reason = transition.reason
+	}
+	if transition.at.IsZero() {
+		transition.at = time.Now()
+	}
+	next.UpdatedAt = transition.at
+	if (transition.answered || isAnsweredVoiceCallState(next.State)) && next.AnsweredAt.IsZero() {
+		next.AnsweredAt = next.UpdatedAt
+	}
+	if transition.ended || isTerminalVoiceCallState(next.State) {
+		next.EndedAt = next.UpdatedAt
+	}
+	return next, next != info
+}
+
+func failVoiceCall(info VoiceCall, reason string, at time.Time) (VoiceCall, bool) {
+	return advanceVoiceCall(info, voiceCallTransition{
+		state:     string(imsvoice.CallStateFailed),
+		reason:    reason,
+		reasonSet: true,
+		at:        at,
+	})
+}
+
+func isAnsweredVoiceCallState(state string) bool {
+	return state == string(imsvoice.CallStateActive) || state == string(imsvoice.CallStateConfirmed)
 }
 
 func failedOutgoingVoiceCall(modemID string, profileID string, to string, err error) VoiceCall {
@@ -464,12 +533,7 @@ func (c *coordinator) finishFailedPendingVoiceDial(modemID string, pending pendi
 			continue
 		}
 		info := state.info
-		if !isTerminalVoiceCallState(info.State) {
-			now := time.Now()
-			info.State = string(imsvoice.CallStateFailed)
-			info.EndedAt = now
-			info.UpdatedAt = now
-		}
+		info, _ = failVoiceCall(info, reason, time.Now())
 		if strings.TrimSpace(info.Reason) == "" {
 			info.Reason = reason
 		}
@@ -538,10 +602,12 @@ func (c *coordinator) AnswerCall(ctx context.Context, modem *mmodem.Modem, callI
 	if err := call.Answer(ctx, browserVoiceMediaOffer()); err != nil {
 		return VoiceCall{}, normalizeVoiceError(err)
 	}
-	info.State = string(call.State())
-	info.Hold = voiceHoldState(call)
-	info.AnsweredAt = time.Now()
-	info.UpdatedAt = info.AnsweredAt
+	info, _ = advanceVoiceCall(info, voiceCallTransition{
+		state:    string(call.State()),
+		hold:     voiceHoldState(call),
+		answered: true,
+		at:       time.Now(),
+	})
 	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
 	c.publishVoiceEvent(info)
 	return info, nil
@@ -555,11 +621,14 @@ func (c *coordinator) RejectCall(ctx context.Context, modem *mmodem.Modem, callI
 	if err := call.Reject(ctx, 486, "Busy Here"); err != nil {
 		return VoiceCall{}, normalizeVoiceError(err)
 	}
-	info.State = string(call.State())
-	info.Hold = voiceHoldState(call)
-	info.Reason = "Busy Here"
-	info.EndedAt = time.Now()
-	info.UpdatedAt = info.EndedAt
+	info, _ = advanceVoiceCall(info, voiceCallTransition{
+		state:     string(call.State()),
+		hold:      voiceHoldState(call),
+		reason:    "Busy Here",
+		reasonSet: true,
+		ended:     true,
+		at:        time.Now(),
+	})
 	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
 	c.publishVoiceEvent(info)
 	return info, nil
@@ -573,10 +642,12 @@ func (c *coordinator) HangupCall(ctx context.Context, modem *mmodem.Modem, callI
 	if err := call.Hangup(ctx); err != nil {
 		return VoiceCall{}, normalizeVoiceError(err)
 	}
-	info.State = string(call.State())
-	info.Hold = voiceHoldState(call)
-	info.EndedAt = time.Now()
-	info.UpdatedAt = info.EndedAt
+	info, _ = advanceVoiceCall(info, voiceCallTransition{
+		state: string(call.State()),
+		hold:  voiceHoldState(call),
+		ended: true,
+		at:    time.Now(),
+	})
 	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
 	c.publishVoiceEvent(info)
 	return info, nil
@@ -590,9 +661,11 @@ func (c *coordinator) HoldCall(ctx context.Context, modem *mmodem.Modem, callID 
 	if err := call.Hold(ctx); err != nil {
 		return VoiceCall{}, normalizeVoiceError(err)
 	}
-	info.State = string(call.State())
-	info.Hold = voiceHoldState(call)
-	info.UpdatedAt = time.Now()
+	info, _ = advanceVoiceCall(info, voiceCallTransition{
+		state: string(call.State()),
+		hold:  voiceHoldState(call),
+		at:    time.Now(),
+	})
 	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
 	c.publishVoiceEvent(info)
 	return info, nil
@@ -606,9 +679,11 @@ func (c *coordinator) ResumeCall(ctx context.Context, modem *mmodem.Modem, callI
 	if err := call.Resume(ctx); err != nil {
 		return VoiceCall{}, normalizeVoiceError(err)
 	}
-	info.State = string(call.State())
-	info.Hold = voiceHoldState(call)
-	info.UpdatedAt = time.Now()
+	info, _ = advanceVoiceCall(info, voiceCallTransition{
+		state: string(call.State()),
+		hold:  voiceHoldState(call),
+		at:    time.Now(),
+	})
 	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
 	c.publishVoiceEvent(info)
 	return info, nil
@@ -900,6 +975,7 @@ func (c *coordinator) start(modem *mmodem.Modem, profileID string) {
 	c.sessions[modemID] = &sessionState{
 		cancel:    cancel,
 		done:      done,
+		phase:     sessionPhaseConnecting,
 		modemPath: modem.Path(),
 		profileID: profileID,
 		calls:     make(map[string]*voiceCallState),
@@ -913,6 +989,7 @@ func (c *coordinator) start(modem *mmodem.Modem, profileID string) {
 
 func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, profileID string) {
 	for {
+		c.markConnecting(modem.EquipmentIdentifier)
 		client, err := c.connectWithRetry(ctx, modem)
 		if err != nil {
 			return
@@ -922,6 +999,7 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 		if ctx.Err() != nil {
 			return
 		}
+		c.markConnecting(modem.EquipmentIdentifier)
 		delay := retryDelays[0]
 		slog.Warn("Wi-Fi Calling disconnected", "modem", modem.EquipmentIdentifier, "retryIn", delay)
 		if err := sleep(ctx, delay); err != nil {
@@ -1082,6 +1160,7 @@ func (c *coordinator) setWebsheet(modemID string, websheetSession *websheet.Sess
 	defer c.mu.Unlock()
 	if session := c.sessions[modemID]; session != nil {
 		session.websheet = websheetSession
+		session.phase = sessionPhaseWebsheetRequired
 	}
 }
 
@@ -1116,6 +1195,7 @@ func (c *coordinator) clearWebsheet(modemID string, websheetSession *websheet.Se
 	c.mu.Lock()
 	if session := c.sessions[modemID]; session != nil && session.websheet == websheetSession {
 		session.websheet = nil
+		session.phase = sessionPhaseConnecting
 	}
 	c.mu.Unlock()
 	if c.websheets != nil {
@@ -1459,6 +1539,7 @@ func (c *coordinator) forwardCallEvent(modemID string, event vowifi.CallEvent) {
 	c.mu.Lock()
 	session := c.sessions[modemID]
 	var info VoiceCall
+	changed := false
 	if session != nil && session.calls != nil {
 		state := session.calls[event.CallID]
 		if state == nil && session.pendingDial != nil {
@@ -1479,31 +1560,28 @@ func (c *coordinator) forwardCallEvent(modemID string, event vowifi.CallEvent) {
 				state.call = event.Call
 			}
 			info = state.info
-			info.State = string(event.State)
-			if hold := strings.TrimSpace(string(event.Hold)); hold != "" {
-				info.Hold = hold
-			} else if event.Call != nil {
-				info.Hold = voiceHoldState(event.Call)
-			} else if info.Hold == "" {
-				info.Hold = string(imsvoice.CallHoldNone)
+			hold := strings.TrimSpace(string(event.Hold))
+			if hold == "" && event.Call != nil {
+				hold = voiceHoldState(event.Call)
 			}
-			info.Reason = event.Cause
-			info.UpdatedAt = event.At
-			if info.UpdatedAt.IsZero() {
-				info.UpdatedAt = time.Now()
+			if hold == "" && info.Hold == "" {
+				hold = string(imsvoice.CallHoldNone)
 			}
-			if isAnsweredVoiceState(event.State) && info.AnsweredAt.IsZero() {
-				info.AnsweredAt = info.UpdatedAt
+			info, changed = advanceVoiceCall(info, voiceCallTransition{
+				state:     string(event.State),
+				hold:      hold,
+				reason:    event.Cause,
+				reasonSet: true,
+				at:        event.At,
+			})
+			if changed {
+				state.info = info
+				state.updatedAt = info.UpdatedAt
 			}
-			if event.State == imsvoice.CallStateEnded || event.State == imsvoice.CallStateFailed {
-				info.EndedAt = info.UpdatedAt
-			}
-			state.info = info
-			state.updatedAt = info.UpdatedAt
 		}
 	}
 	c.mu.Unlock()
-	if info.ID != "" {
+	if changed {
 		c.publishVoiceEvent(info)
 	}
 }
@@ -1547,6 +1625,19 @@ func (c *coordinator) markConnected(modemID string, client *vowifi.Client) {
 		session.client = client
 		session.connected = true
 		session.connectedAt = time.Now()
+		session.phase = sessionPhaseConnected
+		session.websheet = nil
+	}
+}
+
+func (c *coordinator) markConnecting(modemID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if session := c.sessions[modemID]; session != nil {
+		session.client = nil
+		session.connected = false
+		session.connectedAt = time.Time{}
+		session.phase = sessionPhaseConnecting
 	}
 }
 
@@ -1560,6 +1651,7 @@ func (c *coordinator) markDisconnected(modemID string, client *vowifi.Client) {
 	session.client = nil
 	session.connected = false
 	session.connectedAt = time.Time{}
+	session.phase = sessionPhaseDisconnected
 	events := disconnectedCallEvents(session)
 	c.mu.Unlock()
 
@@ -1578,10 +1670,7 @@ func disconnectedCallEvents(session *sessionState) []VoiceCall {
 		if state == nil || state.info.ID == "" || isTerminalVoiceCallState(state.info.State) {
 			continue
 		}
-		state.info.State = string(imsvoice.CallStateFailed)
-		state.info.Reason = "wifi calling disconnected"
-		state.info.EndedAt = now
-		state.info.UpdatedAt = now
+		state.info, _ = failVoiceCall(state.info, "wifi calling disconnected", now)
 		state.updatedAt = now
 		events = append(events, state.info)
 	}
