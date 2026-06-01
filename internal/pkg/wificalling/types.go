@@ -32,8 +32,8 @@ const (
 var (
 	ErrUnavailable         = errors.New("wifi calling is unavailable")
 	ErrNotConnected        = errors.New("wifi calling is not connected")
-	ErrEntitlementPending  = errors.New("wifi calling entitlement is pending")
-	ErrEntitlementDenied   = errors.New("wifi calling entitlement denied")
+	ErrWFCSetupPending     = errors.New("wifi calling setup is pending")
+	ErrWFCSetupDenied      = errors.New("wifi calling setup denied")
 	ErrUnsupportedCodec    = errors.New("wifi calling voice codec is not supported")
 	ErrUnsupportedDTMF     = errors.New("wifi calling dtmf is not supported")
 	ErrCallOnHold          = errors.New("wifi calling call is on hold")

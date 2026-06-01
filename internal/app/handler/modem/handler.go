@@ -57,8 +57,8 @@ const (
 	errorCodeStartWiFiCallingWebsheetFailed          = "start_wifi_calling_websheet_failed"
 	errorCodeStartWiFiCallingE911WebsheetFailed      = "start_wifi_calling_e911_websheet_failed"
 	errorCodeWiFiCallingWebsheetNotPending           = "wifi_calling_websheet_not_pending"
-	errorCodeWiFiCallingEntitlementPending           = "wifi_calling_entitlement_pending"
-	errorCodeWiFiCallingEntitlementDenied            = "wifi_calling_entitlement_denied"
+	errorCodeWiFiCallingSetupPending                 = "wifi_calling_setup_pending"
+	errorCodeWiFiCallingSetupDenied                  = "wifi_calling_setup_denied"
 	errorCodeWiFiCallingWebsheetUnavailable          = "wifi_calling_websheet_unavailable"
 )
 
@@ -290,10 +290,10 @@ func (h *Handler) StartWiFiCallingEmergencyAddressWebsheet(c *echo.Context) erro
 
 func (h *Handler) wifiCallingWebsheetStartError(c *echo.Context, fallbackCode string, err error) error {
 	switch {
-	case errors.Is(err, wificalling.ErrEntitlementPending):
-		return httpapi.TooManyRequests(c, errorCodeWiFiCallingEntitlementPending, err)
-	case errors.Is(err, wificalling.ErrEntitlementDenied):
-		return httpapi.BadRequest(c, errorCodeWiFiCallingEntitlementDenied, err)
+	case errors.Is(err, wificalling.ErrWFCSetupPending):
+		return httpapi.TooManyRequests(c, errorCodeWiFiCallingSetupPending, err)
+	case errors.Is(err, wificalling.ErrWFCSetupDenied):
+		return httpapi.BadRequest(c, errorCodeWiFiCallingSetupDenied, err)
 	case errors.Is(err, wificalling.ErrUnavailable), errors.Is(err, wificalling.ErrWebsheetUnavailable):
 		return httpapi.BadRequest(c, errorCodeWiFiCallingWebsheetUnavailable, err)
 	default:
