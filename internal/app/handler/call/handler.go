@@ -28,6 +28,8 @@ const (
 	errorCodeDialCallFailed            = "dial_call_failed"
 	errorCodeUpdateCallInvalidRequest  = "update_call_invalid_request"
 	errorCodeUpdateCallFailed          = "update_call_failed"
+	errorCodeSendDTMFInvalidRequest    = "send_dtmf_invalid_request"
+	errorCodeSendDTMFFailed            = "send_dtmf_failed"
 	errorCodeCallNumberRequired        = "call_number_required"
 	errorCodeCallNumberInvalid         = "call_number_invalid"
 	errorCodeUSSDDialString            = "ussd_dial_string"
@@ -39,7 +41,12 @@ const (
 	errorCodeInvalidCallState          = "invalid_call_state"
 	errorCodeInvalidCallHold           = "invalid_call_hold"
 	errorCodeCallUpdateConflict        = "call_update_conflict"
+	errorCodeDTMFDigitsRequired        = "dtmf_digits_required"
+	errorCodeInvalidDTMFDigit          = "invalid_dtmf_digit"
+	errorCodeInvalidDTMFCallState      = "invalid_dtmf_call_state"
+	errorCodeCallOnHold                = "call_on_hold"
 	errorCodeCallRecordActive          = "call_record_active"
+	errorCodeCallDTMFUnsupported       = "call_dtmf_unsupported"
 	errorCodeHangupCallFailed          = "hangup_call_failed"
 	errorCodeDeleteCallFailed          = "delete_call_failed"
 	errorCodeCallMediaUnavailable      = "call_media_unavailable"
@@ -116,6 +123,21 @@ func (h *Handler) Hangup(c *echo.Context) error {
 		return callActionError(c, err, errorCodeHangupCallFailed)
 	}
 	return c.JSON(http.StatusOK, buildCallResponse(call))
+}
+
+func (h *Handler) SendDTMF(c *echo.Context) error {
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeSendDTMFFailed)
+	}
+	var req SendDTMFRequest
+	if err := c.Bind(&req); err != nil {
+		return httpapi.BadRequest(c, errorCodeSendDTMFInvalidRequest, err)
+	}
+	if err := h.calls.SendDTMF(c.Request().Context(), modem, callIDParam(c), req.Digits); err != nil {
+		return callActionError(c, err, errorCodeSendDTMFFailed)
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 func (h *Handler) Delete(c *echo.Context) error {
@@ -306,8 +328,18 @@ func callActionError(c *echo.Context, err error, fallback string) error {
 		return httpapi.BadRequest(c, errorCodeInvalidCallHold, err)
 	case errors.Is(err, pcall.ErrCallUpdateConflict):
 		return httpapi.BadRequest(c, errorCodeCallUpdateConflict, err)
+	case errors.Is(err, pcall.ErrDTMFDigitsRequired):
+		return httpapi.BadRequest(c, errorCodeDTMFDigitsRequired, err)
+	case errors.Is(err, pcall.ErrInvalidDTMFDigit):
+		return httpapi.BadRequest(c, errorCodeInvalidDTMFDigit, err)
+	case errors.Is(err, pcall.ErrInvalidDTMFCallState):
+		return httpapi.Error(c, http.StatusConflict, errorCodeInvalidDTMFCallState, err.Error())
+	case errors.Is(err, pcall.ErrCallOnHold):
+		return httpapi.Error(c, http.StatusConflict, errorCodeCallOnHold, err.Error())
 	case errors.Is(err, pcall.ErrCallRecordActive):
 		return httpapi.Error(c, http.StatusConflict, errorCodeCallRecordActive, err.Error())
+	case errors.Is(err, pcall.ErrUnsupportedDTMF):
+		return httpapi.Error(c, http.StatusNotImplemented, errorCodeCallDTMFUnsupported, err.Error())
 	case fallback == errorCodeDialCallFailed:
 		return httpapi.Error(c, http.StatusBadGateway, errorCodeDialCallFailed, callActionMessage(err))
 	default:

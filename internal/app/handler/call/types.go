@@ -11,6 +11,10 @@ type UpdateCallRequest struct {
 	Hold   string `json:"hold"`
 }
 
+type SendDTMFRequest struct {
+	Digits string `json:"digits"`
+}
+
 type CallResponse struct {
 	ID         string `json:"callID"`
 	Route      string `json:"route"`

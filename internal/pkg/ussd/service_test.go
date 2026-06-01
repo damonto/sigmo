@@ -188,6 +188,10 @@ func (fakeWiFiCalling) ResumeCall(context.Context, *mmodem.Modem, string) (wific
 	return wificalling.VoiceCall{}, nil
 }
 
+func (fakeWiFiCalling) SendCallDTMF(context.Context, *mmodem.Modem, string, string) error {
+	return nil
+}
+
 func (fakeWiFiCalling) OpenCallMedia(context.Context, *mmodem.Modem, string) (wificalling.MediaSession, error) {
 	return nil, nil
 }

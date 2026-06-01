@@ -53,6 +53,11 @@ func (m *Modem) ProfileID(ctx context.Context) (string, error) {
 	if m == nil {
 		return "", errors.New("modem is required")
 	}
+	if m.Sim != nil {
+		if profileID := strings.TrimSpace(m.Sim.Identifier); profileID != "" {
+			return profileID, nil
+		}
+	}
 	sim, err := m.SIMs().Primary(ctx)
 	if err != nil {
 		return "", fmt.Errorf("read primary SIM: %w", err)

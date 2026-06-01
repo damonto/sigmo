@@ -38,6 +38,10 @@ export type UpdateCallRequest = {
   hold?: 'local' | 'none'
 }
 
+export type SendDTMFRequest = {
+  digits: string
+}
+
 export type CallEventMessage = {
   type: 'call'
   call: CallRecord

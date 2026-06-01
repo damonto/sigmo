@@ -684,6 +684,17 @@ func (c *coordinator) ResumeCall(ctx context.Context, modem *mmodem.Modem, callI
 	return info, nil
 }
 
+func (c *coordinator) SendCallDTMF(ctx context.Context, modem *mmodem.Modem, callID string, digits string) error {
+	call, _, err := c.lookupVoiceCall(ctx, modem, callID)
+	if err != nil {
+		return err
+	}
+	if err := call.SendDTMF(ctx, imsvoice.DTMFRequest{Digits: digits}); err != nil {
+		return normalizeVoiceError(err)
+	}
+	return nil
+}
+
 func (c *coordinator) OpenCallMedia(ctx context.Context, modem *mmodem.Modem, callID string) (MediaSession, error) {
 	call, _, err := c.lookupVoiceCall(ctx, modem, callID)
 	if err != nil {

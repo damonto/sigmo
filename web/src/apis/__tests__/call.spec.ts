@@ -149,4 +149,19 @@ describe('useCallApi', () => {
       }),
     )
   })
+
+  it('sends DTMF events with POST requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await useCallApi().sendDTMF('modem-1', 'call/1', { digits: '1' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/modems/modem-1/calls/call%2F1/dtmf-events'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ digits: '1' }),
+      }),
+    )
+  })
 })

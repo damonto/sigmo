@@ -56,8 +56,13 @@ var (
 	ErrCallRecordActive        = errors.New("active calls cannot be deleted")
 	ErrMediaUnavailable        = errors.New("call media is not available")
 	ErrUnsupportedCodec        = errors.New("call media codec is not supported")
+	ErrUnsupportedDTMF         = errors.New("call dtmf is not supported")
 	ErrInvalidCallHold         = errors.New("call hold must be local or none")
 	ErrCallUpdateConflict      = errors.New("call update cannot change state and hold together")
+	ErrDTMFDigitsRequired      = errors.New("dtmf digits are required")
+	ErrInvalidDTMFDigit        = errors.New("dtmf digits must contain 0-9, *, #, or A-D")
+	ErrInvalidDTMFCallState    = errors.New("call state must be early_media, active, or confirmed")
+	ErrCallOnHold              = errors.New("call is on hold")
 )
 
 type Service struct {
@@ -311,6 +316,37 @@ func (s *Service) Hangup(ctx context.Context, modem *mmodem.Modem, callID string
 	}
 }
 
+func (s *Service) SendDTMF(ctx context.Context, modem *mmodem.Modem, callID string, digits string) error {
+	digits = strings.TrimSpace(digits)
+	if digits == "" {
+		return ErrDTMFDigitsRequired
+	}
+	if !validDTMFDigits(digits) {
+		return ErrInvalidDTMFDigit
+	}
+	call, err := s.callForAction(ctx, modem, callID)
+	if err != nil {
+		return err
+	}
+	if !dtmfCallState(call.State) {
+		return ErrInvalidDTMFCallState
+	}
+	if call.Hold == HoldLocal || call.Hold == HoldLocalRemote {
+		return ErrCallOnHold
+	}
+	switch call.Route {
+	case RouteWiFiCalling:
+		if err := s.wifiCalling.SendCallDTMF(ctx, modem, call.ID, digits); err != nil {
+			return mapWiFiCallingActionError("send DTMF", err)
+		}
+		return nil
+	case RouteModem:
+		return ErrModemCallingUnavailable
+	default:
+		return ErrInvalidRoute
+	}
+}
+
 func (s *Service) Delete(ctx context.Context, modem *mmodem.Modem, callID string) error {
 	call, err := s.callForAction(ctx, modem, callID)
 	if err != nil {
@@ -379,6 +415,27 @@ func isTerminalCallState(state string) bool {
 	return state == StateEnded || state == StateFailed
 }
 
+func dtmfCallState(state string) bool {
+	return state == StateEarlyMedia || state == StateActive || state == StateConfirmed
+}
+
+func validDTMFDigits(digits string) bool {
+	for _, digit := range digits {
+		if !validDTMFDigit(digit) {
+			return false
+		}
+	}
+	return true
+}
+
+func validDTMFDigit(digit rune) bool {
+	return digit >= '0' && digit <= '9' ||
+		digit == '*' ||
+		digit == '#' ||
+		digit >= 'A' && digit <= 'D' ||
+		digit >= 'a' && digit <= 'd'
+}
+
 func mapWiFiCallingMediaError(err error) error {
 	switch {
 	case err == nil:
@@ -402,6 +459,8 @@ func mapWiFiCallingActionError(action string, err error) error {
 		return ErrWiFiCallingNotConnected
 	case errors.Is(err, wificalling.ErrUnavailable):
 		return ErrCallNotFound
+	case errors.Is(err, wificalling.ErrUnsupportedDTMF):
+		return ErrUnsupportedDTMF
 	default:
 		return fmt.Errorf("%s Wi-Fi Calling: %w", action, err)
 	}

@@ -7,6 +7,7 @@ import type { ApiErrorResponse } from '@/types/api'
 import type {
   CallRecord,
   DialCallRequest,
+  SendDTMFRequest,
   UpdateCallRequest,
   WebRTCSessionDescriptionPayload,
 } from '@/types/call'
@@ -156,6 +157,13 @@ export const useCallApi = () => {
     return updateCall(id, callID, { hold: 'none' })
   }
 
+  const sendDTMF = (id: string, callID: string, payload: SendDTMFRequest) => {
+    return requestCallApi<void>(id, `/${encodeURIComponent(callID)}/dtmf-events`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+
   const createWebRTCAnswer = (
     id: string,
     callID: string,
@@ -184,6 +192,7 @@ export const useCallApi = () => {
     hangupCall,
     holdCall,
     resumeCall,
+    sendDTMF,
     createWebRTCAnswer,
     deleteCall,
   }

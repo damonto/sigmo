@@ -436,6 +436,155 @@ func TestSetHoldRejectsInvalidHold(t *testing.T) {
 	}
 }
 
+func TestSendDTMFRejectsInvalidDigitsBeforeLookup(t *testing.T) {
+	tests := []struct {
+		name    string
+		digits  string
+		wantErr error
+	}{
+		{name: "empty", wantErr: ErrDTMFDigitsRequired},
+		{name: "whitespace", digits: "  ", wantErr: ErrDTMFDigitsRequired},
+		{name: "letter outside dtmf range", digits: "12x", wantErr: ErrInvalidDTMFDigit},
+		{name: "unicode digit", digits: "１", wantErr: ErrInvalidDTMFDigit},
+	}
+
+	service := New(nil, fakeWiFiCalling{})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := service.SendDTMF(context.Background(), nil, "call-1", tt.digits)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("SendDTMF() error = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidDTMFDigits(t *testing.T) {
+	tests := []struct {
+		name   string
+		digits string
+		want   bool
+	}{
+		{name: "numeric star pound", digits: "123*0#", want: true},
+		{name: "upper abcd", digits: "ABCD", want: true},
+		{name: "lower abcd", digits: "abcd", want: true},
+		{name: "empty", want: true},
+		{name: "invalid letter", digits: "E", want: false},
+		{name: "plus", digits: "+", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := validDTMFDigits(tt.digits); got != tt.want {
+				t.Fatalf("validDTMFDigits(%q) = %v, want %v", tt.digits, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSendDTMFValidatesStoredCallAndRoutesToWiFiCalling(t *testing.T) {
+	baseCall := storage.Call{
+		ID:        "call-1",
+		ProfileID: "profile-a",
+		ModemID:   "modem-1",
+		Route:     RouteWiFiCalling,
+		Direction: DirectionOutgoing,
+		Number:    "+12242255559",
+		State:     StateActive,
+		Hold:      HoldNone,
+		StartedAt: time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC),
+	}
+	tests := []struct {
+		name       string
+		call       *storage.Call
+		digits     string
+		wantErr    error
+		wantCalled bool
+	}{
+		{name: "call not found", digits: "1", wantErr: ErrCallNotFound},
+		{name: "modem route unavailable", call: callWith(baseCall, func(call *storage.Call) { call.Route = RouteModem }), digits: "1", wantErr: ErrModemCallingUnavailable},
+		{name: "local hold blocks dtmf", call: callWith(baseCall, func(call *storage.Call) { call.Hold = HoldLocal }), digits: "1", wantErr: ErrCallOnHold},
+		{name: "local remote hold blocks dtmf", call: callWith(baseCall, func(call *storage.Call) { call.Hold = HoldLocalRemote }), digits: "1", wantErr: ErrCallOnHold},
+		{name: "ended state blocks dtmf", call: callWith(baseCall, func(call *storage.Call) { call.State = StateEnded }), digits: "1", wantErr: ErrInvalidDTMFCallState},
+		{name: "early media can send dtmf", call: callWith(baseCall, func(call *storage.Call) { call.State = StateEarlyMedia }), digits: "1", wantCalled: true},
+		{name: "active can send dtmf", call: &baseCall, digits: "*#", wantCalled: true},
+		{name: "confirmed can send dtmf", call: callWith(baseCall, func(call *storage.Call) { call.State = StateConfirmed }), digits: "A", wantCalled: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := testStore(t)
+			if tt.call != nil {
+				if err := store.SaveCall(ctx, *tt.call); err != nil {
+					t.Fatalf("SaveCall() error = %v", err)
+				}
+			}
+			called := false
+			service := New(store, fakeWiFiCalling{
+				sendDTMF: func(callID string, digits string) error {
+					called = true
+					if callID != baseCall.ID || digits != tt.digits {
+						t.Fatalf("SendCallDTMF() = callID %q digits %q, want %q/%q", callID, digits, baseCall.ID, tt.digits)
+					}
+					return nil
+				},
+			})
+			modem := &mmodem.Modem{
+				EquipmentIdentifier: baseCall.ModemID,
+				Sim:                 &mmodem.SIM{Identifier: baseCall.ProfileID},
+			}
+
+			err := service.SendDTMF(ctx, modem, baseCall.ID, tt.digits)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("SendDTMF() error = %v, want %v", err, tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("SendDTMF() error = %v", err)
+			}
+			if called != tt.wantCalled {
+				t.Fatalf("SendCallDTMF called = %v, want %v", called, tt.wantCalled)
+			}
+		})
+	}
+}
+
+func TestSendDTMFMapsWiFiCallingError(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	call := storage.Call{
+		ID:        "call-1",
+		ProfileID: "profile-a",
+		ModemID:   "modem-1",
+		Route:     RouteWiFiCalling,
+		Direction: DirectionOutgoing,
+		Number:    "+12242255559",
+		State:     StateActive,
+		Hold:      HoldNone,
+		StartedAt: time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC),
+	}
+	if err := store.SaveCall(ctx, call); err != nil {
+		t.Fatalf("SaveCall() error = %v", err)
+	}
+	service := New(store, fakeWiFiCalling{dtmfErr: wificalling.ErrNotConnected})
+	modem := &mmodem.Modem{
+		EquipmentIdentifier: call.ModemID,
+		Sim:                 &mmodem.SIM{Identifier: call.ProfileID},
+	}
+
+	err := service.SendDTMF(ctx, modem, call.ID, "1")
+	if !errors.Is(err, ErrWiFiCallingNotConnected) {
+		t.Fatalf("SendDTMF() error = %v, want %v", err, ErrWiFiCallingNotConnected)
+	}
+}
+
+func callWith(call storage.Call, update func(*storage.Call)) *storage.Call {
+	update(&call)
+	return &call
+}
+
 func TestDeleteRemovesTerminalCallRecords(t *testing.T) {
 	ctx := context.Background()
 	store := testStore(t)
@@ -517,6 +666,7 @@ func TestMapWiFiCallingActionError(t *testing.T) {
 		{name: "nil", err: nil, wantErr: nil},
 		{name: "wifi calling disconnected", err: wificalling.ErrNotConnected, wantErr: ErrWiFiCallingNotConnected},
 		{name: "call unavailable", err: wificalling.ErrUnavailable, wantErr: ErrCallNotFound},
+		{name: "dtmf unsupported", err: wificalling.ErrUnsupportedDTMF, wantErr: ErrUnsupportedDTMF},
 		{name: "unexpected", err: errors.New("sip transaction"), want: "answer Wi-Fi Calling: sip transaction"},
 	}
 	for _, tt := range tests {
@@ -550,6 +700,8 @@ type fakeWiFiCalling struct {
 	hangupCall wificalling.VoiceCall
 	holdCall   wificalling.VoiceCall
 	resumeCall wificalling.VoiceCall
+	dtmfErr    error
+	sendDTMF   func(string, string) error
 	mediaErr   error
 	subscribe  func(wificalling.VoiceEventFunc) func()
 }
@@ -599,6 +751,12 @@ func (f fakeWiFiCalling) HoldCall(context.Context, *mmodem.Modem, string) (wific
 }
 func (f fakeWiFiCalling) ResumeCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
 	return f.resumeCall, nil
+}
+func (f fakeWiFiCalling) SendCallDTMF(ctx context.Context, modem *mmodem.Modem, callID string, digits string) error {
+	if f.sendDTMF != nil {
+		return f.sendDTMF(callID, digits)
+	}
+	return f.dtmfErr
 }
 func (f fakeWiFiCalling) OpenCallMedia(context.Context, *mmodem.Modem, string) (wificalling.MediaSession, error) {
 	if f.mediaErr != nil {

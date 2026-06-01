@@ -43,6 +43,7 @@ const makeSession = (state: {
     reject: vi.fn(),
     hangup: vi.fn(),
     toggleHold: vi.fn(),
+    sendDTMF: vi.fn(),
   }) as unknown as ModemCallSession
 
 const mountBanner = (session: ModemCallSession) =>
@@ -50,7 +51,7 @@ const mountBanner = (session: ModemCallSession) =>
     props: { session },
     global: {
       mocks: {
-        $t: (key: string) =>
+        $t: (key: string, params?: Record<string, string>) =>
           ({
             'modemDetail.phone.answer': 'Answer',
             'modemDetail.phone.reject': 'Reject',
@@ -58,6 +59,9 @@ const mountBanner = (session: ModemCallSession) =>
             'modemDetail.phone.hold': 'Hold',
             'modemDetail.phone.resume': 'Resume',
             'modemDetail.phone.duration': 'Duration',
+            'modemDetail.phone.openInCallDialpad': 'Open in-call dialpad',
+            'modemDetail.phone.closeInCallDialpad': 'Close in-call dialpad',
+            'modemDetail.phone.sendDtmf': `Send ${params?.digit ?? ''}`,
           })[key] ?? key,
       },
       stubs: {
@@ -72,6 +76,7 @@ const mountBanner = (session: ModemCallSession) =>
   })
 
 vi.mock('lucide-vue-next', () => ({
+  Keyboard: { template: '<span />' },
   Mic: { template: '<span />' },
   PhoneCall: { template: '<span />' },
   PhoneIncoming: { template: '<span />' },
@@ -126,6 +131,26 @@ describe('ModemCallBanner', () => {
     expect(session.hangup).toHaveBeenCalledWith(active)
   })
 
+  it('opens an in-call dialpad and sends DTMF digits', async () => {
+    const active = call({
+      direction: 'outgoing',
+      state: 'active',
+      answeredAt: '2026-05-27T00:00:10Z',
+    })
+    const session = makeSession({ activeCall: active })
+    const wrapper = mountBanner(session)
+
+    await wrapper.get('button[aria-label="Open in-call dialpad"]').trigger('click')
+    expect(wrapper.text()).toContain('*')
+    expect(wrapper.text()).toContain('#')
+
+    const one = wrapper.findAll('button').find((button) => button.text() === '1')
+    expect(one).toBeTruthy()
+    await one?.trigger('click')
+
+    expect(session.sendDTMF).toHaveBeenCalledWith(active, '1')
+  })
+
   it('shows local hold state and resume action', async () => {
     const active = call({
       direction: 'outgoing',
@@ -137,6 +162,7 @@ describe('ModemCallBanner', () => {
     const wrapper = mountBanner(session)
 
     expect(wrapper.text()).toContain('On hold')
+    expect(wrapper.find('button[aria-label="Open in-call dialpad"]').exists()).toBe(false)
     await wrapper.get('button[aria-label="Resume"]').trigger('click')
 
     expect(session.toggleHold).toHaveBeenCalledWith(active)

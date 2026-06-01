@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   hangupCall: vi.fn(),
   holdCall: vi.fn(),
   resumeCall: vi.fn(),
+  sendDTMF: vi.fn(),
   deleteCall: vi.fn(),
 }))
 
@@ -162,6 +163,7 @@ describe('usePhoneCalls', () => {
     api.hangupCall.mockResolvedValue({ data: ref(call({ state: 'ended', endedAt: '2026-05-27T00:00:10Z' })) })
     api.holdCall.mockResolvedValue({ data: ref(call({ state: 'active', hold: 'local' })) })
     api.resumeCall.mockResolvedValue({ data: ref(call({ state: 'active', hold: 'none' })) })
+    api.sendDTMF.mockResolvedValue({ data: ref(undefined) })
     api.deleteCall.mockResolvedValue({ data: ref(undefined) })
   })
 
@@ -427,6 +429,55 @@ describe('usePhoneCalls', () => {
 
     expect(api.holdCall).toHaveBeenCalledWith('modem-1', 'call-1')
     expect(api.resumeCall).toHaveBeenCalledWith('modem-1', 'call-1')
+  })
+
+  it('sends DTMF digits through the route-neutral call API', async () => {
+    const { phone } = mountComposable()
+    await flushPromises()
+    const active = call({ state: 'active' })
+
+    const sent = await phone.sendDTMF(active, '1')
+
+    expect(sent).toBe(true)
+    expect(api.sendDTMF).toHaveBeenCalledWith('modem-1', 'call-1', { digits: '1' })
+  })
+
+  it('queues DTMF digits so rapid key presses keep order', async () => {
+    const resolvers: Array<() => void> = []
+    api.sendDTMF.mockImplementation(
+      () =>
+        new Promise<{ data: ReturnType<typeof ref<void>> }>((resolve) => {
+          resolvers.push(() => resolve({ data: ref(undefined) }))
+        }),
+    )
+    const { phone } = mountComposable()
+    await flushPromises()
+    const active = call({ state: 'active' })
+
+    const first = phone.sendDTMF(active, '1')
+    const second = phone.sendDTMF(active, '2')
+
+    await flushPromises()
+    expect(api.sendDTMF).toHaveBeenCalledTimes(1)
+    resolvers[0]?.()
+    await flushPromises()
+    expect(api.sendDTMF).toHaveBeenCalledTimes(2)
+    resolvers[1]?.()
+
+    await expect(first).resolves.toBe(true)
+    await expect(second).resolves.toBe(true)
+    expect(api.sendDTMF.mock.calls.map((args) => args[2])).toEqual([{ digits: '1' }, { digits: '2' }])
+  })
+
+  it('keeps DTMF API failures handled inside the composable', async () => {
+    api.sendDTMF.mockRejectedValueOnce(new Error('call is on hold'))
+    const { phone } = mountComposable()
+    await flushPromises()
+
+    const sent = await phone.sendDTMF(call({ state: 'active' }), '1')
+
+    expect(sent).toBe(false)
+    expect(phone.errorMessage.value).toBe('call is on hold')
   })
 
   it('deletes terminal records from the local list', async () => {

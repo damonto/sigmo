@@ -50,6 +50,7 @@ export const usePhoneCalls = (
   let eventReconnectTimer: number | null = null
   let eventReconnectAttempt = 0
   let loadRequestID = 0
+  let dtmfQueue = Promise.resolve()
   const incomingNotifications = new Map<string, Notification>()
 
   const recentCalls = computed(() => calls.value)
@@ -382,6 +383,27 @@ export const usePhoneCalls = (
     await hold(call)
   }
 
+  const sendDTMF = (call: CallRecord, digits: string) => {
+    const id = modemId.value
+    if (!id || id === 'unknown') return Promise.resolve(false)
+    const callID = call.callID
+    const task = dtmfQueue.catch(() => undefined).then(async () => {
+      errorMessage.value = ''
+      try {
+        await callApi.sendDTMF(id, callID, { digits })
+        return true
+      } catch (err) {
+        errorMessage.value = err instanceof Error ? err.message : 'DTMF failed'
+        return false
+      }
+    })
+    dtmfQueue = task.then(
+      () => undefined,
+      () => undefined,
+    )
+    return task
+  }
+
   const deleteRecord = async (call: CallRecord) => {
     const id = modemId.value
     if (!id || id === 'unknown' || isDeletingCallID.value) return false
@@ -448,6 +470,7 @@ export const usePhoneCalls = (
     hold,
     resume,
     toggleHold,
+    sendDTMF,
     deleteRecord,
     loadCalls,
   }

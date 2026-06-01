@@ -102,6 +102,10 @@ func (c *coordinator) ResumeCall(ctx context.Context, modem *mmodem.Modem, callI
 	return VoiceCall{}, ErrUnavailable
 }
 
+func (c *coordinator) SendCallDTMF(ctx context.Context, modem *mmodem.Modem, callID string, digits string) error {
+	return ErrUnavailable
+}
+
 func (c *coordinator) OpenCallMedia(ctx context.Context, modem *mmodem.Modem, callID string) (MediaSession, error) {
 	return nil, ErrUnavailable
 }
