@@ -2,10 +2,10 @@ github.com/ElMostafaIdrassi/goscard v1.0.0 h1:RDG5QrqrQBUoi5MkzM4zILdYf8qDn62daY
 github.com/ElMostafaIdrassi/goscard v1.0.0/go.mod h1:uGOakQe2fFlW2cVlr9cv6x07uelrf0j0aKPbR7jGgfg=
 github.com/damonto/euicc-go v1.1.2 h1:OmiCRDypkHmMQf2Z6a0mUjOFt/Ya1fybolni0S0eDMU=
 github.com/damonto/euicc-go v1.1.2/go.mod h1:+GaYrdvxig1psL+dMF/l/D0pgED1FX4m/POhgHItZfE=
-github.com/damonto/ts43-go v0.0.0-20260601065336-bb5512b222fb h1:A50eXL3cWR+5rdlBB7aRCAWJPMBKVAMKWLjWDGRlXlM=
-github.com/damonto/ts43-go v0.0.0-20260601065336-bb5512b222fb/go.mod h1:3wNf90BwemrsknCrUJ3ujSlYKnfQhA63l5mVnB8p/Uc=
-github.com/damonto/vowifi-go v0.0.0-20260602075919-638cfe454ece h1:Y7QQctfcjP8x0XBJhCu3E3nSPGTSsTIVUIfLxn1zSMo=
-github.com/damonto/vowifi-go v0.0.0-20260602075919-638cfe454ece/go.mod h1:giv3GtfHhaQOdUZqhKqPwusmoforUIz6dliH1jGwjq4=
+github.com/damonto/ts43-go v0.0.0-20260602155218-9daacdd4cadf h1:koaMovJpmJkVxkbu78u4iHqCE6Fx/pjcvZvpxv//6f0=
+github.com/damonto/ts43-go v0.0.0-20260602155218-9daacdd4cadf/go.mod h1:3wNf90BwemrsknCrUJ3ujSlYKnfQhA63l5mVnB8p/Uc=
+github.com/damonto/vowifi-go v0.0.0-20260602155739-af3824ea8881 h1:zsPrDr2n1EUp93NEJ+xkT9BNiMOUENkAg+OI727cYGs=
+github.com/damonto/vowifi-go v0.0.0-20260602155739-af3824ea8881/go.mod h1:98xTfCXSQ1u7LJ6sRa6e+hbOaaoM8DF17aj1YAWu1Jc=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/ebitengine/purego v0.10.1 h1:dewVBCBT2GaMu1SrNTYxQhgQBethzfhiwvZiLGP/qyY=
