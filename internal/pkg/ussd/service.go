@@ -10,7 +10,12 @@ import (
 
 type Service struct {
 	session     *session
-	wifiCalling wificalling.Coordinator
+	wifiCalling wifiCallingUSSD
+}
+
+type wifiCallingUSSD interface {
+	Status(context.Context, *mmodem.Modem) (wificalling.Status, error)
+	ExecuteUSSD(context.Context, *mmodem.Modem, string, string) (string, error)
 }
 
 type modemDevice interface {
@@ -23,7 +28,7 @@ type realModemDevice struct {
 	session  *session
 }
 
-func New(wifiCalling wificalling.Coordinator) *Service {
+func New(wifiCalling wifiCallingUSSD) *Service {
 	return &Service{
 		session:     newSession(),
 		wifiCalling: wifiCalling,

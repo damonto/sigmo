@@ -159,7 +159,7 @@ func (m *Modem) SignalQuality(ctx context.Context) (percent uint32, recent bool,
 func (m *Modem) Restart(ctx context.Context, compatible bool) error {
 	var err error
 	if m.PrimaryPortType() == ModemPortTypeQmi {
-		err = errors.Join(err, qmicliRepowerSimCard(ctx, m))
+		err = errors.Join(err, qmiRepowerSimCard(ctx, m))
 		// Wait for the SIM card to be ready.
 		if e := sleepContext(ctx, time.Second); e != nil {
 			return errors.Join(err, e)
@@ -168,7 +168,7 @@ func (m *Modem) Restart(ctx context.Context, compatible bool) error {
 
 	// Try to activate provisioning session if SIM is missing.
 	if compatible {
-		err = errors.Join(err, qmicliActivateProvisioningIfSimMissing(ctx, m))
+		err = errors.Join(err, qmiActivateProvisioningIfSimMissing(ctx, m))
 	}
 
 	// Some legacy modems require the modem to be disabled and enabled to take effect.

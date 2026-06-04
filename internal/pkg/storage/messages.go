@@ -242,6 +242,7 @@ func scanMessage(row messageScanner) (Message, error) {
 	var msg Message
 	var timestamp string
 	var incoming, wifiCalling int
+	var err error
 	if err := row.Scan(
 		&msg.ID,
 		&msg.ProfileID,
@@ -258,7 +259,9 @@ func scanMessage(row messageScanner) (Message, error) {
 	); err != nil {
 		return Message{}, fmt.Errorf("scan message: %w", err)
 	}
-	msg.Timestamp = parseTime(timestamp)
+	if msg.Timestamp, err = parseTime(timestamp); err != nil {
+		return Message{}, fmt.Errorf("parse message timestamp: %w", err)
+	}
 	msg.Incoming = incoming != 0
 	msg.WiFiCalling = wifiCalling != 0
 	return msg, nil
@@ -294,12 +297,12 @@ func timeText(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-func parseTime(value string) time.Time {
+func parseTime(value string) (time.Time, error) {
 	t, err := time.Parse(time.RFC3339Nano, value)
 	if err == nil {
-		return t
+		return t, nil
 	}
-	return time.Time{}
+	return time.Time{}, err
 }
 
 func boolInt(value bool) int {

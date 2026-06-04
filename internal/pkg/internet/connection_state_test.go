@@ -27,11 +27,12 @@ func TestDBConnectionStateProxy(t *testing.T) {
 			t.Parallel()
 
 			state := testDBConnectionState(t)
-			if err := state.saveProxyStateForModem(tt.modemID, tt.interfaceName); err != nil {
+			ctx := context.Background()
+			if err := state.saveProxyStateForModem(ctx, tt.modemID, tt.interfaceName); err != nil {
 				t.Fatalf("saveProxyStateForModem() error = %v", err)
 			}
 
-			got, ok, err := state.loadProxyStateForModem(tt.modemID, tt.interfaceName)
+			got, ok, err := state.loadProxyStateForModem(ctx, tt.modemID, tt.interfaceName)
 			if err != nil {
 				t.Fatalf("loadProxyStateForModem() error = %v", err)
 			}
@@ -39,7 +40,7 @@ func TestDBConnectionStateProxy(t *testing.T) {
 				t.Fatalf("loadProxyStateForModem() = %v, ok %t; want true, true", got, ok)
 			}
 
-			interfaces, err := state.proxyInterfacesForModem(tt.modemID)
+			interfaces, err := state.proxyInterfacesForModem(ctx, tt.modemID)
 			if err != nil {
 				t.Fatalf("proxyInterfacesForModem() error = %v", err)
 			}
@@ -47,10 +48,10 @@ func TestDBConnectionStateProxy(t *testing.T) {
 				t.Fatalf("proxyInterfacesForModem() = %#v, want %#v", interfaces, []string{tt.interfaceName})
 			}
 
-			if err := state.deleteProxyState(tt.interfaceName); err != nil {
+			if err := state.deleteProxyState(ctx, tt.interfaceName); err != nil {
 				t.Fatalf("deleteProxyState() error = %v", err)
 			}
-			if _, ok, err := state.loadProxyStateForModem(tt.modemID, tt.interfaceName); err != nil || ok {
+			if _, ok, err := state.loadProxyStateForModem(ctx, tt.modemID, tt.interfaceName); err != nil || ok {
 				t.Fatalf("loadProxyStateForModem() after delete = ok %t, err %v; want false, nil", ok, err)
 			}
 		})
@@ -84,11 +85,12 @@ func TestDBConnectionStateRoute(t *testing.T) {
 			t.Parallel()
 
 			state := testDBConnectionState(t)
-			if err := state.saveRouteStateForModem(tt.modemID, tt.interfaceName, []netlink.DefaultRoute{original}, changes); err != nil {
+			ctx := context.Background()
+			if err := state.saveRouteStateForModem(ctx, tt.modemID, tt.interfaceName, []netlink.DefaultRoute{original}, changes); err != nil {
 				t.Fatalf("saveRouteStateForModem() error = %v", err)
 			}
 
-			got, ok, err := state.loadRouteStateForModem(tt.modemID, tt.interfaceName)
+			got, ok, err := state.loadRouteStateForModem(ctx, tt.modemID, tt.interfaceName)
 			if err != nil {
 				t.Fatalf("loadRouteStateForModem() error = %v", err)
 			}
@@ -96,7 +98,7 @@ func TestDBConnectionStateRoute(t *testing.T) {
 				t.Fatalf("loadRouteStateForModem() = %#v, ok %t; want saved change", got, ok)
 			}
 
-			all, err := state.loadAllRouteStates()
+			all, err := state.loadAllRouteStates(ctx)
 			if err != nil {
 				t.Fatalf("loadAllRouteStates() error = %v", err)
 			}
@@ -105,10 +107,10 @@ func TestDBConnectionStateRoute(t *testing.T) {
 				t.Fatalf("loadAllRouteStates() = %#v, want route state for %s", all, tt.interfaceName)
 			}
 
-			if err := state.deleteRouteState(tt.interfaceName); err != nil {
+			if err := state.deleteRouteState(ctx, tt.interfaceName); err != nil {
 				t.Fatalf("deleteRouteState() error = %v", err)
 			}
-			if _, ok, err := state.loadRouteStateForModem(tt.modemID, tt.interfaceName); err != nil || ok {
+			if _, ok, err := state.loadRouteStateForModem(ctx, tt.modemID, tt.interfaceName); err != nil || ok {
 				t.Fatalf("loadRouteStateForModem() after delete = ok %t, err %v; want false, nil", ok, err)
 			}
 		})

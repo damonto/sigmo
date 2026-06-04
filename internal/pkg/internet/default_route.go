@@ -1,6 +1,7 @@
 package internet
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -40,7 +41,7 @@ var netlinkDefaultRouteOps = defaultRouteOps{
 	deleteDefaultRoute: netlink.DeleteDefaultRoute,
 }
 
-func takeoverDefaultRoutesWithStore(state connectionStateStore, modemID string, interfaceName string, preferred []netlink.DefaultRoute, ops defaultRouteOps) ([]defaultRouteChange, error) {
+func takeoverDefaultRoutesWithStore(ctx context.Context, state connectionStateStore, modemID string, interfaceName string, preferred []netlink.DefaultRoute, ops defaultRouteOps) ([]defaultRouteChange, error) {
 	current, err := ops.defaultRoutes()
 	if err != nil {
 		return nil, err
@@ -49,21 +50,21 @@ func takeoverDefaultRoutesWithStore(state connectionStateStore, modemID string, 
 	changes := defaultRouteChanges(current, preferred)
 	logDefaultRouteTakeover(modemID, interfaceName, current, preferred, changes)
 	if len(changes) > 0 {
-		if err := state.saveRouteStateForModem(modemID, interfaceName, preferred, changes); err != nil {
+		if err := state.saveRouteStateForModem(ctx, modemID, interfaceName, preferred, changes); err != nil {
 			return nil, err
 		}
 	}
 	var applied []defaultRouteChange
 	for _, change := range changes {
 		if err := ops.deleteDefaultRoute(change.Original); err != nil {
-			err = errors.Join(fmt.Errorf("delete existing default route: %w", err), cleanupSavedDefaultRouteStateWithStore(state, interfaceName, applied))
+			err = errors.Join(fmt.Errorf("delete existing default route: %w", err), cleanupSavedDefaultRouteStateWithStore(ctx, state, interfaceName, applied))
 			return applied, err
 		}
 		if err := ops.addDefaultRoute(change.Replacement); err != nil {
 			restoreErr := restoreOriginalDefaultRouteWithOps(change.Original, ops)
 			var cleanupErr error
 			if restoreErr == nil {
-				cleanupErr = cleanupSavedDefaultRouteStateWithStore(state, interfaceName, applied)
+				cleanupErr = cleanupSavedDefaultRouteStateWithStore(ctx, state, interfaceName, applied)
 			} else {
 				applied = append(applied, change)
 			}
@@ -90,24 +91,24 @@ func logDefaultRouteTakeover(modemID string, interfaceName string, current []net
 	slog.Debug("default route takeover planned", args...)
 }
 
-func cleanupSavedDefaultRouteStateWithStore(state connectionStateStore, interfaceName string, applied []defaultRouteChange) error {
+func cleanupSavedDefaultRouteStateWithStore(ctx context.Context, state connectionStateStore, interfaceName string, applied []defaultRouteChange) error {
 	if len(applied) > 0 {
 		return nil
 	}
-	if err := state.deleteRouteState(interfaceName); err != nil {
+	if err := state.deleteRouteState(ctx, interfaceName); err != nil {
 		return fmt.Errorf("delete default route state: %w", err)
 	}
 	return nil
 }
 
-func cleanupDefaultRouteChangesWithStore(state connectionStateStore, interfaceName string, changes []defaultRouteChange, ops defaultRouteOps) error {
+func cleanupDefaultRouteChangesWithStore(ctx context.Context, state connectionStateStore, interfaceName string, changes []defaultRouteChange, ops defaultRouteOps) error {
 	if len(changes) == 0 {
 		return nil
 	}
 	if err := restoreDefaultRoutesWithOps(changes, ops); err != nil {
 		return err
 	}
-	return state.deleteRouteState(interfaceName)
+	return state.deleteRouteState(ctx, interfaceName)
 }
 
 func restoreDefaultRoutesWithOps(changes []defaultRouteChange, ops defaultRouteOps) error {
@@ -137,8 +138,8 @@ func restoreOriginalDefaultRouteWithOps(route netlink.DefaultRoute, ops defaultR
 	return err
 }
 
-func restoreStaleDefaultRouteStatesWithStore(state connectionStateStore, target routeStateRestoreTarget, ops defaultRouteOps) error {
-	entries, err := state.loadAllRouteStates()
+func restoreStaleDefaultRouteStatesWithStore(ctx context.Context, state connectionStateStore, target routeStateRestoreTarget, ops defaultRouteOps) error {
+	entries, err := state.loadAllRouteStates(ctx)
 	if err != nil {
 		return err
 	}
@@ -162,7 +163,7 @@ func restoreStaleDefaultRouteStatesWithStore(state connectionStateStore, target 
 		if !scoped && routeStatePreferredPresent(entry.Preferred, current) {
 			continue
 		}
-		restoreErr := restoreStaleDefaultRouteStateWithStore(state, interfaceName, entry, current, ops)
+		restoreErr := restoreStaleDefaultRouteStateWithStore(ctx, state, interfaceName, entry, current, ops)
 		if restoreErr != nil {
 			result = errors.Join(result, fmt.Errorf("restore default route state for %s: %w", interfaceName, restoreErr))
 		}
@@ -193,14 +194,14 @@ func (t routeStateRestoreTarget) interfaceSet() map[string]struct{} {
 	return targets
 }
 
-func restoreStaleDefaultRouteStateWithStore(state connectionStateStore, interfaceName string, entry savedRouteState, current []netlink.DefaultRoute, ops defaultRouteOps) error {
+func restoreStaleDefaultRouteStateWithStore(ctx context.Context, state connectionStateStore, interfaceName string, entry savedRouteState, current []netlink.DefaultRoute, ops defaultRouteOps) error {
 	if err := deleteDefaultRoutesWithOps(existingDefaultRoutes(entry.Preferred, current), ops); err != nil {
 		return err
 	}
 	if err := restoreDefaultRoutesWithOps(entry.Changes, ops); err != nil {
 		return err
 	}
-	return state.deleteRouteState(interfaceName)
+	return state.deleteRouteState(ctx, interfaceName)
 }
 
 func deleteDefaultRoutesWithOps(routes []netlink.DefaultRoute, ops defaultRouteOps) error {

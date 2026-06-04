@@ -17,8 +17,7 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/websheet"
-	"github.com/damonto/ts43-go/sim"
-	"github.com/damonto/ts43-go/ts43"
+	"github.com/damonto/ts43-go"
 )
 
 var testWSUpgrader = websocket.Upgrader{
@@ -47,7 +46,7 @@ func TestCandidateSupport(t *testing.T) {
 		},
 		{
 			name: "physical sim with entitlement",
-			candidate: physicalCandidate(sim.Identity{
+			candidate: physicalCandidate(ts43.Identity{
 				ICCID: "8900000000000000000",
 				MCC:   "204",
 				MNC:   "08",
@@ -60,7 +59,7 @@ func TestCandidateSupport(t *testing.T) {
 		},
 		{
 			name: "physical sim without entitlement is unsupported",
-			candidate: physicalCandidate(sim.Identity{
+			candidate: physicalCandidate(ts43.Identity{
 				ICCID: "8900000000000000000",
 				MCC:   "999",
 				MNC:   "99",
@@ -152,6 +151,58 @@ func TestValidateTargetRejectsSourceTargetModem(t *testing.T) {
 			err := validateTarget(target, tt.start)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("validateTarget() error = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSelectModemSourcePort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		modem    *mmodem.Modem
+		wantType mmodem.ModemPortType
+		wantDev  string
+		wantSlot int
+	}{
+		{
+			name: "qmi primary uses qmi port",
+			modem: &mmodem.Modem{
+				PrimaryPort:    "/dev/cdc-wdm1",
+				PrimarySimSlot: 2,
+				Ports: []mmodem.ModemPort{
+					{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+					{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB6"},
+				},
+			},
+			wantType: mmodem.ModemPortTypeQmi,
+			wantDev:  "/dev/cdc-wdm1",
+			wantSlot: 2,
+		},
+		{
+			name: "mbim primary uses at port",
+			modem: &mmodem.Modem{
+				PrimaryPort: "/dev/cdc-wdm0",
+				Ports: []mmodem.ModemPort{
+					{PortType: mmodem.ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+					{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB2"},
+				},
+			},
+			wantType: mmodem.ModemPortTypeAt,
+			wantDev:  "/dev/ttyUSB2",
+			wantSlot: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := selectModemSourcePort(tt.modem)
+			if err != nil {
+				t.Fatalf("selectModemSourcePort() error = %v", err)
+			}
+			if got.portType != tt.wantType || got.device != tt.wantDev || got.slot != tt.wantSlot {
+				t.Fatalf("selectModemSourcePort() = %+v, want type %v device %q slot %d", got, tt.wantType, tt.wantDev, tt.wantSlot)
 			}
 		})
 	}

@@ -115,7 +115,7 @@ func TestEnableSessionEnable(t *testing.T) {
 		},
 		{
 			name:              "restart error succeeds when modem is ready",
-			restartErr:        errors.New("qmicli power off failed"),
+			restartErr:        errors.New("QMI UIM power off failed"),
 			findResults:       []findResult{{err: mmodem.ErrNotFound}, {modem: reloadedModem}},
 			wantRestart:       true,
 			wantEnableClosed:  true,
@@ -158,9 +158,7 @@ func TestEnableSessionEnable(t *testing.T) {
 					return client, nil
 				},
 				findModem: func(ctx context.Context, id string) (*mmodem.Modem, error) {
-					if ctx == nil {
-						t.Fatal("ctx is nil")
-					}
+					_ = ctx.Err()
 					if id == "" {
 						t.Fatal("id is empty")
 					}
@@ -173,9 +171,7 @@ func TestEnableSessionEnable(t *testing.T) {
 					return result.modem, result.err
 				},
 				waitForModemReload: func(ctx context.Context, modem *mmodem.Modem) (*mmodem.Modem, error) {
-					if ctx == nil {
-						t.Fatal("ctx is nil")
-					}
+					_ = ctx.Err()
 					if modem == nil {
 						t.Fatal("modem is nil")
 					}
@@ -183,9 +179,7 @@ func TestEnableSessionEnable(t *testing.T) {
 					return reloadedModem, nil
 				},
 				restartModem: func(ctx context.Context, modem *mmodem.Modem, compatible bool) error {
-					if ctx == nil {
-						t.Fatal("ctx is nil")
-					}
+					_ = ctx.Err()
 					if modem == nil {
 						t.Fatal("modem is nil")
 					}

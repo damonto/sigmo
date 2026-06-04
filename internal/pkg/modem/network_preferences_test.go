@@ -31,14 +31,14 @@ func TestNetworkPreferencesStoreForModem(t *testing.T) {
 	tests := []struct {
 		name      string
 		modemID   string
-		save      func(*NetworkPreferences) error
+		save      func(context.Context, *NetworkPreferences) error
 		assertion func(t *testing.T, got savedNetworkPreferences, ok bool)
 	}{
 		{
 			name:    "save mode",
 			modemID: "modem-1",
-			save: func(prefs *NetworkPreferences) error {
-				return prefs.SaveMode("modem-1", ModemModePair{Allowed: ModemMode4G, Preferred: ModemModeNone})
+			save: func(ctx context.Context, prefs *NetworkPreferences) error {
+				return prefs.SaveMode(ctx, "modem-1", ModemModePair{Allowed: ModemMode4G, Preferred: ModemModeNone})
 			},
 			assertion: func(t *testing.T, got savedNetworkPreferences, ok bool) {
 				t.Helper()
@@ -57,8 +57,8 @@ func TestNetworkPreferencesStoreForModem(t *testing.T) {
 		{
 			name:    "save bands",
 			modemID: "modem-2",
-			save: func(prefs *NetworkPreferences) error {
-				return prefs.SaveBands("modem-2", []ModemBand{71, 378})
+			save: func(ctx context.Context, prefs *NetworkPreferences) error {
+				return prefs.SaveBands(ctx, "modem-2", []ModemBand{71, 378})
 			},
 			assertion: func(t *testing.T, got savedNetworkPreferences, ok bool) {
 				t.Helper()
@@ -74,11 +74,11 @@ func TestNetworkPreferencesStoreForModem(t *testing.T) {
 		{
 			name:    "overwrite modem keeps other field",
 			modemID: "modem-3",
-			save: func(prefs *NetworkPreferences) error {
-				if err := prefs.SaveMode("modem-3", ModemModePair{Allowed: ModemMode4G, Preferred: ModemModeNone}); err != nil {
+			save: func(ctx context.Context, prefs *NetworkPreferences) error {
+				if err := prefs.SaveMode(ctx, "modem-3", ModemModePair{Allowed: ModemMode4G, Preferred: ModemModeNone}); err != nil {
 					return err
 				}
-				return prefs.SaveBands("modem-3", []ModemBand{ModemBandAny})
+				return prefs.SaveBands(ctx, "modem-3", []ModemBand{ModemBandAny})
 			},
 			assertion: func(t *testing.T, got savedNetworkPreferences, ok bool) {
 				t.Helper()
@@ -96,7 +96,7 @@ func TestNetworkPreferencesStoreForModem(t *testing.T) {
 		{
 			name:    "missing modem is empty",
 			modemID: "missing",
-			save:    func(*NetworkPreferences) error { return nil },
+			save:    func(context.Context, *NetworkPreferences) error { return nil },
 			assertion: func(t *testing.T, _ savedNetworkPreferences, ok bool) {
 				t.Helper()
 				if ok {
@@ -116,10 +116,11 @@ func TestNetworkPreferencesStoreForModem(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewNetworkPreferences() error = %v", err)
 			}
-			if err := tt.save(prefs); err != nil {
+			ctx := context.Background()
+			if err := tt.save(ctx, prefs); err != nil {
 				t.Fatalf("save() error = %v", err)
 			}
-			got, ok, err := prefs.loadForModem(tt.modemID)
+			got, ok, err := prefs.loadForModem(ctx, tt.modemID)
 			if err != nil {
 				t.Fatalf("loadForModem() error = %v", err)
 			}

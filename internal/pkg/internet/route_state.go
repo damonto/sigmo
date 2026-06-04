@@ -1,6 +1,7 @@
 package internet
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/netip"
 
@@ -8,9 +9,9 @@ import (
 )
 
 type routeStateEntry struct {
-	Modem     string             `json:"modem,omitempty"`
-	Preferred []routeStateRoute  `json:"preferred"`
-	Changes   []routeStateChange `json:"changes"`
+	Modem     string
+	Preferred []netlink.DefaultRoute
+	Changes   []defaultRouteChange
 }
 
 type routeStateChange struct {
@@ -32,6 +33,43 @@ type savedRouteState struct {
 	ModemID   string
 	Preferred []netlink.DefaultRoute
 	Changes   []defaultRouteChange
+}
+
+func (e routeStateEntry) MarshalJSON() ([]byte, error) {
+	type state struct {
+		Modem     string             `json:"modem,omitempty"`
+		Preferred []routeStateRoute  `json:"preferred"`
+		Changes   []routeStateChange `json:"changes"`
+	}
+	return json.Marshal(state{
+		Modem:     e.Modem,
+		Preferred: routeStateRoutes(e.Preferred),
+		Changes:   routeStateChanges(e.Changes),
+	})
+}
+
+func (e *routeStateEntry) UnmarshalJSON(data []byte) error {
+	type state struct {
+		Modem     string             `json:"modem,omitempty"`
+		Preferred []routeStateRoute  `json:"preferred"`
+		Changes   []routeStateChange `json:"changes"`
+	}
+	var raw state
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	preferred, err := defaultRoutesFromState(raw.Preferred)
+	if err != nil {
+		return err
+	}
+	changes, err := defaultRouteChangesFromState(raw.Changes)
+	if err != nil {
+		return err
+	}
+	e.Modem = raw.Modem
+	e.Preferred = preferred
+	e.Changes = changes
+	return nil
 }
 
 func routeStateRoutes(routes []netlink.DefaultRoute) []routeStateRoute {

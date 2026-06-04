@@ -159,10 +159,10 @@ func (c *Connector) recoverAlwaysOn(ctx context.Context, modem internetModem, be
 	}
 	tracked.profileID = profileID
 	tracked.prefs.AlwaysOn = true
-	if err := c.syncProxyPreference(modemID, tracked.interfaceName, tracked.prefs); err != nil {
+	if err := c.syncProxyPreference(ctx, modemID, tracked.interfaceName, tracked.prefs); err != nil {
 		return err
 	}
-	if err := c.syncAlwaysOnState(profileID, tracked.prefs); err != nil {
+	if err := c.syncAlwaysOnState(ctx, profileID, tracked.prefs); err != nil {
 		return fmt.Errorf("sync always on state: %w", err)
 	}
 	c.setConnectionAndPreference(modemID, tracked, tracked.prefs)

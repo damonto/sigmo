@@ -214,7 +214,7 @@ func (h *Handler) UpdateSettings(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *Handler) GetSettings(c *echo.Context) error {
+func (h *Handler) Settings(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeGetSettingsFailed)
@@ -241,7 +241,7 @@ func (h *Handler) UpdateWiFiCallingSettings(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *Handler) GetWiFiCallingSettings(c *echo.Context) error {
+func (h *Handler) WiFiCallingSettings(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeGetWiFiCallingSettingsFailed)

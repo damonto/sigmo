@@ -47,7 +47,7 @@ func (c *coordinator) ExecuteUSSD(ctx context.Context, modem *mmodem.Modem, acti
 	}
 }
 
-func (c *coordinator) ussdSession(modemID string) (*vowifi.Client, *vowifi.Session, error) {
+func (c *coordinator) ussdSession(modemID string) (*vowifi.Client, *vowifi.USSDSession, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modemID]
@@ -57,7 +57,7 @@ func (c *coordinator) ussdSession(modemID string) (*vowifi.Client, *vowifi.Sessi
 	return session.client, session.ussd, nil
 }
 
-func (c *coordinator) setUSSDSession(modemID string, ussd *vowifi.Session, closed bool) {
+func (c *coordinator) setUSSDSession(modemID string, ussd *vowifi.USSDSession, closed bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modemID]

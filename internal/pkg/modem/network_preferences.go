@@ -39,7 +39,7 @@ func NewNetworkPreferences(store *storage.Store) (*NetworkPreferences, error) {
 	return &NetworkPreferences{store: store}, nil
 }
 
-func (p *NetworkPreferences) SaveMode(modemID string, mode ModemModePair) error {
+func (p *NetworkPreferences) SaveMode(ctx context.Context, modemID string, mode ModemModePair) error {
 	modemID = strings.TrimSpace(modemID)
 	if modemID == "" {
 		return errors.New("modem id is required")
@@ -48,7 +48,7 @@ func (p *NetworkPreferences) SaveMode(modemID string, mode ModemModePair) error 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	entry, _, err := p.loadForModemLocked(context.Background(), modemID)
+	entry, _, err := p.loadForModemLocked(ctx, modemID)
 	if err != nil {
 		return err
 	}
@@ -56,10 +56,10 @@ func (p *NetworkPreferences) SaveMode(modemID string, mode ModemModePair) error 
 		Allowed:   mode.Allowed,
 		Preferred: mode.Preferred,
 	}
-	return p.saveForModemLocked(context.Background(), modemID, entry)
+	return p.saveForModemLocked(ctx, modemID, entry)
 }
 
-func (p *NetworkPreferences) SaveBands(modemID string, bands []ModemBand) error {
+func (p *NetworkPreferences) SaveBands(ctx context.Context, modemID string, bands []ModemBand) error {
 	modemID = strings.TrimSpace(modemID)
 	if modemID == "" {
 		return errors.New("modem id is required")
@@ -68,12 +68,12 @@ func (p *NetworkPreferences) SaveBands(modemID string, bands []ModemBand) error 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	entry, _, err := p.loadForModemLocked(context.Background(), modemID)
+	entry, _, err := p.loadForModemLocked(ctx, modemID)
 	if err != nil {
 		return err
 	}
 	entry.Bands = slices.Clone(bands)
-	return p.saveForModemLocked(context.Background(), modemID, entry)
+	return p.saveForModemLocked(ctx, modemID, entry)
 }
 
 func (p *NetworkPreferences) Run(ctx context.Context, registry *Registry) error {
@@ -108,7 +108,7 @@ func (p *NetworkPreferences) restoreWithRetry(ctx context.Context, m *Modem) {
 }
 
 func (p *NetworkPreferences) restoreOnce(ctx context.Context, m *Modem) (bool, error) {
-	prefs, ok, err := p.loadForModem(m.EquipmentIdentifier)
+	prefs, ok, err := p.loadForModem(ctx, m.EquipmentIdentifier)
 	if err != nil {
 		return false, fmt.Errorf("load network preferences: %w", err)
 	}
@@ -139,7 +139,7 @@ func (p *NetworkPreferences) restoreOnce(ctx context.Context, m *Modem) (bool, e
 	return retry, result
 }
 
-func (p *NetworkPreferences) loadForModem(modemID string) (savedNetworkPreferences, bool, error) {
+func (p *NetworkPreferences) loadForModem(ctx context.Context, modemID string) (savedNetworkPreferences, bool, error) {
 	modemID = strings.TrimSpace(modemID)
 	if modemID == "" {
 		return savedNetworkPreferences{}, false, nil
@@ -148,7 +148,7 @@ func (p *NetworkPreferences) loadForModem(modemID string) (savedNetworkPreferenc
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	return p.loadForModemLocked(context.Background(), modemID)
+	return p.loadForModemLocked(ctx, modemID)
 }
 
 func (p *NetworkPreferences) loadForModemLocked(ctx context.Context, modemID string) (savedNetworkPreferences, bool, error) {

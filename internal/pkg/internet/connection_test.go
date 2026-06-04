@@ -634,10 +634,10 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 				routeChanges:  []defaultRouteChange{oldRouteChange},
 			}
 
-			if err := c.syncAlwaysOnState(oldProfileID, Preferences{DefaultRoute: true, AlwaysOn: true}); err != nil {
+			if err := c.syncAlwaysOnState(context.Background(), oldProfileID, Preferences{DefaultRoute: true, AlwaysOn: true}); err != nil {
 				t.Fatalf("sync old always-on state: %v", err)
 			}
-			if err := c.syncDefaultRouteTakeover("new-modem", &tracked); err != nil {
+			if err := c.syncDefaultRouteTakeover(context.Background(), "new-modem", &tracked); err != nil {
 				t.Fatalf("syncDefaultRouteTakeover() error = %v", err)
 			}
 
@@ -673,7 +673,7 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 				t.Fatalf("loadRouteStateForModem(new) = %#v, ok = %t, err = %v; want %#v, true, nil", gotChanges, ok, err, []defaultRouteChange{oldRouteChange})
 			}
 
-			if err := c.syncDefaultRouteRestore(tracked.routeChanges); err != nil {
+			if err := c.syncDefaultRouteRestore(context.Background(), tracked.routeChanges); err != nil {
 				t.Fatalf("syncDefaultRouteRestore() error = %v", err)
 			}
 			oldTracked = c.connections["old-modem"]
@@ -768,7 +768,7 @@ func TestSyncDefaultRouteRemovalTransfersOriginalRouteState(t *testing.T) {
 				persistence: fileConnectionState{routePath: path},
 			}
 
-			if err := c.syncDefaultRouteRemoval(removed); err != nil {
+			if err := c.syncDefaultRouteRemoval(context.Background(), removed); err != nil {
 				t.Fatalf("syncDefaultRouteRemoval() error = %v", err)
 			}
 

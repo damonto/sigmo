@@ -232,7 +232,7 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 				c.markDisconnected(modem.EquipmentIdentifier, client)
 				return
 			}
-			if state == vowifi.StateFailed || state == vowifi.StateClosed {
+			if state.Status == vowifi.StatusFailed || state.Status == vowifi.StatusClosed {
 				_ = client.Close()
 				c.markDisconnected(modem.EquipmentIdentifier, client)
 				return

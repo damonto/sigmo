@@ -46,7 +46,7 @@ func (n *network) SetCurrentModes(ctx context.Context, modem *mmodem.Modem, req 
 	if err := modem.SetCurrentModes(ctx, want); err != nil {
 		return fmt.Errorf("set current modes: %w", err)
 	}
-	if err := n.preferences.SaveMode(modem.EquipmentIdentifier, want); err != nil {
+	if err := n.preferences.SaveMode(ctx, modem.EquipmentIdentifier, want); err != nil {
 		return fmt.Errorf("save current modes: %w", err)
 	}
 	return nil

@@ -11,8 +11,7 @@ import (
 	"strings"
 
 	sgp22 "github.com/damonto/euicc-go/v2"
-	"github.com/damonto/ts43-go/sim"
-	"github.com/damonto/ts43-go/ts43"
+	"github.com/damonto/ts43-go"
 
 	"github.com/damonto/sigmo/internal/pkg/carrier"
 	ilpa "github.com/damonto/sigmo/internal/pkg/lpa"
@@ -121,7 +120,7 @@ func esimCandidate(profile *sgp22.ProfileInfo) profileCandidate {
 	mnc := profile.ProfileOwner.MNC()
 	gid1 := strings.ToUpper(hex.EncodeToString(profile.ProfileOwner.GID1))
 	enabled := profile.ProfileState == sgp22.ProfileEnabled
-	supported, reason := support(sim.Identity{MCC: mcc, MNC: mnc, GID1: gid1}, ts43.SIMTypeESIM, "eSIM")
+	supported, reason := support(ts43.Identity{MCC: mcc, MNC: mnc, GID1: gid1}, ts43.SIMTypeESIM, "eSIM")
 	carrierName := carrierName(mcc + mnc)
 	return profileCandidate{
 		response: ProfileResponse{
@@ -140,12 +139,12 @@ func esimCandidate(profile *sgp22.ProfileInfo) profileCandidate {
 	}
 }
 
-func physicalCandidate(identity sim.Identity) profileCandidate {
-	carrierInfo := carrier.Lookup(identity.MCCMNC())
+func physicalCandidate(identity ts43.Identity) profileCandidate {
+	carrierInfo := carrier.Lookup(identity.MCC + identity.MNC)
 	supported, reason := support(identity, ts43.SIMTypePSIM, "pSIM")
 	name := carrierInfo.Name
 	if name == "" || name == "Unknown" {
-		name = identity.MCCMNC()
+		name = identity.MCC + identity.MNC
 	}
 	carrierName := name
 	if carrierInfo.Name == "Unknown" {
@@ -166,7 +165,7 @@ func physicalCandidate(identity sim.Identity) profileCandidate {
 	}
 }
 
-func support(identity sim.Identity, sourceSIMType ts43.SIMType, label string) (bool, string) {
+func support(identity ts43.Identity, sourceSIMType ts43.SIMType, label string) (bool, string) {
 	if _, err := ts43.DiscoverEntitlement(identity, sourceSIMType); err != nil {
 		if errors.Is(err, ts43.ErrEntitlementAmbiguous) {
 			return false, "carrier entitlement config is ambiguous"

@@ -297,7 +297,7 @@ func TestConnectorAlwaysOnStatePolicy(t *testing.T) {
 				t.Helper()
 
 				prefs := Preferences{APN: "internet", DefaultRoute: true, ProxyEnabled: true, AlwaysOn: true}
-				if err := c.syncAlwaysOnState(profileID, prefs); err != nil {
+				if err := c.syncAlwaysOnState(context.Background(), profileID, prefs); err != nil {
 					t.Fatalf("syncAlwaysOnState() error = %v", err)
 				}
 				c.preferences[modemID] = prefs
@@ -311,7 +311,7 @@ func TestConnectorAlwaysOnStatePolicy(t *testing.T) {
 				t.Helper()
 
 				prefs := Preferences{APN: "internet", DefaultRoute: true, ProxyEnabled: true, AlwaysOn: true}
-				if err := c.syncAlwaysOnState(profileID, prefs); err != nil {
+				if err := c.syncAlwaysOnState(context.Background(), profileID, prefs); err != nil {
 					t.Fatalf("syncAlwaysOnState() error = %v", err)
 				}
 				modem := fakeInternetModem{modemID: modemID, iccidValue: profileID}
@@ -327,10 +327,10 @@ func TestConnectorAlwaysOnStatePolicy(t *testing.T) {
 				t.Helper()
 
 				prefs := Preferences{APN: "internet", AlwaysOn: true}
-				if err := c.syncAlwaysOnState(profileID, prefs); err != nil {
+				if err := c.syncAlwaysOnState(context.Background(), profileID, prefs); err != nil {
 					t.Fatalf("syncAlwaysOnState() setup error = %v", err)
 				}
-				if err := c.syncAlwaysOnState(profileID, Preferences{APN: "internet"}); err != nil {
+				if err := c.syncAlwaysOnState(context.Background(), profileID, Preferences{APN: "internet"}); err != nil {
 					t.Fatalf("syncAlwaysOnState() error = %v", err)
 				}
 				c.preferences[modemID] = Preferences{APN: "internet"}
@@ -412,7 +412,7 @@ func TestAlwaysOnStateUsesCurrentProfile(t *testing.T) {
 			}
 			c.setPreference(tt.modem.modemID, Preferences{APN: "runtime"})
 			for profileID, prefs := range tt.states {
-				if err := c.syncAlwaysOnState(profileID, prefs); err != nil {
+				if err := c.syncAlwaysOnState(context.Background(), profileID, prefs); err != nil {
 					t.Fatalf("syncAlwaysOnState(%s) error = %v", profileID, err)
 				}
 			}
@@ -480,7 +480,7 @@ func TestDisconnectClearsAlwaysOnButRestoreCleanupKeepsProfileState(t *testing.T
 			}
 			modem := fakeInternetModem{modemID: "modem-1", iccidValue: "8901000000000000000"}
 			prefs := Preferences{APN: "internet", AlwaysOn: true}
-			if err := c.syncAlwaysOnState(modem.iccidValue, prefs); err != nil {
+			if err := c.syncAlwaysOnState(context.Background(), modem.iccidValue, prefs); err != nil {
 				t.Fatalf("syncAlwaysOnState() error = %v", err)
 			}
 
@@ -510,7 +510,7 @@ func TestRestoreAlwaysOnSkipsStaleSnapshotAfterManualClear(t *testing.T) {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
 	prefs := Preferences{APN: "internet", DefaultRoute: true, AlwaysOn: true}
-	if err := c.syncAlwaysOnState(profileID, prefs); err != nil {
+	if err := c.syncAlwaysOnState(context.Background(), profileID, prefs); err != nil {
 		t.Fatalf("syncAlwaysOnState() error = %v", err)
 	}
 	states, err := c.loadAlwaysOnStates(context.Background())

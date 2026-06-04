@@ -16,7 +16,13 @@ import (
 
 type Service struct {
 	store       *storage.Store
-	wifiCalling wificalling.Coordinator
+	wifiCalling wifiCallingSMS
+}
+
+type wifiCallingSMS interface {
+	Status(context.Context, *mmodem.Modem) (wificalling.Status, error)
+	SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error)
+	ApplyPendingSMSStatus(context.Context, storage.Message) error
 }
 
 type modemDevice interface {
@@ -33,7 +39,7 @@ type realModemDevice struct {
 	modemRef *mmodem.Modem
 }
 
-func New(store *storage.Store, wifiCalling wificalling.Coordinator) *Service {
+func New(store *storage.Store, wifiCalling wifiCallingSMS) *Service {
 	return &Service{store: store, wifiCalling: wifiCalling}
 }
 

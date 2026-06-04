@@ -16,7 +16,7 @@ const (
 var (
 	ErrInvalidAction        = errors.New("action must be initialize or reply")
 	ErrSessionNotReady      = errors.New("ussd session is not waiting for user response")
-	ErrUnknownSessionStatus = errors.New("unable to determine ussd session state")
+	ErrUnknownSessionStatus = errors.New("determine ussd session state")
 )
 
 type session struct{}

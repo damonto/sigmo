@@ -11,11 +11,13 @@ import (
 
 	eccid "github.com/damonto/euicc-go/driver/ccid"
 	sgp22 "github.com/damonto/euicc-go/v2"
-	tat "github.com/damonto/ts43-go/driver/at"
-	tccid "github.com/damonto/ts43-go/driver/ccid"
-	tmbim "github.com/damonto/ts43-go/driver/mbim"
-	tqmi "github.com/damonto/ts43-go/driver/qmi"
-	"github.com/damonto/ts43-go/ts43"
+	"github.com/damonto/ts43-go"
+	"github.com/damonto/uicc-go/at"
+	"github.com/damonto/uicc-go/ccid"
+	"github.com/damonto/uicc-go/qualcomm/qmi"
+	"github.com/damonto/uicc-go/qualcomm/uim"
+	"github.com/damonto/uicc-go/usim"
+	usimcard "github.com/damonto/uicc-go/usim/card"
 
 	ilpa "github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -29,7 +31,7 @@ func (s *Service) openSource(ctx context.Context, currentSettings *settings.Sett
 		if err != nil {
 			return nil, err
 		}
-		channel, release, err := openModemSource(modem)
+		channel, release, err := openModemSource(ctx, modem)
 		if err != nil {
 			return nil, err
 		}
@@ -45,65 +47,134 @@ func (s *Service) openSource(ctx context.Context, currentSettings *settings.Sett
 			device:  device,
 		}, nil
 	case SourceCCID:
-		reader, err := tccid.NewWithReader(start.SourceID)
+		channel, release, err := openCCIDSource(ctx, start.SourceID)
 		if err != nil {
 			return nil, fmt.Errorf("open CCID reader: %w", err)
 		}
 		return &sourceEndpoint{
-			channel: reader,
-			release: func() {
-				if err := reader.Disconnect(); err != nil {
-					slog.Debug("disconnect CCID reader", "error", err)
-				}
-			},
-			device: ts43Device(start.SourceIMEI),
+			channel: channel,
+			release: release,
+			device:  ts43Device(start.SourceIMEI),
 		}, nil
 	default:
 		return nil, ErrSourceUnsupported
 	}
 }
 
-func openModemSource(modem *mmodem.Modem) (ts43.Channel, func(), error) {
-	slot := uint8(1)
+func openModemSource(ctx context.Context, modem *mmodem.Modem) (ts43.Channel, func(), error) {
+	sourcePort, err := selectModemSourcePort(modem)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch sourcePort.portType {
+	case mmodem.ModemPortTypeQmi:
+		reader, err := openQMISource(ctx, sourcePort.device, sourcePort.slot)
+		if err != nil {
+			return nil, nil, err
+		}
+		return sourceFromReader(ctx, reader)
+	case mmodem.ModemPortTypeAt:
+		reader, err := openATSource(ctx, sourcePort.device)
+		if err != nil {
+			return nil, nil, err
+		}
+		return sourceFromReader(ctx, reader)
+	default:
+		return nil, nil, errors.New("modem source port type is unsupported")
+	}
+}
+
+type modemSourcePort struct {
+	portType mmodem.ModemPortType
+	device   string
+	slot     int
+}
+
+func selectModemSourcePort(modem *mmodem.Modem) (modemSourcePort, error) {
+	slot := 1
 	if modem.PrimarySimSlot > 0 {
-		slot = uint8(modem.PrimarySimSlot)
+		slot = int(modem.PrimarySimSlot)
 	}
 	switch modem.PrimaryPortType() {
 	case mmodem.ModemPortTypeQmi:
-		ch, err := tqmi.New(modem.PrimaryPort, slot)
-		if err != nil {
-			return nil, nil, err
-		}
-		return ch, releaseSource(ch), nil
-	case mmodem.ModemPortTypeMbim:
-		ch, err := tmbim.New(modem.PrimaryPort, slot)
-		if err != nil {
-			return nil, nil, err
-		}
-		return ch, releaseSource(ch), nil
+		return modemSourcePort{portType: mmodem.ModemPortTypeQmi, device: modem.PrimaryPort, slot: slot}, nil
 	default:
 		port, err := modem.Port(mmodem.ModemPortTypeAt)
 		if err != nil {
-			return nil, nil, err
+			return modemSourcePort{}, err
 		}
-		ch, err := tat.New(port.Device)
-		if err != nil {
-			return nil, nil, err
-		}
-		return ch, releaseSource(ch), nil
+		return modemSourcePort{portType: mmodem.ModemPortTypeAt, device: port.Device, slot: slot}, nil
 	}
 }
 
 type sourceCloser interface {
-	Disconnect() error
+	Close() error
 }
 
 func releaseSource(ch sourceCloser) func() {
 	return func() {
-		if err := ch.Disconnect(); err != nil {
+		if err := ch.Close(); err != nil {
 			slog.Debug("disconnect transfer source", "error", err)
 		}
 	}
+}
+
+func openCCIDSource(ctx context.Context, readerName string) (ts43.Channel, func(), error) {
+	tx, err := ccid.Open(ctx, readerName)
+	if err != nil {
+		return nil, nil, err
+	}
+	reader, err := usim.NewReader(tx)
+	if err != nil {
+		return nil, nil, errors.Join(err, tx.Close())
+	}
+	return sourceFromReader(ctx, reader)
+}
+
+func openATSource(ctx context.Context, device string) (usimcard.Reader, error) {
+	tx, err := at.Open(ctx, device, 0)
+	if err != nil {
+		return nil, err
+	}
+	reader, err := usim.NewReader(tx)
+	if err != nil {
+		return nil, errors.Join(err, tx.Close())
+	}
+	return reader, nil
+}
+
+func openQMISource(ctx context.Context, device string, slot int) (usimcard.Reader, error) {
+	if slot < 1 || slot > 5 {
+		return nil, fmt.Errorf("slot %d is out of range", slot)
+	}
+	transport, err := qmi.Open(ctx, qmi.WithProxy(device))
+	if err != nil {
+		return nil, err
+	}
+	reader, err := uim.New(ctx, transport, uim.WithSlot(uint8(slot)))
+	if err != nil {
+		return nil, errors.Join(err, transport.Close())
+	}
+	if err := reader.ActivateSlot(ctx); err != nil {
+		return nil, errors.Join(err, reader.Close())
+	}
+	adapter, err := usim.NewQualcomm(reader)
+	if err != nil {
+		return nil, errors.Join(err, reader.Close())
+	}
+	return adapter, nil
+}
+
+func sourceFromReader(ctx context.Context, reader usimcard.Reader) (ts43.Channel, func(), error) {
+	card, err := usim.New(ctx, reader, slog.Default())
+	if err != nil {
+		return nil, nil, errors.Join(err, reader.Close())
+	}
+	source, err := ts43.NewSource(card)
+	if err != nil {
+		return nil, nil, errors.Join(err, card.Close())
+	}
+	return source, releaseSource(source), nil
 }
 
 func (s *Service) activateSourceProfile(ctx context.Context, currentSettings *settings.Settings, start Start, candidate profileCandidate) error {
@@ -288,20 +359,7 @@ func activeProfile(profiles []*sgp22.ProfileInfo, iccid sgp22.ICCID) bool {
 }
 
 func listCCIDReaders() ([]string, error) {
-	reader, err := tccid.New()
-	if err != nil {
-		slog.Debug("list CCID readers", "error", err)
-		if ccidServiceUnavailable(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	defer func() {
-		if cerr := reader.Disconnect(); cerr != nil {
-			slog.Debug("close CCID reader list context", "error", cerr)
-		}
-	}()
-	readers, err := reader.ListReaders()
+	readers, err := ccid.ListReaders(context.Background())
 	if err != nil {
 		slog.Debug("list CCID readers", "error", err)
 		if ccidServiceUnavailable(err) {

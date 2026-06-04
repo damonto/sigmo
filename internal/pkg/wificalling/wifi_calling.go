@@ -42,7 +42,7 @@ type sessionState struct {
 	reconnect   chan struct{}
 	phase       sessionPhase
 	client      *vowifi.Client
-	ussd        *vowifi.Session
+	ussd        *vowifi.USSDSession
 	calls       map[string]*voiceCallState
 	pendingDial *pendingVoiceDial
 	modemPath   dbus.ObjectPath

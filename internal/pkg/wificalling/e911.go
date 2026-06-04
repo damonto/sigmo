@@ -11,8 +11,8 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/websheet"
+	"github.com/damonto/uicc-go/usim"
 	vowifi "github.com/damonto/vowifi-go"
-	"github.com/damonto/vowifi-go/usim"
 	"github.com/damonto/vowifi-go/wfcsetup"
 )
 
@@ -160,7 +160,7 @@ func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mm
 	defer func() {
 		_ = reader.Close()
 	}()
-	card, err := usim.Load(ctx, reader, slog.Default())
+	card, err := usim.New(ctx, reader, slog.Default())
 	if err != nil {
 		return wfcsetup.Result{}, fmt.Errorf("load Wi-Fi Calling SIM: %w", err)
 	}

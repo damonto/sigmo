@@ -5,7 +5,7 @@ package esimtransfer
 import (
 	"context"
 
-	"github.com/damonto/ts43-go/ts43"
+	"github.com/damonto/ts43-go"
 )
 
 func (s *session) userInput(ctx context.Context, event ts43.UserInputEvent) (*ts43.UserInputResult, error) {

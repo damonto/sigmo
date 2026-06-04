@@ -9,13 +9,14 @@ import (
 	"strings"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/vowifi-go/driver/at"
-	"github.com/damonto/vowifi-go/driver/mbim"
-	"github.com/damonto/vowifi-go/driver/qmi"
-	usimreader "github.com/damonto/vowifi-go/usim/reader"
+	"github.com/damonto/uicc-go/at"
+	"github.com/damonto/uicc-go/qualcomm/qmi"
+	"github.com/damonto/uicc-go/qualcomm/uim"
+	"github.com/damonto/uicc-go/usim"
+	usimcard "github.com/damonto/uicc-go/usim/card"
 )
 
-func openReader(ctx context.Context, modem *mmodem.Modem) (usimreader.Reader, error) {
+func openReader(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader, error) {
 	return openReaderWith(ctx, modem, openReaderCandidate)
 }
 
@@ -24,16 +25,16 @@ type readerCandidate struct {
 	device   string
 }
 
-type readerOpener func(context.Context, readerCandidate, int) (usimreader.Reader, error)
+type readerOpener func(context.Context, readerCandidate, int) (usimcard.Reader, error)
 
-func openReaderWith(ctx context.Context, modem *mmodem.Modem, open readerOpener) (usimreader.Reader, error) {
+func openReaderWith(ctx context.Context, modem *mmodem.Modem, open readerOpener) (usimcard.Reader, error) {
 	slot := 1
 	if modem.PrimarySimSlot > 0 {
 		slot = int(modem.PrimarySimSlot)
 	}
 	candidates := readerCandidates(modem)
 	if len(candidates) == 0 {
-		return nil, errors.New("Wi-Fi Calling requires QMI, MBIM, or AT modem port")
+		return nil, errors.New("Wi-Fi Calling requires QMI or AT modem port")
 	}
 	var result error
 	for _, candidate := range candidates {
@@ -64,7 +65,7 @@ func readerCandidates(modem *mmodem.Modem) []readerCandidate {
 		candidates = append(candidates, readerCandidate{portType: portType, device: device})
 	}
 	add(modem.PrimaryPortType(), modem.PrimaryPort)
-	for _, portType := range []mmodem.ModemPortType{mmodem.ModemPortTypeQmi, mmodem.ModemPortTypeMbim, mmodem.ModemPortTypeAt} {
+	for _, portType := range []mmodem.ModemPortType{mmodem.ModemPortTypeQmi, mmodem.ModemPortTypeAt} {
 		for _, port := range modem.Ports {
 			if port.PortType == portType {
 				add(portType, port.Device)
@@ -75,17 +76,41 @@ func readerCandidates(modem *mmodem.Modem) []readerCandidate {
 }
 
 func supportedReaderPort(portType mmodem.ModemPortType) bool {
-	return portType == mmodem.ModemPortTypeQmi || portType == mmodem.ModemPortTypeMbim || portType == mmodem.ModemPortTypeAt
+	return portType == mmodem.ModemPortTypeQmi || portType == mmodem.ModemPortTypeAt
 }
 
-func openReaderCandidate(ctx context.Context, candidate readerCandidate, slot int) (usimreader.Reader, error) {
+func openReaderCandidate(ctx context.Context, candidate readerCandidate, slot int) (usimcard.Reader, error) {
 	switch candidate.portType {
 	case mmodem.ModemPortTypeQmi:
-		return qmi.Open(ctx, candidate.device, slot)
-	case mmodem.ModemPortTypeMbim:
-		return mbim.Open(ctx, candidate.device, slot)
+		if slot < 1 || slot > 5 {
+			return nil, fmt.Errorf("slot %d is out of range", slot)
+		}
+		transport, err := qmi.Open(ctx, qmi.WithProxy(candidate.device))
+		if err != nil {
+			return nil, err
+		}
+		reader, err := uim.New(ctx, transport, uim.WithSlot(uint8(slot)))
+		if err != nil {
+			return nil, errors.Join(err, transport.Close())
+		}
+		if err := reader.ActivateSlot(ctx); err != nil {
+			return nil, errors.Join(err, reader.Close())
+		}
+		adapter, err := usim.NewQualcomm(reader)
+		if err != nil {
+			return nil, errors.Join(err, reader.Close())
+		}
+		return adapter, nil
 	case mmodem.ModemPortTypeAt:
-		return at.New(candidate.device, 0)
+		tx, err := at.Open(ctx, candidate.device, 0)
+		if err != nil {
+			return nil, err
+		}
+		reader, err := usim.NewReader(tx)
+		if err != nil {
+			return nil, errors.Join(err, tx.Close())
+		}
+		return reader, nil
 	default:
 		return nil, errors.New("reader port type is unsupported")
 	}
@@ -95,8 +120,6 @@ func readerPortTypeName(portType mmodem.ModemPortType) string {
 	switch portType {
 	case mmodem.ModemPortTypeQmi:
 		return "QMI"
-	case mmodem.ModemPortTypeMbim:
-		return "MBIM"
 	case mmodem.ModemPortTypeAt:
 		return "AT"
 	default:

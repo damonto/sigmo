@@ -29,6 +29,7 @@ const (
 	webRTCUDPPortMax            = 40100
 	webRTCICEGatheringTimeout   = 20 * time.Second
 	webRTCDisconnectedGraceTime = 5 * time.Second
+	mediaCleanupTimeout         = 5 * time.Second
 )
 
 type WebRTCSessionDescription struct {
@@ -128,6 +129,10 @@ func (s *Service) closeAMRCodecFactory(ctx context.Context) error {
 	return factory.Close(ctx)
 }
 
+func mediaCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), mediaCleanupTimeout)
+}
+
 func (s *Service) registerBridge(bridge *webRTCBridge) bool {
 	s.bridgeMu.Lock()
 	defer s.bridgeMu.Unlock()
@@ -167,7 +172,6 @@ type webRTCBridge struct {
 	track   *webrtc.TrackLocalStaticRTP
 	codec   bridgeCodec
 
-	ctx          context.Context
 	cancel       context.CancelFunc
 	once         sync.Once
 	wg           sync.WaitGroup
@@ -257,14 +261,13 @@ func newWebRTCBridge(media MediaSession, factory *voicecodec.AMRCodecFactory, co
 		pc:      pc,
 		track:   track,
 		codec:   codec,
-		ctx:     bridgeCtx,
 		cancel:  cancel,
 	}
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		switch bridgeActionForPeerState(state) {
 		case webRTCBridgeActionReady:
 			bridge.cancelDisconnectTimer()
-			bridge.startDownlink()
+			bridge.startDownlink(bridgeCtx)
 		case webRTCBridgeActionGraceClose:
 			bridge.closeAfterDisconnectGrace()
 		case webRTCBridgeActionCloseNow:
@@ -275,7 +278,7 @@ func newWebRTCBridge(media MediaSession, factory *voicecodec.AMRCodecFactory, co
 		if !strings.EqualFold(track.Codec().MimeType, webrtc.MimeTypePCMU) {
 			return
 		}
-		bridge.startUplink(track, codec)
+		bridge.startUplink(bridgeCtx, track, codec)
 	})
 	return bridge, nil
 }
@@ -361,25 +364,25 @@ func (b *webRTCBridge) cancelDisconnectTimer() {
 	b.disconnectTimer = nil
 }
 
-func (b *webRTCBridge) startDownlink() {
+func (b *webRTCBridge) startDownlink(ctx context.Context) {
 	b.downlinkOnce.Do(func() {
 		if !b.addWorker() {
 			return
 		}
 		go func() {
 			defer b.wg.Done()
-			b.runDownlink(b.codec)
+			b.runDownlink(ctx, b.codec)
 		}()
 	})
 }
 
-func (b *webRTCBridge) startUplink(track *webrtc.TrackRemote, codec bridgeCodec) {
+func (b *webRTCBridge) startUplink(ctx context.Context, track *webrtc.TrackRemote, codec bridgeCodec) {
 	if !b.addWorker() {
 		return
 	}
 	go func() {
 		defer b.wg.Done()
-		b.runUplink(track, codec)
+		b.runUplink(ctx, track, codec)
 	}()
 }
 
@@ -393,23 +396,23 @@ func (b *webRTCBridge) addWorker() bool {
 	return true
 }
 
-func (b *webRTCBridge) runDownlink(codec bridgeCodec) {
+func (b *webRTCBridge) runDownlink(ctx context.Context, codec bridgeCodec) {
 	if codec.pcmu {
-		b.runPCMUPassthroughDownlink()
+		b.runPCMUPassthroughDownlink(ctx)
 		return
 	}
-	amr, err := b.factory.NewCodec(b.ctx, codec.amr)
+	amr, err := b.factory.NewCodec(ctx, codec.amr)
 	if err != nil {
 		b.stop()
 		return
 	}
-	defer func() { _ = amr.Close(context.Background()) }()
+	defer closeAMRCodec(ctx, amr)
 
 	sequenceNumber := random16()
 	timestamp := random32()
 	ssrc := random32()
 	for {
-		packet, err := b.media.ReadPacket(b.ctx)
+		packet, err := b.media.ReadPacket(ctx)
 		if err != nil {
 			b.stop()
 			return
@@ -426,7 +429,7 @@ func (b *webRTCBridge) runDownlink(codec bridgeCodec) {
 			if frame.FrameType == 15 || !frame.Quality {
 				continue
 			}
-			pcm, err := amr.Decode(b.ctx, frame)
+			pcm, err := amr.Decode(ctx, frame)
 			if err != nil {
 				b.stop()
 				return
@@ -456,14 +459,14 @@ func (b *webRTCBridge) runDownlink(codec bridgeCodec) {
 	}
 }
 
-func (b *webRTCBridge) runPCMUPassthroughDownlink() {
+func (b *webRTCBridge) runPCMUPassthroughDownlink(ctx context.Context) {
 	sequenceNumber := random16()
 	timestamp := random32()
 	ssrc := random32()
 	var firstTimestamp uint32
 	firstPacket := true
 	for {
-		packet, err := b.media.ReadPacket(b.ctx)
+		packet, err := b.media.ReadPacket(ctx)
 		if err != nil {
 			b.stop()
 			return
@@ -485,17 +488,17 @@ func (b *webRTCBridge) runPCMUPassthroughDownlink() {
 	}
 }
 
-func (b *webRTCBridge) runUplink(track *webrtc.TrackRemote, codec bridgeCodec) {
+func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote, codec bridgeCodec) {
 	if codec.pcmu {
-		b.runPCMUPassthroughUplink(track)
+		b.runPCMUPassthroughUplink(ctx, track)
 		return
 	}
-	amr, err := b.factory.NewCodec(b.ctx, codec.amr)
+	amr, err := b.factory.NewCodec(ctx, codec.amr)
 	if err != nil {
 		b.stop()
 		return
 	}
-	defer func() { _ = amr.Close(context.Background()) }()
+	defer closeAMRCodec(ctx, amr)
 
 	sequenceNumber := random16()
 	timestamp := random32()
@@ -524,7 +527,7 @@ func (b *webRTCBridge) runUplink(track *webrtc.TrackRemote, codec bridgeCodec) {
 			chunk := make([]int16, frameSamples)
 			copy(chunk, buffer[:frameSamples])
 			buffer = buffer[frameSamples:]
-			frames, err := amr.Encode(b.ctx, chunk)
+			frames, err := amr.Encode(ctx, chunk)
 			if err != nil {
 				b.stop()
 				return
@@ -553,7 +556,7 @@ func (b *webRTCBridge) runUplink(track *webrtc.TrackRemote, codec bridgeCodec) {
 				b.stop()
 				return
 			}
-			if err := b.media.WritePacket(b.ctx, data); errors.Is(err, wificalling.ErrCallOnHold) {
+			if err := b.media.WritePacket(ctx, data); errors.Is(err, wificalling.ErrCallOnHold) {
 				continue
 			} else if err != nil {
 				b.stop()
@@ -565,7 +568,15 @@ func (b *webRTCBridge) runUplink(track *webrtc.TrackRemote, codec bridgeCodec) {
 	}
 }
 
-func (b *webRTCBridge) runPCMUPassthroughUplink(track *webrtc.TrackRemote) {
+func closeAMRCodec(ctx context.Context, amr *voicecodec.WASMAMRCodec) {
+	cleanupCtx, cancel := mediaCleanupContext(ctx)
+	defer cancel()
+	if err := amr.Close(cleanupCtx); err != nil {
+		slog.Warn("close AMR codec", "error", err)
+	}
+}
+
+func (b *webRTCBridge) runPCMUPassthroughUplink(ctx context.Context, track *webrtc.TrackRemote) {
 	sequenceNumber := random16()
 	timestamp := random32()
 	ssrc := random32()
@@ -592,7 +603,7 @@ func (b *webRTCBridge) runPCMUPassthroughUplink(track *webrtc.TrackRemote) {
 			b.stop()
 			return
 		}
-		if err := b.media.WritePacket(b.ctx, data); errors.Is(err, wificalling.ErrCallOnHold) {
+		if err := b.media.WritePacket(ctx, data); errors.Is(err, wificalling.ErrCallOnHold) {
 			continue
 		} else if err != nil {
 			b.stop()

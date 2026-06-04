@@ -67,7 +67,7 @@ var (
 
 type Service struct {
 	store       *storage.Store
-	wifiCalling wificalling.Coordinator
+	wifiCalling wifiCallingVoice
 
 	mu          sync.Mutex
 	subscribers map[uint64]chan Event
@@ -111,7 +111,20 @@ type MediaSession interface {
 	WritePacket(context.Context, []byte) error
 }
 
-func New(store *storage.Store, wifiCalling wificalling.Coordinator) *Service {
+type wifiCallingVoice interface {
+	Status(context.Context, *mmodem.Modem) (wificalling.Status, error)
+	DialCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
+	AnswerCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
+	RejectCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
+	HangupCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
+	HoldCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
+	ResumeCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
+	SendCallDTMF(context.Context, *mmodem.Modem, string, string) error
+	OpenCallMedia(context.Context, *mmodem.Modem, string) (wificalling.MediaSession, error)
+	SubscribeVoiceEvents(wificalling.VoiceEventFunc) func()
+}
+
+func New(store *storage.Store, wifiCalling wifiCallingVoice) *Service {
 	return &Service{
 		store:       store,
 		wifiCalling: wifiCalling,
@@ -123,7 +136,9 @@ func New(store *storage.Store, wifiCalling wificalling.Coordinator) *Service {
 
 func (s *Service) Run(ctx context.Context) error {
 	defer func() {
-		if err := s.closeMedia(context.Background()); err != nil {
+		cleanupCtx, cancel := mediaCleanupContext(ctx)
+		defer cancel()
+		if err := s.closeMedia(cleanupCtx); err != nil {
 			slog.Warn("close call media", "error", err)
 		}
 	}()

@@ -12,6 +12,7 @@ import (
 
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	vowifi "github.com/damonto/vowifi-go"
+	imssms "github.com/damonto/vowifi-go/ims/sms"
 )
 
 func TestIncomingMessageKey(t *testing.T) {
@@ -88,27 +89,27 @@ func TestSMSReportStatus(t *testing.T) {
 	}{
 		{
 			name:   "delivered",
-			report: vowifi.SMSReport{Status: vowifi.SMSReportStatusReceivedBySME},
+			report: vowifi.SMSReport{Status: imssms.ReportStatusReceivedBySME},
 			want:   "delivered",
 		},
 		{
 			name:   "retrying",
-			report: vowifi.SMSReport{Status: vowifi.SMSReportStatusRetryingSMEBusy},
+			report: vowifi.SMSReport{Status: imssms.ReportStatusRetryingSMEBusy},
 			want:   "retrying",
 		},
 		{
 			name:   "permanent failure",
-			report: vowifi.SMSReport{Status: vowifi.SMSReportStatusPermanentIncompatibleDestination},
+			report: vowifi.SMSReport{Status: imssms.ReportStatusPermanentIncompatibleDestination},
 			want:   "failed",
 		},
 		{
 			name:   "temporary failure without retry",
-			report: vowifi.SMSReport{Status: vowifi.SMSReportStatusNoRetryServiceRejected},
+			report: vowifi.SMSReport{Status: imssms.ReportStatusNoRetryServiceRejected},
 			want:   "failed",
 		},
 		{
 			name:   "completed but not confirmed delivered keeps sent",
-			report: vowifi.SMSReport{Status: vowifi.SMSReportStatusForwardedUnconfirmed},
+			report: vowifi.SMSReport{Status: imssms.ReportStatusForwardedUnconfirmed},
 		},
 	}
 	for _, tt := range tests {
@@ -134,7 +135,7 @@ func TestSMSReportTrackingAggregatesSegments(t *testing.T) {
 				{TPReference: 7},
 			}},
 			reports: []vowifi.SMSReport{
-				{Recipient: "+200", MessageReference: 7, Status: vowifi.SMSReportStatusReceivedBySME},
+				{Recipient: "+200", MessageReference: 7, Status: imssms.ReportStatusReceivedBySME},
 			},
 			wantUpdates: []string{"delivered"},
 		},
@@ -145,8 +146,8 @@ func TestSMSReportTrackingAggregatesSegments(t *testing.T) {
 				{TPReference: 2},
 			}},
 			reports: []vowifi.SMSReport{
-				{Recipient: "+200", MessageReference: 1, Status: vowifi.SMSReportStatusReceivedBySME},
-				{Recipient: "+200", MessageReference: 2, Status: vowifi.SMSReportStatusReceivedBySME},
+				{Recipient: "+200", MessageReference: 1, Status: imssms.ReportStatusReceivedBySME},
+				{Recipient: "+200", MessageReference: 2, Status: imssms.ReportStatusReceivedBySME},
 			},
 			wantUpdates: []string{"delivered"},
 		},
@@ -157,8 +158,8 @@ func TestSMSReportTrackingAggregatesSegments(t *testing.T) {
 				{TPReference: 2},
 			}},
 			reports: []vowifi.SMSReport{
-				{Recipient: "+200", MessageReference: 1, Status: vowifi.SMSReportStatusReceivedBySME},
-				{Recipient: "+200", MessageReference: 2, Status: vowifi.SMSReportStatusPermanentIncompatibleDestination},
+				{Recipient: "+200", MessageReference: 1, Status: imssms.ReportStatusReceivedBySME},
+				{Recipient: "+200", MessageReference: 2, Status: imssms.ReportStatusPermanentIncompatibleDestination},
 			},
 			wantUpdates: []string{"failed"},
 		},
@@ -169,7 +170,7 @@ func TestSMSReportTrackingAggregatesSegments(t *testing.T) {
 				{TPReference: 2},
 			}},
 			reports: []vowifi.SMSReport{
-				{Recipient: "+200", MessageReference: 1, Status: vowifi.SMSReportStatusRetryingSMEBusy},
+				{Recipient: "+200", MessageReference: 1, Status: imssms.ReportStatusRetryingSMEBusy},
 			},
 			wantUpdates: []string{"retrying"},
 		},
@@ -180,7 +181,7 @@ func TestSMSReportTrackingAggregatesSegments(t *testing.T) {
 				{TPReference: 2},
 			}},
 			reports: []vowifi.SMSReport{
-				{Recipient: "+200", MessageReference: 1, Status: vowifi.SMSReportStatusReceivedBySME},
+				{Recipient: "+200", MessageReference: 1, Status: imssms.ReportStatusReceivedBySME},
 			},
 		},
 		{
@@ -189,7 +190,7 @@ func TestSMSReportTrackingAggregatesSegments(t *testing.T) {
 				{TPReference: 9},
 			}},
 			reports: []vowifi.SMSReport{
-				{Recipient: "+200", MessageReference: 9, Status: vowifi.SMSReportStatusReceivedBySME},
+				{Recipient: "+200", MessageReference: 9, Status: imssms.ReportStatusReceivedBySME},
 			},
 			wantTrackStatus: "delivered",
 		},
@@ -264,7 +265,7 @@ func TestApplyPendingSMSStatusAfterStoreMiss(t *testing.T) {
 	c.forwardSMSReport(ctx, msg.ModemID, msg.ProfileID, vowifi.SMSReport{
 		Recipient:        msg.Recipient,
 		MessageReference: 7,
-		Status:           vowifi.SMSReportStatusReceivedBySME,
+		Status:           imssms.ReportStatusReceivedBySME,
 	})
 
 	inserted, err := store.InsertMessage(ctx, msg)

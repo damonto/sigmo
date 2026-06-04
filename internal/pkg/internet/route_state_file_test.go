@@ -31,8 +31,8 @@ func saveRouteStateForModem(path string, modemID string, interfaceName string, p
 	}
 	store.Interfaces[interfaceName] = routeStateEntry{
 		Modem:     modemID,
-		Preferred: routeStateRoutes(preferred),
-		Changes:   routeStateChanges(changes),
+		Preferred: preferred,
+		Changes:   changes,
 	}
 	return writeRouteState(path, store)
 }
@@ -47,8 +47,8 @@ func putRouteStateForModem(path string, modemID string, interfaceName string, pr
 	}
 	store.Interfaces[interfaceName] = routeStateEntry{
 		Modem:     modemID,
-		Preferred: routeStateRoutes(preferred),
-		Changes:   routeStateChanges(changes),
+		Preferred: preferred,
+		Changes:   changes,
 	}
 	return writeRouteState(path, store)
 }
@@ -72,11 +72,7 @@ func loadRouteStateMatching(path string, modemID string, interfaceName string, s
 			return nil, false, nil
 		}
 	}
-	changes, err := defaultRouteChangesFromState(entry.Changes)
-	if err != nil {
-		return nil, false, err
-	}
-	return changes, true, nil
+	return entry.Changes, true, nil
 }
 
 func loadAllRouteStates(path string) (map[string]savedRouteState, error) {
@@ -86,18 +82,10 @@ func loadAllRouteStates(path string) (map[string]savedRouteState, error) {
 	}
 	result := make(map[string]savedRouteState, len(store.Interfaces))
 	for interfaceName, entry := range store.Interfaces {
-		preferred, err := defaultRoutesFromState(entry.Preferred)
-		if err != nil {
-			return nil, err
-		}
-		changes, err := defaultRouteChangesFromState(entry.Changes)
-		if err != nil {
-			return nil, err
-		}
 		result[interfaceName] = savedRouteState{
 			ModemID:   entry.Modem,
-			Preferred: preferred,
-			Changes:   changes,
+			Preferred: entry.Preferred,
+			Changes:   entry.Changes,
 		}
 	}
 	return result, nil

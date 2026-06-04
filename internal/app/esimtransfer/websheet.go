@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/damonto/ts43-go/ts43"
+	"github.com/damonto/ts43-go"
 
 	"github.com/damonto/sigmo/internal/pkg/websheet"
 )

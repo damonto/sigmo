@@ -1,6 +1,7 @@
 package voicecodec
 
 import (
+	"bufio"
 	"errors"
 	"io"
 )
@@ -384,18 +385,98 @@ func (s *AMRStorage) UnmarshalBinary(data []byte) error {
 }
 
 func (s *AMRStorage) ReadFrom(r io.Reader) (int64, error) {
-	data, err := io.ReadAll(r)
+	counter := &countingReader{r: r}
+	reader := bufio.NewReader(counter)
+	codec, includeHeader, err := readAMRStorageHeader(reader, s.Codec)
 	if err != nil {
-		return int64(len(data)), err
+		return counter.n, err
 	}
-	return int64(len(data)), s.UnmarshalBinary(data)
+
+	frames := []AMRFrame{}
+	for {
+		header, err := reader.ReadByte()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return counter.n, err
+		}
+		frameType := int((header >> 3) & 0x0f)
+		quality := header&0x04 != 0
+		size := AMRFrameBytes(codec, frameType)
+		if size < 0 {
+			return counter.n, ErrAMRFrameTypeUnsupported
+		}
+		frameData := make([]byte, size)
+		if _, err := io.ReadFull(reader, frameData); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				return counter.n, ErrAMRSpeechDataTruncated
+			}
+			return counter.n, err
+		}
+		frames = append(frames, AMRFrame{FrameType: frameType, Quality: quality, Data: frameData})
+	}
+	s.Codec = codec
+	s.Frames = frames
+	s.IncludeHeader = includeHeader
+	return counter.n, nil
 }
 
 func (s AMRStorage) WriteTo(w io.Writer) (int64, error) {
-	data, err := s.MarshalBinary()
-	if err != nil {
-		return 0, err
+	var written int64
+	switch s.Codec {
+	case CodecAMR, CodecAMRWB:
+	default:
+		if len(s.Frames) > 0 || s.IncludeHeader {
+			return 0, ErrAMRStorageHeaderMissing
+		}
 	}
+	if s.IncludeHeader {
+		header := amrStorageHeader
+		if s.Codec == CodecAMRWB {
+			header = amrWBStorageHeader
+		}
+		n, err := writeFull(w, header)
+		written += n
+		if err != nil {
+			return written, err
+		}
+	}
+	for _, frame := range s.Frames {
+		data, err := (AMRStorageFrame{Codec: s.Codec, Frame: frame}).MarshalBinary()
+		if err != nil {
+			return written, err
+		}
+		n, err := writeFull(w, data)
+		written += n
+		if err != nil {
+			return written, err
+		}
+	}
+	return written, nil
+}
+
+func readAMRStorageHeader(reader *bufio.Reader, fallback AMRCodec) (AMRCodec, bool, error) {
+	if hasBufferedPrefix(reader, amrWBStorageHeader) {
+		_, _ = reader.Discard(len(amrWBStorageHeader))
+		return CodecAMRWB, true, nil
+	}
+	if hasBufferedPrefix(reader, amrStorageHeader) {
+		_, _ = reader.Discard(len(amrStorageHeader))
+		return CodecAMR, true, nil
+	}
+	if fallback == CodecAMR || fallback == CodecAMRWB {
+		return fallback, false, nil
+	}
+	return "", false, ErrAMRStorageHeaderMissing
+}
+
+func hasBufferedPrefix(reader *bufio.Reader, prefix []byte) bool {
+	data, err := reader.Peek(len(prefix))
+	return (err == nil || errors.Is(err, io.EOF)) && hasPrefix(data, prefix)
+}
+
+func writeFull(w io.Writer, data []byte) (int64, error) {
 	var written int64
 	for len(data) > 0 {
 		n, err := w.Write(data)
@@ -409,6 +490,17 @@ func (s AMRStorage) WriteTo(w io.Writer) (int64, error) {
 		}
 	}
 	return written, nil
+}
+
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	r.n += int64(n)
+	return n, err
 }
 
 func storageCodec(codec AMRCodec, data []byte) (AMRCodec, int, error) {

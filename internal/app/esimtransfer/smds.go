@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	sgp22 "github.com/damonto/euicc-go/v2"
-	"github.com/damonto/ts43-go/ts43"
+	"github.com/damonto/ts43-go"
 
 	ilpa "github.com/damonto/sigmo/internal/pkg/lpa"
 )

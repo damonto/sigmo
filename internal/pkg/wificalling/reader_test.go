@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	usimreader "github.com/damonto/vowifi-go/usim/reader"
+	usimcard "github.com/damonto/uicc-go/usim/card"
 )
 
 func TestReaderCandidatesPreferPrimaryThenFallbackPorts(t *testing.T) {
@@ -47,7 +47,19 @@ func TestReaderCandidatesPreferPrimaryThenFallbackPorts(t *testing.T) {
 				},
 			},
 			want: []readerCandidate{
-				{portType: mmodem.ModemPortTypeMbim, device: "/dev/cdc-wdm0"},
+				{portType: mmodem.ModemPortTypeAt, device: "/dev/ttyUSB2"},
+			},
+		},
+		{
+			name: "mbim primary uses at port",
+			modem: &mmodem.Modem{
+				PrimaryPort: "/dev/cdc-wdm0",
+				Ports: []mmodem.ModemPort{
+					{PortType: mmodem.ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+					{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB2"},
+				},
+			},
+			want: []readerCandidate{
 				{portType: mmodem.ModemPortTypeAt, device: "/dev/ttyUSB2"},
 			},
 		},
@@ -83,7 +95,7 @@ func TestOpenReaderFallsBackAfterPrimaryFailure(t *testing.T) {
 		},
 	}
 	var attempts []readerCandidate
-	reader, err := openReaderWith(context.Background(), modem, func(_ context.Context, candidate readerCandidate, slot int) (usimreader.Reader, error) {
+	reader, err := openReaderWith(context.Background(), modem, func(_ context.Context, candidate readerCandidate, slot int) (usimcard.Reader, error) {
 		attempts = append(attempts, candidate)
 		if slot != 2 {
 			t.Fatalf("slot = %d, want 2", slot)
@@ -117,7 +129,7 @@ func TestOpenReaderReturnsJoinedCandidateErrors(t *testing.T) {
 			{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB6"},
 		},
 	}
-	_, err := openReaderWith(context.Background(), modem, func(_ context.Context, candidate readerCandidate, _ int) (usimreader.Reader, error) {
+	_, err := openReaderWith(context.Background(), modem, func(_ context.Context, candidate readerCandidate, _ int) (usimcard.Reader, error) {
 		return nil, errors.New(readerPortTypeName(candidate.portType) + " unavailable")
 	})
 	if err == nil {
@@ -132,28 +144,28 @@ func TestOpenReaderReturnsJoinedCandidateErrors(t *testing.T) {
 
 type fakeUSIMReader struct{}
 
-func (fakeUSIMReader) ListApplications(context.Context) ([]usimreader.Application, error) {
+func (fakeUSIMReader) ListApplications(context.Context) ([]usimcard.Application, error) {
 	return nil, nil
 }
 
-func (fakeUSIMReader) GetFileAttributes(context.Context, usimreader.FileRef) (usimreader.FileAttributes, error) {
-	return usimreader.FileAttributes{}, nil
+func (fakeUSIMReader) FileAttributes(context.Context, usimcard.FileRef) (usimcard.FileAttributes, error) {
+	return usimcard.FileAttributes{}, nil
 }
 
-func (fakeUSIMReader) ReadTransparent(context.Context, usimreader.TransparentRead) ([]byte, error) {
+func (fakeUSIMReader) ReadTransparent(context.Context, usimcard.TransparentRead) ([]byte, error) {
 	return nil, nil
 }
 
-func (fakeUSIMReader) ReadRecord(context.Context, usimreader.RecordRead) ([]byte, error) {
+func (fakeUSIMReader) ReadRecord(context.Context, usimcard.RecordRead) ([]byte, error) {
 	return nil, nil
 }
 
-func (fakeUSIMReader) Authenticate3G(context.Context, usimreader.AuthenticateRequest) ([]byte, error) {
+func (fakeUSIMReader) Authenticate3G(context.Context, usimcard.AuthenticateRequest) ([]byte, error) {
 	return nil, nil
 }
 
-func (fakeUSIMReader) SMSPPDownload(context.Context, usimreader.SMSPPDownloadRequest) (usimreader.SMSPPDownloadResponse, error) {
-	return usimreader.SMSPPDownloadResponse{}, nil
+func (fakeUSIMReader) SMSPPDownload(context.Context, usimcard.SMSPPDownloadRequest) (usimcard.SMSPPDownloadResponse, error) {
+	return usimcard.SMSPPDownloadResponse{}, nil
 }
 
 func (fakeUSIMReader) Close() error {

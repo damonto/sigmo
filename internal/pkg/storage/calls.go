@@ -204,6 +204,7 @@ type callScanner interface {
 func scanCall(row callScanner) (Call, error) {
 	var call Call
 	var startedAt, answeredAt, endedAt, updatedAt string
+	var err error
 	if err := row.Scan(
 		&call.ID,
 		&call.ProfileID,
@@ -221,9 +222,17 @@ func scanCall(row callScanner) (Call, error) {
 	); err != nil {
 		return Call{}, fmt.Errorf("scan call: %w", err)
 	}
-	call.StartedAt = parseTime(startedAt)
-	call.AnsweredAt = parseTime(answeredAt)
-	call.EndedAt = parseTime(endedAt)
-	call.UpdatedAt = parseTime(updatedAt)
+	if call.StartedAt, err = parseTime(startedAt); err != nil {
+		return Call{}, fmt.Errorf("parse call started_at: %w", err)
+	}
+	if call.AnsweredAt, err = parseTime(answeredAt); err != nil {
+		return Call{}, fmt.Errorf("parse call answered_at: %w", err)
+	}
+	if call.EndedAt, err = parseTime(endedAt); err != nil {
+		return Call{}, fmt.Errorf("parse call ended_at: %w", err)
+	}
+	if call.UpdatedAt, err = parseTime(updatedAt); err != nil {
+		return Call{}, fmt.Errorf("parse call updated_at: %w", err)
+	}
 	return call, nil
 }

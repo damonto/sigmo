@@ -19,28 +19,27 @@ const (
 )
 
 type connectionStateStore interface {
-	saveProxyStateForModem(modemID string, interfaceName string) error
-	loadProxyStateForModem(modemID string, interfaceName string) (bool, bool, error)
-	deleteProxyState(interfaceName string) error
-	proxyInterfacesForModem(modemID string) ([]string, error)
-	saveRouteStateForModem(modemID string, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error
-	putRouteStateForModem(modemID string, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error
-	loadRouteStateForModem(modemID string, interfaceName string) ([]defaultRouteChange, bool, error)
-	loadAllRouteStates() (map[string]savedRouteState, error)
-	deleteRouteState(interfaceName string) error
+	saveProxyStateForModem(ctx context.Context, modemID string, interfaceName string) error
+	loadProxyStateForModem(ctx context.Context, modemID string, interfaceName string) (bool, bool, error)
+	deleteProxyState(ctx context.Context, interfaceName string) error
+	proxyInterfacesForModem(ctx context.Context, modemID string) ([]string, error)
+	saveRouteStateForModem(ctx context.Context, modemID string, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error
+	putRouteStateForModem(ctx context.Context, modemID string, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error
+	loadRouteStateForModem(ctx context.Context, modemID string, interfaceName string) ([]defaultRouteChange, bool, error)
+	loadAllRouteStates(ctx context.Context) (map[string]savedRouteState, error)
+	deleteRouteState(ctx context.Context, interfaceName string) error
 }
 
 type dbConnectionState struct {
 	store *storage.Store
 }
 
-func (s dbConnectionState) saveProxyStateForModem(modemID string, interfaceName string) error {
+func (s dbConnectionState) saveProxyStateForModem(ctx context.Context, modemID string, interfaceName string) error {
 	modemID = strings.TrimSpace(modemID)
 	interfaceName = strings.TrimSpace(interfaceName)
 	if interfaceName == "" {
 		return errors.New("interface name is empty")
 	}
-	ctx := context.Background()
 	entry, ok, err := s.proxyState(ctx, interfaceName)
 	if err != nil {
 		return err
@@ -50,13 +49,13 @@ func (s dbConnectionState) saveProxyStateForModem(modemID string, interfaceName 
 		return fmt.Errorf("proxy state for interface %s belongs to modem %s", interfaceName, owner)
 	}
 	if modemID != "" {
-		interfaces, err := s.proxyInterfacesForModem(modemID)
+		interfaces, err := s.proxyInterfacesForModem(ctx, modemID)
 		if err != nil {
 			return err
 		}
 		for _, name := range interfaces {
 			if name != interfaceName {
-				if err := s.deleteProxyState(name); err != nil {
+				if err := s.deleteProxyState(ctx, name); err != nil {
 					return err
 				}
 			}
@@ -66,9 +65,9 @@ func (s dbConnectionState) saveProxyStateForModem(modemID string, interfaceName 
 	return s.store.Put(ctx, interfaceScope(interfaceName), proxyKVKey, entry)
 }
 
-func (s dbConnectionState) loadProxyStateForModem(modemID string, interfaceName string) (bool, bool, error) {
+func (s dbConnectionState) loadProxyStateForModem(ctx context.Context, modemID string, interfaceName string) (bool, bool, error) {
 	modemID = strings.TrimSpace(modemID)
-	entry, ok, err := s.proxyState(context.Background(), interfaceName)
+	entry, ok, err := s.proxyState(ctx, interfaceName)
 	if err != nil || !ok {
 		return false, false, err
 	}
@@ -79,16 +78,16 @@ func (s dbConnectionState) loadProxyStateForModem(modemID string, interfaceName 
 	return true, true, nil
 }
 
-func (s dbConnectionState) deleteProxyState(interfaceName string) error {
-	return s.store.Delete(context.Background(), interfaceScope(interfaceName), proxyKVKey)
+func (s dbConnectionState) deleteProxyState(ctx context.Context, interfaceName string) error {
+	return s.store.Delete(ctx, interfaceScope(interfaceName), proxyKVKey)
 }
 
-func (s dbConnectionState) proxyInterfacesForModem(modemID string) ([]string, error) {
+func (s dbConnectionState) proxyInterfacesForModem(ctx context.Context, modemID string) ([]string, error) {
 	modemID = strings.TrimSpace(modemID)
 	if modemID == "" {
 		return nil, nil
 	}
-	raw, err := s.store.ListRaw(context.Background(), interfaceScopePrefix, proxyKVKey)
+	raw, err := s.store.ListRaw(ctx, interfaceScopePrefix, proxyKVKey)
 	if err != nil {
 		return nil, err
 	}
@@ -106,36 +105,36 @@ func (s dbConnectionState) proxyInterfacesForModem(modemID string) ([]string, er
 	return interfaces, nil
 }
 
-func (s dbConnectionState) saveRouteStateForModem(modemID string, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error {
+func (s dbConnectionState) saveRouteStateForModem(ctx context.Context, modemID string, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error {
 	interfaceName = strings.TrimSpace(interfaceName)
 	if interfaceName == "" {
 		return errors.New("interface name is empty")
 	}
-	_, ok, err := s.routeState(context.Background(), interfaceName)
+	_, ok, err := s.routeState(ctx, interfaceName)
 	if err != nil {
 		return err
 	}
 	if ok {
 		return fmt.Errorf("route state for interface %s already exists", interfaceName)
 	}
-	return s.putRouteStateForModem(modemID, interfaceName, preferred, changes)
+	return s.putRouteStateForModem(ctx, modemID, interfaceName, preferred, changes)
 }
 
-func (s dbConnectionState) putRouteStateForModem(modemID string, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error {
+func (s dbConnectionState) putRouteStateForModem(ctx context.Context, modemID string, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error {
 	interfaceName = strings.TrimSpace(interfaceName)
 	if interfaceName == "" {
 		return errors.New("interface name is empty")
 	}
 	entry := routeStateEntry{
 		Modem:     modemID,
-		Preferred: routeStateRoutes(preferred),
-		Changes:   routeStateChanges(changes),
+		Preferred: preferred,
+		Changes:   changes,
 	}
-	return s.store.Put(context.Background(), interfaceScope(interfaceName), routeKVKey, entry)
+	return s.store.Put(ctx, interfaceScope(interfaceName), routeKVKey, entry)
 }
 
-func (s dbConnectionState) loadRouteStateForModem(modemID string, interfaceName string) ([]defaultRouteChange, bool, error) {
-	entry, ok, err := s.routeState(context.Background(), interfaceName)
+func (s dbConnectionState) loadRouteStateForModem(ctx context.Context, modemID string, interfaceName string) ([]defaultRouteChange, bool, error) {
+	entry, ok, err := s.routeState(ctx, interfaceName)
 	if err != nil || !ok {
 		return nil, false, err
 	}
@@ -143,15 +142,11 @@ func (s dbConnectionState) loadRouteStateForModem(modemID string, interfaceName 
 	if owner != "" && owner != strings.TrimSpace(modemID) {
 		return nil, false, nil
 	}
-	changes, err := defaultRouteChangesFromState(entry.Changes)
-	if err != nil {
-		return nil, false, err
-	}
-	return changes, true, nil
+	return entry.Changes, true, nil
 }
 
-func (s dbConnectionState) loadAllRouteStates() (map[string]savedRouteState, error) {
-	raw, err := s.store.ListRaw(context.Background(), interfaceScopePrefix, routeKVKey)
+func (s dbConnectionState) loadAllRouteStates(ctx context.Context) (map[string]savedRouteState, error) {
+	raw, err := s.store.ListRaw(ctx, interfaceScopePrefix, routeKVKey)
 	if err != nil {
 		return nil, err
 	}
@@ -161,25 +156,17 @@ func (s dbConnectionState) loadAllRouteStates() (map[string]savedRouteState, err
 		if err := json.Unmarshal([]byte(value), &entry); err != nil {
 			return nil, fmt.Errorf("decode route state for %s: %w", scope, err)
 		}
-		preferred, err := defaultRoutesFromState(entry.Preferred)
-		if err != nil {
-			return nil, err
-		}
-		changes, err := defaultRouteChangesFromState(entry.Changes)
-		if err != nil {
-			return nil, err
-		}
 		result[strings.TrimPrefix(scope, interfaceScopePrefix)] = savedRouteState{
 			ModemID:   entry.Modem,
-			Preferred: preferred,
-			Changes:   changes,
+			Preferred: entry.Preferred,
+			Changes:   entry.Changes,
 		}
 	}
 	return result, nil
 }
 
-func (s dbConnectionState) deleteRouteState(interfaceName string) error {
-	return s.store.Delete(context.Background(), interfaceScope(interfaceName), routeKVKey)
+func (s dbConnectionState) deleteRouteState(ctx context.Context, interfaceName string) error {
+	return s.store.Delete(ctx, interfaceScope(interfaceName), routeKVKey)
 }
 
 func (s dbConnectionState) proxyState(ctx context.Context, interfaceName string) (proxyStateEntry, bool, error) {

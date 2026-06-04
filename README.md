@@ -86,7 +86,7 @@ Visit `http://localhost:9527` to access the UI.
 
 ### Docker Compose
 
-The Docker image includes the embedded Vue frontend and installs `dbus`, `ModemManager`, `qmi-utils`, and `libmbim-tools` in the runtime image.
+The Docker image includes the embedded Vue frontend and installs `dbus`, `ModemManager`, `qmi-utils` for QMI proxy support, and `libmbim-tools` in the runtime image.
 
 1.  **Data**:
 
