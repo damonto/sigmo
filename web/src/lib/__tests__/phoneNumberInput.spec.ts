@@ -5,6 +5,7 @@ import {
   formatDialInput,
   formatPhoneDisplay,
   formatPhoneInput,
+  isCallableDialString,
   isDialServiceCode,
   phoneNumberChars,
 } from '@/lib/phoneNumberInput'
@@ -42,6 +43,13 @@ describe('phoneNumberInput', () => {
   it('extracts dial string characters for the dialpad', () => {
     expect(dialStringChars('*123#')).toBe('*123#')
     expect(dialStringChars('+1 (222) 333-4444')).toBe('+12223334444')
+  })
+
+  it('checks whether a dial string can be submitted as a call', () => {
+    expect(isCallableDialString('+')).toBe(false)
+    expect(isCallableDialString('')).toBe(false)
+    expect(isCallableDialString('12583113788889999')).toBe(true)
+    expect(isCallableDialString('0118613800138000')).toBe(true)
   })
 
   it('formats display values without API-provided display fields', () => {

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/sigmo/internal/pkg/phonenumber"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/voicecodec"
 	"github.com/damonto/sigmo/internal/pkg/wificalling"
@@ -189,7 +188,7 @@ func (s *Service) Dial(ctx context.Context, modem *mmodem.Modem, number string, 
 	if isUSSDDialString(number) {
 		return storage.Call{}, ErrUSSDDialString
 	}
-	number, err := normalizeDialNumber(ctx, modem, number)
+	number, err := normalizeDialString(number)
 	if err != nil {
 		return storage.Call{}, err
 	}
@@ -646,16 +645,33 @@ func isUSSDDialString(number string) bool {
 	return strings.HasPrefix(number, "*") || strings.HasPrefix(number, "#")
 }
 
-func normalizeDialNumber(ctx context.Context, modem *mmodem.Modem, number string) (string, error) {
-	normalized, err := phonenumber.Normalize(ctx, modem, number)
-	switch {
-	case err == nil:
-		return normalized, nil
-	case errors.Is(err, phonenumber.ErrRequired):
-		return "", ErrNumberRequired
-	case errors.Is(err, phonenumber.ErrInvalid):
+func normalizeDialString(number string) (string, error) {
+	normalized, ok := compactDialString(number)
+	if !ok {
 		return "", ErrInvalidNumber
-	default:
-		return "", err
 	}
+	if normalized == "" {
+		return "", ErrNumberRequired
+	}
+	return normalized, nil
+}
+
+func compactDialString(value string) (string, bool) {
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '+' && b.Len() == 0:
+			b.WriteRune(r)
+		case r == ' ', r == '-', r == '.', r == '(', r == ')':
+		default:
+			return "", false
+		}
+	}
+	number := b.String()
+	if number == "+" {
+		return "", false
+	}
+	return number, true
 }

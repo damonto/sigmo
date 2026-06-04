@@ -8,7 +8,6 @@ import (
 	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/sigmo/internal/pkg/phonenumber"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/websheet"
 	"github.com/damonto/sigmo/internal/pkg/wificalling"
@@ -53,32 +52,36 @@ func TestDialMapsBackendDisconnectedAfterRouteSelected(t *testing.T) {
 	}
 }
 
-func TestNormalizeDialNumber(t *testing.T) {
+func TestNormalizeDialString(t *testing.T) {
 	tests := []struct {
 		name    string
 		number  string
 		want    string
 		wantErr error
 	}{
-		{name: "canonicalizes international number", number: " +1 (224) 225-5559 ", want: "+12242255559"},
+		{name: "compacts formatted international dial string", number: " +1 (224) 225-5559 ", want: "+12242255559"},
+		{name: "keeps local dial string", number: "2242255559", want: "2242255559"},
 		{name: "keeps short code", number: "777", want: "777"},
-		{name: "rejects invalid international number", number: "+1", wantErr: ErrInvalidNumber},
-		{name: "requires modem region for local number", number: "2242255559", wantErr: phonenumber.ErrModemRequired},
+		{name: "keeps 011 international access dial string", number: "0118613800138000", want: "0118613800138000"},
+		{name: "keeps formatted 011 international access dial string", number: "011 86 138 0013 8000", want: "0118613800138000"},
+		{name: "keeps carrier service prefix dial string", number: "12583113788889999", want: "12583113788889999"},
+		{name: "rejects lone plus", number: "+", wantErr: ErrInvalidNumber},
+		{name: "rejects letters", number: "12583A13788889999", wantErr: ErrInvalidNumber},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := normalizeDialNumber(context.Background(), nil, tt.number)
+			got, err := normalizeDialString(tt.number)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
-					t.Fatalf("normalizeDialNumber() error = %v, want %v", err, tt.wantErr)
+					t.Fatalf("normalizeDialString() error = %v, want %v", err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("normalizeDialNumber() error = %v", err)
+				t.Fatalf("normalizeDialString() error = %v", err)
 			}
 			if got != tt.want {
-				t.Fatalf("normalizeDialNumber() = %q, want %q", got, tt.want)
+				t.Fatalf("normalizeDialString() = %q, want %q", got, tt.want)
 			}
 		})
 	}

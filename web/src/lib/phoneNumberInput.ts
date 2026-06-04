@@ -43,6 +43,11 @@ export const isDialServiceCode = (value: string) => {
   return chars.startsWith('*') || chars.startsWith('#')
 }
 
+export const isCallableDialString = (value: string) => {
+  const chars = dialStringChars(value)
+  return chars !== '' && chars !== '+'
+}
+
 export const formatPhoneInput = (value: string, defaultCountry?: string) => {
   const chars = phoneNumberChars(value)
   if (!chars || chars === '+') return chars

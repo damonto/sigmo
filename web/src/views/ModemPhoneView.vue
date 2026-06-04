@@ -33,7 +33,12 @@ import { useModemCallSession } from '@/composables/useModemCallSession'
 import { useModemPhoneCountry } from '@/composables/useModemPhoneCountry'
 import { useStickyTopBar } from '@/composables/useStickyTopBar'
 import { formatListTimestamp } from '@/lib/datetime'
-import { dialStringChars, formatDialInput, isDialServiceCode } from '@/lib/phoneNumberInput'
+import {
+  dialStringChars,
+  formatDialInput,
+  isCallableDialString,
+  isDialServiceCode,
+} from '@/lib/phoneNumberInput'
 import type { CallRecord } from '@/types/call'
 import type { UssdAction } from '@/types/ussd'
 
@@ -102,7 +107,7 @@ const keys = [
 ]
 
 const normalizedDigits = computed(() => dialStringChars(digits.value))
-const canDial = computed(() => normalizedDigits.value.length > 0 && !isDialing.value)
+const canDial = computed(() => isCallableDialString(normalizedDigits.value) && !isDialing.value)
 const dialInputClass = computed(() => {
   const length = normalizedDigits.value.length
   if (length > 20) return 'text-lg'
