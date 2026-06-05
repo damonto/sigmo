@@ -24,6 +24,8 @@ import (
 const (
 	pcmuPayloadType             = 0
 	pcmuClockRate               = 8000
+	maxPCMUSilenceGapSamples    = pcmuClockRate
+	pcmuSilenceByte             = 0xff
 	webRTCUDPPortMin            = 40000
 	webRTCUDPPortMax            = 40100
 	webRTCDisconnectedGraceTime = 5 * time.Second
@@ -559,11 +561,7 @@ func (b *webRTCBridge) runDownlink(ctx context.Context, codec bridgeCodec) {
 }
 
 func (b *webRTCBridge) runPCMUPassthroughDownlink(ctx context.Context) {
-	sequenceNumber := random16()
-	timestamp := random32()
-	ssrc := random32()
-	var firstTimestamp uint32
-	firstPacket := true
+	rewriter := newPCMUDownlinkRewriter(random16(), random32(), random32())
 	for {
 		packet, err := b.media.ReadPacket(ctx)
 		if err != nil {
@@ -574,16 +572,12 @@ func (b *webRTCBridge) runPCMUPassthroughDownlink(ctx context.Context) {
 		if err := inbound.Unmarshal(packet); err != nil || int(inbound.PayloadType) != b.info.PayloadType {
 			continue
 		}
-		if firstPacket {
-			firstTimestamp = inbound.Timestamp
-			firstPacket = false
-		}
-		out := rewriteRTPPacket(inbound, pcmuPayloadType, sequenceNumber, timestamp, firstTimestamp, ssrc)
-		if err := b.track.WriteRTP(out); err != nil {
+		if err := rewriter.rewrite(inbound, func(out rtp.Packet) error {
+			return b.track.WriteRTP(&out)
+		}); err != nil {
 			b.stop()
 			return
 		}
-		sequenceNumber++
 	}
 }
 
@@ -696,7 +690,7 @@ func (b *webRTCBridge) runPCMUPassthroughUplink(ctx context.Context, track *webr
 			firstTimestamp = packet.Timestamp
 			firstPacket = false
 		}
-		out := rewriteRTPPacket(*packet, uint8(b.info.PayloadType), sequenceNumber, timestamp, firstTimestamp, ssrc)
+		out := rewriteRTPPacketWithSourceTiming(*packet, uint8(b.info.PayloadType), sequenceNumber, timestamp, firstTimestamp, ssrc)
 		data, err := out.Marshal()
 		if err != nil {
 			b.stop()
@@ -712,7 +706,7 @@ func (b *webRTCBridge) runPCMUPassthroughUplink(ctx context.Context, track *webr
 	}
 }
 
-func rewriteRTPPacket(in rtp.Packet, payloadType uint8, sequenceNumber uint16, timestampBase uint32, firstTimestamp uint32, ssrc uint32) *rtp.Packet {
+func rewriteRTPPacketWithSourceTiming(in rtp.Packet, payloadType uint8, sequenceNumber uint16, timestampBase uint32, firstTimestamp uint32, ssrc uint32) *rtp.Packet {
 	header := in.Header
 	header.PayloadType = payloadType
 	header.SequenceNumber = sequenceNumber
@@ -722,6 +716,95 @@ func rewriteRTPPacket(in rtp.Packet, payloadType uint8, sequenceNumber uint16, t
 		Header:  header,
 		Payload: in.Payload,
 	}
+}
+
+type pcmuDownlinkRewriter struct {
+	sequenceNumber uint16
+	timestamp      uint32
+	ssrc           uint32
+
+	seen                     bool
+	lastSourceSequenceNumber uint16
+	lastSourceTimestamp      uint32
+	lastSourceSamples        uint32
+}
+
+func newPCMUDownlinkRewriter(sequenceNumber uint16, timestamp uint32, ssrc uint32) pcmuDownlinkRewriter {
+	return pcmuDownlinkRewriter{
+		sequenceNumber: sequenceNumber,
+		timestamp:      timestamp,
+		ssrc:           ssrc,
+	}
+}
+
+func (r *pcmuDownlinkRewriter) rewrite(in rtp.Packet, write func(rtp.Packet) error) error {
+	samples := uint32(len(in.Payload))
+	if samples == 0 {
+		return nil
+	}
+
+	if r.seen {
+		if !rtpSequenceNumberAhead(in.SequenceNumber, r.lastSourceSequenceNumber) {
+			return nil
+		}
+		sourceDelta := in.Timestamp - r.lastSourceTimestamp
+		if sourceDelta > r.lastSourceSamples {
+			gap := sourceDelta - r.lastSourceSamples
+			if gap <= maxPCMUSilenceGapSamples {
+				if err := r.writeSilence(gap, r.lastSourceSamples, write); err != nil {
+					return err
+				}
+			} else {
+				slog.Warn("resync PCMU downlink RTP timestamp",
+					"gap_samples", gap,
+					"packet_samples", samples,
+				)
+			}
+		}
+	} else {
+		r.seen = true
+	}
+	r.lastSourceSequenceNumber = in.SequenceNumber
+	r.lastSourceTimestamp = in.Timestamp
+	r.lastSourceSamples = samples
+
+	return write(r.packet(in.Payload))
+}
+
+func rtpSequenceNumberAhead(current uint16, previous uint16) bool {
+	delta := current - previous
+	return delta != 0 && delta < 1<<15
+}
+
+func (r *pcmuDownlinkRewriter) writeSilence(samples uint32, packetSamples uint32, write func(rtp.Packet) error) error {
+	for samples > 0 {
+		n := min(samples, packetSamples)
+		payload := make([]byte, n)
+		for i := range payload {
+			payload[i] = pcmuSilenceByte
+		}
+		if err := write(r.packet(payload)); err != nil {
+			return err
+		}
+		samples -= n
+	}
+	return nil
+}
+
+func (r *pcmuDownlinkRewriter) packet(payload []byte) rtp.Packet {
+	out := rtp.Packet{
+		Header: rtp.Header{
+			Version:        2,
+			PayloadType:    pcmuPayloadType,
+			SequenceNumber: r.sequenceNumber,
+			Timestamp:      r.timestamp,
+			SSRC:           r.ssrc,
+		},
+		Payload: payload,
+	}
+	r.sequenceNumber++
+	r.timestamp += uint32(len(payload))
+	return out
 }
 
 func shouldCloseDisconnectedBridge(state webrtc.PeerConnectionState) bool {

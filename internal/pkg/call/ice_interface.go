@@ -33,7 +33,6 @@ func defaultRouteInterfaceNames() ([]string, error) {
 	if len(errs) == 2 {
 		return nil, fmt.Errorf("read default route tables: %w", errors.Join(errs...))
 	}
-
 	return sortedInterfaceNames(names), nil
 }
 
@@ -63,7 +62,6 @@ func parseIPv4DefaultRouteInterfaceNames(data string) []string {
 			names[fields[0]] = struct{}{}
 		}
 	}
-
 	return sortedInterfaceNames(names)
 }
 
@@ -94,7 +92,6 @@ func parseIPv6DefaultRouteInterfaceNames(data string) []string {
 			names[fields[9]] = struct{}{}
 		}
 	}
-
 	return sortedInterfaceNames(names)
 }
 

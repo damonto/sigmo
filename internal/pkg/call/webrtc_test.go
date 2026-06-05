@@ -36,7 +36,7 @@ func TestMediaBridgeCodec(t *testing.T) {
 	}
 }
 
-func TestRewriteRTPPacketPreservesTimestampDelta(t *testing.T) {
+func TestRewriteRTPPacketWithSourceTimingPreservesTimestampDelta(t *testing.T) {
 	tests := []struct {
 		name           string
 		inTimestamp    uint32
@@ -52,7 +52,7 @@ func TestRewriteRTPPacketPreservesTimestampDelta(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			payload := []byte{1, 2, 3}
-			got := rewriteRTPPacket(
+			got := rewriteRTPPacketWithSourceTiming(
 				rtp.Packet{
 					Header: rtp.Header{
 						Version:          2,
@@ -76,13 +76,140 @@ func TestRewriteRTPPacketPreservesTimestampDelta(t *testing.T) {
 			)
 
 			if got.PayloadType != 0 || got.SequenceNumber != 42 || got.Timestamp != tt.wantTimestamp || got.SSRC != 5678 {
-				t.Fatalf("rewriteRTPPacket() header = %+v, want pt 0 seq 42 timestamp %d ssrc 5678", got.Header, tt.wantTimestamp)
+				t.Fatalf("rewriteRTPPacketWithSourceTiming() header = %+v, want pt 0 seq 42 timestamp %d ssrc 5678", got.Header, tt.wantTimestamp)
 			}
 			if !got.Marker || !got.Padding || !got.Extension || got.ExtensionProfile != 0xBEDE || len(got.CSRC) != 2 {
-				t.Fatalf("rewriteRTPPacket() dropped RTP header fields: %+v", got.Header)
+				t.Fatalf("rewriteRTPPacketWithSourceTiming() dropped RTP header fields: %+v", got.Header)
 			}
 			if string(got.Payload) != string(payload) {
-				t.Fatalf("rewriteRTPPacket() payload = %v, want %v", got.Payload, payload)
+				t.Fatalf("rewriteRTPPacketWithSourceTiming() payload = %v, want %v", got.Payload, payload)
+			}
+		})
+	}
+}
+
+func TestPCMUDownlinkRewriterRepairsTimestampGaps(t *testing.T) {
+	const (
+		seqBase = 42
+		tsBase  = 90000
+		ssrc    = 5678
+	)
+	payload := func(value byte, samples int) []byte {
+		out := make([]byte, samples)
+		for i := range out {
+			out[i] = value
+		}
+		return out
+	}
+
+	tests := []struct {
+		name         string
+		inTimestamps []uint32
+		inSequences  []uint16
+		inSamples    []int
+		wantPayloads [][]byte
+		wantTS       []uint32
+	}{
+		{
+			name:         "continuous",
+			inTimestamps: []uint32{1000, 1160},
+			wantPayloads: [][]byte{payload(1, 160), payload(2, 160)},
+			wantTS:       []uint32{tsBase, tsBase + 160},
+		},
+		{
+			name:         "packet duration changes",
+			inTimestamps: []uint32{1000, 1320},
+			inSamples:    []int{320, 160},
+			wantPayloads: [][]byte{payload(1, 320), payload(2, 160)},
+			wantTS:       []uint32{tsBase, tsBase + 320},
+		},
+		{
+			name:         "single missing frame",
+			inTimestamps: []uint32{1000, 1320},
+			wantPayloads: [][]byte{payload(1, 160), payload(pcmuSilenceByte, 160), payload(2, 160)},
+			wantTS:       []uint32{tsBase, tsBase + 160, tsBase + 320},
+		},
+		{
+			name:         "multiple missing frames",
+			inTimestamps: []uint32{1000, 1480},
+			wantPayloads: [][]byte{payload(1, 160), payload(pcmuSilenceByte, 160), payload(pcmuSilenceByte, 160), payload(2, 160)},
+			wantTS:       []uint32{tsBase, tsBase + 160, tsBase + 320, tsBase + 480},
+		},
+		{
+			name:         "timestamp wraparound",
+			inTimestamps: []uint32{^uint32(79), 80},
+			inSequences:  []uint16{^uint16(0), 0},
+			wantPayloads: [][]byte{payload(1, 160), payload(2, 160)},
+			wantTS:       []uint32{tsBase, tsBase + 160},
+		},
+		{
+			name:         "duplicate packet",
+			inTimestamps: []uint32{1000, 1000, 1160},
+			inSequences:  []uint16{100, 100, 101},
+			wantPayloads: [][]byte{payload(1, 160), payload(3, 160)},
+			wantTS:       []uint32{tsBase, tsBase + 160},
+		},
+		{
+			name:         "late packet",
+			inTimestamps: []uint32{1000, 1160, 1000},
+			inSequences:  []uint16{100, 101, 100},
+			wantPayloads: [][]byte{payload(1, 160), payload(2, 160)},
+			wantTS:       []uint32{tsBase, tsBase + 160},
+		},
+		{
+			name:         "huge gap resyncs without padding",
+			inTimestamps: []uint32{1000, 1000 + maxPCMUSilenceGapSamples + 161},
+			wantPayloads: [][]byte{payload(1, 160), payload(2, 160)},
+			wantTS:       []uint32{tsBase, tsBase + 160},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rewriter := newPCMUDownlinkRewriter(seqBase, tsBase, ssrc)
+			got := []rtp.Packet{}
+			for i, timestamp := range tt.inTimestamps {
+				samples := 160
+				if i < len(tt.inSamples) {
+					samples = tt.inSamples[i]
+				}
+				sequenceNumber := uint16(100 + i)
+				if i < len(tt.inSequences) {
+					sequenceNumber = tt.inSequences[i]
+				}
+				in := rtp.Packet{
+					Header: rtp.Header{
+						Version:        2,
+						PayloadType:    104,
+						SequenceNumber: sequenceNumber,
+						Timestamp:      timestamp,
+						SSRC:           1234,
+						Extension:      true,
+					},
+					Payload: payload(byte(i+1), samples),
+				}
+				err := rewriter.rewrite(in, func(out rtp.Packet) error {
+					got = append(got, out)
+					return nil
+				})
+				if err != nil {
+					t.Fatalf("rewrite() error = %v", err)
+				}
+			}
+
+			if len(got) != len(tt.wantPayloads) {
+				t.Fatalf("rewrite() packets = %d, want %d", len(got), len(tt.wantPayloads))
+			}
+			for i, packet := range got {
+				if packet.PayloadType != pcmuPayloadType || packet.SequenceNumber != seqBase+uint16(i) || packet.Timestamp != tt.wantTS[i] || packet.SSRC != ssrc {
+					t.Fatalf("packet %d header = %+v, want pt %d seq %d timestamp %d ssrc %d", i, packet.Header, pcmuPayloadType, seqBase+uint16(i), tt.wantTS[i], ssrc)
+				}
+				if packet.Extension || packet.Padding || len(packet.CSRC) != 0 {
+					t.Fatalf("packet %d kept source RTP header fields: %+v", i, packet.Header)
+				}
+				if string(packet.Payload) != string(tt.wantPayloads[i]) {
+					t.Fatalf("packet %d payload = %v, want %v", i, packet.Payload, tt.wantPayloads[i])
+				}
 			}
 		})
 	}
