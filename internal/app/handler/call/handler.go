@@ -1,11 +1,13 @@
 package call
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -52,7 +54,6 @@ const (
 	errorCodeDeleteCallFailed          = "delete_call_failed"
 	errorCodeCallMediaUnavailable      = "call_media_unavailable"
 	errorCodeCallMediaUnsupportedCodec = "call_media_unsupported_codec"
-	errorCodeCallWebRTCInvalidRequest  = "call_webrtc_session_invalid_request"
 	errorCodeSubscribeCallEventsFailed = "subscribe_call_events_failed"
 )
 
@@ -260,28 +261,84 @@ func (h *Handler) Events(c *echo.Context) error {
 	}
 }
 
-func (h *Handler) CreateWebRTCSession(c *echo.Context) error {
+func (h *Handler) WebRTCSession(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeCallMediaUnavailable)
 	}
-	var req WebRTCSessionRequest
-	if err := httpapi.BindAndValidate(c, &req, errorCodeCallWebRTCInvalidRequest); err != nil {
+	conn, err := callWSUpgrader.Upgrade(c.Response(), c.Request(), nil)
+	if err != nil {
 		return err
 	}
-	answer, err := h.calls.CreateWebRTCSession(c.Request().Context(), modem, callIDParam(c), pcall.WebRTCSessionDescription{
-		Type: req.Offer.Type,
-		SDP:  req.Offer.SDP,
-	})
-	if err != nil {
-		return callMediaError(c, err)
+	defer conn.Close()
+
+	return h.serveWebRTCSession(c.Request().Context(), conn, modem, callIDParam(c))
+}
+
+func (h *Handler) serveWebRTCSession(ctx context.Context, conn *websocket.Conn, modem *mmodem.Modem, callID string) error {
+	var (
+		session *pcall.WebRTCSession
+		writeMu sync.Mutex
+	)
+	defer func() {
+		if session != nil {
+			session.CloseIfNotConnected()
+		}
+	}()
+
+	for {
+		var message WebRTCSignalMessage
+		if err := conn.ReadJSON(&message); err != nil {
+			return nil
+		}
+		switch message.Type {
+		case "offer":
+			if message.Offer == nil || session != nil {
+				_ = writeWebRTCSignalError(conn, &writeMu, "invalid WebRTC offer")
+				return nil
+			}
+			nextSession, err := h.calls.OpenWebRTCSession(ctx, modem, callID)
+			if err != nil {
+				_ = writeWebRTCSignalError(conn, &writeMu, callMediaMessage(err))
+				return nil
+			}
+			session = nextSession
+			go writeWebRTCIceCandidates(ctx, conn, &writeMu, session.ICECandidates())
+			answer, err := session.Answer(ctx, pcall.WebRTCSessionDescription{
+				Type: message.Offer.Type,
+				SDP:  message.Offer.SDP,
+			})
+			if err != nil {
+				_ = writeWebRTCSignalError(conn, &writeMu, callMediaMessage(err))
+				return nil
+			}
+			if err := writeWebRTCSignal(conn, &writeMu, WebRTCSignalMessage{
+				Type: "answer",
+				Answer: &WebRTCSessionDescription{
+					Type: answer.Type,
+					SDP:  answer.SDP,
+				},
+			}); err != nil {
+				return nil
+			}
+		case "candidate":
+			if message.Candidate == nil || session == nil {
+				continue
+			}
+			if err := session.AddICECandidate(pcall.WebRTCICECandidate{
+				Candidate:        message.Candidate.Candidate,
+				SDPMid:           message.Candidate.SDPMid,
+				SDPMLineIndex:    message.Candidate.SDPMLineIndex,
+				UsernameFragment: message.Candidate.UsernameFragment,
+			}); err != nil {
+				_ = writeWebRTCSignalError(conn, &writeMu, callMediaMessage(err))
+				return nil
+			}
+		default:
+			_ = writeWebRTCSignalError(conn, &writeMu, "invalid WebRTC signal")
+			return nil
+		}
 	}
-	return c.JSON(http.StatusCreated, WebRTCSessionResponse{
-		Answer: WebRTCSessionDescriptionResponse{
-			Type: answer.Type,
-			SDP:  answer.SDP,
-		},
-	})
 }
 
 func writeCallEvent(conn *websocket.Conn, call storage.Call) error {
@@ -289,6 +346,43 @@ func writeCallEvent(conn *websocket.Conn, call storage.Call) error {
 		return err
 	}
 	return conn.WriteJSON(EventMessage{Type: "call", Call: buildCallResponse(call)})
+}
+
+func writeWebRTCIceCandidates(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, candidates <-chan pcall.WebRTCICECandidate) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case candidate, ok := <-candidates:
+			if !ok {
+				return
+			}
+			if err := writeWebRTCSignal(conn, writeMu, WebRTCSignalMessage{
+				Type: "candidate",
+				Candidate: &WebRTCICECandidate{
+					Candidate:        candidate.Candidate,
+					SDPMid:           candidate.SDPMid,
+					SDPMLineIndex:    candidate.SDPMLineIndex,
+					UsernameFragment: candidate.UsernameFragment,
+				},
+			}); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func writeWebRTCSignalError(conn *websocket.Conn, writeMu *sync.Mutex, message string) error {
+	return writeWebRTCSignal(conn, writeMu, WebRTCSignalMessage{Type: "error", Message: message})
+}
+
+func writeWebRTCSignal(conn *websocket.Conn, writeMu *sync.Mutex, message WebRTCSignalMessage) error {
+	writeMu.Lock()
+	defer writeMu.Unlock()
+	if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return err
+	}
+	return conn.WriteJSON(message)
 }
 
 func writeCurrentCallEvents(conn *websocket.Conn, calls []storage.Call, modemID string) error {
@@ -376,6 +470,14 @@ func callMediaError(c *echo.Context, err error) error {
 	default:
 		return callActionError(c, err, errorCodeCallMediaUnavailable)
 	}
+}
+
+func callMediaMessage(err error) string {
+	message := strings.TrimSpace(err.Error())
+	if message == "" {
+		return "call media is not available"
+	}
+	return message
 }
 
 func buildCallResponses(calls []storage.Call) []CallResponse {

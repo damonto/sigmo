@@ -84,7 +84,7 @@ func TestCallMediaErrorMapsExpectedFailures(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := echo.New()
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/modems/test/calls/test/webrtc-sessions", nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/modems/test/calls/test/webrtc-sessions", nil)
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
 

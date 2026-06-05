@@ -1,6 +1,7 @@
 import { computed, getCurrentInstance, onBeforeUnmount, ref, shallowRef, type Ref } from 'vue'
 
-import { useCallApi } from '@/apis/call'
+import { buildWebRTCSessionUrl, useCallApi } from '@/apis/call'
+import type { WebRTCSessionDescriptionPayload, WebRTCSignalMessage } from '@/types/call'
 
 export type AudioStatus = 'idle' | 'preparing' | 'connecting' | 'ready' | 'closed' | 'error'
 
@@ -31,7 +32,6 @@ const microphoneConstraints: MediaTrackConstraints = {
   sampleSize: 16,
 }
 
-const iceGatheringTimeoutMs = 20000
 const disconnectedGraceMs = 5000
 
 export const reduceAudioStatus = (current: AudioStatus, event: AudioStatusEvent): AudioStatus => {
@@ -62,12 +62,19 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   const calls = useCallApi()
 
   let pc: RTCPeerConnection | null = null
+  let signalWS: WebSocket | null = null
   let stream: MediaStream | null = null
   let inputPromise: Promise<MediaStream> | null = null
   let preparePromise: Promise<boolean> | null = null
   let sessionAbort: AbortController | null = null
   let connectionLossTimer: ReturnType<typeof setTimeout> | null = null
   let activeCallID = ''
+  let activeModemID = ''
+  let offerSent = false
+  let pendingLocalSignals: WebRTCSignalMessage[] = []
+  let pendingRemoteICECandidates: RTCIceCandidateInit[] = []
+  let answerResolve: ((answer: RTCSessionDescriptionInit) => void) | null = null
+  let answerReject: ((err: Error) => void) | null = null
 
   const isReady = computed(() => status.value === 'ready')
 
@@ -164,6 +171,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     cleanup(true)
     const nextAbort = new AbortController()
     sessionAbort = nextAbort
+    activeModemID = modemId.value
     activeCallID = callID
     errorMessage.value = ''
     applyStatus({ type: 'prepare' })
@@ -176,6 +184,12 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       if (!isCurrentSession(nextAbort)) return false
       const nextPC = createPeerConnection({ iceServers })
       pc = nextPC
+      const signal = await openWebRTCSignaling(nextPC, activeModemID, callID, nextAbort)
+      if (!isCurrentSession(nextAbort)) return false
+      nextPC.onicecandidate = (event) => {
+        if (pc !== nextPC || !event.candidate) return
+        queueOrSendWebRTCSignal({ type: 'candidate', candidate: event.candidate.toJSON() })
+      }
       nextPC.ontrack = (event) => {
         remoteStream.value = event.streams[0] ?? new MediaStream([event.track])
       }
@@ -211,28 +225,26 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       const offer = await nextPC.createOffer()
       if (!isCurrentSession(nextAbort)) return false
       await nextPC.setLocalDescription(offer)
-      if (!isCurrentSession(nextAbort)) return false
-      await waitForIceGathering(nextPC, nextAbort.signal)
       if (pc !== nextPC || !isCurrentSession(nextAbort)) return false
       const localDescription = nextPC.localDescription
       if (!localDescription) {
         throw new Error('WebRTC offer is missing a local description')
       }
-      const { data } = await calls.createWebRTCSession(modemId.value, callID, {
+      const answerPromise = waitForWebRTCAnswer(signal, nextAbort)
+      sendWebRTCSignal({
+        type: 'offer',
         offer: {
           type: 'offer',
           sdp: localDescription.sdp,
         },
       })
-      const answer = data.value?.answer
-      if (!answer) {
-        throw new Error('Call audio answer is empty')
-      }
+      offerSent = true
+      flushLocalSignals()
+      const answer = await answerPromise
       if (!isCurrentSession(nextAbort)) return false
       await nextPC.setRemoteDescription(answer)
-      if (pc === nextPC && status.value === 'connecting') {
-        applyStatus({ type: 'ready' })
-      }
+      if (!isCurrentSession(nextAbort)) return false
+      await flushRemoteICECandidates(nextPC)
       return true
     } catch (err) {
       if (isAbortError(err)) return false
@@ -246,16 +258,200 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     sessionAbort = null
     clearConnectionLossTimer()
     if (pc) {
+      pc.onicecandidate = null
       pc.ontrack = null
       pc.onconnectionstatechange = null
       pc.close()
       pc = null
     }
+    closeWebRTCSignaling()
+    activeModemID = ''
+    offerSent = false
+    pendingLocalSignals = []
+    pendingRemoteICECandidates = []
+    answerResolve = null
+    answerReject = null
     remoteStream.value = null
     if (!keepInput && stream) {
       stopStream(stream)
       stream = null
     }
+  }
+
+  const openWebRTCSignaling = (
+    targetPC: RTCPeerConnection,
+    id: string,
+    callID: string,
+    controller: AbortController,
+  ) =>
+    new Promise<WebSocket>((resolve, reject) => {
+      closeWebRTCSignaling()
+      const conn = new WebSocket(buildWebRTCSessionUrl(id, callID))
+      signalWS = conn
+      let settled = false
+      const settle = (fn: () => void) => {
+        if (settled) return
+        settled = true
+        controller.signal.removeEventListener('abort', abort)
+        fn()
+      }
+      const abort = () => {
+        closeWebRTCSignaling()
+        settle(() => reject(newAbortError()))
+      }
+      conn.onopen = () => {
+        settle(() => {
+          flushLocalSignals()
+          resolve(conn)
+        })
+      }
+      conn.onerror = () => {
+        if (!settled) {
+          settle(() => reject(new Error('Call audio signaling failed')))
+        }
+      }
+      conn.onclose = () => {
+        if (!settled) {
+          if (signalWS === conn) {
+            signalWS = null
+          }
+          settle(() => reject(new Error('Call audio signaling closed')))
+          return
+        }
+        if (signalWS !== conn || pc !== targetPC) return
+        if (status.value !== 'ready') {
+          fail(new Error('Call audio signaling closed'))
+          return
+        }
+        signalWS = null
+        console.warn('[useCallAudioSession] WebRTC signaling closed')
+      }
+      conn.onmessage = (event) => {
+        if (signalWS !== conn || pc !== targetPC) return
+        handleWebRTCSignalMessage(targetPC, event.data)
+      }
+      controller.signal.addEventListener('abort', abort, { once: true })
+    })
+
+  const queueOrSendWebRTCSignal = (message: WebRTCSignalMessage) => {
+    if (message.type === 'candidate' && !offerSent) {
+      pendingLocalSignals.push(message)
+      return
+    }
+    try {
+      sendWebRTCSignal(message)
+    } catch (err) {
+      handleWebRTCSignalSendError(err)
+    }
+  }
+
+  const sendWebRTCSignal = (message: WebRTCSignalMessage) => {
+    if (!signalWS || signalWS.readyState !== WebSocket.OPEN) {
+      pendingLocalSignals.push(message)
+      return
+    }
+    signalWS.send(JSON.stringify(message))
+  }
+
+  const flushLocalSignals = () => {
+    const messages = pendingLocalSignals
+    pendingLocalSignals = []
+    for (const message of messages) {
+      try {
+        sendWebRTCSignal(message)
+      } catch (err) {
+        handleWebRTCSignalSendError(err)
+        return
+      }
+    }
+  }
+
+  const waitForWebRTCAnswer = (conn: WebSocket, controller: AbortController) =>
+    new Promise<RTCSessionDescriptionInit>((resolve, reject) => {
+      const abort = () => {
+        cleanup()
+        reject(newAbortError())
+      }
+      const cleanup = () => {
+        controller.signal.removeEventListener('abort', abort)
+        if (answerResolve === done) answerResolve = null
+        if (answerReject === failAnswer) answerReject = null
+      }
+      const done = (answer: RTCSessionDescriptionInit) => {
+        cleanup()
+        resolve(answer)
+      }
+      const failAnswer = (err: Error) => {
+        cleanup()
+        reject(err)
+      }
+      if (conn.readyState !== WebSocket.OPEN) {
+        reject(new Error('Call audio signaling closed'))
+        return
+      }
+      answerResolve = done
+      answerReject = failAnswer
+      controller.signal.addEventListener('abort', abort, { once: true })
+    })
+
+  const handleWebRTCSignalMessage = (targetPC: RTCPeerConnection, data: unknown) => {
+    const message = parseWebRTCSignalMessage(data)
+    if (!message) return
+    switch (message.type) {
+      case 'answer':
+        answerResolve?.(message.answer)
+        break
+      case 'candidate':
+        if (!targetPC.remoteDescription) {
+          pendingRemoteICECandidates.push(message.candidate)
+          return
+        }
+        void addRemoteICECandidate(targetPC, message.candidate)
+        break
+      case 'error':
+        answerReject?.(new Error(message.message || 'Call audio signaling failed'))
+        break
+      case 'offer':
+        break
+    }
+  }
+
+  const flushRemoteICECandidates = async (targetPC: RTCPeerConnection) => {
+    const candidates = pendingRemoteICECandidates
+    pendingRemoteICECandidates = []
+    for (const candidate of candidates) {
+      await addRemoteICECandidate(targetPC, candidate)
+    }
+  }
+
+  const addRemoteICECandidate = async (
+    targetPC: RTCPeerConnection,
+    candidate: RTCIceCandidateInit,
+  ) => {
+    try {
+      await targetPC.addIceCandidate(candidate)
+    } catch (err) {
+      console.warn('[useCallAudioSession] add WebRTC ICE candidate:', err)
+    }
+  }
+
+  const handleWebRTCSignalSendError = (err: unknown) => {
+    if (status.value === 'ready') {
+      console.warn('[useCallAudioSession] send WebRTC signal:', err)
+      return
+    }
+    fail(new Error('Call audio signaling failed'))
+  }
+
+  const closeWebRTCSignaling = () => {
+    if (!signalWS) return
+    const current = signalWS
+    signalWS = null
+    current.onopen = null
+    current.onclose = null
+    current.onerror = null
+    current.onmessage = null
+    current.close()
   }
 
   const stop = () => {
@@ -306,48 +502,57 @@ const defaultIceServers: RTCIceServer[] = [
   { urls: 'stun:stun.cloudflare.com:3478' },
 ]
 
-const waitForIceGathering = (pc: RTCPeerConnection, signal: AbortSignal) => {
-  if (signal.aborted) {
-    return Promise.reject(newAbortError())
-  }
-  if (pc.iceGatheringState === 'complete') {
-    return Promise.resolve()
-  }
-  return new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup()
-      const sdp = pc.localDescription?.sdp ?? ''
-      if (hasIceCandidate(sdp)) {
-        resolve()
-        return
-      }
-      reject(new Error('WebRTC ICE candidates are missing'))
-    }, iceGatheringTimeoutMs)
-    const abort = () => {
-      cleanup()
-      reject(newAbortError())
-    }
-    const done = () => {
-      if (pc.iceGatheringState !== 'complete') return
-      cleanup()
-      resolve()
-    }
-    const cleanup = () => {
-      clearTimeout(timeout)
-      pc.removeEventListener('icegatheringstatechange', done)
-      signal.removeEventListener('abort', abort)
-    }
-    pc.addEventListener('icegatheringstatechange', done)
-    signal.addEventListener('abort', abort, { once: true })
-  })
-}
-
 const newAbortError = () => {
   const err = new Error('WebRTC audio session was cancelled')
   err.name = 'AbortError'
   return err
 }
 
-const hasIceCandidate = (sdp: string) => /^a=candidate:/m.test(sdp)
+const parseWebRTCSignalMessage = (data: unknown): WebRTCSignalMessage | null => {
+  if (typeof data !== 'string') return null
+  try {
+    const parsed = JSON.parse(data) as Record<string, unknown>
+    switch (parsed.type) {
+      case 'answer':
+        {
+          const answer = asSessionDescription(parsed.answer)
+          return answer ? { type: 'answer', answer } : null
+        }
+      case 'candidate':
+        {
+          const candidate = asICECandidate(parsed.candidate)
+          return candidate ? { type: 'candidate', candidate } : null
+        }
+      case 'error':
+        return { type: 'error', message: String(parsed.message ?? '') }
+      default:
+        return null
+    }
+  } catch {
+    return null
+  }
+}
+
+const asSessionDescription = (value: unknown): WebRTCSessionDescriptionPayload | null => {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  if ((record.type !== 'offer' && record.type !== 'answer') || typeof record.sdp !== 'string') {
+    return null
+  }
+  return { type: record.type, sdp: record.sdp }
+}
+
+const asICECandidate = (value: unknown): RTCIceCandidateInit | null => {
+  if (!value || typeof value !== 'object') return null
+  const record = value as RTCIceCandidateInit
+  return typeof record.candidate === 'string' && record.candidate
+    ? {
+        candidate: record.candidate,
+        sdpMid: record.sdpMid,
+        sdpMLineIndex: record.sdpMLineIndex,
+        usernameFragment: record.usernameFragment,
+      }
+    : null
+}
 
 const isAbortError = (err: unknown) => err instanceof Error && err.name === 'AbortError'

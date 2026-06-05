@@ -52,14 +52,24 @@ export type WebRTCSessionDescriptionPayload = {
   sdp: string
 }
 
-export type WebRTCSessionPayload = {
-  offer: WebRTCSessionDescriptionPayload
-}
-
-export type WebRTCSessionResponsePayload = {
-  answer: WebRTCSessionDescriptionPayload
-}
-
 export type WebRTCICEServersPayload = {
   iceServers: RTCIceServer[]
 }
+
+export type WebRTCSignalMessage =
+  | {
+      type: 'offer'
+      offer: WebRTCSessionDescriptionPayload
+    }
+  | {
+      type: 'answer'
+      answer: WebRTCSessionDescriptionPayload
+    }
+  | {
+      type: 'candidate'
+      candidate: RTCIceCandidateInit
+    }
+  | {
+      type: 'error'
+      message: string
+    }

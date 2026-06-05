@@ -11,8 +11,6 @@ import type {
   SendDTMFRequest,
   UpdateCallRequest,
   WebRTCICEServersPayload,
-  WebRTCSessionPayload,
-  WebRTCSessionResponsePayload,
 } from '@/types/call'
 
 type CallApiResult<T> = {
@@ -68,6 +66,9 @@ const buildCallWebSocketUrl = (id: string, path: string) => {
 }
 
 export const buildCallEventsUrl = (id: string) => buildCallWebSocketUrl(id, '/events')
+
+export const buildWebRTCSessionUrl = (id: string, callID: string) =>
+  buildCallWebSocketUrl(id, `/${encodeURIComponent(callID)}/webrtc-sessions`)
 
 const requestCallApi = async <T>(
   id: string,
@@ -168,21 +169,6 @@ export const useCallApi = () => {
     })
   }
 
-  const createWebRTCSession = (
-    id: string,
-    callID: string,
-    payload: WebRTCSessionPayload,
-  ) => {
-    return requestCallApi<WebRTCSessionResponsePayload>(
-      id,
-      `/${encodeURIComponent(callID)}/webrtc-sessions`,
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      },
-    )
-  }
-
   const getWebRTCICEServers = () => {
     return requestCallMediaApi<WebRTCICEServersPayload>('/ice-servers')
   }
@@ -201,7 +187,6 @@ export const useCallApi = () => {
     holdCall,
     resumeCall,
     sendDTMF,
-    createWebRTCSession,
     getWebRTCICEServers,
     deleteCall,
   }

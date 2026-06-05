@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { useCallApi } from '@/apis/call'
+import { buildWebRTCSessionUrl, useCallApi } from '@/apis/call'
 import { getStoredToken, setStoredToken } from '@/lib/authStorage'
 
 describe('useCallApi', () => {
@@ -182,25 +182,9 @@ describe('useCallApi', () => {
     )
   })
 
-  it('creates WebRTC sessions with POST requests', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ answer: { type: 'answer', sdp: 'answer-sdp' } }), {
-        status: 201,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    await useCallApi().createWebRTCSession('modem-1', 'call/1', {
-      offer: { type: 'offer', sdp: 'offer-sdp' },
-    })
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/api/v1/modems/modem-1/calls/call%2F1/webrtc-sessions'),
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ offer: { type: 'offer', sdp: 'offer-sdp' } }),
-      }),
+  it('builds WebRTC session WebSocket URLs', () => {
+    expect(buildWebRTCSessionUrl('modem-1', 'call/1')).toContain(
+      '/api/v1/modems/modem-1/calls/call%2F1/webrtc-sessions',
     )
   })
 })

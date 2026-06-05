@@ -44,20 +44,22 @@ type WebRTCICEServerResponse struct {
 	Credential string   `json:"credential,omitempty"`
 }
 
-type WebRTCSessionRequest struct {
-	Offer WebRTCSessionDescriptionRequest `json:"offer" validate:"required"`
+type WebRTCSignalMessage struct {
+	Type      string                    `json:"type"`
+	Offer     *WebRTCSessionDescription `json:"offer,omitempty"`
+	Answer    *WebRTCSessionDescription `json:"answer,omitempty"`
+	Candidate *WebRTCICECandidate       `json:"candidate,omitempty"`
+	Message   string                    `json:"message,omitempty"`
 }
 
-type WebRTCSessionResponse struct {
-	Answer WebRTCSessionDescriptionResponse `json:"answer"`
-}
-
-type WebRTCSessionDescriptionRequest struct {
+type WebRTCSessionDescription struct {
 	Type string `json:"type" validate:"required"`
 	SDP  string `json:"sdp" validate:"required"`
 }
 
-type WebRTCSessionDescriptionResponse struct {
-	Type string `json:"type"`
-	SDP  string `json:"sdp"`
+type WebRTCICECandidate struct {
+	Candidate        string  `json:"candidate" validate:"required"`
+	SDPMid           *string `json:"sdpMid"`
+	SDPMLineIndex    *uint16 `json:"sdpMLineIndex"`
+	UsernameFragment *string `json:"usernameFragment"`
 }

@@ -45,10 +45,14 @@ Set `SIGMO_AMR_WASM` when the codec is not available at the default path
 
 Before creating a browser offer, the UI loads ICE configuration from
 `GET /api/v1/call-media/ice-servers`. The backend uses the same ICE
-configuration when creating the WebRTC answer.
+configuration when creating the WebRTC answer. Offer, answer, and trickled ICE
+candidates are exchanged over
+`GET /api/v1/modems/{id}/calls/{callID}/webrtc-sessions` as a WebSocket.
 
 Sigmo fetches short-lived Cloudflare TURN credentials from
-`https://speed.cloudflare.com/turn-creds`.
+`https://speed.cloudflare.com/turn-creds`. The backend filters WebRTC host
+candidates to the system's default route interface so Docker bridge and other
+non-routable interfaces are not advertised.
 
 The backend WebRTC ICE UDP ports are pinned to `40000-40100`; expose that UDP
 range on the server firewall.

@@ -27,7 +27,6 @@ const (
 	pcmuClockRate               = 8000
 	webRTCUDPPortMin            = 40000
 	webRTCUDPPortMax            = 40100
-	webRTCICEGatheringTimeout   = 20 * time.Second
 	webRTCDisconnectedGraceTime = 5 * time.Second
 	mediaCleanupTimeout         = 5 * time.Second
 )
@@ -37,22 +36,29 @@ type WebRTCSessionDescription struct {
 	SDP  string
 }
 
-func (s *Service) CreateWebRTCSession(ctx context.Context, modem *mmodem.Modem, callID string, offer WebRTCSessionDescription) (WebRTCSessionDescription, error) {
-	offer.Type = strings.TrimSpace(strings.ToLower(offer.Type))
-	if offer.Type != "offer" || strings.TrimSpace(offer.SDP) == "" {
-		return WebRTCSessionDescription{}, ErrMediaUnavailable
-	}
+type WebRTCICECandidate struct {
+	Candidate        string
+	SDPMid           *string
+	SDPMLineIndex    *uint16
+	UsernameFragment *string
+}
+
+type WebRTCSession struct {
+	bridge *webRTCBridge
+}
+
+func (s *Service) OpenWebRTCSession(ctx context.Context, modem *mmodem.Modem, callID string) (*WebRTCSession, error) {
 	iceServers, err := s.webRTCICEServers(ctx)
 	if err != nil {
-		return WebRTCSessionDescription{}, fmt.Errorf("fetch WebRTC ICE servers: %w", err)
+		return nil, fmt.Errorf("fetch WebRTC ICE servers: %w", err)
 	}
 	media, err := s.OpenMedia(ctx, modem, callID)
 	if err != nil {
-		return WebRTCSessionDescription{}, err
+		return nil, err
 	}
 	codec, err := mediaBridgeCodec(media.Info())
 	if err != nil {
-		return WebRTCSessionDescription{}, err
+		return nil, err
 	}
 	var factory *voicecodec.AMRCodecFactory
 	if codec.amr != "" {
@@ -65,26 +71,68 @@ func (s *Service) CreateWebRTCSession(ctx context.Context, modem *mmodem.Modem, 
 				"source", source,
 				"error", err,
 			)
-			return WebRTCSessionDescription{}, ErrMediaUnavailable
+			return nil, ErrMediaUnavailable
 		}
 	}
 	bridge, err := newWebRTCBridge(media, factory, codec, iceServers)
 	if err != nil {
-		return WebRTCSessionDescription{}, err
+		return nil, err
 	}
 	if !s.registerBridge(bridge) {
 		bridge.close()
-		return WebRTCSessionDescription{}, ErrMediaUnavailable
+		return nil, ErrMediaUnavailable
 	}
 	bridge.onClose = func() {
 		s.unregisterBridge(bridge)
 	}
-	answer, err := bridge.answer(ctx, offer)
-	if err != nil {
-		bridge.close()
-		return WebRTCSessionDescription{}, err
+	return &WebRTCSession{bridge: bridge}, nil
+}
+
+func (s *WebRTCSession) Answer(ctx context.Context, offer WebRTCSessionDescription) (WebRTCSessionDescription, error) {
+	if s == nil || s.bridge == nil {
+		return WebRTCSessionDescription{}, ErrMediaUnavailable
 	}
-	return answer, nil
+	offer.Type = strings.TrimSpace(strings.ToLower(offer.Type))
+	if offer.Type != "offer" || strings.TrimSpace(offer.SDP) == "" {
+		return WebRTCSessionDescription{}, ErrMediaUnavailable
+	}
+	return s.bridge.answer(ctx, offer)
+}
+
+func (s *WebRTCSession) AddICECandidate(candidate WebRTCICECandidate) error {
+	if s == nil || s.bridge == nil {
+		return ErrMediaUnavailable
+	}
+	return s.bridge.addRemoteICECandidate(candidate)
+}
+
+func (s *WebRTCSession) ICECandidates() <-chan WebRTCICECandidate {
+	if s == nil || s.bridge == nil {
+		return nil
+	}
+	return s.bridge.localICE
+}
+
+func (s *WebRTCSession) Close() {
+	if s == nil || s.bridge == nil {
+		return
+	}
+	s.bridge.close()
+}
+
+func (s *WebRTCSession) CloseIfNotConnected() bool {
+	if s == nil || s.bridge == nil || s.Connected() {
+		return false
+	}
+	s.Close()
+	return true
+}
+
+func (s *WebRTCSession) Connected() bool {
+	if s == nil || s.bridge == nil {
+		return false
+	}
+	return s.bridge.connected()
 }
 
 func amrWASMPath() string {
@@ -177,14 +225,19 @@ type webRTCBridge struct {
 	wg           sync.WaitGroup
 	downlinkOnce sync.Once
 
-	stateMu sync.Mutex
-	closed  bool
+	stateMu       sync.Mutex
+	closed        bool
+	connectedOnce bool
 
 	doneOnce sync.Once
 	onClose  func()
 
 	disconnectMu    sync.Mutex
 	disconnectTimer *time.Timer
+
+	iceMu     sync.Mutex
+	localICE  chan WebRTCICECandidate
+	iceClosed bool
 }
 
 type bridgeCodec struct {
@@ -225,6 +278,17 @@ func newWebRTCBridge(media MediaSession, factory *voicecodec.AMRCodecFactory, co
 	if err := settingEngine.SetEphemeralUDPPortRange(webRTCUDPPortMin, webRTCUDPPortMax); err != nil {
 		return nil, fmt.Errorf("set WebRTC UDP port range: %w", err)
 	}
+	interfaceNames, err := defaultRouteInterfaceNames()
+	if err != nil {
+		slog.Warn("detect WebRTC ICE default interface", "error", err)
+	} else if len(interfaceNames) > 0 {
+		allowedInterfaces := interfaceNameSet(interfaceNames)
+		settingEngine.SetInterfaceFilter(func(interfaceName string) bool {
+			_, ok := allowedInterfaces[interfaceName]
+			return ok
+		})
+		slog.Debug("filter WebRTC ICE interfaces", "interfaces", interfaceNames)
+	}
 	api := webrtc.NewAPI(
 		webrtc.WithMediaEngine(mediaEngine),
 		webrtc.WithInterceptorRegistry(interceptors),
@@ -252,20 +316,27 @@ func newWebRTCBridge(media MediaSession, factory *voicecodec.AMRCodecFactory, co
 	}
 	go drainRTCP(sender)
 
-	// The HTTP request ends once the SDP answer is returned; media lives with the peer connection.
 	bridgeCtx, cancel := context.WithCancel(context.Background())
 	bridge := &webRTCBridge{
-		media:   media,
-		info:    info,
-		factory: factory,
-		pc:      pc,
-		track:   track,
-		codec:   codec,
-		cancel:  cancel,
+		media:    media,
+		info:     info,
+		factory:  factory,
+		pc:       pc,
+		track:    track,
+		codec:    codec,
+		cancel:   cancel,
+		localICE: make(chan WebRTCICECandidate, 32),
 	}
+	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			return
+		}
+		bridge.sendLocalICECandidate(webRTCICECandidateFromPion(candidate.ToJSON()))
+	})
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		switch bridgeActionForPeerState(state) {
 		case webRTCBridgeActionReady:
+			bridge.markConnected()
 			bridge.cancelDisconnectTimer()
 			bridge.startDownlink(bridgeCtx)
 		case webRTCBridgeActionGraceClose:
@@ -294,22 +365,11 @@ func (b *webRTCBridge) answer(ctx context.Context, offer WebRTCSessionDescriptio
 	if err != nil {
 		return WebRTCSessionDescription{}, fmt.Errorf("create WebRTC answer: %w", err)
 	}
-	gatherComplete := webrtc.GatheringCompletePromise(b.pc)
 	if err := b.pc.SetLocalDescription(answer); err != nil {
 		return WebRTCSessionDescription{}, fmt.Errorf("set WebRTC answer: %w", err)
 	}
-	gatherCtx, cancel := context.WithTimeout(ctx, webRTCICEGatheringTimeout)
-	defer cancel()
-	select {
-	case <-gatherComplete:
-	case <-gatherCtx.Done():
-		if err := ctx.Err(); err != nil {
-			return WebRTCSessionDescription{}, err
-		}
-		local := b.pc.LocalDescription()
-		if local == nil || !hasICECandidate(local.SDP) {
-			return WebRTCSessionDescription{}, fmt.Errorf("gather WebRTC ICE candidates: %w", gatherCtx.Err())
-		}
+	if err := ctx.Err(); err != nil {
+		return WebRTCSessionDescription{}, err
 	}
 	local := b.pc.LocalDescription()
 	if local == nil {
@@ -334,9 +394,67 @@ func (b *webRTCBridge) stop() {
 		b.stateMu.Lock()
 		b.closed = true
 		b.stateMu.Unlock()
-		b.cancel()
-		_ = b.pc.Close()
+		if b.cancel != nil {
+			b.cancel()
+		}
+		if b.pc != nil {
+			_ = b.pc.Close()
+		}
+		b.closeLocalICECandidates()
 	})
+}
+
+func (b *webRTCBridge) markConnected() {
+	b.stateMu.Lock()
+	b.connectedOnce = true
+	b.stateMu.Unlock()
+}
+
+func (b *webRTCBridge) connected() bool {
+	b.stateMu.Lock()
+	defer b.stateMu.Unlock()
+	return b.connectedOnce
+}
+
+func (b *webRTCBridge) addRemoteICECandidate(candidate WebRTCICECandidate) error {
+	candidate.Candidate = strings.TrimSpace(candidate.Candidate)
+	if candidate.Candidate == "" {
+		return ErrMediaUnavailable
+	}
+	if err := b.pc.AddICECandidate(webrtc.ICECandidateInit{
+		Candidate:        candidate.Candidate,
+		SDPMid:           candidate.SDPMid,
+		SDPMLineIndex:    candidate.SDPMLineIndex,
+		UsernameFragment: candidate.UsernameFragment,
+	}); err != nil {
+		return fmt.Errorf("add WebRTC ICE candidate: %w", err)
+	}
+	return nil
+}
+
+func (b *webRTCBridge) sendLocalICECandidate(candidate WebRTCICECandidate) {
+	b.iceMu.Lock()
+	defer b.iceMu.Unlock()
+	if b.iceClosed {
+		return
+	}
+	select {
+	case b.localICE <- candidate:
+	default:
+		slog.Warn("drop WebRTC ICE candidate")
+	}
+}
+
+func (b *webRTCBridge) closeLocalICECandidates() {
+	b.iceMu.Lock()
+	defer b.iceMu.Unlock()
+	if b.iceClosed {
+		return
+	}
+	b.iceClosed = true
+	if b.localICE != nil {
+		close(b.localICE)
+	}
 }
 
 func (b *webRTCBridge) closeAfterDisconnectGrace() {
@@ -642,15 +760,6 @@ func bridgeActionForPeerState(state webrtc.PeerConnectionState) webRTCBridgeActi
 	}
 }
 
-func hasICECandidate(sdp string) bool {
-	for line := range strings.Lines(sdp) {
-		if strings.HasPrefix(line, "a=candidate:") {
-			return true
-		}
-	}
-	return false
-}
-
 func mediaBridgeCodec(info MediaInfo) (bridgeCodec, error) {
 	switch strings.ToUpper(strings.TrimSpace(info.Codec)) {
 	case string(voicecodec.CodecAMR):
@@ -687,4 +796,13 @@ func random32() uint32 {
 		return uint32(time.Now().UnixNano())
 	}
 	return binary.BigEndian.Uint32(data[:])
+}
+
+func webRTCICECandidateFromPion(candidate webrtc.ICECandidateInit) WebRTCICECandidate {
+	return WebRTCICECandidate{
+		Candidate:        candidate.Candidate,
+		SDPMid:           candidate.SDPMid,
+		SDPMLineIndex:    candidate.SDPMLineIndex,
+		UsernameFragment: candidate.UsernameFragment,
+	}
 }

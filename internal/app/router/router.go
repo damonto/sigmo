@@ -104,7 +104,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.GET("/modems/:id/calls", h.List)
 			protected.POST("/modems/:id/calls", h.Dial)
 			protected.GET("/modems/:id/calls/events", h.Events)
-			protected.POST("/modems/:id/calls/:callID/webrtc-sessions", h.CreateWebRTCSession)
+			protected.GET("/modems/:id/calls/:callID/webrtc-sessions", h.WebRTCSession)
 			protected.POST("/modems/:id/calls/:callID/dtmf-events", h.SendDTMF)
 			protected.PATCH("/modems/:id/calls/:callID", h.Update)
 			protected.DELETE("/modems/:id/calls/:callID", h.Delete)

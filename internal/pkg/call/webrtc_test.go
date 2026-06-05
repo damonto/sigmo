@@ -132,21 +132,76 @@ func TestBridgeActionForPeerState(t *testing.T) {
 	}
 }
 
-func TestHasICECandidate(t *testing.T) {
+func TestWebRTCSessionConnected(t *testing.T) {
 	tests := []struct {
-		name string
-		sdp  string
-		want bool
+		name    string
+		session *WebRTCSession
+		connect bool
+		want    bool
 	}{
-		{name: "candidate", sdp: "v=0\r\na=candidate:1 1 udp 2130706431 192.0.2.10 40000 typ host\r\n", want: true},
-		{name: "no candidate", sdp: "v=0\r\na=ice-ufrag:test\r\n", want: false},
-		{name: "candidate not at line start", sdp: "v=0\r\nx-a=candidate:fake\r\n", want: false},
+		{name: "nil session"},
+		{name: "open session", session: &WebRTCSession{bridge: &webRTCBridge{}}},
+		{name: "connected session", session: &WebRTCSession{bridge: &webRTCBridge{}}, connect: true, want: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := hasICECandidate(tt.sdp); got != tt.want {
-				t.Fatalf("hasICECandidate() = %v, want %v", got, tt.want)
+			if tt.connect {
+				tt.session.bridge.markConnected()
+			}
+			if got := tt.session.Connected(); got != tt.want {
+				t.Fatalf("Connected() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWebRTCSessionCloseIfNotConnected(t *testing.T) {
+	tests := []struct {
+		name       string
+		session    *WebRTCSession
+		connect    bool
+		wantClosed bool
+	}{
+		{name: "nil session"},
+		{name: "missing bridge", session: &WebRTCSession{}},
+		{name: "setup incomplete", session: &WebRTCSession{bridge: &webRTCBridge{localICE: make(chan WebRTCICECandidate)}}, wantClosed: true},
+		{name: "already connected", session: &WebRTCSession{bridge: &webRTCBridge{localICE: make(chan WebRTCICECandidate)}}, connect: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.connect {
+				tt.session.bridge.markConnected()
+			}
+			got := tt.session.CloseIfNotConnected()
+			if got != tt.wantClosed {
+				t.Fatalf("CloseIfNotConnected() = %v, want %v", got, tt.wantClosed)
+			}
+			if tt.session != nil && tt.session.bridge != nil && tt.session.bridge.closed != tt.wantClosed {
+				t.Fatalf("bridge closed = %v, want %v", tt.session.bridge.closed, tt.wantClosed)
+			}
+		})
+	}
+}
+
+func TestWebRTCBridgeSendsLocalICECandidates(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "candidate"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bridge := &webRTCBridge{
+				localICE: make(chan WebRTCICECandidate, 1),
+			}
+			want := WebRTCICECandidate{Candidate: "candidate:1 1 udp 2130706431 192.0.2.10 40000 typ host"}
+			bridge.sendLocalICECandidate(want)
+
+			if got := <-bridge.localICE; got.Candidate != want.Candidate {
+				t.Fatalf("local ICE candidate = %q, want %q", got.Candidate, want.Candidate)
 			}
 		})
 	}
