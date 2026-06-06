@@ -2,8 +2,6 @@ module github.com/damonto/sigmo
 
 go 1.26.3
 
-replace github.com/damonto/vowifi-go => ../vowifi-go
-
 require (
 	github.com/damonto/euicc-go v1.1.3-0.20260604120717-95d9496f9a65
 	github.com/damonto/ts43-go v0.0.0-20260604121040-db99eefcae20
