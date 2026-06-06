@@ -62,12 +62,19 @@ configure_private_module_auth() {
 		github.com/*/*)
 			path="${module#github.com/}"
 			owner="${path%%/*}"
+			if [ -n "${PRIVATE_MODULE_TOKEN:-}" ]; then
+				git config --global \
+					url."https://x-access-token:${PRIVATE_MODULE_TOKEN}@github.com/${owner}/".insteadOf \
+					"https://github.com/${owner}/"
+				return
+			fi
+
 			git config --global \
 				url."git@github.com:${owner}/".insteadOf \
 				"https://github.com/${owner}/"
 			;;
 		*)
-			echo "skip SSH rewrite for unsupported private module host: ${module}" >&2
+			echo "skip Git auth rewrite for unsupported private module host: ${module}" >&2
 			;;
 	esac
 }
@@ -91,7 +98,7 @@ github_repo_url() {
 			owner="${path%%/*}"
 			rest="${path#*/}"
 			repo="${rest%%/*}"
-			printf 'git@github.com:%s/%s.git' "${owner}" "${repo}"
+			printf 'https://github.com/%s/%s.git' "${owner}" "${repo}"
 			;;
 		*)
 			echo "unsupported private module host: ${module}" >&2
@@ -150,22 +157,26 @@ main() {
 
 	mapfile -t modules < <(read_private_modules)
 
-	ssh_cmd=(ssh)
-	if [ -f "${SSH_KEY}" ]; then
-		ssh_cmd+=(-i "${SSH_KEY}" -o IdentitiesOnly=yes)
+	if [ -z "${PRIVATE_MODULE_TOKEN:-}" ]; then
+		ssh_cmd=(ssh)
+		if [ -f "${SSH_KEY}" ]; then
+			ssh_cmd+=(-i "${SSH_KEY}" -o IdentitiesOnly=yes)
+		fi
+		if [ -f "${SSH_DIR}/config" ]; then
+			ssh_cmd+=(-F "${SSH_DIR}/config")
+		fi
+		if [ -f "${SSH_DIR}/known_hosts" ]; then
+			ssh_cmd+=(-o "UserKnownHostsFile=${SSH_DIR}/known_hosts")
+		fi
+		printf -v git_ssh_command '%q ' "${ssh_cmd[@]}"
+		export GIT_SSH_COMMAND="${git_ssh_command}"
+	else
+		unset GIT_SSH_COMMAND
 	fi
-	if [ -f "${SSH_DIR}/config" ]; then
-		ssh_cmd+=(-F "${SSH_DIR}/config")
-	fi
-	if [ -f "${SSH_DIR}/known_hosts" ]; then
-		ssh_cmd+=(-o "UserKnownHostsFile=${SSH_DIR}/known_hosts")
-	fi
-	printf -v git_ssh_command '%q ' "${ssh_cmd[@]}"
 
 	tmp_git_config="$(mktemp)"
 	add_cleanup_file "${tmp_git_config}"
 	export GIT_CONFIG_GLOBAL="${tmp_git_config}"
-	export GIT_SSH_COMMAND="${git_ssh_command}"
 	export GOPRIVATE="${PRIVATE_GOPRIVATE}"
 	export GONOSUMDB="${GONOSUMDB:-${PRIVATE_GOPRIVATE}}"
 
