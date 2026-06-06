@@ -35,7 +35,7 @@
     "tailwindcss": "^4.3.0",
     "vee-validate": "^4.15.1",
     "vue": "^3.5.35",
-    "vue-i18n": "^11.4.4",
+    "vue-i18n": "^11.4.5",
     "vue-input-otp": "^0.3.2",
     "vue-qrcode-reader": "^5.7.3",
     "vue-router": "^5.1.0",
