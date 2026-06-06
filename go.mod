@@ -13,7 +13,7 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.1.1
-	github.com/ncruces/go-sqlite3 v0.34.3
+	github.com/ncruces/go-sqlite3 v0.34.4
 	github.com/nyaruka/phonenumbers v1.8.0
 	github.com/pion/interceptor v0.1.45
 	github.com/pion/rtp v1.10.2
@@ -30,7 +30,7 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
-	github.com/ncruces/go-sqlite3-wasm/v2 v2.5.35301 // indirect
+	github.com/ncruces/go-sqlite3-wasm/v2 v2.6.35302 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/pion/datachannel v1.6.0 // indirect
 	github.com/pion/dtls/v3 v3.1.2 // indirect
