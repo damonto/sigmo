@@ -110,7 +110,10 @@ onMounted(() => {
       </template>
     </ModemStickyTopBar>
 
-    <div class="flex items-center justify-between gap-3" :class="{ invisible: isStickyVisible }">
+    <div
+      class="flex items-center justify-between gap-3 lg:hidden"
+      :class="{ invisible: isStickyVisible }"
+    >
       <div ref="backButtonRef" class="inline-flex">
         <BackButton :label="t('modemDetail.back')" @click="handleBack" />
       </div>

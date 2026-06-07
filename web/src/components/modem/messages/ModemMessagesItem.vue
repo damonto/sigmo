@@ -10,6 +10,7 @@ import type { ConversationItem } from '@/composables/useModemMessages'
 const props = defineProps<{
   item: ConversationItem
   modemId: string
+  selected?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -46,7 +47,10 @@ const avatarTone = computed(() => {
 </script>
 
 <template>
-  <div class="rounded-lg bg-card px-4 py-3 shadow-sm transition hover:shadow-md">
+  <div
+    class="rounded-lg bg-card px-4 py-3 shadow-sm ring-1 ring-transparent transition hover:shadow-md"
+    :class="props.selected ? 'bg-primary/5 ring-primary/20' : ''"
+  >
     <div class="flex items-center gap-3">
       <RouterLink :to="threadRoute" class="flex min-w-0 flex-1 items-center gap-3">
         <span

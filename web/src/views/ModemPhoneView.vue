@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { refDebounced } from '@vueuse/core'
-import { Delete, Phone, PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2 } from 'lucide-vue-next'
+import { Phone, PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2 } from 'lucide-vue-next'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -9,6 +9,7 @@ import { useModemApi } from '@/apis/modem'
 import { useUssdApi } from '@/apis/ussd'
 import BackButton from '@/components/BackButton.vue'
 import DraggableFab from '@/components/fab/DraggableFab.vue'
+import ModemDialpad from '@/components/modem/ModemDialpad.vue'
 import ModemSearchInput from '@/components/modem/ModemSearchInput.vue'
 import ModemStickyTopBar from '@/components/modem/ModemStickyTopBar.vue'
 import {
@@ -47,7 +48,7 @@ const { t } = useI18n()
 const modemApi = useModemApi()
 const ussdApi = useUssdApi()
 const backButtonRef = ref<HTMLElement | null>(null)
-const dialInputRef = ref<HTMLInputElement | null>(null)
+const dialpadRef = ref<{ focus: () => void } | null>(null)
 const { isStickyVisible } = useStickyTopBar(backButtonRef)
 
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
@@ -160,11 +161,6 @@ const appendKey = (value: string) => {
 
 const backspace = () => {
   setDigits(dialStringChars(digits.value).slice(0, -1))
-}
-
-const updateDialInput = (event: Event) => {
-  const target = event.target as HTMLInputElement | null
-  setDigits(target?.value ?? '')
 }
 
 const openUssdDialog = (code: string) => {
@@ -334,12 +330,14 @@ watch(deleteDialogOpen, (open) => {
 watch(dialpadOpen, async (open) => {
   if (!open) return
   await nextTick()
-  dialInputRef.value?.focus()
+  dialpadRef.value?.focus()
 })
 </script>
 
 <template>
-  <div class="flex min-h-[calc(100dvh-6.5rem)] flex-col gap-4">
+  <div
+    class="flex min-h-[calc(100dvh-6.5rem)] flex-col gap-4 lg:h-[var(--modem-desktop-content-height)] lg:min-h-0 lg:overflow-hidden"
+  >
     <header class="space-y-3">
       <ModemStickyTopBar
         :show="isStickyVisible"
@@ -349,7 +347,11 @@ watch(dialpadOpen, async (open) => {
       />
 
       <div class="space-y-1">
-        <div ref="backButtonRef" class="inline-flex" :class="{ invisible: isStickyVisible }">
+        <div
+          ref="backButtonRef"
+          class="inline-flex lg:hidden"
+          :class="{ invisible: isStickyVisible }"
+        >
           <BackButton to="/" :label="t('modemDetail.back')" />
         </div>
         <h1 class="text-2xl font-semibold">{{ t('modemDetail.phone.title') }}</h1>
@@ -364,165 +366,198 @@ watch(dialpadOpen, async (open) => {
       {{ pageErrorMessage }}
     </p>
 
-    <ModemSearchInput
-      v-model="searchQuery"
-      :placeholder="t('modemDetail.phone.searchPlaceholder')"
-      :clear-label="t('modemDetail.phone.clearSearch')"
-    />
+    <div class="grid flex-1 gap-6 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-stretch">
+      <div class="min-w-0 space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:gap-4 lg:space-y-0">
+        <ModemSearchInput
+          v-model="searchQuery"
+          :placeholder="t('modemDetail.phone.searchPlaceholder')"
+          :clear-label="t('modemDetail.phone.clearSearch')"
+        />
 
-    <div v-if="isLoading" class="flex flex-1 items-center justify-center">
-      <Spinner class="size-6" />
-    </div>
-
-    <div
-      v-else-if="!hasRecentCalls"
-      class="flex flex-1 flex-col items-center justify-center rounded-lg border border-dashed px-6 py-12 text-center"
-    >
-      <Phone class="mb-3 size-10 text-muted-foreground" />
-      <p class="font-medium">{{ emptyLabel }}</p>
-    </div>
-
-    <section v-else class="space-y-3">
-      <div
-        v-for="call in recentCalls"
-        :key="call.callID"
-        class="group rounded-lg bg-card px-4 py-3 shadow-sm transition hover:shadow-md"
-        role="button"
-        tabindex="0"
-        :aria-expanded="expandedCallID === call.callID"
-        @click="toggleCallDetails(call)"
-        @keydown.enter.prevent="toggleCallDetails(call)"
-        @keydown.space.prevent="toggleCallDetails(call)"
-      >
-        <div class="flex items-center gap-3">
-          <span
-            class="flex size-11 shrink-0 items-center justify-center rounded-full text-base font-semibold shadow-sm ring-1"
-            :class="
-              call.direction === 'incoming'
-                ? 'bg-emerald-100 text-emerald-700 ring-emerald-200/70 dark:bg-emerald-500/15 dark:text-emerald-200 dark:ring-emerald-400/20'
-                : 'bg-sky-100 text-sky-700 ring-sky-200/70 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-400/20'
-            "
-            aria-hidden="true"
-          >
-            <PhoneIncoming v-if="call.direction === 'incoming'" class="size-5" />
-            <PhoneOutgoing v-else class="size-5" />
-          </span>
-
-          <span class="min-w-0 flex-1 space-y-1">
-            <span class="flex min-w-0 items-center justify-between gap-3">
-              <span class="truncate text-sm font-semibold text-foreground">
-                {{ primaryLine(call) }}
-              </span>
-              <span class="shrink-0 text-xs font-medium text-muted-foreground">
-                {{ formatListTimestamp(call.updatedAt) }}
-              </span>
-            </span>
-            <span class="flex min-w-0 items-center justify-between gap-3">
-              <span class="block truncate text-xs text-muted-foreground">
-                {{ stateLabel(call.state) }} · {{ routeLabel(call.route) }}
-              </span>
-              <span v-if="callDurationLabel(call)" class="shrink-0 text-xs text-muted-foreground">{{
-                callDurationLabel(call)
-              }}</span>
-            </span>
-          </span>
-
-          <Button
-            size="icon"
-            variant="ghost"
-            class="size-8 shrink-0 rounded-full opacity-100 transition"
-            :disabled="!call.number || isDialing || !!dialingCallBackID"
-            :aria-busy="dialingCallBackID === call.callID"
-            :aria-label="t('modemDetail.phone.callBack')"
-            @click.stop="callBack(call)"
-          >
-            <Spinner v-if="dialingCallBackID === call.callID" class="size-4" />
-            <PhoneCall v-else class="size-4" />
-          </Button>
+        <div
+          v-if="isLoading"
+          class="flex min-h-80 items-center justify-center lg:min-h-0 lg:flex-1"
+        >
+          <Spinner class="size-6" />
         </div>
 
-        <div v-if="expandedCallID === call.callID" class="mt-4 border-t pt-4" @click.stop>
-          <dl class="grid grid-cols-2 gap-3 text-sm">
-            <div class="space-y-1">
-              <dt class="text-xs font-medium text-muted-foreground">
-                {{ t('modemDetail.phone.details.direction') }}
-              </dt>
-              <dd>{{ t(`modemDetail.phone.${call.direction}`) }}</dd>
-            </div>
-            <div class="space-y-1">
-              <dt class="text-xs font-medium text-muted-foreground">
-                {{ t('modemDetail.phone.details.state') }}
-              </dt>
-              <dd>{{ stateLabel(call.state) }}</dd>
-            </div>
-            <div class="space-y-1">
-              <dt class="text-xs font-medium text-muted-foreground">
-                {{ t('modemDetail.phone.details.route') }}
-              </dt>
-              <dd>{{ routeLabel(call.route) }}</dd>
-            </div>
-            <div class="space-y-1">
-              <dt class="text-xs font-medium text-muted-foreground">
-                {{ t('modemDetail.phone.details.duration') }}
-              </dt>
-              <dd>{{ callDurationLabel(call) || t('modemDetail.phone.durationEmpty') }}</dd>
-            </div>
-            <div class="space-y-1">
-              <dt class="text-xs font-medium text-muted-foreground">
-                {{ t('modemDetail.phone.details.startedAt') }}
-              </dt>
-              <dd>{{ formatDetailTimestamp(call.startedAt) }}</dd>
-            </div>
-            <div class="space-y-1">
-              <dt class="text-xs font-medium text-muted-foreground">
-                {{ t('modemDetail.phone.details.answeredAt') }}
-              </dt>
-              <dd>
-                {{
-                  call.answeredAt
-                    ? formatDetailTimestamp(call.answeredAt)
-                    : t('modemDetail.phone.details.notAnswered')
-                }}
-              </dd>
-            </div>
-            <div class="space-y-1">
-              <dt class="text-xs font-medium text-muted-foreground">
-                {{ t('modemDetail.phone.details.endedAt') }}
-              </dt>
-              <dd>
-                {{
-                  call.endedAt
-                    ? formatDetailTimestamp(call.endedAt)
-                    : t('modemDetail.phone.details.inProgress')
-                }}
-              </dd>
-            </div>
-            <div v-if="call.reason" class="space-y-1">
-              <dt class="text-xs font-medium text-muted-foreground">
-                {{ t('modemDetail.phone.details.reason') }}
-              </dt>
-              <dd>{{ call.reason }}</dd>
-            </div>
-          </dl>
+        <div
+          v-else-if="!hasRecentCalls"
+          class="flex min-h-80 flex-col items-center justify-center rounded-lg border border-dashed px-6 py-12 text-center lg:min-h-0 lg:flex-1"
+        >
+          <Phone class="mb-3 size-10 text-muted-foreground" />
+          <p class="font-medium">{{ emptyLabel }}</p>
+        </div>
 
-          <div v-if="terminalStates.has(call.state)" class="mt-4 flex justify-end">
-            <Button
-              variant="destructive"
-              size="sm"
-              class="w-full gap-2 sm:w-auto"
-              :disabled="isDeletingCallID === call.callID"
-              @click="openDeleteDialog(call)"
-            >
-              <Spinner v-if="isDeletingCallID === call.callID" class="size-4" />
-              <Trash2 v-else class="size-4" />
-              {{ t('modemDetail.phone.deleteRecord') }}
-            </Button>
+        <section v-else class="scrollbar-none space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+          <div
+            v-for="call in recentCalls"
+            :key="call.callID"
+            class="group rounded-lg bg-card px-4 py-3 shadow-sm transition hover:shadow-md"
+            role="button"
+            tabindex="0"
+            :aria-expanded="expandedCallID === call.callID"
+            @click="toggleCallDetails(call)"
+            @keydown.enter.prevent="toggleCallDetails(call)"
+            @keydown.space.prevent="toggleCallDetails(call)"
+          >
+            <div class="flex items-center gap-3">
+              <span
+                class="flex size-11 shrink-0 items-center justify-center rounded-full text-base font-semibold shadow-sm ring-1"
+                :class="
+                  call.direction === 'incoming'
+                    ? 'bg-emerald-100 text-emerald-700 ring-emerald-200/70 dark:bg-emerald-500/15 dark:text-emerald-200 dark:ring-emerald-400/20'
+                    : 'bg-sky-100 text-sky-700 ring-sky-200/70 dark:bg-sky-500/15 dark:text-sky-200 dark:ring-sky-400/20'
+                "
+                aria-hidden="true"
+              >
+                <PhoneIncoming v-if="call.direction === 'incoming'" class="size-5" />
+                <PhoneOutgoing v-else class="size-5" />
+              </span>
+
+              <span class="min-w-0 flex-1 space-y-1">
+                <span class="flex min-w-0 items-center justify-between gap-3">
+                  <span class="truncate text-sm font-semibold text-foreground">
+                    {{ primaryLine(call) }}
+                  </span>
+                  <span class="shrink-0 text-xs font-medium text-muted-foreground">
+                    {{ formatListTimestamp(call.updatedAt) }}
+                  </span>
+                </span>
+                <span class="flex min-w-0 items-center justify-between gap-3">
+                  <span class="block truncate text-xs text-muted-foreground">
+                    {{ stateLabel(call.state) }} · {{ routeLabel(call.route) }}
+                  </span>
+                  <span
+                    v-if="callDurationLabel(call)"
+                    class="shrink-0 text-xs text-muted-foreground"
+                    >{{ callDurationLabel(call) }}</span
+                  >
+                </span>
+              </span>
+
+              <Button
+                size="icon"
+                variant="ghost"
+                class="size-8 shrink-0 rounded-full opacity-100 transition"
+                :disabled="!call.number || isDialing || !!dialingCallBackID"
+                :aria-busy="dialingCallBackID === call.callID"
+                :aria-label="t('modemDetail.phone.callBack')"
+                @click.stop="callBack(call)"
+              >
+                <Spinner v-if="dialingCallBackID === call.callID" class="size-4" />
+                <PhoneCall v-else class="size-4" />
+              </Button>
+            </div>
+
+            <div v-if="expandedCallID === call.callID" class="mt-4 border-t pt-4" @click.stop>
+              <dl class="grid grid-cols-2 gap-3 text-sm xl:grid-cols-3">
+                <div class="space-y-1">
+                  <dt class="text-xs font-medium text-muted-foreground">
+                    {{ t('modemDetail.phone.details.direction') }}
+                  </dt>
+                  <dd>{{ t(`modemDetail.phone.${call.direction}`) }}</dd>
+                </div>
+                <div class="space-y-1">
+                  <dt class="text-xs font-medium text-muted-foreground">
+                    {{ t('modemDetail.phone.details.state') }}
+                  </dt>
+                  <dd>{{ stateLabel(call.state) }}</dd>
+                </div>
+                <div class="space-y-1">
+                  <dt class="text-xs font-medium text-muted-foreground">
+                    {{ t('modemDetail.phone.details.route') }}
+                  </dt>
+                  <dd>{{ routeLabel(call.route) }}</dd>
+                </div>
+                <div class="space-y-1">
+                  <dt class="text-xs font-medium text-muted-foreground">
+                    {{ t('modemDetail.phone.details.duration') }}
+                  </dt>
+                  <dd>{{ callDurationLabel(call) || t('modemDetail.phone.durationEmpty') }}</dd>
+                </div>
+                <div class="space-y-1">
+                  <dt class="text-xs font-medium text-muted-foreground">
+                    {{ t('modemDetail.phone.details.startedAt') }}
+                  </dt>
+                  <dd>{{ formatDetailTimestamp(call.startedAt) }}</dd>
+                </div>
+                <div class="space-y-1">
+                  <dt class="text-xs font-medium text-muted-foreground">
+                    {{ t('modemDetail.phone.details.answeredAt') }}
+                  </dt>
+                  <dd>
+                    {{
+                      call.answeredAt
+                        ? formatDetailTimestamp(call.answeredAt)
+                        : t('modemDetail.phone.details.notAnswered')
+                    }}
+                  </dd>
+                </div>
+                <div class="space-y-1">
+                  <dt class="text-xs font-medium text-muted-foreground">
+                    {{ t('modemDetail.phone.details.endedAt') }}
+                  </dt>
+                  <dd>
+                    {{
+                      call.endedAt
+                        ? formatDetailTimestamp(call.endedAt)
+                        : t('modemDetail.phone.details.inProgress')
+                    }}
+                  </dd>
+                </div>
+                <div v-if="call.reason" class="space-y-1">
+                  <dt class="text-xs font-medium text-muted-foreground">
+                    {{ t('modemDetail.phone.details.reason') }}
+                  </dt>
+                  <dd>{{ call.reason }}</dd>
+                </div>
+              </dl>
+
+              <div v-if="terminalStates.has(call.state)" class="mt-4 flex justify-end">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  class="w-full gap-2 sm:w-auto"
+                  :disabled="isDeletingCallID === call.callID"
+                  @click="openDeleteDialog(call)"
+                >
+                  <Spinner v-if="isDeletingCallID === call.callID" class="size-4" />
+                  <Trash2 v-else class="size-4" />
+                  {{ t('modemDetail.phone.deleteRecord') }}
+                </Button>
+              </div>
+            </div>
           </div>
-        </div>
+        </section>
       </div>
-    </section>
 
-    <DraggableFab :ariaLabel="t('modemDetail.phone.openDialpad')" @click="dialpadOpen = true">
+      <aside class="scrollbar-none hidden min-h-0 lg:block lg:h-full lg:overflow-y-auto">
+        <div class="rounded-xl border bg-card/60 p-4 shadow-sm">
+          <ModemDialpad
+            :digits="digits"
+            :keys="keys"
+            :input-class="dialInputClass"
+            :can-dial="canDial"
+            :is-dialing="isDialing"
+            density="compact"
+            show-header
+            @update:digits="setDigits"
+            @backspace="backspace"
+            @append-key="appendKey"
+            @start-plus="startPlusLongPress"
+            @clear-plus="clearPlusLongPress"
+            @dial="startDial"
+          />
+        </div>
+      </aside>
+    </div>
+
+    <DraggableFab
+      class="lg:hidden"
+      :ariaLabel="t('modemDetail.phone.openDialpad')"
+      @click="dialpadOpen = true"
+    >
       <Phone class="size-6" />
     </DraggableFab>
 
@@ -537,64 +572,20 @@ watch(dialpadOpen, async (open) => {
           </DialogDescription>
         </DialogHeader>
 
-        <div class="flex min-h-0 flex-col justify-between gap-6">
-          <div class="relative flex min-h-24 items-center">
-            <input
-              ref="dialInputRef"
-              :value="digits"
-              type="tel"
-              inputmode="tel"
-              autocomplete="tel"
-              class="h-20 w-full bg-transparent text-center font-semibold tracking-normal outline-none"
-              :class="dialInputClass"
-              :aria-label="t('modemDetail.phone.numberPlaceholder')"
-              @input="updateDialInput"
-              @keydown.enter.prevent="startDial"
-            />
-            <Button
-              v-if="digits"
-              size="icon"
-              variant="ghost"
-              class="absolute top-1/2 right-0 -translate-y-1/2 touch-manipulation"
-              :aria-label="t('modemDetail.phone.backspace')"
-              @click="backspace"
-            >
-              <Delete class="size-5" />
-            </Button>
-          </div>
-
-          <div class="mx-auto grid w-full max-w-60 grid-cols-3 gap-4">
-            <button
-              v-for="key in keys"
-              :key="key.value"
-              type="button"
-              class="flex aspect-square min-h-0 touch-manipulation select-none flex-col items-center justify-center rounded-full bg-muted text-lg font-semibold transition hover:bg-muted/70 active:scale-95"
-              @click="appendKey(key.value)"
-              @pointerdown="startPlusLongPress(key.value)"
-              @pointerup="clearPlusLongPress"
-              @pointercancel="clearPlusLongPress"
-              @pointerleave="clearPlusLongPress"
-            >
-              <span>{{ key.value }}</span>
-              <span class="h-4 text-[0.65rem] font-medium text-muted-foreground">{{
-                key.letters
-              }}</span>
-            </button>
-          </div>
-
-          <div class="mx-auto grid w-full max-w-60 grid-cols-3 gap-4">
-            <button
-              type="button"
-              class="col-start-2 flex aspect-square min-h-0 touch-manipulation items-center justify-center rounded-full bg-emerald-600 text-white transition hover:bg-emerald-700 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
-              :disabled="!canDial"
-              :aria-label="t('modemDetail.phone.call')"
-              @click="startDial"
-            >
-              <PhoneCall v-if="!isDialing" class="size-5" />
-              <Spinner v-else class="size-6" />
-            </button>
-          </div>
-        </div>
+        <ModemDialpad
+          ref="dialpadRef"
+          :digits="digits"
+          :keys="keys"
+          :input-class="dialInputClass"
+          :can-dial="canDial"
+          :is-dialing="isDialing"
+          @update:digits="setDigits"
+          @backspace="backspace"
+          @append-key="appendKey"
+          @start-plus="startPlusLongPress"
+          @clear-plus="clearPlusLongPress"
+          @dial="startDial"
+        />
       </DialogContent>
     </Dialog>
 

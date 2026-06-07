@@ -13,7 +13,7 @@ const props = defineProps<{
 
 <template>
   <div
-    class="fixed inset-x-0 top-0 z-30 border-b border-border bg-background/80 backdrop-blur backdrop-saturate-125 transition duration-200"
+    class="fixed inset-x-0 top-0 z-30 border-b border-border bg-background/80 backdrop-blur backdrop-saturate-125 transition duration-200 lg:hidden"
     :class="
       props.show ? 'translate-y-0 opacity-100' : '-translate-y-2 opacity-0 pointer-events-none'
     "

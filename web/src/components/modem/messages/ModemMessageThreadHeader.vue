@@ -19,9 +19,17 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <div class="grid grid-cols-[1fr_auto_1fr] items-center border-b border-border pb-3">
-    <BackButton class="justify-self-start" :label="t('modemDetail.back')" @click="emit('back')" />
-    <h2 class="text-center text-lg font-semibold text-foreground">
+  <div
+    class="grid grid-cols-[1fr_auto_1fr] items-center border-b border-border pb-3 lg:flex lg:justify-between lg:gap-3"
+  >
+    <BackButton
+      class="justify-self-start lg:hidden"
+      :label="t('modemDetail.back')"
+      @click="emit('back')"
+    />
+    <h2
+      class="min-w-0 text-center text-lg font-semibold text-foreground lg:flex-1 lg:truncate lg:text-left"
+    >
       {{ props.title }}
     </h2>
     <Button

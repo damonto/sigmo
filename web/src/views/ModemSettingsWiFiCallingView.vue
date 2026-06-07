@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
 import CarrierWebsheetDialog from '@/components/CarrierWebsheetDialog.vue'
 import ModemSettingsHeader from '@/components/modem/settings/ModemSettingsHeader.vue'
+import ModemSettingsShell from '@/components/modem/settings/ModemSettingsShell.vue'
 import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 import { useFeedbackBanner } from '@/composables/useFeedbackBanner'
 import { useModemWiFiCallingSettings } from '@/composables/useModemWiFiCallingSettings'
@@ -17,7 +18,7 @@ const { t } = useI18n()
 
 const modemId = computed(() => route.params.id as string)
 const { showFeedback } = useFeedbackBanner()
-const { hasFeature, fetchCapabilities } = useCapabilities()
+const { hasFeature } = useCapabilities()
 const canUseWiFiCalling = computed(() => hasFeature(FEATURE.wifiCalling))
 
 const {
@@ -51,14 +52,10 @@ const closeWiFiCallingWebsheet = () => {
 const closeWiFiCallingEmergencyAddressWebsheet = () => {
   void completeWiFiCallingEmergencyAddressWebsheet()
 }
-
-onMounted(() => {
-  void fetchCapabilities()
-})
 </script>
 
 <template>
-  <div class="space-y-4">
+  <ModemSettingsShell>
     <ModemSettingsHeader
       :title="t('modemDetail.settings.wifiCallingTitle')"
       :subtitle="t('modemDetail.settings.wifiCallingCategoryDescription')"
@@ -98,7 +95,7 @@ onMounted(() => {
     <div v-else class="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
       {{ t('modemDetail.settings.wifiCallingUnavailable') }}
     </div>
-  </div>
+  </ModemSettingsShell>
 
   <CarrierWebsheetDialog
     :open="settingsWiFiCallingWebsheet !== null"

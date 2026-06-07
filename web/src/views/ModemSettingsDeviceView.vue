@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
 import ModemSettingsHeader from '@/components/modem/settings/ModemSettingsHeader.vue'
+import ModemSettingsShell from '@/components/modem/settings/ModemSettingsShell.vue'
 import { useFeedbackBanner } from '@/composables/useFeedbackBanner'
 import { useModemDeviceSettings } from '@/composables/useModemDeviceSettings'
 import DeviceSettingsPanel from '@/views/modem-settings/DeviceSettingsPanel.vue'
@@ -29,7 +30,7 @@ const {
 </script>
 
 <template>
-  <div class="space-y-4">
+  <ModemSettingsShell>
     <ModemSettingsHeader
       :title="t('modemDetail.settings.deviceTitle')"
       :subtitle="t('modemDetail.settings.deviceCategoryDescription')"
@@ -45,5 +46,5 @@ const {
       :is-valid="isMssValid"
       @update="handleSettingsUpdate"
     />
-  </div>
+  </ModemSettingsShell>
 </template>

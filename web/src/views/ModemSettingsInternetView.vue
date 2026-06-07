@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
 import ModemSettingsHeader from '@/components/modem/settings/ModemSettingsHeader.vue'
+import ModemSettingsShell from '@/components/modem/settings/ModemSettingsShell.vue'
 import { useFeedbackBanner } from '@/composables/useFeedbackBanner'
 import { useModemInternet } from '@/composables/useModemInternet'
 import InternetSettingsContent from '@/views/modem-settings/InternetSettingsContent.vue'
@@ -39,7 +40,7 @@ const {
 </script>
 
 <template>
-  <div class="space-y-4">
+  <ModemSettingsShell>
     <ModemSettingsHeader
       :title="t('modemDetail.settings.internetTitle')"
       :subtitle="t('modemDetail.settings.internetCategoryDescription')"
@@ -65,5 +66,5 @@ const {
       @connect="handleInternetConnect"
       @disconnect="handleInternetDisconnect"
     />
-  </div>
+  </ModemSettingsShell>
 </template>

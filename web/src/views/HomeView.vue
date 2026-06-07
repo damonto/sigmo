@@ -42,7 +42,7 @@ onMounted(() => {
 
 <template>
   <div class="min-h-dvh bg-background">
-    <div class="mx-auto flex w-full max-w-6xl flex-col gap-4 px-6 py-10">
+    <div class="mx-auto flex w-full max-w-7xl flex-col gap-5 px-6 py-10 lg:px-8">
       <HomeHeader :subtitle="subtitle" :is-loading="isLoading" @refresh="handleRefresh" />
 
       <HomeModemList :items="modemItems" :is-loading="isLoading" />

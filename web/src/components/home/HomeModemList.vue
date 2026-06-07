@@ -21,7 +21,7 @@ const hasItems = computed(() => props.items.length > 0)
 <template>
   <HomeModemSkeletonList v-if="props.isLoading" />
 
-  <div v-else-if="hasItems" class="grid grid-cols-1 gap-3 md:grid-cols-2">
+  <div v-else-if="hasItems" class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
     <RouterLink
       v-for="item in props.items"
       :key="item.id"

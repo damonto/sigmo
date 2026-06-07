@@ -323,15 +323,23 @@ void fetchCapabilities()
   />
 
   <!-- eSIM modem: show original layout -->
-  <div v-if="modem && isEsimModem" class="space-y-3">
-    <EsimSummaryCard :modem="modem" :euicc="euicc" />
-    <EsimProfileSection
-      v-model:profiles="esimProfiles"
-      :loading="isEsimProfilesLoading"
-      :modem-id="modemId"
-      :refresh-modem="refreshModem"
-      @success="showSuccess"
-    />
+  <div v-if="modem && isEsimModem" class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+    <div class="min-w-0 space-y-3">
+      <EsimSummaryCard :modem="modem" :euicc="euicc" />
+      <EsimProfileSection
+        v-model:profiles="esimProfiles"
+        :loading="isEsimProfilesLoading"
+        :modem-id="modemId"
+        :refresh-modem="refreshModem"
+        @success="showSuccess"
+      />
+    </div>
+
+    <aside class="hidden xl:block">
+      <div class="sticky top-[var(--modem-desktop-sticky-top)]">
+        <ModemDetailCard :modem="modem" :euicc="euicc" />
+      </div>
+    </aside>
   </div>
 
   <!-- Physical modem: show detail card -->

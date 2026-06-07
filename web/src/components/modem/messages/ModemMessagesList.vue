@@ -11,6 +11,7 @@ const props = defineProps<{
   modemId: string
   isLoading: boolean
   emptyLabel?: string
+  selectedParticipant?: string
 }>()
 
 const emit = defineEmits<{
@@ -33,6 +34,7 @@ const emptyStateLabel = computed(() => props.emptyLabel || t('modemDetail.messag
         :key="item.key"
         :item="item"
         :modem-id="props.modemId"
+        :selected="item.participantValue === props.selectedParticipant"
         @delete="emit('delete', $event)"
       />
     </div>

@@ -371,6 +371,9 @@ const en = {
       threadTitle: 'Conversation',
       threadSubtitle: 'Chat with {participant}.',
       threadEmpty: 'No messages with {participant}.',
+      desktopEmptyTitle: 'Select a conversation',
+      desktopEmptyDescription:
+        'Open a thread from the left. Desktop keeps the list and conversation visible together.',
       unknownParticipant: 'Unknown number',
     },
     notifications: {

@@ -1,22 +1,13 @@
 <script setup lang="ts">
-import type { Component } from 'vue'
 import { computed } from 'vue'
-import { RouterLink, useRoute, type RouteLocationRaw } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 
 import { Button } from '@/components/ui/button'
-
-export type TabBarItem = {
-  key: string
-  to: RouteLocationRaw
-  routeName: string
-  activeRouteNames?: string[]
-  label: string
-  icon: Component
-}
+import type { NavigationItem } from '@/types/navigation'
 
 const props = withDefaults(
   defineProps<{
-    items: TabBarItem[]
+    items: NavigationItem[]
     containerClass?: string
   }>(),
   {

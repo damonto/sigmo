@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
 import ModemSettingsHeader from '@/components/modem/settings/ModemSettingsHeader.vue'
+import ModemSettingsShell from '@/components/modem/settings/ModemSettingsShell.vue'
 import { useFeedbackBanner } from '@/composables/useFeedbackBanner'
 import { useModemNetwork } from '@/composables/useModemNetwork'
 import { useModemOverview } from '@/composables/useModemOverview'
@@ -16,12 +17,8 @@ const { t } = useI18n()
 const modemId = computed(() => route.params.id as string)
 
 const { showFeedback } = useFeedbackBanner()
-const {
-  currentOperatorLabel,
-  currentRegistrationState,
-  currentAccessTechnology,
-  fetchModem,
-} = useModemOverview(modemId)
+const { currentOperatorLabel, currentRegistrationState, currentAccessTechnology, fetchModem } =
+  useModemOverview(modemId)
 
 const {
   networkDialogOpen,
@@ -53,7 +50,7 @@ const {
 </script>
 
 <template>
-  <div class="space-y-4">
+  <ModemSettingsShell>
     <ModemSettingsHeader
       :title="t('modemDetail.settings.networkTitle')"
       :subtitle="t('modemDetail.settings.networkCategoryDescription')"
@@ -79,7 +76,7 @@ const {
       @update-mode="handleModeUpdate"
       @update-bands="handleBandUpdate"
     />
-  </div>
+  </ModemSettingsShell>
 
   <NetworkRegistrationDialog
     v-model:open="networkDialogOpen"

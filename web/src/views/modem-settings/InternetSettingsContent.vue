@@ -62,7 +62,7 @@ const handleAction = () => {
 </script>
 
 <template>
-  <div class="space-y-3 pb-16">
+  <div class="space-y-3 pb-16 lg:pb-0">
     <InternetConnectionPanel
       v-model:apn="apn"
       v-model:ip-type="ipType"
@@ -86,9 +86,9 @@ const handleAction = () => {
   </div>
 
   <div
-    class="fixed inset-x-0 bottom-16 z-10 border-t border-white/40 bg-background/80 px-4 py-3 backdrop-blur-xl dark:border-white/10"
+    class="fixed inset-x-0 bottom-16 z-10 border-t border-white/40 bg-background/80 px-4 py-3 backdrop-blur-xl dark:border-white/10 lg:static lg:mt-3 lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none"
   >
-    <div class="mx-auto max-w-4xl">
+    <div class="mx-auto max-w-4xl lg:max-w-none">
       <Button
         size="sm"
         type="button"

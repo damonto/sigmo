@@ -42,7 +42,11 @@ const backLabel = props.backLabel || t('modemDetail.back')
     />
 
     <div class="space-y-1">
-      <div ref="backButtonRef" class="inline-flex" :class="{ invisible: isStickyVisible }">
+      <div
+        ref="backButtonRef"
+        class="inline-flex lg:hidden"
+        :class="{ invisible: isStickyVisible }"
+      >
         <BackButton :to="props.backTo" :label="backLabel" />
       </div>
       <h1 class="text-2xl font-semibold text-foreground">

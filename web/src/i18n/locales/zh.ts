@@ -369,6 +369,8 @@ const zh = {
       threadTitle: '对话',
       threadSubtitle: '与 {participant} 的短信记录。',
       threadEmpty: '暂无与 {participant} 的短信。',
+      desktopEmptyTitle: '选择一个会话',
+      desktopEmptyDescription: '在左侧打开短信会话，桌面端会保留列表与对话内容。',
       unknownParticipant: '未知号码',
     },
     notifications: {

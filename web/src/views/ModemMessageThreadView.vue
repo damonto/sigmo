@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import ModemMessageComposer from '@/components/modem/messages/ModemMessageComposer.vue'
+import ModemMessagesPanel from '@/components/modem/messages/ModemMessagesPanel.vue'
 import ModemMessageThreadDeleteDialog from '@/components/modem/messages/ModemMessageThreadDeleteDialog.vue'
 import ModemMessageThreadHeader from '@/components/modem/messages/ModemMessageThreadHeader.vue'
 import ModemMessageThreadList from '@/components/modem/messages/ModemMessageThreadList.vue'
@@ -75,31 +76,41 @@ watch(
 </script>
 
 <template>
-  <div class="flex h-[calc(100dvh-6.5rem)] flex-col overflow-hidden">
-    <ModemMessageThreadHeader
-      :title="participantLabel"
-      :can-delete="canDelete"
-      @back="handleBack"
-      @delete="openDeleteDialog"
-    />
-
-    <div ref="messagesContainerRef" class="flex-1 min-h-0 overflow-y-auto py-3 pr-1">
-      <ModemMessageThreadList
-        :items="items"
-        :is-loading="isLoading"
-        :participant-label="participantLabel"
-      />
+  <div
+    class="grid h-[calc(100dvh-6.5rem)] gap-6 overflow-hidden lg:h-[var(--modem-desktop-content-height)] lg:grid-cols-[22rem_minmax(0,1fr)]"
+  >
+    <div class="hidden min-h-0 overflow-hidden rounded-xl border bg-card/40 p-4 lg:block">
+      <ModemMessagesPanel :modem-id="modemId" :selected-participant="participant" compact />
     </div>
 
-    <ModemMessageComposer
-      v-model:message="messageDraft"
-      v-model:recipient="newRecipient"
-      :is-new-conversation="isNewConversation"
-      :is-sending="isSending"
-      :is-loading="isLoading"
-      :default-country="phoneCountry"
-      @submit="sendMessage"
-    />
+    <section
+      class="flex min-h-0 flex-col overflow-hidden rounded-none bg-background lg:rounded-xl lg:border lg:bg-card/40 lg:p-4"
+    >
+      <ModemMessageThreadHeader
+        :title="participantLabel"
+        :can-delete="canDelete"
+        @back="handleBack"
+        @delete="openDeleteDialog"
+      />
+
+      <div ref="messagesContainerRef" class="scrollbar-none min-h-0 flex-1 overflow-y-auto py-3">
+        <ModemMessageThreadList
+          :items="items"
+          :is-loading="isLoading"
+          :participant-label="participantLabel"
+        />
+      </div>
+
+      <ModemMessageComposer
+        v-model:message="messageDraft"
+        v-model:recipient="newRecipient"
+        :is-new-conversation="isNewConversation"
+        :is-sending="isSending"
+        :is-loading="isLoading"
+        :default-country="phoneCountry"
+        @submit="sendMessage"
+      />
+    </section>
   </div>
 
   <ModemMessageThreadDeleteDialog

@@ -376,7 +376,7 @@ describe('ModemPhoneView phone interactions', () => {
       .find((item) => item.text() === 'Cancel')
       ?.trigger('click')
 
-    expect(wrapper.text()).not.toContain('USSD')
+    expect(wrapper.find('input[placeholder="Reply"]').exists()).toBe(false)
   })
 
   it('renders call details without direction text and calls back from recent records', async () => {
@@ -632,13 +632,13 @@ describe('ModemPhoneView phone interactions', () => {
     await wrapper.get('button[aria-label="Open dialpad"]').trigger('click')
     await clickKey(wrapper, '1')
     await clickKey(wrapper, '2')
-    expect(wrapper.text()).toContain('Dialpad')
+    expect(wrapper.findAll('input[type="tel"]')).toHaveLength(2)
 
     await callButton(wrapper)?.trigger('click')
 
     expect(callAudioHarness.prepare).toHaveBeenCalled()
     expect(phoneHarness.dial).toHaveBeenCalledWith('12')
-    expect(wrapper.text()).not.toContain('Dialpad')
+    expect(wrapper.findAll('input[type="tel"]')).toHaveLength(1)
     resolvePrepare(true)
     pendingDial.resolve(null)
     await flushPromises()

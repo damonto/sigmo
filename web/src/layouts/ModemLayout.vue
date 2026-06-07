@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { RouterView, useRoute } from 'vue-router'
 
 import BottomTabBar from '@/components/BottomTabBar.vue'
+import ModemDesktopTopNav from '@/components/modem/ModemDesktopTopNav.vue'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -53,10 +54,16 @@ const tabItems = computed(() => [
 
 <template>
   <div class="min-h-dvh bg-background">
-    <div class="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 py-4 pb-20">
+    <ModemDesktopTopNav :items="tabItems" :modem-id="modemId" />
+
+    <div
+      class="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 py-4 pb-20 lg:max-w-7xl lg:px-8 lg:py-6 lg:pb-8"
+    >
       <RouterView />
     </div>
   </div>
 
-  <BottomTabBar :items="tabItems" container-class="max-w-4xl" />
+  <div class="lg:hidden">
+    <BottomTabBar :items="tabItems" container-class="max-w-4xl" />
+  </div>
 </template>

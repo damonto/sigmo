@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { Globe2, Phone, RadioTower, Smartphone } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -8,6 +8,7 @@ import ModemLineMsisdnDialog from '@/components/modem/settings/ModemLineMsisdnDi
 import ModemLineSummaryCard from '@/components/modem/settings/ModemLineSummaryCard.vue'
 import ModemSettingsCategoryCard from '@/components/modem/settings/ModemSettingsCategoryCard.vue'
 import ModemSettingsHeader from '@/components/modem/settings/ModemSettingsHeader.vue'
+import ModemSettingsShell from '@/components/modem/settings/ModemSettingsShell.vue'
 import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 import { useFeedbackBanner } from '@/composables/useFeedbackBanner'
 import { useModemMsisdn } from '@/composables/useModemMsisdn'
@@ -20,15 +21,10 @@ const modemId = computed(() => route.params.id as string)
 const msisdnDialogOpen = ref(false)
 
 const { showFeedback } = useFeedbackBanner()
-const { hasFeature, fetchCapabilities } = useCapabilities()
+const { hasFeature } = useCapabilities()
 const canUseWiFiCalling = computed(() => hasFeature(FEATURE.wifiCalling))
 
-const {
-  modem,
-  isModemLoading,
-  currentAccessTechnology,
-  fetchModem,
-} = useModemOverview(modemId)
+const { modem, isModemLoading, currentAccessTechnology, fetchModem } = useModemOverview(modemId)
 
 const { msisdnInput, isMsisdnUpdating, isMsisdnValid, handleMsisdnUpdate } = useModemMsisdn({
   modemId,
@@ -91,14 +87,10 @@ const saveMsisdn = async () => {
     msisdnDialogOpen.value = false
   }
 }
-
-onMounted(() => {
-  void fetchCapabilities()
-})
 </script>
 
 <template>
-  <div class="space-y-4">
+  <ModemSettingsShell>
     <ModemSettingsHeader />
 
     <ModemLineSummaryCard
@@ -116,11 +108,14 @@ onMounted(() => {
       @save="saveMsisdn"
     />
 
-    <div v-if="!modem && !isModemLoading" class="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
+    <div
+      v-if="!modem && !isModemLoading"
+      class="rounded-xl border border-dashed p-6 text-sm text-muted-foreground"
+    >
       {{ t('modemDetail.unknown') }}
     </div>
 
-    <div class="space-y-3">
+    <div class="grid gap-3 xl:grid-cols-2">
       <ModemSettingsCategoryCard
         v-for="card in categoryCards"
         :key="card.key"
@@ -130,5 +125,5 @@ onMounted(() => {
         :to="card.to"
       />
     </div>
-  </div>
+  </ModemSettingsShell>
 </template>
