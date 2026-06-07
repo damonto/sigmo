@@ -179,7 +179,8 @@ func modemClientConfig(ctx context.Context, modem *mmodem.Modem) (*vowifi.Config
 		Logger:   slog.Default(),
 		Terminal: terminalInfo(imei),
 		IMS: vowifi.IMSConfig{
-			Voice: browserVoiceConfig(),
+			SMSDeliveryReportTimeout: smsDeliveryReportTimeout(),
+			Voice:                    browserVoiceConfig(),
 		},
 	}, nil
 }

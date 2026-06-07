@@ -16,31 +16,33 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	vowifi "github.com/damonto/vowifi-go"
+	imssms "github.com/damonto/vowifi-go/ims/sms"
 )
 
-type smsReportKey struct {
-	modemID     string
-	profileID   string
-	recipient   string
-	tpReference byte
+type smsSubmissionKey struct {
+	modemID      string
+	profileID    string
+	submissionID string
 }
 
-type smsReportTracker struct {
+type smsSubmissionTracker struct {
 	profileID    string
 	externalKey  string
 	segmentCount int
-	statuses     map[byte]string
+	statuses     map[int]string
 	current      string
 	pendingStore string
 	expiresAt    time.Time
 }
 
-type pendingSMSReport struct {
-	status    string
-	expiresAt time.Time
-}
+const (
+	smsSubmissionRetention = 6 * time.Hour
+	smsStatusUpdateTimeout = 5 * time.Second
+)
 
-const smsReportRetention = 6 * time.Hour
+func smsDeliveryReportTimeout() time.Duration {
+	return imssms.DefaultDeliveryReportTimeout()
+}
 
 func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to string, text string) (storage.Message, error) {
 	profileID, err := modem.ProfileID(ctx)
@@ -75,9 +77,10 @@ func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to strin
 		Incoming:    false,
 		WiFiCalling: true,
 	}
-	if status := c.trackOutgoingSMSReport(msg, submission); status != "" {
+	if status := c.trackOutgoingSMSSubmission(msg, submission); status != "" {
 		msg.Status = status
 	}
+	go c.watchSMSSubmissionUpdates(modem.EquipmentIdentifier, profileID, submission)
 	return msg, nil
 }
 
@@ -104,7 +107,7 @@ func (c *coordinator) ApplyPendingSMSStatus(ctx context.Context, msg storage.Mes
 	return nil
 }
 
-func (c *coordinator) trackOutgoingSMSReport(msg storage.Message, submission vowifi.SMSSubmission) string {
+func (c *coordinator) trackOutgoingSMSSubmission(msg storage.Message, submission vowifi.SMSSubmission) string {
 	if len(submission.Segments) == 0 {
 		return ""
 	}
@@ -112,54 +115,42 @@ func (c *coordinator) trackOutgoingSMSReport(msg storage.Message, submission vow
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.ensureSMSReportMaps()
-	c.cleanupSMSReportsLocked(now)
+	c.ensureSMSSubmissionMap()
+	c.cleanupSMSSubmissionsLocked(now)
 
-	tracker := &smsReportTracker{
+	tracker := &smsSubmissionTracker{
 		profileID:    msg.ProfileID,
 		externalKey:  msg.ExternalKey,
 		segmentCount: len(submission.Segments),
-		statuses:     make(map[byte]string, len(submission.Segments)),
-		expiresAt:    now.Add(smsReportRetention),
+		statuses:     make(map[int]string, len(submission.Segments)),
+		expiresAt:    now.Add(smsSubmissionRetention),
 	}
 	for _, segment := range submission.Segments {
-		key := outgoingSMSReportKey(msg.ModemID, msg.ProfileID, msg.Recipient, segment.TPReference)
-		tracker.statuses[segment.TPReference] = ""
-		c.smsReports[key] = tracker
-		if pending, ok := c.pendingSMSReports[key]; ok {
-			tracker.statuses[segment.TPReference] = pending.status
-			delete(c.pendingSMSReports, key)
-		}
+		tracker.statuses[segment.Index] = ""
 	}
 	tracker.current = tracker.aggregateStatus()
+	key := outgoingSMSSubmissionKey(msg.ModemID, msg.ProfileID, submission.ID)
+	c.smsSubmissions[key] = tracker
 	if smsStatusFinal(tracker.current) {
-		c.removeSMSReportTrackerLocked(tracker)
+		c.removeSMSSubmissionTrackerLocked(tracker)
 	}
 	return tracker.current
 }
 
 func (c *coordinator) forwardSMSReport(ctx context.Context, modemID string, profileID string, report vowifi.SMSReport) {
-	status := smsReportStatus(report)
-	if status == "" {
-		return
-	}
-	update, ok := c.recordSMSReport(modemID, profileID, report, status)
-	if !ok || c.store == nil {
-		return
-	}
-	if updated, err := c.store.UpdateMessageStatus(ctx, storage.MessageStatusUpdate{
-		ProfileID:   update.profileID,
-		Source:      storage.MessageSourceWiFiCalling,
-		ExternalKey: update.externalKey,
-		Status:      update.status,
-	}); err != nil {
-		slog.Warn("update Wi-Fi Calling SMS status", "modem", modemID, "recipient", report.Recipient, "status", update.status, "error", err)
-	} else if !updated {
-		c.deferStoredSMSStatus(update)
-		slog.Debug("Wi-Fi Calling SMS status target not yet stored", "modem", modemID, "recipient", report.Recipient, "status", update.status)
-	} else {
-		c.completeStoredSMSStatus(update)
-	}
+	_ = ctx
+	slog.Info("Wi-Fi Calling SMS report",
+		"modem", modemID,
+		"profile_id", profileID,
+		"submission_id", report.SubmissionID,
+		"segment", report.SegmentIndex+1,
+		"segments", report.SegmentCount,
+		"recipient", report.Recipient,
+		"service_center", report.ServiceCenter,
+		"tp_ref", report.MessageReference,
+		"tp_status", report.Status,
+		"received_at", report.ReceivedAt.Format(time.RFC3339),
+	)
 }
 
 type smsStatusUpdate struct {
@@ -168,28 +159,105 @@ type smsStatusUpdate struct {
 	status      string
 }
 
-func (c *coordinator) recordSMSReport(modemID string, profileID string, report vowifi.SMSReport, status string) (smsStatusUpdate, bool) {
+func (c *coordinator) watchSMSSubmissionUpdates(modemID string, profileID string, submission vowifi.SMSSubmission) {
+	c.watchSMSSubmissionUpdatesWithTimeout(modemID, profileID, submission, smsDeliveryReportTimeout())
+}
+
+func (c *coordinator) watchSMSSubmissionUpdatesWithTimeout(modemID string, profileID string, submission vowifi.SMSSubmission, timeout time.Duration) {
+	defer func() {
+		c.stopSMSSubmissionTracking(modemID, profileID, submission.ID)
+		submission.Close()
+	}()
+	if submission.Updates == nil {
+		return
+	}
+
+	// Requested delivery reports are not guaranteed to arrive, so the caller
+	// must bound how long it keeps vowifi-go's per-submission tracking alive.
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case update, ok := <-submission.Updates:
+			if !ok {
+				return
+			}
+			logSMSSubmissionUpdate(modemID, profileID, update)
+			status := smsSubmissionUpdateStatus(update)
+			if status == "" {
+				continue
+			}
+			statusUpdate, ok := c.recordSMSSubmissionUpdate(modemID, profileID, update, status)
+			if !ok {
+				continue
+			}
+			c.updateStoredSMSStatus(modemID, update.Recipient, statusUpdate)
+		case <-timer.C:
+			slog.Warn("wait Wi-Fi Calling SMS delivery report",
+				"modem", modemID,
+				"profile_id", profileID,
+				"submission_id", submission.ID,
+				"timeout", timeout,
+			)
+			return
+		}
+	}
+}
+
+func logSMSSubmissionUpdate(modemID string, profileID string, update vowifi.SMSSubmissionUpdate) {
+	attrs := []any{
+		"modem", modemID,
+		"profile_id", profileID,
+		"submission_id", update.SubmissionID,
+		"segment", update.SegmentIndex + 1,
+		"segments", update.SegmentCount,
+		"state", update.State,
+		"recipient", update.Recipient,
+		"service_center", update.ServiceCenter,
+		"call_id", update.CallID,
+		"rp_ref", update.RPReference,
+		"tp_ref", update.TPReference,
+		"received_at", update.ReceivedAt.Format(time.RFC3339),
+	}
+	if update.HasRPCause {
+		attrs = append(attrs, "rp_cause", update.RPCause)
+	}
+	if update.HasStatus {
+		attrs = append(attrs, "tp_status", update.Status)
+	}
+	slog.Info("Wi-Fi Calling SMS submission update", attrs...)
+}
+
+func smsSubmissionUpdateStatus(update vowifi.SMSSubmissionUpdate) string {
+	switch update.State {
+	case vowifi.SMSRejectedBySMSC, vowifi.SMSDeliveryFailed:
+		return "failed"
+	case vowifi.SMSDelivered:
+		return "delivered"
+	default:
+		return ""
+	}
+}
+
+func (c *coordinator) recordSMSSubmissionUpdate(modemID string, profileID string, update vowifi.SMSSubmissionUpdate, status string) (smsStatusUpdate, bool) {
 	now := time.Now()
-	key := outgoingSMSReportKey(modemID, profileID, report.Recipient, report.MessageReference)
+	key := outgoingSMSSubmissionKey(modemID, profileID, update.SubmissionID)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.ensureSMSReportMaps()
-	c.cleanupSMSReportsLocked(now)
+	c.ensureSMSSubmissionMap()
+	c.cleanupSMSSubmissionsLocked(now)
 
-	tracker := c.smsReports[key]
+	tracker := c.smsSubmissions[key]
 	if tracker == nil {
-		c.pendingSMSReports[key] = pendingSMSReport{
-			status:    status,
-			expiresAt: now.Add(smsReportRetention),
-		}
 		return smsStatusUpdate{}, false
 	}
-	if _, ok := tracker.statuses[key.tpReference]; !ok {
+	if _, ok := tracker.statuses[update.SegmentIndex]; !ok {
 		return smsStatusUpdate{}, false
 	}
-	tracker.statuses[key.tpReference] = status
+	tracker.statuses[update.SegmentIndex] = status
 	aggregate := tracker.aggregateStatus()
 	if aggregate == "" || aggregate == tracker.current {
 		return smsStatusUpdate{}, false
@@ -202,11 +270,33 @@ func (c *coordinator) recordSMSReport(modemID string, profileID string, report v
 	}, true
 }
 
+func (c *coordinator) updateStoredSMSStatus(modemID string, recipient string, update smsStatusUpdate) {
+	if c.store == nil {
+		c.completeStoredSMSStatus(update)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), smsStatusUpdateTimeout)
+	defer cancel()
+	if updated, err := c.store.UpdateMessageStatus(ctx, storage.MessageStatusUpdate{
+		ProfileID:   update.profileID,
+		Source:      storage.MessageSourceWiFiCalling,
+		ExternalKey: update.externalKey,
+		Status:      update.status,
+	}); err != nil {
+		slog.Warn("update Wi-Fi Calling SMS status", "modem", modemID, "recipient", recipient, "status", update.status, "error", err)
+	} else if !updated {
+		c.deferStoredSMSStatus(update)
+		slog.Debug("Wi-Fi Calling SMS status target not yet stored", "modem", modemID, "recipient", recipient, "status", update.status)
+	} else {
+		c.completeStoredSMSStatus(update)
+	}
+}
+
 func (c *coordinator) deferStoredSMSStatus(update smsStatusUpdate) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	tracker := c.findSMSReportTrackerLocked(update.profileID, update.externalKey)
+	tracker := c.findSMSSubmissionTrackerLocked(update.profileID, update.externalKey)
 	if tracker != nil {
 		tracker.pendingStore = update.status
 	}
@@ -217,10 +307,10 @@ func (c *coordinator) pendingSMSStatus(msg storage.Message) (smsStatusUpdate, bo
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.ensureSMSReportMaps()
-	c.cleanupSMSReportsLocked(now)
+	c.ensureSMSSubmissionMap()
+	c.cleanupSMSSubmissionsLocked(now)
 
-	tracker := c.findSMSReportTrackerLocked(msg.ProfileID, msg.ExternalKey)
+	tracker := c.findSMSSubmissionTrackerLocked(msg.ProfileID, msg.ExternalKey)
 	if tracker == nil || tracker.pendingStore == "" {
 		return smsStatusUpdate{}, false
 	}
@@ -235,20 +325,33 @@ func (c *coordinator) completeStoredSMSStatus(update smsStatusUpdate) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	tracker := c.findSMSReportTrackerLocked(update.profileID, update.externalKey)
+	tracker := c.findSMSSubmissionTrackerLocked(update.profileID, update.externalKey)
 	if tracker == nil {
 		return
 	}
 	tracker.pendingStore = ""
 	if smsStatusFinal(update.status) {
-		c.removeSMSReportTrackerLocked(tracker)
+		c.removeSMSSubmissionTrackerLocked(tracker)
 	}
 }
 
-func (c *coordinator) findSMSReportTrackerLocked(profileID string, externalKey string) *smsReportTracker {
+func (c *coordinator) stopSMSSubmissionTracking(modemID string, profileID string, submissionID string) {
+	key := outgoingSMSSubmissionKey(modemID, profileID, submissionID)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	tracker := c.smsSubmissions[key]
+	if tracker == nil || tracker.pendingStore != "" {
+		return
+	}
+	delete(c.smsSubmissions, key)
+}
+
+func (c *coordinator) findSMSSubmissionTrackerLocked(profileID string, externalKey string) *smsSubmissionTracker {
 	profileID = strings.TrimSpace(profileID)
 	externalKey = strings.TrimSpace(externalKey)
-	for _, tracker := range c.smsReports {
+	for _, tracker := range c.smsSubmissions {
 		if tracker.profileID == profileID && tracker.externalKey == externalKey {
 			return tracker
 		}
@@ -256,37 +359,29 @@ func (c *coordinator) findSMSReportTrackerLocked(profileID string, externalKey s
 	return nil
 }
 
-func (c *coordinator) removeSMSReportTrackerLocked(target *smsReportTracker) {
-	for key, tracker := range c.smsReports {
+func (c *coordinator) removeSMSSubmissionTrackerLocked(target *smsSubmissionTracker) {
+	for key, tracker := range c.smsSubmissions {
 		if tracker == target {
-			delete(c.smsReports, key)
+			delete(c.smsSubmissions, key)
 		}
 	}
 }
 
-func (c *coordinator) ensureSMSReportMaps() {
-	if c.smsReports == nil {
-		c.smsReports = make(map[smsReportKey]*smsReportTracker)
-	}
-	if c.pendingSMSReports == nil {
-		c.pendingSMSReports = make(map[smsReportKey]pendingSMSReport)
+func (c *coordinator) ensureSMSSubmissionMap() {
+	if c.smsSubmissions == nil {
+		c.smsSubmissions = make(map[smsSubmissionKey]*smsSubmissionTracker)
 	}
 }
 
-func (c *coordinator) cleanupSMSReportsLocked(now time.Time) {
-	for key, tracker := range c.smsReports {
+func (c *coordinator) cleanupSMSSubmissionsLocked(now time.Time) {
+	for key, tracker := range c.smsSubmissions {
 		if now.After(tracker.expiresAt) {
-			delete(c.smsReports, key)
-		}
-	}
-	for key, report := range c.pendingSMSReports {
-		if now.After(report.expiresAt) {
-			delete(c.pendingSMSReports, key)
+			delete(c.smsSubmissions, key)
 		}
 	}
 }
 
-func (t *smsReportTracker) aggregateStatus() string {
+func (t *smsSubmissionTracker) aggregateStatus() string {
 	if t == nil || t.segmentCount == 0 {
 		return ""
 	}
@@ -295,8 +390,6 @@ func (t *smsReportTracker) aggregateStatus() string {
 		switch status {
 		case "failed":
 			return "failed"
-		case "retrying":
-			return "retrying"
 		case "delivered":
 			delivered++
 		}
@@ -311,25 +404,11 @@ func smsStatusFinal(status string) bool {
 	return status == "delivered" || status == "failed"
 }
 
-func outgoingSMSReportKey(modemID string, profileID string, recipient string, tpReference byte) smsReportKey {
-	return smsReportKey{
-		modemID:     strings.TrimSpace(modemID),
-		profileID:   strings.TrimSpace(profileID),
-		recipient:   strings.TrimSpace(recipient),
-		tpReference: tpReference,
-	}
-}
-
-func smsReportStatus(report vowifi.SMSReport) string {
-	switch status := report.Status; {
-	case status.Delivered():
-		return "delivered"
-	case status.Failed():
-		return "failed"
-	case status.Retrying():
-		return "retrying"
-	default:
-		return ""
+func outgoingSMSSubmissionKey(modemID string, profileID string, submissionID string) smsSubmissionKey {
+	return smsSubmissionKey{
+		modemID:      strings.TrimSpace(modemID),
+		profileID:    strings.TrimSpace(profileID),
+		submissionID: strings.TrimSpace(submissionID),
 	}
 }
 

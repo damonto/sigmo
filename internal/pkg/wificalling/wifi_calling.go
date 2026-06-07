@@ -28,12 +28,11 @@ type coordinator struct {
 	onIncoming IncomingSMSFunc
 	websheets  *websheet.Broker
 
-	mu                sync.Mutex
-	sessions          map[string]*sessionState
-	smsReports        map[smsReportKey]*smsReportTracker
-	pendingSMSReports map[smsReportKey]pendingSMSReport
-	voiceSubscribers  map[uint64]VoiceEventFunc
-	nextVoiceSubID    uint64
+	mu               sync.Mutex
+	sessions         map[string]*sessionState
+	smsSubmissions   map[smsSubmissionKey]*smsSubmissionTracker
+	voiceSubscribers map[uint64]VoiceEventFunc
+	nextVoiceSubID   uint64
 }
 
 type sessionState struct {
@@ -63,14 +62,13 @@ const (
 
 func New(cfg Config) Coordinator {
 	return &coordinator{
-		settings:          NewSettingsStore(cfg.Store),
-		store:             cfg.Store,
-		onIncoming:        cfg.OnIncoming,
-		websheets:         cfg.Websheets,
-		sessions:          make(map[string]*sessionState),
-		smsReports:        make(map[smsReportKey]*smsReportTracker),
-		pendingSMSReports: make(map[smsReportKey]pendingSMSReport),
-		voiceSubscribers:  make(map[uint64]VoiceEventFunc),
+		settings:         NewSettingsStore(cfg.Store),
+		store:            cfg.Store,
+		onIncoming:       cfg.OnIncoming,
+		websheets:        cfg.Websheets,
+		sessions:         make(map[string]*sessionState),
+		smsSubmissions:   make(map[smsSubmissionKey]*smsSubmissionTracker),
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
 	}
 }
 
