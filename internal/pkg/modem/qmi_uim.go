@@ -10,13 +10,7 @@ import (
 	"github.com/damonto/uicc-go/qualcomm/uim"
 )
 
-const (
-	qmiCardStatePresent          = 1
-	qmiApplicationTypeUSIM       = 2
-	qmiApplicationStateReady     = 7
-	qmiPersonalizationStateReady = 2
-	qmiMaxSIMSlot                = 5
-)
+const qmiMaxSIMSlot = 5
 
 type qmiUIMReader interface {
 	PowerOffSIM(ctx context.Context, slot uint8) error
@@ -139,7 +133,7 @@ func qmiCardForSlot(status uim.CardStatus, slot uint8) (uim.Card, bool) {
 
 func qmiUSIMApplication(card uim.Card) (uim.CardApplication, bool) {
 	for _, app := range card.Applications {
-		if app.Type == qmiApplicationTypeUSIM {
+		if app.Type == uim.ApplicationTypeUSIM {
 			return app, true
 		}
 	}
@@ -147,8 +141,8 @@ func qmiUSIMApplication(card uim.Card) (uim.CardApplication, bool) {
 }
 
 func qmiUSIMReady(card uim.Card, app uim.CardApplication) bool {
-	return card.State == qmiCardStatePresent &&
-		app.Type == qmiApplicationTypeUSIM &&
-		app.State == qmiApplicationStateReady &&
-		app.PersonalizationState == qmiPersonalizationStateReady
+	return card.State == uim.CardStatePresent &&
+		app.Type == uim.ApplicationTypeUSIM &&
+		app.State == uim.ApplicationStateReady &&
+		app.PersonalizationState == uim.PersonalizationStateReady
 }

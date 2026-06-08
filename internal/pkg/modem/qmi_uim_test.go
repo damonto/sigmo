@@ -121,7 +121,7 @@ func TestQMIActivateProvisioningIfSimMissing(t *testing.T) {
 				PrimarySimSlot: 1,
 			},
 			reader: &fakeQMIUIMReader{
-				cardStatus: qmiTestCardStatus(qmiApplicationStateReady, qmiPersonalizationStateReady, aid),
+				cardStatus: qmiTestCardStatus(uim.ApplicationStateReady, uim.PersonalizationStateReady, aid),
 			},
 			wantCalls: []string{"card-status", "close"},
 		},
@@ -132,7 +132,7 @@ func TestQMIActivateProvisioningIfSimMissing(t *testing.T) {
 				PrimarySimSlot: 2,
 			},
 			reader: &fakeQMIUIMReader{
-				cardStatus: qmiTestCardStatusForSlot(2, qmiApplicationStateReady, 1, aid),
+				cardStatus: qmiTestCardStatusForSlot(2, uim.ApplicationStateReady, uim.PersonalizationStateInProgress, aid),
 			},
 			wantCalls: []string{"card-status", "change-provisioning:2", "close"},
 			wantReq: uim.ChangeProvisioningSessionRequest{
@@ -157,7 +157,7 @@ func TestQMIActivateProvisioningIfSimMissing(t *testing.T) {
 				PrimaryPort: "/dev/cdc-wdm0",
 			},
 			reader: &fakeQMIUIMReader{
-				cardStatus: qmiTestCardStatus(qmiApplicationStateReady, 1, nil),
+				cardStatus: qmiTestCardStatus(uim.ApplicationStateReady, uim.PersonalizationStateInProgress, nil),
 			},
 			wantCalls: []string{"card-status", "close"},
 			wantText:  "AID is empty",
@@ -168,7 +168,7 @@ func TestQMIActivateProvisioningIfSimMissing(t *testing.T) {
 				PrimaryPort: "/dev/cdc-wdm0",
 			},
 			reader: &fakeQMIUIMReader{
-				cardStatus:      qmiTestCardStatus(qmiApplicationStateReady, 1, aid),
+				cardStatus:      qmiTestCardStatus(uim.ApplicationStateReady, uim.PersonalizationStateInProgress, aid),
 				provisioningErr: errProvisioning,
 			},
 			wantCalls: []string{"card-status", "change-provisioning:1", "close"},
@@ -268,16 +268,16 @@ func qmiTestSlot(m *Modem) uint8 {
 	return slot
 }
 
-func qmiTestCardStatus(appState, personalizationState byte, aid []byte) uim.CardStatus {
+func qmiTestCardStatus(appState uim.ApplicationState, personalizationState uim.PersonalizationState, aid []byte) uim.CardStatus {
 	return qmiTestCardStatusForSlot(1, appState, personalizationState, aid)
 }
 
-func qmiTestCardStatusForSlot(slot uint8, appState, personalizationState byte, aid []byte) uim.CardStatus {
+func qmiTestCardStatusForSlot(slot uint8, appState uim.ApplicationState, personalizationState uim.PersonalizationState, aid []byte) uim.CardStatus {
 	cards := make([]uim.Card, slot)
 	cards[slot-1] = uim.Card{
-		State: qmiCardStatePresent,
+		State: uim.CardStatePresent,
 		Applications: []uim.CardApplication{{
-			Type:                 qmiApplicationTypeUSIM,
+			Type:                 uim.ApplicationTypeUSIM,
 			State:                appState,
 			PersonalizationState: personalizationState,
 			AID:                  slices.Clone(aid),

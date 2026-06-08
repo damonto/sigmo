@@ -3,10 +3,10 @@ module github.com/damonto/sigmo
 go 1.26.3
 
 require (
-	github.com/damonto/euicc-go v1.1.3-0.20260604120717-95d9496f9a65
-	github.com/damonto/ts43-go v0.0.0-20260604121040-db99eefcae20
-	github.com/damonto/uicc-go v0.0.0-20260604125014-6162f7feb56a
-	github.com/damonto/vowifi-go v0.0.0-20260608061539-27b69ea55b4c
+	github.com/damonto/euicc-go v1.1.3-0.20260608104233-cb35bff8aa20
+	github.com/damonto/ts43-go v0.0.0-20260608104423-08d96990ecbc
+	github.com/damonto/uicc-go v0.0.0-20260608104005-d1ab2eb31f2b
+	github.com/damonto/vowifi-go v0.0.0-20260608104517-3ac38fb39d34
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
 	github.com/go-playground/validator/v10 v10.30.3
