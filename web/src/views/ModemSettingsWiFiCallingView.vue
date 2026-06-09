@@ -32,9 +32,11 @@ const {
   settingsWiFiCallingEmergencyAddressWebsheet,
   isWiFiCallingSettingsLoading,
   isWiFiCallingSettingsUpdating,
+  isWiFiCallingReconnecting,
   isWiFiCallingWebsheetStarting,
   isWiFiCallingEmergencyAddressWebsheetStarting,
   handleWiFiCallingUpdate,
+  reconnectWiFiCalling,
   startWiFiCallingWebsheet,
   startWiFiCallingEmergencyAddressWebsheet,
   completeWiFiCallingWebsheet,
@@ -70,7 +72,8 @@ const closeWiFiCallingEmergencyAddressWebsheet = () => {
         :duration-seconds="settingsWiFiCallingDurationSeconds"
         :is-loading="isWiFiCallingSettingsLoading"
         :is-updating="isWiFiCallingSettingsUpdating"
-        @reconnect="handleWiFiCallingUpdate"
+        :is-reconnecting="isWiFiCallingReconnecting"
+        @reconnect="reconnectWiFiCalling"
       />
 
       <WiFiCallingSettingsPanel

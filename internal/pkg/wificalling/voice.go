@@ -433,6 +433,11 @@ func (c *coordinator) lookupVoiceCall(ctx context.Context, modem *mmodem.Modem, 
 }
 
 func (c *coordinator) storeVoiceCall(modemID string, profileID string, call *imsvoice.Call, number string, direction string, state string, reason string) VoiceCall {
+	info, _ := c.storeVoiceCallForSession(modemID, 0, profileID, call, number, direction, state, reason)
+	return info
+}
+
+func (c *coordinator) storeVoiceCallForSession(modemID string, sessionID uint64, profileID string, call *imsvoice.Call, number string, direction string, state string, reason string) (VoiceCall, bool) {
 	now := time.Now()
 	info := VoiceCall{
 		ID:        call.ID(),
@@ -446,7 +451,13 @@ func (c *coordinator) storeVoiceCall(modemID string, profileID string, call *ims
 		StartedAt: now,
 		UpdatedAt: now,
 	}
-	if existing := c.voiceCallInfo(modemID, call.ID()); existing.ID != "" {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	session := c.sessions[modemID]
+	if !sameSession(session, sessionID) {
+		return VoiceCall{}, false
+	}
+	if existing := voiceCallInfoLocked(session, call.ID()); existing.ID != "" {
 		info.StartedAt = existing.StartedAt
 		if info.StartedAt.IsZero() {
 			info.StartedAt = now
@@ -458,8 +469,8 @@ func (c *coordinator) storeVoiceCall(modemID string, profileID string, call *ims
 			info.Hold = existing.Hold
 		}
 	}
-	c.updateVoiceCallWithPointer(modemID, call.ID(), call, info)
-	return info
+	updateVoiceCallWithPointerLocked(session, call.ID(), call, info)
+	return info, true
 }
 
 func voiceHoldState(call *imsvoice.Call) string {
@@ -476,7 +487,10 @@ func voiceHoldState(call *imsvoice.Call) string {
 func (c *coordinator) voiceCallInfo(modemID string, callID string) VoiceCall {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	session := c.sessions[modemID]
+	return voiceCallInfoLocked(c.sessions[modemID], callID)
+}
+
+func voiceCallInfoLocked(session *sessionState, callID string) VoiceCall {
 	if session == nil || session.calls == nil {
 		return VoiceCall{}
 	}
@@ -518,12 +532,25 @@ func (c *coordinator) updateVoiceCall(modemID string, callID string, info VoiceC
 }
 
 func (c *coordinator) updateVoiceCallWithPointer(modemID string, callID string, call *imsvoice.Call, info VoiceCall) {
+	c.updateVoiceCallWithPointerForSession(modemID, 0, callID, call, info)
+}
+
+func (c *coordinator) updateVoiceCallForSession(modemID string, sessionID uint64, callID string, info VoiceCall) bool {
+	return c.updateVoiceCallWithPointerForSession(modemID, sessionID, callID, nil, info)
+}
+
+func (c *coordinator) updateVoiceCallWithPointerForSession(modemID string, sessionID uint64, callID string, call *imsvoice.Call, info VoiceCall) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modemID]
-	if session == nil {
-		return
+	if !sameSession(session, sessionID) {
+		return false
 	}
+	updateVoiceCallWithPointerLocked(session, callID, call, info)
+	return true
+}
+
+func updateVoiceCallWithPointerLocked(session *sessionState, callID string, call *imsvoice.Call, info VoiceCall) {
 	if session.calls == nil {
 		session.calls = make(map[string]*voiceCallState)
 	}
@@ -552,26 +579,29 @@ func (c *coordinator) publishVoiceEvent(call VoiceCall) {
 	}
 }
 
-func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string, incoming vowifi.IncomingCall) {
+func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string, sessionID uint64, incoming vowifi.IncomingCall) {
 	if incoming.Call == nil {
 		return
 	}
-	info := c.storeVoiceCall(modem.EquipmentIdentifier, profileID, incoming.Call, incoming.FromNumber, string(incoming.Call.Direction()), string(incoming.Call.State()), "")
+	info, ok := c.storeVoiceCallForSession(modem.EquipmentIdentifier, sessionID, profileID, incoming.Call, incoming.FromNumber, string(incoming.Call.Direction()), string(incoming.Call.State()), "")
+	if !ok {
+		return
+	}
 	info.Hold = voiceHoldState(incoming.Call)
 	if !incoming.ReceivedAt.IsZero() {
 		info.StartedAt = incoming.ReceivedAt
 		info.UpdatedAt = incoming.ReceivedAt
-		c.updateVoiceCall(modem.EquipmentIdentifier, info.ID, info)
+		c.updateVoiceCallForSession(modem.EquipmentIdentifier, sessionID, info.ID, info)
 	}
 	c.publishVoiceEvent(info)
 }
 
-func (c *coordinator) forwardCallEvent(modemID string, event vowifi.CallEvent) {
+func (c *coordinator) forwardCallEvent(modemID string, sessionID uint64, event vowifi.CallEvent) {
 	c.mu.Lock()
 	session := c.sessions[modemID]
 	var info VoiceCall
 	changed := false
-	if session != nil && session.calls != nil {
+	if sameSession(session, sessionID) && session.calls != nil {
 		state := session.calls[event.CallID]
 		if state == nil && session.pendingDial != nil {
 			info = VoiceCall{
@@ -615,6 +645,10 @@ func (c *coordinator) forwardCallEvent(modemID string, event vowifi.CallEvent) {
 	if changed {
 		c.publishVoiceEvent(info)
 	}
+}
+
+func sameSession(session *sessionState, sessionID uint64) bool {
+	return session != nil && (sessionID == 0 || session.id == sessionID)
 }
 
 func isTerminalVoiceCallState(state string) bool {

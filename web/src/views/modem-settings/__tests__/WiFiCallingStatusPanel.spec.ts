@@ -39,6 +39,7 @@ const mountPanel = (
       durationSeconds: 0,
       isLoading: false,
       isUpdating: false,
+      isReconnecting: false,
       ...props,
     },
     global: {
@@ -67,6 +68,13 @@ describe('WiFiCallingStatusPanel', () => {
 
     expect(wrapper.text()).toContain('Connected')
     expect(wrapper.text()).toContain('1m 5s')
+    expect(wrapper.find('button[aria-label="Reconnect Wi-Fi Calling"]').exists()).toBe(false)
+  })
+
+  it('hides reconnect while reconnecting', () => {
+    const wrapper = mountPanel('en', { isReconnecting: true })
+
+    expect(wrapper.text()).toContain('Connecting')
     expect(wrapper.find('button[aria-label="Reconnect Wi-Fi Calling"]').exists()).toBe(false)
   })
 

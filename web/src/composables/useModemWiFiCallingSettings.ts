@@ -31,6 +31,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
   const settingsWiFiCallingEmergencyAddressWebsheet = ref<CarrierWebsheetInfo | null>(null)
   const isWiFiCallingSettingsLoading = ref(false)
   const isWiFiCallingSettingsUpdating = ref(false)
+  const isWiFiCallingReconnecting = ref(false)
   const isWiFiCallingWebsheetStarting = ref(false)
   const isWiFiCallingEmergencyAddressWebsheetStarting = ref(false)
   const isWiFiCallingSettingsFetching = ref(false)
@@ -124,6 +125,34 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
     }
   }
 
+  const reconnectWiFiCalling = async () => {
+    const targetId = modemId.value
+    if (!enabled.value || !targetId) return
+    if (isWiFiCallingReconnecting.value) return
+    isWiFiCallingReconnecting.value = true
+    const previousConnected = settingsWiFiCallingConnected.value
+    const previousState = settingsWiFiCallingState.value
+    const previousDurationSeconds = settingsWiFiCallingDurationSeconds.value
+    settingsWiFiCallingConnected.value = false
+    settingsWiFiCallingState.value = 'connecting'
+    settingsWiFiCallingDurationSeconds.value = 0
+    let reconnectStarted = false
+    try {
+      await modemApi.createWiFiCallingSession(targetId)
+      reconnectStarted = true
+      await fetchSettings(targetId)
+    } catch (err) {
+      if (!reconnectStarted) {
+        settingsWiFiCallingConnected.value = previousConnected
+        settingsWiFiCallingState.value = previousState
+        settingsWiFiCallingDurationSeconds.value = previousDurationSeconds
+      }
+      console.error('[useModemWiFiCallingSettings] Failed to reconnect Wi-Fi Calling:', err)
+    } finally {
+      isWiFiCallingReconnecting.value = false
+    }
+  }
+
   const startWiFiCallingWebsheet = async () => {
     const targetId = modemId.value
     if (!enabled.value || !targetId) return
@@ -205,9 +234,11 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
     settingsWiFiCallingEmergencyAddressWebsheet,
     isWiFiCallingSettingsLoading,
     isWiFiCallingSettingsUpdating,
+    isWiFiCallingReconnecting,
     isWiFiCallingWebsheetStarting,
     isWiFiCallingEmergencyAddressWebsheetStarting,
     handleWiFiCallingUpdate,
+    reconnectWiFiCalling,
     startWiFiCallingWebsheet,
     startWiFiCallingEmergencyAddressWebsheet,
     completeWiFiCallingWebsheet,

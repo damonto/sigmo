@@ -89,20 +89,31 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func (c *coordinator) setWebsheet(modemID string, websheetSession *websheet.Session) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if session := c.sessions[modemID]; session != nil {
-		session.websheet = websheetSession
-		session.phase = sessionPhaseWebsheetRequired
+func (c *coordinator) attachWebsheet(modemID string, sessionID uint64, websheetSession *websheet.Session) {
+	if c.setWebsheet(modemID, sessionID, websheetSession) {
+		return
+	}
+	if c.websheets != nil && websheetSession != nil {
+		c.websheets.Delete(websheetSession.Info().ID)
 	}
 }
 
-func (c *coordinator) waitForWebsheet(ctx context.Context, modemID string) error {
+func (c *coordinator) setWebsheet(modemID string, sessionID uint64, websheetSession *websheet.Session) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if session := c.sessions[modemID]; session != nil && session.id == sessionID {
+		session.websheet = websheetSession
+		session.phase = sessionPhaseWebsheetRequired
+		return true
+	}
+	return false
+}
+
+func (c *coordinator) waitForWebsheet(ctx context.Context, modemID string, sessionID uint64) error {
 	c.mu.Lock()
 	session := c.sessions[modemID]
 	var websheetSession *websheet.Session
-	if session != nil {
+	if session != nil && session.id == sessionID {
 		websheetSession = session.websheet
 	}
 	c.mu.Unlock()
@@ -116,18 +127,18 @@ func (c *coordinator) waitForWebsheet(ctx context.Context, modemID string) error
 		}
 		switch wfcWebsheetCallbackResult(callback) {
 		case wfcWebsheetCallbackRetry:
-			c.clearWebsheet(modemID, websheetSession)
+			c.clearWebsheet(modemID, sessionID, websheetSession)
 			return nil
 		case wfcWebsheetCallbackDismiss:
-			c.clearWebsheet(modemID, websheetSession)
+			c.clearWebsheet(modemID, sessionID, websheetSession)
 			return ErrWebsheetDismissed
 		}
 	}
 }
 
-func (c *coordinator) clearWebsheet(modemID string, websheetSession *websheet.Session) {
+func (c *coordinator) clearWebsheet(modemID string, sessionID uint64, websheetSession *websheet.Session) {
 	c.mu.Lock()
-	if session := c.sessions[modemID]; session != nil && session.websheet == websheetSession {
+	if session := c.sessions[modemID]; session != nil && session.id == sessionID && session.websheet == websheetSession {
 		session.websheet = nil
 		session.phase = sessionPhaseConnecting
 	}

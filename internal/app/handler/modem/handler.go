@@ -54,6 +54,8 @@ const (
 	errorCodeGetWiFiCallingSettingsFailed            = "get_wifi_calling_settings_failed"
 	errorCodeUpdateWiFiCallingSettingsInvalidRequest = "update_wifi_calling_settings_invalid_request"
 	errorCodeUpdateWiFiCallingSettingsFailed         = "update_wifi_calling_settings_failed"
+	errorCodeCreateWiFiCallingSessionFailed          = "create_wifi_calling_session_failed"
+	errorCodeWiFiCallingSessionUnavailable           = "wifi_calling_session_unavailable"
 	errorCodeStartWiFiCallingWebsheetFailed          = "start_wifi_calling_websheet_failed"
 	errorCodeStartWiFiCallingE911WebsheetFailed      = "start_wifi_calling_e911_websheet_failed"
 	errorCodeWiFiCallingWebsheetNotPending           = "wifi_calling_websheet_not_pending"
@@ -259,6 +261,20 @@ func (h *Handler) WiFiCallingSettings(c *echo.Context) error {
 		EmergencyAddressUpdateAvailable: h.wifiCalling.EmergencyAddressUpdateAvailable(c.Request().Context(), modem),
 		Websheet:                        status.Websheet,
 	})
+}
+
+func (h *Handler) CreateWiFiCallingSession(c *echo.Context) error {
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeCreateWiFiCallingSessionFailed)
+	}
+	if err := h.wifiCalling.Reconnect(c.Request().Context(), modem); err != nil {
+		if errors.Is(err, wificalling.ErrNotConnected) || errors.Is(err, wificalling.ErrUnavailable) {
+			return httpapi.BadRequest(c, errorCodeWiFiCallingSessionUnavailable, err)
+		}
+		return httpapi.Internal(c, errorCodeCreateWiFiCallingSessionFailed, err)
+	}
+	return c.NoContent(http.StatusAccepted)
 }
 
 func (h *Handler) StartWiFiCallingWebsheet(c *echo.Context) error {

@@ -30,12 +30,14 @@ type coordinator struct {
 
 	mu               sync.Mutex
 	sessions         map[string]*sessionState
+	nextSessionID    uint64
 	smsSubmissions   map[smsSubmissionKey]*smsSubmissionTracker
 	voiceSubscribers map[uint64]VoiceEventFunc
 	nextVoiceSubID   uint64
 }
 
 type sessionState struct {
+	id          uint64
 	cancel      context.CancelFunc
 	done        <-chan struct{}
 	reconnect   chan struct{}
@@ -112,10 +114,27 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 	if err := c.settings.Put(ctx, profileID, settings); err != nil {
 		return err
 	}
-	c.stop(modem.EquipmentIdentifier)
 	if settings.Enabled {
-		c.start(modem, profileID)
+		c.restart(modem, profileID)
+	} else {
+		c.stopAsync(modem.EquipmentIdentifier)
 	}
+	return nil
+}
+
+func (c *coordinator) Reconnect(ctx context.Context, modem *mmodem.Modem) error {
+	profileID, err := modem.ProfileID(ctx)
+	if err != nil {
+		return err
+	}
+	settings, err := c.settings.Get(ctx, profileID)
+	if err != nil {
+		return err
+	}
+	if !settings.Enabled {
+		return ErrNotConnected
+	}
+	c.restart(modem, profileID)
 	return nil
 }
 

@@ -6,6 +6,7 @@ import { useModemWiFiCallingSettings } from '@/composables/useModemWiFiCallingSe
 const api = vi.hoisted(() => ({
   getWiFiCallingSettings: vi.fn(),
   updateWiFiCallingSettings: vi.fn(),
+  createWiFiCallingSession: vi.fn(),
   startWiFiCallingWebsheet: vi.fn(),
   startWiFiCallingEmergencyAddressWebsheet: vi.fn(),
 }))
@@ -41,6 +42,8 @@ describe('useModemWiFiCallingSettings', () => {
         },
       },
     })
+    api.updateWiFiCallingSettings.mockResolvedValue({ data: { value: undefined } })
+    api.createWiFiCallingSession.mockResolvedValue({ data: { value: undefined } })
   })
 
   it('loads pending carrier websheet state', async () => {
@@ -107,5 +110,39 @@ describe('useModemWiFiCallingSettings', () => {
     expect(api.startWiFiCallingEmergencyAddressWebsheet).toHaveBeenCalledWith('modem-1')
     expect(settings.settingsWiFiCallingEmergencyAddressWebsheet.value?.id).toBe('sheet-e911')
     expect(settings.settingsWiFiCallingWebsheet.value).toBeNull()
+  })
+
+  it('reconnects without saving Wi-Fi Calling settings', async () => {
+    const settings = useModemWiFiCallingSettings({
+      modemId: computed(() => 'modem-1'),
+      enabled: computed(() => true),
+    })
+    await vi.waitFor(() => {
+      expect(api.getWiFiCallingSettings).toHaveBeenCalled()
+    })
+
+    await settings.reconnectWiFiCalling()
+
+    expect(api.createWiFiCallingSession).toHaveBeenCalledWith('modem-1')
+    expect(api.updateWiFiCallingSettings).not.toHaveBeenCalled()
+  })
+
+  it('restores the previous state when reconnect fails before starting', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    api.createWiFiCallingSession.mockRejectedValue(new Error('offline'))
+    const settings = useModemWiFiCallingSettings({
+      modemId: computed(() => 'modem-1'),
+      enabled: computed(() => true),
+    })
+    await vi.waitFor(() => {
+      expect(settings.settingsWiFiCallingState.value).toBe('websheet_required')
+    })
+
+    await settings.reconnectWiFiCalling()
+
+    expect(settings.settingsWiFiCallingState.value).toBe('websheet_required')
+    expect(settings.settingsWiFiCallingConnected.value).toBe(false)
+    expect(settings.settingsWiFiCallingDurationSeconds.value).toBe(0)
+    consoleError.mockRestore()
   })
 })

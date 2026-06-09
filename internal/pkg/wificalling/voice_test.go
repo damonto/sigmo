@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	vowifi "github.com/damonto/vowifi-go"
 	imssip "github.com/damonto/vowifi-go/ims/sip"
 	imsvoice "github.com/damonto/vowifi-go/ims/voice"
@@ -320,7 +321,7 @@ func TestForwardCallEventCreatesPendingOutgoingCall(t *testing.T) {
 			})
 			defer unsubscribe()
 
-			c.forwardCallEvent("modem-1", tt.event)
+			c.forwardCallEvent("modem-1", 0, tt.event)
 
 			state := c.sessions["modem-1"].calls[tt.event.CallID]
 			if state == nil {
@@ -386,7 +387,7 @@ func TestForwardCallEventStoresCallPointer(t *testing.T) {
 				voiceSubscribers: make(map[uint64]VoiceEventFunc),
 			}
 
-			c.forwardCallEvent("modem-1", tt.event)
+			c.forwardCallEvent("modem-1", 0, tt.event)
 
 			state := c.sessions["modem-1"].calls[tt.event.CallID]
 			if state == nil {
@@ -394,6 +395,73 @@ func TestForwardCallEventStoresCallPointer(t *testing.T) {
 			}
 			if state.call != tt.event.Call {
 				t.Fatalf("call pointer = %p, want %p", state.call, tt.event.Call)
+			}
+		})
+	}
+}
+
+func TestVoiceEventsIgnoreStaleSessionID(t *testing.T) {
+	at := time.Date(2026, 6, 9, 11, 30, 0, 0, time.UTC)
+	tests := []struct {
+		name  string
+		apply func(*coordinator)
+	}{
+		{
+			name: "call event",
+			apply: func(c *coordinator) {
+				c.forwardCallEvent("modem-1", 1, vowifi.CallEvent{
+					CallID: "call-1",
+					State:  imsvoice.CallStateFailed,
+					Cause:  "stale client closed",
+					At:     at,
+				})
+			},
+		},
+		{
+			name: "incoming call",
+			apply: func(c *coordinator) {
+				c.forwardIncomingCall(&mmodem.Modem{EquipmentIdentifier: "modem-1"}, "profile-1", 1, vowifi.IncomingCall{
+					Call:       &imsvoice.Call{},
+					FromNumber: "+12242255559",
+					ReceivedAt: at,
+				})
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &coordinator{
+				sessions: map[string]*sessionState{
+					"modem-1": {
+						id:        2,
+						profileID: "profile-1",
+						calls: map[string]*voiceCallState{
+							"call-1": {
+								info: VoiceCall{ID: "call-1", State: string(imsvoice.CallStateDialing)},
+							},
+						},
+						pendingDial: &pendingVoiceDial{profileID: "profile-1", number: "+12242255559", startedAt: at},
+					},
+				},
+				voiceSubscribers: make(map[uint64]VoiceEventFunc),
+			}
+			var events []VoiceEvent
+			unsubscribe := c.SubscribeVoiceEvents(func(event VoiceEvent) {
+				events = append(events, event)
+			})
+			defer unsubscribe()
+
+			tt.apply(c)
+
+			session := c.sessions["modem-1"]
+			if len(session.calls) != 1 {
+				t.Fatalf("stored calls = %d, want unchanged current session", len(session.calls))
+			}
+			if got := session.calls["call-1"].info.State; got != string(imsvoice.CallStateDialing) {
+				t.Fatalf("call state = %q, want dialing", got)
+			}
+			if len(events) != 0 {
+				t.Fatalf("events = %+v, want none", events)
 			}
 		})
 	}
@@ -457,7 +525,7 @@ func TestFinishFailedPendingVoiceDialReusesEventCall(t *testing.T) {
 			pending := c.setPendingVoiceDial("modem-1", "profile-1", "+12242255559")
 			pending.startedAt = at
 			c.sessions["modem-1"].pendingDial.startedAt = at
-			c.forwardCallEvent("modem-1", tt.event)
+			c.forwardCallEvent("modem-1", 0, tt.event)
 
 			got, ok := c.finishFailedPendingVoiceDial("modem-1", pending, tt.err)
 
@@ -479,7 +547,7 @@ func TestFinishFailedPendingVoiceDialReusesEventCall(t *testing.T) {
 			if c.sessions["modem-1"].pendingDial != nil {
 				t.Fatalf("pendingDial = %+v, want nil", c.sessions["modem-1"].pendingDial)
 			}
-			c.forwardCallEvent("modem-1", vowifi.CallEvent{
+			c.forwardCallEvent("modem-1", 0, vowifi.CallEvent{
 				CallID: tt.event.CallID + "-late",
 				State:  imsvoice.CallStateFailed,
 				Cause:  "late failed event",
@@ -517,7 +585,7 @@ func TestFinishFailedPendingVoiceDialConsumesPendingWithoutEvent(t *testing.T) {
 		t.Fatalf("pendingDial = %+v, want nil", c.sessions["modem-1"].pendingDial)
 	}
 
-	c.forwardCallEvent("modem-1", vowifi.CallEvent{
+	c.forwardCallEvent("modem-1", 0, vowifi.CallEvent{
 		CallID: "sip-call-487",
 		State:  imsvoice.CallStateFailed,
 		Cause:  "Request Terminated",

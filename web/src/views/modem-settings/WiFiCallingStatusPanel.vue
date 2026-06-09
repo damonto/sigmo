@@ -13,6 +13,7 @@ const props = defineProps<{
   durationSeconds: number
   isLoading: boolean
   isUpdating: boolean
+  isReconnecting: boolean
 }>()
 
 const emit = defineEmits<{
@@ -25,7 +26,7 @@ const normalizedState = computed(() => {
   if (props.isLoading) return 'loading'
   if (!props.enabled) return 'disabled'
   if (props.connected || props.state === 'connected') return 'connected'
-  if (props.state === 'connecting') return 'connecting'
+  if (props.isReconnecting || props.state === 'connecting') return 'connecting'
   if (props.state === 'websheet_required') return 'websheet_required'
   return 'disconnected'
 })
@@ -35,7 +36,8 @@ const canReconnect = computed(
     props.enabled &&
     normalizedState.value === 'disconnected' &&
     !props.isLoading &&
-    !props.isUpdating,
+    !props.isUpdating &&
+    !props.isReconnecting,
 )
 
 const statusLabel = computed(() => {

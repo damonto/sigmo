@@ -4,6 +4,7 @@ package wificalling
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log/slog"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/damonto/sigmo/internal/pkg/websheet"
 	vowifi "github.com/damonto/vowifi-go"
 	imsvoice "github.com/damonto/vowifi-go/ims/voice"
 	"github.com/godbus/dbus/v5"
@@ -149,7 +151,7 @@ func TestMarkConnectingResetsDisconnectedSession(t *testing.T) {
 		},
 	}
 
-	c.markConnecting("modem-1")
+	c.markConnecting("modem-1", 0)
 
 	session := c.sessions["modem-1"]
 	if session.client != nil {
@@ -167,6 +169,186 @@ func TestMarkConnectingResetsDisconnectedSession(t *testing.T) {
 	got := statusFromSession(Settings{Enabled: true}, session, "profile-1", now)
 	if got.State != StateConnecting {
 		t.Fatalf("State = %q, want %q", got.State, StateConnecting)
+	}
+}
+
+func TestSessionStateIgnoresStaleSessionID(t *testing.T) {
+	tests := []struct {
+		name          string
+		apply         func(*coordinator, *vowifi.Client, *vowifi.Client)
+		wantConnected bool
+		wantPhase     sessionPhase
+	}{
+		{
+			name: "mark connected",
+			apply: func(c *coordinator, oldClient *vowifi.Client, currentClient *vowifi.Client) {
+				c.markConnected("modem-1", 1, oldClient)
+			},
+			wantConnected: true,
+			wantPhase:     sessionPhaseConnected,
+		},
+		{
+			name: "mark connecting",
+			apply: func(c *coordinator, oldClient *vowifi.Client, currentClient *vowifi.Client) {
+				c.markConnecting("modem-1", 1)
+			},
+			wantConnected: true,
+			wantPhase:     sessionPhaseConnected,
+		},
+		{
+			name: "mark disconnected",
+			apply: func(c *coordinator, oldClient *vowifi.Client, currentClient *vowifi.Client) {
+				c.markDisconnected("modem-1", 1, currentClient)
+			},
+			wantConnected: true,
+			wantPhase:     sessionPhaseConnected,
+		},
+		{
+			name: "stop async",
+			apply: func(c *coordinator, oldClient *vowifi.Client, currentClient *vowifi.Client) {
+				c.stopAsyncSession("modem-1", 1)
+			},
+			wantConnected: true,
+			wantPhase:     sessionPhaseConnected,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldClient := &vowifi.Client{}
+			currentClient := &vowifi.Client{}
+			c := &coordinator{
+				sessions: map[string]*sessionState{
+					"modem-1": {
+						id:        2,
+						client:    currentClient,
+						connected: true,
+						phase:     sessionPhaseConnected,
+					},
+				},
+				voiceSubscribers: make(map[uint64]VoiceEventFunc),
+			}
+
+			tt.apply(c, oldClient, currentClient)
+
+			session := c.sessions["modem-1"]
+			if session.client != currentClient {
+				t.Fatal("stale session changed current client")
+			}
+			if session.connected != tt.wantConnected {
+				t.Fatalf("connected = %v, want %v", session.connected, tt.wantConnected)
+			}
+			if session.phase != tt.wantPhase {
+				t.Fatalf("phase = %q, want %q", session.phase, tt.wantPhase)
+			}
+		})
+	}
+}
+
+func TestStopDeletesPendingWebsheet(t *testing.T) {
+	tests := []struct {
+		name string
+		stop func(*coordinator)
+	}{
+		{
+			name: "stop",
+			stop: func(c *coordinator) {
+				c.stop("modem-1")
+			},
+		},
+		{
+			name: "stop async",
+			stop: func(c *coordinator) {
+				c.stopAsync("modem-1")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			broker := websheet.New(websheet.Config{AllowPrivateHosts: true})
+			sheet, err := broker.Create(context.Background(), websheet.Request{URL: "http://127.0.0.1/setup"})
+			if err != nil {
+				t.Fatalf("Create() error = %v", err)
+			}
+			info := sheet.Info()
+			c := &coordinator{
+				websheets: broker,
+				sessions: map[string]*sessionState{
+					"modem-1": {
+						websheet: sheet,
+					},
+				},
+				voiceSubscribers: make(map[uint64]VoiceEventFunc),
+			}
+
+			tt.stop(c)
+
+			if _, err := broker.Get(info.ID); !errors.Is(err, websheet.ErrNotFound) {
+				t.Fatalf("Get() error = %v, want %v", err, websheet.ErrNotFound)
+			}
+		})
+	}
+}
+
+func TestAttachWebsheetDeletesStaleSession(t *testing.T) {
+	tests := []struct {
+		name       string
+		sessions   map[string]*sessionState
+		sessionID  uint64
+		wantStored bool
+	}{
+		{
+			name: "current session",
+			sessions: map[string]*sessionState{
+				"modem-1": {id: 2},
+			},
+			sessionID:  2,
+			wantStored: true,
+		},
+		{
+			name: "stale session",
+			sessions: map[string]*sessionState{
+				"modem-1": {id: 2},
+			},
+			sessionID: 1,
+		},
+		{
+			name:      "detached session",
+			sessions:  make(map[string]*sessionState),
+			sessionID: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			broker := websheet.New(websheet.Config{AllowPrivateHosts: true})
+			sheet, err := broker.Create(context.Background(), websheet.Request{URL: "http://127.0.0.1/setup"})
+			if err != nil {
+				t.Fatalf("Create() error = %v", err)
+			}
+			info := sheet.Info()
+			c := &coordinator{
+				websheets: broker,
+				sessions:  tt.sessions,
+			}
+
+			c.attachWebsheet("modem-1", tt.sessionID, sheet)
+
+			_, err = broker.Get(info.ID)
+			if tt.wantStored {
+				if err != nil {
+					t.Fatalf("Get() error = %v, want stored websheet", err)
+				}
+				if c.sessions["modem-1"].websheet != sheet {
+					t.Fatal("current session websheet was not stored")
+				}
+				return
+			}
+			if !errors.Is(err, websheet.ErrNotFound) {
+				t.Fatalf("Get() error = %v, want %v", err, websheet.ErrNotFound)
+			}
+			if session := c.sessions["modem-1"]; session != nil && session.websheet != nil {
+				t.Fatal("stale websheet was stored on current session")
+			}
+		})
 	}
 }
 
@@ -201,7 +383,7 @@ func TestMarkDisconnectedFailsOpenCalls(t *testing.T) {
 	})
 	defer unsubscribe()
 
-	c.markDisconnected("modem-1", client)
+	c.markDisconnected("modem-1", 0, client)
 
 	session := c.sessions["modem-1"]
 	if session.connected || session.client != nil {
@@ -251,7 +433,7 @@ func TestMarkDisconnectedIgnoresStaleClient(t *testing.T) {
 		},
 		voiceSubscribers: make(map[uint64]VoiceEventFunc),
 	}
-	c.markDisconnected("modem-1", &vowifi.Client{})
+	c.markDisconnected("modem-1", 0, &vowifi.Client{})
 
 	session := c.sessions["modem-1"]
 	if !session.connected {

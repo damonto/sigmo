@@ -70,7 +70,10 @@ func (c *coordinator) start(modem *mmodem.Modem, profileID string) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	c.nextSessionID++
+	sessionID := c.nextSessionID
 	c.sessions[modemID] = &sessionState{
+		id:        sessionID,
 		cancel:    cancel,
 		done:      done,
 		reconnect: make(chan struct{}, 1),
@@ -82,23 +85,23 @@ func (c *coordinator) start(modem *mmodem.Modem, profileID string) {
 	c.mu.Unlock()
 	go func() {
 		defer close(done)
-		c.connectLoop(ctx, modem, profileID)
+		c.connectLoop(ctx, modem, profileID, sessionID)
 	}()
 }
 
-func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, profileID string) {
+func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, profileID string, sessionID uint64) {
 	for {
-		c.markConnecting(modem.EquipmentIdentifier)
-		client, err := c.connectWithRetry(ctx, modem)
+		c.markConnecting(modem.EquipmentIdentifier, sessionID)
+		client, err := c.connectWithRetry(ctx, modem, sessionID)
 		if err != nil {
 			return
 		}
-		c.markConnected(modem.EquipmentIdentifier, client)
-		c.watchClient(ctx, modem, profileID, client)
+		c.markConnected(modem.EquipmentIdentifier, sessionID, client)
+		c.watchClient(ctx, modem, profileID, sessionID, client)
 		if ctx.Err() != nil {
 			return
 		}
-		c.markConnecting(modem.EquipmentIdentifier)
+		c.markConnecting(modem.EquipmentIdentifier, sessionID)
 		delay := retryDelays[0]
 		slog.Warn("Wi-Fi Calling disconnected", "imei", modem.EquipmentIdentifier, "retryIn", delay)
 		if err := sleep(ctx, delay); err != nil {
@@ -107,10 +110,10 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 	}
 }
 
-func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem) (*vowifi.Client, error) {
+func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem, sessionID uint64) (*vowifi.Client, error) {
 	attempt := 0
 	for {
-		client, err := c.connectOnce(ctx, modem)
+		client, err := c.connectOnce(ctx, modem, sessionID)
 		if err == nil {
 			return client, nil
 		}
@@ -119,10 +122,10 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem)
 		}
 		if errors.Is(err, wfcsetup.ErrUserActionRequired) {
 			slog.Warn("Wi-Fi Calling requires carrier websheet", "imei", modem.EquipmentIdentifier, "error", err)
-			if err := c.waitForWebsheet(ctx, modem.EquipmentIdentifier); err != nil {
+			if err := c.waitForWebsheet(ctx, modem.EquipmentIdentifier, sessionID); err != nil {
 				if errors.Is(err, ErrWebsheetDismissed) {
 					slog.Info("Wi-Fi Calling carrier websheet dismissed", "imei", modem.EquipmentIdentifier)
-					c.stopAsync(modem.EquipmentIdentifier)
+					c.stopAsyncSession(modem.EquipmentIdentifier, sessionID)
 				}
 				return nil, err
 			}
@@ -142,7 +145,7 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem)
 	}
 }
 
-func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem) (*vowifi.Client, error) {
+func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sessionID uint64) (*vowifi.Client, error) {
 	reader, err := openReader(ctx, modem)
 	if err != nil {
 		return nil, err
@@ -162,7 +165,7 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem) (*vo
 				_ = client.Close()
 				return nil, errors.Join(err, serr)
 			}
-			c.setWebsheet(modem.EquipmentIdentifier, session)
+			c.attachWebsheet(modem.EquipmentIdentifier, sessionID, session)
 		}
 		_ = client.Close()
 		return nil, err
@@ -198,53 +201,53 @@ func terminalInfo(imei string) vowifi.TerminalInfo {
 	}
 }
 
-func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, profileID string, client *vowifi.Client) {
+func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, profileID string, sessionID uint64, client *vowifi.Client) {
 	events := client.Events()
 	defer events.Close()
 	smsEvents := client.SMS().Events()
 	defer smsEvents.Close()
 	voiceEvents := client.Voice().Events()
 	defer voiceEvents.Close()
-	reconnect := c.reconnectChannel(modem.EquipmentIdentifier, client)
+	reconnect := c.reconnectChannel(modem.EquipmentIdentifier, sessionID, client)
 	for {
 		select {
 		case msg, ok := <-smsEvents.Incoming:
 			if !ok {
-				c.markDisconnected(modem.EquipmentIdentifier, client)
+				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 				return
 			}
 			c.forwardIncoming(ctx, modem, profileID, msg)
 		case report, ok := <-smsEvents.Reports:
 			if !ok {
-				c.markDisconnected(modem.EquipmentIdentifier, client)
+				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 				return
 			}
 			c.forwardSMSReport(ctx, modem.EquipmentIdentifier, profileID, report)
 		case incoming, ok := <-voiceEvents.Incoming:
 			if !ok {
-				c.markDisconnected(modem.EquipmentIdentifier, client)
+				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 				return
 			}
-			c.forwardIncomingCall(modem, profileID, incoming)
+			c.forwardIncomingCall(modem, profileID, sessionID, incoming)
 		case event, ok := <-voiceEvents.Events:
 			if !ok {
-				c.markDisconnected(modem.EquipmentIdentifier, client)
+				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 				return
 			}
-			c.forwardCallEvent(modem.EquipmentIdentifier, event)
+			c.forwardCallEvent(modem.EquipmentIdentifier, sessionID, event)
 		case state, ok := <-events.State:
 			if !ok {
-				c.markDisconnected(modem.EquipmentIdentifier, client)
+				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 				return
 			}
 			if state.Status == vowifi.StatusFailed || state.Status == vowifi.StatusClosed {
 				_ = client.Close()
-				c.markDisconnected(modem.EquipmentIdentifier, client)
+				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 				return
 			}
 		case <-ctx.Done():
 			_ = client.Close()
-			c.markDisconnected(modem.EquipmentIdentifier, client)
+			c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 			return
 		case <-reconnect:
 			_ = client.Close()
@@ -253,11 +256,11 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 	}
 }
 
-func (c *coordinator) reconnectChannel(modemID string, client *vowifi.Client) <-chan struct{} {
+func (c *coordinator) reconnectChannel(modemID string, sessionID uint64, client *vowifi.Client) <-chan struct{} {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modemID]
-	if session == nil || session.client != client {
+	if session == nil || session.id != sessionID || session.client != client {
 		return nil
 	}
 	return session.reconnect
@@ -273,10 +276,10 @@ func (c *coordinator) connectedClient(modemID string, profileID string) (*vowifi
 	return session.client, nil
 }
 
-func (c *coordinator) markConnected(modemID string, client *vowifi.Client) {
+func (c *coordinator) markConnected(modemID string, sessionID uint64, client *vowifi.Client) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if session := c.sessions[modemID]; session != nil {
+	if session := c.sessions[modemID]; session != nil && session.id == sessionID {
 		session.client = client
 		session.connected = true
 		session.connectedAt = time.Now()
@@ -285,10 +288,10 @@ func (c *coordinator) markConnected(modemID string, client *vowifi.Client) {
 	}
 }
 
-func (c *coordinator) markConnecting(modemID string) {
+func (c *coordinator) markConnecting(modemID string, sessionID uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if session := c.sessions[modemID]; session != nil {
+	if session := c.sessions[modemID]; session != nil && session.id == sessionID {
 		session.client = nil
 		session.connected = false
 		session.connectedAt = time.Time{}
@@ -296,10 +299,10 @@ func (c *coordinator) markConnecting(modemID string) {
 	}
 }
 
-func (c *coordinator) markDisconnected(modemID string, client *vowifi.Client) {
+func (c *coordinator) markDisconnected(modemID string, sessionID uint64, client *vowifi.Client) {
 	c.mu.Lock()
 	session := c.sessions[modemID]
-	if session == nil || session.client != client {
+	if session == nil || session.id != sessionID || session.client != client {
 		c.mu.Unlock()
 		return
 	}
@@ -374,29 +377,96 @@ func (c *coordinator) stop(modemID string) {
 }
 
 func (c *coordinator) stopAsync(modemID string) {
-	c.stopSession(modemID, false)
+	session, events := c.detachSession(modemID)
+	c.closeDetachedSessionAsync(session, events)
+}
+
+func (c *coordinator) stopAsyncSession(modemID string, sessionID uint64) {
+	session, events := c.detachSessionByID(modemID, sessionID)
+	c.closeDetachedSessionAsync(session, events)
+}
+
+func (c *coordinator) restart(modem *mmodem.Modem, profileID string) {
+	if modem == nil || strings.TrimSpace(modem.EquipmentIdentifier) == "" {
+		return
+	}
+	session, events := c.detachSession(modem.EquipmentIdentifier)
+	c.closeDetachedSessionAsync(session, events)
+	c.start(modem, profileID)
 }
 
 func (c *coordinator) stopSession(modemID string, wait bool) {
+	session, events := c.detachSession(modemID)
+	c.closeDetachedSession(session, events, wait)
+}
+
+func (c *coordinator) closeDetachedSession(session *sessionState, events []VoiceCall, wait bool) {
+	if session == nil {
+		return
+	}
+	c.deleteSessionWebsheet(session)
+	if session.cancel != nil {
+		session.cancel()
+	}
+	closeSession(session, wait)
+	for _, call := range events {
+		c.publishVoiceEvent(call)
+	}
+}
+
+func (c *coordinator) closeDetachedSessionAsync(session *sessionState, events []VoiceCall) {
+	if session == nil {
+		return
+	}
+	c.deleteSessionWebsheet(session)
+	if session.cancel != nil {
+		session.cancel()
+	}
+	go closeSession(session, true)
+	for _, call := range events {
+		c.publishVoiceEvent(call)
+	}
+}
+
+func (c *coordinator) deleteSessionWebsheet(session *sessionState) {
+	if session == nil || session.websheet == nil || c.websheets == nil {
+		return
+	}
+	c.websheets.Delete(session.websheet.Info().ID)
+	session.websheet = nil
+}
+
+func (c *coordinator) detachSession(modemID string) (*sessionState, []VoiceCall) {
 	c.mu.Lock()
 	session := c.sessions[modemID]
 	delete(c.sessions, modemID)
 	events := disconnectedCallEvents(session)
 	c.mu.Unlock()
+	return session, events
+}
+
+func (c *coordinator) detachSessionByID(modemID string, sessionID uint64) (*sessionState, []VoiceCall) {
+	c.mu.Lock()
+	session := c.sessions[modemID]
+	if session == nil || session.id != sessionID {
+		c.mu.Unlock()
+		return nil, nil
+	}
+	delete(c.sessions, modemID)
+	events := disconnectedCallEvents(session)
+	c.mu.Unlock()
+	return session, events
+}
+
+func closeSession(session *sessionState, wait bool) {
 	if session == nil {
 		return
-	}
-	if session.cancel != nil {
-		session.cancel()
 	}
 	if session.client != nil {
 		_ = session.client.Close()
 	}
 	if wait && session.done != nil {
 		<-session.done
-	}
-	for _, call := range events {
-		c.publishVoiceEvent(call)
 	}
 }
 

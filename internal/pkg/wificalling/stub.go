@@ -46,6 +46,10 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 	return c.settings.Put(ctx, profileID, settings)
 }
 
+func (c *coordinator) Reconnect(context.Context, *mmodem.Modem) error {
+	return ErrUnavailable
+}
+
 func (c *coordinator) Status(ctx context.Context, modem *mmodem.Modem) (Status, error) {
 	settings, err := c.Settings(ctx, modem)
 	if err != nil {

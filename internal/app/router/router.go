@@ -87,6 +87,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		protected.PUT("/modems/:id/settings", h.UpdateSettings)
 		protected.GET("/modems/:id/wifi-calling-settings", h.WiFiCallingSettings)
 		protected.PUT("/modems/:id/wifi-calling-settings", h.UpdateWiFiCallingSettings)
+		protected.POST("/modems/:id/wifi-calling-sessions", h.CreateWiFiCallingSession)
 		protected.POST("/modems/:id/wifi-calling-websheets", h.StartWiFiCallingWebsheet)
 		protected.POST("/modems/:id/wifi-calling-emergency-address-websheets", h.StartWiFiCallingEmergencyAddressWebsheet)
 
