@@ -6,7 +6,7 @@ require (
 	github.com/damonto/euicc-go v1.1.3-0.20260608104233-cb35bff8aa20
 	github.com/damonto/ts43-go v0.0.0-20260608104423-08d96990ecbc
 	github.com/damonto/uicc-go v0.0.0-20260608104005-d1ab2eb31f2b
-	github.com/damonto/vowifi-go v0.0.0-20260609033002-3da33e88a0e7
+	github.com/damonto/vowifi-go v0.0.0-20260610030049-d73d411f6ef1
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
 	github.com/go-playground/validator/v10 v10.30.3
