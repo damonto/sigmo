@@ -10,7 +10,7 @@ permissions:
   packages: write
 
 env:
-  PRIVATE_GO_TAGS: esim_transfer,wifi_calling
+  PRIVATE_GO_TAGS: esim_transfer
   PRIVATE_GO_MODFILE: go.private.mod
 
 jobs:

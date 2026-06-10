@@ -17,7 +17,7 @@ permissions:
   id-token: write
 
 env:
-  PRIVATE_GO_TAGS: esim_transfer,wifi_calling
+  PRIVATE_GO_TAGS: esim_transfer
   PRIVATE_GO_MODFILE: go.private.mod
   PRIVATE_GOPRIVATE: github.com/damonto/*
 
