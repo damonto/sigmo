@@ -2,6 +2,12 @@ name: Build and Release
 
 on:
   workflow_dispatch:
+    inputs:
+      build_vowifi:
+        description: Build with VoWiFi support
+        required: false
+        default: false
+        type: boolean
   push:
     branches: [main]
     tags: [v*]
@@ -52,6 +58,12 @@ jobs:
         with:
           go-version: "stable"
 
+      - name: Validate manual VoWiFi input
+        if: github.event_name == 'workflow_dispatch' && inputs.build_vowifi && vars.SIGMO_PRIVATE_FEATURES != 'true'
+        run: |
+          echo "build_vowifi requires SIGMO_PRIVATE_FEATURES=true." >&2
+          exit 1
+
       - name: Configure private Go modules
         if: github.event_name != 'pull_request' && vars.SIGMO_PRIVATE_FEATURES == 'true'
         run: |
@@ -72,6 +84,7 @@ jobs:
           TARGET_MUSL: ${{ matrix.target.musl }}
           PUREGO_MUSL_LIBC: ${{ matrix.target.libc }}
           MUSL_INTERPRETER: ${{ matrix.target.interp }}
+          BUILD_VOWIFI: ${{ github.event_name == 'workflow_dispatch' && inputs.build_vowifi }}
         run: |
           set -eu
 
@@ -81,9 +94,14 @@ jobs:
           sumfile="go.sum"
           tags_arg=""
           if [ "${{ github.event_name }}" != "pull_request" ] && [ "${{ vars.SIGMO_PRIVATE_FEATURES }}" = "true" ]; then
+            private_tags="${PRIVATE_GO_TAGS}"
+            if [ "${BUILD_VOWIFI}" = "true" ]; then
+              private_tags="${private_tags},wifi_calling"
+            fi
+
             modfile="${PRIVATE_GO_MODFILE}"
             sumfile="${PRIVATE_GO_MODFILE%.mod}.sum"
-            tags_arg="-tags=${PRIVATE_GO_TAGS}"
+            tags_arg="-tags=${private_tags}"
           fi
 
           ldflags="-w -s -X main.BuildVersion=${BUILD_VERSION}"
