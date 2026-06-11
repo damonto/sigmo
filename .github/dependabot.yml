@@ -23,16 +23,14 @@ updates:
     schedule:
       interval: "weekly"
 
-  - package-ecosystem: "gomod" # See documentation for possible values
-    directory: "/" # Location of package manifests
-    registries:
-      - github-damonto
-    schedule:
-      interval: "weekly"
-
   - package-ecosystem: "gomod"
-    directory: "/pro"
+    directories:
+      - "/"
+      - "/pro"
     registries:
       - github-damonto
     schedule:
       interval: "weekly"
+    groups:
+      gomod-dependencies:
+        group-by: dependency-name

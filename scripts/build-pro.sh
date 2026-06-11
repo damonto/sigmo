@@ -196,7 +196,7 @@ prepare_arm64_musl_modfile() {
 
 	source_modfile="$(root_path "${PRO_MODFILE}")"
 	source_sumfile="$(root_path "${PRO_SUMFILE}")"
-	musl_modfile="${OUTPUT_DIR}/go.linux-arm64-musl.mod"
+	musl_modfile="$(root_path "${OUTPUT_DIR}/go.linux-arm64-musl.mod")"
 
 	(cd "${PRO_DIR}" && go mod download)
 
@@ -234,11 +234,15 @@ build_target() {
 	local musl="${6:-0}"
 	local binary
 	local archive
+	local build_archive
+	local build_binary
 	local ldflags
 	local go_args=()
 
 	binary="${recipient_dir}/sigmo-pro-${name}"
 	archive="${recipient_dir}/sigmo-pro-${name}.tar.gz"
+	build_binary="$(root_path "${binary}")"
+	build_archive="$(root_path "${archive}")"
 	ldflags="-w -s -X main.BuildVersion=${base_version}-TGID-${chat_id}"
 
 	if [ "${musl}" = "1" ]; then
@@ -253,12 +257,12 @@ build_target() {
 		-tags="${PRO_GO_TAGS}"
 		-trimpath
 		-ldflags="${ldflags}"
-		-o "${binary}"
+		-o "${build_binary}"
 		.
 	)
 
 	(cd "${PRO_DIR}" && env GOOS=linux GOARCH="${goarch}" CGO_ENABLED=0 go build "${go_args[@]}")
-	package_target "${binary}" "${archive}"
+	package_target "${build_binary}" "${build_archive}"
 	printf '%s\t%s\t%s\n' "${chat_id}" "${name}" "${archive}" >> "${MANIFEST}"
 }
 
