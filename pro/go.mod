@@ -26,8 +26,8 @@ require (
 	github.com/go-playground/validator/v10 v10.30.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
-	github.com/ncruces/go-sqlite3 v0.34.4 // indirect
-	github.com/ncruces/go-sqlite3-wasm/v2 v2.6.35302 // indirect
+	github.com/ncruces/go-sqlite3 v0.35.0 // indirect
+	github.com/ncruces/go-sqlite3-wasm/v3 v3.1.35302 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/nyaruka/phonenumbers v1.8.0 // indirect
 	github.com/pion/datachannel v1.6.0 // indirect
@@ -46,10 +46,10 @@ require (
 	github.com/things-go/go-socks5 v0.1.1 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/wneessen/go-mail v0.7.3 // indirect
-	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
