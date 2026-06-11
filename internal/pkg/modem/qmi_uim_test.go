@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/damonto/uicc-go/qualcomm/uim"
+	"github.com/damonto/uicc-go/qcom/uim"
 )
 
 func TestQMISIMSlot(t *testing.T) {

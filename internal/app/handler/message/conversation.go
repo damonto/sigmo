@@ -44,13 +44,13 @@ func buildMessageResponses(messages []storage.Message) []MessageResponse {
 
 func buildMessageResponse(msg storage.Message) MessageResponse {
 	return MessageResponse{
-		ID:          msg.ID,
-		Sender:      msg.Sender,
-		Recipient:   msg.Recipient,
-		Text:        msg.Text,
-		Timestamp:   msg.Timestamp,
-		Status:      msg.Status,
-		Incoming:    msg.Incoming,
-		WiFiCalling: msg.WiFiCalling,
+		ID:        msg.ID,
+		Sender:    msg.Sender,
+		Recipient: msg.Recipient,
+		Text:      msg.Text,
+		Timestamp: msg.Timestamp,
+		Status:    msg.Status,
+		Incoming:  msg.Incoming,
+		Routed:    msg.Routed,
 	}
 }

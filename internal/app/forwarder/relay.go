@@ -11,16 +11,19 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
-	pcall "github.com/damonto/sigmo/internal/pkg/call"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/notify"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
-	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 const incomingNotificationFreshnessWindow = 30 * time.Minute
+
+const (
+	callDirectionIncoming = "incoming"
+	callStateRinging      = "ringing"
+)
 
 type Relay struct {
 	store         *settings.Store
@@ -166,42 +169,23 @@ func (r *Relay) stopAll() {
 	}
 }
 
-func (r *Relay) ForwardWiFiCallingSMS(ctx context.Context, incoming wificalling.IncomingSMS) error {
-	if !freshIncomingMessage(incoming.Message, time.Now()) {
-		slog.Debug("skipping stale Wi-Fi Calling SMS", "imei", incoming.ModemID, "externalKey", incoming.Message.ExternalKey, "timestamp", incoming.Message.Timestamp)
+func (r *Relay) ForwardRoutedSMS(ctx context.Context, modemID string, message storage.Message) error {
+	if !freshIncomingMessage(message, time.Now()) {
+		slog.Debug("skipping stale routed SMS", "imei", modemID, "externalKey", message.ExternalKey, "timestamp", message.Timestamp)
 		return nil
 	}
-	inserted, err := r.messages.InsertMessage(ctx, incoming.Message)
+	inserted, err := r.messages.InsertMessage(ctx, message)
 	if err != nil {
 		return err
 	}
 	if !inserted {
-		slog.Debug("skipping known Wi-Fi Calling SMS", "imei", incoming.ModemID, "externalKey", incoming.Message.ExternalKey)
+		slog.Debug("skipping known routed SMS", "imei", modemID, "externalKey", message.ExternalKey)
 		return nil
 	}
 	r.mu.Lock()
 	notifier := r.notifier
 	r.mu.Unlock()
-	return notifier.Send(ctx, r.formatStoredMessage(incoming.ModemID, incoming.Message))
-}
-
-func (r *Relay) ForwardCalls(ctx context.Context, calls *pcall.Service) error {
-	if calls == nil {
-		return errors.New("call service is required")
-	}
-	events, unsubscribe := calls.Subscribe(16)
-	defer unsubscribe()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case event := <-events:
-			if err := r.ForwardCall(ctx, event.Call); err != nil {
-				slog.Warn("forward call notification", "call_id", event.Call.ID, "imei", event.Call.ModemID, "error", err)
-			}
-		}
-	}
+	return notifier.Send(ctx, r.formatStoredMessage(modemID, message))
 }
 
 func (r *Relay) ForwardCall(ctx context.Context, call storage.Call) error {
@@ -259,7 +243,7 @@ func freshIncomingMessage(message storage.Message, now time.Time) bool {
 }
 
 func freshIncomingCall(call storage.Call, now time.Time) bool {
-	if call.Direction != pcall.DirectionIncoming || call.State != pcall.StateRinging {
+	if call.Direction != callDirectionIncoming || call.State != callStateRinging {
 		return false
 	}
 	timestamp := call.StartedAt
@@ -293,7 +277,7 @@ func (r *Relay) formatStoredCall(call storage.Call) notifyevent.CallEvent {
 		From:     strings.TrimSpace(call.Number),
 		Time:     call.StartedAt,
 		State:    call.State,
-		Incoming: call.Direction == pcall.DirectionIncoming,
+		Incoming: call.Direction == callDirectionIncoming,
 	}
 }
 

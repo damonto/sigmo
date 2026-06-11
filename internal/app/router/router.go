@@ -10,7 +10,6 @@ import (
 	"github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	hauth "github.com/damonto/sigmo/internal/app/handler/auth"
-	hcall "github.com/damonto/sigmo/internal/app/handler/call"
 	"github.com/damonto/sigmo/internal/app/handler/capability"
 	"github.com/damonto/sigmo/internal/app/handler/esim"
 	"github.com/damonto/sigmo/internal/app/handler/euicc"
@@ -21,17 +20,17 @@ import (
 	"github.com/damonto/sigmo/internal/app/handler/notification"
 	hsettings "github.com/damonto/sigmo/internal/app/handler/settings"
 	"github.com/damonto/sigmo/internal/app/handler/ussd"
-	hwebsheet "github.com/damonto/sigmo/internal/app/handler/websheet"
 	appmiddleware "github.com/damonto/sigmo/internal/app/middleware"
-	pcall "github.com/damonto/sigmo/internal/pkg/call"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
+	pmessage "github.com/damonto/sigmo/internal/pkg/message"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
-	pwebsheet "github.com/damonto/sigmo/internal/pkg/websheet"
-	"github.com/damonto/sigmo/internal/pkg/wificalling"
+	pussd "github.com/damonto/sigmo/internal/pkg/ussd"
 	"github.com/damonto/sigmo/web"
 )
+
+type Extension func(*echo.Group, RegisterConfig) error
 
 type RegisterConfig struct {
 	Store              *settings.Store
@@ -40,9 +39,10 @@ type RegisterConfig struct {
 	Relay              *forwarder.Relay
 	NetworkPreferences *modem.NetworkPreferences
 	Storage            *storage.Store
-	WiFiCalling        wificalling.Coordinator
-	Calls              *pcall.Service
-	Websheets          *pwebsheet.Broker
+	MessageRoute       pmessage.Route
+	USSDRoute          pussd.Route
+	Features           []string
+	Extensions         []Extension
 }
 
 func Register(e *echo.Echo, deps RegisterConfig) error {
@@ -58,7 +58,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 
 	v1 := e.Group("/api/v1")
 
-	capabilityHandler := capability.New()
+	capabilityHandler := capability.New(deps.Features)
 	v1.GET("/capabilities", capabilityHandler.List)
 
 	authStore := auth.NewStore()
@@ -75,9 +75,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.PUT("/settings", h.Update)
 		}
 
-		hwebsheet.New(deps.Websheets).Register(protected)
-
-		h := hmodem.New(deps.Store, deps.Registry, deps.Internet, deps.WiFiCalling)
+		h := hmodem.New(deps.Store, deps.Registry, deps.Internet)
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
 		protected.POST("/modems/:id/sim-unlocks", h.UnlockSIM)
@@ -85,14 +83,9 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		protected.PUT("/modems/:id/msisdn", h.UpdateMSISDN)
 		protected.GET("/modems/:id/settings", h.Settings)
 		protected.PUT("/modems/:id/settings", h.UpdateSettings)
-		protected.GET("/modems/:id/wifi-calling-settings", h.WiFiCallingSettings)
-		protected.PUT("/modems/:id/wifi-calling-settings", h.UpdateWiFiCallingSettings)
-		protected.POST("/modems/:id/wifi-calling-sessions", h.CreateWiFiCallingSession)
-		protected.POST("/modems/:id/wifi-calling-websheets", h.StartWiFiCallingWebsheet)
-		protected.POST("/modems/:id/wifi-calling-emergency-address-websheets", h.StartWiFiCallingEmergencyAddressWebsheet)
 
 		{
-			h := message.New(deps.Registry, deps.Storage, deps.WiFiCalling)
+			h := message.New(deps.Registry, deps.Storage, deps.MessageRoute)
 			protected.GET("/modems/:id/messages", h.List)
 			protected.GET("/modems/:id/messages/:participant", h.ListByParticipant)
 			protected.POST("/modems/:id/messages", h.Send)
@@ -100,19 +93,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		}
 
 		{
-			h := hcall.New(deps.Registry, deps.Calls)
-			protected.GET("/call-media/ice-servers", h.WebRTCICEServers)
-			protected.GET("/modems/:id/calls", h.List)
-			protected.POST("/modems/:id/calls", h.Dial)
-			protected.GET("/modems/:id/calls/events", h.Events)
-			protected.GET("/modems/:id/calls/:callID/webrtc-sessions", h.WebRTCSession)
-			protected.POST("/modems/:id/calls/:callID/dtmf-events", h.SendDTMF)
-			protected.PATCH("/modems/:id/calls/:callID", h.Update)
-			protected.DELETE("/modems/:id/calls/:callID", h.Delete)
-		}
-
-		{
-			h := ussd.New(deps.Registry, deps.WiFiCalling)
+			h := ussd.New(deps.Registry, deps.USSDRoute)
 			protected.POST("/modems/:id/ussd", h.Execute)
 		}
 
@@ -143,11 +124,14 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		}
 
 		{
-			h := esim.New(deps.Store, deps.Registry, deps.Internet, deps.Websheets)
+			h := esim.New(esim.Config{
+				Store:    deps.Store,
+				Registry: deps.Registry,
+				Internet: deps.Internet,
+			})
 			protected.GET("/modems/:id/esims", h.List)
 			protected.POST("/modems/:id/esim-discoveries", h.Discovery)
 			protected.GET("/modems/:id/esims/download-sessions", h.Download)
-			h.RegisterTransferRoutes(protected)
 			protected.PUT("/modems/:id/esims/:iccid/activation", h.Enable)
 			protected.PUT("/modems/:id/esims/:iccid/nickname", h.UpdateNickname)
 			protected.DELETE("/modems/:id/esims/:iccid", h.Delete)
@@ -158,6 +142,12 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.GET("/modems/:id/notifications", h.List)
 			protected.POST("/modems/:id/notifications/:sequence/deliveries", h.Resend)
 			protected.DELETE("/modems/:id/notifications/:sequence", h.Delete)
+		}
+
+		for _, extension := range deps.Extensions {
+			if err := extension(protected, deps); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

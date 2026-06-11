@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	MessageSourceModem       = "modem"
-	MessageSourceWiFiCalling = "wifi_calling"
+	MessageSourceModem  = "modem"
+	MessageSourceRouted = "wifi_calling"
 )
 
 type Message struct {
@@ -30,7 +30,7 @@ type Message struct {
 	Timestamp   time.Time
 	Status      string
 	Incoming    bool
-	WiFiCalling bool
+	Routed      bool
 }
 
 type MessageStatusUpdate struct {
@@ -54,7 +54,7 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT DO NOTHING
 	`, msg.ProfileID, msg.Source, msg.ExternalKey, msg.Fingerprint, msg.Sender, msg.Recipient, msg.Text,
-		timeText(msg.Timestamp), msg.Status, boolInt(msg.Incoming), boolInt(msg.WiFiCalling), now, now)
+		timeText(msg.Timestamp), msg.Status, boolInt(msg.Incoming), boolInt(msg.Routed), now, now)
 	if err != nil {
 		return false, fmt.Errorf("insert message: %w", err)
 	}
@@ -241,7 +241,7 @@ type messageScanner interface {
 func scanMessage(row messageScanner) (Message, error) {
 	var msg Message
 	var timestamp string
-	var incoming, wifiCalling int
+	var incoming, routed int
 	var err error
 	if err := row.Scan(
 		&msg.ID,
@@ -255,7 +255,7 @@ func scanMessage(row messageScanner) (Message, error) {
 		&timestamp,
 		&msg.Status,
 		&incoming,
-		&wifiCalling,
+		&routed,
 	); err != nil {
 		return Message{}, fmt.Errorf("scan message: %w", err)
 	}
@@ -263,7 +263,7 @@ func scanMessage(row messageScanner) (Message, error) {
 		return Message{}, fmt.Errorf("parse message timestamp: %w", err)
 	}
 	msg.Incoming = incoming != 0
-	msg.WiFiCalling = wifiCalling != 0
+	msg.Routed = routed != 0
 	return msg, nil
 }
 

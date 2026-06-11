@@ -11,7 +11,6 @@ import (
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	pussd "github.com/damonto/sigmo/internal/pkg/ussd"
-	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 type Handler struct {
@@ -32,10 +31,10 @@ const (
 
 var errExecuteTimeout = errors.New("ussd request timed out, please retry")
 
-func New(registry *mmodem.Registry, wifiCalling wificalling.Coordinator) *Handler {
+func New(registry *mmodem.Registry, route pussd.Route) *Handler {
 	return &Handler{
 		registry: registry,
-		service:  pussd.New(wifiCalling),
+		service:  pussd.New(route),
 	}
 }
 

@@ -30,7 +30,7 @@ func TestCatalogBuildResponseLockedModem(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			catalog := newCatalog(settings.NewMemoryStore(settings.Default()), nil, nil)
+			catalog := newCatalog(settings.NewMemoryStore(settings.Default()), nil)
 			device := &mmodem.Modem{
 				EquipmentIdentifier: "860588043408833",
 				Manufacturer:        "Quectel",

@@ -40,10 +40,10 @@ func TestWriteSendMessageError(t *testing.T) {
 			wantErrorCode: errorCodeTextRequired,
 		},
 		{
-			name:          "wifi calling disconnected",
-			err:           pmessage.ErrWiFiCallingNotConnected,
+			name:          "message route disconnected",
+			err:           pmessage.ErrRouteNotConnected,
 			wantStatus:    http.StatusServiceUnavailable,
-			wantErrorCode: errorCodeWiFiCallingNotConnected,
+			wantErrorCode: errorCodeMessageRouteNotConnected,
 		},
 		{
 			name:           "send failed",

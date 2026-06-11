@@ -11,52 +11,50 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
-	"github.com/damonto/sigmo/internal/pkg/websheet"
-	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 func TestSendRoutesMessages(t *testing.T) {
 	tests := []struct {
 		name          string
-		status        wificalling.Status
+		status        RouteStatus
 		statusErr     error
 		sendErr       error
-		wifiSendErr   error
+		routeSendErr  error
 		wantTo        string
 		wantErr       string
 		wantErrIs     error
-		wantWiFiSends int
+		wantRouteSend int
 		wantModemSend int
 	}{
 		{
-			name:          "preferred wifi calling sends without modem",
-			status:        wificalling.Status{Settings: wificalling.Settings{Preferred: true}, Connected: true},
+			name:          "preferred route sends without modem",
+			status:        RouteStatus{Preferred: true, Connected: true},
 			wantTo:        "777",
-			wantWiFiSends: 1,
+			wantRouteSend: 1,
 		},
 		{
-			name:          "connected wifi calling fallback after modem send fails",
-			status:        wificalling.Status{Connected: true},
+			name:          "connected route fallback after modem send fails",
+			status:        RouteStatus{Connected: true},
 			sendErr:       errors.New("modem rejected message"),
 			wantTo:        "777",
-			wantWiFiSends: 1,
+			wantRouteSend: 1,
 			wantModemSend: 1,
 		},
 		{
-			name:      "wifi calling status error stops send",
+			name:      "route status error stops send",
 			statusErr: errors.New("settings unavailable"),
-			wantErr:   "read wifi calling status: settings unavailable",
+			wantErr:   "read message route status: settings unavailable",
 		},
 		{
-			name:          "preferred wifi calling disconnected",
-			status:        wificalling.Status{Settings: wificalling.Settings{Preferred: true}, Connected: true},
-			wifiSendErr:   wificalling.ErrNotConnected,
-			wantErr:       "send SMS to 777 over wifi calling: wifi calling is not connected",
-			wantErrIs:     ErrWiFiCallingNotConnected,
-			wantWiFiSends: 1,
+			name:          "preferred route disconnected",
+			status:        RouteStatus{Preferred: true, Connected: true},
+			routeSendErr:  ErrRouteNotConnected,
+			wantErr:       "send SMS to 777 over selected route: message route is not connected",
+			wantErrIs:     ErrRouteNotConnected,
+			wantRouteSend: 1,
 		},
 		{
-			name:          "modem error is returned when wifi calling is disconnected",
+			name:          "modem error is returned when route is disconnected",
 			sendErr:       errors.New("modem rejected message"),
 			wantErr:       "send SMS to 777: modem rejected message",
 			wantModemSend: 1,
@@ -67,22 +65,22 @@ func TestSendRoutesMessages(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			store := testStore(t)
-			wifiCalling := &fakeWiFiCalling{
+			route := &fakeRoute{
 				status:    tt.status,
 				statusErr: tt.statusErr,
 				message: storage.Message{
 					ModemID:     "modem-1",
 					ProfileID:   "profile-a",
-					Source:      storage.MessageSourceWiFiCalling,
+					Source:      storage.MessageSourceRouted,
 					ExternalKey: "wifi-message-" + tt.name,
 					Sender:      "+12025550199",
 					Recipient:   "777",
 					Text:        "BAL",
 					Timestamp:   time.Date(2026, 5, 29, 10, 0, 0, 0, time.UTC),
 					Status:      "sent",
-					WiFiCalling: true,
+					Routed:      true,
 				},
-				sendErr: tt.wifiSendErr,
+				sendErr: tt.routeSendErr,
 			}
 			device := &fakeModemDevice{
 				id:      "modem-1",
@@ -90,7 +88,7 @@ func TestSendRoutesMessages(t *testing.T) {
 				number:  "+12025550199",
 				sendErr: tt.sendErr,
 			}
-			service := New(store, wifiCalling)
+			service := New(store, route)
 
 			got, err := service.send(ctx, device, "777", "BAL")
 			if tt.wantErr != "" {
@@ -106,15 +104,15 @@ func TestSendRoutesMessages(t *testing.T) {
 			if got != tt.wantTo {
 				t.Fatalf("send() = %q, want %q", got, tt.wantTo)
 			}
-			if wifiCalling.sendSMSCalls != tt.wantWiFiSends {
-				t.Fatalf("Wi-Fi Calling sends = %d, want %d", wifiCalling.sendSMSCalls, tt.wantWiFiSends)
+			if route.sendSMSCalls != tt.wantRouteSend {
+				t.Fatalf("route sends = %d, want %d", route.sendSMSCalls, tt.wantRouteSend)
 			}
-			wantStatusApplies := tt.wantWiFiSends
+			wantStatusApplies := tt.wantRouteSend
 			if tt.wantErr != "" {
 				wantStatusApplies = 0
 			}
-			if wifiCalling.applySMSStatusCalls != wantStatusApplies {
-				t.Fatalf("Wi-Fi Calling status applies = %d, want %d", wifiCalling.applySMSStatusCalls, wantStatusApplies)
+			if route.applySMSStatusCalls != wantStatusApplies {
+				t.Fatalf("route status applies = %d, want %d", route.applySMSStatusCalls, wantStatusApplies)
 			}
 			if device.sendCalls != tt.wantModemSend {
 				t.Fatalf("modem sends = %d, want %d", device.sendCalls, tt.wantModemSend)
@@ -127,7 +125,7 @@ func TestDeleteByParticipantDeletesOnlyModemMessagesFromBackend(t *testing.T) {
 	ctx := context.Background()
 	store := testStore(t)
 	device := &fakeModemDevice{profile: "profile-a"}
-	service := New(store, &fakeWiFiCalling{})
+	service := New(store, &fakeRoute{})
 	messages := []storage.Message{
 		{
 			ProfileID:   "profile-a",
@@ -141,13 +139,13 @@ func TestDeleteByParticipantDeletesOnlyModemMessagesFromBackend(t *testing.T) {
 		},
 		{
 			ProfileID:   "profile-a",
-			Source:      storage.MessageSourceWiFiCalling,
+			Source:      storage.MessageSourceRouted,
 			ExternalKey: "wifi-message-1",
 			Sender:      "+12025550199",
 			Recipient:   "777",
 			Text:        "BAL",
 			Timestamp:   time.Date(2026, 5, 29, 11, 1, 0, 0, time.UTC),
-			WiFiCalling: true,
+			Routed:      true,
 		},
 	}
 	for _, msg := range messages {
@@ -168,27 +166,27 @@ func TestListConversationsPassesSearchQueryToStorage(t *testing.T) {
 	ctx := context.Background()
 	store := testStore(t)
 	device := &fakeModemDevice{profile: "profile-a"}
-	service := New(store, &fakeWiFiCalling{})
+	service := New(store, &fakeRoute{})
 	messages := []storage.Message{
 		{
 			ProfileID:   "profile-a",
-			Source:      storage.MessageSourceWiFiCalling,
+			Source:      storage.MessageSourceRouted,
 			ExternalKey: "wifi-message-1",
 			Sender:      "+12025550199",
 			Recipient:   "777",
 			Text:        "balance",
 			Timestamp:   time.Date(2026, 5, 29, 11, 0, 0, 0, time.UTC),
-			WiFiCalling: true,
+			Routed:      true,
 		},
 		{
 			ProfileID:   "profile-a",
-			Source:      storage.MessageSourceWiFiCalling,
+			Source:      storage.MessageSourceRouted,
 			ExternalKey: "wifi-message-2",
 			Sender:      "+12025550199",
 			Recipient:   "888",
 			Text:        "promo",
 			Timestamp:   time.Date(2026, 5, 29, 11, 1, 0, 0, time.UTC),
-			WiFiCalling: true,
+			Routed:      true,
 		},
 	}
 	for _, msg := range messages {
@@ -239,8 +237,8 @@ func (f *fakeModemDevice) modemID() string { return f.id }
 
 func (f *fakeModemDevice) phoneNumber() string { return f.number }
 
-type fakeWiFiCalling struct {
-	status              wificalling.Status
+type fakeRoute struct {
+	status              RouteStatus
 	statusErr           error
 	message             storage.Message
 	sendErr             error
@@ -248,80 +246,18 @@ type fakeWiFiCalling struct {
 	applySMSStatusCalls int
 }
 
-func (fakeWiFiCalling) Run(context.Context, *mmodem.Registry) error { return nil }
-
-func (fakeWiFiCalling) Settings(context.Context, *mmodem.Modem) (wificalling.Settings, error) {
-	return wificalling.Settings{}, nil
-}
-
-func (fakeWiFiCalling) UpdateSettings(context.Context, *mmodem.Modem, wificalling.Settings) error {
-	return nil
-}
-
-func (f fakeWiFiCalling) Status(context.Context, *mmodem.Modem) (wificalling.Status, error) {
+func (f fakeRoute) Status(context.Context, *mmodem.Modem) (RouteStatus, error) {
 	return f.status, f.statusErr
 }
 
-func (fakeWiFiCalling) EmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool {
-	return false
-}
-
-func (fakeWiFiCalling) StartWebsheet(context.Context, *mmodem.Modem) (websheet.Info, error) {
-	return websheet.Info{}, nil
-}
-
-func (fakeWiFiCalling) StartEmergencyAddressUpdate(context.Context, *mmodem.Modem) (websheet.Info, error) {
-	return websheet.Info{}, nil
-}
-
-func (f *fakeWiFiCalling) SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error) {
+func (f *fakeRoute) SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error) {
 	f.sendSMSCalls++
 	return f.message, f.sendErr
 }
 
-func (f *fakeWiFiCalling) ApplyPendingSMSStatus(context.Context, storage.Message) error {
+func (f *fakeRoute) ApplyPendingSMSStatus(context.Context, storage.Message) error {
 	f.applySMSStatusCalls++
 	return nil
-}
-
-func (fakeWiFiCalling) ExecuteUSSD(context.Context, *mmodem.Modem, string, string) (string, error) {
-	return "", nil
-}
-
-func (fakeWiFiCalling) DialCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
-	return wificalling.VoiceCall{}, nil
-}
-
-func (fakeWiFiCalling) AnswerCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
-	return wificalling.VoiceCall{}, nil
-}
-
-func (fakeWiFiCalling) RejectCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
-	return wificalling.VoiceCall{}, nil
-}
-
-func (fakeWiFiCalling) HangupCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
-	return wificalling.VoiceCall{}, nil
-}
-
-func (fakeWiFiCalling) HoldCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
-	return wificalling.VoiceCall{}, nil
-}
-
-func (fakeWiFiCalling) ResumeCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
-	return wificalling.VoiceCall{}, nil
-}
-
-func (fakeWiFiCalling) SendCallDTMF(context.Context, *mmodem.Modem, string, string) error {
-	return nil
-}
-
-func (fakeWiFiCalling) OpenCallMedia(context.Context, *mmodem.Modem, string) (wificalling.MediaSession, error) {
-	return nil, nil
-}
-
-func (fakeWiFiCalling) SubscribeVoiceEvents(wificalling.VoiceEventFunc) func() {
-	return func() {}
 }
 
 func testStore(t *testing.T) *storage.Store {

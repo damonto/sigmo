@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/damonto/uicc-go/qualcomm/qmi"
-	"github.com/damonto/uicc-go/qualcomm/uim"
+	"github.com/damonto/uicc-go/qcom/qmi"
+	"github.com/damonto/uicc-go/qcom/uim"
 )
 
 const qmiMaxSIMSlot = 5

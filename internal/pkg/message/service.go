@@ -11,16 +11,20 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
-	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 type Service struct {
-	store       *storage.Store
-	wifiCalling wifiCallingSMS
+	store *storage.Store
+	route Route
 }
 
-type wifiCallingSMS interface {
-	Status(context.Context, *mmodem.Modem) (wificalling.Status, error)
+type RouteStatus struct {
+	Preferred bool
+	Connected bool
+}
+
+type Route interface {
+	Status(context.Context, *mmodem.Modem) (RouteStatus, error)
 	SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error)
 	ApplyPendingSMSStatus(context.Context, storage.Message) error
 }
@@ -39,8 +43,8 @@ type realModemDevice struct {
 	modemRef *mmodem.Modem
 }
 
-func New(store *storage.Store, wifiCalling wifiCallingSMS) *Service {
-	return &Service{store: store, wifiCalling: wifiCalling}
+func New(store *storage.Store, route Route) *Service {
+	return &Service{store: store, route: route}
 }
 
 func (s *Service) ListConversations(ctx context.Context, modem *mmodem.Modem, query string) ([]storage.Message, error) {
@@ -122,14 +126,14 @@ func (s *Service) send(ctx context.Context, device modemDevice, to string, text 
 	if err != nil {
 		return "", err
 	}
-	settings, err := s.wifiCalling.Status(ctx, device.modem())
-	if err != nil && !errors.Is(err, wificalling.ErrUnavailable) {
-		return "", fmt.Errorf("read wifi calling status: %w", err)
+	status, err := s.routeStatus(ctx, device.modem())
+	if err != nil {
+		return "", fmt.Errorf("read message route status: %w", err)
 	}
-	if settings.Preferred && settings.Connected {
-		msg, err := s.wifiCalling.SendSMS(ctx, device.modem(), to, text)
+	if status.Preferred && status.Connected {
+		msg, err := s.route.SendSMS(ctx, device.modem(), to, text)
 		if err != nil {
-			return "", mapWiFiCallingSendError(to, err)
+			return "", mapRouteSendError(to, err)
 		}
 		if err := s.insertSentMessage(ctx, msg); err != nil {
 			return "", err
@@ -138,9 +142,9 @@ func (s *Service) send(ctx context.Context, device modemDevice, to string, text 
 	}
 	sms, err := device.sendSMS(ctx, to, text)
 	if err != nil {
-		if settings.Connected {
-			msg, werr := s.wifiCalling.SendSMS(ctx, device.modem(), to, text)
-			if werr == nil {
+		if status.Connected && s.route != nil {
+			msg, routeErr := s.route.SendSMS(ctx, device.modem(), to, text)
+			if routeErr == nil {
 				return to, s.insertSentMessage(ctx, msg)
 			}
 		}
@@ -152,11 +156,22 @@ func (s *Service) send(ctx context.Context, device modemDevice, to string, text 
 	return to, nil
 }
 
-func mapWiFiCallingSendError(to string, err error) error {
-	if errors.Is(err, wificalling.ErrNotConnected) {
-		return fmt.Errorf("send SMS to %s over wifi calling: %w", to, ErrWiFiCallingNotConnected)
+func (s *Service) routeStatus(ctx context.Context, modem *mmodem.Modem) (RouteStatus, error) {
+	if s.route == nil {
+		return RouteStatus{}, nil
 	}
-	return fmt.Errorf("send SMS to %s over wifi calling: %w", to, err)
+	status, err := s.route.Status(ctx, modem)
+	if err != nil && !errors.Is(err, ErrRouteUnavailable) {
+		return RouteStatus{}, err
+	}
+	return status, nil
+}
+
+func mapRouteSendError(to string, err error) error {
+	if errors.Is(err, ErrRouteNotConnected) {
+		return fmt.Errorf("send SMS to %s over selected route: %w", to, ErrRouteNotConnected)
+	}
+	return fmt.Errorf("send SMS to %s over selected route: %w", to, err)
 }
 
 func (s *Service) insertSentMessage(ctx context.Context, msg storage.Message) error {
@@ -173,9 +188,9 @@ func (s *Service) insertSentMessage(ctx context.Context, msg storage.Message) er
 			"timestamp", msg.Timestamp,
 		)
 	}
-	if msg.Source == storage.MessageSourceWiFiCalling && s.wifiCalling != nil {
-		if err := s.wifiCalling.ApplyPendingSMSStatus(ctx, msg); err != nil {
-			return fmt.Errorf("apply wifi calling SMS status: %w", err)
+	if s.route != nil {
+		if err := s.route.ApplyPendingSMSStatus(ctx, msg); err != nil {
+			return fmt.Errorf("apply routed SMS status: %w", err)
 		}
 	}
 	return nil

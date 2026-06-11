@@ -118,14 +118,14 @@ func TestMessages(t *testing.T) {
 			message: Message{
 				ModemID:     "modem-a",
 				ProfileID:   "891",
-				Source:      MessageSourceWiFiCalling,
+				Source:      MessageSourceRouted,
 				ExternalKey: "sms-1",
 				Sender:      "+200",
 				Recipient:   "+100",
 				Text:        "reply",
 				Timestamp:   base.Add(time.Minute),
 				Status:      "sent",
-				WiFiCalling: true,
+				Routed:      true,
 			},
 			wantInsert: true,
 		},
@@ -229,14 +229,14 @@ func TestUpdateMessageStatus(t *testing.T) {
 		{
 			ModemID:     "modem-a",
 			ProfileID:   "profile-a",
-			Source:      MessageSourceWiFiCalling,
+			Source:      MessageSourceRouted,
 			ExternalKey: "outgoing-1",
 			Sender:      "+100",
 			Recipient:   "+200",
 			Text:        "hello",
 			Timestamp:   base,
 			Status:      "sent",
-			WiFiCalling: true,
+			Routed:      true,
 		},
 		{
 			ModemID:     "modem-a",
@@ -252,14 +252,14 @@ func TestUpdateMessageStatus(t *testing.T) {
 		{
 			ModemID:     "modem-a",
 			ProfileID:   "profile-b",
-			Source:      MessageSourceWiFiCalling,
+			Source:      MessageSourceRouted,
 			ExternalKey: "outgoing-1",
 			Sender:      "+100",
 			Recipient:   "+200",
 			Text:        "hello",
 			Timestamp:   base.Add(time.Second),
 			Status:      "sent",
-			WiFiCalling: true,
+			Routed:      true,
 		},
 	}
 	for _, msg := range messages {
@@ -281,7 +281,7 @@ func TestUpdateMessageStatus(t *testing.T) {
 		{
 			name:        "updates matching message",
 			profileID:   "profile-a",
-			source:      MessageSourceWiFiCalling,
+			source:      MessageSourceRouted,
 			externalKey: "outgoing-1",
 			status:      "DELIVERED",
 			wantUpdated: true,
@@ -290,7 +290,7 @@ func TestUpdateMessageStatus(t *testing.T) {
 		{
 			name:        "unknown message is ignored",
 			profileID:   "profile-a",
-			source:      MessageSourceWiFiCalling,
+			source:      MessageSourceRouted,
 			externalKey: "missing",
 			status:      "failed",
 			wantStatus:  "delivered",
@@ -298,7 +298,7 @@ func TestUpdateMessageStatus(t *testing.T) {
 		{
 			name:        "empty status is rejected",
 			profileID:   "profile-a",
-			source:      MessageSourceWiFiCalling,
+			source:      MessageSourceRouted,
 			externalKey: "outgoing-1",
 			status:      " ",
 			wantStatus:  "delivered",
@@ -333,8 +333,8 @@ func TestUpdateMessageStatus(t *testing.T) {
 			for _, msg := range got {
 				statuses[msg.Source] = msg.Status
 			}
-			if statuses[MessageSourceWiFiCalling] != tt.wantStatus {
-				t.Fatalf("wifi calling status = %q, want %q", statuses[MessageSourceWiFiCalling], tt.wantStatus)
+			if statuses[MessageSourceRouted] != tt.wantStatus {
+				t.Fatalf("routed message status = %q, want %q", statuses[MessageSourceRouted], tt.wantStatus)
 			}
 			if statuses[MessageSourceModem] != "sent" {
 				t.Fatalf("modem status = %q, want sent", statuses[MessageSourceModem])
@@ -621,7 +621,7 @@ func TestMigrateMessageFingerprints(t *testing.T) {
 			)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`, msg.ProfileID, msg.Source, msg.ExternalKey, msg.Sender, msg.Recipient, msg.Text,
-			timeText(msg.Timestamp), msg.Status, boolInt(msg.Incoming), boolInt(msg.WiFiCalling), now, now)
+			timeText(msg.Timestamp), msg.Status, boolInt(msg.Incoming), boolInt(msg.Routed), now, now)
 		if err != nil {
 			t.Fatalf("insert old message: %v", err)
 		}

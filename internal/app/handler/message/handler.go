@@ -12,7 +12,6 @@ import (
 	pmessage "github.com/damonto/sigmo/internal/pkg/message"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
-	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 type Handler struct {
@@ -30,14 +29,14 @@ const (
 	errorCodeRecipientInvalid          = "invalid_recipient"
 	errorCodeTextRequired              = "text_required"
 	errorCodeSendMessageFailed         = "send_message_failed"
-	errorCodeWiFiCallingNotConnected   = "wifi_calling_not_connected"
+	errorCodeMessageRouteNotConnected  = "message_route_not_connected"
 	errorCodeDeleteMessageThreadFailed = "delete_message_thread_failed"
 )
 
-func New(registry *mmodem.Registry, store *storage.Store, wifiCalling wificalling.Coordinator) *Handler {
+func New(registry *mmodem.Registry, store *storage.Store, route pmessage.Route) *Handler {
 	return &Handler{
 		registry: registry,
-		messages: pmessage.New(store, wifiCalling),
+		messages: pmessage.New(store, route),
 	}
 }
 
@@ -104,8 +103,8 @@ func writeSendMessageError(c *echo.Context, err error) error {
 	if errors.Is(err, pmessage.ErrTextRequired) {
 		return httpapi.BadRequest(c, errorCodeTextRequired, err)
 	}
-	if errors.Is(err, pmessage.ErrWiFiCallingNotConnected) {
-		return httpapi.Error(c, http.StatusServiceUnavailable, errorCodeWiFiCallingNotConnected, err.Error())
+	if errors.Is(err, pmessage.ErrRouteNotConnected) {
+		return httpapi.Error(c, http.StatusServiceUnavailable, errorCodeMessageRouteNotConnected, err.Error())
 	}
 	return httpapi.Internal(c, errorCodeSendMessageFailed, err)
 }

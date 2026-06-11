@@ -9,10 +9,6 @@ permissions:
   contents: read
   packages: write
 
-env:
-  PRIVATE_GO_TAGS: esim_transfer
-  PRIVATE_GO_MODFILE: go.private.mod
-
 jobs:
   build:
     name: Build for ${{ matrix.platform }}
@@ -73,8 +69,6 @@ jobs:
           {
             echo "BUILDKIT_CONTEXT_KEEP_GIT_DIR=true"
             echo "BUILD_VERSION=${{ steps.meta.outputs.version }}"
-            echo "GO_TAGS=${PRIVATE_GO_TAGS}"
-            echo "GO_MODFILE=${PRIVATE_GO_MODFILE}"
           } >> "$GITHUB_ENV"
 
       - name: Build and push by digest
@@ -86,10 +80,6 @@ jobs:
           build-args: |
             BUILDKIT_CONTEXT_KEEP_GIT_DIR=${{ env.BUILDKIT_CONTEXT_KEEP_GIT_DIR }}
             BUILD_VERSION=${{ env.BUILD_VERSION }}
-            GO_TAGS=${{ env.GO_TAGS }}
-            GO_MODFILE=${{ env.GO_MODFILE }}
-          secrets: |
-            private_module_token=${{ secrets.SIGMO_PRIVATE_MODULE_TOKEN }}
           provenance: true
           sbom: true
           labels: ${{ steps.meta.outputs.labels }}

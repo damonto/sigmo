@@ -18,8 +18,13 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
-	"github.com/damonto/sigmo/internal/pkg/websheet"
 )
+
+type Config struct {
+	Store    *settings.Store
+	Registry *mmodem.Registry
+	Internet *internet.Connector
+}
 
 type Handler struct {
 	registry     *mmodem.Registry
@@ -27,7 +32,6 @@ type Handler struct {
 	provisioning *provisioning
 	lifecycle    *lifecycle
 	internet     *internet.Connector
-	websheets    *websheet.Broker
 }
 
 const (
@@ -76,14 +80,13 @@ const (
 	wsTypeError                    = "error"
 )
 
-func New(store *settings.Store, registry *mmodem.Registry, internetConnector *internet.Connector, websheets *websheet.Broker) *Handler {
+func New(cfg Config) *Handler {
 	return &Handler{
-		registry:     registry,
-		profile:      newProfile(store),
-		provisioning: newProvisioning(store),
-		lifecycle:    newLifecycle(store, registry),
-		internet:     internetConnector,
-		websheets:    websheets,
+		registry:     cfg.Registry,
+		profile:      newProfile(cfg.Store),
+		provisioning: newProvisioning(cfg.Store),
+		lifecycle:    newLifecycle(cfg.Store, cfg.Registry),
+		internet:     cfg.Internet,
 	}
 }
 

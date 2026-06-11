@@ -6,12 +6,11 @@
 
 **Sigmo** is a modern, self-hosted web UI and API for managing ModemManager-based cellular modems. It ships as a single binary with an embedded Vue 3 frontend, designed to be lightweight and easy to deploy.
 
-Sigmo focuses on advanced eSIM operations, eSIM Quick Transfer, SMS management, and network control.
+Sigmo focuses on advanced eSIM operations, SMS management, and network control. Pro-only features are documented in [pro/README.md](pro/README.md).
 
 ## ✨ Features
 
 - **📱 eSIM Management**: List, download (SM-DP+), enable, rename, and delete eSIM profiles.
-- **🔁 eSIM Quick Transfer**: Transfer supported physical SIM or eSIM lines from another modem or CCID reader to the target eUICC through TS.43 carrier flows.
 - **📩 SMS Center**: Full conversational view for SMS, send/delete capability, and USSD session support.
 - **⚙️ Modem Control**: SIM slot switching, network scanning, manual registration, and preference configuration (Alias, MSS).
 - **🔒 Secure Access**: OTP-based login system via Telegram, HTTP, Email, and more.
@@ -47,8 +46,6 @@ Sigmo focuses on advanced eSIM operations, eSIM Quick Transfer, SMS management, 
 - **OS**: Linux.
 - **Service**: `ModemManager` running on the system D-Bus when using the binary directly. The Docker image includes `ModemManager` and starts it inside the container.
 - **Permissions**: Root access or proper `udev` rules to access modem device nodes.
-- **eSIM Quick Transfer**: Requires a build with the `esim_transfer` feature, a target modem with eUICC support, a separate source modem or CCID reader, and carrier TS.43 transfer support for the source line.
-
 ---
 
 ## 📥 Installation
@@ -110,34 +107,6 @@ Sigmo stores Internet Always On settings, modem network Mode/Bands preferences,
 and manual network registration preferences in SQLite so they can be restored
 after modem reloads, program restarts, and system reboots.
 
----
-
-## 🔁 eSIM Quick Transfer
-
-eSIM Quick Transfer is exposed only when the running build reports the
-`esimTransfer` capability from `/api/v1/capabilities`. Private builds enable it
-with the `esim_transfer` Go build tag.
-
-What it adds:
-
-- A transfer entry in the eSIM install dialog.
-- Source discovery from other connected modems and CCID readers.
-- Transferable line discovery for supported physical SIM and eSIM sources.
-- Carrier TS.43 transfer progress, including user prompts, carrier Websheets, SM-DS discovery, profile download, profile enablement, and completion.
-- Source profile deletion confirmation when the carrier requires it.
-
-Usage flow:
-
-1. Open the target modem's eSIM page and choose **Transfer from another device**.
-2. Select a source modem or CCID reader. CCID sources require the original device IMEI.
-3. Load transferable lines and select the line to transfer.
-4. Confirm the transfer warning. The original SIM or eSIM may become invalid after the carrier accepts the transfer.
-5. Keep both source and target devices connected until Sigmo finishes downloading and enabling the transferred profile.
-
-The source and target must be different devices. If the carrier does not expose
-a TS.43 transfer entitlement for that line, Sigmo marks it as unsupported before
-the transfer starts.
-
 ## ⚙️ Configuration Reference
 
 Startup configuration is provided through flags:
@@ -197,52 +166,7 @@ If you wish to contribute or modify the source:
 
     _Or for frontend hot-reload:_ `cd web && bun run dev`
 
-4.  **Private eSIM Transfer build**:
-
-    The public module does not build eSIM Transfer by default. Private builds use
-    `go.private.mod` and download the private TS.43 modules through normal Go
-    module auth:
-
-    ```bash
-    export GOPRIVATE=github.com/damonto/*
-    go run -tags=esim_transfer -modfile=go.private.mod . --db-path=./sigmo.db --debug
-    ```
-
-    To use SSH for private modules locally:
-
-    ```bash
-    export GOPRIVATE=github.com/damonto/*
-    git config --global url."git@github.com:damonto/".insteadOf "https://github.com/damonto/"
-    go build -tags=esim_transfer -modfile=go.private.mod -o sigmo .
-    sudo ./sigmo --db-path=/var/lib/sigmo/sigmo.db
-    ```
-
-    Prefer building as your normal user and running the binary with `sudo`.
-    Running `sudo go run` makes Go and Git use root's module cache and Git/SSH
-    configuration, which is why it may prompt for a GitHub username.
-
-    This repository also includes a local helper that uses
-    `/home/user/.ssh/id_ed25519` over SSH, builds with your normal user's Go
-    cache, and starts the temporary `go run` binary with `sudo`:
-
-    ```bash
-    ./scripts/dev.sh
-    ```
-
-    GitHub Actions private builds pass `PRIVATE_GO_TAGS` and
-    `PRIVATE_GO_MODFILE` by default. Private Go module access uses the
-    repository secret `SIGMO_PRIVATE_MODULE_TOKEN`.
-
-    Pull request builds keep using the public module manifest so private module
-    credentials are not exposed.
-
-    To sync the private manifest locally after changing public dependencies:
-
-    ```bash
-    ./scripts/sync-private-go-mod.sh
-    ```
-
-6.  **Build Docker Image**:
+4.  **Build Docker Image**:
     ```bash
     docker build -t sigmo:local .
     ```
@@ -251,4 +175,6 @@ If you wish to contribute or modify the source:
 
 ## 📄 License
 
-Released under the [MIT License](LICENSE).
+This repository uses mixed licensing. Public Sigmo files are released under the
+[MIT License](LICENSE); files under `pro/` are proprietary and covered by
+[pro/LICENSE](pro/LICENSE). See [NOTICE](NOTICE).

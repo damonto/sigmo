@@ -2,14 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PRO_DIR="${ROOT_DIR}/pro"
 
-source "${ROOT_DIR}/scripts/private-features.env"
+source "${ROOT_DIR}/scripts/pro-features.env"
 
 SSH_DIR="${SIGMO_SSH_DIR:-/home/user/.ssh}"
 SSH_KEY="${SIGMO_SSH_KEY:-${SSH_DIR}/id_ed25519}"
 DB_PATH="${SIGMO_DB_PATH:-${ROOT_DIR}/build/sigmo-dev.db}"
 OUTPUT="${SIGMO_DEV_BIN:-${ROOT_DIR}/build/sigmo-dev}"
-GOPRIVATE_PATTERN="${GOPRIVATE:-${PRIVATE_GOPRIVATE}}"
+GOPRIVATE_PATTERN="${GOPRIVATE:-${PRO_GOPRIVATE}}"
 
 if [ ! -f "${SSH_KEY}" ]; then
 	echo "SSH key not found: ${SSH_KEY}" >&2
@@ -47,10 +48,10 @@ export GOPRIVATE="${GOPRIVATE_PATTERN}"
 
 git config --global url."git@github.com:damonto/".insteadOf "https://github.com/damonto/"
 
-cd "${ROOT_DIR}"
-go_args=(-modfile="${PRIVATE_GO_MODFILE}")
-if [ -n "${PRIVATE_GO_TAGS}" ]; then
-	go_args+=(-tags="${PRIVATE_GO_TAGS}")
+cd "${PRO_DIR}"
+go_args=()
+if [ -n "${PRO_GO_TAGS}" ]; then
+	go_args+=(-tags="${PRO_GO_TAGS}")
 fi
 
 args=("$@")

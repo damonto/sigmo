@@ -1,0 +1,48 @@
+name: Build Pro
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "pro/**"
+      - "web/**"
+      - "scripts/build-pro.sh"
+      - "scripts/send-pro-artifacts.sh"
+      - "scripts/patch-purego-musl.sh"
+      - "scripts/pro-features.env"
+      - ".github/workflows/build-pro.yml"
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build-pro:
+    name: Build and send Pro artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "stable"
+
+      - name: Build and send Pro artifacts
+        env:
+          SIGMO_PRO_MODULE_TOKEN: ${{ secrets.SIGMO_PRO_MODULE_TOKEN }}
+          SIGMO_PRO_TELEGRAM_BOT_TOKEN: ${{ secrets.SIGMO_PRO_TELEGRAM_BOT_TOKEN }}
+          SIGMO_PRO_TELEGRAM_CHAT_IDS: ${{ vars.SIGMO_PRO_TELEGRAM_CHAT_IDS }}
+        run: |
+          set -euo pipefail
+
+          scripts/build-pro.sh
+          scripts/send-pro-artifacts.sh

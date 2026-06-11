@@ -12,17 +12,15 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
-	"github.com/damonto/sigmo/internal/pkg/wificalling"
 )
 
 type Handler struct {
-	registry    *mmodem.Registry
-	catalog     *catalog
-	simSlot     *simSlot
-	msisdn      *msisdn
-	settings    *modemSettings
-	internet    *internet.Connector
-	wifiCalling wificalling.Coordinator
+	registry *mmodem.Registry
+	catalog  *catalog
+	simSlot  *simSlot
+	msisdn   *msisdn
+	settings *modemSettings
+	internet *internet.Connector
 }
 
 const (
@@ -31,37 +29,26 @@ const (
 )
 
 const (
-	errorCodeListModemsFailed                        = "list_modems_failed"
-	errorCodeGetModemFailed                          = "get_modem_failed"
-	errorCodeSwitchSimSlotFailed                     = "switch_sim_slot_failed"
-	errorCodeSimIdentifierRequired                   = "sim_identifier_required"
-	errorCodeSimSlotsUnavailable                     = "sim_slots_unavailable"
-	errorCodeSimSlotNotFound                         = "sim_slot_not_found"
-	errorCodeSimSlotAlreadyActive                    = "sim_slot_already_active"
-	errorCodeSimSlotSwitchTimeout                    = "sim_slot_switch_timeout"
-	errorCodeUnlockSIMInvalidRequest                 = "unlock_sim_invalid_request"
-	errorCodeUnlockSIMNotRequired                    = "unlock_sim_not_required"
-	errorCodeUnlockSIMUnsupportedLock                = "unlock_sim_unsupported_lock"
-	errorCodeUnlockSIMFailed                         = "unlock_sim_failed"
-	errorCodeEnableModemAfterUnlockFailed            = "enable_modem_after_unlock_failed"
-	errorCodeUpdateMSISDNInvalidRequest              = "update_msisdn_invalid_request"
-	errorCodeUpdateMSISDNFailed                      = "update_msisdn_failed"
-	errorCodeInvalidPhoneNumber                      = "invalid_phone_number"
-	errorCodeUpdateSettingsInvalidRequest            = "update_settings_invalid_request"
-	errorCodeUpdateSettingsFailed                    = "update_settings_failed"
-	errorCodeCompatibleRequired                      = "compatible_required"
-	errorCodeGetSettingsFailed                       = "get_settings_failed"
-	errorCodeGetWiFiCallingSettingsFailed            = "get_wifi_calling_settings_failed"
-	errorCodeUpdateWiFiCallingSettingsInvalidRequest = "update_wifi_calling_settings_invalid_request"
-	errorCodeUpdateWiFiCallingSettingsFailed         = "update_wifi_calling_settings_failed"
-	errorCodeCreateWiFiCallingSessionFailed          = "create_wifi_calling_session_failed"
-	errorCodeWiFiCallingSessionUnavailable           = "wifi_calling_session_unavailable"
-	errorCodeStartWiFiCallingWebsheetFailed          = "start_wifi_calling_websheet_failed"
-	errorCodeStartWiFiCallingE911WebsheetFailed      = "start_wifi_calling_e911_websheet_failed"
-	errorCodeWiFiCallingWebsheetNotPending           = "wifi_calling_websheet_not_pending"
-	errorCodeWiFiCallingSetupPending                 = "wifi_calling_setup_pending"
-	errorCodeWiFiCallingSetupDenied                  = "wifi_calling_setup_denied"
-	errorCodeWiFiCallingWebsheetUnavailable          = "wifi_calling_websheet_unavailable"
+	errorCodeListModemsFailed             = "list_modems_failed"
+	errorCodeGetModemFailed               = "get_modem_failed"
+	errorCodeSwitchSimSlotFailed          = "switch_sim_slot_failed"
+	errorCodeSimIdentifierRequired        = "sim_identifier_required"
+	errorCodeSimSlotsUnavailable          = "sim_slots_unavailable"
+	errorCodeSimSlotNotFound              = "sim_slot_not_found"
+	errorCodeSimSlotAlreadyActive         = "sim_slot_already_active"
+	errorCodeSimSlotSwitchTimeout         = "sim_slot_switch_timeout"
+	errorCodeUnlockSIMInvalidRequest      = "unlock_sim_invalid_request"
+	errorCodeUnlockSIMNotRequired         = "unlock_sim_not_required"
+	errorCodeUnlockSIMUnsupportedLock     = "unlock_sim_unsupported_lock"
+	errorCodeUnlockSIMFailed              = "unlock_sim_failed"
+	errorCodeEnableModemAfterUnlockFailed = "enable_modem_after_unlock_failed"
+	errorCodeUpdateMSISDNInvalidRequest   = "update_msisdn_invalid_request"
+	errorCodeUpdateMSISDNFailed           = "update_msisdn_failed"
+	errorCodeInvalidPhoneNumber           = "invalid_phone_number"
+	errorCodeUpdateSettingsInvalidRequest = "update_settings_invalid_request"
+	errorCodeUpdateSettingsFailed         = "update_settings_failed"
+	errorCodeCompatibleRequired           = "compatible_required"
+	errorCodeGetSettingsFailed            = "get_settings_failed"
 )
 
 var (
@@ -69,15 +56,14 @@ var (
 	errUpdateMSISDNTimeout  = errors.New("updating MSISDN timed out, please refresh to confirm the active slot")
 )
 
-func New(store *settings.Store, registry *mmodem.Registry, internetConnector *internet.Connector, wifiCalling wificalling.Coordinator) *Handler {
+func New(store *settings.Store, registry *mmodem.Registry, internetConnector *internet.Connector) *Handler {
 	return &Handler{
-		registry:    registry,
-		catalog:     newCatalog(store, registry, wifiCalling),
-		simSlot:     newSIMSlot(registry),
-		msisdn:      newMSISDN(store, registry),
-		settings:    newSettings(store),
-		internet:    internetConnector,
-		wifiCalling: wifiCalling,
+		registry: registry,
+		catalog:  newCatalog(store, registry),
+		simSlot:  newSIMSlot(registry),
+		msisdn:   newMSISDN(store, registry),
+		settings: newSettings(store),
+		internet: internetConnector,
 	}
 }
 
@@ -223,96 +209,4 @@ func (h *Handler) Settings(c *echo.Context) error {
 	}
 	response := h.settings.Get(modem)
 	return c.JSON(http.StatusOK, response)
-}
-
-func (h *Handler) UpdateWiFiCallingSettings(c *echo.Context) error {
-	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeUpdateWiFiCallingSettingsFailed)
-	}
-	var req UpdateWiFiCallingSettingsRequest
-	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateWiFiCallingSettingsInvalidRequest); err != nil {
-		return err
-	}
-	if err := h.wifiCalling.UpdateSettings(c.Request().Context(), modem, wificalling.Settings{
-		Enabled:   req.Enabled,
-		Preferred: req.Preferred,
-	}); err != nil {
-		return httpapi.Internal(c, errorCodeUpdateWiFiCallingSettingsFailed, err)
-	}
-	return c.NoContent(http.StatusNoContent)
-}
-
-func (h *Handler) WiFiCallingSettings(c *echo.Context) error {
-	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeGetWiFiCallingSettingsFailed)
-	}
-	status, err := h.wifiCalling.Status(c.Request().Context(), modem)
-	if err != nil {
-		return httpapi.Internal(c, errorCodeGetWiFiCallingSettingsFailed, err)
-	}
-	return c.JSON(http.StatusOK, WiFiCallingSettingsResponse{
-		Enabled:                         status.Enabled,
-		Preferred:                       status.Preferred,
-		Connected:                       status.Connected,
-		State:                           status.State,
-		DurationSeconds:                 status.DurationSeconds,
-		EmergencyAddressUpdateAvailable: h.wifiCalling.EmergencyAddressUpdateAvailable(c.Request().Context(), modem),
-		Websheet:                        status.Websheet,
-	})
-}
-
-func (h *Handler) CreateWiFiCallingSession(c *echo.Context) error {
-	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeCreateWiFiCallingSessionFailed)
-	}
-	if err := h.wifiCalling.Reconnect(c.Request().Context(), modem); err != nil {
-		if errors.Is(err, wificalling.ErrNotConnected) || errors.Is(err, wificalling.ErrUnavailable) {
-			return httpapi.BadRequest(c, errorCodeWiFiCallingSessionUnavailable, err)
-		}
-		return httpapi.Internal(c, errorCodeCreateWiFiCallingSessionFailed, err)
-	}
-	return c.NoContent(http.StatusAccepted)
-}
-
-func (h *Handler) StartWiFiCallingWebsheet(c *echo.Context) error {
-	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeStartWiFiCallingWebsheetFailed)
-	}
-	info, err := h.wifiCalling.StartWebsheet(c.Request().Context(), modem)
-	if err != nil {
-		if errors.Is(err, wificalling.ErrWebsheetNotPending) {
-			return httpapi.BadRequest(c, errorCodeWiFiCallingWebsheetNotPending, err)
-		}
-		return httpapi.Internal(c, errorCodeStartWiFiCallingWebsheetFailed, err)
-	}
-	return c.JSON(http.StatusCreated, info)
-}
-
-func (h *Handler) StartWiFiCallingEmergencyAddressWebsheet(c *echo.Context) error {
-	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeStartWiFiCallingE911WebsheetFailed)
-	}
-	info, err := h.wifiCalling.StartEmergencyAddressUpdate(c.Request().Context(), modem)
-	if err != nil {
-		return h.wifiCallingWebsheetStartError(c, errorCodeStartWiFiCallingE911WebsheetFailed, err)
-	}
-	return c.JSON(http.StatusCreated, info)
-}
-
-func (h *Handler) wifiCallingWebsheetStartError(c *echo.Context, fallbackCode string, err error) error {
-	switch {
-	case errors.Is(err, wificalling.ErrWFCSetupPending):
-		return httpapi.TooManyRequests(c, errorCodeWiFiCallingSetupPending, err)
-	case errors.Is(err, wificalling.ErrWFCSetupDenied):
-		return httpapi.BadRequest(c, errorCodeWiFiCallingSetupDenied, err)
-	case errors.Is(err, wificalling.ErrUnavailable), errors.Is(err, wificalling.ErrWebsheetUnavailable):
-		return httpapi.BadRequest(c, errorCodeWiFiCallingWebsheetUnavailable, err)
-	default:
-		return httpapi.Internal(c, fallbackCode, err)
-	}
 }

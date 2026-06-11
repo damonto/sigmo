@@ -10,7 +10,7 @@ registries:
     type: git
     url: https://github.com
     username: x-access-token
-    password: ${{secrets.SIGMO_PRIVATE_MODULE_TOKEN}}
+    password: ${{secrets.SIGMO_PRO_MODULE_TOKEN}}
 
 updates:
   - package-ecosystem: "github-actions"
@@ -25,6 +25,13 @@ updates:
 
   - package-ecosystem: "gomod" # See documentation for possible values
     directory: "/" # Location of package manifests
+    registries:
+      - github-damonto
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "gomod"
+    directory: "/pro"
     registries:
       - github-damonto
     schedule:

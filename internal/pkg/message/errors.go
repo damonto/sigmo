@@ -3,9 +3,10 @@ package message
 import "errors"
 
 var (
-	ErrParticipantRequired     = errors.New("participant is required")
-	ErrRecipientRequired       = errors.New("recipient is required")
-	ErrRecipientInvalid        = errors.New("invalid recipient")
-	ErrTextRequired            = errors.New("text is required")
-	ErrWiFiCallingNotConnected = errors.New("wifi calling is not connected")
+	ErrParticipantRequired = errors.New("participant is required")
+	ErrRecipientRequired   = errors.New("recipient is required")
+	ErrRecipientInvalid    = errors.New("invalid recipient")
+	ErrTextRequired        = errors.New("text is required")
+	ErrRouteUnavailable    = errors.New("message route is unavailable")
+	ErrRouteNotConnected   = errors.New("message route is not connected")
 )

@@ -15,7 +15,7 @@ import (
 	"github.com/damonto/euicc-go/bertlv/primitive"
 	"github.com/damonto/euicc-go/driver/at"
 	"github.com/damonto/euicc-go/driver/mbim"
-	"github.com/damonto/euicc-go/driver/qmi"
+	"github.com/damonto/euicc-go/driver/qcom"
 	"github.com/damonto/euicc-go/lpa"
 	sgp22 "github.com/damonto/euicc-go/v2"
 	"github.com/damonto/sigmo/internal/pkg/euicc"
@@ -179,7 +179,7 @@ func createChannel(m *modem.Modem) (apdu.SmartCardChannel, error) {
 	switch m.PrimaryPortType() {
 	case modem.ModemPortTypeQmi:
 		m.Logger().Info("using QMI driver", "port", m.PrimaryPort, "slot", slot)
-		return qmi.New(m.PrimaryPort, slot)
+		return qcom.NewQMI(m.PrimaryPort, slot)
 	case modem.ModemPortTypeMbim:
 		m.Logger().Info("using MBIM driver", "port", m.PrimaryPort, "slot", slot)
 		return mbim.New(m.PrimaryPort, slot)

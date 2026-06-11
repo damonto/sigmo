@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	pcall "github.com/damonto/sigmo/internal/pkg/call"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -43,8 +42,8 @@ func TestFreshIncomingCall(t *testing.T) {
 		{
 			name: "recent incoming ringing call",
 			call: storage.Call{
-				Direction: pcall.DirectionIncoming,
-				State:     pcall.StateRinging,
+				Direction: "incoming",
+				State:     "ringing",
 				StartedAt: now.Add(-29 * time.Minute),
 			},
 			want: true,
@@ -52,32 +51,32 @@ func TestFreshIncomingCall(t *testing.T) {
 		{
 			name: "old incoming ringing call",
 			call: storage.Call{
-				Direction: pcall.DirectionIncoming,
-				State:     pcall.StateRinging,
+				Direction: "incoming",
+				State:     "ringing",
 				StartedAt: now.Add(-31 * time.Minute),
 			},
 		},
 		{
 			name: "outgoing call",
 			call: storage.Call{
-				Direction: pcall.DirectionOutgoing,
-				State:     pcall.StateRinging,
+				Direction: "outgoing",
+				State:     "ringing",
 				StartedAt: now,
 			},
 		},
 		{
 			name: "answered incoming call",
 			call: storage.Call{
-				Direction: pcall.DirectionIncoming,
-				State:     pcall.StateActive,
+				Direction: "incoming",
+				State:     "active",
 				StartedAt: now,
 			},
 		},
 		{
 			name: "unknown timestamp",
 			call: storage.Call{
-				Direction: pcall.DirectionIncoming,
-				State:     pcall.StateRinging,
+				Direction: "incoming",
+				State:     "ringing",
 			},
 			want: true,
 		},
@@ -135,9 +134,9 @@ func TestForwardCallNotifiesIncomingRingingOnce(t *testing.T) {
 	call := storage.Call{
 		ID:        "call-1",
 		ModemID:   "modem-1",
-		Direction: pcall.DirectionIncoming,
+		Direction: "incoming",
 		Number:    "+12242255559",
-		State:     pcall.StateRinging,
+		State:     "ringing",
 		StartedAt: time.Now(),
 	}
 	if err := relay.ForwardCall(ctx, call); err != nil {

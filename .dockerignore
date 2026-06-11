@@ -17,6 +17,7 @@ sigmo-*
 coverage.out
 
 build/
+pro/
 dist/
 tmp/
 web/node_modules/
