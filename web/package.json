@@ -66,7 +66,7 @@
     "typescript": "~6.0.3",
     "vite": "npm:rolldown-vite@^7.3.1",
     "vite-plugin-vue-devtools": "^8.1.2",
-    "vitest": "^4.1.7",
+    "vitest": "^4.1.8",
     "vue-tsc": "^3.3.3"
   }
 }
