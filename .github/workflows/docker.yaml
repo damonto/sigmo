@@ -73,10 +73,8 @@ jobs:
           {
             echo "BUILDKIT_CONTEXT_KEEP_GIT_DIR=true"
             echo "BUILD_VERSION=${{ steps.meta.outputs.version }}"
-            if [ "${{ vars.SIGMO_PRIVATE_FEATURES }}" = "true" ]; then
-              echo "GO_TAGS=${PRIVATE_GO_TAGS}"
-              echo "GO_MODFILE=${PRIVATE_GO_MODFILE}"
-            fi
+            echo "GO_TAGS=${PRIVATE_GO_TAGS}"
+            echo "GO_MODFILE=${PRIVATE_GO_MODFILE}"
           } >> "$GITHUB_ENV"
 
       - name: Build and push by digest

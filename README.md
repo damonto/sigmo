@@ -229,14 +229,12 @@ If you wish to contribute or modify the source:
     ./scripts/dev.sh
     ```
 
-    GitHub Actions enables private features only when the repository variable
-    `SIGMO_PRIVATE_FEATURES` is set to `true`. Private Go module access uses the
+    GitHub Actions private builds pass `PRIVATE_GO_TAGS` and
+    `PRIVATE_GO_MODFILE` by default. Private Go module access uses the
     repository secret `SIGMO_PRIVATE_MODULE_TOKEN`.
 
-    Pull requests from branches in this repository that update `go.mod` or
-    `go.sum` automatically sync `go.private.mod` and `go.private.sum` when
-    private features are enabled. Fork pull requests are skipped so private
-    module credentials are not exposed.
+    Pull request builds keep using the public module manifest so private module
+    credentials are not exposed.
 
     To sync the private manifest locally after changing public dependencies:
 

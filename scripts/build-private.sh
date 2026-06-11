@@ -5,7 +5,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 source "${ROOT_DIR}/scripts/private-features.env"
 
-PRIVATE_BUILD_TAGS="esim_transfer,wifi_calling"
 PRIVATE_MODFILE="${PRIVATE_MODFILE:-${PRIVATE_GO_MODFILE}}"
 PRIVATE_SUMFILE="${PRIVATE_SUMFILE:-${PRIVATE_MODFILE%.mod}.sum}"
 OUTPUT_DIR="${SIGMO_BUILD_DIR:-${ROOT_DIR}/build}"
@@ -146,7 +145,7 @@ build_target() {
 
 	echo "Building ${output}"
 	go_args+=(
-		-tags="${PRIVATE_BUILD_TAGS}"
+		-tags="${PRIVATE_GO_TAGS}"
 		-modfile="${modfile}"
 		-trimpath
 		-ldflags="${ldflags}"

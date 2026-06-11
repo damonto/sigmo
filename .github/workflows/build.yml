@@ -58,14 +58,8 @@ jobs:
         with:
           go-version: "stable"
 
-      - name: Validate manual VoWiFi input
-        if: github.event_name == 'workflow_dispatch' && inputs.build_vowifi && vars.SIGMO_PRIVATE_FEATURES != 'true'
-        run: |
-          echo "build_vowifi requires SIGMO_PRIVATE_FEATURES=true." >&2
-          exit 1
-
       - name: Configure private Go modules
-        if: github.event_name != 'pull_request' && vars.SIGMO_PRIVATE_FEATURES == 'true'
+        if: github.event_name != 'pull_request'
         run: |
           go env -w GOPRIVATE="${PRIVATE_GOPRIVATE}"
           git config --global url."https://x-access-token:${{ secrets.SIGMO_PRIVATE_MODULE_TOKEN }}@github.com/".insteadOf "https://github.com/"
@@ -93,7 +87,7 @@ jobs:
           modfile="go.mod"
           sumfile="go.sum"
           tags_arg=""
-          if [ "${{ github.event_name }}" != "pull_request" ] && [ "${{ vars.SIGMO_PRIVATE_FEATURES }}" = "true" ]; then
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
             private_tags="${PRIVATE_GO_TAGS}"
             if [ "${BUILD_VOWIFI}" = "true" ]; then
               private_tags="${private_tags},wifi_calling"
