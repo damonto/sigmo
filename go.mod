@@ -15,7 +15,7 @@ require (
 	github.com/nyaruka/phonenumbers v1.8.0
 	github.com/things-go/go-socks5 v0.1.1
 	github.com/wneessen/go-mail v0.7.3
-	golang.org/x/sys v0.45.0
+	golang.org/x/sys v0.46.0
 )
 
 require (
