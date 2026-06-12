@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/damonto/euicc-go v1.1.3-0.20260611124659-0ff213c8a246
-	github.com/damonto/uicc-go v0.0.0-20260611123120-01e3637ef8da
+	github.com/damonto/uicc-go v0.0.0-20260612071304-cdc1df426101
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
 	github.com/go-playground/validator/v10 v10.30.3
