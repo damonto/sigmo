@@ -12,7 +12,8 @@ OUTPUT_DIR="${SIGMO_BUILD_DIR:-${ROOT_DIR}/build/pro}"
 MANIFEST="${SIGMO_PRO_MANIFEST:-${OUTPUT_DIR}/artifacts.tsv}"
 GOPRIVATE_PATTERN="${GOPRIVATE:-${PRO_GOPRIVATE}}"
 PRO_TARGETS="${SIGMO_PRO_TARGETS:-linux-amd64 linux-arm64 linux-arm64-musl}"
-TGID_PLACEHOLDER="TGID-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+TGID_DIGITS=16
+TGID_PLACEHOLDER="TGID-XXXXXXXXXXXXXXXXX"
 MUSL_ARM64_LIBC="libc.musl-aarch64.so.1"
 MUSL_ARM64_INTERPRETER="/lib/ld-musl-aarch64.so.1"
 
@@ -274,12 +275,12 @@ tgid_watermark() {
 		sign="N"
 		digits="${digits#-}"
 	fi
-	if [ "${#digits}" -gt 31 ]; then
+	if [ "${#digits}" -gt "${TGID_DIGITS}" ]; then
 		echo "Telegram chat id is too long to watermark: ${chat_id}" >&2
 		return 1
 	fi
 
-	printf -v padded '%031s' "${digits}"
+	printf -v padded "%${TGID_DIGITS}s" "${digits}"
 	padded="${padded// /0}"
 	printf 'TGID-%s%s\n' "${sign}" "${padded}"
 }
@@ -416,12 +417,17 @@ package_recipient_target() {
 	echo "Patching ${binary} for TGID ${chat_id}"
 	patch_tgid "${base_binary}" "${build_binary}" "${chat_id}"
 	package_target "${build_binary}" "${build_archive}"
-	printf '%s\t%s\t%s\n' "${chat_id}" "${name}" "${archive}" >> "${MANIFEST_ABS}"
 }
 
 main() {
 	local recipients=()
+	local archive
 	local chat_id
+	local i
+	local package_chats=()
+	local package_failed
+	local package_pids=()
+	local recipient_dir
 	local target
 	local version
 
@@ -452,8 +458,33 @@ main() {
 	printf 'chat_id\ttarget\tarchive\n' > "${MANIFEST_ABS}"
 	for target in ${PRO_TARGETS}; do
 		build_named_target_base "${target}" "${version}"
+		package_chats=()
+		package_pids=()
 		for chat_id in "${recipients[@]}"; do
-			package_recipient_target "${chat_id}" "${built_base_binary}" "${target}"
+			package_recipient_target "${chat_id}" "${built_base_binary}" "${target}" &
+			package_pids+=("$!")
+			package_chats+=("${chat_id}")
+		done
+
+		package_failed=0
+		for i in "${!package_pids[@]}"; do
+			if wait "${package_pids[$i]}"; then
+				continue
+			fi
+			echo "package ${target} for TGID ${package_chats[$i]}" >&2
+			package_failed=1
+		done
+		if [ "${package_failed}" -ne 0 ]; then
+			return 1
+		fi
+
+	done
+
+	for chat_id in "${recipients[@]}"; do
+		for target in ${PRO_TARGETS}; do
+			recipient_dir="$(recipient_dir_for_chat "${chat_id}")"
+			archive="${recipient_dir}/sigmo-pro-${target}.tar.gz"
+			printf '%s\t%s\t%s\n' "${chat_id}" "${target}" "${archive}" >> "${MANIFEST_ABS}"
 		done
 	done
 
