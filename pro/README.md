@@ -94,7 +94,7 @@ credentials are not exposed.
 
 ## License
 
-Copyright (c) 2025 Damon To. All rights reserved.
+Copyright (c) 2025 Damon. All rights reserved.
 
 No license is granted to copy, modify, distribute, sublicense, publish, or use
 the contents of this directory, except with prior written permission from Damon
