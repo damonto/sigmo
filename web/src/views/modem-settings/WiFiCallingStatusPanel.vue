@@ -31,14 +31,9 @@ const normalizedState = computed(() => {
   return 'disconnected'
 })
 
-const canReconnect = computed(
-  () =>
-    props.enabled &&
-    normalizedState.value === 'disconnected' &&
-    !props.isLoading &&
-    !props.isUpdating &&
-    !props.isReconnecting,
-)
+const showReconnect = computed(() => props.enabled && !props.isLoading)
+
+const isReconnectDisabled = computed(() => props.isUpdating || props.isReconnecting)
 
 const statusLabel = computed(() => {
   switch (normalizedState.value) {
@@ -154,15 +149,17 @@ const formatDuration = (seconds: number) => {
         </div>
 
         <Button
-          v-if="canReconnect"
+          v-if="showReconnect"
           type="button"
           size="icon-sm"
           variant="ghost"
+          :disabled="isReconnectDisabled"
           :title="t('modemDetail.settings.wifiCallingReconnect')"
           :aria-label="t('modemDetail.settings.wifiCallingReconnect')"
           @click="emit('reconnect')"
         >
-          <RefreshCw class="size-4" />
+          <LoaderCircle v-if="props.isReconnecting" class="size-4 animate-spin" />
+          <RefreshCw v-else class="size-4" />
         </Button>
       </div>
 

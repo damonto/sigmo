@@ -63,19 +63,23 @@ describe('WiFiCallingStatusPanel', () => {
     expect(wrapper.emitted('reconnect')).toHaveLength(1)
   })
 
-  it('hides reconnect while connected', () => {
+  it('keeps reconnect available while connected', async () => {
     const wrapper = mountPanel('en', { connected: true, state: 'connected', durationSeconds: 65 })
 
     expect(wrapper.text()).toContain('Connected')
     expect(wrapper.text()).toContain('1m 5s')
-    expect(wrapper.find('button[aria-label="Reconnect Wi-Fi Calling"]').exists()).toBe(false)
+    expect(wrapper.get('button[aria-label="Reconnect Wi-Fi Calling"]').attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('button[aria-label="Reconnect Wi-Fi Calling"]').trigger('click')
+
+    expect(wrapper.emitted('reconnect')).toHaveLength(1)
   })
 
-  it('hides reconnect while reconnecting', () => {
+  it('disables reconnect while reconnecting', () => {
     const wrapper = mountPanel('en', { isReconnecting: true })
 
     expect(wrapper.text()).toContain('Connecting')
-    expect(wrapper.find('button[aria-label="Reconnect Wi-Fi Calling"]').exists()).toBe(false)
+    expect(wrapper.get('button[aria-label="Reconnect Wi-Fi Calling"]').attributes('disabled')).toBeDefined()
   })
 
   it('renders Chinese disabled status', () => {

@@ -7,7 +7,7 @@ require (
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260611125016-ab0c78f7aadd
 	github.com/damonto/uicc-go v0.0.0-20260612071304-cdc1df426101
-	github.com/damonto/vowifi-go v0.0.0-20260612095641-41c056f0d0b8
+	github.com/damonto/vowifi-go v0.0.0-20260613150238-d897766e2e22
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.1.1
