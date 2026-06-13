@@ -20,7 +20,7 @@
     "ui:update": "../scripts/update-shadcn-vue-ui.sh"
   },
   "dependencies": {
-    "@lucide/vue": "^1.17.0",
+    "@lucide/vue": "^1.18.0",
     "@tailwindcss/vite": "^4.3.1",
     "@vee-validate/zod": "^4.15.1",
     "@vueuse/core": "^14.3.0",
