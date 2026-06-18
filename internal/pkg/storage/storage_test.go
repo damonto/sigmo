@@ -552,6 +552,154 @@ func TestSaveCallPreservesAnsweredAtOnSparseUpdates(t *testing.T) {
 	}
 }
 
+func TestSaveCallPreservingTerminal(t *testing.T) {
+	ctx := context.Background()
+	base := time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC)
+	baseCall := Call{
+		ID:        "call-1",
+		ProfileID: "profile-a",
+		ModemID:   "modem-1",
+		Route:     "wifi_calling",
+		Direction: "outgoing",
+		Number:    "+12242255559",
+		State:     "active",
+		StartedAt: base,
+		UpdatedAt: base,
+	}
+	tests := []struct {
+		name        string
+		existing    *Call
+		update      Call
+		wantState   string
+		wantSaved   bool
+		wantUpdated time.Time
+	}{
+		{
+			name:        "inserts new call",
+			update:      baseCall,
+			wantState:   "active",
+			wantSaved:   true,
+			wantUpdated: base,
+		},
+		{
+			name:     "active accepts ended",
+			existing: callPtr(baseCall),
+			update: callWithState(baseCall, "ended", func(call *Call) {
+				call.EndedAt = base.Add(time.Minute)
+				call.UpdatedAt = base.Add(time.Minute)
+			}),
+			wantState:   "ended",
+			wantSaved:   true,
+			wantUpdated: base.Add(time.Minute),
+		},
+		{
+			name: "ended ignores active",
+			existing: callPtr(callWithState(baseCall, "ended", func(call *Call) {
+				call.EndedAt = base.Add(time.Minute)
+				call.UpdatedAt = base.Add(time.Minute)
+			})),
+			update: callWithState(baseCall, "active", func(call *Call) {
+				call.UpdatedAt = base.Add(2 * time.Minute)
+			}),
+			wantState:   "ended",
+			wantSaved:   false,
+			wantUpdated: base.Add(time.Minute),
+		},
+		{
+			name: "failed accepts ended",
+			existing: callPtr(callWithState(baseCall, "failed", func(call *Call) {
+				call.EndedAt = base.Add(time.Minute)
+				call.UpdatedAt = base.Add(time.Minute)
+			})),
+			update: callWithState(baseCall, "ended", func(call *Call) {
+				call.EndedAt = base.Add(2 * time.Minute)
+				call.UpdatedAt = base.Add(2 * time.Minute)
+			}),
+			wantState:   "ended",
+			wantSaved:   true,
+			wantUpdated: base.Add(2 * time.Minute),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := testStore(t)
+			if tt.existing != nil {
+				if err := store.SaveCall(ctx, *tt.existing); err != nil {
+					t.Fatalf("SaveCall(existing) error = %v", err)
+				}
+			}
+
+			got, saved, err := store.SaveCallPreservingTerminal(ctx, tt.update)
+			if err != nil {
+				t.Fatalf("SaveCallPreservingTerminal() error = %v", err)
+			}
+			if saved != tt.wantSaved {
+				t.Fatalf("SaveCallPreservingTerminal() saved = %v, want %v", saved, tt.wantSaved)
+			}
+			if got.State != tt.wantState || !got.UpdatedAt.Equal(tt.wantUpdated) {
+				t.Fatalf("SaveCallPreservingTerminal() = %+v, want state %q updated %v", got, tt.wantState, tt.wantUpdated)
+			}
+			stored, err := store.GetCall(ctx, tt.update.ID)
+			if err != nil {
+				t.Fatalf("GetCall() error = %v", err)
+			}
+			if stored.State != tt.wantState || !stored.UpdatedAt.Equal(tt.wantUpdated) {
+				t.Fatalf("stored call = %+v, want state %q updated %v", stored, tt.wantState, tt.wantUpdated)
+			}
+		})
+	}
+}
+
+func TestSaveCallPreservingTerminalPreservesAnsweredAtOnSparseUpdates(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	base := time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC)
+	answered := Call{
+		ID:         "call-1",
+		ProfileID:  "profile-a",
+		ModemID:    "modem-1",
+		Route:      "wifi_calling",
+		Direction:  "outgoing",
+		Number:     "+12242255559",
+		State:      "active",
+		StartedAt:  base,
+		AnsweredAt: base.Add(30 * time.Second),
+		UpdatedAt:  base.Add(30 * time.Second),
+	}
+	if err := store.SaveCall(ctx, answered); err != nil {
+		t.Fatalf("SaveCall(answered) error = %v", err)
+	}
+	update := answered
+	update.State = "ended"
+	update.AnsweredAt = time.Time{}
+	update.EndedAt = base.Add(2 * time.Minute)
+	update.UpdatedAt = base.Add(2 * time.Minute)
+
+	got, saved, err := store.SaveCallPreservingTerminal(ctx, update)
+	if err != nil {
+		t.Fatalf("SaveCallPreservingTerminal() error = %v", err)
+	}
+	if !saved {
+		t.Fatal("SaveCallPreservingTerminal() saved = false, want true")
+	}
+	if !got.AnsweredAt.Equal(answered.AnsweredAt) {
+		t.Fatalf("AnsweredAt = %v, want %v", got.AnsweredAt, answered.AnsweredAt)
+	}
+}
+
+func callPtr(call Call) *Call {
+	return &call
+}
+
+func callWithState(call Call, state string, update func(*Call)) Call {
+	call.State = state
+	if update != nil {
+		update(&call)
+	}
+	return call
+}
+
 func TestMigrateMessageFingerprints(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "sigmo.db")

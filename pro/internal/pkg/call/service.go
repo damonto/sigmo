@@ -18,6 +18,8 @@ import (
 )
 
 const (
+	wifiCallingHangupCleanupTimeout = 3 * time.Second
+
 	RouteAuto        = "auto"
 	RouteWiFiCalling = "wifi_calling"
 	RouteModem       = "modem"
@@ -132,7 +134,7 @@ func (s *Service) Run(ctx context.Context) error {
 			return
 		}
 		call := callFromWiFiCalling(event.Call)
-		if err := s.store.SaveCall(ctx, call); err != nil {
+		if _, err := s.saveAndPublish(ctx, call); err != nil {
 			slog.Warn("save Wi-Fi Calling voice event",
 				"call_id", call.ID,
 				"modem_id", call.ModemID,
@@ -143,7 +145,6 @@ func (s *Service) Run(ctx context.Context) error {
 			s.publish(Event{Call: call})
 			return
 		}
-		s.publish(Event{Call: call})
 	})
 	defer unsubscribe()
 	<-ctx.Done()
@@ -187,18 +188,17 @@ func (s *Service) Dial(ctx context.Context, modem *mmodem.Modem, number string, 
 			}
 			if call.ID != "" {
 				failedCall := callFromWiFiCalling(call)
-				if saveErr := s.store.SaveCall(ctx, failedCall); saveErr != nil {
+				if _, saveErr := s.saveAndPublish(ctx, failedCall); saveErr != nil {
 					return storage.Call{}, errors.Join(fmt.Errorf("dial Wi-Fi Calling: %w", err), fmt.Errorf("save failed call: %w", saveErr))
 				}
-				s.publish(Event{Call: failedCall})
 			}
 			return storage.Call{}, fmt.Errorf("dial Wi-Fi Calling: %w", err)
 		}
 		stored := callFromWiFiCalling(call)
-		if err := s.store.SaveCall(ctx, stored); err != nil {
+		stored, err = s.saveAndPublish(ctx, stored)
+		if err != nil {
 			return storage.Call{}, err
 		}
-		s.publish(Event{Call: stored})
 		return stored, nil
 	case RouteModem:
 		return storage.Call{}, ErrModemCallingUnavailable
@@ -303,16 +303,42 @@ func (s *Service) Hangup(ctx context.Context, modem *mmodem.Modem, callID string
 	}
 	switch call.Route {
 	case RouteWiFiCalling:
-		updated, err := s.wifiCalling.HangupCall(ctx, modem, call.ID)
-		if err := mapWiFiCallingActionError("hang up", err); err != nil {
+		ended, err := s.endWiFiCallingCall(ctx, call)
+		if err != nil {
 			return storage.Call{}, err
 		}
-		return s.saveAndPublish(ctx, callFromWiFiCalling(updated))
+		s.cleanupWiFiCallingHangup(ctx, modem, call.ID)
+		return ended, nil
 	case RouteModem:
 		return storage.Call{}, ErrModemCallingUnavailable
 	default:
 		return storage.Call{}, ErrInvalidRoute
 	}
+}
+
+func (s *Service) endWiFiCallingCall(ctx context.Context, call storage.Call) (storage.Call, error) {
+	if isTerminalCallState(call.State) {
+		return call, nil
+	}
+	now := time.Now()
+	call.State = StateEnded
+	call.EndedAt = now
+	call.UpdatedAt = now
+	return s.saveAndPublish(ctx, call)
+}
+
+func (s *Service) cleanupWiFiCallingHangup(ctx context.Context, modem *mmodem.Modem, callID string) {
+	go func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), wifiCallingHangupCleanupTimeout)
+		defer cancel()
+		if _, err := s.wifiCalling.HangupCall(cleanupCtx, modem, callID); err != nil {
+			if errors.Is(err, wificalling.ErrNotConnected) || errors.Is(err, wificalling.ErrUnavailable) {
+				slog.Debug("clean up Wi-Fi Calling hangup", "call_id", callID, "error", err)
+				return
+			}
+			slog.Warn("clean up Wi-Fi Calling hangup", "call_id", callID, "error", err)
+		}
+	}()
 }
 
 func (s *Service) SendDTMF(ctx context.Context, modem *mmodem.Modem, callID string, digits string) error {
@@ -527,10 +553,13 @@ func (s *Service) callForAction(ctx context.Context, modem *mmodem.Modem, callID
 }
 
 func (s *Service) saveAndPublish(ctx context.Context, call storage.Call) (storage.Call, error) {
-	if err := s.store.SaveCall(ctx, call); err != nil {
+	call, publish, err := s.store.SaveCallPreservingTerminal(ctx, call)
+	if err != nil {
 		return storage.Call{}, err
 	}
-	s.publish(Event{Call: call})
+	if publish {
+		s.publish(Event{Call: call})
+	}
 	return call, nil
 }
 

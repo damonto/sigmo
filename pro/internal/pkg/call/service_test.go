@@ -417,6 +417,208 @@ func TestEndUnavailableWiFiCallingMediaIgnoresTerminalCall(t *testing.T) {
 	}
 }
 
+func TestHangupEndsWiFiCallingCallLocally(t *testing.T) {
+	tests := []struct {
+		name   string
+		hangup func(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
+	}{
+		{
+			name: "backend disconnected",
+			hangup: func(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+				return wificalling.VoiceCall{}, wificalling.ErrNotConnected
+			},
+		},
+		{
+			name: "call already unavailable",
+			hangup: func(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+				return wificalling.VoiceCall{}, wificalling.ErrUnavailable
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := testStore(t)
+			service := New(store, fakeWiFiCalling{hangup: tt.hangup})
+			events, unsubscribe := service.Subscribe(1)
+			defer unsubscribe()
+			call := storage.Call{
+				ID:        "call-hangup",
+				ProfileID: "profile-a",
+				ModemID:   "modem-1",
+				Route:     RouteWiFiCalling,
+				Direction: DirectionOutgoing,
+				Number:    "+12242255559",
+				State:     StateActive,
+				StartedAt: time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC),
+				UpdatedAt: time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC),
+			}
+			if err := store.SaveCall(ctx, call); err != nil {
+				t.Fatalf("SaveCall() error = %v", err)
+			}
+			modem := &mmodem.Modem{
+				EquipmentIdentifier: call.ModemID,
+				Sim:                 &mmodem.SIM{Identifier: call.ProfileID},
+			}
+
+			ended, err := service.Hangup(ctx, modem, call.ID)
+			if err != nil {
+				t.Fatalf("Hangup() error = %v", err)
+			}
+			if ended.State != StateEnded || ended.EndedAt.IsZero() || !ended.UpdatedAt.Equal(ended.EndedAt) {
+				t.Fatalf("Hangup() = %+v, want locally ended call", ended)
+			}
+
+			stored, err := store.GetCall(ctx, call.ID)
+			if err != nil {
+				t.Fatalf("GetCall() error = %v", err)
+			}
+			if stored.State != StateEnded || stored.EndedAt.IsZero() {
+				t.Fatalf("stored call = %+v, want ended call", stored)
+			}
+
+			select {
+			case event := <-events:
+				if event.Call.ID != call.ID || event.Call.State != StateEnded {
+					t.Fatalf("event = %+v, want ended call", event)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for ended call event")
+			}
+		})
+	}
+}
+
+func TestHangupDoesNotWaitForWiFiCallingCleanup(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	hangupStarted := make(chan struct{})
+	releaseHangup := make(chan struct{})
+	service := New(store, fakeWiFiCalling{
+		hangup: func(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+			close(hangupStarted)
+			<-releaseHangup
+			return wificalling.VoiceCall{}, nil
+		},
+	})
+	call := storage.Call{
+		ID:        "call-slow-hangup",
+		ProfileID: "profile-a",
+		ModemID:   "modem-1",
+		Route:     RouteWiFiCalling,
+		Direction: DirectionOutgoing,
+		Number:    "+12242255559",
+		State:     StateActive,
+		StartedAt: time.Date(2026, 5, 28, 14, 5, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 5, 28, 14, 5, 0, 0, time.UTC),
+	}
+	if err := store.SaveCall(ctx, call); err != nil {
+		t.Fatalf("SaveCall() error = %v", err)
+	}
+	modem := &mmodem.Modem{
+		EquipmentIdentifier: call.ModemID,
+		Sim:                 &mmodem.SIM{Identifier: call.ProfileID},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := service.Hangup(ctx, modem, call.ID)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Hangup() error = %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Hangup() waited for Wi-Fi Calling cleanup")
+	}
+	select {
+	case <-hangupStarted:
+	case <-time.After(time.Second):
+		t.Fatal("HangupCall was not started")
+	}
+	close(releaseHangup)
+}
+
+func TestSaveAndPublishKeepsTerminalCallClosed(t *testing.T) {
+	tests := []struct {
+		name          string
+		existingState string
+		nextState     string
+		wantState     string
+		wantPublish   bool
+	}{
+		{name: "ended ignores active", existingState: StateEnded, nextState: StateActive, wantState: StateEnded},
+		{name: "failed ignores ringing", existingState: StateFailed, nextState: StateRinging, wantState: StateFailed},
+		{name: "ended accepts failed", existingState: StateEnded, nextState: StateFailed, wantState: StateFailed, wantPublish: true},
+		{name: "active accepts ended", existingState: StateActive, nextState: StateEnded, wantState: StateEnded, wantPublish: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := testStore(t)
+			service := New(store, fakeWiFiCalling{})
+			events, unsubscribe := service.Subscribe(1)
+			defer unsubscribe()
+			existing := storage.Call{
+				ID:        "call-terminal",
+				ProfileID: "profile-a",
+				ModemID:   "modem-1",
+				Route:     RouteWiFiCalling,
+				Direction: DirectionOutgoing,
+				Number:    "+12242255559",
+				State:     tt.existingState,
+				StartedAt: time.Date(2026, 5, 28, 15, 0, 0, 0, time.UTC),
+				EndedAt:   time.Date(2026, 5, 28, 15, 1, 0, 0, time.UTC),
+				UpdatedAt: time.Date(2026, 5, 28, 15, 1, 0, 0, time.UTC),
+			}
+			if err := store.SaveCall(ctx, existing); err != nil {
+				t.Fatalf("SaveCall() error = %v", err)
+			}
+			next := existing
+			next.State = tt.nextState
+			next.EndedAt = time.Time{}
+			if isTerminalCallState(tt.nextState) {
+				next.EndedAt = time.Date(2026, 5, 28, 15, 2, 0, 0, time.UTC)
+			}
+			next.UpdatedAt = time.Date(2026, 5, 28, 15, 2, 0, 0, time.UTC)
+
+			got, err := service.saveAndPublish(ctx, next)
+			if err != nil {
+				t.Fatalf("saveAndPublish() error = %v", err)
+			}
+			if got.State != tt.wantState {
+				t.Fatalf("saveAndPublish() state = %q, want %q", got.State, tt.wantState)
+			}
+			stored, err := store.GetCall(ctx, existing.ID)
+			if err != nil {
+				t.Fatalf("GetCall() error = %v", err)
+			}
+			if stored.State != tt.wantState {
+				t.Fatalf("stored state = %q, want %q", stored.State, tt.wantState)
+			}
+
+			select {
+			case event := <-events:
+				if !tt.wantPublish {
+					t.Fatalf("event = %+v, want no event", event)
+				}
+				if event.Call.State != tt.wantState {
+					t.Fatalf("event state = %q, want %q", event.Call.State, tt.wantState)
+				}
+			default:
+				if tt.wantPublish {
+					t.Fatal("missing published call event")
+				}
+			}
+		})
+	}
+}
+
 func TestUpdateRejectsUnsupportedState(t *testing.T) {
 	service := New(nil, fakeWiFiCalling{})
 	_, err := service.Update(context.Background(), nil, "call-1", UpdateRequest{State: StateFailed})
@@ -707,6 +909,7 @@ type fakeWiFiCalling struct {
 	resumeCall wificalling.VoiceCall
 	dtmfErr    error
 	sendDTMF   func(string, string) error
+	hangup     func(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
 	mediaErr   error
 	subscribe  func(wificalling.VoiceEventFunc) func()
 }
@@ -748,7 +951,10 @@ func (f fakeWiFiCalling) AnswerCall(context.Context, *mmodem.Modem, string) (wif
 func (f fakeWiFiCalling) RejectCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
 	return f.rejectCall, nil
 }
-func (f fakeWiFiCalling) HangupCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+func (f fakeWiFiCalling) HangupCall(ctx context.Context, modem *mmodem.Modem, callID string) (wificalling.VoiceCall, error) {
+	if f.hangup != nil {
+		return f.hangup(ctx, modem, callID)
+	}
 	return f.hangupCall, nil
 }
 func (f fakeWiFiCalling) HoldCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {

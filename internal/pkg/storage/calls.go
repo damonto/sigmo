@@ -60,6 +60,52 @@ func (s *Store) SaveCall(ctx context.Context, call Call) error {
 	return nil
 }
 
+func (s *Store) SaveCallPreservingTerminal(ctx context.Context, call Call) (Call, bool, error) {
+	call = normalizeCall(call)
+	if err := validateCall(call); err != nil {
+		return Call{}, false, err
+	}
+	row := s.db.QueryRowContext(ctx, `
+		INSERT INTO calls (
+			id, profile_id, modem_id, route, direction, number, state, hold_state, reason,
+			started_at, answered_at, ended_at, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			profile_id = excluded.profile_id,
+			modem_id = excluded.modem_id,
+			route = excluded.route,
+			direction = excluded.direction,
+			number = excluded.number,
+			state = excluded.state,
+			hold_state = excluded.hold_state,
+			reason = excluded.reason,
+			started_at = excluded.started_at,
+			answered_at = CASE
+				WHEN excluded.answered_at = ? THEN calls.answered_at
+				ELSE excluded.answered_at
+			END,
+			ended_at = excluded.ended_at,
+			updated_at = excluded.updated_at
+		WHERE NOT (calls.state IN ('ended', 'failed') AND excluded.state NOT IN ('ended', 'failed'))
+		RETURNING id, profile_id, modem_id, route, direction, number, state, hold_state, reason,
+			started_at, answered_at, ended_at, updated_at
+	`, call.ID, call.ProfileID, call.ModemID, call.Route, call.Direction, call.Number, call.State, call.Hold, call.Reason,
+		timeText(call.StartedAt), timeText(call.AnsweredAt), timeText(call.EndedAt), timeText(call.UpdatedAt), timeText(time.Time{}))
+	saved, err := scanCall(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		existing, err := s.GetCall(ctx, call.ID)
+		if err != nil {
+			return Call{}, false, err
+		}
+		return existing, false, nil
+	}
+	if err != nil {
+		return Call{}, false, fmt.Errorf("save call preserving terminal state: %w", err)
+	}
+	return saved, true, nil
+}
+
 func (s *Store) GetCall(ctx context.Context, id string) (Call, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
