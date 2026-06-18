@@ -120,7 +120,7 @@ send_media_group() {
 	echo "Sending ${#archives[@]} Pro archives to ${chat_id} as one media group"
 	if ! curl --fail-with-body --show-error --silent \
 		--request POST "${API_BASE}/bot${BOT_TOKEN}/sendMediaGroup" \
-		--form "media=${media}" \
+		--form-string "media=${media}" \
 		"${forms[@]}"; then
 		echo "send Telegram media group to ${chat_id}" >&2
 		return 1
