@@ -7,7 +7,7 @@ import (
 
 	coreesim "github.com/damonto/sigmo/internal/app/handler/esim"
 	"github.com/damonto/sigmo/internal/app/router"
-	protransfer "github.com/damonto/sigmo/pro/internal/pkg/esimtransfer"
+	protransfer "github.com/damonto/sigmo/pro/esimtransfer"
 )
 
 const esimTransferFeature = "esimTransfer"
@@ -22,7 +22,7 @@ var proESIMTransfer = func(app *proApp) error {
 			Registry: deps.Registry,
 			Internet: deps.Internet,
 		})
-		protransfer.Register(group, protransfer.ConfigFromCore(core, protransfer.Config{
+		protransfer.RegisterRoutes(group, protransfer.ConfigFromCore(core, protransfer.Config{
 			Store:     deps.Store,
 			Registry:  deps.Registry,
 			Websheets: app.Websheets(),

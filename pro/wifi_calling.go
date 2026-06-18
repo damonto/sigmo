@@ -16,9 +16,8 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	pussd "github.com/damonto/sigmo/internal/pkg/ussd"
-	callhandler "github.com/damonto/sigmo/pro/internal/app/handler/call"
-	procall "github.com/damonto/sigmo/pro/internal/pkg/call"
-	"github.com/damonto/sigmo/pro/internal/pkg/wificalling"
+	procall "github.com/damonto/sigmo/pro/call"
+	"github.com/damonto/sigmo/pro/wificalling"
 )
 
 var proWiFiCalling = func(app *proApp) error {
@@ -48,7 +47,7 @@ var proWiFiCalling = func(app *proApp) error {
 	})
 	runtime.AddRoute(func(group *echo.Group, deps router.RegisterConfig) error {
 		wificalling.RegisterRoutes(group, deps.Registry, wifiCalling)
-		callhandler.Register(group, deps.Registry, calls, media)
+		procall.RegisterRoutes(group, deps.Registry, calls, media)
 		return nil
 	})
 	return nil

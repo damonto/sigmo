@@ -6,8 +6,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/router"
-	hwebsheet "github.com/damonto/sigmo/pro/internal/app/handler/websheet"
-	"github.com/damonto/sigmo/pro/internal/pkg/websheet"
+	"github.com/damonto/sigmo/pro/websheet"
 )
 
 type websheetState struct {
@@ -28,7 +27,7 @@ func (p *proApp) RegisterWebsheets() {
 	}
 	p.websheet.routesRegistered = true
 	p.runtime.AddRoute(func(group *echo.Group, _ router.RegisterConfig) error {
-		hwebsheet.New(p.Websheets()).Register(group)
+		websheet.RegisterRoutes(group, p.Websheets())
 		return nil
 	})
 }

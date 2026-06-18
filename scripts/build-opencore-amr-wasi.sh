@@ -9,7 +9,7 @@ VO_AMRWBENC_URL="${VO_AMRWBENC_URL:-https://sourceforge.net/projects/opencore-am
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 refs_dir="${repo_root}/refs"
-out_dir="${repo_root}/pro/internal/pkg/voicecodec/assets"
+out_dir="${repo_root}/pro/voicecodec/assets"
 out_wasm="${out_dir}/opencore-amr.wasm"
 
 opencore_archive="${refs_dir}/opencore-amr-${OPENCORE_AMR_VERSION}.tar.gz"

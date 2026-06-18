@@ -9,7 +9,7 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/sigmo/pro/internal/pkg/wificalling"
+	"github.com/damonto/sigmo/pro/wificalling"
 )
 
 func TestWiFiCallingOverview(t *testing.T) {
