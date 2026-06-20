@@ -11,7 +11,7 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.2.0
-	github.com/ncruces/go-sqlite3 v0.35.0
+	github.com/ncruces/go-sqlite3 v0.35.1
 	github.com/nyaruka/phonenumbers v1.8.0
 	github.com/things-go/go-socks5 v0.1.1
 	github.com/wneessen/go-mail v0.7.3

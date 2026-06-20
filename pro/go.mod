@@ -26,7 +26,7 @@ require (
 	github.com/go-playground/validator/v10 v10.30.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
-	github.com/ncruces/go-sqlite3 v0.35.0 // indirect
+	github.com/ncruces/go-sqlite3 v0.35.1 // indirect
 	github.com/ncruces/go-sqlite3-wasm/v3 v3.1.35302 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/nyaruka/phonenumbers v1.8.0 // indirect
