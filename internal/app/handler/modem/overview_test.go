@@ -4,12 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"strings"
 	"testing"
 
 	"github.com/damonto/sigmo/internal/app/modemstatus"
-	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
@@ -131,31 +129,25 @@ func TestCatalogApplyOverviewExtensions(t *testing.T) {
 	}
 }
 
-func TestSupportsEsimFallbackToLPA(t *testing.T) {
-	errLPA := errors.New("lpa open")
+func TestSupportsEsimUsesModemMetadata(t *testing.T) {
 	tests := []struct {
-		name       string
-		modem      *mmodem.Modem
-		lpaErr     error
-		want       bool
-		wantErr    error
-		wantCalled bool
+		name    string
+		modem   *mmodem.Modem
+		want    bool
+		wantErr bool
 	}{
 		{
-			name: "uses LPA when metadata detection errors",
+			name: "unsupported AT modem",
 			modem: &mmodem.Modem{
 				EquipmentIdentifier: "imei-1",
-				PrimaryPort:         "/dev/cdc-wdm0",
-				PrimarySimSlot:      6,
+				PrimaryPort:         "/dev/ttyUSB2",
 				Ports: []mmodem.ModemPort{
-					{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm0"},
+					{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB2"},
 				},
 			},
-			want:       true,
-			wantCalled: true,
 		},
 		{
-			name: "no supported AID means unsupported",
+			name: "metadata error is returned",
 			modem: &mmodem.Modem{
 				EquipmentIdentifier: "imei-2",
 				PrimaryPort:         "/dev/cdc-wdm0",
@@ -164,81 +156,27 @@ func TestSupportsEsimFallbackToLPA(t *testing.T) {
 					{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm0"},
 				},
 			},
-			lpaErr:     lpa.ErrNoSupportedAID,
-			wantCalled: true,
-		},
-		{
-			name: "keeps LPA open error",
-			modem: &mmodem.Modem{
-				EquipmentIdentifier: "imei-3",
-				PrimaryPort:         "/dev/cdc-wdm0",
-				PrimarySimSlot:      6,
-				Ports: []mmodem.ModemPort{
-					{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm0"},
-				},
-			},
-			lpaErr:     errLPA,
-			wantErr:    errLPA,
-			wantCalled: true,
-		},
-		{
-			name: "does not fallback when metadata says unsupported",
-			modem: &mmodem.Modem{
-				EquipmentIdentifier: "imei-4",
-				PrimaryPort:         "/dev/ttyUSB2",
-				Ports: []mmodem.ModemPort{
-					{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB2"},
-				},
-			},
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var called bool
-			old := newEsimSupportClient
-			newEsimSupportClient = func(m *mmodem.Modem, current *settings.Settings) (esimSupportClient, error) {
-				called = true
-				if m != tt.modem {
-					t.Fatalf("modem = %p, want %p", m, tt.modem)
+			got, err := supportsEsim(context.Background(), tt.modem)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("supportsEsim() error = nil, want error")
 				}
-				if current == nil {
-					t.Fatal("settings = nil")
-				}
-				if tt.lpaErr != nil {
-					return nil, tt.lpaErr
-				}
-				return &fakeEsimSupportClient{}, nil
+				return
 			}
-			t.Cleanup(func() {
-				newEsimSupportClient = old
-			})
-
-			got, err := supportsEsim(context.Background(), tt.modem, settings.NewMemoryStore(settings.Default()))
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("supportsEsim() error = %v, want %v", err, tt.wantErr)
+			if err != nil {
+				t.Fatalf("supportsEsim() error = %v", err)
 			}
 			if got != tt.want {
 				t.Fatalf("supportsEsim() = %v, want %v", got, tt.want)
 			}
-			if called != tt.wantCalled {
-				t.Fatalf("LPA fallback called = %v, want %v", called, tt.wantCalled)
-			}
 		})
 	}
-}
-
-type fakeEsimSupportClient struct {
-	closed bool
-}
-
-func (c *fakeEsimSupportClient) Close() error {
-	c.closed = true
-	return nil
-}
-
-func (c *fakeEsimSupportClient) Logger() *slog.Logger {
-	return slog.Default()
 }
 
 func TestModemResponseJSONIncludesOverviewFields(t *testing.T) {

@@ -11,6 +11,12 @@ import (
 
 var errFakeMBIMATR = errors.New("mbim atr")
 
+var (
+	westkKnownATR  = []byte{0x3B, 0xBF, 0x93, 0x00, 0x80, 0x1F, 0xC6, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x13, 0x57, 0x65, 0x73, 0x74, 0x6B, 0x2E, 0x6D, 0x65, 0xE3}
+	f002KnownATR   = []byte{0x3B, 0x9F, 0x96, 0x80, 0x1F, 0xC7, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x1B, 0x57, 0xAA, 0x86, 0x60, 0xF0, 0x02, 0x00, 0x02, 0x5C}
+	one601KnownATR = []byte{0x3B, 0x9F, 0x96, 0x80, 0x1F, 0xC7, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x1B, 0x57, 0xAA, 0x86, 0x60, 0x16, 0x01, 0x00, 0x01, 0xBA}
+)
+
 func TestATRSupportsEUICC(t *testing.T) {
 	tests := []struct {
 		name string
@@ -25,6 +31,21 @@ func TestATRSupportsEUICC(t *testing.T) {
 		{
 			name: "TS 102 221 eUICC ATR",
 			atr:  []byte{0x3B, 0x97, 0x93, 0x80, 0x3F, 0xC7, 0x82, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x13, 0x10},
+			want: true,
+		},
+		{
+			name: "known pSIM ATR westk",
+			atr:  westkKnownATR,
+			want: true,
+		},
+		{
+			name: "known pSIM ATR f002",
+			atr:  f002KnownATR,
+			want: true,
+		},
+		{
+			name: "known pSIM ATR 1601",
+			atr:  one601KnownATR,
 			want: true,
 		},
 		{
@@ -101,6 +122,54 @@ func TestSupportsEUICCQMI(t *testing.T) {
 				ActiveSlot: 1,
 				Slots: []uim.Slot{
 					{ATR: []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}},
+				},
+			},
+			want:       true,
+			wantSlot:   1,
+			wantOpened: true,
+		},
+		{
+			name: "known pSIM ATR westk",
+			modem: testATRModem(ModemPortTypeQmi, ModemPort{
+				PortType: ModemPortTypeQmi,
+				Device:   "/dev/cdc-wdm0",
+			}),
+			status: uim.SlotStatus{
+				ActiveSlot: 1,
+				Slots: []uim.Slot{
+					{ATR: westkKnownATR},
+				},
+			},
+			want:       true,
+			wantSlot:   1,
+			wantOpened: true,
+		},
+		{
+			name: "known pSIM ATR f002",
+			modem: testATRModem(ModemPortTypeQmi, ModemPort{
+				PortType: ModemPortTypeQmi,
+				Device:   "/dev/cdc-wdm0",
+			}),
+			status: uim.SlotStatus{
+				ActiveSlot: 1,
+				Slots: []uim.Slot{
+					{ATR: f002KnownATR},
+				},
+			},
+			want:       true,
+			wantSlot:   1,
+			wantOpened: true,
+		},
+		{
+			name: "known pSIM ATR 1601",
+			modem: testATRModem(ModemPortTypeQmi, ModemPort{
+				PortType: ModemPortTypeQmi,
+				Device:   "/dev/cdc-wdm0",
+			}),
+			status: uim.SlotStatus{
+				ActiveSlot: 1,
+				Slots: []uim.Slot{
+					{ATR: one601KnownATR},
 				},
 			},
 			want:       true,
@@ -186,6 +255,21 @@ func TestSupportsEUICCMBIM(t *testing.T) {
 		{
 			name: "ATR marks eUICC",
 			atr:  []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
+			want: true,
+		},
+		{
+			name: "known pSIM ATR westk",
+			atr:  westkKnownATR,
+			want: true,
+		},
+		{
+			name: "known pSIM ATR f002",
+			atr:  f002KnownATR,
+			want: true,
+		},
+		{
+			name: "known pSIM ATR 1601",
+			atr:  one601KnownATR,
 			want: true,
 		},
 		{

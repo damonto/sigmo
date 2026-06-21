@@ -2,7 +2,6 @@ package modem
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/pkg/carrier"
-	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
@@ -19,15 +17,6 @@ type catalog struct {
 	store              *settings.Store
 	registry           *mmodem.Registry
 	overviewExtensions []modemstatus.Extension
-}
-
-type esimSupportClient interface {
-	Close() error
-	Logger() *slog.Logger
-}
-
-var newEsimSupportClient = func(m *mmodem.Modem, current *settings.Settings) (esimSupportClient, error) {
-	return lpa.New(m, current)
 }
 
 func newCatalog(store *settings.Store, registry *mmodem.Registry, overviewExtensions ...modemstatus.Extension) *catalog {
@@ -102,7 +91,7 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 	}
 
 	carrierInfo := carrier.Lookup(sim.OperatorIdentifier)
-	supportsEsim, err := supportsEsim(ctx, device, c.store)
+	supportsEsim, err := supportsEsim(ctx, device)
 	if err != nil {
 		return nil, fmt.Errorf("detect eSIM support: %w", err)
 	}
@@ -160,7 +149,7 @@ func (c *catalog) buildLockedResponse(ctx context.Context, device *mmodem.Modem)
 	if alias != "" {
 		name = alias
 	}
-	supportsEsim, err := supportsEsim(ctx, device, c.store)
+	supportsEsim, err := supportsEsim(ctx, device)
 	if err != nil {
 		slog.Warn("detect eSIM support for locked modem", "imei", device.EquipmentIdentifier, "error", err)
 	}
@@ -254,26 +243,8 @@ func (c *catalog) applyOverviewExtensions(ctx context.Context, device *mmodem.Mo
 	return nil
 }
 
-func supportsEsim(ctx context.Context, m *mmodem.Modem, store *settings.Store) (bool, error) {
-	supported, err := mmodem.SupportsEUICC(ctx, m)
-	if err == nil {
-		return supported, nil
-	}
-
-	current := store.Snapshot()
-	client, fallbackErr := newEsimSupportClient(m, &current)
-	if fallbackErr != nil {
-		if errors.Is(fallbackErr, lpa.ErrNoSupportedAID) {
-			return false, nil
-		}
-		return false, errors.Join(err, fmt.Errorf("create LPA client: %w", fallbackErr))
-	}
-	defer func() {
-		if cerr := client.Close(); cerr != nil {
-			client.Logger().Warn("close LPA client", "error", cerr)
-		}
-	}()
-	return true, nil
+func supportsEsim(ctx context.Context, m *mmodem.Modem) (bool, error) {
+	return mmodem.SupportsEUICC(ctx, m)
 }
 
 func accessTechnologyString(access []mmodem.ModemAccessTechnology) string {
