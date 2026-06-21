@@ -49,9 +49,8 @@ type Channel struct {
 }
 
 type Modem struct {
-	Alias      string `json:"alias"`
-	Compatible bool   `json:"compatible"`
-	MSS        int    `json:"mss"`
+	Alias string `json:"alias"`
+	MSS   int    `json:"mss"`
 }
 
 type Proxy struct {
@@ -69,8 +68,7 @@ func Default() *Settings {
 
 func DefaultModem() Modem {
 	return Modem{
-		Compatible: false,
-		MSS:        240,
+		MSS: 240,
 	}
 }
 

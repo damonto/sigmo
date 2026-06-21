@@ -15,7 +15,6 @@ export const useModemDeviceSettings = ({ modemId, onSuccess }: Options) => {
 
   const settingsAlias = ref('')
   const settingsMss = ref('')
-  const settingsCompatible = ref(false)
   const isSettingsLoading = ref(false)
   const isSettingsUpdating = ref(false)
 
@@ -27,7 +26,6 @@ export const useModemDeviceSettings = ({ modemId, onSuccess }: Options) => {
   const resetSettings = () => {
     settingsAlias.value = ''
     settingsMss.value = ''
-    settingsCompatible.value = false
   }
 
   const fetchSettings = async (id: string) => {
@@ -38,7 +36,6 @@ export const useModemDeviceSettings = ({ modemId, onSuccess }: Options) => {
       const payload: ModemSettings | undefined = data.value
       settingsAlias.value = payload?.alias ?? ''
       settingsMss.value = payload?.mss ? String(payload.mss) : ''
-      settingsCompatible.value = payload?.compatible ?? false
     } finally {
       isSettingsLoading.value = false
     }
@@ -52,7 +49,6 @@ export const useModemDeviceSettings = ({ modemId, onSuccess }: Options) => {
     try {
       const payload: ModemSettings = {
         alias: settingsAlias.value.trim(),
-        compatible: settingsCompatible.value,
         mss,
       }
       await modemApi.updateSettings(targetId, payload)
@@ -85,7 +81,6 @@ export const useModemDeviceSettings = ({ modemId, onSuccess }: Options) => {
   return {
     settingsAlias,
     settingsMss,
-    settingsCompatible,
     isSettingsLoading,
     isSettingsUpdating,
     isMssValid,

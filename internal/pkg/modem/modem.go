@@ -156,51 +156,47 @@ func (m *Modem) SignalQuality(ctx context.Context) (percent uint32, recent bool,
 	return percent, recent, nil
 }
 
-func (m *Modem) Restart(ctx context.Context, compatible bool) error {
+func (m *Modem) Restart(ctx context.Context) error {
 	var err error
-	if m.PrimaryPortType() == ModemPortTypeQmi {
-		err = errors.Join(err, qmiRepowerSimCard(ctx, m))
-		// Wait for the SIM card to be ready.
-		if e := sleepContext(ctx, time.Second); e != nil {
-			return errors.Join(err, e)
-		}
-	}
-
-	// Try to activate provisioning session if SIM is missing.
-	if compatible {
-		err = errors.Join(err, qmiActivateProvisioningIfSimMissing(ctx, m))
-	}
-
-	// Some legacy modems require the modem to be disabled and enabled to take effect.
-	if e := m.simpleStatus(ctx); e == nil {
-		slog.Info("try to disable and enable modem", "imei", m.EquipmentIdentifier)
-		err = errors.Join(err, m.togglePower(ctx))
-	} else if ctx.Err() != nil {
-		return errors.Join(err, ctx.Err())
-	}
-
-	// This workaround is needed for some modems that don't properly reload.
-	if compatible {
-		// Inhibiting the device will cause the ModemManager to reload the device.
-		if e := sleepContext(ctx, time.Second); e != nil {
-			return errors.Join(err, e)
-		}
-		if e := m.simpleStatus(ctx); e == nil {
-			if m.inhibitDevice == nil {
-				return errors.Join(err, errors.New("modem inhibit function is required"))
-			}
-			slog.Info("try to inhibit and uninhibit modem", "imei", m.EquipmentIdentifier, "compatible", compatible)
-			err = errors.Join(
-				err,
-				m.inhibitDevice(ctx, m.Device, true),
-				m.inhibitDevice(ctx, m.Device, false),
-			)
-		} else if ctx.Err() != nil {
-			return errors.Join(err, ctx.Err())
-		}
-		return err
-	}
+	err = errors.Join(err, m.refreshModemManager(ctx))
 	return err
+}
+
+func (m *Modem) refreshModemManager(ctx context.Context) error {
+	if m == nil || m.dbusObject == nil {
+		return nil
+	}
+	if e := m.simpleStatus(ctx); e != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return nil
+	}
+	slog.Info("try to disable and enable modem", "imei", m.EquipmentIdentifier)
+	return m.togglePower(ctx)
+}
+
+func (m *Modem) reloadModemManager(ctx context.Context) error {
+	if m == nil || m.dbusObject == nil {
+		return nil
+	}
+	if e := sleepContext(ctx, time.Second); e != nil {
+		return e
+	}
+	if e := m.simpleStatus(ctx); e != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return nil
+	}
+	if m.inhibitDevice == nil {
+		return errors.New("modem inhibit function is required")
+	}
+	slog.Info("try to inhibit and uninhibit modem", "imei", m.EquipmentIdentifier)
+	return errors.Join(
+		m.inhibitDevice(ctx, m.Device, true),
+		m.inhibitDevice(ctx, m.Device, false),
+	)
 }
 
 func (m *Modem) simpleStatus(ctx context.Context) error {

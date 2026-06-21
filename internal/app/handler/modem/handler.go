@@ -48,7 +48,6 @@ const (
 	errorCodeInvalidPhoneNumber           = "invalid_phone_number"
 	errorCodeUpdateSettingsInvalidRequest = "update_settings_invalid_request"
 	errorCodeUpdateSettingsFailed         = "update_settings_failed"
-	errorCodeCompatibleRequired           = "compatible_required"
 	errorCodeGetSettingsFailed            = "get_settings_failed"
 )
 
@@ -62,7 +61,7 @@ func New(store *settings.Store, registry *mmodem.Registry, internetConnector *in
 		registry: registry,
 		catalog:  newCatalog(store, registry, overviewExtensions...),
 		simSlot:  newSIMSlot(registry),
-		msisdn:   newMSISDN(store, registry),
+		msisdn:   newMSISDN(registry),
 		settings: newSettings(store),
 		internet: internetConnector,
 	}
@@ -195,9 +194,6 @@ func (h *Handler) UpdateSettings(c *echo.Context) error {
 		return err
 	}
 	if err := h.settings.Update(c.Request().Context(), modem, req); err != nil {
-		if errors.Is(err, errCompatibleRequired) {
-			return httpapi.BadRequest(c, errorCodeCompatibleRequired, err)
-		}
 		return httpapi.Internal(c, errorCodeUpdateSettingsFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)

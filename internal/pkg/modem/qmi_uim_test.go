@@ -7,7 +7,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/damonto/uicc-go/qcom"
 	"github.com/damonto/uicc-go/qcom/uim"
 )
 
@@ -37,6 +39,18 @@ func TestQMISIMSlot(t *testing.T) {
 }
 
 func TestQMIRepowerSimCard(t *testing.T) {
+	oldTimeout := qmiSlotInactiveTimeout
+	qmiSlotInactiveTimeout = time.Nanosecond
+	t.Cleanup(func() {
+		qmiSlotInactiveTimeout = oldTimeout
+	})
+
+	oldDelay := qmiSlotInactiveUnsupportedDelay
+	qmiSlotInactiveUnsupportedDelay = time.Nanosecond
+	t.Cleanup(func() {
+		qmiSlotInactiveUnsupportedDelay = oldDelay
+	})
+
 	errOpen := errors.New("proxy unavailable")
 	errPowerOff := errors.New("power off rejected")
 	errPowerOn := errors.New("power on rejected")
@@ -45,20 +59,21 @@ func TestQMIRepowerSimCard(t *testing.T) {
 		modem     *Modem
 		reader    *fakeQMIUIMReader
 		openErr   error
+		cancelCtx bool
 		wantCalls []string
 		wantErr   error
 	}{
 		{
 			name:      "power cycles default slot",
 			modem:     &Modem{PrimaryPort: "/dev/cdc-wdm0"},
-			reader:    &fakeQMIUIMReader{},
-			wantCalls: []string{"power-off:1", "power-on:1", "close"},
+			reader:    &fakeQMIUIMReader{slotStatus: qmiTestInactiveSlotStatus(1)},
+			wantCalls: []string{"power-off:1", "slot-status", "power-on:1", "close"},
 		},
 		{
 			name:      "power cycles primary slot",
 			modem:     &Modem{PrimaryPort: "/dev/cdc-wdm0", PrimarySimSlot: 2},
-			reader:    &fakeQMIUIMReader{},
-			wantCalls: []string{"power-off:2", "power-on:2", "close"},
+			reader:    &fakeQMIUIMReader{slotStatus: qmiTestInactiveSlotStatus(2)},
+			wantCalls: []string{"power-off:2", "slot-status", "power-on:2", "close"},
 		},
 		{
 			name:      "returns open error",
@@ -77,9 +92,28 @@ func TestQMIRepowerSimCard(t *testing.T) {
 		{
 			name:      "returns power on error",
 			modem:     &Modem{PrimaryPort: "/dev/cdc-wdm0"},
-			reader:    &fakeQMIUIMReader{powerOnErr: errPowerOn},
-			wantCalls: []string{"power-off:1", "power-on:1", "close"},
+			reader:    &fakeQMIUIMReader{powerOnErr: errPowerOn, slotStatus: qmiTestInactiveSlotStatus(1)},
+			wantCalls: []string{"power-off:1", "slot-status", "power-on:1", "close"},
 			wantErr:   errPowerOn,
+		},
+		{
+			name:      "uses fixed wait when slot status is unsupported",
+			modem:     &Modem{PrimaryPort: "/dev/cdc-wdm0"},
+			reader:    &fakeQMIUIMReader{slotStatusErr: qcom.QMIErrorNotSupported},
+			wantCalls: []string{"power-off:1", "slot-status", "power-on:1", "close"},
+		},
+		{
+			name:      "uses fixed wait when slot status cannot be read",
+			modem:     &Modem{PrimaryPort: "/dev/cdc-wdm0"},
+			reader:    &fakeQMIUIMReader{slotStatusErr: context.DeadlineExceeded},
+			wantCalls: []string{"power-off:1", "slot-status", "power-on:1", "close"},
+		},
+		{
+			name:      "powers SIM back on after parent context is canceled",
+			modem:     &Modem{PrimaryPort: "/dev/cdc-wdm0"},
+			reader:    &fakeQMIUIMReader{slotStatus: qmiTestInactiveSlotStatus(1)},
+			cancelCtx: true,
+			wantCalls: []string{"power-off:1", "slot-status", "power-on:1", "close"},
 		},
 	}
 
@@ -87,7 +121,14 @@ func TestQMIRepowerSimCard(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			withQMIUIMReader(t, tt.modem.PrimaryPort, qmiTestSlot(tt.modem), tt.reader, tt.openErr)
 
-			err := qmiRepowerSimCard(context.Background(), tt.modem)
+			ctx := context.Background()
+			if tt.cancelCtx {
+				cancelCtx, cancel := context.WithCancel(ctx)
+				ctx = cancelCtx
+				tt.reader.afterPowerOff = cancel
+			}
+
+			err := qmiRepowerSimCard(ctx, tt.modem)
 			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
 				t.Fatalf("qmiRepowerSimCard() error = %v, want %v", err, tt.wantErr)
 			}
@@ -206,7 +247,12 @@ func TestQMIActivateProvisioningIfSimMissing(t *testing.T) {
 type fakeQMIUIMReader struct {
 	calls           []string
 	powerOffErr     error
+	afterPowerOff   func()
 	powerOnErr      error
+	slotStatus      uim.SlotStatus
+	slotStatuses    []uim.SlotStatus
+	slotStatusErr   error
+	slotStatusErrs  []error
 	cardStatus      uim.CardStatus
 	cardStatusErr   error
 	changeReq       uim.ChangeProvisioningSessionRequest
@@ -215,12 +261,30 @@ type fakeQMIUIMReader struct {
 
 func (r *fakeQMIUIMReader) PowerOffSIM(_ context.Context, slot uint8) error {
 	r.calls = append(r.calls, fmtCall("power-off", slot))
+	if r.afterPowerOff != nil {
+		r.afterPowerOff()
+	}
 	return r.powerOffErr
 }
 
 func (r *fakeQMIUIMReader) PowerOnSIM(_ context.Context, req uim.PowerOnSIMRequest) error {
 	r.calls = append(r.calls, fmtCall("power-on", req.Slot))
 	return r.powerOnErr
+}
+
+func (r *fakeQMIUIMReader) SlotStatus(context.Context) (uim.SlotStatus, error) {
+	r.calls = append(r.calls, "slot-status")
+	err := r.slotStatusErr
+	if len(r.slotStatusErrs) > 0 {
+		err = r.slotStatusErrs[0]
+		r.slotStatusErrs = r.slotStatusErrs[1:]
+	}
+	if len(r.slotStatuses) > 0 {
+		status := r.slotStatuses[0]
+		r.slotStatuses = r.slotStatuses[1:]
+		return status, err
+	}
+	return r.slotStatus, err
 }
 
 func (r *fakeQMIUIMReader) CardStatus(context.Context) (uim.CardStatus, error) {
@@ -284,6 +348,16 @@ func qmiTestCardStatusForSlot(slot uint8, appState uim.ApplicationState, persona
 		}},
 	}
 	return uim.CardStatus{Cards: cards}
+}
+
+func qmiTestInactiveSlotStatus(slot uint8) uim.SlotStatus {
+	slots := make([]uim.Slot, slot)
+	slots[slot-1] = uim.Slot{
+		PhysicalCardStatus: uim.PhysicalCardStatePresent,
+		PhysicalSlotStatus: uim.SlotStateInactive,
+		LogicalSlot:        1,
+	}
+	return uim.SlotStatus{Slots: slots}
 }
 
 func qmiChangeProvisioningRequestEqual(a, b uim.ChangeProvisioningSessionRequest) bool {

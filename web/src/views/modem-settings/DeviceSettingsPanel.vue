@@ -6,11 +6,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
-import { Switch } from '@/components/ui/switch'
 
 const alias = defineModel<string>('alias', { required: true })
 const mss = defineModel<string>('mss', { required: true })
-const compatible = defineModel<boolean>('compatible', { required: true })
 
 const props = defineProps<{
   isLoading: boolean
@@ -64,23 +62,6 @@ const isActionDisabled = computed(() => !props.isValid || props.isUpdating)
       <p class="text-xs text-muted-foreground">
         {{ t('modemDetail.settings.mssDescription') }}
       </p>
-    </div>
-
-    <div class="space-y-2">
-      <div class="flex items-center justify-between gap-3">
-        <div class="min-w-0 flex-1 space-y-1">
-          <Label for="modem-compatible">{{ t('modemDetail.settings.compatibleLabel') }}</Label>
-          <p class="text-xs leading-5 text-muted-foreground">
-            {{ t('modemDetail.settings.compatibleDescription') }}
-          </p>
-        </div>
-        <Switch
-          id="modem-compatible"
-          :model-value="compatible"
-          :disabled="isInputDisabled"
-          @update:model-value="(value: boolean) => (compatible = value)"
-        />
-      </div>
     </div>
 
     <div class="flex justify-end">

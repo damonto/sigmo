@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/damonto/euicc-go/bertlv"
 	sgp22 "github.com/damonto/euicc-go/v2"
@@ -78,50 +77,31 @@ func TestEnableSessionEnable(t *testing.T) {
 		t.Fatalf("NewICCID() error = %v", err)
 	}
 	enableErr := errors.New("qmi enable returned unknown")
+	ensureErr := errors.New("SIM not visible")
 	current := &mmodem.Modem{EquipmentIdentifier: "354015820228039"}
-	reloadedModem := &mmodem.Modem{EquipmentIdentifier: current.EquipmentIdentifier}
+	visibleModem := &mmodem.Modem{EquipmentIdentifier: current.EquipmentIdentifier}
 
 	tests := []struct {
 		name              string
 		enableErr         error
-		restartErr        error
-		findResults       []findResult
+		ensureErr         error
 		wantErr           error
-		wantRestart       bool
+		wantEnsure        bool
 		wantEnableClosed  bool
 		wantNotifications bool
-		wantWaitForModem  bool
-		wantFindCalls     int
 	}{
 		{
 			name:              "enable succeeds",
-			findResults:       []findResult{{modem: current}},
-			wantRestart:       true,
+			wantEnsure:        true,
 			wantEnableClosed:  true,
 			wantNotifications: true,
-			wantFindCalls:     1,
 		},
 		{
-			name: "enable succeeds after final modem availability wait",
-			findResults: []findResult{
-				{err: mmodem.ErrNotFound},
-				{modem: reloadedModem},
-			},
-			wantRestart:       true,
-			wantEnableClosed:  true,
-			wantNotifications: true,
-			wantWaitForModem:  true,
-			wantFindCalls:     2,
-		},
-		{
-			name:              "restart error succeeds when modem is ready",
-			restartErr:        errors.New("QMI UIM power off failed"),
-			findResults:       []findResult{{err: mmodem.ErrNotFound}, {modem: reloadedModem}},
-			wantRestart:       true,
-			wantEnableClosed:  true,
-			wantNotifications: true,
-			wantWaitForModem:  true,
-			wantFindCalls:     2,
+			name:             "ensure SIM visible error is returned",
+			ensureErr:        ensureErr,
+			wantErr:          ensureErr,
+			wantEnsure:       true,
+			wantEnableClosed: true,
 		},
 		{
 			name:             "enable error returns original error immediately",
@@ -141,14 +121,9 @@ func TestEnableSessionEnable(t *testing.T) {
 			}
 			factoryClients := []lifecycleClient{notificationClient}
 
-			var (
-				restartCalled      bool
-				findCalls          int
-				waitForModemCalled bool
-			)
+			var ensureCalled bool
 			l := &lifecycle{
-				settings:     &settings.Settings{},
-				readyTimeout: time.Millisecond,
+				settings: &settings.Settings{},
 				newClient: func(*mmodem.Modem, *settings.Settings) (lifecycleClient, error) {
 					if len(factoryClients) == 0 {
 						return &fakeLifecycleClient{profiles: disabledProfiles(iccid)}, nil
@@ -157,35 +132,19 @@ func TestEnableSessionEnable(t *testing.T) {
 					factoryClients = factoryClients[1:]
 					return client, nil
 				},
-				findModem: func(ctx context.Context, id string) (*mmodem.Modem, error) {
+				ensureSIMVisible: func(ctx context.Context, modem *mmodem.Modem, target mmodem.SIMTarget) (*mmodem.Modem, error) {
 					_ = ctx.Err()
-					if id == "" {
-						t.Fatal("id is empty")
+					ensureCalled = true
+					if modem != current {
+						t.Fatalf("modem = %p, want %p", modem, current)
 					}
-					findCalls++
-					if len(tt.findResults) == 0 {
-						return current, nil
+					if target.ICCID != iccid.String() {
+						t.Fatalf("target ICCID = %q, want %q", target.ICCID, iccid.String())
 					}
-					index := min(findCalls-1, len(tt.findResults)-1)
-					result := tt.findResults[index]
-					return result.modem, result.err
-				},
-				waitForModemReload: func(ctx context.Context, modem *mmodem.Modem) (*mmodem.Modem, error) {
-					_ = ctx.Err()
-					if modem == nil {
-						t.Fatal("modem is nil")
+					if tt.ensureErr != nil {
+						return nil, tt.ensureErr
 					}
-					waitForModemCalled = true
-					return reloadedModem, nil
-				},
-				restartModem: func(ctx context.Context, modem *mmodem.Modem, compatible bool) error {
-					_ = ctx.Err()
-					if modem == nil {
-						t.Fatal("modem is nil")
-					}
-					_ = compatible
-					restartCalled = true
-					return tt.restartErr
+					return visibleModem, nil
 				},
 			}
 			session := &enableSession{
@@ -204,11 +163,8 @@ func TestEnableSessionEnable(t *testing.T) {
 			} else if err != nil {
 				t.Fatalf("Enable() error = %v", err)
 			}
-			if restartCalled != tt.wantRestart {
-				t.Fatalf("restart called = %v, want %v", restartCalled, tt.wantRestart)
-			}
-			if findCalls < tt.wantFindCalls {
-				t.Fatalf("find calls = %d, want at least %d", findCalls, tt.wantFindCalls)
+			if ensureCalled != tt.wantEnsure {
+				t.Fatalf("ensure called = %v, want %v", ensureCalled, tt.wantEnsure)
 			}
 			if enableClient.closed != tt.wantEnableClosed {
 				t.Fatalf("enable client closed = %v, want %v", enableClient.closed, tt.wantEnableClosed)
@@ -219,16 +175,8 @@ func TestEnableSessionEnable(t *testing.T) {
 			if tt.wantNotifications && notificationClient.sentNotifications != 1 {
 				t.Fatalf("sent notifications = %d, want 1", notificationClient.sentNotifications)
 			}
-			if waitForModemCalled != tt.wantWaitForModem {
-				t.Fatalf("wait for modem called = %v, want %v", waitForModemCalled, tt.wantWaitForModem)
-			}
 		})
 	}
-}
-
-type findResult struct {
-	modem *mmodem.Modem
-	err   error
 }
 
 type fakeLifecycleClient struct {
@@ -269,12 +217,6 @@ func (f *fakeLifecycleClient) SendNotification(any, bool) error {
 func (f *fakeLifecycleClient) Close() error {
 	f.closed = true
 	return nil
-}
-
-func enabledProfiles(iccid sgp22.ICCID) []*sgp22.ProfileInfo {
-	return []*sgp22.ProfileInfo{
-		{ICCID: iccid, ProfileState: sgp22.ProfileEnabled},
-	}
 }
 
 func disabledProfiles(iccid sgp22.ICCID) []*sgp22.ProfileInfo {

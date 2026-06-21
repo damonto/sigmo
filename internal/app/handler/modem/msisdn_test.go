@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 func TestMSISDNUpdate(t *testing.T) {
@@ -63,21 +62,17 @@ func TestMSISDNUpdate(t *testing.T) {
 			client := &fakeMSISDNClient{updateErr: tt.updateErr}
 			var restartCalled bool
 			service := &msisdn{
-				store: settings.NewMemoryStore(settings.Default()),
 				newClient: func(device string) (msisdnClient, error) {
 					if device != "/dev/ttyUSB2" {
 						t.Fatalf("device = %q, want /dev/ttyUSB2", device)
 					}
 					return client, nil
 				},
-				restartModem: func(ctx context.Context, modem *mmodem.Modem, compatible bool) error {
+				restartModem: func(ctx context.Context, modem *mmodem.Modem) error {
 					_ = ctx.Err()
 					restartCalled = true
 					if modem != current {
 						t.Fatalf("restart modem = %p, want %p", modem, current)
-					}
-					if compatible {
-						t.Fatalf("compatible = true, want false")
 					}
 					return nil
 				},

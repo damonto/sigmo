@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/damonto/euicc-go/bertlv"
 	sgp22 "github.com/damonto/euicc-go/v2"
@@ -17,13 +16,10 @@ import (
 )
 
 type lifecycle struct {
-	settings           *settings.Settings
-	store              *settings.Store
-	newClient          lifecycleClientFactory
-	findModem          func(context.Context, string) (*mmodem.Modem, error)
-	waitForModemReload func(context.Context, *mmodem.Modem) (*mmodem.Modem, error)
-	restartModem       func(context.Context, *mmodem.Modem, bool) error
-	readyTimeout       time.Duration
+	settings         *settings.Settings
+	store            *settings.Store
+	newClient        lifecycleClientFactory
+	ensureSIMVisible func(context.Context, *mmodem.Modem, mmodem.SIMTarget) (*mmodem.Modem, error)
 }
 
 type enableSession struct {
@@ -47,23 +43,15 @@ type lifecycleClientFactory func(*mmodem.Modem, *settings.Settings) (lifecycleCl
 
 var (
 	errActiveProfileCannotDelete = errors.New("active profile cannot be deleted")
-	errModemRequired             = errors.New("modem is required")
 	errProfileNotFound           = errors.New("profile not found")
 	errProfileAlreadyActive      = errors.New("profile already active")
 )
 
-const enableReadyTimeout = 30 * time.Second
-
 func newLifecycle(store *settings.Store, registry *mmodem.Registry) *lifecycle {
 	return &lifecycle{
-		store:              store,
-		newClient:          newLifecycleClient,
-		findModem:          registry.Find,
-		waitForModemReload: registry.WaitForReloadedModem,
-		restartModem: func(ctx context.Context, modem *mmodem.Modem, compatible bool) error {
-			return modem.Restart(ctx, compatible)
-		},
-		readyTimeout: enableReadyTimeout,
+		store:            store,
+		newClient:        newLifecycleClient,
+		ensureSIMVisible: registry.EnsureSIMVisible,
 	}
 }
 
@@ -80,16 +68,6 @@ func (l *lifecycle) settingsSnapshot() *settings.Settings {
 		return l.settings
 	}
 	return settings.Default()
-}
-
-func (l *lifecycle) findModemConfig(id string) settings.Modem {
-	if l.store != nil {
-		return l.store.FindModem(id)
-	}
-	if l.settings != nil {
-		return l.settings.FindModem(id)
-	}
-	return settings.Default().FindModem(id)
 }
 
 func (l *lifecycle) PrepareEnable(modem *mmodem.Modem, iccid sgp22.ICCID) (*enableSession, error) {
@@ -143,10 +121,6 @@ func (s *enableSession) Enable(ctx context.Context) error {
 
 	s.Close()
 
-	if err := s.l.restartModem(ctx, s.modem, s.l.findModemConfig(s.modem.EquipmentIdentifier).Compatible); err != nil {
-		slog.Warn("restart modem after enabling profile", "imei", s.modem.EquipmentIdentifier, "error", err)
-	}
-
 	if err := s.finish(ctx); err != nil {
 		return err
 	}
@@ -154,7 +128,7 @@ func (s *enableSession) Enable(ctx context.Context) error {
 }
 
 func (s *enableSession) finish(ctx context.Context) error {
-	target, err := s.l.waitForReadyModem(ctx, s.modem)
+	target, err := s.l.ensureSIMVisible(ctx, s.modem, mmodem.SIMTarget{ICCID: s.iccid.String()})
 	if err != nil {
 		return fmt.Errorf("wait for modem readiness: %w", err)
 	}
@@ -162,32 +136,6 @@ func (s *enableSession) finish(ctx context.Context) error {
 		slog.Warn("failed to handle modem notifications", "error", err, "imei", s.modem.EquipmentIdentifier)
 	}
 	return nil
-}
-
-func (l *lifecycle) waitForReadyModem(ctx context.Context, original *mmodem.Modem) (*mmodem.Modem, error) {
-	if original == nil {
-		return nil, errModemRequired
-	}
-	if modem, err := l.findModem(ctx, original.EquipmentIdentifier); err == nil {
-		return modem, nil
-	} else if !errors.Is(err, mmodem.ErrNotFound) {
-		return nil, fmt.Errorf("confirm modem availability: %w", err)
-	}
-
-	timeout := l.readyTimeout
-	if timeout <= 0 {
-		timeout = enableReadyTimeout
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	if _, err := l.waitForModemReload(waitCtx, original); err != nil {
-		return nil, err
-	}
-	modem, err := l.findModem(ctx, original.EquipmentIdentifier)
-	if err != nil {
-		return nil, fmt.Errorf("confirm modem availability: %w", err)
-	}
-	return modem, nil
 }
 
 func (s *enableSession) Close() {

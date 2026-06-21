@@ -24,15 +24,13 @@ type UnlockSIMRequest struct {
 }
 
 type UpdateModemSettingsRequest struct {
-	Alias      string `json:"alias"`
-	Compatible *bool  `json:"compatible" validate:"required"`
-	MSS        int    `json:"mss" validate:"gte=64,lte=254"`
+	Alias string `json:"alias"`
+	MSS   int    `json:"mss" validate:"gte=64,lte=254"`
 }
 
 type ModemSettingsResponse struct {
-	Alias      string `json:"alias"`
-	Compatible bool   `json:"compatible"`
-	MSS        int    `json:"mss"`
+	Alias string `json:"alias"`
+	MSS   int    `json:"mss"`
 }
 
 type ModemResponse struct {

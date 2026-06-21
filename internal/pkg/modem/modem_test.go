@@ -153,7 +153,7 @@ func TestModemRestart(t *testing.T) {
 				EquipmentIdentifier: "354015820228039",
 			}
 
-			err := modem.Restart(context.Background(), false)
+			err := modem.Restart(context.Background())
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Restart() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -171,7 +171,7 @@ func TestModemRestartReturnsCanceledContext(t *testing.T) {
 		EquipmentIdentifier: "354015820228039",
 	}
 
-	if err := modem.Restart(ctx, false); !errors.Is(err, context.Canceled) {
+	if err := modem.Restart(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Restart() error = %v, want context.Canceled", err)
 	}
 }

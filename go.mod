@@ -3,15 +3,15 @@ module github.com/damonto/sigmo
 go 1.26.3
 
 require (
-	github.com/damonto/euicc-go v1.1.3-0.20260611124659-0ff213c8a246
-	github.com/damonto/uicc-go v0.0.0-20260612071304-cdc1df426101
+	github.com/damonto/euicc-go v1.1.3-0.20260620090222-49b24d9d0215
+	github.com/damonto/uicc-go v0.0.0-20260621104144-6601409990f1
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
-	github.com/labstack/echo/v5 v5.2.0
-	github.com/ncruces/go-sqlite3 v0.35.0
+	github.com/labstack/echo/v5 v5.2.1
+	github.com/ncruces/go-sqlite3 v0.35.1
 	github.com/nyaruka/phonenumbers v1.8.0
 	github.com/things-go/go-socks5 v0.1.1
 	github.com/wneessen/go-mail v0.7.3

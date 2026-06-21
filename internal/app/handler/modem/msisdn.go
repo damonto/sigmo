@@ -10,7 +10,6 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	msisdnclient "github.com/damonto/sigmo/internal/pkg/modem/msisdn"
-	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 var errMSISDNInvalidNumber = errors.New("invalid phone number")
@@ -18,9 +17,8 @@ var errMSISDNInvalidNumber = errors.New("invalid phone number")
 var msisdnPhoneRE = regexp.MustCompile(`^\+?[0-9]{1,15}$`)
 
 type msisdn struct {
-	store        *settings.Store
 	newClient    msisdnClientFactory
-	restartModem func(context.Context, *mmodem.Modem, bool) error
+	restartModem func(context.Context, *mmodem.Modem) error
 	waitForModem func(context.Context, *mmodem.Modem, func() error) (*mmodem.Modem, error)
 }
 
@@ -31,14 +29,13 @@ type msisdnClient interface {
 
 type msisdnClientFactory func(string) (msisdnClient, error)
 
-func newMSISDN(store *settings.Store, registry *mmodem.Registry) *msisdn {
+func newMSISDN(registry *mmodem.Registry) *msisdn {
 	return &msisdn{
-		store: store,
 		newClient: func(device string) (msisdnClient, error) {
 			return msisdnclient.New(device)
 		},
-		restartModem: func(ctx context.Context, modem *mmodem.Modem, compatible bool) error {
-			return modem.Restart(ctx, compatible)
+		restartModem: func(ctx context.Context, modem *mmodem.Modem) error {
+			return modem.Restart(ctx)
 		},
 		waitForModem: registry.WaitForModemAfter,
 	}
@@ -76,7 +73,7 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 			return fmt.Errorf("update MSISDN: %w", err)
 		}
 		closeClient()
-		if err := m.restartModem(ctx, modem, m.store.FindModem(modem.EquipmentIdentifier).Compatible); err != nil {
+		if err := m.restartModem(ctx, modem); err != nil {
 			err = fmt.Errorf("restart modem: %w", err)
 			if mmodem.IsTransientRestartError(err) {
 				return mmodem.ReloadStarted(err)

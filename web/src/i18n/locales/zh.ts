@@ -557,8 +557,6 @@ const zh = {
       mssLabel: '最大报文段长度',
       mssPlaceholder: '64 - 254',
       mssDescription: '单次 APDU 传输数量范围 64-254。',
-      compatibleLabel: '兼容模式',
-      compatibleDescription: '用于 eSIM 切换不兼容的旧模块，开启后会尝试重新启用模块。',
       wifiCallingTitle: 'Wi-Fi Calling',
       wifiCallingLabel: '启用 Wi-Fi Calling',
       wifiCallingDescription: '开启后当前 Profile 会通过 Wi-Fi 连接 IMS。',

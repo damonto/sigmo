@@ -22,8 +22,7 @@ func TestFindModem(t *testing.T) {
 			name: "default modem settings",
 			id:   "missing",
 			want: Modem{
-				Compatible: false,
-				MSS:        240,
+				MSS: 240,
 			},
 		},
 		{
@@ -31,17 +30,15 @@ func TestFindModem(t *testing.T) {
 			settings: Settings{
 				Modems: map[string]Modem{
 					"123": {
-						Alias:      "Office",
-						Compatible: true,
-						MSS:        128,
+						Alias: "Office",
+						MSS:   128,
 					},
 				},
 			},
 			id: "123",
 			want: Modem{
-				Alias:      "Office",
-				Compatible: true,
-				MSS:        128,
+				Alias: "Office",
+				MSS:   128,
 			},
 		},
 	}
@@ -154,7 +151,7 @@ func TestStorePersistsSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
-	if err := store.UpdateModem(ctx, "modem-1", Modem{Alias: "Office", Compatible: true, MSS: 128}); err != nil {
+	if err := store.UpdateModem(ctx, "modem-1", Modem{Alias: "Office", MSS: 128}); err != nil {
 		t.Fatalf("UpdateModem() error = %v", err)
 	}
 
@@ -175,7 +172,7 @@ func TestStorePersistsSettings(t *testing.T) {
 	if got.ProxySettings().HTTPPort != 18080 {
 		t.Fatalf("proxy http port = %d, want 18080", got.ProxySettings().HTTPPort)
 	}
-	if modem := got.FindModem("modem-1"); modem.Alias != "Office" || modem.MSS != 128 || !modem.Compatible {
+	if modem := got.FindModem("modem-1"); modem.Alias != "Office" || modem.MSS != 128 {
 		t.Fatalf("modem settings = %#v, want saved settings", modem)
 	}
 }

@@ -11,7 +11,6 @@ import (
 	sgp22 "github.com/damonto/euicc-go/v2"
 	"github.com/damonto/ts43-go"
 
-	esimcore "github.com/damonto/sigmo/internal/pkg/esim"
 	ilpa "github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
@@ -101,7 +100,7 @@ func activationCode(downloadConfig ts43.DownloadConfig) (*elpa.ActivationCode, e
 		ac.IMEI = downloadConfig.IMEI
 		return &ac, nil
 	}
-	var smdp esimcore.SMDPAddress
+	var smdp ilpa.SMDPAddress
 	if err := smdp.UnmarshalText([]byte(downloadConfig.SMDPFQDN)); err != nil {
 		return nil, err
 	}

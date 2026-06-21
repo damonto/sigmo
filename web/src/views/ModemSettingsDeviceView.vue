@@ -18,7 +18,6 @@ const { showFeedback } = useFeedbackBanner()
 const {
   settingsAlias,
   settingsMss,
-  settingsCompatible,
   isSettingsLoading,
   isSettingsUpdating,
   isMssValid,
@@ -40,7 +39,6 @@ const {
     <DeviceSettingsPanel
       v-model:alias="settingsAlias"
       v-model:mss="settingsMss"
-      v-model:compatible="settingsCompatible"
       :is-loading="isSettingsLoading"
       :is-updating="isSettingsUpdating"
       :is-valid="isMssValid"

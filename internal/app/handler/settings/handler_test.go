@@ -363,9 +363,8 @@ func newTestHandler(t *testing.T) (*appsettings.Store, *Handler) {
 	settings := appsettings.Default()
 	settings.Modems = map[string]appsettings.Modem{
 		"modem-1": {
-			Alias:      "Office",
-			Compatible: true,
-			MSS:        128,
+			Alias: "Office",
+			MSS:   128,
 		},
 	}
 	store := appsettings.NewMemoryStore(settings)

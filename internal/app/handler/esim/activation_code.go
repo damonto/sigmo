@@ -7,12 +7,12 @@ import (
 
 	elpa "github.com/damonto/euicc-go/lpa"
 
-	esimcore "github.com/damonto/sigmo/internal/pkg/esim"
+	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
 func buildActivationCode(ctx context.Context, modem *mmodem.Modem, start downloadClientMessage) (*elpa.ActivationCode, error) {
-	var smdp esimcore.SMDPAddress
+	var smdp lpa.SMDPAddress
 	if err := smdp.UnmarshalText([]byte(start.SMDP)); err != nil {
 		return nil, err
 	}

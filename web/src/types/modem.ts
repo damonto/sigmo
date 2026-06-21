@@ -42,7 +42,6 @@ export type Modem = ModemApiResponse
 
 export type ModemSettings = {
   alias: string
-  compatible: boolean
   mss: number
 }
 

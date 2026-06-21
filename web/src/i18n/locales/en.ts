@@ -563,8 +563,6 @@ const en = {
       mssLabel: 'MSS',
       mssPlaceholder: '64 - 254',
       mssDescription: 'APDU payload size per transfer (64-254).',
-      compatibleLabel: 'Compatible',
-      compatibleDescription: 'Enable for legacy modems that need re-enable after eSIM switching.',
       wifiCallingTitle: 'Wi-Fi Calling',
       wifiCallingLabel: 'Enable Wi-Fi Calling',
       wifiCallingDescription: 'Connect this profile to IMS over Wi-Fi when enabled.',

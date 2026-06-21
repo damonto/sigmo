@@ -1,4 +1,4 @@
-package esim
+package lpa
 
 import (
 	"errors"
