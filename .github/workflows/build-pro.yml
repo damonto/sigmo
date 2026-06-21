@@ -4,14 +4,9 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - "pro/**"
-      - "web/**"
-      - "scripts/build-pro.sh"
-      - "scripts/send-pro-artifacts.sh"
-      - "scripts/patch-purego-musl.sh"
-      - "scripts/pro-features.env"
-      - ".github/workflows/build-pro.yml"
+    tags: [v*]
+    paths-ignore:
+      - "**/*.md"
   release:
     types: [published]
 
