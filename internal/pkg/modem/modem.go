@@ -15,6 +15,8 @@ const ModemInterface = ModemManagerInterface + ".Modem"
 
 var ErrProfileIDMissing = errors.New("profile id is missing")
 
+var modemReloadSettleDelay = time.Second
+
 type Modem struct {
 	dbusConn            *dbus.Conn
 	inhibitDevice       func(context.Context, string, bool) error
@@ -156,13 +158,7 @@ func (m *Modem) SignalQuality(ctx context.Context) (percent uint32, recent bool,
 	return percent, recent, nil
 }
 
-func (m *Modem) Restart(ctx context.Context) error {
-	var err error
-	err = errors.Join(err, m.refreshModemManager(ctx))
-	return err
-}
-
-func (m *Modem) refreshModemManager(ctx context.Context) error {
+func (m *Modem) RefreshModemManager(ctx context.Context) error {
 	if m == nil || m.dbusObject == nil {
 		return nil
 	}
@@ -180,7 +176,7 @@ func (m *Modem) reloadModemManager(ctx context.Context) error {
 	if m == nil || m.dbusObject == nil {
 		return nil
 	}
-	if e := sleepContext(ctx, time.Second); e != nil {
+	if e := sleepContext(ctx, modemReloadSettleDelay); e != nil {
 		return e
 	}
 	if e := m.simpleStatus(ctx); e != nil {

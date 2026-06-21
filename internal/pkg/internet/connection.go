@@ -88,7 +88,7 @@ type internetModem interface {
 	connectBearer(context.Context, mmodem.BearerProperties) (*mmodem.Bearer, error)
 	disconnectBearer(context.Context, dbus.ObjectPath) error
 	deleteBearer(context.Context, dbus.ObjectPath) error
-	restart(context.Context) error
+	refreshModemManager(context.Context) error
 }
 
 type modemAccess struct {
@@ -176,11 +176,11 @@ func (m modemAccess) deleteBearer(ctx context.Context, path dbus.ObjectPath) err
 	return m.modem.DeleteBearer(ctx, path)
 }
 
-func (m modemAccess) restart(ctx context.Context) error {
+func (m modemAccess) refreshModemManager(ctx context.Context) error {
 	if m.modem == nil {
 		return ErrModemRequired
 	}
-	return m.modem.Restart(ctx)
+	return m.modem.RefreshModemManager(ctx)
 }
 
 func NewConnector(cfg ConnectorConfig) (*Connector, error) {
@@ -988,8 +988,8 @@ func (c *Connector) resetConnectFailure(ctx context.Context, modem internetModem
 	if err != nil {
 		return err
 	}
-	if err := modem.restart(ctx); err != nil {
-		return fmt.Errorf("restart modem: %w", err)
+	if err := modem.refreshModemManager(ctx); err != nil {
+		return fmt.Errorf("refresh ModemManager: %w", err)
 	}
 	return c.cleanupConnectFailure(ctx, modem)
 }

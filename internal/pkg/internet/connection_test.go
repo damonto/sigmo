@@ -1798,6 +1798,6 @@ func (m fakeInternetModem) deleteBearer(context.Context, dbus.ObjectPath) error 
 	return errors.New("delete bearer unused")
 }
 
-func (m fakeInternetModem) restart(context.Context) error {
-	return errors.New("restart unused")
+func (m fakeInternetModem) refreshModemManager(context.Context) error {
+	return errors.New("refresh ModemManager unused")
 }

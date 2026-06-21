@@ -12,6 +12,8 @@ func TestMSISDNUpdate(t *testing.T) {
 	transientUpdateErr := errors.New("Object does not exist at path \"/org/freedesktop/ModemManager1/Modem/1\"")
 	current := &mmodem.Modem{
 		EquipmentIdentifier: "354015820228039",
+		PrimarySimSlot:      1,
+		Sim:                 &mmodem.SIM{Identifier: "8986000000000000000"},
 		Ports: []mmodem.ModemPort{
 			{
 				PortType: mmodem.ModemPortTypeAt,
@@ -27,24 +29,24 @@ func TestMSISDNUpdate(t *testing.T) {
 		waitErr     error
 		wantErr     error
 		wantUpdate  bool
-		wantRestart bool
+		wantRefresh bool
 	}{
 		{
-			name:        "update succeeds after modem wait",
+			name:        "update succeeds after SIM refresh",
 			number:      "+1234567890",
 			wantUpdate:  true,
-			wantRestart: true,
+			wantRefresh: true,
 		},
 		{
-			name:        "wait timeout after update and restart",
+			name:        "wait timeout after update and SIM refresh",
 			number:      "+1234567890",
 			waitErr:     context.DeadlineExceeded,
 			wantErr:     context.DeadlineExceeded,
 			wantUpdate:  true,
-			wantRestart: true,
+			wantRefresh: true,
 		},
 		{
-			name:       "return transient update error without restart",
+			name:       "return transient update error without SIM refresh",
 			number:     "+1234567890",
 			updateErr:  transientUpdateErr,
 			wantErr:    transientUpdateErr,
@@ -60,7 +62,7 @@ func TestMSISDNUpdate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &fakeMSISDNClient{updateErr: tt.updateErr}
-			var restartCalled bool
+			var refreshCalled bool
 			service := &msisdn{
 				newClient: func(device string) (msisdnClient, error) {
 					if device != "/dev/ttyUSB2" {
@@ -68,17 +70,14 @@ func TestMSISDNUpdate(t *testing.T) {
 					}
 					return client, nil
 				},
-				restartModem: func(ctx context.Context, modem *mmodem.Modem) error {
+				refreshSIM: func(ctx context.Context, modem *mmodem.Modem, target mmodem.SIMTarget) (*mmodem.Modem, error) {
 					_ = ctx.Err()
-					restartCalled = true
+					refreshCalled = true
 					if modem != current {
-						t.Fatalf("restart modem = %p, want %p", modem, current)
+						t.Fatalf("refresh SIM modem = %p, want %p", modem, current)
 					}
-					return nil
-				},
-				waitForModem: func(ctx context.Context, modem *mmodem.Modem, action func() error) (*mmodem.Modem, error) {
-					if err := action(); err != nil {
-						return nil, err
+					if target.Slot != 1 || target.ICCID != "8986000000000000000" {
+						t.Fatalf("refresh SIM target = %+v, want slot 1 ICCID", target)
 					}
 					if tt.waitErr != nil {
 						return nil, tt.waitErr
@@ -98,8 +97,8 @@ func TestMSISDNUpdate(t *testing.T) {
 			if client.updated != tt.wantUpdate {
 				t.Fatalf("client updated = %v, want %v", client.updated, tt.wantUpdate)
 			}
-			if restartCalled != tt.wantRestart {
-				t.Fatalf("restart called = %v, want %v", restartCalled, tt.wantRestart)
+			if refreshCalled != tt.wantRefresh {
+				t.Fatalf("refresh called = %v, want %v", refreshCalled, tt.wantRefresh)
 			}
 			if tt.wantUpdate && !client.closed {
 				t.Fatalf("client closed = false, want true")

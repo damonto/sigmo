@@ -314,18 +314,14 @@ func (m *Registry) Close() error {
 }
 
 func (m *Registry) WaitForModem(ctx context.Context, current *Modem) (*Modem, error) {
-	return m.waitForModemAfter(ctx, current, nil, false)
+	return m.waitForModem(ctx, current, false)
 }
 
 func (m *Registry) WaitForReloadedModem(ctx context.Context, current *Modem) (*Modem, error) {
-	return m.waitForModemAfter(ctx, current, nil, true)
+	return m.waitForModem(ctx, current, true)
 }
 
-func (m *Registry) WaitForModemAfter(ctx context.Context, current *Modem, action func() error) (*Modem, error) {
-	return m.waitForModemAfter(ctx, current, action, false)
-}
-
-func (m *Registry) waitForModemAfter(ctx context.Context, current *Modem, action func() error, reloadObserved bool) (*Modem, error) {
+func (m *Registry) waitForModem(ctx context.Context, current *Modem, reloadObserved bool) (*Modem, error) {
 	if current == nil {
 		return nil, errModemRequired
 	}
@@ -361,15 +357,7 @@ func (m *Registry) waitForModemAfter(ctx context.Context, current *Modem, action
 	}
 	defer unsubscribe()
 
-	if action != nil {
-		if err := action(); err != nil {
-			if !isReloadStarted(err) {
-				return nil, err
-			}
-			reload.mark()
-			slog.Info("waiting for modem after reload started", "imei", current.EquipmentIdentifier, "error", err)
-		}
-	} else if modem := m.findReadyModem(current, reload.observed()); modem != nil {
+	if modem := m.findReadyModem(current, reload.observed()); modem != nil {
 		return modem, nil
 	}
 
@@ -497,35 +485,6 @@ func isCurrentModemEvent(current *Modem, event ModemEvent) bool {
 		return true
 	}
 	return event.Path != "" && event.Path == current.objectPath
-}
-
-type reloadStartedError struct {
-	err error
-}
-
-// ReloadStarted marks an action error as evidence that ModemManager started replacing the modem.
-func ReloadStarted(err error) error {
-	if err == nil {
-		return nil
-	}
-	return reloadStartedError{err: err}
-}
-
-func (e reloadStartedError) Error() string {
-	return e.err.Error()
-}
-
-func (e reloadStartedError) Unwrap() error {
-	return e.err
-}
-
-func (e reloadStartedError) reloadStarted() {}
-
-func isReloadStarted(err error) bool {
-	var target interface {
-		reloadStarted()
-	}
-	return errors.As(err, &target)
 }
 
 func (m *Registry) deleteAndUpdate(modem *Modem) {

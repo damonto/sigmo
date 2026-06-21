@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/damonto/uicc-go/qcom"
 	"github.com/damonto/uicc-go/qcom/qmi"
 	"github.com/damonto/uicc-go/qcom/uim"
 )
@@ -15,10 +14,8 @@ import (
 const qmiMaxSIMSlot = 5
 
 var (
-	qmiSlotInactiveTimeout          = 5 * time.Second
-	qmiSlotInactivePollInterval     = 250 * time.Millisecond
-	qmiSlotInactiveUnsupportedDelay = time.Second
-	qmiPowerRestoreTimeout          = 5 * time.Second
+	qmiPowerRestoreTimeout = 5 * time.Second
+	qmiSIMPowerCycleDelay  = 100 * time.Millisecond
 )
 
 type qmiUIMReader interface {
@@ -94,15 +91,14 @@ func qmiRepowerSimCard(ctx context.Context, m *Modem, slot uint8) error {
 		return fmt.Errorf("power off sim: %w", err)
 	}
 	slog.Info("sim powered off", "imei", m.EquipmentIdentifier, "slot", slot)
-	if err := qmiWaitForSlotInactive(context.Background(), reader, slot); err != nil {
-		err = fmt.Errorf("wait for sim slot inactive: %w", err)
+	if err := qmiWaitFixedDelay(context.Background(), qmiSIMPowerCycleDelay); err != nil {
+		err = fmt.Errorf("wait after sim power off: %w", err)
 		if powerOnErr := qmiPowerOnSIM(context.Background(), reader, slot); powerOnErr != nil {
-			return errors.Join(err, fmt.Errorf("power on sim after inactive wait failure: %w", powerOnErr))
+			return errors.Join(err, fmt.Errorf("power on sim after power-off wait failure: %w", powerOnErr))
 		}
-		slog.Warn("sim slot inactive wait failed, powered sim back on", "imei", m.EquipmentIdentifier, "slot", slot, "error", err)
+		slog.Warn("sim power-off wait failed, powered sim back on", "imei", m.EquipmentIdentifier, "slot", slot, "error", err)
 		return err
 	}
-	slog.Info("sim slot inactive", "imei", m.EquipmentIdentifier, "slot", slot)
 	if err := qmiPowerOnSIM(context.Background(), reader, slot); err != nil {
 		return fmt.Errorf("power on sim: %w", err)
 	}
@@ -116,44 +112,6 @@ func qmiPowerOnSIM(ctx context.Context, reader qmiUIMReader, slot uint8) error {
 	return reader.PowerOnSIM(powerCtx, uim.PowerOnSIMRequest{Slot: slot})
 }
 
-func qmiWaitForSlotInactive(ctx context.Context, reader qmiUIMReader, slot uint8) error {
-	waitCtx, cancel := context.WithTimeout(ctx, qmiSlotInactiveTimeout)
-	defer cancel()
-
-	for {
-		status, err := reader.SlotStatus(waitCtx)
-		if errors.Is(err, qcom.QMIErrorNotSupported) {
-			return qmiWaitFixedDelay(ctx, qmiSlotInactiveUnsupportedDelay)
-		}
-		if err == nil && qmiSlotInactive(status, slot) {
-			return nil
-		}
-		if waitCtx.Err() != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if err != nil {
-				return qmiWaitFixedDelay(ctx, qmiSlotInactiveUnsupportedDelay)
-			}
-			return waitCtx.Err()
-		}
-
-		timer := time.NewTimer(qmiSlotInactivePollInterval)
-		select {
-		case <-waitCtx.Done():
-			timer.Stop()
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if err != nil {
-				return qmiWaitFixedDelay(ctx, qmiSlotInactiveUnsupportedDelay)
-			}
-			return waitCtx.Err()
-		case <-timer.C:
-		}
-	}
-}
-
 func qmiWaitFixedDelay(ctx context.Context, delay time.Duration) error {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -164,13 +122,6 @@ func qmiWaitFixedDelay(ctx context.Context, delay time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
-}
-
-func qmiSlotInactive(status uim.SlotStatus, slot uint8) bool {
-	if slot == 0 || int(slot) > len(status.Slots) {
-		return false
-	}
-	return status.Slots[slot-1].PhysicalSlotStatus == uim.SlotStateInactive
 }
 
 func qmiSIMSlot(m *Modem) (uint8, error) {

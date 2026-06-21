@@ -82,6 +82,25 @@ func isCanceledError(err error) bool {
 	return strings.Contains(message, "operation was cancelled") || strings.Contains(message, "operation was canceled")
 }
 
+func isAbortedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if dbusErr, ok := errors.AsType[dbus.Error](err); ok {
+		if isAbortedName(dbusErr.Name) {
+			return true
+		}
+	}
+	var dbusErrPtr *dbus.Error
+	if errors.As(err, &dbusErrPtr) && dbusErrPtr != nil {
+		if isAbortedName(dbusErrPtr.Name) {
+			return true
+		}
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "operation aborted") || strings.Contains(message, "operation was aborted")
+}
+
 func isTransientRestartError(err error) bool {
 	if err == nil {
 		return false
@@ -101,4 +120,8 @@ func isCanceledName(name string) bool {
 	default:
 		return strings.Contains(strings.ToLower(name), "cancel")
 	}
+}
+
+func isAbortedName(name string) bool {
+	return strings.Contains(strings.ToLower(name), "abort")
 }

@@ -97,7 +97,48 @@ func TestIsTransientRestartError(t *testing.T) {
 	}
 }
 
-func TestModemRestart(t *testing.T) {
+func TestIsAbortedError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "dbus aborted name",
+			err:  dbus.Error{Name: "org.freedesktop.ModemManager1.Error.Core.Aborted"},
+			want: true,
+		},
+		{
+			name: "dbus aborted pointer",
+			err:  &dbus.Error{Name: "org.freedesktop.ModemManager1.Error.Core.Aborted"},
+			want: true,
+		},
+		{
+			name: "aborted message",
+			err:  errors.New("Aborted: Operation aborted"),
+			want: true,
+		},
+		{
+			name: "other error",
+			err:  errors.New("permission denied"),
+			want: false,
+		},
+		{
+			name: "nil",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isAbortedError(tt.err); got != tt.want {
+				t.Fatalf("isAbortedError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestModemRefreshModemManager(t *testing.T) {
 	tests := []struct {
 		name    string
 		errors  map[string][]error
@@ -153,15 +194,15 @@ func TestModemRestart(t *testing.T) {
 				EquipmentIdentifier: "354015820228039",
 			}
 
-			err := modem.Restart(context.Background())
+			err := modem.RefreshModemManager(context.Background())
 			if (err != nil) != tt.wantErr {
-				t.Fatalf("Restart() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("RefreshModemManager() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-func TestModemRestartReturnsCanceledContext(t *testing.T) {
+func TestModemRefreshModemManagerReturnsCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -171,8 +212,8 @@ func TestModemRestartReturnsCanceledContext(t *testing.T) {
 		EquipmentIdentifier: "354015820228039",
 	}
 
-	if err := modem.Restart(ctx); !errors.Is(err, context.Canceled) {
-		t.Fatalf("Restart() error = %v, want context.Canceled", err)
+	if err := modem.RefreshModemManager(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("RefreshModemManager() error = %v, want context.Canceled", err)
 	}
 }
 
@@ -401,13 +442,12 @@ func TestWaitForModem(t *testing.T) {
 		objectPath:          current.objectPath,
 		EquipmentIdentifier: current.EquipmentIdentifier,
 	}
-	transientActionErr := errors.New("Object does not exist at path \"/org/freedesktop/ModemManager1/Modem/1\"")
 
 	tests := []struct {
 		name       string
 		current    *Modem
 		modems     map[dbus.ObjectPath]*Modem
-		action     func(*Registry) error
+		async      func(*Registry)
 		ctxTimeout time.Duration
 		wantErr    error
 		wantPath   dbus.ObjectPath
@@ -430,56 +470,25 @@ func TestWaitForModem(t *testing.T) {
 			wantErr:    context.DeadlineExceeded,
 		},
 		{
-			name:    "return unmarked action error",
-			current: current,
-			modems: map[dbus.ObjectPath]*Modem{
-				replacement.objectPath: replacement,
-			},
-			action: func(*Registry) error {
-				return transientActionErr
-			},
-			wantErr: transientActionErr,
-		},
-		{
-			name:    "wait after marked reload action error",
-			current: current,
-			modems: map[dbus.ObjectPath]*Modem{
-				replacement.objectPath: replacement,
-			},
-			action: func(*Registry) error {
-				return ReloadStarted(transientActionErr)
-			},
-			wantPath: replacement.objectPath,
-		},
-		{
-			name:    "wait after marked reload action error returns same path replacement",
-			current: current,
-			modems: map[dbus.ObjectPath]*Modem{
-				samePathReplacement.objectPath: samePathReplacement,
-			},
-			action: func(*Registry) error {
-				return ReloadStarted(transientActionErr)
-			},
-			wantPath: samePathReplacement.objectPath,
-		},
-		{
 			name:    "event removed then added during action",
 			current: current,
 			modems: map[dbus.ObjectPath]*Modem{
 				current.objectPath: current,
 			},
-			action: func(registry *Registry) error {
-				publishModemEvent(t, registry, ModemEvent{
-					Type:  ModemEventRemoved,
-					Modem: current,
-					Path:  current.objectPath,
-				})
-				publishModemEvent(t, registry, ModemEvent{
-					Type:  ModemEventAdded,
-					Modem: replacement,
-					Path:  replacement.objectPath,
-				})
-				return nil
+			async: func(registry *Registry) {
+				go func() {
+					time.Sleep(time.Microsecond)
+					publishModemEvent(t, registry, ModemEvent{
+						Type:  ModemEventRemoved,
+						Modem: current,
+						Path:  current.objectPath,
+					})
+					publishModemEvent(t, registry, ModemEvent{
+						Type:  ModemEventAdded,
+						Modem: replacement,
+						Path:  replacement.objectPath,
+					})
+				}()
 			},
 			wantPath: replacement.objectPath,
 		},
@@ -489,13 +498,15 @@ func TestWaitForModem(t *testing.T) {
 			modems: map[dbus.ObjectPath]*Modem{
 				current.objectPath: current,
 			},
-			action: func(registry *Registry) error {
-				publishModemEvent(t, registry, ModemEvent{
-					Type:  ModemEventAdded,
-					Modem: current,
-					Path:  current.objectPath,
-				})
-				return nil
+			async: func(registry *Registry) {
+				go func() {
+					time.Sleep(time.Microsecond)
+					publishModemEvent(t, registry, ModemEvent{
+						Type:  ModemEventAdded,
+						Modem: current,
+						Path:  current.objectPath,
+					})
+				}()
 			},
 			ctxTimeout: time.Millisecond,
 			wantErr:    context.DeadlineExceeded,
@@ -517,13 +528,13 @@ func TestWaitForModem(t *testing.T) {
 			name:    "poll until modem reappears after not found window",
 			current: current,
 			modems:  map[dbus.ObjectPath]*Modem{},
-			action: func(registry *Registry) error {
+			async: func(registry *Registry) {
 				go func() {
+					time.Sleep(time.Microsecond)
 					registry.mu.Lock()
 					defer registry.mu.Unlock()
 					registry.modems[replacement.objectPath] = replacement
 				}()
-				return nil
 			},
 			ctxTimeout: time.Second,
 			wantPath:   replacement.objectPath,
@@ -555,12 +566,10 @@ func TestWaitForModem(t *testing.T) {
 				defer cancel()
 			}
 
-			modem, err := registry.WaitForModemAfter(ctx, tt.current, func() error {
-				if tt.action == nil {
-					return nil
-				}
-				return tt.action(registry)
-			})
+			if tt.async != nil {
+				tt.async(registry)
+			}
+			modem, err := registry.WaitForModem(ctx, tt.current)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("WaitForModem() error = %v, want %v", err, tt.wantErr)
@@ -831,6 +840,7 @@ type fakeBusObject struct {
 	calls          []string
 	propertyCalls  []string
 	args           [][]any
+	afterCall      func(method string, args []any)
 }
 
 func (f *fakeBusObject) Call(method string, _ dbus.Flags, args ...any) *dbus.Call {
@@ -850,6 +860,9 @@ func (f *fakeBusObject) Call(method string, _ dbus.Flags, args ...any) *dbus.Cal
 	}
 	f.calls = append(f.calls, method)
 	f.args = append(f.args, append([]any(nil), args...))
+	if f.afterCall != nil {
+		f.afterCall(method, args)
+	}
 	var err error
 	if queue := f.errors[method]; len(queue) > 0 {
 		err = queue[0]
