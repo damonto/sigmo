@@ -1,7 +1,7 @@
 github.com/ElMostafaIdrassi/goscard v1.0.0 h1:RDG5QrqrQBUoi5MkzM4zILdYf8qDn62daYZszqvdgx0=
 github.com/ElMostafaIdrassi/goscard v1.0.0/go.mod h1:uGOakQe2fFlW2cVlr9cv6x07uelrf0j0aKPbR7jGgfg=
-github.com/damonto/euicc-go v1.1.3-0.20260622030157-e6dc3f08749e h1:Y2ReLFwxmqUNvdZpc6zPQwJhULfoD1t6iGoN2yakysM=
-github.com/damonto/euicc-go v1.1.3-0.20260622030157-e6dc3f08749e/go.mod h1:L2YqXCb1ESnL1ZlqkQ7t/bVrcqrgt1hCwdzWrVzgYN0=
+github.com/damonto/euicc-go v1.1.3-0.20260622122451-a7d5c9345f5a h1:JgNdFuEK7alxlHiS0+p+QVqwk5A/P8xU4NhqlDr+/uM=
+github.com/damonto/euicc-go v1.1.3-0.20260622122451-a7d5c9345f5a/go.mod h1:L2YqXCb1ESnL1ZlqkQ7t/bVrcqrgt1hCwdzWrVzgYN0=
 github.com/damonto/ts43-go v0.0.0-20260622030018-3e953eacd018 h1:Er4yeZfHosM1N8ZM/ag/LBAvWDUne9WLApGhiOskrWs=
 github.com/damonto/ts43-go v0.0.0-20260622030018-3e953eacd018/go.mod h1:YHdBM5CGIls9gqG06hAab3RYHhlOEKmG4MuqXjtMI7M=
 github.com/damonto/uicc-go v0.0.0-20260622025011-5cf36d6c8626 h1:jcUx6ygMhU27ca9qn0qX3rZCa1956YYJcn/1NUhX8XQ=

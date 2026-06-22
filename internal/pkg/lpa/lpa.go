@@ -10,9 +10,9 @@ import (
 	"net/url"
 	"sync"
 
-	"github.com/damonto/euicc-go/apdu"
 	"github.com/damonto/euicc-go/bertlv"
 	"github.com/damonto/euicc-go/bertlv/primitive"
+	"github.com/damonto/euicc-go/driver"
 	"github.com/damonto/euicc-go/driver/at"
 	"github.com/damonto/euicc-go/driver/mbim"
 	"github.com/damonto/euicc-go/driver/qcom"
@@ -44,7 +44,7 @@ type Info struct {
 type ChannelConfig struct {
 	LockKey  string
 	ConfigID string
-	Channel  apdu.SmartCardChannel
+	Channel  driver.SmartCardChannel
 	Settings *settings.Settings
 	Logger   *slog.Logger
 }
@@ -100,7 +100,7 @@ func NewWithChannel(cfg ChannelConfig) (*LPA, error) {
 	return instance, nil
 }
 
-func NewChannel(m *modem.Modem) (apdu.SmartCardChannel, func(), error) {
+func NewChannel(m *modem.Modem) (driver.SmartCardChannel, func(), error) {
 	gmu.Lock(m.EquipmentIdentifier)
 	ch, err := createChannel(m)
 	if err != nil {
@@ -118,7 +118,7 @@ func NewChannel(m *modem.Modem) (apdu.SmartCardChannel, func(), error) {
 }
 
 type lockedChannel struct {
-	apdu.SmartCardChannel
+	driver.SmartCardChannel
 	key  string
 	once sync.Once
 }
@@ -171,7 +171,7 @@ func (l *LPA) tryCreateClient(opts *lpa.Options) error {
 	return ErrNoSupportedAID
 }
 
-func createChannel(m *modem.Modem) (apdu.SmartCardChannel, error) {
+func createChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
 	slot := uint8(1)
 	if m.PrimarySimSlot > 0 {
 		slot = uint8(m.PrimarySimSlot)
@@ -188,7 +188,7 @@ func createChannel(m *modem.Modem) (apdu.SmartCardChannel, error) {
 	}
 }
 
-func createATChannel(m *modem.Modem) (apdu.SmartCardChannel, error) {
+func createATChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
 	port, err := m.Port(modem.ModemPortTypeAt)
 	if err != nil {
 		return nil, err

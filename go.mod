@@ -3,7 +3,7 @@ module github.com/damonto/sigmo
 go 1.26.3
 
 require (
-	github.com/damonto/euicc-go v1.1.3-0.20260622030157-e6dc3f08749e
+	github.com/damonto/euicc-go v1.1.3-0.20260622122451-a7d5c9345f5a
 	github.com/damonto/uicc-go v0.0.0-20260622025011-5cf36d6c8626
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
