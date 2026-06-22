@@ -131,10 +131,9 @@ func TestCatalogApplyOverviewExtensions(t *testing.T) {
 
 func TestSupportsEsimUsesModemMetadata(t *testing.T) {
 	tests := []struct {
-		name    string
-		modem   *mmodem.Modem
-		want    bool
-		wantErr bool
+		name  string
+		modem *mmodem.Modem
+		want  bool
 	}{
 		{
 			name: "unsupported AT modem",
@@ -147,28 +146,18 @@ func TestSupportsEsimUsesModemMetadata(t *testing.T) {
 			},
 		},
 		{
-			name: "metadata error is returned",
+			name: "unknown primary port",
 			modem: &mmodem.Modem{
 				EquipmentIdentifier: "imei-2",
-				PrimaryPort:         "/dev/cdc-wdm0",
-				PrimarySimSlot:      6,
-				Ports: []mmodem.ModemPort{
-					{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm0"},
-				},
+				PrimaryPort:         "/dev/ttyUSB2",
 			},
-			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := supportsEsim(context.Background(), tt.modem)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("supportsEsim() error = nil, want error")
-				}
-				return
-			}
+			currentSettings := settings.Default()
+			got, err := supportsEsim(context.Background(), tt.modem, currentSettings)
 			if err != nil {
 				t.Fatalf("supportsEsim() error = %v", err)
 			}

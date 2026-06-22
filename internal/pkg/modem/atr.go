@@ -27,9 +27,6 @@ var knownATRs = [][]byte{
 // SupportsEUICC detects eUICC support from modem-exposed card metadata without
 // opening the ISD-R logical channel.
 func SupportsEUICC(ctx context.Context, m *Modem) (bool, error) {
-	if m == nil {
-		return false, errModemRequired
-	}
 	switch m.PrimaryPortType() {
 	case ModemPortTypeQmi:
 		return supportsQMIEUICC(ctx, m)

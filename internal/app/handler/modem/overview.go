@@ -2,6 +2,7 @@ package modem
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/pkg/carrier"
+	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
@@ -91,7 +93,8 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 	}
 
 	carrierInfo := carrier.Lookup(sim.OperatorIdentifier)
-	supportsEsim, err := supportsEsim(ctx, device)
+	currentSettings := c.store.Snapshot()
+	supportsEsim, err := supportsEsim(ctx, device, &currentSettings)
 	if err != nil {
 		return nil, fmt.Errorf("detect eSIM support: %w", err)
 	}
@@ -101,7 +104,7 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		return nil, fmt.Errorf("fetch SIM slots: %w", err)
 	}
 
-	alias := c.store.FindModem(device.EquipmentIdentifier).Alias
+	alias := currentSettings.FindModem(device.EquipmentIdentifier).Alias
 	name := device.Model
 	if alias != "" {
 		name = alias
@@ -144,12 +147,13 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 }
 
 func (c *catalog) buildLockedResponse(ctx context.Context, device *mmodem.Modem) (*ModemResponse, error) {
-	alias := c.store.FindModem(device.EquipmentIdentifier).Alias
+	currentSettings := c.store.Snapshot()
+	alias := currentSettings.FindModem(device.EquipmentIdentifier).Alias
 	name := device.Model
 	if alias != "" {
 		name = alias
 	}
-	supportsEsim, err := supportsEsim(ctx, device)
+	supportsEsim, err := supportsEsim(ctx, device, &currentSettings)
 	if err != nil {
 		slog.Warn("detect eSIM support for locked modem", "imei", device.EquipmentIdentifier, "error", err)
 	}
@@ -243,8 +247,24 @@ func (c *catalog) applyOverviewExtensions(ctx context.Context, device *mmodem.Mo
 	return nil
 }
 
-func supportsEsim(ctx context.Context, m *mmodem.Modem) (bool, error) {
-	return mmodem.SupportsEUICC(ctx, m)
+func supportsEsim(ctx context.Context, m *mmodem.Modem, currentSettings *settings.Settings) (bool, error) {
+	supported, err := mmodem.SupportsEUICC(ctx, m)
+	if err == nil {
+		return supported, nil
+	}
+
+	m.Logger().Warn("fall back to LPA eSIM detection", "error", err)
+	client, err := lpa.New(m, currentSettings)
+	if err != nil {
+		if errors.Is(err, lpa.ErrNoSupportedAID) {
+			return false, nil
+		}
+		return false, fmt.Errorf("create LPA client: %w", err)
+	}
+	if err := client.Close(); err != nil {
+		m.Logger().Warn("close LPA client after eSIM detection", "error", err)
+	}
+	return true, nil
 }
 
 func accessTechnologyString(access []mmodem.ModemAccessTechnology) string {
