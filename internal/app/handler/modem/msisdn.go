@@ -17,9 +17,8 @@ var errMSISDNInvalidNumber = errors.New("invalid phone number")
 var msisdnPhoneRE = regexp.MustCompile(`^\+?[0-9]{1,15}$`)
 
 type msisdn struct {
-	newClient            msisdnClientFactory
-	refreshSIM           func(context.Context, *mmodem.Modem, mmodem.SIMTarget) (*mmodem.Modem, error)
-	waitForReloadedModem func(context.Context, *mmodem.Modem) (*mmodem.Modem, error)
+	newClient         msisdnClientFactory
+	refreshSIMAndWait func(context.Context, *mmodem.Modem, mmodem.SIMTarget) (*mmodem.Modem, error)
 }
 
 type msisdnClient interface {
@@ -34,8 +33,7 @@ func newMSISDN(registry *mmodem.Registry) *msisdn {
 		newClient: func(device string) (msisdnClient, error) {
 			return msisdnclient.New(device)
 		},
-		refreshSIM:           registry.PowerCycleSIM,
-		waitForReloadedModem: registry.WaitForReloadedModem,
+		refreshSIMAndWait: registry.PowerCycleSIMAndWait,
 	}
 }
 
@@ -59,7 +57,7 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 		}
 		clientClosed = true
 		if cerr := client.Close(); cerr != nil {
-			slog.Warn("failed to close MSISDN client", "error", cerr, "imei", modem.EquipmentIdentifier)
+			slog.Warn("close MSISDN client", "error", cerr, "imei", modem.EquipmentIdentifier)
 		}
 	}
 	defer func() {
@@ -75,18 +73,11 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 	if modem.Sim != nil {
 		target.ICCID = modem.Sim.Identifier
 	}
-	_, err = m.refreshSIM(ctx, modem, target)
-	if err != nil {
+	if _, err := m.refreshSIMAndWait(ctx, modem, target); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("wait for modem: %w", err)
 		}
 		return fmt.Errorf("refresh SIM after MSISDN update: %w", err)
-	}
-	if _, err := m.waitForReloadedModem(ctx, modem); err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("wait for modem: %w", err)
-		}
-		return fmt.Errorf("wait for modem after MSISDN update: %w", err)
 	}
 	return nil
 }

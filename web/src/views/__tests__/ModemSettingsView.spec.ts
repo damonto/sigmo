@@ -87,6 +87,7 @@ vi.mock('@/composables/useModemMsisdn', async () => {
       msisdnInput: ref(modem.number),
       isMsisdnUpdating: false,
       isMsisdnValid: true,
+      resetMsisdnInput: vi.fn(),
       handleMsisdnUpdate: harness.handleMsisdnUpdate,
     }),
   }

@@ -89,6 +89,33 @@ export const formatPhoneDisplay = (value: string, defaultCountry?: string) => {
   return formatPhoneInput(chars, defaultCountry) || value.trim()
 }
 
+export const normalizePhoneSubmission = (value: string, defaultCountry?: string) => {
+  const chars = phoneNumberChars(value)
+  if (!chars || chars === '+') return ''
+  if (shortCodeRE.test(chars)) return chars
+
+  const country = phoneCountry(defaultCountry)
+  if (chars.startsWith('+')) {
+    const number = parsePhoneNumberFromString(chars)
+    return number?.isPossible() ? number.number : chars
+  }
+  if (!country) return chars
+
+  const defaultCallingCode = getCountryCallingCode(country)
+  const parsed = parsePhoneNumberFromString(chars, country)
+  if (parsed?.isPossible()) {
+    if (parsed.number === `+${chars}`) return parsed.number
+    if (parsed.countryCallingCode !== defaultCallingCode) return parsed.number
+    return chars
+  }
+
+  const international = parsePhoneNumberFromString(`+${chars}`)
+  if (international?.isPossible() && international.countryCallingCode !== defaultCallingCode) {
+    return international.number
+  }
+  return chars
+}
+
 const phoneCountry = (value?: string): CountryCode | undefined => {
   const country = value?.trim().toUpperCase()
   if (!country || country === 'UN' || !/^[A-Z]{2}$/.test(country)) return undefined

@@ -602,6 +602,61 @@ func TestWaitForModem(t *testing.T) {
 	}
 }
 
+func TestWaitForModemReturnsSamePathReplacementAfterRemovedEvent(t *testing.T) {
+	withWaitForModemRefreshInterval(t, time.Hour)
+
+	current := &Modem{
+		objectPath:          "/org/freedesktop/ModemManager1/Modem/1",
+		EquipmentIdentifier: "354015820228039",
+	}
+	replacement := &Modem{
+		objectPath:          current.objectPath,
+		EquipmentIdentifier: current.EquipmentIdentifier,
+	}
+	registry := &Registry{
+		modems: map[dbus.ObjectPath]*Modem{
+			current.objectPath: current,
+		},
+		subscribed: true,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	type result struct {
+		modem *Modem
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		modem, err := registry.WaitForModem(ctx, current)
+		done <- result{modem: modem, err: err}
+	}()
+
+	waitForSubscribers(t, registry, 1)
+	publishModemEvent(t, registry, ModemEvent{
+		Type:  ModemEventRemoved,
+		Modem: current,
+		Path:  current.objectPath,
+	})
+	publishModemEvent(t, registry, ModemEvent{
+		Type:  ModemEventAdded,
+		Modem: replacement,
+		Path:  replacement.objectPath,
+	})
+
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("WaitForModem() error = %v", got.err)
+		}
+		if got.modem != replacement {
+			t.Fatalf("WaitForModem() = %p, want %p", got.modem, replacement)
+		}
+	case <-ctx.Done():
+		t.Fatalf("WaitForModem() timed out: %v", ctx.Err())
+	}
+}
+
 func TestWaitForReloadedModemReturnsSamePathReplacement(t *testing.T) {
 	withWaitForModemRefreshInterval(t, time.Microsecond)
 
@@ -631,6 +686,121 @@ func TestWaitForReloadedModemReturnsSamePathReplacement(t *testing.T) {
 	}
 }
 
+func TestWaitForModemAfterSubscribesBeforeAction(t *testing.T) {
+	withWaitForModemRefreshInterval(t, time.Microsecond)
+
+	current := &Modem{
+		objectPath:          "/org/freedesktop/ModemManager1/Modem/1",
+		EquipmentIdentifier: "354015820228039",
+	}
+	replacement := &Modem{
+		objectPath:          current.objectPath,
+		EquipmentIdentifier: current.EquipmentIdentifier,
+	}
+	registry := &Registry{
+		modems: map[dbus.ObjectPath]*Modem{
+			current.objectPath: current,
+		},
+		subscribed: true,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	modem, err := registry.waitForModemAfter(ctx, current, func() error {
+		publishModemEvent(t, registry, ModemEvent{
+			Type:  ModemEventRemoved,
+			Modem: current,
+			Path:  current.objectPath,
+		})
+		publishModemEvent(t, registry, ModemEvent{
+			Type:  ModemEventAdded,
+			Modem: replacement,
+			Path:  replacement.objectPath,
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("waitForModemAfter() error = %v", err)
+	}
+	if modem != replacement {
+		t.Fatalf("waitForModemAfter() = %p, want %p", modem, replacement)
+	}
+}
+
+func TestWaitForModemAfterPollsDuringAction(t *testing.T) {
+	withWaitForModemRefreshInterval(t, time.Microsecond)
+
+	current := &Modem{
+		objectPath:          "/org/freedesktop/ModemManager1/Modem/1",
+		EquipmentIdentifier: "354015820228039",
+	}
+	replacement := &Modem{
+		objectPath:          current.objectPath,
+		EquipmentIdentifier: current.EquipmentIdentifier,
+	}
+	registry := &Registry{
+		modems: map[dbus.ObjectPath]*Modem{
+			current.objectPath: current,
+		},
+		subscribed: true,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	modem, err := registry.waitForModemAfter(ctx, current, func() error {
+		registry.mu.Lock()
+		delete(registry.modems, current.objectPath)
+		registry.mu.Unlock()
+
+		time.Sleep(time.Millisecond)
+
+		registry.mu.Lock()
+		registry.modems[replacement.objectPath] = replacement
+		registry.mu.Unlock()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("waitForModemAfter() error = %v", err)
+	}
+	if modem != replacement {
+		t.Fatalf("waitForModemAfter() = %p, want %p", modem, replacement)
+	}
+}
+
+func TestWaitForModemAfterAcceptsActionObservedReload(t *testing.T) {
+	withWaitForModemRefreshInterval(t, time.Hour)
+
+	current := &Modem{
+		objectPath:          "/org/freedesktop/ModemManager1/Modem/1",
+		EquipmentIdentifier: "354015820228039",
+	}
+	replacement := &Modem{
+		objectPath:          current.objectPath,
+		EquipmentIdentifier: current.EquipmentIdentifier,
+	}
+	registry := &Registry{
+		modems: map[dbus.ObjectPath]*Modem{
+			current.objectPath: current,
+		},
+		subscribed: true,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	modem, err := registry.waitForModemAfterAction(ctx, current, false, func() (modemWaitActionResult, error) {
+		registry.mu.Lock()
+		registry.modems[replacement.objectPath] = replacement
+		registry.mu.Unlock()
+		return modemWaitActionResult{ReloadObserved: true}, nil
+	})
+	if err != nil {
+		t.Fatalf("waitForModemAfterAction() error = %v", err)
+	}
+	if modem != replacement {
+		t.Fatalf("waitForModemAfterAction() = %p, want %p", modem, replacement)
+	}
+}
+
 func withWaitForModemRefreshInterval(t *testing.T, interval time.Duration) {
 	t.Helper()
 	original := waitForModemRefreshInterval
@@ -648,6 +818,28 @@ func publishModemEvent(t *testing.T, registry *Registry, event ModemEvent) {
 	for _, subscriber := range subscribers {
 		if err := subscriber.fn(event); err != nil {
 			t.Fatalf("publish modem event: %v", err)
+		}
+	}
+}
+
+func waitForSubscribers(t *testing.T, registry *Registry, count int) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		registry.mu.RLock()
+		got := len(registry.subs)
+		registry.mu.RUnlock()
+		if got >= count {
+			return
+		}
+
+		select {
+		case <-deadline:
+			t.Fatalf("subscribers = %d, want at least %d", got, count)
+		case <-ticker.C:
 		}
 	}
 }

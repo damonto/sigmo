@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
 import { Globe2, Phone, RadioTower, Smartphone } from 'lucide-vue-next'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
@@ -26,12 +26,13 @@ const canUseWiFiCalling = computed(() => hasFeature(FEATURE.wifiCalling))
 
 const { modem, isModemLoading, currentAccessTechnology, fetchModem } = useModemOverview(modemId)
 
-const { msisdnInput, isMsisdnUpdating, isMsisdnValid, handleMsisdnUpdate } = useModemMsisdn({
-  modemId,
-  modem,
-  refreshModem: fetchModem,
-  onSuccess: showFeedback,
-})
+const { msisdnInput, isMsisdnUpdating, isMsisdnValid, resetMsisdnInput, handleMsisdnUpdate } =
+  useModemMsisdn({
+    modemId,
+    modem,
+    refreshModem: fetchModem,
+    onSuccess: showFeedback,
+  })
 
 const lineOperatorLabel = computed(() => {
   const registeredName = modem.value?.registeredOperator?.name?.trim() ?? ''
@@ -77,7 +78,7 @@ const categoryCards = computed(() => {
 })
 
 const openMsisdnDialog = () => {
-  msisdnInput.value = modem.value?.number ?? ''
+  resetMsisdnInput()
   msisdnDialogOpen.value = true
 }
 

@@ -7,6 +7,7 @@ import {
   formatPhoneInput,
   isCallableDialString,
   isDialServiceCode,
+  normalizePhoneSubmission,
   phoneNumberChars,
 } from '@/lib/phoneNumberInput'
 
@@ -56,5 +57,18 @@ describe('phoneNumberInput', () => {
     expect(formatPhoneDisplay('+8613344445555', 'US')).toBe('+86 133 4444 5555')
     expect(formatPhoneDisplay('+12223334444', 'US')).toBe('(222) 333-4444')
     expect(formatPhoneDisplay('2223334444', 'US')).toBe('(222) 333-4444')
+  })
+
+  it('normalizes formatted national numbers for submission without adding plus', () => {
+    expect(normalizePhoneSubmission('(222) 333-4444', 'US')).toBe('2223334444')
+    expect(normalizePhoneSubmission('133 4444 5555', 'CN')).toBe('13344445555')
+  })
+
+  it('normalizes international numbers for submission with plus', () => {
+    expect(normalizePhoneSubmission('+86 133 4444 5555', 'US')).toBe('+8613344445555')
+    expect(normalizePhoneSubmission('011 86 133 4444 5555', 'US')).toBe('+8613344445555')
+    expect(normalizePhoneSubmission('86 133 4444 5555', 'US')).toBe('+8613344445555')
+    expect(normalizePhoneSubmission('1 224 225 5559', 'US')).toBe('+12242255559')
+    expect(normalizePhoneSubmission('86 133 4444 5555', 'CN')).toBe('+8613344445555')
   })
 })

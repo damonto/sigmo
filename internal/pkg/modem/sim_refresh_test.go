@@ -33,7 +33,7 @@ func TestEnsureSIMVisible(t *testing.T) {
 	})
 
 	oldGracePeriod := simReenumerationGracePeriod
-	simReenumerationGracePeriod = time.Nanosecond
+	simReenumerationGracePeriod = 0
 	t.Cleanup(func() {
 		simReenumerationGracePeriod = oldGracePeriod
 	})
@@ -408,9 +408,15 @@ func TestEnsureSIMVisiblePowerCyclesWhenModemDoesNotReenumerate(t *testing.T) {
 	})
 
 	oldGracePeriod := simReenumerationGracePeriod
-	simReenumerationGracePeriod = time.Nanosecond
+	simReenumerationGracePeriod = 0
 	t.Cleanup(func() {
 		simReenumerationGracePeriod = oldGracePeriod
+	})
+
+	oldInterval := simVisiblePollInterval
+	simVisiblePollInterval = time.Nanosecond
+	t.Cleanup(func() {
+		simVisiblePollInterval = oldInterval
 	})
 
 	oldPowerCycleDelay := qmiSIMPowerCycleDelay
@@ -468,6 +474,12 @@ func TestEnsureSIMVisibleDoesNotTreatFreshSnapshotAsReenumeration(t *testing.T) 
 	simReenumerationGracePeriod = time.Nanosecond
 	t.Cleanup(func() {
 		simReenumerationGracePeriod = oldGracePeriod
+	})
+
+	oldInterval := simVisiblePollInterval
+	simVisiblePollInterval = time.Nanosecond
+	t.Cleanup(func() {
+		simVisiblePollInterval = oldInterval
 	})
 
 	oldPowerCycleDelay := qmiSIMPowerCycleDelay
@@ -616,9 +628,15 @@ func TestEnsureSIMVisibleSkipsInhibitWhenDisableEnableWorks(t *testing.T) {
 	})
 
 	oldGracePeriod := simReenumerationGracePeriod
-	simReenumerationGracePeriod = time.Nanosecond
+	simReenumerationGracePeriod = 0
 	t.Cleanup(func() {
 		simReenumerationGracePeriod = oldGracePeriod
+	})
+
+	oldInterval := simVisiblePollInterval
+	simVisiblePollInterval = time.Nanosecond
+	t.Cleanup(func() {
+		simVisiblePollInterval = oldInterval
 	})
 
 	oldPowerCycleDelay := qmiSIMPowerCycleDelay
@@ -696,9 +714,15 @@ func TestEnsureSIMVisibleInhibitsAfterDisableEnableDoesNotWork(t *testing.T) {
 	})
 
 	oldGracePeriod := simReenumerationGracePeriod
-	simReenumerationGracePeriod = time.Nanosecond
+	simReenumerationGracePeriod = 0
 	t.Cleanup(func() {
 		simReenumerationGracePeriod = oldGracePeriod
+	})
+
+	oldInterval := simVisiblePollInterval
+	simVisiblePollInterval = time.Nanosecond
+	t.Cleanup(func() {
+		simVisiblePollInterval = oldInterval
 	})
 
 	oldPowerCycleDelay := qmiSIMPowerCycleDelay

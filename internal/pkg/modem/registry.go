@@ -317,11 +317,37 @@ func (m *Registry) WaitForModem(ctx context.Context, current *Modem) (*Modem, er
 	return m.waitForModem(ctx, current, false)
 }
 
+type modemWaitActionResult struct {
+	ReloadObserved bool
+}
+
+type modemWaitAction func() (modemWaitActionResult, error)
+
+type readyModemRefresh struct {
+	Modem          *Modem
+	CurrentMissing bool
+}
+
+type readyModemLookup struct {
+	Modem *Modem
+	Found bool
+}
+
+func (m *Registry) waitForModemAfter(ctx context.Context, current *Modem, action func() error) (*Modem, error) {
+	return m.waitForModemAfterAction(ctx, current, false, func() (modemWaitActionResult, error) {
+		return modemWaitActionResult{}, action()
+	})
+}
+
 func (m *Registry) WaitForReloadedModem(ctx context.Context, current *Modem) (*Modem, error) {
 	return m.waitForModem(ctx, current, true)
 }
 
 func (m *Registry) waitForModem(ctx context.Context, current *Modem, reloadObserved bool) (*Modem, error) {
+	return m.waitForModemAfterAction(ctx, current, reloadObserved, nil)
+}
+
+func (m *Registry) waitForModemAfterAction(ctx context.Context, current *Modem, reloadObserved bool, action modemWaitAction) (*Modem, error) {
 	if current == nil {
 		return nil, errModemRequired
 	}
@@ -357,11 +383,58 @@ func (m *Registry) waitForModem(ctx context.Context, current *Modem, reloadObser
 	}
 	defer unsubscribe()
 
+	if action != nil {
+		actionCtx, cancelActionPoll := context.WithCancel(ctx)
+		actionPollDone := make(chan struct{})
+		go func() {
+			defer close(actionPollDone)
+			m.pollReadyModem(actionCtx, current, ready, reload)
+		}()
+		actionResult, err := action()
+		if err != nil {
+			cancelActionPoll()
+			<-actionPollDone
+			return nil, err
+		}
+		cancelActionPoll()
+		<-actionPollDone
+		if actionResult.ReloadObserved {
+			reload.mark()
+		}
+	}
 	if modem := m.findReadyModem(current, reload.observed()); modem != nil {
 		return modem, nil
 	}
 
 	return m.waitForReadyModem(ctx, current, ready, reload)
+}
+
+func (m *Registry) pollReadyModem(ctx context.Context, current *Modem, ready chan<- *Modem, reload *modemReloadState) {
+	ticker := time.NewTicker(waitForModemRefreshInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refreshed, err := m.refreshReadyModem(ctx, current, reload.observed())
+			if err != nil {
+				slog.Warn("refresh modem while action is running", "imei", current.EquipmentIdentifier, "error", err)
+				continue
+			}
+			if refreshed.CurrentMissing {
+				reload.mark()
+				continue
+			}
+			if refreshed.Modem != nil {
+				select {
+				case ready <- refreshed.Modem:
+				default:
+				}
+			}
+		}
+	}
 }
 
 type modemReloadState struct {
@@ -398,17 +471,17 @@ func (m *Registry) waitForReadyModem(ctx context.Context, current *Modem, ready 
 		case modem := <-ready:
 			return modem, nil
 		case <-ticker.C:
-			modem, missing, err := m.refreshReadyModem(ctx, current, reload.observed())
+			refreshed, err := m.refreshReadyModem(ctx, current, reload.observed())
 			if err != nil {
 				slog.Warn("refresh modem while waiting", "imei", current.EquipmentIdentifier, "error", err)
 				continue
 			}
-			if missing {
+			if refreshed.CurrentMissing {
 				reload.mark()
 				continue
 			}
-			if modem != nil {
-				return modem, nil
+			if refreshed.Modem != nil {
+				return refreshed.Modem, nil
 			}
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -419,26 +492,25 @@ func (m *Registry) waitForReadyModem(ctx context.Context, current *Modem, ready 
 func (m *Registry) findReadyModem(current *Modem, reloadObserved bool) *Modem {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	modem, _ := readyModemIn(current, m.modems, reloadObserved)
-	return modem
+	return readyModemIn(current, m.modems, reloadObserved).Modem
 }
 
-func (m *Registry) refreshReadyModem(ctx context.Context, current *Modem, reloadObserved bool) (*Modem, bool, error) {
+func (m *Registry) refreshReadyModem(ctx context.Context, current *Modem, reloadObserved bool) (readyModemRefresh, error) {
 	if m.dbusObject == nil {
 		m.mu.RLock()
 		defer m.mu.RUnlock()
-		modem, found := readyModemIn(current, m.modems, reloadObserved)
-		return modem, !found, nil
+		lookup := readyModemIn(current, m.modems, reloadObserved)
+		return readyModemRefresh{Modem: lookup.Modem, CurrentMissing: !lookup.Found}, nil
 	}
 	modems, err := m.Modems(ctx)
 	if err != nil {
-		return nil, false, err
+		return readyModemRefresh{}, err
 	}
-	modem, found := readyModemIn(current, modems, reloadObserved)
-	return modem, !found, nil
+	lookup := readyModemIn(current, modems, reloadObserved)
+	return readyModemRefresh{Modem: lookup.Modem, CurrentMissing: !lookup.Found}, nil
 }
 
-func readyModemIn(current *Modem, modems map[dbus.ObjectPath]*Modem, reloadObserved bool) (*Modem, bool) {
+func readyModemIn(current *Modem, modems map[dbus.ObjectPath]*Modem, reloadObserved bool) readyModemLookup {
 	found := false
 	for _, modem := range modems {
 		if !sameEquipmentIdentifier(current, modem) {
@@ -446,13 +518,13 @@ func readyModemIn(current *Modem, modems map[dbus.ObjectPath]*Modem, reloadObser
 		}
 		found = true
 		if reloadObserved && modem != current {
-			return modem, true
+			return readyModemLookup{Modem: modem, Found: true}
 		}
 		if !reloadObserved && isReplacementObjectPath(current, modem) {
-			return modem, true
+			return readyModemLookup{Modem: modem, Found: true}
 		}
 	}
-	return nil, found
+	return readyModemLookup{Found: found}
 }
 
 func readyModemEvent(current *Modem, candidate *Modem, reloadObserved bool) bool {
@@ -478,9 +550,6 @@ func sameEquipmentIdentifier(current *Modem, candidate *Modem) bool {
 }
 
 func isCurrentModemEvent(current *Modem, event ModemEvent) bool {
-	if current == nil {
-		return false
-	}
 	if event.Modem != nil && sameEquipmentIdentifier(current, event.Modem) {
 		return true
 	}

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
 import RegionFlag from '@/components/RegionFlag.vue'
+import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
 
 const props = defineProps<{
   name: string
@@ -39,7 +40,11 @@ const showRoamingLabel = computed(() => isRoaming.value && Boolean(props.registe
 const roamingLabel = computed(() => props.registeredOperatorName || props.registeredOperatorCode)
 const esimLabel = computed(() => (props.supportsEsim ? t('labels.esim') : t('labels.psim')))
 const displayName = computed(() => (props.name.trim().length > 0 ? props.name : props.operatorName))
-const displayNumber = computed(() => (props.number.trim() ? props.number : t('home.noNumber')))
+const displayNumber = computed(() => {
+  const number = props.number.trim()
+  if (!number) return t('home.noNumber')
+  return formatPhoneDisplay(number, props.regionCode)
+})
 </script>
 
 <template>
