@@ -8,12 +8,12 @@ OPENCORE_AMR_URL="${OPENCORE_AMR_URL:-https://sourceforge.net/projects/opencore-
 VO_AMRWBENC_URL="${VO_AMRWBENC_URL:-https://sourceforge.net/projects/opencore-amr/files/vo-amrwbenc/vo-amrwbenc-${VO_AMRWBENC_VERSION}.tar.gz/download}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-refs_dir="${repo_root}/refs"
+build_dir="${repo_root}/build"
 out_dir="${repo_root}/pro/voicecodec/assets"
 out_wasm="${out_dir}/opencore-amr.wasm"
 
-opencore_archive="${refs_dir}/opencore-amr-${OPENCORE_AMR_VERSION}.tar.gz"
-vo_archive="${refs_dir}/vo-amrwbenc-${VO_AMRWBENC_VERSION}.tar.gz"
+opencore_archive="${build_dir}/opencore-amr-${OPENCORE_AMR_VERSION}.tar.gz"
+vo_archive="${build_dir}/vo-amrwbenc-${VO_AMRWBENC_VERSION}.tar.gz"
 
 require_tool() {
   if ! command -v "$1" >/dev/null 2>&1; then
