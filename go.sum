@@ -1,5 +1,5 @@
-github.com/damonto/euicc-go v1.1.3-0.20260622122451-a7d5c9345f5a h1:JgNdFuEK7alxlHiS0+p+QVqwk5A/P8xU4NhqlDr+/uM=
-github.com/damonto/euicc-go v1.1.3-0.20260622122451-a7d5c9345f5a/go.mod h1:L2YqXCb1ESnL1ZlqkQ7t/bVrcqrgt1hCwdzWrVzgYN0=
+github.com/damonto/euicc-go v1.1.3-0.20260624160743-3bd0b16f6bf9 h1:ov9bYTtKu16qAhlOVLFchU6HLZwrJN/NLsLc9LtjT0w=
+github.com/damonto/euicc-go v1.1.3-0.20260624160743-3bd0b16f6bf9/go.mod h1:L2YqXCb1ESnL1ZlqkQ7t/bVrcqrgt1hCwdzWrVzgYN0=
 github.com/damonto/uicc-go v0.0.0-20260622025011-5cf36d6c8626 h1:jcUx6ygMhU27ca9qn0qX3rZCa1956YYJcn/1NUhX8XQ=
 github.com/damonto/uicc-go v0.0.0-20260622025011-5cf36d6c8626/go.mod h1:4il4tcO0GJ2Bn8827RWDiMxNOnQpEApy3pwKliaR9uc=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
