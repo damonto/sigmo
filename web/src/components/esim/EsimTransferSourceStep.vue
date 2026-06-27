@@ -28,7 +28,7 @@ const sourceDetail = (source: EsimTransferSource) => {
 </script>
 
 <template>
-  <div class="min-h-0 space-y-6 overflow-hidden">
+  <div class="min-h-0 min-w-0 space-y-6 overflow-visible">
     <div v-if="props.loading" class="flex items-center gap-3 rounded-lg bg-muted/40 p-4">
       <Spinner class="size-5" />
       <div class="min-w-0">
@@ -39,8 +39,8 @@ const sourceDetail = (source: EsimTransferSource) => {
       </div>
     </div>
 
-    <div v-if="props.ready" class="space-y-4">
-      <section class="space-y-3">
+    <div v-if="props.ready" class="min-w-0 space-y-4">
+      <section class="min-w-0 space-y-3">
         <p class="text-sm font-medium">{{ t('modemDetail.esim.transferSource') }}</p>
         <Alert v-if="!props.hasSources" class="border-dashed">
           <AlertDescription>
@@ -52,7 +52,7 @@ const sourceDetail = (source: EsimTransferSource) => {
             {{ t('modemDetail.esim.transferCcidUnavailable') }}: {{ props.ccidError }}
           </AlertDescription>
         </Alert>
-        <div class="space-y-2">
+        <div class="-mx-1 min-w-0 space-y-2 px-1 py-1">
           <EsimTransferSourceItem
             v-for="source in props.sources"
             :key="`${source.type}-${source.id}`"

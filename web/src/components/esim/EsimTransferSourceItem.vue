@@ -17,7 +17,7 @@ const emit = defineEmits<{
 <template>
   <button
     type="button"
-    class="flex w-full items-center gap-3 rounded-lg border border-transparent bg-card px-4 py-3 text-left text-sm shadow-sm transition hover:bg-muted/40"
+    class="flex w-full min-w-0 max-w-full items-center gap-3 rounded-lg border border-transparent bg-card px-4 py-3 text-left text-sm shadow-sm transition hover:bg-muted/40"
     @click="emit('select', props.source)"
   >
     <EsimTransferSourceIcon :type="props.source.type" />

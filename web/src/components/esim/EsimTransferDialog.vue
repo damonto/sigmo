@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import type { Ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import CarrierWebsheetDialog from '@/components/CarrierWebsheetDialog.vue'
@@ -38,9 +39,15 @@ const transfer = useEsimTransfer(modemIdRef, {
   onCompleted: () => emit('completed'),
 })
 
+type TransferHeaderFocus = {
+  focus: () => void
+}
+
 const profileDialogOpen = ref(false)
 const startConfirmOpen = ref(false)
 const transferStarted = ref(false)
+const sourceHeader = ref<TransferHeaderFocus | null>(null)
+const transferHeader = ref<TransferHeaderFocus | null>(null)
 
 const sourceDialogOpen = computed(() => open.value && !profileDialogOpen.value)
 const promptOpen = computed(() => transfer.state.value === TRANSFER_STATE.userInput)
@@ -144,6 +151,19 @@ const confirmStartTransfer = () => {
   transfer.startTransfer()
 }
 
+const focusDialogHeader = (target: Ref<TransferHeaderFocus | null>, event: Event) => {
+  event.preventDefault()
+  void nextTick(() => target.value?.focus())
+}
+
+const focusSourceDialogHeader = (event: Event) => {
+  focusDialogHeader(sourceHeader, event)
+}
+
+const focusTransferDialogHeader = (event: Event) => {
+  focusDialogHeader(transferHeader, event)
+}
+
 watch(open, (value) => {
   if (value) {
     startConfirmOpen.value = false
@@ -163,8 +183,9 @@ watch(open, (value) => {
   <Dialog :open="sourceDialogOpen" @update:open="handleDialogOpen">
     <EsimPersistentDialogContent
       class="max-h-[calc(100vh-2rem)] overflow-hidden sm:max-w-md"
+      @open-auto-focus="focusSourceDialogHeader"
     >
-      <EsimTransferHeader />
+      <EsimTransferHeader ref="sourceHeader" />
 
       <EsimTransferSourceStep
         :loading="sourceLoading"
@@ -187,8 +208,9 @@ watch(open, (value) => {
   <Dialog :open="transferDialogOpen" @update:open="handleDialogOpen">
     <EsimPersistentDialogContent
       class="flex max-h-[70dvh] flex-col overflow-hidden sm:max-w-md"
+      @open-auto-focus="focusTransferDialogHeader"
     >
-      <EsimTransferHeader class="shrink-0" />
+      <EsimTransferHeader ref="transferHeader" class="shrink-0" />
 
       <EsimTransferProfileStep
         v-if="transfer.state.value !== TRANSFER_STATE.userInput"
