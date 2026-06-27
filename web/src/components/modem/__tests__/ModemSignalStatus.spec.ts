@@ -246,41 +246,7 @@ describe('ModemDetailHeader', () => {
     expect(wrapper.findAll('button[aria-label="modemDetail.tabs.detail"]')).toHaveLength(2)
   })
 
-  it('switches to another modem from the title menu', async () => {
-    const current = modem()
-    const next = {
-      ...modem('Registered'),
-      id: 'modem-2',
-      name: 'Modem 2',
-      signalQuality: 72,
-    }
-    modemHarness.modems = [current, next]
-
-    const wrapper = mount(ModemDetailHeader, {
-      props: {
-        modem: current,
-        isLoading: false,
-        showDetailsAction: true,
-      },
-      global: {
-        stubs: headerStubs,
-      },
-    })
-
-    expect(wrapper.find('button[aria-label="modemDetail.switchModem"]').exists()).toBe(true)
-    const nextButton = wrapper.findAll('button').find((button) => button.text().includes('Modem 2'))
-    expect(nextButton).toBeDefined()
-    await nextButton?.trigger('click')
-
-    expect(router.push).toHaveBeenCalledWith({
-      name: 'modem-detail',
-      params: { id: 'modem-2' },
-    })
-  })
-
-  it('keeps the seven-click notifications shortcut when the title is a modem switcher', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(1000)
+  it('keeps modem switching on mobile and a plain title on desktop', () => {
     const current = modem()
     modemHarness.modems = [
       current,
@@ -290,6 +256,63 @@ describe('ModemDetailHeader', () => {
         name: 'Modem 2',
       },
     ]
+    const wrapper = mount(ModemDetailHeader, {
+      props: {
+        modem: current,
+        isLoading: false,
+        showDetailsAction: true,
+      },
+      global: {
+        stubs: headerStubs,
+      },
+    })
+
+    expect(wrapper.find('.lg\\:hidden button[aria-label="modemDetail.switchModem"]').exists()).toBe(
+      true,
+    )
+    expect(wrapper.find('h1').classes()).toEqual(
+      expect.arrayContaining(['hidden', 'lg:block']),
+    )
+    expect(wrapper.find('h1').text()).toBe('Modem 1')
+  })
+
+  it('switches modems from the mobile title menu', async () => {
+    const current = modem()
+    modemHarness.modems = [
+      current,
+      {
+        ...modem('Registered'),
+        id: 'modem-2',
+        name: 'Modem 2',
+      },
+    ]
+    const wrapper = mount(ModemDetailHeader, {
+      props: {
+        modem: current,
+        isLoading: false,
+        showDetailsAction: true,
+      },
+      global: {
+        stubs: headerStubs,
+      },
+    })
+
+    const nextButton = wrapper
+      .findAll('.lg\\:hidden button')
+      .find((button) => button.text().includes('Modem 2'))
+    expect(nextButton).toBeDefined()
+    await nextButton?.trigger('click')
+
+    expect(router.push).toHaveBeenCalledWith({
+      name: 'modem-detail',
+      params: { id: 'modem-2' },
+    })
+  })
+
+  it('keeps the seven-click notifications shortcut on the plain title', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1000)
+    const current = modem()
 
     const wrapper = mount(ModemDetailHeader, {
       props: {
@@ -302,10 +325,10 @@ describe('ModemDetailHeader', () => {
       },
     })
 
-    const titleButton = wrapper.find('button[aria-label="modemDetail.switchModem"]')
-    expect(titleButton.exists()).toBe(true)
+    const title = wrapper.find('h1')
+    expect(title.exists()).toBe(true)
     for (let count = 0; count < 7; count += 1) {
-      await titleButton.trigger('click')
+      await title.trigger('click')
       vi.advanceTimersByTime(100)
     }
 
@@ -319,14 +342,6 @@ describe('ModemDetailHeader', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1000)
     const current = modem()
-    modemHarness.modems = [
-      current,
-      {
-        ...modem('Registered'),
-        id: 'modem-2',
-        name: 'Modem 2',
-      },
-    ]
 
     const wrapper = mount(ModemDetailHeader, {
       props: {
@@ -339,10 +354,10 @@ describe('ModemDetailHeader', () => {
       },
     })
 
-    const titleButton = wrapper.find('button[aria-label="modemDetail.switchModem"]')
-    expect(titleButton.exists()).toBe(true)
+    const title = wrapper.find('h1')
+    expect(title.exists()).toBe(true)
     for (let count = 0; count < 7; count += 1) {
-      await titleButton.trigger('click')
+      await title.trigger('click')
       vi.advanceTimersByTime(1300)
     }
 
@@ -361,8 +376,6 @@ describe('ModemDetailHeader', () => {
       id: 'modem-2',
       name: 'Modem 2',
     }
-    modemHarness.modems = [current, next]
-
     const wrapper = mount(ModemDetailHeader, {
       props: {
         modem: current,
@@ -374,16 +387,16 @@ describe('ModemDetailHeader', () => {
       },
     })
 
-    let titleButton = wrapper.find('button[aria-label="modemDetail.switchModem"]')
-    expect(titleButton.exists()).toBe(true)
+    let title = wrapper.find('h1')
+    expect(title.exists()).toBe(true)
     for (let count = 0; count < 6; count += 1) {
-      await titleButton.trigger('click')
+      await title.trigger('click')
       vi.advanceTimersByTime(100)
     }
 
     await wrapper.setProps({ modem: next })
-    titleButton = wrapper.find('button[aria-label="modemDetail.switchModem"]')
-    await titleButton.trigger('click')
+    title = wrapper.find('h1')
+    await title.trigger('click')
 
     expect(router.push).not.toHaveBeenCalledWith({
       name: 'modem-notifications',

@@ -6,6 +6,7 @@ import type { InternetConnectionResponse, InternetPublicResponse } from '@/types
 
 type Options = {
   modemId: ComputedRef<string>
+  enabled?: ComputedRef<boolean>
   onSuccess?: (message: string) => void
 }
 
@@ -18,9 +19,10 @@ const pollIntervalMs = 5000
 const defaultAPNAuth = 'default'
 const defaultIPType = 'ipv4v6'
 
-export const useModemInternet = ({ modemId, onSuccess }: Options) => {
+export const useModemInternet = ({ modemId, enabled, onSuccess }: Options) => {
   const { t } = useI18n()
   const internetApi = useInternetApi()
+  const isInternetEnabled = computed(() => enabled?.value ?? true)
 
   const internetConnection = ref<InternetConnectionResponse | null>(null)
   const internetPublicInfo = ref<InternetPublicResponse | null>(null)
@@ -52,6 +54,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
   const startPolling = () => {
     if (pollTimer.value !== undefined) return
     pollTimer.value = window.setInterval(() => {
+      if (!isInternetEnabled.value) return
       void fetchInternetConnection({ silent: true })
     }, pollIntervalMs)
   }
@@ -118,7 +121,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
 
   const fetchInternetConnection = async (options?: FetchConnectionOptions) => {
     const targetId = modemId.value
-    if (!targetId) {
+    if (!targetId || !isInternetEnabled.value) {
       resetInternet()
       return
     }
@@ -127,6 +130,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
     }
     try {
       const { data } = await internetApi.getCurrentConnection(targetId)
+      if (!isInternetEnabled.value || modemId.value !== targetId) return
       const connection = data.value ?? null
       applyConnection(connection)
       if (options?.includePublic && shouldFetchPublic(connection)) {
@@ -143,7 +147,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
 
   const handleInternetConnect = async () => {
     const targetId = modemId.value
-    if (!targetId) return
+    if (!targetId || !isInternetEnabled.value) return
     if (!canConnectInternet.value) return
     isInternetConnecting.value = true
     try {
@@ -172,7 +176,7 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
 
   const handleInternetDisconnect = async () => {
     const targetId = modemId.value
-    if (!targetId) return
+    if (!targetId || !isInternetEnabled.value) return
     if (isInternetDisconnecting.value) return
     isInternetDisconnecting.value = true
     try {
@@ -187,9 +191,9 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
   }
 
   watch(
-    modemId,
-    async (id) => {
-      if (!id) {
+    [modemId, isInternetEnabled],
+    async ([id, canUseInternet]) => {
+      if (!id || !canUseInternet) {
         resetInternet()
         return
       }
@@ -199,9 +203,9 @@ export const useModemInternet = ({ modemId, onSuccess }: Options) => {
   )
 
   watch(
-    isInternetConnected,
-    (connected) => {
-      if (connected) {
+    [isInternetConnected, isInternetEnabled],
+    ([connected, canUseInternet]) => {
+      if (connected && canUseInternet) {
         startPolling()
         return
       }

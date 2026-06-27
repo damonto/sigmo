@@ -48,6 +48,10 @@ const subtitle = computed(() => {
   return t('modemDetail.subtitlePhysical')
 })
 const currentModemId = computed(() => props.modem?.id ?? '')
+const title = computed(() => {
+  if (!props.modem) return t('modemDetail.unknown')
+  return props.modem.name.trim() || props.modem.sim.operatorName || props.modem.id
+})
 
 const handleTitleClick = () => {
   if (!props.modem?.id || !props.modem.supportsEsim) return
@@ -66,15 +70,15 @@ watch(currentModemId, () => {
   lastTitleClickAt.value = 0
 })
 
+const handleBack = () => {
+  void router.push('/')
+}
+
 const switchRouteName = computed(() => {
   if (route.name === 'modem-message-thread') return 'modem-messages'
   if (typeof route.name === 'string' && route.name.startsWith('modem-')) return route.name
   return 'modem-detail'
 })
-
-const handleBack = () => {
-  void router.push('/')
-}
 
 const handleModemSwitch = (modem: Modem) => {
   if (modem.id === currentModemId.value) return
@@ -134,12 +138,20 @@ onMounted(() => {
     <header class="space-y-3">
       <div class="flex flex-wrap items-center gap-3">
         <template v-if="!props.isLoading">
-          <ModemTitleSwitcher
-            :current-modem="props.modem"
-            :modems="modems"
-            @select="handleModemSwitch"
-            @title-click="handleTitleClick"
-          />
+          <div class="lg:hidden">
+            <ModemTitleSwitcher
+              :current-modem="props.modem"
+              :modems="modems"
+              @select="handleModemSwitch"
+              @title-click="handleTitleClick"
+            />
+          </div>
+          <h1
+            class="hidden text-3xl font-semibold tracking-tight text-foreground lg:block"
+            @click="handleTitleClick"
+          >
+            {{ title }}
+          </h1>
         </template>
         <Skeleton v-else class="h-9 w-48 rounded bg-muted" />
       </div>

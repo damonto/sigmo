@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   getWiFiCallingSettings: vi.fn(),
   updateWiFiCallingSettings: vi.fn(),
   createWiFiCallingSession: vi.fn(),
+  deleteWiFiCallingSession: vi.fn(),
   startWiFiCallingWebsheet: vi.fn(),
   startWiFiCallingEmergencyAddressWebsheet: vi.fn(),
 }))
@@ -44,6 +45,7 @@ describe('useModemWiFiCallingSettings', () => {
     })
     api.updateWiFiCallingSettings.mockResolvedValue({ data: { value: undefined } })
     api.createWiFiCallingSession.mockResolvedValue({ data: { value: undefined } })
+    api.deleteWiFiCallingSession.mockResolvedValue({ data: { value: undefined } })
   })
 
   it('loads pending carrier websheet state', async () => {
@@ -143,6 +145,52 @@ describe('useModemWiFiCallingSettings', () => {
     expect(settings.settingsWiFiCallingState.value).toBe('websheet_required')
     expect(settings.settingsWiFiCallingConnected.value).toBe(false)
     expect(settings.settingsWiFiCallingDurationSeconds.value).toBe(0)
+    consoleError.mockRestore()
+  })
+
+  it('disconnects the current Wi-Fi Calling session', async () => {
+    const settings = useModemWiFiCallingSettings({
+      modemId: computed(() => 'modem-1'),
+      enabled: computed(() => true),
+    })
+    await vi.waitFor(() => {
+      expect(api.getWiFiCallingSettings).toHaveBeenCalled()
+    })
+
+    await settings.disconnectWiFiCalling()
+
+    expect(api.deleteWiFiCallingSession).toHaveBeenCalledWith('modem-1')
+    expect(settings.settingsWiFiCallingConnected.value).toBe(false)
+  })
+
+  it('restores the previous state when disconnect fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    api.getWiFiCallingSettings.mockResolvedValue({
+      data: {
+        value: {
+          enabled: true,
+          preferred: true,
+          connected: true,
+          state: 'connected',
+          durationSeconds: 25,
+          emergencyAddressUpdateAvailable: false,
+        },
+      },
+    })
+    api.deleteWiFiCallingSession.mockRejectedValue(new Error('offline'))
+    const settings = useModemWiFiCallingSettings({
+      modemId: computed(() => 'modem-1'),
+      enabled: computed(() => true),
+    })
+    await vi.waitFor(() => {
+      expect(settings.settingsWiFiCallingConnected.value).toBe(true)
+    })
+
+    await settings.disconnectWiFiCalling()
+
+    expect(settings.settingsWiFiCallingConnected.value).toBe(true)
+    expect(settings.settingsWiFiCallingState.value).toBe('connected')
+    expect(settings.settingsWiFiCallingDurationSeconds.value).toBe(25)
     consoleError.mockRestore()
   })
 })

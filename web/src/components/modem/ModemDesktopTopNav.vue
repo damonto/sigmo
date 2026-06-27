@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ChevronLeft } from 'lucide-vue-next'
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { Button } from '@/components/ui/button'
+import ModemTitleSwitcher from '@/components/modem/ModemTitleSwitcher.vue'
+import { useModems } from '@/composables/useModems'
 import type { NavigationItem } from '@/types/navigation'
+import type { Modem } from '@/types/modem'
 
 const props = defineProps<{
   items: NavigationItem[]
@@ -13,7 +16,9 @@ const props = defineProps<{
 }>()
 
 const route = useRoute()
+const router = useRouter()
 const { t } = useI18n()
+const { modems, fetchModems } = useModems()
 
 const navItems = computed(() =>
   props.items.map((item) => ({
@@ -22,6 +27,26 @@ const navItems = computed(() =>
       route.name === item.routeName || (item.activeRouteNames ?? []).includes(route.name as string),
   })),
 )
+
+const currentModem = computed(
+  () => modems.value.find((modem) => modem.id === props.modemId) ?? null,
+)
+
+const switchRouteName = computed(() => {
+  if (route.name === 'modem-message-thread') return 'modem-messages'
+  if (typeof route.name === 'string' && route.name.startsWith('modem-')) return route.name
+  return 'modem-detail'
+})
+
+const handleModemSwitch = (modem: Modem) => {
+  if (modem.id === props.modemId) return
+  void router.push({ name: switchRouteName.value, params: { id: modem.id } })
+}
+
+onMounted(() => {
+  if (modems.value.length > 0) return
+  void fetchModems()
+})
 </script>
 
 <template>
@@ -37,12 +62,12 @@ const navItems = computed(() =>
       </Button>
 
       <div class="min-w-0 border-l border-border pl-5">
-        <p class="text-[0.65rem] font-medium uppercase tracking-normal text-muted-foreground">
-          {{ t('home.title') }}
-        </p>
-        <p class="truncate text-sm font-semibold text-foreground" :title="props.modemId">
-          {{ props.modemId }}
-        </p>
+        <ModemTitleSwitcher
+          :current-modem="currentModem"
+          :modems="modems"
+          variant="compact"
+          @select="handleModemSwitch"
+        />
       </div>
 
       <nav class="ml-auto flex items-center gap-1" aria-label="Primary navigation">

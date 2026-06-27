@@ -104,6 +104,12 @@ export const useModemApi = () => {
     })
   }
 
+  const deleteWiFiCallingSession = (id: string) => {
+    return fetchJson<void>(`modems/${id}/wifi-calling-sessions/current`, {
+      method: 'DELETE',
+    })
+  }
+
   const startWiFiCallingWebsheet = (id: string) => {
     return fetchJson<WiFiCallingWebsheetResponse>(`modems/${id}/wifi-calling-websheets`, {
       method: 'POST',
@@ -130,6 +136,7 @@ export const useModemApi = () => {
     getWiFiCallingSettings,
     updateWiFiCallingSettings,
     createWiFiCallingSession,
+    deleteWiFiCallingSession,
     startWiFiCallingWebsheet,
     startWiFiCallingEmergencyAddressWebsheet,
   }

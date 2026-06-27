@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 
+import { useModemApi } from '@/apis/modem'
 import EsimDiscoverDialog from '@/components/esim/EsimDiscoverDialog.vue'
 import EsimDownloadConfirmationModal from '@/components/esim/EsimDownloadConfirmationModal.vue'
 import EsimDownloadPreviewModal from '@/components/esim/EsimDownloadPreviewModal.vue'
@@ -17,18 +18,20 @@ import EsimTransferDialog from '@/components/esim/EsimTransferDialog.vue'
 import DraggableFab from '@/components/fab/DraggableFab.vue'
 import ModemDetailCard from '@/components/modem/ModemDetailCard.vue'
 import ModemDetailHeader from '@/components/modem/ModemDetailHeader.vue'
+import ModemLineMsisdnDialog from '@/components/modem/settings/ModemLineMsisdnDialog.vue'
 import SimPinUnlockDialog from '@/components/modem/SimPinUnlockDialog.vue'
 import SimSlotSwitcher from '@/components/modem/SimSlotSwitcher.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { useModemApi } from '@/apis/modem'
 import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 import { useEsimDiscover } from '@/composables/useEsimDiscover'
 import { useEsimDownload } from '@/composables/useEsimDownload'
+import { useEsimProfileQuickActions } from '@/composables/useEsimProfileQuickActions'
 import { useModemDetail } from '@/composables/useModemDetail'
 import { useSimSlotSwitch } from '@/composables/useSimSlotSwitch'
+import type { EsimProfile } from '@/types/esim'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -37,6 +40,7 @@ const modemApi = useModemApi()
 
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
 const canTransferEsim = computed(() => hasFeature(FEATURE.esimTransfer))
+const canUseWiFiCalling = computed(() => hasFeature(FEATURE.wifiCalling))
 const {
   modem,
   euicc,
@@ -64,6 +68,7 @@ const resultState = ref<'completed' | 'error' | null>(null)
 const resultErrorMessage = ref('')
 const resultErrorType = ref<'none' | 'failed' | 'disconnected'>('none')
 const resultName = ref('')
+const activeProfileActionsProfileId = ref<string | null>(null)
 
 const {
   downloadState,
@@ -133,9 +138,9 @@ const confirmationPlaceholder = computed(() =>
   t('modemDetail.esim.downloadConfirmationPlaceholder'),
 )
 
-const refreshModem = async () => {
-  if (!modemId.value || modemId.value === 'unknown') return
-  await fetchModemDetail(modemId.value)
+const refreshModem = async (targetId = modemId.value) => {
+  if (!targetId || targetId === 'unknown') return
+  await fetchModemDetail(targetId)
 }
 
 const needsPinUnlock = computed(() => {
@@ -175,6 +180,35 @@ const handlePinUnlockSubmit = async () => {
 const showSuccess = (message: string) => {
   toast.success(message)
 }
+
+const shouldLoadProfileQuickActions = computed(() => activeProfileActionsProfileId.value !== null)
+const shouldLoadWiFiCallingQuickActions = computed(
+  () => canUseWiFiCalling.value && activeProfileActionsProfileId.value !== null,
+)
+
+const {
+  msisdnDialogOpen,
+  msisdnInput,
+  isMsisdnUpdating,
+  isMsisdnValid,
+  isInternetConnected,
+  isInternetBusy,
+  settingsWiFiCallingEnabled,
+  settingsWiFiCallingConnected,
+  isWiFiCallingBusy,
+  openMsisdnDialog,
+  saveMsisdn,
+  handleNetworkQuickToggle,
+  handleWiFiCallingQuickToggle,
+} = useEsimProfileQuickActions({
+  modemId,
+  modem,
+  canUseWiFiCalling,
+  loadInternetConnection: shouldLoadProfileQuickActions,
+  loadWiFiCallingSettings: shouldLoadWiFiCallingQuickActions,
+  refreshModem,
+  onSuccess: showSuccess,
+})
 
 const { currentSimIdentifier, simSlots, handleSimSwitch } = useSimSlotSwitch({
   modemId,
@@ -237,6 +271,10 @@ watch(
   { immediate: true },
 )
 
+watch(modemId, () => {
+  activeProfileActionsProfileId.value = null
+})
+
 // Fetch modem detail when route changes or on mount
 watch(
   modemId,
@@ -268,6 +306,17 @@ const openTransferDialog = () => {
 
   installDialogOpen.value = false
   transferDialogOpen.value = true
+}
+
+const handleProfileActionsOpenChange = (profile: EsimProfile, open: boolean) => {
+  if (!profile.enabled) return
+  if (open) {
+    activeProfileActionsProfileId.value = profile.id
+    return
+  }
+  if (activeProfileActionsProfileId.value === profile.id) {
+    activeProfileActionsProfileId.value = null
+  }
 }
 
 void fetchCapabilities()
@@ -331,12 +380,22 @@ void fetchCapabilities()
         :loading="isEsimProfilesLoading"
         :modem-id="modemId"
         :refresh-modem="refreshModem"
+        :internet-connected="isInternetConnected"
+        :internet-busy="isInternetBusy"
+        :wifi-calling-available="canUseWiFiCalling"
+        :wifi-calling-enabled="settingsWiFiCallingEnabled"
+        :wifi-calling-connected="settingsWiFiCallingConnected"
+        :wifi-calling-busy="isWiFiCallingBusy"
         @success="showSuccess"
+        @toggle-network="handleNetworkQuickToggle"
+        @toggle-wifi-calling="handleWiFiCallingQuickToggle"
+        @edit-phone-number="openMsisdnDialog"
+        @profile-actions-open-change="handleProfileActionsOpenChange"
       />
     </div>
 
     <aside class="hidden xl:block">
-      <div class="sticky top-[var(--modem-desktop-sticky-top)]">
+      <div class="sticky top-(--modem-desktop-sticky-top)">
         <ModemDetailCard :modem="modem" :euicc="euicc" />
       </div>
     </aside>
@@ -352,11 +411,19 @@ void fetchCapabilities()
       <DialogHeader>
         <DialogTitle>{{ t('modemDetail.tabs.detail') }}</DialogTitle>
       </DialogHeader>
-      <ScrollArea class="pr-2 [&_[data-slot=scroll-area-viewport]]:max-h-[70vh]">
+      <ScrollArea class="pr-2 **:data-[slot=scroll-area-viewport]:max-h-[70vh]">
         <ModemDetailCard :modem="modem" :euicc="euicc" />
       </ScrollArea>
     </DialogContent>
   </Dialog>
+
+  <ModemLineMsisdnDialog
+    v-model:open="msisdnDialogOpen"
+    v-model:msisdn="msisdnInput"
+    :is-updating="isMsisdnUpdating"
+    :is-valid="isMsisdnValid"
+    @save="saveMsisdn"
+  />
 
   <DraggableFab
     v-if="modem && isEsimModem"

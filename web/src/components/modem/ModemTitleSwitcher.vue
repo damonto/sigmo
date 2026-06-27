@@ -16,6 +16,7 @@ import type { Modem } from '@/types/modem'
 const props = defineProps<{
   currentModem: Modem | null
   modems: Modem[]
+  variant?: 'page' | 'compact'
 }>()
 
 const emit = defineEmits<{
@@ -27,6 +28,7 @@ const { t } = useI18n()
 
 const currentModemId = computed(() => props.currentModem?.id ?? '')
 const canSwitchModems = computed(() => Boolean(props.currentModem) && props.modems.length > 1)
+const isCompact = computed(() => props.variant === 'compact')
 
 const displayModemName = (modem: Modem) => {
   return modem.name.trim() || modem.sim.operatorName || modem.id
@@ -47,20 +49,40 @@ const handleSelect = (modem: Modem) => {
     <DropdownMenuTrigger as-child>
       <button
         type="button"
-        class="group inline-flex max-w-full items-center gap-2 text-left text-3xl font-semibold tracking-tight text-foreground"
+        :class="[
+          'group max-w-full text-left font-semibold text-foreground',
+          isCompact
+            ? 'inline-flex min-w-0 flex-col items-start gap-0.5'
+            : 'inline-flex items-center gap-2 text-3xl tracking-tight',
+        ]"
         :aria-label="t('modemDetail.switchModem')"
         :title="t('modemDetail.switchModem')"
         @click="emit('title-click')"
       >
-        <span class="min-w-0 truncate">
-          {{ title }}
+        <span class="inline-flex max-w-full items-center gap-1.5">
+          <span class="min-w-0 truncate" :class="isCompact ? 'text-sm leading-tight' : ''">
+            {{ title }}
+          </span>
+          <ChevronDown
+            :class="[
+              'shrink-0 text-muted-foreground transition group-data-[state=open]:rotate-180',
+              isCompact ? 'size-3.5' : 'mt-1 size-5',
+            ]"
+          />
         </span>
-        <ChevronDown
-          class="mt-1 size-5 shrink-0 text-muted-foreground transition group-data-[state=open]:rotate-180"
-        />
+        <span
+          v-if="isCompact && currentModemId"
+          class="block max-w-full truncate text-xs font-medium leading-tight text-muted-foreground"
+          :title="currentModemId"
+        >
+          {{ currentModemId }}
+        </span>
       </button>
     </DropdownMenuTrigger>
-    <DropdownMenuContent align="start" class="w-80 max-w-[calc(100vw-3rem)]">
+    <DropdownMenuContent
+      align="start"
+      :class="isCompact ? 'w-72 max-w-[calc(100vw-3rem)]' : 'w-80 max-w-[calc(100vw-3rem)]'"
+    >
       <DropdownMenuItem
         v-for="item in props.modems"
         :key="item.id"
@@ -75,6 +97,9 @@ const handleSelect = (modem: Modem) => {
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-semibold leading-tight text-foreground">
             {{ displayModemName(item) }}
+          </p>
+          <p v-if="isCompact" class="truncate text-xs text-muted-foreground" :title="item.id">
+            {{ item.id }}
           </p>
         </div>
         <ModemSignalStatus
@@ -93,6 +118,18 @@ const handleSelect = (modem: Modem) => {
       </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
+  <div v-else-if="isCompact" class="min-w-0 text-left" @click="emit('title-click')">
+    <p class="truncate text-sm font-semibold leading-tight text-foreground">
+      {{ title }}
+    </p>
+    <p
+      v-if="currentModemId"
+      class="truncate text-xs font-medium leading-tight text-muted-foreground"
+      :title="currentModemId"
+    >
+      {{ currentModemId }}
+    </p>
+  </div>
   <h1
     v-else
     class="text-3xl font-semibold tracking-tight text-foreground"

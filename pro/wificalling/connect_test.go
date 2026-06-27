@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/pro/websheet"
 	vowifi "github.com/damonto/vowifi-go"
 	imsvoice "github.com/damonto/vowifi-go/ims/voice"
@@ -508,6 +509,60 @@ func TestStopFailsOpenCallsBeforeRemovingSession(t *testing.T) {
 	}
 	if events[0].Call.ID != "active" || events[0].Call.State != string(imsvoice.CallStateFailed) {
 		t.Fatalf("event = %+v, want failed active call", events[0])
+	}
+}
+
+func TestDisconnectRemovesSessionAndFailsOpenCalls(t *testing.T) {
+	cancelled := false
+	c := &coordinator{
+		sessions: map[string]*sessionState{
+			"modem-1": {
+				cancel: func() {
+					cancelled = true
+				},
+				connected: true,
+				calls: map[string]*voiceCallState{
+					"active": {
+						info: VoiceCall{ID: "active", State: string(imsvoice.CallStateActive)},
+					},
+				},
+			},
+		},
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+	}
+	var events []VoiceEvent
+	unsubscribe := c.SubscribeVoiceEvents(func(event VoiceEvent) {
+		events = append(events, event)
+	})
+	defer unsubscribe()
+
+	err := c.Disconnect(context.Background(), &mmodem.Modem{EquipmentIdentifier: "modem-1"})
+
+	if err != nil {
+		t.Fatalf("Disconnect() error = %v", err)
+	}
+	if !cancelled {
+		t.Fatal("session was not cancelled")
+	}
+	if _, ok := c.sessions["modem-1"]; ok {
+		t.Fatal("session was not removed")
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	if events[0].Call.ID != "active" || events[0].Call.State != string(imsvoice.CallStateFailed) {
+		t.Fatalf("event = %+v, want failed active call", events[0])
+	}
+}
+
+func TestDisconnectIsIdempotent(t *testing.T) {
+	c := &coordinator{sessions: make(map[string]*sessionState)}
+
+	if err := c.Disconnect(context.Background(), &mmodem.Modem{EquipmentIdentifier: "modem-1"}); err != nil {
+		t.Fatalf("Disconnect() error = %v", err)
+	}
+	if err := c.Disconnect(context.Background(), nil); err != nil {
+		t.Fatalf("Disconnect(nil) error = %v", err)
 	}
 }
 

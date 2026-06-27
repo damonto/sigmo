@@ -30,13 +30,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import {
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
+import { FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -51,13 +45,29 @@ const props = withDefaults(
     modemId: string
     loading?: boolean
     refreshModem?: () => Promise<void>
+    internetConnected?: boolean
+    internetBusy?: boolean
+    wifiCallingAvailable?: boolean
+    wifiCallingEnabled?: boolean
+    wifiCallingConnected?: boolean
+    wifiCallingBusy?: boolean
   }>(),
   {
     loading: false,
+    internetConnected: false,
+    internetBusy: false,
+    wifiCallingAvailable: false,
+    wifiCallingEnabled: false,
+    wifiCallingConnected: false,
+    wifiCallingBusy: false,
   },
 )
 const emit = defineEmits<{
   (event: 'success', message: string): void
+  (event: 'toggle-network', profile: EsimProfile, nextValue: boolean): void
+  (event: 'toggle-wifi-calling', profile: EsimProfile, nextValue: boolean): void
+  (event: 'edit-phone-number', profile: EsimProfile): void
+  (event: 'profile-actions-open-change', profile: EsimProfile, open: boolean): void
 }>()
 
 const { t } = useI18n()
@@ -94,13 +104,16 @@ type RenameFormValues = z.infer<typeof renameSchemaDefinition>
 
 const renameSchema = toTypedSchema(renameSchemaDefinition)
 
-const { handleSubmit: handleRenameSubmit, resetForm: resetRenameForm, isSubmitting: renameSubmitting } =
-  useForm<RenameFormValues>({
-    validationSchema: renameSchema,
-    initialValues: {
-      name: '',
-    },
-  })
+const {
+  handleSubmit: handleRenameSubmit,
+  resetForm: resetRenameForm,
+  isSubmitting: renameSubmitting,
+} = useForm<RenameFormValues>({
+  validationSchema: renameSchema,
+  initialValues: {
+    name: '',
+  },
+})
 
 const openToggleDialog = (profile: EsimProfile, nextValue: boolean) => {
   toggleOpen.value = true
@@ -161,11 +174,7 @@ const closeRenameDialog = () => {
 const confirmRename = handleRenameSubmit(async (values) => {
   if (!renameProfile.value) return
   try {
-    await esimApi.updateEsimNickname(
-      props.modemId,
-      renameProfile.value.iccid,
-      values.name,
-    )
+    await esimApi.updateEsimNickname(props.modemId, renameProfile.value.iccid, values.name)
     renameProfile.value.name = values.name
     closeRenameDialog()
   } catch (err) {
@@ -206,6 +215,25 @@ const handleRenameClick = (profile: EsimProfile) => {
 
 const handleDeleteClick = (profile: EsimProfile) => {
   openDeleteDialog(profile)
+}
+
+const handleNetworkToggle = (profile: EsimProfile, nextValue: boolean) => {
+  if (!profile.enabled || props.internetBusy) return
+  emit('toggle-network', profile, nextValue)
+}
+
+const handleWiFiCallingToggle = (profile: EsimProfile, nextValue: boolean) => {
+  if (!profile.enabled || props.wifiCallingBusy || !props.wifiCallingAvailable) return
+  emit('toggle-wifi-calling', profile, nextValue)
+}
+
+const handlePhoneNumberClick = (profile: EsimProfile) => {
+  if (!profile.enabled) return
+  emit('edit-phone-number', profile)
+}
+
+const handleProfileActionsOpenChange = (profile: EsimProfile, open: boolean) => {
+  emit('profile-actions-open-change', profile, open)
 }
 
 const togglePrompt = computed(() => {
@@ -290,13 +318,57 @@ watch(renameOpen, (value) => {
             @update:model-value="(nextValue) => handleToggle(profile, nextValue)"
           />
 
-          <DropdownMenu>
+          <DropdownMenu @update:open="(open) => handleProfileActionsOpenChange(profile, open)">
             <DropdownMenuTrigger as-child>
               <Button variant="ghost" size="icon" type="button" aria-label="Profile actions">
                 <EllipsisVertical class="size-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" class="w-40">
+            <DropdownMenuContent align="end" class="w-56">
+              <template v-if="profile.enabled">
+                <DropdownMenuItem
+                  class="justify-between gap-4"
+                  :disabled="props.internetBusy"
+                  @click="handleNetworkToggle(profile, !props.internetConnected)"
+                >
+                  <span>{{ t('modemDetail.settings.networkTitle') }}</span>
+                  <Switch
+                    :model-value="props.internetConnected"
+                    :disabled="props.internetBusy"
+                    @click.stop
+                    @update:model-value="(nextValue) => handleNetworkToggle(profile, nextValue)"
+                  />
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  v-if="props.wifiCallingAvailable"
+                  class="justify-between gap-4"
+                  :disabled="props.wifiCallingBusy"
+                  @click="
+                    handleWiFiCallingToggle(
+                      profile,
+                      !(props.wifiCallingEnabled && props.wifiCallingConnected),
+                    )
+                  "
+                >
+                  <span>{{ t('modemDetail.settings.wifiCallingTitle') }}</span>
+                  <Spinner
+                    v-if="props.wifiCallingBusy"
+                    data-testid="wifi-calling-quick-action-loading"
+                    class="size-4 text-muted-foreground"
+                  />
+                  <Switch
+                    v-else
+                    :model-value="props.wifiCallingEnabled && props.wifiCallingConnected"
+                    :disabled="props.wifiCallingBusy"
+                    @click.stop
+                    @update:model-value="(nextValue) => handleWiFiCallingToggle(profile, nextValue)"
+                  />
+                </DropdownMenuItem>
+                <DropdownMenuItem @click="handlePhoneNumberClick(profile)">
+                  {{ t('modemDetail.settings.msisdnTitle') }}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </template>
               <DropdownMenuItem @click="handleRenameClick(profile)">
                 {{ t('modemDetail.actions.rename') }}
               </DropdownMenuItem>

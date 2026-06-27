@@ -3,6 +3,7 @@
 package wificalling
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -14,8 +15,12 @@ import (
 )
 
 type Handler struct {
-	registry    *mmodem.Registry
+	registry    modemFinder
 	wifiCalling Coordinator
+}
+
+type modemFinder interface {
+	Find(context.Context, string) (*mmodem.Modem, error)
 }
 
 type UpdateSettingsRequest struct {
@@ -38,6 +43,7 @@ const (
 	errorCodeUpdateSettingsInvalidRequest = "update_wifi_calling_settings_invalid_request"
 	errorCodeUpdateSettingsFailed         = "update_wifi_calling_settings_failed"
 	errorCodeCreateSessionFailed          = "create_wifi_calling_session_failed"
+	errorCodeDeleteSessionFailed          = "delete_wifi_calling_session_failed"
 	errorCodeSessionUnavailable           = "wifi_calling_session_unavailable"
 	errorCodeStartWebsheetFailed          = "start_wifi_calling_websheet_failed"
 	errorCodeStartE911WebsheetFailed      = "start_wifi_calling_e911_websheet_failed"
@@ -52,6 +58,7 @@ func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, wifiCalling Co
 	group.GET("/modems/:id/wifi-calling-settings", h.Settings)
 	group.PUT("/modems/:id/wifi-calling-settings", h.UpdateSettings)
 	group.POST("/modems/:id/wifi-calling-sessions", h.CreateSession)
+	group.DELETE("/modems/:id/wifi-calling-sessions/current", h.DeleteSession)
 	group.POST("/modems/:id/wifi-calling-websheets", h.StartWebsheet)
 	group.POST("/modems/:id/wifi-calling-emergency-address-websheets", h.StartEmergencyAddressWebsheet)
 }
@@ -106,6 +113,17 @@ func (h *Handler) CreateSession(c *echo.Context) error {
 		return httpapi.Internal(c, errorCodeCreateSessionFailed, err)
 	}
 	return c.NoContent(http.StatusAccepted)
+}
+
+func (h *Handler) DeleteSession(c *echo.Context) error {
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeDeleteSessionFailed)
+	}
+	if err := h.wifiCalling.Disconnect(c.Request().Context(), modem); err != nil {
+		return httpapi.Internal(c, errorCodeDeleteSessionFailed, err)
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 func (h *Handler) StartWebsheet(c *echo.Context) error {

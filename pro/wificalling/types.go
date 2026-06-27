@@ -106,6 +106,7 @@ type Coordinator interface {
 	Settings(context.Context, *mmodem.Modem) (Settings, error)
 	UpdateSettings(context.Context, *mmodem.Modem, Settings) error
 	Reconnect(context.Context, *mmodem.Modem) error
+	Disconnect(context.Context, *mmodem.Modem) error
 	Status(context.Context, *mmodem.Modem) (Status, error)
 	EmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool
 	StartWebsheet(context.Context, *mmodem.Modem) (websheet.Info, error)

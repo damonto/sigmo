@@ -42,7 +42,11 @@ const { isStickyVisible } = useStickyTopBar(backButtonRef)
 
     <div class="flex items-center justify-between gap-3">
       <div class="space-y-1">
-        <div ref="backButtonRef" class="inline-flex" :class="{ invisible: isStickyVisible }">
+        <div
+          ref="backButtonRef"
+          class="inline-flex lg:hidden"
+          :class="{ invisible: isStickyVisible }"
+        >
           <BackButton :to="backRoute" :label="t('modemDetail.back')" />
         </div>
         <div class="space-y-1">

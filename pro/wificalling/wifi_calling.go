@@ -138,6 +138,14 @@ func (c *coordinator) Reconnect(ctx context.Context, modem *mmodem.Modem) error 
 	return nil
 }
 
+func (c *coordinator) Disconnect(_ context.Context, modem *mmodem.Modem) error {
+	if modem == nil || modem.EquipmentIdentifier == "" {
+		return nil
+	}
+	c.stopAsync(modem.EquipmentIdentifier)
+	return nil
+}
+
 func (c *coordinator) Status(ctx context.Context, modem *mmodem.Modem) (Status, error) {
 	settings, err := c.Settings(ctx, modem)
 	if err != nil {

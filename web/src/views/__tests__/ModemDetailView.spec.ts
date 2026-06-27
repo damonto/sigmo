@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import type { Ref } from 'vue'
+import type { ComputedRef, Ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Modem } from '@/types/modem'
@@ -9,31 +9,47 @@ const api = vi.hoisted(() => ({
   unlockSim: vi.fn(),
 }))
 
+const routeHarness = vi.hoisted(() => ({
+  route: undefined as { params: { id: string } } | undefined,
+}))
+
 const detailHarness = vi.hoisted(() => ({
   modem: undefined as Ref<Modem | null> | undefined,
   fetchModemDetail: vi.fn(),
   fetchEsimProfiles: vi.fn(),
+  resetMsisdnInput: vi.fn(),
+  handleMsisdnUpdate: vi.fn(),
+  handleInternetConnect: vi.fn(),
+  handleInternetDisconnect: vi.fn(),
+  handleWiFiCallingUpdate: vi.fn(),
+  reconnectWiFiCalling: vi.fn(),
+  disconnectWiFiCalling: vi.fn(),
+  wifiCallingFeature: false,
+  internetConnectionEnabled: undefined as ComputedRef<boolean> | undefined,
+  wifiCallingSettingsEnabled: undefined as ComputedRef<boolean> | undefined,
 }))
 
 vi.mock('@/apis/modem', () => ({
   useModemApi: () => api,
 }))
 
-vi.mock('vue-router', () => ({
-  createRouter: () => ({
-    beforeEach: vi.fn(),
-    currentRoute: {
-      value: {
-        name: 'modem-detail',
+vi.mock('vue-router', async () => {
+  const { reactive } = await vi.importActual<typeof import('vue')>('vue')
+  routeHarness.route = reactive({ params: { id: 'modem-1' } })
+  return {
+    createRouter: () => ({
+      beforeEach: vi.fn(),
+      currentRoute: {
+        value: {
+          name: 'modem-detail',
+        },
       },
-    },
-    replace: vi.fn(),
-  }),
-  createWebHistory: () => ({}),
-  useRoute: () => ({
-    params: { id: 'modem-1' },
-  }),
-}))
+      replace: vi.fn(),
+    }),
+    createWebHistory: () => ({}),
+    useRoute: () => routeHarness.route,
+  }
+})
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -50,9 +66,11 @@ vi.mock('vue-sonner', () => ({
 vi.mock('@/composables/useCapabilities', () => ({
   FEATURE: {
     esimTransfer: 'esim_transfer',
+    wifiCalling: 'wifi_calling',
   },
   useCapabilities: () => ({
-    hasFeature: () => false,
+    hasFeature: (feature: string) =>
+      feature === 'wifi_calling' ? detailHarness.wifiCallingFeature : false,
     fetchCapabilities: vi.fn(),
   }),
 }))
@@ -122,6 +140,58 @@ vi.mock('@/composables/useEsimDownload', async () => {
   }
 })
 
+vi.mock('@/composables/useModemInternet', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+  return {
+    useModemInternet: (options: { enabled: ComputedRef<boolean> }) => {
+      detailHarness.internetConnectionEnabled = options.enabled
+      return {
+        isInternetLoading: ref(false),
+        isInternetConnecting: ref(false),
+        isInternetDisconnecting: ref(false),
+        isInternetConnected: ref(false),
+        handleInternetConnect: detailHarness.handleInternetConnect,
+        handleInternetDisconnect: detailHarness.handleInternetDisconnect,
+      }
+    },
+  }
+})
+
+vi.mock('@/composables/useModemWiFiCallingSettings', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+  return {
+    useModemWiFiCallingSettings: (options: { enabled: ComputedRef<boolean> }) => {
+      detailHarness.wifiCallingSettingsEnabled = options.enabled
+      return {
+        settingsWiFiCallingEnabled: ref(false),
+        settingsWiFiCallingPreferred: ref(false),
+        settingsWiFiCallingConnected: ref(false),
+        settingsWiFiCallingState: ref(''),
+        isWiFiCallingSettingsLoading: ref(false),
+        isWiFiCallingSettingsUpdating: ref(false),
+        isWiFiCallingReconnecting: ref(false),
+        isWiFiCallingDisconnecting: ref(false),
+        handleWiFiCallingUpdate: detailHarness.handleWiFiCallingUpdate,
+        reconnectWiFiCalling: detailHarness.reconnectWiFiCalling,
+        disconnectWiFiCalling: detailHarness.disconnectWiFiCalling,
+      }
+    },
+  }
+})
+
+vi.mock('@/composables/useModemMsisdn', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+  return {
+    useModemMsisdn: () => ({
+      msisdnInput: ref(''),
+      isMsisdnUpdating: ref(false),
+      isMsisdnValid: ref(true),
+      resetMsisdnInput: detailHarness.resetMsisdnInput,
+      handleMsisdnUpdate: detailHarness.handleMsisdnUpdate,
+    }),
+  }
+})
+
 const lockedModem = (supportsEsim = false): Modem => ({
   manufacturer: 'Quectel',
   id: 'modem-1',
@@ -159,7 +229,10 @@ const mountView = () =>
         ModemDetailCard: true,
         EsimSummaryCard: true,
         EsimProfileSection: {
-          template: '<section data-testid="esim-profiles" />',
+          name: 'EsimProfileSection',
+          emits: ['edit-phone-number', 'profile-actions-open-change'],
+          template:
+            '<section data-testid="esim-profiles"><button data-testid="edit-msisdn" type="button" @click="$emit(\'edit-phone-number\', {})">edit</button></section>',
         },
         DraggableFab: {
           template: '<button data-testid="install-esim"><slot /></button>',
@@ -171,6 +244,12 @@ const mountView = () =>
         EsimDownloadPreviewModal: true,
         EsimDownloadConfirmationModal: true,
         EsimDownloadResultModal: true,
+        ModemLineMsisdnDialog: {
+          props: ['open'],
+          emits: ['save'],
+          template:
+            '<form v-if="open" data-testid="msisdn-dialog" @submit.prevent="$emit(\'save\')"><button type="submit">save</button></form>',
+        },
         Dialog: { template: '<div><slot /></div>' },
         DialogContent: { template: '<div><slot /></div>' },
         DialogHeader: { template: '<div><slot /></div>' },
@@ -202,8 +281,20 @@ const mountView = () =>
 
 describe('ModemDetailView SIM PIN unlock', () => {
   beforeEach(() => {
+    if (routeHarness.route) {
+      routeHarness.route.params.id = 'modem-1'
+    }
     vi.clearAllMocks()
     api.unlockSim.mockResolvedValue(undefined)
+    detailHarness.handleMsisdnUpdate.mockResolvedValue(true)
+    detailHarness.handleInternetConnect.mockResolvedValue(undefined)
+    detailHarness.handleInternetDisconnect.mockResolvedValue(undefined)
+    detailHarness.handleWiFiCallingUpdate.mockResolvedValue(undefined)
+    detailHarness.reconnectWiFiCalling.mockResolvedValue(undefined)
+    detailHarness.disconnectWiFiCalling.mockResolvedValue(undefined)
+    detailHarness.wifiCallingFeature = false
+    detailHarness.internetConnectionEnabled = undefined
+    detailHarness.wifiCallingSettingsEnabled = undefined
     if (detailHarness.modem) {
       detailHarness.modem.value = lockedModem()
     }
@@ -274,5 +365,90 @@ describe('ModemDetailView SIM PIN unlock', () => {
     expect(wrapper.find('[data-testid="pin-dialog"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="esim-profiles"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="install-esim"]').exists()).toBe(true)
+  })
+
+  it('updates the line number from the eSIM profile shortcut', async () => {
+    if (detailHarness.modem) {
+      detailHarness.modem.value = lockedModem(true)
+    }
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="edit-msisdn"]').trigger('click')
+    expect(detailHarness.resetMsisdnInput).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="msisdn-dialog"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="msisdn-dialog"]').trigger('submit')
+    await flushPromises()
+
+    expect(detailHarness.handleMsisdnUpdate).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="msisdn-dialog"]').exists()).toBe(false)
+  })
+
+  it('loads profile quick action state only while the active profile menu is open', async () => {
+    detailHarness.wifiCallingFeature = true
+    if (detailHarness.modem) {
+      detailHarness.modem.value = lockedModem(true)
+    }
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(detailHarness.internetConnectionEnabled?.value).toBe(false)
+    expect(detailHarness.wifiCallingSettingsEnabled?.value).toBe(false)
+
+    const section = wrapper.findComponent({ name: 'EsimProfileSection' })
+    section.vm.$emit('profile-actions-open-change', { id: 'active', enabled: true }, true)
+    await wrapper.vm.$nextTick()
+
+    expect(detailHarness.internetConnectionEnabled?.value).toBe(true)
+    expect(detailHarness.wifiCallingSettingsEnabled?.value).toBe(true)
+
+    section.vm.$emit('profile-actions-open-change', { id: 'active', enabled: true }, false)
+    await wrapper.vm.$nextTick()
+
+    expect(detailHarness.internetConnectionEnabled?.value).toBe(false)
+    expect(detailHarness.wifiCallingSettingsEnabled?.value).toBe(false)
+  })
+
+  it('stops profile quick action state loading when the modem changes', async () => {
+    detailHarness.wifiCallingFeature = true
+    if (detailHarness.modem) {
+      detailHarness.modem.value = lockedModem(true)
+    }
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const section = wrapper.findComponent({ name: 'EsimProfileSection' })
+    section.vm.$emit('profile-actions-open-change', { id: 'active', enabled: true }, true)
+    await wrapper.vm.$nextTick()
+
+    expect(detailHarness.internetConnectionEnabled?.value).toBe(true)
+    expect(detailHarness.wifiCallingSettingsEnabled?.value).toBe(true)
+
+    routeHarness.route!.params.id = 'modem-2'
+    await wrapper.vm.$nextTick()
+
+    expect(detailHarness.internetConnectionEnabled?.value).toBe(false)
+    expect(detailHarness.wifiCallingSettingsEnabled?.value).toBe(false)
+  })
+
+  it('keeps the line number dialog open when updating fails', async () => {
+    detailHarness.handleMsisdnUpdate.mockResolvedValue(false)
+    if (detailHarness.modem) {
+      detailHarness.modem.value = lockedModem(true)
+    }
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('[data-testid="edit-msisdn"]').trigger('click')
+    await wrapper.find('[data-testid="msisdn-dialog"]').trigger('submit')
+    await flushPromises()
+
+    expect(detailHarness.handleMsisdnUpdate).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="msisdn-dialog"]').exists()).toBe(true)
   })
 })

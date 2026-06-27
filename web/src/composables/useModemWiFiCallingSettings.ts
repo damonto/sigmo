@@ -32,6 +32,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
   const isWiFiCallingSettingsLoading = ref(false)
   const isWiFiCallingSettingsUpdating = ref(false)
   const isWiFiCallingReconnecting = ref(false)
+  const isWiFiCallingDisconnecting = ref(false)
   const isWiFiCallingWebsheetStarting = ref(false)
   const isWiFiCallingEmergencyAddressWebsheetStarting = ref(false)
   const isWiFiCallingSettingsFetching = ref(false)
@@ -90,6 +91,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
     }
     try {
       const { data } = await modemApi.getWiFiCallingSettings(id)
+      if (!enabled.value || modemId.value !== id) return
       const payload: WiFiCallingSettingsResponse | undefined = data.value
       settingsWiFiCallingEnabled.value = payload?.enabled ?? false
       settingsWiFiCallingPreferred.value = payload?.preferred ?? false
@@ -153,6 +155,30 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
     }
   }
 
+  const disconnectWiFiCalling = async () => {
+    const targetId = modemId.value
+    if (!enabled.value || !targetId) return
+    if (isWiFiCallingDisconnecting.value) return
+    isWiFiCallingDisconnecting.value = true
+    const previousConnected = settingsWiFiCallingConnected.value
+    const previousState = settingsWiFiCallingState.value
+    const previousDurationSeconds = settingsWiFiCallingDurationSeconds.value
+    settingsWiFiCallingConnected.value = false
+    settingsWiFiCallingState.value = 'disconnected'
+    settingsWiFiCallingDurationSeconds.value = 0
+    try {
+      await modemApi.deleteWiFiCallingSession(targetId)
+      await fetchSettings(targetId)
+    } catch (err) {
+      settingsWiFiCallingConnected.value = previousConnected
+      settingsWiFiCallingState.value = previousState
+      settingsWiFiCallingDurationSeconds.value = previousDurationSeconds
+      console.error('[useModemWiFiCallingSettings] Failed to disconnect Wi-Fi Calling:', err)
+    } finally {
+      isWiFiCallingDisconnecting.value = false
+    }
+  }
+
   const startWiFiCallingWebsheet = async () => {
     const targetId = modemId.value
     if (!enabled.value || !targetId) return
@@ -201,6 +227,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
         return
       }
       await fetchSettings(id)
+      if (!enabled.value || modemId.value !== id) return
       startPolling()
     },
     { immediate: true },
@@ -235,10 +262,12 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
     isWiFiCallingSettingsLoading,
     isWiFiCallingSettingsUpdating,
     isWiFiCallingReconnecting,
+    isWiFiCallingDisconnecting,
     isWiFiCallingWebsheetStarting,
     isWiFiCallingEmergencyAddressWebsheetStarting,
     handleWiFiCallingUpdate,
     reconnectWiFiCalling,
+    disconnectWiFiCalling,
     startWiFiCallingWebsheet,
     startWiFiCallingEmergencyAddressWebsheet,
     completeWiFiCallingWebsheet,

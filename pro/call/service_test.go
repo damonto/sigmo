@@ -921,6 +921,9 @@ func (fakeWiFiCalling) Settings(context.Context, *mmodem.Modem) (wificalling.Set
 func (fakeWiFiCalling) UpdateSettings(context.Context, *mmodem.Modem, wificalling.Settings) error {
 	return nil
 }
+func (fakeWiFiCalling) Disconnect(context.Context, *mmodem.Modem) error {
+	return nil
+}
 func (f fakeWiFiCalling) Status(context.Context, *mmodem.Modem) (wificalling.Status, error) {
 	return f.status, nil
 }
