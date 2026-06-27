@@ -42,7 +42,7 @@ const { t } = useI18n()
         </DialogDescription>
       </DialogHeader>
 
-      <ScrollArea class="pr-1 [&_[data-slot=scroll-area-viewport]]:max-h-[60vh]">
+      <ScrollArea class="pr-1 **:data-[slot=scroll-area-viewport]:max-h-[60vh]">
         <div v-if="props.isLoading" class="flex items-center justify-center py-10">
           <Spinner class="size-6 text-muted-foreground" />
           <span class="sr-only">{{ t('modemDetail.actions.loading') }}</span>

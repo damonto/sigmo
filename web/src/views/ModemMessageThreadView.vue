@@ -77,7 +77,7 @@ watch(
 
 <template>
   <div
-    class="grid h-[calc(100dvh-6.5rem)] gap-6 overflow-hidden lg:h-[var(--modem-desktop-content-height)] lg:grid-cols-[22rem_minmax(0,1fr)]"
+    class="grid h-[calc(100dvh-6.5rem)] gap-6 overflow-hidden lg:h-(--modem-desktop-content-height) lg:grid-cols-[22rem_minmax(0,1fr)]"
   >
     <div class="hidden min-h-0 overflow-hidden rounded-xl border bg-card/40 p-4 lg:block">
       <ModemMessagesPanel :modem-id="modemId" :selected-participant="participant" compact />

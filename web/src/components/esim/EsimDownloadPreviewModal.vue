@@ -126,7 +126,7 @@ watch(
             class="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 py-1"
           >
             <dt class="text-muted-foreground">{{ row.label }}</dt>
-            <dd class="min-w-0 break-words font-medium text-foreground">{{ row.value }}</dd>
+            <dd class="min-w-0 wrap-break-word font-medium text-foreground">{{ row.value }}</dd>
           </div>
         </dl>
       </div>

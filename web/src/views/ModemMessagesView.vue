@@ -13,7 +13,7 @@ const modemId = computed(() => (route.params.id ?? 'unknown') as string)
 
 <template>
   <div
-    class="grid min-h-[calc(100dvh-6.5rem)] gap-6 lg:h-[var(--modem-desktop-content-height)] lg:min-h-0 lg:grid-cols-[22rem_minmax(0,1fr)] lg:overflow-hidden"
+    class="grid min-h-[calc(100dvh-6.5rem)] gap-6 lg:h-(--modem-desktop-content-height) lg:min-h-0 lg:grid-cols-[22rem_minmax(0,1fr)] lg:overflow-hidden"
   >
     <ModemMessagesPanel :modem-id="modemId" />
 

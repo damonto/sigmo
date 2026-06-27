@@ -336,7 +336,7 @@ watch(dialpadOpen, async (open) => {
 
 <template>
   <div
-    class="flex min-h-[calc(100dvh-6.5rem)] flex-col gap-4 lg:h-[var(--modem-desktop-content-height)] lg:min-h-0 lg:overflow-hidden"
+    class="flex min-h-[calc(100dvh-6.5rem)] flex-col gap-4 lg:h-(--modem-desktop-content-height) lg:min-h-0 lg:overflow-hidden"
   >
     <header class="space-y-3">
       <ModemStickyTopBar
