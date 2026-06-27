@@ -23,7 +23,14 @@ const profiles: EsimProfile[] = [
     id: 'active',
     name: 'Active',
     iccid: 'iccid-active',
+    isdPAID: 'A000000559',
     enabled: true,
+    serviceProviderName: 'Carrier Active',
+    profileName: 'Active Line',
+    profileNickname: 'Active',
+    profileStateName: 'enabled',
+    profileClass: 'operational',
+    profileOwner: { mcc: '208', mnc: '09', gid1: '6332' },
     regionCode: 'US',
   },
   {
@@ -31,6 +38,11 @@ const profiles: EsimProfile[] = [
     name: 'Inactive',
     iccid: 'iccid-inactive',
     enabled: false,
+    serviceProviderName: 'Carrier Inactive',
+    profileName: 'Inactive Line',
+    profileStateName: 'disabled',
+    profileClass: 'operational',
+    profileOwner: { mcc: '310', mnc: '260' },
     regionCode: 'US',
   },
 ]
@@ -45,7 +57,8 @@ const stubs = {
   Badge: { template: '<span><slot /></span>' },
   Button: {
     props: ['disabled', 'type'],
-    template: '<button :type="type || \'button\'" :disabled="disabled"><slot /></button>',
+    template:
+      '<button v-bind="$attrs" :type="type || \'button\'" :disabled="disabled"><slot /></button>',
   },
   Dialog: { template: '<div><slot /></div>' },
   DialogContent: { template: '<div><slot /></div>' },
@@ -65,6 +78,11 @@ const stubs = {
   DropdownMenuSeparator: { template: '<hr />' },
   DropdownMenuTrigger: { template: '<div><slot /></div>' },
   EsimProfileAvatar: { template: '<span />' },
+  EsimProfileDetailsDialog: {
+    props: ['open', 'profile'],
+    template:
+      '<section v-if="open" data-testid="profile-details"><span>{{ profile?.serviceProviderName }}</span><span>{{ profile?.profileName }}</span><span>{{ profile?.profileOwner?.mcc }}</span></section>',
+  },
   FormControl: { template: '<div><slot /></div>' },
   FormField: { template: '<div><slot :component-field="{}" /></div>' },
   FormItem: { template: '<div><slot /></div>' },
@@ -171,5 +189,20 @@ describe('EsimProfileSection', () => {
     expect(wrapper.emitted('edit-phone-number')?.[0]?.[0]).toMatchObject({
       id: 'active',
     })
+  })
+
+  it('opens the profile details dialog from the action menu', async () => {
+    const wrapper = mountSection()
+
+    const detailsActions = wrapper
+      .findAll('button')
+      .filter((button) => button.text().includes('actions.viewDetails'))
+    expect(detailsActions).toHaveLength(2)
+
+    await detailsActions[0].trigger('click')
+
+    expect(wrapper.find('[data-testid="profile-details"]').text()).toContain('Carrier Active')
+    expect(wrapper.find('[data-testid="profile-details"]').text()).toContain('Active Line')
+    expect(wrapper.find('[data-testid="profile-details"]').text()).toContain('208')
   })
 })

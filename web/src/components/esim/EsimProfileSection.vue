@@ -37,6 +37,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { useEsimApi } from '@/apis/esim'
 import EsimProfileAvatar from '@/components/esim/EsimProfileAvatar.vue'
+import EsimProfileDetailsDialog from '@/components/esim/EsimProfileDetailsDialog.vue'
 import type { EsimProfile } from '@/types/esim'
 
 const profiles = defineModel<EsimProfile[]>('profiles', { required: true })
@@ -84,6 +85,9 @@ const toggleLoading = ref(false)
 
 const renameOpen = ref(false)
 const renameProfile = ref<EsimProfile | null>(null)
+
+const detailsOpen = ref(false)
+const detailsProfile = ref<EsimProfile | null>(null)
 
 const deleteOpen = ref(false)
 const deleteProfile = ref<EsimProfile | null>(null)
@@ -213,6 +217,11 @@ const handleRenameClick = (profile: EsimProfile) => {
   openRenameDialog(profile)
 }
 
+const openDetailsDialog = (profile: EsimProfile) => {
+  detailsProfile.value = profile
+  detailsOpen.value = true
+}
+
 const handleDeleteClick = (profile: EsimProfile) => {
   openDeleteDialog(profile)
 }
@@ -251,6 +260,11 @@ watch(renameOpen, (value) => {
   if (value) return
   renameProfile.value = null
   resetRenameForm({ values: { name: '' } })
+})
+
+watch(detailsOpen, (value) => {
+  if (value) return
+  detailsProfile.value = null
 })
 </script>
 
@@ -369,6 +383,10 @@ watch(renameOpen, (value) => {
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </template>
+              <DropdownMenuItem @click="openDetailsDialog(profile)">
+                {{ t('modemDetail.actions.viewDetails') }}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem @click="handleRenameClick(profile)">
                 {{ t('modemDetail.actions.rename') }}
               </DropdownMenuItem>
@@ -448,6 +466,8 @@ watch(renameOpen, (value) => {
       </form>
     </DialogContent>
   </Dialog>
+
+  <EsimProfileDetailsDialog v-model:open="detailsOpen" :profile="detailsProfile" />
 
   <AlertDialog v-model:open="deleteOpen">
     <AlertDialogContent>

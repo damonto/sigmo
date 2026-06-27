@@ -1,12 +1,25 @@
 package esim
 
 type ProfileResponse struct {
-	Name                string `json:"name"`
-	ServiceProviderName string `json:"serviceProviderName"`
-	ICCID               string `json:"iccid"`
-	Icon                string `json:"icon"`
-	ProfileState        uint8  `json:"profileState"`
-	RegionCode          string `json:"regionCode,omitempty"`
+	Name                string               `json:"name"`
+	ServiceProviderName string               `json:"serviceProviderName"`
+	ICCID               string               `json:"iccid"`
+	ISDPAID             string               `json:"isdPAID,omitempty"`
+	Icon                string               `json:"icon"`
+	ProfileName         string               `json:"profileName"`
+	ProfileNickname     string               `json:"profileNickname,omitempty"`
+	ProfileState        uint8                `json:"profileState"`
+	ProfileStateName    string               `json:"profileStateName"`
+	ProfileClass        string               `json:"profileClass"`
+	ProfileOwner        ProfileOwnerResponse `json:"profileOwner"`
+	RegionCode          string               `json:"regionCode,omitempty"`
+}
+
+type ProfileOwnerResponse struct {
+	MCC  string `json:"mcc"`
+	MNC  string `json:"mnc"`
+	GID1 string `json:"gid1,omitempty"`
+	GID2 string `json:"gid2,omitempty"`
 }
 
 type DiscoverResponse struct {
@@ -35,11 +48,12 @@ type downloadServerMessage struct {
 }
 
 type downloadProfilePreview struct {
-	ICCID               string `json:"iccid"`
-	ServiceProviderName string `json:"serviceProviderName"`
-	ProfileName         string `json:"profileName"`
-	ProfileNickname     string `json:"profileNickname,omitempty"`
-	ProfileState        string `json:"profileState"`
-	Icon                string `json:"icon,omitempty"`
-	RegionCode          string `json:"regionCode,omitempty"`
+	ICCID               string               `json:"iccid"`
+	ServiceProviderName string               `json:"serviceProviderName"`
+	ProfileName         string               `json:"profileName"`
+	ProfileNickname     string               `json:"profileNickname,omitempty"`
+	ProfileState        string               `json:"profileState"`
+	ProfileOwner        ProfileOwnerResponse `json:"profileOwner"`
+	Icon                string               `json:"icon,omitempty"`
+	RegionCode          string               `json:"regionCode,omitempty"`
 }

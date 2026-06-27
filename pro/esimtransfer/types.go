@@ -59,17 +59,30 @@ type ProfilesRequest struct {
 }
 
 type ProfileResponse struct {
-	ID                  string      `json:"id"`
-	Type                ProfileType `json:"type"`
-	Name                string      `json:"name"`
-	ServiceProviderName string      `json:"serviceProviderName,omitempty"`
-	ICCID               string      `json:"iccid"`
-	Icon                string      `json:"icon,omitempty"`
-	RegionCode          string      `json:"regionCode,omitempty"`
-	Enabled             bool        `json:"enabled"`
-	Supported           bool        `json:"supported"`
-	UnsupportedReason   string      `json:"unsupportedReason,omitempty"`
-	CarrierName         string      `json:"carrierName,omitempty"`
+	ID                  string               `json:"id"`
+	Type                ProfileType          `json:"type"`
+	Name                string               `json:"name"`
+	ServiceProviderName string               `json:"serviceProviderName,omitempty"`
+	ICCID               string               `json:"iccid"`
+	ISDPAID             string               `json:"isdPAID,omitempty"`
+	Icon                string               `json:"icon,omitempty"`
+	ProfileName         string               `json:"profileName,omitempty"`
+	ProfileNickname     string               `json:"profileNickname,omitempty"`
+	ProfileStateName    string               `json:"profileStateName,omitempty"`
+	ProfileClass        string               `json:"profileClass,omitempty"`
+	ProfileOwner        ProfileOwnerResponse `json:"profileOwner,omitempty"`
+	RegionCode          string               `json:"regionCode,omitempty"`
+	Enabled             bool                 `json:"enabled"`
+	Supported           bool                 `json:"supported"`
+	UnsupportedReason   string               `json:"unsupportedReason,omitempty"`
+	CarrierName         string               `json:"carrierName,omitempty"`
+}
+
+type ProfileOwnerResponse struct {
+	MCC  string `json:"mcc"`
+	MNC  string `json:"mnc"`
+	GID1 string `json:"gid1,omitempty"`
+	GID2 string `json:"gid2,omitempty"`
 }
 
 type clientMessage struct {
@@ -101,11 +114,12 @@ type userInputMessage struct {
 }
 
 type downloadProfilePreview struct {
-	ICCID               string `json:"iccid"`
-	ServiceProviderName string `json:"serviceProviderName"`
-	ProfileName         string `json:"profileName"`
-	ProfileNickname     string `json:"profileNickname,omitempty"`
-	ProfileState        string `json:"profileState"`
-	Icon                string `json:"icon,omitempty"`
-	RegionCode          string `json:"regionCode,omitempty"`
+	ICCID               string               `json:"iccid"`
+	ServiceProviderName string               `json:"serviceProviderName"`
+	ProfileName         string               `json:"profileName"`
+	ProfileNickname     string               `json:"profileNickname,omitempty"`
+	ProfileState        string               `json:"profileState"`
+	ProfileOwner        ProfileOwnerResponse `json:"profileOwner"`
+	Icon                string               `json:"icon,omitempty"`
+	RegionCode          string               `json:"regionCode,omitempty"`
 }

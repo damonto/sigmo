@@ -4,8 +4,14 @@ export type EsimProfileApiResponse = {
   name: string
   serviceProviderName: string
   iccid: string
+  isdPAID?: string
   icon: string
+  profileName: string
+  profileNickname?: string
   profileState: number
+  profileStateName: string
+  profileClass: string
+  profileOwner: EsimProfileOwner
   regionCode?: string
 }
 
@@ -24,15 +30,30 @@ export type EsimDownloadPreview = {
   profileName: string
   profileNickname?: string
   profileState: string
+  profileOwner: EsimProfileOwner
   icon?: string
   regionCode?: string
+}
+
+export type EsimProfileOwner = {
+  mcc: string
+  mnc: string
+  gid1?: string
+  gid2?: string
 }
 
 export type EsimProfile = {
   id: string
   name: string
   iccid: string
+  isdPAID?: string
   enabled: boolean
+  serviceProviderName: string
+  profileName: string
+  profileNickname?: string
+  profileStateName: string
+  profileClass: string
+  profileOwner: EsimProfileOwner
   regionCode: string
   logoUrl?: string
 }

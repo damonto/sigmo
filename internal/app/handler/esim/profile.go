@@ -40,14 +40,7 @@ func (p *profile) List(modem *mmodem.Modem) ([]ProfileResponse, error) {
 
 	response := make([]ProfileResponse, 0, len(profiles))
 	for _, item := range profiles {
-		response = append(response, ProfileResponse{
-			Name:                profileDisplayName(item),
-			ServiceProviderName: item.ServiceProviderName,
-			ICCID:               item.ICCID.String(),
-			Icon:                profileIconDataURL(item.Icon),
-			ProfileState:        uint8(item.ProfileState),
-			RegionCode:          profileRegion(item),
-		})
+		response = append(response, profileResponseFrom(item))
 	}
 	return response, nil
 }

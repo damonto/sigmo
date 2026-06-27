@@ -79,6 +79,11 @@ const profile: EsimProfile = {
   name: 'Line',
   iccid: 'iccid-1',
   enabled: true,
+  serviceProviderName: 'Carrier',
+  profileName: 'Line',
+  profileStateName: 'enabled',
+  profileClass: 'operational',
+  profileOwner: { mcc: '208', mnc: '09' },
   regionCode: 'US',
 }
 

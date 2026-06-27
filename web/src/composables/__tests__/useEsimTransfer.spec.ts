@@ -93,6 +93,7 @@ describe('useEsimTransfer', () => {
         serviceProviderName: 'Carrier',
         profileName: 'Transferred line',
         profileState: 'disabled',
+        profileOwner: { mcc: '208', mnc: '09' },
       },
     })
     ws.message({ type: TRANSFER_MESSAGE.completed })
