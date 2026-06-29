@@ -118,7 +118,7 @@ func (s *Service) send(ctx context.Context, device modemDevice, to string, text 
 	if strings.TrimSpace(text) == "" {
 		return "", ErrTextRequired
 	}
-	to, err := normalizeRecipient(ctx, device.modem(), to)
+	to, err := normalizeSMSAddress(to)
 	if err != nil {
 		return "", err
 	}

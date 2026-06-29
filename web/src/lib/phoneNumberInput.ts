@@ -51,7 +51,7 @@ export const isCallableDialString = (value: string) => {
 export const formatPhoneInput = (value: string, defaultCountry?: string) => {
   const chars = phoneNumberChars(value)
   if (!chars || chars === '+') return chars
-  if (shortCodeRE.test(chars)) return chars
+  if (!shouldFormatPhoneChars(chars, defaultCountry)) return chars
 
   const country = phoneCountry(defaultCountry)
   if (!chars.startsWith('+') && !country) return chars
@@ -66,10 +66,16 @@ export const formatDialInput = (value: string, defaultCountry?: string) => {
   return formatPhoneInput(chars, defaultCountry)
 }
 
+export const formatAddressInput = (value: string, defaultCountry?: string) => {
+  const address = addressSubmissionChars(value)
+  if (!address.valid) return value.trim()
+  return formatPhoneInput(address.value, defaultCountry)
+}
+
 export const formatPhoneDisplay = (value: string, defaultCountry?: string) => {
   const chars = phoneNumberChars(value)
   if (!chars || chars === '+') return value.trim()
-  if (shortCodeRE.test(chars)) return chars
+  if (!shouldFormatPhoneChars(chars, defaultCountry)) return chars
 
   const country = phoneCountry(defaultCountry)
   const number = chars.startsWith('+')
@@ -87,6 +93,11 @@ export const formatPhoneDisplay = (value: string, defaultCountry?: string) => {
     return chars.startsWith('+') ? number.formatInternational() : number.formatNational()
   }
   return formatPhoneInput(chars, defaultCountry) || value.trim()
+}
+
+export const normalizeAddressSubmission = (value: string) => {
+  const address = addressSubmissionChars(value)
+  return address.valid ? address.value : value.trim()
 }
 
 export const normalizePhoneSubmission = (value: string, defaultCountry?: string) => {
@@ -120,4 +131,33 @@ const phoneCountry = (value?: string): CountryCode | undefined => {
   const country = value?.trim().toUpperCase()
   if (!country || country === 'UN' || !/^[A-Z]{2}$/.test(country)) return undefined
   return country as CountryCode
+}
+
+const shouldFormatPhoneChars = (chars: string, defaultCountry?: string) => {
+  if (shortCodeRE.test(chars)) return false
+  if (chars.startsWith('+')) return true
+  const country = phoneCountry(defaultCountry)
+  if (!country) return false
+  const number = parsePhoneNumberFromString(chars, country)
+  return number?.isPossible() === true && phoneNumberChars(number.formatNational()) === chars
+}
+
+const addressSubmissionChars = (value: string) => {
+  const trimmed = value.trim()
+  let result = ''
+  for (const char of trimmed) {
+    if (char >= '0' && char <= '9') {
+      result += char
+      continue
+    }
+    if (char === '+' && result.length === 0) {
+      result += char
+      continue
+    }
+    if (char === ' ' || char === '-' || char === '.' || char === '(' || char === ')') {
+      continue
+    }
+    return { value: trimmed, valid: false }
+  }
+  return { value: result, valid: result !== '' && result !== '+' }
 }

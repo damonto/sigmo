@@ -133,7 +133,7 @@ func openCCIDSource(ctx context.Context, readerName string, logger *slog.Logger)
 }
 
 func openATSource(ctx context.Context, device string) (usimcard.Reader, error) {
-	tx, err := at.Open(ctx, device, 0)
+	tx, err := at.Open(device, 0)
 	if err != nil {
 		return nil, err
 	}

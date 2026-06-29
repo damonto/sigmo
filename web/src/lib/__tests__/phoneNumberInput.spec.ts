@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   dialStringChars,
+  formatAddressInput,
   formatDialInput,
   formatPhoneDisplay,
   formatPhoneInput,
   isCallableDialString,
   isDialServiceCode,
+  normalizeAddressSubmission,
   normalizePhoneSubmission,
   phoneNumberChars,
 } from '@/lib/phoneNumberInput'
@@ -20,6 +22,7 @@ describe('phoneNumberInput', () => {
   it('formats national input for the modem country', () => {
     expect(formatPhoneInput('2223334444', 'US')).toBe('(222) 333-4444')
     expect(formatPhoneInput('13344445555', 'CN')).toBe('133 4444 5555')
+    expect(formatPhoneInput('07123456789', 'GB')).toBe('07123 456789')
   })
 
   it('keeps input compact when there is no usable default country', () => {
@@ -33,6 +36,15 @@ describe('phoneNumberInput', () => {
     expect(formatPhoneDisplay('10086', 'CN')).toBe('10086')
     expect(formatPhoneDisplay('911', 'US')).toBe('911')
     expect(isDialServiceCode('#123')).toBe(true)
+  })
+
+  it('keeps service numbers and international access dial strings compact', () => {
+    expect(formatAddressInput('10690760295102', 'CN')).toBe('10690760295102')
+    expect(formatAddressInput('0118613800138000', 'US')).toBe('0118613800138000')
+    expect(formatAddressInput('008613800138000', 'CN')).toBe('008613800138000')
+    expect(formatAddressInput('*123#', 'CN')).toBe('*123#')
+    expect(formatAddressInput('12583113788889999', 'CN')).toBe('12583113788889999')
+    expect(formatDialInput('12583113788889999', 'CN')).toBe('12583113788889999')
   })
 
   it('extracts phone number characters from formatted input', () => {
@@ -57,6 +69,20 @@ describe('phoneNumberInput', () => {
     expect(formatPhoneDisplay('+8613344445555', 'US')).toBe('+86 133 4444 5555')
     expect(formatPhoneDisplay('+12223334444', 'US')).toBe('(222) 333-4444')
     expect(formatPhoneDisplay('2223334444', 'US')).toBe('(222) 333-4444')
+    expect(formatPhoneDisplay('10690760295102', 'CN')).toBe('10690760295102')
+    expect(formatPhoneDisplay('0118613800138000', 'US')).toBe('0118613800138000')
+  })
+
+  it('normalizes address submissions without inferring E.164', () => {
+    expect(normalizeAddressSubmission('+86 138 0013 8000')).toBe('+8613800138000')
+    expect(normalizeAddressSubmission('138 0013 8000')).toBe('13800138000')
+    expect(normalizeAddressSubmission('(650) 253-0000')).toBe('6502530000')
+    expect(normalizeAddressSubmission('106 90760295102')).toBe('10690760295102')
+    expect(normalizeAddressSubmission('011 86 138 0013 8000')).toBe('0118613800138000')
+    expect(normalizeAddressSubmission('0086 138 0013 8000')).toBe('008613800138000')
+    expect(normalizeAddressSubmission('*123#')).toBe('*123#')
+    expect(normalizeAddressSubmission('abc123')).toBe('abc123')
+    expect(normalizeAddressSubmission('12x34')).toBe('12x34')
   })
 
   it('normalizes formatted national numbers for submission without adding plus', () => {

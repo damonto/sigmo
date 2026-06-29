@@ -102,7 +102,7 @@ func openReaderCandidate(ctx context.Context, candidate readerCandidate, slot in
 		}
 		return adapter, nil
 	case mmodem.ModemPortTypeAt:
-		tx, err := at.Open(ctx, candidate.device, 0)
+		tx, err := at.Open(candidate.device, 0)
 		if err != nil {
 			return nil, err
 		}

@@ -5,90 +5,94 @@ import (
 	"testing"
 )
 
-func TestNormalizeRecipientForRegion(t *testing.T) {
+func TestNormalizeSMSAddress(t *testing.T) {
 	tests := []struct {
 		name    string
 		to      string
-		region  string
 		want    string
 		wantErr error
 	}{
 		{
-			name:   "china local mobile",
-			to:     "13800138000",
-			region: "CN",
-			want:   "+8613800138000",
+			name: "china local mobile",
+			to:   "13800138000",
+			want: "13800138000",
 		},
 		{
-			name:   "us local mobile",
-			to:     "6502530000",
-			region: "US",
-			want:   "+16502530000",
+			name: "us local mobile",
+			to:   "6502530000",
+			want: "6502530000",
 		},
 		{
-			name:   "uk local mobile",
-			to:     "07123456789",
-			region: "GB",
-			want:   "+447123456789",
+			name: "uk local mobile",
+			to:   "07123456789",
+			want: "07123456789",
 		},
 		{
-			name:   "international is canonicalized",
-			to:     "+1 (650) 253-0000",
-			region: "CN",
-			want:   "+16502530000",
+			name: "international keeps plus and removes separators",
+			to:   "+1 (650) 253-0000",
+			want: "+16502530000",
 		},
 		{
-			name:   "short code remains local",
-			to:     "777",
-			region: "NZ",
-			want:   "777",
+			name: "short code remains local",
+			to:   "777",
+			want: "777",
 		},
 		{
-			name:   "long service code remains local",
-			to:     "10086",
-			region: "CN",
-			want:   "10086",
+			name: "long service code remains local",
+			to:   "10086",
+			want: "10086",
 		},
 		{
-			name:    "invalid local number",
-			to:      "1234567",
-			region:  "CN",
+			name: "china sms service number remains local",
+			to:   "106 90760295102",
+			want: "10690760295102",
+		},
+		{
+			name: "local number does not need a region",
+			to:   "13800138000",
+			want: "13800138000",
+		},
+		{
+			name: "international access code remains dial address",
+			to:   "011 86 138 0013 8000",
+			want: "0118613800138000",
+		},
+		{
+			name: "double zero access code remains dial address",
+			to:   "0086 138 0013 8000",
+			want: "008613800138000",
+		},
+		{
+			name:    "letters are invalid",
+			to:      "abc123",
 			wantErr: ErrRecipientInvalid,
 		},
 		{
-			name:    "unknown region rejects local number",
-			to:      "13800138000",
-			region:  "UN",
+			name:    "ussd characters are invalid",
+			to:      "*123#",
 			wantErr: ErrRecipientInvalid,
-		},
-		{
-			name:   "unknown region accepts international number",
-			to:     "+44 7123 456789",
-			region: "UN",
-			want:   "+447123456789",
 		},
 		{
 			name:    "empty recipient",
 			to:      " ",
-			region:  "CN",
 			wantErr: ErrRecipientRequired,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := normalizeRecipientForRegion(tt.to, tt.region)
+			got, err := normalizeSMSAddress(tt.to)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
-					t.Fatalf("normalizeRecipientForRegion() error = %v, want %v", err, tt.wantErr)
+					t.Fatalf("normalizeSMSAddress() error = %v, want %v", err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("normalizeRecipientForRegion() error = %v", err)
+				t.Fatalf("normalizeSMSAddress() error = %v", err)
 			}
 			if got != tt.want {
-				t.Fatalf("normalizeRecipientForRegion() = %q, want %q", got, tt.want)
+				t.Fatalf("normalizeSMSAddress() = %q, want %q", got, tt.want)
 			}
 		})
 	}

@@ -3,17 +3,17 @@ module github.com/damonto/sigmo/pro
 go 1.26.3
 
 require (
-	github.com/damonto/euicc-go v1.1.3-0.20260628013808-8d873a2dfc98
+	github.com/damonto/euicc-go v1.1.3-0.20260629074730-8a59598949d5
 	github.com/damonto/sigmo v1.0.6
-	github.com/damonto/ts43-go v0.0.0-20260622030018-3e953eacd018
-	github.com/damonto/uicc-go v0.0.0-20260622025011-5cf36d6c8626
-	github.com/damonto/vowifi-go v0.0.0-20260622030959-6f7e8ee8eb60
+	github.com/damonto/ts43-go v0.0.0-20260629075047-0221e7e08753
+	github.com/damonto/uicc-go v0.0.0-20260629074612-113106cdcc19
+	github.com/damonto/vowifi-go v0.0.0-20260629054946-ce7d54e4d9d2
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.2.1
 	github.com/pion/interceptor v0.1.45
 	github.com/pion/rtp v1.10.2
-	github.com/pion/webrtc/v4 v4.2.15
+	github.com/pion/webrtc/v4 v4.2.16
 	github.com/tetratelabs/wazero v1.12.0
 )
 

@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 
 import { useMessageApi } from '@/apis/message'
 import { formatListTimestamp } from '@/lib/datetime'
-import { formatPhoneDisplay, phoneNumberChars } from '@/lib/phoneNumberInput'
+import { formatPhoneDisplay, normalizeAddressSubmission } from '@/lib/phoneNumberInput'
 import type { MessageResponse } from '@/types/message'
 
 export type ThreadMessageItem = {
@@ -100,7 +100,7 @@ export const useModemMessageThread = ({
     const targetId = modemId.value
     if (!targetId || targetId === 'unknown') return
     const target = isNewConversation.value
-      ? phoneNumberChars(newRecipient.value)
+      ? normalizeAddressSubmission(newRecipient.value)
       : participant.value.trim()
     const text = messageDraft.value.trim()
     if (!target || !text || isSending.value) return

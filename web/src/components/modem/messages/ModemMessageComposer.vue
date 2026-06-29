@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
-import { formatPhoneInput } from '@/lib/phoneNumberInput'
+import { formatAddressInput } from '@/lib/phoneNumberInput'
 
 const message = defineModel<string>('message', { required: true })
 const recipient = defineModel<string>('recipient')
@@ -30,7 +30,7 @@ const isSendDisabled = computed(() => props.isSending || props.isLoading || !has
 
 const updateRecipient = (event: Event) => {
   const target = event.target as HTMLInputElement | null
-  recipient.value = formatPhoneInput(target?.value ?? '', props.defaultCountry)
+  recipient.value = formatAddressInput(target?.value ?? '', props.defaultCountry)
 }
 </script>
 

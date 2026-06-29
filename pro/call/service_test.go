@@ -66,7 +66,9 @@ func TestNormalizeDialString(t *testing.T) {
 		{name: "keeps short code", number: "777", want: "777"},
 		{name: "keeps 011 international access dial string", number: "0118613800138000", want: "0118613800138000"},
 		{name: "keeps formatted 011 international access dial string", number: "011 86 138 0013 8000", want: "0118613800138000"},
+		{name: "keeps double zero international access dial string", number: "0086 138 0013 8000", want: "008613800138000"},
 		{name: "keeps carrier service prefix dial string", number: "12583113788889999", want: "12583113788889999"},
+		{name: "keeps sms service style dial string", number: "10690760295102", want: "10690760295102"},
 		{name: "rejects lone plus", number: "+", wantErr: ErrInvalidNumber},
 		{name: "rejects letters", number: "12583A13788889999", wantErr: ErrInvalidNumber},
 	}
