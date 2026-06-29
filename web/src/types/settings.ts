@@ -16,6 +16,7 @@ export type SettingsChannel = {
   botToken?: string
   recipients?: string[]
   headers?: Record<string, string>
+  format?: string
   smtpHost?: string
   smtpPort?: number
   smtpUsername?: string

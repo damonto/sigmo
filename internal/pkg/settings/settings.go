@@ -34,6 +34,7 @@ type Channel struct {
 
 	// HTTP
 	Headers map[string]string `json:"headers,omitempty"`
+	Format  string            `json:"format,omitempty"`
 
 	// Email
 	SMTPHost     string `json:"smtpHost,omitempty"`

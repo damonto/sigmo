@@ -140,6 +140,16 @@ const en = {
             label: 'Headers',
             description: 'Optional HTTP headers.',
           },
+          format: {
+            label: 'Message format',
+            description:
+              'Default sends the raw JSON event; Feishu or WeCom sends the matching text message format.',
+            options: {
+              raw: 'Default (raw JSON)',
+              feishu: 'Feishu',
+              wecom: 'WeCom',
+            },
+          },
         },
         email: {
           label: 'Email',

@@ -213,6 +213,7 @@ func filterChannelValue(name string, channel ChannelValues) ChannelValues {
 	case "http":
 		values.Endpoint = channel.Endpoint
 		values.Headers = channel.Headers
+		values.Format = channel.Format
 	case "email":
 		values.SMTPHost = channel.SMTPHost
 		values.SMTPPort = channel.SMTPPort
@@ -247,6 +248,7 @@ func channelSettingsFromValues(name string, channel ChannelValues) appsettings.C
 	case "http":
 		normalized.Endpoint = channel.Endpoint
 		normalized.Headers = normalizeHeaders(channel.Headers)
+		normalized.Format = channel.Format
 	case "email":
 		normalized.SMTPHost = channel.SMTPHost
 		normalized.SMTPPort = channel.SMTPPort
@@ -290,6 +292,7 @@ func channelSettingsValues(name string, channel appsettings.Channel) ChannelValu
 	case "http":
 		values.Endpoint = channel.Endpoint
 		values.Headers = cloneHeaders(channel.Headers)
+		values.Format = channel.Format
 	case "email":
 		values.SMTPHost = channel.SMTPHost
 		values.SMTPPort = channel.SMTPPort

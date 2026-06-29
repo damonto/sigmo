@@ -32,6 +32,7 @@ type ChannelValues struct {
 	Recipients []string `json:"recipients,omitempty" validate:"omitempty,dive,required"`
 
 	Headers map[string]string `json:"headers,omitempty" validate:"omitempty,dive,keys,required,endkeys"`
+	Format  string            `json:"format,omitempty" validate:"omitempty,oneof=raw feishu wecom"`
 
 	SMTPHost     string `json:"smtpHost,omitempty"`
 	SMTPPort     int    `json:"smtpPort,omitempty" validate:"omitempty,gte=1,lte=65535"`

@@ -140,6 +140,15 @@ const zh = {
             label: 'Headers',
             description: '可选 HTTP 请求头。',
           },
+          format: {
+            label: '消息格式',
+            description: '默认发送原始 JSON 事件；选择飞书或企业微信将发送对应的文本消息格式。',
+            options: {
+              raw: '默认（原始 JSON）',
+              feishu: '飞书',
+              wecom: '企业微信',
+            },
+          },
         },
         email: {
           label: 'Email',

@@ -83,6 +83,11 @@ func settingsSchema() Schema {
 						Description: "settings.schema.channels.http.headers.description",
 						Control:     controlKeyValue,
 					},
+					selectField("format", "settings.schema.channels.http.format.label", "settings.schema.channels.http.format.description", false, []Option{
+						{Label: "settings.schema.channels.http.format.options.raw", Value: "raw"},
+						{Label: "settings.schema.channels.http.format.options.feishu", Value: "feishu"},
+						{Label: "settings.schema.channels.http.format.options.wecom", Value: "wecom"},
+					}),
 				},
 			},
 			{
