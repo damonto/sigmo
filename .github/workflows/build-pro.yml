@@ -48,9 +48,10 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - { name: linux-amd64 }
-          - { name: linux-arm64 }
-          - { name: linux-arm64-musl }
+          - { name: linux-amd64, arch: amd64, musl: false }
+          - { name: linux-arm64, arch: arm64, musl: false }
+          - { name: linux-arm64-musl, arch: arm64, musl: true }
+          - { name: linux-amd64-musl, arch: amd64, musl: true }
 
     steps:
       - name: Checkout code
@@ -79,6 +80,8 @@ jobs:
           SIGMO_BUILD_DIR: build/pro
           SIGMO_PRO_MANIFEST: build/pro/manifests/${{ matrix.target.name }}.tsv
           SIGMO_PRO_TARGETS: ${{ matrix.target.name }}
+          SIGMO_PRO_TARGET_ARCH: ${{ matrix.target.arch }}
+          SIGMO_PRO_TARGET_MUSL: ${{ matrix.target.musl }}
           SIGMO_SKIP_FRONTEND_BUILD: "1"
         run: |
           set -euo pipefail

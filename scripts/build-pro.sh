@@ -14,8 +14,6 @@ GOPRIVATE_PATTERN="${GOPRIVATE:-${PRO_GOPRIVATE}}"
 PRO_TARGETS="${SIGMO_PRO_TARGETS:-linux-amd64 linux-arm64 linux-arm64-musl}"
 TGID_DIGITS=16
 TGID_PLACEHOLDER="TGID-XXXXXXXXXXXXXXXXX"
-MUSL_ARM64_LIBC="libc.musl-aarch64.so.1"
-MUSL_ARM64_INTERPRETER="/lib/ld-musl-aarch64.so.1"
 
 case "${OUTPUT_DIR}" in
 	/*)
@@ -37,6 +35,7 @@ esac
 cleanup_files=()
 cleanup_dirs=()
 musl_modfile=""
+musl_modfile_key=""
 built_base_binary=""
 
 cleanup() {
@@ -204,19 +203,93 @@ root_path() {
 	esac
 }
 
-prepare_arm64_musl_modfile() {
+musl_interpreter() {
+	local goarch="$1"
+
+	case "${goarch}" in
+		amd64)
+			printf '%s\n' "/lib/ld-musl-x86_64.so.1"
+			;;
+		arm64)
+			printf '%s\n' "/lib/ld-musl-aarch64.so.1"
+			;;
+		*)
+			echo "unsupported musl interpreter for GOARCH: ${goarch}" >&2
+			return 1
+			;;
+	esac
+}
+
+target_arch() {
+	local name="$1"
+
+	if [ -n "${SIGMO_PRO_TARGET_ARCH:-}" ]; then
+		printf '%s\n' "${SIGMO_PRO_TARGET_ARCH}"
+		return
+	fi
+
+	case "${name}" in
+		linux-amd64)
+			printf '%s\n' "amd64"
+			;;
+		linux-arm64 | linux-arm64-musl)
+			printf '%s\n' "arm64"
+			;;
+		*)
+			echo "unknown Pro target: ${name}" >&2
+			return 1
+			;;
+	esac
+}
+
+target_musl() {
+	local name="$1"
+
+	case "${SIGMO_PRO_TARGET_MUSL:-}" in
+		1 | true | TRUE | yes | YES)
+			printf '%s\n' "1"
+			return
+			;;
+		0 | false | FALSE | no | NO)
+			printf '%s\n' "0"
+			return
+			;;
+		"")
+			;;
+		*)
+			echo "invalid SIGMO_PRO_TARGET_MUSL: ${SIGMO_PRO_TARGET_MUSL}" >&2
+			return 1
+			;;
+	esac
+
+	case "${name}" in
+		*-musl)
+			printf '%s\n' "1"
+			;;
+		*)
+			printf '%s\n' "0"
+			;;
+	esac
+}
+
+prepare_musl_modfile() {
+	local name="$1"
+	local goarch="$2"
+	local key
 	local source_modfile
 	local source_sumfile
 	local purego_tmp
 	local purego_dir
 
-	if [ -n "${musl_modfile}" ]; then
+	key="${name}-${goarch}"
+	if [ "${musl_modfile_key}" = "${key}" ]; then
 		return
 	fi
 
 	source_modfile="$(root_path "${PRO_MODFILE}")"
 	source_sumfile="$(root_path "${PRO_SUMFILE}")"
-	musl_modfile="${OUTPUT_DIR_ABS}/go.linux-arm64-musl.mod"
+	musl_modfile="${OUTPUT_DIR_ABS}/go.${name}.mod"
+	musl_modfile_key="${key}"
 
 	(cd "${PRO_DIR}" && go mod download)
 
@@ -229,8 +302,7 @@ prepare_arm64_musl_modfile() {
 	copy_sumfile "${source_sumfile}" "${musl_modfile%.mod}.sum"
 	go mod edit -modfile="${musl_modfile}" -replace=github.com/ebitengine/purego="${purego_tmp}/purego"
 
-	TARGETARCH=arm64 PUREGO_MUSL_LIBC="${MUSL_ARM64_LIBC}" \
-		"${ROOT_DIR}/scripts/patch-purego-musl.sh" "${musl_modfile}"
+	TARGETARCH="${goarch}" "${ROOT_DIR}/scripts/patch-purego-musl.sh" "${musl_modfile}"
 }
 
 package_target() {
@@ -349,6 +421,7 @@ build_target_base() {
 	local binary
 	local build_binary
 	local ldflags
+	local interpreter
 	local go_args=()
 
 	binary="${OUTPUT_DIR}/targets/sigmo-pro-${name}"
@@ -357,8 +430,9 @@ build_target_base() {
 	ldflags="-w -s -X main.BuildVersion=${base_version}-${TGID_PLACEHOLDER}"
 
 	if [ "${musl}" = "1" ]; then
-		prepare_arm64_musl_modfile
-		ldflags="-I ${MUSL_ARM64_INTERPRETER} ${ldflags}"
+		interpreter="$(musl_interpreter "${goarch}")"
+		prepare_musl_modfile "${name}" "${goarch}"
+		ldflags="-I ${interpreter} ${ldflags}"
 		go_args+=(-a)
 		go_args+=(-modfile="${musl_modfile}")
 	fi
@@ -379,22 +453,12 @@ build_target_base() {
 build_named_target_base() {
 	local name="$1"
 	local base_version="$2"
+	local goarch
+	local musl
 
-	case "${name}" in
-		linux-amd64)
-			build_target_base "${name}" "${base_version}" "amd64"
-			;;
-		linux-arm64)
-			build_target_base "${name}" "${base_version}" "arm64"
-			;;
-		linux-arm64-musl)
-			build_target_base "${name}" "${base_version}" "arm64" "1"
-			;;
-		*)
-			echo "unknown Pro target: ${name}" >&2
-			return 1
-			;;
-	esac
+	goarch="$(target_arch "${name}")"
+	musl="$(target_musl "${name}")"
+	build_target_base "${name}" "${base_version}" "${goarch}" "${musl}"
 }
 
 package_recipient_target() {
