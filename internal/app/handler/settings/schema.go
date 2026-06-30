@@ -72,6 +72,22 @@ func settingsSchema() Schema {
 				},
 			},
 			{
+				Key:         "lark",
+				Label:       "settings.schema.channels.lark.label",
+				Description: "settings.schema.channels.lark.description",
+				Fields: []Field{
+					textField("endpoint", "settings.schema.channels.lark.endpoint.label", "settings.schema.channels.lark.endpoint.description", "settings.schema.channels.lark.endpoint.placeholder", true),
+				},
+			},
+			{
+				Key:         "wecom",
+				Label:       "settings.schema.channels.wecom.label",
+				Description: "settings.schema.channels.wecom.description",
+				Fields: []Field{
+					textField("endpoint", "settings.schema.channels.wecom.endpoint.label", "settings.schema.channels.wecom.endpoint.description", "settings.schema.channels.wecom.endpoint.placeholder", true),
+				},
+			},
+			{
 				Key:         "http",
 				Label:       "settings.schema.channels.http.label",
 				Description: "settings.schema.channels.http.description",

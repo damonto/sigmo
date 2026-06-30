@@ -128,6 +128,24 @@ const en = {
             placeholder: 'https://uid.push.ft07.com/send/key.send',
           },
         },
+        lark: {
+          label: 'Lark',
+          description: 'Send notifications to a Lark custom bot.',
+          endpoint: {
+            label: 'Webhook',
+            description: 'Lark custom bot webhook URL.',
+            placeholder: 'https://open.feishu.cn/open-apis/bot/v2/hook/xxxx',
+          },
+        },
+        wecom: {
+          label: 'WeCom',
+          description: 'Send notifications to a WeCom group bot.',
+          endpoint: {
+            label: 'Webhook',
+            description: 'WeCom group bot webhook URL.',
+            placeholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx',
+          },
+        },
         http: {
           label: 'HTTP webhook',
           description: 'POST notification events to a custom webhook.',

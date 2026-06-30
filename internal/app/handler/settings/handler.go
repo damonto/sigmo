@@ -210,6 +210,10 @@ func filterChannelValue(name string, channel ChannelValues) ChannelValues {
 		values.Priority = channel.Priority
 	case "sc3":
 		values.Endpoint = channel.Endpoint
+	case "lark":
+		values.Endpoint = channel.Endpoint
+	case "wecom":
+		values.Endpoint = channel.Endpoint
 	case "http":
 		values.Endpoint = channel.Endpoint
 		values.Headers = channel.Headers
@@ -243,6 +247,10 @@ func channelSettingsFromValues(name string, channel ChannelValues) appsettings.C
 		normalized.Recipients = normalizeRecipients(channel.Recipients)
 		normalized.Priority = channel.Priority
 	case "sc3":
+		normalized.Endpoint = channel.Endpoint
+	case "lark":
+		normalized.Endpoint = channel.Endpoint
+	case "wecom":
 		normalized.Endpoint = channel.Endpoint
 	case "http":
 		normalized.Endpoint = channel.Endpoint
@@ -286,6 +294,10 @@ func channelSettingsValues(name string, channel appsettings.Channel) ChannelValu
 		values.Recipients = channel.Recipients.Strings()
 		values.Priority = channel.Priority
 	case "sc3":
+		values.Endpoint = channel.Endpoint
+	case "lark":
+		values.Endpoint = channel.Endpoint
+	case "wecom":
 		values.Endpoint = channel.Endpoint
 	case "http":
 		values.Endpoint = channel.Endpoint

@@ -128,6 +128,24 @@ const zh = {
             placeholder: 'https://uid.push.ft07.com/send/key.send',
           },
         },
+        lark: {
+          label: 'Lark',
+          description: '发送通知到飞书自定义机器人。',
+          endpoint: {
+            label: 'Webhook',
+            description: '飞书自定义机器人的 Webhook 地址。',
+            placeholder: 'https://open.feishu.cn/open-apis/bot/v2/hook/xxxx',
+          },
+        },
+        wecom: {
+          label: 'WeCom',
+          description: '发送通知到企业微信群机器人。',
+          endpoint: {
+            label: 'Webhook',
+            description: '企业微信群机器人的 Webhook 地址。',
+            placeholder: 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx',
+          },
+        },
         http: {
           label: 'HTTP Webhook',
           description: '将通知事件 POST 到自定义 webhook。',
