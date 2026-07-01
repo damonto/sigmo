@@ -7,7 +7,7 @@ require (
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260629075047-0221e7e08753
 	github.com/damonto/uicc-go v0.0.0-20260629074612-113106cdcc19
-	github.com/damonto/vowifi-go v0.0.0-20260629054946-ce7d54e4d9d2
+	github.com/damonto/vowifi-go v0.0.0-20260701134824-7cdc8fb7dc1c
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.2.1
@@ -36,7 +36,7 @@ require (
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.1.0 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtcp v1.2.16 // indirect
+	github.com/pion/rtcp v1.2.17 // indirect
 	github.com/pion/sctp v1.10.3 // indirect
 	github.com/pion/sdp/v3 v3.0.19 // indirect
 	github.com/pion/srtp/v3 v3.0.12 // indirect

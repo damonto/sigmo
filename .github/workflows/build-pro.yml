@@ -51,7 +51,7 @@ jobs:
           - { name: linux-amd64, arch: amd64, musl: false }
           - { name: linux-arm64, arch: arm64, musl: false }
           - { name: linux-arm64-musl, arch: arm64, musl: true }
-          - { name: linux-amd64-musl, arch: amd64, musl: true }
+          # - { name: linux-amd64-musl, arch: amd64, musl: true }
 
     steps:
       - name: Checkout code
