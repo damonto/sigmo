@@ -1,6 +1,6 @@
 # Sigmo Pro
 
-Sigmo Pro is proprietary software. See [LICENSE](LICENSE) and
+Sigmo Pro is released under the GNU Affero General Public License v3.0. See [LICENSE](LICENSE) and
 [../NOTICE](../NOTICE).
 
 Sigmo Pro is the nested Go module for features that should not affect the public
@@ -94,8 +94,4 @@ credentials are not exposed.
 
 ## License
 
-Copyright (c) 2025 Damon. All rights reserved.
-
-No license is granted to copy, modify, distribute, sublicense, publish, or use
-the contents of this directory, except with prior written permission from Damon
-To.
+Sigmo Pro is released under the [GNU Affero General Public License v3.0](LICENSE).
