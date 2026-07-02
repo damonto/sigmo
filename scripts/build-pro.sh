@@ -13,7 +13,7 @@ MANIFEST="${SIGMO_PRO_MANIFEST:-${OUTPUT_DIR}/artifacts.tsv}"
 GOPRIVATE_PATTERN="${GOPRIVATE:-${PRO_GOPRIVATE}}"
 PRO_TARGETS="${SIGMO_PRO_TARGETS:-linux-amd64 linux-arm64 linux-arm64-musl}"
 TGID_DIGITS=16
-TGID_PLACEHOLDER="TGID-XXXXXXXXXXXXXXXXX"
+TGID_PLACEHOLDER="XXXXXXXXXXXXXXXXX"
 
 case "${OUTPUT_DIR}" in
 	/*)
@@ -340,12 +340,11 @@ tgid_watermark() {
 	local chat_id="$1"
 	local digits
 	local padded
-	local sign="P"
 
 	digits="${chat_id}"
 	if [[ "${digits}" == -* ]]; then
-		sign="N"
-		digits="${digits#-}"
+		echo "Telegram chat id must be non-negative to watermark: ${chat_id}" >&2
+		return 1
 	fi
 	if [ "${#digits}" -gt "${TGID_DIGITS}" ]; then
 		echo "Telegram chat id is too long to watermark: ${chat_id}" >&2
@@ -354,7 +353,7 @@ tgid_watermark() {
 
 	printf -v padded "%${TGID_DIGITS}s" "${digits}"
 	padded="${padded// /0}"
-	printf 'TGID-%s%s\n' "${sign}" "${padded}"
+	printf 'T%s\n' "${padded}"
 }
 
 patch_tgid() {
@@ -410,7 +409,7 @@ recipient_dir_for_chat() {
 	local safe_chat_id
 
 	safe_chat_id="${chat_id//-/_}"
-	printf '%s/TGID-%s\n' "${OUTPUT_DIR}" "${safe_chat_id}"
+	printf '%s/%s\n' "${OUTPUT_DIR}" "${safe_chat_id}"
 }
 
 build_target_base() {
