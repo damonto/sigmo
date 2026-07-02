@@ -93,7 +93,7 @@ jobs:
         with:
           name: sigmo-pro-${{ matrix.target.name }}
           path: |
-            build/pro/TGID-*/sigmo-pro-${{ matrix.target.name }}.tar.gz
+            build/pro/*/sigmo-pro-${{ matrix.target.name }}.tar.gz
             build/pro/manifests/${{ matrix.target.name }}.tsv
           if-no-files-found: error
           retention-days: 1
