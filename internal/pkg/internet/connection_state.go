@@ -34,6 +34,10 @@ type dbConnectionState struct {
 	store *storage.Store
 }
 
+type proxyStateEntry struct {
+	Modem string `json:"modem,omitempty"`
+}
+
 func (s dbConnectionState) saveProxyStateForModem(ctx context.Context, modemID string, interfaceName string) error {
 	modemID = strings.TrimSpace(modemID)
 	interfaceName = strings.TrimSpace(interfaceName)
