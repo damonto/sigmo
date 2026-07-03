@@ -52,7 +52,7 @@ type transferRunner struct {
 	store         *settings.Store
 	registry      *mmodem.Registry
 	enableProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
-	deleteProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
+	deleteProfile func(*mmodem.Modem, string, sgp22.ICCID) error
 	websheets     *websheet.Broker
 }
 

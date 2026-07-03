@@ -333,7 +333,7 @@ func (s *transferRunner) deleteModemProfile(ctx context.Context, modem *mmodem.M
 	if s.deleteProfile == nil {
 		return errors.New("delete profile dependency is missing")
 	}
-	return s.deleteProfile(ctx, modem, seID, iccid)
+	return s.deleteProfile(modem, seID, iccid)
 }
 
 func deleteCCIDSourceProfile(currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {

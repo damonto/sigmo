@@ -222,7 +222,7 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 				return
 			}
-			c.forwardSMSReport(ctx, modem.EquipmentIdentifier, profileID, report)
+			c.forwardSMSReport(modem.EquipmentIdentifier, profileID, report)
 		case incoming, ok := <-voiceEvents.Incoming:
 			if !ok {
 				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)

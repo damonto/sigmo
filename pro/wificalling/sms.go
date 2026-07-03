@@ -137,8 +137,7 @@ func (c *coordinator) trackOutgoingSMSSubmission(msg storage.Message, submission
 	return tracker.current
 }
 
-func (c *coordinator) forwardSMSReport(ctx context.Context, modemID string, profileID string, report vowifi.SMSReport) {
-	_ = ctx
+func (c *coordinator) forwardSMSReport(modemID string, profileID string, report vowifi.SMSReport) {
 	slog.Info("Wi-Fi Calling SMS report",
 		"imei", modemID,
 		"profile_id", profileID,

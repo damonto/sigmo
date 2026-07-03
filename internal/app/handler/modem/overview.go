@@ -248,7 +248,7 @@ func (c *catalog) applyOverviewExtensions(ctx context.Context, device *mmodem.Mo
 }
 
 func supportsEsim(ctx context.Context, m *mmodem.Modem, currentSettings *settings.Settings) (bool, error) {
-	supported, err := mmodem.SupportsEUICC(ctx, m)
+	supported, err := mmodem.SupportsEUICC(m)
 	if err != nil {
 		return false, err
 	}

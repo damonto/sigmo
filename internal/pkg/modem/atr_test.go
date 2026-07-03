@@ -122,7 +122,7 @@ func TestSupportsEUICCUsesCachedATR(t *testing.T) {
 				Device:   "/dev/cdc-wdm0",
 			})
 			modem.Sim = &SIM{ATR: tt.atr}
-			got, err := SupportsEUICC(context.Background(), modem)
+			got, err := SupportsEUICC(modem)
 			if err != nil {
 				t.Fatalf("SupportsEUICC() error = %v", err)
 			}
@@ -361,7 +361,7 @@ func TestSupportsEUICCDoesNotProbeATOrUnknown(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			failOnATRTransports(t)
-			got, err := SupportsEUICC(context.Background(), tt.modem)
+			got, err := SupportsEUICC(tt.modem)
 			if err != nil {
 				t.Fatalf("SupportsEUICC() error = %v", err)
 			}

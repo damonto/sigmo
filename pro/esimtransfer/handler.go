@@ -54,10 +54,7 @@ func RegisterRoutes(group *echo.Group, cfg Config) {
 
 func ConfigFromCore(core *coreesim.Handler, cfg Config) Config {
 	cfg.EnableProfile = core.EnableProfile
-	cfg.DeleteProfile = func(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
-		_ = ctx
-		return core.DeleteProfile(modem, seID, iccid)
-	}
+	cfg.DeleteProfile = core.DeleteProfile
 	return cfg
 }
 
@@ -132,8 +129,7 @@ func profileActionConfig(core *coreesim.Handler, cfg Config) (Config, error) {
 		}
 		return nil
 	}
-	cfg.DeleteProfile = func(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
-		_ = ctx
+	cfg.DeleteProfile = func(modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
 		if err := core.DeleteProfile(modem, seID, iccid); err != nil {
 			return fmt.Errorf("delete profile: %w", err)
 		}
