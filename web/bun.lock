@@ -35,7 +35,7 @@
         "@vitejs/plugin-vue-jsx": "^5.1.5",
         "@vitest/eslint-plugin": "^1.6.20",
         "@vue/eslint-config-prettier": "^10.2.0",
-        "@vue/eslint-config-typescript": "^14.8.0",
+        "@vue/eslint-config-typescript": "^14.9.0",
         "@vue/test-utils": "^2.4.11",
         "@vue/tsconfig": "^0.9.1",
         "eslint": "^10.4.1",
@@ -549,7 +549,7 @@
 
     "@vue/eslint-config-prettier": ["@vue/eslint-config-prettier@10.2.0", "", { "dependencies": { "eslint-config-prettier": "^10.0.1", "eslint-plugin-prettier": "^5.2.2" }, "peerDependencies": { "eslint": ">= 8.21.0", "prettier": ">= 3.0.0" } }, "sha512-GL3YBLwv/+b86yHcNNfPJxOTtVFJ4Mbc9UU3zR+KVoG7SwGTjPT+32fXamscNumElhcpXW3mT0DgzS9w32S7Bw=="],
 
-    "@vue/eslint-config-typescript": ["@vue/eslint-config-typescript@14.8.0", "", { "dependencies": { "@typescript-eslint/utils": "^8.60.0", "fast-glob": "^3.3.3", "typescript-eslint": "^8.60.0", "vue-eslint-parser": "^10.4.0" }, "peerDependencies": { "eslint": "^9.10.0 || ^10.0.0", "eslint-plugin-vue": "^9.28.0 || ^10.0.0", "typescript": ">=4.8.4" }, "optionalPeers": ["typescript"] }, "sha512-yIquzhXH7ZsrwSSm+rYvoGCRY6wcuF4qBi76e0l7hHLq7YU0f9aC+RcR5fL+XJNfmBZxgX5cVl4sppt4x7ZCBg=="],
+    "@vue/eslint-config-typescript": ["@vue/eslint-config-typescript@14.9.0", "", { "dependencies": { "@typescript-eslint/utils": "^8.60.0", "fast-glob": "^3.3.3", "typescript-eslint": "^8.60.0", "vue-eslint-parser": "^10.4.0" }, "peerDependencies": { "eslint": "^9.10.0 || ^10.0.0", "eslint-plugin-vue": "^9.28.0 || ^10.0.0", "typescript": ">=4.8.4" }, "optionalPeers": ["typescript"], "bin": { "vue-eslint-config-typescript": "./dist/bin.js" } }, "sha512-E3j9hDlfVf10F30MRcLTPY2IIhWIx1nsvkVukk14kTcuA+oBVot9zsP1hzsO+PAMDxV3Fd9FimBJtUBNBL5KFA=="],
 
     "@vue/language-core": ["@vue/language-core@3.3.5", "", { "dependencies": { "@volar/language-core": "2.4.28", "@vue/compiler-dom": "^3.5.0", "@vue/shared": "^3.5.0", "alien-signals": "^3.2.0", "muggle-string": "^0.4.1", "path-browserify": "^1.0.1", "picomatch": "^4.0.4" } }, "sha512-UkKu5nhX89fg4VhlG/FOeI10G3cj/7radKT/cy9BT4Q9qJmJlSTAc/dP63Xqs29aypN4f39xUV6PsLNk/dcD6g=="],
 
