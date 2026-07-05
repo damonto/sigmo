@@ -24,9 +24,7 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - { arch: 386, name: linux-i386 }
           - { arch: amd64, name: linux-amd64 }
-          - { arch: arm, arm: 7, name: linux-armhf }
           - { arch: arm64, name: linux-arm64 }
           - { arch: riscv64, name: linux-riscv64 }
 

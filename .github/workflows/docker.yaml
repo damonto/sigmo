@@ -17,10 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - linux/386
           - linux/amd64
-          - linux/arm/v6
-          - linux/arm/v7
           - linux/arm64
     steps:
       - name: Checkout code
