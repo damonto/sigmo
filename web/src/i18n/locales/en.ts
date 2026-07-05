@@ -243,6 +243,15 @@ const en = {
       switchSuccess: 'Switched to {sim}.',
       switchSuccessFallback: 'SIM slot switched.',
     },
+    simApplication: {
+      title: 'SIM Application',
+      messageTitle: 'Message',
+      inputTitle: 'Input',
+      confirmTitle: 'Confirm',
+      errorTitle: 'SIM Application stopped',
+      yes: 'Yes',
+      no: 'No',
+    },
     unlock: {
       title: 'SIM PIN required',
       description: 'This modem is locked by {lock}.',

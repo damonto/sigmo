@@ -2,7 +2,11 @@
 
 package call
 
-import "sync"
+import (
+	"maps"
+	"slices"
+	"sync"
+)
 
 type callEvents struct {
 	mu          sync.Mutex
@@ -33,10 +37,7 @@ func (e *callEvents) Subscribe(buffer int) (<-chan Event, func()) {
 
 func (e *callEvents) publish(event Event) {
 	e.mu.Lock()
-	subscribers := make([]chan Event, 0, len(e.subscribers))
-	for _, ch := range e.subscribers {
-		subscribers = append(subscribers, ch)
-	}
+	subscribers := slices.Collect(maps.Values(e.subscribers))
 	e.mu.Unlock()
 	for _, ch := range subscribers {
 		select {

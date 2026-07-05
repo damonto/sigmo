@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -472,10 +474,7 @@ func closeSession(session *sessionState, wait bool) {
 
 func (c *coordinator) stopAll() {
 	c.mu.Lock()
-	ids := make([]string, 0, len(c.sessions))
-	for modemID := range c.sessions {
-		ids = append(ids, modemID)
-	}
+	ids := slices.Collect(maps.Keys(c.sessions))
 	c.mu.Unlock()
 	for _, modemID := range ids {
 		c.stop(modemID)

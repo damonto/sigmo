@@ -54,6 +54,8 @@ const props = withDefaults(
     wifiCallingEnabled?: boolean
     wifiCallingConnected?: boolean
     wifiCallingBusy?: boolean
+    simApplicationAvailable?: boolean
+    simApplicationProfileIccid?: string
   }>(),
   {
     loading: false,
@@ -63,6 +65,8 @@ const props = withDefaults(
     wifiCallingEnabled: false,
     wifiCallingConnected: false,
     wifiCallingBusy: false,
+    simApplicationAvailable: false,
+    simApplicationProfileIccid: '',
   },
 )
 const emit = defineEmits<{
@@ -71,6 +75,7 @@ const emit = defineEmits<{
   (event: 'toggle-wifi-calling', profile: EsimProfile, nextValue: boolean): void
   (event: 'edit-phone-number', profile: EsimProfile): void
   (event: 'profile-actions-open-change', profile: EsimProfile, open: boolean): void
+  (event: 'open-sim-application', profile: EsimProfile): void
 }>()
 
 const { t } = useI18n()
@@ -269,6 +274,19 @@ const handlePhoneNumberClick = (profile: EsimProfile) => {
   emit('edit-phone-number', profile)
 }
 
+const isProfileSimApplicationAvailable = (profile: EsimProfile) => {
+  return (
+    props.simApplicationAvailable &&
+    profile.enabled &&
+    profile.iccid === props.simApplicationProfileIccid
+  )
+}
+
+const handleSimApplicationClick = (profile: EsimProfile) => {
+  if (!isProfileSimApplicationAvailable(profile)) return
+  emit('open-sim-application', profile)
+}
+
 const handleProfileActionsOpenChange = (profile: EsimProfile, open: boolean) => {
   emit('profile-actions-open-change', profile, open)
 }
@@ -421,6 +439,13 @@ watch(detailsOpen, (value) => {
                   <DropdownMenuSeparator v-if="props.wifiCallingAvailable" />
                   <DropdownMenuItem @click="handlePhoneNumberClick(profile)">
                     {{ t('modemDetail.settings.msisdnTitle') }}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator v-if="isProfileSimApplicationAvailable(profile)" />
+                  <DropdownMenuItem
+                    v-if="isProfileSimApplicationAvailable(profile)"
+                    @click="handleSimApplicationClick(profile)"
+                  >
+                    {{ t('modemDetail.simApplication.title') }}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                 </template>

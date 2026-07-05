@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -155,10 +157,7 @@ func (r *Relay) removeModem(path dbus.ObjectPath) {
 
 func (r *Relay) stopAll() {
 	r.mu.Lock()
-	cancels := make([]context.CancelFunc, 0, len(r.cancels))
-	for _, cancel := range r.cancels {
-		cancels = append(cancels, cancel)
-	}
+	cancels := slices.Collect(maps.Values(r.cancels))
 	r.cancels = make(map[dbus.ObjectPath]context.CancelFunc)
 	r.equipment = make(map[string]dbus.ObjectPath)
 	r.modems = make(map[dbus.ObjectPath]string)

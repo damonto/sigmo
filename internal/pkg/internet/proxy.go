@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -395,10 +397,7 @@ func (p *Proxy) takeUserSessionsLocked(username string) []proxySession {
 	if len(sessions) == 0 {
 		return nil
 	}
-	result := make([]proxySession, 0, len(sessions))
-	for session := range sessions {
-		result = append(result, session)
-	}
+	result := slices.Collect(maps.Keys(sessions))
 	delete(p.sessions, username)
 	return result
 }
@@ -406,9 +405,7 @@ func (p *Proxy) takeUserSessionsLocked(username string) []proxySession {
 func (p *Proxy) takeAllSessionsLocked() []proxySession {
 	var result []proxySession
 	for _, sessions := range p.sessions {
-		for session := range sessions {
-			result = append(result, session)
-		}
+		result = append(result, slices.Collect(maps.Keys(sessions))...)
 	}
 	p.sessions = make(map[string]map[proxySession]struct{})
 	return result

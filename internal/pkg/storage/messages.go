@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -138,10 +139,7 @@ func (s *Store) ListConversations(ctx context.Context, profileID string, query s
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
-	messages := make([]Message, 0, len(latest))
-	for _, msg := range latest {
-		messages = append(messages, msg)
-	}
+	messages := slices.Collect(maps.Values(latest))
 	slices.SortFunc(messages, func(a, b Message) int {
 		if a.Timestamp.Equal(b.Timestamp) {
 			return int(b.ID - a.ID)

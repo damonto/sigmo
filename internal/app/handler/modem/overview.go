@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 
@@ -34,11 +35,19 @@ func (c *catalog) List(ctx context.Context) ([]*ModemResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list modems: %w", err)
 	}
-	response := make([]*ModemResponse, 0, len(modems))
-	for _, device := range modems {
+	return c.buildListResponse(ctx, slices.Collect(maps.Values(modems)))
+}
+
+func (c *catalog) buildListResponse(ctx context.Context, devices []*mmodem.Modem) ([]*ModemResponse, error) {
+	response := make([]*ModemResponse, 0, len(devices))
+	for _, device := range devices {
 		modemResp, err := c.buildResponse(ctx, device)
 		if err != nil {
-			return nil, err
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			slog.Warn("skip modem overview", "imei", device.EquipmentIdentifier, "path", device.Path(), "error", err)
+			continue
 		}
 		response = append(response, modemResp)
 	}

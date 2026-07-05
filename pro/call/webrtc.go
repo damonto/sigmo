@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -204,10 +206,7 @@ func (m *Media) Close(ctx context.Context) error {
 	}
 	m.bridgeMu.Lock()
 	m.closing = true
-	bridges := make([]*webRTCBridge, 0, len(m.bridges))
-	for bridge := range m.bridges {
-		bridges = append(bridges, bridge)
-	}
+	bridges := slices.Collect(maps.Keys(m.bridges))
 	m.bridgeMu.Unlock()
 
 	for _, bridge := range bridges {

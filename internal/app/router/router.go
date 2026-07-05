@@ -20,6 +20,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/handler/network"
 	"github.com/damonto/sigmo/internal/app/handler/notification"
 	hsettings "github.com/damonto/sigmo/internal/app/handler/settings"
+	"github.com/damonto/sigmo/internal/app/handler/simapp"
 	"github.com/damonto/sigmo/internal/app/handler/ussd"
 	appmiddleware "github.com/damonto/sigmo/internal/app/middleware"
 	"github.com/damonto/sigmo/internal/app/modemstatus"
@@ -90,6 +91,11 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		protected.PUT("/modems/:id/msisdn", h.UpdateMSISDN)
 		protected.GET("/modems/:id/settings", h.Settings)
 		protected.PUT("/modems/:id/settings", h.UpdateSettings)
+
+		{
+			h := simapp.New(deps.Registry)
+			protected.GET("/modems/:id/sim-application/sessions", h.Session)
+		}
 
 		{
 			h := message.New(deps.Registry, deps.Storage, deps.MessageRoute)

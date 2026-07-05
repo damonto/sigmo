@@ -111,10 +111,10 @@ const normalizedDigits = computed(() => dialStringChars(digits.value))
 const canDial = computed(() => isCallableDialString(normalizedDigits.value) && !isDialing.value)
 const dialInputClass = computed(() => {
   const length = normalizedDigits.value.length
-  if (length > 20) return 'text-base'
-  if (length > 15) return 'text-lg'
-  if (length > 10) return 'text-xl'
-  return 'text-2xl'
+  if (length > 20) return 'text-lg'
+  if (length > 15) return 'text-xl'
+  if (length > 10) return 'text-2xl'
+  return 'text-3xl'
 })
 
 const isUssd = (value: string) => isDialServiceCode(value)

@@ -243,6 +243,15 @@ const zh = {
       switchSuccess: '已切换至 {sim}。',
       switchSuccessFallback: '已切换 SIM 卡槽。',
     },
+    simApplication: {
+      title: 'SIM Application',
+      messageTitle: '消息',
+      inputTitle: '输入',
+      confirmTitle: '确认',
+      errorTitle: 'SIM Application 已停止',
+      yes: '是',
+      no: '否',
+    },
     unlock: {
       title: '需要 SIM PIN',
       description: '当前 Modem 被 {lock} 锁定。',

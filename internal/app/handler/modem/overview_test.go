@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,6 +12,64 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
+
+func TestCatalogBuildListResponseSkipsBrokenModems(t *testing.T) {
+	euiccATR := []byte{0x3B, 0x9F, 0x96, 0x80, 0x3F, 0xC7, 0x82, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x15, 0x57, 0x65, 0x73, 0x74, 0x6B, 0x2E, 0x6D, 0x65, 0x63}
+	tests := []struct {
+		name    string
+		devices []*mmodem.Modem
+		wantIDs []string
+	}{
+		{
+			name: "skips enabled modem without primary SIM",
+			devices: []*mmodem.Modem{
+				{
+					EquipmentIdentifier: "bad-modem",
+					Model:               "No SIM",
+					State:               mmodem.ModemStateEnabled,
+				},
+				{
+					EquipmentIdentifier: "good-modem",
+					Model:               "Locked",
+					State:               mmodem.ModemStateLocked,
+					UnlockRequired:      mmodem.ModemLockSimPin,
+					Sim:                 &mmodem.SIM{ATR: euiccATR},
+				},
+			},
+			wantIDs: []string{"good-modem"},
+		},
+		{
+			name: "returns empty list when all modems are broken",
+			devices: []*mmodem.Modem{
+				{
+					EquipmentIdentifier: "bad-modem",
+					Model:               "No SIM",
+					State:               mmodem.ModemStateEnabled,
+				},
+			},
+			wantIDs: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			catalog := newCatalog(settings.NewMemoryStore(settings.Default()), nil)
+
+			got, err := catalog.buildListResponse(context.Background(), tt.devices)
+			if err != nil {
+				t.Fatalf("buildListResponse() error = %v", err)
+			}
+
+			gotIDs := make([]string, 0, len(got))
+			for _, modem := range got {
+				gotIDs = append(gotIDs, modem.ID)
+			}
+			if !slices.Equal(gotIDs, tt.wantIDs) {
+				t.Fatalf("modem IDs = %v, want %v", gotIDs, tt.wantIDs)
+			}
+		})
+	}
+}
 
 func TestCatalogBuildResponseLockedModem(t *testing.T) {
 	tests := []struct {

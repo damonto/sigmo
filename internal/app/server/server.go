@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -269,9 +271,5 @@ func recoverInternetConnections(ctx context.Context, registry *modem.Registry, c
 	if err != nil {
 		return fmt.Errorf("list modems: %w", err)
 	}
-	modems := make([]*modem.Modem, 0, len(modemMap))
-	for _, modem := range modemMap {
-		modems = append(modems, modem)
-	}
-	return connector.Recover(ctx, modems)
+	return connector.Recover(ctx, slices.Collect(maps.Values(modemMap)))
 }

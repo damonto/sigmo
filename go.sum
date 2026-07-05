@@ -1,7 +1,7 @@
 github.com/damonto/euicc-go v1.1.3-0.20260629074730-8a59598949d5 h1:aCOL7oMt8mFzTwRsTMLxRbdiBzi3vME81tGzIKkJT5A=
 github.com/damonto/euicc-go v1.1.3-0.20260629074730-8a59598949d5/go.mod h1:DhWDwXwrYzOaqmI+VrMOSKDdcupyGbG2XfwjbBIa3TM=
-github.com/damonto/uicc-go v0.0.0-20260629074612-113106cdcc19 h1:9HWSbhuvlmkSzPPoTCAHTK4Vvhhskgvt+4wmsSMjc4M=
-github.com/damonto/uicc-go v0.0.0-20260629074612-113106cdcc19/go.mod h1:4il4tcO0GJ2Bn8827RWDiMxNOnQpEApy3pwKliaR9uc=
+github.com/damonto/uicc-go v0.0.0-20260704164455-5ffe97bcbbf0 h1:XTPrKSZMLY1fRIqUo7kzLPnmNtUibtZyCfpD3N2jUNc=
+github.com/damonto/uicc-go v0.0.0-20260704164455-5ffe97bcbbf0/go.mod h1:4il4tcO0GJ2Bn8827RWDiMxNOnQpEApy3pwKliaR9uc=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/gabriel-vasile/mimetype v1.4.13 h1:46nXokslUBsAJE/wMsp5gtO500a4F3Nkz9Ufpk2AcUM=
@@ -38,8 +38,8 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/things-go/go-socks5 v0.1.1 h1:48hy9cHEXPKeG91G/g4n8zW4uynzPUQy/FkcrJ7r5AY=
 github.com/things-go/go-socks5 v0.1.1/go.mod h1:1YBHVYG7Oli5ae+Pwkp630cPAwY1pjUPmohO1n0Emg0=
-github.com/wneessen/go-mail v0.7.3 h1:g3DravXC5SMlVdboFrQA8Jx95A8sOzoBeS5F+vzNRK0=
-github.com/wneessen/go-mail v0.7.3/go.mod h1:QGhBX0yNbc1J+Mkjcu7z2rpj4B4l+BmDY8gYznPC9sk=
+github.com/wneessen/go-mail v0.8.0 h1:I65TZ7+oYA+Kcme8GeJrBzfVioKDezj8f/BS+XhVpEE=
+github.com/wneessen/go-mail v0.8.0/go.mod h1:EkVXlu2G11/WYwPBElvN7QQ2c7IKIk0Nexs8BIPVsoQ=
 golang.org/x/crypto v0.53.0 h1:QZ4Muo8THX6CizN2vPPd5fBGHyogrdK9fG4wLPFUsto=
 golang.org/x/crypto v0.53.0/go.mod h1:DNLU434OwVakk9PzuwV8w62mAJpRJL3vsgcfp4Qnsio=
 golang.org/x/net v0.55.0 h1:bcvxaJn3e1U6InsFWt1JUq1aSjnRxLzT2rtD2KfkDF8=

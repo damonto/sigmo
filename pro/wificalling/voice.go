@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -568,10 +570,7 @@ func updateVoiceCallWithPointerLocked(session *sessionState, callID string, call
 
 func (c *coordinator) publishVoiceEvent(call VoiceCall) {
 	c.mu.Lock()
-	subscribers := make([]VoiceEventFunc, 0, len(c.voiceSubscribers))
-	for _, fn := range c.voiceSubscribers {
-		subscribers = append(subscribers, fn)
-	}
+	subscribers := slices.Collect(maps.Values(c.voiceSubscribers))
 	c.mu.Unlock()
 	event := VoiceEvent{Call: call}
 	for _, fn := range subscribers {

@@ -6,8 +6,8 @@ require (
 	github.com/damonto/euicc-go v1.1.3-0.20260629074730-8a59598949d5
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260629075047-0221e7e08753
-	github.com/damonto/uicc-go v0.0.0-20260629074612-113106cdcc19
-	github.com/damonto/vowifi-go v0.0.0-20260701134824-7cdc8fb7dc1c
+	github.com/damonto/uicc-go v0.0.0-20260704164455-5ffe97bcbbf0
+	github.com/damonto/vowifi-go v0.0.0-20260703062610-5e054806f5b9
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.2.1
@@ -42,10 +42,10 @@ require (
 	github.com/pion/srtp/v3 v3.0.12 // indirect
 	github.com/pion/stun/v3 v3.1.6 // indirect
 	github.com/pion/transport/v4 v4.0.2 // indirect
-	github.com/pion/turn/v5 v5.0.10 // indirect
+	github.com/pion/turn/v5 v5.0.12 // indirect
 	github.com/things-go/go-socks5 v0.1.1 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
-	github.com/wneessen/go-mail v0.7.3 // indirect
+	github.com/wneessen/go-mail v0.8.0 // indirect
 	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect

@@ -5,6 +5,7 @@ package call
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strconv"
@@ -112,10 +113,5 @@ func addInterfaceNames(dst map[string]struct{}, names []string) {
 }
 
 func sortedInterfaceNames(names map[string]struct{}) []string {
-	out := make([]string, 0, len(names))
-	for name := range names {
-		out = append(out, name)
-	}
-	slices.Sort(out)
-	return out
+	return slices.Sorted(maps.Keys(names))
 }

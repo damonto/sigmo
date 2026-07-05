@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/godbus/dbus/v5"
@@ -107,10 +109,7 @@ func (t *presenceTask) Run(ctx context.Context) error {
 	stopAll := func() {
 		mu.Lock()
 		stopped = true
-		allCancels := make([]context.CancelFunc, 0, len(cancels))
-		for _, cancel := range cancels {
-			allCancels = append(allCancels, cancel)
-		}
+		allCancels := slices.Collect(maps.Values(cancels))
 		cancels = make(map[dbus.ObjectPath]context.CancelFunc)
 		equipment = make(map[string]dbus.ObjectPath)
 		modems = make(map[dbus.ObjectPath]string)

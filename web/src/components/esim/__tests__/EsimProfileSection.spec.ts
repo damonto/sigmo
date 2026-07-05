@@ -219,4 +219,22 @@ describe('EsimProfileSection', () => {
     expect(wrapper.find('[data-testid="profile-details"]').text()).toContain('Active Line')
     expect(wrapper.find('[data-testid="profile-details"]').text()).toContain('208')
   })
+
+  it('shows SIM Application only for the enabled matching profile', async () => {
+    const wrapper = mountSection({
+      simApplicationAvailable: true,
+      simApplicationProfileIccid: 'iccid-active',
+    })
+
+    const actions = wrapper
+      .findAll('button')
+      .filter((button) => button.text().includes('simApplication.title'))
+    expect(actions).toHaveLength(1)
+
+    await actions[0].trigger('click')
+
+    expect(wrapper.emitted('open-sim-application')?.[0]?.[0]).toMatchObject({
+      id: 'active',
+    })
+  })
 })

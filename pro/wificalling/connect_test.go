@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -616,10 +617,5 @@ func TestStopByPathStopsMatchingSession(t *testing.T) {
 }
 
 func sessionKeys(sessions map[string]*sessionState) string {
-	keys := make([]string, 0, len(sessions))
-	for key := range sessions {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return strings.Join(keys, ",")
+	return strings.Join(slices.Sorted(maps.Keys(sessions)), ",")
 }

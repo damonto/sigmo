@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Download } from 'lucide-vue-next'
+import { CreditCard, Download } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -19,6 +19,7 @@ import DraggableFab from '@/components/fab/DraggableFab.vue'
 import ModemDetailCard from '@/components/modem/ModemDetailCard.vue'
 import ModemDetailHeader from '@/components/modem/ModemDetailHeader.vue'
 import ModemLineMsisdnDialog from '@/components/modem/settings/ModemLineMsisdnDialog.vue'
+import SimApplicationDialog from '@/components/modem/SimApplicationDialog.vue'
 import SimPinUnlockDialog from '@/components/modem/SimPinUnlockDialog.vue'
 import SimSlotSwitcher from '@/components/modem/SimSlotSwitcher.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -36,6 +37,7 @@ import { useEsimDiscover } from '@/composables/useEsimDiscover'
 import { useEsimDownload } from '@/composables/useEsimDownload'
 import { useEsimProfileQuickActions } from '@/composables/useEsimProfileQuickActions'
 import { useModemDetail } from '@/composables/useModemDetail'
+import { useSimApplicationSession } from '@/composables/useSimApplicationSession'
 import { useSimSlotSwitch } from '@/composables/useSimSlotSwitch'
 import type { EsimProfile } from '@/types/esim'
 
@@ -59,6 +61,20 @@ const {
   fetchModemDetail,
   fetchEsimProfiles,
 } = useModemDetail()
+
+const {
+  available: simApplicationAvailable,
+  profileIccid: simApplicationProfileIccid,
+  currentView: simApplicationView,
+  dialogOpen: simApplicationDialogOpen,
+  errorMessage: simApplicationErrorMessage,
+  openRootMenu: openSimApplication,
+  selectMenuItem: selectSimApplicationMenuItem,
+  submitInput: submitSimApplicationInput,
+  submitInkey: submitSimApplicationInkey,
+  respondConfirm: respondSimApplicationConfirm,
+  back: backSimApplication,
+} = useSimApplicationSession(modemId)
 
 const installDialogRef = ref<{
   applyDiscoverAddress: (address: string, seId?: string) => void
@@ -293,6 +309,13 @@ watch(modemId, () => {
   activeProfileActionsProfileId.value = null
 })
 
+watch(simApplicationErrorMessage, (message) => {
+  if (!message) return
+  toast.error(t('modemDetail.simApplication.errorTitle'), {
+    description: message,
+  })
+})
+
 // Fetch modem detail when route changes or on mount
 watch(
   modemId,
@@ -406,11 +429,14 @@ void fetchCapabilities()
         :wifi-calling-enabled="settingsWiFiCallingEnabled"
         :wifi-calling-connected="settingsWiFiCallingConnected"
         :wifi-calling-busy="isWiFiCallingBusy"
+        :sim-application-available="simApplicationAvailable"
+        :sim-application-profile-iccid="simApplicationProfileIccid"
         @success="showSuccess"
         @toggle-network="handleNetworkQuickToggle"
         @toggle-wifi-calling="handleWiFiCallingQuickToggle"
         @edit-phone-number="openMsisdnDialog"
         @profile-actions-open-change="handleProfileActionsOpenChange"
+        @open-sim-application="openSimApplication"
       />
     </div>
 
@@ -424,6 +450,16 @@ void fetchCapabilities()
   <!-- Physical modem: show detail card -->
   <div v-if="modem && isPhysicalModem" class="space-y-3">
     <ModemDetailCard :modem="modem" :se-info="null" />
+    <Button
+      v-if="simApplicationAvailable"
+      type="button"
+      variant="outline"
+      class="w-full justify-start gap-2"
+      @click="openSimApplication"
+    >
+      <CreditCard class="size-4" />
+      {{ t('modemDetail.simApplication.title') }}
+    </Button>
   </div>
 
   <Dialog v-model:open="detailDialogOpen">
@@ -446,6 +482,16 @@ void fetchCapabilities()
     :is-updating="isMsisdnUpdating"
     :is-valid="isMsisdnValid"
     @save="saveMsisdn"
+  />
+
+  <SimApplicationDialog
+    v-model:open="simApplicationDialogOpen"
+    :view="simApplicationView"
+    @select-menu-item="selectSimApplicationMenuItem"
+    @submit-input="submitSimApplicationInput"
+    @submit-inkey="submitSimApplicationInkey"
+    @respond-confirm="respondSimApplicationConfirm"
+    @back="backSimApplication"
   />
 
   <DraggableFab

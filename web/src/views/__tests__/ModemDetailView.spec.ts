@@ -32,6 +32,25 @@ const detailHarness = vi.hoisted(() => ({
   wifiCallingSettingsEnabled: undefined as ComputedRef<boolean> | undefined,
 }))
 
+const simAppHarness = vi.hoisted(() => ({
+  available: undefined as Ref<boolean> | undefined,
+  profileIccid: undefined as Ref<string> | undefined,
+  currentView: undefined as Ref<unknown> | undefined,
+  dialogOpen: undefined as Ref<boolean> | undefined,
+  errorMessage: undefined as Ref<string> | undefined,
+  openRootMenu: vi.fn(),
+  selectMenuItem: vi.fn(),
+  submitInput: vi.fn(),
+  submitInkey: vi.fn(),
+  respondConfirm: vi.fn(),
+  back: vi.fn(),
+}))
+
+const toastHarness = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+}))
+
 vi.mock('@/apis/modem', () => ({
   useModemApi: () => api,
 }))
@@ -61,9 +80,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 vi.mock('vue-sonner', () => ({
-  toast: {
-    success: vi.fn(),
-  },
+  toast: toastHarness,
 }))
 
 vi.mock('@/composables/useCapabilities', () => ({
@@ -96,6 +113,30 @@ vi.mock('@/composables/useModemDetail', async () => {
       fetchModemDetail: detailHarness.fetchModemDetail,
       fetchSEs: vi.fn(),
       fetchEsimProfiles: detailHarness.fetchEsimProfiles,
+    }),
+  }
+})
+
+vi.mock('@/composables/useSimApplicationSession', async () => {
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
+  simAppHarness.available = ref(false)
+  simAppHarness.profileIccid = ref('')
+  simAppHarness.currentView = ref(null)
+  simAppHarness.dialogOpen = ref(false)
+  simAppHarness.errorMessage = ref('')
+  return {
+    useSimApplicationSession: () => ({
+      available: simAppHarness.available,
+      profileIccid: simAppHarness.profileIccid,
+      currentView: simAppHarness.currentView,
+      dialogOpen: simAppHarness.dialogOpen,
+      errorMessage: simAppHarness.errorMessage,
+      openRootMenu: simAppHarness.openRootMenu,
+      selectMenuItem: simAppHarness.selectMenuItem,
+      submitInput: simAppHarness.submitInput,
+      submitInkey: simAppHarness.submitInkey,
+      respondConfirm: simAppHarness.respondConfirm,
+      back: simAppHarness.back,
     }),
   }
 })
@@ -260,6 +301,18 @@ const mountView = () =>
           template:
             '<form v-if="open" data-testid="msisdn-dialog" @submit.prevent="$emit(\'save\')"><button type="submit">save</button></form>',
         },
+        SimApplicationDialog: {
+          props: ['open', 'view'],
+          emits: [
+            'update:open',
+            'select-menu-item',
+            'submit-input',
+            'submit-inkey',
+            'respond-confirm',
+            'back',
+          ],
+          template: '<section v-if="open" data-testid="sim-application-dialog"></section>',
+        },
         Dialog: { template: '<div><slot /></div>' },
         DialogContent: { template: '<div><slot /></div>' },
         DialogDescription: { template: '<p><slot /></p>' },
@@ -306,6 +359,27 @@ describe('ModemDetailView SIM PIN unlock', () => {
     detailHarness.wifiCallingFeature = false
     detailHarness.internetConnectionEnabled = undefined
     detailHarness.wifiCallingSettingsEnabled = undefined
+    simAppHarness.openRootMenu.mockClear()
+    simAppHarness.selectMenuItem.mockClear()
+    simAppHarness.submitInput.mockClear()
+    simAppHarness.submitInkey.mockClear()
+    simAppHarness.respondConfirm.mockClear()
+    simAppHarness.back.mockClear()
+    if (simAppHarness.available) {
+      simAppHarness.available.value = false
+    }
+    if (simAppHarness.profileIccid) {
+      simAppHarness.profileIccid.value = ''
+    }
+    if (simAppHarness.currentView) {
+      simAppHarness.currentView.value = null
+    }
+    if (simAppHarness.dialogOpen) {
+      simAppHarness.dialogOpen.value = false
+    }
+    if (simAppHarness.errorMessage) {
+      simAppHarness.errorMessage.value = ''
+    }
     if (detailHarness.modem) {
       detailHarness.modem.value = lockedModem()
     }
@@ -408,6 +482,38 @@ describe('ModemDetailView SIM PIN unlock', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.find('[data-testid="install-esim"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('shows SIM Application for physical SIM only when available', async () => {
+    if (simAppHarness.available) {
+      simAppHarness.available.value = true
+    }
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const action = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('simApplication.title'))
+    expect(action?.exists()).toBe(true)
+
+    await action!.trigger('click')
+
+    expect(simAppHarness.openRootMenu).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows SIM Application session errors', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    if (simAppHarness.errorMessage) {
+      simAppHarness.errorMessage.value = 'open USIM card: reader busy'
+    }
+    await wrapper.vm.$nextTick()
+
+    expect(toastHarness.error).toHaveBeenCalledWith('modemDetail.simApplication.errorTitle', {
+      description: 'open USIM card: reader busy',
+    })
   })
 
   it('updates the line number from the eSIM profile shortcut', async () => {
