@@ -3,6 +3,7 @@ package stk
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	uiccat "github.com/damonto/uicc-go/at"
 	uiccmbim "github.com/damonto/uicc-go/mbim"
@@ -54,7 +55,7 @@ func openQMICard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
 		_ = reader.Close()
 		return Card{}, err
 	}
-	return openUSIMCard(ctx, q)
+	return openUSIMCard(ctx, q, modem.Logger())
 }
 
 func openMBIMCard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
@@ -71,7 +72,7 @@ func openMBIMCard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
 		_ = reader.Close()
 		return Card{}, err
 	}
-	return openUSIMCard(ctx, m)
+	return openUSIMCard(ctx, m, modem.Logger())
 }
 
 func openATCard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
@@ -88,11 +89,11 @@ func openATCard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
 		_ = tx.Close()
 		return Card{}, err
 	}
-	return openUSIMCard(ctx, reader)
+	return openUSIMCard(ctx, reader, modem.Logger())
 }
 
-func openUSIMCard(ctx context.Context, reader usimcard.Reader) (Card, error) {
-	card, err := usim.New(ctx, reader)
+func openUSIMCard(ctx context.Context, reader usimcard.Reader, logger *slog.Logger) (Card, error) {
+	card, err := usim.New(ctx, reader, logger)
 	if err != nil {
 		_ = reader.Close()
 		return Card{}, fmt.Errorf("open USIM card: %w", err)

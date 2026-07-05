@@ -13,7 +13,10 @@ import (
 	mstk "github.com/damonto/sigmo/internal/pkg/modem/stk"
 )
 
-const errorCodeSimApplicationFailed = "sim_application_failed"
+const (
+	errorCodeSimApplicationFailed = "sim_application_failed"
+	simAppSessionMaxRetries       = 5
+)
 
 var simAppSessionRetryDelay = 2 * time.Second
 
@@ -58,6 +61,7 @@ func (h *Handler) Session(c *echo.Context) error {
 }
 
 func (h *Handler) runSessionLoop(ctx context.Context, id string, device *mmodem.Modem, session *wsSession) {
+	retries := 0
 	for {
 		current, ok := h.findSessionModem(ctx, id, device, session)
 		if !ok {
@@ -67,7 +71,17 @@ func (h *Handler) runSessionLoop(ctx context.Context, id string, device *mmodem.
 			continue
 		}
 		device = current
-		if h.runSessionAttempt(ctx, current, session) {
+		done, opened := h.runSessionAttempt(ctx, current, session)
+		if done {
+			return
+		}
+		if opened {
+			retries = 0
+		}
+		retries++
+		if retries >= simAppSessionMaxRetries {
+			current.Logger().Warn("SIM Application session retry limit reached", "retries", retries)
+			session.disconnect()
 			return
 		}
 		if !sleepSessionRetry(ctx, session.disconnectCh) {
@@ -103,7 +117,7 @@ func (h *Handler) findSessionModem(ctx context.Context, id string, fallback *mmo
 	return nil, true
 }
 
-func (h *Handler) runSessionAttempt(ctx context.Context, device *mmodem.Modem, session *wsSession) bool {
+func (h *Handler) runSessionAttempt(ctx context.Context, device *mmodem.Modem, session *wsSession) (bool, bool) {
 	session.resetSetupMenuSignal()
 	card, err := h.openCardFunc()(ctx, device)
 	if err != nil {
@@ -111,7 +125,7 @@ func (h *Handler) runSessionAttempt(ctx context.Context, device *mmodem.Modem, s
 			device.Logger().Warn("SIM Application session unavailable", "error", err)
 			session.sendIfConnected(statusMessage(false, session.currentProfileICCID(), nil))
 		}
-		return ctx.Err() != nil || session.disconnected()
+		return ctx.Err() != nil || session.disconnected(), false
 	}
 	defer func() {
 		if card.Close == nil {
@@ -130,7 +144,7 @@ func (h *Handler) runSessionAttempt(ctx context.Context, device *mmodem.Modem, s
 	cached := h.menus.Get(device.EquipmentIdentifier, card.ICCID)
 	session.setRootMenu(cached)
 	if err := session.send(statusMessage(cached.menu != nil, card.ICCID, cached.menu)); err != nil {
-		return true
+		return true, true
 	}
 
 	go session.rootSelectionLoop(attemptCtx, envelopeRootSelector{sender: card.STK})
@@ -154,17 +168,17 @@ func (h *Handler) runSessionAttempt(ctx context.Context, device *mmodem.Modem, s
 	select {
 	case <-session.disconnectCh:
 		cancel()
-		return true
+		return true, true
 	case <-ctx.Done():
 		session.disconnect()
-		return true
+		return true, true
 	case err := <-runErr:
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			device.Logger().Warn("SIM Application session stopped", "error", err)
 			session.sendIfConnected(statusMessage(false, card.ICCID, nil))
 		}
-		return ctx.Err() != nil || session.disconnected()
+		return ctx.Err() != nil || session.disconnected(), true
 	}
 }
 

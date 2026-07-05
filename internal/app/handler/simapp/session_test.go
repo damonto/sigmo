@@ -149,6 +149,15 @@ func setProbeInterval(t *testing.T, interval time.Duration) {
 	})
 }
 
+func setSessionRetryDelay(t *testing.T, delay time.Duration) {
+	t.Helper()
+	old := simAppSessionRetryDelay
+	simAppSessionRetryDelay = delay
+	t.Cleanup(func() {
+		simAppSessionRetryDelay = old
+	})
+}
+
 func TestSessionAttemptKeepsWebSocketOpenForRetry(t *testing.T) {
 	tests := []struct {
 		name string
@@ -169,11 +178,14 @@ func TestSessionAttemptKeepsWebSocketOpenForRetry(t *testing.T) {
 				},
 			}
 
-			done := handler.runSessionAttempt(context.Background(), &mmodem.Modem{
+			done, opened := handler.runSessionAttempt(context.Background(), &mmodem.Modem{
 				EquipmentIdentifier: "866069053145502",
 			}, session)
 			if done {
 				t.Fatal("runSessionAttempt() = done, want retry")
+			}
+			if opened {
+				t.Fatal("runSessionAttempt() opened = true, want false")
 			}
 			if session.disconnected() {
 				t.Fatal("session disconnected, want websocket kept open")
@@ -184,6 +196,57 @@ func TestSessionAttemptKeepsWebSocketOpenForRetry(t *testing.T) {
 			}
 			if writes[0].Type != wsTypeStatus || writes[0].Available == nil || *writes[0].Available {
 				t.Fatalf("status = %+v, want unavailable", writes[0])
+			}
+		})
+	}
+}
+
+func TestSessionLoopStopsAfterRetryLimit(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantTry int
+	}{
+		{
+			name:    "open card keeps failing",
+			err:     errors.New("claim rejected"),
+			wantTry: simAppSessionMaxRetries,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setSessionRetryDelay(t, 0)
+			session, conn := newTestSession()
+			tries := 0
+			handler := &Handler{
+				openCard: func(context.Context, *mmodem.Modem) (mstk.Card, error) {
+					tries++
+					return mstk.Card{}, tt.err
+				},
+			}
+
+			handler.runSessionLoop(context.Background(), "866069053145502", &mmodem.Modem{
+				EquipmentIdentifier: "866069053145502",
+			}, session)
+
+			if tries != tt.wantTry {
+				t.Fatalf("openCard calls = %d, want %d", tries, tt.wantTry)
+			}
+			if !session.disconnected() {
+				t.Fatal("session connected, want disconnected after retry limit")
+			}
+			writes := conn.writesCopy()
+			if len(writes) != tt.wantTry {
+				t.Fatalf("writes = %d, want %d unavailable statuses", len(writes), tt.wantTry)
+			}
+			for i, write := range writes {
+				if write.Type == wsTypeError {
+					t.Fatalf("write %d type = error, want silent retry exhaustion", i)
+				}
+				if write.Type != wsTypeStatus || write.Available == nil || *write.Available {
+					t.Fatalf("write %d = %+v, want unavailable status", i, write)
+				}
 			}
 		})
 	}
