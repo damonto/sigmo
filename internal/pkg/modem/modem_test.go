@@ -271,7 +271,7 @@ func TestEnableDisabledModem(t *testing.T) {
 				State:      tt.state,
 			}
 
-			err := enableDisabledModem(context.Background(), modem)
+			err := enableDisabledModem(context.Background(), modem, nil)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("enableDisabledModem() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -279,6 +279,35 @@ func TestEnableDisabledModem(t *testing.T) {
 				t.Fatalf("enable called = %v, want %v", got, tt.wantRun)
 			}
 		})
+	}
+}
+
+func TestEnableDisabledModemSkipsSavedAirplaneMode(t *testing.T) {
+	db := openNetworkPreferencesTestStore(t)
+	preferences, err := NewNetworkPreferences(db)
+	if err != nil {
+		t.Fatalf("NewNetworkPreferences() error = %v", err)
+	}
+	ctx := context.Background()
+	if err := preferences.SaveAirplaneMode(ctx, "modem-1", true); err != nil {
+		t.Fatalf("SaveAirplaneMode() error = %v", err)
+	}
+	object := &fakeBusObject{
+		errors: map[string][]error{
+			ModemInterface + ".Enable": {errors.New("must not enable")},
+		},
+	}
+	modem := &Modem{
+		dbusObject:          object,
+		EquipmentIdentifier: "modem-1",
+		State:               ModemStateDisabled,
+	}
+
+	if err := enableDisabledModem(ctx, modem, SkipEnableDisabledInAirplaneMode(preferences)); err != nil {
+		t.Fatalf("enableDisabledModem() error = %v", err)
+	}
+	if len(object.calls) != 0 {
+		t.Fatalf("Enable calls = %v, want none", object.calls)
 	}
 }
 

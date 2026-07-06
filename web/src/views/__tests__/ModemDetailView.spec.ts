@@ -265,6 +265,7 @@ const lockedModem = (supportsEsim = false): Modem => ({
     code: '',
   },
   signalQuality: 0,
+  airplaneMode: false,
   supportsEsim,
 })
 

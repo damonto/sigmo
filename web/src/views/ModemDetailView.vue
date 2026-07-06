@@ -411,6 +411,7 @@ void fetchCapabilities()
     :access-technology="modem.accessTechnology"
     :registered-operator-name="modem.registeredOperator.name"
     :wifi-calling-connected="modem.wifiCallingConnected"
+    :airplane-mode="modem.airplaneMode"
     :on-switch="handleSimSwitch"
   />
 

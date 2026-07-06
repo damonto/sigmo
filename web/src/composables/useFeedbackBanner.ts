@@ -7,7 +7,14 @@ export const useFeedbackBanner = () => {
     toast.success(trimmed)
   }
 
+  const showError = (message: string) => {
+    const trimmed = message.trim()
+    if (!trimmed) return
+    toast.error(trimmed)
+  }
+
   return {
     showFeedback,
+    showError,
   }
 }

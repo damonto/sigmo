@@ -7,9 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/damonto/uicc-go/qcom"
-	"github.com/damonto/uicc-go/qcom/uim"
-	"github.com/damonto/uicc-go/usim/simfile"
+	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
 	"github.com/godbus/dbus/v5"
 )
 
@@ -18,12 +16,6 @@ func TestEnsureSIMVisible(t *testing.T) {
 	simSettleDelay = time.Nanosecond
 	t.Cleanup(func() {
 		simSettleDelay = oldDelay
-	})
-
-	oldPowerCycleDelay := qmiSIMPowerCycleDelay
-	qmiSIMPowerCycleDelay = time.Nanosecond
-	t.Cleanup(func() {
-		qmiSIMPowerCycleDelay = oldPowerCycleDelay
 	})
 
 	oldInterval := simVisiblePollInterval
@@ -43,13 +35,13 @@ func TestEnsureSIMVisible(t *testing.T) {
 		name      string
 		modem     *Modem
 		target    SIMTarget
-		reader    *fakeQMIUIMReader
+		device    *fakeDeviceControl
 		timeout   time.Duration
 		wantErr   error
 		wantCalls []string
 	}{
 		{
-			name: "returns visible modem without QMI access",
+			name: "returns visible modem without device access",
 			modem: &Modem{
 				EquipmentIdentifier: "imei-1",
 				PrimarySimSlot:      1,
@@ -57,7 +49,7 @@ func TestEnsureSIMVisible(t *testing.T) {
 			},
 		},
 		{
-			name: "power cycles when QMI is target and ready but modem did not reenumerate",
+			name: "power cycles when device is target and ready but modem did not reenumerate",
 			modem: &Modem{
 				dbusObject:          &fakeBusObject{errors: map[string][]error{ModemInterface + ".Simple.GetStatus": {nil}}},
 				EquipmentIdentifier: "imei-1",
@@ -66,17 +58,12 @@ func TestEnsureSIMVisible(t *testing.T) {
 				PrimarySimSlot:      1,
 				Sim:                 &SIM{Identifier: "old"},
 			},
-			reader: &fakeQMIUIMReader{
-				slotStatus: qmiTestSlotStatus(1, target.ICCID),
-				cardStatus: qmiTestCardStatus(
-					uim.ApplicationStateReady,
-					uim.PersonalizationStateReady,
-					[]byte{0xA0, 0x00},
-				),
+			device: &fakeDeviceControl{
+				state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
 			},
 			timeout:   5 * time.Millisecond,
 			wantErr:   context.DeadlineExceeded,
-			wantCalls: []string{"power-off:1", "power-on:1", "slot-status", "card-status"},
+			wantCalls: []string{"power-cycle", "sim-state"},
 		},
 		{
 			name: "power cycles then activates provisioning when USIM is not ready",
@@ -87,24 +74,15 @@ func TestEnsureSIMVisible(t *testing.T) {
 				PrimarySimSlot:      1,
 				Sim:                 &SIM{Identifier: "old"},
 			},
-			reader: &fakeQMIUIMReader{
-				slotStatus: qmiTestSlotStatus(1, target.ICCID),
-				cardStatus: qmiTestCardStatus(
-					uim.ApplicationStateDetected,
-					uim.PersonalizationStateInProgress,
-					[]byte{0xA0, 0x00},
-				),
+			device: &fakeDeviceControl{
+				state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Slot: 1, ICCID: target.ICCID},
 			},
-			timeout: 5 * time.Millisecond,
-			wantErr: context.DeadlineExceeded,
-			wantCalls: []string{
-				"power-off:1", "power-on:1",
-				"slot-status", "card-status",
-				"card-status", "change-provisioning:1",
-			},
+			timeout:   5 * time.Millisecond,
+			wantErr:   context.DeadlineExceeded,
+			wantCalls: []string{"power-cycle", "sim-state", "activate-provisioning"},
 		},
 		{
-			name:   "recovers not initialized USIM when QMI ICCID is unavailable",
+			name:   "recovers not initialized USIM when device ICCID is unavailable",
 			target: SIMTarget{ICCID: target.ICCID},
 			modem: &Modem{
 				EquipmentIdentifier: "imei-1",
@@ -113,21 +91,12 @@ func TestEnsureSIMVisible(t *testing.T) {
 				PrimarySimSlot:      1,
 				Sim:                 &SIM{Identifier: "old"},
 			},
-			reader: &fakeQMIUIMReader{
-				cardStatus: qmiTestCardStatus(
-					uim.ApplicationStateDetected,
-					uim.PersonalizationStateUnknown,
-					[]byte{0xA0, 0x00},
-				),
-				slotStatus: qmiTestSlotStatusRawICCID(1, nil),
+			device: &fakeDeviceControl{
+				state: mdevice.SIMState{Supported: true, Recoverable: true, Slot: 1},
 			},
-			timeout: 5 * time.Millisecond,
-			wantErr: context.DeadlineExceeded,
-			wantCalls: []string{
-				"power-off:1", "power-on:1",
-				"slot-status", "card-status",
-				"card-status", "change-provisioning:1",
-			},
+			timeout:   5 * time.Millisecond,
+			wantErr:   context.DeadlineExceeded,
+			wantCalls: []string{"power-cycle", "sim-state", "activate-provisioning"},
 		},
 		{
 			name:   "power cycles ready USIM when SlotStatus cannot confirm ICCID",
@@ -139,23 +108,15 @@ func TestEnsureSIMVisible(t *testing.T) {
 				PrimarySimSlot:      1,
 				Sim:                 &SIM{Identifier: "old"},
 			},
-			reader: &fakeQMIUIMReader{
-				cardStatus: qmiTestCardStatus(
-					uim.ApplicationStateReady,
-					uim.PersonalizationStateReady,
-					[]byte{0xA0, 0x00},
-				),
-				slotStatusErr: qcom.QMIErrorNotSupported,
+			device: &fakeDeviceControl{
+				state: mdevice.SIMState{Supported: true, Recoverable: true, Ready: true, Slot: 1},
 			},
-			timeout: 5 * time.Millisecond,
-			wantErr: context.DeadlineExceeded,
-			wantCalls: []string{
-				"power-off:1", "power-on:1",
-				"slot-status", "card-status",
-			},
+			timeout:   5 * time.Millisecond,
+			wantErr:   context.DeadlineExceeded,
+			wantCalls: []string{"power-cycle", "sim-state"},
 		},
 		{
-			name: "power cycles before QMI status read failure",
+			name: "power cycles before device status read failure",
 			modem: &Modem{
 				EquipmentIdentifier: "imei-1",
 				PrimaryPort:         "/dev/cdc-wdm0",
@@ -163,15 +124,15 @@ func TestEnsureSIMVisible(t *testing.T) {
 				PrimarySimSlot:      1,
 				Sim:                 &SIM{Identifier: "old"},
 			},
-			reader: &fakeQMIUIMReader{
-				slotStatusErr: errors.New("slot status rejected"),
+			device: &fakeDeviceControl{
+				stateErr: errors.New("slot status rejected"),
 			},
 			timeout:   5 * time.Millisecond,
 			wantErr:   context.DeadlineExceeded,
-			wantCalls: []string{"power-off:1", "power-on:1", "slot-status"},
+			wantCalls: []string{"power-cycle", "sim-state"},
 		},
 		{
-			name: "power cycles when QMI ICCID mismatches target",
+			name: "power cycles when device ICCID mismatches target",
 			modem: &Modem{
 				EquipmentIdentifier: "imei-1",
 				PrimaryPort:         "/dev/cdc-wdm0",
@@ -179,20 +140,15 @@ func TestEnsureSIMVisible(t *testing.T) {
 				PrimarySimSlot:      1,
 				Sim:                 &SIM{Identifier: "old"},
 			},
-			reader: &fakeQMIUIMReader{
-				cardStatus: qmiTestCardStatus(
-					uim.ApplicationStateDetected,
-					uim.PersonalizationStateInProgress,
-					[]byte{0xA0, 0x00},
-				),
-				slotStatus: qmiTestSlotStatusActiveWithSlotICCID(2, 1, "8986000000000000001"),
+			device: &fakeDeviceControl{
+				state: mdevice.SIMState{Supported: true, Recoverable: true, ICCIDMismatch: true, Slot: 1, ICCID: "8986000000000000001"},
 			},
 			timeout:   5 * time.Millisecond,
 			wantErr:   context.DeadlineExceeded,
-			wantCalls: []string{"power-off:1", "power-on:1", "slot-status", "card-status"},
+			wantCalls: []string{"power-cycle", "sim-state"},
 		},
 		{
-			name: "does not recover SIM when QMI ICCID is invalid",
+			name: "does not recover SIM when device ICCID is invalid",
 			modem: &Modem{
 				EquipmentIdentifier: "imei-1",
 				PrimaryPort:         "/dev/cdc-wdm0",
@@ -200,17 +156,12 @@ func TestEnsureSIMVisible(t *testing.T) {
 				PrimarySimSlot:      1,
 				Sim:                 &SIM{Identifier: "old"},
 			},
-			reader: &fakeQMIUIMReader{
-				slotStatus: qmiTestSlotStatusRawICCID(1, []byte{0x9A}),
-				cardStatus: qmiTestCardStatus(
-					uim.ApplicationStateDetected,
-					uim.PersonalizationStateInProgress,
-					[]byte{0xA0, 0x00},
-				),
+			device: &fakeDeviceControl{
+				stateErr: errors.New("decode ICCID"),
 			},
 			timeout:   5 * time.Millisecond,
 			wantErr:   context.DeadlineExceeded,
-			wantCalls: []string{"power-off:1", "power-on:1", "slot-status"},
+			wantCalls: []string{"power-cycle", "sim-state"},
 		},
 	}
 
@@ -219,8 +170,8 @@ func TestEnsureSIMVisible(t *testing.T) {
 			registry := &Registry{
 				modems: map[dbus.ObjectPath]*Modem{"/modem/1": tt.modem},
 			}
-			if tt.reader != nil {
-				withQMIUIMReader(t, tt.modem.PrimaryPort, 1, tt.reader, nil)
+			if tt.device != nil {
+				registry.openDevice = fakeDeviceOpener(t, tt.device, nil)
 			}
 			simTarget := target
 			if tt.target.valid() {
@@ -244,8 +195,8 @@ func TestEnsureSIMVisible(t *testing.T) {
 			if tt.wantErr == nil && got != tt.modem {
 				t.Fatalf("EnsureSIMVisible() modem = %p, want %p", got, tt.modem)
 			}
-			if tt.reader != nil && !slices.Equal(callPrefixWithoutClose(tt.reader.calls, len(tt.wantCalls)), tt.wantCalls) {
-				t.Fatalf("reader calls prefix = %v, want %v", tt.reader.calls, tt.wantCalls)
+			if tt.device != nil && !slices.Equal(tt.device.calls[:min(len(tt.device.calls), len(tt.wantCalls))], tt.wantCalls) {
+				t.Fatalf("device calls prefix = %v, want %v", tt.device.calls, tt.wantCalls)
 			}
 		})
 	}
@@ -319,45 +270,40 @@ func TestRefreshModemManagerSIMState(t *testing.T) {
 	}
 }
 
-func TestQMISIMTargetDoesNotMatchSlotOnlyTargetWithoutSlotStatus(t *testing.T) {
+func TestDeviceSIMTargetDoesNotMatchSlotOnlyTargetWithoutSlotStatus(t *testing.T) {
 	modem := &Modem{
 		EquipmentIdentifier: "imei-1",
 		PrimaryPort:         "/dev/cdc-wdm0",
 		Ports:               []ModemPort{{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm0"}},
 		PrimarySimSlot:      1,
 	}
-	reader := &fakeQMIUIMReader{
-		slotStatusErr: qcom.QMIErrorNotSupported,
-		cardStatus: qmiTestCardStatus(
-			uim.ApplicationStateReady,
-			uim.PersonalizationStateReady,
-			[]byte{0xA0, 0x00},
-		),
+	device := &fakeDeviceControl{
+		state: mdevice.SIMState{Supported: true, Ready: true, Slot: 1},
 	}
-	withQMIUIMReader(t, modem.PrimaryPort, 1, reader, nil)
+	openDevice := fakeDeviceOpener(t, device, nil)
 
-	state, err := qmiSIMStateForTarget(context.Background(), modem, SIMTarget{Slot: 1})
+	state, err := readDeviceSIMState(context.Background(), modem, SIMTarget{Slot: 1}, openDevice)
 	if err != nil {
-		t.Fatalf("qmiSIMStateForTarget() error = %v", err)
+		t.Fatalf("readDeviceSIMState() error = %v", err)
 	}
-	if !state.supported {
-		t.Fatal("qmiSIMStateForTarget() supported = false, want true")
+	if !state.Supported {
+		t.Fatal("readDeviceSIMState() supported = false, want true")
 	}
-	if !state.ready {
-		t.Fatal("qmiSIMStateForTarget() ready = false, want true")
+	if !state.Ready {
+		t.Fatal("readDeviceSIMState() ready = false, want true")
 	}
-	if state.matches {
-		t.Fatal("qmiSIMStateForTarget() matches = true, want false")
+	if state.Matches {
+		t.Fatal("readDeviceSIMState() matches = true, want false")
 	}
 }
 
-func TestQMISIMStateMarksICCIDMismatchRecoverable(t *testing.T) {
+func TestDeviceSIMStateMarksICCIDMismatchRecoverable(t *testing.T) {
 	tests := []struct {
 		name   string
 		target SIMTarget
 	}{
 		{
-			name:   "target iccid differs from QMI slot iccid",
+			name:   "target iccid differs from device slot iccid",
 			target: SIMTarget{Slot: 1, ICCID: "8986000000000000000"},
 		},
 	}
@@ -370,31 +316,26 @@ func TestQMISIMStateMarksICCIDMismatchRecoverable(t *testing.T) {
 				Ports:               []ModemPort{{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm0"}},
 				PrimarySimSlot:      1,
 			}
-			reader := &fakeQMIUIMReader{
-				slotStatus: qmiTestSlotStatusActiveWithSlotICCID(2, 1, "8986000000000000001"),
-				cardStatus: qmiTestCardStatus(
-					uim.ApplicationStateDetected,
-					uim.PersonalizationStateInProgress,
-					[]byte{0xA0, 0x00},
-				),
+			device := &fakeDeviceControl{
+				state: mdevice.SIMState{Supported: true, Recoverable: true, ICCIDMismatch: true, Slot: 1, ICCID: "8986000000000000001"},
 			}
-			withQMIUIMReader(t, modem.PrimaryPort, 1, reader, nil)
+			openDevice := fakeDeviceOpener(t, device, nil)
 
-			state, err := qmiSIMStateForTarget(context.Background(), modem, tt.target)
+			state, err := readDeviceSIMState(context.Background(), modem, tt.target, openDevice)
 			if err != nil {
-				t.Fatalf("qmiSIMStateForTarget() error = %v", err)
+				t.Fatalf("readDeviceSIMState() error = %v", err)
 			}
-			if state.matches {
-				t.Fatal("qmiSIMStateForTarget() matches = true, want false")
+			if state.Matches {
+				t.Fatal("readDeviceSIMState() matches = true, want false")
 			}
-			if !state.recoverable {
-				t.Fatal("qmiSIMStateForTarget() recoverable = false, want true")
+			if !state.Recoverable {
+				t.Fatal("readDeviceSIMState() recoverable = false, want true")
 			}
-			if !state.iccidMismatch {
-				t.Fatal("qmiSIMStateForTarget() iccidMismatch = false, want true")
+			if !state.ICCIDMismatch {
+				t.Fatal("readDeviceSIMState() iccidMismatch = false, want true")
 			}
-			if state.ready {
-				t.Fatal("qmiSIMStateForTarget() ready = true, want false")
+			if state.Ready {
+				t.Fatal("readDeviceSIMState() ready = true, want false")
 			}
 		})
 	}
@@ -419,12 +360,6 @@ func TestEnsureSIMVisiblePowerCyclesWhenModemDoesNotReenumerate(t *testing.T) {
 		simVisiblePollInterval = oldInterval
 	})
 
-	oldPowerCycleDelay := qmiSIMPowerCycleDelay
-	qmiSIMPowerCycleDelay = time.Nanosecond
-	t.Cleanup(func() {
-		qmiSIMPowerCycleDelay = oldPowerCycleDelay
-	})
-
 	target := SIMTarget{Slot: 1, ICCID: "8986000000000000000"}
 	modem := &Modem{
 		EquipmentIdentifier: "imei-1",
@@ -433,18 +368,13 @@ func TestEnsureSIMVisiblePowerCyclesWhenModemDoesNotReenumerate(t *testing.T) {
 		PrimarySimSlot:      1,
 		Sim:                 &SIM{Identifier: "old"},
 	}
-	reader := &fakeQMIUIMReader{
-		slotStatus: qmiTestSlotStatus(1, target.ICCID),
-		cardStatus: qmiTestCardStatus(
-			uim.ApplicationStateDetected,
-			uim.PersonalizationStateInProgress,
-			[]byte{0xA0, 0x00},
-		),
+	device := &fakeDeviceControl{
+		state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Slot: 1, ICCID: target.ICCID},
 	}
 	registry := &Registry{
-		modems: map[dbus.ObjectPath]*Modem{"/modem/1": modem},
+		modems:     map[dbus.ObjectPath]*Modem{"/modem/1": modem},
+		openDevice: fakeDeviceOpener(t, device, nil),
 	}
-	withQMIUIMReader(t, modem.PrimaryPort, 1, reader, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
@@ -453,13 +383,9 @@ func TestEnsureSIMVisiblePowerCyclesWhenModemDoesNotReenumerate(t *testing.T) {
 		t.Fatalf("EnsureSIMVisible() error = %v, want %v", err, context.DeadlineExceeded)
 	}
 
-	wantCalls := []string{
-		"power-off:1", "power-on:1",
-		"slot-status", "card-status",
-		"card-status", "change-provisioning:1",
-	}
-	if !slices.Equal(callPrefixWithoutClose(reader.calls, len(wantCalls)), wantCalls) {
-		t.Fatalf("reader calls prefix = %v, want %v", reader.calls, wantCalls)
+	wantCalls := []string{"power-cycle", "sim-state", "activate-provisioning"}
+	if !slices.Equal(device.calls[:min(len(device.calls), len(wantCalls))], wantCalls) {
+		t.Fatalf("device calls prefix = %v, want %v", device.calls, wantCalls)
 	}
 }
 
@@ -482,12 +408,6 @@ func TestEnsureSIMVisibleDoesNotTreatFreshSnapshotAsReenumeration(t *testing.T) 
 		simVisiblePollInterval = oldInterval
 	})
 
-	oldPowerCycleDelay := qmiSIMPowerCycleDelay
-	qmiSIMPowerCycleDelay = time.Nanosecond
-	t.Cleanup(func() {
-		qmiSIMPowerCycleDelay = oldPowerCycleDelay
-	})
-
 	target := SIMTarget{Slot: 1, ICCID: "8986000000000000000"}
 	current := &Modem{
 		objectPath:          "/org/freedesktop/ModemManager1/Modem/1",
@@ -496,6 +416,9 @@ func TestEnsureSIMVisibleDoesNotTreatFreshSnapshotAsReenumeration(t *testing.T) 
 		Ports:               []ModemPort{{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm0"}},
 		PrimarySimSlot:      1,
 		Sim:                 &SIM{Identifier: "old"},
+	}
+	device := &fakeDeviceControl{
+		state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
 	}
 	registry := &Registry{
 		modems: map[dbus.ObjectPath]*Modem{
@@ -508,16 +431,8 @@ func TestEnsureSIMVisibleDoesNotTreatFreshSnapshotAsReenumeration(t *testing.T) 
 				Sim:                 &SIM{Identifier: "old"},
 			},
 		},
+		openDevice: fakeDeviceOpener(t, device, nil),
 	}
-	reader := &fakeQMIUIMReader{
-		slotStatus: qmiTestSlotStatus(1, target.ICCID),
-		cardStatus: qmiTestCardStatus(
-			uim.ApplicationStateReady,
-			uim.PersonalizationStateReady,
-			[]byte{0xA0, 0x00},
-		),
-	}
-	withQMIUIMReader(t, current.PrimaryPort, 1, reader, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
 	defer cancel()
@@ -525,13 +440,13 @@ func TestEnsureSIMVisibleDoesNotTreatFreshSnapshotAsReenumeration(t *testing.T) 
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("EnsureSIMVisible() error = %v, want %v", err, context.DeadlineExceeded)
 	}
-	wantCalls := []string{"power-off:1", "power-on:1", "slot-status", "card-status"}
-	if !slices.Equal(callPrefixWithoutClose(reader.calls, len(wantCalls)), wantCalls) {
-		t.Fatalf("reader calls prefix = %v, want %v", reader.calls, wantCalls)
+	wantCalls := []string{"power-cycle", "sim-state"}
+	if !slices.Equal(device.calls[:min(len(device.calls), len(wantCalls))], wantCalls) {
+		t.Fatalf("device calls prefix = %v, want %v", device.calls, wantCalls)
 	}
 }
 
-func TestPowerCycleSIMRequiresQMI(t *testing.T) {
+func TestPowerCycleSIMRequiresDevice(t *testing.T) {
 	registry := &Registry{}
 	modem := &Modem{
 		EquipmentIdentifier: "imei-1",
@@ -542,8 +457,55 @@ func TestPowerCycleSIMRequiresQMI(t *testing.T) {
 	}
 
 	_, err := registry.PowerCycleSIM(context.Background(), modem, SIMTarget{})
-	if !errors.Is(err, errQMIRequiredForSIMPowerCycle) {
-		t.Fatalf("PowerCycleSIM() error = %v, want %v", err, errQMIRequiredForSIMPowerCycle)
+	if !errors.Is(err, mdevice.ErrUnsupported) {
+		t.Fatalf("PowerCycleSIM() error = %v, want %v", err, mdevice.ErrUnsupported)
+	}
+}
+
+func TestCurrentSIMTarget(t *testing.T) {
+	tests := []struct {
+		name   string
+		modem  *Modem
+		target SIMTarget
+		want   SIMTarget
+	}{
+		{
+			name:   "keeps explicit target",
+			modem:  testSIMTargetModem(ModemPortTypeQmi),
+			target: SIMTarget{Slot: 2, ICCID: "8986000000000000001"},
+			want:   SIMTarget{Slot: 2, ICCID: "8986000000000000001"},
+		},
+		{
+			name: "uses modem primary SIM",
+			modem: &Modem{
+				PrimaryPort:    "/dev/cdc-wdm0",
+				Ports:          []ModemPort{{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm0"}},
+				PrimarySimSlot: 2,
+				Sim:            &SIM{Identifier: "8986000000000000002"},
+			},
+			want: SIMTarget{Slot: 2, ICCID: "8986000000000000002"},
+		},
+		{
+			name:  "defaults QMI device slot",
+			modem: testSIMTargetModem(ModemPortTypeQmi),
+			want:  SIMTarget{Slot: 1},
+		},
+		{
+			name:  "defaults MBIM device slot",
+			modem: testSIMTargetModem(ModemPortTypeMbim),
+			want:  SIMTarget{Slot: 1},
+		},
+		{
+			name:  "does not default AT slot",
+			modem: testSIMTargetModem(ModemPortTypeAt),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := currentSIMTarget(tt.modem, tt.target); got != tt.want {
+				t.Fatalf("currentSIMTarget() = %#v, want %#v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -583,11 +545,11 @@ func TestEnsureSIMVisibleWaitsForLateReenumerationBeforePowerCycle(t *testing.T)
 		PrimarySimSlot:      target.Slot,
 		Sim:                 &SIM{Identifier: target.ICCID},
 	}
+	device := &fakeDeviceControl{}
 	registry := &Registry{
-		modems: map[dbus.ObjectPath]*Modem{current.objectPath: current},
+		modems:     map[dbus.ObjectPath]*Modem{current.objectPath: current},
+		openDevice: fakeDeviceOpener(t, device, nil),
 	}
-	reader := &fakeQMIUIMReader{}
-	withQMIUIMReader(t, current.PrimaryPort, 1, reader, nil)
 
 	removeTimer := time.AfterFunc(time.Millisecond, func() {
 		registry.mu.Lock()
@@ -615,8 +577,8 @@ func TestEnsureSIMVisibleWaitsForLateReenumerationBeforePowerCycle(t *testing.T)
 	if got != next {
 		t.Fatalf("EnsureSIMVisible() modem = %p, want %p", got, next)
 	}
-	if len(reader.calls) != 0 {
-		t.Fatalf("reader calls = %v, want none", reader.calls)
+	if len(device.calls) != 0 {
+		t.Fatalf("device calls = %v, want none", device.calls)
 	}
 }
 
@@ -637,12 +599,6 @@ func TestEnsureSIMVisibleSkipsInhibitWhenDisableEnableWorks(t *testing.T) {
 	simVisiblePollInterval = time.Nanosecond
 	t.Cleanup(func() {
 		simVisiblePollInterval = oldInterval
-	})
-
-	oldPowerCycleDelay := qmiSIMPowerCycleDelay
-	qmiSIMPowerCycleDelay = time.Nanosecond
-	t.Cleanup(func() {
-		qmiSIMPowerCycleDelay = oldPowerCycleDelay
 	})
 
 	target := SIMTarget{Slot: 1, ICCID: "8986000000000000000"}
@@ -675,18 +631,13 @@ func TestEnsureSIMVisibleSkipsInhibitWhenDisableEnableWorks(t *testing.T) {
 		return nil
 	}
 
-	reader := &fakeQMIUIMReader{
-		slotStatus: qmiTestSlotStatus(1, target.ICCID),
-		cardStatus: qmiTestCardStatus(
-			uim.ApplicationStateReady,
-			uim.PersonalizationStateReady,
-			[]byte{0xA0, 0x00},
-		),
+	device := &fakeDeviceControl{
+		state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
 	}
 	registry := &Registry{
-		modems: map[dbus.ObjectPath]*Modem{object.path: modem},
+		modems:     map[dbus.ObjectPath]*Modem{object.path: modem},
+		openDevice: fakeDeviceOpener(t, device, nil),
 	}
-	withQMIUIMReader(t, modem.PrimaryPort, 1, reader, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -723,12 +674,6 @@ func TestEnsureSIMVisibleInhibitsAfterDisableEnableDoesNotWork(t *testing.T) {
 	simVisiblePollInterval = time.Nanosecond
 	t.Cleanup(func() {
 		simVisiblePollInterval = oldInterval
-	})
-
-	oldPowerCycleDelay := qmiSIMPowerCycleDelay
-	qmiSIMPowerCycleDelay = time.Nanosecond
-	t.Cleanup(func() {
-		qmiSIMPowerCycleDelay = oldPowerCycleDelay
 	})
 
 	oldReloadSettleDelay := modemReloadSettleDelay
@@ -769,18 +714,13 @@ func TestEnsureSIMVisibleInhibitsAfterDisableEnableDoesNotWork(t *testing.T) {
 		return nil
 	}
 
-	reader := &fakeQMIUIMReader{
-		slotStatus: qmiTestSlotStatus(1, target.ICCID),
-		cardStatus: qmiTestCardStatus(
-			uim.ApplicationStateReady,
-			uim.PersonalizationStateReady,
-			[]byte{0xA0, 0x00},
-		),
+	device := &fakeDeviceControl{
+		state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
 	}
 	registry := &Registry{
-		modems: map[dbus.ObjectPath]*Modem{object.path: modem},
+		modems:     map[dbus.ObjectPath]*Modem{object.path: modem},
+		openDevice: fakeDeviceOpener(t, device, nil),
 	}
-	withQMIUIMReader(t, modem.PrimaryPort, 1, reader, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -804,12 +744,6 @@ func TestPowerCycleSIMRefreshesWithoutSecondPowerCycle(t *testing.T) {
 		simSettleDelay = oldSettleDelay
 	})
 
-	oldPowerCycleDelay := qmiSIMPowerCycleDelay
-	qmiSIMPowerCycleDelay = time.Nanosecond
-	t.Cleanup(func() {
-		qmiSIMPowerCycleDelay = oldPowerCycleDelay
-	})
-
 	target := SIMTarget{Slot: 1, ICCID: "8986000000000000000"}
 	modem := &Modem{
 		EquipmentIdentifier: "imei-1",
@@ -818,18 +752,13 @@ func TestPowerCycleSIMRefreshesWithoutSecondPowerCycle(t *testing.T) {
 		PrimarySimSlot:      1,
 		Sim:                 &SIM{Identifier: "old"},
 	}
-	reader := &fakeQMIUIMReader{
-		slotStatus: qmiTestSlotStatus(1, target.ICCID),
-		cardStatus: qmiTestCardStatus(
-			uim.ApplicationStateReady,
-			uim.PersonalizationStateReady,
-			[]byte{0xA0, 0x00},
-		),
+	device := &fakeDeviceControl{
+		state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
 	}
 	registry := &Registry{
-		modems: map[dbus.ObjectPath]*Modem{"/modem/1": modem},
+		modems:     map[dbus.ObjectPath]*Modem{"/modem/1": modem},
+		openDevice: fakeDeviceOpener(t, device, nil),
 	}
-	withQMIUIMReader(t, modem.PrimaryPort, 1, reader, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
 	defer cancel()
@@ -837,13 +766,13 @@ func TestPowerCycleSIMRefreshesWithoutSecondPowerCycle(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("PowerCycleSIM() error = %v, want %v", err, context.DeadlineExceeded)
 	}
-	wantCalls := []string{"power-off:1", "power-on:1", "slot-status", "card-status"}
-	if !slices.Equal(callPrefixWithoutClose(reader.calls, len(wantCalls)), wantCalls) {
-		t.Fatalf("reader calls prefix = %v, want %v", reader.calls, wantCalls)
+	wantCalls := []string{"power-cycle", "sim-state"}
+	if !slices.Equal(device.calls[:min(len(device.calls), len(wantCalls))], wantCalls) {
+		t.Fatalf("device calls prefix = %v, want %v", device.calls, wantCalls)
 	}
 }
 
-func TestEnsureSIMVisibleWaitsBeforeQMIProbe(t *testing.T) {
+func TestEnsureSIMVisibleWaitsBeforeDeviceProbe(t *testing.T) {
 	oldDelay := simSettleDelay
 	simSettleDelay = 10 * time.Millisecond
 	t.Cleanup(func() {
@@ -864,11 +793,11 @@ func TestEnsureSIMVisibleWaitsBeforeQMIProbe(t *testing.T) {
 		PrimarySimSlot:      1,
 		Sim:                 &SIM{Identifier: "old"},
 	}
+	device := &fakeDeviceControl{}
 	registry := &Registry{
-		modems: map[dbus.ObjectPath]*Modem{"/modem/1": modem},
+		modems:     map[dbus.ObjectPath]*Modem{"/modem/1": modem},
+		openDevice: fakeDeviceOpener(t, device, nil),
 	}
-	reader := &fakeQMIUIMReader{}
-	withQMIUIMReader(t, modem.PrimaryPort, 1, reader, nil)
 
 	timer := time.AfterFunc(time.Millisecond, func() {
 		registry.mu.Lock()
@@ -888,12 +817,12 @@ func TestEnsureSIMVisibleWaitsBeforeQMIProbe(t *testing.T) {
 	if got != modem {
 		t.Fatalf("EnsureSIMVisible() modem = %p, want %p", got, modem)
 	}
-	if len(reader.calls) != 0 {
-		t.Fatalf("reader calls = %v, want none", reader.calls)
+	if len(device.calls) != 0 {
+		t.Fatalf("device calls = %v, want none", device.calls)
 	}
 }
 
-func TestEnsureSIMVisibleSkipsQMIWhenModemIsMissing(t *testing.T) {
+func TestEnsureSIMVisibleSkipsDeviceWhenModemIsMissing(t *testing.T) {
 	oldDelay := simSettleDelay
 	simSettleDelay = time.Nanosecond
 	t.Cleanup(func() {
@@ -914,11 +843,11 @@ func TestEnsureSIMVisibleSkipsQMIWhenModemIsMissing(t *testing.T) {
 		PrimarySimSlot:      1,
 		Sim:                 &SIM{Identifier: target.ICCID},
 	}
+	device := &fakeDeviceControl{}
 	registry := &Registry{
-		modems: map[dbus.ObjectPath]*Modem{},
+		modems:     map[dbus.ObjectPath]*Modem{},
+		openDevice: fakeDeviceOpener(t, device, nil),
 	}
-	reader := &fakeQMIUIMReader{}
-	withQMIUIMReader(t, modem.PrimaryPort, 1, reader, nil)
 
 	timer := time.AfterFunc(time.Millisecond, func() {
 		registry.mu.Lock()
@@ -938,57 +867,9 @@ func TestEnsureSIMVisibleSkipsQMIWhenModemIsMissing(t *testing.T) {
 	if got != modem {
 		t.Fatalf("EnsureSIMVisible() modem = %p, want %p", got, modem)
 	}
-	if len(reader.calls) != 0 {
-		t.Fatalf("reader calls = %v, want none", reader.calls)
+	if len(device.calls) != 0 {
+		t.Fatalf("device calls = %v, want none", device.calls)
 	}
-}
-
-func callPrefixWithoutClose(calls []string, size int) []string {
-	filtered := make([]string, 0, len(calls))
-	for _, call := range calls {
-		if call == "close" {
-			continue
-		}
-		filtered = append(filtered, call)
-		if len(filtered) == size {
-			return filtered
-		}
-	}
-	return filtered
-}
-
-func qmiTestSlotStatus(active uint8, iccid string) uim.SlotStatus {
-	return qmiTestSlotStatusRawICCID(active, qmiTestICCID(iccid))
-}
-
-func qmiTestSlotStatusActiveWithSlotICCID(active, slot uint8, iccid string) uim.SlotStatus {
-	slots := make([]uim.Slot, max(active, slot))
-	slots[slot-1] = uim.Slot{
-		PhysicalCardStatus: uim.PhysicalCardStatePresent,
-		PhysicalSlotStatus: uim.SlotStateActive,
-		LogicalSlot:        1,
-		ICCID:              qmiTestICCID(iccid),
-	}
-	return uim.SlotStatus{ActiveSlot: active, Slots: slots}
-}
-
-func qmiTestSlotStatusRawICCID(active uint8, iccid []byte) uim.SlotStatus {
-	slots := make([]uim.Slot, active)
-	slots[active-1] = uim.Slot{
-		PhysicalCardStatus: uim.PhysicalCardStatePresent,
-		PhysicalSlotStatus: uim.SlotStateActive,
-		LogicalSlot:        1,
-		ICCID:              slices.Clone(iccid),
-	}
-	return uim.SlotStatus{ActiveSlot: active, Slots: slots}
-}
-
-func qmiTestICCID(iccid string) []byte {
-	raw, err := simfile.ICCID(iccid).MarshalBinary()
-	if err != nil {
-		panic(err)
-	}
-	return raw
 }
 
 func fmtBoolEvent(action string, value bool) string {
@@ -998,40 +879,9 @@ func fmtBoolEvent(action string, value bool) string {
 	return action + ":false"
 }
 
-func TestDecodeQMIICCID(t *testing.T) {
-	tests := []struct {
-		name    string
-		raw     []byte
-		want    string
-		wantErr bool
-	}{
-		{
-			name: "swapped bcd",
-			raw:  []byte{0x98, 0x68, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0},
-			want: "8986000000000000000",
-		},
-		{
-			name:    "invalid bcd",
-			raw:     []byte{0x9A},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := decodeQMIICCID(tt.raw)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("decodeQMIICCID() error = nil, want error")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("decodeQMIICCID() error = %v", err)
-			}
-			if got != tt.want {
-				t.Fatalf("decodeQMIICCID() = %q, want %q", got, tt.want)
-			}
-		})
+func testSIMTargetModem(portType ModemPortType) *Modem {
+	return &Modem{
+		PrimaryPort: "/dev/cdc-wdm0",
+		Ports:       []ModemPort{{PortType: portType, Device: "/dev/cdc-wdm0"}},
 	}
 }

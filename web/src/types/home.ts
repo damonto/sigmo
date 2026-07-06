@@ -10,5 +10,6 @@ export type HomeModemItem = {
   supportsEsim: boolean
   number: string
   signalQuality: number
+  airplaneMode: boolean
   wifiCallingConnected: boolean
 }

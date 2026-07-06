@@ -11,8 +11,8 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/pkg/carrier"
-	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
@@ -75,35 +75,48 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		return nil, fmt.Errorf("fetch primary SIM: %w", err)
 	}
 
-	percent, _, err := device.SignalQuality(ctx)
+	airplaneMode, err := readAirplaneMode(ctx, device)
 	if err != nil {
-		return nil, fmt.Errorf("fetch signal quality: %w", err)
+		return nil, fmt.Errorf("read airplane mode: %w", err)
 	}
 
-	access, err := device.AccessTechnologies(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetch access technologies: %w", err)
-	}
+	var percent uint32
+	var access []mmodem.ModemAccessTechnology
+	var registrationState string
+	var registeredOperatorName string
+	var operatorCode string
+	if !airplaneMode {
+		percent, _, err = device.SignalQuality(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("fetch signal quality: %w", err)
+		}
 
-	threeGpp := device.ThreeGPP()
-	registrationState, err := threeGpp.RegistrationState(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetch registration state: %w", err)
-	}
+		access, err = device.AccessTechnologies(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("fetch access technologies: %w", err)
+		}
 
-	registeredOperatorName, err := threeGpp.OperatorName(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetch operator name: %w", err)
-	}
+		threeGpp := device.ThreeGPP()
+		currentRegistrationState, err := threeGpp.RegistrationState(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("fetch registration state: %w", err)
+		}
+		registrationState = currentRegistrationState.String()
 
-	operatorCode, err := threeGpp.OperatorCode(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetch operator code: %w", err)
+		registeredOperatorName, err = threeGpp.OperatorName(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("fetch operator name: %w", err)
+		}
+
+		operatorCode, err = threeGpp.OperatorCode(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("fetch operator code: %w", err)
+		}
 	}
 
 	carrierInfo := carrier.Lookup(sim.OperatorIdentifier)
 	currentSettings := c.store.Snapshot()
-	supportsEsim, err := supportsEsim(ctx, device, &currentSettings)
+	supportsEsim, err := mmodem.SupportsEUICC(device)
 	if err != nil {
 		return nil, fmt.Errorf("detect eSIM support: %w", err)
 	}
@@ -141,12 +154,13 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		},
 		Slots:             simSlots,
 		AccessTechnology:  accessTechnologyString(access),
-		RegistrationState: registrationState.String(),
+		RegistrationState: registrationState,
 		RegisteredOperator: RegisteredOperatorResponse{
 			Name: registeredOperatorName,
 			Code: operatorCode,
 		},
 		SignalQuality: percent,
+		AirplaneMode:  airplaneMode,
 		SupportsEsim:  supportsEsim,
 	}
 	if err := c.applyOverviewExtensions(ctx, device, resp); err != nil {
@@ -162,7 +176,11 @@ func (c *catalog) buildLockedResponse(ctx context.Context, device *mmodem.Modem)
 	if alias != "" {
 		name = alias
 	}
-	supportsEsim, err := supportsEsim(ctx, device, &currentSettings)
+	airplaneMode, err := readAirplaneMode(ctx, device)
+	if err != nil {
+		slog.Warn("read airplane mode for locked modem", "imei", device.EquipmentIdentifier, "error", err)
+	}
+	supportsEsim, err := mmodem.SupportsEUICC(device)
 	if err != nil {
 		slog.Warn("detect eSIM support for locked modem", "imei", device.EquipmentIdentifier, "error", err)
 	}
@@ -176,6 +194,7 @@ func (c *catalog) buildLockedResponse(ctx context.Context, device *mmodem.Modem)
 		State:            modemStateValue(device.State),
 		UnlockRequired:   device.UnlockRequired.String(),
 		UnlockSupported:  unlockSupported(device),
+		AirplaneMode:     airplaneMode,
 		SupportsEsim:     supportsEsim,
 		Slots:            []SlotResponse{},
 	}, nil
@@ -256,30 +275,15 @@ func (c *catalog) applyOverviewExtensions(ctx context.Context, device *mmodem.Mo
 	return nil
 }
 
-func supportsEsim(ctx context.Context, m *mmodem.Modem, currentSettings *settings.Settings) (bool, error) {
-	supported, err := mmodem.SupportsEUICC(m)
+func readAirplaneMode(ctx context.Context, m *mmodem.Modem) (bool, error) {
+	device, err := mmodem.OpenDevice(m)
+	if errors.Is(err, mdevice.ErrUnsupported) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	if supported {
-		return true, nil
-	}
-	if m == nil {
-		return false, nil
-	}
-
-	m.Logger().Debug("fall back to LPA eSIM detection")
-	client, err := lpa.New(m, currentSettings)
-	if err != nil {
-		if !errors.Is(err, lpa.ErrNoSupportedAID) {
-			m.Logger().Debug("LPA eSIM detection failed", "error", err)
-		}
-		return false, nil
-	}
-	if err := client.Close(); err != nil {
-		m.Logger().Warn("close LPA client after eSIM detection", "error", err)
-	}
-	return true, nil
+	return device.AirplaneMode(ctx)
 }
 
 func accessTechnologyString(access []mmodem.ModemAccessTechnology) string {

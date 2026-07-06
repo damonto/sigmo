@@ -72,6 +72,25 @@ func TestNetworkPreferencesStoreForModem(t *testing.T) {
 			},
 		},
 		{
+			name:    "save airplane mode",
+			modemID: "modem-airplane",
+			save: func(ctx context.Context, prefs *NetworkPreferences) error {
+				return prefs.SaveAirplaneMode(ctx, "modem-airplane", true)
+			},
+			assertion: func(t *testing.T, got savedNetworkPreferences, ok bool) {
+				t.Helper()
+				if !ok {
+					t.Fatal("loadForModem() ok = false, want true")
+				}
+				if got.AirplaneMode == nil {
+					t.Fatal("saved airplane mode = nil, want value")
+				}
+				if !*got.AirplaneMode {
+					t.Fatal("saved airplane mode = false, want true")
+				}
+			},
+		},
+		{
 			name:    "overwrite modem keeps other field",
 			modemID: "modem-3",
 			save: func(ctx context.Context, prefs *NetworkPreferences) error {
@@ -125,6 +144,94 @@ func TestNetworkPreferencesStoreForModem(t *testing.T) {
 				t.Fatalf("loadForModem() error = %v", err)
 			}
 			tt.assertion(t, got, ok)
+		})
+	}
+}
+
+func TestRestoreAirplaneModePreference(t *testing.T) {
+	tests := []struct {
+		name            string
+		saveAirplane    bool
+		deviceAirplane  bool
+		wantAirplane    bool
+		wantSetCalls    int
+		wantModeRestore bool
+		wantBandRestore bool
+	}{
+		{
+			name:         "enable skips modes and bands",
+			saveAirplane: true,
+			wantAirplane: true,
+			wantSetCalls: 1,
+		},
+		{
+			name:            "disable restores modes and bands",
+			deviceAirplane:  true,
+			wantSetCalls:    1,
+			wantModeRestore: true,
+			wantBandRestore: true,
+		},
+		{
+			name:            "already disabled still restores modes and bands",
+			wantModeRestore: true,
+			wantBandRestore: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openNetworkPreferencesTestStore(t)
+			prefs, err := NewNetworkPreferences(db)
+			if err != nil {
+				t.Fatalf("NewNetworkPreferences() error = %v", err)
+			}
+			ctx := context.Background()
+			if err := prefs.SaveAirplaneMode(ctx, "modem-1", tt.saveAirplane); err != nil {
+				t.Fatalf("SaveAirplaneMode() error = %v", err)
+			}
+			if err := prefs.SaveMode(ctx, "modem-1", ModemModePair{Allowed: ModemMode4G, Preferred: ModemModeNone}); err != nil {
+				t.Fatalf("SaveMode() error = %v", err)
+			}
+			if err := prefs.SaveBands(ctx, "modem-1", []ModemBand{71}); err != nil {
+				t.Fatalf("SaveBands() error = %v", err)
+			}
+
+			device := &fakeDeviceControl{airplane: tt.deviceAirplane}
+			prefs.openDevice = fakeDeviceOpener(t, device, nil)
+			object := &fakeBusObject{
+				path: "/org/freedesktop/ModemManager1/Modem/1",
+				properties: map[string]dbus.Variant{
+					ModemInterface + ".SupportedModes": dbus.MakeVariant([]dbusModePair{{Allowed: uint32(ModemMode4G), Preferred: uint32(ModemModeNone)}}),
+					ModemInterface + ".CurrentModes":   dbus.MakeVariant(dbusModePair{Allowed: uint32(ModemMode5G), Preferred: uint32(ModemModeNone)}),
+					ModemInterface + ".SupportedBands": dbus.MakeVariant([]uint32{uint32(ModemBandAny), 71}),
+					ModemInterface + ".CurrentBands":   dbus.MakeVariant([]uint32{uint32(ModemBandAny)}),
+				},
+			}
+			modem := &Modem{
+				dbusObject:          object,
+				objectPath:          object.path,
+				EquipmentIdentifier: "modem-1",
+				PrimaryPort:         "/dev/cdc-wdm0",
+				Ports: []ModemPort{
+					{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm0"},
+				},
+			}
+
+			retry, err := prefs.restoreOnce(ctx, modem)
+			if retry {
+				t.Fatal("restoreOnce() retry = true, want false")
+			}
+			if err != nil {
+				t.Fatalf("restoreOnce() error = %v", err)
+			}
+			if got := countCalls(device.calls, "set-airplane-mode"); got != tt.wantSetCalls {
+				t.Fatalf("set airplane mode calls = %d, want %d", got, tt.wantSetCalls)
+			}
+			if tt.wantSetCalls > 0 && device.airplane != tt.wantAirplane {
+				t.Fatalf("airplane mode = %v, want %v", device.airplane, tt.wantAirplane)
+			}
+			assertCallPresence(t, object.calls, ModemInterface+".SetCurrentModes", tt.wantModeRestore)
+			assertCallPresence(t, object.calls, ModemInterface+".SetCurrentBands", tt.wantBandRestore)
 		})
 	}
 }

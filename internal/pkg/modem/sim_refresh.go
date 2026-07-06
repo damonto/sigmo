@@ -7,10 +7,6 @@ import (
 	"log/slog"
 	"strings"
 	"time"
-
-	"github.com/damonto/uicc-go/qcom"
-	"github.com/damonto/uicc-go/qcom/uim"
-	"github.com/damonto/uicc-go/usim/simfile"
 )
 
 var (
@@ -18,8 +14,6 @@ var (
 	simVisiblePollInterval      = time.Second
 	simReenumerationGracePeriod = time.Second
 )
-
-var errQMIRequiredForSIMPowerCycle = errors.New("QMI modem is required for SIM power cycle")
 
 type SIMTarget struct {
 	Slot  uint32
@@ -35,16 +29,6 @@ type currentModemRead struct {
 	Modem          *Modem
 	SIMVisible     bool
 	ReloadObserved bool
-}
-
-type qmiTargetSIMState struct {
-	supported     bool
-	matches       bool
-	recoverable   bool
-	ready         bool
-	iccidMismatch bool
-	iccid         string
-	slot          uint8
 }
 
 func (t SIMTarget) valid() bool {
@@ -85,15 +69,12 @@ func (m *Registry) powerCycleSIM(ctx context.Context, current *Modem, target SIM
 	if !target.valid() {
 		return simRefreshResult{}, errors.New("SIM target is required")
 	}
-	if current.PrimaryPortType() != ModemPortTypeQmi {
-		return simRefreshResult{}, errQMIRequiredForSIMPowerCycle
-	}
-	slot, err := qmiTargetSlot(current, target)
+	device, err := openDeviceForTarget(current, target, m.deviceOpener())
 	if err != nil {
 		return simRefreshResult{}, err
 	}
-	if err := qmiRepowerSimCard(ctx, current, slot); err != nil {
-		return simRefreshResult{}, fmt.Errorf("power cycle QMI SIM: %w", err)
+	if err := device.PowerCycleSIM(ctx); err != nil {
+		return simRefreshResult{}, fmt.Errorf("power cycle SIM: %w", err)
 	}
 	return m.ensureSIMVisible(ctx, current, target, false, true)
 }
@@ -106,14 +87,17 @@ func currentSIMTarget(current *Modem, target SIMTarget) SIMTarget {
 	if current.Sim != nil {
 		target.ICCID = strings.TrimSpace(current.Sim.Identifier)
 	}
-	if target.valid() || current.PrimaryPortType() != ModemPortTypeQmi {
+	if target.valid() {
 		return target
 	}
-	slot, err := qmiSIMSlot(current)
-	if err != nil {
-		return target
+	switch current.PrimaryPortType() {
+	case ModemPortTypeQmi, ModemPortTypeMbim:
+		slot, err := deviceSlot(current)
+		if err != nil {
+			return target
+		}
+		target.Slot = uint32(slot)
 	}
-	target.Slot = uint32(slot)
 	return target
 }
 
@@ -179,14 +163,14 @@ func (m *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 		current = read.Modem
 
 		if reenumerated || powerCycledSIM {
-			state, qmiErr := qmiSIMStateForTarget(ctx, current, target)
-			if qmiErr != nil {
-				slog.Warn("read QMI SIM state", "imei", current.EquipmentIdentifier, "error", qmiErr)
+			state, stateErr := readDeviceSIMState(ctx, current, target, m.deviceOpener())
+			if stateErr != nil {
+				slog.Warn("read device SIM state", "imei", current.EquipmentIdentifier, "error", stateErr)
 			}
 
 			switch {
-			case qmiErr != nil:
-				// QMI returned a partial or unreliable state; do not use it for recovery actions.
+			case stateErr != nil:
+				// Partial or unreliable device state must not drive recovery actions.
 				refreshed, err := refreshModemManagerSIMStateInOrder(ctx, current, &refreshedModemManager, &reloadedModemManager)
 				if err != nil {
 					return simRefreshResult{}, err
@@ -194,10 +178,13 @@ func (m *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 				if refreshed {
 					continue
 				}
-			case state.supported && state.recoverable && !state.ready && !state.iccidMismatch && !activatedProvisioning:
+			case state.Supported && state.Recoverable && !state.Ready && !state.ICCIDMismatch && !activatedProvisioning:
 				activatedProvisioning = true
-				if err := qmiActivateProvisioningIfSimMissing(ctx, current, state.slot); err != nil {
-					slog.Warn("activate QMI provisioning session", "imei", current.EquipmentIdentifier, "error", err)
+				device, err := openDeviceForSlot(current, int(state.Slot), m.deviceOpener())
+				if err != nil {
+					slog.Warn("open device for provisioning session", "imei", current.EquipmentIdentifier, "error", err)
+				} else if err := device.ActivateProvisioningIfSIMMissing(ctx); err != nil {
+					slog.Warn("activate device provisioning session", "imei", current.EquipmentIdentifier, "error", err)
 				}
 				refreshed, err := refreshModemManagerSIMStateInOrder(ctx, current, &refreshedModemManager, &reloadedModemManager)
 				if err != nil {
@@ -206,7 +193,7 @@ func (m *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 				if refreshed {
 					continue
 				}
-			case state.supported && state.recoverable && !state.ready && !state.iccidMismatch:
+			case state.Supported && state.Recoverable && !state.Ready && !state.ICCIDMismatch:
 				refreshed, err := refreshModemManagerSIMStateInOrder(ctx, current, &refreshedModemManager, &reloadedModemManager)
 				if err != nil {
 					return simRefreshResult{}, err
@@ -214,7 +201,7 @@ func (m *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 				if refreshed {
 					continue
 				}
-			case state.supported && state.recoverable && state.ready:
+			case state.Supported && state.Recoverable && state.Ready:
 				refreshed, err := refreshModemManagerSIMStateInOrder(ctx, current, &refreshedModemManager, &reloadedModemManager)
 				if err != nil {
 					return simRefreshResult{}, err
@@ -222,7 +209,7 @@ func (m *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 				if refreshed {
 					continue
 				}
-			case !state.supported:
+			case !state.Supported:
 				refreshed, err := refreshModemManagerSIMStateInOrder(ctx, current, &refreshedModemManager, &reloadedModemManager)
 				if err != nil {
 					return simRefreshResult{}, err
@@ -233,7 +220,7 @@ func (m *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 			}
 		}
 
-		if allowPowerCycleFallback && !reenumerated && !powerCycledSIM && current.PrimaryPortType() == ModemPortTypeQmi {
+		if allowPowerCycleFallback && !reenumerated && !powerCycledSIM {
 			if unchangedModemSince.IsZero() {
 				unchangedModemSince = time.Now()
 			}
@@ -245,13 +232,13 @@ func (m *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 				}
 				continue
 			}
-			slot, err := qmiTargetSlot(current, target)
+			device, err := openDeviceForTarget(current, target, m.deviceOpener())
 			if err != nil {
 				return simRefreshResult{}, err
 			}
 			powerCycledSIM = true
-			if err := qmiRepowerSimCard(ctx, current, slot); err != nil {
-				return simRefreshResult{}, fmt.Errorf("power cycle QMI SIM: %w", err)
+			if err := device.PowerCycleSIM(ctx); err != nil {
+				return simRefreshResult{}, fmt.Errorf("power cycle SIM: %w", err)
 			}
 			continue
 		}
@@ -262,6 +249,13 @@ func (m *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 		case <-ticker.C:
 		}
 	}
+}
+
+func (m *Registry) deviceOpener() deviceControlOpener {
+	if m == nil || m.openDevice == nil {
+		return nil
+	}
+	return m.openDevice
 }
 
 func refreshModemManagerSIMStateInOrder(ctx context.Context, current *Modem, refreshedModemManager *bool, reloadedModemManager *bool) (bool, error) {
@@ -360,93 +354,4 @@ func modemMatchesSIMTarget(m *Modem, target SIMTarget) bool {
 		}
 	}
 	return true
-}
-
-func qmiSIMStateForTarget(ctx context.Context, m *Modem, target SIMTarget) (qmiTargetSIMState, error) {
-	if m.PrimaryPortType() != ModemPortTypeQmi {
-		return qmiTargetSIMState{}, nil
-	}
-	slot, err := qmiTargetSlot(m, target)
-	if err != nil {
-		return qmiTargetSIMState{supported: true}, err
-	}
-	reader, err := openQMIUIMReader(ctx, m.PrimaryPort, slot)
-	if err != nil {
-		return qmiTargetSIMState{supported: true}, fmt.Errorf("open QMI UIM reader: %w", err)
-	}
-	defer closeQMIUIMReader(reader)
-
-	state := qmiTargetSIMState{supported: true, slot: slot}
-	var slotStatus uim.SlotStatus
-	var slotStatusRead bool
-	slotStatus, err = reader.SlotStatus(ctx)
-	if err != nil && !errors.Is(err, qcom.QMIErrorNotSupported) {
-		return state, fmt.Errorf("read QMI UIM slot status: %w", err)
-	}
-	if err == nil {
-		slotStatusRead = true
-		iccid, err := qmiICCIDForSlot(slotStatus, slot)
-		if err != nil {
-			return state, err
-		}
-		state.iccid = iccid
-		state.matches = qmiSlotMatchesTarget(slotStatus, slot, state.iccid, target)
-		targetICCID := strings.TrimSpace(target.ICCID)
-		state.iccidMismatch = targetICCID != "" && state.iccid != "" && state.iccid != targetICCID
-	}
-
-	cardStatus, err := reader.CardStatus(ctx)
-	if err != nil {
-		return state, fmt.Errorf("read QMI UIM card status: %w", err)
-	}
-	state.ready = qmiUSIMReadyForSlot(cardStatus, slot)
-	state.recoverable = state.matches
-	if !state.recoverable && qmiUSIMPresentForSlot(cardStatus, slot) {
-		slotContradicted := target.Slot == 0 && slotStatusRead && slotStatus.ActiveSlot != 0 && slotStatus.ActiveSlot != slot
-		state.recoverable = !slotContradicted
-	}
-	return state, nil
-}
-
-func qmiTargetSlot(m *Modem, target SIMTarget) (uint8, error) {
-	if target.Slot != 0 {
-		if target.Slot > qmiMaxSIMSlot {
-			return 0, fmt.Errorf("QMI SIM slot %d is out of range", target.Slot)
-		}
-		return uint8(target.Slot), nil
-	}
-	return qmiSIMSlot(m)
-}
-
-func qmiSlotMatchesTarget(status uim.SlotStatus, slot uint8, iccid string, target SIMTarget) bool {
-	if target.Slot != 0 && status.ActiveSlot != slot {
-		return false
-	}
-	if target.ICCID != "" && iccid != strings.TrimSpace(target.ICCID) {
-		return false
-	}
-	return true
-}
-
-func qmiICCIDForSlot(status uim.SlotStatus, slot uint8) (string, error) {
-	if slot == 0 || int(slot) > len(status.Slots) {
-		return "", nil
-	}
-	raw := status.Slots[slot-1].ICCID
-	if len(raw) == 0 {
-		return "", nil
-	}
-	iccid, err := decodeQMIICCID(raw)
-	if err != nil {
-		return "", fmt.Errorf("decode QMI slot %d ICCID: %w", slot, err)
-	}
-	return iccid, nil
-}
-
-func decodeQMIICCID(raw []byte) (string, error) {
-	var iccid simfile.ICCID
-	if err := iccid.UnmarshalBinary(raw); err != nil {
-		return "", err
-	}
-	return iccid.String(), nil
 }

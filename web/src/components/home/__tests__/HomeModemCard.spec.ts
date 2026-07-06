@@ -22,6 +22,7 @@ const mountCard = (number: string) =>
       supportsEsim: true,
       number,
       signalQuality: 72,
+      airplaneMode: false,
       wifiCallingConnected: false,
     },
     global: {

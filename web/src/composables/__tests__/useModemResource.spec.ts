@@ -39,6 +39,7 @@ const modem = (id: string, regionCode = 'US'): Modem => ({
     code: '310260',
   },
   signalQuality: 80,
+  airplaneMode: false,
   supportsEsim: false,
 })
 

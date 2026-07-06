@@ -19,6 +19,7 @@ const props = defineProps<{
   supportsEsim: boolean
   number: string
   signalQuality: number
+  airplaneMode: boolean
   wifiCallingConnected: boolean
 }>()
 
@@ -34,11 +35,19 @@ const getTech = (accessTechnology: string | null): '4G' | '5G' => {
 }
 
 const tech = computed(() => getTech(props.accessTechnology))
-const techVariant = computed(() => (tech.value === '5G' ? 'default' : 'secondary'))
+const techVariant = computed(() => (tech.value === '5G' && !props.airplaneMode ? 'default' : 'secondary'))
 const isRoaming = computed(() => props.registrationState === 'Roaming')
-const showRoamingLabel = computed(() => isRoaming.value && Boolean(props.registeredOperatorCode))
+const showRoamingLabel = computed(
+  () => !props.airplaneMode && isRoaming.value && Boolean(props.registeredOperatorCode),
+)
 const roamingLabel = computed(() => props.registeredOperatorName || props.registeredOperatorCode)
 const esimLabel = computed(() => (props.supportsEsim ? t('labels.esim') : t('labels.psim')))
+const techLabel = computed(() =>
+  props.airplaneMode ? t('modemDetail.settings.networkAirplaneModeStatus') : tech.value,
+)
+const operatorLine = computed(() =>
+  props.airplaneMode ? t('modemDetail.settings.networkAirplaneModeStatus') : props.operatorName,
+)
 const displayName = computed(() => (props.name.trim().length > 0 ? props.name : props.operatorName))
 const displayNumber = computed(() => {
   const number = props.number.trim()
@@ -65,7 +74,7 @@ const displayNumber = computed(() => {
           </p>
           <div class="flex shrink-0 items-center gap-1.5">
             <Badge :variant="techVariant">
-              {{ tech }}
+              {{ techLabel }}
             </Badge>
             <Badge variant="outline">
               {{ esimLabel }}
@@ -73,7 +82,7 @@ const displayNumber = computed(() => {
           </div>
         </div>
         <p class="truncate text-xs font-normal text-foreground/70">
-          <span>{{ props.operatorName }}</span>
+          <span>{{ operatorLine }}</span>
           <span v-if="showRoamingLabel" class="ml-1 text-muted-foreground">
             ({{ roamingLabel }})
           </span>
@@ -87,6 +96,7 @@ const displayNumber = computed(() => {
             :registration-state="props.registrationState"
             :access-technology="props.accessTechnology"
             :wifi-calling-connected="props.wifiCallingConnected"
+            :airplane-mode="props.airplaneMode"
             size="sm"
           />
         </div>

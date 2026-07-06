@@ -40,3 +40,12 @@ type BandResponse struct {
 type SetCurrentBandsRequest struct {
 	Bands []uint32 `json:"bands"`
 }
+
+type AirplaneModeResponse struct {
+	Supported bool `json:"supported"`
+	Enabled   bool `json:"enabled"`
+}
+
+type SetAirplaneModeRequest struct {
+	Enabled bool `json:"enabled"`
+}

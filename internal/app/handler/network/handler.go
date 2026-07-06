@@ -8,6 +8,7 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -17,20 +18,24 @@ type Handler struct {
 }
 
 const (
-	errorCodeListNetworksFailed    = "list_networks_failed"
-	errorCodeRegisterNetworkFailed = "register_network_failed"
-	errorCodeOperatorCodeRequired  = "operator_code_required"
-	errorCodeGetModesFailed        = "get_modes_failed"
-	errorCodeSetModesFailed        = "set_modes_failed"
-	errorCodeSetModesInvalid       = "set_modes_invalid_request"
-	errorCodeUnsupportedMode       = "unsupported_mode"
-	errorCodeGetBandsFailed        = "get_bands_failed"
-	errorCodeSetBandsFailed        = "set_bands_failed"
-	errorCodeSetBandsInvalid       = "set_bands_invalid_request"
-	errorCodeBandsRequired         = "bands_required"
-	errorCodeUnsupportedBand       = "unsupported_band"
-	errorCodeDuplicateBand         = "duplicate_band"
-	errorCodeAnyBandExclusive      = "any_band_exclusive"
+	errorCodeListNetworksFailed      = "list_networks_failed"
+	errorCodeRegisterNetworkFailed   = "register_network_failed"
+	errorCodeOperatorCodeRequired    = "operator_code_required"
+	errorCodeGetModesFailed          = "get_modes_failed"
+	errorCodeSetModesFailed          = "set_modes_failed"
+	errorCodeSetModesInvalid         = "set_modes_invalid_request"
+	errorCodeUnsupportedMode         = "unsupported_mode"
+	errorCodeGetBandsFailed          = "get_bands_failed"
+	errorCodeSetBandsFailed          = "set_bands_failed"
+	errorCodeSetBandsInvalid         = "set_bands_invalid_request"
+	errorCodeBandsRequired           = "bands_required"
+	errorCodeUnsupportedBand         = "unsupported_band"
+	errorCodeDuplicateBand           = "duplicate_band"
+	errorCodeAnyBandExclusive        = "any_band_exclusive"
+	errorCodeGetAirplaneModeFailed   = "get_airplane_mode_failed"
+	errorCodeSetAirplaneModeFailed   = "set_airplane_mode_failed"
+	errorCodeSetAirplaneModeInvalid  = "set_airplane_mode_invalid_request"
+	errorCodeAirplaneModeUnsupported = "airplane_mode_unsupported"
 )
 
 func New(registry *mmodem.Registry, preferences *mmodem.NetworkPreferences, store *storage.Store) (*Handler, error) {
@@ -141,6 +146,38 @@ func (h *Handler) SetCurrentBands(c *echo.Context) error {
 		default:
 			return httpapi.Internal(c, errorCodeSetBandsFailed, err)
 		}
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *Handler) AirplaneMode(c *echo.Context) error {
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeGetAirplaneModeFailed)
+	}
+	response, err := h.networks.AirplaneMode(ctx, modem)
+	if err != nil {
+		return httpapi.Internal(c, errorCodeGetAirplaneModeFailed, err)
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
+func (h *Handler) SetAirplaneMode(c *echo.Context) error {
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeSetAirplaneModeFailed)
+	}
+	var req SetAirplaneModeRequest
+	if err := c.Bind(&req); err != nil {
+		return httpapi.BadRequest(c, errorCodeSetAirplaneModeInvalid, err)
+	}
+	if err := h.networks.SetAirplaneMode(ctx, modem, req); err != nil {
+		if errors.Is(err, mdevice.ErrUnsupported) {
+			return httpapi.BadRequest(c, errorCodeAirplaneModeUnsupported, err)
+		}
+		return httpapi.Internal(c, errorCodeSetAirplaneModeFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

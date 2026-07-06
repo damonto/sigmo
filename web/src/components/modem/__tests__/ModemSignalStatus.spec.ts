@@ -72,6 +72,7 @@ const modem = (registrationState = 'Roaming'): Modem => ({
     code: '00101',
   },
   signalQuality: 67,
+  airplaneMode: false,
   supportsEsim: true,
 })
 
@@ -228,6 +229,27 @@ describe('ModemSignalStatus', () => {
 
     expect(wrapper.text()).toContain('LTE')
     expect(wrapper.text()).toContain('Carrier')
+  })
+
+  it('shows only airplane mode state when the radio is off', () => {
+    const wrapper = mount(ModemSignalStatus, {
+      props: {
+        signalQuality: 72,
+        registrationState: 'Roaming',
+        accessTechnology: 'LTE',
+        registeredOperatorName: 'Carrier',
+        wifiCallingConnected: true,
+        airplaneMode: true,
+      },
+    })
+
+    expect(
+      wrapper.find('[aria-label="modemDetail.settings.networkAirplaneModeStatus"]').exists(),
+    ).toBe(true)
+    expect(wrapper.text()).not.toContain('72%')
+    expect(wrapper.text()).not.toContain('R')
+    expect(wrapper.text()).not.toContain('LTE')
+    expect(wrapper.text()).not.toContain('Carrier')
   })
 })
 

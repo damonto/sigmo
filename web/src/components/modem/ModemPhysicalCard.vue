@@ -41,7 +41,11 @@ const { t } = useI18n()
           {{ t('modemDetail.fields.roamingCarrier') }}
         </span>
         <span class="text-muted-foreground">
-          {{ props.modem.registeredOperator.name || '—' }}
+          {{
+            props.modem.airplaneMode
+              ? t('modemDetail.settings.networkAirplaneModeStatus')
+              : props.modem.registeredOperator.name || '—'
+          }}
         </span>
       </div>
       <div class="flex items-center justify-between gap-4">
@@ -54,6 +58,7 @@ const { t } = useI18n()
           :access-technology="props.modem.accessTechnology"
           :registered-operator-name="props.modem.registeredOperator.name"
           :wifi-calling-connected="props.modem.wifiCallingConnected"
+          :airplane-mode="props.modem.airplaneMode"
           size="md"
         />
       </div>

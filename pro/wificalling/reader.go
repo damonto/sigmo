@@ -9,120 +9,92 @@ import (
 	"strings"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
 	"github.com/damonto/uicc-go/at"
-	"github.com/damonto/uicc-go/qcom/qmi"
-	"github.com/damonto/uicc-go/qcom/uim"
 	"github.com/damonto/uicc-go/usim"
 	usimcard "github.com/damonto/uicc-go/usim/card"
 )
 
 func openReader(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader, error) {
-	return openReaderWith(ctx, modem, openReaderCandidate)
+	return openReaderWith(ctx, modem, openDeviceReader, openATReader)
 }
 
-type readerCandidate struct {
-	portType mmodem.ModemPortType
-	device   string
-}
+type deviceReaderOpener func(context.Context, *mmodem.Modem) (usimcard.Reader, error)
+type atReaderOpener func(context.Context, mmodem.ModemPort) (usimcard.Reader, error)
 
-type readerOpener func(context.Context, readerCandidate, int) (usimcard.Reader, error)
-
-func openReaderWith(ctx context.Context, modem *mmodem.Modem, open readerOpener) (usimcard.Reader, error) {
-	slot := 1
-	if modem.PrimarySimSlot > 0 {
-		slot = int(modem.PrimarySimSlot)
-	}
-	candidates := readerCandidates(modem)
-	if len(candidates) == 0 {
-		return nil, errors.New("Wi-Fi Calling requires QMI or AT modem port")
-	}
+func openReaderWith(ctx context.Context, modem *mmodem.Modem, openDevice deviceReaderOpener, openAT atReaderOpener) (usimcard.Reader, error) {
 	var result error
-	for _, candidate := range candidates {
-		reader, err := open(ctx, candidate, slot)
+	reader, err := openDevice(ctx, modem)
+	if err == nil {
+		return reader, nil
+	}
+	if !errors.Is(err, mdevice.ErrUnsupported) {
+		result = errors.Join(result, fmt.Errorf("open device reader: %w", err))
+	}
+
+	for _, port := range atReaderPorts(modem) {
+		reader, err := openAT(ctx, port)
 		if err == nil {
 			return reader, nil
 		}
-		result = errors.Join(result, fmt.Errorf("open %s reader on %s: %w", readerPortTypeName(candidate.portType), candidate.device, err))
+		result = errors.Join(result, fmt.Errorf("open AT reader on %s: %w", port.Device, err))
+	}
+	if result == nil {
+		return nil, errors.New("Wi-Fi Calling requires modem device or AT modem port")
 	}
 	return nil, result
 }
 
-func readerCandidates(modem *mmodem.Modem) []readerCandidate {
+func atReaderPorts(modem *mmodem.Modem) []mmodem.ModemPort {
 	if modem == nil {
 		return nil
 	}
-	var candidates []readerCandidate
-	add := func(portType mmodem.ModemPortType, device string) {
+	var ports []mmodem.ModemPort
+	add := func(port mmodem.ModemPort) {
+		device := port.Device
 		device = strings.TrimSpace(device)
-		if device == "" || !supportedReaderPort(portType) {
+		if device == "" || port.PortType != mmodem.ModemPortTypeAt {
 			return
 		}
-		for _, candidate := range candidates {
-			if candidate.portType == portType && candidate.device == device {
+		for _, candidate := range ports {
+			if candidate.Device == device {
 				return
 			}
 		}
-		candidates = append(candidates, readerCandidate{portType: portType, device: device})
+		port.Device = device
+		ports = append(ports, port)
 	}
-	add(modem.PrimaryPortType(), modem.PrimaryPort)
-	for _, portType := range []mmodem.ModemPortType{mmodem.ModemPortTypeQmi, mmodem.ModemPortTypeAt} {
-		for _, port := range modem.Ports {
-			if port.PortType == portType {
-				add(portType, port.Device)
-			}
+
+	for _, port := range modem.Ports {
+		if port.Device == modem.PrimaryPort {
+			add(port)
+			break
 		}
 	}
-	return candidates
+	for _, port := range modem.Ports {
+		if port.PortType == mmodem.ModemPortTypeAt {
+			add(port)
+		}
+	}
+	return ports
 }
 
-func supportedReaderPort(portType mmodem.ModemPortType) bool {
-	return portType == mmodem.ModemPortTypeQmi || portType == mmodem.ModemPortTypeAt
+func openDeviceReader(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader, error) {
+	device, err := mmodem.OpenDevice(modem)
+	if err != nil {
+		return nil, err
+	}
+	return device.USIM(ctx)
 }
 
-func openReaderCandidate(ctx context.Context, candidate readerCandidate, slot int) (usimcard.Reader, error) {
-	switch candidate.portType {
-	case mmodem.ModemPortTypeQmi:
-		if slot < 1 || slot > 5 {
-			return nil, fmt.Errorf("slot %d is out of range", slot)
-		}
-		transport, err := qmi.Open(ctx, qmi.WithProxy(candidate.device))
-		if err != nil {
-			return nil, err
-		}
-		reader, err := uim.New(ctx, transport, uim.WithSlot(uint8(slot)))
-		if err != nil {
-			return nil, errors.Join(err, transport.Close())
-		}
-		if err := reader.ActivateSlot(ctx); err != nil {
-			return nil, errors.Join(err, reader.Close())
-		}
-		adapter, err := usim.NewQCOM(reader)
-		if err != nil {
-			return nil, errors.Join(err, reader.Close())
-		}
-		return adapter, nil
-	case mmodem.ModemPortTypeAt:
-		tx, err := at.Open(candidate.device, 0)
-		if err != nil {
-			return nil, err
-		}
-		reader, err := usim.NewReader(tx)
-		if err != nil {
-			return nil, errors.Join(err, tx.Close())
-		}
-		return reader, nil
-	default:
-		return nil, errors.New("reader port type is unsupported")
+func openATReader(_ context.Context, port mmodem.ModemPort) (usimcard.Reader, error) {
+	tx, err := at.Open(port.Device, 0)
+	if err != nil {
+		return nil, err
 	}
-}
-
-func readerPortTypeName(portType mmodem.ModemPortType) string {
-	switch portType {
-	case mmodem.ModemPortTypeQmi:
-		return "QMI"
-	case mmodem.ModemPortTypeAt:
-		return "AT"
-	default:
-		return "unknown"
+	reader, err := usim.NewReader(tx)
+	if err != nil {
+		return nil, errors.Join(err, tx.Close())
 	}
+	return reader, nil
 }

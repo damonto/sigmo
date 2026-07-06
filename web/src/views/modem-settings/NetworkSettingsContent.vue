@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NetworkAirplaneModePanel from './NetworkAirplaneModePanel.vue'
 import NetworkBandsPanel from './NetworkBandsPanel.vue'
 import NetworkModePanel from './NetworkModePanel.vue'
 import NetworkOverviewPanel from './NetworkOverviewPanel.vue'
@@ -11,14 +12,19 @@ const props = defineProps<{
   registrationState: string
   accessTechnology: string
   isScanning: boolean
+  canScanNetworks: boolean
   modeOptions: ModeResponse[]
   supportedBands: BandResponse[]
   selectedBands: number[]
+  airplaneModeSupported: boolean
+  airplaneModeEnabled: boolean
   isSettingsLoading: boolean
   isModeUpdating: boolean
   isBandUpdating: boolean
+  isAirplaneModeUpdating: boolean
   canUpdateMode: boolean
   canUpdateBands: boolean
+  canUpdateAirplaneMode: boolean
 }>()
 
 const emit = defineEmits<{
@@ -26,6 +32,7 @@ const emit = defineEmits<{
   (event: 'toggleBand', value: number, checked: boolean): void
   (event: 'updateMode'): void
   (event: 'updateBands'): void
+  (event: 'updateAirplaneMode', enabled: boolean): void
 }>()
 
 const handleToggleBand = (value: number, checked: boolean) => {
@@ -40,13 +47,23 @@ const handleToggleBand = (value: number, checked: boolean) => {
       :registration-state="props.registrationState"
       :access-technology="props.accessTechnology"
       :is-scanning="props.isScanning"
+      :can-scan="props.canScanNetworks"
       @scan="emit('scan')"
+    />
+
+    <NetworkAirplaneModePanel
+      :supported="props.airplaneModeSupported"
+      :enabled="props.airplaneModeEnabled"
+      :is-loading="props.isSettingsLoading"
+      :is-updating="props.isAirplaneModeUpdating"
+      :can-update="props.canUpdateAirplaneMode"
+      @update="emit('updateAirplaneMode', $event)"
     />
 
     <NetworkModePanel
       v-model:selected-mode="selectedMode"
       :mode-options="props.modeOptions"
-      :is-settings-loading="props.isSettingsLoading"
+      :is-settings-loading="props.isSettingsLoading || props.airplaneModeEnabled"
       :is-mode-updating="props.isModeUpdating"
       :can-update-mode="props.canUpdateMode"
       @update-mode="emit('updateMode')"
@@ -55,7 +72,7 @@ const handleToggleBand = (value: number, checked: boolean) => {
     <NetworkBandsPanel
       :supported-bands="props.supportedBands"
       :selected-bands="props.selectedBands"
-      :is-settings-loading="props.isSettingsLoading"
+      :is-settings-loading="props.isSettingsLoading || props.airplaneModeEnabled"
       :is-band-updating="props.isBandUpdating"
       :can-update-bands="props.canUpdateBands"
       @toggle-band="handleToggleBand"

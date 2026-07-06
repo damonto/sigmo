@@ -45,6 +45,7 @@ const modem = (slots: Modem['slots']): Modem => ({
     code: '00101',
   },
   signalQuality: 80,
+  airplaneMode: false,
   supportsEsim: false,
 })
 

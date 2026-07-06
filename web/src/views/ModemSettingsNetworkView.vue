@@ -16,7 +16,7 @@ const { t } = useI18n()
 
 const modemId = computed(() => route.params.id as string)
 
-const { showFeedback } = useFeedbackBanner()
+const { showFeedback, showError } = useFeedbackBanner()
 const { currentOperatorLabel, currentRegistrationState, currentAccessTechnology, fetchModem } =
   useModemOverview(modemId)
 
@@ -28,24 +28,32 @@ const {
   selectedMode,
   supportedBands,
   selectedBands,
+  airplaneModeSupported,
+  airplaneModeEnabled,
   isNetworkLoading,
   isNetworkRegistering,
   isNetworkSettingsLoading,
   isModeUpdating,
   isBandUpdating,
+  isAirplaneModeUpdating,
   hasAvailableNetworks,
   hasNetworkSelection,
+  canScanNetworks,
   canUpdateMode,
   canUpdateBands,
+  canUpdateAirplaneMode,
   openNetworkDialog,
   handleNetworkRegister,
   handleModeUpdate,
   toggleBand,
   handleBandUpdate,
+  handleAirplaneModeUpdate,
 } = useModemNetwork({
   modemId,
   onRegistered: fetchModem,
+  onChanged: fetchModem,
   onSuccess: showFeedback,
+  onError: showError,
 })
 </script>
 
@@ -63,18 +71,24 @@ const {
       :registration-state="currentRegistrationState"
       :access-technology="currentAccessTechnology"
       :is-scanning="isNetworkLoading"
+      :can-scan-networks="canScanNetworks"
       :mode-options="modeOptions"
       :supported-bands="supportedBands"
       :selected-bands="selectedBands"
+      :airplane-mode-supported="airplaneModeSupported"
+      :airplane-mode-enabled="airplaneModeEnabled"
       :is-settings-loading="isNetworkSettingsLoading"
       :is-mode-updating="isModeUpdating"
       :is-band-updating="isBandUpdating"
+      :is-airplane-mode-updating="isAirplaneModeUpdating"
       :can-update-mode="canUpdateMode"
       :can-update-bands="canUpdateBands"
+      :can-update-airplane-mode="canUpdateAirplaneMode"
       @scan="openNetworkDialog"
       @toggle-band="toggleBand"
       @update-mode="handleModeUpdate"
       @update-bands="handleBandUpdate"
+      @update-airplane-mode="handleAirplaneModeUpdate"
     />
   </ModemSettingsShell>
 

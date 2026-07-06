@@ -60,19 +60,21 @@ type Connection struct {
 }
 
 type Connector struct {
-	mu          sync.Mutex
-	operationMu sync.Mutex
-	connections map[string]trackedConnection
-	preferences map[string]Preferences
-	operations  map[string]*sync.Mutex
-	proxy       *Proxy
-	state       *storage.Store
-	persistence connectionStateStore
+	mu                 sync.Mutex
+	operationMu        sync.Mutex
+	connections        map[string]trackedConnection
+	preferences        map[string]Preferences
+	operations         map[string]*sync.Mutex
+	proxy              *Proxy
+	state              *storage.Store
+	persistence        connectionStateStore
+	networkPreferences *mmodem.NetworkPreferences
 }
 
 type ConnectorConfig struct {
-	Proxy *Proxy
-	State *storage.Store
+	Proxy              *Proxy
+	State              *storage.Store
+	NetworkPreferences *mmodem.NetworkPreferences
 }
 
 type internetModem interface {
@@ -188,12 +190,13 @@ func NewConnector(cfg ConnectorConfig) (*Connector, error) {
 		return nil, errors.New("storage is required")
 	}
 	return &Connector{
-		connections: make(map[string]trackedConnection),
-		preferences: make(map[string]Preferences),
-		operations:  make(map[string]*sync.Mutex),
-		proxy:       cfg.Proxy,
-		state:       cfg.State,
-		persistence: dbConnectionState{store: cfg.State},
+		connections:        make(map[string]trackedConnection),
+		preferences:        make(map[string]Preferences),
+		operations:         make(map[string]*sync.Mutex),
+		proxy:              cfg.Proxy,
+		state:              cfg.State,
+		persistence:        dbConnectionState{store: cfg.State},
+		networkPreferences: cfg.NetworkPreferences,
 	}, nil
 }
 
@@ -215,15 +218,34 @@ func (c *Connector) Recover(ctx context.Context, modems []*mmodem.Modem) error {
 		if modem == nil {
 			continue
 		}
+		airplaneMode, err := c.savedAirplaneMode(ctx, modem)
+		if err != nil {
+			result = errors.Join(result, fmt.Errorf("read airplane mode preference for modem %s: %w", modem.EquipmentIdentifier, err))
+			continue
+		}
+		if airplaneMode {
+			continue
+		}
 		access := modemAccess{modem: modem}
 		unlock := c.lockModem(access.id())
-		err := c.recover(ctx, access)
+		err = c.recover(ctx, access)
 		unlock()
 		if err != nil {
 			result = errors.Join(result, fmt.Errorf("recover internet connection for modem %s: %w", access.id(), err))
 		}
 	}
 	return result
+}
+
+func (c *Connector) savedAirplaneMode(ctx context.Context, modem *mmodem.Modem) (bool, error) {
+	if c.networkPreferences == nil || modem == nil {
+		return false, nil
+	}
+	enabled, ok, err := c.networkPreferences.SavedAirplaneMode(ctx, modem.EquipmentIdentifier)
+	if err != nil || !ok {
+		return false, err
+	}
+	return enabled, nil
 }
 
 func (c *Connector) Current(ctx context.Context, modem *mmodem.Modem) (*Connection, error) {

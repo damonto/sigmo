@@ -542,6 +542,16 @@ const en = {
       networkBandTitle: 'Frequency Bands',
       networkBandEmpty: 'No supported bands reported.',
       networkBandSuccess: 'Network bands updated.',
+      networkAirplaneModeTitle: 'Airplane Mode',
+      networkAirplaneModeLabel: 'Turn off cellular radio',
+      networkAirplaneModeDescription:
+        'Stops cellular registration and data connections while enabled.',
+      networkAirplaneModeUnsupported:
+        'This modem does not support airplane mode control over QMI or MBIM.',
+      networkAirplaneModeStatus: 'Airplane Mode',
+      networkAirplaneModeEnabledSuccess: 'Airplane mode enabled.',
+      networkAirplaneModeDisabledSuccess: 'Airplane mode disabled.',
+      networkAirplaneModeUpdateFailed: 'Airplane mode update failed.',
       internetTitle: 'Internet',
       internetAPNLabel: 'APN',
       internetAPNPlaceholder: 'APN',

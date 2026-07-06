@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { SignalHigh, Wifi } from 'lucide-vue-next'
+import { Plane, SignalHigh, Wifi } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 import { Badge } from '@/components/ui/badge'
@@ -13,6 +13,7 @@ const props = withDefaults(
     accessTechnology?: string | null
     registeredOperatorName?: string | null
     wifiCallingConnected?: boolean
+    airplaneMode?: boolean
     showSignalValue?: boolean
     size?: 'sm' | 'md'
     variant?: 'inline' | 'pill'
@@ -59,6 +60,7 @@ const accessTechnologyTitle = computed(
 const registeredOperatorTitle = computed(
   () => `${t('labels.registeredOperator')}: ${registeredOperatorLabel.value}`,
 )
+const airplaneModeTitle = computed(() => t('modemDetail.settings.networkAirplaneModeStatus'))
 const iconSizeClass = computed(() => (props.size === 'md' ? 'size-5' : 'size-4'))
 const numberClass = computed(() =>
   props.size === 'md'
@@ -89,55 +91,64 @@ const rootClass = computed(() =>
 
 <template>
   <div :class="rootClass" data-testid="modem-signal-status">
-    <component
-      :is="signalIconComponent"
+    <Plane
+      v-if="props.airplaneMode"
       class="shrink-0"
-      :class="[iconSizeClass, signalToneClass, isSearching && 'animate-pulse']"
-      :title="signalTitle"
+      :class="[iconSizeClass, 'text-muted-foreground']"
+      :title="airplaneModeTitle"
+      :aria-label="airplaneModeTitle"
     />
-    <span v-if="props.showSignalValue" :class="numberClass">
-      {{ signalValue }}
-    </span>
-    <Wifi
-      v-if="props.wifiCallingConnected"
-      class="shrink-0 text-sky-500"
-      :class="iconSizeClass"
-      title="Wi-Fi Calling"
-      aria-label="Wi-Fi Calling"
-    />
-    <component
-      v-if="showRegistrationIcon && registrationIcon"
-      :is="registrationIcon"
-      class="shrink-0"
-      :class="[iconSizeClass, registrationToneClass]"
-      :aria-label="props.registrationState"
-      :title="props.registrationState"
-    />
-    <Badge
-      v-else-if="showRegistrationIcon && registrationLabel"
-      variant="secondary"
-      :class="[registrationBadgeClass, registrationToneClass]"
-      :aria-label="props.registrationState"
-      :title="props.registrationState"
-    >
-      {{ registrationLabel }}
-    </Badge>
-    <Badge
-      v-if="accessTechnologyLabel"
-      variant="outline"
-      :class="accessTechnologyClass"
-      :aria-label="accessTechnologyTitle"
-      :title="accessTechnologyTitle"
-    >
-      {{ accessTechnologyLabel }}
-    </Badge>
-    <span
-      v-if="registeredOperatorLabel"
-      :class="operatorClass"
-      :aria-label="registeredOperatorTitle"
-      :title="registeredOperatorTitle"
-    >
-      {{ registeredOperatorLabel }}
-    </span>
+    <template v-else>
+      <component
+        :is="signalIconComponent"
+        class="shrink-0"
+        :class="[iconSizeClass, signalToneClass, isSearching && 'animate-pulse']"
+        :title="signalTitle"
+      />
+      <span v-if="props.showSignalValue" :class="numberClass">
+        {{ signalValue }}
+      </span>
+      <Wifi
+        v-if="props.wifiCallingConnected"
+        class="shrink-0 text-sky-500"
+        :class="iconSizeClass"
+        title="Wi-Fi Calling"
+        aria-label="Wi-Fi Calling"
+      />
+      <component
+        v-if="showRegistrationIcon && registrationIcon"
+        :is="registrationIcon"
+        class="shrink-0"
+        :class="[iconSizeClass, registrationToneClass]"
+        :aria-label="props.registrationState"
+        :title="props.registrationState"
+      />
+      <Badge
+        v-else-if="showRegistrationIcon && registrationLabel"
+        variant="secondary"
+        :class="[registrationBadgeClass, registrationToneClass]"
+        :aria-label="props.registrationState"
+        :title="props.registrationState"
+      >
+        {{ registrationLabel }}
+      </Badge>
+      <Badge
+        v-if="accessTechnologyLabel"
+        variant="outline"
+        :class="accessTechnologyClass"
+        :aria-label="accessTechnologyTitle"
+        :title="accessTechnologyTitle"
+      >
+        {{ accessTechnologyLabel }}
+      </Badge>
+      <span
+        v-if="registeredOperatorLabel"
+        :class="operatorClass"
+        :aria-label="registeredOperatorTitle"
+        :title="registeredOperatorTitle"
+      >
+        {{ registeredOperatorLabel }}
+      </span>
+    </template>
   </div>
 </template>

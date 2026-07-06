@@ -107,6 +107,7 @@ const handleSelect = (modem: Modem) => {
           :registration-state="item.registrationState"
           :access-technology="item.accessTechnology"
           :wifi-calling-connected="item.wifiCallingConnected"
+          :airplane-mode="item.airplaneMode"
           :show-signal-value="false"
           size="sm"
         />

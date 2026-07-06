@@ -11,6 +11,7 @@ const props = defineProps<{
   registrationState: string
   accessTechnology: string
   isScanning: boolean
+  canScan: boolean
 }>()
 
 const emit = defineEmits<{
@@ -19,7 +20,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const isScanDisabled = computed(() => props.isScanning)
+const isScanDisabled = computed(() => props.isScanning || !props.canScan)
 </script>
 
 <template>

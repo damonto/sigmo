@@ -40,3 +40,12 @@ export type BandsResponse = {
 export type SetCurrentBandsRequest = {
   bands: number[]
 }
+
+export type AirplaneModeResponse = {
+  supported: boolean
+  enabled: boolean
+}
+
+export type SetAirplaneModeRequest = {
+  enabled: boolean
+}

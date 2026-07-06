@@ -1,9 +1,11 @@
 import { fetchJson } from '@/lib/fetch'
 
 import type {
+  AirplaneModeResponse,
   BandsResponse,
   ModesResponse,
   NetworksResponse,
+  SetAirplaneModeRequest,
   SetCurrentBandsRequest,
   SetCurrentModesRequest,
 } from '@/types/network'
@@ -42,6 +44,17 @@ export const useNetworkApi = () => {
     })
   }
 
+  const getAirplaneMode = (id: string) => {
+    return fetchJson<AirplaneModeResponse>(`modems/${id}/networks/airplane-mode`)
+  }
+
+  const setAirplaneMode = (id: string, payload: SetAirplaneModeRequest) => {
+    return fetchJson<void>(`modems/${id}/networks/airplane-mode`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+  }
+
   return {
     scanNetworks,
     registerNetwork,
@@ -49,5 +62,7 @@ export const useNetworkApi = () => {
     setCurrentModes,
     getBands,
     setCurrentBands,
+    getAirplaneMode,
+    setAirplaneMode,
   }
 }

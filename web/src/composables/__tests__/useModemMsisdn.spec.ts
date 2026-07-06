@@ -44,6 +44,7 @@ const modem = (number: string): Modem => ({
     code: '310260',
   },
   signalQuality: 76,
+  airplaneMode: false,
   supportsEsim: false,
 })
 

@@ -38,6 +38,7 @@ const modem: Modem = {
     code: '310260',
   },
   signalQuality: 76,
+  airplaneMode: false,
   supportsEsim: false,
 }
 

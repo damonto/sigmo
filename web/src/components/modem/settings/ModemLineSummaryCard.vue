@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Pencil, Smartphone, Wifi } from 'lucide-vue-next'
+import { Pencil, Plane, Smartphone, Wifi } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 import { Button } from '@/components/ui/button'
@@ -29,10 +29,18 @@ const displayMsisdn = computed(() => {
   return formatPhoneDisplay(rawMsisdn.value, phoneCountry.value)
 })
 const accessTechnologyLabel = computed(() => {
+  if (props.modem?.airplaneMode) return t('modemDetail.settings.networkAirplaneModeStatus')
   const value = props.accessTechnology.trim()
   return value || t('modemDetail.settings.networkUnknown')
 })
-const signalIconComponent = computed(() => signalIcon(props.modem?.signalQuality ?? 0))
+const signalIconComponent = computed(() =>
+  props.modem?.airplaneMode ? Plane : signalIcon(props.modem?.signalQuality ?? 0),
+)
+const signalLabel = computed(() =>
+  props.modem?.airplaneMode
+    ? t('modemDetail.settings.networkAirplaneModeStatus')
+    : t('labels.signal'),
+)
 </script>
 
 <template>
@@ -73,7 +81,7 @@ const signalIconComponent = computed(() => signalIcon(props.modem?.signalQuality
           <component
             :is="signalIconComponent"
             class="size-4 shrink-0 text-primary"
-            :aria-label="t('labels.signal')"
+            :aria-label="signalLabel"
             data-testid="line-signal-icon"
           />
           <span
@@ -84,7 +92,7 @@ const signalIconComponent = computed(() => signalIcon(props.modem?.signalQuality
             {{ accessTechnologyLabel }}
           </span>
           <Wifi
-            v-if="props.modem?.wifiCallingConnected"
+            v-if="props.modem?.wifiCallingConnected && !props.modem?.airplaneMode"
             class="size-4 shrink-0 text-primary"
             title="Wi-Fi Calling"
             aria-label="Wi-Fi Calling"

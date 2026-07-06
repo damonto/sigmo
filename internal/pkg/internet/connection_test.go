@@ -1740,6 +1740,32 @@ func TestConnectorRequiresModem(t *testing.T) {
 	}
 }
 
+func TestConnectorRecoverSkipsSavedAirplaneMode(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := testStore(t)
+	networkPreferences, err := mmodem.NewNetworkPreferences(store)
+	if err != nil {
+		t.Fatalf("NewNetworkPreferences() error = %v", err)
+	}
+	if err := networkPreferences.SaveAirplaneMode(ctx, "modem-1", true); err != nil {
+		t.Fatalf("SaveAirplaneMode() error = %v", err)
+	}
+	connector, err := NewConnector(ConnectorConfig{
+		State:              store,
+		NetworkPreferences: networkPreferences,
+	})
+	if err != nil {
+		t.Fatalf("NewConnector() error = %v", err)
+	}
+
+	modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
+	if err := connector.Recover(ctx, []*mmodem.Modem{modem}); err != nil {
+		t.Fatalf("Recover() error = %v", err)
+	}
+}
+
 type fakeInternetModem struct {
 	modemID    string
 	operatorID string

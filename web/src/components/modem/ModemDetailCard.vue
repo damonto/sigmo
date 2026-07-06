@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { Plane } from 'lucide-vue-next'
+import { useI18n } from 'vue-i18n'
 
 import RegionFlag from '@/components/RegionFlag.vue'
 import { Badge } from '@/components/ui/badge'
@@ -10,6 +12,8 @@ const props = defineProps<{
   modem: Modem
   seInfo?: SEsResponse | null
 }>()
+
+const { t } = useI18n()
 
 const formatBytes = (bytes?: number) => {
   if (bytes === null || bytes === undefined) return 'N/A'
@@ -129,7 +133,16 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
     <!-- Network Info -->
     <section class="space-y-3">
       <h2 class="text-base font-semibold text-foreground">Network Information</h2>
-      <div class="grid gap-3 text-sm">
+      <div v-if="modem.airplaneMode" class="grid gap-3 text-sm">
+        <div class="flex items-center justify-between gap-4">
+          <span class="text-muted-foreground">Radio State</span>
+          <span class="inline-flex items-center gap-2 font-medium text-muted-foreground">
+            <Plane class="size-4" />
+            {{ t('modemDetail.settings.networkAirplaneModeStatus') }}
+          </span>
+        </div>
+      </div>
+      <div v-else class="grid gap-3 text-sm">
         <div class="flex justify-between">
           <span class="text-muted-foreground">Access Technology</span>
           <span>{{ modem.accessTechnology || 'N/A' }}</span>

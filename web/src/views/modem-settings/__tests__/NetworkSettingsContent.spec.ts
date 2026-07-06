@@ -17,6 +17,18 @@ const stubs = {
     props: ['type', 'disabled'],
     template: '<button :type="type || \'button\'" :disabled="disabled"><slot /></button>',
   },
+  Card: {
+    template: '<section><slot /></section>',
+  },
+  CardContent: {
+    template: '<div><slot /></div>',
+  },
+  CardHeader: {
+    template: '<div><slot /></div>',
+  },
+  CardTitle: {
+    template: '<h2><slot /></h2>',
+  },
   Checkbox: {
     props: ['id', 'modelValue', 'disabled'],
     emits: ['update:modelValue'],
@@ -47,6 +59,12 @@ const stubs = {
   Spinner: {
     template: '<span />',
   },
+  Switch: {
+    props: ['id', 'modelValue', 'disabled'],
+    emits: ['update:modelValue'],
+    template:
+      '<input :id="id" type="checkbox" :checked="modelValue" :disabled="disabled" @change="$emit(\'update:modelValue\', $event.target.checked)" />',
+  },
 }
 
 const mountSection = () =>
@@ -56,6 +74,7 @@ const mountSection = () =>
       registrationState: 'Registered',
       accessTechnology: 'LTE',
       isScanning: false,
+      canScanNetworks: true,
       modeOptions: [
         {
           allowed: 8,
@@ -71,11 +90,15 @@ const mountSection = () =>
         { value: 71, label: 'LTE B41', current: true },
       ],
       selectedBands: [71],
+      airplaneModeSupported: true,
+      airplaneModeEnabled: false,
       isSettingsLoading: false,
       isModeUpdating: false,
       isBandUpdating: false,
+      isAirplaneModeUpdating: false,
       canUpdateMode: true,
       canUpdateBands: true,
+      canUpdateAirplaneMode: true,
     },
     global: {
       stubs,
@@ -96,5 +119,13 @@ describe('NetworkSettingsContent', () => {
     await wrapper.find('#band-256').setValue(true)
 
     expect(wrapper.emitted('toggleBand')).toEqual([[256, true]])
+  })
+
+  it('emits airplane mode updates', async () => {
+    const wrapper = mountSection()
+
+    await wrapper.find('#network-airplane-mode').setValue(true)
+
+    expect(wrapper.emitted('updateAirplaneMode')).toEqual([[true]])
   })
 })

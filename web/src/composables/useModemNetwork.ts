@@ -12,10 +12,18 @@ import type {
 type Options = {
   modemId: ComputedRef<string>
   onRegistered?: (id: string) => Promise<void> | void
+  onChanged?: (id: string) => Promise<void> | void
   onSuccess?: (message: string) => void
+  onError?: (message: string) => void
 }
 
-export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) => {
+export const useModemNetwork = ({
+  modemId,
+  onRegistered,
+  onChanged,
+  onSuccess,
+  onError,
+}: Options) => {
   const { t } = useI18n()
   const networkApi = useNetworkApi()
 
@@ -26,18 +34,29 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
   const selectedMode = ref('')
   const supportedBands = ref<BandResponse[]>([])
   const selectedBands = ref<number[]>([])
+  const airplaneModeSupported = ref(false)
+  const airplaneModeEnabled = ref(false)
   const isNetworkLoading = ref(false)
   const isNetworkRegistering = ref(false)
   const isNetworkSettingsLoading = ref(false)
   const isModeUpdating = ref(false)
   const isBandUpdating = ref(false)
+  const isAirplaneModeUpdating = ref(false)
 
   const hasAvailableNetworks = computed(() => availableNetworks.value.length > 0)
   const hasNetworkSelection = computed(() => selectedNetwork.value.trim().length > 0)
   const hasModeSelection = computed(() => selectedMode.value.trim().length > 0)
   const hasBandSelection = computed(() => selectedBands.value.length > 0)
-  const canUpdateMode = computed(() => hasModeSelection.value && !isModeUpdating.value)
-  const canUpdateBands = computed(() => hasBandSelection.value && !isBandUpdating.value)
+  const canScanNetworks = computed(() => !isNetworkLoading.value && !airplaneModeEnabled.value)
+  const canUpdateMode = computed(
+    () => hasModeSelection.value && !isModeUpdating.value && !airplaneModeEnabled.value,
+  )
+  const canUpdateBands = computed(
+    () => hasBandSelection.value && !isBandUpdating.value && !airplaneModeEnabled.value,
+  )
+  const canUpdateAirplaneMode = computed(
+    () => airplaneModeSupported.value && !isAirplaneModeUpdating.value,
+  )
   let networkSettingsRequestID = 0
 
   const resetNetworks = () => {
@@ -48,12 +67,14 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
     selectedMode.value = ''
     supportedBands.value = []
     selectedBands.value = []
+    airplaneModeSupported.value = false
+    airplaneModeEnabled.value = false
   }
 
   const openNetworkDialog = async () => {
     const targetId = modemId.value
     if (!targetId) return
-    if (isNetworkLoading.value) return
+    if (!canScanNetworks.value) return
     selectedNetwork.value = ''
     isNetworkLoading.value = true
     try {
@@ -92,9 +113,10 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
     const requestId = ++networkSettingsRequestID
     isNetworkSettingsLoading.value = true
     try {
-      const [modes, bands] = await Promise.allSettled([
+      const [modes, bands, airplane] = await Promise.allSettled([
         networkApi.getModes(targetId),
         networkApi.getBands(targetId),
+        networkApi.getAirplaneMode(targetId),
       ])
       if (requestId !== networkSettingsRequestID || modemId.value !== targetId) return
 
@@ -117,6 +139,16 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
         supportedBands.value = []
         selectedBands.value = []
       }
+
+      if (airplane.status === 'fulfilled') {
+        const airplaneData = airplane.value.data.value
+        airplaneModeSupported.value = airplaneData?.supported ?? false
+        airplaneModeEnabled.value = airplaneData?.enabled ?? false
+      } else {
+        console.error('[useModemNetwork] Failed to load airplane mode:', airplane.reason)
+        airplaneModeSupported.value = false
+        airplaneModeEnabled.value = false
+      }
     } catch (err) {
       if (requestId !== networkSettingsRequestID || modemId.value !== targetId) return
       console.error('[useModemNetwork] Failed to load network settings:', err)
@@ -124,6 +156,8 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
       selectedMode.value = ''
       supportedBands.value = []
       selectedBands.value = []
+      airplaneModeSupported.value = false
+      airplaneModeEnabled.value = false
     } finally {
       if (requestId === networkSettingsRequestID) {
         isNetworkSettingsLoading.value = false
@@ -180,6 +214,28 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
     }
   }
 
+  const handleAirplaneModeUpdate = async (enabled: boolean) => {
+    const targetId = modemId.value
+    if (!targetId) return
+    if (!canUpdateAirplaneMode.value) return
+    isAirplaneModeUpdating.value = true
+    try {
+      await networkApi.setAirplaneMode(targetId, { enabled })
+      await refreshNetworkSettings()
+      await onChanged?.(targetId)
+      onSuccess?.(
+        enabled
+          ? t('modemDetail.settings.networkAirplaneModeEnabledSuccess')
+          : t('modemDetail.settings.networkAirplaneModeDisabledSuccess'),
+      )
+    } catch (err) {
+      console.error('[useModemNetwork] Failed to set airplane mode:', err)
+      onError?.(t('modemDetail.settings.networkAirplaneModeUpdateFailed'))
+    } finally {
+      isAirplaneModeUpdating.value = false
+    }
+  }
+
   watch(
     modemId,
     async (id) => {
@@ -200,23 +256,29 @@ export const useModemNetwork = ({ modemId, onRegistered, onSuccess }: Options) =
     selectedMode,
     supportedBands,
     selectedBands,
+    airplaneModeSupported,
+    airplaneModeEnabled,
     isNetworkLoading,
     isNetworkRegistering,
     isNetworkSettingsLoading,
     isModeUpdating,
     isBandUpdating,
+    isAirplaneModeUpdating,
     hasAvailableNetworks,
     hasNetworkSelection,
     hasModeSelection,
     hasBandSelection,
+    canScanNetworks,
     canUpdateMode,
     canUpdateBands,
+    canUpdateAirplaneMode,
     openNetworkDialog,
     handleNetworkRegister,
     refreshNetworkSettings,
     handleModeUpdate,
     toggleBand,
     handleBandUpdate,
+    handleAirplaneModeUpdate,
   }
 }
 

@@ -52,6 +52,14 @@ func (c *Connector) restoreAlwaysOnModems(ctx context.Context, registry *mmodem.
 		if modem == nil {
 			continue
 		}
+		airplaneMode, err := c.savedAirplaneMode(ctx, modem)
+		if err != nil {
+			slog.Warn("read airplane mode preference for internet always on", "imei", modem.EquipmentIdentifier, "error", err)
+			continue
+		}
+		if airplaneMode {
+			continue
+		}
 		access := modemAccess{modem: modem}
 		profileID := access.profileID()
 		if profileID == "" {

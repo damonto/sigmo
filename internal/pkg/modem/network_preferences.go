@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -18,8 +19,9 @@ var networkPreferencesRetryInterval = 5 * time.Second
 var errNetworkPreferencesStorageRequired = errors.New("network preferences storage is required")
 
 type NetworkPreferences struct {
-	store *storage.Store
-	mu    sync.Mutex
+	store      *storage.Store
+	mu         sync.Mutex
+	openDevice deviceControlOpener
 }
 
 type networkPreferenceMode struct {
@@ -28,8 +30,9 @@ type networkPreferenceMode struct {
 }
 
 type savedNetworkPreferences struct {
-	Mode  *networkPreferenceMode `json:"mode,omitempty"`
-	Bands []ModemBand            `json:"bands,omitempty"`
+	Mode         *networkPreferenceMode `json:"mode,omitempty"`
+	Bands        []ModemBand            `json:"bands,omitempty"`
+	AirplaneMode *bool                  `json:"airplaneMode,omitempty"`
 }
 
 func NewNetworkPreferences(store *storage.Store) (*NetworkPreferences, error) {
@@ -76,6 +79,45 @@ func (p *NetworkPreferences) SaveBands(ctx context.Context, modemID string, band
 	return p.saveForModemLocked(ctx, modemID, entry)
 }
 
+func (p *NetworkPreferences) SaveAirplaneMode(ctx context.Context, modemID string, enabled bool) error {
+	modemID = strings.TrimSpace(modemID)
+	if modemID == "" {
+		return errors.New("modem id is required")
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	entry, _, err := p.loadForModemLocked(ctx, modemID)
+	if err != nil {
+		return err
+	}
+	entry.AirplaneMode = &enabled
+	return p.saveForModemLocked(ctx, modemID, entry)
+}
+
+func (p *NetworkPreferences) SavedAirplaneMode(ctx context.Context, modemID string) (bool, bool, error) {
+	prefs, ok, err := p.loadForModem(ctx, modemID)
+	if err != nil || !ok || prefs.AirplaneMode == nil {
+		return false, false, err
+	}
+	return *prefs.AirplaneMode, true, nil
+}
+
+// SkipEnableDisabledInAirplaneMode keeps the auto-enable lifecycle from turning RF back on.
+func SkipEnableDisabledInAirplaneMode(preferences *NetworkPreferences) EnableDisabledPolicy {
+	return func(ctx context.Context, modem *Modem) (bool, error) {
+		if preferences == nil || modem == nil {
+			return false, nil
+		}
+		enabled, ok, err := preferences.SavedAirplaneMode(ctx, modem.EquipmentIdentifier)
+		if err != nil {
+			return false, fmt.Errorf("read airplane mode preference: %w", err)
+		}
+		return ok && enabled, nil
+	}
+}
+
 func (p *NetworkPreferences) Run(ctx context.Context, registry *Registry) error {
 	task := newPresenceTask(registry, p.restoreWithRetry)
 	return task.Run(ctx)
@@ -116,6 +158,16 @@ func (p *NetworkPreferences) restoreOnce(ctx context.Context, m *Modem) (bool, e
 		return false, nil
 	}
 
+	if prefs.AirplaneMode != nil {
+		retry, err := restoreAirplaneModePreference(ctx, m, *prefs.AirplaneMode, p.deviceOpener())
+		if err != nil {
+			return retry, err
+		}
+		if *prefs.AirplaneMode {
+			return false, nil
+		}
+	}
+
 	var result error
 	retry := false
 	if prefs.Mode != nil {
@@ -137,6 +189,13 @@ func (p *NetworkPreferences) restoreOnce(ctx context.Context, m *Modem) (bool, e
 		}
 	}
 	return retry, result
+}
+
+func (p *NetworkPreferences) deviceOpener() deviceControlOpener {
+	if p == nil || p.openDevice == nil {
+		return nil
+	}
+	return p.openDevice
 }
 
 func (p *NetworkPreferences) loadForModem(ctx context.Context, modemID string) (savedNetworkPreferences, bool, error) {
@@ -165,6 +224,28 @@ func (p *NetworkPreferences) loadForModemLocked(ctx context.Context, modemID str
 
 func (p *NetworkPreferences) saveForModemLocked(ctx context.Context, modemID string, entry savedNetworkPreferences) error {
 	return p.store.Put(ctx, "modem:"+modemID, "network.preferences", entry)
+}
+
+func restoreAirplaneModePreference(ctx context.Context, m *Modem, enabled bool, open deviceControlOpener) (bool, error) {
+	device, err := openDeviceForModem(m, open)
+	if errors.Is(err, mdevice.ErrUnsupported) {
+		return false, mdevice.ErrUnsupported
+	}
+	if err != nil {
+		return false, fmt.Errorf("open device: %w", err)
+	}
+	current, err := device.AirplaneMode(ctx)
+	if err != nil {
+		return false, fmt.Errorf("read airplane mode: %w", err)
+	}
+	if current == enabled {
+		return false, nil
+	}
+	if err := device.SetAirplaneMode(ctx, enabled); err != nil {
+		return false, fmt.Errorf("set airplane mode: %w", err)
+	}
+	slog.Info("airplane mode restored", "imei", m.EquipmentIdentifier, "enabled", enabled)
+	return false, nil
 }
 
 func restoreModePreference(ctx context.Context, m *Modem, mode ModemModePair) (bool, error) {

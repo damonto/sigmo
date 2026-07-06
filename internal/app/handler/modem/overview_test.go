@@ -188,45 +188,6 @@ func TestCatalogApplyOverviewExtensions(t *testing.T) {
 	}
 }
 
-func TestSupportsEsimUsesModemMetadata(t *testing.T) {
-	tests := []struct {
-		name  string
-		modem *mmodem.Modem
-		want  bool
-	}{
-		{
-			name: "unsupported AT modem",
-			modem: &mmodem.Modem{
-				EquipmentIdentifier: "imei-1",
-				PrimaryPort:         "/dev/ttyUSB2",
-				Ports: []mmodem.ModemPort{
-					{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB2"},
-				},
-			},
-		},
-		{
-			name: "unknown primary port",
-			modem: &mmodem.Modem{
-				EquipmentIdentifier: "imei-2",
-				PrimaryPort:         "/dev/ttyUSB2",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			currentSettings := settings.Default()
-			got, err := supportsEsim(context.Background(), tt.modem, currentSettings)
-			if err != nil {
-				t.Fatalf("supportsEsim() error = %v", err)
-			}
-			if got != tt.want {
-				t.Fatalf("supportsEsim() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestModemResponseJSONIncludesOverviewFields(t *testing.T) {
 	tests := []struct {
 		name string

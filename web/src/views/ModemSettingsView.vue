@@ -35,6 +35,7 @@ const { msisdnInput, isMsisdnUpdating, isMsisdnValid, resetMsisdnInput, handleMs
   })
 
 const lineOperatorLabel = computed(() => {
+  if (modem.value?.airplaneMode) return t('modemDetail.settings.networkAirplaneModeStatus')
   const registeredName = modem.value?.registeredOperator?.name?.trim() ?? ''
   if (registeredName) return registeredName
   const simName = modem.value?.sim?.operatorName?.trim() ?? ''

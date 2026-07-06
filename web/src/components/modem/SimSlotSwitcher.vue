@@ -27,6 +27,7 @@ const props = defineProps<{
   accessTechnology?: string | null
   registeredOperatorName?: string | null
   wifiCallingConnected?: boolean
+  airplaneMode?: boolean
   onSwitch?: (identifier: string) => Promise<void>
 }>()
 
@@ -148,6 +149,7 @@ const slotOptionClass = (slot: SlotInfo) => {
       :access-technology="props.accessTechnology"
       :registered-operator-name="props.registeredOperatorName"
       :wifi-calling-connected="props.wifiCallingConnected"
+      :airplane-mode="props.airplaneMode"
       :show-signal-value="false"
       size="sm"
       class="ml-auto"

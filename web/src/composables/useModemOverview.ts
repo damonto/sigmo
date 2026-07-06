@@ -12,6 +12,7 @@ export const useModemOverview = (modemId: ComputedRef<string>) => {
   const isModemLoading = ref(false)
 
   const currentOperatorLabel = computed(() => {
+    if (modem.value?.airplaneMode) return t('modemDetail.settings.networkAirplaneModeStatus')
     const unknown = t('modemDetail.settings.networkUnknown')
     const name = modem.value?.registeredOperator?.name?.trim() ?? ''
     const code = modem.value?.registeredOperator?.code?.trim() ?? ''
@@ -24,11 +25,13 @@ export const useModemOverview = (modemId: ComputedRef<string>) => {
   })
 
   const currentRegistrationState = computed(() => {
+    if (modem.value?.airplaneMode) return t('modemDetail.settings.networkAirplaneModeStatus')
     const value = modem.value?.registrationState?.trim()
     return value && value.length > 0 ? value : t('modemDetail.settings.networkUnknown')
   })
 
   const currentAccessTechnology = computed(() => {
+    if (modem.value?.airplaneMode) return t('modemDetail.settings.networkAirplaneModeStatus')
     const value = modem.value?.accessTechnology?.trim()
     return value && value.length > 0 ? value : t('modemDetail.settings.networkUnknown')
   })

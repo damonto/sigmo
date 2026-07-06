@@ -1,0 +1,143 @@
+package modem
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+)
+
+func TestOpenDeviceRejectsInvalidInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		modem   *Modem
+		wantErr error
+	}{
+		{name: "nil modem", wantErr: errModemRequired},
+		{
+			name: "unsupported port",
+			modem: &Modem{
+				PrimaryPort: "/dev/ttyUSB0",
+				Ports: []ModemPort{
+					{PortType: ModemPortTypeAt, Device: "/dev/ttyUSB0"},
+				},
+			},
+			wantErr: mdevice.ErrUnsupported,
+		},
+		{
+			name: "slot too large",
+			modem: &Modem{
+				PrimaryPort:    "/dev/cdc-wdm0",
+				PrimarySimSlot: maxSIMSlot + 1,
+				Ports: []ModemPort{
+					{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm0"},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			device, err := OpenDevice(tt.modem)
+			if err == nil {
+				t.Fatal("OpenDevice() error = nil, want error")
+			}
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Fatalf("OpenDevice() error = %v, want %v", err, tt.wantErr)
+			}
+			if device != nil {
+				t.Fatalf("OpenDevice() device = %v, want nil", device)
+			}
+		})
+	}
+}
+
+func TestMBIMDeviceSIMPowerNoop(t *testing.T) {
+	device, err := OpenDevice(&Modem{
+		PrimaryPort:    "/dev/cdc-wdm0",
+		PrimarySimSlot: 1,
+		Ports: []ModemPort{
+			{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("OpenDevice() error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		run  func(context.Context) error
+	}{
+		{name: "power off", run: device.PowerOffSIM},
+		{name: "power on", run: device.PowerOnSIM},
+		{name: "power cycle", run: device.PowerCycleSIM},
+		{name: "activate provisioning", run: device.ActivateProvisioningIfSIMMissing},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.run(context.Background()); err != nil {
+				t.Fatalf("%s error = %v", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestOpenDeviceSelectsModemDevicePort(t *testing.T) {
+	tests := []struct {
+		name       string
+		modem      *Modem
+		wantDevice string
+		wantType   mdevice.PortType
+	}{
+		{
+			name: "uses primary QMI port",
+			modem: &Modem{
+				PrimaryPort: "/dev/cdc-wdm1",
+				Ports: []ModemPort{
+					{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+					{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+				},
+			},
+			wantDevice: "/dev/cdc-wdm1",
+			wantType:   mdevice.PortTypeQMI,
+		},
+		{
+			name: "falls back to QMI port",
+			modem: &Modem{
+				PrimaryPort: "/dev/ttyUSB0",
+				Ports: []ModemPort{
+					{PortType: ModemPortTypeAt, Device: "/dev/ttyUSB0"},
+					{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+				},
+			},
+			wantDevice: "/dev/cdc-wdm1",
+			wantType:   mdevice.PortTypeQMI,
+		},
+		{
+			name: "falls back to MBIM port",
+			modem: &Modem{
+				PrimaryPort: "/dev/ttyUSB0",
+				Ports: []ModemPort{
+					{PortType: ModemPortTypeAt, Device: "/dev/ttyUSB0"},
+					{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+				},
+			},
+			wantDevice: "/dev/cdc-wdm0",
+			wantType:   mdevice.PortTypeMBIM,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := deviceConfig(tt.modem)
+			if err != nil {
+				t.Fatalf("deviceConfig() error = %v", err)
+			}
+			if cfg.PortType != tt.wantType {
+				t.Fatalf("deviceConfig() port type = %d, want %d", cfg.PortType, tt.wantType)
+			}
+			if cfg.Device != tt.wantDevice {
+				t.Fatalf("deviceConfig() device = %q, want %q", cfg.Device, tt.wantDevice)
+			}
+		})
+	}
+}

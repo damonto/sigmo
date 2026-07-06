@@ -51,5 +51,6 @@ type ModemResponse struct {
 	RegistrationState  string                     `json:"registrationState"`
 	RegisteredOperator RegisteredOperatorResponse `json:"registeredOperator"`
 	SignalQuality      uint32                     `json:"signalQuality"`
+	AirplaneMode       bool                       `json:"airplaneMode"`
 	SupportsEsim       bool                       `json:"supportsEsim"`
 }

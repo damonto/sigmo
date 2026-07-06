@@ -29,6 +29,7 @@ export type ModemApiResponse = {
   registrationState: string
   registeredOperator: RegisteredOperator
   signalQuality: number
+  airplaneMode: boolean
   supportsEsim: boolean
   wifiCallingEnabled?: boolean
   wifiCallingPreferred?: boolean

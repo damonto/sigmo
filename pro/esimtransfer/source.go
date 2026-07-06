@@ -14,13 +14,12 @@ import (
 	"github.com/damonto/ts43-go"
 	"github.com/damonto/uicc-go/at"
 	"github.com/damonto/uicc-go/ccid"
-	"github.com/damonto/uicc-go/qcom/qmi"
-	"github.com/damonto/uicc-go/qcom/uim"
 	"github.com/damonto/uicc-go/usim"
 	usimcard "github.com/damonto/uicc-go/usim/card"
 
 	ilpa "github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
@@ -62,50 +61,23 @@ func (s *transferRunner) openSource(ctx context.Context, currentSettings *settin
 }
 
 func openModemSource(ctx context.Context, modem *mmodem.Modem) (ts43.Channel, func(), error) {
-	sourcePort, err := selectModemSourcePort(modem)
+	logger := modem.Logger()
+	device, err := mmodem.OpenDevice(modem)
+	if err == nil {
+		reader, err := device.USIM(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		return sourceFromReader(ctx, reader, logger)
+	}
+	if !errors.Is(err, mdevice.ErrUnsupported) {
+		return nil, nil, err
+	}
+	reader, err := openATSource(ctx, modem)
 	if err != nil {
 		return nil, nil, err
 	}
-	logger := modem.Logger()
-	switch sourcePort.portType {
-	case mmodem.ModemPortTypeQmi:
-		reader, err := openQMISource(ctx, sourcePort.device, sourcePort.slot)
-		if err != nil {
-			return nil, nil, err
-		}
-		return sourceFromReader(ctx, reader, logger)
-	case mmodem.ModemPortTypeAt:
-		reader, err := openATSource(ctx, sourcePort.device)
-		if err != nil {
-			return nil, nil, err
-		}
-		return sourceFromReader(ctx, reader, logger)
-	default:
-		return nil, nil, errors.New("modem source port type is unsupported")
-	}
-}
-
-type modemSourcePort struct {
-	portType mmodem.ModemPortType
-	device   string
-	slot     int
-}
-
-func selectModemSourcePort(modem *mmodem.Modem) (modemSourcePort, error) {
-	slot := 1
-	if modem.PrimarySimSlot > 0 {
-		slot = int(modem.PrimarySimSlot)
-	}
-	switch modem.PrimaryPortType() {
-	case mmodem.ModemPortTypeQmi:
-		return modemSourcePort{portType: mmodem.ModemPortTypeQmi, device: modem.PrimaryPort, slot: slot}, nil
-	default:
-		port, err := modem.Port(mmodem.ModemPortTypeAt)
-		if err != nil {
-			return modemSourcePort{}, err
-		}
-		return modemSourcePort{portType: mmodem.ModemPortTypeAt, device: port.Device, slot: slot}, nil
-	}
+	return sourceFromReader(ctx, reader, logger)
 }
 
 type sourceCloser interface {
@@ -132,8 +104,12 @@ func openCCIDSource(ctx context.Context, readerName string, logger *slog.Logger)
 	return sourceFromReader(ctx, reader, logger)
 }
 
-func openATSource(ctx context.Context, device string) (usimcard.Reader, error) {
-	tx, err := at.Open(device, 0)
+func openATSource(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader, error) {
+	port, err := modem.Port(mmodem.ModemPortTypeAt)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := at.Open(port.Device, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -142,28 +118,6 @@ func openATSource(ctx context.Context, device string) (usimcard.Reader, error) {
 		return nil, errors.Join(err, tx.Close())
 	}
 	return reader, nil
-}
-
-func openQMISource(ctx context.Context, device string, slot int) (usimcard.Reader, error) {
-	if slot < 1 || slot > 5 {
-		return nil, fmt.Errorf("slot %d is out of range", slot)
-	}
-	transport, err := qmi.Open(ctx, qmi.WithProxy(device))
-	if err != nil {
-		return nil, err
-	}
-	reader, err := uim.New(ctx, transport, uim.WithSlot(uint8(slot)))
-	if err != nil {
-		return nil, errors.Join(err, transport.Close())
-	}
-	if err := reader.ActivateSlot(ctx); err != nil {
-		return nil, errors.Join(err, reader.Close())
-	}
-	adapter, err := usim.NewQCOM(reader)
-	if err != nil {
-		return nil, errors.Join(err, reader.Close())
-	}
-	return adapter, nil
 }
 
 func sourceFromReader(ctx context.Context, reader usimcard.Reader, logger *slog.Logger) (ts43.Channel, func(), error) {

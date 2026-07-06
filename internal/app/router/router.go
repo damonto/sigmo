@@ -116,6 +116,8 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 				return fmt.Errorf("configure network handler: %w", err)
 			}
 			protected.GET("/modems/:id/networks", h.List)
+			protected.GET("/modems/:id/networks/airplane-mode", h.AirplaneMode)
+			protected.PUT("/modems/:id/networks/airplane-mode", h.SetAirplaneMode)
 			protected.GET("/modems/:id/networks/modes", h.Modes)
 			protected.PUT("/modems/:id/networks/current-modes", h.SetCurrentModes)
 			protected.GET("/modems/:id/networks/bands", h.Bands)

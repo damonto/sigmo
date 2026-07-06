@@ -101,12 +101,17 @@ func Run(cfg Config) error {
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch, http.MethodHead, http.MethodOptions},
 		AllowHeaders: []string{"*"},
 	}))
-	internetConnector, err := newInternetConnector(store, db)
+	networkPreferences, err := modem.NewNetworkPreferences(db)
+	if err != nil {
+		return fmt.Errorf("configure network preferences: %w", err)
+	}
+	enableDisabledPolicy := modem.SkipEnableDisabledInAirplaneMode(networkPreferences)
+	internetConnector, err := newInternetConnector(store, db, networkPreferences)
 	if err != nil {
 		return fmt.Errorf("configure internet connector: %w", err)
 	}
 	startupCtx, cancelStartup := context.WithTimeout(ctx, 15*time.Second)
-	if err := modem.EnableDisabled(startupCtx, registry); err != nil {
+	if err := modem.EnableDisabled(startupCtx, registry, enableDisabledPolicy); err != nil {
 		slog.Error("enable disabled modems", "error", err)
 	}
 	if err := recoverInternetConnections(startupCtx, registry, internetConnector); err != nil {
@@ -116,10 +121,6 @@ func Run(cfg Config) error {
 	relay, err := forwarder.New(store, registry, db)
 	if err != nil {
 		return fmt.Errorf("configure message relay: %w", err)
-	}
-	networkPreferences, err := modem.NewNetworkPreferences(db)
-	if err != nil {
-		return fmt.Errorf("configure network preferences: %w", err)
 	}
 	runtime := &Runtime{
 		Store:              store,
@@ -154,7 +155,7 @@ func Run(cfg Config) error {
 	var wg sync.WaitGroup
 
 	wg.Go(func() {
-		if err := modem.RunEnableDisabled(ctx, registry); err != nil {
+		if err := modem.RunEnableDisabled(ctx, registry, enableDisabledPolicy); err != nil {
 			slog.Error("modem enable runner stopped", "error", err)
 		}
 	})
@@ -255,7 +256,7 @@ func applyLogLevel(debug bool) {
 	slog.SetLogLoggerLevel(slog.LevelInfo)
 }
 
-func newInternetConnector(store *settings.Store, db *storage.Store) (*internet.Connector, error) {
+func newInternetConnector(store *settings.Store, db *storage.Store, networkPreferences *modem.NetworkPreferences) (*internet.Connector, error) {
 	proxyConfig := store.ProxySettings()
 	proxy := internet.NewProxy(internet.ProxyConfig{
 		ListenAddress: proxyConfig.ListenAddress,
@@ -263,7 +264,11 @@ func newInternetConnector(store *settings.Store, db *storage.Store) (*internet.C
 		SOCKS5Port:    proxyConfig.SOCKS5Port,
 		Password:      proxyConfig.Password,
 	})
-	return internet.NewConnector(internet.ConnectorConfig{Proxy: proxy, State: db})
+	return internet.NewConnector(internet.ConnectorConfig{
+		Proxy:              proxy,
+		State:              db,
+		NetworkPreferences: networkPreferences,
+	})
 }
 
 func recoverInternetConnections(ctx context.Context, registry *modem.Registry, connector *internet.Connector) error {

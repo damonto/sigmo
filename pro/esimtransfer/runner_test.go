@@ -159,58 +159,6 @@ func TestValidateTargetRejectsSourceTargetModem(t *testing.T) {
 	}
 }
 
-func TestSelectModemSourcePort(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		modem    *mmodem.Modem
-		wantType mmodem.ModemPortType
-		wantDev  string
-		wantSlot int
-	}{
-		{
-			name: "qmi primary uses qmi port",
-			modem: &mmodem.Modem{
-				PrimaryPort:    "/dev/cdc-wdm1",
-				PrimarySimSlot: 2,
-				Ports: []mmodem.ModemPort{
-					{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
-					{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB6"},
-				},
-			},
-			wantType: mmodem.ModemPortTypeQmi,
-			wantDev:  "/dev/cdc-wdm1",
-			wantSlot: 2,
-		},
-		{
-			name: "mbim primary uses at port",
-			modem: &mmodem.Modem{
-				PrimaryPort: "/dev/cdc-wdm0",
-				Ports: []mmodem.ModemPort{
-					{PortType: mmodem.ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
-					{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB2"},
-				},
-			},
-			wantType: mmodem.ModemPortTypeAt,
-			wantDev:  "/dev/ttyUSB2",
-			wantSlot: 1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := selectModemSourcePort(tt.modem)
-			if err != nil {
-				t.Fatalf("selectModemSourcePort() error = %v", err)
-			}
-			if got.portType != tt.wantType || got.device != tt.wantDev || got.slot != tt.wantSlot {
-				t.Fatalf("selectModemSourcePort() = %+v, want type %v device %q slot %d", got, tt.wantType, tt.wantDev, tt.wantSlot)
-			}
-		})
-	}
-}
-
 func TestModemName(t *testing.T) {
 	t.Parallel()
 
