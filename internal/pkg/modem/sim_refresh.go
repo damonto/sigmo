@@ -69,7 +69,7 @@ func (m *Registry) powerCycleSIM(ctx context.Context, current *Modem, target SIM
 	if !target.valid() {
 		return simRefreshResult{}, errors.New("SIM target is required")
 	}
-	device, err := openDeviceForTarget(current, target, m.deviceOpener())
+	device, err := openQMIDeviceForTarget(current, target, m.deviceOpener())
 	if err != nil {
 		return simRefreshResult{}, err
 	}
@@ -180,7 +180,7 @@ func (m *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 				}
 			case state.Supported && state.Recoverable && !state.Ready && !state.ICCIDMismatch && !activatedProvisioning:
 				activatedProvisioning = true
-				device, err := openDeviceForSlot(current, int(state.Slot), m.deviceOpener())
+				device, err := openQMIDeviceForSlot(current, state.Slot, m.deviceOpener())
 				if err != nil {
 					slog.Warn("open device for provisioning session", "imei", current.EquipmentIdentifier, "error", err)
 				} else if err := device.ActivateProvisioningIfSIMMissing(ctx); err != nil {
@@ -232,7 +232,7 @@ func (m *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 				}
 				continue
 			}
-			device, err := openDeviceForTarget(current, target, m.deviceOpener())
+			device, err := openQMIDeviceForTarget(current, target, m.deviceOpener())
 			if err != nil {
 				return simRefreshResult{}, err
 			}

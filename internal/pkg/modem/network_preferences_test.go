@@ -91,6 +91,25 @@ func TestNetworkPreferencesStoreForModem(t *testing.T) {
 			},
 		},
 		{
+			name:    "save volte",
+			modemID: "modem-volte",
+			save: func(ctx context.Context, prefs *NetworkPreferences) error {
+				return prefs.SaveVoLTE(ctx, "modem-volte", true)
+			},
+			assertion: func(t *testing.T, got savedNetworkPreferences, ok bool) {
+				t.Helper()
+				if !ok {
+					t.Fatal("loadForModem() ok = false, want true")
+				}
+				if got.VoLTE == nil {
+					t.Fatal("saved volte = nil, want value")
+				}
+				if !*got.VoLTE {
+					t.Fatal("saved volte = false, want true")
+				}
+			},
+		},
+		{
 			name:    "overwrite modem keeps other field",
 			modemID: "modem-3",
 			save: func(ctx context.Context, prefs *NetworkPreferences) error {
@@ -109,6 +128,28 @@ func TestNetworkPreferencesStoreForModem(t *testing.T) {
 				}
 				if !slices.Equal(got.Bands, []ModemBand{ModemBandAny}) {
 					t.Fatalf("saved bands = %#v, want any", got.Bands)
+				}
+			},
+		},
+		{
+			name:    "save volte keeps other fields",
+			modemID: "modem-4",
+			save: func(ctx context.Context, prefs *NetworkPreferences) error {
+				if err := prefs.SaveAirplaneMode(ctx, "modem-4", true); err != nil {
+					return err
+				}
+				return prefs.SaveVoLTE(ctx, "modem-4", true)
+			},
+			assertion: func(t *testing.T, got savedNetworkPreferences, ok bool) {
+				t.Helper()
+				if !ok {
+					t.Fatal("loadForModem() ok = false, want true")
+				}
+				if got.AirplaneMode == nil || !*got.AirplaneMode {
+					t.Fatalf("saved airplane mode = %v, want true", got.AirplaneMode)
+				}
+				if got.VoLTE == nil || !*got.VoLTE {
+					t.Fatalf("saved volte = %v, want true", got.VoLTE)
 				}
 			},
 		},
@@ -145,6 +186,30 @@ func TestNetworkPreferencesStoreForModem(t *testing.T) {
 			}
 			tt.assertion(t, got, ok)
 		})
+	}
+}
+
+func TestNetworkPreferencesSaveVoLTEDisabledClearsPreference(t *testing.T) {
+	t.Parallel()
+
+	db := openNetworkPreferencesTestStore(t)
+	prefs, err := NewNetworkPreferences(db)
+	if err != nil {
+		t.Fatalf("NewNetworkPreferences() error = %v", err)
+	}
+	ctx := context.Background()
+	if err := prefs.SaveVoLTE(ctx, "modem-1", true); err != nil {
+		t.Fatalf("SaveVoLTE(true) error = %v", err)
+	}
+	if err := prefs.SaveVoLTE(ctx, "modem-1", false); err != nil {
+		t.Fatalf("SaveVoLTE(false) error = %v", err)
+	}
+	enabled, ok, err := prefs.SavedVoLTE(ctx, "modem-1")
+	if err != nil {
+		t.Fatalf("SavedVoLTE() error = %v", err)
+	}
+	if ok || enabled {
+		t.Fatalf("SavedVoLTE() = %v, %v; want false, false", enabled, ok)
 	}
 }
 

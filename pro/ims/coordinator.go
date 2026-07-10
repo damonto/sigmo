@@ -1,6 +1,6 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"context"
@@ -9,24 +9,29 @@ import (
 	"sync"
 	"time"
 
+	imsgo "github.com/damonto/ims-go"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/pro/websheet"
-	vowifi "github.com/damonto/vowifi-go"
 	"github.com/godbus/dbus/v5"
 )
 
 type Config struct {
-	Store      *storage.Store
-	OnIncoming IncomingSMSFunc
-	Websheets  *websheet.Broker
+	Store              *storage.Store
+	OnIncoming         IncomingSMSFunc
+	Websheets          *websheet.Broker
+	Access             Access
+	NetworkPreferences *mmodem.NetworkPreferences
 }
 
 type coordinator struct {
-	settings   *SettingsStore
-	store      *storage.Store
-	onIncoming IncomingSMSFunc
-	websheets  *websheet.Broker
+	settings           *SettingsStore
+	store              *storage.Store
+	onIncoming         IncomingSMSFunc
+	websheets          *websheet.Broker
+	access             Access
+	networkPreferences *mmodem.NetworkPreferences
+	voltePreferenceMu  sync.Mutex
 
 	mu               sync.Mutex
 	sessions         map[string]*sessionState
@@ -42,8 +47,8 @@ type sessionState struct {
 	done        <-chan struct{}
 	reconnect   chan struct{}
 	phase       sessionPhase
-	client      *vowifi.Client
-	ussd        *vowifi.USSDSession
+	client      *imsgo.Client
+	ussd        *imsgo.USSDSession
 	calls       map[string]*voiceCallState
 	pendingDial *pendingVoiceDial
 	modemPath   dbus.ObjectPath
@@ -63,21 +68,29 @@ const (
 )
 
 func New(cfg Config) Coordinator {
+	access := cfg.Access
+	if access == "" {
+		access = AccessWiFiCalling
+	}
 	return &coordinator{
-		settings:         NewSettingsStore(cfg.Store),
-		store:            cfg.Store,
-		onIncoming:       cfg.OnIncoming,
-		websheets:        cfg.Websheets,
-		sessions:         make(map[string]*sessionState),
-		smsSubmissions:   make(map[smsSubmissionKey]*smsSubmissionTracker),
-		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+		settings:           NewSettingsStore(cfg.Store),
+		store:              cfg.Store,
+		onIncoming:         cfg.OnIncoming,
+		websheets:          cfg.Websheets,
+		access:             access,
+		networkPreferences: cfg.NetworkPreferences,
+		sessions:           make(map[string]*sessionState),
+		smsSubmissions:     make(map[smsSubmissionKey]*smsSubmissionTracker),
+		voiceSubscribers:   make(map[uint64]VoiceEventFunc),
 	}
 }
 
 func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) error {
 	if err := c.startEnabled(ctx, registry); err != nil {
-		slog.Warn("start configured Wi-Fi Calling profiles", "error", err)
+		slog.Warn("start configured IMS access", "access", c.routeName(), "error", err)
 	}
+	unsubscribeVoLTE := c.subscribeVoLTEPreferences(ctx, registry)
+	defer unsubscribeVoLTE()
 	unsubscribe, err := registry.Subscribe(func(event mmodem.ModemEvent) error {
 		switch event.Type {
 		case mmodem.ModemEventAdded:
@@ -99,6 +112,16 @@ func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) error 
 }
 
 func (c *coordinator) Settings(ctx context.Context, modem *mmodem.Modem) (Settings, error) {
+	if c.access == AccessVoLTE {
+		if c.networkPreferences == nil {
+			return Settings{}, nil
+		}
+		enabled, _, err := c.networkPreferences.SavedVoLTE(ctx, modem.EquipmentIdentifier)
+		if err != nil {
+			return Settings{}, fmt.Errorf("read volte preference: %w", err)
+		}
+		return Settings{Enabled: enabled}, nil
+	}
 	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
 		return Settings{}, err
@@ -111,8 +134,17 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 	if err != nil {
 		return err
 	}
-	if err := c.settings.Put(ctx, profileID, settings); err != nil {
-		return err
+	if c.access == AccessVoLTE {
+		if c.networkPreferences == nil {
+			return ErrUnavailable
+		}
+		if err := c.networkPreferences.SaveVoLTE(ctx, modem.EquipmentIdentifier, settings.Enabled); err != nil {
+			return err
+		}
+	} else {
+		if err := c.settings.Put(ctx, profileID, settings); err != nil {
+			return err
+		}
 	}
 	if settings.Enabled {
 		c.restart(modem, profileID)
@@ -127,7 +159,7 @@ func (c *coordinator) Reconnect(ctx context.Context, modem *mmodem.Modem) error 
 	if err != nil {
 		return err
 	}
-	settings, err := c.settings.Get(ctx, profileID)
+	settings, err := c.Settings(ctx, modem)
 	if err != nil {
 		return err
 	}
@@ -136,6 +168,43 @@ func (c *coordinator) Reconnect(ctx context.Context, modem *mmodem.Modem) error 
 	}
 	c.restart(modem, profileID)
 	return nil
+}
+
+func (c *coordinator) subscribeVoLTEPreferences(ctx context.Context, registry *mmodem.Registry) func() {
+	if c.access != AccessVoLTE || c.networkPreferences == nil {
+		return func() {}
+	}
+	return c.networkPreferences.SubscribeVoLTE(func(event mmodem.VoLTEPreferenceEvent) {
+		c.applyVoLTEPreference(ctx, registry, event)
+	})
+}
+
+func (c *coordinator) applyVoLTEPreference(ctx context.Context, registry *mmodem.Registry, event mmodem.VoLTEPreferenceEvent) {
+	if event.ModemID == "" {
+		return
+	}
+	c.voltePreferenceMu.Lock()
+	defer c.voltePreferenceMu.Unlock()
+
+	enabled, _, err := c.networkPreferences.SavedVoLTE(ctx, event.ModemID)
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("read VoLTE preference", "imei", event.ModemID, "error", err)
+		}
+		return
+	}
+	if !enabled {
+		c.stopAsync(event.ModemID)
+		return
+	}
+	modem, err := registry.Find(ctx, event.ModemID)
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("find modem for VoLTE preference", "imei", event.ModemID, "error", err)
+		}
+		return
+	}
+	c.startIfEnabled(ctx, modem)
 }
 
 func (c *coordinator) Disconnect(_ context.Context, modem *mmodem.Modem) error {
@@ -196,6 +265,13 @@ func statusFromSession(settings Settings, session *sessionState, profileID strin
 		status.State = StateConnecting
 	}
 	return status
+}
+
+func (c *coordinator) routeName() string {
+	if c.access == AccessVoLTE {
+		return string(AccessVoLTE)
+	}
+	return string(AccessWiFiCalling)
 }
 
 func sleep(ctx context.Context, delay time.Duration) error {

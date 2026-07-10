@@ -4,8 +4,8 @@ Sigmo Pro is released under the GNU Affero General Public License v3.0. See [LIC
 [../NOTICE](../NOTICE).
 
 Sigmo Pro is the nested Go module for features that should not affect the public
-`go.mod`: eSIM Quick Transfer, Wi-Fi Calling, carrier Websheets, WebRTC call
-media, and voice codec support.
+`go.mod`: eSIM Quick Transfer, IMS access, carrier Websheets, WebRTC call media,
+and voice codec support.
 
 The Pro module imports the public Sigmo module through:
 
@@ -16,9 +16,9 @@ replace github.com/damonto/sigmo => ..
 ## Features
 
 - **eSIM Quick Transfer** (`esim_transfer`): Transfers supported physical SIM or eSIM lines from another modem or CCID reader to the target eUICC through TS.43 carrier flows.
-- **Wi-Fi Calling** (`wifi_calling`): Adds VoWiFi SMS, USSD, call control, WebRTC media, and carrier websheet flows.
-- **Websheets** (`esim_transfer` or `wifi_calling`): Pro-owned carrier websheet proxy routes.
-- **Voice codecs** (`wifi_calling`): Pro-owned AMR/PCMU codec support used by Wi-Fi Calling media.
+- **IMS access** (`ims`): Adds Sigmo-managed VoWiFi and VoLTE SMS, USSD, call control, WebRTC media, and carrier websheet flows.
+- **Websheets** (`esim_transfer` or `ims`): Pro-owned carrier websheet proxy routes.
+- **Voice codecs** (`ims`): Pro-owned AMR/PCMU codec support used by IMS media.
 
 ## Structure
 
@@ -46,7 +46,7 @@ Run Pro with both features:
 
 ```bash
 cd pro
-go run -tags=esim_transfer,wifi_calling . --db-path=../sigmo.db --debug
+go run -tags=esim_transfer,ims . --db-path=../sigmo.db --debug
 ```
 
 Or build first and run the binary with the permissions needed to access
@@ -54,7 +54,7 @@ ModemManager:
 
 ```bash
 cd pro
-go build -tags=esim_transfer,wifi_calling -o ../sigmo-pro .
+go build -tags=esim_transfer,ims -o ../sigmo-pro .
 sudo ../sigmo-pro --db-path=/var/lib/sigmo/sigmo.db
 ```
 

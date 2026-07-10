@@ -12,11 +12,11 @@ import (
 
 type mbimDevice struct {
 	device    string
-	slot      int
+	slot      uint8
 	openRadio func(context.Context) (mbimAirplaneModeReader, error)
 }
 
-func newMBIMDevice(device string, slot int) mbimDevice {
+func newMBIMDevice(device string, slot uint8) mbimDevice {
 	return mbimDevice{
 		device: device,
 		slot:   slot,
@@ -43,16 +43,31 @@ func (u mbimDevice) USIMWithCAT(ctx context.Context, _ CATProfile) (usimcard.Rea
 func (u mbimDevice) ATR(ctx context.Context) ([]byte, error) {
 	reader, err := openMBIMReader(ctx, u.device, u.slot)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open MBIM reader: %w", err)
 	}
-	defer func() {
-		_ = reader.Close()
-	}()
+	defer closeReader("close MBIM reader", reader)
+
 	atr, err := reader.QueryUiccATR(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query MBIM UICC ATR: %w", err)
 	}
 	return atr, nil
+}
+
+func (u mbimDevice) VoLTEStatus(context.Context) (VoLTEStatus, error) {
+	return VoLTEStatus{}, nil
+}
+
+func (u mbimDevice) PowerCycleSIM(context.Context) error {
+	return ErrUnsupported
+}
+
+func (u mbimDevice) ActivateProvisioningIfSIMMissing(context.Context) error {
+	return ErrUnsupported
+}
+
+func (u mbimDevice) SIMState(context.Context, Target) (SIMState, error) {
+	return SIMState{}, nil
 }
 
 func (u mbimDevice) AirplaneMode(ctx context.Context) (bool, error) {
@@ -79,24 +94,6 @@ func (u mbimDevice) SetAirplaneMode(ctx context.Context, enabled bool) error {
 	return setMBIMAirplaneMode(ctx, reader, enabled)
 }
 
-func (u mbimDevice) ToggleAirplaneMode(ctx context.Context) (bool, error) {
-	reader, err := u.openRadio(ctx)
-	if err != nil {
-		return false, fmt.Errorf("open MBIM airplane mode reader: %w", err)
-	}
-	defer closeReader("close MBIM airplane mode reader", reader)
-
-	state, err := reader.RadioState(ctx)
-	if err != nil {
-		return false, fmt.Errorf("read MBIM radio state: %w", err)
-	}
-	enabled := state.SwRadioState != uiccmbim.RadioSwitchStateOff
-	if err := setMBIMAirplaneMode(ctx, reader, enabled); err != nil {
-		return false, err
-	}
-	return enabled, nil
-}
-
 func setMBIMAirplaneMode(ctx context.Context, reader mbimAirplaneModeReader, enabled bool) error {
 	state := uiccmbim.RadioSwitchStateOn
 	if enabled {
@@ -108,11 +105,11 @@ func setMBIMAirplaneMode(ctx context.Context, reader mbimAirplaneModeReader, ena
 	return nil
 }
 
-func openMBIMReader(ctx context.Context, device string, slot int) (*uiccmbim.Reader, error) {
-	return uiccmbim.Open(ctx, uiccmbim.WithProxy(device), uiccmbim.WithSlot(slot))
+func openMBIMReader(ctx context.Context, device string, slot uint8) (*uiccmbim.Reader, error) {
+	return uiccmbim.Open(ctx, uiccmbim.WithProxy(device), uiccmbim.WithSlot(int(slot)))
 }
 
-func openMBIMUSIMReader(ctx context.Context, device string, slot int) (usimcard.Reader, error) {
+func openMBIMUSIMReader(ctx context.Context, device string, slot uint8) (usimcard.Reader, error) {
 	reader, err := openMBIMReader(ctx, device, slot)
 	if err != nil {
 		return nil, err

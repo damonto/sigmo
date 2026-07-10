@@ -34,8 +34,16 @@ func OpenDevice(m *Modem) (*mdevice.Device, error) {
 	return mdevice.Open(cfg)
 }
 
-func openDeviceForTarget(m *Modem, target SIMTarget, open deviceControlOpener) (deviceControl, error) {
-	cfg, err := deviceConfigForTarget(m, target)
+func OpenVoLTEStatusDevice(m *Modem) (*mdevice.Device, error) {
+	cfg, err := qmiDeviceConfig(m)
+	if err != nil {
+		return nil, err
+	}
+	return mdevice.Open(cfg)
+}
+
+func openQMIDeviceForTarget(m *Modem, target SIMTarget, open deviceControlOpener) (deviceControl, error) {
+	cfg, err := qmiDeviceConfigForTarget(m, target)
 	if err != nil {
 		return nil, err
 	}
@@ -50,8 +58,16 @@ func openDeviceForModem(m *Modem, open deviceControlOpener) (deviceControl, erro
 	return openDeviceWith(cfg, open)
 }
 
-func openDeviceForSlot(m *Modem, slot int, open deviceControlOpener) (deviceControl, error) {
-	cfg, err := deviceConfigForSlot(m, slot)
+func openQMIDeviceForModem(m *Modem, open deviceControlOpener) (deviceControl, error) {
+	cfg, err := qmiDeviceConfig(m)
+	if err != nil {
+		return nil, err
+	}
+	return openDeviceWith(cfg, open)
+}
+
+func openQMIDeviceForSlot(m *Modem, slot uint8, open deviceControlOpener) (deviceControl, error) {
+	cfg, err := qmiDeviceConfigForSlot(m, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +82,7 @@ func openDeviceWith(cfg mdevice.Config, open deviceControlOpener) (deviceControl
 }
 
 func readDeviceSIMState(ctx context.Context, m *Modem, target SIMTarget, open deviceControlOpener) (mdevice.SIMState, error) {
-	device, err := openDeviceForModem(m, open)
+	device, err := openQMIDeviceForModem(m, open)
 	if errors.Is(err, mdevice.ErrUnsupported) {
 		return mdevice.SIMState{}, nil
 	}
@@ -87,15 +103,42 @@ func deviceConfig(m *Modem) (mdevice.Config, error) {
 	return deviceConfigForSlot(m, slot)
 }
 
-func deviceConfigForTarget(m *Modem, target SIMTarget) (mdevice.Config, error) {
+func qmiDeviceConfig(m *Modem) (mdevice.Config, error) {
+	if m == nil {
+		return mdevice.Config{}, errModemRequired
+	}
+	slot, err := deviceSlot(m)
+	if err != nil {
+		return mdevice.Config{}, err
+	}
+	return qmiDeviceConfigForSlot(m, slot)
+}
+
+func qmiDeviceConfigForTarget(m *Modem, target SIMTarget) (mdevice.Config, error) {
 	slot, err := deviceTargetSlot(m, target)
 	if err != nil {
 		return mdevice.Config{}, err
 	}
-	return deviceConfigForSlot(m, int(slot))
+	return qmiDeviceConfigForSlot(m, slot)
 }
 
-func deviceConfigForSlot(m *Modem, slot int) (mdevice.Config, error) {
+func qmiDeviceConfigForSlot(m *Modem, slot uint8) (mdevice.Config, error) {
+	if m == nil {
+		return mdevice.Config{}, errModemRequired
+	}
+	port, err := selectQMIDevicePort(m)
+	if err != nil {
+		return mdevice.Config{}, err
+	}
+	return mdevice.Config{
+		PortType: port.portType,
+		Device:   port.device,
+		Slot:     slot,
+		IMEI:     m.EquipmentIdentifier,
+	}, nil
+}
+
+func deviceConfigForSlot(m *Modem, slot uint8) (mdevice.Config, error) {
 	if m == nil {
 		return mdevice.Config{}, errModemRequired
 	}
@@ -137,6 +180,16 @@ func selectDevicePort(m *Modem) (devicePort, error) {
 	return devicePort{}, mdevice.ErrUnsupported
 }
 
+func selectQMIDevicePort(m *Modem) (devicePort, error) {
+	for _, port := range m.Ports {
+		if port.PortType != ModemPortTypeQmi || strings.TrimSpace(port.Device) == "" {
+			continue
+		}
+		return devicePort{portType: mdevice.PortTypeQMI, device: port.Device}, nil
+	}
+	return devicePort{}, mdevice.ErrUnsupported
+}
+
 func devicePortType(portType ModemPortType) (mdevice.PortType, bool) {
 	switch portType {
 	case ModemPortTypeQmi:
@@ -148,28 +201,31 @@ func devicePortType(portType ModemPortType) (mdevice.PortType, bool) {
 	}
 }
 
-func deviceSlot(m *Modem) (int, error) {
+func deviceSlot(m *Modem) (uint8, error) {
 	if m.PrimarySimSlot == 0 {
 		return 1, nil
 	}
 	if m.PrimarySimSlot > maxSIMSlot {
-		return 0, fmt.Errorf("SIM slot %d is out of range", m.PrimarySimSlot)
+		return 0, fmt.Errorf("sim slot %d is out of range", m.PrimarySimSlot)
 	}
-	return int(m.PrimarySimSlot), nil
+	return uint8(m.PrimarySimSlot), nil
 }
 
 func deviceTargetSlot(m *Modem, target SIMTarget) (uint8, error) {
+	if m == nil {
+		return 0, errModemRequired
+	}
 	slot, err := deviceSlot(m)
 	if err != nil {
 		return 0, err
 	}
 	if target.Slot != 0 {
 		if target.Slot > maxSIMSlot {
-			return 0, fmt.Errorf("SIM slot %d is out of range", target.Slot)
+			return 0, fmt.Errorf("sim slot %d is out of range", target.Slot)
 		}
 		return uint8(target.Slot), nil
 	}
-	return uint8(slot), nil
+	return slot, nil
 }
 
 func deviceTarget(target SIMTarget) mdevice.Target {

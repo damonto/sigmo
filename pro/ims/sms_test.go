@@ -1,6 +1,6 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"context"
@@ -10,27 +10,27 @@ import (
 	"testing"
 	"time"
 
+	imsgo "github.com/damonto/ims-go"
+	imssms "github.com/damonto/ims-go/ims/sms"
 	"github.com/damonto/sigmo/internal/pkg/storage"
-	vowifi "github.com/damonto/vowifi-go"
-	imssms "github.com/damonto/vowifi-go/ims/sms"
 )
 
 func TestIncomingMessageKey(t *testing.T) {
 	tests := []struct {
 		name string
-		msg  vowifi.SMS
+		msg  imsgo.SMS
 		want string
 	}{
 		{
 			name: "uses SIP call id",
-			msg: vowifi.SMS{
+			msg: imsgo.SMS{
 				CallID: " sms-call-id ",
 			},
 			want: "sms-call-id",
 		},
 		{
 			name: "falls back to stable content hash",
-			msg: vowifi.SMS{
+			msg: imsgo.SMS{
 				From:          "+100",
 				To:            "+200",
 				ServiceCenter: "+300",
@@ -84,38 +84,38 @@ func TestNewOutgoingMessageKey(t *testing.T) {
 func TestSMSSubmissionUpdateStatus(t *testing.T) {
 	tests := []struct {
 		name   string
-		update vowifi.SMSSubmissionUpdate
+		update imsgo.SMSSubmissionUpdate
 		want   string
 	}{
 		{
 			name:   "submitted to IMS keeps sent",
-			update: vowifi.SMSSubmissionUpdate{State: vowifi.SMSSubmittedToIMS},
+			update: imsgo.SMSSubmissionUpdate{State: imsgo.SMSSubmittedToIMS},
 		},
 		{
 			name:   "accepted by SMSC keeps sent",
-			update: vowifi.SMSSubmissionUpdate{State: vowifi.SMSAcceptedBySMSC},
+			update: imsgo.SMSSubmissionUpdate{State: imsgo.SMSAcceptedBySMSC},
 		},
 		{
 			name:   "submit unknown keeps sent",
-			update: vowifi.SMSSubmissionUpdate{State: vowifi.SMSSubmitUnknown},
+			update: imsgo.SMSSubmissionUpdate{State: imsgo.SMSSubmitUnknown},
 		},
 		{
 			name:   "delivery completed keeps sent",
-			update: vowifi.SMSSubmissionUpdate{State: vowifi.SMSDeliveryCompleted},
+			update: imsgo.SMSSubmissionUpdate{State: imsgo.SMSDeliveryCompleted},
 		},
 		{
 			name:   "rejected by SMSC fails",
-			update: vowifi.SMSSubmissionUpdate{State: vowifi.SMSRejectedBySMSC},
+			update: imsgo.SMSSubmissionUpdate{State: imsgo.SMSRejectedBySMSC},
 			want:   "failed",
 		},
 		{
 			name:   "delivery failed fails",
-			update: vowifi.SMSSubmissionUpdate{State: vowifi.SMSDeliveryFailed},
+			update: imsgo.SMSSubmissionUpdate{State: imsgo.SMSDeliveryFailed},
 			want:   "failed",
 		},
 		{
 			name:   "delivered",
-			update: vowifi.SMSSubmissionUpdate{State: vowifi.SMSDelivered},
+			update: imsgo.SMSSubmissionUpdate{State: imsgo.SMSDelivered},
 			want:   "delivered",
 		},
 	}
@@ -151,72 +151,72 @@ func TestSMSDeliveryReportTimeoutMatchesVowifiDefault(t *testing.T) {
 func TestSMSSubmissionTrackingAggregatesSegments(t *testing.T) {
 	tests := []struct {
 		name        string
-		submission  vowifi.SMSSubmission
-		updates     []vowifi.SMSSubmissionUpdate
+		submission  imsgo.SMSSubmission
+		updates     []imsgo.SMSSubmissionUpdate
 		wantUpdates []string
 	}{
 		{
 			name: "single segment delivered",
-			submission: vowifi.SMSSubmission{ID: "sms-1", Segments: []vowifi.SMSSubmissionSegment{
+			submission: imsgo.SMSSubmission{ID: "sms-1", Segments: []imsgo.SMSSubmissionSegment{
 				{Index: 0},
 			}},
-			updates: []vowifi.SMSSubmissionUpdate{
-				{SubmissionID: "sms-1", SegmentIndex: 0, State: vowifi.SMSDelivered},
+			updates: []imsgo.SMSSubmissionUpdate{
+				{SubmissionID: "sms-1", SegmentIndex: 0, State: imsgo.SMSDelivered},
 			},
 			wantUpdates: []string{"delivered"},
 		},
 		{
 			name: "multipart waits for all delivered reports",
-			submission: vowifi.SMSSubmission{ID: "sms-2", Segments: []vowifi.SMSSubmissionSegment{
+			submission: imsgo.SMSSubmission{ID: "sms-2", Segments: []imsgo.SMSSubmissionSegment{
 				{Index: 0},
 				{Index: 1},
 			}},
-			updates: []vowifi.SMSSubmissionUpdate{
-				{SubmissionID: "sms-2", SegmentIndex: 0, State: vowifi.SMSDelivered},
-				{SubmissionID: "sms-2", SegmentIndex: 1, State: vowifi.SMSDelivered},
+			updates: []imsgo.SMSSubmissionUpdate{
+				{SubmissionID: "sms-2", SegmentIndex: 0, State: imsgo.SMSDelivered},
+				{SubmissionID: "sms-2", SegmentIndex: 1, State: imsgo.SMSDelivered},
 			},
 			wantUpdates: []string{"delivered"},
 		},
 		{
 			name: "multipart failed segment wins",
-			submission: vowifi.SMSSubmission{ID: "sms-3", Segments: []vowifi.SMSSubmissionSegment{
+			submission: imsgo.SMSSubmission{ID: "sms-3", Segments: []imsgo.SMSSubmissionSegment{
 				{Index: 0},
 				{Index: 1},
 			}},
-			updates: []vowifi.SMSSubmissionUpdate{
-				{SubmissionID: "sms-3", SegmentIndex: 0, State: vowifi.SMSDelivered},
-				{SubmissionID: "sms-3", SegmentIndex: 1, State: vowifi.SMSDeliveryFailed},
+			updates: []imsgo.SMSSubmissionUpdate{
+				{SubmissionID: "sms-3", SegmentIndex: 0, State: imsgo.SMSDelivered},
+				{SubmissionID: "sms-3", SegmentIndex: 1, State: imsgo.SMSDeliveryFailed},
 			},
 			wantUpdates: []string{"failed"},
 		},
 		{
 			name: "SMSC rejection fails",
-			submission: vowifi.SMSSubmission{ID: "sms-4", Segments: []vowifi.SMSSubmissionSegment{
+			submission: imsgo.SMSSubmission{ID: "sms-4", Segments: []imsgo.SMSSubmissionSegment{
 				{Index: 0},
 			}},
-			updates: []vowifi.SMSSubmissionUpdate{
-				{SubmissionID: "sms-4", SegmentIndex: 0, State: vowifi.SMSRejectedBySMSC},
+			updates: []imsgo.SMSSubmissionUpdate{
+				{SubmissionID: "sms-4", SegmentIndex: 0, State: imsgo.SMSRejectedBySMSC},
 			},
 			wantUpdates: []string{"failed"},
 		},
 		{
 			name: "unknown states keep sent",
-			submission: vowifi.SMSSubmission{ID: "sms-5", Segments: []vowifi.SMSSubmissionSegment{
+			submission: imsgo.SMSSubmission{ID: "sms-5", Segments: []imsgo.SMSSubmissionSegment{
 				{Index: 0},
 			}},
-			updates: []vowifi.SMSSubmissionUpdate{
-				{SubmissionID: "sms-5", SegmentIndex: 0, State: vowifi.SMSSubmitUnknown},
-				{SubmissionID: "sms-5", SegmentIndex: 0, State: vowifi.SMSDeliveryCompleted},
+			updates: []imsgo.SMSSubmissionUpdate{
+				{SubmissionID: "sms-5", SegmentIndex: 0, State: imsgo.SMSSubmitUnknown},
+				{SubmissionID: "sms-5", SegmentIndex: 0, State: imsgo.SMSDeliveryCompleted},
 			},
 		},
 		{
 			name: "missing final delivery keeps sent",
-			submission: vowifi.SMSSubmission{ID: "sms-6", Segments: []vowifi.SMSSubmissionSegment{
+			submission: imsgo.SMSSubmission{ID: "sms-6", Segments: []imsgo.SMSSubmissionSegment{
 				{Index: 0},
 				{Index: 1},
 			}},
-			updates: []vowifi.SMSSubmissionUpdate{
-				{SubmissionID: "sms-6", SegmentIndex: 0, State: vowifi.SMSDelivered},
+			updates: []imsgo.SMSSubmissionUpdate{
+				{SubmissionID: "sms-6", SegmentIndex: 0, State: imsgo.SMSDelivered},
 			},
 		},
 	}
@@ -256,35 +256,35 @@ func TestSMSSubmissionTrackingAggregatesSegments(t *testing.T) {
 func TestWatchSMSSubmissionUpdatesStopsOnTimeout(t *testing.T) {
 	tests := []struct {
 		name           string
-		submission     vowifi.SMSSubmission
-		updates        []vowifi.SMSSubmissionUpdate
+		submission     imsgo.SMSSubmission
+		updates        []imsgo.SMSSubmissionUpdate
 		pendingStore   string
 		wantSubmission int
 	}{
 		{
 			name: "idle open channel returns",
-			submission: vowifi.SMSSubmission{
+			submission: imsgo.SMSSubmission{
 				ID: "sms-1",
 			},
 		},
 		{
 			name: "partial delivery tracker is cleaned up",
-			submission: vowifi.SMSSubmission{
+			submission: imsgo.SMSSubmission{
 				ID: "sms-2",
-				Segments: []vowifi.SMSSubmissionSegment{
+				Segments: []imsgo.SMSSubmissionSegment{
 					{Index: 0},
 					{Index: 1},
 				},
 			},
-			updates: []vowifi.SMSSubmissionUpdate{
-				{SubmissionID: "sms-2", SegmentIndex: 0, State: vowifi.SMSDelivered},
+			updates: []imsgo.SMSSubmissionUpdate{
+				{SubmissionID: "sms-2", SegmentIndex: 0, State: imsgo.SMSDelivered},
 			},
 		},
 		{
 			name: "pending store status survives cleanup",
-			submission: vowifi.SMSSubmission{
+			submission: imsgo.SMSSubmission{
 				ID: "sms-3",
-				Segments: []vowifi.SMSSubmissionSegment{
+				Segments: []imsgo.SMSSubmissionSegment{
 					{Index: 0},
 				},
 			},
@@ -311,7 +311,7 @@ func TestWatchSMSSubmissionUpdatesStopsOnTimeout(t *testing.T) {
 				c.smsSubmissions[key].pendingStore = tt.pendingStore
 			}
 
-			updates := make(chan vowifi.SMSSubmissionUpdate, len(tt.updates))
+			updates := make(chan imsgo.SMSSubmissionUpdate, len(tt.updates))
 			for _, update := range tt.updates {
 				updates <- update
 			}
@@ -360,17 +360,17 @@ func TestApplyPendingSMSStatusAfterStoreMiss(t *testing.T) {
 		Status:      "sent",
 		Routed:      true,
 	}
-	submission := vowifi.SMSSubmission{ID: "sms-7", Segments: []vowifi.SMSSubmissionSegment{
+	submission := imsgo.SMSSubmission{ID: "sms-7", Segments: []imsgo.SMSSubmissionSegment{
 		{Index: 0},
 	}}
 	c.trackOutgoingSMSSubmission(msg, submission)
-	submissionUpdate := vowifi.SMSSubmissionUpdate{
+	submissionUpdate := imsgo.SMSSubmissionUpdate{
 		SubmissionID: "sms-7",
 		SegmentIndex: 0,
 		SegmentCount: 1,
 		Recipient:    msg.Recipient,
 		TPReference:  7,
-		State:        vowifi.SMSDelivered,
+		State:        imsgo.SMSDelivered,
 	}
 	statusUpdate, ok := c.recordSMSSubmissionUpdate(msg.ModemID, msg.ProfileID, submissionUpdate, smsSubmissionUpdateStatus(submissionUpdate))
 	if !ok {
@@ -425,7 +425,7 @@ func TestApplyPendingSMSStatusIgnoresUnknown(t *testing.T) {
 		Status:      "sent",
 		Routed:      true,
 	}
-	c.trackOutgoingSMSSubmission(msg, vowifi.SMSSubmission{ID: "sms-8", Segments: []vowifi.SMSSubmissionSegment{
+	c.trackOutgoingSMSSubmission(msg, imsgo.SMSSubmission{ID: "sms-8", Segments: []imsgo.SMSSubmissionSegment{
 		{Index: 0},
 	}})
 
@@ -439,10 +439,10 @@ func TestApplyPendingSMSStatusIgnoresUnknown(t *testing.T) {
 	if err := c.ApplyPendingSMSStatus(ctx, msg); err != nil {
 		t.Fatalf("ApplyPendingSMSStatus() error = %v", err)
 	}
-	unknown := vowifi.SMSSubmissionUpdate{
+	unknown := imsgo.SMSSubmissionUpdate{
 		SubmissionID: "sms-8",
 		SegmentIndex: 0,
-		State:        vowifi.SMSSubmitUnknown,
+		State:        imsgo.SMSSubmitUnknown,
 	}
 	if status := smsSubmissionUpdateStatus(unknown); status != "" {
 		t.Fatalf("smsSubmissionUpdateStatus() = %q, want empty", status)

@@ -33,15 +33,7 @@ bun install
 
 Sigmo uses browser WebRTC for call audio. The backend transcodes carrier
 AMR/AMR-WB RTP to PCMU for the browser and encodes browser PCMU audio back to
-the negotiated carrier AMR format. Build the service-side AMR WebAssembly codec
-with:
-
-```sh
-scripts/build-opencore-amr-wasi.sh
-```
-
-The backend loads the codec from
-`internal/pkg/voicecodec/assets/opencore-amr.wasm`.
+the negotiated carrier AMR format.
 
 Before creating a browser offer, the UI loads ICE configuration from
 `GET /api/v1/call-media/ice-servers`. The backend uses the same ICE

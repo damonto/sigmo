@@ -1,6 +1,6 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"context"
@@ -9,11 +9,11 @@ import (
 	"log/slog"
 	"strings"
 
+	imsgo "github.com/damonto/ims-go"
+	"github.com/damonto/ims-go/wfcsetup"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/pro/websheet"
 	"github.com/damonto/uicc-go/usim"
-	vowifi "github.com/damonto/vowifi-go"
-	"github.com/damonto/vowifi-go/wfcsetup"
 )
 
 func (c *coordinator) StartEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem) (websheet.Info, error) {
@@ -160,7 +160,7 @@ func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mm
 	defer func() {
 		_ = reader.Close()
 	}()
-	cfg, err := modemClientConfig(ctx, modem)
+	cfg, err := wifiCallingModemClientConfig(ctx, modem)
 	if err != nil {
 		return wfcsetup.Result{}, err
 	}
@@ -177,7 +177,7 @@ func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mm
 	})
 }
 
-func wfcSetupDevice(terminal vowifi.TerminalInfo) wfcsetup.Device {
+func wfcSetupDevice(terminal imsgo.TerminalInfo) wfcsetup.Device {
 	return wfcsetup.Device{
 		IMEI:            strings.TrimSpace(terminal.ID),
 		Vendor:          strings.TrimSpace(terminal.Vendor),

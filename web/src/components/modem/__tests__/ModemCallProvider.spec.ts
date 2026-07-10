@@ -60,8 +60,6 @@ vi.mock('vue-i18n', () => ({
         'modemDetail.phone.holdStates.localRemote': 'Both on hold',
         'modemDetail.phone.unknownNumber': 'Unknown number',
         'modemDetail.phone.durationEmpty': '0:00',
-        'modemDetail.phone.audioCodecUnavailable':
-          'Call audio requires an AMR/AMR-WB codec module.',
       })[key] ?? key,
   }),
 }))

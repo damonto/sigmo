@@ -114,7 +114,7 @@ describe('ModemCallBanner', () => {
     const session = makeSession({
       activeCall: active,
       duration: '1:05',
-      audioMessage: 'Call audio requires an AMR/AMR-WB codec module.',
+      audioMessage: 'Call audio connection failed',
     })
     const wrapper = mountBanner(session)
 
@@ -122,7 +122,7 @@ describe('ModemCallBanner', () => {
     expect(wrapper.text()).toContain('In call')
     expect(wrapper.text()).toContain('Duration')
     expect(wrapper.text()).toContain('1:05')
-    expect(wrapper.text()).toContain('Call audio requires an AMR/AMR-WB codec module.')
+    expect(wrapper.text()).toContain('Call audio connection failed')
 
     await wrapper.get('button[aria-label="Hold"]').trigger('click')
     await wrapper.get('button[aria-label="Hang up"]').trigger('click')

@@ -1,15 +1,15 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"context"
 	"errors"
 	"testing"
 
+	"github.com/damonto/ims-go/wfcsetup"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/pro/websheet"
-	"github.com/damonto/vowifi-go/wfcsetup"
 )
 
 func TestEmergencyAddressUpdateAvailable(t *testing.T) {

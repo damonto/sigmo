@@ -1,4 +1,4 @@
-//go:build esim_transfer || wifi_calling
+//go:build esim_transfer || ims
 
 package main
 

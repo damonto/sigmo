@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
 import { useModemApi } from '@/apis/modem'
+import { useNetworkApi } from '@/apis/network'
 import { useUssdApi } from '@/apis/ussd'
 import BackButton from '@/components/BackButton.vue'
 import DraggableFab from '@/components/fab/DraggableFab.vue'
@@ -46,6 +47,7 @@ import type { UssdAction } from '@/types/ussd'
 const route = useRoute()
 const { t } = useI18n()
 const modemApi = useModemApi()
+const networkApi = useNetworkApi()
 const ussdApi = useUssdApi()
 const backButtonRef = ref<HTMLElement | null>(null)
 const dialpadRef = ref<{ focus: () => void } | null>(null)
@@ -91,6 +93,7 @@ const ussdReply = ref('')
 const ussdAction = ref<UssdAction>('initialize')
 const isSendingUssd = ref(false)
 const wifiCallingConnected = ref(false)
+const volteEnabled = ref(false)
 
 const keys = [
   { value: '1', letters: '' },
@@ -119,7 +122,7 @@ const dialInputClass = computed(() => {
 
 const isUssd = (value: string) => isDialServiceCode(value)
 
-const shouldPrepareOutgoingAudio = () => wifiCallingConnected.value
+const shouldPrepareOutgoingAudio = () => wifiCallingConnected.value || volteEnabled.value
 
 const setDigits = (value: string) => {
   digits.value = formatDialInput(value, phoneCountry.value)
@@ -241,18 +244,28 @@ const closeUssd = () => {
   ussdAction.value = 'initialize'
 }
 
-const loadWiFiCallingStatus = async () => {
+const loadImsRouteStatus = async () => {
   const targetId = modemId.value
   if (!targetId || targetId === 'unknown') {
     wifiCallingConnected.value = false
+    volteEnabled.value = false
     return
   }
-  try {
-    const { data } = await modemApi.getWiFiCallingSettings(targetId)
-    wifiCallingConnected.value = data.value?.connected ?? false
-  } catch (err) {
-    console.warn('[ModemPhoneView] load Wi-Fi Calling status:', err)
+  const [wifiCalling, volte] = await Promise.allSettled([
+    modemApi.getWiFiCallingSettings(targetId),
+    networkApi.getVoLTE(targetId),
+  ])
+  if (wifiCalling.status === 'fulfilled') {
+    wifiCallingConnected.value = wifiCalling.value.data.value?.connected ?? false
+  } else {
+    console.warn('[ModemPhoneView] load Wi-Fi Calling status:', wifiCalling.reason)
     wifiCallingConnected.value = false
+  }
+  if (volte.status === 'fulfilled') {
+    volteEnabled.value = volte.value.data.value?.managed ?? false
+  } else {
+    console.warn('[ModemPhoneView] load VoLTE status:', volte.reason)
+    volteEnabled.value = false
   }
 }
 
@@ -301,7 +314,7 @@ watch(
     expandedCallID.value = ''
     deleteDialogOpen.value = false
     deleteTarget.value = null
-    void loadWiFiCallingStatus()
+    void loadImsRouteStatus()
   },
   { immediate: true },
 )

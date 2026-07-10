@@ -1,4 +1,4 @@
-//go:build wifi_calling
+//go:build ims
 
 package call
 
@@ -41,6 +41,7 @@ const (
 	errorCodeInvalidCallRoute          = "invalid_call_route"
 	errorCodeNoCallRouteAvailable      = "no_call_route_available"
 	errorCodeWiFiCallingNotConnected   = "wifi_calling_not_connected"
+	errorCodeVoLTENotConnected         = "volte_not_connected"
 	errorCodeModemCallingUnavailable   = "modem_calling_unavailable"
 	errorCodeCallNotFound              = "call_not_found"
 	errorCodeInvalidCallState          = "invalid_call_state"
@@ -429,6 +430,8 @@ func callActionError(c *echo.Context, err error, fallback string) error {
 		return httpapi.Error(c, http.StatusServiceUnavailable, errorCodeNoCallRouteAvailable, err.Error())
 	case errors.Is(err, ErrWiFiCallingNotConnected):
 		return httpapi.Error(c, http.StatusServiceUnavailable, errorCodeWiFiCallingNotConnected, err.Error())
+	case errors.Is(err, ErrVoLTENotConnected):
+		return httpapi.Error(c, http.StatusServiceUnavailable, errorCodeVoLTENotConnected, err.Error())
 	case errors.Is(err, ErrModemCallingUnavailable):
 		return httpapi.Error(c, http.StatusNotImplemented, errorCodeModemCallingUnavailable, err.Error())
 	case errors.Is(err, ErrCallNotFound):
@@ -461,6 +464,7 @@ func callActionError(c *echo.Context, err error, fallback string) error {
 func callActionMessage(err error) string {
 	message := strings.TrimSpace(err.Error())
 	message = strings.TrimPrefix(message, "dial Wi-Fi Calling: ")
+	message = strings.TrimPrefix(message, "dial VoLTE: ")
 	if message == "" {
 		return "call failed"
 	}

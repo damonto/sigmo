@@ -3,6 +3,7 @@ import NetworkAirplaneModePanel from './NetworkAirplaneModePanel.vue'
 import NetworkBandsPanel from './NetworkBandsPanel.vue'
 import NetworkModePanel from './NetworkModePanel.vue'
 import NetworkOverviewPanel from './NetworkOverviewPanel.vue'
+import NetworkVoLTEPanel from './NetworkVoLTEPanel.vue'
 import type { BandResponse, ModeResponse } from '@/types/network'
 
 const selectedMode = defineModel<string>('selectedMode', { required: true })
@@ -18,13 +19,17 @@ const props = defineProps<{
   selectedBands: number[]
   airplaneModeSupported: boolean
   airplaneModeEnabled: boolean
+  volteManaged: boolean
+  volteCanEnable: boolean
   isSettingsLoading: boolean
   isModeUpdating: boolean
   isBandUpdating: boolean
   isAirplaneModeUpdating: boolean
+  isVolteUpdating: boolean
   canUpdateMode: boolean
   canUpdateBands: boolean
   canUpdateAirplaneMode: boolean
+  canUpdateVolte: boolean
 }>()
 
 const emit = defineEmits<{
@@ -33,6 +38,7 @@ const emit = defineEmits<{
   (event: 'updateMode'): void
   (event: 'updateBands'): void
   (event: 'updateAirplaneMode', enabled: boolean): void
+  (event: 'updateVolte', managed: boolean): void
 }>()
 
 const handleToggleBand = (value: number, checked: boolean) => {
@@ -58,6 +64,15 @@ const handleToggleBand = (value: number, checked: boolean) => {
       :is-updating="props.isAirplaneModeUpdating"
       :can-update="props.canUpdateAirplaneMode"
       @update="emit('updateAirplaneMode', $event)"
+    />
+
+    <NetworkVoLTEPanel
+      :managed="props.volteManaged"
+      :can-enable="props.volteCanEnable"
+      :is-loading="props.isSettingsLoading || props.airplaneModeEnabled"
+      :is-updating="props.isVolteUpdating"
+      :can-update="props.canUpdateVolte"
+      @update="emit('updateVolte', $event)"
     />
 
     <NetworkModePanel

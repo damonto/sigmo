@@ -1,4 +1,4 @@
-//go:build wifi_calling
+//go:build ims
 
 package call
 
@@ -11,8 +11,8 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
+	pims "github.com/damonto/sigmo/pro/ims"
 	"github.com/damonto/sigmo/pro/websheet"
-	"github.com/damonto/sigmo/pro/wificalling"
 )
 
 func TestDialRejectsInvalidRequestsBeforeRouting(t *testing.T) {
@@ -28,10 +28,11 @@ func TestDialRejectsInvalidRequestsBeforeRouting(t *testing.T) {
 		{name: "hash ussd uses ussd api", number: "#123", route: RouteModem, wantErr: ErrUSSDDialString},
 		{name: "auto route has no connected backend", number: "+12242255559", route: RouteAuto, wantErr: ErrNoRouteAvailable},
 		{name: "wifi calling route disconnected", number: "+12242255559", route: RouteWiFiCalling, wantErr: ErrWiFiCallingNotConnected},
+		{name: "volte route disconnected", number: "+12242255559", route: RouteVoLTE, wantErr: ErrVoLTENotConnected},
 		{name: "modem route unavailable", number: "+12242255559", route: RouteModem, wantErr: ErrModemCallingUnavailable},
 	}
 
-	service := New(nil, fakeWiFiCalling{})
+	service := New(nil, fakeIMSVoice{})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := service.Dial(context.Background(), nil, tt.number, tt.route)
@@ -42,10 +43,160 @@ func TestDialRejectsInvalidRequestsBeforeRouting(t *testing.T) {
 	}
 }
 
+func TestDialSelectsVoLTERoute(t *testing.T) {
+	tests := []struct {
+		name       string
+		route      string
+		wifiStatus pims.Status
+		wantRoute  string
+	}{
+		{
+			name:      "explicit volte",
+			route:     RouteVoLTE,
+			wantRoute: RouteVoLTE,
+		},
+		{
+			name:       "auto prefers connected volte over non preferred wifi",
+			route:      RouteAuto,
+			wifiStatus: pims.Status{Connected: true},
+			wantRoute:  RouteVoLTE,
+		},
+		{
+			name:       "auto keeps preferred wifi first",
+			route:      RouteAuto,
+			wifiStatus: pims.Status{Connected: true, Settings: pims.Settings{Preferred: true}},
+			wantRoute:  RouteWiFiCalling,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wifi := fakeIMSVoice{
+				status: pims.Status{Connected: true},
+				voiceCall: pims.VoiceCall{
+					ID:        "wifi-call",
+					Route:     RouteWiFiCalling,
+					ModemID:   "modem-1",
+					ProfileID: "profile-1",
+					Direction: DirectionOutgoing,
+					State:     StateDialing,
+					StartedAt: time.Now(),
+					UpdatedAt: time.Now(),
+				},
+			}
+			if tt.wifiStatus.Connected || tt.wifiStatus.Preferred {
+				wifi.status = tt.wifiStatus
+			}
+			volte := fakeIMSVoice{
+				status: pims.Status{Connected: true},
+				voiceCall: pims.VoiceCall{
+					ID:        "volte-call",
+					Route:     RouteVoLTE,
+					ModemID:   "modem-1",
+					ProfileID: "profile-1",
+					Direction: DirectionOutgoing,
+					State:     StateDialing,
+					StartedAt: time.Now(),
+					UpdatedAt: time.Now(),
+				},
+			}
+			service := New(testStore(t), wifi, VoiceRoute{Route: RouteVoLTE, Voice: volte})
+
+			call, err := service.Dial(context.Background(), nil, "+12242255559", tt.route)
+			if err != nil {
+				t.Fatalf("Dial() error = %v", err)
+			}
+			if call.Route != tt.wantRoute {
+				t.Fatalf("Dial() route = %q, want %q", call.Route, tt.wantRoute)
+			}
+		})
+	}
+}
+
+func TestDialPropagatesRouteStatusErrors(t *testing.T) {
+	errStatus := errors.New("read IMS status")
+	tests := []struct {
+		name  string
+		route string
+		wifi  fakeIMSVoice
+		volte fakeIMSVoice
+	}{
+		{
+			name:  "explicit wifi calling",
+			route: RouteWiFiCalling,
+			wifi:  fakeIMSVoice{statusErr: errStatus},
+		},
+		{
+			name:  "explicit volte",
+			route: RouteVoLTE,
+			volte: fakeIMSVoice{statusErr: errStatus},
+		},
+		{
+			name:  "automatic wifi calling check",
+			route: RouteAuto,
+			wifi:  fakeIMSVoice{statusErr: errStatus},
+		},
+		{
+			name:  "automatic volte check",
+			route: RouteAuto,
+			volte: fakeIMSVoice{statusErr: errStatus},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := New(nil, tt.wifi, VoiceRoute{Route: RouteVoLTE, Voice: tt.volte})
+			_, err := service.Dial(context.Background(), nil, "+12242255559", tt.route)
+			if !errors.Is(err, errStatus) {
+				t.Fatalf("Dial() error = %v, want %v", err, errStatus)
+			}
+		})
+	}
+}
+
+func TestDialTreatsUnavailableRouteStatusAsDisconnected(t *testing.T) {
+	tests := []struct {
+		name    string
+		route   string
+		wifi    fakeIMSVoice
+		volte   fakeIMSVoice
+		wantErr error
+	}{
+		{
+			name:    "wifi calling unavailable",
+			route:   RouteWiFiCalling,
+			wifi:    fakeIMSVoice{statusErr: pims.ErrUnavailable},
+			wantErr: ErrWiFiCallingNotConnected,
+		},
+		{
+			name:    "wifi calling profile missing",
+			route:   RouteWiFiCalling,
+			wifi:    fakeIMSVoice{statusErr: mmodem.ErrProfileIDMissing},
+			wantErr: ErrWiFiCallingNotConnected,
+		},
+		{
+			name:    "volte unavailable",
+			route:   RouteVoLTE,
+			volte:   fakeIMSVoice{statusErr: pims.ErrUnavailable},
+			wantErr: ErrVoLTENotConnected,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := New(nil, tt.wifi, VoiceRoute{Route: RouteVoLTE, Voice: tt.volte})
+			_, err := service.Dial(context.Background(), nil, "+12242255559", tt.route)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Dial() error = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestDialMapsBackendDisconnectedAfterRouteSelected(t *testing.T) {
-	service := New(nil, fakeWiFiCalling{
-		status:  wificalling.Status{Connected: true},
-		dialErr: wificalling.ErrNotConnected,
+	service := New(nil, fakeIMSVoice{
+		status:  pims.Status{Connected: true},
+		dialErr: pims.ErrNotConnected,
 	})
 
 	_, err := service.Dial(context.Background(), nil, "+12242255559", RouteAuto)
@@ -98,9 +249,9 @@ func TestRunPersistsAndPublishesWiFiCallingVoiceEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	subscriberCh := make(chan wificalling.VoiceEventFunc, 1)
-	service := New(store, fakeWiFiCalling{
-		subscribe: func(fn wificalling.VoiceEventFunc) func() {
+	subscriberCh := make(chan pims.VoiceEventFunc, 1)
+	service := New(store, fakeIMSVoice{
+		subscribe: func(fn pims.VoiceEventFunc) func() {
 			subscriberCh <- fn
 			return func() {}
 		},
@@ -112,14 +263,14 @@ func TestRunPersistsAndPublishesWiFiCallingVoiceEvents(t *testing.T) {
 	go func() {
 		done <- service.Run(ctx)
 	}()
-	var subscriber wificalling.VoiceEventFunc
+	var subscriber pims.VoiceEventFunc
 	select {
 	case subscriber = <-subscriberCh:
 	case <-time.After(time.Second):
 		t.Fatal("SubscribeVoiceEvents was not called")
 	}
 
-	voiceCall := wificalling.VoiceCall{
+	voiceCall := pims.VoiceCall{
 		ID:        "call-1",
 		ProfileID: "profile-a",
 		ModemID:   "modem-1",
@@ -129,7 +280,7 @@ func TestRunPersistsAndPublishesWiFiCallingVoiceEvents(t *testing.T) {
 		StartedAt: time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC),
 		UpdatedAt: time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC),
 	}
-	subscriber(wificalling.VoiceEvent{Call: voiceCall})
+	subscriber(pims.VoiceEvent{Call: voiceCall})
 
 	stored, err := store.GetCall(ctx, "call-1")
 	if err != nil {
@@ -158,9 +309,9 @@ func TestRunPublishesWiFiCallingVoiceEventsWhenPersistenceFails(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	store := testStore(t)
-	subscriberCh := make(chan wificalling.VoiceEventFunc, 1)
-	service := New(store, fakeWiFiCalling{
-		subscribe: func(fn wificalling.VoiceEventFunc) func() {
+	subscriberCh := make(chan pims.VoiceEventFunc, 1)
+	service := New(store, fakeIMSVoice{
+		subscribe: func(fn pims.VoiceEventFunc) func() {
 			subscriberCh <- fn
 			return func() {}
 		},
@@ -172,7 +323,7 @@ func TestRunPublishesWiFiCallingVoiceEventsWhenPersistenceFails(t *testing.T) {
 	go func() {
 		done <- service.Run(ctx)
 	}()
-	var subscriber wificalling.VoiceEventFunc
+	var subscriber pims.VoiceEventFunc
 	select {
 	case subscriber = <-subscriberCh:
 	case <-time.After(time.Second):
@@ -182,7 +333,7 @@ func TestRunPublishesWiFiCallingVoiceEventsWhenPersistenceFails(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	subscriber(wificalling.VoiceEvent{Call: wificalling.VoiceCall{
+	subscriber(pims.VoiceEvent{Call: pims.VoiceCall{
 		ID:        "call-after-store-close",
 		ProfileID: "profile-a",
 		ModemID:   "modem-1",
@@ -211,9 +362,9 @@ func TestRunPublishesWiFiCallingVoiceEventsWhenPersistenceFails(t *testing.T) {
 func TestDialPersistsRouteAndPublishesEvent(t *testing.T) {
 	ctx := context.Background()
 	store := testStore(t)
-	service := New(store, fakeWiFiCalling{
-		status: wificalling.Status{Connected: true},
-		voiceCall: wificalling.VoiceCall{
+	service := New(store, fakeIMSVoice{
+		status: pims.Status{Connected: true},
+		voiceCall: pims.VoiceCall{
 			ID:        "call-2",
 			ProfileID: "profile-a",
 			ModemID:   "modem-1",
@@ -256,13 +407,13 @@ func TestDialPersistsRouteAndPublishesEvent(t *testing.T) {
 func TestDialPersistsSelectedRouteFailure(t *testing.T) {
 	tests := []struct {
 		name      string
-		voiceCall wificalling.VoiceCall
+		voiceCall pims.VoiceCall
 		dialErr   error
 		wantErr   string
 	}{
 		{
 			name: "wifi calling setup fails after route selection",
-			voiceCall: wificalling.VoiceCall{
+			voiceCall: pims.VoiceCall{
 				ID:        "failed-call-1",
 				ProfileID: "profile-a",
 				ModemID:   "modem-1",
@@ -282,8 +433,8 @@ func TestDialPersistsSelectedRouteFailure(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			store := testStore(t)
-			service := New(store, fakeWiFiCalling{
-				status:    wificalling.Status{Connected: true},
+			service := New(store, fakeIMSVoice{
+				status:    pims.Status{Connected: true},
 				voiceCall: tt.voiceCall,
 				dialErr:   tt.dialErr,
 			})
@@ -323,28 +474,28 @@ func TestMapWiFiCallingMediaError(t *testing.T) {
 		want    string
 	}{
 		{name: "nil", err: nil, wantErr: nil},
-		{name: "unsupported codec", err: wificalling.ErrUnsupportedCodec, wantErr: ErrUnsupportedCodec},
-		{name: "media unavailable", err: wificalling.ErrUnavailable, wantErr: ErrMediaUnavailable},
-		{name: "wifi calling disconnected", err: wificalling.ErrNotConnected, wantErr: ErrWiFiCallingNotConnected},
+		{name: "unsupported codec", err: pims.ErrUnsupportedCodec, wantErr: ErrUnsupportedCodec},
+		{name: "media unavailable", err: pims.ErrUnavailable, wantErr: ErrMediaUnavailable},
+		{name: "wifi calling disconnected", err: pims.ErrNotConnected, wantErr: ErrWiFiCallingNotConnected},
 		{name: "unexpected", err: errors.New("rtp transport"), want: "open Wi-Fi Calling media: rtp transport"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := mapWiFiCallingMediaError(tt.err)
+			err := mapIMSMediaError(RouteWiFiCalling, tt.err)
 			if tt.want != "" {
 				if err == nil || err.Error() != tt.want {
-					t.Fatalf("mapWiFiCallingMediaError() error = %v, want %q", err, tt.want)
+					t.Fatalf("mapIMSMediaError() error = %v, want %q", err, tt.want)
 				}
 				return
 			}
 			if tt.wantErr == nil {
 				if err != nil {
-					t.Fatalf("mapWiFiCallingMediaError() error = %v, want nil", err)
+					t.Fatalf("mapIMSMediaError() error = %v, want nil", err)
 				}
 				return
 			}
 			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("mapWiFiCallingMediaError() error = %v, want %v", err, tt.wantErr)
+				t.Fatalf("mapIMSMediaError() error = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -353,7 +504,7 @@ func TestMapWiFiCallingMediaError(t *testing.T) {
 func TestEndUnavailableWiFiCallingMediaClosesStoredCall(t *testing.T) {
 	ctx := context.Background()
 	store := testStore(t)
-	service := New(store, fakeWiFiCalling{})
+	service := New(store, fakeIMSVoice{})
 	events, unsubscribe := service.Subscribe(1)
 	defer unsubscribe()
 
@@ -398,7 +549,7 @@ func TestEndUnavailableWiFiCallingMediaClosesStoredCall(t *testing.T) {
 
 func TestEndUnavailableWiFiCallingMediaIgnoresTerminalCall(t *testing.T) {
 	store := testStore(t)
-	service := New(store, fakeWiFiCalling{})
+	service := New(store, fakeIMSVoice{})
 	events, unsubscribe := service.Subscribe(1)
 	defer unsubscribe()
 
@@ -422,18 +573,18 @@ func TestEndUnavailableWiFiCallingMediaIgnoresTerminalCall(t *testing.T) {
 func TestHangupEndsWiFiCallingCallLocally(t *testing.T) {
 	tests := []struct {
 		name   string
-		hangup func(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
+		hangup func(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error)
 	}{
 		{
 			name: "backend disconnected",
-			hangup: func(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
-				return wificalling.VoiceCall{}, wificalling.ErrNotConnected
+			hangup: func(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error) {
+				return pims.VoiceCall{}, pims.ErrNotConnected
 			},
 		},
 		{
 			name: "call already unavailable",
-			hangup: func(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
-				return wificalling.VoiceCall{}, wificalling.ErrUnavailable
+			hangup: func(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error) {
+				return pims.VoiceCall{}, pims.ErrUnavailable
 			},
 		},
 	}
@@ -442,7 +593,7 @@ func TestHangupEndsWiFiCallingCallLocally(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			store := testStore(t)
-			service := New(store, fakeWiFiCalling{hangup: tt.hangup})
+			service := New(store, fakeIMSVoice{hangup: tt.hangup})
 			events, unsubscribe := service.Subscribe(1)
 			defer unsubscribe()
 			call := storage.Call{
@@ -497,11 +648,11 @@ func TestHangupDoesNotWaitForWiFiCallingCleanup(t *testing.T) {
 	store := testStore(t)
 	hangupStarted := make(chan struct{})
 	releaseHangup := make(chan struct{})
-	service := New(store, fakeWiFiCalling{
-		hangup: func(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+	service := New(store, fakeIMSVoice{
+		hangup: func(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error) {
 			close(hangupStarted)
 			<-releaseHangup
-			return wificalling.VoiceCall{}, nil
+			return pims.VoiceCall{}, nil
 		},
 	})
 	call := storage.Call{
@@ -563,7 +714,7 @@ func TestSaveAndPublishKeepsTerminalCallClosed(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 			store := testStore(t)
-			service := New(store, fakeWiFiCalling{})
+			service := New(store, fakeIMSVoice{})
 			events, unsubscribe := service.Subscribe(1)
 			defer unsubscribe()
 			existing := storage.Call{
@@ -622,7 +773,7 @@ func TestSaveAndPublishKeepsTerminalCallClosed(t *testing.T) {
 }
 
 func TestUpdateRejectsUnsupportedState(t *testing.T) {
-	service := New(nil, fakeWiFiCalling{})
+	service := New(nil, fakeIMSVoice{})
 	_, err := service.Update(context.Background(), nil, "call-1", UpdateRequest{State: StateFailed})
 	if !errors.Is(err, ErrInvalidCallState) {
 		t.Fatalf("Update() error = %v, want %v", err, ErrInvalidCallState)
@@ -630,7 +781,7 @@ func TestUpdateRejectsUnsupportedState(t *testing.T) {
 }
 
 func TestUpdateRejectsStateAndHoldTogether(t *testing.T) {
-	service := New(nil, fakeWiFiCalling{})
+	service := New(nil, fakeIMSVoice{})
 	_, err := service.Update(context.Background(), nil, "call-1", UpdateRequest{State: StateActive, Hold: HoldLocal})
 	if !errors.Is(err, ErrCallUpdateConflict) {
 		t.Fatalf("Update() error = %v, want %v", err, ErrCallUpdateConflict)
@@ -638,7 +789,7 @@ func TestUpdateRejectsStateAndHoldTogether(t *testing.T) {
 }
 
 func TestSetHoldRejectsInvalidHold(t *testing.T) {
-	service := New(nil, fakeWiFiCalling{})
+	service := New(nil, fakeIMSVoice{})
 	_, err := service.SetHold(context.Background(), nil, "call-1", HoldRemote)
 	if !errors.Is(err, ErrInvalidCallHold) {
 		t.Fatalf("SetHold() error = %v, want %v", err, ErrInvalidCallHold)
@@ -657,7 +808,7 @@ func TestSendDTMFRejectsInvalidDigitsBeforeLookup(t *testing.T) {
 		{name: "unicode digit", digits: "１", wantErr: ErrInvalidDTMFDigit},
 	}
 
-	service := New(nil, fakeWiFiCalling{})
+	service := New(nil, fakeIMSVoice{})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := service.SendDTMF(context.Background(), nil, "call-1", tt.digits)
@@ -730,7 +881,7 @@ func TestSendDTMFValidatesStoredCallAndRoutesToWiFiCalling(t *testing.T) {
 				}
 			}
 			called := false
-			service := New(store, fakeWiFiCalling{
+			service := New(store, fakeIMSVoice{
 				sendDTMF: func(callID string, digits string) error {
 					called = true
 					if callID != baseCall.ID || digits != tt.digits {
@@ -777,7 +928,7 @@ func TestSendDTMFMapsWiFiCallingError(t *testing.T) {
 	if err := store.SaveCall(ctx, call); err != nil {
 		t.Fatalf("SaveCall() error = %v", err)
 	}
-	service := New(store, fakeWiFiCalling{dtmfErr: wificalling.ErrNotConnected})
+	service := New(store, fakeIMSVoice{dtmfErr: pims.ErrNotConnected})
 	modem := &mmodem.Modem{
 		EquipmentIdentifier: call.ModemID,
 		Sim:                 &mmodem.SIM{Identifier: call.ProfileID},
@@ -797,7 +948,7 @@ func callWith(call storage.Call, update func(*storage.Call)) *storage.Call {
 func TestDeleteRemovesTerminalCallRecords(t *testing.T) {
 	ctx := context.Background()
 	store := testStore(t)
-	service := New(store, fakeWiFiCalling{})
+	service := New(store, fakeIMSVoice{})
 	call := storage.Call{
 		ID:        "call-ended",
 		ProfileID: "profile-a",
@@ -825,7 +976,7 @@ func TestDeleteRemovesTerminalCallRecords(t *testing.T) {
 func TestDeleteRejectsActiveCallRecords(t *testing.T) {
 	ctx := context.Background()
 	store := testStore(t)
-	service := New(store, fakeWiFiCalling{})
+	service := New(store, fakeIMSVoice{})
 	call := storage.Call{
 		ID:        "call-active",
 		ProfileID: "profile-a",
@@ -851,7 +1002,7 @@ func TestDeleteRejectsActiveCallRecords(t *testing.T) {
 }
 
 func TestSubscribeUnsubscribeLeavesChannelOpen(t *testing.T) {
-	service := New(nil, fakeWiFiCalling{})
+	service := New(nil, fakeIMSVoice{})
 	events, unsubscribe := service.Subscribe(1)
 	unsubscribe()
 	service.events.publish(Event{Call: storage.Call{ID: "call-1"}})
@@ -873,114 +1024,115 @@ func TestMapWiFiCallingActionError(t *testing.T) {
 		want    string
 	}{
 		{name: "nil", err: nil, wantErr: nil},
-		{name: "wifi calling disconnected", err: wificalling.ErrNotConnected, wantErr: ErrWiFiCallingNotConnected},
-		{name: "call unavailable", err: wificalling.ErrUnavailable, wantErr: ErrCallNotFound},
-		{name: "dtmf unsupported", err: wificalling.ErrUnsupportedDTMF, wantErr: ErrUnsupportedDTMF},
+		{name: "wifi calling disconnected", err: pims.ErrNotConnected, wantErr: ErrWiFiCallingNotConnected},
+		{name: "call unavailable", err: pims.ErrUnavailable, wantErr: ErrCallNotFound},
+		{name: "dtmf unsupported", err: pims.ErrUnsupportedDTMF, wantErr: ErrUnsupportedDTMF},
 		{name: "unexpected", err: errors.New("sip transaction"), want: "answer Wi-Fi Calling: sip transaction"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := mapWiFiCallingActionError("answer", tt.err)
+			err := mapIMSActionError(RouteWiFiCalling, "answer", tt.err)
 			if tt.want != "" {
 				if err == nil || err.Error() != tt.want {
-					t.Fatalf("mapWiFiCallingActionError() error = %v, want %q", err, tt.want)
+					t.Fatalf("mapIMSActionError() error = %v, want %q", err, tt.want)
 				}
 				return
 			}
 			if tt.wantErr == nil {
 				if err != nil {
-					t.Fatalf("mapWiFiCallingActionError() error = %v, want nil", err)
+					t.Fatalf("mapIMSActionError() error = %v, want nil", err)
 				}
 				return
 			}
 			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("mapWiFiCallingActionError() error = %v, want %v", err, tt.wantErr)
+				t.Fatalf("mapIMSActionError() error = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-type fakeWiFiCalling struct {
-	status     wificalling.Status
+type fakeIMSVoice struct {
+	status     pims.Status
+	statusErr  error
 	dialErr    error
-	voiceCall  wificalling.VoiceCall
-	answerCall wificalling.VoiceCall
-	rejectCall wificalling.VoiceCall
-	hangupCall wificalling.VoiceCall
-	holdCall   wificalling.VoiceCall
-	resumeCall wificalling.VoiceCall
+	voiceCall  pims.VoiceCall
+	answerCall pims.VoiceCall
+	rejectCall pims.VoiceCall
+	hangupCall pims.VoiceCall
+	holdCall   pims.VoiceCall
+	resumeCall pims.VoiceCall
 	dtmfErr    error
 	sendDTMF   func(string, string) error
-	hangup     func(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
+	hangup     func(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error)
 	mediaErr   error
-	subscribe  func(wificalling.VoiceEventFunc) func()
+	subscribe  func(pims.VoiceEventFunc) func()
 }
 
-func (fakeWiFiCalling) Run(context.Context, *mmodem.Registry) error { return nil }
-func (fakeWiFiCalling) Settings(context.Context, *mmodem.Modem) (wificalling.Settings, error) {
-	return wificalling.Settings{}, nil
+func (fakeIMSVoice) Run(context.Context, *mmodem.Registry) error { return nil }
+func (fakeIMSVoice) Settings(context.Context, *mmodem.Modem) (pims.Settings, error) {
+	return pims.Settings{}, nil
 }
-func (fakeWiFiCalling) UpdateSettings(context.Context, *mmodem.Modem, wificalling.Settings) error {
+func (fakeIMSVoice) UpdateSettings(context.Context, *mmodem.Modem, pims.Settings) error {
 	return nil
 }
-func (fakeWiFiCalling) Disconnect(context.Context, *mmodem.Modem) error {
+func (fakeIMSVoice) Disconnect(context.Context, *mmodem.Modem) error {
 	return nil
 }
-func (f fakeWiFiCalling) Status(context.Context, *mmodem.Modem) (wificalling.Status, error) {
-	return f.status, nil
+func (f fakeIMSVoice) Status(context.Context, *mmodem.Modem) (pims.Status, error) {
+	return f.status, f.statusErr
 }
-func (fakeWiFiCalling) EmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool {
+func (fakeIMSVoice) EmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool {
 	return false
 }
-func (fakeWiFiCalling) StartWebsheet(context.Context, *mmodem.Modem) (websheet.Info, error) {
+func (fakeIMSVoice) StartWebsheet(context.Context, *mmodem.Modem) (websheet.Info, error) {
 	return websheet.Info{}, nil
 }
-func (fakeWiFiCalling) StartEmergencyAddressUpdate(context.Context, *mmodem.Modem) (websheet.Info, error) {
+func (fakeIMSVoice) StartEmergencyAddressUpdate(context.Context, *mmodem.Modem) (websheet.Info, error) {
 	return websheet.Info{}, nil
 }
-func (fakeWiFiCalling) SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error) {
+func (fakeIMSVoice) SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error) {
 	return storage.Message{}, nil
 }
-func (fakeWiFiCalling) ApplyPendingSMSStatus(context.Context, storage.Message) error {
+func (fakeIMSVoice) ApplyPendingSMSStatus(context.Context, storage.Message) error {
 	return nil
 }
-func (fakeWiFiCalling) ExecuteUSSD(context.Context, *mmodem.Modem, string, string) (string, error) {
+func (fakeIMSVoice) ExecuteUSSD(context.Context, *mmodem.Modem, string, string) (string, error) {
 	return "", nil
 }
-func (f fakeWiFiCalling) DialCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+func (f fakeIMSVoice) DialCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error) {
 	return f.voiceCall, f.dialErr
 }
-func (f fakeWiFiCalling) AnswerCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+func (f fakeIMSVoice) AnswerCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error) {
 	return f.answerCall, nil
 }
-func (f fakeWiFiCalling) RejectCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+func (f fakeIMSVoice) RejectCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error) {
 	return f.rejectCall, nil
 }
-func (f fakeWiFiCalling) HangupCall(ctx context.Context, modem *mmodem.Modem, callID string) (wificalling.VoiceCall, error) {
+func (f fakeIMSVoice) HangupCall(ctx context.Context, modem *mmodem.Modem, callID string) (pims.VoiceCall, error) {
 	if f.hangup != nil {
 		return f.hangup(ctx, modem, callID)
 	}
 	return f.hangupCall, nil
 }
-func (f fakeWiFiCalling) HoldCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+func (f fakeIMSVoice) HoldCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error) {
 	return f.holdCall, nil
 }
-func (f fakeWiFiCalling) ResumeCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error) {
+func (f fakeIMSVoice) ResumeCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error) {
 	return f.resumeCall, nil
 }
-func (f fakeWiFiCalling) SendCallDTMF(ctx context.Context, modem *mmodem.Modem, callID string, digits string) error {
+func (f fakeIMSVoice) SendCallDTMF(ctx context.Context, modem *mmodem.Modem, callID string, digits string) error {
 	if f.sendDTMF != nil {
 		return f.sendDTMF(callID, digits)
 	}
 	return f.dtmfErr
 }
-func (f fakeWiFiCalling) OpenCallMedia(context.Context, *mmodem.Modem, string) (wificalling.MediaSession, error) {
+func (f fakeIMSVoice) OpenCallMedia(context.Context, *mmodem.Modem, string) (pims.MediaSession, error) {
 	if f.mediaErr != nil {
 		return nil, f.mediaErr
 	}
-	return nil, wificalling.ErrUnavailable
+	return nil, pims.ErrUnavailable
 }
-func (f fakeWiFiCalling) SubscribeVoiceEvents(fn wificalling.VoiceEventFunc) func() {
+func (f fakeIMSVoice) SubscribeVoiceEvents(fn pims.VoiceEventFunc) func() {
 	if f.subscribe != nil {
 		return f.subscribe(fn)
 	}

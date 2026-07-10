@@ -1,6 +1,6 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"context"
@@ -85,6 +85,14 @@ func openDeviceReader(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader
 		return nil, err
 	}
 	return device.USIM(ctx)
+}
+
+func openVoLTEReader(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader, error) {
+	reader, err := openDeviceReader(ctx, modem)
+	if err != nil {
+		return nil, err
+	}
+	return reader, nil
 }
 
 func openATReader(_ context.Context, port mmodem.ModemPort) (usimcard.Reader, error) {

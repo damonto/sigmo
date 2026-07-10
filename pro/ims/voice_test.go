@@ -1,6 +1,6 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"errors"
@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	imsgo "github.com/damonto/ims-go"
+	imssip "github.com/damonto/ims-go/ims/sip"
+	imsvoice "github.com/damonto/ims-go/ims/voice"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	vowifi "github.com/damonto/vowifi-go"
-	imssip "github.com/damonto/vowifi-go/ims/sip"
-	imsvoice "github.com/damonto/vowifi-go/ims/voice"
 )
 
 func TestNormalizeVoiceErrorMapsClientNotConnected(t *testing.T) {
@@ -23,8 +23,8 @@ func TestNormalizeVoiceErrorMapsClientNotConnected(t *testing.T) {
 		wantErr error
 		want    string
 	}{
-		{name: "client not connected", err: vowifi.ErrClientNotConnected, wantErr: ErrNotConnected},
-		{name: "wrapped client not connected", err: errors.Join(errors.New("dialing call"), vowifi.ErrClientNotConnected), wantErr: ErrNotConnected},
+		{name: "client not connected", err: imsgo.ErrClientNotConnected, wantErr: ErrNotConnected},
+		{name: "wrapped client not connected", err: errors.Join(errors.New("dialing call"), imsgo.ErrClientNotConnected), wantErr: ErrNotConnected},
 		{
 			name: "sip warning text",
 			err: fmt.Errorf("dialing call: %w", imssip.NewResponseError(imssip.Message{
@@ -77,7 +77,7 @@ func TestFailedOutgoingVoiceCall(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			call := failedOutgoingVoiceCallAt(tt.modemID, tt.profileID, tt.number, tt.err, at)
+			call := failedOutgoingVoiceCallAt(tt.modemID, tt.profileID, string(AccessWiFiCalling), tt.number, tt.err, at)
 			if call.ID != tt.wantID {
 				t.Fatalf("ID = %q, want %q", call.ID, tt.wantID)
 			}
@@ -281,12 +281,12 @@ func TestAdvanceVoiceCall(t *testing.T) {
 func TestForwardCallEventCreatesPendingOutgoingCall(t *testing.T) {
 	tests := []struct {
 		name         string
-		event        vowifi.CallEvent
+		event        imsgo.CallEvent
 		wantAnswered bool
 	}{
 		{
 			name: "dial event before DialCall returns",
-			event: vowifi.CallEvent{
+			event: imsgo.CallEvent{
 				CallID: "call-1",
 				State:  imsvoice.CallStateDialing,
 				Cause:  "early dialog terminated",
@@ -295,7 +295,7 @@ func TestForwardCallEventCreatesPendingOutgoingCall(t *testing.T) {
 		},
 		{
 			name: "confirmed event before DialCall returns",
-			event: vowifi.CallEvent{
+			event: imsgo.CallEvent{
 				CallID: "call-2",
 				State:  imsvoice.CallStateConfirmed,
 				At:     time.Date(2026, 5, 28, 1, 22, 0, 0, time.UTC),
@@ -362,11 +362,11 @@ func TestForwardCallEventCreatesPendingOutgoingCall(t *testing.T) {
 func TestForwardCallEventStoresCallPointer(t *testing.T) {
 	tests := []struct {
 		name  string
-		event vowifi.CallEvent
+		event imsgo.CallEvent
 	}{
 		{
 			name: "early media event before DialCall returns",
-			event: vowifi.CallEvent{
+			event: imsgo.CallEvent{
 				Call:   &imsvoice.Call{},
 				CallID: "call-1",
 				State:  imsvoice.CallStateEarlyMedia,
@@ -409,7 +409,7 @@ func TestVoiceEventsIgnoreStaleSessionID(t *testing.T) {
 		{
 			name: "call event",
 			apply: func(c *coordinator) {
-				c.forwardCallEvent("modem-1", 1, vowifi.CallEvent{
+				c.forwardCallEvent("modem-1", 1, imsgo.CallEvent{
 					CallID: "call-1",
 					State:  imsvoice.CallStateFailed,
 					Cause:  "stale client closed",
@@ -420,7 +420,7 @@ func TestVoiceEventsIgnoreStaleSessionID(t *testing.T) {
 		{
 			name: "incoming call",
 			apply: func(c *coordinator) {
-				c.forwardIncomingCall(&mmodem.Modem{EquipmentIdentifier: "modem-1"}, "profile-1", 1, vowifi.IncomingCall{
+				c.forwardIncomingCall(&mmodem.Modem{EquipmentIdentifier: "modem-1"}, "profile-1", 1, imsgo.IncomingCall{
 					Call:       &imsvoice.Call{},
 					FromNumber: "+12242255559",
 					ReceivedAt: at,
@@ -471,14 +471,14 @@ func TestFinishFailedPendingVoiceDialReusesEventCall(t *testing.T) {
 	at := time.Date(2026, 5, 28, 1, 24, 0, 0, time.UTC)
 	tests := []struct {
 		name      string
-		event     vowifi.CallEvent
+		event     imsgo.CallEvent
 		err       error
 		wantState string
 		wantCause string
 	}{
 		{
 			name: "failed event before dial returns",
-			event: vowifi.CallEvent{
+			event: imsgo.CallEvent{
 				CallID: "sip-call-487",
 				State:  imsvoice.CallStateFailed,
 				Cause:  "Request Terminated",
@@ -490,7 +490,7 @@ func TestFinishFailedPendingVoiceDialReusesEventCall(t *testing.T) {
 		},
 		{
 			name: "failed event without cause uses dial error",
-			event: vowifi.CallEvent{
+			event: imsgo.CallEvent{
 				CallID: "sip-call-487-empty-cause",
 				State:  imsvoice.CallStateFailed,
 				At:     at.Add(time.Second),
@@ -501,7 +501,7 @@ func TestFinishFailedPendingVoiceDialReusesEventCall(t *testing.T) {
 		},
 		{
 			name: "dialing event before dial failure",
-			event: vowifi.CallEvent{
+			event: imsgo.CallEvent{
 				CallID: "sip-call-dialing",
 				State:  imsvoice.CallStateDialing,
 				At:     at.Add(2 * time.Second),
@@ -547,7 +547,7 @@ func TestFinishFailedPendingVoiceDialReusesEventCall(t *testing.T) {
 			if c.sessions["modem-1"].pendingDial != nil {
 				t.Fatalf("pendingDial = %+v, want nil", c.sessions["modem-1"].pendingDial)
 			}
-			c.forwardCallEvent("modem-1", 0, vowifi.CallEvent{
+			c.forwardCallEvent("modem-1", 0, imsgo.CallEvent{
 				CallID: tt.event.CallID + "-late",
 				State:  imsvoice.CallStateFailed,
 				Cause:  "late failed event",
@@ -585,7 +585,7 @@ func TestFinishFailedPendingVoiceDialConsumesPendingWithoutEvent(t *testing.T) {
 		t.Fatalf("pendingDial = %+v, want nil", c.sessions["modem-1"].pendingDial)
 	}
 
-	c.forwardCallEvent("modem-1", 0, vowifi.CallEvent{
+	c.forwardCallEvent("modem-1", 0, imsgo.CallEvent{
 		CallID: "sip-call-487",
 		State:  imsvoice.CallStateFailed,
 		Cause:  "Request Terminated",

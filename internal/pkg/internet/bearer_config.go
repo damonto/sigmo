@@ -263,7 +263,7 @@ func prefixFromIPConfig(cfg mmodem.BearerIPConfig, family int) (netip.Prefix, bo
 }
 
 func connectionFromBearer(ctx context.Context, bearer *mmodem.Bearer, prefs Preferences, metric int) (*Connection, error) {
-	prefs = normalizePreferences(bearerPreferences(ctx, bearer, prefs))
+	prefs = bearerPreferences(ctx, bearer, prefs)
 
 	connected, err := bearer.Connected(ctx)
 	if err != nil {
@@ -396,20 +396,21 @@ func preferencesWithSelectedAPN(modem internetModem, prefs Preferences) Preferen
 }
 
 func preferencesWithDefaultAPNCredentials(modem internetModem, prefs Preferences) Preferences {
+	prefs = normalizePreferences(prefs)
 	profile := defaultAPNProfileFrom(defaultAPNs, strings.TrimSpace(modem.operatorIdentifier()), modemAPNCriteria(modem))
-	if profile.APN == "" || !strings.EqualFold(strings.TrimSpace(prefs.APN), profile.APN) {
-		return normalizePreferences(prefs)
+	if profile.APN == "" || !strings.EqualFold(prefs.APN, profile.APN) {
+		return prefs
 	}
-	if strings.TrimSpace(prefs.IPType) == "" {
+	if prefs.IPType == "" {
 		prefs.IPType = profile.IPType
 	}
-	if strings.TrimSpace(prefs.APNUsername) == "" {
+	if prefs.APNUsername == "" {
 		prefs.APNUsername = profile.Username
 	}
 	if prefs.APNPassword == "" {
 		prefs.APNPassword = profile.Password
 	}
-	if strings.TrimSpace(prefs.APNAuth) == "" {
+	if prefs.APNAuth == "" {
 		prefs.APNAuth = profile.Auth
 	}
 	return normalizePreferences(prefs)
@@ -459,7 +460,7 @@ func bearerPreferences(ctx context.Context, bearer *mmodem.Bearer, fallback Pref
 	if properties.AllowedAuth != "" {
 		fallback.APNAuth = properties.AllowedAuth
 	}
-	return fallback
+	return normalizePreferences(fallback)
 }
 
 func recoverTrackedConnection(ctx context.Context, stateStore connectionStateStore, modemID string, bearer *mmodem.Bearer, fallback Preferences) (trackedConnection, int, bool, error) {

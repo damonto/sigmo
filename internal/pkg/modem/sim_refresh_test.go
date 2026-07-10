@@ -802,7 +802,9 @@ func TestEnsureSIMVisibleWaitsBeforeDeviceProbe(t *testing.T) {
 	timer := time.AfterFunc(time.Millisecond, func() {
 		registry.mu.Lock()
 		defer registry.mu.Unlock()
-		modem.Sim = &SIM{Identifier: target.ICCID}
+		updated := *modem
+		updated.Sim = &SIM{Identifier: target.ICCID}
+		registry.modems["/modem/1"] = &updated
 	})
 	t.Cleanup(func() {
 		timer.Stop()
@@ -814,8 +816,8 @@ func TestEnsureSIMVisibleWaitsBeforeDeviceProbe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureSIMVisible() error = %v", err)
 	}
-	if got != modem {
-		t.Fatalf("EnsureSIMVisible() modem = %p, want %p", got, modem)
+	if got == nil || got.Sim == nil || got.Sim.Identifier != target.ICCID {
+		t.Fatalf("EnsureSIMVisible() modem = %+v, want SIM %q", got, target.ICCID)
 	}
 	if len(device.calls) != 0 {
 		t.Fatalf("device calls = %v, want none", device.calls)

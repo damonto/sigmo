@@ -1,14 +1,14 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"context"
 	"errors"
 	"testing"
 
+	"github.com/damonto/ims-go/wfcsetup"
 	"github.com/damonto/sigmo/pro/websheet"
-	"github.com/damonto/vowifi-go/wfcsetup"
 )
 
 func TestWFCWebsheetRequestFromSetupErrors(t *testing.T) {
@@ -105,14 +105,14 @@ func TestCreateWFCWebsheetFromSetupResult(t *testing.T) {
 				Action:  wfcsetup.ActionWait,
 				Pending: true,
 			},
-			wantErr: ErrWFCSetupPending,
+			wantErr: ErrWiFiCallingSetupPending,
 		},
 		{
 			name: "denied",
 			result: wfcsetup.Result{
 				Action: wfcsetup.ActionDenied,
 			},
-			wantErr: ErrWFCSetupDenied,
+			wantErr: ErrWiFiCallingSetupDenied,
 		},
 		{
 			name: "missing websheet",

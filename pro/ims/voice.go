@@ -1,6 +1,6 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"context"
@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
+	imsgo "github.com/damonto/ims-go"
+	imssip "github.com/damonto/ims-go/ims/sip"
+	imsvoice "github.com/damonto/ims-go/ims/voice"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	vowifi "github.com/damonto/vowifi-go"
-	imssip "github.com/damonto/vowifi-go/ims/sip"
-	imsvoice "github.com/damonto/vowifi-go/ims/voice"
 )
 
 type voiceCallState struct {
@@ -60,7 +60,7 @@ func (c *coordinator) DialCall(ctx context.Context, modem *mmodem.Modem, to stri
 		if info, ok := c.finishFailedPendingVoiceDial(modem.EquipmentIdentifier, pending, err); ok {
 			return info, err
 		}
-		return failedOutgoingVoiceCall(modem.EquipmentIdentifier, profileID, to, err), err
+		return failedOutgoingVoiceCall(modem.EquipmentIdentifier, profileID, c.routeName(), to, err), err
 	}
 	info := c.storeVoiceCall(modem.EquipmentIdentifier, profileID, call, strings.TrimSpace(to), string(call.Direction()), string(call.State()), "")
 	info.Hold = voiceHoldState(call)
@@ -120,11 +120,11 @@ func isAnsweredVoiceCallState(state string) bool {
 	return state == string(imsvoice.CallStateActive) || state == string(imsvoice.CallStateConfirmed)
 }
 
-func failedOutgoingVoiceCall(modemID string, profileID string, to string, err error) VoiceCall {
-	return failedOutgoingVoiceCallAt(modemID, profileID, to, err, time.Now())
+func failedOutgoingVoiceCall(modemID string, profileID string, route string, to string, err error) VoiceCall {
+	return failedOutgoingVoiceCallAt(modemID, profileID, route, to, err, time.Now())
 }
 
-func failedOutgoingVoiceCallAt(modemID string, profileID string, to string, err error, at time.Time) VoiceCall {
+func failedOutgoingVoiceCallAt(modemID string, profileID string, route string, to string, err error, at time.Time) VoiceCall {
 	number := strings.TrimSpace(to)
 	reason := ""
 	if err != nil {
@@ -132,6 +132,7 @@ func failedOutgoingVoiceCallAt(modemID string, profileID string, to string, err 
 	}
 	return VoiceCall{
 		ID:        failedVoiceCallID(modemID, profileID, number, at),
+		Route:     route,
 		ModemID:   modemID,
 		ProfileID: profileID,
 		Direction: string(imsvoice.CallDirectionOutgoing),
@@ -367,7 +368,7 @@ func (c *coordinator) SubscribeVoiceEvents(fn VoiceEventFunc) func() {
 }
 
 func normalizeVoiceError(err error) error {
-	if errors.Is(err, vowifi.ErrClientNotConnected) {
+	if errors.Is(err, imsgo.ErrClientNotConnected) {
 		return ErrNotConnected
 	}
 	var responseErr *imssip.ResponseError
@@ -415,7 +416,7 @@ func (s callMediaSession) WritePacket(ctx context.Context, packet []byte) error 
 	return s.call.WriteRTP(ctx, packet)
 }
 
-func (c *coordinator) lookupVoiceCall(ctx context.Context, modem *mmodem.Modem, callID string) (*vowifi.Client, *imsvoice.Call, VoiceCall, error) {
+func (c *coordinator) lookupVoiceCall(ctx context.Context, modem *mmodem.Modem, callID string) (*imsgo.Client, *imsvoice.Call, VoiceCall, error) {
 	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
 		return nil, nil, VoiceCall{}, err
@@ -443,6 +444,7 @@ func (c *coordinator) storeVoiceCallForSession(modemID string, sessionID uint64,
 	now := time.Now()
 	info := VoiceCall{
 		ID:        call.ID(),
+		Route:     c.routeName(),
 		ModemID:   modemID,
 		ProfileID: profileID,
 		Direction: direction,
@@ -578,7 +580,7 @@ func (c *coordinator) publishVoiceEvent(call VoiceCall) {
 	}
 }
 
-func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string, sessionID uint64, incoming vowifi.IncomingCall) {
+func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string, sessionID uint64, incoming imsgo.IncomingCall) {
 	if incoming.Call == nil {
 		return
 	}
@@ -595,7 +597,7 @@ func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string,
 	c.publishVoiceEvent(info)
 }
 
-func (c *coordinator) forwardCallEvent(modemID string, sessionID uint64, event vowifi.CallEvent) {
+func (c *coordinator) forwardCallEvent(modemID string, sessionID uint64, event imsgo.CallEvent) {
 	c.mu.Lock()
 	session := c.sessions[modemID]
 	var info VoiceCall
@@ -605,6 +607,7 @@ func (c *coordinator) forwardCallEvent(modemID string, sessionID uint64, event v
 		if state == nil && session.pendingDial != nil {
 			info = VoiceCall{
 				ID:        event.CallID,
+				Route:     c.routeName(),
 				ModemID:   modemID,
 				ProfileID: session.pendingDial.profileID,
 				Direction: string(imsvoice.CallDirectionOutgoing),

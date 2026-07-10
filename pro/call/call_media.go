@@ -1,4 +1,4 @@
-//go:build wifi_calling
+//go:build ims
 
 package call
 
@@ -11,12 +11,12 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
-	"github.com/damonto/sigmo/pro/wificalling"
+	pims "github.com/damonto/sigmo/pro/ims"
 )
 
 type callMedia struct {
-	wifiCalling wifiCallingVoice
-	records     *callRecords
+	routes  *callRoutes
+	records *callRecords
 }
 
 func (m *callMedia) Open(ctx context.Context, modem *mmodem.Modem, callID string) (MediaSession, error) {
@@ -25,15 +25,19 @@ func (m *callMedia) Open(ctx context.Context, modem *mmodem.Modem, callID string
 		return nil, err
 	}
 	switch call.Route {
-	case RouteWiFiCalling:
-		session, err := m.wifiCalling.OpenCallMedia(ctx, modem, call.ID)
-		if errors.Is(err, wificalling.ErrUnavailable) {
+	case RouteWiFiCalling, RouteVoLTE:
+		voice := m.routes.voice(call.Route)
+		if voice == nil {
+			return nil, notConnectedError(call.Route)
+		}
+		session, err := voice.OpenCallMedia(ctx, modem, call.ID)
+		if errors.Is(err, pims.ErrUnavailable) {
 			m.endUnavailable(ctx, call)
 		}
-		if err := mapWiFiCallingMediaError(err); err != nil {
+		if err := mapIMSMediaError(call.Route, err); err != nil {
 			return nil, err
 		}
-		return wifiCallingMediaSession{session: session}, nil
+		return imsMediaSession{session: session}, nil
 	case RouteModem:
 		return nil, ErrModemCallingUnavailable
 	default:
@@ -51,8 +55,9 @@ func (m *callMedia) endUnavailable(ctx context.Context, call storage.Call) {
 	call.EndedAt = now
 	call.UpdatedAt = now
 	if err := m.records.store.SaveCall(ctx, call); err != nil {
-		slog.Warn("save Wi-Fi Calling call after media became unavailable",
+		slog.Warn("save IMS call after media became unavailable",
 			"call_id", call.ID,
+			"route", call.Route,
 			"modem_id", call.ModemID,
 			"profile_id", call.ProfileID,
 			"error", err,
@@ -62,11 +67,11 @@ func (m *callMedia) endUnavailable(ctx context.Context, call storage.Call) {
 	m.records.events.publish(Event{Call: call})
 }
 
-type wifiCallingMediaSession struct {
-	session wificalling.MediaSession
+type imsMediaSession struct {
+	session pims.MediaSession
 }
 
-func (s wifiCallingMediaSession) Info() MediaInfo {
+func (s imsMediaSession) Info() MediaInfo {
 	info := s.session.Info()
 	return MediaInfo{
 		Codec:           info.Codec,
@@ -80,25 +85,25 @@ func (s wifiCallingMediaSession) Info() MediaInfo {
 	}
 }
 
-func (s wifiCallingMediaSession) ReadPacket(ctx context.Context) ([]byte, error) {
+func (s imsMediaSession) ReadPacket(ctx context.Context) ([]byte, error) {
 	return s.session.ReadPacket(ctx)
 }
 
-func (s wifiCallingMediaSession) WritePacket(ctx context.Context, packet []byte) error {
+func (s imsMediaSession) WritePacket(ctx context.Context, packet []byte) error {
 	return s.session.WritePacket(ctx, packet)
 }
 
-func mapWiFiCallingMediaError(err error) error {
+func mapIMSMediaError(route string, err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, wificalling.ErrUnsupportedCodec):
+	case errors.Is(err, pims.ErrUnsupportedCodec):
 		return ErrUnsupportedCodec
-	case errors.Is(err, wificalling.ErrUnavailable):
+	case errors.Is(err, pims.ErrUnavailable):
 		return ErrMediaUnavailable
-	case errors.Is(err, wificalling.ErrNotConnected):
-		return ErrWiFiCallingNotConnected
+	case errors.Is(err, pims.ErrNotConnected):
+		return notConnectedError(route)
 	default:
-		return fmt.Errorf("open Wi-Fi Calling media: %w", err)
+		return fmt.Errorf("open %s media: %w", routeLabel(route), err)
 	}
 }

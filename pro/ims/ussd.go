@@ -1,13 +1,13 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"context"
 	"errors"
 
+	imsgo "github.com/damonto/ims-go"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	vowifi "github.com/damonto/vowifi-go"
 )
 
 func (c *coordinator) ExecuteUSSD(ctx context.Context, modem *mmodem.Modem, action string, code string) (string, error) {
@@ -47,17 +47,17 @@ func (c *coordinator) ExecuteUSSD(ctx context.Context, modem *mmodem.Modem, acti
 	}
 }
 
-func (c *coordinator) ussdSession(modemID string) (*vowifi.Client, *vowifi.USSDSession, error) {
+func (c *coordinator) ussdSession(modemID string) (*imsgo.Client, *imsgo.USSDSession, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modemID]
 	if session == nil || session.ussd == nil {
-		return nil, nil, vowifi.ErrUSSDNotStarted
+		return nil, nil, imsgo.ErrUSSDNotStarted
 	}
 	return session.client, session.ussd, nil
 }
 
-func (c *coordinator) setUSSDSession(modemID string, ussd *vowifi.USSDSession, closed bool) {
+func (c *coordinator) setUSSDSession(modemID string, ussd *imsgo.USSDSession, closed bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modemID]

@@ -903,7 +903,7 @@ func TestCommandResponses(t *testing.T) {
 		{
 			name: "select item returns selected identifier",
 			run: func(t *testing.T, session *wsSession, conn *fakeWSConn) stkpkg.TerminalResponse {
-				go sendAfterWrite(t, conn, func() {
+				sendErr := sendAfterWrite(conn, func() {
 					session.selectCh <- wsClientMessage{Type: wsTypeMenuSelection, ItemID: 7}
 				})
 				resp, err := session.selectItem(context.Background(), stkpkg.SelectItemCommand{
@@ -913,6 +913,9 @@ func TestCommandResponses(t *testing.T) {
 				})
 				if err != nil {
 					t.Fatalf("selectItem() error = %v", err)
+				}
+				if err := <-sendErr; err != nil {
+					t.Fatalf("send response: %v", err)
 				}
 				return resp
 			},
@@ -928,7 +931,7 @@ func TestCommandResponses(t *testing.T) {
 		{
 			name: "display text accepts confirmation",
 			run: func(t *testing.T, session *wsSession, conn *fakeWSConn) stkpkg.TerminalResponse {
-				go sendAfterWrite(t, conn, func() {
+				sendErr := sendAfterWrite(conn, func() {
 					session.confirmCh <- wsClientMessage{Type: wsTypeConfirmResponse, Accepted: true}
 				})
 				resp, err := session.displayText(context.Background(), stkpkg.DisplayTextCommand{
@@ -936,6 +939,9 @@ func TestCommandResponses(t *testing.T) {
 				})
 				if err != nil {
 					t.Fatalf("displayText() error = %v", err)
+				}
+				if err := <-sendErr; err != nil {
+					t.Fatalf("send response: %v", err)
 				}
 				return resp
 			},
@@ -951,7 +957,7 @@ func TestCommandResponses(t *testing.T) {
 		{
 			name: "get input returns text",
 			run: func(t *testing.T, session *wsSession, conn *fakeWSConn) stkpkg.TerminalResponse {
-				go sendAfterWrite(t, conn, func() {
+				sendErr := sendAfterWrite(conn, func() {
 					session.inputCh <- wsClientMessage{Type: wsTypeInputResponse, Text: "1234"}
 				})
 				resp, err := session.getInput(context.Background(), stkpkg.GetInputCommand{
@@ -960,6 +966,9 @@ func TestCommandResponses(t *testing.T) {
 				})
 				if err != nil {
 					t.Fatalf("getInput() error = %v", err)
+				}
+				if err := <-sendErr; err != nil {
+					t.Fatalf("send response: %v", err)
 				}
 				return resp
 			},
@@ -972,7 +981,7 @@ func TestCommandResponses(t *testing.T) {
 		{
 			name: "get inkey returns text",
 			run: func(t *testing.T, session *wsSession, conn *fakeWSConn) stkpkg.TerminalResponse {
-				go sendAfterWrite(t, conn, func() {
+				sendErr := sendAfterWrite(conn, func() {
 					session.inkeyCh <- wsClientMessage{Type: wsTypeInkeyResponse, Text: "Y"}
 				})
 				resp, err := session.getInkey(context.Background(), stkpkg.GetInkeyCommand{
@@ -981,6 +990,9 @@ func TestCommandResponses(t *testing.T) {
 				})
 				if err != nil {
 					t.Fatalf("getInkey() error = %v", err)
+				}
+				if err := <-sendErr; err != nil {
+					t.Fatalf("send response: %v", err)
 				}
 				return resp
 			},
@@ -993,7 +1005,7 @@ func TestCommandResponses(t *testing.T) {
 		{
 			name: "confirm command rejects user decline",
 			run: func(t *testing.T, session *wsSession, conn *fakeWSConn) stkpkg.TerminalResponse {
-				go sendAfterWrite(t, conn, func() {
+				sendErr := sendAfterWrite(conn, func() {
 					session.confirmCh <- wsClientMessage{Type: wsTypeConfirmResponse, Accepted: false}
 				})
 				resp, err := session.confirmSimple(context.Background(), stkpkg.SimpleCommand{
@@ -1004,6 +1016,9 @@ func TestCommandResponses(t *testing.T) {
 				})
 				if err != nil {
 					t.Fatalf("confirmSimple() error = %v", err)
+				}
+				if err := <-sendErr; err != nil {
+					t.Fatalf("send response: %v", err)
 				}
 				return resp
 			},
@@ -1027,19 +1042,27 @@ func TestCommandResponses(t *testing.T) {
 	}
 }
 
-func sendAfterWrite(t *testing.T, conn *fakeWSConn, send func()) {
-	t.Helper()
-	deadline := time.After(time.Second)
-	for {
-		if conn.writeCount() > 0 {
-			send()
-			return
+func sendAfterWrite(conn *fakeWSConn, send func()) <-chan error {
+	errCh := make(chan error, 1)
+	go func() {
+		deadline := time.NewTimer(time.Second)
+		defer deadline.Stop()
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-deadline.C:
+				errCh <- errors.New("timed out waiting for websocket write")
+				return
+			case <-ticker.C:
+				if conn.writeCount() == 0 {
+					continue
+				}
+				send()
+				errCh <- nil
+				return
+			}
 		}
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for websocket write")
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
+	}()
+	return errCh
 }

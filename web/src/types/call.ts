@@ -1,4 +1,4 @@
-export type CallRoute = 'auto' | 'wifi_calling' | 'modem'
+export type CallRoute = 'auto' | 'wifi_calling' | 'volte' | 'modem'
 export type StoredCallRoute = Exclude<CallRoute, 'auto'>
 export type CallDirection = 'incoming' | 'outgoing'
 export type CallState =

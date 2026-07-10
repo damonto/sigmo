@@ -26,6 +26,7 @@ const liveDurationStates = new Set<CallRecord['state']>([
 
 const mediaSessionStates = new Set<CallRecord['state']>(['early_media', 'active', 'confirmed'])
 const terminalStates = new Set<CallRecord['state']>(['ended', 'failed'])
+const imsMediaRoutes = new Set<CallRecord['route']>(['wifi_calling', 'volte'])
 
 const localHoldStates = new Set<CallRecord['hold']>(['local', 'local_remote'])
 const remoteHoldStates = new Set<CallRecord['hold']>(['remote', 'local_remote'])
@@ -62,6 +63,8 @@ const createModemCallSession = (
     switch (value) {
       case 'wifi_calling':
         return t('modemDetail.phone.routes.wifiCalling')
+      case 'volte':
+        return t('modemDetail.phone.routes.volte')
       case 'modem':
         return t('modemDetail.phone.routes.modem')
       default:
@@ -162,7 +165,7 @@ const createModemCallSession = (
   }
 
   const answerIncoming = async (call: CallRecord) => {
-    if (call.route === 'wifi_calling') {
+    if (imsMediaRoutes.has(call.route)) {
       const ready = await callAudio.prepare()
       if (!ready) return
     }
@@ -182,7 +185,7 @@ const createModemCallSession = (
         stopDurationTimer()
       }
 
-      if (call && mediaSessionStates.has(call.state) && call.route === 'wifi_calling') {
+      if (call && mediaSessionStates.has(call.state) && imsMediaRoutes.has(call.route)) {
         callAudio.setInputEnabled(!localHoldStates.has(call.hold) && !remoteHoldStates.has(call.hold))
         if (audioCallID.value === call.callID) return
         audioCallID.value = call.callID

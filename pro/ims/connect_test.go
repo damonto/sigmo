@@ -1,6 +1,6 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"bytes"
@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
+	imsgo "github.com/damonto/ims-go"
+	imsvoice "github.com/damonto/ims-go/ims/voice"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/pro/websheet"
-	vowifi "github.com/damonto/vowifi-go"
-	imsvoice "github.com/damonto/vowifi-go/ims/voice"
 	"github.com/godbus/dbus/v5"
 )
 
@@ -27,7 +27,7 @@ func TestRetryDelays(t *testing.T) {
 		want []time.Duration
 	}{
 		{
-			name: "wifi calling connect backoff",
+			name: "Wi-Fi Calling connect backoff",
 			want: []time.Duration{
 				30 * time.Second,
 				60 * time.Second,
@@ -51,12 +51,12 @@ func TestTerminalInfo(t *testing.T) {
 	tests := []struct {
 		name string
 		imei string
-		want vowifi.TerminalInfo
+		want imsgo.TerminalInfo
 	}{
 		{
 			name: "uses real device imei and transfer device shape",
 			imei: "123456789012345",
-			want: vowifi.TerminalInfo{
+			want: imsgo.TerminalInfo{
 				ID:              "123456789012345",
 				Vendor:          "Google",
 				Model:           "Pixel 8 Pro",
@@ -88,12 +88,15 @@ func TestModemClientConfigForIMEI(t *testing.T) {
 			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 			defer slog.SetDefault(previous)
 
-			cfg := modemClientConfigForIMEI(tt.imei)
+			cfg := modemClientConfigForIMEI(tt.imei, AccessWiFiCalling)
 			if cfg.Logger == nil {
 				t.Fatal("Logger = nil, want configured logger")
 			}
 			if cfg.Terminal.ID != tt.imei {
 				t.Fatalf("Terminal.ID = %q, want %q", cfg.Terminal.ID, tt.imei)
+			}
+			if cfg.Access.VoWiFi == nil {
+				t.Fatal("Access.VoWiFi = nil, want Wi-Fi Calling access")
 			}
 			cfg.Logger.Info("config log")
 			if !strings.Contains(logs.String(), "imei="+tt.imei) {
@@ -112,18 +115,18 @@ func TestConnectedClientRequiresSameProfile(t *testing.T) {
 	}{
 		{
 			name:      "same profile",
-			session:   &sessionState{client: &vowifi.Client{}, profileID: "profile-a", connected: true},
+			session:   &sessionState{client: &imsgo.Client{}, profileID: "profile-a", connected: true},
 			profileID: "profile-a",
 		},
 		{
 			name:      "different profile",
-			session:   &sessionState{client: &vowifi.Client{}, profileID: "profile-a", connected: true},
+			session:   &sessionState{client: &imsgo.Client{}, profileID: "profile-a", connected: true},
 			profileID: "profile-b",
 			wantErr:   ErrNotConnected,
 		},
 		{
 			name:      "disconnected",
-			session:   &sessionState{client: &vowifi.Client{}, profileID: "profile-a"},
+			session:   &sessionState{client: &imsgo.Client{}, profileID: "profile-a"},
 			profileID: "profile-a",
 			wantErr:   ErrNotConnected,
 		},
@@ -144,7 +147,7 @@ func TestMarkConnectingResetsDisconnectedSession(t *testing.T) {
 	c := &coordinator{
 		sessions: map[string]*sessionState{
 			"modem-1": {
-				client:      &vowifi.Client{},
+				client:      &imsgo.Client{},
 				connected:   true,
 				connectedAt: now,
 				phase:       sessionPhaseDisconnected,
@@ -177,13 +180,13 @@ func TestMarkConnectingResetsDisconnectedSession(t *testing.T) {
 func TestSessionStateIgnoresStaleSessionID(t *testing.T) {
 	tests := []struct {
 		name          string
-		apply         func(*coordinator, *vowifi.Client, *vowifi.Client)
+		apply         func(*coordinator, *imsgo.Client, *imsgo.Client)
 		wantConnected bool
 		wantPhase     sessionPhase
 	}{
 		{
 			name: "mark connected",
-			apply: func(c *coordinator, oldClient *vowifi.Client, currentClient *vowifi.Client) {
+			apply: func(c *coordinator, oldClient *imsgo.Client, currentClient *imsgo.Client) {
 				c.markConnected("modem-1", 1, oldClient)
 			},
 			wantConnected: true,
@@ -191,7 +194,7 @@ func TestSessionStateIgnoresStaleSessionID(t *testing.T) {
 		},
 		{
 			name: "mark connecting",
-			apply: func(c *coordinator, oldClient *vowifi.Client, currentClient *vowifi.Client) {
+			apply: func(c *coordinator, oldClient *imsgo.Client, currentClient *imsgo.Client) {
 				c.markConnecting("modem-1", 1)
 			},
 			wantConnected: true,
@@ -199,7 +202,7 @@ func TestSessionStateIgnoresStaleSessionID(t *testing.T) {
 		},
 		{
 			name: "mark disconnected",
-			apply: func(c *coordinator, oldClient *vowifi.Client, currentClient *vowifi.Client) {
+			apply: func(c *coordinator, oldClient *imsgo.Client, currentClient *imsgo.Client) {
 				c.markDisconnected("modem-1", 1, currentClient)
 			},
 			wantConnected: true,
@@ -207,7 +210,7 @@ func TestSessionStateIgnoresStaleSessionID(t *testing.T) {
 		},
 		{
 			name: "stop async",
-			apply: func(c *coordinator, oldClient *vowifi.Client, currentClient *vowifi.Client) {
+			apply: func(c *coordinator, oldClient *imsgo.Client, currentClient *imsgo.Client) {
 				c.stopAsyncSession("modem-1", 1)
 			},
 			wantConnected: true,
@@ -216,8 +219,8 @@ func TestSessionStateIgnoresStaleSessionID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldClient := &vowifi.Client{}
-			currentClient := &vowifi.Client{}
+			oldClient := &imsgo.Client{}
+			currentClient := &imsgo.Client{}
 			c := &coordinator{
 				sessions: map[string]*sessionState{
 					"modem-1": {
@@ -355,7 +358,7 @@ func TestAttachWebsheetDeletesStaleSession(t *testing.T) {
 }
 
 func TestMarkDisconnectedFailsOpenCalls(t *testing.T) {
-	client := &vowifi.Client{}
+	client := &imsgo.Client{}
 	c := &coordinator{
 		sessions: map[string]*sessionState{
 			"modem-1": {
@@ -424,7 +427,7 @@ func TestMarkDisconnectedIgnoresStaleClient(t *testing.T) {
 	c := &coordinator{
 		sessions: map[string]*sessionState{
 			"modem-1": {
-				client:    &vowifi.Client{},
+				client:    &imsgo.Client{},
 				connected: true,
 				calls: map[string]*voiceCallState{
 					"active": {
@@ -435,7 +438,7 @@ func TestMarkDisconnectedIgnoresStaleClient(t *testing.T) {
 		},
 		voiceSubscribers: make(map[uint64]VoiceEventFunc),
 	}
-	c.markDisconnected("modem-1", 0, &vowifi.Client{})
+	c.markDisconnected("modem-1", 0, &imsgo.Client{})
 
 	session := c.sessions["modem-1"]
 	if !session.connected {
@@ -447,7 +450,7 @@ func TestMarkDisconnectedIgnoresStaleClient(t *testing.T) {
 }
 
 func TestMapClientConnectionErrorMarksSessionDisconnected(t *testing.T) {
-	client := &vowifi.Client{}
+	client := &imsgo.Client{}
 	c := &coordinator{
 		sessions: map[string]*sessionState{
 			"modem-1": {
@@ -459,7 +462,7 @@ func TestMapClientConnectionErrorMarksSessionDisconnected(t *testing.T) {
 		voiceSubscribers: make(map[uint64]VoiceEventFunc),
 	}
 
-	err := c.handleClientDisconnected("modem-1", client, errors.Join(errors.New("sending SMS"), vowifi.ErrClientNotConnected))
+	err := c.handleClientDisconnected("modem-1", client, errors.Join(errors.New("sending SMS"), imsgo.ErrClientNotConnected))
 
 	if !errors.Is(err, ErrNotConnected) {
 		t.Fatalf("handleClientDisconnected() error = %v, want %v", err, ErrNotConnected)

@@ -19,13 +19,13 @@ import (
 
 type qmiDevice struct {
 	device    string
-	slot      int
+	slot      uint8
 	imei      string
 	openUIM   func(context.Context, uint8) (qmiUIMReader, error)
 	openRadio func(context.Context) (qmiAirplaneModeReader, error)
 }
 
-func newQMIDevice(device string, slot int, imei string) qmiDevice {
+func newQMIDevice(device string, slot uint8, imei string) qmiDevice {
 	return qmiDevice{
 		device: device,
 		slot:   slot,
@@ -44,17 +44,12 @@ func (u qmiDevice) USIM(ctx context.Context) (usimcard.Reader, error) {
 }
 
 func (u qmiDevice) USIMWithCAT(ctx context.Context, profile CATProfile) (usimcard.Reader, error) {
-	slot, err := normalizeSIMSlot(u.slot)
-	if err != nil {
-		return nil, err
-	}
-	reader, err := openQMIUIM(ctx, u.device, slot)
+	reader, err := openQMIUIM(ctx, u.device, u.slot)
 	if err != nil {
 		return nil, fmt.Errorf("open QMI UIM reader: %w", err)
 	}
 	if err := configureQMICAT(ctx, u.imei, uim.NewCAT(reader), profile); err != nil {
-		_ = reader.Close()
-		return nil, err
+		return nil, errors.Join(err, reader.Close())
 	}
 	adapter, err := usim.NewQCOM(reader)
 	if err != nil {
@@ -75,11 +70,11 @@ func openQMIUIM(ctx context.Context, device string, slot uint8) (*uim.Reader, er
 	return reader, nil
 }
 
-func openQMIUSIMReader(ctx context.Context, device string, slot int) (usimcard.Reader, error) {
-	if slot < 1 || slot > MaxSIMSlot {
-		return nil, fmt.Errorf("SIM slot %d is out of range", slot)
+func openQMIUSIMReader(ctx context.Context, device string, slot uint8) (usimcard.Reader, error) {
+	if err := validateSIMSlot(slot); err != nil {
+		return nil, err
 	}
-	reader, err := openQMIUIM(ctx, device, uint8(slot))
+	reader, err := openQMIUIM(ctx, device, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -106,12 +101,39 @@ type qmiAirplaneModeReader interface {
 
 type qmiUIMReader interface {
 	ATR(ctx context.Context) ([]byte, error)
+	IMSAStatus(ctx context.Context) (qcom.IMSAStatus, error)
 	PowerOffSIM(ctx context.Context, slot uint8) error
 	PowerOnSIM(ctx context.Context, req uim.PowerOnSIMRequest) error
 	SlotStatus(ctx context.Context) (uim.SlotStatus, error)
 	CardStatus(ctx context.Context) (uim.CardStatus, error)
 	ChangeProvisioningSession(ctx context.Context, req uim.ChangeProvisioningSessionRequest) error
 	Close() error
+}
+
+type slotStatus struct {
+	ActiveSlot uint8
+	Slots      []slot
+}
+
+type slot struct {
+	ICCID string
+	ATR   []byte
+}
+
+type cardStatus struct {
+	Cards []card
+}
+
+type card struct {
+	Present          bool
+	USIMApplications []usimApplication
+}
+
+type usimApplication struct {
+	Ready                bool
+	AID                  []byte
+	ApplicationState     string
+	PersonalizationState string
 }
 
 func (u qmiDevice) AirplaneMode(ctx context.Context) (bool, error) {
@@ -138,24 +160,6 @@ func (u qmiDevice) SetAirplaneMode(ctx context.Context, enabled bool) error {
 	return setQMIAirplaneMode(ctx, reader, enabled)
 }
 
-func (u qmiDevice) ToggleAirplaneMode(ctx context.Context) (bool, error) {
-	reader, err := u.openRadio(ctx)
-	if err != nil {
-		return false, fmt.Errorf("open QMI airplane mode reader: %w", err)
-	}
-	defer closeReader("close QMI airplane mode reader", reader)
-
-	mode, err := reader.OperatingMode(ctx)
-	if err != nil {
-		return false, fmt.Errorf("read QMI operating mode: %w", err)
-	}
-	enabled := !qmiOperatingModeAirplane(mode)
-	if err := setQMIAirplaneMode(ctx, reader, enabled); err != nil {
-		return false, err
-	}
-	return enabled, nil
-}
-
 func setQMIAirplaneMode(ctx context.Context, reader qmiAirplaneModeReader, enabled bool) error {
 	mode := qcom.DMSOperatingModeOnline
 	if enabled {
@@ -180,11 +184,7 @@ func qmiOperatingModeAirplane(mode qcom.DMSOperatingMode) bool {
 }
 
 func (u qmiDevice) ATR(ctx context.Context) ([]byte, error) {
-	slot, err := normalizeSIMSlot(u.slot)
-	if err != nil {
-		return nil, err
-	}
-	reader, err := u.openUIM(ctx, slot)
+	reader, err := u.openUIM(ctx, u.slot)
 	if err != nil {
 		return nil, fmt.Errorf("open QMI UIM reader: %w", err)
 	}
@@ -197,173 +197,91 @@ func (u qmiDevice) ATR(ctx context.Context) ([]byte, error) {
 	return atr, nil
 }
 
-func (u qmiDevice) SlotStatus(ctx context.Context) (SlotStatus, error) {
-	slot, err := normalizeSIMSlot(u.slot)
+func (u qmiDevice) VoLTEStatus(ctx context.Context) (VoLTEStatus, error) {
+	reader, err := u.openUIM(ctx, u.slot)
 	if err != nil {
-		return SlotStatus{}, err
-	}
-	reader, err := u.openUIM(ctx, slot)
-	if err != nil {
-		return SlotStatus{}, fmt.Errorf("open QMI UIM reader: %w", err)
+		return VoLTEStatus{}, fmt.Errorf("open QMI UIM reader: %w", err)
 	}
 	defer closeQMIUIMReader(reader)
 
-	status, err := reader.SlotStatus(ctx)
+	status, err := reader.IMSAStatus(ctx)
 	if err != nil {
-		return SlotStatus{}, fmt.Errorf("read QMI UIM slot status: %w", err)
+		switch {
+		case errors.Is(err, qcom.QMIErrorNetworkUnsupported),
+			errors.Is(err, qcom.QMIErrorDeviceUnsupported),
+			errors.Is(err, qcom.QMIErrorInvalidServiceType),
+			errors.Is(err, qcom.QMIErrorInvalidQmiCommand),
+			errors.Is(err, qcom.QMIErrorNotSupported):
+			return VoLTEStatus{}, nil
+		default:
+			return VoLTEStatus{}, fmt.Errorf("read QMI IMSA status: %w", err)
+		}
 	}
-	deviceStatus, err := qmiSlotStatus(status)
-	if err != nil {
-		return SlotStatus{}, err
-	}
-	return deviceStatus, nil
+	return VoLTEStatus{
+		Supported: true,
+		Known:     status.RegistrationKnown,
+		CanEnable: status.RegistrationKnown && !status.VoLTERegistered(),
+	}, nil
 }
 
-func (u qmiDevice) CardStatus(ctx context.Context) (CardStatus, error) {
-	slot, err := normalizeSIMSlot(u.slot)
-	if err != nil {
-		return CardStatus{}, err
-	}
-	reader, err := u.openUIM(ctx, slot)
-	if err != nil {
-		return CardStatus{}, fmt.Errorf("open QMI UIM reader: %w", err)
-	}
-	defer closeQMIUIMReader(reader)
-
-	status, err := reader.CardStatus(ctx)
-	if err != nil {
-		return CardStatus{}, fmt.Errorf("read QMI UIM card status: %w", err)
-	}
-	return qmiCardStatus(status), nil
-}
-
-func (u qmiDevice) ChangeProvisioningSession(ctx context.Context, req ProvisioningSessionRequest) error {
-	slot, err := normalizeSIMSlot(u.slot)
-	if err != nil {
-		return err
-	}
-	reader, err := u.openUIM(ctx, slot)
+func (u qmiDevice) ActivateProvisioningIfSIMMissing(ctx context.Context) error {
+	reader, err := u.openUIM(ctx, u.slot)
 	if err != nil {
 		return fmt.Errorf("open QMI UIM reader: %w", err)
 	}
 	defer closeQMIUIMReader(reader)
 
-	if err := reader.ChangeProvisioningSession(ctx, uim.ChangeProvisioningSessionRequest{
-		Session:  uim.SessionPrimaryGWProvisioning,
-		Activate: req.Activate,
-		Slot:     req.Slot,
-		AID:      slices.Clone(req.AID),
-	}); err != nil {
-		return fmt.Errorf("change provisioning session: %w", err)
-	}
-	return nil
-}
-
-func (u qmiDevice) ActivateProvisioningIfSIMMissing(ctx context.Context) error {
-	slot, err := normalizeSIMSlot(u.slot)
+	status, err := readQMICardStatus(ctx, reader)
 	if err != nil {
 		return err
 	}
-	status, err := u.CardStatus(ctx)
-	if err != nil {
-		return err
-	}
-	card, ok := deviceCardForSlot(status, slot)
+	card, ok := deviceCardForSlot(status, u.slot)
 	if !ok {
-		return fmt.Errorf("QMI UIM card status missing slot %d", slot)
+		return fmt.Errorf("qmi UIM card status missing slot %d", u.slot)
 	}
 	app, ok := deviceUSIMApplication(card)
 	if !ok {
-		return fmt.Errorf("QMI UIM USIM application missing in slot %d", slot)
+		return fmt.Errorf("qmi UIM USIM application missing in slot %d", u.slot)
 	}
 	if app.Ready {
 		return nil
 	}
 	if len(app.AID) == 0 {
-		return errors.New("QMI UIM USIM application AID is empty")
+		return errors.New("qmi UIM USIM application AID is empty")
 	}
 
 	slog.Info(
 		"sim missing, activate provisioning session",
 		"imei", u.imei,
-		"slot", slot,
+		"slot", u.slot,
 		"applicationState", app.ApplicationState,
 		"personalizationState", app.PersonalizationState,
 	)
-	err = u.ChangeProvisioningSession(ctx, ProvisioningSessionRequest{
-		Activate: true,
-		Slot:     slot,
-		AID:      app.AID,
-	})
-	if err != nil {
+	if err := changeQMIProvisioningSession(ctx, reader, u.slot, app.AID); err != nil {
 		return fmt.Errorf("activate provisioning session: %w", err)
 	}
 	return nil
 }
 
-func (u qmiDevice) PowerOffSIM(ctx context.Context) error {
-	slot, err := normalizeSIMSlot(u.slot)
-	if err != nil {
-		return err
-	}
-	reader, err := u.openUIM(ctx, slot)
-	if err != nil {
-		return fmt.Errorf("open QMI UIM reader: %w", err)
-	}
-	defer closeQMIUIMReader(reader)
-
-	if err := reader.PowerOffSIM(ctx, slot); err != nil {
-		return fmt.Errorf("power off sim: %w", err)
-	}
-	slog.Info("sim powered off", "imei", u.imei, "slot", slot)
-	return nil
-}
-
-func (u qmiDevice) PowerOnSIM(ctx context.Context) error {
-	slot, err := normalizeSIMSlot(u.slot)
-	if err != nil {
-		return err
-	}
-	reader, err := u.openUIM(ctx, slot)
-	if err != nil {
-		return fmt.Errorf("open QMI UIM reader: %w", err)
-	}
-	defer closeQMIUIMReader(reader)
-
-	if err := qmiPowerOnSIM(ctx, reader, slot); err != nil {
-		return fmt.Errorf("power on sim: %w", err)
-	}
-	slog.Info("sim powered on", "imei", u.imei, "slot", slot)
-	return nil
-}
-
 func (u qmiDevice) PowerCycleSIM(ctx context.Context) error {
-	slot, err := normalizeSIMSlot(u.slot)
-	if err != nil {
-		return err
-	}
-	reader, err := u.openUIM(ctx, slot)
+	reader, err := u.openUIM(ctx, u.slot)
 	if err != nil {
 		return fmt.Errorf("open QMI UIM reader: %w", err)
 	}
 	defer closeQMIUIMReader(reader)
 
-	if err := reader.PowerOffSIM(ctx, slot); err != nil {
+	if err := reader.PowerOffSIM(ctx, u.slot); err != nil {
 		return fmt.Errorf("power off sim: %w", err)
 	}
-	slog.Info("sim powered off", "imei", u.imei, "slot", slot)
-	if err := qmiWaitFixedDelay(context.Background(), qmiSIMPowerCycleDelay); err != nil {
-		err = fmt.Errorf("wait after sim power off: %w", err)
-		if powerOnErr := qmiPowerOnSIM(context.Background(), reader, slot); powerOnErr != nil {
-			return errors.Join(err, fmt.Errorf("power on sim after power-off wait failure: %w", powerOnErr))
-		}
-		slog.Warn("sim power-off wait failed, powered sim back on", "imei", u.imei, "slot", slot, "error", err)
-		return err
-	}
-	if err := qmiPowerOnSIM(context.Background(), reader, slot); err != nil {
+	slog.Info("sim powered off", "imei", u.imei, "slot", u.slot)
+	// Once the SIM is off, cancellation must not leave it without power.
+	time.Sleep(qmiSIMPowerCycleDelay)
+
+	restoreCtx := context.WithoutCancel(ctx)
+	if err := qmiPowerOnSIM(restoreCtx, reader, u.slot); err != nil {
 		return fmt.Errorf("power on sim: %w", err)
 	}
-	slog.Info("sim powered on", "imei", u.imei, "slot", slot)
+	slog.Info("sim powered on", "imei", u.imei, "slot", u.slot)
 	return nil
 }
 
@@ -372,33 +290,37 @@ func (u qmiDevice) SIMState(ctx context.Context, target Target) (SIMState, error
 	if err != nil {
 		return SIMState{Supported: true}, err
 	}
-	targeted := u
-	targeted.slot = int(slot)
+	target.ICCID = strings.TrimSpace(target.ICCID)
+
+	reader, err := u.openUIM(ctx, slot)
+	if err != nil {
+		return SIMState{Supported: true, Slot: slot}, fmt.Errorf("open QMI UIM reader: %w", err)
+	}
+	defer closeQMIUIMReader(reader)
 
 	state := SIMState{Supported: true, Slot: slot}
-	var slotStatus SlotStatus
+	var status slotStatus
 	var slotStatusRead bool
-	slotStatus, err = targeted.SlotStatus(ctx)
+	status, err = readQMISlotStatus(ctx, reader)
 	if err != nil && !errors.Is(err, qcom.QMIErrorNotSupported) {
 		return state, fmt.Errorf("read device slot status: %w", err)
 	}
 	if err == nil {
 		slotStatusRead = true
-		iccid := deviceICCIDForSlot(slotStatus, slot)
+		iccid := deviceICCIDForSlot(status, slot)
 		state.ICCID = iccid
-		state.Matches = deviceSlotMatchesTarget(slotStatus, slot, state.ICCID, target)
-		targetICCID := strings.TrimSpace(target.ICCID)
-		state.ICCIDMismatch = targetICCID != "" && state.ICCID != "" && state.ICCID != targetICCID
+		state.Matches = deviceSlotMatchesTarget(status, slot, state.ICCID, target)
+		state.ICCIDMismatch = target.ICCID != "" && state.ICCID != "" && state.ICCID != target.ICCID
 	}
 
-	cardStatus, err := targeted.CardStatus(ctx)
+	cardStatus, err := readQMICardStatus(ctx, reader)
 	if err != nil {
 		return state, fmt.Errorf("read device card status: %w", err)
 	}
 	state.Ready = deviceUSIMReadyForSlot(cardStatus, slot)
 	state.Recoverable = state.Matches
 	if !state.Recoverable && deviceUSIMPresentForSlot(cardStatus, slot) {
-		slotContradicted := target.Slot == 0 && slotStatusRead && slotStatus.ActiveSlot != 0 && slotStatus.ActiveSlot != slot
+		slotContradicted := target.Slot == 0 && slotStatusRead && status.ActiveSlot != 0 && status.ActiveSlot != slot
 		state.Recoverable = !slotContradicted
 	}
 	return state, nil
@@ -408,6 +330,34 @@ func qmiPowerOnSIM(ctx context.Context, reader qmiUIMReader, slot uint8) error {
 	powerCtx, cancel := context.WithTimeout(ctx, qmiPowerRestoreTimeout)
 	defer cancel()
 	return reader.PowerOnSIM(powerCtx, uim.PowerOnSIMRequest{Slot: slot})
+}
+
+func readQMISlotStatus(ctx context.Context, reader qmiUIMReader) (slotStatus, error) {
+	status, err := reader.SlotStatus(ctx)
+	if err != nil {
+		return slotStatus{}, fmt.Errorf("read QMI UIM slot status: %w", err)
+	}
+	return qmiSlotStatus(status)
+}
+
+func readQMICardStatus(ctx context.Context, reader qmiUIMReader) (cardStatus, error) {
+	status, err := reader.CardStatus(ctx)
+	if err != nil {
+		return cardStatus{}, fmt.Errorf("read QMI UIM card status: %w", err)
+	}
+	return qmiCardStatus(status), nil
+}
+
+func changeQMIProvisioningSession(ctx context.Context, reader qmiUIMReader, slot uint8, aid []byte) error {
+	if err := reader.ChangeProvisioningSession(ctx, uim.ChangeProvisioningSessionRequest{
+		Session:  uim.SessionPrimaryGWProvisioning,
+		Activate: true,
+		Slot:     slot,
+		AID:      slices.Clone(aid),
+	}); err != nil {
+		return fmt.Errorf("change provisioning session: %w", err)
+	}
+	return nil
 }
 
 func configureQMICAT(ctx context.Context, imei string, cat *uim.CAT, profile CATProfile) error {
@@ -453,35 +403,23 @@ func configureQMICAT(ctx context.Context, imei string, cat *uim.CAT, profile CAT
 	return nil
 }
 
-func qmiWaitFixedDelay(ctx context.Context, delay time.Duration) error {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
 func closeQMIUIMReader(reader qmiUIMReader) {
 	closeReader("close QMI UIM reader", reader)
 }
 
-func qmiSlotStatus(status uim.SlotStatus) (SlotStatus, error) {
-	slots := make([]Slot, len(status.Slots))
+func qmiSlotStatus(status uim.SlotStatus) (slotStatus, error) {
+	slots := make([]slot, len(status.Slots))
 	for i, slot := range status.Slots {
 		if len(slot.ICCID) > 0 {
 			iccid, err := decodeQMIICCID(slot.ICCID)
 			if err != nil {
-				return SlotStatus{}, fmt.Errorf("decode device slot %d ICCID: %w", i+1, err)
+				return slotStatus{}, fmt.Errorf("decode device slot %d ICCID: %w", i+1, err)
 			}
 			slots[i].ICCID = iccid
 		}
 		slots[i].ATR = slices.Clone(slot.ATR)
 	}
-	return SlotStatus{ActiveSlot: status.ActiveSlot, Slots: slots}, nil
+	return slotStatus{ActiveSlot: status.ActiveSlot, Slots: slots}, nil
 }
 
 func decodeQMIICCID(raw []byte) (string, error) {
@@ -492,15 +430,15 @@ func decodeQMIICCID(raw []byte) (string, error) {
 	return iccid.String(), nil
 }
 
-func qmiCardStatus(status uim.CardStatus) CardStatus {
-	cards := make([]Card, len(status.Cards))
+func qmiCardStatus(status uim.CardStatus) cardStatus {
+	cards := make([]card, len(status.Cards))
 	for i, card := range status.Cards {
 		cards[i].Present = card.State == uim.CardStatePresent
 		for _, app := range card.Applications {
 			if app.Type != uim.ApplicationTypeUSIM {
 				continue
 			}
-			cards[i].USIMApplications = append(cards[i].USIMApplications, USIMApplication{
+			cards[i].USIMApplications = append(cards[i].USIMApplications, usimApplication{
 				Ready:                qmiUSIMReady(card, app),
 				AID:                  slices.Clone(app.AID),
 				ApplicationState:     fmt.Sprint(app.State),
@@ -508,22 +446,22 @@ func qmiCardStatus(status uim.CardStatus) CardStatus {
 			})
 		}
 	}
-	return CardStatus{Cards: cards}
+	return cardStatus{Cards: cards}
 }
 
-func deviceCardForSlot(status CardStatus, slot uint8) (Card, bool) {
+func deviceCardForSlot(status cardStatus, slot uint8) (card, bool) {
 	index := int(slot) - 1
 	if index < 0 || index >= len(status.Cards) {
-		return Card{}, false
+		return card{}, false
 	}
 	return status.Cards[index], true
 }
 
-func deviceUSIMApplication(card Card) (USIMApplication, bool) {
-	for _, app := range card.USIMApplications {
-		return app, true
+func deviceUSIMApplication(card card) (usimApplication, bool) {
+	if len(card.USIMApplications) == 0 {
+		return usimApplication{}, false
 	}
-	return USIMApplication{}, false
+	return card.USIMApplications[0], true
 }
 
 func qmiUSIMReady(card uim.Card, app uim.CardApplication) bool {
@@ -533,7 +471,7 @@ func qmiUSIMReady(card uim.Card, app uim.CardApplication) bool {
 		app.PersonalizationState == uim.PersonalizationStateReady
 }
 
-func deviceUSIMPresentForSlot(status CardStatus, slot uint8) bool {
+func deviceUSIMPresentForSlot(status cardStatus, slot uint8) bool {
 	card, ok := deviceCardForSlot(status, slot)
 	if !ok || !card.Present {
 		return false
@@ -542,7 +480,7 @@ func deviceUSIMPresentForSlot(status CardStatus, slot uint8) bool {
 	return ok
 }
 
-func deviceUSIMReadyForSlot(status CardStatus, slot uint8) bool {
+func deviceUSIMReadyForSlot(status cardStatus, slot uint8) bool {
 	card, ok := deviceCardForSlot(status, slot)
 	if !ok {
 		return false
@@ -551,17 +489,17 @@ func deviceUSIMReadyForSlot(status CardStatus, slot uint8) bool {
 	return ok && app.Ready
 }
 
-func deviceSlotMatchesTarget(status SlotStatus, slot uint8, iccid string, target Target) bool {
+func deviceSlotMatchesTarget(status slotStatus, slot uint8, iccid string, target Target) bool {
 	if target.Slot != 0 && status.ActiveSlot != slot {
 		return false
 	}
-	if target.ICCID != "" && iccid != strings.TrimSpace(target.ICCID) {
+	if target.ICCID != "" && iccid != target.ICCID {
 		return false
 	}
 	return true
 }
 
-func deviceICCIDForSlot(status SlotStatus, slot uint8) string {
+func deviceICCIDForSlot(status slotStatus, slot uint8) string {
 	if slot == 0 || int(slot) > len(status.Slots) {
 		return ""
 	}

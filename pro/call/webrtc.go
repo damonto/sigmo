@@ -1,4 +1,4 @@
-//go:build wifi_calling
+//go:build ims
 
 package call
 
@@ -21,8 +21,8 @@ import (
 	"github.com/pion/webrtc/v4"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	pims "github.com/damonto/sigmo/pro/ims"
 	"github.com/damonto/sigmo/pro/voicecodec"
-	"github.com/damonto/sigmo/pro/wificalling"
 )
 
 const (
@@ -38,9 +38,6 @@ const (
 
 type Media struct {
 	calls *Calls
-
-	amrMu      sync.Mutex
-	amrFactory *voicecodec.AMRCodecFactory
 
 	ice webRTCICEProvider
 
@@ -81,19 +78,7 @@ func (m *Media) OpenWebRTCSession(ctx context.Context, modem *mmodem.Modem, call
 	if err != nil {
 		return nil, err
 	}
-	var factory *voicecodec.AMRCodecFactory
-	if codec.amr != "" {
-		factory, err = m.amrCodecFactory(ctx)
-		if err != nil {
-			slog.Warn("open AMR codec",
-				"call_id", callID,
-				"imei", modem.EquipmentIdentifier,
-				"error", err,
-			)
-			return nil, ErrMediaUnavailable
-		}
-	}
-	bridge, err := newWebRTCBridge(media, factory, codec, iceServers)
+	bridge, err := newWebRTCBridge(media, codec, iceServers)
 	if err != nil {
 		return nil, err
 	}
@@ -154,32 +139,6 @@ func (s *WebRTCSession) Connected() bool {
 	return s.bridge.connected()
 }
 
-func (m *Media) amrCodecFactory(ctx context.Context) (*voicecodec.AMRCodecFactory, error) {
-	m.amrMu.Lock()
-	defer m.amrMu.Unlock()
-	if m.amrFactory != nil {
-		return m.amrFactory, nil
-	}
-
-	factory, err := voicecodec.NewDefaultAMRCodecFactory(ctx)
-	if err != nil {
-		return nil, err
-	}
-	m.amrFactory = factory
-	return factory, nil
-}
-
-func (m *Media) closeAMRCodecFactory(ctx context.Context) error {
-	m.amrMu.Lock()
-	factory := m.amrFactory
-	m.amrFactory = nil
-	m.amrMu.Unlock()
-	if factory == nil {
-		return nil
-	}
-	return factory.Close(ctx)
-}
-
 func mediaCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), mediaCleanupTimeout)
 }
@@ -212,16 +171,15 @@ func (m *Media) Close(ctx context.Context) error {
 	for _, bridge := range bridges {
 		bridge.close()
 	}
-	return m.closeAMRCodecFactory(ctx)
+	return nil
 }
 
 type webRTCBridge struct {
-	media   MediaSession
-	info    MediaInfo
-	factory *voicecodec.AMRCodecFactory
-	pc      *webrtc.PeerConnection
-	track   *webrtc.TrackLocalStaticRTP
-	codec   bridgeCodec
+	media MediaSession
+	info  MediaInfo
+	pc    *webrtc.PeerConnection
+	track *webrtc.TrackLocalStaticRTP
+	codec bridgeCodec
 
 	cancel       context.CancelFunc
 	once         sync.Once
@@ -257,11 +215,8 @@ const (
 	webRTCBridgeActionCloseNow
 )
 
-func newWebRTCBridge(media MediaSession, factory *voicecodec.AMRCodecFactory, codec bridgeCodec, iceServers []webrtc.ICEServer) (*webRTCBridge, error) {
+func newWebRTCBridge(media MediaSession, codec bridgeCodec, iceServers []webrtc.ICEServer) (*webRTCBridge, error) {
 	info := media.Info()
-	if codec.amr != "" && factory == nil {
-		return nil, ErrMediaUnavailable
-	}
 	mediaEngine := &webrtc.MediaEngine{}
 	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
@@ -323,7 +278,6 @@ func newWebRTCBridge(media MediaSession, factory *voicecodec.AMRCodecFactory, co
 	bridge := &webRTCBridge{
 		media:    media,
 		info:     info,
-		factory:  factory,
 		pc:       pc,
 		track:    track,
 		codec:    codec,
@@ -522,12 +476,11 @@ func (b *webRTCBridge) runDownlink(ctx context.Context, codec bridgeCodec) {
 		b.runPCMUPassthroughDownlink(ctx)
 		return
 	}
-	amr, err := b.factory.NewCodec(ctx, codec.amr)
+	amr, err := voicecodec.NewAMRTranscoder(codec.amr)
 	if err != nil {
 		b.stop()
 		return
 	}
-	defer closeAMRCodec(ctx, amr)
 
 	sequenceNumber := random16()
 	timestamp := random32()
@@ -550,7 +503,7 @@ func (b *webRTCBridge) runDownlink(ctx context.Context, codec bridgeCodec) {
 			if frame.FrameType == 15 || !frame.Quality {
 				continue
 			}
-			pcm, err := amr.Decode(ctx, frame)
+			pcm, err := amr.Decode(frame)
 			if err != nil {
 				b.stop()
 				return
@@ -606,12 +559,11 @@ func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote,
 		b.runPCMUPassthroughUplink(ctx, track)
 		return
 	}
-	amr, err := b.factory.NewCodec(ctx, codec.amr)
+	amr, err := voicecodec.NewAMRTranscoder(codec.amr)
 	if err != nil {
 		b.stop()
 		return
 	}
-	defer closeAMRCodec(ctx, amr)
 
 	sequenceNumber := random16()
 	timestamp := random32()
@@ -640,7 +592,7 @@ func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote,
 			chunk := make([]int16, frameSamples)
 			copy(chunk, buffer[:frameSamples])
 			buffer = buffer[frameSamples:]
-			frames, err := amr.Encode(ctx, chunk)
+			frames, err := amr.Encode(chunk)
 			if err != nil {
 				b.stop()
 				return
@@ -669,7 +621,7 @@ func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote,
 				b.stop()
 				return
 			}
-			if err := b.media.WritePacket(ctx, data); errors.Is(err, wificalling.ErrCallOnHold) {
+			if err := b.media.WritePacket(ctx, data); errors.Is(err, pims.ErrCallOnHold) {
 				continue
 			} else if err != nil {
 				b.stop()
@@ -678,14 +630,6 @@ func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote,
 			sequenceNumber++
 			timestamp += uint32(frameSamples)
 		}
-	}
-}
-
-func closeAMRCodec(ctx context.Context, amr *voicecodec.WASMAMRCodec) {
-	cleanupCtx, cancel := mediaCleanupContext(ctx)
-	defer cancel()
-	if err := amr.Close(cleanupCtx); err != nil {
-		slog.Warn("close AMR codec", "error", err)
 	}
 }
 
@@ -716,7 +660,7 @@ func (b *webRTCBridge) runPCMUPassthroughUplink(ctx context.Context, track *webr
 			b.stop()
 			return
 		}
-		if err := b.media.WritePacket(ctx, data); errors.Is(err, wificalling.ErrCallOnHold) {
+		if err := b.media.WritePacket(ctx, data); errors.Is(err, pims.ErrCallOnHold) {
 			continue
 		} else if err != nil {
 			b.stop()

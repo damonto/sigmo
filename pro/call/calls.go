@@ -1,4 +1,4 @@
-//go:build wifi_calling
+//go:build ims
 
 package call
 
@@ -10,12 +10,13 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
-	"github.com/damonto/sigmo/pro/wificalling"
+	pims "github.com/damonto/sigmo/pro/ims"
 )
 
 const (
 	RouteAuto        = "auto"
 	RouteWiFiCalling = "wifi_calling"
+	RouteVoLTE       = "volte"
 	RouteModem       = "modem"
 
 	DirectionIncoming = "incoming"
@@ -43,9 +44,10 @@ var (
 	ErrNumberRequired          = errors.New("number is required")
 	ErrInvalidNumber           = errors.New("invalid number")
 	ErrUSSDDialString          = errors.New("ussd dial strings must use the USSD API")
-	ErrInvalidRoute            = errors.New("route must be auto, wifi_calling, or modem")
+	ErrInvalidRoute            = errors.New("route must be auto, wifi_calling, volte, or modem")
 	ErrNoRouteAvailable        = errors.New("no call route is available")
 	ErrWiFiCallingNotConnected = errors.New("wifi calling is not connected")
+	ErrVoLTENotConnected       = errors.New("volte is not connected")
 	ErrModemCallingUnavailable = errors.New("modem calling is not available in this version")
 	ErrCallNotFound            = errors.New("call not found")
 	ErrInvalidCallState        = errors.New("call state must be active or ended")
@@ -62,12 +64,17 @@ var (
 )
 
 type Calls struct {
-	voice   wifiCallingVoice
+	voices  []VoiceRoute
 	events  *callEvents
 	records *callRecords
 	routes  *callRoutes
 	actions *callActions
 	media   *callMedia
+}
+
+type VoiceRoute struct {
+	Route string
+	Voice imsVoice
 }
 
 type Event struct {
@@ -97,27 +104,29 @@ type MediaSession interface {
 	WritePacket(context.Context, []byte) error
 }
 
-type wifiCallingVoice interface {
-	Status(context.Context, *mmodem.Modem) (wificalling.Status, error)
-	DialCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
-	AnswerCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
-	RejectCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
-	HangupCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
-	HoldCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
-	ResumeCall(context.Context, *mmodem.Modem, string) (wificalling.VoiceCall, error)
+type imsVoice interface {
+	Status(context.Context, *mmodem.Modem) (pims.Status, error)
+	DialCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error)
+	AnswerCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error)
+	RejectCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error)
+	HangupCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error)
+	HoldCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error)
+	ResumeCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error)
 	SendCallDTMF(context.Context, *mmodem.Modem, string, string) error
-	OpenCallMedia(context.Context, *mmodem.Modem, string) (wificalling.MediaSession, error)
-	SubscribeVoiceEvents(wificalling.VoiceEventFunc) func()
+	OpenCallMedia(context.Context, *mmodem.Modem, string) (pims.MediaSession, error)
+	SubscribeVoiceEvents(pims.VoiceEventFunc) func()
 }
 
-func New(store *storage.Store, wifiCalling wifiCallingVoice) *Calls {
+func New(store *storage.Store, wifiCalling imsVoice, extraRoutes ...VoiceRoute) *Calls {
 	events := newCallEvents()
 	records := &callRecords{store: store, events: events}
-	routes := &callRoutes{wifiCalling: wifiCalling}
-	actions := &callActions{wifiCalling: wifiCalling, records: records, routes: routes}
-	media := &callMedia{wifiCalling: wifiCalling, records: records}
+	voices := []VoiceRoute{{Route: RouteWiFiCalling, Voice: wifiCalling}}
+	voices = append(voices, extraRoutes...)
+	routes := newCallRoutes(voices)
+	actions := &callActions{records: records, routes: routes}
+	media := &callMedia{routes: routes, records: records}
 	return &Calls{
-		voice:   wifiCalling,
+		voices:  voices,
 		events:  events,
 		records: records,
 		routes:  routes,
@@ -127,7 +136,7 @@ func New(store *storage.Store, wifiCalling wifiCallingVoice) *Calls {
 }
 
 func (c *Calls) Run(ctx context.Context) error {
-	return runVoiceEvents(ctx, c.voice, c.records)
+	return runVoiceEvents(ctx, c.voices, c.records)
 }
 
 func (c *Calls) List(ctx context.Context, modem *mmodem.Modem, query string) ([]storage.Call, error) {
@@ -197,5 +206,5 @@ func normalizeRoute(route string) string {
 }
 
 func validRoute(route string) bool {
-	return slices.Contains([]string{RouteAuto, RouteWiFiCalling, RouteModem}, route)
+	return slices.Contains([]string{RouteAuto, RouteWiFiCalling, RouteVoLTE, RouteModem}, route)
 }

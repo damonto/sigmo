@@ -1,4 +1,4 @@
-//go:build wifi_calling
+//go:build ims
 
 package main
 
@@ -9,14 +9,14 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/sigmo/pro/wificalling"
+	pims "github.com/damonto/sigmo/pro/ims"
 )
 
 func TestWiFiCallingOverview(t *testing.T) {
 	errStatus := errors.New("status read")
 	tests := []struct {
 		name              string
-		status            wificalling.Status
+		status            pims.Status
 		err               error
 		wantWiFiEnabled   bool
 		wantWiFiPreferred bool
@@ -25,8 +25,8 @@ func TestWiFiCallingOverview(t *testing.T) {
 	}{
 		{
 			name: "fills connected status",
-			status: wificalling.Status{
-				Settings: wificalling.Settings{
+			status: pims.Status{
+				Settings: pims.Settings{
 					Enabled:   true,
 					Preferred: true,
 				},
@@ -38,7 +38,7 @@ func TestWiFiCallingOverview(t *testing.T) {
 		},
 		{
 			name: "ignores unavailable route",
-			err:  wificalling.ErrUnavailable,
+			err:  pims.ErrUnavailable,
 		},
 		{
 			name: "ignores missing profile id",
@@ -53,7 +53,7 @@ func TestWiFiCallingOverview(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			extension := wifiCallingOverview(func(ctx context.Context, modem *mmodem.Modem) (wificalling.Status, error) {
+			extension := wifiCallingOverview(func(ctx context.Context, modem *mmodem.Modem) (pims.Status, error) {
 				return tt.status, tt.err
 			})
 			fields := &modemstatus.Fields{}

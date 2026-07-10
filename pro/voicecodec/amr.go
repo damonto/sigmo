@@ -1,4 +1,4 @@
-//go:build wifi_calling
+//go:build ims
 
 package voicecodec
 

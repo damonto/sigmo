@@ -1,6 +1,6 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"context"
@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
+	imsgo "github.com/damonto/ims-go"
+	imssms "github.com/damonto/ims-go/ims/sms"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
-	vowifi "github.com/damonto/vowifi-go"
-	imssms "github.com/damonto/vowifi-go/ims/sms"
 )
 
 type smsSubmissionKey struct {
@@ -59,7 +59,7 @@ func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to strin
 	}
 	submission, err := client.SMS().Send(ctx, to, text)
 	if err != nil {
-		if errors.Is(err, vowifi.ErrClientNotConnected) {
+		if errors.Is(err, imsgo.ErrClientNotConnected) {
 			return storage.Message{}, c.handleClientDisconnected(modem.EquipmentIdentifier, client, err)
 		}
 		return storage.Message{}, err
@@ -107,7 +107,7 @@ func (c *coordinator) ApplyPendingSMSStatus(ctx context.Context, msg storage.Mes
 	return nil
 }
 
-func (c *coordinator) trackOutgoingSMSSubmission(msg storage.Message, submission vowifi.SMSSubmission) string {
+func (c *coordinator) trackOutgoingSMSSubmission(msg storage.Message, submission imsgo.SMSSubmission) string {
 	if len(submission.Segments) == 0 {
 		return ""
 	}
@@ -137,8 +137,8 @@ func (c *coordinator) trackOutgoingSMSSubmission(msg storage.Message, submission
 	return tracker.current
 }
 
-func (c *coordinator) forwardSMSReport(modemID string, profileID string, report vowifi.SMSReport) {
-	slog.Info("Wi-Fi Calling SMS report",
+func (c *coordinator) forwardSMSReport(modemID string, profileID string, report imsgo.SMSReport) {
+	slog.Info("IMS SMS report",
 		"imei", modemID,
 		"profile_id", profileID,
 		"submission_id", report.SubmissionID,
@@ -158,11 +158,11 @@ type smsStatusUpdate struct {
 	status      string
 }
 
-func (c *coordinator) watchSMSSubmissionUpdates(modemID string, profileID string, submission vowifi.SMSSubmission) {
+func (c *coordinator) watchSMSSubmissionUpdates(modemID string, profileID string, submission imsgo.SMSSubmission) {
 	c.watchSMSSubmissionUpdatesWithTimeout(modemID, profileID, submission, smsDeliveryReportTimeout())
 }
 
-func (c *coordinator) watchSMSSubmissionUpdatesWithTimeout(modemID string, profileID string, submission vowifi.SMSSubmission, timeout time.Duration) {
+func (c *coordinator) watchSMSSubmissionUpdatesWithTimeout(modemID string, profileID string, submission imsgo.SMSSubmission, timeout time.Duration) {
 	defer func() {
 		c.stopSMSSubmissionTracking(modemID, profileID, submission.ID)
 		submission.Close()
@@ -172,7 +172,7 @@ func (c *coordinator) watchSMSSubmissionUpdatesWithTimeout(modemID string, profi
 	}
 
 	// Requested delivery reports are not guaranteed to arrive, so the caller
-	// must bound how long it keeps vowifi-go's per-submission tracking alive.
+	// must bound how long it keeps ims-go's per-submission tracking alive.
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
@@ -193,7 +193,7 @@ func (c *coordinator) watchSMSSubmissionUpdatesWithTimeout(modemID string, profi
 			}
 			c.updateStoredSMSStatus(modemID, update.Recipient, statusUpdate)
 		case <-timer.C:
-			slog.Warn("wait Wi-Fi Calling SMS delivery report",
+			slog.Warn("wait IMS SMS delivery report",
 				"imei", modemID,
 				"profile_id", profileID,
 				"submission_id", submission.ID,
@@ -204,7 +204,7 @@ func (c *coordinator) watchSMSSubmissionUpdatesWithTimeout(modemID string, profi
 	}
 }
 
-func logSMSSubmissionUpdate(modemID string, profileID string, update vowifi.SMSSubmissionUpdate) {
+func logSMSSubmissionUpdate(modemID string, profileID string, update imsgo.SMSSubmissionUpdate) {
 	attrs := []any{
 		"imei", modemID,
 		"profile_id", profileID,
@@ -225,21 +225,21 @@ func logSMSSubmissionUpdate(modemID string, profileID string, update vowifi.SMSS
 	if update.HasStatus {
 		attrs = append(attrs, "tp_status", update.Status)
 	}
-	slog.Info("Wi-Fi Calling SMS submission update", attrs...)
+	slog.Info("IMS SMS submission update", attrs...)
 }
 
-func smsSubmissionUpdateStatus(update vowifi.SMSSubmissionUpdate) string {
+func smsSubmissionUpdateStatus(update imsgo.SMSSubmissionUpdate) string {
 	switch update.State {
-	case vowifi.SMSRejectedBySMSC, vowifi.SMSDeliveryFailed:
+	case imsgo.SMSRejectedBySMSC, imsgo.SMSDeliveryFailed:
 		return "failed"
-	case vowifi.SMSDelivered:
+	case imsgo.SMSDelivered:
 		return "delivered"
 	default:
 		return ""
 	}
 }
 
-func (c *coordinator) recordSMSSubmissionUpdate(modemID string, profileID string, update vowifi.SMSSubmissionUpdate, status string) (smsStatusUpdate, bool) {
+func (c *coordinator) recordSMSSubmissionUpdate(modemID string, profileID string, update imsgo.SMSSubmissionUpdate, status string) (smsStatusUpdate, bool) {
 	now := time.Now()
 	key := outgoingSMSSubmissionKey(modemID, profileID, update.SubmissionID)
 
@@ -282,10 +282,10 @@ func (c *coordinator) updateStoredSMSStatus(modemID string, recipient string, up
 		ExternalKey: update.externalKey,
 		Status:      update.status,
 	}); err != nil {
-		slog.Warn("update Wi-Fi Calling SMS status", "imei", modemID, "recipient", recipient, "status", update.status, "error", err)
+		slog.Warn("update IMS SMS status", "imei", modemID, "recipient", recipient, "status", update.status, "error", err)
 	} else if !updated {
 		c.deferStoredSMSStatus(update)
-		slog.Debug("Wi-Fi Calling SMS status target not yet stored", "imei", modemID, "recipient", recipient, "status", update.status)
+		slog.Debug("IMS SMS status target not yet stored", "imei", modemID, "recipient", recipient, "status", update.status)
 	} else {
 		c.completeStoredSMSStatus(update)
 	}
@@ -411,7 +411,7 @@ func outgoingSMSSubmissionKey(modemID string, profileID string, submissionID str
 	}
 }
 
-func (c *coordinator) forwardIncoming(ctx context.Context, modem *mmodem.Modem, profileID string, msg vowifi.SMS) {
+func (c *coordinator) forwardIncoming(ctx context.Context, modem *mmodem.Modem, profileID string, msg imsgo.SMS) {
 	if c.onIncoming == nil {
 		return
 	}
@@ -429,11 +429,11 @@ func (c *coordinator) forwardIncoming(ctx context.Context, modem *mmodem.Modem, 
 		Routed:      true,
 	}
 	if err := c.onIncoming(ctx, IncomingSMS{ModemID: modem.EquipmentIdentifier, Message: stored}); err != nil {
-		slog.Warn("forward Wi-Fi Calling SMS", "imei", modem.EquipmentIdentifier, "error", err)
+		slog.Warn("forward IMS SMS", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
 	}
 }
 
-func incomingMessageKey(msg vowifi.SMS) string {
+func incomingMessageKey(msg imsgo.SMS) string {
 	if callID := strings.TrimSpace(msg.CallID); callID != "" {
 		return callID
 	}

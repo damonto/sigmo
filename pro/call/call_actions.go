@@ -1,4 +1,4 @@
-//go:build wifi_calling
+//go:build ims
 
 package call
 
@@ -12,15 +12,14 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
-	"github.com/damonto/sigmo/pro/wificalling"
+	pims "github.com/damonto/sigmo/pro/ims"
 )
 
-const wifiCallingHangupCleanupTimeout = 3 * time.Second
+const imsHangupCleanupTimeout = 3 * time.Second
 
 type callActions struct {
-	wifiCalling wifiCallingVoice
-	records     *callRecords
-	routes      *callRoutes
+	records *callRecords
+	routes  *callRoutes
 }
 
 func (a *callActions) Dial(ctx context.Context, modem *mmodem.Modem, number string, route string) (storage.Call, error) {
@@ -44,21 +43,22 @@ func (a *callActions) Dial(ctx context.Context, modem *mmodem.Modem, number stri
 		return storage.Call{}, err
 	}
 	switch selected {
-	case RouteWiFiCalling:
-		call, err := a.wifiCalling.DialCall(ctx, modem, number)
+	case RouteWiFiCalling, RouteVoLTE:
+		voice := a.routes.voice(selected)
+		call, err := voice.DialCall(ctx, modem, number)
 		if err != nil {
-			if errors.Is(err, wificalling.ErrNotConnected) {
-				return storage.Call{}, ErrWiFiCallingNotConnected
+			if errors.Is(err, pims.ErrNotConnected) {
+				return storage.Call{}, notConnectedError(selected)
 			}
 			if call.ID != "" {
-				failedCall := callFromWiFiCalling(call)
+				failedCall := callFromIMS(call)
 				if _, saveErr := a.records.saveAndPublish(ctx, failedCall); saveErr != nil {
-					return storage.Call{}, errors.Join(fmt.Errorf("dial Wi-Fi Calling: %w", err), fmt.Errorf("save failed call: %w", saveErr))
+					return storage.Call{}, errors.Join(fmt.Errorf("dial %s: %w", routeLabel(selected), err), fmt.Errorf("save failed call: %w", saveErr))
 				}
 			}
-			return storage.Call{}, fmt.Errorf("dial Wi-Fi Calling: %w", err)
+			return storage.Call{}, fmt.Errorf("dial %s: %w", routeLabel(selected), err)
 		}
-		stored := callFromWiFiCalling(call)
+		stored := callFromIMS(call)
 		stored, err = a.records.saveAndPublish(ctx, stored)
 		if err != nil {
 			return storage.Call{}, err
@@ -77,12 +77,13 @@ func (a *callActions) Answer(ctx context.Context, modem *mmodem.Modem, callID st
 		return storage.Call{}, err
 	}
 	switch call.Route {
-	case RouteWiFiCalling:
-		updated, err := a.wifiCalling.AnswerCall(ctx, modem, call.ID)
-		if err := mapWiFiCallingActionError("answer", err); err != nil {
+	case RouteWiFiCalling, RouteVoLTE:
+		voice := a.routes.voice(call.Route)
+		updated, err := voice.AnswerCall(ctx, modem, call.ID)
+		if err := mapIMSActionError(call.Route, "answer", err); err != nil {
 			return storage.Call{}, err
 		}
-		return a.records.saveAndPublish(ctx, callFromWiFiCalling(updated))
+		return a.records.saveAndPublish(ctx, callFromIMS(updated))
 	case RouteModem:
 		return storage.Call{}, ErrModemCallingUnavailable
 	default:
@@ -96,12 +97,13 @@ func (a *callActions) Reject(ctx context.Context, modem *mmodem.Modem, callID st
 		return storage.Call{}, err
 	}
 	switch call.Route {
-	case RouteWiFiCalling:
-		updated, err := a.wifiCalling.RejectCall(ctx, modem, call.ID)
-		if err := mapWiFiCallingActionError("reject", err); err != nil {
+	case RouteWiFiCalling, RouteVoLTE:
+		voice := a.routes.voice(call.Route)
+		updated, err := voice.RejectCall(ctx, modem, call.ID)
+		if err := mapIMSActionError(call.Route, "reject", err); err != nil {
 			return storage.Call{}, err
 		}
-		return a.records.saveAndPublish(ctx, callFromWiFiCalling(updated))
+		return a.records.saveAndPublish(ctx, callFromIMS(updated))
 	case RouteModem:
 		return storage.Call{}, ErrModemCallingUnavailable
 	default:
@@ -142,17 +144,18 @@ func (a *callActions) SetHold(ctx context.Context, modem *mmodem.Modem, callID s
 		return storage.Call{}, err
 	}
 	switch call.Route {
-	case RouteWiFiCalling:
-		var updated wificalling.VoiceCall
+	case RouteWiFiCalling, RouteVoLTE:
+		voice := a.routes.voice(call.Route)
+		var updated pims.VoiceCall
 		if hold == HoldLocal {
-			updated, err = a.wifiCalling.HoldCall(ctx, modem, call.ID)
+			updated, err = voice.HoldCall(ctx, modem, call.ID)
 		} else {
-			updated, err = a.wifiCalling.ResumeCall(ctx, modem, call.ID)
+			updated, err = voice.ResumeCall(ctx, modem, call.ID)
 		}
-		if err := mapWiFiCallingActionError("update hold", err); err != nil {
+		if err := mapIMSActionError(call.Route, "update hold", err); err != nil {
 			return storage.Call{}, err
 		}
-		return a.records.saveAndPublish(ctx, callFromWiFiCalling(updated))
+		return a.records.saveAndPublish(ctx, callFromIMS(updated))
 	case RouteModem:
 		return storage.Call{}, ErrModemCallingUnavailable
 	default:
@@ -166,12 +169,12 @@ func (a *callActions) Hangup(ctx context.Context, modem *mmodem.Modem, callID st
 		return storage.Call{}, err
 	}
 	switch call.Route {
-	case RouteWiFiCalling:
-		ended, err := a.endWiFiCallingCall(ctx, call)
+	case RouteWiFiCalling, RouteVoLTE:
+		ended, err := a.endIMSCall(ctx, call)
 		if err != nil {
 			return storage.Call{}, err
 		}
-		a.cleanupWiFiCallingHangup(ctx, modem, call.ID)
+		a.cleanupIMSHangup(ctx, modem, call)
 		return ended, nil
 	case RouteModem:
 		return storage.Call{}, ErrModemCallingUnavailable
@@ -180,7 +183,7 @@ func (a *callActions) Hangup(ctx context.Context, modem *mmodem.Modem, callID st
 	}
 }
 
-func (a *callActions) endWiFiCallingCall(ctx context.Context, call storage.Call) (storage.Call, error) {
+func (a *callActions) endIMSCall(ctx context.Context, call storage.Call) (storage.Call, error) {
 	if isTerminalCallState(call.State) {
 		return call, nil
 	}
@@ -191,16 +194,20 @@ func (a *callActions) endWiFiCallingCall(ctx context.Context, call storage.Call)
 	return a.records.saveAndPublish(ctx, call)
 }
 
-func (a *callActions) cleanupWiFiCallingHangup(ctx context.Context, modem *mmodem.Modem, callID string) {
+func (a *callActions) cleanupIMSHangup(ctx context.Context, modem *mmodem.Modem, call storage.Call) {
 	go func() {
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), wifiCallingHangupCleanupTimeout)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), imsHangupCleanupTimeout)
 		defer cancel()
-		if _, err := a.wifiCalling.HangupCall(cleanupCtx, modem, callID); err != nil {
-			if errors.Is(err, wificalling.ErrNotConnected) || errors.Is(err, wificalling.ErrUnavailable) {
-				slog.Debug("clean up Wi-Fi Calling hangup", "call_id", callID, "error", err)
+		voice := a.routes.voice(call.Route)
+		if voice == nil {
+			return
+		}
+		if _, err := voice.HangupCall(cleanupCtx, modem, call.ID); err != nil {
+			if errors.Is(err, pims.ErrNotConnected) || errors.Is(err, pims.ErrUnavailable) {
+				slog.Debug("clean up IMS hangup", "call_id", call.ID, "route", call.Route, "error", err)
 				return
 			}
-			slog.Warn("clean up Wi-Fi Calling hangup", "call_id", callID, "error", err)
+			slog.Warn("clean up IMS hangup", "call_id", call.ID, "route", call.Route, "error", err)
 		}
 	}()
 }
@@ -224,9 +231,10 @@ func (a *callActions) SendDTMF(ctx context.Context, modem *mmodem.Modem, callID 
 		return ErrCallOnHold
 	}
 	switch call.Route {
-	case RouteWiFiCalling:
-		if err := a.wifiCalling.SendCallDTMF(ctx, modem, call.ID, digits); err != nil {
-			return mapWiFiCallingActionError("send DTMF", err)
+	case RouteWiFiCalling, RouteVoLTE:
+		voice := a.routes.voice(call.Route)
+		if err := voice.SendCallDTMF(ctx, modem, call.ID, digits); err != nil {
+			return mapIMSActionError(call.Route, "send DTMF", err)
 		}
 		return nil
 	case RouteModem:
@@ -265,17 +273,31 @@ func validDTMFDigit(digit rune) bool {
 		digit >= 'a' && digit <= 'd'
 }
 
-func mapWiFiCallingActionError(action string, err error) error {
+func mapIMSActionError(route string, action string, err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, wificalling.ErrNotConnected):
-		return ErrWiFiCallingNotConnected
-	case errors.Is(err, wificalling.ErrUnavailable):
+	case errors.Is(err, pims.ErrNotConnected):
+		return notConnectedError(route)
+	case errors.Is(err, pims.ErrUnavailable):
 		return ErrCallNotFound
-	case errors.Is(err, wificalling.ErrUnsupportedDTMF):
+	case errors.Is(err, pims.ErrUnsupportedDTMF):
 		return ErrUnsupportedDTMF
 	default:
-		return fmt.Errorf("%s Wi-Fi Calling: %w", action, err)
+		return fmt.Errorf("%s %s: %w", action, routeLabel(route), err)
 	}
+}
+
+func notConnectedError(route string) error {
+	if route == RouteVoLTE {
+		return ErrVoLTENotConnected
+	}
+	return ErrWiFiCallingNotConnected
+}
+
+func routeLabel(route string) string {
+	if route == RouteVoLTE {
+		return "VoLTE"
+	}
+	return "Wi-Fi Calling"
 }

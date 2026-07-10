@@ -1,15 +1,15 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"context"
 	"errors"
 	"strings"
 
+	"github.com/damonto/ims-go/wfcsetup"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/pro/websheet"
-	"github.com/damonto/vowifi-go/wfcsetup"
 )
 
 func (c *coordinator) StartWebsheet(ctx context.Context, modem *mmodem.Modem) (websheet.Info, error) {
@@ -52,9 +52,9 @@ func (c *coordinator) createWFCWebsheet(ctx context.Context, result wfcsetup.Res
 		}
 		return session.Info(), nil
 	case wfcsetup.ActionWait:
-		return websheet.Info{}, ErrWFCSetupPending
+		return websheet.Info{}, ErrWiFiCallingSetupPending
 	case wfcsetup.ActionDenied, wfcsetup.ActionDisableWFC:
-		return websheet.Info{}, ErrWFCSetupDenied
+		return websheet.Info{}, ErrWiFiCallingSetupDenied
 	default:
 		return websheet.Info{}, ErrWebsheetUnavailable
 	}

@@ -1,6 +1,6 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"context"
@@ -15,7 +15,8 @@ import (
 )
 
 const (
-	FeatureName = "wifiCalling"
+	WiFiCallingFeatureName = "wifiCalling"
+	VoLTEFeatureName       = "volte"
 
 	scopePrefix          = "profile:"
 	keyEnabled           = "wifi_calling.enabled"
@@ -30,17 +31,24 @@ const (
 	StateDisconnected     = "disconnected"
 )
 
+type Access string
+
+const (
+	AccessWiFiCalling Access = "wifi_calling"
+	AccessVoLTE       Access = "volte"
+)
+
 var (
-	ErrUnavailable         = errors.New("wifi calling is unavailable")
-	ErrNotConnected        = errors.New("wifi calling is not connected")
-	ErrWFCSetupPending     = errors.New("wifi calling setup is pending")
-	ErrWFCSetupDenied      = errors.New("wifi calling setup denied")
-	ErrUnsupportedCodec    = errors.New("wifi calling voice codec is not supported")
-	ErrUnsupportedDTMF     = errors.New("wifi calling dtmf is not supported")
-	ErrCallOnHold          = errors.New("wifi calling call is on hold")
-	ErrWebsheetNotPending  = errors.New("wifi calling websheet is not pending")
-	ErrWebsheetDismissed   = errors.New("wifi calling websheet was dismissed")
-	ErrWebsheetUnavailable = errors.New("wifi calling websheet is unavailable")
+	ErrUnavailable             = errors.New("ims access is unavailable")
+	ErrNotConnected            = errors.New("ims access is not connected")
+	ErrWiFiCallingSetupPending = errors.New("wifi calling setup is pending")
+	ErrWiFiCallingSetupDenied  = errors.New("wifi calling setup denied")
+	ErrUnsupportedCodec        = errors.New("ims voice codec is not supported")
+	ErrUnsupportedDTMF         = errors.New("ims dtmf is not supported")
+	ErrCallOnHold              = errors.New("ims call is on hold")
+	ErrWebsheetNotPending      = errors.New("wifi calling websheet is not pending")
+	ErrWebsheetDismissed       = errors.New("wifi calling websheet was dismissed")
+	ErrWebsheetUnavailable     = errors.New("wifi calling websheet is unavailable")
 )
 
 type Settings struct {
@@ -65,6 +73,7 @@ type IncomingSMSFunc func(context.Context, IncomingSMS) error
 
 type VoiceCall struct {
 	ID         string
+	Route      string
 	ModemID    string
 	ProfileID  string
 	Direction  string

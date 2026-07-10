@@ -1,6 +1,6 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"context"
@@ -12,9 +12,12 @@ import (
 	"strings"
 	"time"
 
+	imsgo "github.com/damonto/ims-go"
+	"github.com/damonto/ims-go/lte"
+	"github.com/damonto/ims-go/wfcsetup"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	vowifi "github.com/damonto/vowifi-go"
-	"github.com/damonto/vowifi-go/wfcsetup"
+	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	usimcard "github.com/damonto/uicc-go/usim/card"
 	"github.com/godbus/dbus/v5"
 )
 
@@ -47,12 +50,12 @@ func (c *coordinator) startEnabled(ctx context.Context, registry *mmodem.Registr
 func (c *coordinator) startIfEnabled(ctx context.Context, modem *mmodem.Modem) {
 	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
-		slog.Debug("skip Wi-Fi Calling start", "imei", modem.EquipmentIdentifier, "error", err)
+		slog.Debug("skip IMS start", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
 		return
 	}
-	settings, err := c.settings.Get(ctx, profileID)
+	settings, err := c.Settings(ctx, modem)
 	if err != nil {
-		slog.Warn("read Wi-Fi Calling settings", "imei", modem.EquipmentIdentifier, "error", err)
+		slog.Warn("read IMS settings", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
 		return
 	}
 	if settings.Enabled {
@@ -105,14 +108,14 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 		}
 		c.markConnecting(modem.EquipmentIdentifier, sessionID)
 		delay := retryDelays[0]
-		slog.Warn("Wi-Fi Calling disconnected", "imei", modem.EquipmentIdentifier, "retryIn", delay)
+		slog.Warn("IMS access disconnected", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "retryIn", delay)
 		if err := sleep(ctx, delay); err != nil {
 			return
 		}
 	}
 }
 
-func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem, sessionID uint64) (*vowifi.Client, error) {
+func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem, sessionID uint64) (*imsgo.Client, error) {
 	attempt := 0
 	for {
 		client, err := c.connectOnce(ctx, modem, sessionID)
@@ -121,6 +124,10 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if errors.Is(err, ErrUnavailable) {
+			slog.Warn("IMS access unavailable", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
+			return nil, err
 		}
 		if errors.Is(err, wfcsetup.ErrUserActionRequired) {
 			slog.Warn("Wi-Fi Calling requires carrier websheet", "imei", modem.EquipmentIdentifier, "error", err)
@@ -135,28 +142,33 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 			continue
 		}
 		if attempt >= len(retryDelays) {
-			slog.Warn("Wi-Fi Calling connection attempts exhausted", "imei", modem.EquipmentIdentifier, "error", err)
+			slog.Warn("IMS access connection attempts exhausted", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
 			return nil, err
 		}
 		delay := retryDelays[attempt]
 		attempt++
-		slog.Warn("Wi-Fi Calling connect", "imei", modem.EquipmentIdentifier, "retryIn", delay, "error", err)
+		slog.Warn("IMS access connect", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "retryIn", delay, "error", err)
 		if err := sleep(ctx, delay); err != nil {
 			return nil, err
 		}
 	}
 }
 
-func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sessionID uint64) (*vowifi.Client, error) {
-	reader, err := openReader(ctx, modem)
+func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sessionID uint64) (*imsgo.Client, error) {
+	if c.access == AccessVoLTE {
+		if err := ensureManagedVoLTEAllowed(ctx, modem); err != nil {
+			return nil, err
+		}
+	}
+	reader, err := c.openReader(ctx, modem)
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := modemClientConfig(ctx, modem)
+	cfg, err := c.modemClientConfig(ctx, modem)
 	if err != nil {
 		return nil, errors.Join(err, reader.Close())
 	}
-	client, err := vowifi.New(reader, cfg)
+	client, err := imsgo.New(reader, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -175,27 +187,65 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sess
 	return client, nil
 }
 
-func modemClientConfig(ctx context.Context, modem *mmodem.Modem) (*vowifi.Config, error) {
+func (c *coordinator) openReader(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader, error) {
+	if c.access == AccessVoLTE {
+		return openVoLTEReader(ctx, modem)
+	}
+	return openReader(ctx, modem)
+}
+
+func (c *coordinator) modemClientConfig(ctx context.Context, modem *mmodem.Modem) (*imsgo.Config, error) {
 	imei, err := modem.ThreeGPP().IMEI(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read modem IMEI: %w", err)
 	}
-	return modemClientConfigForIMEI(imei), nil
+	return modemClientConfigForIMEI(imei, c.access), nil
 }
 
-func modemClientConfigForIMEI(imei string) *vowifi.Config {
-	return &vowifi.Config{
+func wifiCallingModemClientConfig(ctx context.Context, modem *mmodem.Modem) (*imsgo.Config, error) {
+	imei, err := modem.ThreeGPP().IMEI(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read modem IMEI: %w", err)
+	}
+	return modemClientConfigForIMEI(imei, AccessWiFiCalling), nil
+}
+
+func modemClientConfigForIMEI(imei string, access Access) *imsgo.Config {
+	accessConfig := imsgo.VoWiFi(imsgo.VoWiFiConfig{})
+	if access == AccessVoLTE {
+		accessConfig = imsgo.VoLTE(lte.Config{})
+	}
+	return &imsgo.Config{
 		Logger:   mmodem.LoggerForIMEI(imei),
 		Terminal: terminalInfo(imei),
-		IMS: vowifi.IMSConfig{
+		Access:   accessConfig,
+		IMS: imsgo.IMSConfig{
 			SMSDeliveryReportTimeout: smsDeliveryReportTimeout(),
 			Voice:                    browserVoiceConfig(),
 		},
 	}
 }
 
-func terminalInfo(imei string) vowifi.TerminalInfo {
-	return vowifi.TerminalInfo{
+func ensureManagedVoLTEAllowed(ctx context.Context, modem *mmodem.Modem) error {
+	device, err := mmodem.OpenVoLTEStatusDevice(modem)
+	if errors.Is(err, mdevice.ErrUnsupported) {
+		return ErrUnavailable
+	}
+	if err != nil {
+		return fmt.Errorf("open device: %w", err)
+	}
+	status, err := device.VoLTEStatus(ctx)
+	if err != nil {
+		return fmt.Errorf("read volte status: %w", err)
+	}
+	if !status.CanEnable {
+		return ErrUnavailable
+	}
+	return nil
+}
+
+func terminalInfo(imei string) imsgo.TerminalInfo {
+	return imsgo.TerminalInfo{
 		ID:              imei,
 		Vendor:          terminalVendor,
 		Model:           terminalModel,
@@ -203,7 +253,7 @@ func terminalInfo(imei string) vowifi.TerminalInfo {
 	}
 }
 
-func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, profileID string, sessionID uint64, client *vowifi.Client) {
+func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, profileID string, sessionID uint64, client *imsgo.Client) {
 	events := client.Events()
 	defer events.Close()
 	smsEvents := client.SMS().Events()
@@ -242,7 +292,7 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 				return
 			}
-			if state.Status == vowifi.StatusFailed || state.Status == vowifi.StatusClosed {
+			if state.Status == imsgo.StatusFailed || state.Status == imsgo.StatusClosed {
 				_ = client.Close()
 				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 				return
@@ -258,7 +308,7 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 	}
 }
 
-func (c *coordinator) reconnectChannel(modemID string, sessionID uint64, client *vowifi.Client) <-chan struct{} {
+func (c *coordinator) reconnectChannel(modemID string, sessionID uint64, client *imsgo.Client) <-chan struct{} {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modemID]
@@ -268,7 +318,7 @@ func (c *coordinator) reconnectChannel(modemID string, sessionID uint64, client 
 	return session.reconnect
 }
 
-func (c *coordinator) connectedClient(modemID string, profileID string) (*vowifi.Client, error) {
+func (c *coordinator) connectedClient(modemID string, profileID string) (*imsgo.Client, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session := c.sessions[modemID]
@@ -278,7 +328,7 @@ func (c *coordinator) connectedClient(modemID string, profileID string) (*vowifi
 	return session.client, nil
 }
 
-func (c *coordinator) markConnected(modemID string, sessionID uint64, client *vowifi.Client) {
+func (c *coordinator) markConnected(modemID string, sessionID uint64, client *imsgo.Client) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if session := c.sessions[modemID]; session != nil && session.id == sessionID {
@@ -301,7 +351,7 @@ func (c *coordinator) markConnecting(modemID string, sessionID uint64) {
 	}
 }
 
-func (c *coordinator) markDisconnected(modemID string, sessionID uint64, client *vowifi.Client) {
+func (c *coordinator) markDisconnected(modemID string, sessionID uint64, client *imsgo.Client) {
 	c.mu.Lock()
 	session := c.sessions[modemID]
 	if session == nil || session.id != sessionID || session.client != client {
@@ -312,7 +362,7 @@ func (c *coordinator) markDisconnected(modemID string, sessionID uint64, client 
 	session.connected = false
 	session.connectedAt = time.Time{}
 	session.phase = sessionPhaseDisconnected
-	events := disconnectedCallEvents(session)
+	events := c.disconnectedCallEvents(session)
 	c.mu.Unlock()
 
 	for _, call := range events {
@@ -320,8 +370,8 @@ func (c *coordinator) markDisconnected(modemID string, sessionID uint64, client 
 	}
 }
 
-func (c *coordinator) handleClientDisconnected(modemID string, client *vowifi.Client, err error) error {
-	if !errors.Is(err, vowifi.ErrClientNotConnected) {
+func (c *coordinator) handleClientDisconnected(modemID string, client *imsgo.Client, err error) error {
+	if !errors.Is(err, imsgo.ErrClientNotConnected) {
 		return err
 	}
 	if client != nil {
@@ -330,7 +380,7 @@ func (c *coordinator) handleClientDisconnected(modemID string, client *vowifi.Cl
 	return ErrNotConnected
 }
 
-func (c *coordinator) requestReconnect(modemID string, client *vowifi.Client) {
+func (c *coordinator) requestReconnect(modemID string, client *imsgo.Client) {
 	c.mu.Lock()
 	session := c.sessions[modemID]
 	if session == nil || session.client != client {
@@ -342,7 +392,7 @@ func (c *coordinator) requestReconnect(modemID string, client *vowifi.Client) {
 	session.connected = false
 	session.connectedAt = time.Time{}
 	session.phase = sessionPhaseDisconnected
-	events := disconnectedCallEvents(session)
+	events := c.disconnectedCallEvents(session)
 	c.mu.Unlock()
 
 	for _, call := range events {
@@ -357,7 +407,7 @@ func (c *coordinator) requestReconnect(modemID string, client *vowifi.Client) {
 	}
 }
 
-func disconnectedCallEvents(session *sessionState) []VoiceCall {
+func (c *coordinator) disconnectedCallEvents(session *sessionState) []VoiceCall {
 	if session == nil || len(session.calls) == 0 {
 		return nil
 	}
@@ -367,11 +417,18 @@ func disconnectedCallEvents(session *sessionState) []VoiceCall {
 		if state == nil || state.info.ID == "" || isTerminalVoiceCallState(state.info.State) {
 			continue
 		}
-		state.info, _ = failVoiceCall(state.info, "wifi calling disconnected", now)
+		state.info, _ = failVoiceCall(state.info, c.disconnectedReason(), now)
 		state.updatedAt = now
 		events = append(events, state.info)
 	}
 	return events
+}
+
+func (c *coordinator) disconnectedReason() string {
+	if c.access == AccessVoLTE {
+		return "volte disconnected"
+	}
+	return "wifi calling disconnected"
 }
 
 func (c *coordinator) stop(modemID string) {
@@ -442,7 +499,7 @@ func (c *coordinator) detachSession(modemID string) (*sessionState, []VoiceCall)
 	c.mu.Lock()
 	session := c.sessions[modemID]
 	delete(c.sessions, modemID)
-	events := disconnectedCallEvents(session)
+	events := c.disconnectedCallEvents(session)
 	c.mu.Unlock()
 	return session, events
 }
@@ -455,7 +512,7 @@ func (c *coordinator) detachSessionByID(modemID string, sessionID uint64) (*sess
 		return nil, nil
 	}
 	delete(c.sessions, modemID)
-	events := disconnectedCallEvents(session)
+	events := c.disconnectedCallEvents(session)
 	c.mu.Unlock()
 	return session, events
 }

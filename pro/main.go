@@ -44,8 +44,8 @@ func main() {
 
 func configurePro(runtime *server.Runtime) error {
 	app := &proApp{runtime: runtime}
-	if proWiFiCalling != nil {
-		if err := proWiFiCalling(app); err != nil {
+	if proIMS != nil {
+		if err := proIMS(app); err != nil {
 			return err
 		}
 	}

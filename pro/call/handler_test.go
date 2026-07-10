@@ -1,4 +1,4 @@
-//go:build wifi_calling
+//go:build ims
 
 package call
 
@@ -28,6 +28,7 @@ func TestCallActionErrorMapsExpectedFailures(t *testing.T) {
 		{name: "invalid number", err: ErrInvalidNumber, wantStatus: http.StatusBadRequest, wantCode: errorCodeCallNumberInvalid},
 		{name: "no call route available", err: ErrNoRouteAvailable, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeNoCallRouteAvailable},
 		{name: "wifi calling disconnected", err: ErrWiFiCallingNotConnected, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeWiFiCallingNotConnected},
+		{name: "volte disconnected", err: ErrVoLTENotConnected, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeVoLTENotConnected},
 		{name: "modem calling unavailable", err: ErrModemCallingUnavailable, wantStatus: http.StatusNotImplemented, wantCode: errorCodeModemCallingUnavailable},
 		{name: "invalid call state", err: ErrInvalidCallState, wantStatus: http.StatusBadRequest, wantCode: errorCodeInvalidCallState},
 		{name: "invalid call hold", err: ErrInvalidCallHold, wantStatus: http.StatusBadRequest, wantCode: errorCodeInvalidCallHold},

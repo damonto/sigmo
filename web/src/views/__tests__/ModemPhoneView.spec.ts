@@ -32,6 +32,10 @@ const modemApiHarness = vi.hoisted(() => ({
   getModem: vi.fn(),
 }))
 
+const networkApiHarness = vi.hoisted(() => ({
+  getVoLTE: vi.fn(),
+}))
+
 const callAudioHarness = vi.hoisted(() => ({
   errorMessage: { value: '' },
   prepare: vi.fn(),
@@ -77,7 +81,6 @@ const labels: Record<string, string> = {
   'modemDetail.phone.ussdTitle': 'USSD',
   'modemDetail.phone.ussdDescription': 'Continue the USSD session in this dialog.',
   'modemDetail.phone.ussdPlaceholder': 'Reply',
-  'modemDetail.phone.audioCodecUnavailable': 'Call audio requires an AMR/AMR-WB codec module.',
   'modemDetail.phone.states.dialing': 'Dialing',
   'modemDetail.phone.states.ringing': 'Ringing',
   'modemDetail.phone.states.answering': 'Answering',
@@ -118,6 +121,10 @@ vi.mock('@/apis/ussd', () => ({
 
 vi.mock('@/apis/modem', () => ({
   useModemApi: () => modemApiHarness,
+}))
+
+vi.mock('@/apis/network', () => ({
+  useNetworkApi: () => networkApiHarness,
 }))
 
 vi.mock('@/composables/usePhoneCalls', () => ({
@@ -278,6 +285,13 @@ describe('ModemPhoneView phone interactions', () => {
     modemApiHarness.getModem.mockReset()
     modemApiHarness.getModem.mockResolvedValue({
       data: ref({ sim: { regionCode: 'US' } }),
+    })
+    networkApiHarness.getVoLTE.mockReset()
+    networkApiHarness.getVoLTE.mockResolvedValue({
+      data: ref({
+        managed: false,
+        canEnable: true,
+      }),
     })
     ussdHarness.executeUssd.mockReset()
     ussdHarness.executeUssd.mockResolvedValue({
@@ -606,6 +620,26 @@ describe('ModemPhoneView phone interactions', () => {
     await flushPromises()
 
     expect(callAudioHarness.prepare).not.toHaveBeenCalled()
+    expect(phoneHarness.dial).toHaveBeenCalledWith('12')
+  })
+
+  it('prepares outgoing audio when VoLTE is enabled', async () => {
+    networkApiHarness.getVoLTE.mockResolvedValue({
+      data: ref({
+        managed: true,
+        canEnable: true,
+      }),
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.get('button[aria-label="Open dialpad"]').trigger('click')
+    await clickKey(wrapper, '1')
+    await clickKey(wrapper, '2')
+    await callButton(wrapper)?.trigger('click')
+    await flushPromises()
+
+    expect(callAudioHarness.prepare).toHaveBeenCalled()
     expect(phoneHarness.dial).toHaveBeenCalledWith('12')
   })
 

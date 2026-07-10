@@ -1,4 +1,4 @@
-//go:build wifi_calling
+//go:build ims
 
 package call
 
@@ -7,11 +7,15 @@ import (
 	"time"
 
 	"github.com/damonto/sigmo/internal/pkg/storage"
-	"github.com/damonto/sigmo/pro/wificalling"
+	pims "github.com/damonto/sigmo/pro/ims"
 )
 
-func callFromWiFiCalling(call wificalling.VoiceCall) storage.Call {
+func callFromIMS(call pims.VoiceCall) storage.Call {
 	state := strings.TrimSpace(call.State)
+	route := strings.TrimSpace(call.Route)
+	if route == "" {
+		route = RouteWiFiCalling
+	}
 	now := time.Now()
 	updatedAt := call.UpdatedAt
 	if updatedAt.IsZero() {
@@ -25,7 +29,7 @@ func callFromWiFiCalling(call wificalling.VoiceCall) storage.Call {
 		ID:         call.ID,
 		ProfileID:  call.ProfileID,
 		ModemID:    call.ModemID,
-		Route:      RouteWiFiCalling,
+		Route:      route,
 		Direction:  call.Direction,
 		Number:     call.Number,
 		State:      state,

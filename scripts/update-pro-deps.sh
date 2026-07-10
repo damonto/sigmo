@@ -224,18 +224,28 @@ update_pro_deps() {
 	local modules=()
 	local pinned_modules=()
 	local module
+	local module_version
 	local version
 
 	mapfile -t modules < <(read_pro_modules)
 
 	echo "Updating Pro module dependencies with ${MODULE_VERSION_MODE} module versions"
-	(cd "${PRO_DIR}" && go_with_pro_tags get -u ./...)
 
 	for module in "${modules[@]}"; do
 		version="$(resolve_pro_module_version "${module}")"
 		echo "${module} ${version}"
 		pinned_modules+=("${module}@${version}")
 	done
+
+	if [ "${#pinned_modules[@]}" -gt 0 ]; then
+		# go get loads the current module graph before applying requested upgrades.
+		# Rewrite stale requirements first so pre-rename versions cannot block it.
+		for module_version in "${pinned_modules[@]}"; do
+			(cd "${PRO_DIR}" && go mod edit -require="${module_version}")
+		done
+	fi
+
+	(cd "${PRO_DIR}" && go_with_pro_tags get -u ./...)
 
 	if [ "${#pinned_modules[@]}" -gt 0 ]; then
 		(cd "${PRO_DIR}" && go get "${pinned_modules[@]}")

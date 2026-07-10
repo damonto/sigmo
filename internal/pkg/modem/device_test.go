@@ -52,7 +52,7 @@ func TestOpenDeviceRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-func TestMBIMDeviceSIMPowerNoop(t *testing.T) {
+func TestMBIMDeviceUnsupportedOperations(t *testing.T) {
 	device, err := OpenDevice(&Modem{
 		PrimaryPort:    "/dev/cdc-wdm0",
 		PrimarySimSlot: 1,
@@ -68,15 +68,13 @@ func TestMBIMDeviceSIMPowerNoop(t *testing.T) {
 		name string
 		run  func(context.Context) error
 	}{
-		{name: "power off", run: device.PowerOffSIM},
-		{name: "power on", run: device.PowerOnSIM},
 		{name: "power cycle", run: device.PowerCycleSIM},
 		{name: "activate provisioning", run: device.ActivateProvisioningIfSIMMissing},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.run(context.Background()); err != nil {
-				t.Fatalf("%s error = %v", tt.name, err)
+			if err := tt.run(context.Background()); !errors.Is(err, mdevice.ErrUnsupported) {
+				t.Fatalf("%s error = %v, want %v", tt.name, err, mdevice.ErrUnsupported)
 			}
 		})
 	}
@@ -137,6 +135,63 @@ func TestOpenDeviceSelectsModemDevicePort(t *testing.T) {
 			}
 			if cfg.Device != tt.wantDevice {
 				t.Fatalf("deviceConfig() device = %q, want %q", cfg.Device, tt.wantDevice)
+			}
+		})
+	}
+}
+
+func TestQMIDeviceConfigPrefersQMI(t *testing.T) {
+	tests := []struct {
+		name       string
+		modem      *Modem
+		wantDevice string
+		wantType   mdevice.PortType
+		wantErr    error
+	}{
+		{
+			name:    "rejects nil modem",
+			wantErr: errModemRequired,
+		},
+		{
+			name: "uses QMI even when primary is MBIM",
+			modem: &Modem{
+				PrimaryPort: "/dev/cdc-wdm0",
+				Ports: []ModemPort{
+					{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+					{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+				},
+			},
+			wantDevice: "/dev/cdc-wdm1",
+			wantType:   mdevice.PortTypeQMI,
+		},
+		{
+			name: "rejects modem without QMI",
+			modem: &Modem{
+				PrimaryPort: "/dev/cdc-wdm0",
+				Ports: []ModemPort{
+					{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+				},
+			},
+			wantErr: mdevice.ErrUnsupported,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := qmiDeviceConfig(tt.modem)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("qmiDeviceConfig() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("qmiDeviceConfig() error = %v", err)
+			}
+			if cfg.PortType != tt.wantType {
+				t.Fatalf("qmiDeviceConfig() port type = %d, want %d", cfg.PortType, tt.wantType)
+			}
+			if cfg.Device != tt.wantDevice {
+				t.Fatalf("qmiDeviceConfig() device = %q, want %q", cfg.Device, tt.wantDevice)
 			}
 		})
 	}

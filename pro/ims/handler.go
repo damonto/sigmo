@@ -1,6 +1,6 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
 	"context"
@@ -39,18 +39,18 @@ type SettingsResponse struct {
 }
 
 const (
-	errorCodeGetSettingsFailed            = "get_wifi_calling_settings_failed"
-	errorCodeUpdateSettingsInvalidRequest = "update_wifi_calling_settings_invalid_request"
-	errorCodeUpdateSettingsFailed         = "update_wifi_calling_settings_failed"
-	errorCodeCreateSessionFailed          = "create_wifi_calling_session_failed"
-	errorCodeDeleteSessionFailed          = "delete_wifi_calling_session_failed"
-	errorCodeSessionUnavailable           = "wifi_calling_session_unavailable"
-	errorCodeStartWebsheetFailed          = "start_wifi_calling_websheet_failed"
-	errorCodeStartE911WebsheetFailed      = "start_wifi_calling_e911_websheet_failed"
-	errorCodeWebsheetNotPending           = "wifi_calling_websheet_not_pending"
-	errorCodeSetupPending                 = "wifi_calling_setup_pending"
-	errorCodeSetupDenied                  = "wifi_calling_setup_denied"
-	errorCodeWebsheetUnavailable          = "wifi_calling_websheet_unavailable"
+	errorCodeGetSettingsFailed            = "get_ims_settings_failed"
+	errorCodeUpdateSettingsInvalidRequest = "update_ims_settings_invalid_request"
+	errorCodeUpdateSettingsFailed         = "update_ims_settings_failed"
+	errorCodeCreateSessionFailed          = "create_ims_session_failed"
+	errorCodeDeleteSessionFailed          = "delete_ims_session_failed"
+	errorCodeSessionUnavailable           = "ims_session_unavailable"
+	errorCodeStartWebsheetFailed          = "start_ims_websheet_failed"
+	errorCodeStartE911WebsheetFailed      = "start_ims_e911_websheet_failed"
+	errorCodeWebsheetNotPending           = "ims_websheet_not_pending"
+	errorCodeSetupPending                 = "ims_setup_pending"
+	errorCodeSetupDenied                  = "ims_setup_denied"
+	errorCodeWebsheetUnavailable          = "ims_websheet_unavailable"
 )
 
 func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, wifiCalling Coordinator) {
@@ -155,9 +155,9 @@ func (h *Handler) StartEmergencyAddressWebsheet(c *echo.Context) error {
 
 func wifiCallingWebsheetStartError(c *echo.Context, fallbackCode string, err error) error {
 	switch {
-	case errors.Is(err, ErrWFCSetupPending):
+	case errors.Is(err, ErrWiFiCallingSetupPending):
 		return httpapi.TooManyRequests(c, errorCodeSetupPending, err)
-	case errors.Is(err, ErrWFCSetupDenied):
+	case errors.Is(err, ErrWiFiCallingSetupDenied):
 		return httpapi.BadRequest(c, errorCodeSetupDenied, err)
 	case errors.Is(err, ErrUnavailable), errors.Is(err, ErrWebsheetUnavailable):
 		return httpapi.BadRequest(c, errorCodeWebsheetUnavailable, err)

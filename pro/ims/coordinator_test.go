@@ -1,12 +1,16 @@
-//go:build wifi_calling
+//go:build ims
 
-package wificalling
+package ims
 
 import (
+	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
-	vowifi "github.com/damonto/vowifi-go"
+	imsgo "github.com/damonto/ims-go"
+	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 func TestStatusFromSession(t *testing.T) {
@@ -53,7 +57,7 @@ func TestStatusFromSession(t *testing.T) {
 			name: "connected session",
 			session: &sessionState{
 				phase:       sessionPhaseConnected,
-				client:      &vowifi.Client{},
+				client:      &imsgo.Client{},
 				profileID:   "profile-1",
 				connectedAt: now.Add(-2 * time.Minute),
 			},
@@ -69,7 +73,7 @@ func TestStatusFromSession(t *testing.T) {
 			},
 			session: &sessionState{
 				phase:     sessionPhaseConnected,
-				client:    &vowifi.Client{},
+				client:    &imsgo.Client{},
 				profileID: "profile-2",
 			},
 			profileID: "profile-1",
@@ -87,6 +91,63 @@ func TestStatusFromSession(t *testing.T) {
 			}
 			if got.DurationSeconds != tt.wantDuration {
 				t.Fatalf("DurationSeconds = %d, want %d", got.DurationSeconds, tt.wantDuration)
+			}
+		})
+	}
+}
+
+func TestApplyVoLTEPreferenceUsesSavedState(t *testing.T) {
+	tests := []struct {
+		name  string
+		event mmodem.VoLTEPreferenceEvent
+	}{
+		{
+			name:  "stale enabled event follows saved disabled state",
+			event: mmodem.VoLTEPreferenceEvent{ModemID: "modem-1", Enabled: true},
+		},
+		{
+			name:  "disabled event follows saved disabled state",
+			event: mmodem.VoLTEPreferenceEvent{ModemID: "modem-1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Errorf("Close() error = %v", err)
+				}
+			})
+			preferences, err := mmodem.NewNetworkPreferences(store)
+			if err != nil {
+				t.Fatalf("NewNetworkPreferences() error = %v", err)
+			}
+			if err := preferences.SaveVoLTE(ctx, tt.event.ModemID, true); err != nil {
+				t.Fatalf("SaveVoLTE(true) error = %v", err)
+			}
+			if err := preferences.SaveVoLTE(ctx, tt.event.ModemID, false); err != nil {
+				t.Fatalf("SaveVoLTE(false) error = %v", err)
+			}
+
+			c := New(Config{
+				Store:              store,
+				Access:             AccessVoLTE,
+				NetworkPreferences: preferences,
+			}).(*coordinator)
+			c.sessions[tt.event.ModemID] = &sessionState{}
+
+			c.applyVoLTEPreference(ctx, nil, tt.event)
+
+			c.mu.Lock()
+			_, exists := c.sessions[tt.event.ModemID]
+			c.mu.Unlock()
+			if exists {
+				t.Fatal("session still exists after saved VoLTE preference was disabled")
 			}
 		})
 	}

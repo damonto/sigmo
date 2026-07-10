@@ -8,6 +8,8 @@ import type {
   SetAirplaneModeRequest,
   SetCurrentBandsRequest,
   SetCurrentModesRequest,
+  SetVoLTERequest,
+  VoLTEResponse,
 } from '@/types/network'
 
 export const useNetworkApi = () => {
@@ -55,6 +57,17 @@ export const useNetworkApi = () => {
     })
   }
 
+  const getVoLTE = (id: string) => {
+    return fetchJson<VoLTEResponse>(`modems/${id}/networks/volte`)
+  }
+
+  const setVoLTE = (id: string, payload: SetVoLTERequest) => {
+    return fetchJson<void>(`modems/${id}/networks/volte`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+  }
+
   return {
     scanNetworks,
     registerNetwork,
@@ -64,5 +77,7 @@ export const useNetworkApi = () => {
     setCurrentBands,
     getAirplaneMode,
     setAirplaneMode,
+    getVoLTE,
+    setVoLTE,
   }
 }

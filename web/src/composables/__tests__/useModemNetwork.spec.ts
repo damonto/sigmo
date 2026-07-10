@@ -12,6 +12,8 @@ const api = vi.hoisted(() => ({
   setCurrentBands: vi.fn(),
   getAirplaneMode: vi.fn(),
   setAirplaneMode: vi.fn(),
+  getVoLTE: vi.fn(),
+  setVoLTE: vi.fn(),
 }))
 
 vi.mock('@/apis/network', () => ({
@@ -47,13 +49,20 @@ const airplaneModeResponse = {
   enabled: false,
 }
 
+const volteResponse = {
+  managed: false,
+  canEnable: true,
+}
+
 describe('useModemNetwork', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.getModes.mockResolvedValue({ data: { value: modeResponse } })
     api.getBands.mockResolvedValue({ data: { value: bandsResponse } })
     api.getAirplaneMode.mockResolvedValue({ data: { value: airplaneModeResponse } })
+    api.getVoLTE.mockResolvedValue({ data: { value: volteResponse } })
     api.setAirplaneMode.mockResolvedValue({})
+    api.setVoLTE.mockResolvedValue({})
   })
 
   it('opens the network dialog after a successful scan', async () => {
@@ -104,9 +113,7 @@ describe('useModemNetwork', () => {
     expect(api.setAirplaneMode).toHaveBeenCalledWith('modem-1', { enabled: true })
     expect(api.getAirplaneMode).toHaveBeenCalled()
     expect(onChanged).toHaveBeenCalledWith('modem-1')
-    expect(onSuccess).toHaveBeenCalledWith(
-      'modemDetail.settings.networkAirplaneModeEnabledSuccess',
-    )
+    expect(onSuccess).toHaveBeenCalledWith('modemDetail.settings.networkAirplaneModeEnabledSuccess')
     expect(network.isAirplaneModeUpdating.value).toBe(false)
   })
 
@@ -119,10 +126,23 @@ describe('useModemNetwork', () => {
     await network.refreshNetworkSettings()
     await network.handleAirplaneModeUpdate(true)
 
-    expect(onError).toHaveBeenCalledWith(
-      'modemDetail.settings.networkAirplaneModeUpdateFailed',
-    )
+    expect(onError).toHaveBeenCalledWith('modemDetail.settings.networkAirplaneModeUpdateFailed')
     expect(onSuccess).not.toHaveBeenCalled()
     expect(network.isAirplaneModeUpdating.value).toBe(false)
+  })
+
+  it('updates volte and refreshes modem state', async () => {
+    const onChanged = vi.fn()
+    const onSuccess = vi.fn()
+    const network = useModemNetwork({ modemId, onChanged, onSuccess })
+
+    await network.refreshNetworkSettings()
+    await network.handleVoLTEUpdate(true)
+
+    expect(api.setVoLTE).toHaveBeenCalledWith('modem-1', { managed: true })
+    expect(api.getVoLTE).toHaveBeenCalled()
+    expect(onChanged).toHaveBeenCalledWith('modem-1')
+    expect(onSuccess).toHaveBeenCalledWith('modemDetail.settings.networkVoLTEEnabledSuccess')
+    expect(network.isVoLTEUpdating.value).toBe(false)
   })
 })

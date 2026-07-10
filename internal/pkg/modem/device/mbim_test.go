@@ -66,36 +66,35 @@ func TestDeviceSetAirplaneModeMBIM(t *testing.T) {
 	}
 }
 
-func TestDeviceToggleAirplaneModeMBIM(t *testing.T) {
+func TestMBIMDeviceUnsupportedQueries(t *testing.T) {
 	tests := []struct {
-		name      string
-		state     uiccmbim.RadioSwitchState
-		want      bool
-		wantState uiccmbim.RadioSwitchState
+		name string
+		run  func(mbimDevice) (bool, error)
 	}{
-		{name: "turn on", state: uiccmbim.RadioSwitchStateOn, want: true, wantState: uiccmbim.RadioSwitchStateOff},
-		{name: "turn off", state: uiccmbim.RadioSwitchStateOff, wantState: uiccmbim.RadioSwitchStateOn},
+		{
+			name: "sim state",
+			run: func(device mbimDevice) (bool, error) {
+				state, err := device.SIMState(context.Background(), Target{})
+				return state.Supported, err
+			},
+		},
+		{
+			name: "volte status",
+			run: func(device mbimDevice) (bool, error) {
+				status, err := device.VoLTEStatus(context.Background())
+				return status.Supported, err
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &fakeMBIMAirplaneModeReader{
-				state: uiccmbim.RadioStateInfo{SwRadioState: tt.state},
-			}
-			device := mbimDeviceWithAirplaneModeReader(t, "/dev/cdc-wdm0", reader, nil)
-
-			got, err := device.ToggleAirplaneMode(context.Background())
+			supported, err := tt.run(mbimDevice{})
 			if err != nil {
-				t.Fatalf("ToggleAirplaneMode() error = %v", err)
+				t.Fatalf("query error = %v", err)
 			}
-			if got != tt.want {
-				t.Fatalf("ToggleAirplaneMode() = %v, want %v", got, tt.want)
-			}
-			if reader.setState != tt.wantState {
-				t.Fatalf("MBIM set state = %d, want %d", reader.setState, tt.wantState)
-			}
-			if !reader.closed {
-				t.Fatal("MBIM reader closed = false, want true")
+			if supported {
+				t.Fatal("supported = true, want false")
 			}
 		})
 	}
@@ -104,7 +103,6 @@ func TestDeviceToggleAirplaneModeMBIM(t *testing.T) {
 type fakeMBIMAirplaneModeReader struct {
 	state    uiccmbim.RadioStateInfo
 	setState uiccmbim.RadioSwitchState
-	setCalls int
 	closed   bool
 }
 
@@ -114,7 +112,6 @@ func (r *fakeMBIMAirplaneModeReader) RadioState(context.Context) (uiccmbim.Radio
 
 func (r *fakeMBIMAirplaneModeReader) SetRadioState(_ context.Context, state uiccmbim.RadioSwitchState) (uiccmbim.RadioStateInfo, error) {
 	r.setState = state
-	r.setCalls++
 	return uiccmbim.RadioStateInfo{SwRadioState: state}, nil
 }
 
