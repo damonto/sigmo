@@ -195,13 +195,20 @@ func samePendingVoiceDial(call VoiceCall, pending pendingVoiceDial) bool {
 
 func browserVoiceMediaOffer() imsvoice.MediaOffer {
 	return imsvoice.MediaOffer{
-		Codecs: []imsvoice.AudioCodec{imsvoice.CodecAMRWB, imsvoice.CodecAMR, imsvoice.CodecPCMU},
+		Codecs: []imsvoice.AudioCodec{imsvoice.CodecEVS, imsvoice.CodecAMRWB, imsvoice.CodecAMR, imsvoice.CodecPCMU},
 	}
 }
 
 func browserVoiceConfig() imsvoice.Config {
 	return imsvoice.Config{
 		Codecs: []imsvoice.AudioCodecConfig{
+			{
+				Name:         imsvoice.CodecEVS,
+				PayloadTypes: []int{127},
+				ClockRate:    16000,
+				Bitrate:      "5.9-13.2",
+				Bandwidth:    "nb-swb",
+			},
 			{
 				Name:         imsvoice.CodecAMRWB,
 				PayloadTypes: []int{104},
@@ -348,7 +355,7 @@ func (c *coordinator) OpenCallMedia(ctx context.Context, modem *mmodem.Modem, ca
 }
 
 func isSupportedCallMediaCodec(codec imsvoice.AudioCodec) bool {
-	return codec == imsvoice.CodecAMRWB || codec == imsvoice.CodecAMR || codec == imsvoice.CodecPCMU
+	return codec == imsvoice.CodecEVS || codec == imsvoice.CodecAMRWB || codec == imsvoice.CodecAMR || codec == imsvoice.CodecPCMU
 }
 
 func (c *coordinator) SubscribeVoiceEvents(fn VoiceEventFunc) func() {
@@ -395,6 +402,7 @@ func (s callMediaSession) Info() MediaInfo {
 		ClockRate:       s.media.ClockRate,
 		Channels:        s.media.Channels,
 		OctetAlign:      s.media.OctetAlign,
+		HFOnly:          s.media.HFOnly,
 		DTMFPayloadType: s.media.DTMFPayloadType,
 		DTMFClockRate:   s.media.DTMFClockRate,
 		PTimeMillis:     int(s.media.PTime / time.Millisecond),

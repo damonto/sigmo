@@ -55,7 +55,15 @@ func TestWebRTCICEServersReturnsCloudflareErrors(t *testing.T) {
 	}))
 	defer server.Close()
 
-	service := NewMedia(nil)
+	service, err := NewMedia(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("NewMedia() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := service.Close(context.Background()); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
 	service.ice.client = server.Client()
 	service.ice.endpoint = server.URL
 

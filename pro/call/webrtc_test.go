@@ -3,26 +3,138 @@
 package call
 
 import (
+	"bytes"
 	"testing"
 
+	imsvoice "github.com/damonto/ims-go/ims/voice"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 
 	"github.com/damonto/sigmo/pro/voicecodec"
 )
 
+func TestEVSPayloadRoundTrip(t *testing.T) {
+	tests := []struct {
+		name           string
+		headerFullOnly bool
+		wantHeaderFull bool
+		frame          voicecodec.EVSFrame
+	}{
+		{name: "compact native", frame: voicecodec.EVSFrame{FrameType: 4, Quality: true, Data: make([]byte, 33)}},
+		{name: "header full native", headerFullOnly: true, wantHeaderFull: true, frame: voicecodec.EVSFrame{FrameType: 4, Quality: true, Data: make([]byte, 33)}},
+		{name: "compact amr wb io", frame: voicecodec.EVSFrame{FrameType: 2, Quality: true, AMRWBIO: true, Data: make([]byte, 32)}},
+		{name: "header full amr wb io", headerFullOnly: true, wantHeaderFull: true, frame: voicecodec.EVSFrame{FrameType: 2, Quality: true, AMRWBIO: true, Data: make([]byte, 32)}},
+		{name: "native sid", wantHeaderFull: false, frame: voicecodec.EVSFrame{FrameType: 12, Quality: true, Data: make([]byte, 6)}},
+		{name: "amr wb io sid", wantHeaderFull: true, frame: voicecodec.EVSFrame{FrameType: 9, Quality: true, AMRWBIO: true, Data: make([]byte, 5)}},
+		{name: "native no data", wantHeaderFull: true, frame: voicecodec.EVSFrame{FrameType: 15, Quality: true}},
+		{name: "native speech lost", wantHeaderFull: true, frame: voicecodec.EVSFrame{FrameType: 14}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload, err := encodeEVSPayload(tt.frame, tt.headerFullOnly)
+			if err != nil {
+				t.Fatalf("encodeEVSPayload() error = %v", err)
+			}
+			decodedPayload, err := (imsvoice.EVSPayloadCodec{HeaderFullOnly: tt.headerFullOnly}).Unmarshal(payload)
+			if err != nil {
+				t.Fatalf("EVSPayloadCodec.Unmarshal() error = %v", err)
+			}
+			if decodedPayload.HeaderFull != tt.wantHeaderFull {
+				t.Fatalf("HeaderFull = %v, want %v", decodedPayload.HeaderFull, tt.wantHeaderFull)
+			}
+			frames, err := decodeEVSPayload(payload, tt.headerFullOnly)
+			if err != nil {
+				t.Fatalf("decodeEVSPayload() error = %v", err)
+			}
+			if len(frames) != 1 {
+				t.Fatalf("frames = %d, want 1", len(frames))
+			}
+			got := frames[0]
+			if got.FrameType != tt.frame.FrameType || got.Quality != tt.frame.Quality || got.AMRWBIO != tt.frame.AMRWBIO || !bytes.Equal(got.Data, tt.frame.Data) {
+				t.Fatalf("frame = %+v, want %+v", got, tt.frame)
+			}
+		})
+	}
+}
+
+func TestEVSRTPWriterAdvancesFrameTiming(t *testing.T) {
+	tests := []struct {
+		name           string
+		headerFullOnly bool
+	}{
+		{name: "compact"},
+		{name: "header full", headerFullOnly: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writer := newEVSRTPWriter(127, tt.headerFullOnly, 42, 90000, 5678)
+			frame := voicecodec.EVSFrame{FrameType: 4, Quality: true, Data: make([]byte, 33)}
+			for i := range 2 {
+				data, err := writer.packet(frame)
+				if err != nil {
+					t.Fatalf("packet() error = %v", err)
+				}
+				var packet rtp.Packet
+				if err := packet.Unmarshal(data); err != nil {
+					t.Fatalf("RTP Unmarshal() error = %v", err)
+				}
+				wantSequence := uint16(42 + i)
+				wantTimestamp := uint32(90000 + i*voicecodec.EVSSamplesPerFrame)
+				if packet.PayloadType != 127 || packet.SequenceNumber != wantSequence || packet.Timestamp != wantTimestamp || packet.SSRC != 5678 {
+					t.Fatalf("RTP header = %+v, want pt 127 seq %d timestamp %d ssrc 5678", packet.Header, wantSequence, wantTimestamp)
+				}
+				writer.commit()
+			}
+		})
+	}
+}
+
+func TestEVSRTPWriterDoesNotAdvanceBeforeWrite(t *testing.T) {
+	tests := []struct {
+		name           string
+		headerFullOnly bool
+	}{
+		{name: "compact"},
+		{name: "header full", headerFullOnly: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writer := newEVSRTPWriter(127, tt.headerFullOnly, 42, 90000, 5678)
+			frame := voicecodec.EVSFrame{FrameType: 4, Quality: true, Data: make([]byte, 33)}
+			for range 2 {
+				data, err := writer.packet(frame)
+				if err != nil {
+					t.Fatalf("packet() error = %v", err)
+				}
+				var packet rtp.Packet
+				if err := packet.Unmarshal(data); err != nil {
+					t.Fatalf("RTP Unmarshal() error = %v", err)
+				}
+				if packet.SequenceNumber != 42 || packet.Timestamp != 90000 {
+					t.Fatalf("RTP timing = %d/%d, want unchanged 42/90000", packet.SequenceNumber, packet.Timestamp)
+				}
+			}
+		})
+	}
+}
+
 func TestMediaBridgeCodec(t *testing.T) {
 	tests := []struct {
 		name     string
 		info     MediaInfo
 		wantAMR  voicecodec.AMRCodec
+		wantEVS  bool
 		wantPCMU bool
 		wantErr  error
 	}{
 		{name: "amr", info: MediaInfo{Codec: "AMR"}, wantAMR: voicecodec.CodecAMR},
 		{name: "amr wb", info: MediaInfo{Codec: "AMR-WB"}, wantAMR: voicecodec.CodecAMRWB},
+		{name: "evs", info: MediaInfo{Codec: "EVS"}, wantEVS: true},
 		{name: "pcmu", info: MediaInfo{Codec: "PCMU"}, wantPCMU: true},
-		{name: "unsupported", info: MediaInfo{Codec: "EVS"}, wantErr: ErrUnsupportedCodec},
+		{name: "unsupported", info: MediaInfo{Codec: "OPUS"}, wantErr: ErrUnsupportedCodec},
 	}
 
 	for _, tt := range tests {
@@ -31,8 +143,8 @@ func TestMediaBridgeCodec(t *testing.T) {
 			if err != tt.wantErr {
 				t.Fatalf("mediaBridgeCodec() error = %v, want %v", err, tt.wantErr)
 			}
-			if got.amr != tt.wantAMR || got.pcmu != tt.wantPCMU {
-				t.Fatalf("mediaBridgeCodec() = %+v, want amr %q pcmu %v", got, tt.wantAMR, tt.wantPCMU)
+			if got.amr != tt.wantAMR || got.evs != tt.wantEVS || got.pcmu != tt.wantPCMU {
+				t.Fatalf("mediaBridgeCodec() = %+v, want amr %q evs %v pcmu %v", got, tt.wantAMR, tt.wantEVS, tt.wantPCMU)
 			}
 		})
 	}

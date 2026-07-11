@@ -79,6 +79,7 @@ func (s imsMediaSession) Info() MediaInfo {
 		ClockRate:       info.ClockRate,
 		Channels:        info.Channels,
 		OctetAlign:      info.OctetAlign,
+		HFOnly:          info.HFOnly,
 		DTMFPayloadType: info.DTMFPayloadType,
 		DTMFClockRate:   info.DTMFClockRate,
 		PTimeMillis:     info.PTimeMillis,

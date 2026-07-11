@@ -43,7 +43,10 @@ var proIMS = func(app *proApp) error {
 		Route: procall.RouteVoLTE,
 		Voice: volte,
 	})
-	media := procall.NewMedia(calls)
+	media, err := procall.NewMedia(context.Background(), calls)
+	if err != nil {
+		return fmt.Errorf("configure call media: %w", err)
+	}
 
 	runtime.AddFeatures(pims.WiFiCallingFeatureName, pims.VoLTEFeatureName)
 	runtime.SetMessageRoute(messageRoute{wifiCalling: wifiCalling, volte: volte})

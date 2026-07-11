@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/damonto/euicc-go v1.1.3-0.20260629074730-8a59598949d5
-	github.com/damonto/ims-go v0.0.0-20260710132152-16ef6b56e856
+	github.com/damonto/ims-go v0.0.0-20260711061955-cdc3fcb1a207
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260629075047-0221e7e08753
 	github.com/damonto/uicc-go v0.0.0-20260707110955-212607e2edf2
@@ -42,6 +42,7 @@ require (
 	github.com/pion/stun/v3 v3.1.6 // indirect
 	github.com/pion/transport/v4 v4.0.2 // indirect
 	github.com/pion/turn/v5 v5.0.12 // indirect
+	github.com/tetratelabs/wazero v1.12.0 // indirect
 	github.com/things-go/go-socks5 v0.1.1 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/wneessen/go-mail v0.8.1 // indirect

@@ -3,6 +3,7 @@
 package voicecodec
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -17,18 +18,18 @@ type AMRTranscoder struct {
 	decoder speechcodec.Decoder
 }
 
-func NewAMRTranscoder(codec AMRCodec) (*AMRTranscoder, error) {
+func NewAMRTranscoder(ctx context.Context, codec AMRCodec) (*AMRTranscoder, error) {
 	name, mode, err := amrCodecConfig(codec)
 	if err != nil {
 		return nil, err
 	}
-	encoder, err := speechcodec.NewEncoder(speechcodec.Config{Name: name, Mode: mode})
+	encoder, err := speechcodec.NewEncoder(ctx, speechcodec.Config{Name: name, Mode: mode})
 	if err != nil {
 		return nil, fmt.Errorf("create AMR encoder: %w", err)
 	}
-	decoder, err := speechcodec.NewDecoder(name)
+	decoder, err := speechcodec.NewDecoder(ctx, name)
 	if err != nil {
-		return nil, fmt.Errorf("create AMR decoder: %w", err)
+		return nil, errors.Join(fmt.Errorf("create AMR decoder: %w", err), encoder.Close(ctx))
 	}
 	return &AMRTranscoder{
 		name:    name,
@@ -37,8 +38,8 @@ func NewAMRTranscoder(codec AMRCodec) (*AMRTranscoder, error) {
 	}, nil
 }
 
-func (t *AMRTranscoder) Decode(frame AMRFrame) ([]int16, error) {
-	pcm, err := t.decoder.Decode(nil, speechcodec.Frame{
+func (t *AMRTranscoder) Decode(ctx context.Context, frame AMRFrame) ([]int16, error) {
+	pcm, err := t.decoder.Decode(ctx, nil, speechcodec.Frame{
 		Name:    t.name,
 		Mode:    speechcodec.Mode(frame.FrameType),
 		Quality: frame.Quality,
@@ -50,14 +51,14 @@ func (t *AMRTranscoder) Decode(frame AMRFrame) ([]int16, error) {
 	return pcm, nil
 }
 
-func (t *AMRTranscoder) Encode(samples []int16) ([]AMRFrame, error) {
+func (t *AMRTranscoder) Encode(ctx context.Context, samples []int16) ([]AMRFrame, error) {
 	frameSamples := t.encoder.FrameSamples()
 	if len(samples) == 0 || len(samples)%frameSamples != 0 {
 		return nil, errors.New("amr encoder requires whole 20 ms PCM frames")
 	}
 	frames := make([]AMRFrame, 0, len(samples)/frameSamples)
 	for offset := 0; offset < len(samples); offset += frameSamples {
-		frame, err := t.encoder.Encode(nil, samples[offset:offset+frameSamples])
+		frame, err := t.encoder.Encode(ctx, nil, samples[offset:offset+frameSamples])
 		if err != nil {
 			return nil, fmt.Errorf("encode AMR frame: %w", err)
 		}
@@ -68,6 +69,13 @@ func (t *AMRTranscoder) Encode(samples []int16) ([]AMRFrame, error) {
 		})
 	}
 	return frames, nil
+}
+
+func (t *AMRTranscoder) Close(ctx context.Context) error {
+	if t == nil {
+		return nil
+	}
+	return errors.Join(t.encoder.Close(ctx), t.decoder.Close(ctx))
 }
 
 func amrCodecConfig(codec AMRCodec) (speechcodec.Name, speechcodec.Mode, error) {

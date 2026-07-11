@@ -2,8 +2,8 @@ github.com/ElMostafaIdrassi/goscard v1.0.0 h1:RDG5QrqrQBUoi5MkzM4zILdYf8qDn62daY
 github.com/ElMostafaIdrassi/goscard v1.0.0/go.mod h1:uGOakQe2fFlW2cVlr9cv6x07uelrf0j0aKPbR7jGgfg=
 github.com/damonto/euicc-go v1.1.3-0.20260629074730-8a59598949d5 h1:aCOL7oMt8mFzTwRsTMLxRbdiBzi3vME81tGzIKkJT5A=
 github.com/damonto/euicc-go v1.1.3-0.20260629074730-8a59598949d5/go.mod h1:DhWDwXwrYzOaqmI+VrMOSKDdcupyGbG2XfwjbBIa3TM=
-github.com/damonto/ims-go v0.0.0-20260710132152-16ef6b56e856 h1:ZbLQsBALGe30HVNpDMYz5PlkFqxpVec3XmTvldq4smc=
-github.com/damonto/ims-go v0.0.0-20260710132152-16ef6b56e856/go.mod h1:iO0i+K0bxwRwsUr8H55vkNTD2dnSKBKY7/g0nSZHwOg=
+github.com/damonto/ims-go v0.0.0-20260711061955-cdc3fcb1a207 h1:yKsbk71jd3e/7ssjnLvxRxHhgFNscG0Y8qB7OmBRkYU=
+github.com/damonto/ims-go v0.0.0-20260711061955-cdc3fcb1a207/go.mod h1:QFc4QwZW2rybeOPcZKXrN6d4k+++tLfCQrqOwvXVcOA=
 github.com/damonto/ts43-go v0.0.0-20260629075047-0221e7e08753 h1:s6ABSiujNVeiThDMeUElOQncg7bR3T7RJB74OKpDSbQ=
 github.com/damonto/ts43-go v0.0.0-20260629075047-0221e7e08753/go.mod h1:xrXIvZsgrYVAg76/MPFccDVWF8CbiJKEXuRoY+Tsmaw=
 github.com/damonto/uicc-go v0.0.0-20260707110955-212607e2edf2 h1:SgZz1w0NZ8pS1j1ymt9B/Nj0mL947rIO2Gx8gJwI2no=
@@ -80,6 +80,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
+github.com/tetratelabs/wazero v1.12.0 h1:DuWcpNu/FzgEXgGBDp8J1Spc+CWOvvtvVyjKlaZopYU=
+github.com/tetratelabs/wazero v1.12.0/go.mod h1:LvKtzl2RqO4gyF27BiXU+nKAjcV8f38U+kP/q2vgxh0=
 github.com/things-go/go-socks5 v0.1.1 h1:48hy9cHEXPKeG91G/g4n8zW4uynzPUQy/FkcrJ7r5AY=
 github.com/things-go/go-socks5 v0.1.1/go.mod h1:1YBHVYG7Oli5ae+Pwkp630cPAwY1pjUPmohO1n0Emg0=
 github.com/wlynxg/anet v0.0.5 h1:J3VJGi1gvo0JwZ/P1/Yc/8p63SoW98B5dHkYDmpgvvU=

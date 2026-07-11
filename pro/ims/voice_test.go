@@ -601,7 +601,7 @@ func TestBrowserVoiceMediaOfferUsesFullDuplexCodec(t *testing.T) {
 		name string
 		want []imsvoice.AudioCodec
 	}{
-		{name: "browser codecs", want: []imsvoice.AudioCodec{imsvoice.CodecAMRWB, imsvoice.CodecAMR, imsvoice.CodecPCMU}},
+		{name: "browser codecs", want: []imsvoice.AudioCodec{imsvoice.CodecEVS, imsvoice.CodecAMRWB, imsvoice.CodecAMR, imsvoice.CodecPCMU}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -621,6 +621,7 @@ func TestBrowserVoiceConfigUsesFullDuplexCodec(t *testing.T) {
 		{
 			name: "browser codecs with dtmf",
 			wantCodecs: []imsvoice.AudioCodecConfig{
+				{Name: imsvoice.CodecEVS, PayloadTypes: []int{127}, ClockRate: 16000, Bitrate: "5.9-13.2", Bandwidth: "nb-swb"},
 				{Name: imsvoice.CodecAMRWB, PayloadTypes: []int{104}, ClockRate: 16000},
 				{Name: imsvoice.CodecAMR, PayloadTypes: []int{102}, ClockRate: 8000, ModeSet: "0,2,4,7"},
 				{Name: imsvoice.CodecTelephoneEvent, PayloadTypes: []int{101}, ClockRate: 8000},
@@ -639,7 +640,7 @@ func TestBrowserVoiceConfigUsesFullDuplexCodec(t *testing.T) {
 			}
 			for i, want := range tt.wantCodecs {
 				got := cfg.Codecs[i]
-				if got.Name != want.Name || got.ClockRate != want.ClockRate || got.ModeSet != want.ModeSet || !slices.Equal(got.PayloadTypes, want.PayloadTypes) {
+				if got.Name != want.Name || got.ClockRate != want.ClockRate || got.ModeSet != want.ModeSet || got.Bitrate != want.Bitrate || got.Bandwidth != want.Bandwidth || !slices.Equal(got.PayloadTypes, want.PayloadTypes) {
 					t.Fatalf("Codecs[%d] = %+v, want %+v", i, got, want)
 				}
 			}
@@ -656,7 +657,7 @@ func TestIsSupportedCallMediaCodec(t *testing.T) {
 		{name: "amr", codec: imsvoice.CodecAMR, want: true},
 		{name: "amr wb", codec: imsvoice.CodecAMRWB, want: true},
 		{name: "pcmu", codec: imsvoice.CodecPCMU, want: true},
-		{name: "evs", codec: imsvoice.CodecEVS, want: false},
+		{name: "evs", codec: imsvoice.CodecEVS, want: true},
 		{name: "telephone event", codec: imsvoice.CodecTelephoneEvent, want: false},
 		{name: "empty", codec: "", want: false},
 	}
@@ -677,6 +678,7 @@ func TestCallMediaSessionInfoIncludesPayloadFormat(t *testing.T) {
 			ClockRate:       8000,
 			Channels:        1,
 			OctetAlign:      false,
+			HFOnly:          true,
 			DTMFPayloadType: 101,
 			DTMFClockRate:   8000,
 			PTime:           20 * time.Millisecond,
@@ -689,5 +691,8 @@ func TestCallMediaSessionInfoIncludesPayloadFormat(t *testing.T) {
 	}
 	if info.OctetAlign {
 		t.Fatal("Info().OctetAlign = true, want false for bandwidth-efficient AMR")
+	}
+	if !info.HFOnly {
+		t.Fatal("Info().HFOnly = false, want true")
 	}
 }

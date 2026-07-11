@@ -99,6 +99,7 @@ type MediaInfo struct {
 	ClockRate       int
 	Channels        int
 	OctetAlign      bool
+	HFOnly          bool
 	DTMFPayloadType int
 	DTMFClockRate   int
 	PTimeMillis     int
