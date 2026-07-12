@@ -392,9 +392,9 @@ func TestSetupMenuProbe(t *testing.T) {
 					}
 					resp, err := session.selectItem(ctx, stkpkg.SelectItemCommand{
 						MenuCommand: stkpkg.MenuCommand{
-							Title: &stkpkg.Text{String: "SIM"},
+							Title: &stkpkg.AlphaIdentifier{Value: "SIM"},
 							Items: []stkpkg.Item{
-								{Identifier: 1, Text: stkpkg.Text{String: "Balance"}},
+								{Identifier: 1, Text: stkpkg.AlphaIdentifier{Value: "Balance"}},
 							},
 						},
 					})
@@ -417,7 +417,7 @@ func TestSetupMenuProbe(t *testing.T) {
 					switch sendNumber {
 					case 2:
 						resp, err := session.displayText(ctx, stkpkg.DisplayTextCommand{
-							Text: stkpkg.Text{String: "Card info"},
+							Text: stkpkg.TextString{Value: "Card info"},
 						})
 						if err != nil {
 							t.Fatalf("displayText() error = %v", err)
@@ -429,7 +429,7 @@ func TestSetupMenuProbe(t *testing.T) {
 						resp, err := session.selectItem(ctx, stkpkg.SelectItemCommand{
 							MenuCommand: stkpkg.MenuCommand{
 								Items: []stkpkg.Item{
-									{Identifier: 1, Text: stkpkg.Text{String: "ESIMLIST"}},
+									{Identifier: 1, Text: stkpkg.AlphaIdentifier{Value: "ESIMLIST"}},
 								},
 							},
 						})
@@ -506,7 +506,7 @@ func TestSetupMenuProbeIgnoresDisplayTextOnly(t *testing.T) {
 						return
 					}
 					resp, err := session.displayText(ctx, stkpkg.DisplayTextCommand{
-						Text: stkpkg.Text{String: "Card info"},
+						Text: stkpkg.TextString{Value: "Card info"},
 					})
 					if err != nil {
 						t.Fatalf("displayText() error = %v", err)
@@ -551,7 +551,7 @@ func TestSetupMenuAvailability(t *testing.T) {
 		{
 			name: "valid menu available",
 			items: []stkpkg.Item{
-				{Identifier: 1, Text: stkpkg.Text{String: "Balance"}},
+				{Identifier: 1, Text: stkpkg.AlphaIdentifier{Value: "Balance"}},
 			},
 			available: true,
 		},
@@ -565,7 +565,7 @@ func TestSetupMenuAvailability(t *testing.T) {
 			session.setProfileICCID("8986000000000000000")
 			resp, err := session.setupMenu(context.Background(), stkpkg.SetupMenuCommand{
 				MenuCommand: stkpkg.MenuCommand{
-					Title: &stkpkg.Text{String: "SIM"},
+					Title: &stkpkg.AlphaIdentifier{Value: "SIM"},
 					Items: tt.items,
 				},
 			})
@@ -605,9 +605,9 @@ func TestProbeSelectItemCachesRootMenuWithoutPopup(t *testing.T) {
 			name: "probed select item becomes cached root menu",
 			cmd: stkpkg.SelectItemCommand{
 				MenuCommand: stkpkg.MenuCommand{
-					Title: &stkpkg.Text{String: "SIM"},
+					Title: &stkpkg.AlphaIdentifier{Value: "SIM"},
 					Items: []stkpkg.Item{
-						{Identifier: 1, Text: stkpkg.Text{String: "Balance"}},
+						{Identifier: 1, Text: stkpkg.AlphaIdentifier{Value: "Balance"}},
 					},
 				},
 			},
@@ -726,10 +726,10 @@ func TestProbeRootMenuSelectionReactivatesAndAnswersSelectItem(t *testing.T) {
 					var err error
 					resp, err = session.selectItem(ctx, stkpkg.SelectItemCommand{
 						MenuCommand: stkpkg.MenuCommand{
-							Title: &stkpkg.Text{String: "9eSIM"},
+							Title: &stkpkg.AlphaIdentifier{Value: "9eSIM"},
 							Items: []stkpkg.Item{
-								{Identifier: 1, Text: stkpkg.Text{String: "ESIMLIST"}},
-								{Identifier: 2, Text: stkpkg.Text{String: "CARDINFO"}},
+								{Identifier: 1, Text: stkpkg.AlphaIdentifier{Value: "ESIMLIST"}},
+								{Identifier: 2, Text: stkpkg.AlphaIdentifier{Value: "CARDINFO"}},
 							},
 						},
 					})
@@ -788,7 +788,7 @@ func TestProbeRootMenuSelectionRequiresSelectItem(t *testing.T) {
 					var err error
 					resp, err = session.selectItem(ctx, stkpkg.SelectItemCommand{
 						MenuCommand: stkpkg.MenuCommand{
-							Items: []stkpkg.Item{{Identifier: 1, Text: stkpkg.Text{String: "ESIMLIST"}}},
+							Items: []stkpkg.Item{{Identifier: 1, Text: stkpkg.AlphaIdentifier{Value: "ESIMLIST"}}},
 						},
 					})
 					if err != nil {
@@ -839,14 +839,14 @@ func TestProbeRootMenuSelectionAutoAcknowledgesDisplayText(t *testing.T) {
 					}
 					var err error
 					displayResp, err = session.displayText(ctx, stkpkg.DisplayTextCommand{
-						Text: stkpkg.Text{String: "Loading"},
+						Text: stkpkg.TextString{Value: "Loading"},
 					})
 					if err != nil {
 						t.Fatalf("displayText() error = %v", err)
 					}
 					selectResp, err = session.selectItem(ctx, stkpkg.SelectItemCommand{
 						MenuCommand: stkpkg.MenuCommand{
-							Items: []stkpkg.Item{{Identifier: 1, Text: stkpkg.Text{String: "ESIMLIST"}}},
+							Items: []stkpkg.Item{{Identifier: 1, Text: stkpkg.AlphaIdentifier{Value: "ESIMLIST"}}},
 						},
 					})
 					if err != nil {
@@ -908,7 +908,7 @@ func TestCommandResponses(t *testing.T) {
 				})
 				resp, err := session.selectItem(context.Background(), stkpkg.SelectItemCommand{
 					MenuCommand: stkpkg.MenuCommand{
-						Items: []stkpkg.Item{{Identifier: 7, Text: stkpkg.Text{String: "Start"}}},
+						Items: []stkpkg.Item{{Identifier: 7, Text: stkpkg.AlphaIdentifier{Value: "Start"}}},
 					},
 				})
 				if err != nil {
@@ -935,7 +935,7 @@ func TestCommandResponses(t *testing.T) {
 					session.confirmCh <- wsClientMessage{Type: wsTypeConfirmResponse, Accepted: true}
 				})
 				resp, err := session.displayText(context.Background(), stkpkg.DisplayTextCommand{
-					Text: stkpkg.Text{String: "Hello"},
+					Text: stkpkg.TextString{Value: "Hello"},
 				})
 				if err != nil {
 					t.Fatalf("displayText() error = %v", err)
@@ -961,7 +961,7 @@ func TestCommandResponses(t *testing.T) {
 					session.inputCh <- wsClientMessage{Type: wsTypeInputResponse, Text: "1234"}
 				})
 				resp, err := session.getInput(context.Background(), stkpkg.GetInputCommand{
-					Text:   stkpkg.Text{String: "PIN"},
+					Text:   stkpkg.TextString{Value: "PIN"},
 					Length: stkpkg.ResponseLength{Min: 1, Max: 8},
 				})
 				if err != nil {
@@ -973,7 +973,7 @@ func TestCommandResponses(t *testing.T) {
 				return resp
 			},
 			want: func(t *testing.T, resp stkpkg.TerminalResponse, _ *fakeWSConn) {
-				if resp.Text == nil || resp.Text.String != "1234" {
+				if resp.Text == nil || resp.Text.String() != "1234" {
 					t.Fatalf("Text = %+v, want 1234", resp.Text)
 				}
 			},
@@ -985,7 +985,7 @@ func TestCommandResponses(t *testing.T) {
 					session.inkeyCh <- wsClientMessage{Type: wsTypeInkeyResponse, Text: "Y"}
 				})
 				resp, err := session.getInkey(context.Background(), stkpkg.GetInkeyCommand{
-					Text:  stkpkg.Text{String: "Continue?"},
+					Text:  stkpkg.TextString{Value: "Continue?"},
 					YesNo: true,
 				})
 				if err != nil {
@@ -997,7 +997,7 @@ func TestCommandResponses(t *testing.T) {
 				return resp
 			},
 			want: func(t *testing.T, resp stkpkg.TerminalResponse, _ *fakeWSConn) {
-				if resp.Text == nil || resp.Text.String != "Y" {
+				if resp.Text == nil || resp.Text.String() != "Y" {
 					t.Fatalf("Text = %+v, want Y", resp.Text)
 				}
 			},
@@ -1012,7 +1012,7 @@ func TestCommandResponses(t *testing.T) {
 					CommandFrame: stkpkg.CommandFrame{
 						Details: stkpkg.CommandDetails{Type: stkpkg.CommandSendUSSD},
 					},
-					Text: &stkpkg.Text{String: "*123#"},
+					Text: &stkpkg.TextString{Value: "*123#"},
 				})
 				if err != nil {
 					t.Fatalf("confirmSimple() error = %v", err)

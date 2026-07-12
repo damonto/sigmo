@@ -38,6 +38,7 @@ export const useModemNetwork = ({
   const airplaneModeEnabled = ref(false)
   const volteManaged = ref(false)
   const volteCanEnable = ref(false)
+  const volteModemRegistered = ref(false)
   const isNetworkLoading = ref(false)
   const isNetworkRegistering = ref(false)
   const isNetworkSettingsLoading = ref(false)
@@ -84,6 +85,7 @@ export const useModemNetwork = ({
   const resetVoLTE = () => {
     volteManaged.value = false
     volteCanEnable.value = false
+    volteModemRegistered.value = false
   }
 
   const openNetworkDialog = async () => {
@@ -170,6 +172,7 @@ export const useModemNetwork = ({
         const volteData = volte.value.data.value
         volteManaged.value = volteData?.managed ?? false
         volteCanEnable.value = volteData?.canEnable ?? false
+        volteModemRegistered.value = volteData?.modemRegistered ?? false
       } else {
         console.error('[useModemNetwork] Failed to load VoLTE:', volte.reason)
         resetVoLTE()
@@ -308,6 +311,7 @@ export const useModemNetwork = ({
     airplaneModeEnabled,
     volteManaged,
     volteCanEnable,
+    volteModemRegistered,
     isNetworkLoading,
     isNetworkRegistering,
     isNetworkSettingsLoading,

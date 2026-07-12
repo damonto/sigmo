@@ -11,6 +11,7 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
 	"github.com/damonto/uicc-go/at"
+	"github.com/damonto/uicc-go/qcom"
 	"github.com/damonto/uicc-go/usim"
 	usimcard "github.com/damonto/uicc-go/usim/card"
 )
@@ -87,12 +88,93 @@ func openDeviceReader(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader
 	return device.USIM(ctx)
 }
 
-func openVoLTEReader(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader, error) {
-	reader, err := openDeviceReader(ctx, modem)
+func openVoLTEReader(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (usimcard.Reader, error) {
+	device, err := mmodem.OpenVoLTEStatusDevice(modem)
 	if err != nil {
 		return nil, err
 	}
-	return reader, nil
+	reader, err := device.USIM(ctx)
+	if err != nil {
+		return nil, err
+	}
+	interfaceName, err := voLTEInterfaceName(modem)
+	if err != nil {
+		return nil, errors.Join(err, reader.Close())
+	}
+	mbim := false
+	if _, ok := reader.(*usim.MBIM); ok {
+		mbim = true
+	}
+	pdn, ok := reader.(imsPDNOpener)
+	if !ok {
+		return nil, errors.Join(errors.New("VoLTE reader does not support IMS PDN"), reader.Close())
+	}
+	return &managedVoLTECard{
+		Reader:   reader,
+		device:   device,
+		modem:    modem,
+		internet: internet,
+		pdn:      pdn,
+		network:  newPDNNetwork(interfaceName, mbim),
+	}, nil
+}
+
+type imsPDNOpener interface {
+	OpenIMSPDN(context.Context, usim.IMSPDNConfig) (*usim.IMSPDNSession, error)
+}
+
+type imsPDNNetwork interface {
+	Replace(context.Context, usim.IMSPDNInfo) error
+	Close() error
+}
+
+type managedVoLTECard struct {
+	usimcard.Reader
+	device   managedVoLTEDevice
+	modem    *mmodem.Modem
+	internet internetRestorer
+	pdn      imsPDNOpener
+	network  imsPDNNetwork
+}
+
+func (c *managedVoLTECard) OpenIMSPDN(ctx context.Context, cfg usim.IMSPDNConfig) (*usim.IMSPDNSession, error) {
+	session, err := c.pdn.OpenIMSPDN(ctx, cfg)
+	if isIMSCallAlreadyPresent(err) && c.device != nil {
+		if resetErr := resetManagedVoLTE(ctx, c.modem, c.device, c.internet); resetErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("reset occupied IMS PDN: %w", resetErr))
+		}
+		session, err = c.pdn.OpenIMSPDN(ctx, cfg)
+		if err != nil {
+			return nil, fmt.Errorf("reopen IMS PDN after modem reset: %w", err)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if c.network != nil {
+		if err := c.network.Replace(ctx, session.Info()); err != nil {
+			return nil, errors.Join(err, session.Close())
+		}
+	}
+	return session, nil
+}
+
+func isIMSCallAlreadyPresent(err error) bool {
+	const callAlreadyPresent int16 = 236
+
+	var startErr *qcom.WDSStartNetworkError
+	return errors.As(err, &startErr) &&
+		startErr.HasVerboseCallEndReason &&
+		startErr.VerboseCallEndReason.Type == qcom.WDSVerboseCallEndReasonTypeInternal &&
+		startErr.VerboseCallEndReason.Reason == callAlreadyPresent
+}
+
+func (c *managedVoLTECard) Close() error {
+	var networkErr error
+	if c.network != nil {
+		networkErr = c.network.Close()
+	}
+	return errors.Join(networkErr, c.Reader.Close())
 }
 
 func openATReader(_ context.Context, port mmodem.ModemPort) (usimcard.Reader, error) {

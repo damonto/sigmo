@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
@@ -16,7 +17,10 @@ import (
 
 	imsgo "github.com/damonto/ims-go"
 	imsvoice "github.com/damonto/ims-go/ims/voice"
+	"github.com/damonto/ims-go/lte"
+	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
 	"github.com/damonto/sigmo/pro/websheet"
 	"github.com/godbus/dbus/v5"
 )
@@ -42,6 +46,25 @@ func TestRetryDelays(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if !slices.Equal(retryDelays, tt.want) {
 				t.Fatalf("retryDelays = %v, want %v", retryDelays, tt.want)
+			}
+		})
+	}
+}
+
+func TestVoLTEDelays(t *testing.T) {
+	tests := []struct {
+		name string
+		got  time.Duration
+		want time.Duration
+	}{
+		{name: "airplane mode reset", got: voLTEResetDelay, want: time.Second},
+		{name: "packet service poll", got: packetServicePollInterval, want: time.Second},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Fatalf("delay = %v, want %v", tt.got, tt.want)
 			}
 		})
 	}
@@ -75,10 +98,13 @@ func TestTerminalInfo(t *testing.T) {
 
 func TestModemClientConfigForIMEI(t *testing.T) {
 	tests := []struct {
-		name string
-		imei string
+		name         string
+		imei         string
+		access       Access
+		profileIndex uint8
 	}{
-		{name: "uses IMEI for terminal and logger", imei: "123456789012345"},
+		{name: "uses IMEI for Wi-Fi Calling", imei: "123456789012345", access: AccessWiFiCalling},
+		{name: "uses selected IMS profile for VoLTE", imei: "123456789012345", access: AccessVoLTE, profileIndex: 2},
 	}
 
 	for _, tt := range tests {
@@ -88,19 +114,534 @@ func TestModemClientConfigForIMEI(t *testing.T) {
 			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 			defer slog.SetDefault(previous)
 
-			cfg := modemClientConfigForIMEI(tt.imei, AccessWiFiCalling)
+			cfg := modemClientConfigForIMEI(tt.imei, tt.access, tt.profileIndex)
 			if cfg.Logger == nil {
 				t.Fatal("Logger = nil, want configured logger")
 			}
 			if cfg.Terminal.ID != tt.imei {
 				t.Fatalf("Terminal.ID = %q, want %q", cfg.Terminal.ID, tt.imei)
 			}
-			if cfg.Access.VoWiFi == nil {
+			if tt.access == AccessWiFiCalling && cfg.Access.VoWiFi == nil {
 				t.Fatal("Access.VoWiFi = nil, want Wi-Fi Calling access")
+			}
+			if tt.access == AccessVoLTE {
+				if cfg.Access.VoLTE == nil {
+					t.Fatal("Access.VoLTE = nil, want VoLTE access")
+				}
+				if cfg.Access.VoLTE.APN != lte.DefaultAPN || cfg.Access.VoLTE.ProfileIndex != tt.profileIndex {
+					t.Fatalf("Access.VoLTE APN/profile = %q/%d, want %q/%d", cfg.Access.VoLTE.APN, cfg.Access.VoLTE.ProfileIndex, lte.DefaultAPN, tt.profileIndex)
+				}
 			}
 			cfg.Logger.Info("config log")
 			if !strings.Contains(logs.String(), "imei="+tt.imei) {
 				t.Fatalf("logs = %s, want IMEI field", logs.String())
+			}
+		})
+	}
+}
+
+type fakeManagedVoLTEDevice struct {
+	status           mdevice.VoLTEStatus
+	statusErr        error
+	testMode         bool
+	testModeErr      error
+	setTestModeErr   error
+	enableFlightErr  error
+	disableFlightErr error
+	cancel           context.CancelFunc
+	calls            []string
+	restoreCtxErr    error
+	packetStatuses   []mdevice.PacketServiceStatus
+	packetErrors     []error
+	profileIndex     uint8
+	profileErr       error
+}
+
+func (d *fakeManagedVoLTEDevice) VoLTEStatus(context.Context) (mdevice.VoLTEStatus, error) {
+	d.calls = append(d.calls, "status")
+	return d.status, d.statusErr
+}
+
+func (d *fakeManagedVoLTEDevice) PacketServiceStatus(context.Context) (mdevice.PacketServiceStatus, error) {
+	d.calls = append(d.calls, "packet-service")
+	status := mdevice.PacketServiceStatus{Registered: true, PSAttached: true, LTE: true}
+	if len(d.packetStatuses) > 0 {
+		status = d.packetStatuses[0]
+		d.packetStatuses = d.packetStatuses[1:]
+	}
+	var err error
+	if len(d.packetErrors) > 0 {
+		err = d.packetErrors[0]
+		d.packetErrors = d.packetErrors[1:]
+	}
+	return status, err
+}
+
+func (d *fakeManagedVoLTEDevice) IMSProfileIndex(context.Context) (uint8, error) {
+	d.calls = append(d.calls, "ims-profile")
+	if d.profileIndex == 0 {
+		d.profileIndex = 2
+	}
+	return d.profileIndex, d.profileErr
+}
+
+func (d *fakeManagedVoLTEDevice) IMSSTestMode(context.Context) (bool, error) {
+	d.calls = append(d.calls, "test-mode")
+	return d.testMode, d.testModeErr
+}
+
+func (d *fakeManagedVoLTEDevice) SetIMSSTestMode(_ context.Context, enabled bool) error {
+	d.calls = append(d.calls, fmt.Sprintf("set-test-mode:%t", enabled))
+	return d.setTestModeErr
+}
+
+func (d *fakeManagedVoLTEDevice) SetAirplaneMode(ctx context.Context, enabled bool) error {
+	d.calls = append(d.calls, fmt.Sprintf("set-airplane-mode:%t", enabled))
+	if enabled {
+		if d.cancel != nil {
+			d.cancel()
+		}
+		return d.enableFlightErr
+	}
+	d.restoreCtxErr = ctx.Err()
+	return d.disableFlightErr
+}
+
+func TestPrepareManagedVoLTE(t *testing.T) {
+	errStatus := errors.New("status rejected")
+	errTestMode := errors.New("test mode rejected")
+	errSetTestMode := errors.New("set test mode rejected")
+	errEnableFlight := errors.New("enable flight rejected")
+	errDisableFlight := errors.New("disable flight rejected")
+	errProfile := errors.New("profile rejected")
+	tests := []struct {
+		name        string
+		device      *fakeManagedVoLTEDevice
+		cancel      bool
+		wantCalls   []string
+		wantProfile uint8
+		wantErr     error
+	}{
+		{
+			name:      "IMSA unavailable",
+			device:    &fakeManagedVoLTEDevice{},
+			wantCalls: []string{"status"},
+			wantErr:   ErrUnavailable,
+		},
+		{
+			name:      "status rejected",
+			device:    &fakeManagedVoLTEDevice{statusErr: errStatus},
+			wantCalls: []string{"status"},
+			wantErr:   errStatus,
+		},
+		{
+			name:        "IMS available",
+			device:      &fakeManagedVoLTEDevice{status: mdevice.VoLTEStatus{Supported: true}},
+			wantCalls:   []string{"status", "ims-profile", "packet-service"},
+			wantProfile: 2,
+		},
+		{
+			name: "waits for packet service before IMS",
+			device: &fakeManagedVoLTEDevice{
+				status: mdevice.VoLTEStatus{Supported: true},
+				packetStatuses: []mdevice.PacketServiceStatus{
+					{},
+					{Registered: true, PSAttached: true, LTE: true},
+				},
+			},
+			wantCalls:   []string{"status", "ims-profile", "packet-service", "packet-service"},
+			wantProfile: 2,
+		},
+		{
+			name:        "test mode already enabled",
+			device:      &fakeManagedVoLTEDevice{status: mdevice.VoLTEStatus{Supported: true, Occupied: true}, testMode: true},
+			wantCalls:   []string{"status", "ims-profile", "test-mode", "packet-service"},
+			wantProfile: 2,
+		},
+		{
+			name:      "test mode query rejected",
+			device:    &fakeManagedVoLTEDevice{status: mdevice.VoLTEStatus{Supported: true, Occupied: true}, testModeErr: errTestMode},
+			wantCalls: []string{"status", "ims-profile", "test-mode"},
+			wantErr:   errTestMode,
+		},
+		{
+			name:      "test mode update rejected",
+			device:    &fakeManagedVoLTEDevice{status: mdevice.VoLTEStatus{Supported: true, Occupied: true}, setTestModeErr: errSetTestMode},
+			wantCalls: []string{"status", "ims-profile", "test-mode", "set-test-mode:true"},
+			wantErr:   errSetTestMode,
+		},
+		{
+			name:      "airplane mode enable rejected",
+			device:    &fakeManagedVoLTEDevice{status: mdevice.VoLTEStatus{Supported: true, Occupied: true}, enableFlightErr: errEnableFlight},
+			wantCalls: []string{"status", "ims-profile", "test-mode", "set-test-mode:true", "set-airplane-mode:true"},
+			wantErr:   errEnableFlight,
+		},
+		{
+			name:        "takes over occupied IMS",
+			device:      &fakeManagedVoLTEDevice{status: mdevice.VoLTEStatus{Supported: true, Occupied: true}},
+			wantCalls:   []string{"status", "ims-profile", "test-mode", "set-test-mode:true", "set-airplane-mode:true", "set-airplane-mode:false", "packet-service"},
+			wantProfile: 2,
+		},
+		{
+			name:      "IMS profile unavailable",
+			device:    &fakeManagedVoLTEDevice{status: mdevice.VoLTEStatus{Supported: true}, profileErr: errProfile},
+			wantCalls: []string{"status", "ims-profile"},
+			wantErr:   errProfile,
+		},
+		{
+			name:      "airplane mode restore rejected",
+			device:    &fakeManagedVoLTEDevice{status: mdevice.VoLTEStatus{Supported: true, Occupied: true}, disableFlightErr: errDisableFlight},
+			wantCalls: []string{"status", "ims-profile", "test-mode", "set-test-mode:true", "set-airplane-mode:true", "set-airplane-mode:false"},
+			wantErr:   errDisableFlight,
+		},
+		{
+			name:      "cancellation still restores online",
+			device:    &fakeManagedVoLTEDevice{status: mdevice.VoLTEStatus{Supported: true, Occupied: true}},
+			cancel:    true,
+			wantCalls: []string{"status", "ims-profile", "test-mode", "set-test-mode:true", "set-airplane-mode:true", "set-airplane-mode:false"},
+			wantErr:   context.Canceled,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previousOpen := openManagedVoLTEDevice
+			previousResetDelay := voLTEResetDelay
+			previousPollInterval := packetServicePollInterval
+			previousPacketWaitTimeout := packetServiceWaitTimeout
+			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+				return tt.device, nil
+			}
+			voLTEResetDelay = time.Nanosecond
+			packetServicePollInterval = time.Nanosecond
+			packetServiceWaitTimeout = time.Hour
+			t.Cleanup(func() {
+				openManagedVoLTEDevice = previousOpen
+				voLTEResetDelay = previousResetDelay
+				packetServicePollInterval = previousPollInterval
+				packetServiceWaitTimeout = previousPacketWaitTimeout
+			})
+
+			ctx := context.Background()
+			if tt.cancel {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				tt.device.cancel = cancel
+				voLTEResetDelay = time.Hour
+			}
+			profileIndex, err := prepareManagedVoLTE(ctx, &mmodem.Modem{}, nil)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("prepareManagedVoLTE() error = %v, want %v", err, tt.wantErr)
+			}
+			if profileIndex != tt.wantProfile {
+				t.Fatalf("prepareManagedVoLTE() profile = %d, want %d", profileIndex, tt.wantProfile)
+			}
+			if !slices.Equal(tt.device.calls, tt.wantCalls) {
+				t.Fatalf("calls = %v, want %v", tt.device.calls, tt.wantCalls)
+			}
+			if tt.cancel && tt.device.restoreCtxErr != nil {
+				t.Fatalf("restore context error = %v, want nil", tt.device.restoreCtxErr)
+			}
+		})
+	}
+}
+
+func TestReleaseManagedVoLTE(t *testing.T) {
+	errTestMode := errors.New("test mode rejected")
+	errSetTestMode := errors.New("set test mode rejected")
+	errEnableFlight := errors.New("enable flight rejected")
+	errDisableFlight := errors.New("disable flight rejected")
+	tests := []struct {
+		name      string
+		device    *fakeManagedVoLTEDevice
+		cancel    bool
+		wantCalls []string
+		wantErr   error
+	}{
+		{
+			name:      "test mode already disabled",
+			device:    &fakeManagedVoLTEDevice{},
+			wantCalls: []string{"test-mode"},
+		},
+		{
+			name:      "MBIM does not require test mode restore",
+			device:    &fakeManagedVoLTEDevice{testModeErr: mdevice.ErrUnsupported},
+			wantCalls: []string{"test-mode"},
+		},
+		{
+			name:      "test mode query rejected",
+			device:    &fakeManagedVoLTEDevice{testModeErr: errTestMode},
+			wantCalls: []string{"test-mode"},
+			wantErr:   errTestMode,
+		},
+		{
+			name:      "test mode restore rejected",
+			device:    &fakeManagedVoLTEDevice{testMode: true, setTestModeErr: errSetTestMode},
+			wantCalls: []string{"test-mode", "set-test-mode:false"},
+			wantErr:   errSetTestMode,
+		},
+		{
+			name:      "airplane mode enable rejected",
+			device:    &fakeManagedVoLTEDevice{testMode: true, enableFlightErr: errEnableFlight},
+			wantCalls: []string{"test-mode", "set-test-mode:false", "set-airplane-mode:true"},
+			wantErr:   errEnableFlight,
+		},
+		{
+			name:      "restores modem IMS",
+			device:    &fakeManagedVoLTEDevice{testMode: true},
+			wantCalls: []string{"test-mode", "set-test-mode:false", "set-airplane-mode:true", "set-airplane-mode:false", "packet-service"},
+		},
+		{
+			name:      "airplane mode restore rejected",
+			device:    &fakeManagedVoLTEDevice{testMode: true, disableFlightErr: errDisableFlight},
+			wantCalls: []string{"test-mode", "set-test-mode:false", "set-airplane-mode:true", "set-airplane-mode:false"},
+			wantErr:   errDisableFlight,
+		},
+		{
+			name:      "cancellation still restores online",
+			device:    &fakeManagedVoLTEDevice{testMode: true},
+			cancel:    true,
+			wantCalls: []string{"test-mode", "set-test-mode:false", "set-airplane-mode:true", "set-airplane-mode:false"},
+			wantErr:   context.Canceled,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previousOpen := openManagedVoLTEDevice
+			previousResetDelay := voLTEResetDelay
+			previousPollInterval := packetServicePollInterval
+			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+				return tt.device, nil
+			}
+			voLTEResetDelay = time.Nanosecond
+			packetServicePollInterval = time.Nanosecond
+			t.Cleanup(func() {
+				openManagedVoLTEDevice = previousOpen
+				voLTEResetDelay = previousResetDelay
+				packetServicePollInterval = previousPollInterval
+			})
+
+			ctx := context.Background()
+			if tt.cancel {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				tt.device.cancel = cancel
+				voLTEResetDelay = time.Hour
+			}
+			err := releaseManagedVoLTE(ctx, &mmodem.Modem{}, nil)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("releaseManagedVoLTE() error = %v, want %v", err, tt.wantErr)
+			}
+			if !slices.Equal(tt.device.calls, tt.wantCalls) {
+				t.Fatalf("calls = %v, want %v", tt.device.calls, tt.wantCalls)
+			}
+			if tt.cancel && tt.device.restoreCtxErr != nil {
+				t.Fatalf("restore context error = %v, want nil", tt.device.restoreCtxErr)
+			}
+		})
+	}
+}
+
+func TestWaitForPacketService(t *testing.T) {
+	errNAS := errors.New("NAS unavailable")
+	tests := []struct {
+		name      string
+		statuses  []mdevice.PacketServiceStatus
+		errors    []error
+		cancel    bool
+		wantCalls int
+		wantErr   error
+	}{
+		{
+			name:      "ready immediately",
+			statuses:  []mdevice.PacketServiceStatus{{Registered: true, PSAttached: true, LTE: true}},
+			wantCalls: 1,
+		},
+		{
+			name: "waits through errors and incomplete states",
+			statuses: []mdevice.PacketServiceStatus{
+				{},
+				{Registered: true, LTE: true},
+				{Registered: true, PSAttached: true, LTE: true},
+			},
+			errors:    []error{errNAS, nil, nil},
+			wantCalls: 3,
+		},
+		{
+			name:      "context cancelled",
+			statuses:  []mdevice.PacketServiceStatus{{}},
+			cancel:    true,
+			wantCalls: 1,
+			wantErr:   context.Canceled,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previousInterval := packetServicePollInterval
+			packetServicePollInterval = time.Nanosecond
+			if tt.cancel {
+				packetServicePollInterval = time.Hour
+			}
+			t.Cleanup(func() {
+				packetServicePollInterval = previousInterval
+			})
+
+			device := &fakeManagedVoLTEDevice{
+				packetStatuses: slices.Clone(tt.statuses),
+				packetErrors:   slices.Clone(tt.errors),
+			}
+			ctx := context.Background()
+			if tt.cancel {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+
+			err := waitForPacketService(ctx, device)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("waitForPacketService() error = %v, want %v", err, tt.wantErr)
+			}
+			if got := len(device.calls); got != tt.wantCalls {
+				t.Fatalf("packet service calls = %d, want %d", got, tt.wantCalls)
+			}
+		})
+	}
+}
+
+type fakeInternetRestorer struct {
+	connection    *pinternet.Connection
+	currentErr    error
+	connectErr    error
+	connectErrors []error
+	cancel        context.CancelFunc
+	calls         []string
+	prefs         pinternet.Preferences
+}
+
+func (r *fakeInternetRestorer) Current(context.Context, *mmodem.Modem) (*pinternet.Connection, error) {
+	r.calls = append(r.calls, "current")
+	return r.connection, r.currentErr
+}
+
+func (r *fakeInternetRestorer) Connect(_ context.Context, _ *mmodem.Modem, prefs pinternet.Preferences) (*pinternet.Connection, error) {
+	r.calls = append(r.calls, "connect")
+	r.prefs = prefs
+	if r.cancel != nil {
+		r.cancel()
+	}
+	if len(r.connectErrors) > 0 {
+		err := r.connectErrors[0]
+		r.connectErrors = r.connectErrors[1:]
+		return r.connection, err
+	}
+	return r.connection, r.connectErr
+}
+
+func TestResetManagedVoLTERestoresInternet(t *testing.T) {
+	errCurrent := errors.New("current rejected")
+	errConnect := errors.New("connect rejected")
+	connected := &pinternet.Connection{
+		Status:       pinternet.StatusConnected,
+		APN:          "ereseller",
+		IPType:       "ipv4v6",
+		APNUsername:  "user",
+		APNPassword:  "pass",
+		APNAuth:      "pap",
+		DefaultRoute: true,
+		ProxyEnabled: true,
+		AlwaysOn:     true,
+	}
+	wantPrefs := pinternet.Preferences{
+		APN:          "ereseller",
+		IPType:       "ipv4v6",
+		APNUsername:  "user",
+		APNPassword:  "pass",
+		APNAuth:      "pap",
+		DefaultRoute: true,
+		ProxyEnabled: true,
+		AlwaysOn:     true,
+	}
+	tests := []struct {
+		name          string
+		internet      *fakeInternetRestorer
+		wantCalls     []string
+		wantDevice    []string
+		wantPrefs     pinternet.Preferences
+		wantErr       error
+		cancelRestore bool
+	}{
+		{
+			name:       "reconnects internet after packet service returns",
+			internet:   &fakeInternetRestorer{connection: connected, connectErrors: []error{errConnect, nil}},
+			wantCalls:  []string{"current", "connect", "connect"},
+			wantDevice: []string{"set-airplane-mode:true", "set-airplane-mode:false", "packet-service"},
+			wantPrefs:  wantPrefs,
+		},
+		{
+			name:       "leaves disconnected internet alone",
+			internet:   &fakeInternetRestorer{connection: &pinternet.Connection{Status: pinternet.StatusDisconnected}},
+			wantCalls:  []string{"current"},
+			wantDevice: []string{"set-airplane-mode:true", "set-airplane-mode:false", "packet-service"},
+		},
+		{
+			name:      "returns current connection error before airplane mode",
+			internet:  &fakeInternetRestorer{currentErr: errCurrent},
+			wantCalls: []string{"current"},
+			wantErr:   errCurrent,
+		},
+		{
+			name:          "returns reconnect error after modem recovery",
+			internet:      &fakeInternetRestorer{connection: connected, connectErr: errConnect},
+			wantCalls:     []string{"current", "connect"},
+			wantDevice:    []string{"set-airplane-mode:true", "set-airplane-mode:false", "packet-service"},
+			wantPrefs:     wantPrefs,
+			wantErr:       errConnect,
+			cancelRestore: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previousResetDelay := voLTEResetDelay
+			previousPollInterval := packetServicePollInterval
+			previousRestoreInterval := internetRestoreInterval
+			previousRestoreTimeout := internetRestoreTimeout
+			voLTEResetDelay = time.Nanosecond
+			packetServicePollInterval = time.Nanosecond
+			internetRestoreInterval = time.Nanosecond
+			internetRestoreTimeout = time.Hour
+			if tt.cancelRestore {
+				internetRestoreInterval = time.Hour
+				internetRestoreTimeout = time.Millisecond
+			}
+			t.Cleanup(func() {
+				voLTEResetDelay = previousResetDelay
+				packetServicePollInterval = previousPollInterval
+				internetRestoreInterval = previousRestoreInterval
+				internetRestoreTimeout = previousRestoreTimeout
+			})
+
+			device := &fakeManagedVoLTEDevice{}
+			ctx := context.Background()
+			if tt.cancelRestore {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				tt.internet.cancel = cancel
+			}
+			err := resetManagedVoLTE(ctx, &mmodem.Modem{}, device, tt.internet)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("resetManagedVoLTE() error = %v, want %v", err, tt.wantErr)
+			}
+			if !slices.Equal(tt.internet.calls, tt.wantCalls) {
+				t.Fatalf("internet calls = %v, want %v", tt.internet.calls, tt.wantCalls)
+			}
+			if !slices.Equal(device.calls, tt.wantDevice) {
+				t.Fatalf("device calls = %v, want %v", device.calls, tt.wantDevice)
+			}
+			if tt.internet.prefs != tt.wantPrefs {
+				t.Fatalf("internet preferences = %+v, want %+v", tt.internet.prefs, tt.wantPrefs)
 			}
 		})
 	}

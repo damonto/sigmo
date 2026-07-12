@@ -16,7 +16,7 @@ import (
 
 const (
 	defaultRouteMetric   = 10
-	secondaryRouteMetric = 9000
+	secondaryRouteMetric = 1000
 )
 
 type defaultRouteChange struct {

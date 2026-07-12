@@ -22,6 +22,8 @@ type deviceControl interface {
 	PowerCycleSIM(ctx context.Context) error
 	ActivateProvisioningIfSIMMissing(ctx context.Context) error
 	SIMState(ctx context.Context, target mdevice.Target) (mdevice.SIMState, error)
+	MSISDN(ctx context.Context) (string, error)
+	UpdateMSISDN(ctx context.Context, number string) error
 }
 
 type deviceControlOpener func(mdevice.Config) (deviceControl, error)
@@ -35,11 +37,34 @@ func OpenDevice(m *Modem) (*mdevice.Device, error) {
 }
 
 func OpenVoLTEStatusDevice(m *Modem) (*mdevice.Device, error) {
-	cfg, err := qmiDeviceConfig(m)
+	cfg, err := voLTEDeviceConfig(m)
 	if err != nil {
 		return nil, err
 	}
 	return mdevice.Open(cfg)
+}
+
+func voLTEDeviceConfig(m *Modem) (mdevice.Config, error) {
+	if m == nil {
+		return mdevice.Config{}, errModemRequired
+	}
+	slot, err := deviceSlot(m)
+	if err != nil {
+		return mdevice.Config{}, err
+	}
+	port, err := selectQMIDevicePort(m)
+	if errors.Is(err, mdevice.ErrUnsupported) {
+		port, err = selectDevicePort(m)
+	}
+	if err != nil {
+		return mdevice.Config{}, err
+	}
+	return mdevice.Config{
+		PortType: port.portType,
+		Device:   port.device,
+		Slot:     slot,
+		IMEI:     m.EquipmentIdentifier,
+	}, nil
 }
 
 func openQMIDeviceForTarget(m *Modem, target SIMTarget, open deviceControlOpener) (deviceControl, error) {

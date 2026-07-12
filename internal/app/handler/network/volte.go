@@ -29,8 +29,9 @@ func (n *network) VoLTE(ctx context.Context, modem *mmodem.Modem) (*VoLTERespons
 		return nil, err
 	}
 	return &VoLTEResponse{
-		Managed:   managed,
-		CanEnable: status.CanEnable,
+		Managed:         managed,
+		CanEnable:       status.Supported,
+		ModemRegistered: status.Occupied,
 	}, nil
 }
 
@@ -40,7 +41,7 @@ func (n *network) SetVoLTE(ctx context.Context, modem *mmodem.Modem, req SetVoLT
 		if err != nil {
 			return err
 		}
-		if !status.CanEnable {
+		if !status.Supported {
 			return errVoLTEUnavailable
 		}
 	}

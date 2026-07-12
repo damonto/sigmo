@@ -54,6 +54,12 @@ type adapter interface {
 	USIMWithCAT(ctx context.Context, profile CATProfile) (usimcard.Reader, error)
 	SIMState(ctx context.Context, target Target) (SIMState, error)
 	VoLTEStatus(ctx context.Context) (VoLTEStatus, error)
+	PacketServiceStatus(ctx context.Context) (PacketServiceStatus, error)
+	IMSProfileIndex(ctx context.Context) (uint8, error)
+	IMSSTestMode(ctx context.Context) (bool, error)
+	SetIMSSTestMode(ctx context.Context, enabled bool) error
+	MSISDN(ctx context.Context) (string, error)
+	UpdateMSISDN(ctx context.Context, number string) error
 }
 
 type CATProfile struct {
@@ -74,8 +80,13 @@ type SIMState struct {
 
 type VoLTEStatus struct {
 	Supported bool
-	Known     bool
-	CanEnable bool
+	Occupied  bool
+}
+
+type PacketServiceStatus struct {
+	Registered bool
+	PSAttached bool
+	LTE        bool
 }
 
 func Open(cfg Config) (*Device, error) {
@@ -129,6 +140,30 @@ func (d *Device) SIMState(ctx context.Context, target Target) (SIMState, error) 
 
 func (d *Device) VoLTEStatus(ctx context.Context) (VoLTEStatus, error) {
 	return d.adapter.VoLTEStatus(ctx)
+}
+
+func (d *Device) PacketServiceStatus(ctx context.Context) (PacketServiceStatus, error) {
+	return d.adapter.PacketServiceStatus(ctx)
+}
+
+func (d *Device) IMSProfileIndex(ctx context.Context) (uint8, error) {
+	return d.adapter.IMSProfileIndex(ctx)
+}
+
+func (d *Device) IMSSTestMode(ctx context.Context) (bool, error) {
+	return d.adapter.IMSSTestMode(ctx)
+}
+
+func (d *Device) SetIMSSTestMode(ctx context.Context, enabled bool) error {
+	return d.adapter.SetIMSSTestMode(ctx, enabled)
+}
+
+func (d *Device) MSISDN(ctx context.Context) (string, error) {
+	return d.adapter.MSISDN(ctx)
+}
+
+func (d *Device) UpdateMSISDN(ctx context.Context, number string) error {
+	return d.adapter.UpdateMSISDN(ctx, number)
 }
 
 func targetSIMSlot(primarySlot uint8, target Target) (uint8, error) {

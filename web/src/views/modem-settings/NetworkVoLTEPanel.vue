@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch'
 const props = defineProps<{
   managed: boolean
   canEnable: boolean
+  modemRegistered: boolean
   isLoading: boolean
   isUpdating: boolean
   canUpdate: boolean
@@ -23,6 +24,7 @@ const { t } = useI18n()
 
 const description = computed(() => {
   if (props.managed) return t('modemDetail.settings.networkVoLTEManagedDescription')
+  if (props.modemRegistered) return t('modemDetail.settings.networkVoLTEModemRegisteredDescription')
   if (!props.canEnable) return t('modemDetail.settings.networkVoLTEUnavailable')
   return t('modemDetail.settings.networkVoLTEDescription')
 })
@@ -56,6 +58,9 @@ const description = computed(() => {
           />
         </div>
       </div>
+      <p class="border-t pt-3 text-xs leading-5 text-muted-foreground">
+        {{ t('modemDetail.settings.networkVoLTEInternetIPTypeNotice') }}
+      </p>
     </CardContent>
   </Card>
 </template>

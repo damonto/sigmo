@@ -94,6 +94,7 @@ const mountSection = () =>
       airplaneModeEnabled: false,
       volteManaged: false,
       volteCanEnable: true,
+      volteModemRegistered: false,
       isSettingsLoading: false,
       isModeUpdating: false,
       isBandUpdating: false,
@@ -115,6 +116,20 @@ describe('NetworkSettingsContent', () => {
 
     expect(wrapper.text()).toContain('4G')
     expect(wrapper.text()).toContain('LTE B41')
+  })
+
+  it('renders the VoLTE Internet IP family notice', () => {
+    const wrapper = mountSection()
+
+    expect(wrapper.text()).toContain('modemDetail.settings.networkVoLTEInternetIPTypeNotice')
+  })
+
+  it('renders modem-managed VoLTE only when IMSA is registered', async () => {
+    const wrapper = mountSection()
+
+    await wrapper.setProps({ volteModemRegistered: true })
+
+    expect(wrapper.text()).toContain('modemDetail.settings.networkVoLTEModemRegisteredDescription')
   })
 
   it('emits band toggle events', async () => {

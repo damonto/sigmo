@@ -1,6 +1,7 @@
 package device
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"slices"
@@ -12,6 +13,53 @@ import (
 	"github.com/damonto/uicc-go/qcom"
 	"github.com/damonto/uicc-go/qcom/uim"
 )
+
+func TestDeviceMSISDNQMI(t *testing.T) {
+	readErr := errors.New("DMS unavailable")
+	tests := []struct {
+		name    string
+		reader  *fakeQMIUIMReader
+		want    string
+		wantErr error
+	}{
+		{name: "voice number", reader: &fakeQMIUIMReader{msisdn: uim.DMSGetMSISDNResponse{VoiceNumber: " +15551234567 "}}, want: "+15551234567"},
+		{name: "empty number", reader: &fakeQMIUIMReader{}},
+		{name: "query error", reader: &fakeQMIUIMReader{msisdnErr: readErr}, wantErr: readErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			device := qmiDevice{slot: 1, openUIM: qmiUIMOpener(t, 1, tt.reader, nil)}
+			got, err := device.MSISDN(context.Background())
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("MSISDN() error = %v, want %v", err, tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("MSISDN() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("MSISDN() = %q, want %q", got, tt.want)
+			}
+			if !slices.Contains(tt.reader.calls, "close") {
+				t.Fatal("reader was not closed")
+			}
+		})
+	}
+}
+
+func TestDeviceUpdateMSISDNQMI(t *testing.T) {
+	reader := &fakeQMIUIMReader{fileAttributes: uim.FileAttributes{RecordSize: 32}}
+	device := qmiDevice{slot: 1, openUIM: qmiUIMOpener(t, 1, reader, nil)}
+	if err := device.UpdateMSISDN(context.Background(), "+12345"); err != nil {
+		t.Fatalf("UpdateMSISDN() error = %v", err)
+	}
+	if reader.writeRecord.Record != 1 || reader.writeRecord.File.Session != uim.SessionPrimaryGWProvisioning || !bytes.Equal(reader.writeRecord.File.Path, qmiMSISDNFile.Path) {
+		t.Fatalf("WriteRecord request = %+v", reader.writeRecord)
+	}
+	if len(reader.writeRecord.Data) != 32 || reader.writeRecord.Data[19] != 0x91 {
+		t.Fatalf("MSISDN record = % X", reader.writeRecord.Data)
+	}
+}
 
 func TestDeviceAirplaneModeQMI(t *testing.T) {
 	tests := []struct {
@@ -59,7 +107,7 @@ func TestDeviceVoLTEStatusQMI(t *testing.T) {
 				RegistrationKnown: true,
 				Registration:      qcom.IMSRegistrationStatusNotRegistered,
 			},
-			want: VoLTEStatus{Supported: true, Known: true, CanEnable: true},
+			want: VoLTEStatus{Supported: true},
 		},
 		{
 			name: "ims registered without volte",
@@ -67,7 +115,7 @@ func TestDeviceVoLTEStatusQMI(t *testing.T) {
 				RegistrationKnown: true,
 				Registration:      qcom.IMSRegistrationStatusRegistered,
 			},
-			want: VoLTEStatus{Supported: true, Known: true, CanEnable: true},
+			want: VoLTEStatus{Supported: true, Occupied: true},
 		},
 		{
 			name: "volte registered",
@@ -79,7 +127,7 @@ func TestDeviceVoLTEStatusQMI(t *testing.T) {
 				VoIPRATKnown:      true,
 				VoIPRAT:           qcom.IMSServiceRATWWAN,
 			},
-			want: VoLTEStatus{Supported: true, Known: true},
+			want: VoLTEStatus{Supported: true, Occupied: true},
 		},
 		{
 			name: "registration unknown",
@@ -137,6 +185,206 @@ func TestDeviceVoLTEStatusQMI(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("VoLTEStatus() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDevicePacketServiceStatusQMI(t *testing.T) {
+	errNAS := errors.New("NAS rejected")
+	tests := []struct {
+		name    string
+		serving qcom.NASServingSystem
+		err     error
+		want    PacketServiceStatus
+		wantErr error
+	}{
+		{
+			name: "registered attached LTE",
+			serving: qcom.NASServingSystem{
+				RegistrationState: qcom.NASRegistrationRegistered,
+				PSAttachState:     qcom.NASAttachAttached,
+				RadioInterfaces:   []qcom.NASRadioInterface{qcom.NASRadioInterfaceUMTS, qcom.NASRadioInterfaceLTE},
+			},
+			want: PacketServiceStatus{Registered: true, PSAttached: true, LTE: true},
+		},
+		{
+			name: "registered detached LTE",
+			serving: qcom.NASServingSystem{
+				RegistrationState: qcom.NASRegistrationRegistered,
+				PSAttachState:     qcom.NASAttachDetached,
+				RadioInterfaces:   []qcom.NASRadioInterface{qcom.NASRadioInterfaceLTE},
+			},
+			want: PacketServiceStatus{Registered: true, LTE: true},
+		},
+		{name: "NAS rejected", err: errNAS, wantErr: errNAS},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &fakeQMIUIMReader{nasServingSystem: tt.serving, nasServingSystemErr: tt.err}
+			device := qmiDevice{slot: 1, openUIM: qmiUIMOpener(t, 1, reader, nil)}
+
+			got, err := device.PacketServiceStatus(context.Background())
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("PacketServiceStatus() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("PacketServiceStatus() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("PacketServiceStatus() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeviceIMSProfileIndexQMI(t *testing.T) {
+	errSettings := errors.New("profile settings rejected")
+	tests := []struct {
+		name            string
+		profiles        []qcom.WDSProfile
+		profileSettings map[uint8]qcom.WDSProfileSettings
+		settingsErr     error
+		want            uint8
+		wantErr         bool
+	}{
+		{
+			name: "selects PCO IMS profile",
+			profiles: []qcom.WDSProfile{
+				{ID: qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: 1}},
+				{ID: qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: 2}},
+			},
+			profileSettings: map[uint8]qcom.WDSProfileSettings{
+				1: {APNKnown: true, APN: "internet", IMCNKnown: true, IMCN: true, PCSCFUsingPCOKnown: true, PCSCFUsingPCO: true},
+				2: {APNKnown: true, APN: "ims", IMCNKnown: true, IMCN: true, PCSCFUsingPCOKnown: true, PCSCFUsingPCO: true},
+			},
+			want: 2,
+		},
+		{
+			name:     "selects DHCP IMS profile",
+			profiles: []qcom.WDSProfile{{ID: qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: 3}}},
+			profileSettings: map[uint8]qcom.WDSProfileSettings{
+				3: {APNKnown: true, APN: " IMS ", IMCNKnown: true, IMCN: true, PCSCFUsingDHCPKnown: true, PCSCFUsingDHCP: true},
+			},
+			want: 3,
+		},
+		{
+			name:     "rejects profile without IMCN",
+			profiles: []qcom.WDSProfile{{ID: qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: 2}}},
+			profileSettings: map[uint8]qcom.WDSProfileSettings{
+				2: {APNKnown: true, APN: "ims", PCSCFUsingPCOKnown: true, PCSCFUsingPCO: true},
+			},
+			wantErr: true,
+		},
+		{
+			name:        "profile settings rejected",
+			profiles:    []qcom.WDSProfile{{ID: qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: 2}}},
+			settingsErr: errSettings,
+			wantErr:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &fakeQMIUIMReader{
+				wdsProfiles:        tt.profiles,
+				wdsProfileSettings: tt.profileSettings,
+				wdsSettingsErr:     tt.settingsErr,
+			}
+			device := qmiDevice{slot: 1, openUIM: qmiUIMOpener(t, 1, reader, nil)}
+
+			got, err := device.IMSProfileIndex(context.Background())
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("IMSProfileIndex() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("IMSProfileIndex() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("IMSProfileIndex() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeviceIMSSTestModeQMI(t *testing.T) {
+	errTestMode := errors.New("test mode rejected")
+	tests := []struct {
+		name    string
+		enabled bool
+		err     error
+		wantErr error
+	}{
+		{name: "disabled"},
+		{name: "enabled", enabled: true},
+		{name: "query rejected", err: errTestMode, wantErr: errTestMode},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &fakeQMIUIMReader{imssTestMode: tt.enabled, imssTestModeErr: tt.err}
+			device := qmiDevice{slot: 1, openUIM: qmiUIMOpener(t, 1, reader, nil)}
+
+			got, err := device.IMSSTestMode(context.Background())
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("IMSSTestMode() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("IMSSTestMode() error = %v", err)
+			}
+			if got != tt.enabled {
+				t.Fatalf("IMSSTestMode() = %v, want %v", got, tt.enabled)
+			}
+			if !slices.Equal(reader.calls, []string{"imss-test-mode", "close"}) {
+				t.Fatalf("calls = %v, want query and close", reader.calls)
+			}
+		})
+	}
+}
+
+func TestDeviceSetIMSSTestModeQMI(t *testing.T) {
+	errTestMode := errors.New("set test mode rejected")
+	tests := []struct {
+		name    string
+		enabled bool
+		err     error
+		wantErr error
+	}{
+		{name: "disable"},
+		{name: "enable", enabled: true},
+		{name: "set rejected", enabled: true, err: errTestMode, wantErr: errTestMode},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := &fakeQMIUIMReader{setIMSSTestModeErr: tt.err}
+			device := qmiDevice{slot: 1, openUIM: qmiUIMOpener(t, 1, reader, nil)}
+
+			err := device.SetIMSSTestMode(context.Background(), tt.enabled)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("SetIMSSTestMode() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SetIMSSTestMode() error = %v", err)
+			}
+			if reader.setIMSSTestMode != tt.enabled {
+				t.Fatalf("SetIMSSTestMode() enabled = %v, want %v", reader.setIMSSTestMode, tt.enabled)
+			}
+			if !slices.Equal(reader.calls, []string{"set-imss-test-mode", "close"}) {
+				t.Fatalf("calls = %v, want set and close", reader.calls)
 			}
 		})
 	}
@@ -531,20 +779,52 @@ func TestDecodeQMIICCID(t *testing.T) {
 }
 
 type fakeQMIUIMReader struct {
-	calls           []string
-	atr             []byte
-	atrErr          error
-	imsaStatus      qcom.IMSAStatus
-	imsaStatusErr   error
-	powerOffErr     error
-	afterPowerOff   func()
-	powerOnErr      error
-	slotStatus      uim.SlotStatus
-	slotStatusErr   error
-	cardStatus      uim.CardStatus
-	cardStatusErr   error
-	changeReq       uim.ChangeProvisioningSessionRequest
-	provisioningErr error
+	calls               []string
+	msisdn              uim.DMSGetMSISDNResponse
+	msisdnErr           error
+	fileAttributes      uim.FileAttributes
+	fileAttributesErr   error
+	writeRecord         uim.RecordWrite
+	writeRecordErr      error
+	atr                 []byte
+	atrErr              error
+	imsaStatus          qcom.IMSAStatus
+	imsaStatusErr       error
+	nasServingSystem    qcom.NASServingSystem
+	nasServingSystemErr error
+	wdsProfiles         []qcom.WDSProfile
+	wdsProfilesErr      error
+	wdsProfileSettings  map[uint8]qcom.WDSProfileSettings
+	wdsSettingsErr      error
+	imssTestMode        bool
+	imssTestModeErr     error
+	setIMSSTestMode     bool
+	setIMSSTestModeErr  error
+	powerOffErr         error
+	afterPowerOff       func()
+	powerOnErr          error
+	slotStatus          uim.SlotStatus
+	slotStatusErr       error
+	cardStatus          uim.CardStatus
+	cardStatusErr       error
+	changeReq           uim.ChangeProvisioningSessionRequest
+	provisioningErr     error
+}
+
+func (r *fakeQMIUIMReader) MSISDN(context.Context) (uim.DMSGetMSISDNResponse, error) {
+	r.calls = append(r.calls, "msisdn")
+	return r.msisdn, r.msisdnErr
+}
+
+func (r *fakeQMIUIMReader) FileAttributes(context.Context, uim.File) (uim.FileAttributes, error) {
+	r.calls = append(r.calls, "file-attributes")
+	return r.fileAttributes, r.fileAttributesErr
+}
+
+func (r *fakeQMIUIMReader) WriteRecord(_ context.Context, req uim.RecordWrite) error {
+	r.calls = append(r.calls, "write-record")
+	r.writeRecord = req
+	return r.writeRecordErr
 }
 
 func (r *fakeQMIUIMReader) ATR(context.Context) ([]byte, error) {
@@ -555,6 +835,35 @@ func (r *fakeQMIUIMReader) ATR(context.Context) ([]byte, error) {
 func (r *fakeQMIUIMReader) IMSAStatus(context.Context) (qcom.IMSAStatus, error) {
 	r.calls = append(r.calls, "imsa-status")
 	return r.imsaStatus, r.imsaStatusErr
+}
+
+func (r *fakeQMIUIMReader) NASServingSystem(context.Context) (qcom.NASServingSystem, error) {
+	r.calls = append(r.calls, "nas-serving-system")
+	return r.nasServingSystem, r.nasServingSystemErr
+}
+
+func (r *fakeQMIUIMReader) WDSProfiles(context.Context, qcom.WDSProfileType) ([]qcom.WDSProfile, error) {
+	r.calls = append(r.calls, "wds-profiles")
+	return slices.Clone(r.wdsProfiles), r.wdsProfilesErr
+}
+
+func (r *fakeQMIUIMReader) WDSProfileSettings(_ context.Context, id qcom.WDSProfileID) (qcom.WDSProfileSettings, error) {
+	r.calls = append(r.calls, fmtCall("wds-profile", id.Index))
+	if r.wdsSettingsErr != nil {
+		return qcom.WDSProfileSettings{}, r.wdsSettingsErr
+	}
+	return r.wdsProfileSettings[id.Index], nil
+}
+
+func (r *fakeQMIUIMReader) IMSSTestMode(context.Context) (bool, error) {
+	r.calls = append(r.calls, "imss-test-mode")
+	return r.imssTestMode, r.imssTestModeErr
+}
+
+func (r *fakeQMIUIMReader) SetIMSSTestMode(_ context.Context, enabled bool) error {
+	r.calls = append(r.calls, "set-imss-test-mode")
+	r.setIMSSTestMode = enabled
+	return r.setIMSSTestModeErr
 }
 
 func (r *fakeQMIUIMReader) PowerOffSIM(_ context.Context, slot uint8) error {

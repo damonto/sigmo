@@ -555,8 +555,12 @@ const en = {
       networkVoLTETitle: 'VoLTE',
       networkVoLTELabel: 'VoLTE',
       networkVoLTEDescription: 'Handle calls, messages, and USSD over LTE.',
-      networkVoLTEManagedDescription: 'VoLTE is managed internally for this modem.',
+      networkVoLTEManagedDescription: 'VoLTE is managed by Sigmo.',
+      networkVoLTEModemRegisteredDescription:
+        'The modem IMS is registered and managing VoLTE internally.',
       networkVoLTEUnavailable: 'VoLTE cannot be enabled on this modem.',
+      networkVoLTEInternetIPTypeNotice:
+        'When managed VoLTE is enabled, Internet must use the same IP family as IMS, and the APN must support that family; otherwise, the data connection will fail.',
       networkVoLTEEnabledSuccess: 'VoLTE enabled.',
       networkVoLTEDisabledSuccess: 'VoLTE disabled.',
       networkVoLTEUpdateFailed: 'VoLTE update failed.',

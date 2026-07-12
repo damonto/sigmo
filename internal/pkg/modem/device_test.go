@@ -196,3 +196,50 @@ func TestQMIDeviceConfigPrefersQMI(t *testing.T) {
 		})
 	}
 }
+
+func TestVoLTEDeviceConfigPrefersQMIFallsBackToMBIM(t *testing.T) {
+	tests := []struct {
+		name       string
+		modem      *Modem
+		wantDevice string
+		wantType   mdevice.PortType
+		wantErr    error
+	}{
+		{name: "nil modem", wantErr: errModemRequired},
+		{
+			name: "prefers QMI for IMS takeover",
+			modem: &Modem{PrimaryPort: "/dev/cdc-wdm0", Ports: []ModemPort{
+				{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+				{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+			}},
+			wantDevice: "/dev/cdc-wdm1",
+			wantType:   mdevice.PortTypeQMI,
+		},
+		{
+			name: "uses MBIM when QMI is unavailable",
+			modem: &Modem{PrimaryPort: "/dev/cdc-wdm0", Ports: []ModemPort{
+				{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+			}},
+			wantDevice: "/dev/cdc-wdm0",
+			wantType:   mdevice.PortTypeMBIM,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := voLTEDeviceConfig(tt.modem)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("voLTEDeviceConfig() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("voLTEDeviceConfig() error = %v", err)
+			}
+			if cfg.PortType != tt.wantType || cfg.Device != tt.wantDevice {
+				t.Fatalf("voLTEDeviceConfig() = (%d, %q), want (%d, %q)", cfg.PortType, cfg.Device, tt.wantType, tt.wantDevice)
+			}
+		})
+	}
+}

@@ -172,9 +172,6 @@ func (m *Registry) createModem(ctx context.Context, objectPath dbus.ObjectPath, 
 			slog.Warn("read primary SIM", "path", primarySIMPath, "imei", modem.EquipmentIdentifier, "error", err)
 		}
 	}
-	if numbers := variantStrings(data, "OwnNumbers"); len(numbers) > 0 {
-		modem.Number = numbers[0]
-	}
 	for _, port := range variantAnySlices(data, "Ports") {
 		if len(port) < 2 {
 			continue
@@ -191,6 +188,14 @@ func (m *Registry) createModem(ctx context.Context, objectPath dbus.ObjectPath, 
 		})
 	}
 	modem.SimSlots = simSlotPaths(data, primarySIMPath)
+	device, err := openDeviceForModem(&modem, m.deviceOpener())
+	if err != nil {
+		slog.Debug("open device for MSISDN", "imei", modem.EquipmentIdentifier, "error", err)
+	} else if number, err := device.MSISDN(ctx); err != nil {
+		slog.Debug("read device MSISDN", "imei", modem.EquipmentIdentifier, "error", err)
+	} else {
+		modem.Number = strings.TrimSpace(number)
+	}
 	if modem.Sim != nil {
 		atr, err := readDeviceATR(ctx, &modem, nil)
 		if err != nil {

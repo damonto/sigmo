@@ -21,6 +21,7 @@ const props = defineProps<{
   airplaneModeEnabled: boolean
   volteManaged: boolean
   volteCanEnable: boolean
+  volteModemRegistered: boolean
   isSettingsLoading: boolean
   isModeUpdating: boolean
   isBandUpdating: boolean
@@ -69,6 +70,7 @@ const handleToggleBand = (value: number, checked: boolean) => {
     <NetworkVoLTEPanel
       :managed="props.volteManaged"
       :can-enable="props.volteCanEnable"
+      :modem-registered="props.volteModemRegistered"
       :is-loading="props.isSettingsLoading || props.airplaneModeEnabled"
       :is-updating="props.isVolteUpdating"
       :can-update="props.canUpdateVolte"

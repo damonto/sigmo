@@ -234,7 +234,9 @@ func setRouteMetric(routes []netlink.DefaultRoute, metric int) {
 }
 
 func prefixFromIPConfig(cfg mmodem.BearerIPConfig, family int) (netip.Prefix, bool, error) {
-	if !cfg.StaticAddress() {
+	// Some QMI firmware reports DHCP while still returning the complete
+	// address, prefix, and gateway. In that case no DHCP client is needed.
+	if !cfg.ConfiguredAddress() {
 		return netip.Prefix{}, false, nil
 	}
 	addr, err := netip.ParseAddr(cfg.Address)

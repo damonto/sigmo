@@ -5,11 +5,18 @@ package ims
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
+	"net/netip"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/uicc-go/qcom"
+	"github.com/damonto/uicc-go/usim"
 	usimcard "github.com/damonto/uicc-go/usim/card"
 )
 
@@ -150,6 +157,605 @@ func TestOpenReaderReturnsJoinedReaderErrors(t *testing.T) {
 			t.Fatalf("error %q does not contain %q", err, want)
 		}
 	}
+}
+
+func TestVoLTEInterfaceName(t *testing.T) {
+	tests := []struct {
+		name    string
+		modem   *mmodem.Modem
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "strips device directory from modem network port",
+			modem: &mmodem.Modem{Ports: []mmodem.ModemPort{
+				{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm2"},
+				{PortType: mmodem.ModemPortTypeNet, Device: "/dev/wws27u4i4"},
+			}},
+			want: "wws27u4i4",
+		},
+		{
+			name:  "keeps bare network interface name",
+			modem: &mmodem.Modem{Ports: []mmodem.ModemPort{{PortType: mmodem.ModemPortTypeNet, Device: "wws27u4i4"}}},
+			want:  "wws27u4i4",
+		},
+		{name: "missing network port", modem: &mmodem.Modem{}, wantErr: true},
+		{name: "nil modem", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := voLTEInterfaceName(tt.modem)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("voLTEInterfaceName() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("voLTEInterfaceName() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("voLTEInterfaceName() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigureIMSPDNNetwork(t *testing.T) {
+	tests := []struct {
+		name               string
+		dedicatedInterface bool
+		wantDisable        bool
+	}{
+		{name: "dedicated interface disables autoconfiguration", dedicatedInterface: true, wantDisable: true},
+		{name: "shared interface preserves autoconfiguration"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls []string
+			links := fakePDNLinks{
+				disableIPv6Autoconfiguration: func(name string) error {
+					calls = append(calls, "disable-ipv6-autoconf:"+name)
+					return nil
+				},
+				setUp: func(name string) error {
+					calls = append(calls, "up:"+name)
+					return nil
+				},
+				addAddress: func(name string, prefix netip.Prefix) error {
+					calls = append(calls, fmt.Sprintf("add-address:%s:%s", name, prefix))
+					return nil
+				},
+				deleteAddress: func(name string, prefix netip.Prefix) error {
+					calls = append(calls, fmt.Sprintf("delete-address:%s:%s", name, prefix))
+					return nil
+				},
+				addHostRoute: func(name string, address netip.Addr) error {
+					calls = append(calls, fmt.Sprintf("add-route:%s:%s", name, address))
+					return nil
+				},
+				deleteHostRoute: func(name string, address netip.Addr) error {
+					calls = append(calls, fmt.Sprintf("delete-route:%s:%s", name, address))
+					return nil
+				},
+			}
+			info := usim.IMSPDNInfo{
+				LocalIPv4: net.ParseIP("10.0.0.2"),
+				LocalIPv6: net.ParseIP("2001:db8::2"),
+				PCSCFIPs:  []net.IP{net.ParseIP("10.0.0.10"), net.ParseIP("2001:db8::10")},
+			}
+
+			network := &pdnNetwork{parent: "wwan0", mbim: tt.dedicatedInterface, links: links}
+			state, err := network.configure(context.Background(), "wwan0", info)
+			if err != nil {
+				t.Fatalf("configure() error = %v", err)
+			}
+			if _, err := network.cleanup("wwan0", state); err != nil {
+				t.Fatalf("cleanup() error = %v", err)
+			}
+			want := []string{
+				"up:wwan0",
+				"add-address:wwan0:10.0.0.2/32",
+				"add-address:wwan0:2001:db8::2/128",
+				"add-route:wwan0:10.0.0.10",
+				"add-route:wwan0:2001:db8::10",
+				"delete-route:wwan0:10.0.0.10",
+				"delete-route:wwan0:2001:db8::10",
+				"delete-address:wwan0:10.0.0.2/32",
+				"delete-address:wwan0:2001:db8::2/128",
+			}
+			if tt.wantDisable {
+				want = slices.Insert(want, 0, "disable-ipv6-autoconf:wwan0")
+			}
+			if !slices.Equal(calls, want) {
+				t.Fatalf("network calls = %v, want %v", calls, want)
+			}
+		})
+	}
+}
+
+func TestManagedVoLTECardUsesMBIMSessionInterface(t *testing.T) {
+	tests := []struct {
+		name      string
+		sessionID uint32
+		stale     bool
+		wantErr   bool
+	}{
+		{name: "session one VLAN", sessionID: 1},
+		{name: "stale session VLAN replaced", sessionID: 1, stale: true},
+		{name: "session zero rejected", sessionID: 0, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previousInterfaceByName := imsInterfaceByName
+			imsInterfaceByName = func(name string) (*net.Interface, error) {
+				return &net.Interface{Index: 7, Name: name}, nil
+			}
+			t.Cleanup(func() { imsInterfaceByName = previousInterfaceByName })
+			interfaceName, err := mbimSessionInterfaceName("lo", tt.sessionID)
+			if err != nil {
+				t.Fatalf("mbimSessionInterfaceName() error = %v", err)
+			}
+			var calls []string
+			addVLANCalls := 0
+			links := fakePDNLinks{
+				disableIPv6Autoconfiguration: func(name string) error {
+					calls = append(calls, "disable-ipv6-autoconf:"+name)
+					return nil
+				},
+				setUp: func(name string) error {
+					calls = append(calls, "up:"+name)
+					return nil
+				},
+				addAddress: func(name string, prefix netip.Prefix) error {
+					calls = append(calls, fmt.Sprintf("add-address:%s:%s", name, prefix))
+					return nil
+				},
+				deleteAddress: func(name string, prefix netip.Prefix) error {
+					calls = append(calls, fmt.Sprintf("delete-address:%s:%s", name, prefix))
+					return nil
+				},
+				addHostRoute: func(name string, address netip.Addr) error {
+					calls = append(calls, fmt.Sprintf("add-route:%s:%s", name, address))
+					return nil
+				},
+				deleteHostRoute: func(name string, address netip.Addr) error {
+					calls = append(calls, fmt.Sprintf("delete-route:%s:%s", name, address))
+					return nil
+				},
+				addVLAN: func(parent, name string, id uint16) error {
+					calls = append(calls, fmt.Sprintf("add-vlan:%s:%s:%d", parent, name, id))
+					addVLANCalls++
+					if tt.stale && addVLANCalls == 1 {
+						return syscall.EEXIST
+					}
+					return nil
+				},
+				deleteLink: func(name string) error {
+					calls = append(calls, "delete-link:"+name)
+					return nil
+				},
+			}
+			network := &pdnNetwork{parent: "lo", mbim: true, links: links}
+			info := usim.IMSPDNInfo{
+				SessionID: tt.sessionID,
+				LocalIPv6: net.ParseIP("2001:db8::2"),
+				PCSCFIPs:  []net.IP{net.ParseIP("2001:db8::10")},
+			}
+
+			err = network.Replace(context.Background(), info)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("Replace() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Replace() error = %v", err)
+			}
+			if err := network.Close(); err != nil {
+				t.Fatalf("Close() error = %v", err)
+			}
+			want := []string{
+				"add-vlan:lo:" + interfaceName + ":1",
+			}
+			if tt.stale {
+				want = append(want,
+					"delete-link:"+interfaceName,
+					"add-vlan:lo:"+interfaceName+":1",
+				)
+			}
+			want = append(want,
+				"disable-ipv6-autoconf:"+interfaceName,
+				"up:"+interfaceName,
+				"add-address:"+interfaceName+":2001:db8::2/128",
+				"add-route:"+interfaceName+":2001:db8::10",
+				"delete-route:"+interfaceName+":2001:db8::10",
+				"delete-address:"+interfaceName+":2001:db8::2/128",
+				"delete-link:"+interfaceName,
+			)
+			if !slices.Equal(calls, want) {
+				t.Fatalf("network calls = %v, want %v", calls, want)
+			}
+		})
+	}
+}
+
+func TestPDNNetworkRollsBackConfigurationOnce(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "address failure cleans configured address once"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addCalls := 0
+			deleteCalls := 0
+			network := &pdnNetwork{
+				parent: "wwan0",
+				links: fakePDNLinks{
+					addAddress: func(string, netip.Prefix) error {
+						addCalls++
+						if addCalls == 2 {
+							return errors.New("add address rejected")
+						}
+						return nil
+					},
+					deleteAddress: func(string, netip.Prefix) error {
+						deleteCalls++
+						return nil
+					},
+				},
+			}
+			info := usim.IMSPDNInfo{
+				LocalIPv4: net.ParseIP("10.0.0.2"),
+				LocalIPv6: net.ParseIP("2001:db8::2"),
+			}
+
+			if err := network.Replace(context.Background(), info); err == nil {
+				t.Fatal("Replace() error = nil, want error")
+			}
+			if deleteCalls != 1 {
+				t.Fatalf("DeleteAddress calls = %d, want 1", deleteCalls)
+			}
+			if err := network.Close(); err != nil {
+				t.Fatalf("Close() error = %v", err)
+			}
+			if deleteCalls != 1 {
+				t.Fatalf("DeleteAddress calls after Close = %d, want 1", deleteCalls)
+			}
+		})
+	}
+}
+
+func TestPDNNetworkRetainsFailedCleanupForRetry(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "shared interface retries failed address and route deletion"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deleteAddressCalls := 0
+			deleteRouteCalls := 0
+			network := &pdnNetwork{
+				parent:        "wwan0",
+				interfaceName: "wwan0",
+				state: pdnNetworkState{
+					prefixes: []netip.Prefix{netip.MustParsePrefix("10.0.0.2/32")},
+					routes:   []netip.Addr{netip.MustParseAddr("10.0.0.10")},
+				},
+				links: fakePDNLinks{
+					deleteAddress: func(string, netip.Prefix) error {
+						deleteAddressCalls++
+						if deleteAddressCalls == 1 {
+							return errors.New("delete address rejected")
+						}
+						return nil
+					},
+					deleteHostRoute: func(string, netip.Addr) error {
+						deleteRouteCalls++
+						if deleteRouteCalls == 1 {
+							return errors.New("delete route rejected")
+						}
+						return nil
+					},
+				},
+			}
+
+			if err := network.Close(); err == nil {
+				t.Fatal("first Close() error = nil, want error")
+			}
+			if network.interfaceName != "wwan0" || len(network.state.prefixes) != 1 || len(network.state.routes) != 1 {
+				t.Fatalf("state after failed Close = %q/%+v, want retained resources", network.interfaceName, network.state)
+			}
+			if err := network.Close(); err != nil {
+				t.Fatalf("second Close() error = %v", err)
+			}
+			if network.interfaceName != "" || len(network.state.prefixes) != 0 || len(network.state.routes) != 0 {
+				t.Fatalf("state after successful Close = %q/%+v, want empty", network.interfaceName, network.state)
+			}
+		})
+	}
+}
+
+func TestWaitForIMSInterface(t *testing.T) {
+	tests := []struct {
+		name      string
+		errors    []error
+		cancel    bool
+		wantCalls int
+		wantErr   error
+	}{
+		{name: "available immediately", errors: []error{nil}, wantCalls: 1},
+		{
+			name: "waits for interface enumeration",
+			errors: []error{
+				fmt.Errorf("disable IPv6 autoconf: %w", syscall.ENOENT),
+				fmt.Errorf("read interface flags: %w", syscall.ENODEV),
+				fmt.Errorf("read interface flags: %w", syscall.ENXIO),
+				nil,
+			},
+			wantCalls: 4,
+		},
+		{name: "returns other errors", errors: []error{syscall.EPERM}, wantCalls: 1, wantErr: syscall.EPERM},
+		{name: "context cancelled", errors: []error{syscall.ENODEV}, cancel: true, wantCalls: 1, wantErr: context.Canceled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previousInterval := imsInterfacePollInterval
+			imsInterfacePollInterval = time.Nanosecond
+			if tt.cancel {
+				imsInterfacePollInterval = time.Hour
+			}
+			t.Cleanup(func() {
+				imsInterfacePollInterval = previousInterval
+			})
+
+			calls := 0
+			setUp := func(string) error {
+				index := min(calls, len(tt.errors)-1)
+				calls++
+				return tt.errors[index]
+			}
+			ctx := context.Background()
+			if tt.cancel {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+
+			err := waitForIMSInterface(ctx, "wwan0", setUp)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("waitForIMSInterface() error = %v, want %v", err, tt.wantErr)
+			}
+			if calls != tt.wantCalls {
+				t.Fatalf("set up calls = %d, want %d", calls, tt.wantCalls)
+			}
+		})
+	}
+}
+
+func TestIsIMSCallAlreadyPresent(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "internal call already present",
+			err: &qcom.WDSStartNetworkError{
+				Err:                     qcom.QMIErrorCallFailed,
+				HasVerboseCallEndReason: true,
+				VerboseCallEndReason: qcom.WDSVerboseCallEndReason{
+					Type:   qcom.WDSVerboseCallEndReasonTypeInternal,
+					Reason: 236,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "wrapped call already present",
+			err: fmt.Errorf("opening IMS PDN: %w", &qcom.WDSStartNetworkError{
+				HasVerboseCallEndReason: true,
+				VerboseCallEndReason: qcom.WDSVerboseCallEndReason{
+					Type:   qcom.WDSVerboseCallEndReasonTypeInternal,
+					Reason: 236,
+				},
+			}),
+			want: true,
+		},
+		{
+			name: "different internal reason",
+			err: &qcom.WDSStartNetworkError{
+				HasVerboseCallEndReason: true,
+				VerboseCallEndReason: qcom.WDSVerboseCallEndReason{
+					Type:   qcom.WDSVerboseCallEndReasonTypeInternal,
+					Reason: 237,
+				},
+			},
+		},
+		{name: "ordinary error", err: syscall.EIO},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isIMSCallAlreadyPresent(tt.err); got != tt.want {
+				t.Fatalf("isIMSCallAlreadyPresent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestManagedVoLTECardRecoversOccupiedIMSPDN(t *testing.T) {
+	callAlready := &qcom.WDSStartNetworkError{
+		Err:                     qcom.QMIErrorCallFailed,
+		HasVerboseCallEndReason: true,
+		VerboseCallEndReason: qcom.WDSVerboseCallEndReason{
+			Type:   qcom.WDSVerboseCallEndReasonTypeInternal,
+			Reason: 236,
+		},
+	}
+	errOpen := errors.New("open rejected")
+	errFlight := errors.New("flight mode rejected")
+	tests := []struct {
+		name         string
+		errors       []error
+		device       *fakeManagedVoLTEDevice
+		wantPDNCalls int
+		wantCalls    []string
+		wantErr      error
+	}{
+		{
+			name:         "resets once and reopens occupied IMS PDN",
+			errors:       []error{callAlready},
+			device:       &fakeManagedVoLTEDevice{},
+			wantPDNCalls: 2,
+			wantCalls:    []string{"set-airplane-mode:true", "set-airplane-mode:false", "packet-service"},
+		},
+		{
+			name:         "does not reset unrelated open error",
+			errors:       []error{errOpen},
+			device:       &fakeManagedVoLTEDevice{},
+			wantPDNCalls: 1,
+			wantErr:      errOpen,
+		},
+		{
+			name:         "returns reset error without reopening",
+			errors:       []error{callAlready},
+			device:       &fakeManagedVoLTEDevice{enableFlightErr: errFlight},
+			wantPDNCalls: 1,
+			wantCalls:    []string{"set-airplane-mode:true"},
+			wantErr:      errFlight,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previousResetDelay := voLTEResetDelay
+			previousPollInterval := packetServicePollInterval
+			voLTEResetDelay = time.Nanosecond
+			packetServicePollInterval = time.Nanosecond
+			t.Cleanup(func() {
+				voLTEResetDelay = previousResetDelay
+				packetServicePollInterval = previousPollInterval
+			})
+
+			pdn := &fakeIMSPDNOpener{errors: slices.Clone(tt.errors)}
+			card := &managedVoLTECard{
+				Reader:  fakeUSIMReader{},
+				device:  tt.device,
+				pdn:     pdn,
+				network: fakeIMSNetwork{},
+			}
+
+			_, err := card.OpenIMSPDN(context.Background(), usim.IMSPDNConfig{})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("OpenIMSPDN() error = %v, want %v", err, tt.wantErr)
+			}
+			if got := len(pdn.configs); got != tt.wantPDNCalls {
+				t.Fatalf("OpenIMSPDN calls = %d, want %d", got, tt.wantPDNCalls)
+			}
+			if !slices.Equal(tt.device.calls, tt.wantCalls) {
+				t.Fatalf("device calls = %v, want %v", tt.device.calls, tt.wantCalls)
+			}
+		})
+	}
+}
+
+type fakeIMSPDNOpener struct {
+	configs []usim.IMSPDNConfig
+	errors  []error
+}
+
+type fakeIMSNetwork struct{}
+
+func (fakeIMSNetwork) Replace(context.Context, usim.IMSPDNInfo) error { return nil }
+func (fakeIMSNetwork) Close() error                                   { return nil }
+
+type fakePDNLinks struct {
+	disableIPv6Autoconfiguration func(string) error
+	setUp                        func(string) error
+	addAddress                   func(string, netip.Prefix) error
+	deleteAddress                func(string, netip.Prefix) error
+	addHostRoute                 func(string, netip.Addr) error
+	deleteHostRoute              func(string, netip.Addr) error
+	addVLAN                      func(string, string, uint16) error
+	deleteLink                   func(string) error
+}
+
+func (f fakePDNLinks) DisableIPv6Autoconfiguration(name string) error {
+	if f.disableIPv6Autoconfiguration == nil {
+		return nil
+	}
+	return f.disableIPv6Autoconfiguration(name)
+}
+
+func (f fakePDNLinks) SetUp(name string) error {
+	if f.setUp == nil {
+		return nil
+	}
+	return f.setUp(name)
+}
+
+func (f fakePDNLinks) AddAddress(name string, prefix netip.Prefix) error {
+	if f.addAddress == nil {
+		return nil
+	}
+	return f.addAddress(name, prefix)
+}
+
+func (f fakePDNLinks) DeleteAddress(name string, prefix netip.Prefix) error {
+	if f.deleteAddress == nil {
+		return nil
+	}
+	return f.deleteAddress(name, prefix)
+}
+
+func (f fakePDNLinks) AddHostRoute(name string, address netip.Addr) error {
+	if f.addHostRoute == nil {
+		return nil
+	}
+	return f.addHostRoute(name, address)
+}
+
+func (f fakePDNLinks) DeleteHostRoute(name string, address netip.Addr) error {
+	if f.deleteHostRoute == nil {
+		return nil
+	}
+	return f.deleteHostRoute(name, address)
+}
+
+func (f fakePDNLinks) AddVLAN(parent, name string, id uint16) error {
+	if f.addVLAN == nil {
+		return nil
+	}
+	return f.addVLAN(parent, name, id)
+}
+
+func (f fakePDNLinks) DeleteLink(name string) error {
+	if f.deleteLink == nil {
+		return nil
+	}
+	return f.deleteLink(name)
+}
+
+func (o *fakeIMSPDNOpener) OpenIMSPDN(_ context.Context, cfg usim.IMSPDNConfig) (*usim.IMSPDNSession, error) {
+	o.configs = append(o.configs, cfg)
+	if len(o.errors) == 0 {
+		return &usim.IMSPDNSession{}, nil
+	}
+	err := o.errors[0]
+	o.errors = o.errors[1:]
+	if err != nil {
+		return nil, err
+	}
+	return &usim.IMSPDNSession{}, nil
 }
 
 type fakeUSIMReader struct{}

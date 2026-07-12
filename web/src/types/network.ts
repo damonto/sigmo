@@ -53,6 +53,7 @@ export type SetAirplaneModeRequest = {
 export type VoLTEResponse = {
   managed: boolean
   canEnable: boolean
+  modemRegistered: boolean
 }
 
 export type SetVoLTERequest = {

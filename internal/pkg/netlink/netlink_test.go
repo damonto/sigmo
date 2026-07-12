@@ -2,12 +2,69 @@ package netlink
 
 import (
 	"encoding/binary"
+	"errors"
 	"net"
 	"net/netip"
+	"os"
+	"slices"
+	"syscall"
 	"testing"
 
 	"golang.org/x/sys/unix"
 )
+
+func TestDisableIPv6Autoconfiguration(t *testing.T) {
+	errWrite := errors.New("write rejected")
+	tests := []struct {
+		name          string
+		interfaceName string
+		failPath      string
+		wantPaths     []string
+		wantErr       error
+	}{
+		{
+			name:          "disables SLAAC and router advertisements",
+			interfaceName: "qmimux0",
+			wantPaths:     []string{"/proc-test/qmimux0/autoconf", "/proc-test/qmimux0/accept_ra"},
+		},
+		{
+			name:          "stops after write rejection",
+			interfaceName: "qmimux0",
+			failPath:      "/proc-test/qmimux0/autoconf",
+			wantPaths:     []string{"/proc-test/qmimux0/autoconf"},
+			wantErr:       errWrite,
+		},
+		{name: "rejects empty interface", wantErr: syscall.EINVAL},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var paths []string
+			writeFile := func(path string, data []byte, mode os.FileMode) error {
+				paths = append(paths, path)
+				if string(data) != "0" || mode != 0o644 {
+					t.Fatalf("write = %q/%#o, want 0/0644", data, mode)
+				}
+				if path == tt.failPath {
+					return errWrite
+				}
+				return nil
+			}
+
+			err := disableIPv6Autoconfiguration("/proc-test", tt.interfaceName, writeFile)
+			if tt.wantErr == syscall.EINVAL {
+				if err == nil {
+					t.Fatal("disableIPv6Autoconfiguration() error = nil, want error")
+				}
+			} else if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("disableIPv6Autoconfiguration() error = %v, want %v", err, tt.wantErr)
+			}
+			if !slices.Equal(paths, tt.wantPaths) {
+				t.Fatalf("write paths = %v, want %v", paths, tt.wantPaths)
+			}
+		})
+	}
+}
 
 func TestParseDefaultRoute(t *testing.T) {
 	t.Parallel()
@@ -78,6 +135,70 @@ func TestRouteProtocol(t *testing.T) {
 
 			if got := routeProtocol(tt.route); got != tt.want {
 				t.Fatalf("routeProtocol() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHostRouteMessage(t *testing.T) {
+	tests := []struct {
+		name        string
+		destination netip.Addr
+		wantFamily  byte
+		wantBits    byte
+	}{
+		{name: "IPv4", destination: netip.MustParseAddr("198.51.100.10"), wantFamily: FamilyIPv4, wantBits: 32},
+		{name: "IPv6", destination: netip.MustParseAddr("2001:db8::10"), wantFamily: FamilyIPv6, wantBits: 128},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, err := hostRouteMessage(7, tt.destination)
+			if err != nil {
+				t.Fatalf("hostRouteMessage() error = %v", err)
+			}
+			if msg[0] != tt.wantFamily || msg[1] != tt.wantBits || msg[6] != unix.RT_SCOPE_LINK {
+				t.Fatalf("route header = family %d bits %d scope %d", msg[0], msg[1], msg[6])
+			}
+			attrs := parseAttrs(msg[unix.SizeofRtMsg:])
+			if got := attrUint32(attrs[unix.RTA_OIF]); got != 7 {
+				t.Fatalf("route interface = %d, want 7", got)
+			}
+			if got := attrAddr(int(tt.wantFamily), attrs[unix.RTA_DST]); got != tt.destination {
+				t.Fatalf("route destination = %s, want %s", got, tt.destination)
+			}
+		})
+	}
+}
+
+func TestVLANLinkMessage(t *testing.T) {
+	tests := []struct {
+		name          string
+		parentIndex   int
+		interfaceName string
+		id            uint16
+	}{
+		{name: "MBIM session", parentIndex: 7, interfaceName: "mbim7s1", id: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := vlanLinkMessage(tt.parentIndex, tt.interfaceName, tt.id)
+			attrs := parseAttrs(msg[unix.SizeofIfInfomsg:])
+			if got := attrUint32(attrs[unix.IFLA_LINK]); got != uint32(tt.parentIndex) {
+				t.Fatalf("parent index = %d, want %d", got, tt.parentIndex)
+			}
+			if got := string(attrs[unix.IFLA_IFNAME]); got != tt.interfaceName+"\x00" {
+				t.Fatalf("interface name = %q, want %q", got, tt.interfaceName+"\x00")
+			}
+			linkInfo := parseAttrs(attrs[unix.IFLA_LINKINFO|unix.NLA_F_NESTED])
+			if got := string(linkInfo[unix.IFLA_INFO_KIND]); got != "vlan\x00" {
+				t.Fatalf("link kind = %q, want vlan", got)
+			}
+			infoData := parseAttrs(linkInfo[unix.IFLA_INFO_DATA|unix.NLA_F_NESTED])
+			gotID := binary.NativeEndian.Uint16(infoData[unix.IFLA_VLAN_ID])
+			if gotID != tt.id {
+				t.Fatalf("VLAN ID = %d, want %d", gotID, tt.id)
 			}
 		})
 	}

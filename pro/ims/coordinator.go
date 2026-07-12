@@ -10,6 +10,7 @@ import (
 	"time"
 
 	imsgo "github.com/damonto/ims-go"
+	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/pro/websheet"
@@ -22,6 +23,7 @@ type Config struct {
 	Websheets          *websheet.Broker
 	Access             Access
 	NetworkPreferences *mmodem.NetworkPreferences
+	Internet           *pinternet.Connector
 }
 
 type coordinator struct {
@@ -31,6 +33,7 @@ type coordinator struct {
 	websheets          *websheet.Broker
 	access             Access
 	networkPreferences *mmodem.NetworkPreferences
+	internet           internetRestorer
 	voltePreferenceMu  sync.Mutex
 
 	mu               sync.Mutex
@@ -79,6 +82,7 @@ func New(cfg Config) Coordinator {
 		websheets:          cfg.Websheets,
 		access:             access,
 		networkPreferences: cfg.NetworkPreferences,
+		internet:           cfg.Internet,
 		sessions:           make(map[string]*sessionState),
 		smsSubmissions:     make(map[smsSubmissionKey]*smsSubmissionTracker),
 		voiceSubscribers:   make(map[uint64]VoiceEventFunc),
@@ -194,7 +198,22 @@ func (c *coordinator) applyVoLTEPreference(ctx context.Context, registry *mmodem
 		return
 	}
 	if !enabled {
-		c.stopAsync(event.ModemID)
+		// The managed IMS client must be fully closed before the modem's client
+		// is restored, otherwise both clients can contend for the same IMS state.
+		c.stop(event.ModemID)
+		if registry == nil {
+			return
+		}
+		modem, err := registry.Find(ctx, event.ModemID)
+		if err != nil {
+			if ctx.Err() == nil {
+				slog.Warn("find modem for VoLTE release", "imei", event.ModemID, "error", err)
+			}
+			return
+		}
+		if err := releaseManagedVoLTE(ctx, modem, c.internet); err != nil && ctx.Err() == nil {
+			slog.Warn("restore modem VoLTE", "imei", event.ModemID, "error", err)
+		}
 		return
 	}
 	modem, err := registry.Find(ctx, event.ModemID)

@@ -52,6 +52,7 @@ const airplaneModeResponse = {
 const volteResponse = {
   managed: false,
   canEnable: true,
+  modemRegistered: false,
 }
 
 describe('useModemNetwork', () => {
@@ -144,5 +145,41 @@ describe('useModemNetwork', () => {
     expect(onChanged).toHaveBeenCalledWith('modem-1')
     expect(onSuccess).toHaveBeenCalledWith('modemDetail.settings.networkVoLTEEnabledSuccess')
     expect(network.isVoLTEUpdating.value).toBe(false)
+  })
+
+  it('allows VoLTE takeover when IMSA status is available', async () => {
+    api.getVoLTE.mockResolvedValue({
+      data: { value: { managed: false, canEnable: true, modemRegistered: false } },
+    })
+    const network = useModemNetwork({ modemId })
+
+    await network.refreshNetworkSettings()
+
+    expect(network.volteManaged.value).toBe(false)
+    expect(network.volteCanEnable.value).toBe(true)
+    expect(network.canUpdateVoLTE.value).toBe(true)
+  })
+
+  it('disables VoLTE takeover when IMSA status is unavailable', async () => {
+    api.getVoLTE.mockResolvedValue({
+      data: { value: { managed: false, canEnable: false, modemRegistered: false } },
+    })
+    const network = useModemNetwork({ modemId })
+
+    await network.refreshNetworkSettings()
+
+    expect(network.volteCanEnable.value).toBe(false)
+    expect(network.canUpdateVoLTE.value).toBe(false)
+  })
+
+  it('exposes modem IMS registration status', async () => {
+    api.getVoLTE.mockResolvedValue({
+      data: { value: { managed: false, canEnable: true, modemRegistered: true } },
+    })
+    const network = useModemNetwork({ modemId })
+
+    await network.refreshNetworkSettings()
+
+    expect(network.volteModemRegistered.value).toBe(true)
   })
 })

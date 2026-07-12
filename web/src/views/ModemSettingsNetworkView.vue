@@ -32,6 +32,7 @@ const {
   airplaneModeEnabled,
   volteManaged,
   volteCanEnable,
+  volteModemRegistered,
   isNetworkLoading,
   isNetworkRegistering,
   isNetworkSettingsLoading,
@@ -84,6 +85,7 @@ const {
       :airplane-mode-enabled="airplaneModeEnabled"
       :volte-managed="volteManaged"
       :volte-can-enable="volteCanEnable"
+      :volte-modem-registered="volteModemRegistered"
       :is-settings-loading="isNetworkSettingsLoading"
       :is-mode-updating="isModeUpdating"
       :is-band-updating="isBandUpdating"

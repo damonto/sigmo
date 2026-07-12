@@ -71,8 +71,8 @@ type BearerIPConfig struct {
 	MTU     uint32
 }
 
-func (c BearerIPConfig) StaticAddress() bool {
-	return c.Method == BearerIPMethodStatic && strings.TrimSpace(c.Address) != ""
+func (c BearerIPConfig) ConfiguredAddress() bool {
+	return (c.Method == BearerIPMethodStatic || c.Method == BearerIPMethodDHCP) && strings.TrimSpace(c.Address) != ""
 }
 
 type BearerStats struct {

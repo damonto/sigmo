@@ -80,6 +80,36 @@ func TestEncodeBCD(t *testing.T) {
 	}
 }
 
+func TestEncodeRecord(t *testing.T) {
+	tests := []struct {
+		name    string
+		number  string
+		length  int
+		wantTON byte
+		wantBCD []byte
+		wantErr bool
+	}{
+		{name: "international odd digits", number: "+12345", length: 32, wantTON: 0x91, wantBCD: []byte{0x21, 0x43, 0xF5}},
+		{name: "national even digits", number: "1234", length: 32, wantTON: 0x81, wantBCD: []byte{0x21, 0x43}},
+		{name: "short record", number: "1", length: 13, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := EncodeRecord("", tt.number, tt.length)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("EncodeRecord() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			offset := tt.length - 14
+			if got[offset+1] != tt.wantTON || !bytes.Equal(got[offset+2:offset+2+len(tt.wantBCD)], tt.wantBCD) {
+				t.Fatalf("EncodeRecord() = % X", got)
+			}
+		})
+	}
+}
+
 type fakeRunner struct {
 	selects []byte
 	err     error

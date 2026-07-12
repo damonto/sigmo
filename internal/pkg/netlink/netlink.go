@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -71,6 +73,26 @@ func SetUp(name string) error {
 	return nil
 }
 
+// DisableIPv6Autoconfiguration keeps a dedicated cellular PDN from installing
+// SLAAC addresses and RA default routes that would take traffic from Internet.
+func DisableIPv6Autoconfiguration(name string) error {
+	return disableIPv6Autoconfiguration("/proc/sys/net/ipv6/conf", name, os.WriteFile)
+}
+
+func disableIPv6Autoconfiguration(root, name string, writeFile func(string, []byte, os.FileMode) error) error {
+	name = filepath.Base(name)
+	if name == "." || name == "" {
+		return errors.New("interface name is required")
+	}
+	for _, setting := range []string{"autoconf", "accept_ra"} {
+		path := filepath.Join(root, name, setting)
+		if err := writeFile(path, []byte("0"), 0o644); err != nil {
+			return fmt.Errorf("disable IPv6 %s on %s: %w", setting, name, err)
+		}
+	}
+	return nil
+}
+
 func SetMTU(name string, mtu uint32) error {
 	if mtu == 0 {
 		return nil
@@ -90,6 +112,59 @@ func SetMTU(name string, mtu uint32) error {
 		return fmt.Errorf("set interface mtu: %w", err)
 	}
 	return nil
+}
+
+func AddVLAN(parentName, name string, id uint16) error {
+	if id == 0 || id > 4094 {
+		return fmt.Errorf("VLAN ID %d is out of range", id)
+	}
+	parent, err := net.InterfaceByName(parentName)
+	if err != nil {
+		return fmt.Errorf("find VLAN parent interface: %w", err)
+	}
+	if name == "" {
+		return errors.New("VLAN interface name is required")
+	}
+	msg := vlanLinkMessage(parent.Index, name, id)
+	if err := send(unix.RTM_NEWLINK, unix.NLM_F_REQUEST|unix.NLM_F_ACK|unix.NLM_F_CREATE|unix.NLM_F_EXCL, msg); err != nil {
+		return fmt.Errorf("create VLAN interface %s: %w", name, err)
+	}
+	return nil
+}
+
+func DeleteLink(name string) error {
+	ifi, err := net.InterfaceByName(name)
+	if err != nil {
+		var opErr *net.OpError
+		if errors.As(err, &opErr) && errors.Is(opErr.Err, unix.ENODEV) {
+			return nil
+		}
+		return fmt.Errorf("find interface: %w", err)
+	}
+	msg := make([]byte, unix.SizeofIfInfomsg)
+	binary.NativeEndian.PutUint32(msg[4:8], uint32(ifi.Index))
+	if err := send(unix.RTM_DELLINK, unix.NLM_F_REQUEST|unix.NLM_F_ACK, msg); err != nil {
+		if errors.Is(err, unix.ENODEV) || errors.Is(err, unix.ENOENT) {
+			return nil
+		}
+		return fmt.Errorf("delete interface %s: %w", name, err)
+	}
+	return nil
+}
+
+func vlanLinkMessage(parentIndex int, name string, id uint16) []byte {
+	msg := make([]byte, unix.SizeofIfInfomsg)
+	parent := make([]byte, 4)
+	binary.NativeEndian.PutUint32(parent, uint32(parentIndex))
+	msg = appendAttr(msg, unix.IFLA_LINK, parent)
+	msg = appendAttr(msg, unix.IFLA_IFNAME, append([]byte(name), 0))
+
+	vlanID := make([]byte, 2)
+	binary.NativeEndian.PutUint16(vlanID, id)
+	infoData := appendAttr(nil, unix.IFLA_VLAN_ID, vlanID)
+	linkInfo := appendAttr(nil, unix.IFLA_INFO_KIND, []byte("vlan\x00"))
+	linkInfo = appendAttr(linkInfo, unix.IFLA_INFO_DATA|unix.NLA_F_NESTED, infoData)
+	return appendAttr(msg, unix.IFLA_LINKINFO|unix.NLA_F_NESTED, linkInfo)
 }
 
 func AddAddress(interfaceName string, prefix netip.Prefix) error {
@@ -136,6 +211,18 @@ func AddDefaultRoute(route DefaultRoute) error {
 
 func DeleteDefaultRoute(route DefaultRoute) error {
 	err := changeDefaultRoute(unix.RTM_DELROUTE, 0, route)
+	if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESRCH) {
+		return nil
+	}
+	return err
+}
+
+func AddHostRoute(interfaceName string, destination netip.Addr) error {
+	return changeHostRoute(unix.RTM_NEWROUTE, unix.NLM_F_CREATE|unix.NLM_F_REPLACE, interfaceName, destination)
+}
+
+func DeleteHostRoute(interfaceName string, destination netip.Addr) error {
+	err := changeHostRoute(unix.RTM_DELROUTE, 0, interfaceName, destination)
 	if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESRCH) {
 		return nil
 	}
@@ -220,6 +307,44 @@ func changeDefaultRoute(msgType uint16, flags uint16, route DefaultRoute) error 
 	}
 
 	return send(msgType, unix.NLM_F_REQUEST|unix.NLM_F_ACK|flags, msg)
+}
+
+func changeHostRoute(msgType uint16, flags uint16, interfaceName string, destination netip.Addr) error {
+	if !destination.IsValid() {
+		return errors.New("host route destination is invalid")
+	}
+	ifi, err := net.InterfaceByName(interfaceName)
+	if err != nil {
+		return fmt.Errorf("find interface: %w", err)
+	}
+	msg, err := hostRouteMessage(ifi.Index, destination)
+	if err != nil {
+		return err
+	}
+	return send(msgType, unix.NLM_F_REQUEST|unix.NLM_F_ACK|flags, msg)
+}
+
+func hostRouteMessage(interfaceIndex int, destination netip.Addr) ([]byte, error) {
+	family, raw, err := ipFamilyBytes(destination)
+	if err != nil {
+		return nil, err
+	}
+	bits := 128
+	if destination.Is4() {
+		bits = 32
+	}
+	msg := make([]byte, unix.SizeofRtMsg)
+	msg[0] = byte(family)
+	msg[1] = byte(bits)
+	msg[4] = unix.RT_TABLE_MAIN
+	msg[5] = unix.RTPROT_STATIC
+	msg[6] = unix.RT_SCOPE_LINK
+	msg[7] = unix.RTN_UNICAST
+	oif := make([]byte, 4)
+	binary.NativeEndian.PutUint32(oif, uint32(interfaceIndex))
+	msg = appendAttr(msg, unix.RTA_DST, raw)
+	msg = appendAttr(msg, unix.RTA_OIF, oif)
+	return msg, nil
 }
 
 func routeProtocol(route DefaultRoute) int {

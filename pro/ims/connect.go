@@ -15,6 +15,7 @@ import (
 	imsgo "github.com/damonto/ims-go"
 	"github.com/damonto/ims-go/lte"
 	"github.com/damonto/ims-go/wfcsetup"
+	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
 	usimcard "github.com/damonto/uicc-go/usim/card"
@@ -34,7 +35,34 @@ const (
 	terminalVendor          = "Google"
 	terminalModel           = "Pixel 8 Pro"
 	terminalSoftwareVersion = "15/AP3A.240905.015"
+	voLTERestoreTimeout     = 5 * time.Second
 )
+
+var (
+	voLTEResetDelay           = time.Second
+	packetServicePollInterval = time.Second
+	packetServiceWaitTimeout  = time.Minute
+	internetRestoreInterval   = 2 * time.Second
+	internetRestoreTimeout    = time.Minute
+)
+
+type managedVoLTEDevice interface {
+	VoLTEStatus(ctx context.Context) (mdevice.VoLTEStatus, error)
+	PacketServiceStatus(ctx context.Context) (mdevice.PacketServiceStatus, error)
+	IMSProfileIndex(ctx context.Context) (uint8, error)
+	IMSSTestMode(ctx context.Context) (bool, error)
+	SetIMSSTestMode(ctx context.Context, enabled bool) error
+	SetAirplaneMode(ctx context.Context, enabled bool) error
+}
+
+type internetRestorer interface {
+	Current(ctx context.Context, modem *mmodem.Modem) (*pinternet.Connection, error)
+	Connect(ctx context.Context, modem *mmodem.Modem, prefs pinternet.Preferences) (*pinternet.Connection, error)
+}
+
+var openManagedVoLTEDevice = func(modem *mmodem.Modem) (managedVoLTEDevice, error) {
+	return mmodem.OpenVoLTEStatusDevice(modem)
+}
 
 func (c *coordinator) startEnabled(ctx context.Context, registry *mmodem.Registry) error {
 	modems, err := registry.Modems(ctx)
@@ -155,8 +183,11 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 }
 
 func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sessionID uint64) (*imsgo.Client, error) {
+	var imsProfileIndex uint8
 	if c.access == AccessVoLTE {
-		if err := ensureManagedVoLTEAllowed(ctx, modem); err != nil {
+		var err error
+		imsProfileIndex, err = prepareManagedVoLTE(ctx, modem, c.internet)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -164,7 +195,7 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sess
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := c.modemClientConfig(ctx, modem)
+	cfg, err := c.modemClientConfig(ctx, modem, imsProfileIndex)
 	if err != nil {
 		return nil, errors.Join(err, reader.Close())
 	}
@@ -189,17 +220,17 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sess
 
 func (c *coordinator) openReader(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader, error) {
 	if c.access == AccessVoLTE {
-		return openVoLTEReader(ctx, modem)
+		return openVoLTEReader(ctx, modem, c.internet)
 	}
 	return openReader(ctx, modem)
 }
 
-func (c *coordinator) modemClientConfig(ctx context.Context, modem *mmodem.Modem) (*imsgo.Config, error) {
+func (c *coordinator) modemClientConfig(ctx context.Context, modem *mmodem.Modem, imsProfileIndex uint8) (*imsgo.Config, error) {
 	imei, err := modem.ThreeGPP().IMEI(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read modem IMEI: %w", err)
 	}
-	return modemClientConfigForIMEI(imei, c.access), nil
+	return modemClientConfigForIMEI(imei, c.access, imsProfileIndex), nil
 }
 
 func wifiCallingModemClientConfig(ctx context.Context, modem *mmodem.Modem) (*imsgo.Config, error) {
@@ -207,13 +238,16 @@ func wifiCallingModemClientConfig(ctx context.Context, modem *mmodem.Modem) (*im
 	if err != nil {
 		return nil, fmt.Errorf("read modem IMEI: %w", err)
 	}
-	return modemClientConfigForIMEI(imei, AccessWiFiCalling), nil
+	return modemClientConfigForIMEI(imei, AccessWiFiCalling, 0), nil
 }
 
-func modemClientConfigForIMEI(imei string, access Access) *imsgo.Config {
+func modemClientConfigForIMEI(imei string, access Access, imsProfileIndex uint8) *imsgo.Config {
 	accessConfig := imsgo.VoWiFi(imsgo.VoWiFiConfig{})
 	if access == AccessVoLTE {
-		accessConfig = imsgo.VoLTE(lte.Config{})
+		accessConfig = imsgo.VoLTE(lte.Config{
+			APN:          lte.DefaultAPN,
+			ProfileIndex: imsProfileIndex,
+		})
 	}
 	return &imsgo.Config{
 		Logger:   mmodem.LoggerForIMEI(imei),
@@ -226,20 +260,175 @@ func modemClientConfigForIMEI(imei string, access Access) *imsgo.Config {
 	}
 }
 
-func ensureManagedVoLTEAllowed(ctx context.Context, modem *mmodem.Modem) error {
-	device, err := mmodem.OpenVoLTEStatusDevice(modem)
+func prepareManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (uint8, error) {
+	device, err := openManagedVoLTEDevice(modem)
+	if errors.Is(err, mdevice.ErrUnsupported) {
+		return 0, ErrUnavailable
+	}
+	if err != nil {
+		return 0, fmt.Errorf("open device: %w", err)
+	}
+	status, err := device.VoLTEStatus(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("read volte status: %w", err)
+	}
+	if !status.Supported {
+		return 0, ErrUnavailable
+	}
+	profileIndex, err := device.IMSProfileIndex(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("find IMS profile: %w", err)
+	}
+	packetServiceReady := false
+	if status.Occupied {
+		testMode, err := device.IMSSTestMode(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("read IMSS test mode: %w", err)
+		}
+		if !testMode {
+			if err := device.SetIMSSTestMode(ctx, true); err != nil {
+				return 0, fmt.Errorf("enable IMSS test mode: %w", err)
+			}
+			if err := resetManagedVoLTE(ctx, modem, device, internet); err != nil {
+				return 0, err
+			}
+			packetServiceReady = true
+		}
+	}
+	if !packetServiceReady {
+		waitCtx, cancel := context.WithTimeout(ctx, packetServiceWaitTimeout)
+		err := waitForPacketService(waitCtx, device)
+		cancel()
+		if err != nil {
+			return 0, err
+		}
+	}
+	return profileIndex, nil
+}
+
+func releaseManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) error {
+	device, err := openManagedVoLTEDevice(modem)
 	if errors.Is(err, mdevice.ErrUnsupported) {
 		return ErrUnavailable
 	}
 	if err != nil {
 		return fmt.Errorf("open device: %w", err)
 	}
-	status, err := device.VoLTEStatus(ctx)
-	if err != nil {
-		return fmt.Errorf("read volte status: %w", err)
+	testMode, err := device.IMSSTestMode(ctx)
+	if errors.Is(err, mdevice.ErrUnsupported) {
+		return nil
 	}
-	if !status.CanEnable {
-		return ErrUnavailable
+	if err != nil {
+		return fmt.Errorf("read IMSS test mode: %w", err)
+	}
+	if !testMode {
+		return nil
+	}
+	if err := device.SetIMSSTestMode(ctx, false); err != nil {
+		return fmt.Errorf("disable IMSS test mode: %w", err)
+	}
+	return resetManagedVoLTE(ctx, modem, device, internet)
+}
+
+func resetManagedVoLTE(ctx context.Context, modem *mmodem.Modem, device managedVoLTEDevice, internet internetRestorer) error {
+	prefs, reconnect, err := internetBeforeVoLTEReset(ctx, modem, internet)
+	if err != nil {
+		return err
+	}
+	if err := cycleVoLTEAirplaneMode(ctx, device); err != nil {
+		return err
+	}
+	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), packetServiceWaitTimeout)
+	waitErr := waitForPacketService(waitCtx, device)
+	cancel()
+	var internetErr error
+	if reconnect {
+		internetErr = restoreInternetAfterVoLTEReset(context.WithoutCancel(ctx), modem, internet, prefs)
+	}
+	return errors.Join(waitErr, internetErr)
+}
+
+func restoreInternetAfterVoLTEReset(ctx context.Context, modem *mmodem.Modem, internet internetRestorer, prefs pinternet.Preferences) error {
+	restoreCtx, cancel := context.WithTimeout(ctx, internetRestoreTimeout)
+	defer cancel()
+	ticker := time.NewTicker(internetRestoreInterval)
+	defer ticker.Stop()
+
+	var lastErr error
+	for {
+		if _, err := internet.Connect(restoreCtx, modem, prefs); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+
+		select {
+		case <-restoreCtx.Done():
+			return errors.Join(fmt.Errorf("restore internet after IMS reset: %w", lastErr), restoreCtx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func internetBeforeVoLTEReset(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (pinternet.Preferences, bool, error) {
+	if internet == nil {
+		return pinternet.Preferences{}, false, nil
+	}
+	connection, err := internet.Current(ctx, modem)
+	if err != nil {
+		return pinternet.Preferences{}, false, fmt.Errorf("read internet before IMS reset: %w", err)
+	}
+	if connection == nil || connection.Status != pinternet.StatusConnected {
+		return pinternet.Preferences{}, false, nil
+	}
+	return pinternet.Preferences{
+		APN:          connection.APN,
+		IPType:       connection.IPType,
+		APNUsername:  connection.APNUsername,
+		APNPassword:  connection.APNPassword,
+		APNAuth:      connection.APNAuth,
+		DefaultRoute: connection.DefaultRoute,
+		ProxyEnabled: connection.ProxyEnabled,
+		AlwaysOn:     connection.AlwaysOn,
+	}, true, nil
+}
+
+func cycleVoLTEAirplaneMode(ctx context.Context, device managedVoLTEDevice) error {
+	if err := device.SetAirplaneMode(ctx, true); err != nil {
+		return fmt.Errorf("enable airplane mode: %w", err)
+	}
+	if err := sleep(ctx, voLTEResetDelay); err != nil {
+		return errors.Join(fmt.Errorf("wait for IMS reset: %w", err), restoreVoLTEOnline(ctx, device))
+	}
+	if err := restoreVoLTEOnline(ctx, device); err != nil {
+		return err
+	}
+	return nil
+}
+
+func waitForPacketService(ctx context.Context, device managedVoLTEDevice) error {
+	ticker := time.NewTicker(packetServicePollInterval)
+	defer ticker.Stop()
+
+	for {
+		status, err := device.PacketServiceStatus(ctx)
+		if err == nil && status.Registered && status.PSAttached && status.LTE {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("packet service unavailable: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func restoreVoLTEOnline(ctx context.Context, device managedVoLTEDevice) error {
+	restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), voLTERestoreTimeout)
+	defer cancel()
+	if err := device.SetAirplaneMode(restoreCtx, false); err != nil {
+		return fmt.Errorf("disable airplane mode: %w", err)
 	}
 	return nil
 }

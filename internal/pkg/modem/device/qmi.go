@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/damonto/sigmo/internal/pkg/modem/msisdn"
 	"github.com/damonto/uicc-go/qcom"
 	"github.com/damonto/uicc-go/qcom/qmi"
 	"github.com/damonto/uicc-go/qcom/uim"
@@ -16,6 +17,11 @@ import (
 	usimcard "github.com/damonto/uicc-go/usim/card"
 	"github.com/damonto/uicc-go/usim/simfile"
 )
+
+var qmiMSISDNFile = uim.File{
+	Session: uim.SessionPrimaryGWProvisioning,
+	Path:    []byte{0x3F, 0x00, 0x7F, 0xFF, 0x6F, 0x40},
+}
 
 type qmiDevice struct {
 	device    string
@@ -100,14 +106,57 @@ type qmiAirplaneModeReader interface {
 }
 
 type qmiUIMReader interface {
+	MSISDN(ctx context.Context) (uim.DMSGetMSISDNResponse, error)
+	FileAttributes(ctx context.Context, file uim.File) (uim.FileAttributes, error)
+	WriteRecord(ctx context.Context, req uim.RecordWrite) error
 	ATR(ctx context.Context) ([]byte, error)
 	IMSAStatus(ctx context.Context) (qcom.IMSAStatus, error)
+	NASServingSystem(ctx context.Context) (qcom.NASServingSystem, error)
+	WDSProfiles(ctx context.Context, profileType qcom.WDSProfileType) ([]qcom.WDSProfile, error)
+	WDSProfileSettings(ctx context.Context, id qcom.WDSProfileID) (qcom.WDSProfileSettings, error)
+	IMSSTestMode(ctx context.Context) (bool, error)
+	SetIMSSTestMode(ctx context.Context, enabled bool) error
 	PowerOffSIM(ctx context.Context, slot uint8) error
 	PowerOnSIM(ctx context.Context, req uim.PowerOnSIMRequest) error
 	SlotStatus(ctx context.Context) (uim.SlotStatus, error)
 	CardStatus(ctx context.Context) (uim.CardStatus, error)
 	ChangeProvisioningSession(ctx context.Context, req uim.ChangeProvisioningSessionRequest) error
 	Close() error
+}
+
+func (u qmiDevice) MSISDN(ctx context.Context) (string, error) {
+	reader, err := u.openUIM(ctx, u.slot)
+	if err != nil {
+		return "", fmt.Errorf("open QMI UIM reader: %w", err)
+	}
+	defer closeQMIUIMReader(reader)
+
+	result, err := reader.MSISDN(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read QMI MSISDN: %w", err)
+	}
+	return strings.TrimSpace(result.VoiceNumber), nil
+}
+
+func (u qmiDevice) UpdateMSISDN(ctx context.Context, number string) error {
+	reader, err := u.openUIM(ctx, u.slot)
+	if err != nil {
+		return fmt.Errorf("open QMI UIM reader: %w", err)
+	}
+	defer closeQMIUIMReader(reader)
+
+	attrs, err := reader.FileAttributes(ctx, qmiMSISDNFile)
+	if err != nil {
+		return fmt.Errorf("read QMI MSISDN file attributes: %w", err)
+	}
+	data, err := msisdn.EncodeRecord("", number, int(attrs.RecordSize))
+	if err != nil {
+		return fmt.Errorf("encode MSISDN record: %w", err)
+	}
+	if err := reader.WriteRecord(ctx, uim.RecordWrite{File: qmiMSISDNFile, Record: 1, Data: data}); err != nil {
+		return fmt.Errorf("write QMI MSISDN record: %w", err)
+	}
+	return nil
 }
 
 type slotStatus struct {
@@ -219,9 +268,83 @@ func (u qmiDevice) VoLTEStatus(ctx context.Context) (VoLTEStatus, error) {
 	}
 	return VoLTEStatus{
 		Supported: true,
-		Known:     status.RegistrationKnown,
-		CanEnable: status.RegistrationKnown && !status.VoLTERegistered(),
+		Occupied:  status.IMSRegistered(),
 	}, nil
+}
+
+func (u qmiDevice) PacketServiceStatus(ctx context.Context) (PacketServiceStatus, error) {
+	reader, err := u.openUIM(ctx, u.slot)
+	if err != nil {
+		return PacketServiceStatus{}, fmt.Errorf("open QMI UIM reader: %w", err)
+	}
+	defer closeQMIUIMReader(reader)
+
+	serving, err := reader.NASServingSystem(ctx)
+	if err != nil {
+		return PacketServiceStatus{}, fmt.Errorf("read QMI NAS serving system: %w", err)
+	}
+	return PacketServiceStatus{
+		Registered: serving.RegistrationState == qcom.NASRegistrationRegistered,
+		PSAttached: serving.PSAttachState == qcom.NASAttachAttached,
+		LTE:        slices.Contains(serving.RadioInterfaces, qcom.NASRadioInterfaceLTE),
+	}, nil
+}
+
+func (u qmiDevice) IMSProfileIndex(ctx context.Context) (uint8, error) {
+	reader, err := u.openUIM(ctx, u.slot)
+	if err != nil {
+		return 0, fmt.Errorf("open QMI UIM reader: %w", err)
+	}
+	defer closeQMIUIMReader(reader)
+
+	profiles, err := reader.WDSProfiles(ctx, qcom.WDSProfileType3GPP)
+	if err != nil {
+		return 0, fmt.Errorf("read QMI WDS profiles: %w", err)
+	}
+	for _, profile := range profiles {
+		settings, err := reader.WDSProfileSettings(ctx, profile.ID)
+		if err != nil {
+			return 0, fmt.Errorf("read QMI WDS profile %d: %w", profile.ID.Index, err)
+		}
+		if isIMSProfile(settings) {
+			return profile.ID.Index, nil
+		}
+	}
+	return 0, errors.New("IMS WDS profile is unavailable")
+}
+
+func isIMSProfile(settings qcom.WDSProfileSettings) bool {
+	return settings.APNKnown && strings.EqualFold(strings.TrimSpace(settings.APN), "ims") &&
+		settings.IMCNKnown && settings.IMCN &&
+		((settings.PCSCFUsingPCOKnown && settings.PCSCFUsingPCO) ||
+			(settings.PCSCFUsingDHCPKnown && settings.PCSCFUsingDHCP))
+}
+
+func (u qmiDevice) IMSSTestMode(ctx context.Context) (bool, error) {
+	reader, err := u.openUIM(ctx, u.slot)
+	if err != nil {
+		return false, fmt.Errorf("open QMI UIM reader: %w", err)
+	}
+	defer closeQMIUIMReader(reader)
+
+	enabled, err := reader.IMSSTestMode(ctx)
+	if err != nil {
+		return false, fmt.Errorf("read QMI IMSS test mode: %w", err)
+	}
+	return enabled, nil
+}
+
+func (u qmiDevice) SetIMSSTestMode(ctx context.Context, enabled bool) error {
+	reader, err := u.openUIM(ctx, u.slot)
+	if err != nil {
+		return fmt.Errorf("open QMI UIM reader: %w", err)
+	}
+	defer closeQMIUIMReader(reader)
+
+	if err := reader.SetIMSSTestMode(ctx, enabled); err != nil {
+		return fmt.Errorf("set QMI IMSS test mode: %w", err)
+	}
+	return nil
 }
 
 func (u qmiDevice) ActivateProvisioningIfSIMMissing(ctx context.Context) error {

@@ -35,6 +35,7 @@ var proIMS = func(app *proApp) error {
 		Store:              runtime.Storage,
 		Access:             pims.AccessVoLTE,
 		NetworkPreferences: runtime.NetworkPreferences,
+		Internet:           runtime.Internet,
 		OnIncoming: func(ctx context.Context, incoming pims.IncomingSMS) error {
 			return runtime.Relay.ForwardRoutedSMS(ctx, incoming.ModemID, incoming.Message)
 		},

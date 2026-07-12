@@ -381,7 +381,7 @@ func (s *wsSession) displayText(ctx context.Context, cmd stkpkg.DisplayTextComma
 	}
 	if err := s.send(wsServerMessage{
 		Type:              wsTypeDisplayText,
-		Text:              cmd.Text.String,
+		Text:              cmd.Text.String(),
 		HighPriority:      cmd.HighPriority,
 		UserClear:         cmd.UserClear,
 		ImmediateResponse: cmd.ImmediateResponse,
@@ -416,14 +416,14 @@ func (s *wsSession) getInput(ctx context.Context, cmd stkpkg.GetInputCommand) (s
 	defer done()
 	message := wsServerMessage{
 		Type:          wsTypeInput,
-		Text:          cmd.Text.String,
+		Text:          cmd.Text.String(),
 		MinLength:     int(cmd.Length.Min),
 		MaxLength:     int(cmd.Length.Max),
 		HideInput:     cmd.HideInput,
 		HelpAvailable: cmd.HelpAvailable,
 	}
 	if cmd.DefaultText != nil {
-		message.DefaultText = cmd.DefaultText.String
+		message.DefaultText = cmd.DefaultText.String()
 	}
 	if err := s.send(message); err != nil {
 		return stkpkg.TerminalResponse{}, err
@@ -450,7 +450,7 @@ func (s *wsSession) getInkey(ctx context.Context, cmd stkpkg.GetInkeyCommand) (s
 	defer done()
 	if err := s.send(wsServerMessage{
 		Type:          wsTypeInkey,
-		Text:          cmd.Text.String,
+		Text:          cmd.Text.String(),
 		YesNo:         cmd.YesNo,
 		HelpAvailable: cmd.HelpAvailable,
 	}); err != nil {
@@ -506,7 +506,7 @@ func menuFromCommand(kind string, cmd stkpkg.MenuCommand) wsMenu {
 		Items:         make([]wsMenuItem, 0, len(cmd.Items)),
 	}
 	if cmd.Title != nil {
-		menu.Title = cmd.Title.String
+		menu.Title = cmd.Title.String()
 	}
 	if cmd.DefaultItem != 0 {
 		value := int(cmd.DefaultItem)
@@ -515,7 +515,7 @@ func menuFromCommand(kind string, cmd stkpkg.MenuCommand) wsMenu {
 	for _, item := range cmd.Items {
 		menu.Items = append(menu.Items, wsMenuItem{
 			ID:    int(item.Identifier),
-			Label: item.Text.String,
+			Label: item.Text.String(),
 		})
 	}
 	return menu
@@ -544,16 +544,16 @@ func byteFromItemID(id int) (byte, bool) {
 func textResponse(text string) stkpkg.TerminalResponse {
 	return stkpkg.TerminalResponse{
 		Result: stkpkg.ResultCommandPerformed,
-		Text:   &stkpkg.Text{String: text},
+		Text:   &stkpkg.TextString{DCS: stkpkg.DCSGSM8Unpacked, Value: text},
 	}
 }
 
 func simpleCommandText(cmd stkpkg.SimpleCommand) string {
-	if cmd.Alpha != nil && strings.TrimSpace(cmd.Alpha.String) != "" {
-		return cmd.Alpha.String
+	if cmd.Alpha != nil && strings.TrimSpace(cmd.Alpha.String()) != "" {
+		return cmd.Alpha.String()
 	}
-	if cmd.Text != nil && strings.TrimSpace(cmd.Text.String) != "" {
-		return cmd.Text.String
+	if cmd.Text != nil && strings.TrimSpace(cmd.Text.String()) != "" {
+		return cmd.Text.String()
 	}
 	if strings.TrimSpace(cmd.URL) != "" {
 		return cmd.URL

@@ -244,6 +244,23 @@ func TestAddressesAndRoutes(t *testing.T) {
 			wantErr: ErrUnsupportedIPMethod,
 		},
 		{
+			name: "dhcp method with complete ipv4 config",
+			ip4: mmodem.BearerIPConfig{
+				Method:  mmodem.BearerIPMethodDHCP,
+				Address: "10.0.0.2",
+				Prefix:  30,
+				Gateway: "10.0.0.1",
+			},
+			wantAddrs: []netip.Prefix{netip.MustParsePrefix("10.0.0.2/30")},
+			wantRoutes: []netlink.DefaultRoute{{
+				Interface: "wwan0",
+				Family:    netlink.FamilyIPv4,
+				Gateway:   netip.MustParseAddr("10.0.0.1"),
+				Source:    netip.MustParseAddr("10.0.0.2"),
+				Metric:    secondaryRouteMetric,
+			}},
+		},
+		{
 			name: "invalid static address",
 			ip4: mmodem.BearerIPConfig{
 				Method:  mmodem.BearerIPMethodStatic,
@@ -1597,6 +1614,16 @@ func TestConnectionAddressStrings(t *testing.T) {
 				Method: mmodem.BearerIPMethodDHCP,
 			},
 			wantIPv4: []string{},
+			wantIPv6: []string{},
+		},
+		{
+			name: "dhcp method with configured address",
+			ip4: mmodem.BearerIPConfig{
+				Method:  mmodem.BearerIPMethodDHCP,
+				Address: "10.0.0.2",
+				Prefix:  30,
+			},
+			wantIPv4: []string{"10.0.0.2/30"},
 			wantIPv6: []string{},
 		},
 		{

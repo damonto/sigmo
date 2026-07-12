@@ -549,8 +549,11 @@ const zh = {
       networkVoLTETitle: 'VoLTE',
       networkVoLTELabel: 'VoLTE',
       networkVoLTEDescription: '通过 LTE 处理通话、短信和 USSD。',
-      networkVoLTEManagedDescription: 'VoLTE 已由模块内部接管。',
+      networkVoLTEManagedDescription: 'VoLTE 已由 Sigmo 接管。',
+      networkVoLTEModemRegisteredDescription: '模块内部 IMS 已注册并接管 VoLTE。',
       networkVoLTEUnavailable: '当前模块无法开启 VoLTE。',
+      networkVoLTEInternetIPTypeNotice:
+        '启用托管 VoLTE 后，Internet 必须使用与 IMS 相同的 IP 类型，且 APN 需支持该类型，否则数据连接会失败。',
       networkVoLTEEnabledSuccess: 'VoLTE 已启用。',
       networkVoLTEDisabledSuccess: 'VoLTE 已关闭。',
       networkVoLTEUpdateFailed: 'VoLTE 切换失败。',

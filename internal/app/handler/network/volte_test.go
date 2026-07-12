@@ -22,7 +22,8 @@ func TestSetVoLTE(t *testing.T) {
 	tests := []struct {
 		name           string
 		req            SetVoLTERequest
-		canEnable      bool
+		supported      bool
+		occupied       bool
 		saved          bool
 		wantPreference bool
 		wantErr        error
@@ -31,7 +32,15 @@ func TestSetVoLTE(t *testing.T) {
 		{
 			name:           "start managing",
 			req:            SetVoLTERequest{Managed: true},
-			canEnable:      true,
+			supported:      true,
+			wantPreference: true,
+			wantManaged:    true,
+		},
+		{
+			name:           "start managing occupied IMS",
+			req:            SetVoLTERequest{Managed: true},
+			supported:      true,
+			occupied:       true,
 			wantPreference: true,
 			wantManaged:    true,
 		},
@@ -51,7 +60,7 @@ func TestSetVoLTE(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			previous := openVoLTEDevice
 			openVoLTEDevice = func(*mmodem.Modem) (volteDevice, error) {
-				return fakeVoLTEDevice{status: mdevice.VoLTEStatus{CanEnable: tt.canEnable}}, nil
+				return fakeVoLTEDevice{status: mdevice.VoLTEStatus{Supported: tt.supported, Occupied: tt.occupied}}, nil
 			}
 			t.Cleanup(func() {
 				openVoLTEDevice = previous
@@ -97,19 +106,26 @@ func TestVoLTE(t *testing.T) {
 	tests := []struct {
 		name      string
 		managed   bool
-		canEnable bool
+		supported bool
+		occupied  bool
 		want      VoLTEResponse
 	}{
 		{
 			name:      "available",
-			canEnable: true,
+			supported: true,
 			want:      VoLTEResponse{CanEnable: true},
 		},
 		{
 			name:      "managed",
 			managed:   true,
-			canEnable: true,
+			supported: true,
 			want:      VoLTEResponse{Managed: true, CanEnable: true},
+		},
+		{
+			name:      "registered modem IMS remains available",
+			supported: true,
+			occupied:  true,
+			want:      VoLTEResponse{CanEnable: true, ModemRegistered: true},
 		},
 		{
 			name: "unavailable",
@@ -121,7 +137,7 @@ func TestVoLTE(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			previous := openVoLTEDevice
 			openVoLTEDevice = func(*mmodem.Modem) (volteDevice, error) {
-				return fakeVoLTEDevice{status: mdevice.VoLTEStatus{CanEnable: tt.canEnable}}, nil
+				return fakeVoLTEDevice{status: mdevice.VoLTEStatus{Supported: tt.supported, Occupied: tt.occupied}}, nil
 			}
 			t.Cleanup(func() {
 				openVoLTEDevice = previous

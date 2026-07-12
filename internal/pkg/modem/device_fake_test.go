@@ -15,6 +15,19 @@ type fakeDeviceControl struct {
 	stateErr    error
 	powerErr    error
 	activateErr error
+	msisdn      string
+	msisdnErr   error
+	updateErr   error
+}
+
+func (d *fakeDeviceControl) MSISDN(context.Context) (string, error) {
+	d.calls = append(d.calls, "msisdn")
+	return d.msisdn, d.msisdnErr
+}
+
+func (d *fakeDeviceControl) UpdateMSISDN(_ context.Context, number string) error {
+	d.calls = append(d.calls, "update-msisdn:"+number)
+	return d.updateErr
 }
 
 func (d *fakeDeviceControl) AirplaneMode(context.Context) (bool, error) {

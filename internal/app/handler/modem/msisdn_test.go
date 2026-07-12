@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
 )
 
 func TestMSISDNUpdate(t *testing.T) {
@@ -64,6 +65,9 @@ func TestMSISDNUpdate(t *testing.T) {
 			client := &fakeMSISDNClient{updateErr: tt.updateErr}
 			var refreshCalled bool
 			service := &msisdn{
+				openDevice: func(*mmodem.Modem) (msisdnDevice, error) {
+					return &fakeMSISDNDevice{err: mdevice.ErrUnsupported}, nil
+				},
 				newClient: func(device string) (msisdnClient, error) {
 					if device != "/dev/ttyUSB2" {
 						t.Fatalf("device = %q, want /dev/ttyUSB2", device)
@@ -105,6 +109,41 @@ func TestMSISDNUpdate(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMSISDNUpdateUsesNativeDevice(t *testing.T) {
+	device := &fakeMSISDNDevice{}
+	refreshed := false
+	service := &msisdn{
+		openDevice: func(*mmodem.Modem) (msisdnDevice, error) { return device, nil },
+		newClient: func(string) (msisdnClient, error) {
+			t.Fatal("AT client opened for native update")
+			return nil, nil
+		},
+		refreshSIMAndWait: func(context.Context, *mmodem.Modem, mmodem.SIMTarget) (*mmodem.Modem, error) {
+			refreshed = true
+			return &mmodem.Modem{}, nil
+		},
+	}
+	if err := service.Update(context.Background(), &mmodem.Modem{PrimarySimSlot: 1}, "+15551234567"); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if device.number != "+15551234567" {
+		t.Fatalf("native number = %q", device.number)
+	}
+	if !refreshed {
+		t.Fatal("SIM refresh was not called")
+	}
+}
+
+type fakeMSISDNDevice struct {
+	err    error
+	number string
+}
+
+func (f *fakeMSISDNDevice) UpdateMSISDN(_ context.Context, number string) error {
+	f.number = number
+	return f.err
 }
 
 type fakeMSISDNClient struct {
