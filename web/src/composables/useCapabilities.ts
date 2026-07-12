@@ -4,6 +4,7 @@ import { useCapabilityApi } from '@/apis/capability'
 
 export const FEATURE = {
   esimTransfer: 'esimTransfer',
+  volte: 'volte',
   wifiCalling: 'wifiCalling',
 } as const
 

@@ -1,4 +1,4 @@
-package device
+package wwan
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
-	usimcard "github.com/damonto/uicc-go/usim/card"
+	usimcard "github.com/damonto/wwan-go/sim/card"
 )
 
 const MaxSIMSlot = 5
@@ -25,10 +25,11 @@ const (
 )
 
 type Config struct {
-	PortType PortType
-	Device   string
-	Slot     uint8
-	IMEI     string
+	PortType        PortType
+	Device          string
+	Slot            uint8
+	IMEI            string
+	ReuseQMIClients bool
 }
 
 type Target struct {
@@ -45,6 +46,7 @@ type closer interface {
 }
 
 type adapter interface {
+	Close() error
 	AirplaneMode(ctx context.Context) (bool, error)
 	SetAirplaneMode(ctx context.Context, enabled bool) error
 	ATR(ctx context.Context) ([]byte, error)
@@ -98,12 +100,16 @@ func Open(cfg Config) (*Device, error) {
 	}
 	switch cfg.PortType {
 	case PortTypeQMI:
-		return &Device{adapter: newQMIDevice(cfg.Device, cfg.Slot, cfg.IMEI)}, nil
+		return &Device{adapter: newQMIDevice(cfg.Device, cfg.Slot, cfg.IMEI, cfg.ReuseQMIClients)}, nil
 	case PortTypeMBIM:
 		return &Device{adapter: newMBIMDevice(cfg.Device, cfg.Slot)}, nil
 	default:
 		return nil, ErrUnsupported
 	}
+}
+
+func (d *Device) Close() error {
+	return d.adapter.Close()
 }
 
 func (d *Device) AirplaneMode(ctx context.Context) (bool, error) {

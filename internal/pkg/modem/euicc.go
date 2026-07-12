@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"slices"
 
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
 
 var knownATRs = [][]byte{
@@ -38,7 +38,7 @@ func readDeviceATR(ctx context.Context, m *Modem, open deviceATROpener) ([]byte,
 		}
 	}
 	device, err := open(m)
-	if errors.Is(err, mdevice.ErrUnsupported) {
+	if errors.Is(err, wwan.ErrUnsupported) {
 		return nil, nil
 	}
 	if err != nil {

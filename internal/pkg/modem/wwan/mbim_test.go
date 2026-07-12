@@ -1,4 +1,4 @@
-package device
+package wwan
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	uiccmbim "github.com/damonto/uicc-go/mbim"
+	uiccmbim "github.com/damonto/wwan-go/mbim"
 )
 
 func TestDeviceMSISDNMBIM(t *testing.T) {

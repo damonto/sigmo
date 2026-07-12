@@ -254,6 +254,12 @@ func changeAddress(msgType uint16, flags uint16, interfaceName string, prefix ne
 	msg := make([]byte, unix.SizeofIfAddrmsg)
 	msg[0] = byte(family)
 	msg[1] = byte(prefix.Bits())
+	if family == FamilyIPv6 {
+		// Cellular point-to-point links already receive a unique address from
+		// the network. Waiting for multicast DAD races immediate route setup on
+		// freshly-created QMAP interfaces and may make RTM_NEWROUTE return EINVAL.
+		msg[2] = unix.IFA_F_NODAD
+	}
 	binary.NativeEndian.PutUint32(msg[4:8], uint32(ifi.Index))
 	msg = appendAttr(msg, unix.IFA_LOCAL, raw)
 	msg = appendAttr(msg, unix.IFA_ADDRESS, raw)

@@ -36,16 +36,12 @@ export const useModemNetwork = ({
   const selectedBands = ref<number[]>([])
   const airplaneModeSupported = ref(false)
   const airplaneModeEnabled = ref(false)
-  const volteManaged = ref(false)
-  const volteCanEnable = ref(false)
-  const volteModemRegistered = ref(false)
   const isNetworkLoading = ref(false)
   const isNetworkRegistering = ref(false)
   const isNetworkSettingsLoading = ref(false)
   const isModeUpdating = ref(false)
   const isBandUpdating = ref(false)
   const isAirplaneModeUpdating = ref(false)
-  const isVoLTEUpdating = ref(false)
 
   const hasAvailableNetworks = computed(() => availableNetworks.value.length > 0)
   const hasNetworkSelection = computed(() => selectedNetwork.value.trim().length > 0)
@@ -61,12 +57,6 @@ export const useModemNetwork = ({
   const canUpdateAirplaneMode = computed(
     () => airplaneModeSupported.value && !isAirplaneModeUpdating.value,
   )
-  const canUpdateVoLTE = computed(
-    () =>
-      !isVoLTEUpdating.value &&
-      !airplaneModeEnabled.value &&
-      (volteManaged.value || volteCanEnable.value),
-  )
   let networkSettingsRequestID = 0
 
   const resetNetworks = () => {
@@ -79,13 +69,6 @@ export const useModemNetwork = ({
     selectedBands.value = []
     airplaneModeSupported.value = false
     airplaneModeEnabled.value = false
-    resetVoLTE()
-  }
-
-  const resetVoLTE = () => {
-    volteManaged.value = false
-    volteCanEnable.value = false
-    volteModemRegistered.value = false
   }
 
   const openNetworkDialog = async () => {
@@ -130,11 +113,10 @@ export const useModemNetwork = ({
     const requestId = ++networkSettingsRequestID
     isNetworkSettingsLoading.value = true
     try {
-      const [modes, bands, airplane, volte] = await Promise.allSettled([
+      const [modes, bands, airplane] = await Promise.allSettled([
         networkApi.getModes(targetId),
         networkApi.getBands(targetId),
         networkApi.getAirplaneMode(targetId),
-        networkApi.getVoLTE(targetId),
       ])
       if (requestId !== networkSettingsRequestID || modemId.value !== targetId) return
 
@@ -167,16 +149,6 @@ export const useModemNetwork = ({
         airplaneModeSupported.value = false
         airplaneModeEnabled.value = false
       }
-
-      if (volte.status === 'fulfilled') {
-        const volteData = volte.value.data.value
-        volteManaged.value = volteData?.managed ?? false
-        volteCanEnable.value = volteData?.canEnable ?? false
-        volteModemRegistered.value = volteData?.modemRegistered ?? false
-      } else {
-        console.error('[useModemNetwork] Failed to load VoLTE:', volte.reason)
-        resetVoLTE()
-      }
     } catch (err) {
       if (requestId !== networkSettingsRequestID || modemId.value !== targetId) return
       console.error('[useModemNetwork] Failed to load network settings:', err)
@@ -186,7 +158,6 @@ export const useModemNetwork = ({
       selectedBands.value = []
       airplaneModeSupported.value = false
       airplaneModeEnabled.value = false
-      resetVoLTE()
     } finally {
       if (requestId === networkSettingsRequestID) {
         isNetworkSettingsLoading.value = false
@@ -265,28 +236,6 @@ export const useModemNetwork = ({
     }
   }
 
-  const handleVoLTEUpdate = async (managed: boolean) => {
-    const targetId = modemId.value
-    if (!targetId) return
-    if (!canUpdateVoLTE.value) return
-    isVoLTEUpdating.value = true
-    try {
-      await networkApi.setVoLTE(targetId, { managed })
-      await refreshNetworkSettings()
-      await onChanged?.(targetId)
-      onSuccess?.(
-        managed
-          ? t('modemDetail.settings.networkVoLTEEnabledSuccess')
-          : t('modemDetail.settings.networkVoLTEDisabledSuccess'),
-      )
-    } catch (err) {
-      console.error('[useModemNetwork] Failed to set VoLTE:', err)
-      onError?.(t('modemDetail.settings.networkVoLTEUpdateFailed'))
-    } finally {
-      isVoLTEUpdating.value = false
-    }
-  }
-
   watch(
     modemId,
     async (id) => {
@@ -309,16 +258,12 @@ export const useModemNetwork = ({
     selectedBands,
     airplaneModeSupported,
     airplaneModeEnabled,
-    volteManaged,
-    volteCanEnable,
-    volteModemRegistered,
     isNetworkLoading,
     isNetworkRegistering,
     isNetworkSettingsLoading,
     isModeUpdating,
     isBandUpdating,
     isAirplaneModeUpdating,
-    isVoLTEUpdating,
     hasAvailableNetworks,
     hasNetworkSelection,
     hasModeSelection,
@@ -327,7 +272,6 @@ export const useModemNetwork = ({
     canUpdateMode,
     canUpdateBands,
     canUpdateAirplaneMode,
-    canUpdateVoLTE,
     openNetworkDialog,
     handleNetworkRegister,
     refreshNetworkSettings,
@@ -335,7 +279,6 @@ export const useModemNetwork = ({
     toggleBand,
     handleBandUpdate,
     handleAirplaneModeUpdate,
-    handleVoLTEUpdate,
   }
 }
 

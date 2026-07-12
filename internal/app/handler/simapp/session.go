@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/damonto/uicc-go/usim"
-	stkpkg "github.com/damonto/uicc-go/usim/stk"
+	usim "github.com/damonto/wwan-go/sim"
+	stkpkg "github.com/damonto/wwan-go/sim/stk"
 )
 
 type wsConn interface {

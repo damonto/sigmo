@@ -4,7 +4,9 @@ package ims
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -12,6 +14,80 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
+
+func TestReleaseManagedVoLTEOnShutdown(t *testing.T) {
+	errTestMode := errors.New("read test mode")
+	tests := []struct {
+		name       string
+		access     Access
+		modems     []*mmodem.Modem
+		device     *fakeManagedVoLTEDevice
+		wantCalls  []string
+		wantErr    error
+		wantOpened bool
+		wantClosed bool
+	}{
+		{
+			name:   "ignores Wi-Fi Calling shutdown",
+			access: AccessWiFiCalling,
+			modems: []*mmodem.Modem{{EquipmentIdentifier: "modem-1"}},
+			device: &fakeManagedVoLTEDevice{},
+		},
+		{
+			name:       "restores managed VoLTE with uncanceled context",
+			access:     AccessVoLTE,
+			modems:     []*mmodem.Modem{nil, {EquipmentIdentifier: "modem-1"}},
+			device:     &fakeManagedVoLTEDevice{},
+			wantCalls:  []string{"test-mode"},
+			wantOpened: true,
+			wantClosed: true,
+		},
+		{
+			name:       "returns restore error",
+			access:     AccessVoLTE,
+			modems:     []*mmodem.Modem{{EquipmentIdentifier: "modem-1"}},
+			device:     &fakeManagedVoLTEDevice{testModeErr: errTestMode},
+			wantCalls:  []string{"test-mode"},
+			wantErr:    errTestMode,
+			wantOpened: true,
+			wantClosed: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previousOpen := openManagedVoLTEDevice
+			opened := false
+			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+				opened = true
+				return tt.device, nil
+			}
+			t.Cleanup(func() {
+				openManagedVoLTEDevice = previousOpen
+			})
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			coordinator := &coordinator{access: tt.access}
+			err := coordinator.releaseManagedVoLTEOnShutdown(ctx, tt.modems)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("releaseManagedVoLTEOnShutdown() error = %v, want %v", err, tt.wantErr)
+			}
+			if opened != tt.wantOpened {
+				t.Fatalf("openManagedVoLTEDevice called = %v, want %v", opened, tt.wantOpened)
+			}
+			if !slices.Equal(tt.device.calls, tt.wantCalls) {
+				t.Fatalf("device calls = %v, want %v", tt.device.calls, tt.wantCalls)
+			}
+			if tt.device.closed != tt.wantClosed {
+				t.Fatalf("device closed = %v, want %v", tt.device.closed, tt.wantClosed)
+			}
+			if tt.device.testModeCtxErr != nil {
+				t.Fatalf("IMSSTestMode() context error = %v, want nil", tt.device.testModeCtxErr)
+			}
+		})
+	}
+}
 
 func TestStatusFromSession(t *testing.T) {
 	now := time.Date(2026, 5, 29, 10, 0, 0, 0, time.UTC)
@@ -96,19 +172,14 @@ func TestStatusFromSession(t *testing.T) {
 	}
 }
 
-func TestApplyVoLTEPreferenceUsesSavedState(t *testing.T) {
+func TestVoLTESettingsStore(t *testing.T) {
 	tests := []struct {
-		name  string
-		event mmodem.VoLTEPreferenceEvent
+		name        string
+		enabled     bool
+		wantEnabled bool
 	}{
-		{
-			name:  "stale enabled event follows saved disabled state",
-			event: mmodem.VoLTEPreferenceEvent{ModemID: "modem-1", Enabled: true},
-		},
-		{
-			name:  "disabled event follows saved disabled state",
-			event: mmodem.VoLTEPreferenceEvent{ModemID: "modem-1"},
-		},
+		{name: "enabled", enabled: true, wantEnabled: true},
+		{name: "disabled"},
 	}
 
 	for _, tt := range tests {
@@ -123,31 +194,16 @@ func TestApplyVoLTEPreferenceUsesSavedState(t *testing.T) {
 					t.Errorf("Close() error = %v", err)
 				}
 			})
-			preferences, err := mmodem.NewNetworkPreferences(store)
+			settings := NewVoLTESettingsStore(store)
+			if err := settings.Put(ctx, "modem-1", tt.enabled); err != nil {
+				t.Fatalf("Put() error = %v", err)
+			}
+			got, err := settings.Get(ctx, "modem-1")
 			if err != nil {
-				t.Fatalf("NewNetworkPreferences() error = %v", err)
+				t.Fatalf("Get() error = %v", err)
 			}
-			if err := preferences.SaveVoLTE(ctx, tt.event.ModemID, true); err != nil {
-				t.Fatalf("SaveVoLTE(true) error = %v", err)
-			}
-			if err := preferences.SaveVoLTE(ctx, tt.event.ModemID, false); err != nil {
-				t.Fatalf("SaveVoLTE(false) error = %v", err)
-			}
-
-			c := New(Config{
-				Store:              store,
-				Access:             AccessVoLTE,
-				NetworkPreferences: preferences,
-			}).(*coordinator)
-			c.sessions[tt.event.ModemID] = &sessionState{}
-
-			c.applyVoLTEPreference(ctx, nil, tt.event)
-
-			c.mu.Lock()
-			_, exists := c.sessions[tt.event.ModemID]
-			c.mu.Unlock()
-			if exists {
-				t.Fatal("session still exists after saved VoLTE preference was disabled")
+			if got.Enabled != tt.wantEnabled || got.Preferred {
+				t.Fatalf("Get() = %+v, want enabled %v without preference", got, tt.wantEnabled)
 			}
 		})
 	}

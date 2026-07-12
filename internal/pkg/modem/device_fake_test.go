@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
 
 type fakeDeviceControl struct {
 	calls       []string
 	airplane    bool
-	state       mdevice.SIMState
+	state       wwan.SIMState
 	stateErr    error
 	powerErr    error
 	activateErr error
@@ -51,7 +51,7 @@ func (d *fakeDeviceControl) ActivateProvisioningIfSIMMissing(context.Context) er
 	return d.activateErr
 }
 
-func (d *fakeDeviceControl) SIMState(context.Context, mdevice.Target) (mdevice.SIMState, error) {
+func (d *fakeDeviceControl) SIMState(context.Context, wwan.Target) (wwan.SIMState, error) {
 	d.calls = append(d.calls, "sim-state")
 	return d.state, d.stateErr
 }
@@ -59,7 +59,7 @@ func (d *fakeDeviceControl) SIMState(context.Context, mdevice.Target) (mdevice.S
 func fakeDeviceOpener(t *testing.T, device deviceControl, openErr error) deviceControlOpener {
 	t.Helper()
 
-	return func(mdevice.Config) (deviceControl, error) {
+	return func(wwan.Config) (deviceControl, error) {
 		if openErr != nil {
 			return nil, openErr
 		}

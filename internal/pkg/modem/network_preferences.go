@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -19,11 +19,9 @@ var networkPreferencesRetryInterval = 5 * time.Second
 var errNetworkPreferencesStorageRequired = errors.New("network preferences storage is required")
 
 type NetworkPreferences struct {
-	store                 *storage.Store
-	mu                    sync.Mutex
-	openDevice            deviceControlOpener
-	volteSubscribers      map[uint64]func(VoLTEPreferenceEvent)
-	nextVoLTESubscriberID uint64
+	store      *storage.Store
+	mu         sync.Mutex
+	openDevice deviceControlOpener
 }
 
 type networkPreferenceMode struct {
@@ -35,12 +33,6 @@ type savedNetworkPreferences struct {
 	Mode         *networkPreferenceMode `json:"mode,omitempty"`
 	Bands        []ModemBand            `json:"bands,omitempty"`
 	AirplaneMode *bool                  `json:"airplaneMode,omitempty"`
-	VoLTE        *bool                  `json:"volte,omitempty"`
-}
-
-type VoLTEPreferenceEvent struct {
-	ModemID string
-	Enabled bool
 }
 
 func NewNetworkPreferences(store *storage.Store) (*NetworkPreferences, error) {
@@ -104,70 +96,12 @@ func (p *NetworkPreferences) SaveAirplaneMode(ctx context.Context, modemID strin
 	return p.saveForModemLocked(ctx, modemID, entry)
 }
 
-func (p *NetworkPreferences) SaveVoLTE(ctx context.Context, modemID string, enabled bool) error {
-	modemID = strings.TrimSpace(modemID)
-	if modemID == "" {
-		return errors.New("modem id is required")
-	}
-
-	p.mu.Lock()
-	entry, _, err := p.loadForModemLocked(ctx, modemID)
-	if err != nil {
-		p.mu.Unlock()
-		return err
-	}
-	if enabled {
-		entry.VoLTE = &enabled
-	} else {
-		entry.VoLTE = nil
-	}
-	if err := p.saveForModemLocked(ctx, modemID, entry); err != nil {
-		p.mu.Unlock()
-		return err
-	}
-	subscribers := p.volteSubscribersLocked()
-	p.mu.Unlock()
-
-	event := VoLTEPreferenceEvent{ModemID: modemID, Enabled: enabled}
-	for _, subscriber := range subscribers {
-		subscriber(event)
-	}
-	return nil
-}
-
 func (p *NetworkPreferences) SavedAirplaneMode(ctx context.Context, modemID string) (bool, bool, error) {
 	prefs, ok, err := p.loadForModem(ctx, modemID)
 	if err != nil || !ok || prefs.AirplaneMode == nil {
 		return false, false, err
 	}
 	return *prefs.AirplaneMode, true, nil
-}
-
-func (p *NetworkPreferences) SavedVoLTE(ctx context.Context, modemID string) (bool, bool, error) {
-	prefs, ok, err := p.loadForModem(ctx, modemID)
-	if err != nil || !ok || prefs.VoLTE == nil {
-		return false, false, err
-	}
-	return *prefs.VoLTE, true, nil
-}
-
-func (p *NetworkPreferences) SubscribeVoLTE(subscriber func(VoLTEPreferenceEvent)) func() {
-	if p == nil || subscriber == nil {
-		return func() {}
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.nextVoLTESubscriberID++
-	id := p.nextVoLTESubscriberID
-	if p.volteSubscribers == nil {
-		p.volteSubscribers = make(map[uint64]func(VoLTEPreferenceEvent))
-	}
-	p.volteSubscribers[id] = subscriber
-	return func() {
-		p.mu.Lock()
-		delete(p.volteSubscribers, id)
-		p.mu.Unlock()
-	}
 }
 
 // SkipEnableDisabledInAirplaneMode keeps the auto-enable lifecycle from turning RF back on.
@@ -292,21 +226,10 @@ func (p *NetworkPreferences) saveForModemLocked(ctx context.Context, modemID str
 	return p.store.Put(ctx, "modem:"+modemID, "network.preferences", entry)
 }
 
-func (p *NetworkPreferences) volteSubscribersLocked() []func(VoLTEPreferenceEvent) {
-	if len(p.volteSubscribers) == 0 {
-		return nil
-	}
-	subscribers := make([]func(VoLTEPreferenceEvent), 0, len(p.volteSubscribers))
-	for _, subscriber := range p.volteSubscribers {
-		subscribers = append(subscribers, subscriber)
-	}
-	return subscribers
-}
-
 func restoreAirplaneModePreference(ctx context.Context, m *Modem, enabled bool, open deviceControlOpener) (bool, error) {
 	device, err := openDeviceForModem(m, open)
-	if errors.Is(err, mdevice.ErrUnsupported) {
-		return false, mdevice.ErrUnsupported
+	if errors.Is(err, wwan.ErrUnsupported) {
+		return false, wwan.ErrUnsupported
 	}
 	if err != nil {
 		return false, fmt.Errorf("open device: %w", err)

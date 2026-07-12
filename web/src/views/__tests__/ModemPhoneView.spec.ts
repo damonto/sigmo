@@ -32,8 +32,12 @@ const modemApiHarness = vi.hoisted(() => ({
   getModem: vi.fn(),
 }))
 
-const networkApiHarness = vi.hoisted(() => ({
-  getVoLTE: vi.fn(),
+const volteApiHarness = vi.hoisted(() => ({
+  settings: vi.fn(),
+}))
+
+const capabilityHarness = vi.hoisted(() => ({
+  volte: true,
 }))
 
 const callAudioHarness = vi.hoisted(() => ({
@@ -123,8 +127,15 @@ vi.mock('@/apis/modem', () => ({
   useModemApi: () => modemApiHarness,
 }))
 
-vi.mock('@/apis/network', () => ({
-  useNetworkApi: () => networkApiHarness,
+vi.mock('@/apis/volte', () => ({
+  useVoLTEApi: () => volteApiHarness,
+}))
+
+vi.mock('@/composables/useCapabilities', () => ({
+  FEATURE: { volte: 'volte' },
+  useCapabilities: () => ({
+    hasFeature: (feature: string) => feature === 'volte' && capabilityHarness.volte,
+  }),
 }))
 
 vi.mock('@/composables/usePhoneCalls', () => ({
@@ -248,6 +259,7 @@ const deferredCall = () => {
 
 describe('ModemPhoneView phone interactions', () => {
   beforeEach(() => {
+    capabilityHarness.volte = true
     phoneHarness.recentCalls = []
     phoneHarness.activeCall = null
     phoneHarness.incomingCall = null
@@ -286,10 +298,10 @@ describe('ModemPhoneView phone interactions', () => {
     modemApiHarness.getModem.mockResolvedValue({
       data: ref({ sim: { regionCode: 'US' } }),
     })
-    networkApiHarness.getVoLTE.mockReset()
-    networkApiHarness.getVoLTE.mockResolvedValue({
+    volteApiHarness.settings.mockReset()
+    volteApiHarness.settings.mockResolvedValue({
       data: ref({
-        managed: false,
+        enabled: false,
         canEnable: true,
       }),
     })
@@ -624,9 +636,9 @@ describe('ModemPhoneView phone interactions', () => {
   })
 
   it('prepares outgoing audio when VoLTE is enabled', async () => {
-    networkApiHarness.getVoLTE.mockResolvedValue({
+    volteApiHarness.settings.mockResolvedValue({
       data: ref({
-        managed: true,
+        enabled: true,
         canEnable: true,
       }),
     })
@@ -641,6 +653,15 @@ describe('ModemPhoneView phone interactions', () => {
 
     expect(callAudioHarness.prepare).toHaveBeenCalled()
     expect(phoneHarness.dial).toHaveBeenCalledWith('12')
+  })
+
+  it('does not request VoLTE without the Pro capability', async () => {
+    capabilityHarness.volte = false
+
+    mountView()
+    await flushPromises()
+
+    expect(volteApiHarness.settings).not.toHaveBeenCalled()
   })
 
   it('hides the dialpad as soon as dialing starts', async () => {

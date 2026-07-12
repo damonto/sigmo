@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
+	imsgo "github.com/damonto/ims-go"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
-	"github.com/damonto/uicc-go/usim"
 )
 
 var imsInterfacePollInterval = time.Second
@@ -61,6 +61,8 @@ type pdnNetworkState struct {
 	routes   []netip.Addr
 }
 
+type imsPDNInfo = imsgo.IMSPDNNetworkInfo
+
 type pdnNetwork struct {
 	parent        string
 	mbim          bool
@@ -74,7 +76,7 @@ func newPDNNetwork(parent string, mbim bool) *pdnNetwork {
 	return &pdnNetwork{parent: parent, mbim: mbim, links: systemPDNLinks{}}
 }
 
-func (n *pdnNetwork) Replace(ctx context.Context, info usim.IMSPDNInfo) error {
+func (n *pdnNetwork) Replace(ctx context.Context, info imsPDNInfo) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if err := n.closeLocked(); err != nil {
@@ -124,7 +126,7 @@ func (n *pdnNetwork) sessionInterface(sessionID uint32) (string, error) {
 	return name, nil
 }
 
-func (n *pdnNetwork) configure(ctx context.Context, interfaceName string, info usim.IMSPDNInfo) (pdnNetworkState, error) {
+func (n *pdnNetwork) configure(ctx context.Context, interfaceName string, info imsPDNInfo) (pdnNetworkState, error) {
 	if err := waitForIMSInterface(ctx, interfaceName, func(name string) error {
 		if n.mbim {
 			if err := n.links.DisableIPv6Autoconfiguration(name); err != nil {

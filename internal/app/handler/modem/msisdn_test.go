@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
 
 func TestMSISDNUpdate(t *testing.T) {
@@ -66,7 +66,7 @@ func TestMSISDNUpdate(t *testing.T) {
 			var refreshCalled bool
 			service := &msisdn{
 				openDevice: func(*mmodem.Modem) (msisdnDevice, error) {
-					return &fakeMSISDNDevice{err: mdevice.ErrUnsupported}, nil
+					return &fakeMSISDNDevice{err: wwan.ErrUnsupported}, nil
 				},
 				newClient: func(device string) (msisdnClient, error) {
 					if device != "/dev/ttyUSB2" {

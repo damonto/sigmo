@@ -167,7 +167,10 @@ resolve_pseudo_version() {
 		return 1
 	fi
 
-	(cd "${PRO_DIR}" && go list -m -f '{{ .Version }}' "${module}@${commit}")
+	# The public dependency update may change the module graph used by the Pro
+	# module through its local sigmo replace. Allow this lookup to record any
+	# newly required checksums before the pinned go get runs.
+	(cd "${PRO_DIR}" && go list -mod=mod -m -f '{{ .Version }}' "${module}@${commit}")
 }
 
 resolve_tag_version() {

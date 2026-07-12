@@ -15,9 +15,8 @@ import (
 	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/uicc-go/qcom"
-	"github.com/damonto/uicc-go/usim"
-	usimcard "github.com/damonto/uicc-go/usim/card"
+	"github.com/damonto/wwan-go/qcom"
+	usimcard "github.com/damonto/wwan-go/sim/card"
 )
 
 func TestATReaderPortsPreferPrimaryThenFallbackPorts(t *testing.T) {
@@ -86,7 +85,26 @@ func TestATReaderPortsPreferPrimaryThenFallbackPorts(t *testing.T) {
 	}
 }
 
-func TestOpenReaderFallsBackAfterDeviceFailure(t *testing.T) {
+func TestOpenWWANRejectsUnsupportedAccess(t *testing.T) {
+	tests := []struct {
+		name   string
+		access Access
+	}{
+		{name: "empty access"},
+		{name: "unknown access", access: "satellite"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := OpenWWAN(context.Background(), nil, WWANConfig{Access: tt.access})
+			if err == nil {
+				t.Fatal("OpenWWAN() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestOpenWWANFallsBackAfterDeviceFailure(t *testing.T) {
 	modem := &mmodem.Modem{
 		PrimaryPort:    "/dev/cdc-wdm1",
 		PrimarySimSlot: 2,
@@ -98,7 +116,7 @@ func TestOpenReaderFallsBackAfterDeviceFailure(t *testing.T) {
 	}
 	var atAttempts []string
 	var deviceCalled bool
-	reader, err := openReaderWith(
+	reader, err := openWiFiCallingWWANWith(
 		context.Background(),
 		modem,
 		func(_ context.Context, got *mmodem.Modem) (usimcard.Reader, error) {
@@ -117,10 +135,10 @@ func TestOpenReaderFallsBackAfterDeviceFailure(t *testing.T) {
 		},
 	)
 	if err != nil {
-		t.Fatalf("openReaderWith() error = %v", err)
+		t.Fatalf("openWiFiCallingWWANWith() error = %v", err)
 	}
 	if reader == nil {
-		t.Fatal("openReaderWith() reader is nil")
+		t.Fatal("openWiFiCallingWWANWith() reader is nil")
 	}
 	if !deviceCalled {
 		t.Fatal("device open called = false, want true")
@@ -131,7 +149,7 @@ func TestOpenReaderFallsBackAfterDeviceFailure(t *testing.T) {
 	}
 }
 
-func TestOpenReaderReturnsJoinedReaderErrors(t *testing.T) {
+func TestOpenWWANReturnsJoinedTransportErrors(t *testing.T) {
 	modem := &mmodem.Modem{
 		PrimaryPort: "/dev/cdc-wdm1",
 		Ports: []mmodem.ModemPort{
@@ -139,7 +157,7 @@ func TestOpenReaderReturnsJoinedReaderErrors(t *testing.T) {
 			{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB6"},
 		},
 	}
-	_, err := openReaderWith(
+	_, err := openWiFiCallingWWANWith(
 		context.Background(),
 		modem,
 		func(context.Context, *mmodem.Modem) (usimcard.Reader, error) {
@@ -150,9 +168,9 @@ func TestOpenReaderReturnsJoinedReaderErrors(t *testing.T) {
 		},
 	)
 	if err == nil {
-		t.Fatal("openReaderWith() error = nil, want error")
+		t.Fatal("openWiFiCallingWWANWith() error = nil, want error")
 	}
-	for _, want := range []string{"open device reader", "open AT reader on /dev/ttyUSB6"} {
+	for _, want := range []string{"open modem WWAN", "open AT WWAN on /dev/ttyUSB6"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q does not contain %q", err, want)
 		}
@@ -202,6 +220,81 @@ func TestVoLTEInterfaceName(t *testing.T) {
 	}
 }
 
+func TestVoLTEControlPort(t *testing.T) {
+	tests := []struct {
+		name    string
+		modem   *mmodem.Modem
+		want    mmodem.ModemPort
+		wantErr bool
+	}{
+		{
+			name: "prefers QMI for IMS PDN access",
+			modem: &mmodem.Modem{Ports: []mmodem.ModemPort{
+				{PortType: mmodem.ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+				{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+			}},
+			want: mmodem.ModemPort{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+		},
+		{
+			name:  "falls back to MBIM",
+			modem: &mmodem.Modem{Ports: []mmodem.ModemPort{{PortType: mmodem.ModemPortTypeMbim, Device: "/dev/cdc-wdm0"}}},
+			want:  mmodem.ModemPort{PortType: mmodem.ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+		},
+		{name: "rejects missing control port", modem: &mmodem.Modem{}, wantErr: true},
+		{name: "rejects nil modem", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := voLTEControlPort(tt.modem)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("voLTEControlPort() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("voLTEControlPort() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("voLTEControlPort() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestVoLTESIMSlot(t *testing.T) {
+	tests := []struct {
+		name    string
+		modem   *mmodem.Modem
+		want    uint8
+		wantErr bool
+	}{
+		{name: "primary slot", modem: &mmodem.Modem{PrimarySimSlot: 2}, want: 2},
+		{name: "zero slot", modem: &mmodem.Modem{}, wantErr: true},
+		{name: "slot out of range", modem: &mmodem.Modem{PrimarySimSlot: 6}, wantErr: true},
+		{name: "nil modem", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := voLTESIMSlot(tt.modem)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("voLTESIMSlot() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("voLTESIMSlot() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("voLTESIMSlot() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConfigureIMSPDNNetwork(t *testing.T) {
 	tests := []struct {
 		name               string
@@ -240,7 +333,7 @@ func TestConfigureIMSPDNNetwork(t *testing.T) {
 					return nil
 				},
 			}
-			info := usim.IMSPDNInfo{
+			info := imsPDNInfo{
 				LocalIPv4: net.ParseIP("10.0.0.2"),
 				LocalIPv6: net.ParseIP("2001:db8::2"),
 				PCSCFIPs:  []net.IP{net.ParseIP("10.0.0.10"), net.ParseIP("2001:db8::10")},
@@ -339,7 +432,7 @@ func TestManagedVoLTECardUsesMBIMSessionInterface(t *testing.T) {
 				},
 			}
 			network := &pdnNetwork{parent: "lo", mbim: true, links: links}
-			info := usim.IMSPDNInfo{
+			info := imsPDNInfo{
 				SessionID: tt.sessionID,
 				LocalIPv6: net.ParseIP("2001:db8::2"),
 				PCSCFIPs:  []net.IP{net.ParseIP("2001:db8::10")},
@@ -410,7 +503,7 @@ func TestPDNNetworkRollsBackConfigurationOnce(t *testing.T) {
 					},
 				},
 			}
-			info := usim.IMSPDNInfo{
+			info := imsPDNInfo{
 				LocalIPv4: net.ParseIP("10.0.0.2"),
 				LocalIPv6: net.ParseIP("2001:db8::2"),
 			}
@@ -592,92 +685,6 @@ func TestIsIMSCallAlreadyPresent(t *testing.T) {
 	}
 }
 
-func TestManagedVoLTECardRecoversOccupiedIMSPDN(t *testing.T) {
-	callAlready := &qcom.WDSStartNetworkError{
-		Err:                     qcom.QMIErrorCallFailed,
-		HasVerboseCallEndReason: true,
-		VerboseCallEndReason: qcom.WDSVerboseCallEndReason{
-			Type:   qcom.WDSVerboseCallEndReasonTypeInternal,
-			Reason: 236,
-		},
-	}
-	errOpen := errors.New("open rejected")
-	errFlight := errors.New("flight mode rejected")
-	tests := []struct {
-		name         string
-		errors       []error
-		device       *fakeManagedVoLTEDevice
-		wantPDNCalls int
-		wantCalls    []string
-		wantErr      error
-	}{
-		{
-			name:         "resets once and reopens occupied IMS PDN",
-			errors:       []error{callAlready},
-			device:       &fakeManagedVoLTEDevice{},
-			wantPDNCalls: 2,
-			wantCalls:    []string{"set-airplane-mode:true", "set-airplane-mode:false", "packet-service"},
-		},
-		{
-			name:         "does not reset unrelated open error",
-			errors:       []error{errOpen},
-			device:       &fakeManagedVoLTEDevice{},
-			wantPDNCalls: 1,
-			wantErr:      errOpen,
-		},
-		{
-			name:         "returns reset error without reopening",
-			errors:       []error{callAlready},
-			device:       &fakeManagedVoLTEDevice{enableFlightErr: errFlight},
-			wantPDNCalls: 1,
-			wantCalls:    []string{"set-airplane-mode:true"},
-			wantErr:      errFlight,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			previousResetDelay := voLTEResetDelay
-			previousPollInterval := packetServicePollInterval
-			voLTEResetDelay = time.Nanosecond
-			packetServicePollInterval = time.Nanosecond
-			t.Cleanup(func() {
-				voLTEResetDelay = previousResetDelay
-				packetServicePollInterval = previousPollInterval
-			})
-
-			pdn := &fakeIMSPDNOpener{errors: slices.Clone(tt.errors)}
-			card := &managedVoLTECard{
-				Reader:  fakeUSIMReader{},
-				device:  tt.device,
-				pdn:     pdn,
-				network: fakeIMSNetwork{},
-			}
-
-			_, err := card.OpenIMSPDN(context.Background(), usim.IMSPDNConfig{})
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("OpenIMSPDN() error = %v, want %v", err, tt.wantErr)
-			}
-			if got := len(pdn.configs); got != tt.wantPDNCalls {
-				t.Fatalf("OpenIMSPDN calls = %d, want %d", got, tt.wantPDNCalls)
-			}
-			if !slices.Equal(tt.device.calls, tt.wantCalls) {
-				t.Fatalf("device calls = %v, want %v", tt.device.calls, tt.wantCalls)
-			}
-		})
-	}
-}
-
-type fakeIMSPDNOpener struct {
-	configs []usim.IMSPDNConfig
-	errors  []error
-}
-
-type fakeIMSNetwork struct{}
-
-func (fakeIMSNetwork) Replace(context.Context, usim.IMSPDNInfo) error { return nil }
-func (fakeIMSNetwork) Close() error                                   { return nil }
-
 type fakePDNLinks struct {
 	disableIPv6Autoconfiguration func(string) error
 	setUp                        func(string) error
@@ -743,19 +750,6 @@ func (f fakePDNLinks) DeleteLink(name string) error {
 		return nil
 	}
 	return f.deleteLink(name)
-}
-
-func (o *fakeIMSPDNOpener) OpenIMSPDN(_ context.Context, cfg usim.IMSPDNConfig) (*usim.IMSPDNSession, error) {
-	o.configs = append(o.configs, cfg)
-	if len(o.errors) == 0 {
-		return &usim.IMSPDNSession{}, nil
-	}
-	err := o.errors[0]
-	o.errors = o.errors[1:]
-	if err != nil {
-		return nil, err
-	}
-	return &usim.IMSPDNSession{}, nil
 }
 
 type fakeUSIMReader struct{}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Globe2, Phone, RadioTower, Smartphone } from 'lucide-vue-next'
+import { Globe2, Phone, PhoneCall, RadioTower, Smartphone } from 'lucide-vue-next'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
@@ -13,6 +13,7 @@ const { hasFeature } = useCapabilities()
 
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
 const canUseWiFiCalling = computed(() => hasFeature(FEATURE.wifiCalling))
+const canUseVoLTE = computed(() => hasFeature(FEATURE.volte))
 
 const items = computed(() => {
   const allItems = [
@@ -41,6 +42,14 @@ const items = computed(() => {
       to: { name: 'modem-settings-wifi-calling', params: { id: modemId.value } },
     },
     {
+      key: 'volte',
+      title: t('modemDetail.settings.volteTitle'),
+      description: t('modemDetail.settings.volteCategoryDescription'),
+      icon: PhoneCall,
+      routeName: 'modem-settings-volte',
+      to: { name: 'modem-settings-volte', params: { id: modemId.value } },
+    },
+    {
       key: 'device',
       title: t('modemDetail.settings.deviceTitle'),
       description: t('modemDetail.settings.deviceCategoryDescription'),
@@ -50,7 +59,11 @@ const items = computed(() => {
     },
   ]
 
-  return canUseWiFiCalling.value ? allItems : allItems.filter((item) => item.key !== 'wifi-calling')
+  return allItems.filter((item) => {
+    if (item.key === 'wifi-calling') return canUseWiFiCalling.value
+    if (item.key === 'volte') return canUseVoLTE.value
+    return true
+  })
 })
 </script>
 

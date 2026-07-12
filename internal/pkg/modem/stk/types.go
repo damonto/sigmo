@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/damonto/uicc-go/usim"
-	stkpkg "github.com/damonto/uicc-go/usim/stk"
+	usim "github.com/damonto/wwan-go/sim"
+	stkpkg "github.com/damonto/wwan-go/sim/stk"
 )
 
 var errModemRequired = errors.New("modem is required")

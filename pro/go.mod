@@ -3,11 +3,11 @@ module github.com/damonto/sigmo/pro
 go 1.26.3
 
 require (
-	github.com/damonto/euicc-go v1.1.3-0.20260629074730-8a59598949d5
-	github.com/damonto/ims-go v0.0.0-20260712021332-0d32f94395b8
+	github.com/damonto/euicc-go v1.1.3-0.20260712112734-b1c42d12dd47
+	github.com/damonto/ims-go v0.0.0-20260712160731-9864d6a2573a
 	github.com/damonto/sigmo v1.0.6
-	github.com/damonto/ts43-go v0.0.0-20260629075047-0221e7e08753
-	github.com/damonto/uicc-go v0.0.0-20260712015150-f12b90990d1f
+	github.com/damonto/ts43-go v0.0.0-20260712112859-5cbe97a5670f
+	github.com/damonto/wwan-go v0.0.0-20260712120326-e1a9b1a5ddf4
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.2.1

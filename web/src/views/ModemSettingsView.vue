@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Globe2, Phone, RadioTower, Smartphone } from 'lucide-vue-next'
+import { Globe2, Phone, PhoneCall, RadioTower, Smartphone } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -23,6 +23,7 @@ const msisdnDialogOpen = ref(false)
 const { showFeedback } = useFeedbackBanner()
 const { hasFeature } = useCapabilities()
 const canUseWiFiCalling = computed(() => hasFeature(FEATURE.wifiCalling))
+const canUseVoLTE = computed(() => hasFeature(FEATURE.volte))
 
 const { modem, isModemLoading, currentAccessTechnology, fetchModem } = useModemOverview(modemId)
 
@@ -66,6 +67,13 @@ const categoryCards = computed(() => {
       to: { name: 'modem-settings-wifi-calling', params: { id: modemId.value } },
     },
     {
+      key: 'volte',
+      title: t('modemDetail.settings.volteTitle'),
+      description: t('modemDetail.settings.volteCategoryDescription'),
+      icon: PhoneCall,
+      to: { name: 'modem-settings-volte', params: { id: modemId.value } },
+    },
+    {
       key: 'device',
       title: t('modemDetail.settings.deviceTitle'),
       description: t('modemDetail.settings.deviceCategoryDescription'),
@@ -74,8 +82,11 @@ const categoryCards = computed(() => {
     },
   ]
 
-  if (canUseWiFiCalling.value) return cards
-  return cards.filter((card) => card.key !== 'wifi-calling')
+  return cards.filter((card) => {
+    if (card.key === 'wifi-calling') return canUseWiFiCalling.value
+    if (card.key === 'volte') return canUseVoLTE.value
+    return true
+  })
 })
 
 const openMsisdnDialog = () => {

@@ -1,7 +1,7 @@
-github.com/damonto/euicc-go v1.1.3-0.20260629074730-8a59598949d5 h1:aCOL7oMt8mFzTwRsTMLxRbdiBzi3vME81tGzIKkJT5A=
-github.com/damonto/euicc-go v1.1.3-0.20260629074730-8a59598949d5/go.mod h1:DhWDwXwrYzOaqmI+VrMOSKDdcupyGbG2XfwjbBIa3TM=
-github.com/damonto/uicc-go v0.0.0-20260712015150-f12b90990d1f h1:xcxIkqKFKpx5a8adlv6KBCx1lmiVS7zuOcPRQT7qRbs=
-github.com/damonto/uicc-go v0.0.0-20260712015150-f12b90990d1f/go.mod h1:4il4tcO0GJ2Bn8827RWDiMxNOnQpEApy3pwKliaR9uc=
+github.com/damonto/euicc-go v1.1.3-0.20260712112734-b1c42d12dd47 h1:OiOlpgaXc07x4kGcLy9XjV6TVx615hSRUUlAHnALTq0=
+github.com/damonto/euicc-go v1.1.3-0.20260712112734-b1c42d12dd47/go.mod h1:z/Ac0eR/C4jGeAZAxPYuHbX0oWedueqiQuiAjySqyHg=
+github.com/damonto/wwan-go v0.0.0-20260712120326-e1a9b1a5ddf4 h1:lB5gvMfdpWY8jLYmJP6a4HDFNkKJQsQ+T0PK2D7v8SA=
+github.com/damonto/wwan-go v0.0.0-20260712120326-e1a9b1a5ddf4/go.mod h1:mW0oTnam1/0WLTbhULbcPz9i5Y5kmNE83e9pRxDpA4Y=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/gabriel-vasile/mimetype v1.4.13 h1:46nXokslUBsAJE/wMsp5gtO500a4F3Nkz9Ufpk2AcUM=

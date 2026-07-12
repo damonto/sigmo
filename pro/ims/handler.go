@@ -17,6 +17,7 @@ import (
 type Handler struct {
 	registry    modemFinder
 	wifiCalling Coordinator
+	volte       Coordinator
 }
 
 type modemFinder interface {
@@ -38,6 +39,19 @@ type SettingsResponse struct {
 	Websheet                        *websheet.Info `json:"websheet,omitempty"`
 }
 
+type UpdateVoLTESettingsRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+type VoLTESettingsResponse struct {
+	Enabled         bool   `json:"enabled"`
+	Connected       bool   `json:"connected"`
+	State           string `json:"state"`
+	DurationSeconds int64  `json:"durationSeconds"`
+	CanEnable       bool   `json:"canEnable"`
+	ModemRegistered bool   `json:"modemRegistered"`
+}
+
 const (
 	errorCodeGetSettingsFailed            = "get_ims_settings_failed"
 	errorCodeUpdateSettingsInvalidRequest = "update_ims_settings_invalid_request"
@@ -51,16 +65,71 @@ const (
 	errorCodeSetupPending                 = "ims_setup_pending"
 	errorCodeSetupDenied                  = "ims_setup_denied"
 	errorCodeWebsheetUnavailable          = "ims_websheet_unavailable"
+	errorCodeGetVoLTESettingsFailed       = "get_volte_settings_failed"
+	errorCodeUpdateVoLTEInvalidRequest    = "update_volte_settings_invalid_request"
+	errorCodeUpdateVoLTESettingsFailed    = "update_volte_settings_failed"
+	errorCodeVoLTEUnavailable             = "volte_unavailable"
 )
 
-func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, wifiCalling Coordinator) {
-	h := &Handler{registry: registry, wifiCalling: wifiCalling}
+func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, wifiCalling Coordinator, volte Coordinator) {
+	h := &Handler{registry: registry, wifiCalling: wifiCalling, volte: volte}
 	group.GET("/modems/:id/wifi-calling/settings", h.Settings)
 	group.PUT("/modems/:id/wifi-calling/settings", h.UpdateSettings)
 	group.POST("/modems/:id/wifi-calling/sessions", h.CreateSession)
 	group.DELETE("/modems/:id/wifi-calling/sessions/current", h.DeleteSession)
 	group.POST("/modems/:id/wifi-calling/websheets", h.StartWebsheet)
 	group.POST("/modems/:id/wifi-calling/emergency-address-websheets", h.StartEmergencyAddressWebsheet)
+	group.GET("/modems/:id/volte/settings", h.VoLTESettings)
+	group.PUT("/modems/:id/volte/settings", h.UpdateVoLTESettings)
+}
+
+func (h *Handler) VoLTESettings(c *echo.Context) error {
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeGetVoLTESettingsFailed)
+	}
+	status, err := h.volte.Status(ctx, modem)
+	if err != nil {
+		return httpapi.Internal(c, errorCodeGetVoLTESettingsFailed, err)
+	}
+	modemStatus, err := readVoLTEStatus(ctx, modem)
+	if err != nil {
+		return httpapi.Internal(c, errorCodeGetVoLTESettingsFailed, err)
+	}
+	return c.JSON(http.StatusOK, VoLTESettingsResponse{
+		Enabled:         status.Enabled,
+		Connected:       status.Connected,
+		State:           status.State,
+		DurationSeconds: status.DurationSeconds,
+		CanEnable:       modemStatus.Supported,
+		ModemRegistered: modemStatus.Occupied,
+	})
+}
+
+func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeUpdateVoLTESettingsFailed)
+	}
+	var req UpdateVoLTESettingsRequest
+	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateVoLTEInvalidRequest); err != nil {
+		return err
+	}
+	if req.Enabled {
+		status, err := readVoLTEStatus(ctx, modem)
+		if err != nil {
+			return httpapi.Internal(c, errorCodeUpdateVoLTESettingsFailed, err)
+		}
+		if !status.Supported {
+			return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, ErrUnavailable)
+		}
+	}
+	if err := h.volte.UpdateSettings(ctx, modem, Settings{Enabled: req.Enabled}); err != nil {
+		return httpapi.Internal(c, errorCodeUpdateVoLTESettingsFailed, err)
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 func (h *Handler) UpdateSettings(c *echo.Context) error {

@@ -13,7 +13,7 @@ import (
 	"github.com/damonto/ims-go/wfcsetup"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/pro/websheet"
-	"github.com/damonto/uicc-go/usim"
+	usim "github.com/damonto/wwan-go/sim"
 )
 
 func (c *coordinator) StartEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem) (websheet.Info, error) {
@@ -153,7 +153,7 @@ func (c modemWFCSetupCard) simPLMN() string {
 }
 
 func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem) (wfcsetup.Result, error) {
-	reader, err := openReader(ctx, modem)
+	reader, err := OpenWWAN(ctx, modem, WWANConfig{Access: AccessWiFiCalling})
 	if err != nil {
 		return wfcsetup.Result{}, fmt.Errorf("open Wi-Fi Calling SIM reader: %w", err)
 	}

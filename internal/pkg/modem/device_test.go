@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
 
 func TestOpenDeviceRejectsInvalidInput(t *testing.T) {
@@ -23,7 +23,7 @@ func TestOpenDeviceRejectsInvalidInput(t *testing.T) {
 					{PortType: ModemPortTypeAt, Device: "/dev/ttyUSB0"},
 				},
 			},
-			wantErr: mdevice.ErrUnsupported,
+			wantErr: wwan.ErrUnsupported,
 		},
 		{
 			name: "slot too large",
@@ -73,8 +73,8 @@ func TestMBIMDeviceUnsupportedOperations(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.run(context.Background()); !errors.Is(err, mdevice.ErrUnsupported) {
-				t.Fatalf("%s error = %v, want %v", tt.name, err, mdevice.ErrUnsupported)
+			if err := tt.run(context.Background()); !errors.Is(err, wwan.ErrUnsupported) {
+				t.Fatalf("%s error = %v, want %v", tt.name, err, wwan.ErrUnsupported)
 			}
 		})
 	}
@@ -85,7 +85,7 @@ func TestOpenDeviceSelectsModemDevicePort(t *testing.T) {
 		name       string
 		modem      *Modem
 		wantDevice string
-		wantType   mdevice.PortType
+		wantType   wwan.PortType
 	}{
 		{
 			name: "uses primary QMI port",
@@ -97,7 +97,7 @@ func TestOpenDeviceSelectsModemDevicePort(t *testing.T) {
 				},
 			},
 			wantDevice: "/dev/cdc-wdm1",
-			wantType:   mdevice.PortTypeQMI,
+			wantType:   wwan.PortTypeQMI,
 		},
 		{
 			name: "falls back to QMI port",
@@ -109,7 +109,7 @@ func TestOpenDeviceSelectsModemDevicePort(t *testing.T) {
 				},
 			},
 			wantDevice: "/dev/cdc-wdm1",
-			wantType:   mdevice.PortTypeQMI,
+			wantType:   wwan.PortTypeQMI,
 		},
 		{
 			name: "falls back to MBIM port",
@@ -121,7 +121,7 @@ func TestOpenDeviceSelectsModemDevicePort(t *testing.T) {
 				},
 			},
 			wantDevice: "/dev/cdc-wdm0",
-			wantType:   mdevice.PortTypeMBIM,
+			wantType:   wwan.PortTypeMBIM,
 		},
 	}
 	for _, tt := range tests {
@@ -145,7 +145,7 @@ func TestQMIDeviceConfigPrefersQMI(t *testing.T) {
 		name       string
 		modem      *Modem
 		wantDevice string
-		wantType   mdevice.PortType
+		wantType   wwan.PortType
 		wantErr    error
 	}{
 		{
@@ -162,7 +162,7 @@ func TestQMIDeviceConfigPrefersQMI(t *testing.T) {
 				},
 			},
 			wantDevice: "/dev/cdc-wdm1",
-			wantType:   mdevice.PortTypeQMI,
+			wantType:   wwan.PortTypeQMI,
 		},
 		{
 			name: "rejects modem without QMI",
@@ -172,7 +172,7 @@ func TestQMIDeviceConfigPrefersQMI(t *testing.T) {
 					{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
 				},
 			},
-			wantErr: mdevice.ErrUnsupported,
+			wantErr: wwan.ErrUnsupported,
 		},
 	}
 	for _, tt := range tests {
@@ -202,7 +202,7 @@ func TestVoLTEDeviceConfigPrefersQMIFallsBackToMBIM(t *testing.T) {
 		name       string
 		modem      *Modem
 		wantDevice string
-		wantType   mdevice.PortType
+		wantType   wwan.PortType
 		wantErr    error
 	}{
 		{name: "nil modem", wantErr: errModemRequired},
@@ -213,7 +213,7 @@ func TestVoLTEDeviceConfigPrefersQMIFallsBackToMBIM(t *testing.T) {
 				{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
 			}},
 			wantDevice: "/dev/cdc-wdm1",
-			wantType:   mdevice.PortTypeQMI,
+			wantType:   wwan.PortTypeQMI,
 		},
 		{
 			name: "uses MBIM when QMI is unavailable",
@@ -221,7 +221,7 @@ func TestVoLTEDeviceConfigPrefersQMIFallsBackToMBIM(t *testing.T) {
 				{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
 			}},
 			wantDevice: "/dev/cdc-wdm0",
-			wantType:   mdevice.PortTypeMBIM,
+			wantType:   wwan.PortTypeMBIM,
 		},
 	}
 

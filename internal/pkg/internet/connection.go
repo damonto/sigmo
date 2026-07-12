@@ -69,6 +69,7 @@ type Connector struct {
 	state              *storage.Store
 	persistence        connectionStateStore
 	networkPreferences *mmodem.NetworkPreferences
+	qmapConnections    map[string]*qmapConnection
 }
 
 type ConnectorConfig struct {
@@ -193,6 +194,7 @@ func NewConnector(cfg ConnectorConfig) (*Connector, error) {
 		connections:        make(map[string]trackedConnection),
 		preferences:        make(map[string]Preferences),
 		operations:         make(map[string]*sync.Mutex),
+		qmapConnections:    make(map[string]*qmapConnection),
 		proxy:              cfg.Proxy,
 		state:              cfg.State,
 		persistence:        dbConnectionState{store: cfg.State},
@@ -249,6 +251,9 @@ func (c *Connector) savedAirplaneMode(ctx context.Context, modem *mmodem.Modem) 
 }
 
 func (c *Connector) Current(ctx context.Context, modem *mmodem.Modem) (*Connection, error) {
+	if connection := c.qmapConnection(modem); connection != nil {
+		return connection.response(), nil
+	}
 	return c.current(ctx, modemAccess{modem: modem})
 }
 
@@ -369,6 +374,9 @@ func (c *Connector) recover(ctx context.Context, modem internetModem) error {
 }
 
 func (c *Connector) Connect(ctx context.Context, modem *mmodem.Modem, prefs Preferences) (*Connection, error) {
+	if modem != nil && modem.PrimaryPortType() == mmodem.ModemPortTypeQmi {
+		return c.connectQMAP(ctx, modem, prefs)
+	}
 	access := modemAccess{modem: modem}
 	defer c.lockModem(access.id())()
 
@@ -447,6 +455,9 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 }
 
 func (c *Connector) Disconnect(ctx context.Context, modem *mmodem.Modem) error {
+	if c.qmapConnection(modem) != nil {
+		return c.disconnectQMAP(ctx, modem)
+	}
 	access := modemAccess{modem: modem}
 	defer c.lockModem(access.id())()
 

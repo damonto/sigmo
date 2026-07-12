@@ -4,6 +4,7 @@ package ims
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -18,23 +19,22 @@ import (
 )
 
 type Config struct {
-	Store              *storage.Store
-	OnIncoming         IncomingSMSFunc
-	Websheets          *websheet.Broker
-	Access             Access
-	NetworkPreferences *mmodem.NetworkPreferences
-	Internet           *pinternet.Connector
+	Store      *storage.Store
+	OnIncoming IncomingSMSFunc
+	Websheets  *websheet.Broker
+	Access     Access
+	Internet   *pinternet.Connector
 }
 
 type coordinator struct {
-	settings           *SettingsStore
-	store              *storage.Store
-	onIncoming         IncomingSMSFunc
-	websheets          *websheet.Broker
-	access             Access
-	networkPreferences *mmodem.NetworkPreferences
-	internet           internetRestorer
-	voltePreferenceMu  sync.Mutex
+	settings      *SettingsStore
+	volteSettings *VoLTESettingsStore
+	store         *storage.Store
+	onIncoming    IncomingSMSFunc
+	websheets     *websheet.Broker
+	access        Access
+	internet      internetRestorer
+	volteUpdateMu sync.Mutex
 
 	mu               sync.Mutex
 	sessions         map[string]*sessionState
@@ -46,6 +46,7 @@ type coordinator struct {
 
 type sessionState struct {
 	id          uint64
+	modem       *mmodem.Modem
 	cancel      context.CancelFunc
 	done        <-chan struct{}
 	reconnect   chan struct{}
@@ -76,16 +77,16 @@ func New(cfg Config) Coordinator {
 		access = AccessWiFiCalling
 	}
 	return &coordinator{
-		settings:           NewSettingsStore(cfg.Store),
-		store:              cfg.Store,
-		onIncoming:         cfg.OnIncoming,
-		websheets:          cfg.Websheets,
-		access:             access,
-		networkPreferences: cfg.NetworkPreferences,
-		internet:           cfg.Internet,
-		sessions:           make(map[string]*sessionState),
-		smsSubmissions:     make(map[smsSubmissionKey]*smsSubmissionTracker),
-		voiceSubscribers:   make(map[uint64]VoiceEventFunc),
+		settings:         NewSettingsStore(cfg.Store),
+		volteSettings:    NewVoLTESettingsStore(cfg.Store),
+		store:            cfg.Store,
+		onIncoming:       cfg.OnIncoming,
+		websheets:        cfg.Websheets,
+		access:           access,
+		internet:         cfg.Internet,
+		sessions:         make(map[string]*sessionState),
+		smsSubmissions:   make(map[smsSubmissionKey]*smsSubmissionTracker),
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
 	}
 }
 
@@ -93,8 +94,6 @@ func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) error 
 	if err := c.startEnabled(ctx, registry); err != nil {
 		slog.Warn("start configured IMS access", "access", c.routeName(), "error", err)
 	}
-	unsubscribeVoLTE := c.subscribeVoLTEPreferences(ctx, registry)
-	defer unsubscribeVoLTE()
 	unsubscribe, err := registry.Subscribe(func(event mmodem.ModemEvent) error {
 		switch event.Type {
 		case mmodem.ModemEventAdded:
@@ -111,20 +110,34 @@ func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) error 
 	}
 	defer unsubscribe()
 	<-ctx.Done()
-	c.stopAll()
+	modems := c.stopAll()
+	if err := c.releaseManagedVoLTEOnShutdown(ctx, modems); err != nil {
+		slog.Warn("restore modem VoLTE on shutdown", "error", err)
+	}
 	return nil
+}
+
+func (c *coordinator) releaseManagedVoLTEOnShutdown(ctx context.Context, modems []*mmodem.Modem) error {
+	if c.access != AccessVoLTE {
+		return nil
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	defer cancel()
+	var result error
+	for _, modem := range modems {
+		if modem == nil {
+			continue
+		}
+		if err := releaseManagedVoLTE(cleanupCtx, modem, c.internet); err != nil {
+			result = errors.Join(result, fmt.Errorf("restore modem %s VoLTE: %w", modem.EquipmentIdentifier, err))
+		}
+	}
+	return result
 }
 
 func (c *coordinator) Settings(ctx context.Context, modem *mmodem.Modem) (Settings, error) {
 	if c.access == AccessVoLTE {
-		if c.networkPreferences == nil {
-			return Settings{}, nil
-		}
-		enabled, _, err := c.networkPreferences.SavedVoLTE(ctx, modem.EquipmentIdentifier)
-		if err != nil {
-			return Settings{}, fmt.Errorf("read volte preference: %w", err)
-		}
-		return Settings{Enabled: enabled}, nil
+		return c.volteSettings.Get(ctx, modem.EquipmentIdentifier)
 	}
 	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
@@ -134,21 +147,37 @@ func (c *coordinator) Settings(ctx context.Context, modem *mmodem.Modem) (Settin
 }
 
 func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, settings Settings) error {
+	if c.access == AccessVoLTE {
+		c.volteUpdateMu.Lock()
+		defer c.volteUpdateMu.Unlock()
+		if settings.Enabled {
+			profileID, err := modem.ProfileID(ctx)
+			if err != nil {
+				return err
+			}
+			if err := c.volteSettings.Put(ctx, modem.EquipmentIdentifier, true); err != nil {
+				return err
+			}
+			c.restart(modem, profileID)
+			return nil
+		}
+		if err := c.volteSettings.Put(ctx, modem.EquipmentIdentifier, settings.Enabled); err != nil {
+			return err
+		}
+		// The managed client must be fully closed before restoring the modem's
+		// internal IMS client, otherwise both clients can contend for IMS state.
+		c.stop(modem.EquipmentIdentifier)
+		if err := releaseManagedVoLTE(ctx, modem, c.internet); err != nil {
+			return fmt.Errorf("restore modem VoLTE: %w", err)
+		}
+		return nil
+	}
 	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
 		return err
 	}
-	if c.access == AccessVoLTE {
-		if c.networkPreferences == nil {
-			return ErrUnavailable
-		}
-		if err := c.networkPreferences.SaveVoLTE(ctx, modem.EquipmentIdentifier, settings.Enabled); err != nil {
-			return err
-		}
-	} else {
-		if err := c.settings.Put(ctx, profileID, settings); err != nil {
-			return err
-		}
+	if err := c.settings.Put(ctx, profileID, settings); err != nil {
+		return err
 	}
 	if settings.Enabled {
 		c.restart(modem, profileID)
@@ -172,58 +201,6 @@ func (c *coordinator) Reconnect(ctx context.Context, modem *mmodem.Modem) error 
 	}
 	c.restart(modem, profileID)
 	return nil
-}
-
-func (c *coordinator) subscribeVoLTEPreferences(ctx context.Context, registry *mmodem.Registry) func() {
-	if c.access != AccessVoLTE || c.networkPreferences == nil {
-		return func() {}
-	}
-	return c.networkPreferences.SubscribeVoLTE(func(event mmodem.VoLTEPreferenceEvent) {
-		c.applyVoLTEPreference(ctx, registry, event)
-	})
-}
-
-func (c *coordinator) applyVoLTEPreference(ctx context.Context, registry *mmodem.Registry, event mmodem.VoLTEPreferenceEvent) {
-	if event.ModemID == "" {
-		return
-	}
-	c.voltePreferenceMu.Lock()
-	defer c.voltePreferenceMu.Unlock()
-
-	enabled, _, err := c.networkPreferences.SavedVoLTE(ctx, event.ModemID)
-	if err != nil {
-		if ctx.Err() == nil {
-			slog.Warn("read VoLTE preference", "imei", event.ModemID, "error", err)
-		}
-		return
-	}
-	if !enabled {
-		// The managed IMS client must be fully closed before the modem's client
-		// is restored, otherwise both clients can contend for the same IMS state.
-		c.stop(event.ModemID)
-		if registry == nil {
-			return
-		}
-		modem, err := registry.Find(ctx, event.ModemID)
-		if err != nil {
-			if ctx.Err() == nil {
-				slog.Warn("find modem for VoLTE release", "imei", event.ModemID, "error", err)
-			}
-			return
-		}
-		if err := releaseManagedVoLTE(ctx, modem, c.internet); err != nil && ctx.Err() == nil {
-			slog.Warn("restore modem VoLTE", "imei", event.ModemID, "error", err)
-		}
-		return
-	}
-	modem, err := registry.Find(ctx, event.ModemID)
-	if err != nil {
-		if ctx.Err() == nil {
-			slog.Warn("find modem for VoLTE preference", "imei", event.ModemID, "error", err)
-		}
-		return
-	}
-	c.startIfEnabled(ctx, modem)
 }
 
 func (c *coordinator) Disconnect(_ context.Context, modem *mmodem.Modem) error {

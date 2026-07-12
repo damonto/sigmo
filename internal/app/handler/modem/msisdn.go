@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
 	msisdnclient "github.com/damonto/sigmo/internal/pkg/modem/msisdn"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
 
 var errMSISDNInvalidNumber = errors.New("invalid phone number")
@@ -55,7 +55,7 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 	if err != nil {
 		return fmt.Errorf("open modem device: %w", err)
 	}
-	if err := device.UpdateMSISDN(ctx, number); errors.Is(err, mdevice.ErrUnsupported) {
+	if err := device.UpdateMSISDN(ctx, number); errors.Is(err, wwan.ErrUnsupported) {
 		if err := m.updateWithAT(modem, number); err != nil {
 			return err
 		}

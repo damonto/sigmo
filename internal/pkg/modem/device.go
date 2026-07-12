@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"strings"
 
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
 
-const maxSIMSlot = mdevice.MaxSIMSlot
+const maxSIMSlot = wwan.MaxSIMSlot
 
 type devicePort struct {
-	portType mdevice.PortType
+	portType wwan.PortType
 	device   string
 }
 
@@ -21,49 +21,50 @@ type deviceControl interface {
 	SetAirplaneMode(ctx context.Context, enabled bool) error
 	PowerCycleSIM(ctx context.Context) error
 	ActivateProvisioningIfSIMMissing(ctx context.Context) error
-	SIMState(ctx context.Context, target mdevice.Target) (mdevice.SIMState, error)
+	SIMState(ctx context.Context, target wwan.Target) (wwan.SIMState, error)
 	MSISDN(ctx context.Context) (string, error)
 	UpdateMSISDN(ctx context.Context, number string) error
 }
 
-type deviceControlOpener func(mdevice.Config) (deviceControl, error)
+type deviceControlOpener func(wwan.Config) (deviceControl, error)
 
-func OpenDevice(m *Modem) (*mdevice.Device, error) {
+func OpenDevice(m *Modem) (*wwan.Device, error) {
 	cfg, err := deviceConfig(m)
 	if err != nil {
 		return nil, err
 	}
-	return mdevice.Open(cfg)
+	return wwan.Open(cfg)
 }
 
-func OpenVoLTEStatusDevice(m *Modem) (*mdevice.Device, error) {
+func OpenVoLTEStatusDevice(m *Modem) (*wwan.Device, error) {
 	cfg, err := voLTEDeviceConfig(m)
 	if err != nil {
 		return nil, err
 	}
-	return mdevice.Open(cfg)
+	return wwan.Open(cfg)
 }
 
-func voLTEDeviceConfig(m *Modem) (mdevice.Config, error) {
+func voLTEDeviceConfig(m *Modem) (wwan.Config, error) {
 	if m == nil {
-		return mdevice.Config{}, errModemRequired
+		return wwan.Config{}, errModemRequired
 	}
 	slot, err := deviceSlot(m)
 	if err != nil {
-		return mdevice.Config{}, err
+		return wwan.Config{}, err
 	}
 	port, err := selectQMIDevicePort(m)
-	if errors.Is(err, mdevice.ErrUnsupported) {
+	if errors.Is(err, wwan.ErrUnsupported) {
 		port, err = selectDevicePort(m)
 	}
 	if err != nil {
-		return mdevice.Config{}, err
+		return wwan.Config{}, err
 	}
-	return mdevice.Config{
-		PortType: port.portType,
-		Device:   port.device,
-		Slot:     slot,
-		IMEI:     m.EquipmentIdentifier,
+	return wwan.Config{
+		PortType:        port.portType,
+		Device:          port.device,
+		Slot:            slot,
+		IMEI:            m.EquipmentIdentifier,
+		ReuseQMIClients: port.portType == wwan.PortTypeQMI,
 	}, nil
 }
 
@@ -99,63 +100,63 @@ func openQMIDeviceForSlot(m *Modem, slot uint8, open deviceControlOpener) (devic
 	return openDeviceWith(cfg, open)
 }
 
-func openDeviceWith(cfg mdevice.Config, open deviceControlOpener) (deviceControl, error) {
+func openDeviceWith(cfg wwan.Config, open deviceControlOpener) (deviceControl, error) {
 	if open == nil {
-		return mdevice.Open(cfg)
+		return wwan.Open(cfg)
 	}
 	return open(cfg)
 }
 
-func readDeviceSIMState(ctx context.Context, m *Modem, target SIMTarget, open deviceControlOpener) (mdevice.SIMState, error) {
+func readDeviceSIMState(ctx context.Context, m *Modem, target SIMTarget, open deviceControlOpener) (wwan.SIMState, error) {
 	device, err := openQMIDeviceForModem(m, open)
-	if errors.Is(err, mdevice.ErrUnsupported) {
-		return mdevice.SIMState{}, nil
+	if errors.Is(err, wwan.ErrUnsupported) {
+		return wwan.SIMState{}, nil
 	}
 	if err != nil {
-		return mdevice.SIMState{}, err
+		return wwan.SIMState{}, err
 	}
 	return device.SIMState(ctx, deviceTarget(target))
 }
 
-func deviceConfig(m *Modem) (mdevice.Config, error) {
+func deviceConfig(m *Modem) (wwan.Config, error) {
 	if m == nil {
-		return mdevice.Config{}, errModemRequired
+		return wwan.Config{}, errModemRequired
 	}
 	slot, err := deviceSlot(m)
 	if err != nil {
-		return mdevice.Config{}, err
+		return wwan.Config{}, err
 	}
 	return deviceConfigForSlot(m, slot)
 }
 
-func qmiDeviceConfig(m *Modem) (mdevice.Config, error) {
+func qmiDeviceConfig(m *Modem) (wwan.Config, error) {
 	if m == nil {
-		return mdevice.Config{}, errModemRequired
+		return wwan.Config{}, errModemRequired
 	}
 	slot, err := deviceSlot(m)
 	if err != nil {
-		return mdevice.Config{}, err
+		return wwan.Config{}, err
 	}
 	return qmiDeviceConfigForSlot(m, slot)
 }
 
-func qmiDeviceConfigForTarget(m *Modem, target SIMTarget) (mdevice.Config, error) {
+func qmiDeviceConfigForTarget(m *Modem, target SIMTarget) (wwan.Config, error) {
 	slot, err := deviceTargetSlot(m, target)
 	if err != nil {
-		return mdevice.Config{}, err
+		return wwan.Config{}, err
 	}
 	return qmiDeviceConfigForSlot(m, slot)
 }
 
-func qmiDeviceConfigForSlot(m *Modem, slot uint8) (mdevice.Config, error) {
+func qmiDeviceConfigForSlot(m *Modem, slot uint8) (wwan.Config, error) {
 	if m == nil {
-		return mdevice.Config{}, errModemRequired
+		return wwan.Config{}, errModemRequired
 	}
 	port, err := selectQMIDevicePort(m)
 	if err != nil {
-		return mdevice.Config{}, err
+		return wwan.Config{}, err
 	}
-	return mdevice.Config{
+	return wwan.Config{
 		PortType: port.portType,
 		Device:   port.device,
 		Slot:     slot,
@@ -163,15 +164,15 @@ func qmiDeviceConfigForSlot(m *Modem, slot uint8) (mdevice.Config, error) {
 	}, nil
 }
 
-func deviceConfigForSlot(m *Modem, slot uint8) (mdevice.Config, error) {
+func deviceConfigForSlot(m *Modem, slot uint8) (wwan.Config, error) {
 	if m == nil {
-		return mdevice.Config{}, errModemRequired
+		return wwan.Config{}, errModemRequired
 	}
 	port, err := selectDevicePort(m)
 	if err != nil {
-		return mdevice.Config{}, err
+		return wwan.Config{}, err
 	}
-	return mdevice.Config{
+	return wwan.Config{
 		PortType: port.portType,
 		Device:   port.device,
 		Slot:     slot,
@@ -202,7 +203,7 @@ func selectDevicePort(m *Modem) (devicePort, error) {
 			return devicePort{portType: portType, device: port.Device}, nil
 		}
 	}
-	return devicePort{}, mdevice.ErrUnsupported
+	return devicePort{}, wwan.ErrUnsupported
 }
 
 func selectQMIDevicePort(m *Modem) (devicePort, error) {
@@ -210,17 +211,17 @@ func selectQMIDevicePort(m *Modem) (devicePort, error) {
 		if port.PortType != ModemPortTypeQmi || strings.TrimSpace(port.Device) == "" {
 			continue
 		}
-		return devicePort{portType: mdevice.PortTypeQMI, device: port.Device}, nil
+		return devicePort{portType: wwan.PortTypeQMI, device: port.Device}, nil
 	}
-	return devicePort{}, mdevice.ErrUnsupported
+	return devicePort{}, wwan.ErrUnsupported
 }
 
-func devicePortType(portType ModemPortType) (mdevice.PortType, bool) {
+func devicePortType(portType ModemPortType) (wwan.PortType, bool) {
 	switch portType {
 	case ModemPortTypeQmi:
-		return mdevice.PortTypeQMI, true
+		return wwan.PortTypeQMI, true
 	case ModemPortTypeMbim:
-		return mdevice.PortTypeMBIM, true
+		return wwan.PortTypeMBIM, true
 	default:
 		return 0, false
 	}
@@ -253,8 +254,8 @@ func deviceTargetSlot(m *Modem, target SIMTarget) (uint8, error) {
 	return slot, nil
 }
 
-func deviceTarget(target SIMTarget) mdevice.Target {
-	return mdevice.Target{
+func deviceTarget(target SIMTarget) wwan.Target {
+	return wwan.Target{
 		Slot:  target.Slot,
 		ICCID: strings.TrimSpace(target.ICCID),
 	}

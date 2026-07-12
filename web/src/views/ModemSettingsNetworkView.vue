@@ -30,30 +30,24 @@ const {
   selectedBands,
   airplaneModeSupported,
   airplaneModeEnabled,
-  volteManaged,
-  volteCanEnable,
-  volteModemRegistered,
   isNetworkLoading,
   isNetworkRegistering,
   isNetworkSettingsLoading,
   isModeUpdating,
   isBandUpdating,
   isAirplaneModeUpdating,
-  isVoLTEUpdating,
   hasAvailableNetworks,
   hasNetworkSelection,
   canScanNetworks,
   canUpdateMode,
   canUpdateBands,
   canUpdateAirplaneMode,
-  canUpdateVoLTE,
   openNetworkDialog,
   handleNetworkRegister,
   handleModeUpdate,
   toggleBand,
   handleBandUpdate,
   handleAirplaneModeUpdate,
-  handleVoLTEUpdate,
 } = useModemNetwork({
   modemId,
   onRegistered: fetchModem,
@@ -83,24 +77,18 @@ const {
       :selected-bands="selectedBands"
       :airplane-mode-supported="airplaneModeSupported"
       :airplane-mode-enabled="airplaneModeEnabled"
-      :volte-managed="volteManaged"
-      :volte-can-enable="volteCanEnable"
-      :volte-modem-registered="volteModemRegistered"
       :is-settings-loading="isNetworkSettingsLoading"
       :is-mode-updating="isModeUpdating"
       :is-band-updating="isBandUpdating"
       :is-airplane-mode-updating="isAirplaneModeUpdating"
-      :is-volte-updating="isVoLTEUpdating"
       :can-update-mode="canUpdateMode"
       :can-update-bands="canUpdateBands"
       :can-update-airplane-mode="canUpdateAirplaneMode"
-      :can-update-volte="canUpdateVoLTE"
       @scan="openNetworkDialog"
       @toggle-band="toggleBand"
       @update-mode="handleModeUpdate"
       @update-bands="handleBandUpdate"
       @update-airplane-mode="handleAirplaneModeUpdate"
-      @update-volte="handleVoLTEUpdate"
     />
   </ModemSettingsShell>
 

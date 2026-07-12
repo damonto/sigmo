@@ -92,18 +92,13 @@ const mountSection = () =>
       selectedBands: [71],
       airplaneModeSupported: true,
       airplaneModeEnabled: false,
-      volteManaged: false,
-      volteCanEnable: true,
-      volteModemRegistered: false,
       isSettingsLoading: false,
       isModeUpdating: false,
       isBandUpdating: false,
       isAirplaneModeUpdating: false,
-      isVolteUpdating: false,
       canUpdateMode: true,
       canUpdateBands: true,
       canUpdateAirplaneMode: true,
-      canUpdateVolte: true,
     },
     global: {
       stubs,
@@ -116,20 +111,6 @@ describe('NetworkSettingsContent', () => {
 
     expect(wrapper.text()).toContain('4G')
     expect(wrapper.text()).toContain('LTE B41')
-  })
-
-  it('renders the VoLTE Internet IP family notice', () => {
-    const wrapper = mountSection()
-
-    expect(wrapper.text()).toContain('modemDetail.settings.networkVoLTEInternetIPTypeNotice')
-  })
-
-  it('renders modem-managed VoLTE only when IMSA is registered', async () => {
-    const wrapper = mountSection()
-
-    await wrapper.setProps({ volteModemRegistered: true })
-
-    expect(wrapper.text()).toContain('modemDetail.settings.networkVoLTEModemRegisteredDescription')
   })
 
   it('emits band toggle events', async () => {
@@ -146,13 +127,5 @@ describe('NetworkSettingsContent', () => {
     await wrapper.find('#network-airplane-mode').setValue(true)
 
     expect(wrapper.emitted('updateAirplaneMode')).toEqual([[true]])
-  })
-
-  it('emits volte updates', async () => {
-    const wrapper = mountSection()
-
-    await wrapper.find('#network-volte').setValue(true)
-
-    expect(wrapper.emitted('updateVolte')).toEqual([[true]])
   })
 })

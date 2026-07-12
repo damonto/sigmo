@@ -6,8 +6,8 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
 import { useModemApi } from '@/apis/modem'
-import { useNetworkApi } from '@/apis/network'
 import { useUssdApi } from '@/apis/ussd'
+import { useVoLTEApi } from '@/apis/volte'
 import BackButton from '@/components/BackButton.vue'
 import DraggableFab from '@/components/fab/DraggableFab.vue'
 import ModemDialpad from '@/components/modem/ModemDialpad.vue'
@@ -31,6 +31,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Spinner } from '@/components/ui/spinner'
+import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 import { useModemCallSession } from '@/composables/useModemCallSession'
 import { useModemPhoneCountry } from '@/composables/useModemPhoneCountry'
 import { useStickyTopBar } from '@/composables/useStickyTopBar'
@@ -47,7 +48,9 @@ import type { UssdAction } from '@/types/ussd'
 const route = useRoute()
 const { t } = useI18n()
 const modemApi = useModemApi()
-const networkApi = useNetworkApi()
+const volteApi = useVoLTEApi()
+const { hasFeature } = useCapabilities()
+const volteAvailable = computed(() => hasFeature(FEATURE.volte))
 const ussdApi = useUssdApi()
 const backButtonRef = ref<HTMLElement | null>(null)
 const dialpadRef = ref<{ focus: () => void } | null>(null)
@@ -251,19 +254,23 @@ const loadImsRouteStatus = async () => {
     volteEnabled.value = false
     return
   }
-  const [wifiCalling, volte] = await Promise.allSettled([
-    modemApi.getWiFiCallingSettings(targetId),
-    networkApi.getVoLTE(targetId),
+  const [wifiCallingResult, volte] = await Promise.all([
+    Promise.allSettled([modemApi.getWiFiCallingSettings(targetId)]).then(([result]) => result),
+    volteAvailable.value
+      ? Promise.allSettled([volteApi.settings(targetId)]).then(([result]) => result)
+      : Promise.resolve(null),
   ])
-  if (wifiCalling.status === 'fulfilled') {
-    wifiCallingConnected.value = wifiCalling.value.data.value?.connected ?? false
+  if (wifiCallingResult.status === 'fulfilled') {
+    wifiCallingConnected.value = wifiCallingResult.value.data.value?.connected ?? false
   } else {
-    console.warn('[ModemPhoneView] load Wi-Fi Calling status:', wifiCalling.reason)
+    console.warn('[ModemPhoneView] load Wi-Fi Calling status:', wifiCallingResult.reason)
     wifiCallingConnected.value = false
   }
-  if (volte.status === 'fulfilled') {
-    volteEnabled.value = volte.value.data.value?.managed ?? false
-  } else {
+  if (!volteAvailable.value) {
+    volteEnabled.value = false
+  } else if (volte?.status === 'fulfilled') {
+    volteEnabled.value = volte.value.data.value?.enabled ?? false
+  } else if (volte?.status === 'rejected') {
     console.warn('[ModemPhoneView] load VoLTE status:', volte.reason)
     volteEnabled.value = false
   }

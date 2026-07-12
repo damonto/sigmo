@@ -12,7 +12,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/pkg/carrier"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
@@ -277,7 +277,7 @@ func (c *catalog) applyOverviewExtensions(ctx context.Context, device *mmodem.Mo
 
 func readAirplaneMode(ctx context.Context, m *mmodem.Modem) (bool, error) {
 	device, err := mmodem.OpenDevice(m)
-	if errors.Is(err, mdevice.ErrUnsupported) {
+	if errors.Is(err, wwan.ErrUnsupported) {
 		return false, nil
 	}
 	if err != nil {

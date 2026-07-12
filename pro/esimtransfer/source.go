@@ -12,14 +12,14 @@ import (
 	eccid "github.com/damonto/euicc-go/driver/ccid"
 	sgp22 "github.com/damonto/euicc-go/v2"
 	"github.com/damonto/ts43-go"
-	"github.com/damonto/uicc-go/at"
-	"github.com/damonto/uicc-go/ccid"
-	"github.com/damonto/uicc-go/usim"
-	usimcard "github.com/damonto/uicc-go/usim/card"
+	"github.com/damonto/wwan-go/at"
+	"github.com/damonto/wwan-go/ccid"
+	usim "github.com/damonto/wwan-go/sim"
+	usimcard "github.com/damonto/wwan-go/sim/card"
 
 	ilpa "github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
@@ -70,7 +70,7 @@ func openModemSource(ctx context.Context, modem *mmodem.Modem) (ts43.Channel, fu
 		}
 		return sourceFromReader(ctx, reader, logger)
 	}
-	if !errors.Is(err, mdevice.ErrUnsupported) {
+	if !errors.Is(err, wwan.ErrUnsupported) {
 		return nil, nil, err
 	}
 	reader, err := openATSource(ctx, modem)

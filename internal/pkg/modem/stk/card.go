@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 
-	uiccat "github.com/damonto/uicc-go/at"
-	"github.com/damonto/uicc-go/usim"
-	usimcard "github.com/damonto/uicc-go/usim/card"
+	uiccat "github.com/damonto/wwan-go/at"
+	usim "github.com/damonto/wwan-go/sim"
+	usimcard "github.com/damonto/wwan-go/sim/card"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
 
 func OpenCard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
@@ -22,7 +22,7 @@ func OpenCard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
 	if err == nil {
 		return card, nil
 	}
-	if !errors.Is(err, mdevice.ErrUnsupported) {
+	if !errors.Is(err, wwan.ErrUnsupported) {
 		return Card{}, err
 	}
 	return openATCard(ctx, modem)

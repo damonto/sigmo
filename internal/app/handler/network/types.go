@@ -49,13 +49,3 @@ type AirplaneModeResponse struct {
 type SetAirplaneModeRequest struct {
 	Enabled bool `json:"enabled"`
 }
-
-type VoLTEResponse struct {
-	Managed         bool `json:"managed"`
-	CanEnable       bool `json:"canEnable"`
-	ModemRegistered bool `json:"modemRegistered"`
-}
-
-type SetVoLTERequest struct {
-	Managed bool `json:"managed"`
-}

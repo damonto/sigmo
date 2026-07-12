@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
 
 func TestAirplaneModeUnsupported(t *testing.T) {
@@ -37,7 +37,7 @@ func TestAirplaneModeUnsupported(t *testing.T) {
 	}
 
 	err = n.SetAirplaneMode(context.Background(), modem, SetAirplaneModeRequest{Enabled: true})
-	if !errors.Is(err, mdevice.ErrUnsupported) {
+	if !errors.Is(err, wwan.ErrUnsupported) {
 		t.Fatalf("SetAirplaneMode() error = %v, want unsupported", err)
 	}
 }

@@ -1,4 +1,4 @@
-package device
+package wwan
 
 import (
 	"context"
@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	uiccmbim "github.com/damonto/uicc-go/mbim"
-	"github.com/damonto/uicc-go/usim"
-	usimcard "github.com/damonto/uicc-go/usim/card"
+	uiccmbim "github.com/damonto/wwan-go/mbim"
+	usim "github.com/damonto/wwan-go/sim"
+	usimcard "github.com/damonto/wwan-go/sim/card"
 )
 
 type mbimDevice struct {
@@ -29,6 +29,10 @@ func newMBIMDevice(device string, slot uint8) mbimDevice {
 			return openMBIMReader(ctx, device, slot)
 		},
 	}
+}
+
+func (u mbimDevice) Close() error {
+	return nil
 }
 
 type mbimAirplaneModeReader interface {
@@ -177,7 +181,7 @@ func mbimIMSContextAvailable(ctx context.Context, reader mbimNetworkReader) (boo
 		return false, fmt.Errorf("read MBIM provisioned contexts: %w", err)
 	}
 	for _, profile := range contexts {
-		if profile.ContextType != uiccmbim.ContextTypeIMS || !strings.EqualFold(strings.TrimSpace(profile.AccessString), usim.DefaultIMSPDNAPN) {
+		if profile.ContextType != uiccmbim.ContextTypeIMS || !strings.EqualFold(strings.TrimSpace(profile.AccessString), uiccmbim.DefaultIMSPDNAPN) {
 			continue
 		}
 		return true, nil
@@ -232,7 +236,7 @@ func setMBIMAirplaneMode(ctx context.Context, reader mbimAirplaneModeReader, ena
 	return nil
 }
 
-func openMBIMReader(ctx context.Context, device string, slot uint8) (*uiccmbim.Reader, error) {
+func openMBIMReader(ctx context.Context, device string, slot uint8) (*uiccmbim.Client, error) {
 	return uiccmbim.Open(ctx, uiccmbim.WithProxy(device), uiccmbim.WithSlot(int(slot)))
 }
 

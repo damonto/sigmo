@@ -21,6 +21,8 @@ const (
 	scopePrefix          = "profile:"
 	keyEnabled           = "wifi_calling.enabled"
 	keyPreferred         = "wifi_calling.preferred"
+	modemScopePrefix     = "modem:"
+	keyVoLTEEnabled      = "volte.enabled"
 	actionUSSDInitialize = "initialize"
 	actionUSSDReply      = "reply"
 
@@ -139,6 +141,46 @@ type SettingsStore struct {
 	store *storage.Store
 }
 
+type VoLTESettingsStore struct {
+	store *storage.Store
+}
+
+func NewVoLTESettingsStore(store *storage.Store) *VoLTESettingsStore {
+	return &VoLTESettingsStore{store: store}
+}
+
+func (s *VoLTESettingsStore) Get(ctx context.Context, modemID string) (Settings, error) {
+	if s == nil || s.store == nil {
+		return Settings{}, nil
+	}
+	scope, err := modemScope(modemID)
+	if err != nil {
+		return Settings{}, err
+	}
+	var enabled bool
+	if err := s.store.Get(ctx, scope, keyVoLTEEnabled, &enabled); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return Settings{}, nil
+		}
+		return Settings{}, fmt.Errorf("read VoLTE enabled: %w", err)
+	}
+	return Settings{Enabled: enabled}, nil
+}
+
+func (s *VoLTESettingsStore) Put(ctx context.Context, modemID string, enabled bool) error {
+	if s == nil || s.store == nil {
+		return nil
+	}
+	scope, err := modemScope(modemID)
+	if err != nil {
+		return err
+	}
+	if err := s.store.Put(ctx, scope, keyVoLTEEnabled, enabled); err != nil {
+		return fmt.Errorf("save VoLTE enabled: %w", err)
+	}
+	return nil
+}
+
 func NewSettingsStore(store *storage.Store) *SettingsStore {
 	return &SettingsStore{store: store}
 }
@@ -187,4 +229,12 @@ func profileScope(profileID string) (string, error) {
 		return "", mmodem.ErrProfileIDMissing
 	}
 	return scopePrefix + profileID, nil
+}
+
+func modemScope(modemID string) (string, error) {
+	modemID = strings.TrimSpace(modemID)
+	if modemID == "" {
+		return "", errors.New("modem identifier is required")
+	}
+	return modemScopePrefix + modemID, nil
 }

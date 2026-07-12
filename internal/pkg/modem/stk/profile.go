@@ -1,14 +1,14 @@
 package stk
 
 import (
-	stkpkg "github.com/damonto/uicc-go/usim/stk"
+	stkpkg "github.com/damonto/wwan-go/sim/stk"
 
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
 
-func terminalCATProfile() mdevice.CATProfile {
+func terminalCATProfile() wwan.CATProfile {
 	profile := terminalProfile()
-	return mdevice.CATProfile{
+	return wwan.CATProfile{
 		Data:             profile.Bytes(),
 		EventMask:        profile.QMIEventMask(),
 		FullFunctionMask: profile.QMIFullFunctionMask(),

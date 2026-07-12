@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	stkpkg "github.com/damonto/uicc-go/usim/stk"
+	stkpkg "github.com/damonto/wwan-go/sim/stk"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	mstk "github.com/damonto/sigmo/internal/pkg/modem/stk"

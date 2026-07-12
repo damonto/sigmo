@@ -32,10 +32,9 @@ var proIMS = func(app *proApp) error {
 		Websheets: app.Websheets(),
 	})
 	volte := pims.New(pims.Config{
-		Store:              runtime.Storage,
-		Access:             pims.AccessVoLTE,
-		NetworkPreferences: runtime.NetworkPreferences,
-		Internet:           runtime.Internet,
+		Store:    runtime.Storage,
+		Access:   pims.AccessVoLTE,
+		Internet: runtime.Internet,
 		OnIncoming: func(ctx context.Context, incoming pims.IncomingSMS) error {
 			return runtime.Relay.ForwardRoutedSMS(ctx, incoming.ModemID, incoming.Message)
 		},
@@ -65,7 +64,7 @@ var proIMS = func(app *proApp) error {
 		return forwardCalls(ctx, runtime.Relay, calls)
 	})
 	runtime.AddRoute(func(group *echo.Group, deps router.RegisterConfig) error {
-		pims.RegisterRoutes(group, deps.Registry, wifiCalling)
+		pims.RegisterRoutes(group, deps.Registry, wifiCalling, volte)
 		procall.RegisterRoutes(group, deps.Registry, calls, media)
 		return nil
 	})

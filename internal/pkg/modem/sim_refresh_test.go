@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/godbus/dbus/v5"
 )
 
@@ -59,7 +59,7 @@ func TestEnsureSIMVisible(t *testing.T) {
 				Sim:                 &SIM{Identifier: "old"},
 			},
 			device: &fakeDeviceControl{
-				state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
+				state: wwan.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
 			},
 			timeout:   5 * time.Millisecond,
 			wantErr:   context.DeadlineExceeded,
@@ -75,7 +75,7 @@ func TestEnsureSIMVisible(t *testing.T) {
 				Sim:                 &SIM{Identifier: "old"},
 			},
 			device: &fakeDeviceControl{
-				state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Slot: 1, ICCID: target.ICCID},
+				state: wwan.SIMState{Supported: true, Matches: true, Recoverable: true, Slot: 1, ICCID: target.ICCID},
 			},
 			timeout:   5 * time.Millisecond,
 			wantErr:   context.DeadlineExceeded,
@@ -92,7 +92,7 @@ func TestEnsureSIMVisible(t *testing.T) {
 				Sim:                 &SIM{Identifier: "old"},
 			},
 			device: &fakeDeviceControl{
-				state: mdevice.SIMState{Supported: true, Recoverable: true, Slot: 1},
+				state: wwan.SIMState{Supported: true, Recoverable: true, Slot: 1},
 			},
 			timeout:   5 * time.Millisecond,
 			wantErr:   context.DeadlineExceeded,
@@ -109,7 +109,7 @@ func TestEnsureSIMVisible(t *testing.T) {
 				Sim:                 &SIM{Identifier: "old"},
 			},
 			device: &fakeDeviceControl{
-				state: mdevice.SIMState{Supported: true, Recoverable: true, Ready: true, Slot: 1},
+				state: wwan.SIMState{Supported: true, Recoverable: true, Ready: true, Slot: 1},
 			},
 			timeout:   5 * time.Millisecond,
 			wantErr:   context.DeadlineExceeded,
@@ -141,7 +141,7 @@ func TestEnsureSIMVisible(t *testing.T) {
 				Sim:                 &SIM{Identifier: "old"},
 			},
 			device: &fakeDeviceControl{
-				state: mdevice.SIMState{Supported: true, Recoverable: true, ICCIDMismatch: true, Slot: 1, ICCID: "8986000000000000001"},
+				state: wwan.SIMState{Supported: true, Recoverable: true, ICCIDMismatch: true, Slot: 1, ICCID: "8986000000000000001"},
 			},
 			timeout:   5 * time.Millisecond,
 			wantErr:   context.DeadlineExceeded,
@@ -278,7 +278,7 @@ func TestDeviceSIMTargetDoesNotMatchSlotOnlyTargetWithoutSlotStatus(t *testing.T
 		PrimarySimSlot:      1,
 	}
 	device := &fakeDeviceControl{
-		state: mdevice.SIMState{Supported: true, Ready: true, Slot: 1},
+		state: wwan.SIMState{Supported: true, Ready: true, Slot: 1},
 	}
 	openDevice := fakeDeviceOpener(t, device, nil)
 
@@ -317,7 +317,7 @@ func TestDeviceSIMStateMarksICCIDMismatchRecoverable(t *testing.T) {
 				PrimarySimSlot:      1,
 			}
 			device := &fakeDeviceControl{
-				state: mdevice.SIMState{Supported: true, Recoverable: true, ICCIDMismatch: true, Slot: 1, ICCID: "8986000000000000001"},
+				state: wwan.SIMState{Supported: true, Recoverable: true, ICCIDMismatch: true, Slot: 1, ICCID: "8986000000000000001"},
 			}
 			openDevice := fakeDeviceOpener(t, device, nil)
 
@@ -369,7 +369,7 @@ func TestEnsureSIMVisiblePowerCyclesWhenModemDoesNotReenumerate(t *testing.T) {
 		Sim:                 &SIM{Identifier: "old"},
 	}
 	device := &fakeDeviceControl{
-		state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Slot: 1, ICCID: target.ICCID},
+		state: wwan.SIMState{Supported: true, Matches: true, Recoverable: true, Slot: 1, ICCID: target.ICCID},
 	}
 	registry := &Registry{
 		modems:     map[dbus.ObjectPath]*Modem{"/modem/1": modem},
@@ -418,7 +418,7 @@ func TestEnsureSIMVisibleDoesNotTreatFreshSnapshotAsReenumeration(t *testing.T) 
 		Sim:                 &SIM{Identifier: "old"},
 	}
 	device := &fakeDeviceControl{
-		state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
+		state: wwan.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
 	}
 	registry := &Registry{
 		modems: map[dbus.ObjectPath]*Modem{
@@ -457,8 +457,8 @@ func TestPowerCycleSIMRequiresDevice(t *testing.T) {
 	}
 
 	_, err := registry.PowerCycleSIM(context.Background(), modem, SIMTarget{})
-	if !errors.Is(err, mdevice.ErrUnsupported) {
-		t.Fatalf("PowerCycleSIM() error = %v, want %v", err, mdevice.ErrUnsupported)
+	if !errors.Is(err, wwan.ErrUnsupported) {
+		t.Fatalf("PowerCycleSIM() error = %v, want %v", err, wwan.ErrUnsupported)
 	}
 }
 
@@ -632,7 +632,7 @@ func TestEnsureSIMVisibleSkipsInhibitWhenDisableEnableWorks(t *testing.T) {
 	}
 
 	device := &fakeDeviceControl{
-		state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
+		state: wwan.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
 	}
 	registry := &Registry{
 		modems:     map[dbus.ObjectPath]*Modem{object.path: modem},
@@ -715,7 +715,7 @@ func TestEnsureSIMVisibleInhibitsAfterDisableEnableDoesNotWork(t *testing.T) {
 	}
 
 	device := &fakeDeviceControl{
-		state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
+		state: wwan.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
 	}
 	registry := &Registry{
 		modems:     map[dbus.ObjectPath]*Modem{object.path: modem},
@@ -753,7 +753,7 @@ func TestPowerCycleSIMRefreshesWithoutSecondPowerCycle(t *testing.T) {
 		Sim:                 &SIM{Identifier: "old"},
 	}
 	device := &fakeDeviceControl{
-		state: mdevice.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
+		state: wwan.SIMState{Supported: true, Matches: true, Recoverable: true, Ready: true, Slot: 1, ICCID: target.ICCID},
 	}
 	registry := &Registry{
 		modems:     map[dbus.ObjectPath]*Modem{"/modem/1": modem},

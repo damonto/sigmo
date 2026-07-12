@@ -75,6 +75,11 @@ const router = createRouter({
           name: 'modem-settings-wifi-calling',
           component: () => import('@/views/ModemSettingsWiFiCallingView.vue'),
         },
+        {
+          path: 'settings/volte',
+          name: 'modem-settings-volte',
+          component: () => import('@/views/ModemSettingsVoLTEView.vue'),
+        },
       ],
     },
   ],

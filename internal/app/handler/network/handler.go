@@ -8,7 +8,7 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	mdevice "github.com/damonto/sigmo/internal/pkg/modem/device"
+	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -36,10 +36,6 @@ const (
 	errorCodeSetAirplaneModeFailed   = "set_airplane_mode_failed"
 	errorCodeSetAirplaneModeInvalid  = "set_airplane_mode_invalid_request"
 	errorCodeAirplaneModeUnsupported = "airplane_mode_unsupported"
-	errorCodeGetVoLTEFailed          = "get_volte_failed"
-	errorCodeSetVoLTEFailed          = "set_volte_failed"
-	errorCodeSetVoLTEInvalid         = "set_volte_invalid_request"
-	errorCodeVoLTEUnavailable        = "volte_unavailable"
 )
 
 func New(registry *mmodem.Registry, preferences *mmodem.NetworkPreferences, store *storage.Store) (*Handler, error) {
@@ -178,42 +174,10 @@ func (h *Handler) SetAirplaneMode(c *echo.Context) error {
 		return httpapi.BadRequest(c, errorCodeSetAirplaneModeInvalid, err)
 	}
 	if err := h.networks.SetAirplaneMode(ctx, modem, req); err != nil {
-		if errors.Is(err, mdevice.ErrUnsupported) {
+		if errors.Is(err, wwan.ErrUnsupported) {
 			return httpapi.BadRequest(c, errorCodeAirplaneModeUnsupported, err)
 		}
 		return httpapi.Internal(c, errorCodeSetAirplaneModeFailed, err)
-	}
-	return c.NoContent(http.StatusNoContent)
-}
-
-func (h *Handler) VoLTE(c *echo.Context) error {
-	ctx := c.Request().Context()
-	modem, err := h.registry.Find(ctx, c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeGetVoLTEFailed)
-	}
-	response, err := h.networks.VoLTE(ctx, modem)
-	if err != nil {
-		return httpapi.Internal(c, errorCodeGetVoLTEFailed, err)
-	}
-	return c.JSON(http.StatusOK, response)
-}
-
-func (h *Handler) SetVoLTE(c *echo.Context) error {
-	ctx := c.Request().Context()
-	modem, err := h.registry.Find(ctx, c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeSetVoLTEFailed)
-	}
-	var req SetVoLTERequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeSetVoLTEInvalid, err)
-	}
-	if err := h.networks.SetVoLTE(ctx, modem, req); err != nil {
-		if errors.Is(err, errVoLTEUnavailable) {
-			return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, err)
-		}
-		return httpapi.Internal(c, errorCodeSetVoLTEFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
