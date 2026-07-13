@@ -49,8 +49,11 @@ jobs:
       matrix:
         target:
           - { name: linux-amd64, arch: amd64, musl: false }
+          - { name: linux-amd64-musl, arch: amd64, musl: true }
           - { name: linux-arm64, arch: arm64, musl: false }
           - { name: linux-arm64-musl, arch: arm64, musl: true }
+          - { name: linux-arm, arch: arm, musl: false }
+          - { name: linux-arm-musl, arch: arm, musl: true }
 
     steps:
       - name: Checkout code

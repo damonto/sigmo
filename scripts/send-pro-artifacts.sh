@@ -8,7 +8,6 @@ BOT_TOKEN="${SIGMO_PRO_TELEGRAM_BOT_TOKEN:-}"
 API_BASE="${SIGMO_PRO_TELEGRAM_API:-https://api.telegram.org}"
 MAX_BYTES="${SIGMO_TELEGRAM_MAX_BYTES:-52428800}"
 MAX_RETRIES="${SIGMO_TELEGRAM_MAX_RETRIES:-5}"
-SEND_INTERVAL="${SIGMO_TELEGRAM_SEND_INTERVAL:-1}"
 send_attempts=0
 send_failures=0
 send_chats=()
@@ -135,7 +134,6 @@ send_documents() {
 			send_document "${chat_id}" "${archive}" "${text}" || return 1
 		else
 			send_document "${chat_id}" "${archive}" "" || return 1
-			sleep "${SEND_INTERVAL}"
 		fi
 	done
 }

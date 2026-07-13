@@ -11,7 +11,7 @@ PRO_SUMFILE="${PRO_SUMFILE:-${PRO_MODFILE%.mod}.sum}"
 OUTPUT_DIR="${SIGMO_BUILD_DIR:-${ROOT_DIR}/build/pro}"
 MANIFEST="${SIGMO_PRO_MANIFEST:-${OUTPUT_DIR}/artifacts.tsv}"
 GOPRIVATE_PATTERN="${GOPRIVATE:-${PRO_GOPRIVATE}}"
-PRO_TARGETS="${SIGMO_PRO_TARGETS:-linux-amd64 linux-arm64 linux-arm64-musl}"
+PRO_TARGETS="${SIGMO_PRO_TARGETS:-linux-amd64 linux-amd64-musl linux-arm64 linux-arm64-musl linux-arm linux-arm-musl}"
 TGID_DIGITS=16
 TGID_PLACEHOLDER="XXXXXXXXXXXXXXXXX"
 
@@ -210,6 +210,9 @@ musl_interpreter() {
 		amd64)
 			printf '%s\n' "/lib/ld-musl-x86_64.so.1"
 			;;
+		arm)
+			printf '%s\n' "/lib/ld-musl-armhf.so.1"
+			;;
 		arm64)
 			printf '%s\n' "/lib/ld-musl-aarch64.so.1"
 			;;
@@ -229,11 +232,14 @@ target_arch() {
 	fi
 
 	case "${name}" in
-		linux-amd64)
+		linux-amd64 | linux-amd64-musl)
 			printf '%s\n' "amd64"
 			;;
 		linux-arm64 | linux-arm64-musl)
 			printf '%s\n' "arm64"
+			;;
+		linux-arm | linux-arm-musl)
+			printf '%s\n' "arm"
 			;;
 		*)
 			echo "unknown Pro target: ${name}" >&2
