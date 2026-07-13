@@ -90,15 +90,17 @@ send_document() {
 			return
 		fi
 
-		if [ "${http_code}" = "429" ]; then
-			retry_after="$(jq -r '.parameters.retry_after // empty' "${response}")"
-			if [[ "${retry_after}" =~ ^[0-9]+$ ]] && [ "${attempt}" -lt "${MAX_RETRIES}" ]; then
-				rm -f "${response}"
-				attempt=$((attempt + 1))
-				echo "Telegram rate limited ${chat_id}; retrying in ${retry_after}s (${attempt}/${MAX_RETRIES})" >&2
-				sleep "${retry_after}"
-				continue
-			fi
+		retry_after="$(jq -r '
+			.parameters.retry_after //
+			(.description // "" | try capture("retry after (?<seconds>[0-9]+)"; "i").seconds) //
+			empty
+		' "${response}")"
+		if [[ "${retry_after}" =~ ^[0-9]+$ ]] && [ "${attempt}" -lt "${MAX_RETRIES}" ]; then
+			rm -f "${response}"
+			attempt=$((attempt + 1))
+			echo "Telegram rate limited ${chat_id}; retrying in ${retry_after}s (${attempt}/${MAX_RETRIES})" >&2
+			sleep "${retry_after}"
+			continue
 		fi
 
 		echo "send Telegram document to ${chat_id}: HTTP ${http_code}" >&2
