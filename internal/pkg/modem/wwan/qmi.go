@@ -28,10 +28,10 @@ type qmiDevice struct {
 	slot         uint8
 	imei         string
 	reuseClients bool
-	openUIM      func(context.Context, uint8) (qmiUIMReader, error)
-	openRadio    func(context.Context) (qmiAirplaneModeReader, error)
+	openClient   func(context.Context, uint8) (qmiClient, error)
+	openRadio    func(context.Context) (qmiRadio, error)
 	mu           sync.Mutex
-	readers      map[uint8]qmiUIMReader
+	clients      map[uint8]qmiClient
 	closeOnce    sync.Once
 	closed       bool
 	closeErr     error
@@ -43,11 +43,11 @@ func newQMIDevice(device string, slot uint8, imei string, reuseClients bool) *qm
 		slot:         slot,
 		imei:         imei,
 		reuseClients: reuseClients,
-		openUIM: func(ctx context.Context, slot uint8) (qmiUIMReader, error) {
-			return openQMIUIM(ctx, device, slot)
+		openClient: func(ctx context.Context, slot uint8) (qmiClient, error) {
+			return openQMIClient(ctx, device, slot)
 		},
-		openRadio: func(ctx context.Context) (qmiAirplaneModeReader, error) {
-			return openQMIUIM(ctx, device, 1)
+		openRadio: func(ctx context.Context) (qmiRadio, error) {
+			return openQMIClient(ctx, device, 1)
 		},
 	}
 }
@@ -56,26 +56,26 @@ func (u *qmiDevice) Close() error {
 	u.closeOnce.Do(func() {
 		u.mu.Lock()
 		u.closed = true
-		readers := make([]qmiUIMReader, 0, len(u.readers))
-		for _, reader := range u.readers {
-			readers = append(readers, reader)
+		clients := make([]qmiClient, 0, len(u.clients))
+		for _, client := range u.clients {
+			clients = append(clients, client)
 		}
-		u.readers = nil
+		u.clients = nil
 		u.mu.Unlock()
 
-		for _, reader := range readers {
-			u.closeErr = errors.Join(u.closeErr, reader.Close())
+		for _, client := range clients {
+			u.closeErr = errors.Join(u.closeErr, client.Close())
 		}
 	})
 	return u.closeErr
 }
 
-func (u *qmiDevice) uimReader(ctx context.Context, slot uint8) (qmiUIMReader, func(), error) {
+func (u *qmiDevice) acquireClient(ctx context.Context, slot uint8) (qmiClient, func(), error) {
 	if !u.reuseClients {
-		reader, err := u.openUIM(ctx, slot)
-		return reader, func() {
-			if reader != nil {
-				closeQMIUIMReader(reader)
+		client, err := u.openClient(ctx, slot)
+		return client, func() {
+			if client != nil {
+				closeQMIClient(client)
 			}
 		}, err
 	}
@@ -85,86 +85,86 @@ func (u *qmiDevice) uimReader(ctx context.Context, slot uint8) (qmiUIMReader, fu
 	if u.closed {
 		return nil, func() {}, errors.New("QMI device is closed")
 	}
-	if reader := u.readers[slot]; reader != nil {
-		return reader, func() {}, nil
+	if client := u.clients[slot]; client != nil {
+		return client, func() {}, nil
 	}
-	reader, err := u.openUIM(ctx, slot)
+	client, err := u.openClient(ctx, slot)
 	if err != nil {
 		return nil, func() {}, err
 	}
-	if u.readers == nil {
-		u.readers = make(map[uint8]qmiUIMReader)
+	if u.clients == nil {
+		u.clients = make(map[uint8]qmiClient)
 	}
-	u.readers[slot] = reader
-	return reader, func() {}, nil
+	u.clients[slot] = client
+	return client, func() {}, nil
 }
 
-func (u *qmiDevice) radioReader(ctx context.Context) (qmiAirplaneModeReader, func(), error) {
+func (u *qmiDevice) acquireRadio(ctx context.Context) (qmiRadio, func(), error) {
 	if !u.reuseClients {
-		reader, err := u.openRadio(ctx)
-		return reader, func() {
-			if reader != nil {
-				closeReader("close QMI airplane mode reader", reader)
+		client, err := u.openRadio(ctx)
+		return client, func() {
+			if client != nil {
+				closeClient("close QMI radio client", client)
 			}
 		}, err
 	}
 
-	reader, _, err := u.uimReader(ctx, 1)
+	client, _, err := u.acquireClient(ctx, 1)
 	if err != nil {
 		return nil, func() {}, err
 	}
-	radio, ok := reader.(qmiAirplaneModeReader)
+	radio, ok := client.(qmiRadio)
 	if !ok {
-		return nil, func() {}, errors.New("QMI reader does not support airplane mode")
+		return nil, func() {}, errors.New("QMI client does not support radio control")
 	}
 	return radio, func() {}, nil
 }
 
 func (u *qmiDevice) USIM(ctx context.Context) (usimcard.Reader, error) {
-	return openQMIUSIMReader(ctx, u.device, u.slot)
+	return openQMIUSIM(ctx, u.device, u.slot)
 }
 
 func (u *qmiDevice) USIMWithCAT(ctx context.Context, profile CATProfile) (usimcard.Reader, error) {
-	reader, err := openQMIUIM(ctx, u.device, u.slot)
+	client, err := openQMIClient(ctx, u.device, u.slot)
 	if err != nil {
-		return nil, fmt.Errorf("open QMI UIM reader: %w", err)
+		return nil, fmt.Errorf("open QMI UIM client: %w", err)
 	}
-	if err := configureQMICAT(ctx, u.imei, qcom.NewCAT(reader), profile); err != nil {
-		return nil, errors.Join(err, reader.Close())
+	if err := configureQMICAT(ctx, u.imei, qcom.NewCAT(client), profile); err != nil {
+		return nil, errors.Join(err, client.Close())
 	}
-	adapter, err := usim.NewQCOM(reader)
+	adapter, err := usim.NewQCOM(client)
 	if err != nil {
-		return nil, errors.Join(err, reader.Close())
+		return nil, errors.Join(err, client.Close())
 	}
 	return adapter, nil
 }
 
-func openQMIUIM(ctx context.Context, device string, slot uint8) (*qcom.Client, error) {
+func openQMIClient(ctx context.Context, device string, slot uint8) (*qcom.Client, error) {
 	transport, err := qmi.Open(ctx, qmi.WithProxy(device))
 	if err != nil {
 		return nil, err
 	}
-	reader, err := qcom.NewClient(transport, qcom.WithSlot(slot))
+	client, err := qcom.NewClient(transport, qcom.WithSlot(slot))
 	if err != nil {
 		return nil, errors.Join(err, transport.Close())
 	}
-	return reader, nil
+	return client, nil
 }
 
-func openQMIUSIMReader(ctx context.Context, device string, slot uint8) (usimcard.Reader, error) {
+func openQMIUSIM(ctx context.Context, device string, slot uint8) (usimcard.Reader, error) {
 	if err := validateSIMSlot(slot); err != nil {
 		return nil, err
 	}
-	reader, err := openQMIUIM(ctx, device, slot)
+	client, err := openQMIClient(ctx, device, slot)
 	if err != nil {
 		return nil, err
 	}
-	if err := reader.ActivateSlot(ctx); err != nil {
-		return nil, errors.Join(err, reader.Close())
+	if err := client.ActivateSlot(ctx); err != nil {
+		return nil, errors.Join(err, client.Close())
 	}
-	adapter, err := usim.NewQCOM(reader)
+	adapter, err := usim.NewQCOM(client)
 	if err != nil {
-		return nil, errors.Join(err, reader.Close())
+		return nil, errors.Join(err, client.Close())
 	}
 	return adapter, nil
 }
@@ -174,13 +174,13 @@ var (
 	qmiSIMPowerCycleDelay  = 100 * time.Millisecond
 )
 
-type qmiAirplaneModeReader interface {
+type qmiRadio interface {
 	OperatingMode(ctx context.Context) (qcom.DMSOperatingMode, error)
 	SetOperatingMode(ctx context.Context, mode qcom.DMSOperatingMode) error
 	Close() error
 }
 
-type qmiUIMReader interface {
+type qmiClient interface {
 	MSISDN(ctx context.Context) (qcom.DMSGetMSISDNResponse, error)
 	FileAttributes(ctx context.Context, file qcom.File) (qcom.FileAttributes, error)
 	WriteRecord(ctx context.Context, req qcom.RecordWrite) error
@@ -200,13 +200,13 @@ type qmiUIMReader interface {
 }
 
 func (u *qmiDevice) MSISDN(ctx context.Context) (string, error) {
-	reader, release, err := u.uimReader(ctx, u.slot)
+	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return "", fmt.Errorf("open QMI UIM reader: %w", err)
+		return "", fmt.Errorf("open QMI UIM client: %w", err)
 	}
 	defer release()
 
-	result, err := reader.MSISDN(ctx)
+	result, err := client.MSISDN(ctx)
 	if err != nil {
 		return "", fmt.Errorf("read QMI MSISDN: %w", err)
 	}
@@ -214,13 +214,13 @@ func (u *qmiDevice) MSISDN(ctx context.Context) (string, error) {
 }
 
 func (u *qmiDevice) UpdateMSISDN(ctx context.Context, number string) error {
-	reader, release, err := u.uimReader(ctx, u.slot)
+	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return fmt.Errorf("open QMI UIM reader: %w", err)
+		return fmt.Errorf("open QMI UIM client: %w", err)
 	}
 	defer release()
 
-	attrs, err := reader.FileAttributes(ctx, qmiMSISDNFile)
+	attrs, err := client.FileAttributes(ctx, qmiMSISDNFile)
 	if err != nil {
 		return fmt.Errorf("read QMI MSISDN file attributes: %w", err)
 	}
@@ -228,7 +228,7 @@ func (u *qmiDevice) UpdateMSISDN(ctx context.Context, number string) error {
 	if err != nil {
 		return fmt.Errorf("encode MSISDN record: %w", err)
 	}
-	if err := reader.WriteRecord(ctx, qcom.RecordWrite{File: qmiMSISDNFile, Record: 1, Data: data}); err != nil {
+	if err := client.WriteRecord(ctx, qcom.RecordWrite{File: qmiMSISDNFile, Record: 1, Data: data}); err != nil {
 		return fmt.Errorf("write QMI MSISDN record: %w", err)
 	}
 	return nil
@@ -261,13 +261,13 @@ type usimApplication struct {
 }
 
 func (u *qmiDevice) AirplaneMode(ctx context.Context) (bool, error) {
-	reader, release, err := u.radioReader(ctx)
+	client, release, err := u.acquireRadio(ctx)
 	if err != nil {
-		return false, fmt.Errorf("open QMI airplane mode reader: %w", err)
+		return false, fmt.Errorf("open QMI radio client: %w", err)
 	}
 	defer release()
 
-	mode, err := reader.OperatingMode(ctx)
+	mode, err := client.OperatingMode(ctx)
 	if err != nil {
 		return false, fmt.Errorf("read QMI operating mode: %w", err)
 	}
@@ -275,21 +275,21 @@ func (u *qmiDevice) AirplaneMode(ctx context.Context) (bool, error) {
 }
 
 func (u *qmiDevice) SetAirplaneMode(ctx context.Context, enabled bool) error {
-	reader, release, err := u.radioReader(ctx)
+	client, release, err := u.acquireRadio(ctx)
 	if err != nil {
-		return fmt.Errorf("open QMI airplane mode reader: %w", err)
+		return fmt.Errorf("open QMI radio client: %w", err)
 	}
 	defer release()
 
-	return setQMIAirplaneMode(ctx, reader, enabled)
+	return setQMIAirplaneMode(ctx, client, enabled)
 }
 
-func setQMIAirplaneMode(ctx context.Context, reader qmiAirplaneModeReader, enabled bool) error {
+func setQMIAirplaneMode(ctx context.Context, client qmiRadio, enabled bool) error {
 	mode := qcom.DMSOperatingModeOnline
 	if enabled {
 		mode = qcom.DMSOperatingModeLowPower
 	}
-	if err := reader.SetOperatingMode(ctx, mode); err != nil {
+	if err := client.SetOperatingMode(ctx, mode); err != nil {
 		return fmt.Errorf("set QMI operating mode: %w", err)
 	}
 	return nil
@@ -308,13 +308,13 @@ func qmiOperatingModeAirplane(mode qcom.DMSOperatingMode) bool {
 }
 
 func (u *qmiDevice) ATR(ctx context.Context) ([]byte, error) {
-	reader, release, err := u.uimReader(ctx, u.slot)
+	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return nil, fmt.Errorf("open QMI UIM reader: %w", err)
+		return nil, fmt.Errorf("open QMI UIM client: %w", err)
 	}
 	defer release()
 
-	atr, err := reader.ATR(ctx)
+	atr, err := client.ATR(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read QMI UIM ATR: %w", err)
 	}
@@ -322,13 +322,13 @@ func (u *qmiDevice) ATR(ctx context.Context) ([]byte, error) {
 }
 
 func (u *qmiDevice) VoLTEStatus(ctx context.Context) (VoLTEStatus, error) {
-	reader, release, err := u.uimReader(ctx, u.slot)
+	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return VoLTEStatus{}, fmt.Errorf("open QMI UIM reader: %w", err)
+		return VoLTEStatus{}, fmt.Errorf("open QMI UIM client: %w", err)
 	}
 	defer release()
 
-	status, err := reader.IMSAStatus(ctx)
+	status, err := client.IMSAStatus(ctx)
 	if err != nil {
 		switch {
 		case errors.Is(err, qcom.QMIErrorNetworkUnsupported),
@@ -341,20 +341,17 @@ func (u *qmiDevice) VoLTEStatus(ctx context.Context) (VoLTEStatus, error) {
 			return VoLTEStatus{}, fmt.Errorf("read QMI IMSA status: %w", err)
 		}
 	}
-	return VoLTEStatus{
-		Supported: true,
-		Occupied:  status.IMSRegistered(),
-	}, nil
+	return VoLTEStatus{Occupied: status.IMSRegistered()}, nil
 }
 
 func (u *qmiDevice) PacketServiceStatus(ctx context.Context) (PacketServiceStatus, error) {
-	reader, release, err := u.uimReader(ctx, u.slot)
+	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return PacketServiceStatus{}, fmt.Errorf("open QMI UIM reader: %w", err)
+		return PacketServiceStatus{}, fmt.Errorf("open QMI UIM client: %w", err)
 	}
 	defer release()
 
-	serving, err := reader.NASServingSystem(ctx)
+	serving, err := client.NASServingSystem(ctx)
 	if err != nil {
 		return PacketServiceStatus{}, fmt.Errorf("read QMI NAS serving system: %w", err)
 	}
@@ -366,18 +363,18 @@ func (u *qmiDevice) PacketServiceStatus(ctx context.Context) (PacketServiceStatu
 }
 
 func (u *qmiDevice) IMSProfileIndex(ctx context.Context) (uint8, error) {
-	reader, release, err := u.uimReader(ctx, u.slot)
+	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return 0, fmt.Errorf("open QMI UIM reader: %w", err)
+		return 0, fmt.Errorf("open QMI UIM client: %w", err)
 	}
 	defer release()
 
-	profiles, err := reader.WDSProfiles(ctx, qcom.WDSProfileType3GPP)
+	profiles, err := client.WDSProfiles(ctx, qcom.WDSProfileType3GPP)
 	if err != nil {
 		return 0, fmt.Errorf("read QMI WDS profiles: %w", err)
 	}
 	for _, profile := range profiles {
-		settings, err := reader.WDSProfileSettings(ctx, profile.ID)
+		settings, err := client.WDSProfileSettings(ctx, profile.ID)
 		if err != nil {
 			return 0, fmt.Errorf("read QMI WDS profile %d: %w", profile.ID.Index, err)
 		}
@@ -396,13 +393,13 @@ func isIMSProfile(settings qcom.WDSProfileSettings) bool {
 }
 
 func (u *qmiDevice) IMSSTestMode(ctx context.Context) (bool, error) {
-	reader, release, err := u.uimReader(ctx, u.slot)
+	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return false, fmt.Errorf("open QMI UIM reader: %w", err)
+		return false, fmt.Errorf("open QMI UIM client: %w", err)
 	}
 	defer release()
 
-	enabled, err := reader.IMSSTestMode(ctx)
+	enabled, err := client.IMSSTestMode(ctx)
 	if err != nil {
 		return false, fmt.Errorf("read QMI IMSS test mode: %w", err)
 	}
@@ -410,26 +407,26 @@ func (u *qmiDevice) IMSSTestMode(ctx context.Context) (bool, error) {
 }
 
 func (u *qmiDevice) SetIMSSTestMode(ctx context.Context, enabled bool) error {
-	reader, release, err := u.uimReader(ctx, u.slot)
+	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return fmt.Errorf("open QMI UIM reader: %w", err)
+		return fmt.Errorf("open QMI UIM client: %w", err)
 	}
 	defer release()
 
-	if err := reader.SetIMSSTestMode(ctx, enabled); err != nil {
+	if err := client.SetIMSSTestMode(ctx, enabled); err != nil {
 		return fmt.Errorf("set QMI IMSS test mode: %w", err)
 	}
 	return nil
 }
 
 func (u *qmiDevice) ActivateProvisioningIfSIMMissing(ctx context.Context) error {
-	reader, release, err := u.uimReader(ctx, u.slot)
+	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return fmt.Errorf("open QMI UIM reader: %w", err)
+		return fmt.Errorf("open QMI UIM client: %w", err)
 	}
 	defer release()
 
-	status, err := readQMICardStatus(ctx, reader)
+	status, err := readQMICardStatus(ctx, client)
 	if err != nil {
 		return err
 	}
@@ -455,20 +452,20 @@ func (u *qmiDevice) ActivateProvisioningIfSIMMissing(ctx context.Context) error 
 		"applicationState", app.ApplicationState,
 		"personalizationState", app.PersonalizationState,
 	)
-	if err := changeQMIProvisioningSession(ctx, reader, u.slot, app.AID); err != nil {
+	if err := changeQMIProvisioningSession(ctx, client, u.slot, app.AID); err != nil {
 		return fmt.Errorf("activate provisioning session: %w", err)
 	}
 	return nil
 }
 
 func (u *qmiDevice) PowerCycleSIM(ctx context.Context) error {
-	reader, release, err := u.uimReader(ctx, u.slot)
+	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return fmt.Errorf("open QMI UIM reader: %w", err)
+		return fmt.Errorf("open QMI UIM client: %w", err)
 	}
 	defer release()
 
-	if err := reader.PowerOffSIM(ctx, u.slot); err != nil {
+	if err := client.PowerOffSIM(ctx, u.slot); err != nil {
 		return fmt.Errorf("power off sim: %w", err)
 	}
 	slog.Info("sim powered off", "imei", u.imei, "slot", u.slot)
@@ -476,7 +473,7 @@ func (u *qmiDevice) PowerCycleSIM(ctx context.Context) error {
 	time.Sleep(qmiSIMPowerCycleDelay)
 
 	restoreCtx := context.WithoutCancel(ctx)
-	if err := qmiPowerOnSIM(restoreCtx, reader, u.slot); err != nil {
+	if err := qmiPowerOnSIM(restoreCtx, client, u.slot); err != nil {
 		return fmt.Errorf("power on sim: %w", err)
 	}
 	slog.Info("sim powered on", "imei", u.imei, "slot", u.slot)
@@ -490,16 +487,16 @@ func (u *qmiDevice) SIMState(ctx context.Context, target Target) (SIMState, erro
 	}
 	target.ICCID = strings.TrimSpace(target.ICCID)
 
-	reader, release, err := u.uimReader(ctx, slot)
+	client, release, err := u.acquireClient(ctx, slot)
 	if err != nil {
-		return SIMState{Supported: true, Slot: slot}, fmt.Errorf("open QMI UIM reader: %w", err)
+		return SIMState{Supported: true, Slot: slot}, fmt.Errorf("open QMI UIM client: %w", err)
 	}
 	defer release()
 
 	state := SIMState{Supported: true, Slot: slot}
 	var status slotStatus
 	var slotStatusRead bool
-	status, err = readQMISlotStatus(ctx, reader)
+	status, err = readQMISlotStatus(ctx, client)
 	if err != nil && !errors.Is(err, qcom.QMIErrorNotSupported) {
 		return state, fmt.Errorf("read device slot status: %w", err)
 	}
@@ -511,7 +508,7 @@ func (u *qmiDevice) SIMState(ctx context.Context, target Target) (SIMState, erro
 		state.ICCIDMismatch = target.ICCID != "" && state.ICCID != "" && state.ICCID != target.ICCID
 	}
 
-	cardStatus, err := readQMICardStatus(ctx, reader)
+	cardStatus, err := readQMICardStatus(ctx, client)
 	if err != nil {
 		return state, fmt.Errorf("read device card status: %w", err)
 	}
@@ -524,30 +521,30 @@ func (u *qmiDevice) SIMState(ctx context.Context, target Target) (SIMState, erro
 	return state, nil
 }
 
-func qmiPowerOnSIM(ctx context.Context, reader qmiUIMReader, slot uint8) error {
+func qmiPowerOnSIM(ctx context.Context, client qmiClient, slot uint8) error {
 	powerCtx, cancel := context.WithTimeout(ctx, qmiPowerRestoreTimeout)
 	defer cancel()
-	return reader.PowerOnSIM(powerCtx, qcom.PowerOnSIMRequest{Slot: slot})
+	return client.PowerOnSIM(powerCtx, qcom.PowerOnSIMRequest{Slot: slot})
 }
 
-func readQMISlotStatus(ctx context.Context, reader qmiUIMReader) (slotStatus, error) {
-	status, err := reader.SlotStatus(ctx)
+func readQMISlotStatus(ctx context.Context, client qmiClient) (slotStatus, error) {
+	status, err := client.SlotStatus(ctx)
 	if err != nil {
 		return slotStatus{}, fmt.Errorf("read QMI UIM slot status: %w", err)
 	}
 	return qmiSlotStatus(status)
 }
 
-func readQMICardStatus(ctx context.Context, reader qmiUIMReader) (cardStatus, error) {
-	status, err := reader.CardStatus(ctx)
+func readQMICardStatus(ctx context.Context, client qmiClient) (cardStatus, error) {
+	status, err := client.CardStatus(ctx)
 	if err != nil {
 		return cardStatus{}, fmt.Errorf("read QMI UIM card status: %w", err)
 	}
 	return qmiCardStatus(status), nil
 }
 
-func changeQMIProvisioningSession(ctx context.Context, reader qmiUIMReader, slot uint8, aid []byte) error {
-	if err := reader.ChangeProvisioningSession(ctx, qcom.ChangeProvisioningSessionRequest{
+func changeQMIProvisioningSession(ctx context.Context, client qmiClient, slot uint8, aid []byte) error {
+	if err := client.ChangeProvisioningSession(ctx, qcom.ChangeProvisioningSessionRequest{
 		Session:  qcom.SessionPrimaryGWProvisioning,
 		Activate: true,
 		Slot:     slot,
@@ -601,8 +598,8 @@ func configureQMICAT(ctx context.Context, imei string, cat *qcom.CAT, profile CA
 	return nil
 }
 
-func closeQMIUIMReader(reader qmiUIMReader) {
-	closeReader("close QMI UIM reader", reader)
+func closeQMIClient(client qmiClient) {
+	closeClient("close QMI UIM client", client)
 }
 
 func qmiSlotStatus(status qcom.SlotStatus) (slotStatus, error) {

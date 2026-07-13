@@ -48,7 +48,6 @@ type VoLTESettingsResponse struct {
 	Connected       bool   `json:"connected"`
 	State           string `json:"state"`
 	DurationSeconds int64  `json:"durationSeconds"`
-	CanEnable       bool   `json:"canEnable"`
 	ModemRegistered bool   `json:"modemRegistered"`
 }
 
@@ -102,7 +101,6 @@ func (h *Handler) VoLTESettings(c *echo.Context) error {
 		Connected:       status.Connected,
 		State:           status.State,
 		DurationSeconds: status.DurationSeconds,
-		CanEnable:       modemStatus.Supported,
 		ModemRegistered: modemStatus.Occupied,
 	})
 }
@@ -118,12 +116,11 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 		return err
 	}
 	if req.Enabled {
-		status, err := readVoLTEStatus(ctx, modem)
-		if err != nil {
+		if err := validateManagedVoLTE(ctx, modem); err != nil {
+			if errors.Is(err, ErrUnavailable) {
+				return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, err)
+			}
 			return httpapi.Internal(c, errorCodeUpdateVoLTESettingsFailed, err)
-		}
-		if !status.Supported {
-			return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, ErrUnavailable)
 		}
 	}
 	if err := h.volte.UpdateSettings(ctx, modem, Settings{Enabled: req.Enabled}); err != nil {

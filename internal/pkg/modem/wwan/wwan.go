@@ -81,8 +81,7 @@ type SIMState struct {
 }
 
 type VoLTEStatus struct {
-	Supported bool
-	Occupied  bool
+	Occupied bool
 }
 
 type PacketServiceStatus struct {
@@ -192,8 +191,8 @@ func validateSIMSlot(slot uint8) error {
 	return nil
 }
 
-func closeReader(message string, reader closer) {
-	if err := reader.Close(); err != nil {
+func closeClient(message string, client closer) {
+	if err := client.Close(); err != nil {
 		slog.Debug(message, "error", err)
 	}
 }

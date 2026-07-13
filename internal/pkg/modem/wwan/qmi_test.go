@@ -17,17 +17,17 @@ func TestDeviceMSISDNQMI(t *testing.T) {
 	readErr := errors.New("DMS unavailable")
 	tests := []struct {
 		name    string
-		reader  *fakeQMIUIMReader
+		client  *fakeQMIClient
 		want    string
 		wantErr error
 	}{
-		{name: "voice number", reader: &fakeQMIUIMReader{msisdn: qcom.DMSGetMSISDNResponse{VoiceNumber: " +15551234567 "}}, want: "+15551234567"},
-		{name: "empty number", reader: &fakeQMIUIMReader{}},
-		{name: "query error", reader: &fakeQMIUIMReader{msisdnErr: readErr}, wantErr: readErr},
+		{name: "voice number", client: &fakeQMIClient{msisdn: qcom.DMSGetMSISDNResponse{VoiceNumber: " +15551234567 "}}, want: "+15551234567"},
+		{name: "empty number", client: &fakeQMIClient{}},
+		{name: "query error", client: &fakeQMIClient{msisdnErr: readErr}, wantErr: readErr},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			device := qmiDevice{slot: 1, openUIM: qmiUIMOpener(t, 1, tt.reader, nil)}
+			device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, tt.client, nil)}
 			got, err := device.MSISDN(context.Background())
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
@@ -39,24 +39,24 @@ func TestDeviceMSISDNQMI(t *testing.T) {
 			if got != tt.want {
 				t.Fatalf("MSISDN() = %q, want %q", got, tt.want)
 			}
-			if !slices.Contains(tt.reader.calls, "close") {
-				t.Fatal("reader was not closed")
+			if !slices.Contains(tt.client.calls, "close") {
+				t.Fatal("client was not closed")
 			}
 		})
 	}
 }
 
 func TestDeviceUpdateMSISDNQMI(t *testing.T) {
-	reader := &fakeQMIUIMReader{fileAttributes: qcom.FileAttributes{RecordSize: 32}}
-	device := qmiDevice{slot: 1, openUIM: qmiUIMOpener(t, 1, reader, nil)}
+	client := &fakeQMIClient{fileAttributes: qcom.FileAttributes{RecordSize: 32}}
+	device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 	if err := device.UpdateMSISDN(context.Background(), "+12345"); err != nil {
 		t.Fatalf("UpdateMSISDN() error = %v", err)
 	}
-	if reader.writeRecord.Record != 1 || reader.writeRecord.File.Session != qcom.SessionPrimaryGWProvisioning || !bytes.Equal(reader.writeRecord.File.Path, qmiMSISDNFile.Path) {
-		t.Fatalf("WriteRecord request = %+v", reader.writeRecord)
+	if client.writeRecord.Record != 1 || client.writeRecord.File.Session != qcom.SessionPrimaryGWProvisioning || !bytes.Equal(client.writeRecord.File.Path, qmiMSISDNFile.Path) {
+		t.Fatalf("WriteRecord request = %+v", client.writeRecord)
 	}
-	if len(reader.writeRecord.Data) != 32 || reader.writeRecord.Data[19] != 0x91 {
-		t.Fatalf("MSISDN record = % X", reader.writeRecord.Data)
+	if len(client.writeRecord.Data) != 32 || client.writeRecord.Data[19] != 0x91 {
+		t.Fatalf("MSISDN record = % X", client.writeRecord.Data)
 	}
 }
 
@@ -74,8 +74,8 @@ func TestDeviceAirplaneModeQMI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &fakeQMIAirplaneModeReader{mode: tt.mode}
-			device := qmiDeviceWithAirplaneModeReader(t, "/dev/cdc-wdm0", reader, nil)
+			client := &fakeQMIRadio{mode: tt.mode}
+			device := qmiDeviceWithRadio(t, "/dev/cdc-wdm0", client, nil)
 
 			got, err := device.AirplaneMode(context.Background())
 			if err != nil {
@@ -84,8 +84,8 @@ func TestDeviceAirplaneModeQMI(t *testing.T) {
 			if got != tt.want {
 				t.Fatalf("AirplaneMode() = %v, want %v", got, tt.want)
 			}
-			if !reader.closed {
-				t.Fatal("QMI reader closed = false, want true")
+			if !client.closed {
+				t.Fatal("QMI client closed = false, want true")
 			}
 		})
 	}
@@ -106,7 +106,7 @@ func TestDeviceVoLTEStatusQMI(t *testing.T) {
 				RegistrationKnown: true,
 				Registration:      qcom.IMSRegistrationStatusNotRegistered,
 			},
-			want: VoLTEStatus{Supported: true},
+			want: VoLTEStatus{},
 		},
 		{
 			name: "ims registered without volte",
@@ -114,7 +114,7 @@ func TestDeviceVoLTEStatusQMI(t *testing.T) {
 				RegistrationKnown: true,
 				Registration:      qcom.IMSRegistrationStatusRegistered,
 			},
-			want: VoLTEStatus{Supported: true, Occupied: true},
+			want: VoLTEStatus{Occupied: true},
 		},
 		{
 			name: "volte registered",
@@ -126,11 +126,11 @@ func TestDeviceVoLTEStatusQMI(t *testing.T) {
 				VoIPRATKnown:      true,
 				VoIPRAT:           qcom.IMSServiceRATWWAN,
 			},
-			want: VoLTEStatus{Supported: true, Occupied: true},
+			want: VoLTEStatus{Occupied: true},
 		},
 		{
 			name: "registration unknown",
-			want: VoLTEStatus{Supported: true},
+			want: VoLTEStatus{},
 		},
 		{
 			name: "network unsupported",
@@ -165,11 +165,11 @@ func TestDeviceVoLTEStatusQMI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &fakeQMIUIMReader{imsaStatus: tt.status, imsaStatusErr: tt.err}
+			client := &fakeQMIClient{imsaStatus: tt.status, imsaStatusErr: tt.err}
 			device := qmiDevice{
-				device:  "/dev/cdc-wdm0",
-				slot:    1,
-				openUIM: qmiUIMOpener(t, 1, reader, nil),
+				device:     "/dev/cdc-wdm0",
+				slot:       1,
+				openClient: qmiClientOpener(t, 1, client, nil),
 			}
 
 			got, err := device.VoLTEStatus(context.Background())
@@ -221,8 +221,8 @@ func TestDevicePacketServiceStatusQMI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &fakeQMIUIMReader{nasServingSystem: tt.serving, nasServingSystemErr: tt.err}
-			device := qmiDevice{slot: 1, openUIM: qmiUIMOpener(t, 1, reader, nil)}
+			client := &fakeQMIClient{nasServingSystem: tt.serving, nasServingSystemErr: tt.err}
+			device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 
 			got, err := device.PacketServiceStatus(context.Background())
 			if tt.wantErr != nil {
@@ -241,7 +241,7 @@ func TestDevicePacketServiceStatusQMI(t *testing.T) {
 	}
 }
 
-func TestQMIDeviceReusesReaderUntilClose(t *testing.T) {
+func TestQMIDeviceReusesClientUntilClose(t *testing.T) {
 	tests := []struct {
 		name string
 	}{
@@ -250,7 +250,7 @@ func TestQMIDeviceReusesReaderUntilClose(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &fakeQMIUIMReader{nasServingSystem: qcom.NASServingSystem{
+			client := &fakeQMIClient{nasServingSystem: qcom.NASServingSystem{
 				RegistrationState: qcom.NASRegistrationRegistered,
 				PSAttachState:     qcom.NASAttachAttached,
 				RadioInterfaces:   []qcom.NASRadioInterface{qcom.NASRadioInterfaceLTE},
@@ -259,9 +259,9 @@ func TestQMIDeviceReusesReaderUntilClose(t *testing.T) {
 			device := qmiDevice{
 				slot:         1,
 				reuseClients: true,
-				openUIM: func(context.Context, uint8) (qmiUIMReader, error) {
+				openClient: func(context.Context, uint8) (qmiClient, error) {
 					openCalls++
-					return reader, nil
+					return client, nil
 				},
 			}
 
@@ -276,11 +276,11 @@ func TestQMIDeviceReusesReaderUntilClose(t *testing.T) {
 			if openCalls != 1 {
 				t.Fatalf("open calls = %d, want 1", openCalls)
 			}
-			if reader.setOperatingMode != qcom.DMSOperatingModeLowPower {
-				t.Fatalf("operating mode = %d, want low power", reader.setOperatingMode)
+			if client.setOperatingMode != qcom.DMSOperatingModeLowPower {
+				t.Fatalf("operating mode = %d, want low power", client.setOperatingMode)
 			}
-			if slices.Contains(reader.calls, "close") {
-				t.Fatal("reader closed before device Close")
+			if slices.Contains(client.calls, "close") {
+				t.Fatal("client closed before device Close")
 			}
 			if err := device.Close(); err != nil {
 				t.Fatalf("Close() error = %v", err)
@@ -289,13 +289,13 @@ func TestQMIDeviceReusesReaderUntilClose(t *testing.T) {
 				t.Fatalf("second Close() error = %v", err)
 			}
 			closeCalls := 0
-			for _, call := range reader.calls {
+			for _, call := range client.calls {
 				if call == "close" {
 					closeCalls++
 				}
 			}
 			if closeCalls != 1 {
-				t.Fatalf("reader close calls = %d, want 1", closeCalls)
+				t.Fatalf("client close calls = %d, want 1", closeCalls)
 			}
 		})
 	}
@@ -349,12 +349,12 @@ func TestDeviceIMSProfileIndexQMI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &fakeQMIUIMReader{
+			client := &fakeQMIClient{
 				wdsProfiles:        tt.profiles,
 				wdsProfileSettings: tt.profileSettings,
 				wdsSettingsErr:     tt.settingsErr,
 			}
-			device := qmiDevice{slot: 1, openUIM: qmiUIMOpener(t, 1, reader, nil)}
+			device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 
 			got, err := device.IMSProfileIndex(context.Background())
 			if tt.wantErr {
@@ -388,8 +388,8 @@ func TestDeviceIMSSTestModeQMI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &fakeQMIUIMReader{imssTestMode: tt.enabled, imssTestModeErr: tt.err}
-			device := qmiDevice{slot: 1, openUIM: qmiUIMOpener(t, 1, reader, nil)}
+			client := &fakeQMIClient{imssTestMode: tt.enabled, imssTestModeErr: tt.err}
+			device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 
 			got, err := device.IMSSTestMode(context.Background())
 			if tt.wantErr != nil {
@@ -404,8 +404,8 @@ func TestDeviceIMSSTestModeQMI(t *testing.T) {
 			if got != tt.enabled {
 				t.Fatalf("IMSSTestMode() = %v, want %v", got, tt.enabled)
 			}
-			if !slices.Equal(reader.calls, []string{"imss-test-mode", "close"}) {
-				t.Fatalf("calls = %v, want query and close", reader.calls)
+			if !slices.Equal(client.calls, []string{"imss-test-mode", "close"}) {
+				t.Fatalf("calls = %v, want query and close", client.calls)
 			}
 		})
 	}
@@ -426,8 +426,8 @@ func TestDeviceSetIMSSTestModeQMI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &fakeQMIUIMReader{setIMSSTestModeErr: tt.err}
-			device := qmiDevice{slot: 1, openUIM: qmiUIMOpener(t, 1, reader, nil)}
+			client := &fakeQMIClient{setIMSSTestModeErr: tt.err}
+			device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 
 			err := device.SetIMSSTestMode(context.Background(), tt.enabled)
 			if tt.wantErr != nil {
@@ -439,11 +439,11 @@ func TestDeviceSetIMSSTestModeQMI(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SetIMSSTestMode() error = %v", err)
 			}
-			if reader.setIMSSTestMode != tt.enabled {
-				t.Fatalf("SetIMSSTestMode() enabled = %v, want %v", reader.setIMSSTestMode, tt.enabled)
+			if client.setIMSSTestMode != tt.enabled {
+				t.Fatalf("SetIMSSTestMode() enabled = %v, want %v", client.setIMSSTestMode, tt.enabled)
 			}
-			if !slices.Equal(reader.calls, []string{"set-imss-test-mode", "close"}) {
-				t.Fatalf("calls = %v, want set and close", reader.calls)
+			if !slices.Equal(client.calls, []string{"set-imss-test-mode", "close"}) {
+				t.Fatalf("calls = %v, want set and close", client.calls)
 			}
 		})
 	}
@@ -461,17 +461,17 @@ func TestDeviceSetAirplaneModeQMI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			reader := &fakeQMIAirplaneModeReader{}
-			device := qmiDeviceWithAirplaneModeReader(t, "/dev/cdc-wdm0", reader, nil)
+			client := &fakeQMIRadio{}
+			device := qmiDeviceWithRadio(t, "/dev/cdc-wdm0", client, nil)
 
 			if err := device.SetAirplaneMode(context.Background(), tt.want); err != nil {
 				t.Fatalf("SetAirplaneMode() error = %v", err)
 			}
-			if reader.setMode != tt.mode {
-				t.Fatalf("QMI set mode = %d, want %d", reader.setMode, tt.mode)
+			if client.setMode != tt.mode {
+				t.Fatalf("QMI set mode = %d, want %d", client.setMode, tt.mode)
 			}
-			if !reader.closed {
-				t.Fatal("QMI reader closed = false, want true")
+			if !client.closed {
+				t.Fatal("QMI client closed = false, want true")
 			}
 		})
 	}
@@ -533,7 +533,7 @@ func TestQMIDeviceSIMState(t *testing.T) {
 	tests := []struct {
 		name      string
 		target    Target
-		reader    *fakeQMIUIMReader
+		client    *fakeQMIClient
 		want      SIMState
 		wantCalls []string
 		wantErr   error
@@ -541,7 +541,7 @@ func TestQMIDeviceSIMState(t *testing.T) {
 		{
 			name:   "matching ready sim",
 			target: Target{Slot: 1, ICCID: " " + iccid + " "},
-			reader: &fakeQMIUIMReader{
+			client: &fakeQMIClient{
 				slotStatus: qcom.SlotStatus{
 					ActiveSlot: 1,
 					Slots:      []qcom.Slot{{ICCID: rawICCID}},
@@ -561,7 +561,7 @@ func TestQMIDeviceSIMState(t *testing.T) {
 		{
 			name:   "recovers without slot status support",
 			target: Target{Slot: 1},
-			reader: &fakeQMIUIMReader{
+			client: &fakeQMIClient{
 				slotStatusErr: qcom.QMIErrorNotSupported,
 				cardStatus:    qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateReady, []byte{0x01}),
 			},
@@ -576,7 +576,7 @@ func TestQMIDeviceSIMState(t *testing.T) {
 		{
 			name:   "returns card status error",
 			target: Target{Slot: 1},
-			reader: &fakeQMIUIMReader{slotStatusErr: qcom.QMIErrorNotSupported, cardStatusErr: errCardStatus},
+			client: &fakeQMIClient{slotStatusErr: qcom.QMIErrorNotSupported, cardStatusErr: errCardStatus},
 			want:   SIMState{Supported: true, Slot: 1},
 			wantCalls: []string{
 				"slot-status",
@@ -590,9 +590,9 @@ func TestQMIDeviceSIMState(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			device := qmiDevice{
-				device:  "/dev/cdc-wdm0",
-				slot:    1,
-				openUIM: qmiUIMOpener(t, 1, tt.reader, nil),
+				device:     "/dev/cdc-wdm0",
+				slot:       1,
+				openClient: qmiClientOpener(t, 1, tt.client, nil),
 			}
 
 			got, err := device.SIMState(context.Background(), tt.target)
@@ -606,8 +606,8 @@ func TestQMIDeviceSIMState(t *testing.T) {
 			if got != tt.want {
 				t.Fatalf("SIMState() = %+v, want %+v", got, tt.want)
 			}
-			if !slices.Equal(tt.reader.calls, tt.wantCalls) {
-				t.Fatalf("reader calls = %v, want %v", tt.reader.calls, tt.wantCalls)
+			if !slices.Equal(tt.client.calls, tt.wantCalls) {
+				t.Fatalf("client calls = %v, want %v", tt.client.calls, tt.wantCalls)
 			}
 		})
 	}
@@ -626,7 +626,7 @@ func TestQMIDevicePowerCycleSIM(t *testing.T) {
 	tests := []struct {
 		name      string
 		cfg       Config
-		reader    *fakeQMIUIMReader
+		client    *fakeQMIClient
 		openErr   error
 		cancelCtx bool
 		wantCalls []string
@@ -635,13 +635,13 @@ func TestQMIDevicePowerCycleSIM(t *testing.T) {
 		{
 			name:      "power cycles default slot",
 			cfg:       testQMIConfig(1),
-			reader:    &fakeQMIUIMReader{},
+			client:    &fakeQMIClient{},
 			wantCalls: []string{"power-off:1", "power-on:1", "close"},
 		},
 		{
 			name:      "power cycles primary slot",
 			cfg:       testQMIConfig(2),
-			reader:    &fakeQMIUIMReader{},
+			client:    &fakeQMIClient{},
 			wantCalls: []string{"power-off:2", "power-on:2", "close"},
 		},
 		{
@@ -654,21 +654,21 @@ func TestQMIDevicePowerCycleSIM(t *testing.T) {
 		{
 			name:      "returns power off error",
 			cfg:       testQMIConfig(1),
-			reader:    &fakeQMIUIMReader{powerOffErr: errPowerOff},
+			client:    &fakeQMIClient{powerOffErr: errPowerOff},
 			wantCalls: []string{"power-off:1", "close"},
 			wantErr:   errPowerOff,
 		},
 		{
 			name:      "returns power on error",
 			cfg:       testQMIConfig(1),
-			reader:    &fakeQMIUIMReader{powerOnErr: errPowerOn},
+			client:    &fakeQMIClient{powerOnErr: errPowerOn},
 			wantCalls: []string{"power-off:1", "power-on:1", "close"},
 			wantErr:   errPowerOn,
 		},
 		{
 			name:      "powers SIM back on after parent context is canceled",
 			cfg:       testQMIConfig(1),
-			reader:    &fakeQMIUIMReader{},
+			client:    &fakeQMIClient{},
 			cancelCtx: true,
 			wantCalls: []string{"power-off:1", "power-on:1", "close"},
 		},
@@ -681,14 +681,14 @@ func TestQMIDevicePowerCycleSIM(t *testing.T) {
 			if tt.cancelCtx {
 				cancelCtx, cancel := context.WithCancel(ctx)
 				ctx = cancelCtx
-				tt.reader.afterPowerOff = cancel
+				tt.client.afterPowerOff = cancel
 			}
 
 			device := qmiDevice{
-				device:  tt.cfg.Device,
-				slot:    slot,
-				imei:    tt.cfg.IMEI,
-				openUIM: qmiUIMOpener(t, slot, tt.reader, tt.openErr),
+				device:     tt.cfg.Device,
+				slot:       slot,
+				imei:       tt.cfg.IMEI,
+				openClient: qmiClientOpener(t, slot, tt.client, tt.openErr),
 			}
 			err := device.PowerCycleSIM(ctx)
 			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
@@ -697,8 +697,8 @@ func TestQMIDevicePowerCycleSIM(t *testing.T) {
 			if tt.wantErr == nil && err != nil {
 				t.Fatalf("PowerCycleSIM() error = %v", err)
 			}
-			if tt.reader != nil && !slices.Equal(tt.reader.calls, tt.wantCalls) {
-				t.Fatalf("reader calls = %v, want %v", tt.reader.calls, tt.wantCalls)
+			if tt.client != nil && !slices.Equal(tt.client.calls, tt.wantCalls) {
+				t.Fatalf("client calls = %v, want %v", tt.client.calls, tt.wantCalls)
 			}
 		})
 	}
@@ -711,7 +711,7 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 	tests := []struct {
 		name      string
 		cfg       Config
-		reader    *fakeQMIUIMReader
+		client    *fakeQMIClient
 		wantCalls []string
 		wantReq   qcom.ChangeProvisioningSessionRequest
 		wantErr   error
@@ -720,7 +720,7 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 		{
 			name: "skips ready usim application",
 			cfg:  testQMIConfig(1),
-			reader: &fakeQMIUIMReader{
+			client: &fakeQMIClient{
 				cardStatus: qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateReady, aid),
 			},
 			wantCalls: []string{"card-status", "close"},
@@ -728,7 +728,7 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 		{
 			name: "activates primary provisioning session",
 			cfg:  testQMIConfig(2),
-			reader: &fakeQMIUIMReader{
+			client: &fakeQMIClient{
 				cardStatus: qmiTestCardStatusForSlot(2, qcom.ApplicationStateReady, qcom.PersonalizationStateInProgress, aid),
 			},
 			wantCalls: []string{"card-status", "change-provisioning:2", "close"},
@@ -742,14 +742,14 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 		{
 			name:      "returns card status error",
 			cfg:       testQMIConfig(1),
-			reader:    &fakeQMIUIMReader{cardStatusErr: errCardStatus},
+			client:    &fakeQMIClient{cardStatusErr: errCardStatus},
 			wantCalls: []string{"card-status", "close"},
 			wantErr:   errCardStatus,
 		},
 		{
 			name: "returns empty aid error",
 			cfg:  testQMIConfig(1),
-			reader: &fakeQMIUIMReader{
+			client: &fakeQMIClient{
 				cardStatus: qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateInProgress, nil),
 			},
 			wantCalls: []string{"card-status", "close"},
@@ -758,7 +758,7 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 		{
 			name: "returns provisioning error",
 			cfg:  testQMIConfig(1),
-			reader: &fakeQMIUIMReader{
+			client: &fakeQMIClient{
 				cardStatus:      qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateInProgress, aid),
 				provisioningErr: errProvisioning,
 			},
@@ -771,10 +771,10 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			slot := qmiTestSlot(tt.cfg)
 			device := qmiDevice{
-				device:  tt.cfg.Device,
-				slot:    slot,
-				imei:    tt.cfg.IMEI,
-				openUIM: qmiUIMOpener(t, slot, tt.reader, nil),
+				device:     tt.cfg.Device,
+				slot:       slot,
+				imei:       tt.cfg.IMEI,
+				openClient: qmiClientOpener(t, slot, tt.client, nil),
 			}
 			err := device.ActivateProvisioningIfSIMMissing(context.Background())
 			if tt.wantErr != nil && err == nil {
@@ -789,11 +789,11 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
 				t.Fatalf("ActivateProvisioningIfSIMMissing() error = %v, want %v", err, tt.wantErr)
 			}
-			if !slices.Equal(tt.reader.calls, tt.wantCalls) {
-				t.Fatalf("reader calls = %v, want %v", tt.reader.calls, tt.wantCalls)
+			if !slices.Equal(tt.client.calls, tt.wantCalls) {
+				t.Fatalf("client calls = %v, want %v", tt.client.calls, tt.wantCalls)
 			}
-			if tt.wantReq.Slot != 0 && !qmiChangeProvisioningRequestEqual(tt.reader.changeReq, tt.wantReq) {
-				t.Fatalf("ChangeProvisioningSession() request = %+v, want %+v", tt.reader.changeReq, tt.wantReq)
+			if tt.wantReq.Slot != 0 && !qmiChangeProvisioningRequestEqual(tt.client.changeReq, tt.wantReq) {
+				t.Fatalf("ChangeProvisioningSession() request = %+v, want %+v", tt.client.changeReq, tt.wantReq)
 			}
 		})
 	}
@@ -837,7 +837,7 @@ func TestDecodeQMIICCID(t *testing.T) {
 	}
 }
 
-type fakeQMIUIMReader struct {
+type fakeQMIClient struct {
 	calls               []string
 	msisdn              qcom.DMSGetMSISDNResponse
 	msisdnErr           error
@@ -872,54 +872,54 @@ type fakeQMIUIMReader struct {
 	setOperatingMode    qcom.DMSOperatingMode
 }
 
-func (r *fakeQMIUIMReader) OperatingMode(context.Context) (qcom.DMSOperatingMode, error) {
+func (r *fakeQMIClient) OperatingMode(context.Context) (qcom.DMSOperatingMode, error) {
 	r.calls = append(r.calls, "operating-mode")
 	return r.operatingMode, nil
 }
 
-func (r *fakeQMIUIMReader) SetOperatingMode(_ context.Context, mode qcom.DMSOperatingMode) error {
+func (r *fakeQMIClient) SetOperatingMode(_ context.Context, mode qcom.DMSOperatingMode) error {
 	r.calls = append(r.calls, "set-operating-mode")
 	r.setOperatingMode = mode
 	return nil
 }
 
-func (r *fakeQMIUIMReader) MSISDN(context.Context) (qcom.DMSGetMSISDNResponse, error) {
+func (r *fakeQMIClient) MSISDN(context.Context) (qcom.DMSGetMSISDNResponse, error) {
 	r.calls = append(r.calls, "msisdn")
 	return r.msisdn, r.msisdnErr
 }
 
-func (r *fakeQMIUIMReader) FileAttributes(context.Context, qcom.File) (qcom.FileAttributes, error) {
+func (r *fakeQMIClient) FileAttributes(context.Context, qcom.File) (qcom.FileAttributes, error) {
 	r.calls = append(r.calls, "file-attributes")
 	return r.fileAttributes, r.fileAttributesErr
 }
 
-func (r *fakeQMIUIMReader) WriteRecord(_ context.Context, req qcom.RecordWrite) error {
+func (r *fakeQMIClient) WriteRecord(_ context.Context, req qcom.RecordWrite) error {
 	r.calls = append(r.calls, "write-record")
 	r.writeRecord = req
 	return r.writeRecordErr
 }
 
-func (r *fakeQMIUIMReader) ATR(context.Context) ([]byte, error) {
+func (r *fakeQMIClient) ATR(context.Context) ([]byte, error) {
 	r.calls = append(r.calls, "atr")
 	return slices.Clone(r.atr), r.atrErr
 }
 
-func (r *fakeQMIUIMReader) IMSAStatus(context.Context) (qcom.IMSAStatus, error) {
+func (r *fakeQMIClient) IMSAStatus(context.Context) (qcom.IMSAStatus, error) {
 	r.calls = append(r.calls, "imsa-status")
 	return r.imsaStatus, r.imsaStatusErr
 }
 
-func (r *fakeQMIUIMReader) NASServingSystem(context.Context) (qcom.NASServingSystem, error) {
+func (r *fakeQMIClient) NASServingSystem(context.Context) (qcom.NASServingSystem, error) {
 	r.calls = append(r.calls, "nas-serving-system")
 	return r.nasServingSystem, r.nasServingSystemErr
 }
 
-func (r *fakeQMIUIMReader) WDSProfiles(context.Context, qcom.WDSProfileType) ([]qcom.WDSProfile, error) {
+func (r *fakeQMIClient) WDSProfiles(context.Context, qcom.WDSProfileType) ([]qcom.WDSProfile, error) {
 	r.calls = append(r.calls, "wds-profiles")
 	return slices.Clone(r.wdsProfiles), r.wdsProfilesErr
 }
 
-func (r *fakeQMIUIMReader) WDSProfileSettings(_ context.Context, id qcom.WDSProfileID) (qcom.WDSProfileSettings, error) {
+func (r *fakeQMIClient) WDSProfileSettings(_ context.Context, id qcom.WDSProfileID) (qcom.WDSProfileSettings, error) {
 	r.calls = append(r.calls, fmtCall("wds-profile", id.Index))
 	if r.wdsSettingsErr != nil {
 		return qcom.WDSProfileSettings{}, r.wdsSettingsErr
@@ -927,18 +927,18 @@ func (r *fakeQMIUIMReader) WDSProfileSettings(_ context.Context, id qcom.WDSProf
 	return r.wdsProfileSettings[id.Index], nil
 }
 
-func (r *fakeQMIUIMReader) IMSSTestMode(context.Context) (bool, error) {
+func (r *fakeQMIClient) IMSSTestMode(context.Context) (bool, error) {
 	r.calls = append(r.calls, "imss-test-mode")
 	return r.imssTestMode, r.imssTestModeErr
 }
 
-func (r *fakeQMIUIMReader) SetIMSSTestMode(_ context.Context, enabled bool) error {
+func (r *fakeQMIClient) SetIMSSTestMode(_ context.Context, enabled bool) error {
 	r.calls = append(r.calls, "set-imss-test-mode")
 	r.setIMSSTestMode = enabled
 	return r.setIMSSTestModeErr
 }
 
-func (r *fakeQMIUIMReader) PowerOffSIM(_ context.Context, slot uint8) error {
+func (r *fakeQMIClient) PowerOffSIM(_ context.Context, slot uint8) error {
 	r.calls = append(r.calls, fmtCall("power-off", slot))
 	if r.afterPowerOff != nil {
 		r.afterPowerOff()
@@ -946,75 +946,75 @@ func (r *fakeQMIUIMReader) PowerOffSIM(_ context.Context, slot uint8) error {
 	return r.powerOffErr
 }
 
-func (r *fakeQMIUIMReader) PowerOnSIM(_ context.Context, req qcom.PowerOnSIMRequest) error {
+func (r *fakeQMIClient) PowerOnSIM(_ context.Context, req qcom.PowerOnSIMRequest) error {
 	r.calls = append(r.calls, fmtCall("power-on", req.Slot))
 	return r.powerOnErr
 }
 
-func (r *fakeQMIUIMReader) SlotStatus(context.Context) (qcom.SlotStatus, error) {
+func (r *fakeQMIClient) SlotStatus(context.Context) (qcom.SlotStatus, error) {
 	r.calls = append(r.calls, "slot-status")
 	return r.slotStatus, r.slotStatusErr
 }
 
-func (r *fakeQMIUIMReader) CardStatus(context.Context) (qcom.CardStatus, error) {
+func (r *fakeQMIClient) CardStatus(context.Context) (qcom.CardStatus, error) {
 	r.calls = append(r.calls, "card-status")
 	return r.cardStatus, r.cardStatusErr
 }
 
-func (r *fakeQMIUIMReader) ChangeProvisioningSession(_ context.Context, req qcom.ChangeProvisioningSessionRequest) error {
+func (r *fakeQMIClient) ChangeProvisioningSession(_ context.Context, req qcom.ChangeProvisioningSessionRequest) error {
 	r.calls = append(r.calls, fmtCall("change-provisioning", req.Slot))
 	r.changeReq = req
 	return r.provisioningErr
 }
 
-func (r *fakeQMIUIMReader) Close() error {
+func (r *fakeQMIClient) Close() error {
 	r.calls = append(r.calls, "close")
 	return nil
 }
 
-func qmiUIMOpener(t *testing.T, wantSlot uint8, reader qmiUIMReader, openErr error) func(context.Context, uint8) (qmiUIMReader, error) {
+func qmiClientOpener(t *testing.T, wantSlot uint8, client qmiClient, openErr error) func(context.Context, uint8) (qmiClient, error) {
 	t.Helper()
 
-	return func(_ context.Context, slot uint8) (qmiUIMReader, error) {
+	return func(_ context.Context, slot uint8) (qmiClient, error) {
 		if slot != wantSlot {
 			t.Fatalf("open QMI UIM slot = %d, want %d", slot, wantSlot)
 		}
 		if openErr != nil {
 			return nil, openErr
 		}
-		return reader, nil
+		return client, nil
 	}
 }
 
-type fakeQMIAirplaneModeReader struct {
+type fakeQMIRadio struct {
 	mode    qcom.DMSOperatingMode
 	setMode qcom.DMSOperatingMode
 	closed  bool
 }
 
-func (r *fakeQMIAirplaneModeReader) OperatingMode(context.Context) (qcom.DMSOperatingMode, error) {
+func (r *fakeQMIRadio) OperatingMode(context.Context) (qcom.DMSOperatingMode, error) {
 	return r.mode, nil
 }
 
-func (r *fakeQMIAirplaneModeReader) SetOperatingMode(_ context.Context, mode qcom.DMSOperatingMode) error {
+func (r *fakeQMIRadio) SetOperatingMode(_ context.Context, mode qcom.DMSOperatingMode) error {
 	r.setMode = mode
 	return nil
 }
 
-func (r *fakeQMIAirplaneModeReader) Close() error {
+func (r *fakeQMIRadio) Close() error {
 	r.closed = true
 	return nil
 }
 
-func qmiDeviceWithAirplaneModeReader(t *testing.T, wantDevice string, reader qmiAirplaneModeReader, openErr error) qmiDevice {
+func qmiDeviceWithRadio(t *testing.T, wantDevice string, client qmiRadio, openErr error) qmiDevice {
 	t.Helper()
 
 	return qmiDevice{
 		device: wantDevice,
 		slot:   1,
 		imei:   "modem-1",
-		openRadio: func(context.Context) (qmiAirplaneModeReader, error) {
-			return reader, openErr
+		openRadio: func(context.Context) (qmiRadio, error) {
+			return client, openErr
 		},
 	}
 }

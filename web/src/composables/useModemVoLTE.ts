@@ -1,4 +1,4 @@
-import { computed, onUnmounted, ref, watch, type ComputedRef } from 'vue'
+import { onUnmounted, ref, watch, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useVoLTEApi } from '@/apis/volte'
@@ -20,17 +20,12 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
   const volteConnected = ref(false)
   const volteState = ref('')
   const volteDurationSeconds = ref(0)
-  const volteCanEnable = ref(false)
   const volteModemRegistered = ref(false)
   const isVoLTELoading = ref(false)
   const isVoLTEUpdating = ref(false)
   const isVoLTEFetching = ref(false)
   const pollTimer = ref<number>()
   const durationTimer = ref<number>()
-
-  const canUpdateVoLTE = computed(
-    () => !isVoLTEUpdating.value && (volteEnabled.value || volteCanEnable.value),
-  )
 
   const stopTimers = () => {
     if (pollTimer.value !== undefined) window.clearInterval(pollTimer.value)
@@ -45,7 +40,6 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     volteConnected.value = false
     volteState.value = ''
     volteDurationSeconds.value = 0
-    volteCanEnable.value = false
     volteModemRegistered.value = false
   }
 
@@ -61,7 +55,6 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
       volteConnected.value = settings?.connected ?? false
       volteState.value = settings?.state ?? ''
       volteDurationSeconds.value = settings?.durationSeconds ?? 0
-      volteCanEnable.value = settings?.canEnable ?? false
       volteModemRegistered.value = settings?.modemRegistered ?? false
     } catch (err) {
       console.error('[useModemVoLTE] Failed to load settings:', err)
@@ -74,7 +67,7 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
 
   const updateVoLTE = async (nextEnabled: boolean) => {
     const id = modemId.value
-    if (!enabled.value || !id || !canUpdateVoLTE.value) return
+    if (!enabled.value || !id || isVoLTEUpdating.value) return
     isVoLTEUpdating.value = true
     try {
       await api.updateSettings(id, { enabled: nextEnabled })
@@ -128,11 +121,9 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     volteConnected,
     volteState,
     volteDurationSeconds,
-    volteCanEnable,
     volteModemRegistered,
     isVoLTELoading,
     isVoLTEUpdating,
-    canUpdateVoLTE,
     updateVoLTE,
   }
 }

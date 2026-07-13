@@ -215,6 +215,102 @@ func (d *fakeManagedVoLTEDevice) SetAirplaneMode(ctx context.Context, enabled bo
 	return d.disableFlightErr
 }
 
+func TestValidateManagedVoLTE(t *testing.T) {
+	errOpen := errors.New("open rejected")
+	errStatus := errors.New("status rejected")
+	errProfile := errors.New("profile rejected")
+	errTestMode := errors.New("test mode rejected")
+	errPacket := errors.New("packet service rejected")
+	tests := []struct {
+		name       string
+		device     *fakeManagedVoLTEDevice
+		openErr    error
+		wantCalls  []string
+		wantErr    error
+		wantClosed bool
+	}{
+		{
+			name:    "device unavailable",
+			openErr: wwan.ErrUnsupported,
+			wantErr: ErrUnavailable,
+		},
+		{
+			name:    "device open rejected",
+			openErr: errOpen,
+			wantErr: errOpen,
+		},
+		{
+			name:       "IMSA unavailable continues with WDS",
+			device:     &fakeManagedVoLTEDevice{},
+			wantCalls:  []string{"status", "ims-profile", "packet-service"},
+			wantClosed: true,
+		},
+		{
+			name:       "occupied IMS checks test mode",
+			device:     &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Occupied: true}},
+			wantCalls:  []string{"status", "ims-profile", "test-mode", "packet-service"},
+			wantClosed: true,
+		},
+		{
+			name:       "status rejected",
+			device:     &fakeManagedVoLTEDevice{statusErr: errStatus},
+			wantCalls:  []string{"status"},
+			wantErr:    errStatus,
+			wantClosed: true,
+		},
+		{
+			name:       "IMS profile unavailable",
+			device:     &fakeManagedVoLTEDevice{profileErr: errProfile},
+			wantCalls:  []string{"status", "ims-profile"},
+			wantErr:    errProfile,
+			wantClosed: true,
+		},
+		{
+			name:       "test mode rejected",
+			device:     &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Occupied: true}, testModeErr: errTestMode},
+			wantCalls:  []string{"status", "ims-profile", "test-mode"},
+			wantErr:    errTestMode,
+			wantClosed: true,
+		},
+		{
+			name:       "packet service rejected",
+			device:     &fakeManagedVoLTEDevice{packetErrors: []error{errPacket}},
+			wantCalls:  []string{"status", "ims-profile", "packet-service"},
+			wantErr:    errPacket,
+			wantClosed: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previousOpen := openManagedVoLTEDevice
+			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+				return tt.device, tt.openErr
+			}
+			t.Cleanup(func() {
+				openManagedVoLTEDevice = previousOpen
+			})
+
+			err := validateManagedVoLTE(context.Background(), &mmodem.Modem{})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("validateManagedVoLTE() error = %v, want %v", err, tt.wantErr)
+			}
+			var calls []string
+			closed := false
+			if tt.device != nil {
+				calls = tt.device.calls
+				closed = tt.device.closed
+			}
+			if !slices.Equal(calls, tt.wantCalls) {
+				t.Fatalf("calls = %v, want %v", calls, tt.wantCalls)
+			}
+			if closed != tt.wantClosed {
+				t.Fatalf("device closed = %v, want %v", closed, tt.wantClosed)
+			}
+		})
+	}
+}
+
 func TestPrepareManagedVoLTE(t *testing.T) {
 	errStatus := errors.New("status rejected")
 	errTestMode := errors.New("test mode rejected")
@@ -231,10 +327,10 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 		wantErr     error
 	}{
 		{
-			name:      "IMSA unavailable",
-			device:    &fakeManagedVoLTEDevice{},
-			wantCalls: []string{"status"},
-			wantErr:   ErrUnavailable,
+			name:        "IMSA unavailable continues with WDS",
+			device:      &fakeManagedVoLTEDevice{},
+			wantCalls:   []string{"status", "ims-profile", "packet-service"},
+			wantProfile: 2,
 		},
 		{
 			name:      "status rejected",
@@ -244,14 +340,14 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 		},
 		{
 			name:        "IMS available",
-			device:      &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Supported: true}},
+			device:      &fakeManagedVoLTEDevice{},
 			wantCalls:   []string{"status", "ims-profile", "packet-service"},
 			wantProfile: 2,
 		},
 		{
 			name: "waits for packet service before IMS",
 			device: &fakeManagedVoLTEDevice{
-				status: wwan.VoLTEStatus{Supported: true},
+				status: wwan.VoLTEStatus{},
 				packetStatuses: []wwan.PacketServiceStatus{
 					{},
 					{Registered: true, PSAttached: true, LTE: true},
@@ -262,49 +358,49 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 		},
 		{
 			name:        "test mode already enabled",
-			device:      &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Supported: true, Occupied: true}, testMode: true},
+			device:      &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Occupied: true}, testMode: true},
 			wantCalls:   []string{"status", "ims-profile", "test-mode", "packet-service"},
 			wantProfile: 2,
 		},
 		{
 			name:      "test mode query rejected",
-			device:    &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Supported: true, Occupied: true}, testModeErr: errTestMode},
+			device:    &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Occupied: true}, testModeErr: errTestMode},
 			wantCalls: []string{"status", "ims-profile", "test-mode"},
 			wantErr:   errTestMode,
 		},
 		{
 			name:      "test mode update rejected",
-			device:    &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Supported: true, Occupied: true}, setTestModeErr: errSetTestMode},
+			device:    &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Occupied: true}, setTestModeErr: errSetTestMode},
 			wantCalls: []string{"status", "ims-profile", "test-mode", "set-test-mode:true"},
 			wantErr:   errSetTestMode,
 		},
 		{
 			name:      "airplane mode enable rejected",
-			device:    &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Supported: true, Occupied: true}, enableFlightErr: errEnableFlight},
+			device:    &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Occupied: true}, enableFlightErr: errEnableFlight},
 			wantCalls: []string{"status", "ims-profile", "test-mode", "set-test-mode:true", "set-airplane-mode:true"},
 			wantErr:   errEnableFlight,
 		},
 		{
 			name:        "takes over occupied IMS",
-			device:      &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Supported: true, Occupied: true}},
+			device:      &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Occupied: true}},
 			wantCalls:   []string{"status", "ims-profile", "test-mode", "set-test-mode:true", "set-airplane-mode:true", "set-airplane-mode:false", "packet-service"},
 			wantProfile: 2,
 		},
 		{
 			name:      "IMS profile unavailable",
-			device:    &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Supported: true}, profileErr: errProfile},
+			device:    &fakeManagedVoLTEDevice{profileErr: errProfile},
 			wantCalls: []string{"status", "ims-profile"},
 			wantErr:   errProfile,
 		},
 		{
 			name:      "airplane mode restore rejected",
-			device:    &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Supported: true, Occupied: true}, disableFlightErr: errDisableFlight},
+			device:    &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Occupied: true}, disableFlightErr: errDisableFlight},
 			wantCalls: []string{"status", "ims-profile", "test-mode", "set-test-mode:true", "set-airplane-mode:true", "set-airplane-mode:false"},
 			wantErr:   errDisableFlight,
 		},
 		{
 			name:      "cancellation still restores online",
-			device:    &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Supported: true, Occupied: true}},
+			device:    &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Occupied: true}},
 			cancel:    true,
 			wantCalls: []string{"status", "ims-profile", "test-mode", "set-test-mode:true", "set-airplane-mode:true", "set-airplane-mode:false"},
 			wantErr:   context.Canceled,
@@ -365,10 +461,15 @@ func TestReleaseManagedVoLTE(t *testing.T) {
 	tests := []struct {
 		name      string
 		device    *fakeManagedVoLTEDevice
+		openErr   error
 		cancel    bool
 		wantCalls []string
 		wantErr   error
 	}{
+		{
+			name:    "unsupported device requires no restore",
+			openErr: wwan.ErrUnsupported,
+		},
 		{
 			name:      "test mode already disabled",
 			device:    &fakeManagedVoLTEDevice{},
@@ -423,7 +524,7 @@ func TestReleaseManagedVoLTE(t *testing.T) {
 			previousResetDelay := voLTEResetDelay
 			previousPollInterval := packetServicePollInterval
 			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
-				return tt.device, nil
+				return tt.device, tt.openErr
 			}
 			voLTEResetDelay = time.Nanosecond
 			packetServicePollInterval = time.Nanosecond
@@ -444,14 +545,16 @@ func TestReleaseManagedVoLTE(t *testing.T) {
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("releaseManagedVoLTE() error = %v, want %v", err, tt.wantErr)
 			}
-			if !slices.Equal(tt.device.calls, tt.wantCalls) {
-				t.Fatalf("calls = %v, want %v", tt.device.calls, tt.wantCalls)
-			}
-			if !tt.device.closed {
-				t.Fatal("device was not closed")
-			}
-			if tt.cancel && tt.device.restoreCtxErr != nil {
-				t.Fatalf("restore context error = %v, want nil", tt.device.restoreCtxErr)
+			if tt.device != nil {
+				if !slices.Equal(tt.device.calls, tt.wantCalls) {
+					t.Fatalf("calls = %v, want %v", tt.device.calls, tt.wantCalls)
+				}
+				if !tt.device.closed {
+					t.Fatal("device was not closed")
+				}
+				if tt.cancel && tt.device.restoreCtxErr != nil {
+					t.Fatalf("restore context error = %v, want nil", tt.device.restoreCtxErr)
+				}
 			}
 		})
 	}
@@ -741,7 +844,7 @@ func TestConnectedClientRequiresSameProfile(t *testing.T) {
 	}
 }
 
-func TestMarkConnectingResetsDisconnectedSession(t *testing.T) {
+func TestConnectingSessionLifecycle(t *testing.T) {
 	now := time.Date(2026, 5, 29, 10, 0, 0, 0, time.UTC)
 	c := &coordinator{
 		sessions: map[string]*sessionState{
@@ -773,6 +876,16 @@ func TestMarkConnectingResetsDisconnectedSession(t *testing.T) {
 	got := statusFromSession(Settings{Enabled: true}, session, "profile-1", now)
 	if got.State != StateConnecting {
 		t.Fatalf("State = %q, want %q", got.State, StateConnecting)
+	}
+
+	c.markDisconnected("modem-1", 0, nil)
+
+	if session.phase != sessionPhaseDisconnected {
+		t.Fatalf("phase after failed connect = %q, want %q", session.phase, sessionPhaseDisconnected)
+	}
+	got = statusFromSession(Settings{Enabled: true}, session, "profile-1", now)
+	if got.State != StateDisconnected {
+		t.Fatalf("State after failed connect = %q, want %q", got.State, StateDisconnected)
 	}
 }
 

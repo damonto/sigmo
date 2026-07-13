@@ -9,6 +9,7 @@ import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 import { useFeedbackBanner } from '@/composables/useFeedbackBanner'
 import { useModemVoLTE } from '@/composables/useModemVoLTE'
 import VoLTESettingsPanel from '@/views/modem-settings/VoLTESettingsPanel.vue'
+import VoLTEStatusPanel from '@/views/modem-settings/VoLTEStatusPanel.vue'
 
 const route = useRoute()
 const { t } = useI18n()
@@ -22,11 +23,9 @@ const {
   volteConnected,
   volteState,
   volteDurationSeconds,
-  volteCanEnable,
   volteModemRegistered,
   isVoLTELoading,
   isVoLTEUpdating,
-  canUpdateVoLTE,
   updateVoLTE,
 } = useModemVoLTE({
   modemId,
@@ -44,18 +43,23 @@ const {
       :back-to="{ name: 'modem-settings', params: { id: modemId } }"
     />
 
-    <VoLTESettingsPanel
-      v-if="canUseVoLTE"
-      :enabled="volteEnabled"
-      :connected="volteConnected"
-      :state="volteState"
-      :duration-seconds="volteDurationSeconds"
-      :can-enable="volteCanEnable"
-      :modem-registered="volteModemRegistered"
-      :is-loading="isVoLTELoading"
-      :is-updating="isVoLTEUpdating"
-      :can-update="canUpdateVoLTE"
-      @update="updateVoLTE"
-    />
+    <template v-if="canUseVoLTE">
+      <VoLTEStatusPanel
+        :enabled="volteEnabled"
+        :connected="volteConnected"
+        :modem-registered="volteModemRegistered"
+        :state="volteState"
+        :duration-seconds="volteDurationSeconds"
+        :is-loading="isVoLTELoading"
+      />
+
+      <VoLTESettingsPanel
+        :enabled="volteEnabled"
+        :modem-registered="volteModemRegistered"
+        :is-loading="isVoLTELoading"
+        :is-updating="isVoLTEUpdating"
+        @update="updateVoLTE"
+      />
+    </template>
   </ModemSettingsShell>
 </template>

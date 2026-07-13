@@ -14,19 +14,19 @@ import (
 type mbimDevice struct {
 	device      string
 	slot        uint8
-	openRadio   func(context.Context) (mbimAirplaneModeReader, error)
-	openNetwork func(context.Context) (mbimNetworkReader, error)
+	openRadio   func(context.Context) (mbimRadio, error)
+	openNetwork func(context.Context) (mbimNetwork, error)
 }
 
 func newMBIMDevice(device string, slot uint8) mbimDevice {
 	return mbimDevice{
 		device: device,
 		slot:   slot,
-		openRadio: func(ctx context.Context) (mbimAirplaneModeReader, error) {
-			return openMBIMReader(ctx, device, 1)
+		openRadio: func(ctx context.Context) (mbimRadio, error) {
+			return openMBIMClient(ctx, device, 1)
 		},
-		openNetwork: func(ctx context.Context) (mbimNetworkReader, error) {
-			return openMBIMReader(ctx, device, slot)
+		openNetwork: func(ctx context.Context) (mbimNetwork, error) {
+			return openMBIMClient(ctx, device, slot)
 		},
 	}
 }
@@ -35,15 +35,14 @@ func (u mbimDevice) Close() error {
 	return nil
 }
 
-type mbimAirplaneModeReader interface {
+type mbimRadio interface {
 	RadioState(ctx context.Context) (uiccmbim.RadioStateInfo, error)
 	SetRadioState(ctx context.Context, state uiccmbim.RadioSwitchState) (uiccmbim.RadioStateInfo, error)
 	Close() error
 }
 
-type mbimNetworkReader interface {
+type mbimNetwork interface {
 	SubscriberReadyStatus(ctx context.Context) (uiccmbim.SubscriberReadyStatusResponse, error)
-	DeviceCaps(ctx context.Context) (uiccmbim.DeviceCapsInfo, error)
 	RegistrationState(ctx context.Context) (uiccmbim.RegistrationStateInfo, error)
 	PacketService(ctx context.Context) (uiccmbim.PacketServiceInfo, error)
 	ProvisionedContexts(ctx context.Context) ([]uiccmbim.ProvisionedContext, error)
@@ -51,13 +50,13 @@ type mbimNetworkReader interface {
 }
 
 func (u mbimDevice) MSISDN(ctx context.Context) (string, error) {
-	reader, err := u.openNetwork(ctx)
+	client, err := u.openNetwork(ctx)
 	if err != nil {
-		return "", fmt.Errorf("open MBIM network reader: %w", err)
+		return "", fmt.Errorf("open MBIM network client: %w", err)
 	}
-	defer closeReader("close MBIM network reader", reader)
+	defer closeClient("close MBIM network client", client)
 
-	status, err := reader.SubscriberReadyStatus(ctx)
+	status, err := client.SubscriberReadyStatus(ctx)
 	if err != nil {
 		return "", fmt.Errorf("read MBIM subscriber ready status: %w", err)
 	}
@@ -74,7 +73,7 @@ func (u mbimDevice) UpdateMSISDN(context.Context, string) error {
 }
 
 func (u mbimDevice) USIM(ctx context.Context) (usimcard.Reader, error) {
-	return openMBIMUSIMReader(ctx, u.device, u.slot)
+	return openMBIMUSIM(ctx, u.device, u.slot)
 }
 
 func (u mbimDevice) USIMWithCAT(ctx context.Context, _ CATProfile) (usimcard.Reader, error) {
@@ -82,52 +81,36 @@ func (u mbimDevice) USIMWithCAT(ctx context.Context, _ CATProfile) (usimcard.Rea
 }
 
 func (u mbimDevice) ATR(ctx context.Context) ([]byte, error) {
-	reader, err := openMBIMReader(ctx, u.device, u.slot)
+	client, err := openMBIMClient(ctx, u.device, u.slot)
 	if err != nil {
-		return nil, fmt.Errorf("open MBIM reader: %w", err)
+		return nil, fmt.Errorf("open MBIM client: %w", err)
 	}
-	defer closeReader("close MBIM reader", reader)
+	defer closeClient("close MBIM client", client)
 
-	atr, err := reader.QueryUiccATR(ctx)
+	atr, err := client.QueryUiccATR(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query MBIM UICC ATR: %w", err)
 	}
 	return atr, nil
 }
 
-func (u mbimDevice) VoLTEStatus(ctx context.Context) (VoLTEStatus, error) {
-	reader, err := u.openNetwork(ctx)
-	if err != nil {
-		return VoLTEStatus{}, fmt.Errorf("open MBIM network reader: %w", err)
-	}
-	defer closeReader("close MBIM network reader", reader)
-
-	found, err := mbimIMSContextAvailable(ctx, reader)
-	if err != nil {
-		return VoLTEStatus{}, err
-	}
-	if !found {
-		return VoLTEStatus{}, nil
-	}
-	caps, err := reader.DeviceCaps(ctx)
-	if err != nil {
-		return VoLTEStatus{}, fmt.Errorf("read MBIM device capabilities: %w", err)
-	}
-	return VoLTEStatus{Supported: caps.MaxSessions > uiccmbim.DefaultIMSPDNSessionID}, nil
+func (mbimDevice) VoLTEStatus(context.Context) (VoLTEStatus, error) {
+	// MBIM does not expose the modem's native IMS registration ownership.
+	return VoLTEStatus{}, nil
 }
 
 func (u mbimDevice) PacketServiceStatus(ctx context.Context) (PacketServiceStatus, error) {
-	reader, err := u.openNetwork(ctx)
+	client, err := u.openNetwork(ctx)
 	if err != nil {
-		return PacketServiceStatus{}, fmt.Errorf("open MBIM network reader: %w", err)
+		return PacketServiceStatus{}, fmt.Errorf("open MBIM network client: %w", err)
 	}
-	defer closeReader("close MBIM network reader", reader)
+	defer closeClient("close MBIM network client", client)
 
-	registration, err := reader.RegistrationState(ctx)
+	registration, err := client.RegistrationState(ctx)
 	if err != nil {
 		return PacketServiceStatus{}, fmt.Errorf("read MBIM registration state: %w", err)
 	}
-	packet, err := reader.PacketService(ctx)
+	packet, err := client.PacketService(ctx)
 	if err != nil {
 		return PacketServiceStatus{}, fmt.Errorf("read MBIM packet service: %w", err)
 	}
@@ -139,13 +122,13 @@ func (u mbimDevice) PacketServiceStatus(ctx context.Context) (PacketServiceStatu
 }
 
 func (u mbimDevice) IMSProfileIndex(ctx context.Context) (uint8, error) {
-	reader, err := u.openNetwork(ctx)
+	client, err := u.openNetwork(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("open MBIM network reader: %w", err)
+		return 0, fmt.Errorf("open MBIM network client: %w", err)
 	}
-	defer closeReader("close MBIM network reader", reader)
+	defer closeClient("close MBIM network client", client)
 
-	found, err := mbimIMSContextAvailable(ctx, reader)
+	found, err := mbimIMSContextAvailable(ctx, client)
 	if err != nil {
 		return 0, err
 	}
@@ -175,8 +158,8 @@ func mbimRegistered(state uiccmbim.RegisterState) bool {
 	}
 }
 
-func mbimIMSContextAvailable(ctx context.Context, reader mbimNetworkReader) (bool, error) {
-	contexts, err := reader.ProvisionedContexts(ctx)
+func mbimIMSContextAvailable(ctx context.Context, client mbimNetwork) (bool, error) {
+	contexts, err := client.ProvisionedContexts(ctx)
 	if err != nil {
 		return false, fmt.Errorf("read MBIM provisioned contexts: %w", err)
 	}
@@ -202,13 +185,13 @@ func (u mbimDevice) SIMState(context.Context, Target) (SIMState, error) {
 }
 
 func (u mbimDevice) AirplaneMode(ctx context.Context) (bool, error) {
-	reader, err := u.openRadio(ctx)
+	client, err := u.openRadio(ctx)
 	if err != nil {
-		return false, fmt.Errorf("open MBIM airplane mode reader: %w", err)
+		return false, fmt.Errorf("open MBIM radio client: %w", err)
 	}
-	defer closeReader("close MBIM airplane mode reader", reader)
+	defer closeClient("close MBIM radio client", client)
 
-	state, err := reader.RadioState(ctx)
+	state, err := client.RadioState(ctx)
 	if err != nil {
 		return false, fmt.Errorf("read MBIM radio state: %w", err)
 	}
@@ -216,38 +199,38 @@ func (u mbimDevice) AirplaneMode(ctx context.Context) (bool, error) {
 }
 
 func (u mbimDevice) SetAirplaneMode(ctx context.Context, enabled bool) error {
-	reader, err := u.openRadio(ctx)
+	client, err := u.openRadio(ctx)
 	if err != nil {
-		return fmt.Errorf("open MBIM airplane mode reader: %w", err)
+		return fmt.Errorf("open MBIM radio client: %w", err)
 	}
-	defer closeReader("close MBIM airplane mode reader", reader)
+	defer closeClient("close MBIM radio client", client)
 
-	return setMBIMAirplaneMode(ctx, reader, enabled)
+	return setMBIMAirplaneMode(ctx, client, enabled)
 }
 
-func setMBIMAirplaneMode(ctx context.Context, reader mbimAirplaneModeReader, enabled bool) error {
+func setMBIMAirplaneMode(ctx context.Context, client mbimRadio, enabled bool) error {
 	state := uiccmbim.RadioSwitchStateOn
 	if enabled {
 		state = uiccmbim.RadioSwitchStateOff
 	}
-	if _, err := reader.SetRadioState(ctx, state); err != nil {
+	if _, err := client.SetRadioState(ctx, state); err != nil {
 		return fmt.Errorf("set MBIM radio state: %w", err)
 	}
 	return nil
 }
 
-func openMBIMReader(ctx context.Context, device string, slot uint8) (*uiccmbim.Client, error) {
+func openMBIMClient(ctx context.Context, device string, slot uint8) (*uiccmbim.Client, error) {
 	return uiccmbim.Open(ctx, uiccmbim.WithProxy(device), uiccmbim.WithSlot(int(slot)))
 }
 
-func openMBIMUSIMReader(ctx context.Context, device string, slot uint8) (usimcard.Reader, error) {
-	reader, err := openMBIMReader(ctx, device, slot)
+func openMBIMUSIM(ctx context.Context, device string, slot uint8) (usimcard.Reader, error) {
+	client, err := openMBIMClient(ctx, device, slot)
 	if err != nil {
 		return nil, err
 	}
-	adapter, err := usim.NewMBIM(reader)
+	adapter, err := usim.NewMBIM(client)
 	if err != nil {
-		return nil, errors.Join(err, reader.Close())
+		return nil, errors.Join(err, client.Close())
 	}
 	return adapter, nil
 }

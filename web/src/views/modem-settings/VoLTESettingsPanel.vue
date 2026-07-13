@@ -9,14 +9,9 @@ import { Switch } from '@/components/ui/switch'
 
 const props = defineProps<{
   enabled: boolean
-  connected: boolean
-  state: string
-  durationSeconds: number
-  canEnable: boolean
   modemRegistered: boolean
   isLoading: boolean
   isUpdating: boolean
-  canUpdate: boolean
 }>()
 
 const emit = defineEmits<{
@@ -28,14 +23,7 @@ const { t } = useI18n()
 const description = computed(() => {
   if (props.enabled) return t('modemDetail.settings.volteManagedDescription')
   if (props.modemRegistered) return t('modemDetail.settings.volteModemRegisteredDescription')
-  if (!props.canEnable) return t('modemDetail.settings.volteUnavailable')
   return t('modemDetail.settings.volteDescription')
-})
-
-const duration = computed(() => {
-  const minutes = Math.floor(props.durationSeconds / 60)
-  const seconds = props.durationSeconds % 60
-  return `${minutes}:${String(seconds).padStart(2, '0')}`
 })
 </script>
 
@@ -44,7 +32,7 @@ const duration = computed(() => {
     <CardHeader class="px-4">
       <CardTitle class="text-base">{{ t('modemDetail.settings.volteTitle') }}</CardTitle>
     </CardHeader>
-    <CardContent class="space-y-3 px-4">
+    <CardContent class="px-4">
       <div class="flex items-center justify-between gap-3">
         <div class="min-w-0 flex-1 space-y-1">
           <Label for="volte-enabled">{{ t('modemDetail.settings.volteLabel') }}</Label>
@@ -55,14 +43,10 @@ const duration = computed(() => {
           <Switch
             id="volte-enabled"
             :model-value="props.enabled"
-            :disabled="props.isLoading || !props.canUpdate"
+            :disabled="props.isLoading || props.isUpdating"
             @update:model-value="emit('update', $event === true)"
           />
         </div>
-      </div>
-      <div v-if="props.enabled" class="flex justify-between border-t pt-3 text-xs">
-        <span class="text-muted-foreground">{{ t('modemDetail.settings.volteStatus') }}</span>
-        <span>{{ props.connected ? `${props.state} · ${duration}` : props.state }}</span>
       </div>
     </CardContent>
   </Card>

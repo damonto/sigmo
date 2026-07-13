@@ -135,6 +135,7 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 		c.markConnecting(modem.EquipmentIdentifier, sessionID)
 		client, err := c.connectWithRetry(ctx, modem, sessionID)
 		if err != nil {
+			c.markDisconnected(modem.EquipmentIdentifier, sessionID, nil)
 			return
 		}
 		c.markConnected(modem.EquipmentIdentifier, sessionID, client)
@@ -311,9 +312,6 @@ func prepareManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet inte
 	if err != nil {
 		return 0, fmt.Errorf("read volte status: %w", err)
 	}
-	if !status.Supported {
-		return 0, ErrUnavailable
-	}
 	profileIndex, err = device.IMSProfileIndex(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("find IMS profile: %w", err)
@@ -348,7 +346,7 @@ func prepareManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet inte
 func releaseManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (err error) {
 	device, err := openManagedVoLTEDevice(modem)
 	if errors.Is(err, wwan.ErrUnsupported) {
-		return ErrUnavailable
+		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("open device: %w", err)

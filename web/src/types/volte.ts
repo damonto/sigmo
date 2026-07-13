@@ -3,7 +3,6 @@ export type VoLTESettingsResponse = {
   connected: boolean
   state: string
   durationSeconds: number
-  canEnable: boolean
   modemRegistered: boolean
 }
 

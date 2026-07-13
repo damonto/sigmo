@@ -302,7 +302,6 @@ describe('ModemPhoneView phone interactions', () => {
     volteApiHarness.settings.mockResolvedValue({
       data: ref({
         enabled: false,
-        canEnable: true,
       }),
     })
     ussdHarness.executeUssd.mockReset()
@@ -639,7 +638,6 @@ describe('ModemPhoneView phone interactions', () => {
     volteApiHarness.settings.mockResolvedValue({
       data: ref({
         enabled: true,
-        canEnable: true,
       }),
     })
     const wrapper = mountView()
