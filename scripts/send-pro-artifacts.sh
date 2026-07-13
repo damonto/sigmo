@@ -7,6 +7,8 @@ MANIFEST="${SIGMO_PRO_MANIFEST:-${OUTPUT_DIR}/artifacts.tsv}"
 BOT_TOKEN="${SIGMO_PRO_TELEGRAM_BOT_TOKEN:-}"
 API_BASE="${SIGMO_PRO_TELEGRAM_API:-https://api.telegram.org}"
 MAX_BYTES="${SIGMO_TELEGRAM_MAX_BYTES:-52428800}"
+MAX_RETRIES="${SIGMO_TELEGRAM_MAX_RETRIES:-5}"
+SEND_INTERVAL="${SIGMO_TELEGRAM_SEND_INTERVAL:-1}"
 send_attempts=0
 send_failures=0
 send_chats=()
@@ -55,80 +57,90 @@ check_archive() {
 	fi
 }
 
-append_media() {
-	local media="$1"
-	local attach_name="$2"
+send_document() {
+	local chat_id="$1"
+	local archive="$2"
 	local text="$3"
+	local attempt=0
+	local http_code
+	local response
+	local retry_after
+	local forms=(
+		--form-string "chat_id=${chat_id}"
+		--form "document=@${archive};filename=$(basename "${archive}")"
+	)
 
 	if [ -n "${text}" ]; then
-		jq -cn \
-			--argjson media "${media}" \
-			--arg attach "attach://${attach_name}" \
-			--arg caption "${text}" \
-			'$media + [{type: "document", media: $attach, caption: $caption}]'
-		return
+		forms+=(--form-string "caption=${text}")
 	fi
 
-	jq -cn \
-		--argjson media "${media}" \
-		--arg attach "attach://${attach_name}" \
-		'$media + [{type: "document", media: $attach}]'
+	while [ "${attempt}" -le "${MAX_RETRIES}" ]; do
+		response="$(mktemp)"
+		if ! http_code="$(curl --show-error --silent \
+			--output "${response}" \
+			--write-out '%{http_code}' \
+			--request POST "${API_BASE}/bot${BOT_TOKEN}/sendDocument" \
+			"${forms[@]}")"; then
+			rm -f "${response}"
+			echo "send Telegram document to ${chat_id}: request transport failed" >&2
+			return 1
+		fi
+
+		if [[ "${http_code}" == 2* ]] && jq -e '.ok == true' "${response}" >/dev/null; then
+			rm -f "${response}"
+			return
+		fi
+
+		if [ "${http_code}" = "429" ]; then
+			retry_after="$(jq -r '.parameters.retry_after // empty' "${response}")"
+			if [[ "${retry_after}" =~ ^[0-9]+$ ]] && [ "${attempt}" -lt "${MAX_RETRIES}" ]; then
+				rm -f "${response}"
+				attempt=$((attempt + 1))
+				echo "Telegram rate limited ${chat_id}; retrying in ${retry_after}s (${attempt}/${MAX_RETRIES})" >&2
+				sleep "${retry_after}"
+				continue
+			fi
+		fi
+
+		echo "send Telegram document to ${chat_id}: HTTP ${http_code}" >&2
+		jq -c . "${response}" >&2 || true
+		rm -f "${response}"
+		return 1
+	done
 }
 
-send_media_group() {
+send_documents() {
 	local chat_id="$1"
 	shift
 	local archives=("$@")
 	local archive
-	local attach_name
-	local media="[]"
 	local i
 	local last_index
 	local text
-	local forms=()
 
-	if [ "${#archives[@]}" -lt 2 ] || [ "${#archives[@]}" -gt 10 ]; then
-		echo "Telegram media group requires 2-10 archives for ${chat_id}; got ${#archives[@]}" >&2
-		return 1
-	fi
 	if ! text="$(caption)"; then
 		echo "build Telegram caption for ${chat_id}" >&2
 		return 1
 	fi
 
 	last_index=$((${#archives[@]} - 1))
-	forms+=(--form "chat_id=${chat_id}")
 	for i in "${!archives[@]}"; do
 		archive="${archives[$i]}"
 		if ! check_archive "${archive}"; then
 			return 1
 		fi
 
-		attach_name="file${i}"
+		echo "Sending $(basename "${archive}") to ${chat_id}"
 		if [ "${i}" -eq "${last_index}" ]; then
-			if ! media="$(append_media "${media}" "${attach_name}" "${text}")"; then
-				echo "build Telegram media JSON for ${chat_id}" >&2
-				return 1
-			fi
-		elif ! media="$(append_media "${media}" "${attach_name}" "")"; then
-			echo "build Telegram media JSON for ${chat_id}" >&2
-			return 1
+			send_document "${chat_id}" "${archive}" "${text}" || return 1
+		else
+			send_document "${chat_id}" "${archive}" "" || return 1
+			sleep "${SEND_INTERVAL}"
 		fi
-		forms+=(--form "${attach_name}=@${archive};filename=$(basename "${archive}")")
 	done
-
-	echo "Sending ${#archives[@]} Pro archives to ${chat_id} as one media group"
-	if ! curl --fail-with-body --show-error --silent \
-		--request POST "${API_BASE}/bot${BOT_TOKEN}/sendMediaGroup" \
-		--form-string "media=${media}" \
-		"${forms[@]}"; then
-		echo "send Telegram media group to ${chat_id}" >&2
-		return 1
-	fi
-	printf '\n'
 }
 
-queue_group() {
+queue_documents() {
 	local chat_id="$1"
 	shift
 	local archives=("$@")
@@ -138,7 +150,7 @@ queue_group() {
 	fi
 
 	send_attempts=$((send_attempts + 1))
-	send_media_group "${chat_id}" "${archives[@]}" &
+	send_documents "${chat_id}" "${archives[@]}" &
 	send_pids+=("$!")
 	send_chats+=("${chat_id}")
 }
@@ -160,7 +172,7 @@ main() {
 		return 1
 	fi
 	if ! command -v jq >/dev/null 2>&1; then
-		echo "jq is required to build Telegram media group JSON" >&2
+		echo "jq is required to parse Telegram API responses" >&2
 		return 1
 	fi
 
@@ -173,7 +185,7 @@ main() {
 		fi
 
 		if [ -n "${current_chat_id}" ] && [ "${chat_id}" != "${current_chat_id}" ]; then
-			queue_group "${current_chat_id}" "${archives[@]}"
+			queue_documents "${current_chat_id}" "${archives[@]}"
 			archives=()
 		fi
 
@@ -181,7 +193,7 @@ main() {
 		archives+=("${archive}")
 	done < "${MANIFEST}"
 
-	queue_group "${current_chat_id}" "${archives[@]}"
+	queue_documents "${current_chat_id}" "${archives[@]}"
 	for i in "${!send_pids[@]}"; do
 		if wait "${send_pids[$i]}"; then
 			continue
