@@ -70,6 +70,8 @@ type Connector struct {
 	persistence        connectionStateStore
 	networkPreferences *mmodem.NetworkPreferences
 	qmapConnections    map[string]*qmapConnection
+	qmapEnabled        map[string]bool
+	qmapPendingNormal  map[string]Preferences
 }
 
 type ConnectorConfig struct {
@@ -195,6 +197,8 @@ func NewConnector(cfg ConnectorConfig) (*Connector, error) {
 		preferences:        make(map[string]Preferences),
 		operations:         make(map[string]*sync.Mutex),
 		qmapConnections:    make(map[string]*qmapConnection),
+		qmapEnabled:        make(map[string]bool),
+		qmapPendingNormal:  make(map[string]Preferences),
 		proxy:              cfg.Proxy,
 		state:              cfg.State,
 		persistence:        dbConnectionState{store: cfg.State},
@@ -374,7 +378,7 @@ func (c *Connector) recover(ctx context.Context, modem internetModem) error {
 }
 
 func (c *Connector) Connect(ctx context.Context, modem *mmodem.Modem, prefs Preferences) (*Connection, error) {
-	if modem != nil && modem.PrimaryPortType() == mmodem.ModemPortTypeQmi {
+	if modem != nil && modem.PrimaryPortType() == mmodem.ModemPortTypeQmi && c.qmapEnabledFor(modem.EquipmentIdentifier) {
 		return c.connectQMAP(ctx, modem, prefs)
 	}
 	access := modemAccess{modem: modem}

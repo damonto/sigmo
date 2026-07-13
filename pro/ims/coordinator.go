@@ -131,6 +131,11 @@ func (c *coordinator) releaseManagedVoLTEOnShutdown(ctx context.Context, modems 
 		if err := releaseManagedVoLTE(cleanupCtx, modem, c.internet); err != nil {
 			result = errors.Join(result, fmt.Errorf("restore modem %s VoLTE: %w", modem.EquipmentIdentifier, err))
 		}
+		if c.internet != nil {
+			if err := c.internet.SetQMAPEnabled(cleanupCtx, modem, false); err != nil {
+				result = errors.Join(result, fmt.Errorf("restore modem %s normal Internet bearer: %w", modem.EquipmentIdentifier, err))
+			}
+		}
 	}
 	return result
 }
@@ -155,20 +160,45 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 			if err != nil {
 				return err
 			}
+			if c.internet != nil {
+				if err := c.internet.SetQMAPEnabled(ctx, modem, true); err != nil {
+					return fmt.Errorf("enable QMAP Internet for VoLTE: %w", err)
+				}
+			}
 			if err := c.volteSettings.Put(ctx, modem.EquipmentIdentifier, true); err != nil {
-				return err
+				if c.internet == nil {
+					return err
+				}
+				rollbackErr := c.internet.SetQMAPEnabled(ctx, modem, false)
+				return errors.Join(err, rollbackErr)
 			}
 			c.restart(modem, profileID)
 			return nil
-		}
-		if err := c.volteSettings.Put(ctx, modem.EquipmentIdentifier, settings.Enabled); err != nil {
-			return err
 		}
 		// The managed client must be fully closed before restoring the modem's
 		// internal IMS client, otherwise both clients can contend for IMS state.
 		c.stop(modem.EquipmentIdentifier)
 		if err := releaseManagedVoLTE(ctx, modem, c.internet); err != nil {
 			return fmt.Errorf("restore modem VoLTE: %w", err)
+		}
+		if c.internet != nil {
+			if err := c.internet.SetQMAPEnabled(ctx, modem, false); err != nil {
+				return fmt.Errorf("restore normal Internet bearer: %w", err)
+			}
+		}
+		if err := c.volteSettings.Put(ctx, modem.EquipmentIdentifier, false); err != nil {
+			if c.internet != nil {
+				rollbackErr := c.internet.SetQMAPEnabled(ctx, modem, true)
+				if rollbackErr == nil {
+					if profileID, profileErr := modem.ProfileID(ctx); profileErr == nil {
+						c.restart(modem, profileID)
+					} else {
+						rollbackErr = profileErr
+					}
+				}
+				return errors.Join(err, rollbackErr)
+			}
+			return err
 		}
 		return nil
 	}

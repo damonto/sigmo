@@ -17,15 +17,18 @@ import (
 
 func TestReleaseManagedVoLTEOnShutdown(t *testing.T) {
 	errTestMode := errors.New("read test mode")
+	errQMAP := errors.New("restore QMAP")
 	tests := []struct {
-		name       string
-		access     Access
-		modems     []*mmodem.Modem
-		device     *fakeManagedVoLTEDevice
-		wantCalls  []string
-		wantErr    error
-		wantOpened bool
-		wantClosed bool
+		name              string
+		access            Access
+		modems            []*mmodem.Modem
+		device            *fakeManagedVoLTEDevice
+		internet          *fakeInternetRestorer
+		wantCalls         []string
+		wantInternetCalls []string
+		wantErrs          []error
+		wantOpened        bool
+		wantClosed        bool
 	}{
 		{
 			name:   "ignores Wi-Fi Calling shutdown",
@@ -43,14 +46,28 @@ func TestReleaseManagedVoLTEOnShutdown(t *testing.T) {
 			wantClosed: true,
 		},
 		{
-			name:       "returns restore error",
-			access:     AccessVoLTE,
-			modems:     []*mmodem.Modem{{EquipmentIdentifier: "modem-1"}},
-			device:     &fakeManagedVoLTEDevice{testModeErr: errTestMode},
-			wantCalls:  []string{"test-mode"},
-			wantErr:    errTestMode,
-			wantOpened: true,
-			wantClosed: true,
+			name:              "restores QMAP after VoLTE cleanup error",
+			access:            AccessVoLTE,
+			modems:            []*mmodem.Modem{{EquipmentIdentifier: "modem-1"}},
+			device:            &fakeManagedVoLTEDevice{testModeErr: errTestMode},
+			internet:          &fakeInternetRestorer{},
+			wantCalls:         []string{"test-mode"},
+			wantInternetCalls: []string{"qmap:false"},
+			wantErrs:          []error{errTestMode},
+			wantOpened:        true,
+			wantClosed:        true,
+		},
+		{
+			name:              "joins VoLTE and QMAP cleanup errors",
+			access:            AccessVoLTE,
+			modems:            []*mmodem.Modem{{EquipmentIdentifier: "modem-1"}},
+			device:            &fakeManagedVoLTEDevice{testModeErr: errTestMode},
+			internet:          &fakeInternetRestorer{qmapErr: errQMAP},
+			wantCalls:         []string{"test-mode"},
+			wantInternetCalls: []string{"qmap:false"},
+			wantErrs:          []error{errTestMode, errQMAP},
+			wantOpened:        true,
+			wantClosed:        true,
 		},
 	}
 
@@ -69,9 +86,17 @@ func TestReleaseManagedVoLTEOnShutdown(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			coordinator := &coordinator{access: tt.access}
+			if tt.internet != nil {
+				coordinator.internet = tt.internet
+			}
 			err := coordinator.releaseManagedVoLTEOnShutdown(ctx, tt.modems)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("releaseManagedVoLTEOnShutdown() error = %v, want %v", err, tt.wantErr)
+			for _, wantErr := range tt.wantErrs {
+				if !errors.Is(err, wantErr) {
+					t.Fatalf("releaseManagedVoLTEOnShutdown() error = %v, want %v", err, wantErr)
+				}
+			}
+			if len(tt.wantErrs) == 0 && err != nil {
+				t.Fatalf("releaseManagedVoLTEOnShutdown() error = %v", err)
 			}
 			if opened != tt.wantOpened {
 				t.Fatalf("openManagedVoLTEDevice called = %v, want %v", opened, tt.wantOpened)
@@ -81,6 +106,13 @@ func TestReleaseManagedVoLTEOnShutdown(t *testing.T) {
 			}
 			if tt.device.closed != tt.wantClosed {
 				t.Fatalf("device closed = %v, want %v", tt.device.closed, tt.wantClosed)
+			}
+			var internetCalls []string
+			if tt.internet != nil {
+				internetCalls = tt.internet.calls
+			}
+			if !slices.Equal(internetCalls, tt.wantInternetCalls) {
+				t.Fatalf("Internet calls = %v, want %v", internetCalls, tt.wantInternetCalls)
 			}
 			if tt.device.testModeCtxErr != nil {
 				t.Fatalf("IMSSTestMode() context error = %v, want nil", tt.device.testModeCtxErr)

@@ -7,10 +7,10 @@ require (
 	github.com/damonto/ims-go v0.0.0-20260712160731-9864d6a2573a
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260712112859-5cbe97a5670f
-	github.com/damonto/wwan-go v0.0.0-20260712120326-e1a9b1a5ddf4
+	github.com/damonto/wwan-go v0.0.0-20260713040007-aa8141790f7e
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
-	github.com/labstack/echo/v5 v5.2.1
+	github.com/labstack/echo/v5 v5.3.0
 	github.com/pion/interceptor v0.1.45
 	github.com/pion/rtp v1.10.3
 	github.com/pion/webrtc/v4 v4.2.16

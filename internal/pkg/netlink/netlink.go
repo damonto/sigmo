@@ -172,6 +172,18 @@ func AddAddress(interfaceName string, prefix netip.Prefix) error {
 }
 
 func FlushAddresses(interfaceName string) error {
+	return flushAddresses(interfaceName, func(netip.Addr) bool { return true })
+}
+
+// FlushGlobalAddresses removes stale PDN addresses while preserving the
+// link-local address needed by IPv6 gateways on point-to-point links.
+func FlushGlobalAddresses(interfaceName string) error {
+	return flushAddresses(interfaceName, func(addr netip.Addr) bool {
+		return !addr.IsLinkLocalUnicast()
+	})
+}
+
+func flushAddresses(interfaceName string, shouldDelete func(netip.Addr) bool) error {
 	ifi, err := net.InterfaceByName(interfaceName)
 	if err != nil {
 		return fmt.Errorf("find interface: %w", err)
@@ -188,7 +200,24 @@ func FlushAddresses(interfaceName string) error {
 			result = errors.Join(result, err)
 			continue
 		}
+		if !shouldDelete(prefix.Addr()) {
+			continue
+		}
 		result = errors.Join(result, DeleteAddress(interfaceName, prefix))
+	}
+	return result
+}
+
+func FlushDefaultRoutes(interfaceName string) error {
+	routes, err := DefaultRoutes()
+	if err != nil {
+		return err
+	}
+	var result error
+	for _, route := range routes {
+		if route.Interface == interfaceName {
+			result = errors.Join(result, DeleteDefaultRoute(route))
+		}
 	}
 	return result
 }

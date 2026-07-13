@@ -532,6 +532,12 @@ type fakeInternetRestorer struct {
 	cancel        context.CancelFunc
 	calls         []string
 	prefs         pinternet.Preferences
+	qmapErr       error
+}
+
+func (r *fakeInternetRestorer) SetQMAPEnabled(_ context.Context, _ *mmodem.Modem, enabled bool) error {
+	r.calls = append(r.calls, fmt.Sprintf("qmap:%t", enabled))
+	return r.qmapErr
 }
 
 func (r *fakeInternetRestorer) Current(context.Context, *mmodem.Modem) (*pinternet.Connection, error) {
@@ -551,6 +557,44 @@ func (r *fakeInternetRestorer) Connect(_ context.Context, _ *mmodem.Modem, prefs
 		return r.connection, err
 	}
 	return r.connection, r.connectErr
+}
+
+func TestConnectOnceEnablesQMAPBeforeVoLTE(t *testing.T) {
+	errQMAP := errors.New("qmap rejected")
+	tests := []struct {
+		name      string
+		internet  *fakeInternetRestorer
+		wantCalls []string
+		wantErr   error
+	}{
+		{
+			name:      "returns QMAP migration error before opening IMS",
+			internet:  &fakeInternetRestorer{qmapErr: errQMAP},
+			wantCalls: []string{"qmap:true"},
+			wantErr:   errQMAP,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			coordinator := &coordinator{access: AccessVoLTE, internet: tt.internet}
+			modem := &mmodem.Modem{
+				EquipmentIdentifier: "modem-1",
+				PrimaryPort:         "cdc-wdm3",
+				Ports: []mmodem.ModemPort{{
+					Device:   "cdc-wdm3",
+					PortType: mmodem.ModemPortTypeQmi,
+				}},
+			}
+			_, err := coordinator.connectOnce(context.Background(), modem, 1)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("connectOnce() error = %v, want %v", err, tt.wantErr)
+			}
+			if !slices.Equal(tt.internet.calls, tt.wantCalls) {
+				t.Fatalf("Internet calls = %v, want %v", tt.internet.calls, tt.wantCalls)
+			}
+		})
+	}
 }
 
 func TestResetManagedVoLTERestoresInternet(t *testing.T) {

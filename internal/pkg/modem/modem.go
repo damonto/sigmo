@@ -80,6 +80,13 @@ func (m *Modem) Enable(ctx context.Context) error {
 	return m.dbusObject.CallWithContext(ctx, ModemInterface+".Enable", 0, true).Err
 }
 
+func (m *Modem) Reset(ctx context.Context) error {
+	if m == nil {
+		return errors.New("modem is required")
+	}
+	return m.dbusObject.CallWithContext(ctx, ModemInterface+".Reset", 0).Err
+}
+
 func (m *Modem) Disable(ctx context.Context) error {
 	return m.dbusObject.CallWithContext(ctx, ModemInterface+".Enable", 0, false).Err
 }

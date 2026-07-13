@@ -58,6 +58,7 @@ type managedVoLTEDevice interface {
 type internetRestorer interface {
 	Current(ctx context.Context, modem *mmodem.Modem) (*pinternet.Connection, error)
 	Connect(ctx context.Context, modem *mmodem.Modem, prefs pinternet.Preferences) (*pinternet.Connection, error)
+	SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, enabled bool) error
 }
 
 var openManagedVoLTEDevice = func(modem *mmodem.Modem) (managedVoLTEDevice, error) {
@@ -76,18 +77,24 @@ func (c *coordinator) startEnabled(ctx context.Context, registry *mmodem.Registr
 }
 
 func (c *coordinator) startIfEnabled(ctx context.Context, modem *mmodem.Modem) {
-	profileID, err := modem.ProfileID(ctx)
-	if err != nil {
-		slog.Debug("skip IMS start", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
-		return
-	}
 	settings, err := c.Settings(ctx, modem)
 	if err != nil {
 		slog.Warn("read IMS settings", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
 		return
 	}
 	if settings.Enabled {
+		profileID, err := modem.ProfileID(ctx)
+		if err != nil {
+			slog.Debug("skip IMS start", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
+			return
+		}
 		c.start(modem, profileID)
+		return
+	}
+	if c.access == AccessVoLTE && c.internet != nil {
+		if err := c.internet.SetQMAPEnabled(ctx, modem, false); err != nil {
+			slog.Warn("restore normal Internet after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
+		}
 	}
 }
 
@@ -188,6 +195,11 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sess
 	var volteInterfaceName string
 	var preparedQMAP mmodem.PreparedQMAP
 	if c.access == AccessVoLTE {
+		if c.internet != nil {
+			if err := c.internet.SetQMAPEnabled(ctx, modem, true); err != nil {
+				return nil, fmt.Errorf("enable QMAP Internet for VoLTE: %w", err)
+			}
+		}
 		var err error
 		imsProfileIndex, err = prepareManagedVoLTE(ctx, modem, c.internet)
 		if err != nil {

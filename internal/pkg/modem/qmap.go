@@ -24,7 +24,7 @@ type QMAPConfig struct {
 }
 
 type QMAPSession struct {
-	reader        *qcom.Client
+	client        *qcom.Client
 	pdn           *qcom.PDNSession
 	InterfaceName string
 	Info          qcom.PDNInfo
@@ -67,12 +67,12 @@ func PrepareQMAP(ctx context.Context, modem *Modem, muxID uint8) (PreparedQMAP, 
 	if err != nil {
 		return PreparedQMAP{}, fmt.Errorf("open QMI proxy: %w", err)
 	}
-	reader, err := qcom.NewClient(transport)
+	client, err := qcom.NewClient(transport)
 	if err != nil {
 		return PreparedQMAP{}, errors.Join(err, transport.Close())
 	}
-	defer reader.Close()
-	if err := ensureQMAP(ctx, reader); err != nil {
+	defer client.Close()
+	if err := ensureQMAP(ctx, client); err != nil {
 		return PreparedQMAP{}, fmt.Errorf("enable QMAP: %w", err)
 	}
 	interfaceName, err := ensureQMIMux(parent, muxID)
@@ -92,6 +92,68 @@ func PrepareQMAP(ctx context.Context, modem *Modem, muxID uint8) (PreparedQMAP, 
 	}, nil
 }
 
+func RestoreNonQMAPDataFormat(ctx context.Context, modem *Modem) error {
+	if modem == nil {
+		return errModemRequired
+	}
+	port, err := selectQMIDevicePort(modem)
+	if err != nil {
+		return err
+	}
+	parent, err := qmapParentInterface(modem)
+	if err != nil {
+		return err
+	}
+	linkLayer, err := nonQMAPLinkLayer(parent)
+	if err != nil {
+		return err
+	}
+	transport, err := qmi.Open(ctx, qmi.WithProxy(port.device))
+	if err != nil {
+		return fmt.Errorf("open QMI proxy: %w", err)
+	}
+	client, err := qcom.NewClient(transport)
+	if err != nil {
+		return errors.Join(err, transport.Close())
+	}
+	defer client.Close()
+	disabled := qcom.WDAAggregationDisabled
+	_, err = client.SetWDADataFormat(ctx, qcom.WDADataFormatConfig{
+		LinkLayerProtocol:   &linkLayer,
+		UplinkAggregation:   &disabled,
+		DownlinkAggregation: &disabled,
+	})
+	if err != nil {
+		format, getErr := client.WDADataFormat(ctx)
+		if getErr == nil && isNonQMAP(format, linkLayer) {
+			return nil
+		}
+		return fmt.Errorf("restore non-QMAP data format: %w", err)
+	}
+	return nil
+}
+
+func nonQMAPLinkLayer(parent string) (qcom.WDALinkLayerProtocol, error) {
+	rawIP, err := os.ReadFile(filepath.Join("/sys/class/net", parent, "qmi", "raw_ip"))
+	if err != nil {
+		return 0, fmt.Errorf("read QMI raw IP mode: %w", err)
+	}
+	return nonQMAPLinkLayerForRawIP(string(rawIP)), nil
+}
+
+func nonQMAPLinkLayerForRawIP(rawIP string) qcom.WDALinkLayerProtocol {
+	if strings.EqualFold(strings.TrimSpace(rawIP), "Y") {
+		return qcom.WDALinkLayerRawIP
+	}
+	return qcom.WDALinkLayerEthernet
+}
+
+func isNonQMAP(format qcom.WDADataFormat, linkLayer qcom.WDALinkLayerProtocol) bool {
+	return format.LinkLayerProtocolKnown && format.LinkLayerProtocol == linkLayer &&
+		format.UplinkAggregationKnown && format.UplinkAggregation == qcom.WDAAggregationDisabled &&
+		format.DownlinkAggregationKnown && format.DownlinkAggregation == qcom.WDAAggregationDisabled
+}
+
 func legacyQMAPDataPort(muxID uint8) (qcom.WDSSIOPort, error) {
 	if muxID < 1 || muxID > 8 {
 		return 0, fmt.Errorf("QMAP mux ID %d is outside legacy RMNET range 1-8", muxID)
@@ -105,6 +167,9 @@ func OpenQMAPSession(ctx context.Context, modem *Modem, cfg QMAPConfig) (*QMAPSe
 	}
 	if cfg.MuxID == 0 {
 		return nil, errors.New("QMAP mux ID is required")
+	}
+	if cfg.IPPreference != qcom.WDSIPPreferenceIPv4 && cfg.IPPreference != qcom.WDSIPPreferenceIPv6 {
+		return nil, errors.New("QMAP IP preference is required")
 	}
 	port, err := selectQMIDevicePort(modem)
 	if err != nil {
@@ -122,30 +187,30 @@ func OpenQMAPSession(ctx context.Context, modem *Modem, cfg QMAPConfig) (*QMAPSe
 	if err != nil {
 		return nil, fmt.Errorf("open QMI proxy: %w", err)
 	}
-	reader, err := qcom.NewClient(transport)
+	client, err := qcom.NewClient(transport)
 	if err != nil {
 		return nil, errors.Join(err, transport.Close())
 	}
-	if err := ensureQMAP(ctx, reader); err != nil {
-		return nil, errors.Join(fmt.Errorf("enable QMAP: %w", err), reader.Close())
+	if err := ensureQMAP(ctx, client); err != nil {
+		return nil, errors.Join(fmt.Errorf("enable QMAP: %w", err), client.Close())
+	}
+	interfaceName, err := ensureQMIMux(parent, cfg.MuxID)
+	if err != nil {
+		return nil, errors.Join(err, client.Close())
+	}
+	if err := netlink.SetUp(parent); err != nil {
+		return nil, errors.Join(fmt.Errorf("set QMAP parent up: %w", err), client.Close())
 	}
 	if cfg.ProfileIndex == 0 && strings.TrimSpace(cfg.APN) != "" {
-		profileIndex, profileErr := reader.WDSProfileIndex(ctx, cfg.APN)
+		profileIndex, profileErr := qmapProfileIndex(ctx, client, cfg.APN, cfg.IPPreference)
 		switch {
 		case profileErr == nil:
 			cfg.ProfileIndex = profileIndex
 		case !errors.Is(profileErr, qcom.ErrWDSProfileNotFound):
-			return nil, errors.Join(fmt.Errorf("find QMAP profile: %w", profileErr), reader.Close())
+			return nil, errors.Join(fmt.Errorf("find QMAP profile: %w", profileErr), client.Close())
 		}
 	}
-	interfaceName, err := ensureQMIMux(parent, cfg.MuxID)
-	if err != nil {
-		return nil, errors.Join(err, reader.Close())
-	}
-	if err := netlink.SetUp(parent); err != nil {
-		return nil, errors.Join(fmt.Errorf("set QMAP parent up: %w", err), reader.Close())
-	}
-	pdn, err := reader.OpenPDN(ctx, qcom.PDNConfig{
+	pdn, err := client.OpenPDN(ctx, qcom.PDNConfig{
 		APN:          cfg.APN,
 		IPPreference: cfg.IPPreference,
 		ProfileIndex: cfg.ProfileIndex,
@@ -155,36 +220,92 @@ func OpenQMAPSession(ctx context.Context, modem *Modem, cfg QMAPConfig) (*QMAPSe
 		},
 	})
 	if err != nil {
-		return nil, errors.Join(err, reader.Close())
+		return nil, errors.Join(err, client.Close())
 	}
-	return &QMAPSession{
-		reader:        reader,
-		pdn:           pdn,
-		InterfaceName: interfaceName,
-		Info:          pdn.Info(),
-	}, nil
+	return &QMAPSession{client: client, pdn: pdn, InterfaceName: interfaceName, Info: pdn.Info()}, nil
+}
+
+func qmapProfileIndex(ctx context.Context, client *qcom.Client, apn string, preference qcom.WDSIPPreference) (uint8, error) {
+	profiles, err := client.WDSProfiles(ctx, qcom.WDSProfileType3GPP)
+	if err != nil {
+		return 0, err
+	}
+	settings := make([]qcom.WDSProfileSettings, 0, len(profiles))
+	for _, profile := range profiles {
+		profileSettings, err := client.WDSProfileSettings(ctx, profile.ID)
+		if err != nil {
+			return 0, err
+		}
+		settings = append(settings, profileSettings)
+	}
+	return selectQMAPProfileIndex(apn, preference, settings)
+}
+
+func selectQMAPProfileIndex(apn string, preference qcom.WDSIPPreference, profiles []qcom.WDSProfileSettings) (uint8, error) {
+	apn = strings.TrimSpace(apn)
+	if apn == "" {
+		return 0, errors.New("QMAP APN is required")
+	}
+	var want qcom.WDSPDPType
+	switch preference {
+	case qcom.WDSIPPreferenceIPv4:
+		want = qcom.WDSPDPTypeIPv4
+	case qcom.WDSIPPreferenceIPv6:
+		want = qcom.WDSPDPTypeIPv6
+	default:
+		return 0, fmt.Errorf("unsupported QMAP IP preference %d", preference)
+	}
+	var compatible uint8
+	for _, profile := range profiles {
+		if !profile.APNKnown || !strings.EqualFold(strings.TrimSpace(profile.APN), apn) || !profile.PDPKnown {
+			continue
+		}
+		if profile.PDPType == want {
+			return profile.ID.Index, nil
+		}
+		if profile.PDPType == qcom.WDSPDPTypeIPv4v6 && compatible == 0 {
+			compatible = profile.ID.Index
+		}
+	}
+	if compatible != 0 {
+		return compatible, nil
+	}
+	return 0, fmt.Errorf("%w: APN %q with IP preference %d", qcom.ErrWDSProfileNotFound, apn, preference)
 }
 
 func (s *QMAPSession) Close() error {
 	if s == nil {
 		return nil
 	}
-	stopErr := s.pdn.Close()
-	return errors.Join(stopErr, s.reader.Close())
+	var pdnErr, clientErr error
+	if s.pdn != nil {
+		pdnErr = qmapStopError(s.pdn.Close())
+	}
+	if s.client != nil {
+		clientErr = s.client.Close()
+	}
+	return errors.Join(pdnErr, clientErr)
 }
 
-func ensureQMAP(ctx context.Context, reader *qcom.Client) error {
-	format, err := reader.WDADataFormat(ctx)
+func qmapStopError(err error) error {
+	if errors.Is(err, qcom.QMIErrorNoEffect) {
+		return nil
+	}
+	return err
+}
+
+func ensureQMAP(ctx context.Context, client *qcom.Client) error {
+	format, err := client.WDADataFormat(ctx)
 	if err == nil && isQMAP(format) {
 		return nil
 	}
 	rawIP := qcom.WDALinkLayerRawIP
 	qmap := qcom.WDAAggregationQMAP
-	_, err = reader.SetWDADataFormat(ctx, qcom.WDADataFormatConfig{
+	_, err = client.SetWDADataFormat(ctx, qcom.WDADataFormatConfig{
 		LinkLayerProtocol: &rawIP, UplinkAggregation: &qmap, DownlinkAggregation: &qmap,
 	})
 	if err != nil {
-		format, getErr := reader.WDADataFormat(ctx)
+		format, getErr := client.WDADataFormat(ctx)
 		if getErr == nil && isQMAP(format) {
 			return nil
 		}
@@ -245,6 +366,33 @@ func ensureQMIMux(parent string, muxID uint8) (string, error) {
 		return "", fmt.Errorf("find QMAP mux %d interface: %w", muxID, err)
 	}
 	return name, nil
+}
+
+// RemoveQMAPMuxes removes mux netdevs after their WDS sessions have stopped.
+func RemoveQMAPMuxes(modem *Modem, muxIDs ...uint8) error {
+	if modem == nil {
+		return errModemRequired
+	}
+	parent, err := qmapParentInterface(modem)
+	if err != nil {
+		return err
+	}
+	current, err := qmapMuxIDs(parent)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join("/sys/class/net", parent, "qmi", "del_mux")
+	var result error
+	for i := len(muxIDs) - 1; i >= 0; i-- {
+		muxID := muxIDs[i]
+		if !slices.Contains(current, muxID) {
+			continue
+		}
+		if err := os.WriteFile(path, []byte(strconv.Itoa(int(muxID))), 0); err != nil && !errors.Is(err, syscall.EINVAL) {
+			result = errors.Join(result, fmt.Errorf("delete QMAP mux %d: %w", muxID, err))
+		}
+	}
+	return result
 }
 
 func qmapMuxInterfaceName(parent string, muxID uint8) (string, error) {
