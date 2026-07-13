@@ -136,6 +136,7 @@ jobs:
       - name: Send Pro artifacts
         env:
           SIGMO_PRO_TELEGRAM_BOT_TOKEN: ${{ secrets.SIGMO_PRO_TELEGRAM_BOT_TOKEN }}
+          SIGMO_PRO_TELEGRAM_API: ${{ vars.SIGMO_PRO_TELEGRAM_API }}
           SIGMO_BUILD_DIR: build/pro
         run: |
           set -euo pipefail
