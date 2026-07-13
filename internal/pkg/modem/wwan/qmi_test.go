@@ -332,12 +332,12 @@ func TestDeviceIMSProfileIndexQMI(t *testing.T) {
 			want: 3,
 		},
 		{
-			name:     "rejects profile without IMCN",
+			name:     "selects IMS profile without optional metadata",
 			profiles: []qcom.WDSProfile{{ID: qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: 2}}},
 			profileSettings: map[uint8]qcom.WDSProfileSettings{
 				2: {APNKnown: true, APN: "ims", PCSCFUsingPCOKnown: true, PCSCFUsingPCO: true},
 			},
-			wantErr: true,
+			want: 2,
 		},
 		{
 			name:        "profile settings rejected",

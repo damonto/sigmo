@@ -389,10 +389,10 @@ func (u *qmiDevice) IMSProfileIndex(ctx context.Context) (uint8, error) {
 }
 
 func isIMSProfile(settings qcom.WDSProfileSettings) bool {
-	return settings.APNKnown && strings.EqualFold(strings.TrimSpace(settings.APN), "ims") &&
-		settings.IMCNKnown && settings.IMCN &&
-		((settings.PCSCFUsingPCOKnown && settings.PCSCFUsingPCO) ||
-			(settings.PCSCFUsingDHCPKnown && settings.PCSCFUsingDHCP))
+	// Some carrier-provisioned Qualcomm profiles omit the optional IMCN and
+	// P-CSCF TLVs even though the modem uses the profile for IMS. The APN is the
+	// portable identifier exposed consistently by both QMI and AT interfaces.
+	return settings.APNKnown && strings.EqualFold(strings.TrimSpace(settings.APN), "ims")
 }
 
 func (u *qmiDevice) IMSSTestMode(ctx context.Context) (bool, error) {
