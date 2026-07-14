@@ -1,8 +1,0 @@
-Sigmo Licensing Notice
-
-This repository uses mixed licensing:
-
-- Files outside pro/ are released under the MIT License in LICENSE.
-- Files under pro/ are released under the GNU Affero General Public License v3.0 in pro/LICENSE.
-
-Copyright (c) 2025 Damon.

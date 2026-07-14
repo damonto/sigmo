@@ -1,7 +1,6 @@
 # Sigmo Pro
 
-Sigmo Pro is released under the GNU Affero General Public License v3.0. See [LICENSE](LICENSE) and
-[../NOTICE](../NOTICE).
+Sigmo Pro is released under the [MIT License](../LICENSE).
 
 Sigmo Pro is the nested Go module for features that should not affect the public
 `go.mod`: eSIM Quick Transfer, IMS access, carrier Websheets, WebRTC call media,
@@ -94,4 +93,4 @@ credentials are not exposed.
 
 ## License
 
-Sigmo Pro is released under the [GNU Affero General Public License v3.0](LICENSE).
+Sigmo Pro is released under the [MIT License](../LICENSE).

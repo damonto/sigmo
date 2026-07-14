@@ -1,6 +1,6 @@
 # Sigmo (Formerly Telmo)
 
-[![License: MIT + AGPL-3.0](https://img.shields.io/badge/License-MIT%20%2B%20AGPL--3.0-blue.svg)](NOTICE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/damonto/sigmo)](https://goreportcard.com/report/github.com/damonto/sigmo)
 [![Release](https://img.shields.io/github/v/release/damonto/sigmo.svg)](https://github.com/damonto/sigmo/releases/latest)
 
@@ -175,6 +175,5 @@ If you wish to contribute or modify the source:
 
 ## 📄 License
 
-This repository uses mixed licensing. Public Sigmo files are released under the
-[MIT License](LICENSE); files under `pro/` are released under the
-[GNU Affero General Public License v3.0](pro/LICENSE). See [NOTICE](NOTICE).
+This repository, including the `pro/` module, is released under the
+[MIT License](LICENSE).
