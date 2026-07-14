@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -135,13 +136,30 @@ func RestoreNonQMAPDataFormat(ctx context.Context, modem *Modem) error {
 
 func nonQMAPLinkLayer(parent string) (qcom.WDALinkLayerProtocol, error) {
 	rawIP, err := os.ReadFile(filepath.Join("/sys/class/net", parent, "qmi", "raw_ip"))
-	if err != nil {
+	if err == nil {
+		return nonQMAPLinkLayerForState(string(rawIP), true, 0), nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
 		return 0, fmt.Errorf("read QMI raw IP mode: %w", err)
 	}
-	return nonQMAPLinkLayerForRawIP(string(rawIP)), nil
+	interfaceState, err := net.InterfaceByName(parent)
+	if err != nil {
+		return 0, fmt.Errorf("find non-QMAP interface: %w", err)
+	}
+	return nonQMAPLinkLayerForState("", false, interfaceState.Flags), nil
 }
 
 func nonQMAPLinkLayerForRawIP(rawIP string) qcom.WDALinkLayerProtocol {
+	return nonQMAPLinkLayerForState(rawIP, true, 0)
+}
+
+func nonQMAPLinkLayerForState(rawIP string, rawIPKnown bool, flags net.Flags) qcom.WDALinkLayerProtocol {
+	if !rawIPKnown {
+		if flags&net.FlagPointToPoint != 0 {
+			return qcom.WDALinkLayerRawIP
+		}
+		return qcom.WDALinkLayerEthernet
+	}
 	if strings.EqualFold(strings.TrimSpace(rawIP), "Y") {
 		return qcom.WDALinkLayerRawIP
 	}
@@ -383,8 +401,8 @@ func RemoveQMAPMuxes(modem *Modem, muxIDs ...uint8) error {
 	}
 	path := filepath.Join("/sys/class/net", parent, "qmi", "del_mux")
 	var result error
-	for i := len(muxIDs) - 1; i >= 0; i-- {
-		muxID := muxIDs[i]
+	for _, muxID := range slices.Backward(muxIDs) {
+
 		if !slices.Contains(current, muxID) {
 			continue
 		}

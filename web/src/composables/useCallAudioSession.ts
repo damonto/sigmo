@@ -225,7 +225,15 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     applyStatus({ type: 'prepare' })
 
     try {
-      const localStream = await ensureAudioInput(nextAbort)
+      let localStream: MediaStream | null = null
+      try {
+        localStream = await ensureAudioInput(nextAbort)
+      } catch (err) {
+        if (isAbortError(err)) throw err
+        // Browsers block microphone capture on plain HTTP. Downlink audio does
+        // not require a microphone, so keep establishing a receive-only call.
+        errorMessage.value = errorText(err)
+      }
       if (!isCurrentSession(nextAbort)) return false
       applyStatus({ type: 'connect' })
       const iceServers = await getIceServers()
@@ -267,11 +275,12 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
             break
         }
       }
-      const localTrack = localStream.getAudioTracks()[0]
-      if (!localTrack) {
-        throw new Error('Microphone capture did not provide an audio track')
+      const localTrack = localStream?.getAudioTracks()[0]
+      if (localTrack && localStream) {
+        audioSender = nextPC.addTrack(localTrack, localStream)
+      } else {
+        nextPC.addTransceiver('audio', { direction: 'recvonly' })
       }
-      audioSender = nextPC.addTrack(localTrack, localStream)
       const offer = await nextPC.createOffer()
       if (!isCurrentSession(nextAbort)) return false
       await nextPC.setLocalDescription(offer)

@@ -22,6 +22,8 @@ import (
 var imsInterfacePollInterval = time.Second
 var imsInterfaceByName = net.InterfaceByName
 
+const imsMediaRouteMetric = 32760
+
 type pdnLinks interface {
 	DisableIPv6Autoconfiguration(string) error
 	SetUp(string) error
@@ -31,6 +33,8 @@ type pdnLinks interface {
 	DeletePointToPointAddress(string, netip.Addr, netip.Addr) error
 	AddHostRoute(string, netip.Addr) error
 	DeleteHostRoute(string, netip.Addr) error
+	AddDefaultRoute(netlink.DefaultRoute) error
+	DeleteDefaultRoute(netlink.DefaultRoute) error
 	AddVLAN(string, string, uint16) error
 	DeleteLink(string) error
 }
@@ -59,6 +63,12 @@ func (systemPDNLinks) AddHostRoute(name string, address netip.Addr) error {
 func (systemPDNLinks) DeleteHostRoute(name string, address netip.Addr) error {
 	return netlink.DeleteHostRoute(name, address)
 }
+func (systemPDNLinks) AddDefaultRoute(route netlink.DefaultRoute) error {
+	return netlink.AddDefaultRoute(route)
+}
+func (systemPDNLinks) DeleteDefaultRoute(route netlink.DefaultRoute) error {
+	return netlink.DeleteDefaultRoute(route)
+}
 func (systemPDNLinks) AddVLAN(parent, name string, id uint16) error {
 	return netlink.AddVLAN(parent, name, id)
 }
@@ -68,6 +78,7 @@ type pdnNetworkState struct {
 	prefixes []netip.Prefix
 	peers    map[netip.Prefix]netip.Addr
 	routes   []netip.Addr
+	defaults []netlink.DefaultRoute
 }
 
 type imsPDNInfo = imsgo.IMSPDNNetworkInfo
@@ -163,24 +174,37 @@ func (n *pdnNetwork) configure(ctx context.Context, interfaceName string, info i
 			if err := n.links.AddAddress(interfaceName, prefix); err != nil {
 				return state, fmt.Errorf("add IMS address %s: %w", prefix, err)
 			}
-			state.prefixes = append(state.prefixes, prefix)
-			continue
-		}
-		// Raw-IP QMI links are point-to-point and do not answer ARP or IPv6
-		// neighbor discovery. Marking the WDS gateway as the peer lets the
-		// kernel transmit directly instead of waiting for an unreachable neighbor.
-		gateway, ok := imsPDNAddress(address.gateway)
-		if !ok || gateway.BitLen() != prefix.Addr().BitLen() {
-			return state, fmt.Errorf("add IMS address %s: point-to-point gateway is unavailable", prefix)
-		}
-		if err := n.links.AddPointToPointAddress(interfaceName, prefix.Addr(), gateway); err != nil {
-			return state, fmt.Errorf("add IMS address %s: %w", prefix, err)
+		} else {
+			// Raw-IP QMI links are point-to-point and do not answer ARP or IPv6
+			// neighbor discovery. Marking the WDS gateway as the peer lets the
+			// kernel transmit directly instead of waiting for an unreachable neighbor.
+			gateway, ok := imsPDNAddress(address.gateway)
+			if !ok || gateway.BitLen() != prefix.Addr().BitLen() {
+				return state, fmt.Errorf("add IMS address %s: point-to-point gateway is unavailable", prefix)
+			}
+			if err := n.links.AddPointToPointAddress(interfaceName, prefix.Addr(), gateway); err != nil {
+				return state, fmt.Errorf("add IMS address %s: %w", prefix, err)
+			}
+			if state.peers == nil {
+				state.peers = make(map[netip.Prefix]netip.Addr)
+			}
+			state.peers[prefix] = gateway
 		}
 		state.prefixes = append(state.prefixes, prefix)
-		if state.peers == nil {
-			state.peers = make(map[netip.Prefix]netip.Addr)
+		family := netlink.FamilyIPv6
+		if prefix.Addr().Is4() {
+			family = netlink.FamilyIPv4
 		}
-		state.peers[prefix] = gateway
+		mediaRoute := netlink.DefaultRoute{
+			Interface: interfaceName,
+			Family:    family,
+			Source:    prefix.Addr(),
+			Metric:    imsMediaRouteMetric,
+		}
+		if err := n.links.AddDefaultRoute(mediaRoute); err != nil {
+			return state, fmt.Errorf("add IMS media route for %s: %w", prefix.Addr(), err)
+		}
+		state.defaults = append(state.defaults, mediaRoute)
 	}
 	for _, ip := range info.PCSCFIPs {
 		address, ok := netip.AddrFromSlice(ip)
@@ -208,7 +232,7 @@ func (n *pdnNetwork) closeLocked() error {
 		}
 		n.state = pdnNetworkState{}
 	}
-	if len(n.state.prefixes) == 0 && len(n.state.routes) == 0 {
+	if len(n.state.prefixes) == 0 && len(n.state.routes) == 0 && len(n.state.defaults) == 0 {
 		n.interfaceName = ""
 	}
 	return err
@@ -219,8 +243,15 @@ func (n *pdnNetwork) cleanup(interfaceName string, state pdnNetworkState) (pdnNe
 		prefixes: make([]netip.Prefix, 0, len(state.prefixes)),
 		peers:    make(map[netip.Prefix]netip.Addr, len(state.peers)),
 		routes:   make([]netip.Addr, 0, len(state.routes)),
+		defaults: make([]netlink.DefaultRoute, 0, len(state.defaults)),
 	}
 	var result error
+	for _, route := range state.defaults {
+		if err := n.links.DeleteDefaultRoute(route); err != nil {
+			result = errors.Join(result, err)
+			remaining.defaults = append(remaining.defaults, route)
+		}
+	}
 	for _, route := range state.routes {
 		if err := n.links.DeleteHostRoute(interfaceName, route); err != nil {
 			result = errors.Join(result, err)

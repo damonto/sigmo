@@ -2,6 +2,7 @@ package modem
 
 import (
 	"errors"
+	"net"
 	"testing"
 
 	"github.com/damonto/wwan-go/qcom"
@@ -41,6 +42,29 @@ func TestNonQMAPLinkLayerForRawIP(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := nonQMAPLinkLayerForRawIP(tt.rawIP); got != tt.want {
 				t.Fatalf("nonQMAPLinkLayerForRawIP() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNonQMAPLinkLayerForState(t *testing.T) {
+	tests := []struct {
+		name       string
+		rawIP      string
+		rawIPKnown bool
+		flags      net.Flags
+		want       qcom.WDALinkLayerProtocol
+	}{
+		{name: "sysfs raw IP", rawIP: "Y\n", rawIPKnown: true, want: qcom.WDALinkLayerRawIP},
+		{name: "sysfs Ethernet", rawIP: "N\n", rawIPKnown: true, flags: net.FlagPointToPoint, want: qcom.WDALinkLayerEthernet},
+		{name: "point-to-point fallback", flags: net.FlagPointToPoint | net.FlagUp, want: qcom.WDALinkLayerRawIP},
+		{name: "Ethernet fallback", flags: net.FlagBroadcast, want: qcom.WDALinkLayerEthernet},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := nonQMAPLinkLayerForState(tt.rawIP, tt.rawIPKnown, tt.flags); got != tt.want {
+				t.Fatalf("nonQMAPLinkLayerForState() = %d, want %d", got, tt.want)
 			}
 		})
 	}

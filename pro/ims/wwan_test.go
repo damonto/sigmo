@@ -15,6 +15,7 @@ import (
 	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/netlink"
 	"github.com/damonto/wwan-go/qcom"
 	usimcard "github.com/damonto/wwan-go/sim/card"
 )
@@ -369,6 +370,14 @@ func TestConfigureIMSPDNNetwork(t *testing.T) {
 					calls = append(calls, fmt.Sprintf("delete-peer-address:%s:%s:%s", name, local, peer))
 					return nil
 				},
+				addDefaultRoute: func(route netlink.DefaultRoute) error {
+					calls = append(calls, fmt.Sprintf("add-default:%s:%d:%s:%d", route.Interface, route.Family, route.Source, route.Metric))
+					return nil
+				},
+				deleteDefaultRoute: func(route netlink.DefaultRoute) error {
+					calls = append(calls, fmt.Sprintf("delete-default:%s:%d:%s:%d", route.Interface, route.Family, route.Source, route.Metric))
+					return nil
+				},
 				addHostRoute: func(name string, address netip.Addr) error {
 					calls = append(calls, fmt.Sprintf("add-route:%s:%s", name, address))
 					return nil
@@ -394,28 +403,38 @@ func TestConfigureIMSPDNNetwork(t *testing.T) {
 			if _, err := network.cleanup("wwan0", state); err != nil {
 				t.Fatalf("cleanup() error = %v", err)
 			}
-			want := []string{
-				"up:wwan0",
+			mediaRoutes := []string{
+				"add-default:wwan0:2:10.0.0.2:32760",
+				"add-default:wwan0:10:2001:db8::2:32760",
 				"add-route:wwan0:10.0.0.10",
 				"add-route:wwan0:2001:db8::10",
+				"delete-default:wwan0:2:10.0.0.2:32760",
+				"delete-default:wwan0:10:2001:db8::2:32760",
 				"delete-route:wwan0:10.0.0.10",
 				"delete-route:wwan0:2001:db8::10",
 			}
+			var want []string
 			if tt.wantDisable {
-				want = slices.Insert(want, 0, "disable-ipv6-autoconf:wwan0")
-				want = slices.Insert(want, 2,
+				want = []string{
+					"disable-ipv6-autoconf:wwan0",
+					"up:wwan0",
 					"add-address:wwan0:10.0.0.2/32",
+					mediaRoutes[0],
 					"add-address:wwan0:2001:db8::2/128",
-				)
+				}
+				want = append(want, mediaRoutes[1:]...)
 				want = append(want,
 					"delete-address:wwan0:10.0.0.2/32",
 					"delete-address:wwan0:2001:db8::2/128",
 				)
 			} else {
-				want = slices.Insert(want, 1,
+				want = []string{
+					"up:wwan0",
 					"add-peer-address:wwan0:10.0.0.2:10.0.0.1",
+					mediaRoutes[0],
 					"add-peer-address:wwan0:2001:db8::2:2001:db8::1",
-				)
+				}
+				want = append(want, mediaRoutes[1:]...)
 				want = append(want,
 					"delete-peer-address:wwan0:10.0.0.2:10.0.0.1",
 					"delete-peer-address:wwan0:2001:db8::2:2001:db8::1",
@@ -468,6 +487,14 @@ func TestManagedVoLTECardUsesMBIMSessionInterface(t *testing.T) {
 				},
 				deleteAddress: func(name string, prefix netip.Prefix) error {
 					calls = append(calls, fmt.Sprintf("delete-address:%s:%s", name, prefix))
+					return nil
+				},
+				addDefaultRoute: func(route netlink.DefaultRoute) error {
+					calls = append(calls, fmt.Sprintf("add-default:%s:%d:%s:%d", route.Interface, route.Family, route.Source, route.Metric))
+					return nil
+				},
+				deleteDefaultRoute: func(route netlink.DefaultRoute) error {
+					calls = append(calls, fmt.Sprintf("delete-default:%s:%d:%s:%d", route.Interface, route.Family, route.Source, route.Metric))
 					return nil
 				},
 				addHostRoute: func(name string, address netip.Addr) error {
@@ -524,7 +551,9 @@ func TestManagedVoLTECardUsesMBIMSessionInterface(t *testing.T) {
 				"disable-ipv6-autoconf:"+interfaceName,
 				"up:"+interfaceName,
 				"add-address:"+interfaceName+":2001:db8::2/128",
+				"add-default:"+interfaceName+":10:2001:db8::2:32760",
 				"add-route:"+interfaceName+":2001:db8::10",
+				"delete-default:"+interfaceName+":10:2001:db8::2:32760",
 				"delete-route:"+interfaceName+":2001:db8::10",
 				"delete-address:"+interfaceName+":2001:db8::2/128",
 				"delete-link:"+interfaceName,
@@ -756,6 +785,8 @@ type fakePDNLinks struct {
 	deletePointToPointAddress    func(string, netip.Addr, netip.Addr) error
 	addHostRoute                 func(string, netip.Addr) error
 	deleteHostRoute              func(string, netip.Addr) error
+	addDefaultRoute              func(netlink.DefaultRoute) error
+	deleteDefaultRoute           func(netlink.DefaultRoute) error
 	addVLAN                      func(string, string, uint16) error
 	deleteLink                   func(string) error
 }
@@ -814,6 +845,20 @@ func (f fakePDNLinks) DeleteHostRoute(name string, address netip.Addr) error {
 		return nil
 	}
 	return f.deleteHostRoute(name, address)
+}
+
+func (f fakePDNLinks) AddDefaultRoute(route netlink.DefaultRoute) error {
+	if f.addDefaultRoute == nil {
+		return nil
+	}
+	return f.addDefaultRoute(route)
+}
+
+func (f fakePDNLinks) DeleteDefaultRoute(route netlink.DefaultRoute) error {
+	if f.deleteDefaultRoute == nil {
+		return nil
+	}
+	return f.deleteDefaultRoute(route)
 }
 
 func (f fakePDNLinks) AddVLAN(parent, name string, id uint16) error {
