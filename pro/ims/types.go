@@ -24,8 +24,6 @@ const (
 	keyPreferred              = "wifi_calling.preferred"
 	modemScopePrefix          = "modem:"
 	keyVoLTESettings          = "volte.settings"
-	keyVoLTEEnabled           = "volte.enabled"
-	keyVoLTENetworkDriver     = "volte.network_driver"
 	keyVoLTESuspendedInternet = "volte.suspended_internet"
 	actionUSSDInitialize      = "initialize"
 	actionUSSDReply           = "reply"
@@ -44,12 +42,12 @@ const (
 	AccessVoLTE       Access = "volte"
 )
 
-type NetworkDriver string
+type DataPath string
 
 const (
-	NetworkDriverMBIM          NetworkDriver = "mbim"
-	NetworkDriverQMAP          NetworkDriver = "qmap"
-	NetworkDriverLegacyBAMDMUX NetworkDriver = "legacy_bam_dmux"
+	DataPathMBIM          DataPath = "mbim"
+	DataPathQMAP          DataPath = "qmap"
+	DataPathLegacyBAMDMUX DataPath = "legacy_bam_dmux"
 )
 
 var (
@@ -68,7 +66,7 @@ var (
 type Settings struct {
 	Enabled            bool
 	Preferred          bool
-	NetworkDriver      NetworkDriver
+	DataPath           DataPath
 	SetIMSAPNAsDefault bool
 	EnablePCSCFViaPCO  bool
 }
@@ -166,26 +164,18 @@ func NewVoLTESettingsStore(store *storage.Store) *VoLTESettingsStore {
 
 func (s *VoLTESettingsStore) Get(ctx context.Context, modemID string) (Settings, error) {
 	if s == nil || s.store == nil {
-		return Settings{NetworkDriver: NetworkDriverQMAP}, nil
+		return Settings{DataPath: DataPathQMAP}, nil
 	}
 	scope, err := modemScope(modemID)
 	if err != nil {
 		return Settings{}, err
 	}
-	settings := Settings{NetworkDriver: NetworkDriverQMAP}
-	if err := s.store.Get(ctx, scope, keyVoLTESettings, &settings); err == nil {
-		return settings, nil
-	} else if !errors.Is(err, storage.ErrNotFound) {
-		return Settings{}, fmt.Errorf("read VoLTE settings: %w", err)
-	}
-	if err := s.store.Get(ctx, scope, keyVoLTEEnabled, &settings.Enabled); err != nil {
+	settings := Settings{DataPath: DataPathQMAP}
+	if err := s.store.Get(ctx, scope, keyVoLTESettings, &settings); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return settings, nil
 		}
-		return Settings{}, fmt.Errorf("read VoLTE enabled: %w", err)
-	}
-	if err := s.store.Get(ctx, scope, keyVoLTENetworkDriver, &settings.NetworkDriver); err != nil && !errors.Is(err, storage.ErrNotFound) {
-		return Settings{}, fmt.Errorf("read VoLTE network driver: %w", err)
+		return Settings{}, fmt.Errorf("read VoLTE settings: %w", err)
 	}
 	return settings, nil
 }

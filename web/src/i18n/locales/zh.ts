@@ -550,16 +550,16 @@ const zh = {
       volteCategoryDescription: '管理 LTE 通话、短信和 USSD。',
       volteLabel: '启用 VoLTE',
       volteDescription: '通过 LTE 处理通话、短信和 USSD。',
-      volteNetworkDriverLabel: '网络驱动',
-      volteNetworkDriverDefault: '默认',
-      volteNetworkDriverQMAP: 'QMAP',
-      volteNetworkDriverQMAPDescription:
+      volteDataPathLabel: 'VoLTE 数据通道',
+      volteDataPathDefault: '默认',
+      volteDataPathQMAP: 'QMAP',
+      volteDataPathQMAPDescription:
         '现代 Qualcomm 设备的默认方案。除非设备不支持 QMAP，否则请选择此项。',
-      volteNetworkDriverLegacy: 'Legacy BAM-DMUX',
-      volteNetworkDriverLegacyDescription: '仅适用于不支持 QMAP 的旧 Qualcomm BAM-DMUX 设备。',
-      volteNetworkDriverLegacyWarning:
+      volteDataPathLegacy: 'Legacy BAM-DMUX',
+      volteDataPathLegacyDescription: '仅适用于不支持 QMAP 的旧 Qualcomm BAM-DMUX 设备。',
+      volteDataPathLegacyWarning:
         'IMS 将独占主 wwan0 通道。启用 VoLTE 期间，蜂窝 Internet 可能不可用。',
-      volteNetworkDriverSuccess: 'VoLTE 网络驱动已更新。',
+      volteDataPathSuccess: 'VoLTE 数据通道已更新。',
       volteIMSAPNDefaultLabel: '设置 IMS APN 为默认',
       volteIMSAPNDefaultDescription: 'VoLTE 启动前将 IMS profile 设为模块默认，并重新 attach。',
       volteIMSAPNPCOLabel: '修正 IMS APN（P-CSCF via PCO）',

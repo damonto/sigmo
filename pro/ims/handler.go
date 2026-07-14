@@ -40,21 +40,21 @@ type SettingsResponse struct {
 }
 
 type UpdateVoLTESettingsRequest struct {
-	Enabled            bool          `json:"enabled"`
-	NetworkDriver      NetworkDriver `json:"networkDriver" validate:"omitempty,oneof=qmap legacy_bam_dmux"`
-	SetIMSAPNAsDefault bool          `json:"setIMSAPNAsDefault"`
-	EnablePCSCFViaPCO  bool          `json:"enablePCSCFViaPCO"`
+	Enabled            bool     `json:"enabled"`
+	DataPath           DataPath `json:"dataPath" validate:"omitempty,oneof=qmap legacy_bam_dmux"`
+	SetIMSAPNAsDefault bool     `json:"setIMSAPNAsDefault"`
+	EnablePCSCFViaPCO  bool     `json:"enablePCSCFViaPCO"`
 }
 
 type VoLTESettingsResponse struct {
-	Enabled            bool          `json:"enabled"`
-	Connected          bool          `json:"connected"`
-	State              string        `json:"state"`
-	DurationSeconds    int64         `json:"durationSeconds"`
-	ModemRegistered    bool          `json:"modemRegistered"`
-	NetworkDriver      NetworkDriver `json:"networkDriver"`
-	SetIMSAPNAsDefault bool          `json:"setIMSAPNAsDefault"`
-	EnablePCSCFViaPCO  bool          `json:"enablePCSCFViaPCO"`
+	Enabled            bool     `json:"enabled"`
+	Connected          bool     `json:"connected"`
+	State              string   `json:"state"`
+	DurationSeconds    int64    `json:"durationSeconds"`
+	ModemRegistered    bool     `json:"modemRegistered"`
+	DataPath           DataPath `json:"dataPath"`
+	SetIMSAPNAsDefault bool     `json:"setIMSAPNAsDefault"`
+	EnablePCSCFViaPCO  bool     `json:"enablePCSCFViaPCO"`
 }
 
 const (
@@ -109,7 +109,7 @@ func (h *Handler) VoLTESettings(c *echo.Context) error {
 		State:              status.State,
 		DurationSeconds:    status.DurationSeconds,
 		ModemRegistered:    modemStatus.Occupied,
-		NetworkDriver:      status.NetworkDriver,
+		DataPath:           status.DataPath,
 		SetIMSAPNAsDefault: status.SetIMSAPNAsDefault,
 		EnablePCSCFViaPCO:  status.EnablePCSCFViaPCO,
 	})
@@ -134,14 +134,14 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 	}
 	switch port.PortType {
 	case mmodem.ModemPortTypeQmi:
-		if req.NetworkDriver == "" {
-			return httpapi.UnprocessableEntity(c, errorCodeUpdateVoLTEInvalidRequest, errors.New("qmi network driver is required"))
+		if req.DataPath == "" {
+			return httpapi.UnprocessableEntity(c, errorCodeUpdateVoLTEInvalidRequest, errors.New("QMI data path is required"))
 		}
 	case mmodem.ModemPortTypeMbim:
 		if req.SetIMSAPNAsDefault || req.EnablePCSCFViaPCO {
 			return httpapi.UnprocessableEntity(c, errorCodeVoLTEProfileOptionsUnsupported, errors.New("IMS APN profile options require QMI"))
 		}
-		req.NetworkDriver = NetworkDriverMBIM
+		req.DataPath = DataPathMBIM
 	default:
 		return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, ErrUnavailable)
 	}
@@ -155,7 +155,7 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 	}
 	if err := h.volte.UpdateSettings(ctx, modem, Settings{
 		Enabled:            req.Enabled,
-		NetworkDriver:      req.NetworkDriver,
+		DataPath:           req.DataPath,
 		SetIMSAPNAsDefault: req.SetIMSAPNAsDefault,
 		EnablePCSCFViaPCO:  req.EnablePCSCFViaPCO,
 	}); err != nil {

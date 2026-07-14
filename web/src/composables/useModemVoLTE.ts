@@ -2,11 +2,7 @@ import { onUnmounted, ref, watch, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useVoLTEApi } from '@/apis/volte'
-import type {
-  UpdateVoLTESettingsRequest,
-  VoLTENetworkDriver,
-  VoLTEQMINetworkDriver,
-} from '@/types/volte'
+import type { UpdateVoLTESettingsRequest, VoLTEDataPath, VoLTEQMIDataPath } from '@/types/volte'
 
 type Options = {
   modemId: ComputedRef<string>
@@ -26,7 +22,7 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
   const volteState = ref('')
   const volteDurationSeconds = ref(0)
   const volteModemRegistered = ref(false)
-  const volteNetworkDriver = ref<VoLTENetworkDriver>('qmap')
+  const volteDataPath = ref<VoLTEDataPath>('qmap')
   const setIMSAPNAsDefault = ref(false)
   const enablePCSCFViaPCO = ref(false)
   const isVoLTELoading = ref(false)
@@ -49,7 +45,7 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     volteState.value = ''
     volteDurationSeconds.value = 0
     volteModemRegistered.value = false
-    volteNetworkDriver.value = 'qmap'
+    volteDataPath.value = 'qmap'
     setIMSAPNAsDefault.value = false
     enablePCSCFViaPCO.value = false
   }
@@ -67,7 +63,7 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
       volteState.value = settings?.state ?? ''
       volteDurationSeconds.value = settings?.durationSeconds ?? 0
       volteModemRegistered.value = settings?.modemRegistered ?? false
-      volteNetworkDriver.value = settings?.networkDriver ?? 'qmap'
+      volteDataPath.value = settings?.dataPath ?? 'qmap'
       setIMSAPNAsDefault.value = settings?.setIMSAPNAsDefault ?? false
       enablePCSCFViaPCO.value = settings?.enablePCSCFViaPCO ?? false
     } catch (err) {
@@ -89,8 +85,8 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
         setIMSAPNAsDefault: setIMSAPNAsDefault.value,
         enablePCSCFViaPCO: enablePCSCFViaPCO.value,
       }
-      if (volteNetworkDriver.value !== 'mbim') {
-        payload.networkDriver = volteNetworkDriver.value
+      if (volteDataPath.value !== 'mbim') {
+        payload.dataPath = volteDataPath.value
       }
       await api.updateSettings(id, payload)
       await fetchSettings(id)
@@ -109,21 +105,21 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     }
   }
 
-  const updateNetworkDriver = async (networkDriver: VoLTEQMINetworkDriver) => {
+  const updateDataPath = async (dataPath: VoLTEQMIDataPath) => {
     const id = modemId.value
     if (!enabled.value || !id || volteEnabled.value || isVoLTEUpdating.value) return
     isVoLTEUpdating.value = true
     try {
       await api.updateSettings(id, {
         enabled: false,
-        networkDriver,
+        dataPath,
         setIMSAPNAsDefault: setIMSAPNAsDefault.value,
         enablePCSCFViaPCO: enablePCSCFViaPCO.value,
       })
       await fetchSettings(id)
-      onSuccess?.(t('modemDetail.settings.volteNetworkDriverSuccess'))
+      onSuccess?.(t('modemDetail.settings.volteDataPathSuccess'))
     } catch (err) {
-      console.error('[useModemVoLTE] Failed to update network driver:', err)
+      console.error('[useModemVoLTE] Failed to update data path:', err)
       onError?.(t('modemDetail.settings.volteUpdateFailed'))
     } finally {
       isVoLTEUpdating.value = false
@@ -140,7 +136,7 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     try {
       await api.updateSettings(id, {
         enabled: false,
-        networkDriver: volteNetworkDriver.value === 'mbim' ? undefined : volteNetworkDriver.value,
+        dataPath: volteDataPath.value === 'mbim' ? undefined : volteDataPath.value,
         setIMSAPNAsDefault: next.setIMSAPNAsDefault,
         enablePCSCFViaPCO: next.enablePCSCFViaPCO,
       })
@@ -189,13 +185,13 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     volteState,
     volteDurationSeconds,
     volteModemRegistered,
-    volteNetworkDriver,
+    volteDataPath,
     setIMSAPNAsDefault,
     enablePCSCFViaPCO,
     isVoLTELoading,
     isVoLTEUpdating,
     updateVoLTE,
-    updateNetworkDriver,
+    updateDataPath,
     updateProfileOptions,
   }
 }

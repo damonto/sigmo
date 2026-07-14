@@ -104,18 +104,18 @@ func TestOpenWWANRejectsUnsupportedAccess(t *testing.T) {
 	}
 }
 
-func TestOpenWWANRequiresOneQMINetworkDriver(t *testing.T) {
+func TestOpenWWANRequiresOneQMIDataPath(t *testing.T) {
 	muxDataPort := &qcom.WDSMuxDataPort{MuxID: 2}
 	tests := []struct {
 		name string
 		cfg  WWANConfig
 	}{
 		{
-			name: "missing driver",
+			name: "missing data path",
 			cfg:  WWANConfig{Access: AccessVoLTE},
 		},
 		{
-			name: "both drivers",
+			name: "both data paths",
 			cfg: WWANConfig{
 				Access:            AccessVoLTE,
 				MuxDataPort:       muxDataPort,

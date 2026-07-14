@@ -29,7 +29,7 @@ describe('useModemVoLTE', () => {
           state: 'idle',
           durationSeconds: 0,
           modemRegistered: false,
-          networkDriver: 'legacy_bam_dmux',
+          dataPath: 'legacy_bam_dmux',
           setIMSAPNAsDefault: false,
           enablePCSCFViaPCO: false,
         },
@@ -38,26 +38,26 @@ describe('useModemVoLTE', () => {
     api.updateSettings.mockResolvedValue({ data: { value: undefined } })
   })
 
-  it('loads and sends the selected network driver when enabling VoLTE', async () => {
+  it('loads and sends the selected data path when enabling VoLTE', async () => {
     const settings = useModemVoLTE({
       modemId: computed(() => 'modem-1'),
       enabled: computed(() => true),
     })
     await vi.waitFor(() => {
-      expect(settings.volteNetworkDriver.value).toBe('legacy_bam_dmux')
+      expect(settings.volteDataPath.value).toBe('legacy_bam_dmux')
     })
 
     await settings.updateVoLTE(true)
 
     expect(api.updateSettings).toHaveBeenCalledWith('modem-1', {
       enabled: true,
-      networkDriver: 'legacy_bam_dmux',
+      dataPath: 'legacy_bam_dmux',
       setIMSAPNAsDefault: false,
       enablePCSCFViaPCO: false,
     })
   })
 
-  it('persists a driver change while VoLTE is disabled', async () => {
+  it('persists a data path change while VoLTE is disabled', async () => {
     const settings = useModemVoLTE({
       modemId: computed(() => 'modem-1'),
       enabled: computed(() => true),
@@ -66,11 +66,11 @@ describe('useModemVoLTE', () => {
       expect(api.settings).toHaveBeenCalled()
     })
 
-    await settings.updateNetworkDriver('qmap')
+    await settings.updateDataPath('qmap')
 
     expect(api.updateSettings).toHaveBeenCalledWith('modem-1', {
       enabled: false,
-      networkDriver: 'qmap',
+      dataPath: 'qmap',
       setIMSAPNAsDefault: false,
       enablePCSCFViaPCO: false,
     })
@@ -92,13 +92,13 @@ describe('useModemVoLTE', () => {
 
     expect(api.updateSettings).toHaveBeenCalledWith('modem-1', {
       enabled: false,
-      networkDriver: 'legacy_bam_dmux',
+      dataPath: 'legacy_bam_dmux',
       setIMSAPNAsDefault: true,
       enablePCSCFViaPCO: true,
     })
   })
 
-  it('does not send a QMI network driver for MBIM', async () => {
+  it('does not send a QMI data path for MBIM', async () => {
     api.settings.mockResolvedValue({
       data: {
         value: {
@@ -107,7 +107,7 @@ describe('useModemVoLTE', () => {
           state: 'idle',
           durationSeconds: 0,
           modemRegistered: false,
-          networkDriver: 'mbim',
+          dataPath: 'mbim',
           setIMSAPNAsDefault: false,
           enablePCSCFViaPCO: false,
         },
@@ -118,7 +118,7 @@ describe('useModemVoLTE', () => {
       enabled: computed(() => true),
     })
     await vi.waitFor(() => {
-      expect(settings.volteNetworkDriver.value).toBe('mbim')
+      expect(settings.volteDataPath.value).toBe('mbim')
     })
 
     await settings.updateVoLTE(true)

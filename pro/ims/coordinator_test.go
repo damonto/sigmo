@@ -208,11 +208,25 @@ func TestStatusFromSession(t *testing.T) {
 func TestVoLTESettingsStore(t *testing.T) {
 	tests := []struct {
 		name     string
-		settings Settings
+		settings *Settings
+		want     Settings
 	}{
-		{name: "enabled QMAP", settings: Settings{Enabled: true, NetworkDriver: NetworkDriverQMAP}},
-		{name: "disabled legacy BAM-DMUX", settings: Settings{NetworkDriver: NetworkDriverLegacyBAMDMUX}},
-		{name: "IMS profile startup options", settings: Settings{NetworkDriver: NetworkDriverQMAP, SetIMSAPNAsDefault: true, EnablePCSCFViaPCO: true}},
+		{name: "empty store defaults to QMAP", want: Settings{DataPath: DataPathQMAP}},
+		{
+			name:     "enabled QMAP",
+			settings: &Settings{Enabled: true, DataPath: DataPathQMAP},
+			want:     Settings{Enabled: true, DataPath: DataPathQMAP},
+		},
+		{
+			name:     "disabled legacy BAM-DMUX",
+			settings: &Settings{DataPath: DataPathLegacyBAMDMUX},
+			want:     Settings{DataPath: DataPathLegacyBAMDMUX},
+		},
+		{
+			name:     "IMS profile startup options",
+			settings: &Settings{DataPath: DataPathQMAP, SetIMSAPNAsDefault: true, EnablePCSCFViaPCO: true},
+			want:     Settings{DataPath: DataPathQMAP, SetIMSAPNAsDefault: true, EnablePCSCFViaPCO: true},
+		},
 	}
 
 	for _, tt := range tests {
@@ -228,93 +242,46 @@ func TestVoLTESettingsStore(t *testing.T) {
 				}
 			})
 			settings := NewVoLTESettingsStore(store)
-			if err := settings.Put(ctx, "modem-1", tt.settings); err != nil {
-				t.Fatalf("Put() error = %v", err)
+			if tt.settings != nil {
+				if err := settings.Put(ctx, "modem-1", *tt.settings); err != nil {
+					t.Fatalf("Put() error = %v", err)
+				}
 			}
 			got, err := settings.Get(ctx, "modem-1")
 			if err != nil {
 				t.Fatalf("Get() error = %v", err)
 			}
-			if got != tt.settings {
-				t.Fatalf("Get() = %+v, want %+v", got, tt.settings)
+			if got != tt.want {
+				t.Fatalf("Get() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestVoLTESettingsStoreDefaultsToQMAP(t *testing.T) {
+func TestVoLTESettingsUseDeviceDataPath(t *testing.T) {
 	tests := []struct {
-		name         string
-		legacyEntry  bool
-		legacyDriver NetworkDriver
-		wantDriver   NetworkDriver
-	}{
-		{name: "empty store", wantDriver: NetworkDriverQMAP},
-		{name: "existing enabled setting without network driver", legacyEntry: true, wantDriver: NetworkDriverQMAP},
-		{name: "existing legacy BAM-DMUX setting", legacyEntry: true, legacyDriver: NetworkDriverLegacyBAMDMUX, wantDriver: NetworkDriverLegacyBAMDMUX},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
-			if err != nil {
-				t.Fatalf("Open() error = %v", err)
-			}
-			t.Cleanup(func() {
-				if err := store.Close(); err != nil {
-					t.Errorf("Close() error = %v", err)
-				}
-			})
-
-			if tt.legacyEntry {
-				if err := store.Put(ctx, modemScopePrefix+"modem-1", keyVoLTEEnabled, true); err != nil {
-					t.Fatalf("seed enabled setting: %v", err)
-				}
-			}
-			if tt.legacyDriver != "" {
-				if err := store.Put(ctx, modemScopePrefix+"modem-1", keyVoLTENetworkDriver, tt.legacyDriver); err != nil {
-					t.Fatalf("seed network driver: %v", err)
-				}
-			}
-			got, err := NewVoLTESettingsStore(store).Get(ctx, "modem-1")
-			if err != nil {
-				t.Fatalf("Get() error = %v", err)
-			}
-			if got.NetworkDriver != tt.wantDriver {
-				t.Fatalf("NetworkDriver = %q, want %q", got.NetworkDriver, tt.wantDriver)
-			}
-			if got.Enabled != tt.legacyEntry {
-				t.Fatalf("Enabled = %v, want %v", got.Enabled, tt.legacyEntry)
-			}
-		})
-	}
-}
-
-func TestVoLTESettingsUseDeviceNetworkDriver(t *testing.T) {
-	tests := []struct {
-		name         string
-		portType     mmodem.ModemPortType
-		storedDriver NetworkDriver
-		wantDriver   NetworkDriver
+		name       string
+		portType   mmodem.ModemPortType
+		storedPath DataPath
+		wantPath   DataPath
 	}{
 		{
-			name:         "MBIM reports MBIM",
-			portType:     mmodem.ModemPortTypeMbim,
-			storedDriver: NetworkDriverLegacyBAMDMUX,
-			wantDriver:   NetworkDriverMBIM,
+			name:       "MBIM reports MBIM",
+			portType:   mmodem.ModemPortTypeMbim,
+			storedPath: DataPathLegacyBAMDMUX,
+			wantPath:   DataPathMBIM,
 		},
 		{
-			name:         "QMI keeps selected legacy BAM-DMUX",
-			portType:     mmodem.ModemPortTypeQmi,
-			storedDriver: NetworkDriverLegacyBAMDMUX,
-			wantDriver:   NetworkDriverLegacyBAMDMUX,
+			name:       "QMI keeps selected legacy BAM-DMUX",
+			portType:   mmodem.ModemPortTypeQmi,
+			storedPath: DataPathLegacyBAMDMUX,
+			wantPath:   DataPathLegacyBAMDMUX,
 		},
 		{
-			name:         "QMI defaults a previous MBIM mode to QMAP",
-			portType:     mmodem.ModemPortTypeQmi,
-			storedDriver: NetworkDriverMBIM,
-			wantDriver:   NetworkDriverQMAP,
+			name:       "QMI defaults a previous MBIM path to QMAP",
+			portType:   mmodem.ModemPortTypeQmi,
+			storedPath: DataPathMBIM,
+			wantPath:   DataPathQMAP,
 		},
 	}
 
@@ -332,7 +299,7 @@ func TestVoLTESettingsUseDeviceNetworkDriver(t *testing.T) {
 			})
 			settings := NewVoLTESettingsStore(store)
 			if err := settings.Put(ctx, "modem-1", Settings{
-				NetworkDriver:      tt.storedDriver,
+				DataPath:           tt.storedPath,
 				SetIMSAPNAsDefault: true,
 				EnablePCSCFViaPCO:  true,
 			}); err != nil {
@@ -351,8 +318,8 @@ func TestVoLTESettingsUseDeviceNetworkDriver(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Settings() error = %v", err)
 			}
-			if got.NetworkDriver != tt.wantDriver {
-				t.Fatalf("NetworkDriver = %q, want %q", got.NetworkDriver, tt.wantDriver)
+			if got.DataPath != tt.wantPath {
+				t.Fatalf("DataPath = %q, want %q", got.DataPath, tt.wantPath)
 			}
 			if tt.portType == mmodem.ModemPortTypeMbim && (got.SetIMSAPNAsDefault || got.EnablePCSCFViaPCO) {
 				t.Fatalf("MBIM profile options = (%v, %v), want disabled", got.SetIMSAPNAsDefault, got.EnablePCSCFViaPCO)
@@ -428,7 +395,7 @@ func TestDisableVoLTEPersistsStateAfterManagedCleanupError(t *testing.T) {
 				}
 			})
 			settings := NewVoLTESettingsStore(store)
-			current := Settings{Enabled: true, NetworkDriver: NetworkDriverLegacyBAMDMUX}
+			current := Settings{Enabled: true, DataPath: DataPathLegacyBAMDMUX}
 			if err := settings.Put(ctx, "modem-1", current); err != nil {
 				t.Fatalf("Put() error = %v", err)
 			}
@@ -453,7 +420,7 @@ func TestDisableVoLTEPersistsStateAfterManagedCleanupError(t *testing.T) {
 			}
 
 			err = coordinator.UpdateSettings(ctx, qmiTestModem("modem-1"), Settings{
-				NetworkDriver: NetworkDriverLegacyBAMDMUX,
+				DataPath: DataPathLegacyBAMDMUX,
 			})
 			if !errors.Is(err, errTestMode) {
 				t.Fatalf("UpdateSettings() error = %v, want %v", err, errTestMode)
@@ -462,7 +429,7 @@ func TestDisableVoLTEPersistsStateAfterManagedCleanupError(t *testing.T) {
 			if getErr != nil {
 				t.Fatalf("Get() error = %v", getErr)
 			}
-			if got.Enabled || got.NetworkDriver != NetworkDriverLegacyBAMDMUX {
+			if got.Enabled || got.DataPath != DataPathLegacyBAMDMUX {
 				t.Fatalf("Get() = %+v, want disabled legacy BAM-DMUX", got)
 			}
 			if !slices.Equal(internet.calls, []string{"connect"}) {
@@ -472,7 +439,7 @@ func TestDisableVoLTEPersistsStateAfterManagedCleanupError(t *testing.T) {
 	}
 }
 
-func TestVoLTEDriverSwitchRollsBackAfterNewDriverFailure(t *testing.T) {
+func TestVoLTEDataPathSwitchRollsBackAfterNewPathFailure(t *testing.T) {
 	errQMAP := errors.New("qmap rejected")
 	tests := []struct {
 		name string
@@ -493,7 +460,7 @@ func TestVoLTEDriverSwitchRollsBackAfterNewDriverFailure(t *testing.T) {
 				}
 			})
 			settings := NewVoLTESettingsStore(store)
-			current := Settings{Enabled: true, NetworkDriver: NetworkDriverLegacyBAMDMUX}
+			current := Settings{Enabled: true, DataPath: DataPathLegacyBAMDMUX}
 			if err := settings.Put(ctx, "modem-1", current); err != nil {
 				t.Fatalf("Put() error = %v", err)
 			}
@@ -517,7 +484,7 @@ func TestVoLTEDriverSwitchRollsBackAfterNewDriverFailure(t *testing.T) {
 				}},
 			}
 
-			err = coordinator.UpdateSettings(ctx, modem, Settings{Enabled: true, NetworkDriver: NetworkDriverQMAP})
+			err = coordinator.UpdateSettings(ctx, modem, Settings{Enabled: true, DataPath: DataPathQMAP})
 			if !errors.Is(err, errQMAP) {
 				t.Fatalf("UpdateSettings() error = %v, want %v", err, errQMAP)
 			}

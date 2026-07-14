@@ -556,17 +556,17 @@ const en = {
       volteCategoryDescription: 'Voice over LTE.',
       volteLabel: 'Enable VoLTE',
       volteDescription: 'Handle calls, messages, and USSD over LTE.',
-      volteNetworkDriverLabel: 'Network driver',
-      volteNetworkDriverDefault: 'Default',
-      volteNetworkDriverQMAP: 'QMAP',
-      volteNetworkDriverQMAPDescription:
+      volteDataPathLabel: 'VoLTE data path',
+      volteDataPathDefault: 'Default',
+      volteDataPathQMAP: 'QMAP',
+      volteDataPathQMAPDescription:
         'Default for modern Qualcomm devices. Select this unless the device does not support QMAP.',
-      volteNetworkDriverLegacy: 'Legacy BAM-DMUX',
-      volteNetworkDriverLegacyDescription:
+      volteDataPathLegacy: 'Legacy BAM-DMUX',
+      volteDataPathLegacyDescription:
         'Only for older Qualcomm BAM-DMUX devices that do not support QMAP.',
-      volteNetworkDriverLegacyWarning:
+      volteDataPathLegacyWarning:
         'IMS exclusively uses the primary wwan0 channel. Cellular Internet may be unavailable while VoLTE is enabled.',
-      volteNetworkDriverSuccess: 'VoLTE network driver updated.',
+      volteDataPathSuccess: 'VoLTE data path updated.',
       volteIMSAPNDefaultLabel: 'Set IMS APN as default',
       volteIMSAPNDefaultDescription:
         'Select the IMS profile as the modem default before VoLTE starts, then reattach the modem.',

@@ -3,7 +3,7 @@ import { createI18n } from 'vue-i18n'
 import { describe, expect, it } from 'vitest'
 
 import en from '@/i18n/locales/en'
-import type { VoLTENetworkDriver } from '@/types/volte'
+import type { VoLTEDataPath } from '@/types/volte'
 import VoLTESettingsPanel from '@/views/modem-settings/VoLTESettingsPanel.vue'
 
 const stubs = {
@@ -23,7 +23,7 @@ const stubs = {
   Switch: { template: '<input type="checkbox" />' },
 }
 
-const mountPanel = (enabled: boolean, networkDriver: VoLTENetworkDriver = 'legacy_bam_dmux') => {
+const mountPanel = (enabled: boolean, dataPath: VoLTEDataPath = 'legacy_bam_dmux') => {
   const i18n = createI18n({
     legacy: false,
     locale: 'en',
@@ -32,7 +32,7 @@ const mountPanel = (enabled: boolean, networkDriver: VoLTENetworkDriver = 'legac
   return mount(VoLTESettingsPanel, {
     props: {
       enabled,
-      networkDriver,
+      dataPath,
       setImsApnAsDefault: false,
       enablePcscfViaPco: false,
       modemRegistered: false,
@@ -51,13 +51,13 @@ describe('VoLTESettingsPanel', () => {
     expect(wrapper.text()).toContain('IMS exclusively uses the primary wwan0 channel')
   })
 
-  it('locks the network driver while VoLTE is enabled', () => {
+  it('locks the data path while VoLTE is enabled', () => {
     const wrapper = mountPanel(true)
 
     expect(wrapper.get('[data-radio-group]').attributes('data-disabled')).toBe('true')
   })
 
-  it('hides the QMI network driver selection for MBIM', () => {
+  it('hides the QMI data path selection for MBIM', () => {
     const wrapper = mountPanel(false, 'mbim')
 
     expect(wrapper.find('[data-radio-group]').exists()).toBe(false)

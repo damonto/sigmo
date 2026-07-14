@@ -119,7 +119,7 @@ func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (us
 	switch port.PortType {
 	case mmodem.ModemPortTypeQmi:
 		if cfg.MuxDataPort == nil && cfg.LegacyMuxDataPort == 0 {
-			return nil, errors.New("QMI VoLTE network driver is required")
+			return nil, errors.New("QMI VoLTE data path is required")
 		}
 		if cfg.MuxDataPort != nil && cfg.LegacyMuxDataPort != 0 {
 			return nil, errors.New("QMAP and legacy BAM-DMUX data ports are mutually exclusive")

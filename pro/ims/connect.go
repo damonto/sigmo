@@ -96,21 +96,21 @@ func (c *coordinator) startIfEnabled(ctx context.Context, modem *mmodem.Modem) {
 		return
 	}
 	if c.access == AccessVoLTE {
-		switch settings.NetworkDriver {
-		case NetworkDriverMBIM:
+		switch settings.DataPath {
+		case DataPathMBIM:
 			return
-		case NetworkDriverQMAP:
+		case DataPathQMAP:
 			if c.internet != nil {
 				if err := c.internet.SetQMAPEnabled(ctx, modem, false); err != nil {
 					slog.Warn("restore normal Internet after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
 				}
 			}
-		case NetworkDriverLegacyBAMDMUX:
+		case DataPathLegacyBAMDMUX:
 			if err := c.restoreLegacyInternet(ctx, modem); err != nil {
 				slog.Warn("restore suspended Internet after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
 			}
 		default:
-			slog.Warn("unsupported VoLTE network driver", "imei", modem.EquipmentIdentifier, "driver", settings.NetworkDriver)
+			slog.Warn("unsupported VoLTE data path", "imei", modem.EquipmentIdentifier, "dataPath", settings.DataPath)
 		}
 	}
 }
@@ -225,7 +225,7 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 
 func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sessionID uint64, imsProfileIndex uint8) (*imsgo.Client, error) {
 	var volteInterfaceName string
-	var networkDriver NetworkDriver
+	var dataPath DataPath
 	wwanConfig := WWANConfig{Access: c.access}
 	if c.access == AccessVoLTE {
 		port, err := voLTEControlPort(modem)
@@ -235,29 +235,29 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sess
 		if port.PortType == mmodem.ModemPortTypeQmi {
 			settings, err := c.Settings(ctx, modem)
 			if err != nil {
-				return nil, fmt.Errorf("read VoLTE network driver: %w", err)
+				return nil, fmt.Errorf("read VoLTE data path: %w", err)
 			}
-			networkDriver = settings.NetworkDriver
-			switch networkDriver {
-			case NetworkDriverQMAP:
+			dataPath = settings.DataPath
+			switch dataPath {
+			case DataPathQMAP:
 				if c.internet != nil {
 					if err := c.internet.SetQMAPEnabled(ctx, modem, true); err != nil {
 						return nil, fmt.Errorf("enable QMAP Internet for VoLTE: %w", err)
 					}
 				}
-			case NetworkDriverLegacyBAMDMUX:
+			case DataPathLegacyBAMDMUX:
 				if c.internet != nil {
 					if err := c.internet.SetQMAPEnabled(ctx, modem, false); err != nil {
 						return nil, fmt.Errorf("restore non-QMAP data format for legacy BAM-DMUX: %w", err)
 					}
 				}
 			default:
-				return nil, fmt.Errorf("unsupported VoLTE network driver %q", networkDriver)
+				return nil, fmt.Errorf("unsupported VoLTE data path %q", dataPath)
 			}
 		}
 		if port.PortType == mmodem.ModemPortTypeQmi {
-			switch networkDriver {
-			case NetworkDriverQMAP:
+			switch dataPath {
+			case DataPathQMAP:
 				preparedQMAP, err := mmodem.PrepareQMAP(ctx, modem, 2)
 				if err != nil {
 					return nil, fmt.Errorf("prepare IMS QMAP mux 2: %w", err)
@@ -265,7 +265,7 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sess
 				wwanConfig.MuxDataPort = preparedQMAP.MuxDataPort
 				wwanConfig.InterfaceName = preparedQMAP.InterfaceName
 				volteInterfaceName = preparedQMAP.InterfaceName
-			case NetworkDriverLegacyBAMDMUX:
+			case DataPathLegacyBAMDMUX:
 				if err := c.suspendLegacyInternet(ctx, modem); err != nil {
 					return nil, err
 				}

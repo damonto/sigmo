@@ -133,24 +133,24 @@ func (c *coordinator) releaseManagedVoLTEOnShutdown(ctx context.Context, modems 
 		}
 		settings, err := c.Settings(cleanupCtx, modem)
 		if err != nil {
-			result = errors.Join(result, fmt.Errorf("read modem %s VoLTE network driver: %w", modem.EquipmentIdentifier, err))
+			result = errors.Join(result, fmt.Errorf("read modem %s VoLTE data path: %w", modem.EquipmentIdentifier, err))
 			continue
 		}
-		switch settings.NetworkDriver {
-		case NetworkDriverMBIM:
+		switch settings.DataPath {
+		case DataPathMBIM:
 			continue
-		case NetworkDriverQMAP:
+		case DataPathQMAP:
 			if c.internet != nil {
 				if err := c.internet.SetQMAPEnabled(cleanupCtx, modem, false); err != nil {
 					result = errors.Join(result, fmt.Errorf("restore modem %s normal Internet bearer: %w", modem.EquipmentIdentifier, err))
 				}
 			}
-		case NetworkDriverLegacyBAMDMUX:
+		case DataPathLegacyBAMDMUX:
 			if err := c.restoreLegacyInternet(cleanupCtx, modem); err != nil {
 				result = errors.Join(result, err)
 			}
 		default:
-			result = errors.Join(result, fmt.Errorf("modem %s has unsupported VoLTE network driver %q", modem.EquipmentIdentifier, settings.NetworkDriver))
+			result = errors.Join(result, fmt.Errorf("modem %s has unsupported VoLTE data path %q", modem.EquipmentIdentifier, settings.DataPath))
 		}
 	}
 	return result
@@ -168,12 +168,12 @@ func (c *coordinator) Settings(ctx context.Context, modem *mmodem.Modem) (Settin
 		}
 		switch port.PortType {
 		case mmodem.ModemPortTypeMbim:
-			settings.NetworkDriver = NetworkDriverMBIM
+			settings.DataPath = DataPathMBIM
 			settings.SetIMSAPNAsDefault = false
 			settings.EnablePCSCFViaPCO = false
 		case mmodem.ModemPortTypeQmi:
-			if settings.NetworkDriver == NetworkDriverMBIM {
-				settings.NetworkDriver = NetworkDriverQMAP
+			if settings.DataPath == DataPathMBIM {
+				settings.DataPath = DataPathQMAP
 			}
 		}
 		return settings, nil
@@ -195,12 +195,12 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 		}
 		switch port.PortType {
 		case mmodem.ModemPortTypeMbim:
-			settings.NetworkDriver = NetworkDriverMBIM
+			settings.DataPath = DataPathMBIM
 		case mmodem.ModemPortTypeQmi:
-			switch settings.NetworkDriver {
-			case NetworkDriverQMAP, NetworkDriverLegacyBAMDMUX:
+			switch settings.DataPath {
+			case DataPathQMAP, DataPathLegacyBAMDMUX:
 			default:
-				return fmt.Errorf("unsupported QMI VoLTE network driver %q", settings.NetworkDriver)
+				return fmt.Errorf("unsupported QMI VoLTE data path %q", settings.DataPath)
 			}
 		default:
 			return ErrUnavailable
@@ -219,12 +219,12 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 			}
 			recoveryCtx, cancelRecovery := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 			defer cancelRecovery()
-			switching := current.Enabled && current.NetworkDriver != settings.NetworkDriver
+			switching := current.Enabled && current.DataPath != settings.DataPath
 			rollbackCurrent := func() error {
 				if !switching {
 					return nil
 				}
-				if err := c.enableVoLTENetworkDriver(recoveryCtx, modem, current.NetworkDriver); err != nil {
+				if err := c.configureVoLTEDataPath(recoveryCtx, modem, current.DataPath); err != nil {
 					return err
 				}
 				c.restart(modem, profileID)
@@ -232,22 +232,22 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 			}
 			if switching {
 				c.stop(modem.EquipmentIdentifier)
-				if err := c.disableVoLTENetworkDriver(ctx, modem, current.NetworkDriver); err != nil {
+				if err := c.restoreVoLTEDataPath(ctx, modem, current.DataPath); err != nil {
 					return errors.Join(err, rollbackCurrent())
 				}
 			}
-			configuredNewDriver := !current.Enabled || switching
-			if err := c.enableVoLTENetworkDriver(ctx, modem, settings.NetworkDriver); err != nil {
+			configuredNewPath := !current.Enabled || switching
+			if err := c.configureVoLTEDataPath(ctx, modem, settings.DataPath); err != nil {
 				var cleanupErr error
-				if configuredNewDriver {
-					cleanupErr = c.disableVoLTENetworkDriver(recoveryCtx, modem, settings.NetworkDriver)
+				if configuredNewPath {
+					cleanupErr = c.restoreVoLTEDataPath(recoveryCtx, modem, settings.DataPath)
 				}
 				return errors.Join(err, cleanupErr, rollbackCurrent())
 			}
 			if err := c.volteSettings.Put(ctx, modem.EquipmentIdentifier, settings); err != nil {
 				var cleanupErr error
-				if configuredNewDriver {
-					cleanupErr = c.disableVoLTENetworkDriver(recoveryCtx, modem, settings.NetworkDriver)
+				if configuredNewPath {
+					cleanupErr = c.restoreVoLTEDataPath(recoveryCtx, modem, settings.DataPath)
 				}
 				return errors.Join(err, cleanupErr, rollbackCurrent())
 			}
@@ -263,7 +263,7 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 		if err := releaseManagedVoLTE(cleanupCtx, modem, c.internet); err != nil {
 			result = errors.Join(result, fmt.Errorf("restore modem VoLTE: %w", err))
 		}
-		result = errors.Join(result, c.disableVoLTENetworkDriver(cleanupCtx, modem, current.NetworkDriver))
+		result = errors.Join(result, c.restoreVoLTEDataPath(cleanupCtx, modem, current.DataPath))
 		result = errors.Join(result, c.volteSettings.Put(cleanupCtx, modem.EquipmentIdentifier, settings))
 		return result
 	}
@@ -282,18 +282,18 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 	return nil
 }
 
-func (c *coordinator) enableVoLTENetworkDriver(ctx context.Context, modem *mmodem.Modem, driver NetworkDriver) error {
-	switch driver {
-	case NetworkDriverMBIM:
+func (c *coordinator) configureVoLTEDataPath(ctx context.Context, modem *mmodem.Modem, dataPath DataPath) error {
+	switch dataPath {
+	case DataPathMBIM:
 		return nil
-	case NetworkDriverQMAP:
+	case DataPathQMAP:
 		if c.internet == nil {
 			return nil
 		}
 		if err := c.internet.SetQMAPEnabled(ctx, modem, true); err != nil {
 			return fmt.Errorf("enable QMAP Internet for VoLTE: %w", err)
 		}
-	case NetworkDriverLegacyBAMDMUX:
+	case DataPathLegacyBAMDMUX:
 		if c.internet == nil {
 			return nil
 		}
@@ -301,25 +301,25 @@ func (c *coordinator) enableVoLTENetworkDriver(ctx context.Context, modem *mmode
 			return fmt.Errorf("restore non-QMAP data format for legacy BAM-DMUX: %w", err)
 		}
 	default:
-		return fmt.Errorf("unsupported VoLTE network driver %q", driver)
+		return fmt.Errorf("unsupported VoLTE data path %q", dataPath)
 	}
 	return nil
 }
 
-func (c *coordinator) disableVoLTENetworkDriver(ctx context.Context, modem *mmodem.Modem, driver NetworkDriver) error {
-	switch driver {
-	case NetworkDriverMBIM:
+func (c *coordinator) restoreVoLTEDataPath(ctx context.Context, modem *mmodem.Modem, dataPath DataPath) error {
+	switch dataPath {
+	case DataPathMBIM:
 		return nil
-	case NetworkDriverQMAP:
+	case DataPathQMAP:
 		if c.internet != nil {
 			if err := c.internet.SetQMAPEnabled(ctx, modem, false); err != nil {
 				return fmt.Errorf("restore normal Internet bearer: %w", err)
 			}
 		}
-	case NetworkDriverLegacyBAMDMUX:
+	case DataPathLegacyBAMDMUX:
 		return c.restoreLegacyInternet(ctx, modem)
 	default:
-		return fmt.Errorf("unsupported VoLTE network driver %q", driver)
+		return fmt.Errorf("unsupported VoLTE data path %q", dataPath)
 	}
 	return nil
 }

@@ -7,11 +7,11 @@ import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
-import type { VoLTENetworkDriver, VoLTEQMINetworkDriver } from '@/types/volte'
+import type { VoLTEDataPath, VoLTEQMIDataPath } from '@/types/volte'
 
 const props = defineProps<{
   enabled: boolean
-  networkDriver: VoLTENetworkDriver
+  dataPath: VoLTEDataPath
   setImsApnAsDefault: boolean
   enablePcscfViaPco: boolean
   modemRegistered: boolean
@@ -21,7 +21,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'update', enabled: boolean): void
-  (event: 'update-driver', networkDriver: VoLTEQMINetworkDriver): void
+  (event: 'update-data-path', dataPath: VoLTEQMIDataPath): void
   (
     event: 'update-profile-options',
     options: { setIMSAPNAsDefault: boolean; enablePCSCFViaPCO: boolean },
@@ -36,19 +36,18 @@ const description = computed(() => {
   return t('modemDetail.settings.volteDescription')
 })
 
-const networkDriverDisabled = computed(() => props.enabled || props.isLoading || props.isUpdating)
+const dataPathDisabled = computed(() => props.enabled || props.isLoading || props.isUpdating)
 
 const profileOptionsDisabled = computed(() => props.enabled || props.isLoading || props.isUpdating)
 
-const updateNetworkDriver = (networkDriver: unknown) => {
-  if (networkDriver !== 'qmap' && networkDriver !== 'legacy_bam_dmux') return
-  emit('update-driver', networkDriver)
+const updateDataPath = (dataPath: unknown) => {
+  if (dataPath !== 'qmap' && dataPath !== 'legacy_bam_dmux') return
+  emit('update-data-path', dataPath)
 }
 
 const updateProfileOption = (name: 'setIMSAPNAsDefault' | 'enablePCSCFViaPCO', value: boolean) => {
   emit('update-profile-options', {
-    setIMSAPNAsDefault:
-      name === 'setIMSAPNAsDefault' ? value : props.setImsApnAsDefault,
+    setIMSAPNAsDefault: name === 'setIMSAPNAsDefault' ? value : props.setImsApnAsDefault,
     enablePCSCFViaPCO: name === 'enablePCSCFViaPCO' ? value : props.enablePcscfViaPco,
   })
 }
@@ -60,39 +59,39 @@ const updateProfileOption = (name: 'setIMSAPNAsDefault' | 'enablePCSCFViaPCO', v
       <CardTitle class="text-base">{{ t('modemDetail.settings.volteTitle') }}</CardTitle>
     </CardHeader>
     <CardContent class="space-y-5 px-4">
-      <div v-if="props.networkDriver !== 'mbim'" class="space-y-2">
-        <Label for="volte-network-driver">
-          {{ t('modemDetail.settings.volteNetworkDriverLabel') }}
+      <div v-if="props.dataPath !== 'mbim'" class="space-y-2">
+        <Label for="volte-data-path">
+          {{ t('modemDetail.settings.volteDataPathLabel') }}
         </Label>
         <RadioGroup
           class="gap-2"
-          :model-value="props.networkDriver"
-          :disabled="networkDriverDisabled"
-          @update:model-value="updateNetworkDriver"
+          :model-value="props.dataPath"
+          :disabled="dataPathDisabled"
+          @update:model-value="updateDataPath"
         >
           <label
             class="flex items-start gap-3 rounded-lg border px-3 py-3 shadow-sm transition"
             :class="[
-              props.networkDriver === 'qmap'
+              props.dataPath === 'qmap'
                 ? 'border-primary/40 bg-primary/5'
                 : 'border-transparent bg-muted/30',
-              networkDriverDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+              dataPathDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
             ]"
           >
-            <RadioGroupItem id="volte-network-driver-qmap" value="qmap" class="mt-1" />
+            <RadioGroupItem id="volte-data-path-qmap" value="qmap" class="mt-1" />
             <span class="min-w-0 space-y-1">
               <span class="flex items-center gap-2">
                 <span class="text-sm font-semibold text-foreground">
-                  {{ t('modemDetail.settings.volteNetworkDriverQMAP') }}
+                  {{ t('modemDetail.settings.volteDataPathQMAP') }}
                 </span>
                 <span
                   class="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary"
                 >
-                  {{ t('modemDetail.settings.volteNetworkDriverDefault') }}
+                  {{ t('modemDetail.settings.volteDataPathDefault') }}
                 </span>
               </span>
               <span class="block text-xs leading-5 text-muted-foreground">
-                {{ t('modemDetail.settings.volteNetworkDriverQMAPDescription') }}
+                {{ t('modemDetail.settings.volteDataPathQMAPDescription') }}
               </span>
             </span>
           </label>
@@ -100,29 +99,29 @@ const updateProfileOption = (name: 'setIMSAPNAsDefault' | 'enablePCSCFViaPCO', v
           <label
             class="flex items-start gap-3 rounded-lg border px-3 py-3 shadow-sm transition"
             :class="[
-              props.networkDriver === 'legacy_bam_dmux'
+              props.dataPath === 'legacy_bam_dmux'
                 ? 'border-primary/40 bg-primary/5'
                 : 'border-transparent bg-muted/30',
-              networkDriverDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+              dataPathDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
             ]"
           >
-            <RadioGroupItem id="volte-network-driver-legacy" value="legacy_bam_dmux" class="mt-1" />
+            <RadioGroupItem id="volte-data-path-legacy" value="legacy_bam_dmux" class="mt-1" />
             <span class="min-w-0 space-y-1">
               <span class="block text-sm font-semibold text-foreground">
-                {{ t('modemDetail.settings.volteNetworkDriverLegacy') }}
+                {{ t('modemDetail.settings.volteDataPathLegacy') }}
               </span>
               <span class="block text-xs leading-5 text-muted-foreground">
-                {{ t('modemDetail.settings.volteNetworkDriverLegacyDescription') }}
+                {{ t('modemDetail.settings.volteDataPathLegacyDescription') }}
               </span>
               <span class="block text-xs leading-5 text-amber-700 dark:text-amber-400">
-                {{ t('modemDetail.settings.volteNetworkDriverLegacyWarning') }}
+                {{ t('modemDetail.settings.volteDataPathLegacyWarning') }}
               </span>
             </span>
           </label>
         </RadioGroup>
       </div>
 
-      <div v-if="props.networkDriver !== 'mbim'" class="space-y-4">
+      <div v-if="props.dataPath !== 'mbim'" class="space-y-4">
         <div class="flex items-center justify-between gap-3">
           <div class="min-w-0 flex-1 space-y-1">
             <Label for="volte-ims-apn-default">
