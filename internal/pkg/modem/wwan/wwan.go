@@ -58,6 +58,8 @@ type adapter interface {
 	VoLTEStatus(ctx context.Context) (VoLTEStatus, error)
 	PacketServiceStatus(ctx context.Context) (PacketServiceStatus, error)
 	IMSProfileIndex(ctx context.Context) (uint8, error)
+	SetIMSProfileDefault(ctx context.Context, index uint8) error
+	SetIMSProfilePCSCFViaPCO(ctx context.Context, index uint8) error
 	IMSSTestMode(ctx context.Context) (bool, error)
 	SetIMSSTestMode(ctx context.Context, enabled bool) error
 	MSISDN(ctx context.Context) (string, error)
@@ -153,6 +155,14 @@ func (d *Device) PacketServiceStatus(ctx context.Context) (PacketServiceStatus, 
 
 func (d *Device) IMSProfileIndex(ctx context.Context) (uint8, error) {
 	return d.adapter.IMSProfileIndex(ctx)
+}
+
+func (d *Device) SetIMSProfileDefault(ctx context.Context, index uint8) error {
+	return d.adapter.SetIMSProfileDefault(ctx, index)
+}
+
+func (d *Device) SetIMSProfilePCSCFViaPCO(ctx context.Context, index uint8) error {
+	return d.adapter.SetIMSProfilePCSCFViaPCO(ctx, index)
 }
 
 func (d *Device) IMSSTestMode(ctx context.Context) (bool, error) {

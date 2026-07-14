@@ -104,6 +104,43 @@ func TestOpenWWANRejectsUnsupportedAccess(t *testing.T) {
 	}
 }
 
+func TestOpenWWANRequiresOneQMINetworkDriver(t *testing.T) {
+	muxDataPort := &qcom.WDSMuxDataPort{MuxID: 2}
+	tests := []struct {
+		name string
+		cfg  WWANConfig
+	}{
+		{
+			name: "missing driver",
+			cfg:  WWANConfig{Access: AccessVoLTE},
+		},
+		{
+			name: "both drivers",
+			cfg: WWANConfig{
+				Access:            AccessVoLTE,
+				MuxDataPort:       muxDataPort,
+				LegacyMuxDataPort: qcom.WDSSIOPortA2MuxRMNET0,
+			},
+		},
+	}
+	modem := &mmodem.Modem{
+		PrimarySimSlot: 1,
+		Ports: []mmodem.ModemPort{{
+			Device:   "/dev/cdc-wdm0",
+			PortType: mmodem.ModemPortTypeQmi,
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := OpenWWAN(context.Background(), modem, tt.cfg)
+			if err == nil {
+				t.Fatal("OpenWWAN() error = nil, want error")
+			}
+		})
+	}
+}
+
 func TestOpenWWANFallsBackAfterDeviceFailure(t *testing.T) {
 	modem := &mmodem.Modem{
 		PrimaryPort:    "/dev/cdc-wdm1",
@@ -271,7 +308,7 @@ func TestVoLTESIMSlot(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "primary slot", modem: &mmodem.Modem{PrimarySimSlot: 2}, want: 2},
-		{name: "zero slot", modem: &mmodem.Modem{}, wantErr: true},
+		{name: "unspecified slot defaults to first slot", modem: &mmodem.Modem{}, want: 1},
 		{name: "slot out of range", modem: &mmodem.Modem{PrimarySimSlot: 6}, wantErr: true},
 		{name: "nil modem", wantErr: true},
 	}

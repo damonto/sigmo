@@ -21,15 +21,17 @@ import (
 
 // WWANConfig selects the modem access used by an IMS client.
 type WWANConfig struct {
-	Access Access
-	QMAP   mmodem.PreparedQMAP
+	Access            Access
+	MuxDataPort       *qcom.WDSMuxDataPort
+	LegacyMuxDataPort qcom.WDSSIOPort
+	InterfaceName     string
 }
 
 // OpenWWAN opens the SIM and packet-data adapter required by the selected IMS access.
 func OpenWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (usimcard.Reader, error) {
 	switch cfg.Access {
 	case AccessVoLTE:
-		return openVoLTEWWAN(ctx, modem, cfg.QMAP)
+		return openVoLTEWWAN(ctx, modem, cfg)
 	case AccessWiFiCalling:
 		return openWiFiCallingWWANWith(ctx, modem, openDeviceWWAN, openATWWAN)
 	default:
@@ -105,7 +107,7 @@ func openDeviceWWAN(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader, 
 	return device.USIM(ctx)
 }
 
-func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, qmap mmodem.PreparedQMAP) (usimcard.Reader, error) {
+func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (usimcard.Reader, error) {
 	port, err := voLTEControlPort(modem)
 	if err != nil {
 		return nil, err
@@ -116,6 +118,12 @@ func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, qmap mmodem.Prepare
 	}
 	switch port.PortType {
 	case mmodem.ModemPortTypeQmi:
+		if cfg.MuxDataPort == nil && cfg.LegacyMuxDataPort == 0 {
+			return nil, errors.New("QMI VoLTE network driver is required")
+		}
+		if cfg.MuxDataPort != nil && cfg.LegacyMuxDataPort != 0 {
+			return nil, errors.New("QMAP and legacy BAM-DMUX data ports are mutually exclusive")
+		}
 		transport, err := qmi.Open(ctx, qmi.WithProxy(port.Device))
 		if err != nil {
 			return nil, fmt.Errorf("open QMI proxy: %w", err)
@@ -128,9 +136,9 @@ func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, qmap mmodem.Prepare
 			return nil, errors.Join(fmt.Errorf("activate QMI SIM slot: %w", err), client.Close())
 		}
 		reader, err := imsgo.NewQCOMClient(client, imsgo.QCOMClientConfig{
-			MuxDataPort:       qmap.MuxDataPort,
-			LegacyMuxDataPort: qmap.LegacyMuxDataPort,
-			Network:           newPDNNetwork(qmap.InterfaceName, false),
+			MuxDataPort:       cfg.MuxDataPort,
+			LegacyMuxDataPort: cfg.LegacyMuxDataPort,
+			Network:           newPDNNetwork(cfg.InterfaceName, false),
 		})
 		if err != nil {
 			return nil, errors.Join(err, client.Close())
@@ -188,7 +196,10 @@ func voLTESIMSlot(modem *mmodem.Modem) (uint8, error) {
 	if modem == nil {
 		return 0, errors.New("modem is required")
 	}
-	if modem.PrimarySimSlot == 0 || modem.PrimarySimSlot > 5 {
+	if modem.PrimarySimSlot == 0 {
+		return 1, nil
+	}
+	if modem.PrimarySimSlot > 5 {
 		return 0, fmt.Errorf("sim slot %d is out of range", modem.PrimarySimSlot)
 	}
 	return uint8(modem.PrimarySimSlot), nil

@@ -2,6 +2,11 @@ import { onUnmounted, ref, watch, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useVoLTEApi } from '@/apis/volte'
+import type {
+  UpdateVoLTESettingsRequest,
+  VoLTENetworkDriver,
+  VoLTEQMINetworkDriver,
+} from '@/types/volte'
 
 type Options = {
   modemId: ComputedRef<string>
@@ -21,6 +26,9 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
   const volteState = ref('')
   const volteDurationSeconds = ref(0)
   const volteModemRegistered = ref(false)
+  const volteNetworkDriver = ref<VoLTENetworkDriver>('qmap')
+  const setIMSAPNAsDefault = ref(false)
+  const enablePCSCFViaPCO = ref(false)
   const isVoLTELoading = ref(false)
   const isVoLTEUpdating = ref(false)
   const isVoLTEFetching = ref(false)
@@ -41,6 +49,9 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     volteState.value = ''
     volteDurationSeconds.value = 0
     volteModemRegistered.value = false
+    volteNetworkDriver.value = 'qmap'
+    setIMSAPNAsDefault.value = false
+    enablePCSCFViaPCO.value = false
   }
 
   const fetchSettings = async (id: string, silent = false) => {
@@ -56,6 +67,9 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
       volteState.value = settings?.state ?? ''
       volteDurationSeconds.value = settings?.durationSeconds ?? 0
       volteModemRegistered.value = settings?.modemRegistered ?? false
+      volteNetworkDriver.value = settings?.networkDriver ?? 'qmap'
+      setIMSAPNAsDefault.value = settings?.setIMSAPNAsDefault ?? false
+      enablePCSCFViaPCO.value = settings?.enablePCSCFViaPCO ?? false
     } catch (err) {
       console.error('[useModemVoLTE] Failed to load settings:', err)
       if (!silent) onError?.(t('modemDetail.settings.volteLoadFailed'))
@@ -70,7 +84,15 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     if (!enabled.value || !id || isVoLTEUpdating.value) return
     isVoLTEUpdating.value = true
     try {
-      await api.updateSettings(id, { enabled: nextEnabled })
+      const payload: UpdateVoLTESettingsRequest = {
+        enabled: nextEnabled,
+        setIMSAPNAsDefault: setIMSAPNAsDefault.value,
+        enablePCSCFViaPCO: enablePCSCFViaPCO.value,
+      }
+      if (volteNetworkDriver.value !== 'mbim') {
+        payload.networkDriver = volteNetworkDriver.value
+      }
+      await api.updateSettings(id, payload)
       await fetchSettings(id)
       onSuccess?.(
         t(
@@ -81,6 +103,51 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
       )
     } catch (err) {
       console.error('[useModemVoLTE] Failed to update settings:', err)
+      onError?.(t('modemDetail.settings.volteUpdateFailed'))
+    } finally {
+      isVoLTEUpdating.value = false
+    }
+  }
+
+  const updateNetworkDriver = async (networkDriver: VoLTEQMINetworkDriver) => {
+    const id = modemId.value
+    if (!enabled.value || !id || volteEnabled.value || isVoLTEUpdating.value) return
+    isVoLTEUpdating.value = true
+    try {
+      await api.updateSettings(id, {
+        enabled: false,
+        networkDriver,
+        setIMSAPNAsDefault: setIMSAPNAsDefault.value,
+        enablePCSCFViaPCO: enablePCSCFViaPCO.value,
+      })
+      await fetchSettings(id)
+      onSuccess?.(t('modemDetail.settings.volteNetworkDriverSuccess'))
+    } catch (err) {
+      console.error('[useModemVoLTE] Failed to update network driver:', err)
+      onError?.(t('modemDetail.settings.volteUpdateFailed'))
+    } finally {
+      isVoLTEUpdating.value = false
+    }
+  }
+
+  const updateProfileOptions = async (next: {
+    setIMSAPNAsDefault: boolean
+    enablePCSCFViaPCO: boolean
+  }) => {
+    const id = modemId.value
+    if (!enabled.value || !id || volteEnabled.value || isVoLTEUpdating.value) return
+    isVoLTEUpdating.value = true
+    try {
+      await api.updateSettings(id, {
+        enabled: false,
+        networkDriver: volteNetworkDriver.value === 'mbim' ? undefined : volteNetworkDriver.value,
+        setIMSAPNAsDefault: next.setIMSAPNAsDefault,
+        enablePCSCFViaPCO: next.enablePCSCFViaPCO,
+      })
+      await fetchSettings(id)
+      onSuccess?.(t('modemDetail.settings.volteProfileOptionsSuccess'))
+    } catch (err) {
+      console.error('[useModemVoLTE] Failed to update IMS profile options:', err)
       onError?.(t('modemDetail.settings.volteUpdateFailed'))
     } finally {
       isVoLTEUpdating.value = false
@@ -122,8 +189,13 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     volteState,
     volteDurationSeconds,
     volteModemRegistered,
+    volteNetworkDriver,
+    setIMSAPNAsDefault,
+    enablePCSCFViaPCO,
     isVoLTELoading,
     isVoLTEUpdating,
     updateVoLTE,
+    updateNetworkDriver,
+    updateProfileOptions,
   }
 }

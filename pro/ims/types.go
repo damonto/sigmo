@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/pro/websheet"
@@ -18,13 +19,16 @@ const (
 	WiFiCallingFeatureName = "wifiCalling"
 	VoLTEFeatureName       = "volte"
 
-	scopePrefix          = "profile:"
-	keyEnabled           = "wifi_calling.enabled"
-	keyPreferred         = "wifi_calling.preferred"
-	modemScopePrefix     = "modem:"
-	keyVoLTEEnabled      = "volte.enabled"
-	actionUSSDInitialize = "initialize"
-	actionUSSDReply      = "reply"
+	scopePrefix               = "profile:"
+	keyEnabled                = "wifi_calling.enabled"
+	keyPreferred              = "wifi_calling.preferred"
+	modemScopePrefix          = "modem:"
+	keyVoLTESettings          = "volte.settings"
+	keyVoLTEEnabled           = "volte.enabled"
+	keyVoLTENetworkDriver     = "volte.network_driver"
+	keyVoLTESuspendedInternet = "volte.suspended_internet"
+	actionUSSDInitialize      = "initialize"
+	actionUSSDReply           = "reply"
 
 	StateIdle             = "idle"
 	StateConnecting       = "connecting"
@@ -38,6 +42,14 @@ type Access string
 const (
 	AccessWiFiCalling Access = "wifi_calling"
 	AccessVoLTE       Access = "volte"
+)
+
+type NetworkDriver string
+
+const (
+	NetworkDriverMBIM          NetworkDriver = "mbim"
+	NetworkDriverQMAP          NetworkDriver = "qmap"
+	NetworkDriverLegacyBAMDMUX NetworkDriver = "legacy_bam_dmux"
 )
 
 var (
@@ -54,8 +66,11 @@ var (
 )
 
 type Settings struct {
-	Enabled   bool
-	Preferred bool
+	Enabled            bool
+	Preferred          bool
+	NetworkDriver      NetworkDriver
+	SetIMSAPNAsDefault bool
+	EnablePCSCFViaPCO  bool
 }
 
 type Status struct {
@@ -151,23 +166,31 @@ func NewVoLTESettingsStore(store *storage.Store) *VoLTESettingsStore {
 
 func (s *VoLTESettingsStore) Get(ctx context.Context, modemID string) (Settings, error) {
 	if s == nil || s.store == nil {
-		return Settings{}, nil
+		return Settings{NetworkDriver: NetworkDriverQMAP}, nil
 	}
 	scope, err := modemScope(modemID)
 	if err != nil {
 		return Settings{}, err
 	}
-	var enabled bool
-	if err := s.store.Get(ctx, scope, keyVoLTEEnabled, &enabled); err != nil {
+	settings := Settings{NetworkDriver: NetworkDriverQMAP}
+	if err := s.store.Get(ctx, scope, keyVoLTESettings, &settings); err == nil {
+		return settings, nil
+	} else if !errors.Is(err, storage.ErrNotFound) {
+		return Settings{}, fmt.Errorf("read VoLTE settings: %w", err)
+	}
+	if err := s.store.Get(ctx, scope, keyVoLTEEnabled, &settings.Enabled); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			return Settings{}, nil
+			return settings, nil
 		}
 		return Settings{}, fmt.Errorf("read VoLTE enabled: %w", err)
 	}
-	return Settings{Enabled: enabled}, nil
+	if err := s.store.Get(ctx, scope, keyVoLTENetworkDriver, &settings.NetworkDriver); err != nil && !errors.Is(err, storage.ErrNotFound) {
+		return Settings{}, fmt.Errorf("read VoLTE network driver: %w", err)
+	}
+	return settings, nil
 }
 
-func (s *VoLTESettingsStore) Put(ctx context.Context, modemID string, enabled bool) error {
+func (s *VoLTESettingsStore) Put(ctx context.Context, modemID string, settings Settings) error {
 	if s == nil || s.store == nil {
 		return nil
 	}
@@ -175,8 +198,55 @@ func (s *VoLTESettingsStore) Put(ctx context.Context, modemID string, enabled bo
 	if err != nil {
 		return err
 	}
-	if err := s.store.Put(ctx, scope, keyVoLTEEnabled, enabled); err != nil {
-		return fmt.Errorf("save VoLTE enabled: %w", err)
+	settings.Preferred = false
+	if err := s.store.Put(ctx, scope, keyVoLTESettings, settings); err != nil {
+		return fmt.Errorf("save VoLTE settings: %w", err)
+	}
+	return nil
+}
+
+func (s *VoLTESettingsStore) SuspendedInternet(ctx context.Context, modemID string) (pinternet.Preferences, bool, error) {
+	if s == nil || s.store == nil {
+		return pinternet.Preferences{}, false, nil
+	}
+	scope, err := modemScope(modemID)
+	if err != nil {
+		return pinternet.Preferences{}, false, err
+	}
+	var prefs pinternet.Preferences
+	if err := s.store.Get(ctx, scope, keyVoLTESuspendedInternet, &prefs); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return pinternet.Preferences{}, false, nil
+		}
+		return pinternet.Preferences{}, false, fmt.Errorf("read suspended Internet: %w", err)
+	}
+	return prefs, true, nil
+}
+
+func (s *VoLTESettingsStore) PutSuspendedInternet(ctx context.Context, modemID string, prefs pinternet.Preferences) error {
+	if s == nil || s.store == nil {
+		return nil
+	}
+	scope, err := modemScope(modemID)
+	if err != nil {
+		return err
+	}
+	if err := s.store.Put(ctx, scope, keyVoLTESuspendedInternet, prefs); err != nil {
+		return fmt.Errorf("save suspended Internet: %w", err)
+	}
+	return nil
+}
+
+func (s *VoLTESettingsStore) DeleteSuspendedInternet(ctx context.Context, modemID string) error {
+	if s == nil || s.store == nil {
+		return nil
+	}
+	scope, err := modemScope(modemID)
+	if err != nil {
+		return err
+	}
+	if err := s.store.Delete(ctx, scope, keyVoLTESuspendedInternet); err != nil {
+		return fmt.Errorf("delete suspended Internet: %w", err)
 	}
 	return nil
 }

@@ -40,34 +40,41 @@ type SettingsResponse struct {
 }
 
 type UpdateVoLTESettingsRequest struct {
-	Enabled bool `json:"enabled"`
+	Enabled            bool          `json:"enabled"`
+	NetworkDriver      NetworkDriver `json:"networkDriver" validate:"omitempty,oneof=qmap legacy_bam_dmux"`
+	SetIMSAPNAsDefault bool          `json:"setIMSAPNAsDefault"`
+	EnablePCSCFViaPCO  bool          `json:"enablePCSCFViaPCO"`
 }
 
 type VoLTESettingsResponse struct {
-	Enabled         bool   `json:"enabled"`
-	Connected       bool   `json:"connected"`
-	State           string `json:"state"`
-	DurationSeconds int64  `json:"durationSeconds"`
-	ModemRegistered bool   `json:"modemRegistered"`
+	Enabled            bool          `json:"enabled"`
+	Connected          bool          `json:"connected"`
+	State              string        `json:"state"`
+	DurationSeconds    int64         `json:"durationSeconds"`
+	ModemRegistered    bool          `json:"modemRegistered"`
+	NetworkDriver      NetworkDriver `json:"networkDriver"`
+	SetIMSAPNAsDefault bool          `json:"setIMSAPNAsDefault"`
+	EnablePCSCFViaPCO  bool          `json:"enablePCSCFViaPCO"`
 }
 
 const (
-	errorCodeGetSettingsFailed            = "get_ims_settings_failed"
-	errorCodeUpdateSettingsInvalidRequest = "update_ims_settings_invalid_request"
-	errorCodeUpdateSettingsFailed         = "update_ims_settings_failed"
-	errorCodeCreateSessionFailed          = "create_ims_session_failed"
-	errorCodeDeleteSessionFailed          = "delete_ims_session_failed"
-	errorCodeSessionUnavailable           = "ims_session_unavailable"
-	errorCodeStartWebsheetFailed          = "start_ims_websheet_failed"
-	errorCodeStartE911WebsheetFailed      = "start_ims_e911_websheet_failed"
-	errorCodeWebsheetNotPending           = "ims_websheet_not_pending"
-	errorCodeSetupPending                 = "ims_setup_pending"
-	errorCodeSetupDenied                  = "ims_setup_denied"
-	errorCodeWebsheetUnavailable          = "ims_websheet_unavailable"
-	errorCodeGetVoLTESettingsFailed       = "get_volte_settings_failed"
-	errorCodeUpdateVoLTEInvalidRequest    = "update_volte_settings_invalid_request"
-	errorCodeUpdateVoLTESettingsFailed    = "update_volte_settings_failed"
-	errorCodeVoLTEUnavailable             = "volte_unavailable"
+	errorCodeGetSettingsFailed              = "get_ims_settings_failed"
+	errorCodeUpdateSettingsInvalidRequest   = "update_ims_settings_invalid_request"
+	errorCodeUpdateSettingsFailed           = "update_ims_settings_failed"
+	errorCodeCreateSessionFailed            = "create_ims_session_failed"
+	errorCodeDeleteSessionFailed            = "delete_ims_session_failed"
+	errorCodeSessionUnavailable             = "ims_session_unavailable"
+	errorCodeStartWebsheetFailed            = "start_ims_websheet_failed"
+	errorCodeStartE911WebsheetFailed        = "start_ims_e911_websheet_failed"
+	errorCodeWebsheetNotPending             = "ims_websheet_not_pending"
+	errorCodeSetupPending                   = "ims_setup_pending"
+	errorCodeSetupDenied                    = "ims_setup_denied"
+	errorCodeWebsheetUnavailable            = "ims_websheet_unavailable"
+	errorCodeGetVoLTESettingsFailed         = "get_volte_settings_failed"
+	errorCodeUpdateVoLTEInvalidRequest      = "update_volte_settings_invalid_request"
+	errorCodeUpdateVoLTESettingsFailed      = "update_volte_settings_failed"
+	errorCodeVoLTEUnavailable               = "volte_unavailable"
+	errorCodeVoLTEProfileOptionsUnsupported = "volte_profile_options_unsupported"
 )
 
 func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, wifiCalling Coordinator, volte Coordinator) {
@@ -97,11 +104,14 @@ func (h *Handler) VoLTESettings(c *echo.Context) error {
 		return httpapi.Internal(c, errorCodeGetVoLTESettingsFailed, err)
 	}
 	return c.JSON(http.StatusOK, VoLTESettingsResponse{
-		Enabled:         status.Enabled,
-		Connected:       status.Connected,
-		State:           status.State,
-		DurationSeconds: status.DurationSeconds,
-		ModemRegistered: modemStatus.Occupied,
+		Enabled:            status.Enabled,
+		Connected:          status.Connected,
+		State:              status.State,
+		DurationSeconds:    status.DurationSeconds,
+		ModemRegistered:    modemStatus.Occupied,
+		NetworkDriver:      status.NetworkDriver,
+		SetIMSAPNAsDefault: status.SetIMSAPNAsDefault,
+		EnablePCSCFViaPCO:  status.EnablePCSCFViaPCO,
 	})
 }
 
@@ -112,8 +122,28 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 		return httpapi.ModemLookupError(c, err, errorCodeUpdateVoLTESettingsFailed)
 	}
 	var req UpdateVoLTESettingsRequest
-	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateVoLTEInvalidRequest); err != nil {
-		return err
+	if err := c.Bind(&req); err != nil {
+		return httpapi.BadRequest(c, errorCodeUpdateVoLTEInvalidRequest, err)
+	}
+	if err := c.Validate(&req); err != nil {
+		return httpapi.UnprocessableEntity(c, errorCodeUpdateVoLTEInvalidRequest, err)
+	}
+	port, err := voLTEControlPort(modem)
+	if err != nil {
+		return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, err)
+	}
+	switch port.PortType {
+	case mmodem.ModemPortTypeQmi:
+		if req.NetworkDriver == "" {
+			return httpapi.UnprocessableEntity(c, errorCodeUpdateVoLTEInvalidRequest, errors.New("qmi network driver is required"))
+		}
+	case mmodem.ModemPortTypeMbim:
+		if req.SetIMSAPNAsDefault || req.EnablePCSCFViaPCO {
+			return httpapi.UnprocessableEntity(c, errorCodeVoLTEProfileOptionsUnsupported, errors.New("IMS APN profile options require QMI"))
+		}
+		req.NetworkDriver = NetworkDriverMBIM
+	default:
+		return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, ErrUnavailable)
 	}
 	if req.Enabled {
 		if err := validateManagedVoLTE(ctx, modem); err != nil {
@@ -123,7 +153,12 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 			return httpapi.Internal(c, errorCodeUpdateVoLTESettingsFailed, err)
 		}
 	}
-	if err := h.volte.UpdateSettings(ctx, modem, Settings{Enabled: req.Enabled}); err != nil {
+	if err := h.volte.UpdateSettings(ctx, modem, Settings{
+		Enabled:            req.Enabled,
+		NetworkDriver:      req.NetworkDriver,
+		SetIMSAPNAsDefault: req.SetIMSAPNAsDefault,
+		EnablePCSCFViaPCO:  req.EnablePCSCFViaPCO,
+	}); err != nil {
 		return httpapi.Internal(c, errorCodeUpdateVoLTESettingsFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)

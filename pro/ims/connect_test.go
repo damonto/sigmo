@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/pro/websheet"
 	"github.com/godbus/dbus/v5"
 )
@@ -156,6 +158,8 @@ type fakeManagedVoLTEDevice struct {
 	packetErrors     []error
 	profileIndex     uint8
 	profileErr       error
+	setDefaultErr    error
+	setPCOErr        error
 	closed           bool
 }
 
@@ -190,6 +194,16 @@ func (d *fakeManagedVoLTEDevice) IMSProfileIndex(context.Context) (uint8, error)
 		d.profileIndex = 2
 	}
 	return d.profileIndex, d.profileErr
+}
+
+func (d *fakeManagedVoLTEDevice) SetIMSProfileDefault(_ context.Context, index uint8) error {
+	d.calls = append(d.calls, fmt.Sprintf("set-default:%d", index))
+	return d.setDefaultErr
+}
+
+func (d *fakeManagedVoLTEDevice) SetIMSProfilePCSCFViaPCO(_ context.Context, index uint8) error {
+	d.calls = append(d.calls, fmt.Sprintf("set-pco:%d", index))
+	return d.setPCOErr
 }
 
 func (d *fakeManagedVoLTEDevice) IMSSTestMode(ctx context.Context) (bool, error) {
@@ -433,7 +447,7 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 				tt.device.cancel = cancel
 				voLTEResetDelay = time.Hour
 			}
-			profileIndex, err := prepareManagedVoLTE(ctx, &mmodem.Modem{}, nil)
+			profileIndex, err := prepareManagedVoLTE(ctx, &mmodem.Modem{}, nil, Settings{})
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("prepareManagedVoLTE() error = %v, want %v", err, tt.wantErr)
 			}
@@ -448,6 +462,83 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 			}
 			if tt.cancel && tt.device.restoreCtxErr != nil {
 				t.Fatalf("restore context error = %v, want nil", tt.device.restoreCtxErr)
+			}
+		})
+	}
+}
+
+func TestPrepareManagedVoLTEAppliesProfileOptionsBeforeSingleReset(t *testing.T) {
+	errPCO := errors.New("PCO rejected")
+	tests := []struct {
+		name        string
+		settings    Settings
+		device      *fakeManagedVoLTEDevice
+		wantCalls   []string
+		wantProfile uint8
+		wantErr     error
+	}{
+		{
+			name: "both options preserve order and reset once",
+			settings: Settings{
+				SetIMSAPNAsDefault: true,
+				EnablePCSCFViaPCO:  true,
+			},
+			device:      &fakeManagedVoLTEDevice{},
+			wantCalls:   []string{"status", "ims-profile", "set-default:2", "set-pco:2", "set-airplane-mode:true", "set-airplane-mode:false", "packet-service"},
+			wantProfile: 2,
+		},
+		{
+			name: "occupied IMS joins takeover into the same reset",
+			settings: Settings{
+				SetIMSAPNAsDefault: true,
+				EnablePCSCFViaPCO:  true,
+			},
+			device: &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Occupied: true}},
+			wantCalls: []string{
+				"status", "ims-profile", "set-default:2", "set-pco:2", "test-mode", "set-test-mode:true", "set-airplane-mode:true", "set-airplane-mode:false", "packet-service",
+			},
+			wantProfile: 2,
+		},
+		{
+			name:     "profile failure stops before reset",
+			settings: Settings{EnablePCSCFViaPCO: true},
+			device:   &fakeManagedVoLTEDevice{setPCOErr: errPCO},
+			wantCalls: []string{
+				"status", "ims-profile", "set-pco:2",
+			},
+			wantErr: errPCO,
+		},
+	}
+
+	previousOpen := openManagedVoLTEDevice
+	previousResetDelay := voLTEResetDelay
+	previousPollInterval := packetServicePollInterval
+	openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+		return nil, errors.New("test device not configured")
+	}
+	t.Cleanup(func() {
+		openManagedVoLTEDevice = previousOpen
+		voLTEResetDelay = previousResetDelay
+		packetServicePollInterval = previousPollInterval
+	})
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+				return tt.device, nil
+			}
+			voLTEResetDelay = time.Nanosecond
+			packetServicePollInterval = time.Nanosecond
+
+			profile, err := prepareManagedVoLTE(context.Background(), &mmodem.Modem{}, nil, tt.settings)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("prepareManagedVoLTE() error = %v, want %v", err, tt.wantErr)
+			}
+			if profile != tt.wantProfile {
+				t.Fatalf("profile = %d, want %d", profile, tt.wantProfile)
+			}
+			if !slices.Equal(tt.device.calls, tt.wantCalls) {
+				t.Fatalf("calls = %v, want %v", tt.device.calls, tt.wantCalls)
 			}
 		})
 	}
@@ -636,10 +727,17 @@ type fakeInternetRestorer struct {
 	calls         []string
 	prefs         pinternet.Preferences
 	qmapErr       error
+	qmapErrors    []error
+	restoreErr    error
 }
 
 func (r *fakeInternetRestorer) SetQMAPEnabled(_ context.Context, _ *mmodem.Modem, enabled bool) error {
 	r.calls = append(r.calls, fmt.Sprintf("qmap:%t", enabled))
+	if len(r.qmapErrors) > 0 {
+		err := r.qmapErrors[0]
+		r.qmapErrors = r.qmapErrors[1:]
+		return err
+	}
 	return r.qmapErr
 }
 
@@ -660,6 +758,83 @@ func (r *fakeInternetRestorer) Connect(_ context.Context, _ *mmodem.Modem, prefs
 		return r.connection, err
 	}
 	return r.connection, r.connectErr
+}
+
+func (r *fakeInternetRestorer) Restore(context.Context, *mmodem.Modem) error {
+	r.calls = append(r.calls, "restore")
+	return r.restoreErr
+}
+
+func TestSuspendLegacyInternet(t *testing.T) {
+	errRestore := errors.New("restore")
+	connected := &pinternet.Connection{
+		Status:       pinternet.StatusConnected,
+		APN:          "internet",
+		IPType:       "ipv4",
+		DefaultRoute: true,
+		AlwaysOn:     true,
+	}
+	tests := []struct {
+		name      string
+		internet  *fakeInternetRestorer
+		wantCalls []string
+		wantSaved bool
+		wantErr   error
+	}{
+		{
+			name:      "disconnects and remembers connected Internet",
+			internet:  &fakeInternetRestorer{connection: connected},
+			wantCalls: []string{"current", "restore"},
+			wantSaved: true,
+		},
+		{
+			name:      "disconnects without remembering an idle connection",
+			internet:  &fakeInternetRestorer{connection: &pinternet.Connection{Status: pinternet.StatusDisconnected}},
+			wantCalls: []string{"current", "restore"},
+		},
+		{
+			name:      "returns disconnect error",
+			internet:  &fakeInternetRestorer{connection: connected, restoreErr: errRestore},
+			wantCalls: []string{"current", "restore"},
+			wantSaved: true,
+			wantErr:   errRestore,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Errorf("Close() error = %v", err)
+				}
+			})
+			coordinator := &coordinator{
+				internet:      tt.internet,
+				volteSettings: NewVoLTESettingsStore(store),
+			}
+			modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
+
+			err = coordinator.suspendLegacyInternet(ctx, modem)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("suspendLegacyInternet() error = %v, want %v", err, tt.wantErr)
+			}
+			if !slices.Equal(tt.internet.calls, tt.wantCalls) {
+				t.Fatalf("Internet calls = %v, want %v", tt.internet.calls, tt.wantCalls)
+			}
+			_, saved, err := coordinator.volteSettings.SuspendedInternet(ctx, modem.EquipmentIdentifier)
+			if err != nil {
+				t.Fatalf("SuspendedInternet() error = %v", err)
+			}
+			if saved != tt.wantSaved {
+				t.Fatalf("saved Internet = %v, want %v", saved, tt.wantSaved)
+			}
+		})
+	}
 }
 
 func TestConnectOnceEnablesQMAPBeforeVoLTE(t *testing.T) {
@@ -689,7 +864,7 @@ func TestConnectOnceEnablesQMAPBeforeVoLTE(t *testing.T) {
 					PortType: mmodem.ModemPortTypeQmi,
 				}},
 			}
-			_, err := coordinator.connectOnce(context.Background(), modem, 1)
+			_, err := coordinator.connectOnce(context.Background(), modem, 1, 0)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("connectOnce() error = %v, want %v", err, tt.wantErr)
 			}

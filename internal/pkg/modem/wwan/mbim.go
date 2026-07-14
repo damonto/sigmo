@@ -139,6 +139,14 @@ func (u mbimDevice) IMSProfileIndex(ctx context.Context) (uint8, error) {
 	return 0, nil
 }
 
+func (mbimDevice) SetIMSProfileDefault(context.Context, uint8) error {
+	return ErrUnsupported
+}
+
+func (mbimDevice) SetIMSProfilePCSCFViaPCO(context.Context, uint8) error {
+	return ErrUnsupported
+}
+
 func (u mbimDevice) IMSSTestMode(context.Context) (bool, error) {
 	return false, ErrUnsupported
 }

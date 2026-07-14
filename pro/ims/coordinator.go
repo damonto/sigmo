@@ -131,10 +131,26 @@ func (c *coordinator) releaseManagedVoLTEOnShutdown(ctx context.Context, modems 
 		if err := releaseManagedVoLTE(cleanupCtx, modem, c.internet); err != nil {
 			result = errors.Join(result, fmt.Errorf("restore modem %s VoLTE: %w", modem.EquipmentIdentifier, err))
 		}
-		if c.internet != nil {
-			if err := c.internet.SetQMAPEnabled(cleanupCtx, modem, false); err != nil {
-				result = errors.Join(result, fmt.Errorf("restore modem %s normal Internet bearer: %w", modem.EquipmentIdentifier, err))
+		settings, err := c.Settings(cleanupCtx, modem)
+		if err != nil {
+			result = errors.Join(result, fmt.Errorf("read modem %s VoLTE network driver: %w", modem.EquipmentIdentifier, err))
+			continue
+		}
+		switch settings.NetworkDriver {
+		case NetworkDriverMBIM:
+			continue
+		case NetworkDriverQMAP:
+			if c.internet != nil {
+				if err := c.internet.SetQMAPEnabled(cleanupCtx, modem, false); err != nil {
+					result = errors.Join(result, fmt.Errorf("restore modem %s normal Internet bearer: %w", modem.EquipmentIdentifier, err))
+				}
 			}
+		case NetworkDriverLegacyBAMDMUX:
+			if err := c.restoreLegacyInternet(cleanupCtx, modem); err != nil {
+				result = errors.Join(result, err)
+			}
+		default:
+			result = errors.Join(result, fmt.Errorf("modem %s has unsupported VoLTE network driver %q", modem.EquipmentIdentifier, settings.NetworkDriver))
 		}
 	}
 	return result
@@ -142,7 +158,25 @@ func (c *coordinator) releaseManagedVoLTEOnShutdown(ctx context.Context, modems 
 
 func (c *coordinator) Settings(ctx context.Context, modem *mmodem.Modem) (Settings, error) {
 	if c.access == AccessVoLTE {
-		return c.volteSettings.Get(ctx, modem.EquipmentIdentifier)
+		settings, err := c.volteSettings.Get(ctx, modem.EquipmentIdentifier)
+		if err != nil {
+			return Settings{}, err
+		}
+		port, err := voLTEControlPort(modem)
+		if err != nil {
+			return Settings{}, err
+		}
+		switch port.PortType {
+		case mmodem.ModemPortTypeMbim:
+			settings.NetworkDriver = NetworkDriverMBIM
+			settings.SetIMSAPNAsDefault = false
+			settings.EnablePCSCFViaPCO = false
+		case mmodem.ModemPortTypeQmi:
+			if settings.NetworkDriver == NetworkDriverMBIM {
+				settings.NetworkDriver = NetworkDriverQMAP
+			}
+		}
+		return settings, nil
 	}
 	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
@@ -155,22 +189,67 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 	if c.access == AccessVoLTE {
 		c.volteUpdateMu.Lock()
 		defer c.volteUpdateMu.Unlock()
+		port, err := voLTEControlPort(modem)
+		if err != nil {
+			return err
+		}
+		switch port.PortType {
+		case mmodem.ModemPortTypeMbim:
+			settings.NetworkDriver = NetworkDriverMBIM
+		case mmodem.ModemPortTypeQmi:
+			switch settings.NetworkDriver {
+			case NetworkDriverQMAP, NetworkDriverLegacyBAMDMUX:
+			default:
+				return fmt.Errorf("unsupported QMI VoLTE network driver %q", settings.NetworkDriver)
+			}
+		default:
+			return ErrUnavailable
+		}
+		current, err := c.Settings(ctx, modem)
+		if err != nil {
+			return err
+		}
+		if !settings.Enabled && !current.Enabled {
+			return c.volteSettings.Put(ctx, modem.EquipmentIdentifier, settings)
+		}
 		if settings.Enabled {
 			profileID, err := modem.ProfileID(ctx)
 			if err != nil {
 				return err
 			}
-			if c.internet != nil {
-				if err := c.internet.SetQMAPEnabled(ctx, modem, true); err != nil {
-					return fmt.Errorf("enable QMAP Internet for VoLTE: %w", err)
+			recoveryCtx, cancelRecovery := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+			defer cancelRecovery()
+			switching := current.Enabled && current.NetworkDriver != settings.NetworkDriver
+			rollbackCurrent := func() error {
+				if !switching {
+					return nil
 				}
-			}
-			if err := c.volteSettings.Put(ctx, modem.EquipmentIdentifier, true); err != nil {
-				if c.internet == nil {
+				if err := c.enableVoLTENetworkDriver(recoveryCtx, modem, current.NetworkDriver); err != nil {
 					return err
 				}
-				rollbackErr := c.internet.SetQMAPEnabled(ctx, modem, false)
-				return errors.Join(err, rollbackErr)
+				c.restart(modem, profileID)
+				return nil
+			}
+			if switching {
+				c.stop(modem.EquipmentIdentifier)
+				if err := c.disableVoLTENetworkDriver(ctx, modem, current.NetworkDriver); err != nil {
+					return errors.Join(err, rollbackCurrent())
+				}
+			}
+			configuredNewDriver := !current.Enabled || switching
+			if err := c.enableVoLTENetworkDriver(ctx, modem, settings.NetworkDriver); err != nil {
+				var cleanupErr error
+				if configuredNewDriver {
+					cleanupErr = c.disableVoLTENetworkDriver(recoveryCtx, modem, settings.NetworkDriver)
+				}
+				return errors.Join(err, cleanupErr, rollbackCurrent())
+			}
+			if err := c.volteSettings.Put(ctx, modem.EquipmentIdentifier, settings); err != nil {
+				var cleanupErr error
+				if configuredNewDriver {
+					cleanupErr = c.disableVoLTENetworkDriver(recoveryCtx, modem, settings.NetworkDriver)
+				}
+				return errors.Join(err, cleanupErr, rollbackCurrent())
 			}
 			c.restart(modem, profileID)
 			return nil
@@ -178,29 +257,15 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 		// The managed client must be fully closed before restoring the modem's
 		// internal IMS client, otherwise both clients can contend for IMS state.
 		c.stop(modem.EquipmentIdentifier)
-		if err := releaseManagedVoLTE(ctx, modem, c.internet); err != nil {
-			return fmt.Errorf("restore modem VoLTE: %w", err)
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+		defer cancelCleanup()
+		result := error(nil)
+		if err := releaseManagedVoLTE(cleanupCtx, modem, c.internet); err != nil {
+			result = errors.Join(result, fmt.Errorf("restore modem VoLTE: %w", err))
 		}
-		if c.internet != nil {
-			if err := c.internet.SetQMAPEnabled(ctx, modem, false); err != nil {
-				return fmt.Errorf("restore normal Internet bearer: %w", err)
-			}
-		}
-		if err := c.volteSettings.Put(ctx, modem.EquipmentIdentifier, false); err != nil {
-			if c.internet != nil {
-				rollbackErr := c.internet.SetQMAPEnabled(ctx, modem, true)
-				if rollbackErr == nil {
-					if profileID, profileErr := modem.ProfileID(ctx); profileErr == nil {
-						c.restart(modem, profileID)
-					} else {
-						rollbackErr = profileErr
-					}
-				}
-				return errors.Join(err, rollbackErr)
-			}
-			return err
-		}
-		return nil
+		result = errors.Join(result, c.disableVoLTENetworkDriver(cleanupCtx, modem, current.NetworkDriver))
+		result = errors.Join(result, c.volteSettings.Put(cleanupCtx, modem.EquipmentIdentifier, settings))
+		return result
 	}
 	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
@@ -215,6 +280,65 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 		c.stopAsync(modem.EquipmentIdentifier)
 	}
 	return nil
+}
+
+func (c *coordinator) enableVoLTENetworkDriver(ctx context.Context, modem *mmodem.Modem, driver NetworkDriver) error {
+	switch driver {
+	case NetworkDriverMBIM:
+		return nil
+	case NetworkDriverQMAP:
+		if c.internet == nil {
+			return nil
+		}
+		if err := c.internet.SetQMAPEnabled(ctx, modem, true); err != nil {
+			return fmt.Errorf("enable QMAP Internet for VoLTE: %w", err)
+		}
+	case NetworkDriverLegacyBAMDMUX:
+		if c.internet == nil {
+			return nil
+		}
+		if err := c.internet.SetQMAPEnabled(ctx, modem, false); err != nil {
+			return fmt.Errorf("restore non-QMAP data format for legacy BAM-DMUX: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported VoLTE network driver %q", driver)
+	}
+	return nil
+}
+
+func (c *coordinator) disableVoLTENetworkDriver(ctx context.Context, modem *mmodem.Modem, driver NetworkDriver) error {
+	switch driver {
+	case NetworkDriverMBIM:
+		return nil
+	case NetworkDriverQMAP:
+		if c.internet != nil {
+			if err := c.internet.SetQMAPEnabled(ctx, modem, false); err != nil {
+				return fmt.Errorf("restore normal Internet bearer: %w", err)
+			}
+		}
+	case NetworkDriverLegacyBAMDMUX:
+		return c.restoreLegacyInternet(ctx, modem)
+	default:
+		return fmt.Errorf("unsupported VoLTE network driver %q", driver)
+	}
+	return nil
+}
+
+func (c *coordinator) restoreLegacyInternet(ctx context.Context, modem *mmodem.Modem) error {
+	if c.internet == nil || modem == nil {
+		return nil
+	}
+	prefs, ok, err := c.volteSettings.SuspendedInternet(ctx, modem.EquipmentIdentifier)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	if err := restoreInternet(ctx, modem, c.internet, prefs); err != nil {
+		return fmt.Errorf("restore modem %s Internet after legacy BAM-DMUX VoLTE: %w", modem.EquipmentIdentifier, err)
+	}
+	return c.volteSettings.DeleteSuspendedInternet(ctx, modem.EquipmentIdentifier)
 }
 
 func (c *coordinator) Reconnect(ctx context.Context, modem *mmodem.Modem) error {

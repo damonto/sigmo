@@ -7,7 +7,7 @@ require (
 	github.com/damonto/ims-go v0.0.0-20260712160731-9864d6a2573a
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260712112859-5cbe97a5670f
-	github.com/damonto/wwan-go v0.0.0-20260713040007-aa8141790f7e
+	github.com/damonto/wwan-go v0.0.0-20260714035829-0dfa7509d814
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.3.0
@@ -31,7 +31,7 @@ require (
 	github.com/nyaruka/phonenumbers v1.8.0 // indirect
 	github.com/pion/datachannel v1.6.2 // indirect
 	github.com/pion/dtls/v3 v3.1.5 // indirect
-	github.com/pion/ice/v4 v4.2.7 // indirect
+	github.com/pion/ice/v4 v4.3.0 // indirect
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.1.0 // indirect
 	github.com/pion/randutil v0.1.0 // indirect

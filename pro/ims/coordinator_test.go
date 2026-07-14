@@ -11,6 +11,7 @@ import (
 	"time"
 
 	imsgo "github.com/damonto/ims-go"
+	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
@@ -39,7 +40,7 @@ func TestReleaseManagedVoLTEOnShutdown(t *testing.T) {
 		{
 			name:       "restores managed VoLTE with uncanceled context",
 			access:     AccessVoLTE,
-			modems:     []*mmodem.Modem{nil, {EquipmentIdentifier: "modem-1"}},
+			modems:     []*mmodem.Modem{nil, qmiTestModem("modem-1")},
 			device:     &fakeManagedVoLTEDevice{},
 			wantCalls:  []string{"test-mode"},
 			wantOpened: true,
@@ -48,7 +49,7 @@ func TestReleaseManagedVoLTEOnShutdown(t *testing.T) {
 		{
 			name:              "restores QMAP after VoLTE cleanup error",
 			access:            AccessVoLTE,
-			modems:            []*mmodem.Modem{{EquipmentIdentifier: "modem-1"}},
+			modems:            []*mmodem.Modem{qmiTestModem("modem-1")},
 			device:            &fakeManagedVoLTEDevice{testModeErr: errTestMode},
 			internet:          &fakeInternetRestorer{},
 			wantCalls:         []string{"test-mode"},
@@ -60,7 +61,7 @@ func TestReleaseManagedVoLTEOnShutdown(t *testing.T) {
 		{
 			name:              "joins VoLTE and QMAP cleanup errors",
 			access:            AccessVoLTE,
-			modems:            []*mmodem.Modem{{EquipmentIdentifier: "modem-1"}},
+			modems:            []*mmodem.Modem{qmiTestModem("modem-1")},
 			device:            &fakeManagedVoLTEDevice{testModeErr: errTestMode},
 			internet:          &fakeInternetRestorer{qmapErr: errQMAP},
 			wantCalls:         []string{"test-mode"},
@@ -206,12 +207,12 @@ func TestStatusFromSession(t *testing.T) {
 
 func TestVoLTESettingsStore(t *testing.T) {
 	tests := []struct {
-		name        string
-		enabled     bool
-		wantEnabled bool
+		name     string
+		settings Settings
 	}{
-		{name: "enabled", enabled: true, wantEnabled: true},
-		{name: "disabled"},
+		{name: "enabled QMAP", settings: Settings{Enabled: true, NetworkDriver: NetworkDriverQMAP}},
+		{name: "disabled legacy BAM-DMUX", settings: Settings{NetworkDriver: NetworkDriverLegacyBAMDMUX}},
+		{name: "IMS profile startup options", settings: Settings{NetworkDriver: NetworkDriverQMAP, SetIMSAPNAsDefault: true, EnablePCSCFViaPCO: true}},
 	}
 
 	for _, tt := range tests {
@@ -227,16 +228,327 @@ func TestVoLTESettingsStore(t *testing.T) {
 				}
 			})
 			settings := NewVoLTESettingsStore(store)
-			if err := settings.Put(ctx, "modem-1", tt.enabled); err != nil {
+			if err := settings.Put(ctx, "modem-1", tt.settings); err != nil {
 				t.Fatalf("Put() error = %v", err)
 			}
 			got, err := settings.Get(ctx, "modem-1")
 			if err != nil {
 				t.Fatalf("Get() error = %v", err)
 			}
-			if got.Enabled != tt.wantEnabled || got.Preferred {
-				t.Fatalf("Get() = %+v, want enabled %v without preference", got, tt.wantEnabled)
+			if got != tt.settings {
+				t.Fatalf("Get() = %+v, want %+v", got, tt.settings)
 			}
 		})
+	}
+}
+
+func TestVoLTESettingsStoreDefaultsToQMAP(t *testing.T) {
+	tests := []struct {
+		name         string
+		legacyEntry  bool
+		legacyDriver NetworkDriver
+		wantDriver   NetworkDriver
+	}{
+		{name: "empty store", wantDriver: NetworkDriverQMAP},
+		{name: "existing enabled setting without network driver", legacyEntry: true, wantDriver: NetworkDriverQMAP},
+		{name: "existing legacy BAM-DMUX setting", legacyEntry: true, legacyDriver: NetworkDriverLegacyBAMDMUX, wantDriver: NetworkDriverLegacyBAMDMUX},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Errorf("Close() error = %v", err)
+				}
+			})
+
+			if tt.legacyEntry {
+				if err := store.Put(ctx, modemScopePrefix+"modem-1", keyVoLTEEnabled, true); err != nil {
+					t.Fatalf("seed enabled setting: %v", err)
+				}
+			}
+			if tt.legacyDriver != "" {
+				if err := store.Put(ctx, modemScopePrefix+"modem-1", keyVoLTENetworkDriver, tt.legacyDriver); err != nil {
+					t.Fatalf("seed network driver: %v", err)
+				}
+			}
+			got, err := NewVoLTESettingsStore(store).Get(ctx, "modem-1")
+			if err != nil {
+				t.Fatalf("Get() error = %v", err)
+			}
+			if got.NetworkDriver != tt.wantDriver {
+				t.Fatalf("NetworkDriver = %q, want %q", got.NetworkDriver, tt.wantDriver)
+			}
+			if got.Enabled != tt.legacyEntry {
+				t.Fatalf("Enabled = %v, want %v", got.Enabled, tt.legacyEntry)
+			}
+		})
+	}
+}
+
+func TestVoLTESettingsUseDeviceNetworkDriver(t *testing.T) {
+	tests := []struct {
+		name         string
+		portType     mmodem.ModemPortType
+		storedDriver NetworkDriver
+		wantDriver   NetworkDriver
+	}{
+		{
+			name:         "MBIM reports MBIM",
+			portType:     mmodem.ModemPortTypeMbim,
+			storedDriver: NetworkDriverLegacyBAMDMUX,
+			wantDriver:   NetworkDriverMBIM,
+		},
+		{
+			name:         "QMI keeps selected legacy BAM-DMUX",
+			portType:     mmodem.ModemPortTypeQmi,
+			storedDriver: NetworkDriverLegacyBAMDMUX,
+			wantDriver:   NetworkDriverLegacyBAMDMUX,
+		},
+		{
+			name:         "QMI defaults a previous MBIM mode to QMAP",
+			portType:     mmodem.ModemPortTypeQmi,
+			storedDriver: NetworkDriverMBIM,
+			wantDriver:   NetworkDriverQMAP,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Errorf("Close() error = %v", err)
+				}
+			})
+			settings := NewVoLTESettingsStore(store)
+			if err := settings.Put(ctx, "modem-1", Settings{
+				NetworkDriver:      tt.storedDriver,
+				SetIMSAPNAsDefault: true,
+				EnablePCSCFViaPCO:  true,
+			}); err != nil {
+				t.Fatalf("Put() error = %v", err)
+			}
+			coordinator := &coordinator{access: AccessVoLTE, volteSettings: settings}
+			modem := &mmodem.Modem{
+				EquipmentIdentifier: "modem-1",
+				Ports: []mmodem.ModemPort{{
+					Device:   "cdc-wdm0",
+					PortType: tt.portType,
+				}},
+			}
+
+			got, err := coordinator.Settings(ctx, modem)
+			if err != nil {
+				t.Fatalf("Settings() error = %v", err)
+			}
+			if got.NetworkDriver != tt.wantDriver {
+				t.Fatalf("NetworkDriver = %q, want %q", got.NetworkDriver, tt.wantDriver)
+			}
+			if tt.portType == mmodem.ModemPortTypeMbim && (got.SetIMSAPNAsDefault || got.EnablePCSCFViaPCO) {
+				t.Fatalf("MBIM profile options = (%v, %v), want disabled", got.SetIMSAPNAsDefault, got.EnablePCSCFViaPCO)
+			}
+			if tt.portType == mmodem.ModemPortTypeQmi && (!got.SetIMSAPNAsDefault || !got.EnablePCSCFViaPCO) {
+				t.Fatalf("QMI profile options = (%v, %v), want preserved", got.SetIMSAPNAsDefault, got.EnablePCSCFViaPCO)
+			}
+		})
+	}
+}
+
+func TestRestoreLegacyInternetSurvivesCoordinatorRestart(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "persisted suspension"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Errorf("Close() error = %v", err)
+				}
+			})
+			prefs := pinternet.Preferences{APN: "internet", IPType: "ipv4", DefaultRoute: true}
+			settings := NewVoLTESettingsStore(store)
+			if err := settings.PutSuspendedInternet(ctx, "modem-1", prefs); err != nil {
+				t.Fatalf("PutSuspendedInternet() error = %v", err)
+			}
+			internet := &fakeInternetRestorer{}
+			coordinator := &coordinator{internet: internet, volteSettings: NewVoLTESettingsStore(store)}
+
+			if err := coordinator.restoreLegacyInternet(ctx, &mmodem.Modem{EquipmentIdentifier: "modem-1"}); err != nil {
+				t.Fatalf("restoreLegacyInternet() error = %v", err)
+			}
+			if !slices.Equal(internet.calls, []string{"connect"}) {
+				t.Fatalf("Internet calls = %v, want [connect]", internet.calls)
+			}
+			if internet.prefs != prefs {
+				t.Fatalf("Internet preferences = %+v, want %+v", internet.prefs, prefs)
+			}
+			if _, ok, err := settings.SuspendedInternet(ctx, "modem-1"); err != nil || ok {
+				t.Fatalf("SuspendedInternet() = ok %v, error %v; want deleted", ok, err)
+			}
+		})
+	}
+}
+
+func TestDisableVoLTEPersistsStateAfterManagedCleanupError(t *testing.T) {
+	errTestMode := errors.New("read test mode")
+	tests := []struct {
+		name string
+	}{
+		{name: "legacy BAM-DMUX cleanup"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Errorf("Close() error = %v", err)
+				}
+			})
+			settings := NewVoLTESettingsStore(store)
+			current := Settings{Enabled: true, NetworkDriver: NetworkDriverLegacyBAMDMUX}
+			if err := settings.Put(ctx, "modem-1", current); err != nil {
+				t.Fatalf("Put() error = %v", err)
+			}
+			prefs := pinternet.Preferences{APN: "internet", IPType: "ipv4"}
+			if err := settings.PutSuspendedInternet(ctx, "modem-1", prefs); err != nil {
+				t.Fatalf("PutSuspendedInternet() error = %v", err)
+			}
+			previousOpen := openManagedVoLTEDevice
+			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+				return &fakeManagedVoLTEDevice{testModeErr: errTestMode}, nil
+			}
+			t.Cleanup(func() {
+				openManagedVoLTEDevice = previousOpen
+			})
+			internet := &fakeInternetRestorer{}
+			coordinator := &coordinator{
+				access:           AccessVoLTE,
+				internet:         internet,
+				volteSettings:    settings,
+				sessions:         make(map[string]*sessionState),
+				voiceSubscribers: make(map[uint64]VoiceEventFunc),
+			}
+
+			err = coordinator.UpdateSettings(ctx, qmiTestModem("modem-1"), Settings{
+				NetworkDriver: NetworkDriverLegacyBAMDMUX,
+			})
+			if !errors.Is(err, errTestMode) {
+				t.Fatalf("UpdateSettings() error = %v, want %v", err, errTestMode)
+			}
+			got, getErr := settings.Get(ctx, "modem-1")
+			if getErr != nil {
+				t.Fatalf("Get() error = %v", getErr)
+			}
+			if got.Enabled || got.NetworkDriver != NetworkDriverLegacyBAMDMUX {
+				t.Fatalf("Get() = %+v, want disabled legacy BAM-DMUX", got)
+			}
+			if !slices.Equal(internet.calls, []string{"connect"}) {
+				t.Fatalf("Internet calls = %v, want [connect]", internet.calls)
+			}
+		})
+	}
+}
+
+func TestVoLTEDriverSwitchRollsBackAfterNewDriverFailure(t *testing.T) {
+	errQMAP := errors.New("qmap rejected")
+	tests := []struct {
+		name string
+	}{
+		{name: "legacy BAM-DMUX to QMAP"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Errorf("Close() error = %v", err)
+				}
+			})
+			settings := NewVoLTESettingsStore(store)
+			current := Settings{Enabled: true, NetworkDriver: NetworkDriverLegacyBAMDMUX}
+			if err := settings.Put(ctx, "modem-1", current); err != nil {
+				t.Fatalf("Put() error = %v", err)
+			}
+			if err := settings.PutSuspendedInternet(ctx, "modem-1", pinternet.Preferences{APN: "internet"}); err != nil {
+				t.Fatalf("PutSuspendedInternet() error = %v", err)
+			}
+			internet := &fakeInternetRestorer{qmapErrors: []error{errQMAP, nil, nil}}
+			coordinator := &coordinator{
+				access:           AccessVoLTE,
+				internet:         internet,
+				volteSettings:    settings,
+				sessions:         make(map[string]*sessionState),
+				voiceSubscribers: make(map[uint64]VoiceEventFunc),
+			}
+			modem := &mmodem.Modem{
+				EquipmentIdentifier: "modem-1",
+				Sim:                 &mmodem.SIM{Identifier: "profile-1"},
+				Ports: []mmodem.ModemPort{{
+					Device:   "cdc-wdm0",
+					PortType: mmodem.ModemPortTypeQmi,
+				}},
+			}
+
+			err = coordinator.UpdateSettings(ctx, modem, Settings{Enabled: true, NetworkDriver: NetworkDriverQMAP})
+			if !errors.Is(err, errQMAP) {
+				t.Fatalf("UpdateSettings() error = %v, want %v", err, errQMAP)
+			}
+			got, getErr := settings.Get(ctx, "modem-1")
+			if getErr != nil {
+				t.Fatalf("Get() error = %v", getErr)
+			}
+			if got != current {
+				t.Fatalf("Get() = %+v, want %+v", got, current)
+			}
+			coordinator.mu.Lock()
+			session := coordinator.sessions[modem.EquipmentIdentifier]
+			coordinator.mu.Unlock()
+			if session == nil {
+				t.Fatal("old VoLTE session was not restarted")
+			}
+			coordinator.stop(modem.EquipmentIdentifier)
+			wantCalls := []string{"connect", "qmap:true", "qmap:false", "qmap:false"}
+			if !slices.Equal(internet.calls, wantCalls) {
+				t.Fatalf("Internet calls = %v, want %v", internet.calls, wantCalls)
+			}
+		})
+	}
+}
+
+func qmiTestModem(id string) *mmodem.Modem {
+	return &mmodem.Modem{
+		EquipmentIdentifier: id,
+		Ports: []mmodem.ModemPort{{
+			Device:   "cdc-wdm0",
+			PortType: mmodem.ModemPortTypeQmi,
+		}},
 	}
 }

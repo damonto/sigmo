@@ -27,47 +27,90 @@ func (f fakeModemFinder) Find(context.Context, string) (*mmodem.Modem, error) {
 
 type updateCoordinatorProbe struct {
 	Coordinator
-	updated bool
+	updated  bool
+	settings Settings
 }
 
-func (p *updateCoordinatorProbe) UpdateSettings(context.Context, *mmodem.Modem, Settings) error {
+func (p *updateCoordinatorProbe) UpdateSettings(_ context.Context, _ *mmodem.Modem, settings Settings) error {
 	p.updated = true
+	p.settings = settings
 	return nil
 }
 
 func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 	tests := []struct {
-		name        string
-		body        string
-		device      *fakeManagedVoLTEDevice
-		openErr     error
-		wantStatus  int
-		wantUpdated bool
-		wantOpened  bool
-		wantCalls   []string
+		name         string
+		body         string
+		portType     mmodem.ModemPortType
+		device       *fakeManagedVoLTEDevice
+		openErr      error
+		wantStatus   int
+		wantUpdated  bool
+		wantSettings Settings
+		wantOpened   bool
+		wantCalls    []string
 	}{
 		{
 			name:       "rejects unavailable device",
-			body:       `{"enabled":true}`,
+			body:       `{"enabled":true,"networkDriver":"qmap"}`,
+			portType:   mmodem.ModemPortTypeQmi,
 			openErr:    wwan.ErrUnsupported,
 			wantStatus: http.StatusBadRequest,
 			wantOpened: true,
 		},
 		{
-			name:        "accepts WDS path without IMSA",
-			body:        `{"enabled":true}`,
-			device:      &fakeManagedVoLTEDevice{},
-			wantStatus:  http.StatusNoContent,
-			wantUpdated: true,
-			wantOpened:  true,
-			wantCalls:   []string{"status", "ims-profile", "packet-service"},
+			name:         "accepts WDS path without IMSA",
+			body:         `{"enabled":true,"networkDriver":"qmap","setIMSAPNAsDefault":true,"enablePCSCFViaPCO":true}`,
+			portType:     mmodem.ModemPortTypeQmi,
+			device:       &fakeManagedVoLTEDevice{},
+			wantStatus:   http.StatusNoContent,
+			wantUpdated:  true,
+			wantSettings: Settings{Enabled: true, NetworkDriver: NetworkDriverQMAP, SetIMSAPNAsDefault: true, EnablePCSCFViaPCO: true},
+			wantOpened:   true,
+			wantCalls:    []string{"status", "ims-profile", "packet-service"},
 		},
 		{
-			name:        "disable skips validation",
-			body:        `{"enabled":false}`,
-			openErr:     wwan.ErrUnsupported,
-			wantStatus:  http.StatusNoContent,
-			wantUpdated: true,
+			name:         "disable skips validation",
+			body:         `{"enabled":false,"networkDriver":"legacy_bam_dmux"}`,
+			portType:     mmodem.ModemPortTypeQmi,
+			openErr:      wwan.ErrUnsupported,
+			wantStatus:   http.StatusNoContent,
+			wantUpdated:  true,
+			wantSettings: Settings{NetworkDriver: NetworkDriverLegacyBAMDMUX},
+		},
+		{
+			name:       "rejects unsupported network driver",
+			body:       `{"enabled":false,"networkDriver":"auto"}`,
+			portType:   mmodem.ModemPortTypeQmi,
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+		{
+			name:       "requires network driver for QMI",
+			body:       `{"enabled":false}`,
+			portType:   mmodem.ModemPortTypeQmi,
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+		{
+			name:         "derives MBIM mode without network driver",
+			body:         `{"enabled":false}`,
+			portType:     mmodem.ModemPortTypeMbim,
+			wantStatus:   http.StatusNoContent,
+			wantUpdated:  true,
+			wantSettings: Settings{NetworkDriver: NetworkDriverMBIM},
+		},
+		{
+			name:         "ignores QMI driver selection for MBIM",
+			body:         `{"enabled":false,"networkDriver":"legacy_bam_dmux"}`,
+			portType:     mmodem.ModemPortTypeMbim,
+			wantStatus:   http.StatusNoContent,
+			wantUpdated:  true,
+			wantSettings: Settings{NetworkDriver: NetworkDriverMBIM},
+		},
+		{
+			name:       "rejects IMS profile options for MBIM",
+			body:       `{"enabled":false,"setIMSAPNAsDefault":true}`,
+			portType:   mmodem.ModemPortTypeMbim,
+			wantStatus: http.StatusUnprocessableEntity,
 		},
 	}
 
@@ -84,8 +127,15 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 			})
 
 			volte := &updateCoordinatorProbe{}
+			modem := &mmodem.Modem{
+				EquipmentIdentifier: "modem-1",
+				Ports: []mmodem.ModemPort{{
+					Device:   "cdc-wdm0",
+					PortType: tt.portType,
+				}},
+			}
 			h := &Handler{
-				registry: fakeModemFinder{modem: &mmodem.Modem{EquipmentIdentifier: "modem-1"}},
+				registry: fakeModemFinder{modem: modem},
 				volte:    volte,
 			}
 			e := echo.New()
@@ -102,6 +152,9 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 			}
 			if volte.updated != tt.wantUpdated {
 				t.Fatalf("UpdateSettings called = %v, want %v", volte.updated, tt.wantUpdated)
+			}
+			if volte.settings != tt.wantSettings {
+				t.Fatalf("UpdateSettings settings = %+v, want %+v", volte.settings, tt.wantSettings)
 			}
 			if opened != tt.wantOpened {
 				t.Fatalf("openManagedVoLTEDevice called = %v, want %v", opened, tt.wantOpened)
