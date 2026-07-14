@@ -46,3 +46,8 @@ export type ConnectInternetPayload = {
   proxyEnabled: boolean
   alwaysOn: boolean
 }
+
+export type InternetConnectionPreferencesPayload = Pick<
+  ConnectInternetPayload,
+  'defaultRoute' | 'proxyEnabled' | 'alwaysOn'
+>

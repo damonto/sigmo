@@ -2,6 +2,7 @@ import { fetchJson } from '@/lib/fetch'
 
 import type {
   ConnectInternetPayload,
+  InternetConnectionPreferencesPayload,
   InternetConnectionResponse,
   InternetPublicResponse,
 } from '@/types/internet'
@@ -28,10 +29,21 @@ export const useInternetApi = () => {
     })
   }
 
+  const updatePreferences = (id: string, payload: InternetConnectionPreferencesPayload) => {
+    return fetchJson<InternetConnectionResponse>(
+      `modems/${id}/internet-connections/current/preferences`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      },
+    )
+  }
+
   return {
     getCurrentConnection,
     getPublic,
     connect,
     disconnect,
+    updatePreferences,
   }
 }

@@ -102,6 +102,12 @@ func TestInternetError(t *testing.T) {
 			wantStatus: http.StatusUnprocessableEntity,
 			wantBody:   errorCodeInternetProfileIDRequired,
 		},
+		{
+			name:       "not connected",
+			err:        internetcore.ErrNotConnected,
+			wantStatus: http.StatusConflict,
+			wantBody:   errorCodeInternetConnectionNotConnected,
+		},
 	}
 
 	for _, tt := range tests {

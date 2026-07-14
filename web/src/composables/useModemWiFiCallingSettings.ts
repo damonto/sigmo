@@ -2,27 +2,33 @@ import { computed, onUnmounted, ref, watch, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useModemApi } from '@/apis/modem'
-import type { WiFiCallingSettingsResponse } from '@/types/modem'
+import type { WiFiCallingSettings, WiFiCallingSettingsResponse } from '@/types/modem'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 
 type Options = {
   modemId: ComputedRef<string>
   enabled: ComputedRef<boolean>
   onSuccess?: (message: string) => void
+  onError?: (message: string) => void
 }
 
 type FetchSettingsOptions = {
   silent?: boolean
+  applyPreferences?: boolean
 }
 
 const pollIntervalMs = 5000
 
-export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Options) => {
+export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onError }: Options) => {
   const { t } = useI18n()
   const modemApi = useModemApi()
 
   const settingsWiFiCallingEnabled = ref(false)
   const settingsWiFiCallingPreferred = ref(false)
+  const confirmedWiFiCallingSettings = ref<WiFiCallingSettings>({
+    enabled: false,
+    preferred: false,
+  })
   const settingsWiFiCallingConnected = ref(false)
   const settingsWiFiCallingState = ref('')
   const settingsWiFiCallingDurationSeconds = ref(0)
@@ -31,6 +37,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
   const settingsWiFiCallingEmergencyAddressWebsheet = ref<CarrierWebsheetInfo | null>(null)
   const isWiFiCallingSettingsLoading = ref(false)
   const isWiFiCallingSettingsUpdating = ref(false)
+  const settingsRequestEpoch = ref(0)
   const isWiFiCallingReconnecting = ref(false)
   const isWiFiCallingDisconnecting = ref(false)
   const isWiFiCallingWebsheetStarting = ref(false)
@@ -40,6 +47,11 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
   const durationTimer = ref<number>()
 
   const isWiFiCallingConnected = computed(() => settingsWiFiCallingConnected.value)
+
+  const advanceSettingsRequestEpoch = () => {
+    settingsRequestEpoch.value += 1
+    return settingsRequestEpoch.value
+  }
 
   const stopPolling = () => {
     if (pollTimer.value === undefined) return
@@ -51,7 +63,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
     if (pollTimer.value !== undefined) return
     pollTimer.value = window.setInterval(() => {
       const targetId = modemId.value
-      if (!targetId || !enabled.value) return
+      if (!targetId || !enabled.value || isWiFiCallingSettingsUpdating.value) return
       void fetchSettings(targetId, { silent: true })
     }, pollIntervalMs)
   }
@@ -75,6 +87,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
     stopDurationTimer()
     settingsWiFiCallingEnabled.value = false
     settingsWiFiCallingPreferred.value = false
+    confirmedWiFiCallingSettings.value = { enabled: false, preferred: false }
     settingsWiFiCallingConnected.value = false
     settingsWiFiCallingState.value = ''
     settingsWiFiCallingDurationSeconds.value = 0
@@ -85,6 +98,8 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
 
   const fetchSettings = async (id: string, options?: FetchSettingsOptions) => {
     if (!enabled.value || isWiFiCallingSettingsFetching.value) return
+    const requestEpoch = settingsRequestEpoch.value
+    const preservePreferences = isWiFiCallingSettingsUpdating.value
     isWiFiCallingSettingsFetching.value = true
     if (!options?.silent) {
       isWiFiCallingSettingsLoading.value = true
@@ -92,9 +107,17 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
     try {
       const { data } = await modemApi.getWiFiCallingSettings(id)
       if (!enabled.value || modemId.value !== id) return
+      if (requestEpoch !== settingsRequestEpoch.value) return
       const payload: WiFiCallingSettingsResponse | undefined = data.value
-      settingsWiFiCallingEnabled.value = payload?.enabled ?? false
-      settingsWiFiCallingPreferred.value = payload?.preferred ?? false
+      if (!preservePreferences || options?.applyPreferences) {
+        const settings = {
+          enabled: payload?.enabled ?? false,
+          preferred: payload?.preferred ?? false,
+        }
+        settingsWiFiCallingEnabled.value = settings.enabled
+        settingsWiFiCallingPreferred.value = settings.preferred
+        confirmedWiFiCallingSettings.value = settings
+      }
       settingsWiFiCallingConnected.value = data.value?.connected ?? false
       settingsWiFiCallingState.value = data.value?.state ?? ''
       settingsWiFiCallingDurationSeconds.value = payload?.durationSeconds ?? 0
@@ -108,24 +131,44 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
     }
   }
 
-  const handleWiFiCallingUpdate = async () => {
+  const updateWiFiCallingSettings = async (next: WiFiCallingSettings) => {
     const targetId = modemId.value
     if (!enabled.value || !targetId) return
     if (isWiFiCallingSettingsUpdating.value) return
+    const mutationEpoch = advanceSettingsRequestEpoch()
     isWiFiCallingSettingsUpdating.value = true
+    const previous = confirmedWiFiCallingSettings.value
+    const settings = {
+      enabled: next.enabled,
+      preferred: next.enabled && next.preferred,
+    }
+    settingsWiFiCallingEnabled.value = settings.enabled
+    settingsWiFiCallingPreferred.value = settings.preferred
     try {
-      await modemApi.updateWiFiCallingSettings(targetId, {
-        enabled: settingsWiFiCallingEnabled.value,
-        preferred: settingsWiFiCallingEnabled.value && settingsWiFiCallingPreferred.value,
-      })
-      await fetchSettings(targetId)
+      await modemApi.updateWiFiCallingSettings(targetId, settings)
+      if (modemId.value !== targetId || settingsRequestEpoch.value !== mutationEpoch) return
+      confirmedWiFiCallingSettings.value = settings
+      await fetchSettings(targetId, { applyPreferences: true })
+      if (modemId.value !== targetId || settingsRequestEpoch.value !== mutationEpoch) return
       onSuccess?.(t('modemDetail.settings.wifiCallingSuccess'))
     } catch (err) {
+      if (modemId.value !== targetId || settingsRequestEpoch.value !== mutationEpoch) return
+      settingsWiFiCallingEnabled.value = previous.enabled
+      settingsWiFiCallingPreferred.value = previous.preferred
       console.error('[useModemWiFiCallingSettings] Failed to update settings:', err)
+      onError?.(t('modemDetail.settings.wifiCallingUpdateFailed'))
     } finally {
-      isWiFiCallingSettingsUpdating.value = false
+      if (settingsRequestEpoch.value === mutationEpoch) {
+        isWiFiCallingSettingsUpdating.value = false
+      }
     }
   }
+
+  const handleWiFiCallingUpdate = () =>
+    updateWiFiCallingSettings({
+      enabled: settingsWiFiCallingEnabled.value,
+      preferred: settingsWiFiCallingPreferred.value,
+    })
 
   const reconnectWiFiCalling = async () => {
     const targetId = modemId.value
@@ -222,8 +265,10 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
   watch(
     [modemId, enabled],
     async ([id, canUseWiFiCalling]) => {
+      advanceSettingsRequestEpoch()
+      isWiFiCallingSettingsUpdating.value = false
+      resetSettings()
       if (!canUseWiFiCalling || !id) {
-        resetSettings()
         return
       }
       await fetchSettings(id)
@@ -265,6 +310,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess }: Opt
     isWiFiCallingDisconnecting,
     isWiFiCallingWebsheetStarting,
     isWiFiCallingEmergencyAddressWebsheetStarting,
+    updateWiFiCallingSettings,
     handleWiFiCallingUpdate,
     reconnectWiFiCalling,
     disconnectWiFiCalling,

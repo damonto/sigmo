@@ -65,11 +65,28 @@ const mountCard = (locale: 'en' | 'zh') => {
 }
 
 describe('WiFiCallingSettingsPanel', () => {
+  it('saves switch changes without rendering an update button', async () => {
+    const wrapper = mountCard('en')
+    const switches = wrapper.findAll('input[type="checkbox"]')
+
+    expect(wrapper.find('button').exists()).toBe(false)
+
+    await switches[0]?.setValue(false)
+    await switches[1]?.setValue(false)
+
+    expect(wrapper.emitted('update')).toEqual([
+      [{ enabled: false, preferred: false }],
+      [{ enabled: true, preferred: false }],
+    ])
+  })
+
   it('renders the English preferred Wi-Fi Calling copy for calls', () => {
     const wrapper = mountCard('en')
 
     expect(wrapper.text()).toContain('Use Wi-Fi Calling when available')
-    expect(wrapper.text()).toContain('Use Wi-Fi Calling for messages, USSD, and calls when available')
+    expect(wrapper.text()).toContain(
+      'Use Wi-Fi Calling for messages, USSD, and calls when available',
+    )
   })
 
   it('renders the Chinese preferred Wi-Fi Calling copy for calls', () => {

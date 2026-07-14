@@ -7,12 +7,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
+import type { WiFiCallingSettings } from '@/types/modem'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 
-const enabled = defineModel<boolean>('enabled', { required: true })
-const preferred = defineModel<boolean>('preferred', { required: true })
-
 const props = defineProps<{
+  enabled: boolean
+  preferred: boolean
   isLoading: boolean
   isUpdating: boolean
   isWebsheetStarting: boolean
@@ -21,15 +21,30 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (event: 'update'): void
+  (event: 'update', settings: WiFiCallingSettings): void
   (event: 'start-websheet'): void
 }>()
 
 const { t } = useI18n()
 
 const isInputDisabled = computed(() => props.isLoading || props.isUpdating)
-const isActionDisabled = computed(() => props.isLoading || props.isUpdating)
-const requiresWebsheet = computed(() => props.state === 'websheet_required' || props.websheet !== null)
+const requiresWebsheet = computed(
+  () => props.state === 'websheet_required' || props.websheet !== null,
+)
+
+const updateEnabled = (enabled: boolean) => {
+  emit('update', {
+    enabled,
+    preferred: enabled && props.preferred,
+  })
+}
+
+const updatePreferred = (preferred: boolean) => {
+  emit('update', {
+    enabled: props.enabled,
+    preferred: props.enabled && preferred,
+  })
+}
 </script>
 
 <template>
@@ -52,9 +67,9 @@ const requiresWebsheet = computed(() => props.state === 'websheet_required' || p
         </div>
         <Switch
           id="modem-wifi-calling"
-          :model-value="enabled"
+          :model-value="props.enabled"
           :disabled="isInputDisabled"
-          @update:model-value="(value: boolean) => (enabled = value)"
+          @update:model-value="updateEnabled"
         />
       </div>
 
@@ -69,26 +84,10 @@ const requiresWebsheet = computed(() => props.state === 'websheet_required' || p
         </div>
         <Switch
           id="modem-wifi-calling-preferred"
-          :model-value="preferred"
-          :disabled="isInputDisabled || !enabled"
-          @update:model-value="(value: boolean) => (preferred = value)"
+          :model-value="props.preferred"
+          :disabled="isInputDisabled || !props.enabled"
+          @update:model-value="updatePreferred"
         />
-      </div>
-
-      <div class="flex justify-end">
-        <Button
-          size="sm"
-          type="button"
-          class="w-full"
-          :disabled="isActionDisabled"
-          @click="emit('update')"
-        >
-          <span v-if="props.isUpdating" class="inline-flex items-center gap-2">
-            <Spinner class="size-4" />
-            {{ t('modemDetail.actions.update') }}
-          </span>
-          <span v-else>{{ t('modemDetail.actions.update') }}</span>
-        </Button>
       </div>
 
       <div v-if="requiresWebsheet" class="rounded-md border border-dashed p-3 text-sm">
@@ -110,7 +109,6 @@ const requiresWebsheet = computed(() => props.state === 'websheet_required' || p
           <span v-else>{{ t('modemDetail.settings.wifiCallingWebsheetAction') }}</span>
         </Button>
       </div>
-
     </CardContent>
   </Card>
 </template>

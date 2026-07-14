@@ -17,7 +17,7 @@ const route = useRoute()
 const { t } = useI18n()
 
 const modemId = computed(() => route.params.id as string)
-const { showFeedback } = useFeedbackBanner()
+const { showFeedback, showError } = useFeedbackBanner()
 const { hasFeature } = useCapabilities()
 const canUseWiFiCalling = computed(() => hasFeature(FEATURE.wifiCalling))
 
@@ -35,7 +35,7 @@ const {
   isWiFiCallingReconnecting,
   isWiFiCallingWebsheetStarting,
   isWiFiCallingEmergencyAddressWebsheetStarting,
-  handleWiFiCallingUpdate,
+  updateWiFiCallingSettings,
   reconnectWiFiCalling,
   startWiFiCallingWebsheet,
   startWiFiCallingEmergencyAddressWebsheet,
@@ -45,6 +45,7 @@ const {
   modemId,
   enabled: canUseWiFiCalling,
   onSuccess: showFeedback,
+  onError: showError,
 })
 
 const closeWiFiCallingWebsheet = () => {
@@ -77,14 +78,14 @@ const closeWiFiCallingEmergencyAddressWebsheet = () => {
       />
 
       <WiFiCallingSettingsPanel
-        v-model:enabled="settingsWiFiCallingEnabled"
-        v-model:preferred="settingsWiFiCallingPreferred"
+        :enabled="settingsWiFiCallingEnabled"
+        :preferred="settingsWiFiCallingPreferred"
         :is-loading="isWiFiCallingSettingsLoading"
         :is-updating="isWiFiCallingSettingsUpdating"
         :is-websheet-starting="isWiFiCallingWebsheetStarting"
         :state="settingsWiFiCallingState"
         :websheet="settingsWiFiCallingWebsheet"
-        @update="handleWiFiCallingUpdate"
+        @update="updateWiFiCallingSettings"
         @start-websheet="startWiFiCallingWebsheet"
       />
 

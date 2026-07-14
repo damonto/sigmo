@@ -1,4 +1,4 @@
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useModemWiFiCallingSettings } from '@/composables/useModemWiFiCallingSettings'
@@ -127,6 +127,110 @@ describe('useModemWiFiCallingSettings', () => {
 
     expect(api.createWiFiCallingSession).toHaveBeenCalledWith('modem-1')
     expect(api.updateWiFiCallingSettings).not.toHaveBeenCalled()
+  })
+
+  it('saves switch changes immediately and clears preferred when disabled', async () => {
+    const onSuccess = vi.fn()
+    const settings = useModemWiFiCallingSettings({
+      modemId: computed(() => 'modem-1'),
+      enabled: computed(() => true),
+      onSuccess,
+    })
+    await vi.waitFor(() => {
+      expect(settings.settingsWiFiCallingEnabled.value).toBe(true)
+    })
+
+    await settings.updateWiFiCallingSettings({ enabled: false, preferred: true })
+
+    expect(api.updateWiFiCallingSettings).toHaveBeenCalledWith('modem-1', {
+      enabled: false,
+      preferred: false,
+    })
+    expect(settings.settingsWiFiCallingEnabled.value).toBe(true)
+    expect(settings.settingsWiFiCallingPreferred.value).toBe(true)
+    expect(onSuccess).toHaveBeenCalledWith('modemDetail.settings.wifiCallingSuccess')
+  })
+
+  it('restores confirmed settings when automatic saving fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const onError = vi.fn()
+    api.updateWiFiCallingSettings.mockRejectedValue(new Error('offline'))
+    const settings = useModemWiFiCallingSettings({
+      modemId: computed(() => 'modem-1'),
+      enabled: computed(() => true),
+      onError,
+    })
+    await vi.waitFor(() => {
+      expect(settings.settingsWiFiCallingEnabled.value).toBe(true)
+    })
+
+    await settings.updateWiFiCallingSettings({ enabled: false, preferred: false })
+
+    expect(settings.settingsWiFiCallingEnabled.value).toBe(true)
+    expect(settings.settingsWiFiCallingPreferred.value).toBe(true)
+    expect(onError).toHaveBeenCalledWith('modemDetail.settings.wifiCallingUpdateFailed')
+    consoleError.mockRestore()
+  })
+
+  it('discards a settings response started before automatic saving', async () => {
+    let resolveFetch:
+      | ((value: {
+          data: { value: { enabled: boolean; preferred: boolean; connected: boolean } }
+        }) => void)
+      | undefined
+    api.getWiFiCallingSettings.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve
+      }),
+    )
+    const settings = useModemWiFiCallingSettings({
+      modemId: computed(() => 'modem-1'),
+      enabled: computed(() => true),
+    })
+    await vi.waitFor(() => expect(api.getWiFiCallingSettings).toHaveBeenCalledTimes(1))
+
+    await settings.updateWiFiCallingSettings({ enabled: true, preferred: false })
+    resolveFetch?.({
+      data: { value: { enabled: false, preferred: false, connected: false } },
+    })
+    await vi.waitFor(() => expect(settings.isWiFiCallingSettingsUpdating.value).toBe(false))
+
+    expect(settings.settingsWiFiCallingEnabled.value).toBe(true)
+    expect(settings.settingsWiFiCallingPreferred.value).toBe(false)
+  })
+
+  it('does not roll back settings onto a newly selected modem', async () => {
+    let rejectUpdate: ((reason?: unknown) => void) | undefined
+    api.getWiFiCallingSettings
+      .mockResolvedValueOnce({
+        data: { value: { enabled: true, preferred: true, connected: false } },
+      })
+      .mockResolvedValueOnce({
+        data: { value: { enabled: false, preferred: false, connected: false } },
+      })
+    api.updateWiFiCallingSettings.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectUpdate = reject
+      }),
+    )
+    const modemId = ref('modem-1')
+    const onError = vi.fn()
+    const settings = useModemWiFiCallingSettings({
+      modemId: computed(() => modemId.value),
+      enabled: computed(() => true),
+      onError,
+    })
+    await vi.waitFor(() => expect(settings.settingsWiFiCallingEnabled.value).toBe(true))
+
+    const update = settings.updateWiFiCallingSettings({ enabled: false, preferred: false })
+    modemId.value = 'modem-2'
+    await vi.waitFor(() => expect(api.getWiFiCallingSettings).toHaveBeenCalledTimes(2))
+    rejectUpdate?.(new Error('offline'))
+    await update
+
+    expect(settings.settingsWiFiCallingEnabled.value).toBe(false)
+    expect(settings.settingsWiFiCallingPreferred.value).toBe(false)
+    expect(onError).not.toHaveBeenCalled()
   })
 
   it('restores the previous state when reconnect fails before starting', async () => {

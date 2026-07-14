@@ -13,7 +13,7 @@ const route = useRoute()
 const { t } = useI18n()
 
 const modemId = computed(() => route.params.id as string)
-const { showFeedback } = useFeedbackBanner()
+const { showFeedback, showError } = useFeedbackBanner()
 
 const {
   internetConnection,
@@ -29,13 +29,16 @@ const {
   isInternetLoading,
   isInternetConnecting,
   isInternetDisconnecting,
+  isInternetPreferencesUpdating,
   isInternetConnected,
   canConnectInternet,
   handleInternetConnect,
   handleInternetDisconnect,
+  handleInternetPreferencesUpdate,
 } = useModemInternet({
   modemId,
   onSuccess: showFeedback,
+  onError: showError,
 })
 </script>
 
@@ -61,10 +64,12 @@ const {
       :is-loading="isInternetLoading"
       :is-connecting="isInternetConnecting"
       :is-disconnecting="isInternetDisconnecting"
+      :is-preferences-updating="isInternetPreferencesUpdating"
       :is-connected="isInternetConnected"
       :can-connect="canConnectInternet"
       @connect="handleInternetConnect"
       @disconnect="handleInternetDisconnect"
+      @update-preferences="handleInternetPreferencesUpdate"
     />
   </ModemSettingsShell>
 </template>

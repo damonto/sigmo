@@ -8,7 +8,11 @@ import InternetProxyPanel from './InternetProxyPanel.vue'
 import InternetPublicPanel from './InternetPublicPanel.vue'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
-import type { InternetConnectionResponse, InternetPublicResponse } from '@/types/internet'
+import type {
+  InternetConnectionPreferencesPayload,
+  InternetConnectionResponse,
+  InternetPublicResponse,
+} from '@/types/internet'
 
 const apn = defineModel<string>('apn', { required: true })
 const ipType = defineModel<string>('ipType', { required: true })
@@ -25,6 +29,7 @@ const props = defineProps<{
   isLoading: boolean
   isConnecting: boolean
   isDisconnecting: boolean
+  isPreferencesUpdating: boolean
   isConnected: boolean
   canConnect: boolean
 }>()
@@ -32,6 +37,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'connect'): void
   (event: 'disconnect'): void
+  (event: 'update-preferences', preferences: InternetConnectionPreferencesPayload): void
 }>()
 
 const { t } = useI18n()
@@ -40,10 +46,11 @@ const shouldShowProxyInfo = computed(
   () => props.isConnected && props.connection?.proxyEnabled === true,
 )
 const isActionLoading = computed(
-  () => props.isLoading || props.isConnecting || props.isDisconnecting,
+  () =>
+    props.isLoading || props.isConnecting || props.isDisconnecting || props.isPreferencesUpdating,
 )
 const isActionDisabled = computed(() => {
-  if (props.isLoading) return true
+  if (props.isLoading || props.isPreferencesUpdating) return true
   if (props.isConnected) return props.isDisconnecting
   return !props.canConnect || props.isConnecting || props.isDisconnecting
 })
@@ -76,8 +83,10 @@ const handleAction = () => {
       :is-loading="props.isLoading"
       :is-connecting="props.isConnecting"
       :is-disconnecting="props.isDisconnecting"
+      :is-preferences-updating="props.isPreferencesUpdating"
       :is-connected="props.isConnected"
       :can-connect="props.canConnect"
+      @update-preferences="emit('update-preferences', $event)"
     />
 
     <InternetProxyPanel v-if="shouldShowProxyInfo" :connection="props.connection" />

@@ -4,11 +4,7 @@ import { CheckCircle2, ChevronDown, CircleX, Globe2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -19,7 +15,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import type { InternetConnectionResponse } from '@/types/internet'
+import type {
+  InternetConnectionPreferencesPayload,
+  InternetConnectionResponse,
+} from '@/types/internet'
 
 const apn = defineModel<string>('apn', { required: true })
 const ipType = defineModel<string>('ipType', { required: true })
@@ -35,14 +34,25 @@ const props = defineProps<{
   isLoading: boolean
   isConnecting: boolean
   isDisconnecting: boolean
+  isPreferencesUpdating: boolean
   isConnected: boolean
   canConnect: boolean
+}>()
+
+const emit = defineEmits<{
+  (event: 'update-preferences', preferences: InternetConnectionPreferencesPayload): void
 }>()
 
 const { t } = useI18n()
 const advancedOpen = ref(false)
 
-const isInputDisabled = computed(() => props.isLoading || props.isConnecting || props.isConnected)
+const isConnectionInputDisabled = computed(
+  () => props.isLoading || props.isConnecting || props.isConnected,
+)
+const isPreferenceInputDisabled = computed(
+  () =>
+    props.isLoading || props.isConnecting || props.isDisconnecting || props.isPreferencesUpdating,
+)
 const statusLabel = computed(() => {
   if (props.isConnected) return t('modemDetail.settings.internetConnected')
   return t('modemDetail.settings.internetDisconnected')
@@ -85,6 +95,20 @@ const routeMetricLabel = computed(() => {
   if (metric === 0) return t('modemDetail.settings.internetNone')
   return String(metric)
 })
+
+const updatePreference = (name: keyof InternetConnectionPreferencesPayload, value: boolean) => {
+  if (!props.isConnected) {
+    if (name === 'defaultRoute') defaultRoute.value = value
+    if (name === 'proxyEnabled') proxyEnabled.value = value
+    if (name === 'alwaysOn') alwaysOn.value = value
+    return
+  }
+  emit('update-preferences', {
+    defaultRoute: name === 'defaultRoute' ? value : defaultRoute.value,
+    proxyEnabled: name === 'proxyEnabled' ? value : proxyEnabled.value,
+    alwaysOn: name === 'alwaysOn' ? value : alwaysOn.value,
+  })
+}
 
 const formatList = (values?: string[]) => {
   if (!values || values.length === 0) return t('modemDetail.settings.internetNone')
@@ -133,12 +157,20 @@ const formatBytes = (bytes: number) => {
         <div class="flex items-start gap-3 border-b border-border/70 p-4">
           <div
             class="relative flex size-11 shrink-0 items-center justify-center rounded-full"
-            :class="props.isConnected ? 'bg-emerald-500/10 text-emerald-600' : 'bg-primary/10 text-primary'"
+            :class="
+              props.isConnected
+                ? 'bg-emerald-500/10 text-emerald-600'
+                : 'bg-primary/10 text-primary'
+            "
           >
             <Globe2 class="size-6" />
             <span
               class="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full border-2 border-card"
-              :class="props.isConnected ? 'bg-emerald-500 text-white' : 'bg-primary text-primary-foreground'"
+              :class="
+                props.isConnected
+                  ? 'bg-emerald-500 text-white'
+                  : 'bg-primary text-primary-foreground'
+              "
             >
               <CheckCircle2 v-if="props.isConnected" class="size-3" />
               <CircleX v-else class="size-3" />
@@ -198,7 +230,7 @@ const formatBytes = (bytes: number) => {
           <Input
             id="modem-internet-apn"
             v-model="apn"
-            :disabled="isInputDisabled"
+            :disabled="isConnectionInputDisabled"
             :placeholder="t('modemDetail.settings.internetAPNPlaceholder')"
           />
         </div>
@@ -230,9 +262,11 @@ const formatBytes = (bytes: number) => {
                 <Label for="modem-internet-ip-type">
                   {{ t('modemDetail.settings.internetIPTypeLabel') }}
                 </Label>
-                <Select v-model="ipType" :disabled="isInputDisabled">
+                <Select v-model="ipType" :disabled="isConnectionInputDisabled">
                   <SelectTrigger id="modem-internet-ip-type" class="w-full">
-                    <SelectValue :placeholder="t('modemDetail.settings.internetIPTypePlaceholder')" />
+                    <SelectValue
+                      :placeholder="t('modemDetail.settings.internetIPTypePlaceholder')"
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem
@@ -250,9 +284,11 @@ const formatBytes = (bytes: number) => {
                 <Label for="modem-internet-apn-auth">
                   {{ t('modemDetail.settings.internetAPNAuthLabel') }}
                 </Label>
-                <Select v-model="apnAuth" :disabled="isInputDisabled">
+                <Select v-model="apnAuth" :disabled="isConnectionInputDisabled">
                   <SelectTrigger id="modem-internet-apn-auth" class="w-full">
-                    <SelectValue :placeholder="t('modemDetail.settings.internetAPNAuthPlaceholder')" />
+                    <SelectValue
+                      :placeholder="t('modemDetail.settings.internetAPNAuthPlaceholder')"
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem
@@ -275,7 +311,7 @@ const formatBytes = (bytes: number) => {
                 <Input
                   id="modem-internet-apn-username"
                   v-model="apnUsername"
-                  :disabled="isInputDisabled"
+                  :disabled="isConnectionInputDisabled"
                   :placeholder="t('modemDetail.settings.internetAPNUsernamePlaceholder')"
                 />
               </div>
@@ -288,7 +324,7 @@ const formatBytes = (bytes: number) => {
                   id="modem-internet-apn-password"
                   v-model="apnPassword"
                   type="password"
-                  :disabled="isInputDisabled"
+                  :disabled="isConnectionInputDisabled"
                   :placeholder="t('modemDetail.settings.internetAPNPasswordPlaceholder')"
                 />
               </div>
@@ -318,8 +354,8 @@ const formatBytes = (bytes: number) => {
             <Switch
               id="modem-internet-default-route"
               :model-value="defaultRoute"
-              :disabled="isInputDisabled"
-              @update:model-value="(value: boolean) => (defaultRoute = value)"
+              :disabled="isPreferenceInputDisabled"
+              @update:model-value="updatePreference('defaultRoute', $event === true)"
             />
           </div>
         </div>
@@ -337,8 +373,8 @@ const formatBytes = (bytes: number) => {
             <Switch
               id="modem-internet-proxy"
               :model-value="proxyEnabled"
-              :disabled="isInputDisabled"
-              @update:model-value="(value: boolean) => (proxyEnabled = value)"
+              :disabled="isPreferenceInputDisabled"
+              @update:model-value="updatePreference('proxyEnabled', $event === true)"
             />
           </div>
         </div>
@@ -356,8 +392,8 @@ const formatBytes = (bytes: number) => {
             <Switch
               id="modem-internet-always-on"
               :model-value="alwaysOn"
-              :disabled="isInputDisabled"
-              @update:model-value="(value: boolean) => (alwaysOn = value)"
+              :disabled="isPreferenceInputDisabled"
+              @update:model-value="updatePreference('alwaysOn', $event === true)"
             />
           </div>
         </div>

@@ -11,6 +11,12 @@ type ConnectRequest struct {
 	AlwaysOn     bool   `json:"alwaysOn"`
 }
 
+type UpdatePreferencesRequest struct {
+	DefaultRoute bool `json:"defaultRoute"`
+	ProxyEnabled bool `json:"proxyEnabled"`
+	AlwaysOn     bool `json:"alwaysOn"`
+}
+
 type ConnectionResponse struct {
 	Status          string   `json:"status"`
 	APN             string   `json:"apn"`

@@ -22,6 +22,7 @@ const (
 
 var (
 	ErrModemRequired       = errors.New("modem is required")
+	ErrNotConnected        = errors.New("internet connection is not connected")
 	ErrProfileIDRequired   = errors.New("profile id is required")
 	ErrUnsupportedIPMethod = errors.New("only static bearer IP configuration is supported")
 )
@@ -256,7 +257,7 @@ func (c *Connector) savedAirplaneMode(ctx context.Context, modem *mmodem.Modem) 
 
 func (c *Connector) Current(ctx context.Context, modem *mmodem.Modem) (*Connection, error) {
 	if connection := c.qmapConnection(modem); connection != nil {
-		return connection.response(), nil
+		return c.qmapConnectionResponse(modem.EquipmentIdentifier, connection), nil
 	}
 	return c.current(ctx, modemAccess{modem: modem})
 }
@@ -264,7 +265,11 @@ func (c *Connector) Current(ctx context.Context, modem *mmodem.Modem) (*Connecti
 func (c *Connector) current(ctx context.Context, modem internetModem) (*Connection, error) {
 	modemID := modem.id()
 	defer c.lockModem(modemID)()
+	return c.currentLocked(ctx, modem)
+}
 
+func (c *Connector) currentLocked(ctx context.Context, modem internetModem) (*Connection, error) {
+	modemID := modem.id()
 	prefs := c.preferenceWithAlwaysOn(ctx, modem)
 	var staleInterfaces []string
 	if tracked, ok := c.connection(modemID); ok {
