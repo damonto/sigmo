@@ -50,6 +50,15 @@ const mountPanel = (
 }
 
 describe('WiFiCallingStatusPanel', () => {
+  it('renders the Chinese loading state with a spinner and no reconnect action', () => {
+    const wrapper = mountPanel('zh', { isLoading: true })
+
+    expect(wrapper.text()).toContain('检查中')
+    expect(wrapper.text()).toContain('正在读取 Wi-Fi Calling 状态')
+    expect(wrapper.find('.animate-spin').exists()).toBe(true)
+    expect(wrapper.find('button').exists()).toBe(false)
+  })
+
   it('shows a reconnect action when Wi-Fi Calling is disconnected', async () => {
     const wrapper = mountPanel('en')
 
@@ -79,6 +88,7 @@ describe('WiFiCallingStatusPanel', () => {
     const wrapper = mountPanel('en', { isReconnecting: true })
 
     expect(wrapper.text()).toContain('Connecting')
+    expect(wrapper.find('.animate-spin').exists()).toBe(true)
     expect(wrapper.get('button[aria-label="Reconnect Wi-Fi Calling"]').attributes('disabled')).toBeDefined()
   })
 

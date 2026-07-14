@@ -35,6 +35,10 @@ const showReconnect = computed(() => props.enabled && !props.isLoading)
 
 const isReconnectDisabled = computed(() => props.isUpdating || props.isReconnecting)
 
+const isPending = computed(
+  () => normalizedState.value === 'loading' || normalizedState.value === 'connecting',
+)
+
 const statusLabel = computed(() => {
   switch (normalizedState.value) {
     case 'loading':
@@ -130,7 +134,7 @@ const formatDuration = (seconds: number) => {
             "
           >
             <CheckCircle2 v-if="statusTone === 'connected'" class="size-3" />
-            <LoaderCircle v-else-if="statusTone === 'connecting'" class="size-3 animate-spin" />
+            <LoaderCircle v-else-if="isPending" class="size-3 animate-spin" />
             <Settings2 v-else-if="statusTone === 'setup'" class="size-3" />
             <CircleX v-else class="size-3" />
           </span>
