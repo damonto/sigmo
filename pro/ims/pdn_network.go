@@ -26,7 +26,9 @@ type pdnLinks interface {
 	DisableIPv6Autoconfiguration(string) error
 	SetUp(string) error
 	AddAddress(string, netip.Prefix) error
+	AddPointToPointAddress(string, netip.Addr, netip.Addr) error
 	DeleteAddress(string, netip.Prefix) error
+	DeletePointToPointAddress(string, netip.Addr, netip.Addr) error
 	AddHostRoute(string, netip.Addr) error
 	DeleteHostRoute(string, netip.Addr) error
 	AddVLAN(string, string, uint16) error
@@ -42,8 +44,14 @@ func (systemPDNLinks) SetUp(name string) error { return netlink.SetUp(name) }
 func (systemPDNLinks) AddAddress(name string, prefix netip.Prefix) error {
 	return netlink.AddAddress(name, prefix)
 }
+func (systemPDNLinks) AddPointToPointAddress(name string, local, peer netip.Addr) error {
+	return netlink.AddPointToPointAddress(name, local, peer)
+}
 func (systemPDNLinks) DeleteAddress(name string, prefix netip.Prefix) error {
 	return netlink.DeleteAddress(name, prefix)
+}
+func (systemPDNLinks) DeletePointToPointAddress(name string, local, peer netip.Addr) error {
+	return netlink.DeletePointToPointAddress(name, local, peer)
 }
 func (systemPDNLinks) AddHostRoute(name string, address netip.Addr) error {
 	return netlink.AddHostRoute(name, address)
@@ -58,6 +66,7 @@ func (systemPDNLinks) DeleteLink(name string) error { return netlink.DeleteLink(
 
 type pdnNetworkState struct {
 	prefixes []netip.Prefix
+	peers    map[netip.Prefix]netip.Addr
 	routes   []netip.Addr
 }
 
@@ -138,15 +147,40 @@ func (n *pdnNetwork) configure(ctx context.Context, interfaceName string, info i
 		return pdnNetworkState{}, fmt.Errorf("set IMS interface up: %w", err)
 	}
 	state := pdnNetworkState{}
-	for _, ip := range []net.IP{info.LocalIPv4, info.LocalIPv6} {
-		prefix, ok := imsPDNPrefix(ip)
+	addresses := []struct {
+		local   net.IP
+		gateway net.IP
+	}{
+		{local: info.LocalIPv4, gateway: info.IPv4Gateway},
+		{local: info.LocalIPv6, gateway: info.IPv6Gateway},
+	}
+	for _, address := range addresses {
+		prefix, ok := imsPDNPrefix(address.local)
 		if !ok {
 			continue
 		}
-		if err := n.links.AddAddress(interfaceName, prefix); err != nil {
+		if n.mbim {
+			if err := n.links.AddAddress(interfaceName, prefix); err != nil {
+				return state, fmt.Errorf("add IMS address %s: %w", prefix, err)
+			}
+			state.prefixes = append(state.prefixes, prefix)
+			continue
+		}
+		// Raw-IP QMI links are point-to-point and do not answer ARP or IPv6
+		// neighbor discovery. Marking the WDS gateway as the peer lets the
+		// kernel transmit directly instead of waiting for an unreachable neighbor.
+		gateway, ok := imsPDNAddress(address.gateway)
+		if !ok || gateway.BitLen() != prefix.Addr().BitLen() {
+			return state, fmt.Errorf("add IMS address %s: point-to-point gateway is unavailable", prefix)
+		}
+		if err := n.links.AddPointToPointAddress(interfaceName, prefix.Addr(), gateway); err != nil {
 			return state, fmt.Errorf("add IMS address %s: %w", prefix, err)
 		}
 		state.prefixes = append(state.prefixes, prefix)
+		if state.peers == nil {
+			state.peers = make(map[netip.Prefix]netip.Addr)
+		}
+		state.peers[prefix] = gateway
 	}
 	for _, ip := range info.PCSCFIPs {
 		address, ok := netip.AddrFromSlice(ip)
@@ -183,6 +217,7 @@ func (n *pdnNetwork) closeLocked() error {
 func (n *pdnNetwork) cleanup(interfaceName string, state pdnNetworkState) (pdnNetworkState, error) {
 	remaining := pdnNetworkState{
 		prefixes: make([]netip.Prefix, 0, len(state.prefixes)),
+		peers:    make(map[netip.Prefix]netip.Addr, len(state.peers)),
 		routes:   make([]netip.Addr, 0, len(state.routes)),
 	}
 	var result error
@@ -193,9 +228,19 @@ func (n *pdnNetwork) cleanup(interfaceName string, state pdnNetworkState) (pdnNe
 		}
 	}
 	for _, prefix := range state.prefixes {
-		if err := n.links.DeleteAddress(interfaceName, prefix); err != nil {
+		peer, pointToPoint := state.peers[prefix]
+		var err error
+		if pointToPoint {
+			err = n.links.DeletePointToPointAddress(interfaceName, prefix.Addr(), peer)
+		} else {
+			err = n.links.DeleteAddress(interfaceName, prefix)
+		}
+		if err != nil {
 			result = errors.Join(result, err)
 			remaining.prefixes = append(remaining.prefixes, prefix)
+			if pointToPoint {
+				remaining.peers[prefix] = peer
+			}
 		}
 	}
 	return remaining, result
@@ -229,12 +274,16 @@ func waitForIMSInterface(ctx context.Context, interfaceName string, setUp func(s
 }
 
 func imsPDNPrefix(ip net.IP) (netip.Prefix, bool) {
-	address, ok := netip.AddrFromSlice(ip)
+	address, ok := imsPDNAddress(ip)
 	if !ok {
 		return netip.Prefix{}, false
 	}
-	address = address.Unmap()
 	return netip.PrefixFrom(address, address.BitLen()), true
+}
+
+func imsPDNAddress(ip net.IP) (netip.Addr, bool) {
+	address, ok := netip.AddrFromSlice(ip)
+	return address.Unmap(), ok
 }
 
 func voLTEInterfaceName(modem *mmodem.Modem) (string, error) {

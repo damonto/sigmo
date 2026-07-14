@@ -2,6 +2,7 @@
 import { Keyboard, Mic, Pause, PhoneCall, PhoneIncoming, PhoneOff, Play } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 
+import ModemCallAudioDevices from '@/components/modem/ModemCallAudioDevices.vue'
 import { Button } from '@/components/ui/button'
 import type { ModemCallSession } from '@/composables/useModemCallSession'
 
@@ -40,7 +41,7 @@ const sendDTMF = (digit: string) => {
 <template>
   <div
     v-if="props.session.incomingCall.value"
-    class="fixed inset-x-0 top-3 z-40 mx-auto flex w-[calc(100%-1.5rem)] max-w-2xl items-center justify-between gap-3 rounded-xl border bg-background/95 px-4 py-3 shadow-lg backdrop-blur"
+    class="fixed inset-x-0 top-3 z-40 mx-auto flex w-[calc(100%-1.5rem)] max-w-2xl flex-col items-stretch justify-between gap-3 rounded-xl border bg-background/95 px-4 py-3 shadow-lg backdrop-blur sm:flex-row sm:items-center"
   >
     <div class="flex min-w-0 items-center gap-3">
       <span
@@ -55,9 +56,19 @@ const sendDTMF = (digit: string) => {
         <p class="text-xs text-muted-foreground">
           {{ props.session.routeLabel(props.session.incomingCall.value.route) }}
         </p>
+        <p v-if="props.session.audioMessage.value" class="truncate text-xs text-destructive">
+          {{ props.session.audioMessage.value }}
+        </p>
       </div>
     </div>
-    <div class="flex shrink-0 items-center gap-2">
+    <div
+      class="flex w-full shrink-0 items-center justify-end gap-2 border-t pt-3 sm:w-auto sm:border-0 sm:pt-0"
+    >
+      <ModemCallAudioDevices
+        v-if="props.session.usesBrowserAudio(props.session.incomingCall.value)"
+        :call="props.session.incomingCall.value"
+        :session="props.session"
+      />
       <Button
         size="icon"
         variant="destructive"
@@ -84,7 +95,7 @@ const sendDTMF = (digit: string) => {
     "
     class="fixed inset-x-0 top-3 z-40 mx-auto flex w-[calc(100%-1.5rem)] max-w-2xl flex-col items-stretch gap-3 rounded-xl border bg-background/95 px-4 py-3 shadow-lg backdrop-blur"
   >
-    <div class="flex items-center justify-between gap-3">
+    <div class="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
       <div class="flex min-w-0 items-center gap-3">
         <span
           class="grid size-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary"
@@ -114,7 +125,14 @@ const sendDTMF = (digit: string) => {
           </p>
         </div>
       </div>
-      <div class="flex shrink-0 items-center gap-2">
+      <div
+        class="flex w-full shrink-0 items-center justify-end gap-2 border-t pt-3 sm:w-auto sm:border-0 sm:pt-0"
+      >
+        <ModemCallAudioDevices
+          v-if="props.session.usesBrowserAudio(props.session.activeCall.value)"
+          :call="props.session.activeCall.value"
+          :session="props.session"
+        />
         <Button
           v-if="dtmfAvailable"
           size="icon"

@@ -37,8 +37,12 @@ const makeSession = (state: {
     routeLabel: () => 'Wi-Fi Calling',
     stateLabel: (value: string) => (value === 'answering' ? 'Answering' : 'In call'),
     holdLabel: (value: string) => (value === 'local' ? 'On hold' : ''),
-    isLocallyHeld: (item: CallRecord | null) => item?.hold === 'local' || item?.hold === 'local_remote',
-    isRemotelyHeld: (item: CallRecord | null) => item?.hold === 'remote' || item?.hold === 'local_remote',
+    isLocallyHeld: (item: CallRecord | null) =>
+      item?.hold === 'local' || item?.hold === 'local_remote',
+    isRemotelyHeld: (item: CallRecord | null) =>
+      item?.hold === 'remote' || item?.hold === 'local_remote',
+    usesBrowserAudio: (item: CallRecord | null) =>
+      item?.route === 'wifi_calling' || item?.route === 'volte',
     answerIncoming: vi.fn(),
     reject: vi.fn(),
     hangup: vi.fn(),
@@ -65,6 +69,11 @@ const mountBanner = (session: ModemCallSession) =>
           })[key] ?? key,
       },
       stubs: {
+        ModemCallAudioDevices: {
+          props: ['call', 'session'],
+          template:
+            '<span data-testid="audio-devices"><button aria-label="Select microphone"></button><button aria-label="Select audio output"></button></span>',
+        },
         Button: {
           props: ['disabled'],
           emits: ['click'],
@@ -83,6 +92,7 @@ vi.mock('lucide-vue-next', () => ({
   PhoneOff: { template: '<span />' },
   Pause: { template: '<span />' },
   Play: { template: '<span />' },
+  Volume2: { template: '<span />' },
 }))
 
 describe('ModemCallBanner', () => {
@@ -97,12 +107,40 @@ describe('ModemCallBanner', () => {
 
     expect(wrapper.text()).toContain('(224) 225-5559')
     expect(wrapper.text()).toContain('Wi-Fi Calling')
+    expect(wrapper.get('[data-testid="audio-devices"]')).toBeTruthy()
 
     await wrapper.get('button[aria-label="Answer"]').trigger('click')
     await wrapper.get('button[aria-label="Reject"]').trigger('click')
 
     expect(session.answerIncoming).toHaveBeenCalledWith(incoming)
     expect(session.reject).toHaveBeenCalledWith(incoming)
+  })
+
+  it('places incoming and active call actions on their own mobile row', () => {
+    const incomingWrapper = mountBanner(makeSession({ incomingCall: call() }))
+    const incomingActions = incomingWrapper.get('button[aria-label="Answer"]').element.parentElement
+
+    expect(incomingActions?.classList.contains('w-full')).toBe(true)
+    expect(incomingActions?.classList.contains('border-t')).toBe(true)
+    expect(incomingActions?.classList.contains('sm:w-auto')).toBe(true)
+
+    const activeWrapper = mountBanner(
+      makeSession({ activeCall: call({ direction: 'outgoing', state: 'active' }) }),
+    )
+    const activeActions = activeWrapper.get('button[aria-label="Hang up"]').element.parentElement
+
+    expect(activeActions?.classList.contains('w-full')).toBe(true)
+    expect(activeActions?.classList.contains('border-t')).toBe(true)
+    expect(activeActions?.classList.contains('sm:w-auto')).toBe(true)
+  })
+
+  it('does not show browser audio devices for modem calls', () => {
+    const session = makeSession({
+      activeCall: call({ route: 'modem', direction: 'outgoing', state: 'active' }),
+    })
+    const wrapper = mountBanner(session)
+
+    expect(wrapper.find('[data-testid="audio-devices"]').exists()).toBe(false)
   })
 
   it('shows active call state, duration, audio status, and hangup action', async () => {

@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { computed, defineComponent, nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -16,6 +16,9 @@ const callsHarness = vi.hoisted(() => ({
   activeCall: null as unknown as ReturnType<typeof ref<CallRecord | null>>,
   incomingCall: null as unknown as ReturnType<typeof ref<CallRecord | null>>,
   remoteStream: null as unknown as ReturnType<typeof ref<MediaStream | null>>,
+  bindOutputElement: vi.fn(),
+  prepareAudio: vi.fn(),
+  stopAudio: vi.fn(),
   usePhoneCalls: vi.fn(),
   useCallAudioSession: vi.fn(),
 }))
@@ -82,7 +85,7 @@ const Consumer = defineComponent({
     return { session }
   },
   template:
-    '<section data-testid="consumer">{{ session.primaryLine(session.incomingCall.value) }}</section>',
+    '<section data-testid="consumer">{{ session.incomingCall.value ? session.primaryLine(session.incomingCall.value) : "" }}</section>',
 })
 
 const mountProvider = () =>
@@ -103,6 +106,7 @@ const mountProvider = () =>
           })[key] ?? key,
       },
       stubs: {
+        ModemCallAudioDevices: { template: '<span />' },
         Button: {
           props: ['disabled'],
           emits: ['click'],
@@ -148,18 +152,38 @@ describe('ModemCallProvider', () => {
       loadCalls: vi.fn(),
     })
     callsHarness.useCallAudioSession.mockReset()
+    callsHarness.bindOutputElement.mockReset()
+    callsHarness.bindOutputElement.mockResolvedValue(true)
+    callsHarness.prepareAudio.mockReset()
+    callsHarness.prepareAudio.mockResolvedValue(true)
+    callsHarness.stopAudio.mockReset()
     callsHarness.useCallAudioSession.mockReturnValue({
       errorMessage: ref(''),
+      deviceNotice: ref(''),
       remoteStream: callsHarness.remoteStream,
-      prepare: vi.fn(),
+      inputDevices: ref([]),
+      outputDevices: ref([]),
+      selectedInputDeviceID: ref(''),
+      selectedOutputDeviceID: ref(''),
+      isRefreshingDevices: ref(false),
+      isSwitchingInput: ref(false),
+      isSwitchingOutput: ref(false),
+      outputSelectionSupported: ref(true),
+      mediaStatus: ref('idle'),
+      prepare: callsHarness.prepareAudio,
       start: vi.fn(),
-      stop: vi.fn(),
+      stop: callsHarness.stopAudio,
       setInputEnabled: vi.fn(),
+      refreshDevices: vi.fn(),
+      selectInputDevice: vi.fn(),
+      selectOutputDevice: vi.fn(),
+      bindOutputElement: callsHarness.bindOutputElement,
     })
   })
 
-  it('provides the same call session to routed children and the global banner', () => {
+  it('provides the same call session to routed children and the global banner', async () => {
     const wrapper = mountProvider()
+    await flushPromises()
 
     expect(callsHarness.usePhoneCalls).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-testid="consumer"]').text()).toBe('(224) 225-5559')
@@ -175,17 +199,83 @@ describe('ModemCallProvider', () => {
 
     callsHarness.remoteStream.value = stream
     await nextTick()
+    await flushPromises()
 
     const audio = wrapper.get('audio').element as HTMLAudioElement
     expect(audio.srcObject).toBe(callsHarness.remoteStream.value)
+    expect(callsHarness.bindOutputElement).toHaveBeenCalledWith(audio)
+    expect(callsHarness.bindOutputElement.mock.invocationCallOrder[0]).toBeLessThan(
+      play.mock.invocationCallOrder[0],
+    )
     expect(play).toHaveBeenCalled()
 
     callsHarness.remoteStream.value = null
     await nextTick()
+    await flushPromises()
 
     expect(audio.srcObject).toBeNull()
     expect(pause).toHaveBeenCalled()
     play.mockRestore()
     pause.mockRestore()
+  })
+
+  it('waits for output binding before playing remote audio', async () => {
+    let resolveBinding!: (bound: boolean) => void
+    callsHarness.bindOutputElement.mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        resolveBinding = resolve
+      }),
+    )
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    mountProvider()
+
+    callsHarness.remoteStream.value = {} as MediaStream
+    await nextTick()
+
+    expect(play).not.toHaveBeenCalled()
+
+    resolveBinding(true)
+    await flushPromises()
+
+    expect(callsHarness.bindOutputElement).toHaveBeenCalledOnce()
+    expect(play).toHaveBeenCalledOnce()
+    play.mockRestore()
+  })
+
+  it('releases microphone preparation when an unanswered incoming call disappears', async () => {
+    const wrapper = mountProvider()
+    const incoming = callsHarness.incomingCall.value
+    const banner = wrapper.findComponent({ name: 'ModemCallBanner' })
+    const session = banner.props('session') as ReturnType<typeof useModemCallSession>
+
+    expect(incoming).toBeTruthy()
+    await session.prepareAudioDevices(incoming!)
+    callsHarness.incomingCall.value = null
+    await nextTick()
+    await flushPromises()
+
+    expect(callsHarness.prepareAudio).toHaveBeenCalled()
+    expect(callsHarness.stopAudio).toHaveBeenCalled()
+  })
+
+  it('releases a pending microphone capture when the incoming call disappears', async () => {
+    let resolvePrepare!: (ready: boolean) => void
+    callsHarness.prepareAudio.mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        resolvePrepare = resolve
+      }),
+    )
+    const wrapper = mountProvider()
+    const incoming = callsHarness.incomingCall.value
+    const banner = wrapper.findComponent({ name: 'ModemCallBanner' })
+    const session = banner.props('session') as ReturnType<typeof useModemCallSession>
+
+    const prepared = session.prepareAudioDevices(incoming!)
+    callsHarness.incomingCall.value = null
+    await nextTick()
+    resolvePrepare(true)
+
+    await expect(prepared).resolves.toBe(false)
+    expect(callsHarness.stopAudio).toHaveBeenCalled()
   })
 })

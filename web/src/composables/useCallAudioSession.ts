@@ -14,8 +14,21 @@ export type AudioStatusEvent =
   | { type: 'error' }
   | { type: 'peer_closed' }
 
+export type AudioDeviceNotice =
+  | ''
+  | 'list_failed'
+  | 'input_switch_failed'
+  | 'output_switch_failed'
+  | 'device_fallback'
+
+export type CallAudioDevice = {
+  deviceId: string
+  label: string
+}
+
 type AudioDeps = {
   createPeerConnection?: (configuration: RTCConfiguration) => RTCPeerConnection
+  enumerateDevices?: () => Promise<MediaDeviceInfo[]>
   getIceServers?: () => Promise<RTCIceServer[]>
   getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>
 }
@@ -33,6 +46,8 @@ const microphoneConstraints: MediaTrackConstraints = {
 }
 
 const disconnectedGraceMs = 5000
+const inputDeviceStorageKey = 'sigmo:call-audio-input-device'
+const outputDeviceStorageKey = 'sigmo:call-audio-output-device'
 
 export const reduceAudioStatus = (current: AudioStatus, event: AudioStatusEvent): AudioStatus => {
   switch (event.type) {
@@ -57,14 +72,25 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   const status = ref<AudioStatus>('idle')
   const mediaStatus = computed(() => status.value)
   const errorMessage = ref('')
+  const deviceNotice = ref<AudioDeviceNotice>('')
   const remoteStream = shallowRef<MediaStream | null>(null)
+  const inputDevices = ref<CallAudioDevice[]>([])
+  const outputDevices = ref<CallAudioDevice[]>([])
+  const selectedInputDeviceID = ref(readStoredDevice(inputDeviceStorageKey))
+  const selectedOutputDeviceID = ref(readStoredDevice(outputDeviceStorageKey))
+  const isRefreshingDevices = ref(false)
+  const isSwitchingInput = ref(false)
+  const isSwitchingOutput = ref(false)
+  const outputElement = shallowRef<HTMLMediaElement | null>(null)
 
   const calls = useCallApi()
 
   let pc: RTCPeerConnection | null = null
+  let audioSender: RTCRtpSender | null = null
   let signalWS: WebSocket | null = null
   let stream: MediaStream | null = null
   let inputPromise: Promise<MediaStream> | null = null
+  let inputSwitchVersion = 0
   let preparePromise: Promise<boolean> | null = null
   let sessionAbort: AbortController | null = null
   let connectionLossTimer: ReturnType<typeof setTimeout> | null = null
@@ -77,6 +103,9 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   let answerReject: ((err: Error) => void) | null = null
 
   const isReady = computed(() => status.value === 'ready')
+  const outputSelectionSupported = computed(
+    () => typeof outputSinkSetter(outputElement.value) === 'function',
+  )
 
   const applyStatus = (event: AudioStatusEvent) => {
     status.value = reduceAudioStatus(status.value, event)
@@ -91,19 +120,33 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   const isCurrentSession = (controller: AbortController) =>
     sessionAbort === controller && !controller.signal.aborted
 
+  const browserMediaDevices = () =>
+    typeof navigator === 'undefined' ? undefined : navigator.mediaDevices
+
+  const captureAudioInput = async (deviceID: string) => {
+    const mediaDevices = browserMediaDevices()
+    const getUserMedia = options.deps?.getUserMedia ?? mediaDevices?.getUserMedia.bind(mediaDevices)
+    if (!getUserMedia) {
+      throw new Error('Microphone capture is not available')
+    }
+    return await getUserMedia({ audio: inputConstraints(deviceID) })
+  }
+
   const openAudioInput = async () => {
     if (stream) return stream
     if (inputPromise) return await inputPromise
     inputPromise = (async () => {
-      const getUserMedia =
-        options.deps?.getUserMedia ??
-        navigator.mediaDevices?.getUserMedia.bind(navigator.mediaDevices)
-      if (!getUserMedia) {
-        throw new Error('Microphone capture is not available')
+      const preferredDeviceID = selectedInputDeviceID.value
+      try {
+        stream = await captureAudioInput(preferredDeviceID)
+      } catch (err) {
+        if (!preferredDeviceID || !isMissingDeviceError(err)) throw err
+        selectedInputDeviceID.value = ''
+        storeDevice(inputDeviceStorageKey, '')
+        deviceNotice.value = 'device_fallback'
+        stream = await captureAudioInput('')
       }
-      const nextStream = await getUserMedia({ audio: microphoneConstraints })
-      stream = nextStream
-      return nextStream
+      return stream
     })()
     try {
       return await inputPromise
@@ -147,11 +190,16 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
 
   const prepare = async () => {
     if (preparePromise) return await preparePromise
+    if (stream) {
+      await refreshDevices()
+      return true
+    }
     errorMessage.value = ''
     applyStatus({ type: 'prepare' })
     preparePromise = (async () => {
       try {
         await openAudioInput()
+        await refreshDevices()
         if (!activeCallID && status.value === 'preparing') {
           applyStatus({ type: 'idle_after_prepare' })
         }
@@ -219,9 +267,11 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
             break
         }
       }
-      for (const track of localStream.getAudioTracks()) {
-        nextPC.addTrack(track, localStream)
+      const localTrack = localStream.getAudioTracks()[0]
+      if (!localTrack) {
+        throw new Error('Microphone capture did not provide an audio track')
       }
+      audioSender = nextPC.addTrack(localTrack, localStream)
       const offer = await nextPC.createOffer()
       if (!isCurrentSession(nextAbort)) return false
       await nextPC.setLocalDescription(offer)
@@ -254,6 +304,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   }
 
   const cleanup = (keepInput = false) => {
+    inputSwitchVersion++
     sessionAbort?.abort()
     sessionAbort = null
     clearConnectionLossTimer()
@@ -264,6 +315,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       pc.close()
       pc = null
     }
+    audioSender = null
     closeWebRTCSignaling()
     activeModemID = ''
     offerSent = false
@@ -458,6 +510,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     cleanup()
     activeCallID = ''
     errorMessage.value = ''
+    deviceNotice.value = ''
     applyStatus({ type: 'closed' })
   }
 
@@ -468,8 +521,152 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     }
   }
 
+  const switchInputDevice = async (deviceID: string, automatic = false) => {
+    if (isSwitchingInput.value) return false
+    const currentTrack = stream?.getAudioTracks()[0]
+    if (
+      deviceID === selectedInputDeviceID.value &&
+      stream &&
+      currentTrack?.readyState !== 'ended'
+    ) {
+      return true
+    }
+    const switchVersion = ++inputSwitchVersion
+    isSwitchingInput.value = true
+    let nextStream: MediaStream | null = null
+    try {
+      nextStream = await captureAudioInput(deviceID)
+      if (switchVersion !== inputSwitchVersion) {
+        stopStream(nextStream)
+        nextStream = null
+        return false
+      }
+      const nextTrack = nextStream.getAudioTracks()[0]
+      if (!nextTrack) {
+        throw new Error('Microphone capture did not provide an audio track')
+      }
+      const previousStream = stream
+      const previousTrack = previousStream?.getAudioTracks()[0]
+      nextTrack.enabled = previousTrack?.enabled ?? true
+      if (audioSender) {
+        await audioSender.replaceTrack(nextTrack)
+      }
+      if (switchVersion !== inputSwitchVersion) {
+        stopStream(nextStream)
+        nextStream = null
+        return false
+      }
+      stream = nextStream
+      nextStream = null
+      selectedInputDeviceID.value = deviceID
+      storeDevice(inputDeviceStorageKey, deviceID)
+      if (previousStream && previousStream !== stream) {
+        stopStream(previousStream)
+      }
+      deviceNotice.value = automatic ? 'device_fallback' : ''
+      return true
+    } catch {
+      if (nextStream) stopStream(nextStream)
+      deviceNotice.value = 'input_switch_failed'
+      return false
+    } finally {
+      isSwitchingInput.value = false
+    }
+  }
+
+  const selectInputDevice = async (deviceID: string) =>
+    await switchInputDevice(normalizeDeviceID(deviceID))
+
+  const switchOutputDevice = async (deviceID: string, automatic = false) => {
+    if (isSwitchingOutput.value) return false
+    const element = outputElement.value
+    const setSinkId = outputSinkSetter(element)
+    if (!element || !setSinkId) return false
+    isSwitchingOutput.value = true
+    try {
+      await setSinkId.call(element, deviceID)
+      selectedOutputDeviceID.value = deviceID
+      storeDevice(outputDeviceStorageKey, deviceID)
+      if (!automatic || deviceNotice.value === 'output_switch_failed') deviceNotice.value = ''
+      return true
+    } catch {
+      if (automatic && deviceID) {
+        selectedOutputDeviceID.value = ''
+        storeDevice(outputDeviceStorageKey, '')
+        try {
+          await setSinkId.call(element, '')
+          deviceNotice.value = 'device_fallback'
+          return true
+        } catch {
+          // Keep browser playback on its current output when even the default sink cannot be set.
+        }
+      }
+      deviceNotice.value = 'output_switch_failed'
+      return false
+    } finally {
+      isSwitchingOutput.value = false
+    }
+  }
+
+  const selectOutputDevice = async (deviceID: string) =>
+    await switchOutputDevice(normalizeDeviceID(deviceID))
+
+  const bindOutputElement = async (element: HTMLMediaElement | null) => {
+    outputElement.value = element
+    if (!element || !selectedOutputDeviceID.value) return true
+    return await switchOutputDevice(selectedOutputDeviceID.value, true)
+  }
+
+  const refreshDevices = async () => {
+    const mediaDevices = browserMediaDevices()
+    const enumerateDevices =
+      options.deps?.enumerateDevices ?? mediaDevices?.enumerateDevices.bind(mediaDevices)
+    if (!enumerateDevices || isRefreshingDevices.value) return true
+    isRefreshingDevices.value = true
+    try {
+      const devices = await enumerateDevices()
+      inputDevices.value = listedDevices(devices, 'audioinput')
+      outputDevices.value = listedDevices(devices, 'audiooutput')
+      if (deviceNotice.value === 'list_failed') deviceNotice.value = ''
+
+      const currentInputTrack = stream?.getAudioTracks()[0]
+      if (stream && !selectedInputDeviceID.value && currentInputTrack?.readyState === 'ended') {
+        await switchInputDevice('', true)
+      } else if (
+        stream &&
+        selectedInputDeviceID.value &&
+        !inputDevices.value.some((device) => device.deviceId === selectedInputDeviceID.value)
+      ) {
+        await switchInputDevice('', true)
+      }
+      if (
+        selectedOutputDeviceID.value &&
+        !outputDevices.value.some((device) => device.deviceId === selectedOutputDeviceID.value)
+      ) {
+        if (await switchOutputDevice('', true)) {
+          deviceNotice.value = 'device_fallback'
+        }
+      }
+      return true
+    } catch {
+      deviceNotice.value = 'list_failed'
+      return false
+    } finally {
+      isRefreshingDevices.value = false
+    }
+  }
+
+  const handleDeviceChange = () => {
+    void refreshDevices()
+  }
+
+  const mediaDevices = browserMediaDevices()
   if (getCurrentInstance()) {
-    onBeforeUnmount(stop)
+    mediaDevices?.addEventListener('devicechange', handleDeviceChange)
+    onBeforeUnmount(() => {
+      mediaDevices?.removeEventListener('devicechange', handleDeviceChange)
+      stop()
+    })
   }
 
   return {
@@ -477,12 +674,76 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     mediaStatus,
     isReady,
     errorMessage,
+    deviceNotice,
     remoteStream,
+    inputDevices,
+    outputDevices,
+    selectedInputDeviceID,
+    selectedOutputDeviceID,
+    isRefreshingDevices,
+    isSwitchingInput,
+    isSwitchingOutput,
+    outputSelectionSupported,
     prepare,
     start,
     stop,
     setInputEnabled,
+    refreshDevices,
+    selectInputDevice,
+    selectOutputDevice,
+    bindOutputElement,
   }
+}
+
+const inputConstraints = (deviceID: string): MediaTrackConstraints => ({
+  ...microphoneConstraints,
+  ...(deviceID ? { deviceId: { exact: deviceID } } : {}),
+})
+
+const listedDevices = (devices: MediaDeviceInfo[], kind: MediaDeviceKind) => {
+  const seen = new Set<string>()
+  const result: CallAudioDevice[] = []
+  for (const device of devices) {
+    if (device.kind !== kind || !device.deviceId || device.deviceId === 'default') continue
+    if (seen.has(device.deviceId)) continue
+    seen.add(device.deviceId)
+    result.push({ deviceId: device.deviceId, label: device.label })
+  }
+  return result
+}
+
+const normalizeDeviceID = (deviceID: string) => (deviceID === 'default' ? '' : deviceID)
+
+const readStoredDevice = (key: string) => {
+  if (typeof localStorage === 'undefined') return ''
+  try {
+    return localStorage.getItem(key) ?? ''
+  } catch {
+    // Storage can be blocked while audio selection still works for the current page.
+    return ''
+  }
+}
+
+const storeDevice = (key: string, deviceID: string) => {
+  if (typeof localStorage === 'undefined') return
+  try {
+    if (deviceID) {
+      localStorage.setItem(key, deviceID)
+      return
+    }
+    localStorage.removeItem(key)
+  } catch {
+    // Storage can be blocked while audio selection still works for the current page.
+  }
+}
+
+const outputSinkSetter = (element: HTMLMediaElement | null) =>
+  (element as unknown as { setSinkId?: (deviceID: string) => Promise<void> } | null)?.setSinkId
+
+const isMissingDeviceError = (err: unknown) => {
+  if (!err || typeof err !== 'object') return false
+  const name = (err as { name?: unknown }).name
+  return name === 'NotFoundError' || name === 'OverconstrainedError'
 }
 
 const errorText = (err: unknown) => {
@@ -513,16 +774,14 @@ const parseWebRTCSignalMessage = (data: unknown): WebRTCSignalMessage | null => 
   try {
     const parsed = JSON.parse(data) as Record<string, unknown>
     switch (parsed.type) {
-      case 'answer':
-        {
-          const answer = asSessionDescription(parsed.answer)
-          return answer ? { type: 'answer', answer } : null
-        }
-      case 'candidate':
-        {
-          const candidate = asICECandidate(parsed.candidate)
-          return candidate ? { type: 'candidate', candidate } : null
-        }
+      case 'answer': {
+        const answer = asSessionDescription(parsed.answer)
+        return answer ? { type: 'answer', answer } : null
+      }
+      case 'candidate': {
+        const candidate = asICECandidate(parsed.candidate)
+        return candidate ? { type: 'candidate', candidate } : null
+      }
       case 'error':
         return { type: 'error', message: String(parsed.message ?? '') }
       default:

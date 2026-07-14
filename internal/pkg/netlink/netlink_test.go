@@ -171,6 +171,63 @@ func TestHostRouteMessage(t *testing.T) {
 	}
 }
 
+func TestPointToPointAddressMessage(t *testing.T) {
+	tests := []struct {
+		name       string
+		local      netip.Addr
+		peer       netip.Addr
+		wantFamily byte
+		wantBits   byte
+		wantErr    bool
+	}{
+		{
+			name:       "IPv4 peer",
+			local:      netip.MustParseAddr("10.0.0.2"),
+			peer:       netip.MustParseAddr("10.0.0.1"),
+			wantFamily: FamilyIPv4,
+			wantBits:   32,
+		},
+		{
+			name:       "IPv6 peer",
+			local:      netip.MustParseAddr("2001:db8::2"),
+			peer:       netip.MustParseAddr("2001:db8::1"),
+			wantFamily: FamilyIPv6,
+			wantBits:   128,
+		},
+		{
+			name:    "rejects mixed families",
+			local:   netip.MustParseAddr("10.0.0.2"),
+			peer:    netip.MustParseAddr("2001:db8::1"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, err := pointToPointAddressMessage(7, tt.local, tt.peer)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("pointToPointAddressMessage() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("pointToPointAddressMessage() error = %v", err)
+			}
+			if msg[0] != tt.wantFamily || msg[1] != tt.wantBits {
+				t.Fatalf("address header = family %d bits %d, want %d/%d", msg[0], msg[1], tt.wantFamily, tt.wantBits)
+			}
+			attrs := parseAttrs(msg[unix.SizeofIfAddrmsg:])
+			if got := attrAddr(int(tt.wantFamily), attrs[unix.IFA_LOCAL]); got != tt.local {
+				t.Fatalf("local address = %s, want %s", got, tt.local)
+			}
+			if got := attrAddr(int(tt.wantFamily), attrs[unix.IFA_ADDRESS]); got != tt.peer {
+				t.Fatalf("peer address = %s, want %s", got, tt.peer)
+			}
+		})
+	}
+}
+
 func TestVLANLinkMessage(t *testing.T) {
 	tests := []struct {
 		name          string

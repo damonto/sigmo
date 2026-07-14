@@ -19,6 +19,7 @@ const sessionHarness = vi.hoisted(() => ({
     remoteStream: {
       value: null,
     },
+    bindOutputElement: vi.fn(),
   },
 }))
 

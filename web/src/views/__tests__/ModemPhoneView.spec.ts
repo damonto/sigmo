@@ -42,6 +42,7 @@ const capabilityHarness = vi.hoisted(() => ({
 
 const callAudioHarness = vi.hoisted(() => ({
   errorMessage: { value: '' },
+  deviceNotice: { value: '' },
   prepare: vi.fn(),
   start: vi.fn(),
   stop: vi.fn(),
@@ -279,6 +280,7 @@ describe('ModemPhoneView phone interactions', () => {
     phoneHarness.setSearchQuery.mockReset()
     phoneHarness.sessionSearchQuery = null
     callAudioHarness.errorMessage.value = ''
+    callAudioHarness.deviceNotice.value = ''
     callAudioHarness.prepare.mockReset()
     callAudioHarness.prepare.mockResolvedValue(true)
     callAudioHarness.start.mockReset()

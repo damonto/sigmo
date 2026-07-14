@@ -357,8 +357,16 @@ func TestConfigureIMSPDNNetwork(t *testing.T) {
 					calls = append(calls, fmt.Sprintf("add-address:%s:%s", name, prefix))
 					return nil
 				},
+				addPointToPointAddress: func(name string, local, peer netip.Addr) error {
+					calls = append(calls, fmt.Sprintf("add-peer-address:%s:%s:%s", name, local, peer))
+					return nil
+				},
 				deleteAddress: func(name string, prefix netip.Prefix) error {
 					calls = append(calls, fmt.Sprintf("delete-address:%s:%s", name, prefix))
+					return nil
+				},
+				deletePointToPointAddress: func(name string, local, peer netip.Addr) error {
+					calls = append(calls, fmt.Sprintf("delete-peer-address:%s:%s:%s", name, local, peer))
 					return nil
 				},
 				addHostRoute: func(name string, address netip.Addr) error {
@@ -371,9 +379,11 @@ func TestConfigureIMSPDNNetwork(t *testing.T) {
 				},
 			}
 			info := imsPDNInfo{
-				LocalIPv4: net.ParseIP("10.0.0.2"),
-				LocalIPv6: net.ParseIP("2001:db8::2"),
-				PCSCFIPs:  []net.IP{net.ParseIP("10.0.0.10"), net.ParseIP("2001:db8::10")},
+				LocalIPv4:   net.ParseIP("10.0.0.2"),
+				LocalIPv6:   net.ParseIP("2001:db8::2"),
+				IPv4Gateway: net.ParseIP("10.0.0.1"),
+				IPv6Gateway: net.ParseIP("2001:db8::1"),
+				PCSCFIPs:    []net.IP{net.ParseIP("10.0.0.10"), net.ParseIP("2001:db8::10")},
 			}
 
 			network := &pdnNetwork{parent: "wwan0", mbim: tt.dedicatedInterface, links: links}
@@ -386,17 +396,30 @@ func TestConfigureIMSPDNNetwork(t *testing.T) {
 			}
 			want := []string{
 				"up:wwan0",
-				"add-address:wwan0:10.0.0.2/32",
-				"add-address:wwan0:2001:db8::2/128",
 				"add-route:wwan0:10.0.0.10",
 				"add-route:wwan0:2001:db8::10",
 				"delete-route:wwan0:10.0.0.10",
 				"delete-route:wwan0:2001:db8::10",
-				"delete-address:wwan0:10.0.0.2/32",
-				"delete-address:wwan0:2001:db8::2/128",
 			}
 			if tt.wantDisable {
 				want = slices.Insert(want, 0, "disable-ipv6-autoconf:wwan0")
+				want = slices.Insert(want, 2,
+					"add-address:wwan0:10.0.0.2/32",
+					"add-address:wwan0:2001:db8::2/128",
+				)
+				want = append(want,
+					"delete-address:wwan0:10.0.0.2/32",
+					"delete-address:wwan0:2001:db8::2/128",
+				)
+			} else {
+				want = slices.Insert(want, 1,
+					"add-peer-address:wwan0:10.0.0.2:10.0.0.1",
+					"add-peer-address:wwan0:2001:db8::2:2001:db8::1",
+				)
+				want = append(want,
+					"delete-peer-address:wwan0:10.0.0.2:10.0.0.1",
+					"delete-peer-address:wwan0:2001:db8::2:2001:db8::1",
+				)
 			}
 			if !slices.Equal(calls, want) {
 				t.Fatalf("network calls = %v, want %v", calls, want)
@@ -527,22 +550,24 @@ func TestPDNNetworkRollsBackConfigurationOnce(t *testing.T) {
 			network := &pdnNetwork{
 				parent: "wwan0",
 				links: fakePDNLinks{
-					addAddress: func(string, netip.Prefix) error {
+					addPointToPointAddress: func(string, netip.Addr, netip.Addr) error {
 						addCalls++
 						if addCalls == 2 {
 							return errors.New("add address rejected")
 						}
 						return nil
 					},
-					deleteAddress: func(string, netip.Prefix) error {
+					deletePointToPointAddress: func(string, netip.Addr, netip.Addr) error {
 						deleteCalls++
 						return nil
 					},
 				},
 			}
 			info := imsPDNInfo{
-				LocalIPv4: net.ParseIP("10.0.0.2"),
-				LocalIPv6: net.ParseIP("2001:db8::2"),
+				LocalIPv4:   net.ParseIP("10.0.0.2"),
+				LocalIPv6:   net.ParseIP("2001:db8::2"),
+				IPv4Gateway: net.ParseIP("10.0.0.1"),
+				IPv6Gateway: net.ParseIP("2001:db8::1"),
 			}
 
 			if err := network.Replace(context.Background(), info); err == nil {
@@ -726,7 +751,9 @@ type fakePDNLinks struct {
 	disableIPv6Autoconfiguration func(string) error
 	setUp                        func(string) error
 	addAddress                   func(string, netip.Prefix) error
+	addPointToPointAddress       func(string, netip.Addr, netip.Addr) error
 	deleteAddress                func(string, netip.Prefix) error
+	deletePointToPointAddress    func(string, netip.Addr, netip.Addr) error
 	addHostRoute                 func(string, netip.Addr) error
 	deleteHostRoute              func(string, netip.Addr) error
 	addVLAN                      func(string, string, uint16) error
@@ -754,11 +781,25 @@ func (f fakePDNLinks) AddAddress(name string, prefix netip.Prefix) error {
 	return f.addAddress(name, prefix)
 }
 
+func (f fakePDNLinks) AddPointToPointAddress(name string, local, peer netip.Addr) error {
+	if f.addPointToPointAddress == nil {
+		return nil
+	}
+	return f.addPointToPointAddress(name, local, peer)
+}
+
 func (f fakePDNLinks) DeleteAddress(name string, prefix netip.Prefix) error {
 	if f.deleteAddress == nil {
 		return nil
 	}
 	return f.deleteAddress(name, prefix)
+}
+
+func (f fakePDNLinks) DeletePointToPointAddress(name string, local, peer netip.Addr) error {
+	if f.deletePointToPointAddress == nil {
+		return nil
+	}
+	return f.deletePointToPointAddress(name, local, peer)
 }
 
 func (f fakePDNLinks) AddHostRoute(name string, address netip.Addr) error {

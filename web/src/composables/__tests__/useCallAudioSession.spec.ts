@@ -23,7 +23,10 @@ class FakePeerConnection {
   onconnectionstatechange: (() => void) | null = null
   private listeners = new Map<string, Set<EventListener>>()
 
-  addTrack = vi.fn()
+  sender = {
+    replaceTrack: vi.fn(async () => {}),
+  }
+  addTrack = vi.fn(() => this.sender as unknown as RTCRtpSender)
   createOffer = vi.fn(async () => ({
     type: 'offer' as const,
     sdp: 'offer-sdp',
@@ -129,6 +132,15 @@ const fakeStream = (tracks: MediaStreamTrack[]) =>
     getAudioTracks: () => tracks,
   }) as unknown as MediaStream
 
+const fakeDevice = (deviceId: string, kind: MediaDeviceKind, label = '') =>
+  ({
+    deviceId,
+    groupId: '',
+    kind,
+    label,
+    toJSON: () => ({}),
+  }) as MediaDeviceInfo
+
 const deferredStream = () => {
   let resolve!: (stream: MediaStream) => void
   const promise = new Promise<MediaStream>((done) => {
@@ -141,6 +153,7 @@ describe('call audio session', () => {
   beforeEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
+    localStorage.clear()
     FakeWebSocket.instances = []
     FakeWebSocket.throwOnCandidate = false
     FakeWebSocket.onOffer = (socket) => {
@@ -490,6 +503,260 @@ describe('call audio session', () => {
 
     session.setInputEnabled(true)
     expect(track.enabled).toBe(true)
+  })
+
+  it('uses the saved microphone when preparing audio', async () => {
+    localStorage.setItem('sigmo:call-audio-input-device', 'mic-saved')
+    const getUserMedia = vi.fn(async () => fakeStream([fakeTrack()]))
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia,
+        enumerateDevices: vi.fn(async () => [
+          fakeDevice('mic-saved', 'audioinput', 'Saved microphone'),
+        ]),
+      },
+    })
+
+    await expect(session.prepare()).resolves.toBe(true)
+
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: {
+        autoGainControl: false,
+        channelCount: 1,
+        deviceId: { exact: 'mic-saved' },
+        echoCancellation: true,
+        noiseSuppression: true,
+        sampleSize: 16,
+      },
+    })
+    expect(session.selectedInputDeviceID.value).toBe('mic-saved')
+  })
+
+  it('keeps a saved microphone when enumeration runs before capture permission', async () => {
+    localStorage.setItem('sigmo:call-audio-input-device', 'mic-saved')
+    const getUserMedia = vi.fn(async () => fakeStream([fakeTrack()]))
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia,
+        enumerateDevices: vi.fn(async () => [fakeDevice('default', 'audioinput')]),
+      },
+    })
+
+    await session.refreshDevices()
+
+    expect(getUserMedia).not.toHaveBeenCalled()
+    expect(session.selectedInputDeviceID.value).toBe('mic-saved')
+    expect(localStorage.getItem('sigmo:call-audio-input-device')).toBe('mic-saved')
+  })
+
+  it('falls back to the system microphone when the saved device is missing', async () => {
+    localStorage.setItem('sigmo:call-audio-input-device', 'mic-missing')
+    const getUserMedia = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException('missing', 'NotFoundError'))
+      .mockResolvedValueOnce(fakeStream([fakeTrack()]))
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: { getUserMedia },
+    })
+
+    await expect(session.prepare()).resolves.toBe(true)
+
+    expect(getUserMedia).toHaveBeenCalledTimes(2)
+    expect(getUserMedia.mock.calls[1]?.[0]).toEqual({
+      audio: {
+        autoGainControl: false,
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        sampleSize: 16,
+      },
+    })
+    expect(session.selectedInputDeviceID.value).toBe('')
+    expect(session.deviceNotice.value).toBe('device_fallback')
+    expect(localStorage.getItem('sigmo:call-audio-input-device')).toBeNull()
+  })
+
+  it('reacquires the system microphone when its current track has ended', async () => {
+    let readyState: MediaStreamTrackState = 'live'
+    const firstStop = vi.fn()
+    const firstTrack = fakeTrack(firstStop)
+    Object.defineProperty(firstTrack, 'readyState', {
+      configurable: true,
+      get: () => readyState,
+    })
+    const secondTrack = fakeTrack()
+    const getUserMedia = vi
+      .fn()
+      .mockResolvedValueOnce(fakeStream([firstTrack]))
+      .mockResolvedValueOnce(fakeStream([secondTrack]))
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia,
+        enumerateDevices: vi.fn(async () => []),
+      },
+    })
+
+    await session.prepare()
+    readyState = 'ended'
+    await session.refreshDevices()
+
+    expect(getUserMedia).toHaveBeenCalledTimes(2)
+    expect(firstStop).toHaveBeenCalled()
+    expect(session.selectedInputDeviceID.value).toBe('')
+    expect(session.deviceNotice.value).toBe('device_fallback')
+  })
+
+  it('reports an automatic microphone fallback failure', async () => {
+    localStorage.setItem('sigmo:call-audio-input-device', 'mic-saved')
+    const firstStop = vi.fn()
+    const getUserMedia = vi
+      .fn()
+      .mockResolvedValueOnce(fakeStream([fakeTrack(firstStop)]))
+      .mockRejectedValueOnce(new Error('default microphone unavailable'))
+    const enumerateDevices = vi
+      .fn()
+      .mockResolvedValueOnce([fakeDevice('mic-saved', 'audioinput')])
+      .mockResolvedValueOnce([])
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: { getUserMedia, enumerateDevices },
+    })
+
+    await session.prepare()
+    await session.refreshDevices()
+
+    expect(firstStop).not.toHaveBeenCalled()
+    expect(session.selectedInputDeviceID.value).toBe('mic-saved')
+    expect(session.deviceNotice.value).toBe('input_switch_failed')
+  })
+
+  it('replaces the active microphone track before stopping the previous stream', async () => {
+    const pc = new FakePeerConnection()
+    const firstStop = vi.fn()
+    const firstTrack = fakeTrack(firstStop)
+    const secondTrack = fakeTrack()
+    const getUserMedia = vi
+      .fn()
+      .mockResolvedValueOnce(fakeStream([firstTrack]))
+      .mockResolvedValueOnce(fakeStream([secondTrack]))
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia,
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+      },
+    })
+
+    await expect(session.start('call-1')).resolves.toBe(true)
+    session.setInputEnabled(false)
+    await expect(session.selectInputDevice('mic-2')).resolves.toBe(true)
+
+    expect(pc.sender.replaceTrack).toHaveBeenCalledWith(secondTrack)
+    expect(secondTrack.enabled).toBe(false)
+    expect(firstStop).toHaveBeenCalled()
+    expect(firstStop.mock.invocationCallOrder[0]).toBeGreaterThan(
+      pc.sender.replaceTrack.mock.invocationCallOrder[0] ?? 0,
+    )
+    expect(session.selectedInputDeviceID.value).toBe('mic-2')
+    expect(localStorage.getItem('sigmo:call-audio-input-device')).toBe('mic-2')
+  })
+
+  it('keeps the previous microphone when replaceTrack fails', async () => {
+    const pc = new FakePeerConnection()
+    const firstStop = vi.fn()
+    const secondStop = vi.fn()
+    const firstTrack = fakeTrack(firstStop)
+    pc.sender.replaceTrack.mockRejectedValueOnce(new Error('replace failed'))
+    const getUserMedia = vi
+      .fn()
+      .mockResolvedValueOnce(fakeStream([firstTrack]))
+      .mockResolvedValueOnce(fakeStream([fakeTrack(secondStop)]))
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia,
+        createPeerConnection: () => pc as unknown as RTCPeerConnection,
+      },
+    })
+
+    await expect(session.start('call-1')).resolves.toBe(true)
+    await expect(session.selectInputDevice('mic-2')).resolves.toBe(false)
+    session.setInputEnabled(false)
+
+    expect(firstStop).not.toHaveBeenCalled()
+    expect(secondStop).toHaveBeenCalled()
+    expect(firstTrack.enabled).toBe(false)
+    expect(session.selectedInputDeviceID.value).toBe('')
+    expect(session.deviceNotice.value).toBe('input_switch_failed')
+  })
+
+  it('stops a microphone switch that finishes after the audio session closes', async () => {
+    const capture = deferredStream()
+    const nextStop = vi.fn()
+    const getUserMedia = vi
+      .fn()
+      .mockResolvedValueOnce(fakeStream([fakeTrack()]))
+      .mockReturnValueOnce(capture.promise)
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: { getUserMedia },
+    })
+
+    await session.prepare()
+    const switched = session.selectInputDevice('mic-2')
+    session.stop()
+    capture.resolve(fakeStream([fakeTrack(nextStop)]))
+
+    await expect(switched).resolves.toBe(false)
+    expect(nextStop).toHaveBeenCalled()
+    expect(session.selectedInputDeviceID.value).toBe('')
+  })
+
+  it('applies and persists the selected audio output', async () => {
+    const setSinkId = vi.fn(async () => {})
+    const session = useCallAudioSession(ref('modem-1'))
+    const audio = { setSinkId } as unknown as HTMLAudioElement
+
+    await expect(session.bindOutputElement(audio)).resolves.toBe(true)
+    await expect(session.selectOutputDevice('speaker-1')).resolves.toBe(true)
+
+    expect(session.outputSelectionSupported.value).toBe(true)
+    expect(setSinkId).toHaveBeenCalledWith('speaker-1')
+    expect(session.selectedOutputDeviceID.value).toBe('speaker-1')
+    expect(localStorage.getItem('sigmo:call-audio-output-device')).toBe('speaker-1')
+  })
+
+  it('keeps the previous output when setSinkId fails', async () => {
+    const setSinkId = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new DOMException('blocked', 'NotAllowedError'))
+    const session = useCallAudioSession(ref('modem-1'))
+
+    await session.bindOutputElement({ setSinkId } as unknown as HTMLAudioElement)
+    await expect(session.selectOutputDevice('speaker-1')).resolves.toBe(true)
+    await expect(session.selectOutputDevice('speaker-2')).resolves.toBe(false)
+
+    expect(session.selectedOutputDeviceID.value).toBe('speaker-1')
+    expect(session.deviceNotice.value).toBe('output_switch_failed')
+    expect(localStorage.getItem('sigmo:call-audio-output-device')).toBe('speaker-1')
+  })
+
+  it('falls back to the system output when a saved device disappears', async () => {
+    localStorage.setItem('sigmo:call-audio-output-device', 'speaker-missing')
+    const setSinkId = vi.fn(async () => {})
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        enumerateDevices: vi.fn(async () => [
+          fakeDevice('speaker-current', 'audiooutput', 'Current speaker'),
+        ]),
+      },
+    })
+
+    await session.bindOutputElement({ setSinkId } as unknown as HTMLAudioElement)
+    await session.refreshDevices()
+
+    expect(setSinkId).toHaveBeenNthCalledWith(1, 'speaker-missing')
+    expect(setSinkId).toHaveBeenNthCalledWith(2, '')
+    expect(session.selectedOutputDeviceID.value).toBe('')
+    expect(session.deviceNotice.value).toBe('device_fallback')
+    expect(localStorage.getItem('sigmo:call-audio-output-device')).toBeNull()
   })
 
   it('reuses pending microphone preparation when a call starts', async () => {

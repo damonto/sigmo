@@ -171,6 +171,10 @@ func AddAddress(interfaceName string, prefix netip.Prefix) error {
 	return changeAddress(unix.RTM_NEWADDR, unix.NLM_F_CREATE|unix.NLM_F_REPLACE, interfaceName, prefix)
 }
 
+func AddPointToPointAddress(interfaceName string, local, peer netip.Addr) error {
+	return changePointToPointAddress(unix.RTM_NEWADDR, unix.NLM_F_CREATE|unix.NLM_F_REPLACE, interfaceName, local, peer)
+}
+
 func FlushAddresses(interfaceName string) error {
 	return flushAddresses(interfaceName, func(netip.Addr) bool { return true })
 }
@@ -224,6 +228,14 @@ func FlushDefaultRoutes(interfaceName string) error {
 
 func DeleteAddress(interfaceName string, prefix netip.Prefix) error {
 	err := changeAddress(unix.RTM_DELADDR, 0, interfaceName, prefix)
+	if errors.Is(err, unix.EADDRNOTAVAIL) || errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESRCH) {
+		return nil
+	}
+	return err
+}
+
+func DeletePointToPointAddress(interfaceName string, local, peer netip.Addr) error {
+	err := changePointToPointAddress(unix.RTM_DELADDR, 0, interfaceName, local, peer)
 	if errors.Is(err, unix.EADDRNOTAVAIL) || errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESRCH) {
 		return nil
 	}
@@ -294,6 +306,48 @@ func changeAddress(msgType uint16, flags uint16, interfaceName string, prefix ne
 	msg = appendAttr(msg, unix.IFA_ADDRESS, raw)
 
 	return send(msgType, unix.NLM_F_REQUEST|unix.NLM_F_ACK|flags, msg)
+}
+
+func changePointToPointAddress(msgType uint16, flags uint16, interfaceName string, local, peer netip.Addr) error {
+	ifi, err := net.InterfaceByName(interfaceName)
+	if err != nil {
+		return fmt.Errorf("find interface: %w", err)
+	}
+	msg, err := pointToPointAddressMessage(ifi.Index, local, peer)
+	if err != nil {
+		return err
+	}
+	return send(msgType, unix.NLM_F_REQUEST|unix.NLM_F_ACK|flags, msg)
+}
+
+func pointToPointAddressMessage(interfaceIndex int, local, peer netip.Addr) ([]byte, error) {
+	if !local.IsValid() || !peer.IsValid() {
+		return nil, errors.New("point-to-point address is invalid")
+	}
+	local = local.Unmap()
+	peer = peer.Unmap()
+	localFamily, localRaw, err := ipFamilyBytes(local)
+	if err != nil {
+		return nil, err
+	}
+	peerFamily, peerRaw, err := ipFamilyBytes(peer)
+	if err != nil {
+		return nil, err
+	}
+	if localFamily != peerFamily {
+		return nil, errors.New("point-to-point peer family does not match local address")
+	}
+
+	msg := make([]byte, unix.SizeofIfAddrmsg)
+	msg[0] = byte(localFamily)
+	msg[1] = byte(local.BitLen())
+	if localFamily == FamilyIPv6 {
+		msg[2] = unix.IFA_F_NODAD
+	}
+	binary.NativeEndian.PutUint32(msg[4:8], uint32(interfaceIndex))
+	msg = appendAttr(msg, unix.IFA_LOCAL, localRaw)
+	msg = appendAttr(msg, unix.IFA_ADDRESS, peerRaw)
+	return msg, nil
 }
 
 func changeDefaultRoute(msgType uint16, flags uint16, route DefaultRoute) error {

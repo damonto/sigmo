@@ -57,6 +57,7 @@ const createModemCallSession = (
 
   const durationTick = ref(Date.now())
   const audioCallID = ref('')
+  const preparedIncomingCallID = ref('')
   let durationTimer: number | null = null
 
   const routeLabel = (value: string) => {
@@ -110,6 +111,7 @@ const createModemCallSession = (
 
   const isLocallyHeld = (call: CallRecord | null) => !!call && localHoldStates.has(call.hold)
   const isRemotelyHeld = (call: CallRecord | null) => !!call && remoteHoldStates.has(call.hold)
+  const usesBrowserAudio = (call: CallRecord | null) => !!call && imsMediaRoutes.has(call.route)
 
   const primaryLine = (call: CallRecord) =>
     formatPhoneDisplay(call.number, defaultCountry?.value) || t('modemDetail.phone.unknownNumber')
@@ -147,7 +149,18 @@ const createModemCallSession = (
 
   const audioMessage = computed(() => {
     if (callAudio.errorMessage.value) return callAudio.errorMessage.value
-    return ''
+    switch (callAudio.deviceNotice.value) {
+      case 'list_failed':
+        return t('modemDetail.phone.audioDevices.listFailed')
+      case 'input_switch_failed':
+        return t('modemDetail.phone.audioDevices.inputSwitchFailed')
+      case 'output_switch_failed':
+        return t('modemDetail.phone.audioDevices.outputSwitchFailed')
+      case 'device_fallback':
+        return t('modemDetail.phone.audioDevices.deviceFallback')
+      default:
+        return ''
+    }
   })
 
   const startDurationTimer = () => {
@@ -165,11 +178,36 @@ const createModemCallSession = (
   }
 
   const answerIncoming = async (call: CallRecord) => {
-    if (imsMediaRoutes.has(call.route)) {
+    if (usesBrowserAudio(call)) {
       const ready = await callAudio.prepare()
       if (!ready) return
+      preparedIncomingCallID.value = call.callID
+      if (phoneCalls.incomingCall.value?.callID !== call.callID) {
+        if (phoneCalls.activeCall.value?.callID !== call.callID) {
+          preparedIncomingCallID.value = ''
+          callAudio.stop()
+        }
+        return
+      }
     }
     await phoneCalls.answer(call)
+  }
+
+  const prepareAudioDevices = async (call: CallRecord) => {
+    if (!usesBrowserAudio(call)) return false
+    const ready = await callAudio.prepare()
+    if (!ready) return false
+    const callStillExists =
+      phoneCalls.incomingCall.value?.callID === call.callID ||
+      phoneCalls.activeCall.value?.callID === call.callID
+    if (!callStillExists) {
+      callAudio.stop()
+      return false
+    }
+    if (call.direction === 'incoming') {
+      preparedIncomingCallID.value = call.callID
+    }
+    return true
   }
 
   const toggleHold = async (call: CallRecord) => {
@@ -179,6 +217,7 @@ const createModemCallSession = (
   watch(
     phoneCalls.activeCall,
     (call) => {
+      let audioStopped = false
       if (call?.answeredAt && liveDurationStates.has(call.state)) {
         startDurationTimer()
       } else {
@@ -186,7 +225,9 @@ const createModemCallSession = (
       }
 
       if (call && mediaSessionStates.has(call.state) && imsMediaRoutes.has(call.route)) {
-        callAudio.setInputEnabled(!localHoldStates.has(call.hold) && !remoteHoldStates.has(call.hold))
+        callAudio.setInputEnabled(
+          !localHoldStates.has(call.hold) && !remoteHoldStates.has(call.hold),
+        )
         if (audioCallID.value === call.callID) return
         audioCallID.value = call.callID
         void Promise.resolve(callAudio.start(call.callID)).then(() => {
@@ -201,10 +242,26 @@ const createModemCallSession = (
       if (audioCallID.value) {
         audioCallID.value = ''
         callAudio.stop()
+        audioStopped = true
+      }
+      if (preparedIncomingCallID.value && (!call || call.callID !== preparedIncomingCallID.value)) {
+        preparedIncomingCallID.value = ''
+        if (!audioStopped) callAudio.stop()
       }
     },
     { immediate: true },
   )
+
+  watch(phoneCalls.incomingCall, (call, previous) => {
+    if (!previous || previous.callID !== preparedIncomingCallID.value) return
+    if (call?.callID === previous.callID) return
+    queueMicrotask(() => {
+      if (preparedIncomingCallID.value !== previous.callID) return
+      if (phoneCalls.activeCall.value?.callID === previous.callID) return
+      preparedIncomingCallID.value = ''
+      callAudio.stop()
+    })
+  })
 
   onBeforeUnmount(stopDurationTimer)
 
@@ -216,11 +273,13 @@ const createModemCallSession = (
     holdLabel,
     isLocallyHeld,
     isRemotelyHeld,
+    usesBrowserAudio,
     primaryLine,
     callDurationLabel,
     activeCallDurationLabel,
     audioMessage,
     answerIncoming,
+    prepareAudioDevices,
     toggleHold,
     setSearchQuery,
     terminalStates,

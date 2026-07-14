@@ -23,10 +23,20 @@ watch(
 
 const callSession = provideModemCallSession(modemId, phoneCountry)
 const remoteAudioRef = ref<HTMLAudioElement | null>(null)
+let boundRemoteAudio: HTMLAudioElement | null = null
+let outputBinding = Promise.resolve(true)
+
+const bindRemoteAudio = (audio: HTMLAudioElement | null) => {
+  if (boundRemoteAudio === audio) return outputBinding
+  boundRemoteAudio = audio
+  outputBinding = callSession.callAudio.bindOutputElement(audio)
+  return outputBinding
+}
 
 const syncRemoteAudio = async (stream: MediaStream | null) => {
   const audio = remoteAudioRef.value
   if (!audio) return
+  await bindRemoteAudio(audio)
   if (audio.srcObject !== stream) {
     audio.srcObject = stream
   }
@@ -40,6 +50,14 @@ const syncRemoteAudio = async (stream: MediaStream | null) => {
     console.warn('[ModemCallProvider] play remote call audio:', err)
   }
 }
+
+watch(
+  remoteAudioRef,
+  (audio) => {
+    void bindRemoteAudio(audio)
+  },
+  { flush: 'post' },
+)
 
 watch(
   callSession.callAudio.remoteStream,
