@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	imsvoice "github.com/damonto/ims-go/ims/voice"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	pims "github.com/damonto/sigmo/pro/ims"
@@ -87,20 +88,8 @@ type UpdateRequest struct {
 	Hold   string
 }
 
-type MediaInfo struct {
-	Codec           string
-	PayloadType     int
-	ClockRate       int
-	Channels        int
-	OctetAlign      bool
-	HFOnly          bool
-	DTMFPayloadType int
-	DTMFClockRate   int
-	PTimeMillis     int
-}
-
 type MediaSession interface {
-	Info() MediaInfo
+	Media() imsvoice.NegotiatedMedia
 	ReadPacket(context.Context) ([]byte, error)
 	WritePacket(context.Context, []byte) error
 }

@@ -17,7 +17,7 @@ replace github.com/damonto/sigmo => ..
 - **eSIM Quick Transfer** (`esim_transfer`): Transfers supported physical SIM or eSIM lines from another modem or CCID reader to the target eUICC through TS.43 carrier flows.
 - **IMS access** (`ims`): Adds Sigmo-managed VoWiFi and VoLTE SMS, USSD, call control, WebRTC media, and carrier websheet flows.
 - **Websheets** (`esim_transfer` or `ims`): Pro-owned carrier websheet proxy routes.
-- **Voice codecs** (`ims`): Pro-owned AMR/PCMU codec support used by IMS media.
+- **Voice media** (`ims`): Bridges browser WebRTC audio to the codecs provided by `ims-go`.
 
 ## Structure
 

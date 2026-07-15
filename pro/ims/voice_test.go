@@ -596,16 +596,16 @@ func TestFinishFailedPendingVoiceDialConsumesPendingWithoutEvent(t *testing.T) {
 	}
 }
 
-func TestBrowserVoiceMediaOfferUsesFullDuplexCodec(t *testing.T) {
+func TestVoiceBridgeMediaOfferUsesFullDuplexCodec(t *testing.T) {
 	tests := []struct {
 		name string
 		want []imsvoice.AudioCodec
 	}{
-		{name: "browser codecs", want: []imsvoice.AudioCodec{imsvoice.CodecEVS, imsvoice.CodecAMRWB, imsvoice.CodecAMR, imsvoice.CodecPCMU}},
+		{name: "bridge codecs", want: []imsvoice.AudioCodec{imsvoice.CodecEVS, imsvoice.CodecAMRWB, imsvoice.CodecAMR, imsvoice.CodecPCMU}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			offer := browserVoiceMediaOffer()
+			offer := voiceBridgeMediaOffer()
 			if !slices.Equal(offer.Codecs, tt.want) {
 				t.Fatalf("Codecs = %v, want %v", offer.Codecs, tt.want)
 			}
@@ -613,15 +613,15 @@ func TestBrowserVoiceMediaOfferUsesFullDuplexCodec(t *testing.T) {
 	}
 }
 
-func TestBrowserVoiceConfigUsesFullDuplexCodec(t *testing.T) {
+func TestVoiceBridgeConfigUsesFullDuplexCodec(t *testing.T) {
 	tests := []struct {
 		name       string
 		wantCodecs []imsvoice.AudioCodecConfig
 	}{
 		{
-			name: "browser codecs with dtmf",
+			name: "bridge codecs with dtmf",
 			wantCodecs: []imsvoice.AudioCodecConfig{
-				{Name: imsvoice.CodecEVS, PayloadTypes: []int{127}, ClockRate: 16000, Bitrate: "5.9-13.2", Bandwidth: "nb-swb"},
+				{Name: imsvoice.CodecEVS, PayloadTypes: []int{127}, ClockRate: 16000, Bitrate: "5.9-13.2", Bandwidth: "nb-wb"},
 				{Name: imsvoice.CodecAMRWB, PayloadTypes: []int{104}, ClockRate: 16000},
 				{Name: imsvoice.CodecAMR, PayloadTypes: []int{102}, ClockRate: 8000, ModeSet: "0,2,4,7"},
 				{Name: imsvoice.CodecTelephoneEvent, PayloadTypes: []int{101}, ClockRate: 8000},
@@ -631,7 +631,7 @@ func TestBrowserVoiceConfigUsesFullDuplexCodec(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := browserVoiceConfig()
+			cfg := voiceBridgeConfig()
 			if cfg.PTime != 20*time.Millisecond || cfg.MaxPTime != 240*time.Millisecond {
 				t.Fatalf("timing = ptime %v maxptime %v, want 20ms/240ms", cfg.PTime, cfg.MaxPTime)
 			}
@@ -670,29 +670,60 @@ func TestIsSupportedCallMediaCodec(t *testing.T) {
 	}
 }
 
-func TestCallMediaSessionInfoIncludesPayloadFormat(t *testing.T) {
-	session := callMediaSession{
-		media: imsvoice.NegotiatedMedia{
-			Codec:           imsvoice.CodecAMR,
-			PayloadType:     102,
-			ClockRate:       8000,
-			Channels:        1,
-			OctetAlign:      false,
-			HFOnly:          true,
-			DTMFPayloadType: 101,
-			DTMFClockRate:   8000,
-			PTime:           20 * time.Millisecond,
+func TestAnswerMediaOfferSelectsExactRemoteFormat(t *testing.T) {
+	tests := []struct {
+		name        string
+		formats     []imsvoice.AudioFormat
+		wantCodecs  []imsvoice.AudioCodec
+		wantPayload []int
+	}{
+		{
+			name: "local preference wins",
+			formats: []imsvoice.AudioFormat{
+				{Codec: imsvoice.CodecPCMU, PayloadType: 0, ClockRate: 8000, Channels: 1},
+				{Codec: imsvoice.CodecAMR, PayloadType: 98, ClockRate: 8000, Channels: 1, ModeSet: "2,4"},
+			},
+			wantCodecs:  []imsvoice.AudioCodec{imsvoice.CodecAMR},
+			wantPayload: []int{98},
+		},
+		{
+			name: "exact duplicate codec payload",
+			formats: []imsvoice.AudioFormat{
+				{Codec: imsvoice.CodecEVS, PayloadType: 126, ClockRate: 16000, Channels: 1, Bitrate: "5.9-9.6", Bandwidth: "nb-wb"},
+				{Codec: imsvoice.CodecEVS, PayloadType: 127, ClockRate: 16000, Channels: 1, Bitrate: "13.2", Bandwidth: "wb"},
+			},
+			wantCodecs:  []imsvoice.AudioCodec{imsvoice.CodecEVS},
+			wantPayload: []int{126},
+		},
+		{
+			name: "skips incompatible EVS format",
+			formats: []imsvoice.AudioFormat{
+				{Codec: imsvoice.CodecEVS, PayloadType: 126, ClockRate: 16000, Channels: 1, Bitrate: "24.4", Bandwidth: "swb"},
+				{Codec: imsvoice.CodecEVS, PayloadType: 127, ClockRate: 16000, Channels: 1, Bitrate: "9.6-13.2", Bandwidth: "wb"},
+			},
+			wantCodecs:  []imsvoice.AudioCodec{imsvoice.CodecEVS},
+			wantPayload: []int{127},
+		},
+		{
+			name:        "missing description falls back to outgoing offer",
+			wantCodecs:  []imsvoice.AudioCodec{imsvoice.CodecEVS, imsvoice.CodecAMRWB, imsvoice.CodecAMR, imsvoice.CodecPCMU},
+			wantPayload: nil,
 		},
 	}
 
-	info := session.Info()
-	if info.Codec != string(imsvoice.CodecAMR) || info.PayloadType != 102 || info.ClockRate != 8000 {
-		t.Fatalf("Info() = %+v, want AMR payload 102 clock 8000", info)
-	}
-	if info.OctetAlign {
-		t.Fatal("Info().OctetAlign = true, want false for bandwidth-efficient AMR")
-	}
-	if !info.HFOnly {
-		t.Fatal("Info().HFOnly = false, want true")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &coordinator{sessions: map[string]*sessionState{
+				"modem-1": {
+					calls: map[string]*voiceCallState{
+						"call-1": {offer: imsvoice.MediaDescription{Formats: tt.formats}},
+					},
+				},
+			}}
+			got := c.answerMediaOffer("modem-1", "call-1")
+			if !slices.Equal(got.Codecs, tt.wantCodecs) || !slices.Equal(got.PayloadTypes, tt.wantPayload) {
+				t.Fatalf("answerMediaOffer() = codecs %v payloads %v, want %v/%v", got.Codecs, got.PayloadTypes, tt.wantCodecs, tt.wantPayload)
+			}
+		})
 	}
 }

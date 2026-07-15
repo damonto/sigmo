@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	imsvoice "github.com/damonto/ims-go/ims/voice"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	pims "github.com/damonto/sigmo/pro/ims"
@@ -71,19 +72,8 @@ type imsMediaSession struct {
 	session pims.MediaSession
 }
 
-func (s imsMediaSession) Info() MediaInfo {
-	info := s.session.Info()
-	return MediaInfo{
-		Codec:           info.Codec,
-		PayloadType:     info.PayloadType,
-		ClockRate:       info.ClockRate,
-		Channels:        info.Channels,
-		OctetAlign:      info.OctetAlign,
-		HFOnly:          info.HFOnly,
-		DTMFPayloadType: info.DTMFPayloadType,
-		DTMFClockRate:   info.DTMFClockRate,
-		PTimeMillis:     info.PTimeMillis,
-	}
+func (s imsMediaSession) Media() imsvoice.NegotiatedMedia {
+	return s.session.Media()
 }
 
 func (s imsMediaSession) ReadPacket(ctx context.Context) ([]byte, error) {

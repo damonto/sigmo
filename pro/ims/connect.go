@@ -381,7 +381,7 @@ func modemClientConfigForIMEI(imei string, access Access, imsProfileIndex uint8)
 		Access:   accessConfig,
 		IMS: imsgo.IMSConfig{
 			SMSDeliveryReportTimeout: smsDeliveryReportTimeout(),
-			Voice:                    browserVoiceConfig(),
+			Voice:                    voiceBridgeConfig(),
 		},
 	}
 }

@@ -20,6 +20,7 @@ import (
 
 type voiceCallState struct {
 	call      *imsvoice.Call
+	offer     imsvoice.MediaDescription
 	info      VoiceCall
 	updatedAt time.Time
 }
@@ -51,7 +52,7 @@ func (c *coordinator) DialCall(ctx context.Context, modem *mmodem.Modem, to stri
 	}
 	pending := c.setPendingVoiceDial(modem.EquipmentIdentifier, profileID, to)
 	defer c.clearPendingVoiceDial(modem.EquipmentIdentifier, pending)
-	call, err := client.Voice().Dial(ctx, imsvoice.DialRequest{To: to, Media: browserVoiceMediaOffer()})
+	call, err := client.Voice().Dial(ctx, imsvoice.DialRequest{To: to, Media: voiceBridgeMediaOffer()})
 	if err != nil {
 		err = normalizeVoiceError(c.handleClientDisconnected(modem.EquipmentIdentifier, client, err))
 		if errors.Is(err, ErrNotConnected) {
@@ -193,13 +194,13 @@ func samePendingVoiceDial(call VoiceCall, pending pendingVoiceDial) bool {
 		call.StartedAt.Equal(pending.startedAt)
 }
 
-func browserVoiceMediaOffer() imsvoice.MediaOffer {
+func voiceBridgeMediaOffer() imsvoice.MediaOffer {
 	return imsvoice.MediaOffer{
 		Codecs: []imsvoice.AudioCodec{imsvoice.CodecEVS, imsvoice.CodecAMRWB, imsvoice.CodecAMR, imsvoice.CodecPCMU},
 	}
 }
 
-func browserVoiceConfig() imsvoice.Config {
+func voiceBridgeConfig() imsvoice.Config {
 	return imsvoice.Config{
 		Codecs: []imsvoice.AudioCodecConfig{
 			{
@@ -207,7 +208,7 @@ func browserVoiceConfig() imsvoice.Config {
 				PayloadTypes: []int{127},
 				ClockRate:    16000,
 				Bitrate:      "5.9-13.2",
-				Bandwidth:    "nb-swb",
+				Bandwidth:    "nb-wb",
 			},
 			{
 				Name:         imsvoice.CodecAMRWB,
@@ -241,7 +242,7 @@ func (c *coordinator) AnswerCall(ctx context.Context, modem *mmodem.Modem, callI
 	if err != nil {
 		return VoiceCall{}, err
 	}
-	if err := call.Answer(ctx, browserVoiceMediaOffer()); err != nil {
+	if err := call.Answer(ctx, c.answerMediaOffer(modem.EquipmentIdentifier, callID)); err != nil {
 		return VoiceCall{}, normalizeVoiceError(c.handleClientDisconnected(modem.EquipmentIdentifier, client, err))
 	}
 	info, _ = advanceVoiceCall(info, voiceCallTransition{
@@ -348,10 +349,10 @@ func (c *coordinator) OpenCallMedia(ctx context.Context, modem *mmodem.Modem, ca
 		return nil, err
 	}
 	media := call.Media()
-	if !isSupportedCallMediaCodec(media.Codec) {
+	if !media.Negotiated || !isSupportedCallMediaCodec(media.Codec) {
 		return nil, ErrUnsupportedCodec
 	}
-	return callMediaSession{call: call, media: media}, nil
+	return callMediaSession{call: call}, nil
 }
 
 func isSupportedCallMediaCodec(codec imsvoice.AudioCodec) bool {
@@ -391,22 +392,11 @@ func normalizeVoiceError(err error) error {
 }
 
 type callMediaSession struct {
-	call  *imsvoice.Call
-	media imsvoice.NegotiatedMedia
+	call *imsvoice.Call
 }
 
-func (s callMediaSession) Info() MediaInfo {
-	return MediaInfo{
-		Codec:           string(s.media.Codec),
-		PayloadType:     s.media.PayloadType,
-		ClockRate:       s.media.ClockRate,
-		Channels:        s.media.Channels,
-		OctetAlign:      s.media.OctetAlign,
-		HFOnly:          s.media.HFOnly,
-		DTMFPayloadType: s.media.DTMFPayloadType,
-		DTMFClockRate:   s.media.DTMFClockRate,
-		PTimeMillis:     int(s.media.PTime / time.Millisecond),
-	}
+func (s callMediaSession) Media() imsvoice.NegotiatedMedia {
+	return s.call.Media()
 }
 
 func (s callMediaSession) ReadPacket(ctx context.Context) ([]byte, error) {
@@ -596,6 +586,7 @@ func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string,
 	if !ok {
 		return
 	}
+	c.storeIncomingVoiceOffer(modem.EquipmentIdentifier, sessionID, incoming.Call.ID(), incoming.Offer)
 	info.Hold = voiceHoldState(incoming.Call)
 	if !incoming.ReceivedAt.IsZero() {
 		info.StartedAt = incoming.ReceivedAt
@@ -603,6 +594,48 @@ func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string,
 		c.updateVoiceCallForSession(modem.EquipmentIdentifier, sessionID, info.ID, info)
 	}
 	c.publishVoiceEvent(info)
+}
+
+func (c *coordinator) storeIncomingVoiceOffer(modemID string, sessionID uint64, callID string, offer imsvoice.MediaDescription) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	session := c.sessions[modemID]
+	if !sameSession(session, sessionID) || session.calls == nil {
+		return
+	}
+	if state := session.calls[callID]; state != nil {
+		state.offer = offer
+	}
+}
+
+func (c *coordinator) answerMediaOffer(modemID string, callID string) imsvoice.MediaOffer {
+	c.mu.Lock()
+	state := c.sessions[modemID]
+	var description imsvoice.MediaDescription
+	if state != nil && state.calls != nil && state.calls[callID] != nil {
+		description = state.calls[callID].offer
+	}
+	c.mu.Unlock()
+
+	preferred := voiceBridgeMediaOffer()
+	configured := voiceBridgeConfig().Codecs
+	for _, codec := range preferred.Codecs {
+		for _, format := range description.Formats {
+			if format.Codec != codec {
+				continue
+			}
+			for _, local := range configured {
+				if local.Name != codec || !imsvoice.AudioFormatCompatible(local, format) {
+					continue
+				}
+				return imsvoice.MediaOffer{
+					Codecs:       []imsvoice.AudioCodec{codec},
+					PayloadTypes: []int{format.PayloadType},
+				}
+			}
+		}
+	}
+	return preferred
 }
 
 func (c *coordinator) forwardCallEvent(modemID string, sessionID uint64, event imsgo.CallEvent) {

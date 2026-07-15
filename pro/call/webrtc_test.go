@@ -4,9 +4,12 @@ package call
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	imsvoice "github.com/damonto/ims-go/ims/voice"
+	"github.com/damonto/ims-go/ims/voice/codec/evs"
+	"github.com/damonto/ims-go/ims/voice/codec/pcmu"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 
@@ -124,27 +127,156 @@ func TestEVSRTPWriterDoesNotAdvanceBeforeWrite(t *testing.T) {
 func TestMediaBridgeCodec(t *testing.T) {
 	tests := []struct {
 		name     string
-		info     MediaInfo
+		media    imsvoice.NegotiatedMedia
 		wantAMR  voicecodec.AMRCodec
 		wantEVS  bool
 		wantPCMU bool
 		wantErr  error
 	}{
-		{name: "amr", info: MediaInfo{Codec: "AMR"}, wantAMR: voicecodec.CodecAMR},
-		{name: "amr wb", info: MediaInfo{Codec: "AMR-WB"}, wantAMR: voicecodec.CodecAMRWB},
-		{name: "evs", info: MediaInfo{Codec: "EVS"}, wantEVS: true},
-		{name: "pcmu", info: MediaInfo{Codec: "PCMU"}, wantPCMU: true},
-		{name: "unsupported", info: MediaInfo{Codec: "OPUS"}, wantErr: ErrUnsupportedCodec},
+		{name: "amr", media: negotiatedMedia(imsvoice.CodecAMR, 8000), wantAMR: voicecodec.CodecAMR},
+		{name: "amr wb", media: negotiatedMedia(imsvoice.CodecAMRWB, 16000), wantAMR: voicecodec.CodecAMRWB},
+		{name: "evs", media: negotiatedMedia(imsvoice.CodecEVS, 16000), wantEVS: true},
+		{name: "pcmu", media: negotiatedMedia(imsvoice.CodecPCMU, 8000), wantPCMU: true},
+		{name: "unsupported", media: negotiatedMedia("OPUS", 48000), wantErr: ErrUnsupportedCodec},
+		{
+			name: "mismatched remote clock",
+			media: imsvoice.NegotiatedMedia{
+				AudioFormat:  imsvoice.AudioFormat{Codec: imsvoice.CodecAMR, ClockRate: 8000, Channels: 1},
+				RemoteFormat: imsvoice.AudioFormat{Codec: imsvoice.CodecAMR, ClockRate: 16000, Channels: 1},
+				Negotiated:   true,
+			},
+			wantErr: ErrUnsupportedCodec,
+		},
+		{name: "not negotiated", media: imsvoice.NegotiatedMedia{}, wantErr: ErrUnsupportedCodec},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := mediaBridgeCodec(tt.info)
+			got, err := mediaBridgeCodec(tt.media)
 			if err != tt.wantErr {
 				t.Fatalf("mediaBridgeCodec() error = %v, want %v", err, tt.wantErr)
 			}
 			if got.amr != tt.wantAMR || got.evs != tt.wantEVS || got.pcmu != tt.wantPCMU {
 				t.Fatalf("mediaBridgeCodec() = %+v, want amr %q evs %v pcmu %v", got, tt.wantAMR, tt.wantEVS, tt.wantPCMU)
+			}
+		})
+	}
+}
+
+func negotiatedMedia(codec imsvoice.AudioCodec, clockRate int) imsvoice.NegotiatedMedia {
+	format := imsvoice.AudioFormat{Codec: codec, ClockRate: clockRate, Channels: 1}
+	return imsvoice.NegotiatedMedia{
+		AudioFormat:  format,
+		RemoteFormat: format,
+		Negotiated:   true,
+	}
+}
+
+func TestMediaAudioFormatsPreservesAsymmetricFMTP(t *testing.T) {
+	tests := []struct {
+		name       string
+		media      imsvoice.NegotiatedMedia
+		wantLocal  imsvoice.AudioFormat
+		wantRemote imsvoice.AudioFormat
+	}{
+		{
+			name: "amr packetization differs by direction",
+			media: imsvoice.NegotiatedMedia{
+				AudioFormat:  imsvoice.AudioFormat{Codec: imsvoice.CodecAMR, PayloadType: 102, OctetAlign: false},
+				RemoteFormat: imsvoice.AudioFormat{Codec: imsvoice.CodecAMR, PayloadType: 98, OctetAlign: true},
+			},
+			wantLocal:  imsvoice.AudioFormat{Codec: imsvoice.CodecAMR, PayloadType: 102, OctetAlign: false},
+			wantRemote: imsvoice.AudioFormat{Codec: imsvoice.CodecAMR, PayloadType: 98, OctetAlign: true},
+		},
+		{
+			name: "evs header mode differs by direction",
+			media: imsvoice.NegotiatedMedia{
+				AudioFormat:  imsvoice.AudioFormat{Codec: imsvoice.CodecEVS, PayloadType: 127, HFOnly: true},
+				RemoteFormat: imsvoice.AudioFormat{Codec: imsvoice.CodecEVS, PayloadType: 126, HFOnly: false},
+			},
+			wantLocal:  imsvoice.AudioFormat{Codec: imsvoice.CodecEVS, PayloadType: 127, HFOnly: true},
+			wantRemote: imsvoice.AudioFormat{Codec: imsvoice.CodecEVS, PayloadType: 126, HFOnly: false},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			local, remote := mediaAudioFormats(tt.media)
+			if local != tt.wantLocal || remote != tt.wantRemote {
+				t.Fatalf("mediaAudioFormats() = local %+v remote %+v, want %+v/%+v", local, remote, tt.wantLocal, tt.wantRemote)
+			}
+		})
+	}
+}
+
+func TestAMREncoderModeUsesNegotiatedModeSet(t *testing.T) {
+	tests := []struct {
+		name    string
+		codec   voicecodec.AMRCodec
+		modeSet string
+		want    int
+		wantErr error
+	}{
+		{name: "amr default", codec: voicecodec.CodecAMR, want: 7},
+		{name: "amr negotiated subset", codec: voicecodec.CodecAMR, modeSet: "0,2,4", want: 4},
+		{name: "amr wb default", codec: voicecodec.CodecAMRWB, want: 8},
+		{name: "amr wb negotiated subset", codec: voicecodec.CodecAMRWB, modeSet: "0,1,5", want: 5},
+		{name: "out of range", codec: voicecodec.CodecAMR, modeSet: "8", wantErr: ErrUnsupportedCodec},
+		{name: "invalid", codec: voicecodec.CodecAMR, modeSet: "0,x", wantErr: ErrUnsupportedCodec},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := amrEncoderMode(tt.codec, tt.modeSet)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("amrEncoderMode() error = %v, want %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("amrEncoderMode() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEVSEncoderConfigUsesNegotiatedFormat(t *testing.T) {
+	channelAware := 2
+	tests := []struct {
+		name    string
+		format  imsvoice.AudioFormat
+		want    evs.EncoderConfig
+		wantErr error
+	}{
+		{
+			name:   "defaults",
+			format: imsvoice.AudioFormat{},
+			want:   evs.EncoderConfig{Bitrate: 13200, Bandwidth: evs.BandwidthWB},
+		},
+		{
+			name:   "highest supported bitrate and bandwidth",
+			format: imsvoice.AudioFormat{Bitrate: "5.9-9.6", Bandwidth: "nb-swb"},
+			want:   evs.EncoderConfig{Bitrate: 9600, Bandwidth: evs.BandwidthWB},
+		},
+		{
+			name:   "channel aware",
+			format: imsvoice.AudioFormat{Bitrate: "13.2", Bandwidth: "wb", ChAwRecv: &channelAware},
+			want: evs.EncoderConfig{
+				Bitrate:   13200,
+				Bandwidth: evs.BandwidthWB,
+				RF:        evs.RFConfig{Offset: 2, Indicator: 1},
+			},
+		},
+		{name: "unsupported bitrate", format: imsvoice.AudioFormat{Bitrate: "24.4"}, wantErr: ErrUnsupportedCodec},
+		{name: "unsupported bandwidth", format: imsvoice.AudioFormat{Bandwidth: "swb-fb"}, wantErr: ErrUnsupportedCodec},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := evsEncoderConfig(tt.format)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("evsEncoderConfig() error = %v, want %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("evsEncoderConfig() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
@@ -240,13 +372,13 @@ func TestPCMUDownlinkRewriterRepairsTimestampGaps(t *testing.T) {
 		{
 			name:         "single missing frame",
 			inTimestamps: []uint32{1000, 1320},
-			wantPayloads: [][]byte{payload(1, 160), payload(pcmuSilenceByte, 160), payload(2, 160)},
+			wantPayloads: [][]byte{payload(1, 160), payload(pcmu.Silence, 160), payload(2, 160)},
 			wantTS:       []uint32{tsBase, tsBase + 160, tsBase + 320},
 		},
 		{
 			name:         "multiple missing frames",
 			inTimestamps: []uint32{1000, 1480},
-			wantPayloads: [][]byte{payload(1, 160), payload(pcmuSilenceByte, 160), payload(pcmuSilenceByte, 160), payload(2, 160)},
+			wantPayloads: [][]byte{payload(1, 160), payload(pcmu.Silence, 160), payload(pcmu.Silence, 160), payload(2, 160)},
 			wantTS:       []uint32{tsBase, tsBase + 160, tsBase + 320, tsBase + 480},
 		},
 		{

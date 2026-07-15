@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,8 @@ import (
 	"github.com/pion/webrtc/v4"
 
 	imsvoice "github.com/damonto/ims-go/ims/voice"
+	"github.com/damonto/ims-go/ims/voice/codec/evs"
+	"github.com/damonto/ims-go/ims/voice/codec/pcmu"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	pims "github.com/damonto/sigmo/pro/ims"
 	"github.com/damonto/sigmo/pro/voicecodec"
@@ -28,9 +31,7 @@ import (
 
 const (
 	pcmuPayloadType             = 0
-	pcmuClockRate               = 8000
-	maxPCMUSilenceGapSamples    = pcmuClockRate
-	pcmuSilenceByte             = 0xff
+	maxPCMUSilenceGapSamples    = pcmu.SampleRate
 	webRTCUDPPortMin            = 40000
 	webRTCUDPPortMax            = 40100
 	webRTCDisconnectedGraceTime = 5 * time.Second
@@ -81,7 +82,7 @@ func (m *Media) OpenWebRTCSession(ctx context.Context, modem *mmodem.Modem, call
 	if err != nil {
 		return nil, err
 	}
-	codec, err := mediaBridgeCodec(media.Info())
+	codec, err := mediaBridgeCodec(media.Media())
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +184,6 @@ func (m *Media) Close(ctx context.Context) error {
 
 type webRTCBridge struct {
 	media MediaSession
-	info  MediaInfo
 	pc    *webrtc.PeerConnection
 	track *webrtc.TrackLocalStaticRTP
 	codec bridgeCodec
@@ -225,12 +225,11 @@ const (
 )
 
 func newWebRTCBridge(ctx context.Context, media MediaSession, codec bridgeCodec, engine *voicecodec.Engine, iceServers []webrtc.ICEServer) (*webRTCBridge, error) {
-	info := media.Info()
 	mediaEngine := &webrtc.MediaEngine{}
 	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{
 			MimeType:  webrtc.MimeTypePCMU,
-			ClockRate: pcmuClockRate,
+			ClockRate: pcmu.SampleRate,
 			Channels:  1,
 		},
 		PayloadType: pcmuPayloadType,
@@ -268,7 +267,7 @@ func newWebRTCBridge(ctx context.Context, media MediaSession, codec bridgeCodec,
 		return nil, fmt.Errorf("create WebRTC peer connection: %w", err)
 	}
 	track, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypePCMU, ClockRate: pcmuClockRate, Channels: 1},
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypePCMU, ClockRate: pcmu.SampleRate, Channels: 1},
 		"audio",
 		"sigmo-call",
 	)
@@ -282,9 +281,15 @@ func newWebRTCBridge(ctx context.Context, media MediaSession, codec bridgeCodec,
 		return nil, fmt.Errorf("add WebRTC audio track: %w", err)
 	}
 	go drainRTCP(sender)
-	var evs *voicecodec.EVSTranscoder
+	var evsTranscoder *voicecodec.EVSTranscoder
 	if codec.evs {
-		evs, err = engine.NewEVSTranscoder(ctx)
+		local, _ := mediaAudioFormats(media.Media())
+		cfg, err := evsEncoderConfig(local)
+		if err != nil {
+			_ = pc.Close()
+			return nil, err
+		}
+		evsTranscoder, err = engine.NewEVSTranscoder(ctx, cfg)
 		if err != nil {
 			_ = pc.Close()
 			return nil, err
@@ -294,11 +299,10 @@ func newWebRTCBridge(ctx context.Context, media MediaSession, codec bridgeCodec,
 	bridgeCtx, cancel := context.WithCancel(context.Background())
 	bridge := &webRTCBridge{
 		media:    media,
-		info:     info,
 		pc:       pc,
 		track:    track,
 		codec:    codec,
-		evs:      evs,
+		evs:      evsTranscoder,
 		cancel:   cancel,
 		localICE: make(chan WebRTCICECandidate, 32),
 	}
@@ -505,7 +509,17 @@ func (b *webRTCBridge) runDownlink(ctx context.Context, codec bridgeCodec) {
 		b.runEVSDownlink(ctx)
 		return
 	}
-	amr, err := voicecodec.NewAMRTranscoder(ctx, codec.amr)
+	local, _, ok := b.formats(codec)
+	if !ok {
+		b.stop()
+		return
+	}
+	mode, err := amrEncoderMode(codec.amr, local.ModeSet)
+	if err != nil {
+		b.stop()
+		return
+	}
+	amr, err := voicecodec.NewAMRTranscoder(ctx, codec.amr, mode)
 	if err != nil {
 		b.stop()
 		return
@@ -525,11 +539,16 @@ func (b *webRTCBridge) runDownlink(ctx context.Context, codec bridgeCodec) {
 			b.stop()
 			return
 		}
+		_, remote, ok := b.formats(codec)
+		if !ok {
+			b.stop()
+			return
+		}
 		var inbound rtp.Packet
-		if err := inbound.Unmarshal(packet); err != nil || int(inbound.PayloadType) != b.info.PayloadType {
+		if err := inbound.Unmarshal(packet); err != nil || int(inbound.PayloadType) != remote.PayloadType {
 			continue
 		}
-		payload := voicecodec.AMRPayload{Codec: codec.amr, OctetAligned: b.info.OctetAlign}
+		payload := voicecodec.AMRPayload{Codec: codec.amr, OctetAligned: remote.OctetAlign}
 		if err := payload.UnmarshalBinary(inbound.Payload); err != nil {
 			continue
 		}
@@ -542,7 +561,7 @@ func (b *webRTCBridge) runDownlink(ctx context.Context, codec bridgeCodec) {
 				b.stop()
 				return
 			}
-			pcm8, err := voicecodec.ResampleLinear(pcm, voicecodec.AMRSampleRate(codec.amr), pcmuClockRate)
+			pcm8, err := voicecodec.ResampleLinear(pcm, voicecodec.AMRSampleRate(codec.amr), pcmu.SampleRate)
 			if err != nil {
 				b.stop()
 				return
@@ -555,7 +574,7 @@ func (b *webRTCBridge) runDownlink(ctx context.Context, codec bridgeCodec) {
 					Timestamp:      timestamp,
 					SSRC:           ssrc,
 				},
-				Payload: voicecodec.EncodePCMU(pcm8),
+				Payload: pcmu.AppendEncode(nil, pcm8),
 			}
 			if err := b.track.WriteRTP(out); err != nil {
 				b.stop()
@@ -577,11 +596,16 @@ func (b *webRTCBridge) runEVSDownlink(ctx context.Context) {
 			b.stop()
 			return
 		}
+		_, remote, ok := b.formats(bridgeCodec{evs: true})
+		if !ok {
+			b.stop()
+			return
+		}
 		var inbound rtp.Packet
-		if err := inbound.Unmarshal(packet); err != nil || int(inbound.PayloadType) != b.info.PayloadType {
+		if err := inbound.Unmarshal(packet); err != nil || int(inbound.PayloadType) != remote.PayloadType {
 			continue
 		}
-		frames, err := decodeEVSPayload(inbound.Payload, b.info.HFOnly)
+		frames, err := decodeEVSPayload(inbound.Payload, remote.HFOnly)
 		if err != nil {
 			continue
 		}
@@ -591,7 +615,7 @@ func (b *webRTCBridge) runEVSDownlink(ctx context.Context) {
 				b.stop()
 				return
 			}
-			pcm8, err := voicecodec.ResampleLinear(pcm, voicecodec.EVSSampleRate, pcmuClockRate)
+			pcm8, err := voicecodec.ResampleLinear(pcm, voicecodec.EVSSampleRate, pcmu.SampleRate)
 			if err != nil {
 				b.stop()
 				return
@@ -604,7 +628,7 @@ func (b *webRTCBridge) runEVSDownlink(ctx context.Context) {
 					Timestamp:      timestamp,
 					SSRC:           ssrc,
 				},
-				Payload: voicecodec.EncodePCMU(pcm8),
+				Payload: pcmu.AppendEncode(nil, pcm8),
 			}
 			if err := b.track.WriteRTP(out); err != nil {
 				b.stop()
@@ -624,8 +648,13 @@ func (b *webRTCBridge) runPCMUPassthroughDownlink(ctx context.Context) {
 			b.stop()
 			return
 		}
+		_, remote, ok := b.formats(bridgeCodec{pcmu: true})
+		if !ok {
+			b.stop()
+			return
+		}
 		var inbound rtp.Packet
-		if err := inbound.Unmarshal(packet); err != nil || int(inbound.PayloadType) != b.info.PayloadType {
+		if err := inbound.Unmarshal(packet); err != nil || int(inbound.PayloadType) != remote.PayloadType {
 			continue
 		}
 		if err := rewriter.rewrite(inbound, func(out rtp.Packet) error {
@@ -646,7 +675,17 @@ func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote,
 		b.runEVSUplink(ctx, track)
 		return
 	}
-	amr, err := voicecodec.NewAMRTranscoder(ctx, codec.amr)
+	local, _, ok := b.formats(codec)
+	if !ok {
+		b.stop()
+		return
+	}
+	mode, err := amrEncoderMode(codec.amr, local.ModeSet)
+	if err != nil {
+		b.stop()
+		return
+	}
+	amr, err := voicecodec.NewAMRTranscoder(ctx, codec.amr, mode)
 	if err != nil {
 		b.stop()
 		return
@@ -673,14 +712,24 @@ func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote,
 		if int(packet.PayloadType) != pcmuPayloadType {
 			continue
 		}
-		pcm8 := voicecodec.DecodePCMU(packet.Payload)
-		pcm, err := voicecodec.ResampleLinear(pcm8, pcmuClockRate, voicecodec.AMRSampleRate(codec.amr))
+		pcm8 := pcmu.AppendDecode(nil, packet.Payload)
+		pcm, err := voicecodec.ResampleLinear(pcm8, pcmu.SampleRate, voicecodec.AMRSampleRate(codec.amr))
 		if err != nil {
 			b.stop()
 			return
 		}
 		buffer = append(buffer, pcm...)
 		for len(buffer) >= frameSamples {
+			local, _, ok := b.formats(codec)
+			if !ok {
+				b.stop()
+				return
+			}
+			currentMode, err := amrEncoderMode(codec.amr, local.ModeSet)
+			if err != nil || currentMode != mode {
+				b.stop()
+				return
+			}
 			chunk := make([]int16, frameSamples)
 			copy(chunk, buffer[:frameSamples])
 			buffer = buffer[frameSamples:]
@@ -691,7 +740,7 @@ func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote,
 			}
 			payload, err := (voicecodec.AMRPayload{
 				Codec:        codec.amr,
-				OctetAligned: b.info.OctetAlign,
+				OctetAligned: local.OctetAlign,
 				Frames:       frames,
 			}).MarshalBinary()
 			if err != nil {
@@ -701,7 +750,7 @@ func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote,
 			out := rtp.Packet{
 				Header: rtp.Header{
 					Version:        2,
-					PayloadType:    uint8(b.info.PayloadType),
+					PayloadType:    uint8(local.PayloadType),
 					SequenceNumber: sequenceNumber,
 					Timestamp:      timestamp,
 					SSRC:           ssrc,
@@ -726,7 +775,7 @@ func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote,
 }
 
 func (b *webRTCBridge) runEVSUplink(ctx context.Context, track *webrtc.TrackRemote) {
-	writer := newEVSRTPWriter(uint8(b.info.PayloadType), b.info.HFOnly, random16(), random32(), random32())
+	writer := newEVSRTPWriter(0, false, random16(), random32(), random32())
 	buffer := []int16{}
 	for {
 		packet, _, err := track.ReadRTP()
@@ -739,14 +788,30 @@ func (b *webRTCBridge) runEVSUplink(ctx context.Context, track *webrtc.TrackRemo
 		if int(packet.PayloadType) != pcmuPayloadType {
 			continue
 		}
-		pcm8 := voicecodec.DecodePCMU(packet.Payload)
-		pcm, err := voicecodec.ResampleLinear(pcm8, pcmuClockRate, voicecodec.EVSSampleRate)
+		pcm8 := pcmu.AppendDecode(nil, packet.Payload)
+		pcm, err := voicecodec.ResampleLinear(pcm8, pcmu.SampleRate, voicecodec.EVSSampleRate)
 		if err != nil {
 			b.stop()
 			return
 		}
 		buffer = append(buffer, pcm...)
 		for len(buffer) >= voicecodec.EVSSamplesPerFrame {
+			local, _, ok := b.formats(bridgeCodec{evs: true})
+			if !ok {
+				b.stop()
+				return
+			}
+			writer.payloadType = uint8(local.PayloadType)
+			writer.headerFullOnly = local.HFOnly
+			cfg, err := evsEncoderConfig(local)
+			if err != nil {
+				b.stop()
+				return
+			}
+			if err := b.evs.Configure(ctx, cfg); err != nil {
+				b.stop()
+				return
+			}
 			chunk := append([]int16(nil), buffer[:voicecodec.EVSSamplesPerFrame]...)
 			buffer = buffer[voicecodec.EVSSamplesPerFrame:]
 			frame, err := b.evs.Encode(ctx, chunk)
@@ -865,7 +930,12 @@ func (b *webRTCBridge) runPCMUPassthroughUplink(ctx context.Context, track *webr
 			firstTimestamp = packet.Timestamp
 			firstPacket = false
 		}
-		out := rewriteRTPPacketWithSourceTiming(*packet, uint8(b.info.PayloadType), sequenceNumber, timestamp, firstTimestamp, ssrc)
+		local, _, ok := b.formats(bridgeCodec{pcmu: true})
+		if !ok {
+			b.stop()
+			return
+		}
+		out := rewriteRTPPacketWithSourceTiming(*packet, uint8(local.PayloadType), sequenceNumber, timestamp, firstTimestamp, ssrc)
 		data, err := out.Marshal()
 		if err != nil {
 			b.stop()
@@ -956,7 +1026,7 @@ func (r *pcmuDownlinkRewriter) writeSilence(samples uint32, packetSamples uint32
 		n := min(samples, packetSamples)
 		payload := make([]byte, n)
 		for i := range payload {
-			payload[i] = pcmuSilenceByte
+			payload[i] = pcmu.Silence
 		}
 		if err := write(r.packet(payload)); err != nil {
 			return err
@@ -999,8 +1069,12 @@ func bridgeActionForPeerState(state webrtc.PeerConnectionState) webRTCBridgeActi
 	}
 }
 
-func mediaBridgeCodec(info MediaInfo) (bridgeCodec, error) {
-	switch strings.ToUpper(strings.TrimSpace(info.Codec)) {
+func mediaBridgeCodec(media imsvoice.NegotiatedMedia) (bridgeCodec, error) {
+	local, remote := mediaAudioFormats(media)
+	if !media.Negotiated || local.Codec == "" || remote.Codec != local.Codec || remote.ClockRate != local.ClockRate || max(remote.Channels, 1) != max(local.Channels, 1) {
+		return bridgeCodec{}, ErrUnsupportedCodec
+	}
+	switch strings.ToUpper(strings.TrimSpace(string(local.Codec))) {
 	case string(voicecodec.CodecAMR):
 		return bridgeCodec{amr: voicecodec.CodecAMR}, nil
 	case string(voicecodec.CodecAMRWB):
@@ -1012,6 +1086,133 @@ func mediaBridgeCodec(info MediaInfo) (bridgeCodec, error) {
 	default:
 		return bridgeCodec{}, ErrUnsupportedCodec
 	}
+}
+
+func mediaAudioFormats(media imsvoice.NegotiatedMedia) (imsvoice.AudioFormat, imsvoice.AudioFormat) {
+	return media.AudioFormat, media.RemoteFormat
+}
+
+func (b *webRTCBridge) formats(codec bridgeCodec) (imsvoice.AudioFormat, imsvoice.AudioFormat, bool) {
+	media := b.media.Media()
+	current, err := mediaBridgeCodec(media)
+	if err != nil || current != codec {
+		return imsvoice.AudioFormat{}, imsvoice.AudioFormat{}, false
+	}
+	local, remote := mediaAudioFormats(media)
+	return local, remote, true
+}
+
+func amrEncoderMode(codec voicecodec.AMRCodec, modeSet string) (int, error) {
+	maximum := 7
+	if codec == voicecodec.CodecAMRWB {
+		maximum = 8
+	} else if codec != voicecodec.CodecAMR {
+		return 0, ErrUnsupportedCodec
+	}
+	modeSet = strings.TrimSpace(modeSet)
+	if modeSet == "" {
+		return maximum, nil
+	}
+	selected := -1
+	for value := range strings.SplitSeq(modeSet, ",") {
+		mode, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || mode < 0 || mode > maximum {
+			return 0, ErrUnsupportedCodec
+		}
+		selected = max(selected, mode)
+	}
+	if selected < 0 {
+		return 0, ErrUnsupportedCodec
+	}
+	return selected, nil
+}
+
+func evsEncoderConfig(format imsvoice.AudioFormat) (evs.EncoderConfig, error) {
+	bitrate, ok := negotiatedEVSBitrate(format.Bitrate)
+	if !ok {
+		return evs.EncoderConfig{}, ErrUnsupportedCodec
+	}
+	bandwidth, ok := negotiatedEVSBandwidth(format.Bandwidth)
+	if !ok {
+		return evs.EncoderConfig{}, ErrUnsupportedCodec
+	}
+	cfg := evs.EncoderConfig{Bitrate: bitrate, Bandwidth: bandwidth}
+	if format.ChAwRecv != nil && *format.ChAwRecv > 0 && bitrate == 13200 && bandwidth != evs.BandwidthNB {
+		cfg.RF = evs.RFConfig{Offset: *format.ChAwRecv, Indicator: 1}
+	}
+	return cfg, nil
+}
+
+func negotiatedEVSBitrate(value string) (int, bool) {
+	const defaultBitrate = 13200
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return defaultBitrate, true
+	}
+	for _, bitrate := range []int{13200, 9600, 8000, 7200, 5900} {
+		if evsRangeContains(value, float64(bitrate)/1000) {
+			return bitrate, true
+		}
+	}
+	return 0, false
+}
+
+func negotiatedEVSBandwidth(value string) (evs.Bandwidth, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return evs.BandwidthWB, true
+	}
+	if evsBandwidthRangeContains(value, "wb") {
+		return evs.BandwidthWB, true
+	}
+	if evsBandwidthRangeContains(value, "nb") {
+		return evs.BandwidthNB, true
+	}
+	return 0, false
+}
+
+func evsRangeContains(value string, want float64) bool {
+	for part := range strings.SplitSeq(value, ",") {
+		left, right, ranged := strings.Cut(strings.TrimSpace(part), "-")
+		minimum, err := strconv.ParseFloat(strings.TrimSpace(left), 64)
+		if err != nil {
+			continue
+		}
+		maximum := minimum
+		if ranged {
+			maximum, err = strconv.ParseFloat(strings.TrimSpace(right), 64)
+			if err != nil {
+				continue
+			}
+		}
+		if minimum <= want && want <= maximum {
+			return true
+		}
+	}
+	return false
+}
+
+func evsBandwidthRangeContains(value string, want string) bool {
+	order := map[string]int{"nb": 0, "wb": 1, "swb": 2, "fb": 3}
+	wanted := order[want]
+	for part := range strings.SplitSeq(value, ",") {
+		left, right, ranged := strings.Cut(strings.TrimSpace(part), "-")
+		minimum, ok := order[strings.TrimSpace(left)]
+		if !ok {
+			continue
+		}
+		maximum := minimum
+		if ranged {
+			maximum, ok = order[strings.TrimSpace(right)]
+			if !ok {
+				continue
+			}
+		}
+		if minimum <= wanted && wanted <= maximum {
+			return true
+		}
+	}
+	return false
 }
 
 func drainRTCP(sender *webrtc.RTPSender) {

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"sync"
 
-	speechcodec "github.com/damonto/ims-go/ims/voice/codec"
+	"github.com/damonto/ims-go/ims/voice/codec/evs"
 )
 
 const (
@@ -17,33 +17,44 @@ const (
 )
 
 type Engine struct {
-	engine *speechcodec.Engine
+	engine *evs.Engine
 }
 
 func NewEngine(ctx context.Context) (*Engine, error) {
-	engine, err := speechcodec.NewEngine(ctx)
+	engine, err := evs.NewEngine(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("create speech codec engine: %w", err)
 	}
 	return &Engine{engine: engine}, nil
 }
 
-func (e *Engine) NewEVSTranscoder(ctx context.Context) (*EVSTranscoder, error) {
+func (e *Engine) NewEVSTranscoder(ctx context.Context, cfg evs.EncoderConfig) (*EVSTranscoder, error) {
 	if e == nil || e.engine == nil {
 		return nil, errors.New("speech codec engine is unavailable")
 	}
-	session, err := e.engine.NewSession(ctx, speechcodec.Config{
-		Name: speechcodec.EVS,
-		Mode: speechcodec.EVSMode13200,
-		EVS: speechcodec.EVSConfig{
-			SampleRate: EVSSampleRate,
-			Bandwidth:  speechcodec.EVSBandwidthWB,
-		},
+	codec, err := e.engine.NewCodec(ctx, evs.Config{
+		SampleRate: EVSSampleRate,
+		Encoder:    cfg,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create EVS session: %w", err)
+		return nil, fmt.Errorf("create EVS codec: %w", err)
 	}
-	return &EVSTranscoder{session: session}, nil
+	return &EVSTranscoder{codec: codec}, nil
+}
+
+func (t *EVSTranscoder) Configure(ctx context.Context, cfg evs.EncoderConfig) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return errors.New("EVS transcoder is closed")
+	}
+	if t.codec.EncoderConfig() == cfg {
+		return nil
+	}
+	if err := t.codec.Configure(ctx, cfg); err != nil {
+		return fmt.Errorf("configure EVS encoder: %w", err)
+	}
+	return nil
 }
 
 func (e *Engine) Close(ctx context.Context) error {
@@ -61,9 +72,9 @@ type EVSFrame struct {
 }
 
 type EVSTranscoder struct {
-	mu      sync.Mutex
-	session speechcodec.Session
-	closed  bool
+	mu     sync.Mutex
+	codec  *evs.Codec
+	closed bool
 }
 
 func (t *EVSTranscoder) Decode(ctx context.Context, frame EVSFrame) ([]int16, error) {
@@ -72,23 +83,20 @@ func (t *EVSTranscoder) Decode(ctx context.Context, frame EVSFrame) ([]int16, er
 	if t.closed {
 		return nil, errors.New("EVS transcoder is closed")
 	}
-	format := speechcodec.EVSNative
+	format := evs.Native
 	if frame.AMRWBIO {
-		format = speechcodec.EVSAMRWBIO
+		format = evs.AMRWBIO
 	}
-	bits, err := speechcodec.EVSFrameBits(format, speechcodec.Mode(frame.FrameType))
+	bits, err := evs.FrameBits(format, frame.FrameType)
 	if err != nil {
 		return nil, fmt.Errorf("read EVS frame size: %w", err)
 	}
-	pcm, err := t.session.Decode(ctx, nil, speechcodec.Frame{
-		Name:    speechcodec.EVS,
-		Mode:    speechcodec.Mode(frame.FrameType),
-		Quality: frame.Quality,
-		Data:    frame.Data,
-		EVS: speechcodec.EVSFrame{
-			Format: format,
-			Bits:   bits,
-		},
+	pcm, err := t.codec.Decode(ctx, nil, evs.Frame{
+		Format:    format,
+		FrameType: frame.FrameType,
+		Quality:   frame.Quality,
+		Bits:      bits,
+		Data:      frame.Data,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("decode EVS frame: %w", err)
@@ -105,14 +113,14 @@ func (t *EVSTranscoder) Encode(ctx context.Context, samples []int16) (EVSFrame, 
 	if t.closed {
 		return EVSFrame{}, errors.New("EVS transcoder is closed")
 	}
-	frame, err := t.session.Encode(ctx, nil, samples)
+	frame, err := t.codec.Encode(ctx, nil, samples)
 	if err != nil {
 		return EVSFrame{}, fmt.Errorf("encode EVS frame: %w", err)
 	}
 	return EVSFrame{
-		FrameType: int(frame.Mode),
+		FrameType: frame.FrameType,
 		Quality:   frame.Quality,
-		AMRWBIO:   frame.EVS.Format == speechcodec.EVSAMRWBIO,
+		AMRWBIO:   frame.Format == evs.AMRWBIO,
 		Data:      append([]byte(nil), frame.Data...),
 	}, nil
 }
@@ -127,5 +135,5 @@ func (t *EVSTranscoder) Close(ctx context.Context) error {
 		return nil
 	}
 	t.closed = true
-	return t.session.Close(ctx)
+	return t.codec.Close(ctx)
 }

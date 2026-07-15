@@ -37,7 +37,7 @@ func TestAMRTranscoderEncodeDecode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			transcoder, err := NewAMRTranscoder(ctx, tt.codec)
+			transcoder, err := NewAMRTranscoder(ctx, tt.codec, tt.wantType)
 			if err != nil {
 				t.Fatalf("NewAMRTranscoder() error = %v", err)
 			}
@@ -84,7 +84,11 @@ func TestAMRTranscoderEncodeMultipleFrames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			transcoder, err := NewAMRTranscoder(ctx, tt.codec)
+			mode := 7
+			if tt.codec == CodecAMRWB {
+				mode = 8
+			}
+			transcoder, err := NewAMRTranscoder(ctx, tt.codec, mode)
 			if err != nil {
 				t.Fatalf("NewAMRTranscoder() error = %v", err)
 			}
@@ -117,7 +121,7 @@ func TestAMRTranscoderErrors(t *testing.T) {
 			name: "unsupported codec",
 			run: func(t *testing.T) error {
 				t.Helper()
-				_, err := NewAMRTranscoder(context.Background(), "EVS")
+				_, err := NewAMRTranscoder(context.Background(), "EVS", 0)
 				return err
 			},
 			wantErr: ErrAMRCodecUnsupported,
@@ -127,7 +131,7 @@ func TestAMRTranscoderErrors(t *testing.T) {
 			run: func(t *testing.T) error {
 				t.Helper()
 				ctx := context.Background()
-				transcoder, err := NewAMRTranscoder(ctx, CodecAMR)
+				transcoder, err := NewAMRTranscoder(ctx, CodecAMR, 7)
 				if err != nil {
 					t.Fatalf("NewAMRTranscoder() error = %v", err)
 				}
