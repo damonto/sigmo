@@ -12,7 +12,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.3.0
 	github.com/ncruces/go-sqlite3 v0.35.2
-	github.com/nyaruka/phonenumbers v1.8.0
+	github.com/nyaruka/phonenumbers v1.8.1
 	github.com/things-go/go-socks5 v0.1.1
 	github.com/wneessen/go-mail v0.8.1
 	golang.org/x/sys v0.47.0

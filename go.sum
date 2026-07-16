@@ -30,8 +30,8 @@ github.com/ncruces/go-sqlite3-wasm/v3 v3.2.35303 h1:td8kMW1bWwzc7NnlzPjQV4GbDNLk
 github.com/ncruces/go-sqlite3-wasm/v3 v3.2.35303/go.mod h1:o8gr9w/50fXA5TDskg6bNUjvqmFfw4KaXth4q+yDSjg=
 github.com/ncruces/julianday v1.0.0 h1:fH0OKwa7NWvniGQtxdJRxAgkBMolni2BjDHaWTxqt7M=
 github.com/ncruces/julianday v1.0.0/go.mod h1:Dusn2KvZrrovOMJuOt0TNXL6tB7U2E8kvza5fFc9G7g=
-github.com/nyaruka/phonenumbers v1.8.0 h1:TrXNJmbwcAHajzDqin3mLWw57vqLUA6ZjVdeNds0heQ=
-github.com/nyaruka/phonenumbers v1.8.0/go.mod h1:fsKPJ70O9JetEA4ggnJadYTFWwtGPvu/lETTXNXq6Cs=
+github.com/nyaruka/phonenumbers v1.8.1 h1:2K9YMQuv1dCGqjjzB1DwmdCe89khT4KPBQb2CxAMMlU=
+github.com/nyaruka/phonenumbers v1.8.1/go.mod h1:fsKPJ70O9JetEA4ggnJadYTFWwtGPvu/lETTXNXq6Cs=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
