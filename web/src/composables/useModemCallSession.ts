@@ -177,21 +177,7 @@ const createModemCallSession = (
     durationTimer = null
   }
 
-  const answerIncoming = async (call: CallRecord) => {
-    if (usesBrowserAudio(call)) {
-      const ready = await callAudio.prepare()
-      if (!ready) return
-      preparedIncomingCallID.value = call.callID
-      if (phoneCalls.incomingCall.value?.callID !== call.callID) {
-        if (phoneCalls.activeCall.value?.callID !== call.callID) {
-          preparedIncomingCallID.value = ''
-          callAudio.stop()
-        }
-        return
-      }
-    }
-    await phoneCalls.answer(call)
-  }
+  const answerIncoming = async (call: CallRecord) => await phoneCalls.answer(call)
 
   const prepareAudioDevices = async (call: CallRecord) => {
     if (!usesBrowserAudio(call)) return false

@@ -278,4 +278,19 @@ describe('ModemCallProvider', () => {
     await expect(prepared).resolves.toBe(false)
     expect(callsHarness.stopAudio).toHaveBeenCalled()
   })
+
+  it('answers an incoming call without waiting for microphone preparation', async () => {
+    callsHarness.prepareAudio.mockResolvedValueOnce(false)
+    const wrapper = mountProvider()
+    const incoming = callsHarness.incomingCall.value
+    const banner = wrapper.findComponent({ name: 'ModemCallBanner' })
+    const session = banner.props('session') as ReturnType<typeof useModemCallSession>
+    const phoneCalls = callsHarness.usePhoneCalls.mock.results[0]?.value
+
+    expect(incoming).toBeTruthy()
+    await session.answerIncoming(incoming!)
+
+    expect(phoneCalls.answer).toHaveBeenCalledWith(incoming)
+    expect(callsHarness.prepareAudio).not.toHaveBeenCalled()
+  })
 })
