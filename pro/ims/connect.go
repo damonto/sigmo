@@ -354,7 +354,16 @@ func (c *coordinator) modemClientConfig(ctx context.Context, modem *mmodem.Modem
 	}
 	cfg := modemClientConfigForIMEI(imei, c.access, imsProfileIndex)
 	if c.access == AccessVoLTE {
+		cell, err := modem.ServingLTECell(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("read serving LTE cell: %w", err)
+		}
+		accessNetworkInfo, err := lteAccessNetworkInfo(cell)
+		if err != nil {
+			return nil, fmt.Errorf("build LTE access network info: %w", err)
+		}
 		cfg.Access.VoLTE.InterfaceName = volteInterfaceName
+		cfg.Access.VoLTE.AccessNetworkInfo = accessNetworkInfo
 	}
 	return cfg, nil
 }
