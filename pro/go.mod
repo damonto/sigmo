@@ -7,7 +7,7 @@ require (
 	github.com/damonto/ims-go v0.0.0-20260716155612-f464f9878cdb
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260712112859-5cbe97a5670f
-	github.com/damonto/wwan-go v0.0.0-20260714171705-9ba943621b17
+	github.com/damonto/wwan-go v0.0.0-20260717035243-87c619fd466a
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.3.0
@@ -55,3 +55,5 @@ require (
 )
 
 replace github.com/damonto/sigmo => ..
+
+replace github.com/damonto/wwan-go => ../../wwan-go

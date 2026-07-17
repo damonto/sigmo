@@ -166,13 +166,11 @@ func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (us
 }
 
 func isIMSCallAlreadyPresent(err error) bool {
-	const callAlreadyPresent int16 = 236
-
 	var startErr *qcom.WDSStartNetworkError
 	return errors.As(err, &startErr) &&
 		startErr.HasVerboseCallEndReason &&
 		startErr.VerboseCallEndReason.Type == qcom.WDSVerboseCallEndReasonTypeInternal &&
-		startErr.VerboseCallEndReason.Reason == callAlreadyPresent
+		startErr.VerboseCallEndReason.Reason == qcom.WDSVerboseCallEndReasonInternalCallAlreadyPresent
 }
 
 func voLTEControlPort(modem *mmodem.Modem) (mmodem.ModemPort, error) {

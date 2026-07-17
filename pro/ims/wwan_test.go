@@ -738,7 +738,7 @@ func TestIsIMSCallAlreadyPresent(t *testing.T) {
 				HasVerboseCallEndReason: true,
 				VerboseCallEndReason: qcom.WDSVerboseCallEndReason{
 					Type:   qcom.WDSVerboseCallEndReasonTypeInternal,
-					Reason: 236,
+					Reason: qcom.WDSVerboseCallEndReasonInternalCallAlreadyPresent,
 				},
 			},
 			want: true,
@@ -749,7 +749,7 @@ func TestIsIMSCallAlreadyPresent(t *testing.T) {
 				HasVerboseCallEndReason: true,
 				VerboseCallEndReason: qcom.WDSVerboseCallEndReason{
 					Type:   qcom.WDSVerboseCallEndReasonTypeInternal,
-					Reason: 236,
+					Reason: qcom.WDSVerboseCallEndReasonInternalCallAlreadyPresent,
 				},
 			}),
 			want: true,
@@ -760,7 +760,7 @@ func TestIsIMSCallAlreadyPresent(t *testing.T) {
 				HasVerboseCallEndReason: true,
 				VerboseCallEndReason: qcom.WDSVerboseCallEndReason{
 					Type:   qcom.WDSVerboseCallEndReasonTypeInternal,
-					Reason: 237,
+					Reason: qcom.WDSVerboseCallEndReasonInternalInterfaceInUse,
 				},
 			},
 		},

@@ -6,8 +6,6 @@ github.com/damonto/ims-go v0.0.0-20260716155612-f464f9878cdb h1:5bEFsks2erJt0oG9
 github.com/damonto/ims-go v0.0.0-20260716155612-f464f9878cdb/go.mod h1:Y2EE3YJlxQXS3VAjyY46SO5ry6xN+2VQSDrfsarjl7E=
 github.com/damonto/ts43-go v0.0.0-20260712112859-5cbe97a5670f h1:4q719XyIFs47Nyixd9xhbmdoZnseNWT2UV8oZOE+ukA=
 github.com/damonto/ts43-go v0.0.0-20260712112859-5cbe97a5670f/go.mod h1:qteYGpTHhBb/unF8KC5wSNAGa1G4fJT7LRrEw+MJ4LU=
-github.com/damonto/wwan-go v0.0.0-20260714171705-9ba943621b17 h1:s7L44pOBcdK7ZbDuPssEQHohj5AkgzpD2xu3p7Tmw50=
-github.com/damonto/wwan-go v0.0.0-20260714171705-9ba943621b17/go.mod h1:mW0oTnam1/0WLTbhULbcPz9i5Y5kmNE83e9pRxDpA4Y=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/ebitengine/purego v0.10.1 h1:dewVBCBT2GaMu1SrNTYxQhgQBethzfhiwvZiLGP/qyY=
