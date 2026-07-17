@@ -55,5 +55,3 @@ require (
 )
 
 replace github.com/damonto/sigmo => ..
-
-replace github.com/damonto/wwan-go => ../../wwan-go
