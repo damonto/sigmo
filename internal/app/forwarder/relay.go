@@ -13,6 +13,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
+	messagepkg "github.com/damonto/sigmo/internal/pkg/message"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/notify"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
@@ -211,7 +212,7 @@ func (r *Relay) forwardModemSMS(ctx context.Context, m *modem.Modem, message *mo
 	if err != nil {
 		return err
 	}
-	stored := storageMessageFromModemSMS(m, profileID, message)
+	stored := storageMessageFromModemSMS(ctx, m, profileID, message)
 	if !freshIncomingMessage(stored, time.Now()) {
 		slog.Debug("skipping stale modem SMS", "imei", m.EquipmentIdentifier, "path", message.Path(), "timestamp", message.Timestamp)
 		return nil
@@ -307,9 +308,9 @@ func (r *Relay) modemLabel(modemID string) string {
 	return strings.TrimSpace(modemID)
 }
 
-func storageMessageFromModemSMS(m *modem.Modem, profileID string, sms *modem.SMS) storage.Message {
+func storageMessageFromModemSMS(ctx context.Context, m *modem.Modem, profileID string, sms *modem.SMS) storage.Message {
 	incoming := sms.State == modem.SMSStateReceived || sms.State == modem.SMSStateReceiving
-	remote := strings.TrimSpace(sms.Number)
+	remote := messagepkg.CanonicalAddress(ctx, m, sms.Number)
 	sender, recipient := m.Number, remote
 	if incoming {
 		sender, recipient = remote, m.Number

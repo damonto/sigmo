@@ -122,6 +122,7 @@ func (s *Messenger) send(ctx context.Context, device modemDevice, to string, tex
 	if err != nil {
 		return "", err
 	}
+	to = CanonicalAddress(ctx, device.modem(), to)
 	profileID, err := device.profileID(ctx)
 	if err != nil {
 		return "", err
@@ -150,7 +151,7 @@ func (s *Messenger) send(ctx context.Context, device modemDevice, to string, tex
 		}
 		return "", fmt.Errorf("send SMS to %s: %w", to, err)
 	}
-	if err := s.insertSentMessage(ctx, messageFromModemSMS(device, profileID, sms)); err != nil {
+	if err := s.insertSentMessage(ctx, messageFromModemSMS(ctx, device, profileID, sms)); err != nil {
 		return "", err
 	}
 	return to, nil
@@ -209,16 +210,16 @@ func (s *Messenger) syncModemMessages(ctx context.Context, device modemDevice, p
 		if sms == nil {
 			continue
 		}
-		if _, err := s.store.InsertMessage(ctx, messageFromModemSMS(device, profileID, sms)); err != nil {
+		if _, err := s.store.InsertMessage(ctx, messageFromModemSMS(ctx, device, profileID, sms)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func messageFromModemSMS(device modemDevice, profileID string, sms *mmodem.SMS) storage.Message {
+func messageFromModemSMS(ctx context.Context, device modemDevice, profileID string, sms *mmodem.SMS) storage.Message {
 	incoming := sms.State == mmodem.SMSStateReceived || sms.State == mmodem.SMSStateReceiving
-	remote := strings.TrimSpace(sms.Number)
+	remote := CanonicalAddress(ctx, device.modem(), sms.Number)
 	sender, recipient := device.phoneNumber(), remote
 	if incoming {
 		sender, recipient = remote, device.phoneNumber()

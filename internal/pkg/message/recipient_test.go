@@ -97,3 +97,26 @@ func TestNormalizeSMSAddress(t *testing.T) {
 		})
 	}
 }
+
+func TestCanonicalAddress(t *testing.T) {
+	tests := []struct {
+		name   string
+		value  string
+		region string
+		want   string
+	}{
+		{name: "US local number", value: "2242255559", region: "US", want: "+12242255559"},
+		{name: "international number", value: "+1 (224) 225-5559", want: "+12242255559"},
+		{name: "short code", value: "9999", region: "US", want: "9999"},
+		{name: "carrier address", value: "999997779", region: "US", want: "999997779"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := canonicalAddressForRegion(tt.value, tt.region)
+			if got != tt.want {
+				t.Errorf("CanonicalAddress() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

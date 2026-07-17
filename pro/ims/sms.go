@@ -15,6 +15,7 @@ import (
 
 	imsgo "github.com/damonto/ims-go"
 	imssms "github.com/damonto/ims-go/ims/sms"
+	messagepkg "github.com/damonto/sigmo/internal/pkg/message"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
@@ -420,8 +421,8 @@ func (c *coordinator) forwardIncoming(ctx context.Context, modem *mmodem.Modem, 
 		ProfileID:   profileID,
 		Source:      storage.MessageSourceRouted,
 		ExternalKey: incomingMessageKey(msg),
-		Sender:      strings.TrimSpace(msg.From),
-		Recipient:   strings.TrimSpace(msg.To),
+		Sender:      messagepkg.CanonicalAddress(ctx, modem, msg.From),
+		Recipient:   messagepkg.CanonicalAddress(ctx, modem, msg.To),
 		Text:        msg.Text,
 		Timestamp:   msg.ReceivedAt,
 		Status:      "received",
