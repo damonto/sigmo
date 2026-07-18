@@ -1,7 +1,6 @@
 # Sigmo (Formerly Telmo)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/damonto/sigmo)](https://goreportcard.com/report/github.com/damonto/sigmo)
 [![Release](https://img.shields.io/github/v/release/damonto/sigmo.svg)](https://github.com/damonto/sigmo/releases/latest)
 
 **Sigmo** is a modern, self-hosted web UI and API for managing ModemManager-based cellular modems. It ships as a single binary with an embedded Vue 3 frontend, designed to be lightweight and easy to deploy.
@@ -46,6 +45,7 @@ Sigmo focuses on advanced eSIM operations, SMS management, and network control. 
 - **OS**: Linux.
 - **Service**: `ModemManager` running on the system D-Bus when using the binary directly. The Docker image includes `ModemManager` and starts it inside the container.
 - **Permissions**: Root access or proper `udev` rules to access modem device nodes.
+
 ---
 
 ## 📥 Installation
@@ -111,12 +111,12 @@ after modem reloads, program restarts, and system reboots.
 
 Startup configuration is provided through flags:
 
-| Flag                 | Default                          | Description                                      |
-| :------------------- | :------------------------------- | :----------------------------------------------- |
-| `--listen-address`   | `0.0.0.0:9527`                   | HTTP bind address.                               |
-| `--db-path`          | `$XDG_DATA_HOME/sigmo/sigmo.db`  | SQLite database path.                            |
-| `--debug`            | `false`                          | Enable debug logging and internal API errors.    |
-| `--version`          | `false`                          | Print the build version and exit.                |
+| Flag               | Default                         | Description                                   |
+| :----------------- | :------------------------------ | :-------------------------------------------- |
+| `--listen-address` | `0.0.0.0:9527`                  | HTTP bind address.                            |
+| `--db-path`        | `$XDG_DATA_HOME/sigmo/sigmo.db` | SQLite database path.                         |
+| `--debug`          | `false`                         | Enable debug logging and internal API errors. |
+| `--version`        | `false`                         | Print the build version and exit.             |
 
 Runtime settings are managed in the Web UI and stored in SQLite:
 
