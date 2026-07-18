@@ -8,13 +8,11 @@ import type {
 } from '@/types/settings'
 
 export type SettingsRootSection = 'proxy'
-export type SettingsSectionKey = 'auth' | SettingsRootSection | 'channels'
 
 export const useSettingsForm = (
   settings: Ref<SettingsResponse | null>,
   values: Ref<SettingsValues | null>,
 ) => {
-  const activeSection = ref<SettingsSectionKey>('auth')
   const expandedChannels = ref<Record<string, boolean>>({})
 
   const schema = computed(() => settings.value?.schema)
@@ -22,7 +20,9 @@ export const useSettingsForm = (
   const proxyFields = computed(() => schema.value?.proxy ?? [])
   const channelSchemas = computed(() => schema.value?.channels ?? [])
   const enabledChannelSchemas = computed(() =>
-    channelSchemas.value.filter((channel) => isChannelEnabled(channel.key)),
+    channelSchemas.value.filter(
+      (channel) => settings.value?.values.channels[channel.key]?.enabled === true,
+    ),
   )
   const isReady = computed(() => values.value !== null && schema.value !== undefined)
   const authValues = computed(() => values.value?.auth ?? null)
@@ -61,10 +61,9 @@ export const useSettingsForm = (
     const channel = values.value.channels[schema.key] ?? defaultChannel(schema, enabled)
     channel.enabled = enabled
     values.value.channels[schema.key] = channel
-    if (!enabled) {
-      removeAuthProvider(schema.key)
+    if (enabled) {
+      expandedChannels.value = { ...expandedChannels.value, [schema.key]: true }
     }
-    expandedChannels.value = { ...expandedChannels.value, [schema.key]: enabled }
   }
 
   const defaultChannel = (schema: SettingsChannelSchema, enabled = true): SettingsChannel => {
@@ -79,14 +78,15 @@ export const useSettingsForm = (
     return channel as SettingsChannel
   }
 
-  const removeAuthProvider = (channel: string) => {
+  const initializeMissingChannels = () => {
     if (!values.value) return
-    values.value.auth.authProviders = values.value.auth.authProviders.filter(
-      (item) => item !== channel,
-    )
+    for (const channel of channelSchemas.value) {
+      values.value.channels[channel.key] ??= defaultChannel(channel, false)
+    }
   }
 
   const initializeExpandedChannels = () => {
+    initializeMissingChannels()
     const firstEnabled = channelSchemas.value.find((channel) => isChannelEnabled(channel.key))?.key
     expandedChannels.value = Object.fromEntries(
       channelSchemas.value.map((channel) => [
@@ -101,7 +101,6 @@ export const useSettingsForm = (
   }
 
   const toggleChannelDetails = (channel: string) => {
-    if (!isChannelEnabled(channel)) return
     expandedChannels.value = {
       ...expandedChannels.value,
       [channel]: !isChannelExpanded(channel),
@@ -109,7 +108,6 @@ export const useSettingsForm = (
   }
 
   return {
-    activeSection,
     authFields,
     authValues,
     channels,

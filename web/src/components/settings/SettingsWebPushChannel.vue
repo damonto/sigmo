@@ -1,25 +1,13 @@
 <script setup lang="ts">
-import {
-  Bell,
-  BellOff,
-  Check,
-  Globe2,
-  Laptop,
-  LoaderCircle,
-  Monitor,
-  Pencil,
-  Smartphone,
-  Tablet,
-  Trash2,
-  X,
-} from 'lucide-vue-next'
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
+import { Smartphone } from 'lucide-vue-next'
 
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Switch } from '@/components/ui/switch'
+import SettingsWebPushControlCard from '@/components/settings/SettingsWebPushControlCard.vue'
+import SettingsWebPushDeviceList from '@/components/settings/SettingsWebPushDeviceList.vue'
+import SettingsWebPushRenameDialog from '@/components/settings/SettingsWebPushRenameDialog.vue'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useWebPush } from '@/composables/useWebPush'
 import type { WebPushSubscriptionResponse } from '@/types/webPush'
 
@@ -44,41 +32,32 @@ const {
   renameSubscription,
 } = useWebPush()
 
-const labels = ref<Record<string, string>>({})
-const editingID = ref<string | null>(null)
-
-watch(
-  subscriptions,
-  (items) => {
-    for (const item of items) {
-      labels.value[item.id] ??= item.label
-    }
-  },
-  { immediate: true },
-)
-
-onMounted(() => {
-  void load().catch(() => undefined)
-})
-
-const supportMessage = () => {
+const renameDialogOpen = ref(false)
+const renamingSubscription = ref<WebPushSubscriptionResponse | null>(null)
+const renameLabel = ref('')
+const hasCurrentSubscription = computed(() => currentSubscription.value !== null)
+const currentSubscriptionID = computed(() => currentSubscription.value?.id)
+const renameOriginalLabel = computed(() => renamingSubscription.value?.label ?? '')
+const supportMessage = computed(() => {
   switch (supportReason.value) {
     case 'insecure':
       return t('settings.webPush.insecure')
     case 'unsupported':
       return t('settings.webPush.unsupported')
-    case 'ios_setup_required':
-      return t('settings.webPush.iosSetupRequired')
     default:
       return ''
   }
-}
-
-const permissionMessage = () => {
+})
+const permissionMessage = computed(() => {
+  if (supportReason.value !== 'supported') return ''
   if (permission.value === 'denied') return t('settings.webPush.permissionDenied')
   if (permission.value === 'default') return t('settings.webPush.permissionDefault')
   return ''
-}
+})
+
+onMounted(() => {
+  void load().catch(() => undefined)
+})
 
 const run = async (action: () => Promise<void>, successMessage?: string) => {
   try {
@@ -112,205 +91,78 @@ const handleDelete = (subscription: WebPushSubscriptionResponse) => {
   void run(() => deleteSubscription(subscription), t('settings.webPush.deleted'))
 }
 
+const handleDisableCurrent = () => {
+  if (currentSubscription.value) handleDelete(currentSubscription.value)
+}
+
 const startRenaming = (subscription: WebPushSubscriptionResponse) => {
-  labels.value[subscription.id] = subscription.label
-  editingID.value = subscription.id
+  renamingSubscription.value = subscription
+  renameLabel.value = subscription.label
+  renameDialogOpen.value = true
 }
 
-const cancelRenaming = (subscription: WebPushSubscriptionResponse) => {
-  labels.value[subscription.id] = subscription.label
-  editingID.value = null
+const resetRenameDialog = () => {
+  renamingSubscription.value = null
+  renameLabel.value = ''
 }
 
-const handleRename = async (subscription: WebPushSubscriptionResponse) => {
-  const label = labels.value[subscription.id]?.trim() ?? ''
-  if (!label) return
-  if (label === subscription.label) {
-    editingID.value = null
-    return
-  }
+const closeRenameDialog = () => {
+  renameDialogOpen.value = false
+  resetRenameDialog()
+}
+
+const handleRename = async (label: string) => {
+  const subscription = renamingSubscription.value
+  if (!subscription) return
   if (await run(() => renameSubscription(subscription, label), t('settings.webPush.renamed'))) {
-    editingID.value = null
+    closeRenameDialog()
   }
-}
-
-const isCurrent = (subscription: WebPushSubscriptionResponse) =>
-  subscription.id === currentSubscription.value?.id
-
-const platformLabel = (subscription: WebPushSubscriptionResponse) =>
-  subscription.platform.trim() || t('settings.webPush.unknownDevice')
-
-const platformIcon = (subscription: WebPushSubscriptionResponse) => {
-  const device = `${subscription.platform} ${subscription.userAgent}`.toLowerCase()
-
-  if (/ipad|tablet/.test(device)) return Tablet
-  if (/android/.test(device)) return /mobile/.test(device) ? Smartphone : Tablet
-  if (/iphone|ipod|ios|mobile/.test(device)) return Smartphone
-  if (/mac|cros|chrome os/.test(device)) return Laptop
-  if (/windows|win32|win64|linux|x11/.test(device)) return Monitor
-  return Globe2
 }
 </script>
 
 <template>
-  <div class="space-y-4 py-4">
-    <div class="flex items-start gap-3">
-      <Bell class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-      <div class="min-w-0 flex-1 space-y-1">
-        <div class="text-sm font-medium text-foreground">
-          {{ t('settings.webPush.title') }}
-        </div>
-        <p class="text-xs leading-5 text-muted-foreground">
-          {{ t('settings.webPush.description') }}
-        </p>
-      </div>
-      <Switch
-        :model-value="enabled"
-        :disabled="props.disabled || isUpdating || isLoading"
-        :aria-label="t('settings.webPush.toggle')"
-        @update:model-value="handleToggle($event === true)"
-      />
-    </div>
+  <div class="space-y-4">
+    <SettingsWebPushControlCard
+      :disabled="props.disabled"
+      :enabled="enabled"
+      :error-message="errorMessage"
+      :has-current-subscription="hasCurrentSubscription"
+      :is-loading="isLoading"
+      :is-updating="isUpdating"
+      :permission-message="permissionMessage"
+      :support-message="supportMessage"
+      :support-reason="supportReason"
+      @disable-current="handleDisableCurrent"
+      @enable-current="handleEnableCurrent"
+      @toggle="handleToggle"
+    />
 
-    <div class="space-y-3 pl-7">
-      <p v-if="supportMessage()" class="text-xs leading-5 text-muted-foreground">
-        {{ supportMessage() }}
-      </p>
-      <p v-else-if="permissionMessage()" class="text-xs leading-5 text-muted-foreground">
-        {{ permissionMessage() }}
-      </p>
+    <Alert v-if="supportReason === 'ios_setup_required'" data-testid="web-push-ios-alert">
+      <Smartphone aria-hidden="true" />
+      <AlertTitle>{{ t('settings.webPush.iosSetupTitle') }}</AlertTitle>
+      <AlertDescription class="leading-5">
+        {{ t('settings.webPush.iosSetupRequired') }}
+      </AlertDescription>
+    </Alert>
 
-      <Button
-        v-if="!currentSubscription"
-        type="button"
-        size="sm"
-        variant="outline"
-        :disabled="
-          props.disabled || isUpdating || isLoading || !enabled || supportReason !== 'supported'
-        "
-        @click="handleEnableCurrent"
-      >
-        <Bell class="size-4" />
-        {{ t('settings.webPush.enableCurrent') }}
-      </Button>
-      <Button
-        v-else
-        type="button"
-        size="sm"
-        variant="outline"
-        :disabled="props.disabled || isUpdating || isLoading"
-        @click="handleDelete(currentSubscription)"
-      >
-        <BellOff class="size-4" />
-        {{ t('settings.webPush.disableCurrent') }}
-      </Button>
+    <SettingsWebPushDeviceList
+      :current-subscription-id="currentSubscriptionID"
+      :disabled="props.disabled"
+      :is-loading="isLoading"
+      :is-updating="isUpdating"
+      :subscriptions="subscriptions"
+      @delete="handleDelete"
+      @rename="startRenaming"
+    />
 
-      <div v-if="subscriptions.length > 0" class="space-y-3">
-        <div
-          v-for="subscription in subscriptions"
-          :key="subscription.id"
-          class="flex min-w-0 items-center gap-3 rounded-xl border bg-card/60 p-3 shadow-xs transition-colors hover:bg-muted/20 sm:p-4"
-        >
-          <div
-            class="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
-          >
-            <component
-              :is="platformIcon(subscription)"
-              class="size-5"
-              aria-hidden="true"
-              data-testid="web-push-platform-icon"
-            />
-          </div>
-
-          <div class="min-w-0 flex-1 space-y-1.5">
-            <div v-if="editingID === subscription.id" class="flex min-w-0 items-center gap-2">
-              <Input
-                v-model="labels[subscription.id]"
-                :aria-label="t('settings.webPush.deviceLabel')"
-                :disabled="props.disabled || isUpdating"
-                class="h-8 min-w-0 max-w-sm"
-                @keyup.enter="handleRename(subscription)"
-                @keyup.esc="cancelRenaming(subscription)"
-              />
-            </div>
-            <div v-else class="min-w-0">
-              <p class="truncate text-sm font-semibold text-foreground" :title="subscription.label">
-                {{ subscription.label }}
-              </p>
-            </div>
-            <p
-              class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground"
-              data-testid="web-push-device-metadata"
-            >
-              <span>{{ platformLabel(subscription) }}</span>
-              <template v-if="isCurrent(subscription)">
-                <span aria-hidden="true">·</span>
-                <span>{{ t('settings.webPush.currentDevice') }}</span>
-              </template>
-            </p>
-          </div>
-
-          <div class="flex shrink-0 items-center gap-1">
-            <template v-if="editingID === subscription.id">
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="outline"
-                class="rounded-lg text-primary"
-                :aria-label="t('settings.webPush.saveRename')"
-                :title="t('settings.webPush.saveRename')"
-                :disabled="props.disabled || isUpdating"
-                @click="handleRename(subscription)"
-              >
-                <Check class="size-4" />
-              </Button>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                class="rounded-lg"
-                :aria-label="t('settings.webPush.cancelRename')"
-                :title="t('settings.webPush.cancelRename')"
-                :disabled="props.disabled || isUpdating"
-                @click="cancelRenaming(subscription)"
-              >
-                <X class="size-4" />
-              </Button>
-            </template>
-            <Button
-              v-else
-              type="button"
-              size="icon-sm"
-              variant="outline"
-              class="rounded-lg"
-              :aria-label="t('settings.webPush.rename')"
-              :title="t('settings.webPush.rename')"
-              :disabled="props.disabled || isUpdating"
-              @click="startRenaming(subscription)"
-            >
-              <Pencil class="size-4" />
-            </Button>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="outline"
-              class="rounded-lg text-destructive hover:text-destructive"
-              :aria-label="t('settings.webPush.deleteDevice')"
-              :title="t('settings.webPush.deleteDevice')"
-              :disabled="props.disabled || isUpdating"
-              @click="handleDelete(subscription)"
-            >
-              <Trash2 class="size-4" />
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      <p v-else-if="!isLoading" class="text-xs text-muted-foreground">
-        {{ t('settings.webPush.noDevices') }}
-      </p>
-      <p v-if="errorMessage" class="text-xs text-destructive">{{ errorMessage }}</p>
-      <LoaderCircle v-if="isLoading" class="size-4 animate-spin text-muted-foreground" />
-    </div>
+    <SettingsWebPushRenameDialog
+      v-model:label="renameLabel"
+      v-model:open="renameDialogOpen"
+      :disabled="props.disabled"
+      :original-label="renameOriginalLabel"
+      :saving="isUpdating"
+      @close="resetRenameDialog"
+      @save="handleRename"
+    />
   </div>
 </template>

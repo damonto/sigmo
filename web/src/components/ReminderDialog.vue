@@ -27,6 +27,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from '@/components/ui/input-group'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Spinner } from '@/components/ui/spinner'
@@ -59,15 +65,10 @@ const maxRepeatDays = 3650
 const schema = toTypedSchema(
   z.object({
     scheduledAt: z.string().min(1, t('modemDetail.reminder.validation.timeRequired')),
-    repeatDays: z
-      .union([z.string(), z.number()])
-      .refine(
-        (value) => {
-          const text = String(value)
-          return text === '' || (/^[1-9]\d*$/.test(text) && Number(text) <= maxRepeatDays)
-        },
-        t('modemDetail.reminder.validation.repeat'),
-      ),
+    repeatDays: z.union([z.string(), z.number()]).refine((value) => {
+      const text = String(value)
+      return text === '' || (/^[1-9]\d*$/.test(text) && Number(text) <= maxRepeatDays)
+    }, t('modemDetail.reminder.validation.repeat')),
     content: z.string().trim().min(1, t('modemDetail.reminder.validation.contentRequired')),
   }),
 )
@@ -95,6 +96,10 @@ const [content] = defineField('content')
 
 const clearOpen = ref(false)
 const busy = computed(() => props.saving || props.deleting)
+const repeatDayUnit = computed(() => {
+  const days = Number(String(repeatDays.value).trim())
+  return t(days > 1 ? 'modemDetail.reminder.dayUnitPlural' : 'modemDetail.reminder.dayUnit')
+})
 const dialogOpen = computed({
   get: () => open.value,
   set: (value: boolean) => {
@@ -161,8 +166,8 @@ watch(
 
         <div class="space-y-2">
           <Label for="reminder-repeat">{{ t('modemDetail.reminder.repeat') }}</Label>
-          <div class="flex items-center gap-2">
-            <Input
+          <InputGroup>
+            <InputGroupInput
               id="reminder-repeat"
               v-model="repeatDays"
               type="number"
@@ -174,10 +179,12 @@ watch(
               :disabled="busy"
               :aria-invalid="Boolean(errors.repeatDays)"
             />
-            <span class="shrink-0 text-sm text-muted-foreground">
-              {{ t('modemDetail.reminder.dayUnit') }}
-            </span>
-          </div>
+            <InputGroupAddon align="inline-end">
+              <InputGroupText data-testid="reminder-repeat-unit">
+                {{ repeatDayUnit }}
+              </InputGroupText>
+            </InputGroupAddon>
+          </InputGroup>
           <p v-if="errors.repeatDays" class="text-xs text-destructive">
             {{ errors.repeatDays }}
           </p>

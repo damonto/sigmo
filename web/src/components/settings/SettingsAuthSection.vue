@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import SettingsField from '@/components/settings/SettingsField.vue'
+import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import type {
@@ -12,7 +13,6 @@ import type {
 } from '@/types/settings'
 
 const props = defineProps<{
-  id: string
   auth: SettingsAuth | null
   enabledChannels: SettingsChannelSchema[]
   fields: SettingsFieldSchema[]
@@ -59,48 +59,45 @@ const toggleAuthProvider = (channel: string, enabled: boolean) => {
 </script>
 
 <template>
-  <section :id="id" class="scroll-mt-8 space-y-4">
-    <div>
-      <h2 class="text-lg font-semibold text-foreground">{{ t('settings.authTitle') }}</h2>
-      <p class="text-sm text-muted-foreground">{{ t('settings.authDescription') }}</p>
-    </div>
-
-    <div v-for="field in fields" :key="field.key" class="space-y-2">
-      <div v-if="field.control === 'channelList'" class="space-y-3">
-        <Label>{{ schemaText(field.label) }}</Label>
-        <div v-if="enabledChannels.length > 0" class="grid gap-3 sm:grid-cols-3">
-          <div
-            v-for="channel in enabledChannels"
-            :key="channel.key"
-            class="flex items-center gap-2"
-          >
-            <Checkbox
-              :id="fieldID('auth_provider', channel.key)"
-              :model-value="isAuthProvider(channel.key)"
-              :disabled="disabled"
-              @update:model-value="toggleAuthProvider(channel.key, $event === true)"
-            />
-            <Label
-              :for="fieldID('auth_provider', channel.key)"
-              class="cursor-pointer text-sm font-normal"
+  <Card class="gap-4 border-0 py-4 shadow-sm">
+    <CardContent class="space-y-4 px-4">
+      <div v-for="field in fields" :key="field.key" class="space-y-2">
+        <div v-if="field.control === 'channelList'" class="space-y-3">
+          <Label>{{ schemaText(field.label) }}</Label>
+          <div v-if="enabledChannels.length > 0" class="grid gap-3 sm:grid-cols-3">
+            <div
+              v-for="channel in enabledChannels"
+              :key="channel.key"
+              class="flex items-center gap-2"
             >
-              {{ schemaText(channel.label) }}
-            </Label>
+              <Checkbox
+                :id="fieldID('auth_provider', channel.key)"
+                :model-value="isAuthProvider(channel.key)"
+                :disabled="disabled"
+                @update:model-value="toggleAuthProvider(channel.key, $event === true)"
+              />
+              <Label
+                :for="fieldID('auth_provider', channel.key)"
+                class="cursor-pointer text-sm font-normal"
+              >
+                {{ schemaText(channel.label) }}
+              </Label>
+            </div>
           </div>
+          <p v-else class="text-xs text-muted-foreground">
+            {{ t('settings.noEnabledChannels') }}
+          </p>
         </div>
-        <p v-else class="text-xs text-muted-foreground">
-          {{ t('settings.noEnabledChannels') }}
-        </p>
-      </div>
 
-      <SettingsField
-        v-else
-        :id="fieldID(field.key)"
-        :field="field"
-        :model-value="fieldValue(field.key)"
-        :disabled="disabled"
-        @update:model-value="emit('update-field', field.key, $event)"
-      />
-    </div>
-  </section>
+        <SettingsField
+          v-else
+          :id="fieldID(field.key)"
+          :field="field"
+          :model-value="fieldValue(field.key)"
+          :disabled="disabled"
+          @update:model-value="emit('update-field', field.key, $event)"
+        />
+      </div>
+    </CardContent>
+  </Card>
 </template>

@@ -85,7 +85,9 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		{
 			h := hsettings.New(deps.Store, deps.Internet, deps.Relay)
 			protected.GET("/settings", h.Get)
-			protected.PUT("/settings", h.Update)
+			protected.PUT("/settings/auth", h.UpdateAuth)
+			protected.PUT("/settings/proxy", h.UpdateProxy)
+			protected.PUT("/settings/notifications/:channel", h.UpdateNotificationChannel)
 		}
 
 		h := hmodem.New(deps.Store, deps.Registry, deps.Internet, deps.Reminders, deps.ModemOverview...)

@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import SettingsField from '@/components/settings/SettingsField.vue'
+import { Card, CardContent } from '@/components/ui/card'
 import type { SettingsRootSection } from '@/composables/useSettingsForm'
 import type { SettingsField as SettingsFieldSchema } from '@/types/settings'
 
 const props = defineProps<{
-  id: string
   section: SettingsRootSection
-  title: string
-  description: string
   fields: SettingsFieldSchema[]
   values: object | null
   disabled?: boolean
@@ -27,13 +25,8 @@ const fieldValue = (key: string) => {
 </script>
 
 <template>
-  <section :id="id" class="scroll-mt-8 space-y-4">
-    <div>
-      <h2 class="text-lg font-semibold text-foreground">{{ title }}</h2>
-      <p class="text-sm text-muted-foreground">{{ description }}</p>
-    </div>
-
-    <div class="grid gap-4 sm:grid-cols-2">
+  <Card class="gap-4 border-0 py-4 shadow-sm">
+    <CardContent class="grid gap-4 px-4 sm:grid-cols-2">
       <SettingsField
         v-for="field in fields"
         :id="fieldID(field.key)"
@@ -44,6 +37,6 @@ const fieldValue = (key: string) => {
         class="space-y-2"
         @update:model-value="emit('update-field', field.key, $event)"
       />
-    </div>
-  </section>
+    </CardContent>
+  </Card>
 </template>

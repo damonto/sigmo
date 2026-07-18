@@ -1,6 +1,6 @@
 import type { Ref } from 'vue'
 import { createI18n } from 'vue-i18n'
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SettingsWebPushChannel from '@/components/settings/SettingsWebPushChannel.vue'
@@ -43,6 +43,7 @@ vi.mock('vue-sonner', () => ({
 type WebPushHarness = ReturnType<typeof useWebPush> & {
   subscriptions: Ref<WebPushSubscriptionResponse[]>
   currentSubscription: Ref<WebPushSubscriptionResponse | null>
+  supportReason: Ref<string>
 }
 
 const webPush = useWebPush() as WebPushHarness
@@ -91,6 +92,25 @@ describe('SettingsWebPushChannel', () => {
       subscription('unknown', ''),
     ]
     webPush.currentSubscription.value = webPush.subscriptions.value[0] ?? null
+    webPush.supportReason.value = 'supported'
+  })
+
+  it('separates controls, the iOS setup callout, and devices into distinct regions', () => {
+    webPush.supportReason.value = 'ios_setup_required'
+
+    const wrapper = mountChannel()
+
+    expect(wrapper.find('[data-testid="web-push-toggle-card"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="web-push-ios-alert"]').text()).toContain(
+      'Set up Web Push on iOS',
+    )
+    expect(wrapper.get('[data-testid="web-push-devices-card"]').text()).toContain('Devices')
+  })
+
+  it('hides the iOS setup callout in supported browsers', () => {
+    const wrapper = mountChannel()
+
+    expect(wrapper.find('[data-testid="web-push-ios-alert"]').exists()).toBe(false)
   })
 
   it('renders platform icons and current-device metadata without status timestamps', () => {
@@ -112,16 +132,28 @@ describe('SettingsWebPushChannel', () => {
     expect(wrapper.text()).not.toContain('Authorized')
   })
 
-  it('renames a device through the inline editor', async () => {
+  it('renames a device through the dialog', async () => {
     const wrapper = mountChannel()
     const current = webPush.subscriptions.value[0]
 
     await wrapper.get('button[aria-label="Rename device"]').trigger('click')
-    await wrapper.get('input[aria-label="Device name"]').setValue('MacBook Pro')
-    await wrapper.get('button[aria-label="Save device name"]').trigger('click')
+    await flushPromises()
+
+    const body = new DOMWrapper(document.body)
+    const input = body.get<HTMLInputElement>('input[aria-label="Device name"]')
+    const saveButton = body.get<HTMLButtonElement>('button[aria-label="Save device name"]')
+
+    expect(body.get('[role="dialog"]').text()).toContain('Rename device')
+    expect(input.element.value).toBe('Device mac')
+    expect(saveButton.element.disabled).toBe(true)
+
+    await input.setValue('MacBook Pro')
+    expect(saveButton.element.disabled).toBe(false)
+    await saveButton.trigger('click')
     await flushPromises()
 
     expect(webPush.renameSubscription).toHaveBeenCalledWith(current, 'MacBook Pro')
-    expect(wrapper.find('input[aria-label="Device name"]').exists()).toBe(false)
+    expect(body.find('input[aria-label="Device name"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 })

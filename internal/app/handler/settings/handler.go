@@ -24,11 +24,17 @@ type Handler struct {
 }
 
 const (
-	errorCodeUpdateSettingsInvalidRequest = "update_settings_invalid_request"
-	errorCodeUpdateSettingsInvalid        = "update_settings_invalid"
-	errorCodeUpdateSettingsFailed         = "update_settings_failed"
-	errorCodeReloadProxySettingsFailed    = "reload_proxy_settings_failed"
-	errorCodeReloadRelayFailed            = "reload_notification_relay_failed"
+	errorCodeUpdateAuthInvalidRequest         = "update_auth_invalid_request"
+	errorCodeUpdateAuthInvalid                = "update_auth_invalid"
+	errorCodeUpdateAuthFailed                 = "update_auth_failed"
+	errorCodeUpdateProxyInvalidRequest        = "update_proxy_invalid_request"
+	errorCodeUpdateProxyInvalid               = "update_proxy_invalid"
+	errorCodeUpdateProxyFailed                = "update_proxy_failed"
+	errorCodeUpdateNotificationInvalidRequest = "update_notification_invalid_request"
+	errorCodeUpdateNotificationInvalid        = "update_notification_invalid"
+	errorCodeUpdateNotificationFailed         = "update_notification_failed"
+	errorCodeReloadProxySettingsFailed        = "reload_proxy_settings_failed"
+	errorCodeReloadRelayFailed                = "reload_notification_relay_failed"
 )
 
 var (
@@ -48,46 +54,115 @@ func (h *Handler) Get(c *echo.Context) error {
 	return c.JSON(http.StatusOK, responseFromSettings(current))
 }
 
-func (h *Handler) Update(c *echo.Context) error {
-	var req UpdateRequest
+func (h *Handler) UpdateAuth(c *echo.Context) error {
+	var req AuthValues
 	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeUpdateSettingsInvalidRequest, err)
+		return httpapi.BadRequest(c, errorCodeUpdateAuthInvalidRequest, err)
 	}
-	req = normalizeRequest(req)
+	req = normalizeAuthValues(req)
 	if err := c.Validate(&req); err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateSettingsInvalid, err)
+		return httpapi.UnprocessableEntity(c, errorCodeUpdateAuthInvalid, err)
 	}
 
-	next := h.store.Snapshot()
-	next.Auth = authSettingsFromValues(req.Auth)
-	next.Channels = normalizeChannels(req.Channels)
-	next.Proxy = proxySettingsFromValues(req.Proxy)
-
-	if err := validateSettings(next); err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateSettingsInvalid, err)
-	}
-	if _, err := notify.New(&next); err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateSettingsInvalid, err)
-	}
-
+	auth := authSettingsFromValues(req)
+	var invalidErr error
 	saved, err := h.store.Update(c.Request().Context(), func(current *appsettings.Settings) error {
-		current.Auth = next.Auth
-		current.Proxy = next.Proxy
-		current.Channels = next.Channels
-		return nil
+		invalidErr = applyAuthSettings(current, auth)
+		return invalidErr
 	})
+	if invalidErr != nil {
+		return httpapi.UnprocessableEntity(c, errorCodeUpdateAuthInvalid, invalidErr)
+	}
 	if err != nil {
-		return httpapi.Internal(c, errorCodeUpdateSettingsFailed, fmt.Errorf("save settings: %w", err))
-	}
-
-	if err := h.internetConnector.UpdateProxyConfig(internetProxyConfig(saved)); err != nil {
-		return httpapi.Internal(c, errorCodeReloadProxySettingsFailed, fmt.Errorf("saved settings, reload proxy settings: %w", err))
-	}
-	if err := h.relay.Reload(); err != nil {
-		return httpapi.Internal(c, errorCodeReloadRelayFailed, fmt.Errorf("saved settings, reload notification relay: %w", err))
+		return httpapi.Internal(c, errorCodeUpdateAuthFailed, fmt.Errorf("save auth settings: %w", err))
 	}
 
 	return c.JSON(http.StatusOK, responseFromSettings(saved))
+}
+
+func (h *Handler) UpdateProxy(c *echo.Context) error {
+	var req ProxyValues
+	if err := c.Bind(&req); err != nil {
+		return httpapi.BadRequest(c, errorCodeUpdateProxyInvalidRequest, err)
+	}
+	req = normalizeProxyValues(req)
+	if err := c.Validate(&req); err != nil {
+		return httpapi.UnprocessableEntity(c, errorCodeUpdateProxyInvalid, err)
+	}
+
+	proxy := proxySettingsFromValues(req)
+	saved, err := h.store.Update(c.Request().Context(), func(current *appsettings.Settings) error {
+		current.Proxy = proxy
+		return nil
+	})
+	if err != nil {
+		return httpapi.Internal(c, errorCodeUpdateProxyFailed, fmt.Errorf("save proxy settings: %w", err))
+	}
+
+	if err := h.internetConnector.UpdateProxyConfig(internetProxyConfig(saved)); err != nil {
+		return httpapi.Internal(c, errorCodeReloadProxySettingsFailed, fmt.Errorf("saved proxy settings, reload proxy: %w", err))
+	}
+
+	return c.JSON(http.StatusOK, responseFromSettings(saved))
+}
+
+func (h *Handler) UpdateNotificationChannel(c *echo.Context) error {
+	name := strings.ToLower(strings.TrimSpace(c.Param("channel")))
+	if _, ok := allowedChannelNames()[name]; !ok {
+		return httpapi.UnprocessableEntity(
+			c,
+			errorCodeUpdateNotificationInvalid,
+			fmt.Errorf("notification channel %q is not supported", name),
+		)
+	}
+
+	var req ChannelValues
+	if err := c.Bind(&req); err != nil {
+		return httpapi.BadRequest(c, errorCodeUpdateNotificationInvalidRequest, err)
+	}
+	req = filterChannelValue(name, normalizeChannelValue(req))
+	if err := c.Validate(&req); err != nil {
+		return httpapi.UnprocessableEntity(c, errorCodeUpdateNotificationInvalid, err)
+	}
+
+	channel := channelSettingsFromValues(name, req)
+	var invalidErr error
+	saved, err := h.store.Update(c.Request().Context(), func(current *appsettings.Settings) error {
+		invalidErr = applyNotificationChannelSettings(current, name, channel)
+		return invalidErr
+	})
+	if invalidErr != nil {
+		return httpapi.UnprocessableEntity(c, errorCodeUpdateNotificationInvalid, invalidErr)
+	}
+	if err != nil {
+		return httpapi.Internal(c, errorCodeUpdateNotificationFailed, fmt.Errorf("save notification channel: %w", err))
+	}
+
+	if err := h.relay.Reload(); err != nil {
+		return httpapi.Internal(c, errorCodeReloadRelayFailed, fmt.Errorf("saved notification channel, reload notification relay: %w", err))
+	}
+
+	return c.JSON(http.StatusOK, responseFromSettings(saved))
+}
+
+func applyAuthSettings(current *appsettings.Settings, auth appsettings.Auth) error {
+	current.Auth = auth
+	return validateSettings(*current)
+}
+
+func applyNotificationChannelSettings(current *appsettings.Settings, name string, channel appsettings.Channel) error {
+	current.Channels[name] = channel
+	if !channel.IsEnabled() {
+		current.Auth.AuthProviders = slices.DeleteFunc(
+			current.Auth.AuthProviders,
+			func(provider string) bool { return provider == name },
+		)
+	}
+	if err := validateSettings(*current); err != nil {
+		return err
+	}
+	_, err := notify.New(current)
+	return err
 }
 
 func responseFromSettings(current appsettings.Settings) Response {
@@ -103,13 +178,6 @@ func valuesFromSettings(current appsettings.Settings) Values {
 		Proxy:    proxyValuesFromSettings(current.ProxySettings()),
 		Channels: channelValuesFromSettings(current.Channels),
 	}
-}
-
-func normalizeRequest(req UpdateRequest) UpdateRequest {
-	req.Auth = normalizeAuthValues(req.Auth)
-	req.Proxy = normalizeProxyValues(req.Proxy)
-	req.Channels = filterChannelValues(normalizeChannelValues(req.Channels))
-	return req
 }
 
 func normalizeAuthValues(auth AuthValues) AuthValues {
@@ -154,23 +222,6 @@ func proxyValuesFromSettings(proxy appsettings.Proxy) ProxyValues {
 	}
 }
 
-func normalizeChannels(channels map[string]ChannelValues) map[string]appsettings.Channel {
-	normalized := make(map[string]appsettings.Channel, len(channels))
-	for name, channel := range channels {
-		normalized[name] = channelSettingsFromValues(name, channel)
-	}
-	return normalized
-}
-
-func normalizeChannelValues(channels map[string]ChannelValues) map[string]ChannelValues {
-	normalized := make(map[string]ChannelValues, len(channels))
-	for name, channel := range channels {
-		name = strings.ToLower(strings.TrimSpace(name))
-		normalized[name] = normalizeChannelValue(channel)
-	}
-	return normalized
-}
-
 func normalizeChannelValue(channel ChannelValues) ChannelValues {
 	channel.Endpoint = strings.TrimSpace(channel.Endpoint)
 	channel.BotToken = strings.TrimSpace(channel.BotToken)
@@ -182,14 +233,6 @@ func normalizeChannelValue(channel ChannelValues) ChannelValues {
 	channel.From = strings.TrimSpace(channel.From)
 	channel.TLSPolicy = strings.ToLower(strings.TrimSpace(channel.TLSPolicy))
 	return channel
-}
-
-func filterChannelValues(channels map[string]ChannelValues) map[string]ChannelValues {
-	filtered := make(map[string]ChannelValues, len(channels))
-	for name, channel := range channels {
-		filtered[name] = filterChannelValue(name, channel)
-	}
-	return filtered
 }
 
 func filterChannelValue(name string, channel ChannelValues) ChannelValues {

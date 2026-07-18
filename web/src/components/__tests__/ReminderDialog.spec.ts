@@ -4,7 +4,13 @@ import { describe, expect, it, vi } from 'vitest'
 import ReminderDialog from '@/components/ReminderDialog.vue'
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({
+    t: (key: string) => {
+      if (key === 'modemDetail.reminder.dayUnit') return 'day'
+      if (key === 'modemDetail.reminder.dayUnitPlural') return 'days'
+      return key
+    },
+  }),
 }))
 
 const passthrough = { template: '<div><slot /></div>' }
@@ -95,5 +101,19 @@ describe('ReminderDialog', () => {
 
     expect(wrapper.emitted('save')).toBeUndefined()
     expect(wrapper.text()).toContain('modemDetail.reminder.validation.repeat')
+  })
+
+  it('renders the repeat unit inside the input group with English pluralization', async () => {
+    const wrapper = mountDialog()
+    const unit = wrapper.get('[data-testid="reminder-repeat-unit"]')
+
+    expect(wrapper.find('[data-slot="input-group"]').exists()).toBe(true)
+    expect(unit.text()).toBe('day')
+
+    await wrapper.get('#reminder-repeat').setValue('1')
+    expect(unit.text()).toBe('day')
+
+    await wrapper.get('#reminder-repeat').setValue('2')
+    expect(unit.text()).toBe('days')
   })
 })

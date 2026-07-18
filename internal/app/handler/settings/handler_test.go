@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -125,118 +126,45 @@ func TestResponseJSONUsesCamelCase(t *testing.T) {
 	}
 }
 
-func TestUpdate(t *testing.T) {
+func TestUpdateAuth(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name       string
-		request    UpdateRequest
-		wantStatus int
-		wantModem  bool
+		name          string
+		request       AuthValues
+		configure     func(*appsettings.Settings)
+		wantStatus    int
+		wantProviders []string
 	}{
 		{
-			name: "rejects auth provider without enabled channel",
-			request: UpdateRequest{
-				Auth: AuthValues{AuthProviders: []string{"telegram"}},
-				Proxy: ProxyValues{
-					ListenAddress: "127.0.0.1",
-					HTTPPort:      8080,
-					SOCKS5Port:    1080,
-				},
+			name:       "rejects auth provider without enabled channel",
+			request:    AuthValues{AuthProviders: []string{"telegram"}},
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+		{
+			name:    "rejects auth provider with disabled channel",
+			request: AuthValues{AuthProviders: []string{"telegram"}},
+			configure: func(settings *appsettings.Settings) {
+				settings.Channels["telegram"] = appsettings.Channel{Enabled: new(false)}
 			},
 			wantStatus: http.StatusUnprocessableEntity,
 		},
 		{
-			name: "rejects auth provider with disabled channel",
-			request: UpdateRequest{
-				Auth: AuthValues{AuthProviders: []string{"telegram"}},
-				Proxy: ProxyValues{
-					ListenAddress: "127.0.0.1",
-					HTTPPort:      8080,
-					SOCKS5Port:    1080,
-				},
-				Channels: map[string]ChannelValues{
-					"telegram": {
-						Enabled:    new(false),
-						BotToken:   "token",
-						Recipients: []string{"123456"},
-					},
-				},
-			},
+			name:       "rejects otp without auth providers",
+			request:    AuthValues{OTPRequired: true},
 			wantStatus: http.StatusUnprocessableEntity,
 		},
 		{
-			name: "rejects zero proxy http port",
-			request: UpdateRequest{
-				Proxy: ProxyValues{
-					ListenAddress: "127.0.0.1",
-					HTTPPort:      0,
-					SOCKS5Port:    1080,
-				},
+			name: "saves only auth settings",
+			request: AuthValues{
+				OTPRequired:   true,
+				AuthProviders: []string{" Telegram ", "telegram"},
 			},
-			wantStatus: http.StatusUnprocessableEntity,
-		},
-		{
-			name: "rejects channel without enabled flag",
-			request: UpdateRequest{
-				Proxy: ProxyValues{
-					ListenAddress: "127.0.0.1",
-					HTTPPort:      8080,
-					SOCKS5Port:    1080,
-				},
-				Channels: map[string]ChannelValues{
-					"telegram": {
-						BotToken:   "token",
-						Recipients: []string{"123456"},
-					},
-				},
+			configure: func(settings *appsettings.Settings) {
+				settings.Channels["telegram"] = appsettings.Channel{Enabled: new(true)}
 			},
-			wantStatus: http.StatusUnprocessableEntity,
-		},
-		{
-			name: "ignores hidden channel fields before validation",
-			request: UpdateRequest{
-				Proxy: ProxyValues{
-					ListenAddress: "127.0.0.1",
-					HTTPPort:      18080,
-					SOCKS5Port:    11080,
-				},
-				Channels: map[string]ChannelValues{
-					"telegram": {
-						Enabled:   new(false),
-						BotToken:  "draft-token",
-						SMTPPort:  70000,
-						TLSPolicy: "invalid",
-					},
-				},
-			},
-			wantStatus: http.StatusOK,
-			wantModem:  true,
-		},
-		{
-			name: "saves editable settings and preserves modems",
-			request: UpdateRequest{
-				Auth: AuthValues{
-					OTPRequired:   true,
-					AuthProviders: []string{"telegram"},
-				},
-				Proxy: ProxyValues{
-					ListenAddress: "127.0.0.1",
-					HTTPPort:      18080,
-					SOCKS5Port:    11080,
-					Password:      "secret",
-				},
-				Channels: map[string]ChannelValues{
-					"telegram": {
-						Enabled:      new(true),
-						BotToken:     "token",
-						Recipients:   []string{"123456"},
-						SMTPPassword: "hidden",
-					},
-				},
-			},
-			wantStatus: http.StatusOK,
-			wantModem:  true,
+			wantStatus:    http.StatusOK,
+			wantProviders: []string{"telegram"},
 		},
 	}
 
@@ -246,11 +174,19 @@ func TestUpdate(t *testing.T) {
 			t.Parallel()
 
 			store, h := newTestHandler(t)
+			if tt.configure != nil {
+				if _, err := store.Update(t.Context(), func(current *appsettings.Settings) error {
+					tt.configure(current)
+					return nil
+				}); err != nil {
+					t.Fatalf("configure settings: %v", err)
+				}
+			}
 			body, err := json.Marshal(tt.request)
 			if err != nil {
 				t.Fatalf("Marshal() error = %v", err)
 			}
-			rec := putSettings(t, h, body)
+			rec := putAuth(t, h, body)
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
 			}
@@ -259,24 +195,294 @@ func TestUpdate(t *testing.T) {
 			}
 
 			snapshot := store.Snapshot()
-			if _, ok := snapshot.Modems["modem-1"]; ok != tt.wantModem {
-				t.Fatalf("modem preserved = %v, want %v", ok, tt.wantModem)
+			if !slices.Equal(snapshot.Auth.AuthProviders, tt.wantProviders) {
+				t.Fatalf("AuthProviders = %#v, want %#v", snapshot.Auth.AuthProviders, tt.wantProviders)
 			}
-			if telegram := snapshot.Channels["telegram"]; telegram.SMTPPassword != "" {
-				t.Fatalf("telegram SMTPPassword = %q, want hidden field dropped", telegram.SMTPPassword)
+			if snapshot.ProxySettings() != appsettings.DefaultProxy() {
+				t.Fatalf("proxy settings changed while saving auth")
 			}
-			var resp Response
-			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-				t.Fatalf("Unmarshal() error = %v", err)
+			if _, ok := snapshot.Modems["modem-1"]; !ok {
+				t.Fatal("modem settings were not preserved")
 			}
-			if len(resp.Values.Auth.AuthProviders) > 0 && !slices.IsSorted(resp.Values.Auth.AuthProviders) {
-				t.Fatalf("AuthProviders = %#v, want sorted", resp.Values.Auth.AuthProviders)
+			if _, ok := snapshot.Channels["telegram"]; !ok {
+				t.Fatal("notification channels were not preserved")
 			}
 		})
 	}
 }
 
-func TestUpdatePersistsSettingsWhenProxyReloadFails(t *testing.T) {
+func TestUpdateProxy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		request    ProxyValues
+		wantStatus int
+	}{
+		{
+			name: "rejects zero http port",
+			request: ProxyValues{
+				ListenAddress: "127.0.0.1",
+				SOCKS5Port:    1080,
+			},
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+		{
+			name: "saves only proxy settings",
+			request: ProxyValues{
+				ListenAddress: " 127.0.0.1 ",
+				HTTPPort:      18080,
+				SOCKS5Port:    11080,
+				Password:      "secret",
+			},
+			wantStatus: http.StatusOK,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			store, h := newTestHandler(t)
+			if _, err := store.Update(t.Context(), func(current *appsettings.Settings) error {
+				current.Auth.AuthProviders = []string{"telegram"}
+				current.Channels["telegram"] = appsettings.Channel{Enabled: new(true)}
+				return nil
+			}); err != nil {
+				t.Fatalf("configure settings: %v", err)
+			}
+			body, err := json.Marshal(tt.request)
+			if err != nil {
+				t.Fatalf("Marshal() error = %v", err)
+			}
+			rec := putProxy(t, h, body)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if tt.wantStatus != http.StatusOK {
+				return
+			}
+
+			snapshot := store.Snapshot()
+			if snapshot.ProxySettings().HTTPPort != tt.request.HTTPPort {
+				t.Fatalf("HTTPPort = %d, want %d", snapshot.ProxySettings().HTTPPort, tt.request.HTTPPort)
+			}
+			if !slices.Equal(snapshot.Auth.AuthProviders, []string{"telegram"}) {
+				t.Fatalf("AuthProviders = %#v, want preserved", snapshot.Auth.AuthProviders)
+			}
+			if _, ok := snapshot.Channels["telegram"]; !ok {
+				t.Fatal("notification channels were not preserved")
+			}
+		})
+	}
+}
+
+func TestUpdateNotificationChannel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		channel       string
+		request       ChannelValues
+		configure     func(*appsettings.Settings)
+		wantStatus    int
+		wantEnabled   bool
+		wantProviders []string
+		wantEmailHost string
+	}{
+		{
+			name:    "saves one enabled channel",
+			channel: "telegram",
+			request: ChannelValues{
+				Enabled:    new(true),
+				BotToken:   "token",
+				Recipients: []string{"123456"},
+			},
+			configure: func(settings *appsettings.Settings) {
+				settings.Channels["email"] = appsettings.Channel{
+					Enabled:  new(false),
+					SMTPHost: "smtp.example.com",
+				}
+			},
+			wantStatus:    http.StatusOK,
+			wantEnabled:   true,
+			wantEmailHost: "smtp.example.com",
+		},
+		{
+			name:    "saves disabled channel draft and removes auth provider",
+			channel: "telegram",
+			request: ChannelValues{
+				Enabled:    new(false),
+				BotToken:   "draft-token",
+				Recipients: []string{"123456"},
+			},
+			configure: func(settings *appsettings.Settings) {
+				settings.Auth.AuthProviders = []string{"telegram"}
+				settings.Channels["telegram"] = appsettings.Channel{
+					Enabled:    new(true),
+					BotToken:   "old-token",
+					Recipients: appsettings.Recipients{"123456"},
+				}
+			},
+			wantStatus:    http.StatusOK,
+			wantProviders: []string{},
+		},
+		{
+			name:       "rejects unknown channel",
+			channel:    "unknown",
+			request:    ChannelValues{Enabled: new(false)},
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+		{
+			name:       "rejects missing enabled flag",
+			channel:    "telegram",
+			request:    ChannelValues{BotToken: "draft-token"},
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			store, h := newTestHandler(t)
+			if tt.configure != nil {
+				if _, err := store.Update(t.Context(), func(current *appsettings.Settings) error {
+					tt.configure(current)
+					return nil
+				}); err != nil {
+					t.Fatalf("configure settings: %v", err)
+				}
+			}
+			body, err := json.Marshal(tt.request)
+			if err != nil {
+				t.Fatalf("Marshal() error = %v", err)
+			}
+			rec := putNotificationChannel(t, h, tt.channel, body)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if tt.wantStatus != http.StatusOK {
+				return
+			}
+
+			snapshot := store.Snapshot()
+			if got := snapshot.Channels[tt.channel].IsEnabled(); got != tt.wantEnabled {
+				t.Fatalf("enabled = %v, want %v", got, tt.wantEnabled)
+			}
+			if tt.wantProviders != nil && !slices.Equal(snapshot.Auth.AuthProviders, tt.wantProviders) {
+				t.Fatalf("AuthProviders = %#v, want %#v", snapshot.Auth.AuthProviders, tt.wantProviders)
+			}
+			if tt.wantEmailHost != "" && snapshot.Channels["email"].SMTPHost != tt.wantEmailHost {
+				t.Fatalf("email SMTP host = %q, want %q", snapshot.Channels["email"].SMTPHost, tt.wantEmailHost)
+			}
+			if got := snapshot.ProxySettings().HTTPPort; got != appsettings.DefaultProxy().HTTPPort {
+				t.Fatalf("proxy HTTP port = %d, want unchanged", got)
+			}
+		})
+	}
+}
+
+func TestSettingsUpdatesValidateCurrentStateAtomically(t *testing.T) {
+	t.Parallel()
+
+	enabled := true
+	disabled := false
+	tests := []struct {
+		name    string
+		updates []func(*appsettings.Settings) error
+	}{
+		{
+			name: "concurrent notification disables",
+			updates: []func(*appsettings.Settings) error{
+				func(current *appsettings.Settings) error {
+					return applyNotificationChannelSettings(
+						current,
+						"lark",
+						appsettings.Channel{Enabled: &disabled, Endpoint: "https://example.com/lark"},
+					)
+				},
+				func(current *appsettings.Settings) error {
+					return applyNotificationChannelSettings(
+						current,
+						"wecom",
+						appsettings.Channel{Enabled: &disabled, Endpoint: "https://example.com/wecom"},
+					)
+				},
+			},
+		},
+		{
+			name: "concurrent auth save and provider disable",
+			updates: []func(*appsettings.Settings) error{
+				func(current *appsettings.Settings) error {
+					return applyAuthSettings(current, appsettings.Auth{
+						OTPRequired:   true,
+						AuthProviders: []string{"lark"},
+					})
+				},
+				func(current *appsettings.Settings) error {
+					return applyNotificationChannelSettings(
+						current,
+						"lark",
+						appsettings.Channel{Enabled: &disabled, Endpoint: "https://example.com/lark"},
+					)
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			current := appsettings.Default()
+			current.Auth = appsettings.Auth{
+				OTPRequired:   true,
+				AuthProviders: []string{"lark", "wecom"},
+			}
+			current.Channels = map[string]appsettings.Channel{
+				"lark": {
+					Enabled:  &enabled,
+					Endpoint: "https://example.com/lark",
+				},
+				"wecom": {
+					Enabled:  &enabled,
+					Endpoint: "https://example.com/wecom",
+				},
+			}
+			store := appsettings.NewMemoryStore(current)
+
+			start := make(chan struct{})
+			results := make(chan error, len(tt.updates))
+			var wg sync.WaitGroup
+			for _, update := range tt.updates {
+				wg.Go(func() {
+					<-start
+					_, err := store.Update(t.Context(), update)
+					results <- err
+				})
+			}
+			close(start)
+			wg.Wait()
+			close(results)
+
+			successes := 0
+			for err := range results {
+				if err == nil {
+					successes++
+				}
+			}
+			if successes != 1 {
+				t.Fatalf("successful updates = %d, want 1", successes)
+			}
+			if err := validateSettings(store.Snapshot()); err != nil {
+				t.Fatalf("stored settings are invalid: %v", err)
+			}
+		})
+	}
+}
+
+func TestUpdateProxyPersistsSettingsWhenReloadFails(t *testing.T) {
 	occupied, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
 	if err != nil {
 		t.Fatalf("Listen() error = %v", err)
@@ -323,21 +529,18 @@ func TestUpdatePersistsSettingsWhenProxyReloadFails(t *testing.T) {
 	}
 	h := New(store, internetConnector, relay)
 
-	reqBody := UpdateRequest{
-		Proxy: ProxyValues{
-			ListenAddress: "127.0.0.1",
-			HTTPPort:      occupiedPort,
-			SOCKS5Port:    occupiedPort,
-			Password:      "new",
-		},
-		Channels: map[string]ChannelValues{},
+	reqBody := ProxyValues{
+		ListenAddress: "127.0.0.1",
+		HTTPPort:      occupiedPort,
+		SOCKS5Port:    occupiedPort,
+		Password:      "new",
 	}
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
 	}
 
-	rec := putSettings(t, h, body)
+	rec := putProxy(t, h, body)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusInternalServerError, rec.Body.String())
 	}
@@ -382,17 +585,52 @@ func newTestHandler(t *testing.T) (*appsettings.Store, *Handler) {
 	return store, New(store, internetConnector, relay)
 }
 
-func putSettings(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecorder {
+func putAuth(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
 
 	e := echo.New()
 	e.Validator = appvalidator.New()
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", strings.NewReader(string(body)))
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings/auth", strings.NewReader(string(body)))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	if err := h.Update(c); err != nil {
-		t.Fatalf("Update() error = %v", err)
+	if err := h.UpdateAuth(c); err != nil {
+		t.Fatalf("UpdateAuth() error = %v", err)
+	}
+	return rec
+}
+
+func putProxy(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+
+	e := echo.New()
+	e.Validator = appvalidator.New()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings/proxy", strings.NewReader(string(body)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := h.UpdateProxy(c); err != nil {
+		t.Fatalf("UpdateProxy() error = %v", err)
+	}
+	return rec
+}
+
+func putNotificationChannel(t *testing.T, h *Handler, channel string, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+
+	e := echo.New()
+	e.Validator = appvalidator.New()
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/settings/notifications/"+channel,
+		strings.NewReader(string(body)),
+	)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPathValues(echo.PathValues{{Name: "channel", Value: channel}})
+	if err := h.UpdateNotificationChannel(c); err != nil {
+		t.Fatalf("UpdateNotificationChannel() error = %v", err)
 	}
 	return rec
 }

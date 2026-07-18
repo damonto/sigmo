@@ -1,13 +1,22 @@
+import { defineComponent, ref, type Ref } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createMemoryHistory, createRouter, RouterView, type Router } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SettingsKeyValueField from '@/components/settings/SettingsKeyValueField.vue'
-import SettingsView from '@/views/SettingsView.vue'
+import SettingsLayout from '@/layouts/SettingsLayout.vue'
 import type { SettingsResponse, SettingsValues } from '@/types/settings'
+import SettingsAuthView from '@/views/SettingsAuthView.vue'
+import SettingsNotificationsView from '@/views/SettingsNotificationsView.vue'
+import SettingsProxyView from '@/views/SettingsProxyView.vue'
+import SettingsView from '@/views/SettingsView.vue'
+import SettingsWebPushView from '@/views/SettingsWebPushView.vue'
 
 const api = vi.hoisted(() => ({
   getSettings: vi.fn(),
-  updateSettings: vi.fn(),
+  updateAuth: vi.fn(),
+  updateProxy: vi.fn(),
+  updateNotificationChannel: vi.fn(),
 }))
 
 vi.mock('@/apis/settings', () => ({
@@ -24,39 +33,13 @@ vi.mock('vue-i18n', () => ({
 vi.mock('vue-sonner', () => ({
   toast: {
     success: vi.fn(),
+    error: vi.fn(),
     warning: vi.fn(),
   },
 }))
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
-
-const sectionRect = (top: number): DOMRect => ({
-  bottom: top + 100,
-  height: 100,
-  left: 0,
-  right: 100,
-  top,
-  width: 100,
-  x: 0,
-  y: top,
-  toJSON: () => ({}),
-})
-
-const stubDesktopViewport = () => {
-  vi.stubGlobal(
-    'matchMedia',
-    vi.fn(() => ({
-      matches: true,
-      media: '(min-width: 768px)',
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(() => true),
-    })),
-  )
-}
+type SettingsApiResult = { data: Ref<SettingsResponse | undefined> }
 
 const values = (): SettingsValues => ({
   auth: {
@@ -106,6 +89,7 @@ const response = (): SettingsResponse => ({
       {
         key: 'telegram',
         label: 'Telegram',
+        description: 'Telegram notifications',
         fields: [
           {
             key: 'botToken',
@@ -127,6 +111,7 @@ const response = (): SettingsResponse => ({
       {
         key: 'email',
         label: 'Email',
+        description: 'Email notifications',
         fields: [
           {
             key: 'smtpHost',
@@ -181,10 +166,6 @@ const response = (): SettingsResponse => ({
 })
 
 const stubs = {
-  Button: {
-    props: ['disabled', 'type'],
-    template: '<button :type="type || \'button\'" :disabled="disabled"><slot /></button>',
-  },
   Checkbox: {
     props: ['disabled', 'id', 'modelValue'],
     emits: ['update:model-value'],
@@ -200,10 +181,6 @@ const stubs = {
   Label: {
     props: ['for'],
     template: '<label :for="$props.for"><slot /></label>',
-  },
-  RouterLink: {
-    props: ['to'],
-    template: '<a><slot /></a>',
   },
   Spinner: {
     template: '<span />',
@@ -236,335 +213,366 @@ const stubs = {
   },
 }
 
-const mountView = async (settings = response(), attachTo?: HTMLElement) => {
-  api.getSettings.mockResolvedValue({ data: { value: clone(settings) } })
-  api.updateSettings.mockImplementation(async (payload: SettingsValues) => ({
-    data: {
-      value: {
-        ...settings,
-        values: clone(payload),
-      },
-    },
-  }))
+const Root = defineComponent({
+  components: { RouterView },
+  template: '<RouterView />',
+})
 
-  const wrapper = mount(SettingsView, {
-    attachTo,
+const createSettingsRouter = () =>
+  createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      {
+        path: '/',
+        name: 'home',
+        component: { template: '<div>Home</div>' },
+      },
+      {
+        path: '/settings',
+        component: SettingsLayout,
+        children: [
+          { path: '', name: 'settings', component: SettingsView },
+          { path: 'auth', name: 'settings-auth', component: SettingsAuthView },
+          { path: 'proxy', name: 'settings-proxy', component: SettingsProxyView },
+          {
+            path: 'web-push',
+            name: 'settings-web-push',
+            component: SettingsWebPushView,
+          },
+          {
+            path: 'notifications',
+            name: 'settings-notifications',
+            component: SettingsNotificationsView,
+          },
+        ],
+      },
+    ],
+  })
+
+const mountSettings = async (path: string, settings = response()) => {
+  api.getSettings.mockResolvedValue({ data: ref<SettingsResponse>(clone(settings)) })
+  api.updateAuth.mockImplementation(async (payload: SettingsValues['auth']) => {
+    const updated = clone(settings)
+    updated.values.auth = clone(payload)
+    return { data: ref<SettingsResponse>(updated) }
+  })
+  api.updateProxy.mockImplementation(async (payload: SettingsValues['proxy']) => {
+    const updated = clone(settings)
+    updated.values.proxy = clone(payload)
+    return { data: ref<SettingsResponse>(updated) }
+  })
+  api.updateNotificationChannel.mockImplementation(
+    async (channel: string, payload: SettingsValues['channels'][string]) => {
+      const updated = clone(settings)
+      updated.values.channels[channel] = clone(payload)
+      if (payload.enabled !== true) {
+        updated.values.auth.authProviders = updated.values.auth.authProviders.filter(
+          (provider) => provider !== channel,
+        )
+      }
+      return { data: ref<SettingsResponse>(updated) }
+    },
+  )
+
+  const router = createSettingsRouter()
+  await router.push(path)
+  await router.isReady()
+
+  const wrapper = mount(Root, {
     global: {
+      plugins: [router],
       stubs,
     },
   })
   await flushPromises()
-  return wrapper
+  return { wrapper, router }
 }
 
-describe('SettingsView', () => {
+const save = async (wrapper: ReturnType<typeof mount>) => {
+  const saveButton = wrapper
+    .findAll('button')
+    .find((button) => button.text().includes('settings.save'))
+  expect(saveButton).toBeDefined()
+  await saveButton?.trigger('click')
+  await flushPromises()
+}
+
+const navigate = async (router: Router, path: string) => {
+  await router.push(path)
+  await flushPromises()
+}
+
+describe('Settings routes', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
-    vi.unstubAllGlobals()
     document.body.innerHTML = ''
   })
 
-  it('renders fields from schema and auth providers as checkboxes', async () => {
-    const wrapper = await mountView()
+  it('renders four category cards with direct module routes', async () => {
+    const { wrapper } = await mountSettings('/settings')
+    const hrefs = wrapper
+      .findAll('main a')
+      .map((link) => link.attributes('href'))
+      .filter((href): href is string => href?.startsWith('/settings/') === true)
 
-    expect(wrapper.find('button#settings-auth-otpRequired[role="switch"]').exists()).toBe(true)
-    expect(wrapper.find('#settings-channel-telegram-recipients[role="listbox"]').exists()).toBe(true)
-    expect(wrapper.find('#settings-channel-email-tlsPolicy[data-slot="select-trigger"]').exists()).toBe(
-      false,
-    )
-    expect(wrapper.find('select').exists()).toBe(false)
-
-    const authProviders = wrapper.findAll('[role="checkbox"]')
-    expect(authProviders).toHaveLength(1)
-    const authProvider = authProviders[0]
-    expect(authProvider?.attributes('aria-checked')).toBe('false')
-    expect(wrapper.text()).toContain('Telegram')
+    expect(hrefs).toEqual([
+      '/settings/auth',
+      '/settings/proxy',
+      '/settings/web-push',
+      '/settings/notifications',
+    ])
+    expect(wrapper.text()).toContain('settings.authTitle')
+    expect(wrapper.text()).toContain('settings.notificationTitle')
   })
 
-  it('renders localized schema text when i18n keys are present', async () => {
+  it('renders one top-level Back link and marks the active desktop module', async () => {
+    const { wrapper } = await mountSettings('/settings/notifications')
+
+    expect(wrapper.get('aside a[aria-current="page"]').attributes('href')).toBe(
+      '/settings/notifications',
+    )
+    expect(wrapper.get('a[href="/settings"]').text()).toContain('settings.back')
+    expect(wrapper.find('main a[href="/settings"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="settings-nav-description-auth"]').classes()).toContain(
+      'whitespace-normal',
+    )
+  })
+
+  it('keeps unsaved edits while navigating and saves each module independently', async () => {
+    const { wrapper, router } = await mountSettings('/settings/auth')
+
+    await wrapper.get('#settings-auth-otpRequired').trigger('click')
+    await navigate(router, '/settings/proxy')
+    await wrapper.get('#settings-proxy-httpPort').setValue('9090')
+    await save(wrapper)
+
+    expect(api.updateProxy).toHaveBeenCalledWith(expect.objectContaining({ httpPort: 9090 }))
+    expect(api.updateAuth).not.toHaveBeenCalled()
+
+    await navigate(router, '/settings/auth')
+    expect(wrapper.get('#settings-auth-otpRequired').attributes('aria-checked')).toBe('true')
+    await save(wrapper)
+
+    expect(api.updateAuth).toHaveBeenCalledWith(expect.objectContaining({ otpRequired: true }))
+  })
+
+  it('does not include unsaved notification drafts in the auth save', async () => {
+    const { wrapper, router } = await mountSettings('/settings/notifications')
+
+    await wrapper.get('button[aria-controls="settings-channel-email-details"]').trigger('click')
+    await wrapper.get('#settings-channel-email-smtpHost').setValue('smtp.draft.example')
+    await navigate(router, '/settings/auth')
+    await save(wrapper)
+
+    expect(api.updateAuth).toHaveBeenCalledTimes(1)
+    expect(api.updateNotificationChannel).not.toHaveBeenCalled()
+
+    await navigate(router, '/settings/notifications')
+    expect(
+      (wrapper.get('#settings-channel-email-smtpHost').element as HTMLInputElement).value,
+    ).toBe('smtp.draft.example')
+  })
+
+  it('renders schema fields and saves selected auth providers', async () => {
+    const { wrapper } = await mountSettings('/settings/auth')
+
+    expect(wrapper.get('#settings-auth-otpRequired').attributes('role')).toBe('switch')
+    const authProvider = wrapper.get('[role="checkbox"]')
+    expect(authProvider.attributes('aria-checked')).toBe('false')
+    await authProvider.trigger('click')
+    await save(wrapper)
+
+    expect(api.updateAuth.mock.calls[0]?.[0].authProviders).toEqual(['telegram'])
+  })
+
+  it('renders desktop auth and proxy save actions below their settings cards', async () => {
+    const { wrapper, router } = await mountSettings('/settings/auth')
+
+    expect(wrapper.find('main header button').exists()).toBe(false)
+    expect(wrapper.find('main [data-slot="card"] + button').text()).toContain('settings.save')
+    expect(wrapper.find('.fixed.inset-x-0.bottom-0 button').text()).toContain('settings.save')
+
+    await navigate(router, '/settings/proxy')
+
+    expect(wrapper.find('main header button').exists()).toBe(false)
+    expect(wrapper.find('main [data-slot="card"] + button').text()).toContain('settings.save')
+    expect(wrapper.find('.fixed.inset-x-0.bottom-0 button').text()).toContain('settings.save')
+  })
+
+  it('renders localized schema text and unsupported controls explicitly', async () => {
     const settings = response()
-    const otpField = settings.schema.auth[0]
-    const telegramChannel = settings.schema.channels[0]
-    if (!otpField || !telegramChannel) {
-      throw new Error('test fixture missing schema entries')
-    }
     settings.schema.auth[0] = {
-      ...otpField,
+      ...settings.schema.auth[0]!,
       label: 'settings.schema.auth.otpRequired.label',
       description: 'settings.schema.auth.otpRequired.description',
     }
-    settings.schema.channels[0] = {
-      ...telegramChannel,
-      label: 'settings.schema.channels.telegram.label',
-      description: 'settings.schema.channels.telegram.description',
-      fields: telegramChannel.fields.map((field) =>
-        field.key === 'headers'
-          ? {
-              ...field,
-              label: 'settings.schema.channels.http.headers.label',
-              description: 'settings.schema.channels.http.headers.description',
-            }
-          : field,
-      ),
-    }
-
-    const wrapper = await mountView(settings)
-
-    expect(wrapper.text()).toContain('settings.schema.auth.otpRequired.label')
-    expect(wrapper.text()).toContain('settings.schema.auth.otpRequired.description')
-    expect(wrapper.text()).toContain('settings.schema.channels.telegram.label')
-    expect(wrapper.text()).toContain('settings.schema.channels.telegram.description')
-    expect(wrapper.text()).toContain('settings.schema.channels.http.headers.label')
-    expect(wrapper.text()).toContain('settings.schema.channels.http.headers.description')
-  })
-
-  it('renders multi-option select fields with shadcn select', async () => {
-    const settings = response()
-    settings.values.channels = {
-      email: {
-        enabled: true,
-        tlsPolicy: 'opportunistic',
-      },
-    }
-
-    const wrapper = await mountView(settings)
-
-    const trigger = wrapper.find('#settings-channel-email-tlsPolicy[data-slot="select-trigger"]')
-    expect(trigger.exists()).toBe(true)
-    expect(trigger.attributes('role')).toBe('combobox')
-    expect(wrapper.find('select').exists()).toBe(false)
-  })
-
-  it('renders and saves email smtp username', async () => {
-    const settings = response()
-    settings.values.channels = {
-      email: {
-        enabled: true,
-        smtpHost: 'smtp.example.com',
-        smtpPort: 587,
-        smtpUsername: 'old@example.com',
-        smtpPassword: 'secret',
-        from: 'Sigmo <sigmo@example.com>',
-        recipients: ['ops@example.com'],
-        tlsPolicy: 'opportunistic',
-      },
-    }
-
-    const wrapper = await mountView(settings)
-
-    const username = wrapper.find('input#settings-channel-email-smtpUsername')
-    expect(username.exists()).toBe(true)
-    expect(username.attributes('type')).toBe('text')
-    expect((username.element as HTMLInputElement).value).toBe('old@example.com')
-
-    await username.setValue('new@example.com')
-    const saveButton = wrapper
-      .findAll('button')
-      .find((button) => button.text().includes('settings.save'))
-    expect(saveButton).toBeDefined()
-    await saveButton?.trigger('click')
-    await flushPromises()
-
-    expect(api.updateSettings).toHaveBeenCalledTimes(1)
-    const payload = api.updateSettings.mock.calls[0]?.[0] as SettingsValues
-    expect(payload.channels.email?.smtpUsername).toBe('new@example.com')
-  })
-
-  it('selects the desktop nav item for the visible section while scrolling', async () => {
-    stubDesktopViewport()
-    const root = document.createElement('div')
-    document.body.append(root)
-    const wrapper = await mountView(response(), root)
-
-    vi.spyOn(
-      wrapper.find('#settings-section-auth').element,
-      'getBoundingClientRect',
-    ).mockReturnValue(sectionRect(-360))
-    vi.spyOn(
-      wrapper.find('#settings-section-proxy').element,
-      'getBoundingClientRect',
-    ).mockReturnValue(sectionRect(80))
-    vi.spyOn(
-      wrapper.find('#settings-section-channels').element,
-      'getBoundingClientRect',
-    ).mockReturnValue(sectionRect(720))
-
-    window.dispatchEvent(new Event('scroll'))
-    await wrapper.vm.$nextTick()
-
-    const navButtons = wrapper.findAll('aside button')
-    expect(navButtons[1]?.classes()).toContain('bg-muted')
-    expect(navButtons[0]?.classes()).not.toContain('bg-muted')
-
-    wrapper.unmount()
-    root.remove()
-  })
-
-  it('selects the last desktop nav item at the page bottom', async () => {
-    stubDesktopViewport()
-    vi.stubGlobal('innerHeight', 600)
-    vi.stubGlobal('scrollY', 1400)
-    vi.spyOn(document.documentElement, 'scrollHeight', 'get').mockReturnValue(2000)
-    vi.spyOn(document.body, 'scrollHeight', 'get').mockReturnValue(2000)
-
-    const root = document.createElement('div')
-    document.body.append(root)
-    const wrapper = await mountView(response(), root)
-
-    const navButtons = wrapper.findAll('aside button')
-    expect(navButtons[2]?.classes()).toContain('bg-muted')
-    expect(navButtons[1]?.classes()).not.toContain('bg-muted')
-
-    wrapper.unmount()
-    root.remove()
-  })
-
-  it('does not register scroll listeners after unmounting during settings load', async () => {
-    stubDesktopViewport()
-    const addEventListener = vi.spyOn(window, 'addEventListener')
-    let resolveSettings: (value: { data: { value: SettingsResponse } }) => void = () => {}
-    api.getSettings.mockReturnValue(
-      new Promise((resolve) => {
-        resolveSettings = resolve
-      }),
-    )
-
-    const wrapper = mount(SettingsView, {
-      global: {
-        stubs,
-      },
-    })
-    await wrapper.vm.$nextTick()
-    expect(api.getSettings).toHaveBeenCalledTimes(1)
-
-    wrapper.unmount()
-    resolveSettings({ data: { value: response() } })
-    await flushPromises()
-
-    expect(addEventListener).not.toHaveBeenCalledWith(
-      'scroll',
-      expect.any(Function),
-      expect.anything(),
-    )
-  })
-
-  it('saves selected auth providers as a channel name array', async () => {
-    const wrapper = await mountView()
-
-    await wrapper.find('[role="checkbox"]').trigger('click')
-    const saveButton = wrapper
-      .findAll('button')
-      .find((button) => button.text().includes('settings.save'))
-    expect(saveButton).toBeDefined()
-    await saveButton?.trigger('click')
-    await flushPromises()
-
-    expect(api.updateSettings).toHaveBeenCalledTimes(1)
-    const payload = api.updateSettings.mock.calls[0]?.[0] as SettingsValues
-    expect(payload.auth.authProviders).toEqual(['telegram'])
-  })
-
-  it('saves updated tag lists as arrays', async () => {
-    const wrapper = await mountView()
-
-    await wrapper.find('#settings-channel-telegram-recipients .tags-input-add').trigger('click')
-    const saveButton = wrapper
-      .findAll('button')
-      .find((button) => button.text().includes('settings.save'))
-    expect(saveButton).toBeDefined()
-    await saveButton?.trigger('click')
-    await flushPromises()
-
-    expect(api.updateSettings).toHaveBeenCalledTimes(1)
-    const payload = api.updateSettings.mock.calls[0]?.[0] as SettingsValues
-    expect(payload.channels.telegram?.recipients).toEqual(['10001', '10002'])
-  })
-
-  it('saves added, renamed, and removed key/value channel fields', async () => {
-    const wrapper = await mountView()
-    const keyValueField = wrapper.findComponent(SettingsKeyValueField)
-    expect(keyValueField.exists()).toBe(true)
-
-    const addHeaderButton = keyValueField
-      .findAll('button')
-      .find((button) => button.text().includes('settings.addHeader'))
-    expect(addHeaderButton).toBeDefined()
-    await addHeaderButton?.trigger('click')
-
-    let inputs = keyValueField.findAll('input')
-    expect(inputs).toHaveLength(4)
-    await inputs[2]?.setValue('X-Sigmo')
-
-    inputs = keyValueField.findAll('input')
-    await inputs[3]?.setValue('enabled')
-
-    const removeOriginalButton = keyValueField.findAll('button')[1]
-    expect(removeOriginalButton).toBeDefined()
-    await removeOriginalButton?.trigger('click')
-
-    const saveButton = wrapper
-      .findAll('button')
-      .find((button) => button.text().includes('settings.save'))
-    expect(saveButton).toBeDefined()
-    await saveButton?.trigger('click')
-    await flushPromises()
-
-    expect(api.updateSettings).toHaveBeenCalledTimes(1)
-    const payload = api.updateSettings.mock.calls[0]?.[0] as SettingsValues
-    expect(payload.channels.telegram?.headers).toEqual({
-      'X-Sigmo': 'enabled',
-    })
-  })
-
-  it('keeps channel settings when a channel is disabled', async () => {
-    const wrapper = await mountView()
-
-    await wrapper.find('#settings-channel-telegram-enabled').trigger('click')
-    const saveButton = wrapper
-      .findAll('button')
-      .find((button) => button.text().includes('settings.save'))
-    expect(saveButton).toBeDefined()
-    await saveButton?.trigger('click')
-    await flushPromises()
-
-    expect(api.updateSettings).toHaveBeenCalledTimes(1)
-    const payload = api.updateSettings.mock.calls[0]?.[0] as SettingsValues
-    expect(payload.channels.telegram).toMatchObject({
-      enabled: false,
-      botToken: 'secret',
-      recipients: ['10001'],
-      headers: {
-        Authorization: 'Bearer token',
-      },
-    })
-  })
-
-  it('does not render unsupported controls as editable inputs', async () => {
-    const settings = response()
     settings.schema.auth.push({
       key: 'mystery',
       label: 'Mystery',
       control: 'unsupported' as never,
     })
 
-    const wrapper = await mountView(settings)
+    const { wrapper } = await mountSettings('/settings/auth', settings)
 
+    expect(wrapper.text()).toContain('settings.schema.auth.otpRequired.label')
+    expect(wrapper.text()).toContain('settings.schema.auth.otpRequired.description')
     expect(wrapper.text()).toContain('Unsupported control: unsupported')
     expect(wrapper.find('input#settings-auth-mystery').exists()).toBe(false)
   })
+})
 
-  it('shows unsupported auth controls instead of dropping them', async () => {
+describe('Settings notifications', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders each channel as a card and expands the first enabled channel', async () => {
+    const { wrapper } = await mountSettings('/settings/notifications')
+
+    expect(wrapper.findAll('main [data-slot="card"]')).toHaveLength(2)
+    expect(wrapper.find('#settings-channel-telegram-recipients[role="listbox"]').exists()).toBe(
+      true,
+    )
+    expect(wrapper.find('#settings-channel-email-smtpHost').exists()).toBe(false)
+    expect(wrapper.find('#settings-channel-telegram-save').exists()).toBe(true)
+    expect(wrapper.find('.fixed.inset-x-0.bottom-0').exists()).toBe(false)
+  })
+
+  it('expands a disabled channel without enabling it', async () => {
+    const { wrapper } = await mountSettings('/settings/notifications')
+
+    expect(wrapper.get('#settings-channel-email-enabled').attributes('aria-checked')).toBe('false')
+    await wrapper.get('button[aria-controls="settings-channel-email-details"]').trigger('click')
+
+    expect(wrapper.find('#settings-channel-email-smtpHost').exists()).toBe(true)
+    expect(wrapper.get('#settings-channel-email-enabled').attributes('aria-checked')).toBe('false')
+  })
+
+  it('saves one disabled channel, preserves its fields, and removes it from auth providers', async () => {
     const settings = response()
-    settings.schema.auth = settings.schema.auth.map((field) =>
-      field.key === 'authProviders' ? { ...field, control: 'unsupported' as never } : field,
+    settings.values.auth.authProviders = ['telegram']
+    const { wrapper } = await mountSettings('/settings/notifications', settings)
+
+    await wrapper.get('#settings-channel-telegram-enabled').trigger('click')
+    expect(wrapper.find('#settings-channel-telegram-recipients').exists()).toBe(true)
+    await wrapper.get('#settings-channel-telegram-save').trigger('click')
+    await flushPromises()
+
+    expect(api.updateAuth).not.toHaveBeenCalled()
+    expect(api.updateProxy).not.toHaveBeenCalled()
+    expect(api.updateNotificationChannel).toHaveBeenCalledTimes(1)
+    expect(api.updateNotificationChannel.mock.calls[0]?.[0]).toBe('telegram')
+    expect(api.updateNotificationChannel.mock.calls[0]?.[1]).toMatchObject({
+      enabled: false,
+      botToken: 'secret',
+      recipients: ['10001'],
+      headers: { Authorization: 'Bearer token' },
+    })
+  })
+
+  it('saves updated tag lists and key/value fields', async () => {
+    const { wrapper } = await mountSettings('/settings/notifications')
+
+    await wrapper.get('#settings-channel-telegram-recipients .tags-input-add').trigger('click')
+
+    const keyValueField = wrapper.findComponent(SettingsKeyValueField)
+    const addButton = keyValueField
+      .findAll('button')
+      .find((button) => button.text().includes('settings.addHeader'))
+    await addButton?.trigger('click')
+
+    let inputs = keyValueField.findAll('input')
+    await inputs[2]?.setValue('X-Sigmo')
+    inputs = keyValueField.findAll('input')
+    await inputs[3]?.setValue('enabled')
+    await keyValueField.findAll('button')[1]?.trigger('click')
+    await wrapper.get('#settings-channel-telegram-save').trigger('click')
+    await flushPromises()
+
+    const payload = api.updateNotificationChannel.mock
+      .calls[0]?.[1] as SettingsValues['channels'][string]
+    expect(payload.recipients).toEqual(['10001', '10002'])
+    expect(payload.headers).toEqual({ 'X-Sigmo': 'enabled' })
+  })
+
+  it('uses two columns and expands an isolated field to the full row', async () => {
+    const settings = response()
+    settings.schema.channels.push({
+      key: 'lark',
+      label: 'Lark',
+      fields: [{ key: 'endpoint', label: 'Webhook', control: 'text' }],
+    })
+    const { wrapper } = await mountSettings('/settings/notifications', settings)
+
+    await wrapper.get('button[aria-controls="settings-channel-email-details"]').trigger('click')
+
+    expect(wrapper.get('[data-channel="email"] [data-field="smtpHost"]').classes()).not.toContain(
+      'sm:col-span-2',
+    )
+    expect(wrapper.get('[data-channel="email"] [data-field="from"]').classes()).toContain(
+      'sm:col-span-2',
     )
 
-    const wrapper = await mountView(settings)
+    await wrapper.get('button[aria-controls="settings-channel-lark-details"]').trigger('click')
+    expect(wrapper.get('[data-channel="lark"] [data-field="endpoint"]').classes()).toContain(
+      'sm:col-span-2',
+    )
+  })
 
-    expect(wrapper.text()).toContain('Unsupported control: unsupported')
+  it('keeps another channel draft when one card is saved', async () => {
+    const { wrapper } = await mountSettings('/settings/notifications')
+
+    await wrapper.get('button[aria-controls="settings-channel-email-details"]').trigger('click')
+    await wrapper.get('#settings-channel-email-smtpHost').setValue('smtp.draft.example')
+    await wrapper.get('#settings-channel-telegram-save').trigger('click')
+    await flushPromises()
+
+    expect(
+      (wrapper.get('#settings-channel-email-smtpHost').element as HTMLInputElement).value,
+    ).toBe('smtp.draft.example')
+    expect(api.updateNotificationChannel.mock.calls[0]?.[0]).toBe('telegram')
+  })
+
+  it('serializes settings saves while a notification request is pending', async () => {
+    const { wrapper, router } = await mountSettings('/settings/notifications')
+    let resolveNotification: ((value: SettingsApiResult) => void) | undefined
+    api.updateNotificationChannel.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveNotification = resolve
+        }),
+    )
+
+    await wrapper.get('#settings-channel-telegram-save').trigger('click')
+    await navigate(router, '/settings/auth')
+
+    const authSave = wrapper.get<HTMLButtonElement>('main [data-slot="card"] + button')
+    expect(authSave.element.disabled).toBe(true)
+    await authSave.trigger('click')
+    expect(api.updateAuth).not.toHaveBeenCalled()
+
+    resolveNotification?.({ data: ref<SettingsResponse>(response()) })
+    await flushPromises()
+    expect(authSave.element.disabled).toBe(false)
+  })
+
+  it('renders multi-option channel fields with shadcn select', async () => {
+    const settings = response()
+    settings.values.channels = {
+      email: {
+        enabled: true,
+        tlsPolicy: 'opportunistic',
+      },
+    }
+
+    const { wrapper } = await mountSettings('/settings/notifications', settings)
+    const trigger = wrapper.get('#settings-channel-email-tlsPolicy[data-slot="select-trigger"]')
+
+    expect(trigger.attributes('role')).toBe('combobox')
+    expect(wrapper.find('select').exists()).toBe(false)
   })
 })

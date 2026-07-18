@@ -18,8 +18,34 @@ const router = createRouter({
     },
     {
       path: '/settings',
-      name: 'settings',
-      component: () => import('@/views/SettingsView.vue'),
+      component: () => import('@/layouts/SettingsLayout.vue'),
+      children: [
+        {
+          path: '',
+          name: 'settings',
+          component: () => import('@/views/SettingsView.vue'),
+        },
+        {
+          path: 'auth',
+          name: 'settings-auth',
+          component: () => import('@/views/SettingsAuthView.vue'),
+        },
+        {
+          path: 'proxy',
+          name: 'settings-proxy',
+          component: () => import('@/views/SettingsProxyView.vue'),
+        },
+        {
+          path: 'web-push',
+          name: 'settings-web-push',
+          component: () => import('@/views/SettingsWebPushView.vue'),
+        },
+        {
+          path: 'notifications',
+          name: 'settings-notifications',
+          component: () => import('@/views/SettingsNotificationsView.vue'),
+        },
+      ],
     },
     {
       path: '/modems/:id',

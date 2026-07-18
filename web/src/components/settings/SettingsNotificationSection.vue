@@ -4,22 +4,17 @@ import { useI18n } from 'vue-i18n'
 
 import SettingsField from '@/components/settings/SettingsField.vue'
 import SettingsKeyValueField from '@/components/settings/SettingsKeyValueField.vue'
-import SettingsWebPushChannel from '@/components/settings/SettingsWebPushChannel.vue'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
+import SettingsSaveButton from '@/components/settings/SettingsSaveButton.vue'
+import { Card } from '@/components/ui/card'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Switch } from '@/components/ui/switch'
 import type { SettingsChannel, SettingsChannelSchema } from '@/types/settings'
 
 const props = defineProps<{
-  id: string
-  title: string
-  description: string
   channels: Record<string, SettingsChannel>
   disabled?: boolean
   expandedChannels: Record<string, boolean>
+  savingChannels: Record<string, boolean>
   schemas: SettingsChannelSchema[]
 }>()
 
@@ -27,6 +22,7 @@ const emit = defineEmits<{
   'toggle-channel': [schema: SettingsChannelSchema, enabled: boolean]
   'toggle-details': [channel: string]
   'update-field': [channel: string, key: string, value: unknown]
+  'save-channel': [channel: string]
 }>()
 
 const { t, te } = useI18n()
@@ -54,43 +50,55 @@ const isChannelExpanded = (channel: string) => {
 const isWideField = (control: string) => {
   return control === 'list' || control === 'keyValue'
 }
+
+const isFullWidthField = (fields: SettingsChannelSchema['fields'], index: number) => {
+  if (isWideField(fields[index]?.control ?? '')) return true
+
+  let start = index
+  while (start > 0 && !isWideField(fields[start - 1]?.control ?? '')) start -= 1
+
+  let end = index
+  while (end < fields.length - 1 && !isWideField(fields[end + 1]?.control ?? '')) end += 1
+
+  return index === end && (end - start + 1) % 2 === 1
+}
+
+const isChannelSaving = (channel: string) => {
+  return props.savingChannels[channel] === true
+}
+
+const isChannelDisabled = (channel: string) => {
+  return props.disabled === true || isChannelSaving(channel)
+}
 </script>
 
 <template>
-  <section :id="id" class="scroll-mt-8 space-y-4 md:border-t md:pt-8">
-    <div>
-      <h2 class="text-lg font-semibold text-foreground">{{ title }}</h2>
-      <p class="text-sm text-muted-foreground">{{ description }}</p>
-    </div>
-
-    <div class="divide-y border-y">
-      <SettingsWebPushChannel :disabled="disabled" />
+  <div class="space-y-3">
+    <Card
+      v-for="channel in schemas"
+      :key="channel.key"
+      :data-channel="channel.key"
+      class="gap-0 overflow-hidden border-0 py-0 shadow-sm"
+    >
       <Collapsible
-        v-for="channel in schemas"
-        :key="channel.key"
-        :open="isChannelEnabled(channel.key) && isChannelExpanded(channel.key)"
-        :disabled="disabled || !isChannelEnabled(channel.key)"
-        class="py-4"
+        :open="isChannelExpanded(channel.key)"
+        :disabled="isChannelDisabled(channel.key)"
         @update:open="emit('toggle-details', channel.key)"
       >
-        <div class="flex items-center gap-3">
+        <div class="flex items-start gap-3 p-4">
           <CollapsibleTrigger as-child>
             <button
               type="button"
-              class="flex min-w-0 flex-1 items-center gap-3 text-left"
-              :class="isChannelEnabled(channel.key) ? 'cursor-pointer' : 'cursor-default'"
-              :disabled="disabled || !isChannelEnabled(channel.key)"
+              class="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+              :disabled="isChannelDisabled(channel.key)"
               :aria-controls="fieldID('details', channel.key)"
             >
               <ChevronDown
-                class="size-4 shrink-0 text-muted-foreground transition-transform"
-                :class="{
-                  'rotate-180': isChannelExpanded(channel.key),
-                  'opacity-30': !isChannelEnabled(channel.key),
-                }"
+                class="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform"
+                :class="{ 'rotate-180': isChannelExpanded(channel.key) }"
               />
               <span class="min-w-0 space-y-1">
-                <span class="block text-sm font-medium text-foreground">
+                <span class="block text-sm font-semibold text-foreground">
                   {{ schemaText(channel.label) }}
                 </span>
                 <span
@@ -107,7 +115,7 @@ const isWideField = (control: string) => {
             <Switch
               :id="fieldID('enabled', channel.key)"
               :model-value="isChannelEnabled(channel.key)"
-              :disabled="disabled"
+              :disabled="isChannelDisabled(channel.key)"
               @update:model-value="emit('toggle-channel', channel, $event === true)"
             />
           </div>
@@ -115,19 +123,20 @@ const isWideField = (control: string) => {
 
         <CollapsibleContent
           :id="fieldID('details', channel.key)"
-          class="mt-4 grid gap-4 sm:grid-cols-2"
+          class="grid gap-4 border-t px-4 py-4 sm:grid-cols-2"
         >
           <div
-            v-for="field in channel.fields"
+            v-for="(field, index) in channel.fields"
             :key="field.key"
+            :data-field="field.key"
             class="space-y-2"
-            :class="{ 'sm:col-span-2': isWideField(field.control) }"
+            :class="{ 'sm:col-span-2': isFullWidthField(channel.fields, index) }"
           >
             <SettingsKeyValueField
               v-if="field.control === 'keyValue'"
               :field="field"
               :model-value="channelValue(channel.key, field.key)"
-              :disabled="disabled"
+              :disabled="isChannelDisabled(channel.key)"
               @update:model-value="emit('update-field', channel.key, field.key, $event)"
             />
             <SettingsField
@@ -135,12 +144,22 @@ const isWideField = (control: string) => {
               :id="fieldID(field.key, channel.key)"
               :field="field"
               :model-value="channelValue(channel.key, field.key)"
-              :disabled="disabled"
+              :disabled="isChannelDisabled(channel.key)"
               @update:model-value="emit('update-field', channel.key, field.key, $event)"
+            />
+          </div>
+
+          <div class="flex justify-end border-t pt-4 sm:col-span-2">
+            <SettingsSaveButton
+              :id="fieldID('save', channel.key)"
+              class="w-full sm:w-auto"
+              :disabled="isChannelDisabled(channel.key)"
+              :saving="isChannelSaving(channel.key)"
+              @save="emit('save-channel', channel.key)"
             />
           </div>
         </CollapsibleContent>
       </Collapsible>
-    </div>
-  </section>
+    </Card>
+  </div>
 </template>
