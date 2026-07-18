@@ -1,5 +1,18 @@
 <script setup lang="ts">
-import { Bell, BellOff, Check, LoaderCircle, Save, Trash2 } from 'lucide-vue-next'
+import {
+  Bell,
+  BellOff,
+  Check,
+  Globe2,
+  Laptop,
+  LoaderCircle,
+  Monitor,
+  Pencil,
+  Smartphone,
+  Tablet,
+  Trash2,
+  X,
+} from 'lucide-vue-next'
 import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
@@ -32,6 +45,7 @@ const {
 } = useWebPush()
 
 const labels = ref<Record<string, string>>({})
+const editingID = ref<string | null>(null)
 
 watch(
   subscriptions,
@@ -70,8 +84,10 @@ const run = async (action: () => Promise<void>, successMessage?: string) => {
   try {
     await action()
     if (successMessage) toast.success(successMessage)
+    return true
   } catch (err) {
     toast.error(err instanceof Error ? err.message : t('settings.webPush.actionFailed'))
+    return false
   }
 }
 
@@ -96,14 +112,44 @@ const handleDelete = (subscription: WebPushSubscriptionResponse) => {
   void run(() => deleteSubscription(subscription), t('settings.webPush.deleted'))
 }
 
-const handleRename = (subscription: WebPushSubscriptionResponse) => {
+const startRenaming = (subscription: WebPushSubscriptionResponse) => {
+  labels.value[subscription.id] = subscription.label
+  editingID.value = subscription.id
+}
+
+const cancelRenaming = (subscription: WebPushSubscriptionResponse) => {
+  labels.value[subscription.id] = subscription.label
+  editingID.value = null
+}
+
+const handleRename = async (subscription: WebPushSubscriptionResponse) => {
   const label = labels.value[subscription.id]?.trim() ?? ''
-  if (!label || label === subscription.label) return
-  void run(() => renameSubscription(subscription, label), t('settings.webPush.renamed'))
+  if (!label) return
+  if (label === subscription.label) {
+    editingID.value = null
+    return
+  }
+  if (await run(() => renameSubscription(subscription, label), t('settings.webPush.renamed'))) {
+    editingID.value = null
+  }
 }
 
 const isCurrent = (subscription: WebPushSubscriptionResponse) =>
   subscription.id === currentSubscription.value?.id
+
+const platformLabel = (subscription: WebPushSubscriptionResponse) =>
+  subscription.platform.trim() || t('settings.webPush.unknownDevice')
+
+const platformIcon = (subscription: WebPushSubscriptionResponse) => {
+  const device = `${subscription.platform} ${subscription.userAgent}`.toLowerCase()
+
+  if (/ipad|tablet/.test(device)) return Tablet
+  if (/android/.test(device)) return /mobile/.test(device) ? Smartphone : Tablet
+  if (/iphone|ipod|ios|mobile/.test(device)) return Smartphone
+  if (/mac|cros|chrome os/.test(device)) return Laptop
+  if (/windows|win32|win64|linux|x11/.test(device)) return Monitor
+  return Globe2
+}
 </script>
 
 <template>
@@ -159,56 +205,104 @@ const isCurrent = (subscription: WebPushSubscriptionResponse) =>
         {{ t('settings.webPush.disableCurrent') }}
       </Button>
 
-      <div v-if="subscriptions.length > 0" class="divide-y border-y">
+      <div v-if="subscriptions.length > 0" class="space-y-3">
         <div
           v-for="subscription in subscriptions"
           :key="subscription.id"
-          class="flex min-w-0 items-start gap-2 py-3"
+          class="flex min-w-0 items-center gap-3 rounded-xl border bg-card/60 p-3 shadow-xs transition-colors hover:bg-muted/20 sm:p-4"
         >
-          <div class="min-w-0 flex-1">
-            <div class="flex min-w-0 items-center gap-2">
+          <div
+            class="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+          >
+            <component
+              :is="platformIcon(subscription)"
+              class="size-5"
+              aria-hidden="true"
+              data-testid="web-push-platform-icon"
+            />
+          </div>
+
+          <div class="min-w-0 flex-1 space-y-1.5">
+            <div v-if="editingID === subscription.id" class="flex min-w-0 items-center gap-2">
               <Input
                 v-model="labels[subscription.id]"
                 :aria-label="t('settings.webPush.deviceLabel')"
                 :disabled="props.disabled || isUpdating"
-                class="h-8 min-w-0"
+                class="h-8 min-w-0 max-w-sm"
                 @keyup.enter="handleRename(subscription)"
+                @keyup.esc="cancelRenaming(subscription)"
               />
-              <Check v-if="isCurrent(subscription)" class="size-4 shrink-0 text-primary" />
             </div>
-            <p class="mt-1 truncate text-xs text-muted-foreground">
-              {{
-                subscription.platform ||
-                subscription.userAgent ||
-                t('settings.webPush.unknownDevice')
-              }}
-              <span v-if="isCurrent(subscription)">
-                · {{ t('settings.webPush.currentDevice') }}</span
-              >
+            <div v-else class="min-w-0">
+              <p class="truncate text-sm font-semibold text-foreground" :title="subscription.label">
+                {{ subscription.label }}
+              </p>
+            </div>
+            <p
+              class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground"
+              data-testid="web-push-device-metadata"
+            >
+              <span>{{ platformLabel(subscription) }}</span>
+              <template v-if="isCurrent(subscription)">
+                <span aria-hidden="true">·</span>
+                <span>{{ t('settings.webPush.currentDevice') }}</span>
+              </template>
             </p>
           </div>
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            :aria-label="t('settings.webPush.rename')"
-            :title="t('settings.webPush.rename')"
-            :disabled="props.disabled || isUpdating"
-            @click="handleRename(subscription)"
-          >
-            <Save class="size-4" />
-          </Button>
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            :aria-label="t('settings.webPush.deleteDevice')"
-            :title="t('settings.webPush.deleteDevice')"
-            :disabled="props.disabled || isUpdating"
-            @click="handleDelete(subscription)"
-          >
-            <Trash2 class="size-4 text-muted-foreground" />
-          </Button>
+
+          <div class="flex shrink-0 items-center gap-1">
+            <template v-if="editingID === subscription.id">
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="outline"
+                class="rounded-lg text-primary"
+                :aria-label="t('settings.webPush.saveRename')"
+                :title="t('settings.webPush.saveRename')"
+                :disabled="props.disabled || isUpdating"
+                @click="handleRename(subscription)"
+              >
+                <Check class="size-4" />
+              </Button>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                class="rounded-lg"
+                :aria-label="t('settings.webPush.cancelRename')"
+                :title="t('settings.webPush.cancelRename')"
+                :disabled="props.disabled || isUpdating"
+                @click="cancelRenaming(subscription)"
+              >
+                <X class="size-4" />
+              </Button>
+            </template>
+            <Button
+              v-else
+              type="button"
+              size="icon-sm"
+              variant="outline"
+              class="rounded-lg"
+              :aria-label="t('settings.webPush.rename')"
+              :title="t('settings.webPush.rename')"
+              :disabled="props.disabled || isUpdating"
+              @click="startRenaming(subscription)"
+            >
+              <Pencil class="size-4" />
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="outline"
+              class="rounded-lg text-destructive hover:text-destructive"
+              :aria-label="t('settings.webPush.deleteDevice')"
+              :title="t('settings.webPush.deleteDevice')"
+              :disabled="props.disabled || isUpdating"
+              @click="handleDelete(subscription)"
+            >
+              <Trash2 class="size-4" />
+            </Button>
+          </div>
         </div>
       </div>
 

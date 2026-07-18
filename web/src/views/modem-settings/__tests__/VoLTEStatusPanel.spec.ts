@@ -95,7 +95,7 @@ describe('VoLTEStatusPanel', () => {
     })
 
     expect(wrapper.text()).toContain('Managed by modem')
-    expect(wrapper.text()).toContain('The modem IMS is registered and managing VoLTE internally.')
+    expect(wrapper.text()).toContain('VoLTE is managed by Modem.')
     expect(wrapper.text()).toContain('—')
     expect(wrapper.get('section').classes()).toContain('bg-emerald-50/40')
   })
