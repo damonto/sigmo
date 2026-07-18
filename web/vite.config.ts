@@ -9,6 +9,28 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 
 // https://vite.dev/config/
 export default defineConfig({
+  build: {
+    rolldownOptions: {
+      output: {
+        advancedChunks: {
+          groups: [
+            {
+              name: 'vue-vendor',
+              test: /[\\/]node_modules[\\/](?:@intlify[\\/]|@vue[\\/]|pinia[\\/]|vue(?:-i18n|-router)?[\\/])/,
+            },
+            {
+              name: 'ui-vendor',
+              test: /[\\/]node_modules[\\/](?:@floating-ui[\\/]|@vueuse[\\/]|aria-hidden[\\/]|class-variance-authority[\\/]|clsx[\\/]|reka-ui[\\/]|tailwind-merge[\\/]|vue-sonner[\\/])/,
+            },
+            {
+              name: 'phone-vendor',
+              test: /[\\/]node_modules[\\/]libphonenumber-js[\\/]/,
+            },
+          ],
+        },
+      },
+    },
+  },
   plugins: [
     vue(),
     vueJsx(),
