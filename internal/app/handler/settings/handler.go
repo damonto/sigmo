@@ -3,6 +3,7 @@ package settings
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 	"slices"
@@ -14,6 +15,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/notify"
+	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 	appsettings "github.com/damonto/sigmo/internal/pkg/settings"
 )
 
@@ -27,6 +29,9 @@ const (
 	errorCodeUpdateAuthInvalidRequest         = "update_auth_invalid_request"
 	errorCodeUpdateAuthInvalid                = "update_auth_invalid"
 	errorCodeUpdateAuthFailed                 = "update_auth_failed"
+	errorCodeTestAuthInvalidRequest           = "test_auth_invalid_request"
+	errorCodeTestAuthInvalid                  = "test_auth_invalid"
+	errorCodeTestAuthFailed                   = "test_auth_failed"
 	errorCodeUpdateProxyInvalidRequest        = "update_proxy_invalid_request"
 	errorCodeUpdateProxyInvalid               = "update_proxy_invalid"
 	errorCodeUpdateProxyFailed                = "update_proxy_failed"
@@ -39,6 +44,7 @@ const (
 
 var (
 	errAuthProvidersRequired = errors.New("auth providers are required when otp is enabled")
+	errAuthTestFailed        = errors.New("authentication provider test failed")
 )
 
 func New(store *appsettings.Store, internetConnector *internet.Connector, relay *forwarder.Relay) *Handler {
@@ -78,6 +84,42 @@ func (h *Handler) UpdateAuth(c *echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, responseFromSettings(saved))
+}
+
+func (h *Handler) TestAuth(c *echo.Context) error {
+	var req AuthTestRequest
+	if err := c.Bind(&req); err != nil {
+		return httpapi.BadRequest(c, errorCodeTestAuthInvalidRequest, err)
+	}
+	providers := normalizeNames(trimNames(req.AuthProviders))
+	candidate := appsettings.Settings{
+		Auth: appsettings.Auth{
+			OTPRequired:   true,
+			AuthProviders: providers,
+		},
+		Channels: make(map[string]appsettings.Channel, len(providers)),
+	}
+	current := h.store.Snapshot()
+	for _, provider := range providers {
+		if channel, ok := current.Channels[provider]; ok {
+			candidate.Channels[provider] = channel
+		}
+	}
+	if err := validateSettings(candidate); err != nil {
+		return httpapi.UnprocessableEntity(c, errorCodeTestAuthInvalid, err)
+	}
+
+	notifier, err := notify.New(&candidate)
+	if err != nil {
+		slog.Error("create authentication test notifier", "error", err, "providers", providers)
+		return httpapi.UnprocessableEntity(c, errorCodeTestAuthFailed, errAuthTestFailed)
+	}
+	if err := notifier.Send(c.Request().Context(), notifyevent.OTPEvent{Code: "000000"}, providers...); err != nil {
+		slog.Error("send authentication provider test", "error", err, "providers", providers)
+		return httpapi.UnprocessableEntity(c, errorCodeTestAuthFailed, errAuthTestFailed)
+	}
+
+	return c.NoContent(http.StatusCreated)
 }
 
 func (h *Handler) UpdateProxy(c *echo.Context) error {

@@ -85,6 +85,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		{
 			h := hsettings.New(deps.Store, deps.Internet, deps.Relay)
 			protected.GET("/settings", h.Get)
+			protected.POST("/settings/auth-tests", h.TestAuth)
 			protected.PUT("/settings/auth", h.UpdateAuth)
 			protected.PUT("/settings/proxy", h.UpdateProxy)
 			protected.PUT("/settings/notifications/:channel", h.UpdateNotificationChannel)

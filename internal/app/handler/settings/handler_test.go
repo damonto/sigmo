@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -206,6 +208,194 @@ func TestUpdateAuth(t *testing.T) {
 			}
 			if _, ok := snapshot.Channels["telegram"]; !ok {
 				t.Fatal("notification channels were not preserved")
+			}
+		})
+	}
+}
+
+func TestAuthTestValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		body       string
+		configure  func(*appsettings.Settings)
+		wantStatus int
+	}{
+		{
+			name:       "rejects malformed request",
+			body:       `{"authProviders":`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "rejects empty providers",
+			body:       `{}`,
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+		{
+			name:       "rejects missing provider",
+			body:       `{"authProviders":["telegram"]}`,
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+		{
+			name: "rejects disabled provider",
+			body: `{"authProviders":["telegram"]}`,
+			configure: func(settings *appsettings.Settings) {
+				settings.Channels["telegram"] = appsettings.Channel{Enabled: new(false)}
+			},
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+		{
+			name: "rejects invalid provider configuration",
+			body: `{"authProviders":["http"]}`,
+			configure: func(settings *appsettings.Settings) {
+				settings.Channels["http"] = appsettings.Channel{Enabled: new(true)}
+			},
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			store, h := newTestHandler(t)
+			if tt.configure != nil {
+				if _, err := store.Update(t.Context(), func(current *appsettings.Settings) error {
+					tt.configure(current)
+					return nil
+				}); err != nil {
+					t.Fatalf("configure settings: %v", err)
+				}
+			}
+			before := store.Snapshot()
+			rec := postAuthTest(t, h, []byte(tt.body))
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if after := store.Snapshot(); !reflect.DeepEqual(after, before) {
+				t.Fatal("authentication test changed stored settings")
+			}
+		})
+	}
+}
+
+func TestAuthTestDelivery(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		providers     []string
+		larkStatus    int
+		wantStatus    int
+		wantHTTPCalls int32
+		wantLarkCalls int32
+	}{
+		{
+			name:          "tests only the selected provider",
+			providers:     []string{"http"},
+			larkStatus:    http.StatusOK,
+			wantStatus:    http.StatusCreated,
+			wantHTTPCalls: 1,
+		},
+		{
+			name:          "succeeds when all selected providers deliver",
+			providers:     []string{"http", "lark"},
+			larkStatus:    http.StatusOK,
+			wantStatus:    http.StatusCreated,
+			wantHTTPCalls: 1,
+			wantLarkCalls: 1,
+		},
+		{
+			name:          "fails when one selected provider rejects delivery",
+			providers:     []string{"http", "lark"},
+			larkStatus:    http.StatusBadGateway,
+			wantStatus:    http.StatusUnprocessableEntity,
+			wantHTTPCalls: 1,
+			wantLarkCalls: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			type payload struct {
+				Kind    string `json:"kind"`
+				Payload struct {
+					Code string `json:"code"`
+				} `json:"payload"`
+			}
+
+			var httpCalls atomic.Int32
+			codes := make(chan string, 1)
+			httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				httpCalls.Add(1)
+				var got payload
+				if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+					t.Errorf("decode HTTP test payload: %v", err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				if got.Kind != "otp" {
+					t.Errorf("kind = %q, want otp", got.Kind)
+				}
+				codes <- got.Payload.Code
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer httpServer.Close()
+
+			var larkCalls atomic.Int32
+			larkServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				larkCalls.Add(1)
+				w.WriteHeader(tt.larkStatus)
+				if tt.larkStatus >= http.StatusBadRequest {
+					_, _ = w.Write([]byte("sensitive upstream detail"))
+				}
+			}))
+			defer larkServer.Close()
+
+			store, h := newTestHandler(t)
+			if _, err := store.Update(t.Context(), func(current *appsettings.Settings) error {
+				current.Channels["http"] = appsettings.Channel{
+					Enabled:  new(true),
+					Endpoint: httpServer.URL,
+				}
+				current.Channels["lark"] = appsettings.Channel{
+					Enabled:  new(true),
+					Endpoint: larkServer.URL,
+				}
+				current.Channels["email"] = appsettings.Channel{Enabled: new(true)}
+				return nil
+			}); err != nil {
+				t.Fatalf("configure settings: %v", err)
+			}
+			before := store.Snapshot()
+			body, err := json.Marshal(AuthTestRequest{AuthProviders: tt.providers})
+			if err != nil {
+				t.Fatalf("Marshal() error = %v", err)
+			}
+
+			rec := postAuthTest(t, h, body)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if got := httpCalls.Load(); got != tt.wantHTTPCalls {
+				t.Fatalf("HTTP calls = %d, want %d", got, tt.wantHTTPCalls)
+			}
+			if got := larkCalls.Load(); got != tt.wantLarkCalls {
+				t.Fatalf("Lark calls = %d, want %d", got, tt.wantLarkCalls)
+			}
+			if tt.wantHTTPCalls > 0 {
+				if got := <-codes; got != "000000" {
+					t.Fatalf("test code = %q, want 000000", got)
+				}
+			}
+			if strings.Contains(rec.Body.String(), "sensitive upstream detail") {
+				t.Fatalf("response exposed upstream body: %s", rec.Body.String())
+			}
+			if after := store.Snapshot(); !reflect.DeepEqual(after, before) {
+				t.Fatal("authentication test changed stored settings")
 			}
 		})
 	}
@@ -596,6 +786,20 @@ func putAuth(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecorder {
 	c := e.NewContext(req, rec)
 	if err := h.UpdateAuth(c); err != nil {
 		t.Fatalf("UpdateAuth() error = %v", err)
+	}
+	return rec
+}
+
+func postAuthTest(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/auth-tests", strings.NewReader(string(body)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := h.TestAuth(c); err != nil {
+		t.Fatalf("TestAuth() error = %v", err)
 	}
 	return rec
 }

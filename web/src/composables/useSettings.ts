@@ -13,6 +13,7 @@ export const useSettings = () => {
   const settings = ref<SettingsResponse | null>(null)
   const values = ref<SettingsValues | null>(null)
   const isLoading = ref(false)
+  const isTestingAuth = ref(false)
   const isSavingAuth = ref(false)
   const isSavingProxy = ref(false)
   const savingNotificationChannels = ref<Record<string, boolean>>({})
@@ -37,7 +38,7 @@ export const useSettings = () => {
   }
 
   const saveAuth = async () => {
-    if (!values.value || isSaving.value) return null
+    if (!values.value || isSaving.value || isTestingAuth.value) return null
     isSavingAuth.value = true
     try {
       const { data } = await configApi.updateAuth(values.value.auth)
@@ -47,6 +48,19 @@ export const useSettings = () => {
       return data.value
     } finally {
       isSavingAuth.value = false
+    }
+  }
+
+  const testAuth = async () => {
+    const authProviders = values.value?.auth.authProviders
+    if (!authProviders?.length || isSaving.value || isTestingAuth.value) return false
+
+    isTestingAuth.value = true
+    try {
+      await configApi.testAuth({ authProviders: clone(authProviders) })
+      return true
+    } finally {
+      isTestingAuth.value = false
     }
   }
 
@@ -98,6 +112,7 @@ export const useSettings = () => {
     settings,
     values,
     isLoading,
+    isTestingAuth,
     isSaving,
     isSavingAuth,
     isSavingProxy,
@@ -106,5 +121,6 @@ export const useSettings = () => {
     saveAuth,
     saveProxy,
     saveNotificationChannel,
+    testAuth,
   }
 }

@@ -127,11 +127,15 @@ func (s *Store) ValidateToken(token string) bool {
 }
 
 func generateOTP() (string, error) {
-	n, err := rand.Int(rand.Reader, big.NewInt(otpMaxValue))
+	n, err := rand.Int(rand.Reader, big.NewInt(otpMaxValue-1))
 	if err != nil {
 		return "", fmt.Errorf("generating otp: %w", err)
 	}
-	return fmt.Sprintf("%0*d", otpLength, n.Int64()), nil
+	return formatOTP(n.Int64()), nil
+}
+
+func formatOTP(randomValue int64) string {
+	return fmt.Sprintf("%0*d", otpLength, randomValue+1)
 }
 
 func generateToken() (string, error) {

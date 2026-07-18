@@ -1,4 +1,4 @@
-import { defineComponent, ref, type Ref } from 'vue'
+import { defineComponent, nextTick, ref, type Ref } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter, RouterView, type Router } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -14,9 +14,16 @@ import SettingsWebPushView from '@/views/SettingsWebPushView.vue'
 
 const api = vi.hoisted(() => ({
   getSettings: vi.fn(),
+  testAuth: vi.fn(),
   updateAuth: vi.fn(),
   updateProxy: vi.fn(),
   updateNotificationChannel: vi.fn(),
+}))
+
+const toast = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  warning: vi.fn(),
 }))
 
 vi.mock('@/apis/settings', () => ({
@@ -31,11 +38,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 vi.mock('vue-sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-    warning: vi.fn(),
-  },
+  toast,
 }))
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -251,6 +254,7 @@ const createSettingsRouter = () =>
 
 const mountSettings = async (path: string, settings = response()) => {
   api.getSettings.mockResolvedValue({ data: ref<SettingsResponse>(clone(settings)) })
+  api.testAuth.mockResolvedValue({ data: ref<void>() })
   api.updateAuth.mockImplementation(async (payload: SettingsValues['auth']) => {
     const updated = clone(settings)
     updated.values.auth = clone(payload)
@@ -389,18 +393,69 @@ describe('Settings routes', () => {
     expect(api.updateAuth.mock.calls[0]?.[0].authProviders).toEqual(['telegram'])
   })
 
-  it('renders desktop auth and proxy save actions below their settings cards', async () => {
+  it('renders the responsive auth test action above save', async () => {
     const { wrapper, router } = await mountSettings('/settings/auth')
 
     expect(wrapper.find('main header button').exists()).toBe(false)
-    expect(wrapper.find('main [data-slot="card"] + button').text()).toContain('settings.save')
-    expect(wrapper.find('.fixed.inset-x-0.bottom-0 button').text()).toContain('settings.save')
+    const authActions = wrapper.get('.fixed.inset-x-0.bottom-0')
+    expect(authActions.classes()).toContain('lg:static')
+    expect(authActions.findAll('button').map((button) => button.text())).toEqual([
+      'settings.test',
+      'settings.save',
+    ])
 
     await navigate(router, '/settings/proxy')
 
     expect(wrapper.find('main header button').exists()).toBe(false)
     expect(wrapper.find('main [data-slot="card"] + button').text()).toContain('settings.save')
     expect(wrapper.find('.fixed.inset-x-0.bottom-0 button').text()).toContain('settings.save')
+  })
+
+  it('tests selected authentication providers without saving', async () => {
+    const { wrapper } = await mountSettings('/settings/auth')
+
+    const testButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('settings.test'))
+    expect(testButton).toBeDefined()
+    expect(testButton?.attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[role="checkbox"]').trigger('click')
+    expect(testButton?.attributes('disabled')).toBeUndefined()
+    await testButton?.trigger('click')
+    await flushPromises()
+
+    expect(api.testAuth).toHaveBeenCalledWith({ authProviders: ['telegram'] })
+    expect(api.updateAuth).not.toHaveBeenCalled()
+    expect(toast.success).toHaveBeenCalledWith('settings.authTestSuccess')
+  })
+
+  it('blocks repeated actions while testing authentication providers', async () => {
+    let resolveTest: (() => void) | undefined
+    api.testAuth.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveTest = () => resolve({ data: ref<void>() })
+        }),
+    )
+    const { wrapper } = await mountSettings('/settings/auth')
+    await wrapper.get('[role="checkbox"]').trigger('click')
+
+    const buttons = () => wrapper.findAll('button')
+    const testButton = buttons().find((button) => button.text().includes('settings.test'))
+    const saveButton = buttons().find((button) => button.text().includes('settings.save'))
+    await testButton?.trigger('click')
+    await nextTick()
+
+    expect(testButton?.attributes('disabled')).toBeDefined()
+    expect(saveButton?.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[role="checkbox"]').attributes('disabled')).toBeDefined()
+    await testButton?.trigger('click')
+    expect(api.testAuth).toHaveBeenCalledTimes(1)
+
+    resolveTest?.()
+    await flushPromises()
+    expect(testButton?.attributes('disabled')).toBeUndefined()
   })
 
   it('renders localized schema text and unsupported controls explicitly', async () => {
@@ -550,14 +605,17 @@ describe('Settings notifications', () => {
     await wrapper.get('#settings-channel-telegram-save').trigger('click')
     await navigate(router, '/settings/auth')
 
-    const authSave = wrapper.get<HTMLButtonElement>('main [data-slot="card"] + button')
-    expect(authSave.element.disabled).toBe(true)
-    await authSave.trigger('click')
+    const authSave = wrapper
+      .findAll<HTMLButtonElement>('main button')
+      .find((button) => button.text().includes('settings.save'))
+    expect(authSave).toBeDefined()
+    expect(authSave?.element.disabled).toBe(true)
+    await authSave?.trigger('click')
     expect(api.updateAuth).not.toHaveBeenCalled()
 
     resolveNotification?.({ data: ref<SettingsResponse>(response()) })
     await flushPromises()
-    expect(authSave.element.disabled).toBe(false)
+    expect(authSave?.element.disabled).toBe(false)
   })
 
   it('renders multi-option channel fields with shadcn select', async () => {

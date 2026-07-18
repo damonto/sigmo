@@ -16,6 +16,10 @@ type AuthValues struct {
 	OTPRequired   bool     `json:"otpRequired"`
 }
 
+type AuthTestRequest struct {
+	AuthProviders []string `json:"authProviders"`
+}
+
 type ProxyValues struct {
 	ListenAddress string `json:"listenAddress" validate:"required"`
 	HTTPPort      int    `json:"httpPort" validate:"gte=1,lte=65535"`

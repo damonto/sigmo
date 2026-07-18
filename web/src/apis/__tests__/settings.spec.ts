@@ -31,6 +31,21 @@ describe('useSettingsApi', () => {
     )
   })
 
+  it('tests the selected authentication providers', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await useSettingsApi().testAuth({ authProviders: ['telegram'] })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/settings/auth-tests'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ authProviders: ['telegram'] }),
+      }),
+    )
+  })
+
   it('updates the proxy settings resource', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ schema: {}, values: {} }), {

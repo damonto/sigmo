@@ -3,6 +3,10 @@ export type SettingsAuth = {
   otpRequired: boolean
 }
 
+export type SettingsAuthTest = {
+  authProviders: string[]
+}
+
 export type SettingsProxy = {
   listenAddress: string
   httpPort: number

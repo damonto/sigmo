@@ -30,7 +30,7 @@ const en = {
     description: 'Manage global authentication, proxy, browser push, and notification settings.',
     back: 'Back',
     loading: 'Loading settings',
-    authTitle: 'Auth',
+    authTitle: 'Authentication',
     authDescription: 'Login OTP and the channels used to send verification codes.',
     proxyTitle: 'Proxy',
     proxyDescription: 'Used when a modem internet connection exposes proxy services.',
@@ -40,7 +40,9 @@ const en = {
     addHeader: 'Add',
     removeHeader: 'Remove',
     cancel: 'Cancel',
+    test: 'Test',
     save: 'Save',
+    authTestSuccess: 'Test verification code sent.',
     saveSuccess: 'Settings saved.',
     notificationSaveSuccess: 'Notification channel saved.',
     schema: {
@@ -50,7 +52,7 @@ const en = {
           description: 'Require one-time password verification before using the API.',
         },
         authProviders: {
-          label: 'Auth providers',
+          label: 'Authentication providers',
           description: 'Enabled channels allowed to send login OTPs.',
         },
       },

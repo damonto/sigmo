@@ -52,4 +52,21 @@ describe('locales', () => {
       'Sigmo <sigmo@example.com>',
     )
   })
+
+  it('uses the full Authentication label in English settings', () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: 'en',
+      fallbackLocale: 'en',
+      messages: { en, zh },
+    })
+    const tests = [
+      { path: 'settings.authTitle', want: 'Authentication' },
+      { path: 'settings.schema.auth.authProviders.label', want: 'Authentication providers' },
+    ] as const
+
+    for (const tt of tests) {
+      expect(i18n.global.t(tt.path)).toBe(tt.want)
+    }
+  })
 })

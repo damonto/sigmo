@@ -40,7 +40,9 @@ const zh = {
     addHeader: '添加',
     removeHeader: '删除',
     cancel: '取消',
+    test: '测试',
     save: '保存',
+    authTestSuccess: '测试验证码已发送。',
     saveSuccess: '设置已保存。',
     notificationSaveSuccess: '通知渠道已保存。',
     schema: {

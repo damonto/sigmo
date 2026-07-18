@@ -2,6 +2,7 @@ import { fetchJson } from '@/lib/fetch'
 
 import type {
   SettingsAuth,
+  SettingsAuthTest,
   SettingsChannel,
   SettingsProxy,
   SettingsResponse,
@@ -15,6 +16,13 @@ export const useSettingsApi = () => {
   const updateAuth = (payload: SettingsAuth) => {
     return fetchJson<SettingsResponse>('settings/auth', {
       method: 'PUT',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  const testAuth = (payload: SettingsAuthTest) => {
+    return fetchJson<void>('settings/auth-tests', {
+      method: 'POST',
       body: JSON.stringify(payload),
     })
   }
@@ -35,6 +43,7 @@ export const useSettingsApi = () => {
 
   return {
     getSettings,
+    testAuth,
     updateAuth,
     updateProxy,
     updateNotificationChannel,
