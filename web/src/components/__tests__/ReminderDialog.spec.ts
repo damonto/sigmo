@@ -37,7 +37,10 @@ const stubs = {
   Spinner: { template: '<span />' },
 }
 
-const mountDialog = (reminder?: { nextAt: string; repeatDays?: number; content: string }) =>
+const mountDialog = (
+  reminder?: { nextAt: string; repeatDays?: number; content: string },
+  attachTo?: HTMLElement,
+) =>
   mount(ReminderDialog, {
     props: {
       open: true,
@@ -46,9 +49,47 @@ const mountDialog = (reminder?: { nextAt: string; repeatDays?: number; content: 
       'onUpdate:open': () => {},
     },
     global: { stubs },
+    attachTo,
   })
 
 describe('ReminderDialog', () => {
+  it('keeps the mobile header left aligned and constrains the datetime input', () => {
+    const wrapper = mountDialog()
+    const header = wrapper
+      .findAll('[class]')
+      .find((element) => element.classes().includes('text-left'))
+    const timeGroup = wrapper.get('[data-testid="reminder-time-group"]')
+    const timeInput = wrapper.get('#reminder-time')
+
+    expect(header?.text()).toContain('modemDetail.reminder.description')
+    expect(timeGroup.classes()).toContain('overflow-hidden')
+    expect(timeInput.classes()).toEqual(
+      expect.arrayContaining([
+        'appearance-none',
+        '[&::-webkit-calendar-picker-indicator]:opacity-0',
+      ]),
+    )
+  })
+
+  it('focuses the dialog heading instead of opening the iOS time picker', () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    const wrapper = mountDialog(undefined, host)
+    const event = new Event('openAutoFocus', { cancelable: true })
+    const focusTarget = wrapper.get('[tabindex="-1"]')
+    const vm = wrapper.vm as unknown as {
+      handleOpenAutoFocus: (event: Event) => void
+    }
+
+    vm.handleOpenAutoFocus(event)
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(focusTarget.element)
+
+    wrapper.unmount()
+    host.remove()
+  })
+
   it('submits browser-local time as UTC with optional repeat', async () => {
     const wrapper = mountDialog()
     const localDate = new Date(2026, 6, 18, 10, 30, 0, 0)

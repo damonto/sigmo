@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bell, Save, Trash2 } from 'lucide-vue-next'
+import { Bell, CalendarClock, Save, Trash2 } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
@@ -26,7 +26,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import {
   InputGroup,
   InputGroupAddon,
@@ -95,6 +94,7 @@ const [repeatDays] = defineField('repeatDays')
 const [content] = defineField('content')
 
 const clearOpen = ref(false)
+const focusTarget = ref<HTMLElement | null>(null)
 const busy = computed(() => props.saving || props.deleting)
 const repeatDayUnit = computed(() => {
   const days = Number(String(repeatDays.value).trim())
@@ -125,6 +125,11 @@ const confirmClear = () => {
   emit('clear')
 }
 
+const handleOpenAutoFocus = (event: Event) => {
+  event.preventDefault()
+  focusTarget.value?.focus({ preventScroll: true })
+}
+
 watch(
   () => [open.value, props.reminder] as const,
   ([isOpen]) => {
@@ -137,28 +142,40 @@ watch(
 
 <template>
   <Dialog v-model:open="dialogOpen">
-    <DialogContent :show-close-button="!busy" class="sm:max-w-md">
-      <DialogHeader>
-        <DialogTitle class="flex items-center gap-2">
-          <Bell class="size-4 text-primary" />
-          {{ t('modemDetail.reminder.title') }}
-        </DialogTitle>
-        <DialogDescription>
-          {{ t('modemDetail.reminder.description', { profile: props.profileName }) }}
-        </DialogDescription>
+    <DialogContent
+      :show-close-button="!busy"
+      class="sm:max-w-md"
+      @open-auto-focus="handleOpenAutoFocus"
+    >
+      <DialogHeader class="text-left">
+        <div ref="focusTarget" tabindex="-1" class="space-y-2 outline-none">
+          <DialogTitle class="flex items-center gap-2">
+            <Bell class="size-4 text-primary" />
+            {{ t('modemDetail.reminder.title') }}
+          </DialogTitle>
+          <DialogDescription>
+            {{ t('modemDetail.reminder.description', { profile: props.profileName }) }}
+          </DialogDescription>
+        </div>
       </DialogHeader>
 
       <form class="space-y-4" @submit.prevent="save">
         <div class="space-y-2">
           <Label for="reminder-time">{{ t('modemDetail.reminder.time') }}</Label>
-          <Input
-            id="reminder-time"
-            v-model="scheduledAt"
-            type="datetime-local"
-            step="60"
-            :disabled="busy"
-            :aria-invalid="Boolean(errors.scheduledAt)"
-          />
+          <InputGroup data-testid="reminder-time-group" class="overflow-hidden">
+            <InputGroupInput
+              id="reminder-time"
+              v-model="scheduledAt"
+              type="datetime-local"
+              step="60"
+              class="appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0"
+              :disabled="busy"
+              :aria-invalid="Boolean(errors.scheduledAt)"
+            />
+            <InputGroupAddon align="inline-end" aria-hidden="true">
+              <CalendarClock class="size-4" />
+            </InputGroupAddon>
+          </InputGroup>
           <p v-if="errors.scheduledAt" class="text-xs text-destructive">
             {{ errors.scheduledAt }}
           </p>

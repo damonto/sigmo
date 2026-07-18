@@ -135,10 +135,10 @@ onMounted(() => {
       </div>
     </div>
 
-    <header class="space-y-3">
-      <div class="flex flex-wrap items-center gap-3">
+    <header class="min-w-0 space-y-3">
+      <div class="flex min-w-0 max-w-full flex-wrap items-center gap-3">
         <template v-if="!props.isLoading">
-          <div class="lg:hidden">
+          <div class="w-full min-w-0 max-w-full lg:hidden">
             <ModemTitleSwitcher
               :current-modem="props.modem"
               :modems="modems"

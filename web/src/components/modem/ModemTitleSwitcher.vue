@@ -50,7 +50,7 @@ const handleSelect = (modem: Modem) => {
       <button
         type="button"
         :class="[
-          'group max-w-full text-left font-semibold text-foreground',
+          'group min-w-0 max-w-full text-left font-semibold text-foreground',
           isCompact
             ? 'inline-flex min-w-0 flex-col items-start gap-0.5'
             : 'inline-flex items-center gap-2 text-3xl tracking-tight',
@@ -59,7 +59,7 @@ const handleSelect = (modem: Modem) => {
         :title="t('modemDetail.switchModem')"
         @click="emit('title-click')"
       >
-        <span class="inline-flex max-w-full items-center gap-1.5">
+        <span class="inline-flex min-w-0 max-w-full items-center gap-1.5">
           <span class="min-w-0 truncate" :class="isCompact ? 'text-sm leading-tight' : ''">
             {{ title }}
           </span>
@@ -133,7 +133,7 @@ const handleSelect = (modem: Modem) => {
   </div>
   <h1
     v-else
-    class="text-3xl font-semibold tracking-tight text-foreground"
+    class="max-w-full truncate text-3xl font-semibold tracking-tight text-foreground"
     @click="emit('title-click')"
   >
     {{ title }}

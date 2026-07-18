@@ -295,10 +295,36 @@ describe('ModemDetailHeader', () => {
     expect(wrapper.find('.lg\\:hidden button[aria-label="modemDetail.switchModem"]').exists()).toBe(
       true,
     )
-    expect(wrapper.find('h1').classes()).toEqual(
-      expect.arrayContaining(['hidden', 'lg:block']),
-    )
+    expect(wrapper.find('h1').classes()).toEqual(expect.arrayContaining(['hidden', 'lg:block']))
     expect(wrapper.find('h1').text()).toBe('Modem 1')
+  })
+
+  it('constrains an overlong modem name on mobile', () => {
+    const current = {
+      ...modem(),
+      name: 'Modem-name-that-is-much-longer-than-the-mobile-viewport'.repeat(3),
+    }
+    modemHarness.modems = [current]
+    const wrapper = mount(ModemDetailHeader, {
+      props: {
+        modem: current,
+        isLoading: false,
+      },
+      global: {
+        stubs: headerStubs,
+      },
+    })
+
+    const mobileTitle = wrapper
+      .findAll('.lg\\:hidden')
+      .find((element) => element.text().includes(current.name))
+
+    expect(mobileTitle?.classes()).toEqual(
+      expect.arrayContaining(['w-full', 'min-w-0', 'max-w-full']),
+    )
+    expect(mobileTitle?.get('h1').classes()).toEqual(
+      expect.arrayContaining(['max-w-full', 'truncate']),
+    )
   })
 
   it('switches modems from the mobile title menu', async () => {
