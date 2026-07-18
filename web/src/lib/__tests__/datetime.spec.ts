@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatListTimestamp, formatMessageTimestamp } from '@/lib/datetime'
+import {
+  dateTimeLocalToISOString,
+  formatDateTimeLocal,
+  formatListTimestamp,
+  formatMessageTimestamp,
+  formatReminderTimestamp,
+} from '@/lib/datetime'
 
 describe('formatListTimestamp', () => {
   const now = new Date('2026-05-08T20:00:00')
@@ -46,5 +52,21 @@ describe('formatListTimestamp', () => {
 
   it('keeps the message timestamp export on the shared formatter', () => {
     expect(formatMessageTimestamp('2026-05-08T09:05:00', 'en-US', now)).toBe('9:05 AM')
+  })
+
+  it('round trips a browser-local reminder time through UTC', () => {
+    const localDate = new Date(2026, 6, 18, 10, 30, 0, 0)
+    const iso = localDate.toISOString()
+
+    expect(formatDateTimeLocal(iso)).toBe('2026-07-18T10:30')
+    expect(dateTimeLocalToISOString('2026-07-18T10:30')).toBe(iso)
+  })
+
+  it('keeps the reminder date and minute in browser-local time', () => {
+    const localDate = new Date(2026, 6, 18, 10, 30, 0, 0)
+
+    expect(formatReminderTimestamp(localDate.toISOString(), 'en-US')).toBe(
+      'Jul 18, 2026, 10:30 AM',
+    )
   })
 })

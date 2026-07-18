@@ -313,7 +313,7 @@ describe('usePhoneCalls', () => {
     expect(warn).toHaveBeenCalledWith('[usePhoneCalls] play ringtone:', expect.any(Error))
   })
 
-  it('dials and requests notification permission from a user action path', async () => {
+  it('dials without requesting notification permission outside settings', async () => {
     const { phone } = mountComposable()
     await flushPromises()
 
@@ -321,7 +321,7 @@ describe('usePhoneCalls', () => {
 
     expect(api.dialCall).toHaveBeenCalledWith('modem-1', { to: '+12242255559', route: 'auto' })
     expect(result?.number).toBe('+12242255559')
-    expect(FakeNotification.requestPermission).toHaveBeenCalled()
+    expect(FakeNotification.requestPermission).not.toHaveBeenCalled()
   })
 
   it('reloads calls with the search query and keeps nonmatching socket events out of the list', async () => {

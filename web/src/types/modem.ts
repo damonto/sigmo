@@ -1,4 +1,5 @@
 import type { CarrierWebsheetInfo } from '@/types/websheet'
+import type { Reminder } from '@/types/reminder'
 
 export type SlotInfo = {
   active: boolean
@@ -6,6 +7,7 @@ export type SlotInfo = {
   operatorIdentifier: string
   regionCode: string
   identifier: string
+  reminder?: Reminder
 }
 
 export type RegisteredOperator = {

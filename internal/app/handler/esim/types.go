@@ -1,5 +1,7 @@
 package esim
 
+import "github.com/damonto/sigmo/internal/pkg/reminder"
+
 type ProfilesResponse struct {
 	SEs []ProfileGroupResponse `json:"ses"`
 }
@@ -28,6 +30,7 @@ type ProfileResponse struct {
 	ProfileClass        string               `json:"profileClass"`
 	ProfileOwner        ProfileOwnerResponse `json:"profileOwner"`
 	RegionCode          string               `json:"regionCode,omitempty"`
+	Reminder            *reminder.Details    `json:"reminder,omitempty"`
 }
 
 type ProfileOwnerResponse struct {

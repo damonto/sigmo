@@ -9,9 +9,11 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/message"
 	"github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/ussd"
+	"github.com/damonto/sigmo/internal/pkg/webpush"
 )
 
 type Extension func(*Runtime) error
@@ -25,6 +27,8 @@ type Runtime struct {
 	Relay              *forwarder.Relay
 	NetworkPreferences *modem.NetworkPreferences
 	Storage            *storage.Store
+	WebPush            *webpush.Client
+	Reminders          *reminder.Scheduler
 
 	messageRoute  message.Route
 	ussdRoute     ussd.Route

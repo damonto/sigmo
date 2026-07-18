@@ -12,6 +12,7 @@ import (
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
+	"github.com/damonto/sigmo/internal/pkg/webpush"
 )
 
 func TestNewRequiresMessageStorage(t *testing.T) {
@@ -23,7 +24,7 @@ func TestNewRequiresMessageStorage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(settings.NewMemoryStore(settings.Default()), nil, nil)
+			_, err := New(settings.NewMemoryStore(settings.Default()), nil, nil, nil)
 			if err == nil {
 				t.Fatal("New() error = nil, want error")
 			}
@@ -126,7 +127,7 @@ func TestForwardCallNotifiesIncomingRingingOnce(t *testing.T) {
 	current.Modems = map[string]settings.Modem{
 		"modem-1": {Alias: "Office SIM"},
 	}
-	relay, err := New(settings.NewMemoryStore(current), nil, db)
+	relay, err := New(settings.NewMemoryStore(current), nil, db, nil)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -154,6 +155,57 @@ func TestForwardCallNotifiesIncomingRingingOnce(t *testing.T) {
 	}
 	if got[0].Payload.From != "+12242255559" || got[0].Payload.Modem != "Office SIM" {
 		t.Fatalf("payload = %+v, want caller and modem alias", got[0].Payload)
+	}
+}
+
+func TestForwardCallKeepsDedupeWhenWebPushFails(t *testing.T) {
+	ctx := context.Background()
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer db.Close()
+	if _, err := db.UpsertPushSubscription(ctx, storage.PushSubscription{
+		ID:       "broken",
+		Endpoint: "https://push.example.test/subscription",
+		P256DH:   "invalid",
+		Auth:     "invalid",
+		Label:    "Broken browser",
+	}); err != nil {
+		t.Fatalf("UpsertPushSubscription() error = %v", err)
+	}
+	pushClient, err := webpush.New(ctx, db)
+	if err != nil {
+		t.Fatalf("webpush.New() error = %v", err)
+	}
+	current := settings.Default()
+	current.Channels = map[string]settings.Channel{"http": {Endpoint: server.URL}}
+	relay, err := New(settings.NewMemoryStore(current), nil, db, pushClient)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	call := storage.Call{
+		ID:        "call-with-broken-push",
+		ModemID:   "modem-1",
+		Direction: "incoming",
+		State:     "ringing",
+		StartedAt: time.Now(),
+	}
+
+	for range 2 {
+		if err := relay.ForwardCall(ctx, call); err != nil {
+			t.Fatalf("ForwardCall() error = %v", err)
+		}
+	}
+	if requests != 1 {
+		t.Fatalf("third-party notifications = %d, want 1", requests)
 	}
 }
 

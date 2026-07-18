@@ -48,6 +48,19 @@ func TestRender(t *testing.T) {
 				ParseMode: parseModeMarkdownV2,
 			},
 		},
+		{
+			name: "reminder escapes profile and content",
+			ev: notifyevent.ReminderEvent{
+				ProfileName: "Travel_1",
+				ProfileID:   "8985",
+				Modem:       "M_1",
+				Content:     "Renew!",
+			},
+			want: content{
+				Text:      "*Reminder*\n\n*Profile:* Travel\\_1\n*ICCID:* 8985\n*Modem:* M\\_1\n*Time:* unknown\n\nRenew\\!",
+				ParseMode: parseModeMarkdownV2,
+			},
+		},
 	}
 
 	for _, tt := range tests {

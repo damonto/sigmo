@@ -2,6 +2,7 @@ package bark
 
 import (
 	"testing"
+	"time"
 
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 )
@@ -43,6 +44,18 @@ func TestRender(t *testing.T) {
 			want: content{
 				Title: "Incoming Call from +86 133 4444 5555",
 				Body:  "Modem: Office SIM\nTime: unknown",
+			},
+		},
+		{
+			name: "reminder uses profile and content",
+			ev: notifyevent.ReminderEvent{
+				ProfileName: "Travel",
+				ScheduledAt: time.Date(2026, 7, 18, 2, 30, 0, 0, time.UTC),
+				Content:     "Renew the plan",
+			},
+			want: content{
+				Title: "Reminder: Travel",
+				Body:  "Profile: Travel\nTime: 2026-07-18T02:30:00Z\n\nRenew the plan",
 			},
 		},
 	}

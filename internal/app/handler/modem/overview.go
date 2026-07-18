@@ -13,6 +13,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/carrier"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
@@ -20,6 +21,7 @@ type catalog struct {
 	store              *settings.Store
 	registry           *mmodem.Registry
 	overviewExtensions []modemstatus.Extension
+	reminders          *reminder.Scheduler
 }
 
 func newCatalog(store *settings.Store, registry *mmodem.Registry, overviewExtensions ...modemstatus.Extension) *catalog {
@@ -163,6 +165,9 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		AirplaneMode:  airplaneMode,
 		SupportsEsim:  supportsEsim,
 	}
+	if resp.SIM.Reminder, err = c.reminderDetails(ctx, sim.Identifier); err != nil {
+		return nil, fmt.Errorf("read primary SIM reminder: %w", err)
+	}
 	if err := c.applyOverviewExtensions(ctx, device, resp); err != nil {
 		return nil, err
 	}
@@ -259,8 +264,24 @@ func (c *catalog) buildSlotsResponse(ctx context.Context, device *mmodem.Modem) 
 			RegionCode:         carrierInfo.Region,
 			Identifier:         sim.Identifier,
 		})
+		current := &simSlots[len(simSlots)-1]
+		if current.Reminder, err = c.reminderDetails(ctx, sim.Identifier); err != nil {
+			return nil, fmt.Errorf("read SIM reminder for slot %s: %w", slotPath, err)
+		}
 	}
 	return simSlots, nil
+}
+
+func (c *catalog) reminderDetails(ctx context.Context, profileID string) (*reminder.Details, error) {
+	if c.reminders == nil || strings.TrimSpace(profileID) == "" {
+		return nil, nil
+	}
+	value, ok, err := c.reminders.Get(ctx, reminder.ProfileTypePSIM, profileID)
+	if err != nil || !ok {
+		return nil, err
+	}
+	details := reminder.DetailsFrom(value)
+	return &details, nil
 }
 
 func (c *catalog) applyOverviewExtensions(ctx context.Context, device *mmodem.Modem, resp *ModemResponse) error {

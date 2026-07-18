@@ -31,6 +31,14 @@ func render(ev notifyevent.Event) (content, error) {
 			Title: callTitle(ev),
 			Body:  fmt.Sprintf("Modem: %s\nTime: %s", strings.TrimSpace(ev.Modem), ev.DisplayTimestamp()),
 		}, nil
+	case notifyevent.ReminderEvent:
+		return content{
+			Title: fmt.Sprintf("Reminder: %s", ev.DisplayProfile()),
+			Body: fmt.Sprintf(
+				"Profile: %s\nTime: %s\n\n%s",
+				ev.DisplayProfile(), ev.DisplayTimestamp(), ev.DisplayContent(),
+			),
+		}, nil
 	default:
 		return content{}, fmt.Errorf("rendering bark content for %q: unsupported event", ev.Kind())
 	}

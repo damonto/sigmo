@@ -38,9 +38,13 @@ import { Spinner } from '@/components/ui/spinner'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { useEsimApi } from '@/apis/esim'
+import { useReminderApi } from '@/apis/reminder'
+import ReminderDialog from '@/components/ReminderDialog.vue'
+import ReminderBadge from '@/components/ReminderBadge.vue'
 import EsimProfileAvatar from '@/components/esim/EsimProfileAvatar.vue'
 import EsimProfileDetailsDialog from '@/components/esim/EsimProfileDetailsDialog.vue'
 import type { EsimProfile } from '@/types/esim'
+import type { ReminderPayload } from '@/types/reminder'
 
 const profiles = defineModel<EsimProfile[]>('profiles', { required: true })
 const props = withDefaults(
@@ -80,6 +84,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const esimApi = useEsimApi()
+const reminderApi = useReminderApi()
 
 const profileCount = computed(() => profiles.value.length)
 const hasProfiles = computed(() => profiles.value.length > 0)
@@ -120,6 +125,11 @@ const detailsProfile = ref<EsimProfile | null>(null)
 const deleteOpen = ref(false)
 const deleteProfile = ref<EsimProfile | null>(null)
 const deleteLoading = ref(false)
+
+const reminderOpen = ref(false)
+const reminderProfile = ref<EsimProfile | null>(null)
+const reminderSaving = ref(false)
+const reminderDeleting = ref(false)
 
 const isWithinMaxBytes = (value: string, maxBytes: number) =>
   new TextEncoder().encode(value).length <= maxBytes
@@ -255,6 +265,60 @@ const openDetailsDialog = (profile: EsimProfile) => {
   detailsOpen.value = true
 }
 
+const openReminderDialog = (profile: EsimProfile) => {
+  reminderProfile.value = profile
+  reminderOpen.value = true
+}
+
+const closeReminderDialog = () => {
+  if (reminderSaving.value || reminderDeleting.value) return
+  reminderOpen.value = false
+  reminderProfile.value = null
+}
+
+const saveReminder = async (payload: ReminderPayload) => {
+  const profile = reminderProfile.value
+  if (!profile) return
+  reminderSaving.value = true
+  try {
+    const { data } = await reminderApi.saveEsimReminder(
+      props.modemId,
+      profile.seId,
+      profile.iccid,
+      payload,
+    )
+    profile.reminder = data.value ?? {
+      nextAt: payload.scheduledAt,
+      repeatDays: payload.repeatDays,
+      content: payload.content,
+    }
+    reminderOpen.value = false
+    reminderProfile.value = null
+    emit('success', t('modemDetail.reminder.saved'))
+  } catch (err) {
+    console.error('[EsimProfileSection] Failed to save reminder:', err)
+  } finally {
+    reminderSaving.value = false
+  }
+}
+
+const clearReminder = async () => {
+  const profile = reminderProfile.value
+  if (!profile) return
+  reminderDeleting.value = true
+  try {
+    await reminderApi.deleteEsimReminder(props.modemId, profile.seId, profile.iccid)
+    profile.reminder = undefined
+    reminderOpen.value = false
+    reminderProfile.value = null
+    emit('success', t('modemDetail.reminder.cleared'))
+  } catch (err) {
+    console.error('[EsimProfileSection] Failed to clear reminder:', err)
+  } finally {
+    reminderDeleting.value = false
+  }
+}
+
 const handleDeleteClick = (profile: EsimProfile) => {
   openDeleteDialog(profile)
 }
@@ -362,115 +426,136 @@ watch(detailsOpen, (value) => {
         <div
           v-for="profile in group.profiles"
           :key="profile.id"
-          class="flex items-center justify-between rounded-lg border bg-card px-4 py-3 shadow-sm transition"
+          class="rounded-lg border bg-card px-4 py-3 shadow-sm transition"
           :class="profile.enabled ? 'border-primary/40 bg-primary/5' : 'border-transparent'"
         >
-          <div class="flex min-w-0 items-center gap-3">
-            <EsimProfileAvatar
-              :name="profile.name"
-              :icon="profile.logoUrl"
-              :region-code="profile.regionCode"
-            />
-            <div class="min-w-0">
-              <p class="truncate text-sm font-semibold text-foreground">
-                {{ profile.name }}
-              </p>
-              <p class="truncate text-xs text-muted-foreground">
-                {{ profile.iccid }}
-              </p>
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex min-w-0 items-center gap-3">
+              <EsimProfileAvatar
+                :name="profile.name"
+                :icon="profile.logoUrl"
+                :region-code="profile.regionCode"
+              />
+              <div class="min-w-0">
+                <p class="truncate text-sm font-semibold text-foreground">
+                  {{ profile.name }}
+                </p>
+                <p class="truncate text-xs text-muted-foreground">
+                  {{ profile.iccid }}
+                </p>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+              <Switch
+                :model-value="profile.enabled"
+                @update:model-value="(nextValue) => handleToggle(profile, nextValue)"
+              />
+
+              <DropdownMenu @update:open="(open) => handleProfileActionsOpenChange(profile, open)">
+                <DropdownMenuTrigger as-child>
+                  <Button variant="ghost" size="icon" type="button" aria-label="Profile actions">
+                    <EllipsisVertical class="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" class="w-56">
+                  <DropdownMenuItem @click="openReminderDialog(profile)">
+                    {{ t('modemDetail.reminder.title') }}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <template v-if="profile.enabled">
+                    <DropdownMenuItem
+                      class="justify-between gap-4"
+                      :disabled="props.internetBusy"
+                      @click="handleNetworkToggle(profile, !props.internetConnected)"
+                    >
+                      <span>{{ t('modemDetail.settings.networkTitle') }}</span>
+                      <Switch
+                        :model-value="props.internetConnected"
+                        :disabled="props.internetBusy"
+                        @click.stop
+                        @update:model-value="(nextValue) => handleNetworkToggle(profile, nextValue)"
+                      />
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      v-if="props.wifiCallingAvailable"
+                      class="justify-between gap-4"
+                      :disabled="props.wifiCallingBusy"
+                      @click="
+                        handleWiFiCallingToggle(
+                          profile,
+                          !(props.wifiCallingEnabled && props.wifiCallingConnected),
+                        )
+                      "
+                    >
+                      <span>{{ t('modemDetail.settings.wifiCallingTitle') }}</span>
+                      <Spinner
+                        v-if="props.wifiCallingBusy"
+                        data-testid="wifi-calling-quick-action-loading"
+                        class="size-4 text-muted-foreground"
+                      />
+                      <Switch
+                        v-else
+                        :model-value="props.wifiCallingEnabled && props.wifiCallingConnected"
+                        :disabled="props.wifiCallingBusy"
+                        @click.stop
+                        @update:model-value="
+                          (nextValue) => handleWiFiCallingToggle(profile, nextValue)
+                        "
+                      />
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator v-if="props.wifiCallingAvailable" />
+                    <DropdownMenuItem @click="handlePhoneNumberClick(profile)">
+                      {{ t('modemDetail.settings.msisdnTitle') }}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator v-if="isProfileSimApplicationAvailable(profile)" />
+                    <DropdownMenuItem
+                      v-if="isProfileSimApplicationAvailable(profile)"
+                      @click="handleSimApplicationClick(profile)"
+                    >
+                      {{ t('modemDetail.simApplication.title') }}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </template>
+                  <DropdownMenuItem @click="openDetailsDialog(profile)">
+                    {{ t('modemDetail.actions.viewDetails') }}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem @click="handleRenameClick(profile)">
+                    {{ t('modemDetail.actions.rename') }}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    :disabled="profile.enabled"
+                    :class="profile.enabled ? 'text-muted-foreground' : 'text-destructive'"
+                    @click="handleDeleteClick(profile)"
+                  >
+                    {{ t('modemDetail.actions.delete') }}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
-
-          <div class="flex items-center gap-3">
-            <Switch
-              :model-value="profile.enabled"
-              @update:model-value="(nextValue) => handleToggle(profile, nextValue)"
-            />
-
-            <DropdownMenu @update:open="(open) => handleProfileActionsOpenChange(profile, open)">
-              <DropdownMenuTrigger as-child>
-                <Button variant="ghost" size="icon" type="button" aria-label="Profile actions">
-                  <EllipsisVertical class="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" class="w-56">
-                <template v-if="profile.enabled">
-                  <DropdownMenuItem
-                    class="justify-between gap-4"
-                    :disabled="props.internetBusy"
-                    @click="handleNetworkToggle(profile, !props.internetConnected)"
-                  >
-                    <span>{{ t('modemDetail.settings.networkTitle') }}</span>
-                    <Switch
-                      :model-value="props.internetConnected"
-                      :disabled="props.internetBusy"
-                      @click.stop
-                      @update:model-value="(nextValue) => handleNetworkToggle(profile, nextValue)"
-                    />
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    v-if="props.wifiCallingAvailable"
-                    class="justify-between gap-4"
-                    :disabled="props.wifiCallingBusy"
-                    @click="
-                      handleWiFiCallingToggle(
-                        profile,
-                        !(props.wifiCallingEnabled && props.wifiCallingConnected),
-                      )
-                    "
-                  >
-                    <span>{{ t('modemDetail.settings.wifiCallingTitle') }}</span>
-                    <Spinner
-                      v-if="props.wifiCallingBusy"
-                      data-testid="wifi-calling-quick-action-loading"
-                      class="size-4 text-muted-foreground"
-                    />
-                    <Switch
-                      v-else
-                      :model-value="props.wifiCallingEnabled && props.wifiCallingConnected"
-                      :disabled="props.wifiCallingBusy"
-                      @click.stop
-                      @update:model-value="
-                        (nextValue) => handleWiFiCallingToggle(profile, nextValue)
-                      "
-                    />
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator v-if="props.wifiCallingAvailable" />
-                  <DropdownMenuItem @click="handlePhoneNumberClick(profile)">
-                    {{ t('modemDetail.settings.msisdnTitle') }}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator v-if="isProfileSimApplicationAvailable(profile)" />
-                  <DropdownMenuItem
-                    v-if="isProfileSimApplicationAvailable(profile)"
-                    @click="handleSimApplicationClick(profile)"
-                  >
-                    {{ t('modemDetail.simApplication.title') }}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </template>
-                <DropdownMenuItem @click="openDetailsDialog(profile)">
-                  {{ t('modemDetail.actions.viewDetails') }}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem @click="handleRenameClick(profile)">
-                  {{ t('modemDetail.actions.rename') }}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  :disabled="profile.enabled"
-                  :class="profile.enabled ? 'text-muted-foreground' : 'text-destructive'"
-                  @click="handleDeleteClick(profile)"
-                >
-                  {{ t('modemDetail.actions.delete') }}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          <div v-if="profile.reminder" class="mt-3 border-t border-border/60 pt-2">
+            <ReminderBadge :reminder="profile.reminder" :profile-name="profile.name" />
           </div>
         </div>
       </div>
     </div>
   </section>
+
+  <ReminderDialog
+    v-if="reminderProfile"
+    v-model:open="reminderOpen"
+    :profile-name="reminderProfile.name"
+    :reminder="reminderProfile.reminder"
+    :saving="reminderSaving"
+    :deleting="reminderDeleting"
+    @save="saveReminder"
+    @clear="clearReminder"
+    @update:open="(value) => !value && closeReminderDialog()"
+  />
 
   <AlertDialog v-model:open="toggleOpen">
     <AlertDialogContent>

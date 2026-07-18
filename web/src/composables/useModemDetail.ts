@@ -40,6 +40,7 @@ export const useModemDetail = () => {
       profileOwner: profile.profileOwner,
       regionCode: profile.regionCode ?? '',
       logoUrl: profile.icon.length > 0 ? profile.icon : undefined,
+      reminder: profile.reminder,
     }
   }
 

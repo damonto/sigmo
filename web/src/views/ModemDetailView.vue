@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { CreditCard, Download } from 'lucide-vue-next'
+import { Bell, CreditCard, Download } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 
 import { useModemApi } from '@/apis/modem'
+import { useReminderApi } from '@/apis/reminder'
+import ReminderDialog from '@/components/ReminderDialog.vue'
+import { formatReminderTimestamp } from '@/lib/datetime'
 import EsimDiscoverDialog from '@/components/esim/EsimDiscoverDialog.vue'
 import EsimDownloadConfirmationModal from '@/components/esim/EsimDownloadConfirmationModal.vue'
 import EsimDownloadPreviewModal from '@/components/esim/EsimDownloadPreviewModal.vue'
@@ -40,11 +43,13 @@ import { useModemDetail } from '@/composables/useModemDetail'
 import { useSimApplicationSession } from '@/composables/useSimApplicationSession'
 import { useSimSlotSwitch } from '@/composables/useSimSlotSwitch'
 import type { EsimProfile } from '@/types/esim'
+import type { ReminderPayload } from '@/types/reminder'
 
 const route = useRoute()
 const { t } = useI18n()
 const { hasFeature, fetchCapabilities } = useCapabilities()
 const modemApi = useModemApi()
+const reminderApi = useReminderApi()
 
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
 const canTransferEsim = computed(() => hasFeature(FEATURE.esimTransfer))
@@ -95,6 +100,9 @@ const resultErrorMessage = ref('')
 const resultErrorType = ref<'none' | 'failed' | 'disconnected'>('none')
 const resultName = ref('')
 const activeProfileActionsProfileId = ref<string | null>(null)
+const physicalReminderOpen = ref(false)
+const physicalReminderSaving = ref(false)
+const physicalReminderDeleting = ref(false)
 
 const {
   downloadState,
@@ -213,6 +221,54 @@ const handlePinUnlockSubmit = async () => {
 
 const showSuccess = (message: string) => {
   toast.success(message)
+}
+
+const physicalProfileName = computed(() => {
+  if (!modem.value) return ''
+  return modem.value.sim.operatorName || modem.value.sim.identifier
+})
+
+const closePhysicalReminder = () => {
+  if (physicalReminderSaving.value || physicalReminderDeleting.value) return
+  physicalReminderOpen.value = false
+}
+
+const savePhysicalReminder = async (payload: ReminderPayload) => {
+  if (!modem.value?.sim.identifier) return
+  physicalReminderSaving.value = true
+  try {
+    const { data } = await reminderApi.savePhysicalReminder(
+      modemId.value,
+      modem.value.sim.identifier,
+      payload,
+    )
+    modem.value.sim.reminder = data.value ?? {
+      nextAt: payload.scheduledAt,
+      repeatDays: payload.repeatDays,
+      content: payload.content,
+    }
+    physicalReminderOpen.value = false
+    showSuccess(t('modemDetail.reminder.saved'))
+  } catch (err) {
+    console.error('[ModemDetailView] Failed to save physical SIM reminder:', err)
+  } finally {
+    physicalReminderSaving.value = false
+  }
+}
+
+const clearPhysicalReminder = async () => {
+  if (!modem.value?.sim.identifier) return
+  physicalReminderDeleting.value = true
+  try {
+    await reminderApi.deletePhysicalReminder(modemId.value, modem.value.sim.identifier)
+    modem.value.sim.reminder = undefined
+    physicalReminderOpen.value = false
+    showSuccess(t('modemDetail.reminder.cleared'))
+  } catch (err) {
+    console.error('[ModemDetailView] Failed to clear physical SIM reminder:', err)
+  } finally {
+    physicalReminderDeleting.value = false
+  }
 }
 
 const shouldLoadProfileQuickActions = computed(() => activeProfileActionsProfileId.value !== null)
@@ -450,17 +506,46 @@ void fetchCapabilities()
 
   <!-- Physical modem: show detail card -->
   <div v-if="modem && isPhysicalModem" class="space-y-3">
+    <div class="flex flex-wrap items-center gap-2">
+      <Button
+        v-if="modem.sim.identifier"
+        type="button"
+        variant="outline"
+        class="justify-start gap-2"
+        @click="physicalReminderOpen = true"
+      >
+        <Bell class="size-4" />
+        {{ t('modemDetail.reminder.title') }}
+      </Button>
+      <Button
+        v-if="simApplicationAvailable"
+        type="button"
+        variant="outline"
+        class="justify-start gap-2"
+        @click="openSimApplication"
+      >
+        <CreditCard class="size-4" />
+        {{ t('modemDetail.simApplication.title') }}
+      </Button>
+    </div>
+    <Alert v-if="modem.sim.reminder">
+      <AlertTitle>{{ t('modemDetail.reminder.title') }}</AlertTitle>
+      <AlertDescription class="space-y-1">
+        <p>
+          {{ t('modemDetail.reminder.nextAt') }}:
+          {{ formatReminderTimestamp(modem.sim.reminder.nextAt) }}
+        </p>
+        <p>
+          {{
+            modem.sim.reminder.repeatDays
+              ? t('modemDetail.reminder.everyDays', { days: modem.sim.reminder.repeatDays })
+              : t('modemDetail.reminder.once')
+          }}
+        </p>
+        <p class="whitespace-pre-wrap break-words">{{ modem.sim.reminder.content }}</p>
+      </AlertDescription>
+    </Alert>
     <ModemDetailCard :modem="modem" :se-info="null" />
-    <Button
-      v-if="simApplicationAvailable"
-      type="button"
-      variant="outline"
-      class="w-full justify-start gap-2"
-      @click="openSimApplication"
-    >
-      <CreditCard class="size-4" />
-      {{ t('modemDetail.simApplication.title') }}
-    </Button>
   </div>
 
   <Dialog v-model:open="detailDialogOpen">
@@ -493,6 +578,18 @@ void fetchCapabilities()
     @submit-inkey="submitSimApplicationInkey"
     @respond-confirm="respondSimApplicationConfirm"
     @back="backSimApplication"
+  />
+
+  <ReminderDialog
+    v-if="modem && isPhysicalModem && modem.sim.identifier"
+    v-model:open="physicalReminderOpen"
+    :profile-name="physicalProfileName"
+    :reminder="modem.sim.reminder"
+    :saving="physicalReminderSaving"
+    :deleting="physicalReminderDeleting"
+    @save="savePhysicalReminder"
+    @clear="clearPhysicalReminder"
+    @update:open="(value) => !value && closePhysicalReminder()"
   />
 
   <DraggableFab

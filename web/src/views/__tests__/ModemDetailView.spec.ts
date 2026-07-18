@@ -10,6 +10,11 @@ const api = vi.hoisted(() => ({
   unlockSim: vi.fn(),
 }))
 
+const reminderApi = vi.hoisted(() => ({
+  savePhysicalReminder: vi.fn(),
+  deletePhysicalReminder: vi.fn(),
+}))
+
 const routeHarness = vi.hoisted(() => ({
   route: undefined as { params: { id: string } } | undefined,
 }))
@@ -53,6 +58,10 @@ const toastHarness = vi.hoisted(() => ({
 
 vi.mock('@/apis/modem', () => ({
   useModemApi: () => api,
+}))
+
+vi.mock('@/apis/reminder', () => ({
+  useReminderApi: () => reminderApi,
 }))
 
 vi.mock('vue-router', async () => {
@@ -269,6 +278,25 @@ const lockedModem = (supportsEsim = false): Modem => ({
   supportsEsim,
 })
 
+const physicalModem = (): Modem => ({
+  ...lockedModem(false),
+  state: 'registered',
+  unlockRequired: 'none',
+  unlockSupported: false,
+  sim: {
+    active: true,
+    operatorName: 'Carrier',
+    operatorIdentifier: '46000',
+    regionCode: 'CN',
+    identifier: '8985200012345678901',
+    reminder: {
+      nextAt: new Date(2026, 6, 18, 10, 30, 0, 0).toISOString(),
+      repeatDays: 7,
+      content: 'Renew the plan',
+    },
+  },
+})
+
 const mountView = () =>
   mount(ModemDetailView, {
     global: {
@@ -276,6 +304,10 @@ const mountView = () =>
         ModemDetailHeader: true,
         SimSlotSwitcher: true,
         ModemDetailCard: true,
+        ReminderDialog: {
+          props: ['open'],
+          template: '<section v-if="open" data-testid="reminder-dialog"></section>',
+        },
         EsimSummaryCard: true,
         EsimProfileSection: {
           name: 'EsimProfileSection',
@@ -501,6 +533,31 @@ describe('ModemDetailView SIM PIN unlock', () => {
     await action!.trigger('click')
 
     expect(simAppHarness.openRootMenu).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows Reminder and STK actions above the physical SIM details', async () => {
+    if (detailHarness.modem) {
+      detailHarness.modem.value = physicalModem()
+    }
+    if (simAppHarness.available) {
+      simAppHarness.available.value = true
+    }
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const actions = wrapper.findAll('button').map((button) => button.text())
+    expect(actions).toContain('modemDetail.reminder.title')
+    expect(actions).toContain('modemDetail.simApplication.title')
+    expect(wrapper.text()).toContain('Renew the plan')
+    expect(wrapper.text()).toContain('modemDetail.reminder.everyDays')
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('reminder.title'))
+      ?.trigger('click')
+
+    expect(wrapper.find('[data-testid="reminder-dialog"]').exists()).toBe(true)
   })
 
   it('shows SIM Application session errors', async () => {

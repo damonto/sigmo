@@ -17,13 +17,15 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type Config struct {
-	Store    *settings.Store
-	Registry *mmodem.Registry
-	Internet *internet.Connector
+	Store     *settings.Store
+	Registry  *mmodem.Registry
+	Internet  *internet.Connector
+	Reminders *reminder.Scheduler
 }
 
 type Handler struct {
@@ -32,6 +34,7 @@ type Handler struct {
 	provisioning *provisioning
 	lifecycle    *lifecycle
 	internet     *internet.Connector
+	reminders    *reminder.Scheduler
 }
 
 const (
@@ -85,10 +88,11 @@ const (
 func New(cfg Config) *Handler {
 	return &Handler{
 		registry:     cfg.Registry,
-		profile:      newProfile(cfg.Store),
+		profile:      newProfile(cfg.Store, cfg.Reminders),
 		provisioning: newProvisioning(cfg.Store),
 		lifecycle:    newLifecycle(cfg.Store, cfg.Registry),
 		internet:     cfg.Internet,
+		reminders:    cfg.Reminders,
 	}
 }
 
@@ -97,7 +101,7 @@ func (h *Handler) List(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeListESIMsFailed)
 	}
-	response, err := h.profile.List(modem)
+	response, err := h.profile.List(c.Request().Context(), modem)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
@@ -206,7 +210,7 @@ func (h *Handler) Delete(c *echo.Context) error {
 		}
 		return httpapi.BadRequest(c, errorCodeInvalidICCID, err)
 	}
-	if err := h.lifecycle.Delete(modem, c.Param("seId"), iccid); err != nil {
+	if err := h.DeleteProfile(c.Request().Context(), modem, c.Param("seId"), iccid); err != nil {
 		if seErr := seRequestError(c, err); seErr != nil {
 			return seErr
 		}
@@ -215,6 +219,9 @@ func (h *Handler) Delete(c *echo.Context) error {
 		}
 		if errors.Is(err, errActiveProfileCannotDelete) {
 			return httpapi.BadRequest(c, errorCodeActiveESIMProfile, err)
+		}
+		if errors.Is(err, errProfileNotFound) {
+			return httpapi.BadRequest(c, errorCodeESIMProfileNotFound, err)
 		}
 		return httpapi.Internal(c, errorCodeDeleteESIMFailed, err)
 	}

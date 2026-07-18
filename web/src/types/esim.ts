@@ -1,4 +1,5 @@
 import type { CarrierWebsheetInfo } from '@/types/websheet'
+import type { Reminder } from '@/types/reminder'
 
 export type EsimProfileApiResponse = {
   seId: string
@@ -16,6 +17,7 @@ export type EsimProfileApiResponse = {
   profileClass: string
   profileOwner: EsimProfileOwner
   regionCode?: string
+  reminder?: Reminder
 }
 
 export type EsimProfileGroup = {
@@ -72,6 +74,7 @@ export type EsimProfile = {
   profileOwner: EsimProfileOwner
   regionCode: string
   logoUrl?: string
+  reminder?: Reminder
 }
 
 export type EsimTransferSource = {

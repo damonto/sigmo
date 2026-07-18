@@ -170,7 +170,11 @@ func (l *lifecycle) Delete(modem *mmodem.Modem, seID string, iccid sgp22.ICCID) 
 	if err != nil {
 		return fmt.Errorf("list profiles: %w", err)
 	}
-	if activeProfile(profiles, iccid) {
+	profile, ok := profileByICCID(profiles, iccid)
+	if !ok {
+		return errProfileNotFound
+	}
+	if profile.ProfileState == sgp22.ProfileEnabled {
 		return errActiveProfileCannotDelete
 	}
 

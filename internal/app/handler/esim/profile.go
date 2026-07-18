@@ -1,6 +1,7 @@
 package esim
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -9,20 +10,22 @@ import (
 	sgp22 "github.com/damonto/euicc-go/v2"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type profile struct {
-	store *settings.Store
+	store     *settings.Store
+	reminders *reminder.Scheduler
 }
 
 var errInvalidNickname = errors.New("nickname must be valid utf-8 and 64 bytes or fewer")
 
-func newProfile(store *settings.Store) *profile {
-	return &profile{store: store}
+func newProfile(store *settings.Store, reminders *reminder.Scheduler) *profile {
+	return &profile{store: store, reminders: reminders}
 }
 
-func (p *profile) List(modem *mmodem.Modem) (*ProfilesResponse, error) {
+func (p *profile) List(ctx context.Context, modem *mmodem.Modem) (*ProfilesResponse, error) {
 	current := p.store.Snapshot()
 	ses, err := lpa.DiscoverSEs(modem)
 	if err != nil {
@@ -61,7 +64,21 @@ func (p *profile) List(modem *mmodem.Modem) (*ProfilesResponse, error) {
 			return nil, err
 		}
 		for _, item := range profiles {
-			group.Profiles = append(group.Profiles, profileResponseFrom(item, se.ID, se.Label, group.EID))
+			profileResponse := profileResponseFrom(item, se.ID, se.Label, group.EID)
+			if p.reminders != nil {
+				value, ok, err := p.reminders.Get(ctx, reminder.ProfileTypeESIM, profileResponse.ICCID)
+				if err != nil {
+					if cerr := client.Close(); cerr != nil {
+						client.Logger().Warn("close LPA client", "error", cerr)
+					}
+					return nil, fmt.Errorf("read reminder for %s: %w", profileResponse.ICCID, err)
+				}
+				if ok {
+					details := reminder.DetailsFrom(value)
+					profileResponse.Reminder = &details
+				}
+			}
+			group.Profiles = append(group.Profiles, profileResponse)
 		}
 		if cerr := client.Close(); cerr != nil {
 			client.Logger().Warn("close LPA client", "error", cerr)

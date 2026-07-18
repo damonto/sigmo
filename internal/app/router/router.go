@@ -22,14 +22,17 @@ import (
 	hsettings "github.com/damonto/sigmo/internal/app/handler/settings"
 	"github.com/damonto/sigmo/internal/app/handler/simapp"
 	"github.com/damonto/sigmo/internal/app/handler/ussd"
+	hwebpush "github.com/damonto/sigmo/internal/app/handler/webpush"
 	appmiddleware "github.com/damonto/sigmo/internal/app/middleware"
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	pmessage "github.com/damonto/sigmo/internal/pkg/message"
 	"github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	pussd "github.com/damonto/sigmo/internal/pkg/ussd"
+	"github.com/damonto/sigmo/internal/pkg/webpush"
 	"github.com/damonto/sigmo/web"
 )
 
@@ -43,6 +46,8 @@ type RegisterConfig struct {
 	Relay              *forwarder.Relay
 	NetworkPreferences *modem.NetworkPreferences
 	Storage            *storage.Store
+	WebPush            *webpush.Client
+	Reminders          *reminder.Scheduler
 	MessageRoute       pmessage.Route
 	USSDRoute          pussd.Route
 	ModemOverview      []modemstatus.Extension
@@ -83,12 +88,14 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.PUT("/settings", h.Update)
 		}
 
-		h := hmodem.New(deps.Store, deps.Registry, deps.Internet, deps.ModemOverview...)
+		h := hmodem.New(deps.Store, deps.Registry, deps.Internet, deps.Reminders, deps.ModemOverview...)
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
 		protected.POST("/modems/:id/sim-unlocks", h.UnlockSIM)
 		protected.PUT("/modems/:id/sim-slots/:identifier", h.SwitchSimSlot)
 		protected.PUT("/modems/:id/msisdn", h.UpdateMSISDN)
+		protected.PUT("/modems/:id/sims/:iccid/reminder", h.UpdateReminder)
+		protected.DELETE("/modems/:id/sims/:iccid/reminder", h.DeleteReminder)
 		protected.GET("/modems/:id/settings", h.Settings)
 		protected.PUT("/modems/:id/settings", h.UpdateSettings)
 
@@ -141,9 +148,10 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 
 		{
 			h := esim.New(esim.Config{
-				Store:    deps.Store,
-				Registry: deps.Registry,
-				Internet: deps.Internet,
+				Store:     deps.Store,
+				Registry:  deps.Registry,
+				Internet:  deps.Internet,
+				Reminders: deps.Reminders,
 			})
 			protected.GET("/modems/:id/esims", h.List)
 			protected.POST("/modems/:id/ses/:seId/esim-discoveries", h.Discovery)
@@ -151,6 +159,8 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.PUT("/modems/:id/ses/:seId/esims/:iccid/activation", h.Enable)
 			protected.PUT("/modems/:id/ses/:seId/esims/:iccid/nickname", h.UpdateNickname)
 			protected.DELETE("/modems/:id/ses/:seId/esims/:iccid", h.Delete)
+			protected.PUT("/modems/:id/ses/:seId/esims/:iccid/reminder", h.UpdateReminder)
+			protected.DELETE("/modems/:id/ses/:seId/esims/:iccid/reminder", h.DeleteReminder)
 		}
 
 		{
@@ -158,6 +168,16 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.GET("/modems/:id/notifications", h.List)
 			protected.POST("/modems/:id/ses/:seId/notifications/:sequence/deliveries", h.Resend)
 			protected.DELETE("/modems/:id/ses/:seId/notifications/:sequence", h.Delete)
+		}
+
+		{
+			h := hwebpush.New(deps.WebPush)
+			protected.GET("/web-push", h.Get)
+			protected.PUT("/web-push", h.Update)
+			protected.GET("/web-push/subscriptions", h.ListSubscriptions)
+			protected.POST("/web-push/subscriptions", h.Register)
+			protected.PATCH("/web-push/subscriptions/:subscriptionId", h.Rename)
+			protected.DELETE("/web-push/subscriptions/:subscriptionId", h.Delete)
 		}
 
 		for _, extension := range deps.Extensions {

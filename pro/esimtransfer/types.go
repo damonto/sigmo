@@ -35,7 +35,7 @@ type Config struct {
 	Store         *settings.Store
 	Registry      *mmodem.Registry
 	EnableProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
-	DeleteProfile func(*mmodem.Modem, string, sgp22.ICCID) error
+	DeleteProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
 	Websheets     *websheet.Broker
 }
 

@@ -16,6 +16,12 @@ func render(ev notifyevent.Event) (string, error) {
 		return fmt.Sprintf("%s\n%s", ev.DisplayCounterparty(), ev.DisplayText()), nil
 	case notifyevent.CallEvent:
 		return fmt.Sprintf("%s\nModem: %s\nTime: %s", callTitle(ev), strings.TrimSpace(ev.Modem), ev.DisplayTimestamp()), nil
+	case notifyevent.ReminderEvent:
+		return fmt.Sprintf(
+			"Reminder: %s\nICCID: %s\nModem: %s\nTime: %s\n\n%s",
+			ev.DisplayProfile(), strings.TrimSpace(ev.ProfileID), strings.TrimSpace(ev.Modem),
+			ev.DisplayTimestamp(), ev.DisplayContent(),
+		), nil
 	default:
 		return "", fmt.Errorf("rendering lark content for %q: unsupported event", ev.Kind())
 	}

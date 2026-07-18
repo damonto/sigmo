@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 
 import SettingsField from '@/components/settings/SettingsField.vue'
 import SettingsKeyValueField from '@/components/settings/SettingsKeyValueField.vue'
+import SettingsWebPushChannel from '@/components/settings/SettingsWebPushChannel.vue'
 import {
   Collapsible,
   CollapsibleContent,
@@ -63,6 +64,7 @@ const isWideField = (control: string) => {
     </div>
 
     <div class="divide-y border-y">
+      <SettingsWebPushChannel :disabled="disabled" />
       <Collapsible
         v-for="channel in schemas"
         :key="channel.key"

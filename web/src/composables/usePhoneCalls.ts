@@ -2,6 +2,7 @@ import { computed, onBeforeUnmount, ref, watch, type ComputedRef, type Ref } fro
 
 import { buildCallEventsUrl, useCallApi } from '@/apis/call'
 import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
+import { hasWebPushSubscription } from '@/lib/webPush'
 import type { CallEventMessage, CallRecord, CallRoute } from '@/types/call'
 
 const terminalStates = new Set(['ended', 'failed'])
@@ -165,6 +166,7 @@ export const usePhoneCalls = (
   }
 
   const maybeNotifyIncoming = (call: CallRecord) => {
+    if (hasWebPushSubscription.value) return
     if (!('Notification' in window) || Notification.permission !== 'granted') return
     if (incomingNotifications.has(call.callID)) return
     try {
@@ -182,15 +184,6 @@ export const usePhoneCalls = (
       }
     } catch (err) {
       console.warn('[usePhoneCalls] show incoming notification:', err)
-    }
-  }
-
-  const requestNotificationPermission = async () => {
-    if (!('Notification' in window) || Notification.permission !== 'default') return
-    try {
-      await Notification.requestPermission()
-    } catch (err) {
-      console.error('[usePhoneCalls] notification permission:', err)
     }
   }
 
@@ -302,7 +295,6 @@ export const usePhoneCalls = (
       if (data.value) {
         setCallState(data.value)
       }
-      void requestNotificationPermission()
       return data.value ?? null
     } catch (err) {
       errorMessage.value = err instanceof Error ? err.message : 'Dial failed'

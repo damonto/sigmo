@@ -10,9 +10,10 @@ import (
 type Kind string
 
 const (
-	KindOTP  Kind = "otp"
-	KindSMS  Kind = "sms"
-	KindCall Kind = "call"
+	KindOTP      Kind = "otp"
+	KindSMS      Kind = "sms"
+	KindCall     Kind = "call"
+	KindReminder Kind = "reminder"
 )
 
 type Event interface {
@@ -28,6 +29,8 @@ func (OTPEvent) Kind() Kind {
 }
 
 type SMSEvent struct {
+	ID       string    `json:"-"`
+	ModemID  string    `json:"-"`
 	Modem    string    `json:"modem"`
 	From     string    `json:"from"`
 	To       string    `json:"to"`
@@ -41,6 +44,8 @@ func (SMSEvent) Kind() Kind {
 }
 
 type CallEvent struct {
+	ID       string    `json:"-"`
+	ModemID  string    `json:"-"`
 	Modem    string    `json:"modem"`
 	From     string    `json:"from"`
 	To       string    `json:"to,omitempty"`
@@ -51,6 +56,43 @@ type CallEvent struct {
 
 func (CallEvent) Kind() Kind {
 	return KindCall
+}
+
+type ReminderEvent struct {
+	ProfileType string    `json:"profileType"`
+	ProfileID   string    `json:"profileId"`
+	ProfileName string    `json:"profileName"`
+	ModemID     string    `json:"modemId,omitempty"`
+	SEID        string    `json:"-"`
+	Modem       string    `json:"modem"`
+	ScheduledAt time.Time `json:"scheduledAt"`
+	Content     string    `json:"content"`
+}
+
+func (ReminderEvent) Kind() Kind {
+	return KindReminder
+}
+
+func (e ReminderEvent) DisplayProfile() string {
+	if name := strings.TrimSpace(e.ProfileName); name != "" {
+		return name
+	}
+	return strings.TrimSpace(e.ProfileID)
+}
+
+func (e ReminderEvent) DisplayTimestamp() string {
+	if e.ScheduledAt.IsZero() {
+		return "unknown"
+	}
+	return e.ScheduledAt.Format(time.RFC3339)
+}
+
+func (e ReminderEvent) DisplayContent() string {
+	content := strings.TrimSpace(e.Content)
+	if content == "" {
+		return "(empty reminder)"
+	}
+	return content
 }
 
 func (e CallEvent) DirectionLabel() string {

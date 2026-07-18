@@ -129,8 +129,8 @@ func profileActionConfig(core *coreesim.Handler, cfg Config) (Config, error) {
 		}
 		return nil
 	}
-	cfg.DeleteProfile = func(modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
-		if err := core.DeleteProfile(modem, seID, iccid); err != nil {
+	cfg.DeleteProfile = func(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
+		if err := core.DeleteProfile(ctx, modem, seID, iccid); err != nil {
 			return fmt.Errorf("delete profile: %w", err)
 		}
 		return nil

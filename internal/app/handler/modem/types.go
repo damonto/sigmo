@@ -1,13 +1,17 @@
 package modem
 
-import "github.com/damonto/sigmo/internal/app/modemstatus"
+import (
+	"github.com/damonto/sigmo/internal/app/modemstatus"
+	"github.com/damonto/sigmo/internal/pkg/reminder"
+)
 
 type SlotResponse struct {
-	Active             bool   `json:"active"`
-	OperatorName       string `json:"operatorName"`
-	OperatorIdentifier string `json:"operatorIdentifier"`
-	RegionCode         string `json:"regionCode"`
-	Identifier         string `json:"identifier"`
+	Active             bool              `json:"active"`
+	OperatorName       string            `json:"operatorName"`
+	OperatorIdentifier string            `json:"operatorIdentifier"`
+	RegionCode         string            `json:"regionCode"`
+	Identifier         string            `json:"identifier"`
+	Reminder           *reminder.Details `json:"reminder,omitempty"`
 }
 
 type RegisteredOperatorResponse struct {

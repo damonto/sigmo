@@ -95,6 +95,33 @@ func (s *Store) Migrate(ctx context.Context) error {
 			updated_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_calls_profile_modem_updated ON calls(profile_id, modem_id, updated_at)`,
+		`CREATE TABLE IF NOT EXISTS reminders (
+			profile_type TEXT NOT NULL,
+			profile_id TEXT NOT NULL,
+			modem_id TEXT NOT NULL,
+			se_id TEXT NOT NULL,
+			profile_name TEXT NOT NULL,
+			next_at TEXT NOT NULL,
+			repeat_days INTEGER,
+			content TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			revision INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (profile_type, profile_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_reminders_next_at ON reminders(next_at)`,
+		`CREATE TABLE IF NOT EXISTS push_subscriptions (
+			id TEXT PRIMARY KEY,
+			endpoint TEXT NOT NULL UNIQUE,
+			p256dh TEXT NOT NULL,
+			auth TEXT NOT NULL,
+			label TEXT NOT NULL,
+			user_agent TEXT NOT NULL,
+			platform TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_updated_at ON push_subscriptions(updated_at)`,
 	}
 	for _, stmt := range statements {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
@@ -107,9 +134,41 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err := s.migrateCallHoldState(ctx); err != nil {
 		return err
 	}
+	if err := s.migrateReminderRevision(ctx); err != nil {
+		return err
+	}
 	if _, err := s.db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_fingerprint ON messages(fingerprint) WHERE fingerprint <> ''`); err != nil {
 		return fmt.Errorf("migrate message fingerprint index: %w", err)
 	}
+	return nil
+}
+
+func (s *Store) migrateReminderRevision(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("start reminder revision migration: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	hasRevision, err := tableColumnExists(ctx, tx, "reminders", "revision")
+	if err != nil {
+		return err
+	}
+	if !hasRevision {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE reminders ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`); err != nil {
+			return fmt.Errorf("add reminder revision column: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit reminder revision migration: %w", err)
+	}
+	committed = true
 	return nil
 }
 

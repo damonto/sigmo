@@ -19,6 +19,7 @@ import (
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
+	"github.com/damonto/sigmo/internal/pkg/webpush"
 )
 
 const incomingNotificationFreshnessWindow = 30 * time.Minute
@@ -32,6 +33,7 @@ type Relay struct {
 	store         *settings.Store
 	registry      *modem.Registry
 	notifier      *notify.Notifier
+	webPush       *webpush.Client
 	messages      *storage.Store
 	mu            sync.Mutex
 	cancels       map[dbus.ObjectPath]context.CancelFunc
@@ -40,7 +42,7 @@ type Relay struct {
 	notifiedCalls map[string]struct{}
 }
 
-func New(store *settings.Store, registry *modem.Registry, messages *storage.Store) (*Relay, error) {
+func New(store *settings.Store, registry *modem.Registry, messages *storage.Store, webPush *webpush.Client) (*Relay, error) {
 	if messages == nil {
 		return nil, errors.New("message storage is required")
 	}
@@ -53,6 +55,7 @@ func New(store *settings.Store, registry *modem.Registry, messages *storage.Stor
 		store:         store,
 		registry:      registry,
 		notifier:      notifier,
+		webPush:       webPush,
 		messages:      messages,
 		cancels:       make(map[dbus.ObjectPath]context.CancelFunc),
 		equipment:     make(map[string]dbus.ObjectPath),
@@ -185,7 +188,7 @@ func (r *Relay) ForwardRoutedSMS(ctx context.Context, modemID string, message st
 	r.mu.Lock()
 	notifier := r.notifier
 	r.mu.Unlock()
-	return notifier.Send(ctx, r.formatStoredMessage(modemID, message))
+	return r.send(ctx, notifier, r.formatStoredMessage(modemID, message))
 }
 
 func (r *Relay) ForwardCall(ctx context.Context, call storage.Call) error {
@@ -200,7 +203,7 @@ func (r *Relay) ForwardCall(ctx context.Context, call storage.Call) error {
 	r.mu.Lock()
 	notifier := r.notifier
 	r.mu.Unlock()
-	if err := notifier.Send(ctx, r.formatStoredCall(call)); err != nil {
+	if err := r.send(ctx, notifier, r.formatStoredCall(call)); err != nil {
 		r.releaseCallNotification(call.ID)
 		return err
 	}
@@ -228,7 +231,7 @@ func (r *Relay) forwardModemSMS(ctx context.Context, m *modem.Modem, message *mo
 	r.mu.Lock()
 	notifier := r.notifier
 	r.mu.Unlock()
-	return notifier.Send(ctx, r.formatStoredMessage(m.EquipmentIdentifier, stored))
+	return r.send(ctx, notifier, r.formatStoredMessage(m.EquipmentIdentifier, stored))
 }
 
 func freshIncomingMessage(message storage.Message, now time.Time) bool {
@@ -262,6 +265,8 @@ func freshIncomingCall(call storage.Call, now time.Time) bool {
 
 func (r *Relay) formatStoredMessage(modemID string, message storage.Message) notifyevent.SMSEvent {
 	return notifyevent.SMSEvent{
+		ID:       storage.MessageFingerprint(message),
+		ModemID:  modemID,
 		Modem:    r.modemLabel(modemID),
 		From:     message.Sender,
 		To:       message.Recipient,
@@ -273,12 +278,32 @@ func (r *Relay) formatStoredMessage(modemID string, message storage.Message) not
 
 func (r *Relay) formatStoredCall(call storage.Call) notifyevent.CallEvent {
 	return notifyevent.CallEvent{
+		ID:       call.ID,
+		ModemID:  call.ModemID,
 		Modem:    r.modemLabel(call.ModemID),
 		From:     strings.TrimSpace(call.Number),
 		Time:     call.StartedAt,
 		State:    call.State,
 		Incoming: call.Direction == callDirectionIncoming,
 	}
+}
+
+func (r *Relay) send(ctx context.Context, notifier *notify.Notifier, event notifyevent.Event) error {
+	var wg sync.WaitGroup
+	var notifierErr, webPushErr error
+	wg.Go(func() {
+		notifierErr = notifier.Send(ctx, event)
+	})
+	if r.webPush != nil {
+		wg.Go(func() {
+			webPushErr = r.webPush.Send(ctx, event)
+		})
+	}
+	wg.Wait()
+	if webPushErr != nil {
+		slog.Warn("send web push", "kind", event.Kind(), "error", webPushErr)
+	}
+	return notifierErr
 }
 
 func (r *Relay) reserveCallNotification(callID string) bool {

@@ -1,12 +1,46 @@
 package email
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 	"github.com/wneessen/go-mail"
 )
+
+func TestRenderReminder(t *testing.T) {
+	t.Parallel()
+	event := notifyevent.ReminderEvent{
+		ProfileName: "Travel",
+		ProfileID:   "8985",
+		Modem:       "Office",
+		ScheduledAt: time.Date(2026, 7, 18, 10, 30, 0, 0, time.UTC),
+		Content:     "Renew the plan",
+	}
+	got, err := render(event)
+	if err != nil {
+		t.Fatalf("render() error = %v", err)
+	}
+	tests := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{name: "subject", got: got.Subject, want: "Reminder: Travel"},
+		{name: "text profile", got: got.TextBody, want: "Profile: Travel"},
+		{name: "text content", got: got.TextBody, want: "Renew the plan"},
+		{name: "html profile", got: got.HTMLBody, want: "Travel"},
+		{name: "html content", got: got.HTMLBody, want: "Renew the plan"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !strings.Contains(tt.got, tt.want) {
+				t.Fatalf("content = %q, want it to contain %q", tt.got, tt.want)
+			}
+		})
+	}
+}
 
 func TestRender(t *testing.T) {
 	t.Parallel()

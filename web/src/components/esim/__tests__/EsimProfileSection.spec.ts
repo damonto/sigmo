@@ -18,6 +18,13 @@ vi.mock('@/apis/esim', () => ({
   }),
 }))
 
+vi.mock('@/apis/reminder', () => ({
+  useReminderApi: () => ({
+    saveEsimReminder: vi.fn(),
+    deleteEsimReminder: vi.fn(),
+  }),
+}))
+
 const profiles: EsimProfile[] = [
   {
     id: 'active',
@@ -149,8 +156,16 @@ describe('EsimProfileSection', () => {
     const wrapper = mountSection()
     const menus = wrapper.findAllComponents({ name: 'DropdownMenu' })
 
-    expect(menus[0].findAll('hr')).toHaveLength(5)
-    expect(menus[1].findAll('hr')).toHaveLength(2)
+    expect(menus[0].findAll('hr')).toHaveLength(6)
+    expect(menus[1].findAll('hr')).toHaveLength(3)
+  })
+
+  it('shows Reminder for active and inactive profiles', () => {
+    const wrapper = mountSection()
+
+    expect(
+      wrapper.findAll('button').filter((button) => button.text().includes('reminder.title')),
+    ).toHaveLength(2)
   })
 
   it('emits network connect and disconnect toggles', async () => {

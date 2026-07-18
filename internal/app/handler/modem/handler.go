@@ -12,16 +12,18 @@ import (
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type Handler struct {
-	registry *mmodem.Registry
-	catalog  *catalog
-	simSlot  *simSlot
-	msisdn   *msisdn
-	settings *modemSettings
-	internet *internet.Connector
+	registry  *mmodem.Registry
+	catalog   *catalog
+	simSlot   *simSlot
+	msisdn    *msisdn
+	settings  *modemSettings
+	internet  *internet.Connector
+	reminders *reminder.Scheduler
 }
 
 const (
@@ -56,14 +58,17 @@ var (
 	errUpdateMSISDNTimeout  = errors.New("updating MSISDN timed out, please refresh to confirm the active slot")
 )
 
-func New(store *settings.Store, registry *mmodem.Registry, internetConnector *internet.Connector, overviewExtensions ...modemstatus.Extension) *Handler {
+func New(store *settings.Store, registry *mmodem.Registry, internetConnector *internet.Connector, reminders *reminder.Scheduler, overviewExtensions ...modemstatus.Extension) *Handler {
+	catalog := newCatalog(store, registry, overviewExtensions...)
+	catalog.reminders = reminders
 	return &Handler{
-		registry: registry,
-		catalog:  newCatalog(store, registry, overviewExtensions...),
-		simSlot:  newSIMSlot(registry),
-		msisdn:   newMSISDN(registry),
-		settings: newSettings(store),
-		internet: internetConnector,
+		registry:  registry,
+		catalog:   catalog,
+		simSlot:   newSIMSlot(registry),
+		msisdn:    newMSISDN(registry),
+		settings:  newSettings(store),
+		internet:  internetConnector,
+		reminders: reminders,
 	}
 }
 

@@ -296,7 +296,7 @@ func TestUpdatePersistsSettingsWhenProxyReloadFails(t *testing.T) {
 		Password:      "old",
 	}
 	store := appsettings.NewMemoryStore(settings)
-	relay, err := forwarder.New(store, nil, testStorage(t))
+	relay, err := forwarder.New(store, nil, testStorage(t), nil)
 	if err != nil {
 		t.Fatalf("forwarder.New() error = %v", err)
 	}
@@ -368,7 +368,7 @@ func newTestHandler(t *testing.T) (*appsettings.Store, *Handler) {
 		},
 	}
 	store := appsettings.NewMemoryStore(settings)
-	relay, err := forwarder.New(store, nil, testStorage(t))
+	relay, err := forwarder.New(store, nil, testStorage(t), nil)
 	if err != nil {
 		t.Fatalf("forwarder.New() error = %v", err)
 	}

@@ -24,9 +24,11 @@ import (
 	"github.com/damonto/sigmo/internal/app/router"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/validator"
+	"github.com/damonto/sigmo/internal/pkg/webpush"
 )
 
 type Config struct {
@@ -61,6 +63,14 @@ func Run(cfg Config) error {
 	store, err := settings.NewStore(context.Background(), db)
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
+	}
+	webPush, err := webpush.New(context.Background(), db)
+	if err != nil {
+		return fmt.Errorf("configure web push: %w", err)
+	}
+	reminderScheduler, err := reminder.New(db, store, webPush)
+	if err != nil {
+		return fmt.Errorf("configure reminders: %w", err)
 	}
 	slog.Info("server starting", "version", cfg.BuildVersion, "listen_address", cfg.ListenAddress, "db_path", resolvedDBPath)
 
@@ -118,7 +128,7 @@ func Run(cfg Config) error {
 		slog.Error("recover internet connections", "error", err)
 	}
 	cancelStartup()
-	relay, err := forwarder.New(store, registry, db)
+	relay, err := forwarder.New(store, registry, db, webPush)
 	if err != nil {
 		return fmt.Errorf("configure message relay: %w", err)
 	}
@@ -129,6 +139,8 @@ func Run(cfg Config) error {
 		Relay:              relay,
 		NetworkPreferences: networkPreferences,
 		Storage:            db,
+		WebPush:            webPush,
+		Reminders:          reminderScheduler,
 	}
 	if cfg.Configure != nil {
 		if err := cfg.Configure(runtime); err != nil {
@@ -143,6 +155,8 @@ func Run(cfg Config) error {
 		Relay:              relay,
 		NetworkPreferences: networkPreferences,
 		Storage:            db,
+		WebPush:            webPush,
+		Reminders:          reminderScheduler,
 		MessageRoute:       runtime.messageRoute,
 		USSDRoute:          runtime.ussdRoute,
 		ModemOverview:      runtime.modemOverview,
@@ -153,6 +167,13 @@ func Run(cfg Config) error {
 	}
 
 	var wg sync.WaitGroup
+
+	wg.Go(func() {
+		if err := reminderScheduler.Run(ctx); err != nil {
+			slog.Error("reminder runner stopped", "error", err)
+			stop()
+		}
+	})
 
 	wg.Go(func() {
 		if err := modem.RunEnableDisabled(ctx, registry, enableDisabledPolicy); err != nil {
