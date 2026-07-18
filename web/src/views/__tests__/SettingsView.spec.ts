@@ -48,6 +48,7 @@ const values = (): SettingsValues => ({
   auth: {
     authProviders: [],
     otpRequired: false,
+    tokenValidityDays: 30,
   },
   proxy: {
     listenAddress: '127.0.0.1',
@@ -79,6 +80,13 @@ const response = (): SettingsResponse => ({
         key: 'authProviders',
         label: 'Auth providers',
         control: 'channelList',
+      },
+      {
+        key: 'tokenValidityDays',
+        label: 'Token validity',
+        control: 'number',
+        min: 1,
+        max: 180,
       },
     ],
     proxy: [
@@ -385,12 +393,18 @@ describe('Settings routes', () => {
     const { wrapper } = await mountSettings('/settings/auth')
 
     expect(wrapper.get('#settings-auth-otpRequired').attributes('role')).toBe('switch')
+    const tokenValidity = wrapper.get('#settings-auth-tokenValidityDays')
+    expect((tokenValidity.element as HTMLInputElement).value).toBe('30')
+    expect(tokenValidity.attributes('min')).toBe('1')
+    expect(tokenValidity.attributes('max')).toBe('180')
+    await tokenValidity.setValue('90')
     const authProvider = wrapper.get('[role="checkbox"]')
     expect(authProvider.attributes('aria-checked')).toBe('false')
     await authProvider.trigger('click')
     await save(wrapper)
 
     expect(api.updateAuth.mock.calls[0]?.[0].authProviders).toEqual(['telegram'])
+    expect(api.updateAuth.mock.calls[0]?.[0].tokenValidityDays).toBe(90)
   })
 
   it('renders the responsive auth test action above save', async () => {

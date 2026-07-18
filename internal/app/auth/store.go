@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -9,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 const (
@@ -16,18 +20,19 @@ const (
 	otpLength          = 6
 	defaultOTPTTL      = 10 * time.Minute
 	defaultOTPCooldown = 30 * time.Second
-	defaultTokenTTL    = 7 * 24 * time.Hour
 )
 
-var ErrOTPCooldown = errors.New("otp requested too soon")
+var (
+	ErrOTPCooldown     = errors.New("otp requested too soon")
+	errStorageRequired = errors.New("auth token storage is required")
+)
 
 type Store struct {
 	mu              sync.Mutex
+	db              *storage.Store
 	otps            map[string]otpEntry
-	tokens          map[string]tokenEntry
 	otpTTL          time.Duration
 	otpCooldown     time.Duration
-	tokenTTL        time.Duration
 	lastOTPIssuedAt time.Time
 }
 
@@ -35,18 +40,16 @@ type otpEntry struct {
 	expiresAt time.Time
 }
 
-type tokenEntry struct {
-	expiresAt time.Time
-}
-
-func NewStore() *Store {
+func NewStore(db *storage.Store) (*Store, error) {
+	if db == nil {
+		return nil, errStorageRequired
+	}
 	return &Store{
+		db:          db,
 		otps:        make(map[string]otpEntry),
-		tokens:      make(map[string]tokenEntry),
 		otpTTL:      defaultOTPTTL,
 		otpCooldown: defaultOTPCooldown,
-		tokenTTL:    defaultTokenTTL,
-	}
+	}, nil
 }
 
 func (s *Store) IssueOTP() (string, time.Time, error) {
@@ -90,40 +93,33 @@ func (s *Store) VerifyOTP(code string) bool {
 	return now.Before(entry.expiresAt)
 }
 
-func (s *Store) IssueToken() (string, time.Time, error) {
+func (s *Store) IssueToken(ctx context.Context, validity time.Duration) (string, time.Time, error) {
+	if validity <= 0 {
+		return "", time.Time{}, errors.New("token validity must be positive")
+	}
 	token, err := generateToken()
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	expiresAt := time.Now().Add(s.tokenTTL)
+	expiresAt := time.Now().Add(validity)
 
-	s.mu.Lock()
-	s.tokens[token] = tokenEntry{expiresAt: expiresAt}
-	s.mu.Unlock()
+	if err := s.db.CreateAuthToken(ctx, hashToken(token), expiresAt); err != nil {
+		return "", time.Time{}, fmt.Errorf("store token: %w", err)
+	}
 
 	return token, expiresAt, nil
 }
 
-func (s *Store) ValidateToken(token string) bool {
+func (s *Store) ValidateToken(ctx context.Context, token string) (bool, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return false
+		return false, nil
 	}
-	now := time.Now()
-
-	s.mu.Lock()
-	entry, ok := s.tokens[token]
-	if !ok {
-		s.mu.Unlock()
-		return false
+	valid, err := s.db.AuthTokenValid(ctx, hashToken(token), time.Now())
+	if err != nil {
+		return false, fmt.Errorf("validate token: %w", err)
 	}
-	if now.After(entry.expiresAt) {
-		delete(s.tokens, token)
-		s.mu.Unlock()
-		return false
-	}
-	s.mu.Unlock()
-	return true
+	return valid, nil
 }
 
 func generateOTP() (string, error) {
@@ -144,4 +140,9 @@ func generateToken() (string, error) {
 		return "", fmt.Errorf("generating token: %w", err)
 	}
 	return hex.EncodeToString(tokenBytes), nil
+}
+
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }

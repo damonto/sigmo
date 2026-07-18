@@ -53,7 +53,7 @@ func (h *Handler) VerifyOTP(c *echo.Context) error {
 	if err := httpapi.BindAndValidate(c, &req, errorCodeInvalidVerifyOTPRequest); err != nil {
 		return err
 	}
-	token, err := h.otp.Verify(req.Code)
+	token, err := h.otp.Verify(c.Request().Context(), req.Code)
 	if err != nil {
 		if errors.Is(err, errOTPNotRequired) {
 			return httpapi.BadRequest(c, errorCodeOTPNotRequired, err)

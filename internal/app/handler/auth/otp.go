@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/pkg/notify"
@@ -85,14 +86,15 @@ func channelEnabled(channels map[string]settings.Channel, target string) bool {
 	return false
 }
 
-func (o *otp) Verify(code string) (string, error) {
+func (o *otp) Verify(ctx context.Context, code string) (string, error) {
 	if !o.Required() {
 		return "", errOTPNotRequired
 	}
 	if !o.store.VerifyOTP(code) {
 		return "", errInvalidOTP
 	}
-	token, _, err := o.store.IssueToken()
+	validity := time.Duration(o.settingsStore.TokenValidityDays()) * 24 * time.Hour
+	token, _, err := o.store.IssueToken(ctx, validity)
 	if err != nil {
 		return "", fmt.Errorf("issue token: %w", err)
 	}

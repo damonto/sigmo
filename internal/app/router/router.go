@@ -74,7 +74,10 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 	capabilityHandler := capability.New(deps.Features)
 	v1.GET("/capabilities", capabilityHandler.List)
 
-	authStore := auth.NewStore()
+	authStore, err := auth.NewStore(deps.Storage)
+	if err != nil {
+		return fmt.Errorf("configure auth store: %w", err)
+	}
 	authHandler := hauth.New(deps.Store, authStore)
 	v1.GET("/auth/otp/required", authHandler.OTPRequirement)
 	v1.POST("/auth/otp", authHandler.SendOTP)

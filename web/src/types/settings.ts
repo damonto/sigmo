@@ -1,6 +1,7 @@
 export type SettingsAuth = {
   authProviders: string[]
   otpRequired: boolean
+  tokenValidityDays: number
 }
 
 export type SettingsAuthTest = {

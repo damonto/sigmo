@@ -130,8 +130,9 @@ func TestStorePersistsSettings(t *testing.T) {
 	enabled := true
 	_, err = store.Update(ctx, func(current *Settings) error {
 		current.Auth = Auth{
-			OTPRequired:   true,
-			AuthProviders: []string{"telegram"},
+			OTPRequired:       true,
+			AuthProviders:     []string{"telegram"},
+			TokenValidityDays: 90,
 		}
 		current.Channels = map[string]Channel{
 			"telegram": {
@@ -166,6 +167,9 @@ func TestStorePersistsSettings(t *testing.T) {
 	if got.Auth.AuthProviders[0] != "telegram" {
 		t.Fatalf("AuthProviders = %#v, want telegram", got.Auth.AuthProviders)
 	}
+	if got.Auth.TokenValidityDays != 90 {
+		t.Fatalf("TokenValidityDays = %d, want 90", got.Auth.TokenValidityDays)
+	}
 	if got.Channels["telegram"].BotToken != "token" {
 		t.Fatalf("telegram bot token = %q, want token", got.Channels["telegram"].BotToken)
 	}
@@ -189,11 +193,39 @@ func TestStoreDefaultsEmptyDatabase(t *testing.T) {
 	if got.Auth.OTPRequired {
 		t.Fatal("OTPRequired = true, want false")
 	}
+	if got.Auth.TokenValidityDays != DefaultTokenValidityDays {
+		t.Fatalf("TokenValidityDays = %d, want %d", got.Auth.TokenValidityDays, DefaultTokenValidityDays)
+	}
 	if len(got.Channels) != 0 {
 		t.Fatalf("Channels length = %d, want 0", len(got.Channels))
 	}
 	if got.ProxySettings() != DefaultProxy() {
 		t.Fatalf("ProxySettings() = %#v, want %#v", got.ProxySettings(), DefaultProxy())
+	}
+}
+
+func TestStoreDefaultsLegacyAuthSettings(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	legacy := struct {
+		AuthProviders []string `json:"authProviders"`
+		OTPRequired   bool     `json:"otpRequired"`
+	}{
+		AuthProviders: []string{"telegram"},
+		OTPRequired:   true,
+	}
+	if err := db.Put(ctx, globalScopeKey, authSettingsKey, legacy); err != nil {
+		t.Fatalf("Put() legacy auth error = %v", err)
+	}
+
+	store, err := NewStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	if got := store.Snapshot().Auth.TokenValidityDays; got != DefaultTokenValidityDays {
+		t.Fatalf("TokenValidityDays = %d, want %d", got, DefaultTokenValidityDays)
 	}
 }
 

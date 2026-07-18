@@ -26,6 +26,16 @@ func TestSettingsSchema(t *testing.T) {
 	t.Parallel()
 
 	schema := settingsSchema()
+	tokenValidity, ok := fieldSchema(schema.Auth, "tokenValidityDays")
+	if !ok {
+		t.Fatal("auth tokenValidityDays field not found")
+	}
+	if tokenValidity.Control != controlNumber || tokenValidity.Min == nil || *tokenValidity.Min != 1 {
+		t.Fatalf("tokenValidityDays schema = %+v, want number with minimum 1", tokenValidity)
+	}
+	if tokenValidity.Max == nil || *tokenValidity.Max != appsettings.MaxTokenValidityDays {
+		t.Fatalf("tokenValidityDays max = %v, want %d", tokenValidity.Max, appsettings.MaxTokenValidityDays)
+	}
 	tests := []struct {
 		name      string
 		channel   string
@@ -94,6 +104,7 @@ func TestResponseJSONUsesCamelCase(t *testing.T) {
 		`"listenAddress"`,
 		`"authProviders"`,
 		`"otpRequired"`,
+		`"tokenValidityDays"`,
 		`"httpPort"`,
 		`"socks5Port"`,
 		`"botToken"`,
@@ -133,19 +144,20 @@ func TestUpdateAuth(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		request       AuthValues
+		request       UpdateAuthRequest
 		configure     func(*appsettings.Settings)
 		wantStatus    int
 		wantProviders []string
+		wantValidity  int
 	}{
 		{
 			name:       "rejects auth provider without enabled channel",
-			request:    AuthValues{AuthProviders: []string{"telegram"}},
+			request:    UpdateAuthRequest{AuthProviders: []string{"telegram"}},
 			wantStatus: http.StatusUnprocessableEntity,
 		},
 		{
 			name:    "rejects auth provider with disabled channel",
-			request: AuthValues{AuthProviders: []string{"telegram"}},
+			request: UpdateAuthRequest{AuthProviders: []string{"telegram"}},
 			configure: func(settings *appsettings.Settings) {
 				settings.Channels["telegram"] = appsettings.Channel{Enabled: new(false)}
 			},
@@ -153,20 +165,42 @@ func TestUpdateAuth(t *testing.T) {
 		},
 		{
 			name:       "rejects otp without auth providers",
-			request:    AuthValues{OTPRequired: true},
+			request:    UpdateAuthRequest{OTPRequired: true},
 			wantStatus: http.StatusUnprocessableEntity,
 		},
 		{
-			name: "saves only auth settings",
-			request: AuthValues{
-				OTPRequired:   true,
-				AuthProviders: []string{" Telegram ", "telegram"},
+			name:       "rejects zero token validity",
+			request:    UpdateAuthRequest{TokenValidityDays: new(0)},
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+		{
+			name:       "rejects token validity above maximum",
+			request:    UpdateAuthRequest{TokenValidityDays: new(appsettings.MaxTokenValidityDays + 1)},
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+		{
+			name: "saves custom token validity with auth settings",
+			request: UpdateAuthRequest{
+				OTPRequired:       true,
+				AuthProviders:     []string{" Telegram ", "telegram"},
+				TokenValidityDays: new(90),
 			},
 			configure: func(settings *appsettings.Settings) {
 				settings.Channels["telegram"] = appsettings.Channel{Enabled: new(true)}
 			},
 			wantStatus:    http.StatusOK,
 			wantProviders: []string{"telegram"},
+			wantValidity:  90,
+		},
+		{
+			name:    "omitted token validity preserves current value",
+			request: UpdateAuthRequest{},
+			configure: func(settings *appsettings.Settings) {
+				settings.Auth.TokenValidityDays = 75
+				settings.Channels["telegram"] = appsettings.Channel{Enabled: new(true)}
+			},
+			wantStatus:   http.StatusOK,
+			wantValidity: 75,
 		},
 	}
 
@@ -199,6 +233,9 @@ func TestUpdateAuth(t *testing.T) {
 			snapshot := store.Snapshot()
 			if !slices.Equal(snapshot.Auth.AuthProviders, tt.wantProviders) {
 				t.Fatalf("AuthProviders = %#v, want %#v", snapshot.Auth.AuthProviders, tt.wantProviders)
+			}
+			if snapshot.Auth.TokenValidityDays != tt.wantValidity {
+				t.Fatalf("TokenValidityDays = %d, want %d", snapshot.Auth.TokenValidityDays, tt.wantValidity)
 			}
 			if snapshot.ProxySettings() != appsettings.DefaultProxy() {
 				t.Fatalf("proxy settings changed while saving auth")

@@ -1,5 +1,7 @@
 package settings
 
+import appsettings "github.com/damonto/sigmo/internal/pkg/settings"
+
 const (
 	controlText        = "text"
 	controlPassword    = "password"
@@ -20,6 +22,14 @@ func settingsSchema() Schema {
 				Description: "settings.schema.auth.otpRequired.description",
 				Control:     controlSwitch,
 			},
+			numberField(
+				"tokenValidityDays",
+				"settings.schema.auth.tokenValidityDays.label",
+				"settings.schema.auth.tokenValidityDays.description",
+				1,
+				appsettings.MaxTokenValidityDays,
+				true,
+			),
 			{
 				Key:         "authProviders",
 				Label:       "settings.schema.auth.authProviders.label",

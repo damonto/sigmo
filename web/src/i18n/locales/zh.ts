@@ -31,7 +31,7 @@ const zh = {
     back: '返回',
     loading: '加载设置',
     authTitle: '认证',
-    authDescription: '登录验证码与验证码发送渠道。',
+    authDescription: '登录验证码、Token 有效期与验证码发送渠道。',
     proxyTitle: '代理',
     proxyDescription: 'Internet 连接启用代理时使用。',
     notificationTitle: '通知',
@@ -50,6 +50,10 @@ const zh = {
         otpRequired: {
           label: '启用 OTP',
           description: '使用 API 前要求一次性验证码验证。',
+        },
+        tokenValidityDays: {
+          label: 'Token 有效期（天）',
+          description: '登录 Token 的有效天数，可设置为 1 至 180 天。',
         },
         authProviders: {
           label: '认证渠道',

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 
 	appauth "github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/pkg/settings"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 func TestOTPSend(t *testing.T) {
@@ -65,7 +67,7 @@ func TestOTPSend(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			store := appauth.NewStore()
+			store := newAuthTestStore(t)
 			settingsStore := settings.NewMemoryStore(&tt.settings)
 			otp := newOTP(settingsStore, store)
 
@@ -149,7 +151,7 @@ func TestSendOTPRejectsInvalidAuthProviderConfig(t *testing.T) {
 				Recipients: settings.Recipients{"123456"},
 			},
 		},
-	}), appauth.NewStore())
+	}), newAuthTestStore(t))
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/otp", nil)
 	rec := httptest.NewRecorder()
@@ -198,7 +200,7 @@ func TestOTPVerify(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			store := appauth.NewStore()
+			store := newAuthTestStore(t)
 			code := tt.code
 			if tt.issueCode {
 				issued, _, err := store.IssueOTP()
@@ -210,13 +212,36 @@ func TestOTPVerify(t *testing.T) {
 
 			settingsStore := settings.NewMemoryStore(&settings.Settings{Auth: settings.Auth{OTPRequired: tt.required}})
 			otp := newOTP(settingsStore, store)
-			token, err := otp.Verify(code)
+			token, err := otp.Verify(t.Context(), code)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Verify() error = %v, want %v", err, tt.wantErr)
 			}
 			if gotToken := token != ""; gotToken != tt.wantToken {
 				t.Fatalf("Verify() token present = %v, want %v", gotToken, tt.wantToken)
 			}
+			if tt.wantToken {
+				if _, err := otp.Verify(t.Context(), code); !errors.Is(err, errInvalidOTP) {
+					t.Fatalf("Verify() reused OTP error = %v, want %v", err, errInvalidOTP)
+				}
+			}
 		})
 	}
+}
+
+func newAuthTestStore(t *testing.T) *appauth.Store {
+	t.Helper()
+	db, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	if err != nil {
+		t.Fatalf("storage.Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	})
+	store, err := appauth.NewStore(db)
+	if err != nil {
+		t.Fatalf("appauth.NewStore() error = %v", err)
+	}
+	return store
 }

@@ -61,7 +61,7 @@ func (h *Handler) Get(c *echo.Context) error {
 }
 
 func (h *Handler) UpdateAuth(c *echo.Context) error {
-	var req AuthValues
+	var req UpdateAuthRequest
 	if err := c.Bind(&req); err != nil {
 		return httpapi.BadRequest(c, errorCodeUpdateAuthInvalidRequest, err)
 	}
@@ -70,9 +70,9 @@ func (h *Handler) UpdateAuth(c *echo.Context) error {
 		return httpapi.UnprocessableEntity(c, errorCodeUpdateAuthInvalid, err)
 	}
 
-	auth := authSettingsFromValues(req)
 	var invalidErr error
 	saved, err := h.store.Update(c.Request().Context(), func(current *appsettings.Settings) error {
+		auth := authSettingsFromRequest(current.Auth, req)
 		invalidErr = applyAuthSettings(current, auth)
 		return invalidErr
 	})
@@ -222,22 +222,25 @@ func valuesFromSettings(current appsettings.Settings) Values {
 	}
 }
 
-func normalizeAuthValues(auth AuthValues) AuthValues {
+func normalizeAuthValues(auth UpdateAuthRequest) UpdateAuthRequest {
 	auth.AuthProviders = trimNames(auth.AuthProviders)
 	return auth
 }
 
-func authSettingsFromValues(auth AuthValues) appsettings.Auth {
-	return appsettings.Auth{
-		AuthProviders: normalizeNames(auth.AuthProviders),
-		OTPRequired:   auth.OTPRequired,
+func authSettingsFromRequest(current appsettings.Auth, auth UpdateAuthRequest) appsettings.Auth {
+	current.AuthProviders = normalizeNames(auth.AuthProviders)
+	current.OTPRequired = auth.OTPRequired
+	if auth.TokenValidityDays != nil {
+		current.TokenValidityDays = *auth.TokenValidityDays
 	}
+	return current
 }
 
 func authValuesFromSettings(auth appsettings.Auth) AuthValues {
 	return AuthValues{
-		AuthProviders: slices.Clone(auth.AuthProviders),
-		OTPRequired:   auth.OTPRequired,
+		AuthProviders:     slices.Clone(auth.AuthProviders),
+		OTPRequired:       auth.OTPRequired,
+		TokenValidityDays: auth.TokenValidityDays,
 	}
 }
 

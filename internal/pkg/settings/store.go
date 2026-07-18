@@ -58,6 +58,12 @@ func (s *Store) OTPRequired() bool {
 	return s.current.Auth.OTPRequired
 }
 
+func (s *Store) TokenValidityDays() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.current.Auth.TokenValidityDays
+}
+
 func (s *Store) FindModem(id string) Modem {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

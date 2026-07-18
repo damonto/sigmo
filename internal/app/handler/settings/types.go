@@ -12,8 +12,15 @@ type Values struct {
 }
 
 type AuthValues struct {
-	AuthProviders []string `json:"authProviders" validate:"omitempty,dive,required"`
-	OTPRequired   bool     `json:"otpRequired"`
+	AuthProviders     []string `json:"authProviders"`
+	OTPRequired       bool     `json:"otpRequired"`
+	TokenValidityDays int      `json:"tokenValidityDays"`
+}
+
+type UpdateAuthRequest struct {
+	AuthProviders     []string `json:"authProviders" validate:"omitempty,dive,required"`
+	OTPRequired       bool     `json:"otpRequired"`
+	TokenValidityDays *int     `json:"tokenValidityDays" validate:"omitempty,gte=1,lte=180"`
 }
 
 type AuthTestRequest struct {

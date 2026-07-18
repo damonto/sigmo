@@ -27,7 +27,11 @@ func Auth(store *auth.Store, settingsStore *settings.Store) echo.MiddlewareFunc 
 			if token == "" {
 				token = strings.TrimSpace(c.QueryParam("token"))
 			}
-			if token == "" || !store.ValidateToken(token) {
+			valid, err := store.ValidateToken(c.Request().Context(), token)
+			if err != nil {
+				return httpapi.Internal(c, "validate_token_failed", err)
+			}
+			if !valid {
 				return httpapi.Error(c, http.StatusUnauthorized, "invalid_token", "missing or invalid token")
 			}
 			return next(c)

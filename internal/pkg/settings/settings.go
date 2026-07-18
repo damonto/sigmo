@@ -9,6 +9,8 @@ const (
 	defaultProxyListenAddress = "127.0.0.1"
 	defaultProxyHTTPPort      = 8080
 	defaultProxySOCKS5Port    = 1080
+	DefaultTokenValidityDays  = 30
+	MaxTokenValidityDays      = 180
 )
 
 type Settings struct {
@@ -19,8 +21,9 @@ type Settings struct {
 }
 
 type Auth struct {
-	AuthProviders []string `json:"authProviders"`
-	OTPRequired   bool     `json:"otpRequired"`
+	AuthProviders     []string `json:"authProviders"`
+	OTPRequired       bool     `json:"otpRequired"`
+	TokenValidityDays int      `json:"tokenValidityDays"`
 }
 
 type Channel struct {
@@ -84,6 +87,9 @@ func (c *Settings) ApplyDefaults() {
 	if c.Auth.AuthProviders == nil {
 		c.Auth.AuthProviders = []string{}
 	}
+	if c.Auth.TokenValidityDays <= 0 {
+		c.Auth.TokenValidityDays = DefaultTokenValidityDays
+	}
 	if c.Channels == nil {
 		c.Channels = map[string]Channel{}
 	}
@@ -126,8 +132,9 @@ func (c *Settings) ProxySettings() Proxy {
 func (c *Settings) Clone() Settings {
 	clone := Settings{
 		Auth: Auth{
-			AuthProviders: slices.Clone(c.Auth.AuthProviders),
-			OTPRequired:   c.Auth.OTPRequired,
+			AuthProviders:     slices.Clone(c.Auth.AuthProviders),
+			OTPRequired:       c.Auth.OTPRequired,
+			TokenValidityDays: c.Auth.TokenValidityDays,
 		},
 		Channels: make(map[string]Channel, len(c.Channels)),
 		Modems:   maps.Clone(c.Modems),

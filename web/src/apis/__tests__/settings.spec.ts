@@ -20,13 +20,18 @@ describe('useSettingsApi', () => {
     await useSettingsApi().updateAuth({
       otpRequired: true,
       authProviders: ['telegram'],
+      tokenValidityDays: 30,
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/settings/auth'),
       expect.objectContaining({
         method: 'PUT',
-        body: JSON.stringify({ otpRequired: true, authProviders: ['telegram'] }),
+        body: JSON.stringify({
+          otpRequired: true,
+          authProviders: ['telegram'],
+          tokenValidityDays: 30,
+        }),
       }),
     )
   })

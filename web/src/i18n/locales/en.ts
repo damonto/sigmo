@@ -31,7 +31,7 @@ const en = {
     back: 'Back',
     loading: 'Loading settings',
     authTitle: 'Authentication',
-    authDescription: 'Login OTP and the channels used to send verification codes.',
+    authDescription: 'Login OTP, token validity, and the channels used to send verification codes.',
     proxyTitle: 'Proxy',
     proxyDescription: 'Used when a modem internet connection exposes proxy services.',
     notificationTitle: 'Notification',
@@ -50,6 +50,10 @@ const en = {
         otpRequired: {
           label: 'OTP required',
           description: 'Require one-time password verification before using the API.',
+        },
+        tokenValidityDays: {
+          label: 'Token validity (days)',
+          description: 'Number of days a login token remains valid, from 1 to 180.',
         },
         authProviders: {
           label: 'Authentication providers',
