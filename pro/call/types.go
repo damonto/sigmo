@@ -36,17 +36,17 @@ type SendDTMFRequest struct {
 }
 
 type CallResponse struct {
-	ID         string `json:"callID"`
-	Route      string `json:"route"`
-	Direction  string `json:"direction"`
-	Number     string `json:"number"`
-	State      string `json:"state"`
-	Hold       string `json:"hold"`
-	Reason     string `json:"reason"`
-	StartedAt  string `json:"startedAt"`
-	AnsweredAt string `json:"answeredAt"`
-	EndedAt    string `json:"endedAt"`
-	UpdatedAt  string `json:"updatedAt"`
+	ID         string `json:"callID" jsonschema:"Sigmo call-record identifier; use this exact value as callId when deleting the record"`
+	Route      string `json:"route" jsonschema:"call transport route, such as VoLTE or Wi-Fi Calling"`
+	Direction  string `json:"direction" jsonschema:"call direction: incoming or outgoing"`
+	Number     string `json:"number" jsonschema:"remote party phone number"`
+	State      string `json:"state" jsonschema:"last recorded call state"`
+	Hold       string `json:"hold" jsonschema:"last recorded hold state; none when the call was not held"`
+	Reason     string `json:"reason" jsonschema:"termination or state-change reason; empty when unavailable"`
+	StartedAt  string `json:"startedAt" jsonschema:"call start time as an RFC 3339 timestamp"`
+	AnsweredAt string `json:"answeredAt" jsonschema:"answer time as an RFC 3339 timestamp; empty when unanswered"`
+	EndedAt    string `json:"endedAt" jsonschema:"end time as an RFC 3339 timestamp; empty while not ended"`
+	UpdatedAt  string `json:"updatedAt" jsonschema:"last record update time as an RFC 3339 timestamp"`
 }
 
 type EventMessage struct {

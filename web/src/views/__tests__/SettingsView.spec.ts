@@ -243,6 +243,11 @@ const createSettingsRouter = () =>
         component: SettingsLayout,
         children: [
           { path: '', name: 'settings', component: SettingsView },
+          {
+            path: 'mcp',
+            name: 'settings-mcp',
+            component: { template: '<div>MCP</div>' },
+          },
           { path: 'auth', name: 'settings-auth', component: SettingsAuthView },
           { path: 'proxy', name: 'settings-proxy', component: SettingsProxyView },
           {
@@ -324,7 +329,7 @@ describe('Settings routes', () => {
     document.body.innerHTML = ''
   })
 
-  it('renders four category cards with direct module routes', async () => {
+  it('renders five category cards with direct module routes', async () => {
     const { wrapper } = await mountSettings('/settings')
     const hrefs = wrapper
       .findAll('main a')
@@ -336,6 +341,7 @@ describe('Settings routes', () => {
       '/settings/proxy',
       '/settings/web-push',
       '/settings/notifications',
+      '/settings/mcp',
     ])
     expect(wrapper.text()).toContain('settings.authTitle')
     expect(wrapper.text()).toContain('settings.notificationTitle')
@@ -344,6 +350,13 @@ describe('Settings routes', () => {
   it('renders one top-level Back link and marks the active desktop module', async () => {
     const { wrapper } = await mountSettings('/settings/notifications')
 
+    expect(wrapper.findAll('aside nav a').map((link) => link.attributes('href'))).toEqual([
+      '/settings/auth',
+      '/settings/proxy',
+      '/settings/web-push',
+      '/settings/notifications',
+      '/settings/mcp',
+    ])
     expect(wrapper.get('aside a[aria-current="page"]').attributes('href')).toBe(
       '/settings/notifications',
     )

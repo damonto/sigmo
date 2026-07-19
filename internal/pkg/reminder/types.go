@@ -17,9 +17,9 @@ type UpdateRequest struct {
 }
 
 type Details struct {
-	NextAt     time.Time `json:"nextAt"`
-	RepeatDays *int      `json:"repeatDays,omitempty"`
-	Content    string    `json:"content"`
+	NextAt     time.Time `json:"nextAt" jsonschema:"next scheduled reminder time in UTC"`
+	RepeatDays *int      `json:"repeatDays" jsonschema:"repeat interval in days; null for a one-time reminder"`
+	Content    string    `json:"content" jsonschema:"user-defined reminder text"`
 }
 
 func (r UpdateRequest) Record(profileType ProfileType, profileID, modemID, seID, profileName string) (storage.Reminder, error) {

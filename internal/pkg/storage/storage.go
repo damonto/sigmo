@@ -127,6 +127,39 @@ func (s *Store) Migrate(ctx context.Context) error {
 			expires_at INTEGER NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires_at ON auth_tokens(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS mcp_api_keys (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			token_hash TEXT NOT NULL UNIQUE,
+			token_hint TEXT NOT NULL,
+			all_modems INTEGER NOT NULL,
+			created_at INTEGER NOT NULL,
+			expires_at INTEGER NOT NULL,
+			revoked_at INTEGER
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mcp_api_keys_expires_at ON mcp_api_keys(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS mcp_api_key_modems (
+			key_id TEXT NOT NULL REFERENCES mcp_api_keys(id) ON DELETE CASCADE,
+			modem_id TEXT NOT NULL,
+			PRIMARY KEY (key_id, modem_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS mcp_api_key_permissions (
+			key_id TEXT NOT NULL REFERENCES mcp_api_keys(id) ON DELETE CASCADE,
+			permission TEXT NOT NULL,
+			PRIMARY KEY (key_id, permission)
+		)`,
+		`CREATE TABLE IF NOT EXISTS mcp_audit_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			key_id TEXT NOT NULL,
+			key_name TEXT NOT NULL,
+			tool TEXT NOT NULL,
+			modem_ids_json TEXT NOT NULL,
+			outcome TEXT NOT NULL,
+			error_code TEXT NOT NULL,
+			duration_ms INTEGER NOT NULL,
+			created_at INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mcp_audit_events_created_at ON mcp_audit_events(created_at)`,
 	}
 	for _, stmt := range statements {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sigmo Control"
+  short_description: "Safely operate authorized Sigmo modem features"
+  default_prompt: "Use $sigmo-control to inspect and safely operate my authorized Sigmo modems."

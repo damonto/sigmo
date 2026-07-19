@@ -87,7 +87,7 @@ func (h *Handler) List(c *echo.Context) error {
 	if err != nil {
 		return httpapi.Internal(c, errorCodeListCallsFailed, err)
 	}
-	return c.JSON(http.StatusOK, buildCallResponses(calls))
+	return c.JSON(http.StatusOK, ResponsesFromCalls(calls))
 }
 
 func (h *Handler) WebRTCICEServers(c *echo.Context) error {
@@ -111,7 +111,7 @@ func (h *Handler) Dial(c *echo.Context) error {
 	if err != nil {
 		return callActionError(c, err, errorCodeDialCallFailed)
 	}
-	return c.JSON(http.StatusCreated, buildCallResponse(call))
+	return c.JSON(http.StatusCreated, ResponseFromCall(call))
 }
 
 func (h *Handler) Update(c *echo.Context) error {
@@ -131,7 +131,7 @@ func (h *Handler) Update(c *echo.Context) error {
 	if err != nil {
 		return callActionError(c, err, errorCodeUpdateCallFailed)
 	}
-	return c.JSON(http.StatusOK, buildCallResponse(call))
+	return c.JSON(http.StatusOK, ResponseFromCall(call))
 }
 
 func (h *Handler) Hangup(c *echo.Context) error {
@@ -143,7 +143,7 @@ func (h *Handler) Hangup(c *echo.Context) error {
 	if err != nil {
 		return callActionError(c, err, errorCodeHangupCallFailed)
 	}
-	return c.JSON(http.StatusOK, buildCallResponse(call))
+	return c.JSON(http.StatusOK, ResponseFromCall(call))
 }
 
 func (h *Handler) SendDTMF(c *echo.Context) error {
@@ -356,7 +356,7 @@ func writeCallEvent(conn *websocket.Conn, call storage.Call) error {
 	if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		return err
 	}
-	return conn.WriteJSON(EventMessage{Type: "call", Call: buildCallResponse(call)})
+	return conn.WriteJSON(EventMessage{Type: "call", Call: ResponseFromCall(call)})
 }
 
 func writeWebRTCIceCandidates(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, candidates <-chan WebRTCICECandidate) {
@@ -490,10 +490,10 @@ func callMediaMessage(err error) string {
 	return message
 }
 
-func buildCallResponses(calls []storage.Call) []CallResponse {
+func ResponsesFromCalls(calls []storage.Call) []CallResponse {
 	response := make([]CallResponse, 0, len(calls))
 	for _, call := range calls {
-		response = append(response, buildCallResponse(call))
+		response = append(response, ResponseFromCall(call))
 	}
 	return response
 }
@@ -510,7 +510,7 @@ func buildWebRTCICEServersResponse(servers []WebRTCICEServer) WebRTCICEServersRe
 	return WebRTCICEServersResponse{ICEServers: out}
 }
 
-func buildCallResponse(call storage.Call) CallResponse {
+func ResponseFromCall(call storage.Call) CallResponse {
 	hold := strings.TrimSpace(call.Hold)
 	if hold == "" {
 		hold = HoldNone

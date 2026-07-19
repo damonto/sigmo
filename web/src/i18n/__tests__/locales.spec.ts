@@ -15,6 +15,10 @@ const leafPaths = (value: unknown, prefix = ''): string[] => {
 }
 
 describe('locales', () => {
+  it('keeps English and Chinese keys in sync', () => {
+    expect(leafPaths(zh).sort()).toEqual(leafPaths(en).sort())
+  })
+
   it('compiles every localized message', () => {
     const i18n = createI18n({
       legacy: false,

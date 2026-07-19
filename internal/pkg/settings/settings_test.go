@@ -147,6 +147,7 @@ func TestStorePersistsSettings(t *testing.T) {
 			SOCKS5Port:    11080,
 			Password:      "secret",
 		}
+		current.MCP.Enabled = true
 		return nil
 	})
 	if err != nil {
@@ -176,6 +177,9 @@ func TestStorePersistsSettings(t *testing.T) {
 	if got.ProxySettings().HTTPPort != 18080 {
 		t.Fatalf("proxy http port = %d, want 18080", got.ProxySettings().HTTPPort)
 	}
+	if !got.MCP.Enabled {
+		t.Fatal("MCP.Enabled = false, want true")
+	}
 	if modem := got.FindModem("modem-1"); modem.Alias != "Office" || modem.MSS != 128 {
 		t.Fatalf("modem settings = %#v, want saved settings", modem)
 	}
@@ -201,6 +205,9 @@ func TestStoreDefaultsEmptyDatabase(t *testing.T) {
 	}
 	if got.ProxySettings() != DefaultProxy() {
 		t.Fatalf("ProxySettings() = %#v, want %#v", got.ProxySettings(), DefaultProxy())
+	}
+	if got.MCP.Enabled {
+		t.Fatal("MCP.Enabled = true, want false")
 	}
 }
 

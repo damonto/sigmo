@@ -21,6 +21,8 @@ import (
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	hnetwork "github.com/damonto/sigmo/internal/app/handler/network"
 	"github.com/damonto/sigmo/internal/app/httpapi"
+	"github.com/damonto/sigmo/internal/app/mcpauth"
+	"github.com/damonto/sigmo/internal/app/mcpserver"
 	"github.com/damonto/sigmo/internal/app/router"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/modem"
@@ -147,6 +149,41 @@ func Run(cfg Config) error {
 			return fmt.Errorf("configure extensions: %w", err)
 		}
 	}
+	mcpKeys, err := mcpauth.NewStore(db)
+	if err != nil {
+		return fmt.Errorf("configure MCP API keys: %w", err)
+	}
+	mcpCatalog := mcpserver.NewCatalog()
+	if err := mcpserver.RegisterCoreTools(mcpCatalog, mcpserver.CoreToolsConfig{
+		Store:              store,
+		Registry:           registry,
+		Internet:           internetConnector,
+		Relay:              relay,
+		NetworkPreferences: networkPreferences,
+		Storage:            db,
+		Reminders:          reminderScheduler,
+		MessageRoute:       runtime.messageRoute,
+		USSDRoute:          runtime.ussdRoute,
+		ModemOverview:      runtime.modemOverview,
+	}); err != nil {
+		return fmt.Errorf("configure MCP core tools: %w", err)
+	}
+	for _, extension := range runtime.mcpTools {
+		if err := extension(mcpCatalog); err != nil {
+			return fmt.Errorf("configure MCP extension: %w", err)
+		}
+	}
+	mcpController, err := mcpserver.New(mcpserver.Config{
+		BuildVersion: cfg.BuildVersion,
+		Settings:     store,
+		Keys:         mcpKeys,
+		Storage:      db,
+		Catalog:      mcpCatalog,
+	})
+	if err != nil {
+		return fmt.Errorf("configure MCP server: %w", err)
+	}
+	defer mcpController.Close()
 	if err := router.Register(server, router.RegisterConfig{
 		BuildVersion:       cfg.BuildVersion,
 		Store:              store,
@@ -162,11 +199,18 @@ func Run(cfg Config) error {
 		ModemOverview:      runtime.modemOverview,
 		Features:           runtime.features,
 		Extensions:         runtime.routes,
+		MCP:                mcpController,
+		MCPKeys:            mcpKeys,
 	}); err != nil {
 		return fmt.Errorf("configure router: %w", err)
 	}
 
 	var wg sync.WaitGroup
+
+	wg.Go(func() {
+		<-ctx.Done()
+		mcpController.Close()
+	})
 
 	wg.Go(func() {
 		if err := reminderScheduler.Run(ctx); err != nil {

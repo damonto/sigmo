@@ -7,7 +7,7 @@ import (
 )
 
 func buildConversationResponses(messages []storage.Message) []MessageResponse {
-	response := buildMessageResponses(messages)
+	response := ResponsesFromMessages(messages)
 	slices.SortFunc(response, func(a, b MessageResponse) int {
 		if a.ID == b.ID {
 			return 0
@@ -21,7 +21,7 @@ func buildConversationResponses(messages []storage.Message) []MessageResponse {
 }
 
 func buildThreadResponses(messages []storage.Message) []MessageResponse {
-	response := buildMessageResponses(messages)
+	response := ResponsesFromMessages(messages)
 	slices.SortFunc(response, func(a, b MessageResponse) int {
 		if a.ID == b.ID {
 			return 0
@@ -34,15 +34,15 @@ func buildThreadResponses(messages []storage.Message) []MessageResponse {
 	return response
 }
 
-func buildMessageResponses(messages []storage.Message) []MessageResponse {
+func ResponsesFromMessages(messages []storage.Message) []MessageResponse {
 	response := make([]MessageResponse, 0, len(messages))
 	for _, msg := range messages {
-		response = append(response, buildMessageResponse(msg))
+		response = append(response, ResponseFromMessage(msg))
 	}
 	return response
 }
 
-func buildMessageResponse(msg storage.Message) MessageResponse {
+func ResponseFromMessage(msg storage.Message) MessageResponse {
 	return MessageResponse{
 		ID:        msg.ID,
 		Sender:    msg.Sender,

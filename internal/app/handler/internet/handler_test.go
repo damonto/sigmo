@@ -161,7 +161,7 @@ func TestResponseFromPublic(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := responseFromPublic(tt.info)
+			got := ResponseFromPublic(tt.info)
 			if got != tt.want {
 				t.Fatalf("responseFromPublic() = %#v, want %#v", got, tt.want)
 			}
@@ -229,7 +229,7 @@ func TestResponseFromConnection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := responseFromConnection(tt.connection)
+			got := ResponseFromConnection(tt.connection)
 			if got.Status != tt.want.Status ||
 				got.APN != tt.want.APN ||
 				got.IPType != tt.want.IPType ||

@@ -147,7 +147,7 @@ func TestSameOrigin(t *testing.T) {
 
 func TestBuildCallResponseFormatsUnsetTimesAsEmptyStrings(t *testing.T) {
 	startedAt := time.Date(2026, 5, 27, 10, 0, 0, 123, time.UTC)
-	response := buildCallResponse(storage.Call{
+	response := ResponseFromCall(storage.Call{
 		ID:        "call-1",
 		Route:     RouteWiFiCalling,
 		Direction: DirectionOutgoing,

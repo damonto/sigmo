@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bell, Globe2, Keyboard, MessageSquare } from 'lucide-vue-next'
+import { Bell, Bot, Globe2, Keyboard, MessageSquare } from 'lucide-vue-next'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -36,6 +36,13 @@ const cards = computed(() => [
     description: t('settings.notificationDescription'),
     icon: MessageSquare,
     to: { name: 'settings-notifications' },
+  },
+  {
+    key: 'mcp',
+    title: t('settings.mcp.title'),
+    description: t('settings.mcp.description'),
+    icon: Bot,
+    to: { name: 'settings-mcp' },
   },
 ])
 </script>

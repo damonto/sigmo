@@ -1767,6 +1767,37 @@ func TestConnectorRequiresModem(t *testing.T) {
 	}
 }
 
+func TestConnectRejectsInvalidPreferencesBeforeReadingBearers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		prefs Preferences
+		err   error
+	}{
+		{name: "IP type", prefs: Preferences{IPType: "ipx"}, err: mmodem.ErrUnsupportedBearerIPType},
+		{name: "APN authentication", prefs: Preferences{APNAuth: "oauth"}, err: mmodem.ErrUnsupportedBearerAuth},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			connector, err := NewConnector(ConnectorConfig{State: testStore(t)})
+			if err != nil {
+				t.Fatalf("NewConnector() error = %v", err)
+			}
+			bearerReads := 0
+			_, err = connector.connect(context.Background(), fakeInternetModem{modemID: "modem-1", bearerReads: &bearerReads}, tt.prefs, true)
+			if !errors.Is(err, tt.err) {
+				t.Fatalf("connect() error = %v, want %v", err, tt.err)
+			}
+			if bearerReads != 0 {
+				t.Fatalf("connect() read bearers %d times before validating preferences", bearerReads)
+			}
+		})
+	}
+}
+
 func TestConnectorRecoverSkipsSavedAirplaneMode(t *testing.T) {
 	t.Parallel()
 
@@ -1794,13 +1825,14 @@ func TestConnectorRecoverSkipsSavedAirplaneMode(t *testing.T) {
 }
 
 type fakeInternetModem struct {
-	modemID    string
-	operatorID string
-	gid1Value  string
-	spnValue   string
-	iccidValue string
-	imsiValue  string
-	bearerList []*mmodem.Bearer
+	modemID     string
+	operatorID  string
+	gid1Value   string
+	spnValue    string
+	iccidValue  string
+	imsiValue   string
+	bearerList  []*mmodem.Bearer
+	bearerReads *int
 }
 
 func (m fakeInternetModem) id() string {
@@ -1836,6 +1868,9 @@ func (m fakeInternetModem) bearer(context.Context, dbus.ObjectPath) (*mmodem.Bea
 }
 
 func (m fakeInternetModem) bearers(context.Context) ([]*mmodem.Bearer, error) {
+	if m.bearerReads != nil {
+		(*m.bearerReads)++
+	}
 	return m.bearerList, nil
 }
 

@@ -45,6 +45,11 @@ const router = createRouter({
           name: 'settings-notifications',
           component: () => import('@/views/SettingsNotificationsView.vue'),
         },
+        {
+          path: 'mcp',
+          name: 'settings-mcp',
+          component: () => import('@/views/SettingsMCPView.vue'),
+        },
       ],
     },
     {

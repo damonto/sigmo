@@ -15,6 +15,7 @@ const (
 	globalScopeKey      = "global"
 	authSettingsKey     = "auth.settings"
 	channelSettingsKey  = "notification.channels"
+	mcpSettingsKey      = "mcp.settings"
 	proxySettingsKey    = "proxy.settings"
 	modemSettingsKey    = "modem.settings"
 	modemSettingsPrefix = "modem:"
@@ -76,6 +77,12 @@ func (s *Store) ProxySettings() Proxy {
 	return s.current.ProxySettings()
 }
 
+func (s *Store) MCPSettings() MCP {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.current.MCP
+}
+
 func (s *Store) Update(ctx context.Context, update func(*Settings) error) (Settings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -132,6 +139,13 @@ func load(ctx context.Context, db *storage.Store) (Settings, error) {
 		current.Proxy = &proxy
 	}
 
+	var mcp MCP
+	if ok, err := get(ctx, db, globalScopeKey, mcpSettingsKey, &mcp); err != nil {
+		return Settings{}, err
+	} else if ok {
+		current.MCP = mcp
+	}
+
 	modems, err := loadModems(ctx, db)
 	if err != nil {
 		return Settings{}, err
@@ -172,6 +186,9 @@ func (s *Store) save(ctx context.Context, current Settings) error {
 		return err
 	}
 	if err := s.db.Put(ctx, globalScopeKey, channelSettingsKey, current.Channels); err != nil {
+		return err
+	}
+	if err := s.db.Put(ctx, globalScopeKey, mcpSettingsKey, current.MCP); err != nil {
 		return err
 	}
 	return s.db.Put(ctx, globalScopeKey, proxySettingsKey, current.ProxySettings())

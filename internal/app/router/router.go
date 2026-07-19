@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -15,6 +16,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/handler/esim"
 	"github.com/damonto/sigmo/internal/app/handler/euicc"
 	hinternet "github.com/damonto/sigmo/internal/app/handler/internet"
+	"github.com/damonto/sigmo/internal/app/handler/mcpadmin"
 	"github.com/damonto/sigmo/internal/app/handler/message"
 	hmodem "github.com/damonto/sigmo/internal/app/handler/modem"
 	"github.com/damonto/sigmo/internal/app/handler/network"
@@ -23,6 +25,8 @@ import (
 	"github.com/damonto/sigmo/internal/app/handler/simapp"
 	"github.com/damonto/sigmo/internal/app/handler/ussd"
 	hwebpush "github.com/damonto/sigmo/internal/app/handler/webpush"
+	"github.com/damonto/sigmo/internal/app/mcpauth"
+	"github.com/damonto/sigmo/internal/app/mcpserver"
 	appmiddleware "github.com/damonto/sigmo/internal/app/middleware"
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
@@ -53,6 +57,8 @@ type RegisterConfig struct {
 	ModemOverview      []modemstatus.Extension
 	Features           []string
 	Extensions         []Extension
+	MCP                *mcpserver.Controller
+	MCPKeys            *mcpauth.Store
 }
 
 func Register(e *echo.Echo, deps RegisterConfig) error {
@@ -62,9 +68,16 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		HTML5:      true,
 		Skipper: func(c *echo.Context) bool {
 			path := c.Request().URL.Path
-			return strings.HasPrefix(path, "/api/")
+			return strings.HasPrefix(path, "/api/") || path == mcpserver.EndpointPath || strings.HasPrefix(path, mcpserver.EndpointPath+"/")
 		},
 	}))
+	if deps.MCP != nil {
+		e.Match(
+			[]string{http.MethodGet, http.MethodPost, http.MethodDelete},
+			mcpserver.EndpointPath,
+			echo.WrapHandler(deps.MCP.Handler()),
+		)
+	}
 
 	v1 := e.Group("/api/v1")
 
@@ -92,6 +105,17 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.PUT("/settings/auth", h.UpdateAuth)
 			protected.PUT("/settings/proxy", h.UpdateProxy)
 			protected.PUT("/settings/notifications/:channel", h.UpdateNotificationChannel)
+		}
+
+		if deps.MCP != nil && deps.MCPKeys != nil {
+			h := mcpadmin.New(mcpadmin.Config{Settings: deps.Store, Keys: deps.MCPKeys, Storage: deps.Storage, Controller: deps.MCP})
+			protected.GET("/settings/mcp", h.GetSettings)
+			protected.PUT("/settings/mcp", h.UpdateSettings)
+			protected.GET("/settings/mcp/api-keys", h.ListAPIKeys)
+			protected.POST("/settings/mcp/api-keys", h.CreateAPIKey)
+			protected.DELETE("/settings/mcp/api-keys/:id", h.RevokeAPIKey)
+			protected.GET("/settings/mcp/audit-events", h.ListAuditEvents)
+			protected.GET("/settings/mcp/skills/sigmo-control", h.DownloadSkill)
 		}
 
 		h := hmodem.New(deps.Store, deps.Registry, deps.Internet, deps.Reminders, deps.ModemOverview...)

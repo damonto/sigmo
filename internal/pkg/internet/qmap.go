@@ -222,6 +222,9 @@ func (c *Connector) connectQMAP(ctx context.Context, modem *mmodem.Modem, prefs 
 
 func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, prefs Preferences) (*Connection, error) {
 	prefs = normalizePreferences(prefs)
+	if err := ValidatePreferences(prefs); err != nil {
+		return nil, err
+	}
 	if prefs.APNUsername != "" || prefs.APNPassword != "" || prefs.APNAuth != "" {
 		return nil, errors.New("QMAP Internet authentication is not supported")
 	}

@@ -168,6 +168,7 @@ watch(
               v-model="scheduledAt"
               type="datetime-local"
               step="60"
+              :placeholder="t('modemDetail.reminder.timePlaceholder')"
               class="appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0"
               :disabled="busy"
               :aria-invalid="Boolean(errors.scheduledAt)"

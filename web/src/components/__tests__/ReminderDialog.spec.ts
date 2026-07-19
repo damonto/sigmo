@@ -63,6 +63,7 @@ describe('ReminderDialog', () => {
 
     expect(header?.text()).toContain('modemDetail.reminder.description')
     expect(timeGroup.classes()).toContain('overflow-hidden')
+    expect(timeInput.attributes('placeholder')).toBe('modemDetail.reminder.timePlaceholder')
     expect(timeInput.classes()).toEqual(
       expect.arrayContaining([
         'appearance-none',

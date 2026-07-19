@@ -16,8 +16,13 @@ const (
 type Settings struct {
 	Auth     Auth               `json:"auth"`
 	Channels map[string]Channel `json:"channels"`
+	MCP      MCP                `json:"mcp"`
 	Modems   map[string]Modem   `json:"modems"`
 	Proxy    *Proxy             `json:"proxy,omitempty"`
+}
+
+type MCP struct {
+	Enabled bool `json:"enabled"`
 }
 
 type Auth struct {
@@ -137,6 +142,7 @@ func (c *Settings) Clone() Settings {
 			TokenValidityDays: c.Auth.TokenValidityDays,
 		},
 		Channels: make(map[string]Channel, len(c.Channels)),
+		MCP:      c.MCP,
 		Modems:   maps.Clone(c.Modems),
 	}
 	if c.Proxy != nil {

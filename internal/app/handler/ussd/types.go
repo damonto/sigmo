@@ -6,5 +6,5 @@ type ExecuteRequest struct {
 }
 
 type ExecuteResponse struct {
-	Reply string `json:"reply"`
+	Reply string `json:"reply" jsonschema:"text returned by the carrier USSD session"`
 }

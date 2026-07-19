@@ -52,7 +52,7 @@ func (e *euicc) Get(modem *mmodem.Modem) (*SEsResponse, error) {
 			Name:   info.SASUP.Name,
 			Region: info.SASUP.Region,
 		}
-		item.Certificates = info.Certificates
+		item.Certificates = append([]string{}, info.Certificates...)
 		if cerr := client.Close(); cerr != nil {
 			client.Logger().Warn("failed to close LPA client", "error", cerr)
 		}

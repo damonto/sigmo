@@ -58,3 +58,40 @@ func validateManagedVoLTE(ctx context.Context, modem *mmodem.Modem) (err error) 
 	}
 	return nil
 }
+
+func ResolveVoLTESettings(modem *mmodem.Modem, settings Settings) (Settings, error) {
+	port, err := voLTEControlPort(modem)
+	if err != nil {
+		return Settings{}, err
+	}
+	switch port.PortType {
+	case mmodem.ModemPortTypeQmi:
+		if settings.DataPath == "" {
+			return Settings{}, ErrVoLTEDataPathRequired
+		}
+		if settings.DataPath != DataPathQMAP && settings.DataPath != DataPathLegacyBAMDMUX {
+			return Settings{}, fmt.Errorf("%w: %q", ErrVoLTEDataPathUnsupported, settings.DataPath)
+		}
+	case mmodem.ModemPortTypeMbim:
+		if settings.SetIMSAPNAsDefault || settings.EnablePCSCFViaPCO {
+			return Settings{}, ErrVoLTEProfileOptionsUnsupported
+		}
+		settings.DataPath = DataPathMBIM
+	default:
+		return Settings{}, ErrUnavailable
+	}
+	return settings, nil
+}
+
+func UpdateVoLTESettings(ctx context.Context, modem *mmodem.Modem, coordinator Coordinator, settings Settings) error {
+	settings, err := ResolveVoLTESettings(modem, settings)
+	if err != nil {
+		return err
+	}
+	if settings.Enabled {
+		if err := validateManagedVoLTE(ctx, modem); err != nil {
+			return err
+		}
+	}
+	return coordinator.UpdateSettings(ctx, modem, settings)
+}

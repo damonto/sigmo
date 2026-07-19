@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bell, Globe2, Keyboard, MessageSquare } from 'lucide-vue-next'
+import { Bell, Bot, Globe2, Keyboard, MessageSquare } from 'lucide-vue-next'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
@@ -42,6 +42,14 @@ const items = computed(() => [
     routeName: 'settings-notifications',
     to: { name: 'settings-notifications' },
   },
+  {
+    key: 'mcp',
+    title: t('settings.mcp.title'),
+    description: t('settings.mcp.description'),
+    icon: Bot,
+    routeName: 'settings-mcp',
+    to: { name: 'settings-mcp' },
+  },
 ])
 </script>
 
@@ -78,7 +86,7 @@ const items = computed(() => [
             <span class="block truncate text-sm font-medium">{{ item.title }}</span>
             <span
               :data-testid="`settings-nav-description-${item.key}`"
-              class="mt-0.5 block whitespace-normal break-words text-xs leading-4 opacity-80"
+              class="mt-0.5 block whitespace-normal wrap-break-word text-xs leading-4 opacity-80"
             >
               {{ item.description }}
             </span>

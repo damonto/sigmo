@@ -65,11 +65,11 @@ type Request struct {
 }
 
 type Info struct {
-	ID       string `json:"id"`
-	EmbedURL string `json:"embedUrl"`
-	Title    string `json:"title,omitempty"`
-	URL      string `json:"url"`
-	Method   string `json:"method"`
+	ID       string `json:"id" jsonschema:"Sigmo identifier for the pending websheet session"`
+	EmbedURL string `json:"embedUrl" jsonschema:"Sigmo Web UI path that embeds the carrier interaction"`
+	Title    string `json:"title" jsonschema:"display title for the carrier interaction; empty when unavailable"`
+	URL      string `json:"url" jsonschema:"carrier URL opened through the protected websheet proxy"`
+	Method   string `json:"method" jsonschema:"HTTP method used to open the carrier URL"`
 }
 
 type Callback struct {

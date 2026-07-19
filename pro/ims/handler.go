@@ -30,31 +30,31 @@ type UpdateSettingsRequest struct {
 }
 
 type SettingsResponse struct {
-	Enabled                         bool           `json:"enabled"`
-	Preferred                       bool           `json:"preferred"`
-	Connected                       bool           `json:"connected"`
-	State                           string         `json:"state"`
-	DurationSeconds                 int64          `json:"durationSeconds"`
-	EmergencyAddressUpdateAvailable bool           `json:"emergencyAddressUpdateAvailable"`
-	Websheet                        *websheet.Info `json:"websheet,omitempty"`
+	Enabled                         bool           `json:"enabled" jsonschema:"whether Wi-Fi Calling is enabled in Sigmo settings"`
+	Preferred                       bool           `json:"preferred" jsonschema:"whether Wi-Fi Calling is preferred over the cellular voice network"`
+	Connected                       bool           `json:"connected" jsonschema:"whether the modem currently has an active Wi-Fi Calling IMS connection"`
+	State                           string         `json:"state" jsonschema:"current Wi-Fi Calling state, such as idle, connecting, connected, or disconnected"`
+	DurationSeconds                 int64          `json:"durationSeconds" jsonschema:"elapsed time of the current Wi-Fi Calling connection in seconds"`
+	EmergencyAddressUpdateAvailable bool           `json:"emergencyAddressUpdateAvailable" jsonschema:"whether an emergency-address update flow is available for this modem"`
+	Websheet                        *websheet.Info `json:"websheet" jsonschema:"pending carrier interaction page; null when no websheet is pending"`
 }
 
 type UpdateVoLTESettingsRequest struct {
 	Enabled            bool     `json:"enabled"`
-	DataPath           DataPath `json:"dataPath" validate:"omitempty,oneof=qmap legacy_bam_dmux"`
+	DataPath           DataPath `json:"dataPath"`
 	SetIMSAPNAsDefault bool     `json:"setIMSAPNAsDefault"`
 	EnablePCSCFViaPCO  bool     `json:"enablePCSCFViaPCO"`
 }
 
 type VoLTESettingsResponse struct {
-	Enabled            bool     `json:"enabled"`
-	Connected          bool     `json:"connected"`
-	State              string   `json:"state"`
-	DurationSeconds    int64    `json:"durationSeconds"`
-	ModemRegistered    bool     `json:"modemRegistered"`
-	DataPath           DataPath `json:"dataPath"`
-	SetIMSAPNAsDefault bool     `json:"setIMSAPNAsDefault"`
-	EnablePCSCFViaPCO  bool     `json:"enablePCSCFViaPCO"`
+	Enabled            bool     `json:"enabled" jsonschema:"whether VoLTE is enabled in Sigmo settings"`
+	Connected          bool     `json:"connected" jsonschema:"whether the modem currently has an active VoLTE IMS connection"`
+	State              string   `json:"state" jsonschema:"current VoLTE state, such as idle, connecting, connected, or disconnected"`
+	DurationSeconds    int64    `json:"durationSeconds" jsonschema:"elapsed time of the current VoLTE connection in seconds"`
+	ModemRegistered    bool     `json:"modemRegistered" jsonschema:"whether the modem reports IMS registration"`
+	DataPath           DataPath `json:"dataPath" jsonschema:"data path used for VoLTE traffic, such as qmap or mbim"`
+	SetIMSAPNAsDefault bool     `json:"setIMSAPNAsDefault" jsonschema:"whether the IMS APN profile is configured as the modem default"`
+	EnablePCSCFViaPCO  bool     `json:"enablePCSCFViaPCO" jsonschema:"whether P-CSCF discovery through protocol configuration options is enabled"`
 }
 
 const (
@@ -89,21 +89,32 @@ func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, wifiCalling Co
 	group.PUT("/modems/:id/volte/settings", h.UpdateVoLTESettings)
 }
 
-func (h *Handler) VoLTESettings(c *echo.Context) error {
-	ctx := c.Request().Context()
-	modem, err := h.registry.Find(ctx, c.Param("id"))
+func ReadWiFiCallingSettings(ctx context.Context, modem *mmodem.Modem, coordinator Coordinator) (SettingsResponse, error) {
+	status, err := coordinator.Status(ctx, modem)
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeGetVoLTESettingsFailed)
+		return SettingsResponse{}, err
 	}
-	status, err := h.volte.Status(ctx, modem)
+	return SettingsResponse{
+		Enabled:                         status.Enabled,
+		Preferred:                       status.Preferred,
+		Connected:                       status.Connected,
+		State:                           status.State,
+		DurationSeconds:                 status.DurationSeconds,
+		EmergencyAddressUpdateAvailable: coordinator.EmergencyAddressUpdateAvailable(ctx, modem),
+		Websheet:                        status.Websheet,
+	}, nil
+}
+
+func ReadVoLTESettings(ctx context.Context, modem *mmodem.Modem, coordinator Coordinator) (VoLTESettingsResponse, error) {
+	status, err := coordinator.Status(ctx, modem)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeGetVoLTESettingsFailed, err)
+		return VoLTESettingsResponse{}, err
 	}
 	modemStatus, err := readVoLTEStatus(ctx, modem)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeGetVoLTESettingsFailed, err)
+		return VoLTESettingsResponse{}, err
 	}
-	return c.JSON(http.StatusOK, VoLTESettingsResponse{
+	return VoLTESettingsResponse{
 		Enabled:            status.Enabled,
 		Connected:          status.Connected,
 		State:              status.State,
@@ -112,7 +123,20 @@ func (h *Handler) VoLTESettings(c *echo.Context) error {
 		DataPath:           status.DataPath,
 		SetIMSAPNAsDefault: status.SetIMSAPNAsDefault,
 		EnablePCSCFViaPCO:  status.EnablePCSCFViaPCO,
-	})
+	}, nil
+}
+
+func (h *Handler) VoLTESettings(c *echo.Context) error {
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeGetVoLTESettingsFailed)
+	}
+	response, err := ReadVoLTESettings(ctx, modem, h.volte)
+	if err != nil {
+		return httpapi.Internal(c, errorCodeGetVoLTESettingsFailed, err)
+	}
+	return c.JSON(http.StatusOK, response)
 }
 
 func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
@@ -125,41 +149,22 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return httpapi.BadRequest(c, errorCodeUpdateVoLTEInvalidRequest, err)
 	}
-	if err := c.Validate(&req); err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateVoLTEInvalidRequest, err)
-	}
-	port, err := voLTEControlPort(modem)
-	if err != nil {
-		return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, err)
-	}
-	switch port.PortType {
-	case mmodem.ModemPortTypeQmi:
-		if req.DataPath == "" {
-			return httpapi.UnprocessableEntity(c, errorCodeUpdateVoLTEInvalidRequest, errors.New("QMI data path is required"))
-		}
-	case mmodem.ModemPortTypeMbim:
-		if req.SetIMSAPNAsDefault || req.EnablePCSCFViaPCO {
-			return httpapi.UnprocessableEntity(c, errorCodeVoLTEProfileOptionsUnsupported, errors.New("IMS APN profile options require QMI"))
-		}
-		req.DataPath = DataPathMBIM
-	default:
-		return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, ErrUnavailable)
-	}
-	if req.Enabled {
-		if err := validateManagedVoLTE(ctx, modem); err != nil {
-			if errors.Is(err, ErrUnavailable) {
-				return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, err)
-			}
-			return httpapi.Internal(c, errorCodeUpdateVoLTESettingsFailed, err)
-		}
-	}
-	if err := h.volte.UpdateSettings(ctx, modem, Settings{
+	if err := UpdateVoLTESettings(ctx, modem, h.volte, Settings{
 		Enabled:            req.Enabled,
 		DataPath:           req.DataPath,
 		SetIMSAPNAsDefault: req.SetIMSAPNAsDefault,
 		EnablePCSCFViaPCO:  req.EnablePCSCFViaPCO,
 	}); err != nil {
-		return httpapi.Internal(c, errorCodeUpdateVoLTESettingsFailed, err)
+		switch {
+		case errors.Is(err, ErrVoLTEDataPathRequired), errors.Is(err, ErrVoLTEDataPathUnsupported):
+			return httpapi.UnprocessableEntity(c, errorCodeUpdateVoLTEInvalidRequest, err)
+		case errors.Is(err, ErrVoLTEProfileOptionsUnsupported):
+			return httpapi.UnprocessableEntity(c, errorCodeVoLTEProfileOptionsUnsupported, err)
+		case errors.Is(err, ErrUnavailable):
+			return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, err)
+		default:
+			return httpapi.Internal(c, errorCodeUpdateVoLTESettingsFailed, err)
+		}
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -187,19 +192,11 @@ func (h *Handler) Settings(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeGetSettingsFailed)
 	}
-	status, err := h.wifiCalling.Status(c.Request().Context(), modem)
+	response, err := ReadWiFiCallingSettings(c.Request().Context(), modem, h.wifiCalling)
 	if err != nil {
 		return httpapi.Internal(c, errorCodeGetSettingsFailed, err)
 	}
-	return c.JSON(http.StatusOK, SettingsResponse{
-		Enabled:                         status.Enabled,
-		Preferred:                       status.Preferred,
-		Connected:                       status.Connected,
-		State:                           status.State,
-		DurationSeconds:                 status.DurationSeconds,
-		EmergencyAddressUpdateAvailable: h.wifiCalling.EmergencyAddressUpdateAvailable(c.Request().Context(), modem),
-		Websheet:                        status.Websheet,
-	})
+	return c.JSON(http.StatusOK, response)
 }
 
 func (h *Handler) CreateSession(c *echo.Context) error {

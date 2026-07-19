@@ -1,6 +1,7 @@
 export * from './settings'
 export * from './app'
 export * from './capability'
+export * from './mcp'
 export * from './call'
 export * from './esim'
 export * from './se'

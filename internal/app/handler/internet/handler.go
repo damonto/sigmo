@@ -50,7 +50,7 @@ func (h *Handler) Current(c *echo.Context) error {
 	if err != nil {
 		return internetError(c, err, errorCodeCurrentInternetConnectionFailed)
 	}
-	return c.JSON(http.StatusOK, responseFromConnection(response))
+	return c.JSON(http.StatusOK, ResponseFromConnection(response))
 }
 
 func (h *Handler) Public(c *echo.Context) error {
@@ -63,7 +63,7 @@ func (h *Handler) Public(c *echo.Context) error {
 	if err != nil {
 		return internetError(c, err, errorCodeInternetPublicFailed)
 	}
-	return c.JSON(http.StatusOK, responseFromPublic(info))
+	return c.JSON(http.StatusOK, ResponseFromPublic(info))
 }
 
 func (h *Handler) Connect(c *echo.Context) error {
@@ -77,12 +77,6 @@ func (h *Handler) Connect(c *echo.Context) error {
 	if err := httpapi.BindAndValidate(c, &req, errorCodeConnectInternetInvalidRequest); err != nil {
 		return err
 	}
-	if _, err := mmodem.BearerAllowedAuth(req.APNAuth); err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeInternetAuthInvalidConfig, err)
-	}
-	if _, err := mmodem.BearerIPFamily(req.IPType); err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeInternetIPTypeInvalidConfig, err)
-	}
 	prefs := internetcore.Preferences{
 		APN:          req.APN,
 		IPType:       req.IPType,
@@ -93,11 +87,14 @@ func (h *Handler) Connect(c *echo.Context) error {
 		ProxyEnabled: req.ProxyEnabled,
 		AlwaysOn:     req.AlwaysOn,
 	}
+	if err := internetcore.ValidatePreferences(prefs); err != nil {
+		return internetError(c, err, errorCodeConnectInternetFailed)
+	}
 	response, err := h.connector.Connect(ctx, modem, prefs)
 	if err != nil {
 		return internetError(c, err, errorCodeConnectInternetFailed)
 	}
-	return c.JSON(http.StatusCreated, responseFromConnection(response))
+	return c.JSON(http.StatusCreated, ResponseFromConnection(response))
 }
 
 func (h *Handler) UpdatePreferences(c *echo.Context) error {
@@ -119,7 +116,7 @@ func (h *Handler) UpdatePreferences(c *echo.Context) error {
 	if err != nil {
 		return internetError(c, err, errorCodeInternetPreferencesUpdateFailed)
 	}
-	return c.JSON(http.StatusOK, responseFromConnection(response))
+	return c.JSON(http.StatusOK, ResponseFromConnection(response))
 }
 
 func (h *Handler) Disconnect(c *echo.Context) error {
@@ -159,7 +156,14 @@ func internetError(c *echo.Context, err error, internalErrorCode string) error {
 	return httpapi.Internal(c, internalErrorCode, err)
 }
 
-func responseFromConnection(connection *internetcore.Connection) ConnectionResponse {
+func ResponseFromConnection(connection *internetcore.Connection) ConnectionResponse {
+	if connection == nil {
+		return ConnectionResponse{
+			IPv4Addresses: []string{},
+			IPv6Addresses: []string{},
+			DNS:           []string{},
+		}
+	}
 	return ConnectionResponse{
 		Status:          connection.Status,
 		APN:             connection.APN,
@@ -173,9 +177,9 @@ func responseFromConnection(connection *internetcore.Connection) ConnectionRespo
 		Proxy:           responseFromProxy(connection.Proxy),
 		InterfaceName:   connection.InterfaceName,
 		Bearer:          connection.Bearer,
-		IPv4Addresses:   connection.IPv4Addresses,
-		IPv6Addresses:   connection.IPv6Addresses,
-		DNS:             connection.DNS,
+		IPv4Addresses:   append([]string{}, connection.IPv4Addresses...),
+		IPv6Addresses:   append([]string{}, connection.IPv6Addresses...),
+		DNS:             append([]string{}, connection.DNS...),
 		DurationSeconds: connection.DurationSeconds,
 		TXBytes:         connection.TXBytes,
 		RXBytes:         connection.RXBytes,
@@ -193,7 +197,7 @@ func responseFromProxy(proxy internetcore.ProxyStatus) Proxy {
 	}
 }
 
-func responseFromPublic(info internetcore.IPInfo) PublicResponse {
+func ResponseFromPublic(info internetcore.IPInfo) PublicResponse {
 	return PublicResponse{
 		IP:           info.IP,
 		Country:      info.Country,

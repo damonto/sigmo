@@ -383,7 +383,13 @@ func (c *Connector) recover(ctx context.Context, modem internetModem) error {
 }
 
 func (c *Connector) Connect(ctx context.Context, modem *mmodem.Modem, prefs Preferences) (*Connection, error) {
-	if modem != nil && modem.PrimaryPortType() == mmodem.ModemPortTypeQmi && c.qmapEnabledFor(modem.EquipmentIdentifier) {
+	if modem == nil {
+		return nil, ErrModemRequired
+	}
+	if err := ValidatePreferences(prefs); err != nil {
+		return nil, err
+	}
+	if modem.PrimaryPortType() == mmodem.ModemPortTypeQmi && c.qmapEnabledFor(modem.EquipmentIdentifier) {
 		return c.connectQMAP(ctx, modem, prefs)
 	}
 	access := modemAccess{modem: modem}
@@ -393,6 +399,9 @@ func (c *Connector) Connect(ctx context.Context, modem *mmodem.Modem, prefs Pref
 }
 
 func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Preferences, clearAlwaysOnBefore bool) (*Connection, error) {
+	if err := ValidatePreferences(prefs); err != nil {
+		return nil, err
+	}
 	modemID := modem.id()
 	profileID := modem.profileID()
 	prefs = normalizePreferences(prefs)
@@ -909,6 +918,17 @@ func normalizePreferences(prefs Preferences) Preferences {
 	prefs.APNUsername = strings.TrimSpace(prefs.APNUsername)
 	prefs.APNAuth = strings.ToLower(strings.TrimSpace(prefs.APNAuth))
 	return prefs
+}
+
+func ValidatePreferences(prefs Preferences) error {
+	prefs = normalizePreferences(prefs)
+	if _, err := mmodem.BearerAllowedAuth(prefs.APNAuth); err != nil {
+		return err
+	}
+	if _, err := mmodem.BearerIPFamily(prefs.IPType); err != nil {
+		return err
+	}
+	return nil
 }
 
 func hasInternetPreference(prefs Preferences) bool {

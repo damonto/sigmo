@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/damonto/sigmo/internal/app/forwarder"
+	"github.com/damonto/sigmo/internal/app/mcpserver"
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/app/router"
 	"github.com/damonto/sigmo/internal/pkg/internet"
@@ -33,6 +34,7 @@ type Runtime struct {
 	messageRoute  message.Route
 	ussdRoute     ussd.Route
 	modemOverview []modemstatus.Extension
+	mcpTools      []mcpserver.Extension
 	routes        []router.Extension
 	runners       []Runner
 	features      []string
@@ -48,6 +50,10 @@ func (r *Runtime) SetUSSDRoute(route ussd.Route) {
 
 func (r *Runtime) AddModemOverview(extensions ...modemstatus.Extension) {
 	r.modemOverview = append(r.modemOverview, extensions...)
+}
+
+func (r *Runtime) AddMCPTools(extensions ...mcpserver.Extension) {
+	r.mcpTools = append(r.mcpTools, extensions...)
 }
 
 func (r *Runtime) AddRoute(route router.Extension) {

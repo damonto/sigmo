@@ -49,6 +49,7 @@ var proIMS = func(app *proApp) error {
 	}
 
 	runtime.AddFeatures(pims.WiFiCallingFeatureName, pims.VoLTEFeatureName)
+	runtime.AddMCPTools(registerIMSMCP(runtime.Registry, wifiCalling, volte, calls))
 	runtime.SetMessageRoute(messageRoute{wifiCalling: wifiCalling, volte: volte})
 	runtime.SetUSSDRoute(ussdRoute{wifiCalling: wifiCalling, volte: volte})
 	runtime.AddModemOverview(wifiCallingOverview(wifiCalling.Status))
