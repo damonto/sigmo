@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -22,7 +24,17 @@ import (
 var imsInterfacePollInterval = time.Second
 var imsInterfaceByName = net.InterfaceByName
 
-const imsMediaRouteMetric = 32760
+const (
+	imsPolicyRulePriorityBase uint32 = 10_000
+	imsPolicyRouteTableBase   uint32 = 20_000
+	imsPolicyRouteTableCount  uint32 = 1024
+	imsPolicyProtocol                = 200
+)
+
+var imsPolicyRoutes = struct {
+	sync.Mutex
+	reserved map[uint32]struct{}
+}{reserved: make(map[uint32]struct{})}
 
 type pdnLinks interface {
 	DisableIPv6Autoconfiguration(string) error
@@ -31,10 +43,13 @@ type pdnLinks interface {
 	AddPointToPointAddress(string, netip.Addr, netip.Addr) error
 	DeleteAddress(string, netip.Prefix) error
 	DeletePointToPointAddress(string, netip.Addr, netip.Addr) error
-	AddHostRoute(string, netip.Addr) error
-	DeleteHostRoute(string, netip.Addr) error
 	AddDefaultRoute(netlink.DefaultRoute) error
 	DeleteDefaultRoute(netlink.DefaultRoute) error
+	RouteEntries() ([]netlink.RouteEntry, error)
+	FlushDefaultRoutesInTable(uint32) error
+	PolicyRules() ([]netlink.PolicyRule, error)
+	AddPolicyRule(netlink.PolicyRule) error
+	DeletePolicyRule(netlink.PolicyRule) error
 	AddVLAN(string, string, uint16) error
 	DeleteLink(string) error
 }
@@ -57,17 +72,26 @@ func (systemPDNLinks) DeleteAddress(name string, prefix netip.Prefix) error {
 func (systemPDNLinks) DeletePointToPointAddress(name string, local, peer netip.Addr) error {
 	return netlink.DeletePointToPointAddress(name, local, peer)
 }
-func (systemPDNLinks) AddHostRoute(name string, address netip.Addr) error {
-	return netlink.AddHostRoute(name, address)
-}
-func (systemPDNLinks) DeleteHostRoute(name string, address netip.Addr) error {
-	return netlink.DeleteHostRoute(name, address)
-}
 func (systemPDNLinks) AddDefaultRoute(route netlink.DefaultRoute) error {
 	return netlink.AddDefaultRoute(route)
 }
 func (systemPDNLinks) DeleteDefaultRoute(route netlink.DefaultRoute) error {
 	return netlink.DeleteDefaultRoute(route)
+}
+func (systemPDNLinks) RouteEntries() ([]netlink.RouteEntry, error) {
+	return netlink.RouteEntries()
+}
+func (systemPDNLinks) FlushDefaultRoutesInTable(table uint32) error {
+	return netlink.FlushDefaultRoutesInTable(table, imsPolicyProtocol)
+}
+func (systemPDNLinks) PolicyRules() ([]netlink.PolicyRule, error) {
+	return netlink.PolicyRules()
+}
+func (systemPDNLinks) AddPolicyRule(rule netlink.PolicyRule) error {
+	return netlink.AddPolicyRule(rule)
+}
+func (systemPDNLinks) DeletePolicyRule(rule netlink.PolicyRule) error {
+	return netlink.DeletePolicyRule(rule)
 }
 func (systemPDNLinks) AddVLAN(parent, name string, id uint16) error {
 	return netlink.AddVLAN(parent, name, id)
@@ -75,10 +99,11 @@ func (systemPDNLinks) AddVLAN(parent, name string, id uint16) error {
 func (systemPDNLinks) DeleteLink(name string) error { return netlink.DeleteLink(name) }
 
 type pdnNetworkState struct {
-	prefixes []netip.Prefix
-	peers    map[netip.Prefix]netip.Addr
-	routes   []netip.Addr
-	defaults []netlink.DefaultRoute
+	prefixes    []netip.Prefix
+	peers       map[netip.Prefix]netip.Addr
+	defaults    []netlink.DefaultRoute
+	rules       []netlink.PolicyRule
+	policyTable uint32
 }
 
 type imsPDNInfo = imsgo.IMSPDNNetworkInfo
@@ -96,23 +121,23 @@ func newPDNNetwork(parent string, mbim bool) *pdnNetwork {
 	return &pdnNetwork{parent: parent, mbim: mbim, links: systemPDNLinks{}}
 }
 
-func (n *pdnNetwork) Replace(ctx context.Context, info imsPDNInfo) error {
+func (n *pdnNetwork) Replace(ctx context.Context, info imsPDNInfo) (string, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if err := n.closeLocked(); err != nil {
-		return fmt.Errorf("clean IMS PDN network: %w", err)
+		return "", fmt.Errorf("clean IMS PDN network: %w", err)
 	}
 	interfaceName, err := n.sessionInterface(info.SessionID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	n.interfaceName = interfaceName
 	state, err := n.configure(ctx, interfaceName, info)
 	n.state = state
 	if err != nil {
-		return errors.Join(err, n.closeLocked())
+		return "", errors.Join(err, n.closeLocked())
 	}
-	return nil
+	return n.interfaceName, nil
 }
 
 func (n *pdnNetwork) Close() error {
@@ -191,33 +216,53 @@ func (n *pdnNetwork) configure(ctx context.Context, interfaceName string, info i
 			state.peers[prefix] = gateway
 		}
 		state.prefixes = append(state.prefixes, prefix)
+	}
+	if err := n.addPolicyRouting(interfaceName, &state); err != nil {
+		return state, err
+	}
+	return state, nil
+}
+
+func (n *pdnNetwork) addPolicyRouting(interfaceName string, state *pdnNetworkState) error {
+	table, priority, err := reserveIMSPolicyTable(n.links)
+	if err != nil {
+		return fmt.Errorf("reserve IMS policy routing table: %w", err)
+	}
+	state.policyTable = table
+	if err := n.links.FlushDefaultRoutesInTable(table); err != nil {
+		return fmt.Errorf("clean IMS policy routing table %d: %w", table, err)
+	}
+	for _, prefix := range state.prefixes {
 		family := netlink.FamilyIPv6
 		if prefix.Addr().Is4() {
 			family = netlink.FamilyIPv4
 		}
-		mediaRoute := netlink.DefaultRoute{
+		route := netlink.DefaultRoute{
 			Interface: interfaceName,
 			Family:    family,
+			Table:     table,
 			Source:    prefix.Addr(),
-			Metric:    imsMediaRouteMetric,
+			Protocol:  imsPolicyProtocol,
 		}
-		if err := n.links.AddDefaultRoute(mediaRoute); err != nil {
-			return state, fmt.Errorf("add IMS media route for %s: %w", prefix.Addr(), err)
+		if err := n.links.AddDefaultRoute(route); err != nil {
+			return fmt.Errorf("add IMS default route for %s in table %d: %w", prefix.Addr(), table, err)
 		}
-		state.defaults = append(state.defaults, mediaRoute)
+		state.defaults = append(state.defaults, route)
 	}
-	for _, ip := range info.PCSCFIPs {
-		address, ok := netip.AddrFromSlice(ip)
-		if !ok {
-			continue
+	for _, route := range state.defaults {
+		rule := netlink.PolicyRule{
+			Family:          route.Family,
+			Priority:        priority,
+			Table:           table,
+			OutputInterface: interfaceName,
+			Protocol:        imsPolicyProtocol,
 		}
-		address = address.Unmap()
-		if err := n.links.AddHostRoute(interfaceName, address); err != nil {
-			return state, fmt.Errorf("add P-CSCF route %s: %w", address, err)
+		if err := n.links.AddPolicyRule(rule); err != nil {
+			return fmt.Errorf("add IMS output-interface rule for %s: %w", interfaceName, err)
 		}
-		state.routes = append(state.routes, address)
+		state.rules = append(state.rules, rule)
 	}
-	return state, nil
+	return nil
 }
 
 func (n *pdnNetwork) closeLocked() error {
@@ -226,38 +271,53 @@ func (n *pdnNetwork) closeLocked() error {
 	}
 	remaining, err := n.cleanup(n.interfaceName, n.state)
 	n.state = remaining
-	if n.mbim {
+	if n.mbim && len(n.state.prefixes) == 0 && len(n.state.rules) == 0 && len(n.state.defaults) == 0 && n.state.policyTable == 0 {
 		if linkErr := n.links.DeleteLink(n.interfaceName); linkErr != nil {
 			return errors.Join(err, linkErr)
 		}
 		n.state = pdnNetworkState{}
 	}
-	if len(n.state.prefixes) == 0 && len(n.state.routes) == 0 && len(n.state.defaults) == 0 {
+	if len(n.state.prefixes) == 0 && len(n.state.defaults) == 0 && len(n.state.rules) == 0 && n.state.policyTable == 0 {
 		n.interfaceName = ""
 	}
 	return err
 }
 
 func (n *pdnNetwork) cleanup(interfaceName string, state pdnNetworkState) (pdnNetworkState, error) {
-	remaining := pdnNetworkState{
-		prefixes: make([]netip.Prefix, 0, len(state.prefixes)),
-		peers:    make(map[netip.Prefix]netip.Addr, len(state.peers)),
-		routes:   make([]netip.Addr, 0, len(state.routes)),
-		defaults: make([]netlink.DefaultRoute, 0, len(state.defaults)),
-	}
+	remaining := clonePDNNetworkState(state)
 	var result error
+	remaining.rules = remaining.rules[:0]
+	for _, rule := range state.rules {
+		if err := n.links.DeletePolicyRule(rule); err != nil {
+			result = errors.Join(result, err)
+			remaining.rules = append(remaining.rules, rule)
+		}
+	}
+	if len(remaining.rules) != 0 {
+		return remaining, result
+	}
+
+	remaining.defaults = remaining.defaults[:0]
 	for _, route := range state.defaults {
 		if err := n.links.DeleteDefaultRoute(route); err != nil {
 			result = errors.Join(result, err)
 			remaining.defaults = append(remaining.defaults, route)
 		}
 	}
-	for _, route := range state.routes {
-		if err := n.links.DeleteHostRoute(interfaceName, route); err != nil {
-			result = errors.Join(result, err)
-			remaining.routes = append(remaining.routes, route)
-		}
+	if len(remaining.defaults) != 0 {
+		return remaining, result
 	}
+	if state.policyTable != 0 {
+		if err := n.links.FlushDefaultRoutesInTable(state.policyTable); err != nil {
+			result = errors.Join(result, err)
+			return remaining, result
+		}
+		releaseIMSPolicyTable(state.policyTable)
+		remaining.policyTable = 0
+	}
+
+	remaining.prefixes = remaining.prefixes[:0]
+	remaining.peers = make(map[netip.Prefix]netip.Addr, len(state.peers))
 	for _, prefix := range state.prefixes {
 		peer, pointToPoint := state.peers[prefix]
 		var err error
@@ -275,6 +335,134 @@ func (n *pdnNetwork) cleanup(interfaceName string, state pdnNetworkState) (pdnNe
 		}
 	}
 	return remaining, result
+}
+
+func clonePDNNetworkState(state pdnNetworkState) pdnNetworkState {
+	state.prefixes = slices.Clone(state.prefixes)
+	state.peers = maps.Clone(state.peers)
+	state.defaults = slices.Clone(state.defaults)
+	state.rules = slices.Clone(state.rules)
+	return state
+}
+
+func reserveIMSPolicyTable(links pdnLinks) (uint32, uint32, error) {
+	imsPolicyRoutes.Lock()
+	defer imsPolicyRoutes.Unlock()
+	rules, err := links.PolicyRules()
+	if err != nil {
+		return 0, 0, err
+	}
+	routes, err := links.RouteEntries()
+	if err != nil {
+		return 0, 0, err
+	}
+	usedTables := make(map[uint32]struct{}, len(rules)+len(routes))
+	usedPriorities := make(map[uint32]struct{}, len(rules))
+	for _, route := range routes {
+		usedTables[route.Table] = struct{}{}
+	}
+	for _, rule := range rules {
+		usedTables[rule.Table] = struct{}{}
+		usedPriorities[rule.Priority] = struct{}{}
+	}
+	for slot := range imsPolicyRouteTableCount {
+		table := imsPolicyRouteTableBase + slot
+		priority := imsPolicyRulePriorityBase + slot
+		if _, reserved := imsPolicyRoutes.reserved[table]; reserved {
+			continue
+		}
+		if _, used := usedTables[table]; used {
+			continue
+		}
+		if _, used := usedPriorities[priority]; used {
+			continue
+		}
+		imsPolicyRoutes.reserved[table] = struct{}{}
+		return table, priority, nil
+	}
+	return 0, 0, errors.New("IMS policy routing tables are exhausted")
+}
+
+func releaseIMSPolicyTable(table uint32) {
+	imsPolicyRoutes.Lock()
+	delete(imsPolicyRoutes.reserved, table)
+	imsPolicyRoutes.Unlock()
+}
+
+func cleanupStaleIMSPolicyRouting(links pdnLinks) error {
+	imsPolicyRoutes.Lock()
+	defer imsPolicyRoutes.Unlock()
+	rules, err := links.PolicyRules()
+	if err != nil {
+		return err
+	}
+	routes, err := links.RouteEntries()
+	if err != nil {
+		return err
+	}
+	tables := make(map[uint32]bool)
+	for table := range imsPolicyRoutes.reserved {
+		if isIMSPolicyTable(table) {
+			tables[table] = true
+		}
+	}
+	for _, route := range routes {
+		table, ok := imsPolicyTableForRoute(route)
+		if ok {
+			tables[table] = true
+		}
+	}
+	var result error
+	for _, rule := range rules {
+		table, ok := imsPolicyTableForRule(rule)
+		if !ok {
+			continue
+		}
+		if _, seen := tables[table]; !seen {
+			tables[table] = true
+		}
+		if err := links.DeletePolicyRule(rule); err != nil {
+			result = errors.Join(result, err)
+			tables[table] = false
+		}
+	}
+	for table, rulesDeleted := range tables {
+		if !rulesDeleted {
+			continue
+		}
+		if err := links.FlushDefaultRoutesInTable(table); err != nil {
+			result = errors.Join(result, err)
+			continue
+		}
+		delete(imsPolicyRoutes.reserved, table)
+	}
+	return result
+}
+
+func imsPolicyTableForRule(rule netlink.PolicyRule) (uint32, bool) {
+	if rule.Family != netlink.FamilyIPv4 && rule.Family != netlink.FamilyIPv6 {
+		return 0, false
+	}
+	if rule.OutputInterface == "" || rule.Protocol != imsPolicyProtocol || !isIMSPolicyTable(rule.Table) || rule.Priority < imsPolicyRulePriorityBase {
+		return 0, false
+	}
+	tableSlot := rule.Table - imsPolicyRouteTableBase
+	prioritySlot := rule.Priority - imsPolicyRulePriorityBase
+	if prioritySlot != tableSlot {
+		return 0, false
+	}
+	return rule.Table, true
+}
+
+func imsPolicyTableForRoute(route netlink.RouteEntry) (uint32, bool) {
+	if !route.Default || route.Protocol != imsPolicyProtocol || !isIMSPolicyTable(route.Table) {
+		return 0, false
+	}
+	return route.Table, true
+}
+
+func isIMSPolicyTable(table uint32) bool {
+	return table >= imsPolicyRouteTableBase && table-imsPolicyRouteTableBase < imsPolicyRouteTableCount
 }
 
 func mbimSessionInterfaceName(parent string, sessionID uint32) (string, error) {

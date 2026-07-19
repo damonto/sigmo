@@ -90,7 +90,19 @@ func New(cfg Config) Coordinator {
 	}
 }
 
-func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) error {
+func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) (runErr error) {
+	if c.access == AccessVoLTE {
+		ownership, err := acquireIMSPolicyRoutingOwnership()
+		if err != nil {
+			return err
+		}
+		defer func() {
+			runErr = errors.Join(runErr, ownership.Close())
+		}()
+		if err := cleanupStaleIMSPolicyRouting(systemPDNLinks{}); err != nil {
+			return fmt.Errorf("clean stale VoLTE policy routing: %w", err)
+		}
+	}
 	if err := c.startEnabled(ctx, registry); err != nil {
 		slog.Warn("start configured IMS access", "access", c.routeName(), "error", err)
 	}

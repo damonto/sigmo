@@ -22,16 +22,33 @@ const (
 type DefaultRoute struct {
 	Interface string
 	Family    int
-	Protocol  int
-	Scope     int
-	Gateway   netip.Addr
-	Source    netip.Addr
-	Metric    int
+	// Table is zero for the main routing table.
+	Table    uint32
+	Protocol int
+	Scope    int
+	Gateway  netip.Addr
+	Source   netip.Addr
+	Metric   int
 }
 
-var ErrDefaultRouteExists = errors.New("default route already exists")
+var (
+	ErrDefaultRouteExists = errors.New("default route already exists")
+	errInterfaceNotFound  = errors.New("network interface not found")
+)
 
 func DefaultRoutes() ([]DefaultRoute, error) {
+	return defaultRoutesInTable(unix.RT_TABLE_MAIN)
+}
+
+// DefaultRoutesInTable returns default routes from one non-reserved policy table.
+func DefaultRoutesInTable(table uint32) ([]DefaultRoute, error) {
+	if err := validatePolicyRouteTable(table); err != nil {
+		return nil, err
+	}
+	return defaultRoutesInTable(table)
+}
+
+func defaultRoutesInTable(table uint32) ([]DefaultRoute, error) {
 	var routes []DefaultRoute
 	for _, family := range []int{unix.AF_UNSPEC, FamilyIPv4, FamilyIPv6} {
 		messages, err := routeDump(family)
@@ -42,7 +59,7 @@ func DefaultRoutes() ([]DefaultRoute, error) {
 			if msg.Header.Type != unix.RTM_NEWROUTE {
 				continue
 			}
-			for _, route := range parseDefaultRoutes(msg.Data) {
+			for _, route := range parseDefaultRoutesInTable(msg.Data, table) {
 				if !defaultRouteExists(route, routes) {
 					routes = append(routes, route)
 				}
@@ -133,10 +150,9 @@ func AddVLAN(parentName, name string, id uint16) error {
 }
 
 func DeleteLink(name string) error {
-	ifi, err := net.InterfaceByName(name)
+	ifi, err := lookupInterface(name)
 	if err != nil {
-		var opErr *net.OpError
-		if errors.As(err, &opErr) && errors.Is(opErr.Err, unix.ENODEV) {
+		if errors.Is(err, errInterfaceNotFound) {
 			return nil
 		}
 		return fmt.Errorf("find interface: %w", err)
@@ -231,7 +247,7 @@ func DeleteAddress(interfaceName string, prefix netip.Prefix) error {
 	if errors.Is(err, unix.EADDRNOTAVAIL) || errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESRCH) {
 		return nil
 	}
-	return err
+	return ignoreMissingInterfaceError(err)
 }
 
 func DeletePointToPointAddress(interfaceName string, local, peer netip.Addr) error {
@@ -239,7 +255,7 @@ func DeletePointToPointAddress(interfaceName string, local, peer netip.Addr) err
 	if errors.Is(err, unix.EADDRNOTAVAIL) || errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESRCH) {
 		return nil
 	}
-	return err
+	return ignoreMissingInterfaceError(err)
 }
 
 func AddDefaultRoute(route DefaultRoute) error {
@@ -255,7 +271,23 @@ func DeleteDefaultRoute(route DefaultRoute) error {
 	if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESRCH) {
 		return nil
 	}
-	return err
+	return ignoreMissingInterfaceError(err)
+}
+
+// FlushDefaultRoutesInTable removes default routes from one non-reserved policy table.
+func FlushDefaultRoutesInTable(table uint32, protocol int) error {
+	routes, err := DefaultRoutesInTable(table)
+	if err != nil {
+		return err
+	}
+	var result error
+	for _, route := range routes {
+		if protocol > 0 && route.Protocol != protocol {
+			continue
+		}
+		result = errors.Join(result, DeleteDefaultRoute(route))
+	}
+	return result
 }
 
 func AddHostRoute(interfaceName string, destination netip.Addr) error {
@@ -267,7 +299,31 @@ func DeleteHostRoute(interfaceName string, destination netip.Addr) error {
 	if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESRCH) {
 		return nil
 	}
+	return ignoreMissingInterfaceError(err)
+}
+
+func ignoreMissingInterfaceError(err error) error {
+	if errors.Is(err, errInterfaceNotFound) {
+		return nil
+	}
 	return err
+}
+
+func lookupInterface(name string) (*net.Interface, error) {
+	ifi, lookupErr := net.InterfaceByName(name)
+	if lookupErr == nil {
+		return ifi, nil
+	}
+	interfaces, listErr := net.Interfaces()
+	if listErr != nil {
+		return nil, errors.Join(lookupErr, fmt.Errorf("list interfaces: %w", listErr))
+	}
+	for _, ifi := range interfaces {
+		if ifi.Name == name {
+			return nil, lookupErr
+		}
+	}
+	return nil, fmt.Errorf("%w: %s", errInterfaceNotFound, name)
 }
 
 func prefixFromAddr(addr net.Addr) (netip.Prefix, error) {
@@ -282,7 +338,7 @@ func changeAddress(msgType uint16, flags uint16, interfaceName string, prefix ne
 	if !prefix.IsValid() {
 		return errors.New("address prefix is invalid")
 	}
-	ifi, err := net.InterfaceByName(interfaceName)
+	ifi, err := lookupInterface(interfaceName)
 	if err != nil {
 		return fmt.Errorf("find interface: %w", err)
 	}
@@ -309,7 +365,7 @@ func changeAddress(msgType uint16, flags uint16, interfaceName string, prefix ne
 }
 
 func changePointToPointAddress(msgType uint16, flags uint16, interfaceName string, local, peer netip.Addr) error {
-	ifi, err := net.InterfaceByName(interfaceName)
+	ifi, err := lookupInterface(interfaceName)
 	if err != nil {
 		return fmt.Errorf("find interface: %w", err)
 	}
@@ -351,23 +407,41 @@ func pointToPointAddressMessage(interfaceIndex int, local, peer netip.Addr) ([]b
 }
 
 func changeDefaultRoute(msgType uint16, flags uint16, route DefaultRoute) error {
-	if route.Family != FamilyIPv4 && route.Family != FamilyIPv6 {
-		return errors.New("route family is invalid")
-	}
-	ifi, err := net.InterfaceByName(route.Interface)
+	ifi, err := lookupInterface(route.Interface)
 	if err != nil {
 		return fmt.Errorf("find interface: %w", err)
+	}
+	msg, err := defaultRouteMessage(ifi.Index, route)
+	if err != nil {
+		return err
+	}
+	return send(msgType, unix.NLM_F_REQUEST|unix.NLM_F_ACK|flags, msg)
+}
+
+func defaultRouteMessage(interfaceIndex int, route DefaultRoute) ([]byte, error) {
+	if route.Family != FamilyIPv4 && route.Family != FamilyIPv6 {
+		return nil, errors.New("route family is invalid")
+	}
+	table := defaultRouteTable(route)
+	if table == unix.RT_TABLE_UNSPEC {
+		return nil, errors.New("route table is invalid")
 	}
 
 	msg := make([]byte, unix.SizeofRtMsg)
 	msg[0] = byte(route.Family)
-	msg[4] = unix.RT_TABLE_MAIN
+	if table <= 255 {
+		msg[4] = byte(table)
+	} else {
+		tableAttr := make([]byte, 4)
+		binary.NativeEndian.PutUint32(tableAttr, table)
+		msg = appendAttr(msg, unix.RTA_TABLE, tableAttr)
+	}
 	msg[5] = byte(routeProtocol(route))
 	msg[6] = byte(route.Scope)
 	msg[7] = unix.RTN_UNICAST
 
 	oif := make([]byte, 4)
-	binary.NativeEndian.PutUint32(oif, uint32(ifi.Index))
+	binary.NativeEndian.PutUint32(oif, uint32(interfaceIndex))
 	msg = appendAttr(msg, unix.RTA_OIF, oif)
 	if route.Metric > 0 {
 		priority := make([]byte, 4)
@@ -377,32 +451,32 @@ func changeDefaultRoute(msgType uint16, flags uint16, route DefaultRoute) error 
 	if route.Gateway.IsValid() {
 		family, raw, err := ipFamilyBytes(route.Gateway)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if family != route.Family {
-			return errors.New("route gateway family does not match route family")
+			return nil, errors.New("route gateway family does not match route family")
 		}
 		msg = appendAttr(msg, unix.RTA_GATEWAY, raw)
 	}
 	if route.Source.IsValid() {
 		family, raw, err := ipFamilyBytes(route.Source)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if family != route.Family {
-			return errors.New("route source family does not match route family")
+			return nil, errors.New("route source family does not match route family")
 		}
 		msg = appendAttr(msg, unix.RTA_PREFSRC, raw)
 	}
 
-	return send(msgType, unix.NLM_F_REQUEST|unix.NLM_F_ACK|flags, msg)
+	return msg, nil
 }
 
 func changeHostRoute(msgType uint16, flags uint16, interfaceName string, destination netip.Addr) error {
 	if !destination.IsValid() {
 		return errors.New("host route destination is invalid")
 	}
-	ifi, err := net.InterfaceByName(interfaceName)
+	ifi, err := lookupInterface(interfaceName)
 	if err != nil {
 		return fmt.Errorf("find interface: %w", err)
 	}
@@ -443,6 +517,22 @@ func routeProtocol(route DefaultRoute) int {
 	return unix.RTPROT_STATIC
 }
 
+func defaultRouteTable(route DefaultRoute) uint32 {
+	if route.Table != 0 {
+		return route.Table
+	}
+	return unix.RT_TABLE_MAIN
+}
+
+func validatePolicyRouteTable(table uint32) error {
+	switch table {
+	case unix.RT_TABLE_UNSPEC, unix.RT_TABLE_DEFAULT, unix.RT_TABLE_MAIN, unix.RT_TABLE_LOCAL:
+		return fmt.Errorf("routing table %d is reserved", table)
+	default:
+		return nil
+	}
+}
+
 func defaultRouteExists(route DefaultRoute, routes []DefaultRoute) bool {
 	for _, existing := range routes {
 		if sameDefaultRoute(route, existing) {
@@ -455,6 +545,7 @@ func defaultRouteExists(route DefaultRoute, routes []DefaultRoute) bool {
 func sameDefaultRoute(a, b DefaultRoute) bool {
 	return a.Interface == b.Interface &&
 		a.Family == b.Family &&
+		defaultRouteTable(a) == defaultRouteTable(b) &&
 		routeProtocol(a) == routeProtocol(b) &&
 		a.Scope == b.Scope &&
 		a.Gateway == b.Gateway &&
@@ -532,6 +623,10 @@ func receiveACK(fd int, seq uint32) error {
 }
 
 func parseDefaultRoutes(data []byte) []DefaultRoute {
+	return parseDefaultRoutesInTable(data, unix.RT_TABLE_MAIN)
+}
+
+func parseDefaultRoutesInTable(data []byte, wantTable uint32) []DefaultRoute {
 	if len(data) < unix.SizeofRtMsg {
 		return nil
 	}
@@ -545,11 +640,11 @@ func parseDefaultRoutes(data []byte) []DefaultRoute {
 		return nil
 	}
 	attrs := parseAttrs(data[unix.SizeofRtMsg:])
-	if table := attrUint32(attrs[unix.RTA_TABLE]); table != 0 {
-		if table != unix.RT_TABLE_MAIN {
-			return nil
-		}
-	} else if data[4] != unix.RT_TABLE_MAIN {
+	table := attrUint32(attrs[unix.RTA_TABLE])
+	if table == 0 {
+		table = uint32(data[4])
+	}
+	if table != wantTable {
 		return nil
 	}
 
@@ -564,6 +659,9 @@ func parseDefaultRoutes(data []byte) []DefaultRoute {
 		Gateway:  gateway,
 		Source:   source,
 		Metric:   metric,
+	}
+	if table != unix.RT_TABLE_MAIN {
+		route.Table = table
 	}
 	if index != 0 {
 		ifi, err := net.InterfaceByIndex(index)
@@ -644,6 +742,13 @@ func attrUint32(value []byte) uint32 {
 		return 0
 	}
 	return binary.NativeEndian.Uint32(value[:4])
+}
+
+func attrUint8(value []byte) int {
+	if len(value) == 0 {
+		return 0
+	}
+	return int(value[0])
 }
 
 func attrAddr(family int, value []byte) netip.Addr {

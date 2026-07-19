@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -334,6 +335,7 @@ func TestVoLTESIMSlot(t *testing.T) {
 }
 
 func TestConfigureIMSPDNNetwork(t *testing.T) {
+	resetIMSPolicyReservations(t)
 	tests := []struct {
 		name               string
 		dedicatedInterface bool
@@ -371,19 +373,23 @@ func TestConfigureIMSPDNNetwork(t *testing.T) {
 					return nil
 				},
 				addDefaultRoute: func(route netlink.DefaultRoute) error {
-					calls = append(calls, fmt.Sprintf("add-default:%s:%d:%s:%d", route.Interface, route.Family, route.Source, route.Metric))
+					calls = append(calls, fmt.Sprintf("add-default:%s:%d:%s:%d", route.Interface, route.Family, route.Source, route.Table))
 					return nil
 				},
 				deleteDefaultRoute: func(route netlink.DefaultRoute) error {
-					calls = append(calls, fmt.Sprintf("delete-default:%s:%d:%s:%d", route.Interface, route.Family, route.Source, route.Metric))
+					calls = append(calls, fmt.Sprintf("delete-default:%s:%d:%s:%d", route.Interface, route.Family, route.Source, route.Table))
 					return nil
 				},
-				addHostRoute: func(name string, address netip.Addr) error {
-					calls = append(calls, fmt.Sprintf("add-route:%s:%s", name, address))
+				flushDefaultRoutesInTable: func(table uint32) error {
+					calls = append(calls, fmt.Sprintf("flush-table:%d", table))
 					return nil
 				},
-				deleteHostRoute: func(name string, address netip.Addr) error {
-					calls = append(calls, fmt.Sprintf("delete-route:%s:%s", name, address))
+				addPolicyRule: func(rule netlink.PolicyRule) error {
+					calls = append(calls, fmt.Sprintf("add-rule:%s:%d:%d:%d", rule.OutputInterface, rule.Family, rule.Priority, rule.Table))
+					return nil
+				},
+				deletePolicyRule: func(rule netlink.PolicyRule) error {
+					calls = append(calls, fmt.Sprintf("delete-rule:%s:%d:%d:%d", rule.OutputInterface, rule.Family, rule.Priority, rule.Table))
 					return nil
 				},
 			}
@@ -403,15 +409,17 @@ func TestConfigureIMSPDNNetwork(t *testing.T) {
 			if _, err := network.cleanup("wwan0", state); err != nil {
 				t.Fatalf("cleanup() error = %v", err)
 			}
-			mediaRoutes := []string{
-				"add-default:wwan0:2:10.0.0.2:32760",
-				"add-default:wwan0:10:2001:db8::2:32760",
-				"add-route:wwan0:10.0.0.10",
-				"add-route:wwan0:2001:db8::10",
-				"delete-default:wwan0:2:10.0.0.2:32760",
-				"delete-default:wwan0:10:2001:db8::2:32760",
-				"delete-route:wwan0:10.0.0.10",
-				"delete-route:wwan0:2001:db8::10",
+			policyCalls := []string{
+				"flush-table:20000",
+				"add-default:wwan0:2:10.0.0.2:20000",
+				"add-default:wwan0:10:2001:db8::2:20000",
+				"add-rule:wwan0:2:10000:20000",
+				"add-rule:wwan0:10:10000:20000",
+				"delete-rule:wwan0:2:10000:20000",
+				"delete-rule:wwan0:10:10000:20000",
+				"delete-default:wwan0:2:10.0.0.2:20000",
+				"delete-default:wwan0:10:2001:db8::2:20000",
+				"flush-table:20000",
 			}
 			var want []string
 			if tt.wantDisable {
@@ -419,10 +427,9 @@ func TestConfigureIMSPDNNetwork(t *testing.T) {
 					"disable-ipv6-autoconf:wwan0",
 					"up:wwan0",
 					"add-address:wwan0:10.0.0.2/32",
-					mediaRoutes[0],
 					"add-address:wwan0:2001:db8::2/128",
 				}
-				want = append(want, mediaRoutes[1:]...)
+				want = append(want, policyCalls...)
 				want = append(want,
 					"delete-address:wwan0:10.0.0.2/32",
 					"delete-address:wwan0:2001:db8::2/128",
@@ -431,10 +438,9 @@ func TestConfigureIMSPDNNetwork(t *testing.T) {
 				want = []string{
 					"up:wwan0",
 					"add-peer-address:wwan0:10.0.0.2:10.0.0.1",
-					mediaRoutes[0],
 					"add-peer-address:wwan0:2001:db8::2:2001:db8::1",
 				}
-				want = append(want, mediaRoutes[1:]...)
+				want = append(want, policyCalls...)
 				want = append(want,
 					"delete-peer-address:wwan0:10.0.0.2:10.0.0.1",
 					"delete-peer-address:wwan0:2001:db8::2:2001:db8::1",
@@ -448,6 +454,7 @@ func TestConfigureIMSPDNNetwork(t *testing.T) {
 }
 
 func TestManagedVoLTECardUsesMBIMSessionInterface(t *testing.T) {
+	resetIMSPolicyReservations(t)
 	tests := []struct {
 		name      string
 		sessionID uint32
@@ -490,19 +497,23 @@ func TestManagedVoLTECardUsesMBIMSessionInterface(t *testing.T) {
 					return nil
 				},
 				addDefaultRoute: func(route netlink.DefaultRoute) error {
-					calls = append(calls, fmt.Sprintf("add-default:%s:%d:%s:%d", route.Interface, route.Family, route.Source, route.Metric))
+					calls = append(calls, fmt.Sprintf("add-default:%s:%d:%s:%d", route.Interface, route.Family, route.Source, route.Table))
 					return nil
 				},
 				deleteDefaultRoute: func(route netlink.DefaultRoute) error {
-					calls = append(calls, fmt.Sprintf("delete-default:%s:%d:%s:%d", route.Interface, route.Family, route.Source, route.Metric))
+					calls = append(calls, fmt.Sprintf("delete-default:%s:%d:%s:%d", route.Interface, route.Family, route.Source, route.Table))
 					return nil
 				},
-				addHostRoute: func(name string, address netip.Addr) error {
-					calls = append(calls, fmt.Sprintf("add-route:%s:%s", name, address))
+				flushDefaultRoutesInTable: func(table uint32) error {
+					calls = append(calls, fmt.Sprintf("flush-table:%d", table))
 					return nil
 				},
-				deleteHostRoute: func(name string, address netip.Addr) error {
-					calls = append(calls, fmt.Sprintf("delete-route:%s:%s", name, address))
+				addPolicyRule: func(rule netlink.PolicyRule) error {
+					calls = append(calls, fmt.Sprintf("add-rule:%s:%d:%d:%d", rule.OutputInterface, rule.Family, rule.Priority, rule.Table))
+					return nil
+				},
+				deletePolicyRule: func(rule netlink.PolicyRule) error {
+					calls = append(calls, fmt.Sprintf("delete-rule:%s:%d:%d:%d", rule.OutputInterface, rule.Family, rule.Priority, rule.Table))
 					return nil
 				},
 				addVLAN: func(parent, name string, id uint16) error {
@@ -525,7 +536,7 @@ func TestManagedVoLTECardUsesMBIMSessionInterface(t *testing.T) {
 				PCSCFIPs:  []net.IP{net.ParseIP("2001:db8::10")},
 			}
 
-			err = network.Replace(context.Background(), info)
+			gotInterfaceName, err := network.Replace(context.Background(), info)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("Replace() error = nil, want error")
@@ -534,6 +545,9 @@ func TestManagedVoLTECardUsesMBIMSessionInterface(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("Replace() error = %v", err)
+			}
+			if gotInterfaceName != interfaceName {
+				t.Fatalf("Replace() interface = %q, want %q", gotInterfaceName, interfaceName)
 			}
 			if err := network.Close(); err != nil {
 				t.Fatalf("Close() error = %v", err)
@@ -551,10 +565,12 @@ func TestManagedVoLTECardUsesMBIMSessionInterface(t *testing.T) {
 				"disable-ipv6-autoconf:"+interfaceName,
 				"up:"+interfaceName,
 				"add-address:"+interfaceName+":2001:db8::2/128",
-				"add-default:"+interfaceName+":10:2001:db8::2:32760",
-				"add-route:"+interfaceName+":2001:db8::10",
-				"delete-default:"+interfaceName+":10:2001:db8::2:32760",
-				"delete-route:"+interfaceName+":2001:db8::10",
+				"flush-table:20000",
+				"add-default:"+interfaceName+":10:2001:db8::2:20000",
+				"add-rule:"+interfaceName+":10:10000:20000",
+				"delete-rule:"+interfaceName+":10:10000:20000",
+				"delete-default:"+interfaceName+":10:2001:db8::2:20000",
+				"flush-table:20000",
 				"delete-address:"+interfaceName+":2001:db8::2/128",
 				"delete-link:"+interfaceName,
 			)
@@ -599,7 +615,7 @@ func TestPDNNetworkRollsBackConfigurationOnce(t *testing.T) {
 				IPv6Gateway: net.ParseIP("2001:db8::1"),
 			}
 
-			if err := network.Replace(context.Background(), info); err == nil {
+			if _, err := network.Replace(context.Background(), info); err == nil {
 				t.Fatal("Replace() error = nil, want error")
 			}
 			if deleteCalls != 1 {
@@ -619,33 +635,39 @@ func TestPDNNetworkRetainsFailedCleanupForRetry(t *testing.T) {
 	tests := []struct {
 		name string
 	}{
-		{name: "shared interface retries failed address and route deletion"},
+		{name: "shared interface keeps routes and addresses until rule deletion succeeds"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			deleteAddressCalls := 0
 			deleteRouteCalls := 0
+			deleteRuleCalls := 0
+			route := netlink.DefaultRoute{Interface: "wwan0", Family: netlink.FamilyIPv4, Table: imsPolicyRouteTableBase, Protocol: imsPolicyProtocol, Source: netip.MustParseAddr("10.0.0.2")}
+			rule := netlink.PolicyRule{Family: netlink.FamilyIPv4, Priority: imsPolicyRulePriorityBase, Table: imsPolicyRouteTableBase, OutputInterface: "wwan0", Protocol: imsPolicyProtocol}
 			network := &pdnNetwork{
 				parent:        "wwan0",
 				interfaceName: "wwan0",
 				state: pdnNetworkState{
-					prefixes: []netip.Prefix{netip.MustParsePrefix("10.0.0.2/32")},
-					routes:   []netip.Addr{netip.MustParseAddr("10.0.0.10")},
+					prefixes:    []netip.Prefix{netip.MustParsePrefix("10.0.0.2/32")},
+					defaults:    []netlink.DefaultRoute{route},
+					rules:       []netlink.PolicyRule{rule},
+					policyTable: imsPolicyRouteTableBase,
 				},
 				links: fakePDNLinks{
-					deleteAddress: func(string, netip.Prefix) error {
-						deleteAddressCalls++
-						if deleteAddressCalls == 1 {
-							return errors.New("delete address rejected")
+					deletePolicyRule: func(netlink.PolicyRule) error {
+						deleteRuleCalls++
+						if deleteRuleCalls == 1 {
+							return errors.New("delete rule rejected")
 						}
 						return nil
 					},
-					deleteHostRoute: func(string, netip.Addr) error {
+					deleteDefaultRoute: func(netlink.DefaultRoute) error {
 						deleteRouteCalls++
-						if deleteRouteCalls == 1 {
-							return errors.New("delete route rejected")
-						}
+						return nil
+					},
+					deleteAddress: func(string, netip.Prefix) error {
+						deleteAddressCalls++
 						return nil
 					},
 				},
@@ -654,17 +676,265 @@ func TestPDNNetworkRetainsFailedCleanupForRetry(t *testing.T) {
 			if err := network.Close(); err == nil {
 				t.Fatal("first Close() error = nil, want error")
 			}
-			if network.interfaceName != "wwan0" || len(network.state.prefixes) != 1 || len(network.state.routes) != 1 {
+			if network.interfaceName != "wwan0" || len(network.state.rules) != 1 || len(network.state.defaults) != 1 || len(network.state.prefixes) != 1 {
 				t.Fatalf("state after failed Close = %q/%+v, want retained resources", network.interfaceName, network.state)
+			}
+			if deleteRouteCalls != 0 || deleteAddressCalls != 0 {
+				t.Fatalf("cleanup after rule failure deleted routes/addresses = %d/%d", deleteRouteCalls, deleteAddressCalls)
 			}
 			if err := network.Close(); err != nil {
 				t.Fatalf("second Close() error = %v", err)
 			}
-			if network.interfaceName != "" || len(network.state.prefixes) != 0 || len(network.state.routes) != 0 {
+			if network.interfaceName != "" || len(network.state.prefixes) != 0 || len(network.state.defaults) != 0 || len(network.state.rules) != 0 {
 				t.Fatalf("state after successful Close = %q/%+v, want empty", network.interfaceName, network.state)
 			}
 		})
 	}
+}
+
+func TestPDNNetworkRetainsMBIMLinkUntilAddressCleanupSucceeds(t *testing.T) {
+	deleteAddressCalls := 0
+	deleteLinkCalls := 0
+	network := &pdnNetwork{
+		parent:        "wwan0",
+		mbim:          true,
+		interfaceName: "mbim7s1",
+		state: pdnNetworkState{
+			prefixes: []netip.Prefix{netip.MustParsePrefix("2001:db8::2/128")},
+		},
+		links: fakePDNLinks{
+			deleteAddress: func(string, netip.Prefix) error {
+				deleteAddressCalls++
+				if deleteAddressCalls == 1 {
+					return errors.New("delete address rejected")
+				}
+				return nil
+			},
+			deleteLink: func(string) error {
+				deleteLinkCalls++
+				return nil
+			},
+		},
+	}
+
+	if err := network.Close(); err == nil {
+		t.Fatal("first Close() error = nil, want error")
+	}
+	if deleteLinkCalls != 0 || network.interfaceName != "mbim7s1" || len(network.state.prefixes) != 1 {
+		t.Fatalf("state after failed Close = link deletes %d, interface %q, prefixes %v", deleteLinkCalls, network.interfaceName, network.state.prefixes)
+	}
+	if err := network.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+	if deleteLinkCalls != 1 || network.interfaceName != "" || len(network.state.prefixes) != 0 {
+		t.Fatalf("state after successful Close = link deletes %d, interface %q, prefixes %v", deleteLinkCalls, network.interfaceName, network.state.prefixes)
+	}
+}
+
+func TestConfigureIMSPDNNetworkUsesDistinctPolicyTables(t *testing.T) {
+	resetIMSPolicyReservations(t)
+	var (
+		mu     sync.Mutex
+		routes = make(map[string]netlink.DefaultRoute)
+		rules  = make(map[string]netlink.PolicyRule)
+	)
+	links := fakePDNLinks{
+		addDefaultRoute: func(route netlink.DefaultRoute) error {
+			mu.Lock()
+			routes[route.Interface] = route
+			mu.Unlock()
+			return nil
+		},
+		addPolicyRule: func(rule netlink.PolicyRule) error {
+			mu.Lock()
+			rules[rule.OutputInterface] = rule
+			mu.Unlock()
+			return nil
+		},
+	}
+	networks := []*pdnNetwork{
+		{parent: "qmimux0", links: links},
+		{parent: "qmimux1", links: links},
+	}
+	infos := []imsPDNInfo{
+		{LocalIPv4: net.ParseIP("10.0.0.2"), IPv4Gateway: net.ParseIP("10.0.0.1")},
+		{LocalIPv4: net.ParseIP("10.0.1.2"), IPv4Gateway: net.ParseIP("10.0.1.1")},
+	}
+
+	errCh := make(chan error, len(networks))
+	var wg sync.WaitGroup
+	for i := range networks {
+		wg.Go(func() {
+			_, err := networks[i].Replace(context.Background(), infos[i])
+			errCh <- err
+		})
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("Replace() error = %v", err)
+		}
+	}
+
+	firstRoute, secondRoute := routes["qmimux0"], routes["qmimux1"]
+	firstRule, secondRule := rules["qmimux0"], rules["qmimux1"]
+	if firstRoute.Table == 0 || secondRoute.Table == 0 || firstRoute.Table == secondRoute.Table {
+		t.Fatalf("policy tables = %d/%d, want distinct non-zero tables", firstRoute.Table, secondRoute.Table)
+	}
+	if firstRule.Table != firstRoute.Table || secondRule.Table != secondRoute.Table || firstRule.Priority == secondRule.Priority {
+		t.Fatalf("policy routes/rules = %+v/%+v and %+v/%+v", firstRoute, firstRule, secondRoute, secondRule)
+	}
+	for _, network := range networks {
+		if err := network.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}
+}
+
+func TestReserveIMSPolicyTableSkipsForeignRoutes(t *testing.T) {
+	resetIMSPolicyReservations(t)
+	foreign := netlink.RouteEntry{
+		Family:   netlink.FamilyIPv4,
+		Table:    imsPolicyRouteTableBase,
+		Protocol: 201,
+		Default:  false,
+	}
+	links := fakePDNLinks{
+		routeEntries: func() ([]netlink.RouteEntry, error) {
+			return []netlink.RouteEntry{foreign}, nil
+		},
+	}
+
+	table, priority, err := reserveIMSPolicyTable(links)
+	if err != nil {
+		t.Fatalf("reserveIMSPolicyTable() error = %v", err)
+	}
+	if table != imsPolicyRouteTableBase+1 || priority != imsPolicyRulePriorityBase+1 {
+		t.Fatalf("policy slot = %d/%d, want %d/%d", table, priority, imsPolicyRouteTableBase+1, imsPolicyRulePriorityBase+1)
+	}
+	releaseIMSPolicyTable(table)
+}
+
+func TestCleanupStaleIMSPolicyRouting(t *testing.T) {
+	resetIMSPolicyReservations(t)
+	ownedIPv4 := netlink.PolicyRule{
+		Family:          netlink.FamilyIPv4,
+		Priority:        imsPolicyRulePriorityBase + 3,
+		Table:           imsPolicyRouteTableBase + 3,
+		OutputInterface: "qmimux0",
+		Protocol:        imsPolicyProtocol,
+	}
+	ownedIPv6 := ownedIPv4
+	ownedIPv6.Family = netlink.FamilyIPv6
+	foreign := netlink.PolicyRule{
+		Family:          netlink.FamilyIPv4,
+		Priority:        ownedIPv4.Priority,
+		Table:           ownedIPv4.Table,
+		OutputInterface: "eth0",
+		Protocol:        imsPolicyProtocol - 1,
+	}
+	orphanTable := imsPolicyRouteTableBase + 7
+	routes := []netlink.RouteEntry{
+		{Family: netlink.FamilyIPv4, Table: orphanTable, Protocol: imsPolicyProtocol, Default: true},
+		{Family: netlink.FamilyIPv4, Table: imsPolicyRouteTableBase + 8, Protocol: imsPolicyProtocol - 1, Default: true},
+	}
+	rules := []netlink.PolicyRule{ownedIPv4, foreign, ownedIPv6}
+	imsPolicyRoutes.Lock()
+	imsPolicyRoutes.reserved[ownedIPv4.Table] = struct{}{}
+	imsPolicyRoutes.Unlock()
+	var (
+		deleted []netlink.PolicyRule
+		flushed []uint32
+	)
+	links := fakePDNLinks{
+		policyRules: func() ([]netlink.PolicyRule, error) {
+			return slices.Clone(rules), nil
+		},
+		routeEntries: func() ([]netlink.RouteEntry, error) {
+			return slices.Clone(routes), nil
+		},
+		deletePolicyRule: func(rule netlink.PolicyRule) error {
+			deleted = append(deleted, rule)
+			return nil
+		},
+		flushDefaultRoutesInTable: func(table uint32) error {
+			flushed = append(flushed, table)
+			return nil
+		},
+	}
+
+	if err := cleanupStaleIMSPolicyRouting(links); err != nil {
+		t.Fatalf("cleanupStaleIMSPolicyRouting() error = %v", err)
+	}
+	if want := []netlink.PolicyRule{ownedIPv4, ownedIPv6}; !slices.Equal(deleted, want) {
+		t.Fatalf("deleted rules = %+v, want %+v", deleted, want)
+	}
+	slices.Sort(flushed)
+	wantFlushed := []uint32{ownedIPv4.Table, orphanTable}
+	slices.Sort(wantFlushed)
+	if !slices.Equal(flushed, wantFlushed) {
+		t.Fatalf("flushed tables = %v, want %v", flushed, wantFlushed)
+	}
+	imsPolicyRoutes.Lock()
+	_, reserved := imsPolicyRoutes.reserved[ownedIPv4.Table]
+	imsPolicyRoutes.Unlock()
+	if reserved {
+		t.Fatalf("policy table %d remains reserved after stale cleanup", ownedIPv4.Table)
+	}
+}
+
+func TestCleanupStaleIMSPolicyRoutingRetainsFailedTable(t *testing.T) {
+	resetIMSPolicyReservations(t)
+	rule := netlink.PolicyRule{
+		Family:          netlink.FamilyIPv4,
+		Priority:        imsPolicyRulePriorityBase,
+		Table:           imsPolicyRouteTableBase,
+		OutputInterface: "qmimux0",
+		Protocol:        imsPolicyProtocol,
+	}
+	imsPolicyRoutes.Lock()
+	imsPolicyRoutes.reserved[rule.Table] = struct{}{}
+	imsPolicyRoutes.Unlock()
+	errDelete := errors.New("delete policy rule")
+	flushed := false
+	links := fakePDNLinks{
+		policyRules: func() ([]netlink.PolicyRule, error) {
+			return []netlink.PolicyRule{rule}, nil
+		},
+		deletePolicyRule: func(netlink.PolicyRule) error {
+			return errDelete
+		},
+		flushDefaultRoutesInTable: func(uint32) error {
+			flushed = true
+			return nil
+		},
+	}
+
+	if err := cleanupStaleIMSPolicyRouting(links); !errors.Is(err, errDelete) {
+		t.Fatalf("cleanupStaleIMSPolicyRouting() error = %v, want %v", err, errDelete)
+	}
+	imsPolicyRoutes.Lock()
+	_, reserved := imsPolicyRoutes.reserved[rule.Table]
+	imsPolicyRoutes.Unlock()
+	if flushed || !reserved {
+		t.Fatalf("failed table state = flushed %v, reserved %v; want false/true", flushed, reserved)
+	}
+}
+
+func resetIMSPolicyReservations(t *testing.T) {
+	t.Helper()
+	imsPolicyRoutes.Lock()
+	if len(imsPolicyRoutes.reserved) != 0 {
+		imsPolicyRoutes.Unlock()
+		t.Fatal("IMS policy table reservations leaked from another test")
+	}
+	imsPolicyRoutes.Unlock()
+	t.Cleanup(func() {
+		imsPolicyRoutes.Lock()
+		clear(imsPolicyRoutes.reserved)
+		imsPolicyRoutes.Unlock()
+	})
 }
 
 func TestWaitForIMSInterface(t *testing.T) {
@@ -783,10 +1053,13 @@ type fakePDNLinks struct {
 	addPointToPointAddress       func(string, netip.Addr, netip.Addr) error
 	deleteAddress                func(string, netip.Prefix) error
 	deletePointToPointAddress    func(string, netip.Addr, netip.Addr) error
-	addHostRoute                 func(string, netip.Addr) error
-	deleteHostRoute              func(string, netip.Addr) error
 	addDefaultRoute              func(netlink.DefaultRoute) error
 	deleteDefaultRoute           func(netlink.DefaultRoute) error
+	routeEntries                 func() ([]netlink.RouteEntry, error)
+	flushDefaultRoutesInTable    func(uint32) error
+	policyRules                  func() ([]netlink.PolicyRule, error)
+	addPolicyRule                func(netlink.PolicyRule) error
+	deletePolicyRule             func(netlink.PolicyRule) error
 	addVLAN                      func(string, string, uint16) error
 	deleteLink                   func(string) error
 }
@@ -833,20 +1106,6 @@ func (f fakePDNLinks) DeletePointToPointAddress(name string, local, peer netip.A
 	return f.deletePointToPointAddress(name, local, peer)
 }
 
-func (f fakePDNLinks) AddHostRoute(name string, address netip.Addr) error {
-	if f.addHostRoute == nil {
-		return nil
-	}
-	return f.addHostRoute(name, address)
-}
-
-func (f fakePDNLinks) DeleteHostRoute(name string, address netip.Addr) error {
-	if f.deleteHostRoute == nil {
-		return nil
-	}
-	return f.deleteHostRoute(name, address)
-}
-
 func (f fakePDNLinks) AddDefaultRoute(route netlink.DefaultRoute) error {
 	if f.addDefaultRoute == nil {
 		return nil
@@ -859,6 +1118,41 @@ func (f fakePDNLinks) DeleteDefaultRoute(route netlink.DefaultRoute) error {
 		return nil
 	}
 	return f.deleteDefaultRoute(route)
+}
+
+func (f fakePDNLinks) RouteEntries() ([]netlink.RouteEntry, error) {
+	if f.routeEntries == nil {
+		return nil, nil
+	}
+	return f.routeEntries()
+}
+
+func (f fakePDNLinks) FlushDefaultRoutesInTable(table uint32) error {
+	if f.flushDefaultRoutesInTable == nil {
+		return nil
+	}
+	return f.flushDefaultRoutesInTable(table)
+}
+
+func (f fakePDNLinks) PolicyRules() ([]netlink.PolicyRule, error) {
+	if f.policyRules == nil {
+		return nil, nil
+	}
+	return f.policyRules()
+}
+
+func (f fakePDNLinks) AddPolicyRule(rule netlink.PolicyRule) error {
+	if f.addPolicyRule == nil {
+		return nil
+	}
+	return f.addPolicyRule(rule)
+}
+
+func (f fakePDNLinks) DeletePolicyRule(rule netlink.PolicyRule) error {
+	if f.deletePolicyRule == nil {
+		return nil
+	}
+	return f.deletePolicyRule(rule)
 }
 
 func (f fakePDNLinks) AddVLAN(parent, name string, id uint16) error {
