@@ -34,7 +34,7 @@ const statusLabel = computed(() => {
     case 'connecting':
       return t('modemDetail.settings.volteConnecting')
     case 'modem_managed':
-      return t('modemDetail.settings.volteModemManaged')
+      return t('modemDetail.settings.volteConnected')
     case 'disabled':
       return t('modemDetail.settings.volteDisabled')
     default:

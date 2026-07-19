@@ -756,7 +756,6 @@ const en = {
       volteConnectedDescription: 'VoLTE is registered with IMS and ready to use',
       volteConnecting: 'Connecting',
       volteConnectingDescription: 'VoLTE is registering with IMS',
-      volteModemManaged: 'Managed by modem',
       volteDisconnected: 'Disconnected',
       volteDisconnectedDescription: 'VoLTE is not connected',
       volteDisabled: 'Disabled',

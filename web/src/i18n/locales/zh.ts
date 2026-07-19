@@ -740,7 +740,6 @@ const zh = {
       volteConnectedDescription: 'VoLTE 已注册到 IMS，可处理通话、短信和 USSD',
       volteConnecting: '连接中',
       volteConnectingDescription: 'VoLTE 正在注册到 IMS',
-      volteModemManaged: '由模块管理',
       volteDisconnected: '未连接',
       volteDisconnectedDescription: 'VoLTE 当前未连接',
       volteDisabled: '已关闭',

@@ -92,7 +92,7 @@ func New(cfg Config) Coordinator {
 
 func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) (runErr error) {
 	if c.access == AccessVoLTE {
-		ownership, err := acquireIMSPolicyRoutingOwnership()
+		ownership, err := acquireIMSPolicyRoutingOwnership(imsPolicyRoutingOwnershipAddress)
 		if err != nil {
 			return err
 		}
