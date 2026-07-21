@@ -4,22 +4,22 @@ go 1.26.3
 
 require (
 	github.com/damonto/euicc-go v1.1.3-0.20260712112734-b1c42d12dd47
-	github.com/damonto/ims-go v0.0.0-20260719144011-7f781ccc1057
+	github.com/damonto/ims-go v0.0.0-20260721155533-6517a9516507
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260712112859-5cbe97a5670f
-	github.com/damonto/wwan-go v0.0.0-20260717035243-87c619fd466a
+	github.com/damonto/wwan-go v0.0.0-20260721112859-6718d491a232
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.3.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
-	github.com/pion/interceptor v0.1.45
+	github.com/pion/interceptor v0.1.46
 	github.com/pion/rtp v1.10.4
 	github.com/pion/webrtc/v4 v4.2.17
 )
 
 require (
 	github.com/ElMostafaIdrassi/goscard v1.0.0 // indirect
-	github.com/ebitengine/purego v0.10.1 // indirect
+	github.com/ebitengine/purego v0.10.2 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
