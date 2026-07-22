@@ -870,7 +870,7 @@ const en = {
       networkCategoryDescription: 'Network registration and mode.',
       internetCategoryDescription: 'APN and connection.',
       deviceCategoryDescription: 'Modem preferences.',
-      wifiCallingCategoryDescription: 'Voice Over Wi-Fi',
+      wifiCallingCategoryDescription: 'Voice Over Wi-Fi.',
       advancedTitle: 'Advanced',
       advancedCategoryDescription: 'Advanced modem options.',
       deviceInfoTitle: 'Device Info',
