@@ -1,7 +1,7 @@
 github.com/damonto/euicc-go v1.1.3-0.20260712112734-b1c42d12dd47 h1:OiOlpgaXc07x4kGcLy9XjV6TVx615hSRUUlAHnALTq0=
 github.com/damonto/euicc-go v1.1.3-0.20260712112734-b1c42d12dd47/go.mod h1:z/Ac0eR/C4jGeAZAxPYuHbX0oWedueqiQuiAjySqyHg=
-github.com/damonto/wwan-go v0.0.0-20260721112859-6718d491a232 h1:Xbkb9Ry/92hn3MNlI1Js5dn5+VYlM4MFbIMhmL1677M=
-github.com/damonto/wwan-go v0.0.0-20260721112859-6718d491a232/go.mod h1:mW0oTnam1/0WLTbhULbcPz9i5Y5kmNE83e9pRxDpA4Y=
+github.com/damonto/wwan-go v0.0.0-20260722014300-d03707066424 h1:N4n9BxnsW/49C53ssw3tavCTdiaC9Q4OOtXaFv66/QQ=
+github.com/damonto/wwan-go v0.0.0-20260722014300-d03707066424/go.mod h1:mW0oTnam1/0WLTbhULbcPz9i5Y5kmNE83e9pRxDpA4Y=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/gabriel-vasile/mimetype v1.4.13 h1:46nXokslUBsAJE/wMsp5gtO500a4F3Nkz9Ufpk2AcUM=
@@ -24,8 +24,8 @@ github.com/google/jsonschema-go v0.4.3 h1:/DBOLZTfDow7pe2GmaJNhltueGTtDKICi8V8p+
 github.com/google/jsonschema-go v0.4.3/go.mod h1:r5quNTdLOYEz95Ru18zA0ydNbBuYoo9tgaYcxEYhJVE=
 github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
-github.com/labstack/echo/v5 v5.3.0 h1:KT74Mprk053PQEHwSZdeCDIz1BigTZOZhavMD0c9Fjs=
-github.com/labstack/echo/v5 v5.3.0/go.mod h1:Q3j2+clBRgJr0O3DDONQeXNsM7RHgSwUhcuo47unqm8=
+github.com/labstack/echo/v5 v5.3.1 h1:75maCxkQVGualckLc/5s/ihgpH1a1Dc6AuGWNVNs6bw=
+github.com/labstack/echo/v5 v5.3.1/go.mod h1:4iEGNQiPPZnkfYpNR/L6fINd3NLiGWUD5+eBotFALas=
 github.com/leodido/go-urn v1.4.0 h1:WT9HwE9SGECu3lg4d/dIA+jxlljEa1/ffXKmRjqdmIQ=
 github.com/leodido/go-urn v1.4.0/go.mod h1:bvxc+MVxLKB4z00jd1z+Dvzr47oO32F/QSNjSBOlFxI=
 github.com/modelcontextprotocol/go-sdk v1.6.1 h1:0zOSupjKUxPKSocPT1Wtago+mUHU2/uZ4xSOY0FGReU=
@@ -54,8 +54,8 @@ github.com/yosida95/uritemplate/v3 v3.0.2 h1:Ed3Oyj9yrmi9087+NczuL5BwkIc4wvTb5zI
 github.com/yosida95/uritemplate/v3 v3.0.2/go.mod h1:ILOh0sOhIJR3+L/8afwt/kE++YT040gmv5BQTMR2HP4=
 golang.org/x/crypto v0.54.0 h1:YLIA59K4fiNzHzjnZt2tUJQjQtUWfWbeHBqKtk3eScw=
 golang.org/x/crypto v0.54.0/go.mod h1:KWL8ny2AZdGR2cWmzeHrp2azQPGogOv+HeQaVEXC2dk=
-golang.org/x/net v0.56.0 h1:Rw8j/hFzGvJUZwNBXnAtf5sVDVt+65SK2C7IxCxZt5o=
-golang.org/x/net v0.56.0/go.mod h1:D3Ku6r+V6JROoZK144D2XfMHFcMq/0zSfLelVTCFKec=
+golang.org/x/net v0.57.0 h1:K5+3DljvIuDG9/Jv9rvyMywYNFCQ9RSUY6OOTTkT+tE=
+golang.org/x/net v0.57.0/go.mod h1:KpXc8iv+r3XplLAG/f7Jsf9RPszJzdR0f58q9vGOuEU=
 golang.org/x/oauth2 v0.36.0 h1:peZ/1z27fi9hUOFCAZaHyrpWG5lwe0RJEEEeH0ThlIs=
 golang.org/x/oauth2 v0.36.0/go.mod h1:YDBUJMTkDnJS+A4BP4eZBjCqtokkg1hODuPjwiGPO7Q=
 golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
