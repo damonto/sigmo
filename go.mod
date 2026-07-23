@@ -20,7 +20,7 @@ require (
 )
 
 require (
-	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
+	github.com/gabriel-vasile/mimetype v1.4.14 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/ncruces/go-sqlite3-wasm/v3 v3.2.35303 // indirect
