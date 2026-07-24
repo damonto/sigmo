@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/damonto/euicc-go v1.1.3-0.20260712112734-b1c42d12dd47
-	github.com/damonto/ims-go v0.0.0-20260724053940-28b41c1be2ca
+	github.com/damonto/ims-go v0.0.0-20260724082515-f1a761f1be4a
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260722032321-cca2b8b7e810
 	github.com/damonto/wwan-go v0.0.0-20260722014300-d03707066424
@@ -61,3 +61,4 @@ require (
 )
 
 replace github.com/damonto/sigmo => ..
+
