@@ -61,4 +61,3 @@ require (
 )
 
 replace github.com/damonto/sigmo => ..
-
