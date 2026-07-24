@@ -817,8 +817,6 @@ const zh = {
       wifiCallingTitle: 'Wi-Fi Calling',
       wifiCallingLabel: '启用 Wi-Fi Calling',
       wifiCallingDescription: '开启后当前 Profile 会通过 Wi-Fi 连接 IMS。',
-      wifiCallingPreferredLabel: '可用时使用 Wi-Fi Calling',
-      wifiCallingPreferredDescription: '可用时优先通过 Wi-Fi Calling 处理短信、USSD 和通话。',
       wifiCallingWebsheetRequired: '需要先完成运营商设置，Wi-Fi Calling 才能连接。',
       wifiCallingWebsheetAction: '打开运营商设置',
       wifiCallingStatusLoading: '检查中',

@@ -20,7 +20,7 @@ func TestAppState(t *testing.T) {
 		value bool
 	}{
 		{name: "enabled", scope: "profile:891", key: "wifi_calling.enabled", value: true},
-		{name: "preferred", scope: "profile:891", key: "wifi_calling.preferred", value: false},
+		{name: "disabled", scope: "profile:892", key: "wifi_calling.enabled", value: false},
 	}
 
 	for _, tt := range tests {

@@ -106,9 +106,8 @@ func (t *imsMCPTools) getWiFiCalling(ctx context.Context, _ *mcp.CallToolRequest
 }
 
 type wifiSettingsInput struct {
-	ModemID   string `json:"modemId"`
-	Enabled   bool   `json:"enabled"`
-	Preferred bool   `json:"preferred"`
+	ModemID string `json:"modemId"`
+	Enabled bool   `json:"enabled"`
 }
 
 func wifiSettingsModemIDs(input wifiSettingsInput) []string { return []string{input.ModemID} }
@@ -119,7 +118,7 @@ func (t *imsMCPTools) setWiFiCallingPolicy() mcpserver.GuardedToolPolicy[wifiSet
 			return err
 		},
 		Confirmation: func(input wifiSettingsInput) string {
-			return fmt.Sprintf("Set Wi-Fi Calling on modem %q to enabled=%t, preferred=%t? This can interrupt IMS service.", input.ModemID, input.Enabled, input.Preferred)
+			return fmt.Sprintf("Set Wi-Fi Calling on modem %q to enabled=%t? This can interrupt IMS service.", input.ModemID, input.Enabled)
 		},
 	}
 }
@@ -128,7 +127,7 @@ func (t *imsMCPTools) setWiFiCalling(ctx context.Context, _ *mcp.CallToolRequest
 	if err != nil {
 		return proSuccessOutput{}, err
 	}
-	if err := t.wifiCalling.UpdateSettings(ctx, device, pims.Settings{Enabled: input.Enabled, Preferred: input.Preferred}); err != nil {
+	if err := t.wifiCalling.UpdateSettings(ctx, device, pims.Settings{Enabled: input.Enabled}); err != nil {
 		return proSuccessOutput{}, mcpserver.OperationError("set Wi-Fi Calling", err)
 	}
 	return proSuccessOutput{Success: true}, nil

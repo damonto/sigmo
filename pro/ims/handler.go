@@ -25,13 +25,11 @@ type modemFinder interface {
 }
 
 type UpdateSettingsRequest struct {
-	Enabled   bool `json:"enabled"`
-	Preferred bool `json:"preferred"`
+	Enabled bool `json:"enabled"`
 }
 
 type SettingsResponse struct {
 	Enabled                         bool           `json:"enabled" jsonschema:"whether Wi-Fi Calling is enabled in Sigmo settings"`
-	Preferred                       bool           `json:"preferred" jsonschema:"whether Wi-Fi Calling is preferred over the cellular voice network"`
 	Connected                       bool           `json:"connected" jsonschema:"whether the modem currently has an active Wi-Fi Calling IMS connection"`
 	State                           string         `json:"state" jsonschema:"current Wi-Fi Calling state, such as idle, connecting, connected, or disconnected"`
 	DurationSeconds                 int64          `json:"durationSeconds" jsonschema:"elapsed time of the current Wi-Fi Calling connection in seconds"`
@@ -96,7 +94,6 @@ func ReadWiFiCallingSettings(ctx context.Context, modem *mmodem.Modem, coordinat
 	}
 	return SettingsResponse{
 		Enabled:                         status.Enabled,
-		Preferred:                       status.Preferred,
 		Connected:                       status.Connected,
 		State:                           status.State,
 		DurationSeconds:                 status.DurationSeconds,
@@ -179,8 +176,7 @@ func (h *Handler) UpdateSettings(c *echo.Context) error {
 		return err
 	}
 	if err := h.wifiCalling.UpdateSettings(c.Request().Context(), modem, Settings{
-		Enabled:   req.Enabled,
-		Preferred: req.Preferred,
+		Enabled: req.Enabled,
 	}); err != nil {
 		return httpapi.Internal(c, errorCodeUpdateSettingsFailed, err)
 	}

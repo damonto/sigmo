@@ -10,7 +10,7 @@ describe('useModemApi', () => {
 
   it('loads Wi-Fi Calling settings from nested resources', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ enabled: true, preferred: false, connected: true }), {
+      new Response(JSON.stringify({ enabled: true, connected: true }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -31,14 +31,13 @@ describe('useModemApi', () => {
 
     await useModemApi().updateWiFiCallingSettings('modem-1', {
       enabled: true,
-      preferred: true,
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/modems/modem-1/wifi-calling/settings'),
       expect.objectContaining({
         method: 'PUT',
-        body: JSON.stringify({ enabled: true, preferred: true }),
+        body: JSON.stringify({ enabled: true }),
       }),
     )
   })
@@ -96,9 +95,7 @@ describe('useModemApi', () => {
     await useModemApi().startWiFiCallingEmergencyAddressWebsheet('modem-1')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining(
-        '/api/v1/modems/modem-1/wifi-calling/emergency-address-websheets',
-      ),
+      expect.stringContaining('/api/v1/modems/modem-1/wifi-calling/emergency-address-websheets'),
       expect.objectContaining({ method: 'POST' }),
     )
   })

@@ -291,7 +291,6 @@ describe('ModemPhoneView phone interactions', () => {
     modemApiHarness.getWiFiCallingSettings.mockResolvedValue({
       data: ref({
         enabled: true,
-        preferred: true,
         connected: false,
         state: 'disconnected',
       }),
@@ -568,7 +567,6 @@ describe('ModemPhoneView phone interactions', () => {
     modemApiHarness.getWiFiCallingSettings.mockResolvedValue({
       data: ref({
         enabled: true,
-        preferred: true,
         connected: true,
         state: 'connected',
       }),
@@ -603,7 +601,6 @@ describe('ModemPhoneView phone interactions', () => {
     modemApiHarness.getWiFiCallingSettings.mockResolvedValue({
       data: ref({
         enabled: true,
-        preferred: true,
         connected: true,
         state: 'connected',
       }),
@@ -668,7 +665,6 @@ describe('ModemPhoneView phone interactions', () => {
     modemApiHarness.getWiFiCallingSettings.mockResolvedValue({
       data: ref({
         enabled: true,
-        preferred: true,
         connected: true,
         state: 'connected',
       }),
@@ -703,7 +699,6 @@ describe('ModemPhoneView phone interactions', () => {
     modemApiHarness.getWiFiCallingSettings.mockResolvedValue({
       data: ref({
         enabled: true,
-        preferred: true,
         connected: true,
         state: 'connected',
       }),

@@ -855,8 +855,12 @@ func TestDecodeQMIICCID(t *testing.T) {
 			want: "8986000000000000000",
 		},
 		{
-			name:    "invalid bcd",
-			raw:     []byte{0x9A},
+			name: "preserves non-decimal bcd",
+			raw:  []byte{0x9A},
+			want: "A9",
+		},
+		{
+			name:    "empty",
 			wantErr: true,
 		},
 	}

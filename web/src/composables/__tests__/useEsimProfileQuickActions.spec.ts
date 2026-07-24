@@ -46,7 +46,6 @@ vi.mock('@/composables/useModemWiFiCallingSettings', async () => {
       harness.wifiCallingSettingsEnabled = options.enabled
       return {
         settingsWiFiCallingEnabled: ref(false),
-        settingsWiFiCallingPreferred: ref(true),
         settingsWiFiCallingConnected: ref(false),
         settingsWiFiCallingState: harness.wifiCallingState,
         isWiFiCallingSettingsLoading: ref(false),

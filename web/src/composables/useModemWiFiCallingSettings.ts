@@ -14,7 +14,7 @@ type Options = {
 
 type FetchSettingsOptions = {
   silent?: boolean
-  applyPreferences?: boolean
+  applySettings?: boolean
 }
 
 const pollIntervalMs = 5000
@@ -24,10 +24,8 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
   const modemApi = useModemApi()
 
   const settingsWiFiCallingEnabled = ref(false)
-  const settingsWiFiCallingPreferred = ref(false)
   const confirmedWiFiCallingSettings = ref<WiFiCallingSettings>({
     enabled: false,
-    preferred: false,
   })
   const settingsWiFiCallingConnected = ref(false)
   const settingsWiFiCallingState = ref('')
@@ -86,8 +84,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
     stopPolling()
     stopDurationTimer()
     settingsWiFiCallingEnabled.value = false
-    settingsWiFiCallingPreferred.value = false
-    confirmedWiFiCallingSettings.value = { enabled: false, preferred: false }
+    confirmedWiFiCallingSettings.value = { enabled: false }
     settingsWiFiCallingConnected.value = false
     settingsWiFiCallingState.value = ''
     settingsWiFiCallingDurationSeconds.value = 0
@@ -99,7 +96,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
   const fetchSettings = async (id: string, options?: FetchSettingsOptions) => {
     if (!enabled.value || isWiFiCallingSettingsFetching.value) return
     const requestEpoch = settingsRequestEpoch.value
-    const preservePreferences = isWiFiCallingSettingsUpdating.value
+    const preserveSettings = isWiFiCallingSettingsUpdating.value
     isWiFiCallingSettingsFetching.value = true
     if (!options?.silent) {
       isWiFiCallingSettingsLoading.value = true
@@ -109,13 +106,11 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
       if (!enabled.value || modemId.value !== id) return
       if (requestEpoch !== settingsRequestEpoch.value) return
       const payload: WiFiCallingSettingsResponse | undefined = data.value
-      if (!preservePreferences || options?.applyPreferences) {
+      if (!preserveSettings || options?.applySettings) {
         const settings = {
           enabled: payload?.enabled ?? false,
-          preferred: payload?.preferred ?? false,
         }
         settingsWiFiCallingEnabled.value = settings.enabled
-        settingsWiFiCallingPreferred.value = settings.preferred
         confirmedWiFiCallingSettings.value = settings
       }
       settingsWiFiCallingConnected.value = data.value?.connected ?? false
@@ -140,21 +135,18 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
     const previous = confirmedWiFiCallingSettings.value
     const settings = {
       enabled: next.enabled,
-      preferred: next.enabled && next.preferred,
     }
     settingsWiFiCallingEnabled.value = settings.enabled
-    settingsWiFiCallingPreferred.value = settings.preferred
     try {
       await modemApi.updateWiFiCallingSettings(targetId, settings)
       if (modemId.value !== targetId || settingsRequestEpoch.value !== mutationEpoch) return
       confirmedWiFiCallingSettings.value = settings
-      await fetchSettings(targetId, { applyPreferences: true })
+      await fetchSettings(targetId, { applySettings: true })
       if (modemId.value !== targetId || settingsRequestEpoch.value !== mutationEpoch) return
       onSuccess?.(t('modemDetail.settings.wifiCallingSuccess'))
     } catch (err) {
       if (modemId.value !== targetId || settingsRequestEpoch.value !== mutationEpoch) return
       settingsWiFiCallingEnabled.value = previous.enabled
-      settingsWiFiCallingPreferred.value = previous.preferred
       console.error('[useModemWiFiCallingSettings] Failed to update settings:', err)
       onError?.(t('modemDetail.settings.wifiCallingUpdateFailed'))
     } finally {
@@ -167,7 +159,6 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
   const handleWiFiCallingUpdate = () =>
     updateWiFiCallingSettings({
       enabled: settingsWiFiCallingEnabled.value,
-      preferred: settingsWiFiCallingPreferred.value,
     })
 
   const reconnectWiFiCalling = async () => {
@@ -297,7 +288,6 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
 
   return {
     settingsWiFiCallingEnabled,
-    settingsWiFiCallingPreferred,
     settingsWiFiCallingConnected,
     settingsWiFiCallingState,
     settingsWiFiCallingDurationSeconds,

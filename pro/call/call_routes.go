@@ -42,7 +42,7 @@ func (r *callRoutes) selectRoute(ctx context.Context, modem *mmodem.Modem, reque
 	if err != nil {
 		return "", err
 	}
-	if wifiCallingOK && wifiCalling.Connected && wifiCalling.Preferred {
+	if wifiCallingOK && wifiCalling.Connected {
 		return RouteWiFiCalling, nil
 	}
 	volte, volteOK, err := r.routeStatus(ctx, modem, RouteVoLTE)
@@ -51,9 +51,6 @@ func (r *callRoutes) selectRoute(ctx context.Context, modem *mmodem.Modem, reque
 	}
 	if volteOK && volte.Connected {
 		return RouteVoLTE, nil
-	}
-	if wifiCallingOK && wifiCalling.Connected {
-		return RouteWiFiCalling, nil
 	}
 	return "", ErrNoRouteAvailable
 }
@@ -84,7 +81,7 @@ func (r *callRoutes) routeStatus(ctx context.Context, modem *mmodem.Modem, route
 		}
 		return routeStatus{}, false, err
 	}
-	return routeStatus{Connected: got.Connected, Preferred: got.Preferred}, true, nil
+	return routeStatus{Connected: got.Connected}, true, nil
 }
 
 func (r *callRoutes) voice(route string) imsVoice {
@@ -95,6 +92,5 @@ func (r *callRoutes) voice(route string) imsVoice {
 }
 
 type routeStatus struct {
-	Preferred bool
 	Connected bool
 }

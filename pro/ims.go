@@ -23,18 +23,21 @@ import (
 var proIMS = func(app *proApp) error {
 	runtime := app.runtime
 	app.RegisterWebsheets()
+	registrationGroups := &pims.RegistrationGroups{}
 	wifiCalling := pims.New(pims.Config{
-		Store:  runtime.Storage,
-		Access: pims.AccessWiFiCalling,
+		Store:              runtime.Storage,
+		Access:             pims.AccessWiFiCalling,
+		RegistrationGroups: registrationGroups,
 		OnIncoming: func(ctx context.Context, incoming pims.IncomingSMS) error {
 			return runtime.Relay.ForwardRoutedSMS(ctx, incoming.ModemID, incoming.Message)
 		},
 		Websheets: app.Websheets(),
 	})
 	volte := pims.New(pims.Config{
-		Store:    runtime.Storage,
-		Access:   pims.AccessVoLTE,
-		Internet: runtime.Internet,
+		Store:              runtime.Storage,
+		Access:             pims.AccessVoLTE,
+		Internet:           runtime.Internet,
+		RegistrationGroups: registrationGroups,
 		OnIncoming: func(ctx context.Context, incoming pims.IncomingSMS) error {
 			return runtime.Relay.ForwardRoutedSMS(ctx, incoming.ModemID, incoming.Message)
 		},
@@ -84,7 +87,6 @@ func wifiCallingOverview(readStatus wifiCallingStatusFunc) modemstatus.Extension
 			return fmt.Errorf("fetch Wi-Fi Calling status: %w", err)
 		}
 		fields.WiFiCallingEnabled = status.Enabled
-		fields.WiFiCallingPreferred = status.Preferred
 		fields.WiFiCallingConnected = status.Connected
 		return nil
 	}
@@ -167,18 +169,15 @@ func (r messageRoute) selectRoute(ctx context.Context, modem *mmodem.Modem) (pim
 	if err != nil {
 		return nil, err
 	}
+	if wifiCallingOK && wifiCallingStatus.Connected {
+		return r.wifiCalling, nil
+	}
 	volteStatus, volteOK, err := routeStatus(ctx, r.volte, modem)
 	if err != nil {
 		return nil, err
 	}
-	if wifiCallingOK && wifiCallingStatus.Connected && wifiCallingStatus.Preferred {
-		return r.wifiCalling, nil
-	}
 	if volteOK && volteStatus.Connected {
 		return r.volte, nil
-	}
-	if wifiCallingOK && wifiCallingStatus.Connected {
-		return r.wifiCalling, nil
 	}
 	return nil, nil
 }

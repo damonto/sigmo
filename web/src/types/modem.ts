@@ -34,7 +34,6 @@ export type ModemApiResponse = {
   airplaneMode: boolean
   supportsEsim: boolean
   wifiCallingEnabled?: boolean
-  wifiCallingPreferred?: boolean
   wifiCallingConnected?: boolean
 }
 
@@ -52,7 +51,6 @@ export type ModemSettingsResponse = ModemSettings
 
 export type WiFiCallingSettings = {
   enabled: boolean
-  preferred: boolean
 }
 
 export type WiFiCallingSettingsResponse = WiFiCallingSettings & {

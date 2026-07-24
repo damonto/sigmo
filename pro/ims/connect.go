@@ -65,6 +65,12 @@ type internetRestorer interface {
 	SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, enabled bool) error
 }
 
+type connectAttempt struct {
+	sessionID         uint64
+	imsProfileIndex   uint8
+	registrationGroup *imsgo.RegistrationGroup
+}
+
 var openManagedVoLTEDevice = func(modem *mmodem.Modem) (managedVoLTEDevice, error) {
 	return mmodem.OpenVoLTEStatusDevice(modem)
 }
@@ -163,9 +169,16 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 			return
 		}
 	}
+	attempt := connectAttempt{
+		sessionID:       sessionID,
+		imsProfileIndex: imsProfileIndex,
+	}
+	if c.registrationGroups != nil {
+		attempt.registrationGroup = c.registrationGroups.Group(modem.EquipmentIdentifier, profileID)
+	}
 	for {
 		c.markConnecting(modem.EquipmentIdentifier, sessionID)
-		client, err := c.connectWithRetry(ctx, modem, sessionID, imsProfileIndex)
+		client, err := c.connectWithRetry(ctx, modem, attempt)
 		if err != nil {
 			c.markDisconnected(modem.EquipmentIdentifier, sessionID, nil)
 			return
@@ -184,10 +197,10 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 	}
 }
 
-func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem, sessionID uint64, imsProfileIndex uint8) (*imsgo.Client, error) {
-	attempt := 0
+func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem, attempt connectAttempt) (*imsgo.Client, error) {
+	retry := 0
 	for {
-		client, err := c.connectOnce(ctx, modem, sessionID, imsProfileIndex)
+		client, err := c.connectOnce(ctx, modem, attempt)
 		if err == nil {
 			return client, nil
 		}
@@ -200,22 +213,22 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 		}
 		if errors.Is(err, wfcsetup.ErrUserActionRequired) {
 			slog.Warn("Wi-Fi Calling requires carrier websheet", "imei", modem.EquipmentIdentifier, "error", err)
-			if err := c.waitForWebsheet(ctx, modem.EquipmentIdentifier, sessionID); err != nil {
+			if err := c.waitForWebsheet(ctx, modem.EquipmentIdentifier, attempt.sessionID); err != nil {
 				if errors.Is(err, ErrWebsheetDismissed) {
 					slog.Info("Wi-Fi Calling carrier websheet dismissed", "imei", modem.EquipmentIdentifier)
-					c.stopAsyncSession(modem.EquipmentIdentifier, sessionID)
+					c.stopAsyncSession(modem.EquipmentIdentifier, attempt.sessionID)
 				}
 				return nil, err
 			}
-			attempt = 0
+			retry = 0
 			continue
 		}
-		if attempt >= len(retryDelays) {
+		if retry >= len(retryDelays) {
 			slog.Warn("IMS access connection attempts exhausted", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
 			return nil, err
 		}
-		delay := retryDelays[attempt]
-		attempt++
+		delay := retryDelays[retry]
+		retry++
 		slog.Warn("IMS access connect", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "retryIn", delay, "error", err)
 		if err := sleep(ctx, delay); err != nil {
 			return nil, err
@@ -223,7 +236,7 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 	}
 }
 
-func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sessionID uint64, imsProfileIndex uint8) (*imsgo.Client, error) {
+func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, attempt connectAttempt) (*imsgo.Client, error) {
 	var volteInterfaceName string
 	var dataPath DataPath
 	wwanConfig := WWANConfig{Access: c.access}
@@ -280,11 +293,12 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sess
 			}
 		}
 	}
-	cfg, err := c.modemClientConfig(ctx, modem, imsProfileIndex, volteInterfaceName)
+	cfg, err := c.modemClientConfig(ctx, modem, attempt.imsProfileIndex, volteInterfaceName)
 	if err != nil {
 		return nil, err
 	}
-	for attempt := 0; attempt < 2; attempt++ {
+	cfg.IMS.RegistrationGroup = attempt.registrationGroup
+	for try := 0; try < 2; try++ {
 		reader, err := OpenWWAN(ctx, modem, wwanConfig)
 		if err != nil {
 			return nil, err
@@ -295,7 +309,7 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sess
 		}
 		if err := client.Connect(ctx); err != nil {
 			_ = client.Close()
-			if c.access == AccessVoLTE && attempt == 0 && isIMSCallAlreadyPresent(err) {
+			if c.access == AccessVoLTE && try == 0 && isIMSCallAlreadyPresent(err) {
 				if resetErr := resetOccupiedManagedVoLTE(ctx, modem, c.internet); resetErr != nil {
 					return nil, errors.Join(err, fmt.Errorf("reset occupied IMS PDN: %w", resetErr))
 				}
@@ -306,7 +320,7 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, sess
 				if serr != nil {
 					return nil, errors.Join(err, serr)
 				}
-				c.attachWebsheet(modem.EquipmentIdentifier, sessionID, session)
+				c.attachWebsheet(modem.EquipmentIdentifier, attempt.sessionID, session)
 			}
 			return nil, err
 		}
@@ -799,7 +813,7 @@ func (c *coordinator) restart(modem *mmodem.Modem, profileID string) {
 		return
 	}
 	session, events := c.detachSession(modem.EquipmentIdentifier)
-	c.closeDetachedSessionAsync(session, events)
+	c.closeDetachedSession(session, events, true)
 	c.start(modem, profileID)
 }
 

@@ -12,7 +12,6 @@ import type { CarrierWebsheetInfo } from '@/types/websheet'
 
 const props = defineProps<{
   enabled: boolean
-  preferred: boolean
   isLoading: boolean
   isUpdating: boolean
   isWebsheetStarting: boolean
@@ -35,14 +34,6 @@ const requiresWebsheet = computed(
 const updateEnabled = (enabled: boolean) => {
   emit('update', {
     enabled,
-    preferred: enabled && props.preferred,
-  })
-}
-
-const updatePreferred = (preferred: boolean) => {
-  emit('update', {
-    enabled: props.enabled,
-    preferred: props.enabled && preferred,
   })
 }
 </script>
@@ -70,23 +61,6 @@ const updatePreferred = (preferred: boolean) => {
           :model-value="props.enabled"
           :disabled="isInputDisabled"
           @update:model-value="updateEnabled"
-        />
-      </div>
-
-      <div class="flex items-center justify-between gap-3">
-        <div class="min-w-0 flex-1 space-y-1">
-          <Label for="modem-wifi-calling-preferred">
-            {{ t('modemDetail.settings.wifiCallingPreferredLabel') }}
-          </Label>
-          <p class="text-xs leading-5 text-muted-foreground">
-            {{ t('modemDetail.settings.wifiCallingPreferredDescription') }}
-          </p>
-        </div>
-        <Switch
-          id="modem-wifi-calling-preferred"
-          :model-value="props.preferred"
-          :disabled="isInputDisabled || !props.enabled"
-          @update:model-value="updatePreferred"
         />
       </div>
 

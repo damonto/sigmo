@@ -22,7 +22,6 @@ const (
 
 	scopePrefix               = "profile:"
 	keyEnabled                = "wifi_calling.enabled"
-	keyPreferred              = "wifi_calling.preferred"
 	modemScopePrefix          = "modem:"
 	keyVoLTESettings          = "volte.settings"
 	keyVoLTESuspendedInternet = "volte.suspended_internet"
@@ -69,7 +68,6 @@ var (
 
 type Settings struct {
 	Enabled            bool
-	Preferred          bool
 	DataPath           DataPath
 	SetIMSAPNAsDefault bool
 	EnablePCSCFViaPCO  bool
@@ -180,7 +178,6 @@ func (s *VoLTESettingsStore) Put(ctx context.Context, modemID string, settings S
 	if err != nil {
 		return err
 	}
-	settings.Preferred = false
 	if err := s.store.Put(ctx, scope, keyVoLTESettings, settings); err != nil {
 		return fmt.Errorf("save VoLTE settings: %w", err)
 	}
@@ -249,9 +246,6 @@ func (s *SettingsStore) Get(ctx context.Context, profileID string) (Settings, er
 	if err := s.store.Get(ctx, scope, keyEnabled, &settings.Enabled); err != nil && !errors.Is(err, storage.ErrNotFound) {
 		return Settings{}, fmt.Errorf("read wifi calling enabled: %w", err)
 	}
-	if err := s.store.Get(ctx, scope, keyPreferred, &settings.Preferred); err != nil && !errors.Is(err, storage.ErrNotFound) {
-		return Settings{}, fmt.Errorf("read wifi calling preference: %w", err)
-	}
 	return settings, nil
 }
 
@@ -263,14 +257,8 @@ func (s *SettingsStore) Put(ctx context.Context, profileID string, settings Sett
 	if err != nil {
 		return err
 	}
-	if !settings.Enabled {
-		settings.Preferred = false
-	}
 	if err := s.store.Put(ctx, scope, keyEnabled, settings.Enabled); err != nil {
 		return fmt.Errorf("save wifi calling enabled: %w", err)
-	}
-	if err := s.store.Put(ctx, scope, keyPreferred, settings.Preferred); err != nil {
-		return fmt.Errorf("save wifi calling preference: %w", err)
 	}
 	return nil
 }

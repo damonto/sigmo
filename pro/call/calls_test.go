@@ -43,7 +43,7 @@ func TestDialRejectsInvalidRequestsBeforeRouting(t *testing.T) {
 	}
 }
 
-func TestDialSelectsVoLTERoute(t *testing.T) {
+func TestDialSelectsIMSRoute(t *testing.T) {
 	tests := []struct {
 		name       string
 		route      string
@@ -56,16 +56,16 @@ func TestDialSelectsVoLTERoute(t *testing.T) {
 			wantRoute: RouteVoLTE,
 		},
 		{
-			name:       "auto prefers connected volte over non preferred wifi",
+			name:       "auto prefers connected wifi calling",
 			route:      RouteAuto,
 			wifiStatus: pims.Status{Connected: true},
-			wantRoute:  RouteVoLTE,
+			wantRoute:  RouteWiFiCalling,
 		},
 		{
-			name:       "auto keeps preferred wifi first",
+			name:       "auto falls back to volte",
 			route:      RouteAuto,
-			wifiStatus: pims.Status{Connected: true, Settings: pims.Settings{Preferred: true}},
-			wantRoute:  RouteWiFiCalling,
+			wifiStatus: pims.Status{},
+			wantRoute:  RouteVoLTE,
 		},
 	}
 
@@ -84,9 +84,7 @@ func TestDialSelectsVoLTERoute(t *testing.T) {
 					UpdatedAt: time.Now(),
 				},
 			}
-			if tt.wifiStatus.Connected || tt.wifiStatus.Preferred {
-				wifi.status = tt.wifiStatus
-			}
+			wifi.status = tt.wifiStatus
 			volte := fakeIMSVoice{
 				status: pims.Status{Connected: true},
 				voiceCall: pims.VoiceCall{

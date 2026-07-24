@@ -19,22 +19,24 @@ import (
 )
 
 type Config struct {
-	Store      *storage.Store
-	OnIncoming IncomingSMSFunc
-	Websheets  *websheet.Broker
-	Access     Access
-	Internet   *pinternet.Connector
+	Store              *storage.Store
+	OnIncoming         IncomingSMSFunc
+	Websheets          *websheet.Broker
+	Access             Access
+	Internet           *pinternet.Connector
+	RegistrationGroups *RegistrationGroups
 }
 
 type coordinator struct {
-	settings      *SettingsStore
-	volteSettings *VoLTESettingsStore
-	store         *storage.Store
-	onIncoming    IncomingSMSFunc
-	websheets     *websheet.Broker
-	access        Access
-	internet      internetRestorer
-	volteUpdateMu sync.Mutex
+	settings           *SettingsStore
+	volteSettings      *VoLTESettingsStore
+	store              *storage.Store
+	onIncoming         IncomingSMSFunc
+	websheets          *websheet.Broker
+	access             Access
+	internet           internetRestorer
+	registrationGroups *RegistrationGroups
+	volteUpdateMu      sync.Mutex
 
 	mu               sync.Mutex
 	sessions         map[string]*sessionState
@@ -77,16 +79,17 @@ func New(cfg Config) Coordinator {
 		access = AccessWiFiCalling
 	}
 	return &coordinator{
-		settings:         NewSettingsStore(cfg.Store),
-		volteSettings:    NewVoLTESettingsStore(cfg.Store),
-		store:            cfg.Store,
-		onIncoming:       cfg.OnIncoming,
-		websheets:        cfg.Websheets,
-		access:           access,
-		internet:         cfg.Internet,
-		sessions:         make(map[string]*sessionState),
-		smsSubmissions:   make(map[smsSubmissionKey]*smsSubmissionTracker),
-		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+		settings:           NewSettingsStore(cfg.Store),
+		volteSettings:      NewVoLTESettingsStore(cfg.Store),
+		store:              cfg.Store,
+		onIncoming:         cfg.OnIncoming,
+		websheets:          cfg.Websheets,
+		access:             access,
+		internet:           cfg.Internet,
+		registrationGroups: cfg.RegistrationGroups,
+		sessions:           make(map[string]*sessionState),
+		smsSubmissions:     make(map[smsSubmissionKey]*smsSubmissionTracker),
+		voiceSubscribers:   make(map[uint64]VoiceEventFunc),
 	}
 }
 

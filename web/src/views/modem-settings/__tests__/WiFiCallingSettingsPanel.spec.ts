@@ -49,7 +49,6 @@ const mountCard = (locale: 'en' | 'zh') => {
   return mount(WiFiCallingSettingsPanel, {
     props: {
       enabled: true,
-      preferred: true,
       isLoading: false,
       isUpdating: false,
       isWebsheetStarting: false,
@@ -72,27 +71,7 @@ describe('WiFiCallingSettingsPanel', () => {
     expect(wrapper.find('button').exists()).toBe(false)
 
     await switches[0]?.setValue(false)
-    await switches[1]?.setValue(false)
 
-    expect(wrapper.emitted('update')).toEqual([
-      [{ enabled: false, preferred: false }],
-      [{ enabled: true, preferred: false }],
-    ])
-  })
-
-  it('renders the English preferred Wi-Fi Calling copy for calls', () => {
-    const wrapper = mountCard('en')
-
-    expect(wrapper.text()).toContain('Use Wi-Fi Calling when available')
-    expect(wrapper.text()).toContain(
-      'Use Wi-Fi Calling for messages, USSD, and calls when available',
-    )
-  })
-
-  it('renders the Chinese preferred Wi-Fi Calling copy for calls', () => {
-    const wrapper = mountCard('zh')
-
-    expect(wrapper.text()).toContain('可用时使用 Wi-Fi Calling')
-    expect(wrapper.text()).toContain('可用时优先通过 Wi-Fi Calling 处理短信、USSD 和通话')
+    expect(wrapper.emitted('update')).toEqual([[{ enabled: false }]])
   })
 })

@@ -125,7 +125,6 @@ func TestCatalogApplyOverviewExtensions(t *testing.T) {
 		name              string
 		extensions        []modemstatus.Extension
 		wantWiFiEnabled   bool
-		wantWiFiPreferred bool
 		wantWiFiConnected bool
 		wantErr           error
 	}{
@@ -134,13 +133,11 @@ func TestCatalogApplyOverviewExtensions(t *testing.T) {
 			extensions: []modemstatus.Extension{
 				func(ctx context.Context, modem *mmodem.Modem, fields *modemstatus.Fields) error {
 					fields.WiFiCallingEnabled = true
-					fields.WiFiCallingPreferred = true
 					fields.WiFiCallingConnected = true
 					return nil
 				},
 			},
 			wantWiFiEnabled:   true,
-			wantWiFiPreferred: true,
 			wantWiFiConnected: true,
 		},
 		{
@@ -178,9 +175,6 @@ func TestCatalogApplyOverviewExtensions(t *testing.T) {
 			if resp.WiFiCallingEnabled != tt.wantWiFiEnabled {
 				t.Fatalf("WiFiCallingEnabled = %v, want %v", resp.WiFiCallingEnabled, tt.wantWiFiEnabled)
 			}
-			if resp.WiFiCallingPreferred != tt.wantWiFiPreferred {
-				t.Fatalf("WiFiCallingPreferred = %v, want %v", resp.WiFiCallingPreferred, tt.wantWiFiPreferred)
-			}
 			if resp.WiFiCallingConnected != tt.wantWiFiConnected {
 				t.Fatalf("WiFiCallingConnected = %v, want %v", resp.WiFiCallingConnected, tt.wantWiFiConnected)
 			}
@@ -199,7 +193,6 @@ func TestModemResponseJSONIncludesOverviewFields(t *testing.T) {
 			resp: ModemResponse{
 				Fields: modemstatus.Fields{
 					WiFiCallingEnabled:   true,
-					WiFiCallingPreferred: true,
 					WiFiCallingConnected: true,
 				},
 			},

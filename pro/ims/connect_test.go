@@ -864,7 +864,7 @@ func TestConnectOnceEnablesQMAPBeforeVoLTE(t *testing.T) {
 					PortType: mmodem.ModemPortTypeQmi,
 				}},
 			}
-			_, err := coordinator.connectOnce(context.Background(), modem, 1, 0)
+			_, err := coordinator.connectOnce(context.Background(), modem, connectAttempt{sessionID: 1})
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("connectOnce() error = %v, want %v", err, tt.wantErr)
 			}
@@ -1401,6 +1401,73 @@ func TestStopFailsOpenCallsBeforeRemovingSession(t *testing.T) {
 	if events[0].Call.ID != "active" || events[0].Call.State != string(imsvoice.CallStateFailed) {
 		t.Fatalf("event = %+v, want failed active call", events[0])
 	}
+}
+
+func TestRestartWaitsForDetachedSessionBeforeStartingReplacement(t *testing.T) {
+	previousOpen := openManagedVoLTEDevice
+	replacementStarted := make(chan struct{})
+	openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+		close(replacementStarted)
+		return &fakeManagedVoLTEDevice{statusErr: errors.New("stop replacement")}, nil
+	}
+	t.Cleanup(func() {
+		openManagedVoLTEDevice = previousOpen
+	})
+
+	oldDone := make(chan struct{})
+	oldCancelled := make(chan struct{})
+	c := &coordinator{
+		access: AccessVoLTE,
+		sessions: map[string]*sessionState{
+			"modem-1": {
+				id:     1,
+				cancel: func() { close(oldCancelled) },
+				done:   oldDone,
+			},
+		},
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+	}
+	modem := &mmodem.Modem{
+		EquipmentIdentifier: "modem-1",
+		Ports: []mmodem.ModemPort{{
+			Device:   "cdc-wdm0",
+			PortType: mmodem.ModemPortTypeMbim,
+		}},
+	}
+	restartDone := make(chan struct{})
+	go func() {
+		c.restart(modem, "profile-1")
+		close(restartDone)
+	}()
+
+	select {
+	case <-oldCancelled:
+	case <-time.After(time.Second):
+		t.Fatal("old session was not cancelled")
+	}
+	select {
+	case <-replacementStarted:
+		t.Fatal("replacement started before old session stopped")
+	default:
+	}
+	select {
+	case <-restartDone:
+		t.Fatal("restart returned before old session stopped")
+	default:
+	}
+
+	close(oldDone)
+	select {
+	case <-replacementStarted:
+	case <-time.After(time.Second):
+		t.Fatal("replacement did not start after old session stopped")
+	}
+	select {
+	case <-restartDone:
+	case <-time.After(time.Second):
+		t.Fatal("restart did not return after starting replacement")
+	}
+	c.stop(modem.EquipmentIdentifier)
 }
 
 func TestDisconnectRemovesSessionAndFailsOpenCalls(t *testing.T) {

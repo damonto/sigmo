@@ -23,7 +23,6 @@ const canUseWiFiCalling = computed(() => hasFeature(FEATURE.wifiCalling))
 
 const {
   settingsWiFiCallingEnabled,
-  settingsWiFiCallingPreferred,
   settingsWiFiCallingConnected,
   settingsWiFiCallingState,
   settingsWiFiCallingDurationSeconds,
@@ -79,7 +78,6 @@ const closeWiFiCallingEmergencyAddressWebsheet = () => {
 
       <WiFiCallingSettingsPanel
         :enabled="settingsWiFiCallingEnabled"
-        :preferred="settingsWiFiCallingPreferred"
         :is-loading="isWiFiCallingSettingsLoading"
         :is-updating="isWiFiCallingSettingsUpdating"
         :is-websheet-starting="isWiFiCallingWebsheetStarting"

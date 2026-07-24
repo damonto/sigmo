@@ -52,7 +52,6 @@ export const useEsimProfileQuickActions = ({
 
   const {
     settingsWiFiCallingEnabled,
-    settingsWiFiCallingPreferred,
     settingsWiFiCallingConnected,
     settingsWiFiCallingState,
     isWiFiCallingSettingsLoading,
@@ -128,7 +127,6 @@ export const useEsimProfileQuickActions = ({
       }
       if (!settingsWiFiCallingEnabled.value) {
         settingsWiFiCallingEnabled.value = true
-        settingsWiFiCallingPreferred.value = false
         await handleWiFiCallingUpdate()
       }
       await reconnectWiFiCalling()

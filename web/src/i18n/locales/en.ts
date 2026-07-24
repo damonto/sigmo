@@ -835,9 +835,6 @@ const en = {
       wifiCallingTitle: 'Wi-Fi Calling',
       wifiCallingLabel: 'Enable Wi-Fi Calling',
       wifiCallingDescription: 'Connect this profile to IMS over Wi-Fi when enabled.',
-      wifiCallingPreferredLabel: 'Use Wi-Fi Calling when available',
-      wifiCallingPreferredDescription:
-        'Use Wi-Fi Calling for messages, USSD, and calls when available.',
       wifiCallingWebsheetRequired: 'Carrier setup is required before Wi-Fi Calling can connect.',
       wifiCallingWebsheetAction: 'Open carrier setup',
       wifiCallingStatusLoading: 'Checking',
