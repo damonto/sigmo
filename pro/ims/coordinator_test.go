@@ -222,11 +222,6 @@ func TestVoLTESettingsStore(t *testing.T) {
 			settings: &Settings{DataPath: DataPathLegacyBAMDMUX},
 			want:     Settings{DataPath: DataPathLegacyBAMDMUX},
 		},
-		{
-			name:     "IMS profile startup options",
-			settings: &Settings{DataPath: DataPathQMAP, SetIMSAPNAsDefault: true, EnablePCSCFViaPCO: true},
-			want:     Settings{DataPath: DataPathQMAP, SetIMSAPNAsDefault: true, EnablePCSCFViaPCO: true},
-		},
 	}
 
 	for _, tt := range tests {
@@ -299,9 +294,7 @@ func TestVoLTESettingsUseDeviceDataPath(t *testing.T) {
 			})
 			settings := NewVoLTESettingsStore(store)
 			if err := settings.Put(ctx, "modem-1", Settings{
-				DataPath:           tt.storedPath,
-				SetIMSAPNAsDefault: true,
-				EnablePCSCFViaPCO:  true,
+				DataPath: tt.storedPath,
 			}); err != nil {
 				t.Fatalf("Put() error = %v", err)
 			}
@@ -320,12 +313,6 @@ func TestVoLTESettingsUseDeviceDataPath(t *testing.T) {
 			}
 			if got.DataPath != tt.wantPath {
 				t.Fatalf("DataPath = %q, want %q", got.DataPath, tt.wantPath)
-			}
-			if tt.portType == mmodem.ModemPortTypeMbim && (got.SetIMSAPNAsDefault || got.EnablePCSCFViaPCO) {
-				t.Fatalf("MBIM profile options = (%v, %v), want disabled", got.SetIMSAPNAsDefault, got.EnablePCSCFViaPCO)
-			}
-			if tt.portType == mmodem.ModemPortTypeQmi && (!got.SetIMSAPNAsDefault || !got.EnablePCSCFViaPCO) {
-				t.Fatalf("QMI profile options = (%v, %v), want preserved", got.SetIMSAPNAsDefault, got.EnablePCSCFViaPCO)
 			}
 		})
 	}

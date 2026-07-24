@@ -25,13 +25,10 @@ const {
   volteDurationSeconds,
   volteModemRegistered,
   volteDataPath,
-  setIMSAPNAsDefault,
-  enablePCSCFViaPCO,
   isVoLTELoading,
   isVoLTEUpdating,
   updateVoLTE,
   updateDataPath,
-  updateProfileOptions,
 } = useModemVoLTE({
   modemId,
   enabled: canUseVoLTE,
@@ -61,14 +58,11 @@ const {
       <VoLTESettingsPanel
         :enabled="volteEnabled"
         :data-path="volteDataPath"
-        :set-ims-apn-as-default="setIMSAPNAsDefault"
-        :enable-pcscf-via-pco="enablePCSCFViaPCO"
         :modem-registered="volteModemRegistered"
         :is-loading="isVoLTELoading"
         :is-updating="isVoLTEUpdating"
         @update="updateVoLTE"
         @update-data-path="updateDataPath"
-        @update-profile-options="updateProfileOptions"
       />
     </template>
   </ModemSettingsShell>

@@ -738,16 +738,7 @@ const en = {
       volteDataPathLegacy: 'Legacy BAM-DMUX',
       volteDataPathLegacyDescription:
         'Only for older Qualcomm BAM-DMUX devices that do not support QMAP.',
-      volteDataPathLegacyWarning:
-        'IMS exclusively uses the primary wwan0 channel. Cellular Internet may be unavailable while VoLTE is enabled.',
       volteDataPathSuccess: 'VoLTE data path updated.',
-      volteIMSAPNDefaultLabel: 'Set IMS APN as default',
-      volteIMSAPNDefaultDescription:
-        'Select the IMS profile as the modem default before VoLTE starts, then reattach the modem.',
-      volteIMSAPNPCOLabel: 'Repair IMS APN (P-CSCF via PCO)',
-      volteIMSAPNPCODescription:
-        'Enable P-CSCF address delivery through PCO before VoLTE starts, then reattach the modem.',
-      volteProfileOptionsSuccess: 'IMS APN options updated.',
       volteManagedDescription: 'VoLTE is managed by Sigmo.',
       volteModemRegisteredDescription: 'VoLTE is managed by Modem.',
       volteStatusLoading: 'Checking',

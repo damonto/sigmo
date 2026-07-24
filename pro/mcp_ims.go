@@ -188,25 +188,20 @@ func (t *imsMCPTools) getVoLTE(ctx context.Context, _ *mcp.CallToolRequest, _ mc
 }
 
 type volteSettingsInput struct {
-	ModemID            string `json:"modemId"`
-	Enabled            bool   `json:"enabled"`
-	DataPath           string `json:"dataPath,omitempty"`
-	SetIMSAPNAsDefault bool   `json:"setImsApnAsDefault"`
-	EnablePCSCFViaPCO  bool   `json:"enablePcscfViaPco"`
+	ModemID  string `json:"modemId"`
+	Enabled  bool   `json:"enabled"`
+	DataPath string `json:"dataPath,omitempty"`
 }
 
 func volteSettingsModemIDs(input volteSettingsInput) []string { return []string{input.ModemID} }
 func volteSettings(input volteSettingsInput) pims.Settings {
 	return pims.Settings{
-		Enabled: input.Enabled, DataPath: pims.DataPath(input.DataPath), SetIMSAPNAsDefault: input.SetIMSAPNAsDefault,
-		EnablePCSCFViaPCO: input.EnablePCSCFViaPCO,
+		Enabled: input.Enabled, DataPath: pims.DataPath(input.DataPath),
 	}
 }
 
 func voLTEInputError(err error) error {
-	if errors.Is(err, pims.ErrVoLTEDataPathRequired) ||
-		errors.Is(err, pims.ErrVoLTEDataPathUnsupported) ||
-		errors.Is(err, pims.ErrVoLTEProfileOptionsUnsupported) {
+	if errors.Is(err, pims.ErrVoLTEDataPathRequired) || errors.Is(err, pims.ErrVoLTEDataPathUnsupported) {
 		return mcpserver.NewToolError("invalid_request", "VoLTE settings are not supported by this modem", err)
 	}
 	return mcpserver.OperationError("set VoLTE", err)

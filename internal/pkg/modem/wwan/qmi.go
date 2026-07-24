@@ -189,8 +189,6 @@ type qmiClient interface {
 	NASServingSystem(ctx context.Context) (qcom.NASServingSystem, error)
 	WDSProfiles(ctx context.Context, profileType qcom.WDSProfileType) ([]qcom.WDSProfile, error)
 	WDSProfileSettings(ctx context.Context, id qcom.WDSProfileID) (qcom.WDSProfileSettings, error)
-	WDSModifyProfile(ctx context.Context, id qcom.WDSProfileID, pcscfUsingPCO bool) error
-	WDSSetDefaultProfile(ctx context.Context, id qcom.WDSProfileID, family qcom.WDSProfileFamily) error
 	IMSSTestMode(ctx context.Context) (bool, error)
 	SetIMSSTestMode(ctx context.Context, enabled bool) error
 	PowerOffSIM(ctx context.Context, slot uint8) error
@@ -387,36 +385,9 @@ func (u *qmiDevice) IMSProfileIndex(ctx context.Context) (uint8, error) {
 	return 0, errors.New("IMS WDS profile is unavailable")
 }
 
-func (u *qmiDevice) SetIMSProfileDefault(ctx context.Context, index uint8) error {
-	client, release, err := u.acquireClient(ctx, u.slot)
-	if err != nil {
-		return fmt.Errorf("open QMI UIM client: %w", err)
-	}
-	defer release()
-
-	if err := client.WDSSetDefaultProfile(ctx, qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: index}, qcom.WDSProfileFamilyTethered); err != nil {
-		return fmt.Errorf("set IMS profile %d as default: %w", index, err)
-	}
-	return nil
-}
-
-func (u *qmiDevice) SetIMSProfilePCSCFViaPCO(ctx context.Context, index uint8) error {
-	client, release, err := u.acquireClient(ctx, u.slot)
-	if err != nil {
-		return fmt.Errorf("open QMI UIM client: %w", err)
-	}
-	defer release()
-
-	if err := client.WDSModifyProfile(ctx, qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: index}, true); err != nil {
-		return fmt.Errorf("enable P-CSCF via PCO for IMS profile %d: %w", index, err)
-	}
-	return nil
-}
-
 func isIMSProfile(settings qcom.WDSProfileSettings) bool {
-	// Some carrier-provisioned Qualcomm profiles omit the optional IMCN and
-	// P-CSCF TLVs even though the modem uses the profile for IMS. The APN is the
-	// portable identifier exposed consistently by both QMI and AT interfaces.
+	// Some carrier-provisioned Qualcomm profiles omit optional IMS metadata. The
+	// APN is the portable identifier exposed consistently by QMI and AT interfaces.
 	return settings.APNKnown && strings.EqualFold(strings.TrimSpace(settings.APN), "ims")
 }
 

@@ -12,8 +12,6 @@ import type { VoLTEDataPath, VoLTEQMIDataPath } from '@/types/volte'
 const props = defineProps<{
   enabled: boolean
   dataPath: VoLTEDataPath
-  setImsApnAsDefault: boolean
-  enablePcscfViaPco: boolean
   modemRegistered: boolean
   isLoading: boolean
   isUpdating: boolean
@@ -22,10 +20,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'update', enabled: boolean): void
   (event: 'update-data-path', dataPath: VoLTEQMIDataPath): void
-  (
-    event: 'update-profile-options',
-    options: { setIMSAPNAsDefault: boolean; enablePCSCFViaPCO: boolean },
-  ): void
 }>()
 
 const { t } = useI18n()
@@ -38,18 +32,9 @@ const description = computed(() => {
 
 const dataPathDisabled = computed(() => props.enabled || props.isLoading || props.isUpdating)
 
-const profileOptionsDisabled = computed(() => props.enabled || props.isLoading || props.isUpdating)
-
 const updateDataPath = (dataPath: unknown) => {
   if (dataPath !== 'qmap' && dataPath !== 'legacy_bam_dmux') return
   emit('update-data-path', dataPath)
-}
-
-const updateProfileOption = (name: 'setIMSAPNAsDefault' | 'enablePCSCFViaPCO', value: boolean) => {
-  emit('update-profile-options', {
-    setIMSAPNAsDefault: name === 'setIMSAPNAsDefault' ? value : props.setImsApnAsDefault,
-    enablePCSCFViaPCO: name === 'enablePCSCFViaPCO' ? value : props.enablePcscfViaPco,
-  })
 }
 </script>
 
@@ -113,48 +98,9 @@ const updateProfileOption = (name: 'setIMSAPNAsDefault' | 'enablePCSCFViaPCO', v
               <span class="block text-xs leading-5 text-muted-foreground">
                 {{ t('modemDetail.settings.volteDataPathLegacyDescription') }}
               </span>
-              <span class="block text-xs leading-5 text-amber-700 dark:text-amber-400">
-                {{ t('modemDetail.settings.volteDataPathLegacyWarning') }}
-              </span>
             </span>
           </label>
         </RadioGroup>
-      </div>
-
-      <div v-if="props.dataPath !== 'mbim'" class="space-y-4">
-        <div class="flex items-center justify-between gap-3">
-          <div class="min-w-0 flex-1 space-y-1">
-            <Label for="volte-ims-apn-default">
-              {{ t('modemDetail.settings.volteIMSAPNDefaultLabel') }}
-            </Label>
-            <p class="text-xs leading-5 text-muted-foreground">
-              {{ t('modemDetail.settings.volteIMSAPNDefaultDescription') }}
-            </p>
-          </div>
-          <Switch
-            id="volte-ims-apn-default"
-            :model-value="props.setImsApnAsDefault"
-            :disabled="profileOptionsDisabled"
-            @update:model-value="updateProfileOption('setIMSAPNAsDefault', $event === true)"
-          />
-        </div>
-
-        <div class="flex items-center justify-between gap-3">
-          <div class="min-w-0 flex-1 space-y-1">
-            <Label for="volte-ims-apn-pco">
-              {{ t('modemDetail.settings.volteIMSAPNPCOLabel') }}
-            </Label>
-            <p class="text-xs leading-5 text-muted-foreground">
-              {{ t('modemDetail.settings.volteIMSAPNPCODescription') }}
-            </p>
-          </div>
-          <Switch
-            id="volte-ims-apn-pco"
-            :model-value="props.enablePcscfViaPco"
-            :disabled="profileOptionsDisabled"
-            @update:model-value="updateProfileOption('enablePCSCFViaPCO', $event === true)"
-          />
-        </div>
       </div>
 
       <div class="flex items-center justify-between gap-3">

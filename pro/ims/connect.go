@@ -51,8 +51,6 @@ type managedVoLTEDevice interface {
 	VoLTEStatus(ctx context.Context) (wwan.VoLTEStatus, error)
 	PacketServiceStatus(ctx context.Context) (wwan.PacketServiceStatus, error)
 	IMSProfileIndex(ctx context.Context) (uint8, error)
-	SetIMSProfileDefault(ctx context.Context, index uint8) error
-	SetIMSProfilePCSCFViaPCO(ctx context.Context, index uint8) error
 	IMSSTestMode(ctx context.Context) (bool, error)
 	SetIMSSTestMode(ctx context.Context, enabled bool) error
 	SetAirplaneMode(ctx context.Context, enabled bool) error
@@ -156,13 +154,8 @@ func (c *coordinator) start(modem *mmodem.Modem, profileID string) {
 func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, profileID string, sessionID uint64) {
 	var imsProfileIndex uint8
 	if c.access == AccessVoLTE {
-		settings, err := c.Settings(ctx, modem)
-		if err != nil {
-			slog.Warn("read VoLTE startup settings", "imei", modem.EquipmentIdentifier, "error", err)
-			c.markDisconnected(modem.EquipmentIdentifier, sessionID, nil)
-			return
-		}
-		imsProfileIndex, err = prepareManagedVoLTE(ctx, modem, c.internet, settings)
+		var err error
+		imsProfileIndex, err = prepareManagedVoLTE(ctx, modem, c.internet)
 		if err != nil {
 			slog.Warn("prepare VoLTE startup", "imei", modem.EquipmentIdentifier, "error", err)
 			c.markDisconnected(modem.EquipmentIdentifier, sessionID, nil)
@@ -409,7 +402,7 @@ func modemClientConfigForIMEI(imei string, access Access, imsProfileIndex uint8)
 	}
 }
 
-func prepareManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet internetRestorer, settings Settings) (profileIndex uint8, err error) {
+func prepareManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (profileIndex uint8, err error) {
 	device, err := openManagedVoLTEDevice(modem)
 	if errors.Is(err, wwan.ErrUnsupported) {
 		return 0, ErrUnavailable
@@ -428,17 +421,7 @@ func prepareManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet inte
 	if err != nil {
 		return 0, fmt.Errorf("find IMS profile: %w", err)
 	}
-	resetNeeded := settings.SetIMSAPNAsDefault || settings.EnablePCSCFViaPCO
-	if settings.SetIMSAPNAsDefault {
-		if err := device.SetIMSProfileDefault(ctx, profileIndex); err != nil {
-			return 0, fmt.Errorf("set IMS APN as default: %w", err)
-		}
-	}
-	if settings.EnablePCSCFViaPCO {
-		if err := device.SetIMSProfilePCSCFViaPCO(ctx, profileIndex); err != nil {
-			return 0, fmt.Errorf("enable P-CSCF via PCO: %w", err)
-		}
-	}
+	packetServiceReady := false
 	if status.Occupied {
 		testMode, err := device.IMSSTestMode(ctx)
 		if err != nil {
@@ -448,14 +431,13 @@ func prepareManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet inte
 			if err := device.SetIMSSTestMode(ctx, true); err != nil {
 				return 0, fmt.Errorf("enable IMSS test mode: %w", err)
 			}
-			resetNeeded = true
+			if err := resetManagedVoLTE(ctx, modem, device, internet); err != nil {
+				return 0, err
+			}
+			packetServiceReady = true
 		}
 	}
-	if resetNeeded {
-		if err := resetManagedVoLTE(ctx, modem, device, internet); err != nil {
-			return 0, err
-		}
-	} else {
+	if !packetServiceReady {
 		waitCtx, cancel := context.WithTimeout(ctx, packetServiceWaitTimeout)
 		err := waitForPacketService(waitCtx, device)
 		cancel()

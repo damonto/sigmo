@@ -70,7 +70,6 @@ func TestSetVoLTEUsesSharedValidation(t *testing.T) {
 	}{
 		{name: "QMI requires data path", portType: mmodem.ModemPortTypeQmi, input: volteSettingsInput{ModemID: "modem-1"}, wantErr: true},
 		{name: "QMI rejects unsupported data path", portType: mmodem.ModemPortTypeQmi, input: volteSettingsInput{ModemID: "modem-1", DataPath: "auto"}, wantErr: true},
-		{name: "MBIM rejects profile options", portType: mmodem.ModemPortTypeMbim, input: volteSettingsInput{ModemID: "modem-1", SetIMSAPNAsDefault: true}, wantErr: true},
 		{
 			name: "MBIM derives data path", portType: mmodem.ModemPortTypeMbim,
 			input:        volteSettingsInput{ModemID: "modem-1", DataPath: "legacy_bam_dmux"},

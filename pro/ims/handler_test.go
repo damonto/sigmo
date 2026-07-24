@@ -59,13 +59,13 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 			wantOpened: true,
 		},
 		{
-			name:         "accepts WDS path without IMSA",
-			body:         `{"enabled":true,"dataPath":"qmap","setIMSAPNAsDefault":true,"enablePCSCFViaPCO":true}`,
+			name:         "accepts QMI data path",
+			body:         `{"enabled":true,"dataPath":"qmap"}`,
 			portType:     mmodem.ModemPortTypeQmi,
 			device:       &fakeManagedVoLTEDevice{},
 			wantStatus:   http.StatusNoContent,
 			wantUpdated:  true,
-			wantSettings: Settings{Enabled: true, DataPath: DataPathQMAP, SetIMSAPNAsDefault: true, EnablePCSCFViaPCO: true},
+			wantSettings: Settings{Enabled: true, DataPath: DataPathQMAP},
 			wantOpened:   true,
 			wantCalls:    []string{"status", "ims-profile", "packet-service"},
 		},
@@ -105,12 +105,6 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 			wantStatus:   http.StatusNoContent,
 			wantUpdated:  true,
 			wantSettings: Settings{DataPath: DataPathMBIM},
-		},
-		{
-			name:       "rejects IMS profile options for MBIM",
-			body:       `{"enabled":false,"setIMSAPNAsDefault":true}`,
-			portType:   mmodem.ModemPortTypeMbim,
-			wantStatus: http.StatusUnprocessableEntity,
 		},
 	}
 

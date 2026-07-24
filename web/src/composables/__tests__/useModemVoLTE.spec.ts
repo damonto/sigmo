@@ -30,8 +30,6 @@ describe('useModemVoLTE', () => {
           durationSeconds: 0,
           modemRegistered: false,
           dataPath: 'legacy_bam_dmux',
-          setIMSAPNAsDefault: false,
-          enablePCSCFViaPCO: false,
         },
       },
     })
@@ -52,8 +50,6 @@ describe('useModemVoLTE', () => {
     expect(api.updateSettings).toHaveBeenCalledWith('modem-1', {
       enabled: true,
       dataPath: 'legacy_bam_dmux',
-      setIMSAPNAsDefault: false,
-      enablePCSCFViaPCO: false,
     })
   })
 
@@ -71,30 +67,6 @@ describe('useModemVoLTE', () => {
     expect(api.updateSettings).toHaveBeenCalledWith('modem-1', {
       enabled: false,
       dataPath: 'qmap',
-      setIMSAPNAsDefault: false,
-      enablePCSCFViaPCO: false,
-    })
-  })
-
-  it('persists IMS profile options while VoLTE is disabled', async () => {
-    const settings = useModemVoLTE({
-      modemId: computed(() => 'modem-1'),
-      enabled: computed(() => true),
-    })
-    await vi.waitFor(() => {
-      expect(api.settings).toHaveBeenCalled()
-    })
-
-    await settings.updateProfileOptions({
-      setIMSAPNAsDefault: true,
-      enablePCSCFViaPCO: true,
-    })
-
-    expect(api.updateSettings).toHaveBeenCalledWith('modem-1', {
-      enabled: false,
-      dataPath: 'legacy_bam_dmux',
-      setIMSAPNAsDefault: true,
-      enablePCSCFViaPCO: true,
     })
   })
 
@@ -108,8 +80,6 @@ describe('useModemVoLTE', () => {
           durationSeconds: 0,
           modemRegistered: false,
           dataPath: 'mbim',
-          setIMSAPNAsDefault: false,
-          enablePCSCFViaPCO: false,
         },
       },
     })
@@ -125,8 +95,6 @@ describe('useModemVoLTE', () => {
 
     expect(api.updateSettings).toHaveBeenCalledWith('modem-1', {
       enabled: true,
-      setIMSAPNAsDefault: false,
-      enablePCSCFViaPCO: false,
     })
   })
 })

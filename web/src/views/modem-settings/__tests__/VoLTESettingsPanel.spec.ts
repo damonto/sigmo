@@ -33,8 +33,6 @@ const mountPanel = (enabled: boolean, dataPath: VoLTEDataPath = 'legacy_bam_dmux
     props: {
       enabled,
       dataPath,
-      setImsApnAsDefault: false,
-      enablePcscfViaPco: false,
       modemRegistered: false,
       isLoading: false,
       isUpdating: false,
@@ -44,11 +42,10 @@ const mountPanel = (enabled: boolean, dataPath: VoLTEDataPath = 'legacy_bam_dmux
 }
 
 describe('VoLTESettingsPanel', () => {
-  it('explains the IMS-first legacy BAM-DMUX tradeoff', () => {
+  it('describes legacy BAM-DMUX support without the removed warning', () => {
     const wrapper = mountPanel(false)
 
     expect(wrapper.text()).toContain('Only for older Qualcomm BAM-DMUX devices')
-    expect(wrapper.text()).toContain('IMS exclusively uses the primary wwan0 channel')
   })
 
   it('locks the data path while VoLTE is enabled', () => {
@@ -61,14 +58,5 @@ describe('VoLTESettingsPanel', () => {
     const wrapper = mountPanel(false, 'mbim')
 
     expect(wrapper.find('[data-radio-group]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('Set IMS APN as default')
-    expect(wrapper.text()).not.toContain('Repair IMS APN')
-  })
-
-  it('shows the QMI IMS profile options while VoLTE is disabled', () => {
-    const wrapper = mountPanel(false, 'qmap')
-
-    expect(wrapper.text()).toContain('Set IMS APN as default')
-    expect(wrapper.text()).toContain('Repair IMS APN')
   })
 })

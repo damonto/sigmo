@@ -38,41 +38,36 @@ type SettingsResponse struct {
 }
 
 type UpdateVoLTESettingsRequest struct {
-	Enabled            bool     `json:"enabled"`
-	DataPath           DataPath `json:"dataPath"`
-	SetIMSAPNAsDefault bool     `json:"setIMSAPNAsDefault"`
-	EnablePCSCFViaPCO  bool     `json:"enablePCSCFViaPCO"`
+	Enabled  bool     `json:"enabled"`
+	DataPath DataPath `json:"dataPath"`
 }
 
 type VoLTESettingsResponse struct {
-	Enabled            bool     `json:"enabled" jsonschema:"whether VoLTE is enabled in Sigmo settings"`
-	Connected          bool     `json:"connected" jsonschema:"whether the modem currently has an active VoLTE IMS connection"`
-	State              string   `json:"state" jsonschema:"current VoLTE state, such as idle, connecting, connected, or disconnected"`
-	DurationSeconds    int64    `json:"durationSeconds" jsonschema:"elapsed time of the current VoLTE connection in seconds"`
-	ModemRegistered    bool     `json:"modemRegistered" jsonschema:"whether the modem reports IMS registration"`
-	DataPath           DataPath `json:"dataPath" jsonschema:"data path used for VoLTE traffic, such as qmap or mbim"`
-	SetIMSAPNAsDefault bool     `json:"setIMSAPNAsDefault" jsonschema:"whether the IMS APN profile is configured as the modem default"`
-	EnablePCSCFViaPCO  bool     `json:"enablePCSCFViaPCO" jsonschema:"whether P-CSCF discovery through protocol configuration options is enabled"`
+	Enabled         bool     `json:"enabled" jsonschema:"whether VoLTE is enabled in Sigmo settings"`
+	Connected       bool     `json:"connected" jsonschema:"whether the modem currently has an active VoLTE IMS connection"`
+	State           string   `json:"state" jsonschema:"current VoLTE state, such as idle, connecting, connected, or disconnected"`
+	DurationSeconds int64    `json:"durationSeconds" jsonschema:"elapsed time of the current VoLTE connection in seconds"`
+	ModemRegistered bool     `json:"modemRegistered" jsonschema:"whether the modem reports IMS registration"`
+	DataPath        DataPath `json:"dataPath" jsonschema:"data path used for VoLTE traffic, such as qmap or mbim"`
 }
 
 const (
-	errorCodeGetSettingsFailed              = "get_ims_settings_failed"
-	errorCodeUpdateSettingsInvalidRequest   = "update_ims_settings_invalid_request"
-	errorCodeUpdateSettingsFailed           = "update_ims_settings_failed"
-	errorCodeCreateSessionFailed            = "create_ims_session_failed"
-	errorCodeDeleteSessionFailed            = "delete_ims_session_failed"
-	errorCodeSessionUnavailable             = "ims_session_unavailable"
-	errorCodeStartWebsheetFailed            = "start_ims_websheet_failed"
-	errorCodeStartE911WebsheetFailed        = "start_ims_e911_websheet_failed"
-	errorCodeWebsheetNotPending             = "ims_websheet_not_pending"
-	errorCodeSetupPending                   = "ims_setup_pending"
-	errorCodeSetupDenied                    = "ims_setup_denied"
-	errorCodeWebsheetUnavailable            = "ims_websheet_unavailable"
-	errorCodeGetVoLTESettingsFailed         = "get_volte_settings_failed"
-	errorCodeUpdateVoLTEInvalidRequest      = "update_volte_settings_invalid_request"
-	errorCodeUpdateVoLTESettingsFailed      = "update_volte_settings_failed"
-	errorCodeVoLTEUnavailable               = "volte_unavailable"
-	errorCodeVoLTEProfileOptionsUnsupported = "volte_profile_options_unsupported"
+	errorCodeGetSettingsFailed            = "get_ims_settings_failed"
+	errorCodeUpdateSettingsInvalidRequest = "update_ims_settings_invalid_request"
+	errorCodeUpdateSettingsFailed         = "update_ims_settings_failed"
+	errorCodeCreateSessionFailed          = "create_ims_session_failed"
+	errorCodeDeleteSessionFailed          = "delete_ims_session_failed"
+	errorCodeSessionUnavailable           = "ims_session_unavailable"
+	errorCodeStartWebsheetFailed          = "start_ims_websheet_failed"
+	errorCodeStartE911WebsheetFailed      = "start_ims_e911_websheet_failed"
+	errorCodeWebsheetNotPending           = "ims_websheet_not_pending"
+	errorCodeSetupPending                 = "ims_setup_pending"
+	errorCodeSetupDenied                  = "ims_setup_denied"
+	errorCodeWebsheetUnavailable          = "ims_websheet_unavailable"
+	errorCodeGetVoLTESettingsFailed       = "get_volte_settings_failed"
+	errorCodeUpdateVoLTEInvalidRequest    = "update_volte_settings_invalid_request"
+	errorCodeUpdateVoLTESettingsFailed    = "update_volte_settings_failed"
+	errorCodeVoLTEUnavailable             = "volte_unavailable"
 )
 
 func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, wifiCalling Coordinator, volte Coordinator) {
@@ -112,14 +107,12 @@ func ReadVoLTESettings(ctx context.Context, modem *mmodem.Modem, coordinator Coo
 		return VoLTESettingsResponse{}, err
 	}
 	return VoLTESettingsResponse{
-		Enabled:            status.Enabled,
-		Connected:          status.Connected,
-		State:              status.State,
-		DurationSeconds:    status.DurationSeconds,
-		ModemRegistered:    modemStatus.Occupied,
-		DataPath:           status.DataPath,
-		SetIMSAPNAsDefault: status.SetIMSAPNAsDefault,
-		EnablePCSCFViaPCO:  status.EnablePCSCFViaPCO,
+		Enabled:         status.Enabled,
+		Connected:       status.Connected,
+		State:           status.State,
+		DurationSeconds: status.DurationSeconds,
+		ModemRegistered: modemStatus.Occupied,
+		DataPath:        status.DataPath,
 	}, nil
 }
 
@@ -147,16 +140,12 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 		return httpapi.BadRequest(c, errorCodeUpdateVoLTEInvalidRequest, err)
 	}
 	if err := UpdateVoLTESettings(ctx, modem, h.volte, Settings{
-		Enabled:            req.Enabled,
-		DataPath:           req.DataPath,
-		SetIMSAPNAsDefault: req.SetIMSAPNAsDefault,
-		EnablePCSCFViaPCO:  req.EnablePCSCFViaPCO,
+		Enabled:  req.Enabled,
+		DataPath: req.DataPath,
 	}); err != nil {
 		switch {
 		case errors.Is(err, ErrVoLTEDataPathRequired), errors.Is(err, ErrVoLTEDataPathUnsupported):
 			return httpapi.UnprocessableEntity(c, errorCodeUpdateVoLTEInvalidRequest, err)
-		case errors.Is(err, ErrVoLTEProfileOptionsUnsupported):
-			return httpapi.UnprocessableEntity(c, errorCodeVoLTEProfileOptionsUnsupported, err)
 		case errors.Is(err, ErrUnavailable):
 			return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, err)
 		default:

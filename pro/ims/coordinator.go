@@ -184,8 +184,6 @@ func (c *coordinator) Settings(ctx context.Context, modem *mmodem.Modem) (Settin
 		switch port.PortType {
 		case mmodem.ModemPortTypeMbim:
 			settings.DataPath = DataPathMBIM
-			settings.SetIMSAPNAsDefault = false
-			settings.EnablePCSCFViaPCO = false
 		case mmodem.ModemPortTypeQmi:
 			if settings.DataPath == DataPathMBIM {
 				settings.DataPath = DataPathQMAP

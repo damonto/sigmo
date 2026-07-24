@@ -51,26 +51,23 @@ const (
 )
 
 var (
-	ErrUnavailable                    = errors.New("ims access is unavailable")
-	ErrNotConnected                   = errors.New("ims access is not connected")
-	ErrWiFiCallingSetupPending        = errors.New("wifi calling setup is pending")
-	ErrWiFiCallingSetupDenied         = errors.New("wifi calling setup denied")
-	ErrUnsupportedCodec               = errors.New("ims voice codec is not supported")
-	ErrUnsupportedDTMF                = errors.New("ims dtmf is not supported")
-	ErrCallOnHold                     = errors.New("ims call is on hold")
-	ErrWebsheetNotPending             = errors.New("wifi calling websheet is not pending")
-	ErrWebsheetDismissed              = errors.New("wifi calling websheet was dismissed")
-	ErrWebsheetUnavailable            = errors.New("wifi calling websheet is unavailable")
-	ErrVoLTEDataPathRequired          = errors.New("QMI VoLTE data path is required")
-	ErrVoLTEDataPathUnsupported       = errors.New("VoLTE data path is unsupported")
-	ErrVoLTEProfileOptionsUnsupported = errors.New("IMS APN profile options require QMI")
+	ErrUnavailable              = errors.New("ims access is unavailable")
+	ErrNotConnected             = errors.New("ims access is not connected")
+	ErrWiFiCallingSetupPending  = errors.New("wifi calling setup is pending")
+	ErrWiFiCallingSetupDenied   = errors.New("wifi calling setup denied")
+	ErrUnsupportedCodec         = errors.New("ims voice codec is not supported")
+	ErrUnsupportedDTMF          = errors.New("ims dtmf is not supported")
+	ErrCallOnHold               = errors.New("ims call is on hold")
+	ErrWebsheetNotPending       = errors.New("wifi calling websheet is not pending")
+	ErrWebsheetDismissed        = errors.New("wifi calling websheet was dismissed")
+	ErrWebsheetUnavailable      = errors.New("wifi calling websheet is unavailable")
+	ErrVoLTEDataPathRequired    = errors.New("QMI VoLTE data path is required")
+	ErrVoLTEDataPathUnsupported = errors.New("VoLTE data path is unsupported")
 )
 
 type Settings struct {
-	Enabled            bool
-	DataPath           DataPath
-	SetIMSAPNAsDefault bool
-	EnablePCSCFViaPCO  bool
+	Enabled  bool
+	DataPath DataPath
 }
 
 type Status struct {

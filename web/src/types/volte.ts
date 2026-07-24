@@ -8,13 +8,9 @@ export type VoLTESettingsResponse = {
   durationSeconds: number
   modemRegistered: boolean
   dataPath: VoLTEDataPath
-  setIMSAPNAsDefault: boolean
-  enablePCSCFViaPCO: boolean
 }
 
 export type UpdateVoLTESettingsRequest = {
   enabled: boolean
   dataPath?: VoLTEQMIDataPath
-  setIMSAPNAsDefault: boolean
-  enablePCSCFViaPCO: boolean
 }

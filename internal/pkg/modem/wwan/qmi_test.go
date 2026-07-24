@@ -312,14 +312,14 @@ func TestDeviceIMSProfileIndexQMI(t *testing.T) {
 		wantErr         bool
 	}{
 		{
-			name: "selects PCO IMS profile",
+			name: "selects IMS profile",
 			profiles: []qcom.WDSProfile{
 				{ID: qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: 1}},
 				{ID: qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: 2}},
 			},
 			profileSettings: map[uint8]qcom.WDSProfileSettings{
-				1: {APNKnown: true, APN: "internet", IMCNKnown: true, IMCN: true, PCSCFUsingPCOKnown: true, PCSCFUsingPCO: true},
-				2: {APNKnown: true, APN: "ims", IMCNKnown: true, IMCN: true, PCSCFUsingPCOKnown: true, PCSCFUsingPCO: true},
+				1: {APNKnown: true, APN: "internet", IMCNKnown: true, IMCN: true},
+				2: {APNKnown: true, APN: "ims", IMCNKnown: true, IMCN: true},
 			},
 			want: 2,
 		},
@@ -327,7 +327,7 @@ func TestDeviceIMSProfileIndexQMI(t *testing.T) {
 			name:     "selects DHCP IMS profile",
 			profiles: []qcom.WDSProfile{{ID: qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: 3}}},
 			profileSettings: map[uint8]qcom.WDSProfileSettings{
-				3: {APNKnown: true, APN: " IMS ", IMCNKnown: true, IMCN: true, PCSCFUsingDHCPKnown: true, PCSCFUsingDHCP: true},
+				3: {APNKnown: true, APN: " IMS ", IMCNKnown: true, IMCN: true},
 			},
 			want: 3,
 		},
@@ -335,7 +335,7 @@ func TestDeviceIMSProfileIndexQMI(t *testing.T) {
 			name:     "selects IMS profile without optional metadata",
 			profiles: []qcom.WDSProfile{{ID: qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: 2}}},
 			profileSettings: map[uint8]qcom.WDSProfileSettings{
-				2: {APNKnown: true, APN: "ims", PCSCFUsingPCOKnown: true, PCSCFUsingPCO: true},
+				2: {APNKnown: true, APN: "ims"},
 			},
 			want: 2,
 		},
@@ -368,49 +368,6 @@ func TestDeviceIMSProfileIndexQMI(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("IMSProfileIndex() = %d, want %d", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestDeviceIMSProfileMutationsQMI(t *testing.T) {
-	errDefault := errors.New("default rejected")
-	tests := []struct {
-		name      string
-		apply     func(context.Context, *qmiDevice) error
-		client    *fakeQMIClient
-		wantCalls []string
-		wantErr   error
-	}{
-		{
-			name:      "set default",
-			apply:     func(ctx context.Context, device *qmiDevice) error { return device.SetIMSProfileDefault(ctx, 2) },
-			client:    &fakeQMIClient{},
-			wantCalls: []string{"wds-default:2", "close"},
-		},
-		{
-			name:      "enable P-CSCF via PCO",
-			apply:     func(ctx context.Context, device *qmiDevice) error { return device.SetIMSProfilePCSCFViaPCO(ctx, 3) },
-			client:    &fakeQMIClient{},
-			wantCalls: []string{"wds-modify:3", "close"},
-		},
-		{
-			name:    "default rejected",
-			apply:   func(ctx context.Context, device *qmiDevice) error { return device.SetIMSProfileDefault(ctx, 2) },
-			client:  &fakeQMIClient{wdsDefaultErr: errDefault},
-			wantErr: errDefault,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, tt.client, nil)}
-			err := tt.apply(context.Background(), &device)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("apply() error = %v, want %v", err, tt.wantErr)
-			}
-			if tt.wantCalls != nil && !slices.Equal(tt.client.calls, tt.wantCalls) {
-				t.Fatalf("calls = %v, want %v", tt.client.calls, tt.wantCalls)
 			}
 		})
 	}
@@ -902,8 +859,6 @@ type fakeQMIClient struct {
 	wdsProfilesErr      error
 	wdsProfileSettings  map[uint8]qcom.WDSProfileSettings
 	wdsSettingsErr      error
-	wdsModifyErr        error
-	wdsDefaultErr       error
 	imssTestMode        bool
 	imssTestModeErr     error
 	setIMSSTestMode     bool
@@ -974,22 +929,6 @@ func (r *fakeQMIClient) WDSProfileSettings(_ context.Context, id qcom.WDSProfile
 		return qcom.WDSProfileSettings{}, r.wdsSettingsErr
 	}
 	return r.wdsProfileSettings[id.Index], nil
-}
-
-func (r *fakeQMIClient) WDSModifyProfile(_ context.Context, id qcom.WDSProfileID, pcscfUsingPCO bool) error {
-	r.calls = append(r.calls, fmtCall("wds-modify", id.Index))
-	if !pcscfUsingPCO {
-		return errors.New("expected P-CSCF via PCO")
-	}
-	return r.wdsModifyErr
-}
-
-func (r *fakeQMIClient) WDSSetDefaultProfile(_ context.Context, id qcom.WDSProfileID, family qcom.WDSProfileFamily) error {
-	r.calls = append(r.calls, fmtCall("wds-default", id.Index))
-	if family != qcom.WDSProfileFamilyTethered {
-		return errors.New("expected tethered profile family")
-	}
-	return r.wdsDefaultErr
 }
 
 func (r *fakeQMIClient) IMSSTestMode(context.Context) (bool, error) {

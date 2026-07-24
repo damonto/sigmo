@@ -23,8 +23,6 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
   const volteDurationSeconds = ref(0)
   const volteModemRegistered = ref(false)
   const volteDataPath = ref<VoLTEDataPath>('qmap')
-  const setIMSAPNAsDefault = ref(false)
-  const enablePCSCFViaPCO = ref(false)
   const isVoLTELoading = ref(false)
   const isVoLTEUpdating = ref(false)
   const isVoLTEFetching = ref(false)
@@ -46,8 +44,6 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     volteDurationSeconds.value = 0
     volteModemRegistered.value = false
     volteDataPath.value = 'qmap'
-    setIMSAPNAsDefault.value = false
-    enablePCSCFViaPCO.value = false
   }
 
   const fetchSettings = async (id: string, silent = false) => {
@@ -64,8 +60,6 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
       volteDurationSeconds.value = settings?.durationSeconds ?? 0
       volteModemRegistered.value = settings?.modemRegistered ?? false
       volteDataPath.value = settings?.dataPath ?? 'qmap'
-      setIMSAPNAsDefault.value = settings?.setIMSAPNAsDefault ?? false
-      enablePCSCFViaPCO.value = settings?.enablePCSCFViaPCO ?? false
     } catch (err) {
       console.error('[useModemVoLTE] Failed to load settings:', err)
       if (!silent) onError?.(t('modemDetail.settings.volteLoadFailed'))
@@ -82,8 +76,6 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     try {
       const payload: UpdateVoLTESettingsRequest = {
         enabled: nextEnabled,
-        setIMSAPNAsDefault: setIMSAPNAsDefault.value,
-        enablePCSCFViaPCO: enablePCSCFViaPCO.value,
       }
       if (volteDataPath.value !== 'mbim') {
         payload.dataPath = volteDataPath.value
@@ -113,37 +105,11 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
       await api.updateSettings(id, {
         enabled: false,
         dataPath,
-        setIMSAPNAsDefault: setIMSAPNAsDefault.value,
-        enablePCSCFViaPCO: enablePCSCFViaPCO.value,
       })
       await fetchSettings(id)
       onSuccess?.(t('modemDetail.settings.volteDataPathSuccess'))
     } catch (err) {
       console.error('[useModemVoLTE] Failed to update data path:', err)
-      onError?.(t('modemDetail.settings.volteUpdateFailed'))
-    } finally {
-      isVoLTEUpdating.value = false
-    }
-  }
-
-  const updateProfileOptions = async (next: {
-    setIMSAPNAsDefault: boolean
-    enablePCSCFViaPCO: boolean
-  }) => {
-    const id = modemId.value
-    if (!enabled.value || !id || volteEnabled.value || isVoLTEUpdating.value) return
-    isVoLTEUpdating.value = true
-    try {
-      await api.updateSettings(id, {
-        enabled: false,
-        dataPath: volteDataPath.value === 'mbim' ? undefined : volteDataPath.value,
-        setIMSAPNAsDefault: next.setIMSAPNAsDefault,
-        enablePCSCFViaPCO: next.enablePCSCFViaPCO,
-      })
-      await fetchSettings(id)
-      onSuccess?.(t('modemDetail.settings.volteProfileOptionsSuccess'))
-    } catch (err) {
-      console.error('[useModemVoLTE] Failed to update IMS profile options:', err)
       onError?.(t('modemDetail.settings.volteUpdateFailed'))
     } finally {
       isVoLTEUpdating.value = false
@@ -186,12 +152,9 @@ export const useModemVoLTE = ({ modemId, enabled, onSuccess, onError }: Options)
     volteDurationSeconds,
     volteModemRegistered,
     volteDataPath,
-    setIMSAPNAsDefault,
-    enablePCSCFViaPCO,
     isVoLTELoading,
     isVoLTEUpdating,
     updateVoLTE,
     updateDataPath,
-    updateProfileOptions,
   }
 }

@@ -73,9 +73,6 @@ func ResolveVoLTESettings(modem *mmodem.Modem, settings Settings) (Settings, err
 			return Settings{}, fmt.Errorf("%w: %q", ErrVoLTEDataPathUnsupported, settings.DataPath)
 		}
 	case mmodem.ModemPortTypeMbim:
-		if settings.SetIMSAPNAsDefault || settings.EnablePCSCFViaPCO {
-			return Settings{}, ErrVoLTEProfileOptionsUnsupported
-		}
 		settings.DataPath = DataPathMBIM
 	default:
 		return Settings{}, ErrUnavailable

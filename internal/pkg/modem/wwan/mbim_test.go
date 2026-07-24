@@ -191,24 +191,6 @@ func TestDeviceIMSProfileIndexMBIM(t *testing.T) {
 	}
 }
 
-func TestDeviceIMSProfileMutationsMBIMUnsupported(t *testing.T) {
-	tests := []struct {
-		name  string
-		apply func(context.Context, mbimDevice) error
-	}{
-		{name: "set default", apply: func(ctx context.Context, device mbimDevice) error { return device.SetIMSProfileDefault(ctx, 1) }},
-		{name: "enable P-CSCF via PCO", apply: func(ctx context.Context, device mbimDevice) error { return device.SetIMSProfilePCSCFViaPCO(ctx, 1) }},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.apply(context.Background(), mbimDevice{}); !errors.Is(err, ErrUnsupported) {
-				t.Fatalf("apply() error = %v, want %v", err, ErrUnsupported)
-			}
-		})
-	}
-}
-
 type fakeMBIMRadio struct {
 	state    uiccmbim.RadioStateInfo
 	setState uiccmbim.RadioSwitchState
