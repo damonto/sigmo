@@ -738,6 +738,9 @@ const en = {
       volteDataPathLegacy: 'Legacy BAM-DMUX',
       volteDataPathLegacyDescription:
         'Only for older Qualcomm BAM-DMUX devices that do not support QMAP.',
+      volteDataPathQualcomm410: 'Qualcomm 410 Compatible (Wi-Fi dongle)',
+      volteDataPathQualcomm410Description:
+        'For Qualcomm 410-compatible Wi-Fi dongles with two QMI/rmnet paths so Internet and IMS can stay connected together.',
       volteDataPathSuccess: 'VoLTE data path updated.',
       volteManagedDescription: 'VoLTE is managed by Sigmo.',
       volteModemRegisteredDescription: 'VoLTE is managed by Modem.',

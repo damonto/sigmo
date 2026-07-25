@@ -33,7 +33,7 @@ const description = computed(() => {
 const dataPathDisabled = computed(() => props.enabled || props.isLoading || props.isUpdating)
 
 const updateDataPath = (dataPath: unknown) => {
-  if (dataPath !== 'qmap' && dataPath !== 'legacy_bam_dmux') return
+  if (dataPath !== 'qmap' && dataPath !== 'legacy_bam_dmux' && dataPath !== 'qualcomm_410') return
   emit('update-data-path', dataPath)
 }
 </script>
@@ -97,6 +97,26 @@ const updateDataPath = (dataPath: unknown) => {
               </span>
               <span class="block text-xs leading-5 text-muted-foreground">
                 {{ t('modemDetail.settings.volteDataPathLegacyDescription') }}
+              </span>
+            </span>
+          </label>
+
+          <label
+            class="flex items-start gap-3 rounded-lg border px-3 py-3 shadow-sm transition"
+            :class="[
+              props.dataPath === 'qualcomm_410'
+                ? 'border-primary/40 bg-primary/5'
+                : 'border-transparent bg-muted/30',
+              dataPathDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+            ]"
+          >
+            <RadioGroupItem id="volte-data-path-qualcomm-410" value="qualcomm_410" class="mt-1" />
+            <span class="min-w-0 space-y-1">
+              <span class="block text-sm font-semibold text-foreground">
+                {{ t('modemDetail.settings.volteDataPathQualcomm410') }}
+              </span>
+              <span class="block text-xs leading-5 text-muted-foreground">
+                {{ t('modemDetail.settings.volteDataPathQualcomm410Description') }}
               </span>
             </span>
           </label>

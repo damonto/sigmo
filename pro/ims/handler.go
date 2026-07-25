@@ -48,7 +48,7 @@ type VoLTESettingsResponse struct {
 	State           string   `json:"state" jsonschema:"current VoLTE state, such as idle, connecting, connected, or disconnected"`
 	DurationSeconds int64    `json:"durationSeconds" jsonschema:"elapsed time of the current VoLTE connection in seconds"`
 	ModemRegistered bool     `json:"modemRegistered" jsonschema:"whether the modem reports IMS registration"`
-	DataPath        DataPath `json:"dataPath" jsonschema:"data path used for VoLTE traffic, such as qmap or mbim"`
+	DataPath        DataPath `json:"dataPath" jsonschema:"data path used for VoLTE traffic, such as qmap, legacy_bam_dmux, or qualcomm_410"`
 }
 
 const (

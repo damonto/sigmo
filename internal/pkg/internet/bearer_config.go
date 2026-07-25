@@ -28,6 +28,7 @@ type trackedConnection struct {
 	prefs         Preferences
 	routeMetric   int
 	addresses     []netip.Prefix
+	peers         map[netip.Prefix]netip.Addr
 	routes        []netlink.DefaultRoute
 	routeChanges  []defaultRouteChange
 }
@@ -159,8 +160,12 @@ func cleanupApplied(ctx context.Context, stateStore connectionStateStore, tracke
 		err = errors.Join(err, netlink.DeleteDefaultRoute(tracked.routes[i]))
 	}
 	err = errors.Join(err, cleanupDefaultRouteChangesWithStore(ctx, stateStore, tracked.interfaceName, tracked.routeChanges, netlinkDefaultRouteOps))
-	for i := len(tracked.addresses) - 1; i >= 0; i-- {
-		err = errors.Join(err, netlink.DeleteAddress(tracked.interfaceName, tracked.addresses[i]))
+	for _, prefix := range slices.Backward(tracked.addresses) {
+		if peer, ok := tracked.peers[prefix]; ok {
+			err = errors.Join(err, netlink.DeletePointToPointAddress(tracked.interfaceName, prefix.Addr(), peer))
+			continue
+		}
+		err = errors.Join(err, netlink.DeleteAddress(tracked.interfaceName, prefix))
 	}
 	return err
 }

@@ -50,7 +50,7 @@ type managedVoLTEDevice interface {
 	Close() error
 	VoLTEStatus(ctx context.Context) (wwan.VoLTEStatus, error)
 	PacketServiceStatus(ctx context.Context) (wwan.PacketServiceStatus, error)
-	IMSProfileIndex(ctx context.Context) (uint8, error)
+	IMSProfile(ctx context.Context) (wwan.IMSProfile, error)
 	IMSSTestMode(ctx context.Context) (bool, error)
 	SetIMSSTestMode(ctx context.Context, enabled bool) error
 	SetAirplaneMode(ctx context.Context, enabled bool) error
@@ -61,11 +61,12 @@ type internetRestorer interface {
 	Connect(ctx context.Context, modem *mmodem.Modem, prefs pinternet.Preferences) (*pinternet.Connection, error)
 	Restore(ctx context.Context, modem *mmodem.Modem) error
 	SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, enabled bool) error
+	SetQualcomm410Enabled(ctx context.Context, modem *mmodem.Modem, enabled bool) error
 }
 
 type connectAttempt struct {
 	sessionID         uint64
-	imsProfileIndex   uint8
+	imsProfile        wwan.IMSProfile
 	registrationGroup *imsgo.RegistrationGroup
 }
 
@@ -113,6 +114,12 @@ func (c *coordinator) startIfEnabled(ctx context.Context, modem *mmodem.Modem) {
 			if err := c.restoreLegacyInternet(ctx, modem); err != nil {
 				slog.Warn("restore suspended Internet after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
 			}
+		case DataPathQualcomm410:
+			if c.internet != nil {
+				if err := c.internet.SetQualcomm410Enabled(ctx, modem, false); err != nil {
+					slog.Warn("restore Internet after Qualcomm 410 modem reload", "imei", modem.EquipmentIdentifier, "error", err)
+				}
+			}
 		default:
 			slog.Warn("unsupported VoLTE data path", "imei", modem.EquipmentIdentifier, "dataPath", settings.DataPath)
 		}
@@ -152,10 +159,10 @@ func (c *coordinator) start(modem *mmodem.Modem, profileID string) {
 }
 
 func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, profileID string, sessionID uint64) {
-	var imsProfileIndex uint8
+	var imsProfile wwan.IMSProfile
 	if c.access == AccessVoLTE {
 		var err error
-		imsProfileIndex, err = prepareManagedVoLTE(ctx, modem, c.internet)
+		imsProfile, err = prepareManagedVoLTE(ctx, modem, c.internet)
 		if err != nil {
 			slog.Warn("prepare VoLTE startup", "imei", modem.EquipmentIdentifier, "error", err)
 			c.markDisconnected(modem.EquipmentIdentifier, sessionID, nil)
@@ -163,8 +170,8 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 		}
 	}
 	attempt := connectAttempt{
-		sessionID:       sessionID,
-		imsProfileIndex: imsProfileIndex,
+		sessionID:  sessionID,
+		imsProfile: imsProfile,
 	}
 	if c.registrationGroups != nil {
 		attempt.registrationGroup = c.registrationGroups.Group(modem.EquipmentIdentifier, profileID)
@@ -257,6 +264,12 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 						return nil, fmt.Errorf("restore non-QMAP data format for legacy BAM-DMUX: %w", err)
 					}
 				}
+			case DataPathQualcomm410:
+				if c.internet != nil {
+					if err := c.internet.SetQualcomm410Enabled(ctx, modem, true); err != nil {
+						return nil, fmt.Errorf("enable Qualcomm 410 Internet: %w", err)
+					}
+				}
 			default:
 				return nil, fmt.Errorf("unsupported VoLTE data path %q", dataPath)
 			}
@@ -278,6 +291,10 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 				wwanConfig.LegacyMuxDataPort = qcom.WDSSIOPortA2MuxRMNET0
 				wwanConfig.InterfaceName = "wwan0"
 				volteInterfaceName = wwanConfig.InterfaceName
+			case DataPathQualcomm410:
+				wwanConfig.QMIControlPort = mmodem.Qualcomm410IMSQMI
+				wwanConfig.InterfaceName = mmodem.Qualcomm410IMSInterface
+				volteInterfaceName = wwanConfig.InterfaceName
 			}
 		} else {
 			volteInterfaceName, err = voLTEInterfaceName(modem)
@@ -286,10 +303,11 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 			}
 		}
 	}
-	cfg, err := c.modemClientConfig(ctx, modem, attempt.imsProfileIndex, volteInterfaceName)
+	cfg, err := c.modemClientConfig(ctx, modem, attempt.imsProfile.Index, volteInterfaceName)
 	if err != nil {
 		return nil, err
 	}
+	configureQualcomm410IMSPDNType(cfg, dataPath, attempt.imsProfile.PDNType)
 	cfg.IMS.RegistrationGroup = attempt.registrationGroup
 	for try := 0; try < 2; try++ {
 		reader, err := OpenWWAN(ctx, modem, wwanConfig)
@@ -320,6 +338,22 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 		return client, nil
 	}
 	return nil, errors.New("connect IMS after modem reset")
+}
+
+func configureQualcomm410IMSPDNType(cfg *imsgo.Config, dataPath DataPath, profilePDNType string) {
+	if dataPath != DataPathQualcomm410 || cfg == nil || cfg.Access.VoLTE == nil {
+		return
+	}
+	// A dedicated 410 QMI channel is not moved with BindDataPort. Its WDS client
+	// therefore has to select the same family as the carrier-provisioned IMS
+	// profile so packets land on the matching rmnet state.
+	if pdnType := strings.TrimSpace(profilePDNType); pdnType != "" {
+		cfg.Access.VoLTE.PDNType = pdnType
+		return
+	}
+	if strings.TrimSpace(cfg.Access.VoLTE.PDNType) == "" {
+		cfg.Access.VoLTE.PDNType = lte.DefaultPDNType
+	}
 }
 
 func (c *coordinator) suspendLegacyInternet(ctx context.Context, modem *mmodem.Modem) error {
@@ -397,42 +431,42 @@ func modemClientConfigForIMEI(imei string, access Access, imsProfileIndex uint8)
 		Access:   accessConfig,
 		IMS: imsgo.IMSConfig{
 			SMSDeliveryReportTimeout: smsDeliveryReportTimeout(),
-			Voice:                    voiceBridgeConfig(),
+			Voice:                    imsVoiceConfig(),
 		},
 	}
 }
 
-func prepareManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (profileIndex uint8, err error) {
+func prepareManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (profile wwan.IMSProfile, err error) {
 	device, err := openManagedVoLTEDevice(modem)
 	if errors.Is(err, wwan.ErrUnsupported) {
-		return 0, ErrUnavailable
+		return wwan.IMSProfile{}, ErrUnavailable
 	}
 	if err != nil {
-		return 0, fmt.Errorf("open device: %w", err)
+		return wwan.IMSProfile{}, fmt.Errorf("open device: %w", err)
 	}
 	defer func() {
 		err = errors.Join(err, device.Close())
 	}()
 	status, err := device.VoLTEStatus(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("read volte status: %w", err)
+		return wwan.IMSProfile{}, fmt.Errorf("read volte status: %w", err)
 	}
-	profileIndex, err = device.IMSProfileIndex(ctx)
+	profile, err = device.IMSProfile(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("find IMS profile: %w", err)
+		return wwan.IMSProfile{}, fmt.Errorf("find IMS profile: %w", err)
 	}
 	packetServiceReady := false
 	if status.Occupied {
 		testMode, err := device.IMSSTestMode(ctx)
 		if err != nil {
-			return 0, fmt.Errorf("read IMSS test mode: %w", err)
+			return wwan.IMSProfile{}, fmt.Errorf("read IMSS test mode: %w", err)
 		}
 		if !testMode {
 			if err := device.SetIMSSTestMode(ctx, true); err != nil {
-				return 0, fmt.Errorf("enable IMSS test mode: %w", err)
+				return wwan.IMSProfile{}, fmt.Errorf("enable IMSS test mode: %w", err)
 			}
 			if err := resetManagedVoLTE(ctx, modem, device, internet); err != nil {
-				return 0, err
+				return wwan.IMSProfile{}, err
 			}
 			packetServiceReady = true
 		}
@@ -442,10 +476,10 @@ func prepareManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet inte
 		err := waitForPacketService(waitCtx, device)
 		cancel()
 		if err != nil {
-			return 0, err
+			return wwan.IMSProfile{}, err
 		}
 	}
-	return profileIndex, nil
+	return profile, nil
 }
 
 func releaseManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (err error) {

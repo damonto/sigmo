@@ -70,6 +70,17 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 			wantCalls:    []string{"status", "ims-profile", "packet-service"},
 		},
 		{
+			name:         "accepts Qualcomm 410 data path",
+			body:         `{"enabled":true,"dataPath":"qualcomm_410"}`,
+			portType:     mmodem.ModemPortTypeQmi,
+			device:       &fakeManagedVoLTEDevice{},
+			wantStatus:   http.StatusNoContent,
+			wantUpdated:  true,
+			wantSettings: Settings{Enabled: true, DataPath: DataPathQualcomm410},
+			wantOpened:   true,
+			wantCalls:    []string{"status", "ims-profile", "packet-service"},
+		},
+		{
 			name:         "disable skips validation",
 			body:         `{"enabled":false,"dataPath":"legacy_bam_dmux"}`,
 			portType:     mmodem.ModemPortTypeQmi,

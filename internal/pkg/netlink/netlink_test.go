@@ -3,11 +3,11 @@ package netlink
 import (
 	"encoding/binary"
 	"errors"
+	"maps"
 	"net"
 	"net/netip"
 	"os"
 	"slices"
-	"syscall"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -20,7 +20,8 @@ func TestDisableIPv6Autoconfiguration(t *testing.T) {
 		interfaceName string
 		failPath      string
 		wantPaths     []string
-		wantErr       error
+		wantErr       bool
+		wantIs        error
 	}{
 		{
 			name:          "disables SLAAC and router advertisements",
@@ -28,13 +29,16 @@ func TestDisableIPv6Autoconfiguration(t *testing.T) {
 			wantPaths:     []string{"/proc-test/qmimux0/autoconf", "/proc-test/qmimux0/accept_ra"},
 		},
 		{
-			name:          "stops after write rejection",
+			name:          "continues after write rejection",
 			interfaceName: "qmimux0",
 			failPath:      "/proc-test/qmimux0/autoconf",
-			wantPaths:     []string{"/proc-test/qmimux0/autoconf"},
-			wantErr:       errWrite,
+			wantPaths:     []string{"/proc-test/qmimux0/autoconf", "/proc-test/qmimux0/accept_ra"},
+			wantErr:       true,
+			wantIs:        errWrite,
 		},
-		{name: "rejects empty interface", wantErr: syscall.EINVAL},
+		{name: "rejects empty interface", wantErr: true},
+		{name: "rejects parent traversal", interfaceName: "..", wantErr: true},
+		{name: "rejects path-like interface", interfaceName: "../wwan0", wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -52,17 +56,53 @@ func TestDisableIPv6Autoconfiguration(t *testing.T) {
 			}
 
 			err := disableIPv6Autoconfiguration("/proc-test", tt.interfaceName, writeFile)
-			if tt.wantErr == syscall.EINVAL {
-				if err == nil {
-					t.Fatal("disableIPv6Autoconfiguration() error = nil, want error")
-				}
-			} else if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("disableIPv6Autoconfiguration() error = %v, want %v", err, tt.wantErr)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("disableIPv6Autoconfiguration() error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
+				t.Fatalf("disableIPv6Autoconfiguration() error = %v, want %v", err, tt.wantIs)
 			}
 			if !slices.Equal(paths, tt.wantPaths) {
 				t.Fatalf("write paths = %v, want %v", paths, tt.wantPaths)
 			}
 		})
+	}
+}
+
+func TestIPv6AutoconfigurationState(t *testing.T) {
+	state, err := readIPv6Autoconfiguration("/proc-test", "wwan0", func(path string) ([]byte, error) {
+		switch path {
+		case "/proc-test/wwan0/autoconf":
+			return []byte("1\n"), nil
+		case "/proc-test/wwan0/accept_ra":
+			return []byte("2\n"), nil
+		default:
+			return nil, os.ErrNotExist
+		}
+	})
+	if err != nil {
+		t.Fatalf("readIPv6Autoconfiguration() error = %v", err)
+	}
+	if want := (IPv6Autoconfiguration{Autoconf: 1, AcceptRA: 2}); state != want {
+		t.Fatalf("readIPv6Autoconfiguration() = %+v, want %+v", state, want)
+	}
+
+	writes := make(map[string]string)
+	if err := setIPv6Autoconfiguration("/proc-test", "wwan0", state, func(path string, data []byte, mode os.FileMode) error {
+		if mode != 0o644 {
+			t.Fatalf("write mode = %#o, want 0644", mode)
+		}
+		writes[path] = string(data)
+		return nil
+	}); err != nil {
+		t.Fatalf("setIPv6Autoconfiguration() error = %v", err)
+	}
+	wantWrites := map[string]string{
+		"/proc-test/wwan0/autoconf":  "1",
+		"/proc-test/wwan0/accept_ra": "2",
+	}
+	if !maps.Equal(writes, wantWrites) {
+		t.Fatalf("writes = %v, want %v", writes, wantWrites)
 	}
 }
 

@@ -12,7 +12,6 @@ import (
 
 	"github.com/damonto/sigmo/internal/pkg/modem/msisdn"
 	"github.com/damonto/wwan-go/qcom"
-	"github.com/damonto/wwan-go/qcom/qmi"
 	usim "github.com/damonto/wwan-go/sim"
 	usimcard "github.com/damonto/wwan-go/sim/card"
 	"github.com/damonto/wwan-go/sim/simfile"
@@ -44,10 +43,10 @@ func newQMIDevice(device string, slot uint8, imei string, reuseClients bool) *qm
 		imei:         imei,
 		reuseClients: reuseClients,
 		openClient: func(ctx context.Context, slot uint8) (qmiClient, error) {
-			return openQMIClient(ctx, device, slot)
+			return OpenQMIClient(ctx, QMIClientConfig{Device: device, Slot: slot})
 		},
 		openRadio: func(ctx context.Context) (qmiRadio, error) {
-			return openQMIClient(ctx, device, 1)
+			return OpenQMIClient(ctx, QMIClientConfig{Device: device, Slot: 1})
 		},
 	}
 }
@@ -125,7 +124,7 @@ func (u *qmiDevice) USIM(ctx context.Context) (usimcard.Reader, error) {
 }
 
 func (u *qmiDevice) USIMWithCAT(ctx context.Context, profile CATProfile) (usimcard.Reader, error) {
-	client, err := openQMIClient(ctx, u.device, u.slot)
+	client, err := OpenQMIClient(ctx, QMIClientConfig{Device: u.device, Slot: u.slot})
 	if err != nil {
 		return nil, fmt.Errorf("open QMI UIM client: %w", err)
 	}
@@ -139,23 +138,11 @@ func (u *qmiDevice) USIMWithCAT(ctx context.Context, profile CATProfile) (usimca
 	return adapter, nil
 }
 
-func openQMIClient(ctx context.Context, device string, slot uint8) (*qcom.Client, error) {
-	transport, err := qmi.Open(ctx, qmi.WithProxy(device))
-	if err != nil {
-		return nil, err
-	}
-	client, err := qcom.NewClient(transport, qcom.WithSlot(slot))
-	if err != nil {
-		return nil, errors.Join(err, transport.Close())
-	}
-	return client, nil
-}
-
 func openQMIUSIM(ctx context.Context, device string, slot uint8) (usimcard.Reader, error) {
 	if err := validateSIMSlot(slot); err != nil {
 		return nil, err
 	}
-	client, err := openQMIClient(ctx, device, slot)
+	client, err := OpenQMIClient(ctx, QMIClientConfig{Device: device, Slot: slot})
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +311,7 @@ func (u *qmiDevice) ATR(ctx context.Context) ([]byte, error) {
 func (u *qmiDevice) VoLTEStatus(ctx context.Context) (VoLTEStatus, error) {
 	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return VoLTEStatus{}, fmt.Errorf("open QMI UIM client: %w", err)
+		return VoLTEStatus{}, fmt.Errorf("open QMI client: %w", err)
 	}
 	defer release()
 
@@ -347,7 +334,7 @@ func (u *qmiDevice) VoLTEStatus(ctx context.Context) (VoLTEStatus, error) {
 func (u *qmiDevice) PacketServiceStatus(ctx context.Context) (PacketServiceStatus, error) {
 	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return PacketServiceStatus{}, fmt.Errorf("open QMI UIM client: %w", err)
+		return PacketServiceStatus{}, fmt.Errorf("open QMI client: %w", err)
 	}
 	defer release()
 
@@ -362,27 +349,30 @@ func (u *qmiDevice) PacketServiceStatus(ctx context.Context) (PacketServiceStatu
 	}, nil
 }
 
-func (u *qmiDevice) IMSProfileIndex(ctx context.Context) (uint8, error) {
+func (u *qmiDevice) IMSProfile(ctx context.Context) (IMSProfile, error) {
 	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return 0, fmt.Errorf("open QMI UIM client: %w", err)
+		return IMSProfile{}, fmt.Errorf("open QMI client: %w", err)
 	}
 	defer release()
 
 	profiles, err := client.WDSProfiles(ctx, qcom.WDSProfileType3GPP)
 	if err != nil {
-		return 0, fmt.Errorf("read QMI WDS profiles: %w", err)
+		return IMSProfile{}, fmt.Errorf("read QMI WDS profiles: %w", err)
 	}
 	for _, profile := range profiles {
 		settings, err := client.WDSProfileSettings(ctx, profile.ID)
 		if err != nil {
-			return 0, fmt.Errorf("read QMI WDS profile %d: %w", profile.ID.Index, err)
+			return IMSProfile{}, fmt.Errorf("read QMI WDS profile %d: %w", profile.ID.Index, err)
 		}
 		if isIMSProfile(settings) {
-			return profile.ID.Index, nil
+			return IMSProfile{
+				Index:   profile.ID.Index,
+				PDNType: imsProfilePDNType(settings),
+			}, nil
 		}
 	}
-	return 0, errors.New("IMS WDS profile is unavailable")
+	return IMSProfile{}, errors.New("IMS WDS profile is unavailable")
 }
 
 func isIMSProfile(settings qcom.WDSProfileSettings) bool {
@@ -391,14 +381,33 @@ func isIMSProfile(settings qcom.WDSProfileSettings) bool {
 	return settings.APNKnown && strings.EqualFold(strings.TrimSpace(settings.APN), "ims")
 }
 
+func imsProfilePDNType(settings qcom.WDSProfileSettings) string {
+	if !settings.PDPKnown {
+		return ""
+	}
+	switch settings.PDPType {
+	case qcom.WDSPDPTypeIPv4:
+		return "ipv4"
+	case qcom.WDSPDPTypeIPv6:
+		return "ipv6"
+	case qcom.WDSPDPTypeIPv4v6:
+		return "ipv4v6"
+	default:
+		return ""
+	}
+}
+
 func (u *qmiDevice) IMSSTestMode(ctx context.Context) (bool, error) {
 	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return false, fmt.Errorf("open QMI UIM client: %w", err)
+		return false, fmt.Errorf("open QMI client: %w", err)
 	}
 	defer release()
 
 	enabled, err := client.IMSSTestMode(ctx)
+	if errors.Is(err, qcom.QMIErrorInvalidServiceType) || errors.Is(err, qcom.QMIErrorNotSupported) {
+		return false, ErrUnsupported
+	}
 	if err != nil {
 		return false, fmt.Errorf("read QMI IMSS test mode: %w", err)
 	}
@@ -408,11 +417,13 @@ func (u *qmiDevice) IMSSTestMode(ctx context.Context) (bool, error) {
 func (u *qmiDevice) SetIMSSTestMode(ctx context.Context, enabled bool) error {
 	client, release, err := u.acquireClient(ctx, u.slot)
 	if err != nil {
-		return fmt.Errorf("open QMI UIM client: %w", err)
+		return fmt.Errorf("open QMI client: %w", err)
 	}
 	defer release()
 
-	if err := client.SetIMSSTestMode(ctx, enabled); err != nil {
+	if err := client.SetIMSSTestMode(ctx, enabled); errors.Is(err, qcom.QMIErrorInvalidServiceType) || errors.Is(err, qcom.QMIErrorNotSupported) {
+		return ErrUnsupported
+	} else if err != nil {
 		return fmt.Errorf("set QMI IMSS test mode: %w", err)
 	}
 	return nil

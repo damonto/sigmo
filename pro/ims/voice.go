@@ -20,7 +20,6 @@ import (
 
 type voiceCallState struct {
 	call      *imsvoice.Call
-	offer     imsvoice.MediaDescription
 	info      VoiceCall
 	updatedAt time.Time
 }
@@ -196,42 +195,24 @@ func samePendingVoiceDial(call VoiceCall, pending pendingVoiceDial) bool {
 
 func voiceBridgeMediaOffer() imsvoice.MediaOffer {
 	return imsvoice.MediaOffer{
-		Codecs: []imsvoice.AudioCodec{imsvoice.CodecEVS, imsvoice.CodecAMRWB, imsvoice.CodecAMR, imsvoice.CodecPCMU},
+		Codecs: voiceBridgeCodecs(),
 	}
 }
 
-func voiceBridgeConfig() imsvoice.Config {
+// voiceBridgeCodecs is the single capability list shared by outgoing offers
+// and media-session validation. Payload numbers and fmtp details belong to the
+// carrier profile negotiated by ims-go, not to this bridge.
+func voiceBridgeCodecs() []imsvoice.AudioCodec {
+	return []imsvoice.AudioCodec{
+		imsvoice.CodecEVS,
+		imsvoice.CodecAMRWB,
+		imsvoice.CodecAMR,
+		imsvoice.CodecPCMU,
+	}
+}
+
+func imsVoiceConfig() imsvoice.Config {
 	return imsvoice.Config{
-		Codecs: []imsvoice.AudioCodecConfig{
-			{
-				Name:         imsvoice.CodecEVS,
-				PayloadTypes: []int{127},
-				ClockRate:    16000,
-				Bitrate:      "5.9-13.2",
-				Bandwidth:    "nb-wb",
-			},
-			{
-				Name:         imsvoice.CodecAMRWB,
-				PayloadTypes: []int{104},
-				ClockRate:    16000,
-			},
-			{
-				Name:         imsvoice.CodecAMR,
-				PayloadTypes: []int{102},
-				ClockRate:    8000,
-				ModeSet:      "0,2,4,7",
-			},
-			{
-				Name:         imsvoice.CodecTelephoneEvent,
-				PayloadTypes: []int{101},
-				ClockRate:    8000,
-			},
-			{
-				Name:         imsvoice.CodecPCMU,
-				PayloadTypes: []int{0},
-				ClockRate:    8000,
-			},
-		},
 		PTime:    20 * time.Millisecond,
 		MaxPTime: 240 * time.Millisecond,
 	}
@@ -242,7 +223,7 @@ func (c *coordinator) AnswerCall(ctx context.Context, modem *mmodem.Modem, callI
 	if err != nil {
 		return VoiceCall{}, err
 	}
-	if err := call.Answer(ctx, c.answerMediaOffer(modem.EquipmentIdentifier, callID)); err != nil {
+	if err := call.Answer(ctx, answerMediaOffer()); err != nil {
 		return VoiceCall{}, normalizeVoiceError(c.handleClientDisconnected(modem.EquipmentIdentifier, client, err))
 	}
 	info, _ = advanceVoiceCall(info, voiceCallTransition{
@@ -356,7 +337,7 @@ func (c *coordinator) OpenCallMedia(ctx context.Context, modem *mmodem.Modem, ca
 }
 
 func isSupportedCallMediaCodec(codec imsvoice.AudioCodec) bool {
-	return codec == imsvoice.CodecEVS || codec == imsvoice.CodecAMRWB || codec == imsvoice.CodecAMR || codec == imsvoice.CodecPCMU
+	return slices.Contains(voiceBridgeCodecs(), codec)
 }
 
 func (c *coordinator) SubscribeVoiceEvents(fn VoiceEventFunc) func() {
@@ -586,7 +567,6 @@ func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string,
 	if !ok {
 		return
 	}
-	c.storeIncomingVoiceOffer(modem.EquipmentIdentifier, sessionID, incoming.Call.ID(), incoming.Offer)
 	info.Hold = voiceHoldState(incoming.Call)
 	if !incoming.ReceivedAt.IsZero() {
 		info.StartedAt = incoming.ReceivedAt
@@ -596,46 +576,11 @@ func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string,
 	c.publishVoiceEvent(info)
 }
 
-func (c *coordinator) storeIncomingVoiceOffer(modemID string, sessionID uint64, callID string, offer imsvoice.MediaDescription) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	session := c.sessions[modemID]
-	if !sameSession(session, sessionID) || session.calls == nil {
-		return
-	}
-	if state := session.calls[callID]; state != nil {
-		state.offer = offer
-	}
-}
-
-func (c *coordinator) answerMediaOffer(modemID string, callID string) imsvoice.MediaOffer {
-	c.mu.Lock()
-	state := c.sessions[modemID]
-	var description imsvoice.MediaDescription
-	if state != nil && state.calls != nil && state.calls[callID] != nil {
-		description = state.calls[callID].offer
-	}
-	c.mu.Unlock()
-
-	preferred := voiceBridgeMediaOffer()
-	configured := voiceBridgeConfig().Codecs
-	for _, codec := range preferred.Codecs {
-		for _, format := range description.Formats {
-			if format.Codec != codec {
-				continue
-			}
-			for _, local := range configured {
-				if local.Name != codec || !imsvoice.AudioFormatCompatible(local, format) {
-					continue
-				}
-				return imsvoice.MediaOffer{
-					Codecs:       []imsvoice.AudioCodec{codec},
-					PayloadTypes: []int{format.PayloadType},
-				}
-			}
-		}
-	}
-	return preferred
+func answerMediaOffer() imsvoice.MediaOffer {
+	// Keep every bridge-supported speech codec in the offer. ims-go owns the
+	// carrier-profile and remote-offer intersection; selecting one codec here
+	// would reject a carrier profile (for example AMR-only) before negotiation.
+	return voiceBridgeMediaOffer()
 }
 
 func (c *coordinator) forwardCallEvent(modemID string, sessionID uint64, event imsgo.CallEvent) {

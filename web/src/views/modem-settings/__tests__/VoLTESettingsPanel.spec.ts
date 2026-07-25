@@ -48,6 +48,13 @@ describe('VoLTESettingsPanel', () => {
     expect(wrapper.text()).toContain('Only for older Qualcomm BAM-DMUX devices')
   })
 
+  it('shows the Qualcomm 410 compatible data path', () => {
+    const wrapper = mountPanel(false, 'qualcomm_410')
+
+    expect(wrapper.text()).toContain('Qualcomm 410 Compatible (Wi-Fi dongle)')
+    expect(wrapper.text()).toContain('two QMI/rmnet paths')
+  })
+
   it('locks the data path while VoLTE is enabled', () => {
     const wrapper = mountPanel(true)
 

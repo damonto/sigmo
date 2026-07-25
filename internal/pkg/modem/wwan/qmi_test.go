@@ -301,14 +301,14 @@ func TestQMIDeviceReusesClientUntilClose(t *testing.T) {
 	}
 }
 
-func TestDeviceIMSProfileIndexQMI(t *testing.T) {
+func TestDeviceIMSProfileQMI(t *testing.T) {
 	errSettings := errors.New("profile settings rejected")
 	tests := []struct {
 		name            string
 		profiles        []qcom.WDSProfile
 		profileSettings map[uint8]qcom.WDSProfileSettings
 		settingsErr     error
-		want            uint8
+		want            IMSProfile
 		wantErr         bool
 	}{
 		{
@@ -319,17 +319,25 @@ func TestDeviceIMSProfileIndexQMI(t *testing.T) {
 			},
 			profileSettings: map[uint8]qcom.WDSProfileSettings{
 				1: {APNKnown: true, APN: "internet", IMCNKnown: true, IMCN: true},
-				2: {APNKnown: true, APN: "ims", IMCNKnown: true, IMCN: true},
+				2: {APNKnown: true, APN: "ims", PDPKnown: true, PDPType: qcom.WDSPDPTypeIPv6, IMCNKnown: true, IMCN: true},
 			},
-			want: 2,
+			want: IMSProfile{Index: 2, PDNType: "ipv6"},
 		},
 		{
-			name:     "selects DHCP IMS profile",
+			name:     "selects IPv4 IMS profile",
 			profiles: []qcom.WDSProfile{{ID: qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: 3}}},
 			profileSettings: map[uint8]qcom.WDSProfileSettings{
-				3: {APNKnown: true, APN: " IMS ", IMCNKnown: true, IMCN: true},
+				3: {APNKnown: true, APN: " IMS ", PDPKnown: true, PDPType: qcom.WDSPDPTypeIPv4, IMCNKnown: true, IMCN: true},
 			},
-			want: 3,
+			want: IMSProfile{Index: 3, PDNType: "ipv4"},
+		},
+		{
+			name:     "selects dual-stack IMS profile",
+			profiles: []qcom.WDSProfile{{ID: qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: 4}}},
+			profileSettings: map[uint8]qcom.WDSProfileSettings{
+				4: {APNKnown: true, APN: "ims", PDPKnown: true, PDPType: qcom.WDSPDPTypeIPv4v6},
+			},
+			want: IMSProfile{Index: 4, PDNType: "ipv4v6"},
 		},
 		{
 			name:     "selects IMS profile without optional metadata",
@@ -337,7 +345,7 @@ func TestDeviceIMSProfileIndexQMI(t *testing.T) {
 			profileSettings: map[uint8]qcom.WDSProfileSettings{
 				2: {APNKnown: true, APN: "ims"},
 			},
-			want: 2,
+			want: IMSProfile{Index: 2},
 		},
 		{
 			name:        "profile settings rejected",
@@ -356,18 +364,18 @@ func TestDeviceIMSProfileIndexQMI(t *testing.T) {
 			}
 			device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 
-			got, err := device.IMSProfileIndex(context.Background())
+			got, err := device.IMSProfile(context.Background())
 			if tt.wantErr {
 				if err == nil {
-					t.Fatal("IMSProfileIndex() error = nil, want error")
+					t.Fatal("IMSProfile() error = nil, want error")
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("IMSProfileIndex() error = %v", err)
+				t.Fatalf("IMSProfile() error = %v", err)
 			}
 			if got != tt.want {
-				t.Fatalf("IMSProfileIndex() = %d, want %d", got, tt.want)
+				t.Fatalf("IMSProfile() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
@@ -383,6 +391,8 @@ func TestDeviceIMSSTestModeQMI(t *testing.T) {
 	}{
 		{name: "disabled"},
 		{name: "enabled", enabled: true},
+		{name: "service unavailable", err: qcom.QMIErrorInvalidServiceType, wantErr: ErrUnsupported},
+		{name: "command unsupported", err: qcom.QMIErrorNotSupported, wantErr: ErrUnsupported},
 		{name: "query rejected", err: errTestMode, wantErr: errTestMode},
 	}
 
@@ -421,6 +431,8 @@ func TestDeviceSetIMSSTestModeQMI(t *testing.T) {
 	}{
 		{name: "disable"},
 		{name: "enable", enabled: true},
+		{name: "service unavailable", err: qcom.QMIErrorInvalidServiceType, wantErr: ErrUnsupported},
+		{name: "command unsupported", err: qcom.QMIErrorNotSupported, wantErr: ErrUnsupported},
 		{name: "set rejected", enabled: true, err: errTestMode, wantErr: errTestMode},
 	}
 

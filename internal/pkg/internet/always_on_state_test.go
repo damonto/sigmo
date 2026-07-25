@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
 func TestAlwaysOnStatePathFromEnv(t *testing.T) {
@@ -518,8 +520,8 @@ func TestRestoreAlwaysOnSkipsStaleSnapshotAfterManualClear(t *testing.T) {
 		t.Fatalf("loadAlwaysOnStates() error = %v", err)
 	}
 	stale := states[profileID]
-	modem := fakeInternetModem{modemID: modemID, iccidValue: profileID}
-	if err := c.clearAlwaysOnState(context.Background(), modem); err != nil {
+	modem := &mmodem.Modem{EquipmentIdentifier: modemID, Sim: &mmodem.SIM{Identifier: profileID}}
+	if err := c.clearAlwaysOnState(context.Background(), modemAccess{modem: modem}); err != nil {
 		t.Fatalf("clearAlwaysOnState() error = %v", err)
 	}
 

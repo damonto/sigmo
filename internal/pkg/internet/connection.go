@@ -73,6 +73,7 @@ type Connector struct {
 	qmapConnections    map[string]*qmapConnection
 	qmapEnabled        map[string]bool
 	qmapPendingNormal  map[string]Preferences
+	qualcomm410States  map[string]qualcomm410State
 }
 
 type ConnectorConfig struct {
@@ -200,6 +201,7 @@ func NewConnector(cfg ConnectorConfig) (*Connector, error) {
 		qmapConnections:    make(map[string]*qmapConnection),
 		qmapEnabled:        make(map[string]bool),
 		qmapPendingNormal:  make(map[string]Preferences),
+		qualcomm410States:  make(map[string]qualcomm410State),
 		proxy:              cfg.Proxy,
 		state:              cfg.State,
 		persistence:        dbConnectionState{store: cfg.State},
@@ -255,11 +257,33 @@ func (c *Connector) savedAirplaneMode(ctx context.Context, modem *mmodem.Modem) 
 	return enabled, nil
 }
 
+// Current holds the modem operation lock while building the response. QMAP
+// and Qualcomm 410 response data is updated in place during cleanup and
+// preference changes, so returning a response outside that lock can race.
 func (c *Connector) Current(ctx context.Context, modem *mmodem.Modem) (*Connection, error) {
+	access := modemAccess{modem: modem}
+	defer c.lockModem(access.id())()
+
 	if connection := c.qmapConnection(modem); connection != nil {
 		return c.qmapConnectionResponse(modem.EquipmentIdentifier, connection), nil
 	}
-	return c.current(ctx, modemAccess{modem: modem})
+	if modem != nil {
+		state := c.qualcomm410StateFor(modem.EquipmentIdentifier)
+		if state.connection != nil {
+			return c.qualcomm410ConnectionResponse(modem.EquipmentIdentifier, state.connection), nil
+		}
+		if state.restorePending {
+			connection, err := c.currentLocked(ctx, access)
+			if err == nil && connection != nil && connection.Status == StatusConnected {
+				c.clearQualcomm410State(modem.EquipmentIdentifier)
+			}
+			return connection, err
+		}
+		if state.enabled {
+			return disconnectedConnection(c.preference(modem.EquipmentIdentifier)), nil
+		}
+	}
+	return c.currentLocked(ctx, access)
 }
 
 func (c *Connector) current(ctx context.Context, modem internetModem) (*Connection, error) {
@@ -392,10 +416,20 @@ func (c *Connector) Connect(ctx context.Context, modem *mmodem.Modem, prefs Pref
 	if modem.PrimaryPortType() == mmodem.ModemPortTypeQmi && c.qmapEnabledFor(modem.EquipmentIdentifier) {
 		return c.connectQMAP(ctx, modem, prefs)
 	}
+	if hasQMIControlPort(modem) && c.qualcomm410EnabledFor(modem.EquipmentIdentifier) {
+		return c.connectQualcomm410(ctx, modem, prefs)
+	}
 	access := modemAccess{modem: modem}
 	defer c.lockModem(access.id())()
 
-	return c.connect(ctx, access, prefs, true)
+	connection, err := c.connect(ctx, access, prefs, true)
+	if err == nil {
+		state := c.qualcomm410StateFor(modem.EquipmentIdentifier)
+		if state.restorePending && state.connection == nil {
+			c.clearQualcomm410State(modem.EquipmentIdentifier)
+		}
+	}
+	return connection, err
 }
 
 func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Preferences, clearAlwaysOnBefore bool) (*Connection, error) {
@@ -478,6 +512,18 @@ func (c *Connector) Disconnect(ctx context.Context, modem *mmodem.Modem) error {
 	}
 	access := modemAccess{modem: modem}
 	defer c.lockModem(access.id())()
+	if modem != nil {
+		state := c.qualcomm410StateFor(modem.EquipmentIdentifier)
+		if state.active() {
+			if err := c.clearAlwaysOnState(ctx, access); err != nil {
+				return fmt.Errorf("clear Qualcomm 410 always on state: %w", err)
+			}
+			if err := c.disconnectQualcomm410ForUser(ctx, modem, access, state); err != nil {
+				return fmt.Errorf("disconnect Qualcomm 410 Internet: %w", err)
+			}
+			return nil
+		}
+	}
 
 	return c.disconnect(ctx, access, true)
 }
@@ -485,6 +531,21 @@ func (c *Connector) Disconnect(ctx context.Context, modem *mmodem.Modem) error {
 func (c *Connector) Restore(ctx context.Context, modem *mmodem.Modem) error {
 	access := modemAccess{modem: modem}
 	defer c.lockModem(access.id())()
+	if modem != nil {
+		modemID := modem.EquipmentIdentifier
+		state := c.qualcomm410StateFor(modemID)
+		if state.active() {
+			if err := c.disconnectQualcomm410Locked(ctx, modem); err != nil {
+				return fmt.Errorf("disconnect Qualcomm 410 Internet for restore: %w", err)
+			}
+			if err := cleanupInternetQualcomm410State(ctx, c, modemID); err != nil {
+				return fmt.Errorf("cleanup Qualcomm 410 state for restore: %w", err)
+			}
+			c.clearQualcomm410State(modemID)
+			c.deleteConnectionAndPreference(modemID)
+			return nil
+		}
+	}
 
 	err := c.disconnect(ctx, access, false)
 	c.deleteConnectionAndPreference(access.id())
@@ -835,15 +896,53 @@ func (c *Connector) clearAlwaysOnState(ctx context.Context, modem internetModem)
 	profileID := modem.profileID()
 	prefs := c.preferenceWithAlwaysOn(ctx, modem)
 	prefs.AlwaysOn = false
-	if hasInternetPreference(prefs) {
-		c.setPreference(modemID, prefs)
-	} else {
-		c.deletePreference(modemID)
-	}
 	if profileID == "" {
+		c.setAlwaysOnPreferenceInMemory(modemID, prefs)
 		return nil
 	}
-	return c.state.Delete(ctx, profileScope(profileID), alwaysOnKVKey)
+	if err := c.state.Delete(ctx, profileScope(profileID), alwaysOnKVKey); err != nil {
+		return fmt.Errorf("clear always on state: %w", err)
+	}
+	c.setAlwaysOnPreferenceInMemory(modemID, prefs)
+	return nil
+}
+
+func (c *Connector) setAlwaysOnPreferenceInMemory(modemID string, prefs Preferences) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if tracked, ok := c.connections[modemID]; ok {
+		tracked.prefs.AlwaysOn = false
+		c.connections[modemID] = tracked
+	}
+	if connection := c.qmapConnections[modemID]; connection != nil {
+		updated := cloneQMAPConnection(connection)
+		updated.prefs.AlwaysOn = false
+		for i := range updated.tracked {
+			updated.tracked[i].prefs.AlwaysOn = false
+		}
+		c.qmapConnections[modemID] = updated
+	}
+	if state, ok := c.qualcomm410States[modemID]; ok {
+		if state.connection != nil {
+			updated := cloneQualcomm410Connection(state.connection)
+			updated.prefs.AlwaysOn = false
+			updated.tracked.prefs.AlwaysOn = false
+			state.connection = updated
+		}
+		if state.restorePending {
+			state.restorePreferences.AlwaysOn = false
+		}
+		c.qualcomm410States[modemID] = state
+	}
+	if hasInternetPreference(prefs) {
+		if c.preferences == nil {
+			c.preferences = make(map[string]Preferences)
+		}
+		c.preferences[modemID] = normalizePreferences(prefs)
+	} else {
+		delete(c.preferences, modemID)
+	}
 }
 
 func (c *Connector) lockModem(modemID string) func() {

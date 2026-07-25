@@ -38,6 +38,7 @@ var imsPolicyRoutes = struct {
 
 type pdnLinks interface {
 	DisableIPv6Autoconfiguration(string) error
+	FlushGlobalAddresses(string) error
 	SetUp(string) error
 	AddAddress(string, netip.Prefix) error
 	AddPointToPointAddress(string, netip.Addr, netip.Addr) error
@@ -58,6 +59,9 @@ type systemPDNLinks struct{}
 
 func (systemPDNLinks) DisableIPv6Autoconfiguration(name string) error {
 	return netlink.DisableIPv6Autoconfiguration(name)
+}
+func (systemPDNLinks) FlushGlobalAddresses(name string) error {
+	return netlink.FlushGlobalAddresses(name)
 }
 func (systemPDNLinks) SetUp(name string) error { return netlink.SetUp(name) }
 func (systemPDNLinks) AddAddress(name string, prefix netip.Prefix) error {
@@ -99,11 +103,20 @@ func (systemPDNLinks) AddVLAN(parent, name string, id uint16) error {
 func (systemPDNLinks) DeleteLink(name string) error { return netlink.DeleteLink(name) }
 
 type pdnNetworkState struct {
-	prefixes    []netip.Prefix
-	peers       map[netip.Prefix]netip.Addr
-	defaults    []netlink.DefaultRoute
-	rules       []netlink.PolicyRule
-	policyTable uint32
+	prefixes     []netip.Prefix
+	peers        map[netip.Prefix]netip.Addr
+	defaults     []netlink.DefaultRoute
+	rules        []netlink.PolicyRule
+	policyTable  uint32
+	flushPending bool
+}
+
+func (s pdnNetworkState) empty() bool {
+	return len(s.prefixes) == 0 &&
+		len(s.defaults) == 0 &&
+		len(s.rules) == 0 &&
+		s.policyTable == 0 &&
+		!s.flushPending
 }
 
 type imsPDNInfo = imsgo.IMSPDNNetworkInfo
@@ -111,6 +124,7 @@ type imsPDNInfo = imsgo.IMSPDNNetworkInfo
 type pdnNetwork struct {
 	parent        string
 	mbim          bool
+	dedicatedQMI  bool
 	links         pdnLinks
 	mu            sync.Mutex
 	interfaceName string
@@ -119,6 +133,14 @@ type pdnNetwork struct {
 
 func newPDNNetwork(parent string, mbim bool) *pdnNetwork {
 	return &pdnNetwork{parent: parent, mbim: mbim, links: systemPDNLinks{}}
+}
+
+func newDedicatedPDNNetwork(parent string) *pdnNetwork {
+	return &pdnNetwork{parent: parent, dedicatedQMI: true, links: systemPDNLinks{}}
+}
+
+func (n *pdnNetwork) isolated() bool {
+	return n.dedicatedQMI || n.mbim
 }
 
 func (n *pdnNetwork) Replace(ctx context.Context, info imsPDNInfo) (string, error) {
@@ -173,8 +195,11 @@ func (n *pdnNetwork) sessionInterface(sessionID uint32) (string, error) {
 
 func (n *pdnNetwork) configure(ctx context.Context, interfaceName string, info imsPDNInfo) (pdnNetworkState, error) {
 	if err := waitForIMSInterface(ctx, interfaceName, func(name string) error {
-		if n.mbim {
+		if n.isolated() {
 			if err := n.links.DisableIPv6Autoconfiguration(name); err != nil {
+				return err
+			}
+			if err := n.links.FlushGlobalAddresses(name); err != nil {
 				return err
 			}
 		}
@@ -271,13 +296,13 @@ func (n *pdnNetwork) closeLocked() error {
 	}
 	remaining, err := n.cleanup(n.interfaceName, n.state)
 	n.state = remaining
-	if n.mbim && len(n.state.prefixes) == 0 && len(n.state.rules) == 0 && len(n.state.defaults) == 0 && n.state.policyTable == 0 {
+	if n.mbim && n.state.empty() {
 		if linkErr := n.links.DeleteLink(n.interfaceName); linkErr != nil {
 			return errors.Join(err, linkErr)
 		}
 		n.state = pdnNetworkState{}
 	}
-	if len(n.state.prefixes) == 0 && len(n.state.defaults) == 0 && len(n.state.rules) == 0 && n.state.policyTable == 0 {
+	if n.state.empty() {
 		n.interfaceName = ""
 	}
 	return err
@@ -332,6 +357,14 @@ func (n *pdnNetwork) cleanup(interfaceName string, state pdnNetworkState) (pdnNe
 			if pointToPoint {
 				remaining.peers[prefix] = peer
 			}
+		}
+	}
+	if n.isolated() {
+		if err := n.links.FlushGlobalAddresses(interfaceName); err != nil {
+			result = errors.Join(result, err)
+			remaining.flushPending = true
+		} else {
+			remaining.flushPending = false
 		}
 	}
 	return remaining, result

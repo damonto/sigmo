@@ -124,6 +124,14 @@ func TestOpenWWANRequiresOneQMIDataPath(t *testing.T) {
 				LegacyMuxDataPort: qcom.WDSSIOPortA2MuxRMNET0,
 			},
 		},
+		{
+			name: "dedicated QMI path cannot bind data port",
+			cfg: WWANConfig{
+				Access:         AccessVoLTE,
+				QMIControlPort: "/dev/qmi_rmnet1",
+				MuxDataPort:    muxDataPort,
+			},
+		},
 	}
 	modem := &mmodem.Modem{
 		PrimarySimSlot: 1,
@@ -138,6 +146,64 @@ func TestOpenWWANRequiresOneQMIDataPath(t *testing.T) {
 			_, err := OpenWWAN(context.Background(), modem, tt.cfg)
 			if err == nil {
 				t.Fatal("OpenWWAN() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestValidateDedicatedQMIWWANConfig(t *testing.T) {
+	previous := validateQualcomm410Layout
+	t.Cleanup(func() { validateQualcomm410Layout = previous })
+
+	layoutErr := errors.New("layout unavailable")
+	probeCalls := 0
+	validateQualcomm410Layout = func() error {
+		probeCalls++
+		return layoutErr
+	}
+	tests := []struct {
+		name         string
+		cfg          WWANConfig
+		wantErr      bool
+		wantIs       error
+		wantContains string
+		wantCalls    int
+	}{
+		{
+			name:         "rejects unsupported dedicated QMI port",
+			cfg:          WWANConfig{QMIControlPort: "/dev/cdc-wdm2"},
+			wantErr:      true,
+			wantContains: "unsupported dedicated QMI",
+		},
+		{
+			name:         "rejects mismatched interface",
+			cfg:          WWANConfig{QMIControlPort: mmodem.Qualcomm410IMSQMI, InterfaceName: "wwan0"},
+			wantErr:      true,
+			wantContains: "interface",
+		},
+		{
+			name:      "checks fixed layout",
+			cfg:       WWANConfig{QMIControlPort: mmodem.Qualcomm410IMSQMI, InterfaceName: mmodem.Qualcomm410IMSInterface},
+			wantErr:   true,
+			wantIs:    layoutErr,
+			wantCalls: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			probeCalls = 0
+			err := validateDedicatedQMIWWANConfig(tt.cfg)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateDedicatedQMIWWANConfig() error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
+				t.Fatalf("validateDedicatedQMIWWANConfig() error = %v, want errors.Is(%v)", err, tt.wantIs)
+			}
+			if tt.wantContains != "" && !strings.Contains(err.Error(), tt.wantContains) {
+				t.Fatalf("validateDedicatedQMIWWANConfig() error = %v, want containing %q", err, tt.wantContains)
+			}
+			if probeCalls != tt.wantCalls {
+				t.Fatalf("layout probe calls = %d, want %d", probeCalls, tt.wantCalls)
 			}
 		})
 	}
@@ -453,6 +519,59 @@ func TestConfigureIMSPDNNetwork(t *testing.T) {
 	}
 }
 
+func TestDedicatedPDNNetworkFlushesStaleAddresses(t *testing.T) {
+	resetIMSPolicyReservations(t)
+	var calls []string
+	network := &pdnNetwork{
+		parent:       "wwan1",
+		dedicatedQMI: true,
+		links: fakePDNLinks{
+			disableIPv6Autoconfiguration: func(name string) error {
+				calls = append(calls, "disable:"+name)
+				return nil
+			},
+			flushGlobalAddresses: func(name string) error {
+				calls = append(calls, "flush-addresses:"+name)
+				return nil
+			},
+			setUp: func(name string) error {
+				calls = append(calls, "up:"+name)
+				return nil
+			},
+			addPointToPointAddress: func(name string, local, peer netip.Addr) error {
+				calls = append(calls, fmt.Sprintf("add:%s:%s:%s", name, local, peer))
+				return nil
+			},
+			deletePointToPointAddress: func(name string, local, peer netip.Addr) error {
+				calls = append(calls, fmt.Sprintf("delete:%s:%s:%s", name, local, peer))
+				return nil
+			},
+		},
+	}
+	info := imsPDNInfo{
+		LocalIPv6:   net.ParseIP("2001:db8::2"),
+		IPv6Gateway: net.ParseIP("2001:db8::1"),
+	}
+
+	if _, err := network.Replace(context.Background(), info); err != nil {
+		t.Fatalf("Replace() error = %v", err)
+	}
+	if err := network.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	want := []string{
+		"disable:wwan1",
+		"flush-addresses:wwan1",
+		"up:wwan1",
+		"add:wwan1:2001:db8::2:2001:db8::1",
+		"delete:wwan1:2001:db8::2:2001:db8::1",
+		"flush-addresses:wwan1",
+	}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("network calls = %v, want %v", calls, want)
+	}
+}
+
 func TestManagedVoLTECardUsesMBIMSessionInterface(t *testing.T) {
 	resetIMSPolicyReservations(t)
 	tests := []struct {
@@ -728,6 +847,47 @@ func TestPDNNetworkRetainsMBIMLinkUntilAddressCleanupSucceeds(t *testing.T) {
 	}
 	if deleteLinkCalls != 1 || network.interfaceName != "" || len(network.state.prefixes) != 0 {
 		t.Fatalf("state after successful Close = link deletes %d, interface %q, prefixes %v", deleteLinkCalls, network.interfaceName, network.state.prefixes)
+	}
+}
+
+func TestPDNNetworkRetainsPendingAddressFlushForRetry(t *testing.T) {
+	flushErr := errors.New("flush addresses rejected")
+	flushCalls := 0
+	network := &pdnNetwork{
+		parent:        "wwan1",
+		dedicatedQMI:  true,
+		interfaceName: "wwan1",
+		state: pdnNetworkState{
+			prefixes: []netip.Prefix{netip.MustParsePrefix("2001:db8::2/128")},
+			peers: map[netip.Prefix]netip.Addr{
+				netip.MustParsePrefix("2001:db8::2/128"): netip.MustParseAddr("2001:db8::1"),
+			},
+		},
+		links: fakePDNLinks{
+			deletePointToPointAddress: func(string, netip.Addr, netip.Addr) error {
+				return nil
+			},
+			flushGlobalAddresses: func(string) error {
+				flushCalls++
+				if flushCalls == 1 {
+					return flushErr
+				}
+				return nil
+			},
+		},
+	}
+
+	if err := network.Close(); !errors.Is(err, flushErr) {
+		t.Fatalf("first Close() error = %v, want %v", err, flushErr)
+	}
+	if network.interfaceName != "wwan1" || !network.state.flushPending || len(network.state.prefixes) != 0 {
+		t.Fatalf("state after failed flush = %q/%+v, want pending flush", network.interfaceName, network.state)
+	}
+	if err := network.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+	if network.interfaceName != "" || !network.state.empty() || flushCalls != 2 {
+		t.Fatalf("state after retry = %q/%+v, flush calls %d", network.interfaceName, network.state, flushCalls)
 	}
 }
 
@@ -1048,6 +1208,7 @@ func TestIsIMSCallAlreadyPresent(t *testing.T) {
 
 type fakePDNLinks struct {
 	disableIPv6Autoconfiguration func(string) error
+	flushGlobalAddresses         func(string) error
 	setUp                        func(string) error
 	addAddress                   func(string, netip.Prefix) error
 	addPointToPointAddress       func(string, netip.Addr, netip.Addr) error
@@ -1069,6 +1230,13 @@ func (f fakePDNLinks) DisableIPv6Autoconfiguration(name string) error {
 		return nil
 	}
 	return f.disableIPv6Autoconfiguration(name)
+}
+
+func (f fakePDNLinks) FlushGlobalAddresses(name string) error {
+	if f.flushGlobalAddresses == nil {
+		return nil
+	}
+	return f.flushGlobalAddresses(name)
 }
 
 func (f fakePDNLinks) SetUp(name string) error {

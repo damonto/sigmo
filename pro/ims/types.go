@@ -48,6 +48,7 @@ const (
 	DataPathMBIM          DataPath = "mbim"
 	DataPathQMAP          DataPath = "qmap"
 	DataPathLegacyBAMDMUX DataPath = "legacy_bam_dmux"
+	DataPathQualcomm410   DataPath = "qualcomm_410"
 )
 
 var (

@@ -724,6 +724,9 @@ const zh = {
         '现代 Qualcomm 设备的默认方案。除非设备不支持 QMAP，否则请选择此项。',
       volteDataPathLegacy: 'Legacy BAM-DMUX',
       volteDataPathLegacyDescription: '仅适用于不支持 QMAP 的旧 Qualcomm BAM-DMUX 设备。',
+      volteDataPathQualcomm410: 'Qualcomm 410 Compatible (Wi-Fi dongle)',
+      volteDataPathQualcomm410Description:
+        '适用于已提供双 QMI/rmnet 通道的 Qualcomm 410 兼容 Wi-Fi dongle；Internet 与 IMS 可同时保持连接。',
       volteDataPathSuccess: 'VoLTE 数据通道已更新。',
       volteManagedDescription: 'VoLTE 已由 Sigmo 接管。',
       volteModemRegisteredDescription: 'VoLTE 由模块管理。',

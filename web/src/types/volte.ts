@@ -1,4 +1,4 @@
-export type VoLTEQMIDataPath = 'qmap' | 'legacy_bam_dmux'
+export type VoLTEQMIDataPath = 'qmap' | 'legacy_bam_dmux' | 'qualcomm_410'
 export type VoLTEDataPath = 'mbim' | VoLTEQMIDataPath
 
 export type VoLTESettingsResponse = {

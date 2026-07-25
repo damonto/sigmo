@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -30,6 +31,13 @@ func (c *Connector) UpdatePreferences(ctx context.Context, modem *mmodem.Modem, 
 			return nil, err
 		}
 		return c.qmapConnectionResponse(modemID, updated), nil
+	}
+	if connection := c.qualcomm410ConnectionFor(modemID); connection != nil {
+		updated, err := c.updateQualcomm410Preferences(ctx, access, connection, next)
+		if err != nil {
+			return nil, err
+		}
+		return c.qualcomm410ConnectionResponse(modemID, updated), nil
 	}
 
 	current, err := c.currentLocked(ctx, access)
@@ -151,6 +159,18 @@ func (c *Connector) updateQMAPPreferences(ctx context.Context, modem internetMod
 	c.qmapConnections[modem.id()] = updated
 	c.preferences[modem.id()] = wanted
 	c.mu.Unlock()
+	return updated, nil
+}
+
+func (c *Connector) updateQualcomm410Preferences(ctx context.Context, modem internetModem, connection *qualcomm410Connection, next ConnectionPreferences) (*qualcomm410Connection, error) {
+	updatedTracked, err := c.updateTrackedPreferences(ctx, modem, connection.tracked, next)
+	if err != nil {
+		return connection, err
+	}
+	updated := cloneQualcomm410Connection(connection)
+	updated.tracked = updatedTracked
+	updated.prefs = updatedTracked.prefs
+	c.setQualcomm410ConnectionAndPreference(modem.id(), updated, updated.prefs)
 	return updated, nil
 }
 
@@ -318,6 +338,7 @@ func qmapPrimaryInterface(connection *qmapConnection) string {
 
 func cloneTrackedConnection(tracked trackedConnection) trackedConnection {
 	tracked.addresses = slices.Clone(tracked.addresses)
+	tracked.peers = maps.Clone(tracked.peers)
 	tracked.routes = slices.Clone(tracked.routes)
 	tracked.routeChanges = slices.Clone(tracked.routeChanges)
 	return tracked

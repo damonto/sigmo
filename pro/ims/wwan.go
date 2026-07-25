@@ -14,7 +14,6 @@ import (
 	"github.com/damonto/wwan-go/at"
 	"github.com/damonto/wwan-go/mbim"
 	"github.com/damonto/wwan-go/qcom"
-	"github.com/damonto/wwan-go/qcom/qmi"
 	usim "github.com/damonto/wwan-go/sim"
 	usimcard "github.com/damonto/wwan-go/sim/card"
 )
@@ -22,10 +21,13 @@ import (
 // WWANConfig selects the modem access used by an IMS client.
 type WWANConfig struct {
 	Access            Access
+	QMIControlPort    string
 	MuxDataPort       *qcom.WDSMuxDataPort
 	LegacyMuxDataPort qcom.WDSSIOPort
 	InterfaceName     string
 }
+
+var validateQualcomm410Layout = mmodem.ValidateQualcomm410Layout
 
 // OpenWWAN opens the SIM and packet-data adapter required by the selected IMS access.
 func OpenWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (usimcard.Reader, error) {
@@ -112,33 +114,55 @@ func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (us
 	if err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(cfg.QMIControlPort) != "" {
+		if port.PortType != mmodem.ModemPortTypeQmi {
+			return nil, errors.New("dedicated QMI control port requires a QMI VoLTE modem")
+		}
+		port.Device = strings.TrimSpace(cfg.QMIControlPort)
+	}
+	dedicatedQMI := strings.TrimSpace(cfg.QMIControlPort) != ""
 	slot, err := voLTESIMSlot(modem)
 	if err != nil {
 		return nil, err
 	}
 	switch port.PortType {
 	case mmodem.ModemPortTypeQmi:
-		if cfg.MuxDataPort == nil && cfg.LegacyMuxDataPort == 0 {
-			return nil, errors.New("QMI VoLTE data path is required")
+		if dedicatedQMI {
+			if cfg.MuxDataPort != nil || cfg.LegacyMuxDataPort != 0 {
+				return nil, errors.New("dedicated QMI cannot bind a data port")
+			}
+			if err := validateDedicatedQMIWWANConfig(cfg); err != nil {
+				return nil, err
+			}
+		} else {
+			if cfg.MuxDataPort == nil && cfg.LegacyMuxDataPort == 0 {
+				return nil, errors.New("QMI VoLTE data path is required")
+			}
+			if cfg.MuxDataPort != nil && cfg.LegacyMuxDataPort != 0 {
+				return nil, errors.New("QMAP and legacy BAM-DMUX data ports are mutually exclusive")
+			}
 		}
-		if cfg.MuxDataPort != nil && cfg.LegacyMuxDataPort != 0 {
-			return nil, errors.New("QMAP and legacy BAM-DMUX data ports are mutually exclusive")
-		}
-		transport, err := qmi.Open(ctx, qmi.WithProxy(port.Device))
+		clientConfig := wwan.QMIClientConfig{Device: port.Device, Slot: slot}
+		client, err := wwan.OpenQMIClient(ctx, clientConfig)
 		if err != nil {
-			return nil, fmt.Errorf("open QMI proxy: %w", err)
-		}
-		client, err := qcom.NewClient(transport, qcom.WithSlot(slot))
-		if err != nil {
-			return nil, errors.Join(err, transport.Close())
+			return nil, fmt.Errorf("open QMI client: %w", err)
 		}
 		if err := client.ActivateSlot(ctx); err != nil {
 			return nil, errors.Join(fmt.Errorf("activate QMI SIM slot: %w", err), client.Close())
 		}
+		if dedicatedQMI {
+			if err := ensureVoLTEQMIDataFormat(ctx, client); err != nil {
+				return nil, errors.Join(fmt.Errorf("set dedicated QMI raw IP: %w", err), client.Close())
+			}
+		}
+		network := newPDNNetwork(cfg.InterfaceName, false)
+		if dedicatedQMI {
+			network = newDedicatedPDNNetwork(cfg.InterfaceName)
+		}
 		reader, err := imsgo.NewQCOMClient(client, imsgo.QCOMClientConfig{
 			MuxDataPort:       cfg.MuxDataPort,
 			LegacyMuxDataPort: cfg.LegacyMuxDataPort,
-			Network:           newPDNNetwork(cfg.InterfaceName, false),
+			Network:           network,
 		})
 		if err != nil {
 			return nil, errors.Join(err, client.Close())
@@ -163,6 +187,38 @@ func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (us
 	default:
 		return nil, ErrUnavailable
 	}
+}
+
+func validateDedicatedQMIWWANConfig(cfg WWANConfig) error {
+	controlPort := strings.TrimSpace(cfg.QMIControlPort)
+	if controlPort == "" {
+		return nil
+	}
+	if controlPort != mmodem.Qualcomm410IMSQMI {
+		return fmt.Errorf("unsupported dedicated QMI control port %q", controlPort)
+	}
+	if strings.TrimSpace(cfg.InterfaceName) != mmodem.Qualcomm410IMSInterface {
+		return fmt.Errorf("Qualcomm 410 IMS interface must be %s", mmodem.Qualcomm410IMSInterface)
+	}
+	if err := validateQualcomm410Layout(); err != nil {
+		return fmt.Errorf("validate Qualcomm 410 layout: %w", err)
+	}
+	return nil
+}
+
+func ensureVoLTEQMIDataFormat(ctx context.Context, client *qcom.Client) error {
+	format, err := client.WDADataFormat(ctx)
+	if err == nil && format.LinkLayerProtocolKnown && format.LinkLayerProtocol == qcom.WDALinkLayerRawIP {
+		return nil
+	}
+	if err := client.SetWDALinkLayerProtocol(ctx, qcom.WDALinkLayerRawIP); err != nil {
+		format, readErr := client.WDADataFormat(ctx)
+		if readErr == nil && format.LinkLayerProtocolKnown && format.LinkLayerProtocol == qcom.WDALinkLayerRawIP {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func isIMSCallAlreadyPresent(err error) bool {

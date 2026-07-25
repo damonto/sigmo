@@ -69,17 +69,21 @@ func (c *Connector) restoreAlwaysOnModems(ctx context.Context, registry *mmodem.
 		if !ok || !prefs.AlwaysOn {
 			continue
 		}
-		if err := c.restoreAlwaysOn(ctx, access, prefs); err != nil {
+		if err := c.restoreAlwaysOn(ctx, modem, prefs); err != nil {
 			slog.Warn("restore internet always on connection", "imei", modem.EquipmentIdentifier, "error", err)
 		}
 	}
 }
 
-func (c *Connector) restoreAlwaysOn(ctx context.Context, modem internetModem, prefs Preferences) error {
-	modemID := modem.id()
+func (c *Connector) restoreAlwaysOn(ctx context.Context, modem *mmodem.Modem, prefs Preferences) error {
+	if modem == nil {
+		return ErrModemRequired
+	}
+	access := modemAccess{modem: modem}
+	modemID := access.id()
 	defer c.lockModem(modemID)()
 
-	profileID := modem.profileID()
+	profileID := access.profileID()
 	if profileID == "" {
 		return nil
 	}
@@ -92,17 +96,33 @@ func (c *Connector) restoreAlwaysOn(ctx context.Context, modem internetModem, pr
 	}
 	prefs = latest
 	prefs.AlwaysOn = true
-	current, err := currentBearer(ctx, modem)
-	if err != nil {
-		return err
+	state := c.qualcomm410StateFor(modemID)
+	if state.restorePending {
+		if err := c.disableQualcomm410PendingRestore(ctx, modem, access, state.restorePreferences); err != nil {
+			return fmt.Errorf("restore pending normal Internet bearer: %w", err)
+		}
+		return nil
 	}
-	if current.bearer != nil && current.connected {
-		return c.recoverAlwaysOn(ctx, modem, current.bearer, prefs)
-	}
+	if !state.enabled {
+		current, err := currentBearer(ctx, access)
+		if err != nil {
+			return err
+		}
+		if current.bearer != nil && current.connected {
+			return c.recoverAlwaysOn(ctx, access, current.bearer, prefs)
+		}
 
-	_, err = c.connect(ctx, modem, prefs, false)
-	if err != nil {
-		return fmt.Errorf("connect always on bearer: %w", err)
+		_, err = c.connect(ctx, access, prefs, false)
+		if err != nil {
+			return fmt.Errorf("connect always on bearer: %w", err)
+		}
+		return nil
+	}
+	if state.connection != nil {
+		return nil
+	}
+	if _, err := c.connectQualcomm410Locked(ctx, modem, prefs); err != nil {
+		return fmt.Errorf("connect always on Qualcomm 410 Internet: %w", err)
 	}
 	return nil
 }

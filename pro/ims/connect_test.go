@@ -123,6 +123,9 @@ func TestModemClientConfigForIMEI(t *testing.T) {
 			if cfg.Terminal.ID != tt.imei {
 				t.Fatalf("Terminal.ID = %q, want %q", cfg.Terminal.ID, tt.imei)
 			}
+			if len(cfg.IMS.Voice.Codecs) != 0 {
+				t.Fatalf("IMS voice codecs = %+v, want carrier profile to configure them", cfg.IMS.Voice.Codecs)
+			}
 			if tt.access == AccessWiFiCalling && cfg.Access.VoWiFi == nil {
 				t.Fatal("Access.VoWiFi = nil, want Wi-Fi Calling access")
 			}
@@ -142,6 +145,35 @@ func TestModemClientConfigForIMEI(t *testing.T) {
 	}
 }
 
+func TestConfigureQualcomm410IMSPDNType(t *testing.T) {
+	tests := []struct {
+		name           string
+		dataPath       DataPath
+		profilePDNType string
+		initialPDN     string
+		wantPDN        string
+	}{
+		{name: "Qualcomm 410 uses IPv4 profile", dataPath: DataPathQualcomm410, profilePDNType: "ipv4", wantPDN: "ipv4"},
+		{name: "Qualcomm 410 uses IPv6 profile", dataPath: DataPathQualcomm410, profilePDNType: "ipv6", wantPDN: "ipv6"},
+		{name: "Qualcomm 410 uses dual-stack profile", dataPath: DataPathQualcomm410, profilePDNType: "ipv4v6", wantPDN: "ipv4v6"},
+		{name: "Qualcomm 410 falls back when profile omits PDP type", dataPath: DataPathQualcomm410, wantPDN: lte.DefaultPDNType},
+		{name: "Qualcomm 410 preserves an explicit override without profile PDP type", dataPath: DataPathQualcomm410, initialPDN: "ipv4", wantPDN: "ipv4"},
+		{name: "QMAP keeps IMS default", dataPath: DataPathQMAP, profilePDNType: "ipv6", wantPDN: ""},
+		{name: "legacy BAM-DMUX keeps IMS default", dataPath: DataPathLegacyBAMDMUX, profilePDNType: "ipv6", wantPDN: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := modemClientConfigForIMEI("123456789012345", AccessVoLTE, 1)
+			cfg.Access.VoLTE.PDNType = tt.initialPDN
+			configureQualcomm410IMSPDNType(cfg, tt.dataPath, tt.profilePDNType)
+			if got := cfg.Access.VoLTE.PDNType; got != tt.wantPDN {
+				t.Fatalf("Access.VoLTE.PDNType = %q, want %q", got, tt.wantPDN)
+			}
+		})
+	}
+}
+
 type fakeManagedVoLTEDevice struct {
 	status           wwan.VoLTEStatus
 	statusErr        error
@@ -156,7 +188,7 @@ type fakeManagedVoLTEDevice struct {
 	restoreCtxErr    error
 	packetStatuses   []wwan.PacketServiceStatus
 	packetErrors     []error
-	profileIndex     uint8
+	profile          wwan.IMSProfile
 	profileErr       error
 	closed           bool
 }
@@ -186,12 +218,12 @@ func (d *fakeManagedVoLTEDevice) PacketServiceStatus(context.Context) (wwan.Pack
 	return status, err
 }
 
-func (d *fakeManagedVoLTEDevice) IMSProfileIndex(context.Context) (uint8, error) {
+func (d *fakeManagedVoLTEDevice) IMSProfile(context.Context) (wwan.IMSProfile, error) {
 	d.calls = append(d.calls, "ims-profile")
-	if d.profileIndex == 0 {
-		d.profileIndex = 2
+	if d.profile.Index == 0 {
+		d.profile = wwan.IMSProfile{Index: 2, PDNType: "ipv6"}
 	}
-	return d.profileIndex, d.profileErr
+	return d.profile, d.profileErr
 }
 
 func (d *fakeManagedVoLTEDevice) IMSSTestMode(ctx context.Context) (bool, error) {
@@ -325,14 +357,14 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 		device      *fakeManagedVoLTEDevice
 		cancel      bool
 		wantCalls   []string
-		wantProfile uint8
+		wantProfile wwan.IMSProfile
 		wantErr     error
 	}{
 		{
 			name:        "IMSA unavailable continues with WDS",
 			device:      &fakeManagedVoLTEDevice{},
 			wantCalls:   []string{"status", "ims-profile", "packet-service"},
-			wantProfile: 2,
+			wantProfile: wwan.IMSProfile{Index: 2, PDNType: "ipv6"},
 		},
 		{
 			name:      "status rejected",
@@ -344,7 +376,7 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 			name:        "IMS available",
 			device:      &fakeManagedVoLTEDevice{},
 			wantCalls:   []string{"status", "ims-profile", "packet-service"},
-			wantProfile: 2,
+			wantProfile: wwan.IMSProfile{Index: 2, PDNType: "ipv6"},
 		},
 		{
 			name: "waits for packet service before IMS",
@@ -356,13 +388,13 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 				},
 			},
 			wantCalls:   []string{"status", "ims-profile", "packet-service", "packet-service"},
-			wantProfile: 2,
+			wantProfile: wwan.IMSProfile{Index: 2, PDNType: "ipv6"},
 		},
 		{
 			name:        "test mode already enabled",
 			device:      &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Occupied: true}, testMode: true},
 			wantCalls:   []string{"status", "ims-profile", "test-mode", "packet-service"},
-			wantProfile: 2,
+			wantProfile: wwan.IMSProfile{Index: 2, PDNType: "ipv6"},
 		},
 		{
 			name:      "test mode query rejected",
@@ -386,7 +418,7 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 			name:        "takes over occupied IMS",
 			device:      &fakeManagedVoLTEDevice{status: wwan.VoLTEStatus{Occupied: true}},
 			wantCalls:   []string{"status", "ims-profile", "test-mode", "set-test-mode:true", "set-airplane-mode:true", "set-airplane-mode:false", "packet-service"},
-			wantProfile: 2,
+			wantProfile: wwan.IMSProfile{Index: 2, PDNType: "ipv6"},
 		},
 		{
 			name:      "IMS profile unavailable",
@@ -435,12 +467,12 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 				tt.device.cancel = cancel
 				voLTEResetDelay = time.Hour
 			}
-			profileIndex, err := prepareManagedVoLTE(ctx, &mmodem.Modem{}, nil)
+			profile, err := prepareManagedVoLTE(ctx, &mmodem.Modem{}, nil)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("prepareManagedVoLTE() error = %v, want %v", err, tt.wantErr)
 			}
-			if profileIndex != tt.wantProfile {
-				t.Fatalf("prepareManagedVoLTE() profile = %d, want %d", profileIndex, tt.wantProfile)
+			if profile != tt.wantProfile {
+				t.Fatalf("prepareManagedVoLTE() profile = %+v, want %+v", profile, tt.wantProfile)
 			}
 			if !slices.Equal(tt.device.calls, tt.wantCalls) {
 				t.Fatalf("calls = %v, want %v", tt.device.calls, tt.wantCalls)
@@ -630,16 +662,18 @@ func TestWaitForPacketService(t *testing.T) {
 }
 
 type fakeInternetRestorer struct {
-	connection    *pinternet.Connection
-	currentErr    error
-	connectErr    error
-	connectErrors []error
-	cancel        context.CancelFunc
-	calls         []string
-	prefs         pinternet.Preferences
-	qmapErr       error
-	qmapErrors    []error
-	restoreErr    error
+	connection        *pinternet.Connection
+	currentErr        error
+	connectErr        error
+	connectErrors     []error
+	cancel            context.CancelFunc
+	calls             []string
+	prefs             pinternet.Preferences
+	qmapErr           error
+	qmapErrors        []error
+	qualcomm410Err    error
+	qualcomm410Errors []error
+	restoreErr        error
 }
 
 func (r *fakeInternetRestorer) SetQMAPEnabled(_ context.Context, _ *mmodem.Modem, enabled bool) error {
@@ -650,6 +684,16 @@ func (r *fakeInternetRestorer) SetQMAPEnabled(_ context.Context, _ *mmodem.Modem
 		return err
 	}
 	return r.qmapErr
+}
+
+func (r *fakeInternetRestorer) SetQualcomm410Enabled(_ context.Context, _ *mmodem.Modem, enabled bool) error {
+	r.calls = append(r.calls, fmt.Sprintf("qualcomm410:%t", enabled))
+	if len(r.qualcomm410Errors) > 0 {
+		err := r.qualcomm410Errors[0]
+		r.qualcomm410Errors = r.qualcomm410Errors[1:]
+		return err
+	}
+	return r.qualcomm410Err
 }
 
 func (r *fakeInternetRestorer) Current(context.Context, *mmodem.Modem) (*pinternet.Connection, error) {

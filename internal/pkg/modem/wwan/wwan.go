@@ -57,7 +57,7 @@ type adapter interface {
 	SIMState(ctx context.Context, target Target) (SIMState, error)
 	VoLTEStatus(ctx context.Context) (VoLTEStatus, error)
 	PacketServiceStatus(ctx context.Context) (PacketServiceStatus, error)
-	IMSProfileIndex(ctx context.Context) (uint8, error)
+	IMSProfile(ctx context.Context) (IMSProfile, error)
 	IMSSTestMode(ctx context.Context) (bool, error)
 	SetIMSSTestMode(ctx context.Context, enabled bool) error
 	MSISDN(ctx context.Context) (string, error)
@@ -88,6 +88,11 @@ type PacketServiceStatus struct {
 	Registered bool
 	PSAttached bool
 	LTE        bool
+}
+
+type IMSProfile struct {
+	Index   uint8
+	PDNType string
 }
 
 func Open(cfg Config) (*Device, error) {
@@ -151,8 +156,8 @@ func (d *Device) PacketServiceStatus(ctx context.Context) (PacketServiceStatus, 
 	return d.adapter.PacketServiceStatus(ctx)
 }
 
-func (d *Device) IMSProfileIndex(ctx context.Context) (uint8, error) {
-	return d.adapter.IMSProfileIndex(ctx)
+func (d *Device) IMSProfile(ctx context.Context) (IMSProfile, error) {
+	return d.adapter.IMSProfile(ctx)
 }
 
 func (d *Device) IMSSTestMode(ctx context.Context) (bool, error) {

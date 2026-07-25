@@ -164,6 +164,12 @@ func (c *coordinator) releaseManagedVoLTEOnShutdown(ctx context.Context, modems 
 			if err := c.restoreLegacyInternet(cleanupCtx, modem); err != nil {
 				result = errors.Join(result, err)
 			}
+		case DataPathQualcomm410:
+			if c.internet != nil {
+				if err := c.internet.SetQualcomm410Enabled(cleanupCtx, modem, false); err != nil {
+					result = errors.Join(result, fmt.Errorf("restore modem %s Qualcomm 410 Internet: %w", modem.EquipmentIdentifier, err))
+				}
+			}
 		default:
 			result = errors.Join(result, fmt.Errorf("modem %s has unsupported VoLTE data path %q", modem.EquipmentIdentifier, settings.DataPath))
 		}
@@ -211,7 +217,7 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 			settings.DataPath = DataPathMBIM
 		case mmodem.ModemPortTypeQmi:
 			switch settings.DataPath {
-			case DataPathQMAP, DataPathLegacyBAMDMUX:
+			case DataPathQMAP, DataPathLegacyBAMDMUX, DataPathQualcomm410:
 			default:
 				return fmt.Errorf("unsupported QMI VoLTE data path %q", settings.DataPath)
 			}
@@ -313,6 +319,13 @@ func (c *coordinator) configureVoLTEDataPath(ctx context.Context, modem *mmodem.
 		if err := c.internet.SetQMAPEnabled(ctx, modem, false); err != nil {
 			return fmt.Errorf("restore non-QMAP data format for legacy BAM-DMUX: %w", err)
 		}
+	case DataPathQualcomm410:
+		if c.internet == nil {
+			return nil
+		}
+		if err := c.internet.SetQualcomm410Enabled(ctx, modem, true); err != nil {
+			return fmt.Errorf("enable Qualcomm 410 Internet: %w", err)
+		}
 	default:
 		return fmt.Errorf("unsupported VoLTE data path %q", dataPath)
 	}
@@ -331,6 +344,12 @@ func (c *coordinator) restoreVoLTEDataPath(ctx context.Context, modem *mmodem.Mo
 		}
 	case DataPathLegacyBAMDMUX:
 		return c.restoreLegacyInternet(ctx, modem)
+	case DataPathQualcomm410:
+		if c.internet != nil {
+			if err := c.internet.SetQualcomm410Enabled(ctx, modem, false); err != nil {
+				return fmt.Errorf("restore Qualcomm 410 Internet: %w", err)
+			}
+		}
 	default:
 		return fmt.Errorf("unsupported VoLTE data path %q", dataPath)
 	}

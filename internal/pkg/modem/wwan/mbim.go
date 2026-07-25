@@ -121,22 +121,22 @@ func (u mbimDevice) PacketServiceStatus(ctx context.Context) (PacketServiceStatu
 	}, nil
 }
 
-func (u mbimDevice) IMSProfileIndex(ctx context.Context) (uint8, error) {
+func (u mbimDevice) IMSProfile(ctx context.Context) (IMSProfile, error) {
 	client, err := u.openNetwork(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("open MBIM network client: %w", err)
+		return IMSProfile{}, fmt.Errorf("open MBIM network client: %w", err)
 	}
 	defer closeClient("close MBIM network client", client)
 
 	found, err := mbimIMSContextAvailable(ctx, client)
 	if err != nil {
-		return 0, err
+		return IMSProfile{}, err
 	}
 	if !found {
-		return 0, errors.New("MBIM IMS provisioned context is unavailable")
+		return IMSProfile{}, errors.New("MBIM IMS provisioned context is unavailable")
 	}
 	// MBIM selects its IMS context by context type and APN, not by the QMI WDS profile index.
-	return 0, nil
+	return IMSProfile{}, nil
 }
 
 func (u mbimDevice) IMSSTestMode(context.Context) (bool, error) {

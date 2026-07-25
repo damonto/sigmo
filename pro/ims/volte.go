@@ -45,7 +45,7 @@ func validateManagedVoLTE(ctx context.Context, modem *mmodem.Modem) (err error) 
 	if err != nil {
 		return fmt.Errorf("read VoLTE status: %w", err)
 	}
-	if _, err := device.IMSProfileIndex(ctx); err != nil {
+	if _, err := device.IMSProfile(ctx); err != nil {
 		return fmt.Errorf("find IMS profile: %w", err)
 	}
 	if status.Occupied {
@@ -69,7 +69,9 @@ func ResolveVoLTESettings(modem *mmodem.Modem, settings Settings) (Settings, err
 		if settings.DataPath == "" {
 			return Settings{}, ErrVoLTEDataPathRequired
 		}
-		if settings.DataPath != DataPathQMAP && settings.DataPath != DataPathLegacyBAMDMUX {
+		switch settings.DataPath {
+		case DataPathQMAP, DataPathLegacyBAMDMUX, DataPathQualcomm410:
+		default:
 			return Settings{}, fmt.Errorf("%w: %q", ErrVoLTEDataPathUnsupported, settings.DataPath)
 		}
 	case mmodem.ModemPortTypeMbim:

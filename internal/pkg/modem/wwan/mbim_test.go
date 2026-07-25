@@ -160,11 +160,11 @@ func TestDevicePacketServiceStatusMBIM(t *testing.T) {
 	}
 }
 
-func TestDeviceIMSProfileIndexMBIM(t *testing.T) {
+func TestDeviceIMSProfileMBIM(t *testing.T) {
 	tests := []struct {
 		name     string
 		contexts []uiccmbim.ProvisionedContext
-		want     uint8
+		want     IMSProfile
 		wantErr  bool
 	}{
 		{name: "finds IMS profile", contexts: []uiccmbim.ProvisionedContext{{ContextID: 7, ContextType: uiccmbim.ContextTypeIMS, AccessString: "ims"}}},
@@ -174,18 +174,18 @@ func TestDeviceIMSProfileIndexMBIM(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			device := mbimDeviceWithNetwork(&fakeMBIMNetwork{contexts: slices.Clone(tt.contexts)})
-			got, err := device.IMSProfileIndex(context.Background())
+			got, err := device.IMSProfile(context.Background())
 			if tt.wantErr {
 				if err == nil {
-					t.Fatal("IMSProfileIndex() error = nil, want error")
+					t.Fatal("IMSProfile() error = nil, want error")
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("IMSProfileIndex() error = %v", err)
+				t.Fatalf("IMSProfile() error = %v", err)
 			}
 			if got != tt.want {
-				t.Fatalf("IMSProfileIndex() = %d, want %d", got, tt.want)
+				t.Fatalf("IMSProfile() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}

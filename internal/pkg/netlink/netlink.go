@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,6 +31,13 @@ type DefaultRoute struct {
 	Gateway  netip.Addr
 	Source   netip.Addr
 	Metric   int
+}
+
+// IPv6Autoconfiguration is the interface state controlled by Linux autoconf
+// and accept_ra sysctls.
+type IPv6Autoconfiguration struct {
+	Autoconf int
+	AcceptRA int
 }
 
 var (
@@ -97,17 +106,85 @@ func DisableIPv6Autoconfiguration(name string) error {
 }
 
 func disableIPv6Autoconfiguration(root, name string, writeFile func(string, []byte, os.FileMode) error) error {
-	name = filepath.Base(name)
-	if name == "." || name == "" {
-		return errors.New("interface name is required")
+	return setIPv6Autoconfiguration(root, name, IPv6Autoconfiguration{}, writeFile)
+}
+
+// ReadIPv6Autoconfiguration reads the state needed to restore an interface
+// after a failed dedicated-PDN configuration.
+func ReadIPv6Autoconfiguration(name string) (IPv6Autoconfiguration, error) {
+	return readIPv6Autoconfiguration("/proc/sys/net/ipv6/conf", name, os.ReadFile)
+}
+
+func readIPv6Autoconfiguration(root, name string, readFile func(string) ([]byte, error)) (IPv6Autoconfiguration, error) {
+	name, err := ipv6InterfaceName(name)
+	if err != nil {
+		return IPv6Autoconfiguration{}, err
 	}
-	for _, setting := range []string{"autoconf", "accept_ra"} {
+	read := func(setting string) (int, error) {
 		path := filepath.Join(root, name, setting)
-		if err := writeFile(path, []byte("0"), 0o644); err != nil {
-			return fmt.Errorf("disable IPv6 %s on %s: %w", setting, name, err)
+		raw, err := readFile(path)
+		if err != nil {
+			return 0, fmt.Errorf("read IPv6 %s on %s: %w", setting, name, err)
+		}
+		value, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+		if err != nil {
+			return 0, fmt.Errorf("parse IPv6 %s on %s: %w", setting, name, err)
+		}
+		return value, nil
+	}
+	autoconf, err := read("autoconf")
+	if err != nil {
+		return IPv6Autoconfiguration{}, err
+	}
+	acceptRA, err := read("accept_ra")
+	if err != nil {
+		return IPv6Autoconfiguration{}, err
+	}
+	return IPv6Autoconfiguration{Autoconf: autoconf, AcceptRA: acceptRA}, nil
+}
+
+// SetIPv6Autoconfiguration restores Linux autoconf and accept_ra sysctls.
+func SetIPv6Autoconfiguration(name string, cfg IPv6Autoconfiguration) error {
+	return setIPv6Autoconfiguration("/proc/sys/net/ipv6/conf", name, cfg, os.WriteFile)
+}
+
+func setIPv6Autoconfiguration(root, name string, cfg IPv6Autoconfiguration, writeFile func(string, []byte, os.FileMode) error) error {
+	name, err := ipv6InterfaceName(name)
+	if err != nil {
+		return err
+	}
+	if cfg.Autoconf < 0 || cfg.Autoconf > 1 {
+		return fmt.Errorf("IPv6 autoconf value %d is outside 0..1", cfg.Autoconf)
+	}
+	if cfg.AcceptRA < 0 || cfg.AcceptRA > 2 {
+		return fmt.Errorf("IPv6 accept_ra value %d is outside 0..2", cfg.AcceptRA)
+	}
+	settings := []struct {
+		name  string
+		value int
+	}{
+		{name: "autoconf", value: cfg.Autoconf},
+		{name: "accept_ra", value: cfg.AcceptRA},
+	}
+	var result error
+	for _, setting := range settings {
+		path := filepath.Join(root, name, setting.name)
+		if err := writeFile(path, []byte(strconv.Itoa(setting.value)), 0o644); err != nil {
+			result = errors.Join(result, fmt.Errorf("set IPv6 %s on %s: %w", setting.name, name, err))
 		}
 	}
-	return nil
+	return result
+}
+
+func ipv6InterfaceName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", errors.New("interface name is required")
+	}
+	if name == "." || name == ".." || strings.ContainsRune(name, filepath.Separator) || strings.ContainsRune(name, 0) {
+		return "", errors.New("interface name is invalid")
+	}
+	return name, nil
 }
 
 func SetMTU(name string, mtu uint32) error {
