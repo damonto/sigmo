@@ -12,7 +12,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.3.1
 	github.com/modelcontextprotocol/go-sdk v1.6.1
-	github.com/pion/interceptor v0.1.46
+	github.com/pion/interceptor v0.1.47
 	github.com/pion/rtp v1.10.5
 	github.com/pion/webrtc/v4 v4.2.17
 )
