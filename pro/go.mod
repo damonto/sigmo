@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/damonto/euicc-go v1.1.3-0.20260712112734-b1c42d12dd47
-	github.com/damonto/ims-go v0.0.0-20260726084944-e131cec4d1c4
+	github.com/damonto/ims-go v0.0.0-20260726121048-f422e53a62dd
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260722032321-cca2b8b7e810
 	github.com/damonto/wwan-go v0.0.0-20260726044848-6c2a4b9b0a0e
@@ -33,7 +33,7 @@ require (
 	github.com/nyaruka/phonenumbers v1.8.1 // indirect
 	github.com/pion/datachannel v1.6.2 // indirect
 	github.com/pion/dtls/v3 v3.1.5 // indirect
-	github.com/pion/ice/v4 v4.3.0 // indirect
+	github.com/pion/ice/v4 v4.4.0 // indirect
 	github.com/pion/logging v0.2.4 // indirect
 	github.com/pion/mdns/v2 v2.1.0 // indirect
 	github.com/pion/randutil v0.1.0 // indirect

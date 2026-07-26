@@ -141,10 +141,6 @@ func (c modemWFCSetupCard) GID1() string {
 	return strings.ToUpper(strings.TrimSpace(c.sim.GID1))
 }
 
-func (c modemWFCSetupCard) AKA(context.Context, []byte, []byte) (usim.AKAResult, error) {
-	return usim.AKAResult{}, errors.New("modem SIM AKA is unavailable")
-}
-
 func (c modemWFCSetupCard) simPLMN() string {
 	if c.sim == nil {
 		return ""
@@ -170,10 +166,11 @@ func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mm
 	}
 
 	return wfcsetup.Check(ctx, wfcsetup.Request{
-		Card:    card,
-		Device:  wfcSetupDevice(cfg.Terminal),
-		Purpose: wfcsetup.PurposeEmergencyAddressUpdate,
-		Logger:  cfg.Logger,
+		Card:            card,
+		AuthenticateAKA: card.EAPAKA,
+		Device:          wfcSetupDevice(cfg.Terminal),
+		Purpose:         wfcsetup.PurposeEmergencyAddressUpdate,
+		Logger:          cfg.Logger,
 	})
 }
 
