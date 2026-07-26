@@ -96,33 +96,16 @@ func (c *Connector) restoreAlwaysOn(ctx context.Context, modem *mmodem.Modem, pr
 	}
 	prefs = latest
 	prefs.AlwaysOn = true
-	state := c.qualcomm410StateFor(modemID)
-	if state.restorePending {
-		if err := c.disableQualcomm410PendingRestore(ctx, modem, access, state.restorePreferences); err != nil {
-			return fmt.Errorf("restore pending normal Internet bearer: %w", err)
-		}
-		return nil
+	current, err := currentBearer(ctx, access)
+	if err != nil {
+		return err
 	}
-	if !state.enabled {
-		current, err := currentBearer(ctx, access)
-		if err != nil {
-			return err
-		}
-		if current.bearer != nil && current.connected {
-			return c.recoverAlwaysOn(ctx, access, current.bearer, prefs)
-		}
+	if current.bearer != nil && current.connected {
+		return c.recoverAlwaysOn(ctx, access, current.bearer, prefs)
+	}
 
-		_, err = c.connect(ctx, access, prefs, false)
-		if err != nil {
-			return fmt.Errorf("connect always on bearer: %w", err)
-		}
-		return nil
-	}
-	if state.connection != nil {
-		return nil
-	}
-	if _, err := c.connectQualcomm410Locked(ctx, modem, prefs); err != nil {
-		return fmt.Errorf("connect always on Qualcomm 410 Internet: %w", err)
+	if _, err := c.connect(ctx, access, prefs, false); err != nil {
+		return fmt.Errorf("connect always on bearer: %w", err)
 	}
 	return nil
 }
@@ -178,7 +161,7 @@ func (c *Connector) loadAlwaysOnStateForProfile(ctx context.Context, profileID s
 func (c *Connector) recoverAlwaysOn(ctx context.Context, modem internetModem, bearer *mmodem.Bearer, prefs Preferences) error {
 	modemID := modem.id()
 	profileID := modem.profileID()
-	tracked, _, ok, err := recoverTrackedConnection(ctx, c.persistence, modemID, bearer, prefs)
+	tracked, _, ok, err := c.recoverConnectedBearer(ctx, modem, bearer, prefs)
 	if err != nil {
 		return err
 	}

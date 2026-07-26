@@ -27,9 +27,17 @@ type Config struct {
 	RegistrationGroups *RegistrationGroups
 }
 
+type volteSettingsPersistence interface {
+	Get(context.Context, string) (Settings, error)
+	Put(context.Context, string, Settings) error
+	SuspendedInternet(context.Context, string) (pinternet.Preferences, bool, error)
+	PutSuspendedInternet(context.Context, string, pinternet.Preferences) error
+	DeleteSuspendedInternet(context.Context, string) error
+}
+
 type coordinator struct {
 	settings           *SettingsStore
-	volteSettings      *VoLTESettingsStore
+	volteSettings      volteSettingsPersistence
 	store              *storage.Store
 	onIncoming         IncomingSMSFunc
 	websheets          *websheet.Broker
@@ -93,6 +101,13 @@ func New(cfg Config) Coordinator {
 	}
 }
 
+func (c *coordinator) volteStore() volteSettingsPersistence {
+	if c.volteSettings == nil {
+		return (*VoLTESettingsStore)(nil)
+	}
+	return c.volteSettings
+}
+
 func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) (runErr error) {
 	if c.access == AccessVoLTE {
 		ownership, err := acquireIMSPolicyRoutingOwnership(imsPolicyRoutingOwnershipAddress)
@@ -110,14 +125,7 @@ func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) (runEr
 		slog.Warn("start configured IMS access", "access", c.routeName(), "error", err)
 	}
 	unsubscribe, err := registry.Subscribe(func(event mmodem.ModemEvent) error {
-		switch event.Type {
-		case mmodem.ModemEventAdded:
-			if event.Modem != nil {
-				c.startIfEnabled(ctx, event.Modem)
-			}
-		case mmodem.ModemEventRemoved:
-			c.stopByPath(event.Path)
-		}
+		c.processModemEvent(ctx, event)
 		return nil
 	})
 	if err != nil {
@@ -130,6 +138,22 @@ func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) (runEr
 		slog.Warn("restore modem VoLTE on shutdown", "error", err)
 	}
 	return nil
+}
+
+func (c *coordinator) processModemEvent(ctx context.Context, event mmodem.ModemEvent) {
+	switch event.Type {
+	case mmodem.ModemEventAdded:
+		if event.Modem != nil {
+			c.startIfEnabled(ctx, event.Modem)
+		}
+	case mmodem.ModemEventRemoved:
+		c.stopByPath(event.Path)
+		if c.access == AccessVoLTE && c.internet != nil && event.Modem != nil {
+			if err := c.internet.InvalidateQualcomm410(event.Modem.EquipmentIdentifier); err != nil {
+				slog.Warn("invalidate Qualcomm 410 Internet after modem removal", "imei", event.Modem.EquipmentIdentifier, "error", err)
+			}
+		}
+	}
 }
 
 func (c *coordinator) releaseManagedVoLTEOnShutdown(ctx context.Context, modems []*mmodem.Modem) error {
@@ -179,7 +203,7 @@ func (c *coordinator) releaseManagedVoLTEOnShutdown(ctx context.Context, modems 
 
 func (c *coordinator) Settings(ctx context.Context, modem *mmodem.Modem) (Settings, error) {
 	if c.access == AccessVoLTE {
-		settings, err := c.volteSettings.Get(ctx, modem.EquipmentIdentifier)
+		settings, err := c.volteStore().Get(ctx, modem.EquipmentIdentifier)
 		if err != nil {
 			return Settings{}, err
 		}
@@ -229,7 +253,7 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 			return err
 		}
 		if !settings.Enabled && !current.Enabled {
-			return c.volteSettings.Put(ctx, modem.EquipmentIdentifier, settings)
+			return c.updateDisabledVoLTEDataPath(ctx, modem, current, settings)
 		}
 		if settings.Enabled {
 			profileID, err := modem.ProfileID(ctx)
@@ -263,7 +287,7 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 				}
 				return errors.Join(err, cleanupErr, rollbackCurrent())
 			}
-			if err := c.volteSettings.Put(ctx, modem.EquipmentIdentifier, settings); err != nil {
+			if err := c.volteStore().Put(ctx, modem.EquipmentIdentifier, settings); err != nil {
 				var cleanupErr error
 				if configuredNewPath {
 					cleanupErr = c.restoreVoLTEDataPath(recoveryCtx, modem, settings.DataPath)
@@ -282,8 +306,17 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 		if err := releaseManagedVoLTE(cleanupCtx, modem, c.internet); err != nil {
 			result = errors.Join(result, fmt.Errorf("restore modem VoLTE: %w", err))
 		}
-		result = errors.Join(result, c.restoreVoLTEDataPath(cleanupCtx, modem, current.DataPath))
-		result = errors.Join(result, c.volteSettings.Put(cleanupCtx, modem.EquipmentIdentifier, settings))
+		// Qualcomm 410 DATA5 still needs its WDA holder and peer addressing
+		// after VoLTE is disabled; only the DATA6 IMS client is released when
+		// Qualcomm 410 remains the selected data path.
+		keepQualcomm410 := current.DataPath == DataPathQualcomm410 && settings.DataPath == DataPathQualcomm410
+		if !keepQualcomm410 {
+			result = errors.Join(result, c.restoreVoLTEDataPath(cleanupCtx, modem, current.DataPath))
+		}
+		if current.DataPath != DataPathQualcomm410 && settings.DataPath == DataPathQualcomm410 {
+			result = errors.Join(result, c.configureVoLTEDataPath(cleanupCtx, modem, settings.DataPath))
+		}
+		result = errors.Join(result, c.volteStore().Put(cleanupCtx, modem.EquipmentIdentifier, settings))
 		return result
 	}
 	profileID, err := modem.ProfileID(ctx)
@@ -297,6 +330,42 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 		c.restart(modem, profileID)
 	} else {
 		c.stopAsync(modem.EquipmentIdentifier)
+	}
+	return nil
+}
+
+func (c *coordinator) updateDisabledVoLTEDataPath(ctx context.Context, modem *mmodem.Modem, current, next Settings) error {
+	if current.DataPath == next.DataPath {
+		return c.volteStore().Put(ctx, modem.EquipmentIdentifier, next)
+	}
+
+	recoveryCtx, cancelRecovery := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	defer cancelRecovery()
+	restoredCurrent := current.DataPath == DataPathQualcomm410
+	if restoredCurrent {
+		if err := c.restoreVoLTEDataPath(ctx, modem, current.DataPath); err != nil {
+			return err
+		}
+	}
+	configuredNext := next.DataPath == DataPathQualcomm410
+	if configuredNext {
+		if err := c.configureVoLTEDataPath(ctx, modem, next.DataPath); err != nil {
+			var rollbackErr error
+			if restoredCurrent {
+				rollbackErr = c.configureVoLTEDataPath(recoveryCtx, modem, current.DataPath)
+			}
+			return errors.Join(err, rollbackErr)
+		}
+	}
+	if err := c.volteStore().Put(ctx, modem.EquipmentIdentifier, next); err != nil {
+		var rollbackErr error
+		if configuredNext {
+			rollbackErr = c.restoreVoLTEDataPath(recoveryCtx, modem, next.DataPath)
+		}
+		if restoredCurrent {
+			rollbackErr = errors.Join(rollbackErr, c.configureVoLTEDataPath(recoveryCtx, modem, current.DataPath))
+		}
+		return errors.Join(err, rollbackErr)
 	}
 	return nil
 }
@@ -360,7 +429,7 @@ func (c *coordinator) restoreLegacyInternet(ctx context.Context, modem *mmodem.M
 	if c.internet == nil || modem == nil {
 		return nil
 	}
-	prefs, ok, err := c.volteSettings.SuspendedInternet(ctx, modem.EquipmentIdentifier)
+	prefs, ok, err := c.volteStore().SuspendedInternet(ctx, modem.EquipmentIdentifier)
 	if err != nil {
 		return err
 	}
@@ -370,7 +439,7 @@ func (c *coordinator) restoreLegacyInternet(ctx context.Context, modem *mmodem.M
 	if err := restoreInternet(ctx, modem, c.internet, prefs); err != nil {
 		return fmt.Errorf("restore modem %s Internet after legacy BAM-DMUX VoLTE: %w", modem.EquipmentIdentifier, err)
 	}
-	return c.volteSettings.DeleteSuspendedInternet(ctx, modem.EquipmentIdentifier)
+	return c.volteStore().DeleteSuspendedInternet(ctx, modem.EquipmentIdentifier)
 }
 
 func (c *coordinator) Reconnect(ctx context.Context, modem *mmodem.Modem) error {

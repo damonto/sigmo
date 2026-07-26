@@ -696,6 +696,11 @@ func (r *fakeInternetRestorer) SetQualcomm410Enabled(_ context.Context, _ *mmode
 	return r.qualcomm410Err
 }
 
+func (r *fakeInternetRestorer) InvalidateQualcomm410(string) error {
+	r.calls = append(r.calls, "qualcomm410:invalidate")
+	return nil
+}
+
 func (r *fakeInternetRestorer) Current(context.Context, *mmodem.Modem) (*pinternet.Connection, error) {
 	r.calls = append(r.calls, "current")
 	return r.connection, r.currentErr

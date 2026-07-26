@@ -258,30 +258,14 @@ func (c *Connector) savedAirplaneMode(ctx context.Context, modem *mmodem.Modem) 
 }
 
 // Current holds the modem operation lock while building the response. QMAP
-// and Qualcomm 410 response data is updated in place during cleanup and
-// preference changes, so returning a response outside that lock can race.
+// response data is updated in place during cleanup and preference changes, so
+// returning a response outside that lock can race.
 func (c *Connector) Current(ctx context.Context, modem *mmodem.Modem) (*Connection, error) {
 	access := modemAccess{modem: modem}
 	defer c.lockModem(access.id())()
 
 	if connection := c.qmapConnection(modem); connection != nil {
 		return c.qmapConnectionResponse(modem.EquipmentIdentifier, connection), nil
-	}
-	if modem != nil {
-		state := c.qualcomm410StateFor(modem.EquipmentIdentifier)
-		if state.connection != nil {
-			return c.qualcomm410ConnectionResponse(modem.EquipmentIdentifier, state.connection), nil
-		}
-		if state.restorePending {
-			connection, err := c.currentLocked(ctx, access)
-			if err == nil && connection != nil && connection.Status == StatusConnected {
-				c.clearQualcomm410State(modem.EquipmentIdentifier)
-			}
-			return connection, err
-		}
-		if state.enabled {
-			return disconnectedConnection(c.preference(modem.EquipmentIdentifier)), nil
-		}
 	}
 	return c.currentLocked(ctx, access)
 }
@@ -354,7 +338,7 @@ func (c *Connector) currentLocked(ctx context.Context, modem internetModem) (*Co
 		return disconnectedConnection(prefs), nil
 	}
 	bearer := current.bearer
-	tracked, metric, ok, err := recoverTrackedConnection(ctx, c.persistence, modemID, bearer, prefs)
+	tracked, metric, ok, err := c.recoverConnectedBearer(ctx, modem, bearer, prefs)
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +374,7 @@ func (c *Connector) recover(ctx context.Context, modem internetModem) error {
 		return nil
 	}
 
-	tracked, _, ok, err := recoverTrackedConnection(ctx, c.persistence, modemID, current.bearer, prefs)
+	tracked, _, ok, err := c.recoverConnectedBearer(ctx, modem, current.bearer, prefs)
 	if err != nil {
 		return err
 	}
@@ -416,20 +400,9 @@ func (c *Connector) Connect(ctx context.Context, modem *mmodem.Modem, prefs Pref
 	if modem.PrimaryPortType() == mmodem.ModemPortTypeQmi && c.qmapEnabledFor(modem.EquipmentIdentifier) {
 		return c.connectQMAP(ctx, modem, prefs)
 	}
-	if hasQMIControlPort(modem) && c.qualcomm410EnabledFor(modem.EquipmentIdentifier) {
-		return c.connectQualcomm410(ctx, modem, prefs)
-	}
 	access := modemAccess{modem: modem}
 	defer c.lockModem(access.id())()
-
-	connection, err := c.connect(ctx, access, prefs, true)
-	if err == nil {
-		state := c.qualcomm410StateFor(modem.EquipmentIdentifier)
-		if state.restorePending && state.connection == nil {
-			c.clearQualcomm410State(modem.EquipmentIdentifier)
-		}
-	}
-	return connection, err
+	return c.connect(ctx, access, prefs, true)
 }
 
 func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Preferences, clearAlwaysOnBefore bool) (*Connection, error) {
@@ -463,7 +436,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 	}
 	prefs = bearerPreferences(ctx, bearer, prefs)
 
-	tracked, err := configureBearer(ctx, c.persistence, modemID, bearer, prefs)
+	tracked, err := c.configureConnectedBearer(ctx, modemID, bearer, prefs)
 	if err != nil {
 		disconnectErr := bearer.Disconnect(ctx)
 		return nil, errors.Join(err, disconnectErr)
@@ -512,41 +485,12 @@ func (c *Connector) Disconnect(ctx context.Context, modem *mmodem.Modem) error {
 	}
 	access := modemAccess{modem: modem}
 	defer c.lockModem(access.id())()
-	if modem != nil {
-		state := c.qualcomm410StateFor(modem.EquipmentIdentifier)
-		if state.active() {
-			if err := c.clearAlwaysOnState(ctx, access); err != nil {
-				return fmt.Errorf("clear Qualcomm 410 always on state: %w", err)
-			}
-			if err := c.disconnectQualcomm410ForUser(ctx, modem, access, state); err != nil {
-				return fmt.Errorf("disconnect Qualcomm 410 Internet: %w", err)
-			}
-			return nil
-		}
-	}
-
 	return c.disconnect(ctx, access, true)
 }
 
 func (c *Connector) Restore(ctx context.Context, modem *mmodem.Modem) error {
 	access := modemAccess{modem: modem}
 	defer c.lockModem(access.id())()
-	if modem != nil {
-		modemID := modem.EquipmentIdentifier
-		state := c.qualcomm410StateFor(modemID)
-		if state.active() {
-			if err := c.disconnectQualcomm410Locked(ctx, modem); err != nil {
-				return fmt.Errorf("disconnect Qualcomm 410 Internet for restore: %w", err)
-			}
-			if err := cleanupInternetQualcomm410State(ctx, c, modemID); err != nil {
-				return fmt.Errorf("cleanup Qualcomm 410 state for restore: %w", err)
-			}
-			c.clearQualcomm410State(modemID)
-			c.deleteConnectionAndPreference(modemID)
-			return nil
-		}
-	}
-
 	err := c.disconnect(ctx, access, false)
 	c.deleteConnectionAndPreference(access.id())
 	return err
@@ -601,7 +545,7 @@ func (c *Connector) disconnect(ctx context.Context, modem internetModem, clearAl
 	bearer := current.bearer
 	prefs := recoverPreferences(ctx, bearer, c.preference(modemID))
 	interfaceName, interfaceErr := bearer.Interface(ctx)
-	err = cleanupBearer(ctx, c.persistence, modemID, bearer, prefs)
+	err = c.cleanupConnectedBearer(ctx, modem, bearer, prefs)
 	if err == nil && interfaceErr == nil {
 		err = c.persistence.deleteRouteState(ctx, interfaceName)
 	}
@@ -625,7 +569,12 @@ func (c *Connector) cleanupTracked(ctx context.Context, modemID string, tracked 
 	if !tracked.prefs.DefaultRoute {
 		cleanup.routeChanges = nil
 	}
-	cleanupErr := cleanupApplied(ctx, c.persistence, cleanup)
+	var cleanupErr error
+	if cleanup.qualcomm410InterfaceState.restoreIPv6 {
+		cleanupErr = cleanupQualcomm410Applied(ctx, c.persistence, cleanup, systemQualcomm410NetworkOps)
+	} else {
+		cleanupErr = cleanupApplied(ctx, c.persistence, cleanup)
+	}
 	if cleanupErr == nil {
 		cleanupErr = c.persistence.deleteRouteState(ctx, tracked.interfaceName)
 	}
@@ -922,18 +871,6 @@ func (c *Connector) setAlwaysOnPreferenceInMemory(modemID string, prefs Preferen
 			updated.tracked[i].prefs.AlwaysOn = false
 		}
 		c.qmapConnections[modemID] = updated
-	}
-	if state, ok := c.qualcomm410States[modemID]; ok {
-		if state.connection != nil {
-			updated := cloneQualcomm410Connection(state.connection)
-			updated.prefs.AlwaysOn = false
-			updated.tracked.prefs.AlwaysOn = false
-			state.connection = updated
-		}
-		if state.restorePending {
-			state.restorePreferences.AlwaysOn = false
-		}
-		c.qualcomm410States[modemID] = state
 	}
 	if hasInternetPreference(prefs) {
 		if c.preferences == nil {

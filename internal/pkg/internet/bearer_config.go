@@ -22,15 +22,16 @@ type recoveredRoute struct {
 }
 
 type trackedConnection struct {
-	bearerPath    dbus.ObjectPath
-	interfaceName string
-	profileID     string
-	prefs         Preferences
-	routeMetric   int
-	addresses     []netip.Prefix
-	peers         map[netip.Prefix]netip.Addr
-	routes        []netlink.DefaultRoute
-	routeChanges  []defaultRouteChange
+	bearerPath                dbus.ObjectPath
+	interfaceName             string
+	profileID                 string
+	prefs                     Preferences
+	routeMetric               int
+	addresses                 []netip.Prefix
+	peers                     map[netip.Prefix]netip.Addr
+	routes                    []netlink.DefaultRoute
+	routeChanges              []defaultRouteChange
+	qualcomm410InterfaceState qualcomm410InterfaceState
 }
 
 func configureBearer(ctx context.Context, stateStore connectionStateStore, modemID string, bearer *mmodem.Bearer, prefs Preferences) (trackedConnection, error) {

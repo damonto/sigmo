@@ -23,6 +23,7 @@ const (
 type qualcomm410LayoutProbe struct {
 	device          func(string) error
 	interfaceByName func(string) error
+	sameDevice      func(string, string) (bool, error)
 }
 
 var systemQualcomm410LayoutProbe = qualcomm410LayoutProbe{
@@ -34,12 +35,30 @@ var systemQualcomm410LayoutProbe = qualcomm410LayoutProbe{
 		_, err := net.InterfaceByName(name)
 		return err
 	},
+	sameDevice: func(a, b string) (bool, error) {
+		aInfo, err := os.Stat(a)
+		if err != nil {
+			return false, err
+		}
+		bInfo, err := os.Stat(b)
+		if err != nil {
+			return false, err
+		}
+		return os.SameFile(aInfo, bInfo), nil
+	},
 }
 
 // ValidateQualcomm410Layout verifies the fixed dual-QMI layout before either
 // Internet or IMS starts changing modem or network state.
 func ValidateQualcomm410Layout() error {
 	return validateQualcomm410Layout(systemQualcomm410LayoutProbe)
+}
+
+// ValidateQualcomm410ModemLayout also verifies that ModemManager uses DATA5
+// as its primary QMI port. If MM selects DATA6, its bearer reports valid IP
+// settings but the wwan0 data plane is a black hole.
+func ValidateQualcomm410ModemLayout(modem *Modem) error {
+	return validateQualcomm410ModemLayout(modem, systemQualcomm410LayoutProbe)
 }
 
 func validateQualcomm410Layout(probe qualcomm410LayoutProbe) error {
@@ -55,6 +74,27 @@ func validateQualcomm410Layout(probe qualcomm410LayoutProbe) error {
 		}
 	}
 	return result
+}
+
+func validateQualcomm410ModemLayout(modem *Modem, probe qualcomm410LayoutProbe) error {
+	if modem == nil {
+		return errors.New("modem is required")
+	}
+	if err := validateQualcomm410Layout(probe); err != nil {
+		return err
+	}
+	primaryPort := strings.TrimSpace(modem.PrimaryPort)
+	if primaryPort == "" {
+		return errors.New("ModemManager primary QMI port is missing")
+	}
+	match, err := probe.sameDevice(Qualcomm410InternetQMI, primaryPort)
+	if err != nil {
+		return fmt.Errorf("compare ModemManager primary port %s with Qualcomm 410 DATA5 %s: %w", primaryPort, Qualcomm410InternetQMI, err)
+	}
+	if !match {
+		return fmt.Errorf("ModemManager primary port %s does not resolve to Qualcomm 410 DATA5 %s; configure udev to ignore DATA6_CNTL", primaryPort, Qualcomm410InternetQMI)
+	}
+	return nil
 }
 
 // BAMDMUXLinkConfig describes one dedicated BAM-DMUX control endpoint.

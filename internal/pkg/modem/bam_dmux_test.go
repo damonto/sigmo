@@ -3,6 +3,7 @@ package modem
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/damonto/wwan-go/qcom"
@@ -37,6 +38,49 @@ func TestValidateQualcomm410LayoutChecksEveryEndpoint(t *testing.T) {
 	}
 	if want := []string{Qualcomm410InternetInterface, Qualcomm410IMSInterface}; !slices.Equal(interfaces, want) {
 		t.Fatalf("interface probes = %v, want %v", interfaces, want)
+	}
+}
+
+func TestValidateQualcomm410ModemLayoutRequiresMMOnDATA5(t *testing.T) {
+	compareErr := errors.New("compare devices")
+	tests := []struct {
+		name        string
+		modem       *Modem
+		match       bool
+		compareErr  error
+		wantErr     error
+		wantMessage string
+	}{
+		{name: "nil modem", wantMessage: "modem is required"},
+		{name: "missing primary", modem: &Modem{}, wantMessage: "primary QMI port is missing"},
+		{name: "device comparison fails", modem: &Modem{PrimaryPort: "/dev/wwan0qmi1"}, compareErr: compareErr, wantErr: compareErr},
+		{name: "MM uses DATA6", modem: &Modem{PrimaryPort: "/dev/wwan0qmi0"}, wantMessage: "does not resolve to Qualcomm 410 DATA5"},
+		{name: "MM uses DATA5", modem: &Modem{PrimaryPort: "/dev/wwan0qmi1"}, match: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			probe := qualcomm410LayoutProbe{
+				device:          func(string) error { return nil },
+				interfaceByName: func(string) error { return nil },
+				sameDevice: func(stable, primary string) (bool, error) {
+					if stable != Qualcomm410InternetQMI || primary != tt.modem.PrimaryPort {
+						t.Fatalf("sameDevice(%q, %q)", stable, primary)
+					}
+					return tt.match, tt.compareErr
+				},
+			}
+			err := validateQualcomm410ModemLayout(tt.modem, probe)
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Fatalf("validateQualcomm410ModemLayout() error = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantMessage != "" && (err == nil || !strings.Contains(err.Error(), tt.wantMessage)) {
+				t.Fatalf("validateQualcomm410ModemLayout() error = %v, want message %q", err, tt.wantMessage)
+			}
+			if tt.wantErr == nil && tt.wantMessage == "" && err != nil {
+				t.Fatalf("validateQualcomm410ModemLayout() error = %v, want nil", err)
+			}
+		})
 	}
 }
 

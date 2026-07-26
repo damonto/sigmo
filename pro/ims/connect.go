@@ -62,6 +62,7 @@ type internetRestorer interface {
 	Restore(ctx context.Context, modem *mmodem.Modem) error
 	SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, enabled bool) error
 	SetQualcomm410Enabled(ctx context.Context, modem *mmodem.Modem, enabled bool) error
+	InvalidateQualcomm410(modemID string) error
 }
 
 type connectAttempt struct {
@@ -116,8 +117,8 @@ func (c *coordinator) startIfEnabled(ctx context.Context, modem *mmodem.Modem) {
 			}
 		case DataPathQualcomm410:
 			if c.internet != nil {
-				if err := c.internet.SetQualcomm410Enabled(ctx, modem, false); err != nil {
-					slog.Warn("restore Internet after Qualcomm 410 modem reload", "imei", modem.EquipmentIdentifier, "error", err)
+				if err := c.internet.SetQualcomm410Enabled(ctx, modem, true); err != nil {
+					slog.Warn("prepare Qualcomm 410 Internet after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
 				}
 			}
 		default:
@@ -364,12 +365,12 @@ func (c *coordinator) suspendLegacyInternet(ctx context.Context, modem *mmodem.M
 	if err != nil {
 		return fmt.Errorf("read Internet before legacy BAM-DMUX VoLTE: %w", err)
 	}
-	_, suspended, err := c.volteSettings.SuspendedInternet(ctx, modem.EquipmentIdentifier)
+	_, suspended, err := c.volteStore().SuspendedInternet(ctx, modem.EquipmentIdentifier)
 	if err != nil {
 		return err
 	}
 	if !suspended && connection != nil && connection.Status == pinternet.StatusConnected {
-		if err := c.volteSettings.PutSuspendedInternet(ctx, modem.EquipmentIdentifier, pinternet.Preferences{
+		if err := c.volteStore().PutSuspendedInternet(ctx, modem.EquipmentIdentifier, pinternet.Preferences{
 			APN:          connection.APN,
 			IPType:       connection.IPType,
 			APNUsername:  connection.APNUsername,
