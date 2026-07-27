@@ -62,6 +62,8 @@ type Request struct {
 	UserData    string
 	ContentType string
 	Title       string
+	HTTPClient  *http.Client
+	LookupNetIP func(context.Context, string, string) ([]netip.Addr, error)
 }
 
 type Info struct {
@@ -96,6 +98,7 @@ type Session struct {
 	expiresAt         time.Time
 	basePath          string
 	client            *http.Client
+	lookupNetIP       func(context.Context, string, string) ([]netip.Addr, error)
 	now               func() time.Time
 	allowPrivateHosts bool
 
@@ -130,7 +133,11 @@ func (b *Broker) Create(ctx context.Context, req Request) (*Session, error) {
 	if b == nil {
 		return nil, errors.New("websheet broker is nil")
 	}
-	target, err := parseAllowedURL(ctx, req.URL, b.allowPrivateHosts)
+	target, err := parseAllowedURL(ctx, req.URL, b.allowPrivateHosts, req.LookupNetIP)
+	if err != nil {
+		return nil, err
+	}
+	client, err := newWebsheetHTTPClient(req.HTTPClient, b.allowPrivateHosts, req.LookupNetIP)
 	if err != nil {
 		return nil, err
 	}
@@ -150,18 +157,20 @@ func (b *Broker) Create(ctx context.Context, req Request) (*Session, error) {
 		title:             strings.TrimSpace(req.Title),
 		expiresAt:         b.now().Add(b.ttl),
 		basePath:          b.basePath,
+		lookupNetIP:       req.LookupNetIP,
 		now:               b.now,
 		allowPrivateHosts: b.allowPrivateHosts,
 		callbackCh:        make(chan Callback, 1),
 		doneCh:            make(chan struct{}),
 	}
-	session.client = &http.Client{
-		Jar:     jar,
-		Timeout: defaultClientTimeout,
-		CheckRedirect: func(r *http.Request, via []*http.Request) error {
-			_, err := parseAllowedURL(r.Context(), r.URL.String(), b.allowPrivateHosts)
-			return err
-		},
+	session.client = client
+	session.client.Jar = jar
+	session.client.CheckRedirect = func(r *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		_, err := parseAllowedURL(r.Context(), r.URL.String(), b.allowPrivateHosts, req.LookupNetIP)
+		return err
 	}
 
 	b.mu.Lock()
@@ -266,7 +275,7 @@ func (s *Session) Proxy(w http.ResponseWriter, r *http.Request) error {
 	if rawTarget == "" {
 		rawTarget = s.target.String()
 	}
-	target, err := parseAllowedURL(r.Context(), rawTarget, s.allowPrivateHosts)
+	target, err := parseAllowedURL(r.Context(), rawTarget, s.allowPrivateHosts, s.lookupNetIP)
 	if err != nil {
 		return err
 	}
@@ -612,7 +621,12 @@ func isHTML(contentType string) bool {
 	return mediaType == "text/html" || mediaType == "application/xhtml+xml"
 }
 
-func parseAllowedURL(ctx context.Context, raw string, allowPrivate bool) (*url.URL, error) {
+func parseAllowedURL(
+	ctx context.Context,
+	raw string,
+	allowPrivate bool,
+	lookupNetIP func(context.Context, string, string) ([]netip.Addr, error),
+) (*url.URL, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, fmt.Errorf("%w: URL is required", ErrUnsafeURL)
@@ -631,26 +645,128 @@ func parseAllowedURL(ctx context.Context, raw string, allowPrivate bool) (*url.U
 	if allowPrivate {
 		return parsed, nil
 	}
+	if _, err := allowedHostAddresses(ctx, host, lookupNetIP); err != nil {
+		return nil, err
+	}
+	return parsed, nil
+}
+
+func newWebsheetHTTPClient(
+	base *http.Client,
+	allowPrivate bool,
+	lookupNetIP func(context.Context, string, string) ([]netip.Addr, error),
+) (*http.Client, error) {
+	client := &http.Client{Timeout: defaultClientTimeout}
+	if base != nil {
+		*client = *base
+		if client.Timeout == 0 {
+			client.Timeout = defaultClientTimeout
+		}
+	}
+	if allowPrivate {
+		return client, nil
+	}
+
+	baseTransport := client.Transport
+	if baseTransport == nil {
+		baseTransport = http.DefaultTransport
+	}
+	transport, ok := baseTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("configure websheet HTTP client: transport %T cannot enforce address validation", baseTransport)
+	}
+	transport = transport.Clone()
+	dialContext := transport.DialContext
+	if dialContext == nil {
+		dialContext = (&net.Dialer{}).DialContext
+	}
+	transport.Proxy = nil
+	transport.DialContext = validatedDialContext(lookupNetIP, dialContext)
+	transport.DialTLS = nil
+	transport.DialTLSContext = nil
+	client.Transport = transport
+	return client, nil
+}
+
+func validatedDialContext(
+	lookupNetIP func(context.Context, string, string) ([]netip.Addr, error),
+	dialContext func(context.Context, string, string) (net.Conn, error),
+) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(address)
+		if err != nil {
+			return nil, fmt.Errorf("parse websheet dial address %q: %w", address, err)
+		}
+		addresses, err := allowedHostAddresses(ctx, host, lookupNetIP)
+		if err != nil {
+			return nil, err
+		}
+		var dialErr error
+		for _, addr := range addresses {
+			conn, err := dialContext(ctx, ipNetwork(network, addr), net.JoinHostPort(addr.String(), port))
+			if err == nil {
+				return conn, nil
+			}
+			dialErr = errors.Join(dialErr, err)
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		return nil, fmt.Errorf("dial websheet host %q: %w", host, dialErr)
+	}
+}
+
+func allowedHostAddresses(
+	ctx context.Context,
+	host string,
+	lookupNetIP func(context.Context, string, string) ([]netip.Addr, error),
+) ([]netip.Addr, error) {
 	if isLocalHostname(host) {
 		return nil, fmt.Errorf("%w: local host %q", ErrUnsafeURL, host)
 	}
-	if ip, err := netip.ParseAddr(host); err == nil {
-		if unsafeIP(ip) {
+	if addr, err := netip.ParseAddr(host); err == nil {
+		addr = addr.Unmap()
+		if unsafeIP(addr) {
 			return nil, fmt.Errorf("%w: private address %q", ErrUnsafeURL, host)
 		}
-		return parsed, nil
+		return []netip.Addr{addr}, nil
 	}
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+
+	var addresses []netip.Addr
+	var err error
+	if lookupNetIP != nil {
+		addresses, err = lookupNetIP(ctx, "ip", host)
+	} else {
+		addresses, err = net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve websheet host: %w", err)
 	}
-	for _, addr := range addrs {
-		ip, ok := netip.AddrFromSlice(addr.IP)
-		if ok && unsafeIP(ip.Unmap()) {
+	result := make([]netip.Addr, 0, len(addresses))
+	for _, addr := range addresses {
+		if !addr.IsValid() {
+			continue
+		}
+		addr = addr.Unmap()
+		if unsafeIP(addr) {
 			return nil, fmt.Errorf("%w: private address %q", ErrUnsafeURL, host)
 		}
+		result = append(result, addr)
 	}
-	return parsed, nil
+	if len(result) == 0 {
+		return nil, fmt.Errorf("resolve websheet host %q: no addresses returned", host)
+	}
+	return result, nil
+}
+
+func ipNetwork(network string, addr netip.Addr) string {
+	if !strings.HasPrefix(network, "tcp") {
+		return network
+	}
+	if addr.Is6() {
+		return "tcp6"
+	}
+	return "tcp4"
 }
 
 func isLocalHostname(host string) bool {

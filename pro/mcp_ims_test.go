@@ -33,6 +33,23 @@ type mcpVoLTEProbe struct {
 	settings pims.Settings
 }
 
+type mcpWiFiCallingProbe struct {
+	pims.Coordinator
+	current  pims.Settings
+	updated  bool
+	settings pims.Settings
+}
+
+func (p *mcpWiFiCallingProbe) Settings(context.Context, *mmodem.Modem) (pims.Settings, error) {
+	return p.current, nil
+}
+
+func (p *mcpWiFiCallingProbe) UpdateSettings(_ context.Context, _ *mmodem.Modem, settings pims.Settings) error {
+	p.updated = true
+	p.settings = settings
+	return nil
+}
+
 func (p *mcpVoLTEProbe) UpdateSettings(_ context.Context, _ *mmodem.Modem, settings pims.Settings) error {
 	p.updated = true
 	p.settings = settings
@@ -97,6 +114,93 @@ func TestSetVoLTEUsesSharedValidation(t *testing.T) {
 			}
 			if !probe.updated || probe.settings != tt.wantSettings {
 				t.Fatalf("UpdateSettings = (%v, %+v), want (true, %+v)", probe.updated, probe.settings, tt.wantSettings)
+			}
+		})
+	}
+}
+
+func TestSetWiFiCallingUnderlay(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        wifiSettingsInput
+		current      pims.Settings
+		wantErr      bool
+		wantSettings pims.Settings
+	}{
+		{
+			name:    "rejects omitted underlay",
+			input:   wifiSettingsInput{ModemID: "modem-1"},
+			wantErr: true,
+		},
+		{
+			name:         "selects system network",
+			input:        wifiSettingsInput{ModemID: "modem-1", Underlay: &pims.UnderlaySettings{Mode: pims.UnderlayModeSystem}},
+			current:      pims.Settings{Enabled: true, Underlay: pims.UnderlaySettings{Mode: pims.UnderlayModeSelf}},
+			wantSettings: pims.Settings{Underlay: pims.UnderlaySettings{Mode: pims.UnderlayModeSystem}},
+		},
+		{
+			name:         "selects another modem",
+			input:        wifiSettingsInput{ModemID: "modem-1", Enabled: true, Underlay: &pims.UnderlaySettings{Mode: pims.UnderlayModeModem, ModemID: "modem-2"}},
+			wantSettings: pims.Settings{Enabled: true, Underlay: pims.UnderlaySettings{Mode: pims.UnderlayModeModem, ModemID: "modem-2"}},
+		},
+		{
+			name:    "rejects missing modem id",
+			input:   wifiSettingsInput{ModemID: "modem-1", Underlay: &pims.UnderlaySettings{Mode: pims.UnderlayModeModem}},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
+			probe := &mcpWiFiCallingProbe{current: tt.current}
+			tools := &imsMCPTools{registry: mcpModemFinder{modem: modem}, wifiCalling: probe}
+
+			_, err := tools.setWiFiCalling(context.Background(), nil, mcpauth.Grant{}, tt.input)
+			if tt.wantErr {
+				if mcpserver.ErrorCode(err) != "invalid_request" {
+					t.Fatalf("setWiFiCalling() error = %v, want invalid_request", err)
+				}
+				if probe.updated {
+					t.Fatal("setWiFiCalling() updated settings after validation error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("setWiFiCalling() error = %v", err)
+			}
+			if !probe.updated || probe.settings != tt.wantSettings {
+				t.Fatalf("UpdateSettings = (%v, %+v), want (true, %+v)", probe.updated, probe.settings, tt.wantSettings)
+			}
+		})
+	}
+}
+
+func TestWiFiSettingsModemIDs(t *testing.T) {
+	tests := []struct {
+		name  string
+		input wifiSettingsInput
+		want  []string
+	}{
+		{
+			name:  "system uses target modem only",
+			input: wifiSettingsInput{ModemID: "voice", Underlay: &pims.UnderlaySettings{Mode: pims.UnderlayModeSystem}},
+			want:  []string{"voice"},
+		},
+		{
+			name:  "modem mode authorizes traffic modem",
+			input: wifiSettingsInput{ModemID: "voice", Underlay: &pims.UnderlaySettings{Mode: " MODEM ", ModemID: " data "}},
+			want:  []string{"voice", "data"},
+		},
+		{
+			name:  "invalid modem mode without id uses target only",
+			input: wifiSettingsInput{ModemID: "voice", Underlay: &pims.UnderlaySettings{Mode: pims.UnderlayModeModem}},
+			want:  []string{"voice"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := wifiSettingsModemIDs(tt.input); !slices.Equal(got, tt.want) {
+				t.Fatalf("wifiSettingsModemIDs() = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -29,6 +29,10 @@ describe('useModemWiFiCallingSettings', () => {
       data: {
         value: {
           enabled: true,
+          underlay: {
+            mode: 'modem',
+            modemId: 'uplink-1',
+          },
           connected: false,
           state: 'websheet_required',
           durationSeconds: 0,
@@ -58,6 +62,10 @@ describe('useModemWiFiCallingSettings', () => {
     })
     expect(settings.settingsWiFiCallingState.value).toBe('websheet_required')
     expect(settings.settingsWiFiCallingConnected.value).toBe(false)
+    expect(settings.settingsWiFiCallingUnderlay.value).toEqual({
+      mode: 'modem',
+      modemId: 'uplink-1',
+    })
     expect(settings.settingsWiFiCallingEmergencyAddressUpdateAvailable.value).toBe(true)
     expect(settings.settingsWiFiCallingWebsheet.value).toBeNull()
   })
@@ -143,6 +151,7 @@ describe('useModemWiFiCallingSettings', () => {
 
     expect(api.updateWiFiCallingSettings).toHaveBeenCalledWith('modem-1', {
       enabled: false,
+      underlay: { mode: 'system' },
     })
     expect(settings.settingsWiFiCallingEnabled.value).toBe(true)
     expect(onSuccess).toHaveBeenCalledWith('modemDetail.settings.wifiCallingSuccess')

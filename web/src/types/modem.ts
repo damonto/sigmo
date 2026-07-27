@@ -49,11 +49,20 @@ export type ModemSettings = {
 
 export type ModemSettingsResponse = ModemSettings
 
-export type WiFiCallingSettings = {
-  enabled: boolean
+export type WiFiCallingUnderlayMode = 'system' | 'self' | 'modem'
+
+export type WiFiCallingUnderlay = {
+  mode: WiFiCallingUnderlayMode
+  modemId?: string
 }
 
-export type WiFiCallingSettingsResponse = WiFiCallingSettings & {
+export type WiFiCallingSettings = {
+  enabled: boolean
+  underlay?: WiFiCallingUnderlay
+}
+
+export type WiFiCallingSettingsResponse = Omit<WiFiCallingSettings, 'underlay'> & {
+  underlay: WiFiCallingUnderlay
   connected: boolean
   state: string
   durationSeconds: number

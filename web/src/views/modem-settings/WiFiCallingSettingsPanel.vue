@@ -1,17 +1,28 @@
 <script setup lang="ts">
+import type { AcceptableValue } from 'reka-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
-import type { WiFiCallingSettings } from '@/types/modem'
+import type { Modem, WiFiCallingSettings, WiFiCallingUnderlay } from '@/types/modem'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 
 const props = defineProps<{
   enabled: boolean
+  underlay: WiFiCallingUnderlay
+  modems: Modem[]
+  modemId: string
   isLoading: boolean
   isUpdating: boolean
   isWebsheetStarting: boolean
@@ -31,10 +42,40 @@ const requiresWebsheet = computed(
   () => props.state === 'websheet_required' || props.websheet !== null,
 )
 
+const underlayValue = computed(() => {
+  if (props.underlay.mode === 'modem' && props.underlay.modemId) {
+    return `modem:${props.underlay.modemId}`
+  }
+  return props.underlay.mode
+})
+
+const otherModems = computed(() => props.modems.filter((modem) => modem.id !== props.modemId))
+
+const missingSelectedModem = computed(() => {
+  if (props.underlay.mode !== 'modem' || !props.underlay.modemId) return null
+  return otherModems.value.some((modem) => modem.id === props.underlay.modemId)
+    ? null
+    : props.underlay.modemId
+})
+
+const emitSettings = (enabled: boolean, underlay: WiFiCallingUnderlay) => {
+  emit('update', { enabled, underlay })
+}
+
 const updateEnabled = (enabled: boolean) => {
-  emit('update', {
-    enabled,
-  })
+  emitSettings(enabled, props.underlay)
+}
+
+const updateUnderlay = (value: AcceptableValue) => {
+  if (typeof value !== 'string') return
+  if (value === 'system' || value === 'self') {
+    emitSettings(props.enabled, { mode: value })
+    return
+  }
+  const modemId = value.startsWith('modem:') ? value.slice('modem:'.length) : ''
+  if (modemId) {
+    emitSettings(props.enabled, { mode: 'modem', modemId })
+  }
 }
 </script>
 
@@ -62,6 +103,49 @@ const updateEnabled = (enabled: boolean) => {
           :disabled="isInputDisabled"
           @update:model-value="updateEnabled"
         />
+      </div>
+
+      <div class="space-y-2">
+        <div class="space-y-1">
+          <Label for="modem-wifi-calling-underlay">
+            {{ t('modemDetail.settings.wifiCallingUnderlayLabel') }}
+          </Label>
+          <p class="text-xs leading-5 text-muted-foreground">
+            {{ t('modemDetail.settings.wifiCallingUnderlayDescription') }}
+          </p>
+        </div>
+        <Select
+          :model-value="underlayValue"
+          :disabled="isInputDisabled"
+          @update:model-value="updateUnderlay"
+        >
+          <SelectTrigger id="modem-wifi-calling-underlay" class="w-full">
+            <SelectValue :placeholder="t('modemDetail.settings.wifiCallingUnderlayPlaceholder')" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="system">
+              {{ t('modemDetail.settings.wifiCallingUnderlaySystem') }}
+            </SelectItem>
+            <SelectItem value="self">
+              {{ t('modemDetail.settings.wifiCallingUnderlaySelf') }}
+            </SelectItem>
+            <SelectItem v-if="missingSelectedModem" :value="`modem:${missingSelectedModem}`">
+              {{
+                t('modemDetail.settings.wifiCallingUnderlayMissingModem', {
+                  id: missingSelectedModem,
+                })
+              }}
+            </SelectItem>
+            <SelectItem v-for="modem in otherModems" :key="modem.id" :value="`modem:${modem.id}`">
+              {{
+                t('modemDetail.settings.wifiCallingUnderlayModem', {
+                  name: modem.name,
+                  id: modem.id,
+                })
+              }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div v-if="requiresWebsheet" class="rounded-md border border-dashed p-3 text-sm">

@@ -77,7 +77,9 @@ describe('WiFiCallingStatusPanel', () => {
 
     expect(wrapper.text()).toContain('Connected')
     expect(wrapper.text()).toContain('1m 5s')
-    expect(wrapper.get('button[aria-label="Reconnect Wi-Fi Calling"]').attributes('disabled')).toBeUndefined()
+    expect(
+      wrapper.get('button[aria-label="Reconnect Wi-Fi Calling"]').attributes('disabled'),
+    ).toBeUndefined()
 
     await wrapper.get('button[aria-label="Reconnect Wi-Fi Calling"]').trigger('click')
 
@@ -89,7 +91,22 @@ describe('WiFiCallingStatusPanel', () => {
 
     expect(wrapper.text()).toContain('Connecting')
     expect(wrapper.find('.animate-spin').exists()).toBe(true)
-    expect(wrapper.get('button[aria-label="Reconnect Wi-Fi Calling"]').attributes('disabled')).toBeDefined()
+    expect(
+      wrapper.get('button[aria-label="Reconnect Wi-Fi Calling"]').attributes('disabled'),
+    ).toBeDefined()
+  })
+
+  it('shows the selected underlay is offline while retrying automatically', () => {
+    const wrapper = mountPanel('en', { state: 'waiting_for_uplink' })
+
+    expect(wrapper.text()).toContain('Waiting for Internet')
+    expect(wrapper.text()).toContain(
+      'The selected modem is offline. Wi-Fi Calling will retry automatically when it reconnects.',
+    )
+    expect(wrapper.find('.animate-spin').exists()).toBe(true)
+    expect(
+      wrapper.get('button[aria-label="Reconnect Wi-Fi Calling"]').attributes('disabled'),
+    ).toBeUndefined()
   })
 
   it('renders Chinese disabled status', () => {

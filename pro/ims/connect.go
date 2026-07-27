@@ -61,6 +61,7 @@ type internetRestorer interface {
 	Connect(ctx context.Context, modem *mmodem.Modem, prefs pinternet.Preferences) (*pinternet.Connection, error)
 	Restore(ctx context.Context, modem *mmodem.Modem) error
 	SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, enabled bool) error
+	SelectQualcomm410Mode(modem *mmodem.Modem) error
 	SetQualcomm410Enabled(ctx context.Context, modem *mmodem.Modem, enabled bool) error
 	InvalidateQualcomm410(modemID string) error
 }
@@ -117,8 +118,8 @@ func (c *coordinator) startIfEnabled(ctx context.Context, modem *mmodem.Modem) {
 			}
 		case DataPathQualcomm410:
 			if c.internet != nil {
-				if err := c.internet.SetQualcomm410Enabled(ctx, modem, true); err != nil {
-					slog.Warn("prepare Qualcomm 410 Internet after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
+				if err := c.internet.SelectQualcomm410Mode(modem); err != nil {
+					slog.Warn("select Qualcomm 410 Internet mode after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
 				}
 			}
 		default:
@@ -211,6 +212,17 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 		if errors.Is(err, ErrUnavailable) {
 			slog.Warn("IMS access unavailable", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
 			return nil, err
+		}
+		if errors.Is(err, ErrWiFiCallingUnderlayUnavailable) {
+			c.markWaitingForUplink(modem.EquipmentIdentifier, attempt.sessionID)
+			delay := retryDelays[0]
+			slog.Info("Wi-Fi Calling waiting for uplink", "imei", modem.EquipmentIdentifier, "retryIn", delay, "error", err)
+			if err := sleep(ctx, delay); err != nil {
+				return nil, err
+			}
+			c.markConnecting(modem.EquipmentIdentifier, attempt.sessionID)
+			retry = 0
+			continue
 		}
 		if errors.Is(err, wfcsetup.ErrUserActionRequired) {
 			slog.Warn("Wi-Fi Calling requires carrier websheet", "imei", modem.EquipmentIdentifier, "error", err)
@@ -328,6 +340,9 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 				continue
 			}
 			if req, ok := c.wfcWebsheetRequest(err); ok {
+				if cfg.Access.VoWiFi != nil {
+					req = wifiCallingWebsheetRequest(req, cfg.Access.VoWiFi.Underlay)
+				}
 				session, serr := c.websheets.Create(ctx, req)
 				if serr != nil {
 					return nil, errors.Join(err, serr)
@@ -395,6 +410,17 @@ func (c *coordinator) modemClientConfig(ctx context.Context, modem *mmodem.Modem
 		return nil, fmt.Errorf("read modem IMEI: %w", err)
 	}
 	cfg := modemClientConfigForIMEI(imei, c.access, imsProfileIndex)
+	if c.access == AccessWiFiCalling {
+		settings, err := c.Settings(ctx, modem)
+		if err != nil {
+			return nil, fmt.Errorf("read Wi-Fi Calling settings: %w", err)
+		}
+		underlay, err := c.wifiCallingUnderlay(ctx, modem, settings)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Access.VoWiFi.Underlay = underlay
+	}
 	if c.access == AccessVoLTE {
 		cell, err := modem.ServingLTECell(ctx)
 		if err != nil {
@@ -408,14 +434,6 @@ func (c *coordinator) modemClientConfig(ctx context.Context, modem *mmodem.Modem
 		cfg.Access.VoLTE.AccessNetworkInfo = accessNetworkInfo
 	}
 	return cfg, nil
-}
-
-func wifiCallingModemClientConfig(ctx context.Context, modem *mmodem.Modem) (*imsgo.Config, error) {
-	imei, err := modem.ThreeGPP().IMEI(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("read modem IMEI: %w", err)
-	}
-	return modemClientConfigForIMEI(imei, AccessWiFiCalling, 0), nil
 }
 
 func modemClientConfigForIMEI(imei string, access Access, imsProfileIndex uint8) *imsgo.Config {
@@ -672,7 +690,12 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 				return
 			}
-			if state.Status == imsgo.StatusFailed || state.Status == imsgo.StatusClosed {
+			switch state.Status {
+			case imsgo.StatusRegistered:
+				c.markConnected(modem.EquipmentIdentifier, sessionID, client)
+			case imsgo.StatusReconnecting:
+				c.markClientReconnecting(modem.EquipmentIdentifier, sessionID, client)
+			case imsgo.StatusFailed, imsgo.StatusClosed:
 				_ = client.Close()
 				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 				return
@@ -720,6 +743,16 @@ func (c *coordinator) markConnected(modemID string, sessionID uint64, client *im
 	}
 }
 
+func (c *coordinator) markClientReconnecting(modemID string, sessionID uint64, client *imsgo.Client) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if session := c.sessions[modemID]; session != nil && session.id == sessionID && session.client == client {
+		session.connected = false
+		session.connectedAt = time.Time{}
+		session.phase = sessionPhaseConnecting
+	}
+}
+
 func (c *coordinator) markConnecting(modemID string, sessionID uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -728,6 +761,17 @@ func (c *coordinator) markConnecting(modemID string, sessionID uint64) {
 		session.connected = false
 		session.connectedAt = time.Time{}
 		session.phase = sessionPhaseConnecting
+	}
+}
+
+func (c *coordinator) markWaitingForUplink(modemID string, sessionID uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if session := c.sessions[modemID]; session != nil && session.id == sessionID {
+		session.client = nil
+		session.connected = false
+		session.connectedAt = time.Time{}
+		session.phase = sessionPhaseWaitingForUplink
 	}
 }
 

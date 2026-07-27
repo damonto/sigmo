@@ -6,13 +6,45 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 )
+
+type websheetTransportProbe struct {
+	called bool
+}
+
+func (p *websheetTransportProbe) RoundTrip(req *http.Request) (*http.Response, error) {
+	p.called = true
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader("through underlay")),
+		Request:    req,
+	}, nil
+}
+
+type websheetRedirectTransport struct {
+	calls int
+}
+
+func (t *websheetRedirectTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.calls++
+	return &http.Response{
+		StatusCode: http.StatusFound,
+		Header:     http.Header{"Location": []string{req.URL.String()}},
+		Body:       io.NopCloser(strings.NewReader("redirect")),
+		Request:    req,
+	}, nil
+}
 
 func TestBrokerCreateRejectsUnsafeURL(t *testing.T) {
 	t.Parallel()
@@ -34,6 +66,151 @@ func TestBrokerCreateRejectsUnsafeURL(t *testing.T) {
 				t.Fatal("Create() error is nil")
 			}
 		})
+	}
+}
+
+func TestBrokerUsesRequestLookupNetIP(t *testing.T) {
+	t.Parallel()
+
+	var network, host string
+	broker := New(Config{})
+	_, err := broker.Create(context.Background(), Request{
+		URL: "https://carrier.example/setup",
+		LookupNetIP: func(_ context.Context, gotNetwork, gotHost string) ([]netip.Addr, error) {
+			network = gotNetwork
+			host = gotHost
+			return []netip.Addr{netip.MustParseAddr("203.0.113.10")}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if network != "ip" || host != "carrier.example" {
+		t.Fatalf("LookupNetIP() = network %q host %q", network, host)
+	}
+}
+
+func TestValidatedDialContextPinsResolvedAddress(t *testing.T) {
+	dialErr := errors.New("stop dial")
+	tests := []struct {
+		name        string
+		address     netip.Addr
+		wantNetwork string
+		wantAddress string
+	}{
+		{name: "IPv4", address: netip.MustParseAddr("203.0.113.10"), wantNetwork: "tcp4", wantAddress: "203.0.113.10:443"},
+		{name: "IPv6", address: netip.MustParseAddr("2001:db8::10"), wantNetwork: "tcp6", wantAddress: "[2001:db8::10]:443"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var network, address string
+			dial := validatedDialContext(
+				func(context.Context, string, string) ([]netip.Addr, error) {
+					return []netip.Addr{tt.address}, nil
+				},
+				func(_ context.Context, gotNetwork, gotAddress string) (net.Conn, error) {
+					network = gotNetwork
+					address = gotAddress
+					return nil, dialErr
+				},
+			)
+
+			if _, err := dial(context.Background(), "tcp", "carrier.example:443"); !errors.Is(err, dialErr) {
+				t.Fatalf("DialContext() error = %v, want %v", err, dialErr)
+			}
+			if network != tt.wantNetwork || address != tt.wantAddress {
+				t.Fatalf("dial() = network %q address %q, want %q %q", network, address, tt.wantNetwork, tt.wantAddress)
+			}
+		})
+	}
+}
+
+func TestSessionRejectsDNSRebindingAtDial(t *testing.T) {
+	public := []netip.Addr{netip.MustParseAddr("203.0.113.10")}
+	private := []netip.Addr{netip.MustParseAddr("192.168.1.10")}
+	lookups := 0
+	dialed := false
+	transport := &http.Transport{
+		DialContext: func(context.Context, string, string) (net.Conn, error) {
+			dialed = true
+			return nil, errors.New("unexpected dial")
+		},
+	}
+	broker := New(Config{})
+	session, err := broker.Create(context.Background(), Request{
+		URL:        "http://carrier.example/setup",
+		HTTPClient: &http.Client{Transport: transport},
+		LookupNetIP: func(context.Context, string, string) ([]netip.Addr, error) {
+			lookups++
+			if lookups < 3 {
+				return public, nil
+			}
+			return private, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/proxy?target=http://carrier.example/setup", nil)
+	err = session.Proxy(httptest.NewRecorder(), req)
+	if !errors.Is(err, ErrUnsafeURL) {
+		t.Fatalf("Proxy() error = %v, want %v", err, ErrUnsafeURL)
+	}
+	if dialed {
+		t.Fatal("HTTP transport dialed an address after DNS rebound to a private IP")
+	}
+	if lookups != 3 {
+		t.Fatalf("LookupNetIP() calls = %d, want 3", lookups)
+	}
+}
+
+func TestSessionUsesRequestHTTPClient(t *testing.T) {
+	t.Parallel()
+
+	transport := &websheetTransportProbe{}
+	broker := New(Config{AllowPrivateHosts: true})
+	session, err := broker.Create(context.Background(), Request{
+		URL:        "https://carrier.example/setup",
+		HTTPClient: &http.Client{Transport: transport},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/proxy?target=https://carrier.example/setup", nil)
+	rec := httptest.NewRecorder()
+	if err := session.Proxy(rec, req); err != nil {
+		t.Fatalf("Proxy() error = %v", err)
+	}
+	if !transport.called {
+		t.Fatal("custom HTTP transport was not used")
+	}
+	if rec.Body.String() != "through underlay" {
+		t.Fatalf("body = %q, want custom transport response", rec.Body.String())
+	}
+}
+
+func TestSessionLimitsRedirects(t *testing.T) {
+	t.Parallel()
+
+	transport := &websheetRedirectTransport{}
+	broker := New(Config{AllowPrivateHosts: true})
+	session, err := broker.Create(context.Background(), Request{
+		URL:        "https://carrier.example/setup",
+		HTTPClient: &http.Client{Transport: transport},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/proxy?target=https://carrier.example/setup", nil)
+	err = session.Proxy(httptest.NewRecorder(), req)
+	if err == nil || !strings.Contains(err.Error(), "stopped after 10 redirects") {
+		t.Fatalf("Proxy() error = %v, want redirect limit error", err)
+	}
+	if transport.calls != 10 {
+		t.Fatalf("RoundTrip() calls = %d, want 10", transport.calls)
 	}
 }
 

@@ -126,7 +126,7 @@ func TestCreateWFCWebsheetFromSetupResult(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &coordinator{websheets: websheet.New(websheet.Config{AllowPrivateHosts: true})}
-			info, err := c.createWFCWebsheet(context.Background(), tt.result)
+			info, err := c.createWFCWebsheet(context.Background(), tt.result, nil)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("createWFCWebsheet() error = %v, want %v", err, tt.wantErr)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -174,6 +175,77 @@ func TestDNSNetwork(t *testing.T) {
 				t.Fatalf("dnsNetwork() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeDNSServers(t *testing.T) {
+	tests := []struct {
+		name    string
+		servers []string
+		want    []string
+	}{
+		{name: "defaults are handled by constructor"},
+		{name: "ipv4", servers: []string{" 1.1.1.1 "}, want: []string{"1.1.1.1:53"}},
+		{name: "ipv6", servers: []string{"2001:4860:4860::8888"}, want: []string{"[2001:4860:4860::8888]:53"}},
+		{name: "keeps port and removes duplicates", servers: []string{"9.9.9.9:5353", "9.9.9.9:5353"}, want: []string{"9.9.9.9:5353"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeDNSServers(tt.servers); !slices.Equal(got, tt.want) {
+				t.Fatalf("normalizeDNSServers() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDNSNetworkForServer(t *testing.T) {
+	tests := []struct {
+		name    string
+		network string
+		server  string
+		want    string
+	}{
+		{name: "udp ipv4", network: "udp", server: "1.1.1.1:53", want: "udp4"},
+		{name: "tcp ipv4", network: "tcp", server: "1.1.1.1:53", want: "tcp4"},
+		{name: "udp ipv6", network: "udp", server: "[2001:4860:4860::8888]:53", want: "udp6"},
+		{name: "tcp ipv6", network: "tcp", server: "[2001:4860:4860::8888]:53", want: "tcp6"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := dnsNetworkForServer(tt.network, tt.server); got != tt.want {
+				t.Fatalf("dnsNetworkForServer() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDNSResolverRotatesServers(t *testing.T) {
+	type dialCall struct {
+		network string
+		address string
+	}
+	want := []dialCall{
+		{network: "udp4", address: "1.1.1.1:53"},
+		{network: "tcp6", address: "[2001:4860:4860::8888]:53"},
+		{network: "udp4", address: "1.1.1.1:53"},
+	}
+	var got []dialCall
+	dialErr := errors.New("stop DNS dial")
+	resolver := newDNSResolver(
+		[]string{"1.1.1.1:53", "[2001:4860:4860::8888]:53"},
+		func(_ context.Context, network, address string) (net.Conn, error) {
+			got = append(got, dialCall{network: network, address: address})
+			return nil, dialErr
+		},
+	)
+
+	for _, network := range []string{"udp", "tcp", "udp"} {
+		if _, err := resolver.Dial(context.Background(), network, "ignored:53"); !errors.Is(err, dialErr) {
+			t.Fatalf("Resolver.Dial() error = %v, want %v", err, dialErr)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Resolver.Dial() calls = %+v, want %+v", got, want)
 	}
 }
 

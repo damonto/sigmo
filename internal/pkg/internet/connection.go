@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -468,6 +469,11 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 		cleanupErr := c.cleanupTracked(ctx, modemID, tracked)
 		disconnectErr := bearer.Disconnect(ctx)
 		return nil, errors.Join(fmt.Errorf("sync always on state: %w", err), cleanupErr, disconnectErr)
+	}
+	if err := c.holdQualcomm410AfterInternetConnectedLocked(ctx, modemID); err != nil {
+		// The current bearer is already usable. WDA only keeps raw-IP sticky
+		// for later reconnects, so holder failure must not tear it down.
+		slog.Warn("hold Qualcomm 410 Internet WDA after connect", "imei", modemID, "error", err)
 	}
 	if err := c.syncDefaultRouteTakeover(ctx, modemID, &tracked); err != nil {
 		cleanupErr := c.cleanupTracked(ctx, modemID, tracked)
@@ -1053,6 +1059,9 @@ func (c *Connector) connectBearerAfterRecovery(ctx context.Context, modem intern
 	bearer, err := modem.connectBearer(ctx, bearerPropertiesFromPreferences(prefs))
 	if err == nil {
 		return bearer, nil
+	}
+	if c.qualcomm410SelectedFor(modem.id()) {
+		return nil, fmt.Errorf("connect bearer: %w", err)
 	}
 
 	resetErr := c.resetConnectFailure(ctx, modem)

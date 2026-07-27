@@ -25,16 +25,18 @@ type modemFinder interface {
 }
 
 type UpdateSettingsRequest struct {
-	Enabled bool `json:"enabled"`
+	Enabled  bool              `json:"enabled"`
+	Underlay *UnderlaySettings `json:"underlay,omitempty"`
 }
 
 type SettingsResponse struct {
-	Enabled                         bool           `json:"enabled" jsonschema:"whether Wi-Fi Calling is enabled in Sigmo settings"`
-	Connected                       bool           `json:"connected" jsonschema:"whether the modem currently has an active Wi-Fi Calling IMS connection"`
-	State                           string         `json:"state" jsonschema:"current Wi-Fi Calling state, such as idle, connecting, connected, or disconnected"`
-	DurationSeconds                 int64          `json:"durationSeconds" jsonschema:"elapsed time of the current Wi-Fi Calling connection in seconds"`
-	EmergencyAddressUpdateAvailable bool           `json:"emergencyAddressUpdateAvailable" jsonschema:"whether an emergency-address update flow is available for this modem"`
-	Websheet                        *websheet.Info `json:"websheet" jsonschema:"pending carrier interaction page; null when no websheet is pending"`
+	Enabled                         bool             `json:"enabled" jsonschema:"whether Wi-Fi Calling is enabled in Sigmo settings"`
+	Underlay                        UnderlaySettings `json:"underlay" jsonschema:"outer network selected for Wi-Fi Calling"`
+	Connected                       bool             `json:"connected" jsonschema:"whether the modem currently has an active Wi-Fi Calling IMS connection"`
+	State                           string           `json:"state" jsonschema:"current Wi-Fi Calling state, such as idle, connecting, connected, or disconnected"`
+	DurationSeconds                 int64            `json:"durationSeconds" jsonschema:"elapsed time of the current Wi-Fi Calling connection in seconds"`
+	EmergencyAddressUpdateAvailable bool             `json:"emergencyAddressUpdateAvailable" jsonschema:"whether an emergency-address update flow is available for this modem"`
+	Websheet                        *websheet.Info   `json:"websheet" jsonschema:"pending carrier interaction page; null when no websheet is pending"`
 }
 
 type UpdateVoLTESettingsRequest struct {
@@ -89,6 +91,7 @@ func ReadWiFiCallingSettings(ctx context.Context, modem *mmodem.Modem, coordinat
 	}
 	return SettingsResponse{
 		Enabled:                         status.Enabled,
+		Underlay:                        status.Underlay,
 		Connected:                       status.Connected,
 		State:                           status.State,
 		DurationSeconds:                 status.DurationSeconds,
@@ -164,9 +167,25 @@ func (h *Handler) UpdateSettings(c *echo.Context) error {
 	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateSettingsInvalidRequest); err != nil {
 		return err
 	}
-	if err := h.wifiCalling.UpdateSettings(c.Request().Context(), modem, Settings{
-		Enabled: req.Enabled,
-	}); err != nil {
+	settings, err := h.wifiCalling.Settings(c.Request().Context(), modem)
+	if err != nil {
+		return httpapi.Internal(c, errorCodeUpdateSettingsFailed, err)
+	}
+	settings.Enabled = req.Enabled
+	if req.Underlay != nil {
+		settings.Underlay = *req.Underlay
+	}
+	settings, err = ResolveWiFiCallingSettings(modem, settings)
+	if errors.Is(err, ErrInvalidWiFiCallingUnderlay) {
+		return httpapi.UnprocessableEntity(c, errorCodeUpdateSettingsInvalidRequest, err)
+	}
+	if err != nil {
+		return httpapi.Internal(c, errorCodeUpdateSettingsFailed, err)
+	}
+	if err := h.wifiCalling.UpdateSettings(c.Request().Context(), modem, settings); err != nil {
+		if errors.Is(err, ErrInvalidWiFiCallingUnderlay) {
+			return httpapi.UnprocessableEntity(c, errorCodeUpdateSettingsInvalidRequest, err)
+		}
 		return httpapi.Internal(c, errorCodeUpdateSettingsFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)

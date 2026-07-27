@@ -9,6 +9,7 @@ import ModemSettingsShell from '@/components/modem/settings/ModemSettingsShell.v
 import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 import { useFeedbackBanner } from '@/composables/useFeedbackBanner'
 import { useModemWiFiCallingSettings } from '@/composables/useModemWiFiCallingSettings'
+import { useModems } from '@/composables/useModems'
 import WiFiCallingEmergencyAddressPanel from '@/views/modem-settings/WiFiCallingEmergencyAddressPanel.vue'
 import WiFiCallingSettingsPanel from '@/views/modem-settings/WiFiCallingSettingsPanel.vue'
 import WiFiCallingStatusPanel from '@/views/modem-settings/WiFiCallingStatusPanel.vue'
@@ -20,9 +21,12 @@ const modemId = computed(() => route.params.id as string)
 const { showFeedback, showError } = useFeedbackBanner()
 const { hasFeature } = useCapabilities()
 const canUseWiFiCalling = computed(() => hasFeature(FEATURE.wifiCalling))
+const { modems, fetchModems } = useModems()
+void fetchModems()
 
 const {
   settingsWiFiCallingEnabled,
+  settingsWiFiCallingUnderlay,
   settingsWiFiCallingConnected,
   settingsWiFiCallingState,
   settingsWiFiCallingDurationSeconds,
@@ -78,6 +82,9 @@ const closeWiFiCallingEmergencyAddressWebsheet = () => {
 
       <WiFiCallingSettingsPanel
         :enabled="settingsWiFiCallingEnabled"
+        :underlay="settingsWiFiCallingUnderlay"
+        :modems="modems"
+        :modem-id="modemId"
         :is-loading="isWiFiCallingSettingsLoading"
         :is-updating="isWiFiCallingSettingsUpdating"
         :is-websheet-starting="isWiFiCallingWebsheetStarting"

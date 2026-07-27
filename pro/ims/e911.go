@@ -31,11 +31,11 @@ func (c *coordinator) StartEmergencyAddressUpdate(ctx context.Context, modem *mm
 	if !supported {
 		return websheet.Info{}, ErrWebsheetUnavailable
 	}
-	result, err := c.checkEmergencyAddressUpdate(ctx, modem)
+	result, underlay, err := c.checkEmergencyAddressUpdate(ctx, modem)
 	if err != nil {
 		return websheet.Info{}, fmt.Errorf("check Wi-Fi Calling E911 setup: %w", err)
 	}
-	return c.createWFCWebsheet(ctx, result)
+	return c.createWFCWebsheet(ctx, result, underlay)
 }
 
 func (c *coordinator) EmergencyAddressUpdateAvailable(ctx context.Context, modem *mmodem.Modem) bool {
@@ -148,30 +148,32 @@ func (c modemWFCSetupCard) simPLMN() string {
 	return strings.TrimSpace(c.sim.OperatorIdentifier)
 }
 
-func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem) (wfcsetup.Result, error) {
+func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem) (wfcsetup.Result, imsgo.Underlay, error) {
 	reader, err := OpenWWAN(ctx, modem, WWANConfig{Access: AccessWiFiCalling})
 	if err != nil {
-		return wfcsetup.Result{}, fmt.Errorf("open Wi-Fi Calling SIM reader: %w", err)
+		return wfcsetup.Result{}, nil, fmt.Errorf("open Wi-Fi Calling SIM reader: %w", err)
 	}
 	defer func() {
 		_ = reader.Close()
 	}()
-	cfg, err := wifiCallingModemClientConfig(ctx, modem)
+	cfg, err := c.modemClientConfig(ctx, modem, 0, "")
 	if err != nil {
-		return wfcsetup.Result{}, err
+		return wfcsetup.Result{}, nil, err
 	}
 	card, err := usim.New(ctx, reader, cfg.Logger)
 	if err != nil {
-		return wfcsetup.Result{}, fmt.Errorf("load Wi-Fi Calling SIM: %w", err)
+		return wfcsetup.Result{}, nil, fmt.Errorf("load Wi-Fi Calling SIM: %w", err)
 	}
 
-	return wfcsetup.Check(ctx, wfcsetup.Request{
+	result, err := wfcsetup.Check(ctx, wfcsetup.Request{
 		Card:            card,
 		AuthenticateAKA: card.EAPAKA,
 		Device:          wfcSetupDevice(cfg.Terminal),
 		Purpose:         wfcsetup.PurposeEmergencyAddressUpdate,
 		Logger:          cfg.Logger,
+		HTTPClient:      wifiCallingHTTPClient(cfg.Access.VoWiFi.Underlay),
 	})
+	return result, cfg.Access.VoWiFi.Underlay, err
 }
 
 func wfcSetupDevice(terminal imsgo.TerminalInfo) wfcsetup.Device {

@@ -20,6 +20,7 @@ import (
 
 type Config struct {
 	Store              *storage.Store
+	Registry           *mmodem.Registry
 	OnIncoming         IncomingSMSFunc
 	Websheets          *websheet.Broker
 	Access             Access
@@ -43,6 +44,7 @@ type coordinator struct {
 	websheets          *websheet.Broker
 	access             Access
 	internet           internetRestorer
+	registry           *mmodem.Registry
 	registrationGroups *RegistrationGroups
 	volteUpdateMu      sync.Mutex
 
@@ -76,6 +78,7 @@ type sessionPhase string
 
 const (
 	sessionPhaseConnecting       sessionPhase = "connecting"
+	sessionPhaseWaitingForUplink sessionPhase = "waiting_for_uplink"
 	sessionPhaseConnected        sessionPhase = "connected"
 	sessionPhaseWebsheetRequired sessionPhase = "websheet_required"
 	sessionPhaseDisconnected     sessionPhase = "disconnected"
@@ -86,14 +89,19 @@ func New(cfg Config) Coordinator {
 	if access == "" {
 		access = AccessWiFiCalling
 	}
+	var internet internetRestorer
+	if cfg.Internet != nil {
+		internet = cfg.Internet
+	}
 	return &coordinator{
 		settings:           NewSettingsStore(cfg.Store),
 		volteSettings:      NewVoLTESettingsStore(cfg.Store),
 		store:              cfg.Store,
+		registry:           cfg.Registry,
 		onIncoming:         cfg.OnIncoming,
 		websheets:          cfg.Websheets,
 		access:             access,
-		internet:           cfg.Internet,
+		internet:           internet,
 		registrationGroups: cfg.RegistrationGroups,
 		sessions:           make(map[string]*sessionState),
 		smsSubmissions:     make(map[smsSubmissionKey]*smsSubmissionTracker),
@@ -225,7 +233,11 @@ func (c *coordinator) Settings(ctx context.Context, modem *mmodem.Modem) (Settin
 	if err != nil {
 		return Settings{}, err
 	}
-	return c.settings.Get(ctx, profileID)
+	settings, err := c.settings.Get(ctx, profileID)
+	if err != nil {
+		return Settings{}, err
+	}
+	return ResolveWiFiCallingSettings(modem, settings)
 }
 
 func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, settings Settings) error {
@@ -320,6 +332,10 @@ func (c *coordinator) UpdateSettings(ctx context.Context, modem *mmodem.Modem, s
 		return result
 	}
 	profileID, err := modem.ProfileID(ctx)
+	if err != nil {
+		return err
+	}
+	settings, err = ResolveWiFiCallingSettings(modem, settings)
 	if err != nil {
 		return err
 	}
@@ -512,6 +528,8 @@ func statusFromSession(settings Settings, session *sessionState, profileID strin
 		}
 	case sessionPhaseDisconnected:
 		status.State = StateDisconnected
+	case sessionPhaseWaitingForUplink:
+		status.State = StateWaitingForUplink
 	default:
 		status.State = StateConnecting
 	}

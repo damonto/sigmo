@@ -4,9 +4,9 @@ go 1.26.3
 
 require (
 	github.com/damonto/euicc-go v1.1.3-0.20260712112734-b1c42d12dd47
-	github.com/damonto/ims-go v0.0.0-20260726121048-f422e53a62dd
+	github.com/damonto/ims-go v0.0.0-20260727131432-ed78bfbcf7dd
 	github.com/damonto/sigmo v1.0.6
-	github.com/damonto/ts43-go v0.0.0-20260722032321-cca2b8b7e810
+	github.com/damonto/ts43-go v0.0.0-20260727131007-1e61ad99de1d
 	github.com/damonto/wwan-go v0.0.0-20260726044848-6c2a4b9b0a0e
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
@@ -38,7 +38,7 @@ require (
 	github.com/pion/mdns/v2 v2.1.0 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.17 // indirect
-	github.com/pion/sctp v1.11.0 // indirect
+	github.com/pion/sctp v1.11.1 // indirect
 	github.com/pion/sdp/v3 v3.0.19 // indirect
 	github.com/pion/srtp/v3 v3.0.12 // indirect
 	github.com/pion/stun/v3 v3.1.6 // indirect

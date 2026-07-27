@@ -169,24 +169,43 @@ describe('ModemCallBanner', () => {
     expect(session.hangup).toHaveBeenCalledWith(active)
   })
 
-  it('opens an in-call dialpad and sends DTMF digits', async () => {
-    const active = call({
-      direction: 'outgoing',
-      state: 'active',
-      answeredAt: '2026-05-27T00:00:10Z',
+  it.each(['wifi_calling', 'volte'] as const)(
+    'opens an in-call dialpad and sends DTMF digits for %s calls',
+    async (route) => {
+      const active = call({
+        route,
+        direction: 'outgoing',
+        state: 'active',
+        answeredAt: '2026-05-27T00:00:10Z',
+      })
+      const session = makeSession({ activeCall: active })
+      const wrapper = mountBanner(session)
+
+      await wrapper.get('button[aria-label="Open in-call dialpad"]').trigger('click')
+      expect(wrapper.text()).toContain('*')
+      expect(wrapper.text()).toContain('#')
+
+      const one = wrapper.findAll('button').find((button) => button.text() === '1')
+      expect(one).toBeTruthy()
+      await one?.trigger('click')
+      await wrapper.get('button[aria-label="Hold"]').trigger('click')
+
+      expect(session.sendDTMF).toHaveBeenCalledWith(active, '1')
+      expect(session.toggleHold).toHaveBeenCalledWith(active)
+    },
+  )
+
+  it('opens the in-call dialpad during early media', () => {
+    const session = makeSession({
+      activeCall: call({
+        route: 'volte',
+        direction: 'outgoing',
+        state: 'early_media',
+      }),
     })
-    const session = makeSession({ activeCall: active })
     const wrapper = mountBanner(session)
 
-    await wrapper.get('button[aria-label="Open in-call dialpad"]').trigger('click')
-    expect(wrapper.text()).toContain('*')
-    expect(wrapper.text()).toContain('#')
-
-    const one = wrapper.findAll('button').find((button) => button.text() === '1')
-    expect(one).toBeTruthy()
-    await one?.trigger('click')
-
-    expect(session.sendDTMF).toHaveBeenCalledWith(active, '1')
+    expect(wrapper.find('button[aria-label="Open in-call dialpad"]').exists()).toBe(true)
   })
 
   it('shows local hold state and resume action', async () => {

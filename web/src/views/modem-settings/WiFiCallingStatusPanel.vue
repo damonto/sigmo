@@ -27,6 +27,7 @@ const normalizedState = computed(() => {
   if (!props.enabled) return 'disabled'
   if (props.connected || props.state === 'connected') return 'connected'
   if (props.isReconnecting || props.state === 'connecting') return 'connecting'
+  if (props.state === 'waiting_for_uplink') return 'waiting_for_uplink'
   if (props.state === 'websheet_required') return 'websheet_required'
   return 'disconnected'
 })
@@ -36,7 +37,10 @@ const showReconnect = computed(() => props.enabled && !props.isLoading)
 const isReconnectDisabled = computed(() => props.isUpdating || props.isReconnecting)
 
 const isPending = computed(
-  () => normalizedState.value === 'loading' || normalizedState.value === 'connecting',
+  () =>
+    normalizedState.value === 'loading' ||
+    normalizedState.value === 'connecting' ||
+    normalizedState.value === 'waiting_for_uplink',
 )
 
 const statusLabel = computed(() => {
@@ -47,6 +51,8 @@ const statusLabel = computed(() => {
       return t('modemDetail.settings.wifiCallingConnected')
     case 'connecting':
       return t('modemDetail.settings.wifiCallingConnecting')
+    case 'waiting_for_uplink':
+      return t('modemDetail.settings.wifiCallingWaitingForUplink')
     case 'websheet_required':
       return t('modemDetail.settings.wifiCallingSetupRequired')
     case 'disabled':
@@ -64,6 +70,8 @@ const statusDescription = computed(() => {
       return t('modemDetail.settings.wifiCallingConnectedDescription')
     case 'connecting':
       return t('modemDetail.settings.wifiCallingConnectingDescription')
+    case 'waiting_for_uplink':
+      return t('modemDetail.settings.wifiCallingWaitingForUplinkDescription')
     case 'websheet_required':
       return t('modemDetail.settings.wifiCallingSetupRequiredDescription')
     case 'disabled':
@@ -78,6 +86,7 @@ const statusTone = computed(() => {
     case 'connected':
       return 'connected'
     case 'connecting':
+    case 'waiting_for_uplink':
       return 'connecting'
     case 'websheet_required':
       return 'setup'

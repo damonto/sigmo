@@ -21,7 +21,7 @@ const (
 	VoLTEFeatureName       = "volte"
 
 	scopePrefix               = "profile:"
-	keyEnabled                = "wifi_calling.enabled"
+	keyWiFiCallingSettings    = "wifi_calling.settings"
 	modemScopePrefix          = "modem:"
 	keyVoLTESettings          = "volte.settings"
 	keyVoLTESuspendedInternet = "volte.suspended_internet"
@@ -30,6 +30,7 @@ const (
 
 	StateIdle             = "idle"
 	StateConnecting       = "connecting"
+	StateWaitingForUplink = "waiting_for_uplink"
 	StateConnected        = "connected"
 	StateWebsheetRequired = "websheet_required"
 	StateDisconnected     = "disconnected"
@@ -44,6 +45,8 @@ const (
 
 type DataPath string
 
+type UnderlayMode string
+
 const (
 	DataPathMBIM          DataPath = "mbim"
 	DataPathQMAP          DataPath = "qmap"
@@ -51,24 +54,62 @@ const (
 	DataPathQualcomm410   DataPath = "qualcomm_410"
 )
 
+const (
+	UnderlayModeSystem UnderlayMode = "system"
+	UnderlayModeSelf   UnderlayMode = "self"
+	UnderlayModeModem  UnderlayMode = "modem"
+)
+
 var (
-	ErrUnavailable              = errors.New("ims access is unavailable")
-	ErrNotConnected             = errors.New("ims access is not connected")
-	ErrWiFiCallingSetupPending  = errors.New("wifi calling setup is pending")
-	ErrWiFiCallingSetupDenied   = errors.New("wifi calling setup denied")
-	ErrUnsupportedCodec         = errors.New("ims voice codec is not supported")
-	ErrUnsupportedDTMF          = errors.New("ims dtmf is not supported")
-	ErrCallOnHold               = errors.New("ims call is on hold")
-	ErrWebsheetNotPending       = errors.New("wifi calling websheet is not pending")
-	ErrWebsheetDismissed        = errors.New("wifi calling websheet was dismissed")
-	ErrWebsheetUnavailable      = errors.New("wifi calling websheet is unavailable")
-	ErrVoLTEDataPathRequired    = errors.New("QMI VoLTE data path is required")
-	ErrVoLTEDataPathUnsupported = errors.New("VoLTE data path is unsupported")
+	ErrUnavailable                    = errors.New("ims access is unavailable")
+	ErrNotConnected                   = errors.New("ims access is not connected")
+	ErrWiFiCallingSetupPending        = errors.New("wifi calling setup is pending")
+	ErrWiFiCallingSetupDenied         = errors.New("wifi calling setup denied")
+	ErrUnsupportedCodec               = errors.New("ims voice codec is not supported")
+	ErrUnsupportedDTMF                = errors.New("ims dtmf is not supported")
+	ErrCallOnHold                     = errors.New("ims call is on hold")
+	ErrWebsheetNotPending             = errors.New("wifi calling websheet is not pending")
+	ErrWebsheetDismissed              = errors.New("wifi calling websheet was dismissed")
+	ErrWebsheetUnavailable            = errors.New("wifi calling websheet is unavailable")
+	ErrInvalidWiFiCallingUnderlay     = errors.New("wifi calling underlay is invalid")
+	ErrWiFiCallingUnderlayUnavailable = errors.New("wifi calling underlay is unavailable")
+	ErrVoLTEDataPathRequired          = errors.New("QMI VoLTE data path is required")
+	ErrVoLTEDataPathUnsupported       = errors.New("VoLTE data path is unsupported")
 )
 
 type Settings struct {
 	Enabled  bool
+	Underlay UnderlaySettings
 	DataPath DataPath
+}
+
+type UnderlaySettings struct {
+	Mode    UnderlayMode `json:"mode" jsonschema:"outer network used by Wi-Fi Calling: system, self, or modem"`
+	ModemID string       `json:"modemId,omitempty" jsonschema:"stable modem identifier used when mode is modem"`
+}
+
+func ResolveWiFiCallingSettings(modem *mmodem.Modem, settings Settings) (Settings, error) {
+	mode := UnderlayMode(strings.ToLower(strings.TrimSpace(string(settings.Underlay.Mode))))
+	if mode == "" {
+		mode = UnderlayModeSystem
+	}
+	modemID := strings.TrimSpace(settings.Underlay.ModemID)
+	switch mode {
+	case UnderlayModeSystem, UnderlayModeSelf:
+		modemID = ""
+	case UnderlayModeModem:
+		if modemID == "" {
+			return Settings{}, fmt.Errorf("%w: modem id is required for modem mode", ErrInvalidWiFiCallingUnderlay)
+		}
+		if modem != nil && modemID == strings.TrimSpace(modem.EquipmentIdentifier) {
+			mode = UnderlayModeSelf
+			modemID = ""
+		}
+	default:
+		return Settings{}, fmt.Errorf("%w: unsupported mode %q", ErrInvalidWiFiCallingUnderlay, mode)
+	}
+	settings.Underlay = UnderlaySettings{Mode: mode, ModemID: modemID}
+	return settings, nil
 }
 
 type Status struct {
@@ -140,6 +181,11 @@ type Coordinator interface {
 
 type SettingsStore struct {
 	store *storage.Store
+}
+
+type wifiCallingSettingsRecord struct {
+	Enabled  bool             `json:"enabled"`
+	Underlay UnderlaySettings `json:"underlay"`
 }
 
 type VoLTESettingsStore struct {
@@ -234,17 +280,20 @@ func NewSettingsStore(store *storage.Store) *SettingsStore {
 
 func (s *SettingsStore) Get(ctx context.Context, profileID string) (Settings, error) {
 	if s == nil || s.store == nil {
-		return Settings{}, nil
+		return Settings{Underlay: UnderlaySettings{Mode: UnderlayModeSystem}}, nil
 	}
 	scope, err := profileScope(profileID)
 	if err != nil {
 		return Settings{}, err
 	}
-	var settings Settings
-	if err := s.store.Get(ctx, scope, keyEnabled, &settings.Enabled); err != nil && !errors.Is(err, storage.ErrNotFound) {
-		return Settings{}, fmt.Errorf("read wifi calling enabled: %w", err)
+	record := wifiCallingSettingsRecord{Underlay: UnderlaySettings{Mode: UnderlayModeSystem}}
+	if err := s.store.Get(ctx, scope, keyWiFiCallingSettings, &record); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return Settings{Underlay: record.Underlay}, nil
+		}
+		return Settings{}, fmt.Errorf("read wifi calling settings: %w", err)
 	}
-	return settings, nil
+	return ResolveWiFiCallingSettings(nil, Settings{Enabled: record.Enabled, Underlay: record.Underlay})
 }
 
 func (s *SettingsStore) Put(ctx context.Context, profileID string, settings Settings) error {
@@ -255,8 +304,13 @@ func (s *SettingsStore) Put(ctx context.Context, profileID string, settings Sett
 	if err != nil {
 		return err
 	}
-	if err := s.store.Put(ctx, scope, keyEnabled, settings.Enabled); err != nil {
-		return fmt.Errorf("save wifi calling enabled: %w", err)
+	settings, err = ResolveWiFiCallingSettings(nil, settings)
+	if err != nil {
+		return err
+	}
+	record := wifiCallingSettingsRecord{Enabled: settings.Enabled, Underlay: settings.Underlay}
+	if err := s.store.Put(ctx, scope, keyWiFiCallingSettings, record); err != nil {
+		return fmt.Errorf("save wifi calling settings: %w", err)
 	}
 	return nil
 }

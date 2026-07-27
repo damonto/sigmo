@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 
+	imsgo "github.com/damonto/ims-go"
 	"github.com/damonto/ims-go/wfcsetup"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/pro/websheet"
@@ -39,13 +40,14 @@ func (c *coordinator) wfcWebsheetRequest(err error) (websheet.Request, bool) {
 	return wfcWebsheetRequestFromResult(setupErr.Result)
 }
 
-func (c *coordinator) createWFCWebsheet(ctx context.Context, result wfcsetup.Result) (websheet.Info, error) {
+func (c *coordinator) createWFCWebsheet(ctx context.Context, result wfcsetup.Result, underlay imsgo.Underlay) (websheet.Info, error) {
 	switch result.Action {
 	case wfcsetup.ActionOpenWebsheet:
 		req, ok := wfcWebsheetRequestFromResult(result)
 		if !ok {
 			return websheet.Info{}, ErrWebsheetUnavailable
 		}
+		req = wifiCallingWebsheetRequest(req, underlay)
 		session, err := c.websheets.Create(ctx, req)
 		if err != nil {
 			return websheet.Info{}, err
@@ -58,6 +60,15 @@ func (c *coordinator) createWFCWebsheet(ctx context.Context, result wfcsetup.Res
 	default:
 		return websheet.Info{}, ErrWebsheetUnavailable
 	}
+}
+
+func wifiCallingWebsheetRequest(req websheet.Request, underlay imsgo.Underlay) websheet.Request {
+	if underlay == nil {
+		return req
+	}
+	req.HTTPClient = wifiCallingHTTPClient(underlay)
+	req.LookupNetIP = underlay.LookupNetIP
+	return req
 }
 
 func wfcWebsheetRequestFromResult(result wfcsetup.Result) (websheet.Request, bool) {

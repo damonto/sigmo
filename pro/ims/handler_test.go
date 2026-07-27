@@ -29,12 +29,73 @@ type updateCoordinatorProbe struct {
 	Coordinator
 	updated  bool
 	settings Settings
+	current  Settings
+}
+
+func (p *updateCoordinatorProbe) Settings(context.Context, *mmodem.Modem) (Settings, error) {
+	return p.current, nil
 }
 
 func (p *updateCoordinatorProbe) UpdateSettings(_ context.Context, _ *mmodem.Modem, settings Settings) error {
 	p.updated = true
 	p.settings = settings
 	return nil
+}
+
+func TestUpdateWiFiCallingSettingsUnderlay(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		current      Settings
+		wantStatus   int
+		wantSettings Settings
+	}{
+		{
+			name:         "preserves omitted underlay",
+			body:         `{"enabled":false}`,
+			current:      Settings{Enabled: true, Underlay: UnderlaySettings{Mode: UnderlayModeSelf}},
+			wantStatus:   http.StatusNoContent,
+			wantSettings: Settings{Underlay: UnderlaySettings{Mode: UnderlayModeSelf}},
+		},
+		{
+			name:         "selects another modem",
+			body:         `{"enabled":true,"underlay":{"mode":"modem","modemId":"modem-2"}}`,
+			wantStatus:   http.StatusNoContent,
+			wantSettings: Settings{Enabled: true, Underlay: UnderlaySettings{Mode: UnderlayModeModem, ModemID: "modem-2"}},
+		},
+		{
+			name:       "rejects missing modem id",
+			body:       `{"enabled":true,"underlay":{"mode":"modem"}}`,
+			wantStatus: http.StatusUnprocessableEntity,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			probe := &updateCoordinatorProbe{current: tt.current}
+			h := &Handler{
+				registry:    fakeModemFinder{modem: &mmodem.Modem{EquipmentIdentifier: "modem-1"}},
+				wifiCalling: probe,
+			}
+			e := echo.New()
+			e.Validator = appvalidator.New()
+			e.PUT("/modems/:id/wifi-calling/settings", h.UpdateSettings)
+			req := httptest.NewRequest(http.MethodPut, "/modems/modem-1/wifi-calling/settings", strings.NewReader(tt.body))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+			if probe.updated != (tt.wantStatus == http.StatusNoContent) {
+				t.Fatalf("UpdateSettings called = %v", probe.updated)
+			}
+			if probe.settings != tt.wantSettings {
+				t.Fatalf("UpdateSettings settings = %+v, want %+v", probe.settings, tt.wantSettings)
+			}
+		})
+	}
 }
 
 func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {

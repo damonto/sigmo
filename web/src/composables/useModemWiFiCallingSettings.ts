@@ -2,7 +2,11 @@ import { computed, onUnmounted, ref, watch, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useModemApi } from '@/apis/modem'
-import type { WiFiCallingSettings, WiFiCallingSettingsResponse } from '@/types/modem'
+import type {
+  WiFiCallingSettings,
+  WiFiCallingSettingsResponse,
+  WiFiCallingUnderlay,
+} from '@/types/modem'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 
 type Options = {
@@ -18,14 +22,17 @@ type FetchSettingsOptions = {
 }
 
 const pollIntervalMs = 5000
+const systemUnderlay = (): WiFiCallingUnderlay => ({ mode: 'system' })
 
 export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onError }: Options) => {
   const { t } = useI18n()
   const modemApi = useModemApi()
 
   const settingsWiFiCallingEnabled = ref(false)
+  const settingsWiFiCallingUnderlay = ref<WiFiCallingUnderlay>(systemUnderlay())
   const confirmedWiFiCallingSettings = ref<WiFiCallingSettings>({
     enabled: false,
+    underlay: systemUnderlay(),
   })
   const settingsWiFiCallingConnected = ref(false)
   const settingsWiFiCallingState = ref('')
@@ -84,7 +91,8 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
     stopPolling()
     stopDurationTimer()
     settingsWiFiCallingEnabled.value = false
-    confirmedWiFiCallingSettings.value = { enabled: false }
+    settingsWiFiCallingUnderlay.value = systemUnderlay()
+    confirmedWiFiCallingSettings.value = { enabled: false, underlay: systemUnderlay() }
     settingsWiFiCallingConnected.value = false
     settingsWiFiCallingState.value = ''
     settingsWiFiCallingDurationSeconds.value = 0
@@ -109,8 +117,10 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
       if (!preserveSettings || options?.applySettings) {
         const settings = {
           enabled: payload?.enabled ?? false,
+          underlay: payload?.underlay ?? systemUnderlay(),
         }
         settingsWiFiCallingEnabled.value = settings.enabled
+        settingsWiFiCallingUnderlay.value = { ...settings.underlay }
         confirmedWiFiCallingSettings.value = settings
       }
       settingsWiFiCallingConnected.value = data.value?.connected ?? false
@@ -132,11 +142,16 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
     if (isWiFiCallingSettingsUpdating.value) return
     const mutationEpoch = advanceSettingsRequestEpoch()
     isWiFiCallingSettingsUpdating.value = true
-    const previous = confirmedWiFiCallingSettings.value
+    const previous = {
+      enabled: confirmedWiFiCallingSettings.value.enabled,
+      underlay: { ...(confirmedWiFiCallingSettings.value.underlay ?? systemUnderlay()) },
+    }
     const settings = {
       enabled: next.enabled,
+      underlay: { ...(next.underlay ?? systemUnderlay()) },
     }
     settingsWiFiCallingEnabled.value = settings.enabled
+    settingsWiFiCallingUnderlay.value = { ...settings.underlay }
     try {
       await modemApi.updateWiFiCallingSettings(targetId, settings)
       if (modemId.value !== targetId || settingsRequestEpoch.value !== mutationEpoch) return
@@ -147,6 +162,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
     } catch (err) {
       if (modemId.value !== targetId || settingsRequestEpoch.value !== mutationEpoch) return
       settingsWiFiCallingEnabled.value = previous.enabled
+      settingsWiFiCallingUnderlay.value = { ...previous.underlay }
       console.error('[useModemWiFiCallingSettings] Failed to update settings:', err)
       onError?.(t('modemDetail.settings.wifiCallingUpdateFailed'))
     } finally {
@@ -159,6 +175,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
   const handleWiFiCallingUpdate = () =>
     updateWiFiCallingSettings({
       enabled: settingsWiFiCallingEnabled.value,
+      underlay: settingsWiFiCallingUnderlay.value,
     })
 
   const reconnectWiFiCalling = async () => {
@@ -288,6 +305,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
 
   return {
     settingsWiFiCallingEnabled,
+    settingsWiFiCallingUnderlay,
     settingsWiFiCallingConnected,
     settingsWiFiCallingState,
     settingsWiFiCallingDurationSeconds,

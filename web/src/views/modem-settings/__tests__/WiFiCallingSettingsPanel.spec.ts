@@ -5,11 +5,14 @@ import { describe, expect, it } from 'vitest'
 import WiFiCallingSettingsPanel from '@/views/modem-settings/WiFiCallingSettingsPanel.vue'
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
+import type { Modem } from '@/types/modem'
 
 const stubs = {
   Button: {
+    name: 'Button',
     props: ['type', 'disabled'],
-    template: '<button :type="type || \'button\'" :disabled="disabled"><slot /></button>',
+    template:
+      '<button data-testid="action-button" :type="type || \'button\'" :disabled="disabled"><slot /></button>',
   },
   Card: {
     template: '<section><slot /></section>',
@@ -30,6 +33,27 @@ const stubs = {
   Spinner: {
     template: '<span />',
   },
+  Select: {
+    name: 'Select',
+    props: ['modelValue', 'disabled'],
+    emits: ['update:modelValue'],
+    template: '<div data-testid="underlay-select"><slot /></div>',
+  },
+  SelectContent: {
+    template: '<div><slot /></div>',
+  },
+  SelectItem: {
+    props: ['value'],
+    template: '<div :data-value="value"><slot /></div>',
+  },
+  SelectTrigger: {
+    props: ['id'],
+    template: '<button :id="id" type="button"><slot /></button>',
+  },
+  SelectValue: {
+    props: ['placeholder'],
+    template: '<span>{{ placeholder }}</span>',
+  },
   Switch: {
     props: ['id', 'modelValue', 'disabled'],
     emits: ['update:modelValue'],
@@ -38,7 +62,36 @@ const stubs = {
   },
 }
 
-const mountCard = (locale: 'en' | 'zh') => {
+const modem = (id: string, name: string): Modem => ({
+  manufacturer: 'Example',
+  id,
+  firmwareRevision: '1',
+  hardwareRevision: '1',
+  name,
+  number: '',
+  state: 'registered',
+  unlockRequired: '',
+  unlockSupported: false,
+  sim: {
+    active: true,
+    operatorName: 'Carrier',
+    operatorIdentifier: '00101',
+    regionCode: '001',
+    identifier: `${id}-sim`,
+  },
+  slots: [],
+  accessTechnology: 'LTE',
+  registrationState: 'registered',
+  registeredOperator: { name: 'Carrier', code: '00101' },
+  signalQuality: 80,
+  airplaneMode: false,
+  supportsEsim: false,
+})
+
+const mountCard = (
+  locale: 'en' | 'zh',
+  props: Partial<InstanceType<typeof WiFiCallingSettingsPanel>['$props']> = {},
+) => {
   const i18n = createI18n({
     legacy: false,
     locale,
@@ -49,12 +102,16 @@ const mountCard = (locale: 'en' | 'zh') => {
   return mount(WiFiCallingSettingsPanel, {
     props: {
       enabled: true,
+      underlay: { mode: 'system' },
+      modems: [],
+      modemId: 'modem-1',
       isLoading: false,
       isUpdating: false,
       isWebsheetStarting: false,
       isEmergencyAddressStarting: false,
       state: 'connected',
       websheet: null,
+      ...props,
     },
     global: {
       plugins: [i18n],
@@ -68,10 +125,38 @@ describe('WiFiCallingSettingsPanel', () => {
     const wrapper = mountCard('en')
     const switches = wrapper.findAll('input[type="checkbox"]')
 
-    expect(wrapper.find('button').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="action-button"]').exists()).toBe(false)
+    expect(wrapper.get('#modem-wifi-calling-underlay').attributes('type')).toBe('button')
 
     await switches[0]?.setValue(false)
 
-    expect(wrapper.emitted('update')).toEqual([[{ enabled: false }]])
+    expect(wrapper.emitted('update')).toEqual([[{ enabled: false, underlay: { mode: 'system' } }]])
+  })
+
+  it('saves current and other modem underlays immediately', async () => {
+    const wrapper = mountCard('en', {
+      modems: [modem('modem-1', 'Voice'), modem('modem-2', 'Data')],
+    })
+    const select = wrapper.getComponent({ name: 'Select' })
+
+    select.vm.$emit('update:modelValue', 'self')
+    await wrapper.vm.$nextTick()
+    select.vm.$emit('update:modelValue', 'modem:modem-2')
+
+    expect(wrapper.text()).toContain('This modem mobile data')
+    expect(wrapper.text()).toContain('Data (modem-2) mobile data')
+    expect(wrapper.emitted('update')).toEqual([
+      [{ enabled: true, underlay: { mode: 'self' } }],
+      [{ enabled: true, underlay: { mode: 'modem', modemId: 'modem-2' } }],
+    ])
+  })
+
+  it('keeps a configured offline modem visible', () => {
+    const wrapper = mountCard('en', {
+      underlay: { mode: 'modem', modemId: 'offline-imei' },
+      modems: [modem('modem-1', 'Voice')],
+    })
+
+    expect(wrapper.text()).toContain('Modem offline-imei (currently offline)')
   })
 })

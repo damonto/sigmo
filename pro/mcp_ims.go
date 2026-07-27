@@ -106,19 +106,42 @@ func (t *imsMCPTools) getWiFiCalling(ctx context.Context, _ *mcp.CallToolRequest
 }
 
 type wifiSettingsInput struct {
-	ModemID string `json:"modemId"`
-	Enabled bool   `json:"enabled"`
+	ModemID  string                 `json:"modemId"`
+	Enabled  bool                   `json:"enabled"`
+	Underlay *pims.UnderlaySettings `json:"underlay"`
 }
 
-func wifiSettingsModemIDs(input wifiSettingsInput) []string { return []string{input.ModemID} }
+func wifiSettingsModemIDs(input wifiSettingsInput) []string {
+	ids := []string{input.ModemID}
+	if input.Underlay != nil && strings.EqualFold(strings.TrimSpace(string(input.Underlay.Mode)), string(pims.UnderlayModeModem)) {
+		if id := strings.TrimSpace(input.Underlay.ModemID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 func (t *imsMCPTools) setWiFiCallingPolicy() mcpserver.GuardedToolPolicy[wifiSettingsInput] {
 	return mcpserver.GuardedToolPolicy[wifiSettingsInput]{
 		Validate: func(ctx context.Context, input wifiSettingsInput) error {
-			_, err := t.modem(ctx, input.ModemID)
+			device, err := t.modem(ctx, input.ModemID)
+			if err != nil {
+				return err
+			}
+			_, err = t.wifiCallingSettings(ctx, device, input)
+			if errors.Is(err, pims.ErrInvalidWiFiCallingUnderlay) {
+				return mcpserver.NewToolError("invalid_request", "Wi-Fi Calling underlay is invalid", err)
+			}
 			return err
 		},
 		Confirmation: func(input wifiSettingsInput) string {
-			return fmt.Sprintf("Set Wi-Fi Calling on modem %q to enabled=%t? This can interrupt IMS service.", input.ModemID, input.Enabled)
+			if input.Underlay == nil {
+				return "Set Wi-Fi Calling without an underlay?"
+			}
+			if strings.EqualFold(strings.TrimSpace(string(input.Underlay.Mode)), string(pims.UnderlayModeModem)) {
+				return fmt.Sprintf("Set Wi-Fi Calling on modem %q to enabled=%t using modem %q for Internet traffic? This can interrupt IMS service and consume data on the underlay modem.", input.ModemID, input.Enabled, strings.TrimSpace(input.Underlay.ModemID))
+			}
+			return fmt.Sprintf("Set Wi-Fi Calling on modem %q to enabled=%t with underlay mode %q? This can interrupt IMS service.", input.ModemID, input.Enabled, input.Underlay.Mode)
 		},
 	}
 }
@@ -127,10 +150,30 @@ func (t *imsMCPTools) setWiFiCalling(ctx context.Context, _ *mcp.CallToolRequest
 	if err != nil {
 		return proSuccessOutput{}, err
 	}
-	if err := t.wifiCalling.UpdateSettings(ctx, device, pims.Settings{Enabled: input.Enabled}); err != nil {
+	settings, err := t.wifiCallingSettings(ctx, device, input)
+	if errors.Is(err, pims.ErrInvalidWiFiCallingUnderlay) {
+		return proSuccessOutput{}, mcpserver.NewToolError("invalid_request", "Wi-Fi Calling underlay is invalid", err)
+	}
+	if err != nil {
+		return proSuccessOutput{}, mcpserver.OperationError("read Wi-Fi Calling settings", err)
+	}
+	if err := t.wifiCalling.UpdateSettings(ctx, device, settings); err != nil {
 		return proSuccessOutput{}, mcpserver.OperationError("set Wi-Fi Calling", err)
 	}
 	return proSuccessOutput{Success: true}, nil
+}
+
+func (t *imsMCPTools) wifiCallingSettings(ctx context.Context, modem *mmodem.Modem, input wifiSettingsInput) (pims.Settings, error) {
+	if input.Underlay == nil {
+		return pims.Settings{}, fmt.Errorf("%w: underlay is required", pims.ErrInvalidWiFiCallingUnderlay)
+	}
+	settings, err := t.wifiCalling.Settings(ctx, modem)
+	if err != nil {
+		return pims.Settings{}, err
+	}
+	settings.Enabled = input.Enabled
+	settings.Underlay = *input.Underlay
+	return pims.ResolveWiFiCallingSettings(modem, settings)
 }
 func (t *imsMCPTools) reconnectWiFiCallingPolicy() mcpserver.GuardedToolPolicy[proModemInput] {
 	return mcpserver.GuardedToolPolicy[proModemInput]{

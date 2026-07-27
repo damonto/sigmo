@@ -686,6 +686,11 @@ func (r *fakeInternetRestorer) SetQMAPEnabled(_ context.Context, _ *mmodem.Modem
 	return r.qmapErr
 }
 
+func (r *fakeInternetRestorer) SelectQualcomm410Mode(*mmodem.Modem) error {
+	r.calls = append(r.calls, "qualcomm410:select")
+	return r.qualcomm410Err
+}
+
 func (r *fakeInternetRestorer) SetQualcomm410Enabled(_ context.Context, _ *mmodem.Modem, enabled bool) error {
 	r.calls = append(r.calls, fmt.Sprintf("qualcomm410:%t", enabled))
 	if len(r.qualcomm410Errors) > 0 {
@@ -1024,6 +1029,50 @@ func TestConnectingSessionLifecycle(t *testing.T) {
 	}
 }
 
+func TestClientReconnectingSessionLifecycle(t *testing.T) {
+	client := &imsgo.Client{}
+	connectedAt := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+	session := &sessionState{
+		id:          1,
+		client:      client,
+		connected:   true,
+		connectedAt: connectedAt,
+		phase:       sessionPhaseConnected,
+		profileID:   "profile-1",
+	}
+	c := &coordinator{sessions: map[string]*sessionState{"modem-1": session}}
+
+	c.markClientReconnecting("modem-1", 1, client)
+
+	if session.client != client {
+		t.Fatal("client changed while reconnecting")
+	}
+	if session.connected {
+		t.Fatal("connected = true while reconnecting")
+	}
+	if !session.connectedAt.IsZero() {
+		t.Fatalf("connectedAt = %v, want zero", session.connectedAt)
+	}
+	if session.phase != sessionPhaseConnecting {
+		t.Fatalf("phase = %q, want %q", session.phase, sessionPhaseConnecting)
+	}
+	if _, err := c.connectedClient("modem-1", "profile-1"); !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("connectedClient() error = %v, want %v", err, ErrNotConnected)
+	}
+
+	c.markConnected("modem-1", 1, client)
+
+	if !session.connected {
+		t.Fatal("connected = false after registration recovered")
+	}
+	if session.connectedAt.IsZero() {
+		t.Fatal("connectedAt is zero after registration recovered")
+	}
+	if session.phase != sessionPhaseConnected {
+		t.Fatalf("phase = %q, want %q", session.phase, sessionPhaseConnected)
+	}
+}
+
 func TestSessionStateIgnoresStaleSessionID(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -1035,6 +1084,14 @@ func TestSessionStateIgnoresStaleSessionID(t *testing.T) {
 			name: "mark connected",
 			apply: func(c *coordinator, oldClient *imsgo.Client, currentClient *imsgo.Client) {
 				c.markConnected("modem-1", 1, oldClient)
+			},
+			wantConnected: true,
+			wantPhase:     sessionPhaseConnected,
+		},
+		{
+			name: "mark client reconnecting",
+			apply: func(c *coordinator, oldClient *imsgo.Client, currentClient *imsgo.Client) {
+				c.markClientReconnecting("modem-1", 1, oldClient)
 			},
 			wantConnected: true,
 			wantPhase:     sessionPhaseConnected,

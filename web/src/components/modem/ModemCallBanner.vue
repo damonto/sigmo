@@ -5,21 +5,28 @@ import { computed, ref, watch } from 'vue'
 import ModemCallAudioDevices from '@/components/modem/ModemCallAudioDevices.vue'
 import { Button } from '@/components/ui/button'
 import type { ModemCallSession } from '@/composables/useModemCallSession'
+import type { CallRecord } from '@/types/call'
 
 const props = defineProps<{
   session: ModemCallSession
 }>()
 
 const dtmfKeys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#']
+const imsCallRoutes = new Set<CallRecord['route']>(['wifi_calling', 'volte'])
+const dtmfCallStates = new Set<CallRecord['state']>(['early_media', 'active', 'confirmed'])
 const dtmfOpen = ref(false)
 
 const dtmfCall = computed(() => props.session.activeCall.value)
+const isIMSCall = computed(() => {
+  const call = dtmfCall.value
+  return !!call && imsCallRoutes.has(call.route)
+})
 const dtmfAvailable = computed(() => {
   const call = dtmfCall.value
   return (
     !!call &&
-    call.route === 'wifi_calling' &&
-    (call.state === 'active' || call.state === 'confirmed') &&
+    isIMSCall.value &&
+    dtmfCallStates.has(call.state) &&
     !props.session.isLocallyHeld(call) &&
     !props.session.isRemotelyHeld(call)
   )
@@ -148,7 +155,7 @@ const sendDTMF = (digit: string) => {
           <Keyboard class="size-4" />
         </Button>
         <Button
-          v-if="props.session.activeCall.value.route === 'wifi_calling'"
+          v-if="isIMSCall"
           size="icon"
           variant="outline"
           :aria-label="

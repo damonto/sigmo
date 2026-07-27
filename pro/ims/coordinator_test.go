@@ -154,6 +154,15 @@ func TestStatusFromSession(t *testing.T) {
 			wantState: StateConnecting,
 		},
 		{
+			name: "waiting for uplink",
+			session: &sessionState{
+				phase:     sessionPhaseWaitingForUplink,
+				profileID: "profile-1",
+			},
+			profileID: "profile-1",
+			wantState: StateWaitingForUplink,
+		},
+		{
 			name: "websheet required session",
 			session: &sessionState{
 				phase:     sessionPhaseWebsheetRequired,
@@ -426,7 +435,7 @@ func TestDisableVoLTEPersistsStateAfterManagedCleanupError(t *testing.T) {
 	}
 }
 
-func TestStartIfDisabledKeepsQualcomm410InternetMode(t *testing.T) {
+func TestStartIfDisabledSelectsQualcomm410ModeWithoutPreparing(t *testing.T) {
 	ctx := context.Background()
 	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
@@ -449,8 +458,8 @@ func TestStartIfDisabledKeepsQualcomm410InternetMode(t *testing.T) {
 	}
 
 	coordinator.startIfEnabled(ctx, qmiTestModem("modem-1"))
-	if !slices.Equal(internet.calls, []string{"qualcomm410:true"}) {
-		t.Fatalf("Internet calls = %v, want [qualcomm410:true]", internet.calls)
+	if !slices.Equal(internet.calls, []string{"qualcomm410:select"}) {
+		t.Fatalf("Internet calls = %v, want [qualcomm410:select]", internet.calls)
 	}
 }
 
