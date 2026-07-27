@@ -9,9 +9,19 @@ import (
 	"testing"
 
 	"github.com/damonto/sigmo/internal/app/modemstatus"
+	"github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
+
+type internetStatusStub struct {
+	connection *internet.Connection
+	err        error
+}
+
+func (s internetStatusStub) Current(context.Context, *mmodem.Modem) (*internet.Connection, error) {
+	return s.connection, s.err
+}
 
 func TestCatalogBuildListResponseSkipsBrokenModems(t *testing.T) {
 	euiccATR := []byte{0x3B, 0x9F, 0x96, 0x80, 0x3F, 0xC7, 0x82, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x15, 0x57, 0x65, 0x73, 0x74, 0x6B, 0x2E, 0x6D, 0x65, 0x63}
@@ -182,12 +192,61 @@ func TestCatalogApplyOverviewExtensions(t *testing.T) {
 	}
 }
 
+func TestCatalogApplyInternetStatus(t *testing.T) {
+	errStatus := errors.New("status source")
+	tests := []struct {
+		name     string
+		internet internetStatusReader
+		want     bool
+	}{
+		{
+			name: "connected",
+			internet: internetStatusStub{
+				connection: &internet.Connection{Status: internet.StatusConnected},
+			},
+			want: true,
+		},
+		{
+			name: "disconnected",
+			internet: internetStatusStub{
+				connection: &internet.Connection{Status: internet.StatusDisconnected},
+			},
+		},
+		{name: "status unavailable", internet: internetStatusStub{err: errStatus}},
+		{name: "connector unavailable"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			catalog := &catalog{internet: tt.internet}
+			resp := &ModemResponse{}
+
+			catalog.applyInternetStatus(
+				context.Background(),
+				&mmodem.Modem{EquipmentIdentifier: "modem-1"},
+				resp,
+			)
+
+			if resp.InternetConnected != tt.want {
+				t.Fatalf("InternetConnected = %v, want %v", resp.InternetConnected, tt.want)
+			}
+		})
+	}
+}
+
 func TestModemResponseJSONIncludesOverviewFields(t *testing.T) {
 	tests := []struct {
 		name string
 		resp ModemResponse
 		want string
 	}{
+		{
+			name: "internet connected",
+			resp: ModemResponse{
+				Fields: modemstatus.Fields{InternetConnected: true},
+			},
+			want: `"internetConnected":true`,
+		},
 		{
 			name: "wifi calling connected",
 			resp: ModemResponse{

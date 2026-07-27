@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/damonto/euicc-go v1.1.3-0.20260712112734-b1c42d12dd47
-	github.com/damonto/ims-go v0.0.0-20260727131432-ed78bfbcf7dd
+	github.com/damonto/ims-go v0.0.0-20260727155930-bd7f1447dde7
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260727131007-1e61ad99de1d
 	github.com/damonto/wwan-go v0.0.0-20260726044848-6c2a4b9b0a0e
@@ -14,7 +14,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/pion/interceptor v0.1.47
 	github.com/pion/rtp v1.10.5
-	github.com/pion/webrtc/v4 v4.2.17
+	github.com/pion/webrtc/v4 v4.2.18
 )
 
 require (

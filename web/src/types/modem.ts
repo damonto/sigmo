@@ -33,6 +33,7 @@ export type ModemApiResponse = {
   signalQuality: number
   airplaneMode: boolean
   supportsEsim: boolean
+  internetConnected?: boolean
   wifiCallingEnabled?: boolean
   wifiCallingConnected?: boolean
 }

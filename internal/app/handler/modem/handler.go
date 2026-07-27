@@ -60,6 +60,7 @@ var (
 
 func New(store *settings.Store, registry *mmodem.Registry, internetConnector *internet.Connector, reminders *reminder.Scheduler, overviewExtensions ...modemstatus.Extension) *Handler {
 	catalog := newCatalog(store, registry, overviewExtensions...)
+	catalog.internet = internetConnector
 	catalog.reminders = reminders
 	return &Handler{
 		registry:  registry,

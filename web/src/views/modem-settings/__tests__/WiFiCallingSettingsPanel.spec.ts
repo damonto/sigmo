@@ -43,8 +43,8 @@ const stubs = {
     template: '<div><slot /></div>',
   },
   SelectItem: {
-    props: ['value'],
-    template: '<div :data-value="value"><slot /></div>',
+    props: ['value', 'disabled'],
+    template: '<div :data-value="value" :data-disabled="disabled"><slot /></div>',
   },
   SelectTrigger: {
     props: ['id'],
@@ -62,7 +62,7 @@ const stubs = {
   },
 }
 
-const modem = (id: string, name: string): Modem => ({
+const modem = (id: string, name: string, internetConnected = false): Modem => ({
   manufacturer: 'Example',
   id,
   firmwareRevision: '1',
@@ -86,6 +86,7 @@ const modem = (id: string, name: string): Modem => ({
   signalQuality: 80,
   airplaneMode: false,
   supportsEsim: false,
+  internetConnected,
 })
 
 const mountCard = (
@@ -135,7 +136,7 @@ describe('WiFiCallingSettingsPanel', () => {
 
   it('saves current and other modem underlays immediately', async () => {
     const wrapper = mountCard('en', {
-      modems: [modem('modem-1', 'Voice'), modem('modem-2', 'Data')],
+      modems: [modem('modem-1', 'Voice', true), modem('modem-2', 'Data', true)],
     })
     const select = wrapper.getComponent({ name: 'Select' })
 
@@ -143,8 +144,8 @@ describe('WiFiCallingSettingsPanel', () => {
     await wrapper.vm.$nextTick()
     select.vm.$emit('update:modelValue', 'modem:modem-2')
 
-    expect(wrapper.text()).toContain('This modem mobile data')
-    expect(wrapper.text()).toContain('Data (modem-2) mobile data')
+    expect(wrapper.text()).toContain('This modem')
+    expect(wrapper.text()).toContain('Data (modem-2)')
     expect(wrapper.emitted('update')).toEqual([
       [{ enabled: true, underlay: { mode: 'self' } }],
       [{ enabled: true, underlay: { mode: 'modem', modemId: 'modem-2' } }],
@@ -158,5 +159,32 @@ describe('WiFiCallingSettingsPanel', () => {
     })
 
     expect(wrapper.text()).toContain('Modem offline-imei (currently offline)')
+    expect(
+      wrapper.get('[data-value="modem:offline-imei"]').attributes('data-disabled'),
+    ).toBeDefined()
+  })
+
+  it('only allows modems with a connected Internet connection', async () => {
+    const wrapper = mountCard('en', {
+      modems: [
+        modem('modem-1', 'Voice'),
+        modem('modem-2', 'Connected data', true),
+        modem('modem-3', 'Disconnected data'),
+      ],
+    })
+    const select = wrapper.getComponent({ name: 'Select' })
+
+    expect(wrapper.find('[data-value="self"]').exists()).toBe(false)
+    expect(wrapper.find('[data-value="modem:modem-2"]').exists()).toBe(true)
+    expect(wrapper.find('[data-value="modem:modem-3"]').exists()).toBe(false)
+
+    select.vm.$emit('update:modelValue', 'self')
+    select.vm.$emit('update:modelValue', 'modem:modem-3')
+    select.vm.$emit('update:modelValue', 'modem:modem-2')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('update')).toEqual([
+      [{ enabled: true, underlay: { mode: 'modem', modemId: 'modem-2' } }],
+    ])
   })
 })

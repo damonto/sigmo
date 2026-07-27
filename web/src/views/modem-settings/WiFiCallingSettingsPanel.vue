@@ -49,7 +49,14 @@ const underlayValue = computed(() => {
   return props.underlay.mode
 })
 
-const otherModems = computed(() => props.modems.filter((modem) => modem.id !== props.modemId))
+const currentModemConnected = computed(
+  () => props.modems.find((modem) => modem.id === props.modemId)?.internetConnected === true,
+)
+const otherModems = computed(() =>
+  props.modems.filter(
+    (modem) => modem.id !== props.modemId && modem.internetConnected === true,
+  ),
+)
 
 const missingSelectedModem = computed(() => {
   if (props.underlay.mode !== 'modem' || !props.underlay.modemId) return null
@@ -68,12 +75,18 @@ const updateEnabled = (enabled: boolean) => {
 
 const updateUnderlay = (value: AcceptableValue) => {
   if (typeof value !== 'string') return
-  if (value === 'system' || value === 'self') {
-    emitSettings(props.enabled, { mode: value })
+  if (value === 'system') {
+    emitSettings(props.enabled, { mode: 'system' })
+    return
+  }
+  if (value === 'self') {
+    if (currentModemConnected.value) {
+      emitSettings(props.enabled, { mode: 'self' })
+    }
     return
   }
   const modemId = value.startsWith('modem:') ? value.slice('modem:'.length) : ''
-  if (modemId) {
+  if (otherModems.value.some((modem) => modem.id === modemId)) {
     emitSettings(props.enabled, { mode: 'modem', modemId })
   }
 }
@@ -126,10 +139,18 @@ const updateUnderlay = (value: AcceptableValue) => {
             <SelectItem value="system">
               {{ t('modemDetail.settings.wifiCallingUnderlaySystem') }}
             </SelectItem>
-            <SelectItem value="self">
+            <SelectItem
+              v-if="currentModemConnected || props.underlay.mode === 'self'"
+              value="self"
+              :disabled="!currentModemConnected"
+            >
               {{ t('modemDetail.settings.wifiCallingUnderlaySelf') }}
             </SelectItem>
-            <SelectItem v-if="missingSelectedModem" :value="`modem:${missingSelectedModem}`">
+            <SelectItem
+              v-if="missingSelectedModem"
+              :value="`modem:${missingSelectedModem}`"
+              disabled
+            >
               {{
                 t('modemDetail.settings.wifiCallingUnderlayMissingModem', {
                   id: missingSelectedModem,

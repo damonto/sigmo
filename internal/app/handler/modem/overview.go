@@ -11,6 +11,7 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/pkg/carrier"
+	"github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
@@ -20,8 +21,13 @@ import (
 type catalog struct {
 	store              *settings.Store
 	registry           *mmodem.Registry
+	internet           internetStatusReader
 	overviewExtensions []modemstatus.Extension
 	reminders          *reminder.Scheduler
+}
+
+type internetStatusReader interface {
+	Current(context.Context, *mmodem.Modem) (*internet.Connection, error)
 }
 
 func newCatalog(store *settings.Store, registry *mmodem.Registry, overviewExtensions ...modemstatus.Extension) *catalog {
@@ -165,6 +171,7 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		AirplaneMode:  airplaneMode,
 		SupportsEsim:  supportsEsim,
 	}
+	c.applyInternetStatus(ctx, device, resp)
 	if resp.SIM.Reminder, err = c.reminderDetails(ctx, sim.Identifier); err != nil {
 		return nil, fmt.Errorf("read primary SIM reminder: %w", err)
 	}
@@ -172,6 +179,18 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		return nil, err
 	}
 	return resp, nil
+}
+
+func (c *catalog) applyInternetStatus(ctx context.Context, device *mmodem.Modem, resp *ModemResponse) {
+	if c.internet == nil {
+		return
+	}
+	connection, err := c.internet.Current(ctx, device)
+	if err != nil {
+		slog.Warn("read modem Internet status", "imei", device.EquipmentIdentifier, "error", err)
+		return
+	}
+	resp.InternetConnected = connection != nil && connection.Status == internet.StatusConnected
 }
 
 func (c *catalog) buildLockedResponse(ctx context.Context, device *mmodem.Modem) (*ModemResponse, error) {
