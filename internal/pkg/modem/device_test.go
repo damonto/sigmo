@@ -70,6 +70,16 @@ func TestMBIMDeviceUnsupportedOperations(t *testing.T) {
 	}{
 		{name: "power cycle", run: device.PowerCycleSIM},
 		{name: "activate provisioning", run: device.ActivateProvisioningIfSIMMissing},
+		{name: "update MSISDN", run: func(ctx context.Context) error {
+			return device.UpdateMSISDN(ctx, "+15551234567")
+		}},
+		{name: "read IMSS test mode", run: func(ctx context.Context) error {
+			_, err := device.IMSSTestMode(ctx)
+			return err
+		}},
+		{name: "set IMSS test mode", run: func(ctx context.Context) error {
+			return device.SetIMSSTestMode(ctx, true)
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -85,7 +95,7 @@ func TestOpenDeviceSelectsModemDevicePort(t *testing.T) {
 		name       string
 		modem      *Modem
 		wantDevice string
-		wantType   wwan.PortType
+		wantType   ModemPortType
 	}{
 		{
 			name: "uses primary QMI port",
@@ -97,7 +107,7 @@ func TestOpenDeviceSelectsModemDevicePort(t *testing.T) {
 				},
 			},
 			wantDevice: "/dev/cdc-wdm1",
-			wantType:   wwan.PortTypeQMI,
+			wantType:   ModemPortTypeQmi,
 		},
 		{
 			name: "falls back to QMI port",
@@ -109,7 +119,7 @@ func TestOpenDeviceSelectsModemDevicePort(t *testing.T) {
 				},
 			},
 			wantDevice: "/dev/cdc-wdm1",
-			wantType:   wwan.PortTypeQMI,
+			wantType:   ModemPortTypeQmi,
 		},
 		{
 			name: "falls back to MBIM port",
@@ -121,20 +131,23 @@ func TestOpenDeviceSelectsModemDevicePort(t *testing.T) {
 				},
 			},
 			wantDevice: "/dev/cdc-wdm0",
-			wantType:   wwan.PortTypeMBIM,
+			wantType:   ModemPortTypeMbim,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := deviceConfig(tt.modem)
+			endpoint, err := ResolveDeviceEndpoint(tt.modem)
 			if err != nil {
-				t.Fatalf("deviceConfig() error = %v", err)
+				t.Fatalf("ResolveDeviceEndpoint() error = %v", err)
 			}
-			if cfg.PortType != tt.wantType {
-				t.Fatalf("deviceConfig() port type = %d, want %d", cfg.PortType, tt.wantType)
+			if endpoint.Port.PortType != tt.wantType {
+				t.Fatalf("ResolveDeviceEndpoint() port type = %d, want %d", endpoint.Port.PortType, tt.wantType)
 			}
-			if cfg.Device != tt.wantDevice {
-				t.Fatalf("deviceConfig() device = %q, want %q", cfg.Device, tt.wantDevice)
+			if endpoint.Port.Device != tt.wantDevice {
+				t.Fatalf("ResolveDeviceEndpoint() device = %q, want %q", endpoint.Port.Device, tt.wantDevice)
+			}
+			if endpoint.SIMSlot != 1 {
+				t.Fatalf("ResolveDeviceEndpoint() SIM slot = %d, want 1", endpoint.SIMSlot)
 			}
 		})
 	}
@@ -197,12 +210,12 @@ func TestQMIDeviceConfigPrefersQMI(t *testing.T) {
 	}
 }
 
-func TestVoLTEDeviceConfigPrefersQMIFallsBackToMBIM(t *testing.T) {
+func TestResolveVoLTEEndpointPrefersQMIFallsBackToMBIM(t *testing.T) {
 	tests := []struct {
 		name       string
 		modem      *Modem
 		wantDevice string
-		wantType   wwan.PortType
+		wantType   ModemPortType
 		wantErr    error
 	}{
 		{name: "nil modem", wantErr: errModemRequired},
@@ -213,7 +226,7 @@ func TestVoLTEDeviceConfigPrefersQMIFallsBackToMBIM(t *testing.T) {
 				{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
 			}},
 			wantDevice: "/dev/cdc-wdm1",
-			wantType:   wwan.PortTypeQMI,
+			wantType:   ModemPortTypeQmi,
 		},
 		{
 			name: "uses MBIM when QMI is unavailable",
@@ -221,24 +234,68 @@ func TestVoLTEDeviceConfigPrefersQMIFallsBackToMBIM(t *testing.T) {
 				{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
 			}},
 			wantDevice: "/dev/cdc-wdm0",
-			wantType:   wwan.PortTypeMBIM,
+			wantType:   ModemPortTypeMbim,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := voLTEDeviceConfig(tt.modem)
+			endpoint, err := ResolveVoLTEEndpoint(tt.modem)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
-					t.Fatalf("voLTEDeviceConfig() error = %v, want %v", err, tt.wantErr)
+					t.Fatalf("ResolveVoLTEEndpoint() error = %v, want %v", err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("voLTEDeviceConfig() error = %v", err)
+				t.Fatalf("ResolveVoLTEEndpoint() error = %v", err)
 			}
-			if cfg.PortType != tt.wantType || cfg.Device != tt.wantDevice {
-				t.Fatalf("voLTEDeviceConfig() = (%d, %q), want (%d, %q)", cfg.PortType, cfg.Device, tt.wantType, tt.wantDevice)
+			if endpoint.Port.PortType != tt.wantType || endpoint.Port.Device != tt.wantDevice {
+				t.Fatalf("ResolveVoLTEEndpoint() = (%d, %q), want (%d, %q)", endpoint.Port.PortType, endpoint.Port.Device, tt.wantType, tt.wantDevice)
+			}
+		})
+	}
+}
+
+func TestResolveVoLTEPortDoesNotRequireSIMSlot(t *testing.T) {
+	modem := &Modem{
+		PrimarySimSlot: maxSIMSlot + 1,
+		Ports: []ModemPort{{
+			PortType: ModemPortTypeMbim,
+			Device:   "/dev/cdc-wdm0",
+		}},
+	}
+
+	port, err := ResolveVoLTEPort(modem)
+	if err != nil {
+		t.Fatalf("ResolveVoLTEPort() error = %v", err)
+	}
+	if port != modem.Ports[0] {
+		t.Fatalf("ResolveVoLTEPort() = %+v, want %+v", port, modem.Ports[0])
+	}
+}
+
+func TestActiveSIMSlot(t *testing.T) {
+	tests := []struct {
+		name    string
+		modem   *Modem
+		want    uint8
+		wantErr bool
+	}{
+		{name: "primary slot", modem: &Modem{PrimarySimSlot: 2}, want: 2},
+		{name: "unspecified slot defaults to first slot", modem: &Modem{}, want: 1},
+		{name: "slot out of range", modem: &Modem{PrimarySimSlot: maxSIMSlot + 1}, wantErr: true},
+		{name: "nil modem", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ActiveSIMSlot(tt.modem)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ActiveSIMSlot() error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("ActiveSIMSlot() = %d, want %d", got, tt.want)
 			}
 		})
 	}

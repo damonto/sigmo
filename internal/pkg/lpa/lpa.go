@@ -200,15 +200,19 @@ func (l *LPA) tryCreateClient(opts *lpa.Options) error {
 }
 
 func createChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
-	slot := uint8(1)
-	if m.PrimarySimSlot > 0 {
-		slot = uint8(m.PrimarySimSlot)
-	}
 	switch m.PrimaryPortType() {
 	case modem.ModemPortTypeQmi:
+		slot, err := modem.ActiveSIMSlot(m)
+		if err != nil {
+			return nil, err
+		}
 		m.Logger().Info("using QMI driver", "port", m.PrimaryPort, "slot", slot)
 		return qcom.NewQMI(m.PrimaryPort, slot)
 	case modem.ModemPortTypeMbim:
+		slot, err := modem.ActiveSIMSlot(m)
+		if err != nil {
+			return nil, err
+		}
 		m.Logger().Info("using MBIM driver", "port", m.PrimaryPort, "slot", slot)
 		return mbim.New(m.PrimaryPort, slot)
 	default:

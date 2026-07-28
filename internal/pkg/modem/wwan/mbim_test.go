@@ -103,23 +103,17 @@ func TestDeviceSetAirplaneModeMBIM(t *testing.T) {
 }
 
 func TestDeviceVoLTEStatusMBIM(t *testing.T) {
-	tests := []struct {
-		name string
-		ctx  context.Context
-	}{
-		{name: "native IMS ownership is unavailable", ctx: context.Background()},
+	device, err := Open(Config{PortType: PortTypeMBIM, Device: "/dev/cdc-wdm0", Slot: 1})
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := (mbimDevice{}).VoLTEStatus(tt.ctx)
-			if err != nil {
-				t.Fatalf("VoLTEStatus() error = %v", err)
-			}
-			if got != (VoLTEStatus{}) {
-				t.Fatalf("VoLTEStatus() = %+v, want zero status", got)
-			}
-		})
+	got, err := device.VoLTEStatus(context.Background())
+	if !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("VoLTEStatus() error = %v, want %v", err, ErrUnsupported)
+	}
+	if got != (VoLTEStatus{}) {
+		t.Fatalf("VoLTEStatus() = %+v, want zero status", got)
 	}
 }
 

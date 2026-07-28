@@ -65,13 +65,13 @@ func PrepareQMAP(ctx context.Context, modem *Modem, muxID uint8) (PreparedQMAP, 
 	if err != nil {
 		return PreparedQMAP{}, err
 	}
-	client, err := wwan.OpenQMIClient(ctx, wwan.QMIClientConfig{Device: port.device})
+	client, err := wwan.OpenQMIClient(ctx, wwan.QMIClientConfig{Device: port.Device})
 	if err != nil {
 		return PreparedQMAP{}, err
 	}
 	defer func() {
 		if err := client.Close(); err != nil {
-			slog.Warn("close QMI client after preparing QMAP", "device", port.device, "error", err)
+			slog.Warn("close QMI client after preparing QMAP", "device", port.Device, "error", err)
 		}
 	}()
 	if err := ensureQMAP(ctx, client); err != nil {
@@ -110,13 +110,13 @@ func RestoreNonQMAPDataFormat(ctx context.Context, modem *Modem) error {
 	if err != nil {
 		return err
 	}
-	client, err := wwan.OpenQMIClient(ctx, wwan.QMIClientConfig{Device: port.device})
+	client, err := wwan.OpenQMIClient(ctx, wwan.QMIClientConfig{Device: port.Device})
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if err := client.Close(); err != nil {
-			slog.Warn("close QMI client after restoring data format", "device", port.device, "error", err)
+			slog.Warn("close QMI client after restoring data format", "device", port.Device, "error", err)
 		}
 	}()
 	disabled := qcom.WDAAggregationDisabled
@@ -202,7 +202,7 @@ func OpenQMAPSession(ctx context.Context, modem *Modem, cfg QMAPConfig) (*QMAPSe
 	if err != nil {
 		return nil, err
 	}
-	client, err := wwan.OpenQMIClient(ctx, wwan.QMIClientConfig{Device: port.device})
+	client, err := wwan.OpenQMIClient(ctx, wwan.QMIClientConfig{Device: port.Device})
 	if err != nil {
 		return nil, err
 	}

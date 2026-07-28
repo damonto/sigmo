@@ -92,7 +92,7 @@ func currentSIMTarget(current *Modem, target SIMTarget) SIMTarget {
 	}
 	switch current.PrimaryPortType() {
 	case ModemPortTypeQmi, ModemPortTypeMbim:
-		slot, err := deviceSlot(current)
+		slot, err := ActiveSIMSlot(current)
 		if err != nil {
 			return target
 		}

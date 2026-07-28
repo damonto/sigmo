@@ -73,7 +73,7 @@ type connectAttempt struct {
 }
 
 var openManagedVoLTEDevice = func(modem *mmodem.Modem) (managedVoLTEDevice, error) {
-	return mmodem.OpenVoLTEStatusDevice(modem)
+	return mmodem.OpenVoLTESession(modem)
 }
 
 func (c *coordinator) startEnabled(ctx context.Context, registry *mmodem.Registry) error {
@@ -270,7 +270,7 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 	var dataPath DataPath
 	wwanConfig := WWANConfig{Access: c.access}
 	if c.access == AccessVoLTE {
-		port, err := voLTEControlPort(modem)
+		port, err := voLTEPort(modem)
 		if err != nil {
 			return nil, err
 		}
@@ -482,7 +482,7 @@ func prepareManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet inte
 	defer func() {
 		err = errors.Join(err, device.Close())
 	}()
-	status, err := device.VoLTEStatus(ctx)
+	status, err := managedVoLTEStatus(ctx, device)
 	if err != nil {
 		return wwan.IMSProfile{}, fmt.Errorf("read volte status: %w", err)
 	}

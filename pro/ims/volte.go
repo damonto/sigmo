@@ -22,7 +22,7 @@ func readVoLTEStatus(ctx context.Context, modem *mmodem.Modem) (status wwan.VoLT
 	defer func() {
 		err = errors.Join(err, device.Close())
 	}()
-	status, err = device.VoLTEStatus(ctx)
+	status, err = managedVoLTEStatus(ctx, device)
 	if err != nil {
 		return wwan.VoLTEStatus{}, fmt.Errorf("read VoLTE status: %w", err)
 	}
@@ -41,7 +41,7 @@ func validateManagedVoLTE(ctx context.Context, modem *mmodem.Modem) (err error) 
 		err = errors.Join(err, device.Close())
 	}()
 
-	status, err := device.VoLTEStatus(ctx)
+	status, err := managedVoLTEStatus(ctx, device)
 	if err != nil {
 		return fmt.Errorf("read VoLTE status: %w", err)
 	}
@@ -59,8 +59,18 @@ func validateManagedVoLTE(ctx context.Context, modem *mmodem.Modem) (err error) 
 	return nil
 }
 
+func managedVoLTEStatus(ctx context.Context, device managedVoLTEDevice) (wwan.VoLTEStatus, error) {
+	status, err := device.VoLTEStatus(ctx)
+	if errors.Is(err, wwan.ErrUnsupported) {
+		// MBIM can validate the IMS context and packet service, but cannot report
+		// whether the modem already owns native IMS registration.
+		return wwan.VoLTEStatus{}, nil
+	}
+	return status, err
+}
+
 func ResolveVoLTESettings(modem *mmodem.Modem, settings VoLTESettings) (VoLTESettings, error) {
-	port, err := voLTEControlPort(modem)
+	port, err := voLTEPort(modem)
 	if err != nil {
 		return VoLTESettings{}, err
 	}

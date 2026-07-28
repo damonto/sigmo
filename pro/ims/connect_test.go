@@ -275,7 +275,7 @@ func TestValidateManagedVoLTE(t *testing.T) {
 		},
 		{
 			name:       "IMSA unavailable continues with WDS",
-			device:     &fakeManagedVoLTEDevice{},
+			device:     &fakeManagedVoLTEDevice{statusErr: wwan.ErrUnsupported},
 			wantCalls:  []string{"status", "ims-profile", "packet-service"},
 			wantClosed: true,
 		},
@@ -362,7 +362,7 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 	}{
 		{
 			name:        "IMSA unavailable continues with WDS",
-			device:      &fakeManagedVoLTEDevice{},
+			device:      &fakeManagedVoLTEDevice{statusErr: wwan.ErrUnsupported},
 			wantCalls:   []string{"status", "ims-profile", "packet-service"},
 			wantProfile: wwan.IMSProfile{Index: 2, PDNType: "ipv6"},
 		},

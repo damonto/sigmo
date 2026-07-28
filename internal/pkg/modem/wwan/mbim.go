@@ -68,10 +68,6 @@ func (u mbimDevice) MSISDN(ctx context.Context) (string, error) {
 	return "", nil
 }
 
-func (u mbimDevice) UpdateMSISDN(context.Context, string) error {
-	return ErrUnsupported
-}
-
 func (u mbimDevice) USIM(ctx context.Context) (usimcard.Reader, error) {
 	return openMBIMUSIM(ctx, u.device, u.slot)
 }
@@ -92,11 +88,6 @@ func (u mbimDevice) ATR(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("query MBIM UICC ATR: %w", err)
 	}
 	return atr, nil
-}
-
-func (mbimDevice) VoLTEStatus(context.Context) (VoLTEStatus, error) {
-	// MBIM does not expose the modem's native IMS registration ownership.
-	return VoLTEStatus{}, nil
 }
 
 func (u mbimDevice) PacketServiceStatus(ctx context.Context) (PacketServiceStatus, error) {
@@ -139,14 +130,6 @@ func (u mbimDevice) IMSProfile(ctx context.Context) (IMSProfile, error) {
 	return IMSProfile{}, nil
 }
 
-func (u mbimDevice) IMSSTestMode(context.Context) (bool, error) {
-	return false, ErrUnsupported
-}
-
-func (u mbimDevice) SetIMSSTestMode(context.Context, bool) error {
-	return ErrUnsupported
-}
-
 const mbimDataClassLTE uint32 = 1 << 5
 
 func mbimRegistered(state uiccmbim.RegisterState) bool {
@@ -170,18 +153,6 @@ func mbimIMSContextAvailable(ctx context.Context, client mbimNetwork) (bool, err
 		return true, nil
 	}
 	return false, nil
-}
-
-func (u mbimDevice) PowerCycleSIM(context.Context) error {
-	return ErrUnsupported
-}
-
-func (u mbimDevice) ActivateProvisioningIfSIMMissing(context.Context) error {
-	return ErrUnsupported
-}
-
-func (u mbimDevice) SIMState(context.Context, Target) (SIMState, error) {
-	return SIMState{}, nil
 }
 
 func (u mbimDevice) AirplaneMode(ctx context.Context) (bool, error) {

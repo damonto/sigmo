@@ -133,28 +133,34 @@ func TestDeviceVoLTEStatusQMI(t *testing.T) {
 			want: VoLTEStatus{},
 		},
 		{
-			name: "network unsupported",
-			err:  qcom.QMIErrorNetworkUnsupported,
+			name:    "network unsupported",
+			err:     qcom.QMIErrorNetworkUnsupported,
+			wantErr: ErrUnsupported,
 		},
 		{
-			name: "device unsupported",
-			err:  qcom.QMIErrorDeviceUnsupported,
+			name:    "device unsupported",
+			err:     qcom.QMIErrorDeviceUnsupported,
+			wantErr: ErrUnsupported,
 		},
 		{
-			name: "invalid service type",
-			err:  qcom.QMIErrorInvalidServiceType,
+			name:    "invalid service type",
+			err:     qcom.QMIErrorInvalidServiceType,
+			wantErr: ErrUnsupported,
 		},
 		{
-			name: "invalid command",
-			err:  qcom.QMIErrorInvalidQmiCommand,
+			name:    "invalid command",
+			err:     qcom.QMIErrorInvalidQmiCommand,
+			wantErr: ErrUnsupported,
 		},
 		{
-			name: "not supported",
-			err:  qcom.QMIErrorNotSupported,
+			name:    "not supported",
+			err:     qcom.QMIErrorNotSupported,
+			wantErr: ErrUnsupported,
 		},
 		{
-			name: "wrapped not supported",
-			err:  errors.Join(errors.New("read IMSA service"), qcom.QMIErrorNotSupported),
+			name:    "wrapped not supported",
+			err:     errors.Join(errors.New("read IMSA service"), qcom.QMIErrorNotSupported),
+			wantErr: ErrUnsupported,
 		},
 		{
 			name:    "query rejected",
@@ -241,64 +247,92 @@ func TestDevicePacketServiceStatusQMI(t *testing.T) {
 	}
 }
 
-func TestQMIDeviceReusesClientUntilClose(t *testing.T) {
-	tests := []struct {
-		name string
-	}{
-		{name: "packet service polling"},
+func TestOpenDoesNotRetainQMIClient(t *testing.T) {
+	client := &fakeQMIClient{nasServingSystem: qcom.NASServingSystem{
+		RegistrationState: qcom.NASRegistrationRegistered,
+		PSAttachState:     qcom.NASAttachAttached,
+		RadioInterfaces:   []qcom.NASRadioInterface{qcom.NASRadioInterfaceLTE},
+	}}
+	device, err := Open(Config{PortType: PortTypeQMI, Device: "/dev/cdc-wdm0", Slot: 1})
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	backend := device.backend.(*qmiDevice)
+	openCalls := 0
+	backend.openClient = func(context.Context, uint8) (qmiClient, error) {
+		openCalls++
+		return client, nil
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := &fakeQMIClient{nasServingSystem: qcom.NASServingSystem{
-				RegistrationState: qcom.NASRegistrationRegistered,
-				PSAttachState:     qcom.NASAttachAttached,
-				RadioInterfaces:   []qcom.NASRadioInterface{qcom.NASRadioInterfaceLTE},
-			}}
-			openCalls := 0
-			device := qmiDevice{
-				slot:         1,
-				reuseClients: true,
-				openClient: func(context.Context, uint8) (qmiClient, error) {
-					openCalls++
-					return client, nil
-				},
-			}
-
-			for range 2 {
-				if _, err := device.PacketServiceStatus(context.Background()); err != nil {
-					t.Fatalf("PacketServiceStatus() error = %v", err)
-				}
-			}
-			if err := device.SetAirplaneMode(context.Background(), true); err != nil {
-				t.Fatalf("SetAirplaneMode() error = %v", err)
-			}
-			if openCalls != 1 {
-				t.Fatalf("open calls = %d, want 1", openCalls)
-			}
-			if client.setOperatingMode != qcom.DMSOperatingModeLowPower {
-				t.Fatalf("operating mode = %d, want low power", client.setOperatingMode)
-			}
-			if slices.Contains(client.calls, "close") {
-				t.Fatal("client closed before device Close")
-			}
-			if err := device.Close(); err != nil {
-				t.Fatalf("Close() error = %v", err)
-			}
-			if err := device.Close(); err != nil {
-				t.Fatalf("second Close() error = %v", err)
-			}
-			closeCalls := 0
-			for _, call := range client.calls {
-				if call == "close" {
-					closeCalls++
-				}
-			}
-			if closeCalls != 1 {
-				t.Fatalf("client close calls = %d, want 1", closeCalls)
-			}
-		})
+	for range 2 {
+		if _, err := device.PacketServiceStatus(context.Background()); err != nil {
+			t.Fatalf("PacketServiceStatus() error = %v", err)
+		}
 	}
+	if openCalls != 2 {
+		t.Fatalf("open calls = %d, want 2", openCalls)
+	}
+	if closeCalls := countCalls(client.calls, "close"); closeCalls != 2 {
+		t.Fatalf("client close calls = %d, want 2", closeCalls)
+	}
+}
+
+func TestOpenSessionReusesQMIClientUntilClose(t *testing.T) {
+	client := &fakeQMIClient{nasServingSystem: qcom.NASServingSystem{
+		RegistrationState: qcom.NASRegistrationRegistered,
+		PSAttachState:     qcom.NASAttachAttached,
+		RadioInterfaces:   []qcom.NASRadioInterface{qcom.NASRadioInterfaceLTE},
+	}}
+	session, err := OpenSession(Config{PortType: PortTypeQMI, Device: "/dev/cdc-wdm0", Slot: 1})
+	if err != nil {
+		t.Fatalf("OpenSession() error = %v", err)
+	}
+	backend := session.backend.(*qmiDevice)
+	openCalls := 0
+	backend.openClient = func(context.Context, uint8) (qmiClient, error) {
+		openCalls++
+		return client, nil
+	}
+
+	for range 2 {
+		if _, err := session.PacketServiceStatus(context.Background()); err != nil {
+			t.Fatalf("PacketServiceStatus() error = %v", err)
+		}
+	}
+	if err := session.SetAirplaneMode(context.Background(), true); err != nil {
+		t.Fatalf("SetAirplaneMode() error = %v", err)
+	}
+	if openCalls != 1 {
+		t.Fatalf("open calls = %d, want 1", openCalls)
+	}
+	if client.setOperatingMode != qcom.DMSOperatingModeLowPower {
+		t.Fatalf("operating mode = %d, want low power", client.setOperatingMode)
+	}
+	if slices.Contains(client.calls, "close") {
+		t.Fatal("client closed before session Close")
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+	if closeCalls := countCalls(client.calls, "close"); closeCalls != 1 {
+		t.Fatalf("client close calls = %d, want 1", closeCalls)
+	}
+	if _, err := session.PacketServiceStatus(context.Background()); err == nil {
+		t.Fatal("PacketServiceStatus() after Close error = nil, want error")
+	}
+}
+
+func countCalls(calls []string, want string) int {
+	count := 0
+	for _, call := range calls {
+		if call == want {
+			count++
+		}
+	}
+	return count
 }
 
 func TestDeviceIMSProfileQMI(t *testing.T) {

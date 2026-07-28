@@ -221,7 +221,7 @@ func (c *coordinator) VoLTESettings(ctx context.Context, modem *mmodem.Modem) (V
 	if err != nil {
 		return VoLTESettings{}, err
 	}
-	port, err := voLTEControlPort(modem)
+	port, err := voLTEPort(modem)
 	if err != nil {
 		return VoLTESettings{}, err
 	}
@@ -237,7 +237,7 @@ func (c *coordinator) VoLTESettings(ctx context.Context, modem *mmodem.Modem) (V
 }
 
 func (c *coordinator) UpdateVoLTESettings(ctx context.Context, modem *mmodem.Modem, settings VoLTESettings) error {
-	port, err := voLTEControlPort(modem)
+	port, err := voLTEPort(modem)
 	if err != nil {
 		return err
 	}

@@ -325,7 +325,7 @@ func TestVoLTEInterfaceName(t *testing.T) {
 	}
 }
 
-func TestVoLTEControlPort(t *testing.T) {
+func TestVoLTEEndpoint(t *testing.T) {
 	tests := []struct {
 		name    string
 		modem   *mmodem.Modem
@@ -351,52 +351,38 @@ func TestVoLTEControlPort(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := voLTEControlPort(tt.modem)
+			got, err := voLTEEndpoint(tt.modem)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatal("voLTEControlPort() error = nil, want error")
+					t.Fatal("voLTEEndpoint() error = nil, want error")
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("voLTEControlPort() error = %v", err)
+				t.Fatalf("voLTEEndpoint() error = %v", err)
 			}
-			if got != tt.want {
-				t.Fatalf("voLTEControlPort() = %+v, want %+v", got, tt.want)
+			if got.Port != tt.want {
+				t.Fatalf("voLTEEndpoint() port = %+v, want %+v", got.Port, tt.want)
 			}
 		})
 	}
 }
 
-func TestVoLTESIMSlot(t *testing.T) {
-	tests := []struct {
-		name    string
-		modem   *mmodem.Modem
-		want    uint8
-		wantErr bool
-	}{
-		{name: "primary slot", modem: &mmodem.Modem{PrimarySimSlot: 2}, want: 2},
-		{name: "unspecified slot defaults to first slot", modem: &mmodem.Modem{}, want: 1},
-		{name: "slot out of range", modem: &mmodem.Modem{PrimarySimSlot: 6}, wantErr: true},
-		{name: "nil modem", wantErr: true},
+func TestResolveVoLTESettingsDoesNotRequireSIMSlot(t *testing.T) {
+	modem := &mmodem.Modem{
+		PrimarySimSlot: 6,
+		Ports: []mmodem.ModemPort{{
+			PortType: mmodem.ModemPortTypeMbim,
+			Device:   "/dev/cdc-wdm0",
+		}},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := voLTESIMSlot(tt.modem)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("voLTESIMSlot() error = nil, want error")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("voLTESIMSlot() error = %v", err)
-			}
-			if got != tt.want {
-				t.Fatalf("voLTESIMSlot() = %d, want %d", got, tt.want)
-			}
-		})
+	got, err := ResolveVoLTESettings(modem, VoLTESettings{})
+	if err != nil {
+		t.Fatalf("ResolveVoLTESettings() error = %v", err)
+	}
+	if got.DataPath != DataPathMBIM {
+		t.Fatalf("ResolveVoLTESettings() data path = %q, want %q", got.DataPath, DataPathMBIM)
 	}
 }
 

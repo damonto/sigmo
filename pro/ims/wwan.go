@@ -110,10 +110,11 @@ func openDeviceWWAN(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader, 
 }
 
 func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (usimcard.Reader, error) {
-	port, err := voLTEControlPort(modem)
+	endpoint, err := voLTEEndpoint(modem)
 	if err != nil {
 		return nil, err
 	}
+	port := endpoint.Port
 	if strings.TrimSpace(cfg.QMIControlPort) != "" {
 		if port.PortType != mmodem.ModemPortTypeQmi {
 			return nil, errors.New("dedicated QMI control port requires a QMI VoLTE modem")
@@ -121,10 +122,7 @@ func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (us
 		port.Device = strings.TrimSpace(cfg.QMIControlPort)
 	}
 	dedicatedQMI := strings.TrimSpace(cfg.QMIControlPort) != ""
-	slot, err := voLTESIMSlot(modem)
-	if err != nil {
-		return nil, err
-	}
+	slot := endpoint.SIMSlot
 	switch port.PortType {
 	case mmodem.ModemPortTypeQmi:
 		if dedicatedQMI {
@@ -229,34 +227,20 @@ func isIMSCallAlreadyPresent(err error) bool {
 		startErr.VerboseCallEndReason.Reason == qcom.WDSVerboseCallEndReasonInternalCallAlreadyPresent
 }
 
-func voLTEControlPort(modem *mmodem.Modem) (mmodem.ModemPort, error) {
-	if modem == nil {
-		return mmodem.ModemPort{}, errors.New("modem is required")
+func voLTEEndpoint(modem *mmodem.Modem) (mmodem.DeviceEndpoint, error) {
+	endpoint, err := mmodem.ResolveVoLTEEndpoint(modem)
+	if errors.Is(err, wwan.ErrUnsupported) {
+		return mmodem.DeviceEndpoint{}, ErrUnavailable
 	}
-	for _, port := range modem.Ports {
-		if port.PortType == mmodem.ModemPortTypeQmi && strings.TrimSpace(port.Device) != "" {
-			return port, nil
-		}
-	}
-	for _, port := range modem.Ports {
-		if port.PortType == mmodem.ModemPortTypeMbim && strings.TrimSpace(port.Device) != "" {
-			return port, nil
-		}
-	}
-	return mmodem.ModemPort{}, ErrUnavailable
+	return endpoint, err
 }
 
-func voLTESIMSlot(modem *mmodem.Modem) (uint8, error) {
-	if modem == nil {
-		return 0, errors.New("modem is required")
+func voLTEPort(modem *mmodem.Modem) (mmodem.ModemPort, error) {
+	port, err := mmodem.ResolveVoLTEPort(modem)
+	if errors.Is(err, wwan.ErrUnsupported) {
+		return mmodem.ModemPort{}, ErrUnavailable
 	}
-	if modem.PrimarySimSlot == 0 {
-		return 1, nil
-	}
-	if modem.PrimarySimSlot > 5 {
-		return 0, fmt.Errorf("sim slot %d is out of range", modem.PrimarySimSlot)
-	}
-	return uint8(modem.PrimarySimSlot), nil
+	return port, err
 }
 
 func openATWWAN(_ context.Context, port mmodem.ModemPort) (usimcard.Reader, error) {

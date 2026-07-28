@@ -11,9 +11,10 @@ import (
 
 const maxSIMSlot = wwan.MaxSIMSlot
 
-type devicePort struct {
-	portType wwan.PortType
-	device   string
+// DeviceEndpoint identifies the protocol port and active SIM used for WWAN access.
+type DeviceEndpoint struct {
+	Port    ModemPort
+	SIMSlot uint8
 }
 
 type deviceControl interface {
@@ -36,35 +37,28 @@ func OpenDevice(m *Modem) (*wwan.Device, error) {
 	return wwan.Open(cfg)
 }
 
-func OpenVoLTEStatusDevice(m *Modem) (*wwan.Device, error) {
+func OpenVoLTESession(m *Modem) (*wwan.Session, error) {
 	cfg, err := voLTEDeviceConfig(m)
 	if err != nil {
 		return nil, err
 	}
-	return wwan.Open(cfg)
+	return wwan.OpenSession(cfg)
 }
 
 func voLTEDeviceConfig(m *Modem) (wwan.Config, error) {
-	if m == nil {
-		return wwan.Config{}, errModemRequired
-	}
-	slot, err := deviceSlot(m)
+	endpoint, err := ResolveVoLTEEndpoint(m)
 	if err != nil {
 		return wwan.Config{}, err
 	}
-	port, err := selectQMIDevicePort(m)
-	if errors.Is(err, wwan.ErrUnsupported) {
-		port, err = selectDevicePort(m)
-	}
-	if err != nil {
-		return wwan.Config{}, err
+	portType, ok := devicePortType(endpoint.Port.PortType)
+	if !ok {
+		return wwan.Config{}, wwan.ErrUnsupported
 	}
 	return wwan.Config{
-		PortType:        port.portType,
-		Device:          port.device,
-		Slot:            slot,
-		IMEI:            m.EquipmentIdentifier,
-		ReuseQMIClients: port.portType == wwan.PortTypeQMI,
+		PortType: portType,
+		Device:   endpoint.Port.Device,
+		Slot:     endpoint.SIMSlot,
+		IMEI:     m.EquipmentIdentifier,
 	}, nil
 }
 
@@ -119,21 +113,18 @@ func readDeviceSIMState(ctx context.Context, m *Modem, target SIMTarget, open de
 }
 
 func deviceConfig(m *Modem) (wwan.Config, error) {
-	if m == nil {
-		return wwan.Config{}, errModemRequired
-	}
-	slot, err := deviceSlot(m)
+	endpoint, err := ResolveDeviceEndpoint(m)
 	if err != nil {
 		return wwan.Config{}, err
 	}
-	return deviceConfigForSlot(m, slot)
+	return deviceConfigForEndpoint(endpoint, m.EquipmentIdentifier)
 }
 
 func qmiDeviceConfig(m *Modem) (wwan.Config, error) {
 	if m == nil {
 		return wwan.Config{}, errModemRequired
 	}
-	slot, err := deviceSlot(m)
+	slot, err := ActiveSIMSlot(m)
 	if err != nil {
 		return wwan.Config{}, err
 	}
@@ -157,36 +148,79 @@ func qmiDeviceConfigForSlot(m *Modem, slot uint8) (wwan.Config, error) {
 		return wwan.Config{}, err
 	}
 	return wwan.Config{
-		PortType: port.portType,
-		Device:   port.device,
+		PortType: wwan.PortTypeQMI,
+		Device:   port.Device,
 		Slot:     slot,
 		IMEI:     m.EquipmentIdentifier,
 	}, nil
 }
 
-func deviceConfigForSlot(m *Modem, slot uint8) (wwan.Config, error) {
+func deviceConfigForEndpoint(endpoint DeviceEndpoint, imei string) (wwan.Config, error) {
+	portType, ok := devicePortType(endpoint.Port.PortType)
+	if !ok {
+		return wwan.Config{}, wwan.ErrUnsupported
+	}
+	return wwan.Config{
+		PortType: portType,
+		Device:   endpoint.Port.Device,
+		Slot:     endpoint.SIMSlot,
+		IMEI:     imei,
+	}, nil
+}
+
+// ResolveDeviceEndpoint selects the primary QMI or MBIM port, then falls back
+// to QMI and MBIM in that order.
+func ResolveDeviceEndpoint(m *Modem) (DeviceEndpoint, error) {
 	if m == nil {
-		return wwan.Config{}, errModemRequired
+		return DeviceEndpoint{}, errModemRequired
+	}
+	slot, err := ActiveSIMSlot(m)
+	if err != nil {
+		return DeviceEndpoint{}, err
 	}
 	port, err := selectDevicePort(m)
 	if err != nil {
-		return wwan.Config{}, err
+		return DeviceEndpoint{}, err
 	}
-	return wwan.Config{
-		PortType: port.portType,
-		Device:   port.device,
-		Slot:     slot,
-		IMEI:     m.EquipmentIdentifier,
-	}, nil
+	return DeviceEndpoint{Port: port, SIMSlot: slot}, nil
 }
 
-func selectDevicePort(m *Modem) (devicePort, error) {
+// ResolveVoLTEPort prefers QMI because modem IMS takeover requires QMI
+// services, then falls back to the regular MBIM device port.
+func ResolveVoLTEPort(m *Modem) (ModemPort, error) {
+	if m == nil {
+		return ModemPort{}, errModemRequired
+	}
+	port, err := selectQMIDevicePort(m)
+	if errors.Is(err, wwan.ErrUnsupported) {
+		port, err = selectDevicePort(m)
+	}
+	return port, err
+}
+
+// ResolveVoLTEEndpoint prefers QMI because modem IMS takeover requires QMI
+// services, then falls back to the regular MBIM device endpoint.
+func ResolveVoLTEEndpoint(m *Modem) (DeviceEndpoint, error) {
+	if m == nil {
+		return DeviceEndpoint{}, errModemRequired
+	}
+	slot, err := ActiveSIMSlot(m)
+	if err != nil {
+		return DeviceEndpoint{}, err
+	}
+	port, err := ResolveVoLTEPort(m)
+	if err != nil {
+		return DeviceEndpoint{}, err
+	}
+	return DeviceEndpoint{Port: port, SIMSlot: slot}, nil
+}
+
+func selectDevicePort(m *Modem) (ModemPort, error) {
 	primaryPort := strings.TrimSpace(m.PrimaryPort)
 	if primaryPort != "" {
 		for _, port := range m.Ports {
-			portType, ok := devicePortType(port.PortType)
-			if port.Device == primaryPort && ok {
-				return devicePort{portType: portType, device: port.Device}, nil
+			if port.Device == primaryPort && isDevicePortType(port.PortType) {
+				return port, nil
 			}
 		}
 	}
@@ -196,24 +230,24 @@ func selectDevicePort(m *Modem) (devicePort, error) {
 			if port.PortType != want || strings.TrimSpace(port.Device) == "" {
 				continue
 			}
-			portType, ok := devicePortType(port.PortType)
-			if !ok {
-				continue
-			}
-			return devicePort{portType: portType, device: port.Device}, nil
+			return port, nil
 		}
 	}
-	return devicePort{}, wwan.ErrUnsupported
+	return ModemPort{}, wwan.ErrUnsupported
 }
 
-func selectQMIDevicePort(m *Modem) (devicePort, error) {
+func selectQMIDevicePort(m *Modem) (ModemPort, error) {
 	for _, port := range m.Ports {
 		if port.PortType != ModemPortTypeQmi || strings.TrimSpace(port.Device) == "" {
 			continue
 		}
-		return devicePort{portType: wwan.PortTypeQMI, device: port.Device}, nil
+		return port, nil
 	}
-	return devicePort{}, wwan.ErrUnsupported
+	return ModemPort{}, wwan.ErrUnsupported
+}
+
+func isDevicePortType(portType ModemPortType) bool {
+	return portType == ModemPortTypeQmi || portType == ModemPortTypeMbim
 }
 
 func devicePortType(portType ModemPortType) (wwan.PortType, bool) {
@@ -227,7 +261,12 @@ func devicePortType(portType ModemPortType) (wwan.PortType, bool) {
 	}
 }
 
-func deviceSlot(m *Modem) (uint8, error) {
+// ActiveSIMSlot returns the selected SIM slot, defaulting ModemManager's zero
+// value to the first slot.
+func ActiveSIMSlot(m *Modem) (uint8, error) {
+	if m == nil {
+		return 0, errModemRequired
+	}
 	if m.PrimarySimSlot == 0 {
 		return 1, nil
 	}
@@ -241,7 +280,7 @@ func deviceTargetSlot(m *Modem, target SIMTarget) (uint8, error) {
 	if m == nil {
 		return 0, errModemRequired
 	}
-	slot, err := deviceSlot(m)
+	slot, err := ActiveSIMSlot(m)
 	if err != nil {
 		return 0, err
 	}

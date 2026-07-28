@@ -23,25 +23,24 @@ var qmiMSISDNFile = qcom.File{
 }
 
 type qmiDevice struct {
-	device       string
-	slot         uint8
-	imei         string
-	reuseClients bool
-	openClient   func(context.Context, uint8) (qmiClient, error)
-	openRadio    func(context.Context) (qmiRadio, error)
-	mu           sync.Mutex
-	clients      map[uint8]qmiClient
-	closeOnce    sync.Once
-	closed       bool
-	closeErr     error
+	device        string
+	slot          uint8
+	imei          string
+	retainClients bool
+	openClient    func(context.Context, uint8) (qmiClient, error)
+	openRadio     func(context.Context) (qmiRadio, error)
+	mu            sync.Mutex
+	clients       map[uint8]qmiClient
+	closeOnce     sync.Once
+	closed        bool
+	closeErr      error
 }
 
-func newQMIDevice(device string, slot uint8, imei string, reuseClients bool) *qmiDevice {
+func newQMIDevice(device string, slot uint8, imei string) *qmiDevice {
 	return &qmiDevice{
-		device:       device,
-		slot:         slot,
-		imei:         imei,
-		reuseClients: reuseClients,
+		device: device,
+		slot:   slot,
+		imei:   imei,
 		openClient: func(ctx context.Context, slot uint8) (qmiClient, error) {
 			return OpenQMIClient(ctx, QMIClientConfig{Device: device, Slot: slot})
 		},
@@ -49,6 +48,12 @@ func newQMIDevice(device string, slot uint8, imei string, reuseClients bool) *qm
 			return OpenQMIClient(ctx, QMIClientConfig{Device: device, Slot: 1})
 		},
 	}
+}
+
+func newQMISession(device string, slot uint8, imei string) *qmiDevice {
+	session := newQMIDevice(device, slot, imei)
+	session.retainClients = true
+	return session
 }
 
 func (u *qmiDevice) Close() error {
@@ -70,7 +75,7 @@ func (u *qmiDevice) Close() error {
 }
 
 func (u *qmiDevice) acquireClient(ctx context.Context, slot uint8) (qmiClient, func(), error) {
-	if !u.reuseClients {
+	if !u.retainClients {
 		client, err := u.openClient(ctx, slot)
 		return client, func() {
 			if client != nil {
@@ -99,7 +104,7 @@ func (u *qmiDevice) acquireClient(ctx context.Context, slot uint8) (qmiClient, f
 }
 
 func (u *qmiDevice) acquireRadio(ctx context.Context) (qmiRadio, func(), error) {
-	if !u.reuseClients {
+	if !u.retainClients {
 		client, err := u.openRadio(ctx)
 		return client, func() {
 			if client != nil {
@@ -323,7 +328,7 @@ func (u *qmiDevice) VoLTEStatus(ctx context.Context) (VoLTEStatus, error) {
 			errors.Is(err, qcom.QMIErrorInvalidServiceType),
 			errors.Is(err, qcom.QMIErrorInvalidQmiCommand),
 			errors.Is(err, qcom.QMIErrorNotSupported):
-			return VoLTEStatus{}, nil
+			return VoLTEStatus{}, ErrUnsupported
 		default:
 			return VoLTEStatus{}, fmt.Errorf("read QMI IMSA status: %w", err)
 		}
