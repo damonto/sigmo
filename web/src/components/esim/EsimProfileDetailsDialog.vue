@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import EsimProfileAvatar from '@/components/esim/EsimProfileAvatar.vue'
@@ -19,7 +19,7 @@ const props = defineProps<{
 const open = defineModel<boolean>('open', { required: true })
 
 const { t } = useI18n()
-const focusTarget = ref<HTMLElement | null>(null)
+const focusTarget = useTemplateRef<HTMLElement>('focusTarget')
 
 type DetailRow = {
   label: string

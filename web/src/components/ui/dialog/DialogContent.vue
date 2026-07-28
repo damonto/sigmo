@@ -7,10 +7,6 @@ import { DialogClose, DialogContent, DialogPortal, useForwardPropsEmits } from '
 import { cn } from '@/lib/utils'
 import DialogOverlay from './DialogOverlay.vue'
 
-defineOptions({
-  inheritAttrs: false,
-})
-
 const props = withDefaults(
   defineProps<
     DialogContentProps & { class?: HTMLAttributes['class']; showCloseButton?: boolean }
@@ -19,7 +15,12 @@ const props = withDefaults(
     showCloseButton: true,
   },
 )
+
 const emits = defineEmits<DialogContentEmits>()
+
+defineOptions({
+  inheritAttrs: false,
+})
 
 const delegatedProps = reactiveOmit(props, 'class')
 

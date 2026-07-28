@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import ModemCallBanner from '@/components/modem/ModemCallBanner.vue'
@@ -22,7 +22,7 @@ watch(
 )
 
 const callSession = provideModemCallSession(modemId, phoneCountry)
-const remoteAudioRef = ref<HTMLAudioElement | null>(null)
+const remoteAudioRef = useTemplateRef<HTMLAudioElement>('remoteAudioRef')
 let boundRemoteAudio: HTMLAudioElement | null = null
 let outputBinding = Promise.resolve(true)
 

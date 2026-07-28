@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { refDebounced } from '@vueuse/core'
 import { Phone, PhoneCall, PhoneIncoming, PhoneOutgoing, Trash2 } from 'lucide-vue-next'
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
@@ -52,8 +52,8 @@ const volteApi = useVoLTEApi()
 const { hasFeature } = useCapabilities()
 const volteAvailable = computed(() => hasFeature(FEATURE.volte))
 const ussdApi = useUssdApi()
-const backButtonRef = ref<HTMLElement | null>(null)
-const dialpadRef = ref<{ focus: () => void } | null>(null)
+const backButtonRef = useTemplateRef<HTMLElement>('backButtonRef')
+const dialpadRef = useTemplateRef<{ focus: () => void }>('dialpadRef')
 const { isStickyVisible } = useStickyTopBar(backButtonRef)
 
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)

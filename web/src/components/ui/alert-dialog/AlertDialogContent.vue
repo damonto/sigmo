@@ -10,17 +10,18 @@ import {
 } from 'reka-ui'
 import { cn } from '@/lib/utils'
 
-defineOptions({
-  inheritAttrs: false,
-})
-
 const props = withDefaults(
   defineProps<AlertDialogContentProps & { class?: HTMLAttributes['class'] }>(),
   {
     disableOutsidePointerEvents: undefined,
   },
 )
+
 const emits = defineEmits<AlertDialogContentEmits>()
+
+defineOptions({
+  inheritAttrs: false,
+})
 
 const delegatedProps = reactiveOmit(props, 'class')
 

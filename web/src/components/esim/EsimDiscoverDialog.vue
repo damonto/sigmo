@@ -15,19 +15,17 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Spinner } from '@/components/ui/spinner'
 import type { EsimDiscoverItem } from '@/types/esim'
 
-const open = defineModel<boolean>('open', { required: true })
-const selectedAddress = defineModel<string>('selectedAddress', { required: true })
-
 const props = defineProps<{
   options: EsimDiscoverItem[]
   isLoading: boolean
   hasOptions: boolean
   hasSelection: boolean
 }>()
-
 const emit = defineEmits<{
   (event: 'confirm'): void
 }>()
+const open = defineModel<boolean>('open', { required: true })
+const selectedAddress = defineModel<string>('selectedAddress', { required: true })
 
 const { t } = useI18n()
 </script>

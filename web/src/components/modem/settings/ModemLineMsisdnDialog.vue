@@ -15,17 +15,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
 
-const open = defineModel<boolean>('open', { required: true })
-const msisdn = defineModel<string>('msisdn', { required: true })
-
 const props = defineProps<{
   isUpdating: boolean
   isValid: boolean
 }>()
-
 const emit = defineEmits<{
   (event: 'save'): void
 }>()
+const open = defineModel<boolean>('open', { required: true })
+const msisdn = defineModel<string>('msisdn', { required: true })
 
 const { t } = useI18n()
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { X } from 'lucide-vue-next'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogContent.vue'
@@ -41,7 +41,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const loaded = ref(false)
 const completing = ref(false)
-const iframeEl = ref<HTMLIFrameElement | null>(null)
+const iframeEl = useTemplateRef<HTMLIFrameElement>('iframeEl')
 
 const iframeSrc = computed(() => {
   if (!props.websheet?.embedUrl) return ''

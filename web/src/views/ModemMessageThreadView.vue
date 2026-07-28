@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import ModemMessageComposer from '@/components/modem/messages/ModemMessageComposer.vue'
@@ -38,7 +38,7 @@ const {
 })
 
 const deleteOpen = ref(false)
-const messagesContainerRef = ref<HTMLElement | null>(null)
+const messagesContainerRef = useTemplateRef<HTMLElement>('messagesContainerRef')
 
 const canDelete = computed(() => !isNewConversation.value && participant.value.trim().length > 0)
 

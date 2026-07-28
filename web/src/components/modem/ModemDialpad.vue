@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Delete, PhoneCall } from 'lucide-vue-next'
-import { computed, ref } from 'vue'
+import { computed, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,31 @@ export type ModemDialpadKey = {
 }
 
 export type ModemDialpadDensity = 'regular' | 'compact'
+
+const props = withDefaults(
+  defineProps<{
+    digits: string
+    keys: ModemDialpadKey[]
+    inputClass: string
+    canDial: boolean
+    isDialing: boolean
+    showHeader?: boolean
+    density?: ModemDialpadDensity
+  }>(),
+  {
+    showHeader: false,
+    density: 'regular',
+  },
+)
+
+const emit = defineEmits<{
+  (event: 'update:digits', value: string): void
+  (event: 'backspace'): void
+  (event: 'append-key', value: string): void
+  (event: 'start-plus', value: string): void
+  (event: 'clear-plus'): void
+  (event: 'dial'): void
+}>()
 
 const densityClasses = {
   regular: {
@@ -46,33 +71,8 @@ const densityClasses = {
   },
 } as const
 
-const props = withDefaults(
-  defineProps<{
-    digits: string
-    keys: ModemDialpadKey[]
-    inputClass: string
-    canDial: boolean
-    isDialing: boolean
-    showHeader?: boolean
-    density?: ModemDialpadDensity
-  }>(),
-  {
-    showHeader: false,
-    density: 'regular',
-  },
-)
-
-const emit = defineEmits<{
-  (event: 'update:digits', value: string): void
-  (event: 'backspace'): void
-  (event: 'append-key', value: string): void
-  (event: 'start-plus', value: string): void
-  (event: 'clear-plus'): void
-  (event: 'dial'): void
-}>()
-
 const { t } = useI18n()
-const inputRef = ref<HTMLInputElement | null>(null)
+const inputRef = useTemplateRef<HTMLInputElement>('inputRef')
 const classes = computed(() => densityClasses[props.density])
 
 const updateDigits = (event: Event) => {

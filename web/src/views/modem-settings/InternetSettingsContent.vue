@@ -14,15 +14,6 @@ import type {
   InternetPublicResponse,
 } from '@/types/internet'
 
-const apn = defineModel<string>('apn', { required: true })
-const ipType = defineModel<string>('ipType', { required: true })
-const apnUsername = defineModel<string>('apnUsername', { required: true })
-const apnPassword = defineModel<string>('apnPassword', { required: true })
-const apnAuth = defineModel<string>('apnAuth', { required: true })
-const defaultRoute = defineModel<boolean>('defaultRoute', { required: true })
-const proxyEnabled = defineModel<boolean>('proxyEnabled', { required: true })
-const alwaysOn = defineModel<boolean>('alwaysOn', { required: true })
-
 const props = defineProps<{
   connection: InternetConnectionResponse | null
   publicInfo: InternetPublicResponse | null
@@ -33,12 +24,19 @@ const props = defineProps<{
   isConnected: boolean
   canConnect: boolean
 }>()
-
 const emit = defineEmits<{
   (event: 'connect'): void
   (event: 'disconnect'): void
   (event: 'update-preferences', preferences: InternetConnectionPreferencesPayload): void
 }>()
+const apn = defineModel<string>('apn', { required: true })
+const ipType = defineModel<string>('ipType', { required: true })
+const apnUsername = defineModel<string>('apnUsername', { required: true })
+const apnPassword = defineModel<string>('apnPassword', { required: true })
+const apnAuth = defineModel<string>('apnAuth', { required: true })
+const defaultRoute = defineModel<boolean>('defaultRoute', { required: true })
+const proxyEnabled = defineModel<boolean>('proxyEnabled', { required: true })
+const alwaysOn = defineModel<boolean>('alwaysOn', { required: true })
 
 const { t } = useI18n()
 

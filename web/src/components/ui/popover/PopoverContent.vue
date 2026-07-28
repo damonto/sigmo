@@ -5,10 +5,6 @@ import { reactiveOmit } from '@vueuse/core'
 import { PopoverContent, PopoverPortal, useForwardPropsEmits } from 'reka-ui'
 import { cn } from '@/lib/utils'
 
-defineOptions({
-  inheritAttrs: false,
-})
-
 const props = withDefaults(
   defineProps<PopoverContentProps & { class?: HTMLAttributes['class'] }>(),
   {
@@ -16,7 +12,12 @@ const props = withDefaults(
     sideOffset: 4,
   },
 )
+
 const emits = defineEmits<PopoverContentEmits>()
+
+defineOptions({
+  inheritAttrs: false,
+})
 
 const delegatedProps = reactiveOmit(props, 'class')
 

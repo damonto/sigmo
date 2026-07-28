@@ -14,8 +14,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 
-const open = defineModel<boolean>('open', { required: true })
-
 const props = defineProps<{
   targetLabel: string
   isDeleting: boolean
@@ -24,6 +22,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'confirm'): void
 }>()
+
+const open = defineModel<boolean>('open', { required: true })
 
 const { t } = useI18n()
 

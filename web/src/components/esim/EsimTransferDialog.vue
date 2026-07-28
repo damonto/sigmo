@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { Ref } from 'vue'
-import { computed, nextTick, ref, watch } from 'vue'
+import type { TemplateRef } from 'vue'
+import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import CarrierWebsheetDialog from '@/components/CarrierWebsheetDialog.vue'
@@ -47,8 +47,8 @@ type TransferHeaderFocus = {
 const profileDialogOpen = ref(false)
 const startConfirmOpen = ref(false)
 const transferStarted = ref(false)
-const sourceHeader = ref<TransferHeaderFocus | null>(null)
-const transferHeader = ref<TransferHeaderFocus | null>(null)
+const sourceHeader = useTemplateRef<TransferHeaderFocus>('sourceHeader')
+const transferHeader = useTemplateRef<TransferHeaderFocus>('transferHeader')
 
 const sourceDialogOpen = computed(() => open.value && !profileDialogOpen.value)
 const promptOpen = computed(() => transfer.state.value === TRANSFER_STATE.userInput)
@@ -154,7 +154,7 @@ const confirmStartTransfer = () => {
   transfer.startTransfer(props.targetSeId)
 }
 
-const focusDialogHeader = (target: Ref<TransferHeaderFocus | null>, event: Event) => {
+const focusDialogHeader = (target: TemplateRef<TransferHeaderFocus>, event: Event) => {
   event.preventDefault()
   void nextTick(() => target.value?.focus())
 }

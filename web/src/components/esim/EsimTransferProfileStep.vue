@@ -20,11 +20,11 @@ const props = defineProps<{
   errorMessage: string
 }>()
 
-const sourceImei = defineModel<string>('sourceImei', { required: true })
-
 const emit = defineEmits<{
   (event: 'select-profile', id: string): void
 }>()
+
+const sourceImei = defineModel<string>('sourceImei', { required: true })
 
 const { t } = useI18n()
 </script>

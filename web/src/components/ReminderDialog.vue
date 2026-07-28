@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Bell, CalendarClock, Save, Trash2 } from 'lucide-vue-next'
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useForm } from 'vee-validate'
 import { toTypedSchema } from '@vee-validate/zod'
 import { useI18n } from 'vue-i18n'
@@ -37,8 +37,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Spinner } from '@/components/ui/spinner'
 import type { Reminder, ReminderPayload } from '@/types/reminder'
 
-const open = defineModel<boolean>('open', { required: true })
-
 const props = withDefaults(
   defineProps<{
     profileName: string
@@ -57,6 +55,8 @@ const emit = defineEmits<{
   (event: 'save', payload: ReminderPayload): void
   (event: 'clear'): void
 }>()
+
+const open = defineModel<boolean>('open', { required: true })
 
 const { t } = useI18n()
 const maxRepeatDays = 3650
@@ -94,7 +94,7 @@ const [repeatDays] = defineField('repeatDays')
 const [content] = defineField('content')
 
 const clearOpen = ref(false)
-const focusTarget = ref<HTMLElement | null>(null)
+const focusTarget = useTemplateRef<HTMLElement>('focusTarget')
 const busy = computed(() => props.saving || props.deleting)
 const repeatDayUnit = computed(() => {
   const days = Number(String(repeatDays.value).trim())

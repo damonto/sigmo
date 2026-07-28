@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, useTemplateRef } from 'vue'
 
 import { Button, type ButtonVariants } from '@/components/ui/button'
 
@@ -30,7 +30,7 @@ const emit = defineEmits<{
   (event: 'click'): void
 }>()
 
-const fabRef = ref<HTMLElement | null>(null)
+const fabRef = useTemplateRef<HTMLElement>('fabRef')
 const bottomOffset = ref(props.defaultBottom)
 const isDragging = ref(false)
 const hasDragged = ref(false)

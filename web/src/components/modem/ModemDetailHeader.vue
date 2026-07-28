@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Info } from 'lucide-vue-next'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -37,7 +37,7 @@ const { modems, fetchModems } = useModems()
 const titleClickWindowMs = 1200
 const titleClickCount = ref(0)
 const lastTitleClickAt = ref(0)
-const backButtonRef = ref<HTMLElement | null>(null)
+const backButtonRef = useTemplateRef<HTMLElement>('backButtonRef')
 const { isStickyVisible } = useStickyTopBar(backButtonRef)
 const topBarTitle = computed(() => {
   if (props.isLoading) return '...'

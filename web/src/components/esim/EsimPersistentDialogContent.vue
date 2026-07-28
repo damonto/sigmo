@@ -6,10 +6,6 @@ import { useForwardPropsEmits } from 'reka-ui'
 
 import { DialogContent } from '@/components/ui/dialog'
 
-defineOptions({
-  inheritAttrs: false,
-})
-
 const props = withDefaults(
   defineProps<DialogContentProps & {
     class?: HTMLAttributes['class']
@@ -19,7 +15,12 @@ const props = withDefaults(
     showCloseButton: true,
   },
 )
+
 const emits = defineEmits<DialogContentEmits>()
+
+defineOptions({
+  inheritAttrs: false,
+})
 
 const delegatedProps = reactiveOmit(props, 'class', 'showCloseButton')
 const forwarded = useForwardPropsEmits(delegatedProps, emits)

@@ -7,18 +7,16 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
 
-const alias = defineModel<string>('alias', { required: true })
-const mss = defineModel<string>('mss', { required: true })
-
 const props = defineProps<{
   isLoading: boolean
   isUpdating: boolean
   isValid: boolean
 }>()
-
 const emit = defineEmits<{
   (event: 'update'): void
 }>()
+const alias = defineModel<string>('alias', { required: true })
+const mss = defineModel<string>('mss', { required: true })
 
 const { t } = useI18n()
 

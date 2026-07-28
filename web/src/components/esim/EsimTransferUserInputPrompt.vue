@@ -16,11 +16,11 @@ const props = defineProps<{
   input: TransferUserInput | null
 }>()
 
-const response = defineModel<string>('response', { required: true })
-
 const emit = defineEmits<{
   (event: 'submit', accept: boolean): void
 }>()
+
+const response = defineModel<string>('response', { required: true })
 
 const { t } = useI18n()
 </script>

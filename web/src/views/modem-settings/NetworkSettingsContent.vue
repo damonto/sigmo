@@ -5,8 +5,6 @@ import NetworkModePanel from './NetworkModePanel.vue'
 import NetworkOverviewPanel from './NetworkOverviewPanel.vue'
 import type { BandResponse, ModeResponse } from '@/types/network'
 
-const selectedMode = defineModel<string>('selectedMode', { required: true })
-
 const props = defineProps<{
   operatorLabel: string
   registrationState: string
@@ -34,6 +32,8 @@ const emit = defineEmits<{
   (event: 'updateBands'): void
   (event: 'updateAirplaneMode', enabled: boolean): void
 }>()
+
+const selectedMode = defineModel<string>('selectedMode', { required: true })
 
 const handleToggleBand = (value: number, checked: boolean) => {
   emit('toggleBand', value, checked)

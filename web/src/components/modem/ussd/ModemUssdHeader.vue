@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import BackButton from '@/components/BackButton.vue'
@@ -7,7 +7,7 @@ import ModemStickyTopBar from '@/components/modem/ModemStickyTopBar.vue'
 import { useStickyTopBar } from '@/composables/useStickyTopBar'
 
 const { t } = useI18n()
-const backButtonRef = ref<HTMLElement | null>(null)
+const backButtonRef = useTemplateRef<HTMLElement>('backButtonRef')
 const { isStickyVisible } = useStickyTopBar(backButtonRef)
 </script>
 

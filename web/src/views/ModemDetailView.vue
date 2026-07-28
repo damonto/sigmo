@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Bell, CreditCard, Download } from 'lucide-vue-next'
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
@@ -81,9 +81,9 @@ const {
   back: backSimApplication,
 } = useSimApplicationSession(modemId)
 
-const installDialogRef = ref<{
+const installDialogRef = useTemplateRef<{
   applyDiscoverAddress: (address: string, seId?: string) => void
-} | null>(null)
+}>('installDialogRef')
 
 const installDialogOpen = ref(false)
 const transferDialogOpen = ref(false)

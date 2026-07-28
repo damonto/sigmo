@@ -6,8 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
 
-const draft = defineModel<string>({ required: true })
-
 const props = defineProps<{
   isSending: boolean
 }>()
@@ -15,6 +13,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'submit'): void
 }>()
+
+const draft = defineModel<string>({ required: true })
 
 const { t } = useI18n()
 

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-defineOptions({
-  inheritAttrs: false,
-})
-
 const props = defineProps<{
   regionCode?: string
 }>()
+
+defineOptions({
+  inheritAttrs: false,
+})
 
 const displayCode = computed(() => props.regionCode?.trim().toUpperCase() ?? '')
 const flagCode = computed(() => {

@@ -102,7 +102,7 @@ function deliverToPage(
 ): Promise<boolean> {
   return new Promise((resolve) => {
     const channel = new MessageChannel()
-    let timeout: ReturnType<typeof setTimeout> | undefined
+    const timeout = setTimeout(() => finish(false), foregroundDeliveryTimeout)
     let settled = false
     const finish = (delivered: boolean) => {
       if (settled) return
@@ -115,7 +115,6 @@ function deliverToPage(
       finish(event.data?.type === 'web-push-rendered')
     }
     channel.port1.onmessageerror = () => finish(false)
-    timeout = setTimeout(() => finish(false), foregroundDeliveryTimeout)
     try {
       client.postMessage({ type: 'web-push', payload }, [channel.port2])
     } catch (err) {

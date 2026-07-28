@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import BackButton from '@/components/BackButton.vue'
@@ -21,7 +21,7 @@ const backRoute = computed(() =>
     ? { name: 'modem-detail', params: { id: props.modemId } }
     : { name: 'home' },
 )
-const backButtonRef = ref<HTMLElement | null>(null)
+const backButtonRef = useTemplateRef<HTMLElement>('backButtonRef')
 const { isStickyVisible } = useStickyTopBar(backButtonRef)
 </script>
 

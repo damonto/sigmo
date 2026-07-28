@@ -16,11 +16,9 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { SimApplicationMenuItem, SimApplicationView } from '@/types/simApplication'
 
-const open = defineModel<boolean>('open', { required: true })
 const props = defineProps<{
   view: SimApplicationView | null
 }>()
-
 const emit = defineEmits<{
   (event: 'select-menu-item', item: SimApplicationMenuItem): void
   (event: 'submit-input', text: string): void
@@ -28,7 +26,7 @@ const emit = defineEmits<{
   (event: 'respond-confirm', accepted: boolean): void
   (event: 'back'): void
 }>()
-
+const open = defineModel<boolean>('open', { required: true })
 const { t } = useI18n()
 const text = ref('')
 const wrappedTextClass =

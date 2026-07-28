@@ -14,8 +14,6 @@ import {
 import { Spinner } from '@/components/ui/spinner'
 import type { ModeResponse } from '@/types/network'
 
-const selectedMode = defineModel<string>('selectedMode', { required: true })
-
 const props = defineProps<{
   modeOptions: ModeResponse[]
   isSettingsLoading: boolean
@@ -26,6 +24,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'updateMode'): void
 }>()
+
+const selectedMode = defineModel<string>('selectedMode', { required: true })
 
 const { t } = useI18n()
 

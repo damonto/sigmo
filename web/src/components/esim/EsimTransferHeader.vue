@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ArrowRightLeft } from 'lucide-vue-next'
-import { ref } from 'vue'
+import { useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 const { t } = useI18n()
-const focusTarget = ref<HTMLElement | null>(null)
+const focusTarget = useTemplateRef<HTMLElement>('focusTarget')
 
 const focus = () => {
   focusTarget.value?.focus({ preventScroll: true })

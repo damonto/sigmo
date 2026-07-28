@@ -8,19 +8,17 @@ import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
 import { formatAddressInput } from '@/lib/phoneNumberInput'
 
-const message = defineModel<string>('message', { required: true })
-const recipient = defineModel<string>('recipient')
-
 const props = defineProps<{
   isNewConversation: boolean
   isSending: boolean
   isLoading: boolean
   defaultCountry?: string
 }>()
-
 const emit = defineEmits<{
   (event: 'submit'): void
 }>()
+const message = defineModel<string>('message', { required: true })
+const recipient = defineModel<string>('recipient')
 
 const { t } = useI18n()
 

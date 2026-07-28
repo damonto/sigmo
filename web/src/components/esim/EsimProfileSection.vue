@@ -46,7 +46,6 @@ import EsimProfileDetailsDialog from '@/components/esim/EsimProfileDetailsDialog
 import type { EsimProfile } from '@/types/esim'
 import type { ReminderPayload } from '@/types/reminder'
 
-const profiles = defineModel<EsimProfile[]>('profiles', { required: true })
 const props = withDefaults(
   defineProps<{
     modemId: string
@@ -81,7 +80,7 @@ const emit = defineEmits<{
   (event: 'profile-actions-open-change', profile: EsimProfile, open: boolean): void
   (event: 'open-sim-application', profile: EsimProfile): void
 }>()
-
+const profiles = defineModel<EsimProfile[]>('profiles', { required: true })
 const { t } = useI18n()
 const esimApi = useEsimApi()
 const reminderApi = useReminderApi()

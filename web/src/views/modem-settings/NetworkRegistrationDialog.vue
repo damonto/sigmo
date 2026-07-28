@@ -16,9 +16,6 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Spinner } from '@/components/ui/spinner'
 import type { NetworkResponse } from '@/types/network'
 
-const open = defineModel<boolean>('open', { required: true })
-const selectedNetwork = defineModel<string>('selectedNetwork', { required: true })
-
 const props = defineProps<{
   networks: NetworkResponse[]
   isLoading: boolean
@@ -26,10 +23,11 @@ const props = defineProps<{
   hasAvailableNetworks: boolean
   hasSelection: boolean
 }>()
-
 const emit = defineEmits<{
   (event: 'register'): void
 }>()
+const open = defineModel<boolean>('open', { required: true })
+const selectedNetwork = defineModel<string>('selectedNetwork', { required: true })
 
 const { t } = useI18n()
 </script>
