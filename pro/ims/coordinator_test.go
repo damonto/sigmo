@@ -126,7 +126,7 @@ func TestStatusFromSession(t *testing.T) {
 	now := time.Date(2026, 5, 29, 10, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name          string
-		settings      Settings
+		enabled       bool
 		session       *sessionState
 		profileID     string
 		wantState     string
@@ -140,7 +140,7 @@ func TestStatusFromSession(t *testing.T) {
 		},
 		{
 			name:      "disconnected when enabled without session",
-			settings:  Settings{Enabled: true},
+			enabled:   true,
 			profileID: "profile-1",
 			wantState: StateDisconnected,
 		},
@@ -185,10 +185,8 @@ func TestStatusFromSession(t *testing.T) {
 			wantDuration:  120,
 		},
 		{
-			name: "profile mismatch uses settings state",
-			settings: Settings{
-				Enabled: true,
-			},
+			name:    "profile mismatch uses settings state",
+			enabled: true,
 			session: &sessionState{
 				phase:     sessionPhaseConnected,
 				client:    &imsgo.Client{},
@@ -200,7 +198,7 @@ func TestStatusFromSession(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := statusFromSession(tt.settings, tt.session, tt.profileID, now)
+			got := statusFromSession(tt.enabled, tt.session, tt.profileID, now)
 			if got.State != tt.wantState {
 				t.Fatalf("State = %q, want %q", got.State, tt.wantState)
 			}
@@ -217,19 +215,19 @@ func TestStatusFromSession(t *testing.T) {
 func TestVoLTESettingsStore(t *testing.T) {
 	tests := []struct {
 		name     string
-		settings *Settings
-		want     Settings
+		settings *VoLTESettings
+		want     VoLTESettings
 	}{
-		{name: "empty store defaults to QMAP", want: Settings{DataPath: DataPathQMAP}},
+		{name: "empty store defaults to QMAP", want: VoLTESettings{DataPath: DataPathQMAP}},
 		{
 			name:     "enabled QMAP",
-			settings: &Settings{Enabled: true, DataPath: DataPathQMAP},
-			want:     Settings{Enabled: true, DataPath: DataPathQMAP},
+			settings: &VoLTESettings{Enabled: true, DataPath: DataPathQMAP},
+			want:     VoLTESettings{Enabled: true, DataPath: DataPathQMAP},
 		},
 		{
 			name:     "disabled legacy BAM-DMUX",
-			settings: &Settings{DataPath: DataPathLegacyBAMDMUX},
-			want:     Settings{DataPath: DataPathLegacyBAMDMUX},
+			settings: &VoLTESettings{DataPath: DataPathLegacyBAMDMUX},
+			want:     VoLTESettings{DataPath: DataPathLegacyBAMDMUX},
 		},
 	}
 
@@ -245,7 +243,7 @@ func TestVoLTESettingsStore(t *testing.T) {
 					t.Errorf("Close() error = %v", err)
 				}
 			})
-			settings := NewVoLTESettingsStore(store)
+			settings := newVoLTESettingsStore(store)
 			if tt.settings != nil {
 				if err := settings.Put(ctx, "modem-1", *tt.settings); err != nil {
 					t.Fatalf("Put() error = %v", err)
@@ -301,8 +299,8 @@ func TestVoLTESettingsUseDeviceDataPath(t *testing.T) {
 					t.Errorf("Close() error = %v", err)
 				}
 			})
-			settings := NewVoLTESettingsStore(store)
-			if err := settings.Put(ctx, "modem-1", Settings{
+			settings := newVoLTESettingsStore(store)
+			if err := settings.Put(ctx, "modem-1", VoLTESettings{
 				DataPath: tt.storedPath,
 			}); err != nil {
 				t.Fatalf("Put() error = %v", err)
@@ -316,9 +314,9 @@ func TestVoLTESettingsUseDeviceDataPath(t *testing.T) {
 				}},
 			}
 
-			got, err := coordinator.Settings(ctx, modem)
+			got, err := coordinator.VoLTESettings(ctx, modem)
 			if err != nil {
-				t.Fatalf("Settings() error = %v", err)
+				t.Fatalf("VoLTESettings() error = %v", err)
 			}
 			if got.DataPath != tt.wantPath {
 				t.Fatalf("DataPath = %q, want %q", got.DataPath, tt.wantPath)
@@ -347,12 +345,12 @@ func TestRestoreLegacyInternetSurvivesCoordinatorRestart(t *testing.T) {
 				}
 			})
 			prefs := pinternet.Preferences{APN: "internet", IPType: "ipv4", DefaultRoute: true}
-			settings := NewVoLTESettingsStore(store)
+			settings := newVoLTESettingsStore(store)
 			if err := settings.PutSuspendedInternet(ctx, "modem-1", prefs); err != nil {
 				t.Fatalf("PutSuspendedInternet() error = %v", err)
 			}
 			internet := &fakeInternetRestorer{}
-			coordinator := &coordinator{internet: internet, volteSettings: NewVoLTESettingsStore(store)}
+			coordinator := &coordinator{internet: internet, volteSettings: newVoLTESettingsStore(store)}
 
 			if err := coordinator.restoreLegacyInternet(ctx, &mmodem.Modem{EquipmentIdentifier: "modem-1"}); err != nil {
 				t.Fatalf("restoreLegacyInternet() error = %v", err)
@@ -390,8 +388,8 @@ func TestDisableVoLTEPersistsStateAfterManagedCleanupError(t *testing.T) {
 					t.Errorf("Close() error = %v", err)
 				}
 			})
-			settings := NewVoLTESettingsStore(store)
-			current := Settings{Enabled: true, DataPath: DataPathLegacyBAMDMUX}
+			settings := newVoLTESettingsStore(store)
+			current := VoLTESettings{Enabled: true, DataPath: DataPathLegacyBAMDMUX}
 			if err := settings.Put(ctx, "modem-1", current); err != nil {
 				t.Fatalf("Put() error = %v", err)
 			}
@@ -415,11 +413,11 @@ func TestDisableVoLTEPersistsStateAfterManagedCleanupError(t *testing.T) {
 				voiceSubscribers: make(map[uint64]VoiceEventFunc),
 			}
 
-			err = coordinator.UpdateSettings(ctx, qmiTestModem("modem-1"), Settings{
+			err = coordinator.UpdateVoLTESettings(ctx, qmiTestModem("modem-1"), VoLTESettings{
 				DataPath: DataPathLegacyBAMDMUX,
 			})
 			if !errors.Is(err, errTestMode) {
-				t.Fatalf("UpdateSettings() error = %v, want %v", err, errTestMode)
+				t.Fatalf("UpdateVoLTESettings() error = %v, want %v", err, errTestMode)
 			}
 			got, getErr := settings.Get(ctx, "modem-1")
 			if getErr != nil {
@@ -446,8 +444,8 @@ func TestStartIfDisabledSelectsQualcomm410ModeWithoutPreparing(t *testing.T) {
 			t.Errorf("Close() error = %v", err)
 		}
 	})
-	settings := NewVoLTESettingsStore(store)
-	if err := settings.Put(ctx, "modem-1", Settings{DataPath: DataPathQualcomm410}); err != nil {
+	settings := newVoLTESettingsStore(store)
+	if err := settings.Put(ctx, "modem-1", VoLTESettings{DataPath: DataPathQualcomm410}); err != nil {
 		t.Fatalf("Put() error = %v", err)
 	}
 	internet := &fakeInternetRestorer{}
@@ -486,8 +484,8 @@ func TestDisableVoLTEKeepsQualcomm410InternetMode(t *testing.T) {
 			t.Errorf("Close() error = %v", err)
 		}
 	})
-	settings := NewVoLTESettingsStore(store)
-	if err := settings.Put(ctx, "modem-1", Settings{Enabled: true, DataPath: DataPathQualcomm410}); err != nil {
+	settings := newVoLTESettingsStore(store)
+	if err := settings.Put(ctx, "modem-1", VoLTESettings{Enabled: true, DataPath: DataPathQualcomm410}); err != nil {
 		t.Fatalf("Put() error = %v", err)
 	}
 	device := &fakeManagedVoLTEDevice{}
@@ -505,8 +503,8 @@ func TestDisableVoLTEKeepsQualcomm410InternetMode(t *testing.T) {
 		sessions:         make(map[string]*sessionState),
 		voiceSubscribers: make(map[uint64]VoiceEventFunc),
 	}
-	if err := coordinator.UpdateSettings(ctx, qmiTestModem("modem-1"), Settings{DataPath: DataPathQualcomm410}); err != nil {
-		t.Fatalf("UpdateSettings() error = %v", err)
+	if err := coordinator.UpdateVoLTESettings(ctx, qmiTestModem("modem-1"), VoLTESettings{DataPath: DataPathQualcomm410}); err != nil {
+		t.Fatalf("UpdateVoLTESettings() error = %v", err)
 	}
 	if len(internet.calls) != 0 {
 		t.Fatalf("Internet calls = %v, want none", internet.calls)
@@ -555,8 +553,8 @@ func TestDisableVoLTESwitchesQualcomm410InternetModeWithDataPath(t *testing.T) {
 					t.Errorf("Close() error = %v", err)
 				}
 			})
-			settings := NewVoLTESettingsStore(store)
-			if err := settings.Put(ctx, "modem-1", Settings{Enabled: true, DataPath: tt.currentPath}); err != nil {
+			settings := newVoLTESettingsStore(store)
+			if err := settings.Put(ctx, "modem-1", VoLTESettings{Enabled: true, DataPath: tt.currentPath}); err != nil {
 				t.Fatalf("Put() error = %v", err)
 			}
 			previousOpen := openManagedVoLTEDevice
@@ -573,8 +571,8 @@ func TestDisableVoLTESwitchesQualcomm410InternetModeWithDataPath(t *testing.T) {
 				sessions:         make(map[string]*sessionState),
 				voiceSubscribers: make(map[uint64]VoiceEventFunc),
 			}
-			if err := coordinator.UpdateSettings(ctx, qmiTestModem("modem-1"), Settings{DataPath: tt.nextPath}); err != nil {
-				t.Fatalf("UpdateSettings() error = %v", err)
+			if err := coordinator.UpdateVoLTESettings(ctx, qmiTestModem("modem-1"), VoLTESettings{DataPath: tt.nextPath}); err != nil {
+				t.Fatalf("UpdateVoLTESettings() error = %v", err)
 			}
 			if !slices.Equal(internet.calls, tt.wantCalls) {
 				t.Fatalf("Internet calls = %v, want %v", internet.calls, tt.wantCalls)
@@ -595,11 +593,11 @@ func TestRestoreQualcomm410DataPathReleasesInternetMode(t *testing.T) {
 }
 
 type failingVoLTESettingsStore struct {
-	*VoLTESettingsStore
+	*voLTESettingsStore
 	putErr error
 }
 
-func (s *failingVoLTESettingsStore) Put(context.Context, string, Settings) error {
+func (s *failingVoLTESettingsStore) Put(context.Context, string, VoLTESettings) error {
 	return s.putErr
 }
 
@@ -636,8 +634,8 @@ func TestDisabledVoLTEDataPathRollsBackAfterPersistenceFailure(t *testing.T) {
 					t.Errorf("Close() error = %v", err)
 				}
 			})
-			settings := NewVoLTESettingsStore(store)
-			current := Settings{DataPath: tt.currentPath}
+			settings := newVoLTESettingsStore(store)
+			current := VoLTESettings{DataPath: tt.currentPath}
 			if err := settings.Put(ctx, "modem-1", current); err != nil {
 				t.Fatalf("Put() error = %v", err)
 			}
@@ -645,12 +643,12 @@ func TestDisabledVoLTEDataPathRollsBackAfterPersistenceFailure(t *testing.T) {
 			coordinator := &coordinator{
 				access:        AccessVoLTE,
 				internet:      internet,
-				volteSettings: &failingVoLTESettingsStore{VoLTESettingsStore: settings, putErr: persistErr},
+				volteSettings: &failingVoLTESettingsStore{voLTESettingsStore: settings, putErr: persistErr},
 			}
 
-			err = coordinator.UpdateSettings(ctx, qmiTestModem("modem-1"), Settings{DataPath: tt.nextPath})
+			err = coordinator.UpdateVoLTESettings(ctx, qmiTestModem("modem-1"), VoLTESettings{DataPath: tt.nextPath})
 			if !errors.Is(err, persistErr) {
-				t.Fatalf("UpdateSettings() error = %v, want %v", err, persistErr)
+				t.Fatalf("UpdateVoLTESettings() error = %v, want %v", err, persistErr)
 			}
 			if !slices.Equal(internet.calls, tt.wantCalls) {
 				t.Fatalf("Internet calls = %v, want %v", internet.calls, tt.wantCalls)
@@ -686,8 +684,8 @@ func TestVoLTEDataPathSwitchRollsBackAfterNewPathFailure(t *testing.T) {
 					t.Errorf("Close() error = %v", err)
 				}
 			})
-			settings := NewVoLTESettingsStore(store)
-			current := Settings{Enabled: true, DataPath: DataPathLegacyBAMDMUX}
+			settings := newVoLTESettingsStore(store)
+			current := VoLTESettings{Enabled: true, DataPath: DataPathLegacyBAMDMUX}
 			if err := settings.Put(ctx, "modem-1", current); err != nil {
 				t.Fatalf("Put() error = %v", err)
 			}
@@ -711,9 +709,9 @@ func TestVoLTEDataPathSwitchRollsBackAfterNewPathFailure(t *testing.T) {
 				}},
 			}
 
-			err = coordinator.UpdateSettings(ctx, modem, Settings{Enabled: true, DataPath: DataPathQMAP})
+			err = coordinator.UpdateVoLTESettings(ctx, modem, VoLTESettings{Enabled: true, DataPath: DataPathQMAP})
 			if !errors.Is(err, errQMAP) {
-				t.Fatalf("UpdateSettings() error = %v, want %v", err, errQMAP)
+				t.Fatalf("UpdateVoLTESettings() error = %v, want %v", err, errQMAP)
 			}
 			got, getErr := settings.Get(ctx, "modem-1")
 			if getErr != nil {

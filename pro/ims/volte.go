@@ -59,30 +59,34 @@ func validateManagedVoLTE(ctx context.Context, modem *mmodem.Modem) (err error) 
 	return nil
 }
 
-func ResolveVoLTESettings(modem *mmodem.Modem, settings Settings) (Settings, error) {
+func ResolveVoLTESettings(modem *mmodem.Modem, settings VoLTESettings) (VoLTESettings, error) {
 	port, err := voLTEControlPort(modem)
 	if err != nil {
-		return Settings{}, err
+		return VoLTESettings{}, err
 	}
 	switch port.PortType {
 	case mmodem.ModemPortTypeQmi:
 		if settings.DataPath == "" {
-			return Settings{}, ErrVoLTEDataPathRequired
+			return VoLTESettings{}, ErrVoLTEDataPathRequired
 		}
 		switch settings.DataPath {
 		case DataPathQMAP, DataPathLegacyBAMDMUX, DataPathQualcomm410:
 		default:
-			return Settings{}, fmt.Errorf("%w: %q", ErrVoLTEDataPathUnsupported, settings.DataPath)
+			return VoLTESettings{}, fmt.Errorf("%w: %q", ErrVoLTEDataPathUnsupported, settings.DataPath)
 		}
 	case mmodem.ModemPortTypeMbim:
 		settings.DataPath = DataPathMBIM
 	default:
-		return Settings{}, ErrUnavailable
+		return VoLTESettings{}, ErrUnavailable
 	}
 	return settings, nil
 }
 
-func UpdateVoLTESettings(ctx context.Context, modem *mmodem.Modem, coordinator Coordinator, settings Settings) error {
+type voLTESettingsUpdater interface {
+	UpdateVoLTESettings(context.Context, *mmodem.Modem, VoLTESettings) error
+}
+
+func updateVoLTESettings(ctx context.Context, modem *mmodem.Modem, updater voLTESettingsUpdater, settings VoLTESettings) error {
 	settings, err := ResolveVoLTESettings(modem, settings)
 	if err != nil {
 		return err
@@ -92,5 +96,5 @@ func UpdateVoLTESettings(ctx context.Context, modem *mmodem.Modem, coordinator C
 			return err
 		}
 	}
-	return coordinator.UpdateSettings(ctx, modem, settings)
+	return updater.UpdateVoLTESettings(ctx, modem, settings)
 }

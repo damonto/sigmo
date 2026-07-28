@@ -31,13 +31,14 @@ describe('useModemApi', () => {
 
     await useModemApi().updateWiFiCallingSettings('modem-1', {
       enabled: true,
+      underlay: { mode: 'system' },
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/modems/modem-1/wifi-calling/settings'),
       expect.objectContaining({
         method: 'PUT',
-        body: JSON.stringify({ enabled: true }),
+        body: JSON.stringify({ enabled: true, underlay: { mode: 'system' } }),
       }),
     )
   })

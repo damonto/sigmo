@@ -6,14 +6,15 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	internetcore "github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
 type Handler struct {
-	registry  *mmodem.Registry
-	connector *internetcore.Connector
+	registry    *mmodem.Registry
+	connections appconnectivity.InternetConnections
 }
 
 const (
@@ -33,10 +34,10 @@ const (
 	errorCodeInternetProfileIDRequired         = "internet_profile_id_required"
 )
 
-func New(registry *mmodem.Registry, connector *internetcore.Connector) *Handler {
+func New(registry *mmodem.Registry, connections appconnectivity.InternetConnections) *Handler {
 	return &Handler{
-		registry:  registry,
-		connector: connector,
+		registry:    registry,
+		connections: connections,
 	}
 }
 
@@ -46,7 +47,7 @@ func (h *Handler) Current(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeCurrentInternetConnectionFailed)
 	}
-	response, err := h.connector.Current(ctx, modem)
+	response, err := h.connections.Current(ctx, modem)
 	if err != nil {
 		return internetError(c, err, errorCodeCurrentInternetConnectionFailed)
 	}
@@ -59,7 +60,7 @@ func (h *Handler) Public(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeInternetPublicFailed)
 	}
-	info, err := h.connector.Public(ctx, modem)
+	info, err := h.connections.Public(ctx, modem)
 	if err != nil {
 		return internetError(c, err, errorCodeInternetPublicFailed)
 	}
@@ -90,7 +91,7 @@ func (h *Handler) Connect(c *echo.Context) error {
 	if err := internetcore.ValidatePreferences(prefs); err != nil {
 		return internetError(c, err, errorCodeConnectInternetFailed)
 	}
-	response, err := h.connector.Connect(ctx, modem, prefs)
+	response, err := h.connections.Connect(ctx, modem, prefs)
 	if err != nil {
 		return internetError(c, err, errorCodeConnectInternetFailed)
 	}
@@ -108,7 +109,7 @@ func (h *Handler) UpdatePreferences(c *echo.Context) error {
 	if err := httpapi.BindAndValidate(c, &req, errorCodeInternetPreferencesInvalidRequest); err != nil {
 		return err
 	}
-	response, err := h.connector.UpdatePreferences(ctx, modem, internetcore.ConnectionPreferences{
+	response, err := h.connections.UpdatePreferences(ctx, modem, internetcore.ConnectionPreferences{
 		DefaultRoute: req.DefaultRoute,
 		ProxyEnabled: req.ProxyEnabled,
 		AlwaysOn:     req.AlwaysOn,
@@ -125,7 +126,7 @@ func (h *Handler) Disconnect(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeDisconnectInternetFailed)
 	}
-	if err := h.connector.Disconnect(ctx, modem); err != nil {
+	if err := h.connections.Disconnect(ctx, modem); err != nil {
 		return httpapi.Internal(c, errorCodeDisconnectInternetFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)

@@ -88,9 +88,27 @@ func (c *coordinator) startEnabled(ctx context.Context, registry *mmodem.Registr
 }
 
 func (c *coordinator) startIfEnabled(ctx context.Context, modem *mmodem.Modem) {
-	settings, err := c.Settings(ctx, modem)
+	if c.access == AccessWiFiCalling {
+		settings, err := c.WiFiCallingSettings(ctx, modem)
+		if err != nil {
+			slog.Warn("read Wi-Fi Calling settings", "imei", modem.EquipmentIdentifier, "error", err)
+			return
+		}
+		if !settings.Enabled {
+			return
+		}
+		profileID, err := modem.ProfileID(ctx)
+		if err != nil {
+			slog.Debug("skip IMS start", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
+			return
+		}
+		c.start(modem, profileID)
+		return
+	}
+
+	settings, err := c.VoLTESettings(ctx, modem)
 	if err != nil {
-		slog.Warn("read IMS settings", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
+		slog.Warn("read VoLTE settings", "imei", modem.EquipmentIdentifier, "error", err)
 		return
 	}
 	if settings.Enabled {
@@ -102,29 +120,27 @@ func (c *coordinator) startIfEnabled(ctx context.Context, modem *mmodem.Modem) {
 		c.start(modem, profileID)
 		return
 	}
-	if c.access == AccessVoLTE {
-		switch settings.DataPath {
-		case DataPathMBIM:
-			return
-		case DataPathQMAP:
-			if c.internet != nil {
-				if err := c.internet.SetQMAPEnabled(ctx, modem, false); err != nil {
-					slog.Warn("restore normal Internet after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
-				}
+	switch settings.DataPath {
+	case DataPathMBIM:
+		return
+	case DataPathQMAP:
+		if c.internet != nil {
+			if err := c.internet.SetQMAPEnabled(ctx, modem, false); err != nil {
+				slog.Warn("restore normal Internet after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
 			}
-		case DataPathLegacyBAMDMUX:
-			if err := c.restoreLegacyInternet(ctx, modem); err != nil {
-				slog.Warn("restore suspended Internet after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
-			}
-		case DataPathQualcomm410:
-			if c.internet != nil {
-				if err := c.internet.SelectQualcomm410Mode(modem); err != nil {
-					slog.Warn("select Qualcomm 410 Internet mode after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
-				}
-			}
-		default:
-			slog.Warn("unsupported VoLTE data path", "imei", modem.EquipmentIdentifier, "dataPath", settings.DataPath)
 		}
+	case DataPathLegacyBAMDMUX:
+		if err := c.restoreLegacyInternet(ctx, modem); err != nil {
+			slog.Warn("restore suspended Internet after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
+		}
+	case DataPathQualcomm410:
+		if c.internet != nil {
+			if err := c.internet.SelectQualcomm410Mode(modem); err != nil {
+				slog.Warn("select Qualcomm 410 Internet mode after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
+			}
+		}
+	default:
+		slog.Warn("unsupported VoLTE data path", "imei", modem.EquipmentIdentifier, "dataPath", settings.DataPath)
 	}
 }
 
@@ -259,7 +275,7 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 			return nil, err
 		}
 		if port.PortType == mmodem.ModemPortTypeQmi {
-			settings, err := c.Settings(ctx, modem)
+			settings, err := c.VoLTESettings(ctx, modem)
 			if err != nil {
 				return nil, fmt.Errorf("read VoLTE data path: %w", err)
 			}
@@ -411,7 +427,7 @@ func (c *coordinator) modemClientConfig(ctx context.Context, modem *mmodem.Modem
 	}
 	cfg := modemClientConfigForIMEI(imei, c.access, imsProfileIndex)
 	if c.access == AccessWiFiCalling {
-		settings, err := c.Settings(ctx, modem)
+		settings, err := c.WiFiCallingSettings(ctx, modem)
 		if err != nil {
 			return nil, fmt.Errorf("read Wi-Fi Calling settings: %w", err)
 		}

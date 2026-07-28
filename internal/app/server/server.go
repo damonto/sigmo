@@ -135,14 +135,15 @@ func Run(cfg Config) error {
 		return fmt.Errorf("configure message relay: %w", err)
 	}
 	runtime := &Runtime{
-		Store:              store,
-		Registry:           registry,
-		Internet:           internetConnector,
-		Relay:              relay,
-		NetworkPreferences: networkPreferences,
-		Storage:            db,
-		WebPush:            webPush,
-		Reminders:          reminderScheduler,
+		Store:               store,
+		Registry:            registry,
+		InternetConnector:   internetConnector,
+		internetConnections: internetConnector,
+		Relay:               relay,
+		NetworkPreferences:  networkPreferences,
+		Storage:             db,
+		WebPush:             webPush,
+		Reminders:           reminderScheduler,
 	}
 	if cfg.Configure != nil {
 		if err := cfg.Configure(runtime); err != nil {
@@ -155,16 +156,17 @@ func Run(cfg Config) error {
 	}
 	mcpCatalog := mcpserver.NewCatalog()
 	if err := mcpserver.RegisterCoreTools(mcpCatalog, mcpserver.CoreToolsConfig{
-		Store:              store,
-		Registry:           registry,
-		Internet:           internetConnector,
-		Relay:              relay,
-		NetworkPreferences: networkPreferences,
-		Storage:            db,
-		Reminders:          reminderScheduler,
-		MessageRoute:       runtime.messageRoute,
-		USSDRoute:          runtime.ussdRoute,
-		ModemOverview:      runtime.modemOverview,
+		Store:               store,
+		Registry:            registry,
+		InternetConnector:   internetConnector,
+		InternetConnections: runtime.internetConnections,
+		Relay:               relay,
+		NetworkPreferences:  networkPreferences,
+		Storage:             db,
+		Reminders:           reminderScheduler,
+		MessageRoute:        runtime.messageRoute,
+		USSDRoute:           runtime.ussdRoute,
+		ModemOverview:       runtime.modemOverview,
 	}); err != nil {
 		return fmt.Errorf("configure MCP core tools: %w", err)
 	}
@@ -185,22 +187,23 @@ func Run(cfg Config) error {
 	}
 	defer mcpController.Close()
 	if err := router.Register(server, router.RegisterConfig{
-		BuildVersion:       cfg.BuildVersion,
-		Store:              store,
-		Registry:           registry,
-		Internet:           internetConnector,
-		Relay:              relay,
-		NetworkPreferences: networkPreferences,
-		Storage:            db,
-		WebPush:            webPush,
-		Reminders:          reminderScheduler,
-		MessageRoute:       runtime.messageRoute,
-		USSDRoute:          runtime.ussdRoute,
-		ModemOverview:      runtime.modemOverview,
-		Features:           runtime.features,
-		Extensions:         runtime.routes,
-		MCP:                mcpController,
-		MCPKeys:            mcpKeys,
+		BuildVersion:        cfg.BuildVersion,
+		Store:               store,
+		Registry:            registry,
+		InternetConnector:   internetConnector,
+		InternetConnections: runtime.internetConnections,
+		Relay:               relay,
+		NetworkPreferences:  networkPreferences,
+		Storage:             db,
+		WebPush:             webPush,
+		Reminders:           reminderScheduler,
+		MessageRoute:        runtime.messageRoute,
+		USSDRoute:           runtime.ussdRoute,
+		ModemOverview:       runtime.modemOverview,
+		Features:            runtime.features,
+		Extensions:          runtime.routes,
+		MCP:                 mcpController,
+		MCPKeys:             mcpKeys,
 	}); err != nil {
 		return fmt.Errorf("configure router: %w", err)
 	}

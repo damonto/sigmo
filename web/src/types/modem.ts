@@ -62,6 +62,11 @@ export type WiFiCallingSettings = {
   underlay?: WiFiCallingUnderlay
 }
 
+export type WiFiCallingSettingsRequest = {
+  enabled: boolean
+  underlay: WiFiCallingUnderlay
+}
+
 export type WiFiCallingSettingsResponse = Omit<WiFiCallingSettings, 'underlay'> & {
   underlay: WiFiCallingUnderlay
   connected: boolean

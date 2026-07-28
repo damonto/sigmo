@@ -95,7 +95,7 @@ type MediaSession interface {
 }
 
 type imsVoice interface {
-	Status(context.Context, *mmodem.Modem) (pims.Status, error)
+	Status(context.Context, *mmodem.Modem) (pims.VoiceStatus, error)
 	DialCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error)
 	AnswerCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error)
 	RejectCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error)

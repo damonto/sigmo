@@ -780,7 +780,7 @@ func TestSuspendLegacyInternet(t *testing.T) {
 			})
 			coordinator := &coordinator{
 				internet:      tt.internet,
-				volteSettings: NewVoLTESettingsStore(store),
+				volteSettings: newVoLTESettingsStore(store),
 			}
 			modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
 
@@ -1013,7 +1013,7 @@ func TestConnectingSessionLifecycle(t *testing.T) {
 	if session.phase != sessionPhaseConnecting {
 		t.Fatalf("phase = %q, want %q", session.phase, sessionPhaseConnecting)
 	}
-	got := statusFromSession(Settings{Enabled: true}, session, "profile-1", now)
+	got := statusFromSession(true, session, "profile-1", now)
 	if got.State != StateConnecting {
 		t.Fatalf("State = %q, want %q", got.State, StateConnecting)
 	}
@@ -1023,7 +1023,7 @@ func TestConnectingSessionLifecycle(t *testing.T) {
 	if session.phase != sessionPhaseDisconnected {
 		t.Fatalf("phase after failed connect = %q, want %q", session.phase, sessionPhaseDisconnected)
 	}
-	got = statusFromSession(Settings{Enabled: true}, session, "profile-1", now)
+	got = statusFromSession(true, session, "profile-1", now)
 	if got.State != StateDisconnected {
 		t.Fatalf("State after failed connect = %q, want %q", got.State, StateDisconnected)
 	}

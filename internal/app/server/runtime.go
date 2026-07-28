@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 
+	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	"github.com/damonto/sigmo/internal/app/mcpserver"
 	"github.com/damonto/sigmo/internal/app/modemstatus"
@@ -22,14 +23,15 @@ type Extension func(*Runtime) error
 type Runner func(context.Context) error
 
 type Runtime struct {
-	Store              *settings.Store
-	Registry           *modem.Registry
-	Internet           *internet.Connector
-	Relay              *forwarder.Relay
-	NetworkPreferences *modem.NetworkPreferences
-	Storage            *storage.Store
-	WebPush            *webpush.Client
-	Reminders          *reminder.Scheduler
+	Store               *settings.Store
+	Registry            *modem.Registry
+	InternetConnector   *internet.Connector
+	internetConnections appconnectivity.InternetConnections
+	Relay               *forwarder.Relay
+	NetworkPreferences  *modem.NetworkPreferences
+	Storage             *storage.Store
+	WebPush             *webpush.Client
+	Reminders           *reminder.Scheduler
 
 	messageRoute  message.Route
 	ussdRoute     ussd.Route
@@ -38,6 +40,10 @@ type Runtime struct {
 	routes        []router.Extension
 	runners       []Runner
 	features      []string
+}
+
+func (r *Runtime) SetInternetConnections(connections appconnectivity.InternetConnections) {
+	r.internetConnections = connections
 }
 
 func (r *Runtime) SetMessageRoute(route message.Route) {

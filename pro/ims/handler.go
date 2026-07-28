@@ -15,21 +15,41 @@ import (
 )
 
 type Handler struct {
-	registry    modemFinder
-	wifiCalling Coordinator
-	volte       Coordinator
+	registry     modemFinder
+	connectivity connectivityHTTP
 }
 
 type modemFinder interface {
 	Find(context.Context, string) (*mmodem.Modem, error)
 }
 
-type UpdateSettingsRequest struct {
-	Enabled  bool              `json:"enabled"`
-	Underlay *UnderlaySettings `json:"underlay,omitempty"`
+type connectivityHTTP interface {
+	WiFiCallingStatus(context.Context, *mmodem.Modem) (WiFiCallingStatus, error)
+	ReplaceWiFiCallingSettings(context.Context, *mmodem.Modem, WiFiCallingSettings) error
+	ReconnectWiFiCalling(context.Context, *mmodem.Modem) error
+	DisconnectWiFiCalling(context.Context, *mmodem.Modem) error
+	WiFiCallingEmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool
+	StartWiFiCallingWebsheet(context.Context, *mmodem.Modem) (websheet.Info, error)
+	StartWiFiCallingEmergencyAddressUpdate(context.Context, *mmodem.Modem) (websheet.Info, error)
+	VoLTEStatus(context.Context, *mmodem.Modem) (VoLTEStatus, error)
+	ReplaceVoLTESettings(context.Context, *mmodem.Modem, VoLTESettings) error
 }
 
-type SettingsResponse struct {
+type wifiCallingStatusReader interface {
+	WiFiCallingStatus(context.Context, *mmodem.Modem) (WiFiCallingStatus, error)
+	WiFiCallingEmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool
+}
+
+type voLTEStatusReader interface {
+	VoLTEStatus(context.Context, *mmodem.Modem) (VoLTEStatus, error)
+}
+
+type WiFiCallingSettingsRequest struct {
+	Enabled  bool              `json:"enabled"`
+	Underlay *UnderlaySettings `json:"underlay" validate:"required"`
+}
+
+type WiFiCallingSettingsResponse struct {
 	Enabled                         bool             `json:"enabled" jsonschema:"whether Wi-Fi Calling is enabled in Sigmo settings"`
 	Underlay                        UnderlaySettings `json:"underlay" jsonschema:"outer network selected for Wi-Fi Calling"`
 	Connected                       bool             `json:"connected" jsonschema:"whether the modem currently has an active Wi-Fi Calling IMS connection"`
@@ -39,7 +59,7 @@ type SettingsResponse struct {
 	Websheet                        *websheet.Info   `json:"websheet" jsonschema:"pending carrier interaction page; null when no websheet is pending"`
 }
 
-type UpdateVoLTESettingsRequest struct {
+type VoLTESettingsRequest struct {
 	Enabled  bool     `json:"enabled"`
 	DataPath DataPath `json:"dataPath"`
 }
@@ -72,36 +92,36 @@ const (
 	errorCodeVoLTEUnavailable             = "volte_unavailable"
 )
 
-func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, wifiCalling Coordinator, volte Coordinator) {
-	h := &Handler{registry: registry, wifiCalling: wifiCalling, volte: volte}
-	group.GET("/modems/:id/wifi-calling/settings", h.Settings)
-	group.PUT("/modems/:id/wifi-calling/settings", h.UpdateSettings)
-	group.POST("/modems/:id/wifi-calling/sessions", h.CreateSession)
-	group.DELETE("/modems/:id/wifi-calling/sessions/current", h.DeleteSession)
-	group.POST("/modems/:id/wifi-calling/websheets", h.StartWebsheet)
-	group.POST("/modems/:id/wifi-calling/emergency-address-websheets", h.StartEmergencyAddressWebsheet)
+func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, connectivity *Connectivity) {
+	h := &Handler{registry: registry, connectivity: connectivity}
+	group.GET("/modems/:id/wifi-calling/settings", h.WiFiCallingSettings)
+	group.PUT("/modems/:id/wifi-calling/settings", h.UpdateWiFiCallingSettings)
+	group.POST("/modems/:id/wifi-calling/sessions", h.CreateWiFiCallingSession)
+	group.DELETE("/modems/:id/wifi-calling/sessions/current", h.DeleteWiFiCallingSession)
+	group.POST("/modems/:id/wifi-calling/websheets", h.CreateWiFiCallingWebsheet)
+	group.POST("/modems/:id/wifi-calling/emergency-address-websheets", h.CreateWiFiCallingEmergencyAddressWebsheet)
 	group.GET("/modems/:id/volte/settings", h.VoLTESettings)
 	group.PUT("/modems/:id/volte/settings", h.UpdateVoLTESettings)
 }
 
-func ReadWiFiCallingSettings(ctx context.Context, modem *mmodem.Modem, coordinator Coordinator) (SettingsResponse, error) {
-	status, err := coordinator.Status(ctx, modem)
+func ReadWiFiCallingSettings(ctx context.Context, modem *mmodem.Modem, connectivity wifiCallingStatusReader) (WiFiCallingSettingsResponse, error) {
+	status, err := connectivity.WiFiCallingStatus(ctx, modem)
 	if err != nil {
-		return SettingsResponse{}, err
+		return WiFiCallingSettingsResponse{}, err
 	}
-	return SettingsResponse{
+	return WiFiCallingSettingsResponse{
 		Enabled:                         status.Enabled,
 		Underlay:                        status.Underlay,
 		Connected:                       status.Connected,
 		State:                           status.State,
 		DurationSeconds:                 status.DurationSeconds,
-		EmergencyAddressUpdateAvailable: coordinator.EmergencyAddressUpdateAvailable(ctx, modem),
+		EmergencyAddressUpdateAvailable: connectivity.WiFiCallingEmergencyAddressUpdateAvailable(ctx, modem),
 		Websheet:                        status.Websheet,
 	}, nil
 }
 
-func ReadVoLTESettings(ctx context.Context, modem *mmodem.Modem, coordinator Coordinator) (VoLTESettingsResponse, error) {
-	status, err := coordinator.Status(ctx, modem)
+func ReadVoLTESettings(ctx context.Context, modem *mmodem.Modem, connectivity voLTEStatusReader) (VoLTESettingsResponse, error) {
+	status, err := connectivity.VoLTEStatus(ctx, modem)
 	if err != nil {
 		return VoLTESettingsResponse{}, err
 	}
@@ -125,7 +145,7 @@ func (h *Handler) VoLTESettings(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeGetVoLTESettingsFailed)
 	}
-	response, err := ReadVoLTESettings(ctx, modem, h.volte)
+	response, err := ReadVoLTESettings(ctx, modem, h.connectivity)
 	if err != nil {
 		return httpapi.Internal(c, errorCodeGetVoLTESettingsFailed, err)
 	}
@@ -138,11 +158,11 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeUpdateVoLTESettingsFailed)
 	}
-	var req UpdateVoLTESettingsRequest
+	var req VoLTESettingsRequest
 	if err := c.Bind(&req); err != nil {
 		return httpapi.BadRequest(c, errorCodeUpdateVoLTEInvalidRequest, err)
 	}
-	if err := UpdateVoLTESettings(ctx, modem, h.volte, Settings{
+	if err := h.connectivity.ReplaceVoLTESettings(ctx, modem, VoLTESettings{
 		Enabled:  req.Enabled,
 		DataPath: req.DataPath,
 	}); err != nil {
@@ -158,31 +178,22 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *Handler) UpdateSettings(c *echo.Context) error {
+func (h *Handler) UpdateWiFiCallingSettings(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeUpdateSettingsFailed)
 	}
-	var req UpdateSettingsRequest
+	var req WiFiCallingSettingsRequest
 	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateSettingsInvalidRequest); err != nil {
 		return err
 	}
-	settings, err := h.wifiCalling.Settings(c.Request().Context(), modem)
-	if err != nil {
-		return httpapi.Internal(c, errorCodeUpdateSettingsFailed, err)
+	if req.Underlay == nil {
+		return httpapi.UnprocessableEntity(c, errorCodeUpdateSettingsInvalidRequest, ErrInvalidWiFiCallingUnderlay)
 	}
-	settings.Enabled = req.Enabled
-	if req.Underlay != nil {
-		settings.Underlay = *req.Underlay
-	}
-	settings, err = ResolveWiFiCallingSettings(modem, settings)
-	if errors.Is(err, ErrInvalidWiFiCallingUnderlay) {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateSettingsInvalidRequest, err)
-	}
-	if err != nil {
-		return httpapi.Internal(c, errorCodeUpdateSettingsFailed, err)
-	}
-	if err := h.wifiCalling.UpdateSettings(c.Request().Context(), modem, settings); err != nil {
+	if err := h.connectivity.ReplaceWiFiCallingSettings(c.Request().Context(), modem, WiFiCallingSettings{
+		Enabled:  req.Enabled,
+		Underlay: *req.Underlay,
+	}); err != nil {
 		if errors.Is(err, ErrInvalidWiFiCallingUnderlay) {
 			return httpapi.UnprocessableEntity(c, errorCodeUpdateSettingsInvalidRequest, err)
 		}
@@ -191,24 +202,24 @@ func (h *Handler) UpdateSettings(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *Handler) Settings(c *echo.Context) error {
+func (h *Handler) WiFiCallingSettings(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeGetSettingsFailed)
 	}
-	response, err := ReadWiFiCallingSettings(c.Request().Context(), modem, h.wifiCalling)
+	response, err := ReadWiFiCallingSettings(c.Request().Context(), modem, h.connectivity)
 	if err != nil {
 		return httpapi.Internal(c, errorCodeGetSettingsFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
 
-func (h *Handler) CreateSession(c *echo.Context) error {
+func (h *Handler) CreateWiFiCallingSession(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeCreateSessionFailed)
 	}
-	if err := h.wifiCalling.Reconnect(c.Request().Context(), modem); err != nil {
+	if err := h.connectivity.ReconnectWiFiCalling(c.Request().Context(), modem); err != nil {
 		if errors.Is(err, ErrNotConnected) || errors.Is(err, ErrUnavailable) {
 			return httpapi.BadRequest(c, errorCodeSessionUnavailable, err)
 		}
@@ -217,23 +228,23 @@ func (h *Handler) CreateSession(c *echo.Context) error {
 	return c.NoContent(http.StatusAccepted)
 }
 
-func (h *Handler) DeleteSession(c *echo.Context) error {
+func (h *Handler) DeleteWiFiCallingSession(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeDeleteSessionFailed)
 	}
-	if err := h.wifiCalling.Disconnect(c.Request().Context(), modem); err != nil {
+	if err := h.connectivity.DisconnectWiFiCalling(c.Request().Context(), modem); err != nil {
 		return httpapi.Internal(c, errorCodeDeleteSessionFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
-func (h *Handler) StartWebsheet(c *echo.Context) error {
+func (h *Handler) CreateWiFiCallingWebsheet(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeStartWebsheetFailed)
 	}
-	info, err := h.wifiCalling.StartWebsheet(c.Request().Context(), modem)
+	info, err := h.connectivity.StartWiFiCallingWebsheet(c.Request().Context(), modem)
 	if err != nil {
 		if errors.Is(err, ErrWebsheetNotPending) {
 			return httpapi.BadRequest(c, errorCodeWebsheetNotPending, err)
@@ -243,12 +254,12 @@ func (h *Handler) StartWebsheet(c *echo.Context) error {
 	return c.JSON(http.StatusCreated, info)
 }
 
-func (h *Handler) StartEmergencyAddressWebsheet(c *echo.Context) error {
+func (h *Handler) CreateWiFiCallingEmergencyAddressWebsheet(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeStartE911WebsheetFailed)
 	}
-	info, err := h.wifiCalling.StartEmergencyAddressUpdate(c.Request().Context(), modem)
+	info, err := h.connectivity.StartWiFiCallingEmergencyAddressUpdate(c.Request().Context(), modem)
 	if err != nil {
 		return wifiCallingWebsheetStartError(c, errorCodeStartE911WebsheetFailed, err)
 	}

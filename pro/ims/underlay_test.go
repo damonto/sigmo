@@ -19,16 +19,16 @@ func TestResolveWiFiCallingSettings(t *testing.T) {
 	modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
 	tests := []struct {
 		name     string
-		settings Settings
+		settings WiFiCallingSettings
 		want     UnderlaySettings
 		wantErr  bool
 	}{
 		{name: "defaults to system", want: UnderlaySettings{Mode: UnderlayModeSystem}},
-		{name: "normalizes self", settings: Settings{Underlay: UnderlaySettings{Mode: " SELF ", ModemID: "ignored"}}, want: UnderlaySettings{Mode: UnderlayModeSelf}},
-		{name: "keeps another modem", settings: Settings{Underlay: UnderlaySettings{Mode: UnderlayModeModem, ModemID: " modem-2 "}}, want: UnderlaySettings{Mode: UnderlayModeModem, ModemID: "modem-2"}},
-		{name: "same modem becomes self", settings: Settings{Underlay: UnderlaySettings{Mode: UnderlayModeModem, ModemID: "modem-1"}}, want: UnderlaySettings{Mode: UnderlayModeSelf}},
-		{name: "modem requires id", settings: Settings{Underlay: UnderlaySettings{Mode: UnderlayModeModem}}, wantErr: true},
-		{name: "rejects unknown mode", settings: Settings{Underlay: UnderlaySettings{Mode: "auto"}}, wantErr: true},
+		{name: "normalizes self", settings: WiFiCallingSettings{Underlay: UnderlaySettings{Mode: " SELF ", ModemID: "ignored"}}, want: UnderlaySettings{Mode: UnderlayModeSelf}},
+		{name: "keeps another modem", settings: WiFiCallingSettings{Underlay: UnderlaySettings{Mode: UnderlayModeModem, ModemID: " modem-2 "}}, want: UnderlaySettings{Mode: UnderlayModeModem, ModemID: "modem-2"}},
+		{name: "same modem becomes self", settings: WiFiCallingSettings{Underlay: UnderlaySettings{Mode: UnderlayModeModem, ModemID: "modem-1"}}, want: UnderlaySettings{Mode: UnderlayModeSelf}},
+		{name: "modem requires id", settings: WiFiCallingSettings{Underlay: UnderlaySettings{Mode: UnderlayModeModem}}, wantErr: true},
+		{name: "rejects unknown mode", settings: WiFiCallingSettings{Underlay: UnderlaySettings{Mode: "auto"}}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -55,8 +55,8 @@ func TestWiFiCallingSettingsStoreUnderlay(t *testing.T) {
 		}
 	})
 
-	settings := NewSettingsStore(store)
-	want := Settings{Enabled: true, Underlay: UnderlaySettings{Mode: UnderlayModeModem, ModemID: "modem-2"}}
+	settings := newWiFiCallingSettingsStore(store)
+	want := WiFiCallingSettings{Enabled: true, Underlay: UnderlaySettings{Mode: UnderlayModeModem, ModemID: "modem-2"}}
 	if err := settings.Put(ctx, "profile-1", want); err != nil {
 		t.Fatalf("Put() error = %v", err)
 	}
@@ -77,22 +77,16 @@ func TestWiFiCallingSettingsStoreUnderlay(t *testing.T) {
 	}
 }
 
-func TestNewDoesNotStoreTypedNilInternet(t *testing.T) {
-	got, ok := New(Config{}).(*coordinator)
-	if !ok {
-		t.Fatalf("New() = %T, want *coordinator", got)
-	}
+func TestNewCoordinatorDoesNotStoreTypedNilInternet(t *testing.T) {
+	got := newCoordinator(coordinatorConfig{})
 	if got.internet != nil {
 		t.Fatalf("internet = %T, want nil", got.internet)
 	}
 }
 
-func TestNewStoresRegistryDependency(t *testing.T) {
+func TestNewCoordinatorStoresRegistryDependency(t *testing.T) {
 	registry := new(mmodem.Registry)
-	got, ok := New(Config{Registry: registry}).(*coordinator)
-	if !ok {
-		t.Fatalf("New() = %T, want *coordinator", got)
-	}
+	got := newCoordinator(coordinatorConfig{Registry: registry})
 	if got.registry != registry {
 		t.Fatalf("registry = %p, want %p", got.registry, registry)
 	}

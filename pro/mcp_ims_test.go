@@ -27,38 +27,37 @@ func (f mcpModemFinder) Find(context.Context, string) (*mmodem.Modem, error) {
 	return f.modem, nil
 }
 
-type mcpVoLTEProbe struct {
-	pims.Coordinator
-	updated  bool
-	settings pims.Settings
+type mcpConnectivityProbe struct {
+	imsMCPConnectivity
+	wifiUpdated   bool
+	wifiSettings  pims.WiFiCallingSettings
+	volteUpdated  bool
+	volteSettings pims.VoLTESettings
 }
 
-type mcpWiFiCallingProbe struct {
-	pims.Coordinator
-	current  pims.Settings
-	updated  bool
-	settings pims.Settings
-}
-
-func (p *mcpWiFiCallingProbe) Settings(context.Context, *mmodem.Modem) (pims.Settings, error) {
-	return p.current, nil
-}
-
-func (p *mcpWiFiCallingProbe) UpdateSettings(_ context.Context, _ *mmodem.Modem, settings pims.Settings) error {
-	p.updated = true
-	p.settings = settings
+func (p *mcpConnectivityProbe) ReplaceWiFiCallingSettings(_ context.Context, modem *mmodem.Modem, settings pims.WiFiCallingSettings) error {
+	settings, err := pims.ResolveWiFiCallingSettings(modem, settings)
+	if err != nil {
+		return err
+	}
+	p.wifiUpdated = true
+	p.wifiSettings = settings
 	return nil
 }
 
-func (p *mcpVoLTEProbe) UpdateSettings(_ context.Context, _ *mmodem.Modem, settings pims.Settings) error {
-	p.updated = true
-	p.settings = settings
+func (p *mcpConnectivityProbe) ReplaceVoLTESettings(_ context.Context, modem *mmodem.Modem, settings pims.VoLTESettings) error {
+	settings, err := pims.ResolveVoLTESettings(modem, settings)
+	if err != nil {
+		return err
+	}
+	p.volteUpdated = true
+	p.volteSettings = settings
 	return nil
 }
 
 func TestRegisterIMSMCPCallPermissionsAreRecordOnly(t *testing.T) {
 	catalog := mcpserver.NewCatalog()
-	if err := registerIMSMCP(nil, nil, nil, nil)(catalog); err != nil {
+	if err := registerIMSMCP(nil, nil, nil)(catalog); err != nil {
 		t.Fatalf("registerIMSMCP() error = %v", err)
 	}
 	names := make([]string, 0)
@@ -83,28 +82,28 @@ func TestSetVoLTEUsesSharedValidation(t *testing.T) {
 		portType     mmodem.ModemPortType
 		input        volteSettingsInput
 		wantErr      bool
-		wantSettings pims.Settings
+		wantSettings pims.VoLTESettings
 	}{
 		{name: "QMI requires data path", portType: mmodem.ModemPortTypeQmi, input: volteSettingsInput{ModemID: "modem-1"}, wantErr: true},
 		{name: "QMI rejects unsupported data path", portType: mmodem.ModemPortTypeQmi, input: volteSettingsInput{ModemID: "modem-1", DataPath: "auto"}, wantErr: true},
 		{
 			name: "MBIM derives data path", portType: mmodem.ModemPortTypeMbim,
 			input:        volteSettingsInput{ModemID: "modem-1", DataPath: "legacy_bam_dmux"},
-			wantSettings: pims.Settings{DataPath: pims.DataPathMBIM},
+			wantSettings: pims.VoLTESettings{DataPath: pims.DataPathMBIM},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			modem := &mmodem.Modem{EquipmentIdentifier: "modem-1", Ports: []mmodem.ModemPort{{Device: "cdc-wdm0", PortType: tt.portType}}}
-			probe := &mcpVoLTEProbe{}
-			tools := &imsMCPTools{registry: mcpModemFinder{modem: modem}, volte: probe}
+			probe := &mcpConnectivityProbe{}
+			tools := &imsMCPTools{registry: mcpModemFinder{modem: modem}, connectivity: probe}
 
 			_, err := tools.setVoLTE(context.Background(), nil, mcpauth.Grant{}, tt.input)
 			if tt.wantErr {
 				if mcpserver.ErrorCode(err) != "invalid_request" {
 					t.Fatalf("setVoLTE() error = %v, want invalid_request", err)
 				}
-				if probe.updated {
+				if probe.volteUpdated {
 					t.Fatal("setVoLTE() updated settings after validation error")
 				}
 				return
@@ -112,8 +111,8 @@ func TestSetVoLTEUsesSharedValidation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("setVoLTE() error = %v", err)
 			}
-			if !probe.updated || probe.settings != tt.wantSettings {
-				t.Fatalf("UpdateSettings = (%v, %+v), want (true, %+v)", probe.updated, probe.settings, tt.wantSettings)
+			if !probe.volteUpdated || probe.volteSettings != tt.wantSettings {
+				t.Fatalf("UpdateVoLTESettings = (%v, %+v), want (true, %+v)", probe.volteUpdated, probe.volteSettings, tt.wantSettings)
 			}
 		})
 	}
@@ -123,9 +122,8 @@ func TestSetWiFiCallingUnderlay(t *testing.T) {
 	tests := []struct {
 		name         string
 		input        wifiSettingsInput
-		current      pims.Settings
 		wantErr      bool
-		wantSettings pims.Settings
+		wantSettings pims.WiFiCallingSettings
 	}{
 		{
 			name:    "rejects omitted underlay",
@@ -135,13 +133,12 @@ func TestSetWiFiCallingUnderlay(t *testing.T) {
 		{
 			name:         "selects system network",
 			input:        wifiSettingsInput{ModemID: "modem-1", Underlay: &pims.UnderlaySettings{Mode: pims.UnderlayModeSystem}},
-			current:      pims.Settings{Enabled: true, Underlay: pims.UnderlaySettings{Mode: pims.UnderlayModeSelf}},
-			wantSettings: pims.Settings{Underlay: pims.UnderlaySettings{Mode: pims.UnderlayModeSystem}},
+			wantSettings: pims.WiFiCallingSettings{Underlay: pims.UnderlaySettings{Mode: pims.UnderlayModeSystem}},
 		},
 		{
 			name:         "selects another modem",
 			input:        wifiSettingsInput{ModemID: "modem-1", Enabled: true, Underlay: &pims.UnderlaySettings{Mode: pims.UnderlayModeModem, ModemID: "modem-2"}},
-			wantSettings: pims.Settings{Enabled: true, Underlay: pims.UnderlaySettings{Mode: pims.UnderlayModeModem, ModemID: "modem-2"}},
+			wantSettings: pims.WiFiCallingSettings{Enabled: true, Underlay: pims.UnderlaySettings{Mode: pims.UnderlayModeModem, ModemID: "modem-2"}},
 		},
 		{
 			name:    "rejects missing modem id",
@@ -152,15 +149,15 @@ func TestSetWiFiCallingUnderlay(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
-			probe := &mcpWiFiCallingProbe{current: tt.current}
-			tools := &imsMCPTools{registry: mcpModemFinder{modem: modem}, wifiCalling: probe}
+			probe := &mcpConnectivityProbe{}
+			tools := &imsMCPTools{registry: mcpModemFinder{modem: modem}, connectivity: probe}
 
 			_, err := tools.setWiFiCalling(context.Background(), nil, mcpauth.Grant{}, tt.input)
 			if tt.wantErr {
 				if mcpserver.ErrorCode(err) != "invalid_request" {
 					t.Fatalf("setWiFiCalling() error = %v, want invalid_request", err)
 				}
-				if probe.updated {
+				if probe.wifiUpdated {
 					t.Fatal("setWiFiCalling() updated settings after validation error")
 				}
 				return
@@ -168,8 +165,8 @@ func TestSetWiFiCallingUnderlay(t *testing.T) {
 			if err != nil {
 				t.Fatalf("setWiFiCalling() error = %v", err)
 			}
-			if !probe.updated || probe.settings != tt.wantSettings {
-				t.Fatalf("UpdateSettings = (%v, %+v), want (true, %+v)", probe.updated, probe.settings, tt.wantSettings)
+			if !probe.wifiUpdated || probe.wifiSettings != tt.wantSettings {
+				t.Fatalf("UpdateWiFiCallingSettings = (%v, %+v), want (true, %+v)", probe.wifiUpdated, probe.wifiSettings, tt.wantSettings)
 			}
 		})
 	}
@@ -216,8 +213,8 @@ func TestIMSMCPOutputSchemasAndEmptyCalls(t *testing.T) {
 	}
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "ims-schema-test", Version: "1"}, nil)
-	mcp.AddTool(server, &mcp.Tool{Name: "get_wifi_calling"}, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, pims.SettingsResponse, error) {
-		return nil, pims.SettingsResponse{}, nil
+	mcp.AddTool(server, &mcp.Tool{Name: "get_wifi_calling"}, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, pims.WiFiCallingSettingsResponse, error) {
+		return nil, pims.WiFiCallingSettingsResponse{}, nil
 	})
 	mcp.AddTool(server, &mcp.Tool{Name: "get_volte"}, func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, pims.VoLTESettingsResponse, error) {
 		return nil, pims.VoLTESettingsResponse{}, nil

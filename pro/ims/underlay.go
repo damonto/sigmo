@@ -24,7 +24,7 @@ type modemUnderlay struct {
 
 var _ imsgo.Underlay = (*modemUnderlay)(nil)
 
-func (c *coordinator) wifiCallingUnderlay(ctx context.Context, modem *mmodem.Modem, settings Settings) (imsgo.Underlay, error) {
+func (c *coordinator) wifiCallingUnderlay(ctx context.Context, modem *mmodem.Modem, settings WiFiCallingSettings) (imsgo.Underlay, error) {
 	settings, err := ResolveWiFiCallingSettings(modem, settings)
 	if err != nil {
 		return nil, err

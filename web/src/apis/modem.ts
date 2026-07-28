@@ -5,7 +5,7 @@ import type {
   ModemListResponse,
   ModemSettings,
   ModemSettingsResponse,
-  WiFiCallingSettings,
+  WiFiCallingSettingsRequest,
   WiFiCallingEmergencyAddressWebsheetResponse,
   WiFiCallingSettingsResponse,
   WiFiCallingWebsheetResponse,
@@ -91,7 +91,7 @@ export const useModemApi = () => {
    * Update Wi-Fi Calling settings
    * PUT /api/v1/modems/:id/wifi-calling/settings
    */
-  const updateWiFiCallingSettings = (id: string, payload: WiFiCallingSettings) => {
+  const updateWiFiCallingSettings = (id: string, payload: WiFiCallingSettingsRequest) => {
     return fetchJson<void>(`modems/${id}/wifi-calling/settings`, {
       method: 'PUT',
       body: JSON.stringify(payload),

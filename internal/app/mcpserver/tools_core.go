@@ -12,6 +12,7 @@ import (
 	sgp22 "github.com/damonto/euicc-go/v2"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	esimhandler "github.com/damonto/sigmo/internal/app/handler/esim"
 	euicchandler "github.com/damonto/sigmo/internal/app/handler/euicc"
@@ -32,16 +33,17 @@ import (
 )
 
 type CoreToolsConfig struct {
-	Store              *settings.Store
-	Registry           *modemcore.Registry
-	Internet           *internetcore.Connector
-	Relay              *forwarder.Relay
-	NetworkPreferences *modemcore.NetworkPreferences
-	Storage            *storage.Store
-	Reminders          *reminder.Scheduler
-	MessageRoute       messagecore.Route
-	USSDRoute          ussdcore.Route
-	ModemOverview      []modemstatus.Extension
+	Store               *settings.Store
+	Registry            *modemcore.Registry
+	InternetConnector   *internetcore.Connector
+	InternetConnections appconnectivity.InternetConnections
+	Relay               *forwarder.Relay
+	NetworkPreferences  *modemcore.NetworkPreferences
+	Storage             *storage.Store
+	Reminders           *reminder.Scheduler
+	MessageRoute        messagecore.Route
+	USSDRoute           ussdcore.Route
+	ModemOverview       []modemstatus.Extension
 }
 
 type coreTools struct {
@@ -50,13 +52,13 @@ type coreTools struct {
 	network  *networkhandler.Handler
 	euicc    *euicchandler.Handler
 	esim     *esimhandler.Handler
-	internet *internetcore.Connector
+	internet appconnectivity.InternetConnections
 	messages *messagecore.Messenger
 	ussd     *ussdcore.Executor
 }
 
 func RegisterCoreTools(catalog *Catalog, cfg CoreToolsConfig) error {
-	if catalog == nil || cfg.Store == nil || cfg.Registry == nil || cfg.Internet == nil || cfg.Storage == nil {
+	if catalog == nil || cfg.Store == nil || cfg.Registry == nil || cfg.InternetConnector == nil || cfg.InternetConnections == nil || cfg.Storage == nil {
 		return errors.New("MCP core tool dependencies are required")
 	}
 	networks, err := networkhandler.New(cfg.Registry, cfg.NetworkPreferences, cfg.Storage)
@@ -65,13 +67,13 @@ func RegisterCoreTools(catalog *Catalog, cfg CoreToolsConfig) error {
 	}
 	tools := &coreTools{
 		registry: cfg.Registry,
-		modems:   modemhandler.New(cfg.Store, cfg.Registry, cfg.Internet, cfg.Reminders, cfg.ModemOverview...),
+		modems:   modemhandler.New(cfg.Store, cfg.Registry, cfg.InternetConnector, cfg.Reminders, cfg.ModemOverview...),
 		network:  networks,
 		euicc:    euicchandler.New(cfg.Store, cfg.Registry),
 		esim: esimhandler.New(esimhandler.Config{
-			Store: cfg.Store, Registry: cfg.Registry, Internet: cfg.Internet, Reminders: cfg.Reminders,
+			Store: cfg.Store, Registry: cfg.Registry, Internet: cfg.InternetConnector, Reminders: cfg.Reminders,
 		}),
-		internet: cfg.Internet,
+		internet: cfg.InternetConnections,
 		messages: messagecore.New(cfg.Storage, cfg.MessageRoute),
 		ussd:     ussdcore.New(cfg.USSDRoute),
 	}

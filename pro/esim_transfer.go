@@ -20,7 +20,7 @@ var proESIMTransfer = func(app *proApp) error {
 		core := coreesim.New(coreesim.Config{
 			Store:    deps.Store,
 			Registry: deps.Registry,
-			Internet: deps.Internet,
+			Internet: deps.InternetConnector,
 		})
 		protransfer.RegisterRoutes(group, protransfer.ConfigFromCore(core, protransfer.Config{
 			Store:     deps.Store,

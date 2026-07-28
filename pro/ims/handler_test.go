@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -25,43 +26,55 @@ func (f fakeModemFinder) Find(context.Context, string) (*mmodem.Modem, error) {
 	return f.modem, nil
 }
 
-type updateCoordinatorProbe struct {
-	Coordinator
+type voLTESettingsProbe struct {
 	updated  bool
-	settings Settings
-	current  Settings
+	settings VoLTESettings
 }
 
-func (p *updateCoordinatorProbe) Settings(context.Context, *mmodem.Modem) (Settings, error) {
-	return p.current, nil
-}
-
-func (p *updateCoordinatorProbe) UpdateSettings(_ context.Context, _ *mmodem.Modem, settings Settings) error {
+func (p *voLTESettingsProbe) UpdateVoLTESettings(_ context.Context, _ *mmodem.Modem, settings VoLTESettings) error {
 	p.updated = true
 	p.settings = settings
 	return nil
+}
+
+type handlerConnectivityProbe struct {
+	connectivityHTTP
+	wifiUpdated  bool
+	wifiSettings WiFiCallingSettings
+	volte        *voLTESettingsProbe
+}
+
+func (p *handlerConnectivityProbe) ReplaceWiFiCallingSettings(_ context.Context, modem *mmodem.Modem, settings WiFiCallingSettings) error {
+	settings, err := ResolveWiFiCallingSettings(modem, settings)
+	if err != nil {
+		return err
+	}
+	p.wifiUpdated = true
+	p.wifiSettings = settings
+	return nil
+}
+
+func (p *handlerConnectivityProbe) ReplaceVoLTESettings(ctx context.Context, modem *mmodem.Modem, settings VoLTESettings) error {
+	return updateVoLTESettings(ctx, modem, p.volte, settings)
 }
 
 func TestUpdateWiFiCallingSettingsUnderlay(t *testing.T) {
 	tests := []struct {
 		name         string
 		body         string
-		current      Settings
 		wantStatus   int
-		wantSettings Settings
+		wantSettings WiFiCallingSettings
 	}{
 		{
-			name:         "preserves omitted underlay",
-			body:         `{"enabled":false}`,
-			current:      Settings{Enabled: true, Underlay: UnderlaySettings{Mode: UnderlayModeSelf}},
-			wantStatus:   http.StatusNoContent,
-			wantSettings: Settings{Underlay: UnderlaySettings{Mode: UnderlayModeSelf}},
+			name:       "requires underlay for PUT",
+			body:       `{"enabled":false}`,
+			wantStatus: http.StatusUnprocessableEntity,
 		},
 		{
 			name:         "selects another modem",
 			body:         `{"enabled":true,"underlay":{"mode":"modem","modemId":"modem-2"}}`,
 			wantStatus:   http.StatusNoContent,
-			wantSettings: Settings{Enabled: true, Underlay: UnderlaySettings{Mode: UnderlayModeModem, ModemID: "modem-2"}},
+			wantSettings: WiFiCallingSettings{Enabled: true, Underlay: UnderlaySettings{Mode: UnderlayModeModem, ModemID: "modem-2"}},
 		},
 		{
 			name:       "rejects missing modem id",
@@ -71,14 +84,14 @@ func TestUpdateWiFiCallingSettingsUnderlay(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			probe := &updateCoordinatorProbe{current: tt.current}
+			probe := &handlerConnectivityProbe{}
 			h := &Handler{
-				registry:    fakeModemFinder{modem: &mmodem.Modem{EquipmentIdentifier: "modem-1"}},
-				wifiCalling: probe,
+				registry:     fakeModemFinder{modem: &mmodem.Modem{EquipmentIdentifier: "modem-1"}},
+				connectivity: probe,
 			}
 			e := echo.New()
 			e.Validator = appvalidator.New()
-			e.PUT("/modems/:id/wifi-calling/settings", h.UpdateSettings)
+			e.PUT("/modems/:id/wifi-calling/settings", h.UpdateWiFiCallingSettings)
 			req := httptest.NewRequest(http.MethodPut, "/modems/modem-1/wifi-calling/settings", strings.NewReader(tt.body))
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 			rec := httptest.NewRecorder()
@@ -88,11 +101,11 @@ func TestUpdateWiFiCallingSettingsUnderlay(t *testing.T) {
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
 			}
-			if probe.updated != (tt.wantStatus == http.StatusNoContent) {
-				t.Fatalf("UpdateSettings called = %v", probe.updated)
+			if probe.wifiUpdated != (tt.wantStatus == http.StatusNoContent) {
+				t.Fatalf("UpdateWiFiCallingSettings called = %v", probe.wifiUpdated)
 			}
-			if probe.settings != tt.wantSettings {
-				t.Fatalf("UpdateSettings settings = %+v, want %+v", probe.settings, tt.wantSettings)
+			if probe.wifiSettings != tt.wantSettings {
+				t.Fatalf("UpdateWiFiCallingSettings settings = %+v, want %+v", probe.wifiSettings, tt.wantSettings)
 			}
 		})
 	}
@@ -107,7 +120,7 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 		openErr      error
 		wantStatus   int
 		wantUpdated  bool
-		wantSettings Settings
+		wantSettings VoLTESettings
 		wantOpened   bool
 		wantCalls    []string
 	}{
@@ -126,7 +139,7 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 			device:       &fakeManagedVoLTEDevice{},
 			wantStatus:   http.StatusNoContent,
 			wantUpdated:  true,
-			wantSettings: Settings{Enabled: true, DataPath: DataPathQMAP},
+			wantSettings: VoLTESettings{Enabled: true, DataPath: DataPathQMAP},
 			wantOpened:   true,
 			wantCalls:    []string{"status", "ims-profile", "packet-service"},
 		},
@@ -137,7 +150,7 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 			device:       &fakeManagedVoLTEDevice{},
 			wantStatus:   http.StatusNoContent,
 			wantUpdated:  true,
-			wantSettings: Settings{Enabled: true, DataPath: DataPathQualcomm410},
+			wantSettings: VoLTESettings{Enabled: true, DataPath: DataPathQualcomm410},
 			wantOpened:   true,
 			wantCalls:    []string{"status", "ims-profile", "packet-service"},
 		},
@@ -148,7 +161,7 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 			openErr:      wwan.ErrUnsupported,
 			wantStatus:   http.StatusNoContent,
 			wantUpdated:  true,
-			wantSettings: Settings{DataPath: DataPathLegacyBAMDMUX},
+			wantSettings: VoLTESettings{DataPath: DataPathLegacyBAMDMUX},
 		},
 		{
 			name:       "rejects unsupported data path",
@@ -168,7 +181,7 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 			portType:     mmodem.ModemPortTypeMbim,
 			wantStatus:   http.StatusNoContent,
 			wantUpdated:  true,
-			wantSettings: Settings{DataPath: DataPathMBIM},
+			wantSettings: VoLTESettings{DataPath: DataPathMBIM},
 		},
 		{
 			name:         "ignores QMI data path selection for MBIM",
@@ -176,7 +189,7 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 			portType:     mmodem.ModemPortTypeMbim,
 			wantStatus:   http.StatusNoContent,
 			wantUpdated:  true,
-			wantSettings: Settings{DataPath: DataPathMBIM},
+			wantSettings: VoLTESettings{DataPath: DataPathMBIM},
 		},
 	}
 
@@ -192,7 +205,8 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 				openManagedVoLTEDevice = previousOpen
 			})
 
-			volte := &updateCoordinatorProbe{}
+			volte := &voLTESettingsProbe{}
+			connectivity := &handlerConnectivityProbe{volte: volte}
 			modem := &mmodem.Modem{
 				EquipmentIdentifier: "modem-1",
 				Ports: []mmodem.ModemPort{{
@@ -201,8 +215,8 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 				}},
 			}
 			h := &Handler{
-				registry: fakeModemFinder{modem: modem},
-				volte:    volte,
+				registry:     fakeModemFinder{modem: modem},
+				connectivity: connectivity,
 			}
 			e := echo.New()
 			e.Validator = appvalidator.New()
@@ -253,9 +267,12 @@ func TestDeleteSessionRouteDisconnectsCurrentSession(t *testing.T) {
 		registry: fakeModemFinder{
 			modem: &mmodem.Modem{EquipmentIdentifier: "modem-1"},
 		},
-		wifiCalling: wifiCalling,
+		connectivity: &Connectivity{
+			wifiCalling: wifiCalling,
+			operations:  make(map[string]*sync.Mutex),
+		},
 	}
-	e.DELETE("/modems/:id/wifi-calling/sessions/current", h.DeleteSession)
+	e.DELETE("/modems/:id/wifi-calling/sessions/current", h.DeleteWiFiCallingSession)
 
 	req := httptest.NewRequest(http.MethodDelete, "/modems/modem-1/wifi-calling/sessions/current", nil)
 	rec := httptest.NewRecorder()

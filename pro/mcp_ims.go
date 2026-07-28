@@ -23,7 +23,7 @@ type proModemInput struct {
 
 func proModemIDs(input proModemInput) []string { return []string{input.ModemID} }
 
-func registerIMSMCP(registry *mmodem.Registry, wifiCalling pims.Coordinator, volte pims.Coordinator, calls *procall.Calls) mcpserver.Extension {
+func registerIMSMCP(registry *mmodem.Registry, connectivity *pims.Connectivity, calls *procall.Calls) mcpserver.Extension {
 	return func(catalog *mcpserver.Catalog) error {
 		for _, permission := range []mcpserver.Permission{
 			{Name: "wifi_calling.read", Module: "wifi_calling"},
@@ -37,7 +37,7 @@ func registerIMSMCP(registry *mmodem.Registry, wifiCalling pims.Coordinator, vol
 				return err
 			}
 		}
-		tools := &imsMCPTools{registry: registry, wifiCalling: wifiCalling, volte: volte, calls: calls}
+		tools := &imsMCPTools{registry: registry, connectivity: connectivity, calls: calls}
 		registrations := []func() error{
 			func() error {
 				return mcpserver.AddTool(catalog, "wifi_calling.read", mcpserver.ReadTool("get_wifi_calling", "Get Wi-Fi Calling status"), proModemIDs, tools.getWiFiCalling)
@@ -74,10 +74,19 @@ func registerIMSMCP(registry *mmodem.Registry, wifiCalling pims.Coordinator, vol
 }
 
 type imsMCPTools struct {
-	registry    modemFinder
-	wifiCalling pims.Coordinator
-	volte       pims.Coordinator
-	calls       *procall.Calls
+	registry     modemFinder
+	connectivity imsMCPConnectivity
+	calls        *procall.Calls
+}
+
+type imsMCPConnectivity interface {
+	WiFiCallingStatus(context.Context, *mmodem.Modem) (pims.WiFiCallingStatus, error)
+	ReplaceWiFiCallingSettings(context.Context, *mmodem.Modem, pims.WiFiCallingSettings) error
+	ReconnectWiFiCalling(context.Context, *mmodem.Modem) error
+	DisconnectWiFiCalling(context.Context, *mmodem.Modem) error
+	WiFiCallingEmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool
+	VoLTEStatus(context.Context, *mmodem.Modem) (pims.VoLTEStatus, error)
+	ReplaceVoLTESettings(context.Context, *mmodem.Modem, pims.VoLTESettings) error
 }
 
 type modemFinder interface {
@@ -92,14 +101,14 @@ func (t *imsMCPTools) modem(ctx context.Context, id string) (*mmodem.Modem, erro
 	return device, nil
 }
 
-func (t *imsMCPTools) getWiFiCalling(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input proModemInput) (pims.SettingsResponse, error) {
+func (t *imsMCPTools) getWiFiCalling(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input proModemInput) (pims.WiFiCallingSettingsResponse, error) {
 	device, err := t.modem(ctx, input.ModemID)
 	if err != nil {
-		return pims.SettingsResponse{}, err
+		return pims.WiFiCallingSettingsResponse{}, err
 	}
-	response, err := pims.ReadWiFiCallingSettings(ctx, device, t.wifiCalling)
+	response, err := pims.ReadWiFiCallingSettings(ctx, device, t.connectivity)
 	if err != nil {
-		return pims.SettingsResponse{}, mcpserver.OperationError("get Wi-Fi Calling status", err)
+		return pims.WiFiCallingSettingsResponse{}, mcpserver.OperationError("get Wi-Fi Calling status", err)
 	}
 	response.Websheet = nil
 	return response, nil
@@ -128,7 +137,14 @@ func (t *imsMCPTools) setWiFiCallingPolicy() mcpserver.GuardedToolPolicy[wifiSet
 			if err != nil {
 				return err
 			}
-			_, err = t.wifiCallingSettings(ctx, device, input)
+			if input.Underlay == nil {
+				err = fmt.Errorf("%w: underlay is required", pims.ErrInvalidWiFiCallingUnderlay)
+			} else {
+				_, err = pims.ResolveWiFiCallingSettings(device, pims.WiFiCallingSettings{
+					Enabled:  input.Enabled,
+					Underlay: *input.Underlay,
+				})
+			}
 			if errors.Is(err, pims.ErrInvalidWiFiCallingUnderlay) {
 				return mcpserver.NewToolError("invalid_request", "Wi-Fi Calling underlay is invalid", err)
 			}
@@ -145,36 +161,28 @@ func (t *imsMCPTools) setWiFiCallingPolicy() mcpserver.GuardedToolPolicy[wifiSet
 		},
 	}
 }
+
 func (t *imsMCPTools) setWiFiCalling(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input wifiSettingsInput) (proSuccessOutput, error) {
 	device, err := t.modem(ctx, input.ModemID)
 	if err != nil {
 		return proSuccessOutput{}, err
 	}
-	settings, err := t.wifiCallingSettings(ctx, device, input)
-	if errors.Is(err, pims.ErrInvalidWiFiCallingUnderlay) {
+	if input.Underlay == nil {
+		err := fmt.Errorf("%w: underlay is required", pims.ErrInvalidWiFiCallingUnderlay)
 		return proSuccessOutput{}, mcpserver.NewToolError("invalid_request", "Wi-Fi Calling underlay is invalid", err)
 	}
-	if err != nil {
-		return proSuccessOutput{}, mcpserver.OperationError("read Wi-Fi Calling settings", err)
-	}
-	if err := t.wifiCalling.UpdateSettings(ctx, device, settings); err != nil {
+	if err := t.connectivity.ReplaceWiFiCallingSettings(ctx, device, pims.WiFiCallingSettings{
+		Enabled:  input.Enabled,
+		Underlay: *input.Underlay,
+	}); err != nil {
+		if errors.Is(err, pims.ErrInvalidWiFiCallingUnderlay) {
+			return proSuccessOutput{}, mcpserver.NewToolError("invalid_request", "Wi-Fi Calling underlay is invalid", err)
+		}
 		return proSuccessOutput{}, mcpserver.OperationError("set Wi-Fi Calling", err)
 	}
 	return proSuccessOutput{Success: true}, nil
 }
 
-func (t *imsMCPTools) wifiCallingSettings(ctx context.Context, modem *mmodem.Modem, input wifiSettingsInput) (pims.Settings, error) {
-	if input.Underlay == nil {
-		return pims.Settings{}, fmt.Errorf("%w: underlay is required", pims.ErrInvalidWiFiCallingUnderlay)
-	}
-	settings, err := t.wifiCalling.Settings(ctx, modem)
-	if err != nil {
-		return pims.Settings{}, err
-	}
-	settings.Enabled = input.Enabled
-	settings.Underlay = *input.Underlay
-	return pims.ResolveWiFiCallingSettings(modem, settings)
-}
 func (t *imsMCPTools) reconnectWiFiCallingPolicy() mcpserver.GuardedToolPolicy[proModemInput] {
 	return mcpserver.GuardedToolPolicy[proModemInput]{
 		Validate: func(ctx context.Context, input proModemInput) error {
@@ -186,16 +194,18 @@ func (t *imsMCPTools) reconnectWiFiCallingPolicy() mcpserver.GuardedToolPolicy[p
 		},
 	}
 }
+
 func (t *imsMCPTools) reconnectWiFiCalling(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input proModemInput) (proSuccessOutput, error) {
 	device, err := t.modem(ctx, input.ModemID)
 	if err != nil {
 		return proSuccessOutput{}, err
 	}
-	if err := t.wifiCalling.Reconnect(ctx, device); err != nil {
+	if err := t.connectivity.ReconnectWiFiCalling(ctx, device); err != nil {
 		return proSuccessOutput{}, mcpserver.OperationError("reconnect Wi-Fi Calling", err)
 	}
 	return proSuccessOutput{Success: true}, nil
 }
+
 func (t *imsMCPTools) disconnectWiFiCallingPolicy() mcpserver.GuardedToolPolicy[proModemInput] {
 	return mcpserver.GuardedToolPolicy[proModemInput]{
 		Validate: func(ctx context.Context, input proModemInput) error {
@@ -207,12 +217,13 @@ func (t *imsMCPTools) disconnectWiFiCallingPolicy() mcpserver.GuardedToolPolicy[
 		},
 	}
 }
+
 func (t *imsMCPTools) disconnectWiFiCalling(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input proModemInput) (proSuccessOutput, error) {
 	device, err := t.modem(ctx, input.ModemID)
 	if err != nil {
 		return proSuccessOutput{}, err
 	}
-	if err := t.wifiCalling.Disconnect(ctx, device); err != nil {
+	if err := t.connectivity.DisconnectWiFiCalling(ctx, device); err != nil {
 		return proSuccessOutput{}, mcpserver.OperationError("disconnect Wi-Fi Calling", err)
 	}
 	return proSuccessOutput{Success: true}, nil
@@ -223,7 +234,7 @@ func (t *imsMCPTools) getVoLTE(ctx context.Context, _ *mcp.CallToolRequest, _ mc
 	if err != nil {
 		return pims.VoLTESettingsResponse{}, err
 	}
-	response, err := pims.ReadVoLTESettings(ctx, device, t.volte)
+	response, err := pims.ReadVoLTESettings(ctx, device, t.connectivity)
 	if err != nil {
 		return pims.VoLTESettingsResponse{}, mcpserver.OperationError("get VoLTE status", err)
 	}
@@ -237,9 +248,11 @@ type volteSettingsInput struct {
 }
 
 func volteSettingsModemIDs(input volteSettingsInput) []string { return []string{input.ModemID} }
-func volteSettings(input volteSettingsInput) pims.Settings {
-	return pims.Settings{
-		Enabled: input.Enabled, DataPath: pims.DataPath(input.DataPath),
+
+func volteSettings(input volteSettingsInput) pims.VoLTESettings {
+	return pims.VoLTESettings{
+		Enabled:  input.Enabled,
+		DataPath: pims.DataPath(input.DataPath),
 	}
 }
 
@@ -268,12 +281,13 @@ func (t *imsMCPTools) setVoLTEPolicy() mcpserver.GuardedToolPolicy[volteSettings
 		},
 	}
 }
+
 func (t *imsMCPTools) setVoLTE(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input volteSettingsInput) (proSuccessOutput, error) {
 	device, err := t.modem(ctx, input.ModemID)
 	if err != nil {
 		return proSuccessOutput{}, err
 	}
-	if err := pims.UpdateVoLTESettings(ctx, device, t.volte, volteSettings(input)); err != nil {
+	if err := t.connectivity.ReplaceVoLTESettings(ctx, device, volteSettings(input)); err != nil {
 		return proSuccessOutput{}, voLTEInputError(err)
 	}
 	return proSuccessOutput{Success: true}, nil

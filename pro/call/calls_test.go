@@ -12,7 +12,6 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	pims "github.com/damonto/sigmo/pro/ims"
-	"github.com/damonto/sigmo/pro/websheet"
 )
 
 func TestDialRejectsInvalidRequestsBeforeRouting(t *testing.T) {
@@ -47,7 +46,7 @@ func TestDialSelectsIMSRoute(t *testing.T) {
 	tests := []struct {
 		name       string
 		route      string
-		wifiStatus pims.Status
+		wifiStatus pims.VoiceStatus
 		wantRoute  string
 	}{
 		{
@@ -58,13 +57,13 @@ func TestDialSelectsIMSRoute(t *testing.T) {
 		{
 			name:       "auto prefers connected wifi calling",
 			route:      RouteAuto,
-			wifiStatus: pims.Status{Connected: true},
+			wifiStatus: pims.VoiceStatus{Connected: true},
 			wantRoute:  RouteWiFiCalling,
 		},
 		{
 			name:       "auto falls back to volte",
 			route:      RouteAuto,
-			wifiStatus: pims.Status{},
+			wifiStatus: pims.VoiceStatus{},
 			wantRoute:  RouteVoLTE,
 		},
 	}
@@ -72,7 +71,7 @@ func TestDialSelectsIMSRoute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			wifi := fakeIMSVoice{
-				status: pims.Status{Connected: true},
+				status: pims.VoiceStatus{Connected: true},
 				voiceCall: pims.VoiceCall{
 					ID:        "wifi-call",
 					Route:     RouteWiFiCalling,
@@ -86,7 +85,7 @@ func TestDialSelectsIMSRoute(t *testing.T) {
 			}
 			wifi.status = tt.wifiStatus
 			volte := fakeIMSVoice{
-				status: pims.Status{Connected: true},
+				status: pims.VoiceStatus{Connected: true},
 				voiceCall: pims.VoiceCall{
 					ID:        "volte-call",
 					Route:     RouteVoLTE,
@@ -193,7 +192,7 @@ func TestDialTreatsUnavailableRouteStatusAsDisconnected(t *testing.T) {
 
 func TestDialMapsBackendDisconnectedAfterRouteSelected(t *testing.T) {
 	service := New(nil, fakeIMSVoice{
-		status:  pims.Status{Connected: true},
+		status:  pims.VoiceStatus{Connected: true},
 		dialErr: pims.ErrNotConnected,
 	})
 
@@ -361,7 +360,7 @@ func TestDialPersistsRouteAndPublishesEvent(t *testing.T) {
 	ctx := context.Background()
 	store := testStore(t)
 	service := New(store, fakeIMSVoice{
-		status: pims.Status{Connected: true},
+		status: pims.VoiceStatus{Connected: true},
 		voiceCall: pims.VoiceCall{
 			ID:        "call-2",
 			ProfileID: "profile-a",
@@ -432,7 +431,7 @@ func TestDialPersistsSelectedRouteFailure(t *testing.T) {
 			ctx := context.Background()
 			store := testStore(t)
 			service := New(store, fakeIMSVoice{
-				status:    pims.Status{Connected: true},
+				status:    pims.VoiceStatus{Connected: true},
 				voiceCall: tt.voiceCall,
 				dialErr:   tt.dialErr,
 			})
@@ -1050,7 +1049,7 @@ func TestMapWiFiCallingActionError(t *testing.T) {
 }
 
 type fakeIMSVoice struct {
-	status     pims.Status
+	status     pims.VoiceStatus
 	statusErr  error
 	dialErr    error
 	voiceCall  pims.VoiceCall
@@ -1066,36 +1065,8 @@ type fakeIMSVoice struct {
 	subscribe  func(pims.VoiceEventFunc) func()
 }
 
-func (fakeIMSVoice) Run(context.Context, *mmodem.Registry) error { return nil }
-func (fakeIMSVoice) Settings(context.Context, *mmodem.Modem) (pims.Settings, error) {
-	return pims.Settings{}, nil
-}
-func (fakeIMSVoice) UpdateSettings(context.Context, *mmodem.Modem, pims.Settings) error {
-	return nil
-}
-func (fakeIMSVoice) Disconnect(context.Context, *mmodem.Modem) error {
-	return nil
-}
-func (f fakeIMSVoice) Status(context.Context, *mmodem.Modem) (pims.Status, error) {
+func (f fakeIMSVoice) Status(context.Context, *mmodem.Modem) (pims.VoiceStatus, error) {
 	return f.status, f.statusErr
-}
-func (fakeIMSVoice) EmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool {
-	return false
-}
-func (fakeIMSVoice) StartWebsheet(context.Context, *mmodem.Modem) (websheet.Info, error) {
-	return websheet.Info{}, nil
-}
-func (fakeIMSVoice) StartEmergencyAddressUpdate(context.Context, *mmodem.Modem) (websheet.Info, error) {
-	return websheet.Info{}, nil
-}
-func (fakeIMSVoice) SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error) {
-	return storage.Message{}, nil
-}
-func (fakeIMSVoice) ApplyPendingSMSStatus(context.Context, storage.Message) error {
-	return nil
-}
-func (fakeIMSVoice) ExecuteUSSD(context.Context, *mmodem.Modem, string, string) (string, error) {
-	return "", nil
 }
 func (f fakeIMSVoice) DialCall(context.Context, *mmodem.Modem, string) (pims.VoiceCall, error) {
 	return f.voiceCall, f.dialErr

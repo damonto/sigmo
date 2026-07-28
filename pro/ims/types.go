@@ -77,10 +77,9 @@ var (
 	ErrVoLTEDataPathUnsupported       = errors.New("VoLTE data path is unsupported")
 )
 
-type Settings struct {
+type WiFiCallingSettings struct {
 	Enabled  bool
 	Underlay UnderlaySettings
-	DataPath DataPath
 }
 
 type UnderlaySettings struct {
@@ -88,7 +87,7 @@ type UnderlaySettings struct {
 	ModemID string       `json:"modemId,omitempty" jsonschema:"stable modem identifier used when mode is modem"`
 }
 
-func ResolveWiFiCallingSettings(modem *mmodem.Modem, settings Settings) (Settings, error) {
+func ResolveWiFiCallingSettings(modem *mmodem.Modem, settings WiFiCallingSettings) (WiFiCallingSettings, error) {
 	mode := UnderlayMode(strings.ToLower(strings.TrimSpace(string(settings.Underlay.Mode))))
 	if mode == "" {
 		mode = UnderlayModeSystem
@@ -99,25 +98,37 @@ func ResolveWiFiCallingSettings(modem *mmodem.Modem, settings Settings) (Setting
 		modemID = ""
 	case UnderlayModeModem:
 		if modemID == "" {
-			return Settings{}, fmt.Errorf("%w: modem id is required for modem mode", ErrInvalidWiFiCallingUnderlay)
+			return WiFiCallingSettings{}, fmt.Errorf("%w: modem id is required for modem mode", ErrInvalidWiFiCallingUnderlay)
 		}
 		if modem != nil && modemID == strings.TrimSpace(modem.EquipmentIdentifier) {
 			mode = UnderlayModeSelf
 			modemID = ""
 		}
 	default:
-		return Settings{}, fmt.Errorf("%w: unsupported mode %q", ErrInvalidWiFiCallingUnderlay, mode)
+		return WiFiCallingSettings{}, fmt.Errorf("%w: unsupported mode %q", ErrInvalidWiFiCallingUnderlay, mode)
 	}
 	settings.Underlay = UnderlaySettings{Mode: mode, ModemID: modemID}
 	return settings, nil
 }
 
-type Status struct {
-	Settings
+type VoLTESettings struct {
+	Enabled  bool
+	DataPath DataPath
+}
+
+type WiFiCallingStatus struct {
+	WiFiCallingSettings
 	Connected       bool
 	State           string
 	DurationSeconds int64
 	Websheet        *websheet.Info
+}
+
+type VoLTEStatus struct {
+	VoLTESettings
+	Connected       bool
+	State           string
+	DurationSeconds int64
 }
 
 type IncomingSMS struct {
@@ -155,31 +166,7 @@ type MediaSession interface {
 	WritePacket(context.Context, []byte) error
 }
 
-type Coordinator interface {
-	Run(context.Context, *mmodem.Registry) error
-	Settings(context.Context, *mmodem.Modem) (Settings, error)
-	UpdateSettings(context.Context, *mmodem.Modem, Settings) error
-	Reconnect(context.Context, *mmodem.Modem) error
-	Disconnect(context.Context, *mmodem.Modem) error
-	Status(context.Context, *mmodem.Modem) (Status, error)
-	EmergencyAddressUpdateAvailable(context.Context, *mmodem.Modem) bool
-	StartWebsheet(context.Context, *mmodem.Modem) (websheet.Info, error)
-	StartEmergencyAddressUpdate(context.Context, *mmodem.Modem) (websheet.Info, error)
-	SendSMS(context.Context, *mmodem.Modem, string, string) (storage.Message, error)
-	ApplyPendingSMSStatus(context.Context, storage.Message) error
-	ExecuteUSSD(context.Context, *mmodem.Modem, string, string) (string, error)
-	DialCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
-	AnswerCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
-	RejectCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
-	HangupCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
-	HoldCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
-	ResumeCall(context.Context, *mmodem.Modem, string) (VoiceCall, error)
-	SendCallDTMF(context.Context, *mmodem.Modem, string, string) error
-	OpenCallMedia(context.Context, *mmodem.Modem, string) (MediaSession, error)
-	SubscribeVoiceEvents(VoiceEventFunc) func()
-}
-
-type SettingsStore struct {
+type wifiCallingSettingsStore struct {
 	store *storage.Store
 }
 
@@ -188,33 +175,33 @@ type wifiCallingSettingsRecord struct {
 	Underlay UnderlaySettings `json:"underlay"`
 }
 
-type VoLTESettingsStore struct {
+type voLTESettingsStore struct {
 	store *storage.Store
 }
 
-func NewVoLTESettingsStore(store *storage.Store) *VoLTESettingsStore {
-	return &VoLTESettingsStore{store: store}
+func newVoLTESettingsStore(store *storage.Store) *voLTESettingsStore {
+	return &voLTESettingsStore{store: store}
 }
 
-func (s *VoLTESettingsStore) Get(ctx context.Context, modemID string) (Settings, error) {
+func (s *voLTESettingsStore) Get(ctx context.Context, modemID string) (VoLTESettings, error) {
 	if s == nil || s.store == nil {
-		return Settings{DataPath: DataPathQMAP}, nil
+		return VoLTESettings{DataPath: DataPathQMAP}, nil
 	}
 	scope, err := modemScope(modemID)
 	if err != nil {
-		return Settings{}, err
+		return VoLTESettings{}, err
 	}
-	settings := Settings{DataPath: DataPathQMAP}
+	settings := VoLTESettings{DataPath: DataPathQMAP}
 	if err := s.store.Get(ctx, scope, keyVoLTESettings, &settings); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return settings, nil
 		}
-		return Settings{}, fmt.Errorf("read VoLTE settings: %w", err)
+		return VoLTESettings{}, fmt.Errorf("read VoLTE settings: %w", err)
 	}
 	return settings, nil
 }
 
-func (s *VoLTESettingsStore) Put(ctx context.Context, modemID string, settings Settings) error {
+func (s *voLTESettingsStore) Put(ctx context.Context, modemID string, settings VoLTESettings) error {
 	if s == nil || s.store == nil {
 		return nil
 	}
@@ -228,7 +215,7 @@ func (s *VoLTESettingsStore) Put(ctx context.Context, modemID string, settings S
 	return nil
 }
 
-func (s *VoLTESettingsStore) SuspendedInternet(ctx context.Context, modemID string) (pinternet.Preferences, bool, error) {
+func (s *voLTESettingsStore) SuspendedInternet(ctx context.Context, modemID string) (pinternet.Preferences, bool, error) {
 	if s == nil || s.store == nil {
 		return pinternet.Preferences{}, false, nil
 	}
@@ -246,7 +233,7 @@ func (s *VoLTESettingsStore) SuspendedInternet(ctx context.Context, modemID stri
 	return prefs, true, nil
 }
 
-func (s *VoLTESettingsStore) PutSuspendedInternet(ctx context.Context, modemID string, prefs pinternet.Preferences) error {
+func (s *voLTESettingsStore) PutSuspendedInternet(ctx context.Context, modemID string, prefs pinternet.Preferences) error {
 	if s == nil || s.store == nil {
 		return nil
 	}
@@ -260,7 +247,7 @@ func (s *VoLTESettingsStore) PutSuspendedInternet(ctx context.Context, modemID s
 	return nil
 }
 
-func (s *VoLTESettingsStore) DeleteSuspendedInternet(ctx context.Context, modemID string) error {
+func (s *voLTESettingsStore) DeleteSuspendedInternet(ctx context.Context, modemID string) error {
 	if s == nil || s.store == nil {
 		return nil
 	}
@@ -274,29 +261,29 @@ func (s *VoLTESettingsStore) DeleteSuspendedInternet(ctx context.Context, modemI
 	return nil
 }
 
-func NewSettingsStore(store *storage.Store) *SettingsStore {
-	return &SettingsStore{store: store}
+func newWiFiCallingSettingsStore(store *storage.Store) *wifiCallingSettingsStore {
+	return &wifiCallingSettingsStore{store: store}
 }
 
-func (s *SettingsStore) Get(ctx context.Context, profileID string) (Settings, error) {
+func (s *wifiCallingSettingsStore) Get(ctx context.Context, profileID string) (WiFiCallingSettings, error) {
 	if s == nil || s.store == nil {
-		return Settings{Underlay: UnderlaySettings{Mode: UnderlayModeSystem}}, nil
+		return WiFiCallingSettings{Underlay: UnderlaySettings{Mode: UnderlayModeSystem}}, nil
 	}
 	scope, err := profileScope(profileID)
 	if err != nil {
-		return Settings{}, err
+		return WiFiCallingSettings{}, err
 	}
 	record := wifiCallingSettingsRecord{Underlay: UnderlaySettings{Mode: UnderlayModeSystem}}
 	if err := s.store.Get(ctx, scope, keyWiFiCallingSettings, &record); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			return Settings{Underlay: record.Underlay}, nil
+			return WiFiCallingSettings{Underlay: record.Underlay}, nil
 		}
-		return Settings{}, fmt.Errorf("read wifi calling settings: %w", err)
+		return WiFiCallingSettings{}, fmt.Errorf("read wifi calling settings: %w", err)
 	}
-	return ResolveWiFiCallingSettings(nil, Settings{Enabled: record.Enabled, Underlay: record.Underlay})
+	return ResolveWiFiCallingSettings(nil, WiFiCallingSettings{Enabled: record.Enabled, Underlay: record.Underlay})
 }
 
-func (s *SettingsStore) Put(ctx context.Context, profileID string, settings Settings) error {
+func (s *wifiCallingSettingsStore) Put(ctx context.Context, profileID string, settings WiFiCallingSettings) error {
 	if s == nil || s.store == nil {
 		return nil
 	}

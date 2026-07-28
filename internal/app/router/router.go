@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v5/middleware"
 
 	"github.com/damonto/sigmo/internal/app/auth"
+	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	"github.com/damonto/sigmo/internal/app/handler/appinfo"
 	hauth "github.com/damonto/sigmo/internal/app/handler/auth"
@@ -43,22 +44,23 @@ import (
 type Extension func(*echo.Group, RegisterConfig) error
 
 type RegisterConfig struct {
-	BuildVersion       string
-	Store              *settings.Store
-	Registry           *modem.Registry
-	Internet           *pinternet.Connector
-	Relay              *forwarder.Relay
-	NetworkPreferences *modem.NetworkPreferences
-	Storage            *storage.Store
-	WebPush            *webpush.Client
-	Reminders          *reminder.Scheduler
-	MessageRoute       pmessage.Route
-	USSDRoute          pussd.Route
-	ModemOverview      []modemstatus.Extension
-	Features           []string
-	Extensions         []Extension
-	MCP                *mcpserver.Controller
-	MCPKeys            *mcpauth.Store
+	BuildVersion        string
+	Store               *settings.Store
+	Registry            *modem.Registry
+	InternetConnector   *pinternet.Connector
+	InternetConnections appconnectivity.InternetConnections
+	Relay               *forwarder.Relay
+	NetworkPreferences  *modem.NetworkPreferences
+	Storage             *storage.Store
+	WebPush             *webpush.Client
+	Reminders           *reminder.Scheduler
+	MessageRoute        pmessage.Route
+	USSDRoute           pussd.Route
+	ModemOverview       []modemstatus.Extension
+	Features            []string
+	Extensions          []Extension
+	MCP                 *mcpserver.Controller
+	MCPKeys             *mcpauth.Store
 }
 
 func Register(e *echo.Echo, deps RegisterConfig) error {
@@ -99,7 +101,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 	protected.Use(appmiddleware.Auth(authStore, deps.Store))
 	{
 		{
-			h := hsettings.New(deps.Store, deps.Internet, deps.Relay)
+			h := hsettings.New(deps.Store, deps.InternetConnector, deps.Relay)
 			protected.GET("/settings", h.Get)
 			protected.POST("/settings/auth-tests", h.TestAuth)
 			protected.PUT("/settings/auth", h.UpdateAuth)
@@ -118,7 +120,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.GET("/settings/mcp/skills/sigmo-control", h.DownloadSkill)
 		}
 
-		h := hmodem.New(deps.Store, deps.Registry, deps.Internet, deps.Reminders, deps.ModemOverview...)
+		h := hmodem.New(deps.Store, deps.Registry, deps.InternetConnector, deps.Reminders, deps.ModemOverview...)
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
 		protected.POST("/modems/:id/sim-unlocks", h.UnlockSIM)
@@ -163,7 +165,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		}
 
 		{
-			h := hinternet.New(deps.Registry, deps.Internet)
+			h := hinternet.New(deps.Registry, deps.InternetConnections)
 			protected.GET("/modems/:id/internet-connections/current", h.Current)
 			protected.GET("/modems/:id/internet-connections/public", h.Public)
 			protected.POST("/modems/:id/internet-connections", h.Connect)
@@ -180,7 +182,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			h := esim.New(esim.Config{
 				Store:     deps.Store,
 				Registry:  deps.Registry,
-				Internet:  deps.Internet,
+				Internet:  deps.InternetConnector,
 				Reminders: deps.Reminders,
 			})
 			protected.GET("/modems/:id/esims", h.List)
