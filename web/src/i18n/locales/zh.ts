@@ -853,7 +853,7 @@ const zh = {
       networkCategoryDescription: '网络注册与制式。',
       internetCategoryDescription: 'APN 与连接。',
       deviceCategoryDescription: '模块偏好。',
-      wifiCallingCategoryDescription: '通过可选联网出口处理通话、短信和 USSD。',
+      wifiCallingCategoryDescription: '通过 Wi-Fi 处理通话、短信和 USSD。',
       advancedTitle: '高级',
       advancedCategoryDescription: '高级模块选项。',
       deviceInfoTitle: '设备信息',

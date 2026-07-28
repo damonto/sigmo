@@ -727,7 +727,7 @@ const en = {
       networkAirplaneModeDisabledSuccess: 'Airplane mode disabled.',
       networkAirplaneModeUpdateFailed: 'Airplane mode update failed.',
       volteTitle: 'VoLTE',
-      volteCategoryDescription: 'Voice over LTE.',
+      volteCategoryDescription: 'Calls, messages, and USSD over LTE.',
       volteLabel: 'Enable VoLTE',
       volteDescription: 'Handle calls, messages, and USSD over LTE.',
       volteDataPathLabel: 'VoLTE data path',
@@ -872,8 +872,7 @@ const en = {
       networkCategoryDescription: 'Network registration and mode.',
       internetCategoryDescription: 'APN and connection.',
       deviceCategoryDescription: 'Modem preferences.',
-      wifiCallingCategoryDescription:
-        'Calls, messages, and USSD through a selectable Internet path.',
+      wifiCallingCategoryDescription: 'Calls, messages, and USSD over Wi-Fi.',
       advancedTitle: 'Advanced',
       advancedCategoryDescription: 'Advanced modem options.',
       deviceInfoTitle: 'Device Info',
