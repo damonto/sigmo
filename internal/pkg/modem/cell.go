@@ -4,25 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 
-	"github.com/godbus/dbus/v5"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
-const (
-	modemCellTypeLTE        = 5
-	servingCellTypeUnknown  = 0
-	servingCellTypePrimary  = 1
-	maxEUTRANCellIdentifier = 0x0FFFFFFF
-)
+const maxEUTRANCellIdentifier = 0x0FFFFFFF
 
 var (
 	errServingLTECellUnavailable = errors.New("serving LTE cell is unavailable")
 	errServingLTECellEARFCN      = errors.New("serving LTE cell EARFCN is unavailable")
 )
 
-// LTECell contains the identity of the primary LTE serving cell.
 type LTECell struct {
 	OperatorCode     string
 	TrackingAreaCode uint16
@@ -30,89 +22,25 @@ type LTECell struct {
 	EARFCN           uint32
 }
 
-// ServingLTECell returns the primary serving cell, falling back to the sole
-// serving cell reported by ModemManager versions without carrier aggregation metadata.
 func (m *Modem) ServingLTECell(ctx context.Context) (LTECell, error) {
-	if m == nil || m.dbusObject == nil {
-		return LTECell{}, errors.New("modem is required")
+	if m == nil || m.core == nil {
+		return LTECell{}, errModemRequired
 	}
-
-	var cells []map[string]dbus.Variant
-	if err := m.dbusObject.CallWithContext(ctx, ModemInterface+".GetCellInfo", 0).Store(&cells); err != nil {
+	cells, err := m.core.CellInfo(ctx)
+	if err != nil {
 		return LTECell{}, fmt.Errorf("read modem cell info: %w", err)
 	}
-	var fallback map[string]dbus.Variant
-	var multipleFallbacks bool
-	for _, raw := range cells {
-		if variantUint[uint32](raw, "cell-type") != modemCellTypeLTE || !boolFromVariant(raw["serving"]) {
+	for _, cell := range cells {
+		if !cell.Serving || cell.Technology&wwanmodem.TechnologyLTE == 0 {
 			continue
 		}
-		servingCellType, ok := raw["serving-cell-type"]
-		if !ok {
-			if fallback == nil {
-				fallback = raw
-			} else {
-				multipleFallbacks = true
-			}
-			continue
+		if cell.ARFCN == 0 {
+			return LTECell{}, errServingLTECellEARFCN
 		}
-		servingCellTypeValue, ok := servingCellType.Value().(uint32)
-		if !ok {
-			return LTECell{}, fmt.Errorf("read serving LTE cell type: unexpected D-Bus type %T", servingCellType.Value())
+		if cell.CellID > maxEUTRANCellIdentifier {
+			return LTECell{}, errors.New("serving LTE cell ID exceeds 28 bits")
 		}
-		if servingCellTypeValue == servingCellTypeUnknown {
-			if fallback == nil {
-				fallback = raw
-			} else {
-				multipleFallbacks = true
-			}
-			continue
-		}
-		if servingCellTypeValue == servingCellTypePrimary {
-			return lteCellFromDBus(raw)
-		}
-	}
-	if fallback != nil && !multipleFallbacks {
-		return lteCellFromDBus(fallback)
+		return LTECell{OperatorCode: cell.OperatorID, TrackingAreaCode: uint16(cell.TrackingAreaCode), CellID: uint32(cell.CellID), EARFCN: cell.ARFCN}, nil
 	}
 	return LTECell{}, errServingLTECellUnavailable
-}
-
-func lteCellFromDBus(raw map[string]dbus.Variant) (LTECell, error) {
-	operatorCode := strings.TrimSpace(variantString(raw, "operator-id"))
-	if len(operatorCode) != 5 && len(operatorCode) != 6 {
-		return LTECell{}, errors.New("serving LTE cell operator code must contain 5 or 6 digits")
-	}
-	for _, digit := range operatorCode {
-		if digit < '0' || digit > '9' {
-			return LTECell{}, errors.New("serving LTE cell operator code must contain only digits")
-		}
-	}
-
-	tac, err := strconv.ParseUint(strings.TrimSpace(variantString(raw, "tac")), 16, 16)
-	if err != nil {
-		return LTECell{}, fmt.Errorf("parse serving LTE cell tracking area code: %w", err)
-	}
-	cellID, err := strconv.ParseUint(strings.TrimSpace(variantString(raw, "ci")), 16, 32)
-	if err != nil {
-		return LTECell{}, fmt.Errorf("parse serving LTE cell ID: %w", err)
-	}
-	if cellID > maxEUTRANCellIdentifier {
-		return LTECell{}, errors.New("serving LTE cell ID exceeds 28 bits")
-	}
-
-	earfcnVariant, ok := raw["earfcn"]
-	if !ok {
-		return LTECell{}, errServingLTECellEARFCN
-	}
-	earfcn, ok := earfcnVariant.Value().(uint32)
-	if !ok {
-		return LTECell{}, fmt.Errorf("read serving LTE cell EARFCN: unexpected D-Bus type %T", earfcnVariant.Value())
-	}
-	return LTECell{
-		OperatorCode:     operatorCode,
-		TrackingAreaCode: uint16(tac),
-		CellID:           uint32(cellID),
-		EARFCN:           earfcn,
-	}, nil
 }

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.3
 ARG BUN_VERSION=1
 ARG ALPINE_VERSION=3.20
 
@@ -36,13 +36,7 @@ FROM alpine:${ALPINE_VERSION} AS runner
 WORKDIR /app
 
 COPY --from=builder /app/sigmo /app/sigmo
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-RUN set -eux \
-	&& apk add --no-cache ca-certificates dbus libmbim-tools modemmanager qmi-utils \
-	&& mkdir -p /run/dbus \
-	&& chmod +x /usr/local/bin/docker-entrypoint.sh
+RUN apk add --no-cache ca-certificates
 
-ENV DBUS_SYSTEM_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket
-
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+ENTRYPOINT ["/app/sigmo"]

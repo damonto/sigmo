@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	devicewwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 var (
@@ -31,37 +34,29 @@ type currentModemRead struct {
 	ReloadObserved bool
 }
 
-func (t SIMTarget) valid() bool {
-	return t.Slot != 0 || strings.TrimSpace(t.ICCID) != ""
-}
+func (t SIMTarget) valid() bool { return t.Slot != 0 || strings.TrimSpace(t.ICCID) != "" }
 
-func (m *Registry) EnsureSIMVisible(ctx context.Context, current *Modem, target SIMTarget) (*Modem, error) {
-	result, err := m.ensureSIMVisible(ctx, current, target, true, false)
+func (r *Registry) EnsureSIMVisible(ctx context.Context, current *Modem, target SIMTarget) (*Modem, error) {
+	result, err := r.ensureSIMVisible(ctx, current, target, true, false)
 	if err != nil {
 		return nil, err
 	}
 	return result.Modem, nil
 }
 
-func (m *Registry) PowerCycleSIM(ctx context.Context, current *Modem, target SIMTarget) (*Modem, error) {
-	result, err := m.powerCycleSIM(ctx, current, target)
+func (r *Registry) PowerCycleSIM(ctx context.Context, current *Modem, target SIMTarget) (*Modem, error) {
+	result, err := r.powerCycleSIM(ctx, current, target)
 	if err != nil {
 		return nil, err
 	}
 	return result.Modem, nil
 }
 
-func (m *Registry) PowerCycleSIMAndWait(ctx context.Context, current *Modem, target SIMTarget) (*Modem, error) {
-	return m.waitForModemAfterAction(ctx, current, false, func() (modemWaitActionResult, error) {
-		result, err := m.powerCycleSIM(ctx, current, target)
-		if err != nil {
-			return modemWaitActionResult{}, err
-		}
-		return modemWaitActionResult{ReloadObserved: result.ReloadObserved}, nil
-	})
+func (r *Registry) PowerCycleSIMAndWait(ctx context.Context, current *Modem, target SIMTarget) (*Modem, error) {
+	return r.PowerCycleSIM(ctx, current, target)
 }
 
-func (m *Registry) powerCycleSIM(ctx context.Context, current *Modem, target SIMTarget) (simRefreshResult, error) {
+func (r *Registry) powerCycleSIM(ctx context.Context, current *Modem, target SIMTarget) (simRefreshResult, error) {
 	if current == nil {
 		return simRefreshResult{}, errModemRequired
 	}
@@ -69,289 +64,149 @@ func (m *Registry) powerCycleSIM(ctx context.Context, current *Modem, target SIM
 	if !target.valid() {
 		return simRefreshResult{}, errors.New("SIM target is required")
 	}
-	device, err := openQMIDeviceForTarget(current, target, m.deviceOpener())
-	if err != nil {
-		return simRefreshResult{}, err
-	}
-	if err := device.PowerCycleSIM(ctx); err != nil {
+	if err := r.powerCycleSIMTransport(ctx, current, target); err != nil {
 		return simRefreshResult{}, fmt.Errorf("power cycle SIM: %w", err)
 	}
-	return m.ensureSIMVisible(ctx, current, target, false, true)
+	return r.ensureSIMVisible(ctx, current, target, false, true)
 }
 
 func currentSIMTarget(current *Modem, target SIMTarget) SIMTarget {
 	if target.valid() {
 		return target
 	}
-	target.Slot = current.PrimarySimSlot
-	if current.Sim != nil {
-		target.ICCID = strings.TrimSpace(current.Sim.Identifier)
+	snapshot := current.Snapshot()
+	target.Slot = snapshot.PrimarySIMSlot
+	if snapshot.SIM != nil {
+		target.ICCID = strings.TrimSpace(snapshot.SIM.Identifier)
 	}
 	if target.valid() {
 		return target
 	}
-	switch current.PrimaryPortType() {
-	case ModemPortTypeQmi, ModemPortTypeMbim:
-		slot, err := ActiveSIMSlot(current)
-		if err != nil {
-			return target
-		}
+	if slot, err := ActiveSIMSlot(current); err == nil {
 		target.Slot = uint32(slot)
 	}
 	return target
 }
 
-func (m *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target SIMTarget, allowPowerCycleFallback bool, initialPowerCycled bool) (simRefreshResult, error) {
+func (r *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target SIMTarget, allowPowerCycleFallback, initialPowerCycled bool) (simRefreshResult, error) {
 	if current == nil {
 		return simRefreshResult{}, errModemRequired
 	}
 	if !target.valid() {
 		return simRefreshResult{}, errors.New("SIM target is required")
 	}
-
-	ticker := time.NewTicker(simVisiblePollInterval)
-	defer ticker.Stop()
-
-	var refreshedModemManager bool
-	var reloadedModemManager bool
-	var activatedProvisioning bool
-	powerCycledSIM := initialPowerCycled
-	var reenumerated bool
-	var unchangedModemSince time.Time
-
+	powerCycled := initialPowerCycled
+	provisioned := make(map[uint64]bool)
+	started := time.Now()
+	active := current
+	reloadObserved := false
 	for {
-		read, err := m.readCurrentModem(ctx, current, target)
-		if read.ReloadObserved {
-			reenumerated = true
+		read, err := r.readCurrentModem(ctx, active, target)
+		if read.Modem != nil {
+			active = read.Modem
+		}
+		reloadObserved = reloadObserved || read.ReloadObserved
+		if err == nil && read.SIMVisible {
+			return simRefreshResult{Modem: active, ReloadObserved: reloadObserved}, nil
+		}
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			slog.Debug("read modem while waiting for SIM", "imei", current.EquipmentIdentifier, "error", err)
 		}
 		if errors.Is(err, ErrNotFound) {
-			reenumerated = true
 			if err := sleepContext(ctx, simVisiblePollInterval); err != nil {
 				return simRefreshResult{}, err
 			}
 			continue
 		}
-		if err != nil {
-			slog.Warn("read modem while waiting for SIM", "imei", current.EquipmentIdentifier, "error", err)
-		}
-		if read.SIMVisible {
-			return simRefreshResult{Modem: read.Modem, ReloadObserved: reenumerated}, nil
-		}
-		current = read.Modem
 
 		if err := sleepContext(ctx, simSettleDelay); err != nil {
 			return simRefreshResult{}, err
 		}
-
-		read, err = m.readCurrentModem(ctx, current, target)
-		if read.ReloadObserved {
-			reenumerated = true
+		read, err = r.readCurrentModem(ctx, active, target)
+		if read.Modem != nil {
+			active = read.Modem
 		}
-		if errors.Is(err, ErrNotFound) {
-			reenumerated = true
-			if err := sleepContext(ctx, simVisiblePollInterval); err != nil {
-				return simRefreshResult{}, err
-			}
-			continue
-		}
-		if err != nil {
-			slog.Warn("read modem after SIM settle delay", "imei", current.EquipmentIdentifier, "error", err)
-		}
-		if read.SIMVisible {
-			return simRefreshResult{Modem: read.Modem, ReloadObserved: reenumerated}, nil
-		}
-		current = read.Modem
-
-		if reenumerated || powerCycledSIM {
-			state, stateErr := readDeviceSIMState(ctx, current, target, m.deviceOpener())
-			if stateErr != nil {
-				slog.Warn("read device SIM state", "imei", current.EquipmentIdentifier, "error", stateErr)
-			}
-
-			switch {
-			case stateErr != nil:
-				// Partial or unreliable device state must not drive recovery actions.
-				refreshed, err := refreshModemManagerSIMStateInOrder(ctx, current, &refreshedModemManager, &reloadedModemManager)
-				if err != nil {
-					return simRefreshResult{}, err
-				}
-				if refreshed {
-					continue
-				}
-			case state.Supported && state.Recoverable && !state.Ready && !state.ICCIDMismatch && !activatedProvisioning:
-				activatedProvisioning = true
-				device, err := openQMIDeviceForSlot(current, state.Slot, m.deviceOpener())
-				if err != nil {
-					slog.Warn("open device for provisioning session", "imei", current.EquipmentIdentifier, "error", err)
-				} else if err := device.ActivateProvisioningIfSIMMissing(ctx); err != nil {
-					slog.Warn("activate device provisioning session", "imei", current.EquipmentIdentifier, "error", err)
-				}
-				refreshed, err := refreshModemManagerSIMStateInOrder(ctx, current, &refreshedModemManager, &reloadedModemManager)
-				if err != nil {
-					return simRefreshResult{}, err
-				}
-				if refreshed {
-					continue
-				}
-			case state.Supported && state.Recoverable && !state.Ready && !state.ICCIDMismatch:
-				refreshed, err := refreshModemManagerSIMStateInOrder(ctx, current, &refreshedModemManager, &reloadedModemManager)
-				if err != nil {
-					return simRefreshResult{}, err
-				}
-				if refreshed {
-					continue
-				}
-			case state.Supported && state.Recoverable && state.Ready:
-				refreshed, err := refreshModemManagerSIMStateInOrder(ctx, current, &refreshedModemManager, &reloadedModemManager)
-				if err != nil {
-					return simRefreshResult{}, err
-				}
-				if refreshed {
-					continue
-				}
-			case !state.Supported:
-				refreshed, err := refreshModemManagerSIMStateInOrder(ctx, current, &refreshedModemManager, &reloadedModemManager)
-				if err != nil {
-					return simRefreshResult{}, err
-				}
-				if refreshed {
-					continue
-				}
-			}
+		reloadObserved = reloadObserved || read.ReloadObserved
+		if err == nil && read.SIMVisible {
+			return simRefreshResult{Modem: active, ReloadObserved: reloadObserved}, nil
 		}
 
-		if allowPowerCycleFallback && !reenumerated && !powerCycledSIM {
-			if unchangedModemSince.IsZero() {
-				unchangedModemSince = time.Now()
+		generation := active.Generation()
+		if !provisioned[generation] {
+			provisioned[generation] = true
+			if provisionErr := r.activateProvisioningTransport(ctx, active, target); provisionErr != nil && !errors.Is(provisionErr, devicewwan.ErrUnsupported) {
+				slog.Warn("activate modem provisioning while waiting for SIM", "imei", active.EquipmentIdentifier, "generation", generation, "error", provisionErr)
 			}
-			if time.Since(unchangedModemSince) < simReenumerationGracePeriod {
-				select {
-				case <-ctx.Done():
-					return simRefreshResult{}, ctx.Err()
-				case <-ticker.C:
-				}
-				continue
-			}
-			device, err := openQMIDeviceForTarget(current, target, m.deviceOpener())
-			if err != nil {
-				return simRefreshResult{}, err
-			}
-			powerCycledSIM = true
-			if err := device.PowerCycleSIM(ctx); err != nil {
-				return simRefreshResult{}, fmt.Errorf("power cycle SIM: %w", err)
-			}
-			continue
 		}
-
-		select {
-		case <-ctx.Done():
-			return simRefreshResult{}, ctx.Err()
-		case <-ticker.C:
+		if allowPowerCycleFallback && !powerCycled && time.Since(started) >= simReenumerationGracePeriod {
+			if powerErr := r.powerCycleSIMTransport(ctx, active, target); powerErr != nil {
+				return simRefreshResult{}, fmt.Errorf("power cycle SIM: %w", powerErr)
+			}
+			powerCycled = true
+		}
+		if err := sleepContext(ctx, simVisiblePollInterval); err != nil {
+			return simRefreshResult{}, err
 		}
 	}
 }
 
-func (m *Registry) deviceOpener() deviceControlOpener {
-	if m == nil || m.openDevice == nil {
+func (r *Registry) powerCycleSIMTransport(ctx context.Context, current *Modem, target SIMTarget) error {
+	slot, err := deviceTargetSlot(current, target)
+	if err != nil {
+		return err
+	}
+	device, err := openQMIDeviceForSlot(current, slot, r.deviceOpener())
+	if err != nil {
+		return err
+	}
+	return device.PowerCycleSIM(ctx)
+}
+
+func (r *Registry) activateProvisioningTransport(ctx context.Context, current *Modem, target SIMTarget) error {
+	slot, err := deviceTargetSlot(current, target)
+	if err != nil {
+		return err
+	}
+	device, err := openQMIDeviceForSlot(current, slot, r.deviceOpener())
+	if err != nil {
+		return err
+	}
+	return device.ActivateProvisioningIfSIMMissing(ctx)
+}
+
+func (r *Registry) deviceOpener() deviceControlOpener {
+	if r == nil {
 		return nil
 	}
-	return m.openDevice
+	return r.openDevice
 }
 
-func refreshModemManagerSIMStateInOrder(ctx context.Context, current *Modem, refreshedModemManager *bool, reloadedModemManager *bool) (bool, error) {
-	if !*refreshedModemManager {
-		*refreshedModemManager = true
-		if err := refreshModemManagerSIMState(ctx, current); err != nil {
-			return false, err
-		}
-		return true, nil
+func (r *Registry) readCurrentModem(ctx context.Context, current *Modem, target SIMTarget) (currentModemRead, error) {
+	modem, err := r.findModem(current.EquipmentIdentifier)
+	if err != nil {
+		return currentModemRead{Modem: current, ReloadObserved: true}, err
 	}
-	if !*reloadedModemManager {
-		*reloadedModemManager = true
-		if err := reloadModemManagerSIMState(ctx, current); err != nil {
-			return false, err
+	reloaded := modem.Generation() != current.Generation() || modem.Path() != current.Path()
+	if modem.core != nil {
+		if info, infoErr := modem.core.SIMInfo(ctx); infoErr == nil {
+			modem.applySIMInfo(info)
+			return currentModemRead{Modem: modem, SIMVisible: simInfoMatchesTarget(info, target), ReloadObserved: reloaded}, nil
 		}
-		return true, nil
 	}
-	return false, nil
+	return currentModemRead{Modem: modem, SIMVisible: modemMatchesSIMTarget(modem, target), ReloadObserved: reloaded}, nil
 }
 
-func refreshModemManagerSIMState(ctx context.Context, current *Modem) error {
-	if err := current.RefreshModemManager(ctx); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		if isRecoverableSIMStateRefreshError(err) {
-			slog.Warn("ignore recoverable ModemManager SIM refresh error", "imei", current.EquipmentIdentifier, "error", err)
-			return nil
-		}
-		return fmt.Errorf("refresh ModemManager SIM state: %w", err)
-	}
-	return nil
-}
-
-func reloadModemManagerSIMState(ctx context.Context, current *Modem) error {
-	if err := current.reloadModemManager(ctx); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		if isRecoverableSIMStateRefreshError(err) {
-			slog.Warn("ignore recoverable ModemManager SIM reload error", "imei", current.EquipmentIdentifier, "error", err)
-			return nil
-		}
-		return fmt.Errorf("reload ModemManager SIM state: %w", err)
-	}
-	return nil
-}
-
-func isRecoverableSIMStateRefreshError(err error) bool {
-	if err == nil {
+func simInfoMatchesTarget(info wwanmodem.SIMInfo, target SIMTarget) bool {
+	if target.Slot != 0 && uint32(info.Slot) != target.Slot {
 		return false
 	}
-	return isTransientRestartError(err) || isAbortedError(err)
-}
-
-func (m *Registry) readCurrentModem(ctx context.Context, current *Modem, target SIMTarget) (currentModemRead, error) {
-	modem, err := m.findModem(ctx, current.EquipmentIdentifier)
-	if err != nil {
-		return currentModemRead{Modem: current}, err
-	}
-	return currentModemRead{
-		Modem:          modem,
-		SIMVisible:     modemMatchesSIMTarget(modem, target),
-		ReloadObserved: modemReenumerated(current, modem),
-	}, nil
-}
-
-func modemReenumerated(current, next *Modem) bool {
-	if current.objectPath != "" && next.objectPath != "" && current.objectPath != next.objectPath {
-		return true
-	}
-	return false
-}
-
-func (m *Registry) findModem(ctx context.Context, id string) (*Modem, error) {
-	if m.dbusObject != nil {
-		return m.Find(ctx, id)
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for _, modem := range m.modems {
-		if strings.TrimSpace(modem.EquipmentIdentifier) == id {
-			return modem, nil
-		}
-	}
-	return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
+	return target.ICCID == "" || strings.TrimSpace(info.ICCID) == strings.TrimSpace(target.ICCID)
 }
 
 func modemMatchesSIMTarget(m *Modem, target SIMTarget) bool {
-	if target.Slot != 0 && m.PrimarySimSlot != target.Slot {
+	snapshot := m.Snapshot()
+	if target.Slot != 0 && snapshot.PrimarySIMSlot != target.Slot {
 		return false
 	}
-	if target.ICCID != "" {
-		if m.Sim == nil || strings.TrimSpace(m.Sim.Identifier) != strings.TrimSpace(target.ICCID) {
-			return false
-		}
-	}
-	return true
+	return target.ICCID == "" || (snapshot.SIM != nil && strings.TrimSpace(snapshot.SIM.Identifier) == strings.TrimSpace(target.ICCID))
 }

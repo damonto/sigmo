@@ -24,7 +24,6 @@ import (
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/pro/websheet"
-	"github.com/godbus/dbus/v5"
 )
 
 func TestRetryDelays(t *testing.T) {
@@ -701,8 +700,8 @@ func (r *fakeInternetRestorer) SetQualcomm410Enabled(_ context.Context, _ *mmode
 	return r.qualcomm410Err
 }
 
-func (r *fakeInternetRestorer) InvalidateQualcomm410(string) error {
-	r.calls = append(r.calls, "qualcomm410:invalidate")
+func (r *fakeInternetRestorer) InvalidateModem(context.Context, *mmodem.Modem) error {
+	r.calls = append(r.calls, "internet:invalidate")
 	return nil
 }
 
@@ -1541,49 +1540,59 @@ func TestDisconnectIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestStopByPathStopsMatchingSession(t *testing.T) {
+func TestStopByDeviceStopsMatchingGeneration(t *testing.T) {
 	tests := []struct {
 		name          string
-		removedPath   dbus.ObjectPath
+		deviceKey     string
+		generation    uint64
 		wantRemaining string
 	}{
 		{
-			name:          "removes matching path",
-			removedPath:   "/modem/1",
+			name:          "removes matching device generation",
+			deviceKey:     "/devices/modem-1",
+			generation:    1,
 			wantRemaining: "modem-2",
 		},
 		{
-			name:          "ignores unknown path",
-			removedPath:   "/modem/3",
+			name:          "ignores unknown device",
+			deviceKey:     "/devices/modem-3",
+			generation:    1,
+			wantRemaining: "modem-1,modem-2",
+		},
+		{
+			name:          "ignores stale generation",
+			deviceKey:     "/devices/modem-1",
+			generation:    2,
 			wantRemaining: "modem-1,modem-2",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cancelled := make(map[string]bool)
-			session := func(modemID string, path dbus.ObjectPath) *sessionState {
+			session := func(modemID, deviceKey string) *sessionState {
 				return &sessionState{
 					cancel: func() {
 						cancelled[modemID] = true
 					},
-					modemPath: path,
-					profileID: modemID + "-profile",
-					client:    nil,
-					connected: true,
+					deviceKey:  deviceKey,
+					generation: 1,
+					profileID:  modemID + "-profile",
+					client:     nil,
+					connected:  true,
 				}
 			}
 			c := &coordinator{sessions: map[string]*sessionState{
-				"modem-1": session("modem-1", "/modem/1"),
-				"modem-2": session("modem-2", "/modem/2"),
+				"modem-1": session("modem-1", "/devices/modem-1"),
+				"modem-2": session("modem-2", "/devices/modem-2"),
 			}}
 
-			c.stopByPath(tt.removedPath)
+			c.stopByDevice(tt.deviceKey, tt.generation)
 
 			gotRemaining := sessionKeys(c.sessions)
 			if gotRemaining != tt.wantRemaining {
 				t.Fatalf("remaining sessions = %q, want %q", gotRemaining, tt.wantRemaining)
 			}
-			if tt.removedPath == "/modem/1" && !cancelled["modem-1"] {
+			if tt.deviceKey == "/devices/modem-1" && tt.generation == 1 && !cancelled["modem-1"] {
 				t.Fatal("matching session was not cancelled")
 			}
 		})

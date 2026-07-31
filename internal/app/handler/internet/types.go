@@ -29,7 +29,7 @@ type ConnectionResponse struct {
 	AlwaysOn        bool     `json:"alwaysOn" jsonschema:"whether Sigmo should automatically restore this connection"`
 	Proxy           Proxy    `json:"proxy" jsonschema:"local proxy status and endpoints; MCP responses redact the password"`
 	InterfaceName   string   `json:"interfaceName" jsonschema:"Linux network interface carrying the connection; empty while disconnected"`
-	Bearer          string   `json:"bearer" jsonschema:"modem bearer object identifier; empty while disconnected"`
+	Bearer          uint64   `json:"bearer" jsonschema:"process-owned modem bearer identifier; zero while disconnected"`
 	IPv4Addresses   []string `json:"ipv4Addresses" jsonschema:"assigned IPv4 addresses in CIDR notation"`
 	IPv6Addresses   []string `json:"ipv6Addresses" jsonschema:"assigned IPv6 addresses in CIDR notation"`
 	DNS             []string `json:"dns" jsonschema:"DNS server addresses assigned to the connection"`

@@ -16,15 +16,15 @@ type QMIClientConfig struct {
 	Slot   uint8
 }
 
-// OpenQMIClient opens a proxy-backed QMI client.
+// OpenQMIClient opens an auto-detected QMI transport lease.
 func OpenQMIClient(ctx context.Context, cfg QMIClientConfig) (*qcom.Client, error) {
 	cfg.Device = strings.TrimSpace(cfg.Device)
 	if cfg.Device == "" {
 		return nil, errors.New("QMI device is required")
 	}
-	transport, err := qmi.Open(ctx, qmi.WithProxy(cfg.Device))
+	transport, err := qmi.Open(ctx, qmi.WithAutoDetect(cfg.Device))
 	if err != nil {
-		return nil, fmt.Errorf("open QMI proxy: %w", err)
+		return nil, fmt.Errorf("open QMI transport: %w", err)
 	}
 
 	var opts []qcom.Option

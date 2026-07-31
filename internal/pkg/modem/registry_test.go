@@ -3,63 +3,322 @@ package modem
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
-	"github.com/godbus/dbus/v5"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
-func TestCreateModemKeepsSIMReferenceWhenPropertiesFail(t *testing.T) {
-	registry := &Registry{
-		dbusObject: &fakeBusObject{path: ModemManagerObjectPath},
+func TestRegistryReplacesAndRemovesPhysicalDeviceGeneration(t *testing.T) {
+	registry, err := NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
 	}
-	data := map[string]dbus.Variant{
-		"EquipmentIdentifier": dbus.MakeVariant("860588043408833"),
-		"Model":               dbus.MakeVariant("RM520N"),
-		"State":               dbus.MakeVariant(int32(ModemStateLocked)),
-		"UnlockRequired":      dbus.MakeVariant(uint32(ModemLockSimPin)),
-		"Sim":                 dbus.MakeVariant(dbus.ObjectPath("/org/freedesktop/ModemManager1/SIM/1")),
+	device := wwanmodem.Device{
+		Path:         "/dev/cdc-wdm0",
+		PhysicalPath: "/sys/devices/modem-1",
+		Protocol:     wwanmodem.ProtocolQMI,
+	}
+	events := make(chan wwanmodem.Result[wwanmodem.DeviceEvent], 2)
+	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
+		return []wwanmodem.Device{device}, nil
+	}
+	registry.watchDevices = func(context.Context) (<-chan wwanmodem.Result[wwanmodem.DeviceEvent], error) {
+		return events, nil
+	}
+	registry.open = func(_ context.Context, candidate wwanmodem.Device, generation uint64) (*Modem, error) {
+		return &Modem{
+			deviceInfo:          candidate,
+			deviceKey:           physicalDeviceKey(candidate),
+			generation:          generation,
+			EquipmentIdentifier: "imei-1",
+			PrimaryPort:         candidate.Path,
+		}, nil
 	}
 
-	got, err := registry.createModem(context.Background(), "/org/freedesktop/ModemManager1/Modem/1", data)
+	modems, err := registry.Modems(context.Background())
 	if err != nil {
-		t.Fatalf("createModem() error = %v", err)
+		t.Fatalf("Modems() error = %v", err)
 	}
-	if got.Sim == nil {
-		t.Fatal("SIM = nil, want path reference")
+	initial := modems[device.PhysicalPath]
+	if initial == nil || initial.Generation() != 1 {
+		t.Fatalf("initial modem = %+v, want generation 1", initial)
 	}
-	if got.Sim.Path != "/org/freedesktop/ModemManager1/SIM/1" {
-		t.Fatalf("SIM path = %q, want primary SIM path", got.Sim.Path)
+
+	published := make(chan ModemEvent, 2)
+	unsubscribe, err := registry.Subscribe(func(event ModemEvent) error {
+		published <- event
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	replacementDevice := device
+	replacementDevice.Path = "/dev/cdc-wdm1"
+	events <- wwanmodem.Result[wwanmodem.DeviceEvent]{Value: wwanmodem.DeviceEvent{
+		Type:   wwanmodem.DeviceChanged,
+		Device: replacementDevice,
+	}}
+	changed := receiveModemEvent(t, published)
+	if changed.Type != ModemEventChanged || changed.Generation != 2 || changed.Previous != initial {
+		t.Fatalf("changed event = %+v", changed)
+	}
+	if changed.Modem == nil || changed.Modem.PrimaryPort != replacementDevice.Path {
+		t.Fatalf("replacement modem = %+v, want primary port %s", changed.Modem, replacementDevice.Path)
+	}
+	if changed.Snapshot[device.PhysicalPath] != changed.Modem {
+		t.Fatalf("changed snapshot = %+v, want replacement", changed.Snapshot)
+	}
+
+	events <- wwanmodem.Result[wwanmodem.DeviceEvent]{Value: wwanmodem.DeviceEvent{
+		Type:   wwanmodem.DeviceRemoved,
+		Device: replacementDevice,
+	}}
+	removed := receiveModemEvent(t, published)
+	if removed.Type != ModemEventRemoved || removed.Generation != 2 || removed.Modem != changed.Modem {
+		t.Fatalf("removed event = %+v", removed)
+	}
+	if len(removed.Snapshot) != 0 {
+		t.Fatalf("removed snapshot = %+v, want empty", removed.Snapshot)
+	}
+
+	close(events)
+	if err := registry.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
 	}
 }
 
-func TestCreateModemReadsDeviceMSISDN(t *testing.T) {
-	tests := []struct {
-		name    string
-		number  string
-		readErr error
-		want    string
-	}{
-		{name: "device number", number: "+15551234567", want: "+15551234567"},
-		{name: "read error is non-fatal", readErr: errors.New("read failed")},
+func TestRegistryRetriesAfterWatcherStartupFailure(t *testing.T) {
+	registry, err := NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			device := &fakeDeviceControl{msisdn: tt.number, msisdnErr: tt.readErr}
-			registry := &Registry{openDevice: fakeDeviceOpener(t, device, nil)}
-			data := map[string]dbus.Variant{
-				"EquipmentIdentifier": dbus.MakeVariant("imei-1"),
-				"PrimaryPort":         dbus.MakeVariant("cdc-wdm0"),
-				"PrimarySimSlot":      dbus.MakeVariant(uint32(1)),
-				"OwnNumbers":          dbus.MakeVariant([]string{"stale-number"}),
-				"Ports":               dbus.MakeVariant([][]any{{"cdc-wdm0", uint32(ModemPortTypeQmi)}}),
-			}
-			got, err := registry.createModem(context.Background(), "/org/freedesktop/ModemManager1/Modem/1", data)
-			if err != nil {
-				t.Fatalf("createModem() error = %v", err)
-			}
-			if got.Number != tt.want {
-				t.Fatalf("Number = %q, want %q", got.Number, tt.want)
-			}
-		})
+	device := wwanmodem.Device{Path: "/dev/cdc-wdm0", PhysicalPath: "/sys/devices/modem-1"}
+	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
+		return []wwanmodem.Device{device}, nil
+	}
+	openCalls := 0
+	registry.open = func(_ context.Context, candidate wwanmodem.Device, generation uint64) (*Modem, error) {
+		openCalls++
+		return &Modem{deviceKey: physicalDeviceKey(candidate), generation: generation}, nil
+	}
+	watchCalls := 0
+	registry.watchDevices = func(context.Context) (<-chan wwanmodem.Result[wwanmodem.DeviceEvent], error) {
+		watchCalls++
+		if watchCalls == 1 {
+			return nil, errors.New("watch unavailable")
+		}
+		stream := make(chan wwanmodem.Result[wwanmodem.DeviceEvent])
+		close(stream)
+		return stream, nil
+	}
+
+	if _, err := registry.Modems(context.Background()); err == nil {
+		t.Fatal("first Modems() error = nil, want watcher error")
+	}
+	modems, err := registry.Modems(context.Background())
+	if err != nil {
+		t.Fatalf("second Modems() error = %v", err)
+	}
+	if len(modems) != 1 || watchCalls != 2 || openCalls != 2 {
+		t.Fatalf("modems/watch/open = %d/%d/%d, want 1/2/2", len(modems), watchCalls, openCalls)
+	}
+	if err := registry.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestRegistryRestartsWatcherAndReconcilesMissedChange(t *testing.T) {
+	previousDelay := registryWatchRetryDelay
+	registryWatchRetryDelay = time.Millisecond
+	t.Cleanup(func() { registryWatchRetryDelay = previousDelay })
+
+	registry, err := NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := registry.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+	initialDevice := wwanmodem.Device{
+		Path:         "/dev/cdc-wdm0",
+		PhysicalPath: "/sys/devices/modem-1",
+		Protocol:     wwanmodem.ProtocolQMI,
+	}
+	replacementDevice := initialDevice
+	replacementDevice.Path = "/dev/cdc-wdm1"
+	var discoverMu sync.RWMutex
+	discovered := initialDevice
+	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
+		discoverMu.RLock()
+		defer discoverMu.RUnlock()
+		return []wwanmodem.Device{discovered}, nil
+	}
+	firstStream := make(chan wwanmodem.Result[wwanmodem.DeviceEvent])
+	secondStream := make(chan wwanmodem.Result[wwanmodem.DeviceEvent])
+	var watchCalls atomic.Int32
+	registry.watchDevices = func(context.Context) (<-chan wwanmodem.Result[wwanmodem.DeviceEvent], error) {
+		switch watchCalls.Add(1) {
+		case 1:
+			return firstStream, nil
+		case 2:
+			return nil, errors.New("watch unavailable")
+		default:
+			return secondStream, nil
+		}
+	}
+	registry.open = func(_ context.Context, candidate wwanmodem.Device, generation uint64) (*Modem, error) {
+		return &Modem{
+			deviceInfo:          candidate,
+			deviceKey:           physicalDeviceKey(candidate),
+			generation:          generation,
+			EquipmentIdentifier: "imei-1",
+			PrimaryPort:         candidate.Path,
+		}, nil
+	}
+
+	if _, err := registry.Modems(context.Background()); err != nil {
+		t.Fatalf("Modems() error = %v", err)
+	}
+	published := make(chan ModemEvent, 1)
+	unsubscribe, err := registry.Subscribe(func(event ModemEvent) error {
+		published <- event
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	discoverMu.Lock()
+	discovered = replacementDevice
+	discoverMu.Unlock()
+	close(firstStream)
+
+	changed := receiveModemEvent(t, published)
+	if changed.Type != ModemEventChanged || changed.Generation != 2 || changed.Modem == nil || changed.Modem.PrimaryPort != replacementDevice.Path {
+		t.Fatalf("reconciled event = %+v", changed)
+	}
+	deadline := time.Now().Add(time.Second)
+	for watchCalls.Load() < 3 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := watchCalls.Load(); got < 3 {
+		t.Fatalf("watch calls = %d, want restarted watcher", got)
+	}
+}
+
+func TestRegistryPublishesPathChangeBeforeClosingPreviousGeneration(t *testing.T) {
+	oldDevice := wwanmodem.Device{Path: "/dev/cdc-wdm0", PhysicalPath: "/sys/devices/old", Protocol: wwanmodem.ProtocolQMI}
+	newDevice := oldDevice
+	newDevice.PhysicalPath = "/sys/devices/new"
+	closed := false
+	old := &Modem{
+		deviceInfo:          oldDevice,
+		deviceKey:           physicalDeviceKey(oldDevice),
+		generation:          1,
+		EquipmentIdentifier: "imei-1",
+		PrimaryPort:         oldDevice.Path,
+		watchCancel:         func() { closed = true },
+	}
+	registry := &Registry{
+		modems:         map[string]*Modem{old.Path(): old},
+		started:        true,
+		nextGeneration: 1,
+		open: func(_ context.Context, candidate wwanmodem.Device, generation uint64) (*Modem, error) {
+			return &Modem{
+				deviceInfo:          candidate,
+				deviceKey:           physicalDeviceKey(candidate),
+				generation:          generation,
+				EquipmentIdentifier: "imei-1",
+				PrimaryPort:         candidate.Path,
+			}, nil
+		},
+	}
+	var got ModemEvent
+	closedAtPublish := true
+	unsubscribe, err := registry.Subscribe(func(event ModemEvent) error {
+		got = event
+		closedAtPublish = closed
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	registry.applyDeviceEvent(context.Background(), wwanmodem.DeviceEvent{Type: wwanmodem.DeviceChanged, Device: newDevice})
+
+	if got.Type != ModemEventChanged || got.Previous != old || got.PreviousPath != old.Path() || got.Path != physicalDeviceKey(newDevice) {
+		t.Fatalf("changed event = %+v", got)
+	}
+	if closedAtPublish {
+		t.Fatal("previous generation was closed before subscribers handled the change")
+	}
+	if !closed {
+		t.Fatal("previous generation was not closed after publishing the change")
+	}
+}
+
+func TestRegistryPublishesRemovedAndAddedForDifferentIMEIOnSameDevice(t *testing.T) {
+	device := wwanmodem.Device{Path: "/dev/cdc-wdm0", PhysicalPath: "/sys/devices/modem-1", Protocol: wwanmodem.ProtocolQMI}
+	old := &Modem{
+		deviceInfo:          device,
+		deviceKey:           physicalDeviceKey(device),
+		generation:          1,
+		EquipmentIdentifier: "imei-old",
+		PrimaryPort:         device.Path,
+	}
+	registry := &Registry{
+		modems:         map[string]*Modem{old.Path(): old},
+		started:        true,
+		nextGeneration: 1,
+		open: func(_ context.Context, candidate wwanmodem.Device, generation uint64) (*Modem, error) {
+			return &Modem{
+				deviceInfo:          candidate,
+				deviceKey:           physicalDeviceKey(candidate),
+				generation:          generation,
+				EquipmentIdentifier: "imei-new",
+				PrimaryPort:         candidate.Path,
+			}, nil
+		},
+	}
+	var events []ModemEvent
+	unsubscribe, err := registry.Subscribe(func(event ModemEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	registry.applyDeviceEvent(context.Background(), wwanmodem.DeviceEvent{Type: wwanmodem.DeviceChanged, Device: device})
+
+	if len(events) != 2 || events[0].Type != ModemEventRemoved || events[1].Type != ModemEventAdded {
+		t.Fatalf("events = %+v, want removed then added", events)
+	}
+	if events[0].Modem != old || events[0].Generation != 1 {
+		t.Fatalf("removed event = %+v", events[0])
+	}
+	if events[1].Modem == nil || events[1].Modem.EquipmentIdentifier != "imei-new" || events[1].Generation != 2 {
+		t.Fatalf("added event = %+v", events[1])
+	}
+}
+
+func receiveModemEvent(t *testing.T, events <-chan ModemEvent) ModemEvent {
+	t.Helper()
+	select {
+	case event := <-events:
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for modem event")
+		return ModemEvent{}
 	}
 }

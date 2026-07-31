@@ -2,21 +2,14 @@ package modem
 
 import (
 	"context"
+	"strings"
 
-	"github.com/godbus/dbus/v5"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
-// ModemManager spells the DBus interface as "Modem3gpp". Keep Go names as 3GPP,
-// but never leak that Go casing into DBus calls.
-const Modem3GPPInterface = ModemInterface + ".Modem3gpp"
+type ThreeGPP struct{ modem *Modem }
 
-type ThreeGPP struct {
-	modem *Modem
-}
-
-func (m *Modem) ThreeGPP() *ThreeGPP {
-	return &ThreeGPP{modem: m}
-}
+func (m *Modem) ThreeGPP() *ThreeGPP { return &ThreeGPP{modem: m} }
 
 type ThreeGPPNetwork struct {
 	Status            Modem3GPPNetworkAvailability
@@ -26,59 +19,78 @@ type ThreeGPPNetwork struct {
 	AccessTechnology  []ModemAccessTechnology
 }
 
-func (g *ThreeGPP) IMEI(ctx context.Context) (string, error) {
-	variant, err := dbusProperty(ctx, g.modem.dbusObject, Modem3GPPInterface, "Imei")
-	if err != nil {
-		return "", err
+func (g *ThreeGPP) IMEI(context.Context) (string, error) {
+	if g == nil || g.modem == nil {
+		return "", errModemRequired
 	}
-	return stringFromVariant(variant), nil
+	return g.modem.EquipmentIdentifier, nil
 }
 
 func (g *ThreeGPP) RegistrationState(ctx context.Context) (Modem3GPPRegistrationState, error) {
-	variant, err := dbusProperty(ctx, g.modem.dbusObject, Modem3GPPInterface, "RegistrationState")
+	status, err := g.modem.core.NetworkStatus(ctx)
 	if err != nil {
-		return 0, err
+		return Modem3GPPRegistrationStateUnknown, err
 	}
-	return Modem3GPPRegistrationState(uintFromVariant[uint32](variant)), nil
+	return legacyRegistration(status.Registration), nil
 }
 
 func (g *ThreeGPP) OperatorCode(ctx context.Context) (string, error) {
-	variant, err := dbusProperty(ctx, g.modem.dbusObject, Modem3GPPInterface, "OperatorCode")
+	status, err := g.modem.core.NetworkStatus(ctx)
 	if err != nil {
 		return "", err
 	}
-	return stringFromVariant(variant), nil
+	return strings.TrimSpace(status.OperatorID), nil
 }
 
 func (g *ThreeGPP) OperatorName(ctx context.Context) (string, error) {
-	variant, err := dbusProperty(ctx, g.modem.dbusObject, Modem3GPPInterface, "OperatorName")
+	status, err := g.modem.core.NetworkStatus(ctx)
 	if err != nil {
 		return "", err
 	}
-	return stringFromVariant(variant), nil
+	return strings.TrimSpace(status.OperatorName), nil
 }
 
 func (g *ThreeGPP) ScanNetworks(ctx context.Context) ([]*ThreeGPPNetwork, error) {
-	var results []map[string]dbus.Variant
-	err := g.modem.dbusObject.CallWithContext(ctx, Modem3GPPInterface+".Scan", 0).Store(&results)
+	operators, err := g.modem.core.ScanNetworks(ctx)
 	if err != nil {
 		return nil, err
 	}
-	networks := make([]*ThreeGPPNetwork, len(results))
-	for i, result := range results {
-		var accessTechnology ModemAccessTechnology
-		n := ThreeGPPNetwork{
-			Status:           Modem3GPPNetworkAvailability(variantUint[uint32](result, "status")),
-			OperatorCode:     variantString(result, "operator-code"),
-			AccessTechnology: accessTechnology.UnmarshalBitmask(variantUint[uint32](result, "access-technology")),
+	result := make([]*ThreeGPPNetwork, 0, len(operators))
+	for _, operator := range operators {
+		availability := Modem3GPPNetworkAvailabilityUnknown
+		switch {
+		case operator.Current:
+			availability = Modem3GPPNetworkAvailabilityCurrent
+		case operator.Forbidden:
+			availability = Modem3GPPNetworkAvailabilityForbidden
+		case operator.Available:
+			availability = Modem3GPPNetworkAvailabilityAvailable
 		}
-		n.OperatorName = variantString(result, "operator-long")
-		n.OperatorShortName = variantString(result, "operator-short")
-		networks[i] = &n
+		result = append(result, &ThreeGPPNetwork{
+			Status: availability, OperatorName: operator.Name, OperatorShortName: operator.Name,
+			OperatorCode: operator.ID, AccessTechnology: accessTechnologies(operator.Technology),
+		})
 	}
-	return networks, nil
+	return result, nil
 }
 
 func (g *ThreeGPP) RegisterNetwork(ctx context.Context, operatorCode string) error {
-	return g.modem.dbusObject.CallWithContext(ctx, Modem3GPPInterface+".Register", 0, operatorCode).Err
+	return g.modem.core.Register(ctx, wwanmodem.RegisterConfig{OperatorID: strings.TrimSpace(operatorCode)})
+}
+
+func legacyRegistration(state wwanmodem.RegistrationState) Modem3GPPRegistrationState {
+	switch state {
+	case wwanmodem.RegistrationHome:
+		return Modem3GPPRegistrationStateHome
+	case wwanmodem.RegistrationSearching:
+		return Modem3GPPRegistrationStateSearching
+	case wwanmodem.RegistrationDenied:
+		return Modem3GPPRegistrationStateDenied
+	case wwanmodem.RegistrationRoaming:
+		return Modem3GPPRegistrationStateRoaming
+	case wwanmodem.RegistrationIdle:
+		return Modem3GPPRegistrationStateIdle
+	default:
+		return Modem3GPPRegistrationStateUnknown
+	}
 }

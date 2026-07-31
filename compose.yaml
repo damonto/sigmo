@@ -5,8 +5,6 @@ services:
     restart: unless-stopped
     network_mode: host
     privileged: true
-    tmpfs:
-      - /run
     volumes:
       - ./data:/root/.local/share/sigmo
       - /dev:/dev

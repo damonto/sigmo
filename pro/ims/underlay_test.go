@@ -145,7 +145,7 @@ func TestModemUnderlayRequiresConnectedInternet(t *testing.T) {
 		{name: "missing connection", wantErr: true},
 		{name: "disconnected", connection: &pinternet.Connection{Status: pinternet.StatusDisconnected, InterfaceName: "wwan0"}, wantErr: true},
 		{name: "missing interface", connection: &pinternet.Connection{Status: pinternet.StatusConnected}, wantErr: true},
-		{name: "current error", currentErr: errors.New("dbus unavailable"), wantErr: true},
+		{name: "current error", currentErr: errors.New("transport unavailable"), wantErr: true},
 		{name: "connected", connection: &pinternet.Connection{Status: pinternet.StatusConnected, InterfaceName: "wwan0", DNS: []string{"1.1.1.1"}}},
 	}
 	for _, tt := range tests {

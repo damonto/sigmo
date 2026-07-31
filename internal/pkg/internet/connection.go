@@ -9,8 +9,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/godbus/dbus/v5"
-
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -51,7 +49,7 @@ type Connection struct {
 	AlwaysOn        bool
 	Proxy           ProxyStatus
 	InterfaceName   string
-	Bearer          string
+	Bearer          uint64
 	IPv4Addresses   []string
 	IPv6Addresses   []string
 	DNS             []string
@@ -85,18 +83,18 @@ type ConnectorConfig struct {
 
 type internetModem interface {
 	id() string
+	generation() uint64
 	operatorIdentifier() string
 	gid1() string
 	spn() string
 	profileID() string
 	iccid() string
 	imsi() string
-	bearer(context.Context, dbus.ObjectPath) (*mmodem.Bearer, error)
+	bearer(context.Context, uint64) (*mmodem.Bearer, error)
 	bearers(context.Context) ([]*mmodem.Bearer, error)
 	connectBearer(context.Context, mmodem.BearerProperties) (*mmodem.Bearer, error)
-	disconnectBearer(context.Context, dbus.ObjectPath) error
-	deleteBearer(context.Context, dbus.ObjectPath) error
-	refreshModemManager(context.Context) error
+	disconnectBearer(context.Context, uint64) error
+	deleteBearer(context.Context, uint64) error
 }
 
 type modemAccess struct {
@@ -110,25 +108,44 @@ func (m modemAccess) id() string {
 	return m.modem.EquipmentIdentifier
 }
 
+func (m modemAccess) generation() uint64 {
+	if m.modem == nil {
+		return 0
+	}
+	return m.modem.Generation()
+}
+
 func (m modemAccess) operatorIdentifier() string {
-	if m.modem == nil || m.modem.Sim == nil {
+	if m.modem == nil {
 		return ""
 	}
-	return strings.TrimSpace(m.modem.Sim.OperatorIdentifier)
+	sim := m.modem.Snapshot().SIM
+	if sim == nil {
+		return ""
+	}
+	return strings.TrimSpace(sim.OperatorIdentifier)
 }
 
 func (m modemAccess) gid1() string {
-	if m.modem == nil || m.modem.Sim == nil {
+	if m.modem == nil {
 		return ""
 	}
-	return strings.TrimSpace(m.modem.Sim.GID1)
+	sim := m.modem.Snapshot().SIM
+	if sim == nil {
+		return ""
+	}
+	return strings.TrimSpace(sim.GID1)
 }
 
 func (m modemAccess) spn() string {
-	if m.modem == nil || m.modem.Sim == nil {
+	if m.modem == nil {
 		return ""
 	}
-	return strings.TrimSpace(m.modem.Sim.OperatorName)
+	sim := m.modem.Snapshot().SIM
+	if sim == nil {
+		return ""
+	}
+	return strings.TrimSpace(sim.SPN)
 }
 
 func (m modemAccess) profileID() string {
@@ -136,24 +153,36 @@ func (m modemAccess) profileID() string {
 }
 
 func (m modemAccess) iccid() string {
-	if m.modem == nil || m.modem.Sim == nil {
+	if m.modem == nil {
 		return ""
 	}
-	return strings.TrimSpace(m.modem.Sim.Identifier)
+	sim := m.modem.Snapshot().SIM
+	if sim == nil {
+		return ""
+	}
+	return strings.TrimSpace(sim.Identifier)
 }
 
 func (m modemAccess) imsi() string {
-	if m.modem == nil || m.modem.Sim == nil {
+	if m.modem == nil {
 		return ""
 	}
-	return strings.TrimSpace(m.modem.Sim.Imsi)
+	sim := m.modem.Snapshot().SIM
+	if sim == nil {
+		return ""
+	}
+	return strings.TrimSpace(sim.Imsi)
 }
 
-func (m modemAccess) bearer(ctx context.Context, path dbus.ObjectPath) (*mmodem.Bearer, error) {
+func (m modemAccess) bearer(ctx context.Context, path uint64) (*mmodem.Bearer, error) {
 	if m.modem == nil {
 		return nil, ErrModemRequired
 	}
-	return m.modem.Bearer(ctx, path)
+	bearer, ok := m.modem.Bearer(ctx, path)
+	if !ok {
+		return nil, fmt.Errorf("bearer %d: %w", path, mmodem.ErrNotFound)
+	}
+	return bearer, nil
 }
 
 func (m modemAccess) bearers(ctx context.Context) ([]*mmodem.Bearer, error) {
@@ -170,25 +199,18 @@ func (m modemAccess) connectBearer(ctx context.Context, properties mmodem.Bearer
 	return m.modem.ConnectBearer(ctx, properties)
 }
 
-func (m modemAccess) disconnectBearer(ctx context.Context, path dbus.ObjectPath) error {
+func (m modemAccess) disconnectBearer(ctx context.Context, path uint64) error {
 	if m.modem == nil {
 		return ErrModemRequired
 	}
 	return m.modem.DisconnectBearer(ctx, path)
 }
 
-func (m modemAccess) deleteBearer(ctx context.Context, path dbus.ObjectPath) error {
+func (m modemAccess) deleteBearer(ctx context.Context, path uint64) error {
 	if m.modem == nil {
 		return ErrModemRequired
 	}
 	return m.modem.DeleteBearer(ctx, path)
-}
-
-func (m modemAccess) refreshModemManager(ctx context.Context) error {
-	if m.modem == nil {
-		return ErrModemRequired
-	}
-	return m.modem.RefreshModemManager(ctx)
 }
 
 func NewConnector(cfg ConnectorConfig) (*Connector, error) {
@@ -282,37 +304,49 @@ func (c *Connector) currentLocked(ctx context.Context, modem internetModem) (*Co
 	prefs := c.preferenceWithAlwaysOn(ctx, modem)
 	var staleInterfaces []string
 	if tracked, ok := c.connection(modemID); ok {
-		bearer, err := modem.bearer(ctx, tracked.bearerPath)
-		if err == nil {
-			connected, err := bearer.Connected(ctx)
+		if !sameModemGeneration(tracked.modemGeneration, modem.generation()) {
+			if err := c.cleanupTracked(ctx, modemID, tracked); err != nil {
+				return nil, fmt.Errorf("cleanup stale modem generation: %w", err)
+			}
+			if err := c.syncCleanedUpDefaultRouteState(ctx, tracked); err != nil {
+				return nil, fmt.Errorf("restore stale modem generation routes: %w", err)
+			}
+			staleInterfaces = append(staleInterfaces, tracked.interfaceName)
+			c.deleteConnection(modemID)
+			prefs = tracked.prefs
+		} else {
+			bearer, err := modem.bearer(ctx, tracked.bearerPath)
 			if err == nil {
-				if !connected {
-					err := c.cleanupTracked(ctx, modemID, tracked)
-					if err == nil {
-						err = c.syncCleanedUpDefaultRouteState(ctx, tracked)
-					}
-					err = errors.Join(err, restoreStaleDefaultRouteStatesWithStore(ctx, c.persistence, routeStateRestoreTarget{modemID: modemID}, netlinkDefaultRouteOps))
-					if err != nil {
-						return nil, fmt.Errorf("cleanup disconnected bearer: %w", err)
-					}
-					c.deleteConnection(modemID)
-					prefs := bearerPreferences(ctx, bearer, tracked.prefs)
-					prefs = preferencesWithSelectedAPN(modem, prefs)
-					c.setPreference(modemID, prefs)
-					return disconnectedConnection(prefs), nil
-				}
-				prefs := preferencesWithDefaultAPNCredentials(modem, tracked.prefs)
-				tracked.prefs = prefs
-				c.setConnectionAndPreference(modemID, tracked, prefs)
-				connection, err := c.connectionFromBearer(ctx, modemID, bearer, prefs, tracked.routeMetric)
+				connected, err := bearer.Connected(ctx)
 				if err == nil {
-					return connection, nil
+					if !connected {
+						err := c.cleanupTracked(ctx, modemID, tracked)
+						if err == nil {
+							err = c.syncCleanedUpDefaultRouteState(ctx, tracked)
+						}
+						err = errors.Join(err, restoreStaleDefaultRouteStatesWithStore(ctx, c.persistence, routeStateRestoreTarget{modemID: modemID}, netlinkDefaultRouteOps))
+						if err != nil {
+							return nil, fmt.Errorf("cleanup disconnected bearer: %w", err)
+						}
+						c.deleteConnection(modemID)
+						prefs := bearerPreferences(ctx, bearer, tracked.prefs)
+						prefs = preferencesWithSelectedAPN(modem, prefs)
+						c.setPreference(modemID, prefs)
+						return disconnectedConnection(prefs), nil
+					}
+					prefs := preferencesWithDefaultAPNCredentials(modem, tracked.prefs)
+					tracked.prefs = prefs
+					c.setConnectionAndPreference(modemID, tracked, prefs)
+					connection, err := c.connectionFromBearer(ctx, modemID, bearer, prefs, tracked.routeMetric)
+					if err == nil {
+						return connection, nil
+					}
 				}
 			}
+			staleInterfaces = append(staleInterfaces, tracked.interfaceName)
+			c.deleteConnection(modemID)
+			prefs = tracked.prefs
 		}
-		staleInterfaces = append(staleInterfaces, tracked.interfaceName)
-		c.deleteConnection(modemID)
-		prefs = tracked.prefs
 	}
 
 	current, err := currentBearer(ctx, modem)
@@ -411,6 +445,9 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 		return nil, err
 	}
 	modemID := modem.id()
+	if err := c.bindQualcomm410Generation(modemID, modem.generation()); err != nil {
+		return nil, err
+	}
 	profileID := modem.profileID()
 	prefs = normalizePreferences(prefs)
 	if prefs.AlwaysOn && profileID == "" {
@@ -443,6 +480,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 		return nil, errors.Join(err, disconnectErr)
 	}
 	tracked.bearerPath = bearer.Path()
+	tracked.modemGeneration = modem.generation()
 	tracked.profileID = profileID
 	tracked.prefs = prefs
 
@@ -514,7 +552,9 @@ func (c *Connector) disconnect(ctx context.Context, modem internetModem, clearAl
 		if err == nil {
 			err = c.syncCleanedUpDefaultRouteState(ctx, tracked)
 		}
-		err = errors.Join(err, modem.disconnectBearer(ctx, tracked.bearerPath))
+		if sameModemGeneration(tracked.modemGeneration, modem.generation()) {
+			err = errors.Join(err, modem.disconnectBearer(ctx, tracked.bearerPath))
+		}
 		err = errors.Join(err, restoreStaleDefaultRouteStatesWithStore(ctx, c.persistence, routeStateRestoreTarget{modemID: modemID}, netlinkDefaultRouteOps))
 		c.deleteConnection(modemID)
 		err = errors.Join(result, err)
@@ -567,6 +607,10 @@ func (c *Connector) disconnect(ctx context.Context, modem internetModem, clearAl
 		return fmt.Errorf("disconnect bearer: %w", err)
 	}
 	return nil
+}
+
+func sameModemGeneration(tracked, current uint64) bool {
+	return tracked == 0 || current == 0 || tracked == current
 }
 
 func (c *Connector) cleanupTracked(ctx context.Context, modemID string, tracked trackedConnection) error {
@@ -1095,9 +1139,6 @@ func (c *Connector) resetConnectFailure(ctx context.Context, modem internetModem
 	if err != nil {
 		return err
 	}
-	if err := modem.refreshModemManager(ctx); err != nil {
-		return fmt.Errorf("refresh ModemManager: %w", err)
-	}
 	return c.cleanupConnectFailure(ctx, modem)
 }
 
@@ -1124,7 +1165,7 @@ func (c *Connector) deleteDisconnectedBearers(ctx context.Context, modem interne
 			}
 		}
 		if err := modem.deleteBearer(ctx, bearer.Path()); err != nil {
-			result = errors.Join(result, fmt.Errorf("delete bearer %s: %w", bearer.Path(), err))
+			result = errors.Join(result, fmt.Errorf("delete bearer %d: %w", bearer.Path(), err))
 		}
 	}
 	return interfaceNames, result

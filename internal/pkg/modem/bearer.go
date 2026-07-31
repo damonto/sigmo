@@ -4,30 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/netip"
 	"slices"
 	"strings"
+	"sync"
 
-	"github.com/godbus/dbus/v5"
-)
-
-const (
-	ModemSimpleInterface = ModemInterface + ".Simple"
-	BearerInterface      = ModemManagerInterface + ".Bearer"
-)
-
-const (
-	bearerIPFamilyIPv4   uint32 = 1 << 0
-	bearerIPFamilyIPv6   uint32 = 1 << 1
-	bearerIPFamilyIPv4V6 uint32 = 1 << 2
-)
-
-const (
-	bearerAllowedAuthNone     uint32 = 1 << 0
-	bearerAllowedAuthPAP      uint32 = 1 << 1
-	bearerAllowedAuthCHAP     uint32 = 1 << 2
-	bearerAllowedAuthMSCHAP   uint32 = 1 << 3
-	bearerAllowedAuthMSCHAPV2 uint32 = 1 << 4
-	bearerAllowedAuthEAP      uint32 = 1 << 5
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 var (
@@ -58,8 +41,13 @@ func (m BearerIPMethod) String() string {
 }
 
 type Bearer struct {
-	objectPath dbus.ObjectPath
-	dbusObject dbus.BusObject
+	modem      *Modem
+	core       *wwanmodem.Bearer
+	mu         sync.RWMutex
+	infoValue  wwanmodem.BearerInfo
+	properties BearerProperties
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
 }
 
 type BearerIPConfig struct {
@@ -90,270 +78,457 @@ type BearerProperties struct {
 }
 
 func (m *Modem) ConnectBearer(ctx context.Context, prefs BearerProperties) (*Bearer, error) {
-	properties, err := bearerDBusProperties(prefs)
+	if m == nil || m.core == nil {
+		return nil, errModemRequired
+	}
+	ipFamily, err := semanticIPFamily(prefs.IPType)
 	if err != nil {
 		return nil, err
 	}
-
-	var path dbus.ObjectPath
-	if err := m.dbusObject.CallWithContext(ctx, ModemSimpleInterface+".Connect", 0, properties).Store(&path); err != nil {
+	auth, err := semanticAuthentication(prefs.AllowedAuth)
+	if err != nil {
 		return nil, err
 	}
-	return m.Bearer(ctx, path)
+	core, err := m.core.Connect(ctx, wwanmodem.ConnectConfig{APN: strings.TrimSpace(prefs.APN), IPFamily: ipFamily, Username: strings.TrimSpace(prefs.Username), Password: prefs.Password, Authentication: auth})
+	if err != nil {
+		return nil, err
+	}
+	prefs.APN = strings.TrimSpace(prefs.APN)
+	prefs.IPType = normalizeIPType(prefs.IPType)
+	prefs.Username = strings.TrimSpace(prefs.Username)
+	prefs.AllowedAuth = normalizeAuthenticationName(prefs.AllowedAuth)
+	return m.bearerAdapter(core, prefs), nil
 }
 
-func bearerDBusProperties(prefs BearerProperties) (map[string]dbus.Variant, error) {
-	ipType, err := BearerIPFamily(prefs.IPType)
-	if err != nil {
+func (m *Modem) DisconnectBearer(ctx context.Context, id uint64) error {
+	bearer, ok := m.Bearer(ctx, id)
+	if !ok {
+		return nil
+	}
+	return bearer.Disconnect(ctx)
+}
+
+func (m *Modem) DeleteBearer(ctx context.Context, id uint64) error {
+	return m.DisconnectBearer(ctx, id)
+}
+
+func (m *Modem) Bearers(ctx context.Context) ([]*Bearer, error) {
+	if m == nil || m.core == nil {
+		return nil, errModemRequired
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	properties := map[string]dbus.Variant{
-		"ip-type": dbus.MakeVariant(ipType),
+	result := make([]*Bearer, 0)
+	active := make(map[uint64]struct{})
+	for _, core := range m.core.Bearers() {
+		bearer := m.bearerAdapter(core, bearerPropertiesFromInfo(core.Info()))
+		active[bearer.Path()] = struct{}{}
+		result = append(result, bearer)
 	}
-	if apn := strings.TrimSpace(prefs.APN); apn != "" {
-		properties["apn"] = dbus.MakeVariant(apn)
+	m.removeMissingBearerAdapters(active)
+	return result, nil
+}
+
+func (m *Modem) Bearer(_ context.Context, id uint64) (*Bearer, bool) {
+	if m == nil || m.core == nil {
+		return nil, false
 	}
-	if username := strings.TrimSpace(prefs.Username); username != "" {
-		properties["user"] = dbus.MakeVariant(username)
+	core, ok := m.core.Bearer(id)
+	if !ok {
+		return nil, false
 	}
-	if prefs.Password != "" {
-		properties["password"] = dbus.MakeVariant(prefs.Password)
+	return m.bearerAdapter(core, bearerPropertiesFromInfo(core.Info())), true
+}
+
+func (m *Modem) bearerAdapter(core *wwanmodem.Bearer, properties BearerProperties) *Bearer {
+	if m == nil || core == nil {
+		return nil
 	}
-	if auth := strings.TrimSpace(prefs.AllowedAuth); auth != "" {
-		allowedAuth, err := BearerAllowedAuth(auth)
-		if err != nil {
-			return nil, err
+	info := cloneBearerInfo(core.Info())
+	m.bearerMu.Lock()
+	if m.bearers == nil {
+		m.bearers = make(map[uint64]*Bearer)
+	}
+	if existing := m.bearers[info.ID]; existing != nil {
+		existing.updateInfo(info)
+		existing.mergeProperties(properties)
+		m.bearerMu.Unlock()
+		return existing
+	}
+	b := &Bearer{modem: m, core: core, infoValue: info, properties: properties}
+	watchCtx, cancel := context.WithCancel(context.Background())
+	b.cancel = cancel
+	b.wg.Add(1)
+	m.bearers[info.ID] = b
+	m.bearerMu.Unlock()
+	go b.watch(watchCtx)
+	return b
+}
+
+func (m *Modem) removeMissingBearerAdapters(active map[uint64]struct{}) {
+	if m == nil {
+		return
+	}
+	var stale []*Bearer
+	m.bearerMu.Lock()
+	for id, bearer := range m.bearers {
+		if _, ok := active[id]; ok {
+			continue
 		}
-		properties["allowed-auth"] = dbus.MakeVariant(allowedAuth)
+		delete(m.bearers, id)
+		stale = append(stale, bearer)
+	}
+	m.bearerMu.Unlock()
+	for _, bearer := range stale {
+		bearer.closeAdapter()
+	}
+}
+
+func (m *Modem) removeBearerAdapter(id uint64, expected *Bearer) {
+	if m == nil {
+		return
+	}
+	m.bearerMu.Lock()
+	if m.bearers[id] == expected {
+		delete(m.bearers, id)
+	}
+	m.bearerMu.Unlock()
+}
+
+func (m *Modem) closeBearerAdapters() {
+	if m == nil {
+		return
+	}
+	m.bearerMu.Lock()
+	bearers := make([]*Bearer, 0, len(m.bearers))
+	for _, bearer := range m.bearers {
+		bearers = append(bearers, bearer)
+	}
+	m.bearers = nil
+	m.bearerMu.Unlock()
+	for _, bearer := range bearers {
+		bearer.closeAdapter()
+	}
+}
+
+func (b *Bearer) watch(ctx context.Context) {
+	defer b.wg.Done()
+	for ctx.Err() == nil {
+		stream, err := b.core.Watch(ctx)
+		if err == nil {
+			err = b.consume(ctx, stream)
+		}
+		if ctx.Err() != nil || errors.Is(err, wwanmodem.ErrClosed) {
+			return
+		}
+		slog.Warn("bearer watcher stopped", "bearer", b.Path(), "generation", b.modem.Generation(), "error", err)
+		if err := sleepContext(ctx, modemWatchRetryDelay); err != nil {
+			return
+		}
+	}
+}
+
+func (b *Bearer) consume(ctx context.Context, stream <-chan wwanmodem.Result[wwanmodem.BearerEvent]) error {
+	if stream == nil {
+		return errors.New("bearer watcher returned a nil stream")
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case result, ok := <-stream:
+			if !ok {
+				return errors.New("bearer stream closed")
+			}
+			if result.Err != nil {
+				return result.Err
+			}
+			b.updateInfo(result.Value.Info)
+		}
+	}
+}
+
+func (b *Bearer) updateInfo(info wwanmodem.BearerInfo) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	b.infoValue = cloneBearerInfo(info)
+	if b.properties.APN == "" {
+		b.properties.APN = strings.TrimSpace(info.APN)
+	}
+	b.mu.Unlock()
+}
+
+func (b *Bearer) mergeProperties(properties BearerProperties) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	if strings.TrimSpace(properties.APN) != "" {
+		b.properties.APN = strings.TrimSpace(properties.APN)
+	}
+	if strings.TrimSpace(properties.IPType) != "" {
+		b.properties.IPType = normalizeIPType(properties.IPType)
+	}
+	if strings.TrimSpace(properties.Username) != "" {
+		b.properties.Username = strings.TrimSpace(properties.Username)
+	}
+	if properties.Password != "" {
+		b.properties.Password = properties.Password
+	}
+	if strings.TrimSpace(properties.AllowedAuth) != "" {
+		b.properties.AllowedAuth = normalizeAuthenticationName(properties.AllowedAuth)
+	}
+	b.mu.Unlock()
+}
+
+func (b *Bearer) closeAdapter() {
+	if b == nil {
+		return
+	}
+	if b.cancel != nil {
+		b.cancel()
+	}
+	b.wg.Wait()
+}
+
+func (b *Bearer) Path() uint64 {
+	if b == nil || b.core == nil {
+		return 0
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.infoValue.ID
+}
+
+func (b *Bearer) Interface(ctx context.Context) (string, error) {
+	info, err := b.info(ctx)
+	return info.Network.Interface, err
+}
+
+func (b *Bearer) Connected(ctx context.Context) (bool, error) {
+	info, err := b.info(ctx)
+	return info.Connected, err
+}
+
+func (b *Bearer) IP4Config(ctx context.Context) (BearerIPConfig, error) {
+	info, err := b.info(ctx)
+	if err != nil {
+		return BearerIPConfig{}, err
+	}
+	return ipConfig(info.Network, false), nil
+}
+
+func (b *Bearer) IP6Config(ctx context.Context) (BearerIPConfig, error) {
+	info, err := b.info(ctx)
+	if err != nil {
+		return BearerIPConfig{}, err
+	}
+	return ipConfig(info.Network, true), nil
+}
+
+func (b *Bearer) Stats(ctx context.Context) (BearerStats, error) {
+	if b == nil || b.core == nil {
+		return BearerStats{}, errModemRequired
+	}
+	stats, err := b.core.Stats(ctx)
+	if err != nil {
+		return BearerStats{}, err
+	}
+	return BearerStats{RXBytes: stats.RXBytes, TXBytes: stats.TXBytes, Duration: uint32(stats.Duration.Seconds())}, nil
+}
+
+func (b *Bearer) APN(ctx context.Context) (string, error) {
+	info, err := b.info(ctx)
+	return info.APN, err
+}
+
+func (b *Bearer) Properties(ctx context.Context) (BearerProperties, error) {
+	info, err := b.info(ctx)
+	if err != nil {
+		return BearerProperties{}, err
+	}
+	b.mu.RLock()
+	properties := b.properties
+	b.mu.RUnlock()
+	if properties.APN == "" {
+		properties.APN = strings.TrimSpace(info.APN)
+	}
+	if properties.IPType == "" {
+		properties.IPType = ipTypeFromNetwork(info.Network)
 	}
 	return properties, nil
 }
 
-func (m *Modem) DisconnectBearer(ctx context.Context, path dbus.ObjectPath) error {
-	return m.dbusObject.CallWithContext(ctx, ModemSimpleInterface+".Disconnect", 0, path).Err
-}
-
-func (m *Modem) DeleteBearer(ctx context.Context, path dbus.ObjectPath) error {
-	return m.dbusObject.CallWithContext(ctx, ModemInterface+".DeleteBearer", 0, path).Err
-}
-
-func (m *Modem) Bearers(ctx context.Context) ([]*Bearer, error) {
-	variant, err := dbusProperty(ctx, m.dbusObject, ModemInterface, "Bearers")
-	if err != nil {
-		return nil, err
-	}
-	paths := objectPathsFromVariant(variant)
-	bearers := make([]*Bearer, 0, len(paths))
-	for _, path := range paths {
-		bearer, err := m.Bearer(ctx, path)
-		if err != nil {
-			return nil, err
-		}
-		bearers = append(bearers, bearer)
-	}
-	return bearers, nil
-}
-
-func (m *Modem) Bearer(ctx context.Context, path dbus.ObjectPath) (*Bearer, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if path == "" || path == "/" {
-		return nil, errors.New("bearer path is required")
-	}
-	if m.dbusConn != nil {
-		return &Bearer{
-			objectPath: path,
-			dbusObject: m.dbusConn.Object(ModemManagerInterface, path),
-		}, nil
-	}
-	object, err := systemBusObject(path)
-	if err != nil {
-		return nil, err
-	}
-	return &Bearer{objectPath: path, dbusObject: object}, nil
-}
-
-func (b *Bearer) Path() dbus.ObjectPath {
-	return b.objectPath
-}
-
-func (b *Bearer) Interface(ctx context.Context) (string, error) {
-	variant, err := dbusProperty(ctx, b.dbusObject, BearerInterface, "Interface")
-	if err != nil {
-		return "", err
-	}
-	return stringFromVariant(variant), nil
-}
-
-func (b *Bearer) Connected(ctx context.Context) (bool, error) {
-	variant, err := dbusProperty(ctx, b.dbusObject, BearerInterface, "Connected")
-	if err != nil {
-		return false, err
-	}
-	return boolFromVariant(variant), nil
-}
-
-func (b *Bearer) IP4Config(ctx context.Context) (BearerIPConfig, error) {
-	return b.ipConfig(ctx, "Ip4Config")
-}
-
-func (b *Bearer) IP6Config(ctx context.Context) (BearerIPConfig, error) {
-	return b.ipConfig(ctx, "Ip6Config")
-}
-
-func (b *Bearer) Stats(ctx context.Context) (BearerStats, error) {
-	variant, err := dbusProperty(ctx, b.dbusObject, BearerInterface, "Stats")
-	if err != nil {
-		return BearerStats{}, err
-	}
-	return bearerStatsFromVariants(variantMapFromVariant(variant)), nil
-}
-
-func (b *Bearer) APN(ctx context.Context) (string, error) {
-	properties, err := b.Properties(ctx)
-	if err != nil {
-		return "", err
-	}
-	return properties.APN, nil
-}
-
-func (b *Bearer) Properties(ctx context.Context) (BearerProperties, error) {
-	variant, err := dbusProperty(ctx, b.dbusObject, BearerInterface, "Properties")
-	if err != nil {
-		return BearerProperties{}, err
-	}
-	return bearerPropertiesFromVariants(variantMapFromVariant(variant)), nil
-}
-
 func (b *Bearer) Disconnect(ctx context.Context) error {
-	return b.dbusObject.CallWithContext(ctx, BearerInterface+".Disconnect", 0).Err
+	if b == nil || b.core == nil {
+		return nil
+	}
+	if err := b.core.Disconnect(ctx); err != nil {
+		return err
+	}
+	b.mu.Lock()
+	b.infoValue.Connected = false
+	id := b.infoValue.ID
+	b.mu.Unlock()
+	if b.cancel != nil {
+		b.cancel()
+	}
+	if b.modem != nil {
+		b.modem.removeBearerAdapter(id, b)
+	}
+	b.wg.Wait()
+	return nil
 }
 
-func (b *Bearer) ipConfig(ctx context.Context, name string) (BearerIPConfig, error) {
-	variant, err := dbusProperty(ctx, b.dbusObject, BearerInterface, name)
-	if err != nil {
-		return BearerIPConfig{}, err
+func (b *Bearer) info(ctx context.Context) (wwanmodem.BearerInfo, error) {
+	if b == nil || b.core == nil {
+		return wwanmodem.BearerInfo{}, errModemRequired
 	}
-	return bearerIPConfigFromVariants(variantMapFromVariant(variant)), nil
+	if err := ctx.Err(); err != nil {
+		return wwanmodem.BearerInfo{}, err
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return cloneBearerInfo(b.infoValue), nil
 }
 
-func bearerIPConfigFromVariants(raw map[string]dbus.Variant) BearerIPConfig {
-	cfg := BearerIPConfig{
-		Method:  BearerIPMethod(variantUint[uint32](raw, "method")),
-		Prefix:  variantUint[uint32](raw, "prefix"),
-		Address: strings.TrimSpace(variantString(raw, "address")),
-		Gateway: strings.TrimSpace(variantString(raw, "gateway")),
-		MTU:     variantUint[uint32](raw, "mtu"),
+func cloneBearerInfo(info wwanmodem.BearerInfo) wwanmodem.BearerInfo {
+	info.Network.Addresses = slices.Clone(info.Network.Addresses)
+	info.Network.Gateways = slices.Clone(info.Network.Gateways)
+	info.Network.DNS = slices.Clone(info.Network.DNS)
+	return info
+}
+
+func bearerPropertiesFromInfo(info wwanmodem.BearerInfo) BearerProperties {
+	return BearerProperties{APN: strings.TrimSpace(info.APN), IPType: ipTypeFromNetwork(info.Network)}
+}
+
+func ipTypeFromNetwork(network wwanmodem.NetworkConfig) string {
+	var ipv4, ipv6 bool
+	for _, prefix := range network.Addresses {
+		ipv4 = ipv4 || prefix.Addr().Is4()
+		ipv6 = ipv6 || prefix.Addr().Is6()
 	}
-	for i := 1; i <= 3; i++ {
-		dns := strings.TrimSpace(variantString(raw, fmt.Sprintf("dns%d", i)))
-		if dns == "" || slices.Contains(cfg.DNS, dns) {
-			continue
+	switch {
+	case ipv4 && ipv6:
+		return "ipv4v6"
+	case ipv4:
+		return "ipv4"
+	case ipv6:
+		return "ipv6"
+	default:
+		return ""
+	}
+}
+
+func ipConfig(network wwanmodem.NetworkConfig, ipv6 bool) BearerIPConfig {
+	addresses := network.Addresses
+	if !ipv6 {
+		addresses = slices.DeleteFunc(slices.Clone(addresses), func(prefix netip.Prefix) bool { return prefix.Addr().Is6() })
+	} else {
+		addresses = slices.DeleteFunc(slices.Clone(addresses), func(prefix netip.Prefix) bool { return !prefix.Addr().Is6() })
+	}
+	config := BearerIPConfig{Method: BearerIPMethodStatic, MTU: network.MTU}
+	if len(addresses) > 0 {
+		config.Address = addresses[0].Addr().String()
+		config.Prefix = uint32(addresses[0].Bits())
+	}
+	for _, gateway := range network.Gateways {
+		if gateway.Is6() == ipv6 {
+			config.Gateway = gateway.String()
+			break
 		}
-		cfg.DNS = append(cfg.DNS, dns)
 	}
-	return cfg
+	for _, dns := range network.DNS {
+		if dns.Is6() == ipv6 {
+			config.DNS = append(config.DNS, dns.String())
+		}
+	}
+	return config
 }
 
-func bearerPropertiesFromVariants(raw map[string]dbus.Variant) BearerProperties {
-	return BearerProperties{
-		APN:         strings.TrimSpace(variantString(raw, "apn")),
-		IPType:      bearerIPFamilyString(variantUint[uint32](raw, "ip-type")),
-		Username:    strings.TrimSpace(variantString(raw, "user")),
-		Password:    variantString(raw, "password"),
-		AllowedAuth: bearerAllowedAuthString(variantUint[uint32](raw, "allowed-auth")),
+func semanticIPFamily(value string) (wwanmodem.IPFamily, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "ipv4":
+		return wwanmodem.IPFamilyIPv4, nil
+	case "ipv6":
+		return wwanmodem.IPFamilyIPv6, nil
+	case "", "ipv4v6", "ipv4+ipv6":
+		return wwanmodem.IPFamilyIPv4v6, nil
+	default:
+		return 0, fmt.Errorf("%w: %s", ErrUnsupportedBearerIPType, value)
 	}
 }
 
-func bearerStatsFromVariants(raw map[string]dbus.Variant) BearerStats {
-	return BearerStats{
-		RXBytes:  variantUint[uint64](raw, "rx-bytes"),
-		TXBytes:  variantUint[uint64](raw, "tx-bytes"),
-		Duration: variantUint[uint32](raw, "duration"),
+func semanticAuthentication(value string) (wwanmodem.Authentication, error) {
+	switch normalizeAuthenticationName(value) {
+	case "none":
+		return wwanmodem.AuthenticationNone, nil
+	case "", "pap|chap":
+		return wwanmodem.AuthenticationPAP | wwanmodem.AuthenticationCHAP, nil
+	case "pap":
+		return wwanmodem.AuthenticationPAP, nil
+	case "chap":
+		return wwanmodem.AuthenticationCHAP, nil
+	case "mschapv2":
+		return wwanmodem.AuthenticationMSCHAPv2, nil
+	default:
+		return 0, fmt.Errorf("%w: %s", ErrUnsupportedBearerAuth, value)
 	}
+}
+
+func normalizeIPType(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "ipv4+ipv6" {
+		return "ipv4v6"
+	}
+	return value
+}
+
+func normalizeAuthenticationName(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "default", "auto":
+		return ""
+	case "mschap":
+		return "mschapv2"
+	}
+	parts := strings.FieldsFunc(value, func(r rune) bool { return r == '|' || r == ',' || r == ' ' })
+	if len(parts) == 2 && slices.Contains(parts, "pap") && slices.Contains(parts, "chap") {
+		return "pap|chap"
+	}
+	return value
 }
 
 func BearerIPFamily(ipType string) (uint32, error) {
 	switch strings.ToLower(strings.TrimSpace(ipType)) {
-	case "", "ipv4v6":
-		return bearerIPFamilyIPv4V6, nil
 	case "ipv4":
-		return bearerIPFamilyIPv4, nil
+		return 1, nil
 	case "ipv6":
-		return bearerIPFamilyIPv6, nil
+		return 2, nil
+	case "", "ipv4v6", "ipv4+ipv6":
+		return 4, nil
 	default:
 		return 0, fmt.Errorf("%w: %s", ErrUnsupportedBearerIPType, ipType)
 	}
 }
 
-func bearerIPFamilyString(ipType uint32) string {
-	switch ipType {
-	case bearerIPFamilyIPv4:
-		return "ipv4"
-	case bearerIPFamilyIPv6:
-		return "ipv6"
-	case bearerIPFamilyIPv4V6:
-		return "ipv4v6"
-	default:
-		return ""
-	}
-}
-
 func BearerAllowedAuth(auth string) (uint32, error) {
-	auth = strings.ToLower(strings.TrimSpace(auth))
-	if auth == "" {
-		return 0, nil
+	switch normalizeAuthenticationName(auth) {
+	case "none":
+		return 1, nil
+	case "", "pap|chap":
+		return 2 | 4, nil
+	case "pap":
+		return 2, nil
+	case "chap":
+		return 4, nil
+	case "mschapv2":
+		return 16, nil
+	default:
+		return 0, fmt.Errorf("%w: %s", ErrUnsupportedBearerAuth, auth)
 	}
-
-	var result uint32
-	for _, part := range strings.FieldsFunc(auth, func(r rune) bool {
-		return r == '|' || r == ',' || r == ' '
-	}) {
-		switch strings.TrimSpace(part) {
-		case "":
-			continue
-		case "none":
-			result |= bearerAllowedAuthNone
-		case "pap":
-			result |= bearerAllowedAuthPAP
-		case "chap":
-			result |= bearerAllowedAuthCHAP
-		case "mschap":
-			result |= bearerAllowedAuthMSCHAP
-		case "mschapv2":
-			result |= bearerAllowedAuthMSCHAPV2
-		case "eap":
-			result |= bearerAllowedAuthEAP
-		default:
-			return 0, fmt.Errorf("%w: %s", ErrUnsupportedBearerAuth, part)
-		}
-	}
-	if result&bearerAllowedAuthNone != 0 && result != bearerAllowedAuthNone {
-		return 0, fmt.Errorf("%w: none cannot be combined with other methods", ErrUnsupportedBearerAuth)
-	}
-	return result, nil
-}
-
-func bearerAllowedAuthString(auth uint32) string {
-	if auth == 0 {
-		return ""
-	}
-	parts := make([]string, 0, 6)
-	for _, item := range []struct {
-		mask uint32
-		name string
-	}{
-		{bearerAllowedAuthNone, "none"},
-		{bearerAllowedAuthPAP, "pap"},
-		{bearerAllowedAuthCHAP, "chap"},
-		{bearerAllowedAuthMSCHAP, "mschap"},
-		{bearerAllowedAuthMSCHAPV2, "mschapv2"},
-		{bearerAllowedAuthEAP, "eap"},
-	} {
-		if auth&item.mask != 0 {
-			parts = append(parts, item.name)
-		}
-	}
-	return strings.Join(parts, "|")
 }

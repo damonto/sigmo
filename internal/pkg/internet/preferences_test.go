@@ -132,7 +132,7 @@ func TestUpdateQMAPPreferencesPersistsAlwaysOn(t *testing.T) {
 	if !updated.prefs.AlwaysOn || !updated.tracked[0].prefs.AlwaysOn {
 		t.Fatalf("QMAP preferences = %+v, want Always On enabled", updated)
 	}
-	if got := connector.qmapConnectionFor("modem-1"); got != updated {
+	if got := connector.qmapConnectionFor("modem-1", 0); got != updated {
 		t.Fatalf("stored QMAP connection = %p, want %p", got, updated)
 	}
 	if _, ok, err := connector.loadAlwaysOnStateForProfile(context.Background(), "profile-1"); err != nil || !ok {

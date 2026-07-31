@@ -12,8 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/godbus/dbus/v5"
-
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
 )
@@ -1911,6 +1909,8 @@ func (m fakeInternetModem) id() string {
 	return m.modemID
 }
 
+func (m fakeInternetModem) generation() uint64 { return 0 }
+
 func (m fakeInternetModem) operatorIdentifier() string {
 	return m.operatorID
 }
@@ -1935,7 +1935,7 @@ func (m fakeInternetModem) imsi() string {
 	return m.imsiValue
 }
 
-func (m fakeInternetModem) bearer(context.Context, dbus.ObjectPath) (*mmodem.Bearer, error) {
+func (m fakeInternetModem) bearer(context.Context, uint64) (*mmodem.Bearer, error) {
 	return nil, errors.New("bearer lookup unused")
 }
 
@@ -1950,14 +1950,10 @@ func (m fakeInternetModem) connectBearer(context.Context, mmodem.BearerPropertie
 	return nil, errors.New("connect bearer unused")
 }
 
-func (m fakeInternetModem) disconnectBearer(context.Context, dbus.ObjectPath) error {
+func (m fakeInternetModem) disconnectBearer(context.Context, uint64) error {
 	return errors.New("disconnect bearer unused")
 }
 
-func (m fakeInternetModem) deleteBearer(context.Context, dbus.ObjectPath) error {
+func (m fakeInternetModem) deleteBearer(context.Context, uint64) error {
 	return errors.New("delete bearer unused")
-}
-
-func (m fakeInternetModem) refreshModemManager(context.Context) error {
-	return errors.New("refresh ModemManager unused")
 }

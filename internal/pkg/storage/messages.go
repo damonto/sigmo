@@ -32,6 +32,14 @@ type Message struct {
 	Status      string
 	Incoming    bool
 	Routed      bool
+	ModemRefs   []ModemMessageRef
+}
+
+type ModemMessageRef struct {
+	ModemID    string
+	Generation uint64
+	Storage    uint8
+	ID         uint32
 }
 
 type MessageStatusUpdate struct {
@@ -47,7 +55,15 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 		return false, err
 	}
 	now := nowText()
-	result, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin message insert: %w", err)
+	}
+	defer func() {
+		// Rollback is a no-op after a successful commit.
+		_ = tx.Rollback()
+	}()
+	result, err := tx.ExecContext(ctx, `
 		INSERT INTO messages (
 			profile_id, source, external_key, fingerprint, sender, recipient, text,
 			timestamp, status, incoming, wifi_calling, created_at, updated_at
@@ -63,7 +79,35 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read inserted message count: %w", err)
 	}
-	return affected > 0, nil
+	if affected == 0 {
+		if err := tx.Commit(); err != nil {
+			return false, fmt.Errorf("commit existing message: %w", err)
+		}
+		return false, nil
+	}
+	messageID, err := result.LastInsertId()
+	if err != nil {
+		return false, fmt.Errorf("read inserted message id: %w", err)
+	}
+	for _, ref := range msg.ModemRefs {
+		modemID := strings.TrimSpace(ref.ModemID)
+		if modemID == "" {
+			modemID = msg.ModemID
+		}
+		if modemID == "" {
+			return false, errors.New("modem message ref requires modem id")
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO modem_message_refs (message_id, modem_id, generation, storage, ref_id)
+			VALUES (?, ?, ?, ?, ?)
+		`, messageID, modemID, ref.Generation, ref.Storage, ref.ID); err != nil {
+			return false, fmt.Errorf("insert modem message ref: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit message insert: %w", err)
+	}
+	return true, nil
 }
 
 func (s *Store) UpdateMessageStatus(ctx context.Context, update MessageStatusUpdate) (bool, error) {
@@ -146,6 +190,9 @@ func (s *Store) ListConversations(ctx context.Context, profileID string, query s
 		}
 		return b.Timestamp.Compare(a.Timestamp)
 	})
+	if err := s.loadModemMessageRefs(ctx, messages); err != nil {
+		return nil, err
+	}
 	return messages, nil
 }
 
@@ -165,7 +212,14 @@ func (s *Store) ListByParticipant(ctx context.Context, profileID string, partici
 		return nil, fmt.Errorf("list messages by participant: %w", err)
 	}
 	defer rows.Close()
-	return scanMessages(rows)
+	messages, err := scanMessages(rows)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.loadModemMessageRefs(ctx, messages); err != nil {
+		return nil, err
+	}
+	return messages, nil
 }
 
 func (s *Store) DeleteByParticipant(ctx context.Context, profileID string, participant string) ([]Message, error) {
@@ -176,14 +230,61 @@ func (s *Store) DeleteByParticipant(ctx context.Context, profileID string, parti
 	if len(messages) == 0 {
 		return nil, nil
 	}
-	_, err = s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin message delete: %w", err)
+	}
+	defer func() {
+		// Rollback is a no-op after a successful commit.
+		_ = tx.Rollback()
+	}()
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM modem_message_refs
+		WHERE message_id IN (
+			SELECT id FROM messages WHERE profile_id = ? AND (sender = ? OR recipient = ?)
+		)
+	`, strings.TrimSpace(profileID), strings.TrimSpace(participant), strings.TrimSpace(participant)); err != nil {
+		return nil, fmt.Errorf("delete modem message refs: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, `
 		DELETE FROM messages
 		WHERE profile_id = ? AND (sender = ? OR recipient = ?)
 	`, strings.TrimSpace(profileID), strings.TrimSpace(participant), strings.TrimSpace(participant))
 	if err != nil {
 		return nil, fmt.Errorf("delete messages by participant: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit message delete: %w", err)
+	}
 	return messages, nil
+}
+
+func (s *Store) loadModemMessageRefs(ctx context.Context, messages []Message) error {
+	for i := range messages {
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT modem_id, generation, storage, ref_id
+			FROM modem_message_refs
+			WHERE message_id = ?
+			ORDER BY generation, storage, ref_id
+		`, messages[i].ID)
+		if err != nil {
+			return fmt.Errorf("list modem message refs: %w", err)
+		}
+		for rows.Next() {
+			var ref ModemMessageRef
+			if err := rows.Scan(&ref.ModemID, &ref.Generation, &ref.Storage, &ref.ID); err != nil {
+				rows.Close()
+				return fmt.Errorf("scan modem message ref: %w", err)
+			}
+			messages[i].ModemRefs = append(messages[i].ModemRefs, ref)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return fmt.Errorf("list modem message refs: %w", err)
+		}
+	}
+	return nil
 }
 
 func normalizeMessage(msg Message) Message {

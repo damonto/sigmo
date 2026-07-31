@@ -2,26 +2,21 @@ package modem
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 
-	"github.com/godbus/dbus/v5"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
-const ModemSimInterface = ModemManagerInterface + ".Sim"
+type SIMs struct{ modem *Modem }
 
-type SIMs struct {
-	modem *Modem
-}
-
-func (m *Modem) SIMs() *SIMs {
-	return &SIMs{modem: m}
-}
+func (m *Modem) SIMs() *SIMs { return &SIMs{modem: m} }
 
 type SIM struct {
-	dbusObject         dbus.BusObject
-	Path               dbus.ObjectPath
+	modem              *Modem
+	Slot               uint32
 	Active             bool
 	Identifier         string
 	ATR                []byte
@@ -30,100 +25,60 @@ type SIM struct {
 	OperatorIdentifier string
 	OperatorName       string
 	GID1               string
+	SPN                string
 }
 
 func (s *SIMs) Primary(ctx context.Context) (*SIM, error) {
-	if s.modem.Sim == nil {
-		return nil, errors.New("primary SIM not available")
+	if s == nil || s.modem == nil || s.modem.core == nil {
+		return nil, errModemRequired
 	}
-	return s.Get(ctx, s.modem.Sim.Path)
-}
-
-func (sims *SIMs) Reference(path dbus.ObjectPath) (*SIM, error) {
-	if path == "" || path == "/" {
-		return nil, errors.New("SIM path is required")
-	}
-	sim := &SIM{Path: path}
-	if sims.modem.dbusConn != nil {
-		sim.dbusObject = sims.modem.dbusConn.Object(ModemManagerInterface, path)
-	}
-	return sim, nil
-}
-
-func (sims *SIMs) Get(ctx context.Context, path dbus.ObjectPath) (*SIM, error) {
-	if path == "" || path == "/" {
-		return nil, errors.New("SIM path is required")
-	}
-	var variant dbus.Variant
-	var err error
-	sim, err := sims.Reference(path)
+	info, err := s.modem.core.SIMInfo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var dbusObject dbus.BusObject
-	if sim.dbusObject != nil {
-		dbusObject = sim.dbusObject
-	} else {
-		dbusObject, err = systemBusObject(path)
-		if err != nil {
-			return nil, err
+	s.modem.applySIMInfo(info)
+	return cloneSIM(s.modem, s.modem.Snapshot().SIM), nil
+}
+
+func (s *SIMs) Get(ctx context.Context, slot uint32) (*SIM, error) {
+	if s == nil || s.modem == nil || s.modem.core == nil {
+		return nil, errModemRequired
+	}
+	if slot == 0 || slot > 255 {
+		return nil, fmt.Errorf("SIM slot %d is invalid", slot)
+	}
+	info, infoErr := s.modem.core.SIMInfo(ctx)
+	if infoErr == nil && uint32(info.Slot) == slot {
+		s.modem.applySIMInfo(info)
+		return cloneSIM(s.modem, s.modem.Snapshot().SIM), nil
+	}
+	slots, err := s.modem.core.SIMSlots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.modem.applySIMSlots(slots)
+	for _, item := range slots {
+		if uint32(item.Index) != slot {
+			continue
 		}
-		sim.dbusObject = dbusObject
+		return &SIM{modem: s.modem, Slot: slot, Active: item.Active, Identifier: strings.TrimSpace(item.ICCID), Eid: strings.TrimSpace(item.EID)}, nil
 	}
+	return nil, fmt.Errorf("SIM slot %d: %w", slot, ErrNotFound)
+}
 
-	variant, err = dbusProperty(ctx, dbusObject, ModemSimInterface, "Active")
-	if err != nil {
-		return nil, err
+func simFromInfo(m *Modem, info wwanmodem.SIMInfo) *SIM {
+	return &SIM{
+		modem: m, Slot: uint32(info.Slot), Active: true,
+		Identifier: strings.TrimSpace(info.ICCID), ATR: slices.Clone(info.ATR),
+		Eid: strings.TrimSpace(info.EID), Imsi: strings.TrimSpace(info.IMSI),
+		OperatorIdentifier: strings.TrimSpace(info.OperatorID), OperatorName: strings.TrimSpace(info.OperatorName),
+		GID1: strings.ToUpper(strings.TrimSpace(info.GID1)), SPN: strings.TrimSpace(info.SPN),
 	}
-	sim.Active = boolFromVariant(variant)
-
-	variant, err = dbusProperty(ctx, dbusObject, ModemSimInterface, "SimIdentifier")
-	if err != nil {
-		return nil, err
-	}
-	sim.Identifier = stringFromVariant(variant)
-
-	variant, err = dbusProperty(ctx, dbusObject, ModemSimInterface, "Eid")
-	if err != nil {
-		return nil, err
-	}
-	sim.Eid = stringFromVariant(variant)
-
-	variant, err = dbusProperty(ctx, dbusObject, ModemSimInterface, "Imsi")
-	if err != nil {
-		return nil, err
-	}
-	sim.Imsi = stringFromVariant(variant)
-
-	variant, err = dbusProperty(ctx, dbusObject, ModemSimInterface, "OperatorIdentifier")
-	if err != nil {
-		return nil, err
-	}
-	sim.OperatorIdentifier = stringFromVariant(variant)
-
-	variant, err = dbusProperty(ctx, dbusObject, ModemSimInterface, "OperatorName")
-	if err != nil {
-		return nil, err
-	}
-	sim.OperatorName = stringFromVariant(variant)
-
-	if variant, err = dbusProperty(ctx, dbusObject, ModemSimInterface, "Gid1"); err == nil {
-		sim.GID1 = strings.ToUpper(hex.EncodeToString(bytesFromVariant(variant)))
-	}
-	return sim, nil
 }
 
 func (s *SIM) SendPin(ctx context.Context, pin string) error {
-	if s == nil || !validSIMObjectPath(s.Path) {
-		return errors.New("SIM path is required")
+	if s == nil || s.modem == nil || s.modem.core == nil {
+		return errors.New("SIM is required")
 	}
-	dbusObject := s.dbusObject
-	if dbusObject == nil {
-		var err error
-		dbusObject, err = systemBusObject(s.Path)
-		if err != nil {
-			return err
-		}
-	}
-	return dbusObject.CallWithContext(ctx, ModemSimInterface+".SendPin", 0, pin).Err
+	return s.modem.core.SendPIN(ctx, pin)
 }

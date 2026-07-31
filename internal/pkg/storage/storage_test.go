@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"testing"
@@ -219,6 +220,168 @@ func TestMessages(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestModemMessageRefsIncludeGenerationAndZeroID(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	base := time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC)
+
+	messages := []Message{
+		{
+			ModemID:     "modem-a",
+			ProfileID:   "profile-a",
+			Source:      MessageSourceModem,
+			ExternalKey: "g1:0",
+			Sender:      "+100",
+			Recipient:   "+200",
+			Text:        "first",
+			Timestamp:   base,
+			Status:      "received",
+			Incoming:    true,
+			ModemRefs: []ModemMessageRef{
+				{Generation: 1, Storage: 2, ID: 0},
+			},
+		},
+		{
+			ModemID:     "modem-a",
+			ProfileID:   "profile-a",
+			Source:      MessageSourceModem,
+			ExternalKey: "g2:0",
+			Sender:      "+100",
+			Recipient:   "+200",
+			Text:        "second",
+			Timestamp:   base.Add(time.Second),
+			Status:      "received",
+			Incoming:    true,
+			ModemRefs: []ModemMessageRef{
+				{Generation: 2, Storage: 2, ID: 0},
+			},
+		},
+	}
+	for _, msg := range messages {
+		inserted, err := store.InsertMessage(ctx, msg)
+		if err != nil {
+			t.Fatalf("InsertMessage() error = %v", err)
+		}
+		if !inserted {
+			t.Fatal("InsertMessage() = false, want true")
+		}
+	}
+
+	got, err := store.ListByParticipant(ctx, "profile-a", "+100")
+	if err != nil {
+		t.Fatalf("ListByParticipant() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ListByParticipant() length = %d, want 2", len(got))
+	}
+	for i, wantGeneration := range []uint64{1, 2} {
+		if len(got[i].ModemRefs) != 1 {
+			t.Fatalf("message %d refs = %v, want one ref", i, got[i].ModemRefs)
+		}
+		ref := got[i].ModemRefs[0]
+		if ref.ModemID != "modem-a" || ref.Generation != wantGeneration || ref.Storage != 2 || ref.ID != 0 {
+			t.Fatalf("message %d ref = %+v, want generation %d zero id", i, ref, wantGeneration)
+		}
+	}
+}
+
+func TestMigrateModemMessageRefGeneration(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sigmo.db")
+	dsn := (&url.URL{Scheme: "file", Path: path}).String()
+	db, err := sql.Open("sqlite3", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	store := &Store{db: db}
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE messages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			profile_id TEXT NOT NULL,
+			source TEXT NOT NULL,
+			external_key TEXT NOT NULL,
+			fingerprint TEXT NOT NULL DEFAULT '',
+			sender TEXT NOT NULL,
+			recipient TEXT NOT NULL,
+			text TEXT NOT NULL,
+			timestamp TEXT NOT NULL,
+			status TEXT NOT NULL,
+			incoming INTEGER NOT NULL,
+			wifi_calling INTEGER NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE (profile_id, source, external_key)
+		);
+		CREATE TABLE modem_message_refs (
+			message_id INTEGER NOT NULL,
+			modem_id TEXT NOT NULL,
+			storage INTEGER NOT NULL,
+			ref_id INTEGER NOT NULL,
+			PRIMARY KEY (message_id, modem_id, storage, ref_id),
+			FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+		);
+		CREATE UNIQUE INDEX idx_modem_message_ref
+		ON modem_message_refs(modem_id, storage, ref_id);
+	`)
+	if err != nil {
+		t.Fatalf("create legacy message schema: %v", err)
+	}
+	now := nowText()
+	for i := 1; i <= 2; i++ {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO messages (
+				profile_id, source, external_key, sender, recipient, text,
+				timestamp, status, incoming, wifi_calling, created_at, updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, "profile-a", MessageSourceModem, fmt.Sprintf("legacy-%d", i), "+100", "+200", "hello", now, "received", 1, 0, now, now); err != nil {
+			t.Fatalf("insert legacy message %d: %v", i, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO modem_message_refs (message_id, modem_id, storage, ref_id)
+		VALUES (1, 'modem-a', 2, 0)
+	`); err != nil {
+		t.Fatalf("insert legacy modem message ref: %v", err)
+	}
+
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate() error = %v", err)
+	}
+	if err := store.Migrate(ctx); err != nil {
+		t.Fatalf("second Migrate() error = %v", err)
+	}
+
+	var generation uint64
+	if err := db.QueryRowContext(ctx, `SELECT generation FROM modem_message_refs WHERE message_id = 1`).Scan(&generation); err != nil {
+		t.Fatalf("read migrated generation: %v", err)
+	}
+	if generation != 0 {
+		t.Fatalf("legacy generation = %d, want 0", generation)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO modem_message_refs (message_id, modem_id, generation, storage, ref_id)
+		VALUES (2, 'modem-a', 1, 2, 0)
+	`); err != nil {
+		t.Fatalf("reuse modem ref in replacement generation: %v", err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM modem_message_refs
+		WHERE modem_id = 'modem-a' AND storage = 2 AND ref_id = 0
+	`).Scan(&count); err != nil {
+		t.Fatalf("count generation-aware refs: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("generation-aware ref count = %d, want 2", count)
+	}
 }
 
 func TestUpdateMessageStatus(t *testing.T) {

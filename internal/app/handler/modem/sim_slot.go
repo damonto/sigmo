@@ -44,13 +44,14 @@ func (s *simSlot) targetIndex(ctx context.Context, modem *mmodem.Modem, identifi
 	if identifier == "" {
 		return 0, errSimIdentifierRequired
 	}
-	if len(modem.SimSlots) == 0 {
+	slots := modem.Snapshot().SIMSlots
+	if len(slots) == 0 {
 		return 0, errSimSlotsUnavailable
 	}
-	for index, slotPath := range modem.SimSlots {
+	for _, slotPath := range slots {
 		sim, err := modem.SIMs().Get(ctx, slotPath)
 		if err != nil {
-			return 0, fmt.Errorf("fetch SIM for slot %s: %w", slotPath, err)
+			return 0, fmt.Errorf("fetch SIM for slot %d: %w", slotPath, err)
 		}
 		if sim.Identifier != identifier {
 			continue
@@ -58,7 +59,7 @@ func (s *simSlot) targetIndex(ctx context.Context, modem *mmodem.Modem, identifi
 		if sim.Active {
 			return 0, errSimSlotAlreadyActive
 		}
-		return uint32(index + 1), nil
+		return slotPath, nil
 	}
 	return 0, errSimSlotNotFound
 }

@@ -261,19 +261,20 @@ func devicePortType(portType ModemPortType) (wwan.PortType, bool) {
 	}
 }
 
-// ActiveSIMSlot returns the selected SIM slot, defaulting ModemManager's zero
-// value to the first slot.
+// ActiveSIMSlot returns the selected SIM slot, defaulting an unknown slot to
+// the first slot.
 func ActiveSIMSlot(m *Modem) (uint8, error) {
 	if m == nil {
 		return 0, errModemRequired
 	}
-	if m.PrimarySimSlot == 0 {
+	slot := m.Snapshot().PrimarySIMSlot
+	if slot == 0 {
 		return 1, nil
 	}
-	if m.PrimarySimSlot > maxSIMSlot {
-		return 0, fmt.Errorf("sim slot %d is out of range", m.PrimarySimSlot)
+	if slot > maxSIMSlot {
+		return 0, fmt.Errorf("sim slot %d is out of range", slot)
 	}
-	return uint8(m.PrimarySimSlot), nil
+	return uint8(slot), nil
 }
 
 func deviceTargetSlot(m *Modem, target SIMTarget) (uint8, error) {

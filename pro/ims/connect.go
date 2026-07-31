@@ -19,7 +19,6 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/wwan-go/qcom"
-	"github.com/godbus/dbus/v5"
 )
 
 var retryDelays = []time.Duration{
@@ -63,7 +62,7 @@ type internetRestorer interface {
 	SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, enabled bool) error
 	SelectQualcomm410Mode(modem *mmodem.Modem) error
 	SetQualcomm410Enabled(ctx context.Context, modem *mmodem.Modem, enabled bool) error
-	InvalidateQualcomm410(modemID string) error
+	InvalidateModem(ctx context.Context, modem *mmodem.Modem) error
 }
 
 type connectAttempt struct {
@@ -159,15 +158,16 @@ func (c *coordinator) start(modem *mmodem.Modem, profileID string) {
 	c.nextSessionID++
 	sessionID := c.nextSessionID
 	c.sessions[modemID] = &sessionState{
-		id:        sessionID,
-		modem:     modem,
-		cancel:    cancel,
-		done:      done,
-		reconnect: make(chan struct{}, 1),
-		phase:     sessionPhaseConnecting,
-		modemPath: modem.Path(),
-		profileID: profileID,
-		calls:     make(map[string]*voiceCallState),
+		id:         sessionID,
+		modem:      modem,
+		cancel:     cancel,
+		done:       done,
+		reconnect:  make(chan struct{}, 1),
+		phase:      sessionPhaseConnecting,
+		deviceKey:  modem.Path(),
+		generation: modem.Generation(),
+		profileID:  profileID,
+		calls:      make(map[string]*voiceCallState),
 	}
 	c.mu.Unlock()
 	go func() {
@@ -985,14 +985,14 @@ func (c *coordinator) stopAll() []*mmodem.Modem {
 	return modems
 }
 
-func (c *coordinator) stopByPath(path dbus.ObjectPath) {
-	if path == "" {
+func (c *coordinator) stopByDevice(deviceKey string, generation uint64) {
+	if deviceKey == "" {
 		return
 	}
 	c.mu.Lock()
 	var modemIDs []string
 	for modemID, session := range c.sessions {
-		if session != nil && session.modemPath == path {
+		if session != nil && session.deviceKey == deviceKey && (generation == 0 || session.generation == generation) {
 			modemIDs = append(modemIDs, modemID)
 		}
 	}

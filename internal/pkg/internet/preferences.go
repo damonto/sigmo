@@ -25,7 +25,7 @@ func (c *Connector) UpdatePreferences(ctx context.Context, modem *mmodem.Modem, 
 	modemID := access.id()
 	defer c.lockModem(modemID)()
 
-	if connection := c.qmapConnectionFor(modemID); connection != nil {
+	if connection := c.qmapConnectionFor(modemID, access.generation()); connection != nil {
 		updated, err := c.updateQMAPPreferences(ctx, access, connection, next)
 		if err != nil {
 			return nil, err
@@ -295,10 +295,14 @@ func (c *Connector) applyProxyPreference(ctx context.Context, modemID, interface
 	return nil
 }
 
-func (c *Connector) qmapConnectionFor(modemID string) *qmapConnection {
+func (c *Connector) qmapConnectionFor(modemID string, generation uint64) *qmapConnection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.qmapConnections[modemID]
+	connection := c.qmapConnections[modemID]
+	if connection == nil || !sameModemGeneration(connection.generation, generation) {
+		return nil
+	}
+	return connection
 }
 
 func (c *Connector) qmapConnectionResponse(modemID string, connection *qmapConnection) *Connection {

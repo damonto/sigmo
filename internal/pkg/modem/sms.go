@@ -1,77 +1,43 @@
 package modem
 
 import (
-	"context"
+	"slices"
 	"time"
 
-	"github.com/godbus/dbus/v5"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
-const ModemSMSInterface = ModemManagerInterface + ".Sms"
+type MessageRef = wwanmodem.MessageRef
+type MessageStorage = wwanmodem.MessageStorage
 
 type SMS struct {
-	objectPath dbus.ObjectPath
-	State      SMSState
-	Number     string
-	Text       string
-	Timestamp  time.Time
+	Generation        uint64
+	Refs              []MessageRef
+	MessageReferences []uint32
+	State             SMSState
+	Storage           SMSStorage
+	Number            string
+	Text              string
+	Timestamp         time.Time
 }
 
-func (sms *SMS) Path() dbus.ObjectPath {
-	return sms.objectPath
+func smsFromWWAN(modem *Modem, message wwanmodem.Message) *SMS {
+	generation := uint64(0)
+	if modem != nil {
+		generation = modem.Generation()
+	}
+	return &SMS{Generation: generation, Refs: slices.Clone(message.Refs), State: legacySMSState(message.State), Storage: legacySMSStorage(message.Storage), Number: message.Number, Text: message.Text, Timestamp: message.Timestamp}
 }
 
-func (msg *Messaging) Retrieve(ctx context.Context, objectPath dbus.ObjectPath) (*SMS, error) {
-	dbusObject, err := systemBusObject(objectPath)
-	if err != nil {
-		return nil, err
+func legacySMSState(state wwanmodem.MessageState) SMSState {
+	switch state {
+	case wwanmodem.MessageStateReceivedUnread, wwanmodem.MessageStateReceivedRead:
+		return SMSStateReceived
+	case wwanmodem.MessageStateStoredSent:
+		return SMSStateSent
+	case wwanmodem.MessageStateStoredUnsent:
+		return SMSStateStored
+	default:
+		return SMSStateUnknown
 	}
-	sms := SMS{objectPath: objectPath}
-	variant, err := dbusProperty(ctx, dbusObject, ModemSMSInterface, "State")
-	if err != nil {
-		return nil, err
-	}
-	sms.State = SMSState(uintFromVariant[uint32](variant))
-
-	variant, err = dbusProperty(ctx, dbusObject, ModemSMSInterface, "Number")
-	if err != nil {
-		return nil, err
-	}
-	sms.Number = stringFromVariant(variant)
-
-	variant, err = dbusProperty(ctx, dbusObject, ModemSMSInterface, "Text")
-	if err != nil {
-		return nil, err
-	}
-	sms.Text = stringFromVariant(variant)
-
-	variant, err = dbusProperty(ctx, dbusObject, ModemSMSInterface, "Timestamp")
-	if err != nil {
-		return nil, err
-	}
-	if t := stringFromVariant(variant); t != "" {
-		if len(t) >= 3 && (t[len(t)-3] == '+' || t[len(t)-3] == '-') {
-			t = t + ":00"
-		}
-		sms.Timestamp, err = time.Parse(time.RFC3339, t)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return &sms, nil
-}
-
-func (msg *Messaging) Send(ctx context.Context, to string, text string) (*SMS, error) {
-	path, err := msg.Create(ctx, to, text)
-	if err != nil {
-		return nil, err
-	}
-	dbusObject, err := systemBusObject(path)
-	if err != nil {
-		return nil, err
-	}
-	if err := dbusObject.CallWithContext(ctx, ModemSMSInterface+".Send", 0).Err; err != nil {
-		return nil, err
-	}
-	return msg.Retrieve(ctx, path)
 }

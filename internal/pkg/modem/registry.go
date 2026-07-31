@@ -6,52 +6,48 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/godbus/dbus/v5"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
-const (
-	ModemManagerManagedObjects = "org.freedesktop.DBus.ObjectManager.GetManagedObjects"
-	ModemManagerObjectPath     = "/org/freedesktop/ModemManager1"
-
-	ModemManagerInterface = "org.freedesktop.ModemManager1"
-
-	ModemManagerInterfacesAdded   = "org.freedesktop.DBus.ObjectManager.InterfacesAdded"
-	ModemManagerInterfacesRemoved = "org.freedesktop.DBus.ObjectManager.InterfacesRemoved"
+var (
+	registryOpenTimeout     = 15 * time.Second
+	registryWatchRetryDelay = time.Second
 )
-
-var waitForModemRefreshInterval = time.Second
-
-const modemSignalLoadTimeout = 5 * time.Second
-
-type Registry struct {
-	dbusConn   *dbus.Conn
-	dbusObject dbus.BusObject
-	modems     map[dbus.ObjectPath]*Modem
-	mu         sync.RWMutex
-	startMu    sync.Mutex
-	signalChan chan *dbus.Signal
-	done       chan struct{}
-	subs       []subscription
-	nextSubID  uint64
-	subscribed bool
-	closed     bool
-	openDevice deviceControlOpener
-}
 
 var (
 	ErrNotFound      = errors.New("modem not found")
 	errModemRequired = errors.New("modem is required")
 )
 
+type Registry struct {
+	mu             sync.RWMutex
+	startMu        sync.Mutex
+	modems         map[string]*Modem
+	subs           []subscription
+	nextSubID      uint64
+	nextGeneration uint64
+	started        bool
+	closed         bool
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+
+	discover     func(context.Context) ([]wwanmodem.Device, error)
+	watchDevices func(context.Context) (<-chan wwanmodem.Result[wwanmodem.DeviceEvent], error)
+	open         func(context.Context, wwanmodem.Device, uint64) (*Modem, error)
+	openDevice   deviceControlOpener
+}
+
 type ModemEventType int
 
 const (
 	ModemEventAdded ModemEventType = iota
 	ModemEventRemoved
+	ModemEventChanged
 )
 
 func (t ModemEventType) String() string {
@@ -60,16 +56,21 @@ func (t ModemEventType) String() string {
 		return "added"
 	case ModemEventRemoved:
 		return "removed"
+	case ModemEventChanged:
+		return "changed"
 	default:
 		return "unknown"
 	}
 }
 
 type ModemEvent struct {
-	Type     ModemEventType
-	Modem    *Modem
-	Path     dbus.ObjectPath
-	Snapshot map[dbus.ObjectPath]*Modem
+	Type         ModemEventType
+	Modem        *Modem
+	Previous     *Modem
+	Path         string
+	PreviousPath string
+	Generation   uint64
+	Snapshot     map[string]*Modem
 }
 
 type subscription struct {
@@ -78,648 +79,550 @@ type subscription struct {
 }
 
 func NewRegistry() (*Registry, error) {
-	m := &Registry{
-		modems: make(map[dbus.ObjectPath]*Modem, 16),
-	}
-	var err error
-	m.dbusConn, err = dbus.SystemBus()
-	if err != nil {
-		return nil, fmt.Errorf("connect system bus: %w", err)
-	}
-	m.dbusObject = m.dbusConn.Object(ModemManagerInterface, ModemManagerObjectPath)
-	return m, nil
+	return &Registry{
+		modems:       make(map[string]*Modem),
+		discover:     wwanmodem.Discover,
+		watchDevices: wwanmodem.WatchDevices,
+		open:         openDiscoveredModem,
+	}, nil
 }
 
-func (m *Registry) ScanDevices(ctx context.Context) error {
-	return m.dbusObject.CallWithContext(ctx, ModemManagerInterface+".ScanDevices", 0).Err
-}
-
-func (m *Registry) InhibitDevice(ctx context.Context, uid string, inhibit bool) error {
-	return m.dbusObject.CallWithContext(ctx, ModemManagerInterface+".InhibitDevice", 0, uid, inhibit).Err
-}
-
-func (m *Registry) Modems(ctx context.Context) (map[dbus.ObjectPath]*Modem, error) {
-	managedObjects := make(map[dbus.ObjectPath]map[string]map[string]dbus.Variant)
-	if err := m.dbusObject.CallWithContext(ctx, ModemManagerManagedObjects, 0).Store(&managedObjects); err != nil {
+func (r *Registry) Modems(ctx context.Context) (map[string]*Modem, error) {
+	if err := r.ensureStarted(ctx); err != nil {
 		return nil, err
 	}
-	modems := make(map[dbus.ObjectPath]*Modem, len(managedObjects))
-	for objectPath, data := range managedObjects {
-		modemData, ok := data[ModemInterface]
-		if !ok {
-			continue
-		}
-		modem, err := m.createModem(ctx, objectPath, modemData)
-		if err != nil {
-			slog.Error("create modem", "error", err)
-			continue
-		}
-		modems[objectPath] = modem
-	}
-	m.mu.Lock()
-	m.modems = modems
-	snapshot := m.copyModemsLocked()
-	m.mu.Unlock()
-	return snapshot, nil
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.copyModemsLocked(), nil
 }
 
-func (m *Registry) Find(ctx context.Context, id string) (*Modem, error) {
-	modems, err := m.Modems(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing modems: %w", err)
+func (r *Registry) Find(ctx context.Context, id string) (*Modem, error) {
+	if err := r.ensureStarted(ctx); err != nil {
+		return nil, err
 	}
+	return r.findModem(id)
+}
+
+func (r *Registry) Subscribe(fn func(ModemEvent) error) (func(), error) {
+	if fn == nil {
+		return nil, errors.New("modem subscriber is required")
+	}
+	if err := r.ensureStarted(context.Background()); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil, errors.New("modem registry is closed")
+	}
+	r.nextSubID++
+	id := r.nextSubID
+	r.subs = append(r.subs, subscription{id: id, fn: fn})
+	r.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			r.mu.Lock()
+			for i := range r.subs {
+				if r.subs[i].id == id {
+					r.subs = append(r.subs[:i], r.subs[i+1:]...)
+					break
+				}
+			}
+			r.mu.Unlock()
+		})
+	}, nil
+}
+
+func (r *Registry) ensureStarted(ctx context.Context) error {
+	r.startMu.Lock()
+	defer r.startMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.RLock()
+	started, closed := r.started, r.closed
+	r.mu.RUnlock()
+	if closed {
+		return errors.New("modem registry is closed")
+	}
+	if started {
+		return nil
+	}
+	runCtx, cancel := context.WithCancel(context.Background())
+	devices, err := r.discover(ctx)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("discover modems: %w", err)
+	}
+	opened := make(map[string]*Modem, len(devices))
+	for _, device := range devices {
+		key := physicalDeviceKey(device)
+		generation := r.nextGenerationToken()
+		modem, err := r.open(ctx, device, generation)
+		if err != nil {
+			slog.Warn("open discovered modem", "device", device.Path, "physical_path", key, "error", err)
+			continue
+		}
+		modem.startRuntimeWatchers(runCtx)
+		if previous := opened[key]; previous != nil {
+			_ = previous.Close()
+		}
+		opened[key] = modem
+	}
+	stream, err := r.watchDevices(runCtx)
+	if err == nil && stream == nil {
+		err = errors.New("modem device watcher returned a nil stream")
+	}
+	if err != nil {
+		cancel()
+		for _, modem := range opened {
+			_ = modem.Close()
+		}
+		return fmt.Errorf("watch modem devices: %w", err)
+	}
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		cancel()
+		for _, modem := range opened {
+			_ = modem.Close()
+		}
+		return errors.New("modem registry is closed")
+	}
+	r.modems = opened
+	r.started = true
+	r.cancel = cancel
+	r.mu.Unlock()
+	r.wg.Add(1)
+	go r.watchLoop(runCtx, stream)
+	return nil
+}
+
+func (r *Registry) watchLoop(ctx context.Context, stream <-chan wwanmodem.Result[wwanmodem.DeviceEvent]) {
+	defer r.wg.Done()
+	for ctx.Err() == nil {
+		if stream != nil {
+			err := r.consumeDeviceStream(ctx, stream)
+			if ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				slog.Error("modem device watcher stopped", "error", err)
+			}
+		}
+		if err := r.reconcile(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("reconcile modems after watcher stop", "error", err)
+		}
+		if err := sleepContext(ctx, registryWatchRetryDelay); err != nil {
+			return
+		}
+		next, err := r.watchDevices(ctx)
+		if err != nil {
+			if ctx.Err() == nil {
+				slog.Error("restart modem device watcher", "error", err)
+			}
+			stream = nil
+			continue
+		}
+		if next == nil {
+			slog.Error("restart modem device watcher", "error", errors.New("watcher returned a nil stream"))
+			stream = nil
+			continue
+		}
+		stream = next
+	}
+}
+
+func (r *Registry) consumeDeviceStream(ctx context.Context, stream <-chan wwanmodem.Result[wwanmodem.DeviceEvent]) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case result, ok := <-stream:
+			if !ok {
+				return errors.New("modem device stream closed")
+			}
+			if result.Err != nil {
+				return result.Err
+			}
+			r.applyDeviceEvent(ctx, result.Value)
+		}
+	}
+}
+
+func (r *Registry) reconcile(ctx context.Context) error {
+	devices, err := r.discover(ctx)
+	if err != nil {
+		return fmt.Errorf("discover modems: %w", err)
+	}
+	present := make(map[string]wwanmodem.Device, len(devices))
+	for _, device := range devices {
+		key := physicalDeviceKey(device)
+		if key == "" {
+			continue
+		}
+		present[key] = device
+		r.applyDeviceEvent(ctx, wwanmodem.DeviceEvent{Type: wwanmodem.DevicePresent, Device: device})
+	}
+
+	r.mu.RLock()
+	current := r.copyModemsLocked()
+	r.mu.RUnlock()
+	for key, modem := range current {
+		if _, ok := present[key]; ok {
+			continue
+		}
+		if modem != nil && devicePresentInSnapshot(modem.deviceInfo, present) {
+			continue
+		}
+		r.removeModem(key, modem)
+	}
+	return nil
+}
+
+func devicePresentInSnapshot(device wwanmodem.Device, devices map[string]wwanmodem.Device) bool {
+	for _, candidate := range devices {
+		if sameControlDevice(device, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceEvent) {
+	key := physicalDeviceKey(event.Device)
+	if key == "" {
+		return
+	}
+	if event.Type == wwanmodem.DeviceRemoved {
+		r.mu.RLock()
+		existingKey, existing := r.findByDeviceLocked(event.Device)
+		r.mu.RUnlock()
+		r.removeModem(existingKey, existing)
+		return
+	}
+
+	r.mu.RLock()
+	existingKey, existing := r.findByDeviceLocked(event.Device)
+	r.mu.RUnlock()
+	if event.Type == wwanmodem.DevicePresent && existing != nil && sameDeviceDescription(existing.deviceInfo, event.Device) {
+		return
+	}
+
+	generation := r.nextGenerationToken()
+	openCtx, cancel := context.WithTimeout(ctx, registryOpenTimeout)
+	replacement, err := r.open(openCtx, event.Device, generation)
+	cancel()
+	if err != nil {
+		slog.Warn("open changed modem", "device", event.Device.Path, "physical_path", key, "error", err)
+		return
+	}
+	replacement.startRuntimeWatchers(ctx)
+
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		_ = replacement.Close()
+		return
+	}
+	previousKey, previous := r.findReplacementLocked(key, replacement)
+	if previous == nil {
+		previousKey, previous = existingKey, existing
+	}
+	if previousKey != "" && previousKey != key {
+		delete(r.modems, previousKey)
+	}
+	r.modems[key] = replacement
+	snapshot := r.copyModemsLocked()
+	subscribers := append([]subscription(nil), r.subs...)
+	r.mu.Unlock()
+
+	typeOfEvent := ModemEventAdded
+	if previous != nil {
+		if samePhysicalModem(previous, replacement) {
+			typeOfEvent = ModemEventChanged
+		} else {
+			r.publish(subscribers, ModemEvent{
+				Type: ModemEventRemoved, Modem: previous, Path: previousKey,
+				Generation: previous.Generation(), Snapshot: snapshot,
+			})
+		}
+	}
+	r.publish(subscribers, ModemEvent{
+		Type: typeOfEvent, Modem: replacement, Previous: previous, Path: key,
+		PreviousPath: previousKey, Generation: generation, Snapshot: snapshot,
+	})
+	if previous != nil {
+		if err := previous.Close(); err != nil {
+			slog.Warn("close replaced modem", "path", previousKey, "error", err)
+		}
+	}
+}
+
+func (r *Registry) removeModem(key string, existing *Modem) {
+	if existing == nil {
+		return
+	}
+	r.mu.Lock()
+	if current := r.modems[key]; current != existing {
+		key = r.keyForModemLocked(existing)
+	}
+	if key == "" || r.modems[key] != existing {
+		r.mu.Unlock()
+		return
+	}
+	delete(r.modems, key)
+	snapshot := r.copyModemsLocked()
+	subscribers := append([]subscription(nil), r.subs...)
+	r.mu.Unlock()
+	r.publish(subscribers, ModemEvent{Type: ModemEventRemoved, Modem: existing, Path: key, Generation: existing.Generation(), Snapshot: snapshot})
+	if err := existing.Close(); err != nil {
+		slog.Warn("close removed modem", "path", key, "error", err)
+	}
+}
+
+func (r *Registry) findByDeviceLocked(device wwanmodem.Device) (string, *Modem) {
+	key := physicalDeviceKey(device)
+	if modem := r.modems[key]; modem != nil {
+		return key, modem
+	}
+	for candidateKey, modem := range r.modems {
+		if modem != nil && sameControlDevice(modem.deviceInfo, device) {
+			return candidateKey, modem
+		}
+	}
+	return "", nil
+}
+
+func (r *Registry) findReplacementLocked(key string, replacement *Modem) (string, *Modem) {
+	if modem := r.modems[key]; modem != nil {
+		return key, modem
+	}
+	for candidateKey, modem := range r.modems {
+		if samePhysicalModem(modem, replacement) {
+			return candidateKey, modem
+		}
+	}
+	return "", nil
+}
+
+func (r *Registry) keyForModemLocked(target *Modem) string {
+	for key, modem := range r.modems {
+		if modem == target {
+			return key
+		}
+	}
+	return ""
+}
+
+func (r *Registry) publish(subscribers []subscription, event ModemEvent) {
+	for _, subscriber := range subscribers {
+		if err := subscriber.fn(event); err != nil {
+			slog.Error("process modem event", "type", event.Type, "path", event.Path, "error", err)
+		}
+	}
+}
+
+func (r *Registry) nextGenerationToken() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextGeneration++
+	return r.nextGeneration
+}
+
+func (r *Registry) Close() error {
+	r.startMu.Lock()
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		r.startMu.Unlock()
+		return nil
+	}
+	r.closed = true
+	if r.cancel != nil {
+		r.cancel()
+	}
+	r.mu.Unlock()
+	r.startMu.Unlock()
+	r.wg.Wait()
+	r.mu.Lock()
+	modems := maps.Clone(r.modems)
+	r.modems = make(map[string]*Modem)
+	r.subs = nil
+	r.mu.Unlock()
+	var result error
 	for _, modem := range modems {
-		if modem.EquipmentIdentifier == id {
+		result = errors.Join(result, modem.Close())
+	}
+	return result
+}
+
+func (r *Registry) WaitForModem(ctx context.Context, current *Modem) (*Modem, error) {
+	return r.waitForGeneration(ctx, current)
+}
+
+func (r *Registry) WaitForReloadedModem(ctx context.Context, current *Modem) (*Modem, error) {
+	return r.waitForGeneration(ctx, current)
+}
+
+func (r *Registry) waitForGeneration(ctx context.Context, current *Modem) (*Modem, error) {
+	if current == nil {
+		return nil, errModemRequired
+	}
+	ready := make(chan *Modem, 1)
+	unsubscribe, err := r.Subscribe(func(event ModemEvent) error {
+		if event.Modem != nil && samePhysicalModem(current, event.Modem) && event.Generation > current.Generation() {
+			select {
+			case ready <- event.Modem:
+			default:
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer unsubscribe()
+	if candidate, err := r.findModem(current.EquipmentIdentifier); err == nil && candidate.Generation() > current.Generation() {
+		return candidate, nil
+	}
+	select {
+	case modem := <-ready:
+		return modem, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (r *Registry) findModem(id string) (*Modem, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, fmt.Errorf("%w: equipment identifier is empty", ErrNotFound)
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, modem := range r.modems {
+		if strings.TrimSpace(modem.EquipmentIdentifier) == id {
 			return modem, nil
 		}
 	}
 	return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
 }
 
-func (m *Registry) createModem(ctx context.Context, objectPath dbus.ObjectPath, data map[string]dbus.Variant) (*Modem, error) {
-	drivers := variantStrings(data, "Drivers")
-	driver := ""
-	if len(drivers) > 0 {
-		driver = drivers[0]
+func (r *Registry) copyModemsLocked() map[string]*Modem { return maps.Clone(r.modems) }
+
+func physicalDeviceKey(device wwanmodem.Device) string {
+	if path := strings.TrimSpace(device.PhysicalPath); path != "" {
+		return path
 	}
-	primaryPort := devicePath(variantString(data, "PrimaryPort"))
-	modem := Modem{
-		dbusConn:            m.dbusConn,
-		inhibitDevice:       m.InhibitDevice,
-		objectPath:          objectPath,
-		dbusObject:          m.dbusConn.Object(ModemManagerInterface, objectPath),
-		Device:              variantString(data, "Device"),
-		Manufacturer:        variantString(data, "Manufacturer"),
-		EquipmentIdentifier: variantString(data, "EquipmentIdentifier"),
-		Driver:              driver,
-		Model:               variantString(data, "Model"),
-		FirmwareRevision:    variantString(data, "Revision"),
-		HardwareRevision:    variantString(data, "HardwareRevision"),
-		State:               ModemState(variantInt32(data, "State")),
-		UnlockRequired:      ModemLock(variantUint[uint32](data, "UnlockRequired")),
-		PrimaryPort:         primaryPort,
-		PrimarySimSlot:      variantUint[uint32](data, "PrimarySimSlot"),
-	}
-	var err error
-	primarySIMPath := variantObjectPath(data, "Sim")
-	if validSIMObjectPath(primarySIMPath) {
-		modem.Sim, err = modem.SIMs().Get(ctx, primarySIMPath)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, fmt.Errorf("read primary SIM: %w", err)
-			}
-			modem.Sim, _ = modem.SIMs().Reference(primarySIMPath)
-			slog.Warn("read primary SIM", "path", primarySIMPath, "imei", modem.EquipmentIdentifier, "error", err)
-		}
-	}
-	for _, port := range variantAnySlices(data, "Ports") {
-		if len(port) < 2 {
-			continue
-		}
-		name, _ := port[0].(string)
-		portType, _ := port[1].(uint32)
-		device := devicePath(name)
-		if device == "" {
-			continue
-		}
-		modem.Ports = append(modem.Ports, ModemPort{
-			PortType: ModemPortType(portType),
-			Device:   device,
-		})
-	}
-	modem.SimSlots = simSlotPaths(data, primarySIMPath)
-	device, err := openDeviceForModem(&modem, m.deviceOpener())
-	if err != nil {
-		slog.Debug("open device for MSISDN", "imei", modem.EquipmentIdentifier, "error", err)
-	} else if number, err := device.MSISDN(ctx); err != nil {
-		slog.Debug("read device MSISDN", "imei", modem.EquipmentIdentifier, "error", err)
-	} else {
-		modem.Number = strings.TrimSpace(number)
-	}
-	if modem.Sim != nil {
-		atr, err := readDeviceATR(ctx, &modem, nil)
-		if err != nil {
-			slog.Debug("read SIM ATR", "path", modem.Sim.Path, "imei", modem.EquipmentIdentifier, "error", err)
-		} else {
-			modem.Sim.ATR = atr
-		}
-	}
-	return &modem, nil
+	return strings.TrimSpace(device.Path)
 }
 
-func devicePath(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
+func samePhysicalModem(a, b *Modem) bool {
+	if a == nil || b == nil {
+		return false
 	}
-	if strings.HasPrefix(name, "/dev/") {
-		return name
+	if a.EquipmentIdentifier != "" && b.EquipmentIdentifier != "" {
+		return a.EquipmentIdentifier == b.EquipmentIdentifier
 	}
-	return fmt.Sprintf("/dev/%s", name)
+	return a.Path() != "" && a.Path() == b.Path()
 }
 
-func simSlotPaths(data map[string]dbus.Variant, primarySIMPath dbus.ObjectPath) []dbus.ObjectPath {
-	slots := variantObjectPaths(data, "SimSlots")
-	paths := make([]dbus.ObjectPath, 0, len(slots))
-	for _, slot := range slots {
-		if !validSIMObjectPath(slot) {
-			continue
-		}
-		paths = append(paths, slot)
+func sameControlDevice(a, b wwanmodem.Device) bool {
+	if strings.TrimSpace(a.Path) != "" && strings.TrimSpace(b.Path) != "" {
+		return strings.TrimSpace(a.Path) == strings.TrimSpace(b.Path)
 	}
-	if len(paths) > 0 {
-		return paths
-	}
-	if !validSIMObjectPath(primarySIMPath) {
-		return nil
-	}
-	return []dbus.ObjectPath{primarySIMPath}
+	return physicalDeviceKey(a) != "" && physicalDeviceKey(a) == physicalDeviceKey(b)
 }
 
-func validSIMObjectPath(path dbus.ObjectPath) bool {
-	return path != "" && path != "/"
+func sameDeviceDescription(a, b wwanmodem.Device) bool {
+	if a.Path != b.Path || a.Protocol != b.Protocol || a.Driver != b.Driver || a.PhysicalPath != b.PhysicalPath {
+		return false
+	}
+	if !slices.Equal(a.NetworkInterfaces, b.NetworkInterfaces) || !slices.Equal(a.Ports, b.Ports) {
+		return false
+	}
+	return true
 }
 
-func (m *Registry) Subscribe(subscriber func(ModemEvent) error) (func(), error) {
-	if subscriber == nil {
-		return nil, errors.New("subscriber is required")
-	}
-	m.mu.Lock()
-	m.nextSubID++
-	id := m.nextSubID
-	m.subs = append(m.subs, subscription{id: id, fn: subscriber})
-	m.mu.Unlock()
-
-	if err := m.ensureSubscriptionStarted(); err != nil {
-		m.mu.Lock()
-		for i, sub := range m.subs {
-			if sub.id == id {
-				m.subs = append(m.subs[:i], m.subs[i+1:]...)
-				break
-			}
-		}
-		m.mu.Unlock()
-		return nil, err
-	}
-
-	unsubscribe := func() {
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		for i, sub := range m.subs {
-			if sub.id == id {
-				m.subs = append(m.subs[:i], m.subs[i+1:]...)
-				break
-			}
-		}
-	}
-	return unsubscribe, nil
-}
-
-func (m *Registry) ensureSubscriptionStarted() error {
-	m.startMu.Lock()
-	defer m.startMu.Unlock()
-
-	if m.closed {
-		return errors.New("modem registry is closed")
-	}
-	m.mu.RLock()
-	started := m.subscribed
-	m.mu.RUnlock()
-	if started {
-		return nil
-	}
-
-	if err := m.startSubscription(); err != nil {
-		return err
-	}
-	m.mu.Lock()
-	m.subscribed = true
-	m.mu.Unlock()
-	return nil
-}
-
-func (m *Registry) Close() error {
-	m.startMu.Lock()
-	defer m.startMu.Unlock()
-
-	m.closed = true
-	if !m.subscribed {
-		return nil
-	}
-	m.mu.Lock()
-	m.subscribed = false
-	m.subs = nil
-	m.mu.Unlock()
-
-	var result error
-	if m.dbusConn != nil {
-		if m.signalChan != nil {
-			m.dbusConn.RemoveSignal(m.signalChan)
-			m.signalChan = nil
-		}
-		result = errors.Join(result, m.dbusConn.RemoveMatchSignal(modemAddedMatchOptions()...))
-		result = errors.Join(result, m.dbusConn.RemoveMatchSignal(modemRemovedMatchOptions()...))
-	}
-	if m.done != nil {
-		close(m.done)
-		m.done = nil
-	}
-	return result
-}
-
-func (m *Registry) WaitForModem(ctx context.Context, current *Modem) (*Modem, error) {
-	return m.waitForModem(ctx, current, false)
-}
-
-type modemWaitActionResult struct {
-	ReloadObserved bool
-}
-
-type modemWaitAction func() (modemWaitActionResult, error)
-
-type readyModemRefresh struct {
-	Modem          *Modem
-	CurrentMissing bool
-}
-
-type readyModemLookup struct {
-	Modem *Modem
-	Found bool
-}
-
-func (m *Registry) waitForModemAfter(ctx context.Context, current *Modem, action func() error) (*Modem, error) {
-	return m.waitForModemAfterAction(ctx, current, false, func() (modemWaitActionResult, error) {
-		return modemWaitActionResult{}, action()
-	})
-}
-
-func (m *Registry) WaitForReloadedModem(ctx context.Context, current *Modem) (*Modem, error) {
-	return m.waitForModem(ctx, current, true)
-}
-
-func (m *Registry) waitForModem(ctx context.Context, current *Modem, reloadObserved bool) (*Modem, error) {
-	return m.waitForModemAfterAction(ctx, current, reloadObserved, nil)
-}
-
-func (m *Registry) waitForModemAfterAction(ctx context.Context, current *Modem, reloadObserved bool, action modemWaitAction) (*Modem, error) {
-	if current == nil {
-		return nil, errModemRequired
-	}
-	ready := make(chan *Modem, 1)
-	reload := newModemReloadState()
-	if reloadObserved {
-		reload.mark()
-	}
-	notify := func(event ModemEvent) error {
-		switch event.Type {
-		case ModemEventRemoved:
-			if isCurrentModemEvent(current, event) {
-				reload.mark()
-			}
-			return nil
-		case ModemEventAdded:
-			if !readyModemEvent(current, event.Modem, reload.observed()) {
-				return nil
-			}
-			select {
-			case ready <- event.Modem:
-			default:
-			}
-			return nil
-		default:
-			return nil
-		}
-	}
-
-	unsubscribe, err := m.Subscribe(notify)
+func openDiscoveredModem(ctx context.Context, device wwanmodem.Device, generation uint64) (*Modem, error) {
+	core, err := wwanmodem.Open(ctx, device.Path, wwanmodem.AccessAuto)
 	if err != nil {
 		return nil, err
 	}
-	defer unsubscribe()
-
-	if action != nil {
-		actionCtx, cancelActionPoll := context.WithCancel(ctx)
-		actionPollDone := make(chan struct{})
-		go func() {
-			defer close(actionPollDone)
-			m.pollReadyModem(actionCtx, current, ready, reload)
-		}()
-		actionResult, err := action()
-		if err != nil {
-			cancelActionPoll()
-			<-actionPollDone
-			return nil, err
-		}
-		cancelActionPoll()
-		<-actionPollDone
-		if actionResult.ReloadObserved {
-			reload.mark()
-		}
-	}
-	if modem := m.findReadyModem(current, reload.observed()); modem != nil {
-		return modem, nil
-	}
-
-	return m.waitForReadyModem(ctx, current, ready, reload)
-}
-
-func (m *Registry) pollReadyModem(ctx context.Context, current *Modem, ready chan<- *Modem, reload *modemReloadState) {
-	ticker := time.NewTicker(waitForModemRefreshInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			refreshed, err := m.refreshReadyModem(ctx, current, reload.observed())
-			if err != nil {
-				slog.Warn("refresh modem while action is running", "imei", current.EquipmentIdentifier, "error", err)
-				continue
-			}
-			if refreshed.CurrentMissing {
-				reload.mark()
-				continue
-			}
-			if refreshed.Modem != nil {
-				select {
-				case ready <- refreshed.Modem:
-				default:
-				}
-			}
-		}
-	}
-}
-
-type modemReloadState struct {
-	mu       sync.RWMutex
-	reloaded bool
-}
-
-func newModemReloadState() *modemReloadState {
-	return &modemReloadState{}
-}
-
-func (s *modemReloadState) mark() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.reloaded = true
-}
-
-func (s *modemReloadState) observed() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.reloaded
-}
-
-func (m *Registry) waitForReadyModem(ctx context.Context, current *Modem, ready <-chan *Modem, reload *modemReloadState) (*Modem, error) {
-	ticker := time.NewTicker(waitForModemRefreshInterval)
-	defer ticker.Stop()
-
-	for {
-		if modem := m.findReadyModem(current, reload.observed()); modem != nil {
-			return modem, nil
-		}
-
-		select {
-		case modem := <-ready:
-			return modem, nil
-		case <-ticker.C:
-			refreshed, err := m.refreshReadyModem(ctx, current, reload.observed())
-			if err != nil {
-				slog.Warn("refresh modem while waiting", "imei", current.EquipmentIdentifier, "error", err)
-				continue
-			}
-			if refreshed.CurrentMissing {
-				reload.mark()
-				continue
-			}
-			if refreshed.Modem != nil {
-				return refreshed.Modem, nil
-			}
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-}
-
-func (m *Registry) findReadyModem(current *Modem, reloadObserved bool) *Modem {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return readyModemIn(current, m.modems, reloadObserved).Modem
-}
-
-func (m *Registry) refreshReadyModem(ctx context.Context, current *Modem, reloadObserved bool) (readyModemRefresh, error) {
-	if m.dbusObject == nil {
-		m.mu.RLock()
-		defer m.mu.RUnlock()
-		lookup := readyModemIn(current, m.modems, reloadObserved)
-		return readyModemRefresh{Modem: lookup.Modem, CurrentMissing: !lookup.Found}, nil
-	}
-	modems, err := m.Modems(ctx)
+	info, err := core.Info(ctx)
 	if err != nil {
-		return readyModemRefresh{}, err
+		_ = core.Close()
+		return nil, fmt.Errorf("read modem info: %w", err)
 	}
-	lookup := readyModemIn(current, modems, reloadObserved)
-	return readyModemRefresh{Modem: lookup.Modem, CurrentMissing: !lookup.Found}, nil
-}
-
-func readyModemIn(current *Modem, modems map[dbus.ObjectPath]*Modem, reloadObserved bool) readyModemLookup {
-	found := false
-	for _, modem := range modems {
-		if !sameEquipmentIdentifier(current, modem) {
-			continue
+	m := &Modem{
+		core: core, deviceInfo: device, deviceKey: physicalDeviceKey(device), generation: generation,
+		Device: device.PhysicalPath, Manufacturer: info.Manufacturer, EquipmentIdentifier: strings.TrimSpace(info.EquipmentID),
+		Driver: device.Driver, Model: info.Model, FirmwareRevision: info.Revision, HardwareRevision: info.HardwareRevision,
+		PrimaryPort: device.Path, ussd: wwanmodem.USSDMessage{State: wwanmodem.USSDStateIdle},
+	}
+	if m.Device == "" {
+		m.Device = device.Path
+	}
+	if len(info.OwnNumbers) > 0 {
+		m.runtimeMu.Lock()
+		m.Number = strings.TrimSpace(info.OwnNumbers[0])
+		m.runtimeMu.Unlock()
+	}
+	for _, port := range device.Ports {
+		path := port.Path
+		if port.Type == wwanmodem.PortNetwork {
+			path = port.Name
 		}
-		found = true
-		if reloadObserved && modem != current {
-			return readyModemLookup{Modem: modem, Found: true}
-		}
-		if !reloadObserved && isReplacementObjectPath(current, modem) {
-			return readyModemLookup{Modem: modem, Found: true}
-		}
+		m.Ports = append(m.Ports, ModemPort{PortType: legacyPortType(port.Type), Device: path})
 	}
-	return readyModemLookup{Found: found}
+	if status, statusErr := core.Status(ctx); statusErr == nil {
+		m.applyStatus(status)
+	}
+	if simInfo, simErr := core.SIMInfo(ctx); simErr == nil {
+		m.applySIMInfo(simInfo)
+	}
+	if slots, slotsErr := core.SIMSlots(ctx); slotsErr == nil {
+		m.applySIMSlots(slots)
+	}
+	return m, nil
 }
 
-func readyModemEvent(current *Modem, candidate *Modem, reloadObserved bool) bool {
-	if reloadObserved {
-		return sameEquipmentIdentifier(current, candidate) && candidate != current
-	}
-	return isReplacementObjectPath(current, candidate)
-}
-
-func isReplacementObjectPath(current *Modem, candidate *Modem) bool {
-	if !sameEquipmentIdentifier(current, candidate) {
-		return false
-	}
-	return current.objectPath != "" && candidate.objectPath != "" && candidate.objectPath != current.objectPath
-}
-
-func sameEquipmentIdentifier(current *Modem, candidate *Modem) bool {
-	if current == nil || candidate == nil {
-		return false
-	}
-	id := strings.TrimSpace(current.EquipmentIdentifier)
-	return id != "" && strings.TrimSpace(candidate.EquipmentIdentifier) == id
-}
-
-func isCurrentModemEvent(current *Modem, event ModemEvent) bool {
-	if event.Modem != nil && sameEquipmentIdentifier(current, event.Modem) {
-		return true
-	}
-	return event.Path != "" && event.Path == current.objectPath
-}
-
-func (m *Registry) deleteAndUpdate(modem *Modem) {
-	// If user restart the ModemManager manually, Dbus will not send the InterfacesRemoved signal
-	// But it will send the InterfacesAdded signal again.
-	// So we need to remove the duplicate modem manually and update it.
-	if modem.EquipmentIdentifier != "" {
-		for path, existing := range m.modems {
-			if existing.EquipmentIdentifier == modem.EquipmentIdentifier {
-				slog.Info("removing duplicate modem", "path", path, "imei", modem.EquipmentIdentifier)
-				delete(m.modems, path)
-			}
-		}
-	}
-	m.modems[modem.objectPath] = modem
-}
-
-func (m *Registry) startSubscription() error {
-	if m.dbusConn == nil {
-		return errors.New("dbus connection is required")
-	}
-	if err := m.dbusConn.AddMatchSignal(modemAddedMatchOptions()...); err != nil {
-		return err
-	}
-	if err := m.dbusConn.AddMatchSignal(modemRemovedMatchOptions()...); err != nil {
-		_ = m.dbusConn.RemoveMatchSignal(modemAddedMatchOptions()...)
-		return err
-	}
-
-	m.signalChan = make(chan *dbus.Signal, 10)
-	m.done = make(chan struct{})
-	m.dbusConn.Signal(m.signalChan)
-	go m.handleSignals(m.signalChan, m.done)
-	return nil
-}
-
-func modemAddedMatchOptions() []dbus.MatchOption {
-	return []dbus.MatchOption{
-		dbus.WithMatchInterface("org.freedesktop.DBus.ObjectManager"),
-		dbus.WithMatchMember("InterfacesAdded"),
-		dbus.WithMatchPathNamespace("/org/freedesktop/ModemManager1"),
+func legacyPortType(portType wwanmodem.PortType) ModemPortType {
+	switch portType {
+	case wwanmodem.PortQMI:
+		return ModemPortTypeQmi
+	case wwanmodem.PortMBIM:
+		return ModemPortTypeMbim
+	case wwanmodem.PortAT:
+		return ModemPortTypeAt
+	case wwanmodem.PortNetwork:
+		return ModemPortTypeNet
+	default:
+		return ModemPortTypeUnknown
 	}
 }
 
-func modemRemovedMatchOptions() []dbus.MatchOption {
-	return []dbus.MatchOption{
-		dbus.WithMatchInterface("org.freedesktop.DBus.ObjectManager"),
-		dbus.WithMatchMember("InterfacesRemoved"),
-		dbus.WithMatchPathNamespace("/org/freedesktop/ModemManager1"),
+func legacyModemState(status wwanmodem.Status) ModemState {
+	if status.SIM == wwanmodem.SIMStateFailure {
+		return ModemStateFailed
 	}
-}
-
-func (m *Registry) handleSignals(sig <-chan *dbus.Signal, done <-chan struct{}) {
-	for {
-		var event *dbus.Signal
-		select {
-		case <-done:
-			return
-		case next, ok := <-sig:
-			if !ok {
-				return
-			}
-			event = next
-		}
-		modemPath, ok := modemPathFromSignal(event)
-		if !ok {
-			name, body := signalDetails(event)
-			slog.Warn("ignore modem signal with invalid body", "name", name, "body", body)
-			continue
-		}
-		var (
-			modem     *Modem
-			eventType ModemEventType
-		)
-		switch event.Name {
-		case ModemManagerInterfacesAdded:
-			eventType = ModemEventAdded
-			slog.Info("new modem plugged in", "path", modemPath)
-			raw, ok := managedInterfacesFromSignal(event)
-			if !ok {
-				_, body := signalDetails(event)
-				slog.Warn("ignore modem added signal with invalid interfaces", "path", modemPath, "body", body)
-				continue
-			}
-			modemData, ok := raw[ModemInterface]
-			if !ok {
-				continue
-			}
-			loadCtx, cancel := context.WithTimeout(context.Background(), modemSignalLoadTimeout)
-			var err error
-			modem, err = m.createModem(loadCtx, modemPath, modemData)
-			cancel()
-			if err != nil {
-				slog.Error("create modem", "error", err)
-				continue
-			}
-		case ModemManagerInterfacesRemoved:
-			eventType = ModemEventRemoved
-			slog.Info("modem unplugged", "path", modemPath)
-		default:
-			continue
-		}
-
-		m.mu.Lock()
-		if eventType == ModemEventAdded {
-			m.deleteAndUpdate(modem)
-		} else {
-			modem = m.modems[modemPath]
-			delete(m.modems, modemPath)
-		}
-		snapshot := m.copyModemsLocked()
-		subscribers := append([]subscription(nil), m.subs...)
-		m.mu.Unlock()
-
-		for _, subscriber := range subscribers {
-			if err := subscriber.fn(ModemEvent{
-				Type:     eventType,
-				Modem:    modem,
-				Path:     modemPath,
-				Snapshot: snapshot,
-			}); err != nil {
-				slog.Error("process modem event", "error", err)
-			}
-		}
+	if status.SIM == wwanmodem.SIMStateLocked {
+		return ModemStateLocked
 	}
-}
-
-func signalDetails(event *dbus.Signal) (string, []any) {
-	if event == nil {
-		return "", nil
+	if status.Power != wwanmodem.PowerStateOn {
+		return ModemStateDisabled
 	}
-	return event.Name, event.Body
-}
-
-func modemPathFromSignal(event *dbus.Signal) (dbus.ObjectPath, bool) {
-	if event == nil || len(event.Body) == 0 {
-		return "", false
+	if status.OwnBearers > 0 {
+		return ModemStateConnected
 	}
-	path, ok := event.Body[0].(dbus.ObjectPath)
-	return path, ok && path != ""
-}
-
-func managedInterfacesFromSignal(event *dbus.Signal) (map[string]map[string]dbus.Variant, bool) {
-	if event == nil || len(event.Body) < 2 {
-		return nil, false
+	switch status.Registration {
+	case wwanmodem.RegistrationHome, wwanmodem.RegistrationRoaming:
+		return ModemStateRegistered
+	case wwanmodem.RegistrationSearching:
+		return ModemStateSearching
+	default:
+		return ModemStateEnabled
 	}
-	raw, ok := event.Body[1].(map[string]map[string]dbus.Variant)
-	return raw, ok
-}
-
-func (m *Registry) copyModemsLocked() map[dbus.ObjectPath]*Modem {
-	snapshot := make(map[dbus.ObjectPath]*Modem, len(m.modems))
-	maps.Copy(snapshot, m.modems)
-	return snapshot
 }

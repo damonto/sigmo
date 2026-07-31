@@ -461,15 +461,17 @@ func TestStartIfDisabledSelectsQualcomm410ModeWithoutPreparing(t *testing.T) {
 	}
 }
 
-func TestRemovedModemInvalidatesQualcomm410Holder(t *testing.T) {
+func TestRemovedModemInvalidatesInternetGeneration(t *testing.T) {
 	internet := &fakeInternetRestorer{}
 	coordinator := &coordinator{access: AccessVoLTE, internet: internet}
 	coordinator.processModemEvent(context.Background(), mmodem.ModemEvent{
-		Type:  mmodem.ModemEventRemoved,
-		Modem: &mmodem.Modem{EquipmentIdentifier: "modem-1"},
+		Type:       mmodem.ModemEventRemoved,
+		Modem:      &mmodem.Modem{EquipmentIdentifier: "modem-1"},
+		Path:       "/devices/modem-1",
+		Generation: 1,
 	})
-	if !slices.Equal(internet.calls, []string{"qualcomm410:invalidate"}) {
-		t.Fatalf("Internet calls = %v, want [qualcomm410:invalidate]", internet.calls)
+	if !slices.Equal(internet.calls, []string{"internet:invalidate"}) {
+		t.Fatalf("Internet calls = %v, want [internet:invalidate]", internet.calls)
 	}
 }
 

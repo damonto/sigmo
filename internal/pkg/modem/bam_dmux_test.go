@@ -41,7 +41,7 @@ func TestValidateQualcomm410LayoutChecksEveryEndpoint(t *testing.T) {
 	}
 }
 
-func TestValidateQualcomm410ModemLayoutRequiresMMOnDATA5(t *testing.T) {
+func TestValidateQualcomm410ModemLayoutRequiresPrimaryOnDATA5(t *testing.T) {
 	compareErr := errors.New("compare devices")
 	tests := []struct {
 		name        string
@@ -52,10 +52,10 @@ func TestValidateQualcomm410ModemLayoutRequiresMMOnDATA5(t *testing.T) {
 		wantMessage string
 	}{
 		{name: "nil modem", wantMessage: "modem is required"},
-		{name: "missing primary", modem: &Modem{}, wantMessage: "primary QMI port is missing"},
+		{name: "missing primary", modem: &Modem{}, wantMessage: "primary QMI control port is missing"},
 		{name: "device comparison fails", modem: &Modem{PrimaryPort: "/dev/wwan0qmi1"}, compareErr: compareErr, wantErr: compareErr},
-		{name: "MM uses DATA6", modem: &Modem{PrimaryPort: "/dev/wwan0qmi0"}, wantMessage: "does not resolve to Qualcomm 410 DATA5"},
-		{name: "MM uses DATA5", modem: &Modem{PrimaryPort: "/dev/wwan0qmi1"}, match: true},
+		{name: "primary uses DATA6", modem: &Modem{PrimaryPort: "/dev/wwan0qmi0"}, wantMessage: "does not resolve to Qualcomm 410 DATA5"},
+		{name: "primary uses DATA5", modem: &Modem{PrimaryPort: "/dev/wwan0qmi1"}, match: true},
 	}
 
 	for _, tt := range tests {

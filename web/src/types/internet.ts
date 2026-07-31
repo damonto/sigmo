@@ -12,7 +12,7 @@ export type InternetConnectionResponse = {
   alwaysOn: boolean
   proxy: InternetProxy
   interfaceName?: string
-  bearer?: string
+  bearer: number
   ipv4Addresses: string[]
   ipv6Addresses: string[]
   dns: string[]

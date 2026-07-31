@@ -2,11 +2,14 @@ package modem
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
+
+func fmtBoolEvent(prefix string, value bool) string { return fmt.Sprintf("%s:%t", prefix, value) }
 
 type fakeDeviceControl struct {
 	calls       []string

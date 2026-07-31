@@ -125,8 +125,8 @@ func sleepContext(ctx context.Context, delay time.Duration) error {
 }
 
 func registrationScope(modem *mmodem.Modem) string {
-	if modem.Sim != nil {
-		if profileID := strings.TrimSpace(modem.Sim.Identifier); profileID != "" {
+	if sim := modem.Snapshot().SIM; sim != nil {
+		if profileID := strings.TrimSpace(sim.Identifier); profileID != "" {
 			return networkRegistrationPrefix + profileID
 		}
 	}

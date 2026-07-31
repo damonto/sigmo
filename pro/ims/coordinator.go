@@ -15,7 +15,6 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/pro/websheet"
-	"github.com/godbus/dbus/v5"
 )
 
 type coordinatorConfig struct {
@@ -66,7 +65,8 @@ type sessionState struct {
 	ussd        *imsgo.USSDSession
 	calls       map[string]*voiceCallState
 	pendingDial *pendingVoiceDial
-	modemPath   dbus.ObjectPath
+	deviceKey   string
+	generation  uint64
 	profileID   string
 	connected   bool
 	connectedAt time.Time
@@ -124,9 +124,6 @@ func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) (runEr
 			return fmt.Errorf("clean stale VoLTE policy routing: %w", err)
 		}
 	}
-	if err := c.startEnabled(ctx, registry); err != nil {
-		slog.Warn("start configured IMS access", "access", c.routeName(), "error", err)
-	}
 	unsubscribe, err := registry.Subscribe(func(event mmodem.ModemEvent) error {
 		c.processModemEvent(ctx, event)
 		return nil
@@ -135,6 +132,9 @@ func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) (runEr
 		return fmt.Errorf("subscribe modem registry: %w", err)
 	}
 	defer unsubscribe()
+	if err := c.startEnabled(ctx, registry); err != nil {
+		slog.Warn("start configured IMS access", "access", c.routeName(), "error", err)
+	}
 	<-ctx.Done()
 	modems := c.stopAll()
 	if err := c.releaseManagedVoLTEOnShutdown(ctx, modems); err != nil {
@@ -149,11 +149,27 @@ func (c *coordinator) processModemEvent(ctx context.Context, event mmodem.ModemE
 		if event.Modem != nil {
 			c.startIfEnabled(ctx, event.Modem)
 		}
+	case mmodem.ModemEventChanged:
+		if event.Previous != nil {
+			if c.internet != nil {
+				if err := c.internet.InvalidateModem(ctx, event.Previous); err != nil {
+					slog.Warn("invalidate Internet after modem replacement", "imei", event.Previous.EquipmentIdentifier, "generation", event.Previous.Generation(), "error", err)
+				}
+			}
+			previousPath := event.PreviousPath
+			if previousPath == "" {
+				previousPath = event.Previous.Path()
+			}
+			c.stopByDevice(previousPath, event.Previous.Generation())
+		}
+		if event.Modem != nil {
+			c.startIfEnabled(ctx, event.Modem)
+		}
 	case mmodem.ModemEventRemoved:
-		c.stopByPath(event.Path)
-		if c.access == AccessVoLTE && c.internet != nil && event.Modem != nil {
-			if err := c.internet.InvalidateQualcomm410(event.Modem.EquipmentIdentifier); err != nil {
-				slog.Warn("invalidate Qualcomm 410 Internet after modem removal", "imei", event.Modem.EquipmentIdentifier, "error", err)
+		c.stopByDevice(event.Path, event.Generation)
+		if c.internet != nil && event.Modem != nil {
+			if err := c.internet.InvalidateModem(ctx, event.Modem); err != nil {
+				slog.Warn("invalidate Internet after modem removal", "imei", event.Modem.EquipmentIdentifier, "generation", event.Generation, "error", err)
 			}
 		}
 	}

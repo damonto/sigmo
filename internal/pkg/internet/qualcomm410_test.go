@@ -567,10 +567,9 @@ func TestConnectBearerRecoverySkipsModemResetForQualcomm410(t *testing.T) {
 		name             string
 		qualcomm410      bool
 		wantConnectCalls int
-		wantRefreshCalls int
 	}{
 		{name: "Qualcomm 410 only cleans and retries", qualcomm410: true, wantConnectCalls: 1},
-		{name: "normal modem keeps reset recovery", wantConnectCalls: 2, wantRefreshCalls: 1},
+		{name: "normal modem retries after stale bearer cleanup", wantConnectCalls: 2},
 	}
 
 	for _, tt := range tests {
@@ -584,12 +583,10 @@ func TestConnectBearerRecoverySkipsModemResetForQualcomm410(t *testing.T) {
 			}
 
 			connectCalls := 0
-			refreshCalls := 0
 			modem := qualcomm410RecoveryModem{
 				fakeInternetModem: fakeInternetModem{modemID: "modem-1"},
 				connectErr:        connectErr,
 				connectCalls:      &connectCalls,
-				refreshCalls:      &refreshCalls,
 			}
 			_, err = connector.connectBearerAfterRecovery(
 				context.Background(),
@@ -600,8 +597,8 @@ func TestConnectBearerRecoverySkipsModemResetForQualcomm410(t *testing.T) {
 			if !errors.Is(err, connectErr) {
 				t.Fatalf("connectBearerAfterRecovery() error = %v, want %v", err, connectErr)
 			}
-			if connectCalls != tt.wantConnectCalls || refreshCalls != tt.wantRefreshCalls {
-				t.Fatalf("connect/refresh calls = %d/%d, want %d/%d", connectCalls, refreshCalls, tt.wantConnectCalls, tt.wantRefreshCalls)
+			if connectCalls != tt.wantConnectCalls {
+				t.Fatalf("connect calls = %d, want %d", connectCalls, tt.wantConnectCalls)
 			}
 		})
 	}
@@ -611,17 +608,11 @@ type qualcomm410RecoveryModem struct {
 	fakeInternetModem
 	connectErr   error
 	connectCalls *int
-	refreshCalls *int
 }
 
 func (m qualcomm410RecoveryModem) connectBearer(context.Context, mmodem.BearerProperties) (*mmodem.Bearer, error) {
 	(*m.connectCalls)++
 	return nil, m.connectErr
-}
-
-func (m qualcomm410RecoveryModem) refreshModemManager(context.Context) error {
-	(*m.refreshCalls)++
-	return nil
 }
 
 func TestQualcomm410BearerNetworkUsesPeerAddresses(t *testing.T) {

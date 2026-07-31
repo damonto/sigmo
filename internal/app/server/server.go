@@ -122,6 +122,23 @@ func Run(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("configure internet connector: %w", err)
 	}
+	unsubscribeInternetLifecycle, err := registry.Subscribe(func(event modem.ModemEvent) error {
+		var previous *modem.Modem
+		switch event.Type {
+		case modem.ModemEventChanged:
+			previous = event.Previous
+		case modem.ModemEventRemoved:
+			previous = event.Modem
+		}
+		if previous == nil {
+			return nil
+		}
+		return internetConnector.InvalidateModem(ctx, previous)
+	})
+	if err != nil {
+		return fmt.Errorf("subscribe Internet modem lifecycle: %w", err)
+	}
+	defer unsubscribeInternetLifecycle()
 	startupCtx, cancelStartup := context.WithTimeout(ctx, 15*time.Second)
 	if err := modem.EnableDisabled(startupCtx, registry, enableDisabledPolicy); err != nil {
 		slog.Error("enable disabled modems", "error", err)

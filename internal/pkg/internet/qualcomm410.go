@@ -19,9 +19,10 @@ type qualcomm410Link interface {
 }
 
 // qualcomm410State records the selected DATA5 data path and its lifecycle.
-// ModemManager continues to own the Internet bearer; link only keeps raw-IP
-// sticky after that bearer has been connected and configured.
+// Sigmo owns the Internet bearer through wwan-go; link keeps the dedicated WDA
+// raw-IP state alive after that bearer has been connected and configured.
 type qualcomm410State struct {
+	generation           uint64
 	selected             bool
 	link                 qualcomm410Link
 	reconnectPending     bool
@@ -40,7 +41,7 @@ func (s *qualcomm410State) clearReconnect() {
 }
 
 // qualcomm410InterfaceState records the host setting changed while the
-// ModemManager bearer uses the Qualcomm 410 point-to-point data path.
+// bearer uses the Qualcomm 410 point-to-point data path.
 type qualcomm410InterfaceState struct {
 	originalIPv6 netlink.IPv6Autoconfiguration
 	restoreIPv6  bool
@@ -139,16 +140,16 @@ func (c *Connector) SelectQualcomm410Mode(modem *mmodem.Modem) error {
 	defer c.lockModem(modemID)()
 
 	state := c.qualcomm410StateFor(modemID)
+	state.generation = modem.Generation()
 	state.selected = true
 	c.setQualcomm410State(modemID, state)
 	return nil
 }
 
-// SetQualcomm410Enabled switches the normal ModemManager bearer into or out
-// of the Qualcomm 410 DATA5 data-plane mode. It never opens an Internet PDN in
-// Sigmo: DATA5 remains owned by ModemManager, while Sigmo only holds WDA raw-IP
-// after ModemManager has connected and Sigmo has applied the point-to-point
-// addresses reported by the bearer.
+// SetQualcomm410Enabled switches the process-owned bearer into or out of the
+// Qualcomm 410 DATA5 data-plane mode. The normal Connect path creates the PDN;
+// this method keeps WDA raw-IP state and point-to-point host configuration in
+// sync with that bearer.
 func (c *Connector) SetQualcomm410Enabled(ctx context.Context, modem *mmodem.Modem, enabled bool) error {
 	if modem == nil {
 		return ErrModemRequired
@@ -156,6 +157,9 @@ func (c *Connector) SetQualcomm410Enabled(ctx context.Context, modem *mmodem.Mod
 	modemID := modem.EquipmentIdentifier
 	defer c.lockModem(modemID)()
 
+	if err := c.bindQualcomm410Generation(modemID, modem.Generation()); err != nil {
+		return err
+	}
 	state := c.qualcomm410StateFor(modemID)
 	if !enabled && !state.selected && state.link == nil && !state.reconnectPending {
 		return nil
@@ -172,7 +176,7 @@ func (c *Connector) SetQualcomm410Enabled(ctx context.Context, modem *mmodem.Mod
 			}
 			if state.reconnectPending {
 				if err := c.retryQualcomm410ReconnectLocked(ctx, access, state); err != nil {
-					return fmt.Errorf("reconnect ModemManager Internet bearer for Qualcomm 410: %w", err)
+					return fmt.Errorf("reconnect Internet bearer for Qualcomm 410: %w", err)
 				}
 				return nil
 			}
@@ -183,9 +187,9 @@ func (c *Connector) SetQualcomm410Enabled(ctx context.Context, modem *mmodem.Mod
 	return c.disableQualcomm410Locked(ctx, access, state)
 }
 
-// InvalidateQualcomm410 drops the WDA holder when ModemManager removes a
-// modem. QMI clients cannot survive that device generation; the next enable
-// restores an active bearer or waits for the next Internet connection.
+// InvalidateQualcomm410 drops the WDA holder when the registry removes or
+// replaces a modem. QMI clients cannot survive that device generation; the
+// next enable restores an active bearer or waits for the next connection.
 func (c *Connector) InvalidateQualcomm410(modemID string) error {
 	modemID = strings.TrimSpace(modemID)
 	if modemID == "" {
@@ -213,6 +217,25 @@ func (c *Connector) InvalidateQualcomm410(modemID string) error {
 	return nil
 }
 
+func (c *Connector) bindQualcomm410Generation(modemID string, generation uint64) error {
+	state := c.qualcomm410StateFor(modemID)
+	if generation == 0 || state.generation == generation {
+		return nil
+	}
+	var closeErr error
+	if state.generation != 0 && state.link != nil {
+		closeErr = state.link.Close()
+		state.link = nil
+		state.reloadPending = true
+	}
+	state.generation = generation
+	c.setQualcomm410State(modemID, state)
+	if closeErr != nil {
+		return fmt.Errorf("release stale Qualcomm 410 Internet WDA client: %w", closeErr)
+	}
+	return nil
+}
+
 func (c *Connector) enableQualcomm410Locked(ctx context.Context, access internetModem, previous qualcomm410State) error {
 	state := previous
 	var err error
@@ -234,9 +257,8 @@ func (c *Connector) enableQualcomm410Locked(ctx context.Context, access internet
 			return fmt.Errorf("read Internet bearer before holding Qualcomm 410 WDA client: %w", currentErr)
 		}
 		if !current.connected {
-			// WDA is sticky state, not a cold-start data-plane initializer. Let
-			// ModemManager own the first setup and hold WDA only after Connect
-			// has configured the bearer on the host.
+			// WDA is sticky state, not a cold-start data-plane initializer. The
+			// normal Connect path creates the PDN before this holder is needed.
 			state.selected = true
 			c.setQualcomm410State(access.id(), state)
 			return nil
@@ -254,7 +276,7 @@ func (c *Connector) enableQualcomm410Locked(ctx context.Context, access internet
 
 	if state.reconnectPending {
 		if err := c.retryQualcomm410ReconnectLocked(ctx, access, state); err != nil {
-			return errors.Join(holdErr, fmt.Errorf("reconnect ModemManager Internet bearer for Qualcomm 410: %w", err))
+			return errors.Join(holdErr, fmt.Errorf("reconnect Internet bearer for Qualcomm 410: %w", err))
 		}
 		return nil
 	}
@@ -282,7 +304,7 @@ func (c *Connector) openQualcomm410HolderLocked(ctx context.Context, modemID str
 }
 
 // holdQualcomm410AfterInternetConnectedLocked must be called while the modem
-// operation lock is held and only after the MM bearer has been configured.
+// operation lock is held and only after the bearer has been configured.
 func (c *Connector) holdQualcomm410AfterInternetConnectedLocked(ctx context.Context, modemID string) error {
 	holdErr := c.openQualcomm410HolderLocked(ctx, modemID)
 	state := c.qualcomm410StateFor(modemID)
@@ -314,7 +336,7 @@ func (c *Connector) ensureQualcomm410BearerLocked(ctx context.Context, access in
 	state.scheduleReconnect(prefs)
 	c.setQualcomm410State(access.id(), state)
 	if err := c.retryQualcomm410ReconnectLocked(ctx, access, state); err != nil {
-		return fmt.Errorf("reconnect ModemManager Internet bearer for Qualcomm 410: %w", err)
+		return fmt.Errorf("reconnect Internet bearer for Qualcomm 410: %w", err)
 	}
 	return nil
 }
@@ -323,7 +345,7 @@ func (c *Connector) disableQualcomm410Locked(ctx context.Context, access interne
 	if !state.selected && state.link == nil {
 		if state.reconnectPending {
 			if err := c.retryQualcomm410ReconnectLocked(ctx, access, state); err != nil {
-				return fmt.Errorf("restore normal ModemManager Internet bearer: %w", err)
+				return fmt.Errorf("restore normal Internet bearer: %w", err)
 			}
 		}
 		return nil
@@ -344,7 +366,7 @@ func (c *Connector) disableQualcomm410Locked(ctx context.Context, access interne
 			return fmt.Errorf("clean stale Qualcomm 410 Internet network: %w", err)
 		}
 	} else if err := disconnectInternetQualcomm410Bearer(ctx, c, access); err != nil {
-		return fmt.Errorf("disconnect Qualcomm 410 ModemManager bearer: %w", err)
+		return fmt.Errorf("disconnect Qualcomm 410 Internet bearer: %w", err)
 	}
 
 	var closeErr error
@@ -365,7 +387,7 @@ func (c *Connector) disableQualcomm410Locked(ctx context.Context, access interne
 
 	connectErr := c.retryQualcomm410ReconnectLocked(ctx, access, next)
 	if connectErr != nil {
-		connectErr = fmt.Errorf("restore normal ModemManager Internet bearer: %w", connectErr)
+		connectErr = fmt.Errorf("restore normal Internet bearer: %w", connectErr)
 	}
 	if closeErr != nil {
 		closeErr = fmt.Errorf("release Qualcomm 410 Internet WDA client: %w", closeErr)
@@ -430,7 +452,7 @@ func (c *Connector) prepareQualcomm410AfterReloadLocked(ctx context.Context, acc
 		state.scheduleReconnect(c.qmapMigrationPreferences(ctx, access, current.bearer))
 		c.setQualcomm410State(access.id(), state)
 		if err := current.bearer.Disconnect(ctx); err != nil {
-			return state, fmt.Errorf("disconnect invalidated Qualcomm 410 ModemManager bearer: %w", err)
+			return state, fmt.Errorf("disconnect invalidated Qualcomm 410 Internet bearer: %w", err)
 		}
 	}
 
@@ -643,10 +665,21 @@ func qualcomm410CleanupContext(ctx context.Context) (context.Context, context.Ca
 }
 
 func (c *Connector) recoverConnectedBearer(ctx context.Context, modem internetModem, bearer *mmodem.Bearer, fallback Preferences) (trackedConnection, int, bool, error) {
+	var (
+		tracked trackedConnection
+		metric  int
+		ok      bool
+		err     error
+	)
 	if !c.qualcomm410SelectedFor(modem.id()) {
-		return recoverTrackedConnection(ctx, c.persistence, modem.id(), bearer, fallback)
+		tracked, metric, ok, err = recoverTrackedConnection(ctx, c.persistence, modem.id(), bearer, fallback)
+	} else {
+		tracked, metric, ok, err = recoverQualcomm410TrackedConnection(ctx, c.persistence, modem.id(), bearer, fallback)
 	}
-	return recoverQualcomm410TrackedConnection(ctx, c.persistence, modem.id(), bearer, fallback)
+	if ok {
+		tracked.modemGeneration = modem.generation()
+	}
+	return tracked, metric, ok, err
 }
 
 func recoverQualcomm410TrackedConnection(ctx context.Context, stateStore connectionStateStore, modemID string, bearer *mmodem.Bearer, fallback Preferences) (trackedConnection, int, bool, error) {

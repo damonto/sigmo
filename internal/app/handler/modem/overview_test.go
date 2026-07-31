@@ -23,7 +23,7 @@ func (s internetStatusStub) Current(context.Context, *mmodem.Modem) (*internet.C
 	return s.connection, s.err
 }
 
-func TestCatalogBuildListResponseSkipsBrokenModems(t *testing.T) {
+func TestCatalogBuildListResponseKeepsDiscoveredModems(t *testing.T) {
 	euiccATR := []byte{0x3B, 0x9F, 0x96, 0x80, 0x3F, 0xC7, 0x82, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x15, 0x57, 0x65, 0x73, 0x74, 0x6B, 0x2E, 0x6D, 0x65, 0x63}
 	tests := []struct {
 		name    string
@@ -31,7 +31,7 @@ func TestCatalogBuildListResponseSkipsBrokenModems(t *testing.T) {
 		wantIDs []string
 	}{
 		{
-			name: "skips enabled modem without primary SIM",
+			name: "keeps enabled modem when primary SIM query is unavailable",
 			devices: []*mmodem.Modem{
 				{
 					EquipmentIdentifier: "bad-modem",
@@ -46,10 +46,10 @@ func TestCatalogBuildListResponseSkipsBrokenModems(t *testing.T) {
 					Sim:                 &mmodem.SIM{ATR: euiccATR},
 				},
 			},
-			wantIDs: []string{"good-modem"},
+			wantIDs: []string{"bad-modem", "good-modem"},
 		},
 		{
-			name: "returns empty list when all modems are broken",
+			name: "keeps list populated when every live query is unavailable",
 			devices: []*mmodem.Modem{
 				{
 					EquipmentIdentifier: "bad-modem",
@@ -57,7 +57,7 @@ func TestCatalogBuildListResponseSkipsBrokenModems(t *testing.T) {
 					State:               mmodem.ModemStateEnabled,
 				},
 			},
-			wantIDs: []string{},
+			wantIDs: []string{"bad-modem"},
 		},
 	}
 
@@ -78,6 +78,42 @@ func TestCatalogBuildListResponseSkipsBrokenModems(t *testing.T) {
 				t.Fatalf("modem IDs = %v, want %v", gotIDs, tt.wantIDs)
 			}
 		})
+	}
+}
+
+func TestCatalogBuildListResponseKeepsSearchingModemWhenLiveQueriesFail(t *testing.T) {
+	catalog := newCatalog(settings.NewMemoryStore(settings.Default()), nil)
+	device := &mmodem.Modem{
+		EquipmentIdentifier: "866069053507297",
+		Manufacturer:        "Qualcomm",
+		Model:               "Searching modem",
+		State:               mmodem.ModemStateSearching,
+		Sim: &mmodem.SIM{
+			Active:             true,
+			Identifier:         "8944000000000000000",
+			OperatorIdentifier: "23433",
+			OperatorName:       "EE",
+		},
+	}
+
+	got, err := catalog.buildListResponse(context.Background(), []*mmodem.Modem{device})
+	if err != nil {
+		t.Fatalf("buildListResponse() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("modem count = %d, want 1", len(got))
+	}
+	if got[0].ID != device.EquipmentIdentifier {
+		t.Fatalf("modem ID = %q, want %q", got[0].ID, device.EquipmentIdentifier)
+	}
+	if got[0].State != "searching" {
+		t.Fatalf("state = %q, want searching", got[0].State)
+	}
+	if got[0].RegistrationState != mmodem.Modem3GPPRegistrationStateSearching.String() {
+		t.Fatalf("registration state = %q, want %q", got[0].RegistrationState, mmodem.Modem3GPPRegistrationStateSearching.String())
+	}
+	if got[0].SIM.Identifier != device.Sim.Identifier {
+		t.Fatalf("SIM identifier = %q, want %q", got[0].SIM.Identifier, device.Sim.Identifier)
 	}
 }
 

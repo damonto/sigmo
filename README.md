@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/damonto/sigmo.svg)](https://github.com/damonto/sigmo/releases/latest)
 
-**Sigmo** is a modern, self-hosted web UI and API for managing ModemManager-based cellular modems. It ships as a single binary with an embedded Vue 3 frontend, designed to be lightweight and easy to deploy.
+**Sigmo** is a modern, self-hosted web UI and API for managing cellular modems through QMI and MBIM. It ships as a single binary with an embedded Vue 3 frontend, designed to be lightweight and easy to deploy.
 
 Sigmo focuses on advanced eSIM operations, SMS management, and network control. Pro-only features are documented in [pro/README.md](pro/README.md).
 
@@ -14,7 +14,7 @@ Sigmo focuses on advanced eSIM operations, SMS management, and network control. 
 - **⚙️ Modem Control**: SIM slot switching, network scanning, manual registration, and preference configuration (Alias, MSS).
 - **🔒 Secure Access**: OTP-based login system via Telegram, HTTP, Email, and more.
 - **🔔 Notifications**: Forward incoming SMS and login tokens to Telegram, Bark, Gotify, Email, etc.
-- **🚀 Portable**: Single Go binary with no external runtime dependencies (except ModemManager).
+- **🚀 Portable**: Single Go binary with no mandatory modem-control daemon.
 
 ---
 
@@ -43,8 +43,10 @@ Sigmo focuses on advanced eSIM operations, SMS management, and network control. 
 **System Requirements:**
 
 - **OS**: Linux.
-- **Service**: `ModemManager` running on the system D-Bus when using the binary directly. The Docker image includes `ModemManager` and starts it inside the container.
+- **Device access**: Access to the modem QMI, MBIM, AT, and network device nodes. Direct control requires read and write permission on the QMI or MBIM node.
 - **Permissions**: Root access or proper `udev` rules to access modem device nodes.
+
+Sigmo automatically tries `qmi-proxy` or `mbim-proxy` before opening a control node directly. This allows Sigmo to coexist with `ModemManager` when the matching proxy socket is available. If no proxy is reachable, Sigmo falls back to direct access; do not let Sigmo and another process open the same QMI or MBIM control node directly.
 
 ---
 
@@ -81,7 +83,7 @@ Visit `http://localhost:9527` to access the UI.
 
 ### Docker Compose
 
-The Docker image includes the embedded Vue frontend and installs `dbus`, `ModemManager`, `qmi-utils` for QMI proxy support, and `libmbim-tools` in the runtime image.
+The Docker image includes the embedded Vue frontend and can reuse `qmi-proxy` or `mbim-proxy` running on the host. The proxy utilities do not need to be installed in the container.
 
 1.  **Data**:
 
@@ -99,9 +101,11 @@ The Docker image includes the embedded Vue frontend and installs `dbus`, `ModemM
 3.  **Open UI**:
     Visit `http://localhost:9527`, or pass `--listen-address` to choose another address.
 
-The compose setup uses `network_mode: host` because Sigmo's internet connection feature configures the modem network interface and host routes. Docker port publishing is disabled in this mode; use `--listen-address` to choose the listening address and port.
+The compose setup uses `network_mode: host` because Sigmo's internet connection feature configures the modem network interface and host routes. Host networking also makes the host's abstract `qmi-proxy` and `mbim-proxy` Unix sockets visible to the container. Docker port publishing is disabled in this mode; use `--listen-address` to choose the listening address and port.
 
-The container runs with `privileged: true` so Sigmo and ModemManager can access modem devices. `/run` is mounted as tmpfs so stale D-Bus sockets cannot survive container restarts. On hosts with strict Docker or udev policies, keep `/dev`, `/run/udev`, and `/sys` mounted as shown in `compose.yaml`.
+The container runs with `privileged: true` so Sigmo can access modem devices and configure network interfaces. On hosts with strict Docker or udev policies, keep `/dev`, `/run/udev`, and `/sys` mounted as shown in `compose.yaml`.
+
+The container shares the host's modem device nodes. A host `ModemManager` can coexist with Sigmo when it uses the matching proxy; if the proxy socket is unavailable, Sigmo's direct fallback can conflict with it.
 
 Sigmo stores Internet Always On settings, modem network Mode/Bands preferences,
 and manual network registration preferences in SQLite so they can be restored
@@ -145,7 +149,7 @@ To run Sigmo as a background service, use Systemd.
     sudo systemctl enable --now sigmo
     ```
 
-> **Note**: The default service runs as `root` to ensure access to ModemManager. If running as a non-root user, verify `udev` rules for the modem and write permissions for the SQLite database path.
+> **Note**: The default service runs as `root` to access modem device nodes and configure network interfaces. If running as a non-root user, verify `udev` rules, network capabilities, and write permissions for the SQLite database path.
 
 ---
 
@@ -153,7 +157,7 @@ To run Sigmo as a background service, use Systemd.
 
 If you wish to contribute or modify the source:
 
-1.  **Prerequisites**: Go 1.25+, Bun (for Vue).
+1.  **Prerequisites**: Go 1.26.3, Bun (for Vue).
 2.  **Build Frontend**:
     ```bash
     cd web && bun install && bun run build

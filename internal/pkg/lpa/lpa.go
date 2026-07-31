@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/damonto/euicc-go/bertlv"
 	"github.com/damonto/euicc-go/bertlv/primitive"
@@ -24,6 +25,8 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
+
+const channelOpenTimeout = 30 * time.Second
 
 // gmu serializes LPA operations for the same modem or external reader. This is necessary
 // because eUICC operations cannot safely share one underlying smart-card channel.
@@ -202,22 +205,106 @@ func (l *LPA) tryCreateClient(opts *lpa.Options) error {
 func createChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
 	switch m.PrimaryPortType() {
 	case modem.ModemPortTypeQmi:
-		slot, err := modem.ActiveSIMSlot(m)
-		if err != nil {
-			return nil, err
-		}
-		m.Logger().Info("using QMI driver", "port", m.PrimaryPort, "slot", slot)
-		return qcom.NewQMI(m.PrimaryPort, slot)
+		return createQMIChannel(m)
 	case modem.ModemPortTypeMbim:
-		slot, err := modem.ActiveSIMSlot(m)
-		if err != nil {
-			return nil, err
-		}
-		m.Logger().Info("using MBIM driver", "port", m.PrimaryPort, "slot", slot)
-		return mbim.New(m.PrimaryPort, slot)
+		return createMBIMChannel(m)
 	default:
 		return createATChannel(m)
 	}
+}
+
+func createQMIChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), channelOpenTimeout)
+	defer cancel()
+	release, err := m.ReserveSIMSlot(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reserve QMI LPA SIM slot: %w", err)
+	}
+	reserved := true
+	defer func() {
+		if reserved {
+			release()
+		}
+	}()
+
+	slot, err := modem.ActiveSIMSlot(m)
+	if err != nil {
+		return nil, err
+	}
+	m.Logger().Info("using QMI driver", "port", m.PrimaryPort, "slot", slot)
+	core := m.WWAN()
+	if core == nil {
+		return nil, errors.New("create QMI LPA channel: wwan modem is unavailable")
+	}
+	client, err := core.QMIClient(ctx, slot)
+	if err != nil {
+		return nil, fmt.Errorf("open QMI LPA client: %w", err)
+	}
+	channel, err := qcom.NewQMIWithClient(client)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("create QMI LPA channel: %w", err), client.Close())
+	}
+
+	reserved = false
+	return &simSlotChannel{SmartCardChannel: channel, release: release}, nil
+}
+
+func createMBIMChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), channelOpenTimeout)
+	defer cancel()
+	release, err := m.ReserveSIMSlot(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reserve MBIM LPA SIM slot: %w", err)
+	}
+	reserved := true
+	defer func() {
+		if reserved {
+			release()
+		}
+	}()
+
+	slot, err := modem.ActiveSIMSlot(m)
+	if err != nil {
+		return nil, err
+	}
+	m.Logger().Info("using MBIM driver", "port", m.PrimaryPort, "slot", slot)
+	core := m.WWAN()
+	if core == nil {
+		return nil, errors.New("create MBIM LPA channel: wwan modem is unavailable")
+	}
+	client, err := core.MBIMClient(ctx, slot)
+	if err != nil {
+		return nil, fmt.Errorf("open MBIM LPA client: %w", err)
+	}
+	channel, err := mbim.NewWithClient(client)
+	if err != nil {
+		return nil, errors.Join(fmt.Errorf("create MBIM LPA channel: %w", err), client.Close())
+	}
+
+	reserved = false
+	return &simSlotChannel{SmartCardChannel: channel, release: release}, nil
+}
+
+type simSlotChannel struct {
+	driver.SmartCardChannel
+	release func()
+	once    sync.Once
+	err     error
+}
+
+func (c *simSlotChannel) Disconnect() error {
+	c.once.Do(func() {
+		c.err = c.SmartCardChannel.Disconnect()
+		c.release()
+	})
+	return c.err
+}
+
+func (c *simSlotChannel) CloseLogicalChannel(channel byte) error {
+	if err := c.SmartCardChannel.CloseLogicalChannel(channel); err != nil {
+		return errors.Join(err, c.Disconnect())
+	}
+	return nil
 }
 
 func createATChannel(m *modem.Modem) (driver.SmartCardChannel, error) {

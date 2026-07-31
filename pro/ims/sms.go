@@ -70,7 +70,7 @@ func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to strin
 		ProfileID:   profileID,
 		Source:      storage.MessageSourceRouted,
 		ExternalKey: externalKey,
-		Sender:      modem.Number,
+		Sender:      modem.Snapshot().Number,
 		Recipient:   strings.TrimSpace(to),
 		Text:        text,
 		Timestamp:   submission.SubmittedAt,

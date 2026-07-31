@@ -26,10 +26,14 @@ type deviceATROpener func(*Modem) (deviceATRReader, error)
 
 // SupportsEUICC detects eUICC support from the ATR cached on the SIM object.
 func SupportsEUICC(m *Modem) (bool, error) {
-	if m == nil || m.Sim == nil || len(m.Sim.ATR) == 0 {
+	if m == nil {
 		return false, nil
 	}
-	return atrSupportsEUICC(m.Sim.ATR), nil
+	sim := m.Snapshot().SIM
+	if sim == nil || len(sim.ATR) == 0 {
+		return false, nil
+	}
+	return atrSupportsEUICC(sim.ATR), nil
 }
 
 func readDeviceATR(ctx context.Context, m *Modem, open deviceATROpener) ([]byte, error) {
@@ -49,7 +53,7 @@ func readDeviceATR(ctx context.Context, m *Modem, open deviceATROpener) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	m.Logger().Debug("read device ATR", "primarySlot", m.PrimarySimSlot, "atr", formatATR(atr))
+	m.Logger().Debug("read device ATR", "primarySlot", m.Snapshot().PrimarySIMSlot, "atr", formatATR(atr))
 	return slices.Clone(atr), nil
 }
 

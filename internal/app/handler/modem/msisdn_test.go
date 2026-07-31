@@ -10,7 +10,7 @@ import (
 )
 
 func TestMSISDNUpdate(t *testing.T) {
-	transientUpdateErr := errors.New("Object does not exist at path \"/org/freedesktop/ModemManager1/Modem/1\"")
+	transientUpdateErr := errors.New("control port disappeared")
 	current := &mmodem.Modem{
 		EquipmentIdentifier: "354015820228039",
 		PrimarySimSlot:      1,

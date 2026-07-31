@@ -54,9 +54,9 @@ func ValidateQualcomm410Layout() error {
 	return validateQualcomm410Layout(systemQualcomm410LayoutProbe)
 }
 
-// ValidateQualcomm410ModemLayout also verifies that ModemManager uses DATA5
-// as its primary QMI port. If MM selects DATA6, its bearer reports valid IP
-// settings but the wwan0 data plane is a black hole.
+// ValidateQualcomm410ModemLayout also verifies that DATA5 is the selected
+// primary QMI port. Selecting DATA6 reports valid bearer settings while the
+// wwan0 data plane remains unusable.
 func ValidateQualcomm410ModemLayout(modem *Modem) error {
 	return validateQualcomm410ModemLayout(modem, systemQualcomm410LayoutProbe)
 }
@@ -85,14 +85,14 @@ func validateQualcomm410ModemLayout(modem *Modem, probe qualcomm410LayoutProbe) 
 	}
 	primaryPort := strings.TrimSpace(modem.PrimaryPort)
 	if primaryPort == "" {
-		return errors.New("ModemManager primary QMI port is missing")
+		return errors.New("primary QMI control port is missing")
 	}
 	match, err := probe.sameDevice(Qualcomm410InternetQMI, primaryPort)
 	if err != nil {
-		return fmt.Errorf("compare ModemManager primary port %s with Qualcomm 410 DATA5 %s: %w", primaryPort, Qualcomm410InternetQMI, err)
+		return fmt.Errorf("compare primary QMI port %s with Qualcomm 410 DATA5 %s: %w", primaryPort, Qualcomm410InternetQMI, err)
 	}
 	if !match {
-		return fmt.Errorf("ModemManager primary port %s does not resolve to Qualcomm 410 DATA5 %s; configure udev to ignore DATA6_CNTL", primaryPort, Qualcomm410InternetQMI)
+		return fmt.Errorf("primary QMI port %s does not resolve to Qualcomm 410 DATA5 %s", primaryPort, Qualcomm410InternetQMI)
 	}
 	return nil
 }

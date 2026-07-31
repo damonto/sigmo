@@ -84,9 +84,7 @@ const authOptions = computed(() => [
   { value: 'pap', label: 'PAP' },
   { value: 'chap', label: 'CHAP' },
   { value: 'pap|chap', label: 'PAP / CHAP' },
-  { value: 'mschap', label: 'MS-CHAP' },
   { value: 'mschapv2', label: 'MS-CHAP v2' },
-  { value: 'eap', label: 'EAP' },
 ])
 const routeMetricLabel = computed(() => {
   const metric = props.connection?.routeMetric ?? 0

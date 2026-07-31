@@ -1,6 +1,5 @@
 [Unit]
 Description=Sigmo
-Wants=ModemManager.service
 After=network.target ModemManager.service
 
 [Service]

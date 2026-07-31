@@ -42,10 +42,11 @@ func discoverSEs(m *modem.Modem, openChannel seChannelOpener) ([]SE, error) {
 	if m == nil {
 		return nil, errors.New("modem is required")
 	}
-	if m.Sim == nil {
+	sim := m.Snapshot().SIM
+	if sim == nil {
 		return []SE{DefaultSE}, nil
 	}
-	if !isESTKmeATR(m.Sim.ATR) {
+	if !isESTKmeATR(sim.ATR) {
 		return []SE{DefaultSE}, nil
 	}
 

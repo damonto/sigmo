@@ -9,8 +9,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/godbus/dbus/v5"
-
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
 )
@@ -22,7 +20,8 @@ type recoveredRoute struct {
 }
 
 type trackedConnection struct {
-	bearerPath                dbus.ObjectPath
+	bearerPath                uint64
+	modemGeneration           uint64
 	interfaceName             string
 	profileID                 string
 	prefs                     Preferences
@@ -318,7 +317,7 @@ func connectionFromBearer(ctx context.Context, bearer *mmodem.Bearer, prefs Pref
 		ProxyEnabled:    prefs.ProxyEnabled,
 		AlwaysOn:        prefs.AlwaysOn,
 		InterfaceName:   interfaceName,
-		Bearer:          string(bearer.Path()),
+		Bearer:          bearer.Path(),
 		IPv4Addresses:   ipv4Addresses,
 		IPv6Addresses:   ipv6Addresses,
 		DNS:             mergeDNS(ip4.DNS, ip6.DNS),

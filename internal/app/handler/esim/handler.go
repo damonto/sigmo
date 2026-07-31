@@ -160,7 +160,7 @@ func (h *Handler) Enable(c *echo.Context) error {
 }
 
 func (h *Handler) restoreInternetBeforeProfileEnable(ctx context.Context, modem *mmodem.Modem) error {
-	if modem != nil && modem.State == mmodem.ModemStateLocked {
+	if modem != nil && modem.Snapshot().State == mmodem.ModemStateLocked {
 		return nil
 	}
 	if h.internet == nil {

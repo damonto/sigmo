@@ -77,7 +77,7 @@ func wfcSetupCardFromModem(ctx context.Context, modem *mmodem.Modem) (modemWFCSe
 	if modem == nil {
 		return modemWFCSetupCard{}, errors.New("modem is required")
 	}
-	sim := modem.Sim
+	sim := modem.Snapshot().SIM
 	if sim == nil {
 		var err error
 		sim, err = modem.SIMs().Primary(ctx)

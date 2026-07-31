@@ -24,16 +24,17 @@ func (m *Modem) UnlockSIMPinAndEnable(ctx context.Context, pin string) error {
 	if pin == "" {
 		return ErrSIMPinRequired
 	}
-	if m.State != ModemStateLocked {
+	snapshot := m.Snapshot()
+	if snapshot.State != ModemStateLocked {
 		return ErrSIMUnlockNotRequired
 	}
-	if m.UnlockRequired != ModemLockSimPin {
-		return fmt.Errorf("%w: %s", ErrSIMUnlockUnsupportedLock, m.UnlockRequired)
+	if snapshot.UnlockRequired != ModemLockSimPin {
+		return fmt.Errorf("%w: %s", ErrSIMUnlockUnsupportedLock, snapshot.UnlockRequired)
 	}
-	if m.Sim == nil {
+	if snapshot.SIM == nil {
 		return ErrPrimarySIMMissing
 	}
-	if err := m.Sim.SendPin(ctx, pin); err != nil {
+	if err := snapshot.SIM.SendPin(ctx, pin); err != nil {
 		return fmt.Errorf("%w: %w", ErrSIMUnlockFailed, err)
 	}
 	if err := m.Enable(ctx); err != nil {

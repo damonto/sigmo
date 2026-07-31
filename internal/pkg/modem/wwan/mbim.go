@@ -191,7 +191,7 @@ func setMBIMAirplaneMode(ctx context.Context, client mbimRadio, enabled bool) er
 }
 
 func openMBIMClient(ctx context.Context, device string, slot uint8) (*uiccmbim.Client, error) {
-	return uiccmbim.Open(ctx, uiccmbim.WithProxy(device), uiccmbim.WithSlot(int(slot)))
+	return uiccmbim.Open(ctx, uiccmbim.WithAutoDetect(device), uiccmbim.WithSlot(int(slot)))
 }
 
 func openMBIMUSIM(ctx context.Context, device string, slot uint8) (usimcard.Reader, error) {

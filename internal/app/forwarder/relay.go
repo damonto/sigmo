@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/godbus/dbus/v5"
-
 	messagepkg "github.com/damonto/sigmo/internal/pkg/message"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/notify"
@@ -23,6 +21,8 @@ import (
 )
 
 const incomingNotificationFreshnessWindow = 30 * time.Minute
+
+var modemSubscriptionRetryDelay = time.Second
 
 const (
 	callDirectionIncoming = "incoming"
@@ -36,10 +36,17 @@ type Relay struct {
 	webPush       *webpush.Client
 	messages      *storage.Store
 	mu            sync.Mutex
-	cancels       map[dbus.ObjectPath]context.CancelFunc
-	equipment     map[string]dbus.ObjectPath
-	modems        map[dbus.ObjectPath]string
+	subscriptions map[string]relaySubscription
+	equipment     map[string]string
+	modems        map[string]string
 	notifiedCalls map[string]struct{}
+	wg            sync.WaitGroup
+	stopping      bool
+}
+
+type relaySubscription struct {
+	generation uint64
+	cancel     context.CancelFunc
 }
 
 func New(store *settings.Store, registry *modem.Registry, messages *storage.Store, webPush *webpush.Client) (*Relay, error) {
@@ -57,9 +64,9 @@ func New(store *settings.Store, registry *modem.Registry, messages *storage.Stor
 		notifier:      notifier,
 		webPush:       webPush,
 		messages:      messages,
-		cancels:       make(map[dbus.ObjectPath]context.CancelFunc),
-		equipment:     make(map[string]dbus.ObjectPath),
-		modems:        make(map[dbus.ObjectPath]string),
+		subscriptions: make(map[string]relaySubscription),
+		equipment:     make(map[string]string),
+		modems:        make(map[string]string),
 		notifiedCalls: make(map[string]struct{}),
 	}, nil
 }
@@ -77,6 +84,17 @@ func (r *Relay) Reload() error {
 }
 
 func (r *Relay) Run(ctx context.Context) error {
+	unsubscribe, err := r.registry.Subscribe(func(event modem.ModemEvent) error {
+		return r.handleModemEvent(ctx, event)
+	})
+	if err != nil {
+		return fmt.Errorf("subscribing to modem registry: %w", err)
+	}
+	defer func() {
+		unsubscribe()
+		r.stopAll()
+	}()
+
 	modems, err := r.registry.Modems(ctx)
 	if err != nil {
 		return fmt.Errorf("listing modems: %w", err)
@@ -85,73 +103,130 @@ func (r *Relay) Run(ctx context.Context) error {
 		r.addModem(ctx, path, m)
 	}
 
-	unsubscribe, err := r.registry.Subscribe(func(event modem.ModemEvent) error {
-		switch event.Type {
-		case modem.ModemEventAdded:
-			if event.Modem == nil {
-				return nil
-			}
-			r.addModem(ctx, event.Path, event.Modem)
-		case modem.ModemEventRemoved:
-			r.removeModem(event.Path)
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("subscribing to modem registry: %w", err)
-	}
-	defer unsubscribe()
-
 	<-ctx.Done()
-	r.stopAll()
 	return nil
 }
 
-func (r *Relay) addModem(ctx context.Context, path dbus.ObjectPath, m *modem.Modem) {
-	if ctx.Err() != nil {
+func (r *Relay) handleModemEvent(ctx context.Context, event modem.ModemEvent) error {
+	switch event.Type {
+	case modem.ModemEventAdded, modem.ModemEventChanged:
+		if event.Modem == nil {
+			return nil
+		}
+		r.addModem(ctx, event.Path, event.Modem)
+		if event.Type == modem.ModemEventChanged && event.Previous != nil {
+			previousPath := event.PreviousPath
+			if previousPath == "" {
+				previousPath = event.Previous.Path()
+			}
+			if previousPath != event.Path {
+				r.removeModem(previousPath, event.Previous.Generation())
+			}
+		}
+	case modem.ModemEventRemoved:
+		r.removeModem(event.Path, event.Generation)
+	}
+	return nil
+}
+
+func (r *Relay) addModem(ctx context.Context, path string, m *modem.Modem) {
+	if m == nil || ctx.Err() != nil {
 		return
 	}
+	if path == "" {
+		path = m.Path()
+	}
+	var replaced []context.CancelFunc
 	r.mu.Lock()
+	if r.stopping {
+		r.mu.Unlock()
+		return
+	}
 	if m.EquipmentIdentifier != "" {
 		if existingPath, ok := r.equipment[m.EquipmentIdentifier]; ok && existingPath != path {
-			if oldCancel := r.cancels[existingPath]; oldCancel != nil {
-				defer oldCancel()
+			if old, ok := r.subscriptions[existingPath]; ok {
+				replaced = append(replaced, old.cancel)
 			}
-			delete(r.cancels, existingPath)
+			delete(r.subscriptions, existingPath)
 			delete(r.modems, existingPath)
 			delete(r.equipment, m.EquipmentIdentifier)
 		}
 	}
-	if _, ok := r.cancels[path]; ok {
+	if existing, ok := r.subscriptions[path]; ok && existing.generation == m.Generation() {
 		r.mu.Unlock()
 		return
 	}
+	if existing, ok := r.subscriptions[path]; ok {
+		replaced = append(replaced, existing.cancel)
+	}
 	modemCtx, cancel := context.WithCancel(ctx)
-	r.cancels[path] = cancel
+	r.subscriptions[path] = relaySubscription{generation: m.Generation(), cancel: cancel}
 	if m.EquipmentIdentifier != "" {
 		r.equipment[m.EquipmentIdentifier] = path
 		r.modems[path] = m.EquipmentIdentifier
 	}
+	r.wg.Add(1)
 	r.mu.Unlock()
+	for _, oldCancel := range replaced {
+		oldCancel()
+	}
 
 	go func() {
-		if err := m.Messaging().Subscribe(modemCtx, func(message *modem.SMS) error {
-			return r.forwardModemSMS(modemCtx, m, message)
-		}); err != nil && !errors.Is(err, context.Canceled) {
-			slog.Error("modem message subscription stopped", "error", err, "imei", m.EquipmentIdentifier)
-		}
-		r.removeModem(path)
+		defer r.wg.Done()
+		defer r.removeModem(path, m.Generation())
+		r.runModemSubscription(modemCtx, m)
 	}()
 }
 
-func (r *Relay) removeModem(path dbus.ObjectPath) {
+func (r *Relay) runModemSubscription(ctx context.Context, m *modem.Modem) {
+	for ctx.Err() == nil {
+		err := m.Messaging().Subscribe(ctx, func(message *modem.SMS) error {
+			if !incomingModemSMS(message) {
+				return nil
+			}
+			return r.forwardModemSMS(ctx, m, message)
+		})
+		if ctx.Err() != nil {
+			return
+		}
+		slog.Error("modem message subscription stopped", "error", err, "imei", m.EquipmentIdentifier, "generation", m.Generation())
+		if err := sleepRelayContext(ctx, modemSubscriptionRetryDelay); err != nil {
+			return
+		}
+	}
+}
+
+func incomingModemSMS(message *modem.SMS) bool {
+	return message != nil && (message.State == modem.SMSStateReceived || message.State == modem.SMSStateReceiving)
+}
+
+func sleepRelayContext(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func (r *Relay) removeModem(path string, generation uint64) {
 	var cancel context.CancelFunc
 	r.mu.Lock()
-	cancel = r.cancels[path]
-	delete(r.cancels, path)
-	if equipmentID, ok := r.modems[path]; ok {
-		delete(r.modems, path)
-		delete(r.equipment, equipmentID)
+	subscription, ok := r.subscriptions[path]
+	if ok && generation != 0 && subscription.generation != generation {
+		ok = false
+	}
+	if ok {
+		cancel = subscription.cancel
+		delete(r.subscriptions, path)
+		if equipmentID, exists := r.modems[path]; exists {
+			delete(r.modems, path)
+			if r.equipment[equipmentID] == path {
+				delete(r.equipment, equipmentID)
+			}
+		}
 	}
 	r.mu.Unlock()
 	if cancel != nil {
@@ -161,15 +236,17 @@ func (r *Relay) removeModem(path dbus.ObjectPath) {
 
 func (r *Relay) stopAll() {
 	r.mu.Lock()
-	cancels := slices.Collect(maps.Values(r.cancels))
-	r.cancels = make(map[dbus.ObjectPath]context.CancelFunc)
-	r.equipment = make(map[string]dbus.ObjectPath)
-	r.modems = make(map[dbus.ObjectPath]string)
+	r.stopping = true
+	subscriptions := slices.Collect(maps.Values(r.subscriptions))
+	r.subscriptions = make(map[string]relaySubscription)
+	r.equipment = make(map[string]string)
+	r.modems = make(map[string]string)
 	r.mu.Unlock()
 
-	for _, cancel := range cancels {
-		cancel()
+	for _, subscription := range subscriptions {
+		subscription.cancel()
 	}
+	r.wg.Wait()
 }
 
 func (r *Relay) ForwardRoutedSMS(ctx context.Context, modemID string, message storage.Message) error {
@@ -211,13 +288,16 @@ func (r *Relay) ForwardCall(ctx context.Context, call storage.Call) error {
 }
 
 func (r *Relay) forwardModemSMS(ctx context.Context, m *modem.Modem, message *modem.SMS) error {
+	if !incomingModemSMS(message) {
+		return nil
+	}
 	profileID, err := m.ProfileID(ctx)
 	if err != nil {
 		return err
 	}
 	stored := storageMessageFromModemSMS(ctx, m, profileID, message)
 	if !freshIncomingMessage(stored, time.Now()) {
-		slog.Debug("skipping stale modem SMS", "imei", m.EquipmentIdentifier, "path", message.Path(), "timestamp", message.Timestamp)
+		slog.Debug("skipping stale modem SMS", "imei", m.EquipmentIdentifier, "refs", message.Refs, "timestamp", message.Timestamp)
 		return nil
 	}
 	inserted, err := r.messages.InsertMessage(ctx, stored)
@@ -225,7 +305,7 @@ func (r *Relay) forwardModemSMS(ctx context.Context, m *modem.Modem, message *mo
 		return err
 	}
 	if !inserted {
-		slog.Debug("skipping known modem SMS", "imei", m.EquipmentIdentifier, "path", message.Path())
+		slog.Debug("skipping known modem SMS", "imei", m.EquipmentIdentifier, "refs", message.Refs)
 		return nil
 	}
 	r.mu.Lock()
@@ -336,20 +416,22 @@ func (r *Relay) modemLabel(modemID string) string {
 func storageMessageFromModemSMS(ctx context.Context, m *modem.Modem, profileID string, sms *modem.SMS) storage.Message {
 	incoming := sms.State == modem.SMSStateReceived || sms.State == modem.SMSStateReceiving
 	remote := messagepkg.CanonicalAddress(ctx, m, sms.Number)
-	sender, recipient := m.Number, remote
+	number := m.Snapshot().Number
+	sender, recipient := number, remote
 	if incoming {
-		sender, recipient = remote, m.Number
+		sender, recipient = remote, number
 	}
 	return storage.Message{
 		ModemID:     m.EquipmentIdentifier,
 		ProfileID:   profileID,
 		Source:      storage.MessageSourceModem,
-		ExternalKey: string(sms.Path()),
+		ExternalKey: messagepkg.ModemSMSKey(m.EquipmentIdentifier, sms),
 		Sender:      sender,
 		Recipient:   recipient,
 		Text:        sms.Text,
 		Timestamp:   sms.Timestamp,
 		Status:      strings.ToLower(sms.State.String()),
 		Incoming:    incoming,
+		ModemRefs:   messagepkg.StorageModemRefs(m.EquipmentIdentifier, sms.Generation, sms.Refs),
 	}
 }

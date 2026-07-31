@@ -42,8 +42,8 @@ func (h *Handler) UpdateReminder(c *echo.Context) error {
 		return err
 	}
 	profileName := profileID
-	if modem.Sim != nil && strings.TrimSpace(modem.Sim.OperatorName) != "" {
-		profileName = modem.Sim.OperatorName
+	if sim := modem.Snapshot().SIM; sim != nil && strings.TrimSpace(sim.OperatorName) != "" {
+		profileName = sim.OperatorName
 	}
 	record, err := req.Record(reminder.ProfileTypePSIM, profileID, modem.EquipmentIdentifier, "", profileName)
 	if err != nil {

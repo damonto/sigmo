@@ -38,7 +38,7 @@ func enableDisabledModem(ctx context.Context, modem *Modem, policy EnableDisable
 	if modem == nil {
 		return errModemRequired
 	}
-	if modem.State != ModemStateDisabled {
+	if modem.Snapshot().State != ModemStateDisabled {
 		return nil
 	}
 	if policy != nil {
@@ -47,11 +47,11 @@ func enableDisabledModem(ctx context.Context, modem *Modem, policy EnableDisable
 			return err
 		}
 		if skip {
-			slog.Info("skip enabling modem", "imei", modem.EquipmentIdentifier, "path", modem.objectPath)
+			slog.Info("skip enabling modem", "imei", modem.EquipmentIdentifier, "path", modem.Path())
 			return nil
 		}
 	}
-	slog.Info("enabling modem", "imei", modem.EquipmentIdentifier, "path", modem.objectPath)
+	slog.Info("enabling modem", "imei", modem.EquipmentIdentifier, "path", modem.Path())
 	if err := modem.Enable(ctx); err != nil {
 		return fmt.Errorf("enable modem: %w", err)
 	}

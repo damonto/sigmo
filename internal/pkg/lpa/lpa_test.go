@@ -51,6 +51,88 @@ func TestLockedChannelDisconnectOnce(t *testing.T) {
 	}
 }
 
+func TestSIMSlotChannelDisconnectOnce(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		channel *fakeSmartCardChannel
+		wantErr error
+	}{
+		{
+			name:    "disconnect succeeds once",
+			channel: &fakeSmartCardChannel{},
+		},
+		{
+			name:    "disconnect error is retained",
+			channel: &fakeSmartCardChannel{disconnectErr: errFakeDisconnect},
+			wantErr: errFakeDisconnect,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			releases := 0
+			channel := &simSlotChannel{
+				SmartCardChannel: tt.channel,
+				release:          func() { releases++ },
+			}
+
+			for range 2 {
+				if err := channel.Disconnect(); !errors.Is(err, tt.wantErr) {
+					t.Fatalf("Disconnect() error = %v, want %v", err, tt.wantErr)
+				}
+			}
+			if tt.channel.disconnects != 1 {
+				t.Fatalf("disconnects = %d, want 1", tt.channel.disconnects)
+			}
+			if releases != 1 {
+				t.Fatalf("slot releases = %d, want 1", releases)
+			}
+		})
+	}
+}
+
+func TestSIMSlotChannelCloseLogicalChannelReleasesOnError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		disconnectErr error
+	}{
+		{name: "close error"},
+		{name: "close and disconnect errors", disconnectErr: errFakeDisconnect},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			releases := 0
+			underlying := &fakeSmartCardChannel{
+				disconnectErr:          tt.disconnectErr,
+				closeLogicalChannelErr: errFakeCloseLogicalChannel,
+			}
+			channel := &simSlotChannel{
+				SmartCardChannel: underlying,
+				release:          func() { releases++ },
+			}
+
+			err := channel.CloseLogicalChannel(1)
+			if !errors.Is(err, errFakeCloseLogicalChannel) {
+				t.Fatalf("CloseLogicalChannel() error = %v, want %v", err, errFakeCloseLogicalChannel)
+			}
+			if tt.disconnectErr != nil && !errors.Is(err, tt.disconnectErr) {
+				t.Fatalf("CloseLogicalChannel() error = %v, want it to contain %v", err, tt.disconnectErr)
+			}
+			if underlying.disconnects != 1 {
+				t.Fatalf("disconnects = %d, want 1", underlying.disconnects)
+			}
+			if releases != 1 {
+				t.Fatalf("slot releases = %d, want 1", releases)
+			}
+		})
+	}
+}
+
 func TestLockedChannelCloseLogicalChannelReleasesOnError(t *testing.T) {
 	t.Parallel()
 

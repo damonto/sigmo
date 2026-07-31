@@ -34,7 +34,7 @@ const connected = (
   alwaysOn: false,
   proxy: { enabled: false },
   interfaceName: 'wwan0',
-  bearer: '/bearer/1',
+  bearer: 1,
   ipv4Addresses: ['10.0.0.2/30'],
   ipv6Addresses: [],
   dns: ['1.1.1.1'],

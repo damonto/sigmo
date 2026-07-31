@@ -22,11 +22,13 @@ const (
 )
 
 type qmapConnection struct {
-	sessions []*mmodem.QMAPSession
-	tracked  []trackedConnection
-	muxIDs   []uint8
-	prefs    Preferences
-	dns      []string
+	modem      *mmodem.Modem
+	generation uint64
+	sessions   []*mmodem.QMAPSession
+	tracked    []trackedConnection
+	muxIDs     []uint8
+	prefs      Preferences
+	dns        []string
 }
 
 var (
@@ -41,7 +43,11 @@ func (c *Connector) qmapConnection(modem *mmodem.Modem) *qmapConnection {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.qmapConnections[modem.EquipmentIdentifier]
+	connection := c.qmapConnections[modem.EquipmentIdentifier]
+	if connection == nil || !sameModemGeneration(connection.generation, modem.Generation()) {
+		return nil
+	}
+	return connection
 }
 
 func (c *Connector) qmapEnabledFor(modemID string) bool {
@@ -80,8 +86,8 @@ func (c *Connector) deleteQMAPPendingNormal(modemID string) {
 }
 
 // SetQMAPEnabled migrates an existing Internet connection between the normal
-// ModemManager bearer and QMAP. Firmware that cannot leave QMAP in place is
-// reset, then the modem-added path finishes restoring the normal bearer.
+// process-owned bearer and QMAP. Firmware that cannot leave QMAP in place is
+// reset, then the replacement-device path restores the normal bearer.
 func (c *Connector) SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, enabled bool) error {
 	if modem == nil {
 		return ErrModemRequired
@@ -235,7 +241,7 @@ func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, 
 	if err != nil {
 		return nil, err
 	}
-	connection := &qmapConnection{prefs: prefs}
+	connection := &qmapConnection{modem: modem, generation: modem.Generation(), prefs: prefs}
 	var legErrors error
 	for _, leg := range legs {
 		session, err := openInternetQMAPSession(ctx, modem, mmodem.QMAPConfig{
@@ -257,6 +263,7 @@ func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, 
 			)
 			continue
 		}
+		tracked.modemGeneration = modem.Generation()
 		connection.sessions = append(connection.sessions, session)
 		connection.tracked = append(connection.tracked, tracked)
 		connection.muxIDs = append(connection.muxIDs, leg.muxID)

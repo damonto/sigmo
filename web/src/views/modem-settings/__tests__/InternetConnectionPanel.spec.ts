@@ -18,7 +18,7 @@ const connection: InternetConnectionResponse = {
   alwaysOn: true,
   proxy: { enabled: false },
   interfaceName: 'wwan0',
-  bearer: '/bearer/1',
+  bearer: 1,
   ipv4Addresses: ['10.0.0.2/30'],
   ipv6Addresses: [],
   dns: ['1.1.1.1'],
@@ -45,7 +45,10 @@ const stubs = {
   Label: { props: ['for'], template: '<label :for="$props.for"><slot /></label>' },
   Select: { template: '<div><slot /></div>' },
   SelectContent: { template: '<div><slot /></div>' },
-  SelectItem: { template: '<div><slot /></div>' },
+  SelectItem: {
+    props: ['value'],
+    template: '<div :data-value="value"><slot /></div>',
+  },
   SelectTrigger: { props: ['id'], template: '<button :id="id"><slot /></button>' },
   SelectValue: { template: '<span />' },
   Switch: {
@@ -81,6 +84,15 @@ const mountPanel = () => {
 }
 
 describe('InternetConnectionPanel', () => {
+  it('only offers authentication modes supported by the direct backends', () => {
+    const wrapper = mountPanel()
+
+    expect(wrapper.find('[data-value="pap|chap"]').exists()).toBe(true)
+    expect(wrapper.find('[data-value="mschapv2"]').exists()).toBe(true)
+    expect(wrapper.find('[data-value="mschap"]').exists()).toBe(false)
+    expect(wrapper.find('[data-value="eap"]').exists()).toBe(false)
+  })
+
   it('keeps APN locked while allowing connected preferences to update', async () => {
     const wrapper = mountPanel()
 

@@ -87,7 +87,7 @@ export const useModemInternet = ({ modemId, enabled, onSuccess, onError }: Optio
   }
 
   const connectionKey = (connection: InternetConnectionResponse | null) => {
-    return connection?.bearer || connection?.interfaceName || ''
+    return connection?.bearer ? String(connection.bearer) : connection?.interfaceName || ''
   }
 
   const shouldFetchPublic = (connection: InternetConnectionResponse | null) => {

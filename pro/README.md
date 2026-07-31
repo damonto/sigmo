@@ -48,8 +48,8 @@ cd pro
 go run -tags=esim_transfer,ims . --db-path=../sigmo.db --debug
 ```
 
-Or build first and run the binary with the permissions needed to access
-ModemManager:
+Or build first and run the binary with the permissions needed to access modem
+device nodes and configure network interfaces:
 
 ```bash
 cd pro

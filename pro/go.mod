@@ -3,15 +3,14 @@ module github.com/damonto/sigmo/pro
 go 1.26.3
 
 require (
-	github.com/damonto/euicc-go v1.1.3-0.20260712112734-b1c42d12dd47
-	github.com/damonto/ims-go v0.0.0-20260727155930-bd7f1447dde7
+	github.com/damonto/euicc-go v1.1.3-0.20260731154314-8f944a2b5f98
+	github.com/damonto/ims-go v0.0.0-20260731154559-1aa5fb5dfd33
 	github.com/damonto/sigmo v1.0.6
-	github.com/damonto/ts43-go v0.0.0-20260727131007-1e61ad99de1d
-	github.com/damonto/wwan-go v0.0.0-20260726044848-6c2a4b9b0a0e
-	github.com/godbus/dbus/v5 v5.2.2
+	github.com/damonto/ts43-go v0.0.0-20260731154436-985904b6ae4f
+	github.com/damonto/wwan-go v0.0.0-20260731153740-68483b6b3dd9
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.3.1
-	github.com/modelcontextprotocol/go-sdk v1.6.1
+	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/pion/interceptor v0.1.47
 	github.com/pion/rtp v1.10.5
 	github.com/pion/webrtc/v4 v4.2.18
@@ -54,6 +53,7 @@ require (
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.15.0 // indirect

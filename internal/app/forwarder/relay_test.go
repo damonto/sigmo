@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/damonto/sigmo/internal/pkg/modem"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -261,5 +262,71 @@ func TestFreshIncomingMessage(t *testing.T) {
 				t.Fatalf("freshIncomingMessage() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRemoveModemDoesNotReleaseNewGenerationOwnership(t *testing.T) {
+	const (
+		path      = "/sys/devices/modem-1"
+		equipment = "imei-1"
+	)
+	newCanceled := false
+	relay := &Relay{
+		subscriptions: map[string]relaySubscription{
+			path: {generation: 2, cancel: func() { newCanceled = true }},
+		},
+		equipment: map[string]string{equipment: path},
+		modems:    map[string]string{path: equipment},
+	}
+
+	relay.removeModem(path, 1)
+
+	if newCanceled {
+		t.Fatal("stale generation canceled the replacement subscription")
+	}
+	if got := relay.subscriptions[path].generation; got != 2 {
+		t.Fatalf("subscription generation = %d, want 2", got)
+	}
+	if relay.equipment[equipment] != path || relay.modems[path] != equipment {
+		t.Fatalf("replacement ownership was removed: equipment=%v modems=%v", relay.equipment, relay.modems)
+	}
+
+	relay.removeModem(path, 2)
+	if !newCanceled {
+		t.Fatal("matching generation did not cancel the subscription")
+	}
+	if len(relay.subscriptions) != 0 || len(relay.equipment) != 0 || len(relay.modems) != 0 {
+		t.Fatalf("matching generation left ownership behind: subscriptions=%v equipment=%v modems=%v", relay.subscriptions, relay.equipment, relay.modems)
+	}
+}
+
+func TestChangedModemRemovesPreviousPathWithoutEquipmentID(t *testing.T) {
+	const previousPath = "/sys/devices/modem-old"
+	canceled := false
+	relay := &Relay{
+		subscriptions: map[string]relaySubscription{
+			previousPath: {cancel: func() { canceled = true }},
+		},
+		equipment: make(map[string]string),
+		modems:    make(map[string]string),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := relay.handleModemEvent(ctx, modem.ModemEvent{
+		Type:         modem.ModemEventChanged,
+		Modem:        new(modem.Modem),
+		Previous:     new(modem.Modem),
+		Path:         "/sys/devices/modem-new",
+		PreviousPath: previousPath,
+	})
+	if err != nil {
+		t.Fatalf("handleModemEvent() error = %v", err)
+	}
+	if !canceled {
+		t.Fatal("path change did not cancel the previous subscription")
+	}
+	if _, ok := relay.subscriptions[previousPath]; ok {
+		t.Fatal("path change left the previous subscription registered")
 	}
 }

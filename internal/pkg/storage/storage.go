@@ -79,6 +79,15 @@ func (s *Store) Migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_profile_timestamp ON messages(profile_id, timestamp)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_profile_participants ON messages(profile_id, sender, recipient)`,
+		`CREATE TABLE IF NOT EXISTS modem_message_refs (
+			message_id INTEGER NOT NULL,
+			modem_id TEXT NOT NULL,
+			generation INTEGER NOT NULL DEFAULT 0,
+			storage INTEGER NOT NULL,
+			ref_id INTEGER NOT NULL,
+			PRIMARY KEY (message_id, modem_id, generation, storage, ref_id),
+			FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+		)`,
 		`CREATE TABLE IF NOT EXISTS calls (
 			id TEXT PRIMARY KEY,
 			profile_id TEXT NOT NULL,
@@ -175,9 +184,50 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if err := s.migrateReminderRevision(ctx); err != nil {
 		return err
 	}
+	if err := s.migrateModemMessageRefGeneration(ctx); err != nil {
+		return err
+	}
 	if _, err := s.db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_fingerprint ON messages(fingerprint) WHERE fingerprint <> ''`); err != nil {
 		return fmt.Errorf("migrate message fingerprint index: %w", err)
 	}
+	return nil
+}
+
+func (s *Store) migrateModemMessageRefGeneration(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("start modem message ref generation migration: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	hasGeneration, err := tableColumnExists(ctx, tx, "modem_message_refs", "generation")
+	if err != nil {
+		return err
+	}
+	if !hasGeneration {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE modem_message_refs ADD COLUMN generation INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add modem message ref generation column: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS idx_modem_message_ref`); err != nil {
+		return fmt.Errorf("drop legacy modem message ref index: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		CREATE UNIQUE INDEX idx_modem_message_ref
+		ON modem_message_refs(modem_id, generation, storage, ref_id)
+	`); err != nil {
+		return fmt.Errorf("create modem message ref generation index: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit modem message ref generation migration: %w", err)
+	}
+	committed = true
 	return nil
 }
 

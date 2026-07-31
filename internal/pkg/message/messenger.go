@@ -1,13 +1,16 @@
 package message
 
 import (
+	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
-
-	"github.com/godbus/dbus/v5"
+	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -34,8 +37,9 @@ type modemDevice interface {
 	profileID(context.Context) (string, error)
 	sendSMS(context.Context, string, string) (*mmodem.SMS, error)
 	listSMS(context.Context) ([]*mmodem.SMS, error)
-	deleteSMS(context.Context, dbus.ObjectPath) error
+	deleteSMS(context.Context, []mmodem.MessageRef) error
 	modemID() string
+	generation() uint64
 	phoneNumber() string
 }
 
@@ -100,7 +104,17 @@ func (s *Messenger) deleteByParticipant(ctx context.Context, device modemDevice,
 		if msg.Source != storage.MessageSourceModem {
 			continue
 		}
-		if err := device.deleteSMS(ctx, dbus.ObjectPath(msg.ExternalKey)); err != nil {
+		refs := make([]mmodem.MessageRef, 0, len(msg.ModemRefs))
+		for _, ref := range msg.ModemRefs {
+			if ref.Generation != 0 && ref.Generation != device.generation() {
+				continue
+			}
+			refs = append(refs, mmodem.MessageRef{Storage: wwanMessageStorage(ref.Storage), ID: ref.ID})
+		}
+		if len(refs) == 0 {
+			continue
+		}
+		if err := device.deleteSMS(ctx, refs); err != nil {
 			return fmt.Errorf("delete message for %s: %w", participant, err)
 		}
 	}
@@ -228,14 +242,62 @@ func messageFromModemSMS(ctx context.Context, device modemDevice, profileID stri
 		ModemID:     device.modemID(),
 		ProfileID:   profileID,
 		Source:      storage.MessageSourceModem,
-		ExternalKey: string(sms.Path()),
+		ExternalKey: ModemSMSKey(device.modemID(), sms),
 		Sender:      sender,
 		Recipient:   recipient,
 		Text:        sms.Text,
 		Timestamp:   sms.Timestamp,
 		Status:      strings.ToLower(sms.State.String()),
 		Incoming:    incoming,
+		ModemRefs:   StorageModemRefs(device.modemID(), sms.Generation, sms.Refs),
 	}
+}
+
+func ModemSMSKey(modemID string, sms *mmodem.SMS) string {
+	modemID = strings.TrimSpace(modemID)
+	if sms == nil {
+		return modemID + ":content:nil"
+	}
+	generation := ""
+	if sms.Generation != 0 {
+		generation = fmt.Sprintf("g%d:", sms.Generation)
+	}
+	refs := slices.Clone(sms.Refs)
+	slices.SortFunc(refs, func(a, b mmodem.MessageRef) int {
+		if a.Storage != b.Storage {
+			return cmp.Compare(a.Storage, b.Storage)
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+	if len(refs) == 0 {
+		content := strings.Join([]string{
+			modemID,
+			fmt.Sprint(sms.State),
+			strings.TrimSpace(sms.Number),
+			sms.Text,
+			sms.Timestamp.UTC().Format(time.RFC3339Nano),
+		}, "\x00")
+		sum := sha256.Sum256([]byte(content))
+		return modemID + ":" + generation + "content:" + hex.EncodeToString(sum[:])
+	}
+	var key strings.Builder
+	key.WriteString(modemID + ":" + generation)
+	for _, ref := range refs {
+		key.WriteString(fmt.Sprintf("%d/%d,", ref.Storage, ref.ID))
+	}
+	return key.String()
+}
+
+func StorageModemRefs(modemID string, generation uint64, refs []mmodem.MessageRef) []storage.ModemMessageRef {
+	result := make([]storage.ModemMessageRef, 0, len(refs))
+	for _, ref := range refs {
+		result = append(result, storage.ModemMessageRef{ModemID: modemID, Generation: generation, Storage: uint8(ref.Storage), ID: ref.ID})
+	}
+	return result
+}
+
+func wwanMessageStorage(storage uint8) mmodem.MessageStorage {
+	return mmodem.MessageStorage(storage)
 }
 
 func (d realModemDevice) modem() *mmodem.Modem {
@@ -254,14 +316,21 @@ func (d realModemDevice) listSMS(ctx context.Context) ([]*mmodem.SMS, error) {
 	return d.modemRef.Messaging().List(ctx)
 }
 
-func (d realModemDevice) deleteSMS(ctx context.Context, path dbus.ObjectPath) error {
-	return d.modemRef.Messaging().Delete(ctx, path)
+func (d realModemDevice) deleteSMS(ctx context.Context, refs []mmodem.MessageRef) error {
+	return d.modemRef.Messaging().Delete(ctx, refs)
 }
 
 func (d realModemDevice) modemID() string {
 	return d.modemRef.EquipmentIdentifier
 }
 
+func (d realModemDevice) generation() uint64 {
+	if d.modemRef == nil {
+		return 0
+	}
+	return d.modemRef.Generation()
+}
+
 func (d realModemDevice) phoneNumber() string {
-	return d.modemRef.Number
+	return d.modemRef.Snapshot().Number
 }

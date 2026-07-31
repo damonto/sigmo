@@ -63,9 +63,10 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 		return fmt.Errorf("update MSISDN: %w", err)
 	}
 
-	target := mmodem.SIMTarget{Slot: modem.PrimarySimSlot}
-	if modem.Sim != nil {
-		target.ICCID = modem.Sim.Identifier
+	snapshot := modem.Snapshot()
+	target := mmodem.SIMTarget{Slot: snapshot.PrimarySIMSlot}
+	if snapshot.SIM != nil {
+		target.ICCID = snapshot.SIM.Identifier
 	}
 	if _, err := m.refreshSIMAndWait(ctx, modem, target); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

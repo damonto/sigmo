@@ -171,9 +171,9 @@ func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (us
 		if err != nil {
 			return nil, err
 		}
-		client, err := mbim.Open(ctx, mbim.WithProxy(port.Device), mbim.WithSlot(int(slot)))
+		client, err := mbim.Open(ctx, mbim.WithAutoDetect(port.Device), mbim.WithSlot(int(slot)))
 		if err != nil {
-			return nil, fmt.Errorf("open MBIM proxy: %w", err)
+			return nil, fmt.Errorf("open MBIM transport: %w", err)
 		}
 		reader, err := imsgo.NewMBIMClient(client, imsgo.MBIMClientConfig{
 			Network: newPDNNetwork(interfaceName, true),

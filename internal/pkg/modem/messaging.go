@@ -2,171 +2,221 @@ package modem
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
+	"errors"
+	"slices"
 	"time"
 
-	"github.com/godbus/dbus/v5"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
-const ModemMessagingInterface = ModemInterface + ".Messaging"
+type Messaging struct{ modem *Modem }
 
-type Messaging struct {
-	modem *Modem
+func (m *Modem) Messaging() *Messaging { return &Messaging{modem: m} }
+
+func (m *Messaging) List(ctx context.Context) ([]*SMS, error) {
+	messages, err := m.modem.core.ListMessages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*SMS, 0, len(messages))
+	for _, message := range messages {
+		result = append(result, smsFromWWAN(m.modem, message))
+	}
+	return result, nil
 }
 
-func (m *Modem) Messaging() *Messaging {
-	return &Messaging{modem: m}
+func (m *Messaging) Retrieve(ctx context.Context, ref MessageRef) (*SMS, error) {
+	message, err := m.modem.core.ReadStoredMessage(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	return smsFromWWAN(m.modem, message), nil
 }
 
-func (msg *Messaging) List(ctx context.Context) ([]*SMS, error) {
-	var messages []dbus.ObjectPath
-	var err error
-	err = msg.modem.dbusObject.CallWithContext(ctx, ModemMessagingInterface+".List", 0).Store(&messages)
-	s := make([]*SMS, len(messages))
-	for i, message := range messages {
-		s[i], err = msg.Retrieve(ctx, message)
-		if err != nil {
-			return nil, err
+func (m *Messaging) Delete(ctx context.Context, refs []MessageRef) error {
+	if len(refs) == 0 {
+		return errors.New("SMS references are required")
+	}
+	return m.modem.core.DeleteMessages(ctx, slices.Clone(refs))
+}
+
+func (m *Messaging) SetDefaultStorage(_ context.Context, storage SMSStorage) error {
+	value, ok := semanticSMSStorage(storage)
+	if !ok {
+		return wwanmodem.ErrNotSupported
+	}
+	m.modem.smsMu.Lock()
+	m.modem.smsStorage = value
+	m.modem.smsMu.Unlock()
+	return nil
+}
+
+func (m *Messaging) SupportedStorages(ctx context.Context) ([]SMSStorage, error) {
+	info, err := m.modem.core.MessageStorages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]SMSStorage, 0, len(info.Supported))
+	for _, storage := range info.Supported {
+		result = append(result, legacySMSStorage(storage))
+	}
+	return result, nil
+}
+
+func (m *Messaging) DefaultStorage(ctx context.Context) (SMSStorage, error) {
+	m.modem.smsMu.RLock()
+	storage := m.modem.smsStorage
+	m.modem.smsMu.RUnlock()
+	if storage != wwanmodem.MessageStorageUnknown {
+		return legacySMSStorage(storage), nil
+	}
+	info, err := m.modem.core.MessageStorages(ctx)
+	if err != nil {
+		return SMSStorageUnknown, err
+	}
+	return legacySMSStorage(info.Default), nil
+}
+
+func (m *Messaging) Send(ctx context.Context, to, text string) (*SMS, error) {
+	m.modem.smsMu.RLock()
+	storage := m.modem.smsStorage
+	m.modem.smsMu.RUnlock()
+	result, err := m.modem.core.SendMessage(ctx, wwanmodem.MessageConfig{Number: to, Text: text, Storage: storage})
+	if err != nil {
+		return nil, err
+	}
+	return sentSMSFromWWAN(sentSMSConfig{
+		modem:   m.modem,
+		storage: storage,
+		to:      to,
+		text:    text,
+		result:  result,
+		now:     time.Now(),
+	}), nil
+}
+
+type sentSMSConfig struct {
+	modem   *Modem
+	storage wwanmodem.MessageStorage
+	to      string
+	text    string
+	result  wwanmodem.SendResult
+	now     time.Time
+}
+
+func sentSMSFromWWAN(cfg sentSMSConfig) *SMS {
+	if len(cfg.result.Messages) == 0 {
+		generation := uint64(0)
+		if cfg.modem != nil {
+			generation = cfg.modem.Generation()
+		}
+		return &SMS{
+			Generation:        generation,
+			MessageReferences: slices.Clone(cfg.result.References),
+			State:             SMSStateSent,
+			Storage:           legacySMSStorage(cfg.storage),
+			Number:            cfg.to,
+			Text:              cfg.text,
+			Timestamp:         cfg.now,
 		}
 	}
-	return s, err
-}
 
-func (msg *Messaging) Create(ctx context.Context, to string, text string) (dbus.ObjectPath, error) {
-	var path dbus.ObjectPath
-	data := map[string]any{
-		"number": to,
-		"text":   text,
+	sms := smsFromWWAN(cfg.modem, cfg.result.Messages[0])
+	sms.MessageReferences = slices.Clone(cfg.result.References)
+	seen := make(map[MessageRef]struct{})
+	refs := make([]MessageRef, 0)
+	for _, part := range cfg.result.Messages {
+		for _, ref := range part.Refs {
+			if _, ok := seen[ref]; ok {
+				continue
+			}
+			seen[ref] = struct{}{}
+			refs = append(refs, ref)
+		}
+		if sms.Number == "" {
+			sms.Number = part.Number
+		}
+		if sms.Timestamp.IsZero() || (!part.Timestamp.IsZero() && part.Timestamp.Before(sms.Timestamp)) {
+			sms.Timestamp = part.Timestamp
+		}
 	}
-	err := msg.modem.dbusObject.CallWithContext(ctx, ModemMessagingInterface+".Create", 0, &data).Store(&path)
-	return path, err
-}
-
-func (msg *Messaging) Delete(ctx context.Context, path dbus.ObjectPath) error {
-	return msg.modem.dbusObject.CallWithContext(ctx, ModemMessagingInterface+".Delete", 0, path).Err
-}
-
-func (msg *Messaging) SetDefaultStorage(ctx context.Context, storage SMSStorage) error {
-	return msg.modem.dbusObject.CallWithContext(ctx, ModemMessagingInterface+".SetDefaultStorage", 0, uint32(storage)).Err
-}
-
-func (msg *Messaging) SupportedStorages(ctx context.Context) ([]SMSStorage, error) {
-	variant, err := dbusProperty(ctx, msg.modem.dbusObject, ModemMessagingInterface, "SupportedStorages")
-	if err != nil {
-		return nil, fmt.Errorf("read supported SMS storages: %w", err)
+	sms.Refs = refs
+	if sms.Number == "" {
+		sms.Number = cfg.to
 	}
-	return smsStoragesFromVariant(variant), nil
+	if sms.Storage == SMSStorageUnknown {
+		sms.Storage = legacySMSStorage(cfg.storage)
+	}
+	sms.Text = cfg.text
+	if sms.Timestamp.IsZero() {
+		sms.Timestamp = cfg.now
+	}
+	return sms
 }
 
-func (msg *Messaging) DefaultStorage(ctx context.Context) (SMSStorage, error) {
-	variant, err := dbusProperty(ctx, msg.modem.dbusObject, ModemMessagingInterface, "DefaultStorage")
-	if err != nil {
-		return SMSStorageUnknown, fmt.Errorf("read default SMS storage: %w", err)
+func (m *Messaging) Subscribe(ctx context.Context, subscriber func(message *SMS) error) error {
+	if subscriber == nil {
+		return errors.New("SMS subscriber is required")
 	}
-	return SMSStorage(uintFromVariant[uint32](variant)), nil
-}
-
-func smsStoragesFromVariant(variant dbus.Variant) []SMSStorage {
-	values, ok := variant.Value().([]uint32)
-	if !ok {
-		return nil
-	}
-	storages := make([]SMSStorage, len(values))
-	for i, value := range values {
-		storages[i] = SMSStorage(value)
-	}
-	return storages
-}
-
-func (msg *Messaging) Subscribe(ctx context.Context, subscriber func(message *SMS) error) error {
-	dbusConn, err := systemBusPrivate()
+	watchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := m.modem.core.WatchMessages(watchCtx)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err := dbusConn.Close(); err != nil {
-			slog.Error("close dbus connection", "error", err)
-		}
-	}()
-	if err := dbusConn.AddMatchSignal(
-		dbus.WithMatchMember("Added"),
-		dbus.WithMatchPathNamespace(msg.modem.objectPath),
-	); err != nil {
+	if stream == nil {
+		return errors.New("modem message watcher returned a nil stream")
+	}
+	// Establish the live stream before replaying stored messages so an SMS
+	// arriving during reconciliation is buffered by the watcher instead of
+	// falling into a list/subscribe gap.
+	messages, err := m.List(watchCtx)
+	if err != nil {
 		return err
 	}
-	signalChan := make(chan *dbus.Signal, 10)
-	dbusConn.Signal(signalChan)
-	defer dbusConn.RemoveSignal(signalChan)
+	for _, message := range messages {
+		if err := subscriber(message); err != nil {
+			return err
+		}
+	}
 	for {
 		select {
-		case sig, ok := <-signalChan:
+		case <-watchCtx.Done():
+			return watchCtx.Err()
+		case result, ok := <-stream:
 			if !ok {
-				return nil
+				return errors.New("modem message stream closed")
 			}
-			path, received, ok := receivedMessageSignal(sig)
-			if !ok {
-				slog.Warn("ignore invalid messaging signal", "path", msg.modem.objectPath, "body", signalBody(sig))
-				continue
+			if result.Err != nil {
+				return result.Err
 			}
-			if !received {
-				continue
+			if err := subscriber(smsFromWWAN(m.modem, result.Value)); err != nil {
+				return err
 			}
-			s, err := msg.waitForSMSReceived(ctx, path, 100*time.Millisecond)
-			if err != nil {
-				slog.Error("process message", "error", err, "path", sig.Path)
-				continue
-			}
-			if err := subscriber(s); err != nil {
-				slog.Error("process message", "error", err, "path", sig.Path)
-			}
-		case <-ctx.Done():
-			slog.Info("unsubscribing from modem messaging", "path", msg.modem.dbusObject.Path())
-			return nil
 		}
 	}
 }
 
-func receivedMessageSignal(sig *dbus.Signal) (dbus.ObjectPath, bool, bool) {
-	if sig == nil || len(sig.Body) < 2 {
-		return "", false, false
+func legacySMSStorage(storage wwanmodem.MessageStorage) SMSStorage {
+	switch storage {
+	case wwanmodem.MessageStorageSIM:
+		return SMSStorageSM
+	case wwanmodem.MessageStorageDevice:
+		return SMSStorageME
+	default:
+		return SMSStorageUnknown
 	}
-	path, ok := sig.Body[0].(dbus.ObjectPath)
-	if !ok || path == "" {
-		return "", false, false
-	}
-	received, ok := sig.Body[1].(bool)
-	if !ok {
-		return "", false, false
-	}
-	return path, received, true
 }
 
-func signalBody(sig *dbus.Signal) []any {
-	if sig == nil {
-		return nil
-	}
-	return sig.Body
-}
-
-func (msg *Messaging) waitForSMSReceived(ctx context.Context, path dbus.ObjectPath, interval time.Duration) (*SMS, error) {
-	if interval <= 0 {
-		interval = 100 * time.Millisecond
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		s, err := msg.Retrieve(ctx, path)
-		if err != nil {
-			return nil, err
-		}
-		if s.State == SMSStateReceived {
-			return s, nil
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-ticker.C:
-		}
+func semanticSMSStorage(storage SMSStorage) (wwanmodem.MessageStorage, bool) {
+	switch storage {
+	case SMSStorageUnknown:
+		return wwanmodem.MessageStorageUnknown, true
+	case SMSStorageSM:
+		return wwanmodem.MessageStorageSIM, true
+	case SMSStorageME:
+		return wwanmodem.MessageStorageDevice, true
+	default:
+		return wwanmodem.MessageStorageUnknown, false
 	}
 }
