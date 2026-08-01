@@ -287,6 +287,112 @@ func TestModemMessageRefsIncludeGenerationAndZeroID(t *testing.T) {
 	}
 }
 
+func TestDeleteModemMessageRefsDeletesExactReferencesTransactionally(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	base := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
+	targetRefs := []ModemMessageRef{
+		{ModemID: "modem-a", Generation: 7, Storage: 2, ID: 0},
+		{ModemID: "modem-a", Generation: 7, Storage: 1, ID: 9},
+	}
+	messages := []Message{
+		{
+			ModemID:     "modem-a",
+			ProfileID:   "profile-a",
+			Source:      MessageSourceModem,
+			ExternalKey: "target",
+			Sender:      "+100",
+			Recipient:   "+200",
+			Text:        "multipart",
+			Timestamp:   base,
+			Status:      "received",
+			Incoming:    true,
+			ModemRefs:   targetRefs,
+		},
+		{
+			ModemID:     "modem-a",
+			ProfileID:   "profile-a",
+			Source:      MessageSourceModem,
+			ExternalKey: "other-generation",
+			Sender:      "+101",
+			Recipient:   "+200",
+			Text:        "new generation",
+			Timestamp:   base.Add(time.Second),
+			Status:      "received",
+			Incoming:    true,
+			ModemRefs: []ModemMessageRef{
+				{ModemID: "modem-a", Generation: 8, Storage: 2, ID: 0},
+			},
+		},
+		{
+			ModemID:     "modem-b",
+			ProfileID:   "profile-b",
+			Source:      MessageSourceModem,
+			ExternalKey: "other-modem",
+			Sender:      "+102",
+			Recipient:   "+200",
+			Text:        "other modem",
+			Timestamp:   base.Add(2 * time.Second),
+			Status:      "received",
+			Incoming:    true,
+			ModemRefs: []ModemMessageRef{
+				{ModemID: "modem-b", Generation: 7, Storage: 1, ID: 9},
+			},
+		},
+	}
+	for _, msg := range messages {
+		inserted, err := store.InsertMessage(ctx, msg)
+		if err != nil {
+			t.Fatalf("InsertMessage() error = %v", err)
+		}
+		if !inserted {
+			t.Fatal("InsertMessage() = false, want true")
+		}
+	}
+
+	invalidRefs := []ModemMessageRef{
+		targetRefs[0],
+		{Generation: 7, Storage: 1, ID: 9},
+	}
+	if err := store.DeleteModemMessageRefs(ctx, invalidRefs); err == nil {
+		t.Fatal("DeleteModemMessageRefs() error = nil, want missing modem id error")
+	}
+	target, err := store.ListByParticipant(ctx, "profile-a", "+100")
+	if err != nil {
+		t.Fatalf("ListByParticipant() after rollback error = %v", err)
+	}
+	if len(target) != 1 || len(target[0].ModemRefs) != 2 {
+		t.Fatalf("target refs after rollback = %+v, want both refs", target)
+	}
+
+	if err := store.DeleteModemMessageRefs(ctx, targetRefs); err != nil {
+		t.Fatalf("DeleteModemMessageRefs() error = %v", err)
+	}
+	target, err = store.ListByParticipant(ctx, "profile-a", "+100")
+	if err != nil {
+		t.Fatalf("ListByParticipant() target error = %v", err)
+	}
+	if len(target) != 1 || len(target[0].ModemRefs) != 0 {
+		t.Fatalf("target refs = %+v, want none", target)
+	}
+	remainingMessages := []struct {
+		profileID   string
+		participant string
+	}{
+		{profileID: "profile-a", participant: "+101"},
+		{profileID: "profile-b", participant: "+102"},
+	}
+	for _, remainingMessage := range remainingMessages {
+		remaining, err := store.ListByParticipant(ctx, remainingMessage.profileID, remainingMessage.participant)
+		if err != nil {
+			t.Fatalf("ListByParticipant(%s) error = %v", remainingMessage.participant, err)
+		}
+		if len(remaining) != 1 || len(remaining[0].ModemRefs) != 1 {
+			t.Fatalf("remaining refs for %s = %+v, want one", remainingMessage.participant, remaining)
+		}
+	}
+}
+
 func TestMigrateModemMessageRefGeneration(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "sigmo.db")

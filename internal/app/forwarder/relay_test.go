@@ -3,9 +3,12 @@ package forwarder
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/webpush"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 func TestNewRequiresMessageStorage(t *testing.T) {
@@ -265,6 +269,235 @@ func TestFreshIncomingMessage(t *testing.T) {
 	}
 }
 
+func TestForwardStoredModemSMSStoresCleansAndNotifies(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name              string
+		source            string
+		incoming          bool
+		timestamp         time.Time
+		refs              []modem.MessageRef
+		preinsert         bool
+		wantStored        int
+		wantDeleteCalls   int
+		wantNotifications int32
+	}{
+		{
+			name:      "fresh multipart",
+			incoming:  true,
+			timestamp: now,
+			refs: []modem.MessageRef{
+				{Storage: wwanmodem.MessageStorageSIM, ID: 0},
+				{Storage: wwanmodem.MessageStorageDevice, ID: 9},
+			},
+			wantStored:        1,
+			wantDeleteCalls:   1,
+			wantNotifications: 1,
+		},
+		{
+			name:            "stale replay",
+			incoming:        true,
+			timestamp:       now.Add(-time.Hour),
+			refs:            []modem.MessageRef{{Storage: wwanmodem.MessageStorageSIM, ID: 10}},
+			wantStored:      1,
+			wantDeleteCalls: 1,
+		},
+		{
+			name:            "known replay",
+			incoming:        true,
+			timestamp:       now,
+			refs:            []modem.MessageRef{{Storage: wwanmodem.MessageStorageDevice, ID: 11}},
+			preinsert:       true,
+			wantStored:      1,
+			wantDeleteCalls: 1,
+		},
+		{
+			name:              "flash message without refs",
+			incoming:          true,
+			timestamp:         now,
+			wantStored:        1,
+			wantNotifications: 1,
+		},
+		{
+			name:      "outgoing message",
+			timestamp: now,
+			refs:      []modem.MessageRef{{Storage: wwanmodem.MessageStorageDevice, ID: 12}},
+		},
+		{
+			name:      "routed IMS message",
+			source:    storage.MessageSourceRouted,
+			incoming:  true,
+			timestamp: now,
+			refs:      []modem.MessageRef{{Storage: wwanmodem.MessageStorageDevice, ID: 13}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			relay, store, notifications := newSMSRelay(t)
+			source := tt.source
+			if source == "" {
+				source = storage.MessageSourceModem
+			}
+			storedRefs := make([]storage.ModemMessageRef, 0, len(tt.refs))
+			for _, ref := range tt.refs {
+				storedRefs = append(storedRefs, storage.ModemMessageRef{
+					ModemID:    "modem-1",
+					Generation: 7,
+					Storage:    uint8(ref.Storage),
+					ID:         ref.ID,
+				})
+			}
+			stored := storage.Message{
+				ModemID:     "modem-1",
+				ProfileID:   "profile-a",
+				Source:      source,
+				ExternalKey: tt.name,
+				Sender:      "+100",
+				Recipient:   "+200",
+				Text:        tt.name,
+				Timestamp:   tt.timestamp,
+				Status:      "received",
+				Incoming:    tt.incoming,
+				ModemRefs:   storedRefs,
+			}
+			if tt.preinsert {
+				inserted, err := store.InsertMessage(ctx, stored)
+				if err != nil {
+					t.Fatalf("InsertMessage() error = %v", err)
+				}
+				if !inserted {
+					t.Fatal("InsertMessage() = false, want true")
+				}
+			}
+
+			refsClearedBeforeDelete := false
+			deleter := &fakeModemSMSDeleter{
+				beforeDelete: func() {
+					messages, err := store.ListByParticipant(ctx, "profile-a", "+100")
+					if err != nil {
+						t.Fatalf("ListByParticipant() before delete error = %v", err)
+					}
+					refsClearedBeforeDelete = len(messages) == 1 && len(messages[0].ModemRefs) == 0
+				},
+			}
+			err := relay.forwardStoredModemSMS(ctx, modemSMSReceipt{stored: stored, refs: tt.refs, deleter: deleter})
+			if err != nil {
+				t.Fatalf("forwardStoredModemSMS() error = %v", err)
+			}
+			if len(deleter.calls) != tt.wantDeleteCalls {
+				t.Fatalf("modem delete calls = %d, want %d", len(deleter.calls), tt.wantDeleteCalls)
+			}
+			if tt.wantDeleteCalls == 1 {
+				if !slices.Equal(deleter.calls[0], tt.refs) {
+					t.Fatalf("deleted refs = %v, want %v", deleter.calls[0], tt.refs)
+				}
+				if !refsClearedBeforeDelete {
+					t.Fatal("database refs were not cleared before modem deletion")
+				}
+			}
+			messages, err := store.ListByParticipant(ctx, "profile-a", "+100")
+			if err != nil {
+				t.Fatalf("ListByParticipant() error = %v", err)
+			}
+			if len(messages) != tt.wantStored {
+				t.Fatalf("stored messages = %d, want %d", len(messages), tt.wantStored)
+			}
+			if len(messages) == 1 && len(messages[0].ModemRefs) != 0 {
+				t.Fatalf("stored modem refs = %v, want none", messages[0].ModemRefs)
+			}
+			if got := notifications.Load(); got != tt.wantNotifications {
+				t.Fatalf("notifications = %d, want %d", got, tt.wantNotifications)
+			}
+		})
+	}
+}
+
+func TestForwardStoredModemSMSRetriesDeleteWithoutDuplicateNotification(t *testing.T) {
+	ctx := context.Background()
+	relay, store, notifications := newSMSRelay(t)
+	deleteErr := errors.New("modem storage busy")
+	refs := []modem.MessageRef{{Storage: wwanmodem.MessageStorageDevice, ID: 21}}
+	stored := storage.Message{
+		ModemID:     "modem-1",
+		ProfileID:   "profile-a",
+		Source:      storage.MessageSourceModem,
+		ExternalKey: "retry-delete",
+		Sender:      "+100",
+		Recipient:   "+200",
+		Text:        "retry",
+		Timestamp:   time.Now(),
+		Status:      "received",
+		Incoming:    true,
+		ModemRefs: []storage.ModemMessageRef{
+			{ModemID: "modem-1", Generation: 7, Storage: uint8(wwanmodem.MessageStorageDevice), ID: 21},
+		},
+	}
+	deleter := &fakeModemSMSDeleter{errs: []error{deleteErr, nil}}
+	receipt := modemSMSReceipt{stored: stored, refs: refs, deleter: deleter}
+
+	err := relay.forwardStoredModemSMS(ctx, receipt)
+	if !errors.Is(err, deleteErr) {
+		t.Fatalf("forwardStoredModemSMS() first error = %v, want %v", err, deleteErr)
+	}
+	if got := notifications.Load(); got != 1 {
+		t.Fatalf("notifications after failed delete = %d, want 1", got)
+	}
+	messages, err := store.ListByParticipant(ctx, "profile-a", "+100")
+	if err != nil {
+		t.Fatalf("ListByParticipant() error = %v", err)
+	}
+	if len(messages) != 1 || len(messages[0].ModemRefs) != 0 {
+		t.Fatalf("stored message after failed delete = %+v, want persisted without modem refs", messages)
+	}
+
+	if err := relay.forwardStoredModemSMS(ctx, receipt); err != nil {
+		t.Fatalf("forwardStoredModemSMS() retry error = %v", err)
+	}
+	if len(deleter.calls) != 2 {
+		t.Fatalf("modem delete calls = %d, want 2", len(deleter.calls))
+	}
+	if got := notifications.Load(); got != 1 {
+		t.Fatalf("notifications after retry = %d, want 1", got)
+	}
+}
+
+func TestForwardStoredModemSMSDoesNotDeleteBeforeInsert(t *testing.T) {
+	relay, _, notifications := newSMSRelay(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	deleter := new(fakeModemSMSDeleter)
+	err := relay.forwardStoredModemSMS(ctx, modemSMSReceipt{
+		stored: storage.Message{
+			ModemID:     "modem-1",
+			ProfileID:   "profile-a",
+			Source:      storage.MessageSourceModem,
+			ExternalKey: "insert-canceled",
+			Sender:      "+100",
+			Recipient:   "+200",
+			Text:        "keep on modem",
+			Timestamp:   time.Now(),
+			Status:      "received",
+			Incoming:    true,
+			ModemRefs: []storage.ModemMessageRef{
+				{ModemID: "modem-1", Generation: 7, Storage: uint8(wwanmodem.MessageStorageSIM), ID: 30},
+			},
+		},
+		refs:    []modem.MessageRef{{Storage: wwanmodem.MessageStorageSIM, ID: 30}},
+		deleter: deleter,
+	})
+	if err == nil {
+		t.Fatal("forwardStoredModemSMS() error = nil, want insert error")
+	}
+	if len(deleter.calls) != 0 {
+		t.Fatalf("modem delete calls = %d, want 0", len(deleter.calls))
+	}
+	if got := notifications.Load(); got != 0 {
+		t.Fatalf("notifications = %d, want 0", got)
+	}
+}
+
 func TestRemoveModemDoesNotReleaseNewGenerationOwnership(t *testing.T) {
 	const (
 		path      = "/sys/devices/modem-1"
@@ -329,4 +562,48 @@ func TestChangedModemRemovesPreviousPathWithoutEquipmentID(t *testing.T) {
 	if _, ok := relay.subscriptions[previousPath]; ok {
 		t.Fatal("path change left the previous subscription registered")
 	}
+}
+
+func newSMSRelay(t *testing.T) (*Relay, *storage.Store, *atomic.Int32) {
+	t.Helper()
+	notifications := new(atomic.Int32)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		notifications.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	store, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	if err != nil {
+		t.Fatalf("storage.Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Store.Close() error = %v", err)
+		}
+	})
+	current := settings.Default()
+	current.Channels = map[string]settings.Channel{"http": {Endpoint: server.URL}}
+	relay, err := New(settings.NewMemoryStore(current), nil, store, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	return relay, store, notifications
+}
+
+type fakeModemSMSDeleter struct {
+	calls        [][]modem.MessageRef
+	errs         []error
+	beforeDelete func()
+}
+
+func (f *fakeModemSMSDeleter) Delete(_ context.Context, refs []modem.MessageRef) error {
+	if f.beforeDelete != nil {
+		f.beforeDelete()
+	}
+	f.calls = append(f.calls, slices.Clone(refs))
+	index := len(f.calls) - 1
+	if index < len(f.errs) {
+		return f.errs[index]
+	}
+	return nil
 }

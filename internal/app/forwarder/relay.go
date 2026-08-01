@@ -49,6 +49,16 @@ type relaySubscription struct {
 	cancel     context.CancelFunc
 }
 
+type modemSMSDeleter interface {
+	Delete(context.Context, []modem.MessageRef) error
+}
+
+type modemSMSReceipt struct {
+	stored  storage.Message
+	refs    []modem.MessageRef
+	deleter modemSMSDeleter
+}
+
 func New(store *settings.Store, registry *modem.Registry, messages *storage.Store, webPush *webpush.Client) (*Relay, error) {
 	if messages == nil {
 		return nil, errors.New("message storage is required")
@@ -296,22 +306,47 @@ func (r *Relay) forwardModemSMS(ctx context.Context, m *modem.Modem, message *mo
 		return err
 	}
 	stored := storageMessageFromModemSMS(ctx, m, profileID, message)
-	if !freshIncomingMessage(stored, time.Now()) {
-		slog.Debug("skipping stale modem SMS", "imei", m.EquipmentIdentifier, "refs", message.Refs, "timestamp", message.Timestamp)
+	return r.forwardStoredModemSMS(ctx, modemSMSReceipt{
+		stored:  stored,
+		refs:    message.Refs,
+		deleter: m.Messaging(),
+	})
+}
+
+func (r *Relay) forwardStoredModemSMS(ctx context.Context, receipt modemSMSReceipt) error {
+	if !receipt.stored.Incoming || receipt.stored.Source != storage.MessageSourceModem {
 		return nil
 	}
-	inserted, err := r.messages.InsertMessage(ctx, stored)
+	inserted, err := r.messages.InsertMessage(ctx, receipt.stored)
 	if err != nil {
 		return err
 	}
+	cleanupErr := r.deleteModemSMS(ctx, receipt)
 	if !inserted {
-		slog.Debug("skipping known modem SMS", "imei", m.EquipmentIdentifier, "refs", message.Refs)
-		return nil
+		slog.Debug("skipping known modem SMS notification", "imei", receipt.stored.ModemID, "refs", receipt.refs)
+		return cleanupErr
+	}
+	if !freshIncomingMessage(receipt.stored, time.Now()) {
+		slog.Debug("skipping stale modem SMS notification", "imei", receipt.stored.ModemID, "refs", receipt.refs, "timestamp", receipt.stored.Timestamp)
+		return cleanupErr
 	}
 	r.mu.Lock()
 	notifier := r.notifier
 	r.mu.Unlock()
-	return r.send(ctx, notifier, r.formatStoredMessage(m.EquipmentIdentifier, stored))
+	return errors.Join(cleanupErr, r.send(ctx, notifier, r.formatStoredMessage(receipt.stored.ModemID, receipt.stored)))
+}
+
+func (r *Relay) deleteModemSMS(ctx context.Context, receipt modemSMSReceipt) error {
+	if len(receipt.refs) == 0 {
+		return nil
+	}
+	if err := r.messages.DeleteModemMessageRefs(ctx, receipt.stored.ModemRefs); err != nil {
+		return fmt.Errorf("delete stored modem SMS references: %w", err)
+	}
+	if err := receipt.deleter.Delete(ctx, receipt.refs); err != nil {
+		return fmt.Errorf("delete modem SMS: %w", err)
+	}
+	return nil
 }
 
 func freshIncomingMessage(message storage.Message, now time.Time) bool {

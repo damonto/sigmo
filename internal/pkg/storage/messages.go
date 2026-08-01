@@ -259,6 +259,36 @@ func (s *Store) DeleteByParticipant(ctx context.Context, profileID string, parti
 	return messages, nil
 }
 
+func (s *Store) DeleteModemMessageRefs(ctx context.Context, refs []ModemMessageRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin modem message ref delete: %w", err)
+	}
+	defer func() {
+		// Rollback is a no-op after a successful commit.
+		_ = tx.Rollback()
+	}()
+	for _, ref := range refs {
+		modemID := strings.TrimSpace(ref.ModemID)
+		if modemID == "" {
+			return errors.New("modem message ref requires modem id")
+		}
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM modem_message_refs
+			WHERE modem_id = ? AND generation = ? AND storage = ? AND ref_id = ?
+		`, modemID, ref.Generation, ref.Storage, ref.ID); err != nil {
+			return fmt.Errorf("delete modem message ref: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit modem message ref delete: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) loadModemMessageRefs(ctx context.Context, messages []Message) error {
 	for i := range messages {
 		rows, err := s.db.QueryContext(ctx, `
