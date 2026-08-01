@@ -7,7 +7,7 @@ require (
 	github.com/damonto/ims-go v0.0.0-20260731154559-1aa5fb5dfd33
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260731154436-985904b6ae4f
-	github.com/damonto/wwan-go v0.0.0-20260801033436-91b8944b9d53
+	github.com/damonto/wwan-go v0.0.0-20260801051701-ba5eace19a13
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.3.1
 	github.com/modelcontextprotocol/go-sdk v1.7.0

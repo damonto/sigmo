@@ -44,7 +44,7 @@ func (u mbimDevice) MSISDN(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open MBIM network client: %w", err)
 	}
-	defer closeClient("close MBIM network client", client)
+	defer closeClient(client, "MBIM network")
 
 	status, err := client.SubscriberReadyStatus(ctx)
 	if err != nil {
@@ -71,7 +71,7 @@ func (u mbimDevice) ATR(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open MBIM client: %w", err)
 	}
-	defer closeClient("close MBIM client", client)
+	defer closeClient(client, "MBIM")
 
 	atr, err := client.QueryUiccATR(ctx)
 	if err != nil {
@@ -85,7 +85,7 @@ func (u mbimDevice) PacketServiceStatus(ctx context.Context) (PacketServiceStatu
 	if err != nil {
 		return PacketServiceStatus{}, fmt.Errorf("open MBIM network client: %w", err)
 	}
-	defer closeClient("close MBIM network client", client)
+	defer closeClient(client, "MBIM network")
 
 	registration, err := client.RegistrationState(ctx)
 	if err != nil {
@@ -107,7 +107,7 @@ func (u mbimDevice) IMSProfile(ctx context.Context) (IMSProfile, error) {
 	if err != nil {
 		return IMSProfile{}, fmt.Errorf("open MBIM network client: %w", err)
 	}
-	defer closeClient("close MBIM network client", client)
+	defer closeClient(client, "MBIM network")
 
 	found, err := mbimIMSContextAvailable(ctx, client)
 	if err != nil {

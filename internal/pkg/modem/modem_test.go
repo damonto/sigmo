@@ -3,10 +3,13 @@ package modem
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
+	"github.com/damonto/wwan-go/cdcwdm"
 	wwanmodem "github.com/damonto/wwan-go/modem"
+	qmitransport "github.com/damonto/wwan-go/qcom/qmi"
 )
 
 func TestReserveSIMSlot(t *testing.T) {
@@ -98,6 +101,26 @@ func TestProfileIDUsesCachedSIMWithoutTransport(t *testing.T) {
 func TestConsumeModemStreamRejectsNilStream(t *testing.T) {
 	if err := consumeModemStream[int](context.Background(), nil, func(int) {}); err == nil {
 		t.Fatal("consumeModemStream() error = nil, want nil stream error")
+	}
+}
+
+func TestTerminalRuntimeError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "cdc-wdm disconnect", err: fmt.Errorf("watch status: %w", cdcwdm.ErrDisconnected), want: true},
+		{name: "QMI terminal read", err: &qmitransport.TransportError{Err: errors.New("malformed QMUX frame")}, want: true},
+		{name: "request canceled", err: context.Canceled, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isTerminalRuntimeError(tt.err); got != tt.want {
+				t.Fatalf("isTerminalRuntimeError(%v) = %t, want %t", tt.err, got, tt.want)
+			}
+		})
 	}
 }
 

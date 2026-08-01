@@ -536,7 +536,7 @@ func configureQMICAT(ctx context.Context, imei string, cat *qcom.CAT, profile CA
 }
 
 func closeQMIClient(client qmiClient) {
-	closeClient("close QMI UIM client", client)
+	closeClient(client, "QMI UIM")
 }
 
 func qmiSlotStatus(status qcom.SlotStatus) (slotStatus, error) {

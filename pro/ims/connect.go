@@ -55,6 +55,15 @@ type managedVoLTEDevice interface {
 	SetAirplaneMode(ctx context.Context, enabled bool) error
 }
 
+type voLTESession struct {
+	*wwan.Session
+	modem *mmodem.Modem
+}
+
+func (s *voLTESession) SetAirplaneMode(ctx context.Context, enabled bool) error {
+	return s.modem.SetAirplaneMode(ctx, enabled)
+}
+
 type internetRestorer interface {
 	Current(ctx context.Context, modem *mmodem.Modem) (*pinternet.Connection, error)
 	Connect(ctx context.Context, modem *mmodem.Modem, prefs pinternet.Preferences) (*pinternet.Connection, error)
@@ -72,7 +81,11 @@ type connectAttempt struct {
 }
 
 var openManagedVoLTEDevice = func(modem *mmodem.Modem) (managedVoLTEDevice, error) {
-	return mmodem.OpenVoLTESession(modem)
+	session, err := mmodem.OpenVoLTESession(modem)
+	if err != nil {
+		return nil, err
+	}
+	return &voLTESession{Session: session, modem: modem}, nil
 }
 
 func (c *coordinator) startEnabled(ctx context.Context, registry *mmodem.Registry) error {

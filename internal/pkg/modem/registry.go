@@ -40,6 +40,12 @@ type Registry struct {
 	watchDevices func(context.Context) (<-chan wwanmodem.Result[wwanmodem.DeviceEvent], error)
 	open         func(context.Context, wwanmodem.Device, uint64) (*Modem, error)
 	openDevice   deviceControlOpener
+	failures     chan modemFailure
+}
+
+type modemFailure struct {
+	modem *Modem
+	err   error
 }
 
 type ModemEventType int
@@ -84,6 +90,7 @@ func NewRegistry() (*Registry, error) {
 		discover:     wwanmodem.Discover,
 		watchDevices: wwanmodem.WatchDevices,
 		open:         openDiscoveredModem,
+		failures:     make(chan modemFailure, 32),
 	}, nil
 }
 
@@ -164,7 +171,7 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 			slog.Warn("open discovered modem", "device", device.Path, "physical_path", key, "error", err)
 			continue
 		}
-		modem.startRuntimeWatchers(runCtx)
+		r.watchModem(runCtx, modem)
 		if previous := opened[key]; previous != nil {
 			_ = previous.Close()
 		}
@@ -247,6 +254,8 @@ func (r *Registry) consumeDeviceStream(ctx context.Context, stream <-chan wwanmo
 				return result.Err
 			}
 			r.applyDeviceEvent(ctx, result.Value)
+		case failure := <-r.failures:
+			r.handleModemFailure(ctx, failure)
 		}
 	}
 }
@@ -318,7 +327,7 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 		slog.Warn("open changed modem", "device", event.Device.Path, "physical_path", key, "error", err)
 		return
 	}
-	replacement.startRuntimeWatchers(ctx)
+	r.watchModem(ctx, replacement)
 
 	r.mu.Lock()
 	if r.closed {
@@ -357,6 +366,39 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 		if err := previous.Close(); err != nil {
 			slog.Warn("close replaced modem", "path", previousKey, "error", err)
 		}
+	}
+}
+
+func (r *Registry) watchModem(ctx context.Context, modem *Modem) {
+	modem.startRuntimeWatchers(ctx, func(err error) {
+		if r.failures == nil {
+			return
+		}
+		select {
+		case r.failures <- modemFailure{modem: modem, err: err}:
+		case <-ctx.Done():
+		}
+	})
+}
+
+func (r *Registry) handleModemFailure(ctx context.Context, failure modemFailure) {
+	if failure.modem == nil {
+		return
+	}
+	r.mu.RLock()
+	key := r.keyForModemLocked(failure.modem)
+	r.mu.RUnlock()
+	if key == "" {
+		return
+	}
+
+	slog.Warn("modem transport stopped", "imei", failure.modem.EquipmentIdentifier, "generation", failure.modem.Generation(), "error", failure.err)
+	r.removeModem(key, failure.modem)
+	if ctx.Err() != nil {
+		return
+	}
+	if err := r.reconcile(ctx); err != nil {
+		slog.Error("recover modem after transport stop", "imei", failure.modem.EquipmentIdentifier, "generation", failure.modem.Generation(), "error", err)
 	}
 }
 

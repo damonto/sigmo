@@ -301,8 +301,8 @@ func validateSIMSlot(slot uint8) error {
 	return nil
 }
 
-func closeClient(message string, client closer) {
+func closeClient(client closer, kind string) {
 	if err := client.Close(); err != nil {
-		slog.Debug(message, "error", err)
+		slog.Debug("close modem client", "kind", kind, "error", err)
 	}
 }

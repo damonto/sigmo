@@ -10,7 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/damonto/wwan-go/cdcwdm"
 	wwanmodem "github.com/damonto/wwan-go/modem"
+	qmitransport "github.com/damonto/wwan-go/qcom/qmi"
 )
 
 var ErrProfileIDMissing = errors.New("profile id is missing")
@@ -26,6 +28,8 @@ type Modem struct {
 	watchOnce    sync.Once
 	watchCancel  context.CancelFunc
 	watchWG      sync.WaitGroup
+	failureOnce  sync.Once
+	onFailure    func(error)
 	runtimeMu    sync.RWMutex
 	simSlotOnce  sync.Once
 	simSlotToken chan struct{}
@@ -249,13 +253,14 @@ func (m *Modem) applySIMSlots(slots []wwanmodem.SIMSlot) {
 	m.slotSIMs = known
 }
 
-func (m *Modem) startRuntimeWatchers(parent context.Context) {
+func (m *Modem) startRuntimeWatchers(parent context.Context, onFailure func(error)) {
 	if m == nil || m.core == nil {
 		return
 	}
 	m.watchOnce.Do(func() {
 		ctx, cancel := context.WithCancel(parent)
 		m.watchCancel = cancel
+		m.onFailure = onFailure
 		m.watchWG.Add(2)
 		go m.watchStatus(ctx)
 		go m.watchSIM(ctx)
@@ -270,6 +275,9 @@ func (m *Modem) watchStatus(ctx context.Context) {
 			err = consumeModemStream(ctx, stream, m.applyStatus)
 		}
 		if ctx.Err() != nil {
+			return
+		}
+		if m.reportTerminalRuntimeError(err) {
 			return
 		}
 		slog.Warn("modem status watcher stopped", "imei", m.EquipmentIdentifier, "generation", m.Generation(), "error", err)
@@ -289,11 +297,34 @@ func (m *Modem) watchSIM(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		if m.reportTerminalRuntimeError(err) {
+			return
+		}
 		slog.Warn("modem SIM watcher stopped", "imei", m.EquipmentIdentifier, "generation", m.Generation(), "error", err)
 		if err := sleepContext(ctx, modemWatchRetryDelay); err != nil {
 			return
 		}
 	}
+}
+
+func (m *Modem) reportTerminalRuntimeError(err error) bool {
+	if !isTerminalRuntimeError(err) {
+		return false
+	}
+	m.failureOnce.Do(func() {
+		if m.onFailure != nil {
+			m.onFailure(err)
+		}
+	})
+	return true
+}
+
+func isTerminalRuntimeError(err error) bool {
+	if errors.Is(err, cdcwdm.ErrDisconnected) {
+		return true
+	}
+	var transportErr *qmitransport.TransportError
+	return errors.As(err, &transportErr)
 }
 
 func consumeModemStream[T any](ctx context.Context, stream <-chan wwanmodem.Result[T], apply func(T)) error {

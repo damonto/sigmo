@@ -132,6 +132,75 @@ func TestRegistryRetriesAfterWatcherStartupFailure(t *testing.T) {
 	}
 }
 
+func TestRegistryRecoversCurrentGenerationAfterTransportFailure(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "same control path"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			device := wwanmodem.Device{
+				Path:         "/dev/cdc-wdm0",
+				PhysicalPath: "/sys/devices/modem-1",
+				Protocol:     wwanmodem.ProtocolQMI,
+			}
+			key := physicalDeviceKey(device)
+			initial := &Modem{
+				deviceInfo:          device,
+				deviceKey:           key,
+				generation:          1,
+				EquipmentIdentifier: "imei-1",
+				PrimaryPort:         device.Path,
+			}
+			openCalls := 0
+			registry := &Registry{
+				modems:         map[string]*Modem{key: initial},
+				nextGeneration: 1,
+				failures:       make(chan modemFailure, 1),
+				discover: func(context.Context) ([]wwanmodem.Device, error) {
+					return []wwanmodem.Device{device}, nil
+				},
+				open: func(_ context.Context, candidate wwanmodem.Device, generation uint64) (*Modem, error) {
+					openCalls++
+					return &Modem{
+						deviceInfo:          candidate,
+						deviceKey:           physicalDeviceKey(candidate),
+						generation:          generation,
+						EquipmentIdentifier: "imei-1",
+						PrimaryPort:         candidate.Path,
+					}, nil
+				},
+			}
+			var published []ModemEvent
+			registry.subs = []subscription{{id: 1, fn: func(event ModemEvent) error {
+				published = append(published, event)
+				return nil
+			}}}
+
+			failure := modemFailure{modem: initial, err: errors.New("terminal transport error")}
+			registry.handleModemFailure(context.Background(), failure)
+
+			replacement := registry.modems[key]
+			if replacement == nil || replacement == initial || replacement.Generation() != 2 {
+				t.Fatalf("replacement = %+v, want generation 2", replacement)
+			}
+			if openCalls != 1 {
+				t.Fatalf("open calls = %d, want 1", openCalls)
+			}
+			if len(published) != 2 || published[0].Type != ModemEventRemoved || published[1].Type != ModemEventAdded {
+				t.Fatalf("published events = %+v, want removed then added", published)
+			}
+
+			registry.handleModemFailure(context.Background(), failure)
+			if openCalls != 1 || registry.modems[key] != replacement {
+				t.Fatal("stale generation failure replaced the current modem")
+			}
+		})
+	}
+}
+
 func TestRegistryRestartsWatcherAndReconcilesMissedChange(t *testing.T) {
 	previousDelay := registryWatchRetryDelay
 	registryWatchRetryDelay = time.Millisecond
