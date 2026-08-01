@@ -36,7 +36,7 @@ func (c *Connector) Public(ctx context.Context, modem *mmodem.Modem) (IPInfo, er
 	if interfaceName == "" {
 		return IPInfo{}, nil
 	}
-	return fetchIPInfo(ctx, interfaceName)
+	return fetchIPInfo(ctx, interfaceName, connection.DNS)
 }
 
 type ipInfoResponse struct {
@@ -45,19 +45,19 @@ type ipInfoResponse struct {
 	Org     string `json:"org"`
 }
 
-func fetchIPInfo(ctx context.Context, interfaceName string) (IPInfo, error) {
+func fetchIPInfo(ctx context.Context, interfaceName string, dnsServers []string) (IPInfo, error) {
 	interfaceName = strings.TrimSpace(interfaceName)
 	if interfaceName == "" {
 		return IPInfo{}, errors.New("interface name is empty")
 	}
 
-	return requestIPInfo(ctx, interfaceName)
+	return requestIPInfo(ctx, interfaceName, dnsServers)
 }
 
-func requestIPInfo(ctx context.Context, interfaceName string) (IPInfo, error) {
+func requestIPInfo(ctx context.Context, interfaceName string, dnsServers []string) (IPInfo, error) {
 	client := &http.Client{
 		Timeout:   ipInfoTimeout,
-		Transport: boundTransportWithTimeout(interfaceName, ipInfoTimeout),
+		Transport: boundTransportWithTimeout(interfaceName, dnsServers, ipInfoTimeout),
 	}
 	defer client.CloseIdleConnections()
 

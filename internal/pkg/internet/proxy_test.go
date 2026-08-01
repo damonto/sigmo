@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -136,7 +137,7 @@ func TestProxyRegister(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			proxy := newProxyWithDial(tt.cfg, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+			proxy := newProxyWithDial(tt.cfg, func(ctx context.Context, interfaceName string, _ []string, network string, address string) (net.Conn, error) {
 				return nil, errors.New("dial unused")
 			})
 			t.Cleanup(func() {
@@ -191,11 +192,11 @@ func TestProxyStatusDoesNotStartListeners(t *testing.T) {
 			proxy := newProxyWithDial(ProxyConfig{
 				ListenAddress: "127.0.0.1",
 				Password:      "secret",
-			}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+			}, func(ctx context.Context, interfaceName string, _ []string, network string, address string) (net.Conn, error) {
 				return nil, errors.New("dial unused")
 			})
 			proxy.mu.Lock()
-			proxy.active["wwan0"] = "wwan0"
+			proxy.active["wwan0"] = ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"}
 			proxy.mu.Unlock()
 
 			status := proxy.Status("wwan0")
@@ -268,7 +269,7 @@ func TestProxyUpdateConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			proxy := newProxyWithDial(tt.start, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+			proxy := newProxyWithDial(tt.start, func(ctx context.Context, interfaceName string, _ []string, network string, address string) (net.Conn, error) {
 				return nil, errors.New("dial should not be called")
 			})
 			if _, err := proxy.Register(ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"}); err != nil {
@@ -316,7 +317,7 @@ func TestProxyUpdateConfigRestoresOldListenersOnStartError(t *testing.T) {
 		HTTPPort:      0,
 		SOCKS5Port:    0,
 		Password:      "old",
-	}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+	}, func(ctx context.Context, interfaceName string, _ []string, network string, address string) (net.Conn, error) {
 		return nil, errors.New("dial should not be called")
 	})
 	if _, err := proxy.Register(ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"}); err != nil {
@@ -380,7 +381,7 @@ func TestProxyUnregisterClosesInterfaceSessions(t *testing.T) {
 			proxy := newProxyWithDial(ProxyConfig{
 				ListenAddress: "127.0.0.1",
 				Password:      "secret",
-			}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+			}, func(ctx context.Context, interfaceName string, _ []string, network string, address string) (net.Conn, error) {
 				local, peer := net.Pipe()
 				mu.Lock()
 				peers[interfaceName] = peer
@@ -435,7 +436,7 @@ func TestProxyRestartsAfterUnexpectedListenerExit(t *testing.T) {
 			proxy := newProxyWithDial(ProxyConfig{
 				ListenAddress: "127.0.0.1",
 				Password:      "secret",
-			}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+			}, func(ctx context.Context, interfaceName string, _ []string, network string, address string) (net.Conn, error) {
 				return nil, errors.New("dial unused")
 			})
 			if _, err := proxy.Register(ProxyBinding{Username: "wwan0", InterfaceName: "wwan0"}); err != nil {
@@ -512,18 +513,24 @@ func TestHTTPProxyAuthentication(t *testing.T) {
 			var (
 				mu       sync.Mutex
 				gotIface string
+				gotDNS   []string
 			)
 			proxy := newProxyWithDial(ProxyConfig{
 				ListenAddress: "127.0.0.1",
 				Password:      "secret",
-			}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+			}, func(ctx context.Context, interfaceName string, dnsServers []string, network string, address string) (net.Conn, error) {
 				mu.Lock()
 				gotIface = interfaceName
+				gotDNS = slices.Clone(dnsServers)
 				mu.Unlock()
 				var dialer net.Dialer
 				return dialer.DialContext(ctx, network, address)
 			})
-			status, err := proxy.Register(ProxyBinding{Username: "354015820228039", InterfaceName: "wwan0"})
+			status, err := proxy.Register(ProxyBinding{
+				Username:      "354015820228039",
+				InterfaceName: "wwan0",
+				DNS:           []string{"10.51.190.5", "10.51.190.6"},
+			})
 			if err != nil {
 				t.Fatalf("Register() error = %v", err)
 			}
@@ -561,6 +568,9 @@ func TestHTTPProxyAuthentication(t *testing.T) {
 				mu.Lock()
 				if gotIface != tt.wantIface {
 					t.Fatalf("dial interface = %q, want %q", gotIface, tt.wantIface)
+				}
+				if want := []string{"10.51.190.5", "10.51.190.6"}; !slices.Equal(gotDNS, want) {
+					t.Fatalf("dial DNS = %v, want %v", gotDNS, want)
 				}
 				mu.Unlock()
 			}
@@ -615,7 +625,7 @@ func TestSOCKS5ProxyAuthentication(t *testing.T) {
 			proxy := newProxyWithDial(ProxyConfig{
 				ListenAddress: "127.0.0.1",
 				Password:      "secret",
-			}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+			}, func(ctx context.Context, interfaceName string, _ []string, network string, address string) (net.Conn, error) {
 				mu.Lock()
 				gotIface = interfaceName
 				mu.Unlock()
@@ -681,7 +691,7 @@ func TestSOCKS5ProxyDefersDomainResolutionToBoundDialer(t *testing.T) {
 			proxy := newProxyWithDial(ProxyConfig{
 				ListenAddress: "127.0.0.1",
 				Password:      "secret",
-			}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+			}, func(ctx context.Context, interfaceName string, _ []string, network string, address string) (net.Conn, error) {
 				mu.Lock()
 				gotAddress = address
 				mu.Unlock()
@@ -738,7 +748,7 @@ func TestSOCKS5ProxyUDPAssociate(t *testing.T) {
 			proxy := newProxyWithDial(ProxyConfig{
 				ListenAddress: "127.0.0.1",
 				Password:      "secret",
-			}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+			}, func(ctx context.Context, interfaceName string, _ []string, network string, address string) (net.Conn, error) {
 				mu.Lock()
 				gotIface = interfaceName
 				gotNetwork = network
@@ -811,7 +821,7 @@ func TestSOCKS5ProxyUDPAssociatePinsClientSource(t *testing.T) {
 			proxy := newProxyWithDial(ProxyConfig{
 				ListenAddress: "127.0.0.1",
 				Password:      "secret",
-			}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+			}, func(ctx context.Context, interfaceName string, _ []string, network string, address string) (net.Conn, error) {
 				if network == "udp" {
 					mu.Lock()
 					dialCount++
@@ -880,7 +890,7 @@ func TestSOCKS5ProxyUDPAssociateClosesOnUnregister(t *testing.T) {
 			proxy := newProxyWithDial(ProxyConfig{
 				ListenAddress: "127.0.0.1",
 				Password:      "secret",
-			}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+			}, func(ctx context.Context, interfaceName string, _ []string, network string, address string) (net.Conn, error) {
 				var dialer net.Dialer
 				return dialer.DialContext(ctx, network, address)
 			})
@@ -933,7 +943,7 @@ func TestSOCKS5ProxyUDPAssociateClosesAfterIdle(t *testing.T) {
 			proxy := newProxyWithDial(ProxyConfig{
 				ListenAddress: "127.0.0.1",
 				Password:      "secret",
-			}, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
+			}, func(ctx context.Context, interfaceName string, _ []string, network string, address string) (net.Conn, error) {
 				var dialer net.Dialer
 				return dialer.DialContext(ctx, network, address)
 			})

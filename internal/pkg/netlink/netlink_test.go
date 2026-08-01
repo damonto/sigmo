@@ -13,6 +13,28 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestInterfaceFlagsWithLinkState(t *testing.T) {
+	tests := []struct {
+		name  string
+		flags uint16
+		up    bool
+		want  uint16
+	}{
+		{name: "set up", flags: unix.IFF_BROADCAST, up: true, want: unix.IFF_BROADCAST | unix.IFF_UP},
+		{name: "keep up", flags: unix.IFF_BROADCAST | unix.IFF_UP, up: true, want: unix.IFF_BROADCAST | unix.IFF_UP},
+		{name: "set down", flags: unix.IFF_BROADCAST | unix.IFF_UP, want: unix.IFF_BROADCAST},
+		{name: "keep down", flags: unix.IFF_BROADCAST, want: unix.IFF_BROADCAST},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := interfaceFlagsWithLinkState(tt.flags, tt.up); got != tt.want {
+				t.Fatalf("interfaceFlagsWithLinkState() = %#x, want %#x", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDisableIPv6Autoconfiguration(t *testing.T) {
 	errWrite := errors.New("write rejected")
 	tests := []struct {

@@ -45,14 +45,15 @@ type ProxyStatus struct {
 type ProxyBinding struct {
 	Username      string
 	InterfaceName string
+	DNS           []string
 }
 
-type proxyDialFunc func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error)
+type proxyDialFunc func(ctx context.Context, interfaceName string, dnsServers []string, network string, address string) (net.Conn, error)
 
 type Proxy struct {
 	mu       sync.Mutex
 	cfg      ProxyConfig
-	active   map[string]string
+	active   map[string]ProxyBinding
 	sessions map[string]map[proxySession]struct{}
 	dialFunc proxyDialFunc
 
@@ -85,15 +86,15 @@ func (c *proxyConn) Close() error {
 }
 
 func NewProxy(cfg ProxyConfig) *Proxy {
-	return newProxyWithDial(cfg, func(ctx context.Context, interfaceName string, network string, address string) (net.Conn, error) {
-		return boundDialerWithTimeout(interfaceName, proxyDialTimeout).DialContext(ctx, network, address)
+	return newProxyWithDial(cfg, func(ctx context.Context, interfaceName string, dnsServers []string, network string, address string) (net.Conn, error) {
+		return boundDialerWithTimeout(interfaceName, dnsServers, proxyDialTimeout).DialContext(ctx, network, address)
 	})
 }
 
 func newProxyWithDial(cfg ProxyConfig, dialFunc proxyDialFunc) *Proxy {
 	return &Proxy{
 		cfg:      cfg,
-		active:   make(map[string]string),
+		active:   make(map[string]ProxyBinding),
 		sessions: make(map[string]map[proxySession]struct{}),
 		dialFunc: dialFunc,
 	}
@@ -136,6 +137,7 @@ func (p *Proxy) UpdateConfig(cfg ProxyConfig) error {
 func (p *Proxy) Register(binding ProxyBinding) (ProxyStatus, error) {
 	binding.Username = strings.TrimSpace(binding.Username)
 	binding.InterfaceName = strings.TrimSpace(binding.InterfaceName)
+	binding.DNS = slices.Clone(binding.DNS)
 	if binding.Username == "" {
 		return ProxyStatus{}, ErrProxyUsernameRequired
 	}
@@ -149,11 +151,11 @@ func (p *Proxy) Register(binding ProxyBinding) (ProxyStatus, error) {
 		p.mu.Unlock()
 		return ProxyStatus{}, ErrProxyPasswordRequired
 	}
-	oldInterfaceName, oldActive := p.active[binding.Username]
-	p.active[binding.Username] = binding.InterfaceName
+	oldBinding, oldActive := p.active[binding.Username]
+	p.active[binding.Username] = binding
 	if err := p.ensureStartedLocked(); err != nil {
 		if oldActive {
-			p.active[binding.Username] = oldInterfaceName
+			p.active[binding.Username] = oldBinding
 		} else {
 			delete(p.active, binding.Username)
 		}
@@ -161,7 +163,7 @@ func (p *Proxy) Register(binding ProxyBinding) (ProxyStatus, error) {
 		return ProxyStatus{}, err
 	}
 	var sessions []proxySession
-	if oldInterfaceName != "" && oldInterfaceName != binding.InterfaceName {
+	if oldActive && oldBinding.InterfaceName != binding.InterfaceName {
 		sessions = p.takeUserSessionsLocked(binding.Username)
 	}
 	status := p.statusLocked(binding.Username)
@@ -306,11 +308,11 @@ func (p *Proxy) dial(ctx context.Context, username string, network string, addre
 	if username == "" {
 		return nil, ErrProxyUsernameRequired
 	}
-	interfaceName, ok := p.interfaceForUser(username)
+	binding, ok := p.bindingForUser(username)
 	if !ok {
 		return nil, fmt.Errorf("proxy username %s is not active", username)
 	}
-	conn, err := p.dialFunc(ctx, interfaceName, network, address)
+	conn, err := p.dialFunc(ctx, binding.InterfaceName, binding.DNS, network, address)
 	if err != nil {
 		return nil, err
 	}
@@ -331,11 +333,12 @@ func (p *Proxy) validCredential(username string, password string) bool {
 	return ok
 }
 
-func (p *Proxy) interfaceForUser(username string) (string, bool) {
+func (p *Proxy) bindingForUser(username string) (ProxyBinding, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	interfaceName, ok := p.active[username]
-	return interfaceName, ok
+	binding, ok := p.active[username]
+	binding.DNS = slices.Clone(binding.DNS)
+	return binding, ok
 }
 
 func (p *Proxy) trackConn(username string, conn net.Conn) (net.Conn, error) {

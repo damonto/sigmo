@@ -79,6 +79,16 @@ func defaultRoutesInTable(table uint32) ([]DefaultRoute, error) {
 }
 
 func SetUp(name string) error {
+	return setLinkUp(name, true)
+}
+
+// SetDown clears IFF_UP so drivers such as qmi_wwan can safely change their
+// link-layer framing through sysfs.
+func SetDown(name string) error {
+	return setLinkUp(name, false)
+}
+
+func setLinkUp(name string, up bool) error {
 	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
 	if err != nil {
 		return fmt.Errorf("open control socket: %w", err)
@@ -92,11 +102,18 @@ func SetUp(name string) error {
 	if err := unix.IoctlIfreq(fd, unix.SIOCGIFFLAGS, ifr); err != nil {
 		return fmt.Errorf("read interface flags: %w", err)
 	}
-	ifr.SetUint16(ifr.Uint16() | unix.IFF_UP)
+	ifr.SetUint16(interfaceFlagsWithLinkState(ifr.Uint16(), up))
 	if err := unix.IoctlIfreq(fd, unix.SIOCSIFFLAGS, ifr); err != nil {
-		return fmt.Errorf("set interface up: %w", err)
+		return fmt.Errorf("set interface link state: %w", err)
 	}
 	return nil
+}
+
+func interfaceFlagsWithLinkState(flags uint16, up bool) uint16 {
+	if up {
+		return flags | unix.IFF_UP
+	}
+	return flags &^ unix.IFF_UP
 }
 
 // DisableIPv6Autoconfiguration keeps a dedicated cellular PDN from installing

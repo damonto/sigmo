@@ -90,6 +90,7 @@ type internetModem interface {
 	profileID() string
 	iccid() string
 	imsi() string
+	prepareBearerDataFormat(context.Context) error
 	bearer(context.Context, uint64) (*mmodem.Bearer, error)
 	bearers(context.Context) ([]*mmodem.Bearer, error)
 	connectBearer(context.Context, mmodem.BearerProperties) (*mmodem.Bearer, error)
@@ -172,6 +173,16 @@ func (m modemAccess) imsi() string {
 		return ""
 	}
 	return strings.TrimSpace(sim.Imsi)
+}
+
+func (m modemAccess) prepareBearerDataFormat(ctx context.Context) error {
+	if m.modem == nil {
+		return ErrModemRequired
+	}
+	if m.modem.PrimaryPortType() != mmodem.ModemPortTypeQmi {
+		return nil
+	}
+	return mmodem.RestoreNonQMAPDataFormat(ctx, m.modem)
 }
 
 func (m modemAccess) bearer(ctx context.Context, path uint64) (*mmodem.Bearer, error) {
@@ -418,7 +429,7 @@ func (c *Connector) recover(ctx context.Context, modem internetModem) error {
 	}
 	tracked.prefs = preferencesWithDefaultAPNCredentials(modem, tracked.prefs)
 	tracked.profileID = profileID
-	if err := c.syncProxyPreference(ctx, modemID, tracked.interfaceName, tracked.prefs); err != nil {
+	if err := c.syncProxyPreference(ctx, modemID, tracked.interfaceName, tracked.dns, tracked.prefs); err != nil {
 		return err
 	}
 	c.setConnectionAndPreference(modemID, tracked, tracked.prefs)
@@ -464,6 +475,11 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 	if err := c.disconnect(ctx, modem, clearAlwaysOnBefore); err != nil {
 		return nil, fmt.Errorf("disconnect previous bearer: %w", err)
 	}
+	if !c.qualcomm410SelectedFor(modemID) {
+		if err := modem.prepareBearerDataFormat(ctx); err != nil {
+			return nil, fmt.Errorf("prepare bearer data format: %w", err)
+		}
+	}
 
 	bearer, err := modem.connectBearer(ctx, bearerPropertiesFromPreferences(prefs))
 	if err != nil {
@@ -484,7 +500,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 	tracked.profileID = profileID
 	tracked.prefs = prefs
 
-	if err := c.syncProxyPreference(ctx, modemID, tracked.interfaceName, prefs); err != nil {
+	if err := c.syncProxyPreference(ctx, modemID, tracked.interfaceName, tracked.dns, prefs); err != nil {
 		cleanupErr := c.cleanupTracked(ctx, modemID, tracked)
 		disconnectErr := bearer.Disconnect(ctx)
 		return nil, errors.Join(err, cleanupErr, disconnectErr)
@@ -1039,7 +1055,7 @@ func (c *Connector) connectionFromBearer(ctx context.Context, modemID string, be
 	return connection, nil
 }
 
-func (c *Connector) syncProxyPreference(ctx context.Context, modemID string, interfaceName string, prefs Preferences) error {
+func (c *Connector) syncProxyPreference(ctx context.Context, modemID string, interfaceName string, dns []string, prefs Preferences) error {
 	proxy := c.proxyInstance()
 	if proxy == nil {
 		if prefs.ProxyEnabled {
@@ -1050,7 +1066,7 @@ func (c *Connector) syncProxyPreference(ctx context.Context, modemID string, int
 	if !prefs.ProxyEnabled {
 		return c.cleanupProxy(ctx, modemID, interfaceName)
 	}
-	_, err := proxy.Register(ProxyBinding{Username: modemID, InterfaceName: interfaceName})
+	_, err := proxy.Register(ProxyBinding{Username: modemID, InterfaceName: interfaceName, DNS: dns})
 	return err
 }
 

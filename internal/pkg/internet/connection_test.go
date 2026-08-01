@@ -150,47 +150,21 @@ func TestSecondaryRouteMetricFor(t *testing.T) {
 	}
 }
 
-func TestDNSNetwork(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		network string
-		want    string
-	}{
-		{name: "udp", network: "udp", want: "udp4"},
-		{name: "udp6", network: "udp6", want: "udp4"},
-		{name: "tcp", network: "tcp", want: "tcp4"},
-		{name: "tcp6", network: "tcp6", want: "tcp4"},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := dnsNetwork(tt.network); got != tt.want {
-				t.Fatalf("dnsNetwork() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestNormalizeDNSServers(t *testing.T) {
+func TestEffectiveDNSServers(t *testing.T) {
 	tests := []struct {
 		name    string
 		servers []string
 		want    []string
 	}{
-		{name: "defaults are handled by constructor"},
+		{name: "fallback", want: []string{fallbackDNSServer}},
 		{name: "ipv4", servers: []string{" 1.1.1.1 "}, want: []string{"1.1.1.1:53"}},
 		{name: "ipv6", servers: []string{"2001:4860:4860::8888"}, want: []string{"[2001:4860:4860::8888]:53"}},
 		{name: "keeps port and removes duplicates", servers: []string{"9.9.9.9:5353", "9.9.9.9:5353"}, want: []string{"9.9.9.9:5353"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeDNSServers(tt.servers); !slices.Equal(got, tt.want) {
-				t.Fatalf("normalizeDNSServers() = %v, want %v", got, tt.want)
+			if got := effectiveDNSServers(tt.servers); !slices.Equal(got, tt.want) {
+				t.Fatalf("effectiveDNSServers() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -1868,6 +1842,72 @@ func TestConnectRejectsInvalidPreferencesBeforeReadingBearers(t *testing.T) {
 	}
 }
 
+func TestConnectPreparesBearerDataFormat(t *testing.T) {
+	errPrepare := errors.New("prepare data format")
+	errConnect := errors.New("connect bearer")
+
+	tests := []struct {
+		name             string
+		qualcomm410      bool
+		prepareErr       error
+		wantErr          error
+		wantPrepareCalls int
+		wantConnect      bool
+	}{
+		{
+			name:             "preparation failure stops normal bearer",
+			prepareErr:       errPrepare,
+			wantErr:          errPrepare,
+			wantPrepareCalls: 1,
+		},
+		{
+			name:             "normal bearer connects after preparation",
+			wantErr:          errConnect,
+			wantPrepareCalls: 1,
+			wantConnect:      true,
+		},
+		{
+			name:        "Qualcomm 410 keeps its dedicated data format",
+			qualcomm410: true,
+			prepareErr:  errPrepare,
+			wantErr:     errConnect,
+			wantConnect: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			connector, err := NewConnector(ConnectorConfig{State: testStore(t)})
+			if err != nil {
+				t.Fatalf("NewConnector() error = %v", err)
+			}
+			if tt.qualcomm410 {
+				connector.setQualcomm410State("modem-1", qualcomm410State{selected: true})
+			}
+
+			prepareCalls := 0
+			connectCalls := 0
+			modem := fakeInternetModem{
+				modemID:      "modem-1",
+				prepareErr:   tt.prepareErr,
+				prepareCalls: &prepareCalls,
+				connectErr:   errConnect,
+				connectCalls: &connectCalls,
+			}
+			_, err = connector.connect(context.Background(), modem, Preferences{APN: "internet", IPType: "ipv4"}, true)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("connect() error = %v, want %v", err, tt.wantErr)
+			}
+			if prepareCalls != tt.wantPrepareCalls {
+				t.Fatalf("prepareBearerDataFormat() calls = %d, want %d", prepareCalls, tt.wantPrepareCalls)
+			}
+			if got := connectCalls > 0; got != tt.wantConnect {
+				t.Fatalf("connectBearer() called = %t, want %t", got, tt.wantConnect)
+			}
+		})
+	}
+}
+
 func TestConnectorRecoverSkipsSavedAirplaneMode(t *testing.T) {
 	t.Parallel()
 
@@ -1895,14 +1935,18 @@ func TestConnectorRecoverSkipsSavedAirplaneMode(t *testing.T) {
 }
 
 type fakeInternetModem struct {
-	modemID     string
-	operatorID  string
-	gid1Value   string
-	spnValue    string
-	iccidValue  string
-	imsiValue   string
-	bearerList  []*mmodem.Bearer
-	bearerReads *int
+	modemID      string
+	operatorID   string
+	gid1Value    string
+	spnValue     string
+	iccidValue   string
+	imsiValue    string
+	bearerList   []*mmodem.Bearer
+	bearerReads  *int
+	prepareErr   error
+	prepareCalls *int
+	connectErr   error
+	connectCalls *int
 }
 
 func (m fakeInternetModem) id() string {
@@ -1935,6 +1979,13 @@ func (m fakeInternetModem) imsi() string {
 	return m.imsiValue
 }
 
+func (m fakeInternetModem) prepareBearerDataFormat(context.Context) error {
+	if m.prepareCalls != nil {
+		(*m.prepareCalls)++
+	}
+	return m.prepareErr
+}
+
 func (m fakeInternetModem) bearer(context.Context, uint64) (*mmodem.Bearer, error) {
 	return nil, errors.New("bearer lookup unused")
 }
@@ -1947,6 +1998,12 @@ func (m fakeInternetModem) bearers(context.Context) ([]*mmodem.Bearer, error) {
 }
 
 func (m fakeInternetModem) connectBearer(context.Context, mmodem.BearerProperties) (*mmodem.Bearer, error) {
+	if m.connectCalls != nil {
+		(*m.connectCalls)++
+	}
+	if m.connectErr != nil {
+		return nil, m.connectErr
+	}
 	return nil, errors.New("connect bearer unused")
 }
 

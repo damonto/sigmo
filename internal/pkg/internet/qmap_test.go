@@ -184,6 +184,120 @@ func TestConnectQMAPLockedAllowsPartialDualStack(t *testing.T) {
 	}
 }
 
+func TestQMAPProxyLifecycle(t *testing.T) {
+	previousOpen := openInternetQMAPSession
+	previousConfigure := configureInternetQMAPNetwork
+	previousRemove := removeInternetQMAPMuxes
+	t.Cleanup(func() {
+		openInternetQMAPSession = previousOpen
+		configureInternetQMAPNetwork = previousConfigure
+		removeInternetQMAPMuxes = previousRemove
+	})
+
+	const (
+		modemID       = "modem-1"
+		interfaceName = "qmimux0"
+	)
+	wantDNS := []string{"10.51.190.5", "10.51.190.6"}
+	openInternetQMAPSession = func(_ context.Context, _ *mmodem.Modem, cfg mmodem.QMAPConfig) (*mmodem.QMAPSession, error) {
+		return &mmodem.QMAPSession{InterfaceName: qmapTestInterface(cfg.MuxID)}, nil
+	}
+	configureInternetQMAPNetwork = func(_ context.Context, _ connectionStateStore, _ string, prefs Preferences, _ *mmodem.QMAPSession) (trackedConnection, []string, error) {
+		return trackedConnection{interfaceName: interfaceName, prefs: prefs}, slices.Clone(wantDNS), nil
+	}
+	removeInternetQMAPMuxes = func(_ *mmodem.Modem, _ ...uint8) error { return nil }
+
+	proxy := newProxyWithDial(ProxyConfig{
+		ListenAddress: "127.0.0.1",
+		Password:      "secret",
+	}, func(context.Context, string, []string, string, string) (net.Conn, error) {
+		return nil, errors.New("dial should not be called")
+	})
+	connector, err := NewConnector(ConnectorConfig{Proxy: proxy, State: testStore(t)})
+	if err != nil {
+		t.Fatalf("NewConnector() error = %v", err)
+	}
+	ctx := context.Background()
+	modem := &mmodem.Modem{EquipmentIdentifier: modemID}
+	connection, err := connector.connectQMAPLocked(ctx, modem, Preferences{IPType: "ipv4", ProxyEnabled: true})
+	if err != nil {
+		t.Fatalf("connectQMAPLocked() error = %v", err)
+	}
+	if !connection.Proxy.Enabled || connection.Proxy.Username != modemID {
+		t.Fatalf("connectQMAPLocked() proxy = %+v, want active proxy for %s", connection.Proxy, modemID)
+	}
+	binding, ok := proxy.bindingForUser(modemID)
+	if !ok {
+		t.Fatal("QMAP proxy binding was not registered")
+	}
+	if binding.InterfaceName != interfaceName || !slices.Equal(binding.DNS, wantDNS) {
+		t.Fatalf("QMAP proxy binding = %+v, want interface %s and DNS %v", binding, interfaceName, wantDNS)
+	}
+	enabled, found, err := connector.persistence.loadProxyStateForModem(ctx, modemID, interfaceName)
+	if err != nil {
+		t.Fatalf("loadProxyStateForModem() error = %v", err)
+	}
+	if !found || !enabled {
+		t.Fatalf("loadProxyStateForModem() = %t, found %t; want true, true", enabled, found)
+	}
+
+	if err := connector.disconnectQMAPLocked(ctx, modem); err != nil {
+		t.Fatalf("disconnectQMAPLocked() error = %v", err)
+	}
+	if status := proxy.Status(modemID); status.Enabled {
+		t.Fatalf("proxy status after disconnect = %+v, want inactive", status)
+	}
+	_, found, err = connector.persistence.loadProxyStateForModem(ctx, modemID, interfaceName)
+	if err != nil {
+		t.Fatalf("loadProxyStateForModem() after disconnect error = %v", err)
+	}
+	if found {
+		t.Fatal("proxy state still exists after QMAP disconnect")
+	}
+}
+
+func TestConnectQMAPLockedRollsBackWhenProxyRegistrationFails(t *testing.T) {
+	previousOpen := openInternetQMAPSession
+	previousConfigure := configureInternetQMAPNetwork
+	previousRemove := removeInternetQMAPMuxes
+	t.Cleanup(func() {
+		openInternetQMAPSession = previousOpen
+		configureInternetQMAPNetwork = previousConfigure
+		removeInternetQMAPMuxes = previousRemove
+	})
+
+	var removed []uint8
+	openInternetQMAPSession = func(_ context.Context, _ *mmodem.Modem, cfg mmodem.QMAPConfig) (*mmodem.QMAPSession, error) {
+		return &mmodem.QMAPSession{InterfaceName: qmapTestInterface(cfg.MuxID)}, nil
+	}
+	configureInternetQMAPNetwork = func(_ context.Context, _ connectionStateStore, _ string, prefs Preferences, session *mmodem.QMAPSession) (trackedConnection, []string, error) {
+		return trackedConnection{interfaceName: session.InterfaceName, prefs: prefs}, nil, nil
+	}
+	removeInternetQMAPMuxes = func(_ *mmodem.Modem, muxIDs ...uint8) error {
+		removed = append(removed, muxIDs...)
+		return nil
+	}
+
+	connector, err := NewConnector(ConnectorConfig{State: testStore(t)})
+	if err != nil {
+		t.Fatalf("NewConnector() error = %v", err)
+	}
+	modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
+	connection, err := connector.connectQMAPLocked(context.Background(), modem, Preferences{IPType: "ipv4", ProxyEnabled: true})
+	if !errors.Is(err, ErrProxyNotConfigured) {
+		t.Fatalf("connectQMAPLocked() error = %v, want %v", err, ErrProxyNotConfigured)
+	}
+	if connection != nil {
+		t.Fatalf("connectQMAPLocked() connection = %+v, want nil", connection)
+	}
+	if connector.qmapConnections[modem.EquipmentIdentifier] != nil {
+		t.Fatal("failed QMAP connection was published")
+	}
+	if !slices.Equal(removed, []uint8{internetQMAPMuxID}) {
+		t.Fatalf("removed muxes = %v, want %v", removed, []uint8{internetQMAPMuxID})
+	}
+}
+
 func TestCleanupStaleQMAPInternetRestoresRoutesAndRemovesInternetMuxes(t *testing.T) {
 	original := netlink.DefaultRoute{Interface: "ens18", Family: netlink.FamilyIPv4, Gateway: netip.MustParseAddr("10.0.0.1"), Metric: 10}
 	replacement := original

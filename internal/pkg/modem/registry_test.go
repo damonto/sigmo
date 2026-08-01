@@ -3,6 +3,7 @@ package modem
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,11 +17,7 @@ func TestRegistryReplacesAndRemovesPhysicalDeviceGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
-	device := wwanmodem.Device{
-		Path:         "/dev/cdc-wdm0",
-		PhysicalPath: "/sys/devices/modem-1",
-		Protocol:     wwanmodem.ProtocolQMI,
-	}
+	device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
 	events := make(chan wwanmodem.Result[wwanmodem.DeviceEvent], 2)
 	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
 		return []wwanmodem.Device{device}, nil
@@ -34,7 +31,7 @@ func TestRegistryReplacesAndRemovesPhysicalDeviceGeneration(t *testing.T) {
 			deviceKey:           physicalDeviceKey(candidate),
 			generation:          generation,
 			EquipmentIdentifier: "imei-1",
-			PrimaryPort:         candidate.Path,
+			PrimaryPort:         controlPortPath(candidate),
 		}, nil
 	}
 
@@ -57,8 +54,7 @@ func TestRegistryReplacesAndRemovesPhysicalDeviceGeneration(t *testing.T) {
 	}
 	defer unsubscribe()
 
-	replacementDevice := device
-	replacementDevice.Path = "/dev/cdc-wdm1"
+	replacementDevice := withRegistryControlPath(device, "/dev/cdc-wdm1")
 	events <- wwanmodem.Result[wwanmodem.DeviceEvent]{Value: wwanmodem.DeviceEvent{
 		Type:   wwanmodem.DeviceChanged,
 		Device: replacementDevice,
@@ -67,8 +63,8 @@ func TestRegistryReplacesAndRemovesPhysicalDeviceGeneration(t *testing.T) {
 	if changed.Type != ModemEventChanged || changed.Generation != 2 || changed.Previous != initial {
 		t.Fatalf("changed event = %+v", changed)
 	}
-	if changed.Modem == nil || changed.Modem.PrimaryPort != replacementDevice.Path {
-		t.Fatalf("replacement modem = %+v, want primary port %s", changed.Modem, replacementDevice.Path)
+	if changed.Modem == nil || changed.Modem.PrimaryPort != controlPortPath(replacementDevice) {
+		t.Fatalf("replacement modem = %+v, want primary port %s", changed.Modem, controlPortPath(replacementDevice))
 	}
 	if changed.Snapshot[device.PhysicalPath] != changed.Modem {
 		t.Fatalf("changed snapshot = %+v, want replacement", changed.Snapshot)
@@ -97,7 +93,7 @@ func TestRegistryRetriesAfterWatcherStartupFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
-	device := wwanmodem.Device{Path: "/dev/cdc-wdm0", PhysicalPath: "/sys/devices/modem-1"}
+	device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
 	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
 		return []wwanmodem.Device{device}, nil
 	}
@@ -141,18 +137,14 @@ func TestRegistryRecoversCurrentGenerationAfterTransportFailure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			device := wwanmodem.Device{
-				Path:         "/dev/cdc-wdm0",
-				PhysicalPath: "/sys/devices/modem-1",
-				Protocol:     wwanmodem.ProtocolQMI,
-			}
+			device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
 			key := physicalDeviceKey(device)
 			initial := &Modem{
 				deviceInfo:          device,
 				deviceKey:           key,
 				generation:          1,
 				EquipmentIdentifier: "imei-1",
-				PrimaryPort:         device.Path,
+				PrimaryPort:         controlPortPath(device),
 			}
 			openCalls := 0
 			registry := &Registry{
@@ -169,7 +161,7 @@ func TestRegistryRecoversCurrentGenerationAfterTransportFailure(t *testing.T) {
 						deviceKey:           physicalDeviceKey(candidate),
 						generation:          generation,
 						EquipmentIdentifier: "imei-1",
-						PrimaryPort:         candidate.Path,
+						PrimaryPort:         controlPortPath(candidate),
 					}, nil
 				},
 			}
@@ -215,13 +207,8 @@ func TestRegistryRestartsWatcherAndReconcilesMissedChange(t *testing.T) {
 			t.Errorf("Close() error = %v", err)
 		}
 	})
-	initialDevice := wwanmodem.Device{
-		Path:         "/dev/cdc-wdm0",
-		PhysicalPath: "/sys/devices/modem-1",
-		Protocol:     wwanmodem.ProtocolQMI,
-	}
-	replacementDevice := initialDevice
-	replacementDevice.Path = "/dev/cdc-wdm1"
+	initialDevice := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
+	replacementDevice := withRegistryControlPath(initialDevice, "/dev/cdc-wdm1")
 	var discoverMu sync.RWMutex
 	discovered := initialDevice
 	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
@@ -248,7 +235,7 @@ func TestRegistryRestartsWatcherAndReconcilesMissedChange(t *testing.T) {
 			deviceKey:           physicalDeviceKey(candidate),
 			generation:          generation,
 			EquipmentIdentifier: "imei-1",
-			PrimaryPort:         candidate.Path,
+			PrimaryPort:         controlPortPath(candidate),
 		}, nil
 	}
 
@@ -271,7 +258,7 @@ func TestRegistryRestartsWatcherAndReconcilesMissedChange(t *testing.T) {
 	close(firstStream)
 
 	changed := receiveModemEvent(t, published)
-	if changed.Type != ModemEventChanged || changed.Generation != 2 || changed.Modem == nil || changed.Modem.PrimaryPort != replacementDevice.Path {
+	if changed.Type != ModemEventChanged || changed.Generation != 2 || changed.Modem == nil || changed.Modem.PrimaryPort != controlPortPath(replacementDevice) {
 		t.Fatalf("reconciled event = %+v", changed)
 	}
 	deadline := time.Now().Add(time.Second)
@@ -284,7 +271,7 @@ func TestRegistryRestartsWatcherAndReconcilesMissedChange(t *testing.T) {
 }
 
 func TestRegistryPublishesPathChangeBeforeClosingPreviousGeneration(t *testing.T) {
-	oldDevice := wwanmodem.Device{Path: "/dev/cdc-wdm0", PhysicalPath: "/sys/devices/old", Protocol: wwanmodem.ProtocolQMI}
+	oldDevice := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/old")
 	newDevice := oldDevice
 	newDevice.PhysicalPath = "/sys/devices/new"
 	closed := false
@@ -293,7 +280,7 @@ func TestRegistryPublishesPathChangeBeforeClosingPreviousGeneration(t *testing.T
 		deviceKey:           physicalDeviceKey(oldDevice),
 		generation:          1,
 		EquipmentIdentifier: "imei-1",
-		PrimaryPort:         oldDevice.Path,
+		PrimaryPort:         controlPortPath(oldDevice),
 		watchCancel:         func() { closed = true },
 	}
 	registry := &Registry{
@@ -306,7 +293,7 @@ func TestRegistryPublishesPathChangeBeforeClosingPreviousGeneration(t *testing.T
 				deviceKey:           physicalDeviceKey(candidate),
 				generation:          generation,
 				EquipmentIdentifier: "imei-1",
-				PrimaryPort:         candidate.Path,
+				PrimaryPort:         controlPortPath(candidate),
 			}, nil
 		},
 	}
@@ -336,13 +323,13 @@ func TestRegistryPublishesPathChangeBeforeClosingPreviousGeneration(t *testing.T
 }
 
 func TestRegistryPublishesRemovedAndAddedForDifferentIMEIOnSameDevice(t *testing.T) {
-	device := wwanmodem.Device{Path: "/dev/cdc-wdm0", PhysicalPath: "/sys/devices/modem-1", Protocol: wwanmodem.ProtocolQMI}
+	device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
 	old := &Modem{
 		deviceInfo:          device,
 		deviceKey:           physicalDeviceKey(device),
 		generation:          1,
 		EquipmentIdentifier: "imei-old",
-		PrimaryPort:         device.Path,
+		PrimaryPort:         controlPortPath(device),
 	}
 	registry := &Registry{
 		modems:         map[string]*Modem{old.Path(): old},
@@ -354,7 +341,7 @@ func TestRegistryPublishesRemovedAndAddedForDifferentIMEIOnSameDevice(t *testing
 				deviceKey:           physicalDeviceKey(candidate),
 				generation:          generation,
 				EquipmentIdentifier: "imei-new",
-				PrimaryPort:         candidate.Path,
+				PrimaryPort:         controlPortPath(candidate),
 			}, nil
 		},
 	}
@@ -381,6 +368,24 @@ func TestRegistryPublishesRemovedAndAddedForDifferentIMEIOnSameDevice(t *testing
 	}
 }
 
+func TestControlPortsPreferQMI(t *testing.T) {
+	device := wwanmodem.Device{Ports: []wwanmodem.Port{
+		{Type: wwanmodem.PortMBIM, Path: "/dev/wwan0mbim0"},
+		{Type: wwanmodem.PortNetwork, Name: "wwan0"},
+		{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi0"},
+		{Type: wwanmodem.PortQMI},
+	}}
+
+	got := controlPorts(device)
+	want := []wwanmodem.Port{
+		{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi0"},
+		{Type: wwanmodem.PortMBIM, Path: "/dev/wwan0mbim0"},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("controlPorts() = %+v, want %+v", got, want)
+	}
+}
+
 func receiveModemEvent(t *testing.T, events <-chan ModemEvent) ModemEvent {
 	t.Helper()
 	select {
@@ -390,4 +395,24 @@ func receiveModemEvent(t *testing.T, events <-chan ModemEvent) ModemEvent {
 		t.Fatal("timed out waiting for modem event")
 		return ModemEvent{}
 	}
+}
+
+func qmiRegistryDevice(path, physicalPath string) wwanmodem.Device {
+	return wwanmodem.Device{
+		PhysicalPath: physicalPath,
+		Ports: []wwanmodem.Port{{
+			Type: wwanmodem.PortQMI, Path: path, Driver: "qmi_wwan",
+		}},
+	}
+}
+
+func withRegistryControlPath(device wwanmodem.Device, path string) wwanmodem.Device {
+	device.Ports = slices.Clone(device.Ports)
+	for i := range device.Ports {
+		if device.Ports[i].Protocol() != wwanmodem.ProtocolUnknown {
+			device.Ports[i].Path = path
+			break
+		}
+	}
+	return device
 }

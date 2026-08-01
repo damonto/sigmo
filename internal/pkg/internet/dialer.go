@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const dnsServer = "1.1.1.1:53"
+const fallbackDNSServer = "1.1.1.1:53"
 
 // BoundUnderlay opens DNS, stream, and packet sockets through one Linux
 // network interface without changing the process or system default route.
@@ -28,13 +28,9 @@ func NewBoundUnderlay(interfaceName string, dnsServers []string) (*BoundUnderlay
 	if interfaceName == "" {
 		return nil, errors.New("create bound underlay: interface name is empty")
 	}
-	servers := normalizeDNSServers(dnsServers)
-	if len(servers) == 0 {
-		servers = []string{dnsServer}
-	}
 	return &BoundUnderlay{
 		interfaceName: interfaceName,
-		dnsServers:    servers,
+		dnsServers:    effectiveDNSServers(dnsServers),
 	}, nil
 }
 
@@ -96,6 +92,14 @@ func normalizeDNSServers(servers []string) []string {
 	return result
 }
 
+func effectiveDNSServers(servers []string) []string {
+	servers = normalizeDNSServers(servers)
+	if len(servers) == 0 {
+		return []string{fallbackDNSServer}
+	}
+	return servers
+}
+
 func dnsNetworkForServer(network, server string) string {
 	family := "4"
 	host, _, err := net.SplitHostPort(server)
@@ -110,35 +114,22 @@ func dnsNetworkForServer(network, server string) string {
 	return "udp" + family
 }
 
-func boundTransportWithTimeout(interfaceName string, timeout time.Duration) *http.Transport {
+func boundTransportWithTimeout(interfaceName string, dnsServers []string, timeout time.Duration) *http.Transport {
 	return &http.Transport{
 		Proxy:       nil,
-		DialContext: boundDialerWithTimeout(interfaceName, timeout).DialContext,
+		DialContext: boundDialerWithTimeout(interfaceName, dnsServers, timeout).DialContext,
 	}
 }
 
-func boundDialerWithTimeout(interfaceName string, timeout time.Duration) *net.Dialer {
+func boundDialerWithTimeout(interfaceName string, dnsServers []string, timeout time.Duration) *net.Dialer {
 	dialer := rawBoundDialerWithTimeout(interfaceName, timeout)
-	dialer.Resolver = boundResolverWithTimeout(interfaceName, timeout)
+	dialer.Resolver = boundResolverWithTimeout(interfaceName, dnsServers, timeout)
 	return dialer
 }
 
-func boundResolverWithTimeout(interfaceName string, timeout time.Duration) *net.Resolver {
-	return &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			// Use a fixed resolver to avoid local DNS hijacking while still binding
-			// the DNS socket to the selected modem interface.
-			return rawBoundDialerWithTimeout(interfaceName, timeout).DialContext(ctx, dnsNetwork(network), dnsServer)
-		},
-	}
-}
-
-func dnsNetwork(network string) string {
-	if strings.HasPrefix(network, "tcp") {
-		return "tcp4"
-	}
-	return "udp4"
+func boundResolverWithTimeout(interfaceName string, dnsServers []string, timeout time.Duration) *net.Resolver {
+	dialer := rawBoundDialerWithTimeout(interfaceName, timeout)
+	return newDNSResolver(effectiveDNSServers(dnsServers), dialer.DialContext)
 }
 
 func rawBoundDialerWithTimeout(interfaceName string, timeout time.Duration) *net.Dialer {

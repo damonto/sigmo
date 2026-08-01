@@ -1,8 +1,11 @@
 package modem
 
 import (
+	"context"
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/damonto/wwan-go/qcom"
@@ -30,43 +33,219 @@ func TestQMAPStopError(t *testing.T) {
 
 func TestNonQMAPLinkLayerForRawIP(t *testing.T) {
 	tests := []struct {
-		name  string
-		rawIP string
-		want  qcom.WDALinkLayerProtocol
+		name    string
+		rawIP   string
+		want    qcom.WDALinkLayerProtocol
+		wantErr bool
 	}{
-		{name: "Ethernet framing", rawIP: "N\n", want: qcom.WDALinkLayerEthernet},
+		{name: "current Ethernet still prefers raw IP", rawIP: "N\n", want: qcom.WDALinkLayerRawIP},
 		{name: "raw IP framing", rawIP: "Y\n", want: qcom.WDALinkLayerRawIP},
+		{name: "invalid state", rawIP: "maybe", wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := nonQMAPLinkLayerForRawIP(tt.rawIP); got != tt.want {
+			got, err := nonQMAPLinkLayerForRawIP(tt.rawIP)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("nonQMAPLinkLayerForRawIP() error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if got != tt.want {
 				t.Fatalf("nonQMAPLinkLayerForRawIP() = %d, want %d", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestNonQMAPLinkLayerForState(t *testing.T) {
+func TestNonQMAPLinkLayerForFlags(t *testing.T) {
 	tests := []struct {
-		name       string
-		rawIP      string
-		rawIPKnown bool
-		flags      net.Flags
-		want       qcom.WDALinkLayerProtocol
+		name  string
+		flags net.Flags
+		want  qcom.WDALinkLayerProtocol
 	}{
-		{name: "sysfs raw IP", rawIP: "Y\n", rawIPKnown: true, want: qcom.WDALinkLayerRawIP},
-		{name: "sysfs Ethernet", rawIP: "N\n", rawIPKnown: true, flags: net.FlagPointToPoint, want: qcom.WDALinkLayerEthernet},
 		{name: "point-to-point fallback", flags: net.FlagPointToPoint | net.FlagUp, want: qcom.WDALinkLayerRawIP},
 		{name: "Ethernet fallback", flags: net.FlagBroadcast, want: qcom.WDALinkLayerEthernet},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := nonQMAPLinkLayerForState(tt.rawIP, tt.rawIPKnown, tt.flags); got != tt.want {
-				t.Fatalf("nonQMAPLinkLayerForState() = %d, want %d", got, tt.want)
+			if got := nonQMAPLinkLayerForFlags(tt.flags); got != tt.want {
+				t.Fatalf("nonQMAPLinkLayerForFlags() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSyncNonQMAPHostDataFormat(t *testing.T) {
+	tests := []struct {
+		name        string
+		linkLayer   qcom.WDALinkLayerProtocol
+		passThrough bool
+		wantRawIP   string
+	}{
+		{name: "raw IP disables pass-through", linkLayer: qcom.WDALinkLayerRawIP, passThrough: true, wantRawIP: "Y"},
+		{name: "Ethernet without pass-through attribute", linkLayer: qcom.WDALinkLayerEthernet, wantRawIP: "N"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			qmiDir := t.TempDir()
+			rawIPPath := filepath.Join(qmiDir, "raw_ip")
+			if err := os.WriteFile(rawIPPath, []byte("N"), 0o644); err != nil {
+				t.Fatalf("create raw_ip: %v", err)
+			}
+			passThroughPath := filepath.Join(qmiDir, "pass_through")
+			if tt.passThrough {
+				if err := os.WriteFile(passThroughPath, []byte("Y"), 0o644); err != nil {
+					t.Fatalf("create pass_through: %v", err)
+				}
+			}
+
+			if err := syncNonQMAPHostDataFormat(qmiDir, tt.linkLayer); err != nil {
+				t.Fatalf("syncNonQMAPHostDataFormat() error = %v", err)
+			}
+			rawIP, err := os.ReadFile(rawIPPath)
+			if err != nil {
+				t.Fatalf("read raw_ip: %v", err)
+			}
+			if got := string(rawIP); got != tt.wantRawIP {
+				t.Fatalf("raw_ip = %q, want %q", got, tt.wantRawIP)
+			}
+			if tt.passThrough {
+				passThrough, err := os.ReadFile(passThroughPath)
+				if err != nil {
+					t.Fatalf("read pass_through: %v", err)
+				}
+				if got := string(passThrough); got != "N" {
+					t.Fatalf("pass_through = %q, want N", got)
+				}
+			}
+		})
+	}
+}
+
+func TestRestoreNonQMAPWDADataFormat(t *testing.T) {
+	endpoint := &qcom.DataEndpoint{Type: qcom.DataEndpointHSUSB, InterfaceID: 4}
+	rawIP := testWDADataFormat(qcom.WDALinkLayerRawIP, qcom.WDAAggregationDisabled)
+	ethernet := testWDADataFormat(qcom.WDALinkLayerEthernet, qcom.WDAAggregationDisabled)
+
+	tests := []struct {
+		name             string
+		endpoint         *qcom.DataEndpoint
+		defaultResults   []testWDAResult
+		endpointResults  []testWDAResult
+		setResults       []testWDAResult
+		wantSetEndpoints []bool
+		wantErr          bool
+	}{
+		{
+			name:           "already configured",
+			defaultResults: []testWDAResult{{format: rawIP}},
+		},
+		{
+			name:             "sets and verifies default endpoint",
+			defaultResults:   []testWDAResult{{format: ethernet}, {format: rawIP}},
+			setResults:       []testWDAResult{{format: rawIP}},
+			wantSetEndpoints: []bool{false},
+		},
+		{
+			name:             "get retries with endpoint",
+			endpoint:         endpoint,
+			defaultResults:   []testWDAResult{{err: qcom.QMIErrorMissingArgument}},
+			endpointResults:  []testWDAResult{{format: ethernet}, {format: rawIP}},
+			setResults:       []testWDAResult{{format: rawIP}},
+			wantSetEndpoints: []bool{true},
+		},
+		{
+			name:            "set retries with endpoint",
+			endpoint:        endpoint,
+			defaultResults:  []testWDAResult{{format: ethernet}},
+			endpointResults: []testWDAResult{{format: rawIP}},
+			setResults: []testWDAResult{
+				{err: qcom.QMIErrorMissingArgument},
+				{format: rawIP},
+			},
+			wantSetEndpoints: []bool{false, true},
+		},
+		{
+			name:             "rejects verification mismatch",
+			defaultResults:   []testWDAResult{{format: ethernet}, {format: ethernet}},
+			setResults:       []testWDAResult{{format: rawIP}},
+			wantSetEndpoints: []bool{false},
+			wantErr:          true,
+		},
+		{
+			name:           "missing endpoint remains an error",
+			defaultResults: []testWDAResult{{err: qcom.QMIErrorMissingArgument}},
+			wantErr:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &testWDADataFormatter{
+				defaultResults:  tt.defaultResults,
+				endpointResults: tt.endpointResults,
+				setResults:      tt.setResults,
+			}
+			err := restoreNonQMAPWDADataFormat(context.Background(), client, qcom.WDALinkLayerRawIP, tt.endpoint)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("restoreNonQMAPWDADataFormat() error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if len(client.setConfigs) != len(tt.wantSetEndpoints) {
+				t.Fatalf("SetWDADataFormat() calls = %d, want %d", len(client.setConfigs), len(tt.wantSetEndpoints))
+			}
+			for i, wantEndpoint := range tt.wantSetEndpoints {
+				gotEndpoint := client.setConfigs[i].Endpoint != nil
+				if gotEndpoint != wantEndpoint {
+					t.Fatalf("SetWDADataFormat() call %d endpoint = %t, want %t", i, gotEndpoint, wantEndpoint)
+				}
+			}
+		})
+	}
+}
+
+type testWDAResult struct {
+	format qcom.WDADataFormat
+	err    error
+}
+
+type testWDADataFormatter struct {
+	defaultResults  []testWDAResult
+	endpointResults []testWDAResult
+	setResults      []testWDAResult
+	setConfigs      []qcom.WDADataFormatConfig
+}
+
+func (f *testWDADataFormatter) WDADataFormat(context.Context) (qcom.WDADataFormat, error) {
+	return popTestWDAResult(&f.defaultResults)
+}
+
+func (f *testWDADataFormatter) WDADataFormatForEndpoint(context.Context, *qcom.DataEndpoint) (qcom.WDADataFormat, error) {
+	return popTestWDAResult(&f.endpointResults)
+}
+
+func (f *testWDADataFormatter) SetWDADataFormat(_ context.Context, config qcom.WDADataFormatConfig) (qcom.WDADataFormat, error) {
+	f.setConfigs = append(f.setConfigs, config)
+	return popTestWDAResult(&f.setResults)
+}
+
+func popTestWDAResult(results *[]testWDAResult) (qcom.WDADataFormat, error) {
+	if len(*results) == 0 {
+		return qcom.WDADataFormat{}, errors.New("unexpected WDA call")
+	}
+	result := (*results)[0]
+	*results = (*results)[1:]
+	return result.format, result.err
+}
+
+func testWDADataFormat(linkLayer qcom.WDALinkLayerProtocol, aggregation qcom.WDAAggregationProtocol) qcom.WDADataFormat {
+	return qcom.WDADataFormat{
+		LinkLayerProtocol:        linkLayer,
+		LinkLayerProtocolKnown:   true,
+		UplinkAggregation:        aggregation,
+		UplinkAggregationKnown:   true,
+		DownlinkAggregation:      aggregation,
+		DownlinkAggregationKnown: true,
 	}
 }
 

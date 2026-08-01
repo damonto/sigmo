@@ -733,7 +733,7 @@ func TestConfigureQualcomm410BearerAppliesPeerAddresses(t *testing.T) {
 		state,
 		"modem-1",
 		"wwan0",
-		mmodem.BearerIPConfig{Method: mmodem.BearerIPMethodStatic, Address: "10.0.0.2", Gateway: "10.0.0.1", MTU: 1500},
+		mmodem.BearerIPConfig{Method: mmodem.BearerIPMethodStatic, Address: "10.0.0.2", Gateway: "10.0.0.1", DNS: []string{"10.51.190.5"}, MTU: 1500},
 		mmodem.BearerIPConfig{Method: mmodem.BearerIPMethodStatic, Address: "2001:db8::2", Gateway: "2001:db8::1", MTU: 1428},
 		Preferences{},
 		probe.ops(),
@@ -746,6 +746,9 @@ func TestConfigureQualcomm410BearerAppliesPeerAddresses(t *testing.T) {
 	}
 	if len(tracked.peers) != 2 {
 		t.Fatalf("tracked peers = %v", tracked.peers)
+	}
+	if !slices.Equal(tracked.dns, []string{"10.51.190.5"}) {
+		t.Fatalf("tracked DNS = %v, want carrier DNS", tracked.dns)
 	}
 	if probe.addedRoutes[1].Gateway.IsValid() {
 		t.Fatalf("IPv6 route gateway = %v, want none", probe.addedRoutes[1].Gateway)

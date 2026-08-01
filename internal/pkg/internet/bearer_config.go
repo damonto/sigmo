@@ -25,6 +25,7 @@ type trackedConnection struct {
 	interfaceName             string
 	profileID                 string
 	prefs                     Preferences
+	dns                       []string
 	routeMetric               int
 	addresses                 []netip.Prefix
 	peers                     map[netip.Prefix]netip.Addr
@@ -53,6 +54,7 @@ func configureBearer(ctx context.Context, stateStore connectionStateStore, modem
 	if err != nil {
 		return tracked, fmt.Errorf("read ipv6 config: %w", err)
 	}
+	tracked.dns = mergeDNS(ip4.DNS, ip6.DNS)
 
 	addresses, routes, err := addressesAndRoutes(interfaceName, prefs, ip4, ip6)
 	if err != nil {
@@ -530,6 +532,7 @@ func recoverTrackedConnection(ctx context.Context, stateStore connectionStateSto
 		bearerPath:    bearer.Path(),
 		interfaceName: interfaceName,
 		prefs:         prefs,
+		dns:           mergeDNS(ip4.DNS, ip6.DNS),
 		routeMetric:   metric,
 		addresses:     addresses,
 		routes:        routes,

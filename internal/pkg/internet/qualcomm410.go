@@ -498,6 +498,7 @@ func configureQualcomm410BearerWithOps(ctx context.Context, state connectionStat
 	tracked = trackedConnection{
 		interfaceName: interfaceName,
 		prefs:         prefs,
+		dns:           mergeDNS(ip4.DNS, ip6.DNS),
 		routeMetric:   routeMetric(prefs.DefaultRoute),
 		peers:         make(map[netip.Prefix]netip.Addr, len(peers)),
 	}
@@ -733,7 +734,8 @@ func recoverQualcomm410TrackedConnection(ctx context.Context, stateStore connect
 	}
 	return trackedConnection{
 		bearerPath: bearer.Path(), interfaceName: interfaceName, prefs: prefs,
-		routeMetric: metric, addresses: addresses, peers: peers, routes: routes,
+		dns: mergeDNS(ip4.DNS, ip6.DNS), routeMetric: metric,
+		addresses: addresses, peers: peers, routes: routes,
 		routeChanges: routeChanges,
 	}, metric, true, nil
 }

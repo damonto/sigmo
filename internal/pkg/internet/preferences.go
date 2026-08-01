@@ -80,7 +80,7 @@ func (c *Connector) updateTrackedPreferences(ctx context.Context, modem internet
 
 	proxyChanged := previous.ProxyEnabled != wanted.ProxyEnabled
 	if proxyChanged {
-		if err := c.applyProxyPreference(ctx, modem.id(), updated.interfaceName, wanted.ProxyEnabled); err != nil {
+		if err := c.applyProxyPreference(ctx, modem.id(), updated.interfaceName, updated.dns, wanted.ProxyEnabled); err != nil {
 			rollbackErr := c.rollbackTrackedDefaultRoute(ctx, modem.id(), updated, previous.DefaultRoute)
 			return tracked, errors.Join(fmt.Errorf("update proxy preference: %w", err), rollbackErr)
 		}
@@ -90,7 +90,7 @@ func (c *Connector) updateTrackedPreferences(ctx context.Context, modem internet
 		if err := c.syncAlwaysOnState(ctx, modem.profileID(), wanted); err != nil {
 			var rollbackErr error
 			if proxyChanged {
-				rollbackErr = errors.Join(rollbackErr, c.applyProxyPreference(ctx, modem.id(), updated.interfaceName, previous.ProxyEnabled))
+				rollbackErr = errors.Join(rollbackErr, c.applyProxyPreference(ctx, modem.id(), updated.interfaceName, tracked.dns, previous.ProxyEnabled))
 			}
 			rollbackErr = errors.Join(rollbackErr, c.rollbackTrackedDefaultRoute(ctx, modem.id(), updated, previous.DefaultRoute))
 			return tracked, errors.Join(fmt.Errorf("update always on preference: %w", err), rollbackErr)
@@ -126,7 +126,7 @@ func (c *Connector) updateQMAPPreferences(ctx context.Context, modem internetMod
 	interfaceName := qmapPrimaryInterface(updated)
 	proxyChanged := previous.prefs.ProxyEnabled != wanted.ProxyEnabled
 	if proxyChanged {
-		if err := c.applyProxyPreference(ctx, modem.id(), interfaceName, wanted.ProxyEnabled); err != nil {
+		if err := c.applyProxyPreference(ctx, modem.id(), interfaceName, updated.dns, wanted.ProxyEnabled); err != nil {
 			rollbackErr := c.rollbackQMAPDefaultRoutes(ctx, modem.id(), updated.tracked, previous.tracked)
 			return connection, errors.Join(fmt.Errorf("update QMAP proxy preference: %w", err), rollbackErr)
 		}
@@ -136,7 +136,7 @@ func (c *Connector) updateQMAPPreferences(ctx context.Context, modem internetMod
 		if err := c.syncAlwaysOnState(ctx, modem.profileID(), wanted); err != nil {
 			var rollbackErr error
 			if proxyChanged {
-				rollbackErr = errors.Join(rollbackErr, c.applyProxyPreference(ctx, modem.id(), interfaceName, previous.prefs.ProxyEnabled))
+				rollbackErr = errors.Join(rollbackErr, c.applyProxyPreference(ctx, modem.id(), interfaceName, previous.dns, previous.prefs.ProxyEnabled))
 			}
 			rollbackErr = errors.Join(rollbackErr, c.rollbackQMAPDefaultRoutes(ctx, modem.id(), updated.tracked, previous.tracked))
 			return connection, errors.Join(fmt.Errorf("update QMAP always on preference: %w", err), rollbackErr)
@@ -281,9 +281,9 @@ func (c *Connector) installTrackedRoutes(ctx context.Context, modemID string, tr
 	return updated, nil
 }
 
-func (c *Connector) applyProxyPreference(ctx context.Context, modemID, interfaceName string, enabled bool) error {
+func (c *Connector) applyProxyPreference(ctx context.Context, modemID, interfaceName string, dns []string, enabled bool) error {
 	prefs := Preferences{ProxyEnabled: enabled}
-	if err := c.syncProxyPreference(ctx, modemID, interfaceName, prefs); err != nil {
+	if err := c.syncProxyPreference(ctx, modemID, interfaceName, dns, prefs); err != nil {
 		return err
 	}
 	if !enabled {
@@ -322,6 +322,7 @@ func qmapPrimaryInterface(connection *qmapConnection) string {
 
 func cloneTrackedConnection(tracked trackedConnection) trackedConnection {
 	tracked.addresses = slices.Clone(tracked.addresses)
+	tracked.dns = slices.Clone(tracked.dns)
 	tracked.peers = maps.Clone(tracked.peers)
 	tracked.routes = slices.Clone(tracked.routes)
 	tracked.routeChanges = slices.Clone(tracked.routeChanges)

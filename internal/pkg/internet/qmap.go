@@ -290,11 +290,27 @@ func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, 
 	if legErrors != nil {
 		slog.Warn("QMAP Internet connected with unavailable data leg", "imei", modem.EquipmentIdentifier, "error", legErrors)
 	}
+	if prefs.ProxyEnabled {
+		if err := c.applyProxyPreference(
+			ctx,
+			modem.EquipmentIdentifier,
+			qmapPrimaryInterface(connection),
+			connection.dns,
+			true,
+		); err != nil {
+			return nil, errors.Join(
+				fmt.Errorf("configure QMAP proxy: %w", err),
+				connection.cleanup(ctx, c),
+				connection.close(),
+				removeInternetQMAPMuxes(modem, connection.muxIDs...),
+			)
+		}
+	}
 	c.mu.Lock()
 	c.qmapConnections[modem.EquipmentIdentifier] = connection
 	c.preferences[modem.EquipmentIdentifier] = prefs
 	c.mu.Unlock()
-	return connection.response(), nil
+	return c.qmapConnectionResponse(modem.EquipmentIdentifier, connection), nil
 }
 
 func (c *Connector) disconnectQMAP(ctx context.Context, modem *mmodem.Modem) error {
@@ -313,7 +329,11 @@ func (c *Connector) disconnectQMAPLocked(ctx context.Context, modem *mmodem.Mode
 	if connection == nil {
 		return nil
 	}
-	return errors.Join(connection.cleanup(ctx, c), connection.close())
+	var proxyErr error
+	if connection.prefs.ProxyEnabled {
+		proxyErr = c.cleanupProxy(ctx, modem.EquipmentIdentifier, qmapPrimaryInterface(connection))
+	}
+	return errors.Join(proxyErr, connection.cleanup(ctx, c), connection.close())
 }
 
 func (c *qmapConnection) close() error {

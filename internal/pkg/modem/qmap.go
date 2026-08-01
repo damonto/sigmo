@@ -43,6 +43,12 @@ type qmapMuxInterface struct {
 	index int
 }
 
+type wdaDataFormatter interface {
+	WDADataFormat(context.Context) (qcom.WDADataFormat, error)
+	WDADataFormatForEndpoint(context.Context, *qcom.DataEndpoint) (qcom.WDADataFormat, error)
+	SetWDADataFormat(context.Context, qcom.WDADataFormatConfig) (qcom.WDADataFormat, error)
+}
+
 var errQMAPMuxNotFound = errors.New("QMAP mux is unavailable")
 
 func PrepareQMAP(ctx context.Context, modem *Modem, muxID uint8) (PreparedQMAP, error) {
@@ -106,9 +112,12 @@ func RestoreNonQMAPDataFormat(ctx context.Context, modem *Modem) error {
 	if err != nil {
 		return err
 	}
-	linkLayer, err := nonQMAPLinkLayer(parent)
+	linkLayer, rawIPSupported, err := nonQMAPLinkLayer(parent)
 	if err != nil {
 		return err
+	}
+	if err := netlink.SetDown(parent); err != nil {
+		return fmt.Errorf("set non-QMAP interface down: %w", err)
 	}
 	client, err := wwan.OpenQMIClient(ctx, wwan.QMIClientConfig{Device: port.Device})
 	if err != nil {
@@ -119,52 +128,143 @@ func RestoreNonQMAPDataFormat(ctx context.Context, modem *Modem) error {
 			slog.Warn("close QMI client after restoring data format", "device", port.Device, "error", err)
 		}
 	}()
-	disabled := qcom.WDAAggregationDisabled
-	_, err = client.SetWDADataFormat(ctx, qcom.WDADataFormatConfig{
-		LinkLayerProtocol:   &linkLayer,
-		UplinkAggregation:   &disabled,
-		DownlinkAggregation: &disabled,
-	})
-	if err != nil {
-		format, getErr := client.WDADataFormat(ctx)
-		if getErr == nil && isNonQMAP(format, linkLayer) {
-			return nil
+
+	var endpoint *qcom.DataEndpoint
+	interfaceNumber, endpointErr := qmapInterfaceNumber(parent)
+	if endpointErr == nil {
+		endpoint = &qcom.DataEndpoint{Type: qcom.DataEndpointHSUSB, InterfaceID: interfaceNumber}
+	}
+	if err := restoreNonQMAPWDADataFormat(ctx, client, linkLayer, endpoint); err != nil {
+		formatErr := fmt.Errorf("restore non-QMAP data format: %w", err)
+		if endpoint == nil && errors.Is(err, qcom.QMIErrorMissingArgument) {
+			return errors.Join(formatErr, fmt.Errorf("resolve WDA endpoint: %w", endpointErr))
 		}
-		return fmt.Errorf("restore non-QMAP data format: %w", err)
+		return formatErr
+	}
+	if rawIPSupported {
+		if err := syncNonQMAPHostDataFormat(filepath.Join("/sys/class/net", parent, "qmi"), linkLayer); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func nonQMAPLinkLayer(parent string) (qcom.WDALinkLayerProtocol, error) {
+func restoreNonQMAPWDADataFormat(ctx context.Context, client wdaDataFormatter, linkLayer qcom.WDALinkLayerProtocol, endpoint *qcom.DataEndpoint) error {
+	format, err := client.WDADataFormat(ctx)
+	var usedEndpoint *qcom.DataEndpoint
+	if errors.Is(err, qcom.QMIErrorMissingArgument) && endpoint != nil {
+		usedEndpoint = endpoint
+		format, err = client.WDADataFormatForEndpoint(ctx, usedEndpoint)
+	}
+	if err != nil {
+		return fmt.Errorf("query QMI WDA data format: %w", err)
+	}
+	if isNonQMAP(format, linkLayer) {
+		return nil
+	}
+
+	disabled := qcom.WDAAggregationDisabled
+	config := qcom.WDADataFormatConfig{
+		LinkLayerProtocol:   &linkLayer,
+		UplinkAggregation:   &disabled,
+		DownlinkAggregation: &disabled,
+		Endpoint:            usedEndpoint,
+	}
+	_, err = client.SetWDADataFormat(ctx, config)
+	if errors.Is(err, qcom.QMIErrorMissingArgument) && usedEndpoint == nil && endpoint != nil {
+		usedEndpoint = endpoint
+		config.Endpoint = usedEndpoint
+		_, err = client.SetWDADataFormat(ctx, config)
+	}
+	if err != nil {
+		current, getErr := queryWDADataFormat(ctx, client, usedEndpoint)
+		if getErr == nil && isNonQMAP(current, linkLayer) {
+			return nil
+		}
+		return fmt.Errorf("set QMI WDA data format: %w", err)
+	}
+
+	format, err = queryWDADataFormat(ctx, client, usedEndpoint)
+	if err != nil {
+		return fmt.Errorf("verify QMI WDA data format: %w", err)
+	}
+	if !isNonQMAP(format, linkLayer) {
+		return errors.New("QMI WDA data format did not switch to non-QMAP mode")
+	}
+	return nil
+}
+
+func queryWDADataFormat(ctx context.Context, client wdaDataFormatter, endpoint *qcom.DataEndpoint) (qcom.WDADataFormat, error) {
+	if endpoint == nil {
+		return client.WDADataFormat(ctx)
+	}
+	return client.WDADataFormatForEndpoint(ctx, endpoint)
+}
+
+func nonQMAPLinkLayer(parent string) (qcom.WDALinkLayerProtocol, bool, error) {
 	rawIP, err := os.ReadFile(filepath.Join("/sys/class/net", parent, "qmi", "raw_ip"))
 	if err == nil {
-		return nonQMAPLinkLayerForState(string(rawIP), true, 0), nil
+		linkLayer, err := nonQMAPLinkLayerForRawIP(string(rawIP))
+		return linkLayer, true, err
 	}
 	if !errors.Is(err, os.ErrNotExist) {
-		return 0, fmt.Errorf("read QMI raw IP mode: %w", err)
+		return 0, false, fmt.Errorf("read QMI raw IP mode: %w", err)
 	}
 	interfaceState, err := net.InterfaceByName(parent)
 	if err != nil {
-		return 0, fmt.Errorf("find non-QMAP interface: %w", err)
+		return 0, false, fmt.Errorf("find non-QMAP interface: %w", err)
 	}
-	return nonQMAPLinkLayerForState("", false, interfaceState.Flags), nil
+	return nonQMAPLinkLayerForFlags(interfaceState.Flags), false, nil
 }
 
-func nonQMAPLinkLayerForRawIP(rawIP string) qcom.WDALinkLayerProtocol {
-	return nonQMAPLinkLayerForState(rawIP, true, 0)
+func nonQMAPLinkLayerForRawIP(rawIP string) (qcom.WDALinkLayerProtocol, error) {
+	switch strings.ToUpper(strings.TrimSpace(rawIP)) {
+	case "Y", "N":
+		// The sysfs capability means qmi_wwan supports raw IP. Its current
+		// value is state, not the preferred format for the next bearer.
+		return qcom.WDALinkLayerRawIP, nil
+	default:
+		return 0, fmt.Errorf("unexpected QMI raw IP mode %q", strings.TrimSpace(rawIP))
+	}
 }
 
-func nonQMAPLinkLayerForState(rawIP string, rawIPKnown bool, flags net.Flags) qcom.WDALinkLayerProtocol {
-	if !rawIPKnown {
-		if flags&net.FlagPointToPoint != 0 {
-			return qcom.WDALinkLayerRawIP
-		}
-		return qcom.WDALinkLayerEthernet
-	}
-	if strings.EqualFold(strings.TrimSpace(rawIP), "Y") {
+func nonQMAPLinkLayerForFlags(flags net.Flags) qcom.WDALinkLayerProtocol {
+	if flags&net.FlagPointToPoint != 0 {
 		return qcom.WDALinkLayerRawIP
 	}
 	return qcom.WDALinkLayerEthernet
+}
+
+func syncNonQMAPHostDataFormat(qmiDir string, linkLayer qcom.WDALinkLayerProtocol) error {
+	if err := writeOptionalQMIDataFormat(filepath.Join(qmiDir, "pass_through"), "N"); err != nil {
+		return fmt.Errorf("disable QMI pass-through mode: %w", err)
+	}
+	rawIP := "N"
+	if linkLayer == qcom.WDALinkLayerRawIP {
+		rawIP = "Y"
+	}
+	rawIPPath := filepath.Join(qmiDir, "raw_ip")
+	if err := os.WriteFile(rawIPPath, []byte(rawIP), 0); err != nil {
+		return fmt.Errorf("set QMI raw IP mode to %s: %w", rawIP, err)
+	}
+	current, err := os.ReadFile(rawIPPath)
+	if err != nil {
+		return fmt.Errorf("verify QMI raw IP mode: %w", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(string(current)), rawIP) {
+		return fmt.Errorf("QMI raw IP mode is %q, want %s", strings.TrimSpace(string(current)), rawIP)
+	}
+	return nil
+}
+
+func writeOptionalQMIDataFormat(path, value string) error {
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return os.WriteFile(path, []byte(value), 0)
 }
 
 func isNonQMAP(format qcom.WDADataFormat, linkLayer qcom.WDALinkLayerProtocol) bool {

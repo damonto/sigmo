@@ -168,7 +168,7 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 		generation := r.nextGenerationToken()
 		modem, err := r.open(ctx, device, generation)
 		if err != nil {
-			slog.Warn("open discovered modem", "device", device.Path, "physical_path", key, "error", err)
+			slog.Warn("open discovered modem", "device", controlPortPath(device), "physical_path", key, "error", err)
 			continue
 		}
 		r.watchModem(runCtx, modem)
@@ -324,7 +324,7 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 	replacement, err := r.open(openCtx, event.Device, generation)
 	cancel()
 	if err != nil {
-		slog.Warn("open changed modem", "device", event.Device.Path, "physical_path", key, "error", err)
+		slog.Warn("open changed modem", "device", controlPortPath(event.Device), "physical_path", key, "error", err)
 		return
 	}
 	r.watchModem(ctx, replacement)
@@ -558,7 +558,12 @@ func physicalDeviceKey(device wwanmodem.Device) string {
 	if path := strings.TrimSpace(device.PhysicalPath); path != "" {
 		return path
 	}
-	return strings.TrimSpace(device.Path)
+	for _, port := range device.Ports {
+		if path := strings.TrimSpace(port.SysPath); path != "" {
+			return path
+		}
+	}
+	return controlPortPath(device)
 }
 
 func samePhysicalModem(a, b *Modem) bool {
@@ -572,63 +577,122 @@ func samePhysicalModem(a, b *Modem) bool {
 }
 
 func sameControlDevice(a, b wwanmodem.Device) bool {
-	if strings.TrimSpace(a.Path) != "" && strings.TrimSpace(b.Path) != "" {
-		return strings.TrimSpace(a.Path) == strings.TrimSpace(b.Path)
+	for _, aPort := range controlPorts(a) {
+		for _, bPort := range controlPorts(b) {
+			if strings.TrimSpace(aPort.Path) != "" && strings.TrimSpace(aPort.Path) == strings.TrimSpace(bPort.Path) {
+				return true
+			}
+		}
 	}
 	return physicalDeviceKey(a) != "" && physicalDeviceKey(a) == physicalDeviceKey(b)
 }
 
 func sameDeviceDescription(a, b wwanmodem.Device) bool {
-	if a.Path != b.Path || a.Protocol != b.Protocol || a.Driver != b.Driver || a.PhysicalPath != b.PhysicalPath {
-		return false
-	}
-	if !slices.Equal(a.NetworkInterfaces, b.NetworkInterfaces) || !slices.Equal(a.Ports, b.Ports) {
-		return false
-	}
-	return true
+	return a.PhysicalPath == b.PhysicalPath && slices.Equal(a.Ports, b.Ports)
 }
 
 func openDiscoveredModem(ctx context.Context, device wwanmodem.Device, generation uint64) (*Modem, error) {
-	core, err := wwanmodem.Open(ctx, device.Path, wwanmodem.AccessAuto)
-	if err != nil {
-		return nil, err
+	ports := controlPorts(device)
+	if len(ports) == 0 {
+		return nil, errors.New("open discovered modem: no QMI or MBIM control port")
 	}
-	info, err := core.Info(ctx)
-	if err != nil {
-		_ = core.Close()
-		return nil, fmt.Errorf("read modem info: %w", err)
+	var openErrs []error
+	for _, port := range ports {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("open discovered modem: %w", err)
+		}
+		core, err := wwanmodem.Open(ctx, port, wwanmodem.AccessAuto)
+		if err != nil {
+			openErrs = append(openErrs, fmt.Errorf("open control port %s: %w", port.Path, err))
+			continue
+		}
+		info, err := core.Info(ctx)
+		if err != nil {
+			openErrs = append(openErrs, fmt.Errorf("read modem info from %s: %w", port.Path, errors.Join(err, core.Close())))
+			continue
+		}
+		m := newDiscoveredModem(ctx, discoveredModemConfig{
+			core:       core,
+			device:     device,
+			port:       port,
+			info:       info,
+			generation: generation,
+		})
+		return m, nil
 	}
+	return nil, fmt.Errorf("open discovered modem: %w", errors.Join(openErrs...))
+}
+
+type discoveredModemConfig struct {
+	core       *wwanmodem.Modem
+	device     wwanmodem.Device
+	port       wwanmodem.Port
+	info       wwanmodem.Info
+	generation uint64
+}
+
+func newDiscoveredModem(ctx context.Context, cfg discoveredModemConfig) *Modem {
 	m := &Modem{
-		core: core, deviceInfo: device, deviceKey: physicalDeviceKey(device), generation: generation,
-		Device: device.PhysicalPath, Manufacturer: info.Manufacturer, EquipmentIdentifier: strings.TrimSpace(info.EquipmentID),
-		Driver: device.Driver, Model: info.Model, FirmwareRevision: info.Revision, HardwareRevision: info.HardwareRevision,
-		PrimaryPort: device.Path, ussd: wwanmodem.USSDMessage{State: wwanmodem.USSDStateIdle},
+		core:                cfg.core,
+		deviceInfo:          cfg.device,
+		deviceKey:           physicalDeviceKey(cfg.device),
+		generation:          cfg.generation,
+		Device:              cfg.device.PhysicalPath,
+		Manufacturer:        cfg.info.Manufacturer,
+		EquipmentIdentifier: strings.TrimSpace(cfg.info.EquipmentID),
+		Driver:              cfg.port.Driver,
+		Model:               cfg.info.Model,
+		FirmwareRevision:    cfg.info.Revision,
+		HardwareRevision:    cfg.info.HardwareRevision,
+		PrimaryPort:         cfg.port.Path,
+		ussd:                wwanmodem.USSDMessage{State: wwanmodem.USSDStateIdle},
 	}
 	if m.Device == "" {
-		m.Device = device.Path
+		m.Device = cfg.port.Path
 	}
-	if len(info.OwnNumbers) > 0 {
+	if len(cfg.info.OwnNumbers) > 0 {
 		m.runtimeMu.Lock()
-		m.Number = strings.TrimSpace(info.OwnNumbers[0])
+		m.Number = strings.TrimSpace(cfg.info.OwnNumbers[0])
 		m.runtimeMu.Unlock()
 	}
-	for _, port := range device.Ports {
-		path := port.Path
-		if port.Type == wwanmodem.PortNetwork {
-			path = port.Name
+	for _, candidate := range cfg.device.Ports {
+		path := candidate.Path
+		if candidate.Type == wwanmodem.PortNetwork {
+			path = candidate.Name
 		}
-		m.Ports = append(m.Ports, ModemPort{PortType: legacyPortType(port.Type), Device: path})
+		m.Ports = append(m.Ports, ModemPort{PortType: legacyPortType(candidate.Type), Device: path})
 	}
-	if status, statusErr := core.Status(ctx); statusErr == nil {
+	// Initial snapshots are best effort; runtime watchers refresh these fields.
+	if status, err := cfg.core.Status(ctx); err == nil {
 		m.applyStatus(status)
 	}
-	if simInfo, simErr := core.SIMInfo(ctx); simErr == nil {
+	if simInfo, err := cfg.core.SIMInfo(ctx); err == nil {
 		m.applySIMInfo(simInfo)
 	}
-	if slots, slotsErr := core.SIMSlots(ctx); slotsErr == nil {
+	if slots, err := cfg.core.SIMSlots(ctx); err == nil {
 		m.applySIMSlots(slots)
 	}
-	return m, nil
+	return m
+}
+
+func controlPorts(device wwanmodem.Device) []wwanmodem.Port {
+	ports := make([]wwanmodem.Port, 0, len(device.Ports))
+	for _, portType := range []wwanmodem.PortType{wwanmodem.PortQMI, wwanmodem.PortMBIM} {
+		for _, port := range device.Ports {
+			if port.Type == portType && strings.TrimSpace(port.Path) != "" {
+				ports = append(ports, port)
+			}
+		}
+	}
+	return ports
+}
+
+func controlPortPath(device wwanmodem.Device) string {
+	ports := controlPorts(device)
+	if len(ports) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(ports[0].Path)
 }
 
 func legacyPortType(portType wwanmodem.PortType) ModemPortType {
