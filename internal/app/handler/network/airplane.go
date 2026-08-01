@@ -5,19 +5,16 @@ import (
 	"errors"
 	"fmt"
 
+	wwanmodem "github.com/damonto/wwan-go/modem"
+
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
 
 func (n *network) AirplaneMode(ctx context.Context, modem *mmodem.Modem) (*AirplaneModeResponse, error) {
-	device, err := mmodem.OpenDevice(modem)
-	if errors.Is(err, wwan.ErrUnsupported) {
+	enabled, err := modem.AirplaneMode(ctx)
+	if errors.Is(err, wwanmodem.ErrNotSupported) {
 		return &AirplaneModeResponse{Supported: false}, nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("open device: %w", err)
-	}
-	enabled, err := device.AirplaneMode(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("read airplane mode: %w", err)
 	}
@@ -28,14 +25,7 @@ func (n *network) AirplaneMode(ctx context.Context, modem *mmodem.Modem) (*Airpl
 }
 
 func (n *network) SetAirplaneMode(ctx context.Context, modem *mmodem.Modem, req SetAirplaneModeRequest) error {
-	device, err := mmodem.OpenDevice(modem)
-	if errors.Is(err, wwan.ErrUnsupported) {
-		return wwan.ErrUnsupported
-	}
-	if err != nil {
-		return fmt.Errorf("open device: %w", err)
-	}
-	if err := device.SetAirplaneMode(ctx, req.Enabled); err != nil {
+	if err := modem.SetAirplaneMode(ctx, req.Enabled); err != nil {
 		return fmt.Errorf("set airplane mode: %w", err)
 	}
 	if err := n.preferences.SaveAirplaneMode(ctx, modem.EquipmentIdentifier, req.Enabled); err != nil {

@@ -134,6 +134,26 @@ func TestApplyStatusCachesOverview(t *testing.T) {
 	}
 }
 
+func TestAirplaneModeEnabled(t *testing.T) {
+	tests := []struct {
+		name  string
+		state wwanmodem.PowerState
+		want  bool
+	}{
+		{name: "unknown", state: wwanmodem.PowerStateUnknown},
+		{name: "off", state: wwanmodem.PowerStateOff, want: true},
+		{name: "low", state: wwanmodem.PowerStateLow, want: true},
+		{name: "on", state: wwanmodem.PowerStateOn},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := airplaneModeEnabled(tt.state); got != tt.want {
+				t.Errorf("airplaneModeEnabled(%d) = %t, want %t", tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestApplySIMSlotsCachesIdentity(t *testing.T) {
 	m := new(Modem)
 	m.applySIMInfo(wwanmodem.SIMInfo{

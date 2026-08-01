@@ -423,6 +423,37 @@ func (m *Modem) ProfileID(ctx context.Context) (string, error) {
 	return "", ErrProfileIDMissing
 }
 
+func (m *Modem) AirplaneMode(ctx context.Context) (bool, error) {
+	if m == nil {
+		return false, errModemRequired
+	}
+	if m.core == nil {
+		return false, wwanmodem.ErrNotSupported
+	}
+	state, err := m.core.PowerState(ctx)
+	if err != nil {
+		return false, fmt.Errorf("read modem power state: %w", err)
+	}
+	return airplaneModeEnabled(state), nil
+}
+
+func (m *Modem) SetAirplaneMode(ctx context.Context, enabled bool) error {
+	if m == nil {
+		return errModemRequired
+	}
+	if m.core == nil {
+		return wwanmodem.ErrNotSupported
+	}
+	if enabled {
+		return m.Disable(ctx)
+	}
+	return m.Enable(ctx)
+}
+
+func airplaneModeEnabled(state wwanmodem.PowerState) bool {
+	return state == wwanmodem.PowerStateOff || state == wwanmodem.PowerStateLow
+}
+
 func (m *Modem) Enable(ctx context.Context) error {
 	if m == nil || m.core == nil {
 		return errModemRequired

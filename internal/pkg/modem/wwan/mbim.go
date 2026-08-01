@@ -14,7 +14,6 @@ import (
 type mbimDevice struct {
 	device      string
 	slot        uint8
-	openRadio   func(context.Context) (mbimRadio, error)
 	openNetwork func(context.Context) (mbimNetwork, error)
 }
 
@@ -22,9 +21,6 @@ func newMBIMDevice(device string, slot uint8) mbimDevice {
 	return mbimDevice{
 		device: device,
 		slot:   slot,
-		openRadio: func(ctx context.Context) (mbimRadio, error) {
-			return openMBIMClient(ctx, device, 1)
-		},
 		openNetwork: func(ctx context.Context) (mbimNetwork, error) {
 			return openMBIMClient(ctx, device, slot)
 		},
@@ -33,12 +29,6 @@ func newMBIMDevice(device string, slot uint8) mbimDevice {
 
 func (u mbimDevice) Close() error {
 	return nil
-}
-
-type mbimRadio interface {
-	RadioState(ctx context.Context) (uiccmbim.RadioStateInfo, error)
-	SetRadioState(ctx context.Context, state uiccmbim.RadioSwitchState) (uiccmbim.RadioStateInfo, error)
-	Close() error
 }
 
 type mbimNetwork interface {
@@ -153,41 +143,6 @@ func mbimIMSContextAvailable(ctx context.Context, client mbimNetwork) (bool, err
 		return true, nil
 	}
 	return false, nil
-}
-
-func (u mbimDevice) AirplaneMode(ctx context.Context) (bool, error) {
-	client, err := u.openRadio(ctx)
-	if err != nil {
-		return false, fmt.Errorf("open MBIM radio client: %w", err)
-	}
-	defer closeClient("close MBIM radio client", client)
-
-	state, err := client.RadioState(ctx)
-	if err != nil {
-		return false, fmt.Errorf("read MBIM radio state: %w", err)
-	}
-	return state.SwRadioState == uiccmbim.RadioSwitchStateOff, nil
-}
-
-func (u mbimDevice) SetAirplaneMode(ctx context.Context, enabled bool) error {
-	client, err := u.openRadio(ctx)
-	if err != nil {
-		return fmt.Errorf("open MBIM radio client: %w", err)
-	}
-	defer closeClient("close MBIM radio client", client)
-
-	return setMBIMAirplaneMode(ctx, client, enabled)
-}
-
-func setMBIMAirplaneMode(ctx context.Context, client mbimRadio, enabled bool) error {
-	state := uiccmbim.RadioSwitchStateOn
-	if enabled {
-		state = uiccmbim.RadioSwitchStateOff
-	}
-	if _, err := client.SetRadioState(ctx, state); err != nil {
-		return fmt.Errorf("set MBIM radio state: %w", err)
-	}
-	return nil
 }
 
 func openMBIMClient(ctx context.Context, device string, slot uint8) (*uiccmbim.Client, error) {

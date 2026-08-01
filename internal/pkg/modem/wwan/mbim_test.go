@@ -43,65 +43,6 @@ func TestDeviceMSISDNMBIM(t *testing.T) {
 	}
 }
 
-func TestDeviceAirplaneModeMBIM(t *testing.T) {
-	tests := []struct {
-		name  string
-		state uiccmbim.RadioSwitchState
-		want  bool
-	}{
-		{name: "on", state: uiccmbim.RadioSwitchStateOn},
-		{name: "off", state: uiccmbim.RadioSwitchStateOff, want: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := &fakeMBIMRadio{
-				state: uiccmbim.RadioStateInfo{SwRadioState: tt.state},
-			}
-			device := mbimDeviceWithRadio(t, "/dev/cdc-wdm0", client, nil)
-
-			got, err := device.AirplaneMode(context.Background())
-			if err != nil {
-				t.Fatalf("AirplaneMode() error = %v", err)
-			}
-			if got != tt.want {
-				t.Fatalf("AirplaneMode() = %v, want %v", got, tt.want)
-			}
-			if !client.closed {
-				t.Fatal("MBIM client closed = false, want true")
-			}
-		})
-	}
-}
-
-func TestDeviceSetAirplaneModeMBIM(t *testing.T) {
-	tests := []struct {
-		name  string
-		want  bool
-		state uiccmbim.RadioSwitchState
-	}{
-		{name: "enable", want: true, state: uiccmbim.RadioSwitchStateOff},
-		{name: "disable", state: uiccmbim.RadioSwitchStateOn},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := &fakeMBIMRadio{}
-			device := mbimDeviceWithRadio(t, "/dev/cdc-wdm0", client, nil)
-
-			if err := device.SetAirplaneMode(context.Background(), tt.want); err != nil {
-				t.Fatalf("SetAirplaneMode() error = %v", err)
-			}
-			if client.setState != tt.state {
-				t.Fatalf("MBIM set state = %d, want %d", client.setState, tt.state)
-			}
-			if !client.closed {
-				t.Fatal("MBIM client closed = false, want true")
-			}
-		})
-	}
-}
-
 func TestDeviceVoLTEStatusMBIM(t *testing.T) {
 	device, err := Open(Config{PortType: PortTypeMBIM, Device: "/dev/cdc-wdm0", Slot: 1})
 	if err != nil {
@@ -185,12 +126,6 @@ func TestDeviceIMSProfileMBIM(t *testing.T) {
 	}
 }
 
-type fakeMBIMRadio struct {
-	state    uiccmbim.RadioStateInfo
-	setState uiccmbim.RadioSwitchState
-	closed   bool
-}
-
 type fakeMBIMNetwork struct {
 	subscriberReady    uiccmbim.SubscriberReadyStatusResponse
 	subscriberReadyErr error
@@ -228,32 +163,6 @@ func mbimDeviceWithNetwork(client mbimNetwork) mbimDevice {
 	return mbimDevice{
 		openNetwork: func(context.Context) (mbimNetwork, error) {
 			return client, nil
-		},
-	}
-}
-
-func (r *fakeMBIMRadio) RadioState(context.Context) (uiccmbim.RadioStateInfo, error) {
-	return r.state, nil
-}
-
-func (r *fakeMBIMRadio) SetRadioState(_ context.Context, state uiccmbim.RadioSwitchState) (uiccmbim.RadioStateInfo, error) {
-	r.setState = state
-	return uiccmbim.RadioStateInfo{SwRadioState: state}, nil
-}
-
-func (r *fakeMBIMRadio) Close() error {
-	r.closed = true
-	return nil
-}
-
-func mbimDeviceWithRadio(t *testing.T, wantDevice string, client mbimRadio, openErr error) mbimDevice {
-	t.Helper()
-
-	return mbimDevice{
-		device: wantDevice,
-		slot:   1,
-		openRadio: func(context.Context) (mbimRadio, error) {
-			return client, openErr
 		},
 	}
 }

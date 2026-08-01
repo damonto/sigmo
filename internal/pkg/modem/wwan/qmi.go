@@ -28,7 +28,6 @@ type qmiDevice struct {
 	imei          string
 	retainClients bool
 	openClient    func(context.Context, uint8) (qmiClient, error)
-	openRadio     func(context.Context) (qmiRadio, error)
 	mu            sync.Mutex
 	clients       map[uint8]qmiClient
 	closeOnce     sync.Once
@@ -43,9 +42,6 @@ func newQMIDevice(device string, slot uint8, imei string) *qmiDevice {
 		imei:   imei,
 		openClient: func(ctx context.Context, slot uint8) (qmiClient, error) {
 			return OpenQMIClient(ctx, QMIClientConfig{Device: device, Slot: slot})
-		},
-		openRadio: func(ctx context.Context) (qmiRadio, error) {
-			return OpenQMIClient(ctx, QMIClientConfig{Device: device, Slot: 1})
 		},
 	}
 }
@@ -103,27 +99,6 @@ func (u *qmiDevice) acquireClient(ctx context.Context, slot uint8) (qmiClient, f
 	return client, func() {}, nil
 }
 
-func (u *qmiDevice) acquireRadio(ctx context.Context) (qmiRadio, func(), error) {
-	if !u.retainClients {
-		client, err := u.openRadio(ctx)
-		return client, func() {
-			if client != nil {
-				closeClient("close QMI radio client", client)
-			}
-		}, err
-	}
-
-	client, _, err := u.acquireClient(ctx, 1)
-	if err != nil {
-		return nil, func() {}, err
-	}
-	radio, ok := client.(qmiRadio)
-	if !ok {
-		return nil, func() {}, errors.New("QMI client does not support radio control")
-	}
-	return radio, func() {}, nil
-}
-
 func (u *qmiDevice) USIM(ctx context.Context) (usimcard.Reader, error) {
 	return openQMIUSIM(ctx, u.device, u.slot)
 }
@@ -165,12 +140,6 @@ var (
 	qmiPowerRestoreTimeout = 5 * time.Second
 	qmiSIMPowerCycleDelay  = 100 * time.Millisecond
 )
-
-type qmiRadio interface {
-	OperatingMode(ctx context.Context) (qcom.DMSOperatingMode, error)
-	SetOperatingMode(ctx context.Context, mode qcom.DMSOperatingMode) error
-	Close() error
-}
 
 type qmiClient interface {
 	MSISDN(ctx context.Context) (qcom.DMSGetMSISDNResponse, error)
@@ -250,53 +219,6 @@ type usimApplication struct {
 	AID                  []byte
 	ApplicationState     string
 	PersonalizationState string
-}
-
-func (u *qmiDevice) AirplaneMode(ctx context.Context) (bool, error) {
-	client, release, err := u.acquireRadio(ctx)
-	if err != nil {
-		return false, fmt.Errorf("open QMI radio client: %w", err)
-	}
-	defer release()
-
-	mode, err := client.OperatingMode(ctx)
-	if err != nil {
-		return false, fmt.Errorf("read QMI operating mode: %w", err)
-	}
-	return qmiOperatingModeAirplane(mode), nil
-}
-
-func (u *qmiDevice) SetAirplaneMode(ctx context.Context, enabled bool) error {
-	client, release, err := u.acquireRadio(ctx)
-	if err != nil {
-		return fmt.Errorf("open QMI radio client: %w", err)
-	}
-	defer release()
-
-	return setQMIAirplaneMode(ctx, client, enabled)
-}
-
-func setQMIAirplaneMode(ctx context.Context, client qmiRadio, enabled bool) error {
-	mode := qcom.DMSOperatingModeOnline
-	if enabled {
-		mode = qcom.DMSOperatingModeLowPower
-	}
-	if err := client.SetOperatingMode(ctx, mode); err != nil {
-		return fmt.Errorf("set QMI operating mode: %w", err)
-	}
-	return nil
-}
-
-func qmiOperatingModeAirplane(mode qcom.DMSOperatingMode) bool {
-	switch mode {
-	case qcom.DMSOperatingModeLowPower,
-		qcom.DMSOperatingModeOffline,
-		qcom.DMSOperatingModePersistentLowPower,
-		qcom.DMSOperatingModeModeOnlyLowPower:
-		return true
-	default:
-		return false
-	}
 }
 
 func (u *qmiDevice) ATR(ctx context.Context) ([]byte, error) {

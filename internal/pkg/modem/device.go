@@ -18,8 +18,6 @@ type DeviceEndpoint struct {
 }
 
 type deviceControl interface {
-	AirplaneMode(ctx context.Context) (bool, error)
-	SetAirplaneMode(ctx context.Context, enabled bool) error
 	PowerCycleSIM(ctx context.Context) error
 	ActivateProvisioningIfSIMMissing(ctx context.Context) error
 	SIMState(ctx context.Context, target wwan.Target) (wwan.SIMState, error)

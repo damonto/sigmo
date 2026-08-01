@@ -60,37 +60,6 @@ func TestDeviceUpdateMSISDNQMI(t *testing.T) {
 	}
 }
 
-func TestDeviceAirplaneModeQMI(t *testing.T) {
-	tests := []struct {
-		name string
-		mode qcom.DMSOperatingMode
-		want bool
-	}{
-		{name: "online", mode: qcom.DMSOperatingModeOnline},
-		{name: "low power", mode: qcom.DMSOperatingModeLowPower, want: true},
-		{name: "offline", mode: qcom.DMSOperatingModeOffline, want: true},
-		{name: "persistent low power", mode: qcom.DMSOperatingModePersistentLowPower, want: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := &fakeQMIRadio{mode: tt.mode}
-			device := qmiDeviceWithRadio(t, "/dev/cdc-wdm0", client, nil)
-
-			got, err := device.AirplaneMode(context.Background())
-			if err != nil {
-				t.Fatalf("AirplaneMode() error = %v", err)
-			}
-			if got != tt.want {
-				t.Fatalf("AirplaneMode() = %v, want %v", got, tt.want)
-			}
-			if !client.closed {
-				t.Fatal("QMI client closed = false, want true")
-			}
-		})
-	}
-}
-
 func TestDeviceVoLTEStatusQMI(t *testing.T) {
 	errIMSA := errors.New("imsa rejected")
 	tests := []struct {
@@ -299,14 +268,8 @@ func TestOpenSessionReusesQMIClientUntilClose(t *testing.T) {
 			t.Fatalf("PacketServiceStatus() error = %v", err)
 		}
 	}
-	if err := session.SetAirplaneMode(context.Background(), true); err != nil {
-		t.Fatalf("SetAirplaneMode() error = %v", err)
-	}
 	if openCalls != 1 {
 		t.Fatalf("open calls = %d, want 1", openCalls)
-	}
-	if client.setOperatingMode != qcom.DMSOperatingModeLowPower {
-		t.Fatalf("operating mode = %d, want low power", client.setOperatingMode)
 	}
 	if slices.Contains(client.calls, "close") {
 		t.Fatal("client closed before session Close")
@@ -490,34 +453,6 @@ func TestDeviceSetIMSSTestModeQMI(t *testing.T) {
 			}
 			if !slices.Equal(client.calls, []string{"set-imss-test-mode", "close"}) {
 				t.Fatalf("calls = %v, want set and close", client.calls)
-			}
-		})
-	}
-}
-
-func TestDeviceSetAirplaneModeQMI(t *testing.T) {
-	tests := []struct {
-		name string
-		want bool
-		mode qcom.DMSOperatingMode
-	}{
-		{name: "enable", want: true, mode: qcom.DMSOperatingModeLowPower},
-		{name: "disable", mode: qcom.DMSOperatingModeOnline},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := &fakeQMIRadio{}
-			device := qmiDeviceWithRadio(t, "/dev/cdc-wdm0", client, nil)
-
-			if err := device.SetAirplaneMode(context.Background(), tt.want); err != nil {
-				t.Fatalf("SetAirplaneMode() error = %v", err)
-			}
-			if client.setMode != tt.mode {
-				t.Fatalf("QMI set mode = %d, want %d", client.setMode, tt.mode)
-			}
-			if !client.closed {
-				t.Fatal("QMI client closed = false, want true")
 			}
 		})
 	}
@@ -918,19 +853,6 @@ type fakeQMIClient struct {
 	cardStatusErr       error
 	changeReq           qcom.ChangeProvisioningSessionRequest
 	provisioningErr     error
-	operatingMode       qcom.DMSOperatingMode
-	setOperatingMode    qcom.DMSOperatingMode
-}
-
-func (r *fakeQMIClient) OperatingMode(context.Context) (qcom.DMSOperatingMode, error) {
-	r.calls = append(r.calls, "operating-mode")
-	return r.operatingMode, nil
-}
-
-func (r *fakeQMIClient) SetOperatingMode(_ context.Context, mode qcom.DMSOperatingMode) error {
-	r.calls = append(r.calls, "set-operating-mode")
-	r.setOperatingMode = mode
-	return nil
 }
 
 func (r *fakeQMIClient) MSISDN(context.Context) (qcom.DMSGetMSISDNResponse, error) {
@@ -1033,39 +955,6 @@ func qmiClientOpener(t *testing.T, wantSlot uint8, client qmiClient, openErr err
 			return nil, openErr
 		}
 		return client, nil
-	}
-}
-
-type fakeQMIRadio struct {
-	mode    qcom.DMSOperatingMode
-	setMode qcom.DMSOperatingMode
-	closed  bool
-}
-
-func (r *fakeQMIRadio) OperatingMode(context.Context) (qcom.DMSOperatingMode, error) {
-	return r.mode, nil
-}
-
-func (r *fakeQMIRadio) SetOperatingMode(_ context.Context, mode qcom.DMSOperatingMode) error {
-	r.setMode = mode
-	return nil
-}
-
-func (r *fakeQMIRadio) Close() error {
-	r.closed = true
-	return nil
-}
-
-func qmiDeviceWithRadio(t *testing.T, wantDevice string, client qmiRadio, openErr error) qmiDevice {
-	t.Helper()
-
-	return qmiDevice{
-		device: wantDevice,
-		slot:   1,
-		imei:   "modem-1",
-		openRadio: func(context.Context) (qmiRadio, error) {
-			return client, openErr
-		},
 	}
 }
 

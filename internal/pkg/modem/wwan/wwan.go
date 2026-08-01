@@ -58,11 +58,6 @@ type backend interface {
 	Close() error
 }
 
-type radioBackend interface {
-	AirplaneMode(ctx context.Context) (bool, error)
-	SetAirplaneMode(ctx context.Context, enabled bool) error
-}
-
 type simBackend interface {
 	ATR(ctx context.Context) ([]byte, error)
 	USIM(ctx context.Context) (usimcard.Reader, error)
@@ -180,22 +175,6 @@ func (s *Session) Close() error {
 		return nil
 	}
 	return s.backend.Close()
-}
-
-func (d *deviceOperations) AirplaneMode(ctx context.Context) (bool, error) {
-	backend, ok := d.backend.(radioBackend)
-	if !ok {
-		return false, ErrUnsupported
-	}
-	return backend.AirplaneMode(ctx)
-}
-
-func (d *deviceOperations) SetAirplaneMode(ctx context.Context, enabled bool) error {
-	backend, ok := d.backend.(radioBackend)
-	if !ok {
-		return ErrUnsupported
-	}
-	return backend.SetAirplaneMode(ctx, enabled)
 }
 
 func (d *deviceOperations) ATR(ctx context.Context) ([]byte, error) {

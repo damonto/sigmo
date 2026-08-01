@@ -10,7 +10,8 @@ import (
 	"sync"
 	"time"
 
-	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	wwanmodem "github.com/damonto/wwan-go/modem"
+
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -19,9 +20,8 @@ var networkPreferencesRetryInterval = 5 * time.Second
 var errNetworkPreferencesStorageRequired = errors.New("network preferences storage is required")
 
 type NetworkPreferences struct {
-	store      *storage.Store
-	mu         sync.Mutex
-	openDevice deviceControlOpener
+	store *storage.Store
+	mu    sync.Mutex
 }
 
 type networkPreferenceMode struct {
@@ -159,7 +159,7 @@ func (p *NetworkPreferences) restoreOnce(ctx context.Context, m *Modem) (bool, e
 	}
 
 	if prefs.AirplaneMode != nil {
-		retry, err := restoreAirplaneModePreference(ctx, m, *prefs.AirplaneMode, p.deviceOpener())
+		retry, err := restoreAirplaneModePreference(ctx, m, *prefs.AirplaneMode)
 		if err != nil {
 			return retry, err
 		}
@@ -191,13 +191,6 @@ func (p *NetworkPreferences) restoreOnce(ctx context.Context, m *Modem) (bool, e
 	return retry, result
 }
 
-func (p *NetworkPreferences) deviceOpener() deviceControlOpener {
-	if p == nil || p.openDevice == nil {
-		return nil
-	}
-	return p.openDevice
-}
-
 func (p *NetworkPreferences) loadForModem(ctx context.Context, modemID string) (savedNetworkPreferences, bool, error) {
 	modemID = strings.TrimSpace(modemID)
 	if modemID == "" {
@@ -226,22 +219,18 @@ func (p *NetworkPreferences) saveForModemLocked(ctx context.Context, modemID str
 	return p.store.Put(ctx, "modem:"+modemID, "network.preferences", entry)
 }
 
-func restoreAirplaneModePreference(ctx context.Context, m *Modem, enabled bool, open deviceControlOpener) (bool, error) {
-	device, err := openDeviceForModem(m, open)
-	if errors.Is(err, wwan.ErrUnsupported) {
-		return false, wwan.ErrUnsupported
+func restoreAirplaneModePreference(ctx context.Context, m *Modem, enabled bool) (bool, error) {
+	current, err := m.AirplaneMode(ctx)
+	if errors.Is(err, wwanmodem.ErrNotSupported) {
+		return false, err
 	}
-	if err != nil {
-		return false, fmt.Errorf("open device: %w", err)
-	}
-	current, err := device.AirplaneMode(ctx)
 	if err != nil {
 		return false, fmt.Errorf("read airplane mode: %w", err)
 	}
 	if current == enabled {
 		return false, nil
 	}
-	if err := device.SetAirplaneMode(ctx, enabled); err != nil {
+	if err := m.SetAirplaneMode(ctx, enabled); err != nil {
 		return false, fmt.Errorf("set airplane mode: %w", err)
 	}
 	slog.Info("airplane mode restored", "imei", m.EquipmentIdentifier, "enabled", enabled)

@@ -4,11 +4,11 @@ import (
 	"errors"
 	"net/http"
 
+	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -174,7 +174,7 @@ func (h *Handler) SetAirplaneMode(c *echo.Context) error {
 		return httpapi.BadRequest(c, errorCodeSetAirplaneModeInvalid, err)
 	}
 	if err := h.networks.SetAirplaneMode(ctx, modem, req); err != nil {
-		if errors.Is(err, wwan.ErrUnsupported) {
+		if errors.Is(err, wwanmodem.ErrNotSupported) {
 			return httpapi.BadRequest(c, errorCodeAirplaneModeUnsupported, err)
 		}
 		return httpapi.Internal(c, errorCodeSetAirplaneModeFailed, err)

@@ -2,18 +2,14 @@ package modem
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
 
-func fmtBoolEvent(prefix string, value bool) string { return fmt.Sprintf("%s:%t", prefix, value) }
-
 type fakeDeviceControl struct {
 	calls       []string
-	airplane    bool
 	state       wwan.SIMState
 	stateErr    error
 	powerErr    error
@@ -31,17 +27,6 @@ func (d *fakeDeviceControl) MSISDN(context.Context) (string, error) {
 func (d *fakeDeviceControl) UpdateMSISDN(_ context.Context, number string) error {
 	d.calls = append(d.calls, "update-msisdn:"+number)
 	return d.updateErr
-}
-
-func (d *fakeDeviceControl) AirplaneMode(context.Context) (bool, error) {
-	d.calls = append(d.calls, "airplane-mode")
-	return d.airplane, nil
-}
-
-func (d *fakeDeviceControl) SetAirplaneMode(_ context.Context, enabled bool) error {
-	d.calls = append(d.calls, fmtBoolEvent("set-airplane-mode", enabled))
-	d.airplane = enabled
-	return nil
 }
 
 func (d *fakeDeviceControl) PowerCycleSIM(context.Context) error {
