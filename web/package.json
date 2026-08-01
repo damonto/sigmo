@@ -29,7 +29,7 @@
     "flag-icons": "^7.5.0",
     "libphonenumber-js": "^1.13.9",
     "lucide-vue-next": "^1.0.0",
-    "pinia": "^3.0.4",
+    "pinia": "^4.0.2",
     "reka-ui": "^2.10.1",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",
