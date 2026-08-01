@@ -35,6 +35,14 @@ type Modem struct {
 	smsStorage   wwanmodem.MessageStorage
 	bearerMu     sync.Mutex
 	bearers      map[uint64]*Bearer
+	slotSIMs     map[uint32]*SIM
+	airplaneMode bool
+	registration Modem3GPPRegistrationState
+	access       []ModemAccessTechnology
+	operatorName string
+	operatorCode string
+	signal       uint32
+	statusKnown  bool
 
 	Device              string
 	Manufacturer        string
@@ -64,7 +72,15 @@ type ModemSnapshot struct {
 	PrimarySIMSlot uint32
 	SIM            *SIM
 	SIMSlots       []uint32
+	Slots          []*SIM
 	Number         string
+	AirplaneMode   bool
+	Registration   Modem3GPPRegistrationState
+	Access         []ModemAccessTechnology
+	OperatorName   string
+	OperatorCode   string
+	SignalQuality  uint32
+	StatusKnown    bool
 }
 
 func (m *Modem) Snapshot() ModemSnapshot {
@@ -79,8 +95,37 @@ func (m *Modem) Snapshot() ModemSnapshot {
 		PrimarySIMSlot: m.PrimarySimSlot,
 		SIM:            cloneSIM(m, m.Sim),
 		SIMSlots:       slices.Clone(m.SimSlots),
+		Slots:          cloneSIMSlots(m),
 		Number:         m.Number,
+		AirplaneMode:   m.airplaneMode,
+		Registration:   m.registration,
+		Access:         slices.Clone(m.access),
+		OperatorName:   m.operatorName,
+		OperatorCode:   m.operatorCode,
+		SignalQuality:  m.signal,
+		StatusKnown:    m.statusKnown,
 	}
+}
+
+func cloneSIMSlots(m *Modem) []*SIM {
+	if len(m.SimSlots) == 0 {
+		if m.Sim == nil {
+			return nil
+		}
+		return []*SIM{cloneSIM(m, m.Sim)}
+	}
+	slots := make([]*SIM, 0, len(m.SimSlots))
+	for _, slot := range m.SimSlots {
+		sim := cloneSIM(m, m.slotSIMs[slot])
+		if sim == nil && m.Sim != nil && (m.Sim.Slot == slot || (m.Sim.Slot == 0 && m.PrimarySimSlot == slot)) {
+			sim = cloneSIM(m, m.Sim)
+		}
+		if sim == nil {
+			sim = &SIM{modem: m, Slot: slot, Active: slot == m.PrimarySimSlot}
+		}
+		slots = append(slots, sim)
+	}
+	return slots
 }
 
 func cloneSIM(m *Modem, sim *SIM) *SIM {
@@ -99,6 +144,13 @@ func (m *Modem) applyStatus(status wwanmodem.Status) {
 	}
 	m.runtimeMu.Lock()
 	m.State = legacyModemState(status)
+	m.airplaneMode = status.Power == wwanmodem.PowerStateOff || status.Power == wwanmodem.PowerStateLow
+	m.registration = legacyRegistration(status.Registration)
+	m.access = accessTechnologies(status.Technology)
+	m.operatorName = strings.TrimSpace(status.OperatorName)
+	m.operatorCode = strings.TrimSpace(status.OperatorID)
+	m.signal = uint32(status.SignalQuality)
+	m.statusKnown = true
 	if status.SIM == wwanmodem.SIMStateLocked {
 		m.UnlockRequired = ModemLockSimPin
 	} else if status.SIM != wwanmodem.SIMStateUnknown {
@@ -113,7 +165,19 @@ func (m *Modem) applySIMInfo(info wwanmodem.SIMInfo) {
 	}
 	m.runtimeMu.Lock()
 	m.PrimarySimSlot = uint32(info.Slot)
+	for _, sim := range m.slotSIMs {
+		if sim != nil {
+			sim.Active = false
+		}
+	}
 	m.Sim = simFromInfo(m, info)
+	if m.PrimarySimSlot != 0 {
+		if m.slotSIMs == nil {
+			m.slotSIMs = make(map[uint32]*SIM)
+		}
+		m.slotSIMs[m.PrimarySimSlot] = cloneSIM(m, m.Sim)
+	}
+	m.Number = ""
 	if len(info.OwnNumbers) > 0 {
 		if number := strings.TrimSpace(info.OwnNumbers[0]); number != "" {
 			m.Number = number
@@ -135,28 +199,54 @@ func (m *Modem) applySIMSlots(slots []wwanmodem.SIMSlot) {
 	if m == nil {
 		return
 	}
+	m.runtimeMu.Lock()
+	defer m.runtimeMu.Unlock()
+
 	values := make([]uint32, 0, len(slots))
+	known := make(map[uint32]*SIM, len(slots))
 	var active uint32
 	for _, slot := range slots {
 		if slot.Index == 0 {
 			continue
 		}
-		values = append(values, uint32(slot.Index))
+		index := uint32(slot.Index)
+		values = append(values, index)
 		if slot.Active {
-			active = uint32(slot.Index)
+			active = index
 		}
+
+		identifier := strings.TrimSpace(slot.ICCID)
+		cached := m.slotSIMs[index]
+		if slot.Active && m.Sim != nil &&
+			(m.Sim.Slot == index || (m.Sim.Slot == 0 && m.PrimarySimSlot == index) || (identifier != "" && m.Sim.Identifier == identifier)) {
+			cached = m.Sim
+		}
+		if cached == nil || (identifier != "" && cached.Identifier != "" && cached.Identifier != identifier) {
+			cached = &SIM{modem: m, Slot: index}
+		} else {
+			cached = cloneSIM(m, cached)
+		}
+		cached.Slot = index
+		cached.Active = slot.Active
+		if identifier != "" {
+			cached.Identifier = identifier
+		}
+		if eid := strings.TrimSpace(slot.EID); eid != "" {
+			cached.Eid = eid
+		}
+		known[index] = cached
 	}
 	slices.Sort(values)
 	values = slices.Compact(values)
-	m.runtimeMu.Lock()
 	m.SimSlots = values
 	if active != 0 {
 		m.PrimarySimSlot = active
 	}
 	if len(m.SimSlots) == 0 && m.PrimarySimSlot != 0 {
 		m.SimSlots = []uint32{m.PrimarySimSlot}
+		known[m.PrimarySimSlot] = cloneSIM(m, m.Sim)
 	}
-	m.runtimeMu.Unlock()
+	m.slotSIMs = known
 }
 
 func (m *Modem) startRuntimeWatchers(parent context.Context) {

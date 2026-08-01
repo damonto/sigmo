@@ -3,6 +3,7 @@ package modem
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	wwanmodem "github.com/damonto/wwan-go/modem"
@@ -97,5 +98,110 @@ func TestProfileIDUsesCachedSIMWithoutTransport(t *testing.T) {
 func TestConsumeModemStreamRejectsNilStream(t *testing.T) {
 	if err := consumeModemStream[int](context.Background(), nil, func(int) {}); err == nil {
 		t.Fatal("consumeModemStream() error = nil, want nil stream error")
+	}
+}
+
+func TestApplyStatusCachesOverview(t *testing.T) {
+	m := new(Modem)
+	m.applyStatus(wwanmodem.Status{
+		Power:         wwanmodem.PowerStateLow,
+		SIM:           wwanmodem.SIMStateReady,
+		Registration:  wwanmodem.RegistrationRoaming,
+		Technology:    wwanmodem.TechnologyLTE | wwanmodem.TechnologyNR5GNSA,
+		OperatorID:    " 46001 ",
+		OperatorName:  " China Unicom ",
+		SignalQuality: 78,
+	})
+
+	snapshot := m.Snapshot()
+	if snapshot.State != ModemStateDisabled {
+		t.Fatalf("state = %v, want %v", snapshot.State, ModemStateDisabled)
+	}
+	if !snapshot.AirplaneMode {
+		t.Fatal("airplane mode = false, want true")
+	}
+	if snapshot.Registration != Modem3GPPRegistrationStateRoaming {
+		t.Fatalf("registration = %v, want %v", snapshot.Registration, Modem3GPPRegistrationStateRoaming)
+	}
+	if !slices.Contains(snapshot.Access, ModemAccessTechnologyLte) || !slices.Contains(snapshot.Access, ModemAccessTechnology5GNR) {
+		t.Fatalf("access technologies = %v, want LTE and 5G NR", snapshot.Access)
+	}
+	if snapshot.OperatorCode != "46001" || snapshot.OperatorName != "China Unicom" {
+		t.Fatalf("operator = %q %q", snapshot.OperatorCode, snapshot.OperatorName)
+	}
+	if snapshot.SignalQuality != 78 {
+		t.Fatalf("signal quality = %d, want 78", snapshot.SignalQuality)
+	}
+}
+
+func TestApplySIMSlotsCachesIdentity(t *testing.T) {
+	m := new(Modem)
+	m.applySIMInfo(wwanmodem.SIMInfo{
+		Slot:         1,
+		ICCID:        "8901000000000000001",
+		OperatorID:   "46001",
+		OperatorName: "China Unicom",
+		ATR:          []byte{0x3b, 0x00},
+	})
+	m.applySIMSlots([]wwanmodem.SIMSlot{
+		{Index: 2, ICCID: "8901000000000000002"},
+		{Index: 1, Active: true, ICCID: "8901000000000000001"},
+	})
+
+	snapshot := m.Snapshot()
+	if len(snapshot.Slots) != 2 {
+		t.Fatalf("slot count = %d, want 2", len(snapshot.Slots))
+	}
+	if snapshot.Slots[0].Slot != 1 || !snapshot.Slots[0].Active {
+		t.Fatalf("first slot = %+v, want active slot 1", snapshot.Slots[0])
+	}
+	if snapshot.Slots[0].OperatorIdentifier != "46001" {
+		t.Fatalf("active slot operator = %q, want 46001", snapshot.Slots[0].OperatorIdentifier)
+	}
+	if snapshot.Slots[1].Slot != 2 || snapshot.Slots[1].Identifier != "8901000000000000002" {
+		t.Fatalf("second slot = %+v", snapshot.Slots[1])
+	}
+
+	snapshot.Slots[0].ATR[0] = 0
+	if got := m.Snapshot().Slots[0].ATR[0]; got != 0x3b {
+		t.Fatalf("cached ATR was mutated through snapshot: %x", got)
+	}
+}
+
+func TestApplySIMSlotsDoesNotMoveIdentityBetweenSlots(t *testing.T) {
+	m := new(Modem)
+	m.applySIMInfo(wwanmodem.SIMInfo{
+		Slot:         1,
+		ICCID:        "8901000000000000001",
+		OperatorID:   "46001",
+		OperatorName: "China Unicom",
+		OwnNumbers:   []string{"+8613800000000"},
+	})
+	m.applySIMSlots([]wwanmodem.SIMSlot{
+		{Index: 1},
+		{Index: 2, Active: true},
+	})
+
+	snapshot := m.Snapshot()
+	if snapshot.PrimarySIMSlot != 2 {
+		t.Fatalf("primary slot = %d, want 2", snapshot.PrimarySIMSlot)
+	}
+	if snapshot.Slots[0].Identifier != "8901000000000000001" || snapshot.Slots[0].Active {
+		t.Fatalf("slot one = %+v, want the inactive cached SIM", snapshot.Slots[0])
+	}
+	if snapshot.Slots[1].Identifier != "" || snapshot.Slots[1].OperatorIdentifier != "" {
+		t.Fatalf("slot two inherited the old SIM identity: %+v", snapshot.Slots[1])
+	}
+
+	m.applySIMInfo(wwanmodem.SIMInfo{Slot: 2, ICCID: "8901000000000000002"})
+	snapshot = m.Snapshot()
+	if snapshot.Number != "" {
+		t.Fatalf("number = %q, want stale number cleared", snapshot.Number)
+	}
+	if snapshot.Slots[0].Active || !snapshot.Slots[1].Active {
+		t.Fatalf("slot activity = %+v", snapshot.Slots)
+	}
+	if snapshot.Slots[1].Identifier != "8901000000000000002" {
+		t.Fatalf("slot two identifier = %q", snapshot.Slots[1].Identifier)
 	}
 }

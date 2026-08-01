@@ -2,7 +2,6 @@ package modem
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -14,7 +13,6 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/carrier"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
@@ -70,9 +68,9 @@ func (c *catalog) buildListResponse(ctx context.Context, devices []*mmodem.Modem
 	return response, nil
 }
 
-// buildBasicResponse keeps a physically present modem visible when one of its
-// live SIM or network queries is temporarily unavailable. Device presence is
-// owned by the Registry, not inferred from network registration.
+// buildBasicResponse keeps a physically present modem visible when an
+// optional overview extension cannot be rendered. Device presence is owned
+// by the Registry, while volatile modem data comes from its runtime snapshot.
 func (c *catalog) buildBasicResponse(device *mmodem.Modem) *ModemResponse {
 	snapshot := device.Snapshot()
 	currentSettings := c.store.Snapshot()
@@ -91,24 +89,18 @@ func (c *catalog) buildBasicResponse(device *mmodem.Modem) *ModemResponse {
 		State:            modemStateValue(snapshot.State),
 		UnlockRequired:   snapshot.UnlockRequired.String(),
 		UnlockSupported:  unlockSupported(device),
-		Slots:            []SlotResponse{},
+		SIM:              slotResponse(snapshot.SIM),
+		Slots:            slotResponses(snapshot.Slots),
+		AirplaneMode:     snapshot.AirplaneMode,
+		SignalQuality:    snapshot.SignalQuality,
 	}
-	if snapshot.State == mmodem.ModemStateSearching {
+	if snapshot.StatusKnown && !snapshot.AirplaneMode {
+		resp.AccessTechnology = accessTechnologyString(snapshot.Access)
+		resp.RegistrationState = snapshot.Registration.String()
+		resp.RegisteredOperator = RegisteredOperatorResponse{Name: snapshot.OperatorName, Code: snapshot.OperatorCode}
+	}
+	if snapshot.State == mmodem.ModemStateSearching && (!snapshot.StatusKnown || snapshot.Registration == mmodem.Modem3GPPRegistrationStateUnknown) {
 		resp.RegistrationState = mmodem.Modem3GPPRegistrationStateSearching.String()
-	}
-	if snapshot.SIM != nil {
-		carrierInfo := carrier.Lookup(snapshot.SIM.OperatorIdentifier)
-		operatorName := carrierInfo.Name
-		if snapshot.SIM.OperatorName != "" {
-			operatorName = snapshot.SIM.OperatorName
-		}
-		resp.SIM = SlotResponse{
-			Active:             snapshot.SIM.Active,
-			OperatorName:       operatorName,
-			OperatorIdentifier: snapshot.SIM.OperatorIdentifier,
-			RegionCode:         carrierInfo.Region,
-			Identifier:         snapshot.SIM.Identifier,
-		}
 	}
 	supportsEsim, err := mmodem.SupportsEUICC(device)
 	if err != nil {
@@ -128,62 +120,18 @@ func (c *catalog) Get(ctx context.Context, modem *mmodem.Modem) (*ModemResponse,
 }
 
 func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*ModemResponse, error) {
-	if device.Snapshot().State == mmodem.ModemStateLocked {
+	snapshot := device.Snapshot()
+	if snapshot.State == mmodem.ModemStateLocked {
 		return c.buildLockedResponse(ctx, device)
 	}
 
-	sim, err := device.SIMs().Primary(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetch primary SIM: %w", err)
-	}
-
-	airplaneMode, err := readAirplaneMode(ctx, device)
-	if err != nil {
-		return nil, fmt.Errorf("read airplane mode: %w", err)
-	}
-
-	var percent uint32
-	var access []mmodem.ModemAccessTechnology
-	var registrationState string
-	var registeredOperatorName string
-	var operatorCode string
-	if !airplaneMode {
-		percent, _, err = device.SignalQuality(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("fetch signal quality: %w", err)
-		}
-
-		access, err = device.AccessTechnologies(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("fetch access technologies: %w", err)
-		}
-
-		threeGpp := device.ThreeGPP()
-		currentRegistrationState, err := threeGpp.RegistrationState(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("fetch registration state: %w", err)
-		}
-		registrationState = currentRegistrationState.String()
-
-		registeredOperatorName, err = threeGpp.OperatorName(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("fetch operator name: %w", err)
-		}
-
-		operatorCode, err = threeGpp.OperatorCode(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("fetch operator code: %w", err)
-		}
-	}
-
-	carrierInfo := carrier.Lookup(sim.OperatorIdentifier)
 	currentSettings := c.store.Snapshot()
 	supportsEsim, err := mmodem.SupportsEUICC(device)
 	if err != nil {
 		return nil, fmt.Errorf("detect eSIM support: %w", err)
 	}
 
-	simSlots, err := c.buildSlotsResponse(ctx, device)
+	simSlots, err := c.buildSlotsResponse(ctx, snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("fetch SIM slots: %w", err)
 	}
@@ -193,41 +141,45 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 	if alias != "" {
 		name = alias
 	}
-	simOperatorName := carrierInfo.Name
-	if sim.OperatorName != "" {
-		simOperatorName = sim.OperatorName
+	sim := slotResponse(snapshot.SIM)
+	registrationState := ""
+	if snapshot.StatusKnown {
+		registrationState = snapshot.Registration.String()
+	} else if snapshot.State == mmodem.ModemStateSearching {
+		registrationState = mmodem.Modem3GPPRegistrationStateSearching.String()
 	}
-	snapshot := device.Snapshot()
 	resp := &ModemResponse{
-		Manufacturer:     device.Manufacturer,
-		ID:               device.EquipmentIdentifier,
-		FirmwareRevision: device.FirmwareRevision,
-		HardwareRevision: device.HardwareRevision,
-		Name:             name,
-		Number:           snapshot.Number,
-		State:            modemStateValue(snapshot.State),
-		UnlockRequired:   snapshot.UnlockRequired.String(),
-		UnlockSupported:  unlockSupported(device),
-		SIM: SlotResponse{
-			Active:             sim.Active,
-			OperatorName:       simOperatorName,
-			OperatorIdentifier: sim.OperatorIdentifier,
-			RegionCode:         carrierInfo.Region,
-			Identifier:         sim.Identifier,
-		},
+		Manufacturer:      device.Manufacturer,
+		ID:                device.EquipmentIdentifier,
+		FirmwareRevision:  device.FirmwareRevision,
+		HardwareRevision:  device.HardwareRevision,
+		Name:              name,
+		Number:            snapshot.Number,
+		State:             modemStateValue(snapshot.State),
+		UnlockRequired:    snapshot.UnlockRequired.String(),
+		UnlockSupported:   unlockSupported(device),
+		SIM:               sim,
 		Slots:             simSlots,
-		AccessTechnology:  accessTechnologyString(access),
+		AccessTechnology:  accessTechnologyString(snapshot.Access),
 		RegistrationState: registrationState,
 		RegisteredOperator: RegisteredOperatorResponse{
-			Name: registeredOperatorName,
-			Code: operatorCode,
+			Name: snapshot.OperatorName,
+			Code: snapshot.OperatorCode,
 		},
-		SignalQuality: percent,
-		AirplaneMode:  airplaneMode,
+		SignalQuality: snapshot.SignalQuality,
+		AirplaneMode:  snapshot.AirplaneMode,
 		SupportsEsim:  supportsEsim,
 	}
+	if snapshot.AirplaneMode || !snapshot.StatusKnown {
+		resp.AccessTechnology = ""
+		if snapshot.AirplaneMode {
+			resp.RegistrationState = ""
+		}
+		resp.RegisteredOperator = RegisteredOperatorResponse{}
+		resp.SignalQuality = 0
+	}
 	c.applyInternetStatus(ctx, device, resp)
-	if resp.SIM.Reminder, err = c.reminderDetails(ctx, sim.Identifier); err != nil {
+	if resp.SIM.Reminder, err = c.reminderDetails(ctx, resp.SIM.Identifier); err != nil {
 		return nil, fmt.Errorf("read primary SIM reminder: %w", err)
 	}
 	if err := c.applyOverviewExtensions(ctx, device, resp); err != nil {
@@ -256,10 +208,6 @@ func (c *catalog) buildLockedResponse(ctx context.Context, device *mmodem.Modem)
 	if alias != "" {
 		name = alias
 	}
-	airplaneMode, err := readAirplaneMode(ctx, device)
-	if err != nil {
-		slog.Warn("read airplane mode for locked modem", "imei", device.EquipmentIdentifier, "error", err)
-	}
 	supportsEsim, err := mmodem.SupportsEUICC(device)
 	if err != nil {
 		slog.Warn("detect eSIM support for locked modem", "imei", device.EquipmentIdentifier, "error", err)
@@ -274,7 +222,7 @@ func (c *catalog) buildLockedResponse(ctx context.Context, device *mmodem.Modem)
 		State:            modemStateValue(snapshot.State),
 		UnlockRequired:   snapshot.UnlockRequired.String(),
 		UnlockSupported:  unlockSupported(device),
-		AirplaneMode:     airplaneMode,
+		AirplaneMode:     snapshot.AirplaneMode,
 		SupportsEsim:     supportsEsim,
 		Slots:            []SlotResponse{},
 	}, nil
@@ -318,35 +266,51 @@ func unlockSupported(device *mmodem.Modem) bool {
 	return snapshot.State == mmodem.ModemStateLocked && snapshot.UnlockRequired == mmodem.ModemLockSimPin
 }
 
-func (c *catalog) buildSlotsResponse(ctx context.Context, device *mmodem.Modem) ([]SlotResponse, error) {
-	slots := device.Snapshot().SIMSlots
+func (c *catalog) buildSlotsResponse(ctx context.Context, snapshot mmodem.ModemSnapshot) ([]SlotResponse, error) {
+	slots := snapshot.Slots
 	if len(slots) == 0 {
 		return []SlotResponse{}, nil
 	}
 	simSlots := make([]SlotResponse, 0, len(slots))
-	for _, slotPath := range slots {
-		sim, err := device.SIMs().Get(ctx, slotPath)
-		if err != nil {
-			return nil, fmt.Errorf("fetch SIM for slot %d: %w", slotPath, err)
-		}
-		carrierInfo := carrier.Lookup(sim.OperatorIdentifier)
-		operatorName := carrierInfo.Name
-		if sim.OperatorName != "" {
-			operatorName = sim.OperatorName
-		}
-		simSlots = append(simSlots, SlotResponse{
-			Active:             sim.Active,
-			OperatorName:       operatorName,
-			OperatorIdentifier: sim.OperatorIdentifier,
-			RegionCode:         carrierInfo.Region,
-			Identifier:         sim.Identifier,
-		})
+	for _, sim := range slots {
+		simSlots = append(simSlots, slotResponse(sim))
 		current := &simSlots[len(simSlots)-1]
-		if current.Reminder, err = c.reminderDetails(ctx, sim.Identifier); err != nil {
-			return nil, fmt.Errorf("read SIM reminder for slot %d: %w", slotPath, err)
+		reminderDetails, err := c.reminderDetails(ctx, sim.Identifier)
+		if err != nil {
+			return nil, fmt.Errorf("read SIM reminder for slot %d: %w", sim.Slot, err)
 		}
+		current.Reminder = reminderDetails
 	}
 	return simSlots, nil
+}
+
+func slotResponses(sims []*mmodem.SIM) []SlotResponse {
+	if len(sims) == 0 {
+		return []SlotResponse{}
+	}
+	result := make([]SlotResponse, 0, len(sims))
+	for _, sim := range sims {
+		result = append(result, slotResponse(sim))
+	}
+	return result
+}
+
+func slotResponse(sim *mmodem.SIM) SlotResponse {
+	if sim == nil {
+		return SlotResponse{}
+	}
+	carrierInfo := carrier.Lookup(sim.OperatorIdentifier)
+	operatorName := carrierInfo.Name
+	if sim.OperatorName != "" {
+		operatorName = sim.OperatorName
+	}
+	return SlotResponse{
+		Active:             sim.Active,
+		OperatorName:       operatorName,
+		OperatorIdentifier: sim.OperatorIdentifier,
+		RegionCode:         carrierInfo.Region,
+		Identifier:         sim.Identifier,
+	}
 }
 
 func (c *catalog) reminderDetails(ctx context.Context, profileID string) (*reminder.Details, error) {
@@ -371,17 +335,6 @@ func (c *catalog) applyOverviewExtensions(ctx context.Context, device *mmodem.Mo
 		}
 	}
 	return nil
-}
-
-func readAirplaneMode(ctx context.Context, m *mmodem.Modem) (bool, error) {
-	device, err := mmodem.OpenDevice(m)
-	if errors.Is(err, wwan.ErrUnsupported) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return device.AirplaneMode(ctx)
 }
 
 func accessTechnologyString(access []mmodem.ModemAccessTechnology) string {

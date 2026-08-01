@@ -165,6 +165,36 @@ func TestCatalogBuildResponseLockedModem(t *testing.T) {
 	}
 }
 
+func TestCatalogBuildResponseUsesCachedSIMWithoutTransport(t *testing.T) {
+	catalog := newCatalog(settings.NewMemoryStore(settings.Default()), nil)
+	device := &mmodem.Modem{
+		EquipmentIdentifier: "866069053507297",
+		Manufacturer:        "Qualcomm",
+		Model:               "Cached modem",
+		State:               mmodem.ModemStateRegistered,
+		PrimarySimSlot:      1,
+		SimSlots:            []uint32{1},
+		Sim: &mmodem.SIM{
+			Slot:               1,
+			Active:             true,
+			Identifier:         "8944000000000000000",
+			OperatorIdentifier: "23433",
+			OperatorName:       "EE",
+		},
+	}
+
+	got, err := catalog.buildResponse(t.Context(), device)
+	if err != nil {
+		t.Fatalf("buildResponse() error = %v", err)
+	}
+	if got.SIM.Identifier != device.Sim.Identifier {
+		t.Fatalf("primary SIM identifier = %q, want %q", got.SIM.Identifier, device.Sim.Identifier)
+	}
+	if len(got.Slots) != 1 || got.Slots[0].Identifier != device.Sim.Identifier {
+		t.Fatalf("slots = %+v, want cached primary SIM", got.Slots)
+	}
+}
+
 func TestCatalogApplyOverviewExtensions(t *testing.T) {
 	errStatus := errors.New("status source")
 	tests := []struct {
