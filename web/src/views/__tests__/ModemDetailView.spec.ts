@@ -251,6 +251,7 @@ vi.mock('@/composables/useModemMsisdn', async () => {
 const lockedModem = (supportsEsim = false): Modem => ({
   manufacturer: 'Quectel',
   id: 'modem-1',
+  primaryPort: '/dev/cdc-wdm0',
   firmwareRevision: '1',
   hardwareRevision: '1',
   name: 'RM520N',

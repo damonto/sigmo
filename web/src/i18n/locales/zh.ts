@@ -420,6 +420,7 @@ const zh = {
       manufacturer: '模块生产厂商',
       firmwareRevision: '固件版本',
       hardwareRevision: '硬件版本',
+      controlDevice: '控制设备',
       carrier: '运营商',
       roamingCarrier: '漫游运营商',
       signal: '信号强度',

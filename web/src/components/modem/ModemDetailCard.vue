@@ -42,6 +42,12 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
           <span class="text-muted-foreground">ID</span>
           <span class="font-mono">{{ modem.id }}</span>
         </div>
+        <div class="flex items-center justify-between gap-4">
+          <span class="text-muted-foreground">
+            {{ t('modemDetail.fields.controlDevice') }}
+          </span>
+          <span class="break-all text-right font-mono">{{ modem.primaryPort }}</span>
+        </div>
         <div class="flex justify-between">
           <span class="text-muted-foreground">Name</span>
           <span>{{ modem.name }}</span>

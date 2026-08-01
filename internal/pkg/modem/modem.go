@@ -12,6 +12,7 @@ import (
 
 	"github.com/damonto/wwan-go/cdcwdm"
 	wwanmodem "github.com/damonto/wwan-go/modem"
+	"github.com/damonto/wwan-go/qcom"
 	qmitransport "github.com/damonto/wwan-go/qcom/qmi"
 )
 
@@ -321,6 +322,9 @@ func (m *Modem) reportTerminalRuntimeError(err error) bool {
 
 func isTerminalRuntimeError(err error) bool {
 	if errors.Is(err, cdcwdm.ErrDisconnected) {
+		return true
+	}
+	if errors.Is(err, qcom.QMIErrorClientIdsExhausted) {
 		return true
 	}
 	var transportErr *qmitransport.TransportError

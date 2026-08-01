@@ -82,6 +82,7 @@ func (c *catalog) buildBasicResponse(device *mmodem.Modem) *ModemResponse {
 	resp := &ModemResponse{
 		Manufacturer:     device.Manufacturer,
 		ID:               device.EquipmentIdentifier,
+		PrimaryPort:      device.PrimaryPort,
 		FirmwareRevision: device.FirmwareRevision,
 		HardwareRevision: device.HardwareRevision,
 		Name:             name,
@@ -151,6 +152,7 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 	resp := &ModemResponse{
 		Manufacturer:      device.Manufacturer,
 		ID:                device.EquipmentIdentifier,
+		PrimaryPort:       device.PrimaryPort,
 		FirmwareRevision:  device.FirmwareRevision,
 		HardwareRevision:  device.HardwareRevision,
 		Name:              name,
@@ -215,6 +217,7 @@ func (c *catalog) buildLockedResponse(ctx context.Context, device *mmodem.Modem)
 	return &ModemResponse{
 		Manufacturer:     device.Manufacturer,
 		ID:               device.EquipmentIdentifier,
+		PrimaryPort:      device.PrimaryPort,
 		FirmwareRevision: device.FirmwareRevision,
 		HardwareRevision: device.HardwareRevision,
 		Name:             name,

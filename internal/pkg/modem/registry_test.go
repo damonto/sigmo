@@ -10,6 +10,7 @@ import (
 	"time"
 
 	wwanmodem "github.com/damonto/wwan-go/modem"
+	"github.com/damonto/wwan-go/qcom"
 )
 
 func TestRegistryReplacesAndRemovesPhysicalDeviceGeneration(t *testing.T) {
@@ -188,6 +189,295 @@ func TestRegistryRecoversCurrentGenerationAfterTransportFailure(t *testing.T) {
 			registry.handleModemFailure(context.Background(), failure)
 			if openCalls != 1 || registry.modems[key] != replacement {
 				t.Fatal("stale generation failure replaced the current modem")
+			}
+		})
+	}
+}
+
+func TestRegistryBoundsClientIDExhaustionRecovery(t *testing.T) {
+	tests := []struct {
+		name              string
+		reconnectByEvents bool
+	}{
+		{name: "device events", reconnectByEvents: true},
+		{name: "discovery snapshot"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
+			key := physicalDeviceKey(device)
+			initial := &Modem{
+				deviceInfo:          device,
+				deviceKey:           key,
+				generation:          1,
+				EquipmentIdentifier: "imei-1",
+				PrimaryPort:         controlPortPath(device),
+			}
+			openCalls := 0
+			devicePresent := true
+			registry := &Registry{
+				modems:         map[string]*Modem{key: initial},
+				nextGeneration: 1,
+				discover: func(context.Context) ([]wwanmodem.Device, error) {
+					if !devicePresent {
+						return nil, nil
+					}
+					return []wwanmodem.Device{device}, nil
+				},
+				open: func(_ context.Context, candidate wwanmodem.Device, generation uint64) (*Modem, error) {
+					openCalls++
+					return &Modem{
+						deviceInfo:          candidate,
+						deviceKey:           physicalDeviceKey(candidate),
+						generation:          generation,
+						EquipmentIdentifier: "imei-1",
+						PrimaryPort:         controlPortPath(candidate),
+					}, nil
+				},
+			}
+			exhausted := func(modem *Modem) modemFailure {
+				return modemFailure{modem: modem, err: errors.Join(errors.New("read serving system"), qcom.QMIErrorClientIdsExhausted)}
+			}
+
+			registry.handleModemFailure(context.Background(), exhausted(initial))
+			replacement := registry.modems[key]
+			if replacement == nil || replacement == initial {
+				t.Fatalf("replacement = %+v, want one coordinated recovery", replacement)
+			}
+			if openCalls != 1 || registry.cidRecoveryState(key) != cidRecoveryRetried {
+				t.Fatalf("open calls = %d, recovery state = %d, want 1 and retried", openCalls, registry.cidRecoveryState(key))
+			}
+
+			registry.handleModemFailure(context.Background(), modemFailure{
+				modem: replacement,
+				err:   errors.New("terminal transport error"),
+			})
+			replacement = registry.modems[key]
+			if replacement == nil {
+				t.Fatal("ordinary transport failure did not recover the modem")
+			}
+			if openCalls != 2 || registry.cidRecoveryState(key) != cidRecoveryRetried {
+				t.Fatalf("open calls = %d, recovery state = %d, want 2 and retried", openCalls, registry.cidRecoveryState(key))
+			}
+
+			registry.handleModemFailure(context.Background(), exhausted(replacement))
+			if registry.modems[key] != nil {
+				t.Fatalf("modem = %+v, want suspended recovery", registry.modems[key])
+			}
+			if openCalls != 2 || registry.cidRecoveryState(key) != cidRecoverySuspended {
+				t.Fatalf("open calls = %d, recovery state = %d, want 2 and suspended", openCalls, registry.cidRecoveryState(key))
+			}
+
+			if err := registry.reconcile(context.Background()); err != nil {
+				t.Fatalf("reconcile() error = %v", err)
+			}
+			if openCalls != 2 || registry.modems[key] != nil {
+				t.Fatal("present device bypassed client ID recovery circuit")
+			}
+
+			if tt.reconnectByEvents {
+				registry.applyDeviceEvent(context.Background(), wwanmodem.DeviceEvent{Type: wwanmodem.DeviceRemoved, Device: device})
+				registry.applyDeviceEvent(context.Background(), wwanmodem.DeviceEvent{Type: wwanmodem.DeviceAdded, Device: device})
+			} else {
+				devicePresent = false
+				if err := registry.reconcile(context.Background()); err != nil {
+					t.Fatalf("reconcile() absent device error = %v", err)
+				}
+				devicePresent = true
+				if err := registry.reconcile(context.Background()); err != nil {
+					t.Fatalf("reconcile() reconnected device error = %v", err)
+				}
+			}
+			if openCalls != 3 || registry.modems[key] == nil {
+				t.Fatalf("open calls = %d, modem = %+v, want recovery after reconnect", openCalls, registry.modems[key])
+			}
+			if registry.cidRecoveryState(key) != cidRecoveryUnused {
+				t.Fatal("client ID recovery state remains set after reconnect")
+			}
+		})
+	}
+}
+
+func TestRegistryBoundsClientIDExhaustionForAddedDevice(t *testing.T) {
+	clientIDsExhausted := errors.Join(errors.New("open NAS client"), qcom.QMIErrorClientIdsExhausted)
+	tests := []struct {
+		name       string
+		openErrors []error
+		wantModem  bool
+		wantState  cidRecoveryState
+	}{
+		{
+			name:       "retry succeeds",
+			openErrors: []error{clientIDsExhausted, nil},
+			wantModem:  true,
+			wantState:  cidRecoveryRetried,
+		},
+		{
+			name:       "retry also exhausts client IDs",
+			openErrors: []error{clientIDsExhausted, clientIDsExhausted},
+			wantState:  cidRecoverySuspended,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
+			key := physicalDeviceKey(device)
+			openCalls := 0
+			registry := &Registry{
+				modems:            make(map[string]*Modem),
+				cidRecoveryStates: map[string]cidRecoveryState{key: cidRecoverySuspended},
+				open: func(_ context.Context, candidate wwanmodem.Device, generation uint64) (*Modem, error) {
+					if openCalls >= len(tt.openErrors) {
+						t.Fatalf("open calls exceed configured outcomes: %d", openCalls+1)
+					}
+					err := tt.openErrors[openCalls]
+					openCalls++
+					if err != nil {
+						return nil, err
+					}
+					return &Modem{
+						deviceInfo:          candidate,
+						deviceKey:           physicalDeviceKey(candidate),
+						generation:          generation,
+						EquipmentIdentifier: "imei-1",
+						PrimaryPort:         controlPortPath(candidate),
+					}, nil
+				},
+			}
+
+			registry.applyDeviceEvent(t.Context(), wwanmodem.DeviceEvent{
+				Type:   wwanmodem.DeviceAdded,
+				Device: device,
+			})
+
+			if openCalls != 2 {
+				t.Fatalf("open calls = %d, want 2", openCalls)
+			}
+			if got := registry.modems[key] != nil; got != tt.wantModem {
+				t.Fatalf("modem present = %t, want %t", got, tt.wantModem)
+			}
+			if got := registry.cidRecoveryState(key); got != tt.wantState {
+				t.Fatalf("recovery state = %d, want %d", got, tt.wantState)
+			}
+		})
+	}
+}
+
+func TestRegistrySuspendsWhenCIDRecoveryOpenAlsoExhausts(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "reopen returns client IDs exhausted"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
+			key := physicalDeviceKey(device)
+			initial := &Modem{
+				deviceInfo:          device,
+				deviceKey:           key,
+				generation:          1,
+				EquipmentIdentifier: "imei-1",
+				PrimaryPort:         controlPortPath(device),
+			}
+			openCalls := 0
+			registry := &Registry{
+				modems: map[string]*Modem{key: initial},
+				discover: func(context.Context) ([]wwanmodem.Device, error) {
+					return []wwanmodem.Device{device}, nil
+				},
+				open: func(context.Context, wwanmodem.Device, uint64) (*Modem, error) {
+					openCalls++
+					return nil, errors.Join(errors.New("open NAS client"), qcom.QMIErrorClientIdsExhausted)
+				},
+			}
+
+			registry.handleModemFailure(context.Background(), modemFailure{
+				modem: initial,
+				err:   errors.Join(errors.New("read serving system"), qcom.QMIErrorClientIdsExhausted),
+			})
+
+			if openCalls != 1 {
+				t.Fatalf("open calls = %d, want one coordinated reopen", openCalls)
+			}
+			if registry.modems[key] != nil {
+				t.Fatalf("modem = %+v, want recovery suspended", registry.modems[key])
+			}
+			if registry.cidRecoveryState(key) != cidRecoverySuspended {
+				t.Fatalf("recovery state = %d, want suspended", registry.cidRecoveryState(key))
+			}
+
+			if err := registry.reconcile(context.Background()); err != nil {
+				t.Fatalf("reconcile() error = %v", err)
+			}
+			if openCalls != 1 {
+				t.Fatalf("open calls = %d, suspended recovery retried again", openCalls)
+			}
+		})
+	}
+}
+
+func TestRegistryStartupHonorsCIDRecoverySuspension(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{name: "repeated startup while device watcher is unavailable"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
+			key := physicalDeviceKey(device)
+			devicePresent := true
+			openCalls := 0
+			watchErr := errors.New("device watcher unavailable")
+			registry, err := NewRegistry()
+			if err != nil {
+				t.Fatalf("NewRegistry() error = %v", err)
+			}
+			t.Cleanup(func() { _ = registry.Close() })
+			registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
+				if !devicePresent {
+					return nil, nil
+				}
+				return []wwanmodem.Device{device}, nil
+			}
+			registry.watchDevices = func(context.Context) (<-chan wwanmodem.Result[wwanmodem.DeviceEvent], error) {
+				return nil, watchErr
+			}
+			registry.open = func(context.Context, wwanmodem.Device, uint64) (*Modem, error) {
+				openCalls++
+				return nil, errors.Join(errors.New("open NAS client"), qcom.QMIErrorClientIdsExhausted)
+			}
+
+			steps := []struct {
+				name         string
+				present      bool
+				wantCalls    int
+				wantRecovery cidRecoveryState
+			}{
+				{name: "first exhaustion", present: true, wantCalls: 1, wantRecovery: cidRecoveryRetried},
+				{name: "second exhaustion", present: true, wantCalls: 2, wantRecovery: cidRecoverySuspended},
+				{name: "suspended startup", present: true, wantCalls: 2, wantRecovery: cidRecoverySuspended},
+				{name: "observed absence", present: false, wantCalls: 2, wantRecovery: cidRecoveryUnused},
+				{name: "opening after reconnect", present: true, wantCalls: 3, wantRecovery: cidRecoveryRetried},
+			}
+			for _, step := range steps {
+				t.Run(step.name, func(t *testing.T) {
+					devicePresent = step.present
+					if err := registry.ensureStarted(t.Context()); !errors.Is(err, watchErr) {
+						t.Fatalf("ensureStarted() error = %v, want watcher error", err)
+					}
+					if openCalls != step.wantCalls {
+						t.Fatalf("open calls = %d, want %d", openCalls, step.wantCalls)
+					}
+					if got := registry.cidRecoveryState(key); got != step.wantRecovery {
+						t.Fatalf("recovery state = %d, want %d", got, step.wantRecovery)
+					}
+				})
 			}
 		})
 	}

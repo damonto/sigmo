@@ -18,6 +18,7 @@ export type RegisteredOperator = {
 export type ModemApiResponse = {
   manufacturer: string
   id: string
+  primaryPort: string
   firmwareRevision: string
   hardwareRevision: string
   name: string

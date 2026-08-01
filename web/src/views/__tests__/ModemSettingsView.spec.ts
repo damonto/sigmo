@@ -16,6 +16,7 @@ const harness = vi.hoisted(() => ({
 const modem: Modem = {
   manufacturer: 'Quectel',
   id: '869710031623444',
+  primaryPort: '/dev/cdc-wdm0',
   firmwareRevision: '1.0',
   hardwareRevision: 'A',
   name: 'RM520N',

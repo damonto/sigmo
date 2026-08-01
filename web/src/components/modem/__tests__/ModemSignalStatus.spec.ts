@@ -50,6 +50,7 @@ vi.mock('vue-i18n', () => ({
 const modem = (registrationState = 'Roaming'): Modem => ({
   manufacturer: 'Quectel',
   id: 'modem-1',
+  primaryPort: '/dev/cdc-wdm0',
   firmwareRevision: '1.0.0',
   hardwareRevision: '1.0',
   name: 'Modem 1',

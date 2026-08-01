@@ -42,6 +42,7 @@ type ModemResponse struct {
 
 	Manufacturer       string                     `json:"manufacturer" jsonschema:"modem manufacturer reported by the device"`
 	ID                 string                     `json:"id" jsonschema:"modem IMEI; use this exact value as modemId in other tools"`
+	PrimaryPort        string                     `json:"primaryPort" jsonschema:"control device path currently used by Sigmo, such as /dev/cdc-wdm0"`
 	FirmwareRevision   string                     `json:"firmwareRevision" jsonschema:"firmware revision reported by the modem"`
 	HardwareRevision   string                     `json:"hardwareRevision" jsonschema:"hardware revision reported by the modem"`
 	Name               string                     `json:"name" jsonschema:"configured modem alias, or the modem model when no alias is set"`

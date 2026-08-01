@@ -17,6 +17,7 @@ vi.mock('@/apis/modem', () => ({
 const modem = (id: string, regionCode = 'US'): Modem => ({
   manufacturer: 'Quectel',
   id,
+  primaryPort: '/dev/cdc-wdm0',
   firmwareRevision: '1',
   hardwareRevision: '1',
   name: id,

@@ -117,6 +117,31 @@ func TestCatalogBuildListResponseKeepsSearchingModemWhenLiveQueriesFail(t *testi
 	}
 }
 
+func TestCatalogBuildBasicResponseIncludesPrimaryPort(t *testing.T) {
+	tests := []struct {
+		name   string
+		device *mmodem.Modem
+	}{
+		{
+			name: "QMI control device",
+			device: &mmodem.Modem{
+				EquipmentIdentifier: "modem-1",
+				PrimaryPort:         "/dev/cdc-wdm0",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			catalog := newCatalog(settings.NewMemoryStore(settings.Default()), nil)
+			got := catalog.buildBasicResponse(tt.device)
+			if got.PrimaryPort != tt.device.PrimaryPort {
+				t.Fatalf("primary port = %q, want %q", got.PrimaryPort, tt.device.PrimaryPort)
+			}
+		})
+	}
+}
+
 func TestCatalogBuildResponseLockedModem(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -142,6 +167,7 @@ func TestCatalogBuildResponseLockedModem(t *testing.T) {
 			catalog := newCatalog(settings.NewMemoryStore(settings.Default()), nil)
 			device := &mmodem.Modem{
 				EquipmentIdentifier: "860588043408833",
+				PrimaryPort:         "/dev/cdc-wdm0",
 				Manufacturer:        "Quectel",
 				Model:               "RM520N",
 				State:               mmodem.ModemStateLocked,
@@ -161,6 +187,9 @@ func TestCatalogBuildResponseLockedModem(t *testing.T) {
 			if got.UnlockSupported != tt.wantSupported {
 				t.Fatalf("unlockSupported = %v, want %v", got.UnlockSupported, tt.wantSupported)
 			}
+			if got.PrimaryPort != device.PrimaryPort {
+				t.Fatalf("primary port = %q, want %q", got.PrimaryPort, device.PrimaryPort)
+			}
 		})
 	}
 }
@@ -169,6 +198,7 @@ func TestCatalogBuildResponseUsesCachedSIMWithoutTransport(t *testing.T) {
 	catalog := newCatalog(settings.NewMemoryStore(settings.Default()), nil)
 	device := &mmodem.Modem{
 		EquipmentIdentifier: "866069053507297",
+		PrimaryPort:         "/dev/cdc-wdm0",
 		Manufacturer:        "Qualcomm",
 		Model:               "Cached modem",
 		State:               mmodem.ModemStateRegistered,
@@ -192,6 +222,9 @@ func TestCatalogBuildResponseUsesCachedSIMWithoutTransport(t *testing.T) {
 	}
 	if len(got.Slots) != 1 || got.Slots[0].Identifier != device.Sim.Identifier {
 		t.Fatalf("slots = %+v, want cached primary SIM", got.Slots)
+	}
+	if got.PrimaryPort != device.PrimaryPort {
+		t.Fatalf("primary port = %q, want %q", got.PrimaryPort, device.PrimaryPort)
 	}
 }
 
@@ -322,6 +355,11 @@ func TestModemResponseJSONIncludesOverviewFields(t *testing.T) {
 				},
 			},
 			want: `"wifiCallingConnected":true`,
+		},
+		{
+			name: "primary port",
+			resp: ModemResponse{PrimaryPort: "/dev/cdc-wdm0"},
+			want: `"primaryPort":"/dev/cdc-wdm0"`,
 		},
 	}
 

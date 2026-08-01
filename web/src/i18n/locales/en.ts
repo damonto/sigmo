@@ -426,6 +426,7 @@ const en = {
       manufacturer: 'Manufacturer',
       firmwareRevision: 'Firmware Revision',
       hardwareRevision: 'Hardware Revision',
+      controlDevice: 'Control Device',
       carrier: 'Carrier',
       roamingCarrier: 'Roaming Carrier',
       signal: 'Signal Quality',

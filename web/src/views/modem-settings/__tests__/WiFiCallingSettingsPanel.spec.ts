@@ -65,6 +65,7 @@ const stubs = {
 const modem = (id: string, name: string, internetConnected = false): Modem => ({
   manufacturer: 'Example',
   id,
+  primaryPort: '/dev/cdc-wdm0',
   firmwareRevision: '1',
   hardwareRevision: '1',
   name,

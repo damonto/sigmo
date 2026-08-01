@@ -9,6 +9,7 @@ import (
 
 	"github.com/damonto/wwan-go/cdcwdm"
 	wwanmodem "github.com/damonto/wwan-go/modem"
+	"github.com/damonto/wwan-go/qcom"
 	qmitransport "github.com/damonto/wwan-go/qcom/qmi"
 )
 
@@ -112,6 +113,8 @@ func TestTerminalRuntimeError(t *testing.T) {
 	}{
 		{name: "cdc-wdm disconnect", err: fmt.Errorf("watch status: %w", cdcwdm.ErrDisconnected), want: true},
 		{name: "QMI terminal read", err: &qmitransport.TransportError{Err: errors.New("malformed QMUX frame")}, want: true},
+		{name: "QMI client IDs exhausted", err: fmt.Errorf("watch status: %w", qcom.QMIErrorClientIdsExhausted), want: true},
+		{name: "ordinary QMI service error", err: qcom.QMIErrorNoNetworkFound, want: false},
 		{name: "request canceled", err: context.Canceled, want: false},
 	}
 

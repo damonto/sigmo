@@ -27,6 +27,7 @@ const passthrough = {
 const modem: Modem = {
   manufacturer: 'Quectel',
   id: 'imei-1',
+  primaryPort: '/dev/cdc-wdm0',
   firmwareRevision: '1',
   hardwareRevision: '1',
   name: 'RM520N',
