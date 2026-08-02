@@ -2,7 +2,6 @@ package modem
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
@@ -53,14 +52,4 @@ func fakeDeviceOpener(t *testing.T, device deviceControl, openErr error) deviceC
 		}
 		return device, nil
 	}
-}
-
-func countCalls(calls []string, prefix string) int {
-	var count int
-	for _, call := range calls {
-		if strings.HasPrefix(call, prefix) {
-			count++
-		}
-	}
-	return count
 }

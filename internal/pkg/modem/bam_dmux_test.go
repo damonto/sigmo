@@ -7,7 +7,53 @@ import (
 	"testing"
 
 	"github.com/damonto/wwan-go/qcom"
+	"golang.org/x/sys/unix"
 )
+
+func TestSameDeviceStat(t *testing.T) {
+	tests := []struct {
+		name string
+		a    unix.Stat_t
+		b    unix.Stat_t
+		want bool
+	}{
+		{
+			name: "same filesystem object",
+			a:    unix.Stat_t{Dev: 1, Ino: 2, Mode: unix.S_IFREG},
+			b:    unix.Stat_t{Dev: 1, Ino: 2, Mode: unix.S_IFREG},
+			want: true,
+		},
+		{
+			name: "distinct regular files",
+			a:    unix.Stat_t{Dev: 1, Ino: 2, Mode: unix.S_IFREG},
+			b:    unix.Stat_t{Dev: 1, Ino: 3, Mode: unix.S_IFREG},
+		},
+		{
+			name: "character device aliases",
+			a:    unix.Stat_t{Dev: 1, Ino: 2, Mode: unix.S_IFCHR, Rdev: 9},
+			b:    unix.Stat_t{Dev: 1, Ino: 3, Mode: unix.S_IFCHR, Rdev: 9},
+			want: true,
+		},
+		{
+			name: "different character devices",
+			a:    unix.Stat_t{Dev: 1, Ino: 2, Mode: unix.S_IFCHR, Rdev: 9},
+			b:    unix.Stat_t{Dev: 1, Ino: 3, Mode: unix.S_IFCHR, Rdev: 10},
+		},
+		{
+			name: "different device types",
+			a:    unix.Stat_t{Dev: 1, Ino: 2, Mode: unix.S_IFCHR, Rdev: 9},
+			b:    unix.Stat_t{Dev: 1, Ino: 3, Mode: unix.S_IFBLK, Rdev: 9},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sameDeviceStat(tt.a, tt.b); got != tt.want {
+				t.Fatalf("sameDeviceStat() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestValidateQualcomm410LayoutChecksEveryEndpoint(t *testing.T) {
 	missingDevice := errors.New("missing device")

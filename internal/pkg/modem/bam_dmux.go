@@ -11,6 +11,7 @@ import (
 
 	"github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/wwan-go/qcom"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -35,17 +36,30 @@ var systemQualcomm410LayoutProbe = qualcomm410LayoutProbe{
 		_, err := net.InterfaceByName(name)
 		return err
 	},
-	sameDevice: func(a, b string) (bool, error) {
-		aInfo, err := os.Stat(a)
-		if err != nil {
-			return false, err
-		}
-		bInfo, err := os.Stat(b)
-		if err != nil {
-			return false, err
-		}
-		return os.SameFile(aInfo, bInfo), nil
-	},
+	sameDevice: sameDeviceNode,
+}
+
+func sameDeviceNode(a, b string) (bool, error) {
+	var aStat unix.Stat_t
+	if err := unix.Stat(a, &aStat); err != nil {
+		return false, fmt.Errorf("stat %s: %w", a, err)
+	}
+	var bStat unix.Stat_t
+	if err := unix.Stat(b, &bStat); err != nil {
+		return false, fmt.Errorf("stat %s: %w", b, err)
+	}
+	return sameDeviceStat(aStat, bStat), nil
+}
+
+func sameDeviceStat(a, b unix.Stat_t) bool {
+	if a.Dev == b.Dev && a.Ino == b.Ino {
+		return true
+	}
+	// Device aliases may be separate devtmpfs nodes. Their rdev still names
+	// the same kernel character or block device even when the inodes differ.
+	aType := a.Mode & unix.S_IFMT
+	bType := b.Mode & unix.S_IFMT
+	return aType == bType && (aType == unix.S_IFCHR || aType == unix.S_IFBLK) && a.Rdev == b.Rdev
 }
 
 // ValidateQualcomm410Layout verifies the fixed dual-QMI layout before either

@@ -3,6 +3,7 @@ package modem
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -658,21 +659,213 @@ func TestRegistryPublishesRemovedAndAddedForDifferentIMEIOnSameDevice(t *testing
 	}
 }
 
-func TestControlPortsPreferQMI(t *testing.T) {
-	device := wwanmodem.Device{Ports: []wwanmodem.Port{
-		{Type: wwanmodem.PortMBIM, Path: "/dev/wwan0mbim0"},
-		{Type: wwanmodem.PortNetwork, Name: "wwan0"},
-		{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi0"},
-		{Type: wwanmodem.PortQMI},
-	}}
-
-	got := controlPorts(device)
-	want := []wwanmodem.Port{
-		{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi0"},
-		{Type: wwanmodem.PortMBIM, Path: "/dev/wwan0mbim0"},
+func TestControlPorts(t *testing.T) {
+	data6 := wwanmodem.Port{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi0"}
+	data5 := wwanmodem.Port{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi1"}
+	stableData5 := wwanmodem.Port{Type: wwanmodem.PortQMI, Path: Qualcomm410InternetQMI}
+	mbim := wwanmodem.Port{Type: wwanmodem.PortMBIM, Path: "/dev/wwan0mbim0"}
+	tests := []struct {
+		name           string
+		device         wwanmodem.Device
+		matchPath      string
+		compareErr     error
+		probeForbidden bool
+		want           []wwanmodem.Port
+	}{
+		{
+			name: "generic device prefers QMI",
+			device: wwanmodem.Device{Ports: []wwanmodem.Port{
+				mbim,
+				{Type: wwanmodem.PortNetwork, Name: "wwan0"},
+				data6,
+				{Type: wwanmodem.PortQMI},
+			}},
+			probeForbidden: true,
+			want:           []wwanmodem.Port{data6, mbim},
+		},
+		{
+			name: "Qualcomm platform prefers stable DATA5 path",
+			device: wwanmodem.Device{Bus: wwanmodem.BusPlatform, Ports: []wwanmodem.Port{
+				data6,
+				stableData5,
+				mbim,
+			}},
+			probeForbidden: true,
+			want:           []wwanmodem.Port{stableData5, data6, mbim},
+		},
+		{
+			name: "Qualcomm platform resolves DATA5 alias",
+			device: wwanmodem.Device{Bus: wwanmodem.BusPlatform, Ports: []wwanmodem.Port{
+				data6,
+				data5,
+				mbim,
+			}},
+			matchPath: data5.Path,
+			want:      []wwanmodem.Port{data5, data6, mbim},
+		},
+		{
+			name: "Qualcomm platform keeps order when aliases cannot be compared",
+			device: wwanmodem.Device{Bus: wwanmodem.BusPlatform, Ports: []wwanmodem.Port{
+				data6,
+				data5,
+				mbim,
+			}},
+			compareErr: errors.New("stat DATA5"),
+			want:       []wwanmodem.Port{data6, data5, mbim},
+		},
 	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("controlPorts() = %+v, want %+v", got, want)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := controlPortsWithSameDevice(tt.device, func(stable, candidate string) (bool, error) {
+				if tt.probeForbidden {
+					t.Fatal("compared Qualcomm 410 nodes")
+				}
+				if stable != Qualcomm410InternetQMI {
+					t.Fatalf("stable path = %q, want %q", stable, Qualcomm410InternetQMI)
+				}
+				if tt.compareErr != nil {
+					return false, tt.compareErr
+				}
+				return candidate == tt.matchPath, nil
+			})
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("controlPortsWithSameDevice() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestControlPortsForOpenRetriesDATA5Resolution(t *testing.T) {
+	data6 := wwanmodem.Port{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi0"}
+	data5 := wwanmodem.Port{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi1"}
+	device := wwanmodem.Device{Bus: wwanmodem.BusPlatform, Ports: []wwanmodem.Port{data6, data5}}
+	tests := []struct {
+		name       string
+		initialErr error
+	}{
+		{name: "node is not ready", initialErr: os.ErrNotExist},
+		{name: "alias still points elsewhere"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			waits := 0
+			got, err := controlPortsForOpenWithResolver(context.Background(), device, controlPortResolver{
+				sameDevice: func(_, candidate string) (bool, error) {
+					if waits == 0 {
+						return false, tt.initialErr
+					}
+					return candidate == data5.Path, nil
+				},
+				wait: func(context.Context) error {
+					waits++
+					return nil
+				},
+			})
+			if err != nil {
+				t.Fatalf("controlPortsForOpenWithResolver() error = %v", err)
+			}
+			if want := []wwanmodem.Port{data5, data6}; !slices.Equal(got, want) {
+				t.Fatalf("controlPortsForOpenWithResolver() = %+v, want %+v", got, want)
+			}
+			if waits != 1 {
+				t.Fatalf("waits = %d, want 1", waits)
+			}
+		})
+	}
+}
+
+func TestControlPortsForOpenReturnsErrorAfterBoundedRetries(t *testing.T) {
+	data6 := wwanmodem.Port{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi0"}
+	data5 := wwanmodem.Port{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi1"}
+	device := wwanmodem.Device{Bus: wwanmodem.BusPlatform, Ports: []wwanmodem.Port{data6, data5}}
+	comparisons := 0
+	waits := 0
+
+	got, err := controlPortsForOpenWithResolver(context.Background(), device, controlPortResolver{
+		sameDevice: func(string, string) (bool, error) {
+			comparisons++
+			return false, os.ErrNotExist
+		},
+		wait: func(context.Context) error {
+			waits++
+			return nil
+		},
+	})
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("controlPortsForOpenWithResolver() error = %v, want os.ErrNotExist", err)
+	}
+	if want := []wwanmodem.Port{data6, data5}; !slices.Equal(got, want) {
+		t.Fatalf("controlPortsForOpenWithResolver() = %+v, want %+v", got, want)
+	}
+	if comparisons != qualcomm410ControlPortResolveAttempts*2 {
+		t.Fatalf("comparisons = %d, want %d", comparisons, qualcomm410ControlPortResolveAttempts*2)
+	}
+	if waits != qualcomm410ControlPortResolveAttempts-1 {
+		t.Fatalf("waits = %d, want %d", waits, qualcomm410ControlPortResolveAttempts-1)
+	}
+}
+
+func TestControlPortsForOpenHonorsContextCancellation(t *testing.T) {
+	data6 := wwanmodem.Port{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi0"}
+	data5 := wwanmodem.Port{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi1"}
+	device := wwanmodem.Device{Bus: wwanmodem.BusPlatform, Ports: []wwanmodem.Port{data6, data5}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	got, err := controlPortsForOpenWithResolver(ctx, device, controlPortResolver{
+		sameDevice: func(string, string) (bool, error) {
+			return false, os.ErrNotExist
+		},
+		wait: func(ctx context.Context) error {
+			return sleepContext(ctx, time.Hour)
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("controlPortsForOpenWithResolver() error = %v, want context.Canceled", err)
+	}
+	if want := []wwanmodem.Port{data6, data5}; !slices.Equal(got, want) {
+		t.Fatalf("controlPortsForOpenWithResolver() = %+v, want %+v", got, want)
+	}
+}
+
+func TestControlPortsForOpenSkipsUnambiguousDevices(t *testing.T) {
+	qmi0 := wwanmodem.Port{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi0"}
+	qmi1 := wwanmodem.Port{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi1"}
+	tests := []struct {
+		name   string
+		device wwanmodem.Device
+	}{
+		{
+			name:   "generic dual QMI device",
+			device: wwanmodem.Device{Bus: wwanmodem.BusUSB, Ports: []wwanmodem.Port{qmi0, qmi1}},
+		},
+		{
+			name:   "Qualcomm platform with one QMI port",
+			device: wwanmodem.Device{Bus: wwanmodem.BusPlatform, Ports: []wwanmodem.Port{qmi0}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := controlPortsForOpenWithResolver(context.Background(), tt.device, controlPortResolver{
+				sameDevice: func(string, string) (bool, error) {
+					t.Fatal("compared Qualcomm 410 nodes")
+					return false, nil
+				},
+				wait: func(context.Context) error {
+					t.Fatal("waited for Qualcomm 410 nodes")
+					return nil
+				},
+			})
+			if err != nil {
+				t.Fatalf("controlPortsForOpenWithResolver() error = %v", err)
+			}
+			if want := listedControlPorts(tt.device); !slices.Equal(got, want) {
+				t.Fatalf("controlPortsForOpenWithResolver() = %+v, want %+v", got, want)
+			}
+		})
 	}
 }
 
