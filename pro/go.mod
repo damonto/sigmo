@@ -7,7 +7,7 @@ require (
 	github.com/damonto/ims-go v0.0.0-20260731154559-1aa5fb5dfd33
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260731154436-985904b6ae4f
-	github.com/damonto/wwan-go v0.0.0-20260801151659-a7ba90405622
+	github.com/damonto/wwan-go v0.0.0-20260802033843-0907e3a4eb48
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.3.1
 	github.com/modelcontextprotocol/go-sdk v1.7.0
@@ -27,7 +27,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
 	github.com/ncruces/go-sqlite3 v0.35.2 // indirect
-	github.com/ncruces/go-sqlite3-wasm/v3 v3.2.35303 // indirect
+	github.com/ncruces/go-sqlite3-wasm/v3 v3.2.35304 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/nyaruka/phonenumbers v1.8.1 // indirect
 	github.com/pion/datachannel v1.6.2 // indirect

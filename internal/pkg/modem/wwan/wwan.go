@@ -150,7 +150,7 @@ func OpenSession(cfg Config) (*Session, error) {
 	var backend backend
 	switch cfg.PortType {
 	case PortTypeQMI:
-		backend = newQMISession(cfg.Device, cfg.Slot, cfg.IMEI)
+		backend = newQMISession(cfg)
 	case PortTypeMBIM:
 		backend = newMBIMDevice(cfg.Device, cfg.Slot)
 	default:

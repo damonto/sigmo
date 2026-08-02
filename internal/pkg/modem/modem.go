@@ -20,34 +20,35 @@ var ErrProfileIDMissing = errors.New("profile id is missing")
 
 // Modem is Sigmo's API adapter around one process-owned wwan-go modem.
 type Modem struct {
-	core         *wwanmodem.Modem
-	deviceInfo   wwanmodem.Device
-	deviceKey    string
-	generation   uint64
-	closeOnce    sync.Once
-	closeErr     error
-	watchOnce    sync.Once
-	watchCancel  context.CancelFunc
-	watchWG      sync.WaitGroup
-	failureOnce  sync.Once
-	onFailure    func(error)
-	runtimeMu    sync.RWMutex
-	simSlotOnce  sync.Once
-	simSlotToken chan struct{}
-	ussdMu       sync.RWMutex
-	ussd         wwanmodem.USSDMessage
-	smsMu        sync.RWMutex
-	smsStorage   wwanmodem.MessageStorage
-	bearerMu     sync.Mutex
-	bearers      map[uint64]*Bearer
-	slotSIMs     map[uint32]*SIM
-	airplaneMode bool
-	registration Modem3GPPRegistrationState
-	access       []ModemAccessTechnology
-	operatorName string
-	operatorCode string
-	signal       uint32
-	statusKnown  bool
+	core           *wwanmodem.Modem
+	deviceInfo     wwanmodem.Device
+	deviceKey      string
+	generation     uint64
+	closeOnce      sync.Once
+	closeErr       error
+	watchOnce      sync.Once
+	watchCancel    context.CancelFunc
+	watchWG        sync.WaitGroup
+	failureOnce    sync.Once
+	onFailure      func(error)
+	deviceSessions deviceSessionStore
+	runtimeMu      sync.RWMutex
+	simSlotOnce    sync.Once
+	simSlotToken   chan struct{}
+	ussdMu         sync.RWMutex
+	ussd           wwanmodem.USSDMessage
+	smsMu          sync.RWMutex
+	smsStorage     wwanmodem.MessageStorage
+	bearerMu       sync.Mutex
+	bearers        map[uint64]*Bearer
+	slotSIMs       map[uint32]*SIM
+	airplaneMode   bool
+	registration   Modem3GPPRegistrationState
+	access         []ModemAccessTechnology
+	operatorName   string
+	operatorCode   string
+	signal         uint32
+	statusKnown    bool
 
 	Device              string
 	Manufacturer        string
@@ -420,10 +421,11 @@ func (m *Modem) Close() error {
 		if m.watchCancel != nil {
 			m.watchCancel()
 		}
+		m.closeErr = errors.Join(m.closeErr, m.deviceSessions.close())
 		m.watchWG.Wait()
 		m.closeBearerAdapters()
 		if m.core != nil {
-			m.closeErr = m.core.Close()
+			m.closeErr = errors.Join(m.closeErr, m.core.Close())
 		}
 	})
 	return m.closeErr

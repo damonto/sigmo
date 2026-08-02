@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	wwanmodem "github.com/damonto/wwan-go/modem"
+	usimcard "github.com/damonto/wwan-go/sim/card"
 )
 
 const maxSIMSlot = wwan.MaxSIMSlot
@@ -25,22 +28,99 @@ type deviceControl interface {
 	UpdateMSISDN(ctx context.Context, number string) error
 }
 
+// Device exposes modem operations without transferring ownership of the
+// generation-scoped protocol session. Readers returned by USIM methods own
+// their independent protocol clients and must still be closed by callers.
+type Device interface {
+	deviceControl
+	ATR(ctx context.Context) ([]byte, error)
+	USIM(ctx context.Context) (usimcard.Reader, error)
+	USIMWithCAT(ctx context.Context, profile wwan.CATProfile) (usimcard.Reader, error)
+	VoLTEStatus(ctx context.Context) (wwan.VoLTEStatus, error)
+	PacketServiceStatus(ctx context.Context) (wwan.PacketServiceStatus, error)
+	IMSProfile(ctx context.Context) (wwan.IMSProfile, error)
+	IMSSTestMode(ctx context.Context) (bool, error)
+	SetIMSSTestMode(ctx context.Context, enabled bool) error
+}
+
 type deviceControlOpener func(wwan.Config) (deviceControl, error)
 
-func OpenDevice(m *Modem) (*wwan.Device, error) {
+type deviceSessionStore struct {
+	mu       sync.Mutex
+	closed   bool
+	sessions map[wwan.Config]*wwan.Session
+}
+
+func (s *deviceSessionStore) open(m *Modem, cfg wwan.Config) (Device, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return nil, wwanmodem.ErrClosed
+	}
+	if cfg.PortType != wwan.PortTypeQMI {
+		return wwan.Open(cfg)
+	}
+	if session := s.sessions[cfg]; session != nil {
+		return session, nil
+	}
+	session, err := openDeviceSession(m, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if s.sessions == nil {
+		s.sessions = make(map[wwan.Config]*wwan.Session)
+	}
+	s.sessions[cfg] = session
+	return session, nil
+}
+
+func openDeviceSession(m *Modem, cfg wwan.Config) (*wwan.Session, error) {
+	if m == nil || m.core == nil || m.core.Protocol() != wwanmodem.ProtocolQMI {
+		return wwan.OpenSession(cfg)
+	}
+	if strings.TrimSpace(m.core.Port().Path) != strings.TrimSpace(cfg.Device) {
+		return wwan.OpenSession(cfg)
+	}
+	return wwan.OpenQMISession(cfg, m.core)
+}
+
+func (s *deviceSessionStore) close() error {
+	s.mu.Lock()
+	s.closed = true
+	sessions := make([]*wwan.Session, 0, len(s.sessions))
+	for _, session := range s.sessions {
+		sessions = append(sessions, session)
+	}
+	s.sessions = nil
+	s.mu.Unlock()
+
+	var result error
+	for _, session := range sessions {
+		result = errors.Join(result, session.Close())
+	}
+	return result
+}
+
+// OpenDevice returns a non-owning device facade. QMI control clients are
+// reused until the modem generation closes.
+func OpenDevice(m *Modem) (Device, error) {
 	cfg, err := deviceConfig(m)
 	if err != nil {
 		return nil, err
 	}
-	return wwan.Open(cfg)
+	return m.deviceSessions.open(m, cfg)
 }
 
-func OpenVoLTESession(m *Modem) (*wwan.Session, error) {
+// OpenVoLTEDevice returns the generation-scoped device selected for managed
+// VoLTE control. QMI clients are shared with other device operations using the
+// same control port and SIM slot.
+func OpenVoLTEDevice(m *Modem) (Device, error) {
 	cfg, err := voLTEDeviceConfig(m)
 	if err != nil {
 		return nil, err
 	}
-	return wwan.OpenSession(cfg)
+	return m.deviceSessions.open(m, cfg)
 }
 
 func voLTEDeviceConfig(m *Modem) (wwan.Config, error) {
@@ -60,54 +140,19 @@ func voLTEDeviceConfig(m *Modem) (wwan.Config, error) {
 	}, nil
 }
 
-func openQMIDeviceForTarget(m *Modem, target SIMTarget, open deviceControlOpener) (deviceControl, error) {
-	cfg, err := qmiDeviceConfigForTarget(m, target)
-	if err != nil {
-		return nil, err
-	}
-	return openDeviceWith(cfg, open)
-}
-
-func openDeviceForModem(m *Modem, open deviceControlOpener) (deviceControl, error) {
-	cfg, err := deviceConfig(m)
-	if err != nil {
-		return nil, err
-	}
-	return openDeviceWith(cfg, open)
-}
-
-func openQMIDeviceForModem(m *Modem, open deviceControlOpener) (deviceControl, error) {
-	cfg, err := qmiDeviceConfig(m)
-	if err != nil {
-		return nil, err
-	}
-	return openDeviceWith(cfg, open)
-}
-
 func openQMIDeviceForSlot(m *Modem, slot uint8, open deviceControlOpener) (deviceControl, error) {
 	cfg, err := qmiDeviceConfigForSlot(m, slot)
 	if err != nil {
 		return nil, err
 	}
-	return openDeviceWith(cfg, open)
+	return openDeviceWith(m, cfg, open)
 }
 
-func openDeviceWith(cfg wwan.Config, open deviceControlOpener) (deviceControl, error) {
+func openDeviceWith(m *Modem, cfg wwan.Config, open deviceControlOpener) (deviceControl, error) {
 	if open == nil {
-		return wwan.Open(cfg)
+		return m.deviceSessions.open(m, cfg)
 	}
 	return open(cfg)
-}
-
-func readDeviceSIMState(ctx context.Context, m *Modem, target SIMTarget, open deviceControlOpener) (wwan.SIMState, error) {
-	device, err := openQMIDeviceForModem(m, open)
-	if errors.Is(err, wwan.ErrUnsupported) {
-		return wwan.SIMState{}, nil
-	}
-	if err != nil {
-		return wwan.SIMState{}, err
-	}
-	return device.SIMState(ctx, deviceTarget(target))
 }
 
 func deviceConfig(m *Modem) (wwan.Config, error) {
@@ -116,25 +161,6 @@ func deviceConfig(m *Modem) (wwan.Config, error) {
 		return wwan.Config{}, err
 	}
 	return deviceConfigForEndpoint(endpoint, m.EquipmentIdentifier)
-}
-
-func qmiDeviceConfig(m *Modem) (wwan.Config, error) {
-	if m == nil {
-		return wwan.Config{}, errModemRequired
-	}
-	slot, err := ActiveSIMSlot(m)
-	if err != nil {
-		return wwan.Config{}, err
-	}
-	return qmiDeviceConfigForSlot(m, slot)
-}
-
-func qmiDeviceConfigForTarget(m *Modem, target SIMTarget) (wwan.Config, error) {
-	slot, err := deviceTargetSlot(m, target)
-	if err != nil {
-		return wwan.Config{}, err
-	}
-	return qmiDeviceConfigForSlot(m, slot)
 }
 
 func qmiDeviceConfigForSlot(m *Modem, slot uint8) (wwan.Config, error) {
@@ -290,11 +316,4 @@ func deviceTargetSlot(m *Modem, target SIMTarget) (uint8, error) {
 		return uint8(target.Slot), nil
 	}
 	return slot, nil
-}
-
-func deviceTarget(target SIMTarget) wwan.Target {
-	return wwan.Target{
-		Slot:  target.Slot,
-		ICCID: strings.TrimSpace(target.ICCID),
-	}
 }

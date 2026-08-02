@@ -18,5 +18,8 @@ type Runner interface {
 type Card struct {
 	ICCID string
 	STK   Runner
+	// Ready is non-nil when the transport has an explicit CAT ownership
+	// handshake. It closes after proactive-command indications are registered.
+	Ready <-chan struct{}
 	Close func() error
 }

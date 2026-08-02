@@ -33,18 +33,11 @@ type wsSession struct {
 	disconnectOnce sync.Once
 	writeMu        sync.Mutex
 
-	stateMu           sync.RWMutex
-	imei              string
-	profileICCID      string
-	rootMenu          *wsMenu
-	rootMenuSource    menuSource
-	rootMenuProbeItem byte
-	hasRootProbeItem  bool
-	probe             probeState
-	setupMenuMu       sync.Mutex
-	setupMenuCh       chan struct{}
-	setupMenuClosed   bool
-	menus             *menuCache
+	stateMu      sync.RWMutex
+	imei         string
+	profileICCID string
+	rootMenu     *wsMenu
+	menus        *menuCache
 
 	pendingMu sync.RWMutex
 	pending   pendingKind
@@ -62,7 +55,6 @@ func newWSSession(conn wsConn, cancel context.CancelFunc, imei string, menus *me
 		conn:         conn,
 		disconnectCh: make(chan struct{}),
 		imei:         strings.TrimSpace(imei),
-		setupMenuCh:  make(chan struct{}),
 		menus:        menus,
 		rootCh:       make(chan wsClientMessage, 1),
 		selectCh:     make(chan wsClientMessage, 1),
@@ -93,6 +85,9 @@ func (s *wsSession) readLoop(cancel context.CancelFunc) {
 		case wsTypeMenuSelection:
 			if s.pendingKind() == pendingSelect {
 				sendLatest(s.selectCh, msg)
+				continue
+			}
+			if !s.rootMenuActionable() {
 				continue
 			}
 			sendLatest(s.rootCh, msg)
@@ -162,52 +157,47 @@ func (s *wsSession) currentProfileICCID() string {
 	return s.profileICCID
 }
 
-func (s *wsSession) setRootMenu(snapshot menuSnapshot) {
+func (s *wsSession) setRootMenu(menu *wsMenu) {
 	s.stateMu.Lock()
-	s.rootMenu = cloneMenu(snapshot.menu)
-	s.rootMenuSource = snapshot.source
-	s.rootMenuProbeItem = snapshot.probeItem
-	s.hasRootProbeItem = snapshot.hasProbeItem
+	s.rootMenu = cloneMenu(menu)
 	s.stateMu.Unlock()
 }
 
-func (s *wsSession) storeRootMenu(snapshot menuSnapshot) {
+func (s *wsSession) storeRootMenu(menu *wsMenu) {
 	s.stateMu.Lock()
-	s.rootMenu = cloneMenu(snapshot.menu)
-	s.rootMenuSource = snapshot.source
-	s.rootMenuProbeItem = snapshot.probeItem
-	s.hasRootProbeItem = snapshot.hasProbeItem
+	s.rootMenu = cloneMenu(menu)
 	imei := s.imei
 	iccid := s.profileICCID
 	s.stateMu.Unlock()
 
 	if s.menus != nil {
-		s.menus.Set(imei, iccid, snapshot)
+		s.menus.Set(imei, iccid, menu)
 	}
 }
 
-func (s *wsSession) markSetupMenuSeen() {
-	s.probe.clear()
+func (s *wsSession) clearRootMenu() {
+	s.setRootMenu(nil)
+	drainClientMessages(s.rootCh)
+}
 
-	s.setupMenuMu.Lock()
-	defer s.setupMenuMu.Unlock()
-	if !s.setupMenuClosed {
-		close(s.setupMenuCh)
-		s.setupMenuClosed = true
+func (s *wsSession) rootMenuActionable() bool {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	return s.rootMenu != nil
+}
+
+func (s *wsSession) rootMenuHasItem(item byte) bool {
+	s.stateMu.RLock()
+	defer s.stateMu.RUnlock()
+	if s.rootMenu == nil {
+		return false
 	}
-}
-
-func (s *wsSession) resetSetupMenuSignal() {
-	s.setupMenuMu.Lock()
-	s.setupMenuCh = make(chan struct{})
-	s.setupMenuClosed = false
-	s.setupMenuMu.Unlock()
-}
-
-func (s *wsSession) setupMenuSeen() <-chan struct{} {
-	s.setupMenuMu.Lock()
-	defer s.setupMenuMu.Unlock()
-	return s.setupMenuCh
+	for _, menuItem := range s.rootMenu.Items {
+		if menuItem.ID == int(item) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *wsSession) disconnected() bool {
@@ -217,20 +207,6 @@ func (s *wsSession) disconnected() bool {
 	default:
 		return false
 	}
-}
-
-func (s *wsSession) probing() bool {
-	return s.probe.scanning()
-}
-
-func (s *wsSession) rootMenuAction() (menuSource, byte, bool) {
-	s.stateMu.RLock()
-	defer s.stateMu.RUnlock()
-	return s.rootMenuSource, s.rootMenuProbeItem, s.hasRootProbeItem
-}
-
-func (s *wsSession) awaitingProbeSelection() bool {
-	return s.probe.awaitingSelection()
 }
 
 func (s *wsSession) pendingKind() pendingKind {
@@ -285,13 +261,12 @@ func (s *wsSession) callbacks() usim.STKCallbacks {
 }
 
 func (s *wsSession) setupMenu(_ context.Context, cmd stkpkg.SetupMenuCommand) (stkpkg.TerminalResponse, error) {
-	s.markSetupMenuSeen()
 	menu := menuFromCommand(menuKindRoot, cmd.MenuCommand)
 	if len(menu.Items) == 0 {
-		s.storeRootMenu(menuSnapshot{})
+		s.storeRootMenu(nil)
 		return stkpkg.OK(), s.send(statusMessage(false, s.currentProfileICCID(), nil))
 	}
-	s.storeRootMenu(newMenuSnapshot(&menu, menuSourceSetup, 0))
+	s.storeRootMenu(&menu)
 	if err := s.send(statusMessage(true, s.currentProfileICCID(), &menu)); err != nil {
 		return stkpkg.TerminalResponse{}, err
 	}
@@ -299,19 +274,6 @@ func (s *wsSession) setupMenu(_ context.Context, cmd stkpkg.SetupMenuCommand) (s
 }
 
 func (s *wsSession) selectItem(ctx context.Context, cmd stkpkg.SelectItemCommand) (stkpkg.TerminalResponse, error) {
-	if selection, ok := s.probe.takeSelection(); ok {
-		response, err := s.answerProbeSelection(cmd, selection)
-		if err != nil {
-			return response, err
-		}
-		sendProbeSelectionHit(selection.hitCh, probeHitSelectItem)
-		return response, nil
-	}
-	probeMenu := menuFromCommand(menuKindRoot, cmd.MenuCommand)
-	if hit, ok := s.probe.takeScanHit(probeHitSelectItem); ok {
-		return s.cacheProbeMenu(&probeMenu, hit.item)
-	}
-
 	menu := menuFromCommand(menuKindSelectItem, cmd.MenuCommand)
 	done := s.beginPending(pendingSelect)
 	defer done()
@@ -338,42 +300,7 @@ func (s *wsSession) selectItem(ctx context.Context, cmd stkpkg.SelectItemCommand
 	}
 }
 
-func (s *wsSession) cacheProbeMenu(menu *wsMenu, probeItem byte) (stkpkg.TerminalResponse, error) {
-	if menu == nil || len(menu.Items) == 0 {
-		s.storeRootMenu(menuSnapshot{})
-		return stkpkg.Result(stkpkg.ResultRequiredValuesMissing), s.send(statusMessage(false, s.currentProfileICCID(), nil))
-	}
-
-	s.storeRootMenu(newMenuSnapshot(menu, menuSourceProbe, probeItem))
-	if err := s.send(statusMessage(true, s.currentProfileICCID(), menu)); err != nil {
-		return stkpkg.TerminalResponse{}, err
-	}
-	return stkpkg.Result(stkpkg.ResultUserTermination), nil
-}
-
-func (s *wsSession) answerProbeSelection(cmd stkpkg.SelectItemCommand, selection probeRootSelection) (stkpkg.TerminalResponse, error) {
-	menu := menuFromCommand(menuKindRoot, cmd.MenuCommand)
-	if len(menu.Items) > 0 {
-		s.storeRootMenu(newMenuSnapshot(&menu, menuSourceProbe, selection.probeItem))
-	}
-	result := stkpkg.ResultCommandPerformed
-	if selection.helpRequested {
-		result = stkpkg.ResultHelpInformationRequired
-	}
-	return stkpkg.TerminalResponse{
-		Result:         result,
-		ItemIdentifier: &selection.item,
-	}, nil
-}
-
 func (s *wsSession) displayText(ctx context.Context, cmd stkpkg.DisplayTextCommand) (stkpkg.TerminalResponse, error) {
-	if _, ok := s.probe.takeScanHit(probeHitDisplayText); ok {
-		return stkpkg.OK(), nil
-	}
-	if s.awaitingProbeSelection() {
-		return stkpkg.OK(), nil
-	}
-
 	var done func()
 	if !cmd.ImmediateResponse {
 		done = s.beginPending(pendingDisplay)
@@ -408,10 +335,6 @@ func (s *wsSession) displayText(ctx context.Context, cmd stkpkg.DisplayTextComma
 }
 
 func (s *wsSession) getInput(ctx context.Context, cmd stkpkg.GetInputCommand) (stkpkg.TerminalResponse, error) {
-	if s.probing() || s.awaitingProbeSelection() {
-		return stkpkg.Result(stkpkg.ResultTerminalUnableToProcess), nil
-	}
-
 	done := s.beginPending(pendingInput)
 	defer done()
 	message := wsServerMessage{
@@ -442,10 +365,6 @@ func (s *wsSession) getInput(ctx context.Context, cmd stkpkg.GetInputCommand) (s
 }
 
 func (s *wsSession) getInkey(ctx context.Context, cmd stkpkg.GetInkeyCommand) (stkpkg.TerminalResponse, error) {
-	if s.probing() || s.awaitingProbeSelection() {
-		return stkpkg.Result(stkpkg.ResultTerminalUnableToProcess), nil
-	}
-
 	done := s.beginPending(pendingInkey)
 	defer done()
 	if err := s.send(wsServerMessage{
@@ -470,10 +389,6 @@ func (s *wsSession) getInkey(ctx context.Context, cmd stkpkg.GetInkeyCommand) (s
 }
 
 func (s *wsSession) confirmSimple(ctx context.Context, cmd stkpkg.SimpleCommand) (stkpkg.TerminalResponse, error) {
-	if s.probing() || s.awaitingProbeSelection() {
-		return stkpkg.Result(stkpkg.ResultTerminalUnableToProcess), nil
-	}
-
 	done := s.beginPending(pendingConfirm)
 	defer done()
 	if err := s.send(wsServerMessage{

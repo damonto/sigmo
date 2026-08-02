@@ -71,12 +71,8 @@ func (h *Handler) runSessionLoop(ctx context.Context, id string, device *mmodem.
 			continue
 		}
 		device = current
-		done, opened := h.runSessionAttempt(ctx, current, session)
-		if done {
+		if h.runSessionAttempt(ctx, current, session) {
 			return
-		}
-		if opened {
-			retries = 0
 		}
 		retries++
 		if retries >= simAppSessionMaxRetries {
@@ -117,15 +113,15 @@ func (h *Handler) findSessionModem(ctx context.Context, id string, fallback *mmo
 	return nil, true
 }
 
-func (h *Handler) runSessionAttempt(ctx context.Context, device *mmodem.Modem, session *wsSession) (bool, bool) {
-	session.resetSetupMenuSignal()
+func (h *Handler) runSessionAttempt(ctx context.Context, device *mmodem.Modem, session *wsSession) bool {
+	session.clearRootMenu()
 	card, err := h.openCardFunc()(ctx, device)
 	if err != nil {
 		if ctx.Err() == nil {
 			device.Logger().Warn("SIM Application session unavailable", "error", err)
 			session.sendIfConnected(statusMessage(false, session.currentProfileICCID(), nil))
 		}
-		return ctx.Err() != nil || session.disconnected(), false
+		return ctx.Err() != nil || session.disconnected()
 	}
 	defer func() {
 		if card.Close == nil {
@@ -138,47 +134,40 @@ func (h *Handler) runSessionAttempt(ctx context.Context, device *mmodem.Modem, s
 
 	attemptCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	defer session.probe.clear()
 
 	session.setProfileICCID(card.ICCID)
-	cached := h.menus.Get(device.EquipmentIdentifier, card.ICCID)
+	var cached *wsMenu
+	if card.Ready == nil {
+		cached = h.menus.Get(device.EquipmentIdentifier, card.ICCID)
+	}
 	session.setRootMenu(cached)
-	if err := session.send(statusMessage(cached.menu != nil, card.ICCID, cached.menu)); err != nil {
-		return true, true
+	if err := session.send(statusMessage(cached != nil, card.ICCID, cached)); err != nil {
+		return true
 	}
 
-	go session.rootSelectionLoop(attemptCtx, envelopeRootSelector{sender: card.STK})
+	go session.rootSelectionLoop(attemptCtx, envelopeRootSelector{sender: card.STK}, card.Ready)
 	runErr := make(chan error, 1)
 	go func() {
 		runErr <- card.STK.Run(attemptCtx, session.callbacks())
 	}()
-	if cached.menu == nil {
-		go func() {
-			probed, err := session.probeMissingSetupMenu(attemptCtx, card.STK)
-			if err != nil && attemptCtx.Err() == nil {
-				device.Logger().Warn("probe SIM Application menu", "error", err)
-				return
-			}
-			if probed {
-				device.Logger().Info("probed SIM Application menu")
-			}
-		}()
-	}
 
 	select {
 	case <-session.disconnectCh:
 		cancel()
-		return true, true
+		return true
 	case <-ctx.Done():
 		session.disconnect()
-		return true, true
+		return true
 	case err := <-runErr:
 		cancel()
-		if err != nil && ctx.Err() == nil {
-			device.Logger().Warn("SIM Application session stopped", "error", err)
+		session.clearRootMenu()
+		if ctx.Err() == nil {
+			if err != nil {
+				device.Logger().Warn("SIM Application session stopped", "error", err)
+			}
 			session.sendIfConnected(statusMessage(false, card.ICCID, nil))
 		}
-		return ctx.Err() != nil || session.disconnected(), true
+		return ctx.Err() != nil || session.disconnected()
 	}
 }
 

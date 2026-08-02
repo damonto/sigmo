@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/damonto/wwan-go/qcom"
+	qmitransport "github.com/damonto/wwan-go/qcom/qmi"
 )
 
 func TestDeviceMSISDNQMI(t *testing.T) {
@@ -41,6 +42,29 @@ func TestDeviceMSISDNQMI(t *testing.T) {
 			}
 			if !slices.Contains(tt.client.calls, "close") {
 				t.Fatal("client was not closed")
+			}
+		})
+	}
+}
+
+func TestEqualCATProfile(t *testing.T) {
+	tests := []struct {
+		name    string
+		current []byte
+		wanted  []byte
+		want    bool
+	}{
+		{name: "exact", current: []byte{0x09, 0x00, 0x07}, wanted: []byte{0x09, 0x00, 0x07}, want: true},
+		{name: "modem padding", current: []byte{0x09, 0x00, 0x07, 0x00, 0x00}, wanted: []byte{0x09, 0x00, 0x07}, want: true},
+		{name: "caller padding", current: []byte{0x09, 0x00, 0x07}, wanted: []byte{0x09, 0x00, 0x07, 0x00}, want: true},
+		{name: "capability differs", current: []byte{0x09, 0x00, 0x07}, wanted: []byte{0x09, 0x00, 0x05}},
+		{name: "leading byte differs", current: []byte{0x00, 0x09}, wanted: []byte{0x09}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := equalCATProfile(tt.current, tt.wanted); got != tt.want {
+				t.Fatalf("equalCATProfile() = %t, want %t", got, tt.want)
 			}
 		})
 	}
@@ -142,7 +166,6 @@ func TestDeviceVoLTEStatusQMI(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &fakeQMIClient{imsaStatus: tt.status, imsaStatusErr: tt.err}
 			device := qmiDevice{
-				device:     "/dev/cdc-wdm0",
 				slot:       1,
 				openClient: qmiClientOpener(t, 1, client, nil),
 			}
@@ -246,6 +269,56 @@ func TestOpenDoesNotRetainQMIClient(t *testing.T) {
 	}
 }
 
+func TestQMISessionUSIMUsesConfiguredQCOMOpener(t *testing.T) {
+	openErr := errors.New("open rejected")
+	tests := []struct {
+		name string
+		run  func(*qmiDevice) error
+	}{
+		{
+			name: "USIM",
+			run: func(device *qmiDevice) error {
+				_, err := device.USIM(context.Background())
+				return err
+			},
+		},
+		{
+			name: "USIM with CAT",
+			run: func(device *qmiDevice) error {
+				_, err := device.USIMWithCAT(context.Background(), CATProfile{})
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			openCalls := 0
+			var gotSlot uint8
+			device := newQMISessionWithQCOMOpener(Config{
+				PortType: PortTypeQMI,
+				Device:   "/dev/cdc-wdm0",
+				Slot:     2,
+				IMEI:     "123456789012345",
+			}, func(_ context.Context, slot uint8) (*qcom.Client, error) {
+				openCalls++
+				gotSlot = slot
+				return nil, openErr
+			})
+
+			if err := tt.run(device); !errors.Is(err, openErr) {
+				t.Fatalf("USIM operation error = %v, want %v", err, openErr)
+			}
+			if openCalls != 1 {
+				t.Fatalf("open calls = %d, want 1", openCalls)
+			}
+			if gotSlot != 2 {
+				t.Fatalf("open slot = %d, want 2", gotSlot)
+			}
+		})
+	}
+}
+
 func TestOpenSessionReusesQMIClientUntilClose(t *testing.T) {
 	client := &fakeQMIClient{nasServingSystem: qcom.NASServingSystem{
 		RegistrationState: qcom.NASRegistrationRegistered,
@@ -285,6 +358,51 @@ func TestOpenSessionReusesQMIClientUntilClose(t *testing.T) {
 	}
 	if _, err := session.PacketServiceStatus(context.Background()); err == nil {
 		t.Fatal("PacketServiceStatus() after Close error = nil, want error")
+	}
+}
+
+func TestOpenSessionReopensQMIClientAfterTerminalError(t *testing.T) {
+	transportErr := &qmitransport.TransportError{Err: errors.New("transport disconnected")}
+	first := &fakeQMIClient{nasServingSystemErr: transportErr}
+	second := &fakeQMIClient{nasServingSystem: qcom.NASServingSystem{
+		RegistrationState: qcom.NASRegistrationRegistered,
+		PSAttachState:     qcom.NASAttachAttached,
+		RadioInterfaces:   []qcom.NASRadioInterface{qcom.NASRadioInterfaceLTE},
+	}}
+	session, err := OpenSession(Config{PortType: PortTypeQMI, Device: "/dev/cdc-wdm0", Slot: 1})
+	if err != nil {
+		t.Fatalf("OpenSession() error = %v", err)
+	}
+	backend := session.backend.(*qmiDevice)
+	clients := []qmiClient{first, second}
+	openCalls := 0
+	backend.openClient = func(context.Context, uint8) (qmiClient, error) {
+		client := clients[min(openCalls, len(clients)-1)]
+		openCalls++
+		return client, nil
+	}
+
+	if _, err := session.PacketServiceStatus(context.Background()); !errors.Is(err, transportErr) {
+		t.Fatalf("PacketServiceStatus(first) error = %v, want %v", err, transportErr)
+	}
+	if closeCalls := countCalls(first.calls, "close"); closeCalls != 1 {
+		t.Fatalf("first client close calls = %d, want 1", closeCalls)
+	}
+	status, err := session.PacketServiceStatus(context.Background())
+	if err != nil {
+		t.Fatalf("PacketServiceStatus(second) error = %v", err)
+	}
+	if !status.Registered || !status.PSAttached || !status.LTE {
+		t.Fatalf("PacketServiceStatus(second) = %+v, want registered attached LTE", status)
+	}
+	if openCalls != 2 {
+		t.Fatalf("open calls = %d, want 2", openCalls)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if closeCalls := countCalls(second.calls, "close"); closeCalls != 1 {
+		t.Fatalf("second client close calls = %d, want 1", closeCalls)
 	}
 }
 
@@ -571,7 +689,6 @@ func TestQMIDeviceSIMState(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			device := qmiDevice{
-				device:     "/dev/cdc-wdm0",
 				slot:       1,
 				openClient: qmiClientOpener(t, 1, tt.client, nil),
 			}
@@ -666,7 +783,6 @@ func TestQMIDevicePowerCycleSIM(t *testing.T) {
 			}
 
 			device := qmiDevice{
-				device:     tt.cfg.Device,
 				slot:       slot,
 				imei:       tt.cfg.IMEI,
 				openClient: qmiClientOpener(t, slot, tt.client, tt.openErr),
@@ -752,7 +868,6 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			slot := qmiTestSlot(tt.cfg)
 			device := qmiDevice{
-				device:     tt.cfg.Device,
 				slot:       slot,
 				imei:       tt.cfg.IMEI,
 				openClient: qmiClientOpener(t, slot, tt.client, nil),

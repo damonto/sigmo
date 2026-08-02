@@ -3,9 +3,11 @@ package modem
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 func TestOpenDeviceRejectsInvalidInput(t *testing.T) {
@@ -49,6 +51,177 @@ func TestOpenDeviceRejectsInvalidInput(t *testing.T) {
 				t.Fatalf("OpenDevice() device = %v, want nil", device)
 			}
 		})
+	}
+}
+
+func TestOpenDeviceReusesQMISessionForModemGeneration(t *testing.T) {
+	modem := &Modem{
+		EquipmentIdentifier: "123456789012345",
+		PrimaryPort:         "/dev/cdc-wdm0",
+		PrimarySimSlot:      1,
+		Ports: []ModemPort{
+			{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm0"},
+		},
+	}
+
+	first, err := OpenDevice(modem)
+	if err != nil {
+		t.Fatalf("OpenDevice(first) error = %v", err)
+	}
+	second, err := OpenDevice(modem)
+	if err != nil {
+		t.Fatalf("OpenDevice(second) error = %v", err)
+	}
+	firstSession, ok := first.(*wwan.Session)
+	if !ok {
+		t.Fatalf("OpenDevice(first) type = %T, want *wwan.Session", first)
+	}
+	secondSession, ok := second.(*wwan.Session)
+	if !ok {
+		t.Fatalf("OpenDevice(second) type = %T, want *wwan.Session", second)
+	}
+	if firstSession != secondSession {
+		t.Fatal("OpenDevice() returned different sessions for the same modem generation and SIM slot")
+	}
+
+	control, err := openQMIDeviceForSlot(modem, 1, nil)
+	if err != nil {
+		t.Fatalf("openQMIDeviceForSlot() error = %v", err)
+	}
+	if control != firstSession {
+		t.Fatal("slot-specific control path did not reuse the generation session")
+	}
+
+	modem.PrimarySimSlot = 2
+	third, err := OpenDevice(modem)
+	if err != nil {
+		t.Fatalf("OpenDevice(slot 2) error = %v", err)
+	}
+	thirdSession, ok := third.(*wwan.Session)
+	if !ok {
+		t.Fatalf("OpenDevice(slot 2) type = %T, want *wwan.Session", third)
+	}
+	if thirdSession == firstSession {
+		t.Fatal("OpenDevice() reused one QMI session across different SIM slots")
+	}
+
+	if err := modem.Close(); err != nil {
+		t.Fatalf("Modem.Close() error = %v", err)
+	}
+	for name, device := range map[string]Device{"slot 1": first, "slot 2": third} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := device.PacketServiceStatus(context.Background()); err == nil {
+				t.Fatal("PacketServiceStatus() after Modem.Close() error = nil, want error")
+			}
+		})
+	}
+	if _, err := OpenDevice(modem); !errors.Is(err, wwanmodem.ErrClosed) {
+		t.Fatalf("OpenDevice() after Modem.Close() error = %v, want %v", err, wwanmodem.ErrClosed)
+	}
+}
+
+func TestOpenDeviceConcurrentQMISessionReuse(t *testing.T) {
+	modem := &Modem{
+		PrimaryPort:    "/dev/cdc-wdm0",
+		PrimarySimSlot: 1,
+		Ports: []ModemPort{
+			{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm0"},
+		},
+	}
+	const count = 32
+	sessions := make([]*wwan.Session, count)
+	errs := make([]error, count)
+
+	var wg sync.WaitGroup
+	for i := range count {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			device, err := OpenDevice(modem)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			var ok bool
+			sessions[i], ok = device.(*wwan.Session)
+			if !ok {
+				errs[i] = errors.New("device is not a QMI session")
+			}
+		}()
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("OpenDevice(%d) error = %v", i, err)
+		}
+		if sessions[i] != sessions[0] {
+			t.Fatalf("OpenDevice(%d) returned a different session", i)
+		}
+	}
+	if err := modem.Close(); err != nil {
+		t.Fatalf("Modem.Close() error = %v", err)
+	}
+}
+
+func TestOpenDeviceKeepsMBIMOperationScoped(t *testing.T) {
+	modem := &Modem{
+		PrimaryPort:    "/dev/cdc-wdm0",
+		PrimarySimSlot: 1,
+		Ports: []ModemPort{
+			{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+		},
+	}
+	first, err := OpenDevice(modem)
+	if err != nil {
+		t.Fatalf("OpenDevice(first) error = %v", err)
+	}
+	second, err := OpenDevice(modem)
+	if err != nil {
+		t.Fatalf("OpenDevice(second) error = %v", err)
+	}
+	if _, ok := first.(*wwan.Session); ok {
+		t.Fatal("OpenDevice() retained an MBIM session")
+	}
+	if first == second {
+		t.Fatal("OpenDevice() reused an operation-scoped MBIM device")
+	}
+	if err := modem.Close(); err != nil {
+		t.Fatalf("Modem.Close() error = %v", err)
+	}
+}
+
+func TestOpenVoLTEDeviceReusesGenerationQMISession(t *testing.T) {
+	modem := &Modem{
+		EquipmentIdentifier: "123456789012345",
+		PrimaryPort:         "/dev/cdc-wdm1",
+		PrimarySimSlot:      1,
+		Ports: []ModemPort{
+			{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+			{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+		},
+	}
+	device, err := OpenDevice(modem)
+	if err != nil {
+		t.Fatalf("OpenDevice() error = %v", err)
+	}
+	volte, err := OpenVoLTEDevice(modem)
+	if err != nil {
+		t.Fatalf("OpenVoLTEDevice() error = %v", err)
+	}
+	deviceSession, ok := device.(*wwan.Session)
+	if !ok {
+		t.Fatalf("OpenDevice() type = %T, want *wwan.Session", device)
+	}
+	volteSession, ok := volte.(*wwan.Session)
+	if !ok {
+		t.Fatalf("OpenVoLTEDevice() type = %T, want *wwan.Session", volte)
+	}
+	if deviceSession != volteSession {
+		t.Fatal("OpenVoLTEDevice() did not reuse the ordinary QMI control session")
+	}
+	if err := modem.Close(); err != nil {
+		t.Fatalf("Modem.Close() error = %v", err)
 	}
 }
 
@@ -153,7 +326,7 @@ func TestOpenDeviceSelectsModemDevicePort(t *testing.T) {
 	}
 }
 
-func TestQMIDeviceConfigPrefersQMI(t *testing.T) {
+func TestQMIDeviceConfigForSlotPrefersQMI(t *testing.T) {
 	tests := []struct {
 		name       string
 		modem      *Modem
@@ -190,21 +363,21 @@ func TestQMIDeviceConfigPrefersQMI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := qmiDeviceConfig(tt.modem)
+			cfg, err := qmiDeviceConfigForSlot(tt.modem, 1)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
-					t.Fatalf("qmiDeviceConfig() error = %v, want %v", err, tt.wantErr)
+					t.Fatalf("qmiDeviceConfigForSlot() error = %v, want %v", err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("qmiDeviceConfig() error = %v", err)
+				t.Fatalf("qmiDeviceConfigForSlot() error = %v", err)
 			}
 			if cfg.PortType != tt.wantType {
-				t.Fatalf("qmiDeviceConfig() port type = %d, want %d", cfg.PortType, tt.wantType)
+				t.Fatalf("qmiDeviceConfigForSlot() port type = %d, want %d", cfg.PortType, tt.wantType)
 			}
 			if cfg.Device != tt.wantDevice {
-				t.Fatalf("qmiDeviceConfig() device = %q, want %q", cfg.Device, tt.wantDevice)
+				t.Fatalf("qmiDeviceConfigForSlot() device = %q, want %q", cfg.Device, tt.wantDevice)
 			}
 		})
 	}

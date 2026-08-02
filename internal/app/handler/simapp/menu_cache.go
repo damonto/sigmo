@@ -7,7 +7,7 @@ import (
 
 type menuCache struct {
 	mu    sync.RWMutex
-	menus map[menuCacheKey]menuSnapshot
+	menus map[menuCacheKey]*wsMenu
 }
 
 type menuCacheKey struct {
@@ -15,39 +15,24 @@ type menuCacheKey struct {
 	iccid string
 }
 
-type menuSource uint8
-
-const (
-	menuSourceUnknown menuSource = iota
-	menuSourceSetup
-	menuSourceProbe
-)
-
-type menuSnapshot struct {
-	menu         *wsMenu
-	source       menuSource
-	probeItem    byte
-	hasProbeItem bool
-}
-
 func newMenuCache() *menuCache {
 	return &menuCache{
-		menus: make(map[menuCacheKey]menuSnapshot),
+		menus: make(map[menuCacheKey]*wsMenu),
 	}
 }
 
-func (c *menuCache) Get(imei, iccid string) menuSnapshot {
+func (c *menuCache) Get(imei, iccid string) *wsMenu {
 	key, ok := newMenuCacheKey(imei, iccid)
 	if !ok || c == nil {
-		return menuSnapshot{}
+		return nil
 	}
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.menus[key].clone()
+	return cloneMenu(c.menus[key])
 }
 
-func (c *menuCache) Set(imei, iccid string, snapshot menuSnapshot) {
+func (c *menuCache) Set(imei, iccid string, menu *wsMenu) {
 	key, ok := newMenuCacheKey(imei, iccid)
 	if !ok || c == nil {
 		return
@@ -55,32 +40,14 @@ func (c *menuCache) Set(imei, iccid string, snapshot menuSnapshot) {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if snapshot.menu == nil {
+	if menu == nil {
 		delete(c.menus, key)
 		return
 	}
 	if c.menus == nil {
-		c.menus = make(map[menuCacheKey]menuSnapshot)
+		c.menus = make(map[menuCacheKey]*wsMenu)
 	}
-	c.menus[key] = snapshot.clone()
-}
-
-func newMenuSnapshot(menu *wsMenu, source menuSource, probeItem byte) menuSnapshot {
-	return menuSnapshot{
-		menu:         cloneMenu(menu),
-		source:       source,
-		probeItem:    probeItem,
-		hasProbeItem: source == menuSourceProbe,
-	}
-}
-
-func (s menuSnapshot) clone() menuSnapshot {
-	return menuSnapshot{
-		menu:         cloneMenu(s.menu),
-		source:       s.source,
-		probeItem:    s.probeItem,
-		hasProbeItem: s.hasProbeItem,
-	}
+	c.menus[key] = cloneMenu(menu)
 }
 
 func newMenuCacheKey(imei, iccid string) (menuCacheKey, bool) {

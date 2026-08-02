@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	usim "github.com/damonto/wwan-go/sim"
 	stkpkg "github.com/damonto/wwan-go/sim/stk"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -59,30 +60,24 @@ func (c *fakeWSConn) writesCopy() []wsServerMessage {
 }
 
 type fakeEnvelopeSender struct {
-	mu         sync.Mutex
-	envelopes  []stkpkg.Envelope
-	responses  []stkpkg.EnvelopeResponse
-	onEnvelope func(context.Context, stkpkg.Envelope, int)
+	mu        sync.Mutex
+	envelopes []stkpkg.Envelope
 }
 
-func (s *fakeEnvelopeSender) SendEnvelope(ctx context.Context, envelope stkpkg.Envelope) (stkpkg.EnvelopeResponse, error) {
+type fakeSTKRunner struct {
+	fakeEnvelopeSender
+	runErr error
+}
+
+func (r *fakeSTKRunner) Run(context.Context, usim.STKCallbacks) error {
+	return r.runErr
+}
+
+func (s *fakeEnvelopeSender) SendEnvelope(_ context.Context, envelope stkpkg.Envelope) (stkpkg.EnvelopeResponse, error) {
 	s.mu.Lock()
 	s.envelopes = append(s.envelopes, envelope)
-	sendNumber := len(s.envelopes)
-	var response stkpkg.EnvelopeResponse
-	if len(s.responses) > 0 {
-		response = s.responses[0]
-		s.responses = s.responses[1:]
-	}
-	onEnvelope := s.onEnvelope
 	s.mu.Unlock()
-	if onEnvelope != nil {
-		onEnvelope(ctx, envelope, sendNumber)
-	}
-	if response.SW1 == 0 && response.SW2 == 0 {
-		return stkpkg.EnvelopeResponse{SW1: 0x90, SW2: 0x00}, nil
-	}
-	return response, nil
+	return stkpkg.EnvelopeResponse{SW1: 0x90, SW2: 0x00}, nil
 }
 
 func (s *fakeEnvelopeSender) firstEnvelope(t *testing.T) stkpkg.Envelope {
@@ -105,24 +100,10 @@ func (s *fakeEnvelopeSender) firstEnvelope(t *testing.T) stkpkg.Envelope {
 	}
 }
 
-func (s *fakeEnvelopeSender) itemIDs(t *testing.T) []byte {
-	t.Helper()
+func (s *fakeEnvelopeSender) count() int {
 	s.mu.Lock()
-	envelopes := append([]stkpkg.Envelope(nil), s.envelopes...)
-	s.mu.Unlock()
-
-	items := make([]byte, 0, len(envelopes))
-	for _, envelope := range envelopes {
-		data, err := envelope.MarshalBinary()
-		if err != nil {
-			t.Fatalf("MarshalBinary() error = %v", err)
-		}
-		if len(data) == 0 {
-			t.Fatal("envelope is empty")
-		}
-		items = append(items, data[len(data)-1])
-	}
-	return items
+	defer s.mu.Unlock()
+	return len(s.envelopes)
 }
 
 func newTestSession() (*wsSession, *fakeWSConn) {
@@ -130,7 +111,6 @@ func newTestSession() (*wsSession, *fakeWSConn) {
 	return &wsSession{
 		conn:         conn,
 		disconnectCh: make(chan struct{}),
-		setupMenuCh:  make(chan struct{}),
 		rootCh:       make(chan wsClientMessage, 1),
 		selectCh:     make(chan wsClientMessage, 1),
 		inputCh:      make(chan wsClientMessage, 1),
@@ -138,15 +118,6 @@ func newTestSession() (*wsSession, *fakeWSConn) {
 		confirmCh:    make(chan wsClientMessage, 1),
 		backCh:       make(chan wsClientMessage, 1),
 	}, conn
-}
-
-func setProbeInterval(t *testing.T, interval time.Duration) {
-	t.Helper()
-	old := setupMenuProbeInterval
-	setupMenuProbeInterval = interval
-	t.Cleanup(func() {
-		setupMenuProbeInterval = old
-	})
 }
 
 func setSessionRetryDelay(t *testing.T, delay time.Duration) {
@@ -178,14 +149,11 @@ func TestSessionAttemptKeepsWebSocketOpenForRetry(t *testing.T) {
 				},
 			}
 
-			done, opened := handler.runSessionAttempt(context.Background(), &mmodem.Modem{
+			done := handler.runSessionAttempt(context.Background(), &mmodem.Modem{
 				EquipmentIdentifier: "866069053145502",
 			}, session)
 			if done {
 				t.Fatal("runSessionAttempt() = done, want retry")
-			}
-			if opened {
-				t.Fatal("runSessionAttempt() opened = true, want false")
 			}
 			if session.disconnected() {
 				t.Fatal("session disconnected, want websocket kept open")
@@ -203,14 +171,28 @@ func TestSessionAttemptKeepsWebSocketOpenForRetry(t *testing.T) {
 
 func TestSessionLoopStopsAfterRetryLimit(t *testing.T) {
 	tests := []struct {
-		name    string
-		err     error
-		wantTry int
+		name       string
+		openErr    error
+		runErr     error
+		wantTry    int
+		wantWrites int
 	}{
 		{
-			name:    "open card keeps failing",
-			err:     errors.New("claim rejected"),
-			wantTry: simAppSessionMaxRetries,
+			name:       "open card keeps failing",
+			openErr:    errors.New("open rejected"),
+			wantTry:    simAppSessionMaxRetries,
+			wantWrites: simAppSessionMaxRetries,
+		},
+		{
+			name:       "STK run keeps failing after card opens",
+			runErr:     errors.New("claim rejected"),
+			wantTry:    simAppSessionMaxRetries,
+			wantWrites: 2 * simAppSessionMaxRetries,
+		},
+		{
+			name:       "STK run ends after card opens",
+			wantTry:    simAppSessionMaxRetries,
+			wantWrites: 2 * simAppSessionMaxRetries,
 		},
 	}
 
@@ -222,7 +204,13 @@ func TestSessionLoopStopsAfterRetryLimit(t *testing.T) {
 			handler := &Handler{
 				openCard: func(context.Context, *mmodem.Modem) (mstk.Card, error) {
 					tries++
-					return mstk.Card{}, tt.err
+					if tt.openErr != nil {
+						return mstk.Card{}, tt.openErr
+					}
+					return mstk.Card{
+						ICCID: "8986000000000000000",
+						STK:   &fakeSTKRunner{runErr: tt.runErr},
+					}, nil
 				},
 			}
 
@@ -237,8 +225,8 @@ func TestSessionLoopStopsAfterRetryLimit(t *testing.T) {
 				t.Fatal("session connected, want disconnected after retry limit")
 			}
 			writes := conn.writesCopy()
-			if len(writes) != tt.wantTry {
-				t.Fatalf("writes = %d, want %d unavailable statuses", len(writes), tt.wantTry)
+			if len(writes) != tt.wantWrites {
+				t.Fatalf("writes = %d, want %d unavailable statuses", len(writes), tt.wantWrites)
 			}
 			for i, write := range writes {
 				if write.Type == wsTypeError {
@@ -247,6 +235,72 @@ func TestSessionLoopStopsAfterRetryLimit(t *testing.T) {
 				if write.Type != wsTypeStatus || write.Available == nil || *write.Available {
 					t.Fatalf("write %d = %+v, want unavailable status", i, write)
 				}
+			}
+		})
+	}
+}
+
+func TestSessionAttemptCachedMenuVisibility(t *testing.T) {
+	tests := []struct {
+		name          string
+		catHandshake  bool
+		wantAvailable bool
+	}{
+		{
+			name:          "transport without CAT handshake uses client cache",
+			wantAvailable: true,
+		},
+		{
+			name:         "QMI CAT handshake hides client cache",
+			catHandshake: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const (
+				imei  = "866069053145502"
+				iccid = "8986000000000000000"
+			)
+			handler := &Handler{}
+			handler.menus.Set(imei, iccid, &wsMenu{
+				Kind:  menuKindRoot,
+				Title: "9eSIM",
+				Items: []wsMenuItem{{ID: 1, Label: "eSIM List"}},
+			})
+			var ready <-chan struct{}
+			if tt.catHandshake {
+				ready = make(chan struct{})
+			}
+			handler.openCard = func(context.Context, *mmodem.Modem) (mstk.Card, error) {
+				return mstk.Card{
+					ICCID: iccid,
+					STK:   &fakeSTKRunner{},
+					Ready: ready,
+				}, nil
+			}
+			session, conn := newTestSession()
+
+			done := handler.runSessionAttempt(context.Background(), &mmodem.Modem{
+				EquipmentIdentifier: imei,
+			}, session)
+			if done {
+				t.Fatal("runSessionAttempt() = done, want retry")
+			}
+			writes := conn.writesCopy()
+			if len(writes) != 2 {
+				t.Fatalf("writes = %d, want initial and stopped statuses", len(writes))
+			}
+			status := writes[0]
+			if status.Available == nil || *status.Available != tt.wantAvailable {
+				t.Fatalf("status.available = %v, want %t", status.Available, tt.wantAvailable)
+			}
+			if (status.Menu != nil) != tt.wantAvailable {
+				t.Fatalf("status.menu present = %t, want %t", status.Menu != nil, tt.wantAvailable)
+			}
+			stopped := writes[1]
+			if stopped.Available == nil || *stopped.Available || stopped.Menu != nil {
+				t.Fatalf("stopped status = %+v, want unavailable without menu", stopped)
 			}
 		})
 	}
@@ -300,238 +354,23 @@ func TestMenuCache(t *testing.T) {
 				Title: "SIM",
 				Items: []wsMenuItem{{ID: 1, Label: "Balance"}},
 			}
-			cache.Set(tt.imei, tt.iccid, newMenuSnapshot(menu, menuSourceProbe, 0xff))
+			cache.Set(tt.imei, tt.iccid, menu)
 
 			got := cache.Get(tt.getIMEI, tt.getICCID)
-			if (got.menu != nil) != tt.wantFound {
-				t.Fatalf("Get() found = %t, want %t", got.menu != nil, tt.wantFound)
+			if (got != nil) != tt.wantFound {
+				t.Fatalf("Get() found = %t, want %t", got != nil, tt.wantFound)
 			}
 			if !tt.wantFound {
 				return
 			}
-			if got.source != menuSourceProbe || got.probeItem != 0xff {
-				t.Fatalf("Get() source = %d probeItem = 0x%02X, want probe 0xFF", got.source, got.probeItem)
-			}
-			if !got.hasProbeItem {
-				t.Fatal("Get() hasProbeItem = false, want true")
-			}
-
 			menu.Items[0].Label = "changed"
-			if got.menu.Items[0].Label != "Balance" {
-				t.Fatalf("cached menu label = %q, want Balance", got.menu.Items[0].Label)
+			if got.Items[0].Label != "Balance" {
+				t.Fatalf("cached menu label = %q, want Balance", got.Items[0].Label)
 			}
-			got.menu.Items[0].Label = "mutated"
+			got.Items[0].Label = "mutated"
 			again := cache.Get(tt.getIMEI, tt.getICCID)
-			if again.menu.Items[0].Label != "Balance" {
-				t.Fatalf("cached menu label after returned mutation = %q, want Balance", again.menu.Items[0].Label)
-			}
-		})
-	}
-}
-
-func TestSetupMenuSignalResetsBetweenAttempts(t *testing.T) {
-	tests := []struct {
-		name string
-	}{
-		{name: "probe runs after previous setup menu"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			setProbeInterval(t, 0)
-			session, _ := newTestSession()
-			session.markSetupMenuSeen()
-			select {
-			case <-session.setupMenuSeen():
-			default:
-				t.Fatal("setupMenuSeen is open, want closed")
-			}
-
-			session.resetSetupMenuSignal()
-			select {
-			case <-session.setupMenuSeen():
-				t.Fatal("setupMenuSeen is closed after reset")
-			default:
-			}
-
-			sender := &fakeEnvelopeSender{}
-			probed, err := session.sendSetupMenuProbes(context.Background(), sender)
-			if err != nil {
-				t.Fatalf("sendSetupMenuProbes() error = %v", err)
-			}
-			if probed {
-				t.Fatal("sendSetupMenuProbes() = true, want false")
-			}
-			if got := sender.itemIDs(t); len(got) != 256 {
-				t.Fatalf("probe items length = %d, want 256", len(got))
-			}
-		})
-	}
-}
-
-func TestSetupMenuProbe(t *testing.T) {
-	tests := []struct {
-		name      string
-		setupSeen bool
-		onSend    func(t *testing.T, session *wsSession) func(context.Context, stkpkg.Envelope, int)
-		wantProbe bool
-		wantItems []byte
-		wantLen   int
-	}{
-		{
-			name:      "setup menu already seen skips probe",
-			setupSeen: true,
-		},
-		{
-			name: "stops when select item appears",
-			onSend: func(t *testing.T, session *wsSession) func(context.Context, stkpkg.Envelope, int) {
-				t.Helper()
-				return func(ctx context.Context, _ stkpkg.Envelope, sendNumber int) {
-					if sendNumber != 3 {
-						return
-					}
-					resp, err := session.selectItem(ctx, stkpkg.SelectItemCommand{
-						MenuCommand: stkpkg.MenuCommand{
-							Title: &stkpkg.AlphaIdentifier{Value: "SIM"},
-							Items: []stkpkg.Item{
-								{Identifier: 1, Text: stkpkg.AlphaIdentifier{Value: "Balance"}},
-							},
-						},
-					})
-					if err != nil {
-						t.Fatalf("selectItem() error = %v", err)
-					}
-					if resp.Result != stkpkg.ResultUserTermination {
-						t.Fatalf("selectItem() result = %v, want user termination", resp.Result)
-					}
-				}
-			},
-			wantProbe: true,
-			wantItems: []byte{0x00, 0x01, 0x02},
-		},
-		{
-			name: "display text is acknowledged and scan continues",
-			onSend: func(t *testing.T, session *wsSession) func(context.Context, stkpkg.Envelope, int) {
-				t.Helper()
-				return func(ctx context.Context, _ stkpkg.Envelope, sendNumber int) {
-					switch sendNumber {
-					case 2:
-						resp, err := session.displayText(ctx, stkpkg.DisplayTextCommand{
-							Text: stkpkg.TextString{Value: "Card info"},
-						})
-						if err != nil {
-							t.Fatalf("displayText() error = %v", err)
-						}
-						if resp.Result != stkpkg.ResultCommandPerformed {
-							t.Fatalf("displayText() result = %v, want command performed", resp.Result)
-						}
-					case 4:
-						resp, err := session.selectItem(ctx, stkpkg.SelectItemCommand{
-							MenuCommand: stkpkg.MenuCommand{
-								Items: []stkpkg.Item{
-									{Identifier: 1, Text: stkpkg.AlphaIdentifier{Value: "ESIMLIST"}},
-								},
-							},
-						})
-						if err != nil {
-							t.Fatalf("selectItem() error = %v", err)
-						}
-						if resp.Result != stkpkg.ResultUserTermination {
-							t.Fatalf("selectItem() result = %v, want user termination", resp.Result)
-						}
-					}
-				}
-			},
-			wantProbe: true,
-			wantItems: []byte{0x00, 0x01, 0x02, 0x03},
-		},
-		{
-			name:    "scans every item when no proactive command appears",
-			wantLen: 256,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			setProbeInterval(t, 0)
-			session, _ := newTestSession()
-			if tt.setupSeen {
-				session.markSetupMenuSeen()
-			}
-			sender := &fakeEnvelopeSender{}
-			if tt.onSend != nil {
-				sender.onEnvelope = tt.onSend(t, session)
-			}
-			probed, err := session.sendSetupMenuProbes(context.Background(), sender)
-			if err != nil {
-				t.Fatalf("sendSetupMenuProbes() error = %v", err)
-			}
-			if probed != tt.wantProbe {
-				t.Fatalf("sendSetupMenuProbes() = %t, want %t", probed, tt.wantProbe)
-			}
-			got := sender.itemIDs(t)
-			if tt.wantLen > 0 {
-				if len(got) != tt.wantLen {
-					t.Fatalf("probe items length = %d, want %d", len(got), tt.wantLen)
-				}
-				if got[0] != 0x00 || got[len(got)-1] != 0xff {
-					t.Fatalf("probe item bounds = 0x%02X..0x%02X, want 0x00..0xFF", got[0], got[len(got)-1])
-				}
-				return
-			}
-			if !bytes.Equal(got, tt.wantItems) {
-				t.Fatalf("probe items = % X, want % X", got, tt.wantItems)
-			}
-		})
-	}
-}
-
-func TestSetupMenuProbeIgnoresDisplayTextOnly(t *testing.T) {
-	tests := []struct {
-		name string
-	}{
-		{name: "display text is acked but not cached as menu"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			setProbeInterval(t, 0)
-			session, conn := newTestSession()
-			session.imei = "866069053145502"
-			session.menus = newMenuCache()
-			session.setProfileICCID("8986000000000000000")
-			sender := &fakeEnvelopeSender{
-				onEnvelope: func(ctx context.Context, _ stkpkg.Envelope, sendNumber int) {
-					if sendNumber != 2 {
-						return
-					}
-					resp, err := session.displayText(ctx, stkpkg.DisplayTextCommand{
-						Text: stkpkg.TextString{Value: "Card info"},
-					})
-					if err != nil {
-						t.Fatalf("displayText() error = %v", err)
-					}
-					if resp.Result != stkpkg.ResultCommandPerformed {
-						t.Fatalf("displayText() result = %v, want command performed", resp.Result)
-					}
-				},
-			}
-
-			probed, err := session.sendSetupMenuProbes(context.Background(), sender)
-			if err != nil {
-				t.Fatalf("sendSetupMenuProbes() error = %v", err)
-			}
-			if probed {
-				t.Fatal("sendSetupMenuProbes() = true, want false")
-			}
-			if got := sender.itemIDs(t); len(got) != 256 {
-				t.Fatalf("probe items length = %d, want 256", len(got))
-			}
-			if conn.writeCount() != 0 {
-				t.Fatalf("writes = %d, want no websocket messages", conn.writeCount())
-			}
-			if cached := session.menus.Get(session.imei, session.currentProfileICCID()); cached.menu != nil {
-				t.Fatalf("cached menu = %+v, want nil", cached.menu)
+			if again.Items[0].Label != "Balance" {
+				t.Fatalf("cached menu label after returned mutation = %q, want Balance", again.Items[0].Label)
 			}
 		})
 	}
@@ -586,289 +425,8 @@ func TestSetupMenuAvailability(t *testing.T) {
 				t.Fatalf("writes = %d, want status and menu", conn.writeCount())
 			}
 			cached := session.menus.Get(session.imei, session.currentProfileICCID())
-			if (cached.menu != nil) != tt.available {
-				t.Fatalf("cached menu found = %t, want %t", cached.menu != nil, tt.available)
-			}
-			if tt.available && cached.source != menuSourceSetup {
-				t.Fatalf("cached menu source = %d, want setup", cached.source)
-			}
-		})
-	}
-}
-
-func TestProbeSelectItemCachesRootMenuWithoutPopup(t *testing.T) {
-	tests := []struct {
-		name string
-		cmd  stkpkg.SelectItemCommand
-	}{
-		{
-			name: "probed select item becomes cached root menu",
-			cmd: stkpkg.SelectItemCommand{
-				MenuCommand: stkpkg.MenuCommand{
-					Title: &stkpkg.AlphaIdentifier{Value: "SIM"},
-					Items: []stkpkg.Item{
-						{Identifier: 1, Text: stkpkg.AlphaIdentifier{Value: "Balance"}},
-					},
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			setProbeInterval(t, 0)
-			session, conn := newTestSession()
-			session.imei = "866069053145502"
-			session.menus = newMenuCache()
-			session.setProfileICCID("8986000000000000000")
-
-			sender := &fakeEnvelopeSender{
-				onEnvelope: func(ctx context.Context, _ stkpkg.Envelope, sendNumber int) {
-					if sendNumber != 4 {
-						return
-					}
-					resp, err := session.selectItem(ctx, tt.cmd)
-					if err != nil {
-						t.Fatalf("selectItem() error = %v", err)
-					}
-					if resp.Result != stkpkg.ResultUserTermination {
-						t.Fatalf("selectItem() result = %v, want user termination", resp.Result)
-					}
-				},
-			}
-			probed, err := session.sendSetupMenuProbes(context.Background(), sender)
-			if err != nil {
-				t.Fatalf("sendSetupMenuProbes() error = %v", err)
-			}
-			if !probed {
-				t.Fatal("sendSetupMenuProbes() = false, want true")
-			}
-			if got := sender.itemIDs(t); !bytes.Equal(got, []byte{0x00, 0x01, 0x02, 0x03}) {
-				t.Fatalf("probe items = % X, want 00 01 02 03", got)
-			}
-
-			writes := conn.writesCopy()
-			if len(writes) != 1 {
-				t.Fatalf("writes = %d, want only status", len(writes))
-			}
-			status := writes[0]
-			if status.Type != wsTypeStatus {
-				t.Fatalf("message type = %q, want status", status.Type)
-			}
-			if status.Available == nil || !*status.Available {
-				t.Fatalf("status.available = %v, want true", status.Available)
-			}
-			if status.Menu == nil || status.Menu.Kind != menuKindRoot {
-				t.Fatalf("status.menu = %+v, want root menu", status.Menu)
-			}
-			cached := session.menus.Get(session.imei, session.currentProfileICCID())
-			if cached.menu == nil || cached.menu.Kind != menuKindRoot || cached.menu.Items[0].Label != "Balance" {
-				t.Fatalf("cached menu = %+v, want root Balance menu", cached)
-			}
-			if cached.source != menuSourceProbe || cached.probeItem != 0x03 || !cached.hasProbeItem {
-				t.Fatalf("cached source = %d probeItem = 0x%02X hasProbeItem=%t, want probe 0x03", cached.source, cached.probeItem, cached.hasProbeItem)
-			}
-		})
-	}
-}
-
-func TestProbeRootMenuSelectionReactivatesAndAnswersSelectItem(t *testing.T) {
-	tests := []struct {
-		name          string
-		cached        menuSnapshot
-		itemID        int
-		wantProbeItem byte
-	}{
-		{
-			name:          "uses cached probe item",
-			cached:        newMenuSnapshot(nil, menuSourceProbe, 0xff),
-			itemID:        1,
-			wantProbeItem: 0xff,
-		},
-		{
-			name:          "zero is a valid cached probe item",
-			cached:        newMenuSnapshot(nil, menuSourceProbe, 0x00),
-			itemID:        2,
-			wantProbeItem: 0x00,
-		},
-		{
-			name:          "falls back to zero without cached probe item",
-			cached:        menuSnapshot{source: menuSourceProbe},
-			itemID:        1,
-			wantProbeItem: 0x00,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			setProbeInterval(t, 0)
-			session, conn := newTestSession()
-			session.imei = "866069053145502"
-			session.menus = newMenuCache()
-			session.setProfileICCID("8986000000000000000")
-			root := &wsMenu{
-				Kind: menuKindRoot,
-				Items: []wsMenuItem{
-					{ID: 1, Label: "ESIMLIST"},
-					{ID: 2, Label: "CARDINFO"},
-				},
-			}
-			cached := tt.cached
-			cached.menu = root
-			session.setRootMenu(cached)
-
-			var resp stkpkg.TerminalResponse
-			sender := &fakeEnvelopeSender{
-				onEnvelope: func(ctx context.Context, _ stkpkg.Envelope, sendNumber int) {
-					if sendNumber != 1 {
-						return
-					}
-					var err error
-					resp, err = session.selectItem(ctx, stkpkg.SelectItemCommand{
-						MenuCommand: stkpkg.MenuCommand{
-							Title: &stkpkg.AlphaIdentifier{Value: "9eSIM"},
-							Items: []stkpkg.Item{
-								{Identifier: 1, Text: stkpkg.AlphaIdentifier{Value: "ESIMLIST"}},
-								{Identifier: 2, Text: stkpkg.AlphaIdentifier{Value: "CARDINFO"}},
-							},
-						},
-					})
-					if err != nil {
-						t.Fatalf("selectItem() error = %v", err)
-					}
-				},
-			}
-			err := session.selectRootMenu(context.Background(), envelopeRootSelector{sender: sender}, wsClientMessage{
-				Type:   wsTypeMenuSelection,
-				ItemID: tt.itemID,
-			})
-			if err != nil {
-				t.Fatalf("selectRootMenu() error = %v", err)
-			}
-			if got := sender.itemIDs(t); !bytes.Equal(got, []byte{tt.wantProbeItem}) {
-				t.Fatalf("probe items = % X, want % X", got, []byte{tt.wantProbeItem})
-			}
-
-			if resp.Result != stkpkg.ResultCommandPerformed {
-				t.Fatalf("selectItem() result = %v, want command performed", resp.Result)
-			}
-			if resp.ItemIdentifier == nil || *resp.ItemIdentifier != byte(tt.itemID) {
-				t.Fatalf("ItemIdentifier = %v, want %d", resp.ItemIdentifier, tt.itemID)
-			}
-			if conn.writeCount() != 0 {
-				t.Fatalf("writes = %d, want no popup messages", conn.writeCount())
-			}
-		})
-	}
-}
-
-func TestProbeRootMenuSelectionRequiresSelectItem(t *testing.T) {
-	tests := []struct {
-		name string
-	}{
-		{name: "accepted envelope without menu tries next item"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			setProbeInterval(t, 0)
-			session, _ := newTestSession()
-			root := &wsMenu{
-				Kind:  menuKindRoot,
-				Items: []wsMenuItem{{ID: 1, Label: "ESIMLIST"}},
-			}
-			session.setRootMenu(newMenuSnapshot(root, menuSourceProbe, 0xff))
-
-			var resp stkpkg.TerminalResponse
-			sender := &fakeEnvelopeSender{
-				onEnvelope: func(ctx context.Context, _ stkpkg.Envelope, sendNumber int) {
-					if sendNumber != 2 {
-						return
-					}
-					var err error
-					resp, err = session.selectItem(ctx, stkpkg.SelectItemCommand{
-						MenuCommand: stkpkg.MenuCommand{
-							Items: []stkpkg.Item{{Identifier: 1, Text: stkpkg.AlphaIdentifier{Value: "ESIMLIST"}}},
-						},
-					})
-					if err != nil {
-						t.Fatalf("selectItem() error = %v", err)
-					}
-				},
-			}
-
-			if err := session.selectRootMenu(context.Background(), envelopeRootSelector{sender: sender}, wsClientMessage{
-				Type:   wsTypeMenuSelection,
-				ItemID: 1,
-			}); err != nil {
-				t.Fatalf("selectRootMenu() error = %v", err)
-			}
-			if got := sender.itemIDs(t); !bytes.Equal(got, []byte{0xff, 0x00}) {
-				t.Fatalf("probe items = % X, want FF 00", got)
-			}
-			if resp.ItemIdentifier == nil || *resp.ItemIdentifier != 1 {
-				t.Fatalf("ItemIdentifier = %v, want 1", resp.ItemIdentifier)
-			}
-		})
-	}
-}
-
-func TestProbeRootMenuSelectionAutoAcknowledgesDisplayText(t *testing.T) {
-	tests := []struct {
-		name string
-	}{
-		{name: "display text does not clear pending select item"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			setProbeInterval(t, 0)
-			session, conn := newTestSession()
-			root := &wsMenu{
-				Kind:  menuKindRoot,
-				Items: []wsMenuItem{{ID: 1, Label: "ESIMLIST"}},
-			}
-			session.setRootMenu(newMenuSnapshot(root, menuSourceProbe, 0xff))
-
-			var displayResp stkpkg.TerminalResponse
-			var selectResp stkpkg.TerminalResponse
-			sender := &fakeEnvelopeSender{
-				onEnvelope: func(ctx context.Context, _ stkpkg.Envelope, sendNumber int) {
-					if sendNumber != 1 {
-						return
-					}
-					var err error
-					displayResp, err = session.displayText(ctx, stkpkg.DisplayTextCommand{
-						Text: stkpkg.TextString{Value: "Loading"},
-					})
-					if err != nil {
-						t.Fatalf("displayText() error = %v", err)
-					}
-					selectResp, err = session.selectItem(ctx, stkpkg.SelectItemCommand{
-						MenuCommand: stkpkg.MenuCommand{
-							Items: []stkpkg.Item{{Identifier: 1, Text: stkpkg.AlphaIdentifier{Value: "ESIMLIST"}}},
-						},
-					})
-					if err != nil {
-						t.Fatalf("selectItem() error = %v", err)
-					}
-				},
-			}
-			if err := session.selectRootMenu(context.Background(), envelopeRootSelector{sender: sender}, wsClientMessage{
-				Type:   wsTypeMenuSelection,
-				ItemID: 1,
-			}); err != nil {
-				t.Fatalf("selectRootMenu() error = %v", err)
-			}
-
-			if displayResp.Result != stkpkg.ResultCommandPerformed {
-				t.Fatalf("displayText() result = %v, want command performed", displayResp.Result)
-			}
-			if selectResp.ItemIdentifier == nil || *selectResp.ItemIdentifier != 1 {
-				t.Fatalf("ItemIdentifier = %v, want 1", selectResp.ItemIdentifier)
-			}
-			if conn.writeCount() != 0 {
-				t.Fatalf("writes = %d, want no popup messages", conn.writeCount())
+			if (cached != nil) != tt.available {
+				t.Fatalf("cached menu found = %t, want %t", cached != nil, tt.available)
 			}
 		})
 	}
@@ -876,10 +434,14 @@ func TestProbeRootMenuSelectionAutoAcknowledgesDisplayText(t *testing.T) {
 
 func TestRootMenuSelectionSendsEnvelope(t *testing.T) {
 	session, _ := newTestSession()
+	session.setRootMenu(&wsMenu{
+		Kind:  menuKindRoot,
+		Items: []wsMenuItem{{ID: 2, Label: "eSIM List"}},
+	})
 	sender := &fakeEnvelopeSender{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go session.rootSelectionLoop(ctx, envelopeRootSelector{sender: sender})
+	go session.rootSelectionLoop(ctx, envelopeRootSelector{sender: sender}, nil)
 
 	session.rootCh <- wsClientMessage{Type: wsTypeMenuSelection, ItemID: 2, HelpRequested: true}
 
@@ -891,6 +453,99 @@ func TestRootMenuSelectionSendsEnvelope(t *testing.T) {
 	want := []byte{0xD3, 0x09, 0x82, 0x02, 0x01, 0x81, 0x90, 0x01, 0x02, 0x95, 0x00}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("envelope = % X, want % X", got, want)
+	}
+}
+
+func TestRootSelectionLoopReadiness(t *testing.T) {
+	tests := []struct {
+		name       string
+		waitForCAT bool
+	}{
+		{name: "transport without handshake is ready"},
+		{name: "CAT claim gates selection", waitForCAT: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session, _ := newTestSession()
+			session.setRootMenu(&wsMenu{
+				Kind:  menuKindRoot,
+				Items: []wsMenuItem{{ID: 1, Label: "eSIM List"}},
+			})
+			sender := &fakeEnvelopeSender{}
+			var ready chan struct{}
+			var readySignal <-chan struct{}
+			if tt.waitForCAT {
+				ready = make(chan struct{})
+				readySignal = ready
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go session.rootSelectionLoop(ctx, envelopeRootSelector{sender: sender}, readySignal)
+
+			session.rootCh <- wsClientMessage{Type: wsTypeMenuSelection, ItemID: 1}
+			if tt.waitForCAT {
+				timer := time.NewTimer(20 * time.Millisecond)
+				<-timer.C
+				if got := sender.count(); got != 0 {
+					t.Fatalf("envelopes before CAT claim = %d, want 0", got)
+				}
+				close(ready)
+			}
+			_ = sender.firstEnvelope(t)
+		})
+	}
+}
+
+func TestRootMenuSelectionValidatesCurrentMenu(t *testing.T) {
+	tests := []struct {
+		name      string
+		menu      *wsMenu
+		itemID    int
+		wantErr   bool
+		wantCalls int
+	}{
+		{
+			name:      "current item",
+			menu:      &wsMenu{Kind: menuKindRoot, Items: []wsMenuItem{{ID: 2, Label: "eSIM List"}}},
+			itemID:    2,
+			wantCalls: 1,
+		},
+		{
+			name:    "stale item",
+			menu:    &wsMenu{Kind: menuKindRoot, Items: []wsMenuItem{{ID: 2, Label: "eSIM List"}}},
+			itemID:  3,
+			wantErr: true,
+		},
+		{
+			name:    "cleared menu",
+			itemID:  2,
+			wantErr: true,
+		},
+		{
+			name:    "item outside byte range",
+			menu:    &wsMenu{Kind: menuKindRoot, Items: []wsMenuItem{{ID: 2, Label: "eSIM List"}}},
+			itemID:  256,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session, _ := newTestSession()
+			session.setRootMenu(tt.menu)
+			sender := &fakeEnvelopeSender{}
+			err := session.selectRootMenu(context.Background(), envelopeRootSelector{sender: sender}, wsClientMessage{
+				Type:   wsTypeMenuSelection,
+				ItemID: tt.itemID,
+			})
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("selectRootMenu() error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if got := sender.count(); got != tt.wantCalls {
+				t.Fatalf("envelopes = %d, want %d", got, tt.wantCalls)
+			}
+		})
 	}
 }
 

@@ -58,6 +58,10 @@ func openATCard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
 }
 
 func openUSIMCard(ctx context.Context, reader usimcard.Reader, logger *slog.Logger) (Card, error) {
+	var ready <-chan struct{}
+	if source, ok := reader.(interface{ CATReady() <-chan struct{} }); ok {
+		ready = source.CATReady()
+	}
 	card, err := usim.New(ctx, reader, logger)
 	if err != nil {
 		_ = reader.Close()
@@ -71,6 +75,7 @@ func openUSIMCard(ctx context.Context, reader usimcard.Reader, logger *slog.Logg
 	return Card{
 		ICCID: card.ICCID(),
 		STK:   stk,
+		Ready: ready,
 		Close: card.Close,
 	}, nil
 }

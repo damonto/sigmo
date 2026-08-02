@@ -55,13 +55,19 @@ type managedVoLTEDevice interface {
 	SetAirplaneMode(ctx context.Context, enabled bool) error
 }
 
-type voLTESession struct {
-	*wwan.Session
+type voLTEDevice struct {
+	mmodem.Device
 	modem *mmodem.Modem
 }
 
-func (s *voLTESession) SetAirplaneMode(ctx context.Context, enabled bool) error {
-	return s.modem.SetAirplaneMode(ctx, enabled)
+func (d *voLTEDevice) Close() error {
+	// The modem generation owns the shared control session. Managed VoLTE
+	// operations only borrow it, so their local cleanup must not tear it down.
+	return nil
+}
+
+func (d *voLTEDevice) SetAirplaneMode(ctx context.Context, enabled bool) error {
+	return d.modem.SetAirplaneMode(ctx, enabled)
 }
 
 type internetRestorer interface {
@@ -81,11 +87,11 @@ type connectAttempt struct {
 }
 
 var openManagedVoLTEDevice = func(modem *mmodem.Modem) (managedVoLTEDevice, error) {
-	session, err := mmodem.OpenVoLTESession(modem)
+	device, err := mmodem.OpenVoLTEDevice(modem)
 	if err != nil {
 		return nil, err
 	}
-	return &voLTESession{Session: session, modem: modem}, nil
+	return &voLTEDevice{Device: device, modem: modem}, nil
 }
 
 func (c *coordinator) startEnabled(ctx context.Context, registry *mmodem.Registry) error {
