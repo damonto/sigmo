@@ -15,6 +15,7 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/pro/websheet"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 type coordinatorConfig struct {
@@ -242,9 +243,9 @@ func (c *coordinator) VoLTESettings(ctx context.Context, modem *mmodem.Modem) (V
 		return VoLTESettings{}, err
 	}
 	switch port.PortType {
-	case mmodem.ModemPortTypeMbim:
+	case wwanmodem.PortMBIM:
 		settings.DataPath = DataPathMBIM
-	case mmodem.ModemPortTypeQmi:
+	case wwanmodem.PortQMI:
 		if settings.DataPath == DataPathMBIM {
 			settings.DataPath = DataPathQMAP
 		}
@@ -258,9 +259,9 @@ func (c *coordinator) UpdateVoLTESettings(ctx context.Context, modem *mmodem.Mod
 		return err
 	}
 	switch port.PortType {
-	case mmodem.ModemPortTypeMbim:
+	case wwanmodem.PortMBIM:
 		settings.DataPath = DataPathMBIM
-	case mmodem.ModemPortTypeQmi:
+	case wwanmodem.PortQMI:
 		switch settings.DataPath {
 		case DataPathQMAP, DataPathLegacyBAMDMUX, DataPathQualcomm410:
 		default:

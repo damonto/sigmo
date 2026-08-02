@@ -77,19 +77,19 @@ const mountSection = () =>
       canScanNetworks: true,
       modeOptions: [
         {
-          allowed: 8,
+          allowed: 4,
           preferred: 0,
-          allowedLabel: '4G',
+          allowedLabel: 'LTE',
           preferredLabel: 'None',
           current: true,
         },
       ],
-      selectedMode: '8:0',
+      selectedMode: '4:0',
       supportedBands: [
-        { value: 256, label: 'Any', current: false },
-        { value: 71, label: 'LTE B41', current: true },
+        { value: { technology: 0, number: 0 }, label: 'Any', current: false },
+        { value: { technology: 4, number: 41 }, label: 'LTE B41', current: true },
       ],
-      selectedBands: [71],
+      selectedBands: [{ technology: 4, number: 41 }],
       airplaneModeSupported: true,
       airplaneModeEnabled: false,
       isSettingsLoading: false,
@@ -109,16 +109,16 @@ describe('NetworkSettingsContent', () => {
   it('renders supported modes and bands', () => {
     const wrapper = mountSection()
 
-    expect(wrapper.text()).toContain('4G')
+    expect(wrapper.text()).toContain('LTE')
     expect(wrapper.text()).toContain('LTE B41')
   })
 
   it('emits band toggle events', async () => {
     const wrapper = mountSection()
 
-    await wrapper.find('#band-256').setValue(true)
+    await wrapper.find('#band-0-0').setValue(true)
 
-    expect(wrapper.emitted('toggleBand')).toEqual([[256, true]])
+    expect(wrapper.emitted('toggleBand')).toEqual([[{ technology: 0, number: 0 }, true]])
   })
 
   it('emits airplane mode updates', async () => {

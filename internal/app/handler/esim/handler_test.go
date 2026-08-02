@@ -12,6 +12,7 @@ import (
 
 	sgp22 "github.com/damonto/euicc-go/v2"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 func TestEnablePrepareError(t *testing.T) {
@@ -128,12 +129,12 @@ func TestRestoreInternetBeforeProfileEnable(t *testing.T) {
 		{
 			name: "skip current SIM internet restore while modem is locked",
 			modem: &mmodem.Modem{
-				State: mmodem.ModemStateLocked,
+				Status: wwanmodem.Status{SIM: wwanmodem.SIMStateLocked},
 			},
 		},
 		{
 			name:    "unlocked modem requires internet connector",
-			modem:   &mmodem.Modem{State: mmodem.ModemStateRegistered},
+			modem:   &mmodem.Modem{Status: wwanmodem.Status{Power: wwanmodem.PowerStateOn, Registration: wwanmodem.RegistrationHome}},
 			wantErr: true,
 		},
 	}

@@ -3,7 +3,7 @@ import NetworkAirplaneModePanel from './NetworkAirplaneModePanel.vue'
 import NetworkBandsPanel from './NetworkBandsPanel.vue'
 import NetworkModePanel from './NetworkModePanel.vue'
 import NetworkOverviewPanel from './NetworkOverviewPanel.vue'
-import type { BandResponse, ModeResponse } from '@/types/network'
+import type { BandResponse, BandValue, ModeResponse } from '@/types/network'
 
 const props = defineProps<{
   operatorLabel: string
@@ -13,7 +13,7 @@ const props = defineProps<{
   canScanNetworks: boolean
   modeOptions: ModeResponse[]
   supportedBands: BandResponse[]
-  selectedBands: number[]
+  selectedBands: BandValue[]
   airplaneModeSupported: boolean
   airplaneModeEnabled: boolean
   isSettingsLoading: boolean
@@ -27,7 +27,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'scan'): void
-  (event: 'toggleBand', value: number, checked: boolean): void
+  (event: 'toggleBand', value: BandValue, checked: boolean): void
   (event: 'updateMode'): void
   (event: 'updateBands'): void
   (event: 'updateAirplaneMode', enabled: boolean): void
@@ -35,7 +35,7 @@ const emit = defineEmits<{
 
 const selectedMode = defineModel<string>('selectedMode', { required: true })
 
-const handleToggleBand = (value: number, checked: boolean) => {
+const handleToggleBand = (value: BandValue, checked: boolean) => {
   emit('toggleBand', value, checked)
 }
 </script>

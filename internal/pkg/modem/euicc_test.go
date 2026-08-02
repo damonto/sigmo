@@ -5,6 +5,8 @@ import (
 	"errors"
 	"slices"
 	"testing"
+
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 var errFakeMBIMATR = errors.New("mbim atr")
@@ -115,8 +117,8 @@ func TestSupportsEUICCUsesCachedATR(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			failOnATRTransports(t)
-			modem := testATRModem(ModemPortTypeQmi, ModemPort{
-				PortType: ModemPortTypeQmi,
+			modem := testATRModem(wwanmodem.PortQMI, ModemPort{
+				PortType: wwanmodem.PortQMI,
 				Device:   "/dev/cdc-wdm0",
 			})
 			modem.Sim = &SIM{ATR: tt.atr}
@@ -143,8 +145,8 @@ func TestATRReaderReadQMI(t *testing.T) {
 	}{
 		{
 			name: "ATR marks eUICC",
-			modem: testATRModem(ModemPortTypeQmi, ModemPort{
-				PortType: ModemPortTypeQmi,
+			modem: testATRModem(wwanmodem.PortQMI, ModemPort{
+				PortType: wwanmodem.PortQMI,
 				Device:   "/dev/cdc-wdm0",
 			}),
 			atr:      []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
@@ -153,8 +155,8 @@ func TestATRReaderReadQMI(t *testing.T) {
 		},
 		{
 			name: "known pSIM ATR westk",
-			modem: testATRModem(ModemPortTypeQmi, ModemPort{
-				PortType: ModemPortTypeQmi,
+			modem: testATRModem(wwanmodem.PortQMI, ModemPort{
+				PortType: wwanmodem.PortQMI,
 				Device:   "/dev/cdc-wdm0",
 			}),
 			atr:      westkKnownATR,
@@ -163,8 +165,8 @@ func TestATRReaderReadQMI(t *testing.T) {
 		},
 		{
 			name: "known pSIM ATR f002",
-			modem: testATRModem(ModemPortTypeQmi, ModemPort{
-				PortType: ModemPortTypeQmi,
+			modem: testATRModem(wwanmodem.PortQMI, ModemPort{
+				PortType: wwanmodem.PortQMI,
 				Device:   "/dev/cdc-wdm0",
 			}),
 			atr:      f002KnownATR,
@@ -173,8 +175,8 @@ func TestATRReaderReadQMI(t *testing.T) {
 		},
 		{
 			name: "known pSIM ATR 1601",
-			modem: testATRModem(ModemPortTypeQmi, ModemPort{
-				PortType: ModemPortTypeQmi,
+			modem: testATRModem(wwanmodem.PortQMI, ModemPort{
+				PortType: wwanmodem.PortQMI,
 				Device:   "/dev/cdc-wdm0",
 			}),
 			atr:      one601KnownATR,
@@ -183,16 +185,16 @@ func TestATRReaderReadQMI(t *testing.T) {
 		},
 		{
 			name: "empty ATR",
-			modem: testATRModem(ModemPortTypeQmi, ModemPort{
-				PortType: ModemPortTypeQmi,
+			modem: testATRModem(wwanmodem.PortQMI, ModemPort{
+				PortType: wwanmodem.PortQMI,
 				Device:   "/dev/cdc-wdm0",
 			}),
 			wantSlot: 1,
 		},
 		{
 			name: "ordinary UICC",
-			modem: testATRModem(ModemPortTypeQmi, ModemPort{
-				PortType: ModemPortTypeQmi,
+			modem: testATRModem(wwanmodem.PortQMI, ModemPort{
+				PortType: wwanmodem.PortQMI,
 				Device:   "/dev/cdc-wdm0",
 			}),
 			atr:      []byte{0x3B, 0x00},
@@ -200,8 +202,8 @@ func TestATRReaderReadQMI(t *testing.T) {
 		},
 		{
 			name: "primary slot unknown uses slot one",
-			modem: testATRModem(ModemPortTypeQmi, ModemPort{
-				PortType: ModemPortTypeQmi,
+			modem: testATRModem(wwanmodem.PortQMI, ModemPort{
+				PortType: wwanmodem.PortQMI,
 				Device:   "/dev/cdc-wdm0",
 			}),
 			atr:      []byte{0x3B, 0x00},
@@ -209,8 +211,8 @@ func TestATRReaderReadQMI(t *testing.T) {
 		},
 		{
 			name: "ATR read error",
-			modem: testATRModem(ModemPortTypeQmi, ModemPort{
-				PortType: ModemPortTypeQmi,
+			modem: testATRModem(wwanmodem.PortQMI, ModemPort{
+				PortType: wwanmodem.PortQMI,
 				Device:   "/dev/cdc-wdm0",
 			}),
 			atrErr:   errFakeMBIMATR,
@@ -286,8 +288,8 @@ func TestATRReaderReadMBIM(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			uicc := &fakeATRDevice{atr: tt.atr, atrErr: tt.atrErr}
-			atr, err := readDeviceATR(context.Background(), testATRModem(ModemPortTypeMbim, ModemPort{
-				PortType: ModemPortTypeMbim,
+			atr, err := readDeviceATR(context.Background(), testATRModem(wwanmodem.PortMBIM, ModemPort{
+				PortType: wwanmodem.PortMBIM,
 				Device:   "/dev/cdc-wdm0",
 			}), testDeviceATROpener(uicc, tt.openErr))
 			if !errors.Is(err, tt.wantErr) {
@@ -308,8 +310,8 @@ func TestSupportsEUICCDoesNotProbeATOrUnknown(t *testing.T) {
 	}{
 		{
 			name: "AT port",
-			modem: testATRModem(ModemPortTypeAt, ModemPort{
-				PortType: ModemPortTypeAt,
+			modem: testATRModem(wwanmodem.PortAT, ModemPort{
+				PortType: wwanmodem.PortAT,
 				Device:   "/dev/ttyUSB2",
 			}),
 		},
@@ -356,7 +358,7 @@ func failOnATRTransports(t *testing.T) {
 	t.Helper()
 }
 
-func testATRModem(portType ModemPortType, port ModemPort) *Modem {
+func testATRModem(portType wwanmodem.PortType, port ModemPort) *Modem {
 	return &Modem{
 		EquipmentIdentifier: "test-imei",
 		PrimaryPort:         port.Device,

@@ -15,6 +15,7 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 type catalog struct {
@@ -87,21 +88,18 @@ func (c *catalog) buildBasicResponse(device *mmodem.Modem) *ModemResponse {
 		HardwareRevision: device.HardwareRevision,
 		Name:             name,
 		Number:           snapshot.Number,
-		State:            modemStateValue(snapshot.State),
-		UnlockRequired:   snapshot.UnlockRequired.String(),
+		State:            modemStateValue(snapshot),
+		UnlockRequired:   unlockRequired(snapshot),
 		UnlockSupported:  unlockSupported(device),
 		SIM:              slotResponse(snapshot.SIM),
 		Slots:            slotResponses(snapshot.Slots),
-		AirplaneMode:     snapshot.AirplaneMode,
-		SignalQuality:    snapshot.SignalQuality,
+		AirplaneMode:     snapshot.AirplaneMode(),
+		SignalQuality:    uint32(snapshot.Status.SignalQuality),
 	}
-	if snapshot.StatusKnown && !snapshot.AirplaneMode {
-		resp.AccessTechnology = accessTechnologyString(snapshot.Access)
-		resp.RegistrationState = snapshot.Registration.String()
-		resp.RegisteredOperator = RegisteredOperatorResponse{Name: snapshot.OperatorName, Code: snapshot.OperatorCode}
-	}
-	if snapshot.State == mmodem.ModemStateSearching && (!snapshot.StatusKnown || snapshot.Registration == mmodem.Modem3GPPRegistrationStateUnknown) {
-		resp.RegistrationState = mmodem.Modem3GPPRegistrationStateSearching.String()
+	if snapshot.StatusKnown && !snapshot.AirplaneMode() {
+		resp.AccessTechnology = accessTechnologyString(snapshot.Status.Technology)
+		resp.RegistrationState = registrationStateName(snapshot.Status.Registration)
+		resp.RegisteredOperator = RegisteredOperatorResponse{Name: snapshot.Status.OperatorName, Code: snapshot.Status.OperatorID}
 	}
 	supportsEsim, err := mmodem.SupportsEUICC(device)
 	if err != nil {
@@ -122,7 +120,7 @@ func (c *catalog) Get(ctx context.Context, modem *mmodem.Modem) (*ModemResponse,
 
 func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*ModemResponse, error) {
 	snapshot := device.Snapshot()
-	if snapshot.State == mmodem.ModemStateLocked {
+	if snapshot.Locked() {
 		return c.buildLockedResponse(ctx, device)
 	}
 
@@ -145,9 +143,7 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 	sim := slotResponse(snapshot.SIM)
 	registrationState := ""
 	if snapshot.StatusKnown {
-		registrationState = snapshot.Registration.String()
-	} else if snapshot.State == mmodem.ModemStateSearching {
-		registrationState = mmodem.Modem3GPPRegistrationStateSearching.String()
+		registrationState = registrationStateName(snapshot.Status.Registration)
 	}
 	resp := &ModemResponse{
 		Manufacturer:      device.Manufacturer,
@@ -157,24 +153,24 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		HardwareRevision:  device.HardwareRevision,
 		Name:              name,
 		Number:            snapshot.Number,
-		State:             modemStateValue(snapshot.State),
-		UnlockRequired:    snapshot.UnlockRequired.String(),
+		State:             modemStateValue(snapshot),
+		UnlockRequired:    unlockRequired(snapshot),
 		UnlockSupported:   unlockSupported(device),
 		SIM:               sim,
 		Slots:             simSlots,
-		AccessTechnology:  accessTechnologyString(snapshot.Access),
+		AccessTechnology:  accessTechnologyString(snapshot.Status.Technology),
 		RegistrationState: registrationState,
 		RegisteredOperator: RegisteredOperatorResponse{
-			Name: snapshot.OperatorName,
-			Code: snapshot.OperatorCode,
+			Name: snapshot.Status.OperatorName,
+			Code: snapshot.Status.OperatorID,
 		},
-		SignalQuality: snapshot.SignalQuality,
-		AirplaneMode:  snapshot.AirplaneMode,
+		SignalQuality: uint32(snapshot.Status.SignalQuality),
+		AirplaneMode:  snapshot.AirplaneMode(),
 		SupportsEsim:  supportsEsim,
 	}
-	if snapshot.AirplaneMode || !snapshot.StatusKnown {
+	if snapshot.AirplaneMode() || !snapshot.StatusKnown {
 		resp.AccessTechnology = ""
-		if snapshot.AirplaneMode {
+		if snapshot.AirplaneMode() {
 			resp.RegistrationState = ""
 		}
 		resp.RegisteredOperator = RegisteredOperatorResponse{}
@@ -222,51 +218,47 @@ func (c *catalog) buildLockedResponse(ctx context.Context, device *mmodem.Modem)
 		HardwareRevision: device.HardwareRevision,
 		Name:             name,
 		Number:           snapshot.Number,
-		State:            modemStateValue(snapshot.State),
-		UnlockRequired:   snapshot.UnlockRequired.String(),
+		State:            modemStateValue(snapshot),
+		UnlockRequired:   unlockRequired(snapshot),
 		UnlockSupported:  unlockSupported(device),
-		AirplaneMode:     snapshot.AirplaneMode,
+		AirplaneMode:     snapshot.AirplaneMode(),
 		SupportsEsim:     supportsEsim,
 		Slots:            []SlotResponse{},
 	}, nil
 }
 
-func modemStateValue(state mmodem.ModemState) string {
-	switch state {
-	case mmodem.ModemStateFailed:
+func modemStateValue(snapshot mmodem.ModemSnapshot) string {
+	status := snapshot.Status
+	switch {
+	case status.SIM == wwanmodem.SIMStateFailure:
 		return "failed"
-	case mmodem.ModemStateUnknown:
-		return "unknown"
-	case mmodem.ModemStateInitializing:
-		return "initializing"
-	case mmodem.ModemStateLocked:
+	case status.SIM == wwanmodem.SIMStateLocked:
 		return "locked"
-	case mmodem.ModemStateDisabled:
+	case status.Power == wwanmodem.PowerStateOff || status.Power == wwanmodem.PowerStateLow:
 		return "disabled"
-	case mmodem.ModemStateDisabling:
-		return "disabling"
-	case mmodem.ModemStateEnabling:
-		return "enabling"
-	case mmodem.ModemStateEnabled:
-		return "enabled"
-	case mmodem.ModemStateSearching:
-		return "searching"
-	case mmodem.ModemStateRegistered:
-		return "registered"
-	case mmodem.ModemStateDisconnecting:
-		return "disconnecting"
-	case mmodem.ModemStateConnecting:
-		return "connecting"
-	case mmodem.ModemStateConnected:
+	case status.OwnBearers > 0:
 		return "connected"
+	case status.Registration == wwanmodem.RegistrationSearching:
+		return "searching"
+	case status.Registration == wwanmodem.RegistrationHome || status.Registration == wwanmodem.RegistrationRoaming:
+		return "registered"
+	case status.Power == wwanmodem.PowerStateOn:
+		return "enabled"
 	default:
 		return "unknown"
 	}
 }
 
+func unlockRequired(snapshot mmodem.ModemSnapshot) string {
+	if snapshot.Locked() {
+		return "sim-pin"
+	}
+	return "none"
+}
+
 func unlockSupported(device *mmodem.Modem) bool {
 	snapshot := device.Snapshot()
-	return snapshot.State == mmodem.ModemStateLocked && snapshot.UnlockRequired == mmodem.ModemLockSimPin
+	return snapshot.Locked()
 }
 
 func (c *catalog) buildSlotsResponse(ctx context.Context, snapshot mmodem.ModemSnapshot) ([]SlotResponse, error) {
@@ -340,34 +332,43 @@ func (c *catalog) applyOverviewExtensions(ctx context.Context, device *mmodem.Mo
 	return nil
 }
 
-func accessTechnologyString(access []mmodem.ModemAccessTechnology) string {
-	if len(access) == 0 {
+func accessTechnologyString(access wwanmodem.Technology) string {
+	if access == 0 {
 		return ""
 	}
-	priority := []mmodem.ModemAccessTechnology{
-		mmodem.ModemAccessTechnology5GNR,
-		mmodem.ModemAccessTechnologyLte,
-		mmodem.ModemAccessTechnologyLteCatM,
-		mmodem.ModemAccessTechnologyLteNBIot,
-		mmodem.ModemAccessTechnologyHspaPlus,
-		mmodem.ModemAccessTechnologyHspa,
-		mmodem.ModemAccessTechnologyHsupa,
-		mmodem.ModemAccessTechnologyHsdpa,
-		mmodem.ModemAccessTechnologyUmts,
-		mmodem.ModemAccessTechnologyEdge,
-		mmodem.ModemAccessTechnologyGprs,
-		mmodem.ModemAccessTechnologyGsm,
-		mmodem.ModemAccessTechnologyGsmCompact,
-		mmodem.ModemAccessTechnologyEvdob,
-		mmodem.ModemAccessTechnologyEvdoa,
-		mmodem.ModemAccessTechnologyEvdo0,
-		mmodem.ModemAccessTechnology1xrtt,
-		mmodem.ModemAccessTechnologyPots,
+	priority := []struct {
+		technology wwanmodem.Technology
+		label      string
+	}{
+		{wwanmodem.TechnologyNR5GSA, "5GNR"},
+		{wwanmodem.TechnologyNR5GNSA, "5GNR"},
+		{wwanmodem.TechnologyLTE, "LTE"},
+		{wwanmodem.TechnologyLTECatM, "LTE Cat-M"},
+		{wwanmodem.TechnologyLTENB, "LTE NB-IoT"},
+		{wwanmodem.TechnologyUMTS, "UMTS"},
+		{wwanmodem.TechnologyGSM, "GSM"},
 	}
-	for _, tech := range priority {
-		if slices.Contains(access, tech) {
-			return tech.String()
+	for _, candidate := range priority {
+		if access&candidate.technology != 0 {
+			return candidate.label
 		}
 	}
-	return access[0].String()
+	return ""
+}
+
+func registrationStateName(state wwanmodem.RegistrationState) string {
+	switch state {
+	case wwanmodem.RegistrationIdle:
+		return "Idle"
+	case wwanmodem.RegistrationSearching:
+		return "Searching"
+	case wwanmodem.RegistrationHome:
+		return "Home"
+	case wwanmodem.RegistrationRoaming:
+		return "Roaming"
+	case wwanmodem.RegistrationDenied:
+		return "Denied"
+	default:
+		return "Unknown"
+	}
 }

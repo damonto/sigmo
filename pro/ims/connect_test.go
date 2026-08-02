@@ -24,6 +24,7 @@ import (
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/pro/websheet"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 func TestRetryDelays(t *testing.T) {
@@ -825,7 +826,7 @@ func TestConnectOnceEnablesQMAPBeforeVoLTE(t *testing.T) {
 				PrimaryPort:         "cdc-wdm3",
 				Ports: []mmodem.ModemPort{{
 					Device:   "cdc-wdm3",
-					PortType: mmodem.ModemPortTypeQmi,
+					PortType: wwanmodem.PortQMI,
 				}},
 			}
 			_, err := coordinator.connectOnce(context.Background(), modem, connectAttempt{sessionID: 1})
@@ -1447,7 +1448,7 @@ func TestRestartWaitsForDetachedSessionBeforeStartingReplacement(t *testing.T) {
 		EquipmentIdentifier: "modem-1",
 		Ports: []mmodem.ModemPort{{
 			Device:   "cdc-wdm0",
-			PortType: mmodem.ModemPortTypeMbim,
+			PortType: wwanmodem.PortMBIM,
 		}},
 	}
 	restartDone := make(chan struct{})

@@ -627,25 +627,27 @@ func TestDeviceSlot(t *testing.T) {
 
 func TestQMIDeviceSIMState(t *testing.T) {
 	const iccid = "8986000000000000000"
-	rawICCID := []byte{0x98, 0x68, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0}
+	errICCID := errors.New("ICCID unavailable")
 	errCardStatus := errors.New("card status rejected")
+	rawICCID := []byte{0x98, 0x68, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0}
+	rawOtherICCID := []byte{0x98, 0x68, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF1}
 	tests := []struct {
 		name      string
 		target    Target
+		openSlot  uint8
 		client    *fakeQMIClient
 		want      SIMState
+		wantFile  qcom.File
 		wantCalls []string
 		wantErr   error
 	}{
 		{
-			name:   "matching ready sim",
-			target: Target{Slot: 1, ICCID: " " + iccid + " "},
+			name:     "matching ready sim",
+			target:   Target{Slot: 1, ICCID: " " + iccid + " "},
+			openSlot: 1,
 			client: &fakeQMIClient{
-				slotStatus: qcom.SlotStatus{
-					ActiveSlot: 1,
-					Slots:      []qcom.Slot{{ICCID: rawICCID}},
-				},
-				cardStatus: qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateReady, []byte{0x01}),
+				transparentData: rawICCID,
+				cardStatus:      qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateReady, []byte{0x01}),
 			},
 			want: SIMState{
 				Supported:   true,
@@ -655,34 +657,76 @@ func TestQMIDeviceSIMState(t *testing.T) {
 				ICCID:       iccid,
 				Slot:        1,
 			},
-			wantCalls: []string{"slot-status", "card-status", "close"},
+			wantFile:  qcom.File{Session: qcom.SessionCardSlot1, Path: qmiICCIDFilePath},
+			wantCalls: []string{"card-status", "read-transparent", "close"},
 		},
 		{
-			name:   "recovers without slot status support",
-			target: Target{Slot: 1},
+			name:     "matching ready second slot",
+			target:   Target{Slot: 2, ICCID: iccid},
+			openSlot: 2,
 			client: &fakeQMIClient{
-				slotStatusErr: qcom.QMIErrorNotSupported,
-				cardStatus:    qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateReady, []byte{0x01}),
+				transparentData: rawICCID,
+				cardStatus:      qmiTestCardStatusForSlot(2, qcom.ApplicationStateReady, qcom.PersonalizationStateReady, []byte{0x01}),
 			},
 			want: SIMState{
 				Supported:   true,
+				Matches:     true,
 				Recoverable: true,
 				Ready:       true,
-				Slot:        1,
+				ICCID:       iccid,
+				Slot:        2,
 			},
-			wantCalls: []string{"slot-status", "card-status", "close"},
+			wantFile:  qcom.File{Session: qcom.SessionCardSlot2, Path: qmiICCIDFilePath},
+			wantCalls: []string{"card-status", "read-transparent", "close"},
 		},
 		{
-			name:   "returns card status error",
-			target: Target{Slot: 1},
-			client: &fakeQMIClient{slotStatusErr: qcom.QMIErrorNotSupported, cardStatusErr: errCardStatus},
-			want:   SIMState{Supported: true, Slot: 1},
-			wantCalls: []string{
-				"slot-status",
-				"card-status",
-				"close",
+			name:     "reports ICCID mismatch",
+			target:   Target{Slot: 1, ICCID: iccid},
+			openSlot: 1,
+			client: &fakeQMIClient{
+				transparentData: rawOtherICCID,
+				cardStatus:      qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateReady, []byte{0x01}),
 			},
-			wantErr: errCardStatus,
+			want: SIMState{
+				Supported:     true,
+				Recoverable:   true,
+				Ready:         true,
+				ICCIDMismatch: true,
+				ICCID:         "8986000000000000001",
+				Slot:          1,
+			},
+			wantFile:  qcom.File{Session: qcom.SessionCardSlot1, Path: qmiICCIDFilePath},
+			wantCalls: []string{"card-status", "read-transparent", "close"},
+		},
+		{
+			name:      "returns card status error",
+			target:    Target{Slot: 1},
+			openSlot:  1,
+			client:    &fakeQMIClient{cardStatusErr: errCardStatus},
+			want:      SIMState{Supported: true, Slot: 1},
+			wantCalls: []string{"card-status", "close"},
+			wantErr:   errCardStatus,
+		},
+		{
+			name:     "returns ICCID error",
+			target:   Target{Slot: 1, ICCID: iccid},
+			openSlot: 1,
+			client: &fakeQMIClient{
+				transparentErr: errICCID,
+				cardStatus:     qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateReady, []byte{0x01}),
+			},
+			want:      SIMState{Supported: true, Recoverable: true, Ready: true, Slot: 1},
+			wantFile:  qcom.File{Session: qcom.SessionCardSlot1, Path: qmiICCIDFilePath},
+			wantCalls: []string{"card-status", "read-transparent", "close"},
+			wantErr:   errICCID,
+		},
+		{
+			name:      "waits for USIM application",
+			target:    Target{Slot: 1, ICCID: iccid},
+			openSlot:  1,
+			client:    &fakeQMIClient{transparentData: rawICCID, cardStatus: qmiTestCardStatus(qcom.ApplicationStateDetected, qcom.PersonalizationStateReady, nil)},
+			want:      SIMState{Supported: true, Recoverable: true, Slot: 1},
+			wantCalls: []string{"card-status", "close"},
 		},
 	}
 
@@ -690,7 +734,7 @@ func TestQMIDeviceSIMState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			device := qmiDevice{
 				slot:       1,
-				openClient: qmiClientOpener(t, 1, tt.client, nil),
+				openClient: qmiClientOpener(t, tt.openSlot, tt.client, nil),
 			}
 
 			got, err := device.SIMState(context.Background(), tt.target)
@@ -706,6 +750,13 @@ func TestQMIDeviceSIMState(t *testing.T) {
 			}
 			if !slices.Equal(tt.client.calls, tt.wantCalls) {
 				t.Fatalf("client calls = %v, want %v", tt.client.calls, tt.wantCalls)
+			}
+			if slices.Contains(tt.wantCalls, "read-transparent") {
+				if tt.client.transparentRead.File.Session != tt.wantFile.Session ||
+					!bytes.Equal(tt.client.transparentRead.File.Path, tt.wantFile.Path) ||
+					tt.client.transparentRead.Length != qmiICCIDFileSize {
+					t.Fatalf("transparent read = %+v, want EF_ICCID", tt.client.transparentRead)
+				}
 			}
 		})
 	}
@@ -943,6 +994,9 @@ type fakeQMIClient struct {
 	msisdnErr           error
 	fileAttributes      qcom.FileAttributes
 	fileAttributesErr   error
+	transparentRead     qcom.TransparentRead
+	transparentData     []byte
+	transparentErr      error
 	writeRecord         qcom.RecordWrite
 	writeRecordErr      error
 	atr                 []byte
@@ -962,8 +1016,6 @@ type fakeQMIClient struct {
 	powerOffErr         error
 	afterPowerOff       func()
 	powerOnErr          error
-	slotStatus          qcom.SlotStatus
-	slotStatusErr       error
 	cardStatus          qcom.CardStatus
 	cardStatusErr       error
 	changeReq           qcom.ChangeProvisioningSessionRequest
@@ -978,6 +1030,12 @@ func (r *fakeQMIClient) MSISDN(context.Context) (qcom.DMSGetMSISDNResponse, erro
 func (r *fakeQMIClient) FileAttributes(context.Context, qcom.File) (qcom.FileAttributes, error) {
 	r.calls = append(r.calls, "file-attributes")
 	return r.fileAttributes, r.fileAttributesErr
+}
+
+func (r *fakeQMIClient) ReadTransparent(_ context.Context, req qcom.TransparentRead) ([]byte, error) {
+	r.calls = append(r.calls, "read-transparent")
+	r.transparentRead = req
+	return slices.Clone(r.transparentData), r.transparentErr
 }
 
 func (r *fakeQMIClient) WriteRecord(_ context.Context, req qcom.RecordWrite) error {
@@ -1036,11 +1094,6 @@ func (r *fakeQMIClient) PowerOffSIM(_ context.Context, slot uint8) error {
 func (r *fakeQMIClient) PowerOnSIM(_ context.Context, req qcom.PowerOnSIMRequest) error {
 	r.calls = append(r.calls, fmtCall("power-on", req.Slot))
 	return r.powerOnErr
-}
-
-func (r *fakeQMIClient) SlotStatus(context.Context) (qcom.SlotStatus, error) {
-	r.calls = append(r.calls, "slot-status")
-	return r.slotStatus, r.slotStatusErr
 }
 
 func (r *fakeQMIClient) CardStatus(context.Context) (qcom.CardStatus, error) {

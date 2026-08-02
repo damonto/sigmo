@@ -110,9 +110,7 @@ func TestRegistryRetriesAfterWatcherStartupFailure(t *testing.T) {
 		if watchCalls == 1 {
 			return nil, errors.New("watch unavailable")
 		}
-		stream := make(chan wwanmodem.Result[wwanmodem.DeviceEvent])
-		close(stream)
-		return stream, nil
+		return make(chan wwanmodem.Result[wwanmodem.DeviceEvent]), nil
 	}
 
 	if _, err := registry.Modems(context.Background()); err == nil {

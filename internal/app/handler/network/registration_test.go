@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -68,7 +69,7 @@ func TestNewNetworkRequiresDependencies(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		preferences func(t *testing.T) *mmodem.NetworkPreferences
+		preferences func(t *testing.T) *networkprefs.Store
 		store       func(t *testing.T) *storage.Store
 		want        error
 	}{
@@ -82,11 +83,11 @@ func TestNewNetworkRequiresDependencies(t *testing.T) {
 		},
 		{
 			name: "storage required",
-			preferences: func(t *testing.T) *mmodem.NetworkPreferences {
+			preferences: func(t *testing.T) *networkprefs.Store {
 				t.Helper()
-				prefs, err := mmodem.NewNetworkPreferences(openNetworkTestStore(t))
+				prefs, err := networkprefs.New(openNetworkTestStore(t))
 				if err != nil {
-					t.Fatalf("NewNetworkPreferences() error = %v", err)
+					t.Fatalf("networkprefs.New() error = %v", err)
 				}
 				return prefs
 			},
@@ -99,7 +100,7 @@ func TestNewNetworkRequiresDependencies(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			var preferences *mmodem.NetworkPreferences
+			var preferences *networkprefs.Store
 			if tt.preferences != nil {
 				preferences = tt.preferences(t)
 			}

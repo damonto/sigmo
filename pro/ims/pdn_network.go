@@ -19,6 +19,7 @@ import (
 	imsgo "github.com/damonto/ims-go"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 var imsInterfacePollInterval = time.Second
@@ -543,7 +544,7 @@ func voLTEInterfaceName(modem *mmodem.Modem) (string, error) {
 		return "", errors.New("modem is required")
 	}
 	for _, port := range modem.Ports {
-		if port.PortType == mmodem.ModemPortTypeNet && strings.TrimSpace(port.Device) != "" {
+		if port.PortType == wwanmodem.PortNetwork && strings.TrimSpace(port.Device) != "" {
 			return filepath.Base(strings.TrimSpace(port.Device)), nil
 		}
 	}

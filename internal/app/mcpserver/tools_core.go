@@ -26,6 +26,7 @@ import (
 	internetcore "github.com/damonto/sigmo/internal/pkg/internet"
 	messagecore "github.com/damonto/sigmo/internal/pkg/message"
 	modemcore "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -38,7 +39,7 @@ type CoreToolsConfig struct {
 	InternetConnector   *internetcore.Connector
 	InternetConnections appconnectivity.InternetConnections
 	Relay               *forwarder.Relay
-	NetworkPreferences  *modemcore.NetworkPreferences
+	NetworkPreferences  *networkprefs.Store
 	Storage             *storage.Store
 	Reminders           *reminder.Scheduler
 	MessageRoute        messagecore.Route

@@ -1,52 +1,110 @@
 package network
 
 import (
+	"context"
 	"errors"
+	"reflect"
 	"testing"
 
-	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
+
+func TestBandsResponse(t *testing.T) {
+	lte41 := wwanmodem.Band{Technology: wwanmodem.TechnologyLTE, Number: 41}
+	nr78 := wwanmodem.Band{Technology: wwanmodem.TechnologyNR5GSA, Number: 78}
+	tests := []struct {
+		name      string
+		supported []wwanmodem.Band
+		current   []wwanmodem.Band
+		want      *BandsResponse
+	}{
+		{
+			name:      "normalize empty current selection to automatic",
+			supported: []wwanmodem.Band{lte41, nr78},
+			want: &BandsResponse{
+				Supported: []BandResponse{
+					{Label: "Any", Current: true},
+					{Value: bandValue(lte41), Label: "LTE B41"},
+					{Value: bandValue(nr78), Label: "NR n78"},
+				},
+				Current: []BandValue{{}},
+			},
+		},
+		{
+			name:      "normalize complete current set to automatic regardless of order",
+			supported: []wwanmodem.Band{lte41, nr78},
+			current:   []wwanmodem.Band{nr78, lte41},
+			want: &BandsResponse{
+				Supported: []BandResponse{
+					{Label: "Any", Current: true},
+					{Value: bandValue(lte41), Label: "LTE B41"},
+					{Value: bandValue(nr78), Label: "NR n78"},
+				},
+				Current: []BandValue{{}},
+			},
+		},
+		{
+			name:      "preserve manual subset selection",
+			supported: []wwanmodem.Band{lte41, nr78},
+			current:   []wwanmodem.Band{nr78},
+			want: &BandsResponse{
+				Supported: []BandResponse{
+					{Label: "Any"},
+					{Value: bandValue(lte41), Label: "LTE B41"},
+					{Value: bandValue(nr78), Label: "NR n78", Current: true},
+				},
+				Current: []BandValue{bandValue(nr78)},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := bandsResponse(tt.supported, tt.current); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("bandsResponse() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBandLabelCombinedNR(t *testing.T) {
+	band := wwanmodem.Band{
+		Technology: wwanmodem.TechnologyNR5GNSA | wwanmodem.TechnologyNR5GSA,
+		Number:     78,
+	}
+	if got := bandLabel(band); got != "NR n78" {
+		t.Fatalf("bandLabel() = %q, want %q", got, "NR n78")
+	}
+}
 
 func TestValidateBandValues(t *testing.T) {
 	tests := []struct {
 		name      string
-		supported []mmodem.ModemBand
-		bands     []mmodem.ModemBand
+		supported []wwanmodem.Band
+		bands     []wwanmodem.Band
 		wantErr   error
 	}{
 		{
 			name:      "accept supported bands",
-			supported: []mmodem.ModemBand{mmodem.ModemBandAny, 71, 378},
-			bands:     []mmodem.ModemBand{71, 378},
+			supported: []wwanmodem.Band{{Technology: wwanmodem.TechnologyLTE, Number: 41}, {Technology: wwanmodem.TechnologyNR5GSA, Number: 78}},
+			bands:     []wwanmodem.Band{{Technology: wwanmodem.TechnologyLTE, Number: 41}, {Technology: wwanmodem.TechnologyNR5GSA, Number: 78}},
 		},
 		{
 			name:      "reject empty",
-			supported: []mmodem.ModemBand{mmodem.ModemBandAny, 71},
+			supported: []wwanmodem.Band{{Technology: wwanmodem.TechnologyLTE, Number: 41}},
 			wantErr:   errBandsRequired,
 		},
 		{
 			name:      "reject unsupported",
-			supported: []mmodem.ModemBand{mmodem.ModemBandAny, 71},
-			bands:     []mmodem.ModemBand{72},
+			supported: []wwanmodem.Band{{Technology: wwanmodem.TechnologyLTE, Number: 41}},
+			bands:     []wwanmodem.Band{{Technology: wwanmodem.TechnologyLTE, Number: 42}},
 			wantErr:   errUnsupportedBand,
 		},
 		{
 			name:      "reject duplicate",
-			supported: []mmodem.ModemBand{mmodem.ModemBandAny, 71},
-			bands:     []mmodem.ModemBand{71, 71},
+			supported: []wwanmodem.Band{{Technology: wwanmodem.TechnologyLTE, Number: 41}},
+			bands:     []wwanmodem.Band{{Technology: wwanmodem.TechnologyLTE, Number: 41}, {Technology: wwanmodem.TechnologyLTE, Number: 41}},
 			wantErr:   errDuplicateBand,
-		},
-		{
-			name:      "reject duplicate any",
-			supported: []mmodem.ModemBand{mmodem.ModemBandAny, 71},
-			bands:     []mmodem.ModemBand{mmodem.ModemBandAny, mmodem.ModemBandAny},
-			wantErr:   errDuplicateBand,
-		},
-		{
-			name:      "reject any with other bands",
-			supported: []mmodem.ModemBand{mmodem.ModemBandAny, 71},
-			bands:     []mmodem.ModemBand{mmodem.ModemBandAny, 71},
-			wantErr:   errAnyBandExclusive,
 		},
 	}
 
@@ -57,5 +115,16 @@ func TestValidateBandValues(t *testing.T) {
 				t.Fatalf("validateBandValues() error = %v, want %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateBandsAutomaticSelection(t *testing.T) {
+	n := new(network)
+	if bands, err := n.validateBands(context.Background(), nil, []BandValue{{}}); err != nil || bands != nil {
+		t.Fatalf("validateBands(any) = %v, %v; want nil, nil", bands, err)
+	}
+	_, err := n.validateBands(context.Background(), nil, []BandValue{{}, {Technology: uint64(wwanmodem.TechnologyLTE), Number: 41}})
+	if !errors.Is(err, errAnyBandExclusive) {
+		t.Fatalf("validateBands(any plus LTE) error = %v, want %v", err, errAnyBandExclusive)
 	}
 }

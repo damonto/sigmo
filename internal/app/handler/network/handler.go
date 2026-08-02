@@ -9,6 +9,7 @@ import (
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -38,7 +39,7 @@ const (
 	errorCodeAirplaneModeUnsupported = "airplane_mode_unsupported"
 )
 
-func New(registry *mmodem.Registry, preferences *mmodem.NetworkPreferences, store *storage.Store) (*Handler, error) {
+func New(registry *mmodem.Registry, preferences *networkprefs.Store, store *storage.Store) (*Handler, error) {
 	networks, err := newNetwork(preferences, store)
 	if err != nil {
 		return nil, err

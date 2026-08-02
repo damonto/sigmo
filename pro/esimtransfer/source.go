@@ -14,6 +14,7 @@ import (
 	"github.com/damonto/ts43-go"
 	"github.com/damonto/wwan-go/at"
 	"github.com/damonto/wwan-go/ccid"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 	usim "github.com/damonto/wwan-go/sim"
 	usimcard "github.com/damonto/wwan-go/sim/card"
 
@@ -105,7 +106,7 @@ func openCCIDSource(ctx context.Context, readerName string, logger *slog.Logger)
 }
 
 func openATSource(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader, error) {
-	port, err := modem.Port(mmodem.ModemPortTypeAt)
+	port, err := modem.Port(wwanmodem.PortAT)
 	if err != nil {
 		return nil, err
 	}

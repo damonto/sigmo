@@ -8,14 +8,15 @@ import (
 	wwanmodem "github.com/damonto/wwan-go/modem"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 )
 
 func TestAirplaneModeUnsupported(t *testing.T) {
 	t.Parallel()
 
-	preferences, err := mmodem.NewNetworkPreferences(openNetworkTestStore(t))
+	preferences, err := networkprefs.New(openNetworkTestStore(t))
 	if err != nil {
-		t.Fatalf("NewNetworkPreferences() error = %v", err)
+		t.Fatalf("networkprefs.New() error = %v", err)
 	}
 	n, err := newNetwork(preferences, openNetworkTestStore(t))
 	if err != nil {
@@ -25,7 +26,7 @@ func TestAirplaneModeUnsupported(t *testing.T) {
 		EquipmentIdentifier: "modem-1",
 		PrimaryPort:         "ttyUSB2",
 		Ports: []mmodem.ModemPort{
-			{PortType: mmodem.ModemPortTypeAt, Device: "ttyUSB2"},
+			{PortType: wwanmodem.PortAT, Device: "ttyUSB2"},
 		},
 	}
 

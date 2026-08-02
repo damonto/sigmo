@@ -33,6 +33,7 @@ import (
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	pmessage "github.com/damonto/sigmo/internal/pkg/message"
 	"github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -50,7 +51,7 @@ type RegisterConfig struct {
 	InternetConnector   *pinternet.Connector
 	InternetConnections appconnectivity.InternetConnections
 	Relay               *forwarder.Relay
-	NetworkPreferences  *modem.NetworkPreferences
+	NetworkPreferences  *networkprefs.Store
 	Storage             *storage.Store
 	WebPush             *webpush.Client
 	Reminders           *reminder.Scheduler

@@ -229,7 +229,7 @@ func TestModemSMSKey(t *testing.T) {
 			{Storage: wwanmodem.MessageStorageSIM, ID: 9},
 			{Storage: wwanmodem.MessageStorageDevice, ID: 3},
 		},
-		State:     mmodem.SMSStateReceived,
+		State:     wwanmodem.MessageStateReceivedUnread,
 		Number:    "+12025550199",
 		Text:      "balance",
 		Timestamp: timestamp,
@@ -259,7 +259,7 @@ func TestModemSMSKey(t *testing.T) {
 		name   string
 		mutate func(*mmodem.SMS)
 	}{
-		{name: "state", mutate: func(sms *mmodem.SMS) { sms.State = mmodem.SMSStateSent }},
+		{name: "state", mutate: func(sms *mmodem.SMS) { sms.State = wwanmodem.MessageStateStoredSent }},
 		{name: "number", mutate: func(sms *mmodem.SMS) { sms.Number = "+12025550200" }},
 		{name: "text", mutate: func(sms *mmodem.SMS) { sms.Text = "usage" }},
 		{name: "timestamp", mutate: func(sms *mmodem.SMS) { sms.Timestamp = sms.Timestamp.Add(time.Nanosecond) }},

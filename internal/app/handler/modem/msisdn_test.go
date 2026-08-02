@@ -7,6 +7,7 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 func TestMSISDNUpdate(t *testing.T) {
@@ -17,7 +18,7 @@ func TestMSISDNUpdate(t *testing.T) {
 		Sim:                 &mmodem.SIM{Identifier: "8986000000000000000"},
 		Ports: []mmodem.ModemPort{
 			{
-				PortType: mmodem.ModemPortTypeAt,
+				PortType: wwanmodem.PortAT,
 				Device:   "/dev/ttyUSB2",
 			},
 		},

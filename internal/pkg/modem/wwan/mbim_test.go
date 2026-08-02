@@ -43,6 +43,94 @@ func TestDeviceMSISDNMBIM(t *testing.T) {
 	}
 }
 
+func TestDeviceSIMStateMBIM(t *testing.T) {
+	const iccid = "8901000000000000001"
+	readErr := errors.New("subscriber status unavailable")
+	tests := []struct {
+		name    string
+		target  Target
+		ready   uiccmbim.SubscriberReadyStatusResponse
+		err     error
+		want    SIMState
+		wantErr error
+	}{
+		{
+			name:   "matching initialized sim",
+			target: Target{ICCID: " " + iccid + " "},
+			ready: uiccmbim.SubscriberReadyStatusResponse{
+				ReadyState: uiccmbim.SubscriberReadyStateInitialized,
+				SIMICCID:   " " + iccid + " ",
+			},
+			want: SIMState{
+				Supported:   true,
+				Matches:     true,
+				Recoverable: true,
+				Ready:       true,
+				ICCID:       iccid,
+				Slot:        1,
+			},
+		},
+		{
+			name:   "waits for initialized state",
+			target: Target{ICCID: iccid},
+			ready: uiccmbim.SubscriberReadyStatusResponse{
+				ReadyState: uiccmbim.SubscriberReadyStateNotInitialized,
+				SIMICCID:   iccid,
+			},
+			want: SIMState{
+				Supported:   true,
+				Matches:     true,
+				Recoverable: true,
+				ICCID:       iccid,
+				Slot:        1,
+			},
+		},
+		{
+			name:   "reports ICCID mismatch",
+			target: Target{ICCID: iccid},
+			ready: uiccmbim.SubscriberReadyStatusResponse{
+				ReadyState: uiccmbim.SubscriberReadyStateInitialized,
+				SIMICCID:   "8901000000000000002",
+			},
+			want: SIMState{
+				Supported:     true,
+				Recoverable:   true,
+				Ready:         true,
+				ICCIDMismatch: true,
+				ICCID:         "8901000000000000002",
+				Slot:          1,
+			},
+		},
+		{
+			name:    "query error",
+			target:  Target{ICCID: iccid},
+			err:     readErr,
+			want:    SIMState{Supported: true, Slot: 1},
+			wantErr: readErr,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &fakeMBIMNetwork{subscriberReady: tt.ready, subscriberReadyErr: tt.err}
+			got, err := mbimDeviceWithNetwork(client).SIMState(context.Background(), tt.target)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("SIMState() error = %v, want %v", err, tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("SIMState() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("SIMState() = %+v, want %+v", got, tt.want)
+			}
+			if !client.closed {
+				t.Fatal("client was not closed")
+			}
+		})
+	}
+}
+
 func TestDeviceVoLTEStatusMBIM(t *testing.T) {
 	device, err := Open(Config{PortType: PortTypeMBIM, Device: "/dev/cdc-wdm0", Slot: 1})
 	if err != nil {
@@ -161,6 +249,7 @@ func (r *fakeMBIMNetwork) Close() error {
 
 func mbimDeviceWithNetwork(client mbimNetwork) mbimDevice {
 	return mbimDevice{
+		slot: 1,
 		openNetwork: func(context.Context) (mbimNetwork, error) {
 			return client, nil
 		},

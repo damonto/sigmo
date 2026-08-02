@@ -10,8 +10,11 @@ import (
 	"sync"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	modemlink "github.com/damonto/sigmo/internal/pkg/modem/link"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
+	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 	"github.com/damonto/sigmo/internal/pkg/storage"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 const (
@@ -68,7 +71,7 @@ type Connector struct {
 	proxy              *Proxy
 	state              *storage.Store
 	persistence        connectionStateStore
-	networkPreferences *mmodem.NetworkPreferences
+	networkPreferences *networkprefs.Store
 	qmapConnections    map[string]*qmapConnection
 	qmapEnabled        map[string]bool
 	qmapPendingNormal  map[string]Preferences
@@ -78,7 +81,7 @@ type Connector struct {
 type ConnectorConfig struct {
 	Proxy              *Proxy
 	State              *storage.Store
-	NetworkPreferences *mmodem.NetworkPreferences
+	NetworkPreferences *networkprefs.Store
 }
 
 type internetModem interface {
@@ -179,10 +182,10 @@ func (m modemAccess) prepareBearerDataFormat(ctx context.Context) error {
 	if m.modem == nil {
 		return ErrModemRequired
 	}
-	if m.modem.PrimaryPortType() != mmodem.ModemPortTypeQmi {
+	if m.modem.PrimaryPortType() != wwanmodem.PortQMI {
 		return nil
 	}
-	return mmodem.RestoreNonQMAPDataFormat(ctx, m.modem)
+	return modemlink.RestoreNonQMAPDataFormat(ctx, m.modem)
 }
 
 func (m modemAccess) bearer(ctx context.Context, path uint64) (*mmodem.Bearer, error) {
@@ -443,7 +446,7 @@ func (c *Connector) Connect(ctx context.Context, modem *mmodem.Modem, prefs Pref
 	if err := ValidatePreferences(prefs); err != nil {
 		return nil, err
 	}
-	if modem.PrimaryPortType() == mmodem.ModemPortTypeQmi && c.qmapEnabledFor(modem.EquipmentIdentifier) {
+	if modem.PrimaryPortType() == wwanmodem.PortQMI && c.qmapEnabledFor(modem.EquipmentIdentifier) {
 		return c.connectQMAP(ctx, modem, prefs)
 	}
 	access := modemAccess{modem: modem}

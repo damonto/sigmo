@@ -22,7 +22,7 @@ func TestOpenDeviceRejectsInvalidInput(t *testing.T) {
 			modem: &Modem{
 				PrimaryPort: "/dev/ttyUSB0",
 				Ports: []ModemPort{
-					{PortType: ModemPortTypeAt, Device: "/dev/ttyUSB0"},
+					{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB0"},
 				},
 			},
 			wantErr: wwan.ErrUnsupported,
@@ -33,7 +33,7 @@ func TestOpenDeviceRejectsInvalidInput(t *testing.T) {
 				PrimaryPort:    "/dev/cdc-wdm0",
 				PrimarySimSlot: maxSIMSlot + 1,
 				Ports: []ModemPort{
-					{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm0"},
+					{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm0"},
 				},
 			},
 		},
@@ -60,7 +60,7 @@ func TestOpenDeviceReusesQMISessionForModemGeneration(t *testing.T) {
 		PrimaryPort:         "/dev/cdc-wdm0",
 		PrimarySimSlot:      1,
 		Ports: []ModemPort{
-			{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm0"},
+			{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm0"},
 		},
 	}
 
@@ -125,7 +125,7 @@ func TestOpenDeviceConcurrentQMISessionReuse(t *testing.T) {
 		PrimaryPort:    "/dev/cdc-wdm0",
 		PrimarySimSlot: 1,
 		Ports: []ModemPort{
-			{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm0"},
+			{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm0"},
 		},
 	}
 	const count = 32
@@ -169,7 +169,7 @@ func TestOpenDeviceKeepsMBIMOperationScoped(t *testing.T) {
 		PrimaryPort:    "/dev/cdc-wdm0",
 		PrimarySimSlot: 1,
 		Ports: []ModemPort{
-			{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+			{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
 		},
 	}
 	first, err := OpenDevice(modem)
@@ -197,8 +197,8 @@ func TestOpenVoLTEDeviceReusesGenerationQMISession(t *testing.T) {
 		PrimaryPort:         "/dev/cdc-wdm1",
 		PrimarySimSlot:      1,
 		Ports: []ModemPort{
-			{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
-			{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+			{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm1"},
+			{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
 		},
 	}
 	device, err := OpenDevice(modem)
@@ -230,7 +230,7 @@ func TestMBIMDeviceUnsupportedOperations(t *testing.T) {
 		PrimaryPort:    "/dev/cdc-wdm0",
 		PrimarySimSlot: 1,
 		Ports: []ModemPort{
-			{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+			{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
 		},
 	})
 	if err != nil {
@@ -268,43 +268,43 @@ func TestOpenDeviceSelectsModemDevicePort(t *testing.T) {
 		name       string
 		modem      *Modem
 		wantDevice string
-		wantType   ModemPortType
+		wantType   wwanmodem.PortType
 	}{
 		{
 			name: "uses primary QMI port",
 			modem: &Modem{
 				PrimaryPort: "/dev/cdc-wdm1",
 				Ports: []ModemPort{
-					{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
-					{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+					{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
+					{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm1"},
 				},
 			},
 			wantDevice: "/dev/cdc-wdm1",
-			wantType:   ModemPortTypeQmi,
+			wantType:   wwanmodem.PortQMI,
 		},
 		{
 			name: "falls back to QMI port",
 			modem: &Modem{
 				PrimaryPort: "/dev/ttyUSB0",
 				Ports: []ModemPort{
-					{PortType: ModemPortTypeAt, Device: "/dev/ttyUSB0"},
-					{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+					{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB0"},
+					{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm1"},
 				},
 			},
 			wantDevice: "/dev/cdc-wdm1",
-			wantType:   ModemPortTypeQmi,
+			wantType:   wwanmodem.PortQMI,
 		},
 		{
 			name: "falls back to MBIM port",
 			modem: &Modem{
 				PrimaryPort: "/dev/ttyUSB0",
 				Ports: []ModemPort{
-					{PortType: ModemPortTypeAt, Device: "/dev/ttyUSB0"},
-					{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+					{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB0"},
+					{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
 				},
 			},
 			wantDevice: "/dev/cdc-wdm0",
-			wantType:   ModemPortTypeMbim,
+			wantType:   wwanmodem.PortMBIM,
 		},
 	}
 	for _, tt := range tests {
@@ -343,8 +343,8 @@ func TestQMIDeviceConfigForSlotPrefersQMI(t *testing.T) {
 			modem: &Modem{
 				PrimaryPort: "/dev/cdc-wdm0",
 				Ports: []ModemPort{
-					{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
-					{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+					{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
+					{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm1"},
 				},
 			},
 			wantDevice: "/dev/cdc-wdm1",
@@ -355,7 +355,7 @@ func TestQMIDeviceConfigForSlotPrefersQMI(t *testing.T) {
 			modem: &Modem{
 				PrimaryPort: "/dev/cdc-wdm0",
 				Ports: []ModemPort{
-					{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+					{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
 				},
 			},
 			wantErr: wwan.ErrUnsupported,
@@ -388,26 +388,26 @@ func TestResolveVoLTEEndpointPrefersQMIFallsBackToMBIM(t *testing.T) {
 		name       string
 		modem      *Modem
 		wantDevice string
-		wantType   ModemPortType
+		wantType   wwanmodem.PortType
 		wantErr    error
 	}{
 		{name: "nil modem", wantErr: errModemRequired},
 		{
 			name: "prefers QMI for IMS takeover",
 			modem: &Modem{PrimaryPort: "/dev/cdc-wdm0", Ports: []ModemPort{
-				{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
-				{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+				{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
+				{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm1"},
 			}},
 			wantDevice: "/dev/cdc-wdm1",
-			wantType:   ModemPortTypeQmi,
+			wantType:   wwanmodem.PortQMI,
 		},
 		{
 			name: "uses MBIM when QMI is unavailable",
 			modem: &Modem{PrimaryPort: "/dev/cdc-wdm0", Ports: []ModemPort{
-				{PortType: ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+				{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
 			}},
 			wantDevice: "/dev/cdc-wdm0",
-			wantType:   ModemPortTypeMbim,
+			wantType:   wwanmodem.PortMBIM,
 		},
 	}
 
@@ -434,7 +434,7 @@ func TestResolveVoLTEPortDoesNotRequireSIMSlot(t *testing.T) {
 	modem := &Modem{
 		PrimarySimSlot: maxSIMSlot + 1,
 		Ports: []ModemPort{{
-			PortType: ModemPortTypeMbim,
+			PortType: wwanmodem.PortMBIM,
 			Device:   "/dev/cdc-wdm0",
 		}},
 	}

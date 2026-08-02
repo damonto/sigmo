@@ -13,6 +13,7 @@ import (
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/wwan-go/at"
 	"github.com/damonto/wwan-go/mbim"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/damonto/wwan-go/qcom"
 	usim "github.com/damonto/wwan-go/sim"
 	usimcard "github.com/damonto/wwan-go/sim/card"
@@ -75,7 +76,7 @@ func atReaderPorts(modem *mmodem.Modem) []mmodem.ModemPort {
 	add := func(port mmodem.ModemPort) {
 		device := port.Device
 		device = strings.TrimSpace(device)
-		if device == "" || port.PortType != mmodem.ModemPortTypeAt {
+		if device == "" || port.PortType != wwanmodem.PortAT {
 			return
 		}
 		for _, candidate := range ports {
@@ -94,7 +95,7 @@ func atReaderPorts(modem *mmodem.Modem) []mmodem.ModemPort {
 		}
 	}
 	for _, port := range modem.Ports {
-		if port.PortType == mmodem.ModemPortTypeAt {
+		if port.PortType == wwanmodem.PortAT {
 			add(port)
 		}
 	}
@@ -116,7 +117,7 @@ func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (us
 	}
 	port := endpoint.Port
 	if strings.TrimSpace(cfg.QMIControlPort) != "" {
-		if port.PortType != mmodem.ModemPortTypeQmi {
+		if port.PortType != wwanmodem.PortQMI {
 			return nil, errors.New("dedicated QMI control port requires a QMI VoLTE modem")
 		}
 		port.Device = strings.TrimSpace(cfg.QMIControlPort)
@@ -124,7 +125,7 @@ func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (us
 	dedicatedQMI := strings.TrimSpace(cfg.QMIControlPort) != ""
 	slot := endpoint.SIMSlot
 	switch port.PortType {
-	case mmodem.ModemPortTypeQmi:
+	case wwanmodem.PortQMI:
 		if dedicatedQMI {
 			if cfg.MuxDataPort != nil || cfg.LegacyMuxDataPort != 0 {
 				return nil, errors.New("dedicated QMI cannot bind a data port")
@@ -166,7 +167,7 @@ func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (us
 			return nil, errors.Join(err, client.Close())
 		}
 		return reader, nil
-	case mmodem.ModemPortTypeMbim:
+	case wwanmodem.PortMBIM:
 		interfaceName, err := voLTEInterfaceName(modem)
 		if err != nil {
 			return nil, err

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 const (
@@ -42,7 +43,7 @@ func (s *session) executeInitialize(ctx context.Context, ussd *mmodem.USSD, code
 	if err != nil {
 		return "", fmt.Errorf("read ussd state: %w", err)
 	}
-	if state != mmodem.Modem3GPPUSSDSessionStateIdle {
+	if state != wwanmodem.USSDStateIdle && state != wwanmodem.USSDStateTerminated {
 		if err := ussd.Cancel(ctx); err != nil {
 			return "", fmt.Errorf("cancel ussd session: %w", err)
 		}
@@ -59,10 +60,10 @@ func (s *session) executeReply(ctx context.Context, ussd *mmodem.USSD, code stri
 	if err != nil {
 		return "", fmt.Errorf("read ussd state: %w", err)
 	}
-	if state == mmodem.Modem3GPPUSSDSessionStateUnknown {
+	if state == wwanmodem.USSDStateUnknown {
 		return "", ErrUnknownSessionStatus
 	}
-	if state != mmodem.Modem3GPPUSSDSessionStateUserResponse {
+	if state != wwanmodem.USSDStateUserResponse {
 		return "", ErrSessionNotReady
 	}
 	reply, err := ussd.Respond(ctx, code)

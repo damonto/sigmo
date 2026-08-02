@@ -1,4 +1,4 @@
-package modem
+package link
 
 import (
 	"context"
@@ -13,8 +13,10 @@ import (
 	"strings"
 	"syscall"
 
+	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/damonto/wwan-go/qcom"
 )
 
@@ -33,9 +35,8 @@ type QMAPSession struct {
 }
 
 type PreparedQMAP struct {
-	MuxDataPort       *qcom.WDSMuxDataPort
-	LegacyMuxDataPort qcom.WDSSIOPort
-	InterfaceName     string
+	MuxDataPort   *qcom.WDSMuxDataPort
+	InterfaceName string
 }
 
 type qmapMuxInterface struct {
@@ -50,14 +51,17 @@ type wdaDataFormatter interface {
 }
 
 var errQMAPMuxNotFound = errors.New("QMAP mux is unavailable")
+var errModemRequired = errors.New("modem is required")
 
-func PrepareQMAP(ctx context.Context, modem *Modem, muxID uint8) (PreparedQMAP, error) {
+func PrepareQMAP(ctx context.Context, modem *mmodem.Modem, muxID uint8) (PreparedQMAP, error) {
 	if modem == nil {
 		return PreparedQMAP{}, errModemRequired
 	}
-	legacyMuxDataPort, err := legacyQMAPDataPort(muxID)
-	if err != nil {
-		return PreparedQMAP{}, err
+	if muxID == 0 {
+		return PreparedQMAP{}, errors.New("QMAP mux ID is required")
+	}
+	if muxID > 8 {
+		return PreparedQMAP{}, fmt.Errorf("QMAP mux ID %d is outside supported range 1-8", muxID)
 	}
 	port, err := selectQMIDevicePort(modem)
 	if err != nil {
@@ -95,12 +99,11 @@ func PrepareQMAP(ctx context.Context, modem *Modem, muxID uint8) (PreparedQMAP, 
 			Endpoint: &qcom.DataEndpoint{Type: qcom.DataEndpointHSUSB, InterfaceID: interfaceNumber},
 			MuxID:    muxID,
 		},
-		LegacyMuxDataPort: legacyMuxDataPort,
-		InterfaceName:     interfaceName,
+		InterfaceName: interfaceName,
 	}, nil
 }
 
-func RestoreNonQMAPDataFormat(ctx context.Context, modem *Modem) error {
+func RestoreNonQMAPDataFormat(ctx context.Context, modem *mmodem.Modem) error {
 	if modem == nil {
 		return errModemRequired
 	}
@@ -273,14 +276,7 @@ func isNonQMAP(format qcom.WDADataFormat, linkLayer qcom.WDALinkLayerProtocol) b
 		format.DownlinkAggregationKnown && format.DownlinkAggregation == qcom.WDAAggregationDisabled
 }
 
-func legacyQMAPDataPort(muxID uint8) (qcom.WDSSIOPort, error) {
-	if muxID < 1 || muxID > 8 {
-		return 0, fmt.Errorf("QMAP mux ID %d is outside legacy RMNET range 1-8", muxID)
-	}
-	return qcom.WDSSIOPort(uint16(qcom.WDSSIOPortA2MuxRMNET0) + uint16(muxID-1)), nil
-}
-
-func OpenQMAPSession(ctx context.Context, modem *Modem, cfg QMAPConfig) (*QMAPSession, error) {
+func OpenQMAPSession(ctx context.Context, modem *mmodem.Modem, cfg QMAPConfig) (*QMAPSession, error) {
 	if modem == nil {
 		return nil, errModemRequired
 	}
@@ -391,9 +387,9 @@ func isQMAP(format qcom.WDADataFormat) bool {
 		format.DownlinkAggregationKnown && format.DownlinkAggregation == qcom.WDAAggregationQMAP
 }
 
-func qmapParentInterface(modem *Modem) (string, error) {
+func qmapParentInterface(modem *mmodem.Modem) (string, error) {
 	for _, port := range modem.Ports {
-		if port.PortType == ModemPortTypeNet && strings.TrimSpace(port.Device) != "" {
+		if port.PortType == wwanmodem.PortNetwork && strings.TrimSpace(port.Device) != "" {
 			return filepath.Base(strings.TrimSpace(port.Device)), nil
 		}
 	}
@@ -436,7 +432,7 @@ func ensureQMIMux(parent string, muxID uint8) (string, error) {
 }
 
 // RemoveQMAPMuxes removes mux netdevs after their WDS sessions have stopped.
-func RemoveQMAPMuxes(modem *Modem, muxIDs ...uint8) error {
+func RemoveQMAPMuxes(modem *mmodem.Modem, muxIDs ...uint8) error {
 	if modem == nil {
 		return errModemRequired
 	}
@@ -460,6 +456,16 @@ func RemoveQMAPMuxes(modem *Modem, muxIDs ...uint8) error {
 		}
 	}
 	return result
+}
+
+func selectQMIDevicePort(modem *mmodem.Modem) (mmodem.ModemPort, error) {
+	for _, port := range modem.Ports {
+		if port.PortType != wwanmodem.PortQMI || strings.TrimSpace(port.Device) == "" {
+			continue
+		}
+		return port, nil
+	}
+	return mmodem.ModemPort{}, wwan.ErrUnsupported
 }
 
 func qmapMuxInterfaceName(parent string, muxID uint8) (string, error) {

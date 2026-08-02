@@ -1,4 +1,4 @@
-package modem
+package link
 
 import (
 	"context"
@@ -246,39 +246,6 @@ func testWDADataFormat(linkLayer qcom.WDALinkLayerProtocol, aggregation qcom.WDA
 		UplinkAggregationKnown:   true,
 		DownlinkAggregation:      aggregation,
 		DownlinkAggregationKnown: true,
-	}
-}
-
-func TestLegacyQMAPDataPort(t *testing.T) {
-	tests := []struct {
-		name    string
-		muxID   uint8
-		want    qcom.WDSSIOPort
-		wantErr bool
-	}{
-		{name: "mux 1", muxID: 1, want: qcom.WDSSIOPortA2MuxRMNET0},
-		{name: "IMS mux 2", muxID: 2, want: qcom.WDSSIOPortA2MuxRMNET1},
-		{name: "mux 8", muxID: 8, want: qcom.WDSSIOPortA2MuxRMNET7},
-		{name: "zero", wantErr: true},
-		{name: "outside range", muxID: 9, wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := legacyQMAPDataPort(tt.muxID)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("legacyQMAPDataPort() error = nil, want error")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("legacyQMAPDataPort() error = %v", err)
-			}
-			if got != tt.want {
-				t.Fatalf("legacyQMAPDataPort() = %d, want %d", got, tt.want)
-			}
-		})
 	}
 }
 

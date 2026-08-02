@@ -9,6 +9,7 @@ import (
 	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	modemlink "github.com/damonto/sigmo/internal/pkg/modem/link"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
 )
 
@@ -71,8 +72,8 @@ func (o qualcomm410NetworkOps) routeOps() defaultRouteOps {
 }
 
 var (
-	openInternetQualcomm410Link = func(ctx context.Context, cfg mmodem.BAMDMUXLinkConfig) (qualcomm410Link, error) {
-		return mmodem.OpenBAMDMUXLink(ctx, cfg)
+	openInternetQualcomm410Link = func(ctx context.Context, cfg modemlink.BAMDMUXLinkConfig) (qualcomm410Link, error) {
+		return modemlink.OpenBAMDMUXLink(ctx, cfg)
 	}
 	validateInternetQualcomm410Layout    = mmodem.ValidateQualcomm410ModemLayout
 	currentQualcomm410Bearer             = currentBearer
@@ -291,7 +292,7 @@ func (c *Connector) openQualcomm410HolderLocked(ctx context.Context, modemID str
 	if !state.selected || state.link != nil {
 		return nil
 	}
-	link, err := openInternetQualcomm410Link(ctx, mmodem.BAMDMUXLinkConfig{
+	link, err := openInternetQualcomm410Link(ctx, modemlink.BAMDMUXLinkConfig{
 		ControlPort:   mmodem.Qualcomm410InternetQMI,
 		InterfaceName: mmodem.Qualcomm410InternetInterface,
 	})

@@ -24,6 +24,13 @@ var qmiMSISDNFile = qcom.File{
 	Path:    []byte{0x3F, 0x00, 0x7F, 0xFF, 0x6F, 0x40},
 }
 
+var qmiICCIDFilePath = []byte{0x3F, 0x00, 0x2F, 0xE2}
+
+const (
+	qmiICCIDFileSize = 10
+	qmiICCIDTimeout  = 2 * time.Second
+)
+
 type qmiDevice struct {
 	slot           uint8
 	imei           string
@@ -188,6 +195,7 @@ type qmiSIMPowerControl interface {
 type qmiClient interface {
 	MSISDN(ctx context.Context) (qcom.DMSGetMSISDNResponse, error)
 	FileAttributes(ctx context.Context, file qcom.File) (qcom.FileAttributes, error)
+	ReadTransparent(ctx context.Context, req qcom.TransparentRead) ([]byte, error)
 	WriteRecord(ctx context.Context, req qcom.RecordWrite) error
 	ATR(ctx context.Context) ([]byte, error)
 	IMSAStatus(ctx context.Context) (qcom.IMSAStatus, error)
@@ -198,7 +206,6 @@ type qmiClient interface {
 	SetIMSSTestMode(ctx context.Context, enabled bool) error
 	PowerOffSIM(ctx context.Context, slot uint8) error
 	PowerOnSIM(ctx context.Context, req qcom.PowerOnSIMRequest) error
-	SlotStatus(ctx context.Context) (qcom.SlotStatus, error)
 	CardStatus(ctx context.Context) (qcom.CardStatus, error)
 	ChangeProvisioningSession(ctx context.Context, req qcom.ChangeProvisioningSessionRequest) error
 	Close() error
@@ -237,16 +244,6 @@ func (u *qmiDevice) UpdateMSISDN(ctx context.Context, number string) (err error)
 		return fmt.Errorf("write QMI MSISDN record: %w", err)
 	}
 	return nil
-}
-
-type slotStatus struct {
-	ActiveSlot uint8
-	Slots      []slot
-}
-
-type slot struct {
-	ICCID string
-	ATR   []byte
 }
 
 type cardStatus struct {
@@ -475,30 +472,22 @@ func (u *qmiDevice) SIMState(ctx context.Context, target Target) (state SIMState
 	defer func() { release(err) }()
 
 	state = SIMState{Supported: true, Slot: slot}
-	var status slotStatus
-	var slotStatusRead bool
-	status, err = readQMISlotStatus(ctx, client)
-	if err != nil && !errors.Is(err, qcom.QMIErrorNotSupported) {
-		return state, fmt.Errorf("read device slot status: %w", err)
-	}
-	if err == nil {
-		slotStatusRead = true
-		iccid := deviceICCIDForSlot(status, slot)
-		state.ICCID = iccid
-		state.Matches = deviceSlotMatchesTarget(status, slot, state.ICCID, target)
-		state.ICCIDMismatch = target.ICCID != "" && state.ICCID != "" && state.ICCID != target.ICCID
-	}
-
 	cardStatus, err := readQMICardStatus(ctx, client)
 	if err != nil {
 		return state, fmt.Errorf("read device card status: %w", err)
 	}
 	state.Ready = deviceUSIMReadyForSlot(cardStatus, slot)
-	state.Recoverable = state.Matches
-	if !state.Recoverable && deviceUSIMPresentForSlot(cardStatus, slot) {
-		slotContradicted := target.Slot == 0 && slotStatusRead && status.ActiveSlot != 0 && status.ActiveSlot != slot
-		state.Recoverable = !slotContradicted
+	state.Recoverable = deviceUSIMPresentForSlot(cardStatus, slot)
+	if !state.Recoverable || !state.Ready {
+		return state, nil
 	}
+
+	state.ICCID, err = readQMIICCID(ctx, client, slot)
+	if err != nil {
+		return state, err
+	}
+	state.Matches = target.ICCID == "" || state.ICCID == target.ICCID
+	state.ICCIDMismatch = target.ICCID != "" && state.ICCID != "" && state.ICCID != target.ICCID
 	return state, nil
 }
 
@@ -508,20 +497,53 @@ func qmiPowerOnSIM(ctx context.Context, client qmiSIMPowerControl, req qcom.Powe
 	return client.PowerOnSIM(powerCtx, req)
 }
 
-func readQMISlotStatus(ctx context.Context, client qmiClient) (slotStatus, error) {
-	status, err := client.SlotStatus(ctx)
-	if err != nil {
-		return slotStatus{}, fmt.Errorf("read QMI UIM slot status: %w", err)
-	}
-	return qmiSlotStatus(status)
-}
-
 func readQMICardStatus(ctx context.Context, client qmiClient) (cardStatus, error) {
 	status, err := client.CardStatus(ctx)
 	if err != nil {
 		return cardStatus{}, fmt.Errorf("read QMI UIM card status: %w", err)
 	}
 	return qmiCardStatus(status), nil
+}
+
+func readQMIICCID(ctx context.Context, client qmiClient, slot uint8) (string, error) {
+	session, err := qmiCardSession(slot)
+	if err != nil {
+		return "", err
+	}
+	readCtx, cancel := context.WithTimeout(ctx, qmiICCIDTimeout)
+	defer cancel()
+	raw, err := client.ReadTransparent(readCtx, qcom.TransparentRead{
+		File: qcom.File{
+			Session: session,
+			Path:    qmiICCIDFilePath,
+		},
+		Length: qmiICCIDFileSize,
+	})
+	if err != nil {
+		return "", fmt.Errorf("read QMI UIM EF_ICCID: %w", err)
+	}
+	iccid, err := decodeQMIICCID(raw)
+	if err != nil {
+		return "", fmt.Errorf("decode QMI UIM EF_ICCID: %w", err)
+	}
+	return strings.TrimSpace(iccid), nil
+}
+
+func qmiCardSession(slot uint8) (qcom.Session, error) {
+	switch slot {
+	case 1:
+		return qcom.SessionCardSlot1, nil
+	case 2:
+		return qcom.SessionCardSlot2, nil
+	case 3:
+		return qcom.SessionCardSlot3, nil
+	case 4:
+		return qcom.SessionCardSlot4, nil
+	case 5:
+		return qcom.SessionCardSlot5, nil
+	default:
+		return 0, fmt.Errorf("map QMI UIM card session: slot %d is out of range", slot)
+	}
 }
 
 func changeQMIProvisioningSession(ctx context.Context, client qmiClient, slot uint8, aid []byte) error {
@@ -574,21 +596,6 @@ func equalCATProfile(current, wanted []byte) bool {
 
 func closeQMIClient(client qmiClient) {
 	closeClient(client, "QMI UIM")
-}
-
-func qmiSlotStatus(status qcom.SlotStatus) (slotStatus, error) {
-	slots := make([]slot, len(status.Slots))
-	for i, slot := range status.Slots {
-		if len(slot.ICCID) > 0 {
-			iccid, err := decodeQMIICCID(slot.ICCID)
-			if err != nil {
-				return slotStatus{}, fmt.Errorf("decode device slot %d ICCID: %w", i+1, err)
-			}
-			slots[i].ICCID = iccid
-		}
-		slots[i].ATR = slices.Clone(slot.ATR)
-	}
-	return slotStatus{ActiveSlot: status.ActiveSlot, Slots: slots}, nil
 }
 
 func decodeQMIICCID(raw []byte) (string, error) {
@@ -656,21 +663,4 @@ func deviceUSIMReadyForSlot(status cardStatus, slot uint8) bool {
 	}
 	app, ok := deviceUSIMApplication(card)
 	return ok && app.Ready
-}
-
-func deviceSlotMatchesTarget(status slotStatus, slot uint8, iccid string, target Target) bool {
-	if target.Slot != 0 && status.ActiveSlot != slot {
-		return false
-	}
-	if target.ICCID != "" && iccid != target.ICCID {
-		return false
-	}
-	return true
-}
-
-func deviceICCIDForSlot(status slotStatus, slot uint8) string {
-	if slot == 0 || int(slot) > len(status.Slots) {
-		return ""
-	}
-	return strings.TrimSpace(status.Slots[slot-1].ICCID)
 }

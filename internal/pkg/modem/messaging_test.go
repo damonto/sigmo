@@ -45,7 +45,7 @@ func TestSentSMSFromWWANCombinesMultipartResult(t *testing.T) {
 		{Storage: wwanmodem.MessageStorageSIM, ID: 10},
 		{Storage: wwanmodem.MessageStorageDevice, ID: 20},
 	}
-	if got.Generation != 7 || got.State != SMSStateSent || got.Storage != SMSStorageSM {
+	if got.Generation != 7 || got.State != wwanmodem.MessageStateStoredSent || got.Storage != wwanmodem.MessageStorageSIM {
 		t.Fatalf("SMS identity/state = %+v", got)
 	}
 	if got.Number != "+12025550199" || got.Text != "the complete original message" || !got.Timestamp.Equal(earlier) {
@@ -75,7 +75,7 @@ func TestSentSMSFromWWANBuildsFallbackResult(t *testing.T) {
 		now:     now,
 	})
 
-	if got.Generation != 0 || got.State != SMSStateSent || got.Storage != SMSStorageME || got.Number != "+12025550100" || got.Text != "hello" || !got.Timestamp.Equal(now) {
+	if got.Generation != 0 || got.State != wwanmodem.MessageStateStoredSent || got.Storage != wwanmodem.MessageStorageDevice || got.Number != "+12025550100" || got.Text != "hello" || !got.Timestamp.Equal(now) {
 		t.Fatalf("fallback SMS = %+v", got)
 	}
 	if !slices.Equal(got.MessageReferences, []uint32{8}) {

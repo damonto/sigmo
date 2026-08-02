@@ -27,18 +27,23 @@ export type SetCurrentModesRequest = {
 }
 
 export type BandResponse = {
-  value: number
+  value: BandValue
   label: string
   current: boolean
 }
 
+export type BandValue = {
+  technology: number
+  number: number
+}
+
 export type BandsResponse = {
   supported: BandResponse[]
-  current: number[]
+  current: BandValue[]
 }
 
 export type SetCurrentBandsRequest = {
-  bands: number[]
+  bands: BandValue[]
 }
 
 export type AirplaneModeResponse = {

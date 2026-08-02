@@ -139,7 +139,8 @@ func (r *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 			}
 		}
 		if allowPowerCycleFallback && !powerCycled && time.Since(started) >= simReenumerationGracePeriod {
-			if powerErr := r.powerCycleSIMTransport(ctx, active, target); powerErr != nil {
+			powerErr := r.powerCycleSIMTransport(ctx, active, target)
+			if powerErr != nil && !errors.Is(powerErr, devicewwan.ErrUnsupported) {
 				return simRefreshResult{}, fmt.Errorf("power cycle SIM: %w", powerErr)
 			}
 			powerCycled = true
@@ -187,6 +188,9 @@ func (r *Registry) readCurrentModem(ctx context.Context, current *Modem, target 
 		return currentModemRead{Modem: current, ReloadObserved: true}, err
 	}
 	reloaded := modem.Generation() != current.Generation() || modem.Path() != current.Path()
+	if strings.TrimSpace(target.ICCID) != "" {
+		return r.readCurrentESIM(ctx, modem, target, reloaded)
+	}
 	if modem.core != nil {
 		if info, infoErr := modem.core.SIMInfo(ctx); infoErr == nil {
 			modem.applySIMInfo(info)
@@ -194,6 +198,29 @@ func (r *Registry) readCurrentModem(ctx context.Context, current *Modem, target 
 		}
 	}
 	return currentModemRead{Modem: modem, SIMVisible: modemMatchesSIMTarget(modem, target), ReloadObserved: reloaded}, nil
+}
+
+func (r *Registry) readCurrentESIM(ctx context.Context, modem *Modem, target SIMTarget, reloaded bool) (currentModemRead, error) {
+	slot, err := deviceTargetSlot(modem, target)
+	if err != nil {
+		return currentModemRead{Modem: modem, ReloadObserved: reloaded}, err
+	}
+	device, err := openDeviceForSlot(modem, slot, r.deviceOpener())
+	if err != nil {
+		return currentModemRead{Modem: modem, ReloadObserved: reloaded}, err
+	}
+	state, err := device.SIMState(ctx, devicewwan.Target{Slot: target.Slot, ICCID: strings.TrimSpace(target.ICCID)})
+	if err != nil {
+		return currentModemRead{Modem: modem, ReloadObserved: reloaded}, fmt.Errorf("read SIM state: %w", err)
+	}
+	if state.ICCID != "" {
+		modem.applyActiveSIMIdentity(state.Slot, state.ICCID)
+	}
+	return currentModemRead{
+		Modem:          modem,
+		SIMVisible:     state.Matches && state.Ready,
+		ReloadObserved: reloaded,
+	}, nil
 }
 
 func simInfoMatchesTarget(info wwanmodem.SIMInfo, target SIMTarget) bool {

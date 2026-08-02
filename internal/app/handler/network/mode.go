@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 var errUnsupportedMode = errors.New("unsupported mode")
@@ -32,9 +33,9 @@ func (n *network) Modes(ctx context.Context, modem *mmodem.Modem) (*ModesRespons
 }
 
 func (n *network) SetCurrentModes(ctx context.Context, modem *mmodem.Modem, req SetCurrentModesRequest) error {
-	want := mmodem.ModemModePair{
-		Allowed:   mmodem.ModemMode(req.Allowed),
-		Preferred: mmodem.ModemMode(req.Preferred),
+	want := wwanmodem.Mode{
+		Allowed:   wwanmodem.Technology(req.Allowed),
+		Preferred: wwanmodem.Technology(req.Preferred),
 	}
 	supported, err := modem.SupportedModes(ctx)
 	if err != nil {
@@ -52,12 +53,12 @@ func (n *network) SetCurrentModes(ctx context.Context, modem *mmodem.Modem, req 
 	return nil
 }
 
-func modeResponse(mode mmodem.ModemModePair, current mmodem.ModemModePair) ModeResponse {
+func modeResponse(mode wwanmodem.Mode, current wwanmodem.Mode) ModeResponse {
 	return ModeResponse{
-		Allowed:        uint32(mode.Allowed),
-		Preferred:      uint32(mode.Preferred),
-		AllowedLabel:   mode.Allowed.Label(),
-		PreferredLabel: mode.Preferred.String(),
+		Allowed:        uint64(mode.Allowed),
+		Preferred:      uint64(mode.Preferred),
+		AllowedLabel:   technologyLabel(mode.Allowed),
+		PreferredLabel: technologyLabel(mode.Preferred),
 		Current:        mode == current,
 	}
 }

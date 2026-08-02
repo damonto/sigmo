@@ -11,7 +11,9 @@ import (
 	"strings"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	modemlink "github.com/damonto/sigmo/internal/pkg/modem/link"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/damonto/wwan-go/qcom"
 )
 
@@ -24,7 +26,7 @@ const (
 type qmapConnection struct {
 	modem      *mmodem.Modem
 	generation uint64
-	sessions   []*mmodem.QMAPSession
+	sessions   []*modemlink.QMAPSession
 	tracked    []trackedConnection
 	muxIDs     []uint8
 	prefs      Preferences
@@ -32,9 +34,9 @@ type qmapConnection struct {
 }
 
 var (
-	openInternetQMAPSession      = mmodem.OpenQMAPSession
+	openInternetQMAPSession      = modemlink.OpenQMAPSession
 	configureInternetQMAPNetwork = configureQMAPNetwork
-	removeInternetQMAPMuxes      = mmodem.RemoveQMAPMuxes
+	removeInternetQMAPMuxes      = modemlink.RemoveQMAPMuxes
 )
 
 func (c *Connector) qmapConnection(modem *mmodem.Modem) *qmapConnection {
@@ -92,7 +94,7 @@ func (c *Connector) SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, ena
 	if modem == nil {
 		return ErrModemRequired
 	}
-	if modem.PrimaryPortType() != mmodem.ModemPortTypeQmi {
+	if modem.PrimaryPortType() != wwanmodem.PortQMI {
 		return nil
 	}
 	modemID := modem.EquipmentIdentifier
@@ -102,7 +104,7 @@ func (c *Connector) SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, ena
 			if err := removeManagedQMAPMuxes(modem); err != nil {
 				return err
 			}
-			if err := mmodem.RestoreNonQMAPDataFormat(ctx, modem); err != nil {
+			if err := modemlink.RestoreNonQMAPDataFormat(ctx, modem); err != nil {
 				return err
 			}
 			if _, err := c.connect(ctx, modemAccess{modem: modem}, prefs, false); err != nil {
@@ -148,7 +150,7 @@ func (c *Connector) SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, ena
 		if err := removeManagedQMAPMuxes(modem); err != nil {
 			return err
 		}
-		if err := mmodem.RestoreNonQMAPDataFormat(ctx, modem); err != nil {
+		if err := modemlink.RestoreNonQMAPDataFormat(ctx, modem); err != nil {
 			if errors.Is(err, qcom.QMIErrorInternal) {
 				c.setQMAPEnabled(modemID, false)
 				if resetErr := modem.Reset(ctx); resetErr != nil {
@@ -171,7 +173,7 @@ func (c *Connector) SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, ena
 		_, restoreErr := c.connectQMAPLocked(ctx, modem, prefs)
 		return errors.Join(fmt.Errorf("remove QMAP mux interfaces: %w", err), restoreErr)
 	}
-	if err := mmodem.RestoreNonQMAPDataFormat(ctx, modem); err != nil {
+	if err := modemlink.RestoreNonQMAPDataFormat(ctx, modem); err != nil {
 		if errors.Is(err, qcom.QMIErrorInternal) {
 			c.setQMAPPendingNormal(modemID, prefs)
 			c.setQMAPEnabled(modemID, false)
@@ -244,7 +246,7 @@ func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, 
 	connection := &qmapConnection{modem: modem, generation: modem.Generation(), prefs: prefs}
 	var legErrors error
 	for _, leg := range legs {
-		session, err := openInternetQMAPSession(ctx, modem, mmodem.QMAPConfig{
+		session, err := openInternetQMAPSession(ctx, modem, modemlink.QMAPConfig{
 			APN: prefs.APN, IPPreference: leg.preference, MuxID: leg.muxID,
 		})
 		if err != nil {
@@ -405,7 +407,7 @@ func qmapActualIPType(tracked []trackedConnection) string {
 	}
 }
 
-func configureQMAPNetwork(ctx context.Context, state connectionStateStore, modemID string, prefs Preferences, session *mmodem.QMAPSession) (tracked trackedConnection, dns []string, err error) {
+func configureQMAPNetwork(ctx context.Context, state connectionStateStore, modemID string, prefs Preferences, session *modemlink.QMAPSession) (tracked trackedConnection, dns []string, err error) {
 	tracked = trackedConnection{prefs: prefs, routeMetric: routeMetric(prefs.DefaultRoute)}
 	if session == nil {
 		return tracked, nil, errors.New("QMAP session is required")

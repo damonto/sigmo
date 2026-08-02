@@ -26,11 +26,14 @@ import (
 	"github.com/damonto/sigmo/internal/app/router"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/modemtask"
+	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/validator"
 	"github.com/damonto/sigmo/internal/pkg/webpush"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 type Config struct {
@@ -113,11 +116,11 @@ func Run(cfg Config) error {
 		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch, http.MethodHead, http.MethodOptions},
 		AllowHeaders: []string{"*"},
 	}))
-	networkPreferences, err := modem.NewNetworkPreferences(db)
+	networkPreferences, err := networkprefs.New(db)
 	if err != nil {
 		return fmt.Errorf("configure network preferences: %w", err)
 	}
-	enableDisabledPolicy := modem.SkipEnableDisabledInAirplaneMode(networkPreferences)
+	enableDisabledPolicy := modemtask.EnableDisabledPolicy(networkprefs.SkipEnableDisabledInAirplaneMode(networkPreferences))
 	internetConnector, err := newInternetConnector(store, db, networkPreferences)
 	if err != nil {
 		return fmt.Errorf("configure internet connector: %w", err)
@@ -140,7 +143,7 @@ func Run(cfg Config) error {
 	}
 	defer unsubscribeInternetLifecycle()
 	startupCtx, cancelStartup := context.WithTimeout(ctx, 15*time.Second)
-	if err := modem.EnableDisabled(startupCtx, registry, enableDisabledPolicy); err != nil {
+	if err := modemtask.EnableDisabled(startupCtx, registry, enableDisabledPolicy); err != nil {
 		slog.Error("enable disabled modems", "error", err)
 	}
 	if err := recoverInternetConnections(startupCtx, registry, internetConnector); err != nil {
@@ -240,13 +243,13 @@ func Run(cfg Config) error {
 	})
 
 	wg.Go(func() {
-		if err := modem.RunEnableDisabled(ctx, registry, enableDisabledPolicy); err != nil {
+		if err := modemtask.RunEnableDisabled(ctx, registry, enableDisabledPolicy); err != nil {
 			slog.Error("modem enable runner stopped", "error", err)
 		}
 	})
 
 	wg.Go(func() {
-		if err := modem.RunSMSStorageDefaults(ctx, registry, modem.SMSStorageME); err != nil {
+		if err := modemtask.RunSMSStorageDefaults(ctx, registry, wwanmodem.MessageStorageDevice); err != nil {
 			slog.Error("SMS storage defaults stopped", "error", err)
 		}
 	})
@@ -256,7 +259,7 @@ func Run(cfg Config) error {
 	})
 
 	wg.Go(func() {
-		if err := networkPreferences.Run(ctx, registry); err != nil {
+		if err := modemtask.Run(ctx, registry, networkPreferences.Restore); err != nil {
 			slog.Error("network preferences restore stopped", "error", err)
 		}
 	})
@@ -341,7 +344,7 @@ func applyLogLevel(debug bool) {
 	slog.SetLogLoggerLevel(slog.LevelInfo)
 }
 
-func newInternetConnector(store *settings.Store, db *storage.Store, networkPreferences *modem.NetworkPreferences) (*internet.Connector, error) {
+func newInternetConnector(store *settings.Store, db *storage.Store, networkPreferences *networkprefs.Store) (*internet.Connector, error) {
 	proxyConfig := store.ProxySettings()
 	proxy := internet.NewProxy(internet.ProxyConfig{
 		ListenAddress: proxyConfig.ListenAddress,

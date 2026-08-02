@@ -14,6 +14,7 @@ import (
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 func TestReleaseManagedVoLTEOnShutdown(t *testing.T) {
@@ -263,25 +264,25 @@ func TestVoLTESettingsStore(t *testing.T) {
 func TestVoLTESettingsUseDeviceDataPath(t *testing.T) {
 	tests := []struct {
 		name       string
-		portType   mmodem.ModemPortType
+		portType   wwanmodem.PortType
 		storedPath DataPath
 		wantPath   DataPath
 	}{
 		{
 			name:       "MBIM reports MBIM",
-			portType:   mmodem.ModemPortTypeMbim,
+			portType:   wwanmodem.PortMBIM,
 			storedPath: DataPathLegacyBAMDMUX,
 			wantPath:   DataPathMBIM,
 		},
 		{
 			name:       "QMI keeps selected legacy BAM-DMUX",
-			portType:   mmodem.ModemPortTypeQmi,
+			portType:   wwanmodem.PortQMI,
 			storedPath: DataPathLegacyBAMDMUX,
 			wantPath:   DataPathLegacyBAMDMUX,
 		},
 		{
 			name:       "QMI defaults a previous MBIM path to QMAP",
-			portType:   mmodem.ModemPortTypeQmi,
+			portType:   wwanmodem.PortQMI,
 			storedPath: DataPathMBIM,
 			wantPath:   DataPathQMAP,
 		},
@@ -707,7 +708,7 @@ func TestVoLTEDataPathSwitchRollsBackAfterNewPathFailure(t *testing.T) {
 				Sim:                 &mmodem.SIM{Identifier: "profile-1"},
 				Ports: []mmodem.ModemPort{{
 					Device:   "cdc-wdm0",
-					PortType: mmodem.ModemPortTypeQmi,
+					PortType: wwanmodem.PortQMI,
 				}},
 			}
 
@@ -742,7 +743,7 @@ func qmiTestModem(id string) *mmodem.Modem {
 		EquipmentIdentifier: id,
 		Ports: []mmodem.ModemPort{{
 			Device:   "cdc-wdm0",
-			PortType: mmodem.ModemPortTypeQmi,
+			PortType: wwanmodem.PortQMI,
 		}},
 	}
 }

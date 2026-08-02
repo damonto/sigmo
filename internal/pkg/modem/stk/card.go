@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	uiccat "github.com/damonto/wwan-go/at"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 	usim "github.com/damonto/wwan-go/sim"
 	usimcard "github.com/damonto/wwan-go/sim/card"
 
@@ -41,7 +42,7 @@ func openDeviceCard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
 }
 
 func openATCard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
-	port, err := modem.Port(mmodem.ModemPortTypeAt)
+	port, err := modem.Port(wwanmodem.PortAT)
 	if err != nil {
 		return Card{}, fmt.Errorf("find AT port: %w", err)
 	}

@@ -11,6 +11,7 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	msisdnclient "github.com/damonto/sigmo/internal/pkg/modem/msisdn"
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 var errMSISDNInvalidNumber = errors.New("invalid phone number")
@@ -78,7 +79,7 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 }
 
 func (m *msisdn) updateWithAT(modem *mmodem.Modem, number string) error {
-	port, err := modem.Port(mmodem.ModemPortTypeAt)
+	port, err := modem.Port(wwanmodem.PortAT)
 	if err != nil {
 		return fmt.Errorf("find AT port: %w", err)
 	}

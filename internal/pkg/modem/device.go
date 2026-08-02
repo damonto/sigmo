@@ -148,6 +148,14 @@ func openQMIDeviceForSlot(m *Modem, slot uint8, open deviceControlOpener) (devic
 	return openDeviceWith(m, cfg, open)
 }
 
+func openDeviceForSlot(m *Modem, slot uint8, open deviceControlOpener) (deviceControl, error) {
+	cfg, err := deviceConfigForSlot(m, slot)
+	if err != nil {
+		return nil, err
+	}
+	return openDeviceWith(m, cfg, open)
+}
+
 func openDeviceWith(m *Modem, cfg wwan.Config, open deviceControlOpener) (deviceControl, error) {
 	if open == nil {
 		return m.deviceSessions.open(m, cfg)
@@ -161,6 +169,20 @@ func deviceConfig(m *Modem) (wwan.Config, error) {
 		return wwan.Config{}, err
 	}
 	return deviceConfigForEndpoint(endpoint, m.EquipmentIdentifier)
+}
+
+func deviceConfigForSlot(m *Modem, slot uint8) (wwan.Config, error) {
+	if m == nil {
+		return wwan.Config{}, errModemRequired
+	}
+	if slot == 0 || slot > maxSIMSlot {
+		return wwan.Config{}, fmt.Errorf("sim slot %d is out of range", slot)
+	}
+	port, err := selectDevicePort(m)
+	if err != nil {
+		return wwan.Config{}, err
+	}
+	return deviceConfigForEndpoint(DeviceEndpoint{Port: port, SIMSlot: slot}, m.EquipmentIdentifier)
 }
 
 func qmiDeviceConfigForSlot(m *Modem, slot uint8) (wwan.Config, error) {
@@ -249,7 +271,7 @@ func selectDevicePort(m *Modem) (ModemPort, error) {
 		}
 	}
 
-	for _, want := range []ModemPortType{ModemPortTypeQmi, ModemPortTypeMbim} {
+	for _, want := range []wwanmodem.PortType{wwanmodem.PortQMI, wwanmodem.PortMBIM} {
 		for _, port := range m.Ports {
 			if port.PortType != want || strings.TrimSpace(port.Device) == "" {
 				continue
@@ -262,7 +284,7 @@ func selectDevicePort(m *Modem) (ModemPort, error) {
 
 func selectQMIDevicePort(m *Modem) (ModemPort, error) {
 	for _, port := range m.Ports {
-		if port.PortType != ModemPortTypeQmi || strings.TrimSpace(port.Device) == "" {
+		if port.PortType != wwanmodem.PortQMI || strings.TrimSpace(port.Device) == "" {
 			continue
 		}
 		return port, nil
@@ -270,15 +292,15 @@ func selectQMIDevicePort(m *Modem) (ModemPort, error) {
 	return ModemPort{}, wwan.ErrUnsupported
 }
 
-func isDevicePortType(portType ModemPortType) bool {
-	return portType == ModemPortTypeQmi || portType == ModemPortTypeMbim
+func isDevicePortType(portType wwanmodem.PortType) bool {
+	return portType == wwanmodem.PortQMI || portType == wwanmodem.PortMBIM
 }
 
-func devicePortType(portType ModemPortType) (wwan.PortType, bool) {
+func devicePortType(portType wwanmodem.PortType) (wwan.PortType, bool) {
 	switch portType {
-	case ModemPortTypeQmi:
+	case wwanmodem.PortQMI:
 		return wwan.PortTypeQMI, true
-	case ModemPortTypeMbim:
+	case wwanmodem.PortMBIM:
 		return wwan.PortTypeMBIM, true
 	default:
 		return 0, false

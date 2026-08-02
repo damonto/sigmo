@@ -12,6 +12,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 type internetStatusStub struct {
@@ -36,13 +37,12 @@ func TestCatalogBuildListResponseKeepsDiscoveredModems(t *testing.T) {
 				{
 					EquipmentIdentifier: "bad-modem",
 					Model:               "No SIM",
-					State:               mmodem.ModemStateEnabled,
+					Status:              wwanmodem.Status{Power: wwanmodem.PowerStateOn},
 				},
 				{
 					EquipmentIdentifier: "good-modem",
 					Model:               "Locked",
-					State:               mmodem.ModemStateLocked,
-					UnlockRequired:      mmodem.ModemLockSimPin,
+					Status:              wwanmodem.Status{Power: wwanmodem.PowerStateOn, SIM: wwanmodem.SIMStateLocked},
 					Sim:                 &mmodem.SIM{ATR: euiccATR},
 				},
 			},
@@ -54,7 +54,7 @@ func TestCatalogBuildListResponseKeepsDiscoveredModems(t *testing.T) {
 				{
 					EquipmentIdentifier: "bad-modem",
 					Model:               "No SIM",
-					State:               mmodem.ModemStateEnabled,
+					Status:              wwanmodem.Status{Power: wwanmodem.PowerStateOn},
 				},
 			},
 			wantIDs: []string{"bad-modem"},
@@ -87,7 +87,7 @@ func TestCatalogBuildListResponseKeepsSearchingModemWhenLiveQueriesFail(t *testi
 		EquipmentIdentifier: "866069053507297",
 		Manufacturer:        "Qualcomm",
 		Model:               "Searching modem",
-		State:               mmodem.ModemStateSearching,
+		Status:              wwanmodem.Status{Power: wwanmodem.PowerStateOn, Registration: wwanmodem.RegistrationSearching},
 		Sim: &mmodem.SIM{
 			Active:             true,
 			Identifier:         "8944000000000000000",
@@ -109,8 +109,8 @@ func TestCatalogBuildListResponseKeepsSearchingModemWhenLiveQueriesFail(t *testi
 	if got[0].State != "searching" {
 		t.Fatalf("state = %q, want searching", got[0].State)
 	}
-	if got[0].RegistrationState != mmodem.Modem3GPPRegistrationStateSearching.String() {
-		t.Fatalf("registration state = %q, want %q", got[0].RegistrationState, mmodem.Modem3GPPRegistrationStateSearching.String())
+	if got[0].RegistrationState != registrationStateName(wwanmodem.RegistrationSearching) {
+		t.Fatalf("registration state = %q, want %q", got[0].RegistrationState, registrationStateName(wwanmodem.RegistrationSearching))
 	}
 	if got[0].SIM.Identifier != device.Sim.Identifier {
 		t.Fatalf("SIM identifier = %q, want %q", got[0].SIM.Identifier, device.Sim.Identifier)
@@ -145,21 +145,10 @@ func TestCatalogBuildBasicResponseIncludesPrimaryPort(t *testing.T) {
 func TestCatalogBuildResponseLockedModem(t *testing.T) {
 	tests := []struct {
 		name            string
-		lock            mmodem.ModemLock
 		wantSupported   bool
 		wantUnlockLabel string
 	}{
-		{
-			name:            "supports sim pin unlock",
-			lock:            mmodem.ModemLockSimPin,
-			wantSupported:   true,
-			wantUnlockLabel: "sim-pin",
-		},
-		{
-			name:            "reports unsupported puk lock",
-			lock:            mmodem.ModemLockSimPuk,
-			wantUnlockLabel: "sim-puk",
-		},
+		{name: "supports sim pin unlock", wantSupported: true, wantUnlockLabel: "sim-pin"},
 	}
 
 	for _, tt := range tests {
@@ -170,8 +159,7 @@ func TestCatalogBuildResponseLockedModem(t *testing.T) {
 				PrimaryPort:         "/dev/cdc-wdm0",
 				Manufacturer:        "Quectel",
 				Model:               "RM520N",
-				State:               mmodem.ModemStateLocked,
-				UnlockRequired:      tt.lock,
+				Status:              wwanmodem.Status{Power: wwanmodem.PowerStateOn, SIM: wwanmodem.SIMStateLocked},
 			}
 
 			got, err := catalog.buildResponse(context.Background(), device)
@@ -201,7 +189,7 @@ func TestCatalogBuildResponseUsesCachedSIMWithoutTransport(t *testing.T) {
 		PrimaryPort:         "/dev/cdc-wdm0",
 		Manufacturer:        "Qualcomm",
 		Model:               "Cached modem",
-		State:               mmodem.ModemStateRegistered,
+		Status:              wwanmodem.Status{Power: wwanmodem.PowerStateOn, Registration: wwanmodem.RegistrationHome},
 		PrimarySimSlot:      1,
 		SimSlots:            []uint32{1},
 		Sim: &mmodem.SIM{

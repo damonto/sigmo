@@ -2,8 +2,12 @@ package modem
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	devicewwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 type simRefreshDevice struct {
@@ -44,9 +48,13 @@ func TestEnsureSIMVisibleProvisionsEachGenerationOnce(t *testing.T) {
 		case 1:
 			registry.modems[path] = replacement
 		case 2:
-			replacement.runtimeMu.Lock()
-			replacement.Sim = &SIM{modem: replacement, Slot: 1, Active: true, Identifier: "8901000000000000001"}
-			replacement.runtimeMu.Unlock()
+			device.state = devicewwan.SIMState{
+				Supported: true,
+				Matches:   true,
+				Ready:     true,
+				ICCID:     "8901000000000000001",
+				Slot:      1,
+			}
 		}
 	}
 	registry.openDevice = fakeDeviceOpener(t, device, nil)
@@ -76,9 +84,13 @@ func TestEnsureSIMVisiblePowerCyclesAfterGracePeriod(t *testing.T) {
 	device.onActivate = func() { activateCalls++ }
 	device.onPower = func() {
 		powerCalls++
-		current.runtimeMu.Lock()
-		current.Sim = &SIM{modem: current, Slot: 1, Active: true, Identifier: "8901000000000000001"}
-		current.runtimeMu.Unlock()
+		device.state = devicewwan.SIMState{
+			Supported: true,
+			Matches:   true,
+			Ready:     true,
+			ICCID:     "8901000000000000001",
+			Slot:      1,
+		}
 	}
 	registry.openDevice = fakeDeviceOpener(t, device, nil)
 
@@ -93,6 +105,79 @@ func TestEnsureSIMVisiblePowerCyclesAfterGracePeriod(t *testing.T) {
 	}
 	if activateCalls != 1 || powerCalls != 1 {
 		t.Fatalf("provision/power calls = %d/%d, want 1/1", activateCalls, powerCalls)
+	}
+}
+
+func TestReadCurrentESIMRequiresMatchingReadyState(t *testing.T) {
+	const path = "/sys/devices/modem-1"
+	const iccid = "8901000000000000001"
+	modem := simRefreshTestModem(path, 1, false)
+	registry := &Registry{modems: map[string]*Modem{path: modem}, started: true}
+	device := &fakeDeviceControl{state: devicewwan.SIMState{Supported: true, Matches: true, ICCID: iccid, Slot: 1}}
+	registry.openDevice = fakeDeviceOpener(t, device, nil)
+
+	read, err := registry.readCurrentModem(context.Background(), modem, SIMTarget{ICCID: iccid})
+	if err != nil {
+		t.Fatalf("readCurrentModem() error = %v", err)
+	}
+	if read.SIMVisible {
+		t.Fatal("SIMVisible = true, want false while USIM is not ready")
+	}
+	if snapshot := modem.Snapshot(); snapshot.SIM == nil || snapshot.SIM.Identifier != iccid {
+		t.Fatalf("cached SIM = %+v, want ICCID %q", snapshot.SIM, iccid)
+	}
+	if len(device.calls) != 1 || device.calls[0] != "sim-state" {
+		t.Fatalf("device calls = %v, want [sim-state]", device.calls)
+	}
+
+	device.state.Ready = true
+	read, err = registry.readCurrentModem(context.Background(), modem, SIMTarget{ICCID: iccid})
+	if err != nil {
+		t.Fatalf("second readCurrentModem() error = %v", err)
+	}
+	if !read.SIMVisible {
+		t.Fatal("SIMVisible = false, want true for matching ready USIM")
+	}
+}
+
+func TestReadCurrentESIMUsesMBIMDevice(t *testing.T) {
+	const path = "/sys/devices/modem-1"
+	const iccid = "8901000000000000001"
+	modem := simRefreshTestModem(path, 1, false)
+	modem.Ports = []ModemPort{{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"}}
+	registry := &Registry{modems: map[string]*Modem{path: modem}, started: true}
+	device := &fakeDeviceControl{state: devicewwan.SIMState{Supported: true, Matches: true, Ready: true, ICCID: iccid, Slot: 1}}
+	var gotCfg devicewwan.Config
+	registry.openDevice = func(cfg devicewwan.Config) (deviceControl, error) {
+		gotCfg = cfg
+		return device, nil
+	}
+
+	read, err := registry.readCurrentModem(context.Background(), modem, SIMTarget{ICCID: iccid})
+	if err != nil {
+		t.Fatalf("readCurrentModem() error = %v", err)
+	}
+	if !read.SIMVisible {
+		t.Fatal("SIMVisible = false, want true")
+	}
+	if gotCfg.PortType != devicewwan.PortTypeMBIM {
+		t.Fatalf("opened port type = %d, want MBIM", gotCfg.PortType)
+	}
+	if gotCfg.Device != "/dev/cdc-wdm0" || gotCfg.Slot != 1 {
+		t.Fatalf("opened device config = %+v", gotCfg)
+	}
+}
+
+func TestReadCurrentESIMReturnsSIMStateError(t *testing.T) {
+	const path = "/sys/devices/modem-1"
+	modem := simRefreshTestModem(path, 1, false)
+	registry := &Registry{modems: map[string]*Modem{path: modem}, started: true}
+	wantErr := errors.New("UIM unavailable")
+	registry.openDevice = fakeDeviceOpener(t, &fakeDeviceControl{stateErr: wantErr}, nil)
+
+	_, err := registry.readCurrentModem(context.Background(), modem, SIMTarget{ICCID: "8901000000000000001"})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("readCurrentModem() error = %v, want %v", err, wantErr)
 	}
 }
 
@@ -119,7 +204,7 @@ func simRefreshTestModem(path string, generation uint64, visible bool) *Modem {
 		PrimaryPort:         "/dev/cdc-wdm0",
 		PrimarySimSlot:      1,
 		SimSlots:            []uint32{1},
-		Ports:               []ModemPort{{PortType: ModemPortTypeQmi, Device: "/dev/cdc-wdm0"}},
+		Ports:               []ModemPort{{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm0"}},
 	}
 	if visible {
 		modem.Sim = &SIM{modem: modem, Slot: 1, Active: true, Identifier: "8901000000000000001"}

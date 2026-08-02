@@ -14,6 +14,7 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
+	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 )
 
 func TestRouteMetric(t *testing.T) {
@@ -1913,9 +1914,9 @@ func TestConnectorRecoverSkipsSavedAirplaneMode(t *testing.T) {
 
 	ctx := context.Background()
 	store := testStore(t)
-	networkPreferences, err := mmodem.NewNetworkPreferences(store)
+	networkPreferences, err := networkprefs.New(store)
 	if err != nil {
-		t.Fatalf("NewNetworkPreferences() error = %v", err)
+		t.Fatalf("networkprefs.New() error = %v", err)
 	}
 	if err := networkPreferences.SaveAirplaneMode(ctx, "modem-1", true); err != nil {
 		t.Fatalf("SaveAirplaneMode() error = %v", err)

@@ -42,7 +42,6 @@ const (
 	errorCodeSimSlotSwitchTimeout         = "sim_slot_switch_timeout"
 	errorCodeUnlockSIMInvalidRequest      = "unlock_sim_invalid_request"
 	errorCodeUnlockSIMNotRequired         = "unlock_sim_not_required"
-	errorCodeUnlockSIMUnsupportedLock     = "unlock_sim_unsupported_lock"
 	errorCodeUnlockSIMFailed              = "unlock_sim_failed"
 	errorCodeEnableModemAfterUnlockFailed = "enable_modem_after_unlock_failed"
 	errorCodeUpdateMSISDNInvalidRequest   = "update_msisdn_invalid_request"
@@ -115,8 +114,6 @@ func unlockSIMError(c *echo.Context, err error) error {
 		return httpapi.BadRequest(c, errorCodeUnlockSIMInvalidRequest, err)
 	case errors.Is(err, mmodem.ErrSIMUnlockNotRequired):
 		return httpapi.BadRequest(c, errorCodeUnlockSIMNotRequired, err)
-	case errors.Is(err, mmodem.ErrSIMUnlockUnsupportedLock):
-		return httpapi.BadRequest(c, errorCodeUnlockSIMUnsupportedLock, err)
 	case errors.Is(err, mmodem.ErrEnableAfterSIMUnlock):
 		return httpapi.Internal(c, errorCodeEnableModemAfterUnlockFailed, err)
 	default:

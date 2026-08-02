@@ -6,17 +6,18 @@ import (
 	"fmt"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 type network struct {
-	preferences *mmodem.NetworkPreferences
+	preferences *networkprefs.Store
 	store       *storage.Store
 }
 
 var errNetworkPreferencesRequired = errors.New("network preferences are required")
 
-func newNetwork(preferences *mmodem.NetworkPreferences, store *storage.Store) (*network, error) {
+func newNetwork(preferences *networkprefs.Store, store *storage.Store) (*network, error) {
 	if preferences == nil {
 		return nil, errNetworkPreferencesRequired
 	}
@@ -35,20 +36,12 @@ func (n *network) List(ctx context.Context, modem *mmodem.Modem) ([]NetworkRespo
 	response := make([]NetworkResponse, 0, len(networks))
 	for _, network := range networks {
 		response = append(response, NetworkResponse{
-			Status:             network.Status.String(),
-			OperatorName:       network.OperatorName,
-			OperatorShortName:  network.OperatorShortName,
-			OperatorCode:       network.OperatorCode,
-			AccessTechnologies: accessTechnologyStrings(network.AccessTechnology),
+			Status:             networkAvailabilityName(network),
+			OperatorName:       network.Name,
+			OperatorShortName:  network.Name,
+			OperatorCode:       network.ID,
+			AccessTechnologies: accessTechnologyStrings(network.Technology),
 		})
 	}
 	return response, nil
-}
-
-func accessTechnologyStrings(access []mmodem.ModemAccessTechnology) []string {
-	names := make([]string, 0, len(access))
-	for _, tech := range access {
-		names = append(names, tech.String())
-	}
-	return names
 }

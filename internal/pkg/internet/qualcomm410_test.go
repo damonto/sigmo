@@ -10,6 +10,7 @@ import (
 	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	modemlink "github.com/damonto/sigmo/internal/pkg/modem/link"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
 )
 
@@ -44,7 +45,7 @@ func TestSelectQualcomm410ModeDoesNotTouchData5OrBearer(t *testing.T) {
 		t.Fatal("read bearer while selecting Qualcomm 410 mode")
 		return bearerState{}, nil
 	}
-	openInternetQualcomm410Link = func(context.Context, mmodem.BAMDMUXLinkConfig) (qualcomm410Link, error) {
+	openInternetQualcomm410Link = func(context.Context, modemlink.BAMDMUXLinkConfig) (qualcomm410Link, error) {
 		t.Fatal("opened DATA5 while selecting Qualcomm 410 mode")
 		return nil, nil
 	}
@@ -74,7 +75,7 @@ func TestSetQualcomm410EnabledDefersWDAUntilInternetConnected(t *testing.T) {
 	var openCalls int
 	link := &qualcomm410LinkProbe{}
 	validateInternetQualcomm410Layout = func(*mmodem.Modem) error { return nil }
-	openInternetQualcomm410Link = func(_ context.Context, cfg mmodem.BAMDMUXLinkConfig) (qualcomm410Link, error) {
+	openInternetQualcomm410Link = func(_ context.Context, cfg modemlink.BAMDMUXLinkConfig) (qualcomm410Link, error) {
 		openCalls++
 		if cfg.ControlPort != mmodem.Qualcomm410InternetQMI || cfg.InterfaceName != mmodem.Qualcomm410InternetInterface {
 			t.Fatalf("OpenBAMDMUXLink config = %+v", cfg)
@@ -149,7 +150,7 @@ func TestSetQualcomm410EnabledValidatesModemBeforeChangingState(t *testing.T) {
 		}
 		return wantErr
 	}
-	openInternetQualcomm410Link = func(context.Context, mmodem.BAMDMUXLinkConfig) (qualcomm410Link, error) {
+	openInternetQualcomm410Link = func(context.Context, modemlink.BAMDMUXLinkConfig) (qualcomm410Link, error) {
 		t.Fatal("opened WDA holder after layout validation failed")
 		return nil, nil
 	}
@@ -204,7 +205,7 @@ func TestEnableQualcomm410MigratesConnectedBearer(t *testing.T) {
 				return nil
 			}
 			link := &qualcomm410LinkProbe{}
-			openInternetQualcomm410Link = func(context.Context, mmodem.BAMDMUXLinkConfig) (qualcomm410Link, error) {
+			openInternetQualcomm410Link = func(context.Context, modemlink.BAMDMUXLinkConfig) (qualcomm410Link, error) {
 				calls = append(calls, "open-holder")
 				if tt.holderErr != nil {
 					return nil, tt.holderErr
@@ -261,7 +262,7 @@ func TestEnableQualcomm410UsesModeForPendingReconnect(t *testing.T) {
 	}
 	link := &qualcomm410LinkProbe{}
 	var calls []string
-	openInternetQualcomm410Link = func(context.Context, mmodem.BAMDMUXLinkConfig) (qualcomm410Link, error) {
+	openInternetQualcomm410Link = func(context.Context, modemlink.BAMDMUXLinkConfig) (qualcomm410Link, error) {
 		calls = append(calls, "open-holder")
 		return link, nil
 	}
@@ -469,7 +470,7 @@ func TestInvalidateQualcomm410DefersHolderAfterReloadWithoutInternet(t *testing.
 	newLink := &qualcomm410LinkProbe{}
 	validateInternetQualcomm410Layout = func(*mmodem.Modem) error { return nil }
 	openCalls := 0
-	openInternetQualcomm410Link = func(context.Context, mmodem.BAMDMUXLinkConfig) (qualcomm410Link, error) {
+	openInternetQualcomm410Link = func(context.Context, modemlink.BAMDMUXLinkConfig) (qualcomm410Link, error) {
 		openCalls++
 		return newLink, nil
 	}
@@ -517,7 +518,7 @@ func TestHoldQualcomm410AfterInternetConnectedClearsPendingAfterFailedHolder(t *
 	})
 
 	wantErr := errors.New("allocate WDA client")
-	openInternetQualcomm410Link = func(context.Context, mmodem.BAMDMUXLinkConfig) (qualcomm410Link, error) {
+	openInternetQualcomm410Link = func(context.Context, modemlink.BAMDMUXLinkConfig) (qualcomm410Link, error) {
 		return nil, wantErr
 	}
 	connector := &Connector{

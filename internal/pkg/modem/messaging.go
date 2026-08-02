@@ -40,41 +40,36 @@ func (m *Messaging) Delete(ctx context.Context, refs []MessageRef) error {
 	return m.modem.core.DeleteMessages(ctx, slices.Clone(refs))
 }
 
-func (m *Messaging) SetDefaultStorage(_ context.Context, storage SMSStorage) error {
-	value, ok := semanticSMSStorage(storage)
-	if !ok {
+func (m *Messaging) SetDefaultStorage(_ context.Context, storage wwanmodem.MessageStorage) error {
+	if storage != wwanmodem.MessageStorageUnknown && storage != wwanmodem.MessageStorageSIM && storage != wwanmodem.MessageStorageDevice {
 		return wwanmodem.ErrNotSupported
 	}
 	m.modem.smsMu.Lock()
-	m.modem.smsStorage = value
+	m.modem.smsStorage = storage
 	m.modem.smsMu.Unlock()
 	return nil
 }
 
-func (m *Messaging) SupportedStorages(ctx context.Context) ([]SMSStorage, error) {
+func (m *Messaging) SupportedStorages(ctx context.Context) ([]wwanmodem.MessageStorage, error) {
 	info, err := m.modem.core.MessageStorages(ctx)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]SMSStorage, 0, len(info.Supported))
-	for _, storage := range info.Supported {
-		result = append(result, legacySMSStorage(storage))
-	}
-	return result, nil
+	return slices.Clone(info.Supported), nil
 }
 
-func (m *Messaging) DefaultStorage(ctx context.Context) (SMSStorage, error) {
+func (m *Messaging) DefaultStorage(ctx context.Context) (wwanmodem.MessageStorage, error) {
 	m.modem.smsMu.RLock()
 	storage := m.modem.smsStorage
 	m.modem.smsMu.RUnlock()
 	if storage != wwanmodem.MessageStorageUnknown {
-		return legacySMSStorage(storage), nil
+		return storage, nil
 	}
 	info, err := m.modem.core.MessageStorages(ctx)
 	if err != nil {
-		return SMSStorageUnknown, err
+		return wwanmodem.MessageStorageUnknown, err
 	}
-	return legacySMSStorage(info.Default), nil
+	return info.Default, nil
 }
 
 func (m *Messaging) Send(ctx context.Context, to, text string) (*SMS, error) {
@@ -113,8 +108,8 @@ func sentSMSFromWWAN(cfg sentSMSConfig) *SMS {
 		return &SMS{
 			Generation:        generation,
 			MessageReferences: slices.Clone(cfg.result.References),
-			State:             SMSStateSent,
-			Storage:           legacySMSStorage(cfg.storage),
+			State:             wwanmodem.MessageStateStoredSent,
+			Storage:           cfg.storage,
 			Number:            cfg.to,
 			Text:              cfg.text,
 			Timestamp:         cfg.now,
@@ -144,8 +139,8 @@ func sentSMSFromWWAN(cfg sentSMSConfig) *SMS {
 	if sms.Number == "" {
 		sms.Number = cfg.to
 	}
-	if sms.Storage == SMSStorageUnknown {
-		sms.Storage = legacySMSStorage(cfg.storage)
+	if sms.Storage == wwanmodem.MessageStorageUnknown {
+		sms.Storage = cfg.storage
 	}
 	sms.Text = cfg.text
 	if sms.Timestamp.IsZero() {
@@ -194,29 +189,5 @@ func (m *Messaging) Subscribe(ctx context.Context, subscriber func(message *SMS)
 				return err
 			}
 		}
-	}
-}
-
-func legacySMSStorage(storage wwanmodem.MessageStorage) SMSStorage {
-	switch storage {
-	case wwanmodem.MessageStorageSIM:
-		return SMSStorageSM
-	case wwanmodem.MessageStorageDevice:
-		return SMSStorageME
-	default:
-		return SMSStorageUnknown
-	}
-}
-
-func semanticSMSStorage(storage SMSStorage) (wwanmodem.MessageStorage, bool) {
-	switch storage {
-	case SMSStorageUnknown:
-		return wwanmodem.MessageStorageUnknown, true
-	case SMSStorageSM:
-		return wwanmodem.MessageStorageSIM, true
-	case SMSStorageME:
-		return wwanmodem.MessageStorageDevice, true
-	default:
-		return wwanmodem.MessageStorageUnknown, false
 	}
 }

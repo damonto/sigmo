@@ -9,6 +9,7 @@ import (
 	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/modemtask"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -60,7 +61,7 @@ func RunRegistrationRestore(ctx context.Context, registry *mmodem.Registry, stor
 		return errNetworkRegistrationStorageRequired
 	}
 	restorer := &registrationRestorer{store: store}
-	return mmodem.RunPresenceTask(ctx, registry, restorer.restoreWithRetry)
+	return modemtask.Run(ctx, registry, restorer.restoreWithRetry)
 }
 
 type registrationRestorer struct {

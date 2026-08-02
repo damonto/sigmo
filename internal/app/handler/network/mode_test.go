@@ -3,49 +3,45 @@ package network
 import (
 	"testing"
 
-	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 func TestModeResponse(t *testing.T) {
 	tests := []struct {
 		name    string
-		mode    mmodem.ModemModePair
-		current mmodem.ModemModePair
+		mode    wwanmodem.Mode
+		current wwanmodem.Mode
 		want    ModeResponse
 	}{
 		{
 			name: "current",
-			mode: mmodem.ModemModePair{
-				Allowed:   mmodem.ModemMode4G,
-				Preferred: mmodem.ModemModeNone,
+			mode: wwanmodem.Mode{
+				Allowed: wwanmodem.TechnologyLTE,
 			},
-			current: mmodem.ModemModePair{
-				Allowed:   mmodem.ModemMode4G,
-				Preferred: mmodem.ModemModeNone,
+			current: wwanmodem.Mode{
+				Allowed: wwanmodem.TechnologyLTE,
 			},
 			want: ModeResponse{
-				Allowed:        uint32(mmodem.ModemMode4G),
-				Preferred:      uint32(mmodem.ModemModeNone),
-				AllowedLabel:   "4G",
+				Allowed:        uint64(wwanmodem.TechnologyLTE),
+				AllowedLabel:   "LTE",
 				PreferredLabel: "None",
 				Current:        true,
 			},
 		},
 		{
 			name: "supported",
-			mode: mmodem.ModemModePair{
-				Allowed:   mmodem.ModemMode4G | mmodem.ModemMode5G,
-				Preferred: mmodem.ModemMode5G,
+			mode: wwanmodem.Mode{
+				Allowed:   wwanmodem.TechnologyLTE | wwanmodem.TechnologyNR5GSA,
+				Preferred: wwanmodem.TechnologyNR5GSA,
 			},
-			current: mmodem.ModemModePair{
-				Allowed:   mmodem.ModemMode4G,
-				Preferred: mmodem.ModemModeNone,
+			current: wwanmodem.Mode{
+				Allowed: wwanmodem.TechnologyLTE,
 			},
 			want: ModeResponse{
-				Allowed:        uint32(mmodem.ModemMode4G | mmodem.ModemMode5G),
-				Preferred:      uint32(mmodem.ModemMode5G),
-				AllowedLabel:   "4G + 5G",
-				PreferredLabel: "5G",
+				Allowed:        uint64(wwanmodem.TechnologyLTE | wwanmodem.TechnologyNR5GSA),
+				Preferred:      uint64(wwanmodem.TechnologyNR5GSA),
+				AllowedLabel:   "LTE + 5G SA",
+				PreferredLabel: "5G SA",
 				Current:        false,
 			},
 		},

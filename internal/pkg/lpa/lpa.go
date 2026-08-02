@@ -24,6 +24,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/keymutex"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 const channelOpenTimeout = 30 * time.Second
@@ -204,9 +205,9 @@ func (l *LPA) tryCreateClient(opts *lpa.Options) error {
 
 func createChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
 	switch m.PrimaryPortType() {
-	case modem.ModemPortTypeQmi:
+	case wwanmodem.PortQMI:
 		return createQMIChannel(m)
-	case modem.ModemPortTypeMbim:
+	case wwanmodem.PortMBIM:
 		return createMBIMChannel(m)
 	default:
 		return createATChannel(m)
@@ -308,7 +309,7 @@ func (c *simSlotChannel) CloseLogicalChannel(channel byte) error {
 }
 
 func createATChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
-	port, err := m.Port(modem.ModemPortTypeAt)
+	port, err := m.Port(wwanmodem.PortAT)
 	if err != nil {
 		return nil, err
 	}

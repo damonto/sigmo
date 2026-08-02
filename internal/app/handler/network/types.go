@@ -14,31 +14,36 @@ type ModesResponse struct {
 }
 
 type ModeResponse struct {
-	Allowed        uint32 `json:"allowed" jsonschema:"numeric modem mode bitmask allowed by this combination"`
-	Preferred      uint32 `json:"preferred" jsonschema:"numeric preferred modem mode within the allowed bitmask; zero means no preference"`
+	Allowed        uint64 `json:"allowed" jsonschema:"wwan-go radio technology bitmask allowed by this combination"`
+	Preferred      uint64 `json:"preferred" jsonschema:"preferred wwan-go radio technology within the allowed bitmask; zero means no preference"`
 	AllowedLabel   string `json:"allowedLabel" jsonschema:"human-readable label for the allowed mode bitmask"`
 	PreferredLabel string `json:"preferredLabel" jsonschema:"human-readable label for the preferred mode"`
 	Current        bool   `json:"current" jsonschema:"whether this supported combination is currently configured"`
 }
 
 type SetCurrentModesRequest struct {
-	Allowed   uint32 `json:"allowed"`
-	Preferred uint32 `json:"preferred"`
+	Allowed   uint64 `json:"allowed"`
+	Preferred uint64 `json:"preferred"`
 }
 
 type BandsResponse struct {
 	Supported []BandResponse `json:"supported" jsonschema:"bands accepted by this modem"`
-	Current   []uint32       `json:"current" jsonschema:"numeric values of the currently configured bands"`
+	Current   []BandValue    `json:"current" jsonschema:"currently configured semantic radio bands; a single zero value means automatic selection"`
 }
 
 type BandResponse struct {
-	Value   uint32 `json:"value" jsonschema:"numeric modem band value used when configuring bands"`
-	Label   string `json:"label" jsonschema:"human-readable modem band label"`
-	Current bool   `json:"current" jsonschema:"whether this band is currently configured"`
+	Value   BandValue `json:"value" jsonschema:"semantic radio technology and band number"`
+	Label   string    `json:"label" jsonschema:"human-readable modem band label"`
+	Current bool      `json:"current" jsonschema:"whether this band is currently configured"`
+}
+
+type BandValue struct {
+	Technology uint64 `json:"technology" jsonschema:"wwan-go radio technology value; zero selects bands automatically"`
+	Number     uint16 `json:"number" jsonschema:"3GPP or modem band number; zero with zero technology selects bands automatically"`
 }
 
 type SetCurrentBandsRequest struct {
-	Bands []uint32 `json:"bands"`
+	Bands []BandValue `json:"bands"`
 }
 
 type AirplaneModeResponse struct {

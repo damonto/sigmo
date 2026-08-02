@@ -121,4 +121,21 @@ describe('useModemNetwork', () => {
     expect(onSuccess).not.toHaveBeenCalled()
     expect(network.isAirplaneModeUpdating.value).toBe(false)
   })
+
+  it('keeps automatic band selection exclusive by semantic value', () => {
+    const network = useModemNetwork({ modemId })
+    const automatic = { technology: 0, number: 0 }
+    const lte41 = { technology: 4, number: 41 }
+
+    network.selectedBands.value = [lte41]
+    network.toggleBand(automatic, true)
+    expect(network.selectedBands.value).toEqual([automatic])
+
+    network.toggleBand({ ...lte41 }, true)
+    network.toggleBand({ ...lte41 }, true)
+    expect(network.selectedBands.value).toEqual([lte41])
+
+    network.toggleBand({ ...lte41 }, false)
+    expect(network.selectedBands.value).toEqual([])
+  })
 })

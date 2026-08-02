@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 var (
@@ -26,27 +28,44 @@ func (n *network) Bands(ctx context.Context, modem *mmodem.Modem) (*BandsRespons
 		return nil, fmt.Errorf("read current bands: %w", err)
 	}
 
+	return bandsResponse(supported, current), nil
+}
+
+func bandsResponse(supported []wwanmodem.Band, current []wwanmodem.Band) *BandsResponse {
+	automatic := len(current) == 0 || sameBandSet(current, supported)
 	currentValues := bandValues(current)
+	if automatic {
+		currentValues = []BandValue{{}}
+	}
 	response := &BandsResponse{
-		Supported: make([]BandResponse, 0, len(supported)),
+		Supported: []BandResponse{{Value: BandValue{}, Label: "Any", Current: automatic}},
 		Current:   currentValues,
 	}
 	for _, band := range supported {
 		response.Supported = append(response.Supported, BandResponse{
-			Value:   uint32(band),
-			Label:   band.String(),
-			Current: slices.Contains(current, band),
+			Value:   bandValue(band),
+			Label:   bandLabel(band),
+			Current: !automatic && slices.Contains(current, band),
 		})
 	}
-	return response, nil
+	return response
+}
+
+func sameBandSet(left []wwanmodem.Band, right []wwanmodem.Band) bool {
+	leftSet := make(map[wwanmodem.Band]struct{}, len(left))
+	for _, band := range left {
+		leftSet[band] = struct{}{}
+	}
+	rightSet := make(map[wwanmodem.Band]struct{}, len(right))
+	for _, band := range right {
+		rightSet[band] = struct{}{}
+	}
+	return maps.Equal(leftSet, rightSet)
 }
 
 func (n *network) SetCurrentBands(ctx context.Context, modem *mmodem.Modem, req SetCurrentBandsRequest) error {
-	bands := make([]mmodem.ModemBand, 0, len(req.Bands))
-	for _, band := range req.Bands {
-		bands = append(bands, mmodem.ModemBand(band))
-	}
-	if err := n.validateBands(ctx, modem, bands); err != nil {
+	bands, err := n.validateBands(ctx, modem, req.Bands)
+	if err != nil {
 		return err
 	}
 	if err := modem.SetCurrentBands(ctx, bands); err != nil {
@@ -58,19 +77,36 @@ func (n *network) SetCurrentBands(ctx context.Context, modem *mmodem.Modem, req 
 	return nil
 }
 
-func (n *network) validateBands(ctx context.Context, modem *mmodem.Modem, bands []mmodem.ModemBand) error {
+func (n *network) validateBands(ctx context.Context, modem *mmodem.Modem, values []BandValue) ([]wwanmodem.Band, error) {
+	if len(values) == 0 {
+		return nil, errBandsRequired
+	}
+	if slices.Contains(values, BandValue{}) {
+		if len(values) > 1 {
+			return nil, errAnyBandExclusive
+		}
+		return nil, nil
+	}
+
+	bands := make([]wwanmodem.Band, 0, len(values))
+	for _, value := range values {
+		bands = append(bands, wwanmodem.Band{Technology: wwanmodem.Technology(value.Technology), Number: value.Number})
+	}
 	supported, err := modem.SupportedBands(ctx)
 	if err != nil {
-		return fmt.Errorf("read supported bands: %w", err)
+		return nil, fmt.Errorf("read supported bands: %w", err)
 	}
-	return validateBandValues(supported, bands)
+	if err := validateBandValues(supported, bands); err != nil {
+		return nil, err
+	}
+	return bands, nil
 }
 
-func validateBandValues(supported []mmodem.ModemBand, bands []mmodem.ModemBand) error {
+func validateBandValues(supported []wwanmodem.Band, bands []wwanmodem.Band) error {
 	if len(bands) == 0 {
 		return errBandsRequired
 	}
-	seen := make(map[mmodem.ModemBand]struct{}, len(bands))
+	seen := make(map[wwanmodem.Band]struct{}, len(bands))
 	for _, band := range bands {
 		if _, ok := seen[band]; ok {
 			return errDuplicateBand
@@ -80,16 +116,17 @@ func validateBandValues(supported []mmodem.ModemBand, bands []mmodem.ModemBand) 
 			return errUnsupportedBand
 		}
 	}
-	if slices.Contains(bands, mmodem.ModemBandAny) && len(bands) > 1 {
-		return errAnyBandExclusive
-	}
 	return nil
 }
 
-func bandValues(bands []mmodem.ModemBand) []uint32 {
-	values := make([]uint32, 0, len(bands))
+func bandValues(bands []wwanmodem.Band) []BandValue {
+	values := make([]BandValue, 0, len(bands))
 	for _, band := range bands {
-		values = append(values, uint32(band))
+		values = append(values, bandValue(band))
 	}
 	return values
+}
+
+func bandValue(band wwanmodem.Band) BandValue {
+	return BandValue{Technology: uint64(band.Technology), Number: band.Number}
 }

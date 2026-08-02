@@ -17,6 +17,7 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	procall "github.com/damonto/sigmo/pro/call"
 	pims "github.com/damonto/sigmo/pro/ims"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 type mcpModemFinder struct {
@@ -79,15 +80,15 @@ func TestRegisterIMSMCPCallPermissionsAreRecordOnly(t *testing.T) {
 func TestSetVoLTEUsesSharedValidation(t *testing.T) {
 	tests := []struct {
 		name         string
-		portType     mmodem.ModemPortType
+		portType     wwanmodem.PortType
 		input        volteSettingsInput
 		wantErr      bool
 		wantSettings pims.VoLTESettings
 	}{
-		{name: "QMI requires data path", portType: mmodem.ModemPortTypeQmi, input: volteSettingsInput{ModemID: "modem-1"}, wantErr: true},
-		{name: "QMI rejects unsupported data path", portType: mmodem.ModemPortTypeQmi, input: volteSettingsInput{ModemID: "modem-1", DataPath: "auto"}, wantErr: true},
+		{name: "QMI requires data path", portType: wwanmodem.PortQMI, input: volteSettingsInput{ModemID: "modem-1"}, wantErr: true},
+		{name: "QMI rejects unsupported data path", portType: wwanmodem.PortQMI, input: volteSettingsInput{ModemID: "modem-1", DataPath: "auto"}, wantErr: true},
 		{
-			name: "MBIM derives data path", portType: mmodem.ModemPortTypeMbim,
+			name: "MBIM derives data path", portType: wwanmodem.PortMBIM,
 			input:        volteSettingsInput{ModemID: "modem-1", DataPath: "legacy_bam_dmux"},
 			wantSettings: pims.VoLTESettings{DataPath: pims.DataPathMBIM},
 		},

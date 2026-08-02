@@ -36,23 +36,10 @@ func (u *USSD) Cancel(ctx context.Context) error {
 	return nil
 }
 
-func (u *USSD) State(context.Context) (Modem3GPPUSSDSessionState, error) {
-	return legacyUSSDState(u.modem.currentUSSD().State), nil
+func (u *USSD) State(context.Context) (wwanmodem.USSDState, error) {
+	return u.modem.currentUSSD().State, nil
 }
 
 func (u *USSD) NetworkRequest(context.Context) (string, error) {
 	return u.modem.currentUSSD().Text, nil
-}
-
-func legacyUSSDState(state wwanmodem.USSDState) Modem3GPPUSSDSessionState {
-	switch state {
-	case wwanmodem.USSDStateIdle, wwanmodem.USSDStateTerminated:
-		return Modem3GPPUSSDSessionStateIdle
-	case wwanmodem.USSDStateUserResponse:
-		return Modem3GPPUSSDSessionStateUserResponse
-	case wwanmodem.USSDStateActive, wwanmodem.USSDStateNetworkResponse:
-		return Modem3GPPUSSDSessionStateActive
-	default:
-		return Modem3GPPUSSDSessionStateUnknown
-	}
 }

@@ -58,6 +58,32 @@ func (u mbimDevice) MSISDN(ctx context.Context) (string, error) {
 	return "", nil
 }
 
+func (u mbimDevice) SIMState(ctx context.Context, target Target) (SIMState, error) {
+	slot, err := targetSIMSlot(u.slot, target)
+	if err != nil {
+		return SIMState{Supported: true}, err
+	}
+	state := SIMState{Supported: true, Slot: slot}
+
+	client, err := u.openNetwork(ctx)
+	if err != nil {
+		return state, fmt.Errorf("open MBIM network client: %w", err)
+	}
+	defer closeClient(client, "MBIM network")
+
+	status, err := client.SubscriberReadyStatus(ctx)
+	if err != nil {
+		return state, fmt.Errorf("read MBIM subscriber ready status: %w", err)
+	}
+	state.Ready = status.ReadyState == uiccmbim.SubscriberReadyStateInitialized
+	state.ICCID = strings.TrimSpace(status.SIMICCID)
+	state.Recoverable = state.ICCID != ""
+	target.ICCID = strings.TrimSpace(target.ICCID)
+	state.Matches = target.ICCID == "" || state.ICCID == target.ICCID
+	state.ICCIDMismatch = target.ICCID != "" && state.ICCID != "" && state.ICCID != target.ICCID
+	return state, nil
+}
+
 func (u mbimDevice) USIM(ctx context.Context) (usimcard.Reader, error) {
 	return openMBIMUSIM(ctx, u.device, u.slot)
 }

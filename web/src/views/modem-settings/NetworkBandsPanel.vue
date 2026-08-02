@@ -7,18 +7,18 @@ import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/componen
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
-import type { BandResponse } from '@/types/network'
+import type { BandResponse, BandValue } from '@/types/network'
 
 const props = defineProps<{
   supportedBands: BandResponse[]
-  selectedBands: number[]
+  selectedBands: BandValue[]
   isSettingsLoading: boolean
   isBandUpdating: boolean
   canUpdateBands: boolean
 }>()
 
 const emit = defineEmits<{
-  (event: 'toggleBand', value: number, checked: boolean): void
+  (event: 'toggleBand', value: BandValue, checked: boolean): void
   (event: 'updateBands'): void
 }>()
 
@@ -26,7 +26,12 @@ const { t } = useI18n()
 
 const hasBandOptions = computed(() => props.supportedBands.length > 0)
 
-const isBandSelected = (band: number) => props.selectedBands.includes(band)
+const bandKey = (band: BandValue) => `${band.technology}-${band.number}`
+
+const isBandSelected = (band: BandValue) => {
+  const key = bandKey(band)
+  return props.selectedBands.some((selected) => bandKey(selected) === key)
+}
 </script>
 
 <template>
@@ -55,16 +60,16 @@ const isBandSelected = (band: number) => props.selectedBands.includes(band)
       <div v-if="hasBandOptions" class="flex flex-wrap gap-2">
         <div
           v-for="band in props.supportedBands"
-          :key="band.value"
+          :key="bandKey(band.value)"
           class="inline-flex min-h-9 items-center gap-2 px-1 py-1"
         >
           <Checkbox
-            :id="`band-${band.value}`"
+            :id="`band-${bandKey(band.value)}`"
             :model-value="isBandSelected(band.value)"
             :disabled="props.isSettingsLoading || props.isBandUpdating"
             @update:model-value="emit('toggleBand', band.value, $event === true)"
           />
-          <Label :for="`band-${band.value}`" class="cursor-pointer text-sm font-normal">
+          <Label :for="`band-${bandKey(band.value)}`" class="cursor-pointer text-sm font-normal">
             {{ band.label }}
           </Label>
         </div>

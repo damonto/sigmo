@@ -17,7 +17,9 @@ import (
 	"github.com/damonto/ims-go/wfcsetup"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	modemlink "github.com/damonto/sigmo/internal/pkg/modem/link"
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/damonto/wwan-go/qcom"
 )
 
@@ -293,7 +295,7 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 		if err != nil {
 			return nil, err
 		}
-		if port.PortType == mmodem.ModemPortTypeQmi {
+		if port.PortType == wwanmodem.PortQMI {
 			settings, err := c.VoLTESettings(ctx, modem)
 			if err != nil {
 				return nil, fmt.Errorf("read VoLTE data path: %w", err)
@@ -322,10 +324,10 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 				return nil, fmt.Errorf("unsupported VoLTE data path %q", dataPath)
 			}
 		}
-		if port.PortType == mmodem.ModemPortTypeQmi {
+		if port.PortType == wwanmodem.PortQMI {
 			switch dataPath {
 			case DataPathQMAP:
-				preparedQMAP, err := mmodem.PrepareQMAP(ctx, modem, 2)
+				preparedQMAP, err := modemlink.PrepareQMAP(ctx, modem, 2)
 				if err != nil {
 					return nil, fmt.Errorf("prepare IMS QMAP mux 2: %w", err)
 				}

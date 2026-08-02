@@ -18,6 +18,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/internal/pkg/webpush"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 const incomingNotificationFreshnessWindow = 30 * time.Minute
@@ -207,7 +208,7 @@ func (r *Relay) runModemSubscription(ctx context.Context, m *modem.Modem) {
 }
 
 func incomingModemSMS(message *modem.SMS) bool {
-	return message != nil && (message.State == modem.SMSStateReceived || message.State == modem.SMSStateReceiving)
+	return message != nil && incomingMessageState(message.State)
 }
 
 func sleepRelayContext(ctx context.Context, delay time.Duration) error {
@@ -449,7 +450,7 @@ func (r *Relay) modemLabel(modemID string) string {
 }
 
 func storageMessageFromModemSMS(ctx context.Context, m *modem.Modem, profileID string, sms *modem.SMS) storage.Message {
-	incoming := sms.State == modem.SMSStateReceived || sms.State == modem.SMSStateReceiving
+	incoming := incomingMessageState(sms.State)
 	remote := messagepkg.CanonicalAddress(ctx, m, sms.Number)
 	number := m.Snapshot().Number
 	sender, recipient := number, remote
@@ -465,8 +466,27 @@ func storageMessageFromModemSMS(ctx context.Context, m *modem.Modem, profileID s
 		Recipient:   recipient,
 		Text:        sms.Text,
 		Timestamp:   sms.Timestamp,
-		Status:      strings.ToLower(sms.State.String()),
+		Status:      messageStateName(sms.State),
 		Incoming:    incoming,
 		ModemRefs:   messagepkg.StorageModemRefs(m.EquipmentIdentifier, sms.Generation, sms.Refs),
+	}
+}
+
+func incomingMessageState(state wwanmodem.MessageState) bool {
+	return state == wwanmodem.MessageStateReceivedUnread || state == wwanmodem.MessageStateReceivedRead
+}
+
+func messageStateName(state wwanmodem.MessageState) string {
+	switch state {
+	case wwanmodem.MessageStateReceivedUnread:
+		return "received-unread"
+	case wwanmodem.MessageStateReceivedRead:
+		return "received-read"
+	case wwanmodem.MessageStateStoredUnsent:
+		return "stored-unsent"
+	case wwanmodem.MessageStateStoredSent:
+		return "stored-sent"
+	default:
+		return "unknown"
 	}
 }

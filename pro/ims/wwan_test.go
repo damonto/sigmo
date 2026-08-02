@@ -17,6 +17,7 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/damonto/wwan-go/qcom"
 	usimcard "github.com/damonto/wwan-go/sim/card"
 )
@@ -33,14 +34,14 @@ func TestATReaderPortsPreferPrimaryThenFallbackPorts(t *testing.T) {
 				PrimaryPort:    "/dev/cdc-wdm1",
 				PrimarySimSlot: 1,
 				Ports: []mmodem.ModemPort{
-					{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
-					{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB6"},
-					{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB7"},
+					{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm1"},
+					{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB6"},
+					{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB7"},
 				},
 			},
 			want: []mmodem.ModemPort{
-				{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB6"},
-				{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB7"},
+				{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB6"},
+				{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB7"},
 			},
 		},
 		{
@@ -48,33 +49,33 @@ func TestATReaderPortsPreferPrimaryThenFallbackPorts(t *testing.T) {
 			modem: &mmodem.Modem{
 				PrimaryPort: "/dev/ttyGPS0",
 				Ports: []mmodem.ModemPort{
-					{PortType: mmodem.ModemPortTypeGps, Device: "/dev/ttyGPS0"},
-					{PortType: mmodem.ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
-					{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB2"},
+					{PortType: wwanmodem.PortGPS, Device: "/dev/ttyGPS0"},
+					{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
+					{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB2"},
 				},
 			},
-			want: []mmodem.ModemPort{{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB2"}},
+			want: []mmodem.ModemPort{{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB2"}},
 		},
 		{
 			name: "MBIM primary keeps AT fallback",
 			modem: &mmodem.Modem{
 				PrimaryPort: "/dev/cdc-wdm0",
 				Ports: []mmodem.ModemPort{
-					{PortType: mmodem.ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
-					{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB2"},
+					{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
+					{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB2"},
 				},
 			},
-			want: []mmodem.ModemPort{{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB2"}},
+			want: []mmodem.ModemPort{{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB2"}},
 		},
 		{
 			name: "deduplicates primary port",
 			modem: &mmodem.Modem{
 				PrimaryPort: "/dev/ttyUSB2",
 				Ports: []mmodem.ModemPort{
-					{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB2"},
+					{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB2"},
 				},
 			},
-			want: []mmodem.ModemPort{{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB2"}},
+			want: []mmodem.ModemPort{{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB2"}},
 		},
 	}
 	for _, tt := range tests {
@@ -137,7 +138,7 @@ func TestOpenWWANRequiresOneQMIDataPath(t *testing.T) {
 		PrimarySimSlot: 1,
 		Ports: []mmodem.ModemPort{{
 			Device:   "/dev/cdc-wdm0",
-			PortType: mmodem.ModemPortTypeQmi,
+			PortType: wwanmodem.PortQMI,
 		}},
 	}
 
@@ -214,9 +215,9 @@ func TestOpenWWANFallsBackAfterDeviceFailure(t *testing.T) {
 		PrimaryPort:    "/dev/cdc-wdm1",
 		PrimarySimSlot: 2,
 		Ports: []mmodem.ModemPort{
-			{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
-			{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB6"},
-			{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB7"},
+			{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm1"},
+			{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB6"},
+			{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB7"},
 		},
 	}
 	var atAttempts []string
@@ -258,8 +259,8 @@ func TestOpenWWANReturnsJoinedTransportErrors(t *testing.T) {
 	modem := &mmodem.Modem{
 		PrimaryPort: "/dev/cdc-wdm1",
 		Ports: []mmodem.ModemPort{
-			{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
-			{PortType: mmodem.ModemPortTypeAt, Device: "/dev/ttyUSB6"},
+			{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm1"},
+			{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB6"},
 		},
 	}
 	_, err := openWiFiCallingWWANWith(
@@ -292,14 +293,14 @@ func TestVoLTEInterfaceName(t *testing.T) {
 		{
 			name: "strips device directory from modem network port",
 			modem: &mmodem.Modem{Ports: []mmodem.ModemPort{
-				{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm2"},
-				{PortType: mmodem.ModemPortTypeNet, Device: "/dev/wws27u4i4"},
+				{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm2"},
+				{PortType: wwanmodem.PortNetwork, Device: "/dev/wws27u4i4"},
 			}},
 			want: "wws27u4i4",
 		},
 		{
 			name:  "keeps bare network interface name",
-			modem: &mmodem.Modem{Ports: []mmodem.ModemPort{{PortType: mmodem.ModemPortTypeNet, Device: "wws27u4i4"}}},
+			modem: &mmodem.Modem{Ports: []mmodem.ModemPort{{PortType: wwanmodem.PortNetwork, Device: "wws27u4i4"}}},
 			want:  "wws27u4i4",
 		},
 		{name: "missing network port", modem: &mmodem.Modem{}, wantErr: true},
@@ -335,15 +336,15 @@ func TestVoLTEEndpoint(t *testing.T) {
 		{
 			name: "prefers QMI for IMS PDN access",
 			modem: &mmodem.Modem{Ports: []mmodem.ModemPort{
-				{PortType: mmodem.ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
-				{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+				{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
+				{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm1"},
 			}},
-			want: mmodem.ModemPort{PortType: mmodem.ModemPortTypeQmi, Device: "/dev/cdc-wdm1"},
+			want: mmodem.ModemPort{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm1"},
 		},
 		{
 			name:  "falls back to MBIM",
-			modem: &mmodem.Modem{Ports: []mmodem.ModemPort{{PortType: mmodem.ModemPortTypeMbim, Device: "/dev/cdc-wdm0"}}},
-			want:  mmodem.ModemPort{PortType: mmodem.ModemPortTypeMbim, Device: "/dev/cdc-wdm0"},
+			modem: &mmodem.Modem{Ports: []mmodem.ModemPort{{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"}}},
+			want:  mmodem.ModemPort{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
 		},
 		{name: "rejects missing control port", modem: &mmodem.Modem{}, wantErr: true},
 		{name: "rejects nil modem", wantErr: true},
@@ -372,7 +373,7 @@ func TestResolveVoLTESettingsDoesNotRequireSIMSlot(t *testing.T) {
 	modem := &mmodem.Modem{
 		PrimarySimSlot: 6,
 		Ports: []mmodem.ModemPort{{
-			PortType: mmodem.ModemPortTypeMbim,
+			PortType: wwanmodem.PortMBIM,
 			Device:   "/dev/cdc-wdm0",
 		}},
 	}

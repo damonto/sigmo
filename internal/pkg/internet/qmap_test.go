@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	modemlink "github.com/damonto/sigmo/internal/pkg/modem/link"
 	"github.com/damonto/sigmo/internal/pkg/netlink"
 	"github.com/damonto/wwan-go/qcom"
 )
@@ -138,14 +139,14 @@ func TestConnectQMAPLockedAllowsPartialDualStack(t *testing.T) {
 			})
 
 			var opened, removed []uint8
-			openInternetQMAPSession = func(_ context.Context, _ *mmodem.Modem, cfg mmodem.QMAPConfig) (*mmodem.QMAPSession, error) {
+			openInternetQMAPSession = func(_ context.Context, _ *mmodem.Modem, cfg modemlink.QMAPConfig) (*modemlink.QMAPSession, error) {
 				opened = append(opened, cfg.MuxID)
 				if err := tt.failures[cfg.MuxID]; err != nil {
 					return nil, err
 				}
-				return &mmodem.QMAPSession{InterfaceName: qmapTestInterface(cfg.MuxID)}, nil
+				return &modemlink.QMAPSession{InterfaceName: qmapTestInterface(cfg.MuxID)}, nil
 			}
-			configureInternetQMAPNetwork = func(_ context.Context, _ connectionStateStore, _ string, _ Preferences, session *mmodem.QMAPSession) (trackedConnection, []string, error) {
+			configureInternetQMAPNetwork = func(_ context.Context, _ connectionStateStore, _ string, _ Preferences, session *modemlink.QMAPSession) (trackedConnection, []string, error) {
 				prefix := netip.MustParsePrefix("2001:db8::2/64")
 				if session.InterfaceName == qmapTestInterface(internetQMAPMuxID) {
 					prefix = netip.MustParsePrefix("10.0.0.2/30")
@@ -199,10 +200,10 @@ func TestQMAPProxyLifecycle(t *testing.T) {
 		interfaceName = "qmimux0"
 	)
 	wantDNS := []string{"10.51.190.5", "10.51.190.6"}
-	openInternetQMAPSession = func(_ context.Context, _ *mmodem.Modem, cfg mmodem.QMAPConfig) (*mmodem.QMAPSession, error) {
-		return &mmodem.QMAPSession{InterfaceName: qmapTestInterface(cfg.MuxID)}, nil
+	openInternetQMAPSession = func(_ context.Context, _ *mmodem.Modem, cfg modemlink.QMAPConfig) (*modemlink.QMAPSession, error) {
+		return &modemlink.QMAPSession{InterfaceName: qmapTestInterface(cfg.MuxID)}, nil
 	}
-	configureInternetQMAPNetwork = func(_ context.Context, _ connectionStateStore, _ string, prefs Preferences, _ *mmodem.QMAPSession) (trackedConnection, []string, error) {
+	configureInternetQMAPNetwork = func(_ context.Context, _ connectionStateStore, _ string, prefs Preferences, _ *modemlink.QMAPSession) (trackedConnection, []string, error) {
 		return trackedConnection{interfaceName: interfaceName, prefs: prefs}, slices.Clone(wantDNS), nil
 	}
 	removeInternetQMAPMuxes = func(_ *mmodem.Modem, _ ...uint8) error { return nil }
@@ -267,10 +268,10 @@ func TestConnectQMAPLockedRollsBackWhenProxyRegistrationFails(t *testing.T) {
 	})
 
 	var removed []uint8
-	openInternetQMAPSession = func(_ context.Context, _ *mmodem.Modem, cfg mmodem.QMAPConfig) (*mmodem.QMAPSession, error) {
-		return &mmodem.QMAPSession{InterfaceName: qmapTestInterface(cfg.MuxID)}, nil
+	openInternetQMAPSession = func(_ context.Context, _ *mmodem.Modem, cfg modemlink.QMAPConfig) (*modemlink.QMAPSession, error) {
+		return &modemlink.QMAPSession{InterfaceName: qmapTestInterface(cfg.MuxID)}, nil
 	}
-	configureInternetQMAPNetwork = func(_ context.Context, _ connectionStateStore, _ string, prefs Preferences, session *mmodem.QMAPSession) (trackedConnection, []string, error) {
+	configureInternetQMAPNetwork = func(_ context.Context, _ connectionStateStore, _ string, prefs Preferences, session *modemlink.QMAPSession) (trackedConnection, []string, error) {
 		return trackedConnection{interfaceName: session.InterfaceName, prefs: prefs}, nil, nil
 	}
 	removeInternetQMAPMuxes = func(_ *mmodem.Modem, muxIDs ...uint8) error {

@@ -33,12 +33,6 @@ func TestUnlockSIMError(t *testing.T) {
 			wantBody: errorCodeUnlockSIMNotRequired,
 		},
 		{
-			name:     "unsupported lock",
-			err:      mmodem.ErrSIMUnlockUnsupportedLock,
-			wantCode: http.StatusBadRequest,
-			wantBody: errorCodeUnlockSIMUnsupportedLock,
-		},
-		{
 			name:     "enable failed after unlock",
 			err:      mmodem.ErrEnableAfterSIMUnlock,
 			wantCode: http.StatusInternalServerError,

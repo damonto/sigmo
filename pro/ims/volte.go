@@ -9,6 +9,7 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 func readVoLTEStatus(ctx context.Context, modem *mmodem.Modem) (status wwan.VoLTEStatus, err error) {
@@ -75,7 +76,7 @@ func ResolveVoLTESettings(modem *mmodem.Modem, settings VoLTESettings) (VoLTESet
 		return VoLTESettings{}, err
 	}
 	switch port.PortType {
-	case mmodem.ModemPortTypeQmi:
+	case wwanmodem.PortQMI:
 		if settings.DataPath == "" {
 			return VoLTESettings{}, ErrVoLTEDataPathRequired
 		}
@@ -84,7 +85,7 @@ func ResolveVoLTESettings(modem *mmodem.Modem, settings VoLTESettings) (VoLTESet
 		default:
 			return VoLTESettings{}, fmt.Errorf("%w: %q", ErrVoLTEDataPathUnsupported, settings.DataPath)
 		}
-	case mmodem.ModemPortTypeMbim:
+	case wwanmodem.PortMBIM:
 		settings.DataPath = DataPathMBIM
 	default:
 		return VoLTESettings{}, ErrUnavailable

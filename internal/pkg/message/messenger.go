@@ -14,6 +14,7 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 type Messenger struct {
@@ -232,7 +233,7 @@ func (s *Messenger) syncModemMessages(ctx context.Context, device modemDevice, p
 }
 
 func messageFromModemSMS(ctx context.Context, device modemDevice, profileID string, sms *mmodem.SMS) storage.Message {
-	incoming := sms.State == mmodem.SMSStateReceived || sms.State == mmodem.SMSStateReceiving
+	incoming := incomingMessageState(sms.State)
 	remote := CanonicalAddress(ctx, device.modem(), sms.Number)
 	sender, recipient := device.phoneNumber(), remote
 	if incoming {
@@ -247,7 +248,7 @@ func messageFromModemSMS(ctx context.Context, device modemDevice, profileID stri
 		Recipient:   recipient,
 		Text:        sms.Text,
 		Timestamp:   sms.Timestamp,
-		Status:      strings.ToLower(sms.State.String()),
+		Status:      messageStateName(sms.State),
 		Incoming:    incoming,
 		ModemRefs:   StorageModemRefs(device.modemID(), sms.Generation, sms.Refs),
 	}
@@ -296,8 +297,27 @@ func StorageModemRefs(modemID string, generation uint64, refs []mmodem.MessageRe
 	return result
 }
 
-func wwanMessageStorage(storage uint8) mmodem.MessageStorage {
-	return mmodem.MessageStorage(storage)
+func wwanMessageStorage(storage uint8) wwanmodem.MessageStorage {
+	return wwanmodem.MessageStorage(storage)
+}
+
+func incomingMessageState(state wwanmodem.MessageState) bool {
+	return state == wwanmodem.MessageStateReceivedUnread || state == wwanmodem.MessageStateReceivedRead
+}
+
+func messageStateName(state wwanmodem.MessageState) string {
+	switch state {
+	case wwanmodem.MessageStateReceivedUnread:
+		return "received-unread"
+	case wwanmodem.MessageStateReceivedRead:
+		return "received-read"
+	case wwanmodem.MessageStateStoredUnsent:
+		return "stored-unsent"
+	case wwanmodem.MessageStateStoredSent:
+		return "stored-sent"
+	default:
+		return "unknown"
+	}
 }
 
 func (d realModemDevice) modem() *mmodem.Modem {

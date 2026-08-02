@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useNetworkApi } from '@/apis/network'
 import type {
   BandResponse,
+  BandValue,
   ModeResponse,
   NetworkResponse,
   SetCurrentModesRequest,
@@ -33,7 +34,7 @@ export const useModemNetwork = ({
   const modeOptions = ref<ModeResponse[]>([])
   const selectedMode = ref('')
   const supportedBands = ref<BandResponse[]>([])
-  const selectedBands = ref<number[]>([])
+  const selectedBands = ref<BandValue[]>([])
   const airplaneModeSupported = ref(false)
   const airplaneModeEnabled = ref(false)
   const isNetworkLoading = ref(false)
@@ -182,18 +183,18 @@ export const useModemNetwork = ({
     }
   }
 
-  const toggleBand = (band: number, checked: boolean) => {
-    const anyBand = 256
+  const toggleBand = (band: BandValue, checked: boolean) => {
+    const key = bandKey(band)
     if (!checked) {
-      selectedBands.value = selectedBands.value.filter((value) => value !== band)
+      selectedBands.value = selectedBands.value.filter((value) => bandKey(value) !== key)
       return
     }
-    if (band === anyBand) {
-      selectedBands.value = [anyBand]
+    if (isAutomaticBand(band)) {
+      selectedBands.value = [band]
       return
     }
-    selectedBands.value = selectedBands.value.filter((value) => value !== anyBand)
-    if (!selectedBands.value.includes(band)) {
+    selectedBands.value = selectedBands.value.filter((value) => !isAutomaticBand(value))
+    if (!selectedBands.value.some((value) => bandKey(value) === key)) {
       selectedBands.value = [...selectedBands.value, band]
     }
   }
@@ -296,3 +297,7 @@ const modeFromKey = (key: string): SetCurrentModesRequest | null => {
   if (!Number.isFinite(allowed) || !Number.isFinite(preferred)) return null
   return { allowed, preferred }
 }
+
+const bandKey = (band: BandValue) => `${band.technology}:${band.number}`
+
+const isAutomaticBand = (band: BandValue) => band.technology === 0 && band.number === 0

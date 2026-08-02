@@ -16,6 +16,7 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	appvalidator "github.com/damonto/sigmo/internal/pkg/validator"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 type fakeModemFinder struct {
@@ -115,7 +116,7 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 	tests := []struct {
 		name         string
 		body         string
-		portType     mmodem.ModemPortType
+		portType     wwanmodem.PortType
 		device       *fakeManagedVoLTEDevice
 		openErr      error
 		wantStatus   int
@@ -127,7 +128,7 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 		{
 			name:       "rejects unavailable device",
 			body:       `{"enabled":true,"dataPath":"qmap"}`,
-			portType:   mmodem.ModemPortTypeQmi,
+			portType:   wwanmodem.PortQMI,
 			openErr:    wwan.ErrUnsupported,
 			wantStatus: http.StatusBadRequest,
 			wantOpened: true,
@@ -135,7 +136,7 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 		{
 			name:         "accepts QMI data path",
 			body:         `{"enabled":true,"dataPath":"qmap"}`,
-			portType:     mmodem.ModemPortTypeQmi,
+			portType:     wwanmodem.PortQMI,
 			device:       &fakeManagedVoLTEDevice{},
 			wantStatus:   http.StatusNoContent,
 			wantUpdated:  true,
@@ -146,7 +147,7 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 		{
 			name:         "accepts Qualcomm 410 data path",
 			body:         `{"enabled":true,"dataPath":"qualcomm_410"}`,
-			portType:     mmodem.ModemPortTypeQmi,
+			portType:     wwanmodem.PortQMI,
 			device:       &fakeManagedVoLTEDevice{},
 			wantStatus:   http.StatusNoContent,
 			wantUpdated:  true,
@@ -157,7 +158,7 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 		{
 			name:         "disable skips validation",
 			body:         `{"enabled":false,"dataPath":"legacy_bam_dmux"}`,
-			portType:     mmodem.ModemPortTypeQmi,
+			portType:     wwanmodem.PortQMI,
 			openErr:      wwan.ErrUnsupported,
 			wantStatus:   http.StatusNoContent,
 			wantUpdated:  true,
@@ -166,19 +167,19 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 		{
 			name:       "rejects unsupported data path",
 			body:       `{"enabled":false,"dataPath":"auto"}`,
-			portType:   mmodem.ModemPortTypeQmi,
+			portType:   wwanmodem.PortQMI,
 			wantStatus: http.StatusUnprocessableEntity,
 		},
 		{
 			name:       "requires data path for QMI",
 			body:       `{"enabled":false}`,
-			portType:   mmodem.ModemPortTypeQmi,
+			portType:   wwanmodem.PortQMI,
 			wantStatus: http.StatusUnprocessableEntity,
 		},
 		{
 			name:         "derives MBIM data path when omitted",
 			body:         `{"enabled":false}`,
-			portType:     mmodem.ModemPortTypeMbim,
+			portType:     wwanmodem.PortMBIM,
 			wantStatus:   http.StatusNoContent,
 			wantUpdated:  true,
 			wantSettings: VoLTESettings{DataPath: DataPathMBIM},
@@ -186,7 +187,7 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 		{
 			name:         "ignores QMI data path selection for MBIM",
 			body:         `{"enabled":false,"dataPath":"legacy_bam_dmux"}`,
-			portType:     mmodem.ModemPortTypeMbim,
+			portType:     wwanmodem.PortMBIM,
 			wantStatus:   http.StatusNoContent,
 			wantUpdated:  true,
 			wantSettings: VoLTESettings{DataPath: DataPathMBIM},

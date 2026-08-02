@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"testing"
 
 	"github.com/damonto/wwan-go/cdcwdm"
@@ -52,39 +51,6 @@ func TestReserveSIMSlot(t *testing.T) {
 			defer release()
 			tt.run(t, m, release)
 		})
-	}
-}
-
-func TestLegacyBandEncoding(t *testing.T) {
-	tests := []struct {
-		name     string
-		semantic wwanmodem.Band
-		legacy   ModemBand
-	}{
-		{name: "LTE B41", semantic: wwanmodem.Band{Technology: wwanmodem.TechnologyLTE, Number: 41}, legacy: 71},
-		{name: "NR n78", semantic: wwanmodem.Band{Technology: wwanmodem.TechnologyNR5GSA, Number: 78}, legacy: 378},
-		{name: "UMTS B1", semantic: wwanmodem.Band{Technology: wwanmodem.TechnologyUMTS, Number: 1}, legacy: 5},
-		{name: "GSM 900", semantic: wwanmodem.Band{Technology: wwanmodem.TechnologyGSM, Number: 900}, legacy: 1},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			legacy, ok := legacyBand(tt.semantic)
-			if !ok || legacy != tt.legacy {
-				t.Fatalf("legacyBand(%+v) = %d, %t; want %d, true", tt.semantic, legacy, ok, tt.legacy)
-			}
-			semantic, ok := semanticBand(tt.legacy)
-			if !ok || semantic.Number != tt.semantic.Number || semantic.Technology&tt.semantic.Technology == 0 {
-				t.Fatalf("semanticBand(%d) = %+v, %t; want technology %d band %d", tt.legacy, semantic, ok, tt.semantic.Technology, tt.semantic.Number)
-			}
-		})
-	}
-}
-
-func TestLegacyBandsIncludeAny(t *testing.T) {
-	got := legacyBands([]wwanmodem.Band{{Technology: wwanmodem.TechnologyLTE, Number: 41}}, true)
-	want := []ModemBand{ModemBandAny, 71}
-	if len(got) != len(want) || got[0] != 71 || got[1] != ModemBandAny {
-		t.Fatalf("legacyBands() = %v, want [71 %d]", got, ModemBandAny)
 	}
 }
 
@@ -140,23 +106,23 @@ func TestApplyStatusCachesOverview(t *testing.T) {
 	})
 
 	snapshot := m.Snapshot()
-	if snapshot.State != ModemStateDisabled {
-		t.Fatalf("state = %v, want %v", snapshot.State, ModemStateDisabled)
+	if snapshot.Status.Power != wwanmodem.PowerStateLow {
+		t.Fatalf("power = %v, want %v", snapshot.Status.Power, wwanmodem.PowerStateLow)
 	}
-	if !snapshot.AirplaneMode {
+	if !snapshot.AirplaneMode() {
 		t.Fatal("airplane mode = false, want true")
 	}
-	if snapshot.Registration != Modem3GPPRegistrationStateRoaming {
-		t.Fatalf("registration = %v, want %v", snapshot.Registration, Modem3GPPRegistrationStateRoaming)
+	if snapshot.Status.Registration != wwanmodem.RegistrationRoaming {
+		t.Fatalf("registration = %v, want %v", snapshot.Status.Registration, wwanmodem.RegistrationRoaming)
 	}
-	if !slices.Contains(snapshot.Access, ModemAccessTechnologyLte) || !slices.Contains(snapshot.Access, ModemAccessTechnology5GNR) {
-		t.Fatalf("access technologies = %v, want LTE and 5G NR", snapshot.Access)
+	if snapshot.Status.Technology != wwanmodem.TechnologyLTE|wwanmodem.TechnologyNR5GNSA {
+		t.Fatalf("access technology = %v, want LTE and 5G NR", snapshot.Status.Technology)
 	}
-	if snapshot.OperatorCode != "46001" || snapshot.OperatorName != "China Unicom" {
-		t.Fatalf("operator = %q %q", snapshot.OperatorCode, snapshot.OperatorName)
+	if snapshot.Status.OperatorID != "46001" || snapshot.Status.OperatorName != "China Unicom" {
+		t.Fatalf("operator = %q %q", snapshot.Status.OperatorID, snapshot.Status.OperatorName)
 	}
-	if snapshot.SignalQuality != 78 {
-		t.Fatalf("signal quality = %d, want 78", snapshot.SignalQuality)
+	if snapshot.Status.SignalQuality != 78 {
+		t.Fatalf("signal quality = %d, want 78", snapshot.Status.SignalQuality)
 	}
 }
 
@@ -249,5 +215,49 @@ func TestApplySIMSlotsDoesNotMoveIdentityBetweenSlots(t *testing.T) {
 	}
 	if snapshot.Slots[1].Identifier != "8901000000000000002" {
 		t.Fatalf("slot two identifier = %q", snapshot.Slots[1].Identifier)
+	}
+}
+
+func TestApplySIMSlotsReplacesChangedActiveIdentity(t *testing.T) {
+	m := new(Modem)
+	m.applySIMInfo(wwanmodem.SIMInfo{
+		Slot:         1,
+		ICCID:        "8901000000000000001",
+		OperatorID:   "46001",
+		OperatorName: "China Unicom",
+		OwnNumbers:   []string{"+8613800000000"},
+	})
+
+	m.applySIMSlots([]wwanmodem.SIMSlot{
+		{Index: 1, Active: true, ICCID: "8901000000000000002"},
+	})
+
+	snapshot := m.Snapshot()
+	if snapshot.SIM == nil || snapshot.SIM.Identifier != "8901000000000000002" {
+		t.Fatalf("active SIM = %+v, want new ICCID", snapshot.SIM)
+	}
+	if snapshot.SIM.OperatorIdentifier != "" || snapshot.Number != "" {
+		t.Fatalf("active SIM retained stale identity: SIM=%+v number=%q", snapshot.SIM, snapshot.Number)
+	}
+}
+
+func TestApplyActiveSIMIdentityReplacesStaleMetadata(t *testing.T) {
+	m := new(Modem)
+	m.applySIMInfo(wwanmodem.SIMInfo{
+		Slot:         1,
+		ICCID:        "8901000000000000001",
+		OperatorID:   "46001",
+		OperatorName: "China Unicom",
+		OwnNumbers:   []string{"+8613800000000"},
+	})
+
+	m.applyActiveSIMIdentity(1, "8901000000000000002")
+
+	snapshot := m.Snapshot()
+	if snapshot.SIM == nil || snapshot.SIM.Identifier != "8901000000000000002" {
+		t.Fatalf("active SIM = %+v, want new ICCID", snapshot.SIM)
+	}
+	if snapshot.SIM.OperatorIdentifier != "" || snapshot.SIM.OperatorName != "" || snapshot.Number != "" {
+		t.Fatalf("active SIM retained stale metadata: SIM=%+v number=%q", snapshot.SIM, snapshot.Number)
 	}
 }
