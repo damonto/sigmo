@@ -7,7 +7,8 @@ MANIFEST="${SIGMO_PRO_MANIFEST:-${OUTPUT_DIR}/artifacts.tsv}"
 BOT_TOKEN="${SIGMO_PRO_TELEGRAM_BOT_TOKEN:-}"
 API_BASE="${SIGMO_PRO_TELEGRAM_API:-https://api.telegram.org}"
 MAX_BYTES="${SIGMO_TELEGRAM_MAX_BYTES:-52428800}"
-MAX_RETRIES="${SIGMO_TELEGRAM_MAX_RETRIES:-5}"
+MAX_RETRIES="${SIGMO_TELEGRAM_MAX_RETRIES:-3}"
+RETRY_BASE_SECONDS="${SIGMO_TELEGRAM_RETRY_BASE_SECONDS:-1}"
 send_attempts=0
 send_failures=0
 send_chats=()
@@ -63,6 +64,7 @@ send_document() {
 	local attempt=0
 	local http_code
 	local response
+	local retry_delay
 	local retry_after
 	local forms=(
 		--form-string "chat_id=${chat_id}"
@@ -85,7 +87,7 @@ send_document() {
 			return 1
 		fi
 
-		if [[ "${http_code}" == 2* ]] && jq -e '.ok == true' "${response}" >/dev/null; then
+		if [ "${http_code}" = "200" ] && jq -e '.ok == true' "${response}" >/dev/null; then
 			rm -f "${response}"
 			return
 		fi
@@ -94,12 +96,18 @@ send_document() {
 			.parameters.retry_after //
 			(.description // "" | try capture("retry after (?<seconds>[0-9]+)"; "i").seconds) //
 			empty
-		' "${response}")"
-		if [[ "${retry_after}" =~ ^[0-9]+$ ]] && [ "${attempt}" -lt "${MAX_RETRIES}" ]; then
+		' "${response}" 2>/dev/null || true)"
+		if { [ "${http_code}" != "200" ] || [[ "${retry_after}" =~ ^[0-9]+$ ]]; } &&
+			[ "${attempt}" -lt "${MAX_RETRIES}" ]; then
+			if [[ "${retry_after}" =~ ^[0-9]+$ ]]; then
+				retry_delay="${retry_after}"
+			else
+				retry_delay=$((10#${RETRY_BASE_SECONDS} * (1 << attempt)))
+			fi
 			rm -f "${response}"
 			attempt=$((attempt + 1))
-			echo "Telegram rate limited ${chat_id}; retrying in ${retry_after}s (${attempt}/${MAX_RETRIES})" >&2
-			sleep "${retry_after}"
+			echo "send Telegram document to ${chat_id}: HTTP ${http_code}; retrying in ${retry_delay}s (${attempt}/${MAX_RETRIES})" >&2
+			sleep "${retry_delay}"
 			continue
 		fi
 
@@ -173,6 +181,14 @@ main() {
 	fi
 	if ! command -v jq >/dev/null 2>&1; then
 		echo "jq is required to parse Telegram API responses" >&2
+		return 1
+	fi
+	if ! [[ "${MAX_RETRIES}" =~ ^[0-9]+$ ]]; then
+		echo "SIGMO_TELEGRAM_MAX_RETRIES must be a non-negative integer" >&2
+		return 1
+	fi
+	if ! [[ "${RETRY_BASE_SECONDS}" =~ ^[0-9]+$ ]]; then
+		echo "SIGMO_TELEGRAM_RETRY_BASE_SECONDS must be a non-negative integer" >&2
 		return 1
 	fi
 
