@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/damonto/wwan-go/cdcwdm"
@@ -177,6 +178,84 @@ func TestApplySIMSlotsCachesIdentity(t *testing.T) {
 	snapshot.Slots[0].ATR[0] = 0
 	if got := m.Snapshot().Slots[0].ATR[0]; got != 0x3b {
 		t.Fatalf("cached ATR was mutated through snapshot: %x", got)
+	}
+}
+
+func TestApplySIMSlotsFiltersUnavailableSlots(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*Modem)
+		slots []wwanmodem.SIMSlot
+		want  []uint32
+	}{
+		{
+			name: "inactive firmware placeholder",
+			slots: []wwanmodem.SIMSlot{
+				{Index: 1, Active: true, State: wwanmodem.SIMStateReady, ICCID: "8901000000000000001"},
+				{Index: 2, State: wwanmodem.SIMStateAbsent},
+			},
+			want: []uint32{1},
+		},
+		{
+			name: "active SIM without identifier",
+			slots: []wwanmodem.SIMSlot{
+				{Index: 1, Active: true},
+				{Index: 2, State: wwanmodem.SIMStateAbsent},
+			},
+			want: []uint32{1},
+		},
+		{
+			name: "two identified SIMs",
+			slots: []wwanmodem.SIMSlot{
+				{Index: 1, Active: true, State: wwanmodem.SIMStateReady, ICCID: "8901000000000000001"},
+				{Index: 2, State: wwanmodem.SIMStateReady, ICCID: "8901000000000000002"},
+			},
+			want: []uint32{1, 2},
+		},
+		{
+			name: "cached inactive SIM",
+			setup: func(m *Modem) {
+				m.applySIMInfo(wwanmodem.SIMInfo{Slot: 2, ICCID: "8901000000000000002"})
+			},
+			slots: []wwanmodem.SIMSlot{
+				{Index: 1, Active: true, State: wwanmodem.SIMStateReady, ICCID: "8901000000000000001"},
+				{Index: 2},
+			},
+			want: []uint32{1, 2},
+		},
+		{
+			name: "removed cached SIM",
+			setup: func(m *Modem) {
+				m.applySIMInfo(wwanmodem.SIMInfo{Slot: 2, ICCID: "8901000000000000002"})
+			},
+			slots: []wwanmodem.SIMSlot{
+				{Index: 1, Active: true, State: wwanmodem.SIMStateReady, ICCID: "8901000000000000001"},
+				{Index: 2, State: wwanmodem.SIMStateAbsent},
+			},
+			want: []uint32{1},
+		},
+		{
+			name: "absent SIM with stale identifier",
+			slots: []wwanmodem.SIMSlot{
+				{Index: 1, Active: true, State: wwanmodem.SIMStateReady, ICCID: "8901000000000000001"},
+				{Index: 2, State: wwanmodem.SIMStateAbsent, ICCID: "8901000000000000002"},
+			},
+			want: []uint32{1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := new(Modem)
+			if tt.setup != nil {
+				tt.setup(m)
+			}
+
+			m.applySIMSlots(tt.slots)
+
+			if got := m.Snapshot().SIMSlots; !slices.Equal(got, tt.want) {
+				t.Errorf("SIM slots = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

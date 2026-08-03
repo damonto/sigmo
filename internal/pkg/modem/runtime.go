@@ -124,13 +124,19 @@ func (m *Modem) applySIMSlots(slots []wwanmodem.SIMSlot) {
 			continue
 		}
 		index := uint32(slot.Index)
+		identifier := strings.TrimSpace(slot.ICCID)
+		cached := m.slotSIMs[index]
+		cachedIdentifier := cached != nil && strings.TrimSpace(cached.Identifier) != ""
+		// Some firmware reports empty physical placeholders as SIM slots, but
+		// Sigmo can only select an inactive SIM after it has a stable ICCID.
+		if !slot.Active && (slot.State == wwanmodem.SIMStateAbsent || (identifier == "" && !cachedIdentifier)) {
+			continue
+		}
 		values = append(values, index)
 		if slot.Active {
 			active = index
 		}
 
-		identifier := strings.TrimSpace(slot.ICCID)
-		cached := m.slotSIMs[index]
 		if slot.Active && m.Sim != nil &&
 			(m.Sim.Slot == index || (m.Sim.Slot == 0 && m.PrimarySimSlot == index) || (identifier != "" && m.Sim.Identifier == identifier)) {
 			cached = m.Sim
