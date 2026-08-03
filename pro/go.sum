@@ -2,8 +2,8 @@ github.com/ElMostafaIdrassi/goscard v1.0.0 h1:RDG5QrqrQBUoi5MkzM4zILdYf8qDn62daY
 github.com/ElMostafaIdrassi/goscard v1.0.0/go.mod h1:uGOakQe2fFlW2cVlr9cv6x07uelrf0j0aKPbR7jGgfg=
 github.com/damonto/euicc-go v1.1.3-0.20260731154314-8f944a2b5f98 h1:QU98x4k3jRGMIJTkfiLe/A2Bu4HSYachWVoLekYd5jU=
 github.com/damonto/euicc-go v1.1.3-0.20260731154314-8f944a2b5f98/go.mod h1:BnbArotxaZqZiz7ELbgDZBncQciEJt9COxakw3E19Ic=
-github.com/damonto/ims-go v0.0.0-20260731154559-1aa5fb5dfd33 h1:0aCQncP9xMtVY6dWzx73i1F0uOZW6nKJBKb6cl3edL4=
-github.com/damonto/ims-go v0.0.0-20260731154559-1aa5fb5dfd33/go.mod h1:Xc7SM34fLh80vEnO79UVF0hAZERclO7YzfNEloe2TzM=
+github.com/damonto/ims-go v0.0.0-20260803094132-7a9ff9373342 h1:aal2NlGVCv23McWiF445G7M/qFsxJQd/JTnuu1wf+DU=
+github.com/damonto/ims-go v0.0.0-20260803094132-7a9ff9373342/go.mod h1:Xc7SM34fLh80vEnO79UVF0hAZERclO7YzfNEloe2TzM=
 github.com/damonto/ts43-go v0.0.0-20260731154436-985904b6ae4f h1:0nBe4Kmxy53I5R6PUzq6A+Bo50eEDQKVp9ezokEkNJo=
 github.com/damonto/ts43-go v0.0.0-20260731154436-985904b6ae4f/go.mod h1:iUvZE8HUlphQsrAU+vsiLp9CypNfNBTDmEMD6eDdNYw=
 github.com/damonto/wwan-go v0.0.0-20260803064143-e51c05bf80cd h1:CsqmQ4lwWpkOgbpkJTn/od9ZARUw/e2QVWcIi87X9oo=

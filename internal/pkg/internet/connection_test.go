@@ -1843,7 +1843,7 @@ func TestConnectRejectsInvalidPreferencesBeforeReadingBearers(t *testing.T) {
 	}
 }
 
-func TestConnectPreparesBearerDataFormat(t *testing.T) {
+func TestConnectPreparesBearerDataPath(t *testing.T) {
 	errPrepare := errors.New("prepare data format")
 	errConnect := errors.New("connect bearer")
 
@@ -1851,8 +1851,11 @@ func TestConnectPreparesBearerDataFormat(t *testing.T) {
 		name             string
 		qualcomm410      bool
 		prepareErr       error
+		leaseErr         error
 		wantErr          error
 		wantPrepareCalls int
+		wantLeaseCalls   int
+		wantLeaseHeld    bool
 		wantConnect      bool
 	}{
 		{
@@ -1868,16 +1871,28 @@ func TestConnectPreparesBearerDataFormat(t *testing.T) {
 			wantConnect:      true,
 		},
 		{
-			name:        "Qualcomm 410 keeps its dedicated data format",
-			qualcomm410: true,
-			prepareErr:  errPrepare,
-			wantErr:     errConnect,
-			wantConnect: true,
+			name:           "Qualcomm 410 leases data format before bearer",
+			qualcomm410:    true,
+			prepareErr:     errPrepare,
+			wantErr:        errConnect,
+			wantLeaseCalls: 1,
+			wantLeaseHeld:  true,
+			wantConnect:    true,
+		},
+		{
+			name:           "Qualcomm 410 lease failure stops bearer",
+			qualcomm410:    true,
+			leaseErr:       errPrepare,
+			wantErr:        errPrepare,
+			wantLeaseCalls: 1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			previousOpen := openInternetQualcomm410Lease
+			t.Cleanup(func() { openInternetQualcomm410Lease = previousOpen })
+
 			connector, err := NewConnector(ConnectorConfig{State: testStore(t)})
 			if err != nil {
 				t.Fatalf("NewConnector() error = %v", err)
@@ -1887,7 +1902,19 @@ func TestConnectPreparesBearerDataFormat(t *testing.T) {
 			}
 
 			prepareCalls := 0
+			leaseCalls := 0
 			connectCalls := 0
+			lease := &qualcomm410LeaseProbe{}
+			openInternetQualcomm410Lease = func(context.Context) (qualcomm410DataFormatLease, error) {
+				leaseCalls++
+				if connectCalls != 0 {
+					t.Fatal("Qualcomm 410 lease opened after bearer connection started")
+				}
+				if tt.leaseErr != nil {
+					return nil, tt.leaseErr
+				}
+				return lease, nil
+			}
 			modem := fakeInternetModem{
 				modemID:      "modem-1",
 				prepareErr:   tt.prepareErr,
@@ -1902,8 +1929,17 @@ func TestConnectPreparesBearerDataFormat(t *testing.T) {
 			if prepareCalls != tt.wantPrepareCalls {
 				t.Fatalf("prepareBearerDataFormat() calls = %d, want %d", prepareCalls, tt.wantPrepareCalls)
 			}
+			if leaseCalls != tt.wantLeaseCalls {
+				t.Fatalf("Qualcomm 410 lease open calls = %d, want %d", leaseCalls, tt.wantLeaseCalls)
+			}
 			if got := connectCalls > 0; got != tt.wantConnect {
 				t.Fatalf("connectBearer() called = %t, want %t", got, tt.wantConnect)
+			}
+			if tt.qualcomm410 {
+				state := connector.qualcomm410StateFor("modem-1")
+				if got := state.lease == lease; got != tt.wantLeaseHeld {
+					t.Fatalf("Qualcomm 410 lease held after connect() = %t, want %t", got, tt.wantLeaseHeld)
+				}
 			}
 		})
 	}

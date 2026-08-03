@@ -30,7 +30,7 @@ func (c *Connector) invalidateModemGeneration(ctx context.Context, modemID strin
 	var (
 		tracked    *trackedConnection
 		qmap       *qmapConnection
-		link       qualcomm410Link
+		lease      qualcomm410DataFormatLease
 		interfaces []string
 	)
 	c.mu.Lock()
@@ -44,7 +44,7 @@ func (c *Connector) invalidateModemGeneration(ctx context.Context, modemID strin
 		delete(c.qmapConnections, modemID)
 	}
 	state, hasQualcomm410State := c.qualcomm410States[modemID]
-	if hasQualcomm410State && sameModemGeneration(state.generation, generation) && (state.selected || state.link != nil) {
+	if hasQualcomm410State && sameModemGeneration(state.generation, generation) && (state.selected || state.lease != nil) {
 		if !state.reconnectPending {
 			switch {
 			case tracked != nil:
@@ -55,8 +55,8 @@ func (c *Connector) invalidateModemGeneration(ctx context.Context, modemID strin
 		}
 		state.generation = generation
 		state.reloadPending = true
-		link = state.link
-		state.link = nil
+		lease = state.lease
+		state.lease = nil
 		c.qualcomm410States[modemID] = state
 	}
 	c.mu.Unlock()
@@ -68,9 +68,9 @@ func (c *Connector) invalidateModemGeneration(ctx context.Context, modemID strin
 		}
 	}
 	var result error
-	if link != nil {
-		if err := link.Close(); err != nil {
-			result = errors.Join(result, fmt.Errorf("release invalidated Qualcomm 410 Internet WDA client: %w", err))
+	if lease != nil {
+		if err := lease.Close(); err != nil {
+			result = errors.Join(result, fmt.Errorf("release invalidated Qualcomm 410 Internet WDA lease: %w", err))
 		}
 	}
 	if tracked != nil {

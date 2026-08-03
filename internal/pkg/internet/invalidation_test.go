@@ -9,12 +9,12 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
-type invalidationLinkProbe struct {
+type invalidationLeaseProbe struct {
 	closeCalls int
 	closeErr   error
 }
 
-func (l *invalidationLinkProbe) Close() error {
+func (l *invalidationLeaseProbe) Close() error {
 	l.closeCalls++
 	return l.closeErr
 }
@@ -32,10 +32,10 @@ func TestInvalidateModemGenerationIgnoresStaleOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
-	link := &invalidationLinkProbe{}
+	lease := &invalidationLeaseProbe{}
 	tracked := trackedConnection{modemGeneration: 8, prefs: Preferences{APN: "new"}}
 	qmap := &qmapConnection{generation: 8, modem: &mmodem.Modem{EquipmentIdentifier: "modem-1"}, muxIDs: []uint8{internetQMAPMuxID}}
-	state := qualcomm410State{generation: 8, selected: true, link: link}
+	state := qualcomm410State{generation: 8, selected: true, lease: lease}
 	connector.connections["modem-1"] = tracked
 	connector.qmapConnections["modem-1"] = qmap
 	connector.qualcomm410States["modem-1"] = state
@@ -53,11 +53,11 @@ func TestInvalidateModemGenerationIgnoresStaleOwner(t *testing.T) {
 		t.Fatal("stale generation removed the replacement QMAP connection")
 	}
 	gotState := connector.qualcomm410States["modem-1"]
-	if gotState.generation != 8 || gotState.link != link || !gotState.selected {
+	if gotState.generation != 8 || gotState.lease != lease || !gotState.selected {
 		t.Fatalf("Qualcomm 410 state = %+v, want replacement owner", gotState)
 	}
-	if link.closeCalls != 0 || removedMuxes {
-		t.Fatalf("stale invalidation released replacement resources: link closes=%d mux removal=%v", link.closeCalls, removedMuxes)
+	if lease.closeCalls != 0 || removedMuxes {
+		t.Fatalf("stale invalidation released replacement resources: lease closes=%d mux removal=%v", lease.closeCalls, removedMuxes)
 	}
 }
 
@@ -75,7 +75,7 @@ func TestInvalidateModemGenerationReleasesMatchingResources(t *testing.T) {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
 	prefs := Preferences{APN: "internet", AlwaysOn: true}
-	link := &invalidationLinkProbe{}
+	lease := &invalidationLeaseProbe{}
 	connector.connections["modem-1"] = trackedConnection{modemGeneration: 7, prefs: prefs}
 	connector.qmapConnections["modem-1"] = &qmapConnection{
 		generation: 7,
@@ -84,7 +84,7 @@ func TestInvalidateModemGenerationReleasesMatchingResources(t *testing.T) {
 		prefs:      prefs,
 	}
 	connector.preferences["modem-1"] = prefs
-	connector.qualcomm410States["modem-1"] = qualcomm410State{generation: 7, selected: true, link: link}
+	connector.qualcomm410States["modem-1"] = qualcomm410State{generation: 7, selected: true, lease: lease}
 
 	if err := connector.invalidateModemGeneration(context.Background(), "modem-1", 7); err != nil {
 		t.Fatalf("invalidateModemGeneration() error = %v", err)
@@ -98,11 +98,11 @@ func TestInvalidateModemGenerationReleasesMatchingResources(t *testing.T) {
 	if got := connector.preferences["modem-1"]; got != prefs {
 		t.Fatalf("preferences = %+v, want %+v", got, prefs)
 	}
-	if link.closeCalls != 1 {
-		t.Fatalf("Qualcomm 410 link close calls after repeated invalidation = %d, want 1", link.closeCalls)
+	if lease.closeCalls != 1 {
+		t.Fatalf("Qualcomm 410 lease close calls after repeated invalidation = %d, want 1", lease.closeCalls)
 	}
 	state := connector.qualcomm410States["modem-1"]
-	if !state.selected || state.link != nil || !state.reloadPending || !state.reconnectPending || state.reconnectPreferences != prefs {
+	if !state.selected || state.lease != nil || !state.reloadPending || !state.reconnectPending || state.reconnectPreferences != prefs {
 		t.Fatalf("Qualcomm 410 replacement state = %+v", state)
 	}
 	if !slices.Equal(removed, []uint8{internetQMAPMuxID, ipv6QMAPMuxID}) {
@@ -111,7 +111,7 @@ func TestInvalidateModemGenerationReleasesMatchingResources(t *testing.T) {
 }
 
 func TestInvalidateModemGenerationJoinsReleaseErrors(t *testing.T) {
-	errLink := errors.New("link close")
+	errLink := errors.New("lease close")
 	errMux := errors.New("mux removal")
 	previousRemove := removeInternetQMAPMuxes
 	t.Cleanup(func() { removeInternetQMAPMuxes = previousRemove })
@@ -129,11 +129,11 @@ func TestInvalidateModemGenerationJoinsReleaseErrors(t *testing.T) {
 	connector.qualcomm410States["modem-1"] = qualcomm410State{
 		generation: 7,
 		selected:   true,
-		link:       &invalidationLinkProbe{closeErr: errLink},
+		lease:      &invalidationLeaseProbe{closeErr: errLink},
 	}
 
 	err = connector.invalidateModemGeneration(context.Background(), "modem-1", 7)
 	if !errors.Is(err, errLink) || !errors.Is(err, errMux) {
-		t.Fatalf("invalidateModemGeneration() error = %v, want link and mux errors", err)
+		t.Fatalf("invalidateModemGeneration() error = %v, want lease and mux errors", err)
 	}
 }
