@@ -33,7 +33,6 @@ type deviceControl interface {
 // their independent protocol clients and must still be closed by callers.
 type Device interface {
 	deviceControl
-	ATR(ctx context.Context) ([]byte, error)
 	USIM(ctx context.Context) (usimcard.Reader, error)
 	USIMWithCAT(ctx context.Context, profile wwan.CATProfile) (usimcard.Reader, error)
 	VoLTEStatus(ctx context.Context) (wwan.VoLTEStatus, error)

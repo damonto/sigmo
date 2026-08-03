@@ -36,7 +36,7 @@ type Target struct {
 	ICCID string
 }
 
-// Device provides operation-scoped modem access without retaining protocol clients.
+// Device provides operation-scoped MBIM access without retaining protocol clients.
 type Device struct {
 	deviceOperations
 }
@@ -45,7 +45,7 @@ type deviceOperations struct {
 	backend backend
 }
 
-// Session is a device that keeps reusable protocol clients open until Close.
+// Session keeps reusable QMI protocol clients open until Close.
 type Session struct {
 	deviceOperations
 }
@@ -58,8 +58,7 @@ type backend interface {
 	Close() error
 }
 
-type simBackend interface {
-	ATR(ctx context.Context) ([]byte, error)
+type usimBackend interface {
 	USIM(ctx context.Context) (usimcard.Reader, error)
 	USIMWithCAT(ctx context.Context, profile CATProfile) (usimcard.Reader, error)
 }
@@ -126,37 +125,27 @@ type IMSProfile struct {
 	PDNType string
 }
 
-// Open returns an operation-scoped device that does not retain protocol clients.
+// Open returns an operation-scoped MBIM device.
 func Open(cfg Config) (*Device, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
-	switch cfg.PortType {
-	case PortTypeQMI:
-		return &Device{deviceOperations: deviceOperations{backend: newQMIDevice(cfg.Device, cfg.Slot, cfg.IMEI)}}, nil
-	case PortTypeMBIM:
-		return &Device{deviceOperations: deviceOperations{backend: newMBIMDevice(cfg.Device, cfg.Slot)}}, nil
-	default:
+	if cfg.PortType != PortTypeMBIM {
 		return nil, ErrUnsupported
 	}
+	return &Device{deviceOperations: deviceOperations{backend: newMBIMDevice(cfg.Device, cfg.Slot)}}, nil
 }
 
-// OpenSession opens a device that can reuse protocol clients across operations.
+// OpenSession opens a QMI device that reuses protocol clients across operations.
 // The caller must close the returned session.
 func OpenSession(cfg Config) (*Session, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
-	var backend backend
-	switch cfg.PortType {
-	case PortTypeQMI:
-		backend = newQMISession(cfg)
-	case PortTypeMBIM:
-		backend = newMBIMDevice(cfg.Device, cfg.Slot)
-	default:
+	if cfg.PortType != PortTypeQMI {
 		return nil, ErrUnsupported
 	}
-	return &Session{deviceOperations: deviceOperations{backend: backend}}, nil
+	return &Session{deviceOperations: deviceOperations{backend: newQMISession(cfg)}}, nil
 }
 
 func validateConfig(cfg Config) error {
@@ -177,14 +166,6 @@ func (s *Session) Close() error {
 	return s.backend.Close()
 }
 
-func (d *deviceOperations) ATR(ctx context.Context) ([]byte, error) {
-	backend, ok := d.backend.(simBackend)
-	if !ok {
-		return nil, ErrUnsupported
-	}
-	return backend.ATR(ctx)
-}
-
 func (d *deviceOperations) PowerCycleSIM(ctx context.Context) error {
 	backend, ok := d.backend.(simRecoveryBackend)
 	if !ok {
@@ -202,7 +183,7 @@ func (d *deviceOperations) ActivateProvisioningIfSIMMissing(ctx context.Context)
 }
 
 func (d *deviceOperations) USIM(ctx context.Context) (usimcard.Reader, error) {
-	backend, ok := d.backend.(simBackend)
+	backend, ok := d.backend.(usimBackend)
 	if !ok {
 		return nil, ErrUnsupported
 	}
@@ -210,7 +191,7 @@ func (d *deviceOperations) USIM(ctx context.Context) (usimcard.Reader, error) {
 }
 
 func (d *deviceOperations) USIMWithCAT(ctx context.Context, profile CATProfile) (usimcard.Reader, error) {
-	backend, ok := d.backend.(simBackend)
+	backend, ok := d.backend.(usimBackend)
 	if !ok {
 		return nil, ErrUnsupported
 	}

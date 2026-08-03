@@ -101,12 +101,7 @@ func (c *catalog) buildBasicResponse(device *mmodem.Modem) *ModemResponse {
 		resp.RegistrationState = registrationStateName(snapshot.Status.Registration)
 		resp.RegisteredOperator = RegisteredOperatorResponse{Name: snapshot.Status.OperatorName, Code: snapshot.Status.OperatorID}
 	}
-	supportsEsim, err := mmodem.SupportsEUICC(device)
-	if err != nil {
-		slog.Warn("read cached eSIM support", "imei", device.EquipmentIdentifier, "error", err)
-		return resp
-	}
-	resp.SupportsEsim = supportsEsim
+	resp.SupportsEsim = mmodem.SupportsEUICC(device)
 	return resp
 }
 
@@ -125,11 +120,6 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 	}
 
 	currentSettings := c.store.Snapshot()
-	supportsEsim, err := mmodem.SupportsEUICC(device)
-	if err != nil {
-		return nil, fmt.Errorf("detect eSIM support: %w", err)
-	}
-
 	simSlots, err := c.buildSlotsResponse(ctx, snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("fetch SIM slots: %w", err)
@@ -166,7 +156,7 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		},
 		SignalQuality: uint32(snapshot.Status.SignalQuality),
 		AirplaneMode:  snapshot.AirplaneMode(),
-		SupportsEsim:  supportsEsim,
+		SupportsEsim:  mmodem.SupportsEUICC(device),
 	}
 	if snapshot.AirplaneMode() || !snapshot.StatusKnown {
 		resp.AccessTechnology = ""
@@ -206,10 +196,6 @@ func (c *catalog) buildLockedResponse(ctx context.Context, device *mmodem.Modem)
 	if alias != "" {
 		name = alias
 	}
-	supportsEsim, err := mmodem.SupportsEUICC(device)
-	if err != nil {
-		slog.Warn("detect eSIM support for locked modem", "imei", device.EquipmentIdentifier, "error", err)
-	}
 	return &ModemResponse{
 		Manufacturer:     device.Manufacturer,
 		ID:               device.EquipmentIdentifier,
@@ -222,7 +208,7 @@ func (c *catalog) buildLockedResponse(ctx context.Context, device *mmodem.Modem)
 		UnlockRequired:   unlockRequired(snapshot),
 		UnlockSupported:  unlockSupported(device),
 		AirplaneMode:     snapshot.AirplaneMode(),
-		SupportsEsim:     supportsEsim,
+		SupportsEsim:     mmodem.SupportsEUICC(device),
 		Slots:            []SlotResponse{},
 	}, nil
 }

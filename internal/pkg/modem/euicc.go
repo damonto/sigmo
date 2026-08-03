@@ -1,13 +1,6 @@
 package modem
 
-import (
-	"context"
-	"errors"
-	"fmt"
-	"slices"
-
-	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
-)
+import "slices"
 
 var knownATRs = [][]byte{
 	{0x3B, 0x9F, 0x96, 0x80, 0x3F, 0xC7, 0x82, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x15, 0x57, 0x65, 0x73, 0x74, 0x6B, 0x2E, 0x6D, 0x65, 0x63}, // eSTK.me
@@ -18,47 +11,16 @@ var knownATRs = [][]byte{
 	{0x3B, 0x9F, 0x96, 0x80, 0x1F, 0xC7, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x1B, 0x57, 0xAA, 0x86, 0x60, 0xF0, 0x02, 0x00, 0x03, 0x5D},       // ECP
 }
 
-type deviceATRReader interface {
-	ATR(context.Context) ([]byte, error)
-}
-
-type deviceATROpener func(*Modem) (deviceATRReader, error)
-
 // SupportsEUICC detects eUICC support from the ATR cached on the SIM object.
-func SupportsEUICC(m *Modem) (bool, error) {
+func SupportsEUICC(m *Modem) bool {
 	if m == nil {
-		return false, nil
+		return false
 	}
 	sim := m.Snapshot().SIM
 	if sim == nil || len(sim.ATR) == 0 {
-		return false, nil
+		return false
 	}
-	return atrSupportsEUICC(sim.ATR), nil
-}
-
-func readDeviceATR(ctx context.Context, m *Modem, open deviceATROpener) ([]byte, error) {
-	if open == nil {
-		open = func(m *Modem) (deviceATRReader, error) {
-			return OpenDevice(m)
-		}
-	}
-	device, err := open(m)
-	if errors.Is(err, wwan.ErrUnsupported) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	atr, err := device.ATR(ctx)
-	if err != nil {
-		return nil, err
-	}
-	m.Logger().Debug("read device ATR", "primarySlot", m.Snapshot().PrimarySIMSlot, "atr", formatATR(atr))
-	return slices.Clone(atr), nil
-}
-
-func formatATR(atr []byte) string {
-	return fmt.Sprintf("% X", atr)
+	return atrSupportsEUICC(sim.ATR)
 }
 
 func atrSupportsEUICC(atr []byte) bool {

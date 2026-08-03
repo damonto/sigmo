@@ -92,20 +92,6 @@ func (u mbimDevice) USIMWithCAT(ctx context.Context, _ CATProfile) (usimcard.Rea
 	return u.USIM(ctx)
 }
 
-func (u mbimDevice) ATR(ctx context.Context) ([]byte, error) {
-	client, err := openMBIMClient(ctx, u.device, u.slot)
-	if err != nil {
-		return nil, fmt.Errorf("open MBIM client: %w", err)
-	}
-	defer closeClient(client, "MBIM")
-
-	atr, err := client.QueryUiccATR(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("query MBIM UICC ATR: %w", err)
-	}
-	return atr, nil
-}
-
 func (u mbimDevice) PacketServiceStatus(ctx context.Context) (PacketServiceStatus, error) {
 	client, err := u.openNetwork(ctx)
 	if err != nil {

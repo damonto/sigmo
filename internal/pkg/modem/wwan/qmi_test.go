@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/damonto/wwan-go/qcom"
 	qmitransport "github.com/damonto/wwan-go/qcom/qmi"
 )
@@ -28,7 +29,7 @@ func TestDeviceMSISDNQMI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, tt.client, nil)}
+			device := qmiSession{slot: 1, openClient: qmiClientOpener(t, 1, tt.client, nil)}
 			got, err := device.MSISDN(context.Background())
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
@@ -40,8 +41,8 @@ func TestDeviceMSISDNQMI(t *testing.T) {
 			if got != tt.want {
 				t.Fatalf("MSISDN() = %q, want %q", got, tt.want)
 			}
-			if !slices.Contains(tt.client.calls, "close") {
-				t.Fatal("client was not closed")
+			if slices.Contains(tt.client.calls, "close") {
+				t.Fatal("client closed before QMI session Close")
 			}
 		})
 	}
@@ -72,7 +73,7 @@ func TestEqualCATProfile(t *testing.T) {
 
 func TestDeviceUpdateMSISDNQMI(t *testing.T) {
 	client := &fakeQMIClient{fileAttributes: qcom.FileAttributes{RecordSize: 32}}
-	device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
+	device := qmiSession{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 	if err := device.UpdateMSISDN(context.Background(), "+12345"); err != nil {
 		t.Fatalf("UpdateMSISDN() error = %v", err)
 	}
@@ -165,7 +166,7 @@ func TestDeviceVoLTEStatusQMI(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &fakeQMIClient{imsaStatus: tt.status, imsaStatusErr: tt.err}
-			device := qmiDevice{
+			device := qmiSession{
 				slot:       1,
 				openClient: qmiClientOpener(t, 1, client, nil),
 			}
@@ -220,7 +221,7 @@ func TestDevicePacketServiceStatusQMI(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &fakeQMIClient{nasServingSystem: tt.serving, nasServingSystemErr: tt.err}
-			device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
+			device := qmiSession{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 
 			got, err := device.PacketServiceStatus(context.Background())
 			if tt.wantErr != nil {
@@ -239,52 +240,22 @@ func TestDevicePacketServiceStatusQMI(t *testing.T) {
 	}
 }
 
-func TestOpenDoesNotRetainQMIClient(t *testing.T) {
-	client := &fakeQMIClient{nasServingSystem: qcom.NASServingSystem{
-		RegistrationState: qcom.NASRegistrationRegistered,
-		PSAttachState:     qcom.NASAttachAttached,
-		RadioInterfaces:   []qcom.NASRadioInterface{qcom.NASRadioInterfaceLTE},
-	}}
-	device, err := Open(Config{PortType: PortTypeQMI, Device: "/dev/cdc-wdm0", Slot: 1})
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	backend := device.backend.(*qmiDevice)
-	openCalls := 0
-	backend.openClient = func(context.Context, uint8) (qmiClient, error) {
-		openCalls++
-		return client, nil
-	}
-
-	for range 2 {
-		if _, err := device.PacketServiceStatus(context.Background()); err != nil {
-			t.Fatalf("PacketServiceStatus() error = %v", err)
-		}
-	}
-	if openCalls != 2 {
-		t.Fatalf("open calls = %d, want 2", openCalls)
-	}
-	if closeCalls := countCalls(client.calls, "close"); closeCalls != 2 {
-		t.Fatalf("client close calls = %d, want 2", closeCalls)
-	}
-}
-
 func TestQMISessionUSIMUsesConfiguredQCOMOpener(t *testing.T) {
 	openErr := errors.New("open rejected")
 	tests := []struct {
 		name string
-		run  func(*qmiDevice) error
+		run  func(*qmiSession) error
 	}{
 		{
 			name: "USIM",
-			run: func(device *qmiDevice) error {
+			run: func(device *qmiSession) error {
 				_, err := device.USIM(context.Background())
 				return err
 			},
 		},
 		{
 			name: "USIM with CAT",
-			run: func(device *qmiDevice) error {
+			run: func(device *qmiSession) error {
 				_, err := device.USIMWithCAT(context.Background(), CATProfile{})
 				return err
 			},
@@ -319,6 +290,46 @@ func TestQMISessionUSIMUsesConfiguredQCOMOpener(t *testing.T) {
 	}
 }
 
+func TestQMISessionRejectsUSIMAfterClose(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*qmiSession) error
+	}{
+		{
+			name: "USIM",
+			run: func(session *qmiSession) error {
+				_, err := session.USIM(context.Background())
+				return err
+			},
+		},
+		{
+			name: "USIM with CAT",
+			run: func(session *qmiSession) error {
+				_, err := session.USIMWithCAT(context.Background(), CATProfile{})
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			openCalls := 0
+			session := newQMISessionWithQCOMOpener(testQMIConfig(1), func(context.Context, uint8) (*qcom.Client, error) {
+				openCalls++
+				return nil, errors.New("unexpected QMI client open")
+			})
+			if err := session.Close(); err != nil {
+				t.Fatalf("Close() error = %v", err)
+			}
+			if err := tt.run(session); !errors.Is(err, wwanmodem.ErrClosed) {
+				t.Fatalf("USIM operation error = %v, want %v", err, wwanmodem.ErrClosed)
+			}
+			if openCalls != 0 {
+				t.Fatalf("QMI client open calls = %d, want 0", openCalls)
+			}
+		})
+	}
+}
+
 func TestOpenSessionReusesQMIClientUntilClose(t *testing.T) {
 	client := &fakeQMIClient{nasServingSystem: qcom.NASServingSystem{
 		RegistrationState: qcom.NASRegistrationRegistered,
@@ -329,7 +340,7 @@ func TestOpenSessionReusesQMIClientUntilClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenSession() error = %v", err)
 	}
-	backend := session.backend.(*qmiDevice)
+	backend := session.backend.(*qmiSession)
 	openCalls := 0
 	backend.openClient = func(context.Context, uint8) (qmiClient, error) {
 		openCalls++
@@ -373,7 +384,7 @@ func TestOpenSessionReopensQMIClientAfterTerminalError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenSession() error = %v", err)
 	}
-	backend := session.backend.(*qmiDevice)
+	backend := session.backend.(*qmiSession)
 	clients := []qmiClient{first, second}
 	openCalls := 0
 	backend.openClient = func(context.Context, uint8) (qmiClient, error) {
@@ -477,7 +488,7 @@ func TestDeviceIMSProfileQMI(t *testing.T) {
 				wdsProfileSettings: tt.profileSettings,
 				wdsSettingsErr:     tt.settingsErr,
 			}
-			device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
+			device := qmiSession{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 
 			got, err := device.IMSProfile(context.Background())
 			if tt.wantErr {
@@ -514,7 +525,7 @@ func TestDeviceIMSSTestModeQMI(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &fakeQMIClient{imssTestMode: tt.enabled, imssTestModeErr: tt.err}
-			device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
+			device := qmiSession{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 
 			got, err := device.IMSSTestMode(context.Background())
 			if tt.wantErr != nil {
@@ -529,8 +540,8 @@ func TestDeviceIMSSTestModeQMI(t *testing.T) {
 			if got != tt.enabled {
 				t.Fatalf("IMSSTestMode() = %v, want %v", got, tt.enabled)
 			}
-			if !slices.Equal(client.calls, []string{"imss-test-mode", "close"}) {
-				t.Fatalf("calls = %v, want query and close", client.calls)
+			if !slices.Equal(client.calls, []string{"imss-test-mode"}) {
+				t.Fatalf("calls = %v, want query", client.calls)
 			}
 		})
 	}
@@ -554,7 +565,7 @@ func TestDeviceSetIMSSTestModeQMI(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &fakeQMIClient{setIMSSTestModeErr: tt.err}
-			device := qmiDevice{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
+			device := qmiSession{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 
 			err := device.SetIMSSTestMode(context.Background(), tt.enabled)
 			if tt.wantErr != nil {
@@ -569,8 +580,8 @@ func TestDeviceSetIMSSTestModeQMI(t *testing.T) {
 			if client.setIMSSTestMode != tt.enabled {
 				t.Fatalf("SetIMSSTestMode() enabled = %v, want %v", client.setIMSSTestMode, tt.enabled)
 			}
-			if !slices.Equal(client.calls, []string{"set-imss-test-mode", "close"}) {
-				t.Fatalf("calls = %v, want set and close", client.calls)
+			if !slices.Equal(client.calls, []string{"set-imss-test-mode"}) {
+				t.Fatalf("calls = %v, want set", client.calls)
 			}
 		})
 	}
@@ -599,6 +610,38 @@ func TestOpenRejectsInvalidConfig(t *testing.T) {
 			}
 			if device != nil {
 				t.Fatalf("Open() device = %v, want nil", device)
+			}
+		})
+	}
+}
+
+func TestOpenFunctionsEnforceProtocolLifecycle(t *testing.T) {
+	tests := []struct {
+		name string
+		open func(Config) error
+		cfg  Config
+	}{
+		{
+			name: "operation-scoped QMI",
+			open: func(cfg Config) error {
+				_, err := Open(cfg)
+				return err
+			},
+			cfg: Config{PortType: PortTypeQMI, Device: "/dev/cdc-wdm0", Slot: 1},
+		},
+		{
+			name: "session-scoped MBIM",
+			open: func(cfg Config) error {
+				_, err := OpenSession(cfg)
+				return err
+			},
+			cfg: Config{PortType: PortTypeMBIM, Device: "/dev/cdc-wdm0", Slot: 1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.open(tt.cfg); !errors.Is(err, ErrUnsupported) {
+				t.Fatalf("open error = %v, want %v", err, ErrUnsupported)
 			}
 		})
 	}
@@ -658,7 +701,7 @@ func TestQMIDeviceSIMState(t *testing.T) {
 				Slot:        1,
 			},
 			wantFile:  qcom.File{Session: qcom.SessionCardSlot1, Path: qmiICCIDFilePath},
-			wantCalls: []string{"card-status", "read-transparent", "close"},
+			wantCalls: []string{"card-status", "read-transparent"},
 		},
 		{
 			name:     "matching ready second slot",
@@ -677,7 +720,7 @@ func TestQMIDeviceSIMState(t *testing.T) {
 				Slot:        2,
 			},
 			wantFile:  qcom.File{Session: qcom.SessionCardSlot2, Path: qmiICCIDFilePath},
-			wantCalls: []string{"card-status", "read-transparent", "close"},
+			wantCalls: []string{"card-status", "read-transparent"},
 		},
 		{
 			name:     "reports ICCID mismatch",
@@ -696,7 +739,7 @@ func TestQMIDeviceSIMState(t *testing.T) {
 				Slot:          1,
 			},
 			wantFile:  qcom.File{Session: qcom.SessionCardSlot1, Path: qmiICCIDFilePath},
-			wantCalls: []string{"card-status", "read-transparent", "close"},
+			wantCalls: []string{"card-status", "read-transparent"},
 		},
 		{
 			name:      "returns card status error",
@@ -704,7 +747,7 @@ func TestQMIDeviceSIMState(t *testing.T) {
 			openSlot:  1,
 			client:    &fakeQMIClient{cardStatusErr: errCardStatus},
 			want:      SIMState{Supported: true, Slot: 1},
-			wantCalls: []string{"card-status", "close"},
+			wantCalls: []string{"card-status"},
 			wantErr:   errCardStatus,
 		},
 		{
@@ -717,7 +760,7 @@ func TestQMIDeviceSIMState(t *testing.T) {
 			},
 			want:      SIMState{Supported: true, Recoverable: true, Ready: true, Slot: 1},
 			wantFile:  qcom.File{Session: qcom.SessionCardSlot1, Path: qmiICCIDFilePath},
-			wantCalls: []string{"card-status", "read-transparent", "close"},
+			wantCalls: []string{"card-status", "read-transparent"},
 			wantErr:   errICCID,
 		},
 		{
@@ -726,13 +769,13 @@ func TestQMIDeviceSIMState(t *testing.T) {
 			openSlot:  1,
 			client:    &fakeQMIClient{transparentData: rawICCID, cardStatus: qmiTestCardStatus(qcom.ApplicationStateDetected, qcom.PersonalizationStateReady, nil)},
 			want:      SIMState{Supported: true, Recoverable: true, Slot: 1},
-			wantCalls: []string{"card-status", "close"},
+			wantCalls: []string{"card-status"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			device := qmiDevice{
+			device := qmiSession{
 				slot:       1,
 				openClient: qmiClientOpener(t, tt.openSlot, tt.client, nil),
 			}
@@ -785,13 +828,13 @@ func TestQMIDevicePowerCycleSIM(t *testing.T) {
 			name:      "power cycles default slot",
 			cfg:       testQMIConfig(1),
 			client:    &fakeQMIClient{},
-			wantCalls: []string{"power-off:1", "power-on:1", "close"},
+			wantCalls: []string{"power-off:1", "power-on:1"},
 		},
 		{
 			name:      "power cycles primary slot",
 			cfg:       testQMIConfig(2),
 			client:    &fakeQMIClient{},
-			wantCalls: []string{"power-off:2", "power-on:2", "close"},
+			wantCalls: []string{"power-off:2", "power-on:2"},
 		},
 		{
 			name:      "returns open error",
@@ -804,14 +847,14 @@ func TestQMIDevicePowerCycleSIM(t *testing.T) {
 			name:      "returns power off error",
 			cfg:       testQMIConfig(1),
 			client:    &fakeQMIClient{powerOffErr: errPowerOff},
-			wantCalls: []string{"power-off:1", "close"},
+			wantCalls: []string{"power-off:1"},
 			wantErr:   errPowerOff,
 		},
 		{
 			name:      "returns power on error",
 			cfg:       testQMIConfig(1),
 			client:    &fakeQMIClient{powerOnErr: errPowerOn},
-			wantCalls: []string{"power-off:1", "power-on:1", "close"},
+			wantCalls: []string{"power-off:1", "power-on:1"},
 			wantErr:   errPowerOn,
 		},
 		{
@@ -819,7 +862,7 @@ func TestQMIDevicePowerCycleSIM(t *testing.T) {
 			cfg:       testQMIConfig(1),
 			client:    &fakeQMIClient{},
 			cancelCtx: true,
-			wantCalls: []string{"power-off:1", "power-on:1", "close"},
+			wantCalls: []string{"power-off:1", "power-on:1"},
 		},
 	}
 
@@ -833,7 +876,7 @@ func TestQMIDevicePowerCycleSIM(t *testing.T) {
 				tt.client.afterPowerOff = cancel
 			}
 
-			device := qmiDevice{
+			device := qmiSession{
 				slot:       slot,
 				imei:       tt.cfg.IMEI,
 				openClient: qmiClientOpener(t, slot, tt.client, tt.openErr),
@@ -871,7 +914,7 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 			client: &fakeQMIClient{
 				cardStatus: qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateReady, aid),
 			},
-			wantCalls: []string{"card-status", "close"},
+			wantCalls: []string{"card-status"},
 		},
 		{
 			name: "activates primary provisioning session",
@@ -879,7 +922,7 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 			client: &fakeQMIClient{
 				cardStatus: qmiTestCardStatusForSlot(2, qcom.ApplicationStateReady, qcom.PersonalizationStateInProgress, aid),
 			},
-			wantCalls: []string{"card-status", "change-provisioning:2", "close"},
+			wantCalls: []string{"card-status", "change-provisioning:2"},
 			wantReq: qcom.ChangeProvisioningSessionRequest{
 				Session:  qcom.SessionPrimaryGWProvisioning,
 				Activate: true,
@@ -891,7 +934,7 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 			name:      "returns card status error",
 			cfg:       testQMIConfig(1),
 			client:    &fakeQMIClient{cardStatusErr: errCardStatus},
-			wantCalls: []string{"card-status", "close"},
+			wantCalls: []string{"card-status"},
 			wantErr:   errCardStatus,
 		},
 		{
@@ -900,7 +943,7 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 			client: &fakeQMIClient{
 				cardStatus: qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateInProgress, nil),
 			},
-			wantCalls: []string{"card-status", "close"},
+			wantCalls: []string{"card-status"},
 			wantText:  "AID is empty",
 		},
 		{
@@ -910,7 +953,7 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 				cardStatus:      qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateInProgress, aid),
 				provisioningErr: errProvisioning,
 			},
-			wantCalls: []string{"card-status", "change-provisioning:1", "close"},
+			wantCalls: []string{"card-status", "change-provisioning:1"},
 			wantErr:   errProvisioning,
 		},
 	}
@@ -918,7 +961,7 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			slot := qmiTestSlot(tt.cfg)
-			device := qmiDevice{
+			device := qmiSession{
 				slot:       slot,
 				imei:       tt.cfg.IMEI,
 				openClient: qmiClientOpener(t, slot, tt.client, nil),
@@ -999,8 +1042,6 @@ type fakeQMIClient struct {
 	transparentErr      error
 	writeRecord         qcom.RecordWrite
 	writeRecordErr      error
-	atr                 []byte
-	atrErr              error
 	imsaStatus          qcom.IMSAStatus
 	imsaStatusErr       error
 	nasServingSystem    qcom.NASServingSystem
@@ -1042,11 +1083,6 @@ func (r *fakeQMIClient) WriteRecord(_ context.Context, req qcom.RecordWrite) err
 	r.calls = append(r.calls, "write-record")
 	r.writeRecord = req
 	return r.writeRecordErr
-}
-
-func (r *fakeQMIClient) ATR(context.Context) ([]byte, error) {
-	r.calls = append(r.calls, "atr")
-	return slices.Clone(r.atr), r.atrErr
 }
 
 func (r *fakeQMIClient) IMSAStatus(context.Context) (qcom.IMSAStatus, error) {
