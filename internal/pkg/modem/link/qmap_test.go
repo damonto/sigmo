@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/damonto/wwan-go/qcom"
 )
 
@@ -120,6 +123,38 @@ func TestSyncNonQMAPHostDataFormat(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSelectQMIDevicePortPrefersPrimaryPort(t *testing.T) {
+	modem := &mmodem.Modem{
+		PrimaryPort: "/dev/wwan0qmi1",
+		Ports: []mmodem.ModemPort{
+			{PortType: wwanmodem.PortQMI, Device: "/dev/wwan0qmi0"},
+			{PortType: wwanmodem.PortQMI, Device: "/dev/wwan0qmi1"},
+		},
+	}
+
+	got, err := selectQMIDevicePort(modem)
+	if err != nil {
+		t.Fatalf("selectQMIDevicePort() error = %v", err)
+	}
+	if got.Device != modem.PrimaryPort {
+		t.Fatalf("selectQMIDevicePort() device = %q, want %q", got.Device, modem.PrimaryPort)
+	}
+}
+
+func TestSelectQMIDevicePortRejectsMissingPrimaryPort(t *testing.T) {
+	modem := &mmodem.Modem{
+		PrimaryPort: "/dev/ttyUSB0",
+		Ports: []mmodem.ModemPort{
+			{PortType: wwanmodem.PortQMI, Device: "/dev/wwan0qmi0"},
+			{PortType: wwanmodem.PortQMI, Device: "/dev/wwan0qmi1"},
+		},
+	}
+
+	if _, err := selectQMIDevicePort(modem); !errors.Is(err, wwan.ErrUnsupported) {
+		t.Fatalf("selectQMIDevicePort() error = %v, want %v", err, wwan.ErrUnsupported)
 	}
 }
 

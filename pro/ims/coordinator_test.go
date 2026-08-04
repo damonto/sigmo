@@ -434,7 +434,7 @@ func TestDisableVoLTEPersistsStateAfterManagedCleanupError(t *testing.T) {
 	}
 }
 
-func TestStartIfDisabledSelectsQualcomm410ModeWithoutPreparing(t *testing.T) {
+func TestStartIfDisabledRestoresNormalMode(t *testing.T) {
 	ctx := context.Background()
 	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
@@ -457,8 +457,8 @@ func TestStartIfDisabledSelectsQualcomm410ModeWithoutPreparing(t *testing.T) {
 	}
 
 	coordinator.startIfEnabled(ctx, qmiTestModem("modem-1"))
-	if !slices.Equal(internet.calls, []string{"qualcomm410:select"}) {
-		t.Fatalf("Internet calls = %v, want [qualcomm410:select]", internet.calls)
+	if !slices.Equal(internet.calls, []string{"qualcomm410:false"}) {
+		t.Fatalf("Internet calls = %v, want [qualcomm410:false]", internet.calls)
 	}
 }
 
@@ -476,7 +476,7 @@ func TestRemovedModemInvalidatesInternetGeneration(t *testing.T) {
 	}
 }
 
-func TestDisableVoLTEKeepsQualcomm410InternetMode(t *testing.T) {
+func TestDisableVoLTERestoresNormalInternetMode(t *testing.T) {
 	ctx := context.Background()
 	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
@@ -509,8 +509,8 @@ func TestDisableVoLTEKeepsQualcomm410InternetMode(t *testing.T) {
 	if err := coordinator.UpdateVoLTESettings(ctx, qmiTestModem("modem-1"), VoLTESettings{DataPath: DataPathQualcomm410}); err != nil {
 		t.Fatalf("UpdateVoLTESettings() error = %v", err)
 	}
-	if len(internet.calls) != 0 {
-		t.Fatalf("Internet calls = %v, want none", internet.calls)
+	if !slices.Equal(internet.calls, []string{"qualcomm410:false"}) {
+		t.Fatalf("Internet calls = %v, want [qualcomm410:false]", internet.calls)
 	}
 	if !slices.Equal(device.calls, []string{"test-mode"}) {
 		t.Fatalf("device calls = %v, want [test-mode]", device.calls)
@@ -538,10 +538,10 @@ func TestDisableVoLTESwitchesQualcomm410InternetModeWithDataPath(t *testing.T) {
 			wantCalls:   []string{"qualcomm410:false"},
 		},
 		{
-			name:        "select Qualcomm 410",
+			name:        "change preference without enabling Qualcomm 410",
 			currentPath: DataPathQMAP,
 			nextPath:    DataPathQualcomm410,
-			wantCalls:   []string{"qmap:false", "qualcomm410:true"},
+			wantCalls:   []string{"qmap:false"},
 		},
 	}
 	for _, tt := range tests {
@@ -616,13 +616,13 @@ func TestDisabledVoLTEDataPathRollsBackAfterPersistenceFailure(t *testing.T) {
 			name:        "leave Qualcomm 410",
 			currentPath: DataPathQualcomm410,
 			nextPath:    DataPathQMAP,
-			wantCalls:   []string{"qualcomm410:false", "qualcomm410:true"},
+			wantCalls:   []string{"qualcomm410:false"},
 		},
 		{
-			name:        "enter Qualcomm 410",
+			name:        "change preference without enabling Qualcomm 410",
 			currentPath: DataPathQMAP,
 			nextPath:    DataPathQualcomm410,
-			wantCalls:   []string{"qualcomm410:true", "qualcomm410:false"},
+			wantCalls:   []string{},
 		},
 	}
 	for _, tt := range tests {

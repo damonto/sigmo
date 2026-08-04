@@ -155,8 +155,8 @@ func (c *coordinator) startIfEnabled(ctx context.Context, modem *mmodem.Modem) {
 		}
 	case DataPathQualcomm410:
 		if c.internet != nil {
-			if err := c.internet.SelectQualcomm410Mode(modem); err != nil {
-				slog.Warn("select Qualcomm 410 Internet mode after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
+			if err := c.internet.SetQualcomm410Enabled(ctx, modem, false); err != nil {
+				slog.Warn("restore normal Internet after modem reload", "imei", modem.EquipmentIdentifier, "error", err)
 			}
 		}
 	default:

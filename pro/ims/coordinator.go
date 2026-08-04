@@ -328,16 +328,10 @@ func (c *coordinator) UpdateVoLTESettings(ctx context.Context, modem *mmodem.Mod
 	if err := releaseManagedVoLTE(cleanupCtx, modem, c.internet); err != nil {
 		result = errors.Join(result, fmt.Errorf("restore modem VoLTE: %w", err))
 	}
-	// Qualcomm 410 DATA5 still needs its WDA holder and peer addressing
-	// after VoLTE is disabled; only the DATA6 IMS client is released when
-	// Qualcomm 410 remains the selected data path.
-	keepQualcomm410 := current.DataPath == DataPathQualcomm410 && settings.DataPath == DataPathQualcomm410
-	if !keepQualcomm410 {
-		result = errors.Join(result, c.restoreVoLTEDataPath(cleanupCtx, modem, current.DataPath))
-	}
-	if current.DataPath != DataPathQualcomm410 && settings.DataPath == DataPathQualcomm410 {
-		result = errors.Join(result, c.configureVoLTEDataPath(cleanupCtx, modem, settings.DataPath))
-	}
+	// DataPath is only an activation preference while VoLTE is enabled. Once
+	// VoLTE is disabled, always release the previously active special path;
+	// the next saved DataPath must not change Internet routing by itself.
+	result = errors.Join(result, c.restoreVoLTEDataPath(cleanupCtx, modem, current.DataPath))
 	result = errors.Join(result, c.volteStore().Put(cleanupCtx, modem.EquipmentIdentifier, settings))
 	return result
 }
@@ -363,39 +357,15 @@ func (c *coordinator) UpdateWiFiCallingSettings(ctx context.Context, modem *mmod
 }
 
 func (c *coordinator) updateDisabledVoLTEDataPath(ctx context.Context, modem *mmodem.Modem, current, next VoLTESettings) error {
-	if current.DataPath == next.DataPath {
-		return c.volteStore().Put(ctx, modem.EquipmentIdentifier, next)
-	}
-
-	recoveryCtx, cancelRecovery := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
-	defer cancelRecovery()
-	restoredCurrent := current.DataPath == DataPathQualcomm410
-	if restoredCurrent {
+	// A disabled setting may retain Qualcomm 410 as the preferred path for a
+	// future enable, but that preference must not affect the current Internet
+	// bearer. This cleanup also handles state left by older builds.
+	if current.DataPath == DataPathQualcomm410 {
 		if err := c.restoreVoLTEDataPath(ctx, modem, current.DataPath); err != nil {
 			return err
 		}
 	}
-	configuredNext := next.DataPath == DataPathQualcomm410
-	if configuredNext {
-		if err := c.configureVoLTEDataPath(ctx, modem, next.DataPath); err != nil {
-			var rollbackErr error
-			if restoredCurrent {
-				rollbackErr = c.configureVoLTEDataPath(recoveryCtx, modem, current.DataPath)
-			}
-			return errors.Join(err, rollbackErr)
-		}
-	}
-	if err := c.volteStore().Put(ctx, modem.EquipmentIdentifier, next); err != nil {
-		var rollbackErr error
-		if configuredNext {
-			rollbackErr = c.restoreVoLTEDataPath(recoveryCtx, modem, next.DataPath)
-		}
-		if restoredCurrent {
-			rollbackErr = errors.Join(rollbackErr, c.configureVoLTEDataPath(recoveryCtx, modem, current.DataPath))
-		}
-		return errors.Join(err, rollbackErr)
-	}
-	return nil
+	return c.volteStore().Put(ctx, modem.EquipmentIdentifier, next)
 }
 
 func (c *coordinator) configureVoLTEDataPath(ctx context.Context, modem *mmodem.Modem, dataPath DataPath) error {

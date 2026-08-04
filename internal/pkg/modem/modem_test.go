@@ -67,7 +67,7 @@ func TestProfileIDUsesCachedSIMWithoutTransport(t *testing.T) {
 }
 
 func TestConsumeModemStreamRejectsNilStream(t *testing.T) {
-	if err := consumeModemStream[int](context.Background(), nil, func(int) {}); err == nil {
+	if err := consumeModemStream(context.Background(), nil, func(int) {}); err == nil {
 		t.Fatal("consumeModemStream() error = nil, want nil stream error")
 	}
 }

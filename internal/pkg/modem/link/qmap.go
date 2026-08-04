@@ -459,11 +459,17 @@ func RemoveQMAPMuxes(modem *mmodem.Modem, muxIDs ...uint8) error {
 }
 
 func selectQMIDevicePort(modem *mmodem.Modem) (mmodem.ModemPort, error) {
+	primary := strings.TrimSpace(modem.PrimaryPort)
+	if primary == "" {
+		return mmodem.ModemPort{}, wwan.ErrUnsupported
+	}
 	for _, port := range modem.Ports {
 		if port.PortType != wwanmodem.PortQMI || strings.TrimSpace(port.Device) == "" {
 			continue
 		}
-		return port, nil
+		if strings.TrimSpace(port.Device) == primary {
+			return port, nil
+		}
 	}
 	return mmodem.ModemPort{}, wwan.ErrUnsupported
 }
