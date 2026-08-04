@@ -118,7 +118,7 @@ func TestDeleteProfileReminderCleanup(t *testing.T) {
 			h := &Handler{
 				lifecycle: &lifecycle{
 					settings: settings.Default(),
-					newClient: func(*mmodem.Modem, *settings.Settings, string) (lifecycleClient, error) {
+					newClient: func(context.Context, *mmodem.Modem, *settings.Settings, string) (lifecycleClient, error) {
 						return &fakeLifecycleClient{profiles: profiles}, nil
 					},
 				},

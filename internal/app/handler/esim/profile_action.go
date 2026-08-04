@@ -16,7 +16,10 @@ import (
 const reminderCleanupTimeout = 15 * time.Second
 
 func (h *Handler) EnableProfile(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
-	session, err := h.lifecycle.PrepareEnable(modem, seID, iccid)
+	sessionCtx, cancel := context.WithTimeout(ctx, enableTimeout)
+	defer cancel()
+
+	session, err := h.lifecycle.PrepareEnable(sessionCtx, modem, seID, iccid)
 	if err != nil {
 		if errors.Is(err, errProfileAlreadyActive) {
 			return nil
@@ -25,8 +28,6 @@ func (h *Handler) EnableProfile(ctx context.Context, modem *mmodem.Modem, seID s
 	}
 	defer session.Close()
 
-	sessionCtx, cancel := context.WithTimeout(ctx, enableTimeout)
-	defer cancel()
 	if err := h.restoreInternetBeforeProfileEnable(sessionCtx, modem); err != nil {
 		return fmt.Errorf("restore internet connection: %w", err)
 	}
@@ -34,7 +35,7 @@ func (h *Handler) EnableProfile(ctx context.Context, modem *mmodem.Modem, seID s
 }
 
 func (h *Handler) DeleteProfile(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
-	deleteErr := h.lifecycle.Delete(modem, seID, iccid)
+	deleteErr := h.lifecycle.Delete(ctx, modem, seID, iccid)
 	if deleteErr != nil && !errors.Is(deleteErr, errProfileNotFound) {
 		return deleteErr
 	}

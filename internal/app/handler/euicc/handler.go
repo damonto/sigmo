@@ -30,11 +30,12 @@ func New(store *settings.Store, registry *mmodem.Registry) *Handler {
 }
 
 func (h *Handler) Get(c *echo.Context) error {
-	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeGetEUICCFailed)
 	}
-	response, err := h.euicc.Get(modem)
+	response, err := h.euicc.Get(ctx, modem)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)

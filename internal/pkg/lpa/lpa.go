@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"slices"
 	"sync"
@@ -66,22 +67,24 @@ var AIDs = [][]byte{
 	{0xA0, 0x00, 0x00, 0x06, 0x28, 0x10, 0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0x89, 0x00, 0x00, 0x01, 0x00}, // GlocalMe
 }
 
-func New(m *modem.Modem, currentSettings *settings.Settings) (*LPA, error) {
-	return newForAID(m, currentSettings, nil)
+func New(ctx context.Context, m *modem.Modem, currentSettings *settings.Settings) (*LPA, error) {
+	return newForAID(ctx, m, currentSettings, nil)
 }
 
-func NewWithAID(m *modem.Modem, currentSettings *settings.Settings, aid []byte) (*LPA, error) {
-	return newForAID(m, currentSettings, aid)
+func NewWithAID(ctx context.Context, m *modem.Modem, currentSettings *settings.Settings, aid []byte) (*LPA, error) {
+	return newForAID(ctx, m, currentSettings, aid)
 }
 
-func newForAID(m *modem.Modem, currentSettings *settings.Settings, aid []byte) (*LPA, error) {
-	gmu.Lock(m.EquipmentIdentifier)
-	ch, err := createChannel(m)
+func newForAID(ctx context.Context, m *modem.Modem, currentSettings *settings.Settings, aid []byte) (*LPA, error) {
+	if err := gmu.LockContext(ctx, m.EquipmentIdentifier); err != nil {
+		return nil, fmt.Errorf("reserve LPA client: %w", err)
+	}
+	ch, err := createChannel(ctx, m)
 	if err != nil {
 		gmu.Unlock(m.EquipmentIdentifier)
 		return nil, err
 	}
-	instance, err := newWithChannelLocked(ChannelConfig{
+	instance, err := newWithChannelLocked(ctx, ChannelConfig{
 		LockKey:  m.EquipmentIdentifier,
 		ConfigID: m.EquipmentIdentifier,
 		Channel:  ch,
@@ -99,14 +102,16 @@ func newForAID(m *modem.Modem, currentSettings *settings.Settings, aid []byte) (
 	return instance, nil
 }
 
-func NewWithChannel(cfg ChannelConfig) (*LPA, error) {
+func NewWithChannel(ctx context.Context, cfg ChannelConfig) (*LPA, error) {
 	if cfg.Channel == nil {
 		return nil, errors.New("lpa channel is required")
 	}
 	if cfg.LockKey != "" {
-		gmu.Lock(cfg.LockKey)
+		if err := gmu.LockContext(ctx, cfg.LockKey); err != nil {
+			return nil, errors.Join(fmt.Errorf("reserve LPA client: %w", err), cfg.Channel.Disconnect())
+		}
 	}
-	instance, err := newWithChannelLocked(cfg)
+	instance, err := newWithChannelLocked(ctx, cfg)
 	if err != nil {
 		if cfg.LockKey != "" {
 			gmu.Unlock(cfg.LockKey)
@@ -119,9 +124,11 @@ func NewWithChannel(cfg ChannelConfig) (*LPA, error) {
 	return instance, nil
 }
 
-func NewChannel(m *modem.Modem) (driver.SmartCardChannel, func(), error) {
-	gmu.Lock(m.EquipmentIdentifier)
-	ch, err := createChannel(m)
+func NewChannel(ctx context.Context, m *modem.Modem) (driver.SmartCardChannel, func(), error) {
+	if err := gmu.LockContext(ctx, m.EquipmentIdentifier); err != nil {
+		return nil, nil, err
+	}
+	ch, err := createChannel(ctx, m)
 	if err != nil {
 		gmu.Unlock(m.EquipmentIdentifier)
 		return nil, nil, err
@@ -158,22 +165,23 @@ func (c *lockedChannel) CloseLogicalChannel(channel byte) error {
 	return nil
 }
 
-func newWithChannelLocked(cfg ChannelConfig) (*LPA, error) {
+func newWithChannelLocked(ctx context.Context, cfg ChannelConfig) (*LPA, error) {
 	logger := cfg.Logger
 	currentSettings := cfg.Settings
 	if currentSettings == nil {
 		currentSettings = settings.Default()
 	}
+	channel := &contextSmartCardChannel{ctx: ctx, SmartCardChannel: cfg.Channel}
 	instance := &LPA{lockKey: cfg.LockKey, logger: logger}
 	opts := &lpa.Options{
-		Channel:              cfg.Channel,
+		Channel:              channel,
 		AdminProtocolVersion: "2.2.0",
 		Logger:               logger,
 		MSS:                  currentSettings.FindModem(cfg.ConfigID).MSS,
 	}
 	if len(cfg.AID) > 0 {
 		opts.AID = slices.Clone(cfg.AID)
-		client, err := lpa.New(opts)
+		client, err := newEUICCClient(ctx, opts)
 		if err != nil {
 			logger.Warn("failed to create LPA client", "AID", fmt.Sprintf("%X", opts.AID), "error", err)
 			return nil, errors.Join(ErrNoSupportedAID, fmt.Errorf("open AID %X: %w", opts.AID, err))
@@ -182,17 +190,20 @@ func newWithChannelLocked(cfg ChannelConfig) (*LPA, error) {
 		logger.Info("LPA client created", "AID", fmt.Sprintf("%X", opts.AID))
 		return instance, nil
 	}
-	if err := instance.tryCreateClient(opts); err != nil {
+	if err := instance.tryCreateClient(ctx, opts); err != nil {
 		return nil, err
 	}
 	return instance, nil
 }
 
-func (l *LPA) tryCreateClient(opts *lpa.Options) error {
+func (l *LPA) tryCreateClient(ctx context.Context, opts *lpa.Options) error {
 	var errs error
 	for _, opts.AID = range AIDs {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(errs, err)
+		}
 		var err error
-		l.Client, err = lpa.New(opts)
+		l.Client, err = newEUICCClient(ctx, opts)
 		if err == nil {
 			l.logger.Info("LPA client created", "AID", fmt.Sprintf("%X", opts.AID))
 			return nil
@@ -203,19 +214,73 @@ func (l *LPA) tryCreateClient(opts *lpa.Options) error {
 	return errors.Join(ErrNoSupportedAID, errs)
 }
 
-func createChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
+func newEUICCClient(ctx context.Context, opts *lpa.Options) (*lpa.Client, error) {
+	client, err := lpa.New(opts)
+	if err != nil {
+		return nil, err
+	}
+	transport := client.HTTP.Client.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	client.HTTP.Client.Transport = &contextRoundTripper{ctx: ctx, next: transport}
+	return client, nil
+}
+
+type contextRoundTripper struct {
+	ctx  context.Context
+	next http.RoundTripper
+}
+
+func (t *contextRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := t.ctx.Err(); err != nil {
+		return nil, err
+	}
+	return t.next.RoundTrip(req.Clone(t.ctx))
+}
+
+type contextSmartCardChannel struct {
+	ctx context.Context
+	driver.SmartCardChannel
+}
+
+func (c *contextSmartCardChannel) Connect() error {
+	if err := c.ctx.Err(); err != nil {
+		return err
+	}
+	return c.SmartCardChannel.Connect()
+}
+
+func (c *contextSmartCardChannel) OpenLogicalChannel(aid []byte) (byte, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.SmartCardChannel.OpenLogicalChannel(aid)
+}
+
+func (c *contextSmartCardChannel) Transmit(command []byte) ([]byte, error) {
+	if err := c.ctx.Err(); err != nil {
+		return nil, err
+	}
+	return c.SmartCardChannel.Transmit(command)
+}
+
+func createChannel(ctx context.Context, m *modem.Modem) (driver.SmartCardChannel, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	switch m.PrimaryPortType() {
 	case wwanmodem.PortQMI:
-		return createQMIChannel(m)
+		return createQMIChannel(ctx, m)
 	case wwanmodem.PortMBIM:
-		return createMBIMChannel(m)
+		return createMBIMChannel(ctx, m)
 	default:
 		return createATChannel(m)
 	}
 }
 
-func createQMIChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), channelOpenTimeout)
+func createQMIChannel(ctx context.Context, m *modem.Modem) (driver.SmartCardChannel, error) {
+	ctx, cancel := context.WithTimeout(ctx, channelOpenTimeout)
 	defer cancel()
 	release, err := m.ReserveSIMSlot(ctx)
 	if err != nil {
@@ -250,8 +315,8 @@ func createQMIChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
 	return &simSlotChannel{SmartCardChannel: channel, release: release}, nil
 }
 
-func createMBIMChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), channelOpenTimeout)
+func createMBIMChannel(ctx context.Context, m *modem.Modem) (driver.SmartCardChannel, error) {
+	ctx, cancel := context.WithTimeout(ctx, channelOpenTimeout)
 	defer cancel()
 	release, err := m.ReserveSIMSlot(ctx)
 	if err != nil {

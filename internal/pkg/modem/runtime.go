@@ -216,6 +216,7 @@ func (m *Modem) startRuntimeWatchers(parent context.Context, onFailure func(erro
 		m.watchWG.Add(2)
 		go m.watchStatus(ctx)
 		go m.watchSIM(ctx)
+		m.startSIMRefreshWatcher(ctx)
 	})
 }
 

@@ -13,9 +13,9 @@ import (
 )
 
 var (
-	simSettleDelay              = 100 * time.Millisecond
-	simVisiblePollInterval      = time.Second
-	simReenumerationGracePeriod = time.Second
+	simSettleDelay         = 100 * time.Millisecond
+	simVisiblePollInterval = time.Second
+	simProbeTimeout        = 3 * time.Second
 )
 
 type SIMTarget struct {
@@ -37,7 +37,7 @@ type currentModemRead struct {
 func (t SIMTarget) valid() bool { return t.Slot != 0 || strings.TrimSpace(t.ICCID) != "" }
 
 func (r *Registry) EnsureSIMVisible(ctx context.Context, current *Modem, target SIMTarget) (*Modem, error) {
-	result, err := r.ensureSIMVisible(ctx, current, target, true, false)
+	result, err := r.ensureSIMVisible(ctx, current, target)
 	if err != nil {
 		return nil, err
 	}
@@ -52,10 +52,6 @@ func (r *Registry) PowerCycleSIM(ctx context.Context, current *Modem, target SIM
 	return result.Modem, nil
 }
 
-func (r *Registry) PowerCycleSIMAndWait(ctx context.Context, current *Modem, target SIMTarget) (*Modem, error) {
-	return r.PowerCycleSIM(ctx, current, target)
-}
-
 func (r *Registry) powerCycleSIM(ctx context.Context, current *Modem, target SIMTarget) (simRefreshResult, error) {
 	if current == nil {
 		return simRefreshResult{}, errModemRequired
@@ -67,7 +63,7 @@ func (r *Registry) powerCycleSIM(ctx context.Context, current *Modem, target SIM
 	if err := r.powerCycleSIMTransport(ctx, current, target); err != nil {
 		return simRefreshResult{}, fmt.Errorf("power cycle SIM: %w", err)
 	}
-	return r.ensureSIMVisible(ctx, current, target, false, true)
+	return r.ensureSIMVisible(ctx, current, target)
 }
 
 func currentSIMTarget(current *Modem, target SIMTarget) SIMTarget {
@@ -88,16 +84,14 @@ func currentSIMTarget(current *Modem, target SIMTarget) SIMTarget {
 	return target
 }
 
-func (r *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target SIMTarget, allowPowerCycleFallback, initialPowerCycled bool) (simRefreshResult, error) {
+func (r *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target SIMTarget) (simRefreshResult, error) {
 	if current == nil {
 		return simRefreshResult{}, errModemRequired
 	}
 	if !target.valid() {
 		return simRefreshResult{}, errors.New("SIM target is required")
 	}
-	powerCycled := initialPowerCycled
 	provisioned := make(map[uint64]bool)
-	started := time.Now()
 	active := current
 	reloadObserved := false
 	for {
@@ -113,41 +107,61 @@ func (r *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 			slog.Debug("read modem while waiting for SIM", "imei", current.EquipmentIdentifier, "error", err)
 		}
 		if errors.Is(err, ErrNotFound) {
-			if err := sleepContext(ctx, simVisiblePollInterval); err != nil {
+			if err := waitForSIMRefresh(ctx, active, simVisiblePollInterval); err != nil {
 				return simRefreshResult{}, err
 			}
 			continue
 		}
 
-		if err := sleepContext(ctx, simSettleDelay); err != nil {
-			return simRefreshResult{}, err
-		}
-		read, err = r.readCurrentModem(ctx, active, target)
-		if read.Modem != nil {
-			active = read.Modem
-		}
-		reloadObserved = reloadObserved || read.ReloadObserved
-		if err == nil && read.SIMVisible {
-			return simRefreshResult{Modem: active, ReloadObserved: reloadObserved}, nil
+		probeTimedOut := errors.Is(err, context.DeadlineExceeded)
+		if !probeTimedOut {
+			if err := sleepContext(ctx, simSettleDelay); err != nil {
+				return simRefreshResult{}, err
+			}
+			read, err = r.readCurrentModem(ctx, active, target)
+			if read.Modem != nil {
+				active = read.Modem
+			}
+			reloadObserved = reloadObserved || read.ReloadObserved
+			if err == nil && read.SIMVisible {
+				return simRefreshResult{Modem: active, ReloadObserved: reloadObserved}, nil
+			}
+			probeTimedOut = errors.Is(err, context.DeadlineExceeded)
 		}
 
 		generation := active.Generation()
-		if !provisioned[generation] {
+		if !probeTimedOut && !provisioned[generation] {
 			provisioned[generation] = true
-			if provisionErr := r.activateProvisioningTransport(ctx, active, target); provisionErr != nil && !errors.Is(provisionErr, devicewwan.ErrUnsupported) {
+			provisionCtx, cancel := context.WithTimeout(ctx, simProbeTimeout)
+			provisionErr := r.activateProvisioningTransport(provisionCtx, active, target)
+			cancel()
+			if provisionErr != nil && !errors.Is(provisionErr, devicewwan.ErrUnsupported) {
 				slog.Warn("activate modem provisioning while waiting for SIM", "imei", active.EquipmentIdentifier, "generation", generation, "error", provisionErr)
 			}
 		}
-		if allowPowerCycleFallback && !powerCycled && time.Since(started) >= simReenumerationGracePeriod {
-			powerErr := r.powerCycleSIMTransport(ctx, active, target)
-			if powerErr != nil && !errors.Is(powerErr, devicewwan.ErrUnsupported) {
-				return simRefreshResult{}, fmt.Errorf("power cycle SIM: %w", powerErr)
-			}
-			powerCycled = true
-		}
-		if err := sleepContext(ctx, simVisiblePollInterval); err != nil {
+		if err := ctx.Err(); err != nil {
 			return simRefreshResult{}, err
 		}
+		if err := waitForSIMRefresh(ctx, active, simVisiblePollInterval); err != nil {
+			return simRefreshResult{}, err
+		}
+	}
+}
+
+func waitForSIMRefresh(ctx context.Context, modem *Modem, timeout time.Duration) error {
+	if timeout <= 0 {
+		return ctx.Err()
+	}
+	_, _, refresh := modem.currentSIMRefresh()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-refresh:
+		return nil
+	case <-timer.C:
+		return nil
 	}
 }
 
@@ -188,13 +202,17 @@ func (r *Registry) readCurrentModem(ctx context.Context, current *Modem, target 
 		return currentModemRead{Modem: current, ReloadObserved: true}, err
 	}
 	reloaded := modem.Generation() != current.Generation() || modem.Path() != current.Path()
+	probeCtx, cancel := context.WithTimeout(ctx, simProbeTimeout)
+	defer cancel()
 	if strings.TrimSpace(target.ICCID) != "" {
-		return r.readCurrentESIM(ctx, modem, target, reloaded)
+		return r.readCurrentESIM(probeCtx, modem, target, reloaded)
 	}
 	if modem.core != nil {
-		if info, infoErr := modem.core.SIMInfo(ctx); infoErr == nil {
+		if info, infoErr := modem.core.SIMInfo(probeCtx); infoErr == nil {
 			modem.applySIMInfo(info)
 			return currentModemRead{Modem: modem, SIMVisible: simInfoMatchesTarget(info, target), ReloadObserved: reloaded}, nil
+		} else if errors.Is(infoErr, context.DeadlineExceeded) {
+			return currentModemRead{Modem: modem, ReloadObserved: reloaded}, infoErr
 		}
 	}
 	return currentModemRead{Modem: modem, SIMVisible: modemMatchesSIMTarget(modem, target), ReloadObserved: reloaded}, nil

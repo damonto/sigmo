@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	elpa "github.com/damonto/euicc-go/lpa"
 	sgp22 "github.com/damonto/euicc-go/v2"
@@ -57,7 +56,10 @@ func (h *Handler) ActivationCode(ctx context.Context, modemID string, smdp strin
 }
 
 func (h *Handler) ActivateProfile(ctx context.Context, modemID string, seID string, rawICCID string) error {
-	device, err := h.registry.Find(ctx, modemID)
+	enableCtx, cancel := context.WithTimeout(ctx, enableTimeout)
+	defer cancel()
+
+	device, err := h.registry.Find(enableCtx, modemID)
 	if err != nil {
 		return err
 	}
@@ -65,13 +67,11 @@ func (h *Handler) ActivateProfile(ctx context.Context, modemID string, seID stri
 	if err != nil {
 		return fmt.Errorf("parse ICCID: %w", err)
 	}
-	session, err := h.lifecycle.PrepareEnable(device, seID, iccid)
+	session, err := h.lifecycle.PrepareEnable(enableCtx, device, seID, iccid)
 	if err != nil {
 		return err
 	}
 	defer session.Close()
-	enableCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
 	if err := h.restoreInternetBeforeProfileEnable(enableCtx, device); err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func (h *Handler) RenameProfile(ctx context.Context, modemID string, seID string
 	if err != nil {
 		return fmt.Errorf("parse ICCID: %w", err)
 	}
-	return h.profile.UpdateNickname(device, seID, iccid, nickname)
+	return h.profile.UpdateNickname(ctx, device, seID, iccid, nickname)
 }
 
 func (h *Handler) RemoveProfile(ctx context.Context, modemID string, seID string, rawICCID string) error {

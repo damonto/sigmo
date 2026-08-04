@@ -72,6 +72,10 @@ type simStateBackend interface {
 	SIMState(ctx context.Context, target Target) (SIMState, error)
 }
 
+type simRefreshBackend interface {
+	WatchSIMRefresh(ctx context.Context) (<-chan SIMRefreshEvent, error)
+}
+
 type volteStatusBackend interface {
 	VoLTEStatus(ctx context.Context) (VoLTEStatus, error)
 }
@@ -108,6 +112,32 @@ type SIMState struct {
 	ICCIDMismatch bool
 	ICCID         string
 	Slot          uint8
+}
+
+type SIMRefreshStage uint8
+
+const (
+	SIMRefreshWaitForOK SIMRefreshStage = iota
+	SIMRefreshStart
+	SIMRefreshEndWithSuccess
+	SIMRefreshEndWithFailure
+)
+
+type SIMRefreshMode uint8
+
+const (
+	SIMRefreshReset SIMRefreshMode = iota
+	SIMRefreshInit
+	SIMRefreshInitFCN
+	SIMRefreshFCN
+	SIMRefreshInitFullFCN
+	SIMRefreshApplicationReset
+	SIMRefresh3GReset
+)
+
+type SIMRefreshEvent struct {
+	Stage SIMRefreshStage
+	Mode  SIMRefreshMode
 }
 
 type VoLTEStatus struct {
@@ -204,6 +234,14 @@ func (d *deviceOperations) SIMState(ctx context.Context, target Target) (SIMStat
 		return SIMState{}, ErrUnsupported
 	}
 	return backend.SIMState(ctx, target)
+}
+
+func (d *deviceOperations) WatchSIMRefresh(ctx context.Context) (<-chan SIMRefreshEvent, error) {
+	backend, ok := d.backend.(simRefreshBackend)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return backend.WatchSIMRefresh(ctx)
 }
 
 func (d *deviceOperations) VoLTEStatus(ctx context.Context) (VoLTEStatus, error) {

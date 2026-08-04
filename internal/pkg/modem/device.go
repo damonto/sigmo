@@ -35,6 +35,7 @@ type Device interface {
 	deviceControl
 	USIM(ctx context.Context) (usimcard.Reader, error)
 	USIMWithCAT(ctx context.Context, profile wwan.CATProfile) (usimcard.Reader, error)
+	WatchSIMRefresh(ctx context.Context) (<-chan wwan.SIMRefreshEvent, error)
 	VoLTEStatus(ctx context.Context) (wwan.VoLTEStatus, error)
 	PacketServiceStatus(ctx context.Context) (wwan.PacketServiceStatus, error)
 	IMSProfile(ctx context.Context) (wwan.IMSProfile, error)

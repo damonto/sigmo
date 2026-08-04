@@ -131,7 +131,10 @@ func (h *Handler) Discovery(c *echo.Context) error {
 }
 
 func (h *Handler) Enable(c *echo.Context) error {
-	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	ctx, cancel := context.WithTimeout(c.Request().Context(), enableTimeout)
+	defer cancel()
+
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeEnableESIMFailed)
 	}
@@ -142,14 +145,12 @@ func (h *Handler) Enable(c *echo.Context) error {
 		}
 		return httpapi.BadRequest(c, errorCodeInvalidICCID, err)
 	}
-	session, err := h.lifecycle.PrepareEnable(modem, c.Param("seId"), iccid)
+	session, err := h.lifecycle.PrepareEnable(ctx, modem, c.Param("seId"), iccid)
 	if err != nil {
 		return enablePrepareError(c, err)
 	}
 	defer session.Close()
 
-	ctx, cancel := context.WithTimeout(c.Request().Context(), enableTimeout)
-	defer cancel()
 	if err := h.restoreInternetBeforeProfileEnable(ctx, modem); err != nil {
 		return httpapi.Internal(c, errorCodeEnableESIMFailed, err)
 	}
@@ -308,7 +309,7 @@ func (h *Handler) UpdateNickname(c *echo.Context) error {
 	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateESIMNicknameInvalidRequest); err != nil {
 		return err
 	}
-	if err := h.profile.UpdateNickname(modem, c.Param("seId"), iccid, req.Nickname); err != nil {
+	if err := h.profile.UpdateNickname(c.Request().Context(), modem, c.Param("seId"), iccid, req.Nickname); err != nil {
 		if seErr := seRequestError(c, err); seErr != nil {
 			return seErr
 		}

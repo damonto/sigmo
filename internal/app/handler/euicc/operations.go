@@ -7,5 +7,5 @@ func (h *Handler) SecureElements(ctx context.Context, modemID string) (*SEsRespo
 	if err != nil {
 		return nil, err
 	}
-	return h.euicc.Get(device)
+	return h.euicc.Get(ctx, device)
 }

@@ -3,6 +3,7 @@ package modem
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ type simRefreshDevice struct {
 	*fakeDeviceControl
 	onActivate func()
 	onPower    func()
+	onSIMState func(context.Context, devicewwan.Target) (devicewwan.SIMState, error)
 }
 
 func (d *simRefreshDevice) ActivateProvisioningIfSIMMissing(context.Context) error {
@@ -32,8 +34,66 @@ func (d *simRefreshDevice) PowerCycleSIM(context.Context) error {
 	return d.powerErr
 }
 
+func (d *simRefreshDevice) SIMState(ctx context.Context, target devicewwan.Target) (devicewwan.SIMState, error) {
+	if d.onSIMState == nil {
+		return d.fakeDeviceControl.SIMState(ctx, target)
+	}
+	d.calls = append(d.calls, "sim-state")
+	return d.onSIMState(ctx, target)
+}
+
+func TestEnsureSIMVisibleSkipsPowerCycleWhenSIMIsVisible(t *testing.T) {
+	restoreSIMRefreshTiming(t, 0, time.Millisecond)
+	const path = "/sys/devices/modem-1"
+	current := simRefreshTestModem(path, 1, false)
+	registry := &Registry{modems: map[string]*Modem{path: current}, started: true}
+	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{state: devicewwan.SIMState{
+		Supported: true,
+		Matches:   true,
+		Ready:     true,
+		ICCID:     "8901000000000000001",
+		Slot:      1,
+	}}}
+	registry.openDevice = fakeDeviceOpener(t, device, nil)
+
+	result, err := registry.ensureSIMVisible(t.Context(), current, SIMTarget{Slot: 1, ICCID: "8901000000000000001"})
+	if err != nil {
+		t.Fatalf("ensureSIMVisible() error = %v", err)
+	}
+	if result.Modem != current {
+		t.Fatalf("result modem = %p, want current modem %p", result.Modem, current)
+	}
+	if !slices.Equal(device.calls, []string{"sim-state"}) {
+		t.Fatalf("device calls = %v, want only SIM state probe", device.calls)
+	}
+}
+
+func TestEnsureSIMVisibleDoesNotPowerCycleAfterProbeTimeout(t *testing.T) {
+	restoreSIMRefreshTiming(t, 0, time.Millisecond)
+	restoreSIMProbeTimeout(t, 10*time.Millisecond)
+	const path = "/sys/devices/modem-1"
+	current := simRefreshTestModem(path, 1, false)
+	registry := &Registry{modems: map[string]*Modem{path: current}, started: true}
+	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{}}
+	device.onSIMState = func(ctx context.Context, _ devicewwan.Target) (devicewwan.SIMState, error) {
+		<-ctx.Done()
+		return devicewwan.SIMState{Supported: true}, ctx.Err()
+	}
+	registry.openDevice = fakeDeviceOpener(t, device, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	_, err := registry.ensureSIMVisible(ctx, current, SIMTarget{Slot: 1, ICCID: "8901000000000000001"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ensureSIMVisible() error = %v, want %v", err, context.DeadlineExceeded)
+	}
+	if slices.Contains(device.calls, "power-cycle") {
+		t.Fatalf("device calls = %v, want no power cycle after probe timeout", device.calls)
+	}
+}
+
 func TestEnsureSIMVisibleProvisionsEachGenerationOnce(t *testing.T) {
-	restoreSIMRefreshTiming(t, 0, time.Millisecond, time.Hour)
+	restoreSIMRefreshTiming(t, 0, time.Millisecond)
 	const path = "/sys/devices/modem-1"
 	current := simRefreshTestModem(path, 1, false)
 	replacement := simRefreshTestModem(path, 2, false)
@@ -61,7 +121,7 @@ func TestEnsureSIMVisibleProvisionsEachGenerationOnce(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	result, err := registry.ensureSIMVisible(ctx, current, SIMTarget{Slot: 1, ICCID: "8901000000000000001"}, false, false)
+	result, err := registry.ensureSIMVisible(ctx, current, SIMTarget{Slot: 1, ICCID: "8901000000000000001"})
 	if err != nil {
 		t.Fatalf("ensureSIMVisible() error = %v", err)
 	}
@@ -73,12 +133,19 @@ func TestEnsureSIMVisibleProvisionsEachGenerationOnce(t *testing.T) {
 	}
 }
 
-func TestEnsureSIMVisiblePowerCyclesAfterGracePeriod(t *testing.T) {
-	restoreSIMRefreshTiming(t, 0, time.Millisecond, 0)
+func TestPowerCycleSIMWaitsForTarget(t *testing.T) {
+	restoreSIMRefreshTiming(t, 0, time.Millisecond)
 	const path = "/sys/devices/modem-1"
 	current := simRefreshTestModem(path, 1, false)
 	registry := &Registry{modems: map[string]*Modem{path: current}, started: true}
-	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{}}
+	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{state: devicewwan.SIMState{
+		Supported:     true,
+		Recoverable:   true,
+		Ready:         true,
+		ICCIDMismatch: true,
+		ICCID:         "8901000000000000002",
+		Slot:          1,
+	}}}
 	activateCalls := 0
 	powerCalls := 0
 	device.onActivate = func() { activateCalls++ }
@@ -96,15 +163,41 @@ func TestEnsureSIMVisiblePowerCyclesAfterGracePeriod(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	result, err := registry.ensureSIMVisible(ctx, current, SIMTarget{Slot: 1, ICCID: "8901000000000000001"}, true, false)
+	result, err := registry.powerCycleSIM(ctx, current, SIMTarget{Slot: 1, ICCID: "8901000000000000001"})
 	if err != nil {
 		t.Fatalf("ensureSIMVisible() error = %v", err)
 	}
 	if result.Modem != current {
 		t.Fatalf("result modem = %p, want current modem %p", result.Modem, current)
 	}
-	if activateCalls != 1 || powerCalls != 1 {
-		t.Fatalf("provision/power calls = %d/%d, want 1/1", activateCalls, powerCalls)
+	if activateCalls != 0 || powerCalls != 1 {
+		t.Fatalf("provision/power calls = %d/%d, want 0/1", activateCalls, powerCalls)
+	}
+}
+
+func TestEnsureSIMVisibleDoesNotPowerCyclePersistentICCIDMismatch(t *testing.T) {
+	restoreSIMRefreshTiming(t, 0, time.Millisecond)
+	const path = "/sys/devices/modem-1"
+	current := simRefreshTestModem(path, 1, false)
+	registry := &Registry{modems: map[string]*Modem{path: current}, started: true}
+	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{state: devicewwan.SIMState{
+		Supported:     true,
+		Recoverable:   true,
+		Ready:         true,
+		ICCIDMismatch: true,
+		ICCID:         "8901000000000000002",
+		Slot:          1,
+	}}}
+	registry.openDevice = fakeDeviceOpener(t, device, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := registry.ensureSIMVisible(ctx, current, SIMTarget{Slot: 1, ICCID: "8901000000000000001"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ensureSIMVisible() error = %v, want %v", err, context.DeadlineExceeded)
+	}
+	if slices.Contains(device.calls, "power-cycle") {
+		t.Fatalf("device calls = %v, want no automatic power cycle", device.calls)
 	}
 }
 
@@ -181,19 +274,23 @@ func TestReadCurrentESIMReturnsSIMStateError(t *testing.T) {
 	}
 }
 
-func restoreSIMRefreshTiming(t *testing.T, settle, poll, grace time.Duration) {
+func restoreSIMRefreshTiming(t *testing.T, settle, poll time.Duration) {
 	t.Helper()
 	previousSettle := simSettleDelay
 	previousPoll := simVisiblePollInterval
-	previousGrace := simReenumerationGracePeriod
 	simSettleDelay = settle
 	simVisiblePollInterval = poll
-	simReenumerationGracePeriod = grace
 	t.Cleanup(func() {
 		simSettleDelay = previousSettle
 		simVisiblePollInterval = previousPoll
-		simReenumerationGracePeriod = previousGrace
 	})
+}
+
+func restoreSIMProbeTimeout(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	previous := simProbeTimeout
+	simProbeTimeout = timeout
+	t.Cleanup(func() { simProbeTimeout = previous })
 }
 
 func simRefreshTestModem(path string, generation uint64, visible bool) *Modem {

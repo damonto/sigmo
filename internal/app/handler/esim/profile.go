@@ -27,7 +27,7 @@ func newProfile(store *settings.Store, reminders *reminder.Scheduler) *profile {
 
 func (p *profile) List(ctx context.Context, modem *mmodem.Modem) (*ProfilesResponse, error) {
 	current := p.store.Snapshot()
-	ses, err := lpa.DiscoverSEs(modem)
+	ses, err := lpa.DiscoverSEs(ctx, modem)
 	if err != nil {
 		return nil, fmt.Errorf("discover eUICC SEs: %w", err)
 	}
@@ -39,7 +39,7 @@ func (p *profile) List(ctx context.Context, modem *mmodem.Modem) (*ProfilesRespo
 			AID:      hex.EncodeToString(se.AID),
 			Profiles: []ProfileResponse{},
 		}
-		client, err := lpa.NewWithAID(modem, &current, se.AID)
+		client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
 		if err != nil {
 			modem.Logger().Warn("create LPA client for eSIM profiles", "seId", se.ID, "error", err)
 			return nil, fmt.Errorf("create LPA client for %s: %w", se.ID, err)
@@ -88,16 +88,16 @@ func (p *profile) List(ctx context.Context, modem *mmodem.Modem) (*ProfilesRespo
 	return response, nil
 }
 
-func (p *profile) UpdateNickname(modem *mmodem.Modem, seID string, iccid sgp22.ICCID, nickname string) error {
+func (p *profile) UpdateNickname(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID, nickname string) error {
 	if err := validateNickname(nickname); err != nil {
 		return err
 	}
 	current := p.store.Snapshot()
-	se, err := lpa.ResolveSE(modem, seID)
+	se, err := lpa.ResolveSE(ctx, modem, seID)
 	if err != nil {
 		return fmt.Errorf("resolve eUICC SE: %w", err)
 	}
-	client, err := lpa.NewWithAID(modem, &current, se.AID)
+	client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}

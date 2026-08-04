@@ -80,6 +80,7 @@ func TestTerminalRuntimeError(t *testing.T) {
 	}{
 		{name: "cdc-wdm disconnect", err: fmt.Errorf("watch status: %w", cdcwdm.ErrDisconnected), want: true},
 		{name: "QMI terminal read", err: &qmitransport.TransportError{Err: errors.New("malformed QMUX frame")}, want: true},
+		{name: "transient request timeout", err: fmt.Errorf("watch status: %w", context.DeadlineExceeded), want: false},
 		{name: "QMI client IDs exhausted", err: fmt.Errorf("watch status: %w", qcom.QMIErrorClientIdsExhausted), want: true},
 		{name: "ordinary QMI service error", err: qcom.QMIErrorNoNetworkFound, want: false},
 		{name: "request canceled", err: context.Canceled, want: false},

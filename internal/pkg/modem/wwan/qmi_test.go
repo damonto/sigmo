@@ -891,6 +891,9 @@ func TestQMIDevicePowerCycleSIM(t *testing.T) {
 			if tt.client != nil && !slices.Equal(tt.client.calls, tt.wantCalls) {
 				t.Fatalf("client calls = %v, want %v", tt.client.calls, tt.wantCalls)
 			}
+			if tt.client != nil && slices.Contains(tt.wantCalls, fmtCall("power-on", slot)) && !tt.client.powerOnReq.IgnoreHotSwapSwitch {
+				t.Fatal("PowerOnSIM() IgnoreHotSwapSwitch = false, want true")
+			}
 		})
 	}
 }
@@ -1031,6 +1034,75 @@ func TestDecodeQMIICCID(t *testing.T) {
 	}
 }
 
+func TestWatchQMIRefreshFallbacks(t *testing.T) {
+	cardErr := errors.New("card session registration unsupported")
+	primaryErr := errors.New("primary GW registration unsupported")
+	tests := []struct {
+		name             string
+		allErrs          []error
+		filesErr         error
+		wantRegistration string
+		wantSessions     []qcom.Session
+		wantFiles        bool
+		wantErr          error
+	}{
+		{
+			name:             "card session",
+			wantRegistration: "card-session-all",
+			wantSessions:     []qcom.Session{qcom.SessionCardSlot1},
+		},
+		{
+			name:             "primary GW",
+			allErrs:          []error{cardErr},
+			wantRegistration: "primary-gw-all",
+			wantSessions:     []qcom.Session{qcom.SessionCardSlot1, qcom.SessionPrimaryGWProvisioning},
+		},
+		{
+			name:             "ICCID and IMSI files",
+			allErrs:          []error{cardErr, primaryErr},
+			wantRegistration: "primary-gw-files",
+			wantSessions:     []qcom.Session{qcom.SessionCardSlot1, qcom.SessionPrimaryGWProvisioning},
+			wantFiles:        true,
+		},
+		{
+			name:         "unsupported",
+			allErrs:      []error{qcom.QMIErrorNotSupported, qcom.QMIErrorInvalidQmiCommand},
+			filesErr:     qcom.QMIErrorDeviceUnsupported,
+			wantSessions: []qcom.Session{qcom.SessionCardSlot1, qcom.SessionPrimaryGWProvisioning},
+			wantFiles:    true,
+			wantErr:      ErrUnsupported,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := make(chan qcom.RefreshEvent)
+			client := &fakeQMIRefreshClient{stream: stream, allErrs: slices.Clone(tt.allErrs), filesErr: tt.filesErr}
+			got, registration, err := watchQMIRefresh(t.Context(), client, 1)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("watchQMIRefresh() error = %v, want %v", err, tt.wantErr)
+				}
+			} else if err != nil {
+				t.Fatalf("watchQMIRefresh() error = %v", err)
+			}
+			if tt.wantErr == nil && (got != stream || registration != tt.wantRegistration) {
+				t.Fatalf("watchQMIRefresh() = (%p, %q), want (%p, %q)", got, registration, stream, tt.wantRegistration)
+			}
+			if !slices.Equal(client.allSessions, tt.wantSessions) {
+				t.Fatalf("refresh-all sessions = %v, want %v", client.allSessions, tt.wantSessions)
+			}
+			if tt.wantFiles {
+				if client.filesReq.Session != qcom.SessionPrimaryGWProvisioning || len(client.filesReq.Files) != 2 {
+					t.Fatalf("refresh files request = %+v, want primary GW ICCID and IMSI", client.filesReq)
+				}
+			} else if len(client.filesReq.Files) != 0 {
+				t.Fatalf("refresh files request = %+v, want none", client.filesReq)
+			}
+		})
+	}
+}
+
 type fakeQMIClient struct {
 	calls               []string
 	msisdn              qcom.DMSGetMSISDNResponse
@@ -1057,10 +1129,33 @@ type fakeQMIClient struct {
 	powerOffErr         error
 	afterPowerOff       func()
 	powerOnErr          error
+	powerOnReq          qcom.PowerOnSIMRequest
 	cardStatus          qcom.CardStatus
 	cardStatusErr       error
 	changeReq           qcom.ChangeProvisioningSessionRequest
 	provisioningErr     error
+}
+
+type fakeQMIRefreshClient struct {
+	stream      chan qcom.RefreshEvent
+	allErrs     []error
+	allSessions []qcom.Session
+	filesReq    qcom.RefreshRegisterRequest
+	filesErr    error
+}
+
+func (c *fakeQMIRefreshClient) WatchRefreshAll(_ context.Context, session qcom.Session, _ []byte) (<-chan qcom.RefreshEvent, error) {
+	c.allSessions = append(c.allSessions, session)
+	index := len(c.allSessions) - 1
+	if index < len(c.allErrs) {
+		return nil, c.allErrs[index]
+	}
+	return c.stream, nil
+}
+
+func (c *fakeQMIRefreshClient) WatchRefreshFiles(_ context.Context, req qcom.RefreshRegisterRequest) (<-chan qcom.RefreshEvent, error) {
+	c.filesReq = req
+	return c.stream, c.filesErr
 }
 
 func (r *fakeQMIClient) MSISDN(context.Context) (qcom.DMSGetMSISDNResponse, error) {
@@ -1129,6 +1224,7 @@ func (r *fakeQMIClient) PowerOffSIM(_ context.Context, slot uint8) error {
 
 func (r *fakeQMIClient) PowerOnSIM(_ context.Context, req qcom.PowerOnSIMRequest) error {
 	r.calls = append(r.calls, fmtCall("power-on", req.Slot))
+	r.powerOnReq = req
 	return r.powerOnErr
 }
 

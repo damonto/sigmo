@@ -43,7 +43,7 @@ func newMSISDN(registry *mmodem.Registry) *msisdn {
 		openDevice: func(modem *mmodem.Modem) (msisdnDevice, error) {
 			return mmodem.OpenDevice(modem)
 		},
-		refreshSIMAndWait: registry.PowerCycleSIMAndWait,
+		refreshSIMAndWait: registry.PowerCycleSIM,
 	}
 }
 

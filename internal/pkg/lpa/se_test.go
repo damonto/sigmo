@@ -1,6 +1,7 @@
 package lpa
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -46,10 +47,10 @@ func TestDiscoverSEsTriesESTKProductAIDFallback(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := discoverSEs(&modem.Modem{
+			got, err := discoverSEs(t.Context(), &modem.Modem{
 				EquipmentIdentifier: "test:" + tt.name,
 				Sim:                 &modem.SIM{ATR: tt.atr},
-			}, func(*modem.Modem) (driver.SmartCardChannel, error) {
+			}, func(context.Context, *modem.Modem) (driver.SmartCardChannel, error) {
 				return tt.channel, nil
 			})
 			if err != nil {

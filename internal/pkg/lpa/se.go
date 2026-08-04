@@ -1,6 +1,7 @@
 package lpa
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -32,15 +33,19 @@ var DefaultSE = SE{
 	Label: "eUICC",
 }
 
-type seChannelOpener func(*modem.Modem) (driver.SmartCardChannel, error)
+type seChannelOpener func(context.Context, *modem.Modem) (driver.SmartCardChannel, error)
 
-func DiscoverSEs(m *modem.Modem) ([]SE, error) {
-	return discoverSEs(m, createChannel)
+// DiscoverSEs returns the eUICC secure elements available through m.
+func DiscoverSEs(ctx context.Context, m *modem.Modem) ([]SE, error) {
+	return discoverSEs(ctx, m, createChannel)
 }
 
-func discoverSEs(m *modem.Modem, openChannel seChannelOpener) ([]SE, error) {
+func discoverSEs(ctx context.Context, m *modem.Modem, openChannel seChannelOpener) ([]SE, error) {
 	if m == nil {
 		return nil, errors.New("modem is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	sim := m.Snapshot().SIM
 	if sim == nil {
@@ -50,10 +55,12 @@ func discoverSEs(m *modem.Modem, openChannel seChannelOpener) ([]SE, error) {
 		return []SE{DefaultSE}, nil
 	}
 
-	gmu.Lock(m.EquipmentIdentifier)
+	if err := gmu.LockContext(ctx, m.EquipmentIdentifier); err != nil {
+		return nil, err
+	}
 	defer gmu.Unlock(m.EquipmentIdentifier)
 
-	ch, err := openChannel(m)
+	ch, err := openChannel(ctx, m)
 	if err != nil {
 		m.Logger().Debug("create channel for eUICC SE detection", "error", err)
 		return []SE{DefaultSE}, nil
@@ -66,12 +73,13 @@ func discoverSEs(m *modem.Modem, openChannel seChannelOpener) ([]SE, error) {
 	return []SE{DefaultSE}, nil
 }
 
-func ResolveSE(m *modem.Modem, id string) (SE, error) {
+// ResolveSE resolves an eUICC secure element.
+func ResolveSE(ctx context.Context, m *modem.Modem, id string) (SE, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return SE{}, ErrSERequired
 	}
-	ses, err := DiscoverSEs(m)
+	ses, err := DiscoverSEs(ctx, m)
 	if err != nil {
 		return SE{}, err
 	}

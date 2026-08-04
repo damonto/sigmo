@@ -129,10 +129,17 @@ func TestRegistryRetriesAfterWatcherStartupFailure(t *testing.T) {
 }
 
 func TestRegistryRecoversCurrentGenerationAfterTransportFailure(t *testing.T) {
+	previousRetryDelay := registryWatchRetryDelay
+	registryWatchRetryDelay = 0
+	t.Cleanup(func() { registryWatchRetryDelay = previousRetryDelay })
+
 	tests := []struct {
-		name string
+		name          string
+		firstOpenErr  error
+		wantOpenCalls int
 	}{
-		{name: "same control path"},
+		{name: "same control path", wantOpenCalls: 1},
+		{name: "transient reopen failure", firstOpenErr: context.DeadlineExceeded, wantOpenCalls: 2},
 	}
 
 	for _, tt := range tests {
@@ -156,6 +163,9 @@ func TestRegistryRecoversCurrentGenerationAfterTransportFailure(t *testing.T) {
 				},
 				open: func(_ context.Context, candidate wwanmodem.Device, generation uint64) (*Modem, error) {
 					openCalls++
+					if openCalls == 1 && tt.firstOpenErr != nil {
+						return nil, tt.firstOpenErr
+					}
 					return &Modem{
 						deviceInfo:          candidate,
 						deviceKey:           physicalDeviceKey(candidate),
@@ -175,18 +185,19 @@ func TestRegistryRecoversCurrentGenerationAfterTransportFailure(t *testing.T) {
 			registry.handleModemFailure(context.Background(), failure)
 
 			replacement := registry.modems[key]
-			if replacement == nil || replacement == initial || replacement.Generation() != 2 {
-				t.Fatalf("replacement = %+v, want generation 2", replacement)
+			wantGeneration := uint64(1 + tt.wantOpenCalls)
+			if replacement == nil || replacement == initial || replacement.Generation() != wantGeneration {
+				t.Fatalf("replacement = %+v, want generation %d", replacement, wantGeneration)
 			}
-			if openCalls != 1 {
-				t.Fatalf("open calls = %d, want 1", openCalls)
+			if openCalls != tt.wantOpenCalls {
+				t.Fatalf("open calls = %d, want %d", openCalls, tt.wantOpenCalls)
 			}
 			if len(published) != 2 || published[0].Type != ModemEventRemoved || published[1].Type != ModemEventAdded {
 				t.Fatalf("published events = %+v, want removed then added", published)
 			}
 
 			registry.handleModemFailure(context.Background(), failure)
-			if openCalls != 1 || registry.modems[key] != replacement {
+			if openCalls != tt.wantOpenCalls || registry.modems[key] != replacement {
 				t.Fatal("stale generation failure replaced the current modem")
 			}
 		})

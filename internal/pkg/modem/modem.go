@@ -28,6 +28,8 @@ type Modem struct {
 	onFailure      func(error)
 	deviceSessions deviceSessionStore
 	runtimeMu      sync.RWMutex
+	simRefreshMu   sync.Mutex
+	simRefresh     simRefreshState
 	simSlotOnce    sync.Once
 	simSlotToken   chan struct{}
 	ussdMu         sync.RWMutex

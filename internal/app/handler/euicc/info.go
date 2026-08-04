@@ -1,6 +1,7 @@
 package euicc
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 
@@ -19,9 +20,9 @@ func newEUICC(store *settings.Store) *euicc {
 	}
 }
 
-func (e *euicc) Get(modem *mmodem.Modem) (*SEsResponse, error) {
+func (e *euicc) Get(ctx context.Context, modem *mmodem.Modem) (*SEsResponse, error) {
 	current := e.store.Snapshot()
-	ses, err := lpa.DiscoverSEs(modem)
+	ses, err := lpa.DiscoverSEs(ctx, modem)
 	if err != nil {
 		return nil, fmt.Errorf("discover eUICC SEs: %w", err)
 	}
@@ -32,7 +33,7 @@ func (e *euicc) Get(modem *mmodem.Modem) (*SEsResponse, error) {
 			Label: se.Label,
 			AID:   hex.EncodeToString(se.AID),
 		}
-		client, err := lpa.NewWithAID(modem, &current, se.AID)
+		client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
 		if err != nil {
 			modem.Logger().Warn("create LPA client for eUICC info", "seId", se.ID, "error", err)
 			return nil, fmt.Errorf("create LPA client for %s: %w", se.ID, err)

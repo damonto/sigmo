@@ -1,6 +1,7 @@
 package notification
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"strconv"
@@ -19,9 +20,9 @@ func newNotification(store *settings.Store) *notification {
 	return &notification{store: store}
 }
 
-func (n *notification) List(modem *mmodem.Modem) (*NotificationsResponse, error) {
+func (n *notification) List(ctx context.Context, modem *mmodem.Modem) (*NotificationsResponse, error) {
 	current := n.store.Snapshot()
-	ses, err := lpa.DiscoverSEs(modem)
+	ses, err := lpa.DiscoverSEs(ctx, modem)
 	if err != nil {
 		return nil, fmt.Errorf("discover eUICC SEs: %w", err)
 	}
@@ -33,7 +34,7 @@ func (n *notification) List(modem *mmodem.Modem) (*NotificationsResponse, error)
 			AID:           hex.EncodeToString(se.AID),
 			Notifications: []NotificationResponse{},
 		}
-		client, err := lpa.NewWithAID(modem, &current, se.AID)
+		client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
 		if err != nil {
 			modem.Logger().Warn("create LPA client for notifications", "seId", se.ID, "error", err)
 			return nil, fmt.Errorf("create LPA client for %s: %w", se.ID, err)
@@ -76,13 +77,13 @@ func (n *notification) List(modem *mmodem.Modem) (*NotificationsResponse, error)
 	return response, nil
 }
 
-func (n *notification) Resend(modem *mmodem.Modem, seID string, sequence sgp22.SequenceNumber) error {
+func (n *notification) Resend(ctx context.Context, modem *mmodem.Modem, seID string, sequence sgp22.SequenceNumber) error {
 	current := n.store.Snapshot()
-	se, err := lpa.ResolveSE(modem, seID)
+	se, err := lpa.ResolveSE(ctx, modem, seID)
 	if err != nil {
 		return fmt.Errorf("resolve eUICC SE: %w", err)
 	}
-	client, err := lpa.NewWithAID(modem, &current, se.AID)
+	client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}
@@ -97,13 +98,13 @@ func (n *notification) Resend(modem *mmodem.Modem, seID string, sequence sgp22.S
 	return nil
 }
 
-func (n *notification) Delete(modem *mmodem.Modem, seID string, sequence sgp22.SequenceNumber) error {
+func (n *notification) Delete(ctx context.Context, modem *mmodem.Modem, seID string, sequence sgp22.SequenceNumber) error {
 	current := n.store.Snapshot()
-	se, err := lpa.ResolveSE(modem, seID)
+	se, err := lpa.ResolveSE(ctx, modem, seID)
 	if err != nil {
 		return fmt.Errorf("resolve eUICC SE: %w", err)
 	}
-	client, err := lpa.NewWithAID(modem, &current, se.AID)
+	client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}

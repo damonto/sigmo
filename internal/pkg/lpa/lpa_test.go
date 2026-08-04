@@ -2,6 +2,7 @@ package lpa
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log/slog"
 	"strings"
@@ -48,6 +49,53 @@ func TestLockedChannelDisconnectOnce(t *testing.T) {
 			}
 			assertLockReleased(t, key)
 		})
+	}
+}
+
+func TestContextSmartCardChannelStopsNewOperationsAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	underlying := &fakeSmartCardChannel{}
+	channel := &contextSmartCardChannel{ctx: ctx, SmartCardChannel: underlying}
+
+	if err := channel.Connect(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Connect() error = %v, want %v", err, context.Canceled)
+	}
+	if _, err := channel.OpenLogicalChannel(nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("OpenLogicalChannel() error = %v, want %v", err, context.Canceled)
+	}
+	if _, err := channel.Transmit(nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Transmit() error = %v, want %v", err, context.Canceled)
+	}
+	if err := channel.CloseLogicalChannel(1); err != nil {
+		t.Fatalf("CloseLogicalChannel() error = %v", err)
+	}
+	if err := channel.Disconnect(); err != nil {
+		t.Fatalf("Disconnect() error = %v", err)
+	}
+	if underlying.disconnects != 1 {
+		t.Fatalf("disconnects = %d, want cleanup after cancellation", underlying.disconnects)
+	}
+}
+
+func TestNewWithChannelStopsWaitingForLockAfterCancellation(t *testing.T) {
+	key := "test:new-with-channel-cancellation"
+	gmu.Lock(key)
+	t.Cleanup(func() { gmu.Unlock(key) })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	channel := &fakeSmartCardChannel{}
+	_, err := NewWithChannel(ctx, ChannelConfig{
+		LockKey: key,
+		Channel: channel,
+		Logger:  slog.Default(),
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("NewWithChannel() error = %v, want %v", err, context.Canceled)
+	}
+	if channel.disconnects != 1 {
+		t.Fatalf("disconnects = %d, want 1 after canceled acquisition", channel.disconnects)
 	}
 }
 
@@ -191,7 +239,7 @@ func TestNewWithChannelLogger(t *testing.T) {
 			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 			defer slog.SetDefault(previous)
 
-			client, err := NewWithChannel(ChannelConfig{
+			client, err := NewWithChannel(context.Background(), ChannelConfig{
 				LockKey: "test:" + tt.name,
 				Channel: tt.channel,
 				Logger:  mmodem.LoggerForIMEI("860588043408833"),

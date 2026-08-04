@@ -12,11 +12,11 @@ import (
 
 func (p *provisioning) Download(ctx context.Context, modem *mmodem.Modem, seID string, activationCode *elpa.ActivationCode, opts *elpa.DownloadOptions) error {
 	current := p.store.Snapshot()
-	se, err := lpa.ResolveSE(modem, seID)
+	se, err := lpa.ResolveSE(ctx, modem, seID)
 	if err != nil {
 		return fmt.Errorf("resolve eUICC SE: %w", err)
 	}
-	client, err := lpa.NewWithAID(modem, &current, se.AID)
+	client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}

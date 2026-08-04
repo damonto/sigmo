@@ -10,6 +10,8 @@ import (
 	"github.com/damonto/wwan-go/qcom"
 )
 
+const registryFailureRecoveryAttempts = 3
+
 func (r *Registry) ensureStarted(ctx context.Context) error {
 	r.startMu.Lock()
 	defer r.startMu.Unlock()
@@ -326,9 +328,35 @@ func (r *Registry) handleModemFailure(ctx context.Context, failure modemFailure)
 		slog.Error("suspend modem recovery until device reconnects", "imei", failure.modem.EquipmentIdentifier, "generation", failure.modem.Generation(), "error", failure.err)
 		return
 	}
-	if err := r.reconcile(ctx); err != nil {
+	if err := r.recoverRemovedModem(ctx, failure.modem); err != nil {
 		slog.Error("recover modem after transport stop", "imei", failure.modem.EquipmentIdentifier, "generation", failure.modem.Generation(), "error", err)
 	}
+}
+
+func (r *Registry) recoverRemovedModem(ctx context.Context, failed *Modem) error {
+	var result error
+	for attempt := range registryFailureRecoveryAttempts {
+		if attempt > 0 {
+			if err := sleepContext(ctx, registryWatchRetryDelay); err != nil {
+				return errors.Join(result, err)
+			}
+		}
+		if err := r.reconcile(ctx); err != nil {
+			result = errors.Join(result, err)
+		}
+		current, err := r.findModem(failed.EquipmentIdentifier)
+		if err == nil && samePhysicalModem(failed, current) {
+			return nil
+		}
+		if err == nil {
+			err = errors.New("recovered modem does not match failed physical device")
+		}
+		result = errors.Join(result, err)
+		if r.cidRecoveryState(failed.Path()) == cidRecoverySuspended {
+			break
+		}
+	}
+	return result
 }
 
 func (r *Registry) removeModem(key string, existing *Modem) {

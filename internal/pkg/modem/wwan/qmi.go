@@ -27,6 +27,11 @@ var qmiMSISDNFile = qcom.File{
 
 var qmiICCIDFilePath = []byte{0x3F, 0x00, 0x2F, 0xE2}
 
+var qmiRefreshFilePaths = [][]byte{
+	qmiICCIDFilePath,
+	{0x3F, 0x00, 0x7F, 0xFF, 0x6F, 0x07},
+}
+
 const (
 	qmiICCIDFileSize = 10
 	qmiICCIDTimeout  = 2 * time.Second
@@ -185,6 +190,11 @@ var (
 type qmiSIMPowerControl interface {
 	PowerOffSIM(ctx context.Context, slot uint8) error
 	PowerOnSIM(ctx context.Context, req qcom.PowerOnSIMRequest) error
+}
+
+type qmiRefreshClient interface {
+	WatchRefreshAll(ctx context.Context, session qcom.Session, aid []byte) (<-chan qcom.RefreshEvent, error)
+	WatchRefreshFiles(ctx context.Context, req qcom.RefreshRegisterRequest) (<-chan qcom.RefreshEvent, error)
 }
 
 type qmiClient interface {
@@ -431,7 +441,10 @@ func (u *qmiSession) PowerCycleSIM(ctx context.Context) (err error) {
 	time.Sleep(qmiSIMPowerCycleDelay)
 
 	restoreCtx := context.WithoutCancel(ctx)
-	if err := qmiPowerOnSIM(restoreCtx, client, qcom.PowerOnSIMRequest{Slot: u.slot}); err != nil {
+	if err := qmiPowerOnSIM(restoreCtx, client, qcom.PowerOnSIMRequest{
+		Slot:                u.slot,
+		IgnoreHotSwapSwitch: true,
+	}); err != nil {
 		return fmt.Errorf("power on sim: %w", err)
 	}
 	slog.Info("sim powered on", "imei", u.imei, "slot", u.slot)
@@ -469,6 +482,91 @@ func (u *qmiSession) SIMState(ctx context.Context, target Target) (state SIMStat
 	state.Matches = target.ICCID == "" || state.ICCID == target.ICCID
 	state.ICCIDMismatch = target.ICCID != "" && state.ICCID != "" && state.ICCID != target.ICCID
 	return state, nil
+}
+
+func (u *qmiSession) WatchSIMRefresh(ctx context.Context) (<-chan SIMRefreshEvent, error) {
+	client, release, err := u.acquireClient(ctx, u.slot)
+	if err != nil {
+		return nil, fmt.Errorf("open QMI UIM client: %w", err)
+	}
+	refreshClient, ok := client.(qmiRefreshClient)
+	if !ok {
+		release(nil)
+		return nil, ErrUnsupported
+	}
+
+	events, registration, err := watchQMIRefresh(ctx, refreshClient, u.slot)
+	release(err)
+	if err != nil {
+		return nil, err
+	}
+	slog.Info("watching QMI UIM refresh", "imei", u.imei, "slot", u.slot, "registration", registration)
+
+	out := make(chan SIMRefreshEvent, 8)
+	go func() {
+		defer close(out)
+		for event := range events {
+			mapped := SIMRefreshEvent{Stage: SIMRefreshStage(event.Stage), Mode: SIMRefreshMode(event.Mode)}
+			select {
+			case out <- mapped:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
+func watchQMIRefresh(ctx context.Context, client qmiRefreshClient, slot uint8) (<-chan qcom.RefreshEvent, string, error) {
+	cardSession, err := qmiCardSession(slot)
+	if err != nil {
+		return nil, "", err
+	}
+
+	type registration struct {
+		name    string
+		session qcom.Session
+	}
+	registrations := []registration{
+		{name: "card-session-all", session: cardSession},
+		{name: "primary-gw-all", session: qcom.SessionPrimaryGWProvisioning},
+	}
+	var errs error
+	unsupported := true
+	for _, registration := range registrations {
+		events, watchErr := client.WatchRefreshAll(ctx, registration.session, nil)
+		if watchErr == nil {
+			return events, registration.name, nil
+		}
+		unsupported = unsupported && unsupportedQMIRefreshRegistration(watchErr)
+		errs = errors.Join(errs, fmt.Errorf("register %s: %w", registration.name, watchErr))
+		if err := ctx.Err(); err != nil {
+			return nil, "", errors.Join(errs, err)
+		}
+	}
+
+	files := make([]qcom.RefreshFile, 0, len(qmiRefreshFilePaths))
+	for _, path := range qmiRefreshFilePaths {
+		files = append(files, qcom.RefreshFile{Path: slices.Clone(path)})
+	}
+	events, err := client.WatchRefreshFiles(ctx, qcom.RefreshRegisterRequest{
+		Session: qcom.SessionPrimaryGWProvisioning,
+		Files:   files,
+	})
+	if err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register primary-gw files: %w", err))
+		if unsupported && unsupportedQMIRefreshRegistration(err) {
+			return nil, "", errors.Join(ErrUnsupported, errs)
+		}
+		return nil, "", errs
+	}
+	return events, "primary-gw-files", nil
+}
+
+func unsupportedQMIRefreshRegistration(err error) bool {
+	return errors.Is(err, qcom.QMIErrorInvalidQmiCommand) ||
+		errors.Is(err, qcom.QMIErrorNotSupported) ||
+		errors.Is(err, qcom.QMIErrorDeviceUnsupported)
 }
 
 func qmiPowerOnSIM(ctx context.Context, client qmiSIMPowerControl, req qcom.PowerOnSIMRequest) error {

@@ -149,19 +149,19 @@ func (s *transferRunner) activateSourceProfile(ctx context.Context, currentSetti
 		}
 		return s.enableModemSourceProfile(ctx, modem, option.SEID, iccid)
 	case SourceCCID:
-		return enableCCIDSourceProfile(currentSettings, start, iccid)
+		return enableCCIDSourceProfile(ctx, currentSettings, start, iccid)
 	default:
 		return ErrSourceUnsupported
 	}
 }
 
-func enableCCIDSourceProfile(currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {
+func enableCCIDSourceProfile(ctx context.Context, currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {
 	reader, err := openCCIDLPAReader(start.SourceID)
 	if err != nil {
 		return fmt.Errorf("open CCID reader: %w", err)
 	}
 	logger := sourceLogger(start)
-	sourceLPA, err := ilpa.NewWithChannel(ilpa.ChannelConfig{
+	sourceLPA, err := ilpa.NewWithChannel(ctx, ilpa.ChannelConfig{
 		LockKey:  sourceLockKey(start.SourceType, start.SourceID),
 		Channel:  reader,
 		Settings: currentSettings,
@@ -200,7 +200,7 @@ func (s *transferRunner) deleteSourceProfile(ctx context.Context, currentSetting
 	case SourceModem:
 		return s.deleteModemSourceProfile(ctx, currentSettings, start, iccid)
 	case SourceCCID:
-		return deleteCCIDSourceProfile(currentSettings, start, iccid)
+		return deleteCCIDSourceProfile(ctx, currentSettings, start, iccid)
 	default:
 		return ErrSourceUnsupported
 	}
@@ -211,7 +211,7 @@ func (s *transferRunner) deleteModemSourceProfile(ctx context.Context, currentSe
 	if err != nil {
 		return err
 	}
-	profiles, err := sourceModemProfiles(modem, currentSettings)
+	profiles, err := sourceModemProfiles(ctx, modem, currentSettings)
 	if err != nil {
 		return err
 	}
@@ -225,11 +225,11 @@ func (s *transferRunner) deleteModemSourceProfile(ctx context.Context, currentSe
 		}
 		return s.deleteModemProfile(ctx, modem, sourceProfileSEID(start.ProfileID), iccid)
 	}
-	se, err := ilpa.ResolveSE(modem, sourceProfileSEID(start.ProfileID))
+	se, err := ilpa.ResolveSE(ctx, modem, sourceProfileSEID(start.ProfileID))
 	if err != nil {
 		return fmt.Errorf("resolve source eUICC SE: %w", err)
 	}
-	sourceLPA, err := ilpa.NewWithAID(modem, currentSettings, se.AID)
+	sourceLPA, err := ilpa.NewWithAID(ctx, modem, currentSettings, se.AID)
 	if err != nil {
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
@@ -249,14 +249,14 @@ type sourceModemProfile struct {
 	profile *sgp22.ProfileInfo
 }
 
-func sourceModemProfiles(modem *mmodem.Modem, currentSettings *settings.Settings) ([]sourceModemProfile, error) {
-	ses, err := ilpa.DiscoverSEs(modem)
+func sourceModemProfiles(ctx context.Context, modem *mmodem.Modem, currentSettings *settings.Settings) ([]sourceModemProfile, error) {
+	ses, err := ilpa.DiscoverSEs(ctx, modem)
 	if err != nil {
 		return nil, fmt.Errorf("discover source eUICC SEs: %w", err)
 	}
 	out := []sourceModemProfile{}
 	for _, se := range ses {
-		sourceLPA, err := ilpa.NewWithAID(modem, currentSettings, se.AID)
+		sourceLPA, err := ilpa.NewWithAID(ctx, modem, currentSettings, se.AID)
 		if err != nil {
 			return nil, fmt.Errorf("create source LPA client for %s: %w", se.ID, err)
 		}
@@ -291,13 +291,13 @@ func (s *transferRunner) deleteModemProfile(ctx context.Context, modem *mmodem.M
 	return s.deleteProfile(ctx, modem, seID, iccid)
 }
 
-func deleteCCIDSourceProfile(currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {
+func deleteCCIDSourceProfile(ctx context.Context, currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {
 	reader, err := openCCIDLPAReader(start.SourceID)
 	if err != nil {
 		return fmt.Errorf("open CCID reader: %w", err)
 	}
 	logger := sourceLogger(start)
-	sourceLPA, err := ilpa.NewWithChannel(ilpa.ChannelConfig{
+	sourceLPA, err := ilpa.NewWithChannel(ctx, ilpa.ChannelConfig{
 		LockKey:  sourceLockKey(start.SourceType, start.SourceID),
 		Channel:  reader,
 		Settings: currentSettings,

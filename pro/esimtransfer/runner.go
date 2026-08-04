@@ -290,11 +290,11 @@ func (s *transferRunner) prepare(ctx context.Context, target *mmodem.Modem, star
 		}
 	}()
 
-	targetSE, err := ilpa.ResolveSE(target, start.SEID)
+	targetSE, err := ilpa.ResolveSE(ctx, target, start.SEID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve target eUICC SE: %w", err)
 	}
-	targetLPA, err := ilpa.NewWithAID(target, currentSettings, targetSE.AID)
+	targetLPA, err := ilpa.NewWithAID(ctx, target, currentSettings, targetSE.AID)
 	if err != nil {
 		return nil, fmt.Errorf("create target LPA client: %w", err)
 	}

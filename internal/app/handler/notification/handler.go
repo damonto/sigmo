@@ -45,11 +45,12 @@ func New(store *settings.Store, registry *mmodem.Registry) *Handler {
 }
 
 func (h *Handler) List(c *echo.Context) error {
-	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeListNotificationsFailed)
 	}
-	response, err := h.notifications.List(modem)
+	response, err := h.notifications.List(ctx, modem)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
 			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
@@ -60,7 +61,8 @@ func (h *Handler) List(c *echo.Context) error {
 }
 
 func (h *Handler) Resend(c *echo.Context) error {
-	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeResendNotificationFailed)
 	}
@@ -71,7 +73,7 @@ func (h *Handler) Resend(c *echo.Context) error {
 		}
 		return httpapi.BadRequest(c, errorCodeInvalidSequenceNumber, err)
 	}
-	if err := h.notifications.Resend(modem, c.Param("seId"), sequence); err != nil {
+	if err := h.notifications.Resend(ctx, modem, c.Param("seId"), sequence); err != nil {
 		if seErr := seRequestError(c, err); seErr != nil {
 			return seErr
 		}
@@ -84,7 +86,8 @@ func (h *Handler) Resend(c *echo.Context) error {
 }
 
 func (h *Handler) Delete(c *echo.Context) error {
-	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeDeleteNotificationFailed)
 	}
@@ -95,7 +98,7 @@ func (h *Handler) Delete(c *echo.Context) error {
 		}
 		return httpapi.BadRequest(c, errorCodeInvalidSequenceNumber, err)
 	}
-	if err := h.notifications.Delete(modem, c.Param("seId"), sequence); err != nil {
+	if err := h.notifications.Delete(ctx, modem, c.Param("seId"), sequence); err != nil {
 		if seErr := seRequestError(c, err); seErr != nil {
 			return seErr
 		}

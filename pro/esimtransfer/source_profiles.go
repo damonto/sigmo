@@ -33,7 +33,7 @@ func (s *transferRunner) modemProfileOptions(ctx context.Context, currentSetting
 	if err != nil {
 		return nil, err
 	}
-	profiles, err := sourceModemProfiles(modem, currentSettings)
+	profiles, err := sourceModemProfiles(ctx, modem, currentSettings)
 	if err == nil {
 		return modemESIMOptions(profiles), nil
 	}
@@ -44,7 +44,7 @@ func (s *transferRunner) modemProfileOptions(ctx context.Context, currentSetting
 }
 
 func (s *transferRunner) ccidProfileOptions(ctx context.Context, currentSettings *settings.Settings, req ProfilesRequest) ([]ProfileResponse, error) {
-	profiles, err := sourceCCIDProfiles(currentSettings, req)
+	profiles, err := sourceCCIDProfiles(ctx, currentSettings, req)
 	if err == nil {
 		return esimOptions(profiles, ""), nil
 	}
@@ -73,12 +73,12 @@ func (s *transferRunner) physicalProfileOptions(ctx context.Context, currentSett
 	return []ProfileResponse{option}, nil
 }
 
-func sourceCCIDProfiles(currentSettings *settings.Settings, req ProfilesRequest) ([]*sgp22.ProfileInfo, error) {
+func sourceCCIDProfiles(ctx context.Context, currentSettings *settings.Settings, req ProfilesRequest) ([]*sgp22.ProfileInfo, error) {
 	reader, err := openCCIDLPAReader(req.SourceID)
 	if err != nil {
 		return nil, fmt.Errorf("open CCID reader: %w", err)
 	}
-	sourceLPA, err := ilpa.NewWithChannel(ilpa.ChannelConfig{
+	sourceLPA, err := ilpa.NewWithChannel(ctx, ilpa.ChannelConfig{
 		LockKey:  sourceLockKey(SourceCCID, req.SourceID),
 		Channel:  reader,
 		Settings: currentSettings,

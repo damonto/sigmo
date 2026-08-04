@@ -3,6 +3,7 @@ package esim
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/damonto/euicc-go/bertlv"
@@ -71,6 +72,47 @@ func TestActiveProfile(t *testing.T) {
 	}
 }
 
+func TestLifecycleClientCreationUsesOperationContext(t *testing.T) {
+	iccid, err := sgp22.NewICCID("8985200012345678901")
+	if err != nil {
+		t.Fatalf("NewICCID() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	l := &lifecycle{
+		newClient: func(ctx context.Context, _ *mmodem.Modem, _ *settings.Settings, _ string) (lifecycleClient, error) {
+			return nil, ctx.Err()
+		},
+	}
+	modem := &mmodem.Modem{EquipmentIdentifier: "354015820228039"}
+
+	tests := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "prepare enable",
+			run: func() error {
+				_, err := l.PrepareEnable(ctx, modem, "default", iccid)
+				return err
+			},
+		},
+		{
+			name: "delete",
+			run: func() error {
+				return l.Delete(ctx, modem, "default", iccid)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.run(); !errors.Is(err, context.Canceled) {
+				t.Fatalf("operation error = %v, want %v", err, context.Canceled)
+			}
+		})
+	}
+}
+
 func TestEnableSessionEnable(t *testing.T) {
 	iccid, err := sgp22.NewICCID("8985200012345678901")
 	if err != nil {
@@ -78,6 +120,7 @@ func TestEnableSessionEnable(t *testing.T) {
 	}
 	enableErr := errors.New("qmi enable returned unknown")
 	ensureErr := errors.New("SIM not visible")
+	notificationErr := errors.New("notification endpoint unavailable")
 	current := &mmodem.Modem{EquipmentIdentifier: "354015820228039"}
 	visibleModem := &mmodem.Modem{EquipmentIdentifier: current.EquipmentIdentifier}
 
@@ -85,16 +128,34 @@ func TestEnableSessionEnable(t *testing.T) {
 		name              string
 		enableErr         error
 		ensureErr         error
+		notificationErr   error
 		wantErr           error
 		wantEnsure        bool
 		wantEnableClosed  bool
 		wantNotifications bool
+		wantRefreshes     []bool
 	}{
 		{
 			name:              "enable succeeds",
 			wantEnsure:        true,
 			wantEnableClosed:  true,
 			wantNotifications: true,
+			wantRefreshes:     []bool{true},
+		},
+		{
+			name:             "CAT busy is returned",
+			enableErr:        sgp22.ErrCatBusy,
+			wantErr:          sgp22.ErrCatBusy,
+			wantEnableClosed: true,
+			wantRefreshes:    []bool{true},
+		},
+		{
+			name:              "notification failure is best effort",
+			notificationErr:   notificationErr,
+			wantEnsure:        true,
+			wantEnableClosed:  true,
+			wantNotifications: true,
+			wantRefreshes:     []bool{true},
 		},
 		{
 			name:             "ensure SIM visible error is returned",
@@ -102,12 +163,14 @@ func TestEnableSessionEnable(t *testing.T) {
 			wantErr:          ensureErr,
 			wantEnsure:       true,
 			wantEnableClosed: true,
+			wantRefreshes:    []bool{true},
 		},
 		{
 			name:             "enable error returns original error immediately",
 			enableErr:        enableErr,
 			wantErr:          enableErr,
 			wantEnableClosed: true,
+			wantRefreshes:    []bool{true},
 		},
 	}
 
@@ -118,13 +181,14 @@ func TestEnableSessionEnable(t *testing.T) {
 				notifications: []*sgp22.NotificationMetadata{
 					{SequenceNumber: 2},
 				},
+				sendErr: tt.notificationErr,
 			}
 			factoryClients := []lifecycleClient{notificationClient}
 
 			var ensureCalled bool
 			l := &lifecycle{
 				settings: &settings.Settings{},
-				newClient: func(*mmodem.Modem, *settings.Settings, string) (lifecycleClient, error) {
+				newClient: func(context.Context, *mmodem.Modem, *settings.Settings, string) (lifecycleClient, error) {
 					if len(factoryClients) == 0 {
 						return &fakeLifecycleClient{profiles: disabledProfiles(iccid)}, nil
 					}
@@ -169,8 +233,8 @@ func TestEnableSessionEnable(t *testing.T) {
 			if enableClient.closed != tt.wantEnableClosed {
 				t.Fatalf("enable client closed = %v, want %v", enableClient.closed, tt.wantEnableClosed)
 			}
-			if !enableClient.enableRefresh {
-				t.Fatal("enable refresh = false, want true")
+			if !slices.Equal(enableClient.enableRefreshes, tt.wantRefreshes) {
+				t.Fatalf("enable refreshes = %v, want %v", enableClient.enableRefreshes, tt.wantRefreshes)
 			}
 			if tt.wantNotifications && notificationClient.sentNotifications != 1 {
 				t.Fatalf("sent notifications = %d, want 1", notificationClient.sentNotifications)
@@ -179,17 +243,48 @@ func TestEnableSessionEnable(t *testing.T) {
 	}
 }
 
+func TestSendPendingNotificationsKeepsFailedNotification(t *testing.T) {
+	wantErr := errors.New("notification endpoint unavailable")
+	client := &fakeLifecycleClient{
+		notifications: []*sgp22.NotificationMetadata{{SequenceNumber: 2}},
+		sendErrors:    []error{wantErr, nil},
+	}
+	l := &lifecycle{
+		newClient: func(context.Context, *mmodem.Modem, *settings.Settings, string) (lifecycleClient, error) {
+			return client, nil
+		},
+	}
+	modem := &mmodem.Modem{EquipmentIdentifier: "354015820228039"}
+
+	err := l.sendPendingNotifications(t.Context(), modem, "default", 1)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("first sendPendingNotifications() error = %v, want %v", err, wantErr)
+	}
+	if client.removedNotifications != 0 || len(client.notifications) != 1 {
+		t.Fatalf("failed notification was removed: removed = %d, pending = %d", client.removedNotifications, len(client.notifications))
+	}
+	if err := l.sendPendingNotifications(t.Context(), modem, "default", 1); err != nil {
+		t.Fatalf("second sendPendingNotifications() error = %v", err)
+	}
+	if client.sentNotifications != 2 || client.removedNotifications != 1 || len(client.notifications) != 0 {
+		t.Fatalf("notification attempts/removals/pending = %d/%d/%d, want 2/1/0", client.sentNotifications, client.removedNotifications, len(client.notifications))
+	}
+}
+
 type fakeLifecycleClient struct {
-	profiles            []*sgp22.ProfileInfo
-	notifications       []*sgp22.NotificationMetadata
-	enableErr           error
-	listProfileErr      error
-	listNotificationErr error
-	deleteErr           error
-	sendErr             error
-	closed              bool
-	enableRefresh       bool
-	sentNotifications   int
+	profiles             []*sgp22.ProfileInfo
+	notifications        []*sgp22.NotificationMetadata
+	enableErr            error
+	listProfileErr       error
+	listNotificationErr  error
+	deleteErr            error
+	sendErr              error
+	sendErrors           []error
+	removeErr            error
+	closed               bool
+	enableRefreshes      []bool
+	sentNotifications    int
+	removedNotifications int
 }
 
 func (f *fakeLifecycleClient) ListProfile(any, []bertlv.Tag) ([]*sgp22.ProfileInfo, error) {
@@ -201,7 +296,7 @@ func (f *fakeLifecycleClient) ListNotification(...sgp22.NotificationEvent) ([]*s
 }
 
 func (f *fakeLifecycleClient) EnableProfile(_ any, refresh bool) error {
-	f.enableRefresh = refresh
+	f.enableRefreshes = append(f.enableRefreshes, refresh)
 	return f.enableErr
 }
 
@@ -209,9 +304,38 @@ func (f *fakeLifecycleClient) Delete(sgp22.ICCID) error {
 	return f.deleteErr
 }
 
-func (f *fakeLifecycleClient) SendNotification(any, bool) error {
+func (f *fakeLifecycleClient) RetrieveNotificationList(sequence any) ([]*sgp22.PendingNotification, error) {
+	seq, ok := sequence.(sgp22.SequenceNumber)
+	if !ok {
+		return nil, errors.New("notification sequence is required")
+	}
+	for _, notification := range f.notifications {
+		if notification != nil && notification.SequenceNumber == seq {
+			return []*sgp22.PendingNotification{{Notification: notification}}, nil
+		}
+	}
+	return nil, nil
+}
+
+func (f *fakeLifecycleClient) HandleNotification(*sgp22.PendingNotification) error {
 	f.sentNotifications++
+	if len(f.sendErrors) > 0 {
+		err := f.sendErrors[0]
+		f.sendErrors = f.sendErrors[1:]
+		return err
+	}
 	return f.sendErr
+}
+
+func (f *fakeLifecycleClient) RemoveNotificationFromList(sequence sgp22.SequenceNumber) error {
+	if f.removeErr != nil {
+		return f.removeErr
+	}
+	f.removedNotifications++
+	f.notifications = slices.DeleteFunc(f.notifications, func(notification *sgp22.NotificationMetadata) bool {
+		return notification != nil && notification.SequenceNumber == sequence
+	})
+	return nil
 }
 
 func (f *fakeLifecycleClient) Close() error {
