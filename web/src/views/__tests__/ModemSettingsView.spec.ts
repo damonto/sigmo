@@ -40,7 +40,7 @@ const modem: Modem = {
   },
   signalQuality: 76,
   airplaneMode: false,
-  supportsEsim: false,
+  simKind: 'physical',
 }
 
 vi.mock('vue-router', () => ({

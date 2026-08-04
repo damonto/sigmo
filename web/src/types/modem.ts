@@ -15,6 +15,8 @@ export type RegisteredOperator = {
   code: string
 }
 
+export type SIMKind = 'unknown' | 'physical' | 'euicc'
+
 export type ModemApiResponse = {
   manufacturer: string
   id: string
@@ -33,7 +35,7 @@ export type ModemApiResponse = {
   registeredOperator: RegisteredOperator
   signalQuality: number
   airplaneMode: boolean
-  supportsEsim: boolean
+  simKind: SIMKind
   internetConnected?: boolean
   wifiCallingEnabled?: boolean
   wifiCallingConnected?: boolean

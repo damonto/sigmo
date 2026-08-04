@@ -33,24 +33,24 @@ func (m *Modem) applySIMInfo(info wwanmodem.SIMInfo) {
 		return
 	}
 	m.runtimeMu.Lock()
+	previous := m.Sim
 	m.PrimarySimSlot = uint32(info.Slot)
 	for _, sim := range m.slotSIMs {
 		if sim != nil {
 			sim.Active = false
 		}
 	}
-	m.Sim = simFromInfo(m, info)
+	m.Sim = mergeSIMMetadata(previous, simFromInfo(m, info))
 	if m.PrimarySimSlot != 0 {
 		if m.slotSIMs == nil {
 			m.slotSIMs = make(map[uint32]*SIM)
 		}
 		m.slotSIMs[m.PrimarySimSlot] = cloneSIM(m, m.Sim)
 	}
-	m.Number = ""
 	if len(info.OwnNumbers) > 0 {
-		if number := strings.TrimSpace(info.OwnNumbers[0]); number != "" {
-			m.Number = number
-		}
+		m.Number = strings.TrimSpace(info.OwnNumbers[0])
+	} else if !sameSIMIdentity(previous, m.Sim) {
+		m.Number = ""
 	}
 	m.Status.SIM = info.State
 	if m.PrimarySimSlot != 0 && !slices.Contains(m.SimSlots, m.PrimarySimSlot) {
@@ -58,6 +58,38 @@ func (m *Modem) applySIMInfo(info wwanmodem.SIMInfo) {
 		slices.Sort(m.SimSlots)
 	}
 	m.runtimeMu.Unlock()
+}
+
+func mergeSIMMetadata(previous, current *SIM) *SIM {
+	if !sameSIMIdentity(previous, current) {
+		return current
+	}
+	if len(current.ATR) == 0 {
+		current.ATR = slices.Clone(previous.ATR)
+	}
+	if current.Eid == "" {
+		current.Eid = previous.Eid
+	}
+	if current.Imsi == "" {
+		current.Imsi = previous.Imsi
+	}
+	if current.OperatorIdentifier == "" {
+		current.OperatorIdentifier = previous.OperatorIdentifier
+	}
+	if current.OperatorName == "" {
+		current.OperatorName = previous.OperatorName
+	}
+	if current.GID1 == "" {
+		current.GID1 = previous.GID1
+	}
+	if current.SPN == "" {
+		current.SPN = previous.SPN
+	}
+	return current
+}
+
+func sameSIMIdentity(a, b *SIM) bool {
+	return a != nil && b != nil && a.Identifier != "" && a.Identifier == b.Identifier
 }
 
 func (m *Modem) applyActiveSIMIdentity(slot uint8, iccid string) {

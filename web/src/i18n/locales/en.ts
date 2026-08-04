@@ -9,6 +9,7 @@ const en = {
   labels: {
     esim: 'eSIM',
     psim: 'pSIM',
+    simUnknown: 'Detecting SIM',
     roaming: 'Roaming',
     signal: 'Signal Quality',
     accessTech: 'Access Tech',

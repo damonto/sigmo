@@ -44,7 +44,7 @@ const topBarTitle = computed(() => {
   return props.modem?.name ?? t('modemDetail.unknown')
 })
 const subtitle = computed(() => {
-  if (!props.modem || props.modem.supportsEsim) return t('modemDetail.subtitle')
+  if (!props.modem || props.modem.simKind !== 'physical') return t('modemDetail.subtitle')
   return t('modemDetail.subtitlePhysical')
 })
 const currentModemId = computed(() => props.modem?.id ?? '')
@@ -54,7 +54,7 @@ const title = computed(() => {
 })
 
 const handleTitleClick = () => {
-  if (!props.modem?.id || !props.modem.supportsEsim) return
+  if (!props.modem?.id || props.modem.simKind !== 'euicc') return
   const now = Date.now()
   titleClickCount.value =
     now - lastTitleClickAt.value > titleClickWindowMs ? 1 : titleClickCount.value + 1

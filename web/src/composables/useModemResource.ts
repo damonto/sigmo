@@ -1,6 +1,7 @@
 import { computed, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 
 import { useModemApi } from '@/apis/modem'
+import { createSIMKindRetry } from '@/composables/simKindRetry'
 import type { Modem } from '@/types/modem'
 
 type ModemResourceState = {
@@ -9,6 +10,8 @@ type ModemResourceState = {
   error: Ref<string | null>
   load: () => Promise<void>
   refresh: () => Promise<void>
+  retain: () => void
+  release: () => void
 }
 
 const resources = new Map<string, ModemResourceState>()
@@ -18,14 +21,25 @@ const usableModemID = (value: string) => {
   return id && id !== 'unknown' ? id : ''
 }
 
-const createResource = (id: string, modemApi: ReturnType<typeof useModemApi>): ModemResourceState => {
+const createResource = (
+  id: string,
+  modemApi: ReturnType<typeof useModemApi>,
+): ModemResourceState => {
   const modem = ref<Modem | null>(null)
   const isLoading = ref(false)
   const error = ref<string | null>(null)
   let loaded = false
   let request: Promise<void> | null = null
+  let consumers = 0
+  const simKindRetry = createSIMKindRetry()
 
-  const loadWith = (force: boolean) => {
+  const scheduleSIMKindRetry = () => {
+    const pending = consumers > 0 && modem.value?.simKind === 'unknown'
+    simKindRetry.schedule(pending, () => void loadWith(true, false))
+  }
+
+  const loadWith = (force: boolean, restartSIMKindRetry = false) => {
+    if (restartSIMKindRetry) simKindRetry.reset()
     if (request) return request
     if (loaded && !force) return Promise.resolve()
 
@@ -44,6 +58,7 @@ const createResource = (id: string, modemApi: ReturnType<typeof useModemApi>): M
       } finally {
         isLoading.value = false
         request = null
+        scheduleSIMKindRetry()
       }
     })()
     return request
@@ -54,7 +69,16 @@ const createResource = (id: string, modemApi: ReturnType<typeof useModemApi>): M
     isLoading,
     error,
     load: () => loadWith(false),
-    refresh: () => loadWith(true),
+    refresh: () => loadWith(true, true),
+    retain: () => {
+      consumers++
+      if (consumers === 1) scheduleSIMKindRetry()
+    },
+    release: () => {
+      if (consumers === 0) return
+      consumers--
+      if (consumers === 0) simKindRetry.reset()
+    },
   }
 }
 
@@ -73,7 +97,7 @@ export const useModemResource = (modemId: ComputedRef<string>) => {
 
   watch(
     modemId,
-    (value) => {
+    (value, _previous, onCleanup) => {
       const id = usableModemID(value)
       if (!id) {
         current.value = null
@@ -81,6 +105,8 @@ export const useModemResource = (modemId: ComputedRef<string>) => {
       }
 
       current.value = resourceFor(id, modemApi)
+      current.value.retain()
+      onCleanup(current.value.release)
       void current.value.load()
     },
     { immediate: true, flush: 'sync' },

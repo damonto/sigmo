@@ -94,42 +94,46 @@ func TestATRSupportsEUICC(t *testing.T) {
 	}
 }
 
-func TestSupportsEUICCUsesCachedATR(t *testing.T) {
+func TestModemSnapshotSIMKind(t *testing.T) {
 	tests := []struct {
-		name  string
-		modem *Modem
-		want  bool
+		name     string
+		modem    *Modem
+		wantKind SIMKind
 	}{
 		{
-			name:  "cached eUICC ATR",
-			modem: &Modem{Sim: &SIM{ATR: []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}}},
-			want:  true,
+			name:     "cached eUICC ATR",
+			modem:    &Modem{Sim: &SIM{ATR: []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}}},
+			wantKind: SIMKindEUICC,
 		},
 		{
-			name:  "cached known ESTKme ATR",
-			modem: &Modem{Sim: &SIM{ATR: westkKnownATR}},
-			want:  true,
+			name:     "cached known ESTKme ATR",
+			modem:    &Modem{Sim: &SIM{ATR: westkKnownATR}},
+			wantKind: SIMKindEUICC,
 		},
 		{
-			name:  "ordinary cached ATR",
-			modem: &Modem{Sim: &SIM{ATR: []byte{0x3B, 0x00}}},
+			name:     "ordinary cached ATR",
+			modem:    &Modem{Sim: &SIM{ATR: []byte{0x3B, 0x00}}},
+			wantKind: SIMKindPhysical,
 		},
 		{
-			name:  "missing ATR",
-			modem: &Modem{Sim: &SIM{}},
+			name:     "missing ATR",
+			modem:    &Modem{Sim: &SIM{}},
+			wantKind: SIMKindUnknown,
 		},
 		{
-			name:  "missing SIM",
-			modem: &Modem{},
+			name:     "missing SIM",
+			modem:    &Modem{},
+			wantKind: SIMKindUnknown,
 		},
 		{
-			name: "nil modem",
+			name:     "nil modem",
+			wantKind: SIMKindUnknown,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := SupportsEUICC(tt.modem); got != tt.want {
-				t.Fatalf("SupportsEUICC() = %v, want %v", got, tt.want)
+			if got := tt.modem.Snapshot().SIMKind(); got != tt.wantKind {
+				t.Fatalf("ModemSnapshot.SIMKind() = %q, want %q", got, tt.wantKind)
 			}
 		})
 	}

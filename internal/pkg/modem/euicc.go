@@ -2,6 +2,15 @@ package modem
 
 import "slices"
 
+// SIMKind describes how the active SIM is classified from its ATR.
+type SIMKind string
+
+const (
+	SIMKindUnknown  SIMKind = "unknown"
+	SIMKindPhysical SIMKind = "physical"
+	SIMKindEUICC    SIMKind = "euicc"
+)
+
 var knownATRs = [][]byte{
 	{0x3B, 0x9F, 0x96, 0x80, 0x3F, 0xC7, 0x82, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x15, 0x57, 0x65, 0x73, 0x74, 0x6B, 0x2E, 0x6D, 0x65, 0x63}, // eSTK.me
 	{0x3B, 0x9F, 0x96, 0x80, 0x1F, 0xC7, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x15, 0x57, 0x65, 0x73, 0x74, 0x6B, 0x2E, 0x6D, 0x65, 0xC1},       // eSTK.me
@@ -11,16 +20,17 @@ var knownATRs = [][]byte{
 	{0x3B, 0x9F, 0x96, 0x80, 0x1F, 0xC7, 0x80, 0x31, 0xE0, 0x73, 0xFE, 0x21, 0x1B, 0x57, 0xAA, 0x86, 0x60, 0xF0, 0x02, 0x00, 0x03, 0x5D},       // ECP
 }
 
-// SupportsEUICC detects eUICC support from the ATR cached on the SIM object.
-func SupportsEUICC(m *Modem) bool {
-	if m == nil {
-		return false
-	}
-	sim := m.Snapshot().SIM
+// SIMKind classifies the active SIM from the ATR in this snapshot. A missing
+// ATR means detection is still in progress, not that the card is physical.
+func (s ModemSnapshot) SIMKind() SIMKind {
+	sim := s.SIM
 	if sim == nil || len(sim.ATR) == 0 {
-		return false
+		return SIMKindUnknown
 	}
-	return atrSupportsEUICC(sim.ATR)
+	if atrSupportsEUICC(sim.ATR) {
+		return SIMKindEUICC
+	}
+	return SIMKindPhysical
 }
 
 func atrSupportsEUICC(atr []byte) bool {

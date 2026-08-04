@@ -181,6 +181,59 @@ func TestApplySIMSlotsCachesIdentity(t *testing.T) {
 	}
 }
 
+func TestApplySIMInfoMergesSparseMetadataForSameCard(t *testing.T) {
+	tests := []struct {
+		name         string
+		update       wwanmodem.SIMInfo
+		wantATR      []byte
+		wantIMSI     string
+		wantNumber   string
+		wantOperator string
+	}{
+		{
+			name:         "same ICCID preserves enriched fields",
+			update:       wwanmodem.SIMInfo{Slot: 1, ICCID: "8901000000000000001"},
+			wantATR:      []byte{0x3b, 0x00},
+			wantIMSI:     "001010123456789",
+			wantNumber:   "+12025550123",
+			wantOperator: "Carrier",
+		},
+		{
+			name:   "different ICCID clears previous metadata",
+			update: wwanmodem.SIMInfo{Slot: 1, ICCID: "8901000000000000002"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := new(Modem)
+			m.applySIMInfo(wwanmodem.SIMInfo{
+				Slot:         1,
+				ICCID:        "8901000000000000001",
+				IMSI:         "001010123456789",
+				OperatorName: "Carrier",
+				ATR:          []byte{0x3b, 0x00},
+				OwnNumbers:   []string{"+12025550123"},
+			})
+
+			m.applySIMInfo(tt.update)
+			snapshot := m.Snapshot()
+			if !slices.Equal(snapshot.SIM.ATR, tt.wantATR) {
+				t.Fatalf("ATR = %x, want %x", snapshot.SIM.ATR, tt.wantATR)
+			}
+			if snapshot.SIM.Imsi != tt.wantIMSI {
+				t.Fatalf("IMSI = %q, want %q", snapshot.SIM.Imsi, tt.wantIMSI)
+			}
+			if snapshot.Number != tt.wantNumber {
+				t.Fatalf("number = %q, want %q", snapshot.Number, tt.wantNumber)
+			}
+			if snapshot.SIM.OperatorName != tt.wantOperator {
+				t.Fatalf("operator = %q, want %q", snapshot.SIM.OperatorName, tt.wantOperator)
+			}
+		})
+	}
+}
+
 func TestApplySIMSlotsFiltersUnavailableSlots(t *testing.T) {
 	tests := []struct {
 		name  string

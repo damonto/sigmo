@@ -71,7 +71,7 @@ const modem = (id: string, name: string): Modem => ({
   },
   signalQuality: 67,
   airplaneMode: false,
-  supportsEsim: true,
+  simKind: 'euicc',
 })
 
 const stubs = {

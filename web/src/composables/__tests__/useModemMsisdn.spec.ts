@@ -46,7 +46,7 @@ const modem = (number: string): Modem => ({
   },
   signalQuality: 76,
   airplaneMode: false,
-  supportsEsim: false,
+  simKind: 'physical',
 })
 
 const mountComposable = (initialModem = modem('+12242255559')) => {

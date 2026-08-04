@@ -51,7 +51,7 @@ const modem: Modem = {
   },
   signalQuality: 0,
   airplaneMode: false,
-  supportsEsim: true,
+  simKind: 'euicc',
 }
 
 describe('EsimSummaryCard', () => {

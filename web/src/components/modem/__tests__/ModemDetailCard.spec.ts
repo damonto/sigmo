@@ -38,7 +38,7 @@ const modem: Modem = {
   },
   signalQuality: 75,
   airplaneMode: false,
-  supportsEsim: false,
+  simKind: 'physical',
 }
 
 describe('ModemDetailCard', () => {
@@ -55,5 +55,20 @@ describe('ModemDetailCard', () => {
 
     expect(wrapper.text()).toContain('Control Device')
     expect(wrapper.text()).toContain('/dev/cdc-wdm0')
+  })
+
+  it('does not report a physical SIM while classification is unknown', () => {
+    const wrapper = mount(ModemDetailCard, {
+      props: { modem: { ...modem, simKind: 'unknown' } },
+      global: {
+        stubs: {
+          Badge: { template: '<span><slot /></span>' },
+          RegionFlag: { template: '<span />' },
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('labels.simUnknown')
+    expect(wrapper.text()).not.toContain('Physical SIM Only')
   })
 })

@@ -61,6 +61,7 @@ const {
   isLoading,
   isSELoading,
   isEsimProfilesLoading,
+  isSIMKindUnknown,
   isPhysicalModem,
   isEsimModem,
   fetchModemDetail,
@@ -505,7 +506,7 @@ void fetchCapabilities()
   </div>
 
   <!-- Physical modem: show detail card -->
-  <div v-if="modem && isPhysicalModem" class="space-y-3">
+  <div v-else-if="modem && isPhysicalModem" class="space-y-3">
     <div class="flex flex-wrap items-center gap-2">
       <Button
         v-if="modem.sim.identifier"
@@ -545,6 +546,10 @@ void fetchCapabilities()
         <p class="whitespace-pre-wrap break-words">{{ modem.sim.reminder.content }}</p>
       </AlertDescription>
     </Alert>
+    <ModemDetailCard :modem="modem" :se-info="null" />
+  </div>
+
+  <div v-else-if="modem && isSIMKindUnknown">
     <ModemDetailCard :modem="modem" :se-info="null" />
   </div>
 

@@ -86,7 +86,7 @@ const modem = (id: string, name: string, internetConnected = false): Modem => ({
   registeredOperator: { name: 'Carrier', code: '00101' },
   signalQuality: 80,
   airplaneMode: false,
-  supportsEsim: false,
+  simKind: 'physical',
   internetConnected,
 })
 

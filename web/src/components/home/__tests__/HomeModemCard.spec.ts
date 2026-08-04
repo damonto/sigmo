@@ -9,7 +9,7 @@ vi.mock('vue-i18n', () => ({
   }),
 }))
 
-const mountCard = (number: string) =>
+const mountCard = (number: string, simKind: 'unknown' | 'physical' | 'euicc' = 'euicc') =>
   mount(HomeModemCard, {
     props: {
       name: 'RM520N',
@@ -19,7 +19,7 @@ const mountCard = (number: string) =>
       registeredOperatorCode: '310260',
       registrationState: 'Registered',
       accessTechnology: 'LTE',
-      supportsEsim: true,
+      simKind,
       number,
       signalQuality: 72,
       airplaneMode: false,
@@ -48,5 +48,12 @@ describe('HomeModemCard', () => {
     const wrapper = mountCard('')
 
     expect(wrapper.text()).toContain('home.noNumber')
+  })
+
+  it('shows a pending label while SIM classification is unknown', () => {
+    const wrapper = mountCard('', 'unknown')
+
+    expect(wrapper.text()).toContain('labels.simUnknown')
+    expect(wrapper.text()).not.toContain('labels.psim')
   })
 })

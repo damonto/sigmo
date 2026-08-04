@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { useEsimApi } from '@/apis/esim'
 import { useSEApi } from '@/apis/se'
@@ -21,6 +21,20 @@ export const useModemDetail = () => {
   const esimProfiles = ref<EsimProfile[]>([])
   const isSELoading = ref(false)
   const isEsimProfilesLoading = ref(false)
+  let seRequestID = 0
+  let esimProfilesRequestID = 0
+
+  const isCurrentEsimModem = (id: string) =>
+    modem.value?.id === id && modem.value.simKind === 'euicc'
+
+  const resetEsimData = () => {
+    seRequestID++
+    esimProfilesRequestID++
+    seInfo.value = null
+    esimProfiles.value = []
+    isSELoading.value = false
+    isEsimProfilesLoading.value = false
+  }
 
   const mapEsimProfile = (profile: EsimProfileApiResponse): EsimProfile => {
     return {
@@ -45,26 +59,30 @@ export const useModemDetail = () => {
   }
 
   const fetchSEs = async (id: string) => {
+    const requestID = ++seRequestID
     isSELoading.value = true
 
     try {
       const { data } = await seApi.getSEs(id)
-
-      if (data.value) {
-        seInfo.value = data.value
-      }
+      if (requestID !== seRequestID || !isCurrentEsimModem(id)) return
+      seInfo.value = data.value ?? null
     } catch (err) {
+      if (requestID !== seRequestID || !isCurrentEsimModem(id)) return
       console.error('[useModemDetail] Failed to fetch SE info:', err)
       seInfo.value = null
     } finally {
-      isSELoading.value = false
+      if (requestID === seRequestID) {
+        isSELoading.value = false
+      }
     }
   }
 
   const fetchEsimProfiles = async (id: string) => {
+    const requestID = ++esimProfilesRequestID
     isEsimProfilesLoading.value = true
     try {
       const { data } = await esimApi.getEsims(id)
+      if (requestID !== esimProfilesRequestID || !isCurrentEsimModem(id)) return
       if (data.value) {
         esimProfiles.value = data.value.ses.flatMap((group) =>
           group.profiles.map((profile) =>
@@ -80,24 +98,32 @@ export const useModemDetail = () => {
         esimProfiles.value = []
       }
     } catch (err) {
+      if (requestID !== esimProfilesRequestID || !isCurrentEsimModem(id)) return
       console.error('[useModemDetail] Failed to fetch eSIM profiles:', err)
       esimProfiles.value = []
     } finally {
-      isEsimProfilesLoading.value = false
+      if (requestID === esimProfilesRequestID) {
+        isEsimProfilesLoading.value = false
+      }
     }
   }
 
   const fetchModemDetail = async (id: string) => {
+    resetEsimData()
     modemId.value = id
-    seInfo.value = null
-    esimProfiles.value = []
 
     await refreshModemResource()
-    if (modem.value?.supportsEsim) {
-      void fetchSEs(id)
-      void fetchEsimProfiles(id)
-    }
   }
+
+  watch([modem, isLoading], ([current, loading]) => {
+    if (loading) return
+    if (!current || current.simKind !== 'euicc') {
+      resetEsimData()
+      return
+    }
+    void fetchSEs(current.id)
+    void fetchEsimProfiles(current.id)
+  })
 
   return {
     modem,
@@ -108,8 +134,9 @@ export const useModemDetail = () => {
     isEsimProfilesLoading,
     error: modemError,
     hasModem: computed(() => modem.value !== null),
-    isPhysicalModem: computed(() => Boolean(modem.value && !modem.value.supportsEsim)),
-    isEsimModem: computed(() => Boolean(modem.value && modem.value.supportsEsim)),
+    isSIMKindUnknown: computed(() => modem.value?.simKind === 'unknown'),
+    isPhysicalModem: computed(() => modem.value?.simKind === 'physical'),
+    isEsimModem: computed(() => modem.value?.simKind === 'euicc'),
     fetchModemDetail,
     fetchSEs,
     fetchEsimProfiles,

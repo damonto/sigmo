@@ -994,13 +994,6 @@ func (c *Connector) setPreference(modemID string, prefs Preferences) {
 	c.preferences[modemID] = normalizePreferences(prefs)
 }
 
-func (c *Connector) deletePreference(modemID string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	delete(c.preferences, modemID)
-}
-
 func (c *Connector) deleteConnectionAndPreference(modemID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

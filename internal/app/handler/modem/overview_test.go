@@ -1,6 +1,7 @@
 package modem
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -138,6 +139,9 @@ func TestCatalogBuildBasicResponseIncludesPrimaryPort(t *testing.T) {
 			if got.PrimaryPort != tt.device.PrimaryPort {
 				t.Fatalf("primary port = %q, want %q", got.PrimaryPort, tt.device.PrimaryPort)
 			}
+			if got.SIMKind != mmodem.SIMKindUnknown {
+				t.Fatalf("SIM kind = %q, want %q", got.SIMKind, mmodem.SIMKindUnknown)
+			}
 		})
 	}
 }
@@ -196,6 +200,7 @@ func TestCatalogBuildResponseUsesCachedSIMWithoutTransport(t *testing.T) {
 			Slot:               1,
 			Active:             true,
 			Identifier:         "8944000000000000000",
+			ATR:                []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
 			OperatorIdentifier: "23433",
 			OperatorName:       "EE",
 		},
@@ -213,6 +218,9 @@ func TestCatalogBuildResponseUsesCachedSIMWithoutTransport(t *testing.T) {
 	}
 	if got.PrimaryPort != device.PrimaryPort {
 		t.Fatalf("primary port = %q, want %q", got.PrimaryPort, device.PrimaryPort)
+	}
+	if got.SIMKind != mmodem.SIMKindEUICC {
+		t.Fatalf("SIM kind = %q, want %q", got.SIMKind, mmodem.SIMKindEUICC)
 	}
 }
 
@@ -349,6 +357,11 @@ func TestModemResponseJSONIncludesOverviewFields(t *testing.T) {
 			resp: ModemResponse{PrimaryPort: "/dev/cdc-wdm0"},
 			want: `"primaryPort":"/dev/cdc-wdm0"`,
 		},
+		{
+			name: "SIM kind",
+			resp: ModemResponse{SIMKind: mmodem.SIMKindUnknown},
+			want: `"simKind":"unknown"`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -361,5 +374,15 @@ func TestModemResponseJSONIncludesOverviewFields(t *testing.T) {
 				t.Fatalf("Marshal() = %s, want field %s", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestModemResponseJSONExcludesLegacyESIMFlag(t *testing.T) {
+	encoded, err := json.Marshal(ModemResponse{SIMKind: mmodem.SIMKindEUICC})
+	if err != nil {
+		t.Fatalf("marshal ModemResponse: %v", err)
+	}
+	if bytes.Contains(encoded, []byte(`"supportsEsim"`)) {
+		t.Fatalf("ModemResponse JSON includes legacy supportsEsim field: %s", encoded)
 	}
 }

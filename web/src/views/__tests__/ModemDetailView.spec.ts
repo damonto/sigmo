@@ -117,8 +117,9 @@ vi.mock('@/composables/useModemDetail', async () => {
       isLoading: ref(false),
       isSELoading: detailHarness.isSELoading,
       isEsimProfilesLoading: ref(false),
-      isPhysicalModem: computed(() => Boolean(detailHarness.modem?.value?.supportsEsim === false)),
-      isEsimModem: computed(() => Boolean(detailHarness.modem?.value?.supportsEsim)),
+      isSIMKindUnknown: computed(() => detailHarness.modem?.value?.simKind === 'unknown'),
+      isPhysicalModem: computed(() => detailHarness.modem?.value?.simKind === 'physical'),
+      isEsimModem: computed(() => detailHarness.modem?.value?.simKind === 'euicc'),
       fetchModemDetail: detailHarness.fetchModemDetail,
       fetchSEs: vi.fn(),
       fetchEsimProfiles: detailHarness.fetchEsimProfiles,
@@ -248,7 +249,7 @@ vi.mock('@/composables/useModemMsisdn', async () => {
   }
 })
 
-const lockedModem = (supportsEsim = false): Modem => ({
+const lockedModem = (simKind: Modem['simKind'] = 'physical'): Modem => ({
   manufacturer: 'Quectel',
   id: 'modem-1',
   primaryPort: '/dev/cdc-wdm0',
@@ -275,11 +276,11 @@ const lockedModem = (supportsEsim = false): Modem => ({
   },
   signalQuality: 0,
   airplaneMode: false,
-  supportsEsim,
+  simKind,
 })
 
 const physicalModem = (): Modem => ({
-  ...lockedModem(false),
+  ...lockedModem(),
   state: 'registered',
   unlockRequired: 'none',
   unlockSupported: false,
@@ -480,7 +481,7 @@ describe('ModemDetailView SIM PIN unlock', () => {
 
   it('keeps eSIM profile actions available while the current profile needs PIN unlock', async () => {
     if (detailHarness.modem) {
-      detailHarness.modem.value = lockedModem(true)
+      detailHarness.modem.value = lockedModem('euicc')
     }
 
     const wrapper = mountView()
@@ -493,7 +494,7 @@ describe('ModemDetailView SIM PIN unlock', () => {
 
   it('disables eSIM install until SE info is loaded', async () => {
     if (detailHarness.modem) {
-      detailHarness.modem.value = lockedModem(true)
+      detailHarness.modem.value = lockedModem('euicc')
     }
     if (detailHarness.isSELoading) {
       detailHarness.isSELoading.value = true
@@ -576,7 +577,7 @@ describe('ModemDetailView SIM PIN unlock', () => {
 
   it('updates the line number from the eSIM profile shortcut', async () => {
     if (detailHarness.modem) {
-      detailHarness.modem.value = lockedModem(true)
+      detailHarness.modem.value = lockedModem('euicc')
     }
 
     const wrapper = mountView()
@@ -596,7 +597,7 @@ describe('ModemDetailView SIM PIN unlock', () => {
   it('loads profile quick action state only while the active profile menu is open', async () => {
     detailHarness.wifiCallingFeature = true
     if (detailHarness.modem) {
-      detailHarness.modem.value = lockedModem(true)
+      detailHarness.modem.value = lockedModem('euicc')
     }
 
     const wrapper = mountView()
@@ -622,7 +623,7 @@ describe('ModemDetailView SIM PIN unlock', () => {
   it('stops profile quick action state loading when the modem changes', async () => {
     detailHarness.wifiCallingFeature = true
     if (detailHarness.modem) {
-      detailHarness.modem.value = lockedModem(true)
+      detailHarness.modem.value = lockedModem('euicc')
     }
 
     const wrapper = mountView()
@@ -645,7 +646,7 @@ describe('ModemDetailView SIM PIN unlock', () => {
   it('keeps the line number dialog open when updating fails', async () => {
     detailHarness.handleMsisdnUpdate.mockResolvedValue(false)
     if (detailHarness.modem) {
-      detailHarness.modem.value = lockedModem(true)
+      detailHarness.modem.value = lockedModem('euicc')
     }
 
     const wrapper = mountView()

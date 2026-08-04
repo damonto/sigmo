@@ -9,6 +9,7 @@ const zh = {
   labels: {
     esim: 'eSIM',
     psim: 'pSIM',
+    simUnknown: '正在识别 SIM',
     roaming: '漫游',
     signal: '信号强度',
     accessTech: '接入制式',

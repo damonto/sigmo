@@ -82,7 +82,7 @@ const modem = (id: string): Modem => ({
   },
   signalQuality: 72,
   airplaneMode: false,
-  supportsEsim: true,
+  simKind: 'euicc',
 })
 
 const mountView = async () => {

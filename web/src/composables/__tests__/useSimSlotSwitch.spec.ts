@@ -47,7 +47,7 @@ const modem = (slots: Modem['slots']): Modem => ({
   },
   signalQuality: 80,
   airplaneMode: false,
-  supportsEsim: false,
+  simKind: 'physical',
 })
 
 describe('useSimSlotSwitch', () => {

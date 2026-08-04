@@ -2,6 +2,7 @@ package modem
 
 import (
 	"github.com/damonto/sigmo/internal/app/modemstatus"
+	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 )
 
@@ -57,5 +58,5 @@ type ModemResponse struct {
 	RegisteredOperator RegisteredOperatorResponse `json:"registeredOperator" jsonschema:"network operator on which the modem is currently registered"`
 	SignalQuality      uint32                     `json:"signalQuality" jsonschema:"signal quality percentage from 0 to 100"`
 	AirplaneMode       bool                       `json:"airplaneMode" jsonschema:"whether radio transmission is disabled for this modem"`
-	SupportsEsim       bool                       `json:"supportsEsim" jsonschema:"whether Sigmo detected usable eSIM hardware on this modem"`
+	SIMKind            mmodem.SIMKind             `json:"simKind" jsonschema:"active SIM classification: unknown while ATR detection is pending, physical for a physical SIM, or euicc for an eUICC"`
 }

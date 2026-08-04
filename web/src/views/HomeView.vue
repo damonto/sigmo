@@ -26,7 +26,7 @@ const modemItems = computed<HomeModemItem[]>(() =>
     registeredOperatorCode: modem.registeredOperator.code,
     registrationState: modem.registrationState,
     accessTechnology: modem.accessTechnology,
-    supportsEsim: modem.supportsEsim,
+    simKind: modem.simKind,
     number: modem.number ?? '',
     signalQuality: modem.signalQuality,
     airplaneMode: modem.airplaneMode,

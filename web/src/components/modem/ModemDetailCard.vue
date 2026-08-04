@@ -71,7 +71,7 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
       </div>
     </section>
 
-    <section v-if="modem.supportsEsim" class="space-y-3">
+    <section v-if="modem.simKind === 'euicc'" class="space-y-3">
       <h2 class="text-base font-semibold text-foreground">eUICC Information</h2>
       <div class="grid gap-3 text-sm">
         <div class="flex items-center justify-between gap-4">
@@ -176,8 +176,11 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
     <section class="space-y-3">
       <h2 class="text-base font-semibold text-foreground">Features</h2>
       <div class="flex flex-wrap gap-2">
-        <Badge v-if="modem.supportsEsim">eSIM Support</Badge>
-        <Badge v-else variant="secondary">Physical SIM Only</Badge>
+        <Badge v-if="modem.simKind === 'euicc'">eSIM Support</Badge>
+        <Badge v-else-if="modem.simKind === 'physical'" variant="secondary">
+          Physical SIM Only
+        </Badge>
+        <Badge v-else variant="secondary">{{ t('labels.simUnknown') }}</Badge>
       </div>
     </section>
   </div>

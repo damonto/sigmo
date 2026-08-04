@@ -1,3 +1,5 @@
+import type { SIMKind } from '@/types/modem'
+
 export type HomeModemItem = {
   id: string
   name: string
@@ -7,7 +9,7 @@ export type HomeModemItem = {
   registeredOperatorCode: string
   registrationState: string
   accessTechnology: string | null
-  supportsEsim: boolean
+  simKind: SIMKind
   number: string
   signalQuality: number
   airplaneMode: boolean

@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
 import RegionFlag from '@/components/RegionFlag.vue'
 import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
+import type { SIMKind } from '@/types/modem'
 
 const props = defineProps<{
   name: string
@@ -16,7 +17,7 @@ const props = defineProps<{
   registeredOperatorCode: string
   registrationState: string
   accessTechnology: string | null
-  supportsEsim: boolean
+  simKind: SIMKind
   number: string
   signalQuality: number
   airplaneMode: boolean
@@ -41,7 +42,11 @@ const showRoamingLabel = computed(
   () => !props.airplaneMode && isRoaming.value && Boolean(props.registeredOperatorCode),
 )
 const roamingLabel = computed(() => props.registeredOperatorName || props.registeredOperatorCode)
-const esimLabel = computed(() => (props.supportsEsim ? t('labels.esim') : t('labels.psim')))
+const esimLabel = computed(() => {
+  if (props.simKind === 'euicc') return t('labels.esim')
+  if (props.simKind === 'physical') return t('labels.psim')
+  return t('labels.simUnknown')
+})
 const techLabel = computed(() =>
   props.airplaneMode ? t('modemDetail.settings.networkAirplaneModeStatus') : tech.value,
 )

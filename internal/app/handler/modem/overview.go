@@ -95,13 +95,13 @@ func (c *catalog) buildBasicResponse(device *mmodem.Modem) *ModemResponse {
 		Slots:            slotResponses(snapshot.Slots),
 		AirplaneMode:     snapshot.AirplaneMode(),
 		SignalQuality:    uint32(snapshot.Status.SignalQuality),
+		SIMKind:          snapshot.SIMKind(),
 	}
 	if snapshot.StatusKnown && !snapshot.AirplaneMode() {
 		resp.AccessTechnology = accessTechnologyString(snapshot.Status.Technology)
 		resp.RegistrationState = registrationStateName(snapshot.Status.Registration)
 		resp.RegisteredOperator = RegisteredOperatorResponse{Name: snapshot.Status.OperatorName, Code: snapshot.Status.OperatorID}
 	}
-	resp.SupportsEsim = mmodem.SupportsEUICC(device)
 	return resp
 }
 
@@ -116,7 +116,7 @@ func (c *catalog) Get(ctx context.Context, modem *mmodem.Modem) (*ModemResponse,
 func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*ModemResponse, error) {
 	snapshot := device.Snapshot()
 	if snapshot.Locked() {
-		return c.buildLockedResponse(ctx, device)
+		return c.buildLockedResponse(device, snapshot)
 	}
 
 	currentSettings := c.store.Snapshot()
@@ -156,7 +156,7 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		},
 		SignalQuality: uint32(snapshot.Status.SignalQuality),
 		AirplaneMode:  snapshot.AirplaneMode(),
-		SupportsEsim:  mmodem.SupportsEUICC(device),
+		SIMKind:       snapshot.SIMKind(),
 	}
 	if snapshot.AirplaneMode() || !snapshot.StatusKnown {
 		resp.AccessTechnology = ""
@@ -188,15 +188,14 @@ func (c *catalog) applyInternetStatus(ctx context.Context, device *mmodem.Modem,
 	resp.InternetConnected = connection != nil && connection.Status == internet.StatusConnected
 }
 
-func (c *catalog) buildLockedResponse(ctx context.Context, device *mmodem.Modem) (*ModemResponse, error) {
-	snapshot := device.Snapshot()
+func (c *catalog) buildLockedResponse(device *mmodem.Modem, snapshot mmodem.ModemSnapshot) (*ModemResponse, error) {
 	currentSettings := c.store.Snapshot()
 	alias := currentSettings.FindModem(device.EquipmentIdentifier).Alias
 	name := device.Model
 	if alias != "" {
 		name = alias
 	}
-	return &ModemResponse{
+	resp := &ModemResponse{
 		Manufacturer:     device.Manufacturer,
 		ID:               device.EquipmentIdentifier,
 		PrimaryPort:      device.PrimaryPort,
@@ -208,9 +207,10 @@ func (c *catalog) buildLockedResponse(ctx context.Context, device *mmodem.Modem)
 		UnlockRequired:   unlockRequired(snapshot),
 		UnlockSupported:  unlockSupported(device),
 		AirplaneMode:     snapshot.AirplaneMode(),
-		SupportsEsim:     mmodem.SupportsEUICC(device),
 		Slots:            []SlotResponse{},
-	}, nil
+		SIMKind:          snapshot.SIMKind(),
+	}
+	return resp, nil
 }
 
 func modemStateValue(snapshot mmodem.ModemSnapshot) string {

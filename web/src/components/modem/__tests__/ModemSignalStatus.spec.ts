@@ -74,7 +74,7 @@ const modem = (registrationState = 'Roaming'): Modem => ({
   },
   signalQuality: 67,
   airplaneMode: false,
-  supportsEsim: true,
+  simKind: 'euicc',
 })
 
 const headerStubs = {
