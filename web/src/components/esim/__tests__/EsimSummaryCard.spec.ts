@@ -36,6 +36,7 @@ const modem: Modem = {
   unlockRequired: '',
   unlockSupported: false,
   sim: {
+    slot: 1,
     active: true,
     operatorName: '',
     operatorIdentifier: '',

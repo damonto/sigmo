@@ -56,6 +56,7 @@ const modem = (id: string, name: string): Modem => ({
   unlockRequired: 'none',
   unlockSupported: false,
   sim: {
+    slot: 1,
     active: true,
     operatorName: 'Carrier',
     operatorIdentifier: '00101',

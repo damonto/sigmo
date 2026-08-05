@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -35,7 +36,7 @@ const (
 	errorCodeListModemsFailed             = "list_modems_failed"
 	errorCodeGetModemFailed               = "get_modem_failed"
 	errorCodeSwitchSimSlotFailed          = "switch_sim_slot_failed"
-	errorCodeSimIdentifierRequired        = "sim_identifier_required"
+	errorCodeSimSlotRequired              = "sim_slot_required"
 	errorCodeSimSlotsUnavailable          = "sim_slots_unavailable"
 	errorCodeSimSlotNotFound              = "sim_slot_not_found"
 	errorCodeSimSlotAlreadyActive         = "sim_slot_already_active"
@@ -127,10 +128,14 @@ func (h *Handler) SwitchSimSlot(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeSwitchSimSlotFailed)
 	}
-	slotIndex, err := h.simSlot.targetIndex(requestCtx, modem, c.Param("identifier"))
+	slotValue, parseErr := strconv.ParseUint(c.Param("slot"), 10, 32)
+	if parseErr != nil || slotValue == 0 {
+		return httpapi.BadRequest(c, errorCodeSimSlotRequired, errSimSlotRequired)
+	}
+	slotIndex, err := h.simSlot.targetIndex(modem, uint32(slotValue))
 	if err != nil {
-		if errors.Is(err, errSimIdentifierRequired) {
-			return httpapi.BadRequest(c, errorCodeSimIdentifierRequired, err)
+		if errors.Is(err, errSimSlotRequired) {
+			return httpapi.BadRequest(c, errorCodeSimSlotRequired, err)
 		}
 		if errors.Is(err, errSimSlotsUnavailable) {
 			return httpapi.BadRequest(c, errorCodeSimSlotsUnavailable, err)

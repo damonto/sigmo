@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -52,11 +53,55 @@ func TestLockedChannelDisconnectOnce(t *testing.T) {
 	}
 }
 
+func TestLPACloseReleasesSIMSlotOnce(t *testing.T) {
+	m := new(mmodem.Modem)
+	releaseSIMSlot, err := m.ReserveSIMSlot(t.Context())
+	if err != nil {
+		t.Fatalf("ReserveSIMSlot() error = %v", err)
+	}
+	client := &LPA{releaseSIMSlot: releaseSIMSlot}
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("second Close() error = %v", err)
+	}
+
+	release, err := m.ReserveSIMSlot(t.Context())
+	if err != nil {
+		t.Fatalf("ReserveSIMSlot() after Close error = %v", err)
+	}
+	release()
+}
+
+func TestLPADiscardSkipsInvalidatedLogicalChannel(t *testing.T) {
+	channel := &fakeSmartCardChannel{logicalChannel: 3}
+	client, err := NewWithChannel(t.Context(), ChannelConfig{Channel: channel})
+	if err != nil {
+		t.Fatalf("NewWithChannel() error = %v", err)
+	}
+	if err := client.discard(); err != nil {
+		t.Fatalf("discard() error = %v", err)
+	}
+	if channel.closeLogicalChannels != 0 {
+		t.Fatalf("logical channel close calls = %d, want 0", channel.closeLogicalChannels)
+	}
+	if channel.disconnects != 1 {
+		t.Fatalf("disconnect calls = %d, want 1", channel.disconnects)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close() after discard error = %v", err)
+	}
+	if channel.disconnects != 1 {
+		t.Fatalf("disconnect calls after Close = %d, want 1", channel.disconnects)
+	}
+}
+
 func TestContextSmartCardChannelStopsNewOperationsAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	underlying := &fakeSmartCardChannel{}
-	channel := &contextSmartCardChannel{ctx: ctx, SmartCardChannel: underlying}
+	channel := &contextSmartCardChannel{operation: newOperationContext(ctx), SmartCardChannel: underlying}
 
 	if err := channel.Connect(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Connect() error = %v, want %v", err, context.Canceled)
@@ -78,6 +123,63 @@ func TestContextSmartCardChannelStopsNewOperationsAfterCancellation(t *testing.T
 	}
 }
 
+func TestNoSupportedAIDCacheability(t *testing.T) {
+	tests := []struct {
+		name      string
+		openErr   error
+		cacheable bool
+	}{
+		{name: "transport error is retryable", openErr: errors.New("transport unavailable")},
+		{name: "protocol rejection is cacheable", openErr: errAIDNotSupported, cacheable: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewWithChannel(t.Context(), ChannelConfig{
+				Channel: &fakeSmartCardChannel{openLogicalChannelErr: tt.openErr},
+				Logger:  slog.Default(),
+			})
+			if !errors.Is(err, ErrNoSupportedAID) {
+				t.Fatalf("NewWithChannel() error = %v, want %v", err, ErrNoSupportedAID)
+			}
+			if got := errors.Is(err, errCacheableNoSupportedAID); got != tt.cacheable {
+				t.Fatalf("cacheable error = %v, want %v", got, tt.cacheable)
+			}
+		})
+	}
+}
+
+func TestContextRoundTripperCancelsInFlightRequest(t *testing.T) {
+	operation := newOperationContext(context.Background())
+	transport := &contextRoundTripper{
+		operation: operation,
+		next: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		}),
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	operation.use(ctx)
+	req, err := http.NewRequest(http.MethodGet, "http://example.invalid", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := transport.RoundTrip(req)
+		done <- err
+	}()
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("RoundTrip() error = %v, want %v", err, context.Canceled)
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestNewWithChannelStopsWaitingForLockAfterCancellation(t *testing.T) {
 	key := "test:new-with-channel-cancellation"
 	gmu.Lock(key)
@@ -96,88 +198,6 @@ func TestNewWithChannelStopsWaitingForLockAfterCancellation(t *testing.T) {
 	}
 	if channel.disconnects != 1 {
 		t.Fatalf("disconnects = %d, want 1 after canceled acquisition", channel.disconnects)
-	}
-}
-
-func TestSIMSlotChannelDisconnectOnce(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		channel *fakeSmartCardChannel
-		wantErr error
-	}{
-		{
-			name:    "disconnect succeeds once",
-			channel: &fakeSmartCardChannel{},
-		},
-		{
-			name:    "disconnect error is retained",
-			channel: &fakeSmartCardChannel{disconnectErr: errFakeDisconnect},
-			wantErr: errFakeDisconnect,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			releases := 0
-			channel := &simSlotChannel{
-				SmartCardChannel: tt.channel,
-				release:          func() { releases++ },
-			}
-
-			for range 2 {
-				if err := channel.Disconnect(); !errors.Is(err, tt.wantErr) {
-					t.Fatalf("Disconnect() error = %v, want %v", err, tt.wantErr)
-				}
-			}
-			if tt.channel.disconnects != 1 {
-				t.Fatalf("disconnects = %d, want 1", tt.channel.disconnects)
-			}
-			if releases != 1 {
-				t.Fatalf("slot releases = %d, want 1", releases)
-			}
-		})
-	}
-}
-
-func TestSIMSlotChannelCloseLogicalChannelReleasesOnError(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name          string
-		disconnectErr error
-	}{
-		{name: "close error"},
-		{name: "close and disconnect errors", disconnectErr: errFakeDisconnect},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			releases := 0
-			underlying := &fakeSmartCardChannel{
-				disconnectErr:          tt.disconnectErr,
-				closeLogicalChannelErr: errFakeCloseLogicalChannel,
-			}
-			channel := &simSlotChannel{
-				SmartCardChannel: underlying,
-				release:          func() { releases++ },
-			}
-
-			err := channel.CloseLogicalChannel(1)
-			if !errors.Is(err, errFakeCloseLogicalChannel) {
-				t.Fatalf("CloseLogicalChannel() error = %v, want %v", err, errFakeCloseLogicalChannel)
-			}
-			if tt.disconnectErr != nil && !errors.Is(err, tt.disconnectErr) {
-				t.Fatalf("CloseLogicalChannel() error = %v, want it to contain %v", err, tt.disconnectErr)
-			}
-			if underlying.disconnects != 1 {
-				t.Fatalf("disconnects = %d, want 1", underlying.disconnects)
-			}
-			if releases != 1 {
-				t.Fatalf("slot releases = %d, want 1", releases)
-			}
-		})
 	}
 }
 
@@ -293,6 +313,7 @@ type fakeSmartCardChannel struct {
 	openLogicalChannelErr  error
 	transmitResponse       []byte
 	logicalChannel         byte
+	closeLogicalChannels   int
 	disconnects            int
 }
 
@@ -323,5 +344,6 @@ func (f *fakeSmartCardChannel) Transmit([]byte) ([]byte, error) {
 }
 
 func (f *fakeSmartCardChannel) CloseLogicalChannel(byte) error {
+	f.closeLogicalChannels++
 	return f.closeLogicalChannelErr
 }

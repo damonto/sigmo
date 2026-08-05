@@ -10,7 +10,14 @@ import (
 )
 
 func TestConsumeSIMRefreshStreamTracksResetLifecycle(t *testing.T) {
-	modem := &Modem{EquipmentIdentifier: "imei-1", generation: 1}
+	reload := make(chan error, 1)
+	modem := &Modem{
+		EquipmentIdentifier: "imei-1",
+		generation:          1,
+		onFailure: func(err error) {
+			reload <- err
+		},
+	}
 	stream := make(chan devicewwan.SIMRefreshEvent, 2)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -29,6 +36,14 @@ func TestConsumeSIMRefreshStreamTracksResetLifecycle(t *testing.T) {
 	endVersion, inProgress, _ := modem.currentSIMRefresh()
 	if endVersion <= startVersion || inProgress {
 		t.Fatalf("refresh after END = version %d, in progress %t; start version %d", endVersion, inProgress, startVersion)
+	}
+	select {
+	case err := <-reload:
+		if !errors.Is(err, errSIMRefreshReload) {
+			t.Fatalf("reload error = %v, want %v", err, errSIMRefreshReload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reset refresh did not request a modem reload")
 	}
 
 	cancel()

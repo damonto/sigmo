@@ -9,6 +9,7 @@ import (
 
 	"github.com/damonto/euicc-go/driver"
 	"github.com/damonto/sigmo/internal/pkg/modem"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 const (
@@ -18,8 +19,9 @@ const (
 )
 
 var (
-	ErrSERequired = errors.New("eUICC SE is required")
-	ErrSENotFound = errors.New("eUICC SE not found")
+	ErrSERequired     = errors.New("eUICC SE is required")
+	ErrSENotFound     = errors.New("eUICC SE not found")
+	errSIMSlotChanged = errors.New("SIM slot changed during LPA operation")
 )
 
 type SE struct {
@@ -44,29 +46,77 @@ func discoverSEs(ctx context.Context, m *modem.Modem, openChannel seChannelOpene
 	if m == nil {
 		return nil, errors.New("modem is required")
 	}
+	releaseSIMSlot, err := m.ReserveSIMSlot(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reserve SIM slot for eUICC SE detection: %w", err)
+	}
+	defer releaseSIMSlot()
+
+	slot, err := modem.ActiveSIMSlot(m)
+	if err != nil {
+		return nil, err
+	}
+	return discoverSEsAtSlot(ctx, m, slot, openChannel)
+}
+
+func discoverSEsForSlot(ctx context.Context, m *modem.Modem, slot uint8) ([]SE, error) {
+	if m == nil {
+		return nil, errors.New("modem is required")
+	}
+	releaseSIMSlot, err := m.ReserveSIMSlot(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reserve SIM slot for eUICC SE detection: %w", err)
+	}
+	defer releaseSIMSlot()
+
+	activeSlot, err := modem.ActiveSIMSlot(m)
+	if err != nil {
+		return nil, err
+	}
+	if activeSlot != slot {
+		return nil, errSIMSlotChanged
+	}
+	return discoverSEsAtSlot(ctx, m, slot, func(ctx context.Context, m *modem.Modem) (driver.SmartCardChannel, error) {
+		return createChannelForSlot(ctx, m, slot)
+	})
+}
+
+func discoverSEsAtSlot(ctx context.Context, m *modem.Modem, slot uint8, openChannel seChannelOpener) ([]SE, error) {
+	if m == nil {
+		return nil, errors.New("modem is required")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	sim := m.Snapshot().SIM
-	if sim == nil {
+	snapshot := m.Snapshot()
+	sim := snapshot.SIM
+	sameSlot := sim != nil && (sim.Slot == uint32(slot) || (sim.Slot == 0 && (snapshot.PrimarySIMSlot == uint32(slot) || (snapshot.PrimarySIMSlot == 0 && slot == 1))))
+	if sameSlot && len(sim.ATR) > 0 && !isESTKmeATR(sim.ATR) {
 		return []SE{DefaultSE}, nil
 	}
-	if !isESTKmeATR(sim.ATR) {
+	if (!sameSlot || len(sim.ATR) == 0) && m.PrimaryPortType() != wwanmodem.PortQMI && m.PrimaryPortType() != wwanmodem.PortMBIM {
 		return []SE{DefaultSE}, nil
 	}
 
-	if err := gmu.LockContext(ctx, m.EquipmentIdentifier); err != nil {
+	if err := gmu.LockContext(ctx, lpaLockKey(m, slot)); err != nil {
 		return nil, err
 	}
-	defer gmu.Unlock(m.EquipmentIdentifier)
+	defer gmu.Unlock(lpaLockKey(m, slot))
 
 	ch, err := openChannel(ctx, m)
 	if err != nil {
-		m.Logger().Debug("create channel for eUICC SE detection", "error", err)
-		return []SE{DefaultSE}, nil
+		return nil, fmt.Errorf("create channel for eUICC SE detection: %w", err)
 	}
+	defer func() {
+		if err := ch.Disconnect(); err != nil {
+			m.Logger().Debug("disconnect eUICC SE detection channel", "error", err)
+		}
+	}()
 
-	ses, ok := estkmeSEs(ch, m.Logger())
+	ses, ok, err := estkmeSEs(ch, m.Logger())
+	if err != nil {
+		return nil, fmt.Errorf("discover ESTKme secure elements: %w", err)
+	}
 	if ok {
 		return ses, nil
 	}

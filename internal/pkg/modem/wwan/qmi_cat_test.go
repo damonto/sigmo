@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"slices"
 	"sync"
 	"testing"
@@ -21,100 +20,42 @@ var testQMISetupMenu = qcom.CATCommand{
 }
 
 func TestQMICATReaderCommands(t *testing.T) {
-	oldReplayWait := qmiCATReplayWait
-	oldPowerCycleDelay := qmiSIMPowerCycleDelay
-	qmiCATReplayWait = 20 * time.Millisecond
-	qmiSIMPowerCycleDelay = time.Nanosecond
-	t.Cleanup(func() {
-		qmiCATReplayWait = oldReplayWait
-		qmiSIMPowerCycleDelay = oldPowerCycleDelay
-	})
-
 	cacheErr := qcom.QMIErrorNoEntry
 	tests := []struct {
-		name                 string
-		cached               qcom.CATCommand
-		cacheErr             error
-		configurationChanged bool
-		live                 []qcom.CATCommand
-		wantRef              uint32
-		wantSession          bool
-		wantPower            bool
-		wantNoSession        bool
-		afterPower           *qcom.CATCommand
+		name     string
+		cached   qcom.CATCommand
+		cacheErr error
+		live     []qcom.CATCommand
+		wantRef  uint32
 	}{
 		{
-			name:        "restores cached setup menu without power cycle",
-			cached:      testQMISetupMenu,
-			wantRef:     qmiCachedSetupMenuRef,
-			wantSession: true,
+			name:    "restores cached setup menu",
+			cached:  testQMISetupMenu,
+			wantRef: qmiCachedSetupMenuRef,
 		},
 		{
-			name:          "coalesces cached setup menu and force claim replay",
-			cached:        testQMISetupMenu,
-			live:          []qcom.CATCommand{testQMISetupMenu},
-			wantRef:       qmiCachedSetupMenuRef,
-			wantSession:   true,
-			wantNoSession: true,
+			name:    "coalesces cached setup menu and force claim replay",
+			cached:  testQMISetupMenu,
+			live:    []qcom.CATCommand{testQMISetupMenu},
+			wantRef: qmiCachedSetupMenuRef,
 		},
 		{
-			name:        "uses force claim replay without power cycle",
-			cacheErr:    cacheErr,
-			live:        []qcom.CATCommand{testQMISetupMenu},
-			wantRef:     testQMISetupMenu.Ref,
-			wantSession: true,
-		},
-		{
-			name:      "power cycles after cache and replay miss",
-			cacheErr:  cacheErr,
-			wantPower: true,
-		},
-		{
-			name:        "reclaims command watch after power cycle",
-			cacheErr:    cacheErr,
-			wantRef:     8,
-			wantSession: true,
-			wantPower:   true,
-			afterPower: &qcom.CATCommand{
-				Ref:  8,
-				Data: slices.Clone(testQMISetupMenu.Data),
-			},
-		},
-		{
-			name:                 "power cycles after terminal configuration changes",
-			cached:               testQMISetupMenu,
-			configurationChanged: true,
-			live:                 []qcom.CATCommand{testQMISetupMenu},
-			wantPower:            true,
-			wantNoSession:        true,
+			name:     "uses live command after cache miss",
+			cacheErr: cacheErr,
+			live:     []qcom.CATCommand{testQMISetupMenu},
+			wantRef:  testQMISetupMenu.Ref,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			qmiSIMPowerCycleDelay = time.Nanosecond
-			if tt.wantNoSession {
-				qmiSIMPowerCycleDelay = 20 * time.Millisecond
-			}
-			commandBatches := [][]qcom.CATCommand{tt.live}
-			if tt.wantPower {
-				var afterPower []qcom.CATCommand
-				if tt.afterPower != nil {
-					afterPower = []qcom.CATCommand{*tt.afterPower}
-				}
-				commandBatches = append(commandBatches, afterPower)
-			}
 			cat := &fakeQMICATCommandSource{
 				cached:         tt.cached,
 				cacheErr:       tt.cacheErr,
-				commandBatches: commandBatches,
+				commandBatches: [][]qcom.CATCommand{tt.live},
 			}
-			power := &fakeQMICATPower{}
 			reader := newQMICATReader(qmiCATReaderConfig{
-				CAT:                  cat,
-				Power:                power,
-				Slot:                 2,
-				ConfigurationChanged: tt.configurationChanged,
+				CAT: cat,
 			})
 			reader.responder = &fakeQMICATResponder{}
 			ctx, cancel := context.WithCancel(context.Background())
@@ -129,121 +70,35 @@ func TestQMICATReaderCommands(t *testing.T) {
 			default:
 				t.Fatal("CATReady() is not closed after command claim")
 			}
-			if tt.wantSession {
-				select {
-				case session := <-out:
-					if session.Err != nil {
-						t.Fatalf("session error = %v", session.Err)
-					}
-					if session.Ref != tt.wantRef {
-						t.Fatalf("session ref = %d, want %d", session.Ref, tt.wantRef)
-					}
-					if _, ok := session.Command.(stkpkg.SetupMenuCommand); !ok {
-						t.Fatalf("session command = %T, want SetupMenuCommand", session.Command)
-					}
-				case <-time.After(time.Second):
-					t.Fatal("timed out waiting for setup menu")
+			select {
+			case session := <-out:
+				if session.Err != nil {
+					t.Fatalf("session error = %v", session.Err)
 				}
-			}
-
-			if tt.wantPower {
-				waitForQMICATPowerCalls(t, power, 2)
-			} else {
-				time.Sleep(2 * qmiCATReplayWait)
-			}
-			if tt.wantNoSession {
-				select {
-				case session := <-out:
-					t.Fatalf("received stale session after power cycle: %+v", session)
-				case <-time.After(20 * time.Millisecond):
+				if session.Ref != tt.wantRef {
+					t.Fatalf("session ref = %d, want %d", session.Ref, tt.wantRef)
 				}
-			}
-			wantCalls := []string{"cache", "claim"}
-			if tt.wantPower {
-				wantCalls = append(wantCalls, "claim")
-			}
-			if got := cat.callsCopy(); !slices.Equal(got, wantCalls) {
-				t.Fatalf("CAT calls = %v, want %v", got, wantCalls)
-			}
-			powerCalls, powerOn := power.snapshot()
-			if tt.wantPower {
-				if !slices.Equal(powerCalls, []string{"power-off:2", "power-on:2"}) {
-					t.Fatalf("power calls = %v, want [power-off:2 power-on:2]", powerCalls)
+				if _, ok := session.Command.(stkpkg.SetupMenuCommand); !ok {
+					t.Fatalf("session command = %T, want SetupMenuCommand", session.Command)
 				}
-				if !powerOn.IgnoreHotSwapSwitch {
-					t.Fatal("PowerOnSIM() IgnoreHotSwapSwitch = false, want true")
-				}
-			} else if len(powerCalls) != 0 {
-				t.Fatalf("power calls = %v, want none", powerCalls)
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for setup menu")
+			}
+			if got := cat.callsCopy(); !slices.Equal(got, []string{"cache", "claim"}) {
+				t.Fatalf("CAT calls = %v, want [cache claim]", got)
 			}
 		})
 	}
 }
 
 func TestQMICATReaderCommandErrors(t *testing.T) {
-	oldReplayWait := qmiCATReplayWait
-	qmiCATReplayWait = time.Nanosecond
-	t.Cleanup(func() { qmiCATReplayWait = oldReplayWait })
-
 	claimErr := errors.New("claim rejected")
-	powerErr := errors.New("power off rejected")
-	tests := []struct {
-		name      string
-		cat       *fakeQMICATCommandSource
-		power     *fakeQMICATPower
-		wantStart bool
-		wantErr   error
-	}{
-		{
-			name: "returns force claim error",
-			cat: &fakeQMICATCommandSource{
-				cacheErr: qcom.QMIErrorNoEntry,
-				claimErr: claimErr,
-			},
-			power:   &fakeQMICATPower{},
-			wantErr: claimErr,
-		},
-		{
-			name: "reports recovery power error",
-			cat: &fakeQMICATCommandSource{
-				cacheErr: qcom.QMIErrorNoEntry,
-			},
-			power:     &fakeQMICATPower{powerOffErr: powerErr},
-			wantStart: true,
-			wantErr:   powerErr,
-		},
+	reader := &qmiCATReader{
+		cat:       &fakeQMICATCommandSource{cacheErr: qcom.QMIErrorNoEntry, claimErr: claimErr},
+		responder: &fakeQMICATResponder{},
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			reader := &qmiCATReader{
-				cat:       tt.cat,
-				power:     tt.power,
-				responder: &fakeQMICATResponder{},
-				slot:      1,
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			out, err := reader.Commands(ctx, stkpkg.NewProfile(stkpkg.CapabilitySetupMenu))
-			if !tt.wantStart {
-				if !errors.Is(err, tt.wantErr) {
-					t.Fatalf("Commands() error = %v, want %v", err, tt.wantErr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Commands() error = %v", err)
-			}
-			select {
-			case session := <-out:
-				if !errors.Is(session.Err, tt.wantErr) {
-					t.Fatalf("session error = %v, want %v", session.Err, tt.wantErr)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("timed out waiting for recovery error")
-			}
-		})
+	if _, err := reader.Commands(t.Context(), stkpkg.NewProfile(stkpkg.CapabilitySetupMenu)); !errors.Is(err, claimErr) {
+		t.Fatalf("Commands() error = %v, want %v", err, claimErr)
 	}
 }
 
@@ -409,35 +264,6 @@ func (c *fakeQMICATCommandSource) callsCopy() []string {
 	return slices.Clone(c.calls)
 }
 
-type fakeQMICATPower struct {
-	mu          sync.Mutex
-	calls       []string
-	powerOn     qcom.PowerOnSIMRequest
-	powerOffErr error
-	powerOnErr  error
-}
-
-func (p *fakeQMICATPower) PowerOffSIM(_ context.Context, slot uint8) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.calls = append(p.calls, fmt.Sprintf("power-off:%d", slot))
-	return p.powerOffErr
-}
-
-func (p *fakeQMICATPower) PowerOnSIM(_ context.Context, req qcom.PowerOnSIMRequest) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.calls = append(p.calls, fmt.Sprintf("power-on:%d", req.Slot))
-	p.powerOn = req
-	return p.powerOnErr
-}
-
-func (p *fakeQMICATPower) snapshot() ([]string, qcom.PowerOnSIMRequest) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return slices.Clone(p.calls), p.powerOn
-}
-
 type fakeQMICATResponder struct {
 	mu    sync.Mutex
 	calls int
@@ -454,18 +280,4 @@ func (r *fakeQMICATResponder) callCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.calls
-}
-
-func waitForQMICATPowerCalls(t *testing.T, power *fakeQMICATPower, want int) {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		calls, _ := power.snapshot()
-		if len(calls) >= want {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	calls, _ := power.snapshot()
-	t.Fatalf("power calls = %v, want at least %d", calls, want)
 }

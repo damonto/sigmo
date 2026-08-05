@@ -17,17 +17,17 @@ import (
 type profile struct {
 	store     *settings.Store
 	reminders *reminder.Scheduler
+	clients   *lpa.Pool
 }
 
 var errInvalidNickname = errors.New("nickname must be valid utf-8 and 64 bytes or fewer")
 
-func newProfile(store *settings.Store, reminders *reminder.Scheduler) *profile {
-	return &profile{store: store, reminders: reminders}
+func newProfile(store *settings.Store, reminders *reminder.Scheduler, clients *lpa.Pool) *profile {
+	return &profile{store: store, reminders: reminders, clients: clients}
 }
 
 func (p *profile) List(ctx context.Context, modem *mmodem.Modem) (*ProfilesResponse, error) {
-	current := p.store.Snapshot()
-	ses, err := lpa.DiscoverSEs(ctx, modem)
+	ses, err := p.clients.SecureElements(ctx, modem)
 	if err != nil {
 		return nil, fmt.Errorf("discover eUICC SEs: %w", err)
 	}
@@ -39,7 +39,7 @@ func (p *profile) List(ctx context.Context, modem *mmodem.Modem) (*ProfilesRespo
 			AID:      hex.EncodeToString(se.AID),
 			Profiles: []ProfileResponse{},
 		}
-		client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
+		client, err := p.clients.Acquire(ctx, modem, se.ID)
 		if err != nil {
 			modem.Logger().Warn("create LPA client for eSIM profiles", "seId", se.ID, "error", err)
 			return nil, fmt.Errorf("create LPA client for %s: %w", se.ID, err)
@@ -92,12 +92,7 @@ func (p *profile) UpdateNickname(ctx context.Context, modem *mmodem.Modem, seID 
 	if err := validateNickname(nickname); err != nil {
 		return err
 	}
-	current := p.store.Snapshot()
-	se, err := lpa.ResolveSE(ctx, modem, seID)
-	if err != nil {
-		return fmt.Errorf("resolve eUICC SE: %w", err)
-	}
-	client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
+	client, err := p.clients.Acquire(ctx, modem, seID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}

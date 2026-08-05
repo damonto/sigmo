@@ -164,7 +164,7 @@ func TestOpenDeviceConcurrentQMISessionReuse(t *testing.T) {
 	}
 }
 
-func TestOpenDeviceKeepsMBIMOperationScoped(t *testing.T) {
+func TestOpenDeviceReusesMBIMSessionForModemGeneration(t *testing.T) {
 	modem := &Modem{
 		PrimaryPort:    "/dev/cdc-wdm0",
 		PrimarySimSlot: 1,
@@ -180,11 +180,28 @@ func TestOpenDeviceKeepsMBIMOperationScoped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenDevice(second) error = %v", err)
 	}
-	if _, ok := first.(*wwan.Session); ok {
-		t.Fatal("OpenDevice() retained an MBIM session")
+	firstSession, ok := first.(*wwan.Session)
+	if !ok {
+		t.Fatalf("OpenDevice(first) type = %T, want *wwan.Session", first)
 	}
-	if first == second {
-		t.Fatal("OpenDevice() reused an operation-scoped MBIM device")
+	secondSession, ok := second.(*wwan.Session)
+	if !ok {
+		t.Fatalf("OpenDevice(second) type = %T, want *wwan.Session", second)
+	}
+	if firstSession != secondSession {
+		t.Fatal("OpenDevice() returned different MBIM sessions for the same modem generation and SIM slot")
+	}
+	modem.PrimarySimSlot = 2
+	third, err := OpenDevice(modem)
+	if err != nil {
+		t.Fatalf("OpenDevice(slot 2) error = %v", err)
+	}
+	thirdSession, ok := third.(*wwan.Session)
+	if !ok {
+		t.Fatalf("OpenDevice(slot 2) type = %T, want *wwan.Session", third)
+	}
+	if thirdSession == firstSession {
+		t.Fatal("OpenDevice() reused one MBIM session across different SIM slots")
 	}
 	if err := modem.Close(); err != nil {
 		t.Fatalf("Modem.Close() error = %v", err)
@@ -241,7 +258,6 @@ func TestMBIMDeviceUnsupportedOperations(t *testing.T) {
 		name string
 		run  func(context.Context) error
 	}{
-		{name: "power cycle", run: device.PowerCycleSIM},
 		{name: "activate provisioning", run: device.ActivateProvisioningIfSIMMissing},
 		{name: "update MSISDN", run: func(ctx context.Context) error {
 			return device.UpdateMSISDN(ctx, "+15551234567")

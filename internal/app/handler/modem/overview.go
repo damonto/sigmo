@@ -286,6 +286,7 @@ func slotResponse(sim *mmodem.SIM) SlotResponse {
 		operatorName = sim.OperatorName
 	}
 	return SlotResponse{
+		Slot:               sim.Slot,
 		Active:             sim.Active,
 		OperatorName:       operatorName,
 		OperatorIdentifier: sim.OperatorIdentifier,

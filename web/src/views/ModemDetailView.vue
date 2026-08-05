@@ -301,7 +301,7 @@ const {
   onSuccess: showSuccess,
 })
 
-const { currentSimIdentifier, simSlots, handleSimSwitch } = useSimSlotSwitch({
+const { currentSimSlot, simSlots, handleSimSwitch } = useSimSlotSwitch({
   modemId,
   modem,
   refreshModem,
@@ -461,7 +461,7 @@ void fetchCapabilities()
   <!-- SIM Slot Switcher -->
   <SimSlotSwitcher
     v-if="modem && !needsPinUnlock"
-    v-model="currentSimIdentifier"
+    v-model="currentSimSlot"
     :slots="simSlots"
     :signal-quality="modem.signalQuality"
     :registration-state="modem.registrationState"

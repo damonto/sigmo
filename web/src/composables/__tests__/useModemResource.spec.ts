@@ -28,6 +28,7 @@ const modem = (id: string, regionCode = 'US', simKind: Modem['simKind'] = 'physi
   unlockRequired: 'none',
   unlockSupported: false,
   sim: {
+    slot: 1,
     active: true,
     operatorName: 'Carrier',
     operatorIdentifier: '310260',

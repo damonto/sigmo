@@ -21,7 +21,6 @@ type DeviceEndpoint struct {
 }
 
 type deviceControl interface {
-	PowerCycleSIM(ctx context.Context) error
 	ActivateProvisioningIfSIMMissing(ctx context.Context) error
 	SIMState(ctx context.Context, target wwan.Target) (wwan.SIMState, error)
 	MSISDN(ctx context.Context) (string, error)
@@ -58,7 +57,7 @@ func (s *deviceSessionStore) open(m *Modem, cfg wwan.Config) (Device, error) {
 	if s.closed {
 		return nil, wwanmodem.ErrClosed
 	}
-	if cfg.PortType != wwan.PortTypeQMI {
+	if cfg.PortType != wwan.PortTypeQMI && cfg.PortType != wwan.PortTypeMBIM {
 		return wwan.Open(cfg)
 	}
 	if session := s.sessions[cfg]; session != nil {
@@ -76,13 +75,26 @@ func (s *deviceSessionStore) open(m *Modem, cfg wwan.Config) (Device, error) {
 }
 
 func openDeviceSession(m *Modem, cfg wwan.Config) (*wwan.Session, error) {
-	if m == nil || m.core == nil || m.core.Protocol() != wwanmodem.ProtocolQMI {
+	if m == nil || m.core == nil {
 		return wwan.OpenSession(cfg)
 	}
 	if strings.TrimSpace(m.core.Port().Path) != strings.TrimSpace(cfg.Device) {
 		return wwan.OpenSession(cfg)
 	}
-	return wwan.OpenQMISession(cfg, m.core)
+	switch cfg.PortType {
+	case wwan.PortTypeQMI:
+		if m.core.Protocol() != wwanmodem.ProtocolQMI {
+			return wwan.OpenSession(cfg)
+		}
+		return wwan.OpenQMISession(cfg, m.core)
+	case wwan.PortTypeMBIM:
+		if m.core.Protocol() != wwanmodem.ProtocolMBIM {
+			return wwan.OpenSession(cfg)
+		}
+		return wwan.OpenMBIMSession(cfg, m.core)
+	default:
+		return wwan.OpenSession(cfg)
+	}
 }
 
 func (s *deviceSessionStore) close() error {
@@ -102,8 +114,8 @@ func (s *deviceSessionStore) close() error {
 	return result
 }
 
-// OpenDevice returns a non-owning device facade. QMI control clients are
-// reused until the modem generation closes.
+// OpenDevice returns a non-owning device facade. QMI and MBIM control clients
+// are reused until the modem generation closes.
 func OpenDevice(m *Modem) (Device, error) {
 	cfg, err := deviceConfig(m)
 	if err != nil {

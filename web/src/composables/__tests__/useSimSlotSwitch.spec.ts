@@ -32,6 +32,7 @@ const modem = (slots: Modem['slots']): Modem => ({
   unlockRequired: 'none',
   unlockSupported: false,
   sim: {
+    slot: 1,
     active: true,
     operatorName: 'Carrier',
     operatorIdentifier: '00101',
@@ -56,7 +57,7 @@ describe('useSimSlotSwitch', () => {
   })
 
   it('uses the active SIM slot when slots are available', () => {
-    let current!: ReturnType<typeof useSimSlotSwitch>['currentSimIdentifier']
+    let current!: ReturnType<typeof useSimSlotSwitch>['currentSimSlot']
 
     mount({
       template: '<div />',
@@ -64,18 +65,20 @@ describe('useSimSlotSwitch', () => {
         const currentModem = ref(
           modem([
             {
+              slot: 1,
               active: false,
               operatorName: 'Carrier',
               operatorIdentifier: '00101',
               regionCode: 'US',
-              identifier: 'sim-1',
+              identifier: 'duplicate-iccid',
             },
             {
+              slot: 2,
               active: true,
               operatorName: 'Carrier',
               operatorIdentifier: '00101',
               regionCode: 'US',
-              identifier: 'sim-2',
+              identifier: 'duplicate-iccid',
             },
           ]),
         )
@@ -83,11 +86,50 @@ describe('useSimSlotSwitch', () => {
           modemId: computed(() => 'modem-1'),
           modem: currentModem,
           refreshModem: async () => {},
-        }).currentSimIdentifier
+        }).currentSimSlot
       },
     })
 
-    expect(current.value).toBe('sim-2')
+    expect(current.value).toBe('2')
+  })
+
+  it('switches by physical slot number when ICCIDs are duplicated', async () => {
+    let result!: ReturnType<typeof useSimSlotSwitch>
+    const refreshModem = vi.fn().mockResolvedValue(undefined)
+    const slots = [
+      {
+        slot: 1,
+        active: true,
+        operatorName: 'Carrier',
+        operatorIdentifier: '00101',
+        regionCode: 'US',
+        identifier: 'duplicate-iccid',
+      },
+      {
+        slot: 2,
+        active: false,
+        operatorName: 'Carrier',
+        operatorIdentifier: '00101',
+        regionCode: 'US',
+        identifier: 'duplicate-iccid',
+      },
+    ]
+
+    mount({
+      template: '<div />',
+      setup() {
+        result = useSimSlotSwitch({
+          modemId: computed(() => 'modem-1'),
+          modem: ref(modem(slots)),
+          refreshModem,
+        })
+      },
+    })
+
+    await result.handleSimSwitch(slots[1])
+
+    expect(api.switchSimSlot).toHaveBeenCalledWith('modem-1', 2)
+    expect(refreshModem).toHaveBeenCalledOnce()
   })
 
   it('treats null slots from lightweight modem responses as empty', async () => {
@@ -105,13 +147,13 @@ describe('useSimSlotSwitch', () => {
       },
     })
 
-    expect(result.currentSimIdentifier.value).toBe('')
+    expect(result.currentSimSlot.value).toBe('')
     expect(result.simSlots.value).toEqual([])
 
     currentModem.value = null
     await Promise.resolve()
 
-    expect(result.currentSimIdentifier.value).toBe('')
+    expect(result.currentSimSlot.value).toBe('')
     expect(result.simSlots.value).toEqual([])
   })
 })

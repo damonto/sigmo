@@ -31,6 +31,7 @@ import (
 	appmiddleware "github.com/damonto/sigmo/internal/app/middleware"
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
+	"github.com/damonto/sigmo/internal/pkg/lpa"
 	pmessage "github.com/damonto/sigmo/internal/pkg/message"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/networkprefs"
@@ -49,6 +50,7 @@ type RegisterConfig struct {
 	Store               *settings.Store
 	Registry            *modem.Registry
 	InternetConnector   *pinternet.Connector
+	LPAClients          *lpa.Pool
 	InternetConnections appconnectivity.InternetConnections
 	Relay               *forwarder.Relay
 	NetworkPreferences  *networkprefs.Store
@@ -125,7 +127,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
 		protected.POST("/modems/:id/sim-unlocks", h.UnlockSIM)
-		protected.PUT("/modems/:id/sim-slots/:identifier", h.SwitchSimSlot)
+		protected.PUT("/modems/:id/sim-slots/:slot", h.SwitchSimSlot)
 		protected.PUT("/modems/:id/msisdn", h.UpdateMSISDN)
 		protected.PUT("/modems/:id/sims/:iccid/reminder", h.UpdateReminder)
 		protected.DELETE("/modems/:id/sims/:iccid/reminder", h.DeleteReminder)
@@ -175,7 +177,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		}
 
 		{
-			h := euicc.New(deps.Store, deps.Registry)
+			h := euicc.New(deps.Registry, deps.LPAClients)
 			protected.GET("/modems/:id/ses", h.Get)
 		}
 
@@ -183,6 +185,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			h := esim.New(esim.Config{
 				Store:     deps.Store,
 				Registry:  deps.Registry,
+				LPA:       deps.LPAClients,
 				Internet:  deps.InternetConnector,
 				Reminders: deps.Reminders,
 			})
@@ -197,7 +200,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		}
 
 		{
-			h := notification.New(deps.Store, deps.Registry)
+			h := notification.New(deps.Registry, deps.LPAClients)
 			protected.GET("/modems/:id/notifications", h.List)
 			protected.POST("/modems/:id/ses/:seId/notifications/:sequence/deliveries", h.Resend)
 			protected.DELETE("/modems/:id/ses/:seId/notifications/:sequence", h.Delete)

@@ -14,24 +14,16 @@ import (
 type simRefreshDevice struct {
 	*fakeDeviceControl
 	onActivate func()
-	onPower    func()
 	onSIMState func(context.Context, devicewwan.Target) (devicewwan.SIMState, error)
 }
 
 func (d *simRefreshDevice) ActivateProvisioningIfSIMMissing(context.Context) error {
 	d.calls = append(d.calls, "activate-provisioning")
+	err := d.activateErr
 	if d.onActivate != nil {
 		d.onActivate()
 	}
-	return d.activateErr
-}
-
-func (d *simRefreshDevice) PowerCycleSIM(context.Context) error {
-	d.calls = append(d.calls, "power-cycle")
-	if d.onPower != nil {
-		d.onPower()
-	}
-	return d.powerErr
+	return err
 }
 
 func (d *simRefreshDevice) SIMState(ctx context.Context, target devicewwan.Target) (devicewwan.SIMState, error) {
@@ -65,6 +57,94 @@ func TestEnsureSIMVisibleSkipsPowerCycleWhenSIMIsVisible(t *testing.T) {
 	}
 	if !slices.Equal(device.calls, []string{"sim-state"}) {
 		t.Fatalf("device calls = %v, want only SIM state probe", device.calls)
+	}
+}
+
+func TestEnsureSIMVisiblePublishesSIMProfileChange(t *testing.T) {
+	restoreSIMRefreshTiming(t, 0, time.Millisecond)
+	const (
+		path     = "/sys/devices/modem-1"
+		previous = "8901000000000000001"
+		next     = "8901000000000000002"
+	)
+	current := simRefreshTestModem(path, 7, true)
+	registry := &Registry{modems: map[string]*Modem{path: current}, started: true}
+	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{state: devicewwan.SIMState{
+		Supported: true,
+		Matches:   true,
+		Ready:     true,
+		ICCID:     next,
+		Slot:      1,
+	}}}
+	registry.openDevice = fakeDeviceOpener(t, device, nil)
+	var events []ModemEvent
+	registry.subs = []subscription{{id: 1, fn: func(event ModemEvent) error {
+		events = append(events, event)
+		return nil
+	}}}
+
+	result, err := registry.EnsureSIMVisible(t.Context(), current, SIMTarget{Slot: 1, ICCID: next})
+	if err != nil {
+		t.Fatalf("EnsureSIMVisible() error = %v", err)
+	}
+	if result != current {
+		t.Fatalf("result modem = %p, want %p", result, current)
+	}
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(events))
+	}
+	event := events[0]
+	if event.Type != ModemEventSIMChanged || event.Modem != current || event.Path != path || event.Generation != 7 {
+		t.Fatalf("event = %+v, want SIM change for current modem", event)
+	}
+	if event.PreviousSIMIdentifier != previous || event.SIMIdentifier != next {
+		t.Fatalf("event SIM transition = %q -> %q, want %q -> %q", event.PreviousSIMIdentifier, event.SIMIdentifier, previous, next)
+	}
+}
+
+func TestEnsureSIMVisibleWaitsForEUICCClassification(t *testing.T) {
+	restoreSIMRefreshTiming(t, 0, time.Millisecond)
+	const (
+		path  = "/sys/devices/modem-1"
+		iccid = "8901000000000000002"
+	)
+	modem := simRefreshTestModem(path, 1, true)
+	registry := &Registry{modems: map[string]*Modem{path: modem}, started: true}
+	state := devicewwan.SIMState{
+		Supported: true,
+		Matches:   true,
+		Ready:     true,
+		ICCID:     iccid,
+		Slot:      1,
+	}
+	probes := 0
+	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{}}
+	device.onSIMState = func(context.Context, devicewwan.Target) (devicewwan.SIMState, error) {
+		probes++
+		if probes == 2 {
+			modem.applySIMInfo(wwanmodem.SIMInfo{
+				Slot:  1,
+				State: wwanmodem.SIMStateReady,
+				ICCID: iccid,
+				ATR:   []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
+			})
+		}
+		return state, nil
+	}
+	registry.openDevice = fakeDeviceOpener(t, device, nil)
+
+	result, err := registry.ensureSIMVisible(t.Context(), modem, SIMTarget{
+		ICCID:        iccid,
+		RequireEUICC: true,
+	})
+	if err != nil {
+		t.Fatalf("ensureSIMVisible() error = %v", err)
+	}
+	if result.Modem != modem || probes != 2 {
+		t.Fatalf("result modem/probes = %p/%d, want %p/2", result.Modem, probes, modem)
+	}
+	if kind := modem.Snapshot().SIMKind(); kind != SIMKindEUICC {
+		t.Fatalf("SIM kind = %q, want %q", kind, SIMKindEUICC)
 	}
 }
 
@@ -133,45 +213,37 @@ func TestEnsureSIMVisibleProvisionsEachGenerationOnce(t *testing.T) {
 	}
 }
 
-func TestPowerCycleSIMWaitsForTarget(t *testing.T) {
+func TestEnsureSIMVisibleRetriesTransientProvisioningFailure(t *testing.T) {
 	restoreSIMRefreshTiming(t, 0, time.Millisecond)
 	const path = "/sys/devices/modem-1"
 	current := simRefreshTestModem(path, 1, false)
 	registry := &Registry{modems: map[string]*Modem{path: current}, started: true}
-	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{state: devicewwan.SIMState{
-		Supported:     true,
-		Recoverable:   true,
-		Ready:         true,
-		ICCIDMismatch: true,
-		ICCID:         "8901000000000000002",
-		Slot:          1,
-	}}}
+	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{activateErr: errors.New("USIM application missing")}}
 	activateCalls := 0
-	powerCalls := 0
-	device.onActivate = func() { activateCalls++ }
-	device.onPower = func() {
-		powerCalls++
-		device.state = devicewwan.SIMState{
-			Supported: true,
-			Matches:   true,
-			Ready:     true,
-			ICCID:     "8901000000000000001",
-			Slot:      1,
+	device.onActivate = func() {
+		activateCalls++
+		switch activateCalls {
+		case 1:
+			device.activateErr = nil
+		case 2:
+			device.state = devicewwan.SIMState{
+				Supported: true,
+				Matches:   true,
+				Ready:     true,
+				ICCID:     "8901000000000000001",
+				Slot:      1,
+			}
 		}
 	}
 	registry.openDevice = fakeDeviceOpener(t, device, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	result, err := registry.powerCycleSIM(ctx, current, SIMTarget{Slot: 1, ICCID: "8901000000000000001"})
-	if err != nil {
+	if _, err := registry.ensureSIMVisible(ctx, current, SIMTarget{Slot: 1, ICCID: "8901000000000000001"}); err != nil {
 		t.Fatalf("ensureSIMVisible() error = %v", err)
 	}
-	if result.Modem != current {
-		t.Fatalf("result modem = %p, want current modem %p", result.Modem, current)
-	}
-	if activateCalls != 0 || powerCalls != 1 {
-		t.Fatalf("provision/power calls = %d/%d, want 0/1", activateCalls, powerCalls)
+	if activateCalls != 2 {
+		t.Fatalf("provisioning calls = %d, want retry after transient failure", activateCalls)
 	}
 }
 
@@ -201,7 +273,7 @@ func TestEnsureSIMVisibleDoesNotPowerCyclePersistentICCIDMismatch(t *testing.T) 
 	}
 }
 
-func TestReadCurrentESIMRequiresMatchingReadyState(t *testing.T) {
+func TestReadCurrentSIMRequiresMatchingReadyState(t *testing.T) {
 	const path = "/sys/devices/modem-1"
 	const iccid = "8901000000000000001"
 	modem := simRefreshTestModem(path, 1, false)
@@ -216,8 +288,8 @@ func TestReadCurrentESIMRequiresMatchingReadyState(t *testing.T) {
 	if read.SIMVisible {
 		t.Fatal("SIMVisible = true, want false while USIM is not ready")
 	}
-	if snapshot := modem.Snapshot(); snapshot.SIM == nil || snapshot.SIM.Identifier != iccid {
-		t.Fatalf("cached SIM = %+v, want ICCID %q", snapshot.SIM, iccid)
+	if snapshot := modem.Snapshot(); snapshot.SIM != nil {
+		t.Fatalf("cached SIM = %+v, want no update before the SIM is ready", snapshot.SIM)
 	}
 	if len(device.calls) != 1 || device.calls[0] != "sim-state" {
 		t.Fatalf("device calls = %v, want [sim-state]", device.calls)
@@ -230,6 +302,227 @@ func TestReadCurrentESIMRequiresMatchingReadyState(t *testing.T) {
 	}
 	if !read.SIMVisible {
 		t.Fatal("SIMVisible = false, want true for matching ready USIM")
+	}
+}
+
+func TestReadCurrentModemUsesReadyActiveSIMSnapshot(t *testing.T) {
+	const path = "/sys/devices/modem-1"
+	const iccid = "8901000000000000002"
+	modem := simRefreshTestModem(path, 1, true)
+	registry := &Registry{modems: map[string]*Modem{path: modem}, started: true}
+	device := &fakeDeviceControl{state: devicewwan.SIMState{
+		Supported: true,
+		Matches:   true,
+		Ready:     true,
+		ICCID:     iccid,
+		Slot:      2,
+	}}
+	registry.openDevice = fakeDeviceOpener(t, device, nil)
+	target := SIMTarget{Slot: 2, ICCID: iccid, RequireActiveSlot: true}
+
+	read, err := registry.readCurrentModem(context.Background(), modem, target)
+	if err != nil {
+		t.Fatalf("readCurrentModem() before slot switch error = %v", err)
+	}
+	if read.SIMVisible {
+		t.Fatal("SIMVisible = true before the active slot changed")
+	}
+	if len(device.calls) != 0 {
+		t.Fatalf("device calls before active slot changed = %v, want none", device.calls)
+	}
+
+	modem.applySIMInfo(wwanmodem.SIMInfo{Slot: 2, State: wwanmodem.SIMStateReady, ICCID: iccid})
+	read, err = registry.readCurrentModem(context.Background(), modem, target)
+	if err != nil {
+		t.Fatalf("readCurrentModem() after slot switch error = %v", err)
+	}
+	if !read.SIMVisible {
+		t.Fatal("SIMVisible = false after target SIM became ready")
+	}
+	if len(device.calls) != 0 {
+		t.Fatalf("device calls after active SIM became ready = %v, want none", device.calls)
+	}
+}
+
+func TestReadCurrentModemUsesReadyEUICCSnapshotWithoutSlotTarget(t *testing.T) {
+	const path = "/sys/devices/modem-1"
+	const iccid = "8901000000000000002"
+	modem := simRefreshTestModem(path, 1, false)
+	modem.applySIMInfo(wwanmodem.SIMInfo{
+		Slot:  1,
+		State: wwanmodem.SIMStateReady,
+		ICCID: iccid,
+		ATR:   []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
+	})
+	registry := &Registry{modems: map[string]*Modem{path: modem}, started: true}
+	registry.openDevice = func(devicewwan.Config) (deviceControl, error) {
+		t.Fatal("ready eUICC snapshot opened a device probe")
+		return nil, nil
+	}
+
+	read, err := registry.readCurrentModem(context.Background(), modem, SIMTarget{ICCID: iccid, RequireEUICC: true})
+	if err != nil {
+		t.Fatalf("readCurrentModem() error = %v", err)
+	}
+	if !read.SIMVisible {
+		t.Fatal("SIMVisible = false, want ready eUICC snapshot")
+	}
+}
+
+func TestEnsureSIMVisibleWaitsForReadyActiveSIMSnapshot(t *testing.T) {
+	restoreSIMRefreshTiming(t, 0, time.Millisecond)
+	const path = "/sys/devices/modem-1"
+	const iccid = "8901000000000000002"
+	modem := simRefreshTestModem(path, 1, true)
+	modem.applyActiveSIMIdentity(2, "")
+	registry := &Registry{modems: map[string]*Modem{path: modem}, started: true}
+	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{}}
+	go func() {
+		time.Sleep(time.Millisecond)
+		modem.applySIMInfo(wwanmodem.SIMInfo{Slot: 2, State: wwanmodem.SIMStateReady, ICCID: iccid})
+	}()
+	registry.openDevice = fakeDeviceOpener(t, device, nil)
+
+	result, err := registry.EnsureSIMVisible(context.Background(), modem, SIMTarget{
+		Slot:              2,
+		ICCID:             iccid,
+		RequireActiveSlot: true,
+	})
+	if err != nil {
+		t.Fatalf("EnsureSIMVisible() error = %v", err)
+	}
+	if result != modem {
+		t.Fatalf("result modem = %p, want %p", result, modem)
+	}
+	if len(device.calls) != 0 {
+		t.Fatalf("device calls = %v, want none for a physical slot switch", device.calls)
+	}
+}
+
+func TestEnsureSIMVisibleWaitsForActiveSIMClassification(t *testing.T) {
+	restoreSIMRefreshTiming(t, 0, time.Millisecond)
+	const path = "/sys/devices/modem-1"
+	const iccid = "8901000000000000002"
+	modem := simRefreshTestModem(path, 1, true)
+	modem.applyActiveSIMIdentity(2, iccid)
+	modem.applySIMInfo(wwanmodem.SIMInfo{Slot: 2, State: wwanmodem.SIMStateReady, ICCID: iccid})
+	registry := &Registry{modems: map[string]*Modem{path: modem}, started: true}
+	go func() {
+		time.Sleep(time.Millisecond)
+		modem.applySIMInfo(wwanmodem.SIMInfo{
+			Slot:  2,
+			State: wwanmodem.SIMStateReady,
+			ICCID: iccid,
+			ATR:   []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
+		})
+	}()
+
+	result, err := registry.EnsureSIMVisible(context.Background(), modem, SIMTarget{
+		Slot:              2,
+		ICCID:             iccid,
+		RequireActiveSlot: true,
+		RequireClassified: true,
+	})
+	if err != nil {
+		t.Fatalf("EnsureSIMVisible() error = %v", err)
+	}
+	if result != modem {
+		t.Fatalf("result modem = %p, want %p", result, modem)
+	}
+	if kind := modem.Snapshot().SIMKind(); kind != SIMKindEUICC {
+		t.Fatalf("SIM kind = %q, want %q", kind, SIMKindEUICC)
+	}
+}
+
+func TestPublishSIMChangedForDuplicateICCIDInDifferentSlot(t *testing.T) {
+	const (
+		path  = "/sys/devices/modem-1"
+		iccid = "8901000000000000001"
+	)
+	current := simRefreshTestModem(path, 7, true)
+	current.applyActiveSIMIdentity(2, iccid)
+	registry := &Registry{modems: map[string]*Modem{path: current}, started: true}
+	var events []ModemEvent
+	registry.subs = []subscription{{id: 1, fn: func(event ModemEvent) error {
+		events = append(events, event)
+		return nil
+	}}}
+
+	registry.publishSIMChanged(current, 1, iccid)
+
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(events))
+	}
+	if events[0].PreviousSIMSlot != 1 || events[0].SIMSlot != 2 {
+		t.Fatalf("event slot transition = %d -> %d, want 1 -> 2", events[0].PreviousSIMSlot, events[0].SIMSlot)
+	}
+
+	registry.publishSIMChanged(current, 1, iccid)
+	if len(events) != 1 {
+		t.Fatalf("duplicate published events = %d, want 1", len(events))
+	}
+}
+
+func TestRuntimeSIMChangePublishesFromTrackedIdentity(t *testing.T) {
+	const (
+		path     = "/sys/devices/modem-1"
+		previous = "8901000000000000001"
+		next     = "8901000000000000002"
+	)
+	current := simRefreshTestModem(path, 7, true)
+	registry := &Registry{modems: map[string]*Modem{path: current}, started: true}
+	registry.trackSIMIdentity(current)
+	var events []ModemEvent
+	registry.subs = []subscription{{id: 1, fn: func(event ModemEvent) error {
+		events = append(events, event)
+		return nil
+	}}}
+	current.onSIMChange = func(previousSlot uint32, previousIdentifier string) {
+		registry.publishSIMChanged(current, previousSlot, previousIdentifier)
+	}
+
+	previousSlot, previousIdentifier := activeSIMIdentity(current)
+	current.applyActiveSIMIdentity(1, next)
+	current.notifySIMChanged(previousSlot, previousIdentifier)
+
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(events))
+	}
+	if events[0].PreviousSIMIdentifier != previous || events[0].SIMIdentifier != next {
+		t.Fatalf("event SIM transition = %q -> %q, want %q -> %q", events[0].PreviousSIMIdentifier, events[0].SIMIdentifier, previous, next)
+	}
+}
+
+func TestRuntimeSIMRemovalPublishesFromTrackedIdentity(t *testing.T) {
+	const (
+		path     = "/sys/devices/modem-1"
+		previous = "8901000000000000001"
+	)
+	current := simRefreshTestModem(path, 7, true)
+	registry := &Registry{modems: map[string]*Modem{path: current}, started: true}
+	registry.trackSIMIdentity(current)
+	var events []ModemEvent
+	registry.subs = []subscription{{id: 1, fn: func(event ModemEvent) error {
+		events = append(events, event)
+		return nil
+	}}}
+	current.onSIMChange = func(previousSlot uint32, previousIdentifier string) {
+		registry.publishSIMChanged(current, previousSlot, previousIdentifier)
+	}
+
+	previousSlot, previousIdentifier := activeSIMIdentity(current)
+	current.applySIMInfo(wwanmodem.SIMInfo{})
+	current.notifySIMChanged(previousSlot, previousIdentifier)
+
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(events))
+	}
+	event := events[0]
+	if event.PreviousSIMSlot != 1 || event.SIMSlot != 0 {
+		t.Fatalf("event slot transition = %d -> %d, want 1 -> 0", event.PreviousSIMSlot, event.SIMSlot)
+	}
+	if event.PreviousSIMIdentifier != previous || event.SIMIdentifier != "" {
+		t.Fatalf("event SIM transition = %q -> %q, want %q -> empty", event.PreviousSIMIdentifier, event.SIMIdentifier, previous)
 	}
 }
 

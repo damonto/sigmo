@@ -60,7 +60,6 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 			slog.Warn("open discovered modem", "device", controlPortPath(device), "physical_path", key, "error", err)
 			continue
 		}
-		r.watchModem(runCtx, modem)
 		if previous := opened[key]; previous != nil {
 			_ = previous.Close()
 		}
@@ -90,6 +89,9 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 	r.started = true
 	r.cancel = cancel
 	r.mu.Unlock()
+	for _, modem := range opened {
+		r.watchModem(runCtx, modem)
+	}
 	r.wg.Add(1)
 	go r.watchLoop(runCtx, stream)
 	return nil
@@ -248,8 +250,6 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 			return
 		}
 	}
-	r.watchModem(ctx, replacement)
-
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
@@ -264,6 +264,13 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 		delete(r.modems, previousKey)
 	}
 	r.modems[key] = replacement
+	if previous != nil && previous != replacement {
+		delete(r.simIdentities, previous)
+	}
+	if r.simIdentities == nil {
+		r.simIdentities = make(map[*Modem]simIdentity)
+	}
+	r.simIdentities[replacement] = currentSIMIdentity(replacement)
 	snapshot := r.copyModemsLocked()
 	subscribers := append([]subscription(nil), r.subs...)
 	r.mu.Unlock()
@@ -283,6 +290,7 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 		Type: typeOfEvent, Modem: replacement, Previous: previous, Path: key,
 		PreviousPath: previousKey, Generation: generation, Snapshot: snapshot,
 	})
+	r.watchModem(ctx, replacement)
 	if previous != nil {
 		if err := previous.Close(); err != nil {
 			slog.Warn("close replaced modem", "path", previousKey, "error", err)
@@ -291,6 +299,7 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 }
 
 func (r *Registry) watchModem(ctx context.Context, modem *Modem) {
+	r.trackSIMIdentity(modem)
 	modem.startRuntimeWatchers(ctx, func(err error) {
 		if r.failures == nil {
 			return
@@ -299,6 +308,8 @@ func (r *Registry) watchModem(ctx context.Context, modem *Modem) {
 		case r.failures <- modemFailure{modem: modem, err: err}:
 		case <-ctx.Done():
 		}
+	}, func(previousSlot uint32, previousIdentifier string) {
+		r.publishSIMChanged(modem, previousSlot, previousIdentifier)
 	})
 }
 
@@ -372,6 +383,7 @@ func (r *Registry) removeModem(key string, existing *Modem) {
 		return
 	}
 	delete(r.modems, key)
+	delete(r.simIdentities, existing)
 	snapshot := r.copyModemsLocked()
 	subscribers := append([]subscription(nil), r.subs...)
 	r.mu.Unlock()

@@ -48,9 +48,12 @@ func (s *SIMs) Get(ctx context.Context, slot uint32) (*SIM, error) {
 		return nil, fmt.Errorf("SIM slot %d is invalid", slot)
 	}
 	info, infoErr := s.modem.core.SIMInfo(ctx)
-	if infoErr == nil && uint32(info.Slot) == slot {
+	if infoErr == nil {
 		s.modem.applySIMInfo(info)
-		return cloneSIM(s.modem, s.modem.Snapshot().SIM), nil
+		snapshot := s.modem.Snapshot()
+		if snapshot.PrimarySIMSlot == slot && snapshot.SIM != nil {
+			return cloneSIM(s.modem, snapshot.SIM), nil
+		}
 	}
 	slots, err := s.modem.core.SIMSlots(ctx)
 	if err != nil {

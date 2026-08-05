@@ -59,6 +59,7 @@ const modem = (registrationState = 'Roaming'): Modem => ({
   unlockRequired: 'none',
   unlockSupported: false,
   sim: {
+    slot: 1,
     active: true,
     operatorName: 'Carrier',
     operatorIdentifier: '00101',
@@ -139,7 +140,7 @@ const simSlotStubs = {
   },
   RadioGroupItem: {
     props: ['id', 'value'],
-    template: '<button :id="id" type="button" role="radio" />',
+    template: '<button :id="id" :data-value="value" type="button" role="radio" />',
   },
   Spinner: {
     template: '<span />',
@@ -461,9 +462,10 @@ describe('SimSlotSwitcher', () => {
   it('shows signal status on the SIM row without the signal percentage', () => {
     const wrapper = mount(SimSlotSwitcher, {
       props: {
-        modelValue: 'slot-1',
+        modelValue: '2',
         slots: [
           {
+            slot: 1,
             active: false,
             operatorName: 'Carrier',
             operatorIdentifier: '00101',
@@ -471,6 +473,7 @@ describe('SimSlotSwitcher', () => {
             identifier: 'slot-0',
           },
           {
+            slot: 2,
             active: true,
             operatorName: 'Carrier',
             operatorIdentifier: '00101',
@@ -499,9 +502,10 @@ describe('SimSlotSwitcher', () => {
   it('renders the SIM row for a single slot without enabling switching', () => {
     const wrapper = mount(SimSlotSwitcher, {
       props: {
-        modelValue: 'slot-1',
+        modelValue: '1',
         slots: [
           {
+            slot: 1,
             active: true,
             operatorName: 'Carrier',
             operatorIdentifier: '00101',
@@ -519,5 +523,38 @@ describe('SimSlotSwitcher', () => {
     expect(wrapper.find('[role="radiogroup"]').attributes('aria-disabled')).toBe('true')
     expect(wrapper.text()).toContain('SIM 1')
     expect(wrapper.text()).not.toContain('ACTIVE')
+  })
+
+  it('uses physical slot numbers when ICCIDs are duplicated', () => {
+    const wrapper = mount(SimSlotSwitcher, {
+      props: {
+        modelValue: '2',
+        slots: [
+          {
+            slot: 1,
+            active: false,
+            operatorName: 'Carrier',
+            operatorIdentifier: '00101',
+            regionCode: 'us',
+            identifier: 'duplicate-iccid',
+          },
+          {
+            slot: 2,
+            active: true,
+            operatorName: 'Carrier',
+            operatorIdentifier: '00101',
+            regionCode: 'us',
+            identifier: 'duplicate-iccid',
+          },
+        ],
+      },
+      global: {
+        stubs: simSlotStubs,
+      },
+    })
+
+    const radios = wrapper.findAll('[role="radio"]')
+    expect(radios.map((radio) => radio.attributes('id'))).toEqual(['sim-slot-1', 'sim-slot-2'])
+    expect(radios.map((radio) => radio.attributes('data-value'))).toEqual(['1', '2'])
   })
 })

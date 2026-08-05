@@ -44,9 +44,15 @@ type qmiSession struct {
 	openUSIMClient func(context.Context, uint8) (*qcom.Client, error)
 	mu             sync.Mutex
 	clients        map[uint8]qmiClient
+	cats           map[uint8]qmiCATClient
 	closeOnce      sync.Once
 	closed         bool
 	closeErr       error
+}
+
+type qmiCATClient struct {
+	client *qcom.Client
+	cat    *qcom.CAT
 }
 
 func newQMISession(cfg Config) *qmiSession {
@@ -85,7 +91,11 @@ func (u *qmiSession) Close() error {
 		for _, client := range u.clients {
 			clients = append(clients, client)
 		}
+		for _, cat := range u.cats {
+			clients = append(clients, cat.client)
+		}
 		u.clients = nil
+		u.cats = nil
 		u.mu.Unlock()
 
 		for _, client := range clients {
@@ -119,7 +129,10 @@ func (u *qmiSession) evictTerminalClient(slot uint8, client qmiClient, err error
 	if _, ok := errors.AsType[*qmiproto.TransportError](err); !ok {
 		return
 	}
+	u.evictClient(slot, client)
+}
 
+func (u *qmiSession) evictClient(slot uint8, client qmiClient) {
 	u.mu.Lock()
 	if u.clients[slot] != client {
 		u.mu.Unlock()
@@ -139,14 +152,13 @@ func (u *qmiSession) USIM(ctx context.Context) (usimcard.Reader, error) {
 }
 
 func (u *qmiSession) USIMWithCAT(ctx context.Context, profile CATProfile) (usimcard.Reader, error) {
-	client, err := u.acquireUSIMClient(ctx)
+	cat, configurationChanged, err := u.acquireCAT(ctx, profile)
 	if err != nil {
 		return nil, fmt.Errorf("open QMI UIM client: %w", err)
 	}
-	cat := qcom.NewCAT(client)
-	configurationChanged, err := configureQMICAT(ctx, u.imei, cat, profile)
+	client, err := u.acquireUSIMClient(ctx)
 	if err != nil {
-		return nil, errors.Join(err, client.Close())
+		return nil, fmt.Errorf("open QMI UIM reader: %w", err)
 	}
 	adapter, err := usim.NewQCOM(client)
 	if err != nil {
@@ -155,11 +167,35 @@ func (u *qmiSession) USIMWithCAT(ctx context.Context, profile CATProfile) (usimc
 	return newQMICATReader(qmiCATReaderConfig{
 		Adapter:              adapter,
 		CAT:                  cat,
-		Power:                client,
 		Slot:                 u.slot,
 		IMEI:                 u.imei,
 		ConfigurationChanged: configurationChanged,
 	}), nil
+}
+
+func (u *qmiSession) acquireCAT(ctx context.Context, profile CATProfile) (*qcom.CAT, bool, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.closed {
+		return nil, false, wwanmodem.ErrClosed
+	}
+	if existing, ok := u.cats[u.slot]; ok {
+		return existing.cat, false, nil
+	}
+	client, err := u.openUSIMClient(ctx, u.slot)
+	if err != nil {
+		return nil, false, err
+	}
+	cat := qcom.NewCAT(client)
+	configurationChanged, err := configureQMICAT(ctx, u.imei, cat, profile)
+	if err != nil {
+		return nil, false, errors.Join(err, client.Close())
+	}
+	if u.cats == nil {
+		u.cats = make(map[uint8]qmiCATClient)
+	}
+	u.cats[u.slot] = qmiCATClient{client: client, cat: cat}
+	return cat, configurationChanged, nil
 }
 
 func (u *qmiSession) acquireUSIMClient(ctx context.Context) (*qcom.Client, error) {
@@ -182,16 +218,6 @@ func openQMIUSIMReader(ctx context.Context, client *qcom.Client) (usimcard.Reade
 	return adapter, nil
 }
 
-var (
-	qmiPowerRestoreTimeout = 5 * time.Second
-	qmiSIMPowerCycleDelay  = 2 * time.Second
-)
-
-type qmiSIMPowerControl interface {
-	PowerOffSIM(ctx context.Context, slot uint8) error
-	PowerOnSIM(ctx context.Context, req qcom.PowerOnSIMRequest) error
-}
-
 type qmiRefreshClient interface {
 	WatchRefreshAll(ctx context.Context, session qcom.Session, aid []byte) (<-chan qcom.RefreshEvent, error)
 	WatchRefreshFiles(ctx context.Context, req qcom.RefreshRegisterRequest) (<-chan qcom.RefreshEvent, error)
@@ -208,8 +234,6 @@ type qmiClient interface {
 	WDSProfileSettings(ctx context.Context, id qcom.WDSProfileID) (qcom.WDSProfileSettings, error)
 	IMSSTestMode(ctx context.Context) (bool, error)
 	SetIMSSTestMode(ctx context.Context, enabled bool) error
-	PowerOffSIM(ctx context.Context, slot uint8) error
-	PowerOnSIM(ctx context.Context, req qcom.PowerOnSIMRequest) error
 	CardStatus(ctx context.Context) (qcom.CardStatus, error)
 	ChangeProvisioningSession(ctx context.Context, req qcom.ChangeProvisioningSessionRequest) error
 	Close() error
@@ -426,31 +450,6 @@ func (u *qmiSession) ActivateProvisioningIfSIMMissing(ctx context.Context) (err 
 	return nil
 }
 
-func (u *qmiSession) PowerCycleSIM(ctx context.Context) (err error) {
-	client, release, err := u.acquireClient(ctx, u.slot)
-	if err != nil {
-		return fmt.Errorf("open QMI UIM client: %w", err)
-	}
-	defer func() { release(err) }()
-
-	if err := client.PowerOffSIM(ctx, u.slot); err != nil {
-		return fmt.Errorf("power off sim: %w", err)
-	}
-	slog.Info("sim powered off", "imei", u.imei, "slot", u.slot)
-	// Once the SIM is off, cancellation must not leave it without power.
-	time.Sleep(qmiSIMPowerCycleDelay)
-
-	restoreCtx := context.WithoutCancel(ctx)
-	if err := qmiPowerOnSIM(restoreCtx, client, qcom.PowerOnSIMRequest{
-		Slot:                u.slot,
-		IgnoreHotSwapSwitch: true,
-	}); err != nil {
-		return fmt.Errorf("power on sim: %w", err)
-	}
-	slog.Info("sim powered on", "imei", u.imei, "slot", u.slot)
-	return nil
-}
-
 func (u *qmiSession) SIMState(ctx context.Context, target Target) (state SIMState, err error) {
 	slot, err := targetSIMSlot(u.slot, target)
 	if err != nil {
@@ -512,9 +511,20 @@ func (u *qmiSession) WatchSIMRefresh(ctx context.Context) (<-chan SIMRefreshEven
 			case <-ctx.Done():
 				return
 			}
+			if simRefreshInvalidatesQMIClient(mapped) {
+				u.evictClient(u.slot, client)
+				return
+			}
 		}
 	}()
 	return out, nil
+}
+
+func simRefreshInvalidatesQMIClient(event SIMRefreshEvent) bool {
+	if event.Stage != SIMRefreshEndWithSuccess && event.Stage != SIMRefreshEndWithFailure {
+		return false
+	}
+	return event.Mode == SIMRefreshReset || event.Mode == SIMRefreshInitFullFCN
 }
 
 func watchQMIRefresh(ctx context.Context, client qmiRefreshClient, slot uint8) (<-chan qcom.RefreshEvent, string, error) {
@@ -567,12 +577,6 @@ func unsupportedQMIRefreshRegistration(err error) bool {
 	return errors.Is(err, qcom.QMIErrorInvalidQmiCommand) ||
 		errors.Is(err, qcom.QMIErrorNotSupported) ||
 		errors.Is(err, qcom.QMIErrorDeviceUnsupported)
-}
-
-func qmiPowerOnSIM(ctx context.Context, client qmiSIMPowerControl, req qcom.PowerOnSIMRequest) error {
-	powerCtx, cancel := context.WithTimeout(ctx, qmiPowerRestoreTimeout)
-	defer cancel()
-	return client.PowerOnSIM(powerCtx, req)
 }
 
 func readQMICardStatus(ctx context.Context, client qmiClient) (cardStatus, error) {

@@ -8,6 +8,7 @@ import (
 
 	sgp22 "github.com/damonto/euicc-go/v2"
 
+	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/pro/websheet"
@@ -34,6 +35,7 @@ var (
 type Config struct {
 	Store         *settings.Store
 	Registry      *mmodem.Registry
+	LPA           *lpa.Pool
 	EnableProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
 	DeleteProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
 	Websheets     *websheet.Broker

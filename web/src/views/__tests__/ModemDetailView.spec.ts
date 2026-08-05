@@ -155,7 +155,7 @@ vi.mock('@/composables/useSimSlotSwitch', async () => {
   const { ref } = await vi.importActual<typeof import('vue')>('vue')
   return {
     useSimSlotSwitch: () => ({
-      currentSimIdentifier: ref(''),
+      currentSimSlot: ref(''),
       simSlots: ref([]),
       handleSimSwitch: vi.fn(),
     }),
@@ -261,6 +261,7 @@ const lockedModem = (simKind: Modem['simKind'] = 'physical'): Modem => ({
   unlockRequired: 'sim-pin',
   unlockSupported: true,
   sim: {
+    slot: 0,
     active: false,
     operatorName: '',
     operatorIdentifier: '',
@@ -285,6 +286,7 @@ const physicalModem = (): Modem => ({
   unlockRequired: 'none',
   unlockSupported: false,
   sim: {
+    slot: 1,
     active: true,
     operatorName: 'Carrier',
     operatorIdentifier: '46000',

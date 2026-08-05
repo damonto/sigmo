@@ -19,8 +19,13 @@ var (
 )
 
 type SIMTarget struct {
-	Slot  uint32
-	ICCID string
+	Slot              uint32
+	ICCID             string
+	PreviousSlot      uint32
+	PreviousICCID     string
+	RequireActiveSlot bool
+	RequireClassified bool
+	RequireEUICC      bool
 }
 
 type simRefreshResult struct {
@@ -34,54 +39,157 @@ type currentModemRead struct {
 	ReloadObserved bool
 }
 
+type simIdentity struct {
+	slot       uint32
+	identifier string
+}
+
 func (t SIMTarget) valid() bool { return t.Slot != 0 || strings.TrimSpace(t.ICCID) != "" }
 
+// SwitchSIMSlot keeps the active-slot reservation through both the modem
+// command and the registry refresh that observes the selected physical card.
+func (r *Registry) SwitchSIMSlot(ctx context.Context, current *Modem, slot uint32) (*Modem, error) {
+	if current == nil {
+		return nil, errModemRequired
+	}
+	if r == nil {
+		return nil, errors.New("modem registry is required")
+	}
+	if err := current.validatePrimarySIMSlot(slot); err != nil {
+		return nil, fmt.Errorf("set primary SIM slot: %w", err)
+	}
+	var result *Modem
+	err := current.withReservedSIMSlot(ctx, func() error {
+		snapshot := current.Snapshot()
+		previousICCID := ""
+		if snapshot.SIM != nil {
+			previousICCID = snapshot.SIM.Identifier
+		}
+		if err := current.setPrimarySIMSlot(ctx, slot); err != nil {
+			err = fmt.Errorf("set primary SIM slot: %w", err)
+			if !IsTransientRestartError(err) {
+				return err
+			}
+		}
+		var err error
+		result, err = r.EnsureSIMVisible(ctx, current, SIMTarget{
+			Slot:              slot,
+			PreviousSlot:      snapshot.PrimarySIMSlot,
+			PreviousICCID:     previousICCID,
+			RequireActiveSlot: true,
+			RequireClassified: true,
+		})
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("wait for modem: %w", err)
+		}
+		return err
+	})
+	return result, err
+}
+
 func (r *Registry) EnsureSIMVisible(ctx context.Context, current *Modem, target SIMTarget) (*Modem, error) {
+	if current == nil {
+		return nil, errModemRequired
+	}
+	previousSlot := target.PreviousSlot
+	previousSIM := strings.TrimSpace(target.PreviousICCID)
+	if previousSlot == 0 || previousSIM == "" {
+		snapshot := current.Snapshot()
+		if previousSlot == 0 {
+			previousSlot = snapshot.PrimarySIMSlot
+		}
+		if previousSIM == "" && snapshot.SIM != nil {
+			previousSIM = strings.TrimSpace(snapshot.SIM.Identifier)
+		}
+	}
 	result, err := r.ensureSIMVisible(ctx, current, target)
 	if err != nil {
 		return nil, err
 	}
-	return result.Modem, nil
-}
-
-func (r *Registry) PowerCycleSIM(ctx context.Context, current *Modem, target SIMTarget) (*Modem, error) {
-	result, err := r.powerCycleSIM(ctx, current, target)
-	if err != nil {
-		return nil, err
+	if !result.ReloadObserved {
+		r.publishSIMChanged(result.Modem, previousSlot, previousSIM)
 	}
 	return result.Modem, nil
 }
 
-func (r *Registry) powerCycleSIM(ctx context.Context, current *Modem, target SIMTarget) (simRefreshResult, error) {
-	if current == nil {
-		return simRefreshResult{}, errModemRequired
-	}
-	target = currentSIMTarget(current, target)
-	if !target.valid() {
-		return simRefreshResult{}, errors.New("SIM target is required")
-	}
-	if err := r.powerCycleSIMTransport(ctx, current, target); err != nil {
-		return simRefreshResult{}, fmt.Errorf("power cycle SIM: %w", err)
-	}
-	return r.ensureSIMVisible(ctx, current, target)
+func activeSIMIdentity(m *Modem) (uint32, string) {
+	identity := currentSIMIdentity(m)
+	return identity.slot, identity.identifier
 }
 
-func currentSIMTarget(current *Modem, target SIMTarget) SIMTarget {
-	if target.valid() {
-		return target
+func currentSIMIdentity(m *Modem) simIdentity {
+	if m == nil {
+		return simIdentity{}
 	}
-	snapshot := current.Snapshot()
-	target.Slot = snapshot.PrimarySIMSlot
-	if snapshot.SIM != nil {
-		target.ICCID = strings.TrimSpace(snapshot.SIM.Identifier)
+	snapshot := m.Snapshot()
+	sim := snapshot.SIM
+	if sim == nil {
+		return simIdentity{slot: snapshot.PrimarySIMSlot}
 	}
-	if target.valid() {
-		return target
+	return simIdentity{slot: snapshot.PrimarySIMSlot, identifier: strings.TrimSpace(sim.Identifier)}
+}
+
+func (r *Registry) trackSIMIdentity(current *Modem) {
+	if r == nil || current == nil {
+		return
 	}
-	if slot, err := ActiveSIMSlot(current); err == nil {
-		target.Slot = uint32(slot)
+	r.mu.Lock()
+	if r.simIdentities == nil {
+		r.simIdentities = make(map[*Modem]simIdentity)
 	}
-	return target
+	r.simIdentities[current] = currentSIMIdentity(current)
+	r.mu.Unlock()
+}
+
+func (r *Registry) publishSIMChanged(current *Modem, previousSlot uint32, previous string) {
+	if r == nil || current == nil {
+		return
+	}
+	providedPrevious := simIdentity{slot: previousSlot, identifier: strings.TrimSpace(previous)}
+	next := currentSIMIdentity(current)
+
+	r.mu.Lock()
+	path := r.keyForModemLocked(current)
+	if path == "" {
+		r.mu.Unlock()
+		return
+	}
+	if r.simIdentities == nil {
+		r.simIdentities = make(map[*Modem]simIdentity)
+	}
+	trackedPrevious, tracked := r.simIdentities[current]
+	if tracked {
+		providedPrevious = trackedPrevious
+	}
+	if providedPrevious == next {
+		r.simIdentities[current] = next
+		r.mu.Unlock()
+		return
+	}
+	r.simIdentities[current] = next
+	snapshot := r.copyModemsLocked()
+	subscribers := append([]subscription(nil), r.subs...)
+	r.mu.Unlock()
+	slog.Info(
+		"SIM profile changed",
+		"imei", current.EquipmentIdentifier,
+		"generation", current.Generation(),
+		"previous_slot", providedPrevious.slot,
+		"slot", next.slot,
+		"previous_iccid", providedPrevious.identifier,
+		"iccid", next.identifier,
+	)
+	r.publish(subscribers, ModemEvent{
+		Type:                  ModemEventSIMChanged,
+		Modem:                 current,
+		Path:                  path,
+		Generation:            current.Generation(),
+		PreviousSIMSlot:       providedPrevious.slot,
+		SIMSlot:               next.slot,
+		PreviousSIMIdentifier: providedPrevious.identifier,
+		SIMIdentifier:         next.identifier,
+		Snapshot:              snapshot,
+	})
 }
 
 func (r *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target SIMTarget) (simRefreshResult, error) {
@@ -130,11 +238,13 @@ func (r *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 		}
 
 		generation := active.Generation()
-		if !probeTimedOut && !provisioned[generation] {
-			provisioned[generation] = true
+		if !target.RequireActiveSlot && !probeTimedOut && !provisioned[generation] {
 			provisionCtx, cancel := context.WithTimeout(ctx, simProbeTimeout)
 			provisionErr := r.activateProvisioningTransport(provisionCtx, active, target)
 			cancel()
+			if provisionErr == nil || errors.Is(provisionErr, devicewwan.ErrUnsupported) {
+				provisioned[generation] = true
+			}
 			if provisionErr != nil && !errors.Is(provisionErr, devicewwan.ErrUnsupported) {
 				slog.Warn("activate modem provisioning while waiting for SIM", "imei", active.EquipmentIdentifier, "generation", generation, "error", provisionErr)
 			}
@@ -165,18 +275,6 @@ func waitForSIMRefresh(ctx context.Context, modem *Modem, timeout time.Duration)
 	}
 }
 
-func (r *Registry) powerCycleSIMTransport(ctx context.Context, current *Modem, target SIMTarget) error {
-	slot, err := deviceTargetSlot(current, target)
-	if err != nil {
-		return err
-	}
-	device, err := openQMIDeviceForSlot(current, slot, r.deviceOpener())
-	if err != nil {
-		return err
-	}
-	return device.PowerCycleSIM(ctx)
-}
-
 func (r *Registry) activateProvisioningTransport(ctx context.Context, current *Modem, target SIMTarget) error {
 	slot, err := deviceTargetSlot(current, target)
 	if err != nil {
@@ -202,23 +300,70 @@ func (r *Registry) readCurrentModem(ctx context.Context, current *Modem, target 
 		return currentModemRead{Modem: current, ReloadObserved: true}, err
 	}
 	reloaded := modem.Generation() != current.Generation() || modem.Path() != current.Path()
+	if activeSIMTargetReady(modem, target) {
+		return currentModemRead{Modem: modem, SIMVisible: true, ReloadObserved: reloaded}, nil
+	}
+	if target.RequireActiveSlot {
+		if shouldRefreshSIMClassification(modem, target) {
+			probeCtx, cancel := context.WithTimeout(ctx, simProbeTimeout)
+			_, refreshErr := modem.SIMs().Primary(probeCtx)
+			cancel()
+			if refreshErr != nil {
+				return currentModemRead{Modem: modem, ReloadObserved: reloaded}, fmt.Errorf("refresh active SIM metadata: %w", refreshErr)
+			}
+		}
+		return currentModemRead{
+			Modem:          modem,
+			SIMVisible:     activeSIMTargetReady(modem, target),
+			ReloadObserved: reloaded,
+		}, nil
+	}
 	probeCtx, cancel := context.WithTimeout(ctx, simProbeTimeout)
 	defer cancel()
-	if strings.TrimSpace(target.ICCID) != "" {
-		return r.readCurrentESIM(probeCtx, modem, target, reloaded)
-	}
-	if modem.core != nil {
-		if info, infoErr := modem.core.SIMInfo(probeCtx); infoErr == nil {
-			modem.applySIMInfo(info)
-			return currentModemRead{Modem: modem, SIMVisible: simInfoMatchesTarget(info, target), ReloadObserved: reloaded}, nil
-		} else if errors.Is(infoErr, context.DeadlineExceeded) {
-			return currentModemRead{Modem: modem, ReloadObserved: reloaded}, infoErr
-		}
-	}
-	return currentModemRead{Modem: modem, SIMVisible: modemMatchesSIMTarget(modem, target), ReloadObserved: reloaded}, nil
+	return r.readCurrentSIM(probeCtx, modem, target, reloaded)
 }
 
-func (r *Registry) readCurrentESIM(ctx context.Context, modem *Modem, target SIMTarget, reloaded bool) (currentModemRead, error) {
+func activeSIMTargetReady(modem *Modem, target SIMTarget) bool {
+	if !activeSIMTargetIdentityReady(modem, target) {
+		return false
+	}
+	kind := modem.Snapshot().SIMKind()
+	if target.RequireEUICC {
+		return kind == SIMKindEUICC
+	}
+	return !target.RequireClassified || kind != SIMKindUnknown
+}
+
+func activeSIMTargetIdentityReady(modem *Modem, target SIMTarget) bool {
+	if modem == nil {
+		return false
+	}
+	snapshot := modem.Snapshot()
+	if (target.Slot != 0 && snapshot.PrimarySIMSlot != target.Slot) || snapshot.SIM == nil {
+		return false
+	}
+	if snapshot.Status.SIM != wwanmodem.SIMStateReady {
+		return false
+	}
+	identifier := strings.TrimSpace(snapshot.SIM.Identifier)
+	if identifier == "" {
+		return false
+	}
+	wanted := strings.TrimSpace(target.ICCID)
+	if wanted != "" && identifier != wanted {
+		return false
+	}
+	return true
+}
+
+func shouldRefreshSIMClassification(modem *Modem, target SIMTarget) bool {
+	if modem == nil || modem.core == nil || !targetRequiresClassification(target) {
+		return false
+	}
+	return activeSIMTargetIdentityReady(modem, target) && modem.Snapshot().SIMKind() == SIMKindUnknown
+}
+
+func (r *Registry) readCurrentSIM(ctx context.Context, modem *Modem, target SIMTarget, reloaded bool) (currentModemRead, error) {
 	slot, err := deviceTargetSlot(modem, target)
 	if err != nil {
 		return currentModemRead{Modem: modem, ReloadObserved: reloaded}, err
@@ -231,27 +376,29 @@ func (r *Registry) readCurrentESIM(ctx context.Context, modem *Modem, target SIM
 	if err != nil {
 		return currentModemRead{Modem: modem, ReloadObserved: reloaded}, fmt.Errorf("read SIM state: %w", err)
 	}
-	if state.ICCID != "" {
+	if state.Ready && state.ICCID != "" {
 		modem.applyActiveSIMIdentity(state.Slot, state.ICCID)
+		if targetRequiresClassification(target) && modem.Snapshot().SIMKind() == SIMKindUnknown {
+			// SIMState only confirms the profile identity. Refresh the full SIM
+			// metadata so ATR-based eUICC classification can settle before an
+			// operation is reported as complete.
+			if _, metadataErr := modem.SIMs().Primary(ctx); metadataErr != nil && ctx.Err() != nil {
+				return currentModemRead{Modem: modem, ReloadObserved: reloaded}, ctx.Err()
+			}
+		}
+	}
+	visible := state.Matches && state.Ready
+	if visible && targetRequiresClassification(target) {
+		kind := modem.Snapshot().SIMKind()
+		visible = kind != SIMKindUnknown && (!target.RequireEUICC || kind == SIMKindEUICC)
 	}
 	return currentModemRead{
 		Modem:          modem,
-		SIMVisible:     state.Matches && state.Ready,
+		SIMVisible:     visible,
 		ReloadObserved: reloaded,
 	}, nil
 }
 
-func simInfoMatchesTarget(info wwanmodem.SIMInfo, target SIMTarget) bool {
-	if target.Slot != 0 && uint32(info.Slot) != target.Slot {
-		return false
-	}
-	return target.ICCID == "" || strings.TrimSpace(info.ICCID) == strings.TrimSpace(target.ICCID)
-}
-
-func modemMatchesSIMTarget(m *Modem, target SIMTarget) bool {
-	snapshot := m.Snapshot()
-	if target.Slot != 0 && snapshot.PrimarySIMSlot != target.Slot {
-		return false
-	}
-	return target.ICCID == "" || (snapshot.SIM != nil && strings.TrimSpace(snapshot.SIM.Identifier) == strings.TrimSpace(target.ICCID))
+func targetRequiresClassification(target SIMTarget) bool {
+	return target.RequireClassified || target.RequireEUICC
 }

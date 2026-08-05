@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/damonto/wwan-go/cdcwdm"
 	wwanmodem "github.com/damonto/wwan-go/modem"
@@ -53,6 +54,37 @@ func TestReserveSIMSlot(t *testing.T) {
 			tt.run(t, m, release)
 		})
 	}
+}
+
+func TestWithReservedSIMSlotKeepsReservationUntilWorkflowCompletes(t *testing.T) {
+	m := new(Modem)
+	started := make(chan struct{})
+	finish := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- m.withReservedSIMSlot(t.Context(), func() error {
+			close(started)
+			<-finish
+			return nil
+		})
+	}()
+	<-started
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := m.ReserveSIMSlot(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ReserveSIMSlot() during workflow error = %v, want %v", err, context.DeadlineExceeded)
+	}
+	close(finish)
+	if err := <-done; err != nil {
+		t.Fatalf("withReservedSIMSlot() error = %v", err)
+	}
+
+	release, err := m.ReserveSIMSlot(t.Context())
+	if err != nil {
+		t.Fatalf("ReserveSIMSlot() after workflow error = %v", err)
+	}
+	release()
 }
 
 func TestProfileIDUsesCachedSIMWithoutTransport(t *testing.T) {
@@ -182,6 +214,37 @@ func TestApplySIMSlotsCachesIdentity(t *testing.T) {
 	}
 }
 
+func TestApplySIMInfoUsesKnownActivePhysicalSlot(t *testing.T) {
+	m := new(Modem)
+	m.applySIMSlots([]wwanmodem.SIMSlot{
+		{Index: 1, State: wwanmodem.SIMStateReady, ICCID: "8901000000000000001"},
+		{Index: 2, Active: true, State: wwanmodem.SIMStateReady, ICCID: "8901000000000000002"},
+	})
+
+	// The long-lived QMI client reports its configured slot 1 even though the
+	// physical slot status identifies slot 2 as active.
+	m.applySIMInfo(wwanmodem.SIMInfo{
+		Slot:         1,
+		ICCID:        "8901000000000000002",
+		OperatorID:   "310240",
+		OperatorName: "T-Mobile",
+	})
+
+	snapshot := m.Snapshot()
+	if snapshot.PrimarySIMSlot != 2 {
+		t.Fatalf("primary slot = %d, want 2", snapshot.PrimarySIMSlot)
+	}
+	if snapshot.Slots[0].Identifier != "8901000000000000001" || snapshot.Slots[0].Active {
+		t.Fatalf("slot one was overwritten by active SIM info: %+v", snapshot.Slots[0])
+	}
+	if snapshot.Slots[1].Identifier != "8901000000000000002" || !snapshot.Slots[1].Active {
+		t.Fatalf("slot two = %+v, want active physical slot", snapshot.Slots[1])
+	}
+	if snapshot.Slots[1].OperatorIdentifier != "310240" {
+		t.Fatalf("slot two operator = %q, want 310240", snapshot.Slots[1].OperatorIdentifier)
+	}
+}
+
 func TestApplySIMInfoMergesSparseMetadataForSameCard(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -232,6 +295,51 @@ func TestApplySIMInfoMergesSparseMetadataForSameCard(t *testing.T) {
 				t.Fatalf("operator = %q, want %q", snapshot.SIM.OperatorName, tt.wantOperator)
 			}
 		})
+	}
+}
+
+func TestApplySIMInfoPreservesSlotHardwareDuringProfileTransition(t *testing.T) {
+	atr := []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}
+	m := new(Modem)
+	m.applySIMInfo(wwanmodem.SIMInfo{
+		Slot:         1,
+		ICCID:        "8901000000000000001",
+		IMSI:         "001010123456789",
+		EID:          "89049032000000000000000000000001",
+		OperatorName: "Carrier",
+		ATR:          atr,
+		OwnNumbers:   []string{"+12025550123"},
+	})
+
+	// QMI briefly exposes the same slot without a profile identity while the
+	// eUICC refresh is in progress, and its transient ATR is not authoritative.
+	m.applySIMInfo(wwanmodem.SIMInfo{Slot: 1, ATR: []byte{0x3B, 0x00}})
+
+	snapshot := m.Snapshot()
+	if snapshot.SIM == nil {
+		t.Fatal("active SIM = nil, want transitional slot state")
+	}
+	if !slices.Equal(snapshot.SIM.ATR, atr) || snapshot.SIM.Eid != "89049032000000000000000000000001" {
+		t.Fatalf("slot hardware = ATR %X EID %q, want preserved eUICC identity", snapshot.SIM.ATR, snapshot.SIM.Eid)
+	}
+	if snapshot.SIM.Identifier != "" || snapshot.SIM.Imsi != "" || snapshot.SIM.OperatorName != "" || snapshot.Number != "" {
+		t.Fatalf("profile metadata survived transition: SIM=%+v number=%q", snapshot.SIM, snapshot.Number)
+	}
+	if kind := snapshot.SIMKind(); kind != SIMKindEUICC {
+		t.Fatalf("SIM kind = %q, want %q during eUICC profile transition", kind, SIMKindEUICC)
+	}
+
+	m.applySIMInfo(wwanmodem.SIMInfo{
+		Slot:  1,
+		State: wwanmodem.SIMStateReady,
+		ICCID: "8901000000000000002",
+	})
+	snapshot = m.Snapshot()
+	if !slices.Equal(snapshot.SIM.ATR, atr) || snapshot.SIM.Eid != "89049032000000000000000000000001" {
+		t.Fatalf("new profile hardware = ATR %X EID %q, want preserved eUICC identity", snapshot.SIM.ATR, snapshot.SIM.Eid)
+	}
+	if snapshot.SIM.Identifier != "8901000000000000002" || snapshot.Status.SIM != wwanmodem.SIMStateReady {
+		t.Fatalf("new profile state = SIM %+v status %v", snapshot.SIM, snapshot.Status.SIM)
 	}
 }
 
@@ -313,6 +421,18 @@ func TestApplySIMSlotsFiltersUnavailableSlots(t *testing.T) {
 	}
 }
 
+func TestApplySIMSlotsIgnoresInactiveSlotWithoutICCID(t *testing.T) {
+	m := new(Modem)
+	m.applySIMSlots([]wwanmodem.SIMSlot{
+		{Index: 1, Active: true, State: wwanmodem.SIMStateReady, ICCID: "8901000000000000001"},
+		{Index: 2, State: wwanmodem.SIMStateReady},
+	})
+
+	if got := m.Snapshot().SIMSlots; !slices.Equal(got, []uint32{1}) {
+		t.Fatalf("selectable SIM slots = %v, want [1]", got)
+	}
+}
+
 func TestApplySIMSlotsDoesNotMoveIdentityBetweenSlots(t *testing.T) {
 	m := new(Modem)
 	m.applySIMInfo(wwanmodem.SIMInfo{
@@ -320,6 +440,7 @@ func TestApplySIMSlotsDoesNotMoveIdentityBetweenSlots(t *testing.T) {
 		ICCID:        "8901000000000000001",
 		OperatorID:   "46001",
 		OperatorName: "China Unicom",
+		ATR:          []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
 		OwnNumbers:   []string{"+8613800000000"},
 	})
 	m.applySIMSlots([]wwanmodem.SIMSlot{
@@ -334,7 +455,7 @@ func TestApplySIMSlotsDoesNotMoveIdentityBetweenSlots(t *testing.T) {
 	if snapshot.Slots[0].Identifier != "8901000000000000001" || snapshot.Slots[0].Active {
 		t.Fatalf("slot one = %+v, want the inactive cached SIM", snapshot.Slots[0])
 	}
-	if snapshot.Slots[1].Identifier != "" || snapshot.Slots[1].OperatorIdentifier != "" {
+	if snapshot.Slots[1].Identifier != "" || snapshot.Slots[1].OperatorIdentifier != "" || len(snapshot.Slots[1].ATR) != 0 {
 		t.Fatalf("slot two inherited the old SIM identity: %+v", snapshot.Slots[1])
 	}
 

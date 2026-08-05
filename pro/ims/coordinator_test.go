@@ -476,6 +476,57 @@ func TestRemovedModemInvalidatesInternetGeneration(t *testing.T) {
 	}
 }
 
+func TestSIMProfileChangeRebuildsEnabledVoLTESession(t *testing.T) {
+	ctx := t.Context()
+	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+	settings := newVoLTESettingsStore(store)
+	if err := settings.Put(ctx, "modem-1", VoLTESettings{Enabled: true, DataPath: DataPathQMAP}); err != nil {
+		t.Fatalf("Put() error = %v", err)
+	}
+
+	done := make(chan struct{})
+	close(done)
+	old := &sessionState{id: 1, done: done, profileID: "old-profile"}
+	internet := &fakeInternetRestorer{}
+	coordinator := &coordinator{
+		access:           AccessVoLTE,
+		internet:         internet,
+		volteSettings:    settings,
+		sessions:         map[string]*sessionState{"modem-1": old},
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+	}
+	modem := qmiTestModem("modem-1")
+	modem.Sim = &mmodem.SIM{Identifier: "new-profile"}
+
+	coordinator.processModemEvent(ctx, mmodem.ModemEvent{
+		Type:       mmodem.ModemEventSIMChanged,
+		Modem:      modem,
+		Generation: modem.Generation(),
+	})
+
+	coordinator.mu.Lock()
+	current := coordinator.sessions[modem.EquipmentIdentifier]
+	coordinator.mu.Unlock()
+	if current == nil || current == old {
+		t.Fatal("SIM profile change did not replace the old VoLTE session")
+	}
+	if current.profileID != "new-profile" {
+		t.Fatalf("new session profile ID = %q, want %q", current.profileID, "new-profile")
+	}
+	coordinator.stop(modem.EquipmentIdentifier)
+	if !slices.Contains(internet.calls, "internet:invalidate") {
+		t.Fatalf("Internet calls = %v, want generation invalidation", internet.calls)
+	}
+}
+
 func TestDisableVoLTERestoresNormalInternetMode(t *testing.T) {
 	ctx := context.Background()
 	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))

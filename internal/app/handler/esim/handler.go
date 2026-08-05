@@ -25,6 +25,7 @@ type Config struct {
 	Store     *settings.Store
 	Registry  *mmodem.Registry
 	Internet  *internet.Connector
+	LPA       *lpa.Pool
 	Reminders *reminder.Scheduler
 }
 
@@ -69,7 +70,9 @@ var wsUpgrader = websocket.Upgrader{
 	},
 }
 
-const enableTimeout = 2 * time.Minute
+// Some Qualcomm firmware needs nearly five minutes between accepting
+// EnableProfile and exposing the replacement profile through UIM.
+const enableTimeout = 5 * time.Minute
 
 var errEnableTimeout = errors.New("enabling timed out, please refresh to confirm whether the profile is active")
 
@@ -88,9 +91,9 @@ const (
 func New(cfg Config) *Handler {
 	return &Handler{
 		registry:     cfg.Registry,
-		profile:      newProfile(cfg.Store, cfg.Reminders),
-		provisioning: newProvisioning(cfg.Store),
-		lifecycle:    newLifecycle(cfg.Store, cfg.Registry),
+		profile:      newProfile(cfg.Store, cfg.Reminders, cfg.LPA),
+		provisioning: newProvisioning(cfg.LPA),
+		lifecycle:    newLifecycle(cfg.Store, cfg.Registry, cfg.LPA),
 		internet:     cfg.Internet,
 		reminders:    cfg.Reminders,
 	}

@@ -61,18 +61,32 @@ func (m *Modem) Disable(ctx context.Context) error {
 }
 
 func (m *Modem) SetPrimarySimSlot(ctx context.Context, slot uint32) error {
+	if err := m.validatePrimarySIMSlot(slot); err != nil {
+		return fmt.Errorf("set primary SIM slot: %w", err)
+	}
+	return m.withReservedSIMSlot(ctx, func() error {
+		if err := m.setPrimarySIMSlot(ctx, slot); err != nil {
+			return fmt.Errorf("set primary SIM slot: %w", err)
+		}
+		return nil
+	})
+}
+
+func (m *Modem) validatePrimarySIMSlot(slot uint32) error {
 	if m == nil || m.core == nil {
 		return errModemRequired
 	}
 	if slot == 0 || slot > 255 {
-		return fmt.Errorf("set primary SIM slot: slot %d is outside 1..255", slot)
+		return fmt.Errorf("slot %d is outside 1..255", slot)
 	}
-	release, err := m.ReserveSIMSlot(ctx)
-	if err != nil {
-		return fmt.Errorf("reserve primary SIM slot: %w", err)
+	return nil
+}
+
+func (m *Modem) setPrimarySIMSlot(ctx context.Context, slot uint32) error {
+	if err := m.core.SetPrimarySIMSlot(ctx, uint8(slot)); err != nil {
+		return err
 	}
-	defer release()
-	return m.core.SetPrimarySIMSlot(ctx, uint8(slot))
+	return nil
 }
 
 func (m *Modem) SupportedModes(ctx context.Context) ([]wwanmodem.Mode, error) {

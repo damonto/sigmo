@@ -51,6 +51,7 @@ var (
 type transferRunner struct {
 	store         *settings.Store
 	registry      *mmodem.Registry
+	lpaClients    *ilpa.Pool
 	enableProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
 	deleteProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
 	websheets     *websheet.Broker
@@ -60,6 +61,7 @@ func newTransferRunner(opts Config) *transferRunner {
 	return &transferRunner{
 		store:         opts.Store,
 		registry:      opts.Registry,
+		lpaClients:    opts.LPA,
 		enableProfile: opts.EnableProfile,
 		deleteProfile: opts.DeleteProfile,
 		websheets:     opts.Websheets,
@@ -290,11 +292,7 @@ func (s *transferRunner) prepare(ctx context.Context, target *mmodem.Modem, star
 		}
 	}()
 
-	targetSE, err := ilpa.ResolveSE(ctx, target, start.SEID)
-	if err != nil {
-		return nil, fmt.Errorf("resolve target eUICC SE: %w", err)
-	}
-	targetLPA, err := ilpa.NewWithAID(ctx, target, currentSettings, targetSE.AID)
+	targetLPA, err := s.lpaClients.Acquire(ctx, target, start.SEID)
 	if err != nil {
 		return nil, fmt.Errorf("create target LPA client: %w", err)
 	}
@@ -336,7 +334,7 @@ func (s *transferRunner) prepare(ctx context.Context, target *mmodem.Modem, star
 		settings:   currentSettings,
 		source:     source,
 		target:     target,
-		targetSEID: targetSE.ID,
+		targetSEID: start.SEID,
 		targetLPA:  targetLPA,
 		ts43Client: ts43Client,
 		logger:     logger,

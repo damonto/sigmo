@@ -7,11 +7,12 @@ import (
 )
 
 type SlotResponse struct {
+	Slot               uint32            `json:"slot" jsonschema:"one-based physical SIM slot number"`
 	Active             bool              `json:"active" jsonschema:"whether this SIM slot is currently selected"`
 	OperatorName       string            `json:"operatorName" jsonschema:"display name of the SIM operator; empty when unknown"`
 	OperatorIdentifier string            `json:"operatorIdentifier" jsonschema:"SIM operator identifier, typically the MCC and MNC; empty when unknown"`
 	RegionCode         string            `json:"regionCode" jsonschema:"carrier region code; empty when unknown"`
-	Identifier         string            `json:"identifier" jsonschema:"SIM ICCID used to identify and select this slot"`
+	Identifier         string            `json:"identifier" jsonschema:"SIM ICCID; use slot rather than this value when selecting a physical slot"`
 	Reminder           *reminder.Details `json:"reminder" jsonschema:"reminder attached to this SIM; null when none is configured"`
 }
 

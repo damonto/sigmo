@@ -211,7 +211,7 @@ func (s *transferRunner) deleteModemSourceProfile(ctx context.Context, currentSe
 	if err != nil {
 		return err
 	}
-	profiles, err := sourceModemProfiles(ctx, modem, currentSettings)
+	profiles, err := s.sourceModemProfiles(ctx, modem, currentSettings)
 	if err != nil {
 		return err
 	}
@@ -225,11 +225,7 @@ func (s *transferRunner) deleteModemSourceProfile(ctx context.Context, currentSe
 		}
 		return s.deleteModemProfile(ctx, modem, sourceProfileSEID(start.ProfileID), iccid)
 	}
-	se, err := ilpa.ResolveSE(ctx, modem, sourceProfileSEID(start.ProfileID))
-	if err != nil {
-		return fmt.Errorf("resolve source eUICC SE: %w", err)
-	}
-	sourceLPA, err := ilpa.NewWithAID(ctx, modem, currentSettings, se.AID)
+	sourceLPA, err := s.lpaClients.Acquire(ctx, modem, sourceProfileSEID(start.ProfileID))
 	if err != nil {
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
@@ -249,14 +245,14 @@ type sourceModemProfile struct {
 	profile *sgp22.ProfileInfo
 }
 
-func sourceModemProfiles(ctx context.Context, modem *mmodem.Modem, currentSettings *settings.Settings) ([]sourceModemProfile, error) {
-	ses, err := ilpa.DiscoverSEs(ctx, modem)
+func (s *transferRunner) sourceModemProfiles(ctx context.Context, modem *mmodem.Modem, _ *settings.Settings) ([]sourceModemProfile, error) {
+	ses, err := s.lpaClients.SecureElements(ctx, modem)
 	if err != nil {
 		return nil, fmt.Errorf("discover source eUICC SEs: %w", err)
 	}
 	out := []sourceModemProfile{}
 	for _, se := range ses {
-		sourceLPA, err := ilpa.NewWithAID(ctx, modem, currentSettings, se.AID)
+		sourceLPA, err := s.lpaClients.Acquire(ctx, modem, se.ID)
 		if err != nil {
 			return nil, fmt.Errorf("create source LPA client for %s: %w", se.ID, err)
 		}

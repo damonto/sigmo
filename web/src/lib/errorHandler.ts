@@ -107,7 +107,12 @@ export const handleResponseError = (response: Response, data?: unknown) => {
     clearStoredToken()
   }
 
-  handleError(apiError)
+  // A removable card can advertise eUICC capability in its ATR while not
+  // exposing an ISD-R application. Callers still receive the typed error and
+  // can render an empty eSIM state without showing a global failure toast.
+  if (apiError.error_code !== 'euicc_not_supported') {
+    handleError(apiError)
+  }
   console.error('[API Error]', response.status, apiError)
 
   return Object.assign(new Error(apiError.message), apiError)

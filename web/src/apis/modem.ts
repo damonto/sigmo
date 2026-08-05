@@ -40,11 +40,11 @@ export const useModemApi = () => {
   }
 
   /**
-   * Switch active SIM slot by identifier
-   * PUT /api/v1/modems/:id/sim-slots/:identifier
+   * Switch active SIM slot by physical slot number
+   * PUT /api/v1/modems/:id/sim-slots/:slot
    */
-  const switchSimSlot = (id: string, identifier: string) => {
-    return fetchJson<void>(`modems/${id}/sim-slots/${identifier}`, {
+  const switchSimSlot = (id: string, slot: number) => {
+    return fetchJson<void>(`modems/${id}/sim-slots/${slot}`, {
       method: 'PUT',
     })
   }

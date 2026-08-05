@@ -3,16 +3,15 @@ package modem
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
 var (
-	errSimIdentifierRequired = errors.New("identifier is required")
-	errSimSlotsUnavailable   = errors.New("sim slots not available")
-	errSimSlotNotFound       = errors.New("sim slot not found")
-	errSimSlotAlreadyActive  = errors.New("sim slot already active")
+	errSimSlotRequired      = errors.New("SIM slot is required")
+	errSimSlotsUnavailable  = errors.New("sim slots not available")
+	errSimSlotNotFound      = errors.New("sim slot not found")
+	errSimSlotAlreadyActive = errors.New("sim slot already active")
 )
 
 type simSlot struct {
@@ -24,42 +23,26 @@ func newSIMSlot(registry *mmodem.Registry) *simSlot {
 }
 
 func (s *simSlot) Switch(ctx context.Context, modem *mmodem.Modem, slotIndex uint32) error {
-	if err := modem.SetPrimarySimSlot(ctx, slotIndex); err != nil {
-		err = fmt.Errorf("set primary SIM slot: %w", err)
-		if !mmodem.IsTransientRestartError(err) {
-			return err
-		}
-	}
-	_, err := s.registry.EnsureSIMVisible(ctx, modem, mmodem.SIMTarget{Slot: slotIndex})
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("wait for modem: %w", err)
-		}
-		return err
-	}
-	return nil
+	_, err := s.registry.SwitchSIMSlot(ctx, modem, slotIndex)
+	return err
 }
 
-func (s *simSlot) targetIndex(ctx context.Context, modem *mmodem.Modem, identifier string) (uint32, error) {
-	if identifier == "" {
-		return 0, errSimIdentifierRequired
+func (s *simSlot) targetIndex(modem *mmodem.Modem, slotIndex uint32) (uint32, error) {
+	if slotIndex == 0 {
+		return 0, errSimSlotRequired
 	}
-	slots := modem.Snapshot().SIMSlots
-	if len(slots) == 0 {
+	snapshot := modem.Snapshot()
+	if len(snapshot.Slots) == 0 {
 		return 0, errSimSlotsUnavailable
 	}
-	for _, slotPath := range slots {
-		sim, err := modem.SIMs().Get(ctx, slotPath)
-		if err != nil {
-			return 0, fmt.Errorf("fetch SIM for slot %d: %w", slotPath, err)
-		}
-		if sim.Identifier != identifier {
+	for _, sim := range snapshot.Slots {
+		if sim == nil || sim.Slot != slotIndex {
 			continue
 		}
 		if sim.Active {
 			return 0, errSimSlotAlreadyActive
 		}
-		return slotPath, nil
+		return slotIndex, nil
 	}
 	return 0, errSimSlotNotFound
 }

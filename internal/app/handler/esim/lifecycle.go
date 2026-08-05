@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/damonto/euicc-go/bertlv"
 	sgp22 "github.com/damonto/euicc-go/v2"
@@ -23,12 +24,13 @@ type lifecycle struct {
 }
 
 type enableSession struct {
-	l       *lifecycle
-	modem   *mmodem.Modem
-	seID    string
-	iccid   sgp22.ICCID
-	client  lifecycleClient
-	lastSeq sgp22.SequenceNumber
+	l             *lifecycle
+	modem         *mmodem.Modem
+	seID          string
+	iccid         sgp22.ICCID
+	previousICCID string
+	client        lifecycleClient
+	lastSeq       sgp22.SequenceNumber
 }
 
 type lifecycleClient interface {
@@ -50,20 +52,18 @@ var (
 	errProfileAlreadyActive      = errors.New("profile already active")
 )
 
-func newLifecycle(store *settings.Store, registry *mmodem.Registry) *lifecycle {
+func newLifecycle(store *settings.Store, registry *mmodem.Registry, clients *lpa.Pool) *lifecycle {
 	return &lifecycle{
 		store:            store,
-		newClient:        newLifecycleClient,
+		newClient:        newLifecycleClient(clients),
 		ensureSIMVisible: registry.EnsureSIMVisible,
 	}
 }
 
-func newLifecycleClient(ctx context.Context, modem *mmodem.Modem, currentSettings *settings.Settings, seID string) (lifecycleClient, error) {
-	se, err := lpa.ResolveSE(ctx, modem, seID)
-	if err != nil {
-		return nil, fmt.Errorf("resolve eUICC SE: %w", err)
+func newLifecycleClient(clients *lpa.Pool) lifecycleClientFactory {
+	return func(ctx context.Context, modem *mmodem.Modem, _ *settings.Settings, seID string) (lifecycleClient, error) {
+		return clients.Acquire(ctx, modem, seID)
 	}
-	return lpa.NewWithAID(ctx, modem, currentSettings, se.AID)
 }
 
 func (l *lifecycle) settingsSnapshot() *settings.Settings {
@@ -84,11 +84,12 @@ func (l *lifecycle) PrepareEnable(ctx context.Context, modem *mmodem.Modem, seID
 		return nil, fmt.Errorf("create LPA client: %w", err)
 	}
 	session := &enableSession{
-		l:      l,
-		modem:  modem,
-		seID:   seID,
-		iccid:  iccid,
-		client: client,
+		l:             l,
+		modem:         modem,
+		seID:          seID,
+		iccid:         iccid,
+		previousICCID: activeModemICCID(modem),
+		client:        client,
 	}
 	release := false
 	defer func() {
@@ -127,12 +128,18 @@ func (s *enableSession) Enable(ctx context.Context) error {
 		return fmt.Errorf("enable profile %s: %w", s.iccid.String(), err)
 	}
 
-	s.Close()
+	if err := s.closeForRefresh(); err != nil {
+		slog.Warn("close LPA client after profile enable", "imei", s.modem.EquipmentIdentifier, "error", err)
+	}
 	return s.finish(ctx)
 }
 
 func (s *enableSession) finish(ctx context.Context) error {
-	target, err := s.l.ensureSIMVisible(ctx, s.modem, mmodem.SIMTarget{ICCID: s.iccid.String()})
+	target, err := s.l.ensureSIMVisible(ctx, s.modem, mmodem.SIMTarget{
+		ICCID:         s.iccid.String(),
+		PreviousICCID: s.previousICCID,
+		RequireEUICC:  true,
+	})
 	if err != nil {
 		return fmt.Errorf("wait for modem readiness: %w", err)
 	}
@@ -140,6 +147,17 @@ func (s *enableSession) finish(ctx context.Context) error {
 		slog.Warn("handle eSIM profile notifications", "error", err, "imei", s.modem.EquipmentIdentifier)
 	}
 	return nil
+}
+
+func activeModemICCID(modem *mmodem.Modem) string {
+	if modem == nil {
+		return ""
+	}
+	sim := modem.Snapshot().SIM
+	if sim == nil {
+		return ""
+	}
+	return strings.TrimSpace(sim.Identifier)
 }
 
 func (s *enableSession) Close() {
@@ -150,6 +168,18 @@ func (s *enableSession) Close() {
 		s.modem.Logger().Warn("failed to close LPA client", "error", err)
 	}
 	s.client = nil
+}
+
+func (s *enableSession) closeForRefresh() error {
+	if s == nil || s.client == nil {
+		return nil
+	}
+	client := s.client
+	s.client = nil
+	if closer, ok := client.(interface{ CloseForRefresh() error }); ok {
+		return closer.CloseForRefresh()
+	}
+	return client.Close()
 }
 
 func (l *lifecycle) Delete(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {

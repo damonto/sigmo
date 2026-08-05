@@ -31,6 +31,7 @@ const modem = (number: string): Modem => ({
   unlockRequired: 'none',
   unlockSupported: false,
   sim: {
+    slot: 1,
     active: true,
     operatorName: 'T-Mobile',
     operatorIdentifier: '310260',

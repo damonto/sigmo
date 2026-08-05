@@ -33,7 +33,7 @@ func (s *transferRunner) modemProfileOptions(ctx context.Context, currentSetting
 	if err != nil {
 		return nil, err
 	}
-	profiles, err := sourceModemProfiles(ctx, modem, currentSettings)
+	profiles, err := s.sourceModemProfiles(ctx, modem, currentSettings)
 	if err == nil {
 		return modemESIMOptions(profiles), nil
 	}

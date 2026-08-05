@@ -28,14 +28,14 @@ const props = defineProps<{
   registeredOperatorName?: string | null
   wifiCallingConnected?: boolean
   airplaneMode?: boolean
-  onSwitch?: (identifier: string) => Promise<void>
+  onSwitch?: (slot: SlotInfo) => Promise<void>
 }>()
 
-const selectedIdentifier = defineModel<string>({ required: true })
+const selectedSlot = defineModel<string>({ required: true })
 
 const { t } = useI18n()
 
-const pendingIdentifier = ref<string | null>(null)
+const pendingSlotNumber = ref<number | null>(null)
 const dialogOpen = ref(false)
 const isSwitching = ref(false)
 
@@ -44,35 +44,39 @@ const showSignalStatus = computed(
   () => props.registrationState !== undefined && props.signalQuality !== undefined,
 )
 
-const openDialog = (identifier: string) => {
+const slotValue = (slot: SlotInfo) => String(slot.slot)
+
+const openDialog = (slot: SlotInfo) => {
   if (!hasMultipleSlots.value) return
-  if (identifier === selectedIdentifier.value) return
-  pendingIdentifier.value = identifier
+  if (slotValue(slot) === selectedSlot.value) return
+  pendingSlotNumber.value = slot.slot
   dialogOpen.value = true
 }
 
 const handleSelect = (payload: AcceptableValue) => {
   if (!hasMultipleSlots.value) return
   if (typeof payload !== 'string') return
-  if (payload === selectedIdentifier.value) return
-  openDialog(payload)
+  if (payload === selectedSlot.value) return
+  const slot = props.slots.find((item) => slotValue(item) === payload)
+  if (!slot) return
+  openDialog(slot)
 }
 
 const closeDialog = () => {
-  pendingIdentifier.value = null
+  pendingSlotNumber.value = null
   dialogOpen.value = false
   isSwitching.value = false
 }
 
 const confirmSwitch = async () => {
-  if (!pendingIdentifier.value) return
+  if (!pendingSlot.value) return
   if (isSwitching.value) return
   isSwitching.value = true
   try {
     if (props.onSwitch) {
-      await props.onSwitch(pendingIdentifier.value)
+      await props.onSwitch(pendingSlot.value)
     } else {
-      selectedIdentifier.value = pendingIdentifier.value
+      selectedSlot.value = slotValue(pendingSlot.value)
     }
     closeDialog()
   } catch (err) {
@@ -83,18 +87,13 @@ const confirmSwitch = async () => {
   }
 }
 
-const getSlotLabel = (index: number) => {
-  return `SIM ${index + 1}`
+const getSlotLabel = (slot: SlotInfo) => {
+  return `SIM ${slot.slot}`
 }
 
 const pendingSlot = computed(() => {
-  if (!pendingIdentifier.value) return null
-  return props.slots.find((slot) => slot.identifier === pendingIdentifier.value)
-})
-
-const pendingSlotIndex = computed(() => {
-  if (!pendingIdentifier.value) return -1
-  return props.slots.findIndex((slot) => slot.identifier === pendingIdentifier.value)
+  if (pendingSlotNumber.value === null) return null
+  return props.slots.find((slot) => slot.slot === pendingSlotNumber.value) ?? null
 })
 
 const pendingOperatorName = computed(() => pendingSlot.value?.operatorName ?? '')
@@ -102,14 +101,14 @@ const pendingIdentifierValue = computed(() => pendingSlot.value?.identifier ?? '
 const pendingRegionCode = computed(() => pendingSlot.value?.regionCode ?? '')
 
 const confirmTitle = computed(() => {
-  return t('modemDetail.sim.confirm', { sim: pendingSlotIndex.value + 1 })
+  return t('modemDetail.sim.confirm', { sim: pendingSlot.value?.slot ?? '' })
 })
 
 const slotOptionClass = (slot: SlotInfo) => {
   if (!hasMultipleSlots.value) {
     return 'cursor-default text-muted-foreground'
   }
-  if (slot.identifier === selectedIdentifier.value) {
+  if (slotValue(slot) === selectedSlot.value) {
     return 'cursor-default text-primary'
   }
   return 'cursor-pointer text-muted-foreground hover:text-foreground'
@@ -121,23 +120,23 @@ const slotOptionClass = (slot: SlotInfo) => {
     class="flex min-w-0 items-center gap-2 rounded-lg bg-card/90 px-3 py-2 shadow-sm backdrop-blur-xl dark:bg-card/70 dark:shadow-none"
   >
     <RadioGroup
-      :model-value="selectedIdentifier"
+      :model-value="selectedSlot"
       :disabled="!hasMultipleSlots"
       class="inline-flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto"
       @update:model-value="handleSelect"
     >
-      <div v-for="(slot, index) in slots" :key="slot.identifier" class="relative flex items-center">
+      <div v-for="slot in slots" :key="slot.slot" class="relative flex items-center">
         <Label
-          :for="`sim-slot-${slot.identifier}`"
+          :for="`sim-slot-${slot.slot}`"
           class="inline-flex h-7 select-none items-center gap-2 rounded-md px-2 text-xs font-semibold uppercase transition-colors"
           :class="slotOptionClass(slot)"
         >
           <RadioGroupItem
-            :id="`sim-slot-${slot.identifier}`"
-            :value="slot.identifier"
+            :id="`sim-slot-${slot.slot}`"
+            :value="slotValue(slot)"
             class="size-3.5"
           />
-          {{ getSlotLabel(index) }}
+          {{ getSlotLabel(slot) }}
         </Label>
       </div>
     </RadioGroup>

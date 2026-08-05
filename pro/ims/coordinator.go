@@ -173,6 +173,17 @@ func (c *coordinator) processModemEvent(ctx context.Context, event mmodem.ModemE
 				slog.Warn("invalidate Internet after modem removal", "imei", event.Modem.EquipmentIdentifier, "generation", event.Generation, "error", err)
 			}
 		}
+	case mmodem.ModemEventSIMChanged:
+		if event.Modem == nil {
+			return
+		}
+		if c.internet != nil {
+			if err := c.internet.InvalidateModem(ctx, event.Modem); err != nil {
+				slog.Warn("invalidate Internet after SIM profile change", "imei", event.Modem.EquipmentIdentifier, "generation", event.Generation, "error", err)
+			}
+		}
+		c.stop(event.Modem.EquipmentIdentifier)
+		c.startIfEnabled(ctx, event.Modem)
 	}
 }
 

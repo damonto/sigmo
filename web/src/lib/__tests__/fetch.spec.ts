@@ -61,6 +61,23 @@ describe('useFetch global error handling', () => {
     expect(notifyHarness.error).toHaveBeenCalledWith('Server Error', 'request rejected')
   })
 
+  it('does not show a global toast when the active SIM has no eUICC application', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error_code: 'euicc_not_supported',
+          message: 'no supported ISD-R AID found',
+          request_id: 'req-2',
+        }),
+        { status: 404, statusText: 'Not Found' },
+      ),
+    )
+
+    await expect(fetchJson('modems/1/esims')).rejects.toThrow('no supported ISD-R AID found')
+
+    expect(notifyHarness.error).not.toHaveBeenCalled()
+  })
+
   it('resolves empty successful responses without parsing errors', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }))
 

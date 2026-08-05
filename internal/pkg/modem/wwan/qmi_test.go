@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/damonto/wwan-go/qcom"
@@ -615,27 +614,19 @@ func TestOpenRejectsInvalidConfig(t *testing.T) {
 	}
 }
 
-func TestOpenFunctionsEnforceProtocolLifecycle(t *testing.T) {
+func TestOpenRejectsUnsupportedProtocol(t *testing.T) {
 	tests := []struct {
 		name string
 		open func(Config) error
 		cfg  Config
 	}{
 		{
-			name: "operation-scoped QMI",
+			name: "QMI",
 			open: func(cfg Config) error {
 				_, err := Open(cfg)
 				return err
 			},
 			cfg: Config{PortType: PortTypeQMI, Device: "/dev/cdc-wdm0", Slot: 1},
-		},
-		{
-			name: "session-scoped MBIM",
-			open: func(cfg Config) error {
-				_, err := OpenSession(cfg)
-				return err
-			},
-			cfg: Config{PortType: PortTypeMBIM, Device: "/dev/cdc-wdm0", Slot: 1},
 		},
 	}
 	for _, tt := range tests {
@@ -800,99 +791,6 @@ func TestQMIDeviceSIMState(t *testing.T) {
 					tt.client.transparentRead.Length != qmiICCIDFileSize {
 					t.Fatalf("transparent read = %+v, want EF_ICCID", tt.client.transparentRead)
 				}
-			}
-		})
-	}
-}
-
-func TestQMIDevicePowerCycleSIM(t *testing.T) {
-	oldDelay := qmiSIMPowerCycleDelay
-	qmiSIMPowerCycleDelay = time.Nanosecond
-	t.Cleanup(func() {
-		qmiSIMPowerCycleDelay = oldDelay
-	})
-
-	errOpen := errors.New("proxy unavailable")
-	errPowerOff := errors.New("power off rejected")
-	errPowerOn := errors.New("power on rejected")
-	tests := []struct {
-		name      string
-		cfg       Config
-		client    *fakeQMIClient
-		openErr   error
-		cancelCtx bool
-		wantCalls []string
-		wantErr   error
-	}{
-		{
-			name:      "power cycles default slot",
-			cfg:       testQMIConfig(1),
-			client:    &fakeQMIClient{},
-			wantCalls: []string{"power-off:1", "power-on:1"},
-		},
-		{
-			name:      "power cycles primary slot",
-			cfg:       testQMIConfig(2),
-			client:    &fakeQMIClient{},
-			wantCalls: []string{"power-off:2", "power-on:2"},
-		},
-		{
-			name:      "returns open error",
-			cfg:       testQMIConfig(1),
-			openErr:   errOpen,
-			wantCalls: nil,
-			wantErr:   errOpen,
-		},
-		{
-			name:      "returns power off error",
-			cfg:       testQMIConfig(1),
-			client:    &fakeQMIClient{powerOffErr: errPowerOff},
-			wantCalls: []string{"power-off:1"},
-			wantErr:   errPowerOff,
-		},
-		{
-			name:      "returns power on error",
-			cfg:       testQMIConfig(1),
-			client:    &fakeQMIClient{powerOnErr: errPowerOn},
-			wantCalls: []string{"power-off:1", "power-on:1"},
-			wantErr:   errPowerOn,
-		},
-		{
-			name:      "powers SIM back on after parent context is canceled",
-			cfg:       testQMIConfig(1),
-			client:    &fakeQMIClient{},
-			cancelCtx: true,
-			wantCalls: []string{"power-off:1", "power-on:1"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			slot := qmiTestSlot(tt.cfg)
-			ctx := context.Background()
-			if tt.cancelCtx {
-				cancelCtx, cancel := context.WithCancel(ctx)
-				ctx = cancelCtx
-				tt.client.afterPowerOff = cancel
-			}
-
-			device := qmiSession{
-				slot:       slot,
-				imei:       tt.cfg.IMEI,
-				openClient: qmiClientOpener(t, slot, tt.client, tt.openErr),
-			}
-			err := device.PowerCycleSIM(ctx)
-			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
-				t.Fatalf("PowerCycleSIM() error = %v, want %v", err, tt.wantErr)
-			}
-			if tt.wantErr == nil && err != nil {
-				t.Fatalf("PowerCycleSIM() error = %v", err)
-			}
-			if tt.client != nil && !slices.Equal(tt.client.calls, tt.wantCalls) {
-				t.Fatalf("client calls = %v, want %v", tt.client.calls, tt.wantCalls)
-			}
-			if tt.client != nil && slices.Contains(tt.wantCalls, fmtCall("power-on", slot)) && !tt.client.powerOnReq.IgnoreHotSwapSwitch {
-				t.Fatal("PowerOnSIM() IgnoreHotSwapSwitch = false, want true")
 			}
 		})
 	}
@@ -1103,6 +1001,60 @@ func TestWatchQMIRefreshFallbacks(t *testing.T) {
 	}
 }
 
+func TestWatchSIMRefreshReopensClientAfterReset(t *testing.T) {
+	rawEvents := make(chan qcom.RefreshEvent, 1)
+	first := &fakeQMIClientWithRefresh{
+		fakeQMIClient: &fakeQMIClient{},
+		fakeQMIRefreshClient: &fakeQMIRefreshClient{
+			stream: rawEvents,
+		},
+	}
+	second := &fakeQMIClient{
+		cardStatus:      qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateReady, []byte{0x01}),
+		transparentData: []byte{0x98, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF1},
+	}
+	clients := []qmiClient{first, second}
+	openCalls := 0
+	device := &qmiSession{slot: 1}
+	device.openClient = func(context.Context, uint8) (qmiClient, error) {
+		client := clients[min(openCalls, len(clients)-1)]
+		openCalls++
+		return client, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, err := device.WatchSIMRefresh(ctx)
+	if err != nil {
+		t.Fatalf("WatchSIMRefresh() error = %v", err)
+	}
+	rawEvents <- qcom.RefreshEvent{Stage: qcom.RefreshStageEndWithSuccess, Mode: qcom.RefreshModeReset}
+	event, ok := <-events
+	if !ok || event.Stage != SIMRefreshEndWithSuccess || event.Mode != SIMRefreshReset {
+		t.Fatalf("refresh event = %+v, open %t", event, ok)
+	}
+	if _, ok := <-events; ok {
+		t.Fatal("refresh stream remained open after reset")
+	}
+	if closeCalls := countCalls(first.calls, "close"); closeCalls != 1 {
+		t.Fatalf("first client close calls = %d, want 1", closeCalls)
+	}
+
+	state, err := device.SIMState(context.Background(), Target{Slot: 1})
+	if err != nil {
+		t.Fatalf("SIMState() after refresh error = %v", err)
+	}
+	if !state.Ready || state.ICCID == "" {
+		t.Fatalf("SIMState() after refresh = %+v, want ready SIM", state)
+	}
+	if openCalls != 2 {
+		t.Fatalf("open calls = %d, want 2", openCalls)
+	}
+	if err := device.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
 type fakeQMIClient struct {
 	calls               []string
 	msisdn              qcom.DMSGetMSISDNResponse
@@ -1126,10 +1078,6 @@ type fakeQMIClient struct {
 	imssTestModeErr     error
 	setIMSSTestMode     bool
 	setIMSSTestModeErr  error
-	powerOffErr         error
-	afterPowerOff       func()
-	powerOnErr          error
-	powerOnReq          qcom.PowerOnSIMRequest
 	cardStatus          qcom.CardStatus
 	cardStatusErr       error
 	changeReq           qcom.ChangeProvisioningSessionRequest
@@ -1142,6 +1090,11 @@ type fakeQMIRefreshClient struct {
 	allSessions []qcom.Session
 	filesReq    qcom.RefreshRegisterRequest
 	filesErr    error
+}
+
+type fakeQMIClientWithRefresh struct {
+	*fakeQMIClient
+	*fakeQMIRefreshClient
 }
 
 func (c *fakeQMIRefreshClient) WatchRefreshAll(_ context.Context, session qcom.Session, _ []byte) (<-chan qcom.RefreshEvent, error) {
@@ -1212,20 +1165,6 @@ func (r *fakeQMIClient) SetIMSSTestMode(_ context.Context, enabled bool) error {
 	r.calls = append(r.calls, "set-imss-test-mode")
 	r.setIMSSTestMode = enabled
 	return r.setIMSSTestModeErr
-}
-
-func (r *fakeQMIClient) PowerOffSIM(_ context.Context, slot uint8) error {
-	r.calls = append(r.calls, fmtCall("power-off", slot))
-	if r.afterPowerOff != nil {
-		r.afterPowerOff()
-	}
-	return r.powerOffErr
-}
-
-func (r *fakeQMIClient) PowerOnSIM(_ context.Context, req qcom.PowerOnSIMRequest) error {
-	r.calls = append(r.calls, fmtCall("power-on", req.Slot))
-	r.powerOnReq = req
-	return r.powerOnErr
 }
 
 func (r *fakeQMIClient) CardStatus(context.Context) (qcom.CardStatus, error) {

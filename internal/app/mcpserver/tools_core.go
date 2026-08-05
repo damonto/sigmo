@@ -24,6 +24,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/mcpauth"
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	internetcore "github.com/damonto/sigmo/internal/pkg/internet"
+	"github.com/damonto/sigmo/internal/pkg/lpa"
 	messagecore "github.com/damonto/sigmo/internal/pkg/message"
 	modemcore "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/networkprefs"
@@ -37,6 +38,7 @@ type CoreToolsConfig struct {
 	Store               *settings.Store
 	Registry            *modemcore.Registry
 	InternetConnector   *internetcore.Connector
+	LPAClients          *lpa.Pool
 	InternetConnections appconnectivity.InternetConnections
 	Relay               *forwarder.Relay
 	NetworkPreferences  *networkprefs.Store
@@ -59,7 +61,7 @@ type coreTools struct {
 }
 
 func RegisterCoreTools(catalog *Catalog, cfg CoreToolsConfig) error {
-	if catalog == nil || cfg.Store == nil || cfg.Registry == nil || cfg.InternetConnector == nil || cfg.InternetConnections == nil || cfg.Storage == nil {
+	if catalog == nil || cfg.Store == nil || cfg.Registry == nil || cfg.InternetConnector == nil || cfg.LPAClients == nil || cfg.InternetConnections == nil || cfg.Storage == nil {
 		return errors.New("MCP core tool dependencies are required")
 	}
 	networks, err := networkhandler.New(cfg.Registry, cfg.NetworkPreferences, cfg.Storage)
@@ -70,9 +72,9 @@ func RegisterCoreTools(catalog *Catalog, cfg CoreToolsConfig) error {
 		registry: cfg.Registry,
 		modems:   modemhandler.New(cfg.Store, cfg.Registry, cfg.InternetConnector, cfg.Reminders, cfg.ModemOverview...),
 		network:  networks,
-		euicc:    euicchandler.New(cfg.Store, cfg.Registry),
+		euicc:    euicchandler.New(cfg.Registry, cfg.LPAClients),
 		esim: esimhandler.New(esimhandler.Config{
-			Store: cfg.Store, Registry: cfg.Registry, Internet: cfg.InternetConnector, Reminders: cfg.Reminders,
+			Store: cfg.Store, Registry: cfg.Registry, LPA: cfg.LPAClients, Internet: cfg.InternetConnector, Reminders: cfg.Reminders,
 		}),
 		internet: cfg.InternetConnections,
 		messages: messagecore.New(cfg.Storage, cfg.MessageRoute),
@@ -323,26 +325,26 @@ func (t *coreTools) listSecureElements(ctx context.Context, _ *mcp.CallToolReque
 }
 
 type simSlotInput struct {
-	ModemID    string `json:"modemId"`
-	Identifier string `json:"identifier"`
+	ModemID string `json:"modemId"`
+	Slot    uint32 `json:"slot"`
 }
 
 func simSlotModemIDs(input simSlotInput) []string { return []string{input.ModemID} }
 func (t *coreTools) switchSIMPolicy() GuardedToolPolicy[simSlotInput] {
 	return GuardedToolPolicy[simSlotInput]{
 		Validate: func(ctx context.Context, input simSlotInput) error {
-			if strings.TrimSpace(input.Identifier) == "" {
-				return NewToolError("invalid_request", "SIM identifier is required", nil)
+			if input.Slot == 0 {
+				return NewToolError("invalid_request", "SIM slot is required", nil)
 			}
 			return t.validateModem(ctx, input.ModemID)
 		},
 		Confirmation: func(input simSlotInput) string {
-			return fmt.Sprintf("Switch modem %q to SIM %q? This can interrupt mobile network, SMS, and IMS services.", input.ModemID, input.Identifier)
+			return fmt.Sprintf("Switch modem %q to SIM slot %d? This can interrupt mobile network, SMS, and IMS services.", input.ModemID, input.Slot)
 		},
 	}
 }
 func (t *coreTools) switchSIMSlot(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input simSlotInput) (successOutput, error) {
-	if err := t.modems.SwitchSIM(ctx, input.ModemID, input.Identifier); err != nil {
+	if err := t.modems.SwitchSIM(ctx, input.ModemID, input.Slot); err != nil {
 		return successOutput{}, OperationError("switch SIM slot", err)
 	}
 	return successOutput{Success: true}, nil

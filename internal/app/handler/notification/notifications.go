@@ -9,20 +9,18 @@ import (
 	sgp22 "github.com/damonto/euicc-go/v2"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type notification struct {
-	store *settings.Store
+	clients *lpa.Pool
 }
 
-func newNotification(store *settings.Store) *notification {
-	return &notification{store: store}
+func newNotification(clients *lpa.Pool) *notification {
+	return &notification{clients: clients}
 }
 
 func (n *notification) List(ctx context.Context, modem *mmodem.Modem) (*NotificationsResponse, error) {
-	current := n.store.Snapshot()
-	ses, err := lpa.DiscoverSEs(ctx, modem)
+	ses, err := n.clients.SecureElements(ctx, modem)
 	if err != nil {
 		return nil, fmt.Errorf("discover eUICC SEs: %w", err)
 	}
@@ -34,7 +32,7 @@ func (n *notification) List(ctx context.Context, modem *mmodem.Modem) (*Notifica
 			AID:           hex.EncodeToString(se.AID),
 			Notifications: []NotificationResponse{},
 		}
-		client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
+		client, err := n.clients.Acquire(ctx, modem, se.ID)
 		if err != nil {
 			modem.Logger().Warn("create LPA client for notifications", "seId", se.ID, "error", err)
 			return nil, fmt.Errorf("create LPA client for %s: %w", se.ID, err)
@@ -78,12 +76,7 @@ func (n *notification) List(ctx context.Context, modem *mmodem.Modem) (*Notifica
 }
 
 func (n *notification) Resend(ctx context.Context, modem *mmodem.Modem, seID string, sequence sgp22.SequenceNumber) error {
-	current := n.store.Snapshot()
-	se, err := lpa.ResolveSE(ctx, modem, seID)
-	if err != nil {
-		return fmt.Errorf("resolve eUICC SE: %w", err)
-	}
-	client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
+	client, err := n.clients.Acquire(ctx, modem, seID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}
@@ -99,12 +92,7 @@ func (n *notification) Resend(ctx context.Context, modem *mmodem.Modem, seID str
 }
 
 func (n *notification) Delete(ctx context.Context, modem *mmodem.Modem, seID string, sequence sgp22.SequenceNumber) error {
-	current := n.store.Snapshot()
-	se, err := lpa.ResolveSE(ctx, modem, seID)
-	if err != nil {
-		return fmt.Errorf("resolve eUICC SE: %w", err)
-	}
-	client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
+	client, err := n.clients.Acquire(ctx, modem, seID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}

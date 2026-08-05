@@ -7,22 +7,18 @@ import (
 
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type euicc struct {
-	store *settings.Store
+	clients *lpa.Pool
 }
 
-func newEUICC(store *settings.Store) *euicc {
-	return &euicc{
-		store: store,
-	}
+func newEUICC(clients *lpa.Pool) *euicc {
+	return &euicc{clients: clients}
 }
 
 func (e *euicc) Get(ctx context.Context, modem *mmodem.Modem) (*SEsResponse, error) {
-	current := e.store.Snapshot()
-	ses, err := lpa.DiscoverSEs(ctx, modem)
+	ses, err := e.clients.SecureElements(ctx, modem)
 	if err != nil {
 		return nil, fmt.Errorf("discover eUICC SEs: %w", err)
 	}
@@ -33,7 +29,7 @@ func (e *euicc) Get(ctx context.Context, modem *mmodem.Modem) (*SEsResponse, err
 			Label: se.Label,
 			AID:   hex.EncodeToString(se.AID),
 		}
-		client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
+		client, err := e.clients.Acquire(ctx, modem, se.ID)
 		if err != nil {
 			modem.Logger().Warn("create LPA client for eUICC info", "seId", se.ID, "error", err)
 			return nil, fmt.Errorf("create LPA client for %s: %w", se.ID, err)

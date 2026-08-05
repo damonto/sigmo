@@ -36,7 +36,8 @@ type Target struct {
 	ICCID string
 }
 
-// Device provides operation-scoped MBIM access without retaining protocol clients.
+// Device provides modem operations through a generation-scoped protocol
+// session when it is opened by the modem package.
 type Device struct {
 	deviceOperations
 }
@@ -45,7 +46,7 @@ type deviceOperations struct {
 	backend backend
 }
 
-// Session keeps reusable QMI protocol clients open until Close.
+// Session keeps reusable QMI or MBIM protocol clients open until Close.
 type Session struct {
 	deviceOperations
 }
@@ -64,7 +65,6 @@ type usimBackend interface {
 }
 
 type simRecoveryBackend interface {
-	PowerCycleSIM(ctx context.Context) error
 	ActivateProvisioningIfSIMMissing(ctx context.Context) error
 }
 
@@ -155,7 +155,8 @@ type IMSProfile struct {
 	PDNType string
 }
 
-// Open returns an operation-scoped MBIM device.
+// Open returns an operation-scoped MBIM device. Modem lifecycle code should use
+// OpenSession so the client remains owned by the modem generation.
 func Open(cfg Config) (*Device, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
@@ -166,16 +167,22 @@ func Open(cfg Config) (*Device, error) {
 	return &Device{deviceOperations: deviceOperations{backend: newMBIMDevice(cfg.Device, cfg.Slot)}}, nil
 }
 
-// OpenSession opens a QMI device that reuses protocol clients across operations.
+// OpenSession opens a QMI or MBIM device that reuses protocol clients across operations.
 // The caller must close the returned session.
 func OpenSession(cfg Config) (*Session, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, err
 	}
-	if cfg.PortType != PortTypeQMI {
+	var backend backend
+	switch cfg.PortType {
+	case PortTypeQMI:
+		backend = newQMISession(cfg)
+	case PortTypeMBIM:
+		backend = newMBIMSession(cfg)
+	default:
 		return nil, ErrUnsupported
 	}
-	return &Session{deviceOperations: deviceOperations{backend: newQMISession(cfg)}}, nil
+	return &Session{deviceOperations: deviceOperations{backend: backend}}, nil
 }
 
 func validateConfig(cfg Config) error {
@@ -194,14 +201,6 @@ func (s *Session) Close() error {
 		return nil
 	}
 	return s.backend.Close()
-}
-
-func (d *deviceOperations) PowerCycleSIM(ctx context.Context) error {
-	backend, ok := d.backend.(simRecoveryBackend)
-	if !ok {
-		return ErrUnsupported
-	}
-	return backend.PowerCycleSIM(ctx)
 }
 
 func (d *deviceOperations) ActivateProvisioningIfSIMMissing(ctx context.Context) error {

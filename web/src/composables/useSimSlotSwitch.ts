@@ -2,7 +2,7 @@ import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useModemApi } from '@/apis/modem'
-import type { Modem } from '@/types/modem'
+import type { Modem, SlotInfo } from '@/types/modem'
 
 type Options = {
   modemId: ComputedRef<string>
@@ -15,7 +15,7 @@ export const useSimSlotSwitch = ({ modemId, modem, refreshModem, onSuccess }: Op
   const { t } = useI18n()
   const modemApi = useModemApi()
 
-  const currentSimIdentifier = ref('')
+  const currentSimSlot = ref('')
 
   const modemSlots = (value: Modem | null) => {
     return Array.isArray(value?.slots) ? value.slots : []
@@ -23,44 +23,37 @@ export const useSimSlotSwitch = ({ modemId, modem, refreshModem, onSuccess }: Op
 
   const simSlots = computed(() => modemSlots(modem.value))
 
-  const getSimLabel = (identifier: string) => {
-    const index = simSlots.value.findIndex((slot) => slot.identifier === identifier)
-    if (index === 0) return t('modemDetail.sim.sim1')
-    if (index === 1) return t('modemDetail.sim.sim2')
-    if (index >= 0) return `SIM ${index + 1}`
-    return ''
+  const getSimLabel = (slot: number) => {
+    if (slot === 1) return t('modemDetail.sim.sim1')
+    if (slot === 2) return t('modemDetail.sim.sim2')
+    return `SIM ${slot}`
   }
 
-  const handleSimSwitch = async (identifier: string) => {
+  const handleSimSwitch = async (slot: SlotInfo) => {
     if (!modemId.value || modemId.value === 'unknown') {
       throw new Error('Modem ID is unavailable')
     }
-    await modemApi.switchSimSlot(modemId.value, identifier)
+    await modemApi.switchSimSlot(modemId.value, slot.slot)
     await refreshModem()
-    const simLabel = getSimLabel(identifier)
-    if (simLabel) {
-      onSuccess?.(t('modemDetail.sim.switchSuccess', { sim: simLabel }))
-    } else {
-      onSuccess?.(t('modemDetail.sim.switchSuccessFallback'))
-    }
+    onSuccess?.(t('modemDetail.sim.switchSuccess', { sim: getSimLabel(slot.slot) }))
   }
 
   watch(
     modem,
     (newModem) => {
       if (!newModem) {
-        currentSimIdentifier.value = ''
+        currentSimSlot.value = ''
         return
       }
       const slots = modemSlots(newModem)
       const activeSlot = slots.find((slot) => slot.active)
-      currentSimIdentifier.value = activeSlot?.identifier ?? slots[0]?.identifier ?? ''
+      currentSimSlot.value = String(activeSlot?.slot ?? slots[0]?.slot ?? '')
     },
     { immediate: true },
   )
 
   return {
-    currentSimIdentifier,
+    currentSimSlot,
     simSlots,
     handleSimSwitch,
   }

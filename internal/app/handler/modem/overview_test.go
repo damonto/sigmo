@@ -213,7 +213,7 @@ func TestCatalogBuildResponseUsesCachedSIMWithoutTransport(t *testing.T) {
 	if got.SIM.Identifier != device.Sim.Identifier {
 		t.Fatalf("primary SIM identifier = %q, want %q", got.SIM.Identifier, device.Sim.Identifier)
 	}
-	if len(got.Slots) != 1 || got.Slots[0].Identifier != device.Sim.Identifier {
+	if len(got.Slots) != 1 || got.Slots[0].Slot != 1 || got.Slots[0].Identifier != device.Sim.Identifier {
 		t.Fatalf("slots = %+v, want cached primary SIM", got.Slots)
 	}
 	if got.PrimaryPort != device.PrimaryPort {

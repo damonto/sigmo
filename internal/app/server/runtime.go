@@ -9,6 +9,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/app/router"
 	"github.com/damonto/sigmo/internal/pkg/internet"
+	"github.com/damonto/sigmo/internal/pkg/lpa"
 	"github.com/damonto/sigmo/internal/pkg/message"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/networkprefs"
@@ -27,6 +28,7 @@ type Runtime struct {
 	Store               *settings.Store
 	Registry            *modem.Registry
 	InternetConnector   *internet.Connector
+	LPAClients          *lpa.Pool
 	internetConnections appconnectivity.InternetConnections
 	Relay               *forwarder.Relay
 	NetworkPreferences  *networkprefs.Store

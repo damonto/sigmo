@@ -33,6 +33,12 @@ func (m *Modem) applySIMInfo(info wwanmodem.SIMInfo) {
 		return
 	}
 	m.runtimeMu.Lock()
+	// The process-owned QMI control client is created for slot 1, so some
+	// firmware reports that configured slot in SIMInfo even when another
+	// physical slot is active. SIMSlots is authoritative once discovered.
+	if activeSlot := activeSIMSlot(m.slotSIMs); activeSlot != 0 {
+		info.Slot = uint8(activeSlot)
+	}
 	previous := m.Sim
 	m.PrimarySimSlot = uint32(info.Slot)
 	for _, sim := range m.slotSIMs {
@@ -60,7 +66,34 @@ func (m *Modem) applySIMInfo(info wwanmodem.SIMInfo) {
 	m.runtimeMu.Unlock()
 }
 
+func activeSIMSlot(slots map[uint32]*SIM) uint32 {
+	var active uint32
+	for slot, sim := range slots {
+		if sim == nil || !sim.Active {
+			continue
+		}
+		if active != 0 {
+			return 0
+		}
+		active = slot
+	}
+	return active
+}
+
 func mergeSIMMetadata(previous, current *SIM) *SIM {
+	if previous == nil || current == nil {
+		return current
+	}
+	if previous.Slot == current.Slot && atrSupportsEUICC(previous.ATR) &&
+		(strings.TrimSpace(current.Identifier) == "" || len(current.ATR) == 0) {
+		// ICCID disappears briefly while one eUICC profile replaces another.
+		// ATR and EID describe the card hardware, so keep them through that
+		// transition and the first identity-only update for the new profile.
+		current.ATR = slices.Clone(previous.ATR)
+		if current.Eid == "" {
+			current.Eid = previous.Eid
+		}
+	}
 	if !sameSIMIdentity(previous, current) {
 		return current
 	}
@@ -132,7 +165,7 @@ func (m *Modem) applyActiveSIMIdentity(slot uint8, iccid string) {
 		m.SimSlots = append(m.SimSlots, index)
 		slices.Sort(m.SimSlots)
 	}
-	if previousIdentifier != "" && iccid != "" && previousIdentifier != iccid {
+	if nextIdentifier := strings.TrimSpace(cached.Identifier); previousIdentifier != "" && nextIdentifier != "" && previousIdentifier != nextIdentifier {
 		m.Number = ""
 	}
 }
@@ -205,7 +238,7 @@ func (m *Modem) applySIMSlots(slots []wwanmodem.SIMSlot) {
 	m.slotSIMs = known
 }
 
-func (m *Modem) startRuntimeWatchers(parent context.Context, onFailure func(error)) {
+func (m *Modem) startRuntimeWatchers(parent context.Context, onFailure func(error), onSIMChange func(uint32, string)) {
 	if m == nil || m.core == nil {
 		return
 	}
@@ -213,6 +246,7 @@ func (m *Modem) startRuntimeWatchers(parent context.Context, onFailure func(erro
 		ctx, cancel := context.WithCancel(parent)
 		m.watchCancel = cancel
 		m.onFailure = onFailure
+		m.onSIMChange = onSIMChange
 		m.watchWG.Add(2)
 		go m.watchStatus(ctx)
 		go m.watchSIM(ctx)
@@ -245,7 +279,9 @@ func (m *Modem) watchSIM(ctx context.Context) {
 	for ctx.Err() == nil {
 		stream, err := m.core.WatchSIM(ctx)
 		if err == nil {
-			err = consumeModemStream(ctx, stream, m.applySIMInfo)
+			err = consumeModemStream(ctx, stream, func(info wwanmodem.SIMInfo) {
+				m.applySIMRuntimeUpdate(ctx, info)
+			})
 		}
 		if ctx.Err() != nil {
 			return
@@ -257,6 +293,28 @@ func (m *Modem) watchSIM(ctx context.Context) {
 		if err := sleepContext(ctx, modemWatchRetryDelay); err != nil {
 			return
 		}
+	}
+}
+
+func (m *Modem) applySIMRuntimeUpdate(ctx context.Context, info wwanmodem.SIMInfo) {
+	previousSlot, previousIdentifier := activeSIMIdentity(m)
+	slots, err := m.core.SIMSlots(ctx)
+	if err != nil {
+		slog.Debug("refresh physical SIM slots", "imei", m.EquipmentIdentifier, "error", err)
+	} else {
+		m.applySIMSlots(slots)
+	}
+	m.applySIMInfo(info)
+	m.notifySIMChanged(previousSlot, previousIdentifier)
+}
+
+func (m *Modem) notifySIMChanged(previousSlot uint32, previousIdentifier string) {
+	nextSlot, nextIdentifier := activeSIMIdentity(m)
+	if nextSlot == previousSlot && nextIdentifier == strings.TrimSpace(previousIdentifier) {
+		return
+	}
+	if m.onSIMChange != nil {
+		m.onSIMChange(previousSlot, previousIdentifier)
 	}
 }
 

@@ -6,17 +6,11 @@ import (
 
 	elpa "github.com/damonto/euicc-go/lpa"
 
-	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
 func (p *provisioning) Download(ctx context.Context, modem *mmodem.Modem, seID string, activationCode *elpa.ActivationCode, opts *elpa.DownloadOptions) error {
-	current := p.store.Snapshot()
-	se, err := lpa.ResolveSE(ctx, modem, seID)
-	if err != nil {
-		return fmt.Errorf("resolve eUICC SE: %w", err)
-	}
-	client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
+	client, err := p.clients.Acquire(ctx, modem, seID)
 	if err != nil {
 		return fmt.Errorf("create LPA client: %w", err)
 	}

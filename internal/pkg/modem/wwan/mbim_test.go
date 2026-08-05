@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	uiccmbim "github.com/damonto/wwan-go/mbim"
+	wwanmodem "github.com/damonto/wwan-go/modem"
+	usimcard "github.com/damonto/wwan-go/sim/card"
 )
 
 func TestDeviceMSISDNMBIM(t *testing.T) {
@@ -254,4 +256,68 @@ func mbimDeviceWithNetwork(client mbimNetwork) mbimDevice {
 			return client, nil
 		},
 	}
+}
+
+func TestMBIMSessionReusesClientPerSlot(t *testing.T) {
+	clients := make(map[uint8]*fakeMBIMSessionClient)
+	opens := 0
+	session := newMBIMSessionWithOpener(Config{Slot: 1}, func(context.Context, uint8) (mbimSessionClient, error) {
+		opens++
+		client := &fakeMBIMSessionClient{fakeMBIMNetwork: &fakeMBIMNetwork{
+			subscriberReady: uiccmbim.SubscriberReadyStatusResponse{
+				TelephoneNumbers: []string{"+15551234567"},
+			},
+		}}
+		clients[uint8(opens)] = client
+		return client, nil
+	})
+
+	for range 2 {
+		if _, err := session.MSISDN(context.Background()); err != nil {
+			t.Fatalf("MSISDN() error = %v", err)
+		}
+	}
+	if opens != 1 {
+		t.Fatalf("MBIM client opens = %d, want 1 for one slot", opens)
+	}
+	if _, err := session.SIMState(context.Background(), Target{Slot: 2}); err != nil {
+		t.Fatalf("SIMState() error = %v", err)
+	}
+	if _, err := session.SIMState(context.Background(), Target{Slot: 2}); err != nil {
+		t.Fatalf("SIMState(slot 2) error = %v", err)
+	}
+	if opens != 2 {
+		t.Fatalf("MBIM client opens = %d, want one client per slot", opens)
+	}
+
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	for slot, client := range clients {
+		if !client.closed {
+			t.Errorf("MBIM client for slot %d was not closed", slot)
+		}
+	}
+	if _, err := session.MSISDN(context.Background()); !errors.Is(err, wwanmodem.ErrClosed) {
+		t.Fatalf("MSISDN() after Close() error = %v, want %v", err, wwanmodem.ErrClosed)
+	}
+}
+
+func TestOpenSessionAcceptsMBIM(t *testing.T) {
+	session, err := OpenSession(Config{PortType: PortTypeMBIM, Device: "/dev/cdc-wdm0", Slot: 1})
+	if err != nil {
+		t.Fatalf("OpenSession() error = %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+	if _, ok := session.backend.(*mbimSession); !ok {
+		t.Fatalf("OpenSession() backend = %T, want *mbimSession", session.backend)
+	}
+}
+
+type fakeMBIMSessionClient struct {
+	*fakeMBIMNetwork
+}
+
+func (c *fakeMBIMSessionClient) openUSIM(context.Context) (usimcard.Reader, error) {
+	return nil, errors.New("fake MBIM USIM reader is unavailable")
 }

@@ -13,6 +13,7 @@ import (
 var (
 	simRefreshEndWait      = 3 * time.Second
 	simRefreshProbeTimeout = 3 * time.Second
+	errSIMRefreshReload    = errors.New("SIM refresh reset modem clients")
 )
 
 type simRefreshState struct {
@@ -83,6 +84,7 @@ func (m *Modem) consumeSIMRefreshStream(ctx context.Context, stream <-chan devic
 
 	var endTimer *time.Timer
 	var endTimeout <-chan time.Time
+	var pendingMode devicewwan.SIMRefreshMode
 	defer func() {
 		if endTimer != nil {
 			endTimer.Stop()
@@ -98,6 +100,7 @@ func (m *Modem) consumeSIMRefreshStream(ctx context.Context, stream <-chan devic
 			endTimeout = nil
 			m.finishSIMRefresh()
 			m.reloadSIMAfterRefresh(ctx, "start timeout")
+			m.reloadAfterSIMRefresh(pendingMode)
 		case event, ok := <-stream:
 			if !ok {
 				return errors.New("QMI UIM refresh stream closed")
@@ -116,6 +119,7 @@ func (m *Modem) consumeSIMRefreshStream(ctx context.Context, stream <-chan devic
 				if !simRefreshReenumeratesSIM(event.Mode) {
 					continue
 				}
+				pendingMode = event.Mode
 				if endTimer == nil {
 					endTimer = time.NewTimer(simRefreshEndWait)
 				} else {
@@ -135,15 +139,28 @@ func (m *Modem) consumeSIMRefreshStream(ctx context.Context, stream <-chan devic
 				}
 				m.finishSIMRefresh()
 				m.reloadSIMAfterRefresh(ctx, "end with success")
+				m.reloadAfterSIMRefresh(event.Mode)
 			case devicewwan.SIMRefreshEndWithFailure:
 				if endTimer != nil {
 					endTimer.Stop()
 					endTimeout = nil
 				}
 				m.finishSIMRefresh()
+				m.reloadAfterSIMRefresh(event.Mode)
 			}
 		}
 	}
+}
+
+func (m *Modem) reloadAfterSIMRefresh(mode devicewwan.SIMRefreshMode) {
+	if !simRefreshReenumeratesSIM(mode) {
+		return
+	}
+	m.failureOnce.Do(func() {
+		if m.onFailure != nil {
+			m.onFailure(errSIMRefreshReload)
+		}
+	})
 }
 
 func simRefreshReenumeratesSIM(mode devicewwan.SIMRefreshMode) bool {
@@ -158,7 +175,7 @@ func (m *Modem) reloadSIMAfterRefresh(ctx context.Context, reason string) {
 		slog.Debug("read SIM after QMI UIM refresh", "imei", m.EquipmentIdentifier, "reason", reason, "error", err)
 		return
 	}
-	m.applySIMInfo(info)
+	m.applySIMRuntimeUpdate(probeCtx, info)
 }
 
 func (m *Modem) publishSIMRefresh(inProgress bool) {

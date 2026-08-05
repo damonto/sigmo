@@ -26,6 +26,7 @@ type Modem struct {
 	watchWG        sync.WaitGroup
 	failureOnce    sync.Once
 	onFailure      func(error)
+	onSIMChange    func(uint32, string)
 	deviceSessions deviceSessionStore
 	runtimeMu      sync.RWMutex
 	simRefreshMu   sync.Mutex
@@ -173,6 +174,15 @@ func (m *Modem) ReserveSIMSlot(ctx context.Context) (func(), error) {
 	return func() {
 		once.Do(func() { m.simSlotToken <- struct{}{} })
 	}, nil
+}
+
+func (m *Modem) withReservedSIMSlot(ctx context.Context, run func() error) error {
+	release, err := m.ReserveSIMSlot(ctx)
+	if err != nil {
+		return fmt.Errorf("reserve SIM slot: %w", err)
+	}
+	defer release()
+	return run()
 }
 
 func (m *Modem) Close() error {

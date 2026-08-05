@@ -43,7 +43,7 @@ func newMSISDN(registry *mmodem.Registry) *msisdn {
 		openDevice: func(modem *mmodem.Modem) (msisdnDevice, error) {
 			return mmodem.OpenDevice(modem)
 		},
-		refreshSIMAndWait: registry.PowerCycleSIM,
+		refreshSIMAndWait: registry.EnsureSIMVisible,
 	}
 }
 
@@ -73,7 +73,7 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("wait for modem: %w", err)
 		}
-		return fmt.Errorf("refresh SIM after MSISDN update: %w", err)
+		return fmt.Errorf("read SIM after MSISDN update: %w", err)
 	}
 	return nil
 }

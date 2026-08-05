@@ -47,6 +47,7 @@ type Registry struct {
 	failures     chan modemFailure
 	// A physical reconnect resets the bounded CID-exhaustion recovery state.
 	cidRecoveryStates map[string]cidRecoveryState
+	simIdentities     map[*Modem]simIdentity
 }
 
 type cidRecoveryState uint8
@@ -68,6 +69,7 @@ const (
 	ModemEventAdded ModemEventType = iota
 	ModemEventRemoved
 	ModemEventChanged
+	ModemEventSIMChanged
 )
 
 func (t ModemEventType) String() string {
@@ -78,19 +80,25 @@ func (t ModemEventType) String() string {
 		return "removed"
 	case ModemEventChanged:
 		return "changed"
+	case ModemEventSIMChanged:
+		return "sim-changed"
 	default:
 		return "unknown"
 	}
 }
 
 type ModemEvent struct {
-	Type         ModemEventType
-	Modem        *Modem
-	Previous     *Modem
-	Path         string
-	PreviousPath string
-	Generation   uint64
-	Snapshot     map[string]*Modem
+	Type                  ModemEventType
+	Modem                 *Modem
+	Previous              *Modem
+	Path                  string
+	PreviousPath          string
+	Generation            uint64
+	PreviousSIMSlot       uint32
+	SIMSlot               uint32
+	PreviousSIMIdentifier string
+	SIMIdentifier         string
+	Snapshot              map[string]*Modem
 }
 
 type subscription struct {
@@ -106,6 +114,7 @@ func NewRegistry() (*Registry, error) {
 		open:              openDiscoveredModem,
 		failures:          make(chan modemFailure, 32),
 		cidRecoveryStates: make(map[string]cidRecoveryState),
+		simIdentities:     make(map[*Modem]simIdentity),
 	}, nil
 }
 
@@ -175,6 +184,7 @@ func (r *Registry) Close() error {
 	modems := maps.Clone(r.modems)
 	r.modems = make(map[string]*Modem)
 	r.subs = nil
+	r.simIdentities = make(map[*Modem]simIdentity)
 	r.mu.Unlock()
 	var result error
 	for _, modem := range modems {

@@ -11,7 +11,6 @@ type fakeDeviceControl struct {
 	calls       []string
 	state       wwan.SIMState
 	stateErr    error
-	powerErr    error
 	activateErr error
 	msisdn      string
 	msisdnErr   error
@@ -26,11 +25,6 @@ func (d *fakeDeviceControl) MSISDN(context.Context) (string, error) {
 func (d *fakeDeviceControl) UpdateMSISDN(_ context.Context, number string) error {
 	d.calls = append(d.calls, "update-msisdn:"+number)
 	return d.updateErr
-}
-
-func (d *fakeDeviceControl) PowerCycleSIM(context.Context) error {
-	d.calls = append(d.calls, "power-cycle")
-	return d.powerErr
 }
 
 func (d *fakeDeviceControl) ActivateProvisioningIfSIMMissing(context.Context) error {

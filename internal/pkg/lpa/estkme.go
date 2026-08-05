@@ -23,17 +23,20 @@ var (
 	}
 )
 
-func estkmeSEs(channel driver.SmartCardChannel, logger *slog.Logger) ([]SE, bool) {
+func estkmeSEs(channel driver.SmartCardChannel, logger *slog.Logger) ([]SE, bool, error) {
 	skuName, err := readESTKSkuName(channel, logger)
 	if err != nil {
 		logger.Debug("read ESTKme SKU", "error", err)
-		return nil, false
+		if errors.Is(err, errAIDNotSupported) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
 	ses, ok := estkmeSEsForSKU(skuName)
 	if !ok {
 		logger.Debug("ESTKme SKU is not dual SE", "skuName", skuName)
 	}
-	return ses, ok
+	return ses, ok, nil
 }
 
 func isESTKmeATR(atr []byte) bool {
@@ -64,11 +67,6 @@ func readESTKSkuName(channel driver.SmartCardChannel, logger *slog.Logger) (stri
 	if err := channel.Connect(); err != nil {
 		return "", fmt.Errorf("connect card: %w", err)
 	}
-	defer func() {
-		if err := channel.Disconnect(); err != nil {
-			logger.Debug("disconnect ESTKme product channel", "error", err)
-		}
-	}()
 
 	logicalChannel, err := channel.OpenLogicalChannel(estkProductAID)
 	if err != nil {

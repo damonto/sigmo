@@ -25,6 +25,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/mcpserver"
 	"github.com/damonto/sigmo/internal/app/router"
 	"github.com/damonto/sigmo/internal/pkg/internet"
+	"github.com/damonto/sigmo/internal/pkg/lpa"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/modemtask"
 	"github.com/damonto/sigmo/internal/pkg/networkprefs"
@@ -130,7 +131,7 @@ func Run(cfg Config) error {
 		switch event.Type {
 		case modem.ModemEventChanged:
 			previous = event.Previous
-		case modem.ModemEventRemoved:
+		case modem.ModemEventRemoved, modem.ModemEventSIMChanged:
 			previous = event.Modem
 		}
 		if previous == nil {
@@ -150,6 +151,15 @@ func Run(cfg Config) error {
 		slog.Error("recover internet connections", "error", err)
 	}
 	cancelStartup()
+	lpaClients, err := lpa.NewPool(store, registry)
+	if err != nil {
+		return fmt.Errorf("configure LPA client pool: %w", err)
+	}
+	defer func() {
+		if err := lpaClients.Close(); err != nil {
+			slog.Warn("close LPA client pool", "error", err)
+		}
+	}()
 	relay, err := forwarder.New(store, registry, db, webPush)
 	if err != nil {
 		return fmt.Errorf("configure message relay: %w", err)
@@ -158,6 +168,7 @@ func Run(cfg Config) error {
 		Store:               store,
 		Registry:            registry,
 		InternetConnector:   internetConnector,
+		LPAClients:          lpaClients,
 		internetConnections: internetConnector,
 		Relay:               relay,
 		NetworkPreferences:  networkPreferences,
@@ -179,6 +190,7 @@ func Run(cfg Config) error {
 		Store:               store,
 		Registry:            registry,
 		InternetConnector:   internetConnector,
+		LPAClients:          lpaClients,
 		InternetConnections: runtime.internetConnections,
 		Relay:               relay,
 		NetworkPreferences:  networkPreferences,
@@ -211,6 +223,7 @@ func Run(cfg Config) error {
 		Store:               store,
 		Registry:            registry,
 		InternetConnector:   internetConnector,
+		LPAClients:          lpaClients,
 		InternetConnections: runtime.internetConnections,
 		Relay:               relay,
 		NetworkPreferences:  networkPreferences,

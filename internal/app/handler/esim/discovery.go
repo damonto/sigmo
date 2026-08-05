@@ -8,24 +8,18 @@ import (
 
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type provisioning struct {
-	store *settings.Store
+	clients *lpa.Pool
 }
 
-func newProvisioning(store *settings.Store) *provisioning {
-	return &provisioning{store: store}
+func newProvisioning(clients *lpa.Pool) *provisioning {
+	return &provisioning{clients: clients}
 }
 
 func (p *provisioning) Discovery(ctx context.Context, modem *mmodem.Modem, seID string) ([]DiscoverResponse, error) {
-	current := p.store.Snapshot()
-	se, err := lpa.ResolveSE(ctx, modem, seID)
-	if err != nil {
-		return nil, fmt.Errorf("resolve eUICC SE: %w", err)
-	}
-	client, err := lpa.NewWithAID(ctx, modem, &current, se.AID)
+	client, err := p.clients.Acquire(ctx, modem, seID)
 	if err != nil {
 		return nil, fmt.Errorf("create LPA client: %w", err)
 	}

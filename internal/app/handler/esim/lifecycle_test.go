@@ -121,7 +121,10 @@ func TestEnableSessionEnable(t *testing.T) {
 	enableErr := errors.New("qmi enable returned unknown")
 	ensureErr := errors.New("SIM not visible")
 	notificationErr := errors.New("notification endpoint unavailable")
-	current := &mmodem.Modem{EquipmentIdentifier: "354015820228039"}
+	current := &mmodem.Modem{
+		EquipmentIdentifier: "354015820228039",
+		Sim:                 &mmodem.SIM{Identifier: "8985200099999999999"},
+	}
 	visibleModem := &mmodem.Modem{EquipmentIdentifier: current.EquipmentIdentifier}
 
 	tests := []struct {
@@ -132,6 +135,7 @@ func TestEnableSessionEnable(t *testing.T) {
 		wantErr           error
 		wantEnsure        bool
 		wantEnableClosed  bool
+		wantRefreshClosed bool
 		wantNotifications bool
 		wantRefreshes     []bool
 	}{
@@ -139,6 +143,7 @@ func TestEnableSessionEnable(t *testing.T) {
 			name:              "enable succeeds",
 			wantEnsure:        true,
 			wantEnableClosed:  true,
+			wantRefreshClosed: true,
 			wantNotifications: true,
 			wantRefreshes:     []bool{true},
 		},
@@ -154,16 +159,18 @@ func TestEnableSessionEnable(t *testing.T) {
 			notificationErr:   notificationErr,
 			wantEnsure:        true,
 			wantEnableClosed:  true,
+			wantRefreshClosed: true,
 			wantNotifications: true,
 			wantRefreshes:     []bool{true},
 		},
 		{
-			name:             "ensure SIM visible error is returned",
-			ensureErr:        ensureErr,
-			wantErr:          ensureErr,
-			wantEnsure:       true,
-			wantEnableClosed: true,
-			wantRefreshes:    []bool{true},
+			name:              "ensure SIM visible error is returned",
+			ensureErr:         ensureErr,
+			wantErr:           ensureErr,
+			wantEnsure:        true,
+			wantEnableClosed:  true,
+			wantRefreshClosed: true,
+			wantRefreshes:     []bool{true},
 		},
 		{
 			name:             "enable error returns original error immediately",
@@ -205,6 +212,12 @@ func TestEnableSessionEnable(t *testing.T) {
 					if target.ICCID != iccid.String() {
 						t.Fatalf("target ICCID = %q, want %q", target.ICCID, iccid.String())
 					}
+					if target.PreviousICCID != "8985200099999999999" {
+						t.Fatalf("previous ICCID = %q, want %q", target.PreviousICCID, "8985200099999999999")
+					}
+					if !target.RequireEUICC {
+						t.Fatal("RequireEUICC = false, want true")
+					}
 					if tt.ensureErr != nil {
 						return nil, tt.ensureErr
 					}
@@ -212,11 +225,12 @@ func TestEnableSessionEnable(t *testing.T) {
 				},
 			}
 			session := &enableSession{
-				l:       l,
-				modem:   current,
-				iccid:   iccid,
-				client:  enableClient,
-				lastSeq: 1,
+				l:             l,
+				modem:         current,
+				iccid:         iccid,
+				previousICCID: activeModemICCID(current),
+				client:        enableClient,
+				lastSeq:       1,
 			}
 
 			err := session.Enable(context.Background())
@@ -232,6 +246,9 @@ func TestEnableSessionEnable(t *testing.T) {
 			}
 			if enableClient.closed != tt.wantEnableClosed {
 				t.Fatalf("enable client closed = %v, want %v", enableClient.closed, tt.wantEnableClosed)
+			}
+			if enableClient.refreshClosed != tt.wantRefreshClosed {
+				t.Fatalf("enable client refresh closed = %v, want %v", enableClient.refreshClosed, tt.wantRefreshClosed)
 			}
 			if !slices.Equal(enableClient.enableRefreshes, tt.wantRefreshes) {
 				t.Fatalf("enable refreshes = %v, want %v", enableClient.enableRefreshes, tt.wantRefreshes)
@@ -282,6 +299,7 @@ type fakeLifecycleClient struct {
 	sendErrors           []error
 	removeErr            error
 	closed               bool
+	refreshClosed        bool
 	enableRefreshes      []bool
 	sentNotifications    int
 	removedNotifications int
@@ -340,6 +358,12 @@ func (f *fakeLifecycleClient) RemoveNotificationFromList(sequence sgp22.Sequence
 
 func (f *fakeLifecycleClient) Close() error {
 	f.closed = true
+	return nil
+}
+
+func (f *fakeLifecycleClient) CloseForRefresh() error {
+	f.closed = true
+	f.refreshClosed = true
 	return nil
 }
 

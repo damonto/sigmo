@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	"github.com/damonto/wwan-go/qcom"
@@ -21,8 +20,6 @@ const (
 	qmiSTKItemIDTLV       = 0x10
 )
 
-var qmiCATReplayWait = 500 * time.Millisecond
-
 type qmiCATCommandSource interface {
 	CachedProactiveCommand(ctx context.Context, commandID qcom.CATCachedCommandID) (qcom.CATCommand, error)
 	ForceClaimCommands(ctx context.Context, config qcom.CATEventClaimConfig) (<-chan qcom.CATCommand, qcom.CATEventClaim, error)
@@ -35,7 +32,6 @@ type qmiSTKResponder interface {
 type qmiCATReaderConfig struct {
 	Adapter              *usim.QCOM
 	CAT                  qmiCATCommandSource
-	Power                qmiSIMPowerControl
 	Slot                 uint8
 	IMEI                 string
 	ConfigurationChanged bool
@@ -44,7 +40,6 @@ type qmiCATReaderConfig struct {
 type qmiCATReader struct {
 	*usim.QCOM
 	cat                  qmiCATCommandSource
-	power                qmiSIMPowerControl
 	responder            qmiSTKResponder
 	slot                 uint8
 	imei                 string
@@ -70,7 +65,6 @@ func newQMICATReader(cfg qmiCATReaderConfig) *qmiCATReader {
 	return &qmiCATReader{
 		QCOM:                 cfg.Adapter,
 		cat:                  cfg.CAT,
-		power:                cfg.Power,
 		responder:            cfg.Adapter,
 		slot:                 cfg.Slot,
 		imei:                 cfg.IMEI,
@@ -151,34 +145,10 @@ func (r *qmiCATReader) runCommands(
 	}
 	dedupeCachedReplay := cachedOK
 
-	var replayTimer *time.Timer
-	var replayTimeout <-chan time.Time
-	switch {
-	case r.configurationChanged:
-		if err := r.recoverSetupMenu(ctx, &watch, claimConfig); err != nil {
-			if ctx.Err() == nil {
-				sendQMICATSession(ctx, out, usim.STKSession{Err: err})
-			}
-			return
-		}
-	case !cachedOK:
-		replayTimer = time.NewTimer(qmiCATReplayWait)
-		replayTimeout = replayTimer.C
-		defer replayTimer.Stop()
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-replayTimeout:
-			replayTimeout = nil
-			if err := r.recoverSetupMenu(ctx, &watch, claimConfig); err != nil {
-				if ctx.Err() == nil {
-					sendQMICATSession(ctx, out, usim.STKSession{Err: err})
-				}
-				return
-			}
 		case command, ok := <-watch.commands:
 			if !ok {
 				return
@@ -195,53 +165,11 @@ func (r *qmiCATReader) runCommands(
 				slog.Warn("decode live QMI CAT command", "imei", r.imei, "error", err)
 				continue
 			}
-			if _, ok := session.Command.(stkpkg.SetupMenuCommand); ok && replayTimeout != nil {
-				if !replayTimer.Stop() {
-					select {
-					case <-replayTimer.C:
-					default:
-					}
-				}
-				replayTimeout = nil
-			}
 			if !sendQMICATSession(ctx, out, session) {
 				return
 			}
 		}
 	}
-}
-
-func (r *qmiCATReader) recoverSetupMenu(ctx context.Context, watch *qmiCATWatch, claimConfig qcom.CATEventClaimConfig) error {
-	stopQMICATWatch(*watch)
-	*watch = qmiCATWatch{}
-
-	if err := r.power.PowerOffSIM(ctx, r.slot); err != nil {
-		return fmt.Errorf("power off SIM for QMI CAT recovery: %w", err)
-	}
-	slog.Info("SIM powered off for QMI CAT recovery", "imei", r.imei, "slot", r.slot)
-
-	timer := time.NewTimer(qmiSIMPowerCycleDelay)
-	<-timer.C
-
-	// Once the SIM is off, cancellation must not leave it without power.
-	restoreCtx := context.WithoutCancel(ctx)
-	if err := qmiPowerOnSIM(restoreCtx, r.power, qcom.PowerOnSIMRequest{
-		Slot:                r.slot,
-		IgnoreHotSwapSwitch: true,
-	}); err != nil {
-		return fmt.Errorf("power on SIM after QMI CAT recovery: %w", err)
-	}
-	slog.Info("SIM powered on for QMI CAT recovery", "imei", r.imei, "slot", r.slot)
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	newWatch, err := r.claimCommands(ctx, claimConfig)
-	if err != nil {
-		return fmt.Errorf("reclaim QMI CAT commands after SIM power-on: %w", err)
-	}
-	*watch = newWatch
-	return nil
 }
 
 func (r *qmiCATReader) claimCommands(ctx context.Context, config qcom.CATEventClaimConfig) (qmiCATWatch, error) {

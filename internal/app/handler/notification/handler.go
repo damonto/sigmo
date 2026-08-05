@@ -13,7 +13,6 @@ import (
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
 type Handler struct {
@@ -37,10 +36,10 @@ var (
 	errInvalidSequence  = errors.New("invalid sequence number")
 )
 
-func New(store *settings.Store, registry *mmodem.Registry) *Handler {
+func New(registry *mmodem.Registry, clients *lpa.Pool) *Handler {
 	return &Handler{
 		registry:      registry,
-		notifications: newNotification(store),
+		notifications: newNotification(clients),
 	}
 }
 

@@ -18,12 +18,12 @@ func (h *Handler) Modem(ctx context.Context, id string) (*ModemResponse, error) 
 	return h.catalog.Get(ctx, device)
 }
 
-func (h *Handler) SwitchSIM(ctx context.Context, id string, identifier string) error {
+func (h *Handler) SwitchSIM(ctx context.Context, id string, slot uint32) error {
 	device, err := h.registry.Find(ctx, id)
 	if err != nil {
 		return err
 	}
-	slotIndex, err := h.simSlot.targetIndex(ctx, device, identifier)
+	slotIndex, err := h.simSlot.targetIndex(device, slot)
 	if err != nil {
 		return err
 	}
