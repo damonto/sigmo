@@ -48,7 +48,7 @@ const { t } = useI18n()
           <span class="sr-only">{{ t('modemDetail.actions.loading') }}</span>
         </div>
 
-        <div v-else-if="props.hasAvailableNetworks" class="space-y-2">
+        <div v-else-if="props.hasAvailableNetworks" class="p-1">
           <RadioGroup v-model="selectedNetwork" class="gap-2">
             <NetworkOption
               v-for="network in props.networks"
