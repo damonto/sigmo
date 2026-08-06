@@ -96,7 +96,7 @@ type transferState struct {
 	source          *sourceConnection
 	target          *mmodem.Modem
 	targetSEID      string
-	targetLPA       *ilpa.LPA
+	targetLPA       *ilpa.Lease
 	ts43Client      *ts43.Client
 	logger          *slog.Logger
 	targetLPAClosed bool

@@ -31,7 +31,6 @@ type Pool struct {
 	store    *settings.Store
 	registry *modem.Registry
 
-	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
@@ -57,7 +56,7 @@ type poolEntry struct {
 	pool    *Pool
 	key     poolKey
 	modem   *modem.Modem
-	client  *LPA
+	client  *Client
 	gate    chan struct{}
 	done    chan struct{}
 	err     error
@@ -89,7 +88,6 @@ func NewPool(store *settings.Store, registry *modem.Registry) (*Pool, error) {
 	pool := &Pool{
 		store:       store,
 		registry:    registry,
-		ctx:         ctx,
 		cancel:      cancel,
 		entries:     make(map[poolKey]*poolEntry),
 		creating:    make(map[poolKey]chan struct{}),
@@ -100,7 +98,7 @@ func NewPool(store *settings.Store, registry *modem.Registry) (*Pool, error) {
 		retired:     make(map[*modem.Modem]struct{}),
 	}
 	unsubscribe, err := registry.Subscribe(func(event modem.ModemEvent) error {
-		pool.handleModemEvent(event)
+		pool.handleModemEvent(ctx, event)
 		return nil
 	})
 	if err != nil {
@@ -115,7 +113,7 @@ func NewPool(store *settings.Store, registry *modem.Registry) (*Pool, error) {
 		return nil, fmt.Errorf("list modems for LPA clients: %w", err)
 	}
 	for _, current := range modems {
-		pool.warm(current)
+		pool.warm(ctx, current)
 	}
 	return pool, nil
 }
@@ -143,7 +141,7 @@ func (p *Pool) SecureElements(ctx context.Context, m *modem.Modem) ([]SE, error)
 
 // Acquire returns a serialized lease of the client for the selected eUICC.
 // Call Close when the operation completes.
-func (p *Pool) Acquire(ctx context.Context, m *modem.Modem, seID string) (*LPA, error) {
+func (p *Pool) Acquire(ctx context.Context, m *modem.Modem, seID string) (*Lease, error) {
 	if p == nil {
 		return nil, errPoolRequired
 	}
@@ -249,7 +247,7 @@ func (p *Pool) entry(key poolKey) *poolEntry {
 	return p.entries[key]
 }
 
-func (p *Pool) createAndLease(ctx context.Context, key poolKey, aid []byte) (*LPA, error) {
+func (p *Pool) createAndLease(ctx context.Context, key poolKey, aid []byte) (*Lease, error) {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
@@ -321,7 +319,7 @@ func (p *Pool) createAndLease(ctx context.Context, key poolKey, aid []byte) (*LP
 	if ownsReady {
 		delete(p.creating, key)
 	}
-	abortCreation := func(cause error) (*LPA, error) {
+	abortCreation := func(cause error) (*Lease, error) {
 		p.mu.Unlock()
 		closeErr := closeClientWhileLocked(client)
 		gmu.Unlock(lockKey)
@@ -384,14 +382,14 @@ func (p *Pool) finishCreation(key poolKey, ready chan struct{}) {
 	p.mu.Unlock()
 }
 
-func closeClientWhileLocked(client *LPA) error {
+func closeClientWhileLocked(client *Client) error {
 	if client == nil {
 		return nil
 	}
 	return client.Close()
 }
 
-func lease(ctx context.Context, entry *poolEntry) (*LPA, error) {
+func lease(ctx context.Context, entry *poolEntry) (*Lease, error) {
 	if entry == nil {
 		return nil, errPoolRequired
 	}
@@ -442,44 +440,31 @@ func lease(ctx context.Context, entry *poolEntry) (*LPA, error) {
 	return newPoolLease(ctx, entry, releaseSIMSlot), nil
 }
 
-func newPoolLease(ctx context.Context, entry *poolEntry, releaseSIMSlot func()) *LPA {
+func newPoolLease(ctx context.Context, entry *poolEntry, releaseSIMSlot func()) *Lease {
 	entry.client.operation.use(ctx)
-	lease := &LPA{
-		Client: entry.client.Client,
-		logger: entry.client.logger,
-		close: func() error {
-			entry.client.operation.reset()
+	return newLease(entry.client, func(disposition leaseDisposition) error {
+		defer func() {
 			if entry.lockKey != "" {
 				gmu.Unlock(entry.lockKey)
 			}
 			entry.gate <- struct{}{}
 			releaseReservation(releaseSIMSlot)
+		}()
+
+		entry.client.operation.reset()
+		if disposition == leaseReusable {
 			return nil
-		},
-	}
-	if entry.pool != nil {
-		lease.closeForRefresh = func() error {
+		}
+		if entry.pool != nil {
 			entry.pool.mu.Lock()
 			if entry.pool.entries[entry.key] == entry {
 				delete(entry.pool.entries, entry.key)
 				closePoolEntryLocked(entry, errPoolEntryRetired)
 			}
 			entry.pool.mu.Unlock()
-
-			entry.client.operation.reset()
-			// Do not send MANAGE CHANNEL CLOSE here. Qualcomm firmware may stop
-			// answering UIM requests as soon as EnableProfile(refresh=true) is
-			// accepted, leaving that request blocked until the delayed refresh.
-			err := entry.client.discard()
-			if entry.lockKey != "" {
-				gmu.Unlock(entry.lockKey)
-			}
-			entry.gate <- struct{}{}
-			releaseReservation(releaseSIMSlot)
-			return err
 		}
-	}
-	return lease
+		return entry.client.discard()
+	})
 }
 
 func releaseReservation(release func()) {
@@ -488,7 +473,7 @@ func releaseReservation(release func()) {
 	}
 }
 
-func (p *Pool) warm(m *modem.Modem) {
+func (p *Pool) warm(ctx context.Context, m *modem.Modem) {
 	if p == nil || m == nil {
 		return
 	}
@@ -498,29 +483,29 @@ func (p *Pool) warm(m *modem.Modem) {
 		return
 	}
 	p.wg.Go(func() {
-		p.warmModem(m)
+		p.warmModem(ctx, m)
 	})
 	p.mu.Unlock()
 }
 
-func (p *Pool) warmModem(m *modem.Modem) {
-	if err := p.ctx.Err(); err != nil {
+func (p *Pool) warmModem(ctx context.Context, m *modem.Modem) {
+	if err := ctx.Err(); err != nil {
 		return
 	}
-	if !waitForWarmableEUICC(p.ctx, m) {
+	if !waitForWarmableEUICC(ctx, m) {
 		return
 	}
 	for _, slot := range poolSlots(m) {
-		se, err := p.secureElementsForSlot(p.ctx, m, slot)
+		se, err := p.secureElementsForSlot(ctx, m, slot)
 		if err != nil {
 			m.Logger().Debug("discover eUICC secure elements for LPA pool", "slot", slot, "error", err)
 			continue
 		}
 		for _, currentSE := range se {
 			key := poolKey{modem: m, slot: slot, seID: currentSE.ID}
-			client, err := p.createAndLease(p.ctx, key, currentSE.AID)
+			client, err := p.createAndLease(ctx, key, currentSE.AID)
 			if err != nil {
-				if !errors.Is(err, ErrNoSupportedAID) && p.ctx.Err() == nil {
+				if !errors.Is(err, ErrNoSupportedAID) && ctx.Err() == nil {
 					m.Logger().Debug("create LPA client", "slot", slot, "seId", currentSE.ID, "error", err)
 				}
 				continue
@@ -706,23 +691,23 @@ func (p *Pool) invalidateSIMSlots(m *modem.Modem, values ...uint32) error {
 	return p.closeEntries(entries)
 }
 
-func (p *Pool) handleModemEvent(event modem.ModemEvent) {
+func (p *Pool) handleModemEvent(ctx context.Context, event modem.ModemEvent) {
 	if p == nil {
 		return
 	}
 	switch event.Type {
 	case modem.ModemEventAdded:
-		p.warm(event.Modem)
+		p.warm(ctx, event.Modem)
 	case modem.ModemEventChanged:
 		p.retire(event.Previous)
-		p.warm(event.Modem)
+		p.warm(ctx, event.Modem)
 	case modem.ModemEventRemoved:
 		p.retire(event.Modem)
 	case modem.ModemEventSIMChanged:
 		if err := p.invalidateSIMSlots(event.Modem, event.PreviousSIMSlot, event.SIMSlot); err != nil && event.Modem != nil {
 			event.Modem.Logger().Debug("refresh LPA clients after SIM change", "error", err)
 		}
-		p.warm(event.Modem)
+		p.warm(ctx, event.Modem)
 	}
 }
 

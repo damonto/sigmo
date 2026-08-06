@@ -57,9 +57,6 @@ func (s *deviceSessionStore) open(m *Modem, cfg wwan.Config) (Device, error) {
 	if s.closed {
 		return nil, wwanmodem.ErrClosed
 	}
-	if cfg.PortType != wwan.PortTypeQMI && cfg.PortType != wwan.PortTypeMBIM {
-		return wwan.Open(cfg)
-	}
 	if session := s.sessions[cfg]; session != nil {
 		return session, nil
 	}

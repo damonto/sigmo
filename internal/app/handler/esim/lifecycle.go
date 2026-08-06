@@ -41,6 +41,7 @@ type lifecycleClient interface {
 	EnableProfile(any, bool) error
 	Delete(sgp22.ICCID) error
 	RemoveNotificationFromList(sgp22.SequenceNumber) error
+	Invalidate() error
 	Close() error
 }
 
@@ -128,8 +129,8 @@ func (s *enableSession) Enable(ctx context.Context) error {
 		return fmt.Errorf("enable profile %s: %w", s.iccid.String(), err)
 	}
 
-	if err := s.closeForRefresh(); err != nil {
-		slog.Warn("close LPA client after profile enable", "imei", s.modem.EquipmentIdentifier, "error", err)
+	if err := s.invalidateClient(); err != nil {
+		slog.Warn("invalidate LPA client after profile enable", "imei", s.modem.EquipmentIdentifier, "error", err)
 	}
 	return s.finish(ctx)
 }
@@ -170,16 +171,13 @@ func (s *enableSession) Close() {
 	s.client = nil
 }
 
-func (s *enableSession) closeForRefresh() error {
+func (s *enableSession) invalidateClient() error {
 	if s == nil || s.client == nil {
 		return nil
 	}
 	client := s.client
 	s.client = nil
-	if closer, ok := client.(interface{ CloseForRefresh() error }); ok {
-		return closer.CloseForRefresh()
-	}
-	return client.Close()
+	return client.Invalidate()
 }
 
 func (l *lifecycle) Delete(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {

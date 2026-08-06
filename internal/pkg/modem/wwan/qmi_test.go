@@ -586,7 +586,7 @@ func TestDeviceSetIMSSTestModeQMI(t *testing.T) {
 	}
 }
 
-func TestOpenRejectsInvalidConfig(t *testing.T) {
+func TestOpenSessionRejectsInvalidConfig(t *testing.T) {
 	tests := []struct {
 		name    string
 		cfg     Config
@@ -600,39 +600,15 @@ func TestOpenRejectsInvalidConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			device, err := Open(tt.cfg)
+			device, err := OpenSession(tt.cfg)
 			if err == nil {
-				t.Fatal("Open() error = nil, want error")
+				t.Fatal("OpenSession() error = nil, want error")
 			}
 			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
-				t.Fatalf("Open() error = %v, want %v", err, tt.wantErr)
+				t.Fatalf("OpenSession() error = %v, want %v", err, tt.wantErr)
 			}
 			if device != nil {
-				t.Fatalf("Open() device = %v, want nil", device)
-			}
-		})
-	}
-}
-
-func TestOpenRejectsUnsupportedProtocol(t *testing.T) {
-	tests := []struct {
-		name string
-		open func(Config) error
-		cfg  Config
-	}{
-		{
-			name: "QMI",
-			open: func(cfg Config) error {
-				_, err := Open(cfg)
-				return err
-			},
-			cfg: Config{PortType: PortTypeQMI, Device: "/dev/cdc-wdm0", Slot: 1},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.open(tt.cfg); !errors.Is(err, ErrUnsupported) {
-				t.Fatalf("open error = %v, want %v", err, ErrUnsupported)
+				t.Fatalf("OpenSession() device = %v, want nil", device)
 			}
 		})
 	}

@@ -53,13 +53,13 @@ func TestLockedChannelDisconnectOnce(t *testing.T) {
 	}
 }
 
-func TestLPACloseReleasesSIMSlotOnce(t *testing.T) {
+func TestClientCloseReleasesSIMSlotOnce(t *testing.T) {
 	m := new(mmodem.Modem)
 	releaseSIMSlot, err := m.ReserveSIMSlot(t.Context())
 	if err != nil {
 		t.Fatalf("ReserveSIMSlot() error = %v", err)
 	}
-	client := &LPA{releaseSIMSlot: releaseSIMSlot}
+	client := &Client{releaseSIMSlot: releaseSIMSlot}
 	if err := client.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
@@ -74,7 +74,7 @@ func TestLPACloseReleasesSIMSlotOnce(t *testing.T) {
 	release()
 }
 
-func TestLPADiscardSkipsInvalidatedLogicalChannel(t *testing.T) {
+func TestClientDiscardSkipsInvalidatedLogicalChannel(t *testing.T) {
 	channel := &fakeSmartCardChannel{logicalChannel: 3}
 	client, err := NewWithChannel(t.Context(), ChannelConfig{Channel: channel})
 	if err != nil {
@@ -229,7 +229,7 @@ func TestNewWithChannelLogger(t *testing.T) {
 	tests := []struct {
 		name    string
 		channel *fakeSmartCardChannel
-		run     func(t *testing.T, client *LPA)
+		run     func(t *testing.T, client *Client)
 		want    string
 		wantErr error
 	}{
@@ -242,9 +242,9 @@ func TestNewWithChannelLogger(t *testing.T) {
 		{
 			name:    "euicc APDU logs IMEI",
 			channel: &fakeSmartCardChannel{logicalChannel: 1},
-			run: func(t *testing.T, client *LPA) {
+			run: func(t *testing.T, client *Client) {
 				t.Helper()
-				if _, err := client.APDU.TransmitRaw([]byte{0x01}); err != nil {
+				if _, err := client.rawClient().APDU.TransmitRaw([]byte{0x01}); err != nil {
 					t.Fatalf("TransmitRaw() error = %v", err)
 				}
 			},

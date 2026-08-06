@@ -22,7 +22,7 @@ func smdsDiscoveryEventFromDelayedDownload(event ts43.DelayedDownloadEvent) ts43
 	}
 }
 
-func smdsDownloadConfig(ctx context.Context, targetLPA *ilpa.LPA, event ts43.SMDSDiscoveryEvent) (ts43.DownloadConfig, error) {
+func smdsDownloadConfig(ctx context.Context, targetLPA *ilpa.Lease, event ts43.SMDSDiscoveryEvent) (ts43.DownloadConfig, error) {
 	if err := ctx.Err(); err != nil {
 		return ts43.DownloadConfig{}, err
 	}

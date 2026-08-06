@@ -36,17 +36,19 @@ const qmiPrimaryLogicalSlot uint8 = 1
 // because eUICC operations cannot safely share one underlying smart-card channel.
 var gmu = keymutex.New()
 
-type LPA struct {
-	*lpa.Client
-	lockKey         string
-	releaseSIMSlot  func()
-	channel         driver.SmartCardChannel
-	logger          *slog.Logger
-	operation       *operationContext
-	close           func() error
-	closeForRefresh func() error
-	closeOnce       sync.Once
-	closeErr        error
+// Client owns one connected eUICC client and its underlying smart-card
+// transport. Pool callers receive a Lease instead, so Close always means
+// releasing the resource owned by Client.
+type Client struct {
+	*clientView
+	lockKey        string
+	releaseSIMSlot func()
+	channel        driver.SmartCardChannel
+	logger         *slog.Logger
+	operation      *operationContext
+	shutdown       func() error
+	closeOnce      sync.Once
+	closeErr       error
 }
 
 type Info struct {
@@ -80,11 +82,11 @@ var AIDs = [][]byte{
 	{0xA0, 0x00, 0x00, 0x06, 0x28, 0x10, 0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0x89, 0x00, 0x00, 0x01, 0x00}, // GlocalMe
 }
 
-func New(ctx context.Context, m *modem.Modem, currentSettings *settings.Settings) (*LPA, error) {
+func New(ctx context.Context, m *modem.Modem, currentSettings *settings.Settings) (*Client, error) {
 	return newModemClient(ctx, modemClientConfig{modem: m, settings: currentSettings})
 }
 
-func NewWithAID(ctx context.Context, m *modem.Modem, currentSettings *settings.Settings, aid []byte) (*LPA, error) {
+func NewWithAID(ctx context.Context, m *modem.Modem, currentSettings *settings.Settings, aid []byte) (*Client, error) {
 	return newModemClient(ctx, modemClientConfig{modem: m, settings: currentSettings, aid: aid})
 }
 
@@ -95,7 +97,7 @@ type modemClientConfig struct {
 	aid      []byte
 }
 
-func newModemClient(ctx context.Context, cfg modemClientConfig) (*LPA, error) {
+func newModemClient(ctx context.Context, cfg modemClientConfig) (*Client, error) {
 	if cfg.modem == nil {
 		return nil, errors.New("modem is required")
 	}
@@ -126,7 +128,7 @@ func newModemClient(ctx context.Context, cfg modemClientConfig) (*LPA, error) {
 
 // newClientForSlot creates a client while the caller owns the modem's SIM slot
 // reservation and the corresponding LPA lock.
-func newClientForSlot(ctx context.Context, cfg modemClientConfig) (*LPA, error) {
+func newClientForSlot(ctx context.Context, cfg modemClientConfig) (*Client, error) {
 	ch, err := createChannelForSlot(ctx, cfg.modem, cfg.slot)
 	if err != nil {
 		return nil, err
@@ -154,7 +156,7 @@ func lpaLockKey(m *modem.Modem, slot uint8) string {
 	return fmt.Sprintf("%s:%d", m.EquipmentIdentifier, slot)
 }
 
-func NewWithChannel(ctx context.Context, cfg ChannelConfig) (*LPA, error) {
+func NewWithChannel(ctx context.Context, cfg ChannelConfig) (*Client, error) {
 	if cfg.Channel == nil {
 		return nil, errors.New("lpa channel is required")
 	}
@@ -236,7 +238,7 @@ func (c *lockedChannel) CloseLogicalChannel(channel byte) error {
 	return nil
 }
 
-func newWithChannelLocked(ctx context.Context, cfg ChannelConfig) (*LPA, error) {
+func newWithChannelLocked(ctx context.Context, cfg ChannelConfig) (*Client, error) {
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -247,7 +249,13 @@ func newWithChannelLocked(ctx context.Context, cfg ChannelConfig) (*LPA, error) 
 	}
 	operation := newOperationContext(ctx)
 	channel := &contextSmartCardChannel{operation: operation, SmartCardChannel: cfg.Channel}
-	instance := &LPA{lockKey: cfg.LockKey, channel: cfg.Channel, logger: logger, operation: operation}
+	instance := &Client{
+		clientView: &clientView{},
+		lockKey:    cfg.LockKey,
+		channel:    cfg.Channel,
+		logger:     logger,
+		operation:  operation,
+	}
 	opts := &lpa.Options{
 		Channel:              channel,
 		AdminProtocolVersion: "2.2.0",
@@ -265,7 +273,7 @@ func newWithChannelLocked(ctx context.Context, cfg ChannelConfig) (*LPA, error) 
 			}
 			return nil, result
 		}
-		instance.Client = client
+		instance.clientView.client = client
 		logger.Info("LPA client created", "AID", fmt.Sprintf("%X", opts.AID))
 		return instance, nil
 	}
@@ -275,7 +283,7 @@ func newWithChannelLocked(ctx context.Context, cfg ChannelConfig) (*LPA, error) 
 	return instance, nil
 }
 
-func (l *LPA) tryCreateClient(ctx context.Context, operation *operationContext, opts *lpa.Options) error {
+func (l *Client) tryCreateClient(ctx context.Context, operation *operationContext, opts *lpa.Options) error {
 	var errs error
 	allUnsupported := true
 	for _, opts.AID = range AIDs {
@@ -283,7 +291,7 @@ func (l *LPA) tryCreateClient(ctx context.Context, operation *operationContext, 
 			return errors.Join(errs, err)
 		}
 		var err error
-		l.Client, err = newEUICCClient(operation, opts)
+		l.clientView.client, err = newEUICCClient(operation, opts)
 		if err == nil {
 			l.logger.Info("LPA client created", "AID", fmt.Sprintf("%X", opts.AID))
 			return nil
@@ -482,52 +490,47 @@ func createATChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
 	return at.New(port.Device)
 }
 
-func (l *LPA) Close() error {
+func (l *Client) Close() error {
 	return l.closeWith(func() error {
-		if l.Client == nil {
+		client := l.rawClient()
+		if client == nil {
 			return nil
 		}
-		return l.Client.Close()
+		return client.Close()
 	})
-}
-
-// CloseForRefresh releases a pooled transport after an operation that asks the
-// eUICC to refresh. The pool may use a hard disconnect because some firmware
-// stops answering logical-channel requests until the delayed refresh finishes.
-func (l *LPA) CloseForRefresh() error {
-	if l == nil || l.closeForRefresh == nil {
-		return l.Close()
-	}
-	l.closeOnce.Do(func() {
-		l.closeErr = l.closeForRefresh()
-	})
-	return l.closeErr
 }
 
 // discard releases transport resources after a SIM change has already
 // invalidated the old logical channel.
-func (l *LPA) discard() error {
+func (l *Client) discard() error {
 	return l.closeWith(func() error {
 		if l.channel != nil {
 			return l.channel.Disconnect()
 		}
-		if l.Client != nil {
-			return l.Client.Close()
+		if client := l.rawClient(); client != nil {
+			return client.Close()
 		}
 		return nil
 	})
 }
 
-func (l *LPA) closeWith(shutdown func() error) error {
+func (l *Client) rawClient() *lpa.Client {
+	if l == nil || l.clientView == nil {
+		return nil
+	}
+	return l.clientView.client
+}
+
+func (l *Client) closeWith(closeResource func() error) error {
 	if l == nil {
 		return nil
 	}
 	l.closeOnce.Do(func() {
-		if l.close != nil {
-			l.closeErr = l.close()
-			return
+		if l.shutdown != nil {
+			l.closeErr = l.shutdown()
+		} else {
+			l.closeErr = closeResource()
 		}
-		l.closeErr = shutdown()
 		if l.lockKey != "" {
 			gmu.Unlock(l.lockKey)
 		}
@@ -538,11 +541,11 @@ func (l *LPA) closeWith(shutdown func() error) error {
 	return l.closeErr
 }
 
-func (l *LPA) Logger() *slog.Logger {
+func (l *Client) Logger() *slog.Logger {
 	return l.logger
 }
 
-func (l *LPA) Info() (*Info, error) {
+func (l *Client) Info() (*Info, error) {
 	var info Info
 	eid, err := l.EID()
 	if err != nil {
@@ -574,7 +577,7 @@ func (l *LPA) Info() (*Info, error) {
 	return &info, nil
 }
 
-func (l *LPA) Delete(id sgp22.ICCID) error {
+func (l *Client) Delete(id sgp22.ICCID) error {
 	currentNotifications, err := l.ListNotification()
 	if err != nil {
 		return err
@@ -604,7 +607,7 @@ func (l *LPA) Delete(id sgp22.ICCID) error {
 	return errs
 }
 
-func (l *LPA) SendNotification(searchCriteria any, delete bool) error {
+func (l *Client) SendNotification(searchCriteria any, delete bool) error {
 	notifications, err := l.RetrieveNotificationList(searchCriteria)
 	if err != nil {
 		return err
@@ -623,7 +626,7 @@ func (l *LPA) SendNotification(searchCriteria any, delete bool) error {
 	return errs
 }
 
-func (l *LPA) Download(ctx context.Context, activationCode *lpa.ActivationCode, opts *lpa.DownloadOptions) error {
+func (l *Client) Download(ctx context.Context, activationCode *lpa.ActivationCode, opts *lpa.DownloadOptions) error {
 	l.logger.Info("downloading profile", "activationCode", activationCode)
 	result, err := l.DownloadProfile(ctx, activationCode, opts)
 	if err != nil {
@@ -638,7 +641,7 @@ func (l *LPA) Download(ctx context.Context, activationCode *lpa.ActivationCode, 
 	return nil
 }
 
-func (l *LPA) Discovery(imei sgp22.IMEI) ([]*sgp22.EventEntry, error) {
+func (l *Client) Discovery(imei sgp22.IMEI) ([]*sgp22.EventEntry, error) {
 	var entries []*sgp22.EventEntry
 	var errs error
 	addresses := []url.URL{
@@ -647,7 +650,7 @@ func (l *LPA) Discovery(imei sgp22.IMEI) ([]*sgp22.EventEntry, error) {
 	}
 	for _, address := range addresses {
 		l.logger.Info("discovering profiles", "address", address.Host)
-		discovered, err := l.Client.Discovery(&address, imei)
+		discovered, err := l.rawClient().Discovery(&address, imei)
 		if err != nil {
 			errs = errors.Join(errs, fmt.Errorf("discover profiles from %s: %w", address.Host, err))
 			continue

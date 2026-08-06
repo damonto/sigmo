@@ -33,7 +33,7 @@ func (s *transferRunner) downloadAndCompleteActivation(ctx context.Context, sess
 	return next, err
 }
 
-func (s *transferRunner) downloadProfile(ctx context.Context, session *wsSession, target *mmodem.Modem, targetLPA *ilpa.LPA, downloadConfig ts43.DownloadConfig) (sgp22.ICCID, error) {
+func (s *transferRunner) downloadProfile(ctx context.Context, session *wsSession, target *mmodem.Modem, targetLPA *ilpa.Lease, downloadConfig ts43.DownloadConfig) (sgp22.ICCID, error) {
 	ac, err := activationCode(downloadConfig)
 	if err != nil {
 		return nil, err

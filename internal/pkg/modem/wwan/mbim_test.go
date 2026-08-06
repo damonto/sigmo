@@ -11,7 +11,7 @@ import (
 	usimcard "github.com/damonto/wwan-go/sim/card"
 )
 
-func TestDeviceMSISDNMBIM(t *testing.T) {
+func TestSessionMSISDNMBIM(t *testing.T) {
 	readErr := errors.New("subscriber status unavailable")
 	tests := []struct {
 		name    string
@@ -27,7 +27,8 @@ func TestDeviceMSISDNMBIM(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &fakeMBIMNetwork{subscriberReady: uiccmbim.SubscriberReadyStatusResponse{TelephoneNumbers: slices.Clone(tt.numbers)}, subscriberReadyErr: tt.err}
-			got, err := mbimDeviceWithNetwork(client).MSISDN(context.Background())
+			session := mbimSessionWithNetwork(client)
+			got, err := session.MSISDN(context.Background())
 			if tt.err != nil {
 				if !errors.Is(err, tt.err) {
 					t.Fatalf("MSISDN() error = %v, want %v", err, tt.err)
@@ -38,14 +39,20 @@ func TestDeviceMSISDNMBIM(t *testing.T) {
 			if got != tt.want {
 				t.Fatalf("MSISDN() = %q, want %q", got, tt.want)
 			}
+			if client.closed {
+				t.Fatal("session client closed after one operation")
+			}
+			if err := session.Close(); err != nil {
+				t.Fatalf("Close() error = %v", err)
+			}
 			if !client.closed {
-				t.Fatal("client was not closed")
+				t.Fatal("session client was not closed")
 			}
 		})
 	}
 }
 
-func TestDeviceSIMStateMBIM(t *testing.T) {
+func TestSessionSIMStateMBIM(t *testing.T) {
 	const iccid = "8901000000000000001"
 	readErr := errors.New("subscriber status unavailable")
 	tests := []struct {
@@ -115,7 +122,8 @@ func TestDeviceSIMStateMBIM(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &fakeMBIMNetwork{subscriberReady: tt.ready, subscriberReadyErr: tt.err}
-			got, err := mbimDeviceWithNetwork(client).SIMState(context.Background(), tt.target)
+			session := mbimSessionWithNetwork(client)
+			got, err := session.SIMState(context.Background(), tt.target)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("SIMState() error = %v, want %v", err, tt.wantErr)
@@ -126,18 +134,25 @@ func TestDeviceSIMStateMBIM(t *testing.T) {
 			if got != tt.want {
 				t.Fatalf("SIMState() = %+v, want %+v", got, tt.want)
 			}
+			if client.closed {
+				t.Fatal("session client closed after one operation")
+			}
+			if err := session.Close(); err != nil {
+				t.Fatalf("Close() error = %v", err)
+			}
 			if !client.closed {
-				t.Fatal("client was not closed")
+				t.Fatal("session client was not closed")
 			}
 		})
 	}
 }
 
-func TestDeviceVoLTEStatusMBIM(t *testing.T) {
-	device, err := Open(Config{PortType: PortTypeMBIM, Device: "/dev/cdc-wdm0", Slot: 1})
+func TestSessionVoLTEStatusMBIM(t *testing.T) {
+	device, err := OpenSession(Config{PortType: PortTypeMBIM, Device: "/dev/cdc-wdm0", Slot: 1})
 	if err != nil {
-		t.Fatalf("Open() error = %v", err)
+		t.Fatalf("OpenSession() error = %v", err)
 	}
+	t.Cleanup(func() { _ = device.Close() })
 
 	got, err := device.VoLTEStatus(context.Background())
 	if !errors.Is(err, ErrUnsupported) {
@@ -148,7 +163,7 @@ func TestDeviceVoLTEStatusMBIM(t *testing.T) {
 	}
 }
 
-func TestDevicePacketServiceStatusMBIM(t *testing.T) {
+func TestSessionPacketServiceStatusMBIM(t *testing.T) {
 	tests := []struct {
 		name         string
 		registration uiccmbim.RegisterState
@@ -173,7 +188,8 @@ func TestDevicePacketServiceStatusMBIM(t *testing.T) {
 				registration: uiccmbim.RegistrationStateInfo{RegisterState: tt.registration},
 				packet:       tt.packet,
 			}
-			device := mbimDeviceWithNetwork(client)
+			device := mbimSessionWithNetwork(client)
+			t.Cleanup(func() { _ = device.Close() })
 			got, err := device.PacketServiceStatus(context.Background())
 			if err != nil {
 				t.Fatalf("PacketServiceStatus() error = %v", err)
@@ -185,7 +201,7 @@ func TestDevicePacketServiceStatusMBIM(t *testing.T) {
 	}
 }
 
-func TestDeviceIMSProfileMBIM(t *testing.T) {
+func TestSessionIMSProfileMBIM(t *testing.T) {
 	tests := []struct {
 		name     string
 		contexts []uiccmbim.ProvisionedContext
@@ -198,7 +214,8 @@ func TestDeviceIMSProfileMBIM(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			device := mbimDeviceWithNetwork(&fakeMBIMNetwork{contexts: slices.Clone(tt.contexts)})
+			device := mbimSessionWithNetwork(&fakeMBIMNetwork{contexts: slices.Clone(tt.contexts)})
+			t.Cleanup(func() { _ = device.Close() })
 			got, err := device.IMSProfile(context.Background())
 			if tt.wantErr {
 				if err == nil {
@@ -249,13 +266,10 @@ func (r *fakeMBIMNetwork) Close() error {
 	return nil
 }
 
-func mbimDeviceWithNetwork(client mbimNetwork) mbimDevice {
-	return mbimDevice{
-		slot: 1,
-		openNetwork: func(context.Context) (mbimNetwork, error) {
-			return client, nil
-		},
-	}
+func mbimSessionWithNetwork(client *fakeMBIMNetwork) *mbimSession {
+	return newMBIMSessionWithOpener(Config{Slot: 1}, func(context.Context, uint8) (mbimSessionClient, error) {
+		return &fakeMBIMSessionClient{fakeMBIMNetwork: client}, nil
+	})
 }
 
 func TestMBIMSessionReusesClientPerSlot(t *testing.T) {

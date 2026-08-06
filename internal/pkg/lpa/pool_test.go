@@ -3,6 +3,7 @@ package lpa
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -13,8 +14,19 @@ import (
 	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
+func TestOwnedClientsDoNotExposeRawClient(t *testing.T) {
+	for name, typ := range map[string]reflect.Type{
+		"Client": reflect.TypeOf(Client{}),
+		"Lease":  reflect.TypeOf(Lease{}),
+	} {
+		if _, ok := typ.FieldByName("Client"); ok {
+			t.Fatalf("%s exposes the raw eUICC client", name)
+		}
+	}
+}
+
 func TestLeaseSerializesAPDUOperations(t *testing.T) {
-	entry := &poolEntry{client: &LPA{}, gate: make(chan struct{}, 1)}
+	entry := &poolEntry{client: &Client{}, gate: make(chan struct{}, 1)}
 	entry.gate <- struct{}{}
 
 	first, err := lease(context.Background(), entry)
@@ -40,7 +52,7 @@ func TestLeaseSerializesAPDUOperations(t *testing.T) {
 
 func TestLeaseReservesSIMSlotUntilClose(t *testing.T) {
 	m := new(modem.Modem)
-	entry := &poolEntry{modem: m, client: &LPA{}, gate: make(chan struct{}, 1)}
+	entry := &poolEntry{modem: m, client: &Client{}, gate: make(chan struct{}, 1)}
 	entry.gate <- struct{}{}
 
 	client, err := lease(t.Context(), entry)
@@ -78,7 +90,7 @@ func TestLeaseCancellationReleasesGateAndSIMReservation(t *testing.T) {
 	})
 	entry := &poolEntry{
 		modem:   m,
-		client:  &LPA{},
+		client:  &Client{},
 		gate:    make(chan struct{}, 1),
 		lockKey: key,
 	}
@@ -104,7 +116,7 @@ func TestLeaseBindsCallerContextForPersistentClient(t *testing.T) {
 	base := context.Background()
 	operation := newOperationContext(base)
 	entry := &poolEntry{
-		client: &LPA{operation: operation},
+		client: &Client{operation: operation},
 		gate:   make(chan struct{}, 1),
 	}
 	entry.gate <- struct{}{}
@@ -126,14 +138,14 @@ func TestLeaseBindsCallerContextForPersistentClient(t *testing.T) {
 	}
 }
 
-func TestLeaseCloseForRefreshRetiresAndClosesPersistentClient(t *testing.T) {
+func TestLeaseInvalidateRetiresAndClosesPersistentClient(t *testing.T) {
 	var closes atomic.Int32
 	key := poolKey{}
 	pool := &Pool{entries: make(map[poolKey]*poolEntry)}
 	entry := &poolEntry{
 		pool: pool,
 		key:  key,
-		client: &LPA{close: func() error {
+		client: &Client{shutdown: func() error {
 			closes.Add(1)
 			return nil
 		}},
@@ -147,8 +159,8 @@ func TestLeaseCloseForRefreshRetiresAndClosesPersistentClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lease() error = %v", err)
 	}
-	if err := client.CloseForRefresh(); err != nil {
-		t.Fatalf("CloseForRefresh() error = %v", err)
+	if err := client.Invalidate(); err != nil {
+		t.Fatalf("Invalidate() error = %v", err)
 	}
 	if got := closes.Load(); got != 1 {
 		t.Fatalf("persistent client close calls = %d, want 1", got)
@@ -161,10 +173,59 @@ func TestLeaseCloseForRefreshRetiresAndClosesPersistentClient(t *testing.T) {
 	}
 }
 
+func TestLeaseInvalidateReleasesResourcesAfterDisconnectError(t *testing.T) {
+	disconnectErr := errors.New("disconnect pooled client")
+	m := new(modem.Modem)
+	key := poolKey{}
+	lockKey := "test:lease-invalidate-error"
+	pool := &Pool{entries: make(map[poolKey]*poolEntry)}
+	entry := &poolEntry{
+		pool:    pool,
+		key:     key,
+		modem:   m,
+		client:  &Client{shutdown: func() error { return disconnectErr }},
+		gate:    make(chan struct{}, 1),
+		done:    make(chan struct{}),
+		lockKey: lockKey,
+	}
+	entry.gate <- struct{}{}
+	pool.entries[key] = entry
+
+	client, err := lease(t.Context(), entry)
+	if err != nil {
+		t.Fatalf("lease() error = %v", err)
+	}
+	if err := client.Invalidate(); !errors.Is(err, disconnectErr) {
+		t.Fatalf("Invalidate() error = %v, want %v", err, disconnectErr)
+	}
+
+	select {
+	case <-entry.gate:
+		entry.gate <- struct{}{}
+	default:
+		t.Fatal("lease gate was not released")
+	}
+
+	lockCtx, cancelLock := context.WithTimeout(t.Context(), time.Second)
+	defer cancelLock()
+	if err := gmu.LockContext(lockCtx, lockKey); err != nil {
+		t.Fatalf("LPA lock after Invalidate() error = %v", err)
+	}
+	gmu.Unlock(lockKey)
+
+	slotCtx, cancelSlot := context.WithTimeout(t.Context(), time.Second)
+	defer cancelSlot()
+	release, err := m.ReserveSIMSlot(slotCtx)
+	if err != nil {
+		t.Fatalf("ReserveSIMSlot() after Invalidate() error = %v", err)
+	}
+	release()
+}
+
 func TestLeaseRejectsRetiredEntry(t *testing.T) {
 	entryErr := errors.New("entry retired")
 	entry := &poolEntry{
-		client: &LPA{},
+		client: &Client{},
 		gate:   make(chan struct{}, 1),
 		done:   make(chan struct{}),
 		err:    entryErr,
@@ -180,7 +241,7 @@ func TestLeaseRejectsRetiredEntry(t *testing.T) {
 func TestPoolCloseClosesPersistentClientOnce(t *testing.T) {
 	var closes atomic.Int32
 	entry := &poolEntry{
-		client: &LPA{close: func() error {
+		client: &Client{shutdown: func() error {
 			closes.Add(1)
 			return nil
 		}},
@@ -188,7 +249,6 @@ func TestPoolCloseClosesPersistentClientOnce(t *testing.T) {
 	}
 	entry.gate <- struct{}{}
 	p := &Pool{
-		ctx:         context.Background(),
 		cancel:      func() {},
 		entries:     map[poolKey]*poolEntry{{}: entry},
 		creating:    make(map[poolKey]chan struct{}),
@@ -213,12 +273,11 @@ func TestPoolRoutesDefaultSEOnlyToActiveSlot(t *testing.T) {
 		PrimarySimSlot:      2,
 		SimSlots:            []uint32{1, 2},
 	}
-	wantClient := &LPA{Client: &euicclpa.Client{}}
+	wantClient := &Client{clientView: &clientView{client: &euicclpa.Client{}}}
 	key := poolKey{modem: m, slot: 2, seID: SEIDDefault}
 	entry := &poolEntry{client: wantClient, gate: make(chan struct{}, 1), done: make(chan struct{})}
 	entry.gate <- struct{}{}
 	p := &Pool{
-		ctx:      context.Background(),
 		entries:  map[poolKey]*poolEntry{key: entry},
 		creating: make(map[poolKey]chan struct{}),
 		failures: map[poolKey]error{
@@ -244,7 +303,7 @@ func TestPoolRoutesDefaultSEOnlyToActiveSlot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Acquire() error = %v", err)
 	}
-	if client.Client != wantClient.Client {
+	if client.owner != wantClient {
 		t.Fatal("Acquire() did not lease the active slot 2 client")
 	}
 	if err := client.Close(); err != nil {
@@ -311,7 +370,7 @@ func TestInvalidateSIMSlotsClosesOnlyAffectedEntries(t *testing.T) {
 	var slot2Closes atomic.Int32
 	newEntry := func(closes *atomic.Int32) *poolEntry {
 		entry := &poolEntry{
-			client: &LPA{close: func() error {
+			client: &Client{shutdown: func() error {
 				closes.Add(1)
 				return nil
 			}},

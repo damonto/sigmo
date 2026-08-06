@@ -134,50 +134,50 @@ func TestEnableSessionEnable(t *testing.T) {
 		notificationErr   error
 		wantErr           error
 		wantEnsure        bool
-		wantEnableClosed  bool
-		wantRefreshClosed bool
+		wantReleased      bool
+		wantInvalidated   bool
 		wantNotifications bool
 		wantRefreshes     []bool
 	}{
 		{
 			name:              "enable succeeds",
 			wantEnsure:        true,
-			wantEnableClosed:  true,
-			wantRefreshClosed: true,
+			wantReleased:      true,
+			wantInvalidated:   true,
 			wantNotifications: true,
 			wantRefreshes:     []bool{true},
 		},
 		{
-			name:             "CAT busy is returned",
-			enableErr:        sgp22.ErrCatBusy,
-			wantErr:          sgp22.ErrCatBusy,
-			wantEnableClosed: true,
-			wantRefreshes:    []bool{true},
+			name:          "CAT busy is returned",
+			enableErr:     sgp22.ErrCatBusy,
+			wantErr:       sgp22.ErrCatBusy,
+			wantReleased:  true,
+			wantRefreshes: []bool{true},
 		},
 		{
 			name:              "notification failure is best effort",
 			notificationErr:   notificationErr,
 			wantEnsure:        true,
-			wantEnableClosed:  true,
-			wantRefreshClosed: true,
+			wantReleased:      true,
+			wantInvalidated:   true,
 			wantNotifications: true,
 			wantRefreshes:     []bool{true},
 		},
 		{
-			name:              "ensure SIM visible error is returned",
-			ensureErr:         ensureErr,
-			wantErr:           ensureErr,
-			wantEnsure:        true,
-			wantEnableClosed:  true,
-			wantRefreshClosed: true,
-			wantRefreshes:     []bool{true},
+			name:            "ensure SIM visible error is returned",
+			ensureErr:       ensureErr,
+			wantErr:         ensureErr,
+			wantEnsure:      true,
+			wantReleased:    true,
+			wantInvalidated: true,
+			wantRefreshes:   []bool{true},
 		},
 		{
-			name:             "enable error returns original error immediately",
-			enableErr:        enableErr,
-			wantErr:          enableErr,
-			wantEnableClosed: true,
-			wantRefreshes:    []bool{true},
+			name:          "enable error returns original error immediately",
+			enableErr:     enableErr,
+			wantErr:       enableErr,
+			wantReleased:  true,
+			wantRefreshes: []bool{true},
 		},
 	}
 
@@ -244,11 +244,11 @@ func TestEnableSessionEnable(t *testing.T) {
 			if ensureCalled != tt.wantEnsure {
 				t.Fatalf("ensure called = %v, want %v", ensureCalled, tt.wantEnsure)
 			}
-			if enableClient.closed != tt.wantEnableClosed {
-				t.Fatalf("enable client closed = %v, want %v", enableClient.closed, tt.wantEnableClosed)
+			if enableClient.released != tt.wantReleased {
+				t.Fatalf("enable lease released = %v, want %v", enableClient.released, tt.wantReleased)
 			}
-			if enableClient.refreshClosed != tt.wantRefreshClosed {
-				t.Fatalf("enable client refresh closed = %v, want %v", enableClient.refreshClosed, tt.wantRefreshClosed)
+			if enableClient.invalidated != tt.wantInvalidated {
+				t.Fatalf("enable lease invalidated = %v, want %v", enableClient.invalidated, tt.wantInvalidated)
 			}
 			if !slices.Equal(enableClient.enableRefreshes, tt.wantRefreshes) {
 				t.Fatalf("enable refreshes = %v, want %v", enableClient.enableRefreshes, tt.wantRefreshes)
@@ -298,8 +298,8 @@ type fakeLifecycleClient struct {
 	sendErr              error
 	sendErrors           []error
 	removeErr            error
-	closed               bool
-	refreshClosed        bool
+	released             bool
+	invalidated          bool
 	enableRefreshes      []bool
 	sentNotifications    int
 	removedNotifications int
@@ -357,13 +357,13 @@ func (f *fakeLifecycleClient) RemoveNotificationFromList(sequence sgp22.Sequence
 }
 
 func (f *fakeLifecycleClient) Close() error {
-	f.closed = true
+	f.released = true
 	return nil
 }
 
-func (f *fakeLifecycleClient) CloseForRefresh() error {
-	f.closed = true
-	f.refreshClosed = true
+func (f *fakeLifecycleClient) Invalidate() error {
+	f.released = true
+	f.invalidated = true
 	return nil
 }
 

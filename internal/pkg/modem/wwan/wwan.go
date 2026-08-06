@@ -36,12 +36,6 @@ type Target struct {
 	ICCID string
 }
 
-// Device provides modem operations through a generation-scoped protocol
-// session when it is opened by the modem package.
-type Device struct {
-	deviceOperations
-}
-
 type deviceOperations struct {
 	backend backend
 }
@@ -153,18 +147,6 @@ type PacketServiceStatus struct {
 type IMSProfile struct {
 	Index   uint8
 	PDNType string
-}
-
-// Open returns an operation-scoped MBIM device. Modem lifecycle code should use
-// OpenSession so the client remains owned by the modem generation.
-func Open(cfg Config) (*Device, error) {
-	if err := validateConfig(cfg); err != nil {
-		return nil, err
-	}
-	if cfg.PortType != PortTypeMBIM {
-		return nil, ErrUnsupported
-	}
-	return &Device{deviceOperations: deviceOperations{backend: newMBIMDevice(cfg.Device, cfg.Slot)}}, nil
 }
 
 // OpenSession opens a QMI or MBIM device that reuses protocol clients across operations.
