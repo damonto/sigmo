@@ -213,6 +213,57 @@ func TestEnsureSIMVisibleProvisionsEachGenerationOnce(t *testing.T) {
 	}
 }
 
+func TestEnsureSIMVisibleDiscardsProbeFromRetiredGeneration(t *testing.T) {
+	restoreSIMRefreshTiming(t, 0, time.Millisecond)
+	const (
+		path  = "/sys/devices/modem-1"
+		iccid = "8901000000000000002"
+	)
+	current := simRefreshTestModem(path, 1, false)
+	replacement := simRefreshTestModem(path, 2, false)
+	registry := &Registry{modems: map[string]*Modem{path: current}, started: true}
+	state := devicewwan.SIMState{
+		Supported: true,
+		Matches:   true,
+		Ready:     true,
+		ICCID:     iccid,
+		Slot:      1,
+	}
+	probes := 0
+	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{}}
+	device.onSIMState = func(context.Context, devicewwan.Target) (devicewwan.SIMState, error) {
+		probes++
+		probed := current
+		if probes > 1 {
+			probed = replacement
+		}
+		probed.applySIMInfo(wwanmodem.SIMInfo{
+			Slot:  1,
+			State: wwanmodem.SIMStateReady,
+			ICCID: iccid,
+			ATR:   []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
+		})
+		if probes == 1 {
+			registry.mu.Lock()
+			registry.modems[path] = replacement
+			registry.mu.Unlock()
+		}
+		return state, nil
+	}
+	registry.openDevice = fakeDeviceOpener(t, device, nil)
+
+	result, err := registry.ensureSIMVisible(t.Context(), current, SIMTarget{ICCID: iccid, RequireEUICC: true})
+	if err != nil {
+		t.Fatalf("ensureSIMVisible() error = %v", err)
+	}
+	if result.Modem != replacement || !result.ReloadObserved {
+		t.Fatalf("result = %+v, want ready replacement generation", result)
+	}
+	if probes != 2 {
+		t.Fatalf("SIM probes = %d, want retired and replacement generations", probes)
+	}
+}
+
 func TestEnsureSIMVisibleRetriesTransientProvisioningFailure(t *testing.T) {
 	restoreSIMRefreshTiming(t, 0, time.Millisecond)
 	const path = "/sys/devices/modem-1"
@@ -562,6 +613,27 @@ func TestReadCurrentESIMReturnsSIMStateError(t *testing.T) {
 	registry.openDevice = fakeDeviceOpener(t, &fakeDeviceControl{stateErr: wantErr}, nil)
 
 	_, err := registry.readCurrentModem(context.Background(), modem, SIMTarget{ICCID: "8901000000000000001"})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("readCurrentModem() error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestReadCurrentModemPreservesProbeErrorDuringGenerationChange(t *testing.T) {
+	const path = "/sys/devices/modem-1"
+	current := simRefreshTestModem(path, 1, false)
+	replacement := simRefreshTestModem(path, 2, false)
+	registry := &Registry{modems: map[string]*Modem{path: current}, started: true}
+	wantErr := errors.New("UIM transport stopped")
+	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{}}
+	device.onSIMState = func(context.Context, devicewwan.Target) (devicewwan.SIMState, error) {
+		registry.mu.Lock()
+		registry.modems[path] = replacement
+		registry.mu.Unlock()
+		return devicewwan.SIMState{}, wantErr
+	}
+	registry.openDevice = fakeDeviceOpener(t, device, nil)
+
+	_, err := registry.readCurrentModem(context.Background(), current, SIMTarget{ICCID: "8901000000000000001"})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("readCurrentModem() error = %v, want %v", err, wantErr)
 	}

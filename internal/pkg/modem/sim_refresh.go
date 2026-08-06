@@ -301,7 +301,7 @@ func (r *Registry) readCurrentModem(ctx context.Context, current *Modem, target 
 	}
 	reloaded := modem.Generation() != current.Generation() || modem.Path() != current.Path()
 	if activeSIMTargetReady(modem, target) {
-		return currentModemRead{Modem: modem, SIMVisible: true, ReloadObserved: reloaded}, nil
+		return r.confirmCurrentReadyModem(currentModemRead{Modem: modem, SIMVisible: true, ReloadObserved: reloaded})
 	}
 	if target.RequireActiveSlot {
 		if shouldRefreshSIMClassification(modem, target) {
@@ -312,15 +312,37 @@ func (r *Registry) readCurrentModem(ctx context.Context, current *Modem, target 
 				return currentModemRead{Modem: modem, ReloadObserved: reloaded}, fmt.Errorf("refresh active SIM metadata: %w", refreshErr)
 			}
 		}
-		return currentModemRead{
+		return r.confirmCurrentReadyModem(currentModemRead{
 			Modem:          modem,
 			SIMVisible:     activeSIMTargetReady(modem, target),
 			ReloadObserved: reloaded,
-		}, nil
+		})
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, simProbeTimeout)
 	defer cancel()
-	return r.readCurrentSIM(probeCtx, modem, target, reloaded)
+	read, err := r.readCurrentSIM(probeCtx, modem, target, reloaded)
+	if err != nil {
+		return read, err
+	}
+	return r.confirmCurrentReadyModem(read)
+}
+
+// confirmCurrentReadyModem prevents an in-flight SIM probe from reporting a
+// retired modem generation as ready.
+func (r *Registry) confirmCurrentReadyModem(read currentModemRead) (currentModemRead, error) {
+	if read.Modem == nil || !read.SIMVisible {
+		return read, nil
+	}
+	current, err := r.findModem(read.Modem.EquipmentIdentifier)
+	if err != nil {
+		read.SIMVisible = false
+		read.ReloadObserved = true
+		return read, err
+	}
+	if current != read.Modem {
+		return currentModemRead{Modem: current, ReloadObserved: true}, nil
+	}
+	return read, nil
 }
 
 func activeSIMTargetReady(modem *Modem, target SIMTarget) bool {
