@@ -342,19 +342,12 @@ func (s *QMAPSession) Close() error {
 	}
 	var pdnErr, clientErr error
 	if s.pdn != nil {
-		pdnErr = qmapStopError(s.pdn.Close())
+		pdnErr = s.pdn.Close()
 	}
 	if s.client != nil {
 		clientErr = s.client.Close()
 	}
 	return errors.Join(pdnErr, clientErr)
-}
-
-func qmapStopError(err error) error {
-	if errors.Is(err, qcom.QMIErrorNoEffect) {
-		return nil
-	}
-	return err
 }
 
 func ensureQMAP(ctx context.Context, client *qcom.Client) error {

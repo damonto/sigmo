@@ -3,6 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Dependency updates mutate the public and Pro modules independently. Disable
+# workspace mode so an enclosing go.work cannot change their module graphs.
+export GOWORK=off
+
 source "${ROOT_DIR}/scripts/pro-features.env"
 
 PRO_MODFILE="${PRO_MODFILE:-${PRO_GO_MODFILE}}"

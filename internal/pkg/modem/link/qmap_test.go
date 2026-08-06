@@ -14,26 +14,6 @@ import (
 	"github.com/damonto/wwan-go/qcom"
 )
 
-func TestQMAPStopError(t *testing.T) {
-	errStop := errors.New("stop rejected")
-	tests := []struct {
-		name    string
-		err     error
-		wantErr error
-	}{
-		{name: "already stopped", err: qcom.QMIErrorNoEffect},
-		{name: "other error", err: errStop, wantErr: errStop},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if err := qmapStopError(tt.err); !errors.Is(err, tt.wantErr) {
-				t.Fatalf("qmapStopError() error = %v, want %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
 func TestNonQMAPLinkLayerForRawIP(t *testing.T) {
 	tests := []struct {
 		name    string
