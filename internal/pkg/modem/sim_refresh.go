@@ -167,6 +167,7 @@ func (r *Registry) publishSIMChanged(current *Modem, previousSlot uint32, previo
 		return
 	}
 	r.simIdentities[current] = next
+	current.markNetworkStateChanged()
 	snapshot := r.copyModemsLocked()
 	subscribers := append([]subscription(nil), r.subs...)
 	r.mu.Unlock()

@@ -27,7 +27,6 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	messagecore "github.com/damonto/sigmo/internal/pkg/message"
 	modemcore "github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -41,7 +40,7 @@ type CoreToolsConfig struct {
 	LPAClients          *lpa.Pool
 	InternetConnections appconnectivity.InternetConnections
 	Relay               *forwarder.Relay
-	NetworkPreferences  *networkprefs.Store
+	Network             *networkhandler.Handler
 	Storage             *storage.Store
 	Reminders           *reminder.Scheduler
 	MessageRoute        messagecore.Route
@@ -61,17 +60,13 @@ type coreTools struct {
 }
 
 func RegisterCoreTools(catalog *Catalog, cfg CoreToolsConfig) error {
-	if catalog == nil || cfg.Store == nil || cfg.Registry == nil || cfg.InternetConnector == nil || cfg.LPAClients == nil || cfg.InternetConnections == nil || cfg.Storage == nil {
+	if catalog == nil || cfg.Store == nil || cfg.Registry == nil || cfg.InternetConnector == nil || cfg.LPAClients == nil || cfg.InternetConnections == nil || cfg.Network == nil || cfg.Storage == nil {
 		return errors.New("MCP core tool dependencies are required")
-	}
-	networks, err := networkhandler.New(cfg.Registry, cfg.NetworkPreferences, cfg.Storage)
-	if err != nil {
-		return fmt.Errorf("configure MCP network tools: %w", err)
 	}
 	tools := &coreTools{
 		registry: cfg.Registry,
 		modems:   modemhandler.New(cfg.Store, cfg.Registry, cfg.InternetConnector, cfg.Reminders, cfg.ModemOverview...),
-		network:  networks,
+		network:  cfg.Network,
 		euicc:    euicchandler.New(cfg.Registry, cfg.LPAClients),
 		esim: esimhandler.New(esimhandler.Config{
 			Store: cfg.Store, Registry: cfg.Registry, LPA: cfg.LPAClients, Internet: cfg.InternetConnector, Reminders: cfg.Reminders,

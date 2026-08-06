@@ -43,21 +43,33 @@ func (m *Modem) Enable(ctx context.Context) error {
 	if m == nil || m.core == nil {
 		return errModemRequired
 	}
-	return m.core.SetPowerState(ctx, wwanmodem.PowerStateOn)
+	if err := m.core.SetPowerState(ctx, wwanmodem.PowerStateOn); err != nil {
+		return err
+	}
+	m.markNetworkStateChanged()
+	return nil
 }
 
 func (m *Modem) Reset(ctx context.Context) error {
 	if m == nil || m.core == nil {
 		return errModemRequired
 	}
-	return m.core.Reset(ctx)
+	if err := m.core.Reset(ctx); err != nil {
+		return err
+	}
+	m.markNetworkStateChanged()
+	return nil
 }
 
 func (m *Modem) Disable(ctx context.Context) error {
 	if m == nil || m.core == nil {
 		return errModemRequired
 	}
-	return m.core.SetPowerState(ctx, wwanmodem.PowerStateLow)
+	if err := m.core.SetPowerState(ctx, wwanmodem.PowerStateLow); err != nil {
+		return err
+	}
+	m.markNetworkStateChanged()
+	return nil
 }
 
 func (m *Modem) SetPrimarySimSlot(ctx context.Context, slot uint32) error {
@@ -86,6 +98,7 @@ func (m *Modem) setPrimarySIMSlot(ctx context.Context, slot uint32) error {
 	if err := m.core.SetPrimarySIMSlot(ctx, uint8(slot)); err != nil {
 		return err
 	}
+	m.markNetworkStateChanged()
 	return nil
 }
 
@@ -109,7 +122,11 @@ func (m *Modem) SetCurrentModes(ctx context.Context, mode wwanmodem.Mode) error 
 	if m == nil || m.core == nil {
 		return errModemRequired
 	}
-	return m.core.SetModes(ctx, mode)
+	if err := m.core.SetModes(ctx, mode); err != nil {
+		return err
+	}
+	m.markNetworkStateChanged()
+	return nil
 }
 
 func (m *Modem) SupportedBands(ctx context.Context) ([]wwanmodem.Band, error) {
@@ -132,7 +149,11 @@ func (m *Modem) SetCurrentBands(ctx context.Context, bands []wwanmodem.Band) err
 	if m == nil || m.core == nil {
 		return errModemRequired
 	}
-	return m.core.SetBands(ctx, slices.Clone(bands))
+	if err := m.core.SetBands(ctx, slices.Clone(bands)); err != nil {
+		return err
+	}
+	m.markNetworkStateChanged()
+	return nil
 }
 
 func (m *Modem) AccessTechnology(ctx context.Context) (wwanmodem.Technology, error) {

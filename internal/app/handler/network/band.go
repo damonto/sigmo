@@ -71,6 +71,7 @@ func (n *network) SetCurrentBands(ctx context.Context, modem *mmodem.Modem, req 
 	if err := modem.SetCurrentBands(ctx, bands); err != nil {
 		return fmt.Errorf("set current bands: %w", err)
 	}
+	n.InvalidateScan(modem)
 	if err := n.preferences.SaveBands(ctx, modem.EquipmentIdentifier, bands); err != nil {
 		return fmt.Errorf("save current bands: %w", err)
 	}

@@ -1,4 +1,4 @@
-import { computed, ref, watch, type ComputedRef } from 'vue'
+import { computed, onUnmounted, ref, watch, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useNetworkApi } from '@/apis/network'
@@ -6,6 +6,7 @@ import type {
   BandResponse,
   BandValue,
   ModeResponse,
+  NetworkScanResponse,
   NetworkResponse,
   SetCurrentModesRequest,
 } from '@/types/network'
@@ -59,6 +60,49 @@ export const useModemNetwork = ({
     () => airplaneModeSupported.value && !isAirplaneModeUpdating.value,
   )
   let networkSettingsRequestID = 0
+  let networkScanRequestID = 0
+  let networkScanTimer: ReturnType<typeof setTimeout> | undefined
+  let resolveNetworkScanTimer: (() => void) | undefined
+  const networkScanPollInterval = 1000
+
+  // A scan is shared by every browser using this modem. Leaving the view only
+  // stops this browser's polling; the server-owned task continues for others.
+  const stopNetworkScanPolling = () => {
+    networkScanRequestID += 1
+    if (networkScanTimer !== undefined) {
+      clearTimeout(networkScanTimer)
+      networkScanTimer = undefined
+    }
+    resolveNetworkScanTimer?.()
+    resolveNetworkScanTimer = undefined
+  }
+
+  const isCurrentNetworkScan = (requestID: number, targetId: string) =>
+    requestID === networkScanRequestID && modemId.value === targetId
+
+  const waitForNetworkScan = async (
+    targetId: string,
+    scanID: string,
+    requestID: number,
+  ): Promise<NetworkScanResponse | null> => {
+    while (isCurrentNetworkScan(requestID, targetId)) {
+      const { data } = await networkApi.getNetworkScan(targetId, scanID)
+      if (!isCurrentNetworkScan(requestID, targetId)) return null
+      const response = data.value
+      if (!response) throw new Error('network scan response is empty')
+      if (response.status !== 'running') return response
+
+      await new Promise<void>((resolve) => {
+        resolveNetworkScanTimer = resolve
+        networkScanTimer = setTimeout(() => {
+          networkScanTimer = undefined
+          resolveNetworkScanTimer = undefined
+          resolve()
+        }, networkScanPollInterval)
+      })
+    }
+    return null
+  }
 
   const resetNetworks = () => {
     networkDialogOpen.value = false
@@ -70,24 +114,41 @@ export const useModemNetwork = ({
     selectedBands.value = []
     airplaneModeSupported.value = false
     airplaneModeEnabled.value = false
+    isNetworkLoading.value = false
   }
 
   const openNetworkDialog = async () => {
     const targetId = modemId.value
     if (!targetId) return
     if (!canScanNetworks.value) return
+    stopNetworkScanPolling()
+    const requestID = networkScanRequestID
     selectedNetwork.value = ''
     isNetworkLoading.value = true
     try {
-      const { data } = await networkApi.scanNetworks(targetId)
-      availableNetworks.value = data.value ?? []
+      const { data } = await networkApi.startNetworkScan(targetId)
+      if (!isCurrentNetworkScan(requestID, targetId)) return
+      const started = data.value
+      if (!started) throw new Error('network scan start response is empty')
+      const response =
+        started.status === 'running'
+          ? await waitForNetworkScan(targetId, started.id, requestID)
+          : started
+      if (!response || !isCurrentNetworkScan(requestID, targetId)) return
+      if (response.status !== 'completed') {
+        throw new Error(response.errorCode ?? `network scan ${response.status}`)
+      }
+      availableNetworks.value = response.networks ?? []
       networkDialogOpen.value = true
     } catch (err) {
+      if (!isCurrentNetworkScan(requestID, targetId)) return
       console.error('[useModemNetwork] Failed to scan networks:', err)
       availableNetworks.value = []
       networkDialogOpen.value = false
     } finally {
-      isNetworkLoading.value = false
+      if (isCurrentNetworkScan(requestID, targetId)) {
+        isNetworkLoading.value = false
+      }
     }
   }
 
@@ -240,14 +301,18 @@ export const useModemNetwork = ({
   watch(
     modemId,
     async (id) => {
+      stopNetworkScanPolling()
+      networkSettingsRequestID += 1
+      resetNetworks()
       if (!id) {
-        resetNetworks()
         return
       }
       await refreshNetworkSettings()
     },
     { immediate: true },
   )
+
+  onUnmounted(stopNetworkScanPolling)
 
   return {
     networkDialogOpen,

@@ -4,6 +4,7 @@ import type {
   AirplaneModeResponse,
   BandsResponse,
   ModesResponse,
+  NetworkScanResponse,
   NetworksResponse,
   SetAirplaneModeRequest,
   SetCurrentBandsRequest,
@@ -13,6 +14,18 @@ import type {
 export const useNetworkApi = () => {
   const scanNetworks = (id: string) => {
     return fetchJson<NetworksResponse>(`modems/${id}/networks`)
+  }
+
+  const startNetworkScan = (id: string) => {
+    return fetchJson<NetworkScanResponse>(`modems/${id}/network-scans`, {
+      method: 'POST',
+    })
+  }
+
+  const getNetworkScan = (id: string, scanID: string) => {
+    return fetchJson<NetworkScanResponse>(
+      `modems/${id}/network-scans/${encodeURIComponent(scanID)}`,
+    )
   }
 
   const registerNetwork = (id: string, operatorCode: string) => {
@@ -57,6 +70,8 @@ export const useNetworkApi = () => {
 
   return {
     scanNetworks,
+    startNetworkScan,
+    getNetworkScan,
     registerNetwork,
     getModes,
     setCurrentModes,

@@ -39,6 +39,7 @@ func (n *network) Register(ctx context.Context, modem *mmodem.Modem, operatorCod
 	if err := modem.ThreeGPP().RegisterNetwork(ctx, operatorCode); err != nil {
 		return fmt.Errorf("register network %s: %w", operatorCode, err)
 	}
+	n.InvalidateScan(modem)
 	if err := n.saveRegistration(ctx, modem, operatorCode); err != nil {
 		return fmt.Errorf("save network registration: %w", err)
 	}

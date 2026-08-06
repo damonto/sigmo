@@ -8,6 +8,15 @@ export type NetworkResponse = {
 
 export type NetworksResponse = NetworkResponse[]
 
+export type NetworkScanStatus = 'running' | 'completed' | 'failed' | 'canceled'
+
+export type NetworkScanResponse = {
+  id: string
+  status: NetworkScanStatus
+  networks?: NetworksResponse
+  errorCode?: string
+}
+
 export type ModeResponse = {
   allowed: number
   preferred: number

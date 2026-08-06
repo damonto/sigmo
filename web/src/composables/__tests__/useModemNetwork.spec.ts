@@ -1,10 +1,12 @@
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 
 import { useModemNetwork } from '@/composables/useModemNetwork'
 
 const api = vi.hoisted(() => ({
   scanNetworks: vi.fn(),
+  startNetworkScan: vi.fn(),
+  getNetworkScan: vi.fn(),
   registerNetwork: vi.fn(),
   getModes: vi.fn(),
   setCurrentModes: vi.fn(),
@@ -57,17 +59,21 @@ describe('useModemNetwork', () => {
   })
 
   it('opens the network dialog after a successful scan', async () => {
-    api.scanNetworks.mockResolvedValue({
+    api.startNetworkScan.mockResolvedValue({
       data: {
-        value: [
-          {
-            status: 'available',
-            operatorName: 'Carrier',
-            operatorShortName: 'Carrier',
-            operatorCode: '00101',
-            accessTechnologies: ['lte'],
-          },
-        ],
+        value: {
+          id: 'scan-1',
+          status: 'completed',
+          networks: [
+            {
+              status: 'available',
+              operatorName: 'Carrier',
+              operatorShortName: 'Carrier',
+              operatorCode: '00101',
+              accessTechnologies: ['lte'],
+            },
+          ],
+        },
       },
     })
 
@@ -81,7 +87,7 @@ describe('useModemNetwork', () => {
   })
 
   it('keeps the network dialog closed when scan fails', async () => {
-    api.scanNetworks.mockRejectedValue(new Error('gateway timeout'))
+    api.startNetworkScan.mockRejectedValue(new Error('gateway timeout'))
 
     const network = useModemNetwork({ modemId })
     network.networkDialogOpen.value = true
@@ -90,6 +96,50 @@ describe('useModemNetwork', () => {
 
     expect(network.networkDialogOpen.value).toBe(false)
     expect(network.availableNetworks.value).toEqual([])
+    expect(network.isNetworkLoading.value).toBe(false)
+  })
+
+  it('polls a running scan task until it completes', async () => {
+    api.startNetworkScan.mockResolvedValue({
+      data: { value: { id: 'scan-1', status: 'running' } },
+    })
+    api.getNetworkScan.mockResolvedValue({
+      data: {
+        value: {
+          id: 'scan-1',
+          status: 'completed',
+          networks: [],
+        },
+      },
+    })
+
+    const network = useModemNetwork({ modemId })
+
+    await network.openNetworkDialog()
+
+    expect(api.getNetworkScan).toHaveBeenCalledWith('modem-1', 'scan-1')
+    expect(network.networkDialogOpen.value).toBe(true)
+    expect(network.isNetworkLoading.value).toBe(false)
+  })
+
+  it('stops local polling without canceling the shared server task', async () => {
+    const activeModemId = ref('modem-1')
+    api.startNetworkScan.mockResolvedValue({
+      data: { value: { id: 'scan-1', status: 'running' } },
+    })
+    api.getNetworkScan.mockResolvedValue({
+      data: { value: { id: 'scan-1', status: 'running' } },
+    })
+    const network = useModemNetwork({ modemId: computed(() => activeModemId.value) })
+
+    const scan = network.openNetworkDialog()
+    await vi.waitFor(() => expect(api.getNetworkScan).toHaveBeenCalledTimes(1))
+
+    activeModemId.value = 'modem-2'
+    await nextTick()
+    await scan
+
+    expect(network.networkDialogOpen.value).toBe(false)
     expect(network.isNetworkLoading.value).toBe(false)
   })
 

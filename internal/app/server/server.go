@@ -181,6 +181,11 @@ func Run(cfg Config) error {
 			return fmt.Errorf("configure extensions: %w", err)
 		}
 	}
+	networkHandler, err := hnetwork.New(registry, networkPreferences, db)
+	if err != nil {
+		return fmt.Errorf("configure network handler: %w", err)
+	}
+	defer networkHandler.Close()
 	mcpKeys, err := mcpauth.NewStore(db)
 	if err != nil {
 		return fmt.Errorf("configure MCP API keys: %w", err)
@@ -193,7 +198,7 @@ func Run(cfg Config) error {
 		LPAClients:          lpaClients,
 		InternetConnections: runtime.internetConnections,
 		Relay:               relay,
-		NetworkPreferences:  networkPreferences,
+		Network:             networkHandler,
 		Storage:             db,
 		Reminders:           reminderScheduler,
 		MessageRoute:        runtime.messageRoute,
@@ -226,7 +231,7 @@ func Run(cfg Config) error {
 		LPAClients:          lpaClients,
 		InternetConnections: runtime.internetConnections,
 		Relay:               relay,
-		NetworkPreferences:  networkPreferences,
+		Network:             networkHandler,
 		Storage:             db,
 		WebPush:             webPush,
 		Reminders:           reminderScheduler,
@@ -246,6 +251,7 @@ func Run(cfg Config) error {
 	wg.Go(func() {
 		<-ctx.Done()
 		mcpController.Close()
+		networkHandler.Close()
 	})
 
 	wg.Go(func() {

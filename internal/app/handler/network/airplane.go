@@ -28,6 +28,7 @@ func (n *network) SetAirplaneMode(ctx context.Context, modem *mmodem.Modem, req 
 	if err := modem.SetAirplaneMode(ctx, req.Enabled); err != nil {
 		return fmt.Errorf("set airplane mode: %w", err)
 	}
+	n.InvalidateScan(modem)
 	if err := n.preferences.SaveAirplaneMode(ctx, modem.EquipmentIdentifier, req.Enabled); err != nil {
 		return fmt.Errorf("save airplane mode: %w", err)
 	}

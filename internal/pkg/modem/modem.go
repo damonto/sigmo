@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	wwanmodem "github.com/damonto/wwan-go/modem"
 )
@@ -20,11 +21,14 @@ type Modem struct {
 	deviceKey      string
 	generation     uint64
 	closeOnce      sync.Once
+	doneOnce       sync.Once
+	done           chan struct{}
 	closeErr       error
 	watchOnce      sync.Once
 	watchCancel    context.CancelFunc
 	watchWG        sync.WaitGroup
 	failureOnce    sync.Once
+	networkState   atomic.Uint64
 	onFailure      func(error)
 	onSIMChange    func(uint32, string)
 	deviceSessions deviceSessionStore
@@ -153,6 +157,37 @@ func (m *Modem) WWAN() *wwanmodem.Modem {
 	return m.core
 }
 
+// Done is closed when this modem generation is no longer usable.
+//
+// A modem can be replaced while a long-running operation is still in flight.
+// Exposing the generation lifecycle lets those operations stop without tying
+// their context to an individual HTTP request.
+func (m *Modem) Done() <-chan struct{} {
+	if m == nil {
+		return nil
+	}
+	m.doneOnce.Do(func() {
+		m.done = make(chan struct{})
+	})
+	return m.done
+}
+
+// NetworkStateVersion changes after a successful radio, SIM, or registration
+// mutation. Consumers can bind short-lived cached observations to the modem
+// state which produced them without reading radio settings on every request.
+func (m *Modem) NetworkStateVersion() uint64 {
+	if m == nil {
+		return 0
+	}
+	return m.networkState.Load()
+}
+
+func (m *Modem) markNetworkStateChanged() {
+	if m != nil {
+		m.networkState.Add(1)
+	}
+}
+
 // ReserveSIMSlot prevents the active SIM slot from changing until the
 // returned release function is called.
 func (m *Modem) ReserveSIMSlot(ctx context.Context) (func(), error) {
@@ -189,7 +224,11 @@ func (m *Modem) Close() error {
 	if m == nil {
 		return nil
 	}
+	m.doneOnce.Do(func() {
+		m.done = make(chan struct{})
+	})
 	m.closeOnce.Do(func() {
+		close(m.done)
 		if m.watchCancel != nil {
 			m.watchCancel()
 		}

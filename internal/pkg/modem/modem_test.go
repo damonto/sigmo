@@ -56,6 +56,40 @@ func TestReserveSIMSlot(t *testing.T) {
 	}
 }
 
+func TestDoneClosesWithModemGeneration(t *testing.T) {
+	m := new(Modem)
+	done := m.Done()
+	select {
+	case <-done:
+		t.Fatal("Done() closed before Close()")
+	default:
+	}
+
+	if err := m.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Done() remained open after Close()")
+	}
+	if got := m.Done(); got != done {
+		t.Fatal("Done() returned a different lifecycle channel")
+	}
+}
+
+func TestNetworkStateVersionChangesMonotonically(t *testing.T) {
+	m := new(Modem)
+	if got := m.NetworkStateVersion(); got != 0 {
+		t.Fatalf("NetworkStateVersion() = %d, want zero value", got)
+	}
+	m.markNetworkStateChanged()
+	m.markNetworkStateChanged()
+	if got := m.NetworkStateVersion(); got != 2 {
+		t.Fatalf("NetworkStateVersion() = %d, want 2", got)
+	}
+}
+
 func TestWithReservedSIMSlotKeepsReservationUntilWorkflowCompletes(t *testing.T) {
 	m := new(Modem)
 	started := make(chan struct{})

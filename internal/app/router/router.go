@@ -1,6 +1,7 @@
 package router
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -34,7 +35,6 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	pmessage "github.com/damonto/sigmo/internal/pkg/message"
 	"github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -53,7 +53,7 @@ type RegisterConfig struct {
 	LPAClients          *lpa.Pool
 	InternetConnections appconnectivity.InternetConnections
 	Relay               *forwarder.Relay
-	NetworkPreferences  *networkprefs.Store
+	Network             *network.Handler
 	Storage             *storage.Store
 	WebPush             *webpush.Client
 	Reminders           *reminder.Scheduler
@@ -67,6 +67,9 @@ type RegisterConfig struct {
 }
 
 func Register(e *echo.Echo, deps RegisterConfig) error {
+	if deps.Network == nil {
+		return errors.New("configure network routes: network handler is required")
+	}
 	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
 		Filesystem: web.Root(),
 		Index:      "index.html",
@@ -153,11 +156,10 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		}
 
 		{
-			h, err := network.New(deps.Registry, deps.NetworkPreferences, deps.Storage)
-			if err != nil {
-				return fmt.Errorf("configure network handler: %w", err)
-			}
+			h := deps.Network
 			protected.GET("/modems/:id/networks", h.List)
+			protected.POST("/modems/:id/network-scans", h.StartNetworkScan)
+			protected.GET("/modems/:id/network-scans/:scanID", h.GetNetworkScan)
 			protected.GET("/modems/:id/networks/airplane-mode", h.AirplaneMode)
 			protected.PUT("/modems/:id/networks/airplane-mode", h.SetAirplaneMode)
 			protected.GET("/modems/:id/networks/modes", h.Modes)

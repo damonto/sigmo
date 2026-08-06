@@ -1,8 +1,11 @@
 package network
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 
 	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/labstack/echo/v5"
@@ -14,12 +17,19 @@ import (
 )
 
 type Handler struct {
-	registry *mmodem.Registry
+	registry modemFinder
 	networks *network
+}
+
+type modemFinder interface {
+	Find(context.Context, string) (*mmodem.Modem, error)
 }
 
 const (
 	errorCodeListNetworksFailed      = "list_networks_failed"
+	errorCodeStartNetworkScanFailed  = "start_network_scan_failed"
+	errorCodeGetNetworkScanFailed    = "get_network_scan_failed"
+	errorCodeNetworkScanNotFound     = "network_scan_not_found"
 	errorCodeRegisterNetworkFailed   = "register_network_failed"
 	errorCodeOperatorCodeRequired    = "operator_code_required"
 	errorCodeGetModesFailed          = "get_modes_failed"
@@ -39,7 +49,12 @@ const (
 	errorCodeAirplaneModeUnsupported = "airplane_mode_unsupported"
 )
 
+var errNetworkRegistryRequired = errors.New("modem registry is required")
+
 func New(registry *mmodem.Registry, preferences *networkprefs.Store, store *storage.Store) (*Handler, error) {
+	if registry == nil {
+		return nil, errNetworkRegistryRequired
+	}
 	networks, err := newNetwork(preferences, store)
 	if err != nil {
 		return nil, err
@@ -48,6 +63,12 @@ func New(registry *mmodem.Registry, preferences *networkprefs.Store, store *stor
 		registry: registry,
 		networks: networks,
 	}, nil
+}
+
+func (h *Handler) Close() {
+	if h != nil && h.networks != nil {
+		h.networks.Close()
+	}
 }
 
 func (h *Handler) List(c *echo.Context) error {
@@ -61,6 +82,53 @@ func (h *Handler) List(c *echo.Context) error {
 		return httpapi.Internal(c, errorCodeListNetworksFailed, err)
 	}
 	return c.JSON(http.StatusOK, response)
+}
+
+func (h *Handler) StartNetworkScan(c *echo.Context) error {
+	header := c.Response().Header()
+	header.Set("Cache-Control", "no-store")
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeStartNetworkScanFailed)
+	}
+	response, created, err := h.networks.StartScan(ctx, modem)
+	if err != nil {
+		return httpapi.Internal(c, errorCodeStartNetworkScanFailed, err)
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	header.Set("Location", strings.TrimRight(c.Request().URL.Path, "/")+"/"+url.PathEscape(response.ID))
+	setNetworkScanRetryHeader(header, response.Status)
+	return c.JSON(status, response)
+}
+
+func (h *Handler) GetNetworkScan(c *echo.Context) error {
+	header := c.Response().Header()
+	header.Set("Cache-Control", "no-store")
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeGetNetworkScanFailed)
+	}
+	response, err := h.networks.Scan(ctx, modem, c.Param("scanID"))
+	if errors.Is(err, errNetworkScanNotFound) {
+		return httpapi.NotFound(c, errorCodeNetworkScanNotFound, err)
+	}
+	if err != nil {
+		return httpapi.Internal(c, errorCodeGetNetworkScanFailed, err)
+	}
+	setNetworkScanRetryHeader(header, response.Status)
+	return c.JSON(http.StatusOK, response)
+}
+
+func setNetworkScanRetryHeader(header http.Header, status string) {
+	header.Del("Retry-After")
+	if status == networkScanStatusRunning {
+		header.Set("Retry-After", "1")
+	}
 }
 
 func (h *Handler) Register(c *echo.Context) error {
