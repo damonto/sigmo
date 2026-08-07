@@ -16,7 +16,6 @@ import (
 	"github.com/damonto/euicc-go/bertlv"
 	"github.com/damonto/euicc-go/bertlv/primitive"
 	"github.com/damonto/euicc-go/driver"
-	"github.com/damonto/euicc-go/driver/at"
 	"github.com/damonto/euicc-go/lpa"
 	sgp22 "github.com/damonto/euicc-go/v2"
 	"github.com/damonto/sigmo/internal/pkg/euicc"
@@ -432,13 +431,14 @@ func createChannelForSlot(ctx context.Context, m *modem.Modem, slot uint8) (driv
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	switch m.PrimaryPortType() {
+	portType := m.PrimaryPortType()
+	switch portType {
 	case wwanmodem.PortQMI:
 		return createQMIChannel(ctx, m, slot)
 	case wwanmodem.PortMBIM:
 		return createMBIMChannel(ctx, m, slot)
 	default:
-		return createATChannel(m)
+		return nil, fmt.Errorf("create LPA channel for primary port type %d: %w", portType, wwanmodem.ErrNotSupported)
 	}
 }
 
@@ -479,15 +479,6 @@ func createMBIMChannel(ctx context.Context, m *modem.Modem, slot uint8) (driver.
 		return nil, errors.Join(fmt.Errorf("create MBIM LPA channel: %w", err), client.Close())
 	}
 	return channel, nil
-}
-
-func createATChannel(m *modem.Modem) (driver.SmartCardChannel, error) {
-	port, err := m.Port(wwanmodem.PortAT)
-	if err != nil {
-		return nil, err
-	}
-	m.Logger().Info("using AT driver", "port", port.Device)
-	return at.New(port.Device)
 }
 
 func (l *Client) Close() error {

@@ -2,31 +2,20 @@ package stk
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 
-	uiccat "github.com/damonto/wwan-go/at"
-	wwanmodem "github.com/damonto/wwan-go/modem"
 	usim "github.com/damonto/wwan-go/sim"
 	usimcard "github.com/damonto/wwan-go/sim/card"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
 
 func OpenCard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
 	if modem == nil {
 		return Card{}, errModemRequired
 	}
-	card, err := openDeviceCard(ctx, modem)
-	if err == nil {
-		return card, nil
-	}
-	if !errors.Is(err, wwan.ErrUnsupported) {
-		return Card{}, err
-	}
-	return openATCard(ctx, modem)
+	return openDeviceCard(ctx, modem)
 }
 
 func openDeviceCard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
@@ -37,23 +26,6 @@ func openDeviceCard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
 	reader, err := device.USIMWithCAT(ctx, terminalCATProfile())
 	if err != nil {
 		return Card{}, fmt.Errorf("open device USIM reader: %w", err)
-	}
-	return openUSIMCard(ctx, reader, modem.Logger())
-}
-
-func openATCard(ctx context.Context, modem *mmodem.Modem) (Card, error) {
-	port, err := modem.Port(wwanmodem.PortAT)
-	if err != nil {
-		return Card{}, fmt.Errorf("find AT port: %w", err)
-	}
-	tx, err := uiccat.Open(port.Device, 0)
-	if err != nil {
-		return Card{}, fmt.Errorf("open AT reader: %w", err)
-	}
-	reader, err := usim.NewReader(tx)
-	if err != nil {
-		_ = tx.Close()
-		return Card{}, err
 	}
 	return openUSIMCard(ctx, reader, modem.Logger())
 }

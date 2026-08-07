@@ -11,7 +11,22 @@ import (
 	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
+
+func TestCreateChannelForSlotRejectsATPrimaryPort(t *testing.T) {
+	modem := &mmodem.Modem{
+		PrimaryPort: "/dev/ttyUSB0",
+		Ports: []mmodem.ModemPort{
+			{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB0"},
+		},
+	}
+
+	_, err := createChannelForSlot(t.Context(), modem, 1)
+	if !errors.Is(err, wwanmodem.ErrNotSupported) {
+		t.Fatalf("createChannelForSlot() error = %v, want %v", err, wwanmodem.ErrNotSupported)
+	}
+}
 
 func TestLockedChannelDisconnectOnce(t *testing.T) {
 	t.Parallel()
