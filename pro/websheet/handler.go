@@ -30,7 +30,6 @@ func RegisterRoutes(group *echo.Group, broker *Broker) {
 	group.Match(proxyMethods, "/websheets/:id/proxy", h.Proxy)
 	group.Match(proxyMethods, "/websheets/:id/proxy/*", h.Proxy)
 	group.POST("/websheets/:id/callback", h.Callback)
-	group.POST("/websheets/:id/done", h.Done)
 }
 
 var proxyMethods = []string{
@@ -73,15 +72,6 @@ func (h *Handler) Callback(c *echo.Context) error {
 		return httpapi.BadRequest(c, errorCodeWebsheetCallbackInvalid, err)
 	}
 	session.Callback(callback)
-	return c.NoContent(http.StatusNoContent)
-}
-
-func (h *Handler) Done(c *echo.Context) error {
-	session, err := h.session(c)
-	if err != nil {
-		return websheetError(c, err)
-	}
-	session.Done()
 	return c.NoContent(http.StatusNoContent)
 }
 

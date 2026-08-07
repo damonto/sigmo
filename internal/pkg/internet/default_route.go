@@ -173,10 +173,7 @@ func restoreStaleDefaultRouteStatesWithStore(ctx context.Context, state connecti
 
 func routeStateTargetMatches(modemID string, targets map[string]struct{}, interfaceName string, entry savedRouteState) bool {
 	if modemID != "" {
-		owner := strings.TrimSpace(entry.ModemID)
-		if owner != "" {
-			return owner == modemID
-		}
+		return strings.TrimSpace(entry.ModemID) == modemID
 	}
 	_, ok := targets[interfaceName]
 	return ok

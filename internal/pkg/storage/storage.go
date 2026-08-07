@@ -79,6 +79,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_profile_timestamp ON messages(profile_id, timestamp)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_profile_participants ON messages(profile_id, sender, recipient)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_fingerprint ON messages(fingerprint) WHERE fingerprint <> ''`,
 		`CREATE TABLE IF NOT EXISTS modem_message_refs (
 			message_id INTEGER NOT NULL,
 			modem_id TEXT NOT NULL,
@@ -88,6 +89,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 			PRIMARY KEY (message_id, modem_id, generation, storage, ref_id),
 			FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_modem_message_ref ON modem_message_refs(modem_id, generation, storage, ref_id)`,
 		`CREATE TABLE IF NOT EXISTS calls (
 			id TEXT PRIMARY KEY,
 			profile_id TEXT NOT NULL,
@@ -175,171 +177,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 			return fmt.Errorf("migrate database: %w", err)
 		}
 	}
-	if err := s.migrateMessageFingerprints(ctx); err != nil {
-		return err
-	}
-	if err := s.migrateCallHoldState(ctx); err != nil {
-		return err
-	}
-	if err := s.migrateReminderRevision(ctx); err != nil {
-		return err
-	}
-	if err := s.migrateModemMessageRefGeneration(ctx); err != nil {
-		return err
-	}
-	if _, err := s.db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_fingerprint ON messages(fingerprint) WHERE fingerprint <> ''`); err != nil {
-		return fmt.Errorf("migrate message fingerprint index: %w", err)
-	}
 	return nil
-}
-
-func (s *Store) migrateModemMessageRefGeneration(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("start modem message ref generation migration: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	hasGeneration, err := tableColumnExists(ctx, tx, "modem_message_refs", "generation")
-	if err != nil {
-		return err
-	}
-	if !hasGeneration {
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE modem_message_refs ADD COLUMN generation INTEGER NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("add modem message ref generation column: %w", err)
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS idx_modem_message_ref`); err != nil {
-		return fmt.Errorf("drop legacy modem message ref index: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		CREATE UNIQUE INDEX idx_modem_message_ref
-		ON modem_message_refs(modem_id, generation, storage, ref_id)
-	`); err != nil {
-		return fmt.Errorf("create modem message ref generation index: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit modem message ref generation migration: %w", err)
-	}
-	committed = true
-	return nil
-}
-
-func (s *Store) migrateReminderRevision(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("start reminder revision migration: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	hasRevision, err := tableColumnExists(ctx, tx, "reminders", "revision")
-	if err != nil {
-		return err
-	}
-	if !hasRevision {
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE reminders ADD COLUMN revision INTEGER NOT NULL DEFAULT 1`); err != nil {
-			return fmt.Errorf("add reminder revision column: %w", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit reminder revision migration: %w", err)
-	}
-	committed = true
-	return nil
-}
-
-func (s *Store) migrateMessageFingerprints(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("start message fingerprint migration: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	hasFingerprint, err := tableColumnExists(ctx, tx, "messages", "fingerprint")
-	if err != nil {
-		return err
-	}
-	if !hasFingerprint {
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE messages ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''`); err != nil {
-			return fmt.Errorf("add message fingerprint column: %w", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit message fingerprint migration: %w", err)
-	}
-	committed = true
-	return nil
-}
-
-func (s *Store) migrateCallHoldState(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("start call hold migration: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	hasHold, err := tableColumnExists(ctx, tx, "calls", "hold_state")
-	if err != nil {
-		return err
-	}
-	if !hasHold {
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE calls ADD COLUMN hold_state TEXT NOT NULL DEFAULT 'none'`); err != nil {
-			return fmt.Errorf("add call hold column: %w", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit call hold migration: %w", err)
-	}
-	committed = true
-	return nil
-}
-
-func tableColumnExists(ctx context.Context, tx *sql.Tx, table string, name string) (bool, error) {
-	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
-	if err != nil {
-		return false, fmt.Errorf("read %s columns: %w", table, err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var columnName, columnType string
-		var notNull, primaryKey int
-		var defaultValue sql.NullString
-		if err := rows.Scan(&cid, &columnName, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return false, fmt.Errorf("scan message column: %w", err)
-		}
-		if columnName == name {
-			return true, nil
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("read %s columns: %w", table, err)
-	}
-	return false, nil
 }
 
 func nowText() string {

@@ -31,19 +31,10 @@ const mountDialog = () =>
     },
     global: {
       stubs: {
-        Button: {
-          template: '<button type="button"><slot /></button>',
-        },
         Dialog: {
           template: '<div><slot /></div>',
         },
         DialogDescription: {
-          template: '<div><slot /></div>',
-        },
-        DialogFooter: {
-          template: '<div><slot /></div>',
-        },
-        DialogHeader: {
           template: '<div><slot /></div>',
         },
         DialogTitle: {
@@ -51,43 +42,6 @@ const mountDialog = () =>
         },
         EsimPersistentDialogContent: {
           template: '<div><slot /></div>',
-        },
-        Spinner: true,
-      },
-    },
-  })
-
-const mountLegacyDialog = () =>
-  mount(CarrierWebsheetDialog, {
-    props: {
-      open: true,
-      websheet,
-      browserFrame: false,
-      showFooter: true,
-    },
-    global: {
-      stubs: {
-        Button: {
-          template: '<button type="button"><slot /></button>',
-        },
-        Dialog: {
-          template: '<div><slot /></div>',
-        },
-        DialogDescription: {
-          template: '<div><slot /></div>',
-        },
-        DialogFooter: {
-          template: '<div><slot /></div>',
-        },
-        DialogHeader: {
-          template: '<div><slot /></div>',
-        },
-        DialogTitle: {
-          template: '<div><slot /></div>',
-        },
-        EsimPersistentDialogContent: {
-          props: ['showCloseButton'],
-          template: '<div :data-show-close-button="showCloseButton"><slot /></div>',
         },
         Spinner: true,
       },
@@ -114,22 +68,14 @@ describe('CarrierWebsheetDialog', () => {
     expect(iframe.attributes('sandbox')).toContain('allow-popups-to-escape-sandbox')
   })
 
-  it('uses the browser-style frame by default without footer actions', () => {
+  it('renders the browser-style frame and emits cancel from its close button', async () => {
     const wrapper = mountDialog()
 
     expect(wrapper.text()).toContain('Carrier setup')
-    expect(wrapper.text()).not.toContain('modemDetail.actions.cancel')
-    expect(wrapper.text()).not.toContain('modemDetail.esim.carrierWebsheetDone')
-    expect(wrapper.find('.bg-red-400').exists()).toBe(false)
-    expect(wrapper.find('.bg-amber-400').exists()).toBe(false)
-    expect(wrapper.find('.bg-emerald-400').exists()).toBe(false)
-  })
-
-  it('can still render the legacy footer when requested', () => {
-    const wrapper = mountLegacyDialog()
-
-    expect(wrapper.text()).toContain('modemDetail.actions.cancel')
-    expect(wrapper.text()).toContain('modemDetail.esim.carrierWebsheetDone')
+    const closeButton = wrapper.get('button')
+    expect(closeButton.attributes('aria-label')).toBe('modemDetail.actions.cancel')
+    await closeButton.trigger('click')
+    expect(wrapper.emitted('cancel')).toHaveLength(1)
   })
 
   it('relays terminal callbacks to the backend before closing the dialog state', async () => {
@@ -184,12 +130,6 @@ describe('CarrierWebsheetDialog', () => {
             template: '<div><slot /></div>',
           },
           DialogDescription: {
-            template: '<div><slot /></div>',
-          },
-          DialogFooter: {
-            template: '<div><slot /></div>',
-          },
-          DialogHeader: {
             template: '<div><slot /></div>',
           },
           DialogTitle: {

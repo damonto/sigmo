@@ -307,8 +307,8 @@ func TestCleanupStaleQMAPInternetRestoresRoutesAndRemovesInternetMuxes(t *testin
 		Interface: "qmimux0", Family: netlink.FamilyIPv4,
 		Gateway: netip.MustParseAddr("10.61.158.137"), Source: netip.MustParseAddr("10.61.158.138"), Metric: 10,
 	}
-	routePath := t.TempDir() + "/routes.json"
-	if err := saveRouteStateForModem(routePath, "modem-1", "qmimux0", []netlink.DefaultRoute{preferred}, []defaultRouteChange{{
+	state := testDBConnectionState(t)
+	if err := state.saveRouteStateForModem(context.Background(), "modem-1", "qmimux0", []netlink.DefaultRoute{preferred}, []defaultRouteChange{{
 		Original: original, Replacement: replacement,
 	}}); err != nil {
 		t.Fatalf("saveRouteStateForModem() error = %v", err)
@@ -340,7 +340,7 @@ func TestCleanupStaleQMAPInternetRestoresRoutesAndRemovesInternetMuxes(t *testin
 		return nil
 	}
 
-	connector := &Connector{persistence: fileConnectionState{routePath: routePath}}
+	connector := &Connector{persistence: state}
 	if err := connector.cleanupStaleQMAPInternet(context.Background(), &mmodem.Modem{EquipmentIdentifier: "modem-1"}); err != nil {
 		t.Fatalf("cleanupStaleQMAPInternet() error = %v", err)
 	}

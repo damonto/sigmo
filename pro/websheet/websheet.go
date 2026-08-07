@@ -103,8 +103,6 @@ type Session struct {
 	allowPrivateHosts bool
 
 	callbackCh chan Callback
-	doneCh     chan struct{}
-	doneOnce   sync.Once
 }
 
 func New(cfg Config) *Broker {
@@ -161,7 +159,6 @@ func (b *Broker) Create(ctx context.Context, req Request) (*Session, error) {
 		now:               b.now,
 		allowPrivateHosts: b.allowPrivateHosts,
 		callbackCh:        make(chan Callback, 1),
-		doneCh:            make(chan struct{}),
 	}
 	session.client = client
 	session.client.Jar = jar
@@ -219,26 +216,9 @@ func (s *Session) WaitCallback(ctx context.Context) (Callback, error) {
 	select {
 	case callback := <-s.callbackCh:
 		return callback, nil
-	case <-s.doneCh:
-		return Callback{Event: "finishFlow"}, nil
 	case <-ctx.Done():
 		return Callback{}, ctx.Err()
 	}
-}
-
-func (s *Session) WaitDone(ctx context.Context) error {
-	select {
-	case <-s.doneCh:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func (s *Session) Done() {
-	s.doneOnce.Do(func() {
-		close(s.doneCh)
-	})
 }
 
 func (s *Session) Callback(callback Callback) {

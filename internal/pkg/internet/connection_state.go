@@ -35,12 +35,15 @@ type dbConnectionState struct {
 }
 
 type proxyStateEntry struct {
-	Modem string `json:"modem,omitempty"`
+	Modem string `json:"modem"`
 }
 
 func (s dbConnectionState) saveProxyStateForModem(ctx context.Context, modemID string, interfaceName string) error {
 	modemID = strings.TrimSpace(modemID)
 	interfaceName = strings.TrimSpace(interfaceName)
+	if modemID == "" {
+		return errors.New("modem id is empty")
+	}
 	if interfaceName == "" {
 		return errors.New("interface name is empty")
 	}
@@ -49,19 +52,17 @@ func (s dbConnectionState) saveProxyStateForModem(ctx context.Context, modemID s
 		return err
 	}
 	owner := strings.TrimSpace(entry.Modem)
-	if ok && owner != "" && owner != modemID {
+	if ok && owner != modemID {
 		return fmt.Errorf("proxy state for interface %s belongs to modem %s", interfaceName, owner)
 	}
-	if modemID != "" {
-		interfaces, err := s.proxyInterfacesForModem(ctx, modemID)
-		if err != nil {
-			return err
-		}
-		for _, name := range interfaces {
-			if name != interfaceName {
-				if err := s.deleteProxyState(ctx, name); err != nil {
-					return err
-				}
+	interfaces, err := s.proxyInterfacesForModem(ctx, modemID)
+	if err != nil {
+		return err
+	}
+	for _, name := range interfaces {
+		if name != interfaceName {
+			if err := s.deleteProxyState(ctx, name); err != nil {
+				return err
 			}
 		}
 	}
@@ -71,12 +72,15 @@ func (s dbConnectionState) saveProxyStateForModem(ctx context.Context, modemID s
 
 func (s dbConnectionState) loadProxyStateForModem(ctx context.Context, modemID string, interfaceName string) (bool, bool, error) {
 	modemID = strings.TrimSpace(modemID)
+	if modemID == "" {
+		return false, false, errors.New("modem id is empty")
+	}
 	entry, ok, err := s.proxyState(ctx, interfaceName)
 	if err != nil || !ok {
 		return false, false, err
 	}
 	owner := strings.TrimSpace(entry.Modem)
-	if owner != "" && owner != modemID {
+	if owner != modemID {
 		return false, false, nil
 	}
 	return true, true, nil
@@ -89,7 +93,7 @@ func (s dbConnectionState) deleteProxyState(ctx context.Context, interfaceName s
 func (s dbConnectionState) proxyInterfacesForModem(ctx context.Context, modemID string) ([]string, error) {
 	modemID = strings.TrimSpace(modemID)
 	if modemID == "" {
-		return nil, nil
+		return nil, errors.New("modem id is empty")
 	}
 	raw, err := s.store.ListRaw(ctx, interfaceScopePrefix, proxyKVKey)
 	if err != nil {
@@ -110,7 +114,11 @@ func (s dbConnectionState) proxyInterfacesForModem(ctx context.Context, modemID 
 }
 
 func (s dbConnectionState) saveRouteStateForModem(ctx context.Context, modemID string, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error {
+	modemID = strings.TrimSpace(modemID)
 	interfaceName = strings.TrimSpace(interfaceName)
+	if modemID == "" {
+		return errors.New("modem id is empty")
+	}
 	if interfaceName == "" {
 		return errors.New("interface name is empty")
 	}
@@ -125,7 +133,11 @@ func (s dbConnectionState) saveRouteStateForModem(ctx context.Context, modemID s
 }
 
 func (s dbConnectionState) putRouteStateForModem(ctx context.Context, modemID string, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error {
+	modemID = strings.TrimSpace(modemID)
 	interfaceName = strings.TrimSpace(interfaceName)
+	if modemID == "" {
+		return errors.New("modem id is empty")
+	}
 	if interfaceName == "" {
 		return errors.New("interface name is empty")
 	}
@@ -138,12 +150,15 @@ func (s dbConnectionState) putRouteStateForModem(ctx context.Context, modemID st
 }
 
 func (s dbConnectionState) loadRouteStateForModem(ctx context.Context, modemID string, interfaceName string) ([]defaultRouteChange, bool, error) {
+	modemID = strings.TrimSpace(modemID)
+	if modemID == "" {
+		return nil, false, errors.New("modem id is empty")
+	}
 	entry, ok, err := s.routeState(ctx, interfaceName)
 	if err != nil || !ok {
 		return nil, false, err
 	}
-	owner := strings.TrimSpace(entry.Modem)
-	if owner != "" && owner != strings.TrimSpace(modemID) {
+	if strings.TrimSpace(entry.Modem) != modemID {
 		return nil, false, nil
 	}
 	return entry.Changes, true, nil
@@ -159,6 +174,10 @@ func (s dbConnectionState) loadAllRouteStates(ctx context.Context) (map[string]s
 		var entry routeStateEntry
 		if err := json.Unmarshal([]byte(value), &entry); err != nil {
 			return nil, fmt.Errorf("decode route state for %s: %w", scope, err)
+		}
+		entry.Modem = strings.TrimSpace(entry.Modem)
+		if entry.Modem == "" {
+			return nil, fmt.Errorf("route state for %s has no modem owner", scope)
 		}
 		result[strings.TrimPrefix(scope, interfaceScopePrefix)] = savedRouteState{
 			ModemID:   entry.Modem,

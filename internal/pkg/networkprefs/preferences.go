@@ -16,7 +16,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
-const preferencesKey = "network.preferences.v2"
+const preferencesKey = "network.preferences"
 
 var retryInterval = 5 * time.Second
 

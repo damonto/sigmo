@@ -2,8 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -106,61 +104,6 @@ func TestReminderStorage(t *testing.T) {
 			t.Fatal("GetReminder(after delete) found = true, want false")
 		}
 	})
-}
-
-func TestReminderRevisionMigration(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "legacy.db")
-	db, err := sql.Open("sqlite3", "file:"+path)
-	if err != nil {
-		t.Fatalf("sql.Open() error = %v", err)
-	}
-	_, err = db.Exec(`
-		CREATE TABLE reminders (
-			profile_type TEXT NOT NULL,
-			profile_id TEXT NOT NULL,
-			modem_id TEXT NOT NULL,
-			se_id TEXT NOT NULL,
-			profile_name TEXT NOT NULL,
-			next_at TEXT NOT NULL,
-			repeat_days INTEGER,
-			content TEXT NOT NULL,
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL,
-			PRIMARY KEY (profile_type, profile_id)
-		);
-		INSERT INTO reminders (
-			profile_type, profile_id, modem_id, se_id, profile_name,
-			next_at, repeat_days, content, created_at, updated_at
-		) VALUES (
-			'esim', '8985200012345678901', 'modem-1', 'se0', 'Travel',
-			'2026-07-18T10:30:00.000000000Z', NULL, 'Renew',
-			'2026-07-18T09:00:00Z', '2026-07-18T09:00:00Z'
-		)
-	`)
-	if err != nil {
-		_ = db.Close()
-		t.Fatalf("create legacy reminders table: %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("legacy db Close() error = %v", err)
-	}
-
-	store, err := Open(context.Background(), path)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Errorf("Store.Close() error = %v", err)
-		}
-	})
-	got, ok, err := store.GetReminder(context.Background(), "esim", "8985200012345678901")
-	if err != nil || !ok {
-		t.Fatalf("GetReminder() = (%+v, %v, %v), want migrated reminder", got, ok, err)
-	}
-	if got.Revision != 1 {
-		t.Fatalf("Revision = %d, want 1", got.Revision)
-	}
 }
 
 func TestReminderStorageValidation(t *testing.T) {

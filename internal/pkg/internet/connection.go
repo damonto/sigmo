@@ -317,7 +317,7 @@ func (c *Connector) currentLocked(ctx context.Context, modem internetModem) (*Co
 	prefs := c.preferenceWithAlwaysOn(ctx, modem)
 	var staleInterfaces []string
 	if tracked, ok := c.connection(modemID); ok {
-		if !sameModemGeneration(tracked.modemGeneration, modem.generation()) {
+		if tracked.modemGeneration != modem.generation() {
 			if err := c.cleanupTracked(ctx, modemID, tracked); err != nil {
 				return nil, fmt.Errorf("cleanup stale modem generation: %w", err)
 			}
@@ -570,7 +570,7 @@ func (c *Connector) disconnect(ctx context.Context, modem internetModem, clearAl
 		if err == nil {
 			err = c.syncCleanedUpDefaultRouteState(ctx, tracked)
 		}
-		if sameModemGeneration(tracked.modemGeneration, modem.generation()) {
+		if tracked.modemGeneration == modem.generation() {
 			err = errors.Join(err, modem.disconnectBearer(ctx, tracked.bearerPath))
 		}
 		err = errors.Join(err, restoreStaleDefaultRouteStatesWithStore(ctx, c.persistence, routeStateRestoreTarget{modemID: modemID}, netlinkDefaultRouteOps))
@@ -625,10 +625,6 @@ func (c *Connector) disconnect(ctx context.Context, modem internetModem, clearAl
 		return fmt.Errorf("disconnect bearer: %w", err)
 	}
 	return nil
-}
-
-func sameModemGeneration(tracked, current uint64) bool {
-	return tracked == 0 || current == 0 || tracked == current
 }
 
 func (c *Connector) cleanupTracked(ctx context.Context, modemID string, tracked trackedConnection) error {

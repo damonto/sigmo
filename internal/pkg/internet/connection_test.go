@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -661,11 +659,11 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "internet-routes.json")
-			if err := saveRouteStateForModem(path, "old-modem", "wws27u1i4", []netlink.DefaultRoute{oldDefaultRoute}, []defaultRouteChange{oldGatewayChange}); err != nil {
+			state := testDBConnectionState(t)
+			if err := state.saveRouteStateForModem(context.Background(), "old-modem", "wws27u1i4", []netlink.DefaultRoute{oldDefaultRoute}, []defaultRouteChange{oldGatewayChange}); err != nil {
 				t.Fatalf("save old route state: %v", err)
 			}
-			if err := saveRouteStateForModem(path, "new-modem", "wws27u2i4", []netlink.DefaultRoute{newDefaultRoute}, []defaultRouteChange{oldRouteChange}); err != nil {
+			if err := state.saveRouteStateForModem(context.Background(), "new-modem", "wws27u2i4", []netlink.DefaultRoute{newDefaultRoute}, []defaultRouteChange{oldRouteChange}); err != nil {
 				t.Fatalf("save new route state: %v", err)
 			}
 			store := testStore(t)
@@ -685,7 +683,7 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 					"old-modem": {DefaultRoute: true, AlwaysOn: true},
 				},
 				state:       store,
-				persistence: fileConnectionState{routePath: path},
+				persistence: state,
 			}
 			tracked := trackedConnection{
 				interfaceName: "wws27u2i4",
@@ -726,11 +724,11 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 			if !slices.Equal(tracked.routeChanges, []defaultRouteChange{oldRouteChange}) {
 				t.Fatalf("new tracked routeChanges = %#v, want %#v", tracked.routeChanges, []defaultRouteChange{oldRouteChange})
 			}
-			gotOldChanges, ok, err := loadRouteStateForModem(path, "old-modem", "wws27u1i4")
+			gotOldChanges, ok, err := state.loadRouteStateForModem(context.Background(), "old-modem", "wws27u1i4")
 			if err != nil || !ok || !slices.Equal(gotOldChanges, []defaultRouteChange{oldGatewayChange}) {
 				t.Fatalf("loadRouteStateForModem(old) = %#v, ok = %t, err = %v; want %#v, true, nil", gotOldChanges, ok, err, []defaultRouteChange{oldGatewayChange})
 			}
-			gotChanges, ok, err := loadRouteStateForModem(path, "new-modem", "wws27u2i4")
+			gotChanges, ok, err := state.loadRouteStateForModem(context.Background(), "new-modem", "wws27u2i4")
 			if err != nil || !ok || !slices.Equal(gotChanges, []defaultRouteChange{oldRouteChange}) {
 				t.Fatalf("loadRouteStateForModem(new) = %#v, ok = %t, err = %v; want %#v, true, nil", gotChanges, ok, err, []defaultRouteChange{oldRouteChange})
 			}
@@ -801,8 +799,8 @@ func TestSyncDefaultRouteRemovalTransfersOriginalRouteState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "internet-routes.json")
-			if err := saveRouteStateForModem(path, "new-modem", "wws27u2i4", []netlink.DefaultRoute{newDefaultRoute}, []defaultRouteChange{oldRouteChange}); err != nil {
+			state := testDBConnectionState(t)
+			if err := state.saveRouteStateForModem(context.Background(), "new-modem", "wws27u2i4", []netlink.DefaultRoute{newDefaultRoute}, []defaultRouteChange{oldRouteChange}); err != nil {
 				t.Fatalf("save new route state: %v", err)
 			}
 			removed := trackedConnection{
@@ -827,7 +825,7 @@ func TestSyncDefaultRouteRemovalTransfersOriginalRouteState(t *testing.T) {
 					"old-modem": {AlwaysOn: true},
 					"new-modem": {DefaultRoute: true},
 				},
-				persistence: fileConnectionState{routePath: path},
+				persistence: state,
 			}
 
 			if err := c.syncDefaultRouteRemoval(context.Background(), removed); err != nil {
@@ -838,7 +836,7 @@ func TestSyncDefaultRouteRemovalTransfersOriginalRouteState(t *testing.T) {
 			if !slices.Equal(newTracked.routeChanges, []defaultRouteChange{oldGatewayChange}) {
 				t.Fatalf("new tracked routeChanges = %#v, want %#v", newTracked.routeChanges, []defaultRouteChange{oldGatewayChange})
 			}
-			gotChanges, ok, err := loadRouteStateForModem(path, "new-modem", "wws27u2i4")
+			gotChanges, ok, err := state.loadRouteStateForModem(context.Background(), "new-modem", "wws27u2i4")
 			if err != nil || !ok || !slices.Equal(gotChanges, []defaultRouteChange{oldGatewayChange}) {
 				t.Fatalf("loadRouteStateForModem(new) = %#v, ok = %t, err = %v; want %#v, true, nil", gotChanges, ok, err, []defaultRouteChange{oldGatewayChange})
 			}
@@ -882,7 +880,7 @@ func TestTakeoverDefaultRoutesKeepsStateWhenRollbackFails(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "internet-routes.json")
+			state := testDBConnectionState(t)
 			ops := defaultRouteOps{
 				defaultRoutes: func() ([]netlink.DefaultRoute, error) {
 					return []netlink.DefaultRoute{original}, nil
@@ -902,10 +900,10 @@ func TestTakeoverDefaultRoutesKeepsStateWhenRollbackFails(t *testing.T) {
 				},
 			}
 
-			if _, err := takeoverDefaultRoutesWithState(path, "modem-1", "wws27u1i4", preferred, ops); err == nil {
+			if _, err := takeoverDefaultRoutesWithState(state, "modem-1", "wws27u1i4", preferred, ops); err == nil {
 				t.Fatal("takeoverDefaultRoutesWithState() error = nil, want error")
 			}
-			_, ok, err := loadRouteState(path, "wws27u1i4")
+			_, ok, err := loadRouteState(state, "wws27u1i4")
 			if err != nil {
 				t.Fatalf("loadRouteState() error = %v", err)
 			}
@@ -920,6 +918,7 @@ func TestTakeoverDefaultRoutesReportsStateCleanupError(t *testing.T) {
 	t.Parallel()
 
 	errDeleteOriginal := errors.New("delete original route")
+	errDeleteState := errors.New("delete route state")
 	original := netlink.DefaultRoute{
 		Interface: "ens18",
 		Family:    netlink.FamilyIPv4,
@@ -946,37 +945,43 @@ func TestTakeoverDefaultRoutesReportsStateCleanupError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "internet-routes.json")
-			t.Cleanup(func() {
-				_ = os.RemoveAll(path)
-			})
+			state := deleteRouteStateErrorStore{
+				connectionStateStore: testDBConnectionState(t),
+				err:                  errDeleteState,
+			}
 			ops := defaultRouteOps{
 				defaultRoutes: func() ([]netlink.DefaultRoute, error) {
 					return []netlink.DefaultRoute{original}, nil
 				},
 				deleteDefaultRoute: func(route netlink.DefaultRoute) error {
-					if err := os.Remove(path); err != nil {
-						return errors.Join(errDeleteOriginal, fmt.Errorf("prepare cleanup failure: %w", err))
-					}
-					if err := os.Mkdir(path, 0o700); err != nil {
-						return errors.Join(errDeleteOriginal, fmt.Errorf("prepare cleanup failure: %w", err))
-					}
 					return errDeleteOriginal
 				},
 			}
 
-			_, err := takeoverDefaultRoutesWithState(path, "modem-1", "wws27u1i4", preferred, ops)
+			_, err := takeoverDefaultRoutesWithState(state, "modem-1", "wws27u1i4", preferred, ops)
 			if err == nil {
 				t.Fatal("takeoverDefaultRoutesWithState() error = nil, want error")
 			}
 			if !errors.Is(err, errDeleteOriginal) {
 				t.Fatalf("takeoverDefaultRoutesWithState() error = %v, want %v", err, errDeleteOriginal)
 			}
+			if !errors.Is(err, errDeleteState) {
+				t.Fatalf("takeoverDefaultRoutesWithState() error = %v, want %v", err, errDeleteState)
+			}
 			if !strings.Contains(err.Error(), "delete default route state") {
 				t.Fatalf("takeoverDefaultRoutesWithState() error = %v, want state cleanup context", err)
 			}
 		})
 	}
+}
+
+type deleteRouteStateErrorStore struct {
+	connectionStateStore
+	err error
+}
+
+func (s deleteRouteStateErrorStore) deleteRouteState(context.Context, string) error {
+	return s.err
 }
 
 func TestTakeoverDefaultRoutesKeepsUnrestoredChangeInCleanup(t *testing.T) {
@@ -1036,7 +1041,7 @@ func TestTakeoverDefaultRoutesKeepsUnrestoredChangeInCleanup(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "internet-routes.json")
+			state := testDBConnectionState(t)
 			restoreAttempts := 0
 			ops := defaultRouteOps{
 				defaultRoutes: func() ([]netlink.DefaultRoute, error) {
@@ -1059,7 +1064,7 @@ func TestTakeoverDefaultRoutesKeepsUnrestoredChangeInCleanup(t *testing.T) {
 				},
 			}
 
-			gotChanges, err := takeoverDefaultRoutesWithState(path, "modem-1", "wws27u1i4", preferred, ops)
+			gotChanges, err := takeoverDefaultRoutesWithState(state, "modem-1", "wws27u1i4", preferred, ops)
 			if err == nil {
 				t.Fatal("takeoverDefaultRoutesWithState() error = nil, want error")
 			}
@@ -1067,11 +1072,11 @@ func TestTakeoverDefaultRoutesKeepsUnrestoredChangeInCleanup(t *testing.T) {
 				t.Fatalf("takeoverDefaultRoutesWithState() changes = %#v, want %#v", gotChanges, wantChanges)
 			}
 
-			cleanupErr := cleanupDefaultRouteChanges(path, "wws27u1i4", gotChanges, ops)
+			cleanupErr := cleanupDefaultRouteChanges(state, "wws27u1i4", gotChanges, ops)
 			if (cleanupErr != nil) != tt.wantCleanupError {
 				t.Fatalf("cleanupDefaultRouteChanges() error = %v, want error %t", cleanupErr, tt.wantCleanupError)
 			}
-			_, ok, err := loadRouteState(path, "wws27u1i4")
+			_, ok, err := loadRouteState(state, "wws27u1i4")
 			if err != nil {
 				t.Fatalf("loadRouteState() error = %v", err)
 			}
@@ -1212,13 +1217,6 @@ func TestRestoreStaleDefaultRouteStates(t *testing.T) {
 			current:   []netlink.DefaultRoute{preferred[0], replacement},
 			wantState: true,
 		},
-		{
-			name:        "use interface fallback for ownerless state",
-			target:      routeStateRestoreTarget{modemID: "modem-1", interfaceNames: []string{"wws27u1i4"}},
-			current:     []netlink.DefaultRoute{preferred[0], replacement},
-			wantDeleted: []netlink.DefaultRoute{preferred[0], replacement},
-			wantAdded:   []netlink.DefaultRoute{original},
-		},
 	}
 
 	for _, tt := range tests {
@@ -1226,8 +1224,12 @@ func TestRestoreStaleDefaultRouteStates(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "internet-routes.json")
-			if err := saveRouteStateForModem(path, tt.modemID, "wws27u1i4", preferred, changes); err != nil {
+			state := testDBConnectionState(t)
+			stateModemID := tt.modemID
+			if stateModemID == "" {
+				stateModemID = "modem-1"
+			}
+			if err := state.saveRouteStateForModem(context.Background(), stateModemID, "wws27u1i4", preferred, changes); err != nil {
 				t.Fatalf("saveRouteState() error = %v", err)
 			}
 			var deleted []netlink.DefaultRoute
@@ -1246,7 +1248,7 @@ func TestRestoreStaleDefaultRouteStates(t *testing.T) {
 				},
 			}
 
-			if err := restoreStaleDefaultRouteStatesWithState(path, tt.target, ops); err != nil {
+			if err := restoreStaleDefaultRouteStatesWithState(state, tt.target, ops); err != nil {
 				t.Fatalf("restoreStaleDefaultRouteStatesWithState() error = %v", err)
 			}
 			if !slices.Equal(deleted, tt.wantDeleted) {
@@ -1255,7 +1257,7 @@ func TestRestoreStaleDefaultRouteStates(t *testing.T) {
 			if !slices.Equal(added, tt.wantAdded) {
 				t.Fatalf("added routes = %#v, want %#v", added, tt.wantAdded)
 			}
-			_, ok, err := loadRouteState(path, "wws27u1i4")
+			_, ok, err := loadRouteState(state, "wws27u1i4")
 			if err != nil {
 				t.Fatalf("loadRouteState() error = %v", err)
 			}
@@ -1340,14 +1342,14 @@ func TestRestoreStaleDefaultRouteStatesScopesModem(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "internet-routes.json")
-			if err := saveRouteStateForModem(path, "modem-1", "wws0", firstPreferred, firstChanges); err != nil {
+			state := testDBConnectionState(t)
+			if err := state.saveRouteStateForModem(context.Background(), "modem-1", "wws0", firstPreferred, firstChanges); err != nil {
 				t.Fatalf("saveRouteStateForModem(wws0) error = %v", err)
 			}
-			if err := saveRouteStateForModem(path, "modem-1", "wws1", secondPreferred, secondChanges); err != nil {
+			if err := state.saveRouteStateForModem(context.Background(), "modem-1", "wws1", secondPreferred, secondChanges); err != nil {
 				t.Fatalf("saveRouteStateForModem(wws1) error = %v", err)
 			}
-			if err := saveRouteStateForModem(path, "modem-2", "wws2", otherPreferred, otherChanges); err != nil {
+			if err := state.saveRouteStateForModem(context.Background(), "modem-2", "wws2", otherPreferred, otherChanges); err != nil {
 				t.Fatalf("saveRouteStateForModem(wws2) error = %v", err)
 			}
 			var deleted []netlink.DefaultRoute
@@ -1370,7 +1372,7 @@ func TestRestoreStaleDefaultRouteStatesScopesModem(t *testing.T) {
 				},
 			}
 
-			if err := restoreStaleDefaultRouteStatesWithState(path, routeStateRestoreTarget{modemID: "modem-1"}, ops); err != nil {
+			if err := restoreStaleDefaultRouteStatesWithState(state, routeStateRestoreTarget{modemID: "modem-1"}, ops); err != nil {
 				t.Fatalf("restoreStaleDefaultRouteStatesWithState() error = %v", err)
 			}
 			wantDeleted := []netlink.DefaultRoute{firstPreferred[0], firstReplacement, secondPreferred[0], secondReplacement}
@@ -1381,13 +1383,13 @@ func TestRestoreStaleDefaultRouteStatesScopesModem(t *testing.T) {
 			if !slices.Equal(added, wantAdded) {
 				t.Fatalf("added routes = %#v, want %#v", added, wantAdded)
 			}
-			if _, ok, err := loadRouteState(path, "wws0"); err != nil || ok {
+			if _, ok, err := loadRouteState(state, "wws0"); err != nil || ok {
 				t.Fatalf("loadRouteState(wws0) ok = %t, err = %v; want false, nil", ok, err)
 			}
-			if _, ok, err := loadRouteState(path, "wws1"); err != nil || ok {
+			if _, ok, err := loadRouteState(state, "wws1"); err != nil || ok {
 				t.Fatalf("loadRouteState(wws1) ok = %t, err = %v; want false, nil", ok, err)
 			}
-			if got, ok, err := loadRouteState(path, "wws2"); err != nil || !ok || !slices.Equal(got, otherChanges) {
+			if got, ok, err := loadRouteState(state, "wws2"); err != nil || !ok || !slices.Equal(got, otherChanges) {
 				t.Fatalf("loadRouteState(wws2) = %#v, ok = %t, err = %v; want %#v, true, nil", got, ok, err, otherChanges)
 			}
 		})
@@ -1448,11 +1450,11 @@ func TestRestoreStaleDefaultRouteStatesScopesInterfaces(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "internet-routes.json")
-			if err := saveOwnerlessRouteState(path, "wws0", firstPreferred, firstChanges); err != nil {
+			state := testDBConnectionState(t)
+			if err := saveRouteState(state, "wws0", firstPreferred, firstChanges); err != nil {
 				t.Fatalf("saveRouteState(wws0) error = %v", err)
 			}
-			if err := saveOwnerlessRouteState(path, "wws1", secondPreferred, secondChanges); err != nil {
+			if err := saveRouteState(state, "wws1", secondPreferred, secondChanges); err != nil {
 				t.Fatalf("saveRouteState(wws1) error = %v", err)
 			}
 			var deleted []netlink.DefaultRoute
@@ -1471,7 +1473,7 @@ func TestRestoreStaleDefaultRouteStatesScopesInterfaces(t *testing.T) {
 				},
 			}
 
-			if err := restoreStaleDefaultRouteStatesWithState(path, routeStateRestoreTarget{interfaceNames: []string{"wws0"}}, ops); err != nil {
+			if err := restoreStaleDefaultRouteStatesWithState(state, routeStateRestoreTarget{interfaceNames: []string{"wws0"}}, ops); err != nil {
 				t.Fatalf("restoreStaleDefaultRouteStatesWithState() error = %v", err)
 			}
 			if want := []netlink.DefaultRoute{firstPreferred[0], firstReplacement}; !slices.Equal(deleted, want) {
@@ -1480,10 +1482,10 @@ func TestRestoreStaleDefaultRouteStatesScopesInterfaces(t *testing.T) {
 			if want := []netlink.DefaultRoute{firstOriginal}; !slices.Equal(added, want) {
 				t.Fatalf("added routes = %#v, want %#v", added, want)
 			}
-			if _, ok, err := loadRouteState(path, "wws0"); err != nil || ok {
+			if _, ok, err := loadRouteState(state, "wws0"); err != nil || ok {
 				t.Fatalf("loadRouteState(wws0) ok = %t, err = %v; want false, nil", ok, err)
 			}
-			if got, ok, err := loadRouteState(path, "wws1"); err != nil || !ok || !slices.Equal(got, secondChanges) {
+			if got, ok, err := loadRouteState(state, "wws1"); err != nil || !ok || !slices.Equal(got, secondChanges) {
 				t.Fatalf("loadRouteState(wws1) = %#v, ok = %t, err = %v; want %#v, true, nil", got, ok, err, secondChanges)
 			}
 		})
@@ -1527,8 +1529,8 @@ func TestRestoreStaleDefaultRouteStateDeletesPreferredBeforeRestore(t *testing.T
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "internet-routes.json")
-			if err := saveOwnerlessRouteState(path, "wws27u1i4", preferred, changes); err != nil {
+			state := testDBConnectionState(t)
+			if err := saveRouteState(state, "wws27u1i4", preferred, changes); err != nil {
 				t.Fatalf("saveRouteState() error = %v", err)
 			}
 			preferredDeleted := false
@@ -1554,7 +1556,7 @@ func TestRestoreStaleDefaultRouteStateDeletesPreferredBeforeRestore(t *testing.T
 				},
 			}
 
-			if err := restoreStaleDefaultRouteStatesWithState(path, routeStateRestoreTarget{interfaceNames: []string{"wws27u1i4"}}, ops); err != nil {
+			if err := restoreStaleDefaultRouteStatesWithState(state, routeStateRestoreTarget{interfaceNames: []string{"wws27u1i4"}}, ops); err != nil {
 				t.Fatalf("restoreStaleDefaultRouteStatesWithState() error = %v", err)
 			}
 			if want := []netlink.DefaultRoute{preferred[0], replacement}; !slices.Equal(deleted, want) {
@@ -1563,7 +1565,7 @@ func TestRestoreStaleDefaultRouteStateDeletesPreferredBeforeRestore(t *testing.T
 			if want := []netlink.DefaultRoute{original}; !slices.Equal(added, want) {
 				t.Fatalf("added routes = %#v, want %#v", added, want)
 			}
-			_, ok, err := loadRouteState(path, "wws27u1i4")
+			_, ok, err := loadRouteState(state, "wws27u1i4")
 			if err != nil {
 				t.Fatalf("loadRouteState() error = %v", err)
 			}
@@ -1990,7 +1992,7 @@ func (m fakeInternetModem) id() string {
 	return m.modemID
 }
 
-func (m fakeInternetModem) generation() uint64 { return 0 }
+func (m fakeInternetModem) generation() uint64 { return 1 }
 
 func (m fakeInternetModem) operatorIdentifier() string {
 	return m.operatorID

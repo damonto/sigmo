@@ -8,30 +8,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
-func TestStoreIgnoresLegacyPreferences(t *testing.T) {
-	db := openTestStore(t)
-	ctx := context.Background()
-	legacy := struct {
-		AirplaneMode bool `json:"airplaneMode"`
-	}{AirplaneMode: true}
-	if err := db.Put(ctx, "modem:modem-1", "network.preferences", legacy); err != nil {
-		t.Fatalf("Put() legacy preferences error = %v", err)
-	}
-
-	preferences, err := New(db)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	enabled, ok, err := preferences.SavedAirplaneMode(ctx, "modem-1")
-	if err != nil {
-		t.Fatalf("SavedAirplaneMode() error = %v", err)
-	}
-	if ok || enabled {
-		t.Fatalf("SavedAirplaneMode() = %t, %t; want false, false", enabled, ok)
-	}
-}
-
-func TestStoreSavesV2AirplaneMode(t *testing.T) {
+func TestStoreSavesAirplaneMode(t *testing.T) {
 	db := openTestStore(t)
 	preferences, err := New(db)
 	if err != nil {

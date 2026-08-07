@@ -505,7 +505,6 @@ const zh = {
       transferDeleteSourceTitle: '删除原 Profile',
       transferDeleteSourceHint: '运营商要求删除原 Profile（{iccid}）后继续。',
       carrierWebsheetTitle: '运营商设置',
-      carrierWebsheetDone: '已完成',
       transferStagePreparing: '准备转移',
       transferStageCarrier: '连接运营商',
       transferStageWebsheet: '完成运营商设置',

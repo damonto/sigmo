@@ -46,7 +46,7 @@ func (c *Connector) qmapConnection(modem *mmodem.Modem) *qmapConnection {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	connection := c.qmapConnections[modem.EquipmentIdentifier]
-	if connection == nil || !sameModemGeneration(connection.generation, modem.Generation()) {
+	if connection == nil || connection.generation != modem.Generation() {
 		return nil
 	}
 	return connection

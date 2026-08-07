@@ -299,7 +299,7 @@ func (c *Connector) qmapConnectionFor(modemID string, generation uint64) *qmapCo
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	connection := c.qmapConnections[modemID]
-	if connection == nil || !sameModemGeneration(connection.generation, generation) {
+	if connection == nil || connection.generation != generation {
 		return nil
 	}
 	return connection

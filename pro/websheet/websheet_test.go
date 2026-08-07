@@ -214,7 +214,7 @@ func TestSessionLimitsRedirects(t *testing.T) {
 	}
 }
 
-func TestSessionCallbackAndDone(t *testing.T) {
+func TestSessionCallback(t *testing.T) {
 	t.Parallel()
 
 	broker := New(Config{AllowPrivateHosts: true})
@@ -230,11 +230,6 @@ func TestSessionCallbackAndDone(t *testing.T) {
 	}
 	if callback.Event != "finishFlow" || callback.NextAction != "AcquireConfiguration" {
 		t.Fatalf("WaitCallback() = %+v", callback)
-	}
-
-	session.Done()
-	if err := session.WaitDone(context.Background()); err != nil {
-		t.Fatalf("WaitDone() error = %v", err)
 	}
 }
 

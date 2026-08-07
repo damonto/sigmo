@@ -34,17 +34,17 @@ func (c *Connector) invalidateModemGeneration(ctx context.Context, modemID strin
 		interfaces []string
 	)
 	c.mu.Lock()
-	if current, ok := c.connections[modemID]; ok && sameModemGeneration(current.modemGeneration, generation) {
+	if current, ok := c.connections[modemID]; ok && current.modemGeneration == generation {
 		copy := current
 		tracked = &copy
 		delete(c.connections, modemID)
 	}
-	if current := c.qmapConnections[modemID]; current != nil && sameModemGeneration(current.generation, generation) {
+	if current := c.qmapConnections[modemID]; current != nil && current.generation == generation {
 		qmap = current
 		delete(c.qmapConnections, modemID)
 	}
 	state, hasQualcomm410State := c.qualcomm410States[modemID]
-	if hasQualcomm410State && sameModemGeneration(state.generation, generation) && (state.selected || state.lease != nil) {
+	if hasQualcomm410State && state.generation == generation && (state.selected || state.lease != nil) {
 		if !state.reconnectPending {
 			switch {
 			case tracked != nil:

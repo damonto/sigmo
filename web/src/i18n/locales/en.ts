@@ -513,7 +513,6 @@ const en = {
       transferDeleteSourceHint:
         'The carrier requires deleting the source profile ({iccid}) before continuing.',
       carrierWebsheetTitle: 'Carrier setup',
-      carrierWebsheetDone: 'Done',
       transferStagePreparing: 'Preparing transfer',
       transferStageCarrier: 'Connecting to carrier',
       transferStageWebsheet: 'Complete carrier setup',

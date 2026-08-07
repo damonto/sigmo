@@ -37,7 +37,7 @@ type savedRouteState struct {
 
 func (e routeStateEntry) MarshalJSON() ([]byte, error) {
 	type state struct {
-		Modem     string             `json:"modem,omitempty"`
+		Modem     string             `json:"modem"`
 		Preferred []routeStateRoute  `json:"preferred"`
 		Changes   []routeStateChange `json:"changes"`
 	}
@@ -50,7 +50,7 @@ func (e routeStateEntry) MarshalJSON() ([]byte, error) {
 
 func (e *routeStateEntry) UnmarshalJSON(data []byte) error {
 	type state struct {
-		Modem     string             `json:"modem,omitempty"`
+		Modem     string             `json:"modem"`
 		Preferred []routeStateRoute  `json:"preferred"`
 		Changes   []routeStateChange `json:"changes"`
 	}
