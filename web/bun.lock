@@ -28,7 +28,7 @@
         "zod": "^4.4.3",
       },
       "devDependencies": {
-        "@prettier/plugin-oxc": "^0.2.1",
+        "@prettier/plugin-oxc": "^0.2.2",
         "@tsconfig/node24": "^24.0.4",
         "@types/jsdom": "^28.0.3",
         "@vitejs/plugin-vue": "^6.0.8",
@@ -512,7 +512,7 @@
 
     "@polka/url": ["@polka/url@1.0.0-next.29", "", {}, "sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww=="],
 
-    "@prettier/plugin-oxc": ["@prettier/plugin-oxc@0.2.1", "", { "dependencies": { "oxc-parser": "0.139.0" } }, "sha512-Dog+deCMG5ozJTLmNNSC8GJhTg9DY69KEu3iJZtcMoyEWcrxFUhlc7aW/70gGv/IviT/QyhlH8AmTUOyEhnkDQ=="],
+    "@prettier/plugin-oxc": ["@prettier/plugin-oxc@0.2.2", "", { "dependencies": { "oxc-parser": "0.139.0" } }, "sha512-yscDcAuDtvOfE0c8i8UVP+hjK43VIPpwfMv+73mdkpy12rZWnk5Kl6N6pUneQmaZ3PKTg611zemBHFpMjp9ZnQ=="],
 
     "@rolldown/binding-android-arm64": ["@rolldown/binding-android-arm64@1.0.0-beta.53", "", { "os": "android", "cpu": "arm64" }, "sha512-Ok9V8o7o6YfSdTTYA/uHH30r3YtOxLD6G3wih/U9DO0ucBBFq8WPt/DslU53OgfteLRHITZny9N/qCUxMf9kjQ=="],
 
