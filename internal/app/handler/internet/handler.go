@@ -32,6 +32,7 @@ const (
 	errorCodeInternetAuthInvalidConfig         = "internet_auth_invalid_config"
 	errorCodeInternetIPTypeInvalidConfig       = "internet_ip_type_invalid_config"
 	errorCodeInternetProfileIDRequired         = "internet_profile_id_required"
+	errorCodeInternetAirplaneMode              = "internet_airplane_mode"
 )
 
 func New(registry *mmodem.Registry, connections appconnectivity.InternetConnections) *Handler {
@@ -133,6 +134,9 @@ func (h *Handler) Disconnect(c *echo.Context) error {
 }
 
 func internetError(c *echo.Context, err error, internalErrorCode string) error {
+	if errors.Is(err, internetcore.ErrAirplaneMode) {
+		return httpapi.Error(c, http.StatusConflict, errorCodeInternetAirplaneMode, internetcore.ErrAirplaneMode.Error())
+	}
 	if errors.Is(err, internetcore.ErrNotConnected) {
 		return httpapi.Error(c, http.StatusConflict, errorCodeInternetConnectionNotConnected, internetcore.ErrNotConnected.Error())
 	}

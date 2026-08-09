@@ -24,6 +24,9 @@ func (c *Connector) UpdatePreferences(ctx context.Context, modem *mmodem.Modem, 
 	access := modemAccess{modem: modem}
 	modemID := access.id()
 	defer c.lockModem(modemID)()
+	if err := c.rejectAirplaneMode(ctx, modem); err != nil {
+		return nil, err
+	}
 
 	if connection := c.qmapConnectionFor(modemID, access.generation()); connection != nil {
 		updated, err := c.updateQMAPPreferences(ctx, access, connection, next)

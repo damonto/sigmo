@@ -30,9 +30,10 @@ const selectedMode = defineModel<string>('selectedMode', { required: true })
 const { t } = useI18n()
 
 const hasModeOptions = computed(() => props.modeOptions.length > 0)
+const canSelectMode = computed(() => props.modeOptions.length > 1)
 
 const modeLabel = (mode: ModeResponse) => {
-  if (mode.preferred === 0 || mode.preferredLabel === 'None') {
+  if (mode.preferred === 0) {
     return mode.allowedLabel
   }
   return `${mode.allowedLabel} / ${mode.preferredLabel}`
@@ -52,7 +53,10 @@ const modeLabel = (mode: ModeResponse) => {
           :disabled="!props.canUpdateMode"
           @click="emit('updateMode')"
         >
-          <span v-if="props.isModeUpdating" class="inline-flex items-center gap-2">
+          <span
+            v-if="props.isModeUpdating"
+            class="inline-flex items-center gap-2"
+          >
             <Spinner class="size-4" />
             {{ t('modemDetail.settings.networkApply') }}
           </span>
@@ -64,7 +68,7 @@ const modeLabel = (mode: ModeResponse) => {
     <CardContent class="space-y-3 px-4">
       <Select
         v-model="selectedMode"
-        :disabled="props.isSettingsLoading || props.isModeUpdating || !hasModeOptions"
+        :disabled="props.isSettingsLoading || props.isModeUpdating || !canSelectMode"
       >
         <SelectTrigger class="w-full">
           <SelectValue :placeholder="t('modemDetail.settings.networkModePlaceholder')" />
@@ -80,7 +84,10 @@ const modeLabel = (mode: ModeResponse) => {
         </SelectContent>
       </Select>
 
-      <p v-if="!hasModeOptions && !props.isSettingsLoading" class="text-xs text-muted-foreground">
+      <p
+        v-if="!hasModeOptions && !props.isSettingsLoading"
+        class="text-xs text-muted-foreground"
+      >
         {{ t('modemDetail.settings.networkModeEmpty') }}
       </p>
     </CardContent>

@@ -25,6 +25,7 @@ type coordinatorConfig struct {
 	Websheets          *websheet.Broker
 	Access             Access
 	Internet           *pinternet.Connector
+	NetworkPreferences airplaneModePreferences
 	RegistrationGroups *RegistrationGroups
 }
 
@@ -36,6 +37,10 @@ type volteSettingsPersistence interface {
 	DeleteSuspendedInternet(context.Context, string) error
 }
 
+type airplaneModePreferences interface {
+	SavedAirplaneMode(context.Context, string) (bool, bool, error)
+}
+
 type coordinator struct {
 	wifiCallingSettings *wifiCallingSettingsStore
 	volteSettings       volteSettingsPersistence
@@ -44,15 +49,18 @@ type coordinator struct {
 	websheets           *websheet.Broker
 	access              Access
 	internet            internetRestorer
+	networkPreferences  airplaneModePreferences
 	registry            *mmodem.Registry
 	registrationGroups  *RegistrationGroups
 
-	mu               sync.Mutex
-	sessions         map[string]*sessionState
-	nextSessionID    uint64
-	smsSubmissions   map[smsSubmissionKey]*smsSubmissionTracker
-	voiceSubscribers map[uint64]VoiceEventFunc
-	nextVoiceSubID   uint64
+	mu                sync.Mutex
+	sessions          map[string]*sessionState
+	airplaneSuspended map[string]bool
+	deferredStarts    map[string]deferredSessionStart
+	nextSessionID     uint64
+	smsSubmissions    map[smsSubmissionKey]*smsSubmissionTracker
+	voiceSubscribers  map[uint64]VoiceEventFunc
+	nextVoiceSubID    uint64
 }
 
 type sessionState struct {
@@ -72,6 +80,11 @@ type sessionState struct {
 	connected   bool
 	connectedAt time.Time
 	websheet    *websheet.Session
+}
+
+type deferredSessionStart struct {
+	modem     *mmodem.Modem
+	profileID string
 }
 
 type sessionPhase string
@@ -98,8 +111,11 @@ func newCoordinator(cfg coordinatorConfig) *coordinator {
 		websheets:           cfg.Websheets,
 		access:              cfg.Access,
 		internet:            internet,
+		networkPreferences:  cfg.NetworkPreferences,
 		registrationGroups:  cfg.RegistrationGroups,
 		sessions:            make(map[string]*sessionState),
+		airplaneSuspended:   make(map[string]bool),
+		deferredStarts:      make(map[string]deferredSessionStart),
 		smsSubmissions:      make(map[smsSubmissionKey]*smsSubmissionTracker),
 		voiceSubscribers:    make(map[uint64]VoiceEventFunc),
 	}

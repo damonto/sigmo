@@ -22,7 +22,7 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 	started, closed := r.started, r.closed
 	r.mu.RUnlock()
 	if closed {
-		return errors.New("modem registry is closed")
+		return errRegistryClosed
 	}
 	if started {
 		return nil
@@ -83,7 +83,7 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 		for _, modem := range opened {
 			_ = modem.Close()
 		}
-		return errors.New("modem registry is closed")
+		return errRegistryClosed
 	}
 	r.modems = opened
 	r.started = true
@@ -147,6 +147,9 @@ func (r *Registry) consumeDeviceStream(ctx context.Context, stream <-chan wwanmo
 			r.applyDeviceEvent(ctx, result.Value)
 		case failure := <-r.failures:
 			r.handleModemFailure(ctx, failure)
+		case request := <-r.reloads:
+			modem, err := r.reloadModem(ctx, request.modem)
+			request.result <- modemReloadResult{modem: modem, err: err}
 		}
 	}
 }
@@ -344,6 +347,40 @@ func (r *Registry) handleModemFailure(ctx context.Context, failure modemFailure)
 	}
 }
 
+func (r *Registry) reloadModem(ctx context.Context, current *Modem) (*Modem, error) {
+	if current == nil {
+		return nil, errModemRequired
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	r.mu.RLock()
+	key := r.keyForModemLocked(current)
+	replacement := r.newerGenerationLocked(current)
+	r.mu.RUnlock()
+	if key == "" {
+		if replacement != nil {
+			return replacement, nil
+		}
+		return nil, fmt.Errorf("%w: modem generation %d", ErrNotFound, current.Generation())
+	}
+
+	slog.Info("reload modem generation", "imei", current.EquipmentIdentifier, "generation", current.Generation())
+	r.removeModem(key, current)
+	if err := r.recoverRemovedModem(ctx, current); err != nil {
+		return nil, err
+	}
+
+	r.mu.RLock()
+	replacement = r.newerGenerationLocked(current)
+	r.mu.RUnlock()
+	if replacement == nil {
+		return nil, fmt.Errorf("%w: replacement for modem generation %d", ErrNotFound, current.Generation())
+	}
+	return replacement, nil
+}
+
 func (r *Registry) recoverRemovedModem(ctx context.Context, failed *Modem) error {
 	var result error
 	for attempt := range registryFailureRecoveryAttempts {
@@ -425,6 +462,15 @@ func (r *Registry) keyForModemLocked(target *Modem) string {
 		}
 	}
 	return ""
+}
+
+func (r *Registry) newerGenerationLocked(current *Modem) *Modem {
+	for _, candidate := range r.modems {
+		if candidate != nil && candidate.Generation() > current.Generation() && samePhysicalModem(current, candidate) {
+			return candidate
+		}
+	}
+	return nil
 }
 
 func (r *Registry) publish(subscribers []subscription, event ModemEvent) {

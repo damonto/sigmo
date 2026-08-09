@@ -29,6 +29,33 @@ func TestModeResponse(t *testing.T) {
 			},
 		},
 		{
+			name: "concrete multi-mode combination",
+			mode: wwanmodem.Mode{
+				Allowed: wwanmodem.TechnologyGSM |
+					wwanmodem.TechnologyUMTS |
+					wwanmodem.TechnologyLTE |
+					wwanmodem.TechnologyNR5GNSA |
+					wwanmodem.TechnologyNR5GSA,
+			},
+			current: wwanmodem.Mode{
+				Allowed: wwanmodem.TechnologyGSM |
+					wwanmodem.TechnologyUMTS |
+					wwanmodem.TechnologyLTE |
+					wwanmodem.TechnologyNR5GNSA |
+					wwanmodem.TechnologyNR5GSA,
+			},
+			want: ModeResponse{
+				Allowed: uint64(wwanmodem.TechnologyGSM |
+					wwanmodem.TechnologyUMTS |
+					wwanmodem.TechnologyLTE |
+					wwanmodem.TechnologyNR5GNSA |
+					wwanmodem.TechnologyNR5GSA),
+				AllowedLabel:   "GSM + UMTS + LTE + 5G NSA + 5G SA",
+				PreferredLabel: "None",
+				Current:        true,
+			},
+		},
+		{
 			name: "supported",
 			mode: wwanmodem.Mode{
 				Allowed:   wwanmodem.TechnologyLTE | wwanmodem.TechnologyNR5GSA,

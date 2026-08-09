@@ -27,22 +27,14 @@ func TestStoreSavesAirplaneMode(t *testing.T) {
 	}
 }
 
-func TestStorePreservesAutomaticBandSelection(t *testing.T) {
+func TestStoreRejectsEmptyBandSelection(t *testing.T) {
 	db := openTestStore(t)
 	preferences, err := New(db)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	if err := preferences.SaveBands(context.Background(), "modem-1", nil); err != nil {
-		t.Fatalf("SaveBands() error = %v", err)
-	}
-
-	saved, ok, err := preferences.load(context.Background(), "modem-1")
-	if err != nil {
-		t.Fatalf("load() error = %v", err)
-	}
-	if !ok || saved.Bands == nil || len(*saved.Bands) != 0 {
-		t.Fatalf("saved bands = %#v, %t; want explicit empty selection", saved.Bands, ok)
+	if err := preferences.SaveBands(context.Background(), "modem-1", nil); err == nil {
+		t.Fatal("SaveBands() error = nil, want non-nil")
 	}
 }
 

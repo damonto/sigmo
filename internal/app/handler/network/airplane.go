@@ -25,12 +25,19 @@ func (n *network) AirplaneMode(ctx context.Context, modem *mmodem.Modem) (*Airpl
 }
 
 func (n *network) SetAirplaneMode(ctx context.Context, modem *mmodem.Modem, req SetAirplaneModeRequest) error {
-	if err := modem.SetAirplaneMode(ctx, req.Enabled); err != nil {
-		return fmt.Errorf("set airplane mode: %w", err)
+	apply := func() (bool, error) {
+		if err := n.setAirplaneMode(ctx, modem, req.Enabled); err != nil {
+			return false, fmt.Errorf("set airplane mode: %w", err)
+		}
+		n.InvalidateScan(modem)
+		if err := n.preferences.SaveAirplaneMode(ctx, modem.EquipmentIdentifier, req.Enabled); err != nil {
+			return true, fmt.Errorf("save airplane mode: %w", err)
+		}
+		return true, nil
 	}
-	n.InvalidateScan(modem)
-	if err := n.preferences.SaveAirplaneMode(ctx, modem.EquipmentIdentifier, req.Enabled); err != nil {
-		return fmt.Errorf("save airplane mode: %w", err)
+	if n.airplaneModeLifecycle != nil {
+		return n.airplaneModeLifecycle.ChangeAirplaneMode(ctx, modem, req.Enabled, apply)
 	}
-	return nil
+	_, err := apply()
+	return err
 }

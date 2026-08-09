@@ -28,6 +28,24 @@ func (m *Modem) applyStatus(status wwanmodem.Status) {
 	m.runtimeMu.Unlock()
 }
 
+func (m *Modem) applyPowerState(state wwanmodem.PowerState) {
+	if m == nil {
+		return
+	}
+	m.runtimeMu.Lock()
+	m.Status.Power = state
+	m.statusKnown = true
+	if state == wwanmodem.PowerStateOff || state == wwanmodem.PowerStateLow {
+		m.Status.Registration = wwanmodem.RegistrationIdle
+		m.Status.PacketService = wwanmodem.PacketServiceDetached
+		m.Status.Technology = 0
+		m.Status.OperatorID = ""
+		m.Status.OperatorName = ""
+		m.Status.SignalQuality = 0
+	}
+	m.runtimeMu.Unlock()
+}
+
 func (m *Modem) applySIMInfo(info wwanmodem.SIMInfo) {
 	if m == nil {
 		return

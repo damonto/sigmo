@@ -462,6 +462,71 @@ func TestStartIfDisabledRestoresNormalMode(t *testing.T) {
 	}
 }
 
+type airplaneModePreferencesStub struct {
+	enabled bool
+	ok      bool
+	err     error
+}
+
+func (s airplaneModePreferencesStub) SavedAirplaneMode(context.Context, string) (bool, bool, error) {
+	return s.enabled, s.ok, s.err
+}
+
+func TestStartIfEnabledSkipsVoLTEInAirplaneMode(t *testing.T) {
+	tests := []struct {
+		name        string
+		preferences airplaneModePreferences
+		power       wwanmodem.PowerState
+	}{
+		{
+			name:        "saved airplane mode wins before radio restore",
+			preferences: airplaneModePreferencesStub{enabled: true, ok: true},
+			power:       wwanmodem.PowerStateOn,
+		},
+		{
+			name:  "observed low power blocks VoLTE",
+			power: wwanmodem.PowerStateLow,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+			if err != nil {
+				t.Fatalf("storage.Open() error = %v", err)
+			}
+			t.Cleanup(func() {
+				if err := store.Close(); err != nil {
+					t.Errorf("storage.Close() error = %v", err)
+				}
+			})
+			settings := newVoLTESettingsStore(store)
+			if err := settings.Put(ctx, "modem-1", VoLTESettings{Enabled: true, DataPath: DataPathQMAP}); err != nil {
+				t.Fatalf("Put() error = %v", err)
+			}
+			coordinator := &coordinator{
+				access:             AccessVoLTE,
+				networkPreferences: tt.preferences,
+				volteSettings:      settings,
+				sessions:           make(map[string]*sessionState),
+			}
+			modem := qmiTestModem("modem-1")
+			modem.Status.Power = tt.power
+			modem.Sim = &mmodem.SIM{Identifier: "profile-1"}
+
+			coordinator.startIfEnabled(ctx, modem)
+			coordinator.mu.Lock()
+			session := coordinator.sessions[modem.EquipmentIdentifier]
+			coordinator.mu.Unlock()
+			if session != nil {
+				coordinator.stop(modem.EquipmentIdentifier)
+				t.Fatal("startIfEnabled() started VoLTE in airplane mode")
+			}
+		})
+	}
+}
+
 func TestRemovedModemInvalidatesInternetGeneration(t *testing.T) {
 	internet := &fakeInternetRestorer{}
 	coordinator := &coordinator{access: AccessVoLTE, internet: internet}

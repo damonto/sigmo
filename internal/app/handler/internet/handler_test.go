@@ -108,6 +108,12 @@ func TestInternetError(t *testing.T) {
 			wantStatus: http.StatusConflict,
 			wantBody:   errorCodeInternetConnectionNotConnected,
 		},
+		{
+			name:       "airplane mode",
+			err:        internetcore.ErrAirplaneMode,
+			wantStatus: http.StatusConflict,
+			wantBody:   errorCodeInternetAirplaneMode,
+		},
 	}
 
 	for _, tt := range tests {

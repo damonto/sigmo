@@ -11,9 +11,13 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
+	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
-const alwaysOnMonitorInterval = 10 * time.Second
+const (
+	alwaysOnMonitorInterval = 10 * time.Second
+	alwaysOnRestoreTimeout  = 30 * time.Second
+)
 
 func (c *Connector) RunAlwaysOn(ctx context.Context, registry *mmodem.Registry) {
 	c.restoreAlwaysOnModems(ctx, registry)
@@ -24,6 +28,8 @@ func (c *Connector) RunAlwaysOn(ctx context.Context, registry *mmodem.Registry) 
 		select {
 		case <-ctx.Done():
 			return
+		case modem := <-c.alwaysOnRestore:
+			c.restoreAlwaysOnModem(ctx, modem)
 		case <-ticker.C:
 			c.restoreAlwaysOnModems(ctx, registry)
 		}
@@ -52,7 +58,7 @@ func (c *Connector) restoreAlwaysOnModems(ctx context.Context, registry *mmodem.
 		if modem == nil {
 			continue
 		}
-		airplaneMode, err := c.savedAirplaneMode(ctx, modem)
+		airplaneMode, err := c.airplaneModeEnabled(ctx, modem)
 		if err != nil {
 			slog.Warn("read airplane mode preference for internet always on", "imei", modem.EquipmentIdentifier, "error", err)
 			continue
@@ -69,9 +75,34 @@ func (c *Connector) restoreAlwaysOnModems(ctx context.Context, registry *mmodem.
 		if !ok || !prefs.AlwaysOn {
 			continue
 		}
-		if err := c.restoreAlwaysOn(ctx, modem, prefs); err != nil {
-			slog.Warn("restore internet always on connection", "imei", modem.EquipmentIdentifier, "error", err)
-		}
+		c.restoreAlwaysOnModemWithPreferences(ctx, modem, prefs)
+	}
+}
+
+func (c *Connector) requestAlwaysOnRestore(modem *mmodem.Modem) {
+	if modem == nil {
+		return
+	}
+	select {
+	case c.alwaysOnRestore <- modem:
+	default:
+		// The periodic pass remains the source of truth if several modem changes
+		// fill the wake-up queue at once.
+	}
+}
+
+func (c *Connector) restoreAlwaysOnModem(ctx context.Context, modem *mmodem.Modem) {
+	c.restoreAlwaysOnModemWithPreferences(ctx, modem, Preferences{})
+}
+
+func (c *Connector) restoreAlwaysOnModemWithPreferences(ctx context.Context, modem *mmodem.Modem, prefs Preferences) {
+	if modem == nil {
+		return
+	}
+	restoreCtx, cancel := context.WithTimeout(ctx, alwaysOnRestoreTimeout)
+	defer cancel()
+	if err := c.restoreAlwaysOn(restoreCtx, modem, prefs); err != nil {
+		slog.Warn("restore internet always on connection", "imei", modem.EquipmentIdentifier, "error", err)
 	}
 }
 
@@ -82,7 +113,18 @@ func (c *Connector) restoreAlwaysOn(ctx context.Context, modem *mmodem.Modem, pr
 	access := modemAccess{modem: modem}
 	modemID := access.id()
 	defer c.lockModem(modemID)()
+	airplaneMode, err := c.airplaneModeEnabled(ctx, modem)
+	if err != nil {
+		return err
+	}
+	if airplaneMode {
+		return nil
+	}
+	return c.restoreAlwaysOnLocked(ctx, modem, prefs)
+}
 
+func (c *Connector) restoreAlwaysOnLocked(ctx context.Context, modem *mmodem.Modem, prefs Preferences) error {
+	access := modemAccess{modem: modem}
 	profileID := access.profileID()
 	if profileID == "" {
 		return nil
@@ -96,6 +138,15 @@ func (c *Connector) restoreAlwaysOn(ctx context.Context, modem *mmodem.Modem, pr
 	}
 	prefs = latest
 	prefs.AlwaysOn = true
+	if access.modem.PrimaryPortType() == wwanmodem.PortQMI && c.qmapEnabledFor(access.id()) {
+		if c.qmapConnectionFor(access.id(), access.generation()) != nil {
+			return nil
+		}
+		if _, err := c.connectQMAPLocked(ctx, access.modem, prefs); err != nil {
+			return fmt.Errorf("connect always on QMAP: %w", err)
+		}
+		return nil
+	}
 	current, err := currentBearer(ctx, access)
 	if err != nil {
 		return err

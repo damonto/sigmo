@@ -89,6 +89,7 @@ const (
 	errorCodeGetVoLTESettingsFailed       = "get_volte_settings_failed"
 	errorCodeUpdateVoLTEInvalidRequest    = "update_volte_settings_invalid_request"
 	errorCodeUpdateVoLTESettingsFailed    = "update_volte_settings_failed"
+	errorCodeVoLTEAirplaneMode            = "volte_airplane_mode"
 	errorCodeVoLTEUnavailable             = "volte_unavailable"
 )
 
@@ -125,16 +126,20 @@ func ReadVoLTESettings(ctx context.Context, modem *mmodem.Modem, connectivity vo
 	if err != nil {
 		return VoLTESettingsResponse{}, err
 	}
-	modemStatus, err := readVoLTEStatus(ctx, modem)
-	if err != nil {
-		return VoLTESettingsResponse{}, err
+	modemRegistered := false
+	if !modem.Snapshot().AirplaneMode() {
+		modemStatus, err := readVoLTEStatus(ctx, modem)
+		if err != nil {
+			return VoLTESettingsResponse{}, err
+		}
+		modemRegistered = modemStatus.Occupied
 	}
 	return VoLTESettingsResponse{
 		Enabled:         status.Enabled,
 		Connected:       status.Connected,
 		State:           status.State,
 		DurationSeconds: status.DurationSeconds,
-		ModemRegistered: modemStatus.Occupied,
+		ModemRegistered: modemRegistered,
 		DataPath:        status.DataPath,
 	}, nil
 }
@@ -169,6 +174,8 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 		switch {
 		case errors.Is(err, ErrVoLTEDataPathRequired), errors.Is(err, ErrVoLTEDataPathUnsupported):
 			return httpapi.UnprocessableEntity(c, errorCodeUpdateVoLTEInvalidRequest, err)
+		case errors.Is(err, ErrVoLTEAirplaneMode):
+			return httpapi.Error(c, http.StatusConflict, errorCodeVoLTEAirplaneMode, err.Error())
 		case errors.Is(err, ErrUnavailable):
 			return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, err)
 		default:

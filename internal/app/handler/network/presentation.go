@@ -24,9 +24,6 @@ func technologyLabel(technology wwanmodem.Technology) string {
 	if technology == 0 {
 		return "None"
 	}
-	if technology == wwanmodem.TechnologyAny {
-		return "Any"
-	}
 	parts := make([]string, 0, len(radioTechnologies))
 	for _, candidate := range radioTechnologies {
 		if technology&candidate.value != 0 {

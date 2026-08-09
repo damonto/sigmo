@@ -75,12 +75,16 @@ type Connector struct {
 	qmapEnabled        map[string]bool
 	qmapPendingNormal  map[string]Preferences
 	qualcomm410States  map[string]qualcomm410State
+	airplaneModeStates map[string]bool
+	alwaysOnRestore    chan *mmodem.Modem
+	reloadModem        func(context.Context, *mmodem.Modem) (*mmodem.Modem, error)
 }
 
 type ConnectorConfig struct {
 	Proxy              *Proxy
 	State              *storage.Store
 	NetworkPreferences *networkprefs.Store
+	Registry           *mmodem.Registry
 }
 
 type internetModem interface {
@@ -230,7 +234,7 @@ func NewConnector(cfg ConnectorConfig) (*Connector, error) {
 	if cfg.State == nil {
 		return nil, errors.New("storage is required")
 	}
-	return &Connector{
+	connector := &Connector{
 		connections:        make(map[string]trackedConnection),
 		preferences:        make(map[string]Preferences),
 		operations:         make(map[string]*sync.Mutex),
@@ -238,11 +242,17 @@ func NewConnector(cfg ConnectorConfig) (*Connector, error) {
 		qmapEnabled:        make(map[string]bool),
 		qmapPendingNormal:  make(map[string]Preferences),
 		qualcomm410States:  make(map[string]qualcomm410State),
+		airplaneModeStates: make(map[string]bool),
+		alwaysOnRestore:    make(chan *mmodem.Modem, 16),
 		proxy:              cfg.Proxy,
 		state:              cfg.State,
 		persistence:        dbConnectionState{store: cfg.State},
 		networkPreferences: cfg.NetworkPreferences,
-	}, nil
+	}
+	if cfg.Registry != nil {
+		connector.reloadModem = cfg.Registry.Reload
+	}
+	return connector, nil
 }
 
 func (c *Connector) UpdateProxyConfig(cfg ProxyConfig) error {
@@ -297,9 +307,19 @@ func (c *Connector) savedAirplaneMode(ctx context.Context, modem *mmodem.Modem) 
 // response data is updated in place during cleanup and preference changes, so
 // returning a response outside that lock can race.
 func (c *Connector) Current(ctx context.Context, modem *mmodem.Modem) (*Connection, error) {
+	if modem == nil {
+		return nil, ErrModemRequired
+	}
 	access := modemAccess{modem: modem}
 	defer c.lockModem(access.id())()
 
+	airplaneMode, err := c.airplaneModeEnabled(ctx, modem)
+	if err != nil {
+		return nil, err
+	}
+	if airplaneMode {
+		return disconnectedConnection(c.preferenceWithAlwaysOn(ctx, access)), nil
+	}
 	if connection := c.qmapConnection(modem); connection != nil {
 		return c.qmapConnectionResponse(modem.EquipmentIdentifier, connection), nil
 	}
@@ -445,11 +465,14 @@ func (c *Connector) Connect(ctx context.Context, modem *mmodem.Modem, prefs Pref
 	if err := ValidatePreferences(prefs); err != nil {
 		return nil, err
 	}
-	if modem.PrimaryPortType() == wwanmodem.PortQMI && c.qmapEnabledFor(modem.EquipmentIdentifier) {
-		return c.connectQMAP(ctx, modem, prefs)
-	}
 	access := modemAccess{modem: modem}
 	defer c.lockModem(access.id())()
+	if err := c.rejectAirplaneMode(ctx, modem); err != nil {
+		return nil, err
+	}
+	if modem.PrimaryPortType() == wwanmodem.PortQMI && c.qmapEnabledFor(modem.EquipmentIdentifier) {
+		return c.connectQMAPLocked(ctx, modem, prefs)
+	}
 	return c.connect(ctx, access, prefs, true)
 }
 
@@ -542,11 +565,22 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 }
 
 func (c *Connector) Disconnect(ctx context.Context, modem *mmodem.Modem) error {
-	if c.qmapConnection(modem) != nil {
-		return c.disconnectQMAP(ctx, modem)
+	if modem == nil {
+		return ErrModemRequired
 	}
 	access := modemAccess{modem: modem}
 	defer c.lockModem(access.id())()
+
+	airplaneMode, err := c.airplaneModeEnabled(ctx, modem)
+	if err != nil {
+		return err
+	}
+	if airplaneMode {
+		return c.clearAlwaysOnState(ctx, access)
+	}
+	if c.qmapConnectionFor(access.id(), access.generation()) != nil {
+		return errors.Join(c.clearAlwaysOnState(ctx, access), c.disconnectQMAPLocked(ctx, modem))
+	}
 	return c.disconnect(ctx, access, true)
 }
 

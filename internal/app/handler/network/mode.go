@@ -10,16 +10,18 @@ import (
 	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
-var errUnsupportedMode = errors.New("unsupported mode")
+var (
+	errUnsupportedMode        = errors.New("unsupported mode")
+	errCurrentModeUnavailable = errors.New("current mode is not in supported modes")
+)
 
 func (n *network) Modes(ctx context.Context, modem *mmodem.Modem) (*ModesResponse, error) {
-	supported, err := modem.SupportedModes(ctx)
+	supported, current, err := modem.Modes(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("read supported modes: %w", err)
+		return nil, fmt.Errorf("read modes: %w", err)
 	}
-	current, err := modem.CurrentModes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("read current modes: %w", err)
+	if !slices.Contains(supported, current) {
+		return nil, errCurrentModeUnavailable
 	}
 
 	response := &ModesResponse{
@@ -37,17 +39,19 @@ func (n *network) SetCurrentModes(ctx context.Context, modem *mmodem.Modem, req 
 		Allowed:   wwanmodem.Technology(req.Allowed),
 		Preferred: wwanmodem.Technology(req.Preferred),
 	}
-	supported, err := modem.SupportedModes(ctx)
+	supported, current, err := modem.Modes(ctx)
 	if err != nil {
-		return fmt.Errorf("read supported modes: %w", err)
+		return fmt.Errorf("read modes: %w", err)
 	}
 	if !slices.Contains(supported, want) {
 		return errUnsupportedMode
 	}
-	if err := modem.SetCurrentModes(ctx, want); err != nil {
-		return fmt.Errorf("set current modes: %w", err)
+	if current != want {
+		if err := modem.SetCurrentModes(ctx, want); err != nil {
+			return fmt.Errorf("set current modes: %w", err)
+		}
+		n.InvalidateScan(modem)
 	}
-	n.InvalidateScan(modem)
 	if err := n.preferences.SaveMode(ctx, modem.EquipmentIdentifier, want); err != nil {
 		return fmt.Errorf("save current modes: %w", err)
 	}

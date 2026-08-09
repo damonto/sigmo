@@ -204,6 +204,120 @@ func TestRegistryRecoversCurrentGenerationAfterTransportFailure(t *testing.T) {
 	}
 }
 
+func TestRegistryReloadClosesCurrentGenerationBeforeOpeningReplacement(t *testing.T) {
+	registry, err := NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := registry.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+	device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
+	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
+		return []wwanmodem.Device{device}, nil
+	}
+	registry.watchDevices = func(context.Context) (<-chan wwanmodem.Result[wwanmodem.DeviceEvent], error) {
+		return make(chan wwanmodem.Result[wwanmodem.DeviceEvent]), nil
+	}
+	var currentClosed atomic.Bool
+	registry.open = func(_ context.Context, candidate wwanmodem.Device, generation uint64) (*Modem, error) {
+		if generation > 1 && !currentClosed.Load() {
+			return nil, errors.New("current generation remains open")
+		}
+		modem := &Modem{
+			deviceInfo:          candidate,
+			deviceKey:           physicalDeviceKey(candidate),
+			generation:          generation,
+			EquipmentIdentifier: "imei-1",
+			PrimaryPort:         controlPortPath(candidate),
+		}
+		if generation == 1 {
+			modem.watchCancel = func() { currentClosed.Store(true) }
+		}
+		return modem, nil
+	}
+
+	modems, err := registry.Modems(t.Context())
+	if err != nil {
+		t.Fatalf("Modems() error = %v", err)
+	}
+	current := modems[physicalDeviceKey(device)]
+	if current == nil {
+		t.Fatal("initial modem is missing")
+	}
+	events := make(chan ModemEvent, 2)
+	unsubscribe, err := registry.Subscribe(func(event ModemEvent) error {
+		events <- event
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	replacement, err := registry.Reload(t.Context(), current)
+	if err != nil {
+		t.Fatalf("Reload() error = %v", err)
+	}
+	if replacement == current || replacement.Generation() <= current.Generation() {
+		t.Fatalf("replacement generation = %d, current = %d", replacement.Generation(), current.Generation())
+	}
+	if !currentClosed.Load() {
+		t.Fatal("current generation was not closed")
+	}
+	select {
+	case <-current.Done():
+	default:
+		t.Fatal("current generation lifecycle remains open")
+	}
+	removed := receiveModemEvent(t, events)
+	added := receiveModemEvent(t, events)
+	if removed.Type != ModemEventRemoved || removed.Modem != current {
+		t.Fatalf("removed event = %+v", removed)
+	}
+	if added.Type != ModemEventAdded || added.Modem != replacement {
+		t.Fatalf("added event = %+v", added)
+	}
+}
+
+func TestRegistryReloadReturnsWhenRegistryCloses(t *testing.T) {
+	registry, err := NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	registry.mu.Lock()
+	registry.started = true
+	registry.mu.Unlock()
+
+	reloadDone := make(chan error, 1)
+	go func() {
+		_, err := registry.Reload(context.Background(), &Modem{EquipmentIdentifier: "imei-1"})
+		reloadDone <- err
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for len(registry.reloads) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(registry.reloads) == 0 {
+		t.Fatal("Reload() did not enter the registry queue")
+	}
+	if err := registry.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	select {
+	case err := <-reloadDone:
+		if !errors.Is(err, errRegistryClosed) {
+			t.Fatalf("Reload() error = %v, want %v", err, errRegistryClosed)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Reload() remained blocked after Registry.Close()")
+	}
+}
+
 func TestRegistryBoundsClientIDExhaustionRecovery(t *testing.T) {
 	tests := []struct {
 		name              string

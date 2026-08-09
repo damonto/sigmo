@@ -28,7 +28,7 @@ type SetCurrentModesRequest struct {
 
 type BandsResponse struct {
 	Supported []BandResponse `json:"supported" jsonschema:"bands accepted by this modem"`
-	Current   []BandValue    `json:"current" jsonschema:"currently configured semantic radio bands; a single zero value means automatic selection"`
+	Current   []BandValue    `json:"current" jsonschema:"currently configured semantic radio bands"`
 }
 
 type BandResponse struct {
@@ -38,8 +38,8 @@ type BandResponse struct {
 }
 
 type BandValue struct {
-	Technology uint64 `json:"technology" jsonschema:"wwan-go radio technology value; zero selects bands automatically"`
-	Number     uint16 `json:"number" jsonschema:"3GPP or modem band number; zero with zero technology selects bands automatically"`
+	Technology uint64 `json:"technology" jsonschema:"wwan-go radio technology value"`
+	Number     uint16 `json:"number" jsonschema:"3GPP or modem band number"`
 }
 
 type SetCurrentBandsRequest struct {

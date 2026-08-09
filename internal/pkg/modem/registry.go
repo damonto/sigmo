@@ -25,6 +25,7 @@ const (
 var (
 	ErrNotFound                          = errors.New("modem not found")
 	errModemRequired                     = errors.New("modem is required")
+	errRegistryClosed                    = errors.New("modem registry is closed")
 	errQualcomm410Data5PortNotDiscovered = errors.New("Qualcomm 410 DATA5 QMI control port is not mapped to a discovered port")
 )
 
@@ -38,6 +39,7 @@ type Registry struct {
 	started        bool
 	closed         bool
 	cancel         context.CancelFunc
+	done           chan struct{}
 	wg             sync.WaitGroup
 
 	discover     func(context.Context) ([]wwanmodem.Device, error)
@@ -45,6 +47,7 @@ type Registry struct {
 	open         func(context.Context, wwanmodem.Device, uint64) (*Modem, error)
 	openDevice   deviceControlOpener
 	failures     chan modemFailure
+	reloads      chan modemReloadRequest
 	// A physical reconnect resets the bounded CID-exhaustion recovery state.
 	cidRecoveryStates map[string]cidRecoveryState
 	simIdentities     map[*Modem]simIdentity
@@ -59,6 +62,16 @@ const (
 )
 
 type modemFailure struct {
+	modem *Modem
+	err   error
+}
+
+type modemReloadRequest struct {
+	modem  *Modem
+	result chan modemReloadResult
+}
+
+type modemReloadResult struct {
 	modem *Modem
 	err   error
 }
@@ -113,6 +126,8 @@ func NewRegistry() (*Registry, error) {
 		watchDevices:      wwanmodem.WatchDevices,
 		open:              openDiscoveredModem,
 		failures:          make(chan modemFailure, 32),
+		reloads:           make(chan modemReloadRequest, 8),
+		done:              make(chan struct{}),
 		cidRecoveryStates: make(map[string]cidRecoveryState),
 		simIdentities:     make(map[*Modem]simIdentity),
 	}, nil
@@ -134,6 +149,54 @@ func (r *Registry) Find(ctx context.Context, id string) (*Modem, error) {
 	return r.findModem(id)
 }
 
+// Reload retires one modem generation and waits for Registry to open its
+// replacement. The device loop owns this transition so a device event cannot
+// open another generation before the old QMI clients have released their IDs.
+func (r *Registry) Reload(ctx context.Context, current *Modem) (*Modem, error) {
+	if current == nil {
+		return nil, errModemRequired
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.ensureStarted(ctx); err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	closed := r.closed
+	reloads := r.reloads
+	done := r.done
+	r.mu.RUnlock()
+	if closed {
+		return nil, errRegistryClosed
+	}
+	if reloads == nil {
+		return nil, errors.New("modem registry reload queue is unavailable")
+	}
+
+	result := make(chan modemReloadResult, 1)
+	request := modemReloadRequest{modem: current, result: result}
+	select {
+	case reloads <- request:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-done:
+		return nil, errRegistryClosed
+	}
+
+	select {
+	case reloaded := <-result:
+		if reloaded.err != nil {
+			return nil, fmt.Errorf("reload modem generation: %w", reloaded.err)
+		}
+		return reloaded.modem, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-done:
+		return nil, errRegistryClosed
+	}
+}
+
 func (r *Registry) Subscribe(fn func(ModemEvent) error) (func(), error) {
 	if fn == nil {
 		return nil, errors.New("modem subscriber is required")
@@ -144,7 +207,7 @@ func (r *Registry) Subscribe(fn func(ModemEvent) error) (func(), error) {
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		return nil, errors.New("modem registry is closed")
+		return nil, errRegistryClosed
 	}
 	r.nextSubID++
 	id := r.nextSubID
@@ -174,6 +237,9 @@ func (r *Registry) Close() error {
 		return nil
 	}
 	r.closed = true
+	if r.done != nil {
+		close(r.done)
+	}
 	if r.cancel != nil {
 		r.cancel()
 	}
@@ -211,6 +277,9 @@ func (r *Registry) WaitForReloadedModem(ctx context.Context, current *Modem) (*M
 		return nil, err
 	}
 	defer unsubscribe()
+	r.mu.RLock()
+	done := r.done
+	r.mu.RUnlock()
 	if candidate, err := r.findModem(current.EquipmentIdentifier); err == nil && candidate.Generation() > current.Generation() {
 		return candidate, nil
 	}
@@ -219,6 +288,8 @@ func (r *Registry) WaitForReloadedModem(ctx context.Context, current *Modem) (*M
 		return modem, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	case <-done:
+		return nil, errRegistryClosed
 	}
 }
 

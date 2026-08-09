@@ -22,15 +22,17 @@ var proIMS = func(app *proApp) error {
 	runtime := app.runtime
 	app.RegisterWebsheets()
 	connectivity := pims.NewConnectivity(pims.ConnectivityConfig{
-		Store:    runtime.Storage,
-		Registry: runtime.Registry,
-		Internet: runtime.InternetConnector,
+		Store:              runtime.Storage,
+		Registry:           runtime.Registry,
+		Internet:           runtime.InternetConnector,
+		NetworkPreferences: runtime.NetworkPreferences,
 		OnIncoming: func(ctx context.Context, incoming pims.IncomingSMS) error {
 			return runtime.Relay.ForwardRoutedSMS(ctx, incoming.ModemID, incoming.Message)
 		},
 		Websheets: app.Websheets(),
 	})
 	runtime.SetInternetConnections(connectivity)
+	runtime.SetAirplaneModeLifecycle(connectivity)
 	calls := procall.New(runtime.Storage, connectivity.WiFiCalling(), procall.VoiceRoute{
 		Route: procall.RouteVoLTE,
 		Voice: connectivity.VoLTE(),

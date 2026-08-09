@@ -4,18 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 var (
-	errBandsRequired    = errors.New("bands are required")
-	errUnsupportedBand  = errors.New("unsupported band")
-	errDuplicateBand    = errors.New("duplicate band")
-	errAnyBandExclusive = errors.New("any band cannot be combined with other bands")
+	errBandsRequired           = errors.New("bands are required")
+	errUnsupportedBand         = errors.New("unsupported band")
+	errDuplicateBand           = errors.New("duplicate band")
+	errCurrentBandsUnavailable = errors.New("current bands are unavailable")
 )
 
 func (n *network) Bands(ctx context.Context, modem *mmodem.Modem) (*BandsResponse, error) {
@@ -27,40 +25,46 @@ func (n *network) Bands(ctx context.Context, modem *mmodem.Modem) (*BandsRespons
 	if err != nil {
 		return nil, fmt.Errorf("read current bands: %w", err)
 	}
+	current = filterCurrentBands(supported, current)
+	if len(current) == 0 {
+		return nil, errCurrentBandsUnavailable
+	}
 
 	return bandsResponse(supported, current), nil
 }
 
 func bandsResponse(supported []wwanmodem.Band, current []wwanmodem.Band) *BandsResponse {
-	automatic := len(current) == 0 || sameBandSet(current, supported)
-	currentValues := bandValues(current)
-	if automatic {
-		currentValues = []BandValue{{}}
-	}
+	currentSet := bandSet(current)
 	response := &BandsResponse{
-		Supported: []BandResponse{{Value: BandValue{}, Label: "Any", Current: automatic}},
-		Current:   currentValues,
+		Supported: make([]BandResponse, 0, len(supported)),
+		Current:   bandValues(current),
 	}
 	for _, band := range supported {
+		_, currentBand := currentSet[band]
 		response.Supported = append(response.Supported, BandResponse{
 			Value:   bandValue(band),
 			Label:   bandLabel(band),
-			Current: !automatic && slices.Contains(current, band),
+			Current: currentBand,
 		})
 	}
 	return response
 }
 
-func sameBandSet(left []wwanmodem.Band, right []wwanmodem.Band) bool {
-	leftSet := make(map[wwanmodem.Band]struct{}, len(left))
-	for _, band := range left {
-		leftSet[band] = struct{}{}
+func filterCurrentBands(supported []wwanmodem.Band, current []wwanmodem.Band) []wwanmodem.Band {
+	supportedSet := bandSet(supported)
+	seen := make(map[wwanmodem.Band]struct{}, len(current))
+	filtered := make([]wwanmodem.Band, 0, len(current))
+	for _, band := range current {
+		if _, ok := supportedSet[band]; !ok {
+			continue
+		}
+		if _, ok := seen[band]; ok {
+			continue
+		}
+		seen[band] = struct{}{}
+		filtered = append(filtered, band)
 	}
-	rightSet := make(map[wwanmodem.Band]struct{}, len(right))
-	for _, band := range right {
-		rightSet[band] = struct{}{}
-	}
-	return maps.Equal(leftSet, rightSet)
+	return filtered
 }
 
 func (n *network) SetCurrentBands(ctx context.Context, modem *mmodem.Modem, req SetCurrentBandsRequest) error {
@@ -82,12 +86,6 @@ func (n *network) validateBands(ctx context.Context, modem *mmodem.Modem, values
 	if len(values) == 0 {
 		return nil, errBandsRequired
 	}
-	if slices.Contains(values, BandValue{}) {
-		if len(values) > 1 {
-			return nil, errAnyBandExclusive
-		}
-		return nil, nil
-	}
 
 	bands := make([]wwanmodem.Band, 0, len(values))
 	for _, value := range values {
@@ -107,17 +105,26 @@ func validateBandValues(supported []wwanmodem.Band, bands []wwanmodem.Band) erro
 	if len(bands) == 0 {
 		return errBandsRequired
 	}
+	supportedSet := bandSet(supported)
 	seen := make(map[wwanmodem.Band]struct{}, len(bands))
 	for _, band := range bands {
 		if _, ok := seen[band]; ok {
 			return errDuplicateBand
 		}
 		seen[band] = struct{}{}
-		if !slices.Contains(supported, band) {
+		if _, ok := supportedSet[band]; !ok {
 			return errUnsupportedBand
 		}
 	}
 	return nil
+}
+
+func bandSet(bands []wwanmodem.Band) map[wwanmodem.Band]struct{} {
+	set := make(map[wwanmodem.Band]struct{}, len(bands))
+	for _, band := range bands {
+		set[band] = struct{}{}
+	}
+	return set
 }
 
 func bandValues(bands []wwanmodem.Band) []BandValue {

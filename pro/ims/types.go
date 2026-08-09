@@ -73,6 +73,7 @@ var (
 	ErrWebsheetUnavailable            = errors.New("wifi calling websheet is unavailable")
 	ErrInvalidWiFiCallingUnderlay     = errors.New("wifi calling underlay is invalid")
 	ErrWiFiCallingUnderlayUnavailable = errors.New("wifi calling underlay is unavailable")
+	ErrVoLTEAirplaneMode              = errors.New("VoLTE settings cannot change in airplane mode")
 	ErrVoLTEDataPathRequired          = errors.New("QMI VoLTE data path is required")
 	ErrVoLTEDataPathUnsupported       = errors.New("VoLTE data path is unsupported")
 )

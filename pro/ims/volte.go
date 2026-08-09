@@ -10,6 +10,7 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	wwanmodem "github.com/damonto/wwan-go/modem"
+	"github.com/damonto/wwan-go/qcom"
 )
 
 func readVoLTEStatus(ctx context.Context, modem *mmodem.Modem) (status wwan.VoLTEStatus, err error) {
@@ -24,6 +25,9 @@ func readVoLTEStatus(ctx context.Context, modem *mmodem.Modem) (status wwan.VoLT
 		err = errors.Join(err, device.Close())
 	}()
 	status, err = managedVoLTEStatus(ctx, device)
+	if errors.Is(err, qcom.QMIErrorInvalidOperation) {
+		return wwan.VoLTEStatus{}, nil
+	}
 	if err != nil {
 		return wwan.VoLTEStatus{}, fmt.Errorf("read VoLTE status: %w", err)
 	}
@@ -102,6 +106,10 @@ func updateVoLTESettings(ctx context.Context, modem *mmodem.Modem, updater voLTE
 	if err != nil {
 		return err
 	}
+	return updateResolvedVoLTESettings(ctx, modem, updater, settings)
+}
+
+func updateResolvedVoLTESettings(ctx context.Context, modem *mmodem.Modem, updater voLTESettingsUpdater, settings VoLTESettings) error {
 	if settings.Enabled {
 		if err := validateManagedVoLTE(ctx, modem); err != nil {
 			return err

@@ -36,13 +36,14 @@ type Runtime struct {
 	WebPush             *webpush.Client
 	Reminders           *reminder.Scheduler
 
-	messageRoute  message.Route
-	ussdRoute     ussd.Route
-	modemOverview []modemstatus.Extension
-	mcpTools      []mcpserver.Extension
-	routes        []router.Extension
-	runners       []Runner
-	features      []string
+	messageRoute          message.Route
+	ussdRoute             ussd.Route
+	modemOverview         []modemstatus.Extension
+	mcpTools              []mcpserver.Extension
+	routes                []router.Extension
+	runners               []Runner
+	features              []string
+	airplaneModeLifecycle appconnectivity.AirplaneModeLifecycle
 }
 
 func (r *Runtime) SetInternetConnections(connections appconnectivity.InternetConnections) {
@@ -55,6 +56,10 @@ func (r *Runtime) SetMessageRoute(route message.Route) {
 
 func (r *Runtime) SetUSSDRoute(route ussd.Route) {
 	r.ussdRoute = route
+}
+
+func (r *Runtime) SetAirplaneModeLifecycle(lifecycle appconnectivity.AirplaneModeLifecycle) {
+	r.airplaneModeLifecycle = lifecycle
 }
 
 func (r *Runtime) AddModemOverview(extensions ...modemstatus.Extension) {

@@ -15,6 +15,7 @@ const props = defineProps<{
   modemRegistered: boolean
   isLoading: boolean
   isUpdating: boolean
+  disabled: boolean
 }>()
 
 const emit = defineEmits<{
@@ -30,7 +31,9 @@ const description = computed(() => {
   return t('modemDetail.settings.volteDescription')
 })
 
-const dataPathDisabled = computed(() => props.enabled || props.isLoading || props.isUpdating)
+const dataPathDisabled = computed(
+  () => props.disabled || props.enabled || props.isLoading || props.isUpdating,
+)
 
 const updateDataPath = (dataPath: unknown) => {
   if (dataPath !== 'qmap' && dataPath !== 'legacy_bam_dmux' && dataPath !== 'qualcomm_410') return
@@ -44,7 +47,10 @@ const updateDataPath = (dataPath: unknown) => {
       <CardTitle class="text-base">{{ t('modemDetail.settings.volteTitle') }}</CardTitle>
     </CardHeader>
     <CardContent class="space-y-5 px-4">
-      <div v-if="props.dataPath !== 'mbim'" class="space-y-2">
+      <div
+        v-if="props.dataPath !== 'mbim'"
+        class="space-y-2"
+      >
         <Label for="volte-data-path">
           {{ t('modemDetail.settings.volteDataPathLabel') }}
         </Label>
@@ -63,7 +69,11 @@ const updateDataPath = (dataPath: unknown) => {
               dataPathDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
             ]"
           >
-            <RadioGroupItem id="volte-data-path-qmap" value="qmap" class="mt-1" />
+            <RadioGroupItem
+              id="volte-data-path-qmap"
+              value="qmap"
+              class="mt-1"
+            />
             <span class="min-w-0 space-y-1">
               <span class="flex items-center gap-2">
                 <span class="text-sm font-semibold text-foreground">
@@ -90,7 +100,11 @@ const updateDataPath = (dataPath: unknown) => {
               dataPathDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
             ]"
           >
-            <RadioGroupItem id="volte-data-path-legacy" value="legacy_bam_dmux" class="mt-1" />
+            <RadioGroupItem
+              id="volte-data-path-legacy"
+              value="legacy_bam_dmux"
+              class="mt-1"
+            />
             <span class="min-w-0 space-y-1">
               <span class="block text-sm font-semibold text-foreground">
                 {{ t('modemDetail.settings.volteDataPathLegacy') }}
@@ -110,7 +124,11 @@ const updateDataPath = (dataPath: unknown) => {
               dataPathDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
             ]"
           >
-            <RadioGroupItem id="volte-data-path-qualcomm-410" value="qualcomm_410" class="mt-1" />
+            <RadioGroupItem
+              id="volte-data-path-qualcomm-410"
+              value="qualcomm_410"
+              class="mt-1"
+            />
             <span class="min-w-0 space-y-1">
               <span class="block text-sm font-semibold text-foreground">
                 {{ t('modemDetail.settings.volteDataPathQualcomm410') }}
@@ -129,11 +147,14 @@ const updateDataPath = (dataPath: unknown) => {
           <p class="text-xs leading-5 text-muted-foreground">{{ description }}</p>
         </div>
         <div class="inline-flex shrink-0 items-center gap-2">
-          <Spinner v-if="props.isUpdating" class="size-4 text-muted-foreground" />
+          <Spinner
+            v-if="props.isUpdating"
+            class="size-4 text-muted-foreground"
+          />
           <Switch
             id="volte-enabled"
             :model-value="props.enabled"
-            :disabled="props.isLoading || props.isUpdating"
+            :disabled="props.disabled || props.isLoading || props.isUpdating"
             @update:model-value="emit('update', $event === true)"
           />
         </div>

@@ -24,17 +24,19 @@ type Connectivity struct {
 	volte            *coordinator
 	wifiCallingVoice *WiFiCalling
 	volteVoice       *VoLTE
+	reloadModem      func(context.Context, *mmodem.Modem) (*mmodem.Modem, error)
 
 	operationMu sync.Mutex
 	operations  map[string]*sync.Mutex
 }
 
 type ConnectivityConfig struct {
-	Store      *storage.Store
-	Registry   *mmodem.Registry
-	Internet   *pinternet.Connector
-	OnIncoming IncomingSMSFunc
-	Websheets  *websheet.Broker
+	Store              *storage.Store
+	Registry           *mmodem.Registry
+	Internet           *pinternet.Connector
+	NetworkPreferences airplaneModePreferences
+	OnIncoming         IncomingSMSFunc
+	Websheets          *websheet.Broker
 }
 
 func NewConnectivity(cfg ConnectivityConfig) *Connectivity {
@@ -53,10 +55,11 @@ func NewConnectivity(cfg ConnectivityConfig) *Connectivity {
 		Registry:           cfg.Registry,
 		Access:             AccessVoLTE,
 		Internet:           cfg.Internet,
+		NetworkPreferences: cfg.NetworkPreferences,
 		RegistrationGroups: registrationGroups,
 		OnIncoming:         cfg.OnIncoming,
 	})
-	return &Connectivity{
+	connectivity := &Connectivity{
 		registry:         cfg.Registry,
 		internet:         cfg.Internet,
 		wifiCalling:      wifiCalling,
@@ -65,6 +68,10 @@ func NewConnectivity(cfg ConnectivityConfig) *Connectivity {
 		volteVoice:       &VoLTE{voiceAccess: &voiceAccess{access: volte}},
 		operations:       make(map[string]*sync.Mutex),
 	}
+	if cfg.Registry != nil {
+		connectivity.reloadModem = cfg.Registry.Reload
+	}
+	return connectivity
 }
 
 func (c *Connectivity) Run(ctx context.Context) error {

@@ -194,6 +194,56 @@ func TestApplyStatusCachesOverview(t *testing.T) {
 	}
 }
 
+func TestApplyPowerStateCachesAirplaneMode(t *testing.T) {
+	registered := wwanmodem.Status{
+		Power:         wwanmodem.PowerStateOn,
+		Registration:  wwanmodem.RegistrationRoaming,
+		PacketService: wwanmodem.PacketServiceAttached,
+		Technology:    wwanmodem.TechnologyLTE,
+		OperatorID:    "46001",
+		OperatorName:  "UNICOM",
+		SignalQuality: 80,
+	}
+	tests := []struct {
+		name  string
+		state wwanmodem.PowerState
+		want  wwanmodem.Status
+	}{
+		{name: "online preserves network status", state: wwanmodem.PowerStateOn, want: registered},
+		{
+			name:  "low power clears network status",
+			state: wwanmodem.PowerStateLow,
+			want: wwanmodem.Status{
+				Power:         wwanmodem.PowerStateLow,
+				Registration:  wwanmodem.RegistrationIdle,
+				PacketService: wwanmodem.PacketServiceDetached,
+			},
+		},
+		{
+			name:  "offline clears network status",
+			state: wwanmodem.PowerStateOff,
+			want: wwanmodem.Status{
+				Power:         wwanmodem.PowerStateOff,
+				Registration:  wwanmodem.RegistrationIdle,
+				PacketService: wwanmodem.PacketServiceDetached,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Modem{Status: registered}
+			m.applyPowerState(tt.state)
+			snapshot := m.Snapshot()
+			if snapshot.Status != tt.want {
+				t.Errorf("applyPowerState() status = %+v, want %+v", snapshot.Status, tt.want)
+			}
+			if !snapshot.StatusKnown {
+				t.Error("applyPowerState() status known = false, want true")
+			}
+		})
+	}
+}
+
 func TestAirplaneModeEnabled(t *testing.T) {
 	tests := []struct {
 		name  string

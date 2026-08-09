@@ -7,6 +7,7 @@ import ModemSettingsHeader from '@/components/modem/settings/ModemSettingsHeader
 import ModemSettingsShell from '@/components/modem/settings/ModemSettingsShell.vue'
 import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 import { useFeedbackBanner } from '@/composables/useFeedbackBanner'
+import { useModemOverview } from '@/composables/useModemOverview'
 import { useModemVoLTE } from '@/composables/useModemVoLTE'
 import VoLTESettingsPanel from '@/views/modem-settings/VoLTESettingsPanel.vue'
 import VoLTEStatusPanel from '@/views/modem-settings/VoLTEStatusPanel.vue'
@@ -17,6 +18,8 @@ const modemId = computed(() => route.params.id as string)
 const { hasFeature } = useCapabilities()
 const canUseVoLTE = computed(() => hasFeature(FEATURE.volte))
 const { showFeedback, showError } = useFeedbackBanner()
+const { modem } = useModemOverview(modemId)
+const airplaneModeEnabled = computed(() => modem.value?.airplaneMode ?? false)
 
 const {
   volteEnabled,
@@ -61,6 +64,7 @@ const {
         :modem-registered="volteModemRegistered"
         :is-loading="isVoLTELoading"
         :is-updating="isVoLTEUpdating"
+        :disabled="airplaneModeEnabled"
         @update="updateVoLTE"
         @update-data-path="updateDataPath"
       />

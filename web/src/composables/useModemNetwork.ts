@@ -34,8 +34,10 @@ export const useModemNetwork = ({
   const selectedNetwork = ref('')
   const modeOptions = ref<ModeResponse[]>([])
   const selectedMode = ref('')
+  const currentMode = ref('')
   const supportedBands = ref<BandResponse[]>([])
   const selectedBands = ref<BandValue[]>([])
+  const currentBands = ref<BandValue[]>([])
   const airplaneModeSupported = ref(false)
   const airplaneModeEnabled = ref(false)
   const isNetworkLoading = ref(false)
@@ -51,10 +53,19 @@ export const useModemNetwork = ({
   const hasBandSelection = computed(() => selectedBands.value.length > 0)
   const canScanNetworks = computed(() => !isNetworkLoading.value && !airplaneModeEnabled.value)
   const canUpdateMode = computed(
-    () => hasModeSelection.value && !isModeUpdating.value && !airplaneModeEnabled.value,
+    () =>
+      modeOptions.value.length > 1 &&
+      hasModeSelection.value &&
+      selectedMode.value !== currentMode.value &&
+      !isModeUpdating.value &&
+      !airplaneModeEnabled.value,
   )
   const canUpdateBands = computed(
-    () => hasBandSelection.value && !isBandUpdating.value && !airplaneModeEnabled.value,
+    () =>
+      hasBandSelection.value &&
+      !sameBandValues(selectedBands.value, currentBands.value) &&
+      !isBandUpdating.value &&
+      !airplaneModeEnabled.value,
   )
   const canUpdateAirplaneMode = computed(
     () => airplaneModeSupported.value && !isAirplaneModeUpdating.value,
@@ -110,8 +121,10 @@ export const useModemNetwork = ({
     selectedNetwork.value = ''
     modeOptions.value = []
     selectedMode.value = ''
+    currentMode.value = ''
     supportedBands.value = []
     selectedBands.value = []
+    currentBands.value = []
     airplaneModeSupported.value = false
     airplaneModeEnabled.value = false
     isNetworkLoading.value = false
@@ -184,22 +197,35 @@ export const useModemNetwork = ({
 
       if (modes.status === 'fulfilled') {
         const modesData = modes.value.data.value
-        modeOptions.value = modesData?.supported ?? []
-        selectedMode.value = modesData ? modeKey(modesData.current) : ''
+        const options = modesData?.supported ?? []
+        const current = modesData ? modeKey(modesData.current) : ''
+        if (current && options.some((mode) => modeKey(mode) === current)) {
+          modeOptions.value = options
+          selectedMode.value = current
+          currentMode.value = current
+        } else {
+          console.error('[useModemNetwork] Current network mode is not supported')
+          modeOptions.value = []
+          selectedMode.value = ''
+          currentMode.value = ''
+        }
       } else {
         console.error('[useModemNetwork] Failed to load network modes:', modes.reason)
         modeOptions.value = []
         selectedMode.value = ''
+        currentMode.value = ''
       }
 
       if (bands.status === 'fulfilled') {
         const bandsData = bands.value.data.value
         supportedBands.value = bandsData?.supported ?? []
-        selectedBands.value = bandsData?.current ?? []
+        selectedBands.value = cloneBandValues(bandsData?.current ?? [])
+        currentBands.value = cloneBandValues(bandsData?.current ?? [])
       } else {
         console.error('[useModemNetwork] Failed to load network bands:', bands.reason)
         supportedBands.value = []
         selectedBands.value = []
+        currentBands.value = []
       }
 
       if (airplane.status === 'fulfilled') {
@@ -216,8 +242,10 @@ export const useModemNetwork = ({
       console.error('[useModemNetwork] Failed to load network settings:', err)
       modeOptions.value = []
       selectedMode.value = ''
+      currentMode.value = ''
       supportedBands.value = []
       selectedBands.value = []
+      currentBands.value = []
       airplaneModeSupported.value = false
       airplaneModeEnabled.value = false
     } finally {
@@ -230,8 +258,7 @@ export const useModemNetwork = ({
   const handleModeUpdate = async () => {
     const targetId = modemId.value
     const mode = modeFromKey(selectedMode.value)
-    if (!targetId || !mode) return
-    if (isModeUpdating.value) return
+    if (!targetId || !mode || !canUpdateMode.value) return
     isModeUpdating.value = true
     try {
       await networkApi.setCurrentModes(targetId, mode)
@@ -250,11 +277,6 @@ export const useModemNetwork = ({
       selectedBands.value = selectedBands.value.filter((value) => bandKey(value) !== key)
       return
     }
-    if (isAutomaticBand(band)) {
-      selectedBands.value = [band]
-      return
-    }
-    selectedBands.value = selectedBands.value.filter((value) => !isAutomaticBand(value))
     if (!selectedBands.value.some((value) => bandKey(value) === key)) {
       selectedBands.value = [...selectedBands.value, band]
     }
@@ -262,8 +284,7 @@ export const useModemNetwork = ({
 
   const handleBandUpdate = async () => {
     const targetId = modemId.value
-    if (!targetId) return
-    if (!hasBandSelection.value || isBandUpdating.value) return
+    if (!targetId || !canUpdateBands.value) return
     isBandUpdating.value = true
     try {
       await networkApi.setCurrentBands(targetId, { bands: selectedBands.value })
@@ -359,10 +380,25 @@ const modeFromKey = (key: string): SetCurrentModesRequest | null => {
   if (allowedPart === undefined || preferredPart === undefined) return null
   const allowed = Number(allowedPart)
   const preferred = Number(preferredPart)
-  if (!Number.isFinite(allowed) || !Number.isFinite(preferred)) return null
+  if (
+    !Number.isSafeInteger(allowed) ||
+    !Number.isSafeInteger(preferred) ||
+    allowed < 0 ||
+    preferred < 0
+  ) {
+    return null
+  }
   return { allowed, preferred }
 }
 
 const bandKey = (band: BandValue) => `${band.technology}:${band.number}`
 
-const isAutomaticBand = (band: BandValue) => band.technology === 0 && band.number === 0
+const cloneBandValues = (bands: BandValue[]) => bands.map((band) => ({ ...band }))
+
+const sameBandValues = (left: BandValue[], right: BandValue[]) => {
+  if (left.length !== right.length) return false
+  const leftKeys = new Set(left.map(bandKey))
+  const rightKeys = new Set(right.map(bandKey))
+  if (leftKeys.size !== left.length || rightKeys.size !== right.length) return false
+  return [...leftKeys].every((key) => rightKeys.has(key))
+}

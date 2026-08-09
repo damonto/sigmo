@@ -125,6 +125,15 @@ func (c *coordinator) startIfEnabled(ctx context.Context, modem *mmodem.Modem) {
 		c.start(modem, profileID)
 		return
 	}
+	airplaneMode, err := c.airplaneModeEnabled(ctx, modem)
+	if err != nil {
+		slog.Warn("read airplane mode before VoLTE start", "imei", modem.EquipmentIdentifier, "error", err)
+		return
+	}
+	if airplaneMode {
+		slog.Debug("skip VoLTE start in airplane mode", "imei", modem.EquipmentIdentifier)
+		return
+	}
 
 	settings, err := c.VoLTESettings(ctx, modem)
 	if err != nil {
@@ -164,12 +173,48 @@ func (c *coordinator) startIfEnabled(ctx context.Context, modem *mmodem.Modem) {
 	}
 }
 
+func (c *coordinator) airplaneModeEnabled(ctx context.Context, modem *mmodem.Modem) (bool, error) {
+	if modem == nil {
+		return false, nil
+	}
+	if c.networkPreferences != nil {
+		enabled, ok, err := c.networkPreferences.SavedAirplaneMode(ctx, modem.EquipmentIdentifier)
+		if err != nil {
+			return false, fmt.Errorf("read saved airplane mode: %w", err)
+		}
+		if ok && enabled {
+			return true, nil
+		}
+	}
+	snapshot := modem.Snapshot()
+	if snapshot.StatusKnown {
+		return snapshot.AirplaneMode(), nil
+	}
+	enabled, err := modem.AirplaneMode(ctx)
+	if errors.Is(err, wwanmodem.ErrNotSupported) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read modem airplane mode: %w", err)
+	}
+	return enabled, nil
+}
+
 func (c *coordinator) start(modem *mmodem.Modem, profileID string) {
 	if modem == nil || strings.TrimSpace(modem.EquipmentIdentifier) == "" {
 		return
 	}
 	modemID := modem.EquipmentIdentifier
 	c.mu.Lock()
+	if c.airplaneSuspended[modemID] {
+		if c.deferredStarts == nil {
+			c.deferredStarts = make(map[string]deferredSessionStart)
+		}
+		c.deferredStarts[modemID] = deferredSessionStart{modem: modem, profileID: profileID}
+		c.mu.Unlock()
+		return
+	}
+	delete(c.deferredStarts, modemID)
 	if current := c.sessions[modemID]; current != nil {
 		c.mu.Unlock()
 		return
@@ -195,6 +240,39 @@ func (c *coordinator) start(modem *mmodem.Modem, profileID string) {
 		defer close(done)
 		c.connectLoop(ctx, modem, profileID, sessionID)
 	}()
+}
+
+func (c *coordinator) beginAirplaneModeChange(modemID string, shouldSuspend bool) {
+	modemID = strings.TrimSpace(modemID)
+	if modemID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !shouldSuspend && !c.airplaneSuspended[modemID] {
+		return
+	}
+	if c.airplaneSuspended == nil {
+		c.airplaneSuspended = make(map[string]bool)
+	}
+	c.airplaneSuspended[modemID] = true
+	// A new transition supersedes a start deferred by an older modem generation.
+	delete(c.deferredStarts, modemID)
+}
+
+func (c *coordinator) endAirplaneModeChange(modemID string) {
+	modemID = strings.TrimSpace(modemID)
+	if modemID == "" {
+		return
+	}
+	c.mu.Lock()
+	delete(c.airplaneSuspended, modemID)
+	deferred := c.deferredStarts[modemID]
+	delete(c.deferredStarts, modemID)
+	c.mu.Unlock()
+	if deferred.modem != nil {
+		c.start(deferred.modem, deferred.profileID)
+	}
 }
 
 func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, profileID string, sessionID uint64) {
@@ -999,6 +1077,8 @@ func (c *coordinator) stopAll() []*mmodem.Modem {
 			modems = append(modems, session.modem)
 		}
 	}
+	clear(c.airplaneSuspended)
+	clear(c.deferredStarts)
 	c.mu.Unlock()
 	for _, modemID := range ids {
 		c.stop(modemID)
@@ -1015,6 +1095,14 @@ func (c *coordinator) stopByDevice(deviceKey string, generation uint64) {
 	for modemID, session := range c.sessions {
 		if session != nil && session.deviceKey == deviceKey && (generation == 0 || session.generation == generation) {
 			modemIDs = append(modemIDs, modemID)
+		}
+	}
+	for modemID, deferred := range c.deferredStarts {
+		if deferred.modem == nil || deferred.modem.Path() != deviceKey {
+			continue
+		}
+		if generation == 0 || deferred.modem.Generation() == generation {
+			delete(c.deferredStarts, modemID)
 		}
 	}
 	c.mu.Unlock()

@@ -20,10 +20,17 @@ const stubs = {
   },
   RadioGroupItem: { template: '<input type="radio" />' },
   Spinner: { template: '<span />' },
-  Switch: { template: '<input type="checkbox" />' },
+  Switch: {
+    props: ['disabled'],
+    template: '<input type="checkbox" :disabled="disabled" />',
+  },
 }
 
-const mountPanel = (enabled: boolean, dataPath: VoLTEDataPath = 'legacy_bam_dmux') => {
+const mountPanel = (
+  enabled: boolean,
+  dataPath: VoLTEDataPath = 'legacy_bam_dmux',
+  disabled = false,
+) => {
   const i18n = createI18n({
     legacy: false,
     locale: 'en',
@@ -36,6 +43,7 @@ const mountPanel = (enabled: boolean, dataPath: VoLTEDataPath = 'legacy_bam_dmux
       modemRegistered: false,
       isLoading: false,
       isUpdating: false,
+      disabled,
     },
     global: { plugins: [i18n], stubs },
   })
@@ -59,6 +67,13 @@ describe('VoLTESettingsPanel', () => {
     const wrapper = mountPanel(true)
 
     expect(wrapper.get('[data-radio-group]').attributes('data-disabled')).toBe('true')
+  })
+
+  it('locks VoLTE settings in airplane mode', () => {
+    const wrapper = mountPanel(false, 'qmap', true)
+
+    expect(wrapper.get('[data-radio-group]').attributes('data-disabled')).toBe('true')
+    expect(wrapper.get('input[type="checkbox"]').attributes('disabled')).toBeDefined()
   })
 
   it('hides the QMI data path selection for MBIM', () => {

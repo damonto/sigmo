@@ -60,6 +60,9 @@ func (s *Store) SaveBands(ctx context.Context, modemID string, bands []wwanmodem
 	if modemID == "" {
 		return errors.New("modem id is required")
 	}
+	if len(bands) == 0 {
+		return errors.New("bands are required")
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -225,17 +228,12 @@ func restoreAirplaneMode(ctx context.Context, m *modem.Modem, enabled bool) (boo
 }
 
 func restoreMode(ctx context.Context, m *modem.Modem, mode wwanmodem.Mode) (bool, error) {
-	supported, err := m.SupportedModes(ctx)
+	supported, current, err := m.Modes(ctx)
 	if err != nil {
-		return modem.IsTransientRestartError(err), fmt.Errorf("read supported modes: %w", err)
+		return modem.IsTransientRestartError(err), fmt.Errorf("read modes: %w", err)
 	}
 	if !slices.Contains(supported, mode) {
 		return false, fmt.Errorf("saved mode unsupported: allowed=%d preferred=%d", mode.Allowed, mode.Preferred)
-	}
-
-	current, err := m.CurrentModes(ctx)
-	if err != nil {
-		return modem.IsTransientRestartError(err), fmt.Errorf("read current modes: %w", err)
 	}
 	if current == mode {
 		return false, nil
@@ -248,6 +246,9 @@ func restoreMode(ctx context.Context, m *modem.Modem, mode wwanmodem.Mode) (bool
 }
 
 func restoreBands(ctx context.Context, m *modem.Modem, bands []wwanmodem.Band) (bool, error) {
+	if len(bands) == 0 {
+		return false, errors.New("saved bands are empty")
+	}
 	if duplicateBand(bands) {
 		return false, errors.New("saved bands contain duplicates")
 	}

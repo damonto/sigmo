@@ -108,7 +108,7 @@ func TestNewNetworkRequiresDependencies(t *testing.T) {
 			if tt.store != nil {
 				store = tt.store(t)
 			}
-			_, err := newNetwork(preferences, store)
+			_, err := newNetwork(preferences, store, nil)
 			if err == nil {
 				t.Fatal("newNetwork() error = nil, want dependency error")
 			}

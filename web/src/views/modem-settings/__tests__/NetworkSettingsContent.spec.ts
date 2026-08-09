@@ -86,8 +86,8 @@ const mountSection = () =>
       ],
       selectedMode: '4:0',
       supportedBands: [
-        { value: { technology: 0, number: 0 }, label: 'Any', current: false },
         { value: { technology: 4, number: 41 }, label: 'LTE B41', current: true },
+        { value: { technology: 4, number: 42 }, label: 'LTE B42', current: false },
       ],
       selectedBands: [{ technology: 4, number: 41 }],
       airplaneModeSupported: true,
@@ -116,9 +116,9 @@ describe('NetworkSettingsContent', () => {
   it('emits band toggle events', async () => {
     const wrapper = mountSection()
 
-    await wrapper.find('#band-0-0').setValue(true)
+    await wrapper.find('#band-4-42').setValue(true)
 
-    expect(wrapper.emitted('toggleBand')).toEqual([[{ technology: 0, number: 0 }, true]])
+    expect(wrapper.emitted('toggleBand')).toEqual([[{ technology: 4, number: 42 }, true]])
   })
 
   it('emits airplane mode updates', async () => {

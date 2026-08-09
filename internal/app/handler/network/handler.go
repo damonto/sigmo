@@ -10,6 +10,7 @@ import (
 	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/labstack/echo/v5"
 
+	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/networkprefs"
@@ -23,6 +24,13 @@ type Handler struct {
 
 type modemFinder interface {
 	Find(context.Context, string) (*mmodem.Modem, error)
+}
+
+type Config struct {
+	Registry              *mmodem.Registry
+	Preferences           *networkprefs.Store
+	Store                 *storage.Store
+	AirplaneModeLifecycle appconnectivity.AirplaneModeLifecycle
 }
 
 const (
@@ -42,7 +50,6 @@ const (
 	errorCodeBandsRequired           = "bands_required"
 	errorCodeUnsupportedBand         = "unsupported_band"
 	errorCodeDuplicateBand           = "duplicate_band"
-	errorCodeAnyBandExclusive        = "any_band_exclusive"
 	errorCodeGetAirplaneModeFailed   = "get_airplane_mode_failed"
 	errorCodeSetAirplaneModeFailed   = "set_airplane_mode_failed"
 	errorCodeSetAirplaneModeInvalid  = "set_airplane_mode_invalid_request"
@@ -51,16 +58,16 @@ const (
 
 var errNetworkRegistryRequired = errors.New("modem registry is required")
 
-func New(registry *mmodem.Registry, preferences *networkprefs.Store, store *storage.Store) (*Handler, error) {
-	if registry == nil {
+func New(cfg Config) (*Handler, error) {
+	if cfg.Registry == nil {
 		return nil, errNetworkRegistryRequired
 	}
-	networks, err := newNetwork(preferences, store)
+	networks, err := newNetwork(cfg.Preferences, cfg.Store, cfg.AirplaneModeLifecycle)
 	if err != nil {
 		return nil, err
 	}
 	return &Handler{
-		registry: registry,
+		registry: cfg.Registry,
 		networks: networks,
 	}, nil
 }
@@ -210,8 +217,6 @@ func (h *Handler) SetCurrentBands(c *echo.Context) error {
 			return httpapi.BadRequest(c, errorCodeUnsupportedBand, err)
 		case errors.Is(err, errDuplicateBand):
 			return httpapi.BadRequest(c, errorCodeDuplicateBand, err)
-		case errors.Is(err, errAnyBandExclusive):
-			return httpapi.BadRequest(c, errorCodeAnyBandExclusive, err)
 		default:
 			return httpapi.Internal(c, errorCodeSetBandsFailed, err)
 		}

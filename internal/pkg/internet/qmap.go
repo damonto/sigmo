@@ -233,6 +233,10 @@ func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, 
 	if err := ValidatePreferences(prefs); err != nil {
 		return nil, err
 	}
+	profileID := modemAccess{modem: modem}.profileID()
+	if prefs.AlwaysOn && profileID == "" {
+		return nil, ErrProfileIDRequired
+	}
 	if prefs.APNUsername != "" || prefs.APNPassword != "" || prefs.APNAuth != "" {
 		return nil, errors.New("QMAP Internet authentication is not supported")
 	}
@@ -307,6 +311,19 @@ func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, 
 				removeInternetQMAPMuxes(modem, connection.muxIDs...),
 			)
 		}
+	}
+	if err := c.syncAlwaysOnState(ctx, profileID, prefs); err != nil {
+		var proxyErr error
+		if prefs.ProxyEnabled {
+			proxyErr = c.cleanupProxy(ctx, modem.EquipmentIdentifier, qmapPrimaryInterface(connection))
+		}
+		return nil, errors.Join(
+			fmt.Errorf("sync QMAP always on state: %w", err),
+			proxyErr,
+			connection.cleanup(ctx, c),
+			connection.close(),
+			removeInternetQMAPMuxes(modem, connection.muxIDs...),
+		)
 	}
 	c.mu.Lock()
 	c.qmapConnections[modem.EquipmentIdentifier] = connection

@@ -122,7 +122,12 @@ func Run(cfg Config) error {
 		return fmt.Errorf("configure network preferences: %w", err)
 	}
 	enableDisabledPolicy := modemtask.EnableDisabledPolicy(networkprefs.SkipEnableDisabledInAirplaneMode(networkPreferences))
-	internetConnector, err := newInternetConnector(store, db, networkPreferences)
+	internetConnector, err := newInternetConnector(internetConnectorConfig{
+		settings:           store,
+		state:              db,
+		networkPreferences: networkPreferences,
+		registry:           registry,
+	})
 	if err != nil {
 		return fmt.Errorf("configure internet connector: %w", err)
 	}
@@ -165,23 +170,29 @@ func Run(cfg Config) error {
 		return fmt.Errorf("configure message relay: %w", err)
 	}
 	runtime := &Runtime{
-		Store:               store,
-		Registry:            registry,
-		InternetConnector:   internetConnector,
-		LPAClients:          lpaClients,
-		internetConnections: internetConnector,
-		Relay:               relay,
-		NetworkPreferences:  networkPreferences,
-		Storage:             db,
-		WebPush:             webPush,
-		Reminders:           reminderScheduler,
+		Store:                 store,
+		Registry:              registry,
+		InternetConnector:     internetConnector,
+		LPAClients:            lpaClients,
+		internetConnections:   internetConnector,
+		Relay:                 relay,
+		NetworkPreferences:    networkPreferences,
+		Storage:               db,
+		WebPush:               webPush,
+		Reminders:             reminderScheduler,
+		airplaneModeLifecycle: internetConnector,
 	}
 	if cfg.Configure != nil {
 		if err := cfg.Configure(runtime); err != nil {
 			return fmt.Errorf("configure extensions: %w", err)
 		}
 	}
-	networkHandler, err := hnetwork.New(registry, networkPreferences, db)
+	networkHandler, err := hnetwork.New(hnetwork.Config{
+		Registry:              registry,
+		Preferences:           networkPreferences,
+		Store:                 db,
+		AirplaneModeLifecycle: runtime.airplaneModeLifecycle,
+	})
 	if err != nil {
 		return fmt.Errorf("configure network handler: %w", err)
 	}
@@ -363,8 +374,15 @@ func applyLogLevel(debug bool) {
 	slog.SetLogLoggerLevel(slog.LevelInfo)
 }
 
-func newInternetConnector(store *settings.Store, db *storage.Store, networkPreferences *networkprefs.Store) (*internet.Connector, error) {
-	proxyConfig := store.ProxySettings()
+type internetConnectorConfig struct {
+	settings           *settings.Store
+	state              *storage.Store
+	networkPreferences *networkprefs.Store
+	registry           *modem.Registry
+}
+
+func newInternetConnector(cfg internetConnectorConfig) (*internet.Connector, error) {
+	proxyConfig := cfg.settings.ProxySettings()
 	proxy := internet.NewProxy(internet.ProxyConfig{
 		ListenAddress: proxyConfig.ListenAddress,
 		HTTPPort:      proxyConfig.HTTPPort,
@@ -373,8 +391,9 @@ func newInternetConnector(store *settings.Store, db *storage.Store, networkPrefe
 	})
 	return internet.NewConnector(internet.ConnectorConfig{
 		Proxy:              proxy,
-		State:              db,
-		NetworkPreferences: networkPreferences,
+		State:              cfg.state,
+		NetworkPreferences: cfg.networkPreferences,
+		Registry:           cfg.registry,
 	})
 }
 

@@ -17,6 +17,7 @@ import (
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	appvalidator "github.com/damonto/sigmo/internal/pkg/validator"
 	wwanmodem "github.com/damonto/wwan-go/modem"
+	"github.com/damonto/wwan-go/qcom"
 )
 
 type fakeModemFinder struct {
@@ -32,6 +33,15 @@ type voLTESettingsProbe struct {
 	settings VoLTESettings
 }
 
+type voLTEStatusReaderStub struct {
+	status VoLTEStatus
+	err    error
+}
+
+func (s voLTEStatusReaderStub) VoLTEStatus(context.Context, *mmodem.Modem) (VoLTEStatus, error) {
+	return s.status, s.err
+}
+
 func (p *voLTESettingsProbe) UpdateVoLTESettings(_ context.Context, _ *mmodem.Modem, settings VoLTESettings) error {
 	p.updated = true
 	p.settings = settings
@@ -43,6 +53,7 @@ type handlerConnectivityProbe struct {
 	wifiUpdated  bool
 	wifiSettings WiFiCallingSettings
 	volte        *voLTESettingsProbe
+	volteErr     error
 }
 
 func (p *handlerConnectivityProbe) ReplaceWiFiCallingSettings(_ context.Context, modem *mmodem.Modem, settings WiFiCallingSettings) error {
@@ -56,7 +67,68 @@ func (p *handlerConnectivityProbe) ReplaceWiFiCallingSettings(_ context.Context,
 }
 
 func (p *handlerConnectivityProbe) ReplaceVoLTESettings(ctx context.Context, modem *mmodem.Modem, settings VoLTESettings) error {
+	if p.volteErr != nil {
+		return p.volteErr
+	}
 	return updateVoLTESettings(ctx, modem, p.volte, settings)
+}
+
+func TestReadVoLTESettingsSkipsModemStatusInAirplaneMode(t *testing.T) {
+	previousOpen := openManagedVoLTEDevice
+	opened := false
+	openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+		opened = true
+		return &fakeManagedVoLTEDevice{}, nil
+	}
+	t.Cleanup(func() {
+		openManagedVoLTEDevice = previousOpen
+	})
+	modem := qmiTestModem("modem-1")
+	modem.Status.Power = wwanmodem.PowerStateLow
+	want := VoLTESettingsResponse{
+		Enabled:  true,
+		State:    StateDisconnected,
+		DataPath: DataPathQMAP,
+	}
+
+	got, err := ReadVoLTESettings(t.Context(), modem, voLTEStatusReaderStub{status: VoLTEStatus{
+		VoLTESettings: VoLTESettings{Enabled: true, DataPath: DataPathQMAP},
+		State:         StateDisconnected,
+	}})
+	if err != nil {
+		t.Fatalf("ReadVoLTESettings() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("ReadVoLTESettings() = %+v, want %+v", got, want)
+	}
+	if opened {
+		t.Fatal("ReadVoLTESettings() queried modem IMS status in airplane mode")
+	}
+}
+
+func TestReadVoLTEStatusTreatsInvalidOperationAsUnavailable(t *testing.T) {
+	previousOpen := openManagedVoLTEDevice
+	device := &fakeManagedVoLTEDevice{statusErr: qcom.QMIErrorInvalidOperation}
+	openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+		return device, nil
+	}
+	t.Cleanup(func() {
+		openManagedVoLTEDevice = previousOpen
+	})
+
+	got, err := readVoLTEStatus(t.Context(), qmiTestModem("modem-1"))
+	if err != nil {
+		t.Fatalf("readVoLTEStatus() error = %v", err)
+	}
+	if got != (wwan.VoLTEStatus{}) {
+		t.Fatalf("readVoLTEStatus() = %+v, want zero status", got)
+	}
+	if !slices.Equal(device.calls, []string{"status"}) {
+		t.Fatalf("device calls = %v, want [status]", device.calls)
+	}
+	if !device.closed {
+		t.Fatal("readVoLTEStatus() did not close device")
+	}
 }
 
 func TestUpdateWiFiCallingSettingsUnderlay(t *testing.T) {
@@ -248,6 +320,31 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 				t.Fatalf("device calls = %v, want %v", calls, tt.wantCalls)
 			}
 		})
+	}
+}
+
+func TestUpdateVoLTESettingsRejectsAirplaneMode(t *testing.T) {
+	modem := qmiTestModem("modem-1")
+	h := &Handler{
+		registry: fakeModemFinder{modem: modem},
+		connectivity: &handlerConnectivityProbe{
+			volteErr: ErrVoLTEAirplaneMode,
+		},
+	}
+	e := echo.New()
+	e.PUT("/modems/:id/volte/settings", h.UpdateVoLTESettings)
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/modems/modem-1/volte/settings",
+		strings.NewReader(`{"enabled":false,"dataPath":"qmap"}`),
+	)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusConflict, rec.Body.String())
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 
 	wwanmodem "github.com/damonto/wwan-go/modem"
 
+	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -49,14 +50,16 @@ type NetworkScanResponse struct {
 }
 
 type network struct {
-	preferences *networkprefs.Store
-	store       *storage.Store
-	scans       *scanTaskStore
+	preferences           *networkprefs.Store
+	store                 *storage.Store
+	scans                 *scanTaskStore
+	airplaneModeLifecycle appconnectivity.AirplaneModeLifecycle
+	setAirplaneMode       func(context.Context, *mmodem.Modem, bool) error
 }
 
 var errNetworkPreferencesRequired = errors.New("network preferences are required")
 
-func newNetwork(preferences *networkprefs.Store, store *storage.Store) (*network, error) {
+func newNetwork(preferences *networkprefs.Store, store *storage.Store, lifecycle appconnectivity.AirplaneModeLifecycle) (*network, error) {
 	if preferences == nil {
 		return nil, errNetworkPreferencesRequired
 	}
@@ -64,9 +67,13 @@ func newNetwork(preferences *networkprefs.Store, store *storage.Store) (*network
 		return nil, errNetworkRegistrationStorageRequired
 	}
 	return &network{
-		preferences: preferences,
-		store:       store,
-		scans:       newScanTaskStore(),
+		preferences:           preferences,
+		store:                 store,
+		scans:                 newScanTaskStore(),
+		airplaneModeLifecycle: lifecycle,
+		setAirplaneMode: func(ctx context.Context, modem *mmodem.Modem, enabled bool) error {
+			return modem.SetAirplaneMode(ctx, enabled)
+		},
 	}, nil
 }
 

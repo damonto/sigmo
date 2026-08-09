@@ -46,6 +46,7 @@ func (m *Modem) Enable(ctx context.Context) error {
 	if err := m.core.SetPowerState(ctx, wwanmodem.PowerStateOn); err != nil {
 		return err
 	}
+	m.applyPowerState(wwanmodem.PowerStateOn)
 	m.markNetworkStateChanged()
 	return nil
 }
@@ -68,6 +69,7 @@ func (m *Modem) Disable(ctx context.Context) error {
 	if err := m.core.SetPowerState(ctx, wwanmodem.PowerStateLow); err != nil {
 		return err
 	}
+	m.applyPowerState(wwanmodem.PowerStateLow)
 	m.markNetworkStateChanged()
 	return nil
 }
@@ -102,20 +104,12 @@ func (m *Modem) setPrimarySIMSlot(ctx context.Context, slot uint32) error {
 	return nil
 }
 
-func (m *Modem) SupportedModes(ctx context.Context) ([]wwanmodem.Mode, error) {
+func (m *Modem) Modes(ctx context.Context) ([]wwanmodem.Mode, wwanmodem.Mode, error) {
 	if m == nil || m.core == nil {
-		return nil, errModemRequired
+		return nil, wwanmodem.Mode{}, errModemRequired
 	}
-	modes, _, err := m.core.Modes(ctx)
-	return slices.Clone(modes), err
-}
-
-func (m *Modem) CurrentModes(ctx context.Context) (wwanmodem.Mode, error) {
-	if m == nil || m.core == nil {
-		return wwanmodem.Mode{}, errModemRequired
-	}
-	_, current, err := m.core.Modes(ctx)
-	return current, err
+	modes, current, err := m.core.Modes(ctx)
+	return slices.Clone(modes), current, err
 }
 
 func (m *Modem) SetCurrentModes(ctx context.Context, mode wwanmodem.Mode) error {
