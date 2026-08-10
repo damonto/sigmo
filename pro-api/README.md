@@ -106,9 +106,14 @@ Administrators can manage entitlements with:
 /grant <telegram_id> [max_devices] [expires_at]
 /revoke <telegram_id>
 /status <telegram_id>
+/entitlements
 /devices <telegram_id>
 /revoke_device <device_id>
 ```
+
+The optional `expires_at` argument uses `YYYY-MM-DD`. The Worker stores it as
+the end of that UTC day (`23:59:59.999Z`). Omit it for a permanent entitlement.
+`/entitlements` lists every currently active, unexpired Telegram entitlement.
 
 Users can run `/devices` and `/revoke_device <device_id>` for their own devices.
 

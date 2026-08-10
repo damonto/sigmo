@@ -442,7 +442,7 @@ describe("Telegram pairing", () => {
     const messages = mockTelegram();
     const admin = 1001;
     const telegramId = 3101;
-    const expiresAt = "2099-08-09T12:00:00Z";
+    const expiresAt = "2099-08-09";
 
     await activatePairing(
       { id: "unused" },
@@ -457,7 +457,7 @@ describe("Telegram pairing", () => {
     expect(granted).toMatchObject({
       status: "active",
       max_devices: 2,
-      expires_at: new Date(expiresAt).toISOString(),
+      expires_at: `${expiresAt}T23:59:59.999Z`,
     });
 
     await activatePairing({ id: "unused" }, admin, `/status ${telegramId}`);
@@ -472,24 +472,115 @@ describe("Telegram pairing", () => {
     expect(revoked?.status).toBe("revoked");
   });
 
-  it("rejects calendar-invalid administrator expiry timestamps", async () => {
+  it("lists only active unexpired entitlements for administrators", async () => {
+    await env.DB.prepare("UPDATE entitlements SET status = 'revoked'").run();
+    const activeId = 3151;
+    const expiringId = 3152;
+    const revokedId = 3153;
+    const expiredId = 3154;
+    await grant(activeId, 2);
+    await grant(expiringId, 4, "2099-12-31T23:59:59.999Z");
+    await grant(revokedId);
+    await grant(expiredId, 3, "2000-01-01T23:59:59.999Z");
+    const timestamp = new Date().toISOString();
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE entitlements SET display_name = ?, username = ? WHERE telegram_id = ?",
+      ).bind("Alice Admin", "alice", activeId),
+      env.DB.prepare(
+        "UPDATE entitlements SET status = 'revoked' WHERE telegram_id = ?",
+      ).bind(revokedId),
+      env.DB.prepare(
+        `INSERT INTO devices
+           (device_id, telegram_id, public_key, created_at, last_seen_at, revoked_at)
+         VALUES (?, ?, ?, ?, ?, NULL), (?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        "00000000000000000000000000003151",
+        activeId,
+        "public-key-1",
+        timestamp,
+        timestamp,
+        "00000000000000000000000000003152",
+        activeId,
+        "public-key-2",
+        timestamp,
+        timestamp,
+        timestamp,
+      ),
+    ]);
     const messages = mockTelegram();
-    const telegramId = 3199;
 
-    await activatePairing(
-      { id: "unused" },
-      1001,
-      `/grant ${telegramId} 3 2027-02-30T12:00:00Z`,
+    await activatePairing({ id: "unused" }, 1001, "/entitlements");
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].text).toContain("Active entitlements (2):");
+    expect(messages[0].text).toContain(
+      `${activeId} | Alice Admin @alice | devices 1/2 | expires never`,
     );
-
-    expect(messages.at(-1)?.text).toContain("Usage: /grant");
-    const entitlement = await env.DB.prepare(
-      "SELECT telegram_id FROM entitlements WHERE telegram_id = ?",
-    )
-      .bind(telegramId)
-      .first();
-    expect(entitlement).toBeNull();
+    expect(messages[0].text).toContain(
+      `${expiringId} | User ${expiringId} @user${expiringId} | devices 0/4 | expires 2099-12-31`,
+    );
+    expect(messages[0].text).not.toContain(String(revokedId));
+    expect(messages[0].text).not.toContain(String(expiredId));
   });
+
+  it("does not expose entitlement lists to regular users", async () => {
+    const entitlementId = 3161;
+    await grant(entitlementId);
+    const messages = mockTelegram();
+
+    await activatePairing({ id: "unused" }, 3162, "/entitlements");
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].text).toBe(
+      "Available commands: /devices, /revoke_device <device_id>",
+    );
+    expect(messages[0].text).not.toContain(String(entitlementId));
+  });
+
+  it("splits long entitlement lists into Telegram-sized messages", async () => {
+    await env.DB.prepare("UPDATE entitlements SET status = 'revoked'").run();
+    const telegramId = 3171;
+    await grant(telegramId);
+    await env.DB.prepare(
+      "UPDATE entitlements SET display_name = ? WHERE telegram_id = ?",
+    )
+      .bind("A".repeat(5_000), telegramId)
+      .run();
+    const messages = mockTelegram();
+
+    await activatePairing({ id: "unused" }, 1001, "/entitlements");
+
+    expect(messages.length).toBeGreaterThan(1);
+    expect(messages.every((message) => message.text.length <= 4_000)).toBe(
+      true,
+    );
+    expect(messages.some((message) => message.text.includes(String(telegramId)))).toBe(
+      true,
+    );
+  });
+
+  it.each(["2027-02-30", "2099-08-09T12:00:00Z", "2099-8-9"])(
+    "rejects invalid administrator expiry date %s",
+    async (expiresAt) => {
+      const messages = mockTelegram();
+      const telegramId = 3199;
+
+      await activatePairing(
+        { id: "unused" },
+        1001,
+        `/grant ${telegramId} 3 ${expiresAt}`,
+      );
+
+      expect(messages.at(-1)?.text).toContain("Usage: /grant");
+      const entitlement = await env.DB.prepare(
+        "SELECT telegram_id FROM entitlements WHERE telegram_id = ?",
+      )
+        .bind(telegramId)
+        .first();
+      expect(entitlement).toBeNull();
+    },
+  );
 });
 
 describe("device authorization", () => {

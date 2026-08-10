@@ -14,6 +14,15 @@ export type Device = {
   revokedAt: string | null;
 };
 
+export type ActiveEntitlement = {
+  telegramId: number;
+  expiresAt: string | null;
+  maxDevices: number;
+  displayName: string;
+  username: string;
+  activeDevices: number;
+};
+
 type Pairing = {
   pollTokenHash: string;
   deviceId: string;
@@ -166,6 +175,31 @@ export class Database {
       )
       .bind(telegramId)
       .first<Entitlement>();
+  }
+
+  async listActiveEntitlements(timestamp: string): Promise<ActiveEntitlement[]> {
+    const result = await this.session
+      .prepare(
+        `SELECT
+           entitlement.telegram_id AS telegramId,
+           entitlement.expires_at AS expiresAt,
+           entitlement.max_devices AS maxDevices,
+           entitlement.display_name AS displayName,
+           entitlement.username,
+           (
+             SELECT COUNT(*)
+             FROM devices
+             WHERE devices.telegram_id = entitlement.telegram_id
+               AND devices.revoked_at IS NULL
+           ) AS activeDevices
+         FROM entitlements AS entitlement
+         WHERE entitlement.status = 'active'
+           AND (entitlement.expires_at IS NULL OR entitlement.expires_at > ?)
+         ORDER BY entitlement.telegram_id ASC`,
+      )
+      .bind(timestamp)
+      .all<ActiveEntitlement>();
+    return result.results;
   }
 
   async findDevice(deviceId: string): Promise<Device | null> {

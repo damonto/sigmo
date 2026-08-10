@@ -29,6 +29,15 @@ function positiveInteger(value: string | undefined): number | undefined {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+const grantUsage =
+  "Usage: /grant <telegram_id> [max_devices] [expires_at]\nexpires_at must use YYYY-MM-DD.";
+
+function parseExpiryEndOfDayUTC(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const timestamp = `${value}T23:59:59.999Z`;
+  return isRFC3339(timestamp) ? new Date(timestamp) : null;
+}
+
 async function activatePairing(
   context: RequestContext,
   pairingID: string,
@@ -83,21 +92,20 @@ async function grantCommand(
   context: RequestContext,
   args: string[],
 ): Promise<string> {
-  if (args.length < 1 || args.length > 3)
-    return "Usage: /grant <telegram_id> [max_devices] [expires_at]";
+  if (args.length < 1 || args.length > 3) return grantUsage;
   const telegramID = positiveInteger(args[0]);
   const maxDevices = args[1] === undefined ? 3 : positiveInteger(args[1]);
   const expiresAtValue = args[2];
-  const expiresAt = expiresAtValue ? new Date(expiresAtValue) : null;
+  const expiresAt = expiresAtValue
+    ? parseExpiryEndOfDayUTC(expiresAtValue)
+    : null;
   if (
     telegramID === undefined ||
     maxDevices === undefined ||
     (expiresAtValue !== undefined &&
-      (!isRFC3339(expiresAtValue) ||
-        !expiresAt ||
-        expiresAt.getTime() <= Date.now()))
+      (!expiresAt || expiresAt.getTime() <= Date.now()))
   ) {
-    return "Usage: /grant <telegram_id> [max_devices] [expires_at]";
+    return grantUsage;
   }
   const timestamp = nowISO();
   await context.db.upsertEntitlement({
@@ -132,6 +140,29 @@ async function statusCommand(
   return row
     ? `${row.telegramId}: ${row.status}, up to ${row.maxDevices} devices, expires: ${row.expiresAt ?? "never"}`
     : "No entitlement found.";
+}
+
+function singleLine(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+async function entitlementsCommand(
+  context: RequestContext,
+  args: string[],
+): Promise<string> {
+  if (args.length !== 0) return "Usage: /entitlements";
+  const rows = await context.db.listActiveEntitlements(nowISO());
+  if (!rows.length) return "No active entitlements.";
+  const lines = rows.map((row) => {
+    const displayName = singleLine(row.displayName);
+    const username = singleLine(row.username);
+    const identity =
+      [displayName, username ? `@${username}` : ""].filter(Boolean).join(" ") ||
+      "not paired";
+    const expiresAt = row.expiresAt?.slice(0, 10) ?? "never";
+    return `${row.telegramId} | ${identity} | devices ${row.activeDevices}/${row.maxDevices} | expires ${expiresAt}`;
+  });
+  return [`Active entitlements (${rows.length}):`, ...lines].join("\n");
 }
 
 async function devicesCommand(
@@ -188,14 +219,35 @@ async function botCommand(
     case "/status":
       if (isAdmin) return statusCommand(context, args);
       break;
+    case "/entitlements":
+      if (isAdmin) return entitlementsCommand(context, args);
+      break;
     case "/devices":
       return devicesCommand(context, user, isAdmin, args);
     case "/revoke_device":
       return revokeDeviceCommand(context, user, isAdmin, args);
   }
   return isAdmin
-    ? "Available commands: /grant, /revoke, /status, /devices, /revoke_device"
+    ? "Available commands: /grant, /revoke, /status, /entitlements, /devices, /revoke_device"
     : "Available commands: /devices, /revoke_device <device_id>";
+}
+
+// Telegram accepts up to 4096 characters. Counting UTF-16 code units and
+// stopping at 4000 keeps messages conservative for non-BMP characters.
+const telegramMessageLimit = 4000;
+
+function splitTelegramText(text: string): string[] {
+  const messages: string[] = [];
+  let remaining = text;
+  while (remaining.length > telegramMessageLimit) {
+    let end = remaining.lastIndexOf("\n", telegramMessageLimit);
+    if (end <= 0) end = telegramMessageLimit;
+    messages.push(remaining.slice(0, end));
+    remaining = remaining.slice(end);
+    if (remaining.startsWith("\n")) remaining = remaining.slice(1);
+  }
+  if (remaining || messages.length === 0) messages.push(remaining);
+  return messages;
 }
 
 async function sendTelegram(
@@ -203,16 +255,18 @@ async function sendTelegram(
   chatID: number,
   text: string,
 ): Promise<void> {
-  const response = await fetch(
-    `https://api.telegram.org/bot${env.SIGMO_TELEGRAM_BOT_TOKEN}/sendMessage`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: chatID, text }),
-    },
-  );
-  if (!response.ok)
-    throw new Error(`Telegram sendMessage returned HTTP ${response.status}`);
+  for (const message of splitTelegramText(text)) {
+    const response = await fetch(
+      `https://api.telegram.org/bot${env.SIGMO_TELEGRAM_BOT_TOKEN}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: chatID, text: message }),
+      },
+    );
+    if (!response.ok)
+      throw new Error(`Telegram sendMessage returned HTTP ${response.status}`);
+  }
 }
 
 export async function telegramWebhook(
