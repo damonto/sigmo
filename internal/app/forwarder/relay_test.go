@@ -269,6 +269,27 @@ func TestFreshIncomingMessage(t *testing.T) {
 	}
 }
 
+func TestModemSMSReady(t *testing.T) {
+	tests := []struct {
+		name  string
+		modem *modem.Modem
+		want  bool
+	}{
+		{name: "ready", modem: &modem.Modem{Status: wwanmodem.Status{SIM: wwanmodem.SIMStateReady}}, want: true},
+		{name: "PIN locked", modem: &modem.Modem{Status: wwanmodem.Status{SIM: wwanmodem.SIMStateLocked}}},
+		{name: "unknown", modem: new(modem.Modem)},
+		{name: "missing modem"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := modemSMSReady(tt.modem); got != tt.want {
+				t.Fatalf("modemSMSReady() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestForwardStoredModemSMSStoresCleansAndNotifies(t *testing.T) {
 	now := time.Now()
 	tests := []struct {

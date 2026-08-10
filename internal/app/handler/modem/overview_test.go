@@ -164,6 +164,7 @@ func TestCatalogBuildResponseLockedModem(t *testing.T) {
 				Manufacturer:        "Quectel",
 				Model:               "RM520N",
 				Status:              wwanmodem.Status{Power: wwanmodem.PowerStateOn, SIM: wwanmodem.SIMStateLocked},
+				Sim:                 &mmodem.SIM{Slot: 1, Active: true, ATR: []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}},
 			}
 
 			got, err := catalog.buildResponse(context.Background(), device)
@@ -181,6 +182,9 @@ func TestCatalogBuildResponseLockedModem(t *testing.T) {
 			}
 			if got.PrimaryPort != device.PrimaryPort {
 				t.Fatalf("primary port = %q, want %q", got.PrimaryPort, device.PrimaryPort)
+			}
+			if got.SIMKind != mmodem.SIMKindEUICC {
+				t.Fatalf("SIM kind = %q, want %q", got.SIMKind, mmodem.SIMKindEUICC)
 			}
 		})
 	}

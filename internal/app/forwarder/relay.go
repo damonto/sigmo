@@ -191,6 +191,12 @@ func (r *Relay) addModem(ctx context.Context, path string, m *modem.Modem) {
 
 func (r *Relay) runModemSubscription(ctx context.Context, m *modem.Modem) {
 	for ctx.Err() == nil {
+		if !modemSMSReady(m) {
+			if err := sleepRelayContext(ctx, modemSubscriptionRetryDelay); err != nil {
+				return
+			}
+			continue
+		}
 		err := m.Messaging().Subscribe(ctx, func(message *modem.SMS) error {
 			if !incomingModemSMS(message) {
 				return nil
@@ -205,6 +211,10 @@ func (r *Relay) runModemSubscription(ctx context.Context, m *modem.Modem) {
 			return
 		}
 	}
+}
+
+func modemSMSReady(m *modem.Modem) bool {
+	return m != nil && m.Snapshot().Status.SIM == wwanmodem.SIMStateReady
 }
 
 func incomingModemSMS(message *modem.SMS) bool {
