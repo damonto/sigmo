@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@lucide/vue": "^1.25.0",
-    "@tailwindcss/vite": "^4.3.2",
+    "@tailwindcss/vite": "^4.3.3",
     "@vee-validate/zod": "^4.15.1",
     "@vueuse/core": "^14.4.0",
     "class-variance-authority": "^0.7.1",
