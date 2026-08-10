@@ -218,6 +218,9 @@ func TestEnableSessionEnable(t *testing.T) {
 					if !target.RequireEUICC {
 						t.Fatal("RequireEUICC = false, want true")
 					}
+					if !target.AllowLocked {
+						t.Fatal("AllowLocked = false, want true")
+					}
 					if tt.ensureErr != nil {
 						return nil, tt.ensureErr
 					}

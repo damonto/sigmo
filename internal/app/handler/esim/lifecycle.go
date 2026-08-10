@@ -140,6 +140,7 @@ func (s *enableSession) finish(ctx context.Context) error {
 		ICCID:         s.iccid.String(),
 		PreviousICCID: s.previousICCID,
 		RequireEUICC:  true,
+		AllowLocked:   true,
 	})
 	if err != nil {
 		return fmt.Errorf("wait for modem readiness: %w", err)

@@ -26,6 +26,7 @@ type SIMTarget struct {
 	RequireActiveSlot bool
 	RequireClassified bool
 	RequireEUICC      bool
+	AllowLocked       bool
 }
 
 type simRefreshResult struct {
@@ -204,7 +205,7 @@ func (r *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 	active := current
 	reloadObserved := false
 	for {
-		read, err := r.readCurrentModem(ctx, active, target)
+		read, err := r.readCurrentModemWithReload(ctx, active, target, reloadObserved)
 		if read.Modem != nil {
 			active = read.Modem
 		}
@@ -227,7 +228,7 @@ func (r *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 			if err := sleepContext(ctx, simSettleDelay); err != nil {
 				return simRefreshResult{}, err
 			}
-			read, err = r.readCurrentModem(ctx, active, target)
+			read, err = r.readCurrentModemWithReload(ctx, active, target, reloadObserved)
 			if read.Modem != nil {
 				active = read.Modem
 			}
@@ -296,13 +297,21 @@ func (r *Registry) deviceOpener() deviceControlOpener {
 }
 
 func (r *Registry) readCurrentModem(ctx context.Context, current *Modem, target SIMTarget) (currentModemRead, error) {
+	return r.readCurrentModemWithReload(ctx, current, target, false)
+}
+
+func (r *Registry) readCurrentModemWithReload(ctx context.Context, current *Modem, target SIMTarget, reloadObserved bool) (currentModemRead, error) {
 	modem, err := r.findModem(current.EquipmentIdentifier)
 	if err != nil {
 		return currentModemRead{Modem: current, ReloadObserved: true}, err
 	}
 	reloaded := modem.Generation() != current.Generation() || modem.Path() != current.Path()
-	if activeSIMTargetReady(modem, target) {
-		return r.confirmCurrentReadyModem(currentModemRead{Modem: modem, SIMVisible: true, ReloadObserved: reloaded})
+	observedReload := reloadObserved || reloaded
+	// A PIN-locked profile can hide its ICCID and active slot. Accept that
+	// state only after the registry has observed the modem generation created
+	// by the profile refresh, never from the generation that issued the switch.
+	if activeSIMTargetReady(modem, target) || (observedReload && lockedSIMTargetReady(modem, target)) {
+		return r.confirmCurrentReadyModem(currentModemRead{Modem: modem, SIMVisible: true, ReloadObserved: observedReload})
 	}
 	if target.RequireActiveSlot {
 		if shouldRefreshSIMClassification(modem, target) {
@@ -310,21 +319,23 @@ func (r *Registry) readCurrentModem(ctx context.Context, current *Modem, target 
 			_, refreshErr := modem.SIMs().Primary(probeCtx)
 			cancel()
 			if refreshErr != nil {
-				return currentModemRead{Modem: modem, ReloadObserved: reloaded}, fmt.Errorf("refresh active SIM metadata: %w", refreshErr)
+				return currentModemRead{Modem: modem, ReloadObserved: observedReload}, fmt.Errorf("refresh active SIM metadata: %w", refreshErr)
 			}
 		}
 		return r.confirmCurrentReadyModem(currentModemRead{
 			Modem:          modem,
 			SIMVisible:     activeSIMTargetReady(modem, target),
-			ReloadObserved: reloaded,
+			ReloadObserved: observedReload,
 		})
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, simProbeTimeout)
 	defer cancel()
 	read, err := r.readCurrentSIM(probeCtx, modem, target, reloaded)
 	if err != nil {
+		read.ReloadObserved = observedReload
 		return read, err
 	}
+	read.ReloadObserved = observedReload
 	return r.confirmCurrentReadyModem(read)
 }
 
@@ -365,7 +376,8 @@ func activeSIMTargetIdentityReady(modem *Modem, target SIMTarget) bool {
 	if (target.Slot != 0 && snapshot.PrimarySIMSlot != target.Slot) || snapshot.SIM == nil {
 		return false
 	}
-	if snapshot.Status.SIM != wwanmodem.SIMStateReady {
+	if snapshot.Status.SIM != wwanmodem.SIMStateReady &&
+		(!target.AllowLocked || snapshot.Status.SIM != wwanmodem.SIMStateLocked) {
 		return false
 	}
 	identifier := strings.TrimSpace(snapshot.SIM.Identifier)
@@ -377,6 +389,22 @@ func activeSIMTargetIdentityReady(modem *Modem, target SIMTarget) bool {
 		return false
 	}
 	return true
+}
+
+func lockedSIMTargetReady(modem *Modem, target SIMTarget) bool {
+	if modem == nil || !target.AllowLocked || strings.TrimSpace(target.ICCID) == "" {
+		return false
+	}
+	snapshot := modem.Snapshot()
+	if snapshot.Status.SIM != wwanmodem.SIMStateLocked || snapshot.SIM == nil ||
+		strings.TrimSpace(snapshot.SIM.Identifier) != "" {
+		return false
+	}
+	kind := snapshot.SIMKind()
+	if target.RequireEUICC {
+		return kind == SIMKindEUICC
+	}
+	return !target.RequireClassified || kind != SIMKindUnknown
 }
 
 func shouldRefreshSIMClassification(modem *Modem, target SIMTarget) bool {

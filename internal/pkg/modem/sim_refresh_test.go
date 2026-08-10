@@ -420,6 +420,130 @@ func TestReadCurrentModemUsesReadyEUICCSnapshotWithoutSlotTarget(t *testing.T) {
 	}
 }
 
+func TestActiveSIMTargetReadyAllowsLockedSIMWhenConfigured(t *testing.T) {
+	const iccid = "8901000000000000002"
+	modem := simRefreshTestModem("/sys/devices/modem-1", 1, true)
+	modem.applySIMInfo(wwanmodem.SIMInfo{
+		Slot:  1,
+		State: wwanmodem.SIMStateReady,
+		ICCID: iccid,
+		ATR:   []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
+	})
+
+	tests := []struct {
+		name        string
+		state       wwanmodem.SIMState
+		identifier  string
+		allowLocked bool
+		want        bool
+	}{
+		{name: "ready", state: wwanmodem.SIMStateReady, identifier: iccid, want: true},
+		{name: "locked by default", state: wwanmodem.SIMStateLocked, identifier: iccid},
+		{name: "locked when allowed", state: wwanmodem.SIMStateLocked, identifier: iccid, allowLocked: true, want: true},
+		{name: "locked without identity when allowed", state: wwanmodem.SIMStateLocked, allowLocked: true},
+		{name: "ready without identity", state: wwanmodem.SIMStateReady, allowLocked: true},
+		{name: "unknown when locked is allowed", state: wwanmodem.SIMStateUnknown, identifier: iccid, allowLocked: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			modem.runtimeMu.Lock()
+			modem.Status.SIM = tt.state
+			modem.Sim.Identifier = tt.identifier
+			modem.runtimeMu.Unlock()
+
+			target := SIMTarget{ICCID: iccid, RequireEUICC: true, AllowLocked: tt.allowLocked}
+			if got := activeSIMTargetReady(modem, target); got != tt.want {
+				t.Fatalf("activeSIMTargetReady() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReadCurrentModemAcceptsLockedEUICCAfterReload(t *testing.T) {
+	const path = "/sys/devices/modem-1"
+	current := simRefreshTestModem(path, 1, true)
+	replacement := simRefreshTestModem(path, 2, false)
+	replacement.applySIMInfo(wwanmodem.SIMInfo{
+		State: wwanmodem.SIMStateLocked,
+		ATR:   []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
+	})
+	registry := &Registry{modems: map[string]*Modem{path: replacement}, started: true}
+	registry.openDevice = func(devicewwan.Config) (deviceControl, error) {
+		t.Fatal("locked replacement generation opened a device probe")
+		return nil, nil
+	}
+
+	read, err := registry.readCurrentModem(t.Context(), current, SIMTarget{
+		ICCID:        "8901000000000000002",
+		RequireEUICC: true,
+		AllowLocked:  true,
+	})
+	if err != nil {
+		t.Fatalf("readCurrentModem() error = %v", err)
+	}
+	if !read.SIMVisible || !read.ReloadObserved || read.Modem != replacement {
+		t.Fatalf("readCurrentModem() = %+v, want visible replacement generation", read)
+	}
+}
+
+func TestReadCurrentModemRejectsLockedEUICCBeforeReload(t *testing.T) {
+	const path = "/sys/devices/modem-1"
+	current := simRefreshTestModem(path, 1, false)
+	current.applySIMInfo(wwanmodem.SIMInfo{
+		State: wwanmodem.SIMStateLocked,
+		ATR:   []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
+	})
+	registry := &Registry{modems: map[string]*Modem{path: current}, started: true}
+	device := &fakeDeviceControl{state: devicewwan.SIMState{Supported: true}}
+	registry.openDevice = fakeDeviceOpener(t, device, nil)
+
+	read, err := registry.readCurrentModem(t.Context(), current, SIMTarget{
+		ICCID:        "8901000000000000002",
+		RequireEUICC: true,
+		AllowLocked:  true,
+	})
+	if err != nil {
+		t.Fatalf("readCurrentModem() error = %v", err)
+	}
+	if read.SIMVisible || read.ReloadObserved || read.Modem != current {
+		t.Fatalf("readCurrentModem() = %+v, want hidden current generation", read)
+	}
+	if !slices.Equal(device.calls, []string{"sim-state"}) {
+		t.Fatalf("device calls = %v, want SIM state probe", device.calls)
+	}
+}
+
+func TestEnsureSIMVisibleAcceptsLockedEUICCAfterReloadSettles(t *testing.T) {
+	restoreSIMRefreshTiming(t, 0, time.Millisecond)
+	const path = "/sys/devices/modem-1"
+	const iccid = "8901000000000000002"
+	current := simRefreshTestModem(path, 1, false)
+	replacement := simRefreshTestModem(path, 2, false)
+	registry := &Registry{modems: map[string]*Modem{path: replacement}, started: true}
+	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{}}
+	device.onActivate = func() {
+		replacement.applySIMInfo(wwanmodem.SIMInfo{
+			State: wwanmodem.SIMStateLocked,
+			ATR:   []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
+		})
+	}
+	registry.openDevice = fakeDeviceOpener(t, device, nil)
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	result, err := registry.ensureSIMVisible(ctx, current, SIMTarget{
+		ICCID:        iccid,
+		RequireEUICC: true,
+		AllowLocked:  true,
+	})
+	if err != nil {
+		t.Fatalf("ensureSIMVisible() error = %v", err)
+	}
+	if result.Modem != replacement || !result.ReloadObserved {
+		t.Fatalf("result = %+v, want settled replacement generation", result)
+	}
+}
+
 func TestEnsureSIMVisibleWaitsForReadyActiveSIMSnapshot(t *testing.T) {
 	restoreSIMRefreshTiming(t, 0, time.Millisecond)
 	const path = "/sys/devices/modem-1"
