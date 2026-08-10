@@ -1,0 +1,22 @@
+{
+  "name": "sigmo-pro-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate:production": "wrangler d1 migrations apply sigmo-licenses --remote",
+    "deploy:production": "bun run migrate:production && bun run deploy",
+    "test": "vitest run",
+    "types": "wrangler types",
+    "type-check": "wrangler types --check && tsc --noEmit",
+    "dry-run": "wrangler deploy --dry-run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.20.3",
+    "@types/node": "^26.2.0",
+    "typescript": "~7.0.2",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.120.0"
+  }
+}

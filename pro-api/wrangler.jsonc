@@ -1,0 +1,45 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "sigmo-pro-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "BOT_USERNAME": "SigmoProBot",
+  },
+  "secrets": {
+    "required": [
+      "SIGMO_TELEGRAM_BOT_TOKEN",
+      "SIGMO_TELEGRAM_WEBHOOK_SECRET",
+      "SIGMO_LICENSE_PRIVATE_KEY",
+      "SIGMO_LICENSE_PUBLIC_KEY",
+      "SIGMO_DOWNLOAD_TICKET_SECRET",
+      "SIGMO_ADMIN_TELEGRAM_IDS",
+    ],
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sigmo-licenses",
+      "database_id": "70a27cc7-3fa8-4b24-a194-1914ce85b6a9",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "bucket_name": "sigmo-pro-updates",
+      "binding": "sigmo_pro_updates",
+    },
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.01,
+    },
+  },
+}
