@@ -148,11 +148,13 @@ func TestStorePersistsSettings(t *testing.T) {
 			Password:      "secret",
 		}
 		current.MCP.Enabled = true
-		current.Updates = Updates{Automatic: true, Channel: UpdateChannelDev}
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("Update() error = %v", err)
+	}
+	if _, err := store.SetUpdateSettings(ctx, Updates{Automatic: true, Channel: UpdateChannelDev}); err != nil {
+		t.Fatalf("SetUpdateSettings() error = %v", err)
 	}
 	if err := store.UpdateModem(ctx, "modem-1", Modem{Alias: "Office", MSS: 128}); err != nil {
 		t.Fatalf("UpdateModem() error = %v", err)
@@ -215,6 +217,45 @@ func TestStoreDefaultsEmptyDatabase(t *testing.T) {
 	}
 	if got.Updates.Automatic || got.Updates.Channel != UpdateChannelStable {
 		t.Fatalf("Updates = %#v, want stable with automatic disabled", got.Updates)
+	}
+	if _, configured := store.UpdateSettings(); configured {
+		t.Fatal("UpdateSettings() configured = true, want false")
+	}
+}
+
+func TestStorePersistsExplicitUpdateSettings(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestStore(t)
+	store, err := NewStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	if _, err := store.Update(ctx, func(current *Settings) error {
+		current.MCP.Enabled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	reloaded, err := NewStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewStore() after unrelated update error = %v", err)
+	}
+	if _, configured := reloaded.UpdateSettings(); configured {
+		t.Fatal("UpdateSettings() configured after unrelated update = true, want false")
+	}
+
+	if _, err := reloaded.SetUpdateSettings(ctx, Updates{Channel: UpdateChannelStable}); err != nil {
+		t.Fatalf("SetUpdateSettings() error = %v", err)
+	}
+	configured, err := NewStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewStore() after update settings error = %v", err)
+	}
+	if _, ok := configured.UpdateSettings(); !ok {
+		t.Fatal("UpdateSettings() configured = false, want true")
 	}
 }
 

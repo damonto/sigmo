@@ -2,7 +2,9 @@
 import { ExternalLink, RefreshCw, ShieldCheck } from 'lucide-vue-next'
 import { onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 
+import { useAppApi } from '@/apis/app'
 import { useLicenseApi } from '@/apis/license'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
@@ -11,6 +13,8 @@ import { useLicenseStore } from '@/stores/license'
 import type { LicensePairing } from '@/types/license'
 
 const { t } = useI18n()
+const router = useRouter()
+const appApi = useAppApi()
 const api = useLicenseApi()
 const licenseStore = useLicenseStore()
 const pairing = ref<LicensePairing>()
@@ -24,6 +28,26 @@ const stopPolling = () => {
   timer = undefined
 }
 
+const enterAppIfReady = async () => {
+  try {
+    if (!(await appApi.ready())) return false
+    const authorized = await licenseStore.check(true)
+    if (!active || !authorized) return false
+    stopPolling()
+    await router.replace({ name: 'home' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+const waitForApp = async () => {
+  timer = undefined
+  if (!active) return
+  if (await enterAppIfReady()) return
+  if (active) timer = window.setTimeout(waitForApp, 1000)
+}
+
 const poll = async () => {
   timer = undefined
   if (!active || !pairing.value || pairing.value.status !== 'pending') return
@@ -32,20 +56,15 @@ const poll = async () => {
     if (!active) return
     pairing.value = next
     if (pairing.value.status === 'active') {
-      timer = window.setTimeout(() => window.location.assign('/'), 1500)
+      void waitForApp()
       return
     }
     if (pairing.value.status === 'expired') return
   } catch (error) {
     // Activation restarts the process. If the polling response was lost, the
     // status resource on the new process is the source of truth.
-    const authorized = await licenseStore.check(true)
     if (!active) return
-    if (authorized) {
-      stopPolling()
-      window.location.assign('/')
-      return
-    }
+    if (await enterAppIfReady()) return
     const code =
       error && typeof error === 'object' && 'error_code' in error ? String(error.error_code) : ''
     if (code === 'license_pairing_expired' || code === 'license_pairing_not_found') {

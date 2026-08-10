@@ -25,27 +25,29 @@ const (
 var errStorageRequired = errors.New("settings storage is required")
 
 type Store struct {
-	mu      sync.RWMutex
-	db      *storage.Store
-	current Settings
-	memory  bool
+	mu                sync.RWMutex
+	db                *storage.Store
+	current           Settings
+	memory            bool
+	updatesConfigured bool
 }
 
 func NewStore(ctx context.Context, db *storage.Store) (*Store, error) {
 	if db == nil {
 		return nil, errStorageRequired
 	}
-	current, err := load(ctx, db)
+	current, updatesConfigured, err := load(ctx, db)
 	if err != nil {
 		return nil, err
 	}
-	return &Store{db: db, current: current}, nil
+	return &Store{db: db, current: current, updatesConfigured: updatesConfigured}, nil
 }
 
 func NewMemoryStore(current *Settings) *Store {
 	clone := current.Clone()
+	updatesConfigured := clone.Updates.Channel != ""
 	clone.ApplyDefaults()
-	return &Store{current: clone, memory: true}
+	return &Store{current: clone, memory: true, updatesConfigured: updatesConfigured}
 }
 
 func (s *Store) Snapshot() Settings {
@@ -84,10 +86,10 @@ func (s *Store) MCPSettings() MCP {
 	return s.current.MCP
 }
 
-func (s *Store) UpdateSettings() Updates {
+func (s *Store) UpdateSettings() (Updates, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.current.Updates
+	return s.current.Updates, s.updatesConfigured
 }
 
 func (s *Store) Update(ctx context.Context, update func(*Settings) error) (Settings, error) {
@@ -99,10 +101,25 @@ func (s *Store) Update(ctx context.Context, update func(*Settings) error) (Setti
 		return Settings{}, err
 	}
 	next.ApplyDefaults()
-	if err := s.save(ctx, next); err != nil {
+	if err := s.save(ctx, next, s.updatesConfigured); err != nil {
 		return Settings{}, err
 	}
 	s.current = next.Clone()
+	return s.current.Clone(), nil
+}
+
+func (s *Store) SetUpdateSettings(ctx context.Context, updates Updates) (Settings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	next := s.current.Clone()
+	next.Updates = updates
+	next.ApplyDefaults()
+	if err := s.save(ctx, next, true); err != nil {
+		return Settings{}, err
+	}
+	s.current = next.Clone()
+	s.updatesConfigured = true
 	return s.current.Clone(), nil
 }
 
@@ -122,51 +139,53 @@ func (s *Store) UpdateModem(ctx context.Context, id string, modem Modem) error {
 	return nil
 }
 
-func load(ctx context.Context, db *storage.Store) (Settings, error) {
+func load(ctx context.Context, db *storage.Store) (Settings, bool, error) {
 	current := Default().Clone()
 
 	var auth Auth
 	if ok, err := get(ctx, db, globalScopeKey, authSettingsKey, &auth); err != nil {
-		return Settings{}, err
+		return Settings{}, false, err
 	} else if ok {
 		current.Auth = auth
 	}
 
 	var channels map[string]Channel
 	if ok, err := get(ctx, db, globalScopeKey, channelSettingsKey, &channels); err != nil {
-		return Settings{}, err
+		return Settings{}, false, err
 	} else if ok {
 		current.Channels = channels
 	}
 
 	var proxy Proxy
 	if ok, err := get(ctx, db, globalScopeKey, proxySettingsKey, &proxy); err != nil {
-		return Settings{}, err
+		return Settings{}, false, err
 	} else if ok {
 		current.Proxy = &proxy
 	}
 
 	var mcp MCP
 	if ok, err := get(ctx, db, globalScopeKey, mcpSettingsKey, &mcp); err != nil {
-		return Settings{}, err
+		return Settings{}, false, err
 	} else if ok {
 		current.MCP = mcp
 	}
 
 	var updates Updates
-	if ok, err := get(ctx, db, globalScopeKey, updateSettingsKey, &updates); err != nil {
-		return Settings{}, err
-	} else if ok {
+	updatesConfigured, err := get(ctx, db, globalScopeKey, updateSettingsKey, &updates)
+	if err != nil {
+		return Settings{}, false, err
+	}
+	if updatesConfigured {
 		current.Updates = updates
 	}
 
 	modems, err := loadModems(ctx, db)
 	if err != nil {
-		return Settings{}, err
+		return Settings{}, false, err
 	}
 	current.Modems = modems
 	current.ApplyDefaults()
-	return current, nil
+	return current, updatesConfigured, nil
 }
 
 func loadModems(ctx context.Context, db *storage.Store) (map[string]Modem, error) {
@@ -189,7 +208,7 @@ func loadModems(ctx context.Context, db *storage.Store) (map[string]Modem, error
 	return modems, nil
 }
 
-func (s *Store) save(ctx context.Context, current Settings) error {
+func (s *Store) save(ctx context.Context, current Settings, updatesConfigured bool) error {
 	if s.memory {
 		return nil
 	}
@@ -205,8 +224,10 @@ func (s *Store) save(ctx context.Context, current Settings) error {
 	if err := s.db.Put(ctx, globalScopeKey, mcpSettingsKey, current.MCP); err != nil {
 		return err
 	}
-	if err := s.db.Put(ctx, globalScopeKey, updateSettingsKey, current.Updates); err != nil {
-		return err
+	if updatesConfigured {
+		if err := s.db.Put(ctx, globalScopeKey, updateSettingsKey, current.Updates); err != nil {
+			return err
+		}
 	}
 	return s.db.Put(ctx, globalScopeKey, proxySettingsKey, current.ProxySettings())
 }

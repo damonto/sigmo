@@ -108,6 +108,48 @@ func TestControllerForcesStoredCommunityChannelToStable(t *testing.T) {
 	}
 }
 
+func TestControllerDefaultsUpdateChannelToCurrentBuild(t *testing.T) {
+	source := &fakeSource{release: Release{Manifest: Manifest{
+		Channel: settings.UpdateChannelDev,
+		Version: "dev-22222222",
+		Commit:  "2222222222222222222222222222222222222222",
+	}}}
+	controller, err := NewController(ControllerConfig{
+		Build: buildinfo.Info{
+			Edition:          buildinfo.EditionPro,
+			Channel:          buildinfo.ChannelStable,
+			Version:          "dev-11111111",
+			Commit:           "1111111111111111111111111111111111111111",
+			Target:           "linux-amd64",
+			Distribution:     buildinfo.DistributionStandalone,
+			ReleasePublicKey: "key",
+		},
+		Settings:   settings.NewMemoryStore(&settings.Settings{}),
+		Source:     source,
+		Executable: "/tmp/sigmo-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := controller.Snapshot().Settings.Channel; got != settings.UpdateChannelDev {
+		t.Fatalf("Snapshot().Settings.Channel = %q, want dev", got)
+	}
+	if err := controller.Check(t.Context()); err != nil {
+		t.Fatalf("Check() error = %v", err)
+	}
+	if source.channel != settings.UpdateChannelDev {
+		t.Fatalf("Latest() channel = %q, want dev", source.channel)
+	}
+
+	snapshot, err := controller.UpdateSettings(t.Context(), settings.Updates{Channel: settings.UpdateChannelStable})
+	if err != nil {
+		t.Fatalf("UpdateSettings() error = %v", err)
+	}
+	if snapshot.Settings.Channel != settings.UpdateChannelStable {
+		t.Fatalf("Snapshot().Settings.Channel = %q, want explicit stable", snapshot.Settings.Channel)
+	}
+}
+
 func TestControllerSerializesChecks(t *testing.T) {
 	source := &fakeSource{started: make(chan struct{}), unblock: make(chan struct{})}
 	controller, err := NewController(ControllerConfig{
@@ -206,7 +248,8 @@ func TestControllerPersistsAutomaticOffWithoutReleaseKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateSettings() error = %v", err)
 	}
-	if snapshot.Settings.Automatic || controller.settings.UpdateSettings().Automatic {
+	stored, _ := controller.settings.UpdateSettings()
+	if snapshot.Settings.Automatic || stored.Automatic {
 		t.Fatalf("automatic setting was not forced off: %+v", snapshot.Settings)
 	}
 }

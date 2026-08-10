@@ -119,6 +119,7 @@ const en = {
       notChecked: 'Not checked',
       available: 'Update available',
       current: 'Up to date',
+      upToDate: 'You are already running the latest version.',
       checkNow: 'Check now',
       installNow: 'Update now',
       saved: 'Update settings saved.',

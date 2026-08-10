@@ -10,6 +10,18 @@ const rawBaseUrl = import.meta.env.VITE_API_BASE_URL
 const baseUrl =
   rawBaseUrl && rawBaseUrl.trim().length > 0 ? rawBaseUrl.replace(/\/$/, '') : '/api/v1'
 
+const requestHeaders = (options: RequestInit) => {
+  const headers = new Headers(options.headers)
+  const token = getStoredToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  const hasBody = options.body !== undefined && options.body !== null
+  if (hasBody && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  return headers
+}
+
 /**
  * Custom fetch instance with global configuration.
  * Unified error handling - no need to handle errors in callers.
@@ -19,20 +31,7 @@ export const useFetch = createFetch({
   options: {
     updateDataOnError: true,
     async beforeFetch({ options }) {
-      const headers = new Headers(options.headers)
-
-      // Add authentication token if available
-      const token = getStoredToken()
-      if (token) {
-        headers.set('Authorization', `Bearer ${token}`)
-      }
-
-      const hasBody = options.body !== undefined && options.body !== null
-      if (hasBody && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
-        headers.set('Content-Type', 'application/json')
-      }
-
-      options.headers = headers
+      options.headers = requestHeaders(options)
 
       return { options }
     },
@@ -95,4 +94,18 @@ export const fetchJson = async <T>(
   data.value = parseResponseText<T>(text)
 
   return request as unknown as ApiFetchReturn<T>
+}
+
+// Expected restart windows must not pass through the global error notifier.
+export const fetchJsonQuietly = async <T>(url: string, options: RequestInit = {}): Promise<T> => {
+  const response = await fetch(`${baseUrl}/${url.replace(/^\/+/, '')}`, {
+    ...options,
+    headers: requestHeaders(options),
+    mode: 'cors',
+  })
+  if (!response.ok) throw new Error(`request returned HTTP ${response.status}`)
+
+  const data = parseResponseText<T>(await response.text())
+  if (data === undefined) throw new Error('request returned an empty response')
+  return data
 }

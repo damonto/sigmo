@@ -117,6 +117,7 @@ const zh = {
       notChecked: '尚未检查',
       available: '有可用更新',
       current: '已是最新版',
+      upToDate: '你已经是最新版本',
       checkNow: '立即检查',
       installNow: '立即更新',
       saved: '更新设置已保存。',

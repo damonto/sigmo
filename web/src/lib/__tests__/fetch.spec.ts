@@ -24,7 +24,7 @@ vi.mock('@/lib/notify', () => ({
   notifyError: notifyHarness.error,
 }))
 
-import { fetchJson } from '@/lib/fetch'
+import { fetchJson, fetchJsonQuietly } from '@/lib/fetch'
 
 const apiError = {
   error_code: 'boom',
@@ -78,6 +78,14 @@ describe('useFetch global error handling', () => {
     expect(notifyHarness.error).not.toHaveBeenCalled()
   })
 
+  it('keeps expected restart errors out of the global notifier', async () => {
+    await expect(fetchJsonQuietly('update-installations/current')).rejects.toThrow(
+      'request returned HTTP 500',
+    )
+
+    expect(notifyHarness.error).not.toHaveBeenCalled()
+  })
+
   it('localizes Worker errors without requiring a request ID', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(
@@ -89,9 +97,7 @@ describe('useFetch global error handling', () => {
       ),
     )
 
-    await expect(fetchJson('settings/updates')).rejects.toThrow(
-      'authorization revoked or expired',
-    )
+    await expect(fetchJson('settings/updates')).rejects.toThrow('authorization revoked or expired')
     expect(notifyHarness.error).toHaveBeenCalledWith(
       'Error',
       'The Sigmo Pro authorization is revoked or expired.',

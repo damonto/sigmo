@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { UpdateSnapshot } from '@/types/update'
 import SettingsUpdatesView from '@/views/SettingsUpdatesView.vue'
@@ -12,9 +12,15 @@ const api = vi.hoisted(() => ({
   install: vi.fn(),
   installation: vi.fn(),
 }))
+const appApi = vi.hoisted(() => ({
+  ready: vi.fn(),
+}))
 
 vi.mock('@/apis/update', () => ({
   useUpdateApi: () => api,
+}))
+vi.mock('@/apis/app', () => ({
+  useAppApi: () => appApi,
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -100,6 +106,11 @@ const render = async (value: UpdateSnapshot) => {
 describe('SettingsUpdatesView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    appApi.ready.mockResolvedValue(false)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('renders Community as Stable-only and keeps release notes as text', async () => {
@@ -173,5 +184,60 @@ describe('SettingsUpdatesView', () => {
       .findAll('button')
       .find((button) => button.text().includes('settings.updates.installNow'))
     expect(install?.attributes('disabled')).toBeDefined()
+  })
+
+  it('shows a clear message after a successful check finds no update', async () => {
+    const wrapper = await render(
+      snapshot({
+        latest: {
+          schemaVersion: 1,
+          edition: 'community',
+          channel: 'stable',
+          version: 'v1.0.0',
+          commit: '1111111111111111111111111111111111111111',
+          publishedAt: '2026-08-09T12:00:00Z',
+          notes: '',
+        },
+        updateAvailable: false,
+      }),
+    )
+
+    expect(wrapper.get('[data-testid="up-to-date-message"]').text()).toContain(
+      'settings.updates.upToDate',
+    )
+  })
+
+  it('uses quiet readiness polling after the server starts restarting', async () => {
+    vi.useFakeTimers()
+    api.install.mockResolvedValue({
+      data: ref(snapshot({ state: 'downloading' })),
+    })
+    api.installation.mockRejectedValue(new Error('request returned HTTP 502'))
+    const wrapper = await render(snapshot())
+    const install = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('settings.updates.installNow'))
+
+    if (!install) throw new Error('install button not found')
+    await install.trigger('click')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(500)
+    await flushPromises()
+
+    expect(api.installation).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('settings.updates.status.restarting')
+
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+
+    expect(appApi.ready).toHaveBeenCalledTimes(1)
+    expect(api.installation).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1999)
+    expect(appApi.ready).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    await flushPromises()
+    expect(appApi.ready).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
   })
 })

@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 
+import { useAppApi } from '@/apis/app'
 import { useUpdateApi } from '@/apis/update'
 import SettingsHeader from '@/components/settings/SettingsHeader.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -24,6 +25,7 @@ import { localizeErrorMessage } from '@/lib/errorHandler'
 import type { UpdateChannel, UpdateSnapshot } from '@/types/update'
 
 const { t, locale } = useI18n()
+const appApi = useAppApi()
 const api = useUpdateApi()
 const snapshot = ref<UpdateSnapshot>()
 const loading = ref(true)
@@ -33,12 +35,20 @@ const action = ref<'check' | 'install' | ''>('')
 let pollTimer: number | undefined
 let active = false
 let installationStarted = false
+let readinessDelay = 1000
 
 const busy = computed(() =>
   ['checking', 'downloading', 'verifying', 'restarting'].includes(snapshot.value?.state ?? ''),
 )
 const isPro = computed(() => snapshot.value?.current.edition === 'pro')
 const isContainer = computed(() => snapshot.value?.current.distribution === 'container')
+const upToDate = computed(
+  () =>
+    Boolean(snapshot.value?.checkedAt) &&
+    snapshot.value?.state === 'idle' &&
+    !snapshot.value.updateAvailable &&
+    !snapshot.value.error,
+)
 const serverVersion = computed(
   () => snapshot.value?.latest?.version ?? t('settings.updates.notChecked'),
 )
@@ -121,13 +131,30 @@ const stopPolling = () => {
   if (pollTimer !== undefined) window.clearTimeout(pollTimer)
   pollTimer = undefined
 }
+const scheduleReadinessCheck = () => {
+  pollTimer = window.setTimeout(waitForRestart, readinessDelay)
+  readinessDelay = Math.min(readinessDelay * 2, 5000)
+}
+const waitForRestart = async () => {
+  pollTimer = undefined
+  if (!active) return
+  try {
+    if (await appApi.ready()) {
+      window.location.reload()
+      return
+    }
+  } catch {
+    // The reverse proxy has no healthy upstream while the process restarts.
+  }
+  if (active) scheduleReadinessCheck()
+}
 const pollInstallation = async () => {
   pollTimer = undefined
   if (!active) return
   try {
-    const { data } = await api.installation()
+    const next = await api.installation()
     if (!active) return
-    snapshot.value = data.value
+    snapshot.value = next
     if (installationStarted && snapshot.value?.state === 'idle') {
       window.location.reload()
       return
@@ -138,14 +165,17 @@ const pollInstallation = async () => {
       return
     }
   } catch {
-    // The process briefly stops accepting requests while the new binary starts.
-    // Keep polling until the replacement server reports its idle state.
+    if (snapshot.value) snapshot.value = { ...snapshot.value, state: 'restarting' }
+    readinessDelay = 1000
+    scheduleReadinessCheck()
+    return
   }
   if (active) pollTimer = window.setTimeout(pollInstallation, 1000)
 }
 const install = async () => {
   action.value = 'install'
   installationStarted = false
+  readinessDelay = 1000
   try {
     const { data } = await api.install()
     if (!active) return
@@ -308,6 +338,14 @@ docker compose pull &amp;&amp; docker compose up -d</pre
             class="text-sm text-destructive"
           >
             {{ snapshotError }}
+          </p>
+          <p
+            v-if="upToDate"
+            data-testid="up-to-date-message"
+            class="flex items-center gap-2 text-sm text-primary"
+          >
+            <ShieldCheck class="size-4" />
+            {{ t('settings.updates.upToDate') }}
           </p>
           <div class="flex flex-wrap gap-2">
             <Button

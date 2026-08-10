@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -162,10 +163,7 @@ func (c *Controller) UpdateSettings(ctx context.Context, next settings.Updates) 
 		return Snapshot{}, ErrBusy
 	}
 	previous := c.effectiveSettings()
-	_, err := c.settings.Update(ctx, func(current *settings.Settings) error {
-		current.Updates = next
-		return nil
-	})
+	_, err := c.settings.SetUpdateSettings(ctx, next)
 	if err != nil {
 		err = fmt.Errorf("save update settings: %w", err)
 		c.fail(err)
@@ -350,7 +348,10 @@ func (c *Controller) selfUpdateSupported() bool {
 }
 
 func (c *Controller) effectiveSettings() settings.Updates {
-	current := c.settings.UpdateSettings()
+	current, configured := c.settings.UpdateSettings()
+	if !configured {
+		current.Channel = defaultChannel(c.build)
+	}
 	if c.build.Edition == buildinfo.EditionCommunity {
 		current.Channel = settings.UpdateChannelStable
 	}
@@ -358,6 +359,14 @@ func (c *Controller) effectiveSettings() settings.Updates {
 		current.Automatic = false
 	}
 	return current
+}
+
+func defaultChannel(build buildinfo.Info) string {
+	version := strings.ToLower(strings.TrimSpace(build.Version))
+	if build.Channel == buildinfo.ChannelDev || version == "dev" || strings.HasPrefix(version, "dev-") {
+		return settings.UpdateChannelDev
+	}
+	return settings.UpdateChannelStable
 }
 
 func operationRunning(state string) bool {
