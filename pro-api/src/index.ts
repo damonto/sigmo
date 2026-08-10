@@ -15,7 +15,8 @@ import {
   isActive,
 } from "./license";
 import { download, latestRelease } from "./releases";
-import { admins, displayName, telegramWebhook } from "./telegram";
+import { displayName, telegramWebhook } from "./telegram";
+import { admins, reconcileTelegramCommands } from "./telegram_commands";
 
 export async function route(
   request: Request,
@@ -88,6 +89,24 @@ export default {
       return apiError("internal_server_error", "internal server error", 500);
     }
   },
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    _ctx: ExecutionContext,
+  ): Promise<void> {
+    const db = new Database(env.DB);
+    try {
+      await reconcileTelegramCommands(env, db);
+    } catch (caught) {
+      logError("reconcile Telegram commands", caught);
+      throw caught;
+    }
+  },
 } satisfies ExportedHandler<Env>;
 
-export const testExports = { admins, deviceID, displayName, isActive };
+export const testExports = {
+  admins,
+  deviceID,
+  displayName,
+  isActive,
+};

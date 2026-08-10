@@ -36,8 +36,29 @@ interface PairingStatus {
   lease?: SignedLease;
 }
 
-afterEach(() => {
+type TelegramCommandScope =
+  | { type: "all_private_chats" }
+  | { type: "chat"; chat_id: number };
+
+type TelegramCommandCall = {
+  method: "setMyCommands" | "deleteMyCommands";
+  commands?: Array<{ command: string; description: string }>;
+  scope: TelegramCommandScope;
+};
+
+type TelegramAPIResponse = {
+  ok: boolean;
+  result?: boolean;
+  description?: string;
+};
+
+type TelegramAPIResponder =
+  | TelegramAPIResponse
+  | ((call: TelegramCommandCall) => TelegramAPIResponse);
+
+afterEach(async () => {
   vi.restoreAllMocks();
+  await env.DB.prepare("DELETE FROM telegram_command_admins").run();
 });
 
 async function request(
@@ -109,16 +130,74 @@ function mockTelegram(): Array<{ chat_id: number; text: string }> {
   const messages: Array<{ chat_id: number; text: string }> = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const outgoing = new Request(input, init);
+    const url = new URL(outgoing.url);
     if (
       outgoing.method !== "POST" ||
-      new URL(outgoing.url).origin !== "https://api.telegram.org"
+      url.origin !== "https://api.telegram.org"
     ) {
       throw new Error(`unexpected outbound request: ${outgoing.url}`);
     }
+    if (!url.pathname.endsWith("/sendMessage"))
+      throw new Error(`unexpected Telegram method: ${url.pathname}`);
     messages.push(await outgoing.json<{ chat_id: number; text: string }>());
     return Response.json({ ok: true });
   });
   return messages;
+}
+
+function mockTelegramCommands(
+  responder: TelegramAPIResponder = { ok: true, result: true },
+): TelegramCommandCall[] {
+  const calls: TelegramCommandCall[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const outgoing = new Request(input, init);
+    const url = new URL(outgoing.url);
+    if (
+      outgoing.method !== "POST" ||
+      url.origin !== "https://api.telegram.org"
+    ) {
+      throw new Error(`unexpected outbound request: ${outgoing.url}`);
+    }
+    const method: TelegramCommandCall["method"] | null = url.pathname.endsWith(
+      "/setMyCommands",
+    )
+      ? "setMyCommands"
+      : url.pathname.endsWith("/deleteMyCommands")
+        ? "deleteMyCommands"
+        : null;
+    if (!method) throw new Error(`unexpected Telegram method: ${url.pathname}`);
+    const body = await outgoing.json<{
+      commands?: Array<{ command: string; description: string }>;
+      scope: TelegramCommandScope;
+    }>();
+    const call: TelegramCommandCall = { method, ...body };
+    calls.push(call);
+    const response =
+      typeof responder === "function" ? responder(call) : responder;
+    return Response.json(response);
+  });
+  return calls;
+}
+
+async function runScheduled(workerEnv: Env = env): Promise<void> {
+  await worker.scheduled(
+    {
+      scheduledTime: Date.now(),
+      cron: "0 * * * *",
+      noRetry() {},
+    },
+    workerEnv,
+    createExecutionContext(),
+  );
+}
+
+async function telegramCommandAdminIDs(): Promise<number[]> {
+  const result = await env.DB.prepare(
+    `SELECT telegram_id
+     FROM telegram_command_admins
+     ORDER BY telegram_id ASC`,
+  ).all<{ telegram_id: number }>();
+  return result.results.map(({ telegram_id }) => telegram_id);
 }
 
 async function createPairing(
@@ -247,6 +326,98 @@ describe("download tickets", () => {
 });
 
 describe("Telegram pairing", () => {
+  it("registers described command menus for users and administrators", async () => {
+    const calls = mockTelegramCommands();
+
+    await runScheduled();
+
+    expect(calls).toHaveLength(2);
+    const userRegistration = calls.find(
+      ({ method, scope }) =>
+        method === "setMyCommands" && scope.type === "all_private_chats",
+    );
+    expect(
+      userRegistration?.commands?.map(({ command }) => command),
+    ).toEqual(["start", "devices", "revoke_device"]);
+    const adminRegistration = calls.find(
+      ({ method, scope }) =>
+        method === "setMyCommands" && scope.type === "chat",
+    );
+    expect(adminRegistration?.scope).toEqual({ type: "chat", chat_id: 1001 });
+    expect(
+      adminRegistration?.commands?.map(({ command }) => command),
+    ).toEqual([
+      "start",
+      "grant",
+      "revoke",
+      "status",
+      "entitlements",
+      "devices",
+      "revoke_device",
+    ]);
+    expect(
+      calls.flatMap(({ commands }) => commands ?? []).every(
+        ({ command, description }) =>
+          /^[a-z0-9_]{1,32}$/.test(command) &&
+          description.length >= 1 &&
+          description.length <= 256,
+      ),
+    ).toBe(true);
+    await expect(telegramCommandAdminIDs()).resolves.toEqual([1001]);
+  });
+
+  it("deletes command scopes for removed administrators", async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO telegram_command_admins (telegram_id) VALUES (?)",
+      ).bind(1001),
+      env.DB.prepare(
+        "INSERT INTO telegram_command_admins (telegram_id) VALUES (?)",
+      ).bind(1002),
+    ]);
+    const calls = mockTelegramCommands();
+
+    await runScheduled();
+
+    expect(calls).toContainEqual({
+      method: "deleteMyCommands",
+      scope: { type: "chat", chat_id: 1002 },
+    });
+    await expect(telegramCommandAdminIDs()).resolves.toEqual([1001]);
+  });
+
+  it("keeps the previous scope state when Telegram does not return true", async () => {
+    await env.DB.prepare(
+      "INSERT INTO telegram_command_admins (telegram_id) VALUES (?)",
+    )
+      .bind(1002)
+      .run();
+    mockTelegramCommands(({ method }) =>
+      method === "deleteMyCommands"
+        ? { ok: true, result: false }
+        : { ok: true, result: true },
+    );
+
+    await expect(runScheduled()).rejects.toThrow(
+      "Telegram deleteMyCommands did not return true",
+    );
+    await expect(telegramCommandAdminIDs()).resolves.toEqual([1002]);
+  });
+
+  it("does not reconcile command menus from /start", async () => {
+    const methods: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const outgoing = new Request(input, init);
+      const method = new URL(outgoing.url).pathname.split("/").at(-1) ?? "";
+      methods.push(method);
+      return Response.json({ ok: true });
+    });
+
+    await activatePairing({ id: "unused" }, 3201, "/start");
+
+    expect(methods).toEqual(["sendMessage"]);
+  });
+
   it("compares the webhook secret before processing an update", async () => {
     const outbound = vi.spyOn(globalThis, "fetch");
     const response = await request(
@@ -533,9 +704,27 @@ describe("Telegram pairing", () => {
 
     expect(messages).toHaveLength(1);
     expect(messages[0].text).toBe(
-      "Available commands: /devices, /revoke_device <device_id>",
+      [
+        "Available commands:",
+        "/start [pairing_id] — Authorize a Sigmo Pro device",
+        "/devices — List linked devices",
+        "/revoke_device <device_id> — Revoke a linked device by ID",
+      ].join("\n"),
     );
     expect(messages[0].text).not.toContain(String(entitlementId));
+  });
+
+  it("shows administrator-specific command usage in help", async () => {
+    const messages = mockTelegram();
+
+    await activatePairing({ id: "unused" }, 1001, "/unknown");
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].text).toContain("/devices [telegram_id]");
+    expect(messages[0].text).toContain("/revoke_device <device_id>");
+    expect(messages[0].text).toContain(
+      "/grant <telegram_id> [max_devices] [expires_at]",
+    );
   });
 
   it("splits long entitlement lists into Telegram-sized messages", async () => {

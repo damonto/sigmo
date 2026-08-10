@@ -7,6 +7,9 @@
   "vars": {
     "BOT_USERNAME": "SigmoProBot",
   },
+  "triggers": {
+    "crons": ["0 * * * *"],
+  },
   "secrets": {
     "required": [
       "SIGMO_TELEGRAM_BOT_TOKEN",

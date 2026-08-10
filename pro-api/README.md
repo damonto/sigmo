@@ -107,7 +107,7 @@ Administrators can manage entitlements with:
 /revoke <telegram_id>
 /status <telegram_id>
 /entitlements
-/devices <telegram_id>
+/devices [telegram_id]
 /revoke_device <device_id>
 ```
 
@@ -116,6 +116,17 @@ the end of that UTC day (`23:59:59.999Z`). Omit it for a permanent entitlement.
 `/entitlements` lists every currently active, unexpired Telegram entitlement.
 
 Users can run `/devices` and `/revoke_device <device_id>` for their own devices.
+
+The Worker reconciles Telegram's command menu every hour through a Cron Trigger.
+Regular private chats receive the user commands, while each configured
+administrator chat receives the full command set. When an administrator is
+removed from `SIGMO_ADMIN_TELEGRAM_IDS`, the next reconciliation deletes that
+chat-specific menu so Telegram falls back to the regular menu.
+
+Cloudflare Workers do not provide a process startup hook, so the Cron Trigger is
+the automatic reconciliation point after a deployment. Command names,
+descriptions, and help usage come from one catalog; BotFather does not need a
+separate command update.
 
 ## HTTP API
 

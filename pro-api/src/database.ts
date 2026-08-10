@@ -42,6 +42,10 @@ type DeviceSummary = {
   revokedAt: string | null;
 };
 
+type TelegramCommandAdmin = {
+  telegramId: number;
+};
+
 type PairingInsert = {
   pairingId: string;
   pollTokenHash: string;
@@ -421,5 +425,32 @@ export class Database {
       .prepare("UPDATE devices SET revoked_at = ? WHERE device_id = ?")
       .bind(timestamp, deviceId)
       .run();
+  }
+
+  async listTelegramCommandAdmins(): Promise<number[]> {
+    const result = await this.session
+      .prepare(
+        `SELECT telegram_id AS telegramId
+         FROM telegram_command_admins
+         ORDER BY telegram_id ASC`,
+      )
+      .all<TelegramCommandAdmin>();
+    return result.results.map(({ telegramId }) => telegramId);
+  }
+
+  async replaceTelegramCommandAdmins(
+    telegramIds: readonly number[],
+  ): Promise<void> {
+    const statements = [
+      this.session.prepare("DELETE FROM telegram_command_admins"),
+      ...telegramIds.map((telegramId) =>
+        this.session
+          .prepare(
+            "INSERT INTO telegram_command_admins (telegram_id) VALUES (?)",
+          )
+          .bind(telegramId),
+      ),
+    ];
+    await this.session.batch(statements);
   }
 }

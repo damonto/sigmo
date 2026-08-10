@@ -2,6 +2,7 @@ import type { RequestContext } from "./context";
 import { secureEqual } from "./crypto";
 import { isActive } from "./license";
 import { apiError, json, logError, nowISO, parseJSON } from "./http";
+import { admins, availableCommands } from "./telegram_commands";
 import type { TelegramUser } from "./types";
 import {
   isRFC3339,
@@ -12,14 +13,6 @@ export function displayName(user: TelegramUser): string {
   return (
     [user.first_name, user.last_name].filter(Boolean).join(" ").trim() ||
     String(user.id)
-  );
-}
-
-export function admins(env: Env): Set<number> {
-  return new Set(
-    env.SIGMO_ADMIN_TELEGRAM_IDS.split(",")
-      .map((value) => Number(value.trim()))
-      .filter((value) => Number.isSafeInteger(value) && value > 0),
   );
 }
 
@@ -174,7 +167,7 @@ async function devicesCommand(
   if (isAdmin ? args.length > 1 : args.length > 0)
     return isAdmin ? "Usage: /devices [telegram_id]" : "Usage: /devices";
   const telegramID = isAdmin && args[0] ? positiveInteger(args[0]) : user.id;
-  if (telegramID === undefined) return "Usage: /devices <telegram_id>";
+  if (telegramID === undefined) return "Usage: /devices [telegram_id]";
   const rows = await context.db.listDevices(telegramID);
   if (!rows.length) return "No linked devices.";
   return rows
@@ -227,9 +220,7 @@ async function botCommand(
     case "/revoke_device":
       return revokeDeviceCommand(context, user, isAdmin, args);
   }
-  return isAdmin
-    ? "Available commands: /grant, /revoke, /status, /entitlements, /devices, /revoke_device"
-    : "Available commands: /devices, /revoke_device <device_id>";
+  return availableCommands(isAdmin);
 }
 
 // Telegram accepts up to 4096 characters. Counting UTF-16 code units and
