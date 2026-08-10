@@ -288,7 +288,7 @@ func TestControllerRejectsConcurrentInstallations(t *testing.T) {
 	source := &fakeSource{release: Release{
 		Verified: true,
 		Manifest: Manifest{Channel: buildinfo.ChannelStable, Version: "v2.0.0"},
-		Artifact: Artifact{Size: 6, SHA256: "9a3a45d01531a20e89ac6ae10b0b0beb0492acd7216a368aa062d1a5fecaf9cd"},
+		Artifact: testRawArtifact([]byte("binary")),
 	}}
 	controller, err := NewController(ControllerConfig{
 		Build: buildinfo.Info{

@@ -462,10 +462,13 @@ func TestLatestVerifiesExactWorkerManifestBytes(t *testing.T) {
 		PublishedAt:   time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC),
 		Notes:         "test release",
 		Artifacts: []appupdate.Artifact{{
-			Target: "linux-amd64",
-			Name:   "sigmo-pro-linux-amd64",
-			Size:   10,
-			SHA256: strings.Repeat("0", 64),
+			Target:           "linux-amd64",
+			Name:             "sigmo-pro-linux-amd64.gz",
+			Compression:      appupdate.ArtifactCompressionGzip,
+			Size:             10,
+			SHA256:           strings.Repeat("0", 64),
+			ExecutableSize:   10,
+			ExecutableSHA256: strings.Repeat("1", 64),
 		}},
 	}
 	manifestData, err := json.MarshalIndent(manifest, "", "  ")

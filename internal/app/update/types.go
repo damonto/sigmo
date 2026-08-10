@@ -7,7 +7,12 @@ import (
 	"time"
 )
 
-const ManifestSchemaVersion = 1
+const (
+	ManifestSchemaVersion = 1
+
+	ArtifactCompressionNone = "none"
+	ArtifactCompressionGzip = "gzip"
+)
 
 type Manifest struct {
 	SchemaVersion int        `json:"schemaVersion"`
@@ -21,11 +26,14 @@ type Manifest struct {
 }
 
 type Artifact struct {
-	Target string `json:"target"`
-	Name   string `json:"name"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256"`
-	URL    string `json:"-"`
+	Target           string `json:"target"`
+	Name             string `json:"name"`
+	Compression      string `json:"compression"`
+	Size             int64  `json:"size"`
+	SHA256           string `json:"sha256"`
+	ExecutableSize   int64  `json:"executableSize"`
+	ExecutableSHA256 string `json:"executableSha256"`
+	URL              string `json:"-"`
 }
 
 type Release struct {

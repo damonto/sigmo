@@ -33,8 +33,14 @@ type TelegramAPIResponse = {
 const telegramCommands = [
   {
     command: "start",
-    description: "Authorize a Sigmo Pro device",
+    description: "Show Pro status or authorize a device",
     usage: "/start [pairing_id]",
+    access: "user",
+  },
+  {
+    command: "download",
+    description: "Download Sigmo Pro",
+    usage: "/download [stable|dev] [target]",
     access: "user",
   },
   {

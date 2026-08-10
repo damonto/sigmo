@@ -1,6 +1,8 @@
 package update
 
 import (
+	"bufio"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -43,19 +45,9 @@ func Apply(ctx context.Context, executable string, release Release, body io.Read
 	tmpPath := tmp.Name()
 	defer func() { _ = removeIfExists(tmpPath) }() // Best-effort temporary-file cleanup.
 
-	hash := sha256.New()
-	written, copyErr := io.Copy(io.MultiWriter(tmp, hash), io.LimitReader(body, release.Artifact.Size+1))
-	if copyErr != nil {
+	if err := writeArtifact(tmp, release.Artifact, body); err != nil {
 		closeBestEffort(tmp)
-		return fmt.Errorf("write update file: %w", copyErr)
-	}
-	if written != release.Artifact.Size {
-		closeBestEffort(tmp)
-		return fmt.Errorf("verify update size: got %d, want %d", written, release.Artifact.Size)
-	}
-	if got := hex.EncodeToString(hash.Sum(nil)); !strings.EqualFold(got, release.Artifact.SHA256) {
-		closeBestEffort(tmp)
-		return errors.New("verify update checksum: sha256 mismatch")
+		return err
 	}
 	if err := tmp.Chmod(current.Mode().Perm()); err != nil {
 		closeBestEffort(tmp)
@@ -98,6 +90,85 @@ func Apply(ctx context.Context, executable string, release Release, body io.Read
 	}
 	if err := syncDir(dir); err != nil {
 		return err
+	}
+	return nil
+}
+
+func writeArtifact(dst io.Writer, artifact Artifact, body io.Reader) error {
+	if artifact.Size <= 0 || artifact.ExecutableSize <= 0 {
+		return errors.New("verify update metadata: sizes must be positive")
+	}
+	if !validSHA256(artifact.SHA256) || !validSHA256(artifact.ExecutableSHA256) {
+		return errors.New("verify update metadata: invalid sha256")
+	}
+	switch artifact.Compression {
+	case ArtifactCompressionNone:
+		return writeUncompressedArtifact(dst, artifact, body)
+	case ArtifactCompressionGzip:
+		return writeGzipArtifact(dst, artifact, body)
+	default:
+		return fmt.Errorf("verify update metadata: unsupported compression %q", artifact.Compression)
+	}
+}
+
+func writeUncompressedArtifact(dst io.Writer, artifact Artifact, body io.Reader) error {
+	hash := sha256.New()
+	written, err := io.Copy(io.MultiWriter(dst, hash), io.LimitReader(body, artifact.Size+1))
+	if err != nil {
+		return fmt.Errorf("write update file: %w", err)
+	}
+	if written != artifact.Size {
+		return fmt.Errorf("verify update size: got %d, want %d", written, artifact.Size)
+	}
+	got := hex.EncodeToString(hash.Sum(nil))
+	if !strings.EqualFold(got, artifact.SHA256) {
+		return errors.New("verify update checksum: sha256 mismatch")
+	}
+	if written != artifact.ExecutableSize || !strings.EqualFold(got, artifact.ExecutableSHA256) {
+		return errors.New("verify executable metadata: uncompressed artifact does not match")
+	}
+	return nil
+}
+
+func writeGzipArtifact(dst io.Writer, artifact Artifact, body io.Reader) error {
+	compressedHash := sha256.New()
+	limited := &io.LimitedReader{R: body, N: artifact.Size + 1}
+	buffered := bufio.NewReader(io.TeeReader(limited, compressedHash))
+	reader, err := gzip.NewReader(buffered)
+	if err != nil {
+		return fmt.Errorf("open gzip update: %w", err)
+	}
+	reader.Multistream(false)
+
+	executableHash := sha256.New()
+	written, copyErr := io.Copy(
+		io.MultiWriter(dst, executableHash),
+		io.LimitReader(reader, artifact.ExecutableSize+1),
+	)
+	closeErr := reader.Close()
+	if copyErr != nil {
+		return fmt.Errorf("decompress update: %w", copyErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close gzip update: %w", closeErr)
+	}
+	if written != artifact.ExecutableSize {
+		return fmt.Errorf("verify executable size: got %d, want %d", written, artifact.ExecutableSize)
+	}
+	if got := hex.EncodeToString(executableHash.Sum(nil)); !strings.EqualFold(got, artifact.ExecutableSHA256) {
+		return errors.New("verify executable checksum: sha256 mismatch")
+	}
+	if _, err := buffered.ReadByte(); err == nil {
+		return errors.New("verify gzip update: trailing data or multiple members")
+	} else if !errors.Is(err, io.EOF) {
+		return fmt.Errorf("read gzip update trailer: %w", err)
+	}
+	compressedSize := artifact.Size + 1 - limited.N
+	if compressedSize != artifact.Size {
+		return fmt.Errorf("verify update size: got %d, want %d", compressedSize, artifact.Size)
+	}
+	if got := hex.EncodeToString(compressedHash.Sum(nil)); !strings.EqualFold(got, artifact.SHA256) {
+		return errors.New("verify update checksum: sha256 mismatch")
 	}
 	return nil
 }

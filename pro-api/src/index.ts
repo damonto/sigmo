@@ -84,7 +84,9 @@ export default {
         );
       logError("handle Worker request", caught, {
         method: request.method,
-        path: url.pathname,
+        path: url.pathname.startsWith("/v1/downloads/")
+          ? "/v1/downloads/:ticket"
+          : url.pathname,
       });
       return apiError("internal_server_error", "internal server error", 500);
     }

@@ -110,6 +110,18 @@ jobs:
         with:
           pattern: sigmo-pro-*
           merge-multiple: true
+      - name: Compress artifacts
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          artifacts=(sigmo-pro-linux-*)
+          if [ "${#artifacts[@]}" -eq 0 ]; then
+            echo "no Pro artifacts found" >&2
+            exit 1
+          fi
+          for artifact in "${artifacts[@]}"; do
+            gzip -9 -n "${artifact}"
+          done
       - name: Generate signed manifest
         env:
           SIGMO_RELEASE_PRIVATE_KEY: ${{ secrets.SIGMO_RELEASE_PRIVATE_KEY }}
@@ -119,13 +131,13 @@ jobs:
           git log -1 --pretty=%B > release-notes.txt
           go run ./cmd/updatemanifest \
             -edition pro -channel "${CHANNEL}" -version "${VERSION}" -commit "${GITHUB_SHA}" \
-            -notes-file release-notes.txt -output manifest.json \
-            -artifact linux-amd64=sigmo-pro-linux-amd64 \
-            -artifact linux-amd64-musl=sigmo-pro-linux-amd64-musl \
-            -artifact linux-arm64=sigmo-pro-linux-arm64 \
-            -artifact linux-arm64-musl=sigmo-pro-linux-arm64-musl \
-            -artifact linux-arm=sigmo-pro-linux-arm \
-            -artifact linux-arm-musl=sigmo-pro-linux-arm-musl
+            -notes-file release-notes.txt -output manifest.json -compression gzip \
+            -artifact linux-amd64=sigmo-pro-linux-amd64.gz \
+            -artifact linux-amd64-musl=sigmo-pro-linux-amd64-musl.gz \
+            -artifact linux-arm64=sigmo-pro-linux-arm64.gz \
+            -artifact linux-arm64-musl=sigmo-pro-linux-arm64-musl.gz \
+            -artifact linux-arm=sigmo-pro-linux-arm.gz \
+            -artifact linux-arm-musl=sigmo-pro-linux-arm-musl.gz
       - name: Upload, switch latest, and remove previous version
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.SIGMO_R2_ACCESS_KEY_ID }}
@@ -142,14 +154,14 @@ jobs:
           : "${SIGMO_R2_BUCKET:?SIGMO_R2_BUCKET is required}"
           endpoint="https://${SIGMO_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           prefix="${CHANNEL}/versions/${VERSION}"
-          artifacts=(sigmo-pro-linux-*)
+          artifacts=(sigmo-pro-linux-*.gz)
           if [ "${#artifacts[@]}" -eq 0 ]; then
             echo "no Pro artifacts found" >&2
             exit 1
           fi
           for artifact in "${artifacts[@]}"; do
             aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
-              --key "${prefix}/${artifact}" --body "${artifact}"
+              --key "${prefix}/${artifact}" --body "${artifact}" --content-type application/gzip
           done
           aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
             --key "${prefix}/manifest.json" --body manifest.json --content-type application/json

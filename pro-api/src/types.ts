@@ -34,10 +34,12 @@ export interface TelegramUpdate {
   };
 }
 
+export type ReleaseChannel = "stable" | "dev";
+
 export interface Manifest {
   schemaVersion: 1;
   edition: "pro";
-  channel: "stable" | "dev";
+  channel: ReleaseChannel;
   version: string;
   commit: string;
   publishedAt: string;
@@ -45,16 +47,29 @@ export interface Manifest {
   artifacts: Array<{
     target: string;
     name: string;
+    compression: "gzip";
     size: number;
     sha256: string;
+    executableSize: number;
+    executableSha256: string;
   }>;
 }
 
-export interface DownloadTicket {
-  deviceId: string;
-  channel: string;
+type DownloadTicketFields = {
+  channel: ReleaseChannel;
   version: string;
   target: string;
   path: string;
   expiresAt: number;
+};
+
+export interface DeviceDownloadTicket extends DownloadTicketFields {
+  deviceId: string;
 }
+
+export interface BootstrapDownloadTicket extends DownloadTicketFields {
+  purpose: "bootstrap";
+  telegramId: number;
+}
+
+export type DownloadTicket = DeviceDownloadTicket | BootstrapDownloadTicket;

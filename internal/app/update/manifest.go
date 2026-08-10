@@ -83,15 +83,36 @@ func ValidateManifest(manifest Manifest) error {
 	seen := make(map[string]struct{}, len(manifest.Artifacts))
 	for _, artifact := range manifest.Artifacts {
 		if strings.TrimSpace(artifact.Target) != artifact.Target || artifact.Target == "" ||
-			strings.TrimSpace(artifact.Name) != artifact.Name || artifact.Name == "" || artifact.Size <= 0 {
+			strings.TrimSpace(artifact.Name) != artifact.Name || artifact.Name == "" ||
+			artifact.Size <= 0 || artifact.ExecutableSize <= 0 {
 			return fmt.Errorf("%w: incomplete artifact", ErrInvalidManifest)
 		}
 		if filepath.Base(artifact.Name) != artifact.Name {
 			return fmt.Errorf("%w: artifact name %q must not contain a path", ErrInvalidManifest, artifact.Name)
 		}
-		checksum, err := hex.DecodeString(artifact.SHA256)
-		if err != nil || len(checksum) != sha256.Size {
+		if !validSHA256(artifact.SHA256) {
 			return fmt.Errorf("%w: invalid sha256 for %s", ErrInvalidManifest, artifact.Target)
+		}
+		if !validSHA256(artifact.ExecutableSHA256) {
+			return fmt.Errorf("%w: invalid executable sha256 for %s", ErrInvalidManifest, artifact.Target)
+		}
+		switch artifact.Compression {
+		case ArtifactCompressionNone:
+			if manifest.Edition != "community" {
+				return fmt.Errorf("%w: Pro artifacts must use gzip compression", ErrInvalidManifest)
+			}
+			if artifact.Size != artifact.ExecutableSize || !strings.EqualFold(artifact.SHA256, artifact.ExecutableSHA256) {
+				return fmt.Errorf("%w: uncompressed artifact metadata must match the executable", ErrInvalidManifest)
+			}
+		case ArtifactCompressionGzip:
+			if manifest.Edition != "pro" {
+				return fmt.Errorf("%w: Community artifacts must not be compressed", ErrInvalidManifest)
+			}
+			if !strings.HasSuffix(artifact.Name, ".gz") {
+				return fmt.Errorf("%w: gzip artifact name %q must end in .gz", ErrInvalidManifest, artifact.Name)
+			}
+		default:
+			return fmt.Errorf("%w: unsupported artifact compression %q", ErrInvalidManifest, artifact.Compression)
 		}
 		if _, ok := seen[artifact.Target]; ok {
 			return fmt.Errorf("%w: duplicate target %q", ErrInvalidManifest, artifact.Target)
@@ -99,6 +120,11 @@ func ValidateManifest(manifest Manifest) error {
 		seen[artifact.Target] = struct{}{}
 	}
 	return nil
+}
+
+func validSHA256(value string) bool {
+	checksum, err := hex.DecodeString(value)
+	return err == nil && len(checksum) == sha256.Size
 }
 
 func validStableVersion(version string) bool {

@@ -115,7 +115,24 @@ The optional `expires_at` argument uses `YYYY-MM-DD`. The Worker stores it as
 the end of that UTC day (`23:59:59.999Z`). Omit it for a permanent entitlement.
 `/entitlements` lists every currently active, unexpired Telegram entitlement.
 
-Users can run `/devices` and `/revoke_device <device_id>` for their own devices.
+Users can interact with the Bot through:
+
+```text
+/start [pairing_id]
+/download [stable|dev]
+/download <stable|dev> <target>
+/devices
+/revoke_device <device_id>
+```
+
+Running `/start` without a pairing ID shows the user's numeric Telegram ID,
+current entitlement status, and the Stable and Dev download commands. An active
+entitlement can download either channel. `/download` defaults to Stable and
+returns six Linux target buttons when the release is complete; the explicit
+form returns one target button. Bootstrap links expire after 15 minutes.
+
+The Bot mints Bootstrap tickets only while handling a command received through
+the verified Telegram webhook. There is no public ticket-minting HTTP API.
 
 The Worker reconciles Telegram's command menu every hour through a Cron Trigger.
 Regular private chats receive the user commands, while each configured
@@ -210,25 +227,41 @@ then switches the channel's fixed `latest` manifest:
 stable/latest/manifest.json
 stable/versions/v1.2.3/manifest.json
 stable/versions/v1.2.3/manifest.json.sig
-stable/versions/v1.2.3/sigmo-pro-...
+stable/versions/v1.2.3/sigmo-pro-<target>.gz
 
 dev/latest/manifest.json
 dev/versions/dev-01234567/manifest.json
 dev/versions/dev-01234567/manifest.json.sig
-dev/versions/dev-01234567/sigmo-pro-...
+dev/versions/dev-01234567/sigmo-pro-<target>.gz
 ```
 
 After the switch succeeds, CI removes every other version prefix in that
-channel. Stable and Dev therefore retain one complete release each. The Worker
-issues five-minute tickets bound to the device, channel, version, target, and R2
-object path, and streams Range requests directly from R2.
+channel. Stable and Dev therefore retain one complete release each. Automatic
+updates use five-minute tickets bound to the device, channel, version, target,
+and R2 object path. First installation uses 15-minute Bootstrap tickets bound
+to the Telegram user, channel, version, target, and object path. Every Bootstrap
+download rechecks the entitlement, so revocation or expiry takes effect
+immediately. Both ticket types stream full and Range responses through the
+Worker; the R2 bucket remains private and is never exposed through a presigned
+direct URL. Every artifact is a gzip-compressed executable; the Worker returns
+the compressed bytes with `Content-Type: application/gzip` and never sets
+`Content-Encoding`.
 
 ## Bootstrap order
 
 1. Deploy D1, private R2, Worker secrets, Worker, and Telegram webhook.
-2. Import existing Telegram users as active entitlements.
-3. Publish one Community Stable bootstrap release for manual installation.
-4. Publish one Pro Stable bootstrap release for manual installation.
-5. Let each Pro device complete Telegram pairing on first startup.
-6. Enable automatic Pro Dev publishing after Stable is verified.
-7. Remove legacy Telegram file-distribution secrets and scripts.
+2. Publish complete Pro Stable and Dev releases, including each channel's
+   `latest/manifest.json` and six Linux artifacts.
+3. Import existing Telegram users as active entitlements; grant new users from
+   the administrator Bot commands.
+4. Ask the user to open the Bot and run `/start` to verify their Telegram ID and
+   entitlement status.
+5. The user runs `/download stable` (or `/download dev`) and downloads the
+   matching `.gz` artifact from the 15-minute Worker link. After downloading,
+   run `gzip -d sigmo-pro-<target>.gz` and `chmod +x sigmo-pro-<target>`.
+6. On first startup, the Pro client opens `/start <pairing_id>` and completes
+   device authorization.
+7. The authorized device continues through the existing lease-based automatic
+   update flow.
+8. Remove legacy Telegram file-distribution secrets and scripts after the Bot
+   download flow is verified in production.

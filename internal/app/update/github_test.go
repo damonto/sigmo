@@ -24,7 +24,11 @@ func TestGitHubSourceLatest(t *testing.T) {
 	manifest := Manifest{
 		SchemaVersion: 1, Edition: "community", Channel: "stable", Version: "v1.2.3",
 		Commit: testCommit, PublishedAt: time.Now().UTC(), Notes: "signed notes",
-		Artifacts: []Artifact{{Target: "linux-amd64", Name: "sigmo-linux-amd64", Size: 6, SHA256: "9a3a45d01531a20e89ac6ae10b0b0beb0492acd7216a368aa062d1a5fecaf9cd"}},
+		Artifacts: []Artifact{{
+			Target: "linux-amd64", Name: "sigmo-linux-amd64", Compression: ArtifactCompressionNone,
+			Size: 6, SHA256: "9a3a45d01531a20e89ac6ae10b0b0beb0492acd7216a368aa062d1a5fecaf9cd",
+			ExecutableSize: 6, ExecutableSHA256: "9a3a45d01531a20e89ac6ae10b0b0beb0492acd7216a368aa062d1a5fecaf9cd",
+		}},
 	}
 	manifestData, err := json.Marshal(manifest)
 	if err != nil {

@@ -2,6 +2,7 @@ package update
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,6 +13,50 @@ import (
 	"testing"
 )
 
+func testRawArtifact(data []byte) Artifact {
+	sum := sha256.Sum256(data)
+	checksum := hex.EncodeToString(sum[:])
+	return Artifact{
+		Compression:      ArtifactCompressionNone,
+		Size:             int64(len(data)),
+		SHA256:           checksum,
+		ExecutableSize:   int64(len(data)),
+		ExecutableSHA256: checksum,
+	}
+}
+
+func testGzipArtifact(t *testing.T, data []byte) (Artifact, []byte) {
+	t.Helper()
+	var compressed bytes.Buffer
+	writer, err := gzip.NewWriterLevel(&compressed, gzip.BestCompression)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	archive := compressed.Bytes()
+	archiveSum := sha256.Sum256(archive)
+	executableSum := sha256.Sum256(data)
+	return Artifact{
+		Compression:      ArtifactCompressionGzip,
+		Size:             int64(len(archive)),
+		SHA256:           hex.EncodeToString(archiveSum[:]),
+		ExecutableSize:   int64(len(data)),
+		ExecutableSHA256: hex.EncodeToString(executableSum[:]),
+	}, archive
+}
+
+func setTestArchiveMetadata(artifact Artifact, archive []byte) Artifact {
+	sum := sha256.Sum256(archive)
+	artifact.Size = int64(len(archive))
+	artifact.SHA256 = hex.EncodeToString(sum[:])
+	return artifact
+}
+
 func TestApplyAndPendingRecovery(t *testing.T) {
 	dir := t.TempDir()
 	executable := filepath.Join(dir, "sigmo")
@@ -20,11 +65,10 @@ func TestApplyAndPendingRecovery(t *testing.T) {
 	if err := os.WriteFile(executable, oldBinary, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256(newBinary)
 	release := Release{
 		Verified: true,
 		Manifest: Manifest{Version: "v2.0.0"},
-		Artifact: Artifact{Size: int64(len(newBinary)), SHA256: hex.EncodeToString(sum[:])},
+		Artifact: testRawArtifact(newBinary),
 	}
 	if err := Apply(context.Background(), executable, release, bytes.NewReader(newBinary)); err != nil {
 		t.Fatalf("Apply() error = %v", err)
@@ -52,10 +96,9 @@ func TestMarkHealthyRemovesBackup(t *testing.T) {
 	if err := os.WriteFile(executable, oldBinary, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256(newBinary)
 	if err := Apply(context.Background(), executable, Release{
 		Verified: true, Manifest: Manifest{Version: "v2.0.0"},
-		Artifact: Artifact{Size: int64(len(newBinary)), SHA256: hex.EncodeToString(sum[:])},
+		Artifact: testRawArtifact(newBinary),
 	}, bytes.NewReader(newBinary)); err != nil {
 		t.Fatal(err)
 	}
@@ -80,10 +123,9 @@ func TestMarkHealthyIgnoresUpdateNotStartedYet(t *testing.T) {
 	if err := os.WriteFile(executable, oldBinary, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256(newBinary)
 	if err := Apply(context.Background(), executable, Release{
 		Verified: true, Manifest: Manifest{Version: "v2.0.0"},
-		Artifact: Artifact{Size: int64(len(newBinary)), SHA256: hex.EncodeToString(sum[:])},
+		Artifact: testRawArtifact(newBinary),
 	}, bytes.NewReader(newBinary)); err != nil {
 		t.Fatal(err)
 	}
@@ -168,11 +210,131 @@ func TestApplyKeepsCurrentExecutableOnValidationFailure(t *testing.T) {
 			if err := os.WriteFile(executable, oldBinary, 0o755); err != nil {
 				t.Fatal(err)
 			}
+			artifact := testRawArtifact([]byte("binary"))
+			artifact.Size = tt.size
+			artifact.SHA256 = tt.checksum
 			err := Apply(context.Background(), executable, Release{
 				Verified: true,
 				Manifest: Manifest{Version: "v2.0.0"},
-				Artifact: Artifact{Size: tt.size, SHA256: tt.checksum},
+				Artifact: artifact,
 			}, bytes.NewReader([]byte("binary")))
+			if err == nil {
+				t.Fatal("Apply() error = nil")
+			}
+			got, readErr := os.ReadFile(executable)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if !bytes.Equal(got, oldBinary) {
+				t.Fatalf("current executable = %q", got)
+			}
+			for _, path := range []string{markerPath(executable), executable + ".previous"} {
+				if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("unexpected update state %s: %v", path, statErr)
+				}
+			}
+		})
+	}
+}
+
+func TestApplyGzipArtifact(t *testing.T) {
+	dir := t.TempDir()
+	executable := filepath.Join(dir, "sigmo")
+	oldBinary := []byte("#!/bin/sh\necho v1.0.0\n")
+	newBinary := []byte("#!/bin/sh\necho v2.0.0\n")
+	if err := os.WriteFile(executable, oldBinary, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	artifact, archive := testGzipArtifact(t, newBinary)
+	if err := Apply(context.Background(), executable, Release{
+		Verified: true,
+		Manifest: Manifest{Version: "v2.0.0"},
+		Artifact: artifact,
+	}, bytes.NewReader(archive)); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	got, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, newBinary) {
+		t.Fatalf("installed executable = %q", got)
+	}
+}
+
+func TestApplyRejectsInvalidGzipArtifact(t *testing.T) {
+	newBinary := []byte("#!/bin/sh\necho v2.0.0\n")
+	baseArtifact, baseArchive := testGzipArtifact(t, newBinary)
+	_, secondArchive := testGzipArtifact(t, []byte("second member"))
+	truncated := append([]byte(nil), baseArchive[:len(baseArchive)-2]...)
+	invalid := []byte("not a gzip stream")
+	trailing := append(append([]byte(nil), baseArchive...), 'x')
+	multiple := append(append([]byte(nil), baseArchive...), secondArchive...)
+
+	tests := []struct {
+		name     string
+		body     []byte
+		artifact Artifact
+	}{
+		{
+			name: "compressed size", body: baseArchive,
+			artifact: func() Artifact {
+				artifact := baseArtifact
+				artifact.Size--
+				return artifact
+			}(),
+		},
+		{
+			name: "compressed checksum", body: baseArchive,
+			artifact: func() Artifact {
+				artifact := baseArtifact
+				artifact.SHA256 = strings.Repeat("0", 64)
+				return artifact
+			}(),
+		},
+		{
+			name: "executable size", body: baseArchive,
+			artifact: func() Artifact {
+				artifact := baseArtifact
+				artifact.ExecutableSize--
+				return artifact
+			}(),
+		},
+		{
+			name: "executable checksum", body: baseArchive,
+			artifact: func() Artifact {
+				artifact := baseArtifact
+				artifact.ExecutableSHA256 = strings.Repeat("0", 64)
+				return artifact
+			}(),
+		},
+		{name: "truncated", body: truncated, artifact: setTestArchiveMetadata(baseArtifact, truncated)},
+		{name: "invalid", body: invalid, artifact: setTestArchiveMetadata(baseArtifact, invalid)},
+		{name: "trailing", body: trailing, artifact: setTestArchiveMetadata(baseArtifact, trailing)},
+		{name: "multiple members", body: multiple, artifact: setTestArchiveMetadata(baseArtifact, multiple)},
+		{
+			name: "unknown compression", body: baseArchive,
+			artifact: func() Artifact {
+				artifact := baseArtifact
+				artifact.Compression = "zstd"
+				return artifact
+			}(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			executable := filepath.Join(dir, "sigmo")
+			oldBinary := []byte("#!/bin/sh\necho v1.0.0\n")
+			if err := os.WriteFile(executable, oldBinary, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			err := Apply(context.Background(), executable, Release{
+				Verified: true,
+				Manifest: Manifest{Version: "v2.0.0"},
+				Artifact: tt.artifact,
+			}, bytes.NewReader(tt.body))
 			if err == nil {
 				t.Fatal("Apply() error = nil")
 			}

@@ -2,12 +2,43 @@ import type { RequestContext } from "./context";
 import { secureEqual } from "./crypto";
 import { isActive } from "./license";
 import { apiError, json, logError, nowISO, parseJSON } from "./http";
+import { createBootstrapDownloads } from "./releases";
 import { admins, availableCommands } from "./telegram_commands";
-import type { TelegramUser } from "./types";
+import type { ReleaseChannel, TelegramUser } from "./types";
 import {
   isRFC3339,
   telegramUpdate as parseTelegramUpdate,
 } from "./validation";
+
+type TelegramInlineKeyboard = Array<
+  Array<{
+    text: string;
+    url: string;
+  }>
+>;
+
+type TelegramReply = {
+  text: string;
+  replyMarkup?: {
+    inline_keyboard: TelegramInlineKeyboard;
+  };
+};
+
+const bootstrapTargets = [
+  { target: "linux-amd64", label: "amd64" },
+  { target: "linux-amd64-musl", label: "amd64 (musl)" },
+  { target: "linux-arm64", label: "arm64" },
+  { target: "linux-arm64-musl", label: "arm64 (musl)" },
+  { target: "linux-arm", label: "arm" },
+  { target: "linux-arm-musl", label: "arm (musl)" },
+] as const;
+
+const downloadUsage = [
+  "Usage:",
+  "/download [stable|dev]",
+  "/download <stable|dev> <target>",
+  `Targets: ${bootstrapTargets.map(({ target }) => target).join(", ")}`,
+].join("\n");
 
 export function displayName(user: TelegramUser): string {
   return (
@@ -20,6 +51,10 @@ function positiveInteger(value: string | undefined): number | undefined {
   if (!value || !/^\d+$/.test(value)) return undefined;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function textReply(text: string): TelegramReply {
+  return { text };
 }
 
 const grantUsage =
@@ -79,6 +114,99 @@ async function activatePairing(
     return `Device limit reached (${currentEntitlement.maxDevices}). Revoke an existing device first.`;
   }
   return `Sigmo Pro authorized device ${pairing.deviceId}. You can now return to Sigmo.`;
+}
+
+async function startCommand(
+  context: RequestContext,
+  user: TelegramUser,
+  args: string[],
+): Promise<TelegramReply> {
+  if (args.length === 1)
+    return textReply(await activatePairing(context, args[0], user));
+  if (args.length > 1) return textReply("Usage: /start [pairing_id]");
+
+  const entitlement = await context.db.findEntitlement(user.id);
+  const status = isActive(entitlement) ? "active" : "inactive";
+  return textReply(
+    [
+      `Telegram ID: ${user.id}`,
+      `Sigmo Pro entitlement: ${status}`,
+      "Stable download: /download stable",
+      "Dev download: /download dev",
+    ].join("\n"),
+  );
+}
+
+function parseDownloadArgs(
+  args: string[],
+): { channel: ReleaseChannel; target?: string } | null {
+  if (args.length === 0) return { channel: "stable" };
+  const channel = args[0]?.toLowerCase();
+  if (channel !== "stable" && channel !== "dev") return null;
+  if (args.length === 1) return { channel };
+  if (args.length !== 2) return null;
+  const target = args[1]?.toLowerCase();
+  if (!bootstrapTargets.some((candidate) => candidate.target === target))
+    return null;
+  return { channel, target };
+}
+
+function channelName(channel: ReleaseChannel): string {
+  return channel === "stable" ? "Stable" : "Dev";
+}
+
+async function downloadCommand(
+  request: Request,
+  context: RequestContext,
+  user: TelegramUser,
+  args: string[],
+): Promise<TelegramReply> {
+  const parsed = parseDownloadArgs(args);
+  if (!parsed) return textReply(downloadUsage);
+  const selectedTargets = parsed.target
+    ? bootstrapTargets.filter(({ target }) => target === parsed.target)
+    : bootstrapTargets;
+  const result = await createBootstrapDownloads(request, context, {
+    telegramId: user.id,
+    channel: parsed.channel,
+    targets: selectedTargets.map(({ target }) => target),
+  });
+  if (!result.ok) {
+    if (result.reason === "entitlement_inactive")
+      return textReply(
+        "This Telegram account does not have an active Sigmo Pro entitlement.",
+      );
+    if (result.reason === "release_unavailable")
+      return textReply(
+        `Sigmo Pro ${channelName(parsed.channel)} is not available yet. Please try again later.`,
+      );
+    return textReply(
+      `The Sigmo Pro ${channelName(parsed.channel)} release does not include ${result.target ?? "the requested target"}.`,
+    );
+  }
+
+  const downloads = new Map(
+    result.downloads.map((download) => [download.target, download.url]),
+  );
+  const buttons = selectedTargets.map(({ target, label }) => ({
+    text: label,
+    url: downloads.get(target) ?? "",
+  }));
+  if (buttons.some(({ url }) => !url))
+    throw new Error("bootstrap download result is missing a requested target");
+  const inlineKeyboard: TelegramInlineKeyboard = [];
+  for (let index = 0; index < buttons.length; index += 2)
+    inlineKeyboard.push(buttons.slice(index, index + 2));
+
+  return {
+    text: [
+      `Channel: ${channelName(result.channel)}`,
+      `Version: ${result.version}`,
+      "Download links expire in 15 minutes.",
+      "Downloads are gzip archives. Run gzip -d on the .gz file, then chmod +x the extracted file.",
+    ].join("\n"),
+    replyMarkup: { inline_keyboard: inlineKeyboard },
+  };
 }
 
 async function grantCommand(
@@ -196,31 +324,36 @@ async function revokeDeviceCommand(
 }
 
 async function botCommand(
+  request: Request,
   context: RequestContext,
   user: TelegramUser,
   command: string,
   args: string[],
-): Promise<string> {
+): Promise<TelegramReply> {
   const isAdmin = admins(context.env).has(user.id);
   switch (command) {
+    case "/download":
+      return downloadCommand(request, context, user, args);
     case "/grant":
-      if (isAdmin) return grantCommand(context, args);
+      if (isAdmin) return textReply(await grantCommand(context, args));
       break;
     case "/revoke":
-      if (isAdmin) return revokeCommand(context, args);
+      if (isAdmin) return textReply(await revokeCommand(context, args));
       break;
     case "/status":
-      if (isAdmin) return statusCommand(context, args);
+      if (isAdmin) return textReply(await statusCommand(context, args));
       break;
     case "/entitlements":
-      if (isAdmin) return entitlementsCommand(context, args);
+      if (isAdmin) return textReply(await entitlementsCommand(context, args));
       break;
     case "/devices":
-      return devicesCommand(context, user, isAdmin, args);
+      return textReply(await devicesCommand(context, user, isAdmin, args));
     case "/revoke_device":
-      return revokeDeviceCommand(context, user, isAdmin, args);
+      return textReply(
+        await revokeDeviceCommand(context, user, isAdmin, args),
+      );
   }
-  return availableCommands(isAdmin);
+  return textReply(availableCommands(isAdmin));
 }
 
 // Telegram accepts up to 4096 characters. Counting UTF-16 code units and
@@ -244,15 +377,23 @@ function splitTelegramText(text: string): string[] {
 async function sendTelegram(
   env: Env,
   chatID: number,
-  text: string,
+  reply: TelegramReply,
 ): Promise<void> {
-  for (const message of splitTelegramText(text)) {
+  const messages = splitTelegramText(reply.text);
+  for (const [index, message] of messages.entries()) {
+    const body: {
+      chat_id: number;
+      text: string;
+      reply_markup?: TelegramReply["replyMarkup"];
+    } = { chat_id: chatID, text: message };
+    if (index === messages.length - 1 && reply.replyMarkup)
+      body.reply_markup = reply.replyMarkup;
     const response = await fetch(
       `https://api.telegram.org/bot${env.SIGMO_TELEGRAM_BOT_TOKEN}/sendMessage`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ chat_id: chatID, text: message }),
+        body: JSON.stringify(body),
       },
     );
     if (!response.ok)
@@ -296,10 +437,8 @@ export async function telegramWebhook(
   const command = commandParts[0];
   const reply =
     command === "/start"
-      ? args.length === 1
-        ? await activatePairing(context, args[0], message.from)
-        : "Open the pairing link from the Sigmo activation page."
-      : await botCommand(context, message.from, command, args);
+      ? await startCommand(context, message.from, args)
+      : await botCommand(request, context, message.from, command, args);
   execution.waitUntil(
     sendTelegram(env, message.chat.id, reply).catch((caught: unknown) => {
       logError("send Telegram reply", caught, { chatId: message.chat.id });

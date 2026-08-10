@@ -14,7 +14,12 @@ import {
 } from "../src/crypto";
 import worker, { testExports } from "../src/index";
 import { createTicket, parseTicket } from "../src/tickets";
-import type { SignedLease } from "../src/types";
+import type {
+  DownloadTicket,
+  ReleaseChannel,
+  SignedLease,
+} from "../src/types";
+import { manifest as parseManifest } from "../src/validation";
 
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
@@ -55,6 +60,23 @@ type TelegramAPIResponse = {
 type TelegramAPIResponder =
   | TelegramAPIResponse
   | ((call: TelegramCommandCall) => TelegramAPIResponse);
+
+type TelegramMessage = {
+  chat_id: number;
+  text: string;
+  reply_markup?: {
+    inline_keyboard: Array<Array<{ text: string; url: string }>>;
+  };
+};
+
+const bootstrapTargets = [
+  "linux-amd64",
+  "linux-amd64-musl",
+  "linux-arm64",
+  "linux-arm64-musl",
+  "linux-arm",
+  "linux-arm-musl",
+] as const;
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -126,8 +148,8 @@ async function grant(
     .run();
 }
 
-function mockTelegram(): Array<{ chat_id: number; text: string }> {
-  const messages: Array<{ chat_id: number; text: string }> = [];
+function mockTelegram(): TelegramMessage[] {
+  const messages: TelegramMessage[] = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const outgoing = new Request(input, init);
     const url = new URL(outgoing.url);
@@ -139,10 +161,51 @@ function mockTelegram(): Array<{ chat_id: number; text: string }> {
     }
     if (!url.pathname.endsWith("/sendMessage"))
       throw new Error(`unexpected Telegram method: ${url.pathname}`);
-    messages.push(await outgoing.json<{ chat_id: number; text: string }>());
+    messages.push(await outgoing.json<TelegramMessage>());
     return Response.json({ ok: true });
   });
   return messages;
+}
+
+async function publishRelease(
+  channel: ReleaseChannel,
+  version: string,
+  targets: readonly string[] = bootstrapTargets,
+): Promise<void> {
+  const commit = "0123456789abcdef0123456789abcdef01234567";
+  const manifest = JSON.stringify({
+    schemaVersion: 1,
+    edition: "pro",
+    channel,
+    version,
+    commit,
+    publishedAt: "2026-08-09T12:00:00Z",
+    notes: "release notes",
+    artifacts: targets.map((target) => ({
+      target,
+      name: `sigmo-pro-${target}.gz`,
+      compression: "gzip" as const,
+      size: 10,
+      sha256: "0".repeat(64),
+      executableSize: 8,
+      executableSha256: "1".repeat(64),
+    })),
+  });
+  await env.sigmo_pro_updates.put(`${channel}/latest/manifest.json`, manifest);
+}
+
+function downloadButtons(message: TelegramMessage): Array<{
+  text: string;
+  url: string;
+}> {
+  return message.reply_markup?.inline_keyboard.flat() ?? [];
+}
+
+function tamperTicketSignature(ticket: string): string {
+  const [payload, signature, extra] = ticket.split(".");
+  assert(payload && signature && extra === undefined);
+  const replacement = signature.startsWith("A") ? "B" : "A";
+  return `${payload}.${replacement}${signature.slice(1)}`;
 }
 
 function mockTelegramCommands(
@@ -292,6 +355,40 @@ async function signedHeaders(
   });
 }
 
+describe("release manifests", () => {
+  it("requires gzip artifacts and executable metadata", () => {
+    const artifact = {
+      target: "linux-amd64",
+      name: "sigmo-pro-linux-amd64.gz",
+      compression: "gzip",
+      size: 10,
+      sha256: "0".repeat(64),
+      executableSize: 8,
+      executableSha256: "1".repeat(64),
+    };
+    const manifest = {
+      schemaVersion: 1,
+      edition: "pro",
+      channel: "stable",
+      version: "v1.0.0",
+      commit: "0123456789abcdef0123456789abcdef01234567",
+      publishedAt: "2026-08-09T12:00:00Z",
+      notes: "release notes",
+      artifacts: [artifact],
+    };
+    expect(parseManifest(manifest)).not.toBeNull();
+
+    const invalidArtifacts = [
+      { ...artifact, compression: "none" },
+      { ...artifact, name: "sigmo-pro-linux-amd64" },
+      { ...artifact, executableSize: 0 },
+      { ...artifact, executableSha256: "invalid" },
+    ];
+    for (const invalid of invalidArtifacts)
+      expect(parseManifest({ ...manifest, artifacts: [invalid] })).toBeNull();
+  });
+});
+
 describe("download tickets", () => {
   it("binds the signed payload and rejects expiry", async () => {
     const secret = "s".repeat(32);
@@ -300,15 +397,53 @@ describe("download tickets", () => {
       channel: "dev",
       version: "dev-01234567",
       target: "linux-amd64",
-      path: "dev/versions/dev-01234567/sigmo-pro-linux-amd64",
+      path: "dev/versions/dev-01234567/sigmo-pro-linux-amd64.gz",
       expiresAt: 200,
     });
     await expect(parseTicket(secret, ticket, 100_000)).resolves.toMatchObject({
       deviceId: "device-1",
       channel: "dev",
     });
+    const [payload] = ticket.split(".");
+    const wireTicket = JSON.parse(
+      new TextDecoder().decode(decodeBase64(payload)),
+    ) as Record<string, unknown>;
+    expect(wireTicket).not.toHaveProperty("purpose");
+    expect(wireTicket).not.toHaveProperty("telegramId");
     await expect(parseTicket(secret, ticket, 201_000)).resolves.toBeNull();
     await expect(parseTicket("wrong", ticket, 100_000)).resolves.toBeNull();
+  });
+
+  it("validates Bootstrap ticket signatures, expiry, and fields", async () => {
+    const secret = "s".repeat(32);
+    const fields = {
+      purpose: "bootstrap" as const,
+      telegramId: 1234,
+      channel: "stable" as const,
+      version: "v1.0.0",
+      target: "linux-amd64",
+      path: "stable/versions/v1.0.0/sigmo-pro-linux-amd64.gz",
+      expiresAt: 200,
+    };
+    const ticket = await createTicket(secret, fields);
+
+    await expect(parseTicket(secret, ticket, 100_000)).resolves.toEqual(fields);
+    const tampered = tamperTicketSignature(ticket);
+    await expect(parseTicket(secret, tampered, 100_000)).resolves.toBeNull();
+    await expect(parseTicket(secret, ticket, 200_000)).resolves.toBeNull();
+
+    const wrongPath = await createTicket(secret, {
+      ...fields,
+      path: "dev/versions/v1.0.0/sigmo-pro-linux-amd64.gz",
+    });
+    await expect(parseTicket(secret, wrongPath, 100_000)).resolves.toBeNull();
+    const mixedIdentity = await createTicket(secret, {
+      ...fields,
+      deviceId: "device-1",
+    } as unknown as DownloadTicket);
+    await expect(
+      parseTicket(secret, mixedIdentity, 100_000),
+    ).resolves.toBeNull();
   });
 
   it("rejects a weak ticket signing secret", async () => {
@@ -318,7 +453,7 @@ describe("download tickets", () => {
         channel: "stable",
         version: "v1.0.0",
         target: "linux-amd64",
-        path: "stable/versions/v1.0.0/sigmo-pro-linux-amd64",
+        path: "stable/versions/v1.0.0/sigmo-pro-linux-amd64.gz",
         expiresAt: 200,
       }),
     ).rejects.toThrow("at least 32 characters");
@@ -338,7 +473,7 @@ describe("Telegram pairing", () => {
     );
     expect(
       userRegistration?.commands?.map(({ command }) => command),
-    ).toEqual(["start", "devices", "revoke_device"]);
+    ).toEqual(["start", "download", "devices", "revoke_device"]);
     const adminRegistration = calls.find(
       ({ method, scope }) =>
         method === "setMyCommands" && scope.type === "chat",
@@ -348,6 +483,7 @@ describe("Telegram pairing", () => {
       adminRegistration?.commands?.map(({ command }) => command),
     ).toEqual([
       "start",
+      "download",
       "grant",
       "revoke",
       "status",
@@ -416,6 +552,185 @@ describe("Telegram pairing", () => {
     await activatePairing({ id: "unused" }, 3201, "/start");
 
     expect(methods).toEqual(["sendMessage"]);
+  });
+
+  it("shows the Telegram ID, entitlement status, and download commands from /start", async () => {
+    const activeTelegramId = 3202;
+    const inactiveTelegramId = 3203;
+    await grant(activeTelegramId);
+    const messages = mockTelegram();
+
+    await activatePairing({ id: "unused" }, activeTelegramId, "/start");
+    await activatePairing({ id: "unused" }, inactiveTelegramId, "/start");
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0].text).toContain(`Telegram ID: ${activeTelegramId}`);
+    expect(messages[0].text).toContain("Sigmo Pro entitlement: active");
+    expect(messages[0].text).toContain("/download stable");
+    expect(messages[0].text).toContain("/download dev");
+    expect(messages[1].text).toContain(`Telegram ID: ${inactiveTelegramId}`);
+    expect(messages[1].text).toContain("Sigmo Pro entitlement: inactive");
+    expect(messages.every((message) => !message.reply_markup)).toBe(true);
+  });
+
+  it("returns Stable downloads in the fixed architecture and libc order", async () => {
+    const telegramId = 3211;
+    await grant(telegramId);
+    await publishRelease("stable", "v3.0.0", [...bootstrapTargets].reverse());
+    const messages = mockTelegram();
+    const issuedAfter = Math.floor(Date.now() / 1000);
+
+    await activatePairing({ id: "unused" }, telegramId, "/download");
+    await activatePairing(
+      { id: "unused" },
+      telegramId,
+      "/download stable",
+    );
+
+    expect(messages).toHaveLength(2);
+    for (const message of messages) {
+      expect(message.text).toContain("Channel: Stable");
+      expect(message.text).toContain("Version: v3.0.0");
+      expect(message.text).toContain("expire in 15 minutes");
+      expect(message.text).toContain("gzip -d");
+      expect(message.text).toContain("chmod +x");
+      expect(
+        message.reply_markup?.inline_keyboard.map((row) =>
+          row.map(({ text }) => text),
+        ),
+      ).toEqual([
+        ["amd64", "amd64 (musl)"],
+        ["arm64", "arm64 (musl)"],
+        ["arm", "arm (musl)"],
+      ]);
+    }
+
+    const buttons = downloadButtons(messages[0]);
+    expect(buttons).toHaveLength(6);
+    const tickets = await Promise.all(
+      buttons.map(async ({ url }) => {
+        const downloadURL = new URL(url);
+        expect(downloadURL.protocol).toBe("https:");
+        expect(downloadURL.origin).toBe("https://updates.example");
+        const ticketValue = downloadURL.pathname.split("/").at(-1) ?? "";
+        return parseTicket(env.SIGMO_DOWNLOAD_TICKET_SECRET, ticketValue);
+      }),
+    );
+    expect(tickets.map((ticket) => ticket?.target)).toEqual(bootstrapTargets);
+    for (const ticket of tickets) {
+      expect(ticket).toMatchObject({
+        purpose: "bootstrap",
+        telegramId,
+        channel: "stable",
+        version: "v3.0.0",
+      });
+      expect(ticket?.expiresAt).toBeGreaterThanOrEqual(issuedAfter + 899);
+      expect(ticket?.expiresAt).toBeLessThanOrEqual(
+        Math.floor(Date.now() / 1000) + 900,
+      );
+    }
+  });
+
+  it("returns Dev downloads to every active entitlement", async () => {
+    const telegramId = 3212;
+    await grant(telegramId);
+    await publishRelease("dev", "dev-01234567");
+    const messages = mockTelegram();
+
+    await activatePairing({ id: "unused" }, telegramId, "/download dev");
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].text).toContain("Channel: Dev");
+    expect(messages[0].text).toContain("Version: dev-01234567");
+    expect(downloadButtons(messages[0])).toHaveLength(6);
+  });
+
+  it("returns one button for an exact channel and target", async () => {
+    const telegramId = 3213;
+    await grant(telegramId);
+    await publishRelease("stable", "v3.1.0", ["linux-arm64-musl"]);
+    const messages = mockTelegram();
+
+    await activatePairing(
+      { id: "unused" },
+      telegramId,
+      "/download stable linux-arm64-musl",
+    );
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].reply_markup?.inline_keyboard).toEqual([
+      [expect.objectContaining({ text: "arm64 (musl)" })],
+    ]);
+    const [button] = downloadButtons(messages[0]);
+    const ticketValue = new URL(button.url).pathname.split("/").at(-1) ?? "";
+    await expect(
+      parseTicket(env.SIGMO_DOWNLOAD_TICKET_SECRET, ticketValue),
+    ).resolves.toMatchObject({
+      purpose: "bootstrap",
+      telegramId,
+      channel: "stable",
+      target: "linux-arm64-musl",
+    });
+  });
+
+  it("returns download usage and legal targets for unknown arguments", async () => {
+    const messages = mockTelegram();
+
+    await activatePairing({ id: "unused" }, 3214, "/download beta");
+    await activatePairing(
+      { id: "unused" },
+      3214,
+      "/download stable windows-amd64",
+    );
+
+    expect(messages).toHaveLength(2);
+    for (const message of messages) {
+      expect(message.text).toContain("Usage:");
+      expect(message.text).toContain("stable|dev");
+      expect(message.text).toContain(bootstrapTargets.join(", "));
+      expect(message.reply_markup).toBeUndefined();
+    }
+  });
+
+  it("does not mint downloads without an active entitlement", async () => {
+    await publishRelease("stable", "v3.2.0");
+    const messages = mockTelegram();
+
+    await activatePairing({ id: "unused" }, 3215, "/download");
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].text).toContain("does not have an active Sigmo Pro entitlement");
+    expect(messages[0].reply_markup).toBeUndefined();
+  });
+
+  it("does not mint downloads when a release is missing", async () => {
+    const telegramId = 3216;
+    await grant(telegramId);
+    await env.sigmo_pro_updates.delete("dev/latest/manifest.json");
+    const messages = mockTelegram();
+
+    await activatePairing({ id: "unused" }, telegramId, "/download dev");
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].text).toContain("is not available yet");
+    expect(messages[0].reply_markup).toBeUndefined();
+  });
+
+  it("does not mint a link when the requested target is missing", async () => {
+    const telegramId = 3217;
+    await grant(telegramId);
+    await publishRelease("stable", "v3.3.0", ["linux-amd64"]);
+    const messages = mockTelegram();
+
+    await activatePairing(
+      { id: "unused" },
+      telegramId,
+      "/download stable linux-arm-musl",
+    );
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].text).toContain("does not include linux-arm-musl");
+    expect(messages[0].reply_markup).toBeUndefined();
   });
 
   it("compares the webhook secret before processing an update", async () => {
@@ -706,7 +1021,8 @@ describe("Telegram pairing", () => {
     expect(messages[0].text).toBe(
       [
         "Available commands:",
-        "/start [pairing_id] — Authorize a Sigmo Pro device",
+        "/start [pairing_id] — Show Pro status or authorize a device",
+        "/download [stable|dev] [target] — Download Sigmo Pro",
         "/devices — List linked devices",
         "/revoke_device <device_id> — Revoke a linked device by ID",
       ].join("\n"),
@@ -863,6 +1179,100 @@ describe("device authorization", () => {
 });
 
 describe("private releases", () => {
+  it("streams Bootstrap downloads and observes entitlement revocation immediately", async () => {
+    const telegramId = 5801;
+    await grant(telegramId);
+    await publishRelease("stable", "v4.0.0", ["linux-amd64"]);
+    await env.sigmo_pro_updates.put(
+      "stable/versions/v4.0.0/sigmo-pro-linux-amd64.gz",
+      "0123456789",
+      {
+        httpMetadata: {
+          contentType: "application/octet-stream",
+          contentEncoding: "gzip",
+        },
+      },
+    );
+    const messages = mockTelegram();
+    await activatePairing(
+      { id: "unused" },
+      telegramId,
+      "/download stable linux-amd64",
+    );
+    const [button] = downloadButtons(messages[0]);
+    assert(button);
+
+    const fullResponse = await request(button.url);
+    expect(fullResponse.status).toBe(200);
+    expect(fullResponse.headers.get("cache-control")).toBe("private, no-store");
+    expect(fullResponse.headers.get("content-type")).toBe("application/gzip");
+    expect(fullResponse.headers.get("content-encoding")).toBeNull();
+    expect(fullResponse.headers.get("content-disposition")).toBe(
+      'attachment; filename="sigmo-pro-linux-amd64.gz"',
+    );
+    expect(new TextDecoder().decode(await fullResponse.arrayBuffer())).toBe(
+      "0123456789",
+    );
+
+    const rangeResponse = await request(button.url, {
+      headers: { range: "bytes=3-6" },
+    });
+    expect(rangeResponse.status).toBe(206);
+    expect(rangeResponse.headers.get("content-type")).toBe("application/gzip");
+    expect(rangeResponse.headers.get("content-encoding")).toBeNull();
+    expect(rangeResponse.headers.get("content-range")).toBe("bytes 3-6/10");
+    expect(new TextDecoder().decode(await rangeResponse.arrayBuffer())).toBe(
+      "3456",
+    );
+
+    await env.DB.prepare(
+      "UPDATE entitlements SET status = 'revoked' WHERE telegram_id = ?",
+    )
+      .bind(telegramId)
+      .run();
+    const revokedResponse = await request(button.url);
+    expect(revokedResponse.status).toBe(403);
+    await expect(
+      revokedResponse.json<{ error_code: string; message: string }>(),
+    ).resolves.toMatchObject({
+      error_code: "license_entitlement_inactive",
+    });
+  });
+
+  it("rejects tampered, expired, and malformed Bootstrap tickets", async () => {
+    const expiresAt = Math.floor(Date.now() / 1000) + 300;
+    const fields = {
+      purpose: "bootstrap" as const,
+      telegramId: 5802,
+      channel: "stable" as const,
+      version: "v4.1.0",
+      target: "linux-amd64",
+      path: "stable/versions/v4.1.0/sigmo-pro-linux-amd64.gz",
+      expiresAt,
+    };
+    const valid = await createTicket(
+      env.SIGMO_DOWNLOAD_TICKET_SECRET,
+      fields,
+    );
+    const tampered = tamperTicketSignature(valid);
+    const expired = await createTicket(env.SIGMO_DOWNLOAD_TICKET_SECRET, {
+      ...fields,
+      expiresAt: Math.floor(Date.now() / 1000) - 1,
+    });
+    const malformed = await createTicket(
+      env.SIGMO_DOWNLOAD_TICKET_SECRET,
+      { ...fields, deviceId: "device-1" } as unknown as DownloadTicket,
+    );
+
+    for (const ticket of [tampered, expired, malformed]) {
+      const response = await request(`/v1/downloads/${ticket}`);
+      expect(response.status).toBe(403);
+      await expect(
+        response.json<{ error_code: string; message: string }>(),
+      ).resolves.toMatchObject({ error_code: "download_ticket_invalid" });
+    }
+  });
+
   it("returns an explicit code for a verified expired lease", async () => {
     const { identity, proof } = await authorizedDevice(5901);
     const now = Date.now();
@@ -945,9 +1355,12 @@ describe("private releases", () => {
       artifacts: [
         {
           target: "linux-amd64",
-          name: "sigmo-pro-linux-amd64",
+          name: "sigmo-pro-linux-amd64.gz",
+          compression: "gzip",
           size: 10,
           sha256: "0".repeat(64),
+          executableSize: 8,
+          executableSha256: "1".repeat(64),
         },
       ],
     });
@@ -961,7 +1374,7 @@ describe("private releases", () => {
       "signature-v2",
     );
     await env.sigmo_pro_updates.put(
-      "stable/versions/v2.0.0/sigmo-pro-linux-amd64",
+      "stable/versions/v2.0.0/sigmo-pro-linux-amd64.gz",
       "0123456789",
     );
 
@@ -978,6 +1391,21 @@ describe("private releases", () => {
     }>();
     expect(release.manifest).toBe(manifest);
     expect(release.signature).toBe("signature-v2");
+    const deviceTicketValue = new URL(release.downloadUrl).pathname
+      .split("/")
+      .at(-1);
+    assert(deviceTicketValue);
+    const deviceTicket = await parseTicket(
+      env.SIGMO_DOWNLOAD_TICKET_SECRET,
+      deviceTicketValue,
+    );
+    expect(deviceTicket).toMatchObject({
+      deviceId: identity.deviceId,
+      channel: "stable",
+      version: "v2.0.0",
+      target: "linux-amd64",
+    });
+    expect(deviceTicket && "purpose" in deviceTicket).toBe(false);
 
     const downloadResponse = await request(release.downloadUrl, {
       headers: await signedHeaders(
@@ -993,6 +1421,10 @@ describe("private releases", () => {
     expect(downloadResponse.headers.get("cache-control")).toBe(
       "private, no-store",
     );
+    expect(downloadResponse.headers.get("content-type")).toBe(
+      "application/gzip",
+    );
+    expect(downloadResponse.headers.get("content-encoding")).toBeNull();
     expect(new TextDecoder().decode(await downloadResponse.arrayBuffer())).toBe(
       "2345",
     );
