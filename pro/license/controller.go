@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -23,12 +25,16 @@ import (
 )
 
 const (
-	leaseStateKey          = "lease"
+	licenseStateScope      = "license"
+	sessionStateKey        = "device.session"
+	legacyIdentityStateKey = "device.identity"
+	legacyLeaseStateKey    = "lease"
+
 	maxResponseSize        = 1 << 20
 	metadataRequestTimeout = 15 * time.Second
-	leaseClockSkew         = 5 * time.Minute
-	maxLeaseRefreshDelay   = 24 * time.Hour
-	maxLeaseLifetime       = 72 * time.Hour
+	maxLeaseRefreshDelay   = 30 * time.Minute
+	maxLeaseLifetime       = 6 * time.Hour
+	leaseRefreshRetryDelay = 5 * time.Minute
 )
 
 var (
@@ -44,6 +50,7 @@ type Config struct {
 	BaseURL          string
 	LicensePublicKey string
 	ReleasePublicKey string
+	IdentityPath     string
 	Storage          *storage.Store
 	Client           *http.Client
 	Restart          func()
@@ -58,11 +65,16 @@ type Controller struct {
 	restart          func()
 	identity         identity
 
-	mu           sync.RWMutex
-	lease        *Lease
-	leaseProof   *signedLease
-	pairings     map[string]pairingSession
-	leaseChanged chan struct{}
+	mu               sync.RWMutex
+	session          *storedSession
+	lease            *Lease
+	leaseProof       *signedLease
+	leaseRefreshAt   time.Time
+	leaseDeadline    time.Time
+	serverIssuedAt   time.Time
+	serverReceivedAt time.Time
+	pairings         map[string]pairingSession
+	leaseChanged     chan struct{}
 }
 
 func New(ctx context.Context, cfg Config) (*Controller, error) {
@@ -83,11 +95,27 @@ func New(ctx context.Context, cfg Config) (*Controller, error) {
 		}
 		publicKey = ed25519.PublicKey(decoded)
 	}
-	identity, err := loadOrCreateIdentity(ctx, cfg.Storage)
+	identityPath := strings.TrimSpace(cfg.IdentityPath)
+	if identityPath == "" {
+		return nil, errors.New("device identity path is required")
+	}
+	identity, err := loadOrCreateIdentity(identityPath)
 	if err != nil {
 		return nil, err
 	}
-	return &Controller{
+	if err := cfg.Storage.Delete(ctx, licenseStateScope, legacyIdentityStateKey); err != nil {
+		return nil, fmt.Errorf("remove legacy device identity: %w", err)
+	}
+	if err := cfg.Storage.Delete(ctx, licenseStateScope, legacyLeaseStateKey); err != nil {
+		return nil, fmt.Errorf("remove legacy license lease: %w", err)
+	}
+	var savedSession storedSession
+	if err := cfg.Storage.Get(ctx, licenseStateScope, sessionStateKey, &savedSession); err != nil && !errors.Is(err, storage.ErrNotFound) {
+		return nil, fmt.Errorf("read device session: %w", err)
+	} else if err == nil && !validStoredSession(savedSession) {
+		return nil, errors.New("read device session: invalid session state")
+	}
+	controller := &Controller{
 		baseURL:          baseURL,
 		licensePublicKey: publicKey,
 		releasePublicKey: cfg.ReleasePublicKey,
@@ -97,7 +125,11 @@ func New(ctx context.Context, cfg Config) (*Controller, error) {
 		identity:         identity,
 		pairings:         make(map[string]pairingSession),
 		leaseChanged:     make(chan struct{}, 1),
-	}, nil
+	}
+	if savedSession.SessionID != "" {
+		controller.session = cloneSession(&savedSession)
+	}
+	return controller, nil
 }
 
 func authorizationHTTPClient(client *http.Client) *http.Client {
@@ -112,34 +144,17 @@ func authorizationHTTPClient(client *http.Client) *http.Client {
 }
 
 func (c *Controller) Start(ctx context.Context) error {
-	proof, err := c.readLease(ctx)
-	if errors.Is(err, storage.ErrNotFound) {
+	c.clearLease()
+	if c.currentSession() == nil {
 		return nil
 	}
-	if err != nil {
-		return err
-	}
-	lease, err := c.verifyLease(proof, time.Now())
-	if err != nil {
-		if removeErr := c.removeLease(ctx); removeErr != nil {
-			return errors.Join(err, fmt.Errorf("remove invalid saved license lease: %w", removeErr))
-		}
-		return err
-	}
-	c.setLease(lease, &proof)
-	if err := c.refresh(ctx); err != nil {
-		if errors.Is(err, errExplicitUnauthorized) {
-			c.clearLease(ctx)
-		}
-		return err
-	}
-	return nil
+	return c.refresh(ctx)
 }
 
 func (c *Controller) Authorized() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.lease != nil && c.lease.Status == "active" && time.Now().Before(c.lease.ExpiresAt)
+	return c.lease != nil && c.lease.Status == "active" && time.Now().Before(c.leaseDeadline)
 }
 
 func (c *Controller) Licensee() *appupdate.Licensee {
@@ -167,22 +182,21 @@ func (c *Controller) Licensee() *appupdate.Licensee {
 func (c *Controller) Run(ctx context.Context) error {
 	var retryAt time.Time
 	for {
-		lease := c.currentLease()
-		if lease == nil {
+		_, refreshAt, deadline := c.currentLeaseState()
+		if deadline.IsZero() {
 			return nil
 		}
-		now := time.Now()
-		if !now.Before(lease.ExpiresAt) {
-			c.clearLease(ctx)
+		if !time.Now().Before(deadline) {
+			c.clearLease()
 			c.restartHealthy()
 			return nil
 		}
-		next := lease.RefreshAfter
+		next := refreshAt
 		if !retryAt.IsZero() {
 			next = retryAt
 		}
-		if next.After(lease.ExpiresAt) {
-			next = lease.ExpiresAt
+		if next.After(deadline) {
+			next = deadline
 		}
 		wait := time.Until(next)
 		if wait < 0 {
@@ -199,8 +213,8 @@ func (c *Controller) Run(ctx context.Context) error {
 			continue
 		case <-timer.C:
 		}
-		if !time.Now().Before(lease.ExpiresAt) {
-			c.clearLease(ctx)
+		if !time.Now().Before(deadline) {
+			c.clearLease()
 			c.restartHealthy()
 			return nil
 		}
@@ -210,18 +224,15 @@ func (c *Controller) Run(ctx context.Context) error {
 			continue
 		}
 		if errors.Is(err, errExplicitUnauthorized) || !c.Authorized() {
-			c.clearLease(ctx)
+			c.clearLease()
 			c.restartHealthy()
 			return nil
 		}
-		lease = c.currentLease()
-		if lease == nil {
-			return nil
-		}
-		slog.Warn("refresh product authorization", "error", err, "offline_until", lease.ExpiresAt)
-		retryAt = time.Now().Add(time.Hour)
-		if retryAt.After(lease.ExpiresAt) {
-			retryAt = lease.ExpiresAt
+		_, _, deadline = c.currentLeaseState()
+		slog.Warn("refresh product authorization", "error", err)
+		retryAt = time.Now().Add(leaseRefreshRetryDelay)
+		if retryAt.After(deadline) {
+			retryAt = deadline
 		}
 	}
 }
@@ -243,36 +254,83 @@ func (c *Controller) refresh(ctx context.Context) error {
 	if c.baseURL == "" || len(c.licensePublicKey) == 0 {
 		return errors.New("Pro authorization service is not configured")
 	}
+	session, err := c.prepareRotation(ctx)
+	if err != nil {
+		return err
+	}
 	var challengeResponse challenge
-	_, err := c.doJSON(ctx, http.MethodPost, "/v1/license-challenges", map[string]string{
-		"deviceId": c.identity.DeviceID,
+	_, err = c.doJSON(ctx, http.MethodPost, "/v1/license-challenges", leaseChallengeRequest{
+		DeviceID:   c.identity.DeviceID,
+		SessionID:  session.SessionID,
+		Generation: session.Generation,
 	}, "", &challengeResponse)
 	if err != nil {
 		return c.classifyAuthorizationError(err)
 	}
-	challengeBytes, err := decodeKey(challengeResponse.Challenge)
-	if err != nil {
+	if _, err := decodeKey(challengeResponse.Challenge); err != nil {
 		return fmt.Errorf("decode license challenge: %w", err)
 	}
-	signature := ed25519.Sign(c.identity.PrivateKey, challengeBytes)
+	nextHash := tokenHash(session.Pending.NextRefreshToken)
+	rotation := leaseRotationRequest{
+		DeviceID:             c.identity.DeviceID,
+		SessionID:            session.SessionID,
+		Generation:           session.Generation,
+		Challenge:            challengeResponse.Challenge,
+		RefreshToken:         session.RefreshToken,
+		NextRefreshTokenHash: nextHash,
+		RotationID:           session.Pending.ID,
+		FingerprintHash:      c.identity.FingerprintHash,
+	}
+	rotation.Signature = base64.RawStdEncoding.EncodeToString(ed25519.Sign(c.identity.PrivateKey, []byte(rotationMessage(rotation))))
 	var proof signedLease
-	_, err = c.doJSON(ctx, http.MethodPost, "/v1/license-leases", map[string]string{
-		"deviceId":  c.identity.DeviceID,
-		"challenge": challengeResponse.Challenge,
-		"signature": base64.RawStdEncoding.EncodeToString(signature),
-	}, "", &proof)
+	_, err = c.doJSON(ctx, http.MethodPost, "/v1/license-leases", rotation, "", &proof)
 	if err != nil {
 		return c.classifyAuthorizationError(err)
 	}
-	lease, err := c.verifyLease(proof, time.Now())
+	lease, err := c.verifyLease(proof, session.SessionID, session.Generation+1)
 	if err != nil {
 		return err
 	}
-	if err := c.saveLease(ctx, proof); err != nil {
+	next := storedSession{
+		SessionID:    session.SessionID,
+		Generation:   session.Generation + 1,
+		RefreshToken: session.Pending.NextRefreshToken,
+	}
+	if err := c.saveSession(ctx, next); err != nil {
 		return err
 	}
+	c.mu.Lock()
+	c.session = cloneSession(&next)
+	c.mu.Unlock()
 	c.setLease(lease, &proof)
 	return nil
+}
+
+func (c *Controller) prepareRotation(ctx context.Context) (*storedSession, error) {
+	c.mu.Lock()
+	if c.session == nil {
+		c.mu.Unlock()
+		return nil, errors.New("device authorization session is unavailable")
+	}
+	if c.session.Pending == nil {
+		rotationID, err := randomToken(24)
+		if err != nil {
+			c.mu.Unlock()
+			return nil, err
+		}
+		nextToken, err := randomToken(32)
+		if err != nil {
+			c.mu.Unlock()
+			return nil, err
+		}
+		c.session.Pending = &pendingRotation{ID: rotationID, NextRefreshToken: nextToken}
+	}
+	session := cloneSession(c.session)
+	c.mu.Unlock()
+	if err := c.saveSession(ctx, *session); err != nil {
+		return nil, err
+	}
+	return session, nil
 }
 
 func (c *Controller) classifyAuthorizationError(err error) error {
@@ -285,14 +343,14 @@ func (c *Controller) classifyAuthorizationError(err error) error {
 
 func isExplicitAuthorizationError(code string) bool {
 	switch code {
-	case "license_device_unauthorized", "license_entitlement_inactive", "license_lease_expired":
+	case "license_device_unauthorized", "license_entitlement_inactive", "license_lease_expired", "license_session_superseded":
 		return true
 	default:
 		return false
 	}
 }
 
-func (c *Controller) verifyLease(proof signedLease, now time.Time) (*Lease, error) {
+func (c *Controller) verifyLease(proof signedLease, sessionID string, generation int64) (*Lease, error) {
 	if len(c.licensePublicKey) == 0 {
 		return nil, errors.New("verify license lease: public key is unavailable")
 	}
@@ -304,11 +362,10 @@ func (c *Controller) verifyLease(proof signedLease, now time.Time) (*Lease, erro
 	if err := json.Unmarshal(proof.Lease, &lease); err != nil {
 		return nil, fmt.Errorf("decode license lease: %w", err)
 	}
-	if lease.SchemaVersion != leaseSchemaVersion || lease.DeviceID != c.identity.DeviceID || lease.TelegramID <= 0 || lease.Status != "active" {
+	if lease.SchemaVersion != leaseSchemaVersion || lease.DeviceID != c.identity.DeviceID || lease.SessionID != sessionID || lease.Generation != generation || lease.TelegramID <= 0 || lease.Status != "active" {
 		return nil, errors.New("verify license lease: metadata mismatch")
 	}
-	if lease.IssuedAt.After(now.Add(leaseClockSkew)) ||
-		!lease.RefreshAfter.After(lease.IssuedAt) ||
+	if !lease.RefreshAfter.After(lease.IssuedAt) ||
 		lease.RefreshAfter.Sub(lease.IssuedAt) > maxLeaseRefreshDelay ||
 		!lease.ExpiresAt.After(lease.RefreshAfter) ||
 		lease.ExpiresAt.Sub(lease.IssuedAt) > maxLeaseLifetime {
@@ -317,13 +374,13 @@ func (c *Controller) verifyLease(proof signedLease, now time.Time) (*Lease, erro
 	if lease.EntitlementExpiresAt != nil && lease.EntitlementExpiresAt.Before(lease.ExpiresAt) {
 		return nil, errors.New("verify license lease: entitlement expires before lease")
 	}
-	if !now.Before(lease.ExpiresAt) {
-		return nil, errExplicitUnauthorized
-	}
 	return &lease, nil
 }
 
 func (c *Controller) setLease(lease *Lease, proof *signedLease) {
+	receivedAt := time.Now()
+	refreshAt := receivedAt.Add(lease.RefreshAfter.Sub(lease.IssuedAt))
+	deadline := receivedAt.Add(lease.ExpiresAt.Sub(lease.IssuedAt))
 	c.mu.Lock()
 	c.lease = cloneLease(lease)
 	if proof == nil {
@@ -333,28 +390,30 @@ func (c *Controller) setLease(lease *Lease, proof *signedLease) {
 		cloned.Lease = bytes.Clone(proof.Lease)
 		c.leaseProof = &cloned
 	}
+	c.leaseRefreshAt = refreshAt
+	c.leaseDeadline = deadline
+	c.serverIssuedAt = lease.IssuedAt
+	c.serverReceivedAt = receivedAt
 	c.mu.Unlock()
 	c.notifyLeaseChanged()
 }
 
-func (c *Controller) clearLease(ctx context.Context) {
+func (c *Controller) clearLease() {
 	c.mu.Lock()
 	c.lease = nil
 	c.leaseProof = nil
+	c.leaseRefreshAt = time.Time{}
+	c.leaseDeadline = time.Time{}
+	c.serverIssuedAt = time.Time{}
+	c.serverReceivedAt = time.Time{}
 	c.mu.Unlock()
 	c.notifyLeaseChanged()
-	if err := c.removeLease(ctx); err != nil {
-		slog.Warn("remove saved license lease", "error", err)
-	}
 }
 
-func (c *Controller) currentLease() *Lease {
+func (c *Controller) currentLeaseState() (*Lease, time.Time, time.Time) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if c.lease == nil {
-		return nil
-	}
-	return cloneLease(c.lease)
+	return cloneLease(c.lease), c.leaseRefreshAt, c.leaseDeadline
 }
 
 func cloneLease(lease *Lease) *Lease {
@@ -369,30 +428,74 @@ func cloneLease(lease *Lease) *Lease {
 	return &cloned
 }
 
+func cloneSession(session *storedSession) *storedSession {
+	if session == nil {
+		return nil
+	}
+	cloned := *session
+	if session.Pending != nil {
+		pending := *session.Pending
+		cloned.Pending = &pending
+	}
+	return &cloned
+}
+
+func (c *Controller) currentSession() *storedSession {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return cloneSession(c.session)
+}
+
+func (c *Controller) saveSession(ctx context.Context, session storedSession) error {
+	if err := c.storage.Put(ctx, licenseStateScope, sessionStateKey, session); err != nil {
+		return fmt.Errorf("save device session: %w", err)
+	}
+	return nil
+}
+
+func validStoredSession(session storedSession) bool {
+	if strings.TrimSpace(session.SessionID) == "" || session.Generation < 1 || !validToken(session.RefreshToken, 32) {
+		return false
+	}
+	return session.Pending == nil || strings.TrimSpace(session.Pending.ID) != "" && validToken(session.Pending.NextRefreshToken, 32)
+}
+
+func validToken(value string, size int) bool {
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	return err == nil && len(decoded) == size
+}
+
+func randomToken(size int) (string, error) {
+	value := make([]byte, size)
+	if _, err := rand.Read(value); err != nil {
+		return "", fmt.Errorf("generate authorization token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(value), nil
+}
+
+func tokenHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func rotationMessage(request leaseRotationRequest) string {
+	return strings.Join([]string{
+		"sigmo-license-v1",
+		request.DeviceID,
+		request.SessionID,
+		fmt.Sprintf("%d", request.Generation),
+		request.Challenge,
+		request.RotationID,
+		request.NextRefreshTokenHash,
+		request.FingerprintHash,
+	}, "\n")
+}
+
 func (c *Controller) notifyLeaseChanged() {
 	select {
 	case c.leaseChanged <- struct{}{}:
 	default:
 	}
-}
-
-func (c *Controller) readLease(ctx context.Context) (signedLease, error) {
-	var proof signedLease
-	if err := c.storage.Get(ctx, licenseStateScope, leaseStateKey, &proof); err != nil {
-		return signedLease{}, err
-	}
-	return proof, nil
-}
-
-func (c *Controller) saveLease(ctx context.Context, proof signedLease) error {
-	if err := c.storage.Put(ctx, licenseStateScope, leaseStateKey, proof); err != nil {
-		return fmt.Errorf("save license lease: %w", err)
-	}
-	return nil
-}
-
-func (c *Controller) removeLease(ctx context.Context) error {
-	return c.storage.Delete(ctx, licenseStateScope, leaseStateKey)
 }
 
 func (c *Controller) doJSON(ctx context.Context, method string, path string, body any, bearer string, dst any) (int, error) {
@@ -457,8 +560,11 @@ func (c *Controller) doJSON(ctx context.Context, method string, path string, bod
 func (c *Controller) signedRequest(ctx context.Context, method string, rawURL string) (*http.Request, error) {
 	c.mu.RLock()
 	proof := c.leaseProof
+	deadline := c.leaseDeadline
+	serverIssuedAt := c.serverIssuedAt
+	serverReceivedAt := c.serverReceivedAt
 	c.mu.RUnlock()
-	if proof == nil || !c.Authorized() {
+	if proof == nil || deadline.IsZero() || !time.Now().Before(deadline) {
 		return nil, errExplicitUnauthorized
 	}
 	parsed, err := url.Parse(rawURL)
@@ -487,7 +593,7 @@ func (c *Controller) signedRequest(ctx context.Context, method string, rawURL st
 	if err != nil {
 		return nil, fmt.Errorf("encode update authorization: %w", err)
 	}
-	timestamp := fmt.Sprintf("%d", time.Now().Unix())
+	timestamp := fmt.Sprintf("%d", serverIssuedAt.Add(time.Since(serverReceivedAt)).Unix())
 	message := method + "\n" + req.URL.RequestURI() + "\n" + timestamp
 	req.Header.Set("X-Sigmo-Device-ID", c.identity.DeviceID)
 	req.Header.Set("X-Sigmo-Lease", base64.RawURLEncoding.EncodeToString(proofData))

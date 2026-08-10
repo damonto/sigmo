@@ -87,6 +87,9 @@ async function activatePairing(
     pairingId: pairingID,
     deviceId: pairing.deviceId,
     publicKey: pairing.publicKey,
+    sessionId: pairing.sessionId,
+    refreshTokenHash: pairing.refreshTokenHash,
+    fingerprintHash: pairing.fingerprintHash,
     telegramId: user.id,
     displayName: displayName(user),
     username: user.username ?? "",
@@ -111,6 +114,14 @@ async function activatePairing(
       currentDevice.telegramId !== user.id
     )
       return "This device is linked to another Telegram account. The current owner must revoke it before it can be linked again.";
+    const currentSession = await db.findDeviceSession(pairing.deviceId);
+    if (
+      currentDevice &&
+      !currentDevice.revokedAt &&
+      currentSession &&
+      currentSession.fingerprintHash !== pairing.fingerprintHash
+    )
+      return "This device identity is bound to another host. Revoke the existing device before pairing it again.";
     return `Device limit reached (${currentEntitlement.maxDevices}). Revoke an existing device first.`;
   }
   return `Sigmo Pro authorized device ${pairing.deviceId}. You can now return to Sigmo.`;
@@ -202,7 +213,7 @@ async function downloadCommand(
     text: [
       `Channel: ${channelName(result.channel)}`,
       `Version: ${result.version}`,
-      "Download links expire in 15 minutes.",
+      "Download links expire in 5 minutes and can be used once.",
       "Downloads are gzip archives. Run gzip -d on the .gz file, then chmod +x the extracted file.",
     ].join("\n"),
     replyMarkup: { inline_keyboard: inlineKeyboard },

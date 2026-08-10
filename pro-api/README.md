@@ -47,8 +47,12 @@ Replace `describe_schema_change` with a concise migration name.
 Queries use prepared statements and explicit result types. Device-limit
 activation uses `D1Database.batch()` so its
 [multi-statement operation remains atomic](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch).
-Challenge validation happens before a conditional `DELETE`; the request
-succeeds only when that atomic write reports one changed row.
+Session rotation uses a generation and refresh-token compare-and-swap in the
+same batch that consumes its challenge.
+
+The authorization schema is pre-release and intentionally has no upgrade path.
+Recreate the D1 database before deployment if an older copy of these migrations
+has already been applied.
 
 ## Secrets and signing keys
 
@@ -60,6 +64,7 @@ bunx wrangler secret put SIGMO_TELEGRAM_BOT_TOKEN
 bunx wrangler secret put SIGMO_TELEGRAM_WEBHOOK_SECRET
 bunx wrangler secret put SIGMO_LICENSE_PRIVATE_KEY
 bunx wrangler secret put SIGMO_LICENSE_PUBLIC_KEY
+bunx wrangler secret put SIGMO_RELEASE_PUBLIC_KEY
 bunx wrangler secret put SIGMO_DOWNLOAD_TICKET_SECRET
 bunx wrangler secret put SIGMO_ADMIN_TELEGRAM_IDS
 ```
@@ -68,6 +73,8 @@ Formats:
 
 - `SIGMO_LICENSE_PRIVATE_KEY`: Base64-encoded Ed25519 PKCS#8 private key.
 - `SIGMO_LICENSE_PUBLIC_KEY`: Base64-encoded 32-byte raw Ed25519 public key.
+- `SIGMO_RELEASE_PUBLIC_KEY`: Base64-encoded 32-byte raw Ed25519 public key
+  used to verify release manifests before issuing downloads.
 - `SIGMO_DOWNLOAD_TICKET_SECRET`: independently generated high-entropy HMAC
   secret of at least 32 characters.
 - `SIGMO_ADMIN_TELEGRAM_IDS`: comma-separated positive Telegram numeric user
@@ -129,7 +136,8 @@ Running `/start` without a pairing ID shows the user's numeric Telegram ID,
 current entitlement status, and the Stable and Dev download commands. An active
 entitlement can download either channel. `/download` defaults to Stable and
 returns six Linux target buttons when the release is complete; the explicit
-form returns one target button. Bootstrap links expire after 15 minutes.
+form returns one target button. Bootstrap links expire after 5 minutes and can
+be consumed only once.
 
 The Bot mints Bootstrap tickets only while handling a command received through
 the verified Telegram webhook. There is no public ticket-minting HTTP API.
@@ -238,12 +246,13 @@ dev/versions/dev-01234567/sigmo-pro-<target>.gz
 After the switch succeeds, CI removes every other version prefix in that
 channel. Stable and Dev therefore retain one complete release each. Automatic
 updates use five-minute tickets bound to the device, channel, version, target,
-and R2 object path. First installation uses 15-minute Bootstrap tickets bound
-to the Telegram user, channel, version, target, and object path. Every Bootstrap
-download rechecks the entitlement, so revocation or expiry takes effect
-immediately. Both ticket types stream full and Range responses through the
-Worker; the R2 bucket remains private and is never exposed through a presigned
-direct URL. Every artifact is a gzip-compressed executable; the Worker returns
+and R2 object path. First installation uses five-minute, single-use Bootstrap
+tickets bound to the Telegram user, channel, version, target, and object path.
+Every Bootstrap download rechecks the entitlement, so revocation or expiry
+takes effect immediately. Bootstrap downloads require a full GET; device
+updates continue to support Range responses. The R2 bucket remains private and
+is never exposed through a presigned direct URL. Every artifact is a
+gzip-compressed executable; the Worker returns
 the compressed bytes with `Content-Type: application/gzip` and never sets
 `Content-Encoding`.
 

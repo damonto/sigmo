@@ -1,5 +1,6 @@
 import type { RequestContext } from "./context";
-import { apiError, json } from "./http";
+import { randomToken, textEncoder, verifyEd25519 } from "./crypto";
+import { apiError, json, nowISO } from "./http";
 import { authorizeRequest, isActive } from "./license";
 import { createTicket, parseTicket } from "./tickets";
 import type { Manifest, ReleaseChannel } from "./types";
@@ -8,17 +9,21 @@ import { manifest as parseManifest } from "./validation";
 const maxManifestSize = 1024 * 1024;
 const maxSignatureSize = 8 * 1024;
 const deviceTicketLifetimeSeconds = 5 * 60;
-const bootstrapTicketLifetimeSeconds = 15 * 60;
+const bootstrapTicketLifetimeSeconds = 5 * 60;
 
 type ReleaseSnapshot = {
   manifest: Manifest;
   text: string;
+  signature: string;
 };
 
 type ReleaseErrorCode =
   | "release_not_found"
   | "release_manifest_too_large"
-  | "release_manifest_invalid";
+  | "release_manifest_invalid"
+  | "release_signature_not_found"
+  | "release_signature_too_large"
+  | "release_signature_invalid";
 
 class ReleaseMetadataError extends Error {
   constructor(
@@ -62,7 +67,36 @@ async function loadLatestManifest(
       502,
       "release manifest is invalid",
     );
-  return { manifest, text };
+  const signatureObject = await env.sigmo_pro_updates.get(
+    `${channel}/versions/${manifest.version}/manifest.json.sig`,
+  );
+  if (!signatureObject)
+    throw new ReleaseMetadataError(
+      "release_signature_not_found",
+      404,
+      "release signature is unavailable",
+    );
+  if (signatureObject.size > maxSignatureSize)
+    throw new ReleaseMetadataError(
+      "release_signature_too_large",
+      502,
+      "release signature exceeds size limit",
+    );
+  const signature = (await signatureObject.text()).trim();
+  if (
+    !signature ||
+    !(await verifyEd25519(
+      env.SIGMO_RELEASE_PUBLIC_KEY,
+      textEncoder.encode(text),
+      signature,
+    ))
+  )
+    throw new ReleaseMetadataError(
+      "release_signature_invalid",
+      502,
+      "release signature is invalid",
+    );
+  return { manifest, text, signature };
 }
 
 function releaseMetadataResponse(caught: unknown): Response | null {
@@ -131,18 +165,28 @@ export async function createBootstrapDownloads(
 
   const expiresAt =
     Math.floor(Date.now() / 1000) + bootstrapTicketLifetimeSeconds;
+  const expiresAtISO = new Date(expiresAt * 1000).toISOString();
   const downloads: BootstrapDownload[] = [];
+  const grants: Array<{
+    jti: string;
+    telegramId: number;
+    objectPath: string;
+    expiresAt: string;
+  }> = [];
   for (const { target, artifact } of artifacts) {
     if (!artifact) continue;
+    const jti = randomToken(24);
+    const path = `${input.channel}/versions/${release.manifest.version}/${artifact.name}`;
     const ticket = await createTicket(
       context.env.SIGMO_DOWNLOAD_TICKET_SECRET,
       {
         purpose: "bootstrap",
+        jti,
         telegramId: input.telegramId,
         channel: input.channel,
         version: release.manifest.version,
         target,
-        path: `${input.channel}/versions/${release.manifest.version}/${artifact.name}`,
+        path,
         expiresAt,
       },
     );
@@ -152,7 +196,14 @@ export async function createBootstrapDownloads(
       target,
       url: downloadURL.toString(),
     });
+    grants.push({
+      jti,
+      telegramId: input.telegramId,
+      objectPath: path,
+      expiresAt: expiresAtISO,
+    });
   }
+  await context.db.insertDownloadGrants(grants);
   return {
     ok: true,
     channel: input.channel,
@@ -185,29 +236,7 @@ export async function latestRelease(
     if (response) return response;
     throw caught;
   }
-  const { manifest, text: manifestText } = release;
-  const signatureObject = await env.sigmo_pro_updates.get(
-    `${channel}/versions/${manifest.version}/manifest.json.sig`,
-  );
-  if (!signatureObject)
-    return apiError(
-      "release_signature_not_found",
-      "release signature is unavailable",
-      404,
-    );
-  if (signatureObject.size > maxSignatureSize)
-    return apiError(
-      "release_signature_too_large",
-      "release signature exceeds size limit",
-      502,
-    );
-  const signature = (await signatureObject.text()).trim();
-  if (!signature)
-    return apiError(
-      "release_signature_invalid",
-      "release signature is invalid",
-      502,
-    );
+  const { manifest, text: manifestText, signature } = release;
   const artifact = manifest.artifacts.find(
     (candidate) => candidate.target === target,
   );
@@ -249,11 +278,29 @@ export async function download(
       403,
     );
   if ("purpose" in ticket) {
+    if (request.headers.has("range"))
+      return apiError(
+        "bootstrap_range_unsupported",
+        "Bootstrap downloads do not support byte ranges",
+        400,
+      );
     const entitlement = await context.db.findEntitlement(ticket.telegramId);
     if (!isActive(entitlement))
       return apiError(
         "license_entitlement_inactive",
         "authorization revoked or expired",
+        403,
+      );
+    const consumed = await context.db.consumeDownloadGrant(
+      ticket.jti,
+      ticket.telegramId,
+      ticket.path,
+      nowISO(),
+    );
+    if (!consumed)
+      return apiError(
+        "download_ticket_invalid",
+        "download ticket is invalid or expired",
         403,
       );
   } else {

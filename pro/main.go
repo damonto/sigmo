@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	"github.com/damonto/sigmo/internal/app/buildinfo"
@@ -24,7 +25,7 @@ var (
 
 func init() {
 	flag.StringVar(&listenAddress, "listen-address", "0.0.0.0:9527", "HTTP listen address")
-	flag.StringVar(&dbPath, "db-path", "", "path to SQLite database")
+	flag.StringVar(&dbPath, "db-path", "", "path to application state database")
 	flag.BoolVar(&debug, "debug", false, "enable debug logging and internal error responses")
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 }
@@ -76,6 +77,7 @@ func authorizePro(ctx context.Context, cfg server.AuthorizationConfig) (server.A
 		BaseURL:          prolicense.WorkerURL,
 		LicensePublicKey: prolicense.LicensePublicKey,
 		ReleasePublicKey: cfg.Build.ReleasePublicKey,
+		IdentityPath:     filepath.Join(cfg.StateDir, "device.identity"),
 		Storage:          cfg.Storage,
 		Restart:          cfg.Restart,
 	})

@@ -35,10 +35,11 @@ type Authorization interface {
 }
 
 type AuthorizationConfig struct {
-	Build   buildinfo.Info
-	Restart func()
-	Store   *settings.Store
-	Storage *storage.Store
+	Build    buildinfo.Info
+	Restart  func()
+	StateDir string
+	Store    *settings.Store
+	Storage  *storage.Store
 }
 
 type AuthorizationFactory func(context.Context, AuthorizationConfig) (Authorization, error)

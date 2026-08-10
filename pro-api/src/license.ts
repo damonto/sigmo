@@ -9,7 +9,7 @@ import {
   verifyEd25519,
 } from "./crypto";
 import type { RequestContext } from "./context";
-import type { Device, Entitlement } from "./database";
+import type { Device, DeviceSession, Entitlement } from "./database";
 import { apiError, json, nowISO, parseJSON } from "./http";
 import type { Lease, SignedLease } from "./types";
 import {
@@ -22,8 +22,8 @@ import {
 const minimumEntitlementLifetime = 5_000;
 const maxOutstandingPairingsPerDevice = 3;
 const leaseClockSkew = 5 * 60_000;
-const maxLeaseRefreshDelay = 24 * 60 * 60_000;
-const maxLeaseLifetime = 72 * 60 * 60_000;
+const maxLeaseRefreshDelay = 30 * 60_000;
+const maxLeaseLifetime = 6 * 60 * 60_000;
 const deviceIDPattern = /^[0-9a-f]{32}$/;
 const telegramBotUsernamePattern = /^[A-Za-z][A-Za-z0-9_]{1,28}bot$/i;
 
@@ -63,7 +63,7 @@ export async function createPairing(
   if (!body)
     return apiError(
       "license_pairing_invalid_request",
-      "deviceId and publicKey are required",
+      "deviceId, publicKey, refreshTokenHash, and fingerprintHash are required",
       400,
     );
   let expectedID: string;
@@ -87,6 +87,7 @@ export async function createPairing(
     throw new Error("BOT_USERNAME is not a valid Telegram bot username");
 
   const pairingID = randomToken(12);
+  const sessionID = randomToken(24);
   const pollToken = randomToken(32);
   const pollTokenHash = await sha256(pollToken);
   const createdAt = new Date();
@@ -100,6 +101,9 @@ export async function createPairing(
       pollTokenHash,
       deviceId: body.deviceId,
       publicKey: body.publicKey,
+      sessionId: sessionID,
+      refreshTokenHash: body.refreshTokenHash,
+      fingerprintHash: body.fingerprintHash,
       createdAt: createdAtISO,
       expiresAt: expiresAtISO,
     },
@@ -159,12 +163,16 @@ export async function getPairing(
   }
   const entitlement = await db.findEntitlement(row.telegramId);
   const device = await db.findDevice(row.deviceId);
+  const session = await db.findDeviceSession(row.deviceId);
   if (
     !isActive(entitlement) ||
     !device ||
     device.revokedAt ||
     device.telegramId !== row.telegramId ||
-    device.publicKey !== row.publicKey
+    device.publicKey !== row.publicKey ||
+    !session ||
+    session.sessionId !== row.sessionId ||
+    session.fingerprintHash !== row.fingerprintHash
   )
     return apiError(
       "license_entitlement_inactive",
@@ -175,7 +183,7 @@ export async function getPairing(
     id: pairingID,
     status: "active",
     expiresAt: row.expiresAt,
-    lease: await issueLease(context, entitlement, device),
+    lease: await issueLease(context, entitlement, device, session),
   });
 }
 
@@ -188,7 +196,7 @@ export async function createChallenge(
   if (!body)
     return apiError(
       "license_challenge_invalid_request",
-      "deviceId is required",
+      "deviceId, sessionId, and generation are required",
       400,
     );
   const device = await db.findDevice(body.deviceId);
@@ -197,6 +205,18 @@ export async function createChallenge(
       "license_device_unauthorized",
       "device is not authorized",
       403,
+    );
+  const session = await db.findDeviceSession(body.deviceId);
+  if (
+    !session ||
+    session.sessionId !== body.sessionId ||
+    body.generation > session.generation ||
+    body.generation < session.generation - 1
+  )
+    return apiError(
+      "license_session_superseded",
+      "device authorization session was replaced",
+      409,
     );
   const entitlement = await db.findEntitlement(device.telegramId);
   if (!isActive(entitlement))
@@ -228,7 +248,7 @@ export async function createLease(
   if (!body)
     return apiError(
       "license_lease_invalid_request",
-      "deviceId, challenge, and signature are required",
+      "device session rotation request is incomplete",
       400,
     );
   const challengeHash = await sha256(body.challenge);
@@ -248,16 +268,11 @@ export async function createLease(
       "device is not authorized",
       403,
     );
-  let signatureValid = false;
-  try {
-    signatureValid = await verifyEd25519(
-      device.publicKey,
-      decodeBase64(body.challenge),
-      body.signature,
-    );
-  } catch {
-    signatureValid = false;
-  }
+  const signatureValid = await verifyEd25519(
+    device.publicKey,
+    textEncoder.encode(rotationMessage(body)),
+    body.signature,
+  );
   if (!signatureValid)
     return apiError(
       "device_signature_invalid",
@@ -271,27 +286,60 @@ export async function createLease(
       "authorization revoked or expired",
       403,
     );
-  // Validation happens before consumption. The conditional DELETE is the
-  // atomic claim: concurrent requests can verify, but only one changes a row.
-  const consumed = await db.consumeChallenge(challengeHash, body.deviceId);
-  if (!consumed)
+  const rotation = await db.rotateSession({
+    deviceId: body.deviceId,
+    sessionId: body.sessionId,
+    generation: body.generation,
+    refreshTokenHash: await sha256(body.refreshToken),
+    nextRefreshTokenHash: body.nextRefreshTokenHash,
+    rotationId: body.rotationId,
+    fingerprintHash: body.fingerprintHash,
+    challengeHash,
+    timestamp: nowISO(),
+  });
+  if (rotation === "superseded")
     return apiError(
-      "license_challenge_invalid",
-      "challenge is invalid or already consumed",
-      403,
+      "license_session_superseded",
+      "device authorization session was replaced",
+      409,
     );
-  await db.markDeviceSeen(device.deviceId, nowISO());
-  return json(await issueLease(context, entitlement, device), 201);
+  const session = await db.findDeviceSession(device.deviceId);
+  if (!session) throw new Error("rotated device session is unavailable");
+  return json(await issueLease(context, entitlement, device, session), 201);
+}
+
+type RotationMessageInput = {
+  deviceId: string;
+  sessionId: string;
+  generation: number;
+  challenge: string;
+  rotationId: string;
+  nextRefreshTokenHash: string;
+  fingerprintHash: string;
+};
+
+export function rotationMessage(input: RotationMessageInput): string {
+  return [
+    "sigmo-license-v1",
+    input.deviceId,
+    input.sessionId,
+    String(input.generation),
+    input.challenge,
+    input.rotationId,
+    input.nextRefreshTokenHash,
+    input.fingerprintHash,
+  ].join("\n");
 }
 
 export async function issueLease(
   context: RequestContext,
   entitlement: Entitlement,
   device: Device,
+  session: DeviceSession,
 ): Promise<SignedLease> {
   const { env } = context;
   const issuedAt = new Date();
-  let expiresAt = new Date(issuedAt.getTime() + 72 * 60 * 60_000);
+  let expiresAt = new Date(issuedAt.getTime() + maxLeaseLifetime);
   const entitlementExpiresAt = entitlement.expiresAt
     ? new Date(entitlement.expiresAt)
     : undefined;
@@ -301,7 +349,7 @@ export async function issueLease(
   if (lifetime < 2)
     throw new Error("authorization expires too soon to issue a lease");
   const refreshAfter = new Date(
-    issuedAt.getTime() + Math.min(24 * 60 * 60_000, Math.floor(lifetime / 2)),
+    issuedAt.getTime() + Math.min(maxLeaseRefreshDelay, Math.floor(lifetime / 2)),
   );
   const telegramID = entitlement.telegramId;
   if (!Number.isSafeInteger(telegramID))
@@ -309,6 +357,8 @@ export async function issueLease(
   const lease: Lease = {
     schemaVersion: 1,
     deviceId: device.deviceId,
+    sessionId: session.sessionId,
+    generation: session.generation,
     telegramId: telegramID,
     status: "active",
     displayName: entitlement.displayName,
@@ -407,6 +457,20 @@ export async function authorizeRequest(
         "license_device_unauthorized",
         "device is not authorized",
         403,
+      ),
+    };
+  const session = await db.findDeviceSession(deviceIDHeader);
+  if (
+    !session ||
+    session.sessionId !== proof.lease.sessionId ||
+    session.generation !== proof.lease.generation
+  )
+    return {
+      ok: false,
+      response: apiError(
+        "license_session_superseded",
+        "device authorization session was replaced",
+        409,
       ),
     };
   const requestURL = new URL(request.url);

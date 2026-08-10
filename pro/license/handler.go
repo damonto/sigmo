@@ -2,6 +2,7 @@ package license
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -48,10 +49,16 @@ func (c *Controller) createPairing(ctx *echo.Context) error {
 	if c.baseURL == "" || len(c.licensePublicKey) == 0 {
 		return httpapi.Error(ctx, http.StatusServiceUnavailable, "license_service_unavailable", "Pro authorization service is not configured")
 	}
+	refreshToken, err := randomToken(32)
+	if err != nil {
+		return httpapi.Internal(ctx, "license_pairing_failed", err)
+	}
 	var remote pairing
-	_, err := c.doJSON(ctx.Request().Context(), http.MethodPost, "/v1/license-pairings", map[string]string{
-		"deviceId":  c.identity.DeviceID,
-		"publicKey": base64.RawStdEncoding.EncodeToString(c.identity.PublicKey),
+	_, err = c.doJSON(ctx.Request().Context(), http.MethodPost, "/v1/license-pairings", map[string]string{
+		"deviceId":         c.identity.DeviceID,
+		"publicKey":        base64.RawStdEncoding.EncodeToString(c.identity.PublicKey),
+		"refreshTokenHash": tokenHash(refreshToken),
+		"fingerprintHash":  c.identity.FingerprintHash,
 	}, "", &remote)
 	if err != nil {
 		return respondServiceError(ctx, "license_pairing_failed", err)
@@ -62,9 +69,10 @@ func (c *Controller) createPairing(ctx *echo.Context) error {
 	c.mu.Lock()
 	c.prunePairingsLocked(time.Now())
 	c.pairings[remote.ID] = pairingSession{
-		PollToken:     remote.PollToken,
-		ActivationURL: remote.ActivationURL,
-		ExpiresAt:     remote.ExpiresAt,
+		PollToken:           remote.PollToken,
+		ActivationURL:       remote.ActivationURL,
+		InitialRefreshToken: refreshToken,
+		ExpiresAt:           remote.ExpiresAt,
 	}
 	c.mu.Unlock()
 	return ctx.JSON(http.StatusCreated, pairingResponse{
@@ -101,13 +109,25 @@ func (c *Controller) getPairing(ctx *echo.Context) error {
 	}
 	restart := false
 	if remote.Status == "active" && remote.Lease != nil {
-		lease, err := c.verifyLease(*remote.Lease, time.Now())
+		var leaseMetadata Lease
+		if err := json.Unmarshal(remote.Lease.Lease, &leaseMetadata); err != nil {
+			return httpapi.Error(ctx, http.StatusBadGateway, "license_lease_invalid", "license lease is invalid")
+		}
+		lease, err := c.verifyLease(*remote.Lease, leaseMetadata.SessionID, 1)
 		if err != nil {
 			return httpapi.Error(ctx, http.StatusBadGateway, "license_lease_invalid", "license lease is invalid")
 		}
-		if err := c.saveLease(ctx.Request().Context(), *remote.Lease); err != nil {
+		saved := storedSession{
+			SessionID:    lease.SessionID,
+			Generation:   lease.Generation,
+			RefreshToken: session.InitialRefreshToken,
+		}
+		if err := c.saveSession(ctx.Request().Context(), saved); err != nil {
 			return httpapi.Internal(ctx, "license_save_failed", err)
 		}
+		c.mu.Lock()
+		c.session = cloneSession(&saved)
+		c.mu.Unlock()
 		c.setLease(lease, remote.Lease)
 		c.mu.Lock()
 		delete(c.pairings, id)

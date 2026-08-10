@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,30 +24,58 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
-func TestIdentityPersistsInStorage(t *testing.T) {
+func TestIdentityPersistsOutsideStorage(t *testing.T) {
 	db := openTestStorage(t)
-	first, err := New(t.Context(), Config{Storage: db})
+	identityPath := filepath.Join(t.TempDir(), "device.identity")
+	if err := db.Put(t.Context(), licenseStateScope, legacyIdentityStateKey, map[string]string{"privateKey": "legacy"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Put(t.Context(), licenseStateScope, legacyLeaseStateKey, map[string]string{"lease": "legacy"}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := newTestController(t, Config{Storage: db, IdentityPath: identityPath})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := New(t.Context(), Config{Storage: db})
+	second, err := newTestController(t, Config{Storage: db, IdentityPath: identityPath})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.identity.DeviceID != second.identity.DeviceID {
 		t.Fatalf("device IDs differ: %q and %q", first.identity.DeviceID, second.identity.DeviceID)
 	}
-	var stored storedIdentity
-	if err := db.Get(t.Context(), licenseStateScope, identityStateKey, &stored); err != nil {
-		t.Fatalf("read stored identity: %v", err)
+	if first.identity.FingerprintHash != second.identity.FingerprintHash {
+		t.Fatalf("fingerprints differ: %q and %q", first.identity.FingerprintHash, second.identity.FingerprintHash)
 	}
-	if stored.PrivateKey == "" {
-		t.Fatal("stored private key is empty")
+
+	info, err := os.Stat(identityPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("identity permissions = %o, want 600", got)
+	}
+	data, err := os.ReadFile(identityPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored storedIdentity
+	if err := json.Unmarshal(data, &stored); err != nil {
+		t.Fatalf("decode identity file: %v", err)
+	}
+	if stored.PrivateKey == "" || stored.HostSecret == "" {
+		t.Fatalf("identity file is incomplete: %+v", stored)
+	}
+	for _, key := range []string{legacyIdentityStateKey, legacyLeaseStateKey} {
+		var value map[string]string
+		if err := db.Get(t.Context(), licenseStateScope, key, &value); !errors.Is(err, storage.ErrNotFound) {
+			t.Fatalf("legacy SQLite state %q still exists: %v", key, err)
+		}
 	}
 }
 
 func TestLicenseeReturnsDefensiveTimeCopies(t *testing.T) {
-	controller, err := New(t.Context(), Config{Storage: openTestStorage(t)})
+	controller, err := newTestController(t, Config{Storage: openTestStorage(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +102,7 @@ func TestNewIgnoresRuntimeAuthorizationEnvironment(t *testing.T) {
 	t.Setenv("SIGMO_PRO_WORKER_URL", "https://attacker.example")
 	t.Setenv("SIGMO_PRO_LICENSE_PUBLIC_KEY", base64.RawStdEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize)))
 
-	controller, err := New(t.Context(), Config{
+	controller, err := newTestController(t, Config{
 		BaseURL:          "https://license.example",
 		LicensePublicKey: base64.RawStdEncoding.EncodeToString(publicKey),
 		Storage:          openTestStorage(t),
@@ -104,7 +133,7 @@ func TestNewValidatesAuthorizationServiceURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(t.Context(), Config{BaseURL: tt.baseURL, Storage: openTestStorage(t)})
+			_, err := newTestController(t, Config{BaseURL: tt.baseURL, Storage: openTestStorage(t)})
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("New() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -124,7 +153,7 @@ func TestAuthorizationClientDoesNotFollowRedirects(t *testing.T) {
 		resp.Request = req
 		return resp, nil
 	})}
-	controller, err := New(t.Context(), Config{
+	controller, err := newTestController(t, Config{
 		BaseURL: "https://license.example",
 		Storage: openTestStorage(t),
 		Client:  client,
@@ -209,7 +238,7 @@ func TestValidateCreatedPairing(t *testing.T) {
 }
 
 func TestControllerPrunesExpiredPairingSessions(t *testing.T) {
-	controller, err := New(t.Context(), Config{Storage: openTestStorage(t)})
+	controller, err := newTestController(t, Config{Storage: openTestStorage(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,79 +264,105 @@ func TestStartRefreshesSignedLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	challengeValue := base64.RawURLEncoding.EncodeToString([]byte("one-time-challenge"))
+	session := validSession(t)
+	var requestedRotation leaseRotationRequest
 	var controller *Controller
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		switch req.URL.Path {
 		case "/v1/license-challenges":
+			var body struct {
+				DeviceID   string `json:"deviceId"`
+				SessionID  string `json:"sessionId"`
+				Generation int64  `json:"generation"`
+			}
+			decodeRequest(t, req, &body)
+			if body.DeviceID != controller.identity.DeviceID || body.SessionID != session.SessionID || body.Generation != session.Generation {
+				t.Fatalf("challenge request = %+v", body)
+			}
 			return response(http.StatusCreated, challenge{Challenge: challengeValue, ExpiresAt: time.Now().Add(time.Minute)}), nil
 		case "/v1/license-leases":
-			return response(http.StatusCreated, signedProof(t, privateKey, validLease(controller.identity.DeviceID, "Updated User"))), nil
+			decodeRequest(t, req, &requestedRotation)
+			verifyRotationRequest(t, controller.identity.PublicKey, requestedRotation)
+			lease := validLease(controller.identity.DeviceID, "Updated User")
+			lease.SessionID = session.SessionID
+			lease.Generation = session.Generation + 1
+			return response(http.StatusCreated, signedProof(t, privateKey, lease)), nil
 		default:
 			return response(http.StatusNotFound, errorResponse{ErrorCode: "resource_not_found", Message: "resource not found"}), nil
 		}
 	})}
-	controller, err = New(t.Context(), Config{
+	controller, err = newTestController(t, Config{
 		BaseURL: "https://license.example", LicensePublicKey: base64.RawStdEncoding.EncodeToString(publicKey),
 		Storage: openTestStorage(t), Client: client,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := controller.saveLease(t.Context(), signedProof(t, privateKey, validLease(controller.identity.DeviceID, "Cached User"))); err != nil {
-		t.Fatal(err)
-	}
+	installSession(t, controller, session)
 	if err := controller.Start(t.Context()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	if !controller.Authorized() || controller.Licensee().DisplayName != "Updated User" {
 		t.Fatalf("Licensee() = %+v", controller.Licensee())
 	}
+	current := controller.currentSession()
+	if current == nil || current.Generation != session.Generation+1 || current.Pending != nil {
+		t.Fatalf("current session = %+v", current)
+	}
+	if tokenHash(current.RefreshToken) != requestedRotation.NextRefreshTokenHash {
+		t.Fatal("client did not commit the rotated refresh token")
+	}
+	var persisted storedSession
+	if err := controller.storage.Get(t.Context(), licenseStateScope, sessionStateKey, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Generation != current.Generation || persisted.RefreshToken != current.RefreshToken || persisted.Pending != nil {
+		t.Fatalf("persisted session = %+v, current = %+v", persisted, current)
+	}
 }
 
-func TestStartUsesOfflineLeaseForTransientFailure(t *testing.T) {
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+func TestStartRequiresOnlineRefresh(t *testing.T) {
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("network unavailable")
 	})}
-	controller, err := New(t.Context(), Config{
+	controller, err := newTestController(t, Config{
 		BaseURL: "https://license.example", LicensePublicKey: base64.RawStdEncoding.EncodeToString(publicKey),
 		Storage: openTestStorage(t), Client: client,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := controller.saveLease(t.Context(), signedProof(t, privateKey, validLease(controller.identity.DeviceID, "Offline User"))); err != nil {
-		t.Fatal(err)
-	}
+	installSession(t, controller, validSession(t))
+	stale := validLease(controller.identity.DeviceID, "Stale User")
+	controller.setLease(&stale, nil)
 	if err := controller.Start(t.Context()); err == nil {
 		t.Fatal("Start() error = nil, want transient network error")
 	}
-	if !controller.Authorized() {
-		t.Fatal("Authorized() = false during offline validity")
+	if controller.Authorized() {
+		t.Fatal("Authorized() = true without a successful startup refresh")
 	}
 }
 
 func TestStartDoesNotGraceExplicitRevocation(t *testing.T) {
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return response(http.StatusForbidden, errorResponse{ErrorCode: "license_entitlement_inactive", Message: "authorization revoked or expired"}), nil
 	})}
-	controller, err := New(t.Context(), Config{
+	controller, err := newTestController(t, Config{
 		BaseURL: "https://license.example", LicensePublicKey: base64.RawStdEncoding.EncodeToString(publicKey),
 		Storage: openTestStorage(t), Client: client,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := controller.saveLease(t.Context(), signedProof(t, privateKey, validLease(controller.identity.DeviceID, "Revoked User"))); err != nil {
-		t.Fatal(err)
-	}
+	installSession(t, controller, validSession(t))
 	if err := controller.Start(t.Context()); !errors.Is(err, errExplicitUnauthorized) {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -316,8 +371,8 @@ func TestStartDoesNotGraceExplicitRevocation(t *testing.T) {
 	}
 }
 
-func TestStartKeepsOfflineLeaseForGenericForbidden(t *testing.T) {
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+func TestStartDoesNotAuthorizeGenericForbidden(t *testing.T) {
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +382,7 @@ func TestStartKeepsOfflineLeaseForGenericForbidden(t *testing.T) {
 			Message:   "authorization required",
 		}), nil
 	})}
-	controller, err := New(t.Context(), Config{
+	controller, err := newTestController(t, Config{
 		BaseURL:          "https://license.example",
 		LicensePublicKey: base64.RawStdEncoding.EncodeToString(publicKey),
 		Storage:          openTestStorage(t),
@@ -336,14 +391,95 @@ func TestStartKeepsOfflineLeaseForGenericForbidden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := controller.saveLease(t.Context(), signedProof(t, privateKey, validLease(controller.identity.DeviceID, "Offline User"))); err != nil {
-		t.Fatal(err)
-	}
+	installSession(t, controller, validSession(t))
 	if err := controller.Start(t.Context()); err == nil || errors.Is(err, errExplicitUnauthorized) {
 		t.Fatalf("Start() error = %v, want transient service error", err)
 	}
-	if !controller.Authorized() {
-		t.Fatal("Authorized() = false for a generic upstream 403")
+	if controller.Authorized() {
+		t.Fatal("Authorized() = true after a generic upstream 403")
+	}
+}
+
+func TestStartRetriesPersistedPendingRotation(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := openTestStorage(t)
+	identityPath := filepath.Join(t.TempDir(), "device.identity")
+	session := validSession(t)
+	firstChallenge := base64.RawURLEncoding.EncodeToString([]byte("first-challenge"))
+	secondChallenge := base64.RawURLEncoding.EncodeToString([]byte("second-challenge"))
+	var firstRotation leaseRotationRequest
+	firstClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v1/license-challenges":
+			return response(http.StatusCreated, challenge{Challenge: firstChallenge, ExpiresAt: time.Now().Add(time.Minute)}), nil
+		case "/v1/license-leases":
+			decodeRequest(t, req, &firstRotation)
+			return nil, errors.New("response lost after session rotation")
+		default:
+			return response(http.StatusNotFound, errorResponse{ErrorCode: "resource_not_found", Message: "resource not found"}), nil
+		}
+	})}
+	first, err := newTestController(t, Config{
+		BaseURL: "https://license.example", LicensePublicKey: base64.RawStdEncoding.EncodeToString(publicKey),
+		IdentityPath: identityPath, Storage: db, Client: firstClient,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installSession(t, first, session)
+	if err := first.Start(t.Context()); err == nil {
+		t.Fatal("first Start() error = nil, want lost response")
+	}
+	var pending storedSession
+	if err := db.Get(t.Context(), licenseStateScope, sessionStateKey, &pending); err != nil {
+		t.Fatal(err)
+	}
+	if pending.Pending == nil || pending.Pending.ID != firstRotation.RotationID || tokenHash(pending.Pending.NextRefreshToken) != firstRotation.NextRefreshTokenHash {
+		t.Fatalf("persisted pending rotation = %+v, request = %+v", pending.Pending, firstRotation)
+	}
+
+	var second *Controller
+	secondClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Path {
+		case "/v1/license-challenges":
+			return response(http.StatusCreated, challenge{Challenge: secondChallenge, ExpiresAt: time.Now().Add(time.Minute)}), nil
+		case "/v1/license-leases":
+			var retried leaseRotationRequest
+			decodeRequest(t, req, &retried)
+			verifyRotationRequest(t, second.identity.PublicKey, retried)
+			if retried.RotationID != firstRotation.RotationID || retried.NextRefreshTokenHash != firstRotation.NextRefreshTokenHash || retried.RefreshToken != firstRotation.RefreshToken {
+				t.Fatalf("retry generated different rotation state: first = %+v, retry = %+v", firstRotation, retried)
+			}
+			if retried.Challenge == firstRotation.Challenge {
+				t.Fatal("retry reused the expired transport challenge")
+			}
+			lease := validLease(second.identity.DeviceID, "Recovered User")
+			lease.SessionID = session.SessionID
+			lease.Generation = session.Generation + 1
+			return response(http.StatusCreated, signedProof(t, privateKey, lease)), nil
+		default:
+			return response(http.StatusNotFound, errorResponse{ErrorCode: "resource_not_found", Message: "resource not found"}), nil
+		}
+	})}
+	second, err = newTestController(t, Config{
+		BaseURL: "https://license.example", LicensePublicKey: base64.RawStdEncoding.EncodeToString(publicKey),
+		IdentityPath: identityPath, Storage: db, Client: secondClient,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Start(t.Context()); err != nil {
+		t.Fatalf("retry Start() error = %v", err)
+	}
+	if !second.Authorized() {
+		t.Fatal("Authorized() = false after idempotent rotation retry")
+	}
+	current := second.currentSession()
+	if current == nil || current.Generation != session.Generation+1 || current.Pending != nil {
+		t.Fatalf("recovered session = %+v", current)
 	}
 }
 
@@ -352,7 +488,7 @@ func TestVerifyLeaseRejectsExcessiveValidity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	controller, err := New(t.Context(), Config{
+	controller, err := newTestController(t, Config{
 		LicensePublicKey: base64.RawStdEncoding.EncodeToString(publicKey),
 		Storage:          openTestStorage(t),
 	})
@@ -381,16 +517,37 @@ func TestVerifyLeaseRejectsExcessiveValidity(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			lease := validLease(controller.identity.DeviceID, "Test User")
 			tt.mutate(&lease)
-			if _, err := controller.verifyLease(signedProof(t, privateKey, lease), time.Now()); err == nil {
+			if _, err := controller.verifyLease(signedProof(t, privateKey, lease), lease.SessionID, lease.Generation); err == nil {
 				t.Fatal("verifyLease() error = nil")
 			}
 		})
 	}
 }
 
+func TestSetLeaseAnchorsValidityToMonotonicClock(t *testing.T) {
+	controller, err := newTestController(t, Config{Storage: openTestStorage(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := validLease(controller.identity.DeviceID, "Clock User")
+	lease.IssuedAt = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	lease.RefreshAfter = lease.IssuedAt.Add(maxLeaseRefreshDelay)
+	lease.ExpiresAt = lease.IssuedAt.Add(maxLeaseLifetime)
+
+	controller.setLease(&lease, nil)
+	_, refreshAt, deadline := controller.currentLeaseState()
+	remaining := time.Until(deadline)
+	if remaining < maxLeaseLifetime-time.Second || remaining > maxLeaseLifetime {
+		t.Fatalf("lease deadline remaining = %v, want about %v", remaining, maxLeaseLifetime)
+	}
+	if got := deadline.Sub(refreshAt); got != maxLeaseLifetime-maxLeaseRefreshDelay {
+		t.Fatalf("deadline - refresh = %v", got)
+	}
+}
+
 func TestRunExpiresLeaseWithoutWaitingForRetryInterval(t *testing.T) {
 	restarted := make(chan struct{}, 1)
-	controller, err := New(t.Context(), Config{
+	controller, err := newTestController(t, Config{
 		Storage: openTestStorage(t),
 		Restart: func() {
 			restarted <- struct{}{}
@@ -402,6 +559,7 @@ func TestRunExpiresLeaseWithoutWaitingForRetryInterval(t *testing.T) {
 	now := time.Now()
 	controller.setLease(&Lease{
 		Status:       "active",
+		IssuedAt:     now,
 		RefreshAfter: now.Add(time.Hour),
 		ExpiresAt:    now.Add(25 * time.Millisecond),
 	}, nil)
@@ -426,7 +584,7 @@ func TestDoJSONPreservesWorkerError(t *testing.T) {
 			Message:   "pairing expired",
 		}), nil
 	})}
-	controller, err := New(t.Context(), Config{
+	controller, err := newTestController(t, Config{
 		BaseURL: "https://license.example",
 		Storage: openTestStorage(t),
 		Client:  client,
@@ -487,7 +645,7 @@ func TestLatestVerifiesExactWorkerManifestBytes(t *testing.T) {
 			DownloadURL: "https://license.example/v1/downloads/ticket",
 		}), nil
 	})}
-	controller, err := New(t.Context(), Config{
+	controller, err := newTestController(t, Config{
 		BaseURL:          "https://license.example",
 		ReleasePublicKey: base64.RawStdEncoding.EncodeToString(publicKey),
 		Storage:          openTestStorage(t),
@@ -516,7 +674,7 @@ func TestLatestRevocationClearsLeaseAndPreservesWorkerCode(t *testing.T) {
 			Message:   "authorization revoked or expired",
 		}), nil
 	})}
-	controller, err := New(t.Context(), Config{
+	controller, err := newTestController(t, Config{
 		BaseURL: "https://license.example",
 		Storage: openTestStorage(t),
 		Client:  client,
@@ -550,7 +708,7 @@ func TestDownloadRejectsUnexpectedOrigin(t *testing.T) {
 		called = true
 		return response(http.StatusOK, map[string]string{}), nil
 	})}
-	controller, err := New(t.Context(), Config{
+	controller, err := newTestController(t, Config{
 		BaseURL: "https://license.example",
 		Storage: openTestStorage(t),
 		Client:  client,
@@ -575,8 +733,51 @@ func TestDownloadRejectsUnexpectedOrigin(t *testing.T) {
 func validLease(deviceID, name string) Lease {
 	issuedAt := time.Now().UTC().Add(-time.Minute)
 	return Lease{
-		SchemaVersion: 1, DeviceID: deviceID, TelegramID: 123456, Status: "active", DisplayName: name,
-		IssuedAt: issuedAt, RefreshAfter: issuedAt.Add(24 * time.Hour), ExpiresAt: issuedAt.Add(72 * time.Hour),
+		SchemaVersion: leaseSchemaVersion, DeviceID: deviceID, SessionID: "test-session", Generation: 2,
+		TelegramID: 123456, Status: "active", DisplayName: name,
+		IssuedAt: issuedAt, RefreshAfter: issuedAt.Add(maxLeaseRefreshDelay), ExpiresAt: issuedAt.Add(maxLeaseLifetime),
+	}
+}
+
+func validSession(t *testing.T) storedSession {
+	t.Helper()
+	refreshToken, err := randomToken(32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return storedSession{
+		SessionID:    "test-session",
+		Generation:   1,
+		RefreshToken: refreshToken,
+	}
+}
+
+func installSession(t *testing.T, controller *Controller, session storedSession) {
+	t.Helper()
+	if err := controller.saveSession(t.Context(), session); err != nil {
+		t.Fatal(err)
+	}
+	controller.mu.Lock()
+	controller.session = cloneSession(&session)
+	controller.mu.Unlock()
+}
+
+func decodeRequest(t *testing.T, req *http.Request, dst any) {
+	t.Helper()
+	if err := json.NewDecoder(req.Body).Decode(dst); err != nil {
+		t.Fatalf("decode %s request: %v", req.URL.Path, err)
+	}
+}
+
+func verifyRotationRequest(t *testing.T, publicKey ed25519.PublicKey, request leaseRotationRequest) {
+	t.Helper()
+	signature, err := decodeKey(request.Signature)
+	if err != nil {
+		t.Fatalf("decode rotation signature: %v", err)
+	}
+	message := rotationMessage(request)
+	if !ed25519.Verify(publicKey, []byte(message), signature) {
+		t.Fatal("rotation signature is invalid")
 	}
 }
 
@@ -613,4 +814,12 @@ func openTestStorage(t *testing.T) *storage.Store {
 		}
 	})
 	return db
+}
+
+func newTestController(t *testing.T, cfg Config) (*Controller, error) {
+	t.Helper()
+	if cfg.IdentityPath == "" {
+		cfg.IdentityPath = filepath.Join(t.TempDir(), "device.identity")
+	}
+	return New(t.Context(), cfg)
 }

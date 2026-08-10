@@ -16,6 +16,7 @@
       "SIGMO_TELEGRAM_WEBHOOK_SECRET",
       "SIGMO_LICENSE_PRIVATE_KEY",
       "SIGMO_LICENSE_PUBLIC_KEY",
+      "SIGMO_RELEASE_PUBLIC_KEY",
       "SIGMO_DOWNLOAD_TICKET_SECRET",
       "SIGMO_ADMIN_TELEGRAM_IDS",
     ],
@@ -24,7 +25,7 @@
     {
       "binding": "DB",
       "database_name": "sigmo-licenses",
-      "database_id": "70a27cc7-3fa8-4b24-a194-1914ce85b6a9",
+      "database_id": "fee5caaf-9b56-48f7-b7ad-2873828ffde7",
       "migrations_dir": "migrations",
     },
   ],

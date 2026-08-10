@@ -52,40 +52,90 @@ function isSafeInteger(value: unknown): value is number {
 
 export function pairingRequest(
   value: unknown,
-): { deviceId: string; publicKey: string } | null {
+): {
+  deviceId: string;
+  publicKey: string;
+  refreshTokenHash: string;
+  fingerprintHash: string;
+} | null {
   if (
     !isRecord(value) ||
     !isNonEmptyString(value.deviceId) ||
-    !isNonEmptyString(value.publicKey)
+    !isNonEmptyString(value.publicKey) ||
+    !isSHA256(value.refreshTokenHash) ||
+    !isSHA256(value.fingerprintHash)
   ) {
     return null;
   }
-  return { deviceId: value.deviceId, publicKey: value.publicKey };
+  return {
+    deviceId: value.deviceId,
+    publicKey: value.publicKey,
+    refreshTokenHash: value.refreshTokenHash,
+    fingerprintHash: value.fingerprintHash,
+  };
 }
 
-export function challengeRequest(value: unknown): { deviceId: string } | null {
-  if (!isRecord(value) || !isNonEmptyString(value.deviceId)) return null;
-  return { deviceId: value.deviceId };
+export function challengeRequest(value: unknown): {
+  deviceId: string;
+  sessionId: string;
+  generation: number;
+} | null {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.deviceId) ||
+    !isNonEmptyString(value.sessionId) ||
+    !isSafeInteger(value.generation) ||
+    value.generation < 1
+  )
+    return null;
+  return {
+    deviceId: value.deviceId,
+    sessionId: value.sessionId,
+    generation: value.generation,
+  };
 }
 
 export function leaseRequest(value: unknown): {
   deviceId: string;
+  sessionId: string;
+  generation: number;
   challenge: string;
+  refreshToken: string;
+  nextRefreshTokenHash: string;
+  rotationId: string;
+  fingerprintHash: string;
   signature: string;
 } | null {
   if (
     !isRecord(value) ||
     !isNonEmptyString(value.deviceId) ||
+    !isNonEmptyString(value.sessionId) ||
+    !isSafeInteger(value.generation) ||
+    value.generation < 1 ||
     !isNonEmptyString(value.challenge) ||
+    !isNonEmptyString(value.refreshToken) ||
+    !isSHA256(value.nextRefreshTokenHash) ||
+    !isNonEmptyString(value.rotationId) ||
+    !isSHA256(value.fingerprintHash) ||
     !isNonEmptyString(value.signature)
   ) {
     return null;
   }
   return {
     deviceId: value.deviceId,
+    sessionId: value.sessionId,
+    generation: value.generation,
     challenge: value.challenge,
+    refreshToken: value.refreshToken,
+    nextRefreshTokenHash: value.nextRefreshTokenHash,
+    rotationId: value.rotationId,
+    fingerprintHash: value.fingerprintHash,
     signature: value.signature,
   };
+}
+
+function isSHA256(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{43}$/.test(value);
 }
 
 export function telegramUpdate(value: unknown): TelegramUpdate | null {
@@ -140,6 +190,9 @@ function isLease(value: unknown): value is Lease {
     isRecord(value) &&
     value.schemaVersion === 1 &&
     isNonEmptyString(value.deviceId) &&
+    isNonEmptyString(value.sessionId) &&
+    isSafeInteger(value.generation) &&
+    value.generation > 0 &&
     isSafeInteger(value.telegramId) &&
     value.telegramId > 0 &&
     value.status === "active" &&
@@ -260,6 +313,7 @@ export function downloadTicket(value: unknown): DownloadTicket | null {
   };
   if (value.purpose === "bootstrap") {
     if (
+      !isNonEmptyString(value.jti) ||
       !isSafeInteger(value.telegramId) ||
       value.telegramId <= 0 ||
       value.deviceId !== undefined
@@ -268,6 +322,7 @@ export function downloadTicket(value: unknown): DownloadTicket | null {
     }
     return {
       purpose: "bootstrap",
+      jti: value.jti,
       telegramId: value.telegramId,
       ...fields,
     };
@@ -275,6 +330,7 @@ export function downloadTicket(value: unknown): DownloadTicket | null {
   if (
     !isNonEmptyString(value.deviceId) ||
     value.purpose !== undefined ||
+    value.jti !== undefined ||
     value.telegramId !== undefined
   ) {
     return null;

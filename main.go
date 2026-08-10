@@ -22,7 +22,7 @@ var (
 
 func init() {
 	flag.StringVar(&listenAddress, "listen-address", "0.0.0.0:9527", "HTTP listen address")
-	flag.StringVar(&dbPath, "db-path", "", "path to SQLite database")
+	flag.StringVar(&dbPath, "db-path", "", "path to application state database")
 	flag.BoolVar(&debug, "debug", false, "enable debug logging and internal error responses")
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 }

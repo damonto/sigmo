@@ -10,6 +10,8 @@ const leaseSchemaVersion = 1
 type Lease struct {
 	SchemaVersion        int        `json:"schemaVersion"`
 	DeviceID             string     `json:"deviceId"`
+	SessionID            string     `json:"sessionId"`
+	Generation           int64      `json:"generation"`
 	TelegramID           int64      `json:"telegramId"`
 	Status               string     `json:"status"`
 	DisplayName          string     `json:"displayName"`
@@ -35,14 +37,45 @@ type pairing struct {
 }
 
 type pairingSession struct {
-	PollToken     string
-	ActivationURL string
-	ExpiresAt     time.Time
+	PollToken           string
+	ActivationURL       string
+	InitialRefreshToken string
+	ExpiresAt           time.Time
+}
+
+type storedSession struct {
+	SessionID    string           `json:"sessionId"`
+	Generation   int64            `json:"generation"`
+	RefreshToken string           `json:"refreshToken"`
+	Pending      *pendingRotation `json:"pending,omitempty"`
+}
+
+type pendingRotation struct {
+	ID               string `json:"id"`
+	NextRefreshToken string `json:"nextRefreshToken"`
 }
 
 type challenge struct {
 	Challenge string    `json:"challenge"`
 	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+type leaseChallengeRequest struct {
+	DeviceID   string `json:"deviceId"`
+	SessionID  string `json:"sessionId"`
+	Generation int64  `json:"generation"`
+}
+
+type leaseRotationRequest struct {
+	DeviceID             string `json:"deviceId"`
+	SessionID            string `json:"sessionId"`
+	Generation           int64  `json:"generation"`
+	Challenge            string `json:"challenge"`
+	RefreshToken         string `json:"refreshToken"`
+	NextRefreshTokenHash string `json:"nextRefreshTokenHash"`
+	RotationID           string `json:"rotationId"`
+	FingerprintHash      string `json:"fingerprintHash"`
+	Signature            string `json:"signature"`
 }
 
 type releaseResponse struct {

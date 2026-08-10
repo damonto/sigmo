@@ -89,10 +89,11 @@ func Run(cfg Config) error {
 	var authorization Authorization
 	if cfg.Authorize != nil {
 		authorization, err = cfg.Authorize(ctx, AuthorizationConfig{
-			Build:   cfg.Build,
-			Restart: restart,
-			Store:   store,
-			Storage: db,
+			Build:    cfg.Build,
+			Restart:  restart,
+			StateDir: filepath.Dir(resolvedDBPath),
+			Store:    store,
+			Storage:  db,
 		})
 		if err != nil {
 			return fmt.Errorf("configure authorization: %w", err)

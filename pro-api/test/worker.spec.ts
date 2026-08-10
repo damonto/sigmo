@@ -9,10 +9,12 @@ import {
   decodeBase64,
   encodeBase64,
   randomToken,
+  sha256,
   signEd25519,
   textEncoder,
 } from "../src/crypto";
 import worker, { testExports } from "../src/index";
+import { rotationMessage } from "../src/license";
 import { createTicket, parseTicket } from "../src/tickets";
 import type {
   DownloadTicket,
@@ -27,6 +29,8 @@ interface DeviceIdentity {
   deviceId: string;
   publicKey: string;
   privateKey: CryptoKey;
+  fingerprintHash: string;
+  refreshToken: string;
 }
 
 interface PairingCreated {
@@ -118,10 +122,13 @@ async function createIdentity(): Promise<DeviceIdentity> {
   assert(exported instanceof ArrayBuffer);
   const rawPublicKey = exported;
   const publicKey = encodeBase64(rawPublicKey);
+  const refreshToken = randomToken(32);
   return {
     deviceId: await testExports.deviceID(publicKey),
     publicKey,
     privateKey: pair.privateKey,
+    fingerprintHash: await sha256(randomToken(32)),
+    refreshToken,
   };
 }
 
@@ -192,6 +199,13 @@ async function publishRelease(
     })),
   });
   await env.sigmo_pro_updates.put(`${channel}/latest/manifest.json`, manifest);
+  await env.sigmo_pro_updates.put(
+    `${channel}/versions/${version}/manifest.json.sig`,
+    await signEd25519(
+      env.SIGMO_LICENSE_PRIVATE_KEY,
+      textEncoder.encode(manifest),
+    ),
+  );
 }
 
 function downloadButtons(message: TelegramMessage): Array<{
@@ -271,6 +285,8 @@ async function createPairing(
     jsonRequest({
       deviceId: identity.deviceId,
       publicKey: identity.publicKey,
+      refreshTokenHash: await sha256(identity.refreshToken),
+      fingerprintHash: identity.fingerprintHash,
     }),
   );
   expect(response.status).toBe(201);
@@ -326,6 +342,84 @@ async function authorizedDevice(
   expect(status.status).toBe("active");
   assert(status.lease);
   return { identity, proof: status.lease };
+}
+
+async function renewLease(
+  identity: DeviceIdentity,
+  proof: SignedLease,
+): Promise<SignedLease> {
+  const { body, nextRefreshToken } = await createRotationRequest(
+    identity,
+    proof,
+  );
+  const response = await request(
+    "/v1/license-leases",
+    jsonRequest(body),
+  );
+  expect(response.status).toBe(201);
+  identity.refreshToken = nextRefreshToken;
+  return response.json<SignedLease>();
+}
+
+async function createRotationRequest(
+  identity: DeviceIdentity,
+  proof: SignedLease,
+): Promise<{
+  body: Record<string, string | number>;
+  nextRefreshToken: string;
+}> {
+  const challengeResponse = await request(
+    "/v1/license-challenges",
+    jsonRequest({
+      deviceId: identity.deviceId,
+      sessionId: proof.lease.sessionId,
+      generation: proof.lease.generation,
+    }),
+  );
+  expect(challengeResponse.status).toBe(201);
+  const challenge = await challengeResponse.json<{ challenge: string }>();
+  return signRotationRequest(identity, proof, challenge.challenge);
+}
+
+async function signRotationRequest(
+  identity: DeviceIdentity,
+  proof: SignedLease,
+  challenge: string,
+): Promise<{
+  body: Record<string, string | number>;
+  nextRefreshToken: string;
+}> {
+  const nextRefreshToken = randomToken(32);
+  const nextRefreshTokenHash = await sha256(nextRefreshToken);
+  const rotationId = randomToken(24);
+  const message = rotationMessage({
+    deviceId: identity.deviceId,
+    sessionId: proof.lease.sessionId,
+    generation: proof.lease.generation,
+    challenge,
+    rotationId,
+    nextRefreshTokenHash,
+    fingerprintHash: identity.fingerprintHash,
+  });
+  const signature = await crypto.subtle.sign(
+    "Ed25519",
+    identity.privateKey,
+    textEncoder.encode(message),
+  );
+  return {
+    body: {
+      deviceId: identity.deviceId,
+      sessionId: proof.lease.sessionId,
+      generation: proof.lease.generation,
+      challenge,
+      refreshToken: identity.refreshToken,
+      nextRefreshTokenHash,
+      rotationId,
+      fingerprintHash: identity.fingerprintHash,
+      signature: encodeBase64(signature),
+    },
+    nextRefreshToken,
+  };
 }
 
 async function signedHeaders(
@@ -418,6 +512,7 @@ describe("download tickets", () => {
     const secret = "s".repeat(32);
     const fields = {
       purpose: "bootstrap" as const,
+      jti: "bootstrap-ticket-1",
       telegramId: 1234,
       channel: "stable" as const,
       version: "v1.0.0",
@@ -591,7 +686,7 @@ describe("Telegram pairing", () => {
     for (const message of messages) {
       expect(message.text).toContain("Channel: Stable");
       expect(message.text).toContain("Version: v3.0.0");
-      expect(message.text).toContain("expire in 15 minutes");
+      expect(message.text).toContain("expire in 5 minutes");
       expect(message.text).toContain("gzip -d");
       expect(message.text).toContain("chmod +x");
       expect(
@@ -624,9 +719,9 @@ describe("Telegram pairing", () => {
         channel: "stable",
         version: "v3.0.0",
       });
-      expect(ticket?.expiresAt).toBeGreaterThanOrEqual(issuedAfter + 899);
+      expect(ticket?.expiresAt).toBeGreaterThanOrEqual(issuedAfter + 299);
       expect(ticket?.expiresAt).toBeLessThanOrEqual(
-        Math.floor(Date.now() / 1000) + 900,
+        Math.floor(Date.now() / 1000) + 300,
       );
     }
   });
@@ -775,6 +870,8 @@ describe("Telegram pairing", () => {
       jsonRequest({
         deviceId: "not-a-device",
         publicKey: encodeBase64(new Uint8Array(31)),
+        refreshTokenHash: await sha256(randomToken(32)),
+        fingerprintHash: await sha256(randomToken(32)),
       }),
     );
     expect(response.status).toBe(400);
@@ -833,8 +930,57 @@ describe("Telegram pairing", () => {
     expect(owner?.telegram_id).toBe(3051);
   });
 
+  it("pins an active device fingerprint until the device is revoked", async () => {
+    const telegramId = 3071;
+    await grant(telegramId);
+    const identity = await createIdentity();
+    const first = await createPairing(identity);
+    const copiedIdentity: DeviceIdentity = {
+      ...identity,
+      fingerprintHash: await sha256(randomToken(32)),
+      refreshToken: randomToken(32),
+    };
+    const copiedPairing = await createPairing(copiedIdentity);
+    const messages = mockTelegram();
+
+    await activatePairing(first, telegramId);
+    await activatePairing(copiedPairing, telegramId);
+
+    expect(messages.at(-1)?.text).toContain("bound to another host");
+    expect((await pollPairing(first)).status).toBe("active");
+    expect((await pollPairing(copiedPairing)).status).toBe("pending");
+    const pinned = await env.DB.prepare(
+      "SELECT fingerprint_hash FROM device_sessions WHERE device_id = ?",
+    )
+      .bind(identity.deviceId)
+      .first<{ fingerprint_hash: string }>();
+    expect(pinned?.fingerprint_hash).toBe(identity.fingerprintHash);
+
+    await activatePairing(
+      { id: "unused" },
+      telegramId,
+      `/revoke_device ${identity.deviceId}`,
+    );
+    const revokedSession = await env.DB.prepare(
+      "SELECT device_id FROM device_sessions WHERE device_id = ?",
+    )
+      .bind(identity.deviceId)
+      .first();
+    expect(revokedSession).toBeNull();
+
+    await activatePairing(copiedPairing, telegramId);
+    expect((await pollPairing(copiedPairing)).status).toBe("active");
+    const rebound = await env.DB.prepare(
+      "SELECT fingerprint_hash FROM device_sessions WHERE device_id = ?",
+    )
+      .bind(identity.deviceId)
+      .first<{ fingerprint_hash: string }>();
+    expect(rebound?.fingerprint_hash).toBe(copiedIdentity.fingerprintHash);
+  });
+
   it("limits outstanding pairings per device", async () => {
     const identity = await createIdentity();
+    const refreshTokenHash = await sha256(identity.refreshToken);
     for (let index = 0; index < 3; index += 1) await createPairing(identity);
 
     const response = await request(
@@ -842,6 +988,8 @@ describe("Telegram pairing", () => {
       jsonRequest({
         deviceId: identity.deviceId,
         publicKey: identity.publicKey,
+        refreshTokenHash,
+        fingerprintHash: identity.fingerprintHash,
       }),
     );
     expect(response.status).toBe(429);
@@ -852,6 +1000,7 @@ describe("Telegram pairing", () => {
 
   it("enforces the outstanding pairing limit under concurrency", async () => {
     const identity = await createIdentity();
+    const refreshTokenHash = await sha256(identity.refreshToken);
     const responses = await Promise.all(
       Array.from({ length: 6 }, () =>
         request(
@@ -859,6 +1008,8 @@ describe("Telegram pairing", () => {
           jsonRequest({
             deviceId: identity.deviceId,
             publicKey: identity.publicKey,
+            refreshTokenHash,
+            fingerprintHash: identity.fingerprintHash,
           }),
         ),
       ),
@@ -1095,71 +1246,90 @@ describe("device authorization", () => {
     expect(proof.lease.telegramId).toBe(telegramId);
   });
 
-  it("consumes a startup challenge exactly once", async () => {
-    const { identity } = await authorizedDevice(4001);
-    const challengeResponse = await request(
-      "/v1/license-challenges",
-      jsonRequest({ deviceId: identity.deviceId }),
-    );
-    expect(challengeResponse.status).toBe(201);
-    const challenge = await challengeResponse.json<{ challenge: string }>();
-    const signature = await crypto.subtle.sign(
-      "Ed25519",
-      identity.privateKey,
-      decodeBase64(challenge.challenge),
-    );
-    const body = {
-      deviceId: identity.deviceId,
-      challenge: challenge.challenge,
-      signature: encodeBase64(signature),
-    };
+  it("retries the same session rotation idempotently", async () => {
+    const { identity, proof } = await authorizedDevice(4001);
+    const { body } = await createRotationRequest(identity, proof);
 
     const responses = await Promise.all([
       request("/v1/license-leases", jsonRequest(body)),
       request("/v1/license-leases", jsonRequest(body)),
     ]);
-    expect(responses.map((response) => response.status).sort()).toEqual([
-      201, 403,
+    expect(responses.map((response) => response.status)).toEqual([201, 201]);
+    const leases = await Promise.all(
+      responses.map((response) => response.json<SignedLease>()),
+    );
+    expect(leases.map(({ lease }) => lease.generation)).toEqual([
+      proof.lease.generation + 1,
+      proof.lease.generation + 1,
     ]);
+
+    const session = await env.DB.prepare(
+      "SELECT generation FROM device_sessions WHERE device_id = ?",
+    )
+      .bind(identity.deviceId)
+      .first<{ generation: number }>();
+    expect(session?.generation).toBe(proof.lease.generation + 1);
+  });
+
+  it("allows only one clone to rotate the same session generation", async () => {
+    const { identity, proof } = await authorizedDevice(4051);
+    const first = await createRotationRequest(identity, proof);
+    const second = await signRotationRequest(
+      identity,
+      proof,
+      String(first.body.challenge),
+    );
+
+    const responses = await Promise.all([
+      request("/v1/license-leases", jsonRequest(first.body)),
+      request("/v1/license-leases", jsonRequest(second.body)),
+    ]);
+    expect(responses.map((response) => response.status).sort()).toEqual([
+      201, 409,
+    ]);
+
+    const winner = responses[0].status === 201 ? first : second;
+    const session = await env.DB.prepare(
+      `SELECT generation, refresh_token_hash AS refreshTokenHash,
+              previous_refresh_token_hash AS previousRefreshTokenHash,
+              last_rotation_id AS lastRotationId
+       FROM device_sessions WHERE device_id = ?`,
+    )
+      .bind(identity.deviceId)
+      .first<{
+        generation: number;
+        refreshTokenHash: string;
+        previousRefreshTokenHash: string;
+        lastRotationId: string;
+      }>();
+    expect(session).toMatchObject({
+      generation: proof.lease.generation + 1,
+      refreshTokenHash: winner.body.nextRefreshTokenHash,
+      previousRefreshTokenHash: await sha256(identity.refreshToken),
+      lastRotationId: winner.body.rotationId,
+    });
   });
 
   it("rejects malformed device signatures without returning an internal error", async () => {
-    const { identity } = await authorizedDevice(4101);
-    const challengeResponse = await request(
-      "/v1/license-challenges",
-      jsonRequest({ deviceId: identity.deviceId }),
-    );
-    const challenge = await challengeResponse.json<{ challenge: string }>();
+    const { identity, proof } = await authorizedDevice(4101);
+    const { body } = await createRotationRequest(identity, proof);
 
     const response = await request(
       "/v1/license-leases",
-      jsonRequest({
-        deviceId: identity.deviceId,
-        challenge: challenge.challenge,
-        signature: "not-valid-base64!",
-      }),
+      jsonRequest({ ...body, signature: "not-valid-base64!" }),
     );
     expect(response.status).toBe(403);
 
-    const signature = await crypto.subtle.sign(
-      "Ed25519",
-      identity.privateKey,
-      decodeBase64(challenge.challenge),
-    );
     const retry = await request(
       "/v1/license-leases",
-      jsonRequest({
-        deviceId: identity.deviceId,
-        challenge: challenge.challenge,
-        signature: encodeBase64(signature),
-      }),
+      jsonRequest(body),
     );
     expect(retry.status).toBe(201);
   });
 
   it("rejects a device immediately after the owner revokes it", async () => {
     const telegramId = 5001;
-    const { identity } = await authorizedDevice(telegramId);
+    const { identity, proof } = await authorizedDevice(telegramId);
     mockTelegram();
     await activatePairing(
       { id: "unused" },
@@ -1169,7 +1339,11 @@ describe("device authorization", () => {
 
     const response = await request(
       "/v1/license-challenges",
-      jsonRequest({ deviceId: identity.deviceId }),
+      jsonRequest({
+        deviceId: identity.deviceId,
+        sessionId: proof.lease.sessionId,
+        generation: proof.lease.generation,
+      }),
     );
     expect(response.status).toBe(403);
     await expect(
@@ -1179,7 +1353,7 @@ describe("device authorization", () => {
 });
 
 describe("private releases", () => {
-  it("streams Bootstrap downloads and observes entitlement revocation immediately", async () => {
+  it("consumes a Bootstrap download once under concurrent requests", async () => {
     const telegramId = 5801;
     await grant(telegramId);
     await publishRelease("stable", "v4.0.0", ["linux-amd64"]);
@@ -1202,7 +1376,23 @@ describe("private releases", () => {
     const [button] = downloadButtons(messages[0]);
     assert(button);
 
-    const fullResponse = await request(button.url);
+    const concurrentResponses = await Promise.all([
+      request(button.url),
+      request(button.url),
+    ]);
+    expect(
+      concurrentResponses.map((response) => response.status).sort(),
+    ).toEqual([200, 403]);
+    const fullResponse = concurrentResponses.find(
+      (response) => response.status === 200,
+    );
+    const rejectedResponse = concurrentResponses.find(
+      (response) => response.status === 403,
+    );
+    assert(fullResponse && rejectedResponse);
+    await expect(
+      rejectedResponse.json<{ error_code: string }>(),
+    ).resolves.toMatchObject({ error_code: "download_ticket_invalid" });
     expect(fullResponse.status).toBe(200);
     expect(fullResponse.headers.get("cache-control")).toBe("private, no-store");
     expect(fullResponse.headers.get("content-type")).toBe("application/gzip");
@@ -1217,13 +1407,16 @@ describe("private releases", () => {
     const rangeResponse = await request(button.url, {
       headers: { range: "bytes=3-6" },
     });
-    expect(rangeResponse.status).toBe(206);
-    expect(rangeResponse.headers.get("content-type")).toBe("application/gzip");
-    expect(rangeResponse.headers.get("content-encoding")).toBeNull();
-    expect(rangeResponse.headers.get("content-range")).toBe("bytes 3-6/10");
-    expect(new TextDecoder().decode(await rangeResponse.arrayBuffer())).toBe(
-      "3456",
-    );
+    expect(rangeResponse.status).toBe(400);
+    await expect(
+      rangeResponse.json<{ error_code: string }>(),
+    ).resolves.toMatchObject({ error_code: "bootstrap_range_unsupported" });
+
+    const replayResponse = await request(button.url);
+    expect(replayResponse.status).toBe(403);
+    await expect(
+      replayResponse.json<{ error_code: string }>(),
+    ).resolves.toMatchObject({ error_code: "download_ticket_invalid" });
 
     await env.DB.prepare(
       "UPDATE entitlements SET status = 'revoked' WHERE telegram_id = ?",
@@ -1239,10 +1432,41 @@ describe("private releases", () => {
     });
   });
 
+  it("does not mint downloads from a release with an invalid signature", async () => {
+    const telegramId = 5851;
+    const { identity, proof } = await authorizedDevice(telegramId);
+    await publishRelease("stable", "v4.1.0", ["linux-amd64"]);
+    await env.sigmo_pro_updates.put(
+      "stable/versions/v4.1.0/manifest.json.sig",
+      "invalid-signature",
+    );
+
+    const messages = mockTelegram();
+    await activatePairing(
+      { id: "unused" },
+      telegramId,
+      "/download stable linux-amd64",
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].text).toContain("is not available yet");
+    expect(downloadButtons(messages[0])).toHaveLength(0);
+
+    const path =
+      "/v1/release-channels/stable/releases/latest?target=linux-amd64";
+    const response = await request(path, {
+      headers: await signedHeaders(identity, proof, "GET", path),
+    });
+    expect(response.status).toBe(502);
+    await expect(
+      response.json<{ error_code: string }>(),
+    ).resolves.toMatchObject({ error_code: "release_signature_invalid" });
+  });
+
   it("rejects tampered, expired, and malformed Bootstrap tickets", async () => {
     const expiresAt = Math.floor(Date.now() / 1000) + 300;
     const fields = {
       purpose: "bootstrap" as const,
+      jti: "bootstrap-ticket-2",
       telegramId: 5802,
       channel: "stable" as const,
       version: "v4.1.0",
@@ -1278,8 +1502,8 @@ describe("private releases", () => {
     const now = Date.now();
     const lease = {
       ...proof.lease,
-      issuedAt: new Date(now - 73 * 60 * 60_000).toISOString(),
-      refreshAfter: new Date(now - 49 * 60 * 60_000).toISOString(),
+      issuedAt: new Date(now - 7 * 60 * 60_000).toISOString(),
+      refreshAfter: new Date(now - 6.5 * 60 * 60_000).toISOString(),
       expiresAt: new Date(now - 60 * 60_000).toISOString(),
     };
     const expiredProof = {
@@ -1311,15 +1535,15 @@ describe("private releases", () => {
         ...proof.lease,
         issuedAt: new Date(issuedAt).toISOString(),
         refreshAfter: new Date(
-          issuedAt + 24 * 60 * 60_000 + 1_000,
+          issuedAt + 30 * 60_000 + 1_000,
         ).toISOString(),
-        expiresAt: new Date(issuedAt + 72 * 60 * 60_000).toISOString(),
+        expiresAt: new Date(issuedAt + 6 * 60 * 60_000).toISOString(),
       },
       {
         ...proof.lease,
         issuedAt: new Date(issuedAt).toISOString(),
-        refreshAfter: new Date(issuedAt + 24 * 60 * 60_000).toISOString(),
-        expiresAt: new Date(issuedAt + 72 * 60 * 60_000 + 1_000).toISOString(),
+        refreshAfter: new Date(issuedAt + 30 * 60_000).toISOString(),
+        expiresAt: new Date(issuedAt + 6 * 60 * 60_000 + 1_000).toISOString(),
       },
     ];
 
@@ -1367,11 +1591,17 @@ describe("private releases", () => {
     await env.sigmo_pro_updates.put("stable/latest/manifest.json", manifest);
     await env.sigmo_pro_updates.put(
       "stable/versions/v1.0.0/manifest.json.sig",
-      "signature-v1",
+      await signEd25519(
+        env.SIGMO_LICENSE_PRIVATE_KEY,
+        textEncoder.encode("old manifest"),
+      ),
     );
     await env.sigmo_pro_updates.put(
       "stable/versions/v2.0.0/manifest.json.sig",
-      "signature-v2",
+      await signEd25519(
+        env.SIGMO_LICENSE_PRIVATE_KEY,
+        textEncoder.encode(manifest),
+      ),
     );
     await env.sigmo_pro_updates.put(
       "stable/versions/v2.0.0/sigmo-pro-linux-amd64.gz",
@@ -1390,7 +1620,12 @@ describe("private releases", () => {
       downloadUrl: string;
     }>();
     expect(release.manifest).toBe(manifest);
-    expect(release.signature).toBe("signature-v2");
+    expect(release.signature).toBe(
+      await signEd25519(
+        env.SIGMO_LICENSE_PRIVATE_KEY,
+        textEncoder.encode(manifest),
+      ),
+    );
     const deviceTicketValue = new URL(release.downloadUrl).pathname
       .split("/")
       .at(-1);

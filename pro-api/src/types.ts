@@ -1,6 +1,8 @@
 export interface Lease {
   schemaVersion: 1;
   deviceId: string;
+  sessionId: string;
+  generation: number;
   telegramId: number;
   status: "active";
   displayName: string;
@@ -69,6 +71,7 @@ export interface DeviceDownloadTicket extends DownloadTicketFields {
 
 export interface BootstrapDownloadTicket extends DownloadTicketFields {
   purpose: "bootstrap";
+  jti: string;
   telegramId: number;
 }
 

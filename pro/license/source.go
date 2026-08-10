@@ -119,7 +119,7 @@ func (c *Controller) authenticatedResponseError(ctx context.Context, resp *http.
 	err := readServiceResponseError(resp, action)
 	err = c.classifyAuthorizationError(err)
 	if errors.Is(err, errExplicitUnauthorized) {
-		c.clearLease(ctx)
+		c.clearLease()
 		c.restartHealthy()
 	}
 	return err
