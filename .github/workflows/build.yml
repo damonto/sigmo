@@ -1,4 +1,4 @@
-name: Build and Release
+name: Build and Release Community
 
 on:
   workflow_dispatch:
@@ -8,17 +8,19 @@ on:
     paths-ignore:
       - "**/*.md"
       - "pro/**"
+      - "pro-api/**"
   pull_request:
     branches: [main]
     paths-ignore:
       - "pro/**"
+      - "pro-api/**"
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build for ${{ matrix.target.name }}
+    name: Build ${{ matrix.target.name }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -26,71 +28,90 @@ jobs:
         target:
           - { arch: 386, name: linux-i386 }
           - { arch: amd64, name: linux-amd64 }
-          - { arch: arm, name: linux-armhf }
+          - { arch: arm, arm: 7, name: linux-armhf }
           - { arch: arm64, name: linux-arm64 }
           - { arch: ppc64le, name: linux-ppc64le }
           - { arch: s390x, name: linux-s390x }
           - { arch: riscv64, name: linux-riscv64 }
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version: "stable"
-
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod }
       - name: Build frontend
         run: |
           cd web
-          bun install
+          bun install --frozen-lockfile
           bun run build --mode prod
-
-      - name: Build for ${{ matrix.target.name }}
+      - name: Build Community binary
         env:
           TARGET_ARCH: ${{ matrix.target.arch }}
           TARGET_ARM: ${{ matrix.target.arm }}
+          TARGET_NAME: ${{ matrix.target.name }}
+          RELEASE_PUBLIC_KEY: ${{ secrets.SIGMO_RELEASE_PUBLIC_KEY }}
         run: |
           set -euo pipefail
-
           go generate ./...
-          BUILD_VERSION=$(git describe --always --tags --match "v*" --dirty="-dev")
-          env_args=(GOOS=linux GOARCH="${TARGET_ARCH}" CGO_ENABLED=0)
-          if [ -n "${TARGET_ARM:-}" ]; then
-            env_args+=(GOARM="${TARGET_ARM}")
+          version="dev-${GITHUB_SHA::8}"
+          distribution="developer"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            : "${RELEASE_PUBLIC_KEY:?SIGMO_RELEASE_PUBLIC_KEY is required for release builds}"
+            version="${GITHUB_REF_NAME}"
+            distribution="standalone"
           fi
-
-          env "${env_args[@]}" go build -trimpath \
-            -ldflags="-w -s -X main.BuildVersion=${BUILD_VERSION}" \
-            -o "sigmo-${{ matrix.target.name }}" .
-
-      - name: Upload ${{ matrix.target.name }} to Artifact
-        uses: actions/upload-artifact@v7
+          ldflags="-w -s"
+          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Version=${version}"
+          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Commit=${GITHUB_SHA}"
+          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Channel=stable"
+          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Edition=community"
+          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Target=${TARGET_NAME}"
+          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Distribution=${distribution}"
+          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.ReleasePublicKey=${RELEASE_PUBLIC_KEY:-}"
+          env_args=(GOOS=linux GOARCH="${TARGET_ARCH}" CGO_ENABLED=0)
+          if [ -n "${TARGET_ARM:-}" ]; then env_args+=(GOARM="${TARGET_ARM}"); fi
+          env "${env_args[@]}" go build -trimpath -ldflags="${ldflags}" -o "sigmo-${TARGET_NAME}" .
+      - uses: actions/upload-artifact@v7
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
           name: sigmo-${{ matrix.target.name }}
           path: sigmo-${{ matrix.target.name }}
+          if-no-files-found: error
+          retention-days: 1
 
   release:
-    name: Release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    needs: build
+    name: Publish signed GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
     steps:
-      - name: Download Artifact
-        uses: actions/download-artifact@v8
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod }
+      - uses: actions/download-artifact@v8
         with:
+          pattern: sigmo-*
           merge-multiple: true
-          pattern: "*"
-
-      - name: Release
-        uses: softprops/action-gh-release@v3
+      - name: Generate signed update manifest
+        env:
+          SIGMO_RELEASE_PRIVATE_KEY: ${{ secrets.SIGMO_RELEASE_PRIVATE_KEY }}
+        run: |
+          go run ./cmd/updatemanifest \
+            -edition community -channel stable -version "${GITHUB_REF_NAME}" -commit "${GITHUB_SHA}" \
+            -output sigmo-update.json \
+            -artifact linux-i386=sigmo-linux-i386 \
+            -artifact linux-amd64=sigmo-linux-amd64 \
+            -artifact linux-armhf=sigmo-linux-armhf \
+            -artifact linux-arm64=sigmo-linux-arm64 \
+            -artifact linux-ppc64le=sigmo-linux-ppc64le \
+            -artifact linux-s390x=sigmo-linux-s390x \
+            -artifact linux-riscv64=sigmo-linux-riscv64
+      - uses: softprops/action-gh-release@v3
         with:
-          files: "*"
+          generate_release_notes: true
+          files: |
+            sigmo-linux-*
+            sigmo-update.json
+            sigmo-update.json.sig

@@ -1,4 +1,4 @@
-name: Build Pro
+name: Build and Publish Pro
 
 on:
   workflow_dispatch:
@@ -7,33 +7,42 @@ on:
     tags: [v*]
     paths-ignore:
       - "**/*.md"
-  release:
-    types: [published]
+      - "pro-api/**"
 
 permissions:
   contents: read
 
+concurrency:
+  group: sigmo-pro-${{ github.ref_type == 'tag' && 'stable' || 'dev' }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
 jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.release.outputs.channel }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - id: release
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "channel=stable" >> "${GITHUB_OUTPUT}"
+            echo "version=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "channel=dev" >> "${GITHUB_OUTPUT}"
+            echo "version=dev-${GITHUB_SHA::8}" >> "${GITHUB_OUTPUT}"
+          fi
+
   frontend:
-    name: Build frontend
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Build frontend
-        run: |
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: |
           cd web
           bun install --frozen-lockfile
           bun run build --mode prod
-
-      - name: Upload frontend dist
-        uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7
         with:
           name: web-dist
           path: web/dist/**
@@ -42,8 +51,8 @@ jobs:
 
   build-pro:
     name: Build Pro ${{ matrix.target.name }}
+    needs: [metadata, frontend]
     runs-on: ubuntu-latest
-    needs: frontend
     strategy:
       fail-fast: false
       matrix:
@@ -54,112 +63,114 @@ jobs:
           - { name: linux-arm64-musl, arch: arm64, musl: true }
           - { name: linux-arm, arch: arm, musl: false }
           - { name: linux-arm-musl, arch: arm, musl: true }
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+      - uses: actions/download-artifact@v8
+        with: { name: web-dist, path: web/dist }
+      - uses: actions/setup-go@v7
         with:
-          fetch-depth: 0
-
-      - name: Download frontend dist
-        uses: actions/download-artifact@v8
-        with:
-          name: web-dist
-          path: web/dist
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version: "stable"
+          go-version-file: go.mod
           cache-dependency-path: |
             go.sum
             pro/go.sum
-
-      - name: Build Pro ${{ matrix.target.name }}
+      - name: Build once for target
         env:
           SIGMO_PRO_MODULE_TOKEN: ${{ secrets.SIGMO_PRO_MODULE_TOKEN }}
-          SIGMO_PRO_TELEGRAM_CHAT_IDS: ${{ vars.SIGMO_PRO_TELEGRAM_CHAT_IDS }}
           SIGMO_BUILD_DIR: build/pro
-          SIGMO_PRO_MANIFEST: build/pro/manifests/${{ matrix.target.name }}.tsv
           SIGMO_PRO_TARGETS: ${{ matrix.target.name }}
           SIGMO_PRO_TARGET_ARCH: ${{ matrix.target.arch }}
           SIGMO_PRO_TARGET_MUSL: ${{ matrix.target.musl }}
           SIGMO_SKIP_FRONTEND_BUILD: "1"
-        run: |
-          set -euo pipefail
-
-          scripts/build-pro.sh
-
-      - name: Upload Pro ${{ matrix.target.name }}
-        uses: actions/upload-artifact@v7
+          SIGMO_BUILD_VERSION: ${{ needs.metadata.outputs.version }}
+          SIGMO_BUILD_CHANNEL: ${{ needs.metadata.outputs.channel }}
+          SIGMO_BUILD_COMMIT: ${{ github.sha }}
+          SIGMO_RELEASE_PUBLIC_KEY: ${{ secrets.SIGMO_RELEASE_PUBLIC_KEY }}
+          SIGMO_LICENSE_PUBLIC_KEY: ${{ secrets.SIGMO_LICENSE_PUBLIC_KEY }}
+          SIGMO_PRO_WORKER_URL: ${{ vars.SIGMO_PRO_WORKER_URL }}
+        run: scripts/build-pro.sh
+      - uses: actions/upload-artifact@v7
         with:
           name: sigmo-pro-${{ matrix.target.name }}
-          path: |
-            build/pro/*/sigmo-pro-${{ matrix.target.name }}.tar.gz
-            build/pro/manifests/${{ matrix.target.name }}.tsv
+          path: build/pro/sigmo-pro-${{ matrix.target.name }}
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
 
-  send-pro:
-    name: Send Pro artifacts
+  publish-r2:
+    name: Publish latest Pro ${{ needs.metadata.outputs.channel }}
+    needs: [metadata, build-pro]
     runs-on: ubuntu-latest
-    needs: build-pro
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Download Pro artifacts
-        uses: actions/download-artifact@v8
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod }
+      - uses: actions/download-artifact@v8
         with:
           pattern: sigmo-pro-*
-          path: build/pro
           merge-multiple: true
-
-      - name: Merge artifact manifests
+      - name: Generate signed manifest
+        env:
+          SIGMO_RELEASE_PRIVATE_KEY: ${{ secrets.SIGMO_RELEASE_PRIVATE_KEY }}
+          CHANNEL: ${{ needs.metadata.outputs.channel }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          git log -1 --pretty=%B > release-notes.txt
+          go run ./cmd/updatemanifest \
+            -edition pro -channel "${CHANNEL}" -version "${VERSION}" -commit "${GITHUB_SHA}" \
+            -notes-file release-notes.txt -output manifest.json \
+            -artifact linux-amd64=sigmo-pro-linux-amd64 \
+            -artifact linux-amd64-musl=sigmo-pro-linux-amd64-musl \
+            -artifact linux-arm64=sigmo-pro-linux-arm64 \
+            -artifact linux-arm64-musl=sigmo-pro-linux-arm64-musl \
+            -artifact linux-arm=sigmo-pro-linux-arm \
+            -artifact linux-arm-musl=sigmo-pro-linux-arm-musl
+      - name: Upload, switch latest, and remove previous version
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.SIGMO_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SIGMO_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          SIGMO_R2_ACCOUNT_ID: ${{ secrets.SIGMO_R2_ACCOUNT_ID }}
+          SIGMO_R2_BUCKET: ${{ vars.SIGMO_R2_BUCKET }}
+          CHANNEL: ${{ needs.metadata.outputs.channel }}
+          VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           set -euo pipefail
-
-          mapfile -t manifests < <(find build/pro/manifests -type f -name '*.tsv' | sort)
-          if [ "${#manifests[@]}" -eq 0 ]; then
-            echo "no Pro artifact manifests found" >&2
+          shopt -s nullglob
+          : "${SIGMO_R2_ACCOUNT_ID:?SIGMO_R2_ACCOUNT_ID is required}"
+          : "${SIGMO_R2_BUCKET:?SIGMO_R2_BUCKET is required}"
+          endpoint="https://${SIGMO_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          prefix="${CHANNEL}/versions/${VERSION}"
+          artifacts=(sigmo-pro-linux-*)
+          if [ "${#artifacts[@]}" -eq 0 ]; then
+            echo "no Pro artifacts found" >&2
             exit 1
           fi
+          for artifact in "${artifacts[@]}"; do
+            aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
+              --key "${prefix}/${artifact}" --body "${artifact}"
+          done
+          aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
+            --key "${prefix}/manifest.json" --body manifest.json --content-type application/json
+          aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
+            --key "${prefix}/manifest.json.sig" --body manifest.json.sig --content-type text/plain
+          aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
+            --key "${CHANNEL}/latest/manifest.json" --body manifest.json --content-type application/json
+          aws s3api list-objects-v2 --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
+            --prefix "${CHANNEL}/versions/" --output json | jq -r '.Contents[]?.Key' > r2-keys.txt
+          while IFS= read -r key; do
+            if [[ -z "${key}" || "${key}" == "${prefix}/"* ]]; then continue; fi
+            aws s3api delete-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" --key "${key}"
+          done < r2-keys.txt
 
-          manifest="build/pro/artifacts.tsv"
-          tmp="${manifest}.tmp"
-          printf 'chat_id\ttarget\tarchive\n' > "${tmp}"
-          for file in "${manifests[@]}"; do
-            awk 'NR > 1 && NF > 0 { print }' "${file}"
-          done | sort -t $'\t' -k1,1 -k2,2 >> "${tmp}"
-          mv "${tmp}" "${manifest}"
-
-      - name: Send Pro artifacts
-        env:
-          SIGMO_PRO_TELEGRAM_BOT_TOKEN: ${{ secrets.SIGMO_PRO_TELEGRAM_BOT_TOKEN }}
-          SIGMO_PRO_TELEGRAM_API: ${{ vars.SIGMO_PRO_TELEGRAM_API }}
-          SIGMO_BUILD_DIR: build/pro
-        run: |
-          set -euo pipefail
-
-          scripts/send-pro-artifacts.sh
-
-  cleanup-pro-artifacts:
-    name: Delete Pro artifacts
+  cleanup:
+    if: always()
+    needs: [frontend, build-pro, publish-r2]
     runs-on: ubuntu-latest
-    needs:
-      - frontend
-      - build-pro
-      - send-pro
-    if: ${{ always() }}
-    permissions:
-      actions: write
-      contents: read
+    permissions: { actions: write, contents: read }
     steps:
-      - name: Delete transient artifacts
-        uses: geekyeggo/delete-artifact@v6
+      - uses: geekyeggo/delete-artifact@v6
         with:
           name: |
             web-dist

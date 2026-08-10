@@ -18,8 +18,10 @@ updates:
     schedule:
       interval: "weekly"
 
-  - package-ecosystem: "bun" # See documentation for possible values
-    directory: "/web" # Location of package manifests
+  - package-ecosystem: "bun"
+    directories:
+      - "/web"
+      - "/pro-api"
     schedule:
       interval: "weekly"
 

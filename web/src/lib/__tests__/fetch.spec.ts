@@ -78,6 +78,26 @@ describe('useFetch global error handling', () => {
     expect(notifyHarness.error).not.toHaveBeenCalled()
   })
 
+  it('localizes Worker errors without requiring a request ID', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error_code: 'license_entitlement_inactive',
+          message: 'authorization revoked or expired',
+        }),
+        { status: 403, statusText: 'Forbidden' },
+      ),
+    )
+
+    await expect(fetchJson('settings/updates')).rejects.toThrow(
+      'authorization revoked or expired',
+    )
+    expect(notifyHarness.error).toHaveBeenCalledWith(
+      'Error',
+      'The Sigmo Pro authorization is revoked or expired.',
+    )
+  })
+
   it('resolves empty successful responses without parsing errors', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }))
 

@@ -8,6 +8,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/mcpserver"
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/app/router"
+	appupdate "github.com/damonto/sigmo/internal/app/update"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	"github.com/damonto/sigmo/internal/pkg/message"
@@ -35,6 +36,8 @@ type Runtime struct {
 	Storage             *storage.Store
 	WebPush             *webpush.Client
 	Reminders           *reminder.Scheduler
+	UpdateSource        appupdate.Source
+	License             appupdate.LicenseProvider
 
 	messageRoute          message.Route
 	ussdRoute             ussd.Route
@@ -80,4 +83,12 @@ func (r *Runtime) AddRunner(runner Runner) {
 
 func (r *Runtime) AddFeatures(features ...string) {
 	r.features = append(r.features, features...)
+}
+
+func (r *Runtime) SetUpdateSource(source appupdate.Source) {
+	r.UpdateSource = source
+}
+
+func (r *Runtime) SetLicenseProvider(provider appupdate.LicenseProvider) {
+	r.License = provider
 }

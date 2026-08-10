@@ -211,6 +211,14 @@ describe('ModemSettingsView', () => {
     expect(wrapper.text()).toContain('Wi-Fi Calling')
   })
 
+  it('allows desktop navigation descriptions to wrap', () => {
+    const wrapper = mountView()
+
+    expect(wrapper.get('[data-testid="modem-settings-nav-description-network"]').classes()).toContain(
+      'whitespace-normal',
+    )
+  })
+
   it('updates the line number from the edit dialog', async () => {
     const wrapper = mountView()
 

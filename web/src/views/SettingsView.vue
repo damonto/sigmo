@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bell, Bot, Globe2, Keyboard, MessageSquare } from 'lucide-vue-next'
+import { Bell, Bot, Download, Globe2, Keyboard, MessageSquare } from 'lucide-vue-next'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -44,12 +44,22 @@ const cards = computed(() => [
     icon: Bot,
     to: { name: 'settings-mcp' },
   },
+  {
+    key: 'updates',
+    title: t('settings.updates.title'),
+    description: t('settings.updates.description'),
+    icon: Download,
+    to: { name: 'settings-updates' },
+  },
 ])
 </script>
 
 <template>
   <div class="space-y-4">
-    <SettingsHeader :title="t('settings.title')" :description="t('settings.description')" />
+    <SettingsHeader
+      :title="t('settings.title')"
+      :description="t('settings.description')"
+    />
 
     <div class="grid gap-3 xl:grid-cols-2">
       <SettingsCategoryCard

@@ -1,7 +1,9 @@
 import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
 
 import App from '@/App.vue'
+import { useLicenseStore } from '@/stores/license'
 
 const route = vi.hoisted(() => ({
   params: {
@@ -40,8 +42,12 @@ vi.mock('@/composables/useModemPhoneCountry', () => ({
 
 describe('App', () => {
   it('renders the call banner at the app shell level', () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    useLicenseStore().mode = 'community'
     const wrapper = mount(App, {
       global: {
+        plugins: [pinia],
         stubs: {
           ModemCallBanner: {
             props: ['session'],

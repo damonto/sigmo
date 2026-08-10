@@ -63,10 +63,12 @@ jobs:
 
       - name: Prepare build args
         run: |
-          {
-            echo "BUILDKIT_CONTEXT_KEEP_GIT_DIR=true"
-            echo "BUILD_VERSION=${{ steps.meta.outputs.version }}"
-          } >> "$GITHUB_ENV"
+          version="dev-${GITHUB_SHA::8}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME}"
+          fi
+          echo "BUILDKIT_CONTEXT_KEEP_GIT_DIR=true" >> "${GITHUB_ENV}"
+          echo "BUILD_VERSION=${version}" >> "${GITHUB_ENV}"
 
       - name: Build and push by digest
         id: build
@@ -77,6 +79,7 @@ jobs:
           build-args: |
             BUILDKIT_CONTEXT_KEEP_GIT_DIR=${{ env.BUILDKIT_CONTEXT_KEEP_GIT_DIR }}
             BUILD_VERSION=${{ env.BUILD_VERSION }}
+            BUILD_COMMIT=${{ github.sha }}
           provenance: true
           sbom: true
           labels: ${{ steps.meta.outputs.labels }}

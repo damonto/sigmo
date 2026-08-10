@@ -6,24 +6,28 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 
+	"github.com/damonto/sigmo/internal/app/buildinfo"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	hnetwork "github.com/damonto/sigmo/internal/app/handler/network"
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/app/mcpauth"
 	"github.com/damonto/sigmo/internal/app/mcpserver"
 	"github.com/damonto/sigmo/internal/app/router"
+	appupdate "github.com/damonto/sigmo/internal/app/update"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	"github.com/damonto/sigmo/internal/pkg/modem"
@@ -38,12 +42,15 @@ import (
 )
 
 type Config struct {
-	BuildVersion  string
+	Build         buildinfo.Info
 	ListenAddress string
 	DBPath        string
 	Debug         bool
+	Authorize     AuthorizationFactory
 	Configure     Extension
 }
+
+var ErrRestart = errors.New("restart requested")
 
 func Run(cfg Config) error {
 	if cfg.ListenAddress == "" {
@@ -70,6 +77,37 @@ func Run(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
 	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	var restartRequested atomic.Bool
+	restart := func() {
+		restartRequested.Store(true)
+		stop()
+	}
+
+	var authorization Authorization
+	if cfg.Authorize != nil {
+		authorization, err = cfg.Authorize(ctx, AuthorizationConfig{
+			Build:   cfg.Build,
+			Restart: restart,
+			Store:   store,
+			Storage: db,
+		})
+		if err != nil {
+			return fmt.Errorf("configure authorization: %w", err)
+		}
+		startupCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		err = authorization.Start(startupCtx)
+		cancel()
+		if err != nil {
+			slog.Warn("validate product authorization", "error", err)
+		}
+		if !authorization.Authorized() {
+			return runActivationServer(ctx, cfg, authorization, restartRequested.Load)
+		}
+	}
+
 	webPush, err := webpush.New(context.Background(), db)
 	if err != nil {
 		return fmt.Errorf("configure web push: %w", err)
@@ -78,7 +116,7 @@ func Run(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("configure reminders: %w", err)
 	}
-	slog.Info("server starting", "version", cfg.BuildVersion, "listen_address", cfg.ListenAddress, "db_path", resolvedDBPath)
+	slog.Info("server starting", "version", cfg.Build.Version, "edition", cfg.Build.Edition, "channel", cfg.Build.Channel, "listen_address", cfg.ListenAddress, "db_path", resolvedDBPath)
 
 	registry, err := modem.NewRegistry()
 	if err != nil {
@@ -88,13 +126,6 @@ func Run(cfg Config) error {
 		if err := registry.Close(); err != nil {
 			slog.Warn("close modem registry", "error", err)
 		}
-	}()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	go func() {
-		<-ctx.Done()
-		stop()
 	}()
 
 	server := echo.New()
@@ -180,12 +211,26 @@ func Run(cfg Config) error {
 		Storage:               db,
 		WebPush:               webPush,
 		Reminders:             reminderScheduler,
+		License:               authorization,
 		airplaneModeLifecycle: internetConnector,
 	}
 	if cfg.Configure != nil {
 		if err := cfg.Configure(runtime); err != nil {
 			return fmt.Errorf("configure extensions: %w", err)
 		}
+	}
+	if runtime.UpdateSource == nil {
+		runtime.UpdateSource = appupdate.NewGitHubSource(nil, "", cfg.Build.ReleasePublicKey)
+	}
+	updateController, err := appupdate.NewController(appupdate.ControllerConfig{
+		Build:    cfg.Build,
+		Settings: store,
+		Source:   runtime.UpdateSource,
+		License:  runtime.License,
+		Restart:  restart,
+	})
+	if err != nil {
+		return fmt.Errorf("configure updater: %w", err)
 	}
 	networkHandler, err := hnetwork.New(hnetwork.Config{
 		Registry:              registry,
@@ -224,7 +269,7 @@ func Run(cfg Config) error {
 		}
 	}
 	mcpController, err := mcpserver.New(mcpserver.Config{
-		BuildVersion: cfg.BuildVersion,
+		BuildVersion: cfg.Build.Version,
 		Settings:     store,
 		Keys:         mcpKeys,
 		Storage:      db,
@@ -235,7 +280,7 @@ func Run(cfg Config) error {
 	}
 	defer mcpController.Close()
 	if err := router.Register(server, router.RegisterConfig{
-		BuildVersion:        cfg.BuildVersion,
+		Build:               cfg.Build,
 		Store:               store,
 		Registry:            registry,
 		InternetConnector:   internetConnector,
@@ -253,6 +298,12 @@ func Run(cfg Config) error {
 		Extensions:          runtime.routes,
 		MCP:                 mcpController,
 		MCPKeys:             mcpKeys,
+		Updates:             updateController,
+		LicenseRoutes: func(group *echo.Group) {
+			if authorization != nil {
+				authorization.RegisterStatusRoute(group)
+			}
+		},
 	}); err != nil {
 		return fmt.Errorf("configure router: %w", err)
 	}
@@ -264,6 +315,21 @@ func Run(cfg Config) error {
 		mcpController.Close()
 		networkHandler.Close()
 	})
+
+	wg.Go(func() {
+		if err := updateController.Run(ctx); err != nil {
+			slog.Error("update runner stopped", "error", err)
+		}
+	})
+
+	if authorization != nil {
+		wg.Go(func() {
+			if err := authorization.Run(ctx); err != nil {
+				slog.Error("authorization runner stopped", "error", err)
+				stop()
+			}
+		})
+	}
 
 	wg.Go(func() {
 		if err := reminderScheduler.Run(ctx); err != nil {
@@ -320,11 +386,19 @@ func Run(cfg Config) error {
 		Address:         cfg.ListenAddress,
 		HideBanner:      true,
 		GracefulTimeout: 5 * time.Second,
+		ListenerAddrFunc: func(net.Addr) {
+			wg.Go(func() {
+				confirmUpdateHealthy(ctx, updateController.MarkHealthy)
+			})
+		},
 	}
 	if err := startConfig.Start(ctx, server); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("start http server: %w", err)
 	}
 	wg.Wait()
+	if restartRequested.Load() {
+		return ErrRestart
+	}
 	return nil
 }
 

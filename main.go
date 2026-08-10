@@ -1,16 +1,19 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
+	"syscall"
 
+	"github.com/damonto/sigmo/internal/app/buildinfo"
 	"github.com/damonto/sigmo/internal/app/server"
+	appupdate "github.com/damonto/sigmo/internal/app/update"
 )
 
 var (
-	BuildVersion  string
 	listenAddress string
 	dbPath        string
 	debug         bool
@@ -26,25 +29,39 @@ func init() {
 
 func main() {
 	flag.Parse()
-	version := buildVersion()
+	info := buildinfo.Current()
 	if showVersion {
-		fmt.Println(version)
+		fmt.Println(info.Version)
 		return
 	}
-	if err := server.Run(server.Config{
-		BuildVersion:  version,
+	executable, err := os.Executable()
+	if err != nil {
+		slog.Error("resolve executable", "error", err)
+		os.Exit(1)
+	}
+	if restored, err := appupdate.RecoverPending(executable); err != nil {
+		slog.Error("recover pending update", "error", err)
+		os.Exit(1)
+	} else if restored {
+		if err := syscall.Exec(executable, os.Args, os.Environ()); err != nil {
+			slog.Error("restart restored version", "error", err)
+			os.Exit(1)
+		}
+	}
+	err = server.Run(server.Config{
+		Build:         info,
 		ListenAddress: listenAddress,
 		DBPath:        dbPath,
 		Debug:         debug,
-	}); err != nil {
+	})
+	if errors.Is(err, server.ErrRestart) {
+		if err := syscall.Exec(executable, os.Args, os.Environ()); err != nil {
+			slog.Error("restart after update", "error", err)
+			os.Exit(1)
+		}
+	}
+	if err != nil {
 		slog.Error("run server", "error", err)
 		os.Exit(1)
 	}
-}
-
-func buildVersion() string {
-	if BuildVersion == "" {
-		return "dev"
-	}
-	return BuildVersion
 }

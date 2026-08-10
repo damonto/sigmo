@@ -19,6 +19,7 @@ const (
 	proxySettingsKey    = "proxy.settings"
 	modemSettingsKey    = "modem.settings"
 	modemSettingsPrefix = "modem:"
+	updateSettingsKey   = "update.settings"
 )
 
 var errStorageRequired = errors.New("settings storage is required")
@@ -81,6 +82,12 @@ func (s *Store) MCPSettings() MCP {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.current.MCP
+}
+
+func (s *Store) UpdateSettings() Updates {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.current.Updates
 }
 
 func (s *Store) Update(ctx context.Context, update func(*Settings) error) (Settings, error) {
@@ -146,6 +153,13 @@ func load(ctx context.Context, db *storage.Store) (Settings, error) {
 		current.MCP = mcp
 	}
 
+	var updates Updates
+	if ok, err := get(ctx, db, globalScopeKey, updateSettingsKey, &updates); err != nil {
+		return Settings{}, err
+	} else if ok {
+		current.Updates = updates
+	}
+
 	modems, err := loadModems(ctx, db)
 	if err != nil {
 		return Settings{}, err
@@ -189,6 +203,9 @@ func (s *Store) save(ctx context.Context, current Settings) error {
 		return err
 	}
 	if err := s.db.Put(ctx, globalScopeKey, mcpSettingsKey, current.MCP); err != nil {
+		return err
+	}
+	if err := s.db.Put(ctx, globalScopeKey, updateSettingsKey, current.Updates); err != nil {
 		return err
 	}
 	return s.db.Put(ctx, globalScopeKey, proxySettingsKey, current.ProxySettings())

@@ -1,11 +1,27 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import {
+  createRouter,
+  createWebHistory,
+  type NavigationGuardReturn,
+  type RouteLocationNormalized,
+} from 'vue-router'
 
 import { getStoredToken } from '@/lib/authStorage'
 import { useAuthStore } from '@/stores/auth'
+import { useLicenseStore } from '@/stores/license'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    {
+      path: '/activate',
+      name: 'activate',
+      component: () => import('@/views/ActivateView.vue'),
+    },
+    {
+      path: '/unavailable',
+      name: 'license-unavailable',
+      component: () => import('@/views/LicenseUnavailableView.vue'),
+    },
     {
       path: '/auth',
       name: 'auth',
@@ -20,6 +36,11 @@ const router = createRouter({
       path: '/settings',
       component: () => import('@/layouts/SettingsLayout.vue'),
       children: [
+        {
+          path: 'updates',
+          name: 'settings-updates',
+          component: () => import('@/views/SettingsUpdatesView.vue'),
+        },
         {
           path: '',
           name: 'settings',
@@ -117,8 +138,27 @@ const router = createRouter({
 })
 
 const AUTH_ROUTE_NAME = 'auth'
+const ACTIVATE_ROUTE_NAME = 'activate'
+const LICENSE_UNAVAILABLE_ROUTE_NAME = 'license-unavailable'
 
-router.beforeEach(async (to) => {
+export const enforceRouteAccess = async (
+  to: Pick<RouteLocationNormalized, 'name'>,
+): Promise<NavigationGuardReturn> => {
+  const licenseStore = useLicenseStore()
+  await licenseStore.check(true)
+  if (licenseStore.unavailable) {
+    if (to.name !== LICENSE_UNAVAILABLE_ROUTE_NAME) {
+      return { name: LICENSE_UNAVAILABLE_ROUTE_NAME }
+    }
+    return
+  }
+  if (to.name === LICENSE_UNAVAILABLE_ROUTE_NAME) return { name: 'home' }
+  if (licenseStore.activationRequired) {
+    if (to.name !== ACTIVATE_ROUTE_NAME) return { name: ACTIVATE_ROUTE_NAME }
+    return
+  }
+  if (to.name === ACTIVATE_ROUTE_NAME) return { name: 'home' }
+
   const token = getStoredToken()
   if (token && to.name === AUTH_ROUTE_NAME) {
     return { name: 'home' }
@@ -140,6 +180,8 @@ router.beforeEach(async (to) => {
   if (to.name !== AUTH_ROUTE_NAME) {
     return { name: AUTH_ROUTE_NAME }
   }
-})
+}
+
+router.beforeEach(enforceRouteAccess)
 
 export default router

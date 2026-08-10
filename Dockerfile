@@ -22,6 +22,7 @@ FROM --platform=$TARGETPLATFORM golang:${GO_VERSION}-alpine AS builder
 WORKDIR /app
 
 ARG BUILD_VERSION=dev
+ARG BUILD_COMMIT=
 
 COPY go.mod go.sum ./
 RUN go mod download
@@ -29,7 +30,12 @@ RUN go mod download
 COPY . .
 COPY --from=frontend /app/web/dist ./web/dist
 
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-w -s -X main.BuildVersion=${BUILD_VERSION}" -o /app/sigmo .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-w -s \
+    -X github.com/damonto/sigmo/internal/app/buildinfo.Version=${BUILD_VERSION} \
+    -X github.com/damonto/sigmo/internal/app/buildinfo.Commit=${BUILD_COMMIT} \
+    -X github.com/damonto/sigmo/internal/app/buildinfo.Channel=stable \
+    -X github.com/damonto/sigmo/internal/app/buildinfo.Edition=community \
+    -X github.com/damonto/sigmo/internal/app/buildinfo.Distribution=container" -o /app/sigmo .
 
 FROM alpine:${ALPINE_VERSION} AS runner
 

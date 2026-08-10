@@ -11,6 +11,8 @@ const (
 	defaultProxySOCKS5Port    = 1080
 	DefaultTokenValidityDays  = 30
 	MaxTokenValidityDays      = 180
+	UpdateChannelStable       = "stable"
+	UpdateChannelDev          = "dev"
 )
 
 type Settings struct {
@@ -19,10 +21,16 @@ type Settings struct {
 	MCP      MCP                `json:"mcp"`
 	Modems   map[string]Modem   `json:"modems"`
 	Proxy    *Proxy             `json:"proxy,omitempty"`
+	Updates  Updates            `json:"updates"`
 }
 
 type MCP struct {
 	Enabled bool `json:"enabled"`
+}
+
+type Updates struct {
+	Automatic bool   `json:"automatic"`
+	Channel   string `json:"channel"`
 }
 
 type Auth struct {
@@ -108,6 +116,9 @@ func (c *Settings) ApplyDefaults() {
 	if c.Modems == nil {
 		c.Modems = map[string]Modem{}
 	}
+	if c.Updates.Channel != UpdateChannelDev {
+		c.Updates.Channel = UpdateChannelStable
+	}
 }
 
 func (c *Settings) FindModem(id string) Modem {
@@ -144,6 +155,7 @@ func (c *Settings) Clone() Settings {
 		Channels: make(map[string]Channel, len(c.Channels)),
 		MCP:      c.MCP,
 		Modems:   maps.Clone(c.Modems),
+		Updates:  c.Updates,
 	}
 	if c.Proxy != nil {
 		proxy := *c.Proxy

@@ -35,10 +35,23 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
 	if err := store.Migrate(ctx); err != nil {
-		_ = db.Close()
+		_ = db.Close() // The migration error is the useful startup failure.
+		return nil, err
+	}
+	if err := protectDatabaseFiles(path); err != nil {
+		_ = db.Close() // The permission error is the useful startup failure.
 		return nil, err
 	}
 	return store, nil
+}
+
+func protectDatabaseFiles(path string) error {
+	for _, candidate := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Chmod(candidate, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("protect database file %s: %w", filepath.Base(candidate), err)
+		}
+	}
+	return nil
 }
 
 func (s *Store) Close() error {

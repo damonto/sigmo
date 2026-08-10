@@ -1,5 +1,8 @@
 import type { ApiErrorResponse } from '@/types/api'
 
+import en from '@/i18n/locales/en'
+import zh from '@/i18n/locales/zh'
+
 import { clearStoredToken } from './authStorage'
 import { notifyError } from './notify'
 
@@ -7,7 +10,7 @@ export type ApiError = ApiErrorResponse & {
   status?: number
 }
 
-const extractErrorResponse = (data: unknown): ApiErrorResponse | null => {
+export const extractErrorResponse = (data: unknown): ApiErrorResponse | null => {
   if (typeof data === 'string' && data.trim()) {
     try {
       return extractErrorResponse(JSON.parse(data) as unknown)
@@ -20,14 +23,14 @@ const extractErrorResponse = (data: unknown): ApiErrorResponse | null => {
     const record = data as Record<string, unknown>
     if (
       typeof record.error_code === 'string' &&
-      typeof record.message === 'string' &&
-      typeof record.request_id === 'string'
+      typeof record.message === 'string'
     ) {
-      return {
+      const response: ApiErrorResponse = {
         error_code: record.error_code,
         message: record.message,
-        request_id: record.request_id,
       }
+      if (typeof record.request_id === 'string') response.request_id = record.request_id
+      return response
     }
   }
 
@@ -57,6 +60,26 @@ const titleFromStatus = (status?: number) => {
   }
 }
 
+export const localizeErrorMessage = (error: unknown, defaultMessage = 'An error occurred') => {
+  if (error && typeof error === 'object') {
+    const apiError = error as Partial<ApiError>
+    if (typeof apiError.error_code === 'string') {
+      const languages = typeof navigator === 'undefined' ? [] : navigator.languages
+      const language = languages.find((candidate) => {
+        const normalized = candidate.toLowerCase()
+        return normalized.startsWith('en') || normalized.startsWith('zh')
+      })
+      const messages: Record<string, string> = language?.toLowerCase().startsWith('zh')
+        ? zh.errors
+        : en.errors
+      const translated = messages[apiError.error_code]
+      if (translated) return translated
+    }
+    if (typeof apiError.message === 'string') return apiError.message
+  }
+  return defaultMessage
+}
+
 const resolveErrorInfo = (error: unknown, defaultMessage: string) => {
   let message = defaultMessage
   let title = 'Error'
@@ -64,9 +87,7 @@ const resolveErrorInfo = (error: unknown, defaultMessage: string) => {
 
   if (error && typeof error === 'object') {
     const apiError = error as Partial<ApiError>
-    if (typeof apiError.message === 'string') {
-      message = apiError.message
-    }
+    message = localizeErrorMessage(error, defaultMessage)
     if (typeof apiError.request_id === 'string') {
       requestId = apiError.request_id
     }
@@ -76,6 +97,17 @@ const resolveErrorInfo = (error: unknown, defaultMessage: string) => {
   }
 
   return { message, title, requestId }
+}
+
+export const createApiError = (response: Response, data?: unknown): ApiError => {
+  const extracted = extractErrorResponse(data)
+  const apiError: ApiError = extracted ?? {
+    error_code: 'unknown_error',
+    message: `Error ${response.status}: ${response.statusText}`,
+    request_id: response.headers.get('X-Request-ID') ?? undefined,
+  }
+  apiError.status = response.status
+  return apiError
 }
 
 /**
@@ -95,13 +127,7 @@ export const handleError = (error: unknown, defaultMessage = 'An error occurred'
  * Handle API response errors
  */
 export const handleResponseError = (response: Response, data?: unknown) => {
-  const extracted = extractErrorResponse(data)
-  const apiError: ApiError = extracted ?? {
-    error_code: 'unknown_error',
-    message: `Error ${response.status}: ${response.statusText}`,
-    request_id: response.headers.get('X-Request-ID') ?? '',
-  }
-  apiError.status = response.status
+  const apiError = createApiError(response, data)
 
   if (response.status === 401) {
     clearStoredToken()

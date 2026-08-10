@@ -6,16 +6,28 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+
+	"github.com/damonto/sigmo/internal/app/buildinfo"
 )
 
 func TestHandlerGet(t *testing.T) {
 	tests := []struct {
-		name    string
-		version string
-		want    string
+		name  string
+		build buildinfo.Info
+		want  string
 	}{
-		{name: "build version", version: "v1.2.3", want: `{"version":"v1.2.3"}` + "\n"},
-		{name: "empty version", version: "", want: `{"version":"dev"}` + "\n"},
+		{
+			name: "release metadata",
+			build: buildinfo.Info{
+				Version:      "v1.2.3",
+				Commit:       "0123456789abcdef",
+				Channel:      buildinfo.ChannelStable,
+				Edition:      buildinfo.EditionCommunity,
+				Target:       "linux-amd64",
+				Distribution: buildinfo.DistributionStandalone,
+			},
+			want: `{"version":"v1.2.3","commit":"0123456789abcdef","channel":"stable","edition":"community","target":"linux-amd64","distribution":"standalone"}` + "\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -25,7 +37,7 @@ func TestHandlerGet(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
 
-			if err := New(tt.version).Get(c); err != nil {
+			if err := New(tt.build).Get(c); err != nil {
 				t.Fatalf("Get() error = %v", err)
 			}
 			if rec.Code != http.StatusOK {

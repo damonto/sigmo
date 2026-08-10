@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v5/middleware"
 
 	"github.com/damonto/sigmo/internal/app/auth"
+	"github.com/damonto/sigmo/internal/app/buildinfo"
 	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	"github.com/damonto/sigmo/internal/app/handler/appinfo"
@@ -25,12 +26,14 @@ import (
 	"github.com/damonto/sigmo/internal/app/handler/notification"
 	hsettings "github.com/damonto/sigmo/internal/app/handler/settings"
 	"github.com/damonto/sigmo/internal/app/handler/simapp"
+	hupdate "github.com/damonto/sigmo/internal/app/handler/update"
 	"github.com/damonto/sigmo/internal/app/handler/ussd"
 	hwebpush "github.com/damonto/sigmo/internal/app/handler/webpush"
 	"github.com/damonto/sigmo/internal/app/mcpauth"
 	"github.com/damonto/sigmo/internal/app/mcpserver"
 	appmiddleware "github.com/damonto/sigmo/internal/app/middleware"
 	"github.com/damonto/sigmo/internal/app/modemstatus"
+	appupdate "github.com/damonto/sigmo/internal/app/update"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	pmessage "github.com/damonto/sigmo/internal/pkg/message"
@@ -46,7 +49,7 @@ import (
 type Extension func(*echo.Group, RegisterConfig) error
 
 type RegisterConfig struct {
-	BuildVersion        string
+	Build               buildinfo.Info
 	Store               *settings.Store
 	Registry            *modem.Registry
 	InternetConnector   *pinternet.Connector
@@ -64,6 +67,8 @@ type RegisterConfig struct {
 	Extensions          []Extension
 	MCP                 *mcpserver.Controller
 	MCPKeys             *mcpauth.Store
+	Updates             *appupdate.Controller
+	LicenseRoutes       func(*echo.Group)
 }
 
 func Register(e *echo.Echo, deps RegisterConfig) error {
@@ -88,8 +93,11 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 	}
 
 	v1 := e.Group("/api/v1")
+	if deps.LicenseRoutes != nil {
+		deps.LicenseRoutes(v1)
+	}
 
-	appInfoHandler := appinfo.New(deps.BuildVersion)
+	appInfoHandler := appinfo.New(deps.Build)
 	v1.GET("/app", appInfoHandler.Get)
 
 	capabilityHandler := capability.New(deps.Features)
@@ -113,6 +121,15 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.PUT("/settings/auth", h.UpdateAuth)
 			protected.PUT("/settings/proxy", h.UpdateProxy)
 			protected.PUT("/settings/notifications/:channel", h.UpdateNotificationChannel)
+		}
+
+		if deps.Updates != nil {
+			h := hupdate.New(deps.Updates)
+			protected.GET("/settings/updates", h.GetSettings)
+			protected.PUT("/settings/updates", h.UpdateSettings)
+			protected.POST("/update-checks", h.CreateCheck)
+			protected.POST("/update-installations", h.CreateInstallation)
+			protected.GET("/update-installations/current", h.CurrentInstallation)
 		}
 
 		if deps.MCP != nil && deps.MCPKeys != nil {

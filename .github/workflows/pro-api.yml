@@ -1,0 +1,31 @@
+name: Verify Pro API
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "pro-api/**"
+      - ".github/workflows/pro-api.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "pro-api/**"
+      - ".github/workflows/pro-api.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pro-api
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run type-check
+      - run: bun run test
+      - run: bun run dry-run

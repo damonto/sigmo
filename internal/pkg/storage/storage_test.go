@@ -2,10 +2,32 @@ package storage
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestOpenProtectsDatabaseFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sigmo.db")
+	store, err := Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("database mode = %o, want 600", got)
+	}
+}
 
 func TestAppState(t *testing.T) {
 	ctx := context.Background()

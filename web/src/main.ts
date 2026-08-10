@@ -9,6 +9,7 @@ import { useTheme } from './composables/useTheme'
 import i18n from './i18n'
 import { bootstrapWebPush } from './lib/webPush'
 import router from './router'
+import { useLicenseStore } from './stores/license'
 
 useTheme()
 
@@ -20,4 +21,6 @@ app.use(router)
 
 app.mount('#app')
 
-void bootstrapWebPush()
+void router.isReady().then(() => {
+  if (useLicenseStore().businessEnabled) return bootstrapWebPush()
+})

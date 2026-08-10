@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bell, Bot, Globe2, Keyboard, MessageSquare } from 'lucide-vue-next'
+import { Bell, Bot, Download, Globe2, Keyboard, MessageSquare } from 'lucide-vue-next'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
@@ -50,6 +50,14 @@ const items = computed(() => [
     routeName: 'settings-mcp',
     to: { name: 'settings-mcp' },
   },
+  {
+    key: 'updates',
+    title: t('settings.updates.title'),
+    description: t('settings.updates.description'),
+    icon: Download,
+    routeName: 'settings-updates',
+    to: { name: 'settings-updates' },
+  },
 ])
 </script>
 
@@ -64,7 +72,10 @@ const items = computed(() => [
       </p>
     </div>
 
-    <nav class="mt-2 space-y-1" :aria-label="t('settings.title')">
+    <nav
+      class="mt-2 space-y-1"
+      :aria-label="t('settings.title')"
+    >
       <Button
         v-for="item in items"
         :key="item.key"
@@ -81,7 +92,10 @@ const items = computed(() => [
           :to="item.to"
           :aria-current="route.name === item.routeName ? 'page' : undefined"
         >
-          <component :is="item.icon" class="mt-0.5 size-4 shrink-0" />
+          <component
+            :is="item.icon"
+            class="mt-0.5 size-4 shrink-0"
+          />
           <span class="min-w-0">
             <span class="block truncate text-sm font-medium">{{ item.title }}</span>
             <span

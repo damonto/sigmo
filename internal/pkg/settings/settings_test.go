@@ -148,6 +148,7 @@ func TestStorePersistsSettings(t *testing.T) {
 			Password:      "secret",
 		}
 		current.MCP.Enabled = true
+		current.Updates = Updates{Automatic: true, Channel: UpdateChannelDev}
 		return nil
 	})
 	if err != nil {
@@ -180,6 +181,9 @@ func TestStorePersistsSettings(t *testing.T) {
 	if !got.MCP.Enabled {
 		t.Fatal("MCP.Enabled = false, want true")
 	}
+	if !got.Updates.Automatic || got.Updates.Channel != UpdateChannelDev {
+		t.Fatalf("Updates = %#v, want persisted dev automatic settings", got.Updates)
+	}
 	if modem := got.FindModem("modem-1"); modem.Alias != "Office" || modem.MSS != 128 {
 		t.Fatalf("modem settings = %#v, want saved settings", modem)
 	}
@@ -208,6 +212,9 @@ func TestStoreDefaultsEmptyDatabase(t *testing.T) {
 	}
 	if got.MCP.Enabled {
 		t.Fatal("MCP.Enabled = true, want false")
+	}
+	if got.Updates.Automatic || got.Updates.Channel != UpdateChannelStable {
+		t.Fatalf("Updates = %#v, want stable with automatic disabled", got.Updates)
 	}
 }
 

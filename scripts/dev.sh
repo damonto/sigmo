@@ -11,6 +11,28 @@ SSH_KEY="${SIGMO_SSH_KEY:-${SSH_DIR}/id_ed25519}"
 DB_PATH="${SIGMO_DB_PATH:-${ROOT_DIR}/build/sigmo-dev.db}"
 OUTPUT="${SIGMO_DEV_BIN:-${ROOT_DIR}/build/sigmo-dev}"
 GOPRIVATE_PATTERN="${GOPRIVATE:-${PRO_GOPRIVATE}}"
+KEYS_DIR="${SIGMO_KEYS_DIR:-${ROOT_DIR}/scripts/sigmo-keys}"
+PRO_WORKER_URL="${SIGMO_PRO_WORKER_URL:-https://sigmo-pro-api.id.workers.dev}"
+
+LICENSE_PUBLIC_KEY="${SIGMO_LICENSE_PUBLIC_KEY:-}"
+if [ -z "${LICENSE_PUBLIC_KEY}" ]; then
+	license_public_key_file="${KEYS_DIR}/license-public.raw.b64"
+	if [ ! -s "${license_public_key_file}" ]; then
+		echo "License public key not found: ${license_public_key_file}" >&2
+		exit 1
+	fi
+	LICENSE_PUBLIC_KEY="$(<"${license_public_key_file}")"
+fi
+
+RELEASE_PUBLIC_KEY="${SIGMO_RELEASE_PUBLIC_KEY:-}"
+if [ -z "${RELEASE_PUBLIC_KEY}" ]; then
+	release_public_key_file="${KEYS_DIR}/release-public.raw.b64"
+	if [ ! -s "${release_public_key_file}" ]; then
+		echo "Release public key not found: ${release_public_key_file}" >&2
+		exit 1
+	fi
+	RELEASE_PUBLIC_KEY="$(<"${release_public_key_file}")"
+fi
 
 if [ ! -f "${SSH_KEY}" ]; then
 	echo "SSH key not found: ${SSH_KEY}" >&2
@@ -53,6 +75,10 @@ go_args=()
 if [ -n "${PRO_GO_TAGS}" ]; then
 	go_args+=(-tags="${PRO_GO_TAGS}")
 fi
+ldflags="-X github.com/damonto/sigmo/internal/app/buildinfo.ReleasePublicKey=${RELEASE_PUBLIC_KEY}"
+ldflags+=" -X github.com/damonto/sigmo/pro/license.WorkerURL=${PRO_WORKER_URL}"
+ldflags+=" -X github.com/damonto/sigmo/pro/license.LicensePublicKey=${LICENSE_PUBLIC_KEY}"
+go_args+=(-ldflags="${ldflags}")
 
 args=("$@")
 if [ "${#args[@]}" -eq 0 ]; then

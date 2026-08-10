@@ -98,7 +98,12 @@ const items = computed(() => {
           <component :is="item.icon" class="mt-0.5 size-4 shrink-0" />
           <span class="min-w-0">
             <span class="block truncate text-sm font-medium">{{ item.title }}</span>
-            <span class="mt-0.5 block line-clamp-2 text-xs opacity-80">{{ item.description }}</span>
+            <span
+              :data-testid="`modem-settings-nav-description-${item.key}`"
+              class="mt-0.5 block whitespace-normal wrap-break-word text-xs leading-4 opacity-80"
+            >
+              {{ item.description }}
+            </span>
           </span>
         </RouterLink>
       </Button>

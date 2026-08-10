@@ -244,6 +244,11 @@ const createSettingsRouter = () =>
         children: [
           { path: '', name: 'settings', component: SettingsView },
           {
+            path: 'updates',
+            name: 'settings-updates',
+            component: { template: '<div>Updates</div>' },
+          },
+          {
             path: 'mcp',
             name: 'settings-mcp',
             component: { template: '<div>MCP</div>' },
@@ -329,7 +334,7 @@ describe('Settings routes', () => {
     document.body.innerHTML = ''
   })
 
-  it('renders five category cards with direct module routes', async () => {
+  it('renders six category cards with direct module routes', async () => {
     const { wrapper } = await mountSettings('/settings')
     const hrefs = wrapper
       .findAll('main a')
@@ -342,6 +347,7 @@ describe('Settings routes', () => {
       '/settings/web-push',
       '/settings/notifications',
       '/settings/mcp',
+      '/settings/updates',
     ])
     expect(wrapper.text()).toContain('settings.authTitle')
     expect(wrapper.text()).toContain('settings.notificationTitle')
@@ -356,6 +362,7 @@ describe('Settings routes', () => {
       '/settings/web-push',
       '/settings/notifications',
       '/settings/mcp',
+      '/settings/updates',
     ])
     expect(wrapper.get('aside a[aria-current="page"]').attributes('href')).toBe(
       '/settings/notifications',
