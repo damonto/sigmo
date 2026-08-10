@@ -75,4 +75,18 @@ describe('ActivateView', () => {
     expect(licenseStore.check).toHaveBeenCalledWith(true)
     expect(router.replace).toHaveBeenCalledWith({ name: 'home' })
   })
+
+  it('recovers when pairing creation races the authorization restart', async () => {
+    licenseApi.createPairing.mockRejectedValueOnce(new Error('Not Found'))
+    appApi.ready.mockReset()
+    appApi.ready.mockResolvedValue(true)
+    licenseStore.check.mockResolvedValue(true)
+
+    mount(ActivateView)
+    await flushPromises()
+
+    expect(appApi.ready).toHaveBeenCalledTimes(1)
+    expect(licenseStore.check).toHaveBeenCalledWith(true)
+    expect(router.replace).toHaveBeenCalledWith({ name: 'home' })
+  })
 })

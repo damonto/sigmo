@@ -87,6 +87,11 @@ const createPairing = async () => {
     timer = window.setTimeout(poll, 2000)
   } catch (error) {
     if (!active) return
+    // The authorization callback restarts the Go server. A stale activation
+    // page can race that restart and hit the full server, where pairing routes
+    // are intentionally unavailable. Recheck the status before showing an
+    // error so the page follows the newly authorized process.
+    if (await enterAppIfReady()) return
     failure.value = localizeErrorMessage(error, t('activate.failed'))
   } finally {
     if (active) loading.value = false
