@@ -95,7 +95,7 @@ func (r *Relay) Reload() error {
 }
 
 func (r *Relay) Run(ctx context.Context) error {
-	unsubscribe, err := r.registry.Subscribe(func(event modem.ModemEvent) error {
+	unsubscribe, err := r.registry.Subscribe(ctx, func(event modem.ModemEvent) error {
 		return r.handleModemEvent(ctx, event)
 	})
 	if err != nil {

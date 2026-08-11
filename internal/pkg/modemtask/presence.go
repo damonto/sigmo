@@ -12,7 +12,7 @@ import (
 // Registry is the part of modem.Registry needed to follow modem presence.
 type Registry interface {
 	Modems(context.Context) (map[string]*modem.Modem, error)
-	Subscribe(func(modem.ModemEvent) error) (func(), error)
+	Subscribe(context.Context, func(modem.ModemEvent) error) (func(), error)
 }
 
 type presenceSubscription struct {
@@ -108,7 +108,7 @@ func Run(ctx context.Context, registry Registry, start func(context.Context, *mo
 		wg.Wait()
 	}
 
-	unsubscribe, err := registry.Subscribe(func(event modem.ModemEvent) error {
+	unsubscribe, err := registry.Subscribe(ctx, func(event modem.ModemEvent) error {
 		switch event.Type {
 		case modem.ModemEventAdded, modem.ModemEventChanged:
 			startModem(event.Modem, event.Path, event.Generation)

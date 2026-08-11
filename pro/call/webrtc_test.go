@@ -4,8 +4,10 @@ package call
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
+	"time"
 
 	imsvoice "github.com/damonto/ims-go/ims/voice"
 	"github.com/damonto/ims-go/ims/voice/codec/evs"
@@ -15,6 +17,25 @@ import (
 
 	"github.com/damonto/sigmo/pro/voicecodec"
 )
+
+func TestMediaCleanupContextSurvivesParentCancellation(t *testing.T) {
+	parent, cancelParent := context.WithCancel(t.Context())
+	cancelParent()
+
+	ctx, cancel := mediaCleanupContext(parent)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("mediaCleanupContext() error = %v, want active context", err)
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("mediaCleanupContext() has no deadline")
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 || remaining > mediaCleanupTimeout {
+		t.Fatalf("media cleanup deadline remaining = %v, want within %v", remaining, mediaCleanupTimeout)
+	}
+}
 
 func TestEVSPayloadRoundTrip(t *testing.T) {
 	tests := []struct {

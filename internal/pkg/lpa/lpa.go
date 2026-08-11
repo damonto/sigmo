@@ -60,11 +60,14 @@ type Info struct {
 type ChannelConfig struct {
 	LockKey  string
 	ConfigID string
-	Channel  driver.SmartCardChannel
 	AID      []byte
 	Settings *settings.Settings
 	Logger   *slog.Logger
 }
+
+// ChannelFactory creates a fresh smart-card channel for one LPA initialization
+// attempt. The caller transfers the returned channel to euicc-go's LPA client.
+type ChannelFactory func(context.Context) (driver.SmartCardChannel, error)
 
 var (
 	ErrNoSupportedAID          = errors.New("no supported ISD-R AID found or it's not an eUICC")
@@ -128,24 +131,14 @@ func newModemClient(ctx context.Context, cfg modemClientConfig) (*Client, error)
 // newClientForSlot creates a client while the caller owns the modem's SIM slot
 // reservation and the corresponding LPA lock.
 func newClientForSlot(ctx context.Context, cfg modemClientConfig) (*Client, error) {
-	ch, err := createChannelForSlot(ctx, cfg.modem, cfg.slot)
-	if err != nil {
-		return nil, err
-	}
-	instance, err := newWithChannelLocked(ctx, ChannelConfig{
+	return newWithChannelFactoryLocked(ctx, ChannelConfig{
 		ConfigID: cfg.modem.EquipmentIdentifier,
-		Channel:  ch,
 		AID:      cfg.aid,
 		Settings: cfg.settings,
 		Logger:   cfg.modem.Logger(),
+	}, func(ctx context.Context) (driver.SmartCardChannel, error) {
+		return createChannelForSlot(ctx, cfg.modem, cfg.slot)
 	})
-	if err != nil {
-		if disconnectErr := ch.Disconnect(); disconnectErr != nil {
-			cfg.modem.Logger().Debug("disconnect LPA channel after client creation failure", "error", disconnectErr)
-		}
-		return nil, err
-	}
-	return instance, nil
 }
 
 func lpaLockKey(m *modem.Modem, slot uint8) string {
@@ -155,22 +148,22 @@ func lpaLockKey(m *modem.Modem, slot uint8) string {
 	return fmt.Sprintf("%s:%d", m.EquipmentIdentifier, slot)
 }
 
-func NewWithChannel(ctx context.Context, cfg ChannelConfig) (*Client, error) {
-	if cfg.Channel == nil {
-		return nil, errors.New("lpa channel is required")
+// NewWithChannelFactory creates an LPA client using a fresh channel for each
+// AID attempt. The returned client owns a successful channel; failed attempts
+// are released before the next AID is tried.
+func NewWithChannelFactory(ctx context.Context, cfg ChannelConfig, factory ChannelFactory) (*Client, error) {
+	if factory == nil {
+		return nil, errors.New("LPA channel factory is required")
 	}
 	if cfg.LockKey != "" {
 		if err := gmu.LockContext(ctx, cfg.LockKey); err != nil {
-			return nil, errors.Join(fmt.Errorf("reserve LPA client: %w", err), cfg.Channel.Disconnect())
+			return nil, fmt.Errorf("reserve LPA client: %w", err)
 		}
 	}
-	instance, err := newWithChannelLocked(ctx, cfg)
+	instance, err := newWithChannelFactoryLocked(ctx, cfg, factory)
 	if err != nil {
 		if cfg.LockKey != "" {
 			gmu.Unlock(cfg.LockKey)
-		}
-		if disconnectErr := cfg.Channel.Disconnect(); disconnectErr != nil && cfg.Logger != nil {
-			cfg.Logger.Debug("disconnect LPA channel after client creation failure", "error", disconnectErr)
 		}
 		return nil, err
 	}
@@ -237,7 +230,7 @@ func (c *lockedChannel) CloseLogicalChannel(channel byte) error {
 	return nil
 }
 
-func newWithChannelLocked(ctx context.Context, cfg ChannelConfig) (*Client, error) {
+func newWithChannelFactoryLocked(ctx context.Context, cfg ChannelConfig, factory ChannelFactory) (*Client, error) {
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -247,54 +240,57 @@ func newWithChannelLocked(ctx context.Context, cfg ChannelConfig) (*Client, erro
 		currentSettings = settings.Default()
 	}
 	operation := newOperationContext(ctx)
-	channel := &contextSmartCardChannel{operation: operation, SmartCardChannel: cfg.Channel}
 	instance := &Client{
 		clientView: &clientView{},
 		lockKey:    cfg.LockKey,
-		channel:    cfg.Channel,
 		logger:     logger,
 		operation:  operation,
 	}
 	opts := &lpa.Options{
-		Channel:              channel,
 		AdminProtocolVersion: "2.2.0",
 		Logger:               logger,
 		MSS:                  currentSettings.FindModem(cfg.ConfigID).MSS,
 	}
 	if len(cfg.AID) > 0 {
-		opts.AID = slices.Clone(cfg.AID)
-		client, err := newEUICCClient(operation, opts)
-		if err != nil {
-			logger.Warn("failed to create LPA client", "AID", fmt.Sprintf("%X", opts.AID), "error", err)
-			result := errors.Join(ErrNoSupportedAID, fmt.Errorf("open AID %X: %w", opts.AID, err))
-			if errors.Is(err, errAIDNotSupported) {
-				result = errors.Join(result, errCacheableNoSupportedAID)
-			}
-			return nil, result
+		if err := instance.tryCreateClient(ctx, operation, opts, factory, [][]byte{cfg.AID}); err != nil {
+			return nil, err
 		}
-		instance.clientView.client = client
-		logger.Info("LPA client created", "AID", fmt.Sprintf("%X", opts.AID))
 		return instance, nil
 	}
-	if err := instance.tryCreateClient(ctx, operation, opts); err != nil {
+	if err := instance.tryCreateClient(ctx, operation, opts, factory, AIDs); err != nil {
 		return nil, err
 	}
 	return instance, nil
 }
 
-func (l *Client) tryCreateClient(ctx context.Context, operation *operationContext, opts *lpa.Options) error {
+func (l *Client) tryCreateClient(ctx context.Context, operation *operationContext, opts *lpa.Options, factory ChannelFactory, aids [][]byte) error {
 	var errs error
 	allUnsupported := true
-	for _, opts.AID = range AIDs {
+	for _, aid := range aids {
 		if err := ctx.Err(); err != nil {
 			return errors.Join(errs, err)
 		}
-		var err error
-		l.clientView.client, err = newEUICCClient(operation, opts)
+		opts.AID = slices.Clone(aid)
+		channel, err := factory(ctx)
+		if err != nil {
+			return errors.Join(errs, fmt.Errorf("open channel for AID %X: %w", opts.AID, err))
+		}
+		if channel == nil {
+			return errors.Join(errs, fmt.Errorf("open channel for AID %X: channel is nil", opts.AID))
+		}
+		ownedChannel := &disconnectOnceChannel{SmartCardChannel: channel}
+		opts.Channel = &contextSmartCardChannel{operation: operation, SmartCardChannel: ownedChannel}
+		client, err := newEUICCClient(operation, opts)
 		if err == nil {
+			l.clientView.client = client
+			l.channel = ownedChannel
 			l.logger.Info("LPA client created", "AID", fmt.Sprintf("%X", opts.AID))
 			return nil
 		}
+		// euicc-go disconnects channels after transport setup failures, but it
+		// validates options before taking ownership. The wrapper makes this
+		// fallback safe in both cases.
+		err = errors.Join(err, ownedChannel.Disconnect())
 		l.logger.Warn("failed to create LPA client", "AID", fmt.Sprintf("%X", opts.AID), "error", err)
 		allUnsupported = allUnsupported && errors.Is(err, errAIDNotSupported)
 		errs = errors.Join(errs, fmt.Errorf("open AID %X: %w", opts.AID, err))
@@ -304,6 +300,19 @@ func (l *Client) tryCreateClient(ctx context.Context, operation *operationContex
 		result = errors.Join(result, errCacheableNoSupportedAID)
 	}
 	return result
+}
+
+type disconnectOnceChannel struct {
+	driver.SmartCardChannel
+	once sync.Once
+	err  error
+}
+
+func (c *disconnectOnceChannel) Disconnect() error {
+	c.once.Do(func() {
+		c.err = c.SmartCardChannel.Disconnect()
+	})
+	return c.err
 }
 
 func newEUICCClient(operation *operationContext, opts *lpa.Options) (*lpa.Client, error) {

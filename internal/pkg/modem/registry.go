@@ -133,6 +133,12 @@ func NewRegistry() (*Registry, error) {
 	}, nil
 }
 
+// Start performs initial discovery using ctx and then owns the device watcher
+// until Close is called.
+func (r *Registry) Start(ctx context.Context) error {
+	return r.ensureStarted(ctx)
+}
+
 func (r *Registry) Modems(ctx context.Context) (map[string]*Modem, error) {
 	if err := r.ensureStarted(ctx); err != nil {
 		return nil, err
@@ -197,11 +203,14 @@ func (r *Registry) Reload(ctx context.Context, current *Modem) (*Modem, error) {
 	}
 }
 
-func (r *Registry) Subscribe(fn func(ModemEvent) error) (func(), error) {
+// Subscribe registers fn after ensuring the registry has started. ctx only
+// controls startup; the subscription remains active until its returned
+// function is called or the registry closes.
+func (r *Registry) Subscribe(ctx context.Context, fn func(ModemEvent) error) (func(), error) {
 	if fn == nil {
 		return nil, errors.New("modem subscriber is required")
 	}
-	if err := r.ensureStarted(context.Background()); err != nil {
+	if err := r.ensureStarted(ctx); err != nil {
 		return nil, err
 	}
 	r.mu.Lock()
@@ -264,7 +273,7 @@ func (r *Registry) WaitForReloadedModem(ctx context.Context, current *Modem) (*M
 		return nil, errModemRequired
 	}
 	ready := make(chan *Modem, 1)
-	unsubscribe, err := r.Subscribe(func(event ModemEvent) error {
+	unsubscribe, err := r.Subscribe(ctx, func(event ModemEvent) error {
 		if event.Modem != nil && samePhysicalModem(current, event.Modem) && event.Generation > current.Generation() {
 			select {
 			case ready <- event.Modem:

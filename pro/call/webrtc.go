@@ -68,6 +68,12 @@ func NewMedia(ctx context.Context, calls *Calls) (*Media, error) {
 
 func (m *Media) Run(ctx context.Context) error {
 	<-ctx.Done()
+	return m.Shutdown(ctx)
+}
+
+// Shutdown closes media resources with the bounded grace period used during
+// process shutdown.
+func (m *Media) Shutdown(ctx context.Context) error {
 	cleanupCtx, cancel := mediaCleanupContext(ctx)
 	defer cancel()
 	return m.Close(cleanupCtx)

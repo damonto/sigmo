@@ -206,6 +206,10 @@ func (c *coordinator) start(modem *mmodem.Modem, profileID string) {
 	}
 	modemID := modem.EquipmentIdentifier
 	c.mu.Lock()
+	if c.closing {
+		c.mu.Unlock()
+		return
+	}
 	if c.airplaneSuspended[modemID] {
 		if c.deferredStarts == nil {
 			c.deferredStarts = make(map[string]deferredSessionStart)
@@ -971,48 +975,73 @@ func (c *coordinator) disconnectedReason() string {
 }
 
 func (c *coordinator) stop(modemID string) {
-	c.stopSession(modemID, true)
+	c.stopSession(modemID)
 }
 
 func (c *coordinator) stopAsync(modemID string) {
-	session, events := c.detachSession(modemID)
-	c.closeDetachedSessionAsync(session, events)
+	session, events, tracked := c.detachSession(modemID)
+	c.closeDetachedSessionAsync(session, events, tracked)
 }
 
 func (c *coordinator) stopAsyncSession(modemID string, sessionID uint64) {
-	session, events := c.detachSessionByID(modemID, sessionID)
-	c.closeDetachedSessionAsync(session, events)
+	session, events, tracked := c.detachSessionByID(modemID, sessionID)
+	c.closeDetachedSessionAsync(session, events, tracked)
 }
 
 func (c *coordinator) restart(modem *mmodem.Modem, profileID string) {
 	if modem == nil || strings.TrimSpace(modem.EquipmentIdentifier) == "" {
 		return
 	}
-	session, events := c.detachSession(modem.EquipmentIdentifier)
-	c.closeDetachedSession(session, events, true)
+	session, events, tracked := c.detachSession(modem.EquipmentIdentifier)
+	c.finishDetachedSession(session, events, tracked)
 	c.start(modem, profileID)
 }
 
-func (c *coordinator) stopSession(modemID string, wait bool) {
-	session, events := c.detachSession(modemID)
-	c.closeDetachedSession(session, events, wait)
+func (c *coordinator) stopSession(modemID string) {
+	session, events, tracked := c.detachSession(modemID)
+	c.finishDetachedSession(session, events, tracked)
 }
 
-func (c *coordinator) closeDetachedSession(session *sessionState, events []VoiceCall, wait bool) {
+func (c *coordinator) closeDetachedSession(session *sessionState, events []VoiceCall) error {
+	ctx, cancel := context.WithTimeout(context.Background(), imsSessionCleanupTimeout)
+	defer cancel()
+	return c.closeDetachedSessionContext(ctx, session, events)
+}
+
+func (c *coordinator) closeDetachedSessionContext(ctx context.Context, session *sessionState, events []VoiceCall) error {
 	if session == nil {
-		return
+		return nil
 	}
 	c.deleteSessionWebsheet(session)
 	if session.cancel != nil {
 		session.cancel()
 	}
-	closeSession(session, wait)
+	err := closeSessionContext(ctx, session)
 	for _, call := range events {
 		c.publishVoiceEvent(call)
 	}
+	return err
 }
 
-func (c *coordinator) closeDetachedSessionAsync(session *sessionState, events []VoiceCall) {
+func (c *coordinator) finishDetachedSession(session *sessionState, events []VoiceCall, tracked bool) {
+	err := c.closeDetachedSession(session, events)
+	c.completeDetachedSession(err, tracked)
+}
+
+func (c *coordinator) completeDetachedSession(err error, tracked bool) {
+	if err != nil {
+		slog.Warn("close IMS session", "error", err)
+	}
+	if !tracked {
+		return
+	}
+	c.mu.Lock()
+	c.cleanupErr = errors.Join(c.cleanupErr, err)
+	c.mu.Unlock()
+	c.cleanupWG.Done()
+}
+
+func (c *coordinator) closeDetachedSessionAsync(session *sessionState, events []VoiceCall, tracked bool) {
 	if session == nil {
 		return
 	}
@@ -1020,7 +1049,13 @@ func (c *coordinator) closeDetachedSessionAsync(session *sessionState, events []
 	if session.cancel != nil {
 		session.cancel()
 	}
-	go closeSession(session, true)
+	if tracked {
+		go func() {
+			c.completeDetachedSession(closeSession(session), true)
+		}()
+	} else {
+		c.completeDetachedSession(closeSession(session), false)
+	}
 	for _, call := range events {
 		c.publishVoiceEvent(call)
 	}
@@ -1034,56 +1069,131 @@ func (c *coordinator) deleteSessionWebsheet(session *sessionState) {
 	session.websheet = nil
 }
 
-func (c *coordinator) detachSession(modemID string) (*sessionState, []VoiceCall) {
+func (c *coordinator) detachSession(modemID string) (*sessionState, []VoiceCall, bool) {
 	c.mu.Lock()
 	session := c.sessions[modemID]
 	delete(c.sessions, modemID)
 	events := c.disconnectedCallEvents(session)
+	// Register before unlocking so stopAll cannot miss this detached session.
+	tracked := session != nil && !c.closing
+	if tracked {
+		c.cleanupWG.Add(1)
+	}
 	c.mu.Unlock()
-	return session, events
+	return session, events, tracked
 }
 
-func (c *coordinator) detachSessionByID(modemID string, sessionID uint64) (*sessionState, []VoiceCall) {
+func (c *coordinator) detachSessionByID(modemID string, sessionID uint64) (*sessionState, []VoiceCall, bool) {
 	c.mu.Lock()
 	session := c.sessions[modemID]
 	if session == nil || session.id != sessionID {
 		c.mu.Unlock()
-		return nil, nil
+		return nil, nil, false
 	}
 	delete(c.sessions, modemID)
 	events := c.disconnectedCallEvents(session)
+	tracked := !c.closing
+	if tracked {
+		c.cleanupWG.Add(1)
+	}
 	c.mu.Unlock()
-	return session, events
+	return session, events, tracked
 }
 
-func closeSession(session *sessionState, wait bool) {
+func closeSession(session *sessionState) error {
+	ctx, cancel := context.WithTimeout(context.Background(), imsSessionCleanupTimeout)
+	defer cancel()
+	return closeSessionContext(ctx, session)
+}
+
+func closeSessionContext(ctx context.Context, session *sessionState) error {
 	if session == nil {
-		return
+		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var result error
 	if session.client != nil {
-		_ = session.client.Close()
+		if err := closeIMSClientContext(ctx, session.client); err != nil {
+			result = errors.Join(result, fmt.Errorf("close ims client: %w", err))
+		}
 	}
-	if wait && session.done != nil {
-		<-session.done
+	if session.done != nil {
+		select {
+		case <-session.done:
+		case <-ctx.Done():
+			result = errors.Join(result, fmt.Errorf("wait for ims session: %w", ctx.Err()))
+		}
+	}
+	return result
+}
+
+func closeIMSClientContext(ctx context.Context, client *imsgo.Client) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- client.Close()
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
-func (c *coordinator) stopAll() []*mmodem.Modem {
+func (c *coordinator) stopAll() ([]*mmodem.Modem, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), imsSessionCleanupTimeout)
+	defer cancel()
+	return c.stopAllContext(ctx)
+}
+
+func (c *coordinator) stopAllContext(ctx context.Context) ([]*mmodem.Modem, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	c.mu.Lock()
-	ids := slices.Collect(maps.Keys(c.sessions))
-	modems := make([]*mmodem.Modem, 0, len(ids))
-	for _, modemID := range ids {
-		if session := c.sessions[modemID]; session != nil && session.modem != nil {
+	c.closing = true
+	// Completed detachments have already been logged. Only errors from cleanup
+	// still in flight when shutdown begins belong to this shutdown result.
+	c.cleanupErr = nil
+	// Detach the complete session set under the lock; new async stops then see
+	// an empty map and cannot create work after the shutdown wait begins.
+	sessions := slices.Collect(maps.Values(c.sessions))
+	events := make([][]VoiceCall, len(sessions))
+	modems := make([]*mmodem.Modem, 0, len(sessions))
+	for i, session := range sessions {
+		events[i] = c.disconnectedCallEvents(session)
+		if session != nil && session.modem != nil {
 			modems = append(modems, session.modem)
 		}
 	}
+	clear(c.sessions)
 	clear(c.airplaneSuspended)
 	clear(c.deferredStarts)
 	c.mu.Unlock()
-	for _, modemID := range ids {
-		c.stop(modemID)
+	var result error
+	for i, session := range sessions {
+		result = errors.Join(result, c.closeDetachedSessionContext(ctx, session, events[i]))
 	}
-	return modems
+	cleanupDone := make(chan struct{})
+	go func() {
+		c.cleanupWG.Wait()
+		close(cleanupDone)
+	}()
+	select {
+	case <-cleanupDone:
+	case <-ctx.Done():
+		result = errors.Join(result, fmt.Errorf("wait for IMS session cleanup: %w", ctx.Err()))
+	}
+	c.mu.Lock()
+	result = errors.Join(result, c.cleanupErr)
+	c.cleanupErr = nil
+	c.mu.Unlock()
+	return modems, result
 }
 
 func (c *coordinator) stopByDevice(deviceKey string, generation uint64) {

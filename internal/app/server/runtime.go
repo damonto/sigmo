@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"slices"
 
 	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
 	"github.com/damonto/sigmo/internal/app/forwarder"
@@ -25,6 +27,8 @@ type Extension func(*Runtime) error
 
 type Runner func(context.Context) error
 
+type Cleanup func(context.Context) error
+
 type Runtime struct {
 	Store               *settings.Store
 	Registry            *modem.Registry
@@ -45,6 +49,7 @@ type Runtime struct {
 	mcpTools              []mcpserver.Extension
 	routes                []router.Extension
 	runners               []Runner
+	cleanups              []Cleanup
 	features              []string
 	airplaneModeLifecycle appconnectivity.AirplaneModeLifecycle
 }
@@ -79,6 +84,23 @@ func (r *Runtime) AddRoute(route router.Extension) {
 
 func (r *Runtime) AddRunner(runner Runner) {
 	r.runners = append(r.runners, runner)
+}
+
+func (r *Runtime) AddCleanup(cleanups ...Cleanup) {
+	r.cleanups = append(r.cleanups, cleanups...)
+}
+
+// close releases extension-owned resources after all extension runners stop.
+func (r *Runtime) close(ctx context.Context) error {
+	var result error
+	for _, v := range slices.Backward(r.cleanups) {
+		if v == nil {
+			continue
+		}
+		result = errors.Join(result, v(ctx))
+	}
+	r.cleanups = nil
+	return result
 }
 
 func (r *Runtime) AddFeatures(features ...string) {

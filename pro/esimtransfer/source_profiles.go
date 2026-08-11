@@ -74,20 +74,12 @@ func (s *transferRunner) physicalProfileOptions(ctx context.Context, currentSett
 }
 
 func sourceCCIDProfiles(ctx context.Context, currentSettings *settings.Settings, req ProfilesRequest) ([]*sgp22.ProfileInfo, error) {
-	reader, err := openCCIDLPAReader(req.SourceID)
-	if err != nil {
-		return nil, fmt.Errorf("open CCID reader: %w", err)
+	start := startRequest{
+		SourceType: SourceCCID,
+		SourceID:   req.SourceID,
+		SourceIMEI: req.SourceIMEI,
 	}
-	sourceLPA, err := ilpa.NewWithChannel(ctx, ilpa.ChannelConfig{
-		LockKey:  sourceLockKey(SourceCCID, req.SourceID),
-		Channel:  reader,
-		Settings: currentSettings,
-		Logger: sourceLogger(startRequest{
-			SourceType: SourceCCID,
-			SourceID:   req.SourceID,
-			SourceIMEI: req.SourceIMEI,
-		}),
-	})
+	sourceLPA, err := newCCIDLPAClient(ctx, currentSettings, start)
 	if err != nil {
 		return nil, fmt.Errorf("create source LPA client: %w", err)
 	}

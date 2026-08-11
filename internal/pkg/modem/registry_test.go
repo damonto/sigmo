@@ -14,6 +14,201 @@ import (
 	"github.com/damonto/wwan-go/qcom"
 )
 
+func TestRegistrySubscribeStartupUsesCallerContext(t *testing.T) {
+	registry, err := NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	discoverStarted := make(chan struct{})
+	registry.discover = func(ctx context.Context) ([]wwanmodem.Device, error) {
+		close(discoverStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan error, 1)
+	go func() {
+		_, err := registry.Subscribe(ctx, func(ModemEvent) error { return nil })
+		result <- err
+	}()
+	select {
+	case <-discoverStarted:
+	case <-time.After(time.Second):
+		t.Fatal("Subscribe() did not start modem discovery")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Subscribe() error = %v, want %v", err, context.Canceled)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Subscribe() ignored caller cancellation")
+	}
+}
+
+func TestRegistryStartStopsDuringInitialOpen(t *testing.T) {
+	registry, err := NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
+	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
+		return []wwanmodem.Device{device}, nil
+	}
+	openStarted := make(chan struct{})
+	registry.open = func(ctx context.Context, _ wwanmodem.Device, _ uint64) (*Modem, error) {
+		close(openStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	var watcherStarted atomic.Bool
+	registry.watchDevices = func(context.Context) (<-chan wwanmodem.Result[wwanmodem.DeviceEvent], error) {
+		watcherStarted.Store(true)
+		return make(chan wwanmodem.Result[wwanmodem.DeviceEvent]), nil
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan error, 1)
+	go func() {
+		result <- registry.Start(ctx)
+	}()
+	select {
+	case <-openStarted:
+	case <-time.After(time.Second):
+		t.Fatal("Start() did not begin opening the discovered modem")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Start() error = %v, want %v", err, context.Canceled)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Start() ignored cancellation during modem open")
+	}
+	if watcherStarted.Load() {
+		t.Fatal("Start() launched the watcher after startup was canceled")
+	}
+}
+
+func TestRegistryStartContinuesAfterDeviceOpenTimeout(t *testing.T) {
+	previousTimeout := registryOpenTimeout
+	registryOpenTimeout = 10 * time.Millisecond
+	t.Cleanup(func() {
+		registryOpenTimeout = previousTimeout
+	})
+
+	registry, err := NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
+	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
+		return []wwanmodem.Device{device}, nil
+	}
+	registry.open = func(ctx context.Context, _ wwanmodem.Device, _ uint64) (*Modem, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	registry.watchDevices = func(context.Context) (<-chan wwanmodem.Result[wwanmodem.DeviceEvent], error) {
+		return make(chan wwanmodem.Result[wwanmodem.DeviceEvent]), nil
+	}
+
+	if err := registry.Start(t.Context()); err != nil {
+		t.Fatalf("Start() error = %v, want timed out device to be skipped", err)
+	}
+	t.Cleanup(func() {
+		if err := registry.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+	modems, err := registry.Modems(t.Context())
+	if err != nil {
+		t.Fatalf("Modems() error = %v", err)
+	}
+	if len(modems) != 0 {
+		t.Fatalf("Modems() = %v, want no opened modems", modems)
+	}
+}
+
+func TestRegistryStartStopsDuringWatcherStartup(t *testing.T) {
+	registry, err := NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
+		return nil, nil
+	}
+	watcherStarted := make(chan struct{})
+	registry.watchDevices = func(ctx context.Context) (<-chan wwanmodem.Result[wwanmodem.DeviceEvent], error) {
+		close(watcherStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan error, 1)
+	go func() {
+		result <- registry.Start(ctx)
+	}()
+	select {
+	case <-watcherStarted:
+	case <-time.After(time.Second):
+		t.Fatal("Start() did not begin watcher startup")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Start() error = %v, want %v", err, context.Canceled)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Start() ignored cancellation during watcher startup")
+	}
+}
+
+func TestRegistryWatcherOutlivesStartupContext(t *testing.T) {
+	registry, err := NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
+		return nil, nil
+	}
+	watcherCtx := make(chan context.Context, 1)
+	registry.watchDevices = func(ctx context.Context) (<-chan wwanmodem.Result[wwanmodem.DeviceEvent], error) {
+		watcherCtx <- ctx
+		return make(chan wwanmodem.Result[wwanmodem.DeviceEvent]), nil
+	}
+
+	ctx, cancelStartup := context.WithCancel(t.Context())
+	if err := registry.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := registry.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+	runCtx := <-watcherCtx
+	cancelStartup()
+	select {
+	case <-runCtx.Done():
+		t.Fatal("watcher stopped with the completed startup context")
+	case <-time.After(20 * time.Millisecond):
+	}
+	if err := registry.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	select {
+	case <-runCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("Close() did not stop the watcher context")
+	}
+}
+
 func TestRegistryReplacesAndRemovesPhysicalDeviceGeneration(t *testing.T) {
 	registry, err := NewRegistry()
 	if err != nil {
@@ -47,7 +242,7 @@ func TestRegistryReplacesAndRemovesPhysicalDeviceGeneration(t *testing.T) {
 	}
 
 	published := make(chan ModemEvent, 2)
-	unsubscribe, err := registry.Subscribe(func(event ModemEvent) error {
+	unsubscribe, err := registry.Subscribe(t.Context(), func(event ModemEvent) error {
 		published <- event
 		return nil
 	})
@@ -248,7 +443,7 @@ func TestRegistryReloadClosesCurrentGenerationBeforeOpeningReplacement(t *testin
 		t.Fatal("initial modem is missing")
 	}
 	events := make(chan ModemEvent, 2)
-	unsubscribe, err := registry.Subscribe(func(event ModemEvent) error {
+	unsubscribe, err := registry.Subscribe(t.Context(), func(event ModemEvent) error {
 		events <- event
 		return nil
 	})
@@ -657,7 +852,7 @@ func TestRegistryRestartsWatcherAndReconcilesMissedChange(t *testing.T) {
 		t.Fatalf("Modems() error = %v", err)
 	}
 	published := make(chan ModemEvent, 1)
-	unsubscribe, err := registry.Subscribe(func(event ModemEvent) error {
+	unsubscribe, err := registry.Subscribe(t.Context(), func(event ModemEvent) error {
 		published <- event
 		return nil
 	})
@@ -713,7 +908,7 @@ func TestRegistryPublishesPathChangeBeforeClosingPreviousGeneration(t *testing.T
 	}
 	var got ModemEvent
 	closedAtPublish := true
-	unsubscribe, err := registry.Subscribe(func(event ModemEvent) error {
+	unsubscribe, err := registry.Subscribe(t.Context(), func(event ModemEvent) error {
 		got = event
 		closedAtPublish = closed
 		return nil
@@ -760,7 +955,7 @@ func TestRegistryPublishesRemovedAndAddedForDifferentIMEIOnSameDevice(t *testing
 		},
 	}
 	var events []ModemEvent
-	unsubscribe, err := registry.Subscribe(func(event ModemEvent) error {
+	unsubscribe, err := registry.Subscribe(t.Context(), func(event ModemEvent) error {
 		events = append(events, event)
 		return nil
 	})

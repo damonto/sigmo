@@ -13,12 +13,12 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/damonto/sigmo/internal/app/buildinfo"
 	"github.com/damonto/sigmo/internal/app/forwarder"
@@ -50,40 +50,85 @@ type Config struct {
 	Configure     Extension
 }
 
-var ErrRestart = errors.New("restart requested")
+var (
+	ErrRestart      = errors.New("restart requested")
+	errSystemSignal = errors.New("system signal received")
+)
 
-func Run(cfg Config) error {
+const serverShutdownTimeout = 30 * time.Second
+
+func Run(cfg Config) (runErr error) {
 	if cfg.ListenAddress == "" {
 		cfg.ListenAddress = "0.0.0.0:9527"
 	}
 	applyLogLevel(cfg.Debug)
 	httpapi.SetExposeInternalErrors(cfg.Debug)
 
+	appCtx, cancelApp := context.WithCancelCause(context.Background())
+	signalCh := make(chan os.Signal, 1)
+	stopSignalWatcher := make(chan struct{})
+	signalWatcherDone := make(chan struct{})
+	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		defer close(signalWatcherDone)
+		select {
+		case <-signalCh:
+			// Restore the default behavior before shutdown so a second signal
+			// still terminates a process stuck in cleanup.
+			signal.Stop(signalCh)
+			cancelApp(errSystemSignal)
+		case <-stopSignalWatcher:
+		}
+	}()
+	runners, ctx := errgroup.WithContext(appCtx)
+	var (
+		cleanups         cleanupStack
+		backgroundTasks  sync.WaitGroup
+		runnerFailures   []error
+		runnerFailuresMu sync.Mutex
+	)
+	defer func() {
+		shutdownCause := context.Cause(ctx)
+		cancelApp(context.Canceled)
+		close(stopSignalWatcher)
+		signal.Stop(signalCh)
+		<-signalWatcherDone
+		runnerWaitErr := runners.Wait()
+		runnerFailuresMu.Lock()
+		joinedRunnerFailures := errors.Join(runnerFailures...)
+		runnerFailuresMu.Unlock()
+		if joinedRunnerFailures != nil {
+			runnerWaitErr = joinedRunnerFailures
+		}
+		runErr = errors.Join(runErr, runnerWaitErr)
+		backgroundTasks.Wait()
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), serverShutdownTimeout)
+		runErr = errors.Join(runErr, cleanups.Close(cleanupCtx))
+		cancelCleanup()
+		runErr = finalizeRunError(runErr, shutdownCause)
+	}()
+	restart := func() {
+		cancelApp(ErrRestart)
+	}
+
 	resolvedDBPath, err := resolveDBPath(cfg.DBPath)
 	if err != nil {
 		return fmt.Errorf("configure storage: %w", err)
 	}
-	db, err := storage.Open(context.Background(), resolvedDBPath)
+	db, err := storage.Open(ctx, resolvedDBPath)
 	if err != nil {
 		return fmt.Errorf("configure storage: %w", err)
 	}
-	defer func() {
+	cleanups.Add(func(context.Context) error {
 		if err := db.Close(); err != nil {
-			slog.Warn("close storage", "error", err)
+			return fmt.Errorf("close storage: %w", err)
 		}
-	}()
+		return nil
+	})
 
-	store, err := settings.NewStore(context.Background(), db)
+	store, err := settings.NewStore(ctx, db)
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	var restartRequested atomic.Bool
-	restart := func() {
-		restartRequested.Store(true)
-		stop()
 	}
 
 	var authorization Authorization
@@ -105,11 +150,11 @@ func Run(cfg Config) error {
 			slog.Warn("validate product authorization", "error", err)
 		}
 		if !authorization.Authorized() {
-			return runActivationServer(ctx, cfg, authorization, restartRequested.Load)
+			return runActivationServer(ctx, cfg, authorization)
 		}
 	}
 
-	webPush, err := webpush.New(context.Background(), db)
+	webPush, err := webpush.New(ctx, db)
 	if err != nil {
 		return fmt.Errorf("configure web push: %w", err)
 	}
@@ -123,11 +168,16 @@ func Run(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("connect modem registry: %w", err)
 	}
-	defer func() {
+	cleanups.Add(func(context.Context) error {
 		if err := registry.Close(); err != nil {
-			slog.Warn("close modem registry", "error", err)
+			return fmt.Errorf("close modem registry: %w", err)
 		}
-	}()
+		return nil
+	})
+	err = registry.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("start modem registry: %w", err)
+	}
 
 	server := echo.New()
 	server.Logger = slog.Default()
@@ -163,7 +213,7 @@ func Run(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("configure internet connector: %w", err)
 	}
-	unsubscribeInternetLifecycle, err := registry.Subscribe(func(event modem.ModemEvent) error {
+	unsubscribeInternetLifecycle, err := registry.Subscribe(ctx, func(event modem.ModemEvent) error {
 		var previous *modem.Modem
 		switch event.Type {
 		case modem.ModemEventChanged:
@@ -179,7 +229,10 @@ func Run(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("subscribe Internet modem lifecycle: %w", err)
 	}
-	defer unsubscribeInternetLifecycle()
+	cleanups.Add(func(context.Context) error {
+		unsubscribeInternetLifecycle()
+		return nil
+	})
 	startupCtx, cancelStartup := context.WithTimeout(ctx, 15*time.Second)
 	if err := modemtask.EnableDisabled(startupCtx, registry, enableDisabledPolicy); err != nil {
 		slog.Error("enable disabled modems", "error", err)
@@ -188,15 +241,16 @@ func Run(cfg Config) error {
 		slog.Error("recover internet connections", "error", err)
 	}
 	cancelStartup()
-	lpaClients, err := lpa.NewPool(store, registry)
+	lpaClients, err := lpa.NewPool(ctx, store, registry)
 	if err != nil {
 		return fmt.Errorf("configure LPA client pool: %w", err)
 	}
-	defer func() {
-		if err := lpaClients.Close(); err != nil {
-			slog.Warn("close LPA client pool", "error", err)
+	cleanups.Add(func(ctx context.Context) error {
+		if err := lpaClients.Close(ctx); err != nil {
+			return fmt.Errorf("close LPA client pool: %w", err)
 		}
-	}()
+		return nil
+	})
 	relay, err := forwarder.New(store, registry, db, webPush)
 	if err != nil {
 		return fmt.Errorf("configure message relay: %w", err)
@@ -215,6 +269,12 @@ func Run(cfg Config) error {
 		License:               authorization,
 		airplaneModeLifecycle: internetConnector,
 	}
+	cleanups.Add(func(ctx context.Context) error {
+		if err := runtime.close(ctx); err != nil {
+			return fmt.Errorf("close extensions: %w", err)
+		}
+		return nil
+	})
 	if cfg.Configure != nil {
 		if err := cfg.Configure(runtime); err != nil {
 			return fmt.Errorf("configure extensions: %w", err)
@@ -242,7 +302,10 @@ func Run(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("configure network handler: %w", err)
 	}
-	defer networkHandler.Close()
+	cleanups.Add(func(context.Context) error {
+		networkHandler.Close()
+		return nil
+	})
 	mcpKeys, err := mcpauth.NewStore(db)
 	if err != nil {
 		return fmt.Errorf("configure MCP API keys: %w", err)
@@ -279,7 +342,10 @@ func Run(cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("configure MCP server: %w", err)
 	}
-	defer mcpController.Close()
+	cleanups.Add(func(context.Context) error {
+		mcpController.Close()
+		return nil
+	})
 	if err := router.Register(server, router.RegisterConfig{
 		Build:               cfg.Build,
 		Store:               store,
@@ -309,78 +375,45 @@ func Run(cfg Config) error {
 		return fmt.Errorf("configure router: %w", err)
 	}
 
-	var wg sync.WaitGroup
-
-	wg.Go(func() {
-		<-ctx.Done()
-		mcpController.Close()
-		networkHandler.Close()
-	})
-
-	wg.Go(func() {
-		if err := updateController.Run(ctx); err != nil {
-			slog.Error("update runner stopped", "error", err)
-		}
-	})
-
-	if authorization != nil {
-		wg.Go(func() {
-			if err := authorization.Run(ctx); err != nil {
-				slog.Error("authorization runner stopped", "error", err)
-				stop()
+	startRunner := func(name string, runner Runner) {
+		runners.Go(func() error {
+			err := superviseRunner(ctx, name, runner)
+			if err != nil {
+				runnerFailuresMu.Lock()
+				runnerFailures = append(runnerFailures, err)
+				runnerFailuresMu.Unlock()
 			}
+			return err
 		})
 	}
 
-	wg.Go(func() {
-		if err := reminderScheduler.Run(ctx); err != nil {
-			slog.Error("reminder runner stopped", "error", err)
-			stop()
-		}
-	})
+	startRunner("update", updateController.Run)
 
-	wg.Go(func() {
-		if err := modemtask.RunEnableDisabled(ctx, registry, enableDisabledPolicy); err != nil {
-			slog.Error("modem enable runner stopped", "error", err)
-		}
-	})
+	if authorization != nil {
+		startRunner("authorization", authorization.Run)
+	}
 
-	wg.Go(func() {
-		if err := modemtask.RunSMSStorageDefaults(ctx, registry, wwanmodem.MessageStorageDevice); err != nil {
-			slog.Error("SMS storage defaults stopped", "error", err)
-		}
+	startRunner("reminder", reminderScheduler.Run)
+	startRunner("modem enable", func(ctx context.Context) error {
+		return modemtask.RunEnableDisabled(ctx, registry, enableDisabledPolicy)
 	})
-
-	wg.Go(func() {
+	startRunner("sms storage defaults", func(ctx context.Context) error {
+		return modemtask.RunSMSStorageDefaults(ctx, registry, wwanmodem.MessageStorageDevice)
+	})
+	startRunner("always-on internet", func(ctx context.Context) error {
 		internetConnector.RunAlwaysOn(ctx, registry)
+		return nil
 	})
-
-	wg.Go(func() {
-		if err := modemtask.Run(ctx, registry, networkPreferences.Restore); err != nil {
-			slog.Error("network preferences restore stopped", "error", err)
-		}
+	startRunner("network preferences restore", func(ctx context.Context) error {
+		return modemtask.Run(ctx, registry, networkPreferences.Restore)
 	})
-
-	wg.Go(func() {
-		if err := hnetwork.RunRegistrationRestore(ctx, registry, db); err != nil {
-			slog.Error("network registration restore stopped", "error", err)
-		}
+	startRunner("network registration restore", func(ctx context.Context) error {
+		return hnetwork.RunRegistrationRestore(ctx, registry, db)
 	})
+	startRunner("message relay", relay.Run)
 
-	wg.Go(func() {
-		if err := relay.Run(ctx); err != nil {
-			slog.Error("message relay stopped", "error", err)
-			stop()
-		}
-	})
-
-	for _, runner := range runtime.runners {
-		wg.Go(func() {
-			if err := runner(ctx); err != nil {
-				slog.Error("extension runner stopped", "error", err)
-				stop()
-			}
-		})
+	for i, runner := range runtime.runners {
+		startRunner(fmt.Sprintf("extension %d", i+1), runner)
 	}
 
 	startConfig := echo.StartConfig{
@@ -388,17 +421,13 @@ func Run(cfg Config) error {
 		HideBanner:      true,
 		GracefulTimeout: 5 * time.Second,
 		ListenerAddrFunc: func(net.Addr) {
-			wg.Go(func() {
+			backgroundTasks.Go(func() {
 				confirmUpdateHealthy(ctx, updateController.MarkHealthy)
 			})
 		},
 	}
-	if err := startConfig.Start(ctx, server); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := startConfig.Start(ctx, server); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("start http server: %w", err)
-	}
-	wg.Wait()
-	if restartRequested.Load() {
-		return ErrRestart
 	}
 	return nil
 }

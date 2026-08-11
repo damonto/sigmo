@@ -54,6 +54,9 @@ type coordinator struct {
 	registrationGroups  *RegistrationGroups
 
 	mu                sync.Mutex
+	closing           bool
+	cleanupWG         sync.WaitGroup
+	cleanupErr        error
 	sessions          map[string]*sessionState
 	airplaneSuspended map[string]bool
 	deferredStarts    map[string]deferredSessionStart
@@ -81,6 +84,8 @@ type sessionState struct {
 	connectedAt time.Time
 	websheet    *websheet.Session
 }
+
+const imsSessionCleanupTimeout = 30 * time.Second
 
 type deferredSessionStart struct {
 	modem     *mmodem.Modem
@@ -141,7 +146,7 @@ func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) (runEr
 			return fmt.Errorf("clean stale VoLTE policy routing: %w", err)
 		}
 	}
-	unsubscribe, err := registry.Subscribe(func(event mmodem.ModemEvent) error {
+	unsubscribe, err := registry.Subscribe(ctx, func(event mmodem.ModemEvent) error {
 		c.processModemEvent(ctx, event)
 		return nil
 	})
@@ -153,11 +158,14 @@ func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) (runEr
 		slog.Warn("start configured IMS access", "access", c.routeName(), "error", err)
 	}
 	<-ctx.Done()
-	modems := c.stopAll()
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), imsSessionCleanupTimeout)
+	defer cancelCleanup()
+	modems, stopErr := c.stopAllContext(cleanupCtx)
+	runErr = errors.Join(runErr, stopErr)
 	if err := c.releaseManagedVoLTEOnShutdown(ctx, modems); err != nil {
-		slog.Warn("restore modem VoLTE on shutdown", "error", err)
+		runErr = errors.Join(runErr, fmt.Errorf("restore modem VoLTE on shutdown: %w", err))
 	}
-	return nil
+	return runErr
 }
 
 func (c *coordinator) processModemEvent(ctx context.Context, event mmodem.ModemEvent) {

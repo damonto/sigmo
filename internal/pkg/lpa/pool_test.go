@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -256,15 +257,75 @@ func TestPoolCloseClosesPersistentClientOnce(t *testing.T) {
 		secureElems: make(map[poolSEKey][]SE),
 	}
 
-	if err := p.Close(); err != nil {
+	if err := p.Close(t.Context()); err != nil {
 		t.Fatalf("Pool.Close() error = %v", err)
 	}
-	if err := p.Close(); err != nil {
+	if err := p.Close(t.Context()); err != nil {
 		t.Fatalf("second Pool.Close() error = %v", err)
 	}
 	if got := closes.Load(); got != 1 {
 		t.Fatalf("client close calls = %d, want 1", got)
 	}
+}
+
+func TestPoolCloseHonorsContextWhileEntryIsLeased(t *testing.T) {
+	var closes atomic.Int32
+	entry := &poolEntry{
+		client: &Client{shutdown: func() error {
+			closes.Add(1)
+			return nil
+		}},
+		gate: make(chan struct{}, 1),
+	}
+	p := &Pool{entries: map[poolKey]*poolEntry{{}: entry}}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if err := p.Close(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Pool.Close() error = %v, want context deadline", err)
+	}
+	if got := closes.Load(); got != 0 {
+		t.Fatalf("client close calls = %d, want 0 while lease is active", got)
+	}
+}
+
+func TestPoolCloseKeepsModemLockUntilTimedOutCloseFinishes(t *testing.T) {
+	key := "test:timed-out-pool-close"
+	closeStarted := make(chan struct{})
+	releaseClose := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseClose) }) }
+	t.Cleanup(release)
+	entry := &poolEntry{
+		client: &Client{shutdown: func() error {
+			close(closeStarted)
+			<-releaseClose
+			return nil
+		}},
+		gate:    make(chan struct{}, 1),
+		lockKey: key,
+	}
+	entry.gate <- struct{}{}
+	p := &Pool{entries: map[poolKey]*poolEntry{{}: entry}}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	if err := p.Close(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Pool.Close() error = %v, want context deadline", err)
+	}
+	select {
+	case <-closeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("client close did not start")
+	}
+	lockCtx, cancelLock := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancelLock()
+	if err := gmu.LockContext(lockCtx, key); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("LockContext() error = %v, want lock held until close finishes", err)
+	}
+
+	release()
+	assertLockReleased(t, key)
 }
 
 func TestPoolRoutesDefaultSEOnlyToActiveSlot(t *testing.T) {
@@ -398,7 +459,7 @@ func TestInvalidateSIMSlotsClosesOnlyAffectedEntries(t *testing.T) {
 		retired: make(map[*modem.Modem]struct{}),
 	}
 
-	if err := p.invalidateSIMSlots(m, 1); err != nil {
+	if err := p.invalidateSIMSlots(t.Context(), m, 1); err != nil {
 		t.Fatalf("invalidateSIMSlots() error = %v", err)
 	}
 	if got := slot1Closes.Load(); got != 1 {

@@ -124,7 +124,7 @@ func (r *fakeRegistry) Modems(context.Context) (map[string]*modem.Modem, error) 
 	return result, nil
 }
 
-func (r *fakeRegistry) Subscribe(fn func(modem.ModemEvent) error) (func(), error) {
+func (r *fakeRegistry) Subscribe(_ context.Context, fn func(modem.ModemEvent) error) (func(), error) {
 	r.mu.Lock()
 	r.subscribers = append(r.subscribers, fn)
 	index := len(r.subscribers) - 1

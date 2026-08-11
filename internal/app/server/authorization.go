@@ -46,7 +46,12 @@ type AuthorizationFactory func(context.Context, AuthorizationConfig) (Authorizat
 
 const updateHealthConfirmationDelay = 5 * time.Second
 
-func runActivationServer(ctx context.Context, cfg Config, authorization Authorization, restartRequested func() bool) error {
+func runActivationServer(ctx context.Context, cfg Config, authorization Authorization) error {
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve executable: %w", err)
+	}
+	runCtx, cancel := context.WithCancel(ctx)
 	server := echo.New()
 	server.Logger = slog.Default()
 	server.Use(middleware.RequestID())
@@ -63,29 +68,25 @@ func runActivationServer(ctx context.Context, cfg Config, authorization Authoriz
 	v1 := server.Group("/api/v1")
 	authorization.RegisterActivationRoutes(v1)
 
-	executable, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("resolve executable: %w", err)
-	}
 	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
 	startConfig := echo.StartConfig{
 		Address:         cfg.ListenAddress,
 		HideBanner:      true,
 		GracefulTimeout: 5 * time.Second,
 		ListenerAddrFunc: func(net.Addr) {
 			wg.Go(func() {
-				confirmUpdateHealthy(ctx, func() error {
+				confirmUpdateHealthy(runCtx, func() error {
 					return appupdate.MarkHealthy(executable)
 				})
 			})
 		},
 	}
-	if err := startConfig.Start(ctx, server); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := startConfig.Start(runCtx, server); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("start activation server: %w", err)
-	}
-	wg.Wait()
-	if restartRequested() {
-		return ErrRestart
 	}
 	return nil
 }

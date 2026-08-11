@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/damonto/euicc-go/driver"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/settings"
 	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
@@ -91,9 +93,11 @@ func TestClientCloseReleasesSIMSlotOnce(t *testing.T) {
 
 func TestClientDiscardSkipsInvalidatedLogicalChannel(t *testing.T) {
 	channel := &fakeSmartCardChannel{logicalChannel: 3}
-	client, err := NewWithChannel(t.Context(), ChannelConfig{Channel: channel})
+	client, err := NewWithChannelFactory(t.Context(), ChannelConfig{AID: AIDs[0]}, func(context.Context) (driver.SmartCardChannel, error) {
+		return channel, nil
+	})
 	if err != nil {
-		t.Fatalf("NewWithChannel() error = %v", err)
+		t.Fatalf("NewWithChannelFactory() error = %v", err)
 	}
 	if err := client.discard(); err != nil {
 		t.Fatalf("discard() error = %v", err)
@@ -149,18 +153,99 @@ func TestNoSupportedAIDCacheability(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewWithChannel(t.Context(), ChannelConfig{
-				Channel: &fakeSmartCardChannel{openLogicalChannelErr: tt.openErr},
-				Logger:  slog.Default(),
+			var channels []*fakeSmartCardChannel
+			_, err := NewWithChannelFactory(t.Context(), ChannelConfig{
+				Logger: slog.Default(),
+			}, func(context.Context) (driver.SmartCardChannel, error) {
+				channel := &fakeSmartCardChannel{openLogicalChannelErr: tt.openErr}
+				channels = append(channels, channel)
+				return channel, nil
 			})
 			if !errors.Is(err, ErrNoSupportedAID) {
-				t.Fatalf("NewWithChannel() error = %v, want %v", err, ErrNoSupportedAID)
+				t.Fatalf("NewWithChannelFactory() error = %v, want %v", err, ErrNoSupportedAID)
 			}
 			if got := errors.Is(err, errCacheableNoSupportedAID); got != tt.cacheable {
 				t.Fatalf("cacheable error = %v, want %v", got, tt.cacheable)
 			}
+			if len(channels) != len(AIDs) {
+				t.Fatalf("channels created = %d, want %d", len(channels), len(AIDs))
+			}
+			for i, channel := range channels {
+				if channel.disconnects != 1 {
+					t.Fatalf("channel %d disconnects = %d, want 1", i, channel.disconnects)
+				}
+			}
 		})
 	}
+}
+
+func TestNewWithChannelFactoryUsesFreshChannelForAIDFallback(t *testing.T) {
+	channels := []*fakeSmartCardChannel{
+		{openLogicalChannelErr: errAIDNotSupported},
+		{logicalChannel: 2},
+	}
+	next := 0
+	client, err := NewWithChannelFactory(t.Context(), ChannelConfig{}, func(context.Context) (driver.SmartCardChannel, error) {
+		if next >= len(channels) {
+			t.Fatal("channel factory called after successful AID attempt")
+		}
+		channel := channels[next]
+		next++
+		return channel, nil
+	})
+	if err != nil {
+		t.Fatalf("NewWithChannelFactory() error = %v", err)
+	}
+	if channels[0].disconnects != 1 {
+		t.Fatalf("failed channel disconnects = %d, want 1", channels[0].disconnects)
+	}
+	if channels[1].disconnects != 0 {
+		t.Fatalf("active channel disconnects = %d, want 0", channels[1].disconnects)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if channels[1].disconnects != 1 {
+		t.Fatalf("closed active channel disconnects = %d, want 1", channels[1].disconnects)
+	}
+}
+
+func TestNewWithChannelFactoryDisconnectsWhenOptionsAreInvalid(t *testing.T) {
+	channel := &fakeSmartCardChannel{}
+	_, err := NewWithChannelFactory(t.Context(), ChannelConfig{
+		AID:      AIDs[0],
+		ConfigID: "invalid-mss",
+		Settings: &settings.Settings{Modems: map[string]settings.Modem{"invalid-mss": {MSS: 255}}},
+	}, func(context.Context) (driver.SmartCardChannel, error) {
+		return channel, nil
+	})
+	if err == nil {
+		t.Fatal("NewWithChannelFactory() error = nil, want invalid MSS error")
+	}
+	if channel.disconnects != 1 {
+		t.Fatalf("disconnects = %d, want 1", channel.disconnects)
+	}
+}
+
+func TestNewWithChannelFactoryReleasesLockAfterFactoryFailure(t *testing.T) {
+	key := "test:channel-factory-failure"
+	factoryErr := errors.New("channel unavailable")
+	first := &fakeSmartCardChannel{openLogicalChannelErr: errAIDNotSupported}
+	calls := 0
+	_, err := NewWithChannelFactory(t.Context(), ChannelConfig{LockKey: key}, func(context.Context) (driver.SmartCardChannel, error) {
+		calls++
+		if calls == 1 {
+			return first, nil
+		}
+		return nil, factoryErr
+	})
+	if !errors.Is(err, factoryErr) {
+		t.Fatalf("NewWithChannelFactory() error = %v, want %v", err, factoryErr)
+	}
+	if first.disconnects != 1 {
+		t.Fatalf("first channel disconnects = %d, want 1", first.disconnects)
+	}
+	assertLockReleased(t, key)
 }
 
 func TestContextRoundTripperCancelsInFlightRequest(t *testing.T) {
@@ -195,24 +280,26 @@ func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-func TestNewWithChannelStopsWaitingForLockAfterCancellation(t *testing.T) {
-	key := "test:new-with-channel-cancellation"
+func TestNewWithChannelFactoryStopsWaitingForLockAfterCancellation(t *testing.T) {
+	key := "test:new-with-channel-factory-cancellation"
 	gmu.Lock(key)
 	t.Cleanup(func() { gmu.Unlock(key) })
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	channel := &fakeSmartCardChannel{}
-	_, err := NewWithChannel(ctx, ChannelConfig{
+	called := false
+	_, err := NewWithChannelFactory(ctx, ChannelConfig{
 		LockKey: key,
-		Channel: channel,
 		Logger:  slog.Default(),
+	}, func(context.Context) (driver.SmartCardChannel, error) {
+		called = true
+		return &fakeSmartCardChannel{}, nil
 	})
 	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("NewWithChannel() error = %v, want %v", err, context.Canceled)
+		t.Fatalf("NewWithChannelFactory() error = %v, want %v", err, context.Canceled)
 	}
-	if channel.disconnects != 1 {
-		t.Fatalf("disconnects = %d, want 1 after canceled acquisition", channel.disconnects)
+	if called {
+		t.Fatal("channel factory called before lock acquisition")
 	}
 }
 
@@ -240,7 +327,7 @@ func TestLockedChannelCloseLogicalChannelReleasesOnError(t *testing.T) {
 	assertLockReleased(t, key)
 }
 
-func TestNewWithChannelLogger(t *testing.T) {
+func TestNewWithChannelFactoryLogger(t *testing.T) {
 	tests := []struct {
 		name    string
 		channel *fakeSmartCardChannel
@@ -274,13 +361,15 @@ func TestNewWithChannelLogger(t *testing.T) {
 			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 			defer slog.SetDefault(previous)
 
-			client, err := NewWithChannel(context.Background(), ChannelConfig{
+			client, err := NewWithChannelFactory(context.Background(), ChannelConfig{
 				LockKey: "test:" + tt.name,
-				Channel: tt.channel,
+				AID:     AIDs[0],
 				Logger:  mmodem.LoggerForIMEI("860588043408833"),
+			}, func(context.Context) (driver.SmartCardChannel, error) {
+				return tt.channel, nil
 			})
 			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("NewWithChannel() error = %v, want %v", err, tt.wantErr)
+				t.Fatalf("NewWithChannelFactory() error = %v, want %v", err, tt.wantErr)
 			}
 			if err == nil {
 				defer func() {

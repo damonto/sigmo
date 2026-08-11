@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/damonto/euicc-go/driver"
 	eccid "github.com/damonto/euicc-go/driver/ccid"
 	sgp22 "github.com/damonto/euicc-go/v2"
 	"github.com/damonto/ts43-go"
@@ -156,17 +157,7 @@ func (s *transferRunner) activateSourceProfile(ctx context.Context, currentSetti
 }
 
 func enableCCIDSourceProfile(ctx context.Context, currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {
-	reader, err := openCCIDLPAReader(start.SourceID)
-	if err != nil {
-		return fmt.Errorf("open CCID reader: %w", err)
-	}
-	logger := sourceLogger(start)
-	sourceLPA, err := ilpa.NewWithChannel(ctx, ilpa.ChannelConfig{
-		LockKey:  sourceLockKey(start.SourceType, start.SourceID),
-		Channel:  reader,
-		Settings: currentSettings,
-		Logger:   logger,
-	})
+	sourceLPA, err := newCCIDLPAClient(ctx, currentSettings, start)
 	if err != nil {
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
@@ -288,17 +279,7 @@ func (s *transferRunner) deleteModemProfile(ctx context.Context, modem *mmodem.M
 }
 
 func deleteCCIDSourceProfile(ctx context.Context, currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {
-	reader, err := openCCIDLPAReader(start.SourceID)
-	if err != nil {
-		return fmt.Errorf("open CCID reader: %w", err)
-	}
-	logger := sourceLogger(start)
-	sourceLPA, err := ilpa.NewWithChannel(ctx, ilpa.ChannelConfig{
-		LockKey:  sourceLockKey(start.SourceType, start.SourceID),
-		Channel:  reader,
-		Settings: currentSettings,
-		Logger:   logger,
-	})
+	sourceLPA, err := newCCIDLPAClient(ctx, currentSettings, start)
 	if err != nil {
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
@@ -403,11 +384,12 @@ func ccidServiceUnavailable(err error) bool {
 	return strings.Contains(msg, scardNoServiceName) || strings.Contains(msg, scardNoServiceCode)
 }
 
-func openCCIDLPAReader(readerName string) (eccid.CCID, error) {
-	reader, err := eccid.New()
-	if err != nil {
-		return nil, err
-	}
-	reader.SetReader(readerName)
-	return reader, nil
+func newCCIDLPAClient(ctx context.Context, currentSettings *settings.Settings, start startRequest) (*ilpa.Client, error) {
+	return ilpa.NewWithChannelFactory(ctx, ilpa.ChannelConfig{
+		LockKey:  sourceLockKey(SourceCCID, start.SourceID),
+		Settings: currentSettings,
+		Logger:   sourceLogger(start),
+	}, func(context.Context) (driver.SmartCardChannel, error) {
+		return eccid.NewWithReader(start.SourceID), nil
+	})
 }

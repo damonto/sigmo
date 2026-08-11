@@ -52,8 +52,16 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 			continue
 		}
 		generation := r.nextGenerationToken()
-		modem, err := r.open(ctx, device, generation)
+		// Device open can block on a modem that is disappearing; keep each
+		// attempt bounded while still inheriting startup cancellation.
+		openCtx, cancelOpen := context.WithTimeout(ctx, registryOpenTimeout)
+		modem, err := r.open(openCtx, device, generation)
+		cancelOpen()
 		if err != nil {
+			if ctx.Err() != nil {
+				cancel()
+				return errors.Join(ctx.Err(), closeOpenedModems(opened))
+			}
 			if errors.Is(err, qcom.QMIErrorClientIdsExhausted) {
 				r.advanceCIDRecoveryState(key)
 			}
@@ -61,29 +69,40 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 			continue
 		}
 		if previous := opened[key]; previous != nil {
-			_ = previous.Close()
+			if err := previous.Close(); err != nil {
+				opened[key] = modem
+				cancel()
+				return errors.Join(
+					fmt.Errorf("close duplicate discovered modem: %w", err),
+					closeOpenedModems(opened),
+				)
+			}
 		}
 		opened[key] = modem
 	}
+	if err := ctx.Err(); err != nil {
+		cancel()
+		return errors.Join(err, closeOpenedModems(opened))
+	}
+	stopStartupCancel := context.AfterFunc(ctx, cancel)
 	stream, err := r.watchDevices(runCtx)
+	stopStartupCancel()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		cancel()
+		return errors.Join(ctxErr, closeOpenedModems(opened))
+	}
 	if err == nil && stream == nil {
 		err = errors.New("modem device watcher returned a nil stream")
 	}
 	if err != nil {
 		cancel()
-		for _, modem := range opened {
-			_ = modem.Close()
-		}
-		return fmt.Errorf("watch modem devices: %w", err)
+		return errors.Join(fmt.Errorf("watch modem devices: %w", err), closeOpenedModems(opened))
 	}
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
 		cancel()
-		for _, modem := range opened {
-			_ = modem.Close()
-		}
-		return errRegistryClosed
+		return errors.Join(errRegistryClosed, closeOpenedModems(opened))
 	}
 	r.modems = opened
 	r.started = true
@@ -95,6 +114,20 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 	r.wg.Add(1)
 	go r.watchLoop(runCtx, stream)
 	return nil
+}
+
+func closeOpenedModems(modems map[string]*Modem) error {
+	var result error
+	for _, modem := range modems {
+		if modem == nil {
+			continue
+		}
+		result = errors.Join(result, modem.Close())
+	}
+	if result == nil {
+		return nil
+	}
+	return fmt.Errorf("close opened modems: %w", result)
 }
 
 func (r *Registry) watchLoop(ctx context.Context, stream <-chan wwanmodem.Result[wwanmodem.DeviceEvent]) {

@@ -77,14 +77,14 @@ type poolTarget struct {
 // NewPool starts eager LPA creation for each modem's active SIM slot and
 // subscribes to future modem generations. Entries are refreshed after a SIM
 // change and closed on modem replacement or pool shutdown.
-func NewPool(store *settings.Store, registry *modem.Registry) (*Pool, error) {
+func NewPool(ctx context.Context, store *settings.Store, registry *modem.Registry) (*Pool, error) {
 	if store == nil {
 		return nil, errors.New("settings store is required")
 	}
 	if registry == nil {
 		return nil, errors.New("modem registry is required")
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	pool := &Pool{
 		store:       store,
 		registry:    registry,
@@ -97,7 +97,7 @@ func NewPool(store *settings.Store, registry *modem.Registry) (*Pool, error) {
 		slotEpoch:   make(map[poolSEKey]uint64),
 		retired:     make(map[*modem.Modem]struct{}),
 	}
-	unsubscribe, err := registry.Subscribe(func(event modem.ModemEvent) error {
+	unsubscribe, err := registry.Subscribe(ctx, func(event modem.ModemEvent) error {
 		pool.handleModemEvent(ctx, event)
 		return nil
 	})
@@ -109,8 +109,14 @@ func NewPool(store *settings.Store, registry *modem.Registry) (*Pool, error) {
 
 	modems, err := registry.Modems(ctx)
 	if err != nil {
-		_ = pool.Close()
-		return nil, fmt.Errorf("list modems for LPA clients: %w", err)
+		listErr := fmt.Errorf("list modems for LPA clients: %w", err)
+		closeCtx, cancelClose := context.WithTimeout(context.WithoutCancel(ctx), poolCloseTimeout)
+		closeErr := pool.Close(closeCtx)
+		cancelClose()
+		if closeErr != nil {
+			return nil, errors.Join(listErr, fmt.Errorf("close lpa client pool: %w", closeErr))
+		}
+		return nil, listErr
 	}
 	for _, current := range modems {
 		pool.warm(ctx, current)
@@ -637,7 +643,7 @@ func normalizedPoolSlots(values ...uint32) []uint8 {
 	return result
 }
 
-func (p *Pool) invalidateSIMSlots(m *modem.Modem, values ...uint32) error {
+func (p *Pool) invalidateSIMSlots(ctx context.Context, m *modem.Modem, values ...uint32) error {
 	if p == nil || m == nil {
 		return nil
 	}
@@ -688,7 +694,7 @@ func (p *Pool) invalidateSIMSlots(m *modem.Modem, values ...uint32) error {
 		}
 	}
 	p.mu.Unlock()
-	return p.closeEntries(entries)
+	return p.closeEntries(ctx, entries)
 }
 
 func (p *Pool) handleModemEvent(ctx context.Context, event modem.ModemEvent) {
@@ -699,19 +705,19 @@ func (p *Pool) handleModemEvent(ctx context.Context, event modem.ModemEvent) {
 	case modem.ModemEventAdded:
 		p.warm(ctx, event.Modem)
 	case modem.ModemEventChanged:
-		p.retire(event.Previous)
+		p.retire(ctx, event.Previous)
 		p.warm(ctx, event.Modem)
 	case modem.ModemEventRemoved:
-		p.retire(event.Modem)
+		p.retire(ctx, event.Modem)
 	case modem.ModemEventSIMChanged:
-		if err := p.invalidateSIMSlots(event.Modem, event.PreviousSIMSlot, event.SIMSlot); err != nil && event.Modem != nil {
+		if err := p.invalidateSIMSlots(ctx, event.Modem, event.PreviousSIMSlot, event.SIMSlot); err != nil && event.Modem != nil {
 			event.Modem.Logger().Debug("refresh LPA clients after SIM change", "error", err)
 		}
 		p.warm(ctx, event.Modem)
 	}
 }
 
-func (p *Pool) retire(m *modem.Modem) {
+func (p *Pool) retire(ctx context.Context, m *modem.Modem) {
 	if p == nil || m == nil {
 		return
 	}
@@ -750,13 +756,18 @@ func (p *Pool) retire(m *modem.Modem) {
 		}
 	}
 	p.mu.Unlock()
-	p.closeEntries(entries)
+	if err := p.closeEntries(ctx, entries); err != nil {
+		m.Logger().Debug("close retired LPA clients", "error", err)
+	}
 }
 
 // Close releases all persistent eUICC channels. It is safe to call more than once.
-func (p *Pool) Close() error {
+func (p *Pool) Close(ctx context.Context) error {
 	if p == nil {
 		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	p.mu.Lock()
 	if p.closed {
@@ -786,7 +797,7 @@ func (p *Pool) Close() error {
 	if unsubscribe != nil {
 		unsubscribe()
 	}
-	p.wg.Wait()
+	waitErr := waitGroupContext(ctx, &p.wg)
 
 	p.mu.Lock()
 	p.creating = make(map[poolKey]chan struct{})
@@ -796,7 +807,7 @@ func (p *Pool) Close() error {
 	p.slotEpoch = make(map[poolSEKey]uint64)
 	p.retired = make(map[*modem.Modem]struct{})
 	p.mu.Unlock()
-	return p.closeEntries(entries)
+	return errors.Join(waitErr, p.closeEntries(ctx, entries))
 }
 
 func (p *Pool) isRetiredLocked(m *modem.Modem) bool {
@@ -820,28 +831,69 @@ func closePoolEntryLocked(entry *poolEntry, err error) {
 	close(entry.done)
 }
 
-func (p *Pool) closeEntries(entries map[poolKey]*poolEntry) error {
+func (p *Pool) closeEntries(ctx context.Context, entries map[poolKey]*poolEntry) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var result error
 	for _, entry := range entries {
-		<-entry.gate
+		select {
+		case <-entry.gate:
+		case <-ctx.Done():
+			return errors.Join(result, ctx.Err())
+		}
 		if entry.lockKey != "" {
-			if err := gmu.LockContext(context.Background(), entry.lockKey); err != nil {
+			if err := gmu.LockContext(ctx, entry.lockKey); err != nil {
+				if ctx.Err() != nil {
+					return errors.Join(result, ctx.Err())
+				}
 				result = errors.Join(result, err)
 				continue
 			}
 		}
 		var closeErr error
+		var closeClient func() error
 		if errors.Is(entry.err, errSIMSlotChanged) {
-			closeErr = entry.client.discard()
+			closeClient = entry.client.discard
 		} else {
-			closeErr = entry.client.Close()
+			closeClient = entry.client.Close
 		}
-		if closeErr != nil {
-			result = errors.Join(result, closeErr)
+		closeDone := make(chan error, 1)
+		go func() {
+			closeDone <- closeClient()
+		}()
+		select {
+		case closeErr = <-closeDone:
+			if entry.lockKey != "" {
+				gmu.Unlock(entry.lockKey)
+			}
+		case <-ctx.Done():
+			closeErr = ctx.Err()
+			if entry.lockKey != "" {
+				go func(lockKey string) {
+					<-closeDone
+					gmu.Unlock(lockKey)
+				}(entry.lockKey)
+			}
+			return errors.Join(result, closeErr)
 		}
-		if entry.lockKey != "" {
-			gmu.Unlock(entry.lockKey)
-		}
+		result = errors.Join(result, closeErr)
 	}
 	return result
+}
+
+const poolCloseTimeout = 30 * time.Second
+
+func waitGroupContext(ctx context.Context, group *sync.WaitGroup) error {
+	done := make(chan struct{})
+	go func() {
+		group.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

@@ -3,7 +3,7 @@ module github.com/damonto/sigmo/pro
 go 1.26.3
 
 require (
-	github.com/damonto/euicc-go v1.1.3-0.20260731154314-8f944a2b5f98
+	github.com/damonto/euicc-go v1.1.3-0.20260811091809-6465fc51dd60
 	github.com/damonto/ims-go v0.0.0-20260809012216-9931ca7b6e15
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260807120436-18b1c890c5b5
@@ -51,14 +51,14 @@ require (
 	github.com/wneessen/go-mail v0.8.1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
-	golang.org/x/mod v0.38.0 // indirect
+	golang.org/x/mod v0.39.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 )
 
 replace github.com/damonto/sigmo => ..

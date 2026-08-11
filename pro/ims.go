@@ -49,7 +49,7 @@ var proIMS = func(app *proApp) error {
 	runtime.AddModemOverview(wifiCallingOverview(connectivity.WiFiCallingStatus))
 	runtime.AddRunner(connectivity.Run)
 	runtime.AddRunner(calls.Run)
-	runtime.AddRunner(media.Run)
+	runtime.AddCleanup(media.Shutdown)
 	runtime.AddRunner(func(ctx context.Context) error {
 		return forwardCalls(ctx, runtime.Relay, calls)
 	})

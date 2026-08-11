@@ -1487,6 +1487,178 @@ func TestRestartWaitsForDetachedSessionBeforeStartingReplacement(t *testing.T) {
 	c.stop(modem.EquipmentIdentifier)
 }
 
+func TestStopAllWaitsForDetachedAsyncSession(t *testing.T) {
+	done := make(chan struct{})
+	c := &coordinator{
+		sessions: map[string]*sessionState{
+			"modem-1": {
+				modem: &mmodem.Modem{EquipmentIdentifier: "modem-1"},
+				done:  done,
+			},
+		},
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+	}
+
+	c.stopAsync("modem-1")
+	stopped := make(chan error, 1)
+	go func() {
+		_, err := c.stopAll()
+		stopped <- err
+	}()
+	select {
+	case err := <-stopped:
+		t.Fatalf("stopAll() returned before detached session stopped: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(done)
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("stopAll() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stopAll() did not return after detached session stopped")
+	}
+
+	c.start(&mmodem.Modem{EquipmentIdentifier: "modem-2"}, "profile-2")
+	c.mu.Lock()
+	started := c.sessions["modem-2"] != nil
+	c.mu.Unlock()
+	if started {
+		t.Fatal("start() accepted a new session after shutdown began")
+	}
+}
+
+func TestStopAllContextHonorsCleanupDeadline(t *testing.T) {
+	done := make(chan struct{})
+	c := &coordinator{
+		sessions: map[string]*sessionState{
+			"modem-1": {
+				modem: &mmodem.Modem{EquipmentIdentifier: "modem-1"},
+				done:  done,
+			},
+		},
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	_, err := c.stopAllContext(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stopAllContext() error = %v, want context deadline", err)
+	}
+	close(done)
+}
+
+func TestStopAllWaitsForSynchronouslyDetachedSession(t *testing.T) {
+	done := make(chan struct{})
+	cancelled := make(chan struct{})
+	c := &coordinator{
+		sessions: map[string]*sessionState{
+			"modem-1": {
+				modem:  &mmodem.Modem{EquipmentIdentifier: "modem-1"},
+				cancel: func() { close(cancelled) },
+				done:   done,
+			},
+		},
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+	}
+
+	stopDone := make(chan struct{})
+	go func() {
+		c.stop("modem-1")
+		close(stopDone)
+	}()
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("stop() did not cancel the detached session")
+	}
+
+	shutdownDone := make(chan error, 1)
+	go func() {
+		_, err := c.stopAll()
+		shutdownDone <- err
+	}()
+	select {
+	case err := <-shutdownDone:
+		t.Fatalf("stopAll() returned before synchronously detached session stopped: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(done)
+	select {
+	case <-stopDone:
+	case <-time.After(time.Second):
+		t.Fatal("stop() did not return after detached session stopped")
+	}
+	select {
+	case err := <-shutdownDone:
+		if err != nil {
+			t.Fatalf("stopAll() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stopAll() did not return after synchronously detached session stopped")
+	}
+}
+
+func TestStopAllIgnoresCompletedDetachedSessionCleanupErrors(t *testing.T) {
+	historicalErr := errors.New("close completed session")
+	c := &coordinator{
+		sessions:         make(map[string]*sessionState),
+		cleanupErr:       historicalErr,
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+	}
+
+	_, err := c.stopAll()
+	if err != nil {
+		t.Fatalf("stopAll() error = %v, want nil", err)
+	}
+}
+
+func TestStopAllReturnsInFlightDetachedSessionCleanupErrors(t *testing.T) {
+	wantErr := errors.New("close in-flight session")
+	c := &coordinator{
+		sessions:         make(map[string]*sessionState),
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+	}
+	c.cleanupWG.Add(1)
+
+	stopped := make(chan error, 1)
+	go func() {
+		_, err := c.stopAll()
+		stopped <- err
+	}()
+
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for {
+		c.mu.Lock()
+		closing := c.closing
+		c.mu.Unlock()
+		if closing {
+			break
+		}
+		select {
+		case <-deadline.C:
+			t.Fatal("stopAll() did not begin shutdown")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	c.completeDetachedSession(wantErr, true)
+
+	select {
+	case err := <-stopped:
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("stopAll() error = %v, want %v", err, wantErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stopAll() did not return after detached cleanup completed")
+	}
+}
+
 func TestDisconnectRemovesSessionAndFailsOpenCalls(t *testing.T) {
 	cancelled := false
 	c := &coordinator{
