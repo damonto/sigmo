@@ -64,7 +64,7 @@ func TestSendRoutesMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := testStore(t)
 			route := &fakeRoute{
 				status:    tt.status,
@@ -123,7 +123,7 @@ func TestSendRoutesMessages(t *testing.T) {
 }
 
 func TestDeleteByParticipantDeletesOnlyModemMessagesFromBackend(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	device := &fakeModemDevice{profile: "profile-a"}
 	service := New(store, &fakeRoute{})
@@ -173,7 +173,7 @@ func TestDeleteByParticipantDeletesOnlyModemMessagesFromBackend(t *testing.T) {
 }
 
 func TestDeleteByParticipantSkipsStaleModemGenerationRefs(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	device := &fakeModemDevice{profile: "profile-a", generationValue: 2}
 	service := New(store, &fakeRoute{})
@@ -290,7 +290,7 @@ func TestStorageModemRefsPreservesMultipartReferences(t *testing.T) {
 }
 
 func TestListConversationsPassesSearchQueryToStorage(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	device := &fakeModemDevice{profile: "profile-a"}
 	service := New(store, &fakeRoute{})
@@ -392,7 +392,7 @@ func (f *fakeRoute) ApplyPendingSMSStatus(context.Context, storage.Message) erro
 
 func testStore(t *testing.T) *storage.Store {
 	t.Helper()
-	store, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	store, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}

@@ -185,13 +185,13 @@ func (c *coordinator) processModemEvent(ctx context.Context, event mmodem.ModemE
 			if previousPath == "" {
 				previousPath = event.Previous.Path()
 			}
-			c.stopByDevice(previousPath, event.Previous.Generation())
+			c.stopByDevice(ctx, previousPath, event.Previous.Generation())
 		}
 		if event.Modem != nil {
 			c.startIfEnabled(ctx, event.Modem)
 		}
 	case mmodem.ModemEventRemoved:
-		c.stopByDevice(event.Path, event.Generation)
+		c.stopByDevice(ctx, event.Path, event.Generation)
 		if c.internet != nil && event.Modem != nil {
 			if err := c.internet.InvalidateModem(ctx, event.Modem); err != nil {
 				slog.Warn("invalidate Internet after modem removal", "imei", event.Modem.EquipmentIdentifier, "generation", event.Generation, "error", err)
@@ -206,7 +206,7 @@ func (c *coordinator) processModemEvent(ctx context.Context, event mmodem.ModemE
 				slog.Warn("invalidate Internet after SIM profile change", "imei", event.Modem.EquipmentIdentifier, "generation", event.Generation, "error", err)
 			}
 		}
-		c.stop(event.Modem.EquipmentIdentifier)
+		c.stop(ctx, event.Modem.EquipmentIdentifier)
 		c.startIfEnabled(ctx, event.Modem)
 	}
 }
@@ -327,11 +327,11 @@ func (c *coordinator) UpdateVoLTESettings(ctx context.Context, modem *mmodem.Mod
 			if err := c.configureVoLTEDataPath(recoveryCtx, modem, current.DataPath); err != nil {
 				return err
 			}
-			c.restart(modem, profileID)
+			c.restart(ctx, modem, profileID)
 			return nil
 		}
 		if switching {
-			c.stop(modem.EquipmentIdentifier)
+			c.stop(ctx, modem.EquipmentIdentifier)
 			if err := c.restoreVoLTEDataPath(ctx, modem, current.DataPath); err != nil {
 				return errors.Join(err, rollbackCurrent())
 			}
@@ -351,12 +351,12 @@ func (c *coordinator) UpdateVoLTESettings(ctx context.Context, modem *mmodem.Mod
 			}
 			return errors.Join(err, cleanupErr, rollbackCurrent())
 		}
-		c.restart(modem, profileID)
+		c.restart(ctx, modem, profileID)
 		return nil
 	}
 	// The managed client must be fully closed before restoring the modem's
 	// internal IMS client, otherwise both clients can contend for IMS state.
-	c.stop(modem.EquipmentIdentifier)
+	c.stop(ctx, modem.EquipmentIdentifier)
 	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancelCleanup()
 	result := error(nil)
@@ -384,9 +384,9 @@ func (c *coordinator) UpdateWiFiCallingSettings(ctx context.Context, modem *mmod
 		return err
 	}
 	if settings.Enabled {
-		c.restart(modem, profileID)
+		c.restart(ctx, modem, profileID)
 	} else {
-		c.stopAsync(modem.EquipmentIdentifier)
+		c.stopAsync(ctx, modem.EquipmentIdentifier)
 	}
 	return nil
 }
@@ -487,15 +487,15 @@ func (c *coordinator) ReconnectWiFiCalling(ctx context.Context, modem *mmodem.Mo
 	if !settings.Enabled {
 		return ErrNotConnected
 	}
-	c.restart(modem, profileID)
+	c.restart(ctx, modem, profileID)
 	return nil
 }
 
-func (c *coordinator) Disconnect(_ context.Context, modem *mmodem.Modem) error {
+func (c *coordinator) Disconnect(ctx context.Context, modem *mmodem.Modem) error {
 	if modem == nil || modem.EquipmentIdentifier == "" {
 		return nil
 	}
-	c.stopAsync(modem.EquipmentIdentifier)
+	c.stopAsync(ctx, modem.EquipmentIdentifier)
 	return nil
 }
 

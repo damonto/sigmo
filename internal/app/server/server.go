@@ -57,14 +57,14 @@ var (
 
 const serverShutdownTimeout = 30 * time.Second
 
-func Run(cfg Config) (runErr error) {
+func Run(ctx context.Context, cfg Config) (runErr error) {
 	if cfg.ListenAddress == "" {
 		cfg.ListenAddress = "0.0.0.0:9527"
 	}
 	applyLogLevel(cfg.Debug)
 	httpapi.SetExposeInternalErrors(cfg.Debug)
 
-	appCtx, cancelApp := context.WithCancelCause(context.Background())
+	appCtx, cancelApp := context.WithCancelCause(ctx)
 	signalCh := make(chan os.Signal, 1)
 	stopSignalWatcher := make(chan struct{})
 	signalWatcherDone := make(chan struct{})
@@ -102,7 +102,7 @@ func Run(cfg Config) (runErr error) {
 		}
 		runErr = errors.Join(runErr, runnerWaitErr)
 		backgroundTasks.Wait()
-		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), serverShutdownTimeout)
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), serverShutdownTimeout)
 		runErr = errors.Join(runErr, cleanups.Close(cleanupCtx))
 		cancelCleanup()
 		runErr = finalizeRunError(runErr, shutdownCause)
@@ -181,7 +181,10 @@ func Run(cfg Config) (runErr error) {
 
 	server := echo.New()
 	server.Logger = slog.Default()
-	server.Validator = validator.New()
+	server.Validator, err = validator.New()
+	if err != nil {
+		return fmt.Errorf("configure request validator: %w", err)
+	}
 	requestLogger := middleware.RequestLogger()
 	server.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		logged := requestLogger(next)
@@ -276,7 +279,7 @@ func Run(cfg Config) (runErr error) {
 		return nil
 	})
 	if cfg.Configure != nil {
-		if err := cfg.Configure(runtime); err != nil {
+		if err := cfg.Configure(ctx, runtime); err != nil {
 			return fmt.Errorf("configure extensions: %w", err)
 		}
 	}

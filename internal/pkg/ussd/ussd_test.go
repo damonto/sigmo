@@ -78,7 +78,7 @@ func TestExecuteRoutesUSSD(t *testing.T) {
 			}
 			service := New(route)
 
-			got, err := service.execute(context.Background(), device, "initialize", "*123#")
+			got, err := service.execute(t.Context(), device, "initialize", "*123#")
 			if tt.wantErr != "" {
 				if err == nil || err.Error() != tt.wantErr {
 					t.Fatalf("execute() error = %v, want %q", err, tt.wantErr)

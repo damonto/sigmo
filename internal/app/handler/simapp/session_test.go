@@ -73,6 +73,19 @@ func (r *fakeSTKRunner) Run(context.Context, usim.STKCallbacks) error {
 	return r.runErr
 }
 
+type blockingSTKRunner struct {
+	fakeEnvelopeSender
+	started chan struct{}
+	stopped chan struct{}
+}
+
+func (r *blockingSTKRunner) Run(ctx context.Context, _ usim.STKCallbacks) error {
+	close(r.started)
+	<-ctx.Done()
+	close(r.stopped)
+	return ctx.Err()
+}
+
 func (s *fakeEnvelopeSender) SendEnvelope(_ context.Context, envelope stkpkg.Envelope) (stkpkg.EnvelopeResponse, error) {
 	s.mu.Lock()
 	s.envelopes = append(s.envelopes, envelope)
@@ -149,7 +162,7 @@ func TestSessionAttemptKeepsWebSocketOpenForRetry(t *testing.T) {
 				},
 			}
 
-			done := handler.runSessionAttempt(context.Background(), &mmodem.Modem{
+			done := handler.runSessionAttempt(t.Context(), &mmodem.Modem{
 				EquipmentIdentifier: "866069053145502",
 			}, session)
 			if done {
@@ -166,6 +179,47 @@ func TestSessionAttemptKeepsWebSocketOpenForRetry(t *testing.T) {
 				t.Fatalf("status = %+v, want unavailable", writes[0])
 			}
 		})
+	}
+}
+
+func TestSessionAttemptStopsWorkersBeforeClosingCard(t *testing.T) {
+	runner := &blockingSTKRunner{
+		started: make(chan struct{}),
+		stopped: make(chan struct{}),
+	}
+	closedAfterStop := make(chan bool, 1)
+	handler := &Handler{
+		openCard: func(context.Context, *mmodem.Modem) (mstk.Card, error) {
+			return mstk.Card{
+				ICCID: "8986000000000000000",
+				STK:   runner,
+				Close: func() error {
+					select {
+					case <-runner.stopped:
+						closedAfterStop <- true
+					default:
+						closedAfterStop <- false
+					}
+					return nil
+				},
+			}, nil
+		},
+	}
+	session, _ := newTestSession()
+	done := make(chan bool, 1)
+	go func() {
+		done <- handler.runSessionAttempt(t.Context(), &mmodem.Modem{
+			EquipmentIdentifier: "866069053145502",
+		}, session)
+	}()
+
+	<-runner.started
+	session.disconnect()
+	if !<-done {
+		t.Fatal("runSessionAttempt() = retry, want done")
+	}
+	if stopped := <-closedAfterStop; !stopped {
+		t.Fatal("card closed before STK runner stopped")
 	}
 }
 
@@ -214,7 +268,7 @@ func TestSessionLoopStopsAfterRetryLimit(t *testing.T) {
 				},
 			}
 
-			handler.runSessionLoop(context.Background(), "866069053145502", &mmodem.Modem{
+			handler.runSessionLoop(t.Context(), "866069053145502", &mmodem.Modem{
 				EquipmentIdentifier: "866069053145502",
 			}, session)
 
@@ -281,7 +335,7 @@ func TestSessionAttemptCachedMenuVisibility(t *testing.T) {
 			}
 			session, conn := newTestSession()
 
-			done := handler.runSessionAttempt(context.Background(), &mmodem.Modem{
+			done := handler.runSessionAttempt(t.Context(), &mmodem.Modem{
 				EquipmentIdentifier: imei,
 			}, session)
 			if done {
@@ -402,7 +456,7 @@ func TestSetupMenuAvailability(t *testing.T) {
 			session.imei = "866069053145502"
 			session.menus = newMenuCache()
 			session.setProfileICCID("8986000000000000000")
-			resp, err := session.setupMenu(context.Background(), stkpkg.SetupMenuCommand{
+			resp, err := session.setupMenu(t.Context(), stkpkg.SetupMenuCommand{
 				MenuCommand: stkpkg.MenuCommand{
 					Title: &stkpkg.AlphaIdentifier{Value: "SIM"},
 					Items: tt.items,
@@ -439,7 +493,7 @@ func TestRootMenuSelectionSendsEnvelope(t *testing.T) {
 		Items: []wsMenuItem{{ID: 2, Label: "eSIM List"}},
 	})
 	sender := &fakeEnvelopeSender{}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go session.rootSelectionLoop(ctx, envelopeRootSelector{sender: sender}, nil)
 
@@ -479,7 +533,7 @@ func TestRootSelectionLoopReadiness(t *testing.T) {
 				ready = make(chan struct{})
 				readySignal = ready
 			}
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			go session.rootSelectionLoop(ctx, envelopeRootSelector{sender: sender}, readySignal)
 
@@ -535,7 +589,7 @@ func TestRootMenuSelectionValidatesCurrentMenu(t *testing.T) {
 			session, _ := newTestSession()
 			session.setRootMenu(tt.menu)
 			sender := &fakeEnvelopeSender{}
-			err := session.selectRootMenu(context.Background(), envelopeRootSelector{sender: sender}, wsClientMessage{
+			err := session.selectRootMenu(t.Context(), envelopeRootSelector{sender: sender}, wsClientMessage{
 				Type:   wsTypeMenuSelection,
 				ItemID: tt.itemID,
 			})
@@ -561,7 +615,7 @@ func TestCommandResponses(t *testing.T) {
 				sendErr := sendAfterWrite(conn, func() {
 					session.selectCh <- wsClientMessage{Type: wsTypeMenuSelection, ItemID: 7}
 				})
-				resp, err := session.selectItem(context.Background(), stkpkg.SelectItemCommand{
+				resp, err := session.selectItem(t.Context(), stkpkg.SelectItemCommand{
 					MenuCommand: stkpkg.MenuCommand{
 						Items: []stkpkg.Item{{Identifier: 7, Text: stkpkg.AlphaIdentifier{Value: "Start"}}},
 					},
@@ -589,7 +643,7 @@ func TestCommandResponses(t *testing.T) {
 				sendErr := sendAfterWrite(conn, func() {
 					session.confirmCh <- wsClientMessage{Type: wsTypeConfirmResponse, Accepted: true}
 				})
-				resp, err := session.displayText(context.Background(), stkpkg.DisplayTextCommand{
+				resp, err := session.displayText(t.Context(), stkpkg.DisplayTextCommand{
 					Text: stkpkg.TextString{Value: "Hello"},
 				})
 				if err != nil {
@@ -615,7 +669,7 @@ func TestCommandResponses(t *testing.T) {
 				sendErr := sendAfterWrite(conn, func() {
 					session.inputCh <- wsClientMessage{Type: wsTypeInputResponse, Text: "1234"}
 				})
-				resp, err := session.getInput(context.Background(), stkpkg.GetInputCommand{
+				resp, err := session.getInput(t.Context(), stkpkg.GetInputCommand{
 					Text:   stkpkg.TextString{Value: "PIN"},
 					Length: stkpkg.ResponseLength{Min: 1, Max: 8},
 				})
@@ -639,7 +693,7 @@ func TestCommandResponses(t *testing.T) {
 				sendErr := sendAfterWrite(conn, func() {
 					session.inkeyCh <- wsClientMessage{Type: wsTypeInkeyResponse, Text: "Y"}
 				})
-				resp, err := session.getInkey(context.Background(), stkpkg.GetInkeyCommand{
+				resp, err := session.getInkey(t.Context(), stkpkg.GetInkeyCommand{
 					Text:  stkpkg.TextString{Value: "Continue?"},
 					YesNo: true,
 				})
@@ -663,7 +717,7 @@ func TestCommandResponses(t *testing.T) {
 				sendErr := sendAfterWrite(conn, func() {
 					session.confirmCh <- wsClientMessage{Type: wsTypeConfirmResponse, Accepted: false}
 				})
-				resp, err := session.confirmSimple(context.Background(), stkpkg.SimpleCommand{
+				resp, err := session.confirmSimple(t.Context(), stkpkg.SimpleCommand{
 					CommandFrame: stkpkg.CommandFrame{
 						Details: stkpkg.CommandDetails{Type: stkpkg.CommandSendUSSD},
 					},

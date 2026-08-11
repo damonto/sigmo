@@ -99,7 +99,7 @@ func TestSetVoLTEUsesSharedValidation(t *testing.T) {
 			probe := &mcpConnectivityProbe{}
 			tools := &imsMCPTools{registry: mcpModemFinder{modem: modem}, connectivity: probe}
 
-			_, err := tools.setVoLTE(context.Background(), nil, mcpauth.Grant{}, tt.input)
+			_, err := tools.setVoLTE(t.Context(), nil, mcpauth.Grant{}, tt.input)
 			if tt.wantErr {
 				if mcpserver.ErrorCode(err) != "invalid_request" {
 					t.Fatalf("setVoLTE() error = %v, want invalid_request", err)
@@ -153,7 +153,7 @@ func TestSetWiFiCallingUnderlay(t *testing.T) {
 			probe := &mcpConnectivityProbe{}
 			tools := &imsMCPTools{registry: mcpModemFinder{modem: modem}, connectivity: probe}
 
-			_, err := tools.setWiFiCalling(context.Background(), nil, mcpauth.Grant{}, tt.input)
+			_, err := tools.setWiFiCalling(t.Context(), nil, mcpauth.Grant{}, tt.input)
 			if tt.wantErr {
 				if mcpserver.ErrorCode(err) != "invalid_request" {
 					t.Fatalf("setWiFiCalling() error = %v, want invalid_request", err)
@@ -224,17 +224,17 @@ func TestIMSMCPOutputSchemasAndEmptyCalls(t *testing.T) {
 		return nil, callsOutput{}, nil
 	})
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	serverSession, err := server.Connect(context.Background(), serverTransport, nil)
+	serverSession, err := server.Connect(t.Context(), serverTransport, nil)
 	if err != nil {
 		t.Fatalf("server.Connect() error = %v", err)
 	}
 	defer func() { _ = serverSession.Close() }()
-	clientSession, err := mcp.NewClient(&mcp.Implementation{Name: "ims-schema-client", Version: "1"}, nil).Connect(context.Background(), clientTransport, nil)
+	clientSession, err := mcp.NewClient(&mcp.Implementation{Name: "ims-schema-client", Version: "1"}, nil).Connect(t.Context(), clientTransport, nil)
 	if err != nil {
 		t.Fatalf("client.Connect() error = %v", err)
 	}
 	defer func() { _ = clientSession.Close() }()
-	listed, err := clientSession.ListTools(context.Background(), nil)
+	listed, err := clientSession.ListTools(t.Context(), nil)
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}

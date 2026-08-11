@@ -147,7 +147,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
 		protected.POST("/modems/:id/sim-unlocks", h.UnlockSIM)
-		protected.PUT("/modems/:id/sim-slots/:slot", h.SwitchSimSlot)
+		protected.PUT("/modems/:id/sim-slots/:slot", h.SwitchSIMSlot)
 		protected.PUT("/modems/:id/msisdn", h.UpdateMSISDN)
 		protected.PUT("/modems/:id/sims/:iccid/reminder", h.UpdateReminder)
 		protected.DELETE("/modems/:id/sims/:iccid/reminder", h.DeleteReminder)

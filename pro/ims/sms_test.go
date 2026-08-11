@@ -3,7 +3,6 @@
 package ims
 
 import (
-	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -319,7 +318,7 @@ func TestWatchSMSSubmissionUpdatesStopsOnTimeout(t *testing.T) {
 
 			done := make(chan struct{})
 			go func() {
-				c.watchSMSSubmissionUpdatesWithTimeout(msg.ModemID, msg.ProfileID, tt.submission, 10*time.Millisecond)
+				c.watchSMSSubmissionUpdatesWithTimeout(t.Context(), msg.ModemID, msg.ProfileID, tt.submission, 10*time.Millisecond)
 				close(done)
 			}()
 
@@ -336,7 +335,7 @@ func TestWatchSMSSubmissionUpdatesStopsOnTimeout(t *testing.T) {
 }
 
 func TestApplyPendingSMSStatusAfterStoreMiss(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -376,7 +375,7 @@ func TestApplyPendingSMSStatusAfterStoreMiss(t *testing.T) {
 	if !ok {
 		t.Fatal("recordSMSSubmissionUpdate() = false, want true")
 	}
-	c.updateStoredSMSStatus(msg.ModemID, msg.Recipient, statusUpdate)
+	c.updateStoredSMSStatus(t.Context(), msg.ModemID, msg.Recipient, statusUpdate)
 
 	inserted, err := store.InsertMessage(ctx, msg)
 	if err != nil {
@@ -401,7 +400,7 @@ func TestApplyPendingSMSStatusAfterStoreMiss(t *testing.T) {
 }
 
 func TestApplyPendingSMSStatusIgnoresUnknown(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)

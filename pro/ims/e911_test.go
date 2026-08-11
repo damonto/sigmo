@@ -3,7 +3,6 @@
 package ims
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -22,7 +21,7 @@ func TestEmergencyAddressUpdateAvailable(t *testing.T) {
 			name: "keeps o2 uk hidden",
 			sim: &mmodem.SIM{
 				Identifier:         "iccid-1",
-				Imsi:               "234100123456789",
+				IMSI:               "234100123456789",
 				OperatorIdentifier: "23410",
 			},
 		},
@@ -30,7 +29,7 @@ func TestEmergencyAddressUpdateAvailable(t *testing.T) {
 			name: "keeps ct excel uk hidden",
 			sim: &mmodem.SIM{
 				Identifier:         "iccid-1",
-				Imsi:               "234100123456789",
+				IMSI:               "234100123456789",
 				OperatorIdentifier: "23410",
 				GID1:               "547275554B3030656E",
 			},
@@ -39,7 +38,7 @@ func TestEmergencyAddressUpdateAvailable(t *testing.T) {
 			name: "shows telus builtin update",
 			sim: &mmodem.SIM{
 				Identifier:         "iccid-1",
-				Imsi:               "302220123456789",
+				IMSI:               "302220123456789",
 				OperatorIdentifier: "302220",
 				GID1:               "5455",
 			},
@@ -49,8 +48,8 @@ func TestEmergencyAddressUpdateAvailable(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &coordinator{websheets: websheet.New(websheet.Config{})}
-			modem := &mmodem.Modem{Sim: tt.sim}
-			got := c.EmergencyAddressUpdateAvailable(context.Background(), modem)
+			modem := &mmodem.Modem{SIM: tt.sim}
+			got := c.EmergencyAddressUpdateAvailable(t.Context(), modem)
 			if got != tt.want {
 				t.Fatalf("EmergencyAddressUpdateAvailable() = %v, want %v", got, tt.want)
 			}
@@ -60,13 +59,13 @@ func TestEmergencyAddressUpdateAvailable(t *testing.T) {
 
 func TestStartEmergencyAddressUpdateRejectsUnsupportedCarrier(t *testing.T) {
 	c := &coordinator{websheets: websheet.New(websheet.Config{})}
-	modem := &mmodem.Modem{Sim: &mmodem.SIM{
+	modem := &mmodem.Modem{SIM: &mmodem.SIM{
 		Identifier:         "iccid-1",
-		Imsi:               "234100123456789",
+		IMSI:               "234100123456789",
 		OperatorIdentifier: "23410",
 		GID1:               "547275554B3030656E",
 	}}
-	_, err := c.StartEmergencyAddressUpdate(context.Background(), modem)
+	_, err := c.StartEmergencyAddressUpdate(t.Context(), modem)
 	if !errors.Is(err, ErrWebsheetUnavailable) {
 		t.Fatalf("StartEmergencyAddressUpdate() error = %v, want %v", err, ErrWebsheetUnavailable)
 	}
@@ -74,13 +73,13 @@ func TestStartEmergencyAddressUpdateRejectsUnsupportedCarrier(t *testing.T) {
 
 func TestEmergencyAddressUpdateAvailableWithoutWebsheetBroker(t *testing.T) {
 	c := &coordinator{}
-	modem := &mmodem.Modem{Sim: &mmodem.SIM{
+	modem := &mmodem.Modem{SIM: &mmodem.SIM{
 		Identifier:         "iccid-1",
-		Imsi:               "302220123456789",
+		IMSI:               "302220123456789",
 		OperatorIdentifier: "302220",
 		GID1:               "5455",
 	}}
-	if got := c.EmergencyAddressUpdateAvailable(context.Background(), modem); got {
+	if got := c.EmergencyAddressUpdateAvailable(t.Context(), modem); got {
 		t.Fatalf("EmergencyAddressUpdateAvailable() = %v, want false", got)
 	}
 }

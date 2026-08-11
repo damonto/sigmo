@@ -1,7 +1,6 @@
 package webpush
 
 import (
-	"context"
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
@@ -19,7 +18,7 @@ import (
 )
 
 func TestClientPersistsVAPIDKeyAndEnabledState(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)
@@ -57,7 +56,7 @@ func TestClientPersistsVAPIDKeyAndEnabledState(t *testing.T) {
 }
 
 func TestClientRemovesExpiredSubscriptions(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)
@@ -99,7 +98,7 @@ func TestClientRemovesExpiredSubscriptions(t *testing.T) {
 }
 
 func TestClientSendsOnlySupportedEvents(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)
@@ -170,7 +169,7 @@ func TestClientDeliveryIsolation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 			if err != nil {
 				t.Fatalf("storage.Open() error = %v", err)

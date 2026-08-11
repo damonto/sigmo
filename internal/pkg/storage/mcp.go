@@ -235,7 +235,7 @@ func (s *Store) ListMCPAuditEvents(ctx context.Context, before int64, limit int)
 		SELECT id, key_id, key_name, tool, modem_ids_json, outcome, error_code, duration_ms, created_at
 		FROM mcp_audit_events
 	`
-	args := []any{}
+	var args []any
 	if before > 0 {
 		query += ` WHERE id < ?`
 		args = append(args, before)

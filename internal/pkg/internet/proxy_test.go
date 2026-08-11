@@ -397,7 +397,7 @@ func TestProxyUnregisterClosesInterfaceSessions(t *testing.T) {
 				}
 			})
 
-			conn, err := proxy.dial(context.Background(), "wwan0", "tcp", "example.com:443")
+			conn, err := proxy.dial(t.Context(), "wwan0", "tcp", "example.com:443")
 			if err != nil {
 				t.Fatalf("dial() error = %v", err)
 			}

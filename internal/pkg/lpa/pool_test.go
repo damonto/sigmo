@@ -30,11 +30,11 @@ func TestLeaseSerializesAPDUOperations(t *testing.T) {
 	entry := &poolEntry{client: &Client{}, gate: make(chan struct{}, 1)}
 	entry.gate <- struct{}{}
 
-	first, err := lease(context.Background(), entry)
+	first, err := lease(t.Context(), entry)
 	if err != nil {
 		t.Fatalf("first lease: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer cancel()
 	if _, err := lease(ctx, entry); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("second lease error = %v, want deadline exceeded", err)
@@ -42,7 +42,7 @@ func TestLeaseSerializesAPDUOperations(t *testing.T) {
 	if err := first.Close(); err != nil {
 		t.Fatalf("release first lease: %v", err)
 	}
-	second, err := lease(context.Background(), entry)
+	second, err := lease(t.Context(), entry)
 	if err != nil {
 		t.Fatalf("second lease after release: %v", err)
 	}
@@ -82,11 +82,11 @@ func TestLeaseReservesSIMSlotUntilClose(t *testing.T) {
 func TestLeaseCancellationReleasesGateAndSIMReservation(t *testing.T) {
 	m := new(modem.Modem)
 	key := "test:lease-cancellation"
-	gmu.Lock(key)
+	operationLocks.Lock(key)
 	locked := true
 	t.Cleanup(func() {
 		if locked {
-			gmu.Unlock(key)
+			operationLocks.Unlock(key)
 		}
 	})
 	entry := &poolEntry{
@@ -102,7 +102,7 @@ func TestLeaseCancellationReleasesGateAndSIMReservation(t *testing.T) {
 		t.Fatalf("lease() error = %v, want %v", err, context.DeadlineExceeded)
 	}
 
-	gmu.Unlock(key)
+	operationLocks.Unlock(key)
 	locked = false
 	client, err := lease(t.Context(), entry)
 	if err != nil {
@@ -114,7 +114,7 @@ func TestLeaseCancellationReleasesGateAndSIMReservation(t *testing.T) {
 }
 
 func TestLeaseBindsCallerContextForPersistentClient(t *testing.T) {
-	base := context.Background()
+	base := t.Context()
 	operation := newOperationContext(base)
 	entry := &poolEntry{
 		client: &Client{operation: operation},
@@ -209,10 +209,10 @@ func TestLeaseInvalidateReleasesResourcesAfterDisconnectError(t *testing.T) {
 
 	lockCtx, cancelLock := context.WithTimeout(t.Context(), time.Second)
 	defer cancelLock()
-	if err := gmu.LockContext(lockCtx, lockKey); err != nil {
+	if err := operationLocks.LockContext(lockCtx, lockKey); err != nil {
 		t.Fatalf("LPA lock after Invalidate() error = %v", err)
 	}
-	gmu.Unlock(lockKey)
+	operationLocks.Unlock(lockKey)
 
 	slotCtx, cancelSlot := context.WithTimeout(t.Context(), time.Second)
 	defer cancelSlot()
@@ -234,7 +234,7 @@ func TestLeaseRejectsRetiredEntry(t *testing.T) {
 	entry.gate <- struct{}{}
 	close(entry.done)
 
-	if _, err := lease(context.Background(), entry); !errors.Is(err, entryErr) {
+	if _, err := lease(t.Context(), entry); !errors.Is(err, entryErr) {
 		t.Fatalf("lease() error = %v, want %v", err, entryErr)
 	}
 }
@@ -320,7 +320,7 @@ func TestPoolCloseKeepsModemLockUntilTimedOutCloseFinishes(t *testing.T) {
 	}
 	lockCtx, cancelLock := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancelLock()
-	if err := gmu.LockContext(lockCtx, key); !errors.Is(err, context.DeadlineExceeded) {
+	if err := operationLocks.LockContext(lockCtx, key); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("LockContext() error = %v, want lock held until close finishes", err)
 	}
 
@@ -331,8 +331,8 @@ func TestPoolCloseKeepsModemLockUntilTimedOutCloseFinishes(t *testing.T) {
 func TestPoolRoutesDefaultSEOnlyToActiveSlot(t *testing.T) {
 	m := &modem.Modem{
 		EquipmentIdentifier: "test-modem",
-		PrimarySimSlot:      2,
-		SimSlots:            []uint32{1, 2},
+		PrimarySIMSlot:      2,
+		SIMSlots:            []uint32{1, 2},
 	}
 	wantClient := &Client{clientView: &clientView{client: &euicclpa.Client{}}}
 	key := poolKey{modem: m, slot: 2, seID: SEIDDefault}
@@ -346,8 +346,8 @@ func TestPoolRoutesDefaultSEOnlyToActiveSlot(t *testing.T) {
 		},
 		discovering: make(map[poolSEKey]chan struct{}),
 		secureElems: map[poolSEKey][]SE{
-			{modem: m, slot: 1}: {DefaultSE},
-			{modem: m, slot: 2}: {DefaultSE},
+			{modem: m, slot: 1}: {defaultSE},
+			{modem: m, slot: 2}: {defaultSE},
 		},
 		retired: make(map[*modem.Modem]struct{}),
 	}
@@ -374,8 +374,8 @@ func TestPoolRoutesDefaultSEOnlyToActiveSlot(t *testing.T) {
 
 func TestExposeTargetsDisambiguatesDuplicateSEIDs(t *testing.T) {
 	targets := exposeTargets([]poolTarget{
-		{se: DefaultSE, slot: 1, sourceID: SEIDDefault},
-		{se: DefaultSE, slot: 2, sourceID: SEIDDefault},
+		{se: defaultSE, slot: 1, sourceID: SEIDDefault},
+		{se: defaultSE, slot: 2, sourceID: SEIDDefault},
 	})
 
 	if got := targets[0].se.ID; got != SEIDDefault {
@@ -391,8 +391,8 @@ func TestExposeTargetsDisambiguatesDuplicateSEIDs(t *testing.T) {
 
 func TestPoolSlotsUsesOnlyActiveSlot(t *testing.T) {
 	m := &modem.Modem{
-		PrimarySimSlot: 2,
-		SimSlots:       []uint32{1, 2},
+		PrimarySIMSlot: 2,
+		SIMSlots:       []uint32{1, 2},
 	}
 
 	got := poolSlots(m)
@@ -453,8 +453,8 @@ func TestInvalidateSIMSlotsClosesOnlyAffectedEntries(t *testing.T) {
 			key2: ErrNoSupportedAID,
 		},
 		secureElems: map[poolSEKey][]SE{
-			{modem: m, slot: 1}: {DefaultSE},
-			{modem: m, slot: 2}: {DefaultSE},
+			{modem: m, slot: 1}: {defaultSE},
+			{modem: m, slot: 2}: {defaultSE},
 		},
 		retired: make(map[*modem.Modem]struct{}),
 	}

@@ -22,7 +22,7 @@ func TestQMAPMigrationPreferencesKeepTrackedFrontendSettings(t *testing.T) {
 		},
 	}
 
-	got := connector.qmapMigrationPreferences(context.Background(), fakeInternetModem{modemID: "modem-1"}, nil)
+	got := connector.qmapMigrationPreferences(t.Context(), fakeInternetModem{modemID: "modem-1"}, nil)
 	if got != want {
 		t.Fatalf("qmapMigrationPreferences() = %+v, want %+v", got, want)
 	}
@@ -163,7 +163,7 @@ func TestConnectQMAPLockedAllowsPartialDualStack(t *testing.T) {
 				preferences:     make(map[string]Preferences),
 				qmapConnections: make(map[string]*qmapConnection),
 			}
-			connection, err := connector.connectQMAPLocked(context.Background(), &mmodem.Modem{EquipmentIdentifier: "modem-1"}, Preferences{IPType: tt.ipType})
+			connection, err := connector.connectQMAPLocked(t.Context(), &mmodem.Modem{EquipmentIdentifier: "modem-1"}, Preferences{IPType: tt.ipType})
 			for _, wantErr := range tt.wantErrs {
 				if !errors.Is(err, wantErr) {
 					t.Fatalf("connectQMAPLocked() error = %v, want %v", err, wantErr)
@@ -218,7 +218,7 @@ func TestQMAPProxyLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	modem := &mmodem.Modem{EquipmentIdentifier: modemID}
 	connection, err := connector.connectQMAPLocked(ctx, modem, Preferences{IPType: "ipv4", ProxyEnabled: true})
 	if err != nil {
@@ -284,7 +284,7 @@ func TestConnectQMAPLockedRollsBackWhenProxyRegistrationFails(t *testing.T) {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
 	modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
-	connection, err := connector.connectQMAPLocked(context.Background(), modem, Preferences{IPType: "ipv4", ProxyEnabled: true})
+	connection, err := connector.connectQMAPLocked(t.Context(), modem, Preferences{IPType: "ipv4", ProxyEnabled: true})
 	if !errors.Is(err, ErrProxyNotConfigured) {
 		t.Fatalf("connectQMAPLocked() error = %v, want %v", err, ErrProxyNotConfigured)
 	}
@@ -308,7 +308,7 @@ func TestCleanupStaleQMAPInternetRestoresRoutesAndRemovesInternetMuxes(t *testin
 		Gateway: netip.MustParseAddr("10.61.158.137"), Source: netip.MustParseAddr("10.61.158.138"), Metric: 10,
 	}
 	state := testDBConnectionState(t)
-	if err := state.saveRouteStateForModem(context.Background(), "modem-1", "qmimux0", []netlink.DefaultRoute{preferred}, []defaultRouteChange{{
+	if err := state.saveRouteStateForModem(t.Context(), "modem-1", "qmimux0", []netlink.DefaultRoute{preferred}, []defaultRouteChange{{
 		Original: original, Replacement: replacement,
 	}}); err != nil {
 		t.Fatalf("saveRouteStateForModem() error = %v", err)
@@ -341,7 +341,7 @@ func TestCleanupStaleQMAPInternetRestoresRoutesAndRemovesInternetMuxes(t *testin
 	}
 
 	connector := &Connector{persistence: state}
-	if err := connector.cleanupStaleQMAPInternet(context.Background(), &mmodem.Modem{EquipmentIdentifier: "modem-1"}); err != nil {
+	if err := connector.cleanupStaleQMAPInternet(t.Context(), &mmodem.Modem{EquipmentIdentifier: "modem-1"}); err != nil {
 		t.Fatalf("cleanupStaleQMAPInternet() error = %v", err)
 	}
 	if !slices.Equal(added, []netlink.DefaultRoute{original}) {

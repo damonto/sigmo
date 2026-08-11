@@ -601,12 +601,7 @@ func isHTML(contentType string) bool {
 	return mediaType == "text/html" || mediaType == "application/xhtml+xml"
 }
 
-func parseAllowedURL(
-	ctx context.Context,
-	raw string,
-	allowPrivate bool,
-	lookupNetIP func(context.Context, string, string) ([]netip.Addr, error),
-) (*url.URL, error) {
+func parseAllowedURL(ctx context.Context, raw string, allowPrivate bool, lookupNetIP func(context.Context, string, string) ([]netip.Addr, error)) (*url.URL, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, fmt.Errorf("%w: URL is required", ErrUnsafeURL)
@@ -631,11 +626,7 @@ func parseAllowedURL(
 	return parsed, nil
 }
 
-func newWebsheetHTTPClient(
-	base *http.Client,
-	allowPrivate bool,
-	lookupNetIP func(context.Context, string, string) ([]netip.Addr, error),
-) (*http.Client, error) {
+func newWebsheetHTTPClient(base *http.Client, allowPrivate bool, lookupNetIP func(context.Context, string, string) ([]netip.Addr, error)) (*http.Client, error) {
 	client := &http.Client{Timeout: defaultClientTimeout}
 	if base != nil {
 		*client = *base
@@ -668,10 +659,7 @@ func newWebsheetHTTPClient(
 	return client, nil
 }
 
-func validatedDialContext(
-	lookupNetIP func(context.Context, string, string) ([]netip.Addr, error),
-	dialContext func(context.Context, string, string) (net.Conn, error),
-) func(context.Context, string, string) (net.Conn, error) {
+func validatedDialContext(lookupNetIP func(context.Context, string, string) ([]netip.Addr, error), dialContext func(context.Context, string, string) (net.Conn, error)) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
@@ -696,11 +684,7 @@ func validatedDialContext(
 	}
 }
 
-func allowedHostAddresses(
-	ctx context.Context,
-	host string,
-	lookupNetIP func(context.Context, string, string) ([]netip.Addr, error),
-) ([]netip.Addr, error) {
+func allowedHostAddresses(ctx context.Context, host string, lookupNetIP func(context.Context, string, string) ([]netip.Addr, error)) ([]netip.Addr, error) {
 	if isLocalHostname(host) {
 		return nil, fmt.Errorf("%w: local host %q", ErrUnsafeURL, host)
 	}

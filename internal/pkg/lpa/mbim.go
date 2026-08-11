@@ -95,12 +95,16 @@ func (c *mbimLPAChannel) TransmitContext(ctx context.Context, command []byte) ([
 }
 
 func (c *mbimLPAChannel) CloseLogicalChannel(channel byte) error {
+	return c.CloseLogicalChannelContext(context.Background(), channel)
+}
+
+func (c *mbimLPAChannel) CloseLogicalChannelContext(ctx context.Context, channel byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
 		return errors.New("MBIM LPA channel is closed")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), channelOpenTimeout)
+	ctx, cancel := context.WithTimeout(ctx, channelOpenTimeout)
 	defer cancel()
 	if err := c.reader.CloseChannel(ctx, uint32(channel)); err != nil {
 		return err

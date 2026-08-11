@@ -189,7 +189,7 @@ func TestControllerDisablesAutomaticInstallForContainer(t *testing.T) {
 	if snapshot.Settings.Automatic || snapshot.SelfUpdateSupported || snapshot.UnsupportedReason != "container" {
 		t.Fatalf("Snapshot() = %+v", snapshot)
 	}
-	if err := controller.StartInstall(); !errors.Is(err, ErrSelfUpdateUnsupported) {
+	if err := controller.StartInstall(t.Context()); !errors.Is(err, ErrSelfUpdateUnsupported) {
 		t.Fatalf("StartInstall() error = %v", err)
 	}
 }
@@ -353,7 +353,7 @@ func TestControllerRejectsConcurrentInstallations(t *testing.T) {
 	}
 	source.started = make(chan struct{})
 	source.unblock = make(chan struct{})
-	if err := controller.StartInstall(); err != nil {
+	if err := controller.StartInstall(t.Context()); err != nil {
 		t.Fatalf("first StartInstall() error = %v", err)
 	}
 	select {
@@ -361,7 +361,7 @@ func TestControllerRejectsConcurrentInstallations(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("installation did not start")
 	}
-	if err := controller.StartInstall(); !errors.Is(err, ErrBusy) {
+	if err := controller.StartInstall(t.Context()); !errors.Is(err, ErrBusy) {
 		t.Fatalf("second StartInstall() error = %v", err)
 	}
 	close(source.unblock)

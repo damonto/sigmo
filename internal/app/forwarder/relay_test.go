@@ -98,7 +98,7 @@ func TestFreshIncomingCall(t *testing.T) {
 }
 
 func TestForwardCallNotifiesIncomingRingingOnce(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var got []struct {
 		Kind    notifyevent.Kind      `json:"kind"`
@@ -164,7 +164,7 @@ func TestForwardCallNotifiesIncomingRingingOnce(t *testing.T) {
 }
 
 func TestForwardCallKeepsDedupeWhenWebPushFails(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests++
@@ -355,7 +355,7 @@ func TestForwardStoredModemSMSStoresCleansAndNotifies(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			relay, store, notifications := newSMSRelay(t)
 			source := tt.source
 			if source == "" {
@@ -436,7 +436,7 @@ func TestForwardStoredModemSMSStoresCleansAndNotifies(t *testing.T) {
 }
 
 func TestForwardStoredModemSMSRetriesDeleteWithoutDuplicateNotification(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	relay, store, notifications := newSMSRelay(t)
 	deleteErr := errors.New("modem storage busy")
 	refs := []modem.MessageRef{{Storage: wwanmodem.MessageStorageDevice, ID: 21}}
@@ -486,7 +486,7 @@ func TestForwardStoredModemSMSRetriesDeleteWithoutDuplicateNotification(t *testi
 
 func TestForwardStoredModemSMSDoesNotDeleteBeforeInsert(t *testing.T) {
 	relay, _, notifications := newSMSRelay(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	deleter := new(fakeModemSMSDeleter)
 	err := relay.forwardStoredModemSMS(ctx, modemSMSReceipt{
@@ -564,7 +564,7 @@ func TestChangedModemRemovesPreviousPathWithoutEquipmentID(t *testing.T) {
 		equipment: make(map[string]string),
 		modems:    make(map[string]string),
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	err := relay.handleModemEvent(ctx, modem.ModemEvent{
@@ -593,7 +593,7 @@ func newSMSRelay(t *testing.T) (*Relay, *storage.Store, *atomic.Int32) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(server.Close)
-	store, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	store, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)
 	}

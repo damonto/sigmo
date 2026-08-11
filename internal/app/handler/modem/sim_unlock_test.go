@@ -22,7 +22,7 @@ func TestUnlockSIMError(t *testing.T) {
 	}{
 		{
 			name:     "pin required",
-			err:      mmodem.ErrSIMPinRequired,
+			err:      mmodem.ErrSIMPINRequired,
 			wantCode: http.StatusBadRequest,
 			wantBody: errorCodeUnlockSIMInvalidRequest,
 		},

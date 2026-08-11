@@ -1,7 +1,6 @@
 package networkprefs
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -14,11 +13,11 @@ func TestStoreSavesAirplaneMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	if err := preferences.SaveAirplaneMode(context.Background(), " modem-1 ", true); err != nil {
+	if err := preferences.SaveAirplaneMode(t.Context(), " modem-1 ", true); err != nil {
 		t.Fatalf("SaveAirplaneMode() error = %v", err)
 	}
 
-	enabled, ok, err := preferences.SavedAirplaneMode(context.Background(), "modem-1")
+	enabled, ok, err := preferences.SavedAirplaneMode(t.Context(), "modem-1")
 	if err != nil {
 		t.Fatalf("SavedAirplaneMode() error = %v", err)
 	}
@@ -33,14 +32,14 @@ func TestStoreRejectsEmptyBandSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	if err := preferences.SaveBands(context.Background(), "modem-1", nil); err == nil {
+	if err := preferences.SaveBands(t.Context(), "modem-1", nil); err == nil {
 		t.Fatal("SaveBands() error = nil, want non-nil")
 	}
 }
 
 func openTestStore(t *testing.T) *storage.Store {
 	t.Helper()
-	db, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	db, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)
 	}

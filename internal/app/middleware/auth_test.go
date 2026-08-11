@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -118,7 +117,7 @@ func TestAuthReturnsInternalErrorWhenStorageFails(t *testing.T) {
 
 func openAuthTestStorage(t *testing.T) *storage.Store {
 	t.Helper()
-	db, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	db, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)
 	}

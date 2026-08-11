@@ -12,7 +12,7 @@ func ResampleLinear(input []int16, fromRate int, toRate int) ([]int16, error) {
 		return nil, ErrInvalidSampleRate
 	}
 	if len(input) == 0 {
-		return []int16{}, nil
+		return nil, nil
 	}
 	if fromRate == toRate {
 		out := make([]int16, len(input))

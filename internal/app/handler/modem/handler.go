@@ -28,19 +28,19 @@ type Handler struct {
 }
 
 const (
-	switchSimSlotTimeout = time.Minute
+	switchSIMSlotTimeout = time.Minute
 	updateMSISDNTimeout  = time.Minute
 )
 
 const (
 	errorCodeListModemsFailed             = "list_modems_failed"
 	errorCodeGetModemFailed               = "get_modem_failed"
-	errorCodeSwitchSimSlotFailed          = "switch_sim_slot_failed"
-	errorCodeSimSlotRequired              = "sim_slot_required"
-	errorCodeSimSlotsUnavailable          = "sim_slots_unavailable"
-	errorCodeSimSlotNotFound              = "sim_slot_not_found"
-	errorCodeSimSlotAlreadyActive         = "sim_slot_already_active"
-	errorCodeSimSlotSwitchTimeout         = "sim_slot_switch_timeout"
+	errorCodeSwitchSIMSlotFailed          = "switch_sim_slot_failed"
+	errorCodeSIMSlotRequired              = "sim_slot_required"
+	errorCodeSIMSlotsUnavailable          = "sim_slots_unavailable"
+	errorCodeSIMSlotNotFound              = "sim_slot_not_found"
+	errorCodeSIMSlotAlreadyActive         = "sim_slot_already_active"
+	errorCodeSIMSlotSwitchTimeout         = "sim_slot_switch_timeout"
 	errorCodeUnlockSIMInvalidRequest      = "unlock_sim_invalid_request"
 	errorCodeUnlockSIMNotRequired         = "unlock_sim_not_required"
 	errorCodeUnlockSIMFailed              = "unlock_sim_failed"
@@ -54,7 +54,7 @@ const (
 )
 
 var (
-	errSwitchSimSlotTimeout = errors.New("switching SIM slot timed out, please refresh to confirm the active slot")
+	errSwitchSIMSlotTimeout = errors.New("switching SIM slot timed out, please refresh to confirm the active slot")
 	errUpdateMSISDNTimeout  = errors.New("updating MSISDN timed out, please refresh to confirm the active slot")
 )
 
@@ -103,7 +103,7 @@ func (h *Handler) UnlockSIM(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return httpapi.BadRequest(c, errorCodeUnlockSIMInvalidRequest, err)
 	}
-	if err := modem.UnlockSIMPinAndEnable(c.Request().Context(), req.PIN); err != nil {
+	if err := modem.UnlockSIMPINAndEnable(c.Request().Context(), req.PIN); err != nil {
 		return unlockSIMError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -111,7 +111,7 @@ func (h *Handler) UnlockSIM(c *echo.Context) error {
 
 func unlockSIMError(c *echo.Context, err error) error {
 	switch {
-	case errors.Is(err, mmodem.ErrSIMPinRequired):
+	case errors.Is(err, mmodem.ErrSIMPINRequired):
 		return httpapi.BadRequest(c, errorCodeUnlockSIMInvalidRequest, err)
 	case errors.Is(err, mmodem.ErrSIMUnlockNotRequired):
 		return httpapi.BadRequest(c, errorCodeUnlockSIMNotRequired, err)
@@ -122,47 +122,47 @@ func unlockSIMError(c *echo.Context, err error) error {
 	}
 }
 
-func (h *Handler) SwitchSimSlot(c *echo.Context) error {
+func (h *Handler) SwitchSIMSlot(c *echo.Context) error {
 	requestCtx := c.Request().Context()
 	modem, err := h.registry.Find(requestCtx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeSwitchSimSlotFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeSwitchSIMSlotFailed)
 	}
 	slotValue, parseErr := strconv.ParseUint(c.Param("slot"), 10, 32)
 	if parseErr != nil || slotValue == 0 {
-		return httpapi.BadRequest(c, errorCodeSimSlotRequired, errSimSlotRequired)
+		return httpapi.BadRequest(c, errorCodeSIMSlotRequired, errSIMSlotRequired)
 	}
 	slotIndex, err := h.simSlot.targetIndex(modem, uint32(slotValue))
 	if err != nil {
-		if errors.Is(err, errSimSlotRequired) {
-			return httpapi.BadRequest(c, errorCodeSimSlotRequired, err)
+		if errors.Is(err, errSIMSlotRequired) {
+			return httpapi.BadRequest(c, errorCodeSIMSlotRequired, err)
 		}
-		if errors.Is(err, errSimSlotsUnavailable) {
-			return httpapi.BadRequest(c, errorCodeSimSlotsUnavailable, err)
+		if errors.Is(err, errSIMSlotsUnavailable) {
+			return httpapi.BadRequest(c, errorCodeSIMSlotsUnavailable, err)
 		}
-		if errors.Is(err, errSimSlotNotFound) {
-			return httpapi.BadRequest(c, errorCodeSimSlotNotFound, err)
+		if errors.Is(err, errSIMSlotNotFound) {
+			return httpapi.BadRequest(c, errorCodeSIMSlotNotFound, err)
 		}
-		if errors.Is(err, errSimSlotAlreadyActive) {
-			return httpapi.BadRequest(c, errorCodeSimSlotAlreadyActive, err)
+		if errors.Is(err, errSIMSlotAlreadyActive) {
+			return httpapi.BadRequest(c, errorCodeSIMSlotAlreadyActive, err)
 		}
-		return httpapi.Internal(c, errorCodeSwitchSimSlotFailed, err)
+		return httpapi.Internal(c, errorCodeSwitchSIMSlotFailed, err)
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request().Context(), switchSimSlotTimeout)
+	ctx, cancel := context.WithTimeout(c.Request().Context(), switchSIMSlotTimeout)
 	defer cancel()
 
 	if err := h.internet.Restore(ctx, modem); err != nil {
-		return httpapi.Internal(c, errorCodeSwitchSimSlotFailed, err)
+		return httpapi.Internal(c, errorCodeSwitchSIMSlotFailed, err)
 	}
 	if err := h.simSlot.Switch(ctx, modem, slotIndex); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return httpapi.RequestTimeout(c, errorCodeSimSlotSwitchTimeout, errSwitchSimSlotTimeout)
+			return httpapi.RequestTimeout(c, errorCodeSIMSlotSwitchTimeout, errSwitchSIMSlotTimeout)
 		}
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}
-		return httpapi.Internal(c, errorCodeSwitchSimSlotFailed, err)
+		return httpapi.Internal(c, errorCodeSwitchSIMSlotFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

@@ -5,46 +5,48 @@ package carrier
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 )
 
 //go:embed carrier.json
-var carrier []byte
+var carrierJSON []byte
 
 type CarrierDataset struct {
 	Brand       string              `json:"brand,omitempty"`
 	Operator    string              `json:"operator,omitempty"`
-	MccmncTuple map[string][]string `json:"mccmnc_tuple,omitempty"`
+	MCCMNCTuple map[string][]string `json:"mccmnc_tuple,omitempty"`
 }
 
 type Carrier struct {
 	Name   string `json:"name"`
 	Region string `json:"region"`
-	Mccmnc string `json:"mccmnc"`
+	MCCMNC string `json:"mccmnc"`
 }
 
-var dictionary map[string]Carrier
+var dictionary = mustLoadDictionary(carrierJSON)
 
-func init() {
-	dictionary = make(map[string]Carrier)
-	var c []CarrierDataset
-	if err := json.Unmarshal(carrier, &c); err != nil {
-		panic(err)
+func mustLoadDictionary(data []byte) map[string]Carrier {
+	var datasets []CarrierDataset
+	if err := json.Unmarshal(data, &datasets); err != nil {
+		panic(fmt.Sprintf("mustLoadDictionary() error = %v", err))
 	}
-	for _, v := range c {
-		name := v.Brand
+	dictionary := make(map[string]Carrier)
+	for _, dataset := range datasets {
+		name := dataset.Brand
 		if name == "" {
-			name = v.Operator
+			name = dataset.Operator
 		}
-		for region, tuple := range v.MccmncTuple {
+		for region, tuple := range dataset.MCCMNCTuple {
 			for _, mccmnc := range tuple {
 				dictionary[mccmnc] = Carrier{
 					Name:   name,
 					Region: region,
-					Mccmnc: mccmnc,
+					MCCMNC: mccmnc,
 				}
 			}
 		}
 	}
+	return dictionary
 }
 
 func Lookup(mccmnc string) Carrier {
@@ -54,6 +56,6 @@ func Lookup(mccmnc string) Carrier {
 	return Carrier{
 		Name:   "Unknown",
 		Region: "UN",
-		Mccmnc: mccmnc,
+		MCCMNC: mccmnc,
 	}
 }

@@ -1,13 +1,12 @@
 package storage
 
 import (
-	"context"
 	"testing"
 	"time"
 )
 
 func TestReminderStorage(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	base := time.Date(2026, 7, 18, 10, 30, 0, 0, time.UTC)
 	repeat := 7
@@ -27,15 +26,15 @@ func TestReminderStorage(t *testing.T) {
 	}
 
 	t.Run("get", func(t *testing.T) {
-		got, ok, err := store.GetReminder(ctx, first.ProfileType, first.ProfileID)
+		got, ok, err := store.Reminder(ctx, first.ProfileType, first.ProfileID)
 		if err != nil {
-			t.Fatalf("GetReminder() error = %v", err)
+			t.Fatalf("Reminder() error = %v", err)
 		}
 		if !ok {
-			t.Fatal("GetReminder() found = false, want true")
+			t.Fatal("Reminder() found = false, want true")
 		}
 		if !got.NextAt.Equal(base) || got.RepeatDays == nil || *got.RepeatDays != repeat || got.Content != first.Content {
-			t.Fatalf("GetReminder() = %+v, want %+v", got, first)
+			t.Fatalf("Reminder() = %+v, want %+v", got, first)
 		}
 	})
 
@@ -83,12 +82,12 @@ func TestReminderStorage(t *testing.T) {
 		if err := store.UpsertReminder(ctx, next); err != nil {
 			t.Fatalf("UpsertReminder(update) error = %v", err)
 		}
-		got, ok, err := store.GetReminder(ctx, next.ProfileType, next.ProfileID)
+		got, ok, err := store.Reminder(ctx, next.ProfileType, next.ProfileID)
 		if err != nil || !ok {
-			t.Fatalf("GetReminder(update) = (%+v, %v, %v)", got, ok, err)
+			t.Fatalf("Reminder(update) = (%+v, %v, %v)", got, ok, err)
 		}
 		if got.RepeatDays != nil || got.Content != next.Content || !got.NextAt.Equal(next.NextAt) {
-			t.Fatalf("GetReminder(update) = %+v, want %+v", got, next)
+			t.Fatalf("Reminder(update) = %+v, want %+v", got, next)
 		}
 	})
 
@@ -96,12 +95,12 @@ func TestReminderStorage(t *testing.T) {
 		if err := store.DeleteReminder(ctx, first.ProfileType, first.ProfileID); err != nil {
 			t.Fatalf("DeleteReminder() error = %v", err)
 		}
-		_, ok, err := store.GetReminder(ctx, first.ProfileType, first.ProfileID)
+		_, ok, err := store.Reminder(ctx, first.ProfileType, first.ProfileID)
 		if err != nil {
-			t.Fatalf("GetReminder(after delete) error = %v", err)
+			t.Fatalf("Reminder(after delete) error = %v", err)
 		}
 		if ok {
-			t.Fatal("GetReminder(after delete) found = true, want false")
+			t.Fatal("Reminder(after delete) found = true, want false")
 		}
 	})
 }
@@ -152,7 +151,7 @@ func TestReminderClaimProtectsNewerRevision(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := testStore(t)
 			original := Reminder{
 				ProfileType: "esim",
@@ -205,12 +204,12 @@ func TestReminderClaimProtectsNewerRevision(t *testing.T) {
 				}
 			}
 
-			got, exists, err := store.GetReminder(ctx, replacement.ProfileType, replacement.ProfileID)
+			got, exists, err := store.Reminder(ctx, replacement.ProfileType, replacement.ProfileID)
 			if err != nil || !exists {
-				t.Fatalf("GetReminder() = (%+v, %v, %v), want replacement", got, exists, err)
+				t.Fatalf("Reminder() = (%+v, %v, %v), want replacement", got, exists, err)
 			}
 			if got.Content != replacement.Content || !got.NextAt.Equal(replacement.NextAt) {
-				t.Fatalf("GetReminder() = %+v, want replacement %+v", got, replacement)
+				t.Fatalf("Reminder() = %+v, want replacement %+v", got, replacement)
 			}
 		})
 	}

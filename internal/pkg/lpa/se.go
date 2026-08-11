@@ -30,7 +30,7 @@ type SE struct {
 	AID   []byte
 }
 
-var DefaultSE = SE{
+var defaultSE = SE{
 	ID:    SEIDDefault,
 	Label: "eUICC",
 }
@@ -92,16 +92,16 @@ func discoverSEsAtSlot(ctx context.Context, m *modem.Modem, slot uint8, openChan
 	sim := snapshot.SIM
 	sameSlot := sim != nil && (sim.Slot == uint32(slot) || (sim.Slot == 0 && (snapshot.PrimarySIMSlot == uint32(slot) || (snapshot.PrimarySIMSlot == 0 && slot == 1))))
 	if sameSlot && len(sim.ATR) > 0 && !isESTKmeATR(sim.ATR) {
-		return []SE{DefaultSE}, nil
+		return []SE{defaultSE}, nil
 	}
 	if (!sameSlot || len(sim.ATR) == 0) && m.PrimaryPortType() != wwanmodem.PortQMI && m.PrimaryPortType() != wwanmodem.PortMBIM {
-		return []SE{DefaultSE}, nil
+		return []SE{defaultSE}, nil
 	}
 
-	if err := gmu.LockContext(ctx, lpaLockKey(m, slot)); err != nil {
+	if err := operationLocks.LockContext(ctx, lpaLockKey(m, slot)); err != nil {
 		return nil, err
 	}
-	defer gmu.Unlock(lpaLockKey(m, slot))
+	defer operationLocks.Unlock(lpaLockKey(m, slot))
 
 	ch, err := openChannel(ctx, m)
 	if err != nil {
@@ -120,7 +120,7 @@ func discoverSEsAtSlot(ctx context.Context, m *modem.Modem, slot uint8, openChan
 	if ok {
 		return ses, nil
 	}
-	return []SE{DefaultSE}, nil
+	return []SE{defaultSE}, nil
 }
 
 // ResolveSE resolves an eUICC secure element.

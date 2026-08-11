@@ -81,8 +81,8 @@ func TestDiscoverSEsTriesESTKProductAIDFallback(t *testing.T) {
 			}
 			current := &modem.Modem{
 				EquipmentIdentifier: "test:" + tt.name,
-				PrimarySimSlot:      tt.simSlot,
-				Sim:                 &modem.SIM{Slot: tt.simSlot, ATR: tt.atr},
+				PrimarySIMSlot:      tt.simSlot,
+				SIM:                 &modem.SIM{Slot: tt.simSlot, ATR: tt.atr},
 			}
 			if len(tt.atr) == 0 || tt.targetSlot != 0 {
 				current.PrimaryPort = "/dev/cdc-wdm0"
@@ -124,8 +124,8 @@ func TestDiscoverSEsTriesESTKProductAIDFallback(t *testing.T) {
 func TestDiscoverSEsReservesSIMSlotDuringProbe(t *testing.T) {
 	m := &modem.Modem{
 		EquipmentIdentifier: "test:reserved-discovery",
-		PrimarySimSlot:      1,
-		Sim:                 &modem.SIM{Slot: 1, ATR: estkmeATRs[0]},
+		PrimarySIMSlot:      1,
+		SIM:                 &modem.SIM{Slot: 1, ATR: estkmeATRs[0]},
 	}
 	channel := &fakeSmartCardChannel{openLogicalChannelErr: errAIDNotSupported}
 	_, err := discoverSEs(t.Context(), m, func(context.Context, *modem.Modem) (driver.SmartCardChannel, error) {

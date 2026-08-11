@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/ncruces/go-sqlite3/driver"
+	sqlite3driver "github.com/ncruces/go-sqlite3/driver"
 )
 
 type Store struct {
@@ -28,7 +28,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	}
 
 	dsn := (&url.URL{Scheme: "file", Path: path}).String() + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sqlite3driver.Open(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}

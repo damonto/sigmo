@@ -84,7 +84,7 @@ func TestDeleteProfileReminderCleanup(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+			store, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
 			if err != nil {
 				t.Fatalf("storage.Open() error = %v", err)
 			}
@@ -98,7 +98,7 @@ func TestDeleteProfileReminderCleanup(t *testing.T) {
 				t.Fatalf("reminder.New() error = %v", err)
 			}
 			if tt.storeReminder {
-				if err := reminders.Save(context.Background(), storage.Reminder{
+				if err := reminders.Save(t.Context(), storage.Reminder{
 					ProfileType: reminder.ProfileTypeESIM.String(),
 					ProfileID:   iccid.String(),
 					ModemID:     tt.reminderModem,
@@ -125,7 +125,7 @@ func TestDeleteProfileReminderCleanup(t *testing.T) {
 				reminders: reminders,
 			}
 			modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
-			err = h.DeleteProfile(context.Background(), modem, "se0", iccid)
+			err = h.DeleteProfile(t.Context(), modem, "se0", iccid)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("DeleteProfile() error = %v, want %v", err, tt.wantErr)
@@ -133,7 +133,7 @@ func TestDeleteProfileReminderCleanup(t *testing.T) {
 			} else if err != nil {
 				t.Fatalf("DeleteProfile() error = %v", err)
 			}
-			_, exists, err := reminders.Get(context.Background(), reminder.ProfileTypeESIM, iccid.String())
+			_, exists, err := reminders.Get(t.Context(), reminder.ProfileTypeESIM, iccid.String())
 			if err != nil {
 				t.Fatalf("Get() error = %v", err)
 			}

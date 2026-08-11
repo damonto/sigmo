@@ -232,7 +232,7 @@ func TestRegistryReplacesAndRemovesPhysicalDeviceGeneration(t *testing.T) {
 		}, nil
 	}
 
-	modems, err := registry.Modems(context.Background())
+	modems, err := registry.Modems(t.Context())
 	if err != nil {
 		t.Fatalf("Modems() error = %v", err)
 	}
@@ -308,10 +308,10 @@ func TestRegistryRetriesAfterWatcherStartupFailure(t *testing.T) {
 		return make(chan wwanmodem.Result[wwanmodem.DeviceEvent]), nil
 	}
 
-	if _, err := registry.Modems(context.Background()); err == nil {
+	if _, err := registry.Modems(t.Context()); err == nil {
 		t.Fatal("first Modems() error = nil, want watcher error")
 	}
-	modems, err := registry.Modems(context.Background())
+	modems, err := registry.Modems(t.Context())
 	if err != nil {
 		t.Fatalf("second Modems() error = %v", err)
 	}
@@ -377,7 +377,7 @@ func TestRegistryRecoversCurrentGenerationAfterTransportFailure(t *testing.T) {
 			}}}
 
 			failure := modemFailure{modem: initial, err: errors.New("terminal transport error")}
-			registry.handleModemFailure(context.Background(), failure)
+			registry.handleModemFailure(t.Context(), failure)
 
 			replacement := registry.modems[key]
 			wantGeneration := uint64(1 + tt.wantOpenCalls)
@@ -391,7 +391,7 @@ func TestRegistryRecoversCurrentGenerationAfterTransportFailure(t *testing.T) {
 				t.Fatalf("published events = %+v, want removed then added", published)
 			}
 
-			registry.handleModemFailure(context.Background(), failure)
+			registry.handleModemFailure(t.Context(), failure)
 			if openCalls != tt.wantOpenCalls || registry.modems[key] != replacement {
 				t.Fatal("stale generation failure replaced the current modem")
 			}
@@ -488,7 +488,7 @@ func TestRegistryReloadReturnsWhenRegistryCloses(t *testing.T) {
 
 	reloadDone := make(chan error, 1)
 	go func() {
-		_, err := registry.Reload(context.Background(), &Modem{EquipmentIdentifier: "imei-1"})
+		_, err := registry.Reload(t.Context(), &Modem{EquipmentIdentifier: "imei-1"})
 		reloadDone <- err
 	}()
 
@@ -556,10 +556,10 @@ func TestRegistryBoundsClientIDExhaustionRecovery(t *testing.T) {
 				},
 			}
 			exhausted := func(modem *Modem) modemFailure {
-				return modemFailure{modem: modem, err: errors.Join(errors.New("read serving system"), qcom.QMIErrorClientIdsExhausted)}
+				return modemFailure{modem: modem, err: errors.Join(errors.New("read serving system"), qcom.QMIErrorClientIDsExhausted)}
 			}
 
-			registry.handleModemFailure(context.Background(), exhausted(initial))
+			registry.handleModemFailure(t.Context(), exhausted(initial))
 			replacement := registry.modems[key]
 			if replacement == nil || replacement == initial {
 				t.Fatalf("replacement = %+v, want one coordinated recovery", replacement)
@@ -568,7 +568,7 @@ func TestRegistryBoundsClientIDExhaustionRecovery(t *testing.T) {
 				t.Fatalf("open calls = %d, recovery state = %d, want 1 and retried", openCalls, registry.cidRecoveryState(key))
 			}
 
-			registry.handleModemFailure(context.Background(), modemFailure{
+			registry.handleModemFailure(t.Context(), modemFailure{
 				modem: replacement,
 				err:   errors.New("terminal transport error"),
 			})
@@ -580,7 +580,7 @@ func TestRegistryBoundsClientIDExhaustionRecovery(t *testing.T) {
 				t.Fatalf("open calls = %d, recovery state = %d, want 2 and retried", openCalls, registry.cidRecoveryState(key))
 			}
 
-			registry.handleModemFailure(context.Background(), exhausted(replacement))
+			registry.handleModemFailure(t.Context(), exhausted(replacement))
 			if registry.modems[key] != nil {
 				t.Fatalf("modem = %+v, want suspended recovery", registry.modems[key])
 			}
@@ -588,7 +588,7 @@ func TestRegistryBoundsClientIDExhaustionRecovery(t *testing.T) {
 				t.Fatalf("open calls = %d, recovery state = %d, want 2 and suspended", openCalls, registry.cidRecoveryState(key))
 			}
 
-			if err := registry.reconcile(context.Background()); err != nil {
+			if err := registry.reconcile(t.Context()); err != nil {
 				t.Fatalf("reconcile() error = %v", err)
 			}
 			if openCalls != 2 || registry.modems[key] != nil {
@@ -596,15 +596,15 @@ func TestRegistryBoundsClientIDExhaustionRecovery(t *testing.T) {
 			}
 
 			if tt.reconnectByEvents {
-				registry.applyDeviceEvent(context.Background(), wwanmodem.DeviceEvent{Type: wwanmodem.DeviceRemoved, Device: device})
-				registry.applyDeviceEvent(context.Background(), wwanmodem.DeviceEvent{Type: wwanmodem.DeviceAdded, Device: device})
+				registry.applyDeviceEvent(t.Context(), wwanmodem.DeviceEvent{Type: wwanmodem.DeviceRemoved, Device: device})
+				registry.applyDeviceEvent(t.Context(), wwanmodem.DeviceEvent{Type: wwanmodem.DeviceAdded, Device: device})
 			} else {
 				devicePresent = false
-				if err := registry.reconcile(context.Background()); err != nil {
+				if err := registry.reconcile(t.Context()); err != nil {
 					t.Fatalf("reconcile() absent device error = %v", err)
 				}
 				devicePresent = true
-				if err := registry.reconcile(context.Background()); err != nil {
+				if err := registry.reconcile(t.Context()); err != nil {
 					t.Fatalf("reconcile() reconnected device error = %v", err)
 				}
 			}
@@ -619,7 +619,7 @@ func TestRegistryBoundsClientIDExhaustionRecovery(t *testing.T) {
 }
 
 func TestRegistryBoundsClientIDExhaustionForAddedDevice(t *testing.T) {
-	clientIDsExhausted := errors.Join(errors.New("open NAS client"), qcom.QMIErrorClientIdsExhausted)
+	clientIDsExhausted := errors.Join(errors.New("open NAS client"), qcom.QMIErrorClientIDsExhausted)
 	tests := []struct {
 		name       string
 		openErrors []error
@@ -710,13 +710,13 @@ func TestRegistrySuspendsWhenCIDRecoveryOpenAlsoExhausts(t *testing.T) {
 				},
 				open: func(context.Context, wwanmodem.Device, uint64) (*Modem, error) {
 					openCalls++
-					return nil, errors.Join(errors.New("open NAS client"), qcom.QMIErrorClientIdsExhausted)
+					return nil, errors.Join(errors.New("open NAS client"), qcom.QMIErrorClientIDsExhausted)
 				},
 			}
 
-			registry.handleModemFailure(context.Background(), modemFailure{
+			registry.handleModemFailure(t.Context(), modemFailure{
 				modem: initial,
-				err:   errors.Join(errors.New("read serving system"), qcom.QMIErrorClientIdsExhausted),
+				err:   errors.Join(errors.New("read serving system"), qcom.QMIErrorClientIDsExhausted),
 			})
 
 			if openCalls != 1 {
@@ -729,7 +729,7 @@ func TestRegistrySuspendsWhenCIDRecoveryOpenAlsoExhausts(t *testing.T) {
 				t.Fatalf("recovery state = %d, want suspended", registry.cidRecoveryState(key))
 			}
 
-			if err := registry.reconcile(context.Background()); err != nil {
+			if err := registry.reconcile(t.Context()); err != nil {
 				t.Fatalf("reconcile() error = %v", err)
 			}
 			if openCalls != 1 {
@@ -769,7 +769,7 @@ func TestRegistryStartupHonorsCIDRecoverySuspension(t *testing.T) {
 			}
 			registry.open = func(context.Context, wwanmodem.Device, uint64) (*Modem, error) {
 				openCalls++
-				return nil, errors.Join(errors.New("open NAS client"), qcom.QMIErrorClientIdsExhausted)
+				return nil, errors.Join(errors.New("open NAS client"), qcom.QMIErrorClientIDsExhausted)
 			}
 
 			steps := []struct {
@@ -848,7 +848,7 @@ func TestRegistryRestartsWatcherAndReconcilesMissedChange(t *testing.T) {
 		}, nil
 	}
 
-	if _, err := registry.Modems(context.Background()); err != nil {
+	if _, err := registry.Modems(t.Context()); err != nil {
 		t.Fatalf("Modems() error = %v", err)
 	}
 	published := make(chan ModemEvent, 1)
@@ -918,7 +918,7 @@ func TestRegistryPublishesPathChangeBeforeClosingPreviousGeneration(t *testing.T
 	}
 	defer unsubscribe()
 
-	registry.applyDeviceEvent(context.Background(), wwanmodem.DeviceEvent{Type: wwanmodem.DeviceChanged, Device: newDevice})
+	registry.applyDeviceEvent(t.Context(), wwanmodem.DeviceEvent{Type: wwanmodem.DeviceChanged, Device: newDevice})
 
 	if got.Type != ModemEventChanged || got.Previous != old || got.PreviousPath != old.Path() || got.Path != physicalDeviceKey(newDevice) {
 		t.Fatalf("changed event = %+v", got)
@@ -964,7 +964,7 @@ func TestRegistryPublishesRemovedAndAddedForDifferentIMEIOnSameDevice(t *testing
 	}
 	defer unsubscribe()
 
-	registry.applyDeviceEvent(context.Background(), wwanmodem.DeviceEvent{Type: wwanmodem.DeviceChanged, Device: device})
+	registry.applyDeviceEvent(t.Context(), wwanmodem.DeviceEvent{Type: wwanmodem.DeviceChanged, Device: device})
 
 	if len(events) != 2 || events[0].Type != ModemEventRemoved || events[1].Type != ModemEventAdded {
 		t.Fatalf("events = %+v, want removed then added", events)
@@ -1069,7 +1069,7 @@ func TestControlPortsForOpenRetriesDATA5Resolution(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			waits := 0
-			got, err := controlPortsForOpenWithResolver(context.Background(), device, controlPortResolver{
+			got, err := controlPortsForOpenWithResolver(t.Context(), device, controlPortResolver{
 				sameDevice: func(_, candidate string) (bool, error) {
 					if waits == 0 {
 						return false, tt.initialErr
@@ -1101,7 +1101,7 @@ func TestControlPortsForOpenReturnsErrorAfterBoundedRetries(t *testing.T) {
 	comparisons := 0
 	waits := 0
 
-	got, err := controlPortsForOpenWithResolver(context.Background(), device, controlPortResolver{
+	got, err := controlPortsForOpenWithResolver(t.Context(), device, controlPortResolver{
 		sameDevice: func(string, string) (bool, error) {
 			comparisons++
 			return false, os.ErrNotExist
@@ -1129,7 +1129,7 @@ func TestControlPortsForOpenHonorsContextCancellation(t *testing.T) {
 	data6 := wwanmodem.Port{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi0"}
 	data5 := wwanmodem.Port{Type: wwanmodem.PortQMI, Path: "/dev/wwan0qmi1"}
 	device := wwanmodem.Device{Bus: wwanmodem.BusPlatform, Ports: []wwanmodem.Port{data6, data5}}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	got, err := controlPortsForOpenWithResolver(ctx, device, controlPortResolver{
@@ -1167,7 +1167,7 @@ func TestControlPortsForOpenSkipsUnambiguousDevices(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := controlPortsForOpenWithResolver(context.Background(), tt.device, controlPortResolver{
+			got, err := controlPortsForOpenWithResolver(t.Context(), tt.device, controlPortResolver{
 				sameDevice: func(string, string) (bool, error) {
 					t.Fatal("compared Qualcomm 410 nodes")
 					return false, nil

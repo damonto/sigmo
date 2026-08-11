@@ -58,7 +58,7 @@ func TestQMICATReaderCommands(t *testing.T) {
 				CAT: cat,
 			})
 			reader.responder = &fakeQMICATResponder{}
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 
 			out, err := reader.Commands(ctx, stkpkg.NewProfile(stkpkg.CapabilitySetupMenu))
@@ -133,7 +133,7 @@ func TestQMICATReaderRespond(t *testing.T) {
 				responder:             responder,
 				cachedResponsePending: tt.cachedPending,
 			}
-			err := reader.Respond(context.Background(), usim.STKSession{Ref: tt.ref}, stkpkg.Result(stkpkg.ResultCommandPerformed))
+			err := reader.Respond(t.Context(), usim.STKSession{Ref: tt.ref}, stkpkg.Result(stkpkg.ResultCommandPerformed))
 			if err != nil {
 				t.Fatalf("Respond() error = %v", err)
 			}

@@ -2,6 +2,7 @@ package stk
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -37,12 +38,16 @@ func openUSIMCard(ctx context.Context, reader usimcard.Reader, logger *slog.Logg
 	}
 	card, err := usim.New(ctx, reader, logger)
 	if err != nil {
-		_ = reader.Close()
+		if closeErr := reader.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close USIM reader: %w", closeErr))
+		}
 		return Card{}, fmt.Errorf("open USIM card: %w", err)
 	}
 	stk, err := card.STK()
 	if err != nil {
-		_ = card.Close()
+		if closeErr := card.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close USIM card: %w", closeErr))
+		}
 		return Card{}, err
 	}
 	return Card{

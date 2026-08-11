@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -43,7 +42,7 @@ func TestStoreRequiresStorage(t *testing.T) {
 func TestTokenPersistence(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "sigmo.db")
 	db, err := storage.Open(ctx, path)
 	if err != nil {
@@ -119,7 +118,7 @@ func TestTokenPersistence(t *testing.T) {
 func TestValidateTokenRejectsExpiredToken(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)

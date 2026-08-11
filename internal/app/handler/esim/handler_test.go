@@ -145,7 +145,7 @@ func TestRestoreInternetBeforeProfileEnable(t *testing.T) {
 			t.Parallel()
 
 			h := &Handler{}
-			err := h.restoreInternetBeforeProfileEnable(context.Background(), tt.modem)
+			err := h.restoreInternetBeforeProfileEnable(t.Context(), tt.modem)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("restoreInternetBeforeProfileEnable() error = %v, wantErr %v", err, tt.wantErr)
 			}

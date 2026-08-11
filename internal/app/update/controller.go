@@ -214,7 +214,10 @@ func (c *Controller) checkLatest(ctx context.Context) error {
 	return nil
 }
 
-func (c *Controller) StartInstall() error {
+func (c *Controller) StartInstall(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	c.mu.Lock()
 	if !c.selfUpdateSupported() {
 		c.mu.Unlock()
@@ -228,7 +231,7 @@ func (c *Controller) StartInstall() error {
 		c.mu.Unlock()
 		return ErrBusy
 	}
-	installCtx, cancel := context.WithCancel(context.Background())
+	installCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	c.installCancel = cancel
 	c.state = StateDownloading
 	c.lastError = ""
@@ -269,7 +272,7 @@ func (c *Controller) Run(ctx context.Context) error {
 			if err := c.Check(ctx); err != nil && !errors.Is(err, ErrBusy) {
 				slog.Warn("check for update", "error", err)
 			} else if c.Snapshot().UpdateAvailable {
-				switch err := c.StartInstall(); {
+				switch err := c.StartInstall(ctx); {
 				case err == nil, errors.Is(err, ErrBusy), errors.Is(err, ErrNoUpdate):
 					// A manual request or settings change may win the race after
 					// the check. Both outcomes are expected and need no retry here.

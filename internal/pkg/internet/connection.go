@@ -178,7 +178,7 @@ func (m modemAccess) imsi() string {
 	if sim == nil {
 		return ""
 	}
-	return strings.TrimSpace(sim.Imsi)
+	return strings.TrimSpace(sim.IMSI)
 }
 
 func (m modemAccess) prepareBearerDataFormat(ctx context.Context) error {

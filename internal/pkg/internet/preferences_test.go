@@ -1,7 +1,6 @@
 package internet
 
 import (
-	"context"
 	"errors"
 	"net/netip"
 	"slices"
@@ -60,7 +59,7 @@ func TestUpdateTrackedDefaultRoute(t *testing.T) {
 		routeMetric:   secondaryRouteMetric,
 	}
 
-	updated, err := connector.updateTrackedDefaultRoute(context.Background(), "modem-1", tracked, true)
+	updated, err := connector.updateTrackedDefaultRoute(t.Context(), "modem-1", tracked, true)
 	if err != nil {
 		t.Fatalf("enable default route: %v", err)
 	}
@@ -68,7 +67,7 @@ func TestUpdateTrackedDefaultRoute(t *testing.T) {
 		t.Fatalf("enabled route state = %+v, want default route metric %d", updated, defaultRouteMetric)
 	}
 
-	updated, err = connector.updateTrackedDefaultRoute(context.Background(), "modem-1", updated, false)
+	updated, err = connector.updateTrackedDefaultRoute(t.Context(), "modem-1", updated, false)
 	if err != nil {
 		t.Fatalf("disable default route: %v", err)
 	}
@@ -88,25 +87,25 @@ func TestUpdateTrackedPreferencesPersistsAlwaysOn(t *testing.T) {
 		prefs:         Preferences{APN: "internet"},
 	}
 
-	updated, err := connector.updateTrackedPreferences(context.Background(), modem, tracked, ConnectionPreferences{AlwaysOn: true})
+	updated, err := connector.updateTrackedPreferences(t.Context(), modem, tracked, ConnectionPreferences{AlwaysOn: true})
 	if err != nil {
 		t.Fatalf("enable Always On: %v", err)
 	}
 	if !updated.prefs.AlwaysOn {
 		t.Fatal("updated preferences AlwaysOn = false, want true")
 	}
-	if _, ok, err := connector.loadAlwaysOnStateForProfile(context.Background(), "profile-1"); err != nil || !ok {
+	if _, ok, err := connector.loadAlwaysOnStateForProfile(t.Context(), "profile-1"); err != nil || !ok {
 		t.Fatalf("load Always On state = ok %t, err %v; want saved state", ok, err)
 	}
 
-	updated, err = connector.updateTrackedPreferences(context.Background(), modem, updated, ConnectionPreferences{})
+	updated, err = connector.updateTrackedPreferences(t.Context(), modem, updated, ConnectionPreferences{})
 	if err != nil {
 		t.Fatalf("disable Always On: %v", err)
 	}
 	if updated.prefs.AlwaysOn {
 		t.Fatal("updated preferences AlwaysOn = true, want false")
 	}
-	if _, ok, err := connector.loadAlwaysOnStateForProfile(context.Background(), "profile-1"); err != nil || ok {
+	if _, ok, err := connector.loadAlwaysOnStateForProfile(t.Context(), "profile-1"); err != nil || ok {
 		t.Fatalf("load cleared Always On state = ok %t, err %v; want absent", ok, err)
 	}
 }
@@ -125,7 +124,7 @@ func TestUpdateQMAPPreferencesPersistsAlwaysOn(t *testing.T) {
 		}},
 	}
 
-	updated, err := connector.updateQMAPPreferences(context.Background(), modem, connection, ConnectionPreferences{AlwaysOn: true})
+	updated, err := connector.updateQMAPPreferences(t.Context(), modem, connection, ConnectionPreferences{AlwaysOn: true})
 	if err != nil {
 		t.Fatalf("update QMAP preferences: %v", err)
 	}
@@ -135,7 +134,7 @@ func TestUpdateQMAPPreferencesPersistsAlwaysOn(t *testing.T) {
 	if got := connector.qmapConnectionFor("modem-1", 0); got != updated {
 		t.Fatalf("stored QMAP connection = %p, want %p", got, updated)
 	}
-	if _, ok, err := connector.loadAlwaysOnStateForProfile(context.Background(), "profile-1"); err != nil || !ok {
+	if _, ok, err := connector.loadAlwaysOnStateForProfile(t.Context(), "profile-1"); err != nil || !ok {
 		t.Fatalf("load QMAP Always On state = ok %t, err %v; want saved state", ok, err)
 	}
 }
@@ -178,10 +177,10 @@ func TestUpdateQMAPPreferencesDisablesDefaultRoutesInReverseOrder(t *testing.T) 
 	}
 	firstChanges := []defaultRouteChange{{Original: otherOriginal, Replacement: otherReplacement}}
 	secondChanges := []defaultRouteChange{{Original: firstOriginal, Replacement: firstReplacement}}
-	if err := connector.persistence.saveRouteStateForModem(context.Background(), "modem-1", "qmimux0", []netlink.DefaultRoute{firstOriginal}, firstChanges); err != nil {
+	if err := connector.persistence.saveRouteStateForModem(t.Context(), "modem-1", "qmimux0", []netlink.DefaultRoute{firstOriginal}, firstChanges); err != nil {
 		t.Fatalf("save first route state: %v", err)
 	}
-	if err := connector.persistence.saveRouteStateForModem(context.Background(), "modem-1", "qmimux1", []netlink.DefaultRoute{secondOriginal}, secondChanges); err != nil {
+	if err := connector.persistence.saveRouteStateForModem(t.Context(), "modem-1", "qmimux1", []netlink.DefaultRoute{secondOriginal}, secondChanges); err != nil {
 		t.Fatalf("save second route state: %v", err)
 	}
 	connection := &qmapConnection{
@@ -192,9 +191,7 @@ func TestUpdateQMAPPreferencesDisablesDefaultRoutesInReverseOrder(t *testing.T) 
 		},
 	}
 
-	updated, err := connector.updateQMAPPreferences(
-		context.Background(),
-		fakeInternetModem{modemID: "modem-1"},
+	updated, err := connector.updateQMAPPreferences(t.Context(), fakeInternetModem{modemID: "modem-1"},
 		connection,
 		ConnectionPreferences{},
 	)
@@ -271,9 +268,7 @@ func TestUpdateTrackedPreferencesRollsBackRoutesWhenProxyFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
-	_, err = connector.updateTrackedPreferences(
-		context.Background(),
-		fakeInternetModem{modemID: "modem-1", iccidValue: "profile-1"},
+	_, err = connector.updateTrackedPreferences(t.Context(), fakeInternetModem{modemID: "modem-1", iccidValue: "profile-1"},
 		trackedConnection{
 			interfaceName: "wwan0",
 			prefs:         Preferences{APN: "internet"},

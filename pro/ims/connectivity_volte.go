@@ -68,12 +68,7 @@ func (c *Connectivity) ReplaceVoLTESettings(ctx context.Context, modem *mmodem.M
 	})
 }
 
-func (c *Connectivity) ChangeAirplaneMode(
-	ctx context.Context,
-	modem *mmodem.Modem,
-	targetEnabled bool,
-	apply func() (applied bool, err error),
-) error {
+func (c *Connectivity) ChangeAirplaneMode(ctx context.Context, modem *mmodem.Modem, targetEnabled bool, apply func() (applied bool, err error)) error {
 	if c == nil || c.volte == nil || modem == nil || apply == nil {
 		return ErrUnavailable
 	}
@@ -98,7 +93,7 @@ func (c *Connectivity) ChangeAirplaneMode(
 		restoreModem, reloadErr := c.reloadAfterAirplaneMode(restoreCtx, modem, transition)
 		if reloadErr != nil {
 			internetErr := c.completeInternetAirplaneModeChange(modem, transition)
-			c.volte.endAirplaneModeChange(modem.EquipmentIdentifier)
+			c.volte.endAirplaneModeChange(ctx, modem.EquipmentIdentifier)
 			return errors.Join(stateErr, beginInternetErr, changeErr, reloadErr, internetErr)
 		}
 		resumeErr := c.resumeAfterAirplaneMode(restoreCtx, restoreModem, transition)
@@ -117,7 +112,7 @@ func (c *Connectivity) prepareVoLTEAirplaneModeChange(ctx context.Context, modem
 	wasAirplaneMode, err := c.volte.airplaneModeEnabled(ctx, modem)
 	c.volte.beginAirplaneModeChange(modem.EquipmentIdentifier, targetEnabled || wasAirplaneMode || err != nil)
 	if targetEnabled {
-		c.volte.stop(modem.EquipmentIdentifier)
+		c.volte.stop(ctx, modem.EquipmentIdentifier)
 	}
 	if err != nil {
 		return fmt.Errorf("read airplane mode before VoLTE transition: %w", err)
@@ -135,10 +130,7 @@ func (c *Connectivity) beginInternetAirplaneModeChange(ctx context.Context, mode
 	return nil
 }
 
-func (c *Connectivity) completeInternetAirplaneModeChange(
-	modem *mmodem.Modem,
-	transition airplaneModeTransition,
-) error {
+func (c *Connectivity) completeInternetAirplaneModeChange(modem *mmodem.Modem, transition airplaneModeTransition) error {
 	if c.internet == nil {
 		return nil
 	}
@@ -152,11 +144,7 @@ func (c *Connectivity) completeInternetAirplaneModeChange(
 	return nil
 }
 
-func (c *Connectivity) reloadAfterAirplaneMode(
-	ctx context.Context,
-	modem *mmodem.Modem,
-	transition airplaneModeTransition,
-) (*mmodem.Modem, error) {
+func (c *Connectivity) reloadAfterAirplaneMode(ctx context.Context, modem *mmodem.Modem, transition airplaneModeTransition) (*mmodem.Modem, error) {
 	if !transition.shouldReloadQMI(modem) || c.reloadModem == nil {
 		return modem, nil
 	}
@@ -170,11 +158,7 @@ func (c *Connectivity) reloadAfterAirplaneMode(
 	return replacement, nil
 }
 
-func (c *Connectivity) resumeAfterAirplaneMode(
-	ctx context.Context,
-	modem *mmodem.Modem,
-	transition airplaneModeTransition,
-) error {
+func (c *Connectivity) resumeAfterAirplaneMode(ctx context.Context, modem *mmodem.Modem, transition airplaneModeTransition) error {
 	settings, err := c.volte.VoLTESettings(ctx, modem)
 	if err != nil {
 		err = fmt.Errorf("read VoLTE settings: %w", err)
@@ -195,9 +179,9 @@ func (c *Connectivity) resumeAfterAirplaneMode(
 		}
 	}
 	internetErr := c.completeInternetAirplaneModeChange(modem, transition)
-	c.volte.endAirplaneModeChange(modem.EquipmentIdentifier)
+	c.volte.endAirplaneModeChange(ctx, modem.EquipmentIdentifier)
 	if err == nil && configureErr == nil && settings.Enabled {
-		c.volte.start(modem, profileID)
+		c.volte.start(ctx, modem, profileID)
 	}
 	return errors.Join(err, configureErr, internetErr)
 }

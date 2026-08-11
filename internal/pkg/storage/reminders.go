@@ -51,7 +51,7 @@ func (s *Store) UpsertReminder(ctx context.Context, reminder Reminder) error {
 	return nil
 }
 
-func (s *Store) GetReminder(ctx context.Context, profileType, profileID string) (Reminder, bool, error) {
+func (s *Store) Reminder(ctx context.Context, profileType, profileID string) (Reminder, bool, error) {
 	profileType = strings.TrimSpace(profileType)
 	profileID = strings.TrimSpace(profileID)
 	if profileType == "" || profileID == "" {

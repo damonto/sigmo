@@ -123,7 +123,7 @@ func TestEnableSessionEnable(t *testing.T) {
 	notificationErr := errors.New("notification endpoint unavailable")
 	current := &mmodem.Modem{
 		EquipmentIdentifier: "354015820228039",
-		Sim:                 &mmodem.SIM{Identifier: "8985200099999999999"},
+		SIM:                 &mmodem.SIM{Identifier: "8985200099999999999"},
 	}
 	visibleModem := &mmodem.Modem{EquipmentIdentifier: current.EquipmentIdentifier}
 
@@ -236,7 +236,7 @@ func TestEnableSessionEnable(t *testing.T) {
 				lastSeq:       1,
 			}
 
-			err := session.Enable(context.Background())
+			err := session.Enable(t.Context())
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("Enable() error = %v, want %v", err, tt.wantErr)

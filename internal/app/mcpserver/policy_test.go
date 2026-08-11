@@ -46,7 +46,7 @@ func TestGuardedToolIdempotency(t *testing.T) {
 	input := guardedTestInput{Value: "same", IdempotencyKey: "request-1"}
 
 	for range 2 {
-		out, err := executeGuardedTool(context.Background(), nil, exec, "test_tool", policy, handler, input)
+		out, err := executeGuardedTool(t.Context(), nil, exec, "test_tool", policy, handler, input)
 		if err != nil {
 			t.Fatalf("executeGuardedTool() error = %v", err)
 		}
@@ -75,7 +75,7 @@ func TestGuardedToolConcurrentIdempotency(t *testing.T) {
 	input := guardedTestInput{Value: "same", IdempotencyKey: "request-1"}
 	results := make(chan error, 2)
 	call := func() {
-		out, err := executeGuardedTool(context.Background(), nil, exec, "test_tool", policy, handler, input)
+		out, err := executeGuardedTool(t.Context(), nil, exec, "test_tool", policy, handler, input)
 		if err == nil && out.Value != "done" {
 			err = errors.New("unexpected guarded tool output")
 		}
@@ -110,11 +110,11 @@ func TestGuardedToolIdempotencyConflict(t *testing.T) {
 		return guardedTestOutput{Value: input.Value}, nil
 	}
 
-	_, err := executeGuardedTool(context.Background(), nil, exec, "test_tool", policy, handler, guardedTestInput{Value: "first", IdempotencyKey: "request-1"})
+	_, err := executeGuardedTool(t.Context(), nil, exec, "test_tool", policy, handler, guardedTestInput{Value: "first", IdempotencyKey: "request-1"})
 	if err != nil {
 		t.Fatalf("first executeGuardedTool() error = %v", err)
 	}
-	_, err = executeGuardedTool(context.Background(), nil, exec, "test_tool", policy, handler, guardedTestInput{Value: "second", IdempotencyKey: "request-1"})
+	_, err = executeGuardedTool(t.Context(), nil, exec, "test_tool", policy, handler, guardedTestInput{Value: "second", IdempotencyKey: "request-1"})
 	if got := ErrorCode(err); got != "idempotency_conflict" {
 		t.Fatalf("second executeGuardedTool() error code = %q, want idempotency_conflict; error = %v", got, err)
 	}
@@ -134,8 +134,7 @@ func TestGuardedToolIdempotencyKeyValidation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := executeGuardedTool(
-				context.Background(), nil, acceptingExecution(), "test_tool", guardedTestPolicy(),
+			_, err := executeGuardedTool(t.Context(), nil, acceptingExecution(), "test_tool", guardedTestPolicy(),
 				func(context.Context, *mcp.CallToolRequest, mcpauth.Grant, guardedTestInput) (guardedTestOutput, error) {
 					t.Fatal("handler called with an invalid idempotency key")
 					return guardedTestOutput{}, nil
@@ -161,7 +160,7 @@ func TestGuardedToolIdempotencyExpires(t *testing.T) {
 	input := guardedTestInput{Value: "same", IdempotencyKey: "request-1"}
 
 	for range 2 {
-		if _, err := executeGuardedTool(context.Background(), nil, exec, "test_tool", guardedTestPolicy(), handler, input); err != nil {
+		if _, err := executeGuardedTool(t.Context(), nil, exec, "test_tool", guardedTestPolicy(), handler, input); err != nil {
 			t.Fatalf("executeGuardedTool() error = %v", err)
 		}
 		now = now.Add(idempotencyRetention)
@@ -188,10 +187,10 @@ func TestGuardedToolPreflightFailureIsNotCached(t *testing.T) {
 	}
 	input := guardedTestInput{Value: "same", IdempotencyKey: "request-1"}
 
-	if _, err := executeGuardedTool(context.Background(), nil, exec, "test_tool", policy, handler, input); ErrorCode(err) != "invalid_request" {
+	if _, err := executeGuardedTool(t.Context(), nil, exec, "test_tool", policy, handler, input); ErrorCode(err) != "invalid_request" {
 		t.Fatalf("first executeGuardedTool() error = %v", err)
 	}
-	if _, err := executeGuardedTool(context.Background(), nil, exec, "test_tool", policy, handler, input); err != nil {
+	if _, err := executeGuardedTool(t.Context(), nil, exec, "test_tool", policy, handler, input); err != nil {
 		t.Fatalf("second executeGuardedTool() error = %v", err)
 	}
 	if got := calls.Load(); got != 1 {
@@ -210,7 +209,7 @@ func TestGuardedToolHandlerErrorIsCached(t *testing.T) {
 	input := guardedTestInput{Value: "same", IdempotencyKey: "request-1"}
 
 	for range 2 {
-		_, err := executeGuardedTool(context.Background(), nil, exec, "test_tool", guardedTestPolicy(), handler, input)
+		_, err := executeGuardedTool(t.Context(), nil, exec, "test_tool", guardedTestPolicy(), handler, input)
 		if !errors.Is(err, errHandler) {
 			t.Fatalf("executeGuardedTool() error = %v, want handler error", err)
 		}
@@ -237,9 +236,9 @@ func TestGuardedToolPanicIsNotCached(t *testing.T) {
 				t.Error("executeGuardedTool() did not propagate handler panic")
 			}
 		}()
-		_, _ = executeGuardedTool(context.Background(), nil, exec, "test_tool", guardedTestPolicy(), handler, input)
+		_, _ = executeGuardedTool(t.Context(), nil, exec, "test_tool", guardedTestPolicy(), handler, input)
 	}()
-	out, err := executeGuardedTool(context.Background(), nil, exec, "test_tool", guardedTestPolicy(), handler, input)
+	out, err := executeGuardedTool(t.Context(), nil, exec, "test_tool", guardedTestPolicy(), handler, input)
 	if err != nil {
 		t.Fatalf("second executeGuardedTool() error = %v", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,15 +103,21 @@ func writeIdentity(path string, data []byte) error {
 	temporary := file.Name()
 	defer func() { _ = os.Remove(temporary) }()
 	if err := file.Chmod(0o600); err != nil {
-		_ = file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close device identity: %w", closeErr))
+		}
 		return fmt.Errorf("protect device identity: %w", err)
 	}
 	if _, err := file.Write(data); err != nil {
-		_ = file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close device identity: %w", closeErr))
+		}
 		return fmt.Errorf("write device identity: %w", err)
 	}
 	if err := file.Sync(); err != nil {
-		_ = file.Close()
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close device identity: %w", closeErr))
+		}
 		return fmt.Errorf("sync device identity: %w", err)
 	}
 	if err := file.Close(); err != nil {
@@ -131,7 +138,9 @@ func syncIdentityDirectory(path string) error {
 		return fmt.Errorf("open device identity directory: %w", err)
 	}
 	if err := dir.Sync(); err != nil {
-		_ = dir.Close()
+		if closeErr := dir.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close device identity directory: %w", closeErr))
+		}
 		return fmt.Errorf("sync device identity directory: %w", err)
 	}
 	if err := dir.Close(); err != nil {
@@ -160,11 +169,7 @@ func newIdentity(publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey, hos
 	}
 }
 
-type fingerprintWriter interface {
-	Write([]byte) (int, error)
-}
-
-func writeFingerprintComponent(dst fingerprintWriter, value []byte) {
+func writeFingerprintComponent(dst hash.Hash, value []byte) {
 	var size [4]byte
 	binary.BigEndian.PutUint32(size[:], uint32(len(value)))
 	_, _ = dst.Write(size[:])

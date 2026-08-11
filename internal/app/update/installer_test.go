@@ -3,7 +3,7 @@ package update
 import (
 	"bytes"
 	"compress/gzip"
-	"context"
+
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -70,7 +70,7 @@ func TestApplyAndPendingRecovery(t *testing.T) {
 		Manifest: Manifest{Version: "v2.0.0"},
 		Artifact: testRawArtifact(newBinary),
 	}
-	if err := Apply(context.Background(), executable, release, bytes.NewReader(newBinary)); err != nil {
+	if err := Apply(t.Context(), executable, release, bytes.NewReader(newBinary)); err != nil {
 		t.Fatalf("Apply() error = %v", err)
 	}
 	if restored, err := RecoverPending(executable); err != nil || restored {
@@ -96,7 +96,7 @@ func TestMarkHealthyRemovesBackup(t *testing.T) {
 	if err := os.WriteFile(executable, oldBinary, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := Apply(context.Background(), executable, Release{
+	if err := Apply(t.Context(), executable, Release{
 		Verified: true, Manifest: Manifest{Version: "v2.0.0"},
 		Artifact: testRawArtifact(newBinary),
 	}, bytes.NewReader(newBinary)); err != nil {
@@ -123,7 +123,7 @@ func TestMarkHealthyIgnoresUpdateNotStartedYet(t *testing.T) {
 	if err := os.WriteFile(executable, oldBinary, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := Apply(context.Background(), executable, Release{
+	if err := Apply(t.Context(), executable, Release{
 		Verified: true, Manifest: Manifest{Version: "v2.0.0"},
 		Artifact: testRawArtifact(newBinary),
 	}, bytes.NewReader(newBinary)); err != nil {
@@ -213,7 +213,7 @@ func TestApplyKeepsCurrentExecutableOnValidationFailure(t *testing.T) {
 			artifact := testRawArtifact([]byte("binary"))
 			artifact.Size = tt.size
 			artifact.SHA256 = tt.checksum
-			err := Apply(context.Background(), executable, Release{
+			err := Apply(t.Context(), executable, Release{
 				Verified: true,
 				Manifest: Manifest{Version: "v2.0.0"},
 				Artifact: artifact,
@@ -246,7 +246,7 @@ func TestApplyGzipArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, archive := testGzipArtifact(t, newBinary)
-	if err := Apply(context.Background(), executable, Release{
+	if err := Apply(t.Context(), executable, Release{
 		Verified: true,
 		Manifest: Manifest{Version: "v2.0.0"},
 		Artifact: artifact,
@@ -330,7 +330,7 @@ func TestApplyRejectsInvalidGzipArtifact(t *testing.T) {
 			if err := os.WriteFile(executable, oldBinary, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			err := Apply(context.Background(), executable, Release{
+			err := Apply(t.Context(), executable, Release{
 				Verified: true,
 				Manifest: Manifest{Version: "v2.0.0"},
 				Artifact: tt.artifact,

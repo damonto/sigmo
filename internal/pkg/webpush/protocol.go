@@ -145,16 +145,7 @@ func decodeSubscriptionKey(value string) ([]byte, error) {
 	return base64.RawURLEncoding.DecodeString(value)
 }
 
-func buildPushRequest(
-	ctx context.Context,
-	endpoint string,
-	payload []byte,
-	keys subscriptionKeys,
-	vapidKey *ecdsa.PrivateKey,
-	ttl int,
-	priority urgency,
-	now time.Time,
-) (*http.Request, error) {
+func buildPushRequest(ctx context.Context, endpoint string, payload []byte, keys subscriptionKeys, vapidKey *ecdsa.PrivateKey, ttl int, priority urgency, now time.Time) (*http.Request, error) {
 	body, err := encryptNotification(payload, keys, rand.Reader)
 	if err != nil {
 		return nil, err
@@ -187,12 +178,7 @@ func encryptNotification(payload []byte, keys subscriptionKeys, random io.Reader
 	return encryptNotificationWithKey(payload, keys, localPrivateKey, salt)
 }
 
-func encryptNotificationWithKey(
-	payload []byte,
-	keys subscriptionKeys,
-	localPrivateKey *ecdh.PrivateKey,
-	salt []byte,
-) ([]byte, error) {
+func encryptNotificationWithKey(payload []byte, keys subscriptionKeys, localPrivateKey *ecdh.PrivateKey, salt []byte) ([]byte, error) {
 	if len(payload)+17 > recordSize {
 		return nil, fmt.Errorf("push payload is %d bytes, maximum is %d", len(payload), recordSize-17)
 	}
@@ -240,13 +226,7 @@ func encryptNotificationWithKey(
 	return append(header, ciphertext...), nil
 }
 
-func vapidAuthorization(
-	endpoint string,
-	subject string,
-	key *ecdsa.PrivateKey,
-	expiresAt time.Time,
-	random io.Reader,
-) (string, error) {
+func vapidAuthorization(endpoint string, subject string, key *ecdsa.PrivateKey, expiresAt time.Time, random io.Reader) (string, error) {
 	if key == nil {
 		return "", errors.New("VAPID private key is required")
 	}

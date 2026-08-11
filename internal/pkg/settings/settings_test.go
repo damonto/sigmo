@@ -1,7 +1,6 @@
 package settings
 
 import (
-	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -120,7 +119,7 @@ func TestProxySettings(t *testing.T) {
 func TestStorePersistsSettings(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := openTestStore(t)
 	store, err := NewStore(ctx, db)
 	if err != nil {
@@ -194,7 +193,7 @@ func TestStorePersistsSettings(t *testing.T) {
 func TestStoreDefaultsEmptyDatabase(t *testing.T) {
 	t.Parallel()
 
-	store, err := NewStore(context.Background(), openTestStore(t))
+	store, err := NewStore(t.Context(), openTestStore(t))
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
@@ -226,7 +225,7 @@ func TestStoreDefaultsEmptyDatabase(t *testing.T) {
 func TestStorePersistsExplicitUpdateSettings(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := openTestStore(t)
 	store, err := NewStore(ctx, db)
 	if err != nil {
@@ -262,7 +261,7 @@ func TestStorePersistsExplicitUpdateSettings(t *testing.T) {
 func TestStoreDefaultsLegacyAuthSettings(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := openTestStore(t)
 	legacy := struct {
 		AuthProviders []string `json:"authProviders"`
@@ -287,7 +286,7 @@ func TestStoreDefaultsLegacyAuthSettings(t *testing.T) {
 func TestNewStoreRequiresDatabase(t *testing.T) {
 	t.Parallel()
 
-	_, err := NewStore(context.Background(), nil)
+	_, err := NewStore(t.Context(), nil)
 	if err == nil {
 		t.Fatal("NewStore() error = nil, want storage error")
 	}
@@ -299,7 +298,7 @@ func TestNewStoreRequiresDatabase(t *testing.T) {
 func openTestStore(t *testing.T) *storage.Store {
 	t.Helper()
 
-	db, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	db, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)
 	}

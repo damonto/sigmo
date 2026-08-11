@@ -29,7 +29,7 @@ func TestDeviceMSISDNQMI(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			device := qmiSession{slot: 1, openClient: qmiClientOpener(t, 1, tt.client, nil)}
-			got, err := device.MSISDN(context.Background())
+			got, err := device.MSISDN(t.Context())
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("MSISDN() error = %v, want %v", err, tt.wantErr)
@@ -73,7 +73,7 @@ func TestEqualCATProfile(t *testing.T) {
 func TestDeviceUpdateMSISDNQMI(t *testing.T) {
 	client := &fakeQMIClient{fileAttributes: qcom.FileAttributes{RecordSize: 32}}
 	device := qmiSession{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
-	if err := device.UpdateMSISDN(context.Background(), "+12345"); err != nil {
+	if err := device.UpdateMSISDN(t.Context(), "+12345"); err != nil {
 		t.Fatalf("UpdateMSISDN() error = %v", err)
 	}
 	if client.writeRecord.Record != 1 || client.writeRecord.File.Session != qcom.SessionPrimaryGWProvisioning || !bytes.Equal(client.writeRecord.File.Path, qmiMSISDNFile.Path) {
@@ -142,7 +142,7 @@ func TestDeviceVoLTEStatusQMI(t *testing.T) {
 		},
 		{
 			name:    "invalid command",
-			err:     qcom.QMIErrorInvalidQmiCommand,
+			err:     qcom.QMIErrorInvalidQMICommand,
 			wantErr: ErrUnsupported,
 		},
 		{
@@ -170,7 +170,7 @@ func TestDeviceVoLTEStatusQMI(t *testing.T) {
 				openClient: qmiClientOpener(t, 1, client, nil),
 			}
 
-			got, err := device.VoLTEStatus(context.Background())
+			got, err := device.VoLTEStatus(t.Context())
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("VoLTEStatus() error = %v, want %v", err, tt.wantErr)
@@ -222,7 +222,7 @@ func TestDevicePacketServiceStatusQMI(t *testing.T) {
 			client := &fakeQMIClient{nasServingSystem: tt.serving, nasServingSystemErr: tt.err}
 			device := qmiSession{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 
-			got, err := device.PacketServiceStatus(context.Background())
+			got, err := device.PacketServiceStatus(t.Context())
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("PacketServiceStatus() error = %v, want %v", err, tt.wantErr)
@@ -248,14 +248,14 @@ func TestQMISessionUSIMUsesConfiguredQCOMOpener(t *testing.T) {
 		{
 			name: "USIM",
 			run: func(device *qmiSession) error {
-				_, err := device.USIM(context.Background())
+				_, err := device.USIM(t.Context())
 				return err
 			},
 		},
 		{
 			name: "USIM with CAT",
 			run: func(device *qmiSession) error {
-				_, err := device.USIMWithCAT(context.Background(), CATProfile{})
+				_, err := device.USIMWithCAT(t.Context(), CATProfile{})
 				return err
 			},
 		},
@@ -297,14 +297,14 @@ func TestQMISessionRejectsUSIMAfterClose(t *testing.T) {
 		{
 			name: "USIM",
 			run: func(session *qmiSession) error {
-				_, err := session.USIM(context.Background())
+				_, err := session.USIM(t.Context())
 				return err
 			},
 		},
 		{
 			name: "USIM with CAT",
 			run: func(session *qmiSession) error {
-				_, err := session.USIMWithCAT(context.Background(), CATProfile{})
+				_, err := session.USIMWithCAT(t.Context(), CATProfile{})
 				return err
 			},
 		},
@@ -347,7 +347,7 @@ func TestOpenSessionReusesQMIClientUntilClose(t *testing.T) {
 	}
 
 	for range 2 {
-		if _, err := session.PacketServiceStatus(context.Background()); err != nil {
+		if _, err := session.PacketServiceStatus(t.Context()); err != nil {
 			t.Fatalf("PacketServiceStatus() error = %v", err)
 		}
 	}
@@ -366,7 +366,7 @@ func TestOpenSessionReusesQMIClientUntilClose(t *testing.T) {
 	if closeCalls := countCalls(client.calls, "close"); closeCalls != 1 {
 		t.Fatalf("client close calls = %d, want 1", closeCalls)
 	}
-	if _, err := session.PacketServiceStatus(context.Background()); err == nil {
+	if _, err := session.PacketServiceStatus(t.Context()); err == nil {
 		t.Fatal("PacketServiceStatus() after Close error = nil, want error")
 	}
 }
@@ -392,13 +392,13 @@ func TestOpenSessionReopensQMIClientAfterTerminalError(t *testing.T) {
 		return client, nil
 	}
 
-	if _, err := session.PacketServiceStatus(context.Background()); !errors.Is(err, transportErr) {
+	if _, err := session.PacketServiceStatus(t.Context()); !errors.Is(err, transportErr) {
 		t.Fatalf("PacketServiceStatus(first) error = %v, want %v", err, transportErr)
 	}
 	if closeCalls := countCalls(first.calls, "close"); closeCalls != 1 {
 		t.Fatalf("first client close calls = %d, want 1", closeCalls)
 	}
-	status, err := session.PacketServiceStatus(context.Background())
+	status, err := session.PacketServiceStatus(t.Context())
 	if err != nil {
 		t.Fatalf("PacketServiceStatus(second) error = %v", err)
 	}
@@ -489,7 +489,7 @@ func TestDeviceIMSProfileQMI(t *testing.T) {
 			}
 			device := qmiSession{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 
-			got, err := device.IMSProfile(context.Background())
+			got, err := device.IMSProfile(t.Context())
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("IMSProfile() error = nil, want error")
@@ -526,7 +526,7 @@ func TestDeviceIMSSTestModeQMI(t *testing.T) {
 			client := &fakeQMIClient{imssTestMode: tt.enabled, imssTestModeErr: tt.err}
 			device := qmiSession{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 
-			got, err := device.IMSSTestMode(context.Background())
+			got, err := device.IMSSTestMode(t.Context())
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("IMSSTestMode() error = %v, want %v", err, tt.wantErr)
@@ -566,7 +566,7 @@ func TestDeviceSetIMSSTestModeQMI(t *testing.T) {
 			client := &fakeQMIClient{setIMSSTestModeErr: tt.err}
 			device := qmiSession{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
 
-			err := device.SetIMSSTestMode(context.Background(), tt.enabled)
+			err := device.SetIMSSTestMode(t.Context(), tt.enabled)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("SetIMSSTestMode() error = %v, want %v", err, tt.wantErr)
@@ -747,7 +747,7 @@ func TestQMIDeviceSIMState(t *testing.T) {
 				openClient: qmiClientOpener(t, tt.openSlot, tt.client, nil),
 			}
 
-			got, err := device.SIMState(context.Background(), tt.target)
+			got, err := device.SIMState(t.Context(), tt.target)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("SIMState() error = %v, want %v", err, tt.wantErr)
@@ -843,7 +843,7 @@ func TestQMIDeviceActivateProvisioningIfSIMMissing(t *testing.T) {
 				imei:       tt.cfg.IMEI,
 				openClient: qmiClientOpener(t, slot, tt.client, nil),
 			}
-			err := device.ActivateProvisioningIfSIMMissing(context.Background())
+			err := device.ActivateProvisioningIfSIMMissing(t.Context())
 			if tt.wantErr != nil && err == nil {
 				t.Fatalf("ActivateProvisioningIfSIMMissing() error = nil, want %v", tt.wantErr)
 			}
@@ -940,7 +940,7 @@ func TestWatchQMIRefreshFallbacks(t *testing.T) {
 		},
 		{
 			name:         "unsupported",
-			allErrs:      []error{qcom.QMIErrorNotSupported, qcom.QMIErrorInvalidQmiCommand},
+			allErrs:      []error{qcom.QMIErrorNotSupported, qcom.QMIErrorInvalidQMICommand},
 			filesErr:     qcom.QMIErrorDeviceUnsupported,
 			wantSessions: []qcom.Session{qcom.SessionCardSlot1, qcom.SessionPrimaryGWProvisioning},
 			wantFiles:    true,
@@ -998,7 +998,7 @@ func TestWatchSIMRefreshReopensClientAfterReset(t *testing.T) {
 		return client, nil
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	events, err := device.WatchSIMRefresh(ctx)
 	if err != nil {
@@ -1016,7 +1016,7 @@ func TestWatchSIMRefreshReopensClientAfterReset(t *testing.T) {
 		t.Fatalf("first client close calls = %d, want 1", closeCalls)
 	}
 
-	state, err := device.SIMState(context.Background(), Target{Slot: 1})
+	state, err := device.SIMState(t.Context(), Target{Slot: 1})
 	if err != nil {
 		t.Fatalf("SIMState() after refresh error = %v", err)
 	}

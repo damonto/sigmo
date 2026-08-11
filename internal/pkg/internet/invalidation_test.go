@@ -1,7 +1,6 @@
 package internet
 
 import (
-	"context"
 	"errors"
 	"slices"
 	"testing"
@@ -40,10 +39,10 @@ func TestInvalidateModemGenerationIgnoresStaleOwner(t *testing.T) {
 	connector.qmapConnections["modem-1"] = qmap
 	connector.qualcomm410States["modem-1"] = state
 
-	if err := connector.invalidateModemGeneration(context.Background(), "modem-1", 7); err != nil {
+	if err := connector.invalidateModemGeneration(t.Context(), "modem-1", 7); err != nil {
 		t.Fatalf("invalidateModemGeneration() error = %v", err)
 	}
-	if err := connector.invalidateModemGeneration(context.Background(), "modem-1", 7); err != nil {
+	if err := connector.invalidateModemGeneration(t.Context(), "modem-1", 7); err != nil {
 		t.Fatalf("second invalidateModemGeneration() error = %v", err)
 	}
 	if got := connector.connections["modem-1"]; got.modemGeneration != 8 || got.prefs.APN != "new" {
@@ -86,7 +85,7 @@ func TestInvalidateModemGenerationReleasesMatchingResources(t *testing.T) {
 	connector.preferences["modem-1"] = prefs
 	connector.qualcomm410States["modem-1"] = qualcomm410State{generation: 7, selected: true, lease: lease}
 
-	if err := connector.invalidateModemGeneration(context.Background(), "modem-1", 7); err != nil {
+	if err := connector.invalidateModemGeneration(t.Context(), "modem-1", 7); err != nil {
 		t.Fatalf("invalidateModemGeneration() error = %v", err)
 	}
 	if _, ok := connector.connections["modem-1"]; ok {
@@ -132,7 +131,7 @@ func TestInvalidateModemGenerationJoinsReleaseErrors(t *testing.T) {
 		lease:      &invalidationLeaseProbe{closeErr: errLink},
 	}
 
-	err = connector.invalidateModemGeneration(context.Background(), "modem-1", 7)
+	err = connector.invalidateModemGeneration(t.Context(), "modem-1", 7)
 	if !errors.Is(err, errLink) || !errors.Is(err, errMux) {
 		t.Fatalf("invalidateModemGeneration() error = %v, want lease and mux errors", err)
 	}

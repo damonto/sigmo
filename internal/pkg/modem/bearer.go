@@ -97,7 +97,7 @@ func (m *Modem) ConnectBearer(ctx context.Context, prefs BearerProperties) (*Bea
 	prefs.IPType = normalizeIPType(prefs.IPType)
 	prefs.Username = strings.TrimSpace(prefs.Username)
 	prefs.AllowedAuth = normalizeAuthenticationName(prefs.AllowedAuth)
-	return m.bearerAdapter(core, prefs), nil
+	return m.bearerAdapter(ctx, core, prefs), nil
 }
 
 func (m *Modem) DisconnectBearer(ctx context.Context, id uint64) error {
@@ -122,7 +122,7 @@ func (m *Modem) Bearers(ctx context.Context) ([]*Bearer, error) {
 	result := make([]*Bearer, 0)
 	active := make(map[uint64]struct{})
 	for _, core := range m.core.Bearers() {
-		bearer := m.bearerAdapter(core, bearerPropertiesFromInfo(core.Info()))
+		bearer := m.bearerAdapter(ctx, core, bearerPropertiesFromInfo(core.Info()))
 		active[bearer.Path()] = struct{}{}
 		result = append(result, bearer)
 	}
@@ -130,7 +130,7 @@ func (m *Modem) Bearers(ctx context.Context) ([]*Bearer, error) {
 	return result, nil
 }
 
-func (m *Modem) Bearer(_ context.Context, id uint64) (*Bearer, bool) {
+func (m *Modem) Bearer(ctx context.Context, id uint64) (*Bearer, bool) {
 	if m == nil || m.core == nil {
 		return nil, false
 	}
@@ -138,10 +138,10 @@ func (m *Modem) Bearer(_ context.Context, id uint64) (*Bearer, bool) {
 	if !ok {
 		return nil, false
 	}
-	return m.bearerAdapter(core, bearerPropertiesFromInfo(core.Info())), true
+	return m.bearerAdapter(ctx, core, bearerPropertiesFromInfo(core.Info())), true
 }
 
-func (m *Modem) bearerAdapter(core *wwanmodem.Bearer, properties BearerProperties) *Bearer {
+func (m *Modem) bearerAdapter(ctx context.Context, core *wwanmodem.Bearer, properties BearerProperties) *Bearer {
 	if m == nil || core == nil {
 		return nil
 	}
@@ -157,7 +157,7 @@ func (m *Modem) bearerAdapter(core *wwanmodem.Bearer, properties BearerPropertie
 		return existing
 	}
 	b := &Bearer{modem: m, core: core, infoValue: info, properties: properties}
-	watchCtx, cancel := context.WithCancel(context.Background())
+	watchCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	b.cancel = cancel
 	b.wg.Add(1)
 	m.bearers[info.ID] = b

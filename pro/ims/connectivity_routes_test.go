@@ -51,7 +51,7 @@ func TestSelectPreferredAccessPrefersWiFiCalling(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			wifiCalling := &routedAccessProbe{connectedValue: tt.wifiConnected}
 			volte := &routedAccessProbe{connectedValue: tt.volteConnected}
-			got, err := selectPreferredAccess(context.Background(), &mmodem.Modem{}, wifiCalling, volte)
+			got, err := selectPreferredAccess(t.Context(), &mmodem.Modem{}, wifiCalling, volte)
 			if err != nil {
 				t.Fatalf("selectPreferredAccess() error = %v", err)
 			}
@@ -72,7 +72,7 @@ func TestSelectPreferredAccessSkipsVoLTEWhenWiFiCallingConnected(t *testing.T) {
 	wifiCalling := &routedAccessProbe{connectedValue: true}
 	volte := &routedAccessProbe{err: statusErr}
 
-	got, err := selectPreferredAccess(context.Background(), &mmodem.Modem{}, wifiCalling, volte)
+	got, err := selectPreferredAccess(t.Context(), &mmodem.Modem{}, wifiCalling, volte)
 	if err != nil {
 		t.Fatalf("selectPreferredAccess() error = %v", err)
 	}
@@ -87,10 +87,10 @@ func TestSelectPreferredAccessSkipsVoLTEWhenWiFiCallingConnected(t *testing.T) {
 func TestConnectivityRoutesRejectIncompleteFacade(t *testing.T) {
 	connectivity := &Connectivity{}
 
-	if _, err := connectivity.preferredAccess(context.Background(), &mmodem.Modem{}); !errors.Is(err, ErrUnavailable) {
+	if _, err := connectivity.preferredAccess(t.Context(), &mmodem.Modem{}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("preferredAccess() error = %v, want %v", err, ErrUnavailable)
 	}
-	if err := connectivity.MessageRoute().ApplyPendingSMSStatus(context.Background(), storage.Message{}); !errors.Is(err, ErrUnavailable) {
+	if err := connectivity.MessageRoute().ApplyPendingSMSStatus(t.Context(), storage.Message{}); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("ApplyPendingSMSStatus() error = %v, want %v", err, ErrUnavailable)
 	}
 }

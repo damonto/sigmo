@@ -14,8 +14,8 @@ func TestMSISDNUpdate(t *testing.T) {
 	transientUpdateErr := errors.New("control port disappeared")
 	current := &mmodem.Modem{
 		EquipmentIdentifier: "354015820228039",
-		PrimarySimSlot:      1,
-		Sim:                 &mmodem.SIM{Identifier: "8986000000000000000"},
+		PrimarySIMSlot:      1,
+		SIM:                 &mmodem.SIM{Identifier: "8986000000000000000"},
 		Ports: []mmodem.ModemPort{
 			{
 				PortType: wwanmodem.PortAT,
@@ -91,7 +91,7 @@ func TestMSISDNUpdate(t *testing.T) {
 				},
 			}
 
-			err := service.Update(context.Background(), current, tt.number)
+			err := service.Update(t.Context(), current, tt.number)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("Update() error = %v, want %v", err, tt.wantErr)
@@ -126,7 +126,7 @@ func TestMSISDNUpdateUsesNativeDevice(t *testing.T) {
 			return &mmodem.Modem{}, nil
 		},
 	}
-	if err := service.Update(context.Background(), &mmodem.Modem{PrimarySimSlot: 1}, "+15551234567"); err != nil {
+	if err := service.Update(t.Context(), &mmodem.Modem{PrimarySIMSlot: 1}, "+15551234567"); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 	if device.number != "+15551234567" {

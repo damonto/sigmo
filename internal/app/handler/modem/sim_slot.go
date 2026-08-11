@@ -8,10 +8,10 @@ import (
 )
 
 var (
-	errSimSlotRequired      = errors.New("SIM slot is required")
-	errSimSlotsUnavailable  = errors.New("sim slots not available")
-	errSimSlotNotFound      = errors.New("sim slot not found")
-	errSimSlotAlreadyActive = errors.New("sim slot already active")
+	errSIMSlotRequired      = errors.New("SIM slot is required")
+	errSIMSlotsUnavailable  = errors.New("sim slots not available")
+	errSIMSlotNotFound      = errors.New("sim slot not found")
+	errSIMSlotAlreadyActive = errors.New("sim slot already active")
 )
 
 type simSlot struct {
@@ -29,20 +29,20 @@ func (s *simSlot) Switch(ctx context.Context, modem *mmodem.Modem, slotIndex uin
 
 func (s *simSlot) targetIndex(modem *mmodem.Modem, slotIndex uint32) (uint32, error) {
 	if slotIndex == 0 {
-		return 0, errSimSlotRequired
+		return 0, errSIMSlotRequired
 	}
 	snapshot := modem.Snapshot()
 	if len(snapshot.Slots) == 0 {
-		return 0, errSimSlotsUnavailable
+		return 0, errSIMSlotsUnavailable
 	}
 	for _, sim := range snapshot.Slots {
 		if sim == nil || sim.Slot != slotIndex {
 			continue
 		}
 		if sim.Active {
-			return 0, errSimSlotAlreadyActive
+			return 0, errSIMSlotAlreadyActive
 		}
 		return slotIndex, nil
 	}
-	return 0, errSimSlotNotFound
+	return 0, errSIMSlotNotFound
 }

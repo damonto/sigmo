@@ -62,7 +62,7 @@ func TestBrokerCreateRejectsUnsafeURL(t *testing.T) {
 	broker := New(Config{})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := broker.Create(context.Background(), Request{URL: tt.raw}); err == nil {
+			if _, err := broker.Create(t.Context(), Request{URL: tt.raw}); err == nil {
 				t.Fatal("Create() error is nil")
 			}
 		})
@@ -74,7 +74,7 @@ func TestBrokerUsesRequestLookupNetIP(t *testing.T) {
 
 	var network, host string
 	broker := New(Config{})
-	_, err := broker.Create(context.Background(), Request{
+	_, err := broker.Create(t.Context(), Request{
 		URL: "https://carrier.example/setup",
 		LookupNetIP: func(_ context.Context, gotNetwork, gotHost string) ([]netip.Addr, error) {
 			network = gotNetwork
@@ -115,7 +115,7 @@ func TestValidatedDialContextPinsResolvedAddress(t *testing.T) {
 				},
 			)
 
-			if _, err := dial(context.Background(), "tcp", "carrier.example:443"); !errors.Is(err, dialErr) {
+			if _, err := dial(t.Context(), "tcp", "carrier.example:443"); !errors.Is(err, dialErr) {
 				t.Fatalf("DialContext() error = %v, want %v", err, dialErr)
 			}
 			if network != tt.wantNetwork || address != tt.wantAddress {
@@ -137,7 +137,7 @@ func TestSessionRejectsDNSRebindingAtDial(t *testing.T) {
 		},
 	}
 	broker := New(Config{})
-	session, err := broker.Create(context.Background(), Request{
+	session, err := broker.Create(t.Context(), Request{
 		URL:        "http://carrier.example/setup",
 		HTTPClient: &http.Client{Transport: transport},
 		LookupNetIP: func(context.Context, string, string) ([]netip.Addr, error) {
@@ -170,7 +170,7 @@ func TestSessionUsesRequestHTTPClient(t *testing.T) {
 
 	transport := &websheetTransportProbe{}
 	broker := New(Config{AllowPrivateHosts: true})
-	session, err := broker.Create(context.Background(), Request{
+	session, err := broker.Create(t.Context(), Request{
 		URL:        "https://carrier.example/setup",
 		HTTPClient: &http.Client{Transport: transport},
 	})
@@ -196,7 +196,7 @@ func TestSessionLimitsRedirects(t *testing.T) {
 
 	transport := &websheetRedirectTransport{}
 	broker := New(Config{AllowPrivateHosts: true})
-	session, err := broker.Create(context.Background(), Request{
+	session, err := broker.Create(t.Context(), Request{
 		URL:        "https://carrier.example/setup",
 		HTTPClient: &http.Client{Transport: transport},
 	})
@@ -218,13 +218,13 @@ func TestSessionCallback(t *testing.T) {
 	t.Parallel()
 
 	broker := New(Config{AllowPrivateHosts: true})
-	session, err := broker.Create(context.Background(), Request{URL: "https://example.com/websheet"})
+	session, err := broker.Create(t.Context(), Request{URL: "https://example.com/websheet"})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 
 	session.Callback(Callback{Event: "finishFlow", NextAction: "AcquireConfiguration"})
-	callback, err := session.WaitCallback(context.Background())
+	callback, err := session.WaitCallback(t.Context())
 	if err != nil {
 		t.Fatalf("WaitCallback() error = %v", err)
 	}
@@ -242,7 +242,7 @@ func TestBrokerExpiresSessions(t *testing.T) {
 			return now
 		},
 	})
-	session, err := broker.Create(context.Background(), Request{URL: "https://example.com/websheet"})
+	session, err := broker.Create(t.Context(), Request{URL: "https://example.com/websheet"})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -278,7 +278,7 @@ func TestSessionMethodUsesContentType(t *testing.T) {
 	broker := New(Config{AllowPrivateHosts: true})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			session, err := broker.Create(context.Background(), tt.req)
+			session, err := broker.Create(t.Context(), tt.req)
 			if err != nil {
 				t.Fatalf("Create() error = %v", err)
 			}
@@ -302,7 +302,7 @@ func TestProxyRewritesHTMLAndStripsFrameHeaders(t *testing.T) {
 	defer carrier.Close()
 
 	broker := New(Config{AllowPrivateHosts: true})
-	session, err := broker.Create(context.Background(), Request{URL: carrier.URL})
+	session, err := broker.Create(t.Context(), Request{URL: carrier.URL})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -361,7 +361,7 @@ func TestProxyRewritesHTMLWithRedirectTargetBase(t *testing.T) {
 	defer carrier.Close()
 
 	broker := New(Config{AllowPrivateHosts: true})
-	session, err := broker.Create(context.Background(), Request{URL: carrier.URL + "/start"})
+	session, err := broker.Create(t.Context(), Request{URL: carrier.URL + "/start"})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -387,7 +387,7 @@ func TestProxyRewritesHTMLUsingCarrierBaseElement(t *testing.T) {
 	defer carrier.Close()
 
 	broker := New(Config{AllowPrivateHosts: true})
-	session, err := broker.Create(context.Background(), Request{URL: carrier.URL + "/softphone/primary/reseller/r017"})
+	session, err := broker.Create(t.Context(), Request{URL: carrier.URL + "/softphone/primary/reseller/r017"})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -420,7 +420,7 @@ func TestProxyDoesNotInjectBridgeIntoXHRHTML(t *testing.T) {
 	defer carrier.Close()
 
 	broker := New(Config{AllowPrivateHosts: true})
-	session, err := broker.Create(context.Background(), Request{URL: carrier.URL})
+	session, err := broker.Create(t.Context(), Request{URL: carrier.URL})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -464,7 +464,7 @@ func TestProxyNormalizesCarrierRequestHeaders(t *testing.T) {
 			defer carrier.Close()
 
 			broker := New(Config{AllowPrivateHosts: true})
-			session, err := broker.Create(context.Background(), Request{URL: carrier.URL})
+			session, err := broker.Create(t.Context(), Request{URL: carrier.URL})
 			if err != nil {
 				t.Fatalf("Create() error = %v", err)
 			}

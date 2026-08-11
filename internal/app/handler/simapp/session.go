@@ -74,8 +74,10 @@ func (s *wsSession) disconnect() {
 }
 
 func (s *wsSession) readLoop(cancel context.CancelFunc) {
-	defer cancel()
-	defer s.disconnect()
+	defer func() {
+		cancel()
+		s.disconnect()
+	}()
 	for {
 		var msg wsClientMessage
 		if err := s.conn.ReadJSON(&msg); err != nil {
@@ -234,7 +236,7 @@ func (s *wsSession) beginPending(kind pendingKind) func() {
 	}
 }
 
-func drainClientMessages(ch chan wsClientMessage) {
+func drainClientMessages(ch <-chan wsClientMessage) {
 	for {
 		select {
 		case <-ch:

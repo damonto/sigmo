@@ -24,7 +24,7 @@ func (r *callRecords) List(ctx context.Context, modem *mmodem.Modem, query strin
 }
 
 func (r *callRecords) callForAction(ctx context.Context, modem *mmodem.Modem, callID string) (storage.Call, error) {
-	call, err := r.store.GetCall(ctx, callID)
+	call, err := r.store.Call(ctx, callID)
 	if errors.Is(err, storage.ErrNotFound) {
 		return storage.Call{}, ErrCallNotFound
 	}

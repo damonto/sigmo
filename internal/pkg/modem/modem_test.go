@@ -122,7 +122,7 @@ func TestWithReservedSIMSlotKeepsReservationUntilWorkflowCompletes(t *testing.T)
 }
 
 func TestProfileIDUsesCachedSIMWithoutTransport(t *testing.T) {
-	modem := &Modem{Sim: &SIM{Identifier: " 8901000000000000001 "}}
+	modem := &Modem{SIM: &SIM{Identifier: " 8901000000000000001 "}}
 	got, err := modem.ProfileID(t.Context())
 	if err != nil {
 		t.Fatalf("ProfileID() error = %v", err)
@@ -133,7 +133,7 @@ func TestProfileIDUsesCachedSIMWithoutTransport(t *testing.T) {
 }
 
 func TestConsumeModemStreamRejectsNilStream(t *testing.T) {
-	if err := consumeModemStream(context.Background(), nil, func(int) {}); err == nil {
+	if err := consumeModemStream(t.Context(), nil, func(int) {}); err == nil {
 		t.Fatal("consumeModemStream() error = nil, want nil stream error")
 	}
 }
@@ -147,7 +147,7 @@ func TestTerminalRuntimeError(t *testing.T) {
 		{name: "cdc-wdm disconnect", err: fmt.Errorf("watch status: %w", cdcwdm.ErrDisconnected), want: true},
 		{name: "QMI terminal read", err: &qmitransport.TransportError{Err: errors.New("malformed QMUX frame")}, want: true},
 		{name: "transient request timeout", err: fmt.Errorf("watch status: %w", context.DeadlineExceeded), want: false},
-		{name: "QMI client IDs exhausted", err: fmt.Errorf("watch status: %w", qcom.QMIErrorClientIdsExhausted), want: true},
+		{name: "QMI client IDs exhausted", err: fmt.Errorf("watch status: %w", qcom.QMIErrorClientIDsExhausted), want: true},
 		{name: "ordinary QMI service error", err: qcom.QMIErrorNoNetworkFound, want: false},
 		{name: "request canceled", err: context.Canceled, want: false},
 	}
@@ -369,8 +369,8 @@ func TestApplySIMInfoMergesSparseMetadataForSameCard(t *testing.T) {
 			if !slices.Equal(snapshot.SIM.ATR, tt.wantATR) {
 				t.Fatalf("ATR = %x, want %x", snapshot.SIM.ATR, tt.wantATR)
 			}
-			if snapshot.SIM.Imsi != tt.wantIMSI {
-				t.Fatalf("IMSI = %q, want %q", snapshot.SIM.Imsi, tt.wantIMSI)
+			if snapshot.SIM.IMSI != tt.wantIMSI {
+				t.Fatalf("IMSI = %q, want %q", snapshot.SIM.IMSI, tt.wantIMSI)
 			}
 			if snapshot.Number != tt.wantNumber {
 				t.Fatalf("number = %q, want %q", snapshot.Number, tt.wantNumber)
@@ -403,10 +403,10 @@ func TestApplySIMInfoPreservesSlotHardwareDuringProfileTransition(t *testing.T) 
 	if snapshot.SIM == nil {
 		t.Fatal("active SIM = nil, want transitional slot state")
 	}
-	if !slices.Equal(snapshot.SIM.ATR, atr) || snapshot.SIM.Eid != "89049032000000000000000000000001" {
-		t.Fatalf("slot hardware = ATR %X EID %q, want preserved eUICC identity", snapshot.SIM.ATR, snapshot.SIM.Eid)
+	if !slices.Equal(snapshot.SIM.ATR, atr) || snapshot.SIM.EID != "89049032000000000000000000000001" {
+		t.Fatalf("slot hardware = ATR %X EID %q, want preserved eUICC identity", snapshot.SIM.ATR, snapshot.SIM.EID)
 	}
-	if snapshot.SIM.Identifier != "" || snapshot.SIM.Imsi != "" || snapshot.SIM.OperatorName != "" || snapshot.Number != "" {
+	if snapshot.SIM.Identifier != "" || snapshot.SIM.IMSI != "" || snapshot.SIM.OperatorName != "" || snapshot.Number != "" {
 		t.Fatalf("profile metadata survived transition: SIM=%+v number=%q", snapshot.SIM, snapshot.Number)
 	}
 	if kind := snapshot.SIMKind(); kind != SIMKindEUICC {
@@ -419,8 +419,8 @@ func TestApplySIMInfoPreservesSlotHardwareDuringProfileTransition(t *testing.T) 
 		ICCID: "8901000000000000002",
 	})
 	snapshot = m.Snapshot()
-	if !slices.Equal(snapshot.SIM.ATR, atr) || snapshot.SIM.Eid != "89049032000000000000000000000001" {
-		t.Fatalf("new profile hardware = ATR %X EID %q, want preserved eUICC identity", snapshot.SIM.ATR, snapshot.SIM.Eid)
+	if !slices.Equal(snapshot.SIM.ATR, atr) || snapshot.SIM.EID != "89049032000000000000000000000001" {
+		t.Fatalf("new profile hardware = ATR %X EID %q, want preserved eUICC identity", snapshot.SIM.ATR, snapshot.SIM.EID)
 	}
 	if snapshot.SIM.Identifier != "8901000000000000002" || snapshot.Status.SIM != wwanmodem.SIMStateReady {
 		t.Fatalf("new profile state = SIM %+v status %v", snapshot.SIM, snapshot.Status.SIM)

@@ -3,6 +3,7 @@ package simapp
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -14,7 +15,7 @@ import (
 )
 
 const (
-	errorCodeSimApplicationFailed = "sim_application_failed"
+	errorCodeSIMApplicationFailed = "sim_application_failed"
 	simAppSessionMaxRetries       = 5
 )
 
@@ -43,7 +44,7 @@ func (h *Handler) Session(c *echo.Context) error {
 	ctx := c.Request().Context()
 	device, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeSimApplicationFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeSIMApplicationFailed)
 	}
 
 	conn, err := simAppWSUpgrader.Upgrade(c.Response(), c.Request(), nil)
@@ -133,7 +134,11 @@ func (h *Handler) runSessionAttempt(ctx context.Context, device *mmodem.Modem, s
 	}()
 
 	attemptCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
 
 	session.setProfileICCID(card.ICCID)
 	var cached *wsMenu
@@ -145,11 +150,13 @@ func (h *Handler) runSessionAttempt(ctx context.Context, device *mmodem.Modem, s
 		return true
 	}
 
-	go session.rootSelectionLoop(attemptCtx, envelopeRootSelector{sender: card.STK}, card.Ready)
+	wg.Go(func() {
+		session.rootSelectionLoop(attemptCtx, envelopeRootSelector{sender: card.STK}, card.Ready)
+	})
 	runErr := make(chan error, 1)
-	go func() {
+	wg.Go(func() {
 		runErr <- card.STK.Run(attemptCtx, session.callbacks())
-	}()
+	})
 
 	select {
 	case <-session.disconnectCh:

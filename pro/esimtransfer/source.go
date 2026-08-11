@@ -241,7 +241,7 @@ func (s *transferRunner) sourceModemProfiles(ctx context.Context, modem *mmodem.
 	if err != nil {
 		return nil, fmt.Errorf("discover source eUICC SEs: %w", err)
 	}
-	out := []sourceModemProfile{}
+	var out []sourceModemProfile
 	for _, se := range ses {
 		sourceLPA, err := s.lpaClients.Acquire(ctx, modem, se.ID)
 		if err != nil {
@@ -341,8 +341,8 @@ func activeProfile(profiles []*sgp22.ProfileInfo, iccid sgp22.ICCID) bool {
 	return false
 }
 
-func listCCIDReaders() ([]string, error) {
-	readers, err := ccid.ListReaders(context.Background())
+func listCCIDReaders(ctx context.Context) ([]string, error) {
+	readers, err := ccid.ListReaders(ctx)
 	if err != nil {
 		slog.Debug("list CCID readers", "error", err)
 		if ccidServiceUnavailable(err) {

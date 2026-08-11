@@ -27,7 +27,7 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 	if started {
 		return nil
 	}
-	runCtx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	devices, err := r.discover(ctx)
 	if err != nil {
 		cancel()
@@ -62,7 +62,7 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 				cancel()
 				return errors.Join(ctx.Err(), closeOpenedModems(opened))
 			}
-			if errors.Is(err, qcom.QMIErrorClientIdsExhausted) {
+			if errors.Is(err, qcom.QMIErrorClientIDsExhausted) {
 				r.advanceCIDRecoveryState(key)
 			}
 			slog.Warn("open discovered modem", "device", controlPortPath(device), "physical_path", key, "error", err)
@@ -274,7 +274,7 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 		}
 
 		slog.Warn("open changed modem", "device", controlPortPath(event.Device), "physical_path", key, "error", err)
-		if !errors.Is(err, qcom.QMIErrorClientIdsExhausted) {
+		if !errors.Is(err, qcom.QMIErrorClientIDsExhausted) {
 			return
 		}
 		state := r.advanceCIDRecoveryState(key)
@@ -289,7 +289,9 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		_ = replacement.Close()
+		if err := replacement.Close(); err != nil {
+			slog.Warn("close replacement modem after registry shutdown", "device", controlPortPath(event.Device), "error", err)
+		}
 		return
 	}
 	previousKey, previous := r.findReplacementLocked(key, replacement)
@@ -360,7 +362,7 @@ func (r *Registry) handleModemFailure(ctx context.Context, failure modemFailure)
 		return
 	}
 
-	clientIDsExhausted := errors.Is(failure.err, qcom.QMIErrorClientIdsExhausted)
+	clientIDsExhausted := errors.Is(failure.err, qcom.QMIErrorClientIDsExhausted)
 	recoverySuspended := clientIDsExhausted && r.advanceCIDRecoveryState(key) == cidRecoverySuspended
 	message := "modem transport stopped"
 	if clientIDsExhausted {

@@ -49,7 +49,7 @@ func TestNotifierSend(t *testing.T) {
 			},
 		}
 
-		if err := notifier.Send(context.Background(), notifyevent.OTPEvent{Code: "123456"}); err != nil {
+		if err := notifier.Send(t.Context(), notifyevent.OTPEvent{Code: "123456"}); err != nil {
 			t.Fatalf("Send() error = %v", err)
 		}
 
@@ -73,7 +73,7 @@ func TestNotifierSend(t *testing.T) {
 			},
 		}
 
-		if err := notifier.Send(context.Background(), notifyevent.OTPEvent{Code: "123456"}, "email", "missing"); err != nil {
+		if err := notifier.Send(t.Context(), notifyevent.OTPEvent{Code: "123456"}, "email", "missing"); err != nil {
 			t.Fatalf("Send() error = %v", err)
 		}
 		if !slices.Equal(called, []string{"email"}) {
@@ -93,7 +93,7 @@ func TestNotifierSend(t *testing.T) {
 			},
 		}
 
-		err := notifier.Send(context.Background(), notifyevent.OTPEvent{Code: "123456"})
+		err := notifier.Send(t.Context(), notifyevent.OTPEvent{Code: "123456"})
 		if err == nil {
 			t.Fatal("Send() error = nil, want joined error")
 		}
@@ -115,7 +115,7 @@ func TestNotifierSend(t *testing.T) {
 				}),
 			},
 		}
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
 		err := notifier.Send(ctx, notifyevent.OTPEvent{Code: "123456"})
@@ -178,7 +178,7 @@ func TestHTTPSend(t *testing.T) {
 		t.Fatalf("NewHTTP() error = %v", err)
 	}
 
-	if err := sender.Send(context.Background(), notifyevent.OTPEvent{Code: "654321"}); err != nil {
+	if err := sender.Send(t.Context(), notifyevent.OTPEvent{Code: "654321"}); err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
 	if got.Kind != notifyevent.KindOTP {

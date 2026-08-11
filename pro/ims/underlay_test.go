@@ -3,7 +3,6 @@
 package ims
 
 import (
-	"context"
 	"errors"
 	"net/netip"
 	"path/filepath"
@@ -44,7 +43,7 @@ func TestResolveWiFiCallingSettings(t *testing.T) {
 }
 
 func TestWiFiCallingSettingsStoreUnderlay(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -122,9 +121,7 @@ func TestNewModemUnderlayAllowsDynamicIPFamilies(t *testing.T) {
 		InterfaceName: "wwan0",
 		IPv4Addresses: []string{"10.0.0.2/30"},
 	}
-	underlay, err := newModemUnderlay(
-		context.Background(),
-		&fakeInternetRestorer{connection: connection},
+	underlay, err := newModemUnderlay(t.Context(), &fakeInternetRestorer{connection: connection},
 		&mmodem.Modem{EquipmentIdentifier: "modem-1"},
 	)
 	if err != nil {
@@ -152,7 +149,7 @@ func TestModemUnderlayRequiresConnectedInternet(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			internet := &fakeInternetRestorer{connection: tt.connection, currentErr: tt.currentErr}
 			underlay := &modemUnderlay{internet: internet, modem: &mmodem.Modem{EquipmentIdentifier: "modem-1"}}
-			_, _, err := underlay.current(context.Background())
+			_, _, err := underlay.current(t.Context())
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("current() error = %v, wantErr %v", err, tt.wantErr)
 			}

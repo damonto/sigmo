@@ -134,7 +134,7 @@ func (p *AMROctetAlignedPayload) UnmarshalBinary(payload []byte) error {
 	if len(payload) < 2 {
 		return ErrAMRPayloadShort
 	}
-	frames := []AMRFrame{}
+	var frames []AMRFrame
 	offset := 1
 	hasMore := true
 	for hasMore {
@@ -205,7 +205,7 @@ func (p *AMRBandwidthEfficientPayload) UnmarshalBinary(payload []byte) error {
 	if _, err := reader.readBits(4); err != nil {
 		return err
 	}
-	frames := []AMRFrame{}
+	var frames []AMRFrame
 	hasMore := true
 	for hasMore {
 		f, err := reader.readBits(1)
@@ -361,7 +361,7 @@ func (s *AMRStorage) UnmarshalBinary(data []byte) error {
 		return err
 	}
 	includeHeader := offset > 0
-	frames := []AMRFrame{}
+	var frames []AMRFrame
 	for offset < len(data) {
 		header := data[offset]
 		offset++
@@ -394,7 +394,7 @@ func (s *AMRStorage) ReadFrom(r io.Reader) (int64, error) {
 		return counter.n, err
 	}
 
-	frames := []AMRFrame{}
+	var frames []AMRFrame
 	for {
 		header, err := reader.ReadByte()
 		if errors.Is(err, io.EOF) {

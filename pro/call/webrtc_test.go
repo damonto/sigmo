@@ -568,7 +568,7 @@ func TestWebRTCSessionCloseIfNotConnected(t *testing.T) {
 			if tt.connect {
 				tt.session.bridge.markConnected()
 			}
-			got := tt.session.CloseIfNotConnected()
+			got := tt.session.CloseIfNotConnected(t.Context())
 			if got != tt.wantClosed {
 				t.Fatalf("CloseIfNotConnected() = %v, want %v", got, tt.wantClosed)
 			}

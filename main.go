@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -48,7 +49,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	err = server.Run(server.Config{
+	err = server.Run(context.Background(), server.Config{
 		Build:         info,
 		ListenAddress: listenAddress,
 		DBPath:        dbPath,

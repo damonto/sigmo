@@ -293,7 +293,7 @@ func (h *Handler) serveWebRTCSession(ctx context.Context, conn *websocket.Conn, 
 	)
 	defer func() {
 		if session != nil {
-			session.CloseIfNotConnected()
+			session.CloseIfNotConnected(ctx)
 		}
 	}()
 
@@ -314,7 +314,7 @@ func (h *Handler) serveWebRTCSession(ctx context.Context, conn *websocket.Conn, 
 				return nil
 			}
 			session = nextSession
-			go writeWebRTCIceCandidates(ctx, conn, &writeMu, session.ICECandidates())
+			go writeWebRTCICECandidates(ctx, conn, &writeMu, session.ICECandidates())
 			answer, err := session.Answer(ctx, WebRTCSessionDescription{
 				Type: message.Offer.Type,
 				SDP:  message.Offer.SDP,
@@ -359,7 +359,7 @@ func writeCallEvent(conn *websocket.Conn, call storage.Call) error {
 	return conn.WriteJSON(EventMessage{Type: "call", Call: ResponseFromCall(call)})
 }
 
-func writeWebRTCIceCandidates(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, candidates <-chan WebRTCICECandidate) {
+func writeWebRTCICECandidates(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, candidates <-chan WebRTCICECandidate) {
 	for {
 		select {
 		case <-ctx.Done():

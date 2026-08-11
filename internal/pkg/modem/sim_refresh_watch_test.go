@@ -19,7 +19,7 @@ func TestConsumeSIMRefreshStreamTracksResetLifecycle(t *testing.T) {
 		},
 	}
 	stream := make(chan devicewwan.SIMRefreshEvent, 2)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- modem.consumeSIMRefreshStream(ctx, stream) }()
 

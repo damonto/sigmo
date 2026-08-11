@@ -34,7 +34,7 @@ func TestDialRejectsInvalidRequestsBeforeRouting(t *testing.T) {
 	service := New(nil, fakeIMSVoice{})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := service.Dial(context.Background(), nil, tt.number, tt.route)
+			_, err := service.Dial(t.Context(), nil, tt.number, tt.route)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Dial() error = %v, want %v", err, tt.wantErr)
 			}
@@ -99,7 +99,7 @@ func TestDialSelectsIMSRoute(t *testing.T) {
 			}
 			service := New(testStore(t), wifi, VoiceRoute{Route: RouteVoLTE, Voice: volte})
 
-			call, err := service.Dial(context.Background(), nil, "+12242255559", tt.route)
+			call, err := service.Dial(t.Context(), nil, "+12242255559", tt.route)
 			if err != nil {
 				t.Fatalf("Dial() error = %v", err)
 			}
@@ -143,7 +143,7 @@ func TestDialPropagatesRouteStatusErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			service := New(nil, tt.wifi, VoiceRoute{Route: RouteVoLTE, Voice: tt.volte})
-			_, err := service.Dial(context.Background(), nil, "+12242255559", tt.route)
+			_, err := service.Dial(t.Context(), nil, "+12242255559", tt.route)
 			if !errors.Is(err, errStatus) {
 				t.Fatalf("Dial() error = %v, want %v", err, errStatus)
 			}
@@ -182,7 +182,7 @@ func TestDialTreatsUnavailableRouteStatusAsDisconnected(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			service := New(nil, tt.wifi, VoiceRoute{Route: RouteVoLTE, Voice: tt.volte})
-			_, err := service.Dial(context.Background(), nil, "+12242255559", tt.route)
+			_, err := service.Dial(t.Context(), nil, "+12242255559", tt.route)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Dial() error = %v, want %v", err, tt.wantErr)
 			}
@@ -196,7 +196,7 @@ func TestDialMapsBackendDisconnectedAfterRouteSelected(t *testing.T) {
 		dialErr: pims.ErrNotConnected,
 	})
 
-	_, err := service.Dial(context.Background(), nil, "+12242255559", RouteAuto)
+	_, err := service.Dial(t.Context(), nil, "+12242255559", RouteAuto)
 	if !errors.Is(err, ErrWiFiCallingNotConnected) {
 		t.Fatalf("Dial() error = %v, want %v", err, ErrWiFiCallingNotConnected)
 	}
@@ -240,7 +240,7 @@ func TestNormalizeDialString(t *testing.T) {
 }
 
 func TestRunPersistsAndPublishesWiFiCallingVoiceEvents(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
@@ -279,9 +279,9 @@ func TestRunPersistsAndPublishesWiFiCallingVoiceEvents(t *testing.T) {
 	}
 	subscriber(pims.VoiceEvent{Call: voiceCall})
 
-	stored, err := store.GetCall(ctx, "call-1")
+	stored, err := store.Call(ctx, "call-1")
 	if err != nil {
-		t.Fatalf("GetCall() error = %v", err)
+		t.Fatalf("Call() error = %v", err)
 	}
 	if stored.Route != RouteWiFiCalling || stored.State != StateRinging || stored.Number != "+12242255559" || stored.Hold != HoldNone {
 		t.Fatalf("stored call = %+v, want Wi-Fi Calling ringing call", stored)
@@ -303,7 +303,7 @@ func TestRunPersistsAndPublishesWiFiCallingVoiceEvents(t *testing.T) {
 }
 
 func TestRunPublishesWiFiCallingVoiceEventsWhenPersistenceFails(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	store := testStore(t)
 	subscriberCh := make(chan pims.VoiceEventFunc, 1)
@@ -357,7 +357,7 @@ func TestRunPublishesWiFiCallingVoiceEventsWhenPersistenceFails(t *testing.T) {
 }
 
 func TestDialPersistsRouteAndPublishesEvent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	service := New(store, fakeIMSVoice{
 		status: pims.VoiceStatus{Connected: true},
@@ -383,9 +383,9 @@ func TestDialPersistsRouteAndPublishesEvent(t *testing.T) {
 		t.Fatalf("Dial() = %+v, want persisted Wi-Fi Calling call", call)
 	}
 
-	stored, err := store.GetCall(ctx, "call-2")
+	stored, err := store.Call(ctx, "call-2")
 	if err != nil {
-		t.Fatalf("GetCall() error = %v", err)
+		t.Fatalf("Call() error = %v", err)
 	}
 	if stored.Route != RouteWiFiCalling || stored.Direction != DirectionOutgoing {
 		t.Fatalf("stored call = %+v, want outgoing Wi-Fi Calling call", stored)
@@ -428,7 +428,7 @@ func TestDialPersistsSelectedRouteFailure(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := testStore(t)
 			service := New(store, fakeIMSVoice{
 				status:    pims.VoiceStatus{Connected: true},
@@ -443,9 +443,9 @@ func TestDialPersistsSelectedRouteFailure(t *testing.T) {
 				t.Fatalf("Dial() error = %v, want %q", err, tt.wantErr)
 			}
 
-			stored, err := store.GetCall(ctx, tt.voiceCall.ID)
+			stored, err := store.Call(ctx, tt.voiceCall.ID)
 			if err != nil {
-				t.Fatalf("GetCall() error = %v", err)
+				t.Fatalf("Call() error = %v", err)
 			}
 			if stored.State != StateFailed || stored.Reason != "sip rejected" || stored.Route != RouteWiFiCalling {
 				t.Fatalf("stored call = %+v, want failed Wi-Fi Calling call", stored)
@@ -499,7 +499,7 @@ func TestMapWiFiCallingMediaError(t *testing.T) {
 }
 
 func TestEndUnavailableWiFiCallingMediaClosesStoredCall(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	service := New(store, fakeIMSVoice{})
 	events, unsubscribe := service.Subscribe(1)
@@ -523,9 +523,9 @@ func TestEndUnavailableWiFiCallingMediaClosesStoredCall(t *testing.T) {
 
 	service.media.endUnavailable(ctx, call)
 
-	stored, err := store.GetCall(ctx, call.ID)
+	stored, err := store.Call(ctx, call.ID)
 	if err != nil {
-		t.Fatalf("GetCall() error = %v", err)
+		t.Fatalf("Call() error = %v", err)
 	}
 	if stored.State != StateEnded || stored.Reason != ErrMediaUnavailable.Error() {
 		t.Fatalf("stored call state = %q/%q, want ended/media unavailable", stored.State, stored.Reason)
@@ -550,7 +550,7 @@ func TestEndUnavailableWiFiCallingMediaIgnoresTerminalCall(t *testing.T) {
 	events, unsubscribe := service.Subscribe(1)
 	defer unsubscribe()
 
-	service.media.endUnavailable(context.Background(), storage.Call{
+	service.media.endUnavailable(t.Context(), storage.Call{
 		ID:        "call-ended",
 		ProfileID: "profile-a",
 		ModemID:   "modem-1",
@@ -588,7 +588,7 @@ func TestHangupEndsWiFiCallingCallLocally(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := testStore(t)
 			service := New(store, fakeIMSVoice{hangup: tt.hangup})
 			events, unsubscribe := service.Subscribe(1)
@@ -609,7 +609,7 @@ func TestHangupEndsWiFiCallingCallLocally(t *testing.T) {
 			}
 			modem := &mmodem.Modem{
 				EquipmentIdentifier: call.ModemID,
-				Sim:                 &mmodem.SIM{Identifier: call.ProfileID},
+				SIM:                 &mmodem.SIM{Identifier: call.ProfileID},
 			}
 
 			ended, err := service.Hangup(ctx, modem, call.ID)
@@ -620,9 +620,9 @@ func TestHangupEndsWiFiCallingCallLocally(t *testing.T) {
 				t.Fatalf("Hangup() = %+v, want locally ended call", ended)
 			}
 
-			stored, err := store.GetCall(ctx, call.ID)
+			stored, err := store.Call(ctx, call.ID)
 			if err != nil {
-				t.Fatalf("GetCall() error = %v", err)
+				t.Fatalf("Call() error = %v", err)
 			}
 			if stored.State != StateEnded || stored.EndedAt.IsZero() {
 				t.Fatalf("stored call = %+v, want ended call", stored)
@@ -641,7 +641,7 @@ func TestHangupEndsWiFiCallingCallLocally(t *testing.T) {
 }
 
 func TestHangupDoesNotWaitForWiFiCallingCleanup(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	hangupStarted := make(chan struct{})
 	releaseHangup := make(chan struct{})
@@ -668,7 +668,7 @@ func TestHangupDoesNotWaitForWiFiCallingCleanup(t *testing.T) {
 	}
 	modem := &mmodem.Modem{
 		EquipmentIdentifier: call.ModemID,
-		Sim:                 &mmodem.SIM{Identifier: call.ProfileID},
+		SIM:                 &mmodem.SIM{Identifier: call.ProfileID},
 	}
 
 	done := make(chan error, 1)
@@ -709,7 +709,7 @@ func TestSaveAndPublishKeepsTerminalCallClosed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := testStore(t)
 			service := New(store, fakeIMSVoice{})
 			events, unsubscribe := service.Subscribe(1)
@@ -744,9 +744,9 @@ func TestSaveAndPublishKeepsTerminalCallClosed(t *testing.T) {
 			if got.State != tt.wantState {
 				t.Fatalf("saveAndPublish() state = %q, want %q", got.State, tt.wantState)
 			}
-			stored, err := store.GetCall(ctx, existing.ID)
+			stored, err := store.Call(ctx, existing.ID)
 			if err != nil {
-				t.Fatalf("GetCall() error = %v", err)
+				t.Fatalf("Call() error = %v", err)
 			}
 			if stored.State != tt.wantState {
 				t.Fatalf("stored state = %q, want %q", stored.State, tt.wantState)
@@ -771,7 +771,7 @@ func TestSaveAndPublishKeepsTerminalCallClosed(t *testing.T) {
 
 func TestUpdateRejectsUnsupportedState(t *testing.T) {
 	service := New(nil, fakeIMSVoice{})
-	_, err := service.Update(context.Background(), nil, "call-1", UpdateRequest{State: StateFailed})
+	_, err := service.Update(t.Context(), nil, "call-1", UpdateRequest{State: StateFailed})
 	if !errors.Is(err, ErrInvalidCallState) {
 		t.Fatalf("Update() error = %v, want %v", err, ErrInvalidCallState)
 	}
@@ -779,7 +779,7 @@ func TestUpdateRejectsUnsupportedState(t *testing.T) {
 
 func TestUpdateRejectsStateAndHoldTogether(t *testing.T) {
 	service := New(nil, fakeIMSVoice{})
-	_, err := service.Update(context.Background(), nil, "call-1", UpdateRequest{State: StateActive, Hold: HoldLocal})
+	_, err := service.Update(t.Context(), nil, "call-1", UpdateRequest{State: StateActive, Hold: HoldLocal})
 	if !errors.Is(err, ErrCallUpdateConflict) {
 		t.Fatalf("Update() error = %v, want %v", err, ErrCallUpdateConflict)
 	}
@@ -787,7 +787,7 @@ func TestUpdateRejectsStateAndHoldTogether(t *testing.T) {
 
 func TestSetHoldRejectsInvalidHold(t *testing.T) {
 	service := New(nil, fakeIMSVoice{})
-	_, err := service.SetHold(context.Background(), nil, "call-1", HoldRemote)
+	_, err := service.SetHold(t.Context(), nil, "call-1", HoldRemote)
 	if !errors.Is(err, ErrInvalidCallHold) {
 		t.Fatalf("SetHold() error = %v, want %v", err, ErrInvalidCallHold)
 	}
@@ -808,7 +808,7 @@ func TestSendDTMFRejectsInvalidDigitsBeforeLookup(t *testing.T) {
 	service := New(nil, fakeIMSVoice{})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := service.SendDTMF(context.Background(), nil, "call-1", tt.digits)
+			err := service.SendDTMF(t.Context(), nil, "call-1", tt.digits)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("SendDTMF() error = %v, want %v", err, tt.wantErr)
 			}
@@ -870,7 +870,7 @@ func TestSendDTMFValidatesStoredCallAndRoutesToWiFiCalling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := testStore(t)
 			if tt.call != nil {
 				if err := store.SaveCall(ctx, *tt.call); err != nil {
@@ -889,7 +889,7 @@ func TestSendDTMFValidatesStoredCallAndRoutesToWiFiCalling(t *testing.T) {
 			})
 			modem := &mmodem.Modem{
 				EquipmentIdentifier: baseCall.ModemID,
-				Sim:                 &mmodem.SIM{Identifier: baseCall.ProfileID},
+				SIM:                 &mmodem.SIM{Identifier: baseCall.ProfileID},
 			}
 
 			err := service.SendDTMF(ctx, modem, baseCall.ID, tt.digits)
@@ -908,7 +908,7 @@ func TestSendDTMFValidatesStoredCallAndRoutesToWiFiCalling(t *testing.T) {
 }
 
 func TestSendDTMFMapsWiFiCallingError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	call := storage.Call{
 		ID:        "call-1",
@@ -928,7 +928,7 @@ func TestSendDTMFMapsWiFiCallingError(t *testing.T) {
 	service := New(store, fakeIMSVoice{dtmfErr: pims.ErrNotConnected})
 	modem := &mmodem.Modem{
 		EquipmentIdentifier: call.ModemID,
-		Sim:                 &mmodem.SIM{Identifier: call.ProfileID},
+		SIM:                 &mmodem.SIM{Identifier: call.ProfileID},
 	}
 
 	err := service.SendDTMF(ctx, modem, call.ID, "1")
@@ -943,7 +943,7 @@ func callWith(call storage.Call, update func(*storage.Call)) *storage.Call {
 }
 
 func TestDeleteRemovesTerminalCallRecords(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	service := New(store, fakeIMSVoice{})
 	call := storage.Call{
@@ -965,13 +965,13 @@ func TestDeleteRemovesTerminalCallRecords(t *testing.T) {
 	if err := service.records.deleteCall(ctx, call); err != nil {
 		t.Fatalf("deleteCall() error = %v", err)
 	}
-	if _, err := store.GetCall(ctx, call.ID); !errors.Is(err, storage.ErrNotFound) {
-		t.Fatalf("GetCall(deleted) error = %v, want %v", err, storage.ErrNotFound)
+	if _, err := store.Call(ctx, call.ID); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("Call(deleted) error = %v, want %v", err, storage.ErrNotFound)
 	}
 }
 
 func TestDeleteRejectsActiveCallRecords(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	service := New(store, fakeIMSVoice{})
 	call := storage.Call{
@@ -993,8 +993,8 @@ func TestDeleteRejectsActiveCallRecords(t *testing.T) {
 	if !errors.Is(err, ErrCallRecordActive) {
 		t.Fatalf("deleteCall() error = %v, want %v", err, ErrCallRecordActive)
 	}
-	if _, err := store.GetCall(ctx, call.ID); err != nil {
-		t.Fatalf("GetCall(active) error = %v", err)
+	if _, err := store.Call(ctx, call.ID); err != nil {
+		t.Fatalf("Call(active) error = %v", err)
 	}
 }
 
@@ -1110,7 +1110,7 @@ func (f fakeIMSVoice) SubscribeVoiceEvents(fn pims.VoiceEventFunc) func() {
 
 func testStore(t *testing.T) *storage.Store {
 	t.Helper()
-	store, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	store, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}

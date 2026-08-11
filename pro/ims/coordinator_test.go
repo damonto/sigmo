@@ -85,7 +85,7 @@ func TestReleaseManagedVoLTEOnShutdown(t *testing.T) {
 				openManagedVoLTEDevice = previousOpen
 			})
 
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
 			coordinator := &coordinator{access: tt.access}
 			if tt.internet != nil {
@@ -234,7 +234,7 @@ func TestVoLTESettingsStore(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 			if err != nil {
 				t.Fatalf("Open() error = %v", err)
@@ -290,7 +290,7 @@ func TestVoLTESettingsUseDeviceDataPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 			if err != nil {
 				t.Fatalf("Open() error = %v", err)
@@ -335,7 +335,7 @@ func TestRestoreLegacyInternetSurvivesCoordinatorRestart(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 			if err != nil {
 				t.Fatalf("Open() error = %v", err)
@@ -379,7 +379,7 @@ func TestDisableVoLTEPersistsStateAfterManagedCleanupError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 			if err != nil {
 				t.Fatalf("Open() error = %v", err)
@@ -435,7 +435,7 @@ func TestDisableVoLTEPersistsStateAfterManagedCleanupError(t *testing.T) {
 }
 
 func TestStartIfDisabledRestoresNormalMode(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -513,14 +513,14 @@ func TestStartIfEnabledSkipsVoLTEInAirplaneMode(t *testing.T) {
 			}
 			modem := qmiTestModem("modem-1")
 			modem.Status.Power = tt.power
-			modem.Sim = &mmodem.SIM{Identifier: "profile-1"}
+			modem.SIM = &mmodem.SIM{Identifier: "profile-1"}
 
 			coordinator.startIfEnabled(ctx, modem)
 			coordinator.mu.Lock()
 			session := coordinator.sessions[modem.EquipmentIdentifier]
 			coordinator.mu.Unlock()
 			if session != nil {
-				coordinator.stop(modem.EquipmentIdentifier)
+				coordinator.stop(t.Context(), modem.EquipmentIdentifier)
 				t.Fatal("startIfEnabled() started VoLTE in airplane mode")
 			}
 		})
@@ -530,7 +530,7 @@ func TestStartIfEnabledSkipsVoLTEInAirplaneMode(t *testing.T) {
 func TestRemovedModemInvalidatesInternetGeneration(t *testing.T) {
 	internet := &fakeInternetRestorer{}
 	coordinator := &coordinator{access: AccessVoLTE, internet: internet}
-	coordinator.processModemEvent(context.Background(), mmodem.ModemEvent{
+	coordinator.processModemEvent(t.Context(), mmodem.ModemEvent{
 		Type:       mmodem.ModemEventRemoved,
 		Modem:      &mmodem.Modem{EquipmentIdentifier: "modem-1"},
 		Path:       "/devices/modem-1",
@@ -569,7 +569,7 @@ func TestSIMProfileChangeRebuildsEnabledVoLTESession(t *testing.T) {
 		voiceSubscribers: make(map[uint64]VoiceEventFunc),
 	}
 	modem := qmiTestModem("modem-1")
-	modem.Sim = &mmodem.SIM{Identifier: "new-profile"}
+	modem.SIM = &mmodem.SIM{Identifier: "new-profile"}
 
 	coordinator.processModemEvent(ctx, mmodem.ModemEvent{
 		Type:       mmodem.ModemEventSIMChanged,
@@ -586,14 +586,14 @@ func TestSIMProfileChangeRebuildsEnabledVoLTESession(t *testing.T) {
 	if current.profileID != "new-profile" {
 		t.Fatalf("new session profile ID = %q, want %q", current.profileID, "new-profile")
 	}
-	coordinator.stop(modem.EquipmentIdentifier)
+	coordinator.stop(t.Context(), modem.EquipmentIdentifier)
 	if !slices.Contains(internet.calls, "internet:invalidate") {
 		t.Fatalf("Internet calls = %v, want generation invalidation", internet.calls)
 	}
 }
 
 func TestDisableVoLTERestoresNormalInternetMode(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
@@ -662,7 +662,7 @@ func TestDisableVoLTESwitchesQualcomm410InternetModeWithDataPath(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 			if err != nil {
 				t.Fatalf("Open() error = %v", err)
@@ -703,7 +703,7 @@ func TestDisableVoLTESwitchesQualcomm410InternetModeWithDataPath(t *testing.T) {
 func TestRestoreQualcomm410DataPathReleasesInternetMode(t *testing.T) {
 	internet := &fakeInternetRestorer{}
 	coordinator := &coordinator{internet: internet}
-	if err := coordinator.restoreVoLTEDataPath(context.Background(), qmiTestModem("modem-1"), DataPathQualcomm410); err != nil {
+	if err := coordinator.restoreVoLTEDataPath(t.Context(), qmiTestModem("modem-1"), DataPathQualcomm410); err != nil {
 		t.Fatalf("restoreVoLTEDataPath() error = %v", err)
 	}
 	if !slices.Equal(internet.calls, []string{"qualcomm410:false"}) {
@@ -743,7 +743,7 @@ func TestDisabledVoLTEDataPathRollsBackAfterPersistenceFailure(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 			if err != nil {
 				t.Fatalf("Open() error = %v", err)
@@ -793,7 +793,7 @@ func TestVoLTEDataPathSwitchRollsBackAfterNewPathFailure(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 			if err != nil {
 				t.Fatalf("Open() error = %v", err)
@@ -821,7 +821,7 @@ func TestVoLTEDataPathSwitchRollsBackAfterNewPathFailure(t *testing.T) {
 			}
 			modem := &mmodem.Modem{
 				EquipmentIdentifier: "modem-1",
-				Sim:                 &mmodem.SIM{Identifier: "profile-1"},
+				SIM:                 &mmodem.SIM{Identifier: "profile-1"},
 				Ports: []mmodem.ModemPort{{
 					Device:   "cdc-wdm0",
 					PortType: wwanmodem.PortQMI,
@@ -845,7 +845,7 @@ func TestVoLTEDataPathSwitchRollsBackAfterNewPathFailure(t *testing.T) {
 			if session == nil {
 				t.Fatal("old VoLTE session was not restarted")
 			}
-			coordinator.stop(modem.EquipmentIdentifier)
+			coordinator.stop(t.Context(), modem.EquipmentIdentifier)
 			wantCalls := []string{"connect", "qmap:true", "qmap:false", "qmap:false"}
 			if !slices.Equal(internet.calls, wantCalls) {
 				t.Fatalf("Internet calls = %v, want %v", internet.calls, wantCalls)

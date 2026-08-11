@@ -142,7 +142,7 @@ func (s *transferRunner) Sources(ctx context.Context, target *mmodem.Modem) (Sou
 			Detail: modem.EquipmentIdentifier,
 		})
 	}
-	readers, ccidErr := listCCIDReaders()
+	readers, ccidErr := listCCIDReaders(ctx)
 	for _, reader := range readers {
 		response = append(response, SourceResponse{
 			Type:               SourceCCID,

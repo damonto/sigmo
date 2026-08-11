@@ -163,7 +163,11 @@ func TestUpdateWiFiCallingSettingsUnderlay(t *testing.T) {
 				connectivity: probe,
 			}
 			e := echo.New()
-			e.Validator = appvalidator.New()
+			requestValidator, err := appvalidator.New()
+			if err != nil {
+				t.Fatalf("appvalidator.New() error = %v", err)
+			}
+			e.Validator = requestValidator
 			e.PUT("/modems/:id/wifi-calling/settings", h.UpdateWiFiCallingSettings)
 			req := httptest.NewRequest(http.MethodPut, "/modems/modem-1/wifi-calling/settings", strings.NewReader(tt.body))
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
@@ -292,7 +296,11 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 				connectivity: connectivity,
 			}
 			e := echo.New()
-			e.Validator = appvalidator.New()
+			requestValidator, err := appvalidator.New()
+			if err != nil {
+				t.Fatalf("appvalidator.New() error = %v", err)
+			}
+			e.Validator = requestValidator
 			e.PUT("/modems/:id/volte/settings", h.UpdateVoLTESettings)
 			req := httptest.NewRequest(http.MethodPut, "/modems/modem-1/volte/settings", strings.NewReader(tt.body))
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)

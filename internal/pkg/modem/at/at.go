@@ -3,6 +3,7 @@ package at
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -27,8 +28,10 @@ func Open(device string) (*AT, error) {
 		return nil, err
 	}
 	if err := at.setTermios(); err != nil {
-		_ = at.f.Close()
-		return nil, err
+		if closeErr := at.f.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close AT device: %w", closeErr))
+		}
+		return nil, fmt.Errorf("configure AT device: %w", err)
 	}
 	at.reader = bufio.NewReader(at.f)
 	return &at, nil

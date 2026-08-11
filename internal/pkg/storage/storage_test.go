@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,7 +29,7 @@ func TestOpenProtectsDatabaseFile(t *testing.T) {
 }
 
 func TestAppState(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 
 	tests := []struct {
@@ -60,7 +59,7 @@ func TestAppState(t *testing.T) {
 }
 
 func TestMessages(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	base := time.Date(2026, 5, 24, 10, 0, 0, 0, time.UTC)
 
@@ -242,7 +241,7 @@ func TestMessages(t *testing.T) {
 }
 
 func TestModemMessageRefsIncludeGenerationAndZeroID(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	base := time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC)
 
@@ -307,7 +306,7 @@ func TestModemMessageRefsIncludeGenerationAndZeroID(t *testing.T) {
 }
 
 func TestDeleteModemMessageRefsDeletesExactReferencesTransactionally(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	base := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
 	targetRefs := []ModemMessageRef{
@@ -413,7 +412,7 @@ func TestDeleteModemMessageRefsDeletesExactReferencesTransactionally(t *testing.
 }
 
 func TestUpdateMessageStatus(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	base := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
 	messages := []Message{
@@ -542,7 +541,7 @@ func TestUpdateMessageStatus(t *testing.T) {
 }
 
 func TestCallsPersistAndListByModem(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	base := time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC)
 
@@ -626,15 +625,15 @@ func TestCallsPersistAndListByModem(t *testing.T) {
 		t.Fatalf("SaveCall(update) error = %v", err)
 	}
 
-	updated, err := store.GetCall(ctx, "call-old")
+	updated, err := store.Call(ctx, "call-old")
 	if err != nil {
-		t.Fatalf("GetCall() error = %v", err)
+		t.Fatalf("Call() error = %v", err)
 	}
 	if updated.State != "active" || updated.AnsweredAt.IsZero() {
-		t.Fatalf("GetCall() = %+v, want active with answered_at", updated)
+		t.Fatalf("Call() = %+v, want active with answered_at", updated)
 	}
 	if updated.Hold != "local" {
-		t.Fatalf("GetCall() hold = %q, want local", updated.Hold)
+		t.Fatalf("Call() hold = %q, want local", updated.Hold)
 	}
 
 	got, err = store.ListCalls(ctx, "profile-a", "modem-1", 1, "")
@@ -677,8 +676,8 @@ func TestCallsPersistAndListByModem(t *testing.T) {
 	if err := store.DeleteCall(ctx, "profile-a", "modem-1", "call-old"); err != nil {
 		t.Fatalf("DeleteCall() error = %v", err)
 	}
-	if _, err := store.GetCall(ctx, "call-old"); err == nil {
-		t.Fatal("GetCall(deleted) error = nil, want not found")
+	if _, err := store.Call(ctx, "call-old"); err == nil {
+		t.Fatal("Call(deleted) error = nil, want not found")
 	}
 	if err := store.DeleteCall(ctx, "profile-a", "modem-1", "call-other-profile"); err == nil {
 		t.Fatal("DeleteCall(other profile) error = nil, want not found")
@@ -686,7 +685,7 @@ func TestCallsPersistAndListByModem(t *testing.T) {
 }
 
 func TestSaveCallPreservesAnsweredAtOnSparseUpdates(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	base := time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name   string
@@ -732,9 +731,9 @@ func TestSaveCallPreservesAnsweredAtOnSparseUpdates(t *testing.T) {
 				t.Fatalf("SaveCall(update) error = %v", err)
 			}
 
-			got, err := store.GetCall(ctx, "call-1")
+			got, err := store.Call(ctx, "call-1")
 			if err != nil {
-				t.Fatalf("GetCall() error = %v", err)
+				t.Fatalf("Call() error = %v", err)
 			}
 			if !got.AnsweredAt.Equal(tt.want) {
 				t.Fatalf("AnsweredAt = %v, want %v", got.AnsweredAt, tt.want)
@@ -744,7 +743,7 @@ func TestSaveCallPreservesAnsweredAtOnSparseUpdates(t *testing.T) {
 }
 
 func TestSaveCallPreservingTerminal(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	base := time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC)
 	baseCall := Call{
 		ID:        "call-1",
@@ -831,9 +830,9 @@ func TestSaveCallPreservingTerminal(t *testing.T) {
 			if got.State != tt.wantState || !got.UpdatedAt.Equal(tt.wantUpdated) {
 				t.Fatalf("SaveCallPreservingTerminal() = %+v, want state %q updated %v", got, tt.wantState, tt.wantUpdated)
 			}
-			stored, err := store.GetCall(ctx, tt.update.ID)
+			stored, err := store.Call(ctx, tt.update.ID)
 			if err != nil {
-				t.Fatalf("GetCall() error = %v", err)
+				t.Fatalf("Call() error = %v", err)
 			}
 			if stored.State != tt.wantState || !stored.UpdatedAt.Equal(tt.wantUpdated) {
 				t.Fatalf("stored call = %+v, want state %q updated %v", stored, tt.wantState, tt.wantUpdated)
@@ -843,7 +842,7 @@ func TestSaveCallPreservingTerminal(t *testing.T) {
 }
 
 func TestSaveCallPreservingTerminalPreservesAnsweredAtOnSparseUpdates(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	base := time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC)
 	answered := Call{
@@ -893,7 +892,7 @@ func callWithState(call Call, state string, update func(*Call)) Call {
 
 func testStore(t *testing.T) *Store {
 	t.Helper()
-	store, err := Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	store, err := Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}

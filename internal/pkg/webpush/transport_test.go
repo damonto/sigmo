@@ -39,3 +39,20 @@ func TestPushHTTPClientRejectsRedirects(t *testing.T) {
 		t.Fatalf("CheckRedirect() error = %v, want %v", err, http.ErrUseLastResponse)
 	}
 }
+
+func TestPushHTTPClientDoesNotUseDefaultTransport(t *testing.T) {
+	previous := http.DefaultTransport
+	t.Cleanup(func() {
+		http.DefaultTransport = previous
+	})
+	http.DefaultTransport = &http.Transport{MaxIdleConns: 1}
+
+	client := newPushHTTPClient()
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("client.Transport = %T, want *http.Transport", client.Transport)
+	}
+	if transport.MaxIdleConns != 100 {
+		t.Fatalf("MaxIdleConns = %d, want 100", transport.MaxIdleConns)
+	}
+}

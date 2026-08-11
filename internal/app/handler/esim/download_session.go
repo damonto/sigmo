@@ -33,7 +33,10 @@ func (s *downloadSession) disconnect() {
 }
 
 func (s *downloadSession) readLoop(cancel context.CancelFunc) {
-	defer s.disconnect()
+	defer func() {
+		cancel()
+		s.disconnect()
+	}()
 	for {
 		var msg downloadClientMessage
 		if err := s.conn.ReadJSON(&msg); err != nil {

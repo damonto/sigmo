@@ -66,7 +66,7 @@ func TestPushSubscriptionStorage(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store, err := Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 			if err != nil {
 				t.Fatalf("Open() error = %v", err)

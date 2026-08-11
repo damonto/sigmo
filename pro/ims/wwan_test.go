@@ -32,7 +32,7 @@ func TestATReaderPortsPreferPrimaryThenFallbackPorts(t *testing.T) {
 			name: "keeps AT fallback ports after Device primary",
 			modem: &mmodem.Modem{
 				PrimaryPort:    "/dev/cdc-wdm1",
-				PrimarySimSlot: 1,
+				PrimarySIMSlot: 1,
 				Ports: []mmodem.ModemPort{
 					{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm1"},
 					{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB6"},
@@ -99,7 +99,7 @@ func TestOpenWWANRejectsUnsupportedAccess(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := OpenWWAN(context.Background(), nil, WWANConfig{Access: tt.access})
+			_, err := OpenWWAN(t.Context(), nil, WWANConfig{Access: tt.access})
 			if err == nil {
 				t.Fatal("OpenWWAN() error = nil, want error")
 			}
@@ -135,7 +135,7 @@ func TestOpenWWANRequiresOneQMIDataPath(t *testing.T) {
 		},
 	}
 	modem := &mmodem.Modem{
-		PrimarySimSlot: 1,
+		PrimarySIMSlot: 1,
 		Ports: []mmodem.ModemPort{{
 			Device:   "/dev/cdc-wdm0",
 			PortType: wwanmodem.PortQMI,
@@ -144,7 +144,7 @@ func TestOpenWWANRequiresOneQMIDataPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := OpenWWAN(context.Background(), modem, tt.cfg)
+			_, err := OpenWWAN(t.Context(), modem, tt.cfg)
 			if err == nil {
 				t.Fatal("OpenWWAN() error = nil, want error")
 			}
@@ -213,7 +213,7 @@ func TestValidateDedicatedQMIWWANConfig(t *testing.T) {
 func TestOpenWWANFallsBackAfterDeviceFailure(t *testing.T) {
 	modem := &mmodem.Modem{
 		PrimaryPort:    "/dev/cdc-wdm1",
-		PrimarySimSlot: 2,
+		PrimarySIMSlot: 2,
 		Ports: []mmodem.ModemPort{
 			{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm1"},
 			{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB6"},
@@ -222,9 +222,7 @@ func TestOpenWWANFallsBackAfterDeviceFailure(t *testing.T) {
 	}
 	var atAttempts []string
 	var deviceCalled bool
-	reader, err := openWiFiCallingWWANWith(
-		context.Background(),
-		modem,
+	reader, err := openWiFiCallingWWANWith(t.Context(), modem,
 		func(_ context.Context, got *mmodem.Modem) (usimcard.Reader, error) {
 			deviceCalled = true
 			if got != modem {
@@ -263,9 +261,7 @@ func TestOpenWWANReturnsJoinedTransportErrors(t *testing.T) {
 			{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB6"},
 		},
 	}
-	_, err := openWiFiCallingWWANWith(
-		context.Background(),
-		modem,
+	_, err := openWiFiCallingWWANWith(t.Context(), modem,
 		func(context.Context, *mmodem.Modem) (usimcard.Reader, error) {
 			return nil, errors.New("device unavailable")
 		},
@@ -371,7 +367,7 @@ func TestVoLTEEndpoint(t *testing.T) {
 
 func TestResolveVoLTESettingsDoesNotRequireSIMSlot(t *testing.T) {
 	modem := &mmodem.Modem{
-		PrimarySimSlot: 6,
+		PrimarySIMSlot: 6,
 		Ports: []mmodem.ModemPort{{
 			PortType: wwanmodem.PortMBIM,
 			Device:   "/dev/cdc-wdm0",
@@ -455,7 +451,7 @@ func TestConfigureIMSPDNNetwork(t *testing.T) {
 			}
 
 			network := &pdnNetwork{parent: "wwan0", mbim: tt.dedicatedInterface, links: links}
-			state, err := network.configure(context.Background(), "wwan0", info)
+			state, err := network.configure(t.Context(), "wwan0", info)
 			if err != nil {
 				t.Fatalf("configure() error = %v", err)
 			}
@@ -540,7 +536,7 @@ func TestDedicatedPDNNetworkFlushesStaleAddresses(t *testing.T) {
 		IPv6Gateway: net.ParseIP("2001:db8::1"),
 	}
 
-	if _, err := network.Replace(context.Background(), info); err != nil {
+	if _, err := network.Replace(t.Context(), info); err != nil {
 		t.Fatalf("Replace() error = %v", err)
 	}
 	if err := network.Close(); err != nil {
@@ -642,7 +638,7 @@ func TestManagedVoLTECardUsesMBIMSessionInterface(t *testing.T) {
 				PCSCFIPs:  []net.IP{net.ParseIP("2001:db8::10")},
 			}
 
-			gotInterfaceName, err := network.Replace(context.Background(), info)
+			gotInterfaceName, err := network.Replace(t.Context(), info)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("Replace() error = nil, want error")
@@ -721,7 +717,7 @@ func TestPDNNetworkRollsBackConfigurationOnce(t *testing.T) {
 				IPv6Gateway: net.ParseIP("2001:db8::1"),
 			}
 
-			if _, err := network.Replace(context.Background(), info); err == nil {
+			if _, err := network.Replace(t.Context(), info); err == nil {
 				t.Fatal("Replace() error = nil, want error")
 			}
 			if deleteCalls != 1 {
@@ -912,7 +908,7 @@ func TestConfigureIMSPDNNetworkUsesDistinctPolicyTables(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range networks {
 		wg.Go(func() {
-			_, err := networks[i].Replace(context.Background(), infos[i])
+			_, err := networks[i].Replace(t.Context(), infos[i])
 			errCh <- err
 		})
 	}
@@ -1124,7 +1120,7 @@ func TestWaitForIMSInterface(t *testing.T) {
 				calls++
 				return tt.errors[index]
 			}
-			ctx := context.Background()
+			ctx := t.Context()
 			if tt.cancel {
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithCancel(ctx)

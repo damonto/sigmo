@@ -27,7 +27,7 @@ func TestDBConnectionStateProxy(t *testing.T) {
 			t.Parallel()
 
 			state := testDBConnectionState(t)
-			ctx := context.Background()
+			ctx := t.Context()
 			if err := state.saveProxyStateForModem(ctx, tt.modemID, tt.interfaceName); err != nil {
 				t.Fatalf("saveProxyStateForModem() error = %v", err)
 			}
@@ -62,7 +62,7 @@ func TestDBConnectionStateProxyOwnership(t *testing.T) {
 	t.Parallel()
 
 	state := testDBConnectionState(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := state.saveProxyStateForModem(ctx, "modem-1", "wws-old"); err != nil {
 		t.Fatalf("saveProxyStateForModem(old) error = %v", err)
 	}
@@ -111,7 +111,7 @@ func TestDBConnectionStateRoute(t *testing.T) {
 			t.Parallel()
 
 			state := testDBConnectionState(t)
-			ctx := context.Background()
+			ctx := t.Context()
 			if err := state.saveRouteStateForModem(ctx, tt.modemID, tt.interfaceName, []netlink.DefaultRoute{original}, changes); err != nil {
 				t.Fatalf("saveRouteStateForModem() error = %v", err)
 			}
@@ -147,7 +147,7 @@ func TestDBConnectionStateRouteOwnership(t *testing.T) {
 	t.Parallel()
 
 	state := testDBConnectionState(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	changes := []defaultRouteChange{{
 		Original:    netlink.DefaultRoute{Interface: "eth0", Family: netlink.FamilyIPv4, Metric: defaultRouteMetric},
 		Replacement: netlink.DefaultRoute{Interface: "eth0", Family: netlink.FamilyIPv4, Metric: secondaryRouteMetric},
@@ -176,7 +176,7 @@ func TestDBConnectionStateRejectsMissingOwner(t *testing.T) {
 	t.Parallel()
 
 	state := testDBConnectionState(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := state.saveProxyStateForModem(ctx, "", "wws0"); err == nil {
 		t.Fatal("saveProxyStateForModem() error = nil, want missing modem error")
 	}
@@ -207,12 +207,12 @@ func testDBConnectionState(t *testing.T) dbConnectionState {
 	return dbConnectionState{store: testStore(t)}
 }
 
-func saveRouteState(state connectionStateStore, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error {
-	return state.saveRouteStateForModem(context.Background(), "modem-1", interfaceName, preferred, changes)
+func saveRouteState(ctx context.Context, state connectionStateStore, interfaceName string, preferred []netlink.DefaultRoute, changes []defaultRouteChange) error {
+	return state.saveRouteStateForModem(ctx, "modem-1", interfaceName, preferred, changes)
 }
 
-func loadRouteState(state connectionStateStore, interfaceName string) ([]defaultRouteChange, bool, error) {
-	entries, err := state.loadAllRouteStates(context.Background())
+func loadRouteState(ctx context.Context, state connectionStateStore, interfaceName string) ([]defaultRouteChange, bool, error) {
+	entries, err := state.loadAllRouteStates(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -220,21 +220,21 @@ func loadRouteState(state connectionStateStore, interfaceName string) ([]default
 	return entry.Changes, ok, nil
 }
 
-func takeoverDefaultRoutesWithState(state connectionStateStore, modemID string, interfaceName string, preferred []netlink.DefaultRoute, ops defaultRouteOps) ([]defaultRouteChange, error) {
-	return takeoverDefaultRoutesWithStore(context.Background(), state, modemID, interfaceName, preferred, ops)
+func takeoverDefaultRoutesWithState(ctx context.Context, state connectionStateStore, modemID string, interfaceName string, preferred []netlink.DefaultRoute, ops defaultRouteOps) ([]defaultRouteChange, error) {
+	return takeoverDefaultRoutesWithStore(ctx, state, modemID, interfaceName, preferred, ops)
 }
 
-func cleanupDefaultRouteChanges(state connectionStateStore, interfaceName string, changes []defaultRouteChange, ops defaultRouteOps) error {
-	return cleanupDefaultRouteChangesWithStore(context.Background(), state, interfaceName, changes, ops)
+func cleanupDefaultRouteChanges(ctx context.Context, state connectionStateStore, interfaceName string, changes []defaultRouteChange, ops defaultRouteOps) error {
+	return cleanupDefaultRouteChangesWithStore(ctx, state, interfaceName, changes, ops)
 }
 
-func restoreStaleDefaultRouteStatesWithState(state connectionStateStore, target routeStateRestoreTarget, ops defaultRouteOps) error {
-	return restoreStaleDefaultRouteStatesWithStore(context.Background(), state, target, ops)
+func restoreStaleDefaultRouteStatesWithState(ctx context.Context, state connectionStateStore, target routeStateRestoreTarget, ops defaultRouteOps) error {
+	return restoreStaleDefaultRouteStatesWithStore(ctx, state, target, ops)
 }
 
 func testStore(t *testing.T) *storage.Store {
 	t.Helper()
-	store, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	store, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}

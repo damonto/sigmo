@@ -1,7 +1,6 @@
 package mcpserver
 
 import (
-	"context"
 	"encoding/json"
 	"reflect"
 	"slices"
@@ -156,18 +155,18 @@ func TestCoreToolOutputSchemasDescribeEveryField(t *testing.T) {
 	server := mcp.NewServer(&mcp.Implementation{Name: "schema-test", Version: "1"}, nil)
 	catalog.registerTools(server, &execution{grant: grant})
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	serverSession, err := server.Connect(context.Background(), serverTransport, nil)
+	serverSession, err := server.Connect(t.Context(), serverTransport, nil)
 	if err != nil {
 		t.Fatalf("server.Connect() error = %v", err)
 	}
 	defer func() { _ = serverSession.Close() }()
 	client := mcp.NewClient(&mcp.Implementation{Name: "schema-client", Version: "1"}, nil)
-	clientSession, err := client.Connect(context.Background(), clientTransport, nil)
+	clientSession, err := client.Connect(t.Context(), clientTransport, nil)
 	if err != nil {
 		t.Fatalf("client.Connect() error = %v", err)
 	}
 	defer func() { _ = clientSession.Close() }()
-	listed, err := clientSession.ListTools(context.Background(), nil)
+	listed, err := clientSession.ListTools(t.Context(), nil)
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}

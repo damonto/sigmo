@@ -55,7 +55,7 @@ func TestWiFiCallingOverview(t *testing.T) {
 			})
 			fields := &modemstatus.Fields{}
 
-			err := extension(context.Background(), &mmodem.Modem{}, fields)
+			err := extension(t.Context(), &mmodem.Modem{}, fields)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("wifiCallingOverview() error = %v, want %v", err, tt.wantErr)

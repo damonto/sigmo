@@ -97,7 +97,7 @@ func (m *Media) OpenWebRTCSession(ctx context.Context, modem *mmodem.Modem, call
 		return nil, err
 	}
 	if !m.registerBridge(bridge) {
-		bridge.close()
+		bridge.close(ctx)
 		return nil, ErrMediaUnavailable
 	}
 	bridge.onClose = func() {
@@ -131,18 +131,18 @@ func (s *WebRTCSession) ICECandidates() <-chan WebRTCICECandidate {
 	return s.bridge.localICE
 }
 
-func (s *WebRTCSession) Close() {
+func (s *WebRTCSession) Close(ctx context.Context) {
 	if s == nil || s.bridge == nil {
 		return
 	}
-	s.bridge.close()
+	s.bridge.close(ctx)
 }
 
-func (s *WebRTCSession) CloseIfNotConnected() bool {
+func (s *WebRTCSession) CloseIfNotConnected(ctx context.Context) bool {
 	if s == nil || s.bridge == nil || s.Connected() {
 		return false
 	}
-	s.Close()
+	s.Close(ctx)
 	return true
 }
 
@@ -183,7 +183,7 @@ func (m *Media) Close(ctx context.Context) error {
 	m.bridgeMu.Unlock()
 
 	for _, bridge := range bridges {
-		bridge.close()
+		bridge.close(ctx)
 	}
 	return m.codec.Close(ctx)
 }
@@ -302,7 +302,7 @@ func newWebRTCBridge(ctx context.Context, media MediaSession, codec bridgeCodec,
 		}
 	}
 
-	bridgeCtx, cancel := context.WithCancel(context.Background())
+	bridgeCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	bridge := &webRTCBridge{
 		media:    media,
 		pc:       pc,
@@ -325,9 +325,9 @@ func newWebRTCBridge(ctx context.Context, media MediaSession, codec bridgeCodec,
 			bridge.cancelDisconnectTimer()
 			bridge.startDownlink(bridgeCtx)
 		case webRTCBridgeActionGraceClose:
-			bridge.closeAfterDisconnectGrace()
+			bridge.closeAfterDisconnectGrace(bridgeCtx)
 		case webRTCBridgeActionCloseNow:
-			go bridge.close()
+			go bridge.close(bridgeCtx)
 		}
 	})
 	pc.OnTrack(func(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
@@ -363,11 +363,11 @@ func (b *webRTCBridge) answer(ctx context.Context, offer WebRTCSessionDescriptio
 	return WebRTCSessionDescription{Type: "answer", SDP: local.SDP}, nil
 }
 
-func (b *webRTCBridge) close() {
+func (b *webRTCBridge) close(ctx context.Context) {
 	b.stop()
 	b.wg.Wait()
 	if b.evs != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), mediaCleanupTimeout)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), mediaCleanupTimeout)
 		if err := b.evs.Close(ctx); err != nil {
 			slog.Warn("close EVS transcoder", "error", err)
 		}
@@ -449,7 +449,7 @@ func (b *webRTCBridge) closeLocalICECandidates() {
 	}
 }
 
-func (b *webRTCBridge) closeAfterDisconnectGrace() {
+func (b *webRTCBridge) closeAfterDisconnectGrace(ctx context.Context) {
 	b.disconnectMu.Lock()
 	defer b.disconnectMu.Unlock()
 	if b.disconnectTimer != nil {
@@ -460,7 +460,7 @@ func (b *webRTCBridge) closeAfterDisconnectGrace() {
 			b.cancelDisconnectTimer()
 			return
 		}
-		b.close()
+		b.close(ctx)
 	})
 }
 
@@ -705,7 +705,7 @@ func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote,
 	sequenceNumber := random16()
 	timestamp := random32()
 	ssrc := random32()
-	buffer := []int16{}
+	var buffer []int16
 	frameSamples := voicecodec.AMRSamplesPerFrame(codec.amr)
 	for {
 		packet, _, err := track.ReadRTP()
@@ -782,7 +782,7 @@ func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote,
 
 func (b *webRTCBridge) runEVSUplink(ctx context.Context, track *webrtc.TrackRemote) {
 	writer := newEVSRTPWriter(0, false, random16(), random32(), random32())
-	buffer := []int16{}
+	var buffer []int16
 	for {
 		packet, _, err := track.ReadRTP()
 		if err != nil {

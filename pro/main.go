@@ -52,7 +52,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	err = server.Run(server.Config{
+	err = server.Run(context.Background(), server.Config{
 		Build:         info,
 		ListenAddress: listenAddress,
 		DBPath:        dbPath,
@@ -83,18 +83,18 @@ func authorizePro(ctx context.Context, cfg server.AuthorizationConfig) (server.A
 	})
 }
 
-func configurePro(runtime *server.Runtime) error {
+func configurePro(ctx context.Context, runtime *server.Runtime) error {
 	if source, ok := runtime.License.(appupdate.Source); ok {
 		runtime.SetUpdateSource(source)
 	}
 	app := &proApp{runtime: runtime}
 	if proIMS != nil {
-		if err := proIMS(app); err != nil {
+		if err := proIMS(ctx, app); err != nil {
 			return err
 		}
 	}
 	if proESIMTransfer != nil {
-		if err := proESIMTransfer(app); err != nil {
+		if err := proESIMTransfer(ctx, app); err != nil {
 			return err
 		}
 	}

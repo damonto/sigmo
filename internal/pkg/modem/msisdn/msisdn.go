@@ -25,7 +25,9 @@ func New(device string) (*MSISDN, error) {
 	}
 	m := &MSISDN{at: conn}
 	if err := m.selectRunner(); err != nil {
-		_ = conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close MSISDN client: %w", closeErr))
+		}
 		return nil, err
 	}
 	return m, nil

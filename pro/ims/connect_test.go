@@ -325,7 +325,7 @@ func TestValidateManagedVoLTE(t *testing.T) {
 				openManagedVoLTEDevice = previousOpen
 			})
 
-			err := validateManagedVoLTE(context.Background(), &mmodem.Modem{})
+			err := validateManagedVoLTE(t.Context(), &mmodem.Modem{})
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("validateManagedVoLTE() error = %v, want %v", err, tt.wantErr)
 			}
@@ -460,7 +460,7 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 				packetServiceWaitTimeout = previousPacketWaitTimeout
 			})
 
-			ctx := context.Background()
+			ctx := t.Context()
 			if tt.cancel {
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithCancel(ctx)
@@ -568,7 +568,7 @@ func TestReleaseManagedVoLTE(t *testing.T) {
 				packetServicePollInterval = previousPollInterval
 			})
 
-			ctx := context.Background()
+			ctx := t.Context()
 			if tt.cancel {
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithCancel(ctx)
@@ -643,7 +643,7 @@ func TestWaitForPacketService(t *testing.T) {
 				packetStatuses: slices.Clone(tt.statuses),
 				packetErrors:   slices.Clone(tt.errors),
 			}
-			ctx := context.Background()
+			ctx := t.Context()
 			if tt.cancel {
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithCancel(ctx)
@@ -768,7 +768,7 @@ func TestSuspendLegacyInternet(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 			if err != nil {
 				t.Fatalf("Open() error = %v", err)
@@ -829,7 +829,7 @@ func TestConnectOnceEnablesQMAPBeforeVoLTE(t *testing.T) {
 					PortType: wwanmodem.PortQMI,
 				}},
 			}
-			_, err := coordinator.connectOnce(context.Background(), modem, connectAttempt{sessionID: 1})
+			_, err := coordinator.connectOnce(t.Context(), modem, connectAttempt{sessionID: 1})
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("connectOnce() error = %v, want %v", err, tt.wantErr)
 			}
@@ -925,7 +925,7 @@ func TestResetManagedVoLTERestoresInternet(t *testing.T) {
 			})
 
 			device := &fakeManagedVoLTEDevice{}
-			ctx := context.Background()
+			ctx := t.Context()
 			if tt.cancelRestore {
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithCancel(ctx)
@@ -1115,7 +1115,7 @@ func TestSessionStateIgnoresStaleSessionID(t *testing.T) {
 		{
 			name: "stop async",
 			apply: func(c *coordinator, oldClient *imsgo.Client, currentClient *imsgo.Client) {
-				c.stopAsyncSession("modem-1", 1)
+				c.stopAsyncSession(t.Context(), "modem-1", 1)
 			},
 			wantConnected: true,
 			wantPhase:     sessionPhaseConnected,
@@ -1161,20 +1161,20 @@ func TestStopDeletesPendingWebsheet(t *testing.T) {
 		{
 			name: "stop",
 			stop: func(c *coordinator) {
-				c.stop("modem-1")
+				c.stop(t.Context(), "modem-1")
 			},
 		},
 		{
 			name: "stop async",
 			stop: func(c *coordinator) {
-				c.stopAsync("modem-1")
+				c.stopAsync(t.Context(), "modem-1")
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			broker := websheet.New(websheet.Config{AllowPrivateHosts: true})
-			sheet, err := broker.Create(context.Background(), websheet.Request{URL: "http://127.0.0.1/setup"})
+			sheet, err := broker.Create(t.Context(), websheet.Request{URL: "http://127.0.0.1/setup"})
 			if err != nil {
 				t.Fatalf("Create() error = %v", err)
 			}
@@ -1229,7 +1229,7 @@ func TestAttachWebsheetDeletesStaleSession(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			broker := websheet.New(websheet.Config{AllowPrivateHosts: true})
-			sheet, err := broker.Create(context.Background(), websheet.Request{URL: "http://127.0.0.1/setup"})
+			sheet, err := broker.Create(t.Context(), websheet.Request{URL: "http://127.0.0.1/setup"})
 			if err != nil {
 				t.Fatalf("Create() error = %v", err)
 			}
@@ -1404,7 +1404,7 @@ func TestStopFailsOpenCallsBeforeRemovingSession(t *testing.T) {
 	})
 	defer unsubscribe()
 
-	c.stop("modem-1")
+	c.stop(t.Context(), "modem-1")
 
 	if !cancelled {
 		t.Fatal("session was not cancelled")
@@ -1453,7 +1453,7 @@ func TestRestartWaitsForDetachedSessionBeforeStartingReplacement(t *testing.T) {
 	}
 	restartDone := make(chan struct{})
 	go func() {
-		c.restart(modem, "profile-1")
+		c.restart(t.Context(), modem, "profile-1")
 		close(restartDone)
 	}()
 
@@ -1484,7 +1484,7 @@ func TestRestartWaitsForDetachedSessionBeforeStartingReplacement(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("restart did not return after starting replacement")
 	}
-	c.stop(modem.EquipmentIdentifier)
+	c.stop(t.Context(), modem.EquipmentIdentifier)
 }
 
 func TestStopAllWaitsForDetachedAsyncSession(t *testing.T) {
@@ -1499,10 +1499,10 @@ func TestStopAllWaitsForDetachedAsyncSession(t *testing.T) {
 		voiceSubscribers: make(map[uint64]VoiceEventFunc),
 	}
 
-	c.stopAsync("modem-1")
+	c.stopAsync(t.Context(), "modem-1")
 	stopped := make(chan error, 1)
 	go func() {
-		_, err := c.stopAll()
+		_, err := c.stopAll(t.Context())
 		stopped <- err
 	}()
 	select {
@@ -1521,7 +1521,7 @@ func TestStopAllWaitsForDetachedAsyncSession(t *testing.T) {
 		t.Fatal("stopAll() did not return after detached session stopped")
 	}
 
-	c.start(&mmodem.Modem{EquipmentIdentifier: "modem-2"}, "profile-2")
+	c.start(t.Context(), &mmodem.Modem{EquipmentIdentifier: "modem-2"}, "profile-2")
 	c.mu.Lock()
 	started := c.sessions["modem-2"] != nil
 	c.mu.Unlock()
@@ -1567,7 +1567,7 @@ func TestStopAllWaitsForSynchronouslyDetachedSession(t *testing.T) {
 
 	stopDone := make(chan struct{})
 	go func() {
-		c.stop("modem-1")
+		c.stop(t.Context(), "modem-1")
 		close(stopDone)
 	}()
 	select {
@@ -1578,7 +1578,7 @@ func TestStopAllWaitsForSynchronouslyDetachedSession(t *testing.T) {
 
 	shutdownDone := make(chan error, 1)
 	go func() {
-		_, err := c.stopAll()
+		_, err := c.stopAll(t.Context())
 		shutdownDone <- err
 	}()
 	select {
@@ -1611,7 +1611,7 @@ func TestStopAllIgnoresCompletedDetachedSessionCleanupErrors(t *testing.T) {
 		voiceSubscribers: make(map[uint64]VoiceEventFunc),
 	}
 
-	_, err := c.stopAll()
+	_, err := c.stopAll(t.Context())
 	if err != nil {
 		t.Fatalf("stopAll() error = %v, want nil", err)
 	}
@@ -1627,7 +1627,7 @@ func TestStopAllReturnsInFlightDetachedSessionCleanupErrors(t *testing.T) {
 
 	stopped := make(chan error, 1)
 	go func() {
-		_, err := c.stopAll()
+		_, err := c.stopAll(t.Context())
 		stopped <- err
 	}()
 
@@ -1683,7 +1683,7 @@ func TestDisconnectRemovesSessionAndFailsOpenCalls(t *testing.T) {
 	})
 	defer unsubscribe()
 
-	err := c.Disconnect(context.Background(), &mmodem.Modem{EquipmentIdentifier: "modem-1"})
+	err := c.Disconnect(t.Context(), &mmodem.Modem{EquipmentIdentifier: "modem-1"})
 
 	if err != nil {
 		t.Fatalf("Disconnect() error = %v", err)
@@ -1705,10 +1705,10 @@ func TestDisconnectRemovesSessionAndFailsOpenCalls(t *testing.T) {
 func TestDisconnectIsIdempotent(t *testing.T) {
 	c := &coordinator{sessions: make(map[string]*sessionState)}
 
-	if err := c.Disconnect(context.Background(), &mmodem.Modem{EquipmentIdentifier: "modem-1"}); err != nil {
+	if err := c.Disconnect(t.Context(), &mmodem.Modem{EquipmentIdentifier: "modem-1"}); err != nil {
 		t.Fatalf("Disconnect() error = %v", err)
 	}
-	if err := c.Disconnect(context.Background(), nil); err != nil {
+	if err := c.Disconnect(t.Context(), nil); err != nil {
 		t.Fatalf("Disconnect(nil) error = %v", err)
 	}
 }
@@ -1759,7 +1759,7 @@ func TestStopByDeviceStopsMatchingGeneration(t *testing.T) {
 				"modem-2": session("modem-2", "/devices/modem-2"),
 			}}
 
-			c.stopByDevice(tt.deviceKey, tt.generation)
+			c.stopByDevice(t.Context(), tt.deviceKey, tt.generation)
 
 			gotRemaining := sessionKeys(c.sessions)
 			if gotRemaining != tt.wantRemaining {

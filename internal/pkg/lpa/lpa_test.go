@@ -52,7 +52,7 @@ func TestLockedChannelDisconnectOnce(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			key := "test:" + tt.name
-			gmu.Lock(key)
+			operationLocks.Lock(key)
 			channel := &lockedChannel{SmartCardChannel: tt.channel, key: key}
 
 			err := channel.Disconnect()
@@ -93,7 +93,7 @@ func TestClientCloseReleasesSIMSlotOnce(t *testing.T) {
 
 func TestClientDiscardSkipsInvalidatedLogicalChannel(t *testing.T) {
 	channel := &fakeSmartCardChannel{logicalChannel: 3}
-	client, err := NewWithChannelFactory(t.Context(), ChannelConfig{AID: AIDs[0]}, func(context.Context) (driver.SmartCardChannel, error) {
+	client, err := NewWithChannelFactory(t.Context(), ChannelConfig{AID: supportedAIDs[0]}, func(context.Context) (driver.SmartCardChannel, error) {
 		return channel, nil
 	})
 	if err != nil {
@@ -167,8 +167,8 @@ func TestNoSupportedAIDCacheability(t *testing.T) {
 			if got := errors.Is(err, errCacheableNoSupportedAID); got != tt.cacheable {
 				t.Fatalf("cacheable error = %v, want %v", got, tt.cacheable)
 			}
-			if len(channels) != len(AIDs) {
-				t.Fatalf("channels created = %d, want %d", len(channels), len(AIDs))
+			if len(channels) != len(supportedAIDs) {
+				t.Fatalf("channels created = %d, want %d", len(channels), len(supportedAIDs))
 			}
 			for i, channel := range channels {
 				if channel.disconnects != 1 {
@@ -213,7 +213,7 @@ func TestNewWithChannelFactoryUsesFreshChannelForAIDFallback(t *testing.T) {
 func TestNewWithChannelFactoryDisconnectsWhenOptionsAreInvalid(t *testing.T) {
 	channel := &fakeSmartCardChannel{}
 	_, err := NewWithChannelFactory(t.Context(), ChannelConfig{
-		AID:      AIDs[0],
+		AID:      supportedAIDs[0],
 		ConfigID: "invalid-mss",
 		Settings: &settings.Settings{Modems: map[string]settings.Modem{"invalid-mss": {MSS: 255}}},
 	}, func(context.Context) (driver.SmartCardChannel, error) {
@@ -249,7 +249,7 @@ func TestNewWithChannelFactoryReleasesLockAfterFactoryFailure(t *testing.T) {
 }
 
 func TestContextRoundTripperCancelsInFlightRequest(t *testing.T) {
-	operation := newOperationContext(context.Background())
+	operation := newOperationContext(t.Context())
 	transport := &contextRoundTripper{
 		operation: operation,
 		next: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
@@ -282,8 +282,8 @@ func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func TestNewWithChannelFactoryStopsWaitingForLockAfterCancellation(t *testing.T) {
 	key := "test:new-with-channel-factory-cancellation"
-	gmu.Lock(key)
-	t.Cleanup(func() { gmu.Unlock(key) })
+	operationLocks.Lock(key)
+	t.Cleanup(func() { operationLocks.Unlock(key) })
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -307,7 +307,7 @@ func TestLockedChannelCloseLogicalChannelReleasesOnError(t *testing.T) {
 	t.Parallel()
 
 	key := "test:close-logical-channel-error"
-	gmu.Lock(key)
+	operationLocks.Lock(key)
 	channel := &fakeSmartCardChannel{closeLogicalChannelErr: errFakeCloseLogicalChannel}
 	locked := &lockedChannel{SmartCardChannel: channel, key: key}
 
@@ -361,9 +361,9 @@ func TestNewWithChannelFactoryLogger(t *testing.T) {
 			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 			defer slog.SetDefault(previous)
 
-			client, err := NewWithChannelFactory(context.Background(), ChannelConfig{
+			client, err := NewWithChannelFactory(t.Context(), ChannelConfig{
 				LockKey: "test:" + tt.name,
-				AID:     AIDs[0],
+				AID:     supportedAIDs[0],
 				Logger:  mmodem.LoggerForIMEI("860588043408833"),
 			}, func(context.Context) (driver.SmartCardChannel, error) {
 				return tt.channel, nil
@@ -395,8 +395,8 @@ func assertLockReleased(t *testing.T, key string) {
 
 	acquired := make(chan struct{})
 	go func() {
-		gmu.Lock(key)
-		defer gmu.Unlock(key)
+		operationLocks.Lock(key)
+		defer operationLocks.Unlock(key)
 		close(acquired)
 	}()
 

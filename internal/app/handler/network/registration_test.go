@@ -1,7 +1,6 @@
 package network
 
 import (
-	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -23,7 +22,7 @@ func TestRegistrationScope(t *testing.T) {
 			name: "profile scope wins",
 			modem: &mmodem.Modem{
 				EquipmentIdentifier: "imei-1",
-				Sim:                 &mmodem.SIM{Identifier: "iccid-1"},
+				SIM:                 &mmodem.SIM{Identifier: "iccid-1"},
 			},
 			want: "profile:iccid-1",
 		},
@@ -55,7 +54,7 @@ func TestRegistrationScope(t *testing.T) {
 func TestRunRegistrationRestoreRequiresStorage(t *testing.T) {
 	t.Parallel()
 
-	err := RunRegistrationRestore(context.Background(), nil, nil)
+	err := RunRegistrationRestore(t.Context(), nil, nil)
 	if err == nil {
 		t.Fatal("RunRegistrationRestore() error = nil, want storage error")
 	}
@@ -122,7 +121,7 @@ func TestNewNetworkRequiresDependencies(t *testing.T) {
 func openNetworkTestStore(t *testing.T) *storage.Store {
 	t.Helper()
 
-	db, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	db, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)
 	}

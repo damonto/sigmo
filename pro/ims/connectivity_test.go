@@ -68,7 +68,7 @@ func TestAirplaneModeVoLTELifecyclePreservesSetting(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 			if err != nil {
 				t.Fatalf("storage.Open() error = %v", err)
@@ -93,7 +93,7 @@ func TestAirplaneModeVoLTELifecyclePreservesSetting(t *testing.T) {
 			}
 			connectivity := &Connectivity{volte: coordinator}
 			modem := qmiTestModem("modem-1")
-			modem.Sim = &mmodem.SIM{Identifier: "profile-1"}
+			modem.SIM = &mmodem.SIM{Identifier: "profile-1"}
 
 			if err := connectivity.ChangeAirplaneMode(ctx, modem, true, func() (bool, error) {
 				coordinator.mu.Lock()
@@ -103,7 +103,7 @@ func TestAirplaneModeVoLTELifecyclePreservesSetting(t *testing.T) {
 				if session != nil || !suspended {
 					t.Fatalf("VoLTE state during Airplane enable = session:%v suspended:%t", session != nil, suspended)
 				}
-				coordinator.start(modem, "profile-1")
+				coordinator.start(t.Context(), modem, "profile-1")
 				coordinator.mu.Lock()
 				started := coordinator.sessions[modem.EquipmentIdentifier] != nil
 				coordinator.mu.Unlock()
@@ -144,7 +144,7 @@ func TestAirplaneModeVoLTELifecyclePreservesSetting(t *testing.T) {
 			if hasSession != tt.wantSession {
 				t.Fatalf("session after Airplane disable = %t, want %t", hasSession, tt.wantSession)
 			}
-			coordinator.stop(modem.EquipmentIdentifier)
+			coordinator.stop(t.Context(), modem.EquipmentIdentifier)
 		})
 	}
 }
@@ -186,7 +186,7 @@ func TestAirplaneModeVoLTERollbackUsesAppliedState(t *testing.T) {
 			}
 			connectivity := &Connectivity{volte: coordinator}
 			modem := qmiTestModem("modem-1")
-			modem.Sim = &mmodem.SIM{Identifier: "profile-1"}
+			modem.SIM = &mmodem.SIM{Identifier: "profile-1"}
 
 			err = connectivity.ChangeAirplaneMode(ctx, modem, true, func() (bool, error) {
 				return tt.applied, errChange
@@ -204,7 +204,7 @@ func TestAirplaneModeVoLTERollbackUsesAppliedState(t *testing.T) {
 			if suspended != tt.wantSuspended {
 				t.Fatalf("suspended = %t, want %t", suspended, tt.wantSuspended)
 			}
-			coordinator.stop(modem.EquipmentIdentifier)
+			coordinator.stop(t.Context(), modem.EquipmentIdentifier)
 		})
 	}
 }
@@ -236,7 +236,7 @@ func TestAirplaneModeVoLTERestoreUsesReloadedQMIModem(t *testing.T) {
 	replacement := qmiTestModem("modem-1")
 	replacement.PrimaryPort = "cdc-wdm0"
 	replacement.Status.Power = wwanmodem.PowerStateOn
-	replacement.Sim = &mmodem.SIM{Identifier: "profile-1"}
+	replacement.SIM = &mmodem.SIM{Identifier: "profile-1"}
 	changed := false
 	connectivity := &Connectivity{
 		volte: coordinator,
@@ -272,7 +272,7 @@ func TestAirplaneModeVoLTERestoreUsesReloadedQMIModem(t *testing.T) {
 	if session.modem != replacement {
 		t.Fatalf("VoLTE session modem = %p, want replacement %p", session.modem, replacement)
 	}
-	coordinator.stop(old.EquipmentIdentifier)
+	coordinator.stop(t.Context(), old.EquipmentIdentifier)
 }
 
 func TestAirplaneModeVoLTEResumesDeferredReplacementAfterReloadError(t *testing.T) {
@@ -287,13 +287,13 @@ func TestAirplaneModeVoLTEResumesDeferredReplacementAfterReloadError(t *testing.
 	old.Status.Power = wwanmodem.PowerStateLow
 	replacement := qmiTestModem("modem-1")
 	replacement.PrimaryPort = "cdc-wdm0"
-	replacement.Sim = &mmodem.SIM{Identifier: "profile-1"}
+	replacement.SIM = &mmodem.SIM{Identifier: "profile-1"}
 	connectivity := &Connectivity{
 		volte: coordinator,
 		reloadModem: func(context.Context, *mmodem.Modem) (*mmodem.Modem, error) {
 			// Registry publishes the replacement before a timed-out Reload caller
 			// observes its error. The start must be remembered until suspension ends.
-			coordinator.start(replacement, "profile-1")
+			coordinator.start(t.Context(), replacement, "profile-1")
 			return nil, context.DeadlineExceeded
 		},
 	}
@@ -320,7 +320,7 @@ func TestAirplaneModeVoLTEResumesDeferredReplacementAfterReloadError(t *testing.
 	if session == nil || session.modem != replacement {
 		t.Fatalf("VoLTE session = %+v, want replacement modem %p", session, replacement)
 	}
-	coordinator.stop(old.EquipmentIdentifier)
+	coordinator.stop(t.Context(), old.EquipmentIdentifier)
 }
 
 func TestReplaceVoLTESettingsRejectsAirplaneMode(t *testing.T) {

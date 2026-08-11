@@ -18,7 +18,7 @@ import (
 	pims "github.com/damonto/sigmo/pro/ims"
 )
 
-var proIMS = func(app *proApp) error {
+var proIMS = func(ctx context.Context, app *proApp) error {
 	runtime := app.runtime
 	app.RegisterWebsheets()
 	connectivity := pims.NewConnectivity(pims.ConnectivityConfig{
@@ -37,7 +37,7 @@ var proIMS = func(app *proApp) error {
 		Route: procall.RouteVoLTE,
 		Voice: connectivity.VoLTE(),
 	})
-	media, err := procall.NewMedia(context.Background(), calls)
+	media, err := procall.NewMedia(ctx, calls)
 	if err != nil {
 		return fmt.Errorf("configure call media: %w", err)
 	}
@@ -63,6 +63,10 @@ var proIMS = func(app *proApp) error {
 
 type wifiCallingStatusFunc func(context.Context, *mmodem.Modem) (pims.WiFiCallingStatus, error)
 
+type callForwarder interface {
+	ForwardCall(context.Context, storage.Call) error
+}
+
 func wifiCallingOverview(readStatus wifiCallingStatusFunc) modemstatus.Extension {
 	return func(ctx context.Context, modem *mmodem.Modem, fields *modemstatus.Fields) error {
 		status, err := readStatus(ctx, modem)
@@ -78,9 +82,7 @@ func wifiCallingOverview(readStatus wifiCallingStatusFunc) modemstatus.Extension
 	}
 }
 
-func forwardCalls(ctx context.Context, relay interface {
-	ForwardCall(context.Context, storage.Call) error
-}, calls *procall.Calls) error {
+func forwardCalls(ctx context.Context, relay callForwarder, calls *procall.Calls) error {
 	events, unsubscribe := calls.Subscribe(16)
 	defer unsubscribe()
 

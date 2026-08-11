@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,7 +9,7 @@ import (
 func TestAuthTokenStorage(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	expiresAt := now.Add(time.Hour)
@@ -46,7 +45,7 @@ func TestAuthTokenStorage(t *testing.T) {
 func TestCreateAuthTokenDeletesExpiredTokens(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	if err := store.CreateAuthToken(ctx, "expired", time.Now().Add(-time.Hour)); err != nil {
 		t.Fatalf("CreateAuthToken() expired error = %v", err)
@@ -67,7 +66,7 @@ func TestCreateAuthTokenDeletesExpiredTokens(t *testing.T) {
 func TestAuthTokenPersistsAcrossReopen(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "sigmo.db")
 	store, err := Open(ctx, path)
 	if err != nil {

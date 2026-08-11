@@ -56,10 +56,7 @@ func (u *BoundUnderlay) resolver() *net.Resolver {
 	return newDNSResolver(u.dnsServers, dialer.DialContext)
 }
 
-func newDNSResolver(
-	servers []string,
-	dialContext func(context.Context, string, string) (net.Conn, error),
-) *net.Resolver {
+func newDNSResolver(servers []string, dialContext func(context.Context, string, string) (net.Conn, error)) *net.Resolver {
 	var next atomic.Uint64
 	return &net.Resolver{
 		PreferGo: true,

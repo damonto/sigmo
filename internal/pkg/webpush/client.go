@@ -226,15 +226,7 @@ func (c *Client) Send(ctx context.Context, event notifyevent.Event) error {
 	return combined
 }
 
-func (c *Client) sendOne(
-	ctx context.Context,
-	client httpClient,
-	privateKey *ecdsa.PrivateKey,
-	item storage.PushSubscription,
-	payload []byte,
-	ttl int,
-	priority urgency,
-) error {
+func (c *Client) sendOne(ctx context.Context, client httpClient, privateKey *ecdsa.PrivateKey, item storage.PushSubscription, payload []byte, ttl int, priority urgency) error {
 	keys, err := decodeSubscriptionKeys(item.Auth, item.P256DH)
 	if err != nil {
 		return fmt.Errorf("decode subscription keys: %w", err)

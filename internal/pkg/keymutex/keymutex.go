@@ -31,7 +31,9 @@ func New() *KeyMutex {
 // If a lock for this key already exists, it will wait until it's released.
 // The lock should be released by calling Unlock with the same key.
 func (km *KeyMutex) Lock(key any) {
-	_ = km.LockContext(context.Background(), key)
+	value, _ := km.maps.LoadOrStore(key, newKeyLock())
+	lock := value.(*keyLock)
+	<-lock.token
 }
 
 // LockContext acquires the lock or returns when ctx is canceled.

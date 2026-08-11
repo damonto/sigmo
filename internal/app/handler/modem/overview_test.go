@@ -44,7 +44,7 @@ func TestCatalogBuildListResponseKeepsDiscoveredModems(t *testing.T) {
 					EquipmentIdentifier: "good-modem",
 					Model:               "Locked",
 					Status:              wwanmodem.Status{Power: wwanmodem.PowerStateOn, SIM: wwanmodem.SIMStateLocked},
-					Sim:                 &mmodem.SIM{ATR: euiccATR},
+					SIM:                 &mmodem.SIM{ATR: euiccATR},
 				},
 			},
 			wantIDs: []string{"bad-modem", "good-modem"},
@@ -66,7 +66,7 @@ func TestCatalogBuildListResponseKeepsDiscoveredModems(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			catalog := newCatalog(settings.NewMemoryStore(settings.Default()), nil)
 
-			got, err := catalog.buildListResponse(context.Background(), tt.devices)
+			got, err := catalog.buildListResponse(t.Context(), tt.devices)
 			if err != nil {
 				t.Fatalf("buildListResponse() error = %v", err)
 			}
@@ -89,7 +89,7 @@ func TestCatalogBuildListResponseKeepsSearchingModemWhenLiveQueriesFail(t *testi
 		Manufacturer:        "Qualcomm",
 		Model:               "Searching modem",
 		Status:              wwanmodem.Status{Power: wwanmodem.PowerStateOn, Registration: wwanmodem.RegistrationSearching},
-		Sim: &mmodem.SIM{
+		SIM: &mmodem.SIM{
 			Active:             true,
 			Identifier:         "8944000000000000000",
 			OperatorIdentifier: "23433",
@@ -97,7 +97,7 @@ func TestCatalogBuildListResponseKeepsSearchingModemWhenLiveQueriesFail(t *testi
 		},
 	}
 
-	got, err := catalog.buildListResponse(context.Background(), []*mmodem.Modem{device})
+	got, err := catalog.buildListResponse(t.Context(), []*mmodem.Modem{device})
 	if err != nil {
 		t.Fatalf("buildListResponse() error = %v", err)
 	}
@@ -113,8 +113,8 @@ func TestCatalogBuildListResponseKeepsSearchingModemWhenLiveQueriesFail(t *testi
 	if got[0].RegistrationState != registrationStateName(wwanmodem.RegistrationSearching) {
 		t.Fatalf("registration state = %q, want %q", got[0].RegistrationState, registrationStateName(wwanmodem.RegistrationSearching))
 	}
-	if got[0].SIM.Identifier != device.Sim.Identifier {
-		t.Fatalf("SIM identifier = %q, want %q", got[0].SIM.Identifier, device.Sim.Identifier)
+	if got[0].SIM.Identifier != device.SIM.Identifier {
+		t.Fatalf("SIM identifier = %q, want %q", got[0].SIM.Identifier, device.SIM.Identifier)
 	}
 }
 
@@ -164,10 +164,10 @@ func TestCatalogBuildResponseLockedModem(t *testing.T) {
 				Manufacturer:        "Quectel",
 				Model:               "RM520N",
 				Status:              wwanmodem.Status{Power: wwanmodem.PowerStateOn, SIM: wwanmodem.SIMStateLocked},
-				Sim:                 &mmodem.SIM{Slot: 1, Active: true, ATR: []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}},
+				SIM:                 &mmodem.SIM{Slot: 1, Active: true, ATR: []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}},
 			}
 
-			got, err := catalog.buildResponse(context.Background(), device)
+			got, err := catalog.buildResponse(t.Context(), device)
 			if err != nil {
 				t.Fatalf("buildResponse() error = %v", err)
 			}
@@ -198,9 +198,9 @@ func TestCatalogBuildResponseUsesCachedSIMWithoutTransport(t *testing.T) {
 		Manufacturer:        "Qualcomm",
 		Model:               "Cached modem",
 		Status:              wwanmodem.Status{Power: wwanmodem.PowerStateOn, Registration: wwanmodem.RegistrationHome},
-		PrimarySimSlot:      1,
-		SimSlots:            []uint32{1},
-		Sim: &mmodem.SIM{
+		PrimarySIMSlot:      1,
+		SIMSlots:            []uint32{1},
+		SIM: &mmodem.SIM{
 			Slot:               1,
 			Active:             true,
 			Identifier:         "8944000000000000000",
@@ -214,10 +214,10 @@ func TestCatalogBuildResponseUsesCachedSIMWithoutTransport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildResponse() error = %v", err)
 	}
-	if got.SIM.Identifier != device.Sim.Identifier {
-		t.Fatalf("primary SIM identifier = %q, want %q", got.SIM.Identifier, device.Sim.Identifier)
+	if got.SIM.Identifier != device.SIM.Identifier {
+		t.Fatalf("primary SIM identifier = %q, want %q", got.SIM.Identifier, device.SIM.Identifier)
 	}
-	if len(got.Slots) != 1 || got.Slots[0].Slot != 1 || got.Slots[0].Identifier != device.Sim.Identifier {
+	if len(got.Slots) != 1 || got.Slots[0].Slot != 1 || got.Slots[0].Identifier != device.SIM.Identifier {
 		t.Fatalf("slots = %+v, want cached primary SIM", got.Slots)
 	}
 	if got.PrimaryPort != device.PrimaryPort {
@@ -271,7 +271,7 @@ func TestCatalogApplyOverviewExtensions(t *testing.T) {
 			catalog := newCatalog(settings.NewMemoryStore(settings.Default()), nil, tt.extensions...)
 			resp := &ModemResponse{}
 
-			err := catalog.applyOverviewExtensions(context.Background(), &mmodem.Modem{}, resp)
+			err := catalog.applyOverviewExtensions(t.Context(), &mmodem.Modem{}, resp)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("applyOverviewExtensions() error = %v, want %v", err, tt.wantErr)
@@ -320,9 +320,7 @@ func TestCatalogApplyInternetStatus(t *testing.T) {
 			catalog := &catalog{internet: tt.internet}
 			resp := &ModemResponse{}
 
-			catalog.applyInternetStatus(
-				context.Background(),
-				&mmodem.Modem{EquipmentIdentifier: "modem-1"},
+			catalog.applyInternetStatus(t.Context(), &mmodem.Modem{EquipmentIdentifier: "modem-1"},
 				resp,
 			)
 

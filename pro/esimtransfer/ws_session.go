@@ -49,7 +49,10 @@ func (s *wsSession) disconnect() {
 }
 
 func (s *wsSession) readLoop(cancel context.CancelFunc) {
-	defer s.disconnect()
+	defer func() {
+		cancel()
+		s.disconnect()
+	}()
 	for {
 		var msg wsClientMessage
 		if err := s.conn.ReadJSON(&msg); err != nil {

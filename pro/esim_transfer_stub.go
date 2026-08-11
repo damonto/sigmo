@@ -2,4 +2,6 @@
 
 package main
 
-var proESIMTransfer func(*proApp) error
+import "context"
+
+var proESIMTransfer func(context.Context, *proApp) error

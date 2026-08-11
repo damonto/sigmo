@@ -99,7 +99,7 @@ func (c modemWFCSetupCard) IMSI() string {
 	if c.sim == nil {
 		return ""
 	}
-	return strings.TrimSpace(c.sim.Imsi)
+	return strings.TrimSpace(c.sim.IMSI)
 }
 
 func (c modemWFCSetupCard) MCC() string {
@@ -148,13 +148,15 @@ func (c modemWFCSetupCard) simPLMN() string {
 	return strings.TrimSpace(c.sim.OperatorIdentifier)
 }
 
-func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem) (wfcsetup.Result, imsgo.Underlay, error) {
+func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem) (result wfcsetup.Result, underlay imsgo.Underlay, err error) {
 	reader, err := OpenWWAN(ctx, modem, WWANConfig{Access: AccessWiFiCalling})
 	if err != nil {
 		return wfcsetup.Result{}, nil, fmt.Errorf("open Wi-Fi Calling SIM reader: %w", err)
 	}
 	defer func() {
-		_ = reader.Close()
+		if closeErr := reader.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close Wi-Fi Calling SIM reader: %w", closeErr))
+		}
 	}()
 	cfg, err := c.modemClientConfig(ctx, modem, 0, "")
 	if err != nil {
@@ -165,7 +167,7 @@ func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mm
 		return wfcsetup.Result{}, nil, fmt.Errorf("load Wi-Fi Calling SIM: %w", err)
 	}
 
-	result, err := wfcsetup.Check(ctx, wfcsetup.Request{
+	result, err = wfcsetup.Check(ctx, wfcsetup.Request{
 		Card:            card,
 		AuthenticateAKA: card.EAPAKA,
 		Device:          wfcSetupDevice(cfg.Terminal),

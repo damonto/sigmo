@@ -3,14 +3,13 @@
 package voicecodec
 
 import (
-	"context"
 	"testing"
 
 	"github.com/damonto/ims-go/ims/voice/codec/evs"
 )
 
 func TestEVSTranscoderEncodeDecode(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	engine, err := NewEngine(ctx)
 	if err != nil {
 		t.Fatalf("NewEngine() error = %v", err)
@@ -61,7 +60,7 @@ func TestEVSTranscoderEncodeDecode(t *testing.T) {
 }
 
 func TestEVSTranscoderDecodesSpecialFrames(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	engine, err := NewEngine(ctx)
 	if err != nil {
 		t.Fatalf("NewEngine() error = %v", err)

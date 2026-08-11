@@ -28,7 +28,7 @@ func TestSessionMSISDNMBIM(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &fakeMBIMNetwork{subscriberReady: uiccmbim.SubscriberReadyStatusResponse{TelephoneNumbers: slices.Clone(tt.numbers)}, subscriberReadyErr: tt.err}
 			session := mbimSessionWithNetwork(client)
-			got, err := session.MSISDN(context.Background())
+			got, err := session.MSISDN(t.Context())
 			if tt.err != nil {
 				if !errors.Is(err, tt.err) {
 					t.Fatalf("MSISDN() error = %v, want %v", err, tt.err)
@@ -123,7 +123,7 @@ func TestSessionSIMStateMBIM(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client := &fakeMBIMNetwork{subscriberReady: tt.ready, subscriberReadyErr: tt.err}
 			session := mbimSessionWithNetwork(client)
-			got, err := session.SIMState(context.Background(), tt.target)
+			got, err := session.SIMState(t.Context(), tt.target)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("SIMState() error = %v, want %v", err, tt.wantErr)
@@ -154,7 +154,7 @@ func TestSessionVoLTEStatusMBIM(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = device.Close() })
 
-	got, err := device.VoLTEStatus(context.Background())
+	got, err := device.VoLTEStatus(t.Context())
 	if !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("VoLTEStatus() error = %v, want %v", err, ErrUnsupported)
 	}
@@ -190,7 +190,7 @@ func TestSessionPacketServiceStatusMBIM(t *testing.T) {
 			}
 			device := mbimSessionWithNetwork(client)
 			t.Cleanup(func() { _ = device.Close() })
-			got, err := device.PacketServiceStatus(context.Background())
+			got, err := device.PacketServiceStatus(t.Context())
 			if err != nil {
 				t.Fatalf("PacketServiceStatus() error = %v", err)
 			}
@@ -216,7 +216,7 @@ func TestSessionIMSProfileMBIM(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			device := mbimSessionWithNetwork(&fakeMBIMNetwork{contexts: slices.Clone(tt.contexts)})
 			t.Cleanup(func() { _ = device.Close() })
-			got, err := device.IMSProfile(context.Background())
+			got, err := device.IMSProfile(t.Context())
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("IMSProfile() error = nil, want error")
@@ -287,17 +287,17 @@ func TestMBIMSessionReusesClientPerSlot(t *testing.T) {
 	})
 
 	for range 2 {
-		if _, err := session.MSISDN(context.Background()); err != nil {
+		if _, err := session.MSISDN(t.Context()); err != nil {
 			t.Fatalf("MSISDN() error = %v", err)
 		}
 	}
 	if opens != 1 {
 		t.Fatalf("MBIM client opens = %d, want 1 for one slot", opens)
 	}
-	if _, err := session.SIMState(context.Background(), Target{Slot: 2}); err != nil {
+	if _, err := session.SIMState(t.Context(), Target{Slot: 2}); err != nil {
 		t.Fatalf("SIMState() error = %v", err)
 	}
-	if _, err := session.SIMState(context.Background(), Target{Slot: 2}); err != nil {
+	if _, err := session.SIMState(t.Context(), Target{Slot: 2}); err != nil {
 		t.Fatalf("SIMState(slot 2) error = %v", err)
 	}
 	if opens != 2 {
@@ -312,7 +312,7 @@ func TestMBIMSessionReusesClientPerSlot(t *testing.T) {
 			t.Errorf("MBIM client for slot %d was not closed", slot)
 		}
 	}
-	if _, err := session.MSISDN(context.Background()); !errors.Is(err, wwanmodem.ErrClosed) {
+	if _, err := session.MSISDN(t.Context()); !errors.Is(err, wwanmodem.ErrClosed) {
 		t.Fatalf("MSISDN() after Close() error = %v, want %v", err, wwanmodem.ErrClosed)
 	}
 }

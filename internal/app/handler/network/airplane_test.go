@@ -19,12 +19,7 @@ type airplaneModeLifecycleProbe struct {
 	afterErr  error
 }
 
-func (p *airplaneModeLifecycleProbe) ChangeAirplaneMode(
-	_ context.Context,
-	_ *mmodem.Modem,
-	enabled bool,
-	change func() (bool, error),
-) error {
+func (p *airplaneModeLifecycleProbe) ChangeAirplaneMode(_ context.Context, _ *mmodem.Modem, enabled bool, change func() (bool, error)) error {
 	p.calls = append(p.calls, fmt.Sprintf("lifecycle:%t", enabled))
 	if p.beforeErr != nil {
 		return p.beforeErr
@@ -53,7 +48,7 @@ func TestAirplaneModeUnsupported(t *testing.T) {
 		},
 	}
 
-	got, err := n.AirplaneMode(context.Background(), modem)
+	got, err := n.AirplaneMode(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("AirplaneMode() error = %v", err)
 	}
@@ -61,7 +56,7 @@ func TestAirplaneModeUnsupported(t *testing.T) {
 		t.Fatalf("AirplaneMode() = %#v, want unsupported disabled response", got)
 	}
 
-	err = n.SetAirplaneMode(context.Background(), modem, SetAirplaneModeRequest{Enabled: true})
+	err = n.SetAirplaneMode(t.Context(), modem, SetAirplaneModeRequest{Enabled: true})
 	if !errors.Is(err, wwanmodem.ErrNotSupported) {
 		t.Fatalf("SetAirplaneMode() error = %v, want unsupported", err)
 	}

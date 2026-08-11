@@ -95,12 +95,16 @@ func (c *qmiLPAChannel) TransmitContext(ctx context.Context, command []byte) ([]
 }
 
 func (c *qmiLPAChannel) CloseLogicalChannel(channel byte) error {
+	return c.CloseLogicalChannelContext(context.Background(), channel)
+}
+
+func (c *qmiLPAChannel) CloseLogicalChannelContext(ctx context.Context, channel byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
 		return errQMILPAChannelClosed
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), channelOpenTimeout)
+	ctx, cancel := context.WithTimeout(ctx, channelOpenTimeout)
 	defer cancel()
 	if err := c.reader.CloseLogicalChannel(ctx, channel); err != nil {
 		c.closed = true

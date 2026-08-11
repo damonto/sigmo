@@ -50,7 +50,7 @@ func New(store *storage.Store, settingsStore *settings.Store, webPush *webpush.C
 }
 
 func (s *Scheduler) Get(ctx context.Context, profileType ProfileType, profileID string) (storage.Reminder, bool, error) {
-	return s.store.GetReminder(ctx, string(profileType), strings.TrimSpace(profileID))
+	return s.store.Reminder(ctx, string(profileType), strings.TrimSpace(profileID))
 }
 
 func (s *Scheduler) Save(ctx context.Context, value storage.Reminder) error {

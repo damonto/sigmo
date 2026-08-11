@@ -70,7 +70,10 @@ func TestUpdateRequestValidation(t *testing.T) {
 		{name: "negative repeat", repeatDays: &negative, wantErr: true},
 		{name: "above maximum", repeatDays: &tooLarge, wantErr: true},
 	}
-	requestValidator := appvalidator.New()
+	requestValidator, err := appvalidator.New()
+	if err != nil {
+		t.Fatalf("appvalidator.New() error = %v", err)
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := requestValidator.Validate(UpdateRequest{RepeatDays: tt.repeatDays})
@@ -133,7 +136,7 @@ func TestServiceProcessDue(t *testing.T) {
 					t.Fatalf("event.ProfileID = %q, want iccid", event.ProfileID)
 				}
 				if tt.replace {
-					if err := scheduler.Save(context.Background(), storage.Reminder{
+					if err := scheduler.Save(t.Context(), storage.Reminder{
 						ProfileType: ProfileTypeESIM.String(),
 						ProfileID:   "iccid",
 						ModemID:     "modem",
@@ -150,7 +153,7 @@ func TestServiceProcessDue(t *testing.T) {
 			if tt.future {
 				nextAt = fixed.Add(time.Hour)
 			}
-			if err := store.UpsertReminder(context.Background(), storage.Reminder{
+			if err := store.UpsertReminder(t.Context(), storage.Reminder{
 				ProfileType: ProfileTypeESIM.String(),
 				ProfileID:   "iccid",
 				ModemID:     "modem",
@@ -161,15 +164,15 @@ func TestServiceProcessDue(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("UpsertReminder() error = %v", err)
 			}
-			if err := scheduler.processDue(context.Background()); err != nil {
+			if err := scheduler.processDue(t.Context()); err != nil {
 				t.Fatalf("processDue() error = %v", err)
 			}
 			if sent != tt.wantSent {
 				t.Fatalf("sent = %d, want %d", sent, tt.wantSent)
 			}
-			got, exists, err := store.GetReminder(context.Background(), ProfileTypeESIM.String(), "iccid")
+			got, exists, err := store.Reminder(t.Context(), ProfileTypeESIM.String(), "iccid")
 			if err != nil {
-				t.Fatalf("GetReminder() error = %v", err)
+				t.Fatalf("Reminder() error = %v", err)
 			}
 			if exists != tt.wantExists {
 				t.Fatalf("exists = %v, want %v", exists, tt.wantExists)
@@ -189,7 +192,7 @@ func TestServiceRunStopsWithContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if err := scheduler.Run(ctx); err != nil {
 		t.Fatalf("Run() error = %v", err)
@@ -198,7 +201,7 @@ func TestServiceRunStopsWithContext(t *testing.T) {
 
 func openTestStore(t *testing.T) *storage.Store {
 	t.Helper()
-	store, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	store, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)
 	}

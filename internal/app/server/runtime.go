@@ -23,7 +23,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/webpush"
 )
 
-type Extension func(*Runtime) error
+type Extension func(context.Context, *Runtime) error
 
 type Runner func(context.Context) error
 

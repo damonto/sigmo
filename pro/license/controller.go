@@ -110,9 +110,11 @@ func New(ctx context.Context, cfg Config) (*Controller, error) {
 		return nil, fmt.Errorf("remove legacy license lease: %w", err)
 	}
 	var savedSession storedSession
-	if err := cfg.Storage.Get(ctx, licenseStateScope, sessionStateKey, &savedSession); err != nil && !errors.Is(err, storage.ErrNotFound) {
+	err = cfg.Storage.Get(ctx, licenseStateScope, sessionStateKey, &savedSession)
+	if err != nil && !errors.Is(err, storage.ErrNotFound) {
 		return nil, fmt.Errorf("read device session: %w", err)
-	} else if err == nil && !validStoredSession(savedSession) {
+	}
+	if err == nil && !validStoredSession(savedSession) {
 		return nil, errors.New("read device session: invalid session state")
 	}
 	controller := &Controller{

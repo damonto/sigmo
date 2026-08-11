@@ -28,7 +28,7 @@ type controllerTestOutput struct {
 }
 
 func TestControllerToolFilteringAuthorizationAndAudit(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := newControllerTestEnv(t)
 	grant, token := env.issue(t, "Read agent", []string{"test.read"}, []string{"imei-a"}, false)
 	server := httptest.NewServer(env.controller.Handler())
@@ -124,7 +124,7 @@ func TestControllerClosesSessionsAndRejectsRevokedKeys(t *testing.T) {
 		t.Fatalf("closed key session status = %d, want %d", status, http.StatusNotFound)
 	}
 
-	if _, err := env.keys.Revoke(context.Background(), grant.ID); err != nil {
+	if _, err := env.keys.Revoke(t.Context(), grant.ID); err != nil {
 		t.Fatalf("Revoke() error = %v", err)
 	}
 	status, _ = controllerRequest(t, server.Client(), http.MethodPost, server.URL, token, "", "", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"test","version":"1"}}}`)
@@ -203,7 +203,7 @@ type controllerTestEnv struct {
 
 func newControllerTestEnv(t *testing.T) controllerTestEnv {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)
@@ -253,7 +253,7 @@ func newControllerTestEnv(t *testing.T) controllerTestEnv {
 
 func (e controllerTestEnv) issue(t *testing.T, name string, permissions []string, modemIDs []string, allModems bool) (mcpauth.Grant, string) {
 	t.Helper()
-	grant, token, err := e.keys.Issue(context.Background(), mcpauth.IssueRequest{Name: name, ValidityDays: mcpauth.DefaultValidityDays, AllModems: allModems, ModemIDs: modemIDs, Permissions: permissions})
+	grant, token, err := e.keys.Issue(t.Context(), mcpauth.IssueRequest{Name: name, ValidityDays: mcpauth.DefaultValidityDays, AllModems: allModems, ModemIDs: modemIDs, Permissions: permissions})
 	if err != nil {
 		t.Fatalf("Issue() error = %v", err)
 	}
@@ -265,7 +265,7 @@ func connectControllerClient(t *testing.T, server *httptest.Server, token string
 	httpClient := *server.Client()
 	httpClient.Transport = bearerRoundTripper{token: token, base: httpClient.Transport}
 	client := mcp.NewClient(&mcp.Implementation{Name: "controller-test", Version: "1"}, nil)
-	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{Endpoint: server.URL, HTTPClient: &httpClient, MaxRetries: -1, DisableStandaloneSSE: true}, nil)
+	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{Endpoint: server.URL, HTTPClient: &httpClient, MaxRetries: -1, DisableStandaloneSSE: true}, nil)
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}

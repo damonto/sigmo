@@ -2,4 +2,6 @@
 
 package main
 
-var proIMS func(*proApp) error
+import "context"
+
+var proIMS func(context.Context, *proApp) error

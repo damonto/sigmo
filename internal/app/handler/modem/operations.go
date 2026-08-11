@@ -27,14 +27,14 @@ func (h *Handler) SwitchSIM(ctx context.Context, id string, slot uint32) error {
 	if err != nil {
 		return err
 	}
-	switchCtx, cancel := context.WithTimeout(ctx, switchSimSlotTimeout)
+	switchCtx, cancel := context.WithTimeout(ctx, switchSIMSlotTimeout)
 	defer cancel()
 	if err := h.internet.Restore(switchCtx, device); err != nil {
 		return err
 	}
 	if err := h.simSlot.Switch(switchCtx, device, slotIndex); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return errSwitchSimSlotTimeout
+			return errSwitchSIMSlotTimeout
 		}
 		return err
 	}

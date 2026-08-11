@@ -65,7 +65,7 @@ func (h *Handler) CreateCheck(c *echo.Context) error {
 
 func (h *Handler) CreateInstallation(c *echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
-	if err := h.controller.StartInstall(); err != nil {
+	if err := h.controller.StartInstall(c.Request().Context()); err != nil {
 		if errors.Is(err, appupdate.ErrBusy) {
 			return httpapi.Error(c, http.StatusConflict, "update_busy", err.Error())
 		}

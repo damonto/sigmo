@@ -816,7 +816,7 @@ func putAuth(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
 
 	e := echo.New()
-	e.Validator = appvalidator.New()
+	e.Validator = newTestValidator(t)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings/auth", strings.NewReader(string(body)))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
@@ -845,7 +845,7 @@ func putProxy(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecorder 
 	t.Helper()
 
 	e := echo.New()
-	e.Validator = appvalidator.New()
+	e.Validator = newTestValidator(t)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/settings/proxy", strings.NewReader(string(body)))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
@@ -860,7 +860,7 @@ func putNotificationChannel(t *testing.T, h *Handler, channel string, body []byt
 	t.Helper()
 
 	e := echo.New()
-	e.Validator = appvalidator.New()
+	e.Validator = newTestValidator(t)
 	req := httptest.NewRequest(
 		http.MethodPut,
 		"/api/v1/settings/notifications/"+channel,
@@ -874,6 +874,15 @@ func putNotificationChannel(t *testing.T, h *Handler, channel string, body []byt
 		t.Fatalf("UpdateNotificationChannel() error = %v", err)
 	}
 	return rec
+}
+
+func newTestValidator(t *testing.T) *appvalidator.Validator {
+	t.Helper()
+	requestValidator, err := appvalidator.New()
+	if err != nil {
+		t.Fatalf("appvalidator.New() error = %v", err)
+	}
+	return requestValidator
 }
 
 func testStorage(t *testing.T) *storage.Store {

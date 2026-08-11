@@ -309,7 +309,7 @@ func (p *Pool) createAndLease(ctx context.Context, key poolKey, aid []byte) (*Le
 	}
 
 	lockKey := lpaLockKey(key.modem, key.slot)
-	if err := gmu.LockContext(ctx, lockKey); err != nil {
+	if err := operationLocks.LockContext(ctx, lockKey); err != nil {
 		releaseSIMSlot()
 		p.finishCreation(key, ready)
 		return nil, fmt.Errorf("reserve LPA client: %w", err)
@@ -328,7 +328,7 @@ func (p *Pool) createAndLease(ctx context.Context, key poolKey, aid []byte) (*Le
 	abortCreation := func(cause error) (*Lease, error) {
 		p.mu.Unlock()
 		closeErr := closeClientWhileLocked(client)
-		gmu.Unlock(lockKey)
+		operationLocks.Unlock(lockKey)
 		releaseSIMSlot()
 		if ownsReady {
 			close(ready)
@@ -379,7 +379,7 @@ func (p *Pool) createAndLease(ctx context.Context, key poolKey, aid []byte) (*Le
 	return newPoolLease(ctx, entry, releaseSIMSlot), nil
 }
 
-func (p *Pool) finishCreation(key poolKey, ready chan struct{}) {
+func (p *Pool) finishCreation(key poolKey, ready chan<- struct{}) {
 	p.mu.Lock()
 	if p.creating[key] == ready {
 		delete(p.creating, key)
@@ -429,14 +429,14 @@ func lease(ctx context.Context, entry *poolEntry) (*Lease, error) {
 	default:
 	}
 	if entry.lockKey != "" {
-		if err := gmu.LockContext(ctx, entry.lockKey); err != nil {
+		if err := operationLocks.LockContext(ctx, entry.lockKey); err != nil {
 			entry.gate <- struct{}{}
 			releaseReservation(releaseSIMSlot)
 			return nil, err
 		}
 		select {
 		case <-entry.done:
-			gmu.Unlock(entry.lockKey)
+			operationLocks.Unlock(entry.lockKey)
 			entry.gate <- struct{}{}
 			releaseReservation(releaseSIMSlot)
 			return nil, entry.err
@@ -451,7 +451,7 @@ func newPoolLease(ctx context.Context, entry *poolEntry, releaseSIMSlot func()) 
 	return newLease(entry.client, func(disposition leaseDisposition) error {
 		defer func() {
 			if entry.lockKey != "" {
-				gmu.Unlock(entry.lockKey)
+				operationLocks.Unlock(entry.lockKey)
 			}
 			entry.gate <- struct{}{}
 			releaseReservation(releaseSIMSlot)
@@ -517,7 +517,9 @@ func (p *Pool) warmModem(ctx context.Context, m *modem.Modem) {
 				continue
 			}
 			// The prewarm lease has no operation to run.
-			_ = client.Close()
+			if err := client.Close(); err != nil {
+				m.Logger().Debug("release prewarmed LPA client", "slot", slot, "seId", currentSE.ID, "error", err)
+			}
 		}
 	}
 }
@@ -766,9 +768,6 @@ func (p *Pool) Close(ctx context.Context) error {
 	if p == nil {
 		return nil
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
@@ -832,9 +831,6 @@ func closePoolEntryLocked(entry *poolEntry, err error) {
 }
 
 func (p *Pool) closeEntries(ctx context.Context, entries map[poolKey]*poolEntry) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	var result error
 	for _, entry := range entries {
 		select {
@@ -843,7 +839,7 @@ func (p *Pool) closeEntries(ctx context.Context, entries map[poolKey]*poolEntry)
 			return errors.Join(result, ctx.Err())
 		}
 		if entry.lockKey != "" {
-			if err := gmu.LockContext(ctx, entry.lockKey); err != nil {
+			if err := operationLocks.LockContext(ctx, entry.lockKey); err != nil {
 				if ctx.Err() != nil {
 					return errors.Join(result, ctx.Err())
 				}
@@ -865,14 +861,14 @@ func (p *Pool) closeEntries(ctx context.Context, entries map[poolKey]*poolEntry)
 		select {
 		case closeErr = <-closeDone:
 			if entry.lockKey != "" {
-				gmu.Unlock(entry.lockKey)
+				operationLocks.Unlock(entry.lockKey)
 			}
 		case <-ctx.Done():
 			closeErr = ctx.Err()
 			if entry.lockKey != "" {
 				go func(lockKey string) {
 					<-closeDone
-					gmu.Unlock(lockKey)
+					operationLocks.Unlock(lockKey)
 				}(entry.lockKey)
 			}
 			return errors.Join(result, closeErr)

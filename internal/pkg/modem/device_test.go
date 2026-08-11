@@ -31,7 +31,7 @@ func TestOpenDeviceRejectsInvalidInput(t *testing.T) {
 			name: "slot too large",
 			modem: &Modem{
 				PrimaryPort:    "/dev/cdc-wdm0",
-				PrimarySimSlot: maxSIMSlot + 1,
+				PrimarySIMSlot: maxSIMSlot + 1,
 				Ports: []ModemPort{
 					{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm0"},
 				},
@@ -58,7 +58,7 @@ func TestOpenDeviceReusesQMISessionForModemGeneration(t *testing.T) {
 	modem := &Modem{
 		EquipmentIdentifier: "123456789012345",
 		PrimaryPort:         "/dev/cdc-wdm0",
-		PrimarySimSlot:      1,
+		PrimarySIMSlot:      1,
 		Ports: []ModemPort{
 			{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm0"},
 		},
@@ -92,7 +92,7 @@ func TestOpenDeviceReusesQMISessionForModemGeneration(t *testing.T) {
 		t.Fatal("slot-specific control path did not reuse the generation session")
 	}
 
-	modem.PrimarySimSlot = 2
+	modem.PrimarySIMSlot = 2
 	third, err := OpenDevice(modem)
 	if err != nil {
 		t.Fatalf("OpenDevice(slot 2) error = %v", err)
@@ -110,7 +110,7 @@ func TestOpenDeviceReusesQMISessionForModemGeneration(t *testing.T) {
 	}
 	for name, device := range map[string]Device{"slot 1": first, "slot 2": third} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := device.PacketServiceStatus(context.Background()); err == nil {
+			if _, err := device.PacketServiceStatus(t.Context()); err == nil {
 				t.Fatal("PacketServiceStatus() after Modem.Close() error = nil, want error")
 			}
 		})
@@ -123,7 +123,7 @@ func TestOpenDeviceReusesQMISessionForModemGeneration(t *testing.T) {
 func TestOpenDeviceConcurrentQMISessionReuse(t *testing.T) {
 	modem := &Modem{
 		PrimaryPort:    "/dev/cdc-wdm0",
-		PrimarySimSlot: 1,
+		PrimarySIMSlot: 1,
 		Ports: []ModemPort{
 			{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm0"},
 		},
@@ -167,7 +167,7 @@ func TestOpenDeviceConcurrentQMISessionReuse(t *testing.T) {
 func TestOpenDeviceReusesMBIMSessionForModemGeneration(t *testing.T) {
 	modem := &Modem{
 		PrimaryPort:    "/dev/cdc-wdm0",
-		PrimarySimSlot: 1,
+		PrimarySIMSlot: 1,
 		Ports: []ModemPort{
 			{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
 		},
@@ -191,7 +191,7 @@ func TestOpenDeviceReusesMBIMSessionForModemGeneration(t *testing.T) {
 	if firstSession != secondSession {
 		t.Fatal("OpenDevice() returned different MBIM sessions for the same modem generation and SIM slot")
 	}
-	modem.PrimarySimSlot = 2
+	modem.PrimarySIMSlot = 2
 	third, err := OpenDevice(modem)
 	if err != nil {
 		t.Fatalf("OpenDevice(slot 2) error = %v", err)
@@ -212,7 +212,7 @@ func TestOpenVoLTEDeviceReusesGenerationQMISession(t *testing.T) {
 	modem := &Modem{
 		EquipmentIdentifier: "123456789012345",
 		PrimaryPort:         "/dev/cdc-wdm1",
-		PrimarySimSlot:      1,
+		PrimarySIMSlot:      1,
 		Ports: []ModemPort{
 			{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm1"},
 			{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
@@ -245,7 +245,7 @@ func TestOpenVoLTEDeviceReusesGenerationQMISession(t *testing.T) {
 func TestMBIMDeviceUnsupportedOperations(t *testing.T) {
 	device, err := OpenDevice(&Modem{
 		PrimaryPort:    "/dev/cdc-wdm0",
-		PrimarySimSlot: 1,
+		PrimarySIMSlot: 1,
 		Ports: []ModemPort{
 			{PortType: wwanmodem.PortMBIM, Device: "/dev/cdc-wdm0"},
 		},
@@ -272,7 +272,7 @@ func TestMBIMDeviceUnsupportedOperations(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := tt.run(context.Background()); !errors.Is(err, wwan.ErrUnsupported) {
+			if err := tt.run(t.Context()); !errors.Is(err, wwan.ErrUnsupported) {
 				t.Fatalf("%s error = %v, want %v", tt.name, err, wwan.ErrUnsupported)
 			}
 		})
@@ -448,7 +448,7 @@ func TestResolveVoLTEEndpointPrefersQMIFallsBackToMBIM(t *testing.T) {
 
 func TestResolveVoLTEPortDoesNotRequireSIMSlot(t *testing.T) {
 	modem := &Modem{
-		PrimarySimSlot: maxSIMSlot + 1,
+		PrimarySIMSlot: maxSIMSlot + 1,
 		Ports: []ModemPort{{
 			PortType: wwanmodem.PortMBIM,
 			Device:   "/dev/cdc-wdm0",
@@ -471,9 +471,9 @@ func TestActiveSIMSlot(t *testing.T) {
 		want    uint8
 		wantErr bool
 	}{
-		{name: "primary slot", modem: &Modem{PrimarySimSlot: 2}, want: 2},
+		{name: "primary slot", modem: &Modem{PrimarySIMSlot: 2}, want: 2},
 		{name: "unspecified slot defaults to first slot", modem: &Modem{}, want: 1},
-		{name: "slot out of range", modem: &Modem{PrimarySimSlot: maxSIMSlot + 1}, wantErr: true},
+		{name: "slot out of range", modem: &Modem{PrimarySIMSlot: maxSIMSlot + 1}, wantErr: true},
 		{name: "nil modem", wantErr: true},
 	}
 

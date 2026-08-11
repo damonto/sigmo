@@ -91,8 +91,6 @@ type scanTaskStore struct {
 	timeout  time.Duration
 	scanFunc func(context.Context, *mmodem.Modem) ([]NetworkResponse, error)
 	state    func(*mmodem.Modem) networkScanState
-	ctx      context.Context
-	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	closed   bool
 }
@@ -128,7 +126,6 @@ type scanTask struct {
 }
 
 func newScanTaskStore() *scanTaskStore {
-	ctx, cancel := context.WithCancel(context.Background())
 	return &scanTaskStore{
 		active:   make(map[*mmodem.Modem]*scanTask),
 		tasks:    make(map[string]*scanTask),
@@ -137,12 +134,10 @@ func newScanTaskStore() *scanTaskStore {
 		timeout:  networkScanTimeout,
 		scanFunc: runNetworkScan,
 		state:    currentNetworkScanState,
-		ctx:      ctx,
-		cancel:   cancel,
 	}
 }
 
-func (s *scanTaskStore) start(modem *mmodem.Modem) (*scanTask, bool, error) {
+func (s *scanTaskStore) start(ctx context.Context, modem *mmodem.Modem) (*scanTask, bool, error) {
 	if modem == nil {
 		return nil, false, mmodem.ErrNotFound
 	}
@@ -176,14 +171,14 @@ func (s *scanTaskStore) start(modem *mmodem.Modem) (*scanTask, bool, error) {
 		delete(s.cache, modem)
 	}
 
-	task := s.startLocked(modem, state, predecessor, now)
+	task := s.startLocked(ctx, modem, state, predecessor, now)
 	s.mu.Unlock()
 	return task, true, nil
 }
 
-func (s *scanTaskStore) startLocked(modem *mmodem.Modem, state networkScanState, predecessor *scanTask, now time.Time) *scanTask {
+func (s *scanTaskStore) startLocked(ctx context.Context, modem *mmodem.Modem, state networkScanState, predecessor *scanTask, now time.Time) *scanTask {
 	s.nextID++
-	ctx, cancel := context.WithTimeout(s.ctx, s.timeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.timeout)
 	task := &scanTask{
 		id:        fmt.Sprintf("scan-%d", s.nextID),
 		modem:     modem,
@@ -216,8 +211,8 @@ func currentNetworkScanState(modem *mmodem.Modem) networkScanState {
 	}
 	if snapshot.SIM != nil {
 		state.simIdentifier = snapshot.SIM.Identifier
-		state.simEID = snapshot.SIM.Eid
-		state.simIMSI = snapshot.SIM.Imsi
+		state.simEID = snapshot.SIM.EID
+		state.simIMSI = snapshot.SIM.IMSI
 	}
 	return state
 }
@@ -424,7 +419,6 @@ func (s *scanTaskStore) close() {
 		return
 	}
 	s.closed = true
-	s.cancel()
 	now := s.now()
 	for _, task := range s.active {
 		s.cancelLocked(task, now)
@@ -476,7 +470,7 @@ func (n *network) List(ctx context.Context, modem *mmodem.Modem) ([]NetworkRespo
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	task, _, err := n.scans.start(modem)
+	task, _, err := n.scans.start(ctx, modem)
 	if err != nil {
 		return nil, fmt.Errorf("start network scan: %w", err)
 	}
@@ -491,7 +485,7 @@ func (n *network) StartScan(ctx context.Context, modem *mmodem.Modem) (NetworkSc
 	if err := ctx.Err(); err != nil {
 		return NetworkScanResponse{}, false, err
 	}
-	task, created, err := n.scans.start(modem)
+	task, created, err := n.scans.start(ctx, modem)
 	if err != nil {
 		return NetworkScanResponse{}, false, err
 	}

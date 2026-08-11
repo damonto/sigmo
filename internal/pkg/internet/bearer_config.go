@@ -182,9 +182,11 @@ func addressesAndRoutesWithMetric(interfaceName string, metric int, includeRoute
 		routes    []netlink.DefaultRoute
 	)
 
-	if address, ok, err := prefixFromIPConfig(ip4, netlink.FamilyIPv4); err != nil {
+	address, ok, err := prefixFromIPConfig(ip4, netlink.FamilyIPv4)
+	if err != nil {
 		return nil, nil, err
-	} else if ok {
+	}
+	if ok {
 		addresses = append(addresses, address)
 		if includeRoutes {
 			routes = append(routes, netlink.DefaultRoute{
@@ -197,9 +199,11 @@ func addressesAndRoutesWithMetric(interfaceName string, metric int, includeRoute
 		}
 	}
 
-	if address, ok, err := prefixFromIPConfig(ip6, netlink.FamilyIPv6); err != nil {
+	address, ok, err = prefixFromIPConfig(ip6, netlink.FamilyIPv6)
+	if err != nil {
 		return nil, nil, err
-	} else if ok {
+	}
+	if ok {
 		addresses = append(addresses, address)
 		if includeRoutes {
 			routes = append(routes, netlink.DefaultRoute{

@@ -6,16 +6,16 @@ package euicc
 import (
 	_ "embed"
 	"encoding/json"
-	"log/slog"
+	"fmt"
 	"slices"
 	"strings"
 )
 
 //go:embed ci.json
-var ci []byte
+var certificateIssuerJSON []byte
 
 //go:embed accredited.json
-var accredited []byte
+var accreditedSiteJSON []byte
 
 type Accredited struct {
 	Version   uint8      `json:"version"`
@@ -41,18 +41,24 @@ type SASUP struct {
 	Region string
 }
 
-var (
-	issuers []CertificateIssuer
-	sites   Accredited
-)
+var issuers = mustLoadCertificateIssuers(certificateIssuerJSON)
 
-func init() {
-	if err := json.Unmarshal(ci, &issuers); err != nil {
-		slog.Error("failed to unmarshal certificate issuers", "error", err)
+var sites = mustLoadAccreditedSites(accreditedSiteJSON)
+
+func mustLoadCertificateIssuers(data []byte) []CertificateIssuer {
+	var issuers []CertificateIssuer
+	if err := json.Unmarshal(data, &issuers); err != nil {
+		panic(fmt.Sprintf("mustLoadCertificateIssuers() error = %v", err))
 	}
-	if err := json.Unmarshal(accredited, &sites); err != nil {
-		slog.Error("failed to unmarshal accredited", "error", err)
+	return issuers
+}
+
+func mustLoadAccreditedSites(data []byte) Accredited {
+	var sites Accredited
+	if err := json.Unmarshal(data, &sites); err != nil {
+		panic(fmt.Sprintf("mustLoadAccreditedSites() error = %v", err))
 	}
+	return sites
 }
 
 func LookupCertificateIssuer(keyID string) string {

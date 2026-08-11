@@ -158,9 +158,11 @@ func writeGzipArtifact(dst io.Writer, artifact Artifact, body io.Reader) error {
 	if got := hex.EncodeToString(executableHash.Sum(nil)); !strings.EqualFold(got, artifact.ExecutableSHA256) {
 		return errors.New("verify executable checksum: sha256 mismatch")
 	}
-	if _, err := buffered.ReadByte(); err == nil {
+	_, err = buffered.ReadByte()
+	if err == nil {
 		return errors.New("verify gzip update: trailing data or multiple members")
-	} else if !errors.Is(err, io.EOF) {
+	}
+	if !errors.Is(err, io.EOF) {
 		return fmt.Errorf("read gzip update trailer: %w", err)
 	}
 	compressedSize := artifact.Size + 1 - limited.N

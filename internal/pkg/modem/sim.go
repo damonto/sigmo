@@ -20,8 +20,8 @@ type SIM struct {
 	Active             bool
 	Identifier         string
 	ATR                []byte
-	Eid                string
-	Imsi               string
+	EID                string
+	IMSI               string
 	OperatorIdentifier string
 	OperatorName       string
 	GID1               string
@@ -64,7 +64,7 @@ func (s *SIMs) Get(ctx context.Context, slot uint32) (*SIM, error) {
 		if uint32(item.Index) != slot {
 			continue
 		}
-		return &SIM{modem: s.modem, Slot: slot, Active: item.Active, Identifier: strings.TrimSpace(item.ICCID), Eid: strings.TrimSpace(item.EID)}, nil
+		return &SIM{modem: s.modem, Slot: slot, Active: item.Active, Identifier: strings.TrimSpace(item.ICCID), EID: strings.TrimSpace(item.EID)}, nil
 	}
 	return nil, fmt.Errorf("SIM slot %d: %w", slot, ErrNotFound)
 }
@@ -73,13 +73,13 @@ func simFromInfo(m *Modem, info wwanmodem.SIMInfo) *SIM {
 	return &SIM{
 		modem: m, Slot: uint32(info.Slot), Active: true,
 		Identifier: strings.TrimSpace(info.ICCID), ATR: slices.Clone(info.ATR),
-		Eid: strings.TrimSpace(info.EID), Imsi: strings.TrimSpace(info.IMSI),
+		EID: strings.TrimSpace(info.EID), IMSI: strings.TrimSpace(info.IMSI),
 		OperatorIdentifier: strings.TrimSpace(info.OperatorID), OperatorName: strings.TrimSpace(info.OperatorName),
 		GID1: strings.ToUpper(strings.TrimSpace(info.GID1)), SPN: strings.TrimSpace(info.SPN),
 	}
 }
 
-func (s *SIM) SendPin(ctx context.Context, pin string) error {
+func (s *SIM) SendPIN(ctx context.Context, pin string) error {
 	if s == nil || s.modem == nil || s.modem.core == nil {
 		return errors.New("SIM is required")
 	}

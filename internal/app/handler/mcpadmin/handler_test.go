@@ -3,7 +3,7 @@ package mcpadmin
 import (
 	"archive/zip"
 	"bytes"
-	"context"
+
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -73,7 +73,7 @@ func TestAPIKeyLifecycle(t *testing.T) {
 	if revokeRec.Code != http.StatusNoContent {
 		t.Fatalf("RevokeAPIKey() status = %d, want %d", revokeRec.Code, http.StatusNoContent)
 	}
-	if _, err := keys.Validate(context.Background(), created.Token); !errors.Is(err, mcpauth.ErrRevoked) {
+	if _, err := keys.Validate(t.Context(), created.Token); !errors.Is(err, mcpauth.ErrRevoked) {
 		t.Fatalf("Validate(revoked) error = %v, want ErrRevoked", err)
 	}
 }
@@ -191,7 +191,7 @@ func TestSettingsAndSkillDownload(t *testing.T) {
 
 func newTestHandler(t *testing.T) (*Handler, *mcpauth.Store, *mcpserver.Controller) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)

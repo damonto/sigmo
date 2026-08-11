@@ -202,7 +202,7 @@ func TestRestoreNonQMAPWDADataFormat(t *testing.T) {
 				endpointResults: tt.endpointResults,
 				setResults:      tt.setResults,
 			}
-			err := restoreNonQMAPWDADataFormat(context.Background(), client, qcom.WDALinkLayerRawIP, tt.endpoint)
+			err := restoreNonQMAPWDADataFormat(t.Context(), client, qcom.WDALinkLayerRawIP, tt.endpoint)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("restoreNonQMAPWDADataFormat() error = %v, wantErr %t", err, tt.wantErr)
 			}

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"time"
@@ -38,8 +39,7 @@ func SigmoControlArchive() ([]byte, error) {
 		return nil
 	})
 	if err != nil {
-		_ = archive.Close()
-		return nil, fmt.Errorf("build Sigmo skill archive: %w", err)
+		return nil, fmt.Errorf("build Sigmo skill archive: %w", errors.Join(err, archive.Close()))
 	}
 	if err := archive.Close(); err != nil {
 		return nil, fmt.Errorf("close Sigmo skill archive: %w", err)

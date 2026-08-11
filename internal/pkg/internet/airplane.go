@@ -21,12 +21,7 @@ var (
 // ChangeAirplaneMode keeps the radio transition serialized with Internet
 // operations. A suspended connection retains its Always-On policy so disabling
 // Airplane mode can restore only connections the user asked Sigmo to maintain.
-func (c *Connector) ChangeAirplaneMode(
-	ctx context.Context,
-	modem *mmodem.Modem,
-	targetEnabled bool,
-	apply func() (applied bool, err error),
-) error {
+func (c *Connector) ChangeAirplaneMode(ctx context.Context, modem *mmodem.Modem, targetEnabled bool, apply func() (applied bool, err error)) error {
 	if modem == nil {
 		return ErrModemRequired
 	}
@@ -50,23 +45,14 @@ func (c *Connector) ChangeAirplaneMode(
 	return errors.Join(transitionErr, reloadErr, completeErr)
 }
 
-func (c *Connector) beginAndApplyAirplaneModeChange(
-	ctx context.Context,
-	modem *mmodem.Modem,
-	targetEnabled bool,
-	apply func() (applied bool, err error),
-) (bool, error) {
+func (c *Connector) beginAndApplyAirplaneModeChange(ctx context.Context, modem *mmodem.Modem, targetEnabled bool, apply func() (applied bool, err error)) (bool, error) {
 	defer c.lockModem(modem.EquipmentIdentifier)()
 	beginErr := c.beginAirplaneModeChangeLocked(ctx, modem, targetEnabled)
 	applied, changeErr := apply()
 	return applied, errors.Join(beginErr, changeErr)
 }
 
-func (c *Connector) finishAirplaneModeChange(
-	modem *mmodem.Modem,
-	targetEnabled bool,
-	radioStateApplied bool,
-) error {
+func (c *Connector) finishAirplaneModeChange(modem *mmodem.Modem, targetEnabled bool, radioStateApplied bool) error {
 	defer c.lockModem(modem.EquipmentIdentifier)()
 	return c.completeAirplaneModeChangeLocked(modem, targetEnabled, radioStateApplied)
 }
@@ -122,11 +108,7 @@ func (c *Connector) beginAirplaneModeChangeLocked(ctx context.Context, modem *mm
 
 // CompleteAirplaneModeChange records the applied radio state. When the final
 // state is online it immediately retries the saved Always-On policy.
-func (c *Connector) CompleteAirplaneModeChange(
-	modem *mmodem.Modem,
-	targetEnabled bool,
-	radioStateApplied bool,
-) error {
+func (c *Connector) CompleteAirplaneModeChange(modem *mmodem.Modem, targetEnabled bool, radioStateApplied bool) error {
 	if modem == nil {
 		return ErrModemRequired
 	}
@@ -134,11 +116,7 @@ func (c *Connector) CompleteAirplaneModeChange(
 	return c.completeAirplaneModeChangeLocked(modem, targetEnabled, radioStateApplied)
 }
 
-func (c *Connector) completeAirplaneModeChangeLocked(
-	modem *mmodem.Modem,
-	targetEnabled bool,
-	radioStateApplied bool,
-) error {
+func (c *Connector) completeAirplaneModeChangeLocked(modem *mmodem.Modem, targetEnabled bool, radioStateApplied bool) error {
 	// These two outcomes leave the radio offline: enabling succeeded, or
 	// disabling was not applied.
 	if targetEnabled == radioStateApplied {

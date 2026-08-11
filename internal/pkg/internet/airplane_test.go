@@ -68,7 +68,7 @@ func TestAirplaneModeRestoresOnlyAlwaysOnQMAPInternet(t *testing.T) {
 					Device:   "cdc-wdm0",
 					PortType: wwanmodem.PortQMI,
 				}},
-				Sim: &mmodem.SIM{Identifier: profileID},
+				SIM: &mmodem.SIM{Identifier: profileID},
 			}
 			prefs := Preferences{APN: "internet", IPType: "ipv4", AlwaysOn: tt.alwaysOn}
 			connector.qmapEnabled[modemID] = true
@@ -160,7 +160,7 @@ func TestAirplaneModeRejectsInternetChangesAndAllowsPolicyClear(t *testing.T) {
 	)
 	modem := &mmodem.Modem{
 		EquipmentIdentifier: modemID,
-		Sim:                 &mmodem.SIM{Identifier: profileID},
+		SIM:                 &mmodem.SIM{Identifier: profileID},
 	}
 	prefs := Preferences{APN: "internet", AlwaysOn: true}
 	connector.preferences[modemID] = prefs

@@ -57,29 +57,29 @@ func (m *Modem) applySIMInfo(info wwanmodem.SIMInfo) {
 	if activeSlot := activeSIMSlot(m.slotSIMs); activeSlot != 0 {
 		info.Slot = uint8(activeSlot)
 	}
-	previous := m.Sim
-	m.PrimarySimSlot = uint32(info.Slot)
+	previous := m.SIM
+	m.PrimarySIMSlot = uint32(info.Slot)
 	for _, sim := range m.slotSIMs {
 		if sim != nil {
 			sim.Active = false
 		}
 	}
-	m.Sim = mergeSIMMetadata(previous, simFromInfo(m, info))
-	if m.PrimarySimSlot != 0 {
+	m.SIM = mergeSIMMetadata(previous, simFromInfo(m, info))
+	if m.PrimarySIMSlot != 0 {
 		if m.slotSIMs == nil {
 			m.slotSIMs = make(map[uint32]*SIM)
 		}
-		m.slotSIMs[m.PrimarySimSlot] = cloneSIM(m, m.Sim)
+		m.slotSIMs[m.PrimarySIMSlot] = cloneSIM(m, m.SIM)
 	}
 	if len(info.OwnNumbers) > 0 {
 		m.Number = strings.TrimSpace(info.OwnNumbers[0])
-	} else if !sameSIMIdentity(previous, m.Sim) {
+	} else if !sameSIMIdentity(previous, m.SIM) {
 		m.Number = ""
 	}
 	m.Status.SIM = info.State
-	if m.PrimarySimSlot != 0 && !slices.Contains(m.SimSlots, m.PrimarySimSlot) {
-		m.SimSlots = append(m.SimSlots, m.PrimarySimSlot)
-		slices.Sort(m.SimSlots)
+	if m.PrimarySIMSlot != 0 && !slices.Contains(m.SIMSlots, m.PrimarySIMSlot) {
+		m.SIMSlots = append(m.SIMSlots, m.PrimarySIMSlot)
+		slices.Sort(m.SIMSlots)
 	}
 	m.runtimeMu.Unlock()
 }
@@ -108,8 +108,8 @@ func mergeSIMMetadata(previous, current *SIM) *SIM {
 		// ATR and EID describe the card hardware, so keep them through that
 		// transition and the first identity-only update for the new profile.
 		current.ATR = slices.Clone(previous.ATR)
-		if current.Eid == "" {
-			current.Eid = previous.Eid
+		if current.EID == "" {
+			current.EID = previous.EID
 		}
 	}
 	if !sameSIMIdentity(previous, current) {
@@ -118,11 +118,11 @@ func mergeSIMMetadata(previous, current *SIM) *SIM {
 	if len(current.ATR) == 0 {
 		current.ATR = slices.Clone(previous.ATR)
 	}
-	if current.Eid == "" {
-		current.Eid = previous.Eid
+	if current.EID == "" {
+		current.EID = previous.EID
 	}
-	if current.Imsi == "" {
-		current.Imsi = previous.Imsi
+	if current.IMSI == "" {
+		current.IMSI = previous.IMSI
 	}
 	if current.OperatorIdentifier == "" {
 		current.OperatorIdentifier = previous.OperatorIdentifier
@@ -154,8 +154,8 @@ func (m *Modem) applyActiveSIMIdentity(slot uint8, iccid string) {
 	defer m.runtimeMu.Unlock()
 
 	previousIdentifier := ""
-	if m.Sim != nil {
-		previousIdentifier = strings.TrimSpace(m.Sim.Identifier)
+	if m.SIM != nil {
+		previousIdentifier = strings.TrimSpace(m.SIM.Identifier)
 	}
 	for _, sim := range m.slotSIMs {
 		if sim != nil {
@@ -177,11 +177,11 @@ func (m *Modem) applyActiveSIMIdentity(slot uint8, iccid string) {
 		m.slotSIMs = make(map[uint32]*SIM)
 	}
 	m.slotSIMs[index] = cached
-	m.PrimarySimSlot = index
-	m.Sim = cloneSIM(m, cached)
-	if !slices.Contains(m.SimSlots, index) {
-		m.SimSlots = append(m.SimSlots, index)
-		slices.Sort(m.SimSlots)
+	m.PrimarySIMSlot = index
+	m.SIM = cloneSIM(m, cached)
+	if !slices.Contains(m.SIMSlots, index) {
+		m.SIMSlots = append(m.SIMSlots, index)
+		slices.Sort(m.SIMSlots)
 	}
 	if nextIdentifier := strings.TrimSpace(cached.Identifier); previousIdentifier != "" && nextIdentifier != "" && previousIdentifier != nextIdentifier {
 		m.Number = ""
@@ -196,8 +196,8 @@ func (m *Modem) applySIMSlots(slots []wwanmodem.SIMSlot) {
 	defer m.runtimeMu.Unlock()
 
 	previousIdentifier := ""
-	if m.Sim != nil {
-		previousIdentifier = strings.TrimSpace(m.Sim.Identifier)
+	if m.SIM != nil {
+		previousIdentifier = strings.TrimSpace(m.SIM.Identifier)
 	}
 	values := make([]uint32, 0, len(slots))
 	known := make(map[uint32]*SIM, len(slots))
@@ -220,9 +220,9 @@ func (m *Modem) applySIMSlots(slots []wwanmodem.SIMSlot) {
 			active = index
 		}
 
-		if slot.Active && m.Sim != nil &&
-			(m.Sim.Slot == index || (m.Sim.Slot == 0 && m.PrimarySimSlot == index) || (identifier != "" && m.Sim.Identifier == identifier)) {
-			cached = m.Sim
+		if slot.Active && m.SIM != nil &&
+			(m.SIM.Slot == index || (m.SIM.Slot == 0 && m.PrimarySIMSlot == index) || (identifier != "" && m.SIM.Identifier == identifier)) {
+			cached = m.SIM
 		}
 		if cached == nil || (identifier != "" && cached.Identifier != "" && cached.Identifier != identifier) {
 			cached = &SIM{modem: m, Slot: index}
@@ -235,23 +235,23 @@ func (m *Modem) applySIMSlots(slots []wwanmodem.SIMSlot) {
 			cached.Identifier = identifier
 		}
 		if eid := strings.TrimSpace(slot.EID); eid != "" {
-			cached.Eid = eid
+			cached.EID = eid
 		}
 		known[index] = cached
 	}
 	slices.Sort(values)
 	values = slices.Compact(values)
-	m.SimSlots = values
+	m.SIMSlots = values
 	if active != 0 {
-		m.PrimarySimSlot = active
-		m.Sim = cloneSIM(m, known[active])
-		if m.Sim != nil && previousIdentifier != "" && m.Sim.Identifier != "" && m.Sim.Identifier != previousIdentifier {
+		m.PrimarySIMSlot = active
+		m.SIM = cloneSIM(m, known[active])
+		if m.SIM != nil && previousIdentifier != "" && m.SIM.Identifier != "" && m.SIM.Identifier != previousIdentifier {
 			m.Number = ""
 		}
 	}
-	if len(m.SimSlots) == 0 && m.PrimarySimSlot != 0 {
-		m.SimSlots = []uint32{m.PrimarySimSlot}
-		known[m.PrimarySimSlot] = cloneSIM(m, m.Sim)
+	if len(m.SIMSlots) == 0 && m.PrimarySIMSlot != 0 {
+		m.SIMSlots = []uint32{m.PrimarySIMSlot}
+		known[m.PrimarySIMSlot] = cloneSIM(m, m.SIM)
 	}
 	m.slotSIMs = known
 }
@@ -352,7 +352,7 @@ func isTerminalRuntimeError(err error) bool {
 	if errors.Is(err, cdcwdm.ErrDisconnected) {
 		return true
 	}
-	if errors.Is(err, qcom.QMIErrorClientIdsExhausted) {
+	if errors.Is(err, qcom.QMIErrorClientIDsExhausted) {
 		return true
 	}
 	var transportErr *qmitransport.TransportError

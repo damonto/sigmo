@@ -81,7 +81,7 @@ func (c *coordinator) SendSMS(ctx context.Context, modem *mmodem.Modem, to strin
 	if status := c.trackOutgoingSMSSubmission(msg, submission); status != "" {
 		msg.Status = status
 	}
-	go c.watchSMSSubmissionUpdates(modem.EquipmentIdentifier, profileID, submission)
+	go c.watchSMSSubmissionUpdates(context.WithoutCancel(ctx), modem.EquipmentIdentifier, profileID, submission)
 	return msg, nil
 }
 
@@ -159,11 +159,11 @@ type smsStatusUpdate struct {
 	status      string
 }
 
-func (c *coordinator) watchSMSSubmissionUpdates(modemID string, profileID string, submission imsgo.SMSSubmission) {
-	c.watchSMSSubmissionUpdatesWithTimeout(modemID, profileID, submission, smsDeliveryReportTimeout())
+func (c *coordinator) watchSMSSubmissionUpdates(ctx context.Context, modemID string, profileID string, submission imsgo.SMSSubmission) {
+	c.watchSMSSubmissionUpdatesWithTimeout(ctx, modemID, profileID, submission, smsDeliveryReportTimeout())
 }
 
-func (c *coordinator) watchSMSSubmissionUpdatesWithTimeout(modemID string, profileID string, submission imsgo.SMSSubmission, timeout time.Duration) {
+func (c *coordinator) watchSMSSubmissionUpdatesWithTimeout(ctx context.Context, modemID string, profileID string, submission imsgo.SMSSubmission, timeout time.Duration) {
 	defer func() {
 		c.stopSMSSubmissionTracking(modemID, profileID, submission.ID)
 		submission.Close()
@@ -192,7 +192,7 @@ func (c *coordinator) watchSMSSubmissionUpdatesWithTimeout(modemID string, profi
 			if !ok {
 				continue
 			}
-			c.updateStoredSMSStatus(modemID, update.Recipient, statusUpdate)
+			c.updateStoredSMSStatus(ctx, modemID, update.Recipient, statusUpdate)
 		case <-timer.C:
 			slog.Warn("wait IMS SMS delivery report",
 				"imei", modemID,
@@ -270,12 +270,12 @@ func (c *coordinator) recordSMSSubmissionUpdate(modemID string, profileID string
 	}, true
 }
 
-func (c *coordinator) updateStoredSMSStatus(modemID string, recipient string, update smsStatusUpdate) {
+func (c *coordinator) updateStoredSMSStatus(ctx context.Context, modemID string, recipient string, update smsStatusUpdate) {
 	if c.store == nil {
 		c.completeStoredSMSStatus(update)
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), smsStatusUpdateTimeout)
+	ctx, cancel := context.WithTimeout(ctx, smsStatusUpdateTimeout)
 	defer cancel()
 	if updated, err := c.store.UpdateMessageStatus(ctx, storage.MessageStatusUpdate{
 		ProfileID:   update.profileID,

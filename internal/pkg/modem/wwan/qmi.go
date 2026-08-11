@@ -303,7 +303,7 @@ func (u *qmiSession) VoLTEStatus(ctx context.Context) (result VoLTEStatus, err e
 		case errors.Is(err, qcom.QMIErrorNetworkUnsupported),
 			errors.Is(err, qcom.QMIErrorDeviceUnsupported),
 			errors.Is(err, qcom.QMIErrorInvalidServiceType),
-			errors.Is(err, qcom.QMIErrorInvalidQmiCommand),
+			errors.Is(err, qcom.QMIErrorInvalidQMICommand),
 			errors.Is(err, qcom.QMIErrorNotSupported):
 			return VoLTEStatus{}, ErrUnsupported
 		default:
@@ -403,9 +403,11 @@ func (u *qmiSession) SetIMSSTestMode(ctx context.Context, enabled bool) (err err
 	}
 	defer func() { release(err) }()
 
-	if err := client.SetIMSSTestMode(ctx, enabled); errors.Is(err, qcom.QMIErrorInvalidServiceType) || errors.Is(err, qcom.QMIErrorNotSupported) {
+	err = client.SetIMSSTestMode(ctx, enabled)
+	if errors.Is(err, qcom.QMIErrorInvalidServiceType) || errors.Is(err, qcom.QMIErrorNotSupported) {
 		return ErrUnsupported
-	} else if err != nil {
+	}
+	if err != nil {
 		return fmt.Errorf("set QMI IMSS test mode: %w", err)
 	}
 	return nil
@@ -574,7 +576,7 @@ func watchQMIRefresh(ctx context.Context, client qmiRefreshClient, slot uint8) (
 }
 
 func unsupportedQMIRefreshRegistration(err error) bool {
-	return errors.Is(err, qcom.QMIErrorInvalidQmiCommand) ||
+	return errors.Is(err, qcom.QMIErrorInvalidQMICommand) ||
 		errors.Is(err, qcom.QMIErrorNotSupported) ||
 		errors.Is(err, qcom.QMIErrorDeviceUnsupported)
 }

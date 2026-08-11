@@ -1,14 +1,13 @@
 package storage
 
 import (
-	"context"
 	"slices"
 	"testing"
 	"time"
 )
 
 func TestMCPAuditEventsPruneAndList(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	now := time.Date(2026, 7, 19, 9, 0, 0, 0, time.UTC)
 	old := now.Add(-91 * 24 * time.Hour)
@@ -46,7 +45,7 @@ func TestMCPAuditEventsPruneAndList(t *testing.T) {
 }
 
 func TestListMCPAuditEventsPagination(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := testStore(t)
 	now := time.Date(2026, 7, 19, 9, 0, 0, 0, time.UTC)
 	for index := range 3 {

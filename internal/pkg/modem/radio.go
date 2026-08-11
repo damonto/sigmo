@@ -74,7 +74,7 @@ func (m *Modem) Disable(ctx context.Context) error {
 	return nil
 }
 
-func (m *Modem) SetPrimarySimSlot(ctx context.Context, slot uint32) error {
+func (m *Modem) SetPrimarySIMSlot(ctx context.Context, slot uint32) error {
 	if err := m.validatePrimarySIMSlot(slot); err != nil {
 		return fmt.Errorf("set primary SIM slot: %w", err)
 	}

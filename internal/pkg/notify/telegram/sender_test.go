@@ -23,7 +23,7 @@ func TestSendOne(t *testing.T) {
 				server := httptest.NewServer(nil)
 				t.Cleanup(server.Close)
 
-				ctx, cancel := context.WithCancel(context.Background())
+				ctx, cancel := context.WithCancel(t.Context())
 				cancel()
 
 				return &Sender{

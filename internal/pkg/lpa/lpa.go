@@ -31,9 +31,9 @@ const channelOpenTimeout = 30 * time.Second
 // physical card to the module's primary logical slot before opening LPA.
 const qmiPrimaryLogicalSlot uint8 = 1
 
-// gmu serializes LPA operations for the same modem or external reader. This is necessary
+// operationLocks serializes LPA operations for the same modem or external reader. This is necessary
 // because eUICC operations cannot safely share one underlying smart-card channel.
-var gmu = keymutex.New()
+var operationLocks = keymutex.New()
 
 // Client owns one connected eUICC client and its underlying smart-card
 // transport. Pool callers receive a Lease instead, so Close always means
@@ -72,10 +72,10 @@ type ChannelFactory func(context.Context) (driver.SmartCardChannel, error)
 var (
 	ErrNoSupportedAID          = errors.New("no supported ISD-R AID found or it's not an eUICC")
 	errAIDNotSupported         = errors.New("AID is not supported")
-	errCacheableNoSupportedAID = errors.New("all ISD-R AIDs are unsupported")
+	errCacheableNoSupportedAID = errors.New("all ISD-R supportedAIDs are unsupported")
 )
 
-var AIDs = [][]byte{
+var supportedAIDs = [][]byte{
 	lpa.GSMAISDRApplicationAID,
 	{0xA0, 0x00, 0x00, 0x05, 0x59, 0x10, 0x10, 0xFF, 0xFF, 0xFF, 0xFF, 0x89, 0x00, 0x05, 0x05, 0x00}, // 5ber Ultra
 	{0xA0, 0x00, 0x00, 0x05, 0x59, 0x10, 0x10, 0x00, 0x00, 0x00, 0x89, 0x00, 0x00, 0x00, 0x03, 0x00}, // eSIM.me V2
@@ -113,13 +113,13 @@ func newModemClient(ctx context.Context, cfg modemClientConfig) (*Client, error)
 		return nil, err
 	}
 	lockKey := lpaLockKey(cfg.modem, cfg.slot)
-	if err := gmu.LockContext(ctx, lockKey); err != nil {
+	if err := operationLocks.LockContext(ctx, lockKey); err != nil {
 		releaseSIMSlot()
 		return nil, fmt.Errorf("reserve LPA client: %w", err)
 	}
 	instance, err := newClientForSlot(ctx, cfg)
 	if err != nil {
-		gmu.Unlock(lockKey)
+		operationLocks.Unlock(lockKey)
 		releaseSIMSlot()
 		return nil, err
 	}
@@ -156,14 +156,14 @@ func NewWithChannelFactory(ctx context.Context, cfg ChannelConfig, factory Chann
 		return nil, errors.New("LPA channel factory is required")
 	}
 	if cfg.LockKey != "" {
-		if err := gmu.LockContext(ctx, cfg.LockKey); err != nil {
+		if err := operationLocks.LockContext(ctx, cfg.LockKey); err != nil {
 			return nil, fmt.Errorf("reserve LPA client: %w", err)
 		}
 	}
 	instance, err := newWithChannelFactoryLocked(ctx, cfg, factory)
 	if err != nil {
 		if cfg.LockKey != "" {
-			gmu.Unlock(cfg.LockKey)
+			operationLocks.Unlock(cfg.LockKey)
 		}
 		return nil, err
 	}
@@ -184,13 +184,13 @@ func NewChannel(ctx context.Context, m *modem.Modem) (driver.SmartCardChannel, f
 		return nil, nil, err
 	}
 	key := lpaLockKey(m, slot)
-	if err := gmu.LockContext(ctx, key); err != nil {
+	if err := operationLocks.LockContext(ctx, key); err != nil {
 		releaseSIMSlot()
 		return nil, nil, err
 	}
 	ch, err := createChannelForSlot(ctx, m, slot)
 	if err != nil {
-		gmu.Unlock(key)
+		operationLocks.Unlock(key)
 		releaseSIMSlot()
 		return nil, nil, err
 	}
@@ -215,7 +215,7 @@ func (c *lockedChannel) Disconnect() error {
 	var err error
 	c.once.Do(func() {
 		err = c.SmartCardChannel.Disconnect()
-		gmu.Unlock(c.key)
+		operationLocks.Unlock(c.key)
 		if c.releaseSIMSlot != nil {
 			c.releaseSIMSlot()
 		}
@@ -257,7 +257,7 @@ func newWithChannelFactoryLocked(ctx context.Context, cfg ChannelConfig, factory
 		}
 		return instance, nil
 	}
-	if err := instance.tryCreateClient(ctx, operation, opts, factory, AIDs); err != nil {
+	if err := instance.tryCreateClient(ctx, operation, opts, factory, supportedAIDs); err != nil {
 		return nil, err
 	}
 	return instance, nil
@@ -337,16 +337,10 @@ type operationContext struct {
 }
 
 func newOperationContext(ctx context.Context) *operationContext {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return &operationContext{base: ctx}
 }
 
 func (c *operationContext) context() context.Context {
-	if c == nil {
-		return context.Background()
-	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if c.current != nil {
@@ -358,9 +352,6 @@ func (c *operationContext) context() context.Context {
 func (c *operationContext) use(ctx context.Context) {
 	if c == nil {
 		return
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 	c.mu.Lock()
 	c.current = ctx
@@ -399,6 +390,10 @@ type smartCardChannelWithContext interface {
 	TransmitContext(context.Context, []byte) ([]byte, error)
 }
 
+type smartCardChannelCloserWithContext interface {
+	CloseLogicalChannelContext(context.Context, byte) error
+}
+
 func (c *contextSmartCardChannel) Connect() error {
 	if err := c.operation.context().Err(); err != nil {
 		return err
@@ -426,6 +421,14 @@ func (c *contextSmartCardChannel) Transmit(command []byte) ([]byte, error) {
 		return channel.TransmitContext(ctx, command)
 	}
 	return c.SmartCardChannel.Transmit(command)
+}
+
+func (c *contextSmartCardChannel) CloseLogicalChannel(channel byte) error {
+	ctx := context.WithoutCancel(c.operation.context())
+	if closer, ok := c.SmartCardChannel.(smartCardChannelCloserWithContext); ok {
+		return closer.CloseLogicalChannelContext(ctx, channel)
+	}
+	return c.SmartCardChannel.CloseLogicalChannel(channel)
 }
 
 func createChannel(ctx context.Context, m *modem.Modem) (driver.SmartCardChannel, error) {
@@ -532,7 +535,7 @@ func (l *Client) closeWith(closeResource func() error) error {
 			l.closeErr = closeResource()
 		}
 		if l.lockKey != "" {
-			gmu.Unlock(l.lockKey)
+			operationLocks.Unlock(l.lockKey)
 		}
 		if l.releaseSIMSlot != nil {
 			l.releaseSIMSlot()
@@ -549,32 +552,65 @@ func (l *Client) Info() (*Info, error) {
 	var info Info
 	eid, err := l.EID()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read EID: %w", err)
 	}
 	info.EID = hex.EncodeToString(eid)
 
 	tlv, err := l.EUICCInfo2()
 	if err != nil {
+		return nil, fmt.Errorf("read eUICC info: %w", err)
+	}
+	if err := parseEUICCInfo2(&info, tlv); err != nil {
 		return nil, err
 	}
+	return &info, nil
+}
 
-	// SASUP
-	info.SASUP = euicc.LookupSASUP(info.EID, string(tlv.First(bertlv.Universal.Primitive(12)).Value))
+func parseEUICCInfo2(info *Info, tlv *bertlv.TLV) error {
+	if info == nil {
+		return errors.New("eUICC info destination is nil")
+	}
+	if tlv == nil {
+		return errors.New("eUICC info is empty")
+	}
 
-	// euiccCiPKIdListForSigning
-	for _, child := range tlv.First(bertlv.ContextSpecific.Constructed(10)).Children {
+	sasup := tlv.First(bertlv.Universal.Primitive(12))
+	if sasup == nil {
+		return errors.New("read SAS-UP version: field is missing")
+	}
+	info.SASUP = euicc.LookupSASUP(info.EID, string(sasup.Value))
+
+	certificateList := tlv.First(bertlv.ContextSpecific.Constructed(10))
+	if certificateList == nil {
+		return errors.New("read certificate issuers: field is missing")
+	}
+	for _, child := range certificateList.Children {
 		info.Certificates = append(info.Certificates, euicc.LookupCertificateIssuer(hex.EncodeToString(child.Value)))
 	}
 
-	// extResource.freeNonVolatileMemory
 	resource := tlv.First(bertlv.ContextSpecific.Primitive(4))
-	data, _ := resource.MarshalBinary()
+	if resource == nil {
+		return errors.New("read free non-volatile memory: resource field is missing")
+	}
+	data, err := resource.MarshalBinary()
+	if err != nil {
+		return fmt.Errorf("encode free non-volatile memory resource: %w", err)
+	}
+	if len(data) == 0 {
+		return errors.New("decode free non-volatile memory resource: field is empty")
+	}
 	data[0] = 0x30
 	if err := resource.UnmarshalBinary(data); err != nil {
-		return nil, err
+		return fmt.Errorf("decode free non-volatile memory resource: %w", err)
 	}
-	primitive.UnmarshalInt(&info.FreeSpace).UnmarshalBinary(resource.First(bertlv.ContextSpecific.Primitive(2)).Value)
-	return &info, nil
+	freeSpace := resource.First(bertlv.ContextSpecific.Primitive(2))
+	if freeSpace == nil {
+		return errors.New("read free non-volatile memory: field is missing")
+	}
+	if err := primitive.UnmarshalInt(&info.FreeSpace).UnmarshalBinary(freeSpace.Value); err != nil {
+		return fmt.Errorf("decode free non-volatile memory: %w", err)
+	}
+	return nil
 }
 
 func (l *Client) Delete(id sgp22.ICCID) error {

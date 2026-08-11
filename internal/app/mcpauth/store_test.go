@@ -1,7 +1,6 @@
 package mcpauth
 
 import (
-	"context"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -13,7 +12,7 @@ import (
 )
 
 func TestStoreIssueValidityAndHashing(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Date(2026, 7, 19, 8, 30, 0, 0, time.UTC)
 	tests := []struct {
 		name         string
@@ -77,7 +76,7 @@ func TestStoreIssueValidityAndHashing(t *testing.T) {
 }
 
 func TestStoreValidateRevocationAndExpiry(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	now := time.Date(2026, 7, 19, 8, 30, 0, 0, time.UTC)
 	db := openTestStorage(t)
 	keys, err := NewStore(db)
@@ -136,7 +135,7 @@ func TestGrantAllowsModem(t *testing.T) {
 }
 
 func TestStoreRejectsInvalidGrant(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	db := openTestStorage(t)
 	keys, err := NewStore(db)
 	if err != nil {
@@ -162,7 +161,7 @@ func TestStoreRejectsInvalidGrant(t *testing.T) {
 
 func openTestStorage(t *testing.T) *storage.Store {
 	t.Helper()
-	db, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	db, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)
 	}

@@ -62,7 +62,7 @@ func TestRequireConfirmation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := requireConfirmation(context.Background(), tt.client, "Confirm operation")
+			err := requireConfirmation(t.Context(), tt.client, "Confirm operation")
 			if tt.wantCode == "" {
 				if err != nil {
 					t.Fatalf("requireConfirmation() error = %v", err)

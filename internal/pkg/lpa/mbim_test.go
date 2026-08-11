@@ -35,7 +35,7 @@ func TestMBIMLPAChannelUsesLeaseContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newMBIMLPAChannel() error = %v", err)
 	}
-	operation := newOperationContext(context.Background())
+	operation := newOperationContext(t.Context())
 	wrapped := &contextSmartCardChannel{operation: operation, SmartCardChannel: channel}
 	ctx, cancel := context.WithCancel(t.Context())
 	operation.use(ctx)

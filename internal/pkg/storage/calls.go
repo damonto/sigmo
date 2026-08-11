@@ -94,7 +94,7 @@ func (s *Store) SaveCallPreservingTerminal(ctx context.Context, call Call) (Call
 		timeText(call.StartedAt), timeText(call.AnsweredAt), timeText(call.EndedAt), timeText(call.UpdatedAt), timeText(time.Time{}))
 	saved, err := scanCall(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		existing, err := s.GetCall(ctx, call.ID)
+		existing, err := s.Call(ctx, call.ID)
 		if err != nil {
 			return Call{}, false, err
 		}
@@ -106,7 +106,7 @@ func (s *Store) SaveCallPreservingTerminal(ctx context.Context, call Call) (Call
 	return saved, true, nil
 }
 
-func (s *Store) GetCall(ctx context.Context, id string) (Call, error) {
+func (s *Store) Call(ctx context.Context, id string) (Call, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return Call{}, ErrNotFound

@@ -125,14 +125,7 @@ func (r *qmiCATReader) cachedSetupMenu(command qcom.CATCommand, cacheErr error) 
 	return qmiCachedSetupMenu{command: command, session: session}, true
 }
 
-func (r *qmiCATReader) runCommands(
-	ctx context.Context,
-	out chan<- usim.STKSession,
-	watch qmiCATWatch,
-	claimConfig qcom.CATEventClaimConfig,
-	cached qmiCachedSetupMenu,
-	cachedOK bool,
-) {
+func (r *qmiCATReader) runCommands(ctx context.Context, out chan<- usim.STKSession, watch qmiCATWatch, claimConfig qcom.CATEventClaimConfig, cached qmiCachedSetupMenu, cachedOK bool) {
 	defer close(out)
 	defer func() { stopQMICATWatch(watch) }()
 

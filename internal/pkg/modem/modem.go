@@ -55,9 +55,9 @@ type Modem struct {
 	HardwareRevision    string
 	Status              wwanmodem.Status
 	PrimaryPort         string
-	PrimarySimSlot      uint32
-	Sim                 *SIM
-	SimSlots            []uint32
+	PrimarySIMSlot      uint32
+	SIM                 *SIM
+	SIMSlots            []uint32
 	Ports               []ModemPort
 	Number              string
 }
@@ -91,9 +91,9 @@ func (m *Modem) Snapshot() ModemSnapshot {
 	defer m.runtimeMu.RUnlock()
 	return ModemSnapshot{
 		Status:         m.Status,
-		PrimarySIMSlot: m.PrimarySimSlot,
-		SIM:            cloneSIM(m, m.Sim),
-		SIMSlots:       slices.Clone(m.SimSlots),
+		PrimarySIMSlot: m.PrimarySIMSlot,
+		SIM:            cloneSIM(m, m.SIM),
+		SIMSlots:       slices.Clone(m.SIMSlots),
 		Slots:          cloneSIMSlots(m),
 		Number:         m.Number,
 		StatusKnown:    m.statusKnown || m.Status != (wwanmodem.Status{}),
@@ -101,20 +101,20 @@ func (m *Modem) Snapshot() ModemSnapshot {
 }
 
 func cloneSIMSlots(m *Modem) []*SIM {
-	if len(m.SimSlots) == 0 {
-		if m.Sim == nil {
+	if len(m.SIMSlots) == 0 {
+		if m.SIM == nil {
 			return nil
 		}
-		return []*SIM{cloneSIM(m, m.Sim)}
+		return []*SIM{cloneSIM(m, m.SIM)}
 	}
-	slots := make([]*SIM, 0, len(m.SimSlots))
-	for _, slot := range m.SimSlots {
+	slots := make([]*SIM, 0, len(m.SIMSlots))
+	for _, slot := range m.SIMSlots {
 		sim := cloneSIM(m, m.slotSIMs[slot])
-		if sim == nil && m.Sim != nil && (m.Sim.Slot == slot || (m.Sim.Slot == 0 && m.PrimarySimSlot == slot)) {
-			sim = cloneSIM(m, m.Sim)
+		if sim == nil && m.SIM != nil && (m.SIM.Slot == slot || (m.SIM.Slot == 0 && m.PrimarySIMSlot == slot)) {
+			sim = cloneSIM(m, m.SIM)
 		}
 		if sim == nil {
-			sim = &SIM{modem: m, Slot: slot, Active: slot == m.PrimarySimSlot}
+			sim = &SIM{modem: m, Slot: slot, Active: slot == m.PrimarySIMSlot}
 		}
 		slots = append(slots, sim)
 	}
@@ -251,7 +251,7 @@ func (m *Modem) ProfileID(ctx context.Context) (string, error) {
 		if id := strings.TrimSpace(snapshot.SIM.Identifier); id != "" {
 			return id, nil
 		}
-		if id := strings.TrimSpace(snapshot.SIM.Eid); id != "" {
+		if id := strings.TrimSpace(snapshot.SIM.EID); id != "" {
 			return id, nil
 		}
 	}

@@ -1,7 +1,6 @@
 package modem
 
 import (
-	"context"
 	"net/netip"
 	"slices"
 	"testing"
@@ -56,7 +55,7 @@ func TestBearerUpdateInfoPreservesExplicitAPN(t *testing.T) {
 }
 
 func TestBearerConsumeRejectsNilStream(t *testing.T) {
-	if err := new(Bearer).consume(context.Background(), nil); err == nil {
+	if err := new(Bearer).consume(t.Context(), nil); err == nil {
 		t.Fatal("consume() error = nil, want nil stream error")
 	}
 }

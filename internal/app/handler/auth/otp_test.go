@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -71,7 +70,7 @@ func TestOTPSend(t *testing.T) {
 			settingsStore := settings.NewMemoryStore(&tt.settings)
 			otp := newOTP(settingsStore, store)
 
-			err := otp.Send(context.Background())
+			err := otp.Send(t.Context())
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("Send() error = %v, want %v", err, tt.want)
 			}
@@ -230,7 +229,7 @@ func TestOTPVerify(t *testing.T) {
 
 func newAuthTestStore(t *testing.T) *appauth.Store {
 	t.Helper()
-	db, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	db, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)
 	}

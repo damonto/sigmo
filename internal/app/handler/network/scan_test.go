@@ -27,7 +27,7 @@ func TestScanTaskStoreSharesActiveScanAndCachesResult(t *testing.T) {
 		}
 	}
 
-	first, created, err := store.start(modem)
+	first, created, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("start() error = %v", err)
 	}
@@ -36,7 +36,7 @@ func TestScanTaskStoreSharesActiveScanAndCachesResult(t *testing.T) {
 	}
 	<-started
 
-	second, created, err := store.start(modem)
+	second, created, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("second start() error = %v", err)
 	}
@@ -56,7 +56,7 @@ func TestScanTaskStoreSharesActiveScanAndCachesResult(t *testing.T) {
 		t.Fatalf("response = %+v, want completed result", response)
 	}
 
-	cached, created, err := store.start(modem)
+	cached, created, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("cached start() error = %v", err)
 	}
@@ -85,7 +85,7 @@ func TestScanTaskStoreCancelAndModemClose(t *testing.T) {
 				<-ctx.Done()
 				return nil, ctx.Err()
 			}
-			task, _, err := store.start(modem)
+			task, _, err := store.start(t.Context(), modem)
 			if err != nil {
 				t.Fatalf("start() error = %v", err)
 			}
@@ -116,7 +116,7 @@ func TestScanTaskStoreInvalidatesCache(t *testing.T) {
 	}
 	modem := &mmodem.Modem{}
 
-	first, _, err := store.start(modem)
+	first, _, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("start() error = %v", err)
 	}
@@ -125,14 +125,14 @@ func TestScanTaskStoreInvalidatesCache(t *testing.T) {
 	}
 
 	store.invalidate(modem)
-	second, created, err := store.start(modem)
+	second, created, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("start() after invalidate error = %v", err)
 	}
 	if !created || second.id == first.id {
 		t.Fatalf("start() after invalidate = (%s, %t), want a new task", second.id, created)
 	}
-	if _, err := store.wait(context.Background(), second); err != nil {
+	if _, err := store.wait(t.Context(), second); err != nil {
 		t.Fatalf("wait() after invalidate error = %v", err)
 	}
 }
@@ -143,11 +143,11 @@ func TestScanTaskStoreCleansExpiredEntries(t *testing.T) {
 	store.now = func() time.Time { return now }
 	store.scanFunc = func(context.Context, *mmodem.Modem) ([]NetworkResponse, error) { return nil, nil }
 	modem := &mmodem.Modem{}
-	task, _, err := store.start(modem)
+	task, _, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("start() error = %v", err)
 	}
-	if _, err := store.wait(context.Background(), task); err != nil {
+	if _, err := store.wait(t.Context(), task); err != nil {
 		t.Fatalf("wait() error = %v", err)
 	}
 
@@ -188,7 +188,7 @@ func TestScanTaskStoreQueuesReplacementUntilCanceledTaskReleasesClient(t *testin
 		}
 	}
 
-	first, _, err := store.start(modem)
+	first, _, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("first start() error = %v", err)
 	}
@@ -198,7 +198,7 @@ func TestScanTaskStoreQueuesReplacementUntilCanceledTaskReleasesClient(t *testin
 	}
 	<-firstCanceled
 
-	second, created, err := store.start(modem)
+	second, created, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("replacement start() error = %v", err)
 	}
@@ -261,7 +261,7 @@ func TestScanTaskStoreKeepsLeaseChainAfterQueuedReplacementTimesOut(t *testing.T
 		}
 	}
 
-	first, _, err := store.start(modem)
+	first, _, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("first start() error = %v", err)
 	}
@@ -269,14 +269,14 @@ func TestScanTaskStoreKeepsLeaseChainAfterQueuedReplacementTimesOut(t *testing.T
 	if err := store.cancelTask(modem, first.id); err != nil {
 		t.Fatalf("cancelTask() error = %v", err)
 	}
-	second, _, err := store.start(modem)
+	second, _, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("second start() error = %v", err)
 	}
 	waitForScanStatus(t, store, modem, second.id, networkScanStatusFailed)
 
 	store.timeout = time.Second
-	third, created, err := store.start(modem)
+	third, created, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("third start() error = %v", err)
 	}
@@ -319,7 +319,7 @@ func TestScanTaskStoreCacheRequiresSameNetworkState(t *testing.T) {
 		return nil, nil
 	}
 
-	first, _, err := store.start(modem)
+	first, _, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("first start() error = %v", err)
 	}
@@ -328,7 +328,7 @@ func TestScanTaskStoreCacheRequiresSameNetworkState(t *testing.T) {
 	}
 
 	stateVersion.Store(2)
-	second, created, err := store.start(modem)
+	second, created, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("start() after state change error = %v", err)
 	}
@@ -350,7 +350,7 @@ func TestScanTaskStoreTimesOutScan(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	task, _, err := store.start(&mmodem.Modem{})
+	task, _, err := store.start(t.Context(), &mmodem.Modem{})
 	if err != nil {
 		t.Fatalf("start() error = %v", err)
 	}
@@ -372,7 +372,7 @@ func TestScanTaskStoreCloseCancelsTasksAndRejectsStarts(t *testing.T) {
 		return nil, ctx.Err()
 	}
 	modem := &mmodem.Modem{}
-	task, _, err := store.start(modem)
+	task, _, err := store.start(t.Context(), modem)
 	if err != nil {
 		t.Fatalf("start() error = %v", err)
 	}
@@ -383,7 +383,7 @@ func TestScanTaskStoreCloseCancelsTasksAndRejectsStarts(t *testing.T) {
 	if !errors.Is(err, context.Canceled) || response.Status != networkScanStatusCanceled {
 		t.Fatalf("wait() = (%+v, %v), want canceled", response, err)
 	}
-	if _, _, err := store.start(modem); !errors.Is(err, errNetworkScanStoreClosed) {
+	if _, _, err := store.start(t.Context(), modem); !errors.Is(err, errNetworkScanStoreClosed) {
 		t.Fatalf("start() after close error = %v, want store closed", err)
 	}
 }

@@ -3,7 +3,6 @@
 package call
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -33,7 +32,7 @@ func TestWebRTCICEProviderFetchesCloudflareCredentials(t *testing.T) {
 	provider.client = server.Client()
 	provider.endpoint = server.URL
 
-	got, err := provider.servers(context.Background())
+	got, err := provider.servers(t.Context())
 	if err != nil {
 		t.Fatalf("servers() error = %v", err)
 	}
@@ -55,19 +54,19 @@ func TestWebRTCICEServersReturnsCloudflareErrors(t *testing.T) {
 	}))
 	defer server.Close()
 
-	service, err := NewMedia(context.Background(), nil)
+	service, err := NewMedia(t.Context(), nil)
 	if err != nil {
 		t.Fatalf("NewMedia() error = %v", err)
 	}
 	t.Cleanup(func() {
-		if err := service.Close(context.Background()); err != nil {
+		if err := service.Close(t.Context()); err != nil {
 			t.Errorf("Close() error = %v", err)
 		}
 	})
 	service.ice.client = server.Client()
 	service.ice.endpoint = server.URL
 
-	got, err := service.webRTCICEServers(context.Background())
+	got, err := service.webRTCICEServers(t.Context())
 	if err == nil {
 		t.Fatalf("webRTCICEServers() error = nil, want error")
 	}
@@ -87,7 +86,7 @@ func TestWebRTCICEProviderRejectsMissingURLs(t *testing.T) {
 	provider.client = server.Client()
 	provider.endpoint = server.URL
 
-	_, err := provider.servers(context.Background())
+	_, err := provider.servers(t.Context())
 	if !errors.Is(err, errWebRTCICEURLsRequired) {
 		t.Fatalf("servers() error = %v, want %v", err, errWebRTCICEURLsRequired)
 	}

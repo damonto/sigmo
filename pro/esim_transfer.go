@@ -3,6 +3,8 @@
 package main
 
 import (
+	"context"
+
 	"github.com/labstack/echo/v5"
 
 	coreesim "github.com/damonto/sigmo/internal/app/handler/esim"
@@ -12,7 +14,7 @@ import (
 
 const esimTransferFeature = "esimTransfer"
 
-var proESIMTransfer = func(app *proApp) error {
+var proESIMTransfer = func(_ context.Context, app *proApp) error {
 	runtime := app.runtime
 	app.RegisterWebsheets()
 	runtime.AddFeatures(esimTransferFeature)

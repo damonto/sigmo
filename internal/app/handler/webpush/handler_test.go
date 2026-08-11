@@ -2,7 +2,7 @@ package webpush
 
 import (
 	"bytes"
-	"context"
+
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/base64"
@@ -120,11 +120,11 @@ func pushTestSubscription(t *testing.T) (string, string, string) {
 
 func testClient(t *testing.T) (*push.Client, func()) {
 	t.Helper()
-	store, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "sigmo.db"))
+	store, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
 	if err != nil {
 		t.Fatalf("storage.Open() error = %v", err)
 	}
-	client, err := push.New(context.Background(), store)
+	client, err := push.New(t.Context(), store)
 	if err != nil {
 		_ = store.Close()
 		t.Fatalf("webpush.New() error = %v", err)

@@ -192,9 +192,11 @@ func inspectGzipArtifact(path string) (int64, string, error) {
 	if closeErr != nil {
 		return 0, "", closeErr
 	}
-	if _, err := buffered.ReadByte(); err == nil {
+	_, err = buffered.ReadByte()
+	if err == nil {
 		return 0, "", errors.New("gzip artifact contains trailing data or multiple members")
-	} else if !errors.Is(err, io.EOF) {
+	}
+	if !errors.Is(err, io.EOF) {
 		return 0, "", fmt.Errorf("read gzip trailer: %w", err)
 	}
 	return size, hex.EncodeToString(hash.Sum(nil)), nil

@@ -8,25 +8,29 @@ import (
 	"github.com/go-playground/locales/en"
 	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
-	en_translations "github.com/go-playground/validator/v10/translations/en"
+	enTranslations "github.com/go-playground/validator/v10/translations/en"
 )
 
-type CustomValidator struct {
+type Validator struct {
 	validator *validator.Validate
 	trans     ut.Translator
 }
 
-func New() *CustomValidator {
+func New() (*Validator, error) {
 	validate := validator.New()
 	en := en.New()
 	uni := ut.New(en, en)
-	trans, _ := uni.GetTranslator("en")
-	en_translations.RegisterDefaultTranslations(validate, trans)
-	v := &CustomValidator{validator: validate, trans: trans}
-	return v
+	trans, ok := uni.GetTranslator("en")
+	if !ok {
+		return nil, errors.New("load English translator")
+	}
+	if err := enTranslations.RegisterDefaultTranslations(validate, trans); err != nil {
+		return nil, fmt.Errorf("register English translations: %w", err)
+	}
+	return &Validator{validator: validate, trans: trans}, nil
 }
 
-func (v *CustomValidator) Validate(i any) error {
+func (v *Validator) Validate(i any) error {
 	if err := v.validator.Struct(i); err != nil {
 		if validationErrors, ok := err.(validator.ValidationErrors); ok {
 			errs := make([]string, 0, len(validationErrors))
@@ -38,7 +42,7 @@ func (v *CustomValidator) Validate(i any) error {
 			}
 			return errors.New(strings.Join(errs, ", "))
 		}
-		return fmt.Errorf("validation failed: %w", err)
+		return fmt.Errorf("validate input: %w", err)
 	}
 	return nil
 }

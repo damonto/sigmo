@@ -293,7 +293,7 @@ func TestWSSessionCancelCancelsContext(t *testing.T) {
 		}
 		defer conn.Close()
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		_ = newWSSession(conn, cancel)
 
@@ -322,20 +322,28 @@ func TestWSSessionCancelCancelsContext(t *testing.T) {
 func TestWSSessionWaitForStartStopsOnDisconnect(t *testing.T) {
 	t.Parallel()
 
-	done := make(chan bool, 1)
+	done := make(chan error, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := testWSUpgrader.Upgrade(w, r, nil)
 		if err != nil {
-			done <- true
+			done <- err
 			return
 		}
 		defer conn.Close()
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		session := newWSSession(conn, cancel)
 		_, ok := session.waitForStart(ctx)
-		done <- ok
+		if ok {
+			done <- errors.New("waitForStart() ok = true, want false")
+			return
+		}
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			done <- errors.New("websocket disconnect did not cancel transfer context")
+			return
+		}
+		done <- nil
 	}))
 	defer server.Close()
 
@@ -344,8 +352,8 @@ func TestWSSessionWaitForStartStopsOnDisconnect(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	if ok := <-done; ok {
-		t.Fatal("waitForStart() ok = true, want false")
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 

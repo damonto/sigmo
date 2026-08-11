@@ -288,7 +288,7 @@ func TestSelectAPN(t *testing.T) {
 func TestPreferencesWithDefaultAPNCredentials(t *testing.T) {
 	t.Parallel()
 
-	modem := modemAccess{modem: &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23491"}}}
+	modem := modemAccess{modem: &mmodem.Modem{SIM: &mmodem.SIM{OperatorIdentifier: "23491"}}}
 	prefs := Preferences{APN: "wap.vodafone.co.uk"}
 
 	got := preferencesWithDefaultAPNCredentials(modem, prefs)
@@ -314,7 +314,7 @@ func TestPreferencesWithDefaultAPNCredentials(t *testing.T) {
 		t.Fatalf("preferencesWithDefaultAPNCredentials() IPType = %q, want ipv4", got.IPType)
 	}
 
-	gid1Modem := modemAccess{modem: &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23415", GID1: "A0"}}}
+	gid1Modem := modemAccess{modem: &mmodem.Modem{SIM: &mmodem.SIM{OperatorIdentifier: "23415", GID1: "A0"}}}
 	gid1Prefs := Preferences{APN: "MY.INTERNET"}
 	got = preferencesWithDefaultAPNCredentials(gid1Modem, gid1Prefs)
 	if got.APNUsername != "wap" || got.APNPassword != "wap" || got.APNAuth != "pap" {
@@ -325,7 +325,7 @@ func TestPreferencesWithDefaultAPNCredentials(t *testing.T) {
 func TestPreferencesWithSelectedAPN(t *testing.T) {
 	t.Parallel()
 
-	modem := modemAccess{modem: &mmodem.Modem{Sim: &mmodem.SIM{OperatorIdentifier: "23491"}}}
+	modem := modemAccess{modem: &mmodem.Modem{SIM: &mmodem.SIM{OperatorIdentifier: "23491"}}}
 
 	got := preferencesWithSelectedAPN(modem, Preferences{})
 	if got.APN != "wap.vodafone.co.uk" {
@@ -338,7 +338,7 @@ func TestPreferencesWithSelectedAPN(t *testing.T) {
 		t.Fatalf("preferencesWithSelectedAPN() IPType = %q, want ipv4v6", got.IPType)
 	}
 
-	vodafone := modemAccess{modem: &mmodem.Modem{Sim: &mmodem.SIM{
+	vodafone := modemAccess{modem: &mmodem.Modem{SIM: &mmodem.SIM{
 		Identifier:         "89441000400308655036",
 		OperatorIdentifier: "23415",
 		GID1:               "E1",
@@ -361,7 +361,7 @@ func TestAPNForModem(t *testing.T) {
 		{
 			name: "remembered wins",
 			modem: &mmodem.Modem{
-				Sim: &mmodem.SIM{OperatorIdentifier: "00101"},
+				SIM: &mmodem.SIM{OperatorIdentifier: "00101"},
 			},
 			remembered: "remembered",
 			want:       "remembered",
@@ -369,14 +369,14 @@ func TestAPNForModem(t *testing.T) {
 		{
 			name: "default fallback from sim operator",
 			modem: &mmodem.Modem{
-				Sim: &mmodem.SIM{OperatorIdentifier: "00101"},
+				SIM: &mmodem.SIM{OperatorIdentifier: "00101"},
 			},
 			want: "default",
 		},
 		{
 			name: "gid1 exact match from sim",
 			modem: &mmodem.Modem{
-				Sim: &mmodem.SIM{OperatorIdentifier: "23415", GID1: "A1"},
+				SIM: &mmodem.SIM{OperatorIdentifier: "23415", GID1: "A1"},
 			},
 			want: "MY.INTERNET",
 		},

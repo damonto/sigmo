@@ -20,7 +20,7 @@ func TestRunStaleWorkerDoesNotReleaseReplacement(t *testing.T) {
 	newCanceled := make(chan struct{})
 	releaseOld := make(chan struct{})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(ctx, registry, func(workerCtx context.Context, m *modem.Modem) {
@@ -74,7 +74,7 @@ func TestRunWaitsForWorkersToExit(t *testing.T) {
 	started := make(chan struct{})
 	canceled := make(chan struct{})
 	release := make(chan struct{})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		done <- Run(ctx, registry, func(workerCtx context.Context, _ *modem.Modem) {

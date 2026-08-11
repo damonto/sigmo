@@ -20,10 +20,15 @@ var carrierGradeNAT = netip.MustParsePrefix("100.64.0.0/10")
 
 func newPushHTTPClient() *http.Client {
 	dialer := &net.Dialer{Timeout: pushDialTimeout, KeepAlive: 30 * time.Second}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		return dialPublicPushAddress(ctx, dialer, net.DefaultResolver, network, address)
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return dialPublicPushAddress(ctx, dialer, net.DefaultResolver, network, address)
+		},
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: time.Second,
 	}
 	return &http.Client{
 		Transport: transport,
@@ -34,13 +39,7 @@ func newPushHTTPClient() *http.Client {
 	}
 }
 
-func dialPublicPushAddress(
-	ctx context.Context,
-	dialer *net.Dialer,
-	resolver *net.Resolver,
-	network string,
-	address string,
-) (net.Conn, error) {
+func dialPublicPushAddress(ctx context.Context, dialer *net.Dialer, resolver *net.Resolver, network string, address string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, fmt.Errorf("parse push endpoint address: %w", err)

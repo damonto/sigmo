@@ -102,22 +102,22 @@ func TestModemSnapshotSIMKind(t *testing.T) {
 	}{
 		{
 			name:     "cached eUICC ATR",
-			modem:    &Modem{Sim: &SIM{ATR: []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}}},
+			modem:    &Modem{SIM: &SIM{ATR: []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}}},
 			wantKind: SIMKindEUICC,
 		},
 		{
 			name:     "cached known ESTKme ATR",
-			modem:    &Modem{Sim: &SIM{ATR: westkKnownATR}},
+			modem:    &Modem{SIM: &SIM{ATR: westkKnownATR}},
 			wantKind: SIMKindEUICC,
 		},
 		{
 			name:     "ordinary cached ATR",
-			modem:    &Modem{Sim: &SIM{ATR: []byte{0x3B, 0x00}}},
+			modem:    &Modem{SIM: &SIM{ATR: []byte{0x3B, 0x00}}},
 			wantKind: SIMKindPhysical,
 		},
 		{
 			name:     "missing ATR",
-			modem:    &Modem{Sim: &SIM{}},
+			modem:    &Modem{SIM: &SIM{}},
 			wantKind: SIMKindUnknown,
 		},
 		{

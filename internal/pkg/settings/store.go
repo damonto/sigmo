@@ -143,30 +143,38 @@ func load(ctx context.Context, db *storage.Store) (Settings, bool, error) {
 	current := Default().Clone()
 
 	var auth Auth
-	if ok, err := get(ctx, db, globalScopeKey, authSettingsKey, &auth); err != nil {
+	ok, err := get(ctx, db, globalScopeKey, authSettingsKey, &auth)
+	if err != nil {
 		return Settings{}, false, err
-	} else if ok {
+	}
+	if ok {
 		current.Auth = auth
 	}
 
 	var channels map[string]Channel
-	if ok, err := get(ctx, db, globalScopeKey, channelSettingsKey, &channels); err != nil {
+	ok, err = get(ctx, db, globalScopeKey, channelSettingsKey, &channels)
+	if err != nil {
 		return Settings{}, false, err
-	} else if ok {
+	}
+	if ok {
 		current.Channels = channels
 	}
 
 	var proxy Proxy
-	if ok, err := get(ctx, db, globalScopeKey, proxySettingsKey, &proxy); err != nil {
+	ok, err = get(ctx, db, globalScopeKey, proxySettingsKey, &proxy)
+	if err != nil {
 		return Settings{}, false, err
-	} else if ok {
+	}
+	if ok {
 		current.Proxy = &proxy
 	}
 
 	var mcp MCP
-	if ok, err := get(ctx, db, globalScopeKey, mcpSettingsKey, &mcp); err != nil {
+	ok, err = get(ctx, db, globalScopeKey, mcpSettingsKey, &mcp)
+	if err != nil {
 		return Settings{}, false, err
-	} else if ok {
+	}
+	if ok {
 		current.MCP = mcp
 	}
 

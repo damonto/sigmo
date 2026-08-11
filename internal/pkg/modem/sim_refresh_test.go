@@ -161,7 +161,7 @@ func TestEnsureSIMVisibleDoesNotPowerCycleAfterProbeTimeout(t *testing.T) {
 	}
 	registry.openDevice = fakeDeviceOpener(t, device, nil)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 	defer cancel()
 	_, err := registry.ensureSIMVisible(ctx, current, SIMTarget{Slot: 1, ICCID: "8901000000000000001"})
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -199,7 +199,7 @@ func TestEnsureSIMVisibleProvisionsEachGenerationOnce(t *testing.T) {
 	}
 	registry.openDevice = fakeDeviceOpener(t, device, nil)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	result, err := registry.ensureSIMVisible(ctx, current, SIMTarget{Slot: 1, ICCID: "8901000000000000001"})
 	if err != nil {
@@ -288,7 +288,7 @@ func TestEnsureSIMVisibleRetriesTransientProvisioningFailure(t *testing.T) {
 	}
 	registry.openDevice = fakeDeviceOpener(t, device, nil)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	if _, err := registry.ensureSIMVisible(ctx, current, SIMTarget{Slot: 1, ICCID: "8901000000000000001"}); err != nil {
 		t.Fatalf("ensureSIMVisible() error = %v", err)
@@ -313,7 +313,7 @@ func TestEnsureSIMVisibleDoesNotPowerCyclePersistentICCIDMismatch(t *testing.T) 
 	}}}
 	registry.openDevice = fakeDeviceOpener(t, device, nil)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
 	_, err := registry.ensureSIMVisible(ctx, current, SIMTarget{Slot: 1, ICCID: "8901000000000000001"})
 	if !errors.Is(err, context.DeadlineExceeded) {
@@ -332,7 +332,7 @@ func TestReadCurrentSIMRequiresMatchingReadyState(t *testing.T) {
 	device := &fakeDeviceControl{state: devicewwan.SIMState{Supported: true, Matches: true, ICCID: iccid, Slot: 1}}
 	registry.openDevice = fakeDeviceOpener(t, device, nil)
 
-	read, err := registry.readCurrentModem(context.Background(), modem, SIMTarget{ICCID: iccid})
+	read, err := registry.readCurrentModem(t.Context(), modem, SIMTarget{ICCID: iccid})
 	if err != nil {
 		t.Fatalf("readCurrentModem() error = %v", err)
 	}
@@ -347,7 +347,7 @@ func TestReadCurrentSIMRequiresMatchingReadyState(t *testing.T) {
 	}
 
 	device.state.Ready = true
-	read, err = registry.readCurrentModem(context.Background(), modem, SIMTarget{ICCID: iccid})
+	read, err = registry.readCurrentModem(t.Context(), modem, SIMTarget{ICCID: iccid})
 	if err != nil {
 		t.Fatalf("second readCurrentModem() error = %v", err)
 	}
@@ -371,7 +371,7 @@ func TestReadCurrentModemUsesReadyActiveSIMSnapshot(t *testing.T) {
 	registry.openDevice = fakeDeviceOpener(t, device, nil)
 	target := SIMTarget{Slot: 2, ICCID: iccid, RequireActiveSlot: true}
 
-	read, err := registry.readCurrentModem(context.Background(), modem, target)
+	read, err := registry.readCurrentModem(t.Context(), modem, target)
 	if err != nil {
 		t.Fatalf("readCurrentModem() before slot switch error = %v", err)
 	}
@@ -383,7 +383,7 @@ func TestReadCurrentModemUsesReadyActiveSIMSnapshot(t *testing.T) {
 	}
 
 	modem.applySIMInfo(wwanmodem.SIMInfo{Slot: 2, State: wwanmodem.SIMStateReady, ICCID: iccid})
-	read, err = registry.readCurrentModem(context.Background(), modem, target)
+	read, err = registry.readCurrentModem(t.Context(), modem, target)
 	if err != nil {
 		t.Fatalf("readCurrentModem() after slot switch error = %v", err)
 	}
@@ -411,7 +411,7 @@ func TestReadCurrentModemUsesReadyEUICCSnapshotWithoutSlotTarget(t *testing.T) {
 		return nil, nil
 	}
 
-	read, err := registry.readCurrentModem(context.Background(), modem, SIMTarget{ICCID: iccid, RequireEUICC: true})
+	read, err := registry.readCurrentModem(t.Context(), modem, SIMTarget{ICCID: iccid, RequireEUICC: true})
 	if err != nil {
 		t.Fatalf("readCurrentModem() error = %v", err)
 	}
@@ -448,7 +448,7 @@ func TestActiveSIMTargetReadyAllowsLockedSIMWhenConfigured(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			modem.runtimeMu.Lock()
 			modem.Status.SIM = tt.state
-			modem.Sim.Identifier = tt.identifier
+			modem.SIM.Identifier = tt.identifier
 			modem.runtimeMu.Unlock()
 
 			target := SIMTarget{ICCID: iccid, RequireEUICC: true, AllowLocked: tt.allowLocked}
@@ -558,7 +558,7 @@ func TestEnsureSIMVisibleWaitsForReadyActiveSIMSnapshot(t *testing.T) {
 	}()
 	registry.openDevice = fakeDeviceOpener(t, device, nil)
 
-	result, err := registry.EnsureSIMVisible(context.Background(), modem, SIMTarget{
+	result, err := registry.EnsureSIMVisible(t.Context(), modem, SIMTarget{
 		Slot:              2,
 		ICCID:             iccid,
 		RequireActiveSlot: true,
@@ -592,7 +592,7 @@ func TestEnsureSIMVisibleWaitsForActiveSIMClassification(t *testing.T) {
 		})
 	}()
 
-	result, err := registry.EnsureSIMVisible(context.Background(), modem, SIMTarget{
+	result, err := registry.EnsureSIMVisible(t.Context(), modem, SIMTarget{
 		Slot:              2,
 		ICCID:             iccid,
 		RequireActiveSlot: true,
@@ -714,7 +714,7 @@ func TestReadCurrentESIMUsesMBIMDevice(t *testing.T) {
 		return device, nil
 	}
 
-	read, err := registry.readCurrentModem(context.Background(), modem, SIMTarget{ICCID: iccid})
+	read, err := registry.readCurrentModem(t.Context(), modem, SIMTarget{ICCID: iccid})
 	if err != nil {
 		t.Fatalf("readCurrentModem() error = %v", err)
 	}
@@ -736,7 +736,7 @@ func TestReadCurrentESIMReturnsSIMStateError(t *testing.T) {
 	wantErr := errors.New("UIM unavailable")
 	registry.openDevice = fakeDeviceOpener(t, &fakeDeviceControl{stateErr: wantErr}, nil)
 
-	_, err := registry.readCurrentModem(context.Background(), modem, SIMTarget{ICCID: "8901000000000000001"})
+	_, err := registry.readCurrentModem(t.Context(), modem, SIMTarget{ICCID: "8901000000000000001"})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("readCurrentModem() error = %v, want %v", err, wantErr)
 	}
@@ -757,7 +757,7 @@ func TestReadCurrentModemPreservesProbeErrorDuringGenerationChange(t *testing.T)
 	}
 	registry.openDevice = fakeDeviceOpener(t, device, nil)
 
-	_, err := registry.readCurrentModem(context.Background(), current, SIMTarget{ICCID: "8901000000000000001"})
+	_, err := registry.readCurrentModem(t.Context(), current, SIMTarget{ICCID: "8901000000000000001"})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("readCurrentModem() error = %v, want %v", err, wantErr)
 	}
@@ -788,12 +788,12 @@ func simRefreshTestModem(path string, generation uint64, visible bool) *Modem {
 		generation:          generation,
 		EquipmentIdentifier: "imei-1",
 		PrimaryPort:         "/dev/cdc-wdm0",
-		PrimarySimSlot:      1,
-		SimSlots:            []uint32{1},
+		PrimarySIMSlot:      1,
+		SIMSlots:            []uint32{1},
 		Ports:               []ModemPort{{PortType: wwanmodem.PortQMI, Device: "/dev/cdc-wdm0"}},
 	}
 	if visible {
-		modem.Sim = &SIM{modem: modem, Slot: 1, Active: true, Identifier: "8901000000000000001"}
+		modem.SIM = &SIM{modem: modem, Slot: 1, Active: true, Identifier: "8901000000000000001"}
 	}
 	return modem
 }
