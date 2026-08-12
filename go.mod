@@ -3,8 +3,8 @@ module github.com/damonto/sigmo
 go 1.26.3
 
 require (
-	github.com/damonto/euicc-go v1.1.3-0.20260811150452-872ebfcf74c3
-	github.com/damonto/wwan-go v0.0.0-20260811152019-279e9a089b1f
+	github.com/damonto/euicc-go v1.1.3-0.20260812151427-d76dfa0b8d9e
+	github.com/damonto/wwan-go v0.0.0-20260812150829-343eef16246d
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
 	github.com/go-playground/validator/v10 v10.30.3
