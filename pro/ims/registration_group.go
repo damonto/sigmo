@@ -6,13 +6,14 @@ import (
 	"sync"
 
 	imsgo "github.com/damonto/ims-go"
+	"github.com/damonto/ims-go/ims/registration"
 )
 
 // RegistrationGroups owns the registration group shared by access flows for
 // the same modem and SIM profile. Its zero value is ready to use.
 type RegistrationGroups struct {
 	mu     sync.Mutex
-	groups map[registrationGroupKey]*imsgo.RegistrationGroup
+	groups map[registrationGroupKey]*registration.Group
 }
 
 type registrationGroupKey struct {
@@ -21,7 +22,7 @@ type registrationGroupKey struct {
 }
 
 // Group returns the stable registration group for a modem and SIM profile.
-func (r *RegistrationGroups) Group(modemID, profileID string) *imsgo.RegistrationGroup {
+func (r *RegistrationGroups) Group(modemID, profileID string) *registration.Group {
 	key := registrationGroupKey{
 		modemID:   modemID,
 		profileID: profileID,
@@ -33,7 +34,7 @@ func (r *RegistrationGroups) Group(modemID, profileID string) *imsgo.Registratio
 		return group
 	}
 	if r.groups == nil {
-		r.groups = make(map[registrationGroupKey]*imsgo.RegistrationGroup)
+		r.groups = make(map[registrationGroupKey]*registration.Group)
 	}
 	group := imsgo.NewRegistrationGroup()
 	r.groups[key] = group

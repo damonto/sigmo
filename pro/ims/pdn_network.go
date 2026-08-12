@@ -120,7 +120,7 @@ func (s pdnNetworkState) empty() bool {
 		!s.flushPending
 }
 
-type imsPDNInfo = imsgo.IMSPDNNetworkInfo
+type imsPDNInfo = imsgo.PDNNetworkInfo
 
 type pdnNetwork struct {
 	parent        string

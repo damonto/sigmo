@@ -13,6 +13,7 @@ import (
 	"time"
 
 	imsgo "github.com/damonto/ims-go"
+	"github.com/damonto/ims-go/ims/registration"
 	"github.com/damonto/ims-go/lte"
 	"github.com/damonto/ims-go/wfcsetup"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
@@ -85,7 +86,7 @@ type internetRestorer interface {
 type connectAttempt struct {
 	sessionID         uint64
 	imsProfile        wwan.IMSProfile
-	registrationGroup *imsgo.RegistrationGroup
+	registrationGroup *registration.Group
 }
 
 var openManagedVoLTEDevice = func(modem *mmodem.Modem) (managedVoLTEDevice, error) {
@@ -567,7 +568,7 @@ func modemClientConfigForIMEI(imei string, access Access, imsProfileIndex uint8)
 		Logger:   mmodem.LoggerForIMEI(imei),
 		Terminal: terminalInfo(imei),
 		Access:   accessConfig,
-		IMS: imsgo.IMSConfig{
+		IMS: imsgo.ServiceConfig{
 			SMSDeliveryReportTimeout: smsDeliveryReportTimeout(),
 			Voice:                    imsVoiceConfig(),
 		},
