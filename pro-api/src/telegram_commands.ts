@@ -1,4 +1,18 @@
 import type { Database } from "./database";
+import { telegramAdmins } from "./telegram_access";
+import {
+  deleteTelegramCommands,
+  setTelegramCommands,
+} from "./telegram_client";
+import type {
+  TelegramBotCommand,
+  TelegramCommandScope,
+} from "./telegram_client";
+import {
+  boldMarkdownV2,
+  codeMarkdownV2,
+  escapeMarkdownV2,
+} from "./telegram_markdown";
 
 type CommandAccess = "user" | "admin";
 
@@ -8,26 +22,6 @@ type TelegramCommandDefinition = {
   usage: string;
   adminUsage?: string;
   access: CommandAccess;
-};
-
-type TelegramBotCommand = {
-  command: string;
-  description: string;
-};
-
-type TelegramCommandScope =
-  | { type: "all_private_chats" }
-  | { type: "chat"; chat_id: number };
-
-type TelegramCommandRequest = {
-  commands?: TelegramBotCommand[];
-  scope: TelegramCommandScope;
-};
-
-type TelegramAPIResponse = {
-  ok: boolean;
-  result?: boolean;
-  description?: string;
 };
 
 const telegramCommands = [
@@ -82,14 +76,6 @@ const telegramCommands = [
   },
 ] satisfies readonly TelegramCommandDefinition[];
 
-export function admins(env: Env): Set<number> {
-  return new Set(
-    env.SIGMO_ADMIN_TELEGRAM_IDS.split(",")
-      .map((value) => Number(value.trim()))
-      .filter((value) => Number.isSafeInteger(value) && value > 0),
-  );
-}
-
 function commandDefinitions(isAdmin: boolean): TelegramCommandDefinition[] {
   return telegramCommands.filter(
     ({ access }) => access === "user" || isAdmin,
@@ -104,80 +90,37 @@ function commandsFor(isAdmin: boolean): TelegramBotCommand[] {
 }
 
 export function availableCommands(isAdmin: boolean): string {
-  const lines = commandDefinitions(isAdmin).map((command) => {
+  const commands = commandDefinitions(isAdmin).map((command) => {
     const usage = isAdmin
       ? (command.adminUsage ?? command.usage)
       : command.usage;
-    return `${usage} — ${command.description}`;
+    return [
+      escapeMarkdownV2(`/${command.command}`),
+      escapeMarkdownV2(command.description),
+      `${boldMarkdownV2("Usage")}: ${codeMarkdownV2(usage)}`,
+    ].join("\n");
   });
-  return ["Available commands:", ...lines].join("\n");
-}
-
-function isTelegramAPIResponse(value: unknown): value is TelegramAPIResponse {
-  if (typeof value !== "object" || value === null || !("ok" in value))
-    return false;
-  if (typeof value.ok !== "boolean") return false;
-  if ("result" in value && typeof value.result !== "boolean") return false;
-  return !("description" in value) || typeof value.description === "string";
-}
-
-async function callTelegramBooleanMethod(
-  env: Env,
-  method: "setMyCommands" | "deleteMyCommands",
-  body: TelegramCommandRequest,
-): Promise<void> {
-  const response = await fetch(
-    `https://api.telegram.org/bot${env.SIGMO_TELEGRAM_BOT_TOKEN}/${method}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    },
-  );
-  const result = await response.json<unknown>().catch(() => null);
-  if (!response.ok)
-    throw new Error(`Telegram ${method} returned HTTP ${response.status}`);
-  if (!isTelegramAPIResponse(result))
-    throw new Error(`Telegram ${method} returned an invalid response`);
-  if (!result.ok) {
-    const detail = result.description ? `: ${result.description}` : "";
-    throw new Error(`Telegram ${method} rejected the request${detail}`);
-  }
-  if (result.result !== true)
-    throw new Error(`Telegram ${method} did not return true`);
-}
-
-function setTelegramCommands(
-  env: Env,
-  commands: TelegramBotCommand[],
-  scope: TelegramCommandScope,
-): Promise<void> {
-  return callTelegramBooleanMethod(env, "setMyCommands", { commands, scope });
-}
-
-function deleteTelegramCommands(
-  env: Env,
-  scope: TelegramCommandScope,
-): Promise<void> {
-  return callTelegramBooleanMethod(env, "deleteMyCommands", { scope });
+  return [boldMarkdownV2("Available commands"), ...commands].join("\n\n");
 }
 
 export async function reconcileTelegramCommands(
   env: Env,
   db: Database,
 ): Promise<void> {
-  const currentAdmins = [...admins(env)].sort((left, right) => left - right);
+  const currentAdmins = [...telegramAdmins(env)].sort(
+    (left, right) => left - right,
+  );
   const currentAdminSet = new Set(currentAdmins);
   const previousAdmins = await db.listTelegramCommandAdmins();
   const operations = [
-    setTelegramCommands(env, commandsFor(false), {
+    setTelegramCommands(env.SIGMO_TELEGRAM_BOT_TOKEN, commandsFor(false), {
       type: "all_private_chats",
     }),
   ];
 
   for (const chatID of currentAdmins) {
     operations.push(
-      setTelegramCommands(env, commandsFor(true), {
+      setTelegramCommands(env.SIGMO_TELEGRAM_BOT_TOKEN, commandsFor(true), {
         type: "chat",
         chat_id: chatID,
       }),
@@ -186,7 +129,10 @@ export async function reconcileTelegramCommands(
   for (const chatID of previousAdmins) {
     if (currentAdminSet.has(chatID)) continue;
     operations.push(
-      deleteTelegramCommands(env, { type: "chat", chat_id: chatID }),
+      deleteTelegramCommands(env.SIGMO_TELEGRAM_BOT_TOKEN, {
+        type: "chat",
+        chat_id: chatID,
+      }),
     );
   }
 

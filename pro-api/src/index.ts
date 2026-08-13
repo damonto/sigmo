@@ -16,7 +16,7 @@ import {
 } from "./license";
 import { download, latestRelease } from "./releases";
 import { displayName, telegramWebhook } from "./telegram";
-import { admins, reconcileTelegramCommands } from "./telegram_commands";
+import { reconcileTelegramCommands } from "./telegram_commands";
 
 export async function route(
   request: Request,
@@ -107,7 +107,6 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 export const testExports = {
-  admins,
   deviceID,
   displayName,
   isActive,

@@ -33,6 +33,11 @@ export type ActiveEntitlement = {
   activeDevices: number;
 };
 
+export type ActiveEntitlementPage = {
+  rows: ActiveEntitlement[];
+  total: number;
+};
+
 type Pairing = {
   pollTokenHash: string;
   deviceId: string;
@@ -53,6 +58,11 @@ type DeviceSummary = {
   deviceId: string;
   lastSeenAt: string;
   revokedAt: string | null;
+};
+
+export type DevicePage = {
+  rows: DeviceSummary[];
+  total: number;
 };
 
 type TelegramCommandAdmin = {
@@ -238,7 +248,22 @@ export class Database {
       .first<Entitlement>();
   }
 
-  async listActiveEntitlements(timestamp: string): Promise<ActiveEntitlement[]> {
+  async listActiveEntitlements(
+    timestamp: string,
+    limit: number,
+    offset: number,
+  ): Promise<ActiveEntitlementPage> {
+    const count = await this.session
+      .prepare(
+        `SELECT COUNT(*) AS total
+         FROM entitlements
+         WHERE status = 'active'
+           AND (expires_at IS NULL OR expires_at > ?)`,
+      )
+      .bind(timestamp)
+      .first<{ total: number }>();
+    if (!Number.isSafeInteger(offset))
+      return { rows: [], total: count?.total ?? 0 };
     const result = await this.session
       .prepare(
         `SELECT
@@ -256,11 +281,12 @@ export class Database {
          FROM entitlements AS entitlement
          WHERE entitlement.status = 'active'
            AND (entitlement.expires_at IS NULL OR entitlement.expires_at > ?)
-         ORDER BY entitlement.telegram_id ASC`,
+         ORDER BY entitlement.telegram_id ASC
+         LIMIT ? OFFSET ?`,
       )
-      .bind(timestamp)
+      .bind(timestamp, limit, offset)
       .all<ActiveEntitlement>();
-    return result.results;
+    return { rows: result.results, total: count?.total ?? 0 };
   }
 
   async findDevice(deviceId: string): Promise<Device | null> {
@@ -629,7 +655,17 @@ export class Database {
     ]);
   }
 
-  async listDevices(telegramId: number): Promise<DeviceSummary[]> {
+  async listDevices(
+    telegramId: number,
+    limit: number,
+    offset: number,
+  ): Promise<DevicePage> {
+    const count = await this.session
+      .prepare("SELECT COUNT(*) AS total FROM devices WHERE telegram_id = ?")
+      .bind(telegramId)
+      .first<{ total: number }>();
+    if (!Number.isSafeInteger(offset))
+      return { rows: [], total: count?.total ?? 0 };
     const result = await this.session
       .prepare(
         `SELECT
@@ -638,11 +674,12 @@ export class Database {
            revoked_at AS revokedAt
          FROM devices
          WHERE telegram_id = ?
-         ORDER BY created_at ASC`,
+         ORDER BY created_at ASC
+         LIMIT ? OFFSET ?`,
       )
-      .bind(telegramId)
+      .bind(telegramId, limit, offset)
       .all<DeviceSummary>();
-    return result.results;
+    return { rows: result.results, total: count?.total ?? 0 };
   }
 
   async revokeDevice(deviceId: string, timestamp: string): Promise<void> {

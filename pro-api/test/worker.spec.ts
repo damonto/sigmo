@@ -15,6 +15,7 @@ import {
 } from "../src/crypto";
 import worker, { testExports } from "../src/index";
 import { rotationMessage } from "../src/license";
+import { telegramAdmins } from "../src/telegram_access";
 import { createTicket, parseTicket } from "../src/tickets";
 import type {
   DownloadTicket,
@@ -68,10 +69,30 @@ type TelegramAPIResponder =
 type TelegramMessage = {
   chat_id: number;
   text: string;
+  parse_mode: "MarkdownV2";
   reply_markup?: {
-    inline_keyboard: Array<Array<{ text: string; url: string }>>;
+    inline_keyboard: Array<
+      Array<
+        | { text: string; url: string }
+        | { text: string; callback_data: string }
+      >
+    >;
   };
 };
+
+type TelegramCallbackAnswer = {
+  callback_query_id: string;
+  text?: string;
+};
+
+type TelegramMessageEdit = TelegramMessage & {
+  message_id: number;
+};
+
+type TelegramMethodCall =
+  | { method: "sendMessage"; body: TelegramMessage }
+  | { method: "editMessageText"; body: TelegramMessageEdit }
+  | { method: "answerCallbackQuery"; body: TelegramCallbackAnswer };
 
 const bootstrapTargets = [
   "linux-amd64",
@@ -212,7 +233,34 @@ function downloadButtons(message: TelegramMessage): Array<{
   text: string;
   url: string;
 }> {
-  return message.reply_markup?.inline_keyboard.flat() ?? [];
+  return (message.reply_markup?.inline_keyboard.flat() ?? []).filter(
+    (button): button is { text: string; url: string } => "url" in button,
+  );
+}
+
+function mockTelegramMethods(): TelegramMethodCall[] {
+  const calls: TelegramMethodCall[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const outgoing = new Request(input, init);
+    const url = new URL(outgoing.url);
+    if (
+      outgoing.method !== "POST" ||
+      url.origin !== "https://api.telegram.org"
+    ) {
+      throw new Error(`unexpected outbound request: ${outgoing.url}`);
+    }
+    const method = url.pathname.split("/").at(-1);
+    if (
+      method !== "sendMessage" &&
+      method !== "editMessageText" &&
+      method !== "answerCallbackQuery"
+    )
+      throw new Error(`unexpected Telegram method: ${url.pathname}`);
+    const body = await outgoing.json();
+    calls.push({ method, body } as TelegramMethodCall);
+    return Response.json({ ok: true });
+  });
+  return calls;
 }
 
 function tamperTicketSignature(ticket: string): string {
@@ -311,6 +359,39 @@ async function activatePairing(
             username: `user${telegramId}`,
           },
           text,
+        },
+      },
+      {
+        "x-telegram-bot-api-secret-token": env.SIGMO_TELEGRAM_WEBHOOK_SECRET,
+      },
+    ),
+  );
+  expect(response.status).toBe(200);
+}
+
+async function pressTelegramButton(
+  telegramId: number,
+  data: string,
+  callbackID = "callback-1",
+  messageID = 42,
+): Promise<void> {
+  const response = await request(
+    "/v1/telegram-updates",
+    jsonRequest(
+      {
+        callback_query: {
+          id: callbackID,
+          from: {
+            id: telegramId,
+            first_name: "Test",
+            last_name: "User",
+            username: `user${telegramId}`,
+          },
+          message: {
+            message_id: messageID,
+            chat: { id: telegramId, type: "private" },
+          },
+          data,
         },
       },
       {
@@ -659,12 +740,18 @@ describe("Telegram pairing", () => {
     await activatePairing({ id: "unused" }, inactiveTelegramId, "/start");
 
     expect(messages).toHaveLength(2);
-    expect(messages[0].text).toContain(`Telegram ID: ${activeTelegramId}`);
-    expect(messages[0].text).toContain("Sigmo Pro entitlement: active");
-    expect(messages[0].text).toContain("/download stable");
-    expect(messages[0].text).toContain("/download dev");
-    expect(messages[1].text).toContain(`Telegram ID: ${inactiveTelegramId}`);
-    expect(messages[1].text).toContain("Sigmo Pro entitlement: inactive");
+    expect(messages[0].text).toContain(`*Telegram ID*\n\`${activeTelegramId}\``);
+    expect(messages[0].text).toContain("*Entitlement*\nActive");
+    expect(messages[0].text).toContain("/download");
+    expect(messages[0].text).toContain("*Dev*: `/download dev`");
+    expect(messages[0].text).not.toContain("`/download`");
+    expect(messages[1].text).toContain(
+      `*Telegram ID*\n\`${inactiveTelegramId}\``,
+    );
+    expect(messages[1].text).toContain("*Entitlement*\nInactive");
+    expect(messages.every(({ parse_mode }) => parse_mode === "MarkdownV2")).toBe(
+      true,
+    );
     expect(messages.every((message) => !message.reply_markup)).toBe(true);
   });
 
@@ -684,8 +771,9 @@ describe("Telegram pairing", () => {
 
     expect(messages).toHaveLength(2);
     for (const message of messages) {
-      expect(message.text).toContain("Channel: Stable");
-      expect(message.text).toContain("Version: v3.0.0");
+      expect(message.parse_mode).toBe("MarkdownV2");
+      expect(message.text).toContain("*Channel*\nStable");
+      expect(message.text).toContain("*Version*\n`v3.0.0`");
       expect(message.text).toContain("expire in 5 minutes");
       expect(message.text).toContain("gzip -d");
       expect(message.text).toContain("chmod +x");
@@ -735,8 +823,8 @@ describe("Telegram pairing", () => {
     await activatePairing({ id: "unused" }, telegramId, "/download dev");
 
     expect(messages).toHaveLength(1);
-    expect(messages[0].text).toContain("Channel: Dev");
-    expect(messages[0].text).toContain("Version: dev-01234567");
+    expect(messages[0].text).toContain("*Channel*\nDev");
+    expect(messages[0].text).toContain("*Version*\n`dev-01234567`");
     expect(downloadButtons(messages[0])).toHaveLength(6);
   });
 
@@ -780,9 +868,9 @@ describe("Telegram pairing", () => {
 
     expect(messages).toHaveLength(2);
     for (const message of messages) {
-      expect(message.text).toContain("Usage:");
-      expect(message.text).toContain("stable|dev");
-      expect(message.text).toContain(bootstrapTargets.join(", "));
+      expect(message.text).toContain("*Download usage*");
+      expect(message.text).toContain("`/download [stable|dev]`");
+      expect(message.text).toContain(`\`${bootstrapTargets.join(", ")}\``);
       expect(message.reply_markup).toBeUndefined();
     }
   });
@@ -824,7 +912,8 @@ describe("Telegram pairing", () => {
     );
 
     expect(messages).toHaveLength(1);
-    expect(messages[0].text).toContain("does not include linux-arm-musl");
+    expect(messages[0].text).toContain("does not include the requested target");
+    expect(messages[0].text).toContain("*Target*\n`linux-arm-musl`");
     expect(messages[0].reply_markup).toBeUndefined();
   });
 
@@ -919,7 +1008,7 @@ describe("Telegram pairing", () => {
     await activatePairing(first, 3051);
     await activatePairing(second, 3052);
 
-    expect(messages.at(-1)?.text).toContain("linked to another Telegram account");
+    expect(messages.at(-1)?.text).toContain("belongs to another Telegram account");
     expect((await pollPairing(first)).status).toBe("active");
     expect((await pollPairing(second)).status).toBe("pending");
     const owner = await env.DB.prepare(
@@ -1098,7 +1187,10 @@ describe("Telegram pairing", () => {
     });
 
     await activatePairing({ id: "unused" }, admin, `/status ${telegramId}`);
-    expect(messages.at(-1)?.text).toContain(`${telegramId}: active`);
+    expect(messages.at(-1)?.text).toContain(
+      `*Telegram ID*: \`${telegramId}\``,
+    );
+    expect(messages.at(-1)?.text).toContain("*Status*: `Active`");
 
     await activatePairing({ id: "unused" }, admin, `/revoke ${telegramId}`);
     const revoked = await env.DB.prepare(
@@ -1150,12 +1242,13 @@ describe("Telegram pairing", () => {
     await activatePairing({ id: "unused" }, 1001, "/entitlements");
 
     expect(messages).toHaveLength(1);
-    expect(messages[0].text).toContain("Active entitlements (2):");
+    expect(messages[0].text).toContain("*Active entitlements*");
+    expect(messages[0].text).toContain("*Total*: `2`");
     expect(messages[0].text).toContain(
-      `${activeId} | Alice Admin @alice | devices 1/2 | expires never`,
+      `*Alice Admin*\n*Telegram ID*: \`${activeId}\`\n*Username*: \`@alice\`\n*Devices*: \`1 / 2\`\n*Expires*: \`Never\``,
     );
     expect(messages[0].text).toContain(
-      `${expiringId} | User ${expiringId} @user${expiringId} | devices 0/4 | expires 2099-12-31`,
+      `*User ${expiringId}*\n*Telegram ID*: \`${expiringId}\`\n*Username*: \`@user${expiringId}\`\n*Devices*: \`0 / 4\`\n*Expires*: \`2099-12-31\``,
     );
     expect(messages[0].text).not.toContain(String(revokedId));
     expect(messages[0].text).not.toContain(String(expiredId));
@@ -1171,12 +1264,12 @@ describe("Telegram pairing", () => {
     expect(messages).toHaveLength(1);
     expect(messages[0].text).toBe(
       [
-        "Available commands:",
-        "/start [pairing_id] — Show Pro status or authorize a device",
-        "/download [stable|dev] [target] — Download Sigmo Pro",
-        "/devices — List linked devices",
-        "/revoke_device <device_id> — Revoke a linked device by ID",
-      ].join("\n"),
+        "*Available commands*",
+        "/start\nShow Pro status or authorize a device\n*Usage*: `/start [pairing_id]`",
+        "/download\nDownload Sigmo Pro\n*Usage*: `/download [stable|dev] [target]`",
+        "/devices\nList linked devices\n*Usage*: `/devices`",
+        "/revoke\\_device\nRevoke a linked device by ID\n*Usage*: `/revoke_device <device_id>`",
+      ].join("\n\n"),
     );
     expect(messages[0].text).not.toContain(String(entitlementId));
   });
@@ -1187,14 +1280,32 @@ describe("Telegram pairing", () => {
     await activatePairing({ id: "unused" }, 1001, "/unknown");
 
     expect(messages).toHaveLength(1);
-    expect(messages[0].text).toContain("/devices [telegram_id]");
-    expect(messages[0].text).toContain("/revoke_device <device_id>");
+    expect(messages[0].text).toContain("/devices\n");
     expect(messages[0].text).toContain(
-      "/grant <telegram_id> [max_devices] [expires_at]",
+      "*Usage*: `/devices [telegram_id]`",
     );
+    expect(messages[0].text).toContain("/revoke\\_device\n");
+    expect(messages[0].text).toContain(
+      "*Usage*: `/grant <telegram_id> [max_devices] [expires_at]`",
+    );
+    expect(messages[0].text).toContain("*Usage*: `/entitlements`");
   });
 
-  it("splits long entitlement lists into Telegram-sized messages", async () => {
+  it("rejects page numbers in public commands", async () => {
+    const messages = mockTelegram();
+
+    await activatePairing({ id: "unused" }, 1001, "/entitlements 2");
+    await activatePairing({ id: "unused" }, 12_001, "/devices 2");
+    await activatePairing({ id: "unused" }, 1001, "/devices 12001 2");
+
+    expect(messages.map(({ text }) => text)).toEqual([
+      "*Entitlements usage*\n\n`/entitlements`",
+      "*Devices usage*\n\n`/devices`",
+      "*Devices usage*\n\n`/devices [telegram_id]`",
+    ]);
+  });
+
+  it("truncates oversized entitlement names without breaking MarkdownV2", async () => {
     await env.DB.prepare("UPDATE entitlements SET status = 'revoked'").run();
     const telegramId = 3171;
     await grant(telegramId);
@@ -1207,13 +1318,263 @@ describe("Telegram pairing", () => {
 
     await activatePairing({ id: "unused" }, 1001, "/entitlements");
 
-    expect(messages.length).toBeGreaterThan(1);
+    expect(messages).toHaveLength(1);
     expect(messages.every((message) => message.text.length <= 4_000)).toBe(
       true,
     );
-    expect(messages.some((message) => message.text.includes(String(telegramId)))).toBe(
-      true,
+    expect(messages[0].text).toContain(
+      `*${"A".repeat(61)}\\.\\.\\.*`,
     );
+    expect(messages[0].text).not.toContain("A".repeat(65));
+    expect(messages[0].parse_mode).toBe("MarkdownV2");
+  });
+
+  it("queries entitlement pages in groups of ten", async () => {
+    await env.DB.prepare("UPDATE entitlements SET status = 'revoked'").run();
+    const telegramIDs = Array.from(
+      { length: 20 },
+      (_, index) => 10_000 + index,
+    );
+    for (const telegramID of telegramIDs) {
+      await grant(telegramID);
+      await env.DB.prepare(
+        "UPDATE entitlements SET display_name = ? WHERE telegram_id = ?",
+      )
+        .bind(`${"A".repeat(150)} ${telegramID}`, telegramID)
+        .run();
+    }
+    const calls = mockTelegramMethods();
+
+    await activatePairing({ id: "unused" }, 1001, "/entitlements");
+    await pressTelegramButton(1001, "page:entitlements:2");
+
+    expect(calls).toHaveLength(3);
+    if (calls[0]?.method !== "sendMessage")
+      assert.fail("expected sendMessage");
+    if (calls[2]?.method !== "editMessageText")
+      assert.fail("expected editMessageText");
+    const firstPage = calls[0].body;
+    const secondPage = calls[2].body;
+    expect(firstPage.text.length).toBeLessThanOrEqual(4_000);
+    expect(secondPage.text.length).toBeLessThanOrEqual(4_000);
+    expect(firstPage.text).toContain("*Page*: `1 / 2`");
+    expect(firstPage.reply_markup?.inline_keyboard).toEqual([
+      [{ text: "Next", callback_data: "page:entitlements:2" }],
+    ]);
+    expect(secondPage.text).toContain("*Page*: `2 / 2`");
+    expect(secondPage.reply_markup?.inline_keyboard).toEqual([
+      [{ text: "Previous", callback_data: "page:entitlements:1" }],
+    ]);
+    for (const [index, telegramID] of telegramIDs.entries()) {
+      const expectedPage = index < 10 ? firstPage : secondPage;
+      const otherPage = index < 10 ? secondPage : firstPage;
+      const field = `*Telegram ID*: \`${telegramID}\``;
+      expect(expectedPage.text).toContain(field);
+      expect(otherPage.text).not.toContain(field);
+    }
+  });
+
+  it("edits entitlement pages from Telegram callback buttons", async () => {
+    await env.DB.prepare("UPDATE entitlements SET status = 'revoked'").run();
+    for (let index = 0; index < 11; index++) await grant(11_000 + index);
+    const calls = mockTelegramMethods();
+
+    await pressTelegramButton(1001, "page:entitlements:2");
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual({
+      method: "answerCallbackQuery",
+      body: { callback_query_id: "callback-1" },
+    });
+    expect(calls[1]).toMatchObject({
+      method: "editMessageText",
+      body: {
+        chat_id: 1001,
+        message_id: 42,
+        parse_mode: "MarkdownV2",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "Previous", callback_data: "page:entitlements:1" }],
+          ],
+        },
+      },
+    });
+    if (calls[1]?.method !== "editMessageText")
+      assert.fail("expected editMessageText");
+    expect(calls[1].body.text).toContain("*Page*: `2 / 2`");
+  });
+
+  it("falls back to the last entitlement page for a stale button", async () => {
+    await env.DB.prepare("UPDATE entitlements SET status = 'revoked'").run();
+    for (let index = 0; index < 11; index++) await grant(11_100 + index);
+    const calls = mockTelegramMethods();
+
+    await activatePairing({ id: "unused" }, 1001, "/entitlements");
+    if (calls[0]?.method !== "sendMessage")
+      assert.fail("expected sendMessage");
+    expect(calls[0].body.reply_markup?.inline_keyboard).toEqual([
+      [{ text: "Next", callback_data: "page:entitlements:2" }],
+    ]);
+
+    await env.DB.prepare(
+      "UPDATE entitlements SET status = 'revoked' WHERE telegram_id >= ?",
+    )
+      .bind(11_110)
+      .run();
+
+    await pressTelegramButton(1001, "page:entitlements:2");
+
+    expect(calls).toHaveLength(3);
+    expect(calls[1]).toEqual({
+      method: "answerCallbackQuery",
+      body: { callback_query_id: "callback-1" },
+    });
+    expect(calls[2]).toMatchObject({
+      method: "editMessageText",
+      body: {
+        chat_id: 1001,
+        message_id: 42,
+        reply_markup: { inline_keyboard: [] },
+      },
+    });
+    if (calls[2]?.method !== "editMessageText")
+      assert.fail("expected editMessageText");
+    expect(calls[2].body.text).toContain("*Page*: `1 / 1`");
+  });
+
+  it("queries device pages in groups of ten", async () => {
+    const telegramId = 10_100;
+    await grant(telegramId);
+    const timestamp = new Date().toISOString();
+    for (let index = 0; index < 12; index++) {
+      await env.DB.prepare(
+        `INSERT INTO devices
+           (device_id, telegram_id, public_key, created_at, last_seen_at, revoked_at)
+         VALUES (?, ?, ?, ?, ?, NULL)`,
+      )
+        .bind(
+          index.toString(16).padStart(32, "0"),
+          telegramId,
+          `public-key-${index}`,
+          new Date(Date.parse(timestamp) + index).toISOString(),
+          timestamp,
+        )
+        .run();
+    }
+    const calls = mockTelegramMethods();
+
+    await activatePairing({ id: "unused" }, telegramId, "/devices");
+    await pressTelegramButton(
+      telegramId,
+      `page:devices:${telegramId}:2`,
+    );
+
+    expect(calls).toHaveLength(3);
+    if (calls[0]?.method !== "sendMessage")
+      assert.fail("expected sendMessage");
+    if (calls[2]?.method !== "editMessageText")
+      assert.fail("expected editMessageText");
+    const firstPage = calls[0].body;
+    const secondPage = calls[2].body;
+    expect(firstPage.text).toContain("*Page*: `1 / 2`");
+    expect(firstPage.reply_markup?.inline_keyboard).toEqual([
+      [
+        {
+          text: "Next",
+          callback_data: `page:devices:${telegramId}:2`,
+        },
+      ],
+    ]);
+    expect(secondPage.text).toContain("*Page*: `2 / 2`");
+    expect(secondPage.reply_markup?.inline_keyboard).toEqual([
+      [
+        {
+          text: "Previous",
+          callback_data: `page:devices:${telegramId}:1`,
+        },
+      ],
+    ]);
+    expect(firstPage.text.match(/\*Device ID\*/g)).toHaveLength(10);
+    expect(secondPage.text.match(/\*Device ID\*/g)).toHaveLength(2);
+  });
+
+  it("falls back to the last device page for a stale button", async () => {
+    const telegramId = 10_200;
+    await grant(telegramId);
+    const timestamp = new Date().toISOString();
+    for (let index = 0; index < 11; index++) {
+      await env.DB.prepare(
+        `INSERT INTO devices
+           (device_id, telegram_id, public_key, created_at, last_seen_at, revoked_at)
+         VALUES (?, ?, ?, ?, ?, NULL)`,
+      )
+        .bind(
+          (20_000 + index).toString(16).padStart(32, "0"),
+          telegramId,
+          `public-key-${index}`,
+          new Date(Date.parse(timestamp) + index).toISOString(),
+          timestamp,
+        )
+        .run();
+    }
+    const calls = mockTelegramMethods();
+
+    await activatePairing({ id: "unused" }, telegramId, "/devices");
+    if (calls[0]?.method !== "sendMessage")
+      assert.fail("expected sendMessage");
+    expect(calls[0].body.reply_markup?.inline_keyboard).toEqual([
+      [
+        {
+          text: "Next",
+          callback_data: `page:devices:${telegramId}:2`,
+        },
+      ],
+    ]);
+
+    await env.DB.prepare(
+      `DELETE FROM devices
+       WHERE telegram_id = ? AND device_id = ?`,
+    )
+      .bind(telegramId, (20_010).toString(16).padStart(32, "0"))
+      .run();
+
+    await pressTelegramButton(
+      telegramId,
+      `page:devices:${telegramId}:2`,
+    );
+
+    expect(calls).toHaveLength(3);
+    expect(calls[1]).toEqual({
+      method: "answerCallbackQuery",
+      body: { callback_query_id: "callback-1" },
+    });
+    expect(calls[2]).toMatchObject({
+      method: "editMessageText",
+      body: {
+        chat_id: telegramId,
+        message_id: 42,
+        reply_markup: { inline_keyboard: [] },
+      },
+    });
+    if (calls[2]?.method !== "editMessageText")
+      assert.fail("expected editMessageText");
+    expect(calls[2].body.text).toContain("*Page*: `1 / 1`");
+  });
+
+  it("rejects device page callbacks for another regular user", async () => {
+    const calls = mockTelegramMethods();
+
+    await pressTelegramButton(12_001, "page:devices:12002:2");
+
+    expect(calls).toEqual([
+      {
+        method: "answerCallbackQuery",
+        body: {
+          callback_query_id: "callback-1",
+          text: "This button is not available.",
+        },
+      },
+    ]);
   });
 
   it.each(["2027-02-30", "2099-08-09T12:00:00Z", "2099-8-9"])(
@@ -1228,7 +1589,10 @@ describe("Telegram pairing", () => {
         `/grant ${telegramId} 3 ${expiresAt}`,
       );
 
-      expect(messages.at(-1)?.text).toContain("Usage: /grant");
+      expect(messages.at(-1)?.text).toContain("*Grant usage*");
+      expect(messages.at(-1)?.text).toContain(
+        "`/grant <telegram_id> [max_devices] [expires_at]`",
+      );
       const entitlement = await env.DB.prepare(
         "SELECT telegram_id FROM entitlements WHERE telegram_id = ?",
       )
@@ -1715,7 +2079,7 @@ describe("request boundaries", () => {
   });
 
   it("uses numeric administrator IDs and secure random tokens", () => {
-    expect(testExports.admins(env)).toEqual(new Set([1001]));
+    expect(telegramAdmins(env)).toEqual(new Set([1001]));
     expect(randomToken()).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 });

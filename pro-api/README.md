@@ -120,7 +120,9 @@ Administrators can manage entitlements with:
 
 The optional `expires_at` argument uses `YYYY-MM-DD`. The Worker stores it as
 the end of that UTC day (`23:59:59.999Z`). Omit it for a permanent entitlement.
-`/entitlements` lists every currently active, unexpired Telegram entitlement.
+`/entitlements` lists active, unexpired Telegram entitlements 10 at a time.
+`/entitlements` and `/devices` use Telegram inline buttons for pagination; page
+numbers are not command arguments.
 
 Users can interact with the Bot through:
 
