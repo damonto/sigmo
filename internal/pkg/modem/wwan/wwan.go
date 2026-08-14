@@ -36,6 +36,18 @@ type Target struct {
 	ICCID string
 }
 
+// ICCIDMatches reports whether current matches target after removing trailing
+// BCD F padding. An empty target matches any current ICCID.
+func ICCIDMatches(current, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return true
+	}
+	current = strings.TrimRight(strings.TrimSpace(current), "Ff")
+	target = strings.TrimRight(target, "Ff")
+	return current != "" && strings.EqualFold(current, target)
+}
+
 type deviceOperations struct {
 	backend backend
 }

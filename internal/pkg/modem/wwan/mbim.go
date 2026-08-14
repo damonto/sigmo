@@ -151,8 +151,8 @@ func (s *mbimSession) SIMState(ctx context.Context, target Target) (state SIMSta
 	state.ICCID = strings.TrimSpace(status.SIMICCID)
 	state.Recoverable = state.ICCID != ""
 	target.ICCID = strings.TrimSpace(target.ICCID)
-	state.Matches = target.ICCID == "" || state.ICCID == target.ICCID
-	state.ICCIDMismatch = target.ICCID != "" && state.ICCID != "" && state.ICCID != target.ICCID
+	state.Matches = ICCIDMatches(state.ICCID, target.ICCID)
+	state.ICCIDMismatch = target.ICCID != "" && state.ICCID != "" && !state.Matches
 	return state, nil
 }
 

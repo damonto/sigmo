@@ -671,6 +671,25 @@ func TestQMIDeviceSIMState(t *testing.T) {
 			wantCalls: []string{"card-status", "read-transparent"},
 		},
 		{
+			name:     "matching ready sim with trailing target padding",
+			target:   Target{Slot: 1, ICCID: iccid + "f"},
+			openSlot: 1,
+			client: &fakeQMIClient{
+				transparentData: rawICCID,
+				cardStatus:      qmiTestCardStatus(qcom.ApplicationStateReady, qcom.PersonalizationStateReady, []byte{0x01}),
+			},
+			want: SIMState{
+				Supported:   true,
+				Matches:     true,
+				Recoverable: true,
+				Ready:       true,
+				ICCID:       iccid,
+				Slot:        1,
+			},
+			wantFile:  qcom.File{Session: qcom.SessionCardSlot1, Path: qmiICCIDFilePath},
+			wantCalls: []string{"card-status", "read-transparent"},
+		},
+		{
 			name:     "matching ready second slot",
 			target:   Target{Slot: 2, ICCID: iccid},
 			openSlot: 2,

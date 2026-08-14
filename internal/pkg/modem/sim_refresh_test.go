@@ -148,6 +148,49 @@ func TestEnsureSIMVisibleWaitsForEUICCClassification(t *testing.T) {
 	}
 }
 
+func TestEnsureSIMVisibleAcceptsTrailingICCIDPadding(t *testing.T) {
+	restoreSIMRefreshTiming(t, 0, time.Millisecond)
+	const (
+		path         = "/sys/devices/modem-1"
+		modemICCID   = "894921007608556913"
+		profileICCID = modemICCID + "f"
+	)
+	modem := simRefreshTestModem(path, 1, false)
+	registry := &Registry{modems: map[string]*Modem{path: modem}, started: true}
+	device := &simRefreshDevice{fakeDeviceControl: &fakeDeviceControl{}}
+	device.onSIMState = func(context.Context, devicewwan.Target) (devicewwan.SIMState, error) {
+		modem.applySIMInfo(wwanmodem.SIMInfo{
+			Slot:  1,
+			State: wwanmodem.SIMStateReady,
+			ICCID: modemICCID,
+			ATR:   []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC},
+		})
+		return devicewwan.SIMState{
+			Supported:   true,
+			Matches:     true,
+			Recoverable: true,
+			Ready:       true,
+			ICCID:       modemICCID,
+			Slot:        1,
+		}, nil
+	}
+	registry.openDevice = fakeDeviceOpener(t, device, nil)
+
+	result, err := registry.ensureSIMVisible(t.Context(), modem, SIMTarget{
+		ICCID:        profileICCID,
+		RequireEUICC: true,
+	})
+	if err != nil {
+		t.Fatalf("ensureSIMVisible() error = %v", err)
+	}
+	if result.Modem != modem {
+		t.Fatalf("result modem = %p, want %p", result.Modem, modem)
+	}
+	if !slices.Equal(device.calls, []string{"sim-state"}) {
+		t.Fatalf("device calls = %v, want one SIM state probe", device.calls)
+	}
+}
+
 func TestEnsureSIMVisibleDoesNotPowerCycleAfterProbeTimeout(t *testing.T) {
 	restoreSIMRefreshTiming(t, 0, time.Millisecond)
 	restoreSIMProbeTimeout(t, 10*time.Millisecond)
@@ -395,9 +438,12 @@ func TestReadCurrentModemUsesReadyActiveSIMSnapshot(t *testing.T) {
 	}
 }
 
-func TestReadCurrentModemUsesReadyEUICCSnapshotWithoutSlotTarget(t *testing.T) {
+func TestReadCurrentModemUsesReadyEUICCSnapshotWithPaddedTarget(t *testing.T) {
 	const path = "/sys/devices/modem-1"
-	const iccid = "8901000000000000002"
+	const (
+		iccid        = "894921007608556913"
+		profileICCID = iccid + "f"
+	)
 	modem := simRefreshTestModem(path, 1, false)
 	modem.applySIMInfo(wwanmodem.SIMInfo{
 		Slot:  1,
@@ -411,7 +457,7 @@ func TestReadCurrentModemUsesReadyEUICCSnapshotWithoutSlotTarget(t *testing.T) {
 		return nil, nil
 	}
 
-	read, err := registry.readCurrentModem(t.Context(), modem, SIMTarget{ICCID: iccid, RequireEUICC: true})
+	read, err := registry.readCurrentModem(t.Context(), modem, SIMTarget{ICCID: profileICCID, RequireEUICC: true})
 	if err != nil {
 		t.Fatalf("readCurrentModem() error = %v", err)
 	}

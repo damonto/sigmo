@@ -384,8 +384,7 @@ func activeSIMTargetIdentityReady(modem *Modem, target SIMTarget) bool {
 	if identifier == "" {
 		return false
 	}
-	wanted := strings.TrimSpace(target.ICCID)
-	if wanted != "" && identifier != wanted {
+	if !devicewwan.ICCIDMatches(identifier, target.ICCID) {
 		return false
 	}
 	return true

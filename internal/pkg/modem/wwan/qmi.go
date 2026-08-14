@@ -480,8 +480,8 @@ func (u *qmiSession) SIMState(ctx context.Context, target Target) (state SIMStat
 	if err != nil {
 		return state, err
 	}
-	state.Matches = target.ICCID == "" || state.ICCID == target.ICCID
-	state.ICCIDMismatch = target.ICCID != "" && state.ICCID != "" && state.ICCID != target.ICCID
+	state.Matches = ICCIDMatches(state.ICCID, target.ICCID)
+	state.ICCIDMismatch = target.ICCID != "" && state.ICCID != "" && !state.Matches
 	return state, nil
 }
 

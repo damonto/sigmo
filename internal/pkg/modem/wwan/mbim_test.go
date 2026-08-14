@@ -80,6 +80,22 @@ func TestSessionSIMStateMBIM(t *testing.T) {
 			},
 		},
 		{
+			name:   "matching initialized sim with trailing target padding",
+			target: Target{ICCID: iccid + "f"},
+			ready: uiccmbim.SubscriberReadyStatusResponse{
+				ReadyState: uiccmbim.SubscriberReadyStateInitialized,
+				SIMICCID:   iccid,
+			},
+			want: SIMState{
+				Supported:   true,
+				Matches:     true,
+				Recoverable: true,
+				Ready:       true,
+				ICCID:       iccid,
+				Slot:        1,
+			},
+		},
+		{
 			name:   "waits for initialized state",
 			target: Target{ICCID: iccid},
 			ready: uiccmbim.SubscriberReadyStatusResponse{
