@@ -339,19 +339,18 @@ func TestReplaceVoLTESettingsRejectsAirplaneMode(t *testing.T) {
 	if err := settingsStore.Put(ctx, "modem-1", want); err != nil {
 		t.Fatalf("Put() error = %v", err)
 	}
-	coordinator := &coordinator{access: AccessVoLTE, volteSettings: settingsStore}
+	opened := false
+	coordinator := &coordinator{
+		access:        AccessVoLTE,
+		volteSettings: settingsStore,
+		managedVoLTE: managedVoLTEOps{openDevice: func(*mmodem.Modem) (managedVoLTEDevice, error) {
+			opened = true
+			return &fakeManagedVoLTEDevice{testMode: true}, nil
+		}},
+	}
 	connectivity := &Connectivity{volte: coordinator}
 	modem := qmiTestModem("modem-1")
 	modem.Status.Power = wwanmodem.PowerStateLow
-	previousOpen := openManagedVoLTEDevice
-	opened := false
-	openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
-		opened = true
-		return &fakeManagedVoLTEDevice{testMode: true}, nil
-	}
-	t.Cleanup(func() {
-		openManagedVoLTEDevice = previousOpen
-	})
 
 	err = connectivity.ReplaceVoLTESettings(ctx, modem, VoLTESettings{DataPath: DataPathQMAP})
 	if !errors.Is(err, ErrVoLTEAirplaneMode) {

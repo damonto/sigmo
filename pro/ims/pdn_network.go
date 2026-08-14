@@ -23,7 +23,6 @@ import (
 )
 
 var imsInterfacePollInterval = time.Second
-var imsInterfaceByName = net.InterfaceByName
 
 const (
 	imsPolicyRulePriorityBase uint32 = 10_000
@@ -123,21 +122,32 @@ func (s pdnNetworkState) empty() bool {
 type imsPDNInfo = imsgo.PDNNetworkInfo
 
 type pdnNetwork struct {
-	parent        string
-	mbim          bool
-	dedicatedQMI  bool
-	links         pdnLinks
-	mu            sync.Mutex
-	interfaceName string
-	state         pdnNetworkState
+	parent          string
+	mbim            bool
+	dedicatedQMI    bool
+	links           pdnLinks
+	interfaceByName func(string) (*net.Interface, error)
+	mu              sync.Mutex
+	interfaceName   string
+	state           pdnNetworkState
 }
 
 func newPDNNetwork(parent string, mbim bool) *pdnNetwork {
-	return &pdnNetwork{parent: parent, mbim: mbim, links: systemPDNLinks{}}
+	return &pdnNetwork{
+		parent:          parent,
+		mbim:            mbim,
+		links:           systemPDNLinks{},
+		interfaceByName: net.InterfaceByName,
+	}
 }
 
 func newDedicatedPDNNetwork(parent string) *pdnNetwork {
-	return &pdnNetwork{parent: parent, dedicatedQMI: true, links: systemPDNLinks{}}
+	return &pdnNetwork{
+		parent:          parent,
+		dedicatedQMI:    true,
+		links:           systemPDNLinks{},
+		interfaceByName: net.InterfaceByName,
+	}
 }
 
 func (n *pdnNetwork) isolated() bool {
@@ -176,7 +186,11 @@ func (n *pdnNetwork) sessionInterface(sessionID uint32) (string, error) {
 	if sessionID == 0 || sessionID > 4094 {
 		return "", fmt.Errorf("create MBIM IMS session interface: session ID %d is outside VLAN range", sessionID)
 	}
-	name, err := mbimSessionInterfaceName(n.parent, sessionID)
+	interfaceByName := n.interfaceByName
+	if interfaceByName == nil {
+		interfaceByName = net.InterfaceByName
+	}
+	name, err := mbimSessionInterfaceName(n.parent, sessionID, interfaceByName)
 	if err != nil {
 		return "", err
 	}
@@ -499,8 +513,8 @@ func isIMSPolicyTable(table uint32) bool {
 	return table >= imsPolicyRouteTableBase && table-imsPolicyRouteTableBase < imsPolicyRouteTableCount
 }
 
-func mbimSessionInterfaceName(parent string, sessionID uint32) (string, error) {
-	ifi, err := imsInterfaceByName(parent)
+func mbimSessionInterfaceName(parent string, sessionID uint32, interfaceByName func(string) (*net.Interface, error)) (string, error) {
+	ifi, err := interfaceByName(parent)
 	if err != nil {
 		return "", fmt.Errorf("find MBIM parent interface: %w", err)
 	}

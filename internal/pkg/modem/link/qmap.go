@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -20,6 +21,7 @@ import (
 	"github.com/damonto/wwan-go/qcom"
 )
 
+// QMAPConfig describes one IP-family packet-data call on a QMAP mux.
 type QMAPConfig struct {
 	APN          string
 	IPPreference qcom.WDSIPPreference
@@ -27,13 +29,29 @@ type QMAPConfig struct {
 	MuxID        uint8
 }
 
+// QMAPSession owns one WDS packet-data session on a shared QMI client. Copies
+// of a QMAPSession share the same close lifecycle, and Close is idempotent.
 type QMAPSession struct {
-	client        *qcom.Client
-	pdn           *qcom.PDNSession
+	state         *qmapSessionState
 	InterfaceName string
 	Info          qcom.PDNInfo
 }
 
+type qmapSessionState struct {
+	pdn         *qcom.PDNSession
+	closeClient func() error
+	closeOnce   sync.Once
+	closeErr    error
+}
+
+// QMAPSessionResult reports one configuration from OpenQMAPSessions. Exactly
+// one of Session and Err is set, and results preserve configuration order.
+type QMAPSessionResult struct {
+	Session *QMAPSession
+	Err     error
+}
+
+// PreparedQMAP identifies a prepared mux data port and its host interface.
 type PreparedQMAP struct {
 	MuxDataPort   *qcom.WDSMuxDataPort
 	InterfaceName string
@@ -42,6 +60,14 @@ type PreparedQMAP struct {
 type qmapMuxInterface struct {
 	name  string
 	index int
+}
+
+type qmapClientOwner struct {
+	mu        sync.Mutex
+	client    *qcom.Client
+	remaining int
+	closeOnce sync.Once
+	closeErr  error
 }
 
 type wdaDataFormatter interface {
@@ -53,48 +79,56 @@ type wdaDataFormatter interface {
 var errQMAPMuxNotFound = errors.New("QMAP mux is unavailable")
 var errModemRequired = errors.New("modem is required")
 
+// PrepareQMAP enables QMAP and creates the requested mux interface without
+// opening a packet-data session.
 func PrepareQMAP(ctx context.Context, modem *mmodem.Modem, muxID uint8) (PreparedQMAP, error) {
+	client, prepared, err := openPreparedQMAP(ctx, modem, muxID)
+	if err != nil {
+		return PreparedQMAP{}, err
+	}
+	if err := client.Close(); err != nil {
+		slog.Warn("close QMI client after preparing QMAP", "error", err)
+	}
+	return prepared, nil
+}
+
+func openPreparedQMAP(ctx context.Context, modem *mmodem.Modem, muxID uint8) (*qcom.Client, PreparedQMAP, error) {
 	if modem == nil {
-		return PreparedQMAP{}, errModemRequired
+		return nil, PreparedQMAP{}, errModemRequired
 	}
 	if muxID == 0 {
-		return PreparedQMAP{}, errors.New("QMAP mux ID is required")
+		return nil, PreparedQMAP{}, errors.New("QMAP mux ID is required")
 	}
 	if muxID > 8 {
-		return PreparedQMAP{}, fmt.Errorf("QMAP mux ID %d is outside supported range 1-8", muxID)
+		return nil, PreparedQMAP{}, fmt.Errorf("QMAP mux ID %d is outside supported range 1-8", muxID)
 	}
 	port, err := selectQMIDevicePort(modem)
 	if err != nil {
-		return PreparedQMAP{}, err
+		return nil, PreparedQMAP{}, err
 	}
 	parent, err := qmapParentInterface(modem)
 	if err != nil {
-		return PreparedQMAP{}, err
+		return nil, PreparedQMAP{}, err
 	}
 	interfaceNumber, err := qmapInterfaceNumber(parent)
 	if err != nil {
-		return PreparedQMAP{}, err
+		return nil, PreparedQMAP{}, err
 	}
 	client, err := wwan.OpenQMIClient(ctx, wwan.QMIClientConfig{Device: port.Device})
 	if err != nil {
-		return PreparedQMAP{}, err
+		return nil, PreparedQMAP{}, err
 	}
-	defer func() {
-		if err := client.Close(); err != nil {
-			slog.Warn("close QMI client after preparing QMAP", "device", port.Device, "error", err)
-		}
-	}()
 	if err := ensureQMAP(ctx, client); err != nil {
-		return PreparedQMAP{}, fmt.Errorf("enable QMAP: %w", err)
+		return nil, PreparedQMAP{}, errors.Join(fmt.Errorf("enable QMAP: %w", err), client.Close())
 	}
 	interfaceName, err := ensureQMIMux(parent, muxID)
 	if err != nil {
-		return PreparedQMAP{}, err
+		return nil, PreparedQMAP{}, errors.Join(err, client.Close())
 	}
 	if err := netlink.SetUp(parent); err != nil {
-		return PreparedQMAP{}, fmt.Errorf("set QMAP parent up: %w", err)
+		return nil, PreparedQMAP{}, errors.Join(fmt.Errorf("set QMAP parent up: %w", err), client.Close())
 	}
-	return PreparedQMAP{
+	return client, PreparedQMAP{
 		MuxDataPort: &qcom.WDSMuxDataPort{
 			Endpoint: &qcom.DataEndpoint{Type: qcom.DataEndpointHSUSB, InterfaceID: interfaceNumber},
 			MuxID:    muxID,
@@ -103,6 +137,8 @@ func PrepareQMAP(ctx context.Context, modem *mmodem.Modem, muxID uint8) (Prepare
 	}, nil
 }
 
+// RestoreNonQMAPDataFormat disables QMAP aggregation and restores the host
+// interface link-layer mode expected by a normal bearer.
 func RestoreNonQMAPDataFormat(ctx context.Context, modem *mmodem.Modem) error {
 	if modem == nil {
 		return errModemRequired
@@ -276,78 +312,176 @@ func isNonQMAP(format qcom.WDADataFormat, linkLayer qcom.WDALinkLayerProtocol) b
 		format.DownlinkAggregationKnown && format.DownlinkAggregation == qcom.WDAAggregationDisabled
 }
 
-func OpenQMAPSession(ctx context.Context, modem *mmodem.Modem, cfg QMAPConfig) (*QMAPSession, error) {
-	if modem == nil {
-		return nil, errModemRequired
+// OpenQMAPSessions opens one QMAP session per configuration. Start Network
+// requests are dispatched in configuration order after all WDS clients have
+// been prepared, matching Qualcomm's dual-stack call sequence. Results preserve
+// configuration order and contain exactly one of Session and Err. A returned
+// error means preparation failed or no configuration opened successfully;
+// individual family failures accompany successful sessions in the result slice.
+func OpenQMAPSessions(ctx context.Context, modem *mmodem.Modem, configs []QMAPConfig) ([]QMAPSessionResult, error) {
+	if len(configs) == 0 {
+		return nil, errors.New("QMAP session configurations are required")
 	}
-	if cfg.MuxID == 0 {
-		return nil, errors.New("QMAP mux ID is required")
+	muxID := configs[0].MuxID
+	apn := strings.TrimSpace(configs[0].APN)
+	profileIndex := configs[0].ProfileIndex
+	var hasIPv4, hasIPv6 bool
+	for i, cfg := range configs {
+		if cfg.MuxID != muxID {
+			return nil, fmt.Errorf("QMAP session %d uses mux ID %d, want %d", i, cfg.MuxID, muxID)
+		}
+		if !strings.EqualFold(strings.TrimSpace(cfg.APN), apn) {
+			return nil, fmt.Errorf("QMAP session %d uses APN %q, want %q", i, strings.TrimSpace(cfg.APN), apn)
+		}
+		if cfg.ProfileIndex != 0 {
+			if profileIndex != 0 && cfg.ProfileIndex != profileIndex {
+				return nil, fmt.Errorf("QMAP session %d uses profile %d, want %d", i, cfg.ProfileIndex, profileIndex)
+			}
+			profileIndex = cfg.ProfileIndex
+		}
+		switch cfg.IPPreference {
+		case qcom.WDSIPPreferenceIPv4:
+			if hasIPv4 {
+				return nil, errors.New("QMAP IPv4 session is duplicated")
+			}
+			hasIPv4 = true
+		case qcom.WDSIPPreferenceIPv6:
+			if hasIPv6 {
+				return nil, errors.New("QMAP IPv6 session is duplicated")
+			}
+			hasIPv6 = true
+		default:
+			return nil, fmt.Errorf("QMAP session %d IP preference is required", i)
+		}
 	}
-	if cfg.IPPreference != qcom.WDSIPPreferenceIPv4 && cfg.IPPreference != qcom.WDSIPPreferenceIPv6 {
-		return nil, errors.New("QMAP IP preference is required")
-	}
-	port, err := selectQMIDevicePort(modem)
+
+	client, prepared, err := openPreparedQMAP(ctx, modem, muxID)
 	if err != nil {
 		return nil, err
 	}
-	parent, err := qmapParentInterface(modem)
-	if err != nil {
-		return nil, err
-	}
-	interfaceNumber, err := qmapInterfaceNumber(parent)
-	if err != nil {
-		return nil, err
-	}
-	client, err := wwan.OpenQMIClient(ctx, wwan.QMIClientConfig{Device: port.Device})
-	if err != nil {
-		return nil, err
-	}
-	if err := ensureQMAP(ctx, client); err != nil {
-		return nil, errors.Join(fmt.Errorf("enable QMAP: %w", err), client.Close())
-	}
-	interfaceName, err := ensureQMIMux(parent, cfg.MuxID)
-	if err != nil {
-		return nil, errors.Join(err, client.Close())
-	}
-	if err := netlink.SetUp(parent); err != nil {
-		return nil, errors.Join(fmt.Errorf("set QMAP parent up: %w", err), client.Close())
-	}
-	if cfg.ProfileIndex == 0 && strings.TrimSpace(cfg.APN) != "" {
-		profileIndex, profileErr := wdsProfileIndex(ctx, client, cfg.APN, cfg.IPPreference)
-		switch {
-		case profileErr == nil:
-			cfg.ProfileIndex = profileIndex
-		case !errors.Is(profileErr, qcom.ErrWDSProfileNotFound):
+	if profileIndex == 0 && apn != "" {
+		var profileErr error
+		if hasIPv4 && hasIPv6 {
+			profileIndex, profileErr = wdsDualStackProfileIndex(ctx, client, apn)
+		} else {
+			profileIndex, profileErr = wdsProfileIndex(ctx, client, apn, configs[0].IPPreference)
+		}
+		if profileErr != nil && !errors.Is(profileErr, qcom.ErrWDSProfileNotFound) {
 			return nil, errors.Join(fmt.Errorf("find QMAP profile: %w", profileErr), client.Close())
 		}
 	}
-	pdn, err := client.OpenPDN(ctx, qcom.PDNConfig{
-		APN:          cfg.APN,
-		IPPreference: cfg.IPPreference,
-		ProfileIndex: cfg.ProfileIndex,
-		MuxDataPort: &qcom.WDSMuxDataPort{
-			Endpoint: &qcom.DataEndpoint{Type: qcom.DataEndpointHSUSB, InterfaceID: interfaceNumber},
-			MuxID:    cfg.MuxID,
-		},
-	})
+	pdnConfigs := make([]qcom.PDNConfig, len(configs))
+	for i, cfg := range configs {
+		pdnConfigs[i] = qcom.PDNConfig{
+			APN:          apn,
+			IPPreference: cfg.IPPreference,
+			ProfileIndex: profileIndex,
+			MuxDataPort:  prepared.MuxDataPort,
+		}
+	}
+	pdnResults, err := client.OpenPDNs(ctx, pdnConfigs)
 	if err != nil {
 		return nil, errors.Join(err, client.Close())
 	}
-	return &QMAPSession{client: client, pdn: pdn, InterfaceName: interfaceName, Info: pdn.Info()}, nil
+	if len(pdnResults) != len(configs) {
+		var closeErr error
+		for _, result := range pdnResults {
+			if result.Session != nil {
+				closeErr = errors.Join(closeErr, result.Session.Close())
+			}
+		}
+		return nil, errors.Join(
+			fmt.Errorf("open QMAP sessions returned %d results, want %d", len(pdnResults), len(configs)),
+			closeErr,
+			client.Close(),
+		)
+	}
+
+	remaining := 0
+	for i := range pdnResults {
+		result := &pdnResults[i]
+		switch {
+		case result.Session != nil && result.Err != nil:
+			result.Err = errors.Join(
+				fmt.Errorf("opened PDN session %d returned both session and error: %w", i, result.Err),
+				result.Session.Close(),
+			)
+			result.Session = nil
+		case result.Session == nil && result.Err == nil:
+			result.Err = errors.New("opened PDN session is nil")
+		}
+		if result.Session != nil {
+			remaining++
+		}
+	}
+	if remaining == 0 {
+		var openErr error
+		for i, result := range pdnResults {
+			openErr = errors.Join(openErr, fmt.Errorf(
+				"open QMAP session %d for IP preference %d: %w",
+				i,
+				configs[i].IPPreference,
+				result.Err,
+			))
+		}
+		return nil, errors.Join(openErr, client.Close())
+	}
+	owner := &qmapClientOwner{client: client, remaining: remaining}
+	results := make([]QMAPSessionResult, len(pdnResults))
+	for i, result := range pdnResults {
+		if result.Err != nil {
+			results[i].Err = result.Err
+			continue
+		}
+		results[i].Session = &QMAPSession{
+			state: &qmapSessionState{
+				pdn:         result.Session,
+				closeClient: owner.release,
+			},
+			InterfaceName: prepared.InterfaceName,
+			Info:          result.Session.Info(),
+		}
+	}
+	return results, nil
 }
 
+// Close stops the packet-data session and releases the shared QMI client after
+// the final session closes.
 func (s *QMAPSession) Close() error {
-	if s == nil {
+	if s == nil || s.state == nil {
 		return nil
 	}
-	var pdnErr, clientErr error
-	if s.pdn != nil {
-		pdnErr = s.pdn.Close()
+	state := s.state
+	state.closeOnce.Do(func() {
+		var pdnErr, clientErr error
+		if state.pdn != nil {
+			pdnErr = state.pdn.Close()
+		}
+		if state.closeClient != nil {
+			clientErr = state.closeClient()
+		}
+		state.closeErr = errors.Join(pdnErr, clientErr)
+	})
+	return state.closeErr
+}
+
+func (o *qmapClientOwner) release() error {
+	if o == nil {
+		return nil
 	}
-	if s.client != nil {
-		clientErr = s.client.Close()
+	o.mu.Lock()
+	if o.remaining > 0 {
+		o.remaining--
 	}
-	return errors.Join(pdnErr, clientErr)
+	closeClient := o.remaining == 0
+	o.mu.Unlock()
+	if !closeClient {
+		return nil
+	}
+	o.closeOnce.Do(func() {
+		o.closeErr = o.client.Close()
+	})
+	return o.closeErr
 }
 
 func ensureQMAP(ctx context.Context, client *qcom.Client) error {

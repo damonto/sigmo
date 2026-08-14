@@ -3,6 +3,7 @@ package internet
 import (
 	"context"
 	"errors"
+	"net"
 	"net/netip"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	modemlink "github.com/damonto/sigmo/internal/pkg/modem/link"
 	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 	wwanmodem "github.com/damonto/wwan-go/modem"
+	"github.com/damonto/wwan-go/qcom"
 )
 
 func TestAirplaneModeRestoresOnlyAlwaysOnQMAPInternet(t *testing.T) {
@@ -24,38 +26,39 @@ func TestAirplaneModeRestoresOnlyAlwaysOnQMAPInternet(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			previousOpen := openInternetQMAPSession
-			previousConfigure := configureInternetQMAPNetwork
-			previousRemove := removeInternetQMAPMuxes
-			t.Cleanup(func() {
-				openInternetQMAPSession = previousOpen
-				configureInternetQMAPNetwork = previousConfigure
-				removeInternetQMAPMuxes = previousRemove
-			})
-
 			openCalls := 0
-			openInternetQMAPSession = func(_ context.Context, _ *mmodem.Modem, _ modemlink.QMAPConfig) (*modemlink.QMAPSession, error) {
-				openCalls++
-				return &modemlink.QMAPSession{InterfaceName: "qmimux0"}, nil
-			}
-			configureInternetQMAPNetwork = func(
-				_ context.Context,
-				_ connectionStateStore,
-				_ string,
-				prefs Preferences,
-				_ *modemlink.QMAPSession,
-			) (trackedConnection, []string, error) {
-				return trackedConnection{
-					interfaceName: "qmimux0",
-					addresses:     []netip.Prefix{netip.MustParsePrefix("10.0.0.2/30")},
-					prefs:         prefs,
-				}, []string{"1.1.1.1"}, nil
-			}
-			removeInternetQMAPMuxes = func(*mmodem.Modem, ...uint8) error { return nil }
-
 			connector, err := NewConnector(ConnectorConfig{State: testStore(t)})
 			if err != nil {
 				t.Fatalf("NewConnector() error = %v", err)
+			}
+			connector.qmap = qmapOps{
+				openSessions: func(_ context.Context, _ *mmodem.Modem, _ []modemlink.QMAPConfig) ([]modemlink.QMAPSessionResult, error) {
+					openCalls++
+					return []modemlink.QMAPSessionResult{{Session: &modemlink.QMAPSession{
+						InterfaceName: "qmimux0",
+						Info: qcom.PDNInfo{
+							LocalIPv4:      net.IPv4(10, 0, 0, 2),
+							IPv4SubnetMask: net.IPv4(255, 255, 255, 252),
+							IPv4Gateway:    net.IPv4(10, 0, 0, 1),
+						},
+					}}}, nil
+				},
+				configureNetwork: func(
+					_ context.Context,
+					_ connectionStateStore,
+					_ string,
+					prefs Preferences,
+					_ qmapLinkConfig,
+					_ defaultRouteOps,
+				) (trackedConnection, error) {
+					return trackedConnection{
+						interfaceName: "qmimux0",
+						addresses:     []netip.Prefix{netip.MustParsePrefix("10.0.0.2/30")},
+						prefs:         prefs,
+						dns:           []string{"1.1.1.1"},
+					}, nil
+				},
+				removeMuxes: func(*mmodem.Modem, ...uint8) error { return nil },
 			}
 			const (
 				modemID   = "modem-1"
@@ -73,8 +76,8 @@ func TestAirplaneModeRestoresOnlyAlwaysOnQMAPInternet(t *testing.T) {
 			prefs := Preferences{APN: "internet", IPType: "ipv4", AlwaysOn: tt.alwaysOn}
 			connector.qmapEnabled[modemID] = true
 			connector.qmapConnections[modemID] = &qmapConnection{
-				modem: modem,
-				prefs: prefs,
+				modem:   modem,
+				tracked: trackedConnection{prefs: prefs},
 			}
 			connector.preferences[modemID] = prefs
 			if tt.alwaysOn {

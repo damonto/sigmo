@@ -122,13 +122,17 @@ func ReadWiFiCallingSettings(ctx context.Context, modem *mmodem.Modem, connectiv
 }
 
 func ReadVoLTESettings(ctx context.Context, modem *mmodem.Modem, connectivity voLTEStatusReader) (VoLTESettingsResponse, error) {
+	return defaultManagedVoLTEOps().readSettings(ctx, modem, connectivity)
+}
+
+func (ops managedVoLTEOps) readSettings(ctx context.Context, modem *mmodem.Modem, connectivity voLTEStatusReader) (VoLTESettingsResponse, error) {
 	status, err := connectivity.VoLTEStatus(ctx, modem)
 	if err != nil {
 		return VoLTESettingsResponse{}, err
 	}
 	modemRegistered := false
 	if !modem.Snapshot().AirplaneMode() {
-		modemStatus, err := readVoLTEStatus(ctx, modem)
+		modemStatus, err := ops.readStatus(ctx, modem)
 		if err != nil {
 			return VoLTESettingsResponse{}, err
 		}

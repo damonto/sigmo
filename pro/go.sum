@@ -2,12 +2,12 @@ github.com/ElMostafaIdrassi/goscard v1.0.0 h1:RDG5QrqrQBUoi5MkzM4zILdYf8qDn62daY
 github.com/ElMostafaIdrassi/goscard v1.0.0/go.mod h1:uGOakQe2fFlW2cVlr9cv6x07uelrf0j0aKPbR7jGgfg=
 github.com/damonto/euicc-go v1.1.3-0.20260813015305-1f7e0d0c2ffc h1:GXVyFolXvTBYDaplUraeV2I+L2C02UDuAQlUWy9VdbE=
 github.com/damonto/euicc-go v1.1.3-0.20260813015305-1f7e0d0c2ffc/go.mod h1:cR84QBjk0rC3MKdykxVxARjxV5RNInWjouWH6SSBwDs=
-github.com/damonto/ims-go v0.0.0-20260814031451-b2ed7305fd0b h1:9eNI39Hqi0ZbwhA8MX0XY3Yk3d/yEkmFi/qv3oeRxKo=
-github.com/damonto/ims-go v0.0.0-20260814031451-b2ed7305fd0b/go.mod h1:3ipBrQtzArH+XoglkgjoxC4z5gJFu5EbBb3VS4lwuzk=
+github.com/damonto/ims-go v0.0.0-20260814081656-27c27221fb2a h1:XrBoR8uRy44L5qlFhkHg/DtqRcDbkIgFEXRM4KF8TPc=
+github.com/damonto/ims-go v0.0.0-20260814081656-27c27221fb2a/go.mod h1:+Cq/oaC83WXe/puNPTaNZeNMj7F7xIkynpxLtcQLXQ4=
 github.com/damonto/ts43-go v0.0.0-20260811150907-666dafee1b6d h1:i8aMD4Z6nCkgifq6P25kp0DIC2cSg24FNug5WEOCdvs=
 github.com/damonto/ts43-go v0.0.0-20260811150907-666dafee1b6d/go.mod h1:iUvZE8HUlphQsrAU+vsiLp9CypNfNBTDmEMD6eDdNYw=
-github.com/damonto/wwan-go v0.0.0-20260814031343-b4e0891f3fec h1:pU/n9PHCCkg9zjZpdQNEkpf4faRwwAAPNw4L0h9rgSE=
-github.com/damonto/wwan-go v0.0.0-20260814031343-b4e0891f3fec/go.mod h1:mW0oTnam1/0WLTbhULbcPz9i5Y5kmNE83e9pRxDpA4Y=
+github.com/damonto/wwan-go v0.0.0-20260814081458-4cbc6590398a h1:D8JwEQDAzJ2YyVtlQvwECoybI2/SnQLDCP7L5MpHcBg=
+github.com/damonto/wwan-go v0.0.0-20260814081458-4cbc6590398a/go.mod h1:mW0oTnam1/0WLTbhULbcPz9i5Y5kmNE83e9pRxDpA4Y=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/ebitengine/purego v0.10.2 h1:W809HbnvzAxgdm+aOvlSekrM16wGCdT/e76+9tS7gzE=

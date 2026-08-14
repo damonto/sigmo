@@ -317,15 +317,11 @@ func TestValidateManagedVoLTE(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			previousOpen := openManagedVoLTEDevice
-			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+			ops := managedVoLTEOps{openDevice: func(*mmodem.Modem) (managedVoLTEDevice, error) {
 				return tt.device, tt.openErr
-			}
-			t.Cleanup(func() {
-				openManagedVoLTEDevice = previousOpen
-			})
+			}}
 
-			err := validateManagedVoLTE(t.Context(), &mmodem.Modem{})
+			err := ops.validate(t.Context(), &mmodem.Modem{})
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("validateManagedVoLTE() error = %v, want %v", err, tt.wantErr)
 			}
@@ -443,18 +439,16 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			previousOpen := openManagedVoLTEDevice
 			previousResetDelay := voLTEResetDelay
 			previousPollInterval := packetServicePollInterval
 			previousPacketWaitTimeout := packetServiceWaitTimeout
-			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+			ops := managedVoLTEOps{openDevice: func(*mmodem.Modem) (managedVoLTEDevice, error) {
 				return tt.device, nil
-			}
+			}}
 			voLTEResetDelay = time.Nanosecond
 			packetServicePollInterval = time.Nanosecond
 			packetServiceWaitTimeout = time.Hour
 			t.Cleanup(func() {
-				openManagedVoLTEDevice = previousOpen
 				voLTEResetDelay = previousResetDelay
 				packetServicePollInterval = previousPollInterval
 				packetServiceWaitTimeout = previousPacketWaitTimeout
@@ -467,7 +461,7 @@ func TestPrepareManagedVoLTE(t *testing.T) {
 				tt.device.cancel = cancel
 				voLTEResetDelay = time.Hour
 			}
-			profile, err := prepareManagedVoLTE(ctx, &mmodem.Modem{}, nil)
+			profile, err := ops.prepare(ctx, &mmodem.Modem{}, nil)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("prepareManagedVoLTE() error = %v, want %v", err, tt.wantErr)
 			}
@@ -554,16 +548,14 @@ func TestReleaseManagedVoLTE(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			previousOpen := openManagedVoLTEDevice
 			previousResetDelay := voLTEResetDelay
 			previousPollInterval := packetServicePollInterval
-			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+			ops := managedVoLTEOps{openDevice: func(*mmodem.Modem) (managedVoLTEDevice, error) {
 				return tt.device, tt.openErr
-			}
+			}}
 			voLTEResetDelay = time.Nanosecond
 			packetServicePollInterval = time.Nanosecond
 			t.Cleanup(func() {
-				openManagedVoLTEDevice = previousOpen
 				voLTEResetDelay = previousResetDelay
 				packetServicePollInterval = previousPollInterval
 			})
@@ -575,7 +567,7 @@ func TestReleaseManagedVoLTE(t *testing.T) {
 				tt.device.cancel = cancel
 				voLTEResetDelay = time.Hour
 			}
-			err := releaseManagedVoLTE(ctx, &mmodem.Modem{}, nil)
+			err := ops.release(ctx, &mmodem.Modem{}, nil)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("releaseManagedVoLTE() error = %v, want %v", err, tt.wantErr)
 			}
@@ -1421,20 +1413,17 @@ func TestStopFailsOpenCallsBeforeRemovingSession(t *testing.T) {
 }
 
 func TestRestartWaitsForDetachedSessionBeforeStartingReplacement(t *testing.T) {
-	previousOpen := openManagedVoLTEDevice
 	replacementStarted := make(chan struct{})
-	openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+	managedVoLTE := managedVoLTEOps{openDevice: func(*mmodem.Modem) (managedVoLTEDevice, error) {
 		close(replacementStarted)
 		return &fakeManagedVoLTEDevice{statusErr: errors.New("stop replacement")}, nil
-	}
-	t.Cleanup(func() {
-		openManagedVoLTEDevice = previousOpen
-	})
+	}}
 
 	oldDone := make(chan struct{})
 	oldCancelled := make(chan struct{})
 	c := &coordinator{
-		access: AccessVoLTE,
+		access:       AccessVoLTE,
+		managedVoLTE: managedVoLTE,
 		sessions: map[string]*sessionState{
 			"modem-1": {
 				id:     1,

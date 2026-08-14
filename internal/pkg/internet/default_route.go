@@ -35,10 +35,26 @@ type routeStateRestoreTarget struct {
 	interfaceNames []string
 }
 
-var netlinkDefaultRouteOps = defaultRouteOps{
-	defaultRoutes:      netlink.DefaultRoutes,
-	addDefaultRoute:    netlink.AddDefaultRoute,
-	deleteDefaultRoute: netlink.DeleteDefaultRoute,
+func defaultRouteOperations() defaultRouteOps {
+	return defaultRouteOps{
+		defaultRoutes:      netlink.DefaultRoutes,
+		addDefaultRoute:    netlink.AddDefaultRoute,
+		deleteDefaultRoute: netlink.DeleteDefaultRoute,
+	}
+}
+
+func (ops defaultRouteOps) withDefaults() defaultRouteOps {
+	defaults := defaultRouteOperations()
+	if ops.defaultRoutes == nil {
+		ops.defaultRoutes = defaults.defaultRoutes
+	}
+	if ops.addDefaultRoute == nil {
+		ops.addDefaultRoute = defaults.addDefaultRoute
+	}
+	if ops.deleteDefaultRoute == nil {
+		ops.deleteDefaultRoute = defaults.deleteDefaultRoute
+	}
+	return ops
 }
 
 func takeoverDefaultRoutesWithStore(ctx context.Context, state connectionStateStore, modemID string, interfaceName string, preferred []netlink.DefaultRoute, ops defaultRouteOps) ([]defaultRouteChange, error) {

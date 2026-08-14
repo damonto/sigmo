@@ -89,7 +89,22 @@ type connectAttempt struct {
 	registrationGroup *registration.Group
 }
 
-var openManagedVoLTEDevice = func(modem *mmodem.Modem) (managedVoLTEDevice, error) {
+type managedVoLTEOps struct {
+	openDevice func(*mmodem.Modem) (managedVoLTEDevice, error)
+}
+
+func defaultManagedVoLTEOps() managedVoLTEOps {
+	return managedVoLTEOps{openDevice: openManagedVoLTEDevice}
+}
+
+func (ops managedVoLTEOps) withDefaults() managedVoLTEOps {
+	if ops.openDevice == nil {
+		ops.openDevice = openManagedVoLTEDevice
+	}
+	return ops
+}
+
+func openManagedVoLTEDevice(modem *mmodem.Modem) (managedVoLTEDevice, error) {
 	device, err := mmodem.OpenVoLTEDevice(modem)
 	if err != nil {
 		return nil, err
@@ -284,7 +299,7 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 	var imsProfile wwan.IMSProfile
 	if c.access == AccessVoLTE {
 		var err error
-		imsProfile, err = prepareManagedVoLTE(ctx, modem, c.internet)
+		imsProfile, err = c.managedVoLTEOperations().prepare(ctx, modem, c.internet)
 		if err != nil {
 			slog.Warn("prepare VoLTE startup", "imei", modem.EquipmentIdentifier, "error", err)
 			c.markDisconnected(modem.EquipmentIdentifier, sessionID, nil)
@@ -454,7 +469,7 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 		if err := client.Connect(ctx); err != nil {
 			_ = client.Close()
 			if c.access == AccessVoLTE && try == 0 && isIMSCallAlreadyPresent(err) {
-				if resetErr := resetOccupiedManagedVoLTE(ctx, modem, c.internet); resetErr != nil {
+				if resetErr := c.managedVoLTEOperations().resetOccupied(ctx, modem, c.internet); resetErr != nil {
 					return nil, errors.Join(err, fmt.Errorf("reset occupied IMS PDN: %w", resetErr))
 				}
 				continue
@@ -575,8 +590,8 @@ func modemClientConfigForIMEI(imei string, access Access, imsProfileIndex uint8)
 	}
 }
 
-func prepareManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (profile wwan.IMSProfile, err error) {
-	device, err := openManagedVoLTEDevice(modem)
+func (ops managedVoLTEOps) prepare(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (profile wwan.IMSProfile, err error) {
+	device, err := ops.withDefaults().openDevice(modem)
 	if errors.Is(err, wwan.ErrUnsupported) {
 		return wwan.IMSProfile{}, ErrUnavailable
 	}
@@ -621,8 +636,8 @@ func prepareManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet inte
 	return profile, nil
 }
 
-func releaseManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (err error) {
-	device, err := openManagedVoLTEDevice(modem)
+func (ops managedVoLTEOps) release(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (err error) {
+	device, err := ops.withDefaults().openDevice(modem)
 	if errors.Is(err, wwan.ErrUnsupported) {
 		return nil
 	}
@@ -666,8 +681,8 @@ func resetManagedVoLTE(ctx context.Context, modem *mmodem.Modem, device managedV
 	return errors.Join(waitErr, internetErr)
 }
 
-func resetOccupiedManagedVoLTE(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (err error) {
-	device, err := openManagedVoLTEDevice(modem)
+func (ops managedVoLTEOps) resetOccupied(ctx context.Context, modem *mmodem.Modem, internet internetRestorer) (err error) {
+	device, err := ops.withDefaults().openDevice(modem)
 	if err != nil {
 		return fmt.Errorf("open device: %w", err)
 	}

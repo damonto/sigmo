@@ -18,7 +18,7 @@ import (
 	pims "github.com/damonto/sigmo/pro/ims"
 )
 
-var proIMS = func(ctx context.Context, app *proApp) error {
+func configureIMS(ctx context.Context, app *proApp) error {
 	runtime := app.runtime
 	app.RegisterWebsheets()
 	connectivity := pims.NewConnectivity(pims.ConnectivityConfig{

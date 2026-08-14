@@ -4,4 +4,6 @@ package main
 
 import "context"
 
-var proESIMTransfer func(context.Context, *proApp) error
+func configureESIMTransfer(context.Context, *proApp) error {
+	return nil
+}

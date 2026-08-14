@@ -58,3 +58,50 @@ func TestSelectWDSProfileIndex(t *testing.T) {
 		})
 	}
 }
+
+func TestSelectWDSDualStackProfileIndex(t *testing.T) {
+	profile := func(index uint8, apn string, pdp qcom.WDSPDPType) qcom.WDSProfileSettings {
+		return qcom.WDSProfileSettings{
+			ID:  qcom.WDSProfileID{Type: qcom.WDSProfileType3GPP, Index: index},
+			APN: apn, APNKnown: true, PDPType: pdp, PDPKnown: true,
+		}
+	}
+	profiles := []qcom.WDSProfileSettings{
+		profile(4, "ereseller", qcom.WDSPDPTypeIPv4),
+		profile(5, "ereseller", qcom.WDSPDPTypeIPv6),
+		profile(6, "ereseller", qcom.WDSPDPTypeIPv4v6),
+	}
+	tests := []struct {
+		name     string
+		apn      string
+		profiles []qcom.WDSProfileSettings
+		want     uint8
+		wantErr  bool
+		wantIs   error
+	}{
+		{name: "shared dual-stack profile", apn: " EReseller ", profiles: profiles, want: 6},
+		{name: "separate family profiles are not shared", apn: "ereseller", profiles: profiles[:2], wantErr: true, wantIs: qcom.ErrWDSProfileNotFound},
+		{name: "APN required", profiles: profiles, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := selectWDSDualStackProfileIndex(tt.apn, tt.profiles)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("selectWDSDualStackProfileIndex() error = nil, want non-nil")
+				}
+				if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
+					t.Fatalf("selectWDSDualStackProfileIndex() error = %v, want %v", err, tt.wantIs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("selectWDSDualStackProfileIndex() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("selectWDSDualStackProfileIndex() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

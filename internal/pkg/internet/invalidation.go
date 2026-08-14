@@ -25,7 +25,7 @@ func (c *Connector) invalidateModemGeneration(ctx context.Context, modemID strin
 	if modemID == "" {
 		return nil
 	}
-	defer c.lockModem(modemID)()
+	defer c.lockRouteTransaction(modemID)()
 
 	var (
 		tracked    *trackedConnection
@@ -50,7 +50,7 @@ func (c *Connector) invalidateModemGeneration(ctx context.Context, modemID strin
 			case tracked != nil:
 				state.scheduleReconnect(tracked.prefs)
 			case qmap != nil:
-				state.scheduleReconnect(qmap.prefs)
+				state.scheduleReconnect(qmap.tracked.prefs)
 			}
 		}
 		state.generation = generation
@@ -82,12 +82,10 @@ func (c *Connector) invalidateModemGeneration(ctx context.Context, modemID strin
 		result = errors.Join(result, err)
 	}
 	if qmap != nil {
-		for _, value := range qmap.tracked {
-			appendInterface(value.interfaceName)
-		}
+		appendInterface(qmap.tracked.interfaceName)
 		result = errors.Join(result, qmap.cleanup(ctx, c), qmap.close())
-		if qmap.modem != nil && len(qmap.muxIDs) > 0 {
-			result = errors.Join(result, removeInternetQMAPMuxes(qmap.modem, qmap.muxIDs...))
+		if qmap.modem != nil {
+			result = errors.Join(result, c.removeQMAPMuxes(qmap.modem, internetQMAPMuxID))
 		}
 	}
 	if tracked != nil || qmap != nil {

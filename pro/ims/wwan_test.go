@@ -153,12 +153,9 @@ func TestOpenWWANRequiresOneQMIDataPath(t *testing.T) {
 }
 
 func TestValidateDedicatedQMIWWANConfig(t *testing.T) {
-	previous := validateQualcomm410Layout
-	t.Cleanup(func() { validateQualcomm410Layout = previous })
-
 	layoutErr := errors.New("layout unavailable")
 	probeCalls := 0
-	validateQualcomm410Layout = func() error {
+	validateLayout := func() error {
 		probeCalls++
 		return layoutErr
 	}
@@ -193,7 +190,7 @@ func TestValidateDedicatedQMIWWANConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			probeCalls = 0
-			err := validateDedicatedQMIWWANConfig(tt.cfg)
+			err := validateDedicatedQMIWWANConfig(tt.cfg, validateLayout)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("validateDedicatedQMIWWANConfig() error = %v, wantErr %t", err, tt.wantErr)
 			}
@@ -570,12 +567,10 @@ func TestManagedVoLTECardUsesMBIMSessionInterface(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			previousInterfaceByName := imsInterfaceByName
-			imsInterfaceByName = func(name string) (*net.Interface, error) {
+			interfaceByName := func(name string) (*net.Interface, error) {
 				return &net.Interface{Index: 7, Name: name}, nil
 			}
-			t.Cleanup(func() { imsInterfaceByName = previousInterfaceByName })
-			interfaceName, err := mbimSessionInterfaceName("lo", tt.sessionID)
+			interfaceName, err := mbimSessionInterfaceName("lo", tt.sessionID, interfaceByName)
 			if err != nil {
 				t.Fatalf("mbimSessionInterfaceName() error = %v", err)
 			}
@@ -631,7 +626,12 @@ func TestManagedVoLTECardUsesMBIMSessionInterface(t *testing.T) {
 					return nil
 				},
 			}
-			network := &pdnNetwork{parent: "lo", mbim: true, links: links}
+			network := &pdnNetwork{
+				parent:          "lo",
+				mbim:            true,
+				links:           links,
+				interfaceByName: interfaceByName,
+			}
 			info := imsPDNInfo{
 				SessionID: tt.sessionID,
 				LocalIPv6: net.ParseIP("2001:db8::2"),

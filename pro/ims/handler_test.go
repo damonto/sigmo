@@ -54,6 +54,7 @@ type handlerConnectivityProbe struct {
 	wifiSettings WiFiCallingSettings
 	volte        *voLTESettingsProbe
 	volteErr     error
+	managedVoLTE managedVoLTEOps
 }
 
 func (p *handlerConnectivityProbe) ReplaceWiFiCallingSettings(_ context.Context, modem *mmodem.Modem, settings WiFiCallingSettings) error {
@@ -70,19 +71,15 @@ func (p *handlerConnectivityProbe) ReplaceVoLTESettings(ctx context.Context, mod
 	if p.volteErr != nil {
 		return p.volteErr
 	}
-	return updateVoLTESettings(ctx, modem, p.volte, settings)
+	return p.managedVoLTE.updateSettings(ctx, modem, p.volte, settings)
 }
 
 func TestReadVoLTESettingsSkipsModemStatusInAirplaneMode(t *testing.T) {
-	previousOpen := openManagedVoLTEDevice
 	opened := false
-	openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+	ops := managedVoLTEOps{openDevice: func(*mmodem.Modem) (managedVoLTEDevice, error) {
 		opened = true
 		return &fakeManagedVoLTEDevice{}, nil
-	}
-	t.Cleanup(func() {
-		openManagedVoLTEDevice = previousOpen
-	})
+	}}
 	modem := qmiTestModem("modem-1")
 	modem.Status.Power = wwanmodem.PowerStateLow
 	want := VoLTESettingsResponse{
@@ -91,7 +88,7 @@ func TestReadVoLTESettingsSkipsModemStatusInAirplaneMode(t *testing.T) {
 		DataPath: DataPathQMAP,
 	}
 
-	got, err := ReadVoLTESettings(t.Context(), modem, voLTEStatusReaderStub{status: VoLTEStatus{
+	got, err := ops.readSettings(t.Context(), modem, voLTEStatusReaderStub{status: VoLTEStatus{
 		VoLTESettings: VoLTESettings{Enabled: true, DataPath: DataPathQMAP},
 		State:         StateDisconnected,
 	}})
@@ -107,16 +104,12 @@ func TestReadVoLTESettingsSkipsModemStatusInAirplaneMode(t *testing.T) {
 }
 
 func TestReadVoLTEStatusTreatsInvalidOperationAsUnavailable(t *testing.T) {
-	previousOpen := openManagedVoLTEDevice
 	device := &fakeManagedVoLTEDevice{statusErr: qcom.QMIErrorInvalidOperation}
-	openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+	ops := managedVoLTEOps{openDevice: func(*mmodem.Modem) (managedVoLTEDevice, error) {
 		return device, nil
-	}
-	t.Cleanup(func() {
-		openManagedVoLTEDevice = previousOpen
-	})
+	}}
 
-	got, err := readVoLTEStatus(t.Context(), qmiTestModem("modem-1"))
+	got, err := ops.readStatus(t.Context(), qmiTestModem("modem-1"))
 	if err != nil {
 		t.Fatalf("readVoLTEStatus() error = %v", err)
 	}
@@ -272,18 +265,14 @@ func TestUpdateVoLTESettingsValidatesManagedDevice(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			previousOpen := openManagedVoLTEDevice
 			opened := false
-			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+			managedVoLTE := managedVoLTEOps{openDevice: func(*mmodem.Modem) (managedVoLTEDevice, error) {
 				opened = true
 				return tt.device, tt.openErr
-			}
-			t.Cleanup(func() {
-				openManagedVoLTEDevice = previousOpen
-			})
+			}}
 
 			volte := &voLTESettingsProbe{}
-			connectivity := &handlerConnectivityProbe{volte: volte}
+			connectivity := &handlerConnectivityProbe{volte: volte, managedVoLTE: managedVoLTE}
 			modem := &mmodem.Modem{
 				EquipmentIdentifier: "modem-1",
 				Ports: []mmodem.ModemPort{{

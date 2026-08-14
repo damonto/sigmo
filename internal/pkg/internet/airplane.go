@@ -46,7 +46,7 @@ func (c *Connector) ChangeAirplaneMode(ctx context.Context, modem *mmodem.Modem,
 }
 
 func (c *Connector) beginAndApplyAirplaneModeChange(ctx context.Context, modem *mmodem.Modem, targetEnabled bool, apply func() (applied bool, err error)) (bool, error) {
-	defer c.lockModem(modem.EquipmentIdentifier)()
+	defer c.lockRouteTransaction(modem.EquipmentIdentifier)()
 	beginErr := c.beginAirplaneModeChangeLocked(ctx, modem, targetEnabled)
 	applied, changeErr := apply()
 	return applied, errors.Join(beginErr, changeErr)
@@ -83,7 +83,7 @@ func (c *Connector) BeginAirplaneModeChange(ctx context.Context, modem *mmodem.M
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	defer c.lockModem(modem.EquipmentIdentifier)()
+	defer c.lockRouteTransaction(modem.EquipmentIdentifier)()
 	return c.beginAirplaneModeChangeLocked(ctx, modem, targetEnabled)
 }
 

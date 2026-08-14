@@ -23,16 +23,22 @@ type qualcomm410LayoutProbe struct {
 	sameDevice      func(string, string) (bool, error)
 }
 
-var systemQualcomm410LayoutProbe = qualcomm410LayoutProbe{
-	device: func(path string) error {
-		_, err := os.Stat(path)
-		return err
-	},
-	interfaceByName: func(name string) error {
-		_, err := net.InterfaceByName(name)
-		return err
-	},
-	sameDevice: sameDeviceNode,
+func systemQualcomm410LayoutProbe() qualcomm410LayoutProbe {
+	return qualcomm410LayoutProbe{
+		device:          probeDeviceNode,
+		interfaceByName: probeNetworkInterface,
+		sameDevice:      sameDeviceNode,
+	}
+}
+
+func probeDeviceNode(path string) error {
+	_, err := os.Stat(path)
+	return err
+}
+
+func probeNetworkInterface(name string) error {
+	_, err := net.InterfaceByName(name)
+	return err
 }
 
 func sameDeviceNode(a, b string) (bool, error) {
@@ -61,14 +67,14 @@ func sameDeviceStat(a, b unix.Stat_t) bool {
 // ValidateQualcomm410Layout verifies the fixed dual-QMI layout before either
 // Internet or IMS starts changing modem or network state.
 func ValidateQualcomm410Layout() error {
-	return validateQualcomm410Layout(systemQualcomm410LayoutProbe)
+	return validateQualcomm410Layout(systemQualcomm410LayoutProbe())
 }
 
 // ValidateQualcomm410ModemLayout also verifies that DATA5 is the selected
 // primary QMI port. Selecting DATA6 reports valid bearer settings while the
 // wwan0 data plane remains unusable.
 func ValidateQualcomm410ModemLayout(modem *Modem) error {
-	return validateQualcomm410ModemLayout(modem, systemQualcomm410LayoutProbe)
+	return validateQualcomm410ModemLayout(modem, systemQualcomm410LayoutProbe())
 }
 
 func validateQualcomm410Layout(probe qualcomm410LayoutProbe) error {

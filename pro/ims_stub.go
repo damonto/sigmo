@@ -4,4 +4,6 @@ package main
 
 import "context"
 
-var proIMS func(context.Context, *proApp) error
+func configureIMS(context.Context, *proApp) error {
+	return nil
+}

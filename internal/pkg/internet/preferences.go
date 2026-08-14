@@ -23,7 +23,7 @@ func (c *Connector) UpdatePreferences(ctx context.Context, modem *mmodem.Modem, 
 	}
 	access := modemAccess{modem: modem}
 	modemID := access.id()
-	defer c.lockModem(modemID)()
+	defer c.lockRouteTransaction(modemID)()
 	if err := c.rejectAirplaneMode(ctx, modem); err != nil {
 		return nil, err
 	}
@@ -105,54 +105,16 @@ func (c *Connector) updateTrackedPreferences(ctx context.Context, modem internet
 }
 
 func (c *Connector) updateQMAPPreferences(ctx context.Context, modem internetModem, connection *qmapConnection, next ConnectionPreferences) (*qmapConnection, error) {
-	previous := cloneQMAPConnection(connection)
-	wanted := previous.prefs
-	wanted.DefaultRoute = next.DefaultRoute
-	wanted.ProxyEnabled = next.ProxyEnabled
-	wanted.AlwaysOn = next.AlwaysOn
-	if wanted.AlwaysOn && modem.profileID() == "" {
-		return connection, ErrProfileIDRequired
+	tracked := cloneTrackedConnection(connection.tracked)
+	tracked, err := c.updateTrackedPreferences(ctx, modem, tracked, next)
+	if err != nil {
+		return connection, err
 	}
-
 	updated := cloneQMAPConnection(connection)
-	if previous.prefs.DefaultRoute != wanted.DefaultRoute {
-		for _, i := range qmapRouteUpdateOrder(len(updated.tracked), wanted.DefaultRoute) {
-			tracked, err := c.updateTrackedDefaultRoute(ctx, modem.id(), updated.tracked[i], wanted.DefaultRoute)
-			if err != nil {
-				rollbackErr := c.rollbackQMAPDefaultRoutes(ctx, modem.id(), updated.tracked, previous.tracked)
-				return connection, errors.Join(fmt.Errorf("update QMAP default route preference: %w", err), rollbackErr)
-			}
-			updated.tracked[i] = tracked
-		}
-	}
-
-	interfaceName := qmapPrimaryInterface(updated)
-	proxyChanged := previous.prefs.ProxyEnabled != wanted.ProxyEnabled
-	if proxyChanged {
-		if err := c.applyProxyPreference(ctx, modem.id(), interfaceName, updated.dns, wanted.ProxyEnabled); err != nil {
-			rollbackErr := c.rollbackQMAPDefaultRoutes(ctx, modem.id(), updated.tracked, previous.tracked)
-			return connection, errors.Join(fmt.Errorf("update QMAP proxy preference: %w", err), rollbackErr)
-		}
-	}
-
-	if previous.prefs.AlwaysOn != wanted.AlwaysOn {
-		if err := c.syncAlwaysOnState(ctx, modem.profileID(), wanted); err != nil {
-			var rollbackErr error
-			if proxyChanged {
-				rollbackErr = errors.Join(rollbackErr, c.applyProxyPreference(ctx, modem.id(), interfaceName, previous.dns, previous.prefs.ProxyEnabled))
-			}
-			rollbackErr = errors.Join(rollbackErr, c.rollbackQMAPDefaultRoutes(ctx, modem.id(), updated.tracked, previous.tracked))
-			return connection, errors.Join(fmt.Errorf("update QMAP always on preference: %w", err), rollbackErr)
-		}
-	}
-
-	updated.prefs = wanted
-	for i := range updated.tracked {
-		updated.tracked[i].prefs = wanted
-	}
+	updated.tracked = tracked
 	c.mu.Lock()
 	c.qmapConnections[modem.id()] = updated
-	c.preferences[modem.id()] = wanted
+	c.preferences[modem.id()] = updated.tracked.prefs
 	c.mu.Unlock()
 	return updated, nil
 }
@@ -186,45 +148,16 @@ func (c *Connector) rollbackTrackedDefaultRoute(ctx context.Context, modemID str
 	return nil
 }
 
-func (c *Connector) rollbackQMAPDefaultRoutes(ctx context.Context, modemID string, current, previous []trackedConnection) error {
-	count := min(len(current), len(previous))
-	if count == 0 {
-		return nil
-	}
-	var result error
-	for _, i := range qmapRouteUpdateOrder(count, previous[0].prefs.DefaultRoute) {
-		if current[i].prefs.DefaultRoute == previous[i].prefs.DefaultRoute {
-			continue
-		}
-		_, err := c.updateTrackedDefaultRoute(ctx, modemID, current[i], previous[i].prefs.DefaultRoute)
-		if err != nil {
-			result = errors.Join(result, fmt.Errorf("rollback QMAP route %s: %w", current[i].interfaceName, err))
-		}
-	}
-	return result
-}
-
-func qmapRouteUpdateOrder(count int, enabled bool) []int {
-	order := make([]int, count)
-	for i := range count {
-		if enabled {
-			order[i] = i
-			continue
-		}
-		order[i] = count - 1 - i
-	}
-	return order
-}
-
 func (c *Connector) removeTrackedRoutes(ctx context.Context, tracked trackedConnection) error {
+	routeOps := c.routeOperationSet()
 	var result error
 	for i := len(tracked.routes) - 1; i >= 0; i-- {
-		result = errors.Join(result, netlinkDefaultRouteOps.deleteDefaultRoute(tracked.routes[i]))
+		result = errors.Join(result, routeOps.deleteDefaultRoute(tracked.routes[i]))
 	}
 	if result != nil {
 		return fmt.Errorf("remove current routes: %w", result)
 	}
-	if err := cleanupDefaultRouteChangesWithStore(ctx, c.persistence, tracked.interfaceName, tracked.routeChanges, netlinkDefaultRouteOps); err != nil {
+	if err := cleanupDefaultRouteChangesWithStore(ctx, c.persistence, tracked.interfaceName, tracked.routeChanges, routeOps); err != nil {
 		return fmt.Errorf("restore replaced routes: %w", err)
 	}
 	if err := c.syncDefaultRouteRestore(ctx, tracked.routeChanges); err != nil {
@@ -234,10 +167,11 @@ func (c *Connector) removeTrackedRoutes(ctx context.Context, tracked trackedConn
 }
 
 func (c *Connector) installTrackedRoutes(ctx context.Context, modemID string, tracked trackedConnection, routeTemplate []netlink.DefaultRoute, enabled bool) (trackedConnection, error) {
+	routeOps := c.routeOperationSet()
 	desired := slices.Clone(routeTemplate)
 	metric := defaultRouteMetric
 	if !enabled {
-		current, err := netlinkDefaultRouteOps.defaultRoutes()
+		current, err := routeOps.defaultRoutes()
 		if err != nil {
 			return tracked, fmt.Errorf("list default routes: %w", err)
 		}
@@ -250,11 +184,11 @@ func (c *Connector) installTrackedRoutes(ctx context.Context, modemID string, tr
 		if err := restoreStaleDefaultRouteStatesWithStore(ctx, c.persistence, routeStateRestoreTarget{
 			modemID:        modemID,
 			interfaceNames: []string{tracked.interfaceName},
-		}, netlinkDefaultRouteOps); err != nil {
+		}, routeOps); err != nil {
 			return tracked, fmt.Errorf("restore stale route state: %w", err)
 		}
 		var err error
-		changes, err = takeoverDefaultRoutesWithStore(ctx, c.persistence, modemID, tracked.interfaceName, desired, netlinkDefaultRouteOps)
+		changes, err = takeoverDefaultRoutesWithStore(ctx, c.persistence, modemID, tracked.interfaceName, desired, routeOps)
 		if err != nil {
 			return tracked, fmt.Errorf("take over default routes: %w", err)
 		}
@@ -262,9 +196,9 @@ func (c *Connector) installTrackedRoutes(ctx context.Context, modemID string, tr
 
 	var added []netlink.DefaultRoute
 	for _, route := range desired {
-		if err := restoreOriginalDefaultRouteWithOps(route, netlinkDefaultRouteOps); err != nil {
-			cleanupErr := deleteDefaultRoutesWithOps(added, netlinkDefaultRouteOps)
-			cleanupErr = errors.Join(cleanupErr, cleanupDefaultRouteChangesWithStore(ctx, c.persistence, tracked.interfaceName, changes, netlinkDefaultRouteOps))
+		if err := restoreOriginalDefaultRouteWithOps(route, routeOps); err != nil {
+			cleanupErr := deleteDefaultRoutesWithOps(added, routeOps)
+			cleanupErr = errors.Join(cleanupErr, cleanupDefaultRouteChangesWithStore(ctx, c.persistence, tracked.interfaceName, changes, routeOps))
 			return tracked, errors.Join(fmt.Errorf("add updated route: %w", err), cleanupErr)
 		}
 		added = append(added, route)
@@ -316,13 +250,6 @@ func (c *Connector) qmapConnectionResponse(modemID string, connection *qmapConne
 	return response
 }
 
-func qmapPrimaryInterface(connection *qmapConnection) string {
-	if connection == nil || len(connection.tracked) == 0 {
-		return ""
-	}
-	return connection.tracked[0].interfaceName
-}
-
 func cloneTrackedConnection(tracked trackedConnection) trackedConnection {
 	tracked.addresses = slices.Clone(tracked.addresses)
 	tracked.dns = slices.Clone(tracked.dns)
@@ -338,11 +265,6 @@ func cloneQMAPConnection(connection *qmapConnection) *qmapConnection {
 	}
 	cloned := *connection
 	cloned.sessions = slices.Clone(connection.sessions)
-	cloned.tracked = slices.Clone(connection.tracked)
-	for i := range cloned.tracked {
-		cloned.tracked[i] = cloneTrackedConnection(cloned.tracked[i])
-	}
-	cloned.muxIDs = slices.Clone(connection.muxIDs)
-	cloned.dns = slices.Clone(connection.dns)
+	cloned.tracked = cloneTrackedConnection(connection.tracked)
 	return &cloned
 }

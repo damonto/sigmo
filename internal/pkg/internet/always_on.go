@@ -112,7 +112,7 @@ func (c *Connector) restoreAlwaysOn(ctx context.Context, modem *mmodem.Modem, pr
 	}
 	access := modemAccess{modem: modem}
 	modemID := access.id()
-	defer c.lockModem(modemID)()
+	defer c.lockRouteTransaction(modemID)()
 	airplaneMode, err := c.airplaneModeEnabled(ctx, modem)
 	if err != nil {
 		return err

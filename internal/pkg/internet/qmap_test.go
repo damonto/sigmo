@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strings"
 	"testing"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -34,7 +35,7 @@ func TestQMAPIPPreferences(t *testing.T) {
 		want        []qcom.WDSIPPreference
 		wantErr     bool
 	}{
-		{name: "dual stack starts both family legs", input: "ipv4v6", want: []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv4, qcom.WDSIPPreferenceIPv6}},
+		{name: "dual stack starts both families", input: "ipv4v6", want: []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv4, qcom.WDSIPPreferenceIPv6}},
 		{name: "ipv4", input: "ipv4", want: []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv4}},
 		{name: "ipv6", input: "ipv6", want: []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv6}},
 		{name: "invalid", input: "ppp", wantErr: true},
@@ -52,161 +53,313 @@ func TestQMAPIPPreferences(t *testing.T) {
 	}
 }
 
-func TestQMAPDataLegs(t *testing.T) {
-	tests := []struct {
-		name    string
-		ipType  string
-		wantMux []uint8
-	}{
-		{name: "IPv4 uses mux 1", ipType: "ipv4", wantMux: []uint8{1}},
-		{name: "IPv6 uses mux 1", ipType: "ipv6", wantMux: []uint8{1}},
-		{name: "dual stack reserves mux 2 for IMS", ipType: "ipv4v6", wantMux: []uint8{1, 3}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			legs, err := qmapDataLegs(tt.ipType)
-			if err != nil {
-				t.Fatalf("qmapDataLegs() error = %v", err)
-			}
-			if len(legs) != len(tt.wantMux) {
-				t.Fatalf("qmapDataLegs() len = %d, want %d", len(legs), len(tt.wantMux))
-			}
-			for i, leg := range legs {
-				if leg.muxID != tt.wantMux[i] {
-					t.Fatalf("qmapDataLegs()[%d].muxID = %d, want %d", i, leg.muxID, tt.wantMux[i])
-				}
-			}
-		})
-	}
-}
-
 func TestConnectQMAPLockedAllowsPartialDualStack(t *testing.T) {
 	errIPv4 := errors.New("IPv4 unavailable")
 	errIPv6 := errors.New("IPv6 unavailable")
 	tests := []struct {
-		name        string
-		ipType      string
-		failures    map[uint8]error
-		wantIPType  string
-		wantErrs    []error
-		wantOpened  []uint8
-		wantRemoved []uint8
+		name         string
+		ipType       string
+		failures     map[qcom.WDSIPPreference]error
+		wantIPType   string
+		wantErrs     []error
+		wantOpened   []qcom.WDSIPPreference
+		wantRemoved  []uint8
+		emptyInfo    map[qcom.WDSIPPreference]bool
+		wrongFamily  map[qcom.WDSIPPreference]bool
+		nilSession   map[qcom.WDSIPPreference]bool
+		wantErr      bool
+		wantSessions int
 	}{
 		{
-			name:        "keeps IPv4 when IPv6 is unavailable",
-			ipType:      "ipv4v6",
-			failures:    map[uint8]error{ipv6QMAPMuxID: errIPv6},
-			wantIPType:  "ipv4",
-			wantOpened:  []uint8{internetQMAPMuxID, ipv6QMAPMuxID},
-			wantRemoved: []uint8{ipv6QMAPMuxID},
+			name:         "combines dual stack on mux 1",
+			ipType:       "ipv4v6",
+			wantIPType:   "ipv4v6",
+			wantOpened:   []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv4, qcom.WDSIPPreferenceIPv6},
+			wantSessions: 2,
 		},
 		{
-			name:        "keeps IPv6 when IPv4 is unavailable",
-			ipType:      "ipv4v6",
-			failures:    map[uint8]error{internetQMAPMuxID: errIPv4},
-			wantIPType:  "ipv6",
-			wantOpened:  []uint8{internetQMAPMuxID, ipv6QMAPMuxID},
-			wantRemoved: []uint8{internetQMAPMuxID},
+			name:         "keeps IPv4 when IPv6 is unavailable",
+			ipType:       "ipv4v6",
+			failures:     map[qcom.WDSIPPreference]error{qcom.WDSIPPreferenceIPv6: errIPv6},
+			wantIPType:   "ipv4",
+			wantOpened:   []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv4, qcom.WDSIPPreferenceIPv6},
+			wantSessions: 1,
 		},
 		{
-			name:        "returns all errors when no leg connects",
+			name:         "keeps IPv6 when IPv4 is unavailable",
+			ipType:       "ipv4v6",
+			failures:     map[qcom.WDSIPPreference]error{qcom.WDSIPPreferenceIPv4: errIPv4},
+			wantIPType:   "ipv6",
+			wantOpened:   []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv4, qcom.WDSIPPreferenceIPv6},
+			wantSessions: 1,
+		},
+		{
+			name:        "returns all errors when no family connects",
 			ipType:      "ipv4v6",
-			failures:    map[uint8]error{internetQMAPMuxID: errIPv4, ipv6QMAPMuxID: errIPv6},
+			failures:    map[qcom.WDSIPPreference]error{qcom.WDSIPPreferenceIPv4: errIPv4, qcom.WDSIPPreferenceIPv6: errIPv6},
 			wantErrs:    []error{errIPv4, errIPv6},
-			wantOpened:  []uint8{internetQMAPMuxID, ipv6QMAPMuxID},
-			wantRemoved: []uint8{internetQMAPMuxID, ipv6QMAPMuxID},
+			wantOpened:  []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv4, qcom.WDSIPPreferenceIPv6},
+			wantRemoved: []uint8{internetQMAPMuxID},
 		},
 		{
 			name:        "single stack failure remains fatal",
 			ipType:      "ipv4",
-			failures:    map[uint8]error{internetQMAPMuxID: errIPv4},
+			failures:    map[qcom.WDSIPPreference]error{qcom.WDSIPPreferenceIPv4: errIPv4},
 			wantErrs:    []error{errIPv4},
-			wantOpened:  []uint8{internetQMAPMuxID},
+			wantOpened:  []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv4},
 			wantRemoved: []uint8{internetQMAPMuxID},
+		},
+		{
+			name:        "single stack without network configuration is fatal",
+			ipType:      "ipv4",
+			emptyInfo:   map[qcom.WDSIPPreference]bool{qcom.WDSIPPreferenceIPv4: true},
+			wantOpened:  []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv4},
+			wantRemoved: []uint8{internetQMAPMuxID},
+			wantErr:     true,
+		},
+		{
+			name:        "single stack nil session is fatal",
+			ipType:      "ipv4",
+			nilSession:  map[qcom.WDSIPPreference]bool{qcom.WDSIPPreferenceIPv4: true},
+			wantOpened:  []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv4},
+			wantRemoved: []uint8{internetQMAPMuxID},
+			wantErr:     true,
+		},
+		{
+			name:         "keeps configured family when the other runtime is empty",
+			ipType:       "ipv4v6",
+			emptyInfo:    map[qcom.WDSIPPreference]bool{qcom.WDSIPPreferenceIPv6: true},
+			wantIPType:   "ipv4",
+			wantOpened:   []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv4, qcom.WDSIPPreferenceIPv6},
+			wantSessions: 1,
+		},
+		{
+			name:         "keeps IPv4 when IPv6 runtime has the wrong family",
+			ipType:       "ipv4v6",
+			wrongFamily:  map[qcom.WDSIPPreference]bool{qcom.WDSIPPreferenceIPv6: true},
+			wantIPType:   "ipv4",
+			wantOpened:   []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv4, qcom.WDSIPPreferenceIPv6},
+			wantSessions: 1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			previousOpen := openInternetQMAPSession
-			previousConfigure := configureInternetQMAPNetwork
-			previousRemove := removeInternetQMAPMuxes
-			t.Cleanup(func() {
-				openInternetQMAPSession = previousOpen
-				configureInternetQMAPNetwork = previousConfigure
-				removeInternetQMAPMuxes = previousRemove
-			})
-
-			var opened, removed []uint8
-			openInternetQMAPSession = func(_ context.Context, _ *mmodem.Modem, cfg modemlink.QMAPConfig) (*modemlink.QMAPSession, error) {
-				opened = append(opened, cfg.MuxID)
-				if err := tt.failures[cfg.MuxID]; err != nil {
-					return nil, err
-				}
-				return &modemlink.QMAPSession{InterfaceName: qmapTestInterface(cfg.MuxID)}, nil
-			}
-			configureInternetQMAPNetwork = func(_ context.Context, _ connectionStateStore, _ string, _ Preferences, session *modemlink.QMAPSession) (trackedConnection, []string, error) {
-				prefix := netip.MustParsePrefix("2001:db8::2/64")
-				if session.InterfaceName == qmapTestInterface(internetQMAPMuxID) {
-					prefix = netip.MustParsePrefix("10.0.0.2/30")
-				}
-				return trackedConnection{interfaceName: session.InterfaceName, addresses: []netip.Prefix{prefix}}, nil, nil
-			}
-			removeInternetQMAPMuxes = func(_ *mmodem.Modem, muxIDs ...uint8) error {
-				removed = append(removed, muxIDs...)
-				return nil
-			}
-
+			var opened []qcom.WDSIPPreference
+			var removed []uint8
+			configureCalls := 0
 			connector := &Connector{
 				connections:     make(map[string]trackedConnection),
 				preferences:     make(map[string]Preferences),
 				qmapConnections: make(map[string]*qmapConnection),
 			}
+			connector.qmap.openSessions = func(_ context.Context, _ *mmodem.Modem, configs []modemlink.QMAPConfig) ([]modemlink.QMAPSessionResult, error) {
+				results := make([]modemlink.QMAPSessionResult, len(configs))
+				for i, cfg := range configs {
+					opened = append(opened, cfg.IPPreference)
+					if cfg.MuxID != internetQMAPMuxID {
+						t.Fatalf("OpenQMAPSessions() mux ID = %d, want %d", cfg.MuxID, internetQMAPMuxID)
+					}
+					if err := tt.failures[cfg.IPPreference]; err != nil {
+						results[i].Err = err
+						continue
+					}
+					if tt.nilSession[cfg.IPPreference] {
+						continue
+					}
+					info := qcom.PDNInfo{
+						LocalIPv4:      net.IPv4(10, 0, 0, 2),
+						IPv4SubnetMask: net.IPv4(255, 255, 255, 252),
+						IPv4Gateway:    net.IPv4(10, 0, 0, 1),
+					}
+					if cfg.IPPreference == qcom.WDSIPPreferenceIPv6 {
+						info = qcom.PDNInfo{
+							LocalIPv6:        net.ParseIP("2001:db8::2"),
+							IPv6Gateway:      net.ParseIP("2001:db8::1"),
+							IPv6PrefixLength: 64,
+						}
+					}
+					if tt.emptyInfo[cfg.IPPreference] {
+						info = qcom.PDNInfo{}
+					}
+					if tt.wrongFamily[cfg.IPPreference] {
+						info = qcom.PDNInfo{
+							LocalIPv4:      net.IPv4(10, 0, 0, 3),
+							IPv4SubnetMask: net.IPv4(255, 255, 255, 252),
+							IPv4Gateway:    net.IPv4(10, 0, 0, 1),
+						}
+					}
+					results[i].Session = &modemlink.QMAPSession{InterfaceName: "qmimux0", Info: info}
+				}
+				return results, nil
+			}
+			connector.qmap.configureNetwork = func(_ context.Context, _ connectionStateStore, _ string, _ Preferences, config qmapLinkConfig, _ defaultRouteOps) (trackedConnection, error) {
+				configureCalls++
+				var addresses []netip.Prefix
+				for _, network := range config.networks {
+					addresses = append(addresses, network.prefix)
+				}
+				return trackedConnection{interfaceName: config.interfaceName, addresses: addresses}, nil
+			}
+			connector.qmap.removeMuxes = func(_ *mmodem.Modem, muxIDs ...uint8) error {
+				removed = append(removed, muxIDs...)
+				return nil
+			}
+
 			connection, err := connector.connectQMAPLocked(t.Context(), &mmodem.Modem{EquipmentIdentifier: "modem-1"}, Preferences{IPType: tt.ipType})
 			for _, wantErr := range tt.wantErrs {
 				if !errors.Is(err, wantErr) {
 					t.Fatalf("connectQMAPLocked() error = %v, want %v", err, wantErr)
 				}
 			}
-			if len(tt.wantErrs) == 0 && err != nil {
+			if tt.wantErr && err == nil {
+				t.Fatal("connectQMAPLocked() error = nil, want error")
+			}
+			if !tt.wantErr && len(tt.wantErrs) == 0 && err != nil {
 				t.Fatalf("connectQMAPLocked() error = %v", err)
 			}
 			if connection != nil && connection.IPType != tt.wantIPType {
 				t.Fatalf("connectQMAPLocked() IPType = %q, want %q", connection.IPType, tt.wantIPType)
 			}
-			if !slices.Equal(opened, tt.wantOpened) {
-				t.Fatalf("opened muxes = %v, want %v", opened, tt.wantOpened)
+			slices.Sort(opened)
+			wantOpened := slices.Clone(tt.wantOpened)
+			slices.Sort(wantOpened)
+			if !slices.Equal(opened, wantOpened) {
+				t.Fatalf("opened IP preferences = %v, want %v", opened, tt.wantOpened)
 			}
 			if !slices.Equal(removed, tt.wantRemoved) {
 				t.Fatalf("removed muxes = %v, want %v", removed, tt.wantRemoved)
+			}
+			wantConfigureCalls := 1
+			if tt.wantErr || len(tt.wantErrs) > 0 {
+				wantConfigureCalls = 0
+			}
+			if configureCalls != wantConfigureCalls {
+				t.Fatalf("configure QMAP calls = %d, want %d", configureCalls, wantConfigureCalls)
+			}
+			if tt.wantSessions > 0 {
+				stored := connector.qmapConnections["modem-1"]
+				gotSessions := 0
+				if stored != nil {
+					gotSessions = len(stored.sessions)
+				}
+				if gotSessions != tt.wantSessions {
+					t.Fatalf("stored QMAP sessions = %d, want %d", gotSessions, tt.wantSessions)
+				}
 			}
 		})
 	}
 }
 
-func TestQMAPProxyLifecycle(t *testing.T) {
-	previousOpen := openInternetQMAPSession
-	previousConfigure := configureInternetQMAPNetwork
-	previousRemove := removeInternetQMAPMuxes
-	t.Cleanup(func() {
-		openInternetQMAPSession = previousOpen
-		configureInternetQMAPNetwork = previousConfigure
-		removeInternetQMAPMuxes = previousRemove
-	})
+func TestOpenQMAPFamilySessionsPassesOrderedDualStackBatch(t *testing.T) {
+	connector := &Connector{}
+	connector.qmap.openSessions = func(_ context.Context, _ *mmodem.Modem, configs []modemlink.QMAPConfig) ([]modemlink.QMAPSessionResult, error) {
+		if len(configs) != 2 {
+			t.Fatalf("OpenQMAPSessions() configs = %d, want 2", len(configs))
+		}
+		if configs[0].IPPreference != qcom.WDSIPPreferenceIPv4 || configs[1].IPPreference != qcom.WDSIPPreferenceIPv6 {
+			t.Fatalf("OpenQMAPSessions() preferences = [%v %v], want [IPv4 IPv6]", configs[0].IPPreference, configs[1].IPPreference)
+		}
+		for _, cfg := range configs {
+			if cfg.APN != "cmnet" || cfg.MuxID != internetQMAPMuxID {
+				t.Fatalf("OpenQMAPSessions() config = %+v", cfg)
+			}
+		}
+		return []modemlink.QMAPSessionResult{
+			{Session: &modemlink.QMAPSession{}},
+			{Session: &modemlink.QMAPSession{}},
+		}, nil
+	}
 
+	results, err := connector.openQMAPFamilySessions(t.Context(), &mmodem.Modem{}, "cmnet", []qcom.WDSIPPreference{
+		qcom.WDSIPPreferenceIPv4,
+		qcom.WDSIPPreferenceIPv6,
+	})
+	if err != nil {
+		t.Fatalf("openQMAPFamilySessions() error = %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("openQMAPFamilySessions() results = %d, want 2", len(results))
+	}
+}
+
+func TestOpenQMAPFamilySessionsRejectsInvalidResults(t *testing.T) {
+	wantErr := errors.New("open family")
+	tests := []struct {
+		name      string
+		opened    []modemlink.QMAPSessionResult
+		wantBatch bool
+		wantIs    error
+	}{
+		{
+			name:      "result count mismatch",
+			opened:    []modemlink.QMAPSessionResult{{Session: &modemlink.QMAPSession{}}},
+			wantBatch: true,
+		},
+		{
+			name:   "session and error",
+			opened: []modemlink.QMAPSessionResult{{Session: &modemlink.QMAPSession{}, Err: wantErr}},
+			wantIs: wantErr,
+		},
+		{
+			name:   "neither session nor error",
+			opened: []modemlink.QMAPSessionResult{{}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			connector := &Connector{}
+			connector.qmap.openSessions = func(context.Context, *mmodem.Modem, []modemlink.QMAPConfig) ([]modemlink.QMAPSessionResult, error) {
+				return tt.opened, nil
+			}
+			preferences := []qcom.WDSIPPreference{qcom.WDSIPPreferenceIPv4}
+			if tt.wantBatch {
+				preferences = append(preferences, qcom.WDSIPPreferenceIPv6)
+			}
+
+			results, err := connector.openQMAPFamilySessions(t.Context(), &mmodem.Modem{}, "internet", preferences)
+			if tt.wantBatch {
+				if err == nil || !strings.Contains(err.Error(), "returned 1 results, want 2") {
+					t.Fatalf("openQMAPFamilySessions() error = %v, want result count error", err)
+				}
+				if results != nil {
+					t.Fatalf("openQMAPFamilySessions() results = %+v, want nil", results)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("openQMAPFamilySessions() error = %v", err)
+			}
+			if len(results) != 1 || results[0].session != nil || results[0].err == nil {
+				t.Fatalf("openQMAPFamilySessions() results = %+v, want one family error", results)
+			}
+			if tt.wantIs != nil && !errors.Is(results[0].err, tt.wantIs) {
+				t.Fatalf("openQMAPFamilySessions() family error = %v, want %v", results[0].err, tt.wantIs)
+			}
+		})
+	}
+}
+
+func TestConfigureQMAPNetworkRejectsEmptyNetwork(t *testing.T) {
+	tracked, err := configureQMAPNetwork(t.Context(), nil, "modem-1", Preferences{}, qmapLinkConfig{
+		interfaceName: "qmimux0",
+	}, defaultRouteOps{})
+	if err == nil || !strings.Contains(err.Error(), "network configuration is empty") {
+		t.Fatalf("configureQMAPNetwork() error = %v, want empty network error", err)
+	}
+	if tracked.interfaceName != "" || len(tracked.addresses) != 0 || len(tracked.routes) != 0 {
+		t.Fatalf("configureQMAPNetwork() tracked = %+v, want untouched network state", tracked)
+	}
+}
+
+func TestQMAPProxyLifecycle(t *testing.T) {
 	const (
 		modemID       = "modem-1"
 		interfaceName = "qmimux0"
 	)
 	wantDNS := []string{"10.51.190.5", "10.51.190.6"}
-	openInternetQMAPSession = func(_ context.Context, _ *mmodem.Modem, cfg modemlink.QMAPConfig) (*modemlink.QMAPSession, error) {
-		return &modemlink.QMAPSession{InterfaceName: qmapTestInterface(cfg.MuxID)}, nil
-	}
-	configureInternetQMAPNetwork = func(_ context.Context, _ connectionStateStore, _ string, prefs Preferences, _ *modemlink.QMAPSession) (trackedConnection, []string, error) {
-		return trackedConnection{interfaceName: interfaceName, prefs: prefs}, slices.Clone(wantDNS), nil
-	}
-	removeInternetQMAPMuxes = func(_ *mmodem.Modem, _ ...uint8) error { return nil }
+	var removed []uint8
 
 	proxy := newProxyWithDial(ProxyConfig{
 		ListenAddress: "127.0.0.1",
@@ -217,6 +370,25 @@ func TestQMAPProxyLifecycle(t *testing.T) {
 	connector, err := NewConnector(ConnectorConfig{Proxy: proxy, State: testStore(t)})
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
+	}
+	connector.qmap = qmapOps{
+		openSessions: func(_ context.Context, _ *mmodem.Modem, _ []modemlink.QMAPConfig) ([]modemlink.QMAPSessionResult, error) {
+			return []modemlink.QMAPSessionResult{{Session: &modemlink.QMAPSession{
+				InterfaceName: "qmimux0",
+				Info: qcom.PDNInfo{
+					LocalIPv4:      net.IPv4(10, 0, 0, 2),
+					IPv4SubnetMask: net.IPv4(255, 255, 255, 252),
+					IPv4Gateway:    net.IPv4(10, 0, 0, 1),
+				},
+			}}}, nil
+		},
+		configureNetwork: func(_ context.Context, _ connectionStateStore, _ string, prefs Preferences, _ qmapLinkConfig, _ defaultRouteOps) (trackedConnection, error) {
+			return trackedConnection{interfaceName: interfaceName, prefs: prefs, dns: slices.Clone(wantDNS)}, nil
+		},
+		removeMuxes: func(_ *mmodem.Modem, muxIDs ...uint8) error {
+			removed = append(removed, muxIDs...)
+			return nil
+		},
 	}
 	ctx := t.Context()
 	modem := &mmodem.Modem{EquipmentIdentifier: modemID}
@@ -255,33 +427,35 @@ func TestQMAPProxyLifecycle(t *testing.T) {
 	if found {
 		t.Fatal("proxy state still exists after QMAP disconnect")
 	}
+	if !slices.Equal(removed, []uint8{internetQMAPMuxID}) {
+		t.Fatalf("removed muxes after disconnect = %v, want %v", removed, []uint8{internetQMAPMuxID})
+	}
 }
 
 func TestConnectQMAPLockedRollsBackWhenProxyRegistrationFails(t *testing.T) {
-	previousOpen := openInternetQMAPSession
-	previousConfigure := configureInternetQMAPNetwork
-	previousRemove := removeInternetQMAPMuxes
-	t.Cleanup(func() {
-		openInternetQMAPSession = previousOpen
-		configureInternetQMAPNetwork = previousConfigure
-		removeInternetQMAPMuxes = previousRemove
-	})
-
 	var removed []uint8
-	openInternetQMAPSession = func(_ context.Context, _ *mmodem.Modem, cfg modemlink.QMAPConfig) (*modemlink.QMAPSession, error) {
-		return &modemlink.QMAPSession{InterfaceName: qmapTestInterface(cfg.MuxID)}, nil
-	}
-	configureInternetQMAPNetwork = func(_ context.Context, _ connectionStateStore, _ string, prefs Preferences, session *modemlink.QMAPSession) (trackedConnection, []string, error) {
-		return trackedConnection{interfaceName: session.InterfaceName, prefs: prefs}, nil, nil
-	}
-	removeInternetQMAPMuxes = func(_ *mmodem.Modem, muxIDs ...uint8) error {
-		removed = append(removed, muxIDs...)
-		return nil
-	}
-
 	connector, err := NewConnector(ConnectorConfig{State: testStore(t)})
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
+	}
+	connector.qmap = qmapOps{
+		openSessions: func(_ context.Context, _ *mmodem.Modem, _ []modemlink.QMAPConfig) ([]modemlink.QMAPSessionResult, error) {
+			return []modemlink.QMAPSessionResult{{Session: &modemlink.QMAPSession{
+				InterfaceName: "qmimux0",
+				Info: qcom.PDNInfo{
+					LocalIPv4:      net.IPv4(10, 0, 0, 2),
+					IPv4SubnetMask: net.IPv4(255, 255, 255, 252),
+					IPv4Gateway:    net.IPv4(10, 0, 0, 1),
+				},
+			}}}, nil
+		},
+		configureNetwork: func(_ context.Context, _ connectionStateStore, _ string, prefs Preferences, config qmapLinkConfig, _ defaultRouteOps) (trackedConnection, error) {
+			return trackedConnection{interfaceName: config.interfaceName, prefs: prefs}, nil
+		},
+		removeMuxes: func(_ *mmodem.Modem, muxIDs ...uint8) error {
+			removed = append(removed, muxIDs...)
+			return nil
+		},
 	}
 	modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
 	connection, err := connector.connectQMAPLocked(t.Context(), modem, Preferences{IPType: "ipv4", ProxyEnabled: true})
@@ -314,14 +488,8 @@ func TestCleanupStaleQMAPInternetRestoresRoutesAndRemovesInternetMuxes(t *testin
 		t.Fatalf("saveRouteStateForModem() error = %v", err)
 	}
 
-	previousOps := netlinkDefaultRouteOps
-	previousRemove := removeInternetQMAPMuxes
-	t.Cleanup(func() {
-		netlinkDefaultRouteOps = previousOps
-		removeInternetQMAPMuxes = previousRemove
-	})
 	var added, deleted []netlink.DefaultRoute
-	netlinkDefaultRouteOps = defaultRouteOps{
+	routeOps := defaultRouteOps{
 		defaultRoutes: func() ([]netlink.DefaultRoute, error) {
 			return []netlink.DefaultRoute{preferred, replacement}, nil
 		},
@@ -335,12 +503,11 @@ func TestCleanupStaleQMAPInternetRestoresRoutesAndRemovesInternetMuxes(t *testin
 		},
 	}
 	var removed []uint8
-	removeInternetQMAPMuxes = func(_ *mmodem.Modem, muxIDs ...uint8) error {
+	connector := &Connector{persistence: state, routes: routeOps}
+	connector.qmap.removeMuxes = func(_ *mmodem.Modem, muxIDs ...uint8) error {
 		removed = append(removed, muxIDs...)
 		return nil
 	}
-
-	connector := &Connector{persistence: state}
 	if err := connector.cleanupStaleQMAPInternet(t.Context(), &mmodem.Modem{EquipmentIdentifier: "modem-1"}); err != nil {
 		t.Fatalf("cleanupStaleQMAPInternet() error = %v", err)
 	}
@@ -350,31 +517,124 @@ func TestCleanupStaleQMAPInternetRestoresRoutesAndRemovesInternetMuxes(t *testin
 	if !slices.Equal(deleted, []netlink.DefaultRoute{preferred, replacement}) {
 		t.Fatalf("deleted routes = %+v, want %+v", deleted, []netlink.DefaultRoute{preferred, replacement})
 	}
-	if !slices.Equal(removed, []uint8{internetQMAPMuxID, ipv6QMAPMuxID}) {
-		t.Fatalf("removed muxes = %v, want %v", removed, []uint8{internetQMAPMuxID, ipv6QMAPMuxID})
+	if !slices.Equal(removed, []uint8{internetQMAPMuxID}) {
+		t.Fatalf("removed muxes = %v, want %v", removed, []uint8{internetQMAPMuxID})
 	}
-}
-
-func qmapTestInterface(muxID uint8) string {
-	if muxID == internetQMAPMuxID {
-		return "qmimux0"
-	}
-	return "qmimux2"
 }
 
 func TestQMAPNetworks(t *testing.T) {
 	tests := []struct {
-		name string
-		info qcom.PDNInfo
-		want int
+		name    string
+		info    qcom.PDNInfo
+		want    int
+		wantErr bool
 	}{
 		{name: "ipv4", info: qcom.PDNInfo{LocalIPv4: net.IPv4(10, 0, 0, 2), IPv4SubnetMask: net.IPv4(255, 255, 255, 252), IPv4Gateway: net.IPv4(10, 0, 0, 1)}, want: 1},
 		{name: "dual stack", info: qcom.PDNInfo{LocalIPv4: net.IPv4(10, 0, 0, 2), IPv4SubnetMask: net.IPv4(255, 255, 255, 252), IPv4Gateway: net.IPv4(10, 0, 0, 1), LocalIPv6: net.ParseIP("2001:db8::2"), IPv6Gateway: net.ParseIP("2001:db8::1"), IPv6PrefixLength: 64}, want: 2},
+		{name: "missing IPv4 mask", info: qcom.PDNInfo{LocalIPv4: net.IPv4(10, 0, 0, 2), IPv4Gateway: net.IPv4(10, 0, 0, 1)}, wantErr: true},
+		{name: "non-contiguous IPv4 mask", info: qcom.PDNInfo{LocalIPv4: net.IPv4(10, 0, 0, 2), IPv4SubnetMask: net.IPv4(255, 0, 255, 0), IPv4Gateway: net.IPv4(10, 0, 0, 1)}, wantErr: true},
+		{name: "zero-length IPv4 prefix", info: qcom.PDNInfo{LocalIPv4: net.IPv4(10, 0, 0, 2), IPv4SubnetMask: net.IPv4zero, IPv4Gateway: net.IPv4(10, 0, 0, 1)}, wantErr: true},
+		{name: "missing IPv4 gateway", info: qcom.PDNInfo{LocalIPv4: net.IPv4(10, 0, 0, 2), IPv4SubnetMask: net.IPv4(255, 255, 255, 252)}, wantErr: true},
+		{name: "unspecified IPv4 local address", info: qcom.PDNInfo{LocalIPv4: net.IPv4zero, IPv4SubnetMask: net.IPv4(255, 255, 255, 252), IPv4Gateway: net.IPv4(10, 0, 0, 1)}, wantErr: true},
+		{name: "unspecified IPv4 gateway", info: qcom.PDNInfo{LocalIPv4: net.IPv4(10, 0, 0, 2), IPv4SubnetMask: net.IPv4(255, 255, 255, 252), IPv4Gateway: net.IPv4zero}, wantErr: true},
+		{name: "IPv4 gateway has wrong family", info: qcom.PDNInfo{LocalIPv4: net.IPv4(10, 0, 0, 2), IPv4SubnetMask: net.IPv4(255, 255, 255, 252), IPv4Gateway: net.ParseIP("2001:db8::1")}, wantErr: true},
+		{name: "missing IPv6 gateway", info: qcom.PDNInfo{LocalIPv6: net.ParseIP("2001:db8::2"), IPv6PrefixLength: 64}, wantErr: true},
+		{name: "unspecified IPv6 local address", info: qcom.PDNInfo{LocalIPv6: net.IPv6unspecified, IPv6Gateway: net.ParseIP("2001:db8::1"), IPv6PrefixLength: 64}, wantErr: true},
+		{name: "unspecified IPv6 gateway", info: qcom.PDNInfo{LocalIPv6: net.ParseIP("2001:db8::2"), IPv6Gateway: net.IPv6unspecified, IPv6PrefixLength: 64}, wantErr: true},
+		{name: "IPv6 gateway has wrong family", info: qcom.PDNInfo{LocalIPv6: net.ParseIP("2001:db8::2"), IPv6Gateway: net.IPv4(10, 0, 0, 1), IPv6PrefixLength: 64}, wantErr: true},
+		{name: "zero-length IPv6 prefix", info: qcom.PDNInfo{LocalIPv6: net.ParseIP("2001:db8::2"), IPv6Gateway: net.ParseIP("2001:db8::1")}, wantErr: true},
+		{name: "IPv6 prefix exceeds address size", info: qcom.PDNInfo{LocalIPv6: net.ParseIP("2001:db8::2"), IPv6Gateway: net.ParseIP("2001:db8::1"), IPv6PrefixLength: 129}, wantErr: true},
+		{name: "IPv4-mapped local IPv6", info: qcom.PDNInfo{LocalIPv6: net.ParseIP("::ffff:10.0.0.2"), IPv6Gateway: net.ParseIP("2001:db8::1"), IPv6PrefixLength: 64}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := qmapNetworks(tt.info); len(got) != tt.want {
+			got, err := qmapNetworks(tt.info)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("qmapNetworks() error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if len(got) != tt.want {
 				t.Fatalf("qmapNetworks() len = %d, want %d", len(got), tt.want)
+			}
+		})
+	}
+}
+
+func TestCombineQMAPSessions(t *testing.T) {
+	tests := []struct {
+		name     string
+		sessions []*modemlink.QMAPSession
+		wantErr  bool
+	}{
+		{
+			name: "dual stack on one mux",
+			sessions: []*modemlink.QMAPSession{
+				{
+					InterfaceName: "qmimux0",
+					Info: qcom.PDNInfo{
+						LocalIPv4:       net.IPv4(10, 0, 0, 2),
+						IPv4SubnetMask:  net.IPv4(255, 255, 255, 252),
+						IPv4Gateway:     net.IPv4(10, 0, 0, 1),
+						DNS:             []net.IP{net.IPv4(1, 1, 1, 1)},
+						MTU:             1500,
+						PacketDataReady: true,
+					},
+				},
+				{
+					InterfaceName: "qmimux0",
+					Info: qcom.PDNInfo{
+						LocalIPv6:        net.ParseIP("2001:db8::2"),
+						IPv6Gateway:      net.ParseIP("2001:db8::1"),
+						IPv6PrefixLength: 64,
+						DNS: []net.IP{
+							net.IPv4zero,
+							net.IPv4(1, 1, 1, 1),
+							net.IPv6unspecified,
+							net.ParseIP("2001:4860:4860::8888"),
+						},
+						MTU: 1420,
+					},
+				},
+			},
+		},
+		{
+			name: "different mux interfaces",
+			sessions: []*modemlink.QMAPSession{
+				{InterfaceName: "qmimux0"},
+				{InterfaceName: "qmimux2"},
+			},
+			wantErr: true,
+		},
+		{name: "empty session interface", sessions: []*modemlink.QMAPSession{{InterfaceName: "  "}}, wantErr: true},
+		{name: "empty network configuration", sessions: []*modemlink.QMAPSession{{InterfaceName: "qmimux0"}}, wantErr: true},
+		{name: "no sessions", wantErr: true},
+		{name: "nil session", sessions: []*modemlink.QMAPSession{nil}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := combineQMAPSessions(tt.sessions)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("combineQMAPSessions() error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if got.interfaceName != "qmimux0" {
+				t.Fatalf("combineQMAPSessions() interface = %q, want qmimux0", got.interfaceName)
+			}
+			wantNetworks := []qmapNetwork{
+				{prefix: netip.MustParsePrefix("10.0.0.2/30"), gateway: netip.MustParseAddr("10.0.0.1")},
+				{prefix: netip.MustParsePrefix("2001:db8::2/64"), gateway: netip.MustParseAddr("2001:db8::1")},
+			}
+			if !slices.Equal(got.networks, wantNetworks) {
+				t.Fatalf("combineQMAPSessions() networks = %v, want %v", got.networks, wantNetworks)
+			}
+			if got.mtu != 1420 {
+				t.Fatalf("combineQMAPSessions() MTU = %d, want 1420", got.mtu)
+			}
+			wantDNS := []string{"1.1.1.1", "2001:4860:4860::8888"}
+			if !slices.Equal(got.dns, wantDNS) {
+				t.Fatalf("combineQMAPSessions() DNS = %v, want %v", got.dns, wantDNS)
 			}
 		})
 	}

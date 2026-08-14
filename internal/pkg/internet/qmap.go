@@ -20,24 +20,59 @@ import (
 const (
 	internetQMAPMuxID = 1
 	imsQMAPMuxID      = 2
-	ipv6QMAPMuxID     = 3
 )
 
 type qmapConnection struct {
 	modem      *mmodem.Modem
 	generation uint64
 	sessions   []*modemlink.QMAPSession
-	tracked    []trackedConnection
-	muxIDs     []uint8
-	prefs      Preferences
-	dns        []string
+	tracked    trackedConnection
 }
 
-var (
-	openInternetQMAPSession      = modemlink.OpenQMAPSession
-	configureInternetQMAPNetwork = configureQMAPNetwork
-	removeInternetQMAPMuxes      = modemlink.RemoveQMAPMuxes
-)
+type qmapSessionResult struct {
+	preference qcom.WDSIPPreference
+	session    *modemlink.QMAPSession
+	err        error
+}
+
+type qmapOps struct {
+	openSessions     func(context.Context, *mmodem.Modem, []modemlink.QMAPConfig) ([]modemlink.QMAPSessionResult, error)
+	configureNetwork func(context.Context, connectionStateStore, string, Preferences, qmapLinkConfig, defaultRouteOps) (trackedConnection, error)
+	removeMuxes      func(*mmodem.Modem, ...uint8) error
+}
+
+func defaultQMAPOps() qmapOps {
+	return qmapOps{
+		openSessions:     modemlink.OpenQMAPSessions,
+		configureNetwork: configureQMAPNetwork,
+		removeMuxes:      modemlink.RemoveQMAPMuxes,
+	}
+}
+
+func (o qmapOps) withDefaults() qmapOps {
+	defaults := defaultQMAPOps()
+	if o.openSessions == nil {
+		o.openSessions = defaults.openSessions
+	}
+	if o.configureNetwork == nil {
+		o.configureNetwork = defaults.configureNetwork
+	}
+	if o.removeMuxes == nil {
+		o.removeMuxes = defaults.removeMuxes
+	}
+	return o
+}
+
+func (c *Connector) qmapOperationSet() qmapOps {
+	if c == nil {
+		return defaultQMAPOps()
+	}
+	return c.qmap.withDefaults()
+}
+
+func (c *Connector) removeQMAPMuxes(modem *mmodem.Modem, muxIDs ...uint8) error {
+	return c.qmapOperationSet().removeMuxes(modem, muxIDs...)
+}
 
 func (c *Connector) qmapConnection(modem *mmodem.Modem) *qmapConnection {
 	if modem == nil {
@@ -98,10 +133,10 @@ func (c *Connector) SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, ena
 		return nil
 	}
 	modemID := modem.EquipmentIdentifier
-	defer c.lockModem(modemID)()
+	defer c.lockRouteTransaction(modemID)()
 	if !enabled {
 		if prefs, ok := c.qmapPendingNormalFor(modemID); ok {
-			if err := removeManagedQMAPMuxes(modem); err != nil {
+			if err := c.removeManagedQMAPMuxes(modem); err != nil {
 				return err
 			}
 			if err := modemlink.RestoreNonQMAPDataFormat(ctx, modem); err != nil {
@@ -147,7 +182,7 @@ func (c *Connector) SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, ena
 
 	connection := c.qmapConnection(modem)
 	if connection == nil {
-		if err := removeManagedQMAPMuxes(modem); err != nil {
+		if err := c.removeManagedQMAPMuxes(modem); err != nil {
 			return err
 		}
 		if err := modemlink.RestoreNonQMAPDataFormat(ctx, modem); err != nil {
@@ -164,11 +199,11 @@ func (c *Connector) SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, ena
 		c.setQMAPEnabled(modemID, false)
 		return nil
 	}
-	prefs := connection.prefs
+	prefs := connection.tracked.prefs
 	if err := c.disconnectQMAPLocked(ctx, modem); err != nil {
 		return fmt.Errorf("disconnect QMAP Internet before restoring bearer: %w", err)
 	}
-	if err := removeManagedQMAPMuxes(modem); err != nil {
+	if err := c.removeManagedQMAPMuxes(modem); err != nil {
 		c.setQMAPEnabled(modemID, true)
 		_, restoreErr := c.connectQMAPLocked(ctx, modem, prefs)
 		return errors.Join(fmt.Errorf("remove QMAP mux interfaces: %w", err), restoreErr)
@@ -197,8 +232,8 @@ func (c *Connector) SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, ena
 	return nil
 }
 
-func removeManagedQMAPMuxes(modem *mmodem.Modem) error {
-	return removeInternetQMAPMuxes(modem, internetQMAPMuxID, imsQMAPMuxID, ipv6QMAPMuxID)
+func (c *Connector) removeManagedQMAPMuxes(modem *mmodem.Modem) error {
+	return c.removeQMAPMuxes(modem, internetQMAPMuxID, imsQMAPMuxID)
 }
 
 func (c *Connector) cleanupStaleQMAPInternet(ctx context.Context, modem *mmodem.Modem) error {
@@ -208,8 +243,8 @@ func (c *Connector) cleanupStaleQMAPInternet(ctx context.Context, modem *mmodem.
 	}
 	routeErr := restoreStaleDefaultRouteStatesWithStore(ctx, c.persistence, routeStateRestoreTarget{
 		modemID: modemID,
-	}, netlinkDefaultRouteOps)
-	muxErr := removeInternetQMAPMuxes(modem, internetQMAPMuxID, ipv6QMAPMuxID)
+	}, c.routeOperationSet())
+	muxErr := c.removeQMAPMuxes(modem, internetQMAPMuxID)
 	return errors.Join(routeErr, muxErr)
 }
 
@@ -218,14 +253,6 @@ func (c *Connector) qmapMigrationPreferences(ctx context.Context, modem internet
 		return tracked.prefs
 	}
 	return recoverPreferences(ctx, bearer, c.preferenceWithAlwaysOn(ctx, modem))
-}
-
-func (c *Connector) connectQMAP(ctx context.Context, modem *mmodem.Modem, prefs Preferences) (*Connection, error) {
-	if modem == nil {
-		return nil, ErrModemRequired
-	}
-	defer c.lockModem(modem.EquipmentIdentifier)()
-	return c.connectQMAPLocked(ctx, modem, prefs)
 }
 
 func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, prefs Preferences) (*Connection, error) {
@@ -243,86 +270,116 @@ func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, 
 	if err := c.disconnectQMAPLocked(ctx, modem); err != nil {
 		return nil, err
 	}
-	legs, err := qmapDataLegs(prefs.IPType)
+	preferences, err := qmapIPPreferences(prefs.IPType)
 	if err != nil {
 		return nil, err
 	}
-	connection := &qmapConnection{modem: modem, generation: modem.Generation(), prefs: prefs}
-	var legErrors error
-	for _, leg := range legs {
-		session, err := openInternetQMAPSession(ctx, modem, modemlink.QMAPConfig{
-			APN: prefs.APN, IPPreference: leg.preference, MuxID: leg.muxID,
-		})
-		if err != nil {
-			legErrors = errors.Join(legErrors,
-				fmt.Errorf("open QMAP mux %d for IP preference %d: %w", leg.muxID, leg.preference, err),
-				removeInternetQMAPMuxes(modem, leg.muxID),
+	connection := &qmapConnection{modem: modem, generation: modem.Generation()}
+	var combined qmapLinkConfig
+	var familyErrors error
+	familyResults, err := c.openQMAPFamilySessions(ctx, modem, prefs.APN, preferences)
+	if err != nil {
+		return nil, errors.Join(
+			fmt.Errorf("open QMAP mux %d sessions: %w", internetQMAPMuxID, err),
+			c.removeQMAPMuxes(modem, internetQMAPMuxID),
+		)
+	}
+	for _, result := range familyResults {
+		preference := result.preference
+		session := result.session
+		if result.err != nil {
+			familyErrors = errors.Join(familyErrors,
+				fmt.Errorf("open QMAP mux %d for IP preference %d: %w", internetQMAPMuxID, preference, result.err),
 			)
 			continue
 		}
-		tracked, dns, err := configureInternetQMAPNetwork(ctx, c.persistence, modem.EquipmentIdentifier, prefs, session)
-		if err != nil {
-			legErrors = errors.Join(legErrors,
-				fmt.Errorf("configure QMAP mux %d for IP preference %d: %w", leg.muxID, leg.preference, err),
-				session.Close(),
-				removeInternetQMAPMuxes(modem, leg.muxID),
+		if session == nil {
+			familyErrors = errors.Join(familyErrors,
+				fmt.Errorf("open QMAP mux %d for IP preference %d: session is nil", internetQMAPMuxID, preference),
 			)
 			continue
 		}
-		tracked.modemGeneration = modem.Generation()
-		connection.sessions = append(connection.sessions, session)
-		connection.tracked = append(connection.tracked, tracked)
-		connection.muxIDs = append(connection.muxIDs, leg.muxID)
-		if err := c.syncDefaultRouteTakeover(ctx, modem.EquipmentIdentifier, &connection.tracked[len(connection.tracked)-1]); err != nil {
-			return nil, errors.Join(
-				fmt.Errorf("sync QMAP default route takeover: %w", err),
-				connection.cleanup(ctx, c),
-				connection.close(),
-				removeInternetQMAPMuxes(modem, connection.muxIDs...),
-			)
+		candidateSessions := append(slices.Clone(connection.sessions), session)
+		candidateConfig := qmapLinkConfig{}
+		sessionErr := validateQMAPSessionFamily(preference, session.Info)
+		if sessionErr == nil {
+			candidateConfig, sessionErr = combineQMAPSessions(candidateSessions)
 		}
-		for _, address := range dns {
-			if !slices.Contains(connection.dns, address) {
-				connection.dns = append(connection.dns, address)
+		if sessionErr != nil {
+			familyErr := fmt.Errorf("validate QMAP mux %d for IP preference %d: %w", internetQMAPMuxID, preference, sessionErr)
+			if closeErr := session.Close(); closeErr != nil {
+				return nil, errors.Join(
+					familyErr,
+					fmt.Errorf("close rejected QMAP session: %w", closeErr),
+					connection.close(),
+					c.removeQMAPMuxes(modem, internetQMAPMuxID),
+				)
 			}
+			familyErrors = errors.Join(familyErrors, familyErr)
+			continue
 		}
+		connection.sessions = candidateSessions
+		combined = candidateConfig
 	}
 	if len(connection.sessions) == 0 {
-		if legErrors == nil {
-			legErrors = errors.New("QMAP Internet has no available data leg")
+		if familyErrors == nil {
+			familyErrors = errors.New("QMAP Internet has no available data family")
 		}
-		return nil, legErrors
+		return nil, errors.Join(
+			familyErrors,
+			connection.close(),
+			c.removeQMAPMuxes(modem, internetQMAPMuxID),
+		)
 	}
-	if legErrors != nil {
-		slog.Warn("QMAP Internet connected with unavailable data leg", "imei", modem.EquipmentIdentifier, "error", legErrors)
+	tracked, err := c.qmapOperationSet().configureNetwork(ctx, c.persistence, modem.EquipmentIdentifier, prefs, combined, c.routeOperationSet())
+	if err != nil {
+		return nil, errors.Join(
+			fmt.Errorf("configure QMAP mux %d: %w", internetQMAPMuxID, err),
+			connection.close(),
+			c.removeQMAPMuxes(modem, internetQMAPMuxID),
+		)
+	}
+	tracked.modemGeneration = modem.Generation()
+	tracked.profileID = profileID
+	connection.tracked = tracked
+	if err := c.syncDefaultRouteTakeover(ctx, modem.EquipmentIdentifier, &connection.tracked); err != nil {
+		return nil, errors.Join(
+			fmt.Errorf("sync QMAP default route takeover: %w", err),
+			connection.cleanup(ctx, c),
+			connection.close(),
+			c.removeQMAPMuxes(modem, internetQMAPMuxID),
+		)
+	}
+	if familyErrors != nil {
+		slog.Warn("QMAP Internet connected with unavailable IP family", "imei", modem.EquipmentIdentifier, "error", familyErrors)
 	}
 	if prefs.ProxyEnabled {
 		if err := c.applyProxyPreference(
 			ctx,
 			modem.EquipmentIdentifier,
-			qmapPrimaryInterface(connection),
-			connection.dns,
+			connection.tracked.interfaceName,
+			connection.tracked.dns,
 			true,
 		); err != nil {
 			return nil, errors.Join(
 				fmt.Errorf("configure QMAP proxy: %w", err),
 				connection.cleanup(ctx, c),
 				connection.close(),
-				removeInternetQMAPMuxes(modem, connection.muxIDs...),
+				c.removeQMAPMuxes(modem, internetQMAPMuxID),
 			)
 		}
 	}
 	if err := c.syncAlwaysOnState(ctx, profileID, prefs); err != nil {
 		var proxyErr error
 		if prefs.ProxyEnabled {
-			proxyErr = c.cleanupProxy(ctx, modem.EquipmentIdentifier, qmapPrimaryInterface(connection))
+			proxyErr = c.cleanupProxy(ctx, modem.EquipmentIdentifier, connection.tracked.interfaceName)
 		}
 		return nil, errors.Join(
 			fmt.Errorf("sync QMAP always on state: %w", err),
 			proxyErr,
 			connection.cleanup(ctx, c),
 			connection.close(),
-			removeInternetQMAPMuxes(modem, connection.muxIDs...),
+			c.removeQMAPMuxes(modem, internetQMAPMuxID),
 		)
 	}
 	c.mu.Lock()
@@ -330,14 +387,6 @@ func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, 
 	c.preferences[modem.EquipmentIdentifier] = prefs
 	c.mu.Unlock()
 	return c.qmapConnectionResponse(modem.EquipmentIdentifier, connection), nil
-}
-
-func (c *Connector) disconnectQMAP(ctx context.Context, modem *mmodem.Modem) error {
-	if modem == nil {
-		return ErrModemRequired
-	}
-	defer c.lockModem(modem.EquipmentIdentifier)()
-	return c.disconnectQMAPLocked(ctx, modem)
 }
 
 func (c *Connector) disconnectQMAPLocked(ctx context.Context, modem *mmodem.Modem) error {
@@ -349,10 +398,58 @@ func (c *Connector) disconnectQMAPLocked(ctx context.Context, modem *mmodem.Mode
 		return nil
 	}
 	var proxyErr error
-	if connection.prefs.ProxyEnabled {
-		proxyErr = c.cleanupProxy(ctx, modem.EquipmentIdentifier, qmapPrimaryInterface(connection))
+	if connection.tracked.prefs.ProxyEnabled {
+		proxyErr = c.cleanupProxy(ctx, modem.EquipmentIdentifier, connection.tracked.interfaceName)
 	}
-	return errors.Join(proxyErr, connection.cleanup(ctx, c), connection.close())
+	cleanupErr := connection.cleanup(ctx, c)
+	closeErr := connection.close()
+	muxErr := c.removeQMAPMuxes(modem, internetQMAPMuxID)
+	return errors.Join(proxyErr, cleanupErr, closeErr, muxErr)
+}
+
+func (c *Connector) openQMAPFamilySessions(
+	ctx context.Context,
+	modem *mmodem.Modem,
+	apn string,
+	preferences []qcom.WDSIPPreference,
+) ([]qmapSessionResult, error) {
+	results := make([]qmapSessionResult, len(preferences))
+	configs := make([]modemlink.QMAPConfig, len(preferences))
+	for i, preference := range preferences {
+		results[i].preference = preference
+		configs[i] = modemlink.QMAPConfig{APN: apn, IPPreference: preference, MuxID: internetQMAPMuxID}
+	}
+	opened, err := c.qmapOperationSet().openSessions(ctx, modem, configs)
+	if err != nil {
+		return nil, err
+	}
+	if len(opened) != len(results) {
+		var closeErr error
+		for _, result := range opened {
+			if result.Session != nil {
+				closeErr = errors.Join(closeErr, result.Session.Close())
+			}
+		}
+		return nil, errors.Join(
+			fmt.Errorf("open QMAP family sessions returned %d results, want %d", len(opened), len(results)),
+			closeErr,
+		)
+	}
+	for i, result := range opened {
+		switch {
+		case result.Session != nil && result.Err != nil:
+			results[i].err = errors.Join(
+				fmt.Errorf("open QMAP family session %d returned both session and error: %w", i, result.Err),
+				result.Session.Close(),
+			)
+		case result.Session == nil && result.Err == nil:
+			results[i].err = fmt.Errorf("open QMAP family session %d returned neither session nor error", i)
+		default:
+			results[i].session = result.Session
+			results[i].err = result.Err
+		}
+	}
+	return results, nil
 }
 
 func (c *qmapConnection) close() error {
@@ -365,52 +462,62 @@ func (c *qmapConnection) close() error {
 }
 
 func (c *qmapConnection) cleanup(ctx context.Context, connector *Connector) error {
-	var result error
-	for i := len(c.tracked) - 1; i >= 0; i-- {
-		tracked := c.tracked[i]
-		err := cleanupApplied(ctx, connector.persistence, tracked)
-		if err == nil {
-			err = connector.syncCleanedUpDefaultRouteState(ctx, tracked)
-		}
-		result = errors.Join(result, err)
+	tracked := c.tracked
+	c.tracked = trackedConnection{}
+	if strings.TrimSpace(tracked.interfaceName) == "" {
+		return nil
 	}
-	c.tracked = nil
-	return result
+	if err := cleanupAppliedWithRouteOps(ctx, connector.persistence, tracked, connector.routeOperationSet()); err != nil {
+		return err
+	}
+	return connector.syncCleanedUpDefaultRouteState(ctx, tracked)
 }
 
 func (c *qmapConnection) response() *Connection {
+	prefs := c.tracked.prefs
 	ipType := qmapActualIPType(c.tracked)
 	if ipType == "" {
-		ipType = c.prefs.IPType
+		ipType = prefs.IPType
 	}
 	response := &Connection{
-		Status: StatusConnected, APN: c.prefs.APN, IPType: ipType,
-		DefaultRoute: c.prefs.DefaultRoute, ProxyEnabled: c.prefs.ProxyEnabled,
-		AlwaysOn: c.prefs.AlwaysOn, DNS: append([]string(nil), c.dns...),
+		Status: StatusConnected, APN: prefs.APN, IPType: ipType,
+		DefaultRoute: prefs.DefaultRoute, ProxyEnabled: prefs.ProxyEnabled,
+		AlwaysOn: prefs.AlwaysOn, DNS: slices.Clone(c.tracked.dns),
+		InterfaceName: c.tracked.interfaceName, RouteMetric: c.tracked.routeMetric,
 	}
-	for _, tracked := range c.tracked {
-		if response.InterfaceName == "" {
-			response.InterfaceName = tracked.interfaceName
-			response.RouteMetric = tracked.routeMetric
-		}
-		for _, prefix := range tracked.addresses {
-			if prefix.Addr().Is4() {
-				response.IPv4Addresses = append(response.IPv4Addresses, prefix.String())
-			} else {
-				response.IPv6Addresses = append(response.IPv6Addresses, prefix.String())
-			}
+	for _, prefix := range c.tracked.addresses {
+		if prefix.Addr().Is4() {
+			response.IPv4Addresses = append(response.IPv4Addresses, prefix.String())
+		} else {
+			response.IPv6Addresses = append(response.IPv6Addresses, prefix.String())
 		}
 	}
 	return response
 }
 
-func qmapActualIPType(tracked []trackedConnection) string {
-	var ipv4, ipv6 bool
-	for _, connection := range tracked {
-		for _, prefix := range connection.addresses {
-			ipv4 = ipv4 || prefix.Addr().Is4()
-			ipv6 = ipv6 || prefix.Addr().Is6()
+func validateQMAPSessionFamily(preference qcom.WDSIPPreference, info qcom.PDNInfo) error {
+	hasIPv4 := len(info.LocalIPv4) > 0
+	hasIPv6 := len(info.LocalIPv6) > 0
+	switch preference {
+	case qcom.WDSIPPreferenceIPv4:
+		if !hasIPv4 || hasIPv6 {
+			return fmt.Errorf("IPv4 session returned IPv4=%t IPv6=%t", hasIPv4, hasIPv6)
 		}
+	case qcom.WDSIPPreferenceIPv6:
+		if hasIPv4 || !hasIPv6 {
+			return fmt.Errorf("IPv6 session returned IPv4=%t IPv6=%t", hasIPv4, hasIPv6)
+		}
+	default:
+		return fmt.Errorf("unsupported QMAP IP preference %d", preference)
+	}
+	return nil
+}
+
+func qmapActualIPType(tracked trackedConnection) string {
+	var ipv4, ipv6 bool
+	for _, prefix := range tracked.addresses {
+		ipv4 = ipv4 || prefix.Addr().Is4()
+		ipv6 = ipv6 || prefix.Addr().Is6()
 	}
 	switch {
 	case ipv4 && ipv6:
@@ -424,33 +531,42 @@ func qmapActualIPType(tracked []trackedConnection) string {
 	}
 }
 
-func configureQMAPNetwork(ctx context.Context, state connectionStateStore, modemID string, prefs Preferences, session *modemlink.QMAPSession) (tracked trackedConnection, dns []string, err error) {
-	tracked = trackedConnection{prefs: prefs, routeMetric: routeMetric(prefs.DefaultRoute)}
-	if session == nil {
-		return tracked, nil, errors.New("QMAP session is required")
+type qmapLinkConfig struct {
+	interfaceName string
+	networks      []qmapNetwork
+	dns           []string
+	mtu           uint32
+}
+
+func configureQMAPNetwork(ctx context.Context, state connectionStateStore, modemID string, prefs Preferences, config qmapLinkConfig, routeOps defaultRouteOps) (tracked trackedConnection, err error) {
+	routeOps = routeOps.withDefaults()
+	tracked = trackedConnection{prefs: prefs, dns: slices.Clone(config.dns), routeMetric: routeMetric(prefs.DefaultRoute)}
+	if strings.TrimSpace(config.interfaceName) == "" {
+		return tracked, errors.New("QMAP interface is required")
 	}
-	tracked.interfaceName = session.InterfaceName
+	if len(config.networks) == 0 {
+		return tracked, errors.New("QMAP network configuration is empty")
+	}
+	tracked.interfaceName = config.interfaceName
 	if err := netlink.DisableIPv6Autoconfiguration(tracked.interfaceName); err != nil {
-		return tracked, nil, err
+		return tracked, err
 	}
 	if err := errors.Join(
 		netlink.FlushDefaultRoutes(tracked.interfaceName),
 		netlink.FlushGlobalAddresses(tracked.interfaceName),
 	); err != nil {
-		return tracked, nil, err
+		return tracked, err
 	}
 	if err := netlink.SetUp(tracked.interfaceName); err != nil {
-		return tracked, nil, err
+		return tracked, err
 	}
-	info := session.Info
-	if info.MTU > 0 {
-		if err := netlink.SetMTU(tracked.interfaceName, info.MTU); err != nil {
-			return tracked, dns, err
+	if config.mtu > 0 {
+		if err := netlink.SetMTU(tracked.interfaceName, config.mtu); err != nil {
+			return tracked, err
 		}
 	}
-	networks := qmapNetworks(info)
-	routes := make([]netlink.DefaultRoute, 0, len(networks))
-	for _, network := range networks {
+	routes := make([]netlink.DefaultRoute, 0, len(config.networks))
+	for _, network := range config.networks {
 		route := netlink.DefaultRoute{Interface: tracked.interfaceName, Source: network.prefix.Addr(), Gateway: network.gateway, Metric: tracked.routeMetric}
 		if network.prefix.Addr().Is4() {
 			route.Family = netlink.FamilyIPv4
@@ -460,9 +576,9 @@ func configureQMAPNetwork(ctx context.Context, state connectionStateStore, modem
 		routes = append(routes, route)
 	}
 	if !prefs.DefaultRoute && len(routes) > 0 {
-		current, err := netlink.DefaultRoutes()
+		current, err := routeOps.defaultRoutes()
 		if err != nil {
-			return tracked, dns, fmt.Errorf("list default routes: %w", err)
+			return tracked, fmt.Errorf("list default routes: %w", err)
 		}
 		tracked.routeMetric = secondaryRouteMetricFor(routes, current)
 		setRouteMetric(routes, tracked.routeMetric)
@@ -471,41 +587,36 @@ func configureQMAPNetwork(ctx context.Context, state connectionStateStore, modem
 	release := false
 	defer func() {
 		if !release {
-			err = errors.Join(err, cleanupApplied(context.WithoutCancel(ctx), state, tracked))
+			err = errors.Join(err, cleanupAppliedWithRouteOps(context.WithoutCancel(ctx), state, tracked, routeOps))
 		}
 	}()
-	for _, network := range networks {
+	for _, network := range config.networks {
 		prefix := network.prefix
 		if err := netlink.AddAddress(tracked.interfaceName, prefix); err != nil {
-			return tracked, dns, err
+			return tracked, err
 		}
 		tracked.addresses = append(tracked.addresses, prefix)
 	}
 	if prefs.DefaultRoute {
 		if err := restoreStaleDefaultRouteStatesWithStore(ctx, state, routeStateRestoreTarget{
 			interfaceNames: []string{tracked.interfaceName},
-		}, netlinkDefaultRouteOps); err != nil {
-			return tracked, dns, fmt.Errorf("restore previous default route state: %w", err)
+		}, routeOps); err != nil {
+			return tracked, fmt.Errorf("restore previous default route state: %w", err)
 		}
-		changes, err := takeoverDefaultRoutesWithStore(ctx, state, modemID, tracked.interfaceName, routes, netlinkDefaultRouteOps)
+		changes, err := takeoverDefaultRoutesWithStore(ctx, state, modemID, tracked.interfaceName, routes, routeOps)
 		tracked.routeChanges = changes
 		if err != nil {
-			return tracked, dns, fmt.Errorf("take over default route: %w", err)
+			return tracked, fmt.Errorf("take over default route: %w", err)
 		}
 	}
 	for _, route := range routes {
-		if err := netlink.AddDefaultRoute(route); err != nil {
-			return tracked, dns, fmt.Errorf("add default route: %w", err)
+		if err := routeOps.addDefaultRoute(route); err != nil {
+			return tracked, fmt.Errorf("add default route: %w", err)
 		}
 		tracked.routes = append(tracked.routes, route)
 	}
-	for _, ip := range info.DNS {
-		if value := strings.TrimSpace(ip.String()); value != "" {
-			dns = append(dns, value)
-		}
-	}
 	release = true
-	return tracked, dns, nil
+	return tracked, nil
 }
 
 type qmapNetwork struct {
@@ -513,20 +624,115 @@ type qmapNetwork struct {
 	gateway netip.Addr
 }
 
-func qmapNetworks(info qcom.PDNInfo) []qmapNetwork {
+func qmapNetworks(info qcom.PDNInfo) ([]qmapNetwork, error) {
 	var networks []qmapNetwork
-	if raw := info.LocalIPv4.To4(); raw != nil {
+	if len(info.LocalIPv4) > 0 {
+		raw := info.LocalIPv4.To4()
+		if raw == nil {
+			return nil, fmt.Errorf("IPv4 local address is invalid: %v", info.LocalIPv4)
+		}
 		addr, _ := netip.AddrFromSlice(raw)
-		ones, _ := net.IPMask(info.IPv4SubnetMask.To4()).Size()
-		gateway, _ := netip.AddrFromSlice(info.IPv4Gateway.To4())
+		if addr.IsUnspecified() {
+			return nil, errors.New("IPv4 local address is unspecified")
+		}
+		mask := info.IPv4SubnetMask.To4()
+		if mask == nil {
+			return nil, fmt.Errorf("IPv4 subnet mask is missing or invalid: %v", info.IPv4SubnetMask)
+		}
+		ones, bits := net.IPMask(mask).Size()
+		if bits != net.IPv4len*8 {
+			return nil, fmt.Errorf("IPv4 subnet mask is not contiguous: %v", info.IPv4SubnetMask)
+		}
+		if ones == 0 {
+			return nil, errors.New("IPv4 subnet mask has zero prefix length")
+		}
+		rawGateway := info.IPv4Gateway.To4()
+		if rawGateway == nil {
+			return nil, fmt.Errorf("IPv4 gateway is missing or not IPv4: %v", info.IPv4Gateway)
+		}
+		gateway, _ := netip.AddrFromSlice(rawGateway)
+		if gateway.IsUnspecified() {
+			return nil, errors.New("IPv4 gateway is unspecified")
+		}
 		networks = append(networks, qmapNetwork{netip.PrefixFrom(addr, ones), gateway})
 	}
-	if raw := info.LocalIPv6.To16(); raw != nil {
+	if len(info.LocalIPv6) > 0 {
+		raw := info.LocalIPv6.To16()
+		if raw == nil || info.LocalIPv6.To4() != nil {
+			return nil, fmt.Errorf("IPv6 local address is invalid: %v", info.LocalIPv6)
+		}
+		if info.IPv6PrefixLength == 0 || info.IPv6PrefixLength > 128 {
+			return nil, fmt.Errorf("IPv6 prefix length %d is outside range 1-128", info.IPv6PrefixLength)
+		}
+		rawGateway := info.IPv6Gateway.To16()
+		if rawGateway == nil || info.IPv6Gateway.To4() != nil {
+			return nil, fmt.Errorf("IPv6 gateway is missing or not IPv6: %v", info.IPv6Gateway)
+		}
 		addr, _ := netip.AddrFromSlice(raw)
-		gateway, _ := netip.AddrFromSlice(info.IPv6Gateway.To16())
+		gateway, _ := netip.AddrFromSlice(rawGateway)
+		if addr.IsUnspecified() {
+			return nil, errors.New("IPv6 local address is unspecified")
+		}
+		if gateway.IsUnspecified() {
+			return nil, errors.New("IPv6 gateway is unspecified")
+		}
 		networks = append(networks, qmapNetwork{netip.PrefixFrom(addr, int(info.IPv6PrefixLength)), gateway})
 	}
-	return networks
+	return networks, nil
+}
+
+func combineQMAPSessions(sessions []*modemlink.QMAPSession) (qmapLinkConfig, error) {
+	var combined qmapLinkConfig
+	for _, session := range sessions {
+		if session == nil {
+			return qmapLinkConfig{}, errors.New("QMAP session is required")
+		}
+		interfaceName := strings.TrimSpace(session.InterfaceName)
+		if interfaceName == "" {
+			return qmapLinkConfig{}, errors.New("QMAP session interface is required")
+		}
+		if combined.interfaceName == "" {
+			combined.interfaceName = interfaceName
+		} else if interfaceName != combined.interfaceName {
+			return qmapLinkConfig{}, fmt.Errorf("QMAP sessions use different interfaces %s and %s", combined.interfaceName, interfaceName)
+		}
+		networks, err := qmapNetworks(session.Info)
+		if err != nil {
+			return qmapLinkConfig{}, fmt.Errorf("validate QMAP network on %s: %w", interfaceName, err)
+		}
+		if len(networks) == 0 {
+			return qmapLinkConfig{}, fmt.Errorf("QMAP network configuration on %s is empty", interfaceName)
+		}
+		for _, network := range networks {
+			if !slices.Contains(combined.networks, network) {
+				combined.networks = append(combined.networks, network)
+			}
+		}
+		for _, server := range session.Info.DNS {
+			addr, ok := netip.AddrFromSlice(server)
+			if !ok {
+				continue
+			}
+			addr = addr.Unmap()
+			if addr.IsUnspecified() {
+				continue
+			}
+			value := addr.String()
+			if !slices.Contains(combined.dns, value) {
+				combined.dns = append(combined.dns, value)
+			}
+		}
+		if mtu := session.Info.MTU; mtu > 0 && (combined.mtu == 0 || mtu < combined.mtu) {
+			combined.mtu = mtu
+		}
+	}
+	if len(sessions) == 0 {
+		return qmapLinkConfig{}, errors.New("QMAP interface is unavailable")
+	}
+	if len(combined.networks) == 0 {
+		return qmapLinkConfig{}, errors.New("QMAP network configuration is empty")
+	}
+	return combined, nil
 }
 
 func qmapIPPreferences(ipType string) ([]qcom.WDSIPPreference, error) {
@@ -540,25 +746,4 @@ func qmapIPPreferences(ipType string) ([]qcom.WDSIPPreference, error) {
 	default:
 		return nil, fmt.Errorf("%w: %s", mmodem.ErrUnsupportedBearerIPType, ipType)
 	}
-}
-
-type qmapDataLeg struct {
-	preference qcom.WDSIPPreference
-	muxID      uint8
-}
-
-func qmapDataLegs(ipType string) ([]qmapDataLeg, error) {
-	preferences, err := qmapIPPreferences(ipType)
-	if err != nil {
-		return nil, err
-	}
-	legs := make([]qmapDataLeg, 0, len(preferences))
-	for i, preference := range preferences {
-		muxID := uint8(internetQMAPMuxID)
-		if i == 1 {
-			muxID = ipv6QMAPMuxID
-		}
-		legs = append(legs, qmapDataLeg{preference: preference, muxID: muxID})
-	}
-	return legs, nil
 }

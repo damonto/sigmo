@@ -64,7 +64,7 @@ func (c *Connectivity) ReplaceVoLTESettings(ctx context.Context, modem *mmodem.M
 		if airplaneMode {
 			return ErrVoLTEAirplaneMode
 		}
-		return updateResolvedVoLTESettings(ctx, modem, c.volte, settings)
+		return c.volte.managedVoLTEOperations().updateResolvedSettings(ctx, modem, c.volte, settings)
 	})
 }
 

@@ -88,15 +88,11 @@ func configurePro(ctx context.Context, runtime *server.Runtime) error {
 		runtime.SetUpdateSource(source)
 	}
 	app := &proApp{runtime: runtime}
-	if proIMS != nil {
-		if err := proIMS(ctx, app); err != nil {
-			return err
-		}
+	if err := configureIMS(ctx, app); err != nil {
+		return err
 	}
-	if proESIMTransfer != nil {
-		if err := proESIMTransfer(ctx, app); err != nil {
-			return err
-		}
+	if err := configureESIMTransfer(ctx, app); err != nil {
+		return err
 	}
 	return nil
 }

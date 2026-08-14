@@ -28,8 +28,6 @@ type WWANConfig struct {
 	InterfaceName     string
 }
 
-var validateQualcomm410Layout = mmodem.ValidateQualcomm410Layout
-
 // OpenWWAN opens the SIM and packet-data adapter required by the selected IMS access.
 func OpenWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (usimcard.Reader, error) {
 	switch cfg.Access {
@@ -130,7 +128,7 @@ func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (us
 			if cfg.MuxDataPort != nil || cfg.LegacyMuxDataPort != 0 {
 				return nil, errors.New("dedicated QMI cannot bind a data port")
 			}
-			if err := validateDedicatedQMIWWANConfig(cfg); err != nil {
+			if err := validateDedicatedQMIWWANConfig(cfg, mmodem.ValidateQualcomm410Layout); err != nil {
 				return nil, err
 			}
 		} else {
@@ -188,7 +186,7 @@ func openVoLTEWWAN(ctx context.Context, modem *mmodem.Modem, cfg WWANConfig) (us
 	}
 }
 
-func validateDedicatedQMIWWANConfig(cfg WWANConfig) error {
+func validateDedicatedQMIWWANConfig(cfg WWANConfig, validateLayout func() error) error {
 	controlPort := strings.TrimSpace(cfg.QMIControlPort)
 	if controlPort == "" {
 		return nil
@@ -199,7 +197,7 @@ func validateDedicatedQMIWWANConfig(cfg WWANConfig) error {
 	if strings.TrimSpace(cfg.InterfaceName) != mmodem.Qualcomm410IMSInterface {
 		return fmt.Errorf("Qualcomm 410 IMS interface must be %s", mmodem.Qualcomm410IMSInterface)
 	}
-	if err := validateQualcomm410Layout(); err != nil {
+	if err := validateLayout(); err != nil {
 		return fmt.Errorf("validate Qualcomm 410 layout: %w", err)
 	}
 	return nil

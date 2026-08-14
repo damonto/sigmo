@@ -13,8 +13,8 @@ import (
 	"github.com/damonto/wwan-go/qcom"
 )
 
-func readVoLTEStatus(ctx context.Context, modem *mmodem.Modem) (status wwan.VoLTEStatus, err error) {
-	device, err := openManagedVoLTEDevice(modem)
+func (ops managedVoLTEOps) readStatus(ctx context.Context, modem *mmodem.Modem) (status wwan.VoLTEStatus, err error) {
+	device, err := ops.withDefaults().openDevice(modem)
 	if errors.Is(err, wwan.ErrUnsupported) {
 		return wwan.VoLTEStatus{}, nil
 	}
@@ -34,8 +34,8 @@ func readVoLTEStatus(ctx context.Context, modem *mmodem.Modem) (status wwan.VoLT
 	return status, nil
 }
 
-func validateManagedVoLTE(ctx context.Context, modem *mmodem.Modem) (err error) {
-	device, err := openManagedVoLTEDevice(modem)
+func (ops managedVoLTEOps) validate(ctx context.Context, modem *mmodem.Modem) (err error) {
+	device, err := ops.withDefaults().openDevice(modem)
 	if errors.Is(err, wwan.ErrUnsupported) {
 		return ErrUnavailable
 	}
@@ -101,17 +101,17 @@ type voLTESettingsUpdater interface {
 	UpdateVoLTESettings(context.Context, *mmodem.Modem, VoLTESettings) error
 }
 
-func updateVoLTESettings(ctx context.Context, modem *mmodem.Modem, updater voLTESettingsUpdater, settings VoLTESettings) error {
+func (ops managedVoLTEOps) updateSettings(ctx context.Context, modem *mmodem.Modem, updater voLTESettingsUpdater, settings VoLTESettings) error {
 	settings, err := ResolveVoLTESettings(modem, settings)
 	if err != nil {
 		return err
 	}
-	return updateResolvedVoLTESettings(ctx, modem, updater, settings)
+	return ops.updateResolvedSettings(ctx, modem, updater, settings)
 }
 
-func updateResolvedVoLTESettings(ctx context.Context, modem *mmodem.Modem, updater voLTESettingsUpdater, settings VoLTESettings) error {
+func (ops managedVoLTEOps) updateResolvedSettings(ctx context.Context, modem *mmodem.Modem, updater voLTESettingsUpdater, settings VoLTESettings) error {
 	if settings.Enabled {
-		if err := validateManagedVoLTE(ctx, modem); err != nil {
+		if err := ops.validate(ctx, modem); err != nil {
 			return err
 		}
 	}

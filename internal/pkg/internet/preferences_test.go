@@ -10,9 +10,6 @@ import (
 )
 
 func TestUpdateTrackedDefaultRoute(t *testing.T) {
-	previousOps := netlinkDefaultRouteOps
-	t.Cleanup(func() { netlinkDefaultRouteOps = previousOps })
-
 	cellular := netlink.DefaultRoute{
 		Interface: "wwan0",
 		Family:    netlink.FamilyIPv4,
@@ -28,7 +25,7 @@ func TestUpdateTrackedDefaultRoute(t *testing.T) {
 		Metric:    defaultRouteMetric,
 	}
 	current := []netlink.DefaultRoute{cellular, other}
-	netlinkDefaultRouteOps = defaultRouteOps{
+	routeOps := defaultRouteOps{
 		defaultRoutes: func() ([]netlink.DefaultRoute, error) { return slices.Clone(current), nil },
 		addDefaultRoute: func(route netlink.DefaultRoute) error {
 			if defaultRouteExists(route, current) {
@@ -52,6 +49,7 @@ func TestUpdateTrackedDefaultRoute(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
+	connector.routes = routeOps
 	tracked := trackedConnection{
 		interfaceName: "wwan0",
 		prefs:         Preferences{APN: "internet", DefaultRoute: false},
@@ -117,18 +115,17 @@ func TestUpdateQMAPPreferencesPersistsAlwaysOn(t *testing.T) {
 	}
 	modem := fakeInternetModem{modemID: "modem-1", iccidValue: "profile-1"}
 	connection := &qmapConnection{
-		prefs: Preferences{APN: "internet"},
-		tracked: []trackedConnection{{
+		tracked: trackedConnection{
 			interfaceName: "qmimux0",
 			prefs:         Preferences{APN: "internet"},
-		}},
+		},
 	}
 
 	updated, err := connector.updateQMAPPreferences(t.Context(), modem, connection, ConnectionPreferences{AlwaysOn: true})
 	if err != nil {
 		t.Fatalf("update QMAP preferences: %v", err)
 	}
-	if !updated.prefs.AlwaysOn || !updated.tracked[0].prefs.AlwaysOn {
+	if !updated.tracked.prefs.AlwaysOn {
 		t.Fatalf("QMAP preferences = %+v, want Always On enabled", updated)
 	}
 	if got := connector.qmapConnectionFor("modem-1", 0); got != updated {
@@ -139,19 +136,13 @@ func TestUpdateQMAPPreferencesPersistsAlwaysOn(t *testing.T) {
 	}
 }
 
-func TestUpdateQMAPPreferencesDisablesDefaultRoutesInReverseOrder(t *testing.T) {
-	previousOps := netlinkDefaultRouteOps
-	t.Cleanup(func() { netlinkDefaultRouteOps = previousOps })
-
+func TestUpdateQMAPPreferencesDisablesDefaultRoute(t *testing.T) {
 	otherOriginal := netlink.DefaultRoute{Interface: "eth0", Family: netlink.FamilyIPv4, Metric: defaultRouteMetric}
 	otherReplacement := otherOriginal
 	otherReplacement.Metric = defaultRouteMetric + 11
-	firstOriginal := netlink.DefaultRoute{Interface: "qmimux0", Family: netlink.FamilyIPv4, Metric: defaultRouteMetric}
-	firstReplacement := firstOriginal
-	firstReplacement.Metric = defaultRouteMetric + 12
-	secondOriginal := netlink.DefaultRoute{Interface: "qmimux1", Family: netlink.FamilyIPv4, Metric: defaultRouteMetric}
-	current := []netlink.DefaultRoute{otherReplacement, firstReplacement, secondOriginal}
-	netlinkDefaultRouteOps = defaultRouteOps{
+	qmapRoute := netlink.DefaultRoute{Interface: "qmimux0", Family: netlink.FamilyIPv4, Metric: defaultRouteMetric}
+	current := []netlink.DefaultRoute{otherReplacement, qmapRoute}
+	routeOps := defaultRouteOps{
 		defaultRoutes: func() ([]netlink.DefaultRoute, error) { return slices.Clone(current), nil },
 		addDefaultRoute: func(route netlink.DefaultRoute) error {
 			if defaultRouteExists(route, current) {
@@ -175,20 +166,13 @@ func TestUpdateQMAPPreferencesDisablesDefaultRoutesInReverseOrder(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
-	firstChanges := []defaultRouteChange{{Original: otherOriginal, Replacement: otherReplacement}}
-	secondChanges := []defaultRouteChange{{Original: firstOriginal, Replacement: firstReplacement}}
-	if err := connector.persistence.saveRouteStateForModem(t.Context(), "modem-1", "qmimux0", []netlink.DefaultRoute{firstOriginal}, firstChanges); err != nil {
-		t.Fatalf("save first route state: %v", err)
-	}
-	if err := connector.persistence.saveRouteStateForModem(t.Context(), "modem-1", "qmimux1", []netlink.DefaultRoute{secondOriginal}, secondChanges); err != nil {
-		t.Fatalf("save second route state: %v", err)
+	connector.routes = routeOps
+	changes := []defaultRouteChange{{Original: otherOriginal, Replacement: otherReplacement}}
+	if err := connector.persistence.saveRouteStateForModem(t.Context(), "modem-1", "qmimux0", []netlink.DefaultRoute{qmapRoute}, changes); err != nil {
+		t.Fatalf("save route state: %v", err)
 	}
 	connection := &qmapConnection{
-		prefs: Preferences{DefaultRoute: true},
-		tracked: []trackedConnection{
-			{interfaceName: "qmimux0", prefs: Preferences{DefaultRoute: true}, routes: []netlink.DefaultRoute{firstOriginal}, routeChanges: firstChanges},
-			{interfaceName: "qmimux1", prefs: Preferences{DefaultRoute: true}, routes: []netlink.DefaultRoute{secondOriginal}, routeChanges: secondChanges},
-		},
+		tracked: trackedConnection{interfaceName: "qmimux0", prefs: Preferences{DefaultRoute: true}, routes: []netlink.DefaultRoute{qmapRoute}, routeChanges: changes},
 	}
 
 	updated, err := connector.updateQMAPPreferences(t.Context(), fakeInternetModem{modemID: "modem-1"},
@@ -198,7 +182,7 @@ func TestUpdateQMAPPreferencesDisablesDefaultRoutesInReverseOrder(t *testing.T) 
 	if err != nil {
 		t.Fatalf("disable QMAP default route: %v", err)
 	}
-	if updated.prefs.DefaultRoute {
+	if updated.tracked.prefs.DefaultRoute {
 		t.Fatal("QMAP DefaultRoute = true, want false")
 	}
 	for _, route := range current {
@@ -211,31 +195,7 @@ func TestUpdateQMAPPreferencesDisablesDefaultRoutesInReverseOrder(t *testing.T) 
 	}
 }
 
-func TestQMAPRouteUpdateOrder(t *testing.T) {
-	tests := []struct {
-		name    string
-		count   int
-		enabled bool
-		want    []int
-	}{
-		{name: "enable uses connection order", count: 3, enabled: true, want: []int{0, 1, 2}},
-		{name: "disable reverses connection order", count: 3, want: []int{2, 1, 0}},
-		{name: "empty connection", enabled: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := qmapRouteUpdateOrder(tt.count, tt.enabled); !slices.Equal(got, tt.want) {
-				t.Fatalf("qmapRouteUpdateOrder() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestUpdateTrackedPreferencesRollsBackRoutesWhenProxyFails(t *testing.T) {
-	previousOps := netlinkDefaultRouteOps
-	t.Cleanup(func() { netlinkDefaultRouteOps = previousOps })
-
 	route := netlink.DefaultRoute{
 		Interface: "wwan0",
 		Family:    netlink.FamilyIPv4,
@@ -244,7 +204,7 @@ func TestUpdateTrackedPreferencesRollsBackRoutesWhenProxyFails(t *testing.T) {
 		Metric:    secondaryRouteMetric,
 	}
 	current := []netlink.DefaultRoute{route}
-	netlinkDefaultRouteOps = defaultRouteOps{
+	routeOps := defaultRouteOps{
 		defaultRoutes: func() ([]netlink.DefaultRoute, error) { return slices.Clone(current), nil },
 		addDefaultRoute: func(route netlink.DefaultRoute) error {
 			if defaultRouteExists(route, current) {
@@ -268,6 +228,7 @@ func TestUpdateTrackedPreferencesRollsBackRoutesWhenProxyFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
+	connector.routes = routeOps
 	_, err = connector.updateTrackedPreferences(t.Context(), fakeInternetModem{modemID: "modem-1", iccidValue: "profile-1"},
 		trackedConnection{
 			interfaceName: "wwan0",

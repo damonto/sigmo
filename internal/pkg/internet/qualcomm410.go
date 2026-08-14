@@ -71,23 +71,60 @@ func (o qualcomm410NetworkOps) routeOps() defaultRouteOps {
 	}
 }
 
-var (
-	openInternetQualcomm410Lease = func(ctx context.Context) (qualcomm410DataFormatLease, error) {
-		return modemlink.OpenQualcomm410RawIPLease(ctx)
+type qualcomm410Ops struct {
+	openLease         func(context.Context) (qualcomm410DataFormatLease, error)
+	validateLayout    func(*mmodem.Modem) error
+	currentBearer     func(context.Context, internetModem) (bearerState, error)
+	cleanupStaleState func(context.Context, *Connector, string) error
+	reconnectBearer   func(context.Context, *Connector, internetModem, Preferences) error
+	disconnectBearer  func(context.Context, *Connector, internetModem) error
+}
+
+func defaultQualcomm410Ops() qualcomm410Ops {
+	return qualcomm410Ops{
+		openLease: func(ctx context.Context) (qualcomm410DataFormatLease, error) {
+			return modemlink.OpenQualcomm410RawIPLease(ctx)
+		},
+		validateLayout: mmodem.ValidateQualcomm410ModemLayout,
+		currentBearer:  currentBearer,
+		cleanupStaleState: func(ctx context.Context, connector *Connector, modemID string) error {
+			return connector.cleanupStaleConnectionState(ctx, modemID, mmodem.Qualcomm410InternetInterface)
+		},
+		reconnectBearer: func(ctx context.Context, connector *Connector, access internetModem, prefs Preferences) error {
+			_, err := connector.connect(ctx, access, prefs, false)
+			return err
+		},
+		disconnectBearer: func(ctx context.Context, connector *Connector, access internetModem) error {
+			return connector.disconnect(ctx, access, false)
+		},
 	}
-	validateInternetQualcomm410Layout    = mmodem.ValidateQualcomm410ModemLayout
-	currentQualcomm410Bearer             = currentBearer
-	cleanupInternetQualcomm410StaleState = func(ctx context.Context, connector *Connector, modemID string) error {
-		return connector.cleanupStaleConnectionState(ctx, modemID, mmodem.Qualcomm410InternetInterface)
+}
+
+func (ops qualcomm410Ops) withDefaults() qualcomm410Ops {
+	defaults := defaultQualcomm410Ops()
+	if ops.openLease == nil {
+		ops.openLease = defaults.openLease
 	}
-	reconnectInternetQualcomm410Bearer = func(ctx context.Context, connector *Connector, access internetModem, prefs Preferences) error {
-		_, err := connector.connect(ctx, access, prefs, false)
-		return err
+	if ops.validateLayout == nil {
+		ops.validateLayout = defaults.validateLayout
 	}
-	disconnectInternetQualcomm410Bearer = func(ctx context.Context, connector *Connector, access internetModem) error {
-		return connector.disconnect(ctx, access, false)
+	if ops.currentBearer == nil {
+		ops.currentBearer = defaults.currentBearer
 	}
-	systemQualcomm410NetworkOps = qualcomm410NetworkOps{
+	if ops.cleanupStaleState == nil {
+		ops.cleanupStaleState = defaults.cleanupStaleState
+	}
+	if ops.reconnectBearer == nil {
+		ops.reconnectBearer = defaults.reconnectBearer
+	}
+	if ops.disconnectBearer == nil {
+		ops.disconnectBearer = defaults.disconnectBearer
+	}
+	return ops
+}
+
+func systemQualcomm410NetworkOperations() qualcomm410NetworkOps {
+	return qualcomm410NetworkOps{
 		readIPv6Autoconfiguration:    netlink.ReadIPv6Autoconfiguration,
 		setIPv6Autoconfiguration:     netlink.SetIPv6Autoconfiguration,
 		disableIPv6Autoconfiguration: netlink.DisableIPv6Autoconfiguration,
@@ -101,7 +138,7 @@ var (
 		addDefaultRoute:              netlink.AddDefaultRoute,
 		deleteDefaultRoute:           netlink.DeleteDefaultRoute,
 	}
-)
+}
 
 func (c *Connector) qualcomm410SelectedFor(modemID string) bool {
 	c.mu.Lock()
@@ -134,7 +171,7 @@ func (c *Connector) SelectQualcomm410Mode(modem *mmodem.Modem) error {
 	if modem == nil {
 		return ErrModemRequired
 	}
-	if err := validateInternetQualcomm410Layout(modem); err != nil {
+	if err := c.qualcomm410OperationSet().validateLayout(modem); err != nil {
 		return fmt.Errorf("validate Qualcomm 410 layout: %w", err)
 	}
 	modemID := modem.EquipmentIdentifier
@@ -155,7 +192,7 @@ func (c *Connector) SetQualcomm410Enabled(ctx context.Context, modem *mmodem.Mod
 		return ErrModemRequired
 	}
 	modemID := modem.EquipmentIdentifier
-	defer c.lockModem(modemID)()
+	defer c.lockRouteTransaction(modemID)()
 
 	if err := c.bindQualcomm410Generation(modemID, modem.Generation()); err != nil {
 		return err
@@ -167,7 +204,7 @@ func (c *Connector) SetQualcomm410Enabled(ctx context.Context, modem *mmodem.Mod
 
 	access := modemAccess{modem: modem}
 	if enabled {
-		if err := validateInternetQualcomm410Layout(modem); err != nil {
+		if err := c.qualcomm410OperationSet().validateLayout(modem); err != nil {
 			return fmt.Errorf("validate Qualcomm 410 layout: %w", err)
 		}
 		if state.selected && state.lease != nil {
@@ -252,7 +289,7 @@ func (c *Connector) enableQualcomm410Locked(ctx context.Context, access internet
 		c.setQualcomm410State(access.id(), state)
 	}
 	if !state.reconnectPending {
-		current, currentErr := currentQualcomm410Bearer(ctx, access)
+		current, currentErr := c.qualcomm410OperationSet().currentBearer(ctx, access)
 		if currentErr != nil {
 			return fmt.Errorf("read Internet bearer before acquiring Qualcomm 410 WDA lease: %w", currentErr)
 		}
@@ -264,7 +301,7 @@ func (c *Connector) enableQualcomm410Locked(ctx context.Context, access internet
 			return nil
 		}
 		state.scheduleReconnect(c.qmapMigrationPreferences(ctx, access, current.bearer))
-		if err := disconnectInternetQualcomm410Bearer(ctx, c, access); err != nil {
+		if err := c.qualcomm410OperationSet().disconnectBearer(ctx, c, access); err != nil {
 			return fmt.Errorf("disconnect Internet bearer before acquiring Qualcomm 410 WDA lease: %w", err)
 		}
 		state.selected = true
@@ -293,7 +330,7 @@ func (c *Connector) prepareQualcomm410DataPathLocked(ctx context.Context, modemI
 	if !state.selected || state.lease != nil {
 		return nil
 	}
-	lease, err := openInternetQualcomm410Lease(ctx)
+	lease, err := c.qualcomm410OperationSet().openLease(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire Qualcomm 410 Internet WDA lease: %w", err)
 	}
@@ -315,7 +352,7 @@ func (c *Connector) completeQualcomm410ConnectLocked(modemID string) {
 }
 
 func (c *Connector) ensureQualcomm410BearerLocked(ctx context.Context, access internetModem) error {
-	current, err := currentQualcomm410Bearer(ctx, access)
+	current, err := c.qualcomm410OperationSet().currentBearer(ctx, access)
 	if err != nil {
 		return fmt.Errorf("read Internet bearer before enabling Qualcomm 410: %w", err)
 	}
@@ -326,7 +363,7 @@ func (c *Connector) ensureQualcomm410BearerLocked(ctx context.Context, access in
 		return nil
 	}
 	prefs := c.qmapMigrationPreferences(ctx, access, current.bearer)
-	if err := disconnectInternetQualcomm410Bearer(ctx, c, access); err != nil {
+	if err := c.qualcomm410OperationSet().disconnectBearer(ctx, c, access); err != nil {
 		return fmt.Errorf("disconnect Internet bearer before enabling Qualcomm 410: %w", err)
 	}
 	state := c.qualcomm410StateFor(access.id())
@@ -348,7 +385,7 @@ func (c *Connector) disableQualcomm410Locked(ctx context.Context, access interne
 		return nil
 	}
 
-	current, err := currentQualcomm410Bearer(ctx, access)
+	current, err := c.qualcomm410OperationSet().currentBearer(ctx, access)
 	if err != nil {
 		return fmt.Errorf("read Internet bearer before disabling Qualcomm 410: %w", err)
 	}
@@ -359,10 +396,10 @@ func (c *Connector) disableQualcomm410Locked(ctx context.Context, access interne
 	}
 	_, tracked := c.connection(access.id())
 	if !tracked && current.bearer == nil {
-		if err := cleanupInternetQualcomm410StaleState(ctx, c, access.id()); err != nil {
+		if err := c.qualcomm410OperationSet().cleanupStaleState(ctx, c, access.id()); err != nil {
 			return fmt.Errorf("clean stale Qualcomm 410 Internet network: %w", err)
 		}
-	} else if err := disconnectInternetQualcomm410Bearer(ctx, c, access); err != nil {
+	} else if err := c.qualcomm410OperationSet().disconnectBearer(ctx, c, access); err != nil {
 		return fmt.Errorf("disconnect Qualcomm 410 Internet bearer: %w", err)
 	}
 
@@ -396,7 +433,7 @@ func (c *Connector) retryQualcomm410ReconnectLocked(ctx context.Context, access 
 	if !state.reconnectPending {
 		return nil
 	}
-	if err := reconnectInternetQualcomm410Bearer(ctx, c, access, state.reconnectPreferences); err != nil {
+	if err := c.qualcomm410OperationSet().reconnectBearer(ctx, c, access, state.reconnectPreferences); err != nil {
 		return err
 	}
 	state = c.qualcomm410StateFor(access.id())
@@ -421,7 +458,7 @@ func (c *Connector) resumeQualcomm410AfterReloadLocked(ctx context.Context, acce
 }
 
 func (c *Connector) prepareQualcomm410AfterReloadLocked(ctx context.Context, access internetModem, state qualcomm410State) (qualcomm410State, error) {
-	current, err := currentQualcomm410Bearer(ctx, access)
+	current, err := c.qualcomm410OperationSet().currentBearer(ctx, access)
 	if err != nil {
 		return state, fmt.Errorf("read Internet bearer after Qualcomm 410 reload: %w", err)
 	}
@@ -435,12 +472,12 @@ func (c *Connector) prepareQualcomm410AfterReloadLocked(ctx context.Context, acc
 		if cleanupErr == nil {
 			cleanupErr = c.syncCleanedUpDefaultRouteState(ctx, tracked)
 		}
-		cleanupErr = errors.Join(cleanupErr, restoreStaleDefaultRouteStatesWithStore(ctx, c.persistence, routeStateRestoreTarget{modemID: access.id()}, netlinkDefaultRouteOps))
+		cleanupErr = errors.Join(cleanupErr, restoreStaleDefaultRouteStatesWithStore(ctx, c.persistence, routeStateRestoreTarget{modemID: access.id()}, c.routeOperationSet()))
 		if cleanupErr != nil {
 			return state, fmt.Errorf("clean invalidated Qualcomm 410 bearer network: %w", cleanupErr)
 		}
 		c.deleteConnection(access.id())
-	} else if err := cleanupInternetQualcomm410StaleState(ctx, c, access.id()); err != nil {
+	} else if err := c.qualcomm410OperationSet().cleanupStaleState(ctx, c, access.id()); err != nil {
 		return state, fmt.Errorf("clean stale Qualcomm 410 Internet network after reload: %w", err)
 	}
 
@@ -462,7 +499,7 @@ func (c *Connector) configureConnectedBearer(ctx context.Context, modemID string
 	if c.qualcomm410SelectedFor(modemID) {
 		return configureQualcomm410Bearer(ctx, c.persistence, modemID, bearer, prefs)
 	}
-	return configureBearer(ctx, c.persistence, modemID, bearer, prefs)
+	return configureBearer(ctx, c.persistence, modemID, bearer, prefs, c.routeOperationSet())
 }
 
 func configureQualcomm410Bearer(ctx context.Context, state connectionStateStore, modemID string, bearer *mmodem.Bearer, prefs Preferences) (trackedConnection, error) {
@@ -479,7 +516,7 @@ func configureQualcomm410Bearer(ctx context.Context, state connectionStateStore,
 	if err != nil {
 		return tracked, fmt.Errorf("read ipv6 config: %w", err)
 	}
-	return configureQualcomm410BearerWithOps(ctx, state, modemID, interfaceName, ip4, ip6, prefs, systemQualcomm410NetworkOps)
+	return configureQualcomm410BearerWithOps(ctx, state, modemID, interfaceName, ip4, ip6, prefs, systemQualcomm410NetworkOperations())
 }
 
 func configureQualcomm410BearerWithOps(ctx context.Context, state connectionStateStore, modemID, interfaceName string, ip4, ip6 mmodem.BearerIPConfig, prefs Preferences, ops qualcomm410NetworkOps) (tracked trackedConnection, err error) {
@@ -670,9 +707,9 @@ func (c *Connector) recoverConnectedBearer(ctx context.Context, modem internetMo
 		err     error
 	)
 	if !c.qualcomm410SelectedFor(modem.id()) {
-		tracked, metric, ok, err = recoverTrackedConnection(ctx, c.persistence, modem.id(), bearer, fallback)
+		tracked, metric, ok, err = recoverTrackedConnection(ctx, c.persistence, modem.id(), bearer, fallback, c.routeOperationSet())
 	} else {
-		tracked, metric, ok, err = recoverQualcomm410TrackedConnection(ctx, c.persistence, modem.id(), bearer, fallback)
+		tracked, metric, ok, err = recoverQualcomm410TrackedConnection(ctx, c.persistence, modem.id(), bearer, fallback, c.routeOperationSet())
 	}
 	if ok {
 		tracked.modemGeneration = modem.generation()
@@ -680,8 +717,9 @@ func (c *Connector) recoverConnectedBearer(ctx context.Context, modem internetMo
 	return tracked, metric, ok, err
 }
 
-func recoverQualcomm410TrackedConnection(ctx context.Context, stateStore connectionStateStore, modemID string, bearer *mmodem.Bearer, fallback Preferences) (trackedConnection, int, bool, error) {
+func recoverQualcomm410TrackedConnection(ctx context.Context, stateStore connectionStateStore, modemID string, bearer *mmodem.Bearer, fallback Preferences, routeOps defaultRouteOps) (trackedConnection, int, bool, error) {
 	prefs := recoverPreferences(ctx, bearer, fallback)
+	routeOps = routeOps.withDefaults()
 	interfaceName, err := bearer.Interface(ctx)
 	if err != nil {
 		return trackedConnection{}, 0, false, fmt.Errorf("read bearer interface: %w", err)
@@ -724,7 +762,7 @@ func recoverQualcomm410TrackedConnection(ctx context.Context, stateStore connect
 		return trackedConnection{}, 0, false, fmt.Errorf("load default route state: %w", err)
 	}
 	if prefs.DefaultRoute && !routeStateFound {
-		routeChanges, err = takeoverDefaultRoutesWithStore(ctx, stateStore, modemID, interfaceName, routes, netlinkDefaultRouteOps)
+		routeChanges, err = takeoverDefaultRoutesWithStore(ctx, stateStore, modemID, interfaceName, routes, routeOps)
 		if err != nil {
 			return trackedConnection{}, 0, false, fmt.Errorf("take over recovered default route: %w", err)
 		}
@@ -739,7 +777,7 @@ func recoverQualcomm410TrackedConnection(ctx context.Context, stateStore connect
 
 func (c *Connector) cleanupConnectedBearer(ctx context.Context, modem internetModem, bearer *mmodem.Bearer, prefs Preferences) error {
 	if !c.qualcomm410SelectedFor(modem.id()) {
-		return cleanupBearer(ctx, c.persistence, modem.id(), bearer, prefs)
+		return cleanupBearer(ctx, c.persistence, modem.id(), bearer, prefs, c.routeOperationSet())
 	}
 	interfaceName, err := bearer.Interface(ctx)
 	if err != nil {
@@ -772,8 +810,8 @@ func (c *Connector) cleanupConnectedBearer(ctx context.Context, modem internetMo
 	if err != nil {
 		return fmt.Errorf("load default route state: %w", err)
 	}
-	return cleanupApplied(ctx, c.persistence, trackedConnection{
+	return cleanupAppliedWithRouteOps(ctx, c.persistence, trackedConnection{
 		interfaceName: interfaceName, addresses: addresses, peers: peers,
 		routes: routes, routeChanges: routeChanges,
-	})
+	}, c.routeOperationSet())
 }

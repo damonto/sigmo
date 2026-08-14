@@ -19,21 +19,18 @@ func (l *invalidationLeaseProbe) Close() error {
 }
 
 func TestInvalidateModemGenerationIgnoresStaleOwner(t *testing.T) {
-	previousRemove := removeInternetQMAPMuxes
-	t.Cleanup(func() { removeInternetQMAPMuxes = previousRemove })
 	removedMuxes := false
-	removeInternetQMAPMuxes = func(*mmodem.Modem, ...uint8) error {
-		removedMuxes = true
-		return nil
-	}
-
 	connector, err := NewConnector(ConnectorConfig{State: testStore(t)})
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
+	connector.qmap.removeMuxes = func(*mmodem.Modem, ...uint8) error {
+		removedMuxes = true
+		return nil
+	}
 	lease := &invalidationLeaseProbe{}
 	tracked := trackedConnection{modemGeneration: 8, prefs: Preferences{APN: "new"}}
-	qmap := &qmapConnection{generation: 8, modem: &mmodem.Modem{EquipmentIdentifier: "modem-1"}, muxIDs: []uint8{internetQMAPMuxID}}
+	qmap := &qmapConnection{generation: 8, modem: &mmodem.Modem{EquipmentIdentifier: "modem-1"}}
 	state := qualcomm410State{generation: 8, selected: true, lease: lease}
 	connector.connections["modem-1"] = tracked
 	connector.qmapConnections["modem-1"] = qmap
@@ -61,17 +58,14 @@ func TestInvalidateModemGenerationIgnoresStaleOwner(t *testing.T) {
 }
 
 func TestInvalidateModemGenerationReleasesMatchingResources(t *testing.T) {
-	previousRemove := removeInternetQMAPMuxes
-	t.Cleanup(func() { removeInternetQMAPMuxes = previousRemove })
 	var removed []uint8
-	removeInternetQMAPMuxes = func(_ *mmodem.Modem, muxIDs ...uint8) error {
-		removed = append(removed, muxIDs...)
-		return nil
-	}
-
 	connector, err := NewConnector(ConnectorConfig{State: testStore(t)})
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
+	}
+	connector.qmap.removeMuxes = func(_ *mmodem.Modem, muxIDs ...uint8) error {
+		removed = append(removed, muxIDs...)
+		return nil
 	}
 	prefs := Preferences{APN: "internet", AlwaysOn: true}
 	lease := &invalidationLeaseProbe{}
@@ -79,8 +73,7 @@ func TestInvalidateModemGenerationReleasesMatchingResources(t *testing.T) {
 	connector.qmapConnections["modem-1"] = &qmapConnection{
 		generation: 7,
 		modem:      &mmodem.Modem{EquipmentIdentifier: "modem-1"},
-		muxIDs:     []uint8{internetQMAPMuxID, ipv6QMAPMuxID},
-		prefs:      prefs,
+		tracked:    trackedConnection{prefs: prefs},
 	}
 	connector.preferences["modem-1"] = prefs
 	connector.qualcomm410States["modem-1"] = qualcomm410State{generation: 7, selected: true, lease: lease}
@@ -104,7 +97,7 @@ func TestInvalidateModemGenerationReleasesMatchingResources(t *testing.T) {
 	if !state.selected || state.lease != nil || !state.reloadPending || !state.reconnectPending || state.reconnectPreferences != prefs {
 		t.Fatalf("Qualcomm 410 replacement state = %+v", state)
 	}
-	if !slices.Equal(removed, []uint8{internetQMAPMuxID, ipv6QMAPMuxID}) {
+	if !slices.Equal(removed, []uint8{internetQMAPMuxID}) {
 		t.Fatalf("removed muxes = %v, want Internet muxes", removed)
 	}
 }
@@ -112,18 +105,14 @@ func TestInvalidateModemGenerationReleasesMatchingResources(t *testing.T) {
 func TestInvalidateModemGenerationJoinsReleaseErrors(t *testing.T) {
 	errLink := errors.New("lease close")
 	errMux := errors.New("mux removal")
-	previousRemove := removeInternetQMAPMuxes
-	t.Cleanup(func() { removeInternetQMAPMuxes = previousRemove })
-	removeInternetQMAPMuxes = func(*mmodem.Modem, ...uint8) error { return errMux }
-
 	connector, err := NewConnector(ConnectorConfig{State: testStore(t)})
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
+	connector.qmap.removeMuxes = func(*mmodem.Modem, ...uint8) error { return errMux }
 	connector.qmapConnections["modem-1"] = &qmapConnection{
 		generation: 7,
 		modem:      &mmodem.Modem{EquipmentIdentifier: "modem-1"},
-		muxIDs:     []uint8{internetQMAPMuxID},
 	}
 	connector.qualcomm410States["modem-1"] = qualcomm410State{
 		generation: 7,

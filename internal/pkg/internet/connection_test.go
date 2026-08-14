@@ -15,6 +15,27 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 )
 
+func TestLockRouteTransactionHoldsGlobalRouteLock(t *testing.T) {
+	t.Parallel()
+
+	connector, err := NewConnector(ConnectorConfig{State: testStore(t)})
+	if err != nil {
+		t.Fatalf("NewConnector() error = %v", err)
+	}
+	unlock := connector.lockRouteTransaction("modem-1")
+	if connector.routeMu.TryLock() {
+		connector.routeMu.Unlock()
+		unlock()
+		t.Fatal("route transaction did not hold the global route lock")
+	}
+	unlock()
+
+	if !connector.routeMu.TryLock() {
+		t.Fatal("route transaction did not release the global route lock")
+	}
+	connector.routeMu.Unlock()
+}
+
 func TestRouteMetric(t *testing.T) {
 	t.Parallel()
 
@@ -650,8 +671,10 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 
 	tests := []struct {
 		name string
+		qmap bool
 	}{
-		{name: "new default takes over previous default route state"},
+		{name: "normal bearer owner"},
+		{name: "QMAP owner", qmap: true},
 	}
 
 	for _, tt := range tests {
@@ -668,22 +691,34 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 			}
 			store := testStore(t)
 			const oldProfileID = "8901000000000000001"
+			oldTracked := trackedConnection{
+				interfaceName: "wws27u1i4",
+				profileID:     oldProfileID,
+				prefs:         Preferences{DefaultRoute: true, AlwaysOn: true},
+				routeMetric:   defaultRouteMetric,
+				routes:        []netlink.DefaultRoute{oldDefaultRoute},
+				routeChanges:  []defaultRouteChange{oldGatewayChange},
+			}
+			connections := map[string]trackedConnection{"old-modem": oldTracked}
+			qmapConnections := make(map[string]*qmapConnection)
+			if tt.qmap {
+				delete(connections, "old-modem")
+				qmapConnections["old-modem"] = &qmapConnection{tracked: oldTracked}
+			}
 			c := &Connector{
-				connections: map[string]trackedConnection{
-					"old-modem": {
-						interfaceName: "wws27u1i4",
-						profileID:     oldProfileID,
-						prefs:         Preferences{DefaultRoute: true, AlwaysOn: true},
-						routeMetric:   defaultRouteMetric,
-						routes:        []netlink.DefaultRoute{oldDefaultRoute},
-						routeChanges:  []defaultRouteChange{oldGatewayChange},
-					},
-				},
+				connections:     connections,
+				qmapConnections: qmapConnections,
 				preferences: map[string]Preferences{
 					"old-modem": {DefaultRoute: true, AlwaysOn: true},
 				},
 				state:       store,
 				persistence: state,
+			}
+			storedTracked := func() trackedConnection {
+				if tt.qmap {
+					return c.qmapConnections["old-modem"].tracked
+				}
+				return c.connections["old-modem"]
 			}
 			tracked := trackedConnection{
 				interfaceName: "wws27u2i4",
@@ -701,18 +736,18 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 				t.Fatalf("syncDefaultRouteTakeover() error = %v", err)
 			}
 
-			oldTracked := c.connections["old-modem"]
-			if oldTracked.prefs.DefaultRoute {
+			gotTracked := storedTracked()
+			if gotTracked.prefs.DefaultRoute {
 				t.Fatal("old tracked DefaultRoute = true, want false")
 			}
-			if oldTracked.routeMetric != demotedOldRoute.Metric {
-				t.Fatalf("old tracked routeMetric = %d, want %d", oldTracked.routeMetric, demotedOldRoute.Metric)
+			if gotTracked.routeMetric != demotedOldRoute.Metric {
+				t.Fatalf("old tracked routeMetric = %d, want %d", gotTracked.routeMetric, demotedOldRoute.Metric)
 			}
-			if !slices.Equal(oldTracked.routes, []netlink.DefaultRoute{demotedOldRoute}) {
-				t.Fatalf("old tracked routes = %#v, want %#v", oldTracked.routes, []netlink.DefaultRoute{demotedOldRoute})
+			if !slices.Equal(gotTracked.routes, []netlink.DefaultRoute{demotedOldRoute}) {
+				t.Fatalf("old tracked routes = %#v, want %#v", gotTracked.routes, []netlink.DefaultRoute{demotedOldRoute})
 			}
-			if !slices.Equal(oldTracked.routeChanges, []defaultRouteChange{oldGatewayChange}) {
-				t.Fatalf("old tracked routeChanges = %#v, want %#v", oldTracked.routeChanges, []defaultRouteChange{oldGatewayChange})
+			if !slices.Equal(gotTracked.routeChanges, []defaultRouteChange{oldGatewayChange}) {
+				t.Fatalf("old tracked routeChanges = %#v, want %#v", gotTracked.routeChanges, []defaultRouteChange{oldGatewayChange})
 			}
 			if c.preferences["old-modem"].DefaultRoute {
 				t.Fatal("old preference DefaultRoute = true, want false")
@@ -736,15 +771,15 @@ func TestSyncDefaultRouteTakeoverTransfersDemotedConnectionState(t *testing.T) {
 			if err := c.syncDefaultRouteRestore(t.Context(), tracked.routeChanges); err != nil {
 				t.Fatalf("syncDefaultRouteRestore() error = %v", err)
 			}
-			oldTracked = c.connections["old-modem"]
-			if !oldTracked.prefs.DefaultRoute {
+			gotTracked = storedTracked()
+			if !gotTracked.prefs.DefaultRoute {
 				t.Fatal("old tracked DefaultRoute after restore = false, want true")
 			}
-			if oldTracked.routeMetric != oldDefaultRoute.Metric {
-				t.Fatalf("old tracked routeMetric after restore = %d, want %d", oldTracked.routeMetric, oldDefaultRoute.Metric)
+			if gotTracked.routeMetric != oldDefaultRoute.Metric {
+				t.Fatalf("old tracked routeMetric after restore = %d, want %d", gotTracked.routeMetric, oldDefaultRoute.Metric)
 			}
-			if !slices.Equal(oldTracked.routes, []netlink.DefaultRoute{oldDefaultRoute}) {
-				t.Fatalf("old tracked routes after restore = %#v, want %#v", oldTracked.routes, []netlink.DefaultRoute{oldDefaultRoute})
+			if !slices.Equal(gotTracked.routes, []netlink.DefaultRoute{oldDefaultRoute}) {
+				t.Fatalf("old tracked routes after restore = %#v, want %#v", gotTracked.routes, []netlink.DefaultRoute{oldDefaultRoute})
 			}
 			oldAlwaysOn, ok, err = c.loadAlwaysOnStateForProfile(t.Context(), oldProfileID)
 			if err != nil || !ok || !oldAlwaysOn.DefaultRoute {
@@ -790,8 +825,10 @@ func TestSyncDefaultRouteRemovalTransfersOriginalRouteState(t *testing.T) {
 
 	tests := []struct {
 		name string
+		qmap bool
 	}{
-		{name: "active default inherits removed demoted route state"},
+		{name: "normal bearer owner"},
+		{name: "QMAP owner", qmap: true},
 	}
 
 	for _, tt := range tests {
@@ -810,17 +847,25 @@ func TestSyncDefaultRouteRemovalTransfersOriginalRouteState(t *testing.T) {
 				routes:        []netlink.DefaultRoute{demotedOldRoute},
 				routeChanges:  []defaultRouteChange{oldGatewayChange},
 			}
+			newTracked := trackedConnection{
+				interfaceName: "wws27u2i4",
+				prefs:         Preferences{DefaultRoute: true},
+				routeMetric:   defaultRouteMetric,
+				routes:        []netlink.DefaultRoute{newDefaultRoute},
+				routeChanges:  []defaultRouteChange{oldRouteChange},
+			}
+			connections := map[string]trackedConnection{
+				"old-modem": removed,
+				"new-modem": newTracked,
+			}
+			qmapConnections := make(map[string]*qmapConnection)
+			if tt.qmap {
+				delete(connections, "new-modem")
+				qmapConnections["new-modem"] = &qmapConnection{tracked: newTracked}
+			}
 			c := &Connector{
-				connections: map[string]trackedConnection{
-					"old-modem": removed,
-					"new-modem": {
-						interfaceName: "wws27u2i4",
-						prefs:         Preferences{DefaultRoute: true},
-						routeMetric:   defaultRouteMetric,
-						routes:        []netlink.DefaultRoute{newDefaultRoute},
-						routeChanges:  []defaultRouteChange{oldRouteChange},
-					},
-				},
+				connections:     connections,
+				qmapConnections: qmapConnections,
 				preferences: map[string]Preferences{
 					"old-modem": {AlwaysOn: true},
 					"new-modem": {DefaultRoute: true},
@@ -832,9 +877,12 @@ func TestSyncDefaultRouteRemovalTransfersOriginalRouteState(t *testing.T) {
 				t.Fatalf("syncDefaultRouteRemoval() error = %v", err)
 			}
 
-			newTracked := c.connections["new-modem"]
-			if !slices.Equal(newTracked.routeChanges, []defaultRouteChange{oldGatewayChange}) {
-				t.Fatalf("new tracked routeChanges = %#v, want %#v", newTracked.routeChanges, []defaultRouteChange{oldGatewayChange})
+			gotTracked := c.connections["new-modem"]
+			if tt.qmap {
+				gotTracked = c.qmapConnections["new-modem"].tracked
+			}
+			if !slices.Equal(gotTracked.routeChanges, []defaultRouteChange{oldGatewayChange}) {
+				t.Fatalf("new tracked routeChanges = %#v, want %#v", gotTracked.routeChanges, []defaultRouteChange{oldGatewayChange})
 			}
 			gotChanges, ok, err := state.loadRouteStateForModem(t.Context(), "new-modem", "wws27u2i4")
 			if err != nil || !ok || !slices.Equal(gotChanges, []defaultRouteChange{oldGatewayChange}) {
@@ -1892,9 +1940,6 @@ func TestConnectPreparesBearerDataPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			previousOpen := openInternetQualcomm410Lease
-			t.Cleanup(func() { openInternetQualcomm410Lease = previousOpen })
-
 			connector, err := NewConnector(ConnectorConfig{State: testStore(t)})
 			if err != nil {
 				t.Fatalf("NewConnector() error = %v", err)
@@ -1907,7 +1952,7 @@ func TestConnectPreparesBearerDataPath(t *testing.T) {
 			leaseCalls := 0
 			connectCalls := 0
 			lease := &qualcomm410LeaseProbe{}
-			openInternetQualcomm410Lease = func(context.Context) (qualcomm410DataFormatLease, error) {
+			connector.qualcomm410.openLease = func(context.Context) (qualcomm410DataFormatLease, error) {
 				leaseCalls++
 				if connectCalls != 0 {
 					t.Fatal("Qualcomm 410 lease opened after bearer connection started")

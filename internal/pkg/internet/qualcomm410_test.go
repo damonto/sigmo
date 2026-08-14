@@ -24,32 +24,24 @@ func (l *qualcomm410LeaseProbe) Close() error {
 }
 
 func TestSelectQualcomm410ModeDoesNotTouchData5OrBearer(t *testing.T) {
-	previousValidate := validateInternetQualcomm410Layout
-	previousCurrent := currentQualcomm410Bearer
-	previousOpen := openInternetQualcomm410Lease
-	t.Cleanup(func() {
-		validateInternetQualcomm410Layout = previousValidate
-		currentQualcomm410Bearer = previousCurrent
-		openInternetQualcomm410Lease = previousOpen
-	})
-
+	ops := qualcomm410Ops{}
 	modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
-	validateInternetQualcomm410Layout = func(got *mmodem.Modem) error {
+	ops.validateLayout = func(got *mmodem.Modem) error {
 		if got != modem {
 			t.Fatalf("validated modem = %p, want %p", got, modem)
 		}
 		return nil
 	}
-	currentQualcomm410Bearer = func(context.Context, internetModem) (bearerState, error) {
+	ops.currentBearer = func(context.Context, internetModem) (bearerState, error) {
 		t.Fatal("read bearer while selecting Qualcomm 410 mode")
 		return bearerState{}, nil
 	}
-	openInternetQualcomm410Lease = func(context.Context) (qualcomm410DataFormatLease, error) {
+	ops.openLease = func(context.Context) (qualcomm410DataFormatLease, error) {
 		t.Fatal("opened DATA5 while selecting Qualcomm 410 mode")
 		return nil, nil
 	}
 
-	connector := &Connector{operations: make(map[string]*sync.Mutex)}
+	connector := &Connector{operations: make(map[string]*sync.Mutex), qualcomm410: ops}
 	if err := connector.SelectQualcomm410Mode(modem); err != nil {
 		t.Fatalf("SelectQualcomm410Mode() error = %v", err)
 	}
@@ -60,32 +52,23 @@ func TestSelectQualcomm410ModeDoesNotTouchData5OrBearer(t *testing.T) {
 }
 
 func TestSetQualcomm410EnabledDefersWDAUntilConnectStarts(t *testing.T) {
-	previousOpen := openInternetQualcomm410Lease
-	previousValidate := validateInternetQualcomm410Layout
-	previousCurrent := currentQualcomm410Bearer
-	previousCleanup := cleanupInternetQualcomm410StaleState
-	t.Cleanup(func() {
-		openInternetQualcomm410Lease = previousOpen
-		validateInternetQualcomm410Layout = previousValidate
-		currentQualcomm410Bearer = previousCurrent
-		cleanupInternetQualcomm410StaleState = previousCleanup
-	})
-
+	ops := qualcomm410Ops{}
 	var openCalls int
 	lease := &qualcomm410LeaseProbe{}
-	validateInternetQualcomm410Layout = func(*mmodem.Modem) error { return nil }
-	openInternetQualcomm410Lease = func(context.Context) (qualcomm410DataFormatLease, error) {
+	ops.validateLayout = func(*mmodem.Modem) error { return nil }
+	ops.openLease = func(context.Context) (qualcomm410DataFormatLease, error) {
 		openCalls++
 		return lease, nil
 	}
-	currentQualcomm410Bearer = func(context.Context, internetModem) (bearerState, error) {
+	ops.currentBearer = func(context.Context, internetModem) (bearerState, error) {
 		return bearerState{}, nil
 	}
-	cleanupInternetQualcomm410StaleState = func(context.Context, *Connector, string) error { return nil }
+	ops.cleanupStaleState = func(context.Context, *Connector, string) error { return nil }
 
 	connector := &Connector{
 		operations:        make(map[string]*sync.Mutex),
 		qualcomm410States: make(map[string]qualcomm410State),
+		qualcomm410:       ops,
 	}
 	modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
 	for range 2 {
@@ -134,33 +117,25 @@ func TestSetQualcomm410EnabledDefersWDAUntilConnectStarts(t *testing.T) {
 }
 
 func TestSetQualcomm410EnabledValidatesModemBeforeChangingState(t *testing.T) {
-	previousOpen := openInternetQualcomm410Lease
-	previousValidate := validateInternetQualcomm410Layout
-	previousCurrent := currentQualcomm410Bearer
-	t.Cleanup(func() {
-		openInternetQualcomm410Lease = previousOpen
-		validateInternetQualcomm410Layout = previousValidate
-		currentQualcomm410Bearer = previousCurrent
-	})
-
+	ops := qualcomm410Ops{}
 	wantErr := errors.New("MM primary is not DATA5")
 	modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
-	validateInternetQualcomm410Layout = func(got *mmodem.Modem) error {
+	ops.validateLayout = func(got *mmodem.Modem) error {
 		if got != modem {
 			t.Fatalf("validated modem = %p, want %p", got, modem)
 		}
 		return wantErr
 	}
-	openInternetQualcomm410Lease = func(context.Context) (qualcomm410DataFormatLease, error) {
+	ops.openLease = func(context.Context) (qualcomm410DataFormatLease, error) {
 		t.Fatal("opened WDA lease after layout validation failed")
 		return nil, nil
 	}
-	currentQualcomm410Bearer = func(context.Context, internetModem) (bearerState, error) {
+	ops.currentBearer = func(context.Context, internetModem) (bearerState, error) {
 		t.Fatal("read bearer after layout validation failed")
 		return bearerState{}, nil
 	}
 
-	connector := &Connector{operations: make(map[string]*sync.Mutex)}
+	connector := &Connector{operations: make(map[string]*sync.Mutex), qualcomm410: ops}
 	err := connector.SetQualcomm410Enabled(t.Context(), modem, true)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("SetQualcomm410Enabled(true) error = %v, want %v", err, wantErr)
@@ -171,19 +146,6 @@ func TestSetQualcomm410EnabledValidatesModemBeforeChangingState(t *testing.T) {
 }
 
 func TestEnableQualcomm410MigratesConnectedBearer(t *testing.T) {
-	previousOpen := openInternetQualcomm410Lease
-	previousValidate := validateInternetQualcomm410Layout
-	previousCurrent := currentQualcomm410Bearer
-	previousDisconnect := disconnectInternetQualcomm410Bearer
-	previousReconnect := reconnectInternetQualcomm410Bearer
-	t.Cleanup(func() {
-		openInternetQualcomm410Lease = previousOpen
-		validateInternetQualcomm410Layout = previousValidate
-		currentQualcomm410Bearer = previousCurrent
-		disconnectInternetQualcomm410Bearer = previousDisconnect
-		reconnectInternetQualcomm410Bearer = previousReconnect
-	})
-
 	tests := []struct {
 		name        string
 		leaseErr    error
@@ -206,25 +168,26 @@ func TestEnableQualcomm410MigratesConnectedBearer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			ops := qualcomm410Ops{}
 			prefs := Preferences{APN: "3gnet", IPType: "ipv4v6"}
-			currentQualcomm410Bearer = func(context.Context, internetModem) (bearerState, error) {
+			ops.currentBearer = func(context.Context, internetModem) (bearerState, error) {
 				return bearerState{connected: true}, nil
 			}
-			validateInternetQualcomm410Layout = func(*mmodem.Modem) error { return nil }
+			ops.validateLayout = func(*mmodem.Modem) error { return nil }
 			var calls []string
-			disconnectInternetQualcomm410Bearer = func(context.Context, *Connector, internetModem) error {
+			ops.disconnectBearer = func(context.Context, *Connector, internetModem) error {
 				calls = append(calls, "disconnect")
 				return nil
 			}
 			lease := &qualcomm410LeaseProbe{}
-			openInternetQualcomm410Lease = func(context.Context) (qualcomm410DataFormatLease, error) {
+			ops.openLease = func(context.Context) (qualcomm410DataFormatLease, error) {
 				calls = append(calls, "open-lease")
 				if tt.leaseErr != nil {
 					return nil, tt.leaseErr
 				}
 				return lease, nil
 			}
-			reconnectInternetQualcomm410Bearer = func(_ context.Context, _ *Connector, _ internetModem, got Preferences) error {
+			ops.reconnectBearer = func(_ context.Context, _ *Connector, _ internetModem, got Preferences) error {
 				calls = append(calls, "connect")
 				if got != prefs {
 					t.Fatalf("reconnect preferences = %+v, want %+v", got, prefs)
@@ -238,6 +201,7 @@ func TestEnableQualcomm410MigratesConnectedBearer(t *testing.T) {
 				},
 				operations:        make(map[string]*sync.Mutex),
 				qualcomm410States: make(map[string]qualcomm410State),
+				qualcomm410:       ops,
 			}
 			err := connector.SetQualcomm410Enabled(t.Context(), &mmodem.Modem{EquipmentIdentifier: "modem-1"}, true)
 			if !errors.Is(err, tt.leaseErr) {
@@ -255,26 +219,16 @@ func TestEnableQualcomm410MigratesConnectedBearer(t *testing.T) {
 }
 
 func TestEnableQualcomm410UsesModeForPendingReconnect(t *testing.T) {
-	previousValidate := validateInternetQualcomm410Layout
-	previousCurrent := currentQualcomm410Bearer
-	previousOpen := openInternetQualcomm410Lease
-	previousReconnect := reconnectInternetQualcomm410Bearer
-	t.Cleanup(func() {
-		validateInternetQualcomm410Layout = previousValidate
-		currentQualcomm410Bearer = previousCurrent
-		openInternetQualcomm410Lease = previousOpen
-		reconnectInternetQualcomm410Bearer = previousReconnect
-	})
-
+	ops := qualcomm410Ops{}
 	prefs := Preferences{APN: "3gnet", IPType: "ipv4v6"}
-	validateInternetQualcomm410Layout = func(*mmodem.Modem) error { return nil }
-	currentQualcomm410Bearer = func(context.Context, internetModem) (bearerState, error) {
+	ops.validateLayout = func(*mmodem.Modem) error { return nil }
+	ops.currentBearer = func(context.Context, internetModem) (bearerState, error) {
 		t.Fatal("read bearer instead of resuming pending reconnect")
 		return bearerState{}, nil
 	}
 	lease := &qualcomm410LeaseProbe{}
 	var calls []string
-	openInternetQualcomm410Lease = func(context.Context) (qualcomm410DataFormatLease, error) {
+	ops.openLease = func(context.Context) (qualcomm410DataFormatLease, error) {
 		calls = append(calls, "open-lease")
 		return lease, nil
 	}
@@ -287,8 +241,9 @@ func TestEnableQualcomm410UsesModeForPendingReconnect(t *testing.T) {
 				reconnectPreferences: prefs,
 			},
 		},
+		qualcomm410: ops,
 	}
-	reconnectInternetQualcomm410Bearer = func(_ context.Context, _ *Connector, _ internetModem, got Preferences) error {
+	connector.qualcomm410.reconnectBearer = func(_ context.Context, _ *Connector, _ internetModem, got Preferences) error {
 		calls = append(calls, "connect")
 		state := connector.qualcomm410StateFor("modem-1")
 		if !state.selected || state.lease != lease {
@@ -313,12 +268,10 @@ func TestEnableQualcomm410UsesModeForPendingReconnect(t *testing.T) {
 }
 
 func TestDisableQualcomm410RetriesPendingBearerReconnect(t *testing.T) {
-	previousReconnect := reconnectInternetQualcomm410Bearer
-	t.Cleanup(func() { reconnectInternetQualcomm410Bearer = previousReconnect })
-
+	ops := qualcomm410Ops{}
 	wantErr := errors.New("restore normal bearer")
 	calls := 0
-	reconnectInternetQualcomm410Bearer = func(_ context.Context, _ *Connector, _ internetModem, prefs Preferences) error {
+	ops.reconnectBearer = func(_ context.Context, _ *Connector, _ internetModem, prefs Preferences) error {
 		calls++
 		if prefs.APN != "3gnet" || prefs.IPType != "ipv4v6" {
 			t.Fatalf("reconnect preferences = %+v", prefs)
@@ -337,6 +290,7 @@ func TestDisableQualcomm410RetriesPendingBearerReconnect(t *testing.T) {
 				reconnectPreferences: Preferences{APN: "3gnet", IPType: "ipv4v6"},
 			},
 		},
+		qualcomm410: ops,
 	}
 	modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
 	if err := connector.SetQualcomm410Enabled(t.Context(), modem, false); !errors.Is(err, wantErr) {
@@ -357,27 +311,19 @@ func TestDisableQualcomm410RetriesPendingBearerReconnect(t *testing.T) {
 }
 
 func TestDisableQualcomm410KeepsReconnectPendingAfterNormalBearerFailure(t *testing.T) {
-	previousCurrent := currentQualcomm410Bearer
-	previousDisconnect := disconnectInternetQualcomm410Bearer
-	previousReconnect := reconnectInternetQualcomm410Bearer
-	t.Cleanup(func() {
-		currentQualcomm410Bearer = previousCurrent
-		disconnectInternetQualcomm410Bearer = previousDisconnect
-		reconnectInternetQualcomm410Bearer = previousReconnect
-	})
-
+	ops := qualcomm410Ops{}
 	prefs := Preferences{APN: "3gnet", IPType: "ipv4v6"}
-	currentQualcomm410Bearer = func(context.Context, internetModem) (bearerState, error) {
+	ops.currentBearer = func(context.Context, internetModem) (bearerState, error) {
 		return bearerState{connected: true}, nil
 	}
 	disconnectCalls := 0
-	disconnectInternetQualcomm410Bearer = func(context.Context, *Connector, internetModem) error {
+	ops.disconnectBearer = func(context.Context, *Connector, internetModem) error {
 		disconnectCalls++
 		return nil
 	}
 	wantErr := errors.New("restore normal bearer")
 	reconnectCalls := 0
-	reconnectInternetQualcomm410Bearer = func(_ context.Context, _ *Connector, _ internetModem, got Preferences) error {
+	ops.reconnectBearer = func(_ context.Context, _ *Connector, _ internetModem, got Preferences) error {
 		reconnectCalls++
 		if got != prefs {
 			t.Fatalf("reconnect preferences = %+v, want %+v", got, prefs)
@@ -397,6 +343,7 @@ func TestDisableQualcomm410KeepsReconnectPendingAfterNormalBearerFailure(t *test
 		qualcomm410States: map[string]qualcomm410State{
 			"modem-1": {selected: true, lease: lease},
 		},
+		qualcomm410: ops,
 	}
 	modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
 	if err := connector.SetQualcomm410Enabled(t.Context(), modem, false); !errors.Is(err, wantErr) {
@@ -421,19 +368,13 @@ func TestDisableQualcomm410KeepsReconnectPendingAfterNormalBearerFailure(t *test
 }
 
 func TestDisableQualcomm410CleansDisconnectedStaleNetworkBeforeClosingLease(t *testing.T) {
-	previousCurrent := currentQualcomm410Bearer
-	previousCleanup := cleanupInternetQualcomm410StaleState
-	t.Cleanup(func() {
-		currentQualcomm410Bearer = previousCurrent
-		cleanupInternetQualcomm410StaleState = previousCleanup
-	})
-
-	currentQualcomm410Bearer = func(context.Context, internetModem) (bearerState, error) {
+	ops := qualcomm410Ops{}
+	ops.currentBearer = func(context.Context, internetModem) (bearerState, error) {
 		return bearerState{}, nil
 	}
 	wantErr := errors.New("clean stale network")
 	cleanupCalls := 0
-	cleanupInternetQualcomm410StaleState = func(_ context.Context, _ *Connector, modemID string) error {
+	ops.cleanupStaleState = func(_ context.Context, _ *Connector, modemID string) error {
 		cleanupCalls++
 		if modemID != "modem-1" {
 			t.Fatalf("cleanup modem ID = %q", modemID)
@@ -450,6 +391,7 @@ func TestDisableQualcomm410CleansDisconnectedStaleNetworkBeforeClosingLease(t *t
 		qualcomm410States: map[string]qualcomm410State{
 			"modem-1": {selected: true, lease: lease},
 		},
+		qualcomm410: ops,
 	}
 	modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
 	if err := connector.SetQualcomm410Enabled(t.Context(), modem, false); !errors.Is(err, wantErr) {
@@ -467,35 +409,26 @@ func TestDisableQualcomm410CleansDisconnectedStaleNetworkBeforeClosingLease(t *t
 }
 
 func TestInvalidateQualcomm410DefersLeaseAfterReloadUntilConnectStarts(t *testing.T) {
-	previousOpen := openInternetQualcomm410Lease
-	previousValidate := validateInternetQualcomm410Layout
-	previousCurrent := currentQualcomm410Bearer
-	previousCleanup := cleanupInternetQualcomm410StaleState
-	t.Cleanup(func() {
-		openInternetQualcomm410Lease = previousOpen
-		validateInternetQualcomm410Layout = previousValidate
-		currentQualcomm410Bearer = previousCurrent
-		cleanupInternetQualcomm410StaleState = previousCleanup
-	})
-
+	ops := qualcomm410Ops{}
 	oldLease := &qualcomm410LeaseProbe{}
 	newLease := &qualcomm410LeaseProbe{}
-	validateInternetQualcomm410Layout = func(*mmodem.Modem) error { return nil }
+	ops.validateLayout = func(*mmodem.Modem) error { return nil }
 	openCalls := 0
-	openInternetQualcomm410Lease = func(context.Context) (qualcomm410DataFormatLease, error) {
+	ops.openLease = func(context.Context) (qualcomm410DataFormatLease, error) {
 		openCalls++
 		return newLease, nil
 	}
-	currentQualcomm410Bearer = func(context.Context, internetModem) (bearerState, error) {
+	ops.currentBearer = func(context.Context, internetModem) (bearerState, error) {
 		return bearerState{}, nil
 	}
-	cleanupInternetQualcomm410StaleState = func(context.Context, *Connector, string) error { return nil }
+	ops.cleanupStaleState = func(context.Context, *Connector, string) error { return nil }
 
 	connector := &Connector{
 		operations: make(map[string]*sync.Mutex),
 		qualcomm410States: map[string]qualcomm410State{
 			"modem-1": {selected: true, lease: oldLease},
 		},
+		qualcomm410: ops,
 	}
 	if err := connector.InvalidateQualcomm410("modem-1"); err != nil {
 		t.Fatalf("InvalidateQualcomm410() error = %v", err)

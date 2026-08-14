@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -13,6 +14,70 @@ import (
 	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/damonto/wwan-go/qcom"
 )
+
+func TestOpenQMAPSessionsRejectsMismatchedCallParameters(t *testing.T) {
+	tests := []struct {
+		name    string
+		configs []QMAPConfig
+		want    string
+	}{
+		{
+			name: "APN",
+			configs: []QMAPConfig{
+				{APN: "internet", IPPreference: qcom.WDSIPPreferenceIPv4, MuxID: 1},
+				{APN: "ims", IPPreference: qcom.WDSIPPreferenceIPv6, MuxID: 1},
+			},
+			want: "uses APN",
+		},
+		{
+			name: "profile",
+			configs: []QMAPConfig{
+				{APN: "internet", IPPreference: qcom.WDSIPPreferenceIPv4, ProfileIndex: 4, MuxID: 1},
+				{APN: "internet", IPPreference: qcom.WDSIPPreferenceIPv6, ProfileIndex: 6, MuxID: 1},
+			},
+			want: "uses profile",
+		},
+		{
+			name: "family",
+			configs: []QMAPConfig{
+				{APN: "internet", IPPreference: qcom.WDSIPPreferenceIPv4, MuxID: 1},
+				{APN: "internet", IPPreference: qcom.WDSIPPreferenceIPv4, MuxID: 1},
+			},
+			want: "IPv4 session is duplicated",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := OpenQMAPSessions(t.Context(), nil, tt.configs)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("OpenQMAPSessions() error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestQMAPSessionCopiesShareCloseLifecycle(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("close client")
+	closeCalls := 0
+	session := QMAPSession{state: &qmapSessionState{closeClient: func() error {
+		closeCalls++
+		return wantErr
+	}}}
+	copy := session
+
+	if err := session.Close(); !errors.Is(err, wantErr) {
+		t.Fatalf("QMAPSession.Close() error = %v, want %v", err, wantErr)
+	}
+	if err := copy.Close(); !errors.Is(err, wantErr) {
+		t.Fatalf("copied QMAPSession.Close() error = %v, want %v", err, wantErr)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("shared client close calls = %d, want 1", closeCalls)
+	}
+}
 
 func TestNonQMAPLinkLayerForRawIP(t *testing.T) {
 	tests := []struct {

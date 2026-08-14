@@ -75,19 +75,15 @@ func TestReleaseManagedVoLTEOnShutdown(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			previousOpen := openManagedVoLTEDevice
 			opened := false
-			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+			managedVoLTE := managedVoLTEOps{openDevice: func(*mmodem.Modem) (managedVoLTEDevice, error) {
 				opened = true
 				return tt.device, nil
-			}
-			t.Cleanup(func() {
-				openManagedVoLTEDevice = previousOpen
-			})
+			}}
 
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
-			coordinator := &coordinator{access: tt.access}
+			coordinator := &coordinator{access: tt.access, managedVoLTE: managedVoLTE}
 			if tt.internet != nil {
 				coordinator.internet = tt.internet
 			}
@@ -398,18 +394,15 @@ func TestDisableVoLTEPersistsStateAfterManagedCleanupError(t *testing.T) {
 			if err := settings.PutSuspendedInternet(ctx, "modem-1", prefs); err != nil {
 				t.Fatalf("PutSuspendedInternet() error = %v", err)
 			}
-			previousOpen := openManagedVoLTEDevice
-			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+			managedVoLTE := managedVoLTEOps{openDevice: func(*mmodem.Modem) (managedVoLTEDevice, error) {
 				return &fakeManagedVoLTEDevice{testModeErr: errTestMode}, nil
-			}
-			t.Cleanup(func() {
-				openManagedVoLTEDevice = previousOpen
-			})
+			}}
 			internet := &fakeInternetRestorer{}
 			coordinator := &coordinator{
 				access:           AccessVoLTE,
 				internet:         internet,
 				volteSettings:    settings,
+				managedVoLTE:     managedVoLTE,
 				sessions:         make(map[string]*sessionState),
 				voiceSubscribers: make(map[uint64]VoiceEventFunc),
 			}
@@ -608,17 +601,16 @@ func TestDisableVoLTERestoresNormalInternetMode(t *testing.T) {
 		t.Fatalf("Put() error = %v", err)
 	}
 	device := &fakeManagedVoLTEDevice{}
-	previousOpen := openManagedVoLTEDevice
-	openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+	managedVoLTE := managedVoLTEOps{openDevice: func(*mmodem.Modem) (managedVoLTEDevice, error) {
 		return device, nil
-	}
-	t.Cleanup(func() { openManagedVoLTEDevice = previousOpen })
+	}}
 
 	internet := &fakeInternetRestorer{}
 	coordinator := &coordinator{
 		access:           AccessVoLTE,
 		internet:         internet,
 		volteSettings:    settings,
+		managedVoLTE:     managedVoLTE,
 		sessions:         make(map[string]*sessionState),
 		voiceSubscribers: make(map[uint64]VoiceEventFunc),
 	}
@@ -676,17 +668,16 @@ func TestDisableVoLTESwitchesQualcomm410InternetModeWithDataPath(t *testing.T) {
 			if err := settings.Put(ctx, "modem-1", VoLTESettings{Enabled: true, DataPath: tt.currentPath}); err != nil {
 				t.Fatalf("Put() error = %v", err)
 			}
-			previousOpen := openManagedVoLTEDevice
-			openManagedVoLTEDevice = func(*mmodem.Modem) (managedVoLTEDevice, error) {
+			managedVoLTE := managedVoLTEOps{openDevice: func(*mmodem.Modem) (managedVoLTEDevice, error) {
 				return &fakeManagedVoLTEDevice{}, nil
-			}
-			t.Cleanup(func() { openManagedVoLTEDevice = previousOpen })
+			}}
 
 			internet := &fakeInternetRestorer{}
 			coordinator := &coordinator{
 				access:           AccessVoLTE,
 				internet:         internet,
 				volteSettings:    settings,
+				managedVoLTE:     managedVoLTE,
 				sessions:         make(map[string]*sessionState),
 				voiceSubscribers: make(map[uint64]VoiceEventFunc),
 			}

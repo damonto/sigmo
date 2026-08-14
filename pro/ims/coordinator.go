@@ -52,6 +52,7 @@ type coordinator struct {
 	networkPreferences  airplaneModePreferences
 	registry            *mmodem.Registry
 	registrationGroups  *RegistrationGroups
+	managedVoLTE        managedVoLTEOps
 
 	mu                sync.Mutex
 	closing           bool
@@ -118,12 +119,20 @@ func newCoordinator(cfg coordinatorConfig) *coordinator {
 		internet:            internet,
 		networkPreferences:  cfg.NetworkPreferences,
 		registrationGroups:  cfg.RegistrationGroups,
+		managedVoLTE:        defaultManagedVoLTEOps(),
 		sessions:            make(map[string]*sessionState),
 		airplaneSuspended:   make(map[string]bool),
 		deferredStarts:      make(map[string]deferredSessionStart),
 		smsSubmissions:      make(map[smsSubmissionKey]*smsSubmissionTracker),
 		voiceSubscribers:    make(map[uint64]VoiceEventFunc),
 	}
+}
+
+func (c *coordinator) managedVoLTEOperations() managedVoLTEOps {
+	if c == nil {
+		return defaultManagedVoLTEOps()
+	}
+	return c.managedVoLTE.withDefaults()
 }
 
 func (c *coordinator) volteStore() volteSettingsPersistence {
@@ -222,7 +231,7 @@ func (c *coordinator) releaseManagedVoLTEOnShutdown(ctx context.Context, modems 
 		if modem == nil {
 			continue
 		}
-		if err := releaseManagedVoLTE(cleanupCtx, modem, c.internet); err != nil {
+		if err := c.managedVoLTEOperations().release(cleanupCtx, modem, c.internet); err != nil {
 			result = errors.Join(result, fmt.Errorf("restore modem %s VoLTE: %w", modem.EquipmentIdentifier, err))
 		}
 		settings, err := c.VoLTESettings(cleanupCtx, modem)
@@ -360,7 +369,7 @@ func (c *coordinator) UpdateVoLTESettings(ctx context.Context, modem *mmodem.Mod
 	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancelCleanup()
 	result := error(nil)
-	if err := releaseManagedVoLTE(cleanupCtx, modem, c.internet); err != nil {
+	if err := c.managedVoLTEOperations().release(cleanupCtx, modem, c.internet); err != nil {
 		result = errors.Join(result, fmt.Errorf("restore modem VoLTE: %w", err))
 	}
 	// DataPath is only an activation preference while VoLTE is enabled. Once

@@ -14,7 +14,7 @@ import (
 
 const esimTransferFeature = "esimTransfer"
 
-var proESIMTransfer = func(_ context.Context, app *proApp) error {
+func configureESIMTransfer(_ context.Context, app *proApp) error {
 	runtime := app.runtime
 	app.RegisterWebsheets()
 	runtime.AddFeatures(esimTransferFeature)
