@@ -3,8 +3,8 @@ module github.com/damonto/sigmo
 go 1.26.3
 
 require (
-	github.com/damonto/euicc-go v1.1.3-0.20260812151427-d76dfa0b8d9e
-	github.com/damonto/wwan-go v0.0.0-20260812150829-343eef16246d
+	github.com/damonto/euicc-go v1.1.3-0.20260813015305-1f7e0d0c2ffc
+	github.com/damonto/wwan-go v0.0.0-20260814031343-b4e0891f3fec
 	github.com/go-playground/locales v0.14.1
 	github.com/go-playground/universal-translator v0.18.1
 	github.com/go-playground/validator/v10 v10.30.3
@@ -15,7 +15,7 @@ require (
 	github.com/nyaruka/phonenumbers v1.8.1
 	github.com/things-go/go-socks5 v0.1.1
 	github.com/wneessen/go-mail v0.8.1
-	golang.org/x/mod v0.39.0
+	golang.org/x/mod v0.40.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
 )

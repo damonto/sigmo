@@ -3,11 +3,11 @@ module github.com/damonto/sigmo/pro
 go 1.26.3
 
 require (
-	github.com/damonto/euicc-go v1.1.3-0.20260812151427-d76dfa0b8d9e
-	github.com/damonto/ims-go v0.0.0-20260812075311-2ea7784caff0
+	github.com/damonto/euicc-go v1.1.3-0.20260813015305-1f7e0d0c2ffc
+	github.com/damonto/ims-go v0.0.0-20260814031451-b2ed7305fd0b
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260811150907-666dafee1b6d
-	github.com/damonto/wwan-go v0.0.0-20260812150829-343eef16246d
+	github.com/damonto/wwan-go v0.0.0-20260814031343-b4e0891f3fec
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.3.1
 	github.com/modelcontextprotocol/go-sdk v1.7.0
@@ -51,8 +51,8 @@ require (
 	github.com/wneessen/go-mail v0.8.1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
-	golang.org/x/mod v0.39.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/mod v0.40.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
