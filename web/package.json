@@ -45,7 +45,7 @@
   "devDependencies": {
     "@prettier/plugin-oxc": "^0.2.2",
     "@tsconfig/node24": "^24.0.4",
-    "@types/jsdom": "^28.0.3",
+    "@types/jsdom": "^30.0.0",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vitejs/plugin-vue-jsx": "^5.1.6",
     "@vitest/eslint-plugin": "^1.6.24",
@@ -57,7 +57,7 @@
     "eslint-plugin-oxlint": "~1.72.0",
     "eslint-plugin-vue": "~10.10.0",
     "jiti": "^2.7.0",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.1",
     "npm-run-all2": "^9.0.3",
     "oxlint": "~1.73.0",
     "prettier": "3.9.6",
