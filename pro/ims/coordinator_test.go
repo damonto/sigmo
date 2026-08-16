@@ -7,7 +7,9 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	imsgo "github.com/damonto/ims-go"
@@ -552,22 +554,38 @@ func TestSIMProfileChangeRebuildsEnabledVoLTESession(t *testing.T) {
 
 	done := make(chan struct{})
 	close(done)
-	old := &sessionState{id: 1, done: done, profileID: "old-profile"}
+	const path = "/devices/modem-1"
+	old := &sessionState{
+		id:         1,
+		done:       done,
+		deviceKey:  path,
+		generation: 1,
+		profileID:  "old-profile",
+	}
 	internet := &fakeInternetRestorer{}
+	registrationGroups := &RegistrationGroups{}
+	oldRegistrationGroup := registrationGroups.Group("modem-1", "old-profile")
+	modem := qmiTestModem("modem-1")
+	modem.SIM = &mmodem.SIM{Identifier: "new-profile"}
 	coordinator := &coordinator{
-		access:           AccessVoLTE,
-		internet:         internet,
-		volteSettings:    settings,
+		access:             AccessVoLTE,
+		internet:           internet,
+		volteSettings:      settings,
+		registrationGroups: registrationGroups,
+		registry: modemFinderFunc(func(context.Context, string) (*mmodem.Modem, error) {
+			return modem, nil
+		}),
 		sessions:         map[string]*sessionState{"modem-1": old},
 		voiceSubscribers: make(map[uint64]VoiceEventFunc),
 	}
-	modem := qmiTestModem("modem-1")
-	modem.SIM = &mmodem.SIM{Identifier: "new-profile"}
 
 	coordinator.processModemEvent(ctx, mmodem.ModemEvent{
-		Type:       mmodem.ModemEventSIMChanged,
-		Modem:      modem,
-		Generation: modem.Generation(),
+		Type:                  mmodem.ModemEventSIMChanged,
+		Modem:                 modem,
+		Path:                  path,
+		Generation:            1,
+		PreviousSIMIdentifier: "old-profile",
+		SIMIdentifier:         "new-profile",
 	})
 
 	coordinator.mu.Lock()
@@ -579,10 +597,310 @@ func TestSIMProfileChangeRebuildsEnabledVoLTESession(t *testing.T) {
 	if current.profileID != "new-profile" {
 		t.Fatalf("new session profile ID = %q, want %q", current.profileID, "new-profile")
 	}
+	if registrationGroups.Group("modem-1", "old-profile") == oldRegistrationGroup {
+		t.Fatal("SIM profile change preserved the old registration group")
+	}
 	coordinator.stop(t.Context(), modem.EquipmentIdentifier)
 	if !slices.Contains(internet.calls, "internet:invalidate") {
 		t.Fatalf("Internet calls = %v, want generation invalidation", internet.calls)
 	}
+}
+
+func TestStaleSIMProfileChangeKeepsReplacementSession(t *testing.T) {
+	ctx := t.Context()
+	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+	if err != nil {
+		t.Fatalf("storage.Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("storage.Close() error = %v", err)
+		}
+	})
+	settings := newWiFiCallingSettingsStore(store)
+	if err := settings.Put(ctx, "old-profile", WiFiCallingSettings{
+		Enabled:  true,
+		Underlay: UnderlaySettings{Mode: UnderlayModeSystem},
+	}); err != nil {
+		t.Fatalf("Put() error = %v", err)
+	}
+
+	const path = "/devices/modem-1"
+	replacement := &sessionState{
+		id:         2,
+		deviceKey:  path,
+		generation: 2,
+		profileID:  "new-profile",
+	}
+	registrationGroups := &RegistrationGroups{}
+	replacementRegistrationGroup := registrationGroups.Group("modem-1", "new-profile")
+	coordinator := &coordinator{
+		access:              AccessWiFiCalling,
+		wifiCallingSettings: settings,
+		registrationGroups:  registrationGroups,
+		sessions:            map[string]*sessionState{"modem-1": replacement},
+		voiceSubscribers:    make(map[uint64]VoiceEventFunc),
+	}
+	stale := &mmodem.Modem{
+		EquipmentIdentifier: "modem-1",
+		SIM:                 &mmodem.SIM{Identifier: "old-profile"},
+	}
+
+	coordinator.processModemEvent(ctx, mmodem.ModemEvent{
+		Type:       mmodem.ModemEventSIMChanged,
+		Modem:      stale,
+		Path:       path,
+		Generation: 1,
+	})
+
+	coordinator.mu.Lock()
+	current := coordinator.sessions[stale.EquipmentIdentifier]
+	coordinator.mu.Unlock()
+	if current != replacement {
+		coordinator.stop(t.Context(), stale.EquipmentIdentifier)
+		t.Fatalf("session = %+v, want replacement generation", current)
+	}
+	if registrationGroups.Group("modem-1", "new-profile") != replacementRegistrationGroup {
+		t.Fatal("stale SIM profile change replaced the current registration group")
+	}
+}
+
+type modemFinderFunc func(context.Context, string) (*mmodem.Modem, error)
+
+func (f modemFinderFunc) Find(ctx context.Context, id string) (*mmodem.Modem, error) {
+	return f(ctx, id)
+}
+
+func TestStaleSIMProfileChangeAfterRemovalWaitsForAdded(t *testing.T) {
+	ctx := t.Context()
+	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+	if err != nil {
+		t.Fatalf("storage.Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("storage.Close() error = %v", err)
+		}
+	})
+	settings := newWiFiCallingSettingsStore(store)
+	for _, profileID := range []string{"old-profile", "new-profile"} {
+		if err := settings.Put(ctx, profileID, WiFiCallingSettings{
+			Enabled:  true,
+			Underlay: UnderlaySettings{Mode: UnderlayModeSystem},
+		}); err != nil {
+			t.Fatalf("Put(%q) error = %v", profileID, err)
+		}
+	}
+
+	const (
+		modemID = "modem-1"
+		path    = "/devices/modem-1"
+	)
+	stale := &mmodem.Modem{
+		EquipmentIdentifier: modemID,
+		SIM:                 &mmodem.SIM{Identifier: "old-profile"},
+	}
+	replacement := &mmodem.Modem{
+		EquipmentIdentifier: modemID,
+		SIM:                 &mmodem.SIM{Identifier: "new-profile"},
+	}
+	oldDone := make(chan struct{})
+	close(oldDone)
+	var current *mmodem.Modem
+	coordinator := &coordinator{
+		access:              AccessWiFiCalling,
+		wifiCallingSettings: settings,
+		registry: modemFinderFunc(func(_ context.Context, id string) (*mmodem.Modem, error) {
+			if id != modemID {
+				t.Fatalf("Find() id = %q, want %q", id, modemID)
+			}
+			if current == nil {
+				return nil, mmodem.ErrNotFound
+			}
+			return current, nil
+		}),
+		sessions: map[string]*sessionState{
+			modemID: {
+				id:         1,
+				modem:      stale,
+				done:       oldDone,
+				deviceKey:  path,
+				generation: 1,
+				profileID:  "old-profile",
+			},
+		},
+		voiceSubscribers: make(map[uint64]VoiceEventFunc),
+	}
+
+	coordinator.processModemEvent(ctx, mmodem.ModemEvent{
+		Type:       mmodem.ModemEventRemoved,
+		Modem:      stale,
+		Path:       path,
+		Generation: 1,
+	})
+	coordinator.processModemEvent(ctx, mmodem.ModemEvent{
+		Type:       mmodem.ModemEventSIMChanged,
+		Modem:      stale,
+		Path:       path,
+		Generation: 1,
+	})
+
+	coordinator.mu.Lock()
+	staleSession := coordinator.sessions[modemID]
+	coordinator.mu.Unlock()
+	if staleSession != nil {
+		coordinator.stop(t.Context(), modemID)
+		t.Fatalf("session modem = %p, want no stale session before Added", staleSession.modem)
+	}
+
+	current = replacement
+	coordinator.processModemEvent(ctx, mmodem.ModemEvent{
+		Type:       mmodem.ModemEventAdded,
+		Modem:      replacement,
+		Path:       path,
+		Generation: 2,
+	})
+
+	coordinator.mu.Lock()
+	session := coordinator.sessions[modemID]
+	coordinator.mu.Unlock()
+	if session == nil {
+		t.Fatal("Added did not start the replacement session")
+	}
+	if session.modem != replacement {
+		coordinator.stop(t.Context(), modemID)
+		t.Fatalf("session modem = %p, want replacement %p", session.modem, replacement)
+	}
+	coordinator.stop(t.Context(), modemID)
+}
+
+type keyedBlockingInvalidationInternet struct {
+	fakeInternetRestorer
+
+	mu                sync.Mutex
+	invalidations     map[string]int
+	firstEntered      chan struct{}
+	secondSameEntered chan struct{}
+	otherEntered      chan struct{}
+	releaseFirst      chan struct{}
+}
+
+func (r *keyedBlockingInvalidationInternet) InvalidateModem(_ context.Context, modem *mmodem.Modem) error {
+	r.mu.Lock()
+	r.invalidations[modem.EquipmentIdentifier]++
+	call := r.invalidations[modem.EquipmentIdentifier]
+	r.mu.Unlock()
+
+	switch {
+	case modem.EquipmentIdentifier == "modem-1" && call == 1:
+		close(r.firstEntered)
+		<-r.releaseFirst
+	case modem.EquipmentIdentifier == "modem-1" && call == 2:
+		close(r.secondSameEntered)
+	case modem.EquipmentIdentifier == "modem-2":
+		close(r.otherEntered)
+	}
+	return nil
+}
+
+func TestProcessModemEventsSerializesPerModem(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		internet := &keyedBlockingInvalidationInternet{
+			invalidations:     make(map[string]int),
+			firstEntered:      make(chan struct{}),
+			secondSameEntered: make(chan struct{}),
+			otherEntered:      make(chan struct{}),
+			releaseFirst:      make(chan struct{}),
+		}
+		releaseFirst := sync.OnceFunc(func() { close(internet.releaseFirst) })
+		defer releaseFirst()
+
+		coordinator := &coordinator{
+			access:              AccessWiFiCalling,
+			internet:            internet,
+			wifiCallingSettings: newWiFiCallingSettingsStore(nil),
+			sessions:            make(map[string]*sessionState),
+		}
+		modem := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
+		firstDone := make(chan struct{})
+		go func() {
+			defer close(firstDone)
+			coordinator.processModemEvent(t.Context(), mmodem.ModemEvent{
+				Type:       mmodem.ModemEventSIMChanged,
+				Modem:      modem,
+				Path:       "/devices/modem-1",
+				Generation: 1,
+			})
+		}()
+
+		select {
+		case <-internet.firstEntered:
+		case <-time.After(time.Second):
+			t.Fatal("first modem event did not enter invalidation")
+		}
+
+		sameDone := make(chan struct{})
+		go func() {
+			defer close(sameDone)
+			coordinator.processModemEvent(t.Context(), mmodem.ModemEvent{
+				Type:       mmodem.ModemEventRemoved,
+				Modem:      modem,
+				Path:       "/devices/modem-1",
+				Generation: 1,
+			})
+		}()
+
+		otherDone := make(chan struct{})
+		go func() {
+			defer close(otherDone)
+			coordinator.processModemEvent(t.Context(), mmodem.ModemEvent{
+				Type:       mmodem.ModemEventSIMChanged,
+				Modem:      &mmodem.Modem{EquipmentIdentifier: "modem-2"},
+				Path:       "/devices/modem-2",
+				Generation: 1,
+			})
+		}()
+
+		synctest.Wait()
+		select {
+		case <-internet.otherEntered:
+		default:
+			t.Fatal("unrelated modem event did not enter invalidation")
+		}
+		select {
+		case <-otherDone:
+		default:
+			t.Fatal("unrelated modem event did not finish")
+		}
+		select {
+		case <-internet.secondSameEntered:
+			t.Fatal("events for the same modem overlapped")
+		default:
+		}
+		select {
+		case <-sameDone:
+			t.Fatal("second event for the same modem finished before the first")
+		default:
+		}
+
+		releaseFirst()
+		synctest.Wait()
+		select {
+		case <-firstDone:
+		default:
+			t.Fatal("first modem event did not finish")
+		}
+		select {
+		case <-internet.secondSameEntered:
+		default:
+			t.Fatal("second event for the same modem did not run after the first")
+		}
+		select {
+		case <-sameDone:
+		default:
+			t.Fatal("second event for the same modem did not finish")
+		}
+	})
 }
 
 func TestDisableVoLTERestoresNormalInternetMode(t *testing.T) {

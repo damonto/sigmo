@@ -1018,6 +1018,11 @@ func (c *coordinator) stopSession(ctx context.Context, modemID string) {
 	c.finishDetachedSession(ctx, session, events, tracked)
 }
 
+func (c *coordinator) stopSessionByID(ctx context.Context, modemID string, sessionID uint64) {
+	session, events, tracked := c.detachSessionByID(modemID, sessionID)
+	c.finishDetachedSession(ctx, session, events, tracked)
+}
+
 func (c *coordinator) closeDetachedSession(ctx context.Context, session *sessionState, events []VoiceCall) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), imsSessionCleanupTimeout)
 	defer cancel()
@@ -1206,27 +1211,32 @@ func (c *coordinator) stopAllContext(ctx context.Context) ([]*mmodem.Modem, erro
 	return modems, result
 }
 
-func (c *coordinator) stopByDevice(ctx context.Context, deviceKey string, generation uint64) {
-	if deviceKey == "" {
-		return
+func (c *coordinator) stopByDevice(ctx context.Context, deviceKey string, generation uint64) bool {
+	if deviceKey == "" || generation == 0 {
+		return false
+	}
+	type sessionRef struct {
+		modemID   string
+		sessionID uint64
 	}
 	c.mu.Lock()
-	var modemIDs []string
+	var sessions []sessionRef
 	for modemID, session := range c.sessions {
-		if session != nil && session.deviceKey == deviceKey && (generation == 0 || session.generation == generation) {
-			modemIDs = append(modemIDs, modemID)
+		if session != nil && session.deviceKey == deviceKey && session.generation == generation {
+			sessions = append(sessions, sessionRef{modemID: modemID, sessionID: session.id})
 		}
 	}
 	for modemID, deferred := range c.deferredStarts {
 		if deferred.modem == nil || deferred.modem.Path() != deviceKey {
 			continue
 		}
-		if generation == 0 || deferred.modem.Generation() == generation {
+		if deferred.modem.Generation() == generation {
 			delete(c.deferredStarts, modemID)
 		}
 	}
 	c.mu.Unlock()
-	for _, modemID := range modemIDs {
-		c.stop(ctx, modemID)
+	for _, session := range sessions {
+		c.stopSessionByID(ctx, session.modemID, session.sessionID)
 	}
+	return len(sessions) != 0
 }

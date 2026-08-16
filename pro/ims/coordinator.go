@@ -12,6 +12,7 @@ import (
 
 	imsgo "github.com/damonto/ims-go"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
+	"github.com/damonto/sigmo/internal/pkg/keymutex"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/damonto/sigmo/pro/websheet"
@@ -50,10 +51,11 @@ type coordinator struct {
 	access              Access
 	internet            internetRestorer
 	networkPreferences  airplaneModePreferences
-	registry            *mmodem.Registry
+	registry            modemFinder
 	registrationGroups  *RegistrationGroups
 	managedVoLTE        managedVoLTEOps
 
+	modemEventMu      keymutex.KeyMutex
 	mu                sync.Mutex
 	closing           bool
 	cleanupWG         sync.WaitGroup
@@ -108,11 +110,15 @@ func newCoordinator(cfg coordinatorConfig) *coordinator {
 	if cfg.Internet != nil {
 		internet = cfg.Internet
 	}
+	var registry modemFinder
+	if cfg.Registry != nil {
+		registry = cfg.Registry
+	}
 	return &coordinator{
 		wifiCallingSettings: newWiFiCallingSettingsStore(cfg.Store),
 		volteSettings:       newVoLTESettingsStore(cfg.Store),
 		store:               cfg.Store,
-		registry:            cfg.Registry,
+		registry:            registry,
 		onIncoming:          cfg.OnIncoming,
 		websheets:           cfg.Websheets,
 		access:              cfg.Access,
@@ -178,45 +184,67 @@ func (c *coordinator) Run(ctx context.Context, registry *mmodem.Registry) (runEr
 }
 
 func (c *coordinator) processModemEvent(ctx context.Context, event mmodem.ModemEvent) {
+	if event.Modem == nil {
+		return
+	}
+	// Runtime SIM watchers and registry recovery publish from different
+	// goroutines. Order transitions for one IMEI without letting a
+	// slow cleanup block unrelated modems.
+	modemID := event.Modem.EquipmentIdentifier
+	if err := c.modemEventMu.LockContext(ctx, modemID); err != nil {
+		return
+	}
+	defer c.modemEventMu.Unlock(modemID)
+
 	switch event.Type {
 	case mmodem.ModemEventAdded:
-		if event.Modem != nil {
-			c.startIfEnabled(ctx, event.Modem)
-		}
+		c.startIfEnabled(ctx, event.Modem)
 	case mmodem.ModemEventChanged:
-		if event.Previous != nil {
-			if c.internet != nil {
-				if err := c.internet.InvalidateModem(ctx, event.Previous); err != nil {
-					slog.Warn("invalidate Internet after modem replacement", "imei", event.Previous.EquipmentIdentifier, "generation", event.Previous.Generation(), "error", err)
-				}
-			}
-			previousPath := event.PreviousPath
-			if previousPath == "" {
-				previousPath = event.Previous.Path()
-			}
-			c.stopByDevice(ctx, previousPath, event.Previous.Generation())
+		if event.Previous == nil {
+			return
 		}
-		if event.Modem != nil {
-			c.startIfEnabled(ctx, event.Modem)
+		if c.internet != nil {
+			if err := c.internet.InvalidateModem(ctx, event.Previous); err != nil {
+				slog.Warn("invalidate Internet after modem replacement", "imei", event.Previous.EquipmentIdentifier, "generation", event.Previous.Generation(), "error", err)
+			}
 		}
+		c.stopByDevice(ctx, event.PreviousPath, event.Previous.Generation())
+		c.startIfEnabled(ctx, event.Modem)
 	case mmodem.ModemEventRemoved:
 		c.stopByDevice(ctx, event.Path, event.Generation)
-		if c.internet != nil && event.Modem != nil {
+		if c.internet != nil {
 			if err := c.internet.InvalidateModem(ctx, event.Modem); err != nil {
 				slog.Warn("invalidate Internet after modem removal", "imei", event.Modem.EquipmentIdentifier, "generation", event.Generation, "error", err)
 			}
 		}
 	case mmodem.ModemEventSIMChanged:
-		if event.Modem == nil {
-			return
-		}
 		if c.internet != nil {
 			if err := c.internet.InvalidateModem(ctx, event.Modem); err != nil {
 				slog.Warn("invalidate Internet after SIM profile change", "imei", event.Modem.EquipmentIdentifier, "generation", event.Generation, "error", err)
 			}
 		}
-		c.stop(ctx, event.Modem.EquipmentIdentifier)
-		c.startIfEnabled(ctx, event.Modem)
+		stopped := c.stopByDevice(ctx, event.Path, event.Generation)
+		if stopped && c.registrationGroups != nil {
+			c.registrationGroups.RotateForSIMChange(event)
+		}
+		if c.registry == nil {
+			return
+		}
+		current, err := c.registry.Find(ctx, event.Modem.EquipmentIdentifier)
+		if errors.Is(err, mmodem.ErrNotFound) {
+			// Removed is published after the registry drops the old
+			// generation. Wait for Added instead of resurrecting it.
+			return
+		}
+		if err != nil {
+			slog.Warn("resolve modem after SIM profile change", "imei", event.Modem.EquipmentIdentifier, "error", err)
+			return
+		}
+		if current == nil {
+			slog.Warn("resolve modem after SIM profile change", "imei", event.Modem.EquipmentIdentifier, "reason", "registry returned nil modem")
+			return
+		}
+		c.startIfEnabled(ctx, current)
 	}
 }
 
