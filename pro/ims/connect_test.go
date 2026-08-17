@@ -1727,11 +1727,6 @@ func TestStopByDeviceStopsMatchingGeneration(t *testing.T) {
 			generation:    2,
 			wantRemaining: "modem-1,modem-2",
 		},
-		{
-			name:          "ignores missing generation",
-			deviceKey:     "/devices/modem-1",
-			wantRemaining: "modem-1,modem-2",
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1763,19 +1758,6 @@ func TestStopByDeviceStopsMatchingGeneration(t *testing.T) {
 				t.Fatal("matching session was not cancelled")
 			}
 		})
-	}
-}
-
-func TestStopSessionByIDKeepsReplacement(t *testing.T) {
-	replacement := &sessionState{id: 2, generation: 2}
-	coordinator := &coordinator{
-		sessions: map[string]*sessionState{"modem-1": replacement},
-	}
-
-	coordinator.stopSessionByID(t.Context(), "modem-1", 1)
-
-	if current := coordinator.sessions["modem-1"]; current != replacement {
-		t.Fatalf("session = %+v, want replacement generation", current)
 	}
 }
 

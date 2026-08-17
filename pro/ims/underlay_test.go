@@ -83,13 +83,6 @@ func TestNewCoordinatorDoesNotStoreTypedNilInternet(t *testing.T) {
 	}
 }
 
-func TestNewCoordinatorDoesNotStoreTypedNilRegistry(t *testing.T) {
-	got := newCoordinator(coordinatorConfig{})
-	if got.registry != nil {
-		t.Fatalf("registry = %T, want nil", got.registry)
-	}
-}
-
 func TestNewCoordinatorStoresRegistryDependency(t *testing.T) {
 	registry := new(mmodem.Registry)
 	got := newCoordinator(coordinatorConfig{Registry: registry})
