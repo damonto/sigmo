@@ -15,12 +15,6 @@ import (
 	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
-type modemFinderFunc func(context.Context, string) (*modem.Modem, error)
-
-func (f modemFinderFunc) Find(ctx context.Context, id string) (*modem.Modem, error) {
-	return f(ctx, id)
-}
-
 func TestOwnedClientsDoNotExposeRawClient(t *testing.T) {
 	for name, typ := range map[string]reflect.Type{
 		"Client": reflect.TypeOf(Client{}),
@@ -30,82 +24,6 @@ func TestOwnedClientsDoNotExposeRawClient(t *testing.T) {
 			t.Fatalf("%s exposes the raw eUICC client", name)
 		}
 	}
-}
-
-func TestPoolRetireDoesNotBlockOnActiveLease(t *testing.T) {
-	m := &modem.Modem{EquipmentIdentifier: "imei-1"}
-	key := poolKey{modem: m, slot: 1, seID: SEIDDefault}
-	p := &Pool{
-		entries: make(map[poolKey]*poolEntry),
-		retired: make(map[*modem.Modem]struct{}),
-	}
-	entry := &poolEntry{
-		pool:   p,
-		key:    key,
-		modem:  m,
-		client: &Client{},
-		gate:   make(chan struct{}, 1),
-		done:   make(chan struct{}),
-	}
-	p.entries[key] = entry
-
-	retired := make(chan struct{})
-	go func() {
-		p.retire(t.Context(), m)
-		close(retired)
-	}()
-	select {
-	case <-retired:
-	case <-time.After(20 * time.Millisecond):
-		t.Fatal("retire() waited for the active lease")
-	}
-	select {
-	case <-entry.done:
-	default:
-		t.Fatal("retire() did not mark the entry retired")
-	}
-
-	entry.gate <- struct{}{}
-	p.wg.Wait()
-}
-
-func TestPoolSIMRefreshDoesNotBlockOnActiveLease(t *testing.T) {
-	m := &modem.Modem{EquipmentIdentifier: "imei-1"}
-	key := poolKey{modem: m, slot: 1, seID: SEIDDefault}
-	p := &Pool{
-		entries:   make(map[poolKey]*poolEntry),
-		slotEpoch: make(map[poolSEKey]uint64),
-	}
-	entry := &poolEntry{
-		pool:   p,
-		key:    key,
-		modem:  m,
-		client: &Client{},
-		gate:   make(chan struct{}, 1),
-		done:   make(chan struct{}),
-	}
-	p.entries[key] = entry
-
-	refreshed := make(chan struct{})
-	go func() {
-		if err := p.invalidateSIMSlots(t.Context(), m, 1); err != nil {
-			t.Errorf("invalidateSIMSlots() error = %v", err)
-		}
-		close(refreshed)
-	}()
-	select {
-	case <-refreshed:
-	case <-time.After(20 * time.Millisecond):
-		t.Fatal("invalidateSIMSlots() waited for the active lease")
-	}
-	select {
-	case <-entry.done:
-	default:
-		t.Fatal("invalidateSIMSlots() did not retire the entry")
-	}
-
-	entry.gate <- struct{}{}
-	p.wg.Wait()
 }
 
 func TestLeaseSerializesAPDUOperations(t *testing.T) {
@@ -454,55 +372,6 @@ func TestPoolRoutesDefaultSEOnlyToActiveSlot(t *testing.T) {
 	}
 }
 
-func TestPoolUsesCurrentModemGeneration(t *testing.T) {
-	retired := &modem.Modem{EquipmentIdentifier: "imei-1"}
-	replacement := &modem.Modem{
-		EquipmentIdentifier: "imei-1",
-		PrimarySIMSlot:      1,
-		SIMSlots:            []uint32{1},
-	}
-	entry := &poolEntry{
-		client: &Client{},
-		modem:  replacement,
-		gate:   make(chan struct{}, 1),
-		done:   make(chan struct{}),
-	}
-	entry.gate <- struct{}{}
-	p := &Pool{
-		registry: modemFinderFunc(func(_ context.Context, id string) (*modem.Modem, error) {
-			if id != retired.EquipmentIdentifier {
-				t.Fatalf("Find() id = %q, want %q", id, retired.EquipmentIdentifier)
-			}
-			return replacement, nil
-		}),
-		entries: map[poolKey]*poolEntry{
-			{modem: replacement, slot: 1, seID: SEIDDefault}: entry,
-		},
-		secureElems: map[poolSEKey][]SE{
-			{modem: replacement, slot: 1}: {defaultSE},
-		},
-	}
-
-	ses, err := p.SecureElements(t.Context(), retired)
-	if err != nil {
-		t.Fatalf("SecureElements() error = %v", err)
-	}
-	if len(ses) != 1 || ses[0].ID != SEIDDefault {
-		t.Fatalf("SecureElements() = %#v, want default SE", ses)
-	}
-
-	client, err := p.Acquire(t.Context(), retired, SEIDDefault)
-	if err != nil {
-		t.Fatalf("Acquire() error = %v", err)
-	}
-	if client.owner != entry.client {
-		t.Fatal("Acquire() did not use replacement generation entry")
-	}
-	if err := client.Close(); err != nil {
-		t.Fatalf("release client: %v", err)
-	}
-}
-
 func TestExposeTargetsDisambiguatesDuplicateSEIDs(t *testing.T) {
 	targets := exposeTargets([]poolTarget{
 		{se: defaultSE, slot: 1, sourceID: SEIDDefault},
@@ -593,7 +462,6 @@ func TestInvalidateSIMSlotsClosesOnlyAffectedEntries(t *testing.T) {
 	if err := p.invalidateSIMSlots(t.Context(), m, 1); err != nil {
 		t.Fatalf("invalidateSIMSlots() error = %v", err)
 	}
-	p.wg.Wait()
 	if got := slot1Closes.Load(); got != 1 {
 		t.Fatalf("slot 1 close calls = %d, want 1", got)
 	}

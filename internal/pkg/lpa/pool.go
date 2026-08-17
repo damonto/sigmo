@@ -29,7 +29,7 @@ var (
 // concurrent use.
 type Pool struct {
 	store    *settings.Store
-	registry modemFinder
+	registry *modem.Registry
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -46,12 +46,7 @@ type Pool struct {
 	unsubscribe func()
 }
 
-type modemFinder interface {
-	Find(context.Context, string) (*modem.Modem, error)
-}
-
 type poolKey struct {
-	// modem identifies the transport generation that owns the client.
 	modem *modem.Modem
 	slot  uint8
 	seID  string
@@ -139,7 +134,7 @@ func (p *Pool) SecureElements(ctx context.Context, m *modem.Modem) ([]SE, error)
 	if m == nil {
 		return nil, errors.New("modem is required")
 	}
-	_, targets, err := p.operationTargets(ctx, m)
+	targets, err := p.targets(ctx, m)
 	if err != nil {
 		return nil, err
 	}
@@ -162,64 +157,35 @@ func (p *Pool) Acquire(ctx context.Context, m *modem.Modem, seID string) (*Lease
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil, errPoolClosed
+	}
+	if p.isRetiredLocked(m) {
+		p.mu.Unlock()
+		return nil, errPoolModemRetired
+	}
+	p.mu.Unlock()
 	seID = strings.TrimSpace(seID)
 	if seID == "" {
 		return nil, ErrSERequired
 	}
-	for {
-		current, targets, err := p.operationTargets(ctx, m)
-		if err != nil {
-			return nil, err
-		}
-		matched := false
-		for _, target := range targets {
-			if target.se.ID != seID {
-				continue
+	targets, err := p.targets(ctx, m)
+	if err != nil {
+		return nil, err
+	}
+	for _, target := range targets {
+		if target.se.ID == seID {
+			key := poolKey{modem: m, slot: target.slot, seID: target.sourceID}
+			entry := p.entry(key)
+			if entry == nil {
+				return nil, fmt.Errorf("%w: %s", ErrSENotFound, seID)
 			}
-			matched = true
-			client, err := p.createAndLease(ctx, poolKey{
-				modem: current,
-				slot:  target.slot,
-				seID:  target.sourceID,
-			}, target.se.AID)
-			if isPoolTransition(err) {
-				if p.registry == nil {
-					return nil, err
-				}
-				break
-			}
-			return client, err
-		}
-		if !matched {
-			return nil, fmt.Errorf("%w: %s", ErrSENotFound, seID)
+			return lease(ctx, entry)
 		}
 	}
-}
-
-func (p *Pool) operationTargets(ctx context.Context, m *modem.Modem) (*modem.Modem, []poolTarget, error) {
-	for {
-		current := m
-		if p.registry != nil {
-			var err error
-			current, err = p.registry.Find(ctx, m.EquipmentIdentifier)
-			if err != nil {
-				return nil, nil, err
-			}
-		}
-		targets, err := p.targets(ctx, current)
-		if !isPoolTransition(err) {
-			return current, targets, err
-		}
-		if p.registry == nil {
-			return nil, nil, err
-		}
-	}
-}
-
-func isPoolTransition(err error) bool {
-	return errors.Is(err, errSIMSlotChanged) ||
-		errors.Is(err, errPoolModemRetired) ||
-		errors.Is(err, errPoolEntryRetired)
+	return nil, fmt.Errorf("%w: %s", ErrSENotFound, seID)
 }
 
 func (p *Pool) targets(ctx context.Context, m *modem.Modem) ([]poolTarget, error) {
@@ -729,15 +695,8 @@ func (p *Pool) invalidateSIMSlots(ctx context.Context, m *modem.Modem, values ..
 			}
 		}
 	}
-	if len(entries) > 0 {
-		p.wg.Go(func() {
-			if err := p.closeEntries(ctx, entries); err != nil {
-				m.Logger().Debug("close refreshed LPA clients", "error", err)
-			}
-		})
-	}
 	p.mu.Unlock()
-	return nil
+	return p.closeEntries(ctx, entries)
 }
 
 func (p *Pool) handleModemEvent(ctx context.Context, event modem.ModemEvent) {
@@ -798,14 +757,10 @@ func (p *Pool) retire(ctx context.Context, m *modem.Modem) {
 			close(ready)
 		}
 	}
-	if len(entries) > 0 {
-		p.wg.Go(func() {
-			if err := p.closeEntries(ctx, entries); err != nil {
-				m.Logger().Debug("close retired LPA clients", "error", err)
-			}
-		})
-	}
 	p.mu.Unlock()
+	if err := p.closeEntries(ctx, entries); err != nil {
+		m.Logger().Debug("close retired LPA clients", "error", err)
+	}
 }
 
 // Close releases all persistent eUICC channels. It is safe to call more than once.

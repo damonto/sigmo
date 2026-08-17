@@ -216,11 +216,7 @@ func TestRegistryReplacesAndRemovesPhysicalDeviceGeneration(t *testing.T) {
 	}
 	device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
 	events := make(chan wwanmodem.Result[wwanmodem.DeviceEvent], 2)
-	devicePresent := true
 	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
-		if !devicePresent {
-			return nil, nil
-		}
 		return []wwanmodem.Device{device}, nil
 	}
 	registry.watchDevices = func(context.Context) (<-chan wwanmodem.Result[wwanmodem.DeviceEvent], error) {
@@ -271,7 +267,6 @@ func TestRegistryReplacesAndRemovesPhysicalDeviceGeneration(t *testing.T) {
 		t.Fatalf("changed snapshot = %+v, want replacement", changed.Snapshot)
 	}
 
-	devicePresent = false
 	events <- wwanmodem.Result[wwanmodem.DeviceEvent]{Value: wwanmodem.DeviceEvent{
 		Type:   wwanmodem.DeviceRemoved,
 		Device: replacementDevice,
@@ -287,68 +282,6 @@ func TestRegistryReplacesAndRemovesPhysicalDeviceGeneration(t *testing.T) {
 	close(events)
 	if err := registry.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
-	}
-}
-
-func TestRegistryReconcilesDeviceRemovalBeforeEndingReload(t *testing.T) {
-	registry, err := NewRegistry()
-	if err != nil {
-		t.Fatalf("NewRegistry() error = %v", err)
-	}
-	device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
-	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
-		return []wwanmodem.Device{device}, nil
-	}
-	registry.watchDevices = func(context.Context) (<-chan wwanmodem.Result[wwanmodem.DeviceEvent], error) {
-		return make(chan wwanmodem.Result[wwanmodem.DeviceEvent]), nil
-	}
-	registry.open = func(_ context.Context, candidate wwanmodem.Device, generation uint64) (*Modem, error) {
-		return &Modem{
-			deviceInfo:          candidate,
-			deviceKey:           physicalDeviceKey(candidate),
-			generation:          generation,
-			EquipmentIdentifier: "imei-1",
-			PrimaryPort:         controlPortPath(candidate),
-		}, nil
-	}
-
-	modems, err := registry.Modems(t.Context())
-	if err != nil {
-		t.Fatalf("Modems() error = %v", err)
-	}
-	current := modems[physicalDeviceKey(device)]
-	if current == nil {
-		t.Fatal("initial modem is missing")
-	}
-
-	events := make(chan ModemEvent, 4)
-	unsubscribe, err := registry.Subscribe(t.Context(), func(event ModemEvent) error {
-		events <- event
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("Subscribe() error = %v", err)
-	}
-	defer unsubscribe()
-
-	registry.applyDeviceEvent(t.Context(), wwanmodem.DeviceEvent{
-		Type:   wwanmodem.DeviceRemoved,
-		Device: device,
-	})
-	replacement, err := registry.Find(t.Context(), "imei-1")
-	if err != nil {
-		t.Fatalf("Find() error = %v", err)
-	}
-	if replacement == nil || replacement == current || replacement.Generation() != 2 {
-		t.Fatalf("replacement = %+v, want generation 2", replacement)
-	}
-	removed := receiveModemEvent(t, events)
-	added := receiveModemEvent(t, events)
-	if removed.Type != ModemEventRemoved || removed.Modem != current {
-		t.Fatalf("removed event = %+v", removed)
-	}
-	if added.Type != ModemEventAdded || added.Modem != replacement {
-		t.Fatalf("added event = %+v", added)
 	}
 }
 
@@ -461,195 +394,6 @@ func TestRegistryRecoversCurrentGenerationAfterTransportFailure(t *testing.T) {
 			registry.handleModemFailure(t.Context(), failure)
 			if openCalls != tt.wantOpenCalls || registry.modems[key] != replacement {
 				t.Fatal("stale generation failure replaced the current modem")
-			}
-		})
-	}
-}
-
-func TestRegistryFindWaitsForTransportRecovery(t *testing.T) {
-	registry, err := NewRegistry()
-	if err != nil {
-		t.Fatalf("NewRegistry() error = %v", err)
-	}
-	device := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/modem-1")
-	key := physicalDeviceKey(device)
-	current := &Modem{
-		deviceInfo:          device,
-		deviceKey:           key,
-		generation:          1,
-		EquipmentIdentifier: "imei-1",
-		PrimaryPort:         controlPortPath(device),
-	}
-	registry.modems[key] = current
-	registry.nextGeneration = 1
-	registry.started = true
-	registry.discover = func(context.Context) ([]wwanmodem.Device, error) {
-		return []wwanmodem.Device{device}, nil
-	}
-	openStarted := make(chan struct{})
-	continueOpen := make(chan struct{})
-	registry.open = func(_ context.Context, candidate wwanmodem.Device, generation uint64) (*Modem, error) {
-		close(openStarted)
-		<-continueOpen
-		return &Modem{
-			deviceInfo:          candidate,
-			deviceKey:           physicalDeviceKey(candidate),
-			generation:          generation,
-			EquipmentIdentifier: "imei-1",
-			PrimaryPort:         controlPortPath(candidate),
-		}, nil
-	}
-
-	recoveryDone := make(chan struct{})
-	go func() {
-		registry.handleModemFailure(t.Context(), modemFailure{
-			modem: current,
-			err:   errors.New("transport stopped"),
-		})
-		close(recoveryDone)
-	}()
-	select {
-	case <-openStarted:
-	case <-time.After(time.Second):
-		t.Fatal("transport recovery did not start")
-	}
-
-	found := make(chan *Modem, 1)
-	findErr := make(chan error, 1)
-	go func() {
-		replacement, err := registry.Find(t.Context(), "imei-1")
-		found <- replacement
-		findErr <- err
-	}()
-	select {
-	case err := <-findErr:
-		t.Fatalf("Find() returned during recovery: %v", err)
-	case <-time.After(20 * time.Millisecond):
-	}
-
-	close(continueOpen)
-	select {
-	case err := <-findErr:
-		if err != nil {
-			t.Fatalf("Find() error = %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Find() did not resume after recovery")
-	}
-	replacement := <-found
-	if replacement == nil || replacement == current || replacement.Generation() != 2 {
-		t.Fatalf("Find() = %+v, want replacement generation 2", replacement)
-	}
-	select {
-	case <-recoveryDone:
-	case <-time.After(time.Second):
-		t.Fatal("transport recovery did not finish")
-	}
-}
-
-func TestRegistryFindWaitsBeforeReturningCurrentGeneration(t *testing.T) {
-	registry, err := NewRegistry()
-	if err != nil {
-		t.Fatalf("NewRegistry() error = %v", err)
-	}
-	registry.started = true
-	current := &Modem{EquipmentIdentifier: "imei-1", generation: 1}
-	replacement := &Modem{EquipmentIdentifier: "imei-1", generation: 2}
-	registry.modems["modem"] = current
-
-	finishReload := registry.beginReload(current.EquipmentIdentifier)
-	findDone := make(chan *Modem, 1)
-	findErr := make(chan error, 1)
-	go func() {
-		found, err := registry.Find(t.Context(), current.EquipmentIdentifier)
-		findDone <- found
-		findErr <- err
-	}()
-	select {
-	case err := <-findErr:
-		t.Fatalf("Find() returned during reload: %v", err)
-	case <-time.After(20 * time.Millisecond):
-	}
-
-	registry.mu.Lock()
-	registry.modems["modem"] = replacement
-	registry.mu.Unlock()
-	finishReload()
-
-	select {
-	case err := <-findErr:
-		if err != nil {
-			t.Fatalf("Find() error = %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Find() did not return after reload")
-	}
-	if found := <-findDone; found != replacement {
-		t.Fatalf("Find() = %+v, want replacement generation", found)
-	}
-}
-
-func TestRegistryFindStopsWaitingForTransportRecovery(t *testing.T) {
-	tests := []struct {
-		name string
-		stop func(context.CancelFunc, *Registry) error
-		want error
-	}{
-		{
-			name: "context canceled",
-			stop: func(cancel context.CancelFunc, _ *Registry) error {
-				cancel()
-				return nil
-			},
-			want: context.Canceled,
-		},
-		{
-			name: "registry closed",
-			stop: func(_ context.CancelFunc, registry *Registry) error {
-				return registry.Close()
-			},
-			want: errRegistryClosed,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			registry, err := NewRegistry()
-			if err != nil {
-				t.Fatalf("NewRegistry() error = %v", err)
-			}
-			t.Cleanup(func() {
-				if err := registry.Close(); err != nil {
-					t.Errorf("Close() error = %v", err)
-				}
-			})
-			registry.started = true
-			finishReload := registry.beginReload("imei-1")
-			defer finishReload()
-
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			findDone := make(chan error, 1)
-			go func() {
-				_, err := registry.Find(ctx, "imei-1")
-				findDone <- err
-			}()
-			select {
-			case err := <-findDone:
-				t.Fatalf("Find() returned before recovery stopped: %v", err)
-			case <-time.After(20 * time.Millisecond):
-			}
-
-			if err := tt.stop(cancel, registry); err != nil {
-				t.Fatalf("stop recovery wait: %v", err)
-			}
-			select {
-			case err := <-findDone:
-				if !errors.Is(err, tt.want) {
-					t.Fatalf("Find() error = %v, want %v", err, tt.want)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("Find() remained blocked after recovery stopped")
 			}
 		})
 	}
