@@ -48,6 +48,8 @@ type Registry struct {
 	openDevice   deviceControlOpener
 	failures     chan modemFailure
 	reloads      chan modemReloadRequest
+	// reloading keeps stable IMEI lookups in the replacement window.
+	reloading map[string]chan struct{}
 	// A physical reconnect resets the bounded CID-exhaustion recovery state.
 	cidRecoveryStates map[string]cidRecoveryState
 	simIdentities     map[*Modem]simIdentity
@@ -127,6 +129,7 @@ func NewRegistry() (*Registry, error) {
 		open:              openDiscoveredModem,
 		failures:          make(chan modemFailure, 32),
 		reloads:           make(chan modemReloadRequest, 8),
+		reloading:         make(map[string]chan struct{}),
 		done:              make(chan struct{}),
 		cidRecoveryStates: make(map[string]cidRecoveryState),
 		simIdentities:     make(map[*Modem]simIdentity),
@@ -152,7 +155,35 @@ func (r *Registry) Find(ctx context.Context, id string) (*Modem, error) {
 	if err := r.ensureStarted(ctx); err != nil {
 		return nil, err
 	}
-	return r.findModem(id)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, fmt.Errorf("%w: equipment identifier is empty", ErrNotFound)
+	}
+	for {
+		r.mu.RLock()
+		current := r.findModemLocked(id)
+		reloadDone := r.reloading[id]
+		closed := r.closed
+		done := r.done
+		r.mu.RUnlock()
+		if closed {
+			return nil, errRegistryClosed
+		}
+		if reloadDone != nil {
+			select {
+			case <-reloadDone:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-done:
+				return nil, errRegistryClosed
+			}
+		}
+		if current != nil {
+			return current, nil
+		}
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
+	}
 }
 
 // Reload retires one modem generation and waits for Registry to open its
@@ -309,12 +340,19 @@ func (r *Registry) findModem(id string) (*Modem, error) {
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for _, modem := range r.modems {
-		if strings.TrimSpace(modem.EquipmentIdentifier) == id {
-			return modem, nil
-		}
+	if current := r.findModemLocked(id); current != nil {
+		return current, nil
 	}
 	return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
+}
+
+func (r *Registry) findModemLocked(id string) *Modem {
+	for _, modem := range r.modems {
+		if strings.TrimSpace(modem.EquipmentIdentifier) == id {
+			return modem
+		}
+	}
+	return nil
 }
 
 func (r *Registry) copyModemsLocked() map[string]*Modem { return maps.Clone(r.modems) }

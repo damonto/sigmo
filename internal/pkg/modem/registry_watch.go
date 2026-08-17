@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/damonto/wwan-go/qcom"
@@ -218,7 +219,13 @@ func (r *Registry) reconcile(ctx context.Context) error {
 		if modem != nil && devicePresentInSnapshot(modem.deviceInfo, present) {
 			continue
 		}
+		if modem == nil {
+			r.removeModem(key, modem)
+			continue
+		}
+		finishReload := r.beginReload(modem.EquipmentIdentifier)
 		r.removeModem(key, modem)
+		finishReload()
 	}
 	return nil
 }
@@ -242,7 +249,20 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 		r.mu.RLock()
 		existingKey, existing := r.findByDeviceLocked(event.Device)
 		r.mu.RUnlock()
+		if existing == nil {
+			return
+		}
+		finishReload := r.beginReload(existing.EquipmentIdentifier)
+		defer finishReload()
 		r.removeModem(existingKey, existing)
+		if ctx.Err() != nil {
+			return
+		}
+		// A device reset can emit Removed before the replacement is visible
+		// to the watcher. Reconcile the snapshot before exposing a gap.
+		if err := r.reconcile(ctx); err != nil {
+			slog.Warn("reconcile modem after device removal", "device", controlPortPath(event.Device), "error", err)
+		}
 		return
 	}
 	if event.Type == wwanmodem.DeviceAdded {
@@ -257,6 +277,11 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 	}
 	if existing == nil && r.cidRecoveryState(key) == cidRecoverySuspended {
 		return
+	}
+	var finishReload func()
+	if existing != nil {
+		finishReload = r.beginReload(existing.EquipmentIdentifier)
+		defer finishReload()
 	}
 
 	var (
@@ -369,6 +394,8 @@ func (r *Registry) handleModemFailure(ctx context.Context, failure modemFailure)
 		message = "modem QMI client IDs exhausted"
 	}
 	slog.Warn(message, "imei", failure.modem.EquipmentIdentifier, "generation", failure.modem.Generation(), "error", failure.err)
+	finishReload := r.beginReload(failure.modem.EquipmentIdentifier)
+	defer finishReload()
 	r.removeModem(key, failure.modem)
 	if ctx.Err() != nil {
 		return
@@ -402,6 +429,8 @@ func (r *Registry) reloadModem(ctx context.Context, current *Modem) (*Modem, err
 	}
 
 	slog.Info("reload modem generation", "imei", current.EquipmentIdentifier, "generation", current.Generation())
+	finishReload := r.beginReload(current.EquipmentIdentifier)
+	defer finishReload()
 	r.removeModem(key, current)
 	if err := r.recoverRemovedModem(ctx, current); err != nil {
 		return nil, err
@@ -414,6 +443,29 @@ func (r *Registry) reloadModem(ctx context.Context, current *Modem) (*Modem, err
 		return nil, fmt.Errorf("%w: replacement for modem generation %d", ErrNotFound, current.Generation())
 	}
 	return replacement, nil
+}
+
+// beginReload is called only by the serialized registry device loop.
+func (r *Registry) beginReload(id string) func() {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return func() {}
+	}
+	done := make(chan struct{})
+	r.mu.Lock()
+	if r.reloading == nil {
+		r.reloading = make(map[string]chan struct{})
+	}
+	r.reloading[id] = done
+	r.mu.Unlock()
+	return func() {
+		r.mu.Lock()
+		if r.reloading[id] == done {
+			delete(r.reloading, id)
+			close(done)
+		}
+		r.mu.Unlock()
+	}
 }
 
 func (r *Registry) recoverRemovedModem(ctx context.Context, failed *Modem) error {
