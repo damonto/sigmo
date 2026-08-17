@@ -145,6 +145,7 @@ describe('SettingsUpdatesView', () => {
       },
       license: {
         status: 'active',
+        deviceId: '0123456789abcdef0123456789abcdef',
         telegramId: 10001,
         displayName: 'Alice Example',
         username: 'alice',
@@ -159,6 +160,9 @@ describe('SettingsUpdatesView', () => {
     expect(wrapper.text()).toContain('Alice Example')
     expect(wrapper.text()).toContain('@alice')
     expect(wrapper.text()).toContain('Telegram ID: 10001')
+    expect(wrapper.text()).toContain(
+      'settings.updates.deviceId: 0123456789abcdef0123456789abcdef',
+    )
     expect(wrapper.text()).toContain('settings.updates.licenseExpires')
     expect(wrapper.text()).toContain('settings.updates.licenseOfflineUntil')
   })

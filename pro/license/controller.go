@@ -173,6 +173,7 @@ func (c *Controller) Licensee() *appupdate.Licensee {
 	expiresAt := c.lease.ExpiresAt
 	return &appupdate.Licensee{
 		Status:       c.lease.Status,
+		DeviceID:     c.lease.DeviceID,
 		TelegramID:   c.lease.TelegramID,
 		DisplayName:  c.lease.DisplayName,
 		Username:     c.lease.Username,

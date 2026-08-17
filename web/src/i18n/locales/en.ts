@@ -124,6 +124,7 @@ const en = {
       installNow: 'Update now',
       saved: 'Update settings saved.',
       licensedTo: 'Licensed to',
+      deviceId: 'Device ID',
       licenseStatus: 'Status',
       licenseActive: 'Active',
       licenseExpires: 'Authorization expires',

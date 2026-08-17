@@ -85,7 +85,7 @@ func TestLicenseeReturnsDefensiveTimeCopies(t *testing.T) {
 	controller.setLease(&lease, nil)
 
 	licensee := controller.Licensee()
-	if licensee == nil || licensee.ExpiresAt == nil {
+	if licensee == nil || licensee.DeviceID != controller.identity.DeviceID || licensee.ExpiresAt == nil {
 		t.Fatalf("Licensee() = %+v", licensee)
 	}
 	*licensee.ExpiresAt = time.Time{}

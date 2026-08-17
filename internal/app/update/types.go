@@ -49,6 +49,7 @@ type Source interface {
 
 type Licensee struct {
 	Status       string     `json:"status"`
+	DeviceID     string     `json:"deviceId"`
 	TelegramID   int64      `json:"telegramId"`
 	DisplayName  string     `json:"displayName"`
 	Username     string     `json:"username,omitempty"`

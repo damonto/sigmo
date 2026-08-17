@@ -1,5 +1,6 @@
 export type Licensee = {
   status: string
+  deviceId: string
   telegramId: number
   displayName: string
   username?: string

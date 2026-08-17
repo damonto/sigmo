@@ -397,6 +397,9 @@ docker compose pull &amp;&amp; docker compose up -d</pre
             >
           </p>
           <p class="text-muted-foreground">Telegram ID: {{ snapshot.license.telegramId }}</p>
+          <p class="break-all font-mono text-muted-foreground">
+            {{ t('settings.updates.deviceId') }}: {{ snapshot.license.deviceId }}
+          </p>
           <p class="text-muted-foreground">
             {{ t('settings.updates.licenseStatus') }}: {{ licenseStatus }}
           </p>

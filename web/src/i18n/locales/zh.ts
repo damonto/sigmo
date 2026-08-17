@@ -122,6 +122,7 @@ const zh = {
       installNow: '立即更新',
       saved: '更新设置已保存。',
       licensedTo: '授权给',
+      deviceId: '设备 ID',
       licenseStatus: '授权状态',
       licenseActive: '有效',
       licenseExpires: '授权到期时间',
