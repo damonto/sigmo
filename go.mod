@@ -13,7 +13,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/ncruces/go-sqlite3 v0.35.3
 	github.com/nyaruka/phonenumbers v1.8.1
-	github.com/things-go/go-socks5 v0.1.1
+	github.com/things-go/go-socks5 v0.1.3
 	github.com/wneessen/go-mail v0.8.1
 	golang.org/x/mod v0.40.0
 	golang.org/x/sync v0.22.0
