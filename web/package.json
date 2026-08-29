@@ -54,7 +54,7 @@
     "@vue/test-utils": "^2.4.11",
     "@vue/tsconfig": "^0.9.1",
     "eslint": "^10.8.1",
-    "eslint-plugin-oxlint": "~1.72.0",
+    "eslint-plugin-oxlint": "~1.80.0",
     "eslint-plugin-vue": "~10.10.0",
     "jiti": "^2.7.0",
     "jsdom": "^30.0.1",
