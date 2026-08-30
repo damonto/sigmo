@@ -20,7 +20,7 @@
     "ui:update": "../scripts/update-shadcn-vue-ui.sh"
   },
   "dependencies": {
-    "@lucide/vue": "^1.25.0",
+    "@lucide/vue": "^1.37.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vee-validate/zod": "^4.15.1",
     "@vueuse/core": "^14.4.0",
@@ -30,7 +30,7 @@
     "libphonenumber-js": "^1.13.11",
     "lucide-vue-next": "^1.0.0",
     "pinia": "^4.0.2",
-    "reka-ui": "^2.10.1",
+    "reka-ui": "^2.10.4",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",
     "vee-validate": "^4.15.1",
@@ -40,7 +40,7 @@
     "vue-qrcode-reader": "^5.7.3",
     "vue-router": "^5.2.0",
     "vue-sonner": "^2.0.9",
-    "zod": "^4.4.3"
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@prettier/plugin-oxc": "^0.2.2",

@@ -128,10 +128,8 @@ describe('useModemDetail', () => {
     modemResource.modem!.value = modem('euicc')
     await flushPromises()
 
-    expect(seApi.getSEs).toHaveBeenCalledOnce()
-    expect(seApi.getSEs).toHaveBeenCalledWith('modem-1')
-    expect(esimApi.getEsims).toHaveBeenCalledOnce()
-    expect(esimApi.getEsims).toHaveBeenCalledWith('modem-1')
+    expect(seApi.getSEs).toHaveBeenCalledExactlyOnceWith('modem-1')
+    expect(esimApi.getEsims).toHaveBeenCalledExactlyOnceWith('modem-1')
   })
 
   it('ignores eSIM data returned for a previously selected modem', async () => {
