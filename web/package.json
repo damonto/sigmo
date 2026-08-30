@@ -68,6 +68,6 @@
     "vite-plugin-pwa": "^1.3.0",
     "vite-plugin-vue-devtools": "^8.2.1",
     "vitest": "^4.1.11",
-    "vue-tsc": "^3.3.7"
+    "vue-tsc": "^3.3.11"
   }
 }
