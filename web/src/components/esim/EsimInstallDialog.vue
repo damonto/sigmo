@@ -81,7 +81,7 @@ const compactEsimValue = (value: string) => value.replace(/\s+/g, '')
 const buildInstallSchemaDefinition = (requiresConfirmation: boolean) =>
   z.object({
     smdp: z
-      .string({ error: t('modemDetail.esim.validation.smdpRequired') })
+      .string({ message: t('modemDetail.esim.validation.smdpRequired') })
       .trim()
       .min(1, t('modemDetail.esim.validation.smdpRequired'))
       .transform((value) => compactEsimValue(value)),
@@ -91,7 +91,7 @@ const buildInstallSchemaDefinition = (requiresConfirmation: boolean) =>
       .transform((value) => compactEsimValue(value ?? '')),
     confirmationCode: requiresConfirmation
       ? z
-          .string({ error: t('modemDetail.validation.required') })
+          .string({ message: t('modemDetail.validation.required') })
           .trim()
           .min(1, t('modemDetail.validation.required'))
       : z

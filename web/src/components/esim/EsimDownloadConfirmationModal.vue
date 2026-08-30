@@ -42,7 +42,7 @@ const code = defineModel<string>('code', { required: true })
 
 const confirmationSchemaDefinition = z.object({
   code: z
-    .string({ error: t('modemDetail.validation.required') })
+    .string({ message: t('modemDetail.validation.required') })
     .trim()
     .min(1, t('modemDetail.validation.required')),
 })
