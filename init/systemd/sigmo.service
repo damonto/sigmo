@@ -1,6 +1,7 @@
 [Unit]
 Description=Sigmo
-After=network.target ModemManager.service
+Wants=network-online.target
+After=network-online.target ModemManager.service
 
 [Service]
 Type=simple
@@ -9,6 +10,7 @@ RuntimeDirectory=sigmo
 RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=yes
 Restart=on-failure
+ExecStartPre=/bin/sh -c 'until ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; do sleep 2; done'
 ExecStart=/usr/local/bin/sigmo --listen-address=0.0.0.0:9527 --db-path=/var/lib/sigmo/sigmo.db
 RestartSec=10s
 TimeoutStopSec=60s
