@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/damonto/euicc-go v1.1.3-0.20260813015305-1f7e0d0c2ffc
-	github.com/damonto/ims-go v0.0.0-20260901134252-24e3249b62af
+	github.com/damonto/ims-go v0.0.0-20260903084448-9b92161fd261
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260811150907-666dafee1b6d
 	github.com/damonto/wwan-go v0.0.0-20260830013653-32ddc42a16b0
@@ -26,8 +26,8 @@ require (
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
-	github.com/ncruces/go-sqlite3 v0.35.3 // indirect
-	github.com/ncruces/go-sqlite3-wasm/v3 v3.4.35304 // indirect
+	github.com/ncruces/go-sqlite3 v0.35.4 // indirect
+	github.com/ncruces/go-sqlite3-wasm/v5 v5.0.35304 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/nyaruka/phonenumbers v1.8.1 // indirect
 	github.com/pion/datachannel v1.6.2 // indirect
@@ -50,7 +50,7 @@ require (
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/wneessen/go-mail v0.8.1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
-	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/crypto v0.56.0 // indirect
 	golang.org/x/mod v0.40.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
