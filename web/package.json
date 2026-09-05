@@ -48,7 +48,7 @@
     "@types/jsdom": "^30.0.0",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vitejs/plugin-vue-jsx": "^5.1.6",
-    "@vitest/eslint-plugin": "^1.6.24",
+    "@vitest/eslint-plugin": "^1.6.27",
     "@vue/eslint-config-prettier": "^10.2.0",
     "@vue/eslint-config-typescript": "^14.9.0",
     "@vue/test-utils": "^2.4.11",
