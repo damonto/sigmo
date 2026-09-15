@@ -3,6 +3,7 @@ package modem
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -11,12 +12,26 @@ import (
 
 type Messaging struct{ modem *Modem }
 
+type messageSource interface {
+	ListMessages(context.Context) ([]wwanmodem.Message, error)
+	WatchMessages(context.Context) (<-chan wwanmodem.Result[wwanmodem.Message], error)
+}
+
 func (m *Modem) Messaging() *Messaging { return &Messaging{modem: m} }
 
 func (m *Messaging) List(ctx context.Context) ([]*SMS, error) {
-	messages, err := m.modem.core.ListMessages(ctx)
+	return m.list(ctx, m.modem.core)
+}
+
+func (m *Messaging) list(ctx context.Context, source messageSource) ([]*SMS, error) {
+	messages, err := source.ListMessages(ctx)
 	if err != nil {
-		return nil, err
+		if _, ok := errors.AsType[*wwanmodem.MessageListError](err); !ok {
+			return nil, err
+		}
+		// A bad stored PDU must not block history synchronization or cancel
+		// the live subscription established before this list operation.
+		slog.Warn("skip malformed stored messages", "error", err, "imei", m.modem.EquipmentIdentifier)
 	}
 	result := make([]*SMS, 0, len(messages))
 	for _, message := range messages {
@@ -150,12 +165,16 @@ func sentSMSFromWWAN(cfg sentSMSConfig) *SMS {
 }
 
 func (m *Messaging) Subscribe(ctx context.Context, subscriber func(message *SMS) error) error {
+	return m.subscribe(ctx, m.modem.core, subscriber)
+}
+
+func (m *Messaging) subscribe(ctx context.Context, source messageSource, subscriber func(message *SMS) error) error {
 	if subscriber == nil {
 		return errors.New("SMS subscriber is required")
 	}
 	watchCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stream, err := m.modem.core.WatchMessages(watchCtx)
+	stream, err := source.WatchMessages(watchCtx)
 	if err != nil {
 		return err
 	}
@@ -165,7 +184,7 @@ func (m *Messaging) Subscribe(ctx context.Context, subscriber func(message *SMS)
 	// Establish the live stream before replaying stored messages so an SMS
 	// arriving during reconciliation is buffered by the watcher instead of
 	// falling into a list/subscribe gap.
-	messages, err := m.List(watchCtx)
+	messages, err := m.list(watchCtx, source)
 	if err != nil {
 		return err
 	}
@@ -183,6 +202,10 @@ func (m *Messaging) Subscribe(ctx context.Context, subscriber func(message *SMS)
 				return errors.New("modem message stream closed")
 			}
 			if result.Err != nil {
+				if _, ok := errors.AsType[*wwanmodem.MessageDecodeError](result.Err); ok {
+					slog.Warn("skip malformed incoming message", "error", result.Err, "imei", m.modem.EquipmentIdentifier)
+					continue
+				}
 				return result.Err
 			}
 			if err := subscriber(smsFromWWAN(m.modem, result.Value)); err != nil {

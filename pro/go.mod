@@ -7,10 +7,10 @@ require (
 	github.com/damonto/ims-go v0.0.0-20260910061752-d4098a4288a0
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260910061641-6430cb78182c
-	github.com/damonto/wwan-go v0.0.0-20260907092144-fdeaa8faa8fb
+	github.com/damonto/wwan-go v0.0.0-20260915085559-e307c0f010f1
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.3.1
-	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/pion/interceptor v0.1.48
 	github.com/pion/rtp v1.10.5
 	github.com/pion/webrtc/v4 v4.2.20
@@ -41,7 +41,7 @@ require (
 	github.com/pion/sdp/v3 v3.0.19 // indirect
 	github.com/pion/srtp/v3 v3.0.15 // indirect
 	github.com/pion/stun/v4 v4.0.0 // indirect
-	github.com/pion/transport/v4 v4.1.0 // indirect
+	github.com/pion/transport/v4 v4.1.1 // indirect
 	github.com/pion/turn/v5 v5.1.1 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
