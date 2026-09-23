@@ -195,6 +195,33 @@ func (s *mbimSession) PacketServiceStatus(ctx context.Context) (result PacketSer
 	}, nil
 }
 
+// NetworkSelection reads the register mode from MBIM_CID_REGISTER_STATE. The
+// provider ID is only meaningful for manual mode, where it names the pinned
+// operator.
+func (s *mbimSession) NetworkSelection(ctx context.Context) (result NetworkSelection, err error) {
+	client, release, err := s.acquireClient(ctx, s.slot)
+	if err != nil {
+		return NetworkSelection{}, fmt.Errorf("open MBIM network client: %w", err)
+	}
+	defer func() { release(err) }()
+
+	registration, err := client.RegistrationState(ctx)
+	if err != nil {
+		return NetworkSelection{}, fmt.Errorf("read MBIM registration state: %w", err)
+	}
+	switch registration.RegisterMode {
+	case uiccmbim.RegisterModeAutomatic:
+		return NetworkSelection{Mode: NetworkSelectionAutomatic}, nil
+	case uiccmbim.RegisterModeManual:
+		return NetworkSelection{
+			Mode:       NetworkSelectionManual,
+			OperatorID: strings.TrimSpace(registration.ProviderID),
+		}, nil
+	default:
+		return NetworkSelection{}, nil
+	}
+}
+
 func (s *mbimSession) IMSProfile(ctx context.Context) (result IMSProfile, err error) {
 	client, release, err := s.acquireClient(ctx, s.slot)
 	if err != nil {

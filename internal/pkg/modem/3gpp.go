@@ -10,7 +10,11 @@ import (
 	wwanmodem "github.com/damonto/wwan-go/modem"
 	modemmbim "github.com/damonto/wwan-go/modem/mbim"
 	modemqmi "github.com/damonto/wwan-go/modem/qmi"
+
+	"github.com/damonto/sigmo/internal/pkg/modem/wwan"
 )
+
+var errOperatorCodeRequired = errors.New("operator code is required")
 
 type ThreeGPP struct{ modem *Modem }
 
@@ -156,13 +160,47 @@ func runIsolatedNetworkScan(ctx context.Context, cfg isolatedNetworkScanConfig) 
 	return networks, scanErr
 }
 
+// RegisterNetwork pins the modem to one operator. The selection persists in
+// modem firmware across SIM profile switches and restarts; use
+// RegisterNetworkAutomatically to release it.
 func (g *ThreeGPP) RegisterNetwork(ctx context.Context, operatorCode string) error {
 	if g == nil || g.modem == nil || g.modem.core == nil {
 		return errModemRequired
 	}
-	if err := g.modem.core.Register(ctx, wwanmodem.RegisterConfig{OperatorID: strings.TrimSpace(operatorCode)}); err != nil {
+	operatorCode = strings.TrimSpace(operatorCode)
+	if operatorCode == "" {
+		return errOperatorCodeRequired
+	}
+	return g.register(ctx, wwanmodem.RegisterConfig{OperatorID: operatorCode})
+}
+
+// RegisterNetworkAutomatically hands network selection back to the modem.
+func (g *ThreeGPP) RegisterNetworkAutomatically(ctx context.Context) error {
+	if g == nil || g.modem == nil || g.modem.core == nil {
+		return errModemRequired
+	}
+	return g.register(ctx, wwanmodem.RegisterConfig{})
+}
+
+func (g *ThreeGPP) register(ctx context.Context, cfg wwanmodem.RegisterConfig) error {
+	if err := g.modem.core.Register(ctx, cfg); err != nil {
 		return err
 	}
 	g.modem.markNetworkStateChanged()
 	return nil
+}
+
+// NetworkSelection reads the modem-wide selection preference through the
+// generation-scoped QMI or MBIM control session. wwan-go's NetworkStatus does
+// not expose it, yet restore logic must tell "registered on this operator
+// automatically" apart from "pinned to this operator".
+func (g *ThreeGPP) NetworkSelection(ctx context.Context) (wwan.NetworkSelection, error) {
+	if g == nil || g.modem == nil {
+		return wwan.NetworkSelection{}, errModemRequired
+	}
+	device, err := OpenDevice(g.modem)
+	if err != nil {
+		return wwan.NetworkSelection{}, fmt.Errorf("open modem control session: %w", err)
+	}
+	return device.NetworkSelection(ctx)
 }

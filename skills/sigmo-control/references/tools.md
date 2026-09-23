@@ -16,8 +16,8 @@
 | `sms.send` | `send_sms` |
 | `sms.delete` | `delete_sms_conversation` |
 | `ussd.execute` | `execute_ussd` |
-| `network.read` | `list_networks`, `get_network_modes`, `get_network_bands`, `get_airplane_mode` |
-| `network.register` | `register_network` |
+| `network.read` | `list_networks`, `get_network_registration`, `get_network_modes`, `get_network_bands`, `get_airplane_mode` |
+| `network.register` | `set_network_registration` |
 | `network.power` | `set_airplane_mode` |
 | `internet.read` | `get_internet_connection`, `get_public_ip` |
 | `internet.connect` | `connect_internet`, `disconnect_internet` |
@@ -46,7 +46,8 @@ Use `structuredContent` for every successful tool call. The server returns a fix
 | `list_esim_profiles` | `{ "ses": [] }` | Use a profile's exact `seId` and `iccid` for management tools. |
 | `discover_esim_profiles` | `{ "profiles": [] }` | Each item contains the discovery `eventId` and SM-DP+ `address`. |
 | `list_sms_conversations`, `list_sms_messages` | `{ "messages": [] }` | `timestamp` is UTC; `incoming` indicates received messages and `routed` indicates Sigmo route processing. |
-| `list_networks` | `{ "networks": [] }` | Use the exact `operatorCode` with `register_network`. |
+| `list_networks` | `{ "networks": [] }` | Use the exact `operatorCode` with `set_network_registration` in manual mode. |
+| `get_network_registration` | `{ "mode": "automatic" }` or `{ "mode": "manual", "operatorCode": "" }` | Manual selection is stored in modem firmware and survives profile switches; call `set_network_registration` with `mode: "automatic"` to release it. |
 | `get_network_modes` | `{ "supported": [], "current": { ... } }` | Numeric `allowed` and `preferred` values are configuration values; labels explain them. |
 | `get_network_bands` | `{ "supported": [], "current": [] }` | Use numeric `value` entries when configuring bands outside this Skill. |
 | `get_internet_connection`, `connect_internet`, `set_internet_preferences` | connection object | Durations are seconds and traffic counters are bytes. MCP redacts APN and proxy passwords in responses. |

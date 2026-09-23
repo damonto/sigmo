@@ -4,8 +4,20 @@ type NetworkResponse struct {
 	Status             string   `json:"status" jsonschema:"network availability state reported by the modem, such as available, current, or forbidden"`
 	OperatorName       string   `json:"operatorName" jsonschema:"long operator name advertised by the network"`
 	OperatorShortName  string   `json:"operatorShortName" jsonschema:"short operator name advertised by the network"`
-	OperatorCode       string   `json:"operatorCode" jsonschema:"operator code, typically the MCC and MNC; use this exact value with register_network"`
+	OperatorCode       string   `json:"operatorCode" jsonschema:"operator code, typically the MCC and MNC; use this exact value with set_network_registration"`
 	AccessTechnologies []string `json:"accessTechnologies" jsonschema:"radio access technologies advertised for this network"`
+}
+
+// RegistrationResponse describes how the modem chooses its network.
+type RegistrationResponse struct {
+	Mode         RegistrationMode `json:"mode" jsonschema:"network selection mode, either automatic or manual"`
+	OperatorCode string           `json:"operatorCode,omitempty" jsonschema:"operator code pinned by a manual selection; empty in automatic mode"`
+}
+
+// SetRegistrationRequest selects automatic registration or pins one operator.
+type SetRegistrationRequest struct {
+	Mode         RegistrationMode `json:"mode"`
+	OperatorCode string           `json:"operatorCode"`
 }
 
 type ModesResponse struct {

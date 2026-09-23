@@ -217,6 +217,40 @@ func TestSessionPacketServiceStatusMBIM(t *testing.T) {
 	}
 }
 
+func TestSessionNetworkSelectionMBIM(t *testing.T) {
+	tests := []struct {
+		name         string
+		registration uiccmbim.RegistrationStateInfo
+		want         NetworkSelection
+	}{
+		{
+			name:         "automatic",
+			registration: uiccmbim.RegistrationStateInfo{RegisterMode: uiccmbim.RegisterModeAutomatic, ProviderID: "46001"},
+			want:         NetworkSelection{Mode: NetworkSelectionAutomatic},
+		},
+		{
+			name:         "manual",
+			registration: uiccmbim.RegistrationStateInfo{RegisterMode: uiccmbim.RegisterModeManual, ProviderID: "46001"},
+			want:         NetworkSelection{Mode: NetworkSelectionManual, OperatorID: "46001"},
+		},
+		{name: "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			device := mbimSessionWithNetwork(&fakeMBIMNetwork{registration: tt.registration})
+			t.Cleanup(func() { _ = device.Close() })
+			got, err := device.NetworkSelection(t.Context())
+			if err != nil {
+				t.Fatalf("NetworkSelection() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("NetworkSelection() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSessionIMSProfileMBIM(t *testing.T) {
 	tests := []struct {
 		name     string

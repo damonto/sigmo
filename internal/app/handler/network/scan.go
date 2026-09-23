@@ -55,6 +55,7 @@ type network struct {
 	scans                 *scanTaskStore
 	airplaneModeLifecycle appconnectivity.AirplaneModeLifecycle
 	setAirplaneMode       func(context.Context, *mmodem.Modem, bool) error
+	registrar             networkRegistrar
 }
 
 var errNetworkPreferencesRequired = errors.New("network preferences are required")
@@ -74,6 +75,7 @@ func newNetwork(preferences *networkprefs.Store, store *storage.Store, lifecycle
 		setAirplaneMode: func(ctx context.Context, modem *mmodem.Modem, enabled bool) error {
 			return modem.SetAirplaneMode(ctx, enabled)
 		},
+		registrar: modemRegistrar{},
 	}, nil
 }
 

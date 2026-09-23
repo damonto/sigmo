@@ -113,7 +113,7 @@ func TestCoreToolSchemasRegister(t *testing.T) {
 		"list_sim_cards", "list_secure_elements", "switch_sim_slot", "update_msisdn",
 		"list_esim_profiles", "discover_esim_profiles", "download_esim_profile", "enable_esim_profile", "rename_esim_profile", "delete_esim_profile",
 		"list_sms_conversations", "list_sms_messages", "send_sms", "delete_sms_conversation", "execute_ussd",
-		"list_networks", "get_network_modes", "get_network_bands", "get_airplane_mode", "register_network", "set_airplane_mode",
+		"list_networks", "get_network_registration", "get_network_modes", "get_network_bands", "get_airplane_mode", "set_network_registration", "set_airplane_mode",
 		"get_internet_connection", "get_public_ip", "connect_internet", "disconnect_internet", "set_internet_preferences",
 	}
 	if !slices.Equal(gotTools, wantTools) {
@@ -129,7 +129,7 @@ func TestCoreToolSchemasRegister(t *testing.T) {
 	for _, name := range []string{
 		"switch_sim_slot", "enable_esim_profile", "delete_esim_profile",
 		"send_sms", "delete_sms_conversation", "execute_ussd",
-		"register_network", "set_airplane_mode", "connect_internet",
+		"set_network_registration", "set_airplane_mode", "connect_internet",
 		"disconnect_internet", "set_internet_preferences",
 	} {
 		if !catalog.RequiresConfirmation(name) {

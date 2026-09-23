@@ -17,6 +17,18 @@ export type NetworkScanResponse = {
   errorCode?: string
 }
 
+export type RegistrationMode = 'automatic' | 'manual'
+
+export type RegistrationResponse = {
+  mode: RegistrationMode
+  operatorCode?: string
+}
+
+export type SetRegistrationRequest = {
+  mode: RegistrationMode
+  operatorCode?: string
+}
+
 export type ModeResponse = {
   allowed: number
   preferred: number

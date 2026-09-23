@@ -230,6 +230,7 @@ type qmiClient interface {
 	WriteRecord(ctx context.Context, req qcom.RecordWrite) error
 	IMSAStatus(ctx context.Context) (qcom.IMSAStatus, error)
 	NASServingSystem(ctx context.Context) (qcom.NASServingSystem, error)
+	SystemSelectionPreference(ctx context.Context) (qcom.NASSystemSelectionPreference, error)
 	WDSProfiles(ctx context.Context, profileType qcom.WDSProfileType) ([]qcom.WDSProfile, error)
 	WDSProfileSettings(ctx context.Context, id qcom.WDSProfileID) (qcom.WDSProfileSettings, error)
 	IMSSTestMode(ctx context.Context) (bool, error)
@@ -329,6 +330,39 @@ func (u *qmiSession) PacketServiceStatus(ctx context.Context) (result PacketServ
 		PSAttached: serving.PSAttachState == qcom.NASAttachAttached,
 		LTE:        slices.Contains(serving.RadioInterfaces, qcom.NASRadioInterfaceLTE),
 	}, nil
+}
+
+// NetworkSelection reads the NAS system selection preference. The manual PLMN
+// TLV is optional, so a manual selection may come back without an operator.
+func (u *qmiSession) NetworkSelection(ctx context.Context) (result NetworkSelection, err error) {
+	client, release, err := u.acquireClient(ctx, u.slot)
+	if err != nil {
+		return NetworkSelection{}, fmt.Errorf("open QMI client: %w", err)
+	}
+	defer func() { release(err) }()
+
+	preference, err := client.SystemSelectionPreference(ctx)
+	if err != nil {
+		if isUnsupportedQMICommand(err) || errors.Is(err, qcom.QMIErrorInvalidServiceType) {
+			return NetworkSelection{}, ErrUnsupported
+		}
+		return NetworkSelection{}, fmt.Errorf("read QMI NAS system selection preference: %w", err)
+	}
+	if !preference.NetworkSelectionKnown {
+		return NetworkSelection{}, ErrUnsupported
+	}
+	switch preference.NetworkSelection {
+	case qcom.NASNetworkSelectionAutomatic:
+		return NetworkSelection{Mode: NetworkSelectionAutomatic}, nil
+	case qcom.NASNetworkSelectionManual:
+		selection := NetworkSelection{Mode: NetworkSelectionManual}
+		if preference.ManualPLMNKnown {
+			selection.OperatorID = preference.ManualPLMN.String()
+		}
+		return selection, nil
+	default:
+		return NetworkSelection{}, fmt.Errorf("QMI NAS network selection %d is unknown", preference.NetworkSelection)
+	}
 }
 
 func (u *qmiSession) IMSProfile(ctx context.Context) (result IMSProfile, err error) {
@@ -550,7 +584,7 @@ func watchQMIRefresh(ctx context.Context, client qmiRefreshClient, slot uint8) (
 		if watchErr == nil {
 			return events, registration.name, nil
 		}
-		unsupported = unsupported && unsupportedQMIRefreshRegistration(watchErr)
+		unsupported = unsupported && isUnsupportedQMICommand(watchErr)
 		errs = errors.Join(errs, fmt.Errorf("register %s: %w", registration.name, watchErr))
 		if err := ctx.Err(); err != nil {
 			return nil, "", errors.Join(errs, err)
@@ -567,7 +601,7 @@ func watchQMIRefresh(ctx context.Context, client qmiRefreshClient, slot uint8) (
 	})
 	if err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register primary-gw files: %w", err))
-		if unsupported && unsupportedQMIRefreshRegistration(err) {
+		if unsupported && isUnsupportedQMICommand(err) {
 			return nil, "", errors.Join(ErrUnsupported, errs)
 		}
 		return nil, "", errs
@@ -575,7 +609,9 @@ func watchQMIRefresh(ctx context.Context, client qmiRefreshClient, slot uint8) (
 	return events, "primary-gw-files", nil
 }
 
-func unsupportedQMIRefreshRegistration(err error) bool {
+// isUnsupportedQMICommand reports firmware answers that mean "this message is
+// not implemented here" rather than a transient failure.
+func isUnsupportedQMICommand(err error) bool {
 	return errors.Is(err, qcom.QMIErrorInvalidQMICommand) ||
 		errors.Is(err, qcom.QMIErrorNotSupported) ||
 		errors.Is(err, qcom.QMIErrorDeviceUnsupported)

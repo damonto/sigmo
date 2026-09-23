@@ -179,11 +179,12 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.GET("/modems/:id/network-scans/:scanID", h.GetNetworkScan)
 			protected.GET("/modems/:id/networks/airplane-mode", h.AirplaneMode)
 			protected.PUT("/modems/:id/networks/airplane-mode", h.SetAirplaneMode)
+			protected.GET("/modems/:id/networks/registration", h.Registration)
+			protected.PUT("/modems/:id/networks/registration", h.SetRegistration)
 			protected.GET("/modems/:id/networks/modes", h.Modes)
 			protected.PUT("/modems/:id/networks/current-modes", h.SetCurrentModes)
 			protected.GET("/modems/:id/networks/bands", h.Bands)
 			protected.PUT("/modems/:id/networks/current-bands", h.SetCurrentBands)
-			protected.PUT("/modems/:id/networks/:operatorCode", h.Register)
 		}
 
 		{

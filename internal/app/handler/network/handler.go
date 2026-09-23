@@ -38,8 +38,11 @@ const (
 	errorCodeStartNetworkScanFailed  = "start_network_scan_failed"
 	errorCodeGetNetworkScanFailed    = "get_network_scan_failed"
 	errorCodeNetworkScanNotFound     = "network_scan_not_found"
-	errorCodeRegisterNetworkFailed   = "register_network_failed"
 	errorCodeOperatorCodeRequired    = "operator_code_required"
+	errorCodeGetRegistrationFailed   = "get_registration_failed"
+	errorCodeSetRegistrationFailed   = "set_registration_failed"
+	errorCodeSetRegistrationInvalid  = "set_registration_invalid_request"
+	errorCodeRegistrationModeInvalid = "registration_mode_invalid"
 	errorCodeGetModesFailed          = "get_modes_failed"
 	errorCodeSetModesFailed          = "set_modes_failed"
 	errorCodeSetModesInvalid         = "set_modes_invalid_request"
@@ -138,18 +141,38 @@ func setNetworkScanRetryHeader(header http.Header, status string) {
 	}
 }
 
-func (h *Handler) Register(c *echo.Context) error {
+func (h *Handler) Registration(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeRegisterNetworkFailed)
+		return httpapi.ModemLookupError(c, err, errorCodeGetRegistrationFailed)
 	}
-	operatorCode := c.Param("operatorCode")
-	if err := h.networks.Register(ctx, modem, operatorCode); err != nil {
-		if errors.Is(err, errOperatorCodeRequired) {
+	response, err := h.networks.Registration(ctx, modem)
+	if err != nil {
+		return httpapi.Internal(c, errorCodeGetRegistrationFailed, err)
+	}
+	return c.JSON(http.StatusOK, response)
+}
+
+func (h *Handler) SetRegistration(c *echo.Context) error {
+	ctx := c.Request().Context()
+	modem, err := h.registry.Find(ctx, c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, errorCodeSetRegistrationFailed)
+	}
+	var req SetRegistrationRequest
+	if err := c.Bind(&req); err != nil {
+		return httpapi.BadRequest(c, errorCodeSetRegistrationInvalid, err)
+	}
+	if err := h.networks.SetRegistration(ctx, modem, req); err != nil {
+		switch {
+		case errors.Is(err, errRegistrationModeInvalid):
+			return httpapi.BadRequest(c, errorCodeRegistrationModeInvalid, err)
+		case errors.Is(err, errOperatorCodeRequired):
 			return httpapi.BadRequest(c, errorCodeOperatorCodeRequired, err)
+		default:
+			return httpapi.Internal(c, errorCodeSetRegistrationFailed, err)
 		}
-		return httpapi.Internal(c, errorCodeRegisterNetworkFailed, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

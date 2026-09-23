@@ -8,6 +8,7 @@ import type {
   ModeResponse,
   NetworkScanResponse,
   NetworkResponse,
+  RegistrationMode,
   SetCurrentModesRequest,
 } from '@/types/network'
 
@@ -32,6 +33,11 @@ export const useModemNetwork = ({
   const networkDialogOpen = ref(false)
   const availableNetworks = ref<NetworkResponse[]>([])
   const selectedNetwork = ref('')
+  // The modem, not the browser, owns the selection mode. A manual choice
+  // survives restarts and profile switches, so it is read back from the
+  // server instead of being remembered locally.
+  const registrationMode = ref<RegistrationMode>('automatic')
+  const registeredOperatorCode = ref('')
   const modeOptions = ref<ModeResponse[]>([])
   const selectedMode = ref('')
   const currentMode = ref('')
@@ -42,6 +48,7 @@ export const useModemNetwork = ({
   const airplaneModeEnabled = ref(false)
   const isNetworkLoading = ref(false)
   const isNetworkRegistering = ref(false)
+  const isRegistrationUpdating = ref(false)
   const isNetworkSettingsLoading = ref(false)
   const isModeUpdating = ref(false)
   const isBandUpdating = ref(false)
@@ -51,7 +58,16 @@ export const useModemNetwork = ({
   const hasNetworkSelection = computed(() => selectedNetwork.value.trim().length > 0)
   const hasModeSelection = computed(() => selectedMode.value.trim().length > 0)
   const hasBandSelection = computed(() => selectedBands.value.length > 0)
-  const canScanNetworks = computed(() => !isNetworkLoading.value && !airplaneModeEnabled.value)
+  const canScanNetworks = computed(
+    () => !isNetworkLoading.value && !isRegistrationUpdating.value && !airplaneModeEnabled.value,
+  )
+  const canUpdateRegistration = computed(
+    () =>
+      !isNetworkSettingsLoading.value &&
+      !isNetworkLoading.value &&
+      !isRegistrationUpdating.value &&
+      !airplaneModeEnabled.value,
+  )
   const canUpdateMode = computed(
     () =>
       modeOptions.value.length > 1 &&
@@ -119,6 +135,8 @@ export const useModemNetwork = ({
     networkDialogOpen.value = false
     availableNetworks.value = []
     selectedNetwork.value = ''
+    registrationMode.value = 'automatic'
+    registeredOperatorCode.value = ''
     modeOptions.value = []
     selectedMode.value = ''
     currentMode.value = ''
@@ -171,14 +189,44 @@ export const useModemNetwork = ({
     if (!hasNetworkSelection.value || isNetworkRegistering.value) return
     isNetworkRegistering.value = true
     try {
-      await networkApi.registerNetwork(targetId, selectedNetwork.value)
-      await onRegistered?.(targetId)
+      await networkApi.setRegistration(targetId, {
+        mode: 'manual',
+        operatorCode: selectedNetwork.value,
+      })
       networkDialogOpen.value = false
+      await refreshNetworkSettings()
+      await onRegistered?.(targetId)
       onSuccess?.(t('modemDetail.settings.networkSuccess'))
     } catch (err) {
       console.error('[useModemNetwork] Failed to register network:', err)
     } finally {
       isNetworkRegistering.value = false
+    }
+  }
+
+  // Manual mode is only entered by picking an operator, so switching the
+  // selector to manual opens the scan dialog and leaves the reported mode
+  // untouched until a registration succeeds. Cancelling the dialog therefore
+  // falls back to the mode the modem still applies.
+  const handleRegistrationModeChange = async (mode: RegistrationMode) => {
+    const targetId = modemId.value
+    if (!targetId || !canUpdateRegistration.value) return
+    if (mode === registrationMode.value) return
+    if (mode === 'manual') {
+      await openNetworkDialog()
+      return
+    }
+    isRegistrationUpdating.value = true
+    try {
+      await networkApi.setRegistration(targetId, { mode: 'automatic' })
+      await refreshNetworkSettings()
+      await onChanged?.(targetId)
+      onSuccess?.(t('modemDetail.settings.networkRegistrationAutomaticSuccess'))
+    } catch (err) {
+      console.error('[useModemNetwork] Failed to set automatic registration:', err)
+      onError?.(t('modemDetail.settings.networkRegistrationUpdateFailed'))
+    } finally {
+      isRegistrationUpdating.value = false
     }
   }
 
@@ -188,12 +236,24 @@ export const useModemNetwork = ({
     const requestId = ++networkSettingsRequestID
     isNetworkSettingsLoading.value = true
     try {
-      const [modes, bands, airplane] = await Promise.allSettled([
+      const [registration, modes, bands, airplane] = await Promise.allSettled([
+        networkApi.getRegistration(targetId),
         networkApi.getModes(targetId),
         networkApi.getBands(targetId),
         networkApi.getAirplaneMode(targetId),
       ])
       if (requestId !== networkSettingsRequestID || modemId.value !== targetId) return
+
+      if (registration.status === 'fulfilled') {
+        const registrationData = registration.value.data.value
+        registrationMode.value = registrationData?.mode === 'manual' ? 'manual' : 'automatic'
+        registeredOperatorCode.value =
+          registrationMode.value === 'manual' ? (registrationData?.operatorCode ?? '') : ''
+      } else {
+        console.error('[useModemNetwork] Failed to load network registration:', registration.reason)
+        registrationMode.value = 'automatic'
+        registeredOperatorCode.value = ''
+      }
 
       if (modes.status === 'fulfilled') {
         const modesData = modes.value.data.value
@@ -240,6 +300,8 @@ export const useModemNetwork = ({
     } catch (err) {
       if (requestId !== networkSettingsRequestID || modemId.value !== targetId) return
       console.error('[useModemNetwork] Failed to load network settings:', err)
+      registrationMode.value = 'automatic'
+      registeredOperatorCode.value = ''
       modeOptions.value = []
       selectedMode.value = ''
       currentMode.value = ''
@@ -339,6 +401,8 @@ export const useModemNetwork = ({
     networkDialogOpen,
     availableNetworks,
     selectedNetwork,
+    registrationMode,
+    registeredOperatorCode,
     modeOptions,
     selectedMode,
     supportedBands,
@@ -347,6 +411,7 @@ export const useModemNetwork = ({
     airplaneModeEnabled,
     isNetworkLoading,
     isNetworkRegistering,
+    isRegistrationUpdating,
     isNetworkSettingsLoading,
     isModeUpdating,
     isBandUpdating,
@@ -356,11 +421,13 @@ export const useModemNetwork = ({
     hasModeSelection,
     hasBandSelection,
     canScanNetworks,
+    canUpdateRegistration,
     canUpdateMode,
     canUpdateBands,
     canUpdateAirplaneMode,
     openNetworkDialog,
     handleNetworkRegister,
+    handleRegistrationModeChange,
     refreshNetworkSettings,
     handleModeUpdate,
     toggleBand,

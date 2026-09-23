@@ -6,9 +6,11 @@ import type {
   ModesResponse,
   NetworkScanResponse,
   NetworksResponse,
+  RegistrationResponse,
   SetAirplaneModeRequest,
   SetCurrentBandsRequest,
   SetCurrentModesRequest,
+  SetRegistrationRequest,
 } from '@/types/network'
 
 export const useNetworkApi = () => {
@@ -28,10 +30,14 @@ export const useNetworkApi = () => {
     )
   }
 
-  const registerNetwork = (id: string, operatorCode: string) => {
-    const encoded = encodeURIComponent(operatorCode)
-    return fetchJson<void>(`modems/${id}/networks/${encoded}`, {
+  const getRegistration = (id: string) => {
+    return fetchJson<RegistrationResponse>(`modems/${id}/networks/registration`)
+  }
+
+  const setRegistration = (id: string, payload: SetRegistrationRequest) => {
+    return fetchJson<void>(`modems/${id}/networks/registration`, {
       method: 'PUT',
+      body: JSON.stringify(payload),
     })
   }
 
@@ -72,7 +78,8 @@ export const useNetworkApi = () => {
     scanNetworks,
     startNetworkScan,
     getNetworkScan,
-    registerNetwork,
+    getRegistration,
+    setRegistration,
     getModes,
     setCurrentModes,
     getBands,

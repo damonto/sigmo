@@ -40,7 +40,10 @@ const stubs = {
     template: '<label :for="$props.for"><slot /></label>',
   },
   Select: {
-    template: '<div><slot /></div>',
+    props: ['modelValue', 'disabled'],
+    emits: ['update:modelValue'],
+    template:
+      '<div :data-value="modelValue" :data-disabled="disabled"><slot /><button type="button" data-testid="select-manual" @click="$emit(\'update:modelValue\', \'manual\')" /><button type="button" data-testid="select-automatic" @click="$emit(\'update:modelValue\', \'automatic\')" /></div>',
   },
   SelectContent: {
     template: '<div><slot /></div>',
@@ -50,7 +53,8 @@ const stubs = {
     template: '<div><slot /></div>',
   },
   SelectTrigger: {
-    template: '<button type="button"><slot /></button>',
+    props: ['id'],
+    template: '<button type="button" :id="id"><slot /></button>',
   },
   SelectValue: {
     props: ['placeholder'],
@@ -67,14 +71,18 @@ const stubs = {
   },
 }
 
-const mountSection = () =>
+const mountSection = (overrides: Record<string, unknown> = {}) =>
   mount(NetworkSettingsContent, {
     props: {
       operatorLabel: 'Carrier',
       registrationState: 'Registered',
       accessTechnology: 'LTE',
+      registrationMode: 'automatic',
+      registeredOperatorCode: '',
       isScanning: false,
+      isRegistrationUpdating: false,
       canScanNetworks: true,
+      canUpdateRegistration: true,
       modeOptions: [
         {
           allowed: 4,
@@ -99,6 +107,7 @@ const mountSection = () =>
       canUpdateMode: true,
       canUpdateBands: true,
       canUpdateAirplaneMode: true,
+      ...overrides,
     },
     global: {
       stubs,
@@ -119,6 +128,22 @@ describe('NetworkSettingsContent', () => {
     await wrapper.find('#band-4-42').setValue(true)
 
     expect(wrapper.emitted('toggleBand')).toEqual([[{ technology: 4, number: 42 }, true]])
+  })
+
+  it('emits registration mode changes only when the mode differs', async () => {
+    const wrapper = mountSection()
+
+    await wrapper.find('[data-testid="select-automatic"]').trigger('click')
+    expect(wrapper.emitted('updateRegistrationMode')).toBeUndefined()
+
+    await wrapper.find('[data-testid="select-manual"]').trigger('click')
+    expect(wrapper.emitted('updateRegistrationMode')).toEqual([['manual']])
+  })
+
+  it('labels the manual option with the pinned operator', () => {
+    const wrapper = mountSection({ registrationMode: 'manual', registeredOperatorCode: '46001' })
+
+    expect(wrapper.text()).toContain('modemDetail.settings.networkRegistrationManualOperator')
   })
 
   it('emits airplane mode updates', async () => {

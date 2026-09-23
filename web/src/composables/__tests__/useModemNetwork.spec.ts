@@ -7,7 +7,8 @@ const api = vi.hoisted(() => ({
   scanNetworks: vi.fn(),
   startNetworkScan: vi.fn(),
   getNetworkScan: vi.fn(),
-  registerNetwork: vi.fn(),
+  getRegistration: vi.fn(),
+  setRegistration: vi.fn(),
   getModes: vi.fn(),
   setCurrentModes: vi.fn(),
   getBands: vi.fn(),
@@ -60,9 +61,13 @@ const airplaneModeResponse = {
   enabled: false,
 }
 
+const automaticRegistration = { mode: 'automatic' }
+
 describe('useModemNetwork', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    api.getRegistration.mockResolvedValue({ data: { value: automaticRegistration } })
+    api.setRegistration.mockResolvedValue({})
     api.getModes.mockResolvedValue({ data: { value: modeResponse } })
     api.getBands.mockResolvedValue({ data: { value: bandsResponse } })
     api.getAirplaneMode.mockResolvedValue({ data: { value: airplaneModeResponse } })
@@ -152,6 +157,93 @@ describe('useModemNetwork', () => {
 
     expect(network.networkDialogOpen.value).toBe(false)
     expect(network.isNetworkLoading.value).toBe(false)
+  })
+
+  it('loads the manual selection reported by the modem', async () => {
+    api.getRegistration.mockResolvedValue({
+      data: { value: { mode: 'manual', operatorCode: '46001' } },
+    })
+    const network = useModemNetwork({ modemId })
+
+    await vi.waitFor(() => expect(network.registrationMode.value).toBe('manual'))
+    expect(network.registeredOperatorCode.value).toBe('46001')
+  })
+
+  it('registers manually through the registration resource and refreshes', async () => {
+    const onRegistered = vi.fn()
+    const onSuccess = vi.fn()
+    const network = useModemNetwork({ modemId, onRegistered, onSuccess })
+    await network.refreshNetworkSettings()
+    api.getRegistration.mockResolvedValue({
+      data: { value: { mode: 'manual', operatorCode: '46001' } },
+    })
+    network.networkDialogOpen.value = true
+    network.selectedNetwork.value = '46001'
+
+    await network.handleNetworkRegister()
+
+    expect(api.setRegistration).toHaveBeenCalledWith('modem-1', {
+      mode: 'manual',
+      operatorCode: '46001',
+    })
+    expect(network.networkDialogOpen.value).toBe(false)
+    expect(network.registrationMode.value).toBe('manual')
+    expect(network.registeredOperatorCode.value).toBe('46001')
+    expect(onRegistered).toHaveBeenCalledWith('modem-1')
+    expect(onSuccess).toHaveBeenCalledWith('modemDetail.settings.networkSuccess')
+  })
+
+  it('switches back to automatic selection', async () => {
+    api.getRegistration.mockResolvedValue({
+      data: { value: { mode: 'manual', operatorCode: '46001' } },
+    })
+    const onChanged = vi.fn()
+    const onSuccess = vi.fn()
+    const network = useModemNetwork({ modemId, onChanged, onSuccess })
+    await vi.waitFor(() => expect(network.registrationMode.value).toBe('manual'))
+    api.getRegistration.mockResolvedValue({ data: { value: automaticRegistration } })
+
+    await network.handleRegistrationModeChange('automatic')
+
+    expect(api.setRegistration).toHaveBeenCalledWith('modem-1', { mode: 'automatic' })
+    expect(network.registrationMode.value).toBe('automatic')
+    expect(network.registeredOperatorCode.value).toBe('')
+    expect(onChanged).toHaveBeenCalledWith('modem-1')
+    expect(onSuccess).toHaveBeenCalledWith(
+      'modemDetail.settings.networkRegistrationAutomaticSuccess',
+    )
+    expect(network.isRegistrationUpdating.value).toBe(false)
+  })
+
+  it('notifies when switching to automatic selection fails', async () => {
+    api.getRegistration.mockResolvedValue({
+      data: { value: { mode: 'manual', operatorCode: '46001' } },
+    })
+    api.setRegistration.mockRejectedValue(new Error('radio busy'))
+    const onError = vi.fn()
+    const network = useModemNetwork({ modemId, onError })
+    await vi.waitFor(() => expect(network.registrationMode.value).toBe('manual'))
+
+    await network.handleRegistrationModeChange('automatic')
+
+    expect(onError).toHaveBeenCalledWith('modemDetail.settings.networkRegistrationUpdateFailed')
+    expect(network.registrationMode.value).toBe('manual')
+    expect(network.isRegistrationUpdating.value).toBe(false)
+  })
+
+  it('opens the scan dialog instead of writing when switching to manual', async () => {
+    api.startNetworkScan.mockResolvedValue({
+      data: { value: { id: 'scan-1', status: 'completed', networks: [] } },
+    })
+    const network = useModemNetwork({ modemId })
+    await network.refreshNetworkSettings()
+
+    await network.handleRegistrationModeChange('manual')
+
+    expect(api.setRegistration).not.toHaveBeenCalled()
+    expect(api.startNetworkScan).toHaveBeenCalledWith('modem-1')
+    expect(network.networkDialogOpen.value).toBe(true)
+    expect(network.registrationMode.value).toBe('automatic')
   })
 
   it('updates airplane mode and refreshes modem state', async () => {

@@ -37,6 +37,7 @@ type Device interface {
 	WatchSIMRefresh(ctx context.Context) (<-chan wwan.SIMRefreshEvent, error)
 	VoLTEStatus(ctx context.Context) (wwan.VoLTEStatus, error)
 	PacketServiceStatus(ctx context.Context) (wwan.PacketServiceStatus, error)
+	NetworkSelection(ctx context.Context) (wwan.NetworkSelection, error)
 	IMSProfile(ctx context.Context) (wwan.IMSProfile, error)
 	IMSSTestMode(ctx context.Context) (bool, error)
 	SetIMSSTestMode(ctx context.Context, enabled bool) error

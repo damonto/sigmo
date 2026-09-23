@@ -3,14 +3,18 @@ import NetworkAirplaneModePanel from './NetworkAirplaneModePanel.vue'
 import NetworkBandsPanel from './NetworkBandsPanel.vue'
 import NetworkModePanel from './NetworkModePanel.vue'
 import NetworkOverviewPanel from './NetworkOverviewPanel.vue'
-import type { BandResponse, BandValue, ModeResponse } from '@/types/network'
+import type { BandResponse, BandValue, ModeResponse, RegistrationMode } from '@/types/network'
 
 const props = defineProps<{
   operatorLabel: string
   registrationState: string
   accessTechnology: string
+  registrationMode: RegistrationMode
+  registeredOperatorCode: string
   isScanning: boolean
+  isRegistrationUpdating: boolean
   canScanNetworks: boolean
+  canUpdateRegistration: boolean
   modeOptions: ModeResponse[]
   supportedBands: BandResponse[]
   selectedBands: BandValue[]
@@ -27,6 +31,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'scan'): void
+  (event: 'updateRegistrationMode', mode: RegistrationMode): void
   (event: 'toggleBand', value: BandValue, checked: boolean): void
   (event: 'updateMode'): void
   (event: 'updateBands'): void
@@ -46,9 +51,14 @@ const handleToggleBand = (value: BandValue, checked: boolean) => {
       :operator-label="props.operatorLabel"
       :registration-state="props.registrationState"
       :access-technology="props.accessTechnology"
+      :registration-mode="props.registrationMode"
+      :registered-operator-code="props.registeredOperatorCode"
       :is-scanning="props.isScanning"
+      :is-registration-updating="props.isRegistrationUpdating"
       :can-scan="props.canScanNetworks"
+      :can-update-registration="props.canUpdateRegistration"
       @scan="emit('scan')"
+      @update-registration-mode="emit('updateRegistrationMode', $event)"
     />
 
     <NetworkAirplaneModePanel

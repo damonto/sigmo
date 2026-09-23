@@ -24,6 +24,8 @@ const {
   networkDialogOpen,
   availableNetworks,
   selectedNetwork,
+  registrationMode,
+  registeredOperatorCode,
   modeOptions,
   selectedMode,
   supportedBands,
@@ -32,6 +34,7 @@ const {
   airplaneModeEnabled,
   isNetworkLoading,
   isNetworkRegistering,
+  isRegistrationUpdating,
   isNetworkSettingsLoading,
   isModeUpdating,
   isBandUpdating,
@@ -39,11 +42,13 @@ const {
   hasAvailableNetworks,
   hasNetworkSelection,
   canScanNetworks,
+  canUpdateRegistration,
   canUpdateMode,
   canUpdateBands,
   canUpdateAirplaneMode,
   openNetworkDialog,
   handleNetworkRegister,
+  handleRegistrationModeChange,
   handleModeUpdate,
   toggleBand,
   handleBandUpdate,
@@ -70,8 +75,12 @@ const {
       :operator-label="currentOperatorLabel"
       :registration-state="currentRegistrationState"
       :access-technology="currentAccessTechnology"
+      :registration-mode="registrationMode"
+      :registered-operator-code="registeredOperatorCode"
       :is-scanning="isNetworkLoading"
+      :is-registration-updating="isRegistrationUpdating"
       :can-scan-networks="canScanNetworks"
+      :can-update-registration="canUpdateRegistration"
       :mode-options="modeOptions"
       :supported-bands="supportedBands"
       :selected-bands="selectedBands"
@@ -85,6 +94,7 @@ const {
       :can-update-bands="canUpdateBands"
       :can-update-airplane-mode="canUpdateAirplaneMode"
       @scan="openNetworkDialog"
+      @update-registration-mode="handleRegistrationModeChange"
       @toggle-band="toggleBand"
       @update-mode="handleModeUpdate"
       @update-bands="handleBandUpdate"

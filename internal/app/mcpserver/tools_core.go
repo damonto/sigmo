@@ -171,6 +171,9 @@ func (t *coreTools) register(c *Catalog) error {
 			return AddTool(c, "network.read", ReadOpenWorldTool("list_networks", "Scan mobile networks"), modemID, t.listNetworks)
 		},
 		func() error {
+			return AddTool(c, "network.read", ReadTool("get_network_registration", "Get network registration mode"), modemID, t.getNetworkRegistration)
+		},
+		func() error {
 			return AddTool(c, "network.read", ReadTool("get_network_modes", "Get network modes"), modemID, t.getNetworkModes)
 		},
 		func() error {
@@ -180,7 +183,7 @@ func (t *coreTools) register(c *Catalog) error {
 			return AddTool(c, "network.read", ReadTool("get_airplane_mode", "Get airplane mode"), modemID, t.getAirplaneMode)
 		},
 		func() error {
-			return AddGuardedTool(c, "network.register", WriteTool("register_network", "Register mobile network", false, true), registerNetworkModemIDs, t.registerNetworkPolicy(), t.registerNetwork)
+			return AddGuardedTool(c, "network.register", WriteTool("set_network_registration", "Set network registration mode", false, true), networkRegistrationModemIDs, t.setNetworkRegistrationPolicy(), t.setNetworkRegistration)
 		},
 		func() error {
 			return AddGuardedTool(c, "network.power", WriteTool("set_airplane_mode", "Set airplane mode", true, true), airplaneModeModemIDs, t.airplaneModePolicy(), t.setAirplaneMode)
@@ -673,6 +676,13 @@ func (t *coreTools) listNetworks(ctx context.Context, _ *mcp.CallToolRequest, _ 
 	}
 	return networksOutput{Networks: append([]networkhandler.NetworkResponse{}, values...)}, nil
 }
+func (t *coreTools) getNetworkRegistration(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*networkhandler.RegistrationResponse, error) {
+	value, err := t.network.NetworkRegistration(ctx, input.ModemID)
+	if err != nil {
+		return nil, OperationError("get network registration", err)
+	}
+	return value, nil
+}
 func (t *coreTools) getNetworkModes(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*networkhandler.ModesResponse, error) {
 	value, err := t.network.NetworkModes(ctx, input.ModemID)
 	if err != nil {
@@ -695,28 +705,49 @@ func (t *coreTools) getAirplaneMode(ctx context.Context, _ *mcp.CallToolRequest,
 	return value, nil
 }
 
-type registerNetworkInput struct {
-	ModemID      string `json:"modemId"`
-	OperatorCode string `json:"operatorCode"`
+type networkRegistrationInput struct {
+	ModemID      string                          `json:"modemId"`
+	Mode         networkhandler.RegistrationMode `json:"mode" jsonschema:"automatic lets the modem choose its network; manual pins operatorCode"`
+	OperatorCode string                          `json:"operatorCode,omitempty" jsonschema:"operator code from list_networks; required for manual mode"`
 }
 
-func registerNetworkModemIDs(input registerNetworkInput) []string { return []string{input.ModemID} }
-func (t *coreTools) registerNetworkPolicy() GuardedToolPolicy[registerNetworkInput] {
-	return GuardedToolPolicy[registerNetworkInput]{
-		Validate: func(ctx context.Context, input registerNetworkInput) error {
-			if strings.TrimSpace(input.OperatorCode) == "" {
-				return NewToolError("invalid_request", "operatorCode is required", nil)
+func (input networkRegistrationInput) request() networkhandler.SetRegistrationRequest {
+	return networkhandler.SetRegistrationRequest{
+		Mode:         networkhandler.RegistrationMode(strings.TrimSpace(string(input.Mode))),
+		OperatorCode: strings.TrimSpace(input.OperatorCode),
+	}
+}
+
+func networkRegistrationModemIDs(input networkRegistrationInput) []string {
+	return []string{input.ModemID}
+}
+func (t *coreTools) setNetworkRegistrationPolicy() GuardedToolPolicy[networkRegistrationInput] {
+	return GuardedToolPolicy[networkRegistrationInput]{
+		Validate: func(ctx context.Context, input networkRegistrationInput) error {
+			req := input.request()
+			switch req.Mode {
+			case networkhandler.RegistrationModeManual:
+				if req.OperatorCode == "" {
+					return NewToolError("invalid_request", "operatorCode is required for manual mode", nil)
+				}
+			case networkhandler.RegistrationModeAutomatic:
+			default:
+				return NewToolError("invalid_request", "mode must be automatic or manual", nil)
 			}
 			return t.validateModem(ctx, input.ModemID)
 		},
-		Confirmation: func(input registerNetworkInput) string {
-			return fmt.Sprintf("Register modem %q with operator %q? This can interrupt mobile service.", input.ModemID, input.OperatorCode)
+		Confirmation: func(input networkRegistrationInput) string {
+			req := input.request()
+			if req.Mode == networkhandler.RegistrationModeAutomatic {
+				return fmt.Sprintf("Let modem %q select its network automatically? This can interrupt mobile service.", input.ModemID)
+			}
+			return fmt.Sprintf("Register modem %q with operator %q? This can interrupt mobile service.", input.ModemID, req.OperatorCode)
 		},
 	}
 }
-func (t *coreTools) registerNetwork(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input registerNetworkInput) (successOutput, error) {
-	if err := t.network.RegisterNetwork(ctx, input.ModemID, input.OperatorCode); err != nil {
-		return successOutput{}, OperationError("register network", err)
+func (t *coreTools) setNetworkRegistration(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input networkRegistrationInput) (successOutput, error) {
+	if err := t.network.SetNetworkRegistration(ctx, input.ModemID, input.request()); err != nil {
+		return successOutput{}, OperationError("set network registration", err)
 	}
 	return successOutput{Success: true}, nil
 }

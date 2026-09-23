@@ -239,6 +239,68 @@ func TestDevicePacketServiceStatusQMI(t *testing.T) {
 	}
 }
 
+func TestDeviceNetworkSelectionQMI(t *testing.T) {
+	errNAS := errors.New("NAS rejected")
+	tests := []struct {
+		name      string
+		selection qcom.NASSystemSelectionPreference
+		err       error
+		want      NetworkSelection
+		wantErr   error
+	}{
+		{
+			name: "automatic",
+			selection: qcom.NASSystemSelectionPreference{
+				NetworkSelection:      qcom.NASNetworkSelectionAutomatic,
+				NetworkSelectionKnown: true,
+			},
+			want: NetworkSelection{Mode: NetworkSelectionAutomatic},
+		},
+		{
+			name: "manual with PLMN",
+			selection: qcom.NASSystemSelectionPreference{
+				NetworkSelection:      qcom.NASNetworkSelectionManual,
+				NetworkSelectionKnown: true,
+				ManualPLMN:            qcom.NASPLMN{MCC: 460, MNC: 1},
+				ManualPLMNKnown:       true,
+			},
+			want: NetworkSelection{Mode: NetworkSelectionManual, OperatorID: "46001"},
+		},
+		{
+			name: "manual without PLMN",
+			selection: qcom.NASSystemSelectionPreference{
+				NetworkSelection:      qcom.NASNetworkSelectionManual,
+				NetworkSelectionKnown: true,
+			},
+			want: NetworkSelection{Mode: NetworkSelectionManual},
+		},
+		{name: "selection TLV missing", wantErr: ErrUnsupported},
+		{name: "command unsupported", err: qcom.QMIErrorNotSupported, wantErr: ErrUnsupported},
+		{name: "NAS rejected", err: errNAS, wantErr: errNAS},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &fakeQMIClient{selection: tt.selection, selectionErr: tt.err}
+			device := qmiSession{slot: 1, openClient: qmiClientOpener(t, 1, client, nil)}
+
+			got, err := device.NetworkSelection(t.Context())
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("NetworkSelection() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NetworkSelection() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("NetworkSelection() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestQMISessionUSIMUsesConfiguredQCOMOpener(t *testing.T) {
 	openErr := errors.New("open rejected")
 	tests := []struct {
@@ -1065,6 +1127,8 @@ type fakeQMIClient struct {
 	imsaStatusErr       error
 	nasServingSystem    qcom.NASServingSystem
 	nasServingSystemErr error
+	selection           qcom.NASSystemSelectionPreference
+	selectionErr        error
 	wdsProfiles         []qcom.WDSProfile
 	wdsProfilesErr      error
 	wdsProfileSettings  map[uint8]qcom.WDSProfileSettings
@@ -1136,6 +1200,11 @@ func (r *fakeQMIClient) IMSAStatus(context.Context) (qcom.IMSAStatus, error) {
 func (r *fakeQMIClient) NASServingSystem(context.Context) (qcom.NASServingSystem, error) {
 	r.calls = append(r.calls, "nas-serving-system")
 	return r.nasServingSystem, r.nasServingSystemErr
+}
+
+func (r *fakeQMIClient) SystemSelectionPreference(context.Context) (qcom.NASSystemSelectionPreference, error) {
+	r.calls = append(r.calls, "system-selection-preference")
+	return r.selection, r.selectionErr
 }
 
 func (r *fakeQMIClient) WDSProfiles(context.Context, qcom.WDSProfileType) ([]qcom.WDSProfile, error) {

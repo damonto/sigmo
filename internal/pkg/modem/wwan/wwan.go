@@ -104,6 +104,10 @@ type subscriberWriterBackend interface {
 	UpdateMSISDN(ctx context.Context, number string) error
 }
 
+type networkSelectionBackend interface {
+	NetworkSelection(ctx context.Context) (NetworkSelection, error)
+}
+
 type CATProfile struct {
 	Data             []byte
 	EventMask        uint32
@@ -159,6 +163,26 @@ type PacketServiceStatus struct {
 type IMSProfile struct {
 	Index   uint8
 	PDNType string
+}
+
+// NetworkSelectionMode reports whether the modem picks its network itself or
+// stays on an operator chosen by the user.
+type NetworkSelectionMode uint8
+
+const (
+	NetworkSelectionUnknown NetworkSelectionMode = iota
+	NetworkSelectionAutomatic
+	NetworkSelectionManual
+)
+
+// NetworkSelection is the modem-wide network selection preference. The
+// preference outlives SIM profile switches and process restarts, which is why
+// callers must read it instead of assuming the modem still selects
+// automatically. OperatorID is only set for manual selection and stays empty
+// when the firmware does not report the selected PLMN.
+type NetworkSelection struct {
+	Mode       NetworkSelectionMode
+	OperatorID string
 }
 
 // OpenSession opens a QMI or MBIM device that reuses protocol clients across operations.
@@ -251,6 +275,14 @@ func (d *deviceOperations) PacketServiceStatus(ctx context.Context) (PacketServi
 		return PacketServiceStatus{}, ErrUnsupported
 	}
 	return backend.PacketServiceStatus(ctx)
+}
+
+func (d *deviceOperations) NetworkSelection(ctx context.Context) (NetworkSelection, error) {
+	backend, ok := d.backend.(networkSelectionBackend)
+	if !ok {
+		return NetworkSelection{}, ErrUnsupported
+	}
+	return backend.NetworkSelection(ctx)
 }
 
 func (d *deviceOperations) IMSProfile(ctx context.Context) (IMSProfile, error) {
