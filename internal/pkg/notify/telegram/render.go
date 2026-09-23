@@ -41,9 +41,10 @@ func render(ev notifyevent.Event) (content, error) {
 	case notifyevent.CallEvent:
 		return content{
 			Text: fmt.Sprintf(
-				"*%s*\n\n*From:* %s\n*Modem:* %s\n*Time:* %s",
+				"*%s*\n\n*From:* %s\n*To:* %s\n*Modem:* %s\n*Time:* %s",
 				escapeMarkdownV2(ev.DirectionLabel()),
 				escapeMarkdownV2(ev.DisplayFrom()),
+				escapeMarkdownV2(ev.DisplayTo()),
 				escapeMarkdownV2(strings.TrimSpace(ev.Modem)),
 				escapeMarkdownV2(ev.DisplayTimestamp()),
 			),

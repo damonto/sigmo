@@ -47,3 +47,45 @@ func TestRenderReminder(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderCall(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		event notifyevent.CallEvent
+		want  content
+	}{
+		{
+			name: "incoming call shows callee number",
+			event: notifyevent.CallEvent{
+				Modem:    "Office",
+				From:     "+8613344445555",
+				To:       "+8613344445556",
+				Incoming: true,
+			},
+			want: content{
+				Title: "Incoming Call from +86 133 4444 5555",
+				Body:  "To: +86 133 4444 5556\nModem: Office\nTime: unknown",
+			},
+		},
+		{
+			name:  "unknown callee stays blank",
+			event: notifyevent.CallEvent{Modem: "Office", From: "10010", Incoming: true},
+			want: content{
+				Title: "Incoming Call from 10010",
+				Body:  "To: \nModem: Office\nTime: unknown",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := render(tt.event)
+			if err != nil {
+				t.Fatalf("render() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("render() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}

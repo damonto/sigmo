@@ -54,9 +54,10 @@ func render(ev notifyevent.Event) (content, error) {
 		return content{
 			Subject: subject,
 			TextBody: fmt.Sprintf(
-				"%s\n\nFrom : %s\nModem: %s\nTime : %s",
+				"%s\n\nFrom : %s\nTo   : %s\nModem: %s\nTime : %s",
 				ev.DirectionLabel(),
 				ev.DisplayFrom(),
+				ev.DisplayTo(),
 				strings.TrimSpace(ev.Modem),
 				ev.DisplayTimestamp(),
 			),
@@ -124,12 +125,14 @@ func callHTML(ev notifyevent.CallEvent) string {
 			"<h1 style=\"margin:0 0 18px;font-size:24px;line-height:1.2;\">%s</h1>"+
 			"<div style=\"padding:16px 18px;border:1px solid #e5e7eb;border-radius:12px;background:#f9fafb;font-size:14px;line-height:1.7;\">"+
 			"<strong>From:</strong> %s<br>"+
+			"<strong>To:</strong> %s<br>"+
 			"<strong>Modem:</strong> %s<br>"+
 			"<strong>Time:</strong> %s"+
 			"</div>"+
 			"</div></div>",
 		html.EscapeString(ev.DirectionLabel()),
 		html.EscapeString(ev.DisplayFrom()),
+		html.EscapeString(ev.DisplayTo()),
 		html.EscapeString(strings.TrimSpace(ev.Modem)),
 		html.EscapeString(ev.DisplayTimestamp()),
 	)

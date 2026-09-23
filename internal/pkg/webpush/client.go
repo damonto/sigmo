@@ -260,6 +260,7 @@ type notificationPayload struct {
 	ModemID     string `json:"modemId"`
 	Modem       string `json:"modem"`
 	From        string `json:"from,omitempty"`
+	To          string `json:"to,omitempty"`
 	Text        string `json:"text,omitempty"`
 	ProfileType string `json:"profileType,omitempty"`
 	ProfileID   string `json:"profileId,omitempty"`
@@ -295,6 +296,7 @@ func payloadForEvent(event notifyevent.Event) (notificationPayload, int, urgency
 			ModemID: event.ModemID,
 			Modem:   strings.TrimSpace(event.Modem),
 			From:    strings.TrimSpace(event.From),
+			To:      strings.TrimSpace(event.To),
 			URL:     "/modems/" + url.PathEscape(event.ModemID) + "/phone",
 			Tag:     "call:" + event.ID,
 		}, 60, urgencyHigh, true

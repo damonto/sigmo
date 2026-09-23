@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -160,6 +162,94 @@ func TestForwardCallNotifiesIncomingRingingOnce(t *testing.T) {
 	}
 	if got[0].Payload.From != "+12242255559" || got[0].Payload.Modem != "Office SIM" {
 		t.Fatalf("payload = %+v, want caller and modem alias", got[0].Payload)
+	}
+}
+
+// fakeRegistry serves modems by equipment identifier and never emits events,
+// so the relay can be exercised without a device loop.
+type fakeRegistry struct {
+	modems map[string]*modem.Modem
+}
+
+func (f *fakeRegistry) Subscribe(context.Context, func(modem.ModemEvent) error) (func(), error) {
+	return func() {}, nil
+}
+
+func (f *fakeRegistry) Modems(context.Context) (map[string]*modem.Modem, error) {
+	return maps.Clone(f.modems), nil
+}
+
+func (f *fakeRegistry) Find(_ context.Context, id string) (*modem.Modem, error) {
+	if m, ok := f.modems[id]; ok {
+		return m, nil
+	}
+	return nil, fmt.Errorf("%w: %s", modem.ErrNotFound, id)
+}
+
+func TestForwardCallIncludesModemNumber(t *testing.T) {
+	tests := []struct {
+		name     string
+		registry *fakeRegistry
+		wantTo   string
+	}{
+		{
+			name:     "modem number becomes callee",
+			registry: &fakeRegistry{modems: map[string]*modem.Modem{"modem-1": {Number: " +12242255558 "}}},
+			wantTo:   "+12242255558",
+		},
+		{
+			name:     "unregistered modem still notifies",
+			registry: &fakeRegistry{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+			var got []notifyevent.CallEvent
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer r.Body.Close()
+				var payload struct {
+					Payload notifyevent.CallEvent `json:"payload"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Errorf("Decode() error = %v", err)
+				}
+				got = append(got, payload.Payload)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			defer db.Close()
+
+			current := settings.Default()
+			current.Channels = map[string]settings.Channel{"http": {Endpoint: server.URL}}
+			relay, err := New(settings.NewMemoryStore(current), tt.registry, db, nil)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			call := storage.Call{
+				ID:        "call-1",
+				ModemID:   "modem-1",
+				Direction: "incoming",
+				Number:    "+12242255559",
+				State:     "ringing",
+				StartedAt: time.Now(),
+			}
+			if err := relay.ForwardCall(ctx, call); err != nil {
+				t.Fatalf("ForwardCall() error = %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("notifications = %d, want 1", len(got))
+			}
+			if got[0].From != "+12242255559" || got[0].To != tt.wantTo {
+				t.Fatalf("payload = %+v, want from +12242255559 and to %q", got[0], tt.wantTo)
+			}
+		})
 	}
 }
 

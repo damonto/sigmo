@@ -112,6 +112,22 @@ describe('webPush', () => {
     }
   })
 
+  it('shows the callee number for incoming calls when known', () => {
+    const payload: WebPushPayload = {
+      type: 'call',
+      id: 'call-1',
+      modemId: 'modem-1',
+      modem: 'Office',
+      from: '10010',
+      url: '/modems/modem-1/phone',
+      tag: 'call:call-1',
+    }
+    expect(notificationContent(payload, 'en-US').options.body).toBe('10010 · Office')
+    expect(notificationContent({ ...payload, to: '+12242255558' }, 'en-US').options.body).toBe(
+      '10010 → +12242255558 · Office',
+    )
+  })
+
   it('keeps notification navigation on the current origin', () => {
     const origin = 'https://sigmo.example'
     const tests = [

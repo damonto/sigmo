@@ -198,6 +198,7 @@ func TestPayloadForEvent(t *testing.T) {
 		event notifyevent.Event
 		want  bool
 		tag   string
+		to    string
 	}{
 		{
 			name:  "incoming sms",
@@ -211,9 +212,10 @@ func TestPayloadForEvent(t *testing.T) {
 		},
 		{
 			name:  "ringing call",
-			event: notifyevent.CallEvent{ID: "call-1", ModemID: "modem-1", Incoming: true, State: "ringing"},
+			event: notifyevent.CallEvent{ID: "call-1", ModemID: "modem-1", Incoming: true, State: "ringing", To: " +12242255558 "},
 			want:  true,
 			tag:   "call:call-1",
+			to:    "+12242255558",
 		},
 		{
 			name:  "active call",
@@ -239,6 +241,9 @@ func TestPayloadForEvent(t *testing.T) {
 			}
 			if tt.want && payload.Tag != tt.tag {
 				t.Fatalf("payload tag = %q, want %q", payload.Tag, tt.tag)
+			}
+			if payload.To != tt.to {
+				t.Fatalf("payload to = %q, want %q", payload.To, tt.to)
 			}
 		})
 	}

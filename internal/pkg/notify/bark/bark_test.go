@@ -39,11 +39,12 @@ func TestRender(t *testing.T) {
 			ev: notifyevent.CallEvent{
 				Modem:    "Office SIM",
 				From:     "+8613344445555",
+				To:       "+8613344445556",
 				Incoming: true,
 			},
 			want: content{
 				Title: "Incoming Call from +86 133 4444 5555",
-				Body:  "Modem: Office SIM\nTime: unknown",
+				Body:  "To: +86 133 4444 5556\nModem: Office SIM\nTime: unknown",
 			},
 		},
 		{

@@ -41,10 +41,11 @@ func TestRender(t *testing.T) {
 			ev: notifyevent.CallEvent{
 				Modem:    "M_1",
 				From:     "+12223334444",
+				To:       "+12223335555",
 				Incoming: true,
 			},
 			want: content{
-				Text:      "*Incoming Call*\n\n*From:* \\+1 \\(222\\) 333\\-4444\n*Modem:* M\\_1\n*Time:* unknown",
+				Text:      "*Incoming Call*\n\n*From:* \\+1 \\(222\\) 333\\-4444\n*To:* \\+1 \\(222\\) 333\\-5555\n*Modem:* M\\_1\n*Time:* unknown",
 				ParseMode: parseModeMarkdownV2,
 			},
 		},

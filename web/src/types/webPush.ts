@@ -30,6 +30,7 @@ export type WebPushPayload = {
   modemId: string
   modem: string
   from?: string
+  to?: string
   text?: string
   profileType?: 'psim' | 'esim'
   profileId?: string

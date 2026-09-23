@@ -15,7 +15,7 @@ func render(ev notifyevent.Event) (string, error) {
 	case notifyevent.SMSEvent:
 		return fmt.Sprintf("%s\n%s", ev.DisplayCounterparty(), ev.DisplayText()), nil
 	case notifyevent.CallEvent:
-		return fmt.Sprintf("%s\nModem: %s\nTime: %s", callTitle(ev), strings.TrimSpace(ev.Modem), ev.DisplayTimestamp()), nil
+		return fmt.Sprintf("%s\nTo: %s\nModem: %s\nTime: %s", callTitle(ev), ev.DisplayTo(), strings.TrimSpace(ev.Modem), ev.DisplayTimestamp()), nil
 	case notifyevent.ReminderEvent:
 		return fmt.Sprintf(
 			"Reminder: %s\nICCID: %s\nModem: %s\nTime: %s\n\n%s",

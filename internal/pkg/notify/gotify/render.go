@@ -28,7 +28,7 @@ func render(ev notifyevent.Event) (content, error) {
 	case notifyevent.CallEvent:
 		return content{
 			Title: callTitle(ev),
-			Body:  fmt.Sprintf("Modem: %s\nTime: %s", strings.TrimSpace(ev.Modem), ev.DisplayTimestamp()),
+			Body:  fmt.Sprintf("To: %s\nModem: %s\nTime: %s", ev.DisplayTo(), strings.TrimSpace(ev.Modem), ev.DisplayTimestamp()),
 		}, nil
 	case notifyevent.ReminderEvent:
 		return content{

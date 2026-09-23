@@ -30,9 +30,17 @@ const (
 	callStateRinging      = "ringing"
 )
 
+// modemRegistry is the slice of modem.Registry the relay depends on. It is
+// an interface so tests can stand in a fake without a real device loop.
+type modemRegistry interface {
+	Subscribe(ctx context.Context, fn func(modem.ModemEvent) error) (func(), error)
+	Modems(ctx context.Context) (map[string]*modem.Modem, error)
+	Find(ctx context.Context, id string) (*modem.Modem, error)
+}
+
 type Relay struct {
 	store         *settings.Store
-	registry      *modem.Registry
+	registry      modemRegistry
 	notifier      *notify.Notifier
 	webPush       *webpush.Client
 	messages      *storage.Store
@@ -60,7 +68,7 @@ type modemSMSReceipt struct {
 	deleter modemSMSDeleter
 }
 
-func New(store *settings.Store, registry *modem.Registry, messages *storage.Store, webPush *webpush.Client) (*Relay, error) {
+func New(store *settings.Store, registry modemRegistry, messages *storage.Store, webPush *webpush.Client) (*Relay, error) {
 	if messages == nil {
 		return nil, errors.New("message storage is required")
 	}
@@ -301,7 +309,7 @@ func (r *Relay) ForwardCall(ctx context.Context, call storage.Call) error {
 	r.mu.Lock()
 	notifier := r.notifier
 	r.mu.Unlock()
-	if err := r.send(ctx, notifier, r.formatStoredCall(call)); err != nil {
+	if err := r.send(ctx, notifier, r.formatStoredCall(ctx, call)); err != nil {
 		r.releaseCallNotification(call.ID)
 		return err
 	}
@@ -402,12 +410,13 @@ func (r *Relay) formatStoredMessage(modemID string, message storage.Message) not
 	}
 }
 
-func (r *Relay) formatStoredCall(call storage.Call) notifyevent.CallEvent {
+func (r *Relay) formatStoredCall(ctx context.Context, call storage.Call) notifyevent.CallEvent {
 	return notifyevent.CallEvent{
 		ID:       call.ID,
 		ModemID:  call.ModemID,
 		Modem:    r.modemLabel(call.ModemID),
 		From:     strings.TrimSpace(call.Number),
+		To:       r.modemNumber(ctx, call.ModemID),
 		Time:     call.StartedAt,
 		State:    call.State,
 		Incoming: call.Direction == callDirectionIncoming,
@@ -450,6 +459,20 @@ func (r *Relay) releaseCallNotification(callID string) {
 	r.mu.Lock()
 	delete(r.notifiedCalls, strings.TrimSpace(callID))
 	r.mu.Unlock()
+}
+
+// modemNumber returns the modem's own number, or "" when the modem is not
+// registered. A missing number must not block the notification itself.
+func (r *Relay) modemNumber(ctx context.Context, modemID string) string {
+	if r.registry == nil {
+		return ""
+	}
+	m, err := r.registry.Find(ctx, modemID)
+	if err != nil {
+		slog.Debug("resolve modem number for call notification", "imei", modemID, "error", err)
+		return ""
+	}
+	return strings.TrimSpace(m.Snapshot().Number)
 }
 
 func (r *Relay) modemLabel(modemID string) string {

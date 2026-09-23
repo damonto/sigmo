@@ -19,3 +19,16 @@ func TestRenderReminder(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderCall(t *testing.T) {
+	t.Parallel()
+	got, err := render(notifyevent.CallEvent{Modem: "Office", From: "+8613344445555", To: "+8613344445556", Incoming: true})
+	if err != nil {
+		t.Fatalf("render() error = %v", err)
+	}
+	for _, want := range []string{"Incoming Call from +86 133 4444 5555", "To: +86 133 4444 5556", "Modem: Office"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("render() = %q, want it to contain %q", got, want)
+		}
+	}
+}
