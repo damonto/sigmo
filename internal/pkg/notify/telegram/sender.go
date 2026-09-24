@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	notifycontent "github.com/damonto/sigmo/internal/pkg/notify/content"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
@@ -51,14 +51,11 @@ func New(channel *settings.Channel) (*Sender, error) {
 	}, nil
 }
 
-func (s *Sender) Send(ctx context.Context, ev notifyevent.Event) error {
+func (s *Sender) Send(ctx context.Context, msg notifycontent.Message) error {
 	if len(s.recipients) == 0 {
 		return errors.New("telegram recipients are required")
 	}
-	content, err := render(ev)
-	if err != nil {
-		return err
-	}
+	content := render(msg)
 
 	var combined error
 	for _, recipient := range s.recipients {

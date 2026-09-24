@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/damonto/sigmo/internal/pkg/locale"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -187,6 +188,41 @@ func TestStorePersistsSettings(t *testing.T) {
 	}
 	if modem := got.FindModem("modem-1"); modem.Alias != "Office" || modem.MSS != 128 {
 		t.Fatalf("modem settings = %#v, want saved settings", modem)
+	}
+}
+
+func TestStoreLocale(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	db := openTestStore(t)
+	store, err := NewStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	if got := store.Locale(); got != "" {
+		t.Fatalf("Locale() on empty database = %q, want no preference", got)
+	}
+	if err := store.SetLocale(ctx, locale.Chinese); err != nil {
+		t.Fatalf("SetLocale() error = %v", err)
+	}
+	// Saving settings must not reset the recorded language.
+	if _, err := store.Update(ctx, func(current *Settings) error {
+		current.MCP.Enabled = true
+		return nil
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if got := store.Locale(); got != locale.Chinese {
+		t.Fatalf("Locale() after Update() = %q, want %q", got, locale.Chinese)
+	}
+
+	reloaded, err := NewStore(ctx, db)
+	if err != nil {
+		t.Fatalf("NewStore() reload error = %v", err)
+	}
+	if got := reloaded.Locale(); got != locale.Chinese {
+		t.Fatalf("reloaded Locale() = %q, want %q", got, locale.Chinese)
 	}
 }
 

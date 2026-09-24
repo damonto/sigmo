@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	notifycontent "github.com/damonto/sigmo/internal/pkg/notify/content"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
@@ -38,13 +39,16 @@ func New(channel *settings.Channel) (*Sender, error) {
 	}, nil
 }
 
-func (s *Sender) Send(ctx context.Context, ev notifyevent.Event) error {
+func (s *Sender) Send(ctx context.Context, msg notifycontent.Message) error {
+	if msg.Event == nil {
+		return errors.New("http event is required")
+	}
 	body, err := json.Marshal(struct {
 		Kind    notifyevent.Kind  `json:"kind"`
 		Payload notifyevent.Event `json:"payload"`
 	}{
-		Kind:    ev.Kind(),
-		Payload: ev,
+		Kind:    msg.Event.Kind(),
+		Payload: msg.Event,
 	})
 	if err != nil {
 		return fmt.Errorf("encoding http event: %w", err)

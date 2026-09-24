@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	notifycontent "github.com/damonto/sigmo/internal/pkg/notify/content"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
@@ -45,13 +45,8 @@ func New(channel *settings.Channel) (*Sender, error) {
 	}, nil
 }
 
-func (s *Sender) Send(ctx context.Context, ev notifyevent.Event) error {
-	body, err := render(ev)
-	if err != nil {
-		return err
-	}
-
-	payload, err := json.Marshal(message{MsgType: "text", Text: text{Content: body}})
+func (s *Sender) Send(ctx context.Context, msg notifycontent.Message) error {
+	payload, err := json.Marshal(message{MsgType: "text", Text: text{Content: msg.Text()}})
 	if err != nil {
 		return fmt.Errorf("encoding wecom message: %w", err)
 	}

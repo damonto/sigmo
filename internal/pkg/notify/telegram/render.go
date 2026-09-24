@@ -1,10 +1,9 @@
 package telegram
 
 import (
-	"fmt"
 	"strings"
 
-	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	notifycontent "github.com/damonto/sigmo/internal/pkg/notify/content"
 )
 
 const parseModeMarkdownV2 = "MarkdownV2"
@@ -14,57 +13,25 @@ type content struct {
 	ParseMode string
 }
 
-func render(ev notifyevent.Event) (content, error) {
-	switch ev := ev.(type) {
-	case notifyevent.OTPEvent:
-		code := strings.TrimSpace(ev.Code)
-		return content{
-			Text: fmt.Sprintf(
-				"*Sigmo Login*\nVerification code\n\n`%s`",
-				escapeMarkdownV2(code),
-			),
-			ParseMode: parseModeMarkdownV2,
-		}, nil
-	case notifyevent.SMSEvent:
-		return content{
-			Text: fmt.Sprintf(
-				"*%s*\n\n*From:* %s\n*To:* %s\n*Modem:* %s\n*Time:* %s\n\n*Message:*\n%s",
-				escapeMarkdownV2(ev.DirectionLabel()),
-				escapeMarkdownV2(ev.DisplayFrom()),
-				escapeMarkdownV2(ev.DisplayTo()),
-				escapeMarkdownV2(strings.TrimSpace(ev.Modem)),
-				escapeMarkdownV2(ev.DisplayTimestamp()),
-				escapeMarkdownV2(ev.DisplayText()),
-			),
-			ParseMode: parseModeMarkdownV2,
-		}, nil
-	case notifyevent.CallEvent:
-		return content{
-			Text: fmt.Sprintf(
-				"*%s*\n\n*From:* %s\n*To:* %s\n*Modem:* %s\n*Time:* %s",
-				escapeMarkdownV2(ev.DirectionLabel()),
-				escapeMarkdownV2(ev.DisplayFrom()),
-				escapeMarkdownV2(ev.DisplayTo()),
-				escapeMarkdownV2(strings.TrimSpace(ev.Modem)),
-				escapeMarkdownV2(ev.DisplayTimestamp()),
-			),
-			ParseMode: parseModeMarkdownV2,
-		}, nil
-	case notifyevent.ReminderEvent:
-		return content{
-			Text: fmt.Sprintf(
-				"*Reminder*\n\n*Profile:* %s\n*ICCID:* %s\n*Modem:* %s\n*Time:* %s\n\n%s",
-				escapeMarkdownV2(ev.DisplayProfile()),
-				escapeMarkdownV2(strings.TrimSpace(ev.ProfileID)),
-				escapeMarkdownV2(strings.TrimSpace(ev.Modem)),
-				escapeMarkdownV2(ev.DisplayTimestamp()),
-				escapeMarkdownV2(ev.DisplayContent()),
-			),
-			ParseMode: parseModeMarkdownV2,
-		}, nil
-	default:
-		return content{}, fmt.Errorf("rendering telegram content for %q: unsupported event", ev.Kind())
+func render(msg notifycontent.Message) content {
+	sections := []string{"*" + escapeMarkdownV2(msg.Subject) + "*"}
+	if len(msg.Fields) > 0 {
+		lines := make([]string, 0, len(msg.Fields))
+		for _, f := range msg.Fields {
+			value := escapeMarkdownV2(f.Value)
+			if f.Code {
+				// Telegram copies monospace text on tap, which is what a reader
+				// wants to do with a verification code.
+				value = "`" + value + "`"
+			}
+			lines = append(lines, "*"+escapeMarkdownV2(f.Label)+":* "+value)
+		}
+		sections = append(sections, strings.Join(lines, "\n"))
 	}
+	if msg.Body != "" {
+		sections = append(sections, escapeMarkdownV2(msg.Body))
+	}
+	return content{Text: strings.Join(sections, "\n\n"), ParseMode: parseModeMarkdownV2}
 }
 
 var markdownV2Escaper = strings.NewReplacer(

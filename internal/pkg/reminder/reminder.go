@@ -214,7 +214,7 @@ func (s *Scheduler) deliverNotification(ctx context.Context, event notifyevent.R
 	if err != nil {
 		return fmt.Errorf("create notifier: %w", err)
 	}
-	notifierErr := notifier.Send(ctx, event)
+	notifierErr := notifier.Send(ctx, s.settings.Locale(), event)
 	if s.webPush != nil {
 		if err := s.webPush.Send(ctx, event); err != nil {
 			slog.Warn("send reminder web push", "profile_type", event.ProfileType, "profile_id", event.ProfileID, "error", err)

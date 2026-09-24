@@ -1,16 +1,19 @@
 package auth
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
 
 	appauth "github.com/damonto/sigmo/internal/app/auth"
+	"github.com/damonto/sigmo/internal/pkg/locale"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
@@ -70,12 +73,60 @@ func TestOTPSend(t *testing.T) {
 			settingsStore := settings.NewMemoryStore(&tt.settings)
 			otp := newOTP(settingsStore, store)
 
-			err := otp.Send(t.Context())
+			err := otp.Send(t.Context(), locale.English)
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("Send() error = %v, want %v", err, tt.want)
 			}
 			if _, _, err := store.IssueOTP(); err != nil {
 				t.Fatalf("IssueOTP() after rejected Send() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestOTPSendLanguage(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		recorded locale.Tag
+		lang     locale.Tag
+		want     string
+	}{
+		{name: "uses the language of the login page", recorded: locale.English, lang: locale.Chinese, want: "验证码"},
+		{name: "falls back to the recorded language", recorded: locale.Chinese, want: "验证码"},
+		{name: "defaults to english", want: "Verification code"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			texts := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Content struct {
+						Text string `json:"text"`
+					} `json:"content"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("Decode() error = %v", err)
+				}
+				texts <- body.Content.Text
+			}))
+			t.Cleanup(server.Close)
+
+			settingsStore := settings.NewMemoryStore(&settings.Settings{
+				Auth:     settings.Auth{OTPRequired: true, AuthProviders: []string{"lark"}},
+				Channels: map[string]settings.Channel{"lark": {Endpoint: server.URL}},
+			})
+			if err := settingsStore.SetLocale(t.Context(), tt.recorded); err != nil {
+				t.Fatalf("SetLocale() error = %v", err)
+			}
+			if err := newOTP(settingsStore, newAuthTestStore(t)).Send(t.Context(), tt.lang); err != nil {
+				t.Fatalf("Send() error = %v", err)
+			}
+			if got := <-texts; !strings.Contains(got, tt.want) {
+				t.Fatalf("sent text = %q, want it to contain %q", got, tt.want)
 			}
 		})
 	}

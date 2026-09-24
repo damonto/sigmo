@@ -427,7 +427,7 @@ func (r *Relay) send(ctx context.Context, notifier *notify.Notifier, event notif
 	var wg sync.WaitGroup
 	var notifierErr, webPushErr error
 	wg.Go(func() {
-		notifierErr = notifier.Send(ctx, event)
+		notifierErr = notifier.Send(ctx, r.store.Locale(), event)
 	})
 	if r.webPush != nil {
 		wg.Go(func() {

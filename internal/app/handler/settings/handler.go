@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -114,7 +115,8 @@ func (h *Handler) TestAuth(c *echo.Context) error {
 		slog.Error("create authentication test notifier", "error", err, "providers", providers)
 		return httpapi.UnprocessableEntity(c, errorCodeTestAuthFailed, errAuthTestFailed)
 	}
-	if err := notifier.Send(c.Request().Context(), notifyevent.OTPEvent{Code: "000000"}, providers...); err != nil {
+	lang := cmp.Or(httpapi.RequestLocale(c), h.store.Locale())
+	if err := notifier.Send(c.Request().Context(), lang, notifyevent.OTPEvent{Code: "000000"}, providers...); err != nil {
 		slog.Error("send authentication provider test", "error", err, "providers", providers)
 		return httpapi.UnprocessableEntity(c, errorCodeTestAuthFailed, errAuthTestFailed)
 	}

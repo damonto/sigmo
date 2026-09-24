@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/damonto/sigmo/internal/pkg/locale"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -20,6 +21,7 @@ const (
 	modemSettingsKey    = "modem.settings"
 	modemSettingsPrefix = "modem:"
 	updateSettingsKey   = "update.settings"
+	localeKey           = "ui.locale"
 )
 
 var errStorageRequired = errors.New("settings storage is required")
@@ -30,6 +32,9 @@ type Store struct {
 	current           Settings
 	memory            bool
 	updatesConfigured bool
+	// locale lives beside current rather than in Settings: it is observed
+	// from requests, not configured, so Update must never overwrite it.
+	locale locale.Tag
 }
 
 func NewStore(ctx context.Context, db *storage.Store) (*Store, error) {
@@ -40,7 +45,16 @@ func NewStore(ctx context.Context, db *storage.Store) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{db: db, current: current, updatesConfigured: updatesConfigured}, nil
+	var lang locale.Tag
+	if _, err := get(ctx, db, globalScopeKey, localeKey, &lang); err != nil {
+		return nil, fmt.Errorf("load locale: %w", err)
+	}
+	return &Store{
+		db:                db,
+		current:           current,
+		updatesConfigured: updatesConfigured,
+		locale:            locale.Parse(string(lang)),
+	}, nil
 }
 
 func NewMemoryStore(current *Settings) *Store {
@@ -90,6 +104,31 @@ func (s *Store) UpdateSettings() (Updates, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.current.Updates, s.updatesConfigured
+}
+
+// Locale is the web UI language of the most recent authenticated request.
+// Notifications use it because events such as an incoming SMS have no
+// request of their own to take a language from.
+func (s *Store) Locale() locale.Tag {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.locale
+}
+
+// SetLocale records lang as the most recent web UI language. It writes only
+// when the language changes, because it runs on every authenticated request.
+func (s *Store) SetLocale(ctx context.Context, lang locale.Tag) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if lang == s.locale {
+		return nil
+	}
+	if err := s.putLocale(ctx, lang); err != nil {
+		return fmt.Errorf("save locale: %w", err)
+	}
+	s.locale = lang
+	return nil
 }
 
 func (s *Store) Update(ctx context.Context, update func(*Settings) error) (Settings, error) {
@@ -248,6 +287,16 @@ func (s *Store) putModem(ctx context.Context, id string, modem Modem) error {
 		return errStorageRequired
 	}
 	return s.db.Put(ctx, modemSettingsPrefix+id, modemSettingsKey, modem)
+}
+
+func (s *Store) putLocale(ctx context.Context, lang locale.Tag) error {
+	if s.memory {
+		return nil
+	}
+	if s.db == nil {
+		return errStorageRequired
+	}
+	return s.db.Put(ctx, globalScopeKey, localeKey, lang)
 }
 
 func get(ctx context.Context, db *storage.Store, scope string, key string, dst any) (bool, error) {

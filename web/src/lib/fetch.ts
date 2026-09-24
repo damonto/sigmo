@@ -1,6 +1,7 @@
 import { createFetch, type UseFetchReturn } from '@vueuse/core'
 import type { Ref } from 'vue'
 
+import { detectLocale } from '@/i18n/locale'
 import router from '@/router'
 
 import { getStoredToken } from './authStorage'
@@ -14,6 +15,11 @@ const requestHeaders = (options: RequestInit) => {
   const headers = new Headers(options.headers)
   const token = getStoredToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
+  // The server sends notifications, such as forwarded SMS, in the language
+  // of the last UI that called it, so every request says which one it shows.
+  // detectLocale is what i18n starts with; the UI has no language switcher,
+  // so if one is added, send its current choice here instead.
+  headers.set('X-Sigmo-Locale', detectLocale())
 
   const hasBody = options.body !== undefined && options.body !== null
   if (hasBody && !(options.body instanceof FormData) && !headers.has('Content-Type')) {

@@ -11,15 +11,17 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/damonto/sigmo/internal/pkg/locale"
+	notifycontent "github.com/damonto/sigmo/internal/pkg/notify/content"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 	notifywebhook "github.com/damonto/sigmo/internal/pkg/notify/webhook"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
-type senderFunc func(ctx context.Context, event notifyevent.Event) error
+type senderFunc func(ctx context.Context, msg notifycontent.Message) error
 
-func (f senderFunc) Send(ctx context.Context, event notifyevent.Event) error {
-	return f(ctx, event)
+func (f senderFunc) Send(ctx context.Context, msg notifycontent.Message) error {
+	return f(ctx, msg)
 }
 
 func TestNotifierSend(t *testing.T) {
@@ -34,13 +36,13 @@ func TestNotifierSend(t *testing.T) {
 		)
 		notifier := &Notifier{
 			channels: map[string]Sender{
-				"email": senderFunc(func(ctx context.Context, event notifyevent.Event) error {
+				"email": senderFunc(func(ctx context.Context, msg notifycontent.Message) error {
 					mu.Lock()
 					called = append(called, "email")
 					mu.Unlock()
 					return nil
 				}),
-				"telegram": senderFunc(func(ctx context.Context, event notifyevent.Event) error {
+				"telegram": senderFunc(func(ctx context.Context, msg notifycontent.Message) error {
 					mu.Lock()
 					called = append(called, "telegram")
 					mu.Unlock()
@@ -49,7 +51,7 @@ func TestNotifierSend(t *testing.T) {
 			},
 		}
 
-		if err := notifier.Send(t.Context(), notifyevent.OTPEvent{Code: "123456"}); err != nil {
+		if err := notifier.Send(t.Context(), locale.English, notifyevent.OTPEvent{Code: "123456"}); err != nil {
 			t.Fatalf("Send() error = %v", err)
 		}
 
@@ -66,14 +68,14 @@ func TestNotifierSend(t *testing.T) {
 		var called []string
 		notifier := &Notifier{
 			channels: map[string]Sender{
-				"email": senderFunc(func(ctx context.Context, event notifyevent.Event) error {
+				"email": senderFunc(func(ctx context.Context, msg notifycontent.Message) error {
 					called = append(called, "email")
 					return nil
 				}),
 			},
 		}
 
-		if err := notifier.Send(t.Context(), notifyevent.OTPEvent{Code: "123456"}, "email", "missing"); err != nil {
+		if err := notifier.Send(t.Context(), locale.English, notifyevent.OTPEvent{Code: "123456"}, "email", "missing"); err != nil {
 			t.Fatalf("Send() error = %v", err)
 		}
 		if !slices.Equal(called, []string{"email"}) {
@@ -87,13 +89,13 @@ func TestNotifierSend(t *testing.T) {
 		wantErr := errors.New("boom")
 		notifier := &Notifier{
 			channels: map[string]Sender{
-				"email": senderFunc(func(ctx context.Context, event notifyevent.Event) error {
+				"email": senderFunc(func(ctx context.Context, msg notifycontent.Message) error {
 					return wantErr
 				}),
 			},
 		}
 
-		err := notifier.Send(t.Context(), notifyevent.OTPEvent{Code: "123456"})
+		err := notifier.Send(t.Context(), locale.English, notifyevent.OTPEvent{Code: "123456"})
 		if err == nil {
 			t.Fatal("Send() error = nil, want joined error")
 		}
@@ -105,12 +107,50 @@ func TestNotifierSend(t *testing.T) {
 		}
 	})
 
+	t.Run("delivers composed content", func(t *testing.T) {
+		t.Parallel()
+
+		titles := make(chan string, 1)
+		notifier := &Notifier{
+			channels: map[string]Sender{
+				"email": senderFunc(func(ctx context.Context, msg notifycontent.Message) error {
+					titles <- msg.Title()
+					return nil
+				}),
+			},
+		}
+
+		if err := notifier.Send(t.Context(), locale.English, notifyevent.OTPEvent{Code: "123456"}); err != nil {
+			t.Fatalf("Send() error = %v", err)
+		}
+		if got := <-titles; got != "Sigmo Login" {
+			t.Fatalf("Title() = %q, want %q", got, "Sigmo Login")
+		}
+	})
+
+	t.Run("rejects events it cannot compose before sending", func(t *testing.T) {
+		t.Parallel()
+
+		notifier := &Notifier{
+			channels: map[string]Sender{
+				"email": senderFunc(func(ctx context.Context, msg notifycontent.Message) error {
+					t.Error("Send() reached the channel, want compose error first")
+					return nil
+				}),
+			},
+		}
+
+		if err := notifier.Send(t.Context(), locale.English, nil); err == nil {
+			t.Fatal("Send() error = nil, want compose error")
+		}
+	})
+
 	t.Run("propagates context cancellation", func(t *testing.T) {
 		t.Parallel()
 
 		notifier := &Notifier{
 			channels: map[string]Sender{
-				"email": senderFunc(func(ctx context.Context, event notifyevent.Event) error {
+				"email": senderFunc(func(ctx context.Context, msg notifycontent.Message) error {
 					return ctx.Err()
 				}),
 			},
@@ -118,7 +158,7 @@ func TestNotifierSend(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		err := notifier.Send(ctx, notifyevent.OTPEvent{Code: "123456"})
+		err := notifier.Send(ctx, locale.English, notifyevent.OTPEvent{Code: "123456"})
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("Send() error = %v, want %v", err, context.Canceled)
 		}
@@ -178,7 +218,11 @@ func TestHTTPSend(t *testing.T) {
 		t.Fatalf("NewHTTP() error = %v", err)
 	}
 
-	if err := sender.Send(t.Context(), notifyevent.OTPEvent{Code: "654321"}); err != nil {
+	msg, err := notifycontent.Compose(locale.English, notifyevent.OTPEvent{Code: "654321"})
+	if err != nil {
+		t.Fatalf("Compose() error = %v", err)
+	}
+	if err := sender.Send(t.Context(), msg); err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
 	if got.Kind != notifyevent.KindOTP {

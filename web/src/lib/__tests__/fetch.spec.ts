@@ -104,6 +104,19 @@ describe('useFetch global error handling', () => {
     )
   })
 
+  it('tells the server which language the UI is shown in', async () => {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['fr-FR', 'zh-CN'])
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }))
+    await fetchJson<void>('modems/1/messages/+1', { method: 'DELETE' })
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('{"ok":true}', { status: 200 }))
+    await fetchJsonQuietly('update-installations/current')
+
+    const sentLocales = vi
+      .mocked(fetch)
+      .mock.calls.map(([, init]) => new Headers(init?.headers).get('X-Sigmo-Locale'))
+    expect(sentLocales).toEqual(['zh', 'zh'])
+  })
+
   it('resolves empty successful responses without parsing errors', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }))
 

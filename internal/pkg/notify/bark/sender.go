@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	notifycontent "github.com/damonto/sigmo/internal/pkg/notify/content"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
@@ -53,11 +53,8 @@ func New(channel *settings.Channel) (*Sender, error) {
 	}, nil
 }
 
-func (s *Sender) Send(ctx context.Context, ev notifyevent.Event) error {
-	content, err := render(ev)
-	if err != nil {
-		return err
-	}
+func (s *Sender) Send(ctx context.Context, msg notifycontent.Message) error {
+	content := render(msg)
 	if strings.TrimSpace(content.Body) == "" {
 		return errors.New("bark body is required")
 	}

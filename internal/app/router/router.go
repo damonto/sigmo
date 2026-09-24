@@ -112,7 +112,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 	v1.POST("/auth/otp", authHandler.SendOTP)
 	v1.POST("/auth/otp/verify", authHandler.VerifyOTP)
 	protected := v1.Group("")
-	protected.Use(appmiddleware.Auth(authStore, deps.Store))
+	protected.Use(appmiddleware.Auth(authStore, deps.Store), appmiddleware.Locale(deps.Store))
 	{
 		{
 			h := hsettings.New(deps.Store, deps.InternetConnector, deps.Relay)

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/damonto/sigmo/internal/app/auth"
+	"github.com/damonto/sigmo/internal/pkg/locale"
 	"github.com/damonto/sigmo/internal/pkg/notify"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 	"github.com/damonto/sigmo/internal/pkg/settings"
@@ -36,7 +38,9 @@ func (o *otp) Required() bool {
 	return o.settingsStore.OTPRequired()
 }
 
-func (o *otp) Send(ctx context.Context) error {
+// Send issues a code and delivers it in lang, the language of the login page
+// that asked for it. An empty lang falls back to the last recorded language.
+func (o *otp) Send(ctx context.Context, lang locale.Tag) error {
 	current := o.settingsStore.Snapshot()
 	if !current.Auth.OTPRequired {
 		return nil
@@ -53,7 +57,8 @@ func (o *otp) Send(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("issue OTP: %w", err)
 	}
-	if err := notifier.Send(ctx, notifyevent.OTPEvent{Code: code}, authProviders...); err != nil {
+	lang = cmp.Or(lang, o.settingsStore.Locale())
+	if err := notifier.Send(ctx, lang, notifyevent.OTPEvent{Code: code}, authProviders...); err != nil {
 		return fmt.Errorf("send OTP notification: %w", err)
 	}
 	return nil

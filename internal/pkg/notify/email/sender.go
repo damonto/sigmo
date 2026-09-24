@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
+	notifycontent "github.com/damonto/sigmo/internal/pkg/notify/content"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/wneessen/go-mail"
 )
@@ -70,13 +70,13 @@ func New(channel *settings.Channel) (*Sender, error) {
 	}, nil
 }
 
-func (s *Sender) Send(ctx context.Context, ev notifyevent.Event) error {
+func (s *Sender) Send(ctx context.Context, content notifycontent.Message) error {
 	if len(s.recipients) == 0 {
 		return errors.New("email recipients are required")
 	}
-	content, err := render(ev)
+	html, err := content.HTML()
 	if err != nil {
-		return err
+		return fmt.Errorf("rendering email html: %w", err)
 	}
 
 	msg := mail.NewMsg()
@@ -86,11 +86,9 @@ func (s *Sender) Send(ctx context.Context, ev notifyevent.Event) error {
 	if err := msg.To(s.recipients...); err != nil {
 		return fmt.Errorf("setting email recipients: %w", err)
 	}
-	msg.Subject(content.Subject)
-	msg.SetBodyString(mail.TypeTextPlain, content.TextBody)
-	if strings.TrimSpace(content.HTMLBody) != "" {
-		msg.AddAlternativeString(mail.TypeTextHTML, content.HTMLBody)
-	}
+	msg.Subject(content.Title())
+	msg.SetBodyString(mail.TypeTextPlain, content.Text())
+	msg.AddAlternativeString(mail.TypeTextHTML, html)
 
 	if err := s.client.DialAndSendWithContext(ctx, msg); err != nil {
 		return fmt.Errorf("sending email: %w", err)

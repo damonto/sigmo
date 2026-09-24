@@ -80,35 +80,6 @@ func (e ReminderEvent) DisplayProfile() string {
 	return strings.TrimSpace(e.ProfileID)
 }
 
-func (e ReminderEvent) DisplayTimestamp() string {
-	if e.ScheduledAt.IsZero() {
-		return "unknown"
-	}
-	return e.ScheduledAt.Format(time.RFC3339)
-}
-
-func (e ReminderEvent) DisplayContent() string {
-	content := strings.TrimSpace(e.Content)
-	if content == "" {
-		return "(empty reminder)"
-	}
-	return content
-}
-
-func (e CallEvent) DirectionLabel() string {
-	if e.Incoming {
-		return "Incoming Call"
-	}
-	return "Outgoing Call"
-}
-
-func (e CallEvent) DisplayTimestamp() string {
-	if e.Time.IsZero() {
-		return "unknown"
-	}
-	return e.Time.Format(time.RFC3339)
-}
-
 func (e CallEvent) Counterparty() string {
 	if e.Incoming {
 		return strings.TrimSpace(e.From)
@@ -129,28 +100,6 @@ func (e CallEvent) DisplayCounterparty() string {
 		return e.DisplayFrom()
 	}
 	return e.DisplayTo()
-}
-
-func (e SMSEvent) DirectionLabel() string {
-	if e.Incoming {
-		return "Incoming SMS"
-	}
-	return "Outgoing SMS"
-}
-
-func (e SMSEvent) DisplayText() string {
-	text := strings.TrimSpace(e.Text)
-	if text == "" {
-		return "(empty message)"
-	}
-	return text
-}
-
-func (e SMSEvent) DisplayTimestamp() string {
-	if e.Time.IsZero() {
-		return "unknown"
-	}
-	return e.Time.Format(time.RFC3339)
 }
 
 func (e SMSEvent) Counterparty() string {

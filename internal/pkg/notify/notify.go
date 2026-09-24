@@ -9,7 +9,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/damonto/sigmo/internal/pkg/locale"
 	notifybark "github.com/damonto/sigmo/internal/pkg/notify/bark"
+	notifycontent "github.com/damonto/sigmo/internal/pkg/notify/content"
 	notifyemail "github.com/damonto/sigmo/internal/pkg/notify/email"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 	notifygotify "github.com/damonto/sigmo/internal/pkg/notify/gotify"
@@ -21,8 +23,9 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
+// Sender delivers composed notification content through one channel.
 type Sender interface {
-	Send(ctx context.Context, event notifyevent.Event) error
+	Send(ctx context.Context, msg notifycontent.Message) error
 }
 
 // Notifier manages multiple notification channels.
@@ -71,9 +74,9 @@ func createSender(name string, channel settings.Channel) (Sender, error) {
 	}
 }
 
-// Send sends an event to the specified channels.
+// Send sends an event, written in lang, to the specified channels.
 // If no channels are specified, the message will be sent to all configured channels.
-func (n *Notifier) Send(ctx context.Context, event notifyevent.Event, channels ...string) error {
+func (n *Notifier) Send(ctx context.Context, lang locale.Tag, event notifyevent.Event, channels ...string) error {
 	var targets []string
 	if len(channels) == 0 {
 		for name := range n.channels {
@@ -92,6 +95,10 @@ func (n *Notifier) Send(ctx context.Context, event notifyevent.Event, channels .
 	if len(targets) == 0 {
 		return nil
 	}
+	msg, err := notifycontent.Compose(lang, event)
+	if err != nil {
+		return err
+	}
 	slices.Sort(targets)
 	var combined error
 	var mu sync.Mutex
@@ -101,7 +108,7 @@ func (n *Notifier) Send(ctx context.Context, event notifyevent.Event, channels .
 		wg.Add(1)
 		go func(target string, sender Sender) {
 			defer wg.Done()
-			if err := sender.Send(ctx, event); err != nil {
+			if err := sender.Send(ctx, msg); err != nil {
 				mu.Lock()
 				combined = errors.Join(combined, fmt.Errorf("%s send failed: %w", target, err))
 				mu.Unlock()
