@@ -239,8 +239,12 @@ func (h *Handler) Events(c *echo.Context) error {
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, errorCodeSubscribeCallEventsFailed)
 	}
-	events, unsubscribe := h.calls.Subscribe(16)
+	events, unsubscribe := h.calls.Subscribe(SubscriptionConfig{ModemID: modem.EquipmentIdentifier, Buffer: 16})
 	defer unsubscribe()
+	dtmfEvents, unsubscribeDTMF := h.calls.Subscribe(SubscriptionConfig{
+		Kind: EventKindDTMF, ModemID: modem.EquipmentIdentifier, Buffer: 16,
+	})
+	defer unsubscribeDTMF()
 	currentCalls, err := h.calls.List(c.Request().Context(), modem, "")
 	if err != nil {
 		return httpapi.Internal(c, errorCodeSubscribeCallEventsFailed, err)
@@ -262,10 +266,14 @@ func (h *Handler) Events(c *echo.Context) error {
 			if !ok {
 				return nil
 			}
-			if event.Call.ModemID != modem.EquipmentIdentifier {
-				continue
+			if err := writeCallEvent(conn, event); err != nil {
+				return nil
 			}
-			if err := writeCallEvent(conn, event.Call); err != nil {
+		case event, ok := <-dtmfEvents:
+			if !ok {
+				return nil
+			}
+			if err := writeCallEvent(conn, event); err != nil {
 				return nil
 			}
 		}
@@ -352,11 +360,19 @@ func (h *Handler) serveWebRTCSession(ctx context.Context, conn *websocket.Conn, 
 	}
 }
 
-func writeCallEvent(conn *websocket.Conn, call storage.Call) error {
+func writeCallEvent(conn *websocket.Conn, event Event) error {
 	if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		return err
 	}
-	return conn.WriteJSON(EventMessage{Type: "call", Call: ResponseFromCall(call)})
+	if event.DTMF != nil {
+		return conn.WriteJSON(DTMFMessage{
+			Type:   "dtmf",
+			CallID: event.Call.ID,
+			Digit:  event.DTMF.Digit,
+			At:     event.DTMF.At.Format(time.RFC3339Nano),
+		})
+	}
+	return conn.WriteJSON(EventMessage{Type: "call", Call: ResponseFromCall(event.Call)})
 }
 
 func writeWebRTCICECandidates(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, candidates <-chan WebRTCICECandidate) {
@@ -398,7 +414,7 @@ func writeWebRTCSignal(conn *websocket.Conn, writeMu *sync.Mutex, message WebRTC
 
 func writeCurrentCallEvents(conn *websocket.Conn, calls []storage.Call, modemID string) error {
 	for _, call := range currentCallEvents(calls, modemID) {
-		if err := writeCallEvent(conn, call); err != nil {
+		if err := writeCallEvent(conn, Event{Call: call}); err != nil {
 			return err
 		}
 	}

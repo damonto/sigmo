@@ -68,7 +68,7 @@ func (c *coordinator) DialCall(ctx context.Context, modem *mmodem.Modem, to stri
 	if !info.AnsweredAt.IsZero() {
 		c.updateVoiceCall(modem.EquipmentIdentifier, info.ID, info)
 	}
-	c.publishVoiceEvent(info)
+	c.publishCallUpdate(info)
 	return info, nil
 }
 
@@ -233,7 +233,7 @@ func (c *coordinator) AnswerCall(ctx context.Context, modem *mmodem.Modem, callI
 		at:       time.Now(),
 	})
 	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
-	c.publishVoiceEvent(info)
+	c.publishCallUpdate(info)
 	return info, nil
 }
 
@@ -254,7 +254,7 @@ func (c *coordinator) RejectCall(ctx context.Context, modem *mmodem.Modem, callI
 		at:        time.Now(),
 	})
 	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
-	c.publishVoiceEvent(info)
+	c.publishCallUpdate(info)
 	return info, nil
 }
 
@@ -273,7 +273,7 @@ func (c *coordinator) HangupCall(ctx context.Context, modem *mmodem.Modem, callI
 		at:    time.Now(),
 	})
 	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
-	c.publishVoiceEvent(info)
+	c.publishCallUpdate(info)
 	return info, nil
 }
 
@@ -291,7 +291,7 @@ func (c *coordinator) HoldCall(ctx context.Context, modem *mmodem.Modem, callID 
 		at:    time.Now(),
 	})
 	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
-	c.publishVoiceEvent(info)
+	c.publishCallUpdate(info)
 	return info, nil
 }
 
@@ -309,7 +309,7 @@ func (c *coordinator) ResumeCall(ctx context.Context, modem *mmodem.Modem, callI
 		at:    time.Now(),
 	})
 	c.updateVoiceCall(modem.EquipmentIdentifier, callID, info)
-	c.publishVoiceEvent(info)
+	c.publishCallUpdate(info)
 	return info, nil
 }
 
@@ -549,11 +549,14 @@ func updateVoiceCallWithPointerLocked(session *sessionState, callID string, call
 	state.updatedAt = info.UpdatedAt
 }
 
-func (c *coordinator) publishVoiceEvent(call VoiceCall) {
+func (c *coordinator) publishCallUpdate(call VoiceCall) {
+	c.publishVoiceEvent(VoiceEvent{Call: call})
+}
+
+func (c *coordinator) publishVoiceEvent(event VoiceEvent) {
 	c.mu.Lock()
 	subscribers := slices.Collect(maps.Values(c.voiceSubscribers))
 	c.mu.Unlock()
-	event := VoiceEvent{Call: call}
 	for _, fn := range subscribers {
 		fn(event)
 	}
@@ -573,7 +576,7 @@ func (c *coordinator) forwardIncomingCall(modem *mmodem.Modem, profileID string,
 		info.UpdatedAt = incoming.ReceivedAt
 		c.updateVoiceCallForSession(modem.EquipmentIdentifier, sessionID, info.ID, info)
 	}
-	c.publishVoiceEvent(info)
+	c.publishCallUpdate(info)
 }
 
 func answerMediaOffer() imsvoice.MediaOffer {
@@ -631,8 +634,27 @@ func (c *coordinator) forwardCallEvent(modemID string, sessionID uint64, event i
 	}
 	c.mu.Unlock()
 	if changed {
-		c.publishVoiceEvent(info)
+		c.publishCallUpdate(info)
 	}
+}
+
+func (c *coordinator) forwardDTMFEvent(modemID string, sessionID uint64, event imsvoice.DTMFEvent) {
+	c.mu.Lock()
+	session := c.sessions[modemID]
+	if !sameSession(session, sessionID) {
+		c.mu.Unlock()
+		return
+	}
+	info := voiceCallInfoLocked(session, event.CallID)
+	c.mu.Unlock()
+	if info.ID == "" {
+		return
+	}
+	// DTMF belongs to the event stream; it must not advance the call snapshot.
+	c.publishVoiceEvent(VoiceEvent{
+		Call: info,
+		DTMF: &VoiceDTMF{Digit: event.Digit, At: event.At},
+	})
 }
 
 func sameSession(session *sessionState, sessionID uint64) bool {

@@ -3,7 +3,7 @@ import { computed, nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { usePhoneCalls } from '@/composables/usePhoneCalls'
-import type { CallRecord } from '@/types/call'
+import type { CallDTMFMessage, CallRecord } from '@/types/call'
 
 const api = vi.hoisted(() => ({
   listCalls: vi.fn(),
@@ -182,6 +182,42 @@ describe('usePhoneCalls', () => {
     expect(notifications).toHaveLength(1)
     expect(notifications[0]?.title).toBe('Incoming call')
     expect(notifications[0]?.options).toEqual({ body: '(224) 225-5559', tag: 'call-1' })
+  })
+
+  it('ignores remote DTMF without updating calls or triggering actions', async () => {
+    FakeNotification.permission = 'granted'
+    const active = call({ state: 'active' })
+    api.listCalls.mockResolvedValue({ data: ref([active]) })
+    const { phone, wrapper } = mountComposable()
+    await flushPromises()
+
+    const message: CallDTMFMessage = {
+      type: 'dtmf',
+      callID: active.callID,
+      digit: '#',
+      at: '2026-09-28T10:00:00Z',
+    }
+    FakeWebSocket.instances[0]?.message(message)
+    await nextTick()
+
+    expect(phone.recentCalls.value).toEqual([active])
+    expect(phone.activeCall.value).toEqual(active)
+    expect(phone.incomingCall.value).toBeNull()
+    expect(notifications).toHaveLength(0)
+    expect(api.listCalls).toHaveBeenCalledTimes(1)
+    for (const action of [
+      api.dialCall,
+      api.answerCall,
+      api.rejectCall,
+      api.hangupCall,
+      api.holdCall,
+      api.resumeCall,
+      api.sendDTMF,
+      api.deleteCall,
+    ]) {
+      expect(action).not.toHaveBeenCalled()
+    }
+    wrapper.unmount()
   })
 
   it('reconnects call events after an unexpected socket close', async () => {

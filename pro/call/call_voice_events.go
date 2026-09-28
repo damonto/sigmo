@@ -24,6 +24,13 @@ func runVoiceEvents(ctx context.Context, voices []VoiceRoute, records *callRecor
 				return
 			}
 			call := callFromIMS(event.Call)
+			if event.DTMF != nil {
+				records.events.publish(Event{
+					Call: call,
+					DTMF: &DTMF{Digit: event.DTMF.Digit, At: event.DTMF.At},
+				})
+				return
+			}
 			if _, err := records.saveAndPublish(ctx, call); err != nil {
 				slog.Warn("save IMS voice event",
 					"call_id", call.ID,

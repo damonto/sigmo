@@ -7,6 +7,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"time"
 
 	imsvoice "github.com/damonto/ims-go/ims/voice"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -78,8 +79,16 @@ type VoiceRoute struct {
 	Voice imsVoice
 }
 
+// DTMF reports a detected remote key. It is transient and is not stored in call records.
+type DTMF struct {
+	Digit string
+	At    time.Time
+}
+
+// Event carries a call snapshot; a non-nil DTMF marks a key event, not a state update.
 type Event struct {
 	Call storage.Call
+	DTMF *DTMF
 }
 
 type UpdateRequest struct {
@@ -169,8 +178,10 @@ func (c *Calls) OpenMedia(ctx context.Context, modem *mmodem.Modem, callID strin
 	return c.media.Open(ctx, modem, callID)
 }
 
-func (c *Calls) Subscribe(buffer int) (<-chan Event, func()) {
-	return c.events.Subscribe(buffer)
+// Subscribe delivers one event kind, filtered before enqueueing. It never blocks
+// publishers; unsubscribe stops delivery but leaves the channel open.
+func (c *Calls) Subscribe(config SubscriptionConfig) (<-chan Event, func()) {
+	return c.events.Subscribe(config)
 }
 
 func isTerminalCallState(state string) bool {

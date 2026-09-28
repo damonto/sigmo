@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -253,7 +254,7 @@ func TestRunPersistsAndPublishesWiFiCallingVoiceEvents(t *testing.T) {
 			return func() {}
 		},
 	})
-	events, unsubscribe := service.Subscribe(1)
+	events, unsubscribe := service.Subscribe(SubscriptionConfig{Buffer: 1})
 	defer unsubscribe()
 
 	done := make(chan error, 1)
@@ -313,7 +314,7 @@ func TestRunPublishesWiFiCallingVoiceEventsWhenPersistenceFails(t *testing.T) {
 			return func() {}
 		},
 	})
-	events, unsubscribe := service.Subscribe(1)
+	events, unsubscribe := service.Subscribe(SubscriptionConfig{Buffer: 1})
 	defer unsubscribe()
 
 	done := make(chan error, 1)
@@ -356,6 +357,75 @@ func TestRunPublishesWiFiCallingVoiceEventsWhenPersistenceFails(t *testing.T) {
 	}
 }
 
+func TestRunPublishesDTMFWithoutSavingCall(t *testing.T) {
+	for _, route := range []string{RouteWiFiCalling, RouteVoLTE} {
+		t.Run(route, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			store := testStore(t)
+			subscriberCh := make(chan pims.VoiceEventFunc, 1)
+			voice := fakeIMSVoice{subscribe: func(fn pims.VoiceEventFunc) func() {
+				subscriberCh <- fn
+				return func() {}
+			}}
+			service := New(store, nil, VoiceRoute{Route: route, Voice: voice})
+			events, unsubscribe := service.Subscribe(SubscriptionConfig{Kind: EventKindDTMF, Buffer: 2})
+			defer unsubscribe()
+			var wg sync.WaitGroup
+			wg.Go(func() {
+				if err := service.Run(ctx); err != nil {
+					t.Errorf("Run() error = %v", err)
+				}
+			})
+			defer func() {
+				cancel()
+				wg.Wait()
+			}()
+			var subscriber pims.VoiceEventFunc
+			select {
+			case subscriber = <-subscriberCh:
+			case <-time.After(time.Second):
+				t.Fatal("SubscribeVoiceEvents was not called")
+			}
+			at := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+			voiceCall := pims.VoiceCall{
+				ID: "call-1", ModemID: "modem-1", ProfileID: "profile-1", Route: route,
+				Direction: DirectionIncoming, State: StateActive, StartedAt: at, UpdatedAt: at,
+			}
+			// Seed a terminal record to detect stale DTMF snapshots being saved or suppressed.
+			stored := callFromIMS(voiceCall)
+			stored.State = StateEnded
+			stored.EndedAt = at.Add(time.Minute)
+			stored.UpdatedAt = stored.EndedAt
+			if err := store.SaveCall(ctx, stored); err != nil {
+				t.Fatalf("SaveCall() error = %v", err)
+			}
+			dtmf := &pims.VoiceDTMF{Digit: "5", At: at.Add(time.Second)}
+			subscriber(pims.VoiceEvent{Call: voiceCall, DTMF: dtmf})
+			voiceCall.ID = "unpersisted-call"
+			subscriber(pims.VoiceEvent{Call: voiceCall, DTMF: dtmf})
+			for _, callID := range []string{"call-1", "unpersisted-call"} {
+				select {
+				case event := <-events:
+					if event.Call.ID != callID || event.Call.Route != route || event.DTMF == nil {
+						t.Fatalf("event = %+v, want DTMF for %s over %s", event, callID, route)
+					}
+					if *event.DTMF != (DTMF{Digit: dtmf.Digit, At: dtmf.At}) {
+						t.Fatalf("DTMF = %+v, want %+v", event.DTMF, dtmf)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("no DTMF event")
+				}
+			}
+			if got, err := store.Call(ctx, stored.ID); err != nil || got != stored {
+				t.Fatalf("Call() = %+v, %v; want unchanged %+v", got, err, stored)
+			}
+			if _, err := store.Call(ctx, voiceCall.ID); !errors.Is(err, storage.ErrNotFound) {
+				t.Fatalf("Call() error = %v, want no record for DTMF", err)
+			}
+		})
+	}
+}
+
 func TestDialPersistsRouteAndPublishesEvent(t *testing.T) {
 	ctx := t.Context()
 	store := testStore(t)
@@ -372,7 +442,7 @@ func TestDialPersistsRouteAndPublishesEvent(t *testing.T) {
 			UpdatedAt: time.Date(2026, 5, 27, 11, 0, 0, 0, time.UTC),
 		},
 	})
-	events, unsubscribe := service.Subscribe(1)
+	events, unsubscribe := service.Subscribe(SubscriptionConfig{Buffer: 1})
 	defer unsubscribe()
 
 	call, err := service.Dial(ctx, nil, " +12242255559 ", RouteAuto)
@@ -435,7 +505,7 @@ func TestDialPersistsSelectedRouteFailure(t *testing.T) {
 				voiceCall: tt.voiceCall,
 				dialErr:   tt.dialErr,
 			})
-			events, unsubscribe := service.Subscribe(1)
+			events, unsubscribe := service.Subscribe(SubscriptionConfig{Buffer: 1})
 			defer unsubscribe()
 
 			_, err := service.Dial(ctx, nil, "+12242255559", RouteAuto)
@@ -502,7 +572,7 @@ func TestEndUnavailableWiFiCallingMediaClosesStoredCall(t *testing.T) {
 	ctx := t.Context()
 	store := testStore(t)
 	service := New(store, fakeIMSVoice{})
-	events, unsubscribe := service.Subscribe(1)
+	events, unsubscribe := service.Subscribe(SubscriptionConfig{Buffer: 1})
 	defer unsubscribe()
 
 	startedAt := time.Date(2026, 5, 28, 13, 10, 0, 0, time.UTC)
@@ -547,7 +617,7 @@ func TestEndUnavailableWiFiCallingMediaClosesStoredCall(t *testing.T) {
 func TestEndUnavailableWiFiCallingMediaIgnoresTerminalCall(t *testing.T) {
 	store := testStore(t)
 	service := New(store, fakeIMSVoice{})
-	events, unsubscribe := service.Subscribe(1)
+	events, unsubscribe := service.Subscribe(SubscriptionConfig{Buffer: 1})
 	defer unsubscribe()
 
 	service.media.endUnavailable(t.Context(), storage.Call{
@@ -591,7 +661,7 @@ func TestHangupEndsWiFiCallingCallLocally(t *testing.T) {
 			ctx := t.Context()
 			store := testStore(t)
 			service := New(store, fakeIMSVoice{hangup: tt.hangup})
-			events, unsubscribe := service.Subscribe(1)
+			events, unsubscribe := service.Subscribe(SubscriptionConfig{Buffer: 1})
 			defer unsubscribe()
 			call := storage.Call{
 				ID:        "call-hangup",
@@ -712,7 +782,7 @@ func TestSaveAndPublishKeepsTerminalCallClosed(t *testing.T) {
 			ctx := t.Context()
 			store := testStore(t)
 			service := New(store, fakeIMSVoice{})
-			events, unsubscribe := service.Subscribe(1)
+			events, unsubscribe := service.Subscribe(SubscriptionConfig{Buffer: 1})
 			defer unsubscribe()
 			existing := storage.Call{
 				ID:        "call-terminal",
@@ -999,17 +1069,31 @@ func TestDeleteRejectsActiveCallRecords(t *testing.T) {
 }
 
 func TestSubscribeUnsubscribeLeavesChannelOpen(t *testing.T) {
-	service := New(nil, fakeIMSVoice{})
-	events, unsubscribe := service.Subscribe(1)
-	unsubscribe()
-	service.events.publish(Event{Call: storage.Call{ID: "call-1"}})
+	tests := []struct {
+		name string
+		kind EventKind
+		dtmf *DTMF
+	}{
+		{name: "state", kind: EventKindCall},
+		{name: "dtmf", kind: EventKindDTMF, dtmf: &DTMF{Digit: "5"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := New(nil, fakeIMSVoice{})
+			events, unsubscribe := service.Subscribe(SubscriptionConfig{Kind: tt.kind, Buffer: 1})
+			unsubscribe()
+			unsubscribe()
+			service.events.publish(Event{Call: storage.Call{ID: "call-1"}, DTMF: tt.dtmf})
 
-	select {
-	case _, ok := <-events:
-		if !ok {
-			t.Fatal("Subscribe() channel was closed")
-		}
-	default:
+			select {
+			case _, ok := <-events:
+				if !ok {
+					t.Fatal("Subscribe() channel was closed")
+				}
+				t.Fatal("event delivered after unsubscribe")
+			default:
+			}
+		})
 	}
 }
 

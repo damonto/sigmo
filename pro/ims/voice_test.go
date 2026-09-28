@@ -427,6 +427,12 @@ func TestVoiceEventsIgnoreStaleSessionID(t *testing.T) {
 				})
 			},
 		},
+		{
+			name: "dtmf",
+			apply: func(c *coordinator) {
+				c.forwardDTMFEvent("modem-1", 1, imsvoice.DTMFEvent{CallID: "call-1", Digit: "5", At: at})
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -462,6 +468,67 @@ func TestVoiceEventsIgnoreStaleSessionID(t *testing.T) {
 			}
 			if len(events) != 0 {
 				t.Fatalf("events = %+v, want none", events)
+			}
+		})
+	}
+}
+
+func TestForwardDTMFEvent(t *testing.T) {
+	at := time.Date(2026, 9, 28, 10, 0, 0, 123, time.UTC)
+	tests := []struct {
+		name      string
+		modemID   string
+		callID    string
+		wantEvent bool
+	}{
+		{name: "known call", modemID: "modem-1", callID: "call-1", wantEvent: true},
+		{name: "unknown call", modemID: "modem-1", callID: "unknown"},
+		{name: "unknown modem", modemID: "unknown", callID: "call-1"},
+		{name: "other modem", modemID: "modem-2", callID: "call-1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := VoiceCall{
+				ID: "call-1", ModemID: "modem-1", ProfileID: "profile-1",
+				Route: string(AccessVoLTE), State: string(imsvoice.CallStateActive),
+				UpdatedAt: at.Add(-time.Second),
+			}
+			c := &coordinator{
+				sessions: map[string]*sessionState{
+					"modem-1": {id: 2, calls: map[string]*voiceCallState{
+						"call-1": {info: info, updatedAt: info.UpdatedAt},
+					}},
+					"modem-2": {id: 2},
+				},
+				voiceSubscribers: make(map[uint64]VoiceEventFunc),
+			}
+			var events []VoiceEvent
+			unsubscribe := c.SubscribeVoiceEvents(func(event VoiceEvent) {
+				// Taking the coordinator lock here also checks publication occurs unlocked.
+				if got := c.voiceCallInfo("modem-1", "call-1"); got != info {
+					t.Errorf("call snapshot = %+v, want %+v", got, info)
+				}
+				events = append(events, event)
+			})
+			defer unsubscribe()
+
+			c.forwardDTMFEvent(tt.modemID, 2, imsvoice.DTMFEvent{CallID: tt.callID, Digit: "#", At: at})
+
+			state := c.sessions["modem-1"].calls["call-1"]
+			if state.info != info || state.updatedAt != info.UpdatedAt {
+				t.Fatalf("stored state = %+v, want unchanged snapshot", state)
+			}
+			if !tt.wantEvent {
+				if len(events) != 0 {
+					t.Fatalf("events = %+v, want none", events)
+				}
+				return
+			}
+			if len(events) != 1 || events[0].Call != info || events[0].DTMF == nil {
+				t.Fatalf("events = %+v, want one DTMF event for %+v", events, info)
+			}
+			if got := *events[0].DTMF; got != (VoiceDTMF{Digit: "#", At: at}) {
+				t.Fatalf("DTMF = %+v, want # at %v", got, at)
 			}
 		})
 	}

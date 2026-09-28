@@ -831,6 +831,12 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 				return
 			}
 			c.forwardCallEvent(modem.EquipmentIdentifier, sessionID, event)
+		case event, ok := <-voiceEvents.DTMF:
+			if !ok {
+				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
+				return
+			}
+			c.forwardDTMFEvent(modem.EquipmentIdentifier, sessionID, event)
 		case state, ok := <-events.State:
 			if !ok {
 				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
@@ -943,7 +949,7 @@ func (c *coordinator) markDisconnected(modemID string, sessionID uint64, client 
 	c.mu.Unlock()
 
 	for _, call := range events {
-		c.publishVoiceEvent(call)
+		c.publishCallUpdate(call)
 	}
 }
 
@@ -974,7 +980,7 @@ func (c *coordinator) requestReconnect(modemID string, client *imsgo.Client) {
 	c.mu.Unlock()
 
 	for _, call := range events {
-		c.publishVoiceEvent(call)
+		c.publishCallUpdate(call)
 	}
 	if ch == nil {
 		return
@@ -1053,7 +1059,7 @@ func (c *coordinator) closeDetachedSessionContext(ctx context.Context, session *
 	}
 	err := closeSessionContext(ctx, session)
 	for _, call := range events {
-		c.publishVoiceEvent(call)
+		c.publishCallUpdate(call)
 	}
 	return err
 }
@@ -1092,7 +1098,7 @@ func (c *coordinator) closeDetachedSessionAsync(ctx context.Context, session *se
 		c.completeDetachedSession(closeSession(ctx, session), false)
 	}
 	for _, call := range events {
-		c.publishVoiceEvent(call)
+		c.publishCallUpdate(call)
 	}
 }
 

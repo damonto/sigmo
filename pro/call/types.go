@@ -54,6 +54,14 @@ type EventMessage struct {
 	Call CallResponse `json:"call"`
 }
 
+// DTMFMessage exposes a remote key on the call WebSocket without changing call state.
+type DTMFMessage struct {
+	Type   string `json:"type"`
+	CallID string `json:"callID"`
+	Digit  string `json:"digit"`
+	At     string `json:"at"`
+}
+
 type WebRTCICEServersResponse struct {
 	ICEServers []WebRTCICEServerResponse `json:"iceServers"`
 }

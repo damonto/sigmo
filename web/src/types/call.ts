@@ -42,10 +42,21 @@ export type SendDTMFRequest = {
   digits: string
 }
 
-export type CallEventMessage = {
-  type: 'call'
-  call: CallRecord
+/** A remote key detection; this does not report release or final duration. */
+export interface CallDTMFMessage {
+  type: 'dtmf'
+  callID: string
+  digit: string
+  at: string
 }
+
+/** Messages from the call event socket; DTMF does not update the call record. */
+export type CallEventMessage =
+  | {
+      type: 'call'
+      call: CallRecord
+    }
+  | CallDTMFMessage
 
 export type WebRTCSessionDescriptionPayload = {
   type: 'offer' | 'answer'

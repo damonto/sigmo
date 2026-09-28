@@ -67,6 +67,10 @@ type callForwarder interface {
 	ForwardCall(context.Context, storage.Call) error
 }
 
+type callEventSource interface {
+	Subscribe(procall.SubscriptionConfig) (<-chan procall.Event, func())
+}
+
 func wifiCallingOverview(readStatus wifiCallingStatusFunc) modemstatus.Extension {
 	return func(ctx context.Context, modem *mmodem.Modem, fields *modemstatus.Fields) error {
 		status, err := readStatus(ctx, modem)
@@ -82,8 +86,8 @@ func wifiCallingOverview(readStatus wifiCallingStatusFunc) modemstatus.Extension
 	}
 }
 
-func forwardCalls(ctx context.Context, relay callForwarder, calls *procall.Calls) error {
-	events, unsubscribe := calls.Subscribe(16)
+func forwardCalls(ctx context.Context, relay callForwarder, calls callEventSource) error {
+	events, unsubscribe := calls.Subscribe(procall.SubscriptionConfig{Kind: procall.EventKindCall, Buffer: 16})
 	defer unsubscribe()
 
 	for {

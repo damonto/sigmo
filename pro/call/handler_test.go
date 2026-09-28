@@ -7,14 +7,69 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
+
+func TestWriteCallEvent(t *testing.T) {
+	at := time.Date(2026, 9, 28, 10, 0, 0, 123, time.UTC)
+	call := storage.Call{ID: "call-1", ModemID: "modem-1", State: StateActive}
+	writeDone := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := callWSUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			writeDone <- err
+			return
+		}
+		defer func() {
+			if err := conn.Close(); err != nil {
+				t.Errorf("close server socket: %v", err)
+			}
+		}()
+		if err := writeCallEvent(conn, Event{Call: call}); err != nil {
+			writeDone <- err
+			return
+		}
+		writeDone <- writeCallEvent(conn, Event{Call: call, DTMF: &DTMF{Digit: "#", At: at}})
+	}))
+	defer server.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial test socket: %v", err)
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("close client socket: %v", err)
+		}
+	}()
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	var state EventMessage
+	if err := conn.ReadJSON(&state); err != nil {
+		t.Fatalf("read state event: %v", err)
+	}
+	if state.Type != "call" || state.Call != ResponseFromCall(call) {
+		t.Fatalf("state event = %+v, want unchanged call message", state)
+	}
+	var dtmf map[string]string
+	if err := conn.ReadJSON(&dtmf); err != nil {
+		t.Fatalf("read DTMF event: %v", err)
+	}
+	if len(dtmf) != 4 || dtmf["type"] != "dtmf" || dtmf["callID"] != "call-1" || dtmf["digit"] != "#" || dtmf["at"] != "2026-09-28T10:00:00.000000123Z" {
+		t.Fatalf("DTMF message = %+v, want only type, callID, digit and receive time", dtmf)
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatalf("writeCallEvent() error = %v", err)
+	}
+}
 
 func TestCallActionErrorMapsExpectedFailures(t *testing.T) {
 	tests := []struct {

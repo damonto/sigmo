@@ -155,8 +155,16 @@ type VoiceCall struct {
 	UpdatedAt  time.Time
 }
 
+// VoiceDTMF reports one detected remote key, without a release or final duration.
+type VoiceDTMF struct {
+	Digit string
+	At    time.Time
+}
+
+// VoiceEvent carries a call snapshot and optionally a transient remote key.
 type VoiceEvent struct {
 	Call VoiceCall
+	DTMF *VoiceDTMF
 }
 
 type VoiceEventFunc func(VoiceEvent)
