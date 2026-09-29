@@ -38,6 +38,7 @@ const (
 	terminalModel           = "Pixel 8 Pro"
 	terminalSoftwareVersion = "15/AP3A.240905.015"
 	voLTERestoreTimeout     = 5 * time.Second
+	imsConnectTimeout       = 2 * time.Minute
 )
 
 var (
@@ -471,8 +472,16 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 		if err != nil {
 			return nil, err
 		}
-		if err := client.Connect(ctx); err != nil {
-			_ = client.Close()
+		// Bound the complete attempt, including registration-group and AKA waits
+		// that happen outside SIP transaction timers. The active client owns its
+		// own lifetime once Connect returns.
+		connectCtx, cancelConnect := context.WithTimeout(ctx, imsConnectTimeout)
+		err = client.Connect(connectCtx)
+		cancelConnect()
+		if err != nil {
+			if closeErr := client.Close(); closeErr != nil {
+				slog.Warn("close failed IMS connection", "imei", modem.EquipmentIdentifier, "error", closeErr)
+			}
 			if c.access == AccessVoLTE && try == 0 && isIMSCallAlreadyPresent(err) {
 				if resetErr := c.managedVoLTEOperations().resetOccupied(ctx, modem, c.internet); resetErr != nil {
 					return nil, errors.Join(err, fmt.Errorf("reset occupied IMS PDN: %w", resetErr))

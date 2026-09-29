@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/damonto/euicc-go v1.1.3-0.20260813015305-1f7e0d0c2ffc
-	github.com/damonto/ims-go v0.0.0-20260929041646-b60744a9ccc1
+	github.com/damonto/ims-go v0.0.0-20260929084841-57adf7085bd2
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260910061641-6430cb78182c
 	github.com/damonto/wwan-go v0.0.0-20260929045201-e365e59dc8b4
