@@ -4,10 +4,10 @@ go 1.26.3
 
 require (
 	github.com/damonto/euicc-go v1.1.3-0.20260813015305-1f7e0d0c2ffc
-	github.com/damonto/ims-go v0.0.0-20260929015237-e7cebab3383c
+	github.com/damonto/ims-go v0.0.0-20260929041646-b60744a9ccc1
 	github.com/damonto/sigmo v1.0.6
 	github.com/damonto/ts43-go v0.0.0-20260910061641-6430cb78182c
-	github.com/damonto/wwan-go v0.0.0-20260929015135-b9278851ab3a
+	github.com/damonto/wwan-go v0.0.0-20260929045201-e365e59dc8b4
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.4.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
