@@ -17,7 +17,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { validateOnInteraction } from '@/lib/form-validation'
+import { validateOnInteraction } from '@/lib/formValidation'
 import type { SEItem } from '@/types/se'
 import {
   QrcodeStream,

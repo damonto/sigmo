@@ -42,7 +42,7 @@ import ReminderBadge from '@/components/ReminderBadge.vue'
 import ValidatedField from '@/components/ValidatedField.vue'
 import EsimProfileAvatar from '@/components/esim/EsimProfileAvatar.vue'
 import EsimProfileDetailsDialog from '@/components/esim/EsimProfileDetailsDialog.vue'
-import { validateOnInteraction } from '@/lib/form-validation'
+import { validateOnInteraction } from '@/lib/formValidation'
 import type { EsimProfile } from '@/types/esim'
 import type { ReminderPayload } from '@/types/reminder'
 

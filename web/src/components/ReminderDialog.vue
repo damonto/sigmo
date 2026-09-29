@@ -34,7 +34,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { Spinner } from '@/components/ui/spinner'
 import { dateTimeLocalToISOString, formatDateTimeLocal } from '@/lib/datetime'
-import { validateOnInteraction } from '@/lib/form-validation'
+import { validateOnInteraction } from '@/lib/formValidation'
 import type { Reminder, ReminderPayload } from '@/types/reminder'
 
 const props = withDefaults(
