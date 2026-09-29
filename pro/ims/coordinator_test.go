@@ -887,3 +887,25 @@ func qmiTestModem(id string) *mmodem.Modem {
 		}},
 	}
 }
+
+func TestSessionFailureTracksCurrentSessionOnly(t *testing.T) {
+	c := &coordinator{sessions: map[string]*sessionState{
+		"modem": {id: 2, profileID: "card", phase: sessionPhaseConnecting},
+	}}
+	failure := errors.New("normalizing ims config: IPsec integrity algorithms are required")
+	c.recordSessionError("modem", 1, failure)
+	if got := statusFromSession(true, c.sessions["modem"], "card", time.Now()); got.LastError != "" {
+		t.Fatalf("retired session changed current error: %q", got.LastError)
+	}
+	c.recordSessionError("modem", 2, failure)
+	if got := statusFromSession(true, c.sessions["modem"], "card", time.Now()); got.LastError != failure.Error() {
+		t.Fatalf("LastError = %q, want %q", got.LastError, failure.Error())
+	}
+	if got := statusFromSession(true, c.sessions["modem"], "other-card", time.Now()); got.LastError != "" {
+		t.Fatalf("error leaked across profiles: %q", got.LastError)
+	}
+	c.markConnected("modem", 2, nil)
+	if got := c.sessions["modem"].lastError; got != "" {
+		t.Fatalf("successful registration retained error: %q", got)
+	}
+}

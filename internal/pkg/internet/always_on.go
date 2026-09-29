@@ -112,7 +112,11 @@ func (c *Connector) restoreAlwaysOn(ctx context.Context, modem *mmodem.Modem, pr
 	}
 	access := modemAccess{modem: modem}
 	modemID := access.id()
-	defer c.lockRouteTransaction(modemID)()
+	unlock, lockErr := c.acquireModem(ctx, modemID)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	airplaneMode, err := c.airplaneModeEnabled(ctx, modem)
 	if err != nil {
 		return err
@@ -210,6 +214,7 @@ func (c *Connector) loadAlwaysOnStateForProfile(ctx context.Context, profileID s
 }
 
 func (c *Connector) recoverAlwaysOn(ctx context.Context, modem internetModem, bearer *mmodem.Bearer, prefs Preferences) error {
+	defer c.lockRoutes()()
 	modemID := modem.id()
 	profileID := modem.profileID()
 	tracked, _, ok, err := c.recoverConnectedBearer(ctx, modem, bearer, prefs)

@@ -3,9 +3,9 @@ package internet
 import (
 	"context"
 	"errors"
+	"golang.org/x/sync/semaphore"
 	"net/netip"
 	"slices"
-	"sync"
 	"testing"
 	"time"
 
@@ -41,7 +41,7 @@ func TestSelectQualcomm410ModeDoesNotTouchData5OrBearer(t *testing.T) {
 		return nil, nil
 	}
 
-	connector := &Connector{operations: make(map[string]*sync.Mutex), qualcomm410: ops}
+	connector := &Connector{operations: make(map[string]*semaphore.Weighted), qualcomm410: ops}
 	if err := connector.SelectQualcomm410Mode(modem); err != nil {
 		t.Fatalf("SelectQualcomm410Mode() error = %v", err)
 	}
@@ -66,7 +66,7 @@ func TestSetQualcomm410EnabledDefersWDAUntilConnectStarts(t *testing.T) {
 	ops.cleanupStaleState = func(context.Context, *Connector, string) error { return nil }
 
 	connector := &Connector{
-		operations:        make(map[string]*sync.Mutex),
+		operations:        make(map[string]*semaphore.Weighted),
 		qualcomm410States: make(map[string]qualcomm410State),
 		qualcomm410:       ops,
 	}
@@ -135,7 +135,7 @@ func TestSetQualcomm410EnabledValidatesModemBeforeChangingState(t *testing.T) {
 		return bearerState{}, nil
 	}
 
-	connector := &Connector{operations: make(map[string]*sync.Mutex), qualcomm410: ops}
+	connector := &Connector{operations: make(map[string]*semaphore.Weighted), qualcomm410: ops}
 	err := connector.SetQualcomm410Enabled(t.Context(), modem, true)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("SetQualcomm410Enabled(true) error = %v, want %v", err, wantErr)
@@ -199,7 +199,7 @@ func TestEnableQualcomm410MigratesConnectedBearer(t *testing.T) {
 				connections: map[string]trackedConnection{
 					"modem-1": {prefs: prefs},
 				},
-				operations:        make(map[string]*sync.Mutex),
+				operations:        make(map[string]*semaphore.Weighted),
 				qualcomm410States: make(map[string]qualcomm410State),
 				qualcomm410:       ops,
 			}
@@ -234,7 +234,7 @@ func TestEnableQualcomm410UsesModeForPendingReconnect(t *testing.T) {
 	}
 
 	connector := &Connector{
-		operations: make(map[string]*sync.Mutex),
+		operations: make(map[string]*semaphore.Weighted),
 		qualcomm410States: map[string]qualcomm410State{
 			"modem-1": {
 				reconnectPending:     true,
@@ -283,7 +283,7 @@ func TestDisableQualcomm410RetriesPendingBearerReconnect(t *testing.T) {
 	}
 
 	connector := &Connector{
-		operations: make(map[string]*sync.Mutex),
+		operations: make(map[string]*semaphore.Weighted),
 		qualcomm410States: map[string]qualcomm410State{
 			"modem-1": {
 				reconnectPending:     true,
@@ -339,7 +339,7 @@ func TestDisableQualcomm410KeepsReconnectPendingAfterNormalBearerFailure(t *test
 		connections: map[string]trackedConnection{
 			"modem-1": {prefs: prefs},
 		},
-		operations: make(map[string]*sync.Mutex),
+		operations: make(map[string]*semaphore.Weighted),
 		qualcomm410States: map[string]qualcomm410State{
 			"modem-1": {selected: true, lease: lease},
 		},
@@ -387,7 +387,7 @@ func TestDisableQualcomm410CleansDisconnectedStaleNetworkBeforeClosingLease(t *t
 
 	lease := &qualcomm410LeaseProbe{}
 	connector := &Connector{
-		operations: make(map[string]*sync.Mutex),
+		operations: make(map[string]*semaphore.Weighted),
 		qualcomm410States: map[string]qualcomm410State{
 			"modem-1": {selected: true, lease: lease},
 		},
@@ -424,7 +424,7 @@ func TestInvalidateQualcomm410DefersLeaseAfterReloadUntilConnectStarts(t *testin
 	ops.cleanupStaleState = func(context.Context, *Connector, string) error { return nil }
 
 	connector := &Connector{
-		operations: make(map[string]*sync.Mutex),
+		operations: make(map[string]*semaphore.Weighted),
 		qualcomm410States: map[string]qualcomm410State{
 			"modem-1": {selected: true, lease: oldLease},
 		},
@@ -460,7 +460,7 @@ func TestInvalidateQualcomm410DefersLeaseAfterReloadUntilConnectStarts(t *testin
 func TestCompleteQualcomm410ConnectClearsPendingState(t *testing.T) {
 	lease := &qualcomm410LeaseProbe{}
 	connector := &Connector{
-		operations: make(map[string]*sync.Mutex),
+		operations: make(map[string]*semaphore.Weighted),
 		qualcomm410States: map[string]qualcomm410State{
 			"modem-1": {
 				selected:             true,

@@ -1,7 +1,7 @@
 package network
 
 type NetworkResponse struct {
-	Status             string   `json:"status" jsonschema:"network availability state reported by the modem, such as available, current, or forbidden"`
+	Status             string   `json:"status" jsonschema:"network availability state reported by the modem, such as Available, Current, or Forbidden"`
 	OperatorName       string   `json:"operatorName" jsonschema:"long operator name advertised by the network"`
 	OperatorShortName  string   `json:"operatorShortName" jsonschema:"short operator name advertised by the network"`
 	OperatorCode       string   `json:"operatorCode" jsonschema:"operator code, typically the MCC and MNC; use this exact value with set_network_registration"`

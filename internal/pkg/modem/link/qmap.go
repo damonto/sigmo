@@ -23,10 +23,13 @@ import (
 
 // QMAPConfig describes one IP-family packet-data call on a QMAP mux.
 type QMAPConfig struct {
-	APN          string
-	IPPreference qcom.WDSIPPreference
-	ProfileIndex uint8
-	MuxID        uint8
+	Username       string
+	Password       string
+	Authentication qcom.WDSAuthenticationMask
+	APN            string
+	IPPreference   qcom.WDSIPPreference
+	ProfileIndex   uint8
+	MuxID          uint8
 }
 
 // QMAPSession owns one WDS packet-data session on a shared QMI client. Copies
@@ -373,10 +376,13 @@ func OpenQMAPSessions(ctx context.Context, modem *mmodem.Modem, configs []QMAPCo
 	pdnConfigs := make([]qcom.PDNConfig, len(configs))
 	for i, cfg := range configs {
 		pdnConfigs[i] = qcom.PDNConfig{
-			APN:          apn,
-			IPPreference: cfg.IPPreference,
-			ProfileIndex: profileIndex,
-			MuxDataPort:  prepared.MuxDataPort,
+			Username:       cfg.Username,
+			Password:       cfg.Password,
+			Authentication: cfg.Authentication,
+			APN:            apn,
+			IPPreference:   cfg.IPPreference,
+			ProfileIndex:   profileIndex,
+			MuxDataPort:    prepared.MuxDataPort,
 		}
 	}
 	pdnResults, err := client.OpenPDNs(ctx, pdnConfigs)

@@ -9,6 +9,7 @@ import (
 	"github.com/damonto/euicc-go/bertlv"
 	sgp22 "github.com/damonto/euicc-go/v2"
 
+	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
@@ -373,5 +374,38 @@ func (f *fakeLifecycleClient) Invalidate() error {
 func disabledProfiles(iccid sgp22.ICCID) []*sgp22.ProfileInfo {
 	return []*sgp22.ProfileInfo{
 		{ICCID: iccid, ProfileState: sgp22.ProfileDisabled},
+	}
+}
+
+func TestEnableNotificationRetriesRetiredGeneration(t *testing.T) {
+	iccid, err := sgp22.NewICCID("8985200012345678901")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := &mmodem.Modem{EquipmentIdentifier: "modem"}
+	replacement := &mmodem.Modem{EquipmentIdentifier: "modem"}
+	client := &fakeLifecycleClient{notifications: []*sgp22.NotificationMetadata{{SequenceNumber: 2}}}
+	probes := 0
+	lifecycle := &lifecycle{
+		ensureSIMVisible: func(context.Context, *mmodem.Modem, mmodem.SIMTarget) (*mmodem.Modem, error) {
+			probes++
+			if probes == 1 {
+				return old, nil
+			}
+			return replacement, nil
+		},
+		newClient: func(_ context.Context, modem *mmodem.Modem, _ *settings.Settings, _ string) (lifecycleClient, error) {
+			if modem == old {
+				return nil, lpa.ErrModemRetired
+			}
+			return client, nil
+		},
+	}
+	session := &enableSession{l: lifecycle, modem: old, iccid: iccid, lastSeq: 1}
+	if err := session.finish(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if probes != 2 || client.sentNotifications != 1 || client.removedNotifications != 1 {
+		t.Fatalf("probes=%d, sent=%d, removed=%d", probes, client.sentNotifications, client.removedNotifications)
 	}
 }

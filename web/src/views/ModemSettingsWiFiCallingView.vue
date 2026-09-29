@@ -29,6 +29,7 @@ const {
   settingsWiFiCallingUnderlay,
   settingsWiFiCallingConnected,
   settingsWiFiCallingState,
+  settingsWiFiCallingLastError,
   settingsWiFiCallingDurationSeconds,
   settingsWiFiCallingEmergencyAddressUpdateAvailable,
   settingsWiFiCallingWebsheet,
@@ -74,6 +75,7 @@ const closeWiFiCallingEmergencyAddressWebsheet = () => {
         :connected="settingsWiFiCallingConnected"
         :state="settingsWiFiCallingState"
         :duration-seconds="settingsWiFiCallingDurationSeconds"
+        :last-error="settingsWiFiCallingLastError"
         :is-loading="isWiFiCallingSettingsLoading"
         :is-updating="isWiFiCallingSettingsUpdating"
         :is-reconnecting="isWiFiCallingReconnecting"
@@ -101,7 +103,10 @@ const closeWiFiCallingEmergencyAddressWebsheet = () => {
       />
     </template>
 
-    <div v-else class="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
+    <div
+      v-else
+      class="rounded-xl border border-dashed p-6 text-sm text-muted-foreground"
+    >
       {{ t('modemDetail.settings.wifiCallingUnavailable') }}
     </div>
   </ModemSettingsShell>

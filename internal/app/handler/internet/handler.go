@@ -23,6 +23,7 @@ const (
 	errorCodeInternetPreferencesInvalidRequest = "internet_preferences_invalid_request"
 	errorCodeInternetPreferencesUpdateFailed   = "internet_preferences_update_failed"
 	errorCodeInternetConnectionNotConnected    = "internet_connection_not_connected"
+	errorCodeInternetOperationInProgress       = "internet_operation_in_progress"
 	errorCodeConnectInternetInvalidRequest     = "connect_internet_invalid_request"
 	errorCodeConnectInternetFailed             = "connect_internet_failed"
 	errorCodeDisconnectInternetFailed          = "disconnect_internet_failed"
@@ -134,6 +135,9 @@ func (h *Handler) Disconnect(c *echo.Context) error {
 }
 
 func internetError(c *echo.Context, err error, internalErrorCode string) error {
+	if errors.Is(err, internetcore.ErrOperationInProgress) {
+		return httpapi.Error(c, http.StatusConflict, errorCodeInternetOperationInProgress, internetcore.ErrOperationInProgress.Error())
+	}
 	if errors.Is(err, internetcore.ErrAirplaneMode) {
 		return httpapi.Error(c, http.StatusConflict, errorCodeInternetAirplaneMode, internetcore.ErrAirplaneMode.Error())
 	}

@@ -1,7 +1,7 @@
 github.com/damonto/euicc-go v1.1.3-0.20260813015305-1f7e0d0c2ffc h1:GXVyFolXvTBYDaplUraeV2I+L2C02UDuAQlUWy9VdbE=
 github.com/damonto/euicc-go v1.1.3-0.20260813015305-1f7e0d0c2ffc/go.mod h1:cR84QBjk0rC3MKdykxVxARjxV5RNInWjouWH6SSBwDs=
-github.com/damonto/wwan-go v0.0.0-20260924010239-61a1c606e670 h1:u/YZCFr4KZ1z0eTuA/DhTwgpAf5K0c9RDsvQVx+TsKM=
-github.com/damonto/wwan-go v0.0.0-20260924010239-61a1c606e670/go.mod h1:GgKFPJRqfQp8/yE0gO4HpuZ+bk6Knx47e5OK7Sz4LiQ=
+github.com/damonto/wwan-go v0.0.0-20260929015135-b9278851ab3a h1:y6zmQuTdhYd3U39oP5offshvRGsuCdLhDiwKdtob6J8=
+github.com/damonto/wwan-go v0.0.0-20260929015135-b9278851ab3a/go.mod h1:GgKFPJRqfQp8/yE0gO4HpuZ+bk6Knx47e5OK7Sz4LiQ=
 github.com/gabriel-vasile/mimetype v1.4.15 h1:05iP/CYtZ/w455R/KZM6rZ5ieAdh99UPtd+d3YzLmaI=
 github.com/gabriel-vasile/mimetype v1.4.15/go.mod h1:azpTcoLcDZRNgFou5j+APrqQx9HqVPWa6ijYQIIVswQ=
 github.com/go-playground/assert/v2 v2.2.0 h1:JvknZsQTYeFEAhQwI4qEt9cyV5ONwRHC+lYKSsYSR8s=

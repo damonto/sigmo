@@ -16,9 +16,12 @@ import (
 	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
+// ErrModemRetired means the caller must acquire a lease on the replacement generation.
+var ErrModemRetired = errors.New("modem generation is retired")
+
 var (
 	errPoolClosed       = errors.New("LPA client pool is closed")
-	errPoolModemRetired = errors.New("modem generation is retired")
+	errPoolModemRetired = ErrModemRetired
 	errPoolRequired     = errors.New("LPA client pool is required")
 	errPoolEntryRetired = errors.New("LPA client entry is retired")
 )

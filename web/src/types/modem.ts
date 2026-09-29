@@ -72,6 +72,7 @@ export type WiFiCallingSettingsRequest = {
 }
 
 export type WiFiCallingSettingsResponse = Omit<WiFiCallingSettings, 'underlay'> & {
+  lastError?: string
   underlay: WiFiCallingUnderlay
   connected: boolean
   state: string

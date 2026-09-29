@@ -100,7 +100,7 @@ func (c *catalog) buildBasicResponse(device *mmodem.Modem) *ModemResponse {
 	if snapshot.StatusKnown && !snapshot.AirplaneMode() {
 		resp.AccessTechnology = accessTechnologyString(snapshot.Status.Technology)
 		resp.RegistrationState = registrationStateName(snapshot.Status.Registration)
-		resp.RegisteredOperator = RegisteredOperatorResponse{Name: snapshot.Status.OperatorName, Code: snapshot.Status.OperatorID}
+		resp.RegisteredOperator = registeredOperator(snapshot)
 	}
 	return resp
 }
@@ -136,27 +136,24 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		registrationState = registrationStateName(snapshot.Status.Registration)
 	}
 	resp := &ModemResponse{
-		Manufacturer:      device.Manufacturer,
-		ID:                device.EquipmentIdentifier,
-		PrimaryPort:       device.PrimaryPort,
-		FirmwareRevision:  device.FirmwareRevision,
-		HardwareRevision:  device.HardwareRevision,
-		Name:              name,
-		Number:            snapshot.Number,
-		State:             modemStateValue(snapshot),
-		UnlockRequired:    unlockRequired(snapshot),
-		UnlockSupported:   unlockSupported(device),
-		SIM:               sim,
-		Slots:             simSlots,
-		AccessTechnology:  accessTechnologyString(snapshot.Status.Technology),
-		RegistrationState: registrationState,
-		RegisteredOperator: RegisteredOperatorResponse{
-			Name: snapshot.Status.OperatorName,
-			Code: snapshot.Status.OperatorID,
-		},
-		SignalQuality: uint32(snapshot.Status.SignalQuality),
-		AirplaneMode:  snapshot.AirplaneMode(),
-		SIMKind:       snapshot.SIMKind(),
+		Manufacturer:       device.Manufacturer,
+		ID:                 device.EquipmentIdentifier,
+		PrimaryPort:        device.PrimaryPort,
+		FirmwareRevision:   device.FirmwareRevision,
+		HardwareRevision:   device.HardwareRevision,
+		Name:               name,
+		Number:             snapshot.Number,
+		State:              modemStateValue(snapshot),
+		UnlockRequired:     unlockRequired(snapshot),
+		UnlockSupported:    unlockSupported(device),
+		SIM:                sim,
+		Slots:              simSlots,
+		AccessTechnology:   accessTechnologyString(snapshot.Status.Technology),
+		RegistrationState:  registrationState,
+		RegisteredOperator: registeredOperator(snapshot),
+		SignalQuality:      uint32(snapshot.Status.SignalQuality),
+		AirplaneMode:       snapshot.AirplaneMode(),
+		SIMKind:            snapshot.SIMKind(),
 	}
 	if snapshot.AirplaneMode() || !snapshot.StatusKnown {
 		resp.AccessTechnology = ""
@@ -358,4 +355,39 @@ func registrationStateName(state wwanmodem.RegistrationState) string {
 	default:
 		return "Unknown"
 	}
+}
+
+func registeredOperator(snapshot mmodem.ModemSnapshot) RegisteredOperatorResponse {
+	if !snapshot.StatusKnown || snapshot.AirplaneMode() {
+		return RegisteredOperatorResponse{}
+	}
+	switch snapshot.Status.Registration {
+	case wwanmodem.RegistrationHome, wwanmodem.RegistrationRoaming:
+		return RegisteredOperatorResponse{Name: snapshot.Status.OperatorName, Code: snapshot.Status.OperatorID}
+	default:
+		return RegisteredOperatorResponse{}
+	}
+}
+
+// ListIdentities returns cached modem identities without reading SIMs or connections.
+func (h *Handler) ListIdentities(ctx context.Context) ([]*ModemResponse, error) {
+	devices, err := h.registry.Modems(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list modems: %w", err)
+	}
+	response := make([]*ModemResponse, 0, len(devices))
+	for _, device := range devices {
+		response = append(response, h.catalog.buildBasicResponse(device))
+	}
+	slices.SortFunc(response, func(a, b *ModemResponse) int { return strings.Compare(a.ID, b.ID) })
+	return response, nil
+}
+
+// Snapshot returns the cached modem status without performing device I/O.
+func (h *Handler) Snapshot(ctx context.Context, id string) (*ModemResponse, error) {
+	device, err := h.registry.Find(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return h.catalog.buildBasicResponse(device), nil
 }

@@ -50,6 +50,7 @@ type WiFiCallingSettingsRequest struct {
 }
 
 type WiFiCallingSettingsResponse struct {
+	LastError                       string           `json:"lastError,omitempty" jsonschema:"most recent IMS connection failure; cleared after successful registration"`
 	Enabled                         bool             `json:"enabled" jsonschema:"whether Wi-Fi Calling is enabled in Sigmo settings"`
 	Underlay                        UnderlaySettings `json:"underlay" jsonschema:"outer network selected for Wi-Fi Calling"`
 	Connected                       bool             `json:"connected" jsonschema:"whether the modem currently has an active Wi-Fi Calling IMS connection"`
@@ -111,6 +112,7 @@ func ReadWiFiCallingSettings(ctx context.Context, modem *mmodem.Modem, connectiv
 		return WiFiCallingSettingsResponse{}, err
 	}
 	return WiFiCallingSettingsResponse{
+		LastError:                       status.LastError,
 		Enabled:                         status.Enabled,
 		Underlay:                        status.Underlay,
 		Connected:                       status.Connected,

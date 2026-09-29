@@ -9264,6 +9264,16 @@
     {
         "mcc": "280",
         "mnc": "10",
+        "name": "Epic Internet",
+        "authType": -1,
+        "protocol": "IP",
+        "apn": "internet",
+        "user": "",
+        "pass": ""
+    },
+    {
+        "mcc": "280",
+        "mnc": "10",
         "name": "MTN Wap",
         "authType": -1,
         "protocol": "IP",

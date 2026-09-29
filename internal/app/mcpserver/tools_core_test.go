@@ -2,11 +2,14 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/damonto/wwan-go/qcom"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	modemhandler "github.com/damonto/sigmo/internal/app/handler/modem"
@@ -109,6 +112,7 @@ func TestCoreToolSchemasRegister(t *testing.T) {
 		gotTools = append(gotTools, tool.name)
 	}
 	wantTools := []string{
+		"get_network_status",
 		"list_authorized_modems", "get_modem_status",
 		"list_sim_cards", "list_secure_elements", "switch_sim_slot", "update_msisdn",
 		"list_esim_profiles", "discover_esim_profiles", "download_esim_profile", "enable_esim_profile", "rename_esim_profile", "delete_esim_profile",
@@ -226,4 +230,30 @@ func resolveSchemaRef(root map[string]any, schema map[string]any) map[string]any
 		return schema
 	}
 	return definition
+}
+
+func TestOperationErrorDistinguishesWDSFailures(t *testing.T) {
+	tests := []struct {
+		name     string
+		cause    error
+		wantCode string
+	}{
+		{name: "network rejects call", cause: qcom.QMIErrorCallFailed, wantCode: "network_rejected"},
+		{name: "modem internal error", cause: qcom.QMIErrorInternal, wantCode: "operation_failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cause := &qcom.WDSStartNetworkError{Err: fmt.Errorf("private credential: %w", tt.cause)}
+			got := OperationError("connect Internet", cause)
+			if code := ErrorCode(got); code != tt.wantCode {
+				t.Fatalf("code = %q, want %q", code, tt.wantCode)
+			}
+			if !errors.Is(got, tt.cause) {
+				t.Fatalf("error chain lost %v: %v", tt.cause, got)
+			}
+			if strings.Contains(got.Error(), "private credential") {
+				t.Fatalf("public message includes private backend text: %v", got)
+			}
+		})
+	}
 }

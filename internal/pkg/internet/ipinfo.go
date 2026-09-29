@@ -15,7 +15,7 @@ import (
 
 const (
 	ipInfoURL     = "https://ipinfo.io/json"
-	ipInfoTimeout = 4 * time.Second
+	ipInfoTimeout = 15 * time.Second
 )
 
 type IPInfo struct {

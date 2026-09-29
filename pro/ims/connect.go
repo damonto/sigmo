@@ -348,6 +348,7 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		c.recordSessionError(modem.EquipmentIdentifier, attempt.sessionID, err)
 		if errors.Is(err, ErrUnavailable) {
 			slog.Warn("IMS access unavailable", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
 			return nil, err
@@ -842,6 +843,7 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 				return
 			}
+			c.recordSessionError(modem.EquipmentIdentifier, sessionID, state.LastError)
 			switch state.Status {
 			case imsgo.StatusRegistered:
 				c.markConnected(modem.EquipmentIdentifier, sessionID, client)
@@ -890,6 +892,7 @@ func (c *coordinator) markConnected(modemID string, sessionID uint64, client *im
 		session.client = client
 		session.connected = true
 		session.connectedAt = time.Now()
+		session.lastError = ""
 		session.phase = sessionPhaseConnected
 		session.websheet = nil
 		if client != nil {
@@ -1256,5 +1259,16 @@ func (c *coordinator) stopByDevice(ctx context.Context, deviceKey string, genera
 	c.mu.Unlock()
 	for _, modemID := range modemIDs {
 		c.stop(ctx, modemID)
+	}
+}
+
+func (c *coordinator) recordSessionError(modemID string, sessionID uint64, err error) {
+	if err == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if session := c.sessions[modemID]; session != nil && session.id == sessionID {
+		session.lastError = err.Error()
 	}
 }

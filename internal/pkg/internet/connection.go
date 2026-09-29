@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	modemlink "github.com/damonto/sigmo/internal/pkg/modem/link"
@@ -14,6 +15,8 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	wwanmodem "github.com/damonto/wwan-go/modem"
+	"github.com/damonto/wwan-go/qcom"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -22,7 +25,9 @@ const (
 )
 
 var (
-	ErrModemRequired       = errors.New("modem is required")
+	ErrModemRequired = errors.New("modem is required")
+	// ErrOperationInProgress means a modem operation currently owns the connection state.
+	ErrOperationInProgress = errors.New("internet operation is in progress")
 	ErrNotConnected        = errors.New("internet connection is not connected")
 	ErrProfileIDRequired   = errors.New("profile id is required")
 	ErrUnsupportedIPMethod = errors.New("only static bearer IP configuration is supported")
@@ -66,8 +71,9 @@ type Connector struct {
 	routeMu            sync.Mutex
 	operationMu        sync.Mutex
 	connections        map[string]trackedConnection
+	preferenceProfiles map[string]string
 	preferences        map[string]Preferences
-	operations         map[string]*sync.Mutex
+	operations         map[string]*semaphore.Weighted
 	proxy              *Proxy
 	state              *storage.Store
 	persistence        connectionStateStore
@@ -241,7 +247,7 @@ func NewConnector(cfg ConnectorConfig) (*Connector, error) {
 	connector := &Connector{
 		connections:        make(map[string]trackedConnection),
 		preferences:        make(map[string]Preferences),
-		operations:         make(map[string]*sync.Mutex),
+		operations:         make(map[string]*semaphore.Weighted),
 		qmapConnections:    make(map[string]*qmapConnection),
 		qmapEnabled:        make(map[string]bool),
 		qmapPendingNormal:  make(map[string]Preferences),
@@ -303,7 +309,10 @@ func (c *Connector) Recover(ctx context.Context, modems []*mmodem.Modem) error {
 			continue
 		}
 		access := modemAccess{modem: modem}
-		unlock := c.lockRouteTransaction(access.id())
+		unlock, lockErr := c.acquireModem(ctx, access.id())
+		if lockErr != nil {
+			return errors.Join(result, lockErr)
+		}
 		err = c.recover(ctx, access)
 		unlock()
 		if err != nil {
@@ -332,7 +341,11 @@ func (c *Connector) Current(ctx context.Context, modem *mmodem.Modem) (*Connecti
 		return nil, ErrModemRequired
 	}
 	access := modemAccess{modem: modem}
-	defer c.lockRouteTransaction(access.id())()
+	lock := c.modemLock(access.id())
+	if !lock.TryAcquire(1) {
+		return nil, ErrOperationInProgress
+	}
+	defer lock.Release(1)
 
 	airplaneMode, err := c.airplaneModeEnabled(ctx, modem)
 	if err != nil {
@@ -349,16 +362,21 @@ func (c *Connector) Current(ctx context.Context, modem *mmodem.Modem) (*Connecti
 
 func (c *Connector) current(ctx context.Context, modem internetModem) (*Connection, error) {
 	modemID := modem.id()
-	defer c.lockRouteTransaction(modemID)()
+	unlock, lockErr := c.acquireModem(ctx, modemID)
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	defer unlock()
 	return c.currentLocked(ctx, modem)
 }
 
 func (c *Connector) currentLocked(ctx context.Context, modem internetModem) (*Connection, error) {
+	defer c.lockRoutes()()
 	modemID := modem.id()
 	prefs := c.preferenceWithAlwaysOn(ctx, modem)
 	var staleInterfaces []string
 	if tracked, ok := c.connection(modemID); ok {
-		if tracked.modemGeneration != modem.generation() {
+		if tracked.modemGeneration != modem.generation() || tracked.profileID != modem.profileID() {
 			if err := c.cleanupTracked(ctx, modemID, tracked); err != nil {
 				return nil, fmt.Errorf("cleanup stale modem generation: %w", err)
 			}
@@ -367,7 +385,6 @@ func (c *Connector) currentLocked(ctx context.Context, modem internetModem) (*Co
 			}
 			staleInterfaces = append(staleInterfaces, tracked.interfaceName)
 			c.deleteConnection(modemID)
-			prefs = tracked.prefs
 		} else {
 			bearer, err := modem.bearer(ctx, tracked.bearerPath)
 			if err == nil {
@@ -383,9 +400,7 @@ func (c *Connector) currentLocked(ctx context.Context, modem internetModem) (*Co
 							return nil, fmt.Errorf("cleanup disconnected bearer: %w", err)
 						}
 						c.deleteConnection(modemID)
-						prefs := bearerPreferences(ctx, bearer, tracked.prefs)
-						prefs = preferencesWithSelectedAPN(modem, prefs)
-						c.setPreference(modemID, prefs)
+						prefs := preferencesWithSelectedAPN(modem, tracked.prefs)
 						return disconnectedConnection(prefs), nil
 					}
 					prefs := preferencesWithDefaultAPNCredentials(modem, tracked.prefs)
@@ -421,9 +436,7 @@ func (c *Connector) currentLocked(ctx context.Context, modem internetModem) (*Co
 		if err := c.cleanupStaleConnectionState(ctx, modemID, staleInterfaces...); err != nil {
 			return nil, err
 		}
-		prefs = bearerPreferences(ctx, current.bearer, prefs)
 		prefs = preferencesWithSelectedAPN(modem, prefs)
-		c.setPreference(modemID, prefs)
 		return disconnectedConnection(prefs), nil
 	}
 	bearer := current.bearer
@@ -441,6 +454,7 @@ func (c *Connector) currentLocked(ctx context.Context, modem internetModem) (*Co
 }
 
 func (c *Connector) recover(ctx context.Context, modem internetModem) error {
+	defer c.lockRoutes()()
 	modemID := modem.id()
 	profileID := modem.profileID()
 	prefs := c.preferenceWithAlwaysOn(ctx, modem)
@@ -459,7 +473,6 @@ func (c *Connector) recover(ctx context.Context, modem internetModem) error {
 		if err := c.cleanupStaleConnectionState(ctx, modemID, staleInterfaces...); err != nil {
 			return err
 		}
-		c.setPreference(modemID, preferencesWithSelectedAPN(modem, bearerPreferences(ctx, current.bearer, prefs)))
 		return nil
 	}
 
@@ -487,7 +500,13 @@ func (c *Connector) Connect(ctx context.Context, modem *mmodem.Modem, prefs Pref
 		return nil, err
 	}
 	access := modemAccess{modem: modem}
-	defer c.lockRouteTransaction(access.id())()
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	lock := c.modemLock(access.id())
+	if err := lock.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	defer lock.Release(1)
 	if err := c.rejectAirplaneMode(ctx, modem); err != nil {
 		return nil, err
 	}
@@ -498,6 +517,8 @@ func (c *Connector) Connect(ctx context.Context, modem *mmodem.Modem, prefs Pref
 }
 
 func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Preferences, clearAlwaysOnBefore bool) (*Connection, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
 	if err := ValidatePreferences(prefs); err != nil {
 		return nil, err
 	}
@@ -510,14 +531,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 	if prefs.AlwaysOn && profileID == "" {
 		return nil, ErrProfileIDRequired
 	}
-	if prefs.APN == "" {
-		apn, err := apnFromBearers(ctx, modem)
-		if err != nil {
-			return nil, err
-		}
-		prefs.APN = apnForModem(modem, "", apn, c.preferenceWithAlwaysOn(ctx, modem).APN)
-	}
-	prefs = preferencesWithDefaultAPNCredentials(modem, prefs)
+	prefs = c.connectionPreferences(ctx, modem, prefs)
 	if err := c.disconnect(ctx, modem, clearAlwaysOnBefore); err != nil {
 		return nil, fmt.Errorf("disconnect previous bearer: %w", err)
 	}
@@ -540,6 +554,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 	}
 	prefs = bearerPreferences(ctx, bearer, prefs)
 
+	defer c.lockRoutes()()
 	tracked, err := c.configureConnectedBearer(ctx, modemID, bearer, prefs)
 	if err != nil {
 		disconnectErr := bearer.Disconnect(ctx)
@@ -590,7 +605,11 @@ func (c *Connector) Disconnect(ctx context.Context, modem *mmodem.Modem) error {
 		return ErrModemRequired
 	}
 	access := modemAccess{modem: modem}
-	defer c.lockRouteTransaction(access.id())()
+	unlock, lockErr := c.acquireModem(ctx, access.id())
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 
 	airplaneMode, err := c.airplaneModeEnabled(ctx, modem)
 	if err != nil {
@@ -607,13 +626,18 @@ func (c *Connector) Disconnect(ctx context.Context, modem *mmodem.Modem) error {
 
 func (c *Connector) Restore(ctx context.Context, modem *mmodem.Modem) error {
 	access := modemAccess{modem: modem}
-	defer c.lockRouteTransaction(access.id())()
+	unlock, lockErr := c.acquireModem(ctx, access.id())
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	err := c.disconnect(ctx, access, false)
 	c.deleteConnectionAndPreference(access.id())
 	return err
 }
 
 func (c *Connector) disconnect(ctx context.Context, modem internetModem, clearAlwaysOn bool) error {
+	defer c.lockRoutes()()
 	modemID := modem.id()
 	var result error
 	if clearAlwaysOn {
@@ -958,8 +982,14 @@ func (c *Connector) preference(modemID string) Preferences {
 
 func (c *Connector) preferenceWithAlwaysOn(ctx context.Context, modem internetModem) Preferences {
 	modemID := modem.id()
-	prefs := c.preference(modemID)
 	profileID := modem.profileID()
+	c.mu.Lock()
+	prefs := normalizePreferences(c.preferences[modemID])
+	owner, known := c.preferenceProfiles[modemID]
+	c.mu.Unlock()
+	if known && owner != profileID {
+		prefs = Preferences{}
+	}
 	if profileID == "" {
 		return prefs
 	}
@@ -1023,30 +1053,40 @@ func (c *Connector) setAlwaysOnPreferenceInMemory(modemID string, prefs Preferen
 	}
 }
 
-func (c *Connector) lockModem(modemID string) func() {
+func (c *Connector) modemLock(modemID string) *semaphore.Weighted {
 	modemID = strings.TrimSpace(modemID)
 	c.operationMu.Lock()
+	defer c.operationMu.Unlock()
 	lock := c.operations[modemID]
 	if lock == nil {
-		lock = new(sync.Mutex)
+		lock = semaphore.NewWeighted(1)
 		c.operations[modemID] = lock
 	}
-	c.operationMu.Unlock()
-
-	lock.Lock()
-	return lock.Unlock
+	return lock
 }
 
-// lockRouteTransaction serializes host-wide route changes before taking the
-// per-modem operation lock. Keeping this order prevents cross-modem route
-// updates from committing stale tracked connection snapshots.
-func (c *Connector) lockRouteTransaction(modemID string) func() {
-	c.routeMu.Lock()
-	unlockModem := c.lockModem(modemID)
-	return func() {
-		unlockModem()
-		c.routeMu.Unlock()
+// acquireModem lets canceled requests leave the operation queue without
+// starting hardware work or spawning a goroutine solely to wait for a lock.
+func (c *Connector) acquireModem(ctx context.Context, modemID string) (func(), error) {
+	lock := c.modemLock(modemID)
+	if err := lock.Acquire(ctx, 1); err != nil {
+		return nil, fmt.Errorf("wait for modem operation: %w", err)
 	}
+	return func() { lock.Release(1) }, nil
+}
+
+func (c *Connector) lockModem(modemID string) func() {
+	lock := c.modemLock(modemID)
+	// Background acquisition cannot be canceled.
+	_ = lock.Acquire(context.Background(), 1)
+	return func() { lock.Release(1) }
+}
+
+// lockRoutes protects host-wide route changes and their tracked ownership.
+// Callers acquire the modem lock first and never hold this lock across PDN setup.
+func (c *Connector) lockRoutes() func() {
+	c.routeMu.Lock()
+	return c.routeMu.Unlock
 }
 
 func (c *Connector) connection(modemID string) (trackedConnection, bool) {
@@ -1062,6 +1102,10 @@ func (c *Connector) setConnectionAndPreference(modemID string, tracked trackedCo
 	defer c.mu.Unlock()
 
 	c.connections[modemID] = tracked
+	if c.preferenceProfiles == nil {
+		c.preferenceProfiles = make(map[string]string)
+	}
+	c.preferenceProfiles[modemID] = tracked.profileID
 	c.preferences[modemID] = normalizePreferences(prefs)
 }
 
@@ -1192,6 +1236,12 @@ func (c *Connector) cleanupStaleConnectionState(ctx context.Context, modemID str
 }
 
 func (c *Connector) connectBearerAfterRecovery(ctx context.Context, modem internetModem, prefs Preferences, connectErr error) (*mmodem.Bearer, error) {
+	// A network rejection is not a broken host data path. Resetting the modem
+	// cannot fix APN or subscription policy and may disrupt its voice session.
+	var rejected *qcom.WDSStartNetworkError
+	if (errors.As(connectErr, &rejected) && errors.Is(rejected, qcom.QMIErrorCallFailed)) || ctx.Err() != nil {
+		return nil, errors.Join(fmt.Errorf("connect bearer: %w", connectErr), c.cleanupConnectFailure(ctx, modem))
+	}
 	recoverErr := c.cleanupConnectFailure(ctx, modem)
 	if recoverErr != nil {
 		return nil, errors.Join(fmt.Errorf("connect bearer: %w", connectErr), recoverErr)
@@ -1225,6 +1275,7 @@ func bearerPropertiesFromPreferences(prefs Preferences) mmodem.BearerProperties 
 }
 
 func (c *Connector) cleanupConnectFailure(ctx context.Context, modem internetModem) error {
+	defer c.lockRoutes()()
 	interfaceNames, err := c.deleteDisconnectedBearers(ctx, modem)
 	err = errors.Join(err, c.cleanupStaleConnectionState(ctx, modem.id(), interfaceNames...))
 	return err
@@ -1265,4 +1316,19 @@ func (c *Connector) deleteDisconnectedBearers(ctx context.Context, modem interne
 		}
 	}
 	return interfaceNames, result
+}
+
+// connectionPreferences uses only the current profile's successful preferences
+// before falling back to the APN database, on both normal and QMAP data paths.
+func (c *Connector) connectionPreferences(ctx context.Context, modem internetModem, prefs Preferences) Preferences {
+	if prefs.APN == "" {
+		remembered := c.preferenceWithAlwaysOn(ctx, modem)
+		prefs.APN = apnForModem(modem, "", "", remembered.APN)
+		if remembered.APN != "" && prefs.APNUsername == "" && prefs.APNPassword == "" && prefs.APNAuth == "" {
+			prefs.APNUsername = remembered.APNUsername
+			prefs.APNPassword = remembered.APNPassword
+			prefs.APNAuth = remembered.APNAuth
+		}
+	}
+	return preferencesWithDefaultAPNCredentials(modem, prefs)
 }

@@ -10,6 +10,7 @@ import (
 
 	elpa "github.com/damonto/euicc-go/lpa"
 	sgp22 "github.com/damonto/euicc-go/v2"
+	"github.com/damonto/wwan-go/qcom"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
@@ -114,8 +115,31 @@ type successOutput struct {
 	Success bool `json:"success" jsonschema:"whether Sigmo completed the requested operation"`
 }
 
+type networkStatusOutput struct {
+	RegistrationState  string                                  `json:"registrationState" jsonschema:"current network registration state, including Idle, Searching, Home, Roaming, or Denied"`
+	RegisteredOperator modemhandler.RegisteredOperatorResponse `json:"registeredOperator" jsonschema:"registered operator; empty when not registered"`
+	SignalQuality      uint32                                  `json:"signalQuality" jsonschema:"signal quality as a percentage"`
+	AccessTechnology   string                                  `json:"accessTechnology" jsonschema:"current radio access technology"`
+}
+
+func (t *coreTools) getNetworkStatus(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (networkStatusOutput, error) {
+	value, err := t.modems.Snapshot(ctx, input.ModemID)
+	if err != nil {
+		return networkStatusOutput{}, OperationError("get network status", err)
+	}
+	return networkStatusOutput{
+		RegistrationState:  value.RegistrationState,
+		RegisteredOperator: value.RegisteredOperator,
+		SignalQuality:      value.SignalQuality,
+		AccessTechnology:   value.AccessTechnology,
+	}, nil
+}
+
 func (t *coreTools) register(c *Catalog) error {
 	registrations := []func() error{
+		func() error {
+			return AddTool(c, "network.read", ReadTool("get_network_status", "Get current network registration, operator, signal and radio technology"), modemID, t.getNetworkStatus)
+		},
 		func() error {
 			return AddTool(c, "", ReadTool("list_authorized_modems", "List authorized modems"), nil, t.listAuthorizedModems)
 		},
@@ -266,7 +290,7 @@ type modemOutput struct {
 }
 
 func (t *coreTools) listAuthorizedModems(ctx context.Context, _ *mcp.CallToolRequest, grant mcpauth.Grant, _ struct{}) (modemsOutput, error) {
-	values, err := t.modems.ListModems(ctx)
+	values, err := t.modems.ListIdentities(ctx)
 	if err != nil {
 		return modemsOutput{}, OperationError("list modems", err)
 	}
@@ -902,6 +926,9 @@ func (t *coreTools) setInternetPreferences(ctx context.Context, _ *mcp.CallToolR
 }
 
 func OperationError(action string, err error) error {
+	if errors.Is(err, internetcore.ErrOperationInProgress) {
+		return NewToolError("operation_in_progress", "a modem Internet operation is in progress; retry shortly", err)
+	}
 	if errors.Is(err, modemcore.ErrNotFound) {
 		return NewToolError("modem_not_found", "the requested modem is not available", err)
 	}
@@ -910,6 +937,16 @@ func OperationError(action string, err error) error {
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return NewToolError("deadline_exceeded", action+" timed out", err)
+	}
+	var rejected *qcom.WDSStartNetworkError
+	if errors.As(err, &rejected) && errors.Is(rejected, qcom.QMIErrorCallFailed) {
+		// Copy only protocol cause fields; never expose arbitrary backend text
+		// that might contain APN credentials or subscriber identifiers.
+		reason := qcom.WDSStartNetworkError{
+			CallEndReason: rejected.CallEndReason, HasCallEndReason: rejected.HasCallEndReason,
+			VerboseCallEndReason: rejected.VerboseCallEndReason, HasVerboseCallEndReason: rejected.HasVerboseCallEndReason,
+		}
+		return NewToolError("network_rejected", action+": "+reason.Error(), err)
 	}
 	slog.Error("MCP tool operation", "action", action, "error", err)
 	return NewToolError("operation_failed", action+" could not be completed", err)

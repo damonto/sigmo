@@ -22,7 +22,7 @@ func TestLockRouteTransactionHoldsGlobalRouteLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewConnector() error = %v", err)
 	}
-	unlock := connector.lockRouteTransaction("modem-1")
+	unlock := connector.lockRoutes()
 	if connector.routeMu.TryLock() {
 		connector.routeMu.Unlock()
 		unlock()

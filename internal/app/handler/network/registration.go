@@ -175,7 +175,10 @@ func (n *network) saveRegistration(ctx context.Context, modem *mmodem.Modem, pre
 }
 
 func loadRegistrationPreference(ctx context.Context, store *storage.Store, modem *mmodem.Modem) (networkRegistrationPreference, error) {
-	scope := registrationScope(modem)
+	return loadRegistrationScope(ctx, store, registrationScope(modem))
+}
+
+func loadRegistrationScope(ctx context.Context, store *storage.Store, scope string) (networkRegistrationPreference, error) {
 	if scope == "" {
 		return networkRegistrationPreference{}, nil
 	}
@@ -291,7 +294,12 @@ func (r *registrationRestorer) restoreWithRetry(ctx context.Context, modem *mmod
 }
 
 func (r *registrationRestorer) restoreModem(ctx context.Context, modem *mmodem.Modem) error {
-	pref, err := loadRegistrationPreference(ctx, r.store, modem)
+	// A missing ICCID is a transition, not a profile with automatic selection.
+	profileID := registrationProfileID(modem)
+	if profileID == "" {
+		return nil
+	}
+	pref, err := loadRegistrationScope(ctx, r.store, networkRegistrationPrefix+profileID)
 	if err != nil {
 		return err
 	}
@@ -299,8 +307,13 @@ func (r *registrationRestorer) restoreModem(ctx context.Context, modem *mmodem.M
 	if err != nil {
 		return err
 	}
+	if registrationProfileID(modem) != profileID {
+		return nil
+	}
 	if pref.manual() {
-		return r.restoreManual(ctx, modem, selection, pref.OperatorCode)
+		return r.restoreManual(ctx, modem, registrationRestoreConfig{
+			selection: selection, operatorCode: pref.OperatorCode, profileID: profileID,
+		})
 	}
 	// Anything short of an explicit manual preference means this profile
 	// expects the modem to choose. Only an observed manual selection needs
@@ -315,24 +328,33 @@ func (r *registrationRestorer) restoreModem(ctx context.Context, modem *mmodem.M
 	return nil
 }
 
-func (r *registrationRestorer) restoreManual(ctx context.Context, modem *mmodem.Modem, selection wwan.NetworkSelection, operatorCode string) error {
-	switch selection.Mode {
+type registrationRestoreConfig struct {
+	selection    wwan.NetworkSelection
+	operatorCode string
+	profileID    string
+}
+
+func (r *registrationRestorer) restoreManual(ctx context.Context, modem *mmodem.Modem, cfg registrationRestoreConfig) error {
+	switch cfg.selection.Mode {
 	case wwan.NetworkSelectionManual:
-		if selection.OperatorID == operatorCode {
+		if cfg.selection.OperatorID == cfg.operatorCode {
 			return nil
 		}
 	case wwan.NetworkSelectionUnknown:
 		// Without a readable selection the registered operator is the best
 		// signal that the manual choice survived.
 		current, err := r.registrar.OperatorCode(ctx, modem)
-		if err == nil && strings.TrimSpace(current) == operatorCode {
+		if err == nil && strings.TrimSpace(current) == cfg.operatorCode {
 			return nil
 		}
 	}
-	if err := r.registrar.Register(ctx, modem, operatorCode); err != nil {
-		return fmt.Errorf("register network %s: %w", operatorCode, err)
+	if registrationProfileID(modem) != cfg.profileID {
+		return nil
 	}
-	slog.Info("network selection restored", "imei", modem.EquipmentIdentifier, "mode", RegistrationModeManual, "operator", operatorCode)
+	if err := r.registrar.Register(ctx, modem, cfg.operatorCode); err != nil {
+		return fmt.Errorf("register network %s: %w", cfg.operatorCode, err)
+	}
+	slog.Info("network selection restored", "imei", modem.EquipmentIdentifier, "mode", RegistrationModeManual, "operator", cfg.operatorCode)
 	return nil
 }
 
@@ -355,6 +377,18 @@ func registrationScope(modem *mmodem.Modem) string {
 	}
 	if modemID := strings.TrimSpace(modem.EquipmentIdentifier); modemID != "" {
 		return networkRegistrationModemID + modemID
+	}
+	return ""
+}
+
+func registrationProfileID(modem *mmodem.Modem) string {
+	select {
+	case <-modem.Done():
+		return ""
+	default:
+	}
+	if sim := modem.Snapshot().SIM; sim != nil {
+		return strings.TrimSpace(sim.Identifier)
 	}
 	return ""
 }

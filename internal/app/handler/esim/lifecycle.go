@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/damonto/euicc-go/bertlv"
 	sgp22 "github.com/damonto/euicc-go/v2"
@@ -15,6 +16,8 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
+
+const notificationAttempts = 3
 
 type lifecycle struct {
 	settings         *settings.Settings
@@ -136,17 +139,35 @@ func (s *enableSession) Enable(ctx context.Context) error {
 }
 
 func (s *enableSession) finish(ctx context.Context) error {
-	target, err := s.l.ensureSIMVisible(ctx, s.modem, mmodem.SIMTarget{
-		ICCID:         s.iccid.String(),
-		PreviousICCID: s.previousICCID,
-		RequireEUICC:  true,
-		AllowLocked:   true,
-	})
-	if err != nil {
-		return fmt.Errorf("wait for modem readiness: %w", err)
-	}
-	if err := s.l.sendPendingNotifications(ctx, target, s.seID, s.lastSeq); err != nil {
-		slog.Warn("handle eSIM profile notifications", "error", err, "imei", s.modem.EquipmentIdentifier)
+	target := s.modem
+	for attempt := range notificationAttempts {
+		var err error
+		target, err = s.l.ensureSIMVisible(ctx, target, mmodem.SIMTarget{
+			ICCID:         s.iccid.String(),
+			PreviousICCID: s.previousICCID,
+			RequireEUICC:  true,
+			AllowLocked:   true,
+		})
+		if err != nil {
+			return fmt.Errorf("wait for modem readiness: %w", err)
+		}
+		err = s.l.sendPendingNotifications(ctx, target, s.seID, s.lastSeq)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, lpa.ErrModemRetired) || attempt == notificationAttempts-1 {
+			slog.Warn("handle eSIM profile notifications", "error", err, "imei", s.modem.EquipmentIdentifier)
+			return nil
+		}
+		// Let the registry publish the replacement before resolving readiness
+		// again. Notification records are removed only after successful delivery.
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 	return nil
 }

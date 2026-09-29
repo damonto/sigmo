@@ -960,6 +960,7 @@ const en = {
       wifiCallingUnderlayMissingModem: 'Modem {id} (currently offline)',
       wifiCallingWebsheetRequired: 'Carrier setup is required before Wi-Fi Calling can connect.',
       wifiCallingWebsheetAction: 'Open carrier setup',
+      wifiCallingLastError: 'Last connection error',
       wifiCallingStatusLoading: 'Checking',
       wifiCallingStatusLoadingDescription: 'Reading Wi-Fi Calling status',
       wifiCallingConnected: 'Connected',

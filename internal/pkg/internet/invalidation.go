@@ -25,7 +25,12 @@ func (c *Connector) invalidateModemGeneration(ctx context.Context, modemID strin
 	if modemID == "" {
 		return nil
 	}
-	defer c.lockRouteTransaction(modemID)()
+	unlock, lockErr := c.acquireModem(ctx, modemID)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
+	defer c.lockRoutes()()
 
 	var (
 		tracked    *trackedConnection

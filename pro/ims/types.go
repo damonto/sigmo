@@ -118,6 +118,7 @@ type VoLTESettings struct {
 }
 
 type WiFiCallingStatus struct {
+	LastError string
 	WiFiCallingSettings
 	Connected       bool
 	State           string

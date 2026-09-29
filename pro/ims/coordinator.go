@@ -74,6 +74,7 @@ type sessionState struct {
 	cancel       context.CancelFunc
 	done         <-chan struct{}
 	reconnect    chan struct{}
+	lastError    string
 	phase        sessionPhase
 	client       *imsgo.Client
 	ussd         *imsgo.USSDSession
@@ -268,9 +269,12 @@ func (c *coordinator) releaseManagedVoLTEOnShutdown(ctx context.Context, modems 
 }
 
 func (c *coordinator) WiFiCallingSettings(ctx context.Context, modem *mmodem.Modem) (WiFiCallingSettings, error) {
-	profileID, err := modem.ProfileID(ctx)
-	if err != nil {
-		return WiFiCallingSettings{}, err
+	profileID := ""
+	if sim := modem.Snapshot().SIM; sim != nil {
+		profileID = sim.Identifier
+	}
+	if profileID == "" {
+		return WiFiCallingSettings{}, nil
 	}
 	settings, err := c.wifiCallingSettings.Get(ctx, profileID)
 	if err != nil {
@@ -511,6 +515,7 @@ func (c *coordinator) Disconnect(ctx context.Context, modem *mmodem.Modem) error
 }
 
 type sessionStatus struct {
+	LastError       string
 	Connected       bool
 	State           string
 	DurationSeconds int64
@@ -518,9 +523,12 @@ type sessionStatus struct {
 }
 
 func (c *coordinator) SessionStatus(ctx context.Context, modem *mmodem.Modem, enabled bool) (sessionStatus, error) {
-	profileID, err := modem.ProfileID(ctx)
-	if err != nil {
-		return sessionStatus{}, err
+	profileID := ""
+	if sim := modem.Snapshot().SIM; sim != nil {
+		profileID = sim.Identifier
+	}
+	if profileID == "" {
+		return sessionStatus{}, nil
 	}
 	c.mu.Lock()
 	session := c.sessions[modem.EquipmentIdentifier]
@@ -537,6 +545,7 @@ func statusFromSession(enabled bool, session *sessionState, profileID string, no
 		}
 		return status
 	}
+	status.LastError = session.lastError
 	switch session.phase {
 	case sessionPhaseConnected:
 		status.Connected = session.client != nil

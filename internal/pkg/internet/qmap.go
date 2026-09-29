@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	modemlink "github.com/damonto/sigmo/internal/pkg/modem/link"
@@ -133,7 +134,11 @@ func (c *Connector) SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, ena
 		return nil
 	}
 	modemID := modem.EquipmentIdentifier
-	defer c.lockRouteTransaction(modemID)()
+	unlock, lockErr := c.acquireModem(ctx, modemID)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 	if !enabled {
 		if prefs, ok := c.qmapPendingNormalFor(modemID); ok {
 			if err := c.removeManagedQMAPMuxes(modem); err != nil {
@@ -237,6 +242,7 @@ func (c *Connector) removeManagedQMAPMuxes(modem *mmodem.Modem) error {
 }
 
 func (c *Connector) cleanupStaleQMAPInternet(ctx context.Context, modem *mmodem.Modem) error {
+	defer c.lockRoutes()()
 	modemID := ""
 	if modem != nil {
 		modemID = modem.EquipmentIdentifier
@@ -256,16 +262,17 @@ func (c *Connector) qmapMigrationPreferences(ctx context.Context, modem internet
 }
 
 func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, prefs Preferences) (*Connection, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
 	prefs = normalizePreferences(prefs)
 	if err := ValidatePreferences(prefs); err != nil {
 		return nil, err
 	}
-	profileID := modemAccess{modem: modem}.profileID()
+	access := modemAccess{modem: modem}
+	prefs = c.connectionPreferences(ctx, access, prefs)
+	profileID := access.profileID()
 	if prefs.AlwaysOn && profileID == "" {
 		return nil, ErrProfileIDRequired
-	}
-	if prefs.APNUsername != "" || prefs.APNPassword != "" || prefs.APNAuth != "" {
-		return nil, errors.New("QMAP Internet authentication is not supported")
 	}
 	if err := c.disconnectQMAPLocked(ctx, modem); err != nil {
 		return nil, err
@@ -277,7 +284,7 @@ func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, 
 	connection := &qmapConnection{modem: modem, generation: modem.Generation()}
 	var combined qmapLinkConfig
 	var familyErrors error
-	familyResults, err := c.openQMAPFamilySessions(ctx, modem, prefs.APN, preferences)
+	familyResults, err := c.openQMAPFamilySessions(ctx, modem, prefs, preferences)
 	if err != nil {
 		return nil, errors.Join(
 			fmt.Errorf("open QMAP mux %d sessions: %w", internetQMAPMuxID, err),
@@ -331,6 +338,7 @@ func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, 
 			c.removeQMAPMuxes(modem, internetQMAPMuxID),
 		)
 	}
+	defer c.lockRoutes()()
 	tracked, err := c.qmapOperationSet().configureNetwork(ctx, c.persistence, modem.EquipmentIdentifier, prefs, combined, c.routeOperationSet())
 	if err != nil {
 		return nil, errors.Join(
@@ -384,12 +392,17 @@ func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, 
 	}
 	c.mu.Lock()
 	c.qmapConnections[modem.EquipmentIdentifier] = connection
+	if c.preferenceProfiles == nil {
+		c.preferenceProfiles = make(map[string]string)
+	}
+	c.preferenceProfiles[modem.EquipmentIdentifier] = profileID
 	c.preferences[modem.EquipmentIdentifier] = prefs
 	c.mu.Unlock()
 	return c.qmapConnectionResponse(modem.EquipmentIdentifier, connection), nil
 }
 
 func (c *Connector) disconnectQMAPLocked(ctx context.Context, modem *mmodem.Modem) error {
+	defer c.lockRoutes()()
 	c.mu.Lock()
 	connection := c.qmapConnections[modem.EquipmentIdentifier]
 	delete(c.qmapConnections, modem.EquipmentIdentifier)
@@ -410,14 +423,20 @@ func (c *Connector) disconnectQMAPLocked(ctx context.Context, modem *mmodem.Mode
 func (c *Connector) openQMAPFamilySessions(
 	ctx context.Context,
 	modem *mmodem.Modem,
-	apn string,
+	prefs Preferences,
 	preferences []qcom.WDSIPPreference,
 ) ([]qmapSessionResult, error) {
+	authentication, err := qmapAuthentication(prefs.APNAuth)
+	if err != nil {
+		return nil, err
+	}
 	results := make([]qmapSessionResult, len(preferences))
 	configs := make([]modemlink.QMAPConfig, len(preferences))
 	for i, preference := range preferences {
 		results[i].preference = preference
-		configs[i] = modemlink.QMAPConfig{APN: apn, IPPreference: preference, MuxID: internetQMAPMuxID}
+		configs[i] = modemlink.QMAPConfig{APN: prefs.APN, IPPreference: preference, MuxID: internetQMAPMuxID,
+			Username: prefs.APNUsername, Password: prefs.APNPassword, Authentication: authentication,
+		}
 	}
 	opened, err := c.qmapOperationSet().openSessions(ctx, modem, configs)
 	if err != nil {
@@ -746,4 +765,26 @@ func qmapIPPreferences(ipType string) ([]qcom.WDSIPPreference, error) {
 	default:
 		return nil, fmt.Errorf("%w: %s", mmodem.ErrUnsupportedBearerIPType, ipType)
 	}
+}
+
+func qmapAuthentication(auth string) (qcom.WDSAuthenticationMask, error) {
+	allowed, err := mmodem.BearerAllowedAuth(auth)
+	if err != nil {
+		return 0, err
+	}
+	// BearerAllowedAuth uses the legacy public bearer bitmask, not QMI bits.
+	const (
+		bearerAuthPAP      = 2
+		bearerAuthCHAP     = 4
+		bearerAuthMSCHAPv2 = 16
+	)
+	var authentication qcom.WDSAuthenticationMask
+	if allowed&bearerAuthPAP != 0 {
+		authentication |= qcom.WDSAuthenticationPAP
+	}
+	// Preserve the normal QMI bearer mapping, including its MSCHAP alias.
+	if allowed&(bearerAuthCHAP|bearerAuthMSCHAPv2) != 0 {
+		authentication |= qcom.WDSAuthenticationCHAP
+	}
+	return authentication, nil
 }

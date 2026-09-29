@@ -23,6 +23,7 @@ func (c *Connectivity) WiFiCallingStatus(ctx context.Context, modem *mmodem.Mode
 	}
 	return WiFiCallingStatus{
 		WiFiCallingSettings: settings,
+		LastError:           status.LastError,
 		Connected:           status.Connected,
 		State:               status.State,
 		DurationSeconds:     status.DurationSeconds,

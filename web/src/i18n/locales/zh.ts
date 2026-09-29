@@ -940,6 +940,7 @@ const zh = {
       wifiCallingUnderlayMissingModem: '模块 {id}（当前不在线）',
       wifiCallingWebsheetRequired: '需要先完成运营商设置，Wi-Fi Calling 才能连接。',
       wifiCallingWebsheetAction: '打开运营商设置',
+      wifiCallingLastError: '最近一次连接失败原因',
       wifiCallingStatusLoading: '检查中',
       wifiCallingStatusLoadingDescription: '正在读取 Wi-Fi Calling 状态',
       wifiCallingConnected: '已连接',

@@ -88,6 +88,7 @@ func defaultQualcomm410Ops() qualcomm410Ops {
 		validateLayout: mmodem.ValidateQualcomm410ModemLayout,
 		currentBearer:  currentBearer,
 		cleanupStaleState: func(ctx context.Context, connector *Connector, modemID string) error {
+			defer connector.lockRoutes()()
 			return connector.cleanupStaleConnectionState(ctx, modemID, mmodem.Qualcomm410InternetInterface)
 		},
 		reconnectBearer: func(ctx context.Context, connector *Connector, access internetModem, prefs Preferences) error {
@@ -192,7 +193,11 @@ func (c *Connector) SetQualcomm410Enabled(ctx context.Context, modem *mmodem.Mod
 		return ErrModemRequired
 	}
 	modemID := modem.EquipmentIdentifier
-	defer c.lockRouteTransaction(modemID)()
+	unlock, lockErr := c.acquireModem(ctx, modemID)
+	if lockErr != nil {
+		return lockErr
+	}
+	defer unlock()
 
 	if err := c.bindQualcomm410Generation(modemID, modem.Generation()); err != nil {
 		return err
@@ -463,6 +468,7 @@ func (c *Connector) prepareQualcomm410AfterReloadLocked(ctx context.Context, acc
 		return state, fmt.Errorf("read Internet bearer after Qualcomm 410 reload: %w", err)
 	}
 
+	unlockRoutes := c.lockRoutes()
 	if tracked, ok := c.connection(access.id()); ok {
 		if !state.reconnectPending {
 			state.scheduleReconnect(tracked.prefs)
@@ -474,11 +480,16 @@ func (c *Connector) prepareQualcomm410AfterReloadLocked(ctx context.Context, acc
 		}
 		cleanupErr = errors.Join(cleanupErr, restoreStaleDefaultRouteStatesWithStore(ctx, c.persistence, routeStateRestoreTarget{modemID: access.id()}, c.routeOperationSet()))
 		if cleanupErr != nil {
+			unlockRoutes()
 			return state, fmt.Errorf("clean invalidated Qualcomm 410 bearer network: %w", cleanupErr)
 		}
 		c.deleteConnection(access.id())
-	} else if err := c.qualcomm410OperationSet().cleanupStaleState(ctx, c, access.id()); err != nil {
-		return state, fmt.Errorf("clean stale Qualcomm 410 Internet network after reload: %w", err)
+		unlockRoutes()
+	} else {
+		unlockRoutes()
+		if err := c.qualcomm410OperationSet().cleanupStaleState(ctx, c, access.id()); err != nil {
+			return state, fmt.Errorf("clean stale Qualcomm 410 Internet network after reload: %w", err)
+		}
 	}
 
 	if current.connected {

@@ -23,18 +23,25 @@ func (c *Connector) UpdatePreferences(ctx context.Context, modem *mmodem.Modem, 
 	}
 	access := modemAccess{modem: modem}
 	modemID := access.id()
-	defer c.lockRouteTransaction(modemID)()
+	unlock, lockErr := c.acquireModem(ctx, modemID)
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	defer unlock()
 	if err := c.rejectAirplaneMode(ctx, modem); err != nil {
 		return nil, err
 	}
 
+	unlockRoutes := c.lockRoutes()
 	if connection := c.qmapConnectionFor(modemID, access.generation()); connection != nil {
+		defer unlockRoutes()
 		updated, err := c.updateQMAPPreferences(ctx, access, connection, next)
 		if err != nil {
 			return nil, err
 		}
 		return c.qmapConnectionResponse(modemID, updated), nil
 	}
+	unlockRoutes()
 	current, err := c.currentLocked(ctx, access)
 	if err != nil {
 		return nil, err
@@ -42,6 +49,7 @@ func (c *Connector) UpdatePreferences(ctx context.Context, modem *mmodem.Modem, 
 	if current.Status != StatusConnected {
 		return nil, ErrNotConnected
 	}
+	defer c.lockRoutes()()
 	tracked, ok := c.connection(modemID)
 	if !ok {
 		return nil, ErrNotConnected

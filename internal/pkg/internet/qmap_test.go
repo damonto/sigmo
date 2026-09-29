@@ -261,7 +261,7 @@ func TestOpenQMAPFamilySessionsPassesOrderedDualStackBatch(t *testing.T) {
 			t.Fatalf("OpenQMAPSessions() preferences = [%v %v], want [IPv4 IPv6]", configs[0].IPPreference, configs[1].IPPreference)
 		}
 		for _, cfg := range configs {
-			if cfg.APN != "cmnet" || cfg.MuxID != internetQMAPMuxID {
+			if cfg.APN != "cmnet" || cfg.MuxID != internetQMAPMuxID || cfg.Username != "user" || cfg.Password != "password" || cfg.Authentication != qcom.WDSAuthenticationPAP|qcom.WDSAuthenticationCHAP {
 				t.Fatalf("OpenQMAPSessions() config = %+v", cfg)
 			}
 		}
@@ -271,7 +271,7 @@ func TestOpenQMAPFamilySessionsPassesOrderedDualStackBatch(t *testing.T) {
 		}, nil
 	}
 
-	results, err := connector.openQMAPFamilySessions(t.Context(), &mmodem.Modem{}, "cmnet", []qcom.WDSIPPreference{
+	results, err := connector.openQMAPFamilySessions(t.Context(), &mmodem.Modem{}, Preferences{APN: "cmnet", APNUsername: "user", APNPassword: "password", APNAuth: "pap|chap"}, []qcom.WDSIPPreference{
 		qcom.WDSIPPreferenceIPv4,
 		qcom.WDSIPPreferenceIPv6,
 	})
@@ -318,7 +318,7 @@ func TestOpenQMAPFamilySessionsRejectsInvalidResults(t *testing.T) {
 				preferences = append(preferences, qcom.WDSIPPreferenceIPv6)
 			}
 
-			results, err := connector.openQMAPFamilySessions(t.Context(), &mmodem.Modem{}, "internet", preferences)
+			results, err := connector.openQMAPFamilySessions(t.Context(), &mmodem.Modem{}, Preferences{APN: "internet"}, preferences)
 			if tt.wantBatch {
 				if err == nil || !strings.Contains(err.Error(), "returned 1 results, want 2") {
 					t.Fatalf("openQMAPFamilySessions() error = %v, want result count error", err)
@@ -635,6 +635,32 @@ func TestCombineQMAPSessions(t *testing.T) {
 			wantDNS := []string{"1.1.1.1", "2001:4860:4860::8888"}
 			if !slices.Equal(got.dns, wantDNS) {
 				t.Fatalf("combineQMAPSessions() DNS = %v, want %v", got.dns, wantDNS)
+			}
+		})
+	}
+}
+
+func TestQMAPAuthenticationAliases(t *testing.T) {
+	tests := []struct {
+		name string
+		auth string
+		want qcom.WDSAuthenticationMask
+	}{
+		{name: "default", auth: "", want: qcom.WDSAuthenticationPAP | qcom.WDSAuthenticationCHAP},
+		{name: "automatic alias", auth: "auto", want: qcom.WDSAuthenticationPAP | qcom.WDSAuthenticationCHAP},
+		{name: "comma separated", auth: "chap,pap", want: qcom.WDSAuthenticationPAP | qcom.WDSAuthenticationCHAP},
+		{name: "PAP", auth: "pap", want: qcom.WDSAuthenticationPAP},
+		{name: "MSCHAP matches normal QMI bearer", auth: "mschap", want: qcom.WDSAuthenticationCHAP},
+		{name: "none", auth: "none"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := qmapAuthentication(tt.auth)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("authentication = %v, want %v", got, tt.want)
 			}
 		})
 	}

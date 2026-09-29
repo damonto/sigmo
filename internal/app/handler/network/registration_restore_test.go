@@ -365,3 +365,28 @@ func waitForCalls(t *testing.T, probe *registrarProbe, count int) {
 		}
 	}
 }
+
+func TestRegistrationRestoreSkipsMissingProfile(t *testing.T) {
+	tests := []struct {
+		name string
+		sim  *mmodem.SIM
+	}{
+		{name: "SIM absent"},
+		{name: "ICCID empty", sim: &mmodem.SIM{}},
+		{name: "ICCID whitespace", sim: &mmodem.SIM{Identifier: " "}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			probe := &registrarProbe{selection: wwan.NetworkSelection{Mode: wwan.NetworkSelectionManual, OperatorID: "46003"}}
+			restorer := newRegistrationRestorer(openNetworkTestStore(t))
+			restorer.registrar = probe
+			modem := &mmodem.Modem{EquipmentIdentifier: "imei-1", SIM: tt.sim}
+			if err := restorer.restoreModem(t.Context(), modem); err != nil {
+				t.Fatal(err)
+			}
+			if got := probe.recorded(); len(got) != 0 {
+				t.Fatalf("calls = %v, want no modem operations during SIM transition", got)
+			}
+		})
+	}
+}

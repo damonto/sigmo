@@ -10,6 +10,7 @@ const props = defineProps<{
   enabled: boolean
   connected: boolean
   state: string
+  lastError?: string
   durationSeconds: number
   isLoading: boolean
   isUpdating: boolean
@@ -124,6 +125,13 @@ const formatDuration = (seconds: number) => {
     "
   >
     <CardContent class="p-0">
+      <p
+        v-if="props.lastError && props.enabled && !props.connected"
+        class="break-words border-b p-4 text-sm text-destructive"
+        role="status"
+      >
+        {{ t('modemDetail.settings.wifiCallingLastError') }}: {{ props.lastError }}
+      </p>
       <div class="flex items-start gap-3 border-b border-border/70 p-4">
         <div
           class="relative flex size-11 shrink-0 items-center justify-center rounded-full"
@@ -142,10 +150,22 @@ const formatDuration = (seconds: number) => {
                 : 'bg-primary text-primary-foreground'
             "
           >
-            <CheckCircle2 v-if="statusTone === 'connected'" class="size-3" />
-            <LoaderCircle v-else-if="isPending" class="size-3 animate-spin" />
-            <Settings2 v-else-if="statusTone === 'setup'" class="size-3" />
-            <CircleX v-else class="size-3" />
+            <CheckCircle2
+              v-if="statusTone === 'connected'"
+              class="size-3"
+            />
+            <LoaderCircle
+              v-else-if="isPending"
+              class="size-3 animate-spin"
+            />
+            <Settings2
+              v-else-if="statusTone === 'setup'"
+              class="size-3"
+            />
+            <CircleX
+              v-else
+              class="size-3"
+            />
           </span>
         </div>
 
@@ -171,8 +191,14 @@ const formatDuration = (seconds: number) => {
           :aria-label="t('modemDetail.settings.wifiCallingReconnect')"
           @click="emit('reconnect')"
         >
-          <LoaderCircle v-if="props.isReconnecting" class="size-4 animate-spin" />
-          <RefreshCw v-else class="size-4" />
+          <LoaderCircle
+            v-if="props.isReconnecting"
+            class="size-4 animate-spin"
+          />
+          <RefreshCw
+            v-else
+            class="size-4"
+          />
         </Button>
       </div>
 

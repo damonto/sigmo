@@ -388,3 +388,16 @@ func TestModemResponseJSONExcludesLegacyESIMFlag(t *testing.T) {
 		t.Fatalf("ModemResponse JSON includes legacy supportsEsim field: %s", encoded)
 	}
 }
+
+func TestRegisteredOperatorRequiresRegistration(t *testing.T) {
+	for _, state := range []wwanmodem.RegistrationState{wwanmodem.RegistrationIdle, wwanmodem.RegistrationSearching, wwanmodem.RegistrationDenied, wwanmodem.RegistrationHome, wwanmodem.RegistrationRoaming} {
+		t.Run(registrationStateName(state), func(t *testing.T) {
+			snapshot := mmodem.ModemSnapshot{StatusKnown: true, Status: wwanmodem.Status{Power: wwanmodem.PowerStateOn, Registration: state, OperatorID: "46001", OperatorName: "previous"}}
+			got := registeredOperator(snapshot)
+			registered := state == wwanmodem.RegistrationHome || state == wwanmodem.RegistrationRoaming
+			if (got.Code != "") != registered {
+				t.Fatalf("registeredOperator() = %+v for %v", got, state)
+			}
+		})
+	}
+}

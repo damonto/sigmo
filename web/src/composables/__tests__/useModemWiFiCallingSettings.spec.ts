@@ -51,6 +51,31 @@ describe('useModemWiFiCallingSettings', () => {
     api.deleteWiFiCallingSession.mockResolvedValue({ data: { value: undefined } })
   })
 
+  it('loads a connection failure and clears it when switching modems', async () => {
+    api.getWiFiCallingSettings.mockResolvedValueOnce({
+      data: {
+        value: {
+          enabled: true,
+          state: 'connecting',
+          lastError: 'IPsec integrity algorithms are required',
+        },
+      },
+    })
+    const modemId = ref('modem-1')
+    const settings = useModemWiFiCallingSettings({
+      modemId: computed(() => modemId.value),
+      enabled: computed(() => true),
+    })
+    await vi.waitFor(() => {
+      expect(settings.settingsWiFiCallingLastError.value).toBe(
+        'IPsec integrity algorithms are required',
+      )
+    })
+    modemId.value = 'modem-2'
+    await vi.waitFor(() => expect(api.getWiFiCallingSettings).toHaveBeenCalledTimes(2))
+    expect(settings.settingsWiFiCallingLastError.value).toBe('')
+  })
+
   it('loads pending carrier websheet state', async () => {
     const settings = useModemWiFiCallingSettings({
       modemId: computed(() => 'modem-1'),
@@ -179,8 +204,7 @@ describe('useModemWiFiCallingSettings', () => {
 
   it('discards a settings response started before automatic saving', async () => {
     let resolveFetch:
-      | ((value: { data: { value: { enabled: boolean; connected: boolean } } }) => void)
-      | undefined
+      ((value: { data: { value: { enabled: boolean; connected: boolean } } }) => void) | undefined
     api.getWiFiCallingSettings.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveFetch = resolve

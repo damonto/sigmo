@@ -36,6 +36,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
   })
   const settingsWiFiCallingConnected = ref(false)
   const settingsWiFiCallingState = ref('')
+  const settingsWiFiCallingLastError = ref('')
   const settingsWiFiCallingDurationSeconds = ref(0)
   const settingsWiFiCallingEmergencyAddressUpdateAvailable = ref(false)
   const settingsWiFiCallingWebsheet = ref<CarrierWebsheetInfo | null>(null)
@@ -95,6 +96,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
     confirmedWiFiCallingSettings.value = { enabled: false, underlay: systemUnderlay() }
     settingsWiFiCallingConnected.value = false
     settingsWiFiCallingState.value = ''
+    settingsWiFiCallingLastError.value = ''
     settingsWiFiCallingDurationSeconds.value = 0
     settingsWiFiCallingEmergencyAddressUpdateAvailable.value = false
     settingsWiFiCallingWebsheet.value = null
@@ -125,6 +127,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
       }
       settingsWiFiCallingConnected.value = data.value?.connected ?? false
       settingsWiFiCallingState.value = data.value?.state ?? ''
+      settingsWiFiCallingLastError.value = payload?.lastError ?? ''
       settingsWiFiCallingDurationSeconds.value = payload?.durationSeconds ?? 0
       settingsWiFiCallingEmergencyAddressUpdateAvailable.value =
         payload?.emergencyAddressUpdateAvailable ?? false
@@ -308,6 +311,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
     settingsWiFiCallingUnderlay,
     settingsWiFiCallingConnected,
     settingsWiFiCallingState,
+    settingsWiFiCallingLastError,
     settingsWiFiCallingDurationSeconds,
     settingsWiFiCallingEmergencyAddressUpdateAvailable,
     settingsWiFiCallingWebsheet,
