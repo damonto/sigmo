@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { computed, defineComponent, nextTick, ref } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ModemCallProvider from '@/components/modem/ModemCallProvider.vue'
 import { useModemCallSession } from '@/composables/useModemCallSession'
@@ -16,6 +16,7 @@ const callsHarness = vi.hoisted(() => ({
   activeCall: null as unknown as ReturnType<typeof ref<CallRecord | null>>,
   incomingCall: null as unknown as ReturnType<typeof ref<CallRecord | null>>,
   remoteStream: null as unknown as ReturnType<typeof ref<MediaStream | null>>,
+  audioReady: null as unknown as ReturnType<typeof ref<boolean>>,
   bindOutputElement: vi.fn(),
   prepareAudio: vi.fn(),
   stopAudio: vi.fn(),
@@ -133,6 +134,7 @@ describe('ModemCallProvider', () => {
     callsHarness.activeCall = ref<CallRecord | null>(null)
     callsHarness.incomingCall = ref<CallRecord | null>(call())
     callsHarness.remoteStream = ref<MediaStream | null>(null)
+    callsHarness.audioReady = ref(false)
     callsHarness.usePhoneCalls.mockReset()
     callsHarness.usePhoneCalls.mockReturnValue({
       recentCalls: computed(() => []),
@@ -161,6 +163,8 @@ describe('ModemCallProvider', () => {
       errorMessage: ref(''),
       deviceNotice: ref(''),
       remoteStream: callsHarness.remoteStream,
+      localStream: ref(null),
+      isReady: callsHarness.audioReady,
       inputDevices: ref([]),
       outputDevices: ref([]),
       selectedInputDeviceID: ref(''),
@@ -181,6 +185,10 @@ describe('ModemCallProvider', () => {
     })
   })
 
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it('provides the same call session to routed children and the global banner', async () => {
     const wrapper = mountProvider()
     await flushPromises()
@@ -195,7 +203,7 @@ describe('ModemCallProvider', () => {
     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
     const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
     const wrapper = mountProvider()
-    const stream = {} as MediaStream
+    const stream = { getAudioTracks: () => [] } as unknown as MediaStream
 
     callsHarness.remoteStream.value = stream
     await nextTick()
@@ -229,7 +237,7 @@ describe('ModemCallProvider', () => {
     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
     mountProvider()
 
-    callsHarness.remoteStream.value = {} as MediaStream
+    callsHarness.remoteStream.value = { getAudioTracks: () => [] } as unknown as MediaStream
     await nextTick()
 
     expect(play).not.toHaveBeenCalled()
@@ -292,5 +300,51 @@ describe('ModemCallProvider', () => {
 
     expect(phoneCalls.answer).toHaveBeenCalledWith(incoming)
     expect(callsHarness.prepareAudio).not.toHaveBeenCalled()
+  })
+
+  it('enables recording only for connected browser calls and follows hold state', async () => {
+    vi.stubGlobal('AudioContext', class {})
+    vi.stubGlobal(
+      'MediaRecorder',
+      class {
+        static isTypeSupported = () => true
+      },
+    )
+    const wrapper = mountProvider()
+    const session = wrapper
+      .findComponent({ name: 'ModemCallBanner' })
+      .props('session') as ReturnType<typeof useModemCallSession>
+    const track = Object.assign(new EventTarget(), { readyState: 'live' })
+    // Only the remote track lifecycle is needed here; recording itself is tested with the media fakes.
+    callsHarness.remoteStream.value = { getAudioTracks: () => [track] } as unknown as MediaStream
+    callsHarness.incomingCall.value = null
+    callsHarness.audioReady.value = true
+    callsHarness.activeCall.value = call({ state: 'early_media' })
+    await nextTick()
+    expect(session.callRecording.canStart.value).toBe(false)
+
+    callsHarness.activeCall.value = call({ state: 'active' })
+    await nextTick()
+    expect(session.callRecording.canStart.value).toBe(true)
+
+    const setInputEnabled = vi.spyOn(session.callAudio, 'setInputEnabled')
+    callsHarness.activeCall.value = call({ state: 'active', hold: 'local' })
+    await nextTick()
+    expect(setInputEnabled).toHaveBeenLastCalledWith(false)
+    expect(session.callRecording.canStart.value).toBe(true)
+
+    callsHarness.activeCall.value = call({ state: 'active', route: 'modem' })
+    await nextTick()
+    expect(session.callRecording.canStart.value).toBe(false)
+
+    callsHarness.activeCall.value = call({ state: 'confirmed', route: 'volte' })
+    await nextTick()
+    expect(session.callRecording.canStart.value).toBe(true)
+    callsHarness.audioReady.value = false
+    expect(session.callRecording.canStart.value).toBe(false)
+    callsHarness.activeCall.value = call({ state: 'ended' })
+    await nextTick()
+    expect(session.callRecording.canStart.value).toBe(false)
+    wrapper.unmount()
   })
 })

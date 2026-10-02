@@ -1,8 +1,19 @@
 <script setup lang="ts">
-import { Keyboard, Mic, Pause, PhoneCall, PhoneIncoming, PhoneOff, Play } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
+import {
+  Circle,
+  Keyboard,
+  Mic,
+  Pause,
+  PhoneCall,
+  PhoneIncoming,
+  PhoneOff,
+  Play,
+  Square,
+} from 'lucide-vue-next'
 
 import ModemCallAudioDevices from '@/components/modem/ModemCallAudioDevices.vue'
+import ModemCallRecordingNotice from '@/components/modem/ModemCallRecordingNotice.vue'
 import { Button } from '@/components/ui/button'
 import type { ModemCallSession } from '@/composables/useModemCallSession'
 import type { CallRecord } from '@/types/call'
@@ -15,6 +26,28 @@ const dtmfKeys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#']
 const imsCallRoutes = new Set<CallRecord['route']>(['wifi_calling', 'volte'])
 const dtmfCallStates = new Set<CallRecord['state']>(['early_media', 'active', 'confirmed'])
 const dtmfOpen = ref(false)
+const recording = computed(() => props.session.callRecording)
+const recordingErrorKey = computed(() =>
+  recording.value.error.value ? `modemDetail.phone.recording.${recording.value.error.value}` : '',
+)
+const recordingActionKey = computed(() =>
+  recording.value.isRecording.value
+    ? 'modemDetail.phone.recording.stop'
+    : 'modemDetail.phone.recording.start',
+)
+const recordingDisabled = computed(
+  () =>
+    recording.value.isBusy.value ||
+    (!recording.value.canStart.value && !recording.value.isRecording.value),
+)
+
+const toggleRecording = () => {
+  if (recording.value.isRecording.value) {
+    recording.value.stop()
+    return
+  }
+  void recording.value.start()
+}
 
 const dtmfCall = computed(() => props.session.activeCall.value)
 const isIMSCall = computed(() => {
@@ -63,7 +96,10 @@ const sendDTMF = (digit: string) => {
         <p class="text-xs text-muted-foreground">
           {{ props.session.routeLabel(props.session.incomingCall.value.route) }}
         </p>
-        <p v-if="props.session.audioMessage.value" class="truncate text-xs text-destructive">
+        <p
+          v-if="props.session.audioMessage.value"
+          class="truncate text-xs text-destructive"
+        >
           {{ props.session.audioMessage.value }}
         </p>
       </div>
@@ -127,19 +163,70 @@ const sendDTMF = (digit: string) => {
             {{ $t('modemDetail.phone.duration') }} ·
             {{ props.session.activeCallDurationLabel.value }}
           </p>
-          <p v-if="props.session.audioMessage.value" class="truncate text-xs text-destructive">
+          <p
+            v-if="props.session.audioMessage.value"
+            class="truncate text-xs text-destructive"
+          >
             {{ props.session.audioMessage.value }}
+          </p>
+          <p
+            v-if="recording.isRecording.value"
+            class="flex items-center gap-1.5 text-xs text-destructive"
+          >
+            <span
+              class="size-2 rounded-full bg-destructive"
+              aria-hidden="true"
+            />
+            {{ $t('modemDetail.phone.recording.active') }} · {{ recording.durationLabel.value }}
+          </p>
+          <p
+            v-else-if="recording.isBusy.value"
+            class="text-xs text-muted-foreground"
+            role="status"
+          >
+            {{ $t(`modemDetail.phone.recording.${recording.status.value}`) }}
+          </p>
+          <p
+            v-if="isIMSCall && !recording.isSupported.value"
+            class="text-xs text-muted-foreground"
+          >
+            {{ $t('modemDetail.phone.recording.unsupported') }}
+          </p>
+          <p
+            v-else-if="isIMSCall && !props.session.callAudio.localStream.value"
+            class="text-xs text-muted-foreground"
+          >
+            {{ $t('modemDetail.phone.recording.receiveOnly') }}
           </p>
         </div>
       </div>
       <div
-        class="flex w-full shrink-0 items-center justify-end gap-2 border-t pt-3 sm:w-auto sm:border-0 sm:pt-0"
+        class="flex w-full shrink-0 flex-wrap items-center justify-end gap-2 border-t pt-3 sm:w-auto sm:border-0 sm:pt-0"
       >
         <ModemCallAudioDevices
           v-if="props.session.usesBrowserAudio(props.session.activeCall.value)"
           :call="props.session.activeCall.value"
           :session="props.session"
         />
+        <Button
+          v-if="isIMSCall"
+          size="icon"
+          variant="outline"
+          :disabled="recordingDisabled"
+          :aria-pressed="recording.isRecording.value"
+          :aria-label="$t(recordingActionKey)"
+          :title="$t(recordingActionKey)"
+          @click="toggleRecording"
+        >
+          <Square
+            v-if="recording.isRecording.value"
+            class="size-4 fill-destructive text-destructive"
+          />
+          <Circle
+            v-else
+            class="size-4 text-destructive"
+          />
+        </Button>
         <Button
           v-if="dtmfAvailable"
           size="icon"
@@ -165,8 +252,14 @@ const sendDTMF = (digit: string) => {
           "
           @click="props.session.toggleHold(props.session.activeCall.value)"
         >
-          <Play v-if="props.session.isLocallyHeld(props.session.activeCall.value)" class="size-4" />
-          <Pause v-else class="size-4" />
+          <Play
+            v-if="props.session.isLocallyHeld(props.session.activeCall.value)"
+            class="size-4"
+          />
+          <Pause
+            v-else
+            class="size-4"
+          />
         </Button>
         <Button
           size="icon"
@@ -179,7 +272,10 @@ const sendDTMF = (digit: string) => {
       </div>
     </div>
 
-    <div v-if="dtmfOpen && dtmfAvailable" class="grid grid-cols-3 gap-2 border-t pt-3">
+    <div
+      v-if="dtmfOpen && dtmfAvailable"
+      class="grid grid-cols-3 gap-2 border-t pt-3"
+    >
       <button
         v-for="key in dtmfKeys"
         :key="key"
@@ -192,4 +288,11 @@ const sendDTMF = (digit: string) => {
       </button>
     </div>
   </div>
+
+  <ModemCallRecordingNotice
+    :filename="recording.filename.value"
+    :error-message="recordingErrorKey ? $t(recordingErrorKey) : ''"
+    @download="recording.download()"
+    @dismiss="recording.dismiss()"
+  />
 </template>

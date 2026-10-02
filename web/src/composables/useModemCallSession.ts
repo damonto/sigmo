@@ -11,6 +11,7 @@ import {
 import { useI18n } from 'vue-i18n'
 
 import { useCallAudioSession } from '@/composables/useCallAudioSession'
+import { useCallRecording } from '@/composables/useCallRecording'
 import { usePhoneCalls } from '@/composables/usePhoneCalls'
 import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
 import type { CallRecord } from '@/types/call'
@@ -54,6 +55,18 @@ const createModemCallSession = (
   }
   const phoneCalls = usePhoneCalls(modemId, defaultCountry, sessionSearchQuery)
   const callAudio = useCallAudioSession(modemId)
+  const recordingCallId = computed(() => {
+    const call = phoneCalls.activeCall.value
+    return call && imsMediaRoutes.has(call.route) && ['active', 'confirmed'].includes(call.state)
+      ? call.callID
+      : ''
+  })
+  const callRecording = useCallRecording({
+    callId: recordingCallId,
+    audioReady: callAudio.isReady,
+    localStream: callAudio.localStream,
+    remoteStream: callAudio.remoteStream,
+  })
 
   const durationTick = ref(Date.now())
   const audioCallID = ref('')
@@ -254,6 +267,7 @@ const createModemCallSession = (
   return {
     ...phoneCalls,
     callAudio,
+    callRecording,
     routeLabel,
     stateLabel,
     holdLabel,

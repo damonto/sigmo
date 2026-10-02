@@ -26,8 +26,37 @@ const makeSession = (state: {
   activeCall?: CallRecord | null
   duration?: string
   audioMessage?: string
-}) =>
-  ({
+  recordingSupported?: boolean
+  recordingReady?: boolean
+  recordingFilename?: string
+}) => {
+  const recordingStatus = ref<'idle' | 'starting' | 'recording' | 'stopping'>('idle')
+  return {
+    callAudio: { localStream: ref(null) },
+    callRecording: {
+      status: recordingStatus,
+      error: ref(''),
+      isSupported: computed(() => state.recordingSupported !== false),
+      canStart: computed(
+        () =>
+          state.recordingSupported !== false &&
+          state.recordingReady !== false &&
+          recordingStatus.value === 'idle',
+      ),
+      isRecording: computed(() => recordingStatus.value === 'recording'),
+      isBusy: computed(
+        () => recordingStatus.value === 'starting' || recordingStatus.value === 'stopping',
+      ),
+      durationLabel: ref('0:00'),
+      filename: computed(() => state.recordingFilename ?? ''),
+      start: vi.fn(async () => {
+        recordingStatus.value = 'recording'
+        return true
+      }),
+      stop: vi.fn(),
+      download: vi.fn(),
+      dismiss: vi.fn(),
+    },
     incomingCall: ref(state.incomingCall ?? null) as Ref<CallRecord | null>,
     activeCall: ref(state.activeCall ?? null) as Ref<CallRecord | null>,
     activeCallDurationLabel: computed(() => state.duration ?? ''),
@@ -48,7 +77,8 @@ const makeSession = (state: {
     hangup: vi.fn(),
     toggleHold: vi.fn(),
     sendDTMF: vi.fn(),
-  }) as unknown as ModemCallSession
+  } as unknown as ModemCallSession
+}
 
 const mountBanner = (session: ModemCallSession) =>
   mount(ModemCallBanner, {
@@ -85,6 +115,10 @@ const mountBanner = (session: ModemCallSession) =>
   })
 
 vi.mock('lucide-vue-next', () => ({
+  Circle: { template: '<span />' },
+  Square: { template: '<span />' },
+  Download: { template: '<span />' },
+  X: { template: '<span />' },
   Keyboard: { template: '<span />' },
   Mic: { template: '<span />' },
   PhoneCall: { template: '<span />' },
@@ -141,6 +175,9 @@ describe('ModemCallBanner', () => {
     const wrapper = mountBanner(session)
 
     expect(wrapper.find('[data-testid="audio-devices"]').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="modemDetail.phone.recording.start"]').exists()).toBe(
+      false,
+    )
   })
 
   it('shows active call state, duration, audio status, and hangup action', async () => {
@@ -239,5 +276,47 @@ describe('ModemCallBanner', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).toBe('')
+  })
+
+  it('starts and stops recording independently of hanging up', async () => {
+    const session = makeSession({ activeCall: call({ state: 'active' }) })
+    const wrapper = mountBanner(session)
+    await wrapper.get('button[aria-label="modemDetail.phone.recording.start"]').trigger('click')
+    expect(session.callRecording.start).toHaveBeenCalledOnce()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('modemDetail.phone.recording.active')
+    expect(wrapper.text()).toContain('0:00')
+    const stop = wrapper.get('button[aria-label="modemDetail.phone.recording.stop"]')
+    expect(stop.attributes('aria-pressed')).toBe('true')
+    await stop.trigger('click')
+    expect(session.callRecording.stop).toHaveBeenCalledOnce()
+    expect(session.hangup).not.toHaveBeenCalled()
+  })
+
+  it.each([{ recordingSupported: false }, { recordingReady: false }])(
+    'disables recording until supported audio is ready: %j',
+    (state) => {
+      const session = makeSession({ activeCall: call({ state: 'active' }), ...state })
+      const wrapper = mountBanner(session)
+      expect(
+        wrapper
+          .get('button[aria-label="modemDetail.phone.recording.start"]')
+          .attributes('disabled'),
+      ).toBeDefined()
+    },
+  )
+
+  it('keeps the manual download available after the call banner disappears', async () => {
+    const session = makeSession({
+      activeCall: call({ state: 'ended' }),
+      recordingFilename: 'sigmo-call.webm',
+    })
+    const wrapper = mountBanner(session)
+    expect(wrapper.find('button[aria-label="Hang up"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('sigmo-call.webm')
+    await wrapper.get('button[aria-label="modemDetail.phone.recording.download"]').trigger('click')
+    await wrapper.get('button[aria-label="modemDetail.phone.recording.dismiss"]').trigger('click')
+    expect(session.callRecording.download).toHaveBeenCalledOnce()
+    expect(session.callRecording.dismiss).toHaveBeenCalledOnce()
   })
 })

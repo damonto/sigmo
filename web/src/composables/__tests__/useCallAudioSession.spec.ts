@@ -218,6 +218,7 @@ describe('call audio session', () => {
       ],
     })
     expect(pc.addTrack).toHaveBeenCalledWith(track, stream)
+    expect(session.localStream.value).toBe(stream)
     expect(FakeWebSocket.instances[0]?.url).toBe(
       'ws://localhost/api/v1/modems/modem-1/calls/call-1/webrtc/sessions',
     )
@@ -650,6 +651,7 @@ describe('call audio session', () => {
     await expect(session.selectInputDevice('mic-2')).resolves.toBe(true)
 
     expect(pc.sender.replaceTrack).toHaveBeenCalledWith(secondTrack)
+    expect(session.localStream.value?.getAudioTracks()).toEqual([secondTrack])
     expect(secondTrack.enabled).toBe(false)
     expect(firstStop).toHaveBeenCalled()
     expect(firstStop.mock.invocationCallOrder[0]).toBeGreaterThan(
@@ -683,6 +685,7 @@ describe('call audio session', () => {
     expect(firstStop).not.toHaveBeenCalled()
     expect(secondStop).toHaveBeenCalled()
     expect(firstTrack.enabled).toBe(false)
+    expect(session.localStream.value?.getAudioTracks()).toEqual([firstTrack])
     expect(session.selectedInputDeviceID.value).toBe('')
     expect(session.deviceNotice.value).toBe('input_switch_failed')
   })
@@ -782,6 +785,7 @@ describe('call audio session', () => {
 
     expect(getUserMedia).toHaveBeenCalledOnce()
     expect(pc.addTrack).toHaveBeenCalledWith(track, stream)
+    expect(session.localStream.value).toBe(stream)
     expect(session.status.value).toBe('connecting')
     pc.setConnectionState('connected')
     expect(session.status.value).toBe('ready')
@@ -935,6 +939,7 @@ describe('call audio session', () => {
     expect(stop).toHaveBeenCalled()
     expect(session.status.value).toBe('closed')
     expect(session.remoteStream.value).toBeNull()
+    expect(session.localStream.value).toBeNull()
   })
 
   it('surfaces microphone capture failures', async () => {

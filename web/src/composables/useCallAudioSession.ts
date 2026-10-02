@@ -15,11 +15,7 @@ export type AudioStatusEvent =
   | { type: 'peer_closed' }
 
 export type AudioDeviceNotice =
-  | ''
-  | 'list_failed'
-  | 'input_switch_failed'
-  | 'output_switch_failed'
-  | 'device_fallback'
+  '' | 'list_failed' | 'input_switch_failed' | 'output_switch_failed' | 'device_fallback'
 
 export type CallAudioDevice = {
   deviceId: string
@@ -73,6 +69,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   const mediaStatus = computed(() => status.value)
   const errorMessage = ref('')
   const deviceNotice = ref<AudioDeviceNotice>('')
+  const localStream = shallowRef<MediaStream | null>(null)
   const remoteStream = shallowRef<MediaStream | null>(null)
   const inputDevices = ref<CallAudioDevice[]>([])
   const outputDevices = ref<CallAudioDevice[]>([])
@@ -88,7 +85,6 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   let pc: RTCPeerConnection | null = null
   let audioSender: RTCRtpSender | null = null
   let signalWS: WebSocket | null = null
-  let stream: MediaStream | null = null
   let inputPromise: Promise<MediaStream> | null = null
   let inputSwitchVersion = 0
   let preparePromise: Promise<boolean> | null = null
@@ -133,20 +129,20 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   }
 
   const openAudioInput = async () => {
-    if (stream) return stream
+    if (localStream.value) return localStream.value
     if (inputPromise) return await inputPromise
     inputPromise = (async () => {
       const preferredDeviceID = selectedInputDeviceID.value
       try {
-        stream = await captureAudioInput(preferredDeviceID)
+        localStream.value = await captureAudioInput(preferredDeviceID)
       } catch (err) {
         if (!preferredDeviceID || !isMissingDeviceError(err)) throw err
         selectedInputDeviceID.value = ''
         storeDevice(inputDeviceStorageKey, '')
         deviceNotice.value = 'device_fallback'
-        stream = await captureAudioInput('')
+        localStream.value = await captureAudioInput('')
       }
-      return stream
+      return localStream.value
     })()
     try {
       return await inputPromise
@@ -160,9 +156,12 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     if (signal.aborted) throw newAbortError()
     const currentStream = await openAudioInput()
     if (signal.aborted) {
-      if (stream === currentStream && (sessionAbort === controller || sessionAbort === null)) {
+      if (
+        localStream.value === currentStream &&
+        (sessionAbort === controller || sessionAbort === null)
+      ) {
         stopStream(currentStream)
-        stream = null
+        localStream.value = null
       }
       throw newAbortError()
     }
@@ -190,7 +189,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
 
   const prepare = async () => {
     if (preparePromise) return await preparePromise
-    if (stream) {
+    if (localStream.value) {
       await refreshDevices()
       return true
     }
@@ -225,9 +224,9 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     applyStatus({ type: 'prepare' })
 
     try {
-      let localStream: MediaStream | null = null
+      let inputStream: MediaStream | null = null
       try {
-        localStream = await ensureAudioInput(nextAbort)
+        inputStream = await ensureAudioInput(nextAbort)
       } catch (err) {
         if (isAbortError(err)) throw err
         // Browsers block microphone capture on plain HTTP. Downlink audio does
@@ -275,9 +274,9 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
             break
         }
       }
-      const localTrack = localStream?.getAudioTracks()[0]
-      if (localTrack && localStream) {
-        audioSender = nextPC.addTrack(localTrack, localStream)
+      const localTrack = inputStream?.getAudioTracks()[0]
+      if (localTrack && inputStream) {
+        audioSender = nextPC.addTrack(localTrack, inputStream)
       } else {
         nextPC.addTransceiver('audio', { direction: 'recvonly' })
       }
@@ -333,9 +332,9 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     answerResolve = null
     answerReject = null
     remoteStream.value = null
-    if (!keepInput && stream) {
-      stopStream(stream)
-      stream = null
+    if (!keepInput && localStream.value) {
+      stopStream(localStream.value)
+      localStream.value = null
     }
   }
 
@@ -524,18 +523,18 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
   }
 
   const setInputEnabled = (enabled: boolean) => {
-    if (!stream) return
-    for (const track of stream.getAudioTracks()) {
+    if (!localStream.value) return
+    for (const track of localStream.value.getAudioTracks()) {
       track.enabled = enabled
     }
   }
 
   const switchInputDevice = async (deviceID: string, automatic = false) => {
     if (isSwitchingInput.value) return false
-    const currentTrack = stream?.getAudioTracks()[0]
+    const currentTrack = localStream.value?.getAudioTracks()[0]
     if (
       deviceID === selectedInputDeviceID.value &&
-      stream &&
+      localStream.value &&
       currentTrack?.readyState !== 'ended'
     ) {
       return true
@@ -554,7 +553,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       if (!nextTrack) {
         throw new Error('Microphone capture did not provide an audio track')
       }
-      const previousStream = stream
+      const previousStream = localStream.value
       const previousTrack = previousStream?.getAudioTracks()[0]
       nextTrack.enabled = previousTrack?.enabled ?? true
       if (audioSender) {
@@ -565,11 +564,11 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
         nextStream = null
         return false
       }
-      stream = nextStream
+      localStream.value = nextStream
       nextStream = null
       selectedInputDeviceID.value = deviceID
       storeDevice(inputDeviceStorageKey, deviceID)
-      if (previousStream && previousStream !== stream) {
+      if (previousStream && previousStream !== localStream.value) {
         stopStream(previousStream)
       }
       deviceNotice.value = automatic ? 'device_fallback' : ''
@@ -638,11 +637,15 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       outputDevices.value = listedDevices(devices, 'audiooutput')
       if (deviceNotice.value === 'list_failed') deviceNotice.value = ''
 
-      const currentInputTrack = stream?.getAudioTracks()[0]
-      if (stream && !selectedInputDeviceID.value && currentInputTrack?.readyState === 'ended') {
+      const currentInputTrack = localStream.value?.getAudioTracks()[0]
+      if (
+        localStream.value &&
+        !selectedInputDeviceID.value &&
+        currentInputTrack?.readyState === 'ended'
+      ) {
         await switchInputDevice('', true)
       } else if (
-        stream &&
+        localStream.value &&
         selectedInputDeviceID.value &&
         !inputDevices.value.some((device) => device.deviceId === selectedInputDeviceID.value)
       ) {
@@ -684,6 +687,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
     isReady,
     errorMessage,
     deviceNotice,
+    localStream,
     remoteStream,
     inputDevices,
     outputDevices,
