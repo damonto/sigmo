@@ -352,7 +352,11 @@ func (r *Relay) forwardStoredModemSMS(ctx context.Context, receipt modemSMSRecei
 	r.mu.Lock()
 	notifier := r.notifier
 	r.mu.Unlock()
-	return errors.Join(cleanupErr, r.send(ctx, notifier, r.formatStoredMessage(receipt.stored.ModemID, receipt.stored)))
+	// Delivery failures must not stop the modem subscription after the SMS is stored.
+	if err := r.send(ctx, notifier, r.formatStoredMessage(receipt.stored.ModemID, receipt.stored)); err != nil {
+		slog.Warn("send modem SMS notification", "imei", receipt.stored.ModemID, "error", err)
+	}
+	return cleanupErr
 }
 
 func (r *Relay) deleteModemSMS(ctx context.Context, receipt modemSMSReceipt) error {

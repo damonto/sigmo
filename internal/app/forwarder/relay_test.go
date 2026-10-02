@@ -1,20 +1,24 @@
 package forwarder
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/notify"
 	notifyevent "github.com/damonto/sigmo/internal/pkg/notify/event"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -520,6 +524,94 @@ func TestForwardStoredModemSMSStoresCleansAndNotifies(t *testing.T) {
 			}
 			if got := notifications.Load(); got != tt.wantNotifications {
 				t.Fatalf("notifications = %d, want %d", got, tt.wantNotifications)
+			}
+		})
+	}
+}
+
+func TestForwardStoredModemSMSIsolatesNotificationFailures(t *testing.T) {
+	deleteErr := errors.New("modem storage busy")
+	tests := []struct {
+		name       string
+		status     int
+		cleanupErr error
+	}{
+		{name: "Bark device token missing", status: http.StatusBadRequest},
+		{name: "Bark service unavailable", status: http.StatusServiceUnavailable},
+		{name: "cleanup error still propagates", status: http.StatusBadRequest, cleanupErr: deleteErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+
+			var barkRequests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				barkRequests.Add(1)
+				http.Error(w, "device token unavailable", tt.status)
+			}))
+			t.Cleanup(server.Close)
+			relay, store, notifications := newSMSRelay(t)
+			current := relay.store.Snapshot()
+			current.Channels["bark"] = settings.Channel{
+				Endpoint: server.URL, Recipients: settings.Recipients{"missing-device"},
+			}
+			notifier, err := notify.New(&current)
+			if err != nil {
+				t.Fatalf("notify.New() error = %v", err)
+			}
+			relay.notifier = notifier
+			deleter := &fakeModemSMSDeleter{errs: []error{tt.cleanupErr, nil}}
+
+			for i := range 2 {
+				stored := storage.Message{
+					ModemID:     "modem-1",
+					ProfileID:   "profile-a",
+					Source:      storage.MessageSourceModem,
+					ExternalKey: fmt.Sprintf("sms-%d", i),
+					Sender:      "+100",
+					Recipient:   "+200",
+					Text:        fmt.Sprintf("message %d", i),
+					Timestamp:   time.Now(),
+					Status:      "received",
+					Incoming:    true,
+					ModemRefs: []storage.ModemMessageRef{
+						{ModemID: "modem-1", Generation: 7, Storage: uint8(wwanmodem.MessageStorageDevice), ID: uint32(i)},
+					},
+				}
+				err := relay.forwardStoredModemSMS(t.Context(), modemSMSReceipt{
+					stored:  stored,
+					refs:    []modem.MessageRef{{Storage: wwanmodem.MessageStorageDevice, ID: uint32(i)}},
+					deleter: deleter,
+				})
+				var wantErr error
+				if i == 0 {
+					wantErr = tt.cleanupErr
+				}
+				if !errors.Is(err, wantErr) {
+					t.Fatalf("forwardStoredModemSMS() message %d error = %v, want %v", i, err, wantErr)
+				}
+			}
+			if got := notifications.Load(); got != 2 {
+				t.Errorf("healthy channel notifications = %d, want 2", got)
+			}
+			if got := barkRequests.Load(); got != 2 {
+				t.Errorf("Bark requests = %d, want 2", got)
+			}
+			if len(deleter.calls) != 2 {
+				t.Errorf("modem delete calls = %d, want 2", len(deleter.calls))
+			}
+			messages, err := store.ListByParticipant(t.Context(), "profile-a", "+100")
+			if err != nil {
+				t.Fatalf("ListByParticipant() error = %v", err)
+			}
+			if len(messages) != 2 {
+				t.Errorf("stored messages = %d, want 2", len(messages))
+			}
+			if strings.Count(logs.String(), "level=WARN") != 2 || !strings.Contains(logs.String(), "bark send failed") {
+				t.Errorf("logs = %q, want a warning with the Bark error for each message", logs.String())
 			}
 		})
 	}
