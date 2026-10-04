@@ -22,9 +22,9 @@ func (s *wsSession) userInput(ctx context.Context, event ts43.UserInputEvent) (*
 	}); err != nil {
 		return nil, err
 	}
-	msg, ok := s.waitForUserInput(ctx)
-	if !ok {
-		return nil, ctx.Err()
+	msg, err := s.waitMessage(ctx, s.inputCh)
+	if err != nil {
+		return nil, err
 	}
 	result := &ts43.UserInputResult{Button: ts43.MessageButtonAccepted, Response: msg.Response}
 	if msg.Accept != nil && !*msg.Accept {
@@ -37,9 +37,9 @@ func (s *wsSession) confirmSourceDeletion(ctx context.Context, iccid string) err
 	if err := s.send(wsServerMessage{Type: wsTypeSourceDeletion, ICCID: iccid}); err != nil {
 		return err
 	}
-	msg, ok := s.waitForSourceDeletion(ctx)
-	if !ok {
-		return ctx.Err()
+	msg, err := s.waitMessage(ctx, s.deleteCh)
+	if err != nil {
+		return err
 	}
 	if msg.Accept == nil || !*msg.Accept {
 		return errSourceDeletionDeclined

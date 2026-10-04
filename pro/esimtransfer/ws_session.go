@@ -4,10 +4,14 @@ package esimtransfer
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/gorilla/websocket"
 )
+
+var errSessionDisconnected = errors.New("transfer session disconnected")
 
 const (
 	wsTypeProgress       = "progress"
@@ -86,7 +90,7 @@ func sendLatest(ch chan wsClientMessage, msg wsClientMessage) {
 func (s *wsSession) send(msg wsServerMessage) error {
 	if err := s.conn.WriteJSON(msg); err != nil {
 		s.disconnect()
-		return err
+		return fmt.Errorf("send transfer message: %w", errors.Join(errSessionDisconnected, err))
 	}
 	return nil
 }
@@ -97,38 +101,26 @@ func (s *wsSession) sendIfConnected(msg wsServerMessage) {
 		return
 	default:
 	}
+	// Progress is best effort; send marks the session disconnected on failure.
 	_ = s.send(msg)
 }
 
-func (s *wsSession) waitForStart(ctx context.Context) (wsClientMessage, bool) {
-	select {
-	case msg := <-s.startCh:
-		return msg, true
-	case <-ctx.Done():
-		return wsClientMessage{}, false
-	case <-s.disconnectCh:
-		return wsClientMessage{}, false
+func (s *wsSession) waitMessage(ctx context.Context, messages <-chan wsClientMessage) (wsClientMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return wsClientMessage{}, err
 	}
-}
-
-func (s *wsSession) waitForUserInput(ctx context.Context) (wsClientMessage, bool) {
+	// Ignore queued replies once the session is already disconnected.
 	select {
-	case msg := <-s.inputCh:
-		return msg, true
-	case <-ctx.Done():
-		return wsClientMessage{}, false
 	case <-s.disconnectCh:
-		return wsClientMessage{}, false
+		return wsClientMessage{}, errSessionDisconnected
+	default:
 	}
-}
-
-func (s *wsSession) waitForSourceDeletion(ctx context.Context) (wsClientMessage, bool) {
 	select {
-	case msg := <-s.deleteCh:
-		return msg, true
+	case msg := <-messages:
+		return msg, nil
 	case <-ctx.Done():
-		return wsClientMessage{}, false
+		return wsClientMessage{}, ctx.Err()
 	case <-s.disconnectCh:
-		return wsClientMessage{}, false
+		return wsClientMessage{}, errSessionDisconnected
 	}
 }

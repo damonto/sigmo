@@ -79,6 +79,7 @@ func wfcWebsheetRequestFromResult(result wfcsetup.Result) (websheet.Request, boo
 	title := firstNonEmpty(sheet.Title, result.Carrier, "Wi-Fi Calling")
 	if result.Scheme == wfcsetup.SchemeNSDS {
 		return websheet.Request{
+			ClientName:  sheet.ClientName,
 			URL:         strings.TrimSpace(sheet.URL),
 			UserData:    wfcUserActionData(sheet.Data),
 			ContentType: "application/x-www-form-urlencoded",
@@ -86,8 +87,9 @@ func wfcWebsheetRequestFromResult(result wfcsetup.Result) (websheet.Request, boo
 		}, true
 	}
 	return websheet.Request{
-		URL:   wfcUserActionURL(sheet.URL, sheet.Data),
-		Title: title,
+		URL:        wfcUserActionURL(sheet.URL, sheet.Data),
+		Title:      title,
+		ClientName: sheet.ClientName,
 	}, true
 }
 
@@ -168,19 +170,19 @@ const (
 )
 
 func wfcWebsheetCallbackResult(callback websheet.Callback) wfcWebsheetCallbackAction {
-	event := normalizeWebsheetCallbackKey(firstNonEmpty(callback.Event, callback.Method, callback.ResultCode))
-	method := normalizeWebsheetCallbackKey(callback.Method)
-	result := normalizeWebsheetCallbackKey(callback.ResultCode)
-	switch {
-	case event == "dismissflow" || event == "cancel" || result == "cancel":
-		return wfcWebsheetCallbackDismiss
-	case strings.Contains(method, "cancel") || strings.Contains(method, "closewebview"):
-		return wfcWebsheetCallbackDismiss
-	case event == "entitlementchanged" || event == "finishflow" || event == "done" || event == "phoneservicesaccountstatuschanged" || result == "success":
-		return wfcWebsheetCallbackRetry
-	default:
-		return wfcWebsheetCallbackWait
+	action := wfcWebsheetCallbackWait
+	for _, value := range [...]string{callback.Event, callback.Method, callback.ResultCode} {
+		switch normalizeWebsheetCallbackKey(value) {
+		case "dismissflow", "cancel", "cancelbuttonclicked", "cancelbuttonpressed":
+			// Explicit cancellation takes precedence over a generic success result.
+			return wfcWebsheetCallbackDismiss
+		case "entitlementchanged", "finishflow", "done", "success",
+			"phoneservicesaccountstatuschanged", "closewebview", "onclosewebview",
+			"workflowcompleted", "workflowabandoned":
+			action = wfcWebsheetCallbackRetry
+		}
 	}
+	return action
 }
 
 func normalizeWebsheetCallbackKey(value string) string {

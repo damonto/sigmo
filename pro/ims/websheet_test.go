@@ -17,6 +17,7 @@ func TestWFCWebsheetRequestFromSetupErrors(t *testing.T) {
 		wantURL         string
 		wantUserData    string
 		wantContentType string
+		wantClientName  string
 	}{
 		{
 			name: "nsds",
@@ -45,14 +46,16 @@ func TestWFCWebsheetRequestFromSetupErrors(t *testing.T) {
 					Scheme:  wfcsetup.SchemeTS43,
 					Carrier: "Carrier",
 					Websheet: &wfcsetup.Websheet{
-						Kind:  wfcsetup.WebsheetKindEmergencyAddress,
-						URL:   "https://example.com/ts43?existing=1",
-						Data:  "token=abc",
-						Title: "Wi-Fi Calling",
+						Kind:       wfcsetup.WebsheetKindEmergencyAddress,
+						URL:        "https://example.com/ts43?existing=1",
+						ClientName: "CarrierWFC",
+						Data:       "token=abc",
+						Title:      "Wi-Fi Calling",
 					},
 				},
 			},
-			wantURL: "https://example.com/ts43?existing=1&token=abc",
+			wantURL:        "https://example.com/ts43?existing=1&token=abc",
+			wantClientName: "CarrierWFC",
 		},
 	}
 
@@ -71,6 +74,9 @@ func TestWFCWebsheetRequestFromSetupErrors(t *testing.T) {
 			}
 			if req.ContentType != tt.wantContentType {
 				t.Fatalf("ContentType = %q, want %q", req.ContentType, tt.wantContentType)
+			}
+			if req.ClientName != tt.wantClientName {
+				t.Errorf("ClientName = %q, want %q", req.ClientName, tt.wantClientName)
 			}
 		})
 	}
@@ -164,14 +170,49 @@ func TestWFCWebsheetCallbackResult(t *testing.T) {
 			want:     wfcWebsheetCallbackDismiss,
 		},
 		{
-			name:     "close webview cancels pending connection",
+			name:     "close webview rechecks pending connection",
 			callback: websheet.Callback{Source: "vowifi", Controller: "WiFiCallingWebViewController", Method: "CloseWebView"},
-			want:     wfcWebsheetCallbackDismiss,
+			want:     wfcWebsheetCallbackRetry,
 		},
 		{
 			name:     "status update retries connection",
 			callback: websheet.Callback{Source: "vowifi", Controller: "WiFiCallingWebViewController", Method: "phoneServicesAccountStatusChanged", Event: "phoneServicesAccountStatusChanged"},
 			want:     wfcWebsheetCallbackRetry,
+		},
+		{
+			name:     "workflow completed",
+			callback: websheet.Callback{Event: "workflowCompleted"},
+			want:     wfcWebsheetCallbackRetry,
+		},
+		{
+			name:     "workflow abandoned still rechecks entitlement",
+			callback: websheet.Callback{Method: "workflowAbandoned"},
+			want:     wfcWebsheetCallbackRetry,
+		},
+		{
+			name:     "cancel button event without method",
+			callback: websheet.Callback{Event: "cancelButtonPressed"},
+			want:     wfcWebsheetCallbackDismiss,
+		},
+		{
+			name:     "cancel overrides reported success",
+			callback: websheet.Callback{Method: "cancelButtonClicked", ResultCode: "success"},
+			want:     wfcWebsheetCallbackDismiss,
+		},
+		{
+			name:     "unknown callback keeps waiting",
+			callback: websheet.Callback{Event: "pageLoaded"},
+			want:     wfcWebsheetCallbackWait,
+		},
+		{
+			name:     "known method behind an unknown event",
+			callback: websheet.Callback{Event: "callback", Method: "CloseWebView"},
+			want:     wfcWebsheetCallbackRetry,
+		},
+		{
+			name:     "dismiss method overrides success event",
+			callback: websheet.Callback{Event: "success", Method: "dismissFlow"},
+			want:     wfcWebsheetCallbackDismiss,
 		},
 	}
 

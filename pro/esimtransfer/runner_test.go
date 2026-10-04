@@ -334,9 +334,9 @@ func TestWSSessionWaitForStartStopsOnDisconnect(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		session := newWSSession(conn, cancel)
-		_, ok := session.waitForStart(ctx)
-		if ok {
-			done <- errors.New("waitForStart() ok = true, want false")
+		_, err = session.waitMessage(ctx, session.startCh)
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, errSessionDisconnected) {
+			done <- errors.New("waitMessage() did not report cancellation or disconnection")
 			return
 		}
 		if !errors.Is(ctx.Err(), context.Canceled) {
@@ -383,49 +383,6 @@ func TestTS43SourceSIMType(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := ts43SourceSIMType(tt.profileType); got != tt.want {
 				t.Fatalf("ts43SourceSIMType() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestSMDSDiscoveryEventFromDelayedDownload(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		event ts43.DelayedDownloadEvent
-		want  ts43.SMDSDiscoveryEvent
-	}{
-		{
-			name: "preserves delayed download fields",
-			event: ts43.DelayedDownloadEvent{
-				SourceICCID:        "8910000000000000000",
-				TargetEID:          "89049032000001000000000000000000",
-				TargetIMEI:         "222222222222222",
-				SubscriptionResult: ts43.SubscriptionResultDelayedDownload,
-			},
-			want: ts43.SMDSDiscoveryEvent{
-				SourceICCID:        "8910000000000000000",
-				TargetEID:          "89049032000001000000000000000000",
-				TargetIMEI:         "222222222222222",
-				SubscriptionResult: ts43.SubscriptionResultDelayedDownload,
-			},
-		},
-		{
-			name: "keeps empty optional fields empty",
-			event: ts43.DelayedDownloadEvent{
-				SubscriptionResult: ts43.SubscriptionResultDelayedDownload,
-			},
-			want: ts43.SMDSDiscoveryEvent{
-				SubscriptionResult: ts43.SubscriptionResultDelayedDownload,
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := smdsDiscoveryEventFromDelayedDownload(tt.event); got != tt.want {
-				t.Fatalf("smdsDiscoveryEventFromDelayedDownload() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}

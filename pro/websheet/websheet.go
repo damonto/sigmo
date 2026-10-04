@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -62,6 +63,8 @@ type Request struct {
 	UserData    string
 	ContentType string
 	Title       string
+	// ClientName selects the carrier's JavaScript callback object.
+	ClientName  string
 	HTTPClient  *http.Client
 	LookupNetIP func(context.Context, string, string) ([]netip.Addr, error)
 }
@@ -95,6 +98,7 @@ type Session struct {
 	userData          string
 	contentType       string
 	title             string
+	clientName        string
 	expiresAt         time.Time
 	basePath          string
 	client            *http.Client
@@ -153,6 +157,7 @@ func (b *Broker) Create(ctx context.Context, req Request) (*Session, error) {
 		userData:          strings.TrimSpace(req.UserData),
 		contentType:       strings.TrimSpace(req.ContentType),
 		title:             strings.TrimSpace(req.Title),
+		clientName:        strings.TrimSpace(req.ClientName),
 		expiresAt:         b.now().Add(b.ttl),
 		basePath:          b.basePath,
 		lookupNetIP:       req.LookupNetIP,
@@ -515,6 +520,7 @@ func (s *Session) bridgeScript(token string, publicOrigin string, carrierBase *u
 	callbackURL := absoluteLocalURL(s.callbackURL(token), publicOrigin)
 	script := strings.ReplaceAll(websheetBridgeJS, callbackURLToken, jsString(callbackURL))
 	script = strings.ReplaceAll(script, "{{ABSOLUTE_PATH_PROXY_PREFIX}}", jsString(s.absolutePathProxyPrefix(carrierBase, token, publicOrigin)))
+	script = strings.ReplaceAll(script, "{{WFC_CLIENT_NAME}}", jsString(s.clientName))
 	return "<script>\n" + script + "\n</script>"
 }
 
@@ -826,11 +832,9 @@ func callbackHTML() string {
 }
 
 func jsString(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `"`, `\"`)
-	value = strings.ReplaceAll(value, "\n", `\n`)
-	value = strings.ReplaceAll(value, "\r", `\r`)
-	return `"` + value + `"`
+	// Marshaling a string cannot fail; JSON also escapes HTML script delimiters.
+	encoded, _ := json.Marshal(value)
+	return string(encoded)
 }
 
 func randomID() (string, error) {

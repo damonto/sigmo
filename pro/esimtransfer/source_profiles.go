@@ -115,8 +115,9 @@ func esimOption(profile *sgp22.ProfileInfo, seID string) ProfileResponse {
 	mcc := profile.ProfileOwner.MCC()
 	mnc := profile.ProfileOwner.MNC()
 	gid1 := strings.ToUpper(hex.EncodeToString(profile.ProfileOwner.GID1))
+	gid2 := strings.ToUpper(hex.EncodeToString(profile.ProfileOwner.GID2))
 	enabled := profile.ProfileState == sgp22.ProfileEnabled
-	supported, reason := transferSupport(ts43.Identity{MCC: mcc, MNC: mnc, GID1: gid1}, ts43.SIMTypeESIM, "eSIM")
+	supported, reason := transferSupport(ts43.Identity{MCC: mcc, MNC: mnc, GID1: gid1, GID2: gid2}, ts43.SIMTypeESIM, "eSIM")
 	carrierName := carrierName(mcc + mnc)
 	id := profile.ICCID.String()
 	if seID != "" {
@@ -169,7 +170,8 @@ func physicalOption(identity ts43.Identity) ProfileResponse {
 }
 
 func transferSupport(identity ts43.Identity, simType ts43.SIMType, label string) (bool, string) {
-	if _, err := ts43.DiscoverEntitlement(identity, simType); err != nil {
+	entitlement, err := ts43.DiscoverEntitlement(identity, simType)
+	if err != nil {
 		if errors.Is(err, ts43.ErrEntitlementAmbiguous) {
 			return false, "carrier entitlement config is ambiguous"
 		}
@@ -177,6 +179,9 @@ func transferSupport(identity ts43.Identity, simType ts43.SIMType, label string)
 			return false, "carrier does not support " + label + " transfer"
 		}
 		return false, "carrier does not support " + label + " transfer"
+	}
+	if entitlement.SamsungAndroidEntitlement {
+		return false, "carrier requires an Android entitlement backend"
 	}
 	return true, ""
 }

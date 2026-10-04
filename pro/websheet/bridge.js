@@ -1,5 +1,6 @@
 (function(){
   const callbackURL = {{CALLBACK_URL}};
+  const wfcClientName = {{WFC_CLIENT_NAME}};
   const absolutePathProxyPrefix = {{ABSOLUTE_PATH_PROXY_PREFIX}};
   const odsaStorageKey = "ts43-go.odsa.callbacks";
   const vowifiStorageKey = "ims-go.vowifi.callbacks";
@@ -107,9 +108,7 @@
       return "entitlementChanged";
     case "dismissFlow":
     case "cancelButtonClicked":
-    case "CloseWebView":
-    case "closeWebView":
-    case "onCloseWebView":
+    case "cancelButtonPressed":
       return "dismissFlow";
     default:
       return method;
@@ -119,6 +118,12 @@
   function vowifiResult(event) {
     switch (event) {
     case "entitlementChanged":
+    case "phoneServicesAccountStatusChanged":
+    case "workflowCompleted":
+    case "workflowAbandoned":
+    case "CloseWebView":
+    case "closeWebView":
+    case "onCloseWebView":
       return "success";
     case "dismissFlow":
       return "cancel";
@@ -155,9 +160,11 @@
     return target;
   }
 
-  const voWiFiWebServiceFlow = installVowifiController("VoWiFiWebServiceFlow", ["entitlementChanged", "dismissFlow"]);
-  const wifiCallingWebViewController = installVowifiController("WiFiCallingWebViewController", ["cancelButtonClicked", "cancelButtonPressed", "phoneServicesAccountStatusChanged", "CloseWebView", "closeWebView", "onCloseWebView"]);
-  const nsdsWebSheetController = installVowifiController("NsdsWebSheetController", ["entitlementChanged", "dismissFlow", "cancelButtonClicked", "cancelButtonPressed", "phoneServicesAccountStatusChanged", "CloseWebView", "closeWebView", "onCloseWebView"]);
+  const wfcMethods = ["entitlementChanged", "dismissFlow", "cancelButtonClicked", "cancelButtonPressed", "phoneServicesAccountStatusChanged", "CloseWebView", "closeWebView", "onCloseWebView", "workflowCompleted", "workflowAbandoned"];
+  const voWiFiWebServiceFlow = installVowifiController("VoWiFiWebServiceFlow", wfcMethods);
+  const wifiCallingWebViewController = installVowifiController("WiFiCallingWebViewController", wfcMethods);
+  const nsdsWebSheetController = installVowifiController("NsdsWebSheetController", wfcMethods);
+  if (wfcClientName) installVowifiController(wfcClientName, wfcMethods);
   window.vowifiCallback = Object.freeze({
     done: voWiFiWebServiceFlow.entitlementChanged,
     dismiss: voWiFiWebServiceFlow.dismissFlow,

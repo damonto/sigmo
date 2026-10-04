@@ -4,6 +4,7 @@ package esimtransfer
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -24,6 +25,45 @@ import (
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
+
+func (s *transferRunner) sourceEID(ctx context.Context, currentSettings *settings.Settings, start startRequest) (string, error) {
+	// Both modem leases and CCID clients expose these operations. Release the
+	// LPA connection before opening the source SIM for TS.43 authentication.
+	var sourceLPA interface {
+		EID() ([]byte, error)
+		Close() error
+	}
+	switch start.SourceType {
+	case SourceModem:
+		modem, err := s.registry.Find(ctx, start.SourceID)
+		if err != nil {
+			return "", err
+		}
+		client, err := s.lpaClients.Acquire(ctx, modem, sourceProfileSEID(start.ProfileID))
+		if err != nil {
+			return "", fmt.Errorf("open source eUICC: %w", err)
+		}
+		sourceLPA = client
+	case SourceCCID:
+		client, err := newCCIDLPAClient(ctx, currentSettings, start)
+		if err != nil {
+			return "", fmt.Errorf("open source eUICC: %w", err)
+		}
+		sourceLPA = client
+	default:
+		return "", ErrSourceUnsupported
+	}
+	defer func() {
+		if err := sourceLPA.Close(); err != nil {
+			sourceLogger(start).Warn("close source eUICC after reading EID", "error", err)
+		}
+	}()
+	eid, err := sourceLPA.EID()
+	if err != nil {
+		return "", fmt.Errorf("read source EID: %w", err)
+	}
+	return strings.ToUpper(hex.EncodeToString(eid)), nil
+}
 
 func (s *transferRunner) openSource(ctx context.Context, currentSettings *settings.Settings, start startRequest) (*sourceConnection, error) {
 	switch start.SourceType {

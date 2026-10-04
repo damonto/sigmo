@@ -13,15 +13,6 @@ import (
 	ilpa "github.com/damonto/sigmo/internal/pkg/lpa"
 )
 
-func smdsDiscoveryEventFromDelayedDownload(event ts43.DelayedDownloadEvent) ts43.SMDSDiscoveryEvent {
-	return ts43.SMDSDiscoveryEvent{
-		SourceICCID:        event.SourceICCID,
-		TargetEID:          event.TargetEID,
-		TargetIMEI:         event.TargetIMEI,
-		SubscriptionResult: event.SubscriptionResult,
-	}
-}
-
 func smdsDownloadConfig(ctx context.Context, targetLPA *ilpa.Lease, event ts43.SMDSDiscoveryEvent) (ts43.DownloadConfig, error) {
 	if err := ctx.Err(); err != nil {
 		return ts43.DownloadConfig{}, err

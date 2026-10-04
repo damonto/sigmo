@@ -4,9 +4,9 @@ go 1.26.3
 
 require (
 	github.com/damonto/euicc-go v1.1.3-0.20260813015305-1f7e0d0c2ffc
-	github.com/damonto/ims-go v0.0.0-20260929084841-57adf7085bd2
+	github.com/damonto/ims-go v0.0.0-20261004115312-c9267a4fc6ba
 	github.com/damonto/sigmo v1.0.6
-	github.com/damonto/ts43-go v0.0.0-20260910061641-6430cb78182c
+	github.com/damonto/ts43-go v0.0.0-20261004115006-4007251000f1
 	github.com/damonto/wwan-go v0.0.0-20260929045201-e365e59dc8b4
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v5 v5.4.0
@@ -32,14 +32,14 @@ require (
 	github.com/nyaruka/phonenumbers v1.8.1 // indirect
 	github.com/pion/datachannel v1.6.3 // indirect
 	github.com/pion/dtls/v3 v3.1.10 // indirect
-	github.com/pion/ice/v4 v4.4.4 // indirect
+	github.com/pion/ice/v4 v4.4.5 // indirect
 	github.com/pion/logging v0.2.4 // indirect
-	github.com/pion/mdns/v2 v2.2.1 // indirect
+	github.com/pion/mdns/v2 v2.2.2 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtcp v1.2.18 // indirect
-	github.com/pion/sctp v1.11.3 // indirect
+	github.com/pion/rtcp v1.2.19 // indirect
+	github.com/pion/sctp v1.12.0 // indirect
 	github.com/pion/sdp/v3 v3.0.20 // indirect
-	github.com/pion/srtp/v3 v3.1.0 // indirect
+	github.com/pion/srtp/v3 v3.1.3 // indirect
 	github.com/pion/stun/v4 v4.0.1 // indirect
 	github.com/pion/transport/v5 v5.1.1 // indirect
 	github.com/pion/turn/v5 v5.1.2 // indirect

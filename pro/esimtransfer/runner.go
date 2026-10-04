@@ -97,6 +97,7 @@ type transferState struct {
 	target          *mmodem.Modem
 	targetSEID      string
 	targetLPA       *ilpa.Lease
+	targetChannel   *activationChannel
 	ts43Client      *ts43.Client
 	logger          *slog.Logger
 	targetLPAClosed bool
@@ -107,7 +108,13 @@ func (t *transferState) Close() {
 		return
 	}
 	t.CloseTarget()
+	if t.targetChannel != nil {
+		t.targetChannel.Close()
+	}
 	t.source.Close()
+	if t.ts43Client != nil {
+		t.ts43Client.CloseIdleConnections()
+	}
 }
 
 func (t *transferState) CloseTarget() {
@@ -171,8 +178,8 @@ func (s *transferRunner) Serve(ctx context.Context, conn *websocket.Conn, target
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	session := newWSSession(conn, cancel)
-	startMsg, ok := session.waitForStart(sessionCtx)
-	if !ok {
+	startMsg, err := session.waitMessage(sessionCtx, session.startCh)
+	if err != nil {
 		return nil
 	}
 	start := startRequest{
@@ -212,16 +219,16 @@ func (s *transferRunner) run(ctx context.Context, session *wsSession, target *mm
 
 	session.sendIfConnected(wsServerMessage{Type: wsTypeProgress, Stage: stageCarrier})
 	result, err := active.ts43Client.Transfer(ctx)
-	if err != nil {
-		return fmt.Errorf("start transfer: %w", err)
-	}
 	for {
+		if err != nil {
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, errSessionDisconnected) || !transferPending(result) {
+				return fmt.Errorf("transfer: %w", err)
+			}
+			active.Logger().Warn("TS.43 check interrupted; keeping transfer for retry", "error", err)
+		}
 		var done bool
 		result, done, err = s.handleEvent(ctx, session, active, start, result)
-		if err != nil {
-			return err
-		}
-		if done {
+		if done && err == nil {
 			return nil
 		}
 	}
@@ -278,6 +285,14 @@ func (s *transferRunner) prepare(ctx context.Context, target *mmodem.Modem, star
 	if err := s.activateSourceProfile(ctx, currentSettings, start, option); err != nil {
 		return nil, err
 	}
+	var sourceEID string
+	if option.Type == ProfileESIM {
+		eid, err := s.sourceEID(ctx, currentSettings, start)
+		if err != nil {
+			return nil, err
+		}
+		sourceEID = eid
+	}
 
 	source, err := s.openSource(ctx, currentSettings, start)
 	if err != nil {
@@ -285,6 +300,7 @@ func (s *transferRunner) prepare(ctx context.Context, target *mmodem.Modem, star
 	}
 	source.simType = ts43SourceSIMType(option.Type)
 	source.device.ICCID = option.ICCID
+	source.device.EID = sourceEID
 	releaseSource := true
 	defer func() {
 		if releaseSource {
@@ -316,12 +332,14 @@ func (s *transferRunner) prepare(ctx context.Context, target *mmodem.Modem, star
 	targetDevice := ts43Device(targetIMEI)
 	targetDevice.EID = strings.ToUpper(hex.EncodeToString(eid))
 	logger := transferLogger(targetIMEI, source.device.IMEI)
+	targetChannel := &activationChannel{modem: target}
 	ts43Client, err := ts43.New(&ts43.Config{
 		Logger:      logger,
 		Entitlement: ts43.Entitlement{SourceSIMType: source.simType},
 		Source:      ts43.Endpoint{Channel: source.channel, Device: source.device},
 		Target: ts43.Endpoint{
-			Device: targetDevice,
+			Device:  targetDevice,
+			Channel: targetChannel,
 		},
 	})
 	if err != nil {
@@ -331,13 +349,14 @@ func (s *transferRunner) prepare(ctx context.Context, target *mmodem.Modem, star
 	releaseSource = false
 	releaseTarget = false
 	return &transferState{
-		settings:   currentSettings,
-		source:     source,
-		target:     target,
-		targetSEID: start.SEID,
-		targetLPA:  targetLPA,
-		ts43Client: ts43Client,
-		logger:     logger,
+		settings:      currentSettings,
+		source:        source,
+		target:        target,
+		targetSEID:    start.SEID,
+		targetLPA:     targetLPA,
+		targetChannel: targetChannel,
+		ts43Client:    ts43Client,
+		logger:        logger,
 	}, nil
 }
 
@@ -379,11 +398,20 @@ func (s *transferRunner) handleEvent(ctx context.Context, session *wsSession, ac
 		next, err := s.handleSMDSDiscovery(ctx, session, active, result, event)
 		return next, false, err
 	case ts43.DelayedDownloadEvent:
-		next, err := s.handleSMDSDiscovery(ctx, session, active, result, smdsDiscoveryEventFromDelayedDownload(event))
+		config, err := session.delayedDownloadConfig(ctx, event)
+		if err != nil {
+			return result, false, err
+		}
+		next, err := s.downloadAndCompleteActivation(ctx, session, active, result, config)
+		return next, false, err
+	case ts43.ConfigurationPendingEvent:
+		active.Logger().Info("TS.43 download configuration is pending", "iccid", event.ICCID)
+		next, err := continuePendingTransfer(ctx, session, active, result)
 		return next, false, err
 	case ts43.ActivationPendingEvent:
 		active.Logger().Info("TS.43 transfer activation is pending", "iccid", event.ICCID, "subscriptionResult", event.SubscriptionResult)
-		return result, true, nil
+		next, err := continuePendingTransfer(ctx, session, active, result)
+		return next, false, err
 	case ts43.DoneEvent:
 		active.Logger().Info("TS.43 transfer completed")
 		return result, true, nil

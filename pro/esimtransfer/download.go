@@ -25,6 +25,7 @@ func (s *transferRunner) downloadAndCompleteActivation(ctx context.Context, sess
 	if err := s.enableTargetProfile(ctx, active.target, active.targetSEID, iccid); err != nil {
 		return result, err
 	}
+	active.targetChannel.iccid = iccid.String()
 	session.sendIfConnected(wsServerMessage{Type: wsTypeProgress, Stage: stageCompleting})
 	next, err := active.ts43Client.CompleteActivation(ctx, result, ts43.ActivationResult{ICCID: iccid.String()})
 	if err != nil {
