@@ -3,6 +3,7 @@ package wwan
 import (
 	"context"
 	"errors"
+	"io"
 	"slices"
 	"testing"
 
@@ -375,6 +376,74 @@ func TestOpenSessionAcceptsMBIM(t *testing.T) {
 	t.Cleanup(func() { _ = session.Close() })
 	if _, ok := session.backend.(*mbimSession); !ok {
 		t.Fatalf("OpenSession() backend = %T, want *mbimSession", session.backend)
+	}
+}
+
+func TestMBIMSessionEvictsOnlyTerminalClients(t *testing.T) {
+	tests := []struct {
+		name  string
+		err   error
+		evict bool
+	}{
+		{name: "EOF", err: io.EOF, evict: true},
+		{name: "deadline", err: context.DeadlineExceeded},
+		{name: "cancellation", err: context.Canceled},
+		{name: "service error", err: errors.New("subscriber not ready")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			first := &fakeMBIMSessionClient{fakeMBIMNetwork: &fakeMBIMNetwork{subscriberReadyErr: tt.err}}
+			second := &fakeMBIMSessionClient{fakeMBIMNetwork: &fakeMBIMNetwork{
+				subscriberReady: uiccmbim.SubscriberReadyStatusResponse{TelephoneNumbers: []string{"123"}},
+			}}
+			opens := 0
+			session := newMBIMSessionWithOpener(Config{Slot: 1}, func(context.Context, uint8) (mbimSessionClient, error) {
+				opens++
+				if opens == 1 {
+					return first, nil
+				}
+				return second, nil
+			})
+			t.Cleanup(func() {
+				if err := session.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			_, releaseOldRequest, err := session.acquireClient(t.Context(), 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := session.MSISDN(t.Context()); !errors.Is(err, tt.err) {
+				t.Fatalf("first MSISDN() error = %v, want %v", err, tt.err)
+			}
+			if first.closed != tt.evict {
+				t.Fatalf("first client closed = %t, want %t", first.closed, tt.evict)
+			}
+			number, err := session.MSISDN(t.Context())
+			if !tt.evict {
+				if !errors.Is(err, tt.err) || opens != 1 {
+					t.Errorf("nonterminal client was replaced: error = %v, opens = %d", err, opens)
+				}
+				return
+			}
+			if err != nil || number != "123" || opens != 2 {
+				t.Fatalf("recovered MSISDN() = %q, %v; opens = %d", number, err, opens)
+			}
+			// An older in-flight request must not evict the replacement client.
+			releaseOldRequest(io.EOF)
+			if _, err := session.MSISDN(t.Context()); err != nil || opens != 2 || second.closed {
+				t.Errorf("stale request invalidated replacement: error = %v, opens = %d, closed = %t", err, opens, second.closed)
+			}
+			if err := session.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if !second.closed {
+				t.Error("session close did not release replacement")
+			}
+			if _, err := session.MSISDN(t.Context()); !errors.Is(err, wwanmodem.ErrClosed) || opens != 2 {
+				t.Errorf("closed session reopened: error = %v, opens = %d", err, opens)
+			}
+		})
 	}
 }
 

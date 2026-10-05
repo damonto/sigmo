@@ -879,7 +879,7 @@ func TestRegistryRestartsWatcherAndReconcilesMissedChange(t *testing.T) {
 	}
 }
 
-func TestRegistryPublishesPathChangeBeforeClosingPreviousGeneration(t *testing.T) {
+func TestRegistryRetiresSharedQMIPortBeforeOpeningReplacement(t *testing.T) {
 	oldDevice := qmiRegistryDevice("/dev/cdc-wdm0", "/sys/devices/old")
 	newDevice := oldDevice
 	newDevice.PhysicalPath = "/sys/devices/new"
@@ -897,6 +897,10 @@ func TestRegistryPublishesPathChangeBeforeClosingPreviousGeneration(t *testing.T
 		started:        true,
 		nextGeneration: 1,
 		open: func(_ context.Context, candidate wwanmodem.Device, generation uint64) (*Modem, error) {
+			if !closed {
+				t.Error("replacement opened before old QMI clients were released")
+				return nil, qcom.QMIErrorClientIDsExhausted
+			}
 			return &Modem{
 				deviceInfo:          candidate,
 				deviceKey:           physicalDeviceKey(candidate),
@@ -906,11 +910,12 @@ func TestRegistryPublishesPathChangeBeforeClosingPreviousGeneration(t *testing.T
 			}, nil
 		},
 	}
-	var got ModemEvent
-	closedAtPublish := true
+	var events []ModemEvent
 	unsubscribe, err := registry.Subscribe(t.Context(), func(event ModemEvent) error {
-		got = event
-		closedAtPublish = closed
+		events = append(events, event)
+		if event.Type == ModemEventRemoved && closed {
+			t.Error("old generation closed before subscribers could release their clients")
+		}
 		return nil
 	})
 	if err != nil {
@@ -920,11 +925,14 @@ func TestRegistryPublishesPathChangeBeforeClosingPreviousGeneration(t *testing.T
 
 	registry.applyDeviceEvent(t.Context(), wwanmodem.DeviceEvent{Type: wwanmodem.DeviceChanged, Device: newDevice})
 
-	if got.Type != ModemEventChanged || got.Previous != old || got.PreviousPath != old.Path() || got.Path != physicalDeviceKey(newDevice) {
-		t.Fatalf("changed event = %+v", got)
+	if len(events) != 2 || events[0].Type != ModemEventRemoved || events[1].Type != ModemEventAdded {
+		t.Fatalf("events = %+v, want removed then added", events)
 	}
-	if closedAtPublish {
-		t.Fatal("previous generation was closed before subscribers handled the change")
+	if events[0].Modem != old || events[0].Path != old.Path() || len(events[0].Snapshot) != 0 {
+		t.Fatalf("removed event = %+v", events[0])
+	}
+	if events[1].Path != physicalDeviceKey(newDevice) || events[1].Generation != 2 || events[1].Snapshot[events[1].Path] != events[1].Modem {
+		t.Fatalf("added event = %+v", events[1])
 	}
 	if !closed {
 		t.Fatal("previous generation was not closed after publishing the change")

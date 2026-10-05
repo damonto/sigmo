@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/damonto/sigmo/internal/pkg/modem"
@@ -102,6 +103,121 @@ func TestRunWaitsForWorkersToExit(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Run() did not return after worker exit")
 	}
+}
+
+func TestRunIgnoresStaleStartupSnapshot(t *testing.T) {
+	tests := []struct {
+		name            string
+		eventType       modem.ModemEventType
+		closeModem      bool
+		wantReplacement bool
+	}{
+		{name: "removed before close", eventType: modem.ModemEventRemoved},
+		{name: "removed and closed", eventType: modem.ModemEventRemoved, closeModem: true},
+		{name: "new generation already started", eventType: modem.ModemEventChanged, wantReplacement: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				const path = "/sys/devices/modem-1"
+				old := &modem.Modem{EquipmentIdentifier: "imei-1"}
+				replacement := &modem.Modem{EquipmentIdentifier: "imei-1"}
+				registry := &snapshotRegistry{fakeRegistry: newFakeRegistry(map[string]*modem.Modem{path: old})}
+				registry.beforeReturn = func() {
+					event := modem.ModemEvent{Type: tt.eventType, Modem: old, Path: path}
+					if tt.wantReplacement {
+						event.Modem = replacement
+						event.Previous = old
+						event.PreviousPath = path
+						event.Generation = 2
+					}
+					registry.publish(event)
+					if tt.closeModem {
+						if err := old.Close(); err != nil {
+							t.Error(err)
+						}
+					}
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				started := make(chan *modem.Modem, 2)
+				done := make(chan error, 1)
+				go func() {
+					done <- Run(ctx, registry, func(ctx context.Context, m *modem.Modem) {
+						started <- m
+						<-ctx.Done()
+					})
+				}()
+				synctest.Wait()
+				if tt.wantReplacement {
+					select {
+					case got := <-started:
+						if got != replacement {
+							t.Error("stale snapshot displaced the replacement worker")
+						}
+					default:
+						t.Error("replacement worker did not start")
+					}
+				}
+				select {
+				case <-started:
+					t.Error("stale snapshot started a retired worker")
+				default:
+				}
+				cancel()
+				if err := <-done; err != nil {
+					t.Error(err)
+				}
+			})
+		})
+	}
+}
+
+// snapshotRegistry delivers an event after the snapshot is copied, before its
+// caller can act on the now-stale result.
+type snapshotRegistry struct {
+	*fakeRegistry
+	beforeReturn func()
+}
+
+func (r *snapshotRegistry) Modems(ctx context.Context) (map[string]*modem.Modem, error) {
+	result, err := r.fakeRegistry.Modems(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r.beforeReturn()
+	return result, nil
+}
+
+func TestRunCancelsWorkerWhenModemCloses(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := &modem.Modem{EquipmentIdentifier: "imei-1"}
+		registry := newFakeRegistry(map[string]*modem.Modem{"modem-1": m})
+		ctx, cancel := context.WithCancel(t.Context())
+		started := make(chan struct{})
+		stopped := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			done <- Run(ctx, registry, func(ctx context.Context, _ *modem.Modem) {
+				close(started)
+				<-ctx.Done()
+				close(stopped)
+			})
+		}()
+		<-started
+		if err := m.Close(); err != nil {
+			t.Error(err)
+		}
+		synctest.Wait()
+		select {
+		case <-stopped:
+		default:
+			t.Error("worker still runs after its modem closes without a removal event")
+		}
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
 }
 
 type fakeRegistry struct {

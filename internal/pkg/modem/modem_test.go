@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
+	"syscall"
 	"testing"
 	"time"
 
@@ -146,6 +148,8 @@ func TestTerminalRuntimeError(t *testing.T) {
 	}{
 		{name: "cdc-wdm disconnect", err: fmt.Errorf("watch status: %w", cdcwdm.ErrDisconnected), want: true},
 		{name: "QMI terminal read", err: &qmitransport.TransportError{Err: errors.New("malformed QMUX frame")}, want: true},
+		{name: "MBIM proxy EOF", err: fmt.Errorf("receiving MBIM message: %w", io.EOF), want: true},
+		{name: "MBIM proxy reset", err: fmt.Errorf("receiving MBIM message: %w", syscall.ECONNRESET), want: true},
 		{name: "transient request timeout", err: fmt.Errorf("watch status: %w", context.DeadlineExceeded), want: false},
 		{name: "QMI client IDs exhausted", err: fmt.Errorf("watch status: %w", qcom.QMIErrorClientIDsExhausted), want: true},
 		{name: "ordinary QMI service error", err: qcom.QMIErrorNoNetworkFound, want: false},

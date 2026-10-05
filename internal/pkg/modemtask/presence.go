@@ -31,14 +31,16 @@ func Run(ctx context.Context, registry Registry, start func(context.Context, *mo
 	}
 
 	var (
-		mu       sync.Mutex
-		wg       sync.WaitGroup
-		stopping bool
-		workers  = make(map[string]presenceSubscription)
+		mu             sync.Mutex
+		wg             sync.WaitGroup
+		stopping       bool
+		workers        = make(map[string]presenceSubscription)
+		lastGeneration = make(map[string]uint64)
 	)
 	stop := func(key string, generation uint64) {
 		mu.Lock()
 		worker, ok := workers[key]
+		lastGeneration[key] = max(lastGeneration[key], generation)
 		if ok && generation != 0 && worker.generation != generation {
 			ok = false
 		}
@@ -68,14 +70,24 @@ func Run(ctx context.Context, registry Registry, start func(context.Context, *mo
 			cancel()
 			return
 		}
-		old, exists := workers[key]
-		if exists && old.generation == generation {
+		// A removal or replacement may arrive after Modems copies its initial
+		// snapshot but before Run consumes it. Never replay an older generation.
+		if last, seen := lastGeneration[key]; seen && generation <= last {
 			mu.Unlock()
 			cancel()
 			return
 		}
+		select {
+		case <-m.Done():
+			mu.Unlock()
+			cancel()
+			return
+		default:
+		}
+		old, exists := workers[key]
+		lastGeneration[key] = generation
 		workers[key] = presenceSubscription{generation: generation, cancel: cancel}
-		wg.Add(1)
+		wg.Add(2)
 		mu.Unlock()
 		if exists {
 			old.cancel()
@@ -83,6 +95,15 @@ func Run(ctx context.Context, registry Registry, start func(context.Context, *mo
 
 		go func() {
 			defer wg.Done()
+			select {
+			case <-m.Done():
+				cancel()
+			case <-modemCtx.Done():
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			defer cancel()
 			defer func() {
 				mu.Lock()
 				if current, ok := workers[key]; ok && current.generation == generation {
@@ -90,7 +111,9 @@ func Run(ctx context.Context, registry Registry, start func(context.Context, *mo
 				}
 				mu.Unlock()
 			}()
-			start(modemCtx, m)
+			if modemCtx.Err() == nil {
+				start(modemCtx, m)
+			}
 		}()
 	}
 	stopAll := func() {

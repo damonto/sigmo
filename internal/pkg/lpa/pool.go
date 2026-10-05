@@ -46,7 +46,14 @@ type Pool struct {
 	secureElems map[poolSEKey][]SE
 	slotEpoch   map[poolSEKey]uint64
 	retired     map[*modem.Modem]struct{}
+	warming     map[*modem.Modem]*poolWarmup
 	unsubscribe func()
+}
+
+// poolWarmup identifies one attempt so its cleanup cannot remove a replacement
+// started after a SIM change canceled the original attempt.
+type poolWarmup struct {
+	cancel context.CancelFunc
 }
 
 type poolKey struct {
@@ -483,18 +490,52 @@ func releaseReservation(release func()) {
 }
 
 func (p *Pool) warm(ctx context.Context, m *modem.Modem) {
-	if p == nil || m == nil {
+	if p == nil || m == nil || ctx.Err() != nil {
 		return
 	}
 	p.mu.Lock()
-	if p.closed || p.isRetiredLocked(m) {
+	if p.closed || p.isRetiredLocked(m) || p.warming[m] != nil {
 		p.mu.Unlock()
 		return
 	}
+	select {
+	case <-m.Done():
+		p.mu.Unlock()
+		return
+	default:
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	job := &poolWarmup{cancel: cancel}
+	if p.warming == nil {
+		p.warming = make(map[*modem.Modem]*poolWarmup)
+	}
+	p.warming[m] = job
 	p.wg.Go(func() {
+		select {
+		case <-m.Done():
+			cancel()
+		case <-ctx.Done():
+		}
+	})
+	p.wg.Go(func() {
+		defer cancel()
+		defer func() {
+			p.mu.Lock()
+			if p.warming[m] == job {
+				delete(p.warming, m)
+			}
+			p.mu.Unlock()
+		}()
 		p.warmModem(ctx, m)
 	})
 	p.mu.Unlock()
+}
+
+func (p *Pool) cancelWarmupLocked(m *modem.Modem) {
+	if job := p.warming[m]; job != nil {
+		job.cancel()
+		delete(p.warming, m)
+	}
 }
 
 func (p *Pool) warmModem(ctx context.Context, m *modem.Modem) {
@@ -530,6 +571,9 @@ func (p *Pool) warmModem(ctx context.Context, m *modem.Modem) {
 func waitForWarmableEUICC(ctx context.Context, m *modem.Modem) bool {
 	const pollInterval = 100 * time.Millisecond
 	for {
+		if ctx.Err() != nil {
+			return false
+		}
 		ready, settled := warmableEUICCState(m.Snapshot())
 		if settled {
 			return ready
@@ -666,6 +710,9 @@ func (p *Pool) invalidateSIMSlots(ctx context.Context, m *modem.Modem, values ..
 		p.mu.Unlock()
 		return nil
 	}
+	// An in-flight discovery belongs to the previous SIM identity. Its
+	// replacement is warmed after the invalidated entries have been released.
+	p.cancelWarmupLocked(m)
 	if p.slotEpoch == nil {
 		p.slotEpoch = make(map[poolSEKey]uint64)
 	}
@@ -731,6 +778,7 @@ func (p *Pool) retire(ctx context.Context, m *modem.Modem) {
 		p.retired = make(map[*modem.Modem]struct{})
 	}
 	p.retired[m] = struct{}{}
+	p.cancelWarmupLocked(m)
 	entries := make(map[poolKey]*poolEntry)
 	for key, entry := range p.entries {
 		if key.modem == m {
@@ -779,6 +827,9 @@ func (p *Pool) Close(ctx context.Context) error {
 	p.closed = true
 	if p.cancel != nil {
 		p.cancel()
+	}
+	for m := range p.warming {
+		p.cancelWarmupLocked(m)
 	}
 	entries := maps.Clone(p.entries)
 	for _, entry := range entries {

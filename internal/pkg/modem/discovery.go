@@ -48,6 +48,20 @@ func sameDeviceDescription(a, b wwanmodem.Device) bool {
 	return a.PhysicalPath == b.PhysicalPath && slices.Equal(a.Ports, b.Ports)
 }
 
+func sharesQMIControlPort(a, b wwanmodem.Device) bool {
+	for _, aPort := range a.Ports {
+		if aPort.Type != wwanmodem.PortQMI || strings.TrimSpace(aPort.Path) == "" {
+			continue
+		}
+		for _, bPort := range b.Ports {
+			if bPort.Type == wwanmodem.PortQMI && strings.TrimSpace(aPort.Path) == strings.TrimSpace(bPort.Path) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func openDiscoveredModem(ctx context.Context, device wwanmodem.Device, generation uint64) (*Modem, error) {
 	ports, resolveErr := controlPortsForOpen(ctx, device)
 	if err := ctx.Err(); err != nil {

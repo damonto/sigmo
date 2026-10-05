@@ -8,10 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/damonto/wwan-go/cdcwdm"
+	devicewwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/damonto/wwan-go/qcom"
-	qmitransport "github.com/damonto/wwan-go/qcom/qmi"
 )
 
 var modemWatchRetryDelay = time.Second
@@ -360,14 +359,7 @@ func (m *Modem) reportTerminalRuntimeError(err error) bool {
 }
 
 func isTerminalRuntimeError(err error) bool {
-	if errors.Is(err, cdcwdm.ErrDisconnected) {
-		return true
-	}
-	if errors.Is(err, qcom.QMIErrorClientIDsExhausted) {
-		return true
-	}
-	var transportErr *qmitransport.TransportError
-	return errors.As(err, &transportErr)
+	return devicewwan.IsTerminalError(err) || errors.Is(err, qcom.QMIErrorClientIDsExhausted)
 }
 
 func consumeModemStream[T any](ctx context.Context, stream <-chan wwanmodem.Result[T], apply func(T)) error {

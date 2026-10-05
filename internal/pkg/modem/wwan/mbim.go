@@ -98,7 +98,7 @@ func (s *mbimSession) acquireClient(ctx context.Context, slot uint8) (mbimSessio
 		return nil, func(error) {}, wwanmodem.ErrClosed
 	}
 	if client := s.clients[slot]; client != nil {
-		return client, func(error) {}, nil
+		return client, func(err error) { s.evictTerminalClient(slot, client, err) }, nil
 	}
 	client, err := s.openClient(ctx, slot)
 	if err != nil {
@@ -108,7 +108,21 @@ func (s *mbimSession) acquireClient(ctx context.Context, slot uint8) (mbimSessio
 		s.clients = make(map[uint8]mbimSessionClient)
 	}
 	s.clients[slot] = client
-	return client, func(error) {}, nil
+	return client, func(err error) { s.evictTerminalClient(slot, client, err) }, nil
+}
+
+func (s *mbimSession) evictTerminalClient(slot uint8, client mbimSessionClient, err error) {
+	if !IsTerminalError(err) {
+		return
+	}
+	s.mu.Lock()
+	if s.clients[slot] != client {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.clients, slot)
+	s.mu.Unlock()
+	closeClient(client, "MBIM")
 }
 
 func (s *mbimSession) MSISDN(ctx context.Context) (number string, err error) {

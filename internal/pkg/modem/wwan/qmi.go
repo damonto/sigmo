@@ -14,7 +14,6 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/modem/msisdn"
 	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/damonto/wwan-go/qcom"
-	qmiproto "github.com/damonto/wwan-go/qcom/qmi"
 	usim "github.com/damonto/wwan-go/sim"
 	usimcard "github.com/damonto/wwan-go/sim/card"
 	"github.com/damonto/wwan-go/sim/simfile"
@@ -126,7 +125,7 @@ func (u *qmiSession) acquireClient(ctx context.Context, slot uint8) (qmiClient, 
 }
 
 func (u *qmiSession) evictTerminalClient(slot uint8, client qmiClient, err error) {
-	if _, ok := errors.AsType[*qmiproto.TransportError](err); !ok {
+	if !IsTerminalError(err) {
 		return
 	}
 	u.evictClient(slot, client)

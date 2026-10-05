@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	wwanmodem "github.com/damonto/wwan-go/modem"
 	"github.com/damonto/wwan-go/qcom"
@@ -40,7 +41,7 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 			present[key] = device
 		}
 	}
-	r.clearAbsentCIDRecoveryStates(present)
+	r.clearAbsentRecoveryStates(present)
 	opened := make(map[string]*Modem, len(devices))
 	for _, device := range devices {
 		key := physicalDeviceKey(device)
@@ -65,6 +66,7 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 			if errors.Is(err, qcom.QMIErrorClientIDsExhausted) {
 				r.advanceCIDRecoveryState(key)
 			}
+			r.scheduleOpenRetry(key)
 			slog.Warn("open discovered modem", "device", controlPortPath(device), "physical_path", key, "error", err)
 			continue
 		}
@@ -79,6 +81,7 @@ func (r *Registry) ensureStarted(ctx context.Context) error {
 			}
 		}
 		opened[key] = modem
+		r.clearOpenRetry(key)
 	}
 	if err := ctx.Err(); err != nil {
 		cancel()
@@ -166,10 +169,18 @@ func (r *Registry) watchLoop(ctx context.Context, stream <-chan wwanmodem.Result
 }
 
 func (r *Registry) consumeDeviceStream(ctx context.Context, stream <-chan wwanmodem.Result[wwanmodem.DeviceEvent]) error {
+	retry := time.NewTicker(registryWatchRetryDelay)
+	defer retry.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-retry.C:
+			if r.hasPendingOpens() {
+				if err := r.reconcile(ctx); err != nil && ctx.Err() == nil {
+					slog.Warn("retry opening discovered modems", "error", err)
+				}
+			}
 		case result, ok := <-stream:
 			if !ok {
 				return errors.New("modem device stream closed")
@@ -200,7 +211,7 @@ func (r *Registry) reconcile(ctx context.Context) error {
 		}
 		present[key] = device
 	}
-	r.clearAbsentCIDRecoveryStates(present)
+	r.clearAbsentRecoveryStates(present)
 	for _, device := range devices {
 		if physicalDeviceKey(device) == "" {
 			continue
@@ -239,6 +250,7 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 	}
 	if event.Type == wwanmodem.DeviceRemoved {
 		r.clearCIDRecoveryState(key)
+		r.clearOpenRetry(key)
 		r.mu.RLock()
 		existingKey, existing := r.findByDeviceLocked(event.Device)
 		r.mu.RUnlock()
@@ -253,10 +265,18 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 	existingKey, existing := r.findByDeviceLocked(event.Device)
 	r.mu.RUnlock()
 	if event.Type == wwanmodem.DevicePresent && existing != nil && sameDeviceDescription(existing.deviceInfo, event.Device) {
+		r.clearOpenRetry(key)
 		return
 	}
 	if existing == nil && r.cidRecoveryState(key) == cidRecoverySuspended {
+		r.clearOpenRetry(key)
 		return
+	}
+	if existing != nil && sharesQMIControlPort(existing.deviceInfo, event.Device) {
+		// Reuse Reload's retirement order: subscribers release their clients
+		// before Close releases the generation's CIDs and a replacement opens.
+		r.removeModem(existingKey, existing)
+		existingKey, existing = "", nil
 	}
 
 	var (
@@ -264,6 +284,9 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 		replacement *Modem
 	)
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		generation = r.nextGenerationToken()
 		openCtx, cancel := context.WithTimeout(ctx, registryOpenTimeout)
 		var err error
@@ -275,17 +298,22 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 
 		slog.Warn("open changed modem", "device", controlPortPath(event.Device), "physical_path", key, "error", err)
 		if !errors.Is(err, qcom.QMIErrorClientIDsExhausted) {
+			r.scheduleOpenRetry(key)
 			return
 		}
 		state := r.advanceCIDRecoveryState(key)
 		if state == cidRecoverySuspended || ctx.Err() != nil {
+			r.clearOpenRetry(key)
 			return
 		}
-		// Do not allocate more client IDs while the current generation still owns its IDs.
 		if existing != nil {
-			return
+			// Different control paths can still share the same firmware CID
+			// budget. Retire the old generation before the bounded retry.
+			r.removeModem(existingKey, existing)
+			existingKey, existing = "", nil
 		}
 	}
+	r.clearOpenRetry(key)
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
@@ -377,6 +405,7 @@ func (r *Registry) handleModemFailure(ctx context.Context, failure modemFailure)
 		slog.Error("suspend modem recovery until device reconnects", "imei", failure.modem.EquipmentIdentifier, "generation", failure.modem.Generation(), "error", failure.err)
 		return
 	}
+	r.scheduleOpenRetry(key)
 	if err := r.recoverRemovedModem(ctx, failure.modem); err != nil {
 		slog.Error("recover modem after transport stop", "imei", failure.modem.EquipmentIdentifier, "generation", failure.modem.Generation(), "error", err)
 	}
@@ -403,6 +432,7 @@ func (r *Registry) reloadModem(ctx context.Context, current *Modem) (*Modem, err
 
 	slog.Info("reload modem generation", "imei", current.EquipmentIdentifier, "generation", current.Generation())
 	r.removeModem(key, current)
+	r.scheduleOpenRetry(key)
 	if err := r.recoverRemovedModem(ctx, current); err != nil {
 		return nil, err
 	}
@@ -549,12 +579,17 @@ func (r *Registry) clearCIDRecoveryState(key string) {
 	r.mu.Unlock()
 }
 
-func (r *Registry) clearAbsentCIDRecoveryStates(present map[string]wwanmodem.Device) {
+func (r *Registry) clearAbsentRecoveryStates(present map[string]wwanmodem.Device) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for key := range r.cidRecoveryStates {
 		if _, ok := present[key]; !ok {
 			delete(r.cidRecoveryStates, key)
+		}
+	}
+	for key := range r.pendingOpens {
+		if _, ok := present[key]; !ok {
+			delete(r.pendingOpens, key)
 		}
 	}
 }

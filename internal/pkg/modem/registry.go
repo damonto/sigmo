@@ -50,6 +50,7 @@ type Registry struct {
 	reloads      chan modemReloadRequest
 	// A physical reconnect resets the bounded CID-exhaustion recovery state.
 	cidRecoveryStates map[string]cidRecoveryState
+	pendingOpens      map[string]struct{}
 	simIdentities     map[*Modem]SIMIdentity
 }
 
@@ -237,6 +238,8 @@ func (r *Registry) Subscribe(ctx context.Context, fn func(ModemEvent) error) (fu
 	}, nil
 }
 
+// Close stops discovery and retries, waits for the device loop, and releases
+// every remaining modem generation.
 func (r *Registry) Close() error {
 	r.startMu.Lock()
 	r.mu.Lock()
@@ -258,6 +261,7 @@ func (r *Registry) Close() error {
 	r.mu.Lock()
 	modems := maps.Clone(r.modems)
 	r.modems = make(map[string]*Modem)
+	r.pendingOpens = nil
 	r.subs = nil
 	r.simIdentities = make(map[*Modem]SIMIdentity)
 	r.mu.Unlock()
