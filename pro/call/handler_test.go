@@ -320,3 +320,19 @@ func TestCurrentCallEventsFiltersTerminalAndOtherModemCalls(t *testing.T) {
 		})
 	}
 }
+
+func TestWebRTCICEServersRespondsWithEmptyListWhenTURNUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer server.Close()
+	h := &Handler{media: &Media{ice: webRTCICEProvider{client: server.Client(), endpoint: server.URL}}}
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/call-media/ice-servers", nil)
+	if err := h.WebRTCICEServers(echo.New().NewContext(req, recorder)); err != nil {
+		t.Fatalf("WebRTCICEServers() error = %v", err)
+	}
+	if recorder.Code != http.StatusOK || strings.TrimSpace(recorder.Body.String()) != `{"iceServers":[]}` {
+		t.Fatalf("response = %d %s, want 200 with empty iceServers array", recorder.Code, recorder.Body.String())
+	}
+}

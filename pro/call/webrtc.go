@@ -250,17 +250,8 @@ func newWebRTCBridge(ctx context.Context, media MediaSession, codec bridgeCodec,
 	if err := settingEngine.SetEphemeralUDPPortRange(webRTCUDPPortMin, webRTCUDPPortMax); err != nil {
 		return nil, fmt.Errorf("set WebRTC UDP port range: %w", err)
 	}
-	interfaceNames, err := defaultRouteInterfaceNames()
-	if err != nil {
-		slog.Warn("detect WebRTC ICE default interface", "error", err)
-	} else if len(interfaceNames) > 0 {
-		allowedInterfaces := interfaceNameSet(interfaceNames)
-		settingEngine.SetInterfaceFilter(func(interfaceName string) bool {
-			_, ok := allowedInterfaces[interfaceName]
-			return ok
-		})
-		slog.Debug("filter WebRTC ICE interfaces", "interfaces", interfaceNames)
-	}
+	// Keep Pion's default interface selection so LAN and VPN paths can participate
+	// in ICE even when they do not carry the system default route.
 	api := webrtc.NewAPI(
 		webrtc.WithMediaEngine(mediaEngine),
 		webrtc.WithInterceptorRegistry(interceptors),

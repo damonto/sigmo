@@ -454,6 +454,24 @@ describe('call audio session', () => {
     consoleWarn.mockRestore()
   })
 
+  it('starts direct connection setup when the backend returns no ICE servers', async () => {
+    getWebRTCICEServers.mockResolvedValue({ data: ref({ iceServers: [] }) })
+    const pc = new FakePeerConnection()
+    const createPeerConnection = vi.fn(() => pc as unknown as RTCPeerConnection)
+    const session = useCallAudioSession(ref('modem-1'), {
+      deps: {
+        getUserMedia: vi.fn(async () => fakeStream([fakeTrack()])),
+        createPeerConnection,
+      },
+    })
+
+    await expect(session.start('call-1')).resolves.toBe(true)
+
+    expect(createPeerConnection).toHaveBeenCalledWith({ iceServers: [] })
+    expect(pc.remoteDescription).toEqual({ type: 'answer', sdp: 'answer-sdp' })
+    session.stop()
+  })
+
   it('uses backend TURN servers when creating the WebRTC peer', async () => {
     getWebRTCICEServers.mockResolvedValue({
       data: ref({

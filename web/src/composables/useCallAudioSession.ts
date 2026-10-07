@@ -173,12 +173,10 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
 
   const getIceServers = async () => {
     if (options.deps?.getIceServers) {
-      const servers = await options.deps.getIceServers()
-      return servers.length > 0 ? servers : defaultIceServers
+      return await options.deps.getIceServers()
     }
     const { data } = await calls.getWebRTCICEServers()
-    const servers = data.value?.iceServers ?? []
-    return servers.length > 0 ? servers : defaultIceServers
+    return data.value?.iceServers ?? []
   }
 
   const clearConnectionLossTimer = () => {
@@ -770,11 +768,6 @@ const stopStream = (stream: MediaStream) => {
     track.stop()
   }
 }
-
-const defaultIceServers: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' },
-]
 
 const newAbortError = () => {
   const err = new Error('WebRTC audio session was cancelled')

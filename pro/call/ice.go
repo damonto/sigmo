@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"time"
@@ -39,6 +40,8 @@ func newWebRTCICEProvider() webRTCICEProvider {
 	}
 }
 
+// WebRTCICEServers returns built-in ICE servers, or an empty list for direct
+// connections when the credential service is unavailable.
 func (m *Media) WebRTCICEServers(ctx context.Context) ([]WebRTCICEServer, error) {
 	servers, err := m.webRTCICEServers(ctx)
 	if err != nil {
@@ -57,7 +60,16 @@ func (m *Media) WebRTCICEServers(ctx context.Context) ([]WebRTCICEServer, error)
 }
 
 func (m *Media) webRTCICEServers(ctx context.Context) ([]webrtc.ICEServer, error) {
-	return m.ice.servers(ctx)
+	servers, err := m.ice.servers(ctx)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if err == nil {
+		return servers, nil
+	}
+	// External relay availability must not prevent LAN or VPN connections.
+	slog.WarnContext(ctx, "fetch WebRTC ICE servers; continue with direct candidates", "error", err)
+	return nil, nil
 }
 
 func (p *webRTCICEProvider) servers(ctx context.Context) ([]webrtc.ICEServer, error) {
