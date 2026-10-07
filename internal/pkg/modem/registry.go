@@ -267,7 +267,9 @@ func (r *Registry) Close() error {
 	r.mu.Unlock()
 	var result error
 	for _, modem := range modems {
-		result = errors.Join(result, modem.Close())
+		if err := modem.Close(); err != nil {
+			result = errors.Join(result, fmt.Errorf("close modem (imei=%s, generation=%d): %w", modem.EquipmentIdentifier, modem.Generation(), err))
+		}
 	}
 	return result
 }

@@ -247,7 +247,7 @@ func (c *coordinator) start(ctx context.Context, modem *mmodem.Modem, profileID 
 	done := make(chan struct{})
 	c.nextSessionID++
 	sessionID := c.nextSessionID
-	c.sessions[modemID] = &sessionState{
+	session := &sessionState{
 		id:           sessionID,
 		modem:        modem,
 		cancel:       cancel,
@@ -260,10 +260,11 @@ func (c *coordinator) start(ctx context.Context, modem *mmodem.Modem, profileID 
 		numberTarget: modem.Snapshot().SIMIdentity,
 		calls:        make(map[string]*voiceCallState),
 	}
+	c.sessions[modemID] = session
 	c.mu.Unlock()
 	go func() {
 		defer close(done)
-		c.connectLoop(ctx, modem, profileID, sessionID)
+		session.closeErr = c.connectLoop(ctx, session)
 	}()
 }
 
@@ -300,7 +301,8 @@ func (c *coordinator) endAirplaneModeChange(ctx context.Context, modemID string)
 	}
 }
 
-func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, profileID string, sessionID uint64) {
+func (c *coordinator) connectLoop(ctx context.Context, session *sessionState) error {
+	modem, sessionID := session.modem, session.id
 	var imsProfile wwan.IMSProfile
 	if c.access == AccessVoLTE {
 		var err error
@@ -308,7 +310,7 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 		if err != nil {
 			slog.Warn("prepare VoLTE startup", "imei", modem.EquipmentIdentifier, "error", err)
 			c.markDisconnected(modem.EquipmentIdentifier, sessionID, nil)
-			return
+			return nil
 		}
 	}
 	attempt := connectAttempt{
@@ -316,25 +318,28 @@ func (c *coordinator) connectLoop(ctx context.Context, modem *mmodem.Modem, prof
 		imsProfile: imsProfile,
 	}
 	if c.registrationGroups != nil {
-		attempt.registrationGroup = c.registrationGroups.Group(modem.EquipmentIdentifier, profileID)
+		attempt.registrationGroup = c.registrationGroups.Group(modem.EquipmentIdentifier, session.profileID)
 	}
 	for {
 		c.markConnecting(modem.EquipmentIdentifier, sessionID)
 		client, err := c.connectWithRetry(ctx, modem, attempt)
 		if err != nil {
 			c.markDisconnected(modem.EquipmentIdentifier, sessionID, nil)
-			return
+			return nil
 		}
 		c.markConnected(modem.EquipmentIdentifier, sessionID, client)
-		c.watchClient(ctx, modem, profileID, sessionID, client)
+		closeErr := c.runClient(ctx, session, client)
 		if ctx.Err() != nil {
-			return
+			return closeErr
+		}
+		if closeErr != nil {
+			slog.Warn("close disconnected IMS client", "imei", modem.EquipmentIdentifier, "access", c.access, "error", closeErr)
 		}
 		c.markConnecting(modem.EquipmentIdentifier, sessionID)
 		delay := retryDelays[0]
 		slog.Warn("IMS access disconnected", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "retryIn", delay)
 		if err := sleep(ctx, delay); err != nil {
-			return
+			return nil
 		}
 	}
 }
@@ -594,7 +599,7 @@ func modemClientConfigForIMEI(imei string, access Access, imsProfileIndex uint8)
 		})
 	}
 	return &imsgo.Config{
-		Logger:   mmodem.LoggerForIMEI(imei),
+		Logger:   mmodem.LoggerForIMEI(imei).With("access", access),
 		Terminal: terminalInfo(imei),
 		Access:   accessConfig,
 		IMS: imsgo.ServiceConfig{
@@ -800,7 +805,18 @@ func terminalInfo(imei string) imsgo.TerminalInfo {
 	}
 }
 
-func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, profileID string, sessionID uint64, client *imsgo.Client) {
+// The connection loop owns its client until local cleanup finishes. A caller
+// timing out while waiting for the session cannot transfer that ownership.
+func (c *coordinator) runClient(ctx context.Context, session *sessionState, client *imsgo.Client) error {
+	c.watchClient(ctx, session, client)
+	if err := client.Close(); err != nil {
+		return fmt.Errorf("close IMS client: %w", err)
+	}
+	return nil
+}
+
+func (c *coordinator) watchClient(ctx context.Context, session *sessionState, client *imsgo.Client) {
+	modem, profileID, sessionID := session.modem, session.profileID, session.id
 	events := client.Events()
 	defer events.Close()
 	c.syncRegistration(modem.EquipmentIdentifier, sessionID, client)
@@ -859,16 +875,13 @@ func (c *coordinator) watchClient(ctx context.Context, modem *mmodem.Modem, prof
 			case imsgo.StatusReconnecting:
 				c.markClientReconnecting(modem.EquipmentIdentifier, sessionID, client)
 			case imsgo.StatusFailed, imsgo.StatusClosed:
-				_ = client.Close()
 				c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 				return
 			}
 		case <-ctx.Done():
-			_ = client.Close()
 			c.markDisconnected(modem.EquipmentIdentifier, sessionID, client)
 			return
 		case <-reconnect:
-			_ = client.Close()
 			return
 		}
 	}
@@ -1066,9 +1079,6 @@ func (c *coordinator) closeDetachedSessionContext(ctx context.Context, session *
 		return nil
 	}
 	c.deleteSessionWebsheet(session)
-	if session.cancel != nil {
-		session.cancel()
-	}
 	err := closeSessionContext(ctx, session)
 	for _, call := range events {
 		c.publishCallUpdate(call)
@@ -1104,10 +1114,10 @@ func (c *coordinator) closeDetachedSessionAsync(ctx context.Context, session *se
 	}
 	if tracked {
 		go func() {
-			c.completeDetachedSession(closeSession(ctx, session), true)
+			c.completeDetachedSession(waitSession(ctx, session), true)
 		}()
 	} else {
-		c.completeDetachedSession(closeSession(ctx, session), false)
+		c.completeDetachedSession(waitSession(ctx, session), false)
 	}
 	for _, call := range events {
 		c.publishCallUpdate(call)
@@ -1155,46 +1165,47 @@ func (c *coordinator) detachSessionByID(modemID string, sessionID uint64) (*sess
 	return session, events, tracked
 }
 
-func closeSession(ctx context.Context, session *sessionState) error {
+func waitSession(ctx context.Context, session *sessionState) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), imsSessionCleanupTimeout)
 	defer cancel()
-	return closeSessionContext(ctx, session)
+	return waitSessionContext(ctx, session)
 }
 
 func closeSessionContext(ctx context.Context, session *sessionState) error {
 	if session == nil {
 		return nil
 	}
-	var result error
-	if session.client != nil {
-		if err := closeIMSClientContext(ctx, session.client); err != nil {
-			result = errors.Join(result, fmt.Errorf("close ims client: %w", err))
-		}
+	if session.cancel != nil {
+		session.cancel()
 	}
+	return waitSessionContext(ctx, session)
+}
+
+func waitSessionContext(ctx context.Context, session *sessionState) error {
+	var err error
 	if session.done != nil {
 		select {
 		case <-session.done:
+			err = session.closeErr
 		case <-ctx.Done():
-			result = errors.Join(result, fmt.Errorf("wait for ims session: %w", ctx.Err()))
+			// If both are ready, report the completed cleanup result instead
+			// of allowing select to turn a successful close into a timeout.
+			select {
+			case <-session.done:
+				err = session.closeErr
+			default:
+				err = fmt.Errorf("wait for IMS session: %w", ctx.Err())
+			}
 		}
 	}
-	return result
-}
-
-func closeIMSClientContext(ctx context.Context, client *imsgo.Client) error {
-	if err := ctx.Err(); err != nil {
-		return err
+	if err == nil {
+		return nil
 	}
-	done := make(chan error, 1)
-	go func() {
-		done <- client.Close()
-	}()
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
+	imei := ""
+	if session.modem != nil {
+		imei = session.modem.EquipmentIdentifier
 	}
+	return fmt.Errorf("close IMS session (imei=%s, generation=%d, session=%d): %w", imei, session.generation, session.id, err)
 }
 
 func (c *coordinator) stopAll(ctx context.Context) ([]*mmodem.Modem, error) {
@@ -1225,9 +1236,26 @@ func (c *coordinator) stopAllContext(ctx context.Context) ([]*mmodem.Modem, erro
 	clear(c.airplaneSuspended)
 	clear(c.deferredStarts)
 	c.mu.Unlock()
+	// Cancel every owner before waiting. The connection loops close their clients
+	// concurrently; shutdown needs no additional goroutine per session.
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		c.deleteSessionWebsheet(session)
+		if session.cancel != nil {
+			session.cancel()
+		}
+	}
 	var result error
 	for i, session := range sessions {
-		result = errors.Join(result, c.closeDetachedSessionContext(ctx, session, events[i]))
+		if session == nil {
+			continue
+		}
+		result = errors.Join(result, waitSessionContext(ctx, session))
+		for _, call := range events[i] {
+			c.publishCallUpdate(call)
+		}
 	}
 	cleanupDone := make(chan struct{})
 	go func() {

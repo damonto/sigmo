@@ -73,6 +73,7 @@ type sessionState struct {
 	modem        *mmodem.Modem
 	cancel       context.CancelFunc
 	done         <-chan struct{}
+	closeErr     error // Written by the connection loop before done closes.
 	reconnect    chan struct{}
 	lastError    string
 	phase        sessionPhase

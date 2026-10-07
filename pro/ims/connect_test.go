@@ -1540,6 +1540,208 @@ func TestStopAllContextHonorsCleanupDeadline(t *testing.T) {
 	close(done)
 }
 
+type shutdownReader struct {
+	fakeUSIMReader
+	started chan struct{}
+	release <-chan struct{}
+	err     error
+}
+
+func (r *shutdownReader) Close() error {
+	close(r.started)
+	if r.release != nil {
+		<-r.release
+	}
+	return r.err
+}
+
+func startTestClientSession(t *testing.T, c *coordinator, session *sessionState) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	session.cancel = cancel
+	session.done = done
+	client := session.client
+	c.mu.Lock()
+	c.sessions[session.modem.EquipmentIdentifier] = session
+	c.mu.Unlock()
+	go func() {
+		defer close(done)
+		session.closeErr = c.runClient(ctx, session, client)
+	}()
+}
+
+func TestStopAllStartsEveryClientCloseBeforeWaiting(t *testing.T) {
+	tests := []struct {
+		name     string
+		sessions int
+	}{
+		{name: "two sessions", sessions: 2},
+		{name: "three sessions", sessions: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			release := make(chan struct{})
+			var sessions []*sessionState
+			t.Cleanup(func() {
+				close(release)
+				for _, session := range sessions {
+					session.cancel()
+					<-session.done
+				}
+			})
+			c := &coordinator{sessions: make(map[string]*sessionState)}
+			readers := make([]*shutdownReader, tt.sessions)
+			for i := range tt.sessions {
+				imei := fmt.Sprintf("%015d", i+1)
+				reader := &shutdownReader{started: make(chan struct{}), release: release}
+				client, err := imsgo.New(reader, modemClientConfigForIMEI(imei, AccessWiFiCalling, 0))
+				if err != nil {
+					t.Fatal(err)
+				}
+				readers[i] = reader
+				session := &sessionState{
+					modem:  &mmodem.Modem{EquipmentIdentifier: imei},
+					client: client,
+				}
+				sessions = append(sessions, session)
+				startTestClientSession(t, c, session)
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := c.stopAllContext(ctx)
+				done <- err
+			}()
+			for i, reader := range readers {
+				select {
+				case <-reader.started:
+				case <-ctx.Done():
+					t.Fatalf("reader %d was not closed before the shared deadline", i)
+				}
+			}
+			cancel()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("stopAllContext() = %v, want canceled wait", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("stopAllContext() did not honor cancellation")
+			}
+		})
+	}
+}
+
+func TestCloseSessionRetainsIdentityAndError(t *testing.T) {
+	readerErr := errors.New("reader close")
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "reader failure", err: readerErr},
+		{name: "reader deadline", err: context.DeadlineExceeded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const imei = "123456789012345"
+			reader := &shutdownReader{started: make(chan struct{}), err: tt.err}
+			client, err := imsgo.New(reader, modemClientConfigForIMEI(imei, AccessWiFiCalling, 0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			session := &sessionState{
+				id: 7, generation: 4,
+				modem:  &mmodem.Modem{EquipmentIdentifier: imei},
+				client: client,
+			}
+			c := &coordinator{sessions: make(map[string]*sessionState)}
+			startTestClientSession(t, c, session)
+			// The owner can finish Close before the coordinator joins it.
+			session.cancel()
+			<-session.done
+			err = closeSessionContext(t.Context(), session)
+			if !errors.Is(err, tt.err) {
+				t.Fatalf("closeSessionContext() = %v, want %v", err, tt.err)
+			}
+			for _, want := range []string{imei, "generation=4", "session=7", "closing reader"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("closeSessionContext() = %v, missing %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestExpiredCleanupStillClosesClient(t *testing.T) {
+	tests := []struct {
+		name     string
+		deadline bool
+	}{
+		{name: "canceled"},
+		{name: "deadline exceeded", deadline: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			if tt.deadline {
+				ctx, cancel = context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+				defer cancel()
+			}
+			reader := &shutdownReader{started: make(chan struct{})}
+			client, err := imsgo.New(reader, modemClientConfigForIMEI("123456789012345", AccessWiFiCalling, 0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			session := &sessionState{modem: &mmodem.Modem{EquipmentIdentifier: "123456789012345"}, client: client}
+			c := &coordinator{sessions: make(map[string]*sessionState)}
+			startTestClientSession(t, c, session)
+			t.Cleanup(func() {
+				session.cancel()
+				<-session.done
+			})
+			if err := closeSessionContext(ctx, session); err != nil && !errors.Is(err, ctx.Err()) {
+				t.Errorf("closeSessionContext() = %v, want %v or completed close", err, ctx.Err())
+			}
+			select {
+			case <-reader.started:
+			case <-time.After(time.Second):
+				t.Fatal("expired cleanup skipped client.Close")
+			}
+			if err := waitSessionContext(t.Context(), session); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+}
+
+func TestWaitSessionPrefersCompletedResult(t *testing.T) {
+	closeErr := errors.New("close reader")
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "successful cleanup"},
+		{name: "failed cleanup", err: closeErr},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			done := make(chan struct{})
+			close(done)
+			session := &sessionState{done: done, closeErr: tt.err}
+			for range 20 {
+				if err := waitSessionContext(ctx, session); !errors.Is(err, tt.err) {
+					t.Fatalf("waitSessionContext() = %v, want %v", err, tt.err)
+				}
+			}
+		})
+	}
+}
+
 func TestStopAllWaitsForSynchronouslyDetachedSession(t *testing.T) {
 	done := make(chan struct{})
 	cancelled := make(chan struct{})

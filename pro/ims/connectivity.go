@@ -5,6 +5,7 @@ package ims
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -93,10 +94,18 @@ func (c *Connectivity) Run(ctx context.Context) error {
 
 	results := make(chan error, 2)
 	go func() {
-		results <- c.wifiCalling.Run(runCtx, c.registry)
+		err := c.wifiCalling.Run(runCtx, c.registry)
+		if err != nil {
+			err = fmt.Errorf("Wi-Fi Calling: %w", err)
+		}
+		results <- err
 	}()
 	go func() {
-		results <- c.volte.Run(runCtx, c.registry)
+		err := c.volte.Run(runCtx, c.registry)
+		if err != nil {
+			err = fmt.Errorf("VoLTE: %w", err)
+		}
+		results <- err
 	}()
 
 	first := <-results
