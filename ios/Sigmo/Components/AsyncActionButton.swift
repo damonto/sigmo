@@ -1,6 +1,6 @@
 import SwiftUI
 
-// The view owns each action; leaving it or entering the background cancels the work.
+// The view owns each action; backgrounding keeps it alive, leaving cancels it.
 struct AsyncActionButton<Label: View>: View {
     var role: ButtonRole?
     var id = ""
@@ -8,7 +8,6 @@ struct AsyncActionButton<Label: View>: View {
     var minimumLabelHeight: CGFloat? = nil
     let action: @MainActor () async -> Void
     @ViewBuilder var label: () -> Label
-    @Environment(\.scenePhase) private var scenePhase
     @State private var requestID: UUID?
 
     var body: some View {
@@ -31,9 +30,6 @@ struct AsyncActionButton<Label: View>: View {
             if self.requestID == requestID { self.requestID = nil }
         }
         .onDisappear { requestID = nil }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { requestID = nil }
-        }
     }
 }
 

@@ -4,7 +4,6 @@ import SwiftUI
 import UserNotifications
 
 struct PushLifecycle: Equatable {
-    let background: Bool
     let revision: Int
     let connections: [String]
 }
@@ -104,8 +103,8 @@ final class NativePushState {
         }
     }
 
-    func lifecycle(store: BackendStore, background: Bool) -> PushLifecycle {
-        PushLifecycle(background: background, revision: configurationRevision, connections: store.settings.backends.map { configuration in
+    func lifecycle(store: BackendStore) -> PushLifecycle {
+        PushLifecycle(revision: configurationRevision, connections: store.settings.backends.map { configuration in
             let session = store.sessions[configuration.id]
             return "\(configuration.id)|\(configuration.address)|\(configuration.name)|\(session?.authentication.rawValue ?? "")|\(session?.license.rawValue ?? "")|\(session?.accessRevision ?? 0)|\(session?.hasLoadedModems ?? false)"
         })
@@ -114,7 +113,7 @@ final class NativePushState {
     func run(store: BackendStore) async {
         guard !disabled else { return }
         self.store = store
-        while !Task.isCancelled {
+        while store.foreground, !Task.isCancelled {
             await reconcile(store: store)
             do { try await Task.sleep(for: .seconds(30)) } catch { return }
         }

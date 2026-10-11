@@ -46,6 +46,7 @@ final class DetailFixtureBuffer: Sendable {
 actor DetailFixtureServer {
     enum Scenario {
         case standard, delayedProfiles, unavailableProfiles, singleHardware, notifications, delayedDiscoveries, noDiscoveries, unavailableDiscoveries, emptyProfiles
+        case delayedDeletion, deletionFailure
         case delayedSettings, unavailableSettings, unsupportedSettings, settingsWriteFailure
         case connectionSetup, connectionScan, connectionScanError, connectionEmptyNetworks, connectionReadFailure, connectionWriteFailure, connectionMBIM, connectionCommunity
     }
@@ -171,6 +172,13 @@ actor DetailFixtureServer {
         }
         if scenario == .delayedDiscoveries, request.url?.path.hasSuffix("/esim-discoveries") == true {
             try await Task.sleep(for: .seconds(5))
+        }
+        if scenario == .delayedDeletion || scenario == .deletionFailure,
+           request.httpMethod == "DELETE", request.url?.path.contains("/esims/") == true {
+            try await Task.sleep(for: .seconds(8))
+            if scenario == .deletionFailure {
+                return HTTPProblem.response(status: 503, code: "remote_error", detail: "Fixture error")
+            }
         }
         let response = try response(request)
         if let suffix = holdSuffix, request.url?.path.hasSuffix(suffix) == true {

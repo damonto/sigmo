@@ -624,6 +624,7 @@
 "detail.profileState" = "配置状态";
 "detail.lineOn" = "开启";
 "detail.lineOff" = "关闭";
+"detail.deletingProfile" = "删除中";
 "detail.next" = "下一步";
 "detail.checkingESIM" = "正在检查可用的 eSIM…";
 "detail.discoveriesAvailable" = "有可下载的 eSIM";

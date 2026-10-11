@@ -262,7 +262,7 @@ final class CallsTests: XCTestCase {
             let request = Task { try await session.callRequest { _, _ in await gate.wait(); return "snapshot" } }
             await gate.waitForCaller()
             switch action {
-            case "background": session.stop()
+            case "background": session.foreground = false
             case "logout": session.logout()
             default: request.cancel()
             }

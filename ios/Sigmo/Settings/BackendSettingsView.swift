@@ -59,7 +59,6 @@ struct BackendSettingsView: View {
 struct SettingsFormView: View {
     @Bindable var state: SettingsState
     let section: SettingsSection
-    @Environment(\.scenePhase) private var scenePhase
 
     private var channelSchema: NotificationSchema? {
         guard case .notification(let channel) = section else { return nil }
@@ -117,7 +116,7 @@ struct SettingsFormView: View {
                 SettingsFeedback(failure: state.failure, message: state.message)
             }
             .disabled(state.busy)
-            .task(id: scenePhase == .background) { if scenePhase != .background { await state.load() } }
+            .foregroundTask { await state.load() }
         }
         .navigationTitle(settingsText(title)).navigationBarTitleDisplayMode(.inline)
     }
@@ -125,7 +124,6 @@ struct SettingsFormView: View {
 
 struct NotificationSettingsView: View {
     @Bindable var state: SettingsState
-    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         SettingsAccessView(session: state.session) {
             Form {
@@ -142,7 +140,7 @@ struct NotificationSettingsView: View {
                 }
                 SettingsFeedback(failure: state.failure)
             }
-            .task(id: scenePhase == .background) { if scenePhase != .background { await state.load() } }
+            .foregroundTask { await state.load() }
         }
         .navigationTitle("settings.notificationTitle").navigationBarTitleDisplayMode(.inline)
     }

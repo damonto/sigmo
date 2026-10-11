@@ -73,6 +73,8 @@ final class BackendSession: Identifiable {
             && information != nil && !isRefreshing && !waitingForRestart
     }
 
+    var foreground = true
+
     var canAccessDevices: Bool {
         (license == .community || license == .authorized)
             && (authentication == .authenticated || authentication == .notRequired)
@@ -251,7 +253,7 @@ final class BackendSession: Identifiable {
     }
 
     // Settings share this session's credential and invalidation boundary. A late
-    // response after logout, address changes, or backgrounding is never published.
+    // response after logout or address changes is never published.
     func protectedRequest<Value: Sendable>(
         _ operation: @escaping @Sendable (BackendAPI, String?) async throws -> Value
     ) async throws -> Value {
@@ -320,8 +322,8 @@ final class BackendSession: Identifiable {
         }
     }
 
-    // Calls outlive ordinary foreground requests. Authentication changes still
-    // cancel them, and the access revision prevents a late cross-account result.
+    // Calls follow the credential lifetime instead of the refresh generation.
+    // Authentication changes cancel them and reject late cross-account results.
     func callRequest<Value: Sendable>(
         _ operation: @escaping @Sendable (BackendAPI, String?) async throws -> Value
     ) async throws -> Value {
@@ -458,10 +460,10 @@ final class BackendSession: Identifiable {
         }
     }
 
-    // Owned by the visible activation screen; leaving it or backgrounding cancels the loop.
+    // Finish the current poll on backgrounding; only start new polls in the foreground.
     func observePairing() async {
         await action { current in
-            while self.isCurrent(current), self.license == .activation || self.waitingForRestart {
+            while self.foreground, self.isCurrent(current), self.license == .activation || self.waitingForRestart {
                 if self.pairing != nil || self.waitingForRestart {
                     await self.pollPairing(current)
                 }

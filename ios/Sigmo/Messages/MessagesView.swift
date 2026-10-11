@@ -22,7 +22,6 @@ struct MessagesView: View {
     @State private var missingInitial = false
 
     private struct RefreshIdentity: Equatable {
-        let background: Bool
         let revision: Int
         let search: String
         let historical: Bool
@@ -59,8 +58,7 @@ struct MessagesView: View {
             }
             Button("common.cancel", role: .cancel) { deleteCandidate = nil }
         } message: { Text("messages.deleteExplanation") }
-        .task(id: RefreshIdentity(background: scenePhase == .background, revision: state.session.accessRevision, search: state.searchQuery, historical: state.historical)) {
-            guard scenePhase != .background else { return }
+        .foregroundTask(id: RefreshIdentity(revision: state.session.accessRevision, search: state.searchQuery, historical: state.historical)) {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             await state.load()
         }
@@ -96,7 +94,6 @@ struct MessagesView: View {
                 state.clear(); selected = nil; pushed = nil
             }
         }
-        .onChange(of: scenePhase) { _, value in if value == .background { action = nil } }
     }
 
     private var list: some View {

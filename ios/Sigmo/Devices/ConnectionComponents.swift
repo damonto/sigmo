@@ -10,11 +10,9 @@ struct ConnectionLifecycle: ViewModifier {
     var refreshID = 0
     let reload: @MainActor () async -> Void
     let cancelAction: @MainActor () -> Void
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
 
     private struct Identity: Equatable {
-        let background: Bool
         let available: Bool
         let refresh: Int
     }
@@ -24,15 +22,12 @@ struct ConnectionLifecycle: ViewModifier {
             .environment(\.defaultMinListRowHeight, 44)
             .navigationBarTitleDisplayMode(.inline)
             .disabled(!scope.available)
-            .task(id: Identity(background: scenePhase == .background, available: scope.available, refresh: refreshID)) {
-                guard scenePhase != .background, scope.available else { return }
+            .foregroundTask(id: Identity(available: scope.available, refresh: refreshID)) {
+                guard scope.available else { return }
                 await reload()
             }
             .onChange(of: scope.available) { _, available in
                 if !available { cancelAction(); dismiss() }
-            }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .background { cancelAction() }
             }
             .onDisappear { cancelAction() }
     }

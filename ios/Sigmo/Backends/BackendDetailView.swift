@@ -87,7 +87,6 @@ struct BackendDetailView: View {
 
 struct AuthenticationView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
     let session: BackendSession
     @State private var code = ""
     @State private var verificationCode: String?
@@ -140,9 +139,6 @@ struct AuthenticationView: View {
             if self.verificationCode == verificationCode { self.verificationCode = nil }
         }
         .onDisappear { verificationCode = nil; code = "" }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { verificationCode = nil; code = "" }
-        }
         .onChange(of: loginComplete) { _, complete in
             if complete { dismiss() }
         }
@@ -152,7 +148,6 @@ struct AuthenticationView: View {
 struct ActivationView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
-    @Environment(\.scenePhase) private var scenePhase
     let session: BackendSession
     @State private var linkFailure: BackendFailure?
 
@@ -199,8 +194,8 @@ struct ActivationView: View {
             .navigationTitle("activation.title")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("common.done") { dismiss() } } }
         }
-        .task(id: scenePhase) {
-            if scenePhase == .active { await session.observePairing() }
+        .foregroundTask {
+            await session.observePairing()
         }
         .onChange(of: session.activationReady) { _, ready in
             if ready { dismiss() }

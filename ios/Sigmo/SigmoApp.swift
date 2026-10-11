@@ -14,13 +14,11 @@ struct SigmoApp: App {
                 .environment(appDelegate.calls)
                 .environment(\.nativePush, appDelegate.push)
                 .preferredColorScheme(AppLaunch.colorScheme)
-                .task(id: scenePhase == .background) {
-                    if scenePhase != .background { await store.refreshAll() }
-                }
+                .foregroundTask { await store.refreshAll() }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     appDelegate.calls.foreground = phase != .background
                     if phase != .active { appDelegate.calls.recordings.stopPlayback() }
-                    if phase == .background { store.stop() }
+                    store.setForeground(phase != .background)
                 }
                 .task { AppDiagnostics.record("app launched") }
                 .task { await appDelegate.calls.run() }
@@ -37,8 +35,8 @@ struct SigmoApp: App {
                         await appDelegate.calls.reloadContacts()
                     }
                 }
-                .task(id: appDelegate.push.lifecycle(store: store, background: scenePhase == .background)) {
-                    if scenePhase != .background { await appDelegate.push.run(store: store) }
+                .foregroundTask(id: appDelegate.push.lifecycle(store: store)) {
+                    await appDelegate.push.run(store: store)
                 }
         }
     }

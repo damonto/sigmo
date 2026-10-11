@@ -87,7 +87,6 @@ struct DetailReminderForm: View {
     @State private var clearing = false
     @State private var presentedFailure: BackendFailure?
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
 
     init(state: ModemDetailState, profile: ESIMProfile?) {
         self.state = state; self.profile = profile
@@ -141,7 +140,6 @@ struct DetailReminderForm: View {
                 clearing = false
             }
         }
-        .onChange(of: scenePhase) { _, phase in if phase == .background { clearing = false } }
         .onDisappear { clearing = false }
     }
 }

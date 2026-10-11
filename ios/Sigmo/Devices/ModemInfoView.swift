@@ -4,7 +4,6 @@ struct ModemInfoView: View {
     let state: ModemDetailState
     @State private var presentedFailure: BackendFailure?
     @State private var refreshID = 0
-    @Environment(\.scenePhase) private var scenePhase
     var body: some View {
         Form {
             if let modem = state.modem {
@@ -28,8 +27,8 @@ struct ModemInfoView: View {
         .task(id: refreshID) {
             if refreshID > 0 { await reload() }
         }
-        .task(id: scenePhase == .background) {
-            if scenePhase != .background { await reload() }
+        .foregroundTask {
+            await reload()
         }
     }
 

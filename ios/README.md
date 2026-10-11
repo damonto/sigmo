@@ -30,6 +30,8 @@ Use **Add Sigmo (+)** to enter a name and server URL, including any reverse-prox
 
 Use HTTPS with a system-trusted certificate, or local-network HTTP. Allow local-network access when prompted. Connections are saved locally, and authentication tokens are stored in Keychain.
 
+Switching to the background lets in-flight requests and eSIM operations finish and pauses automatic polling between requests. Returning to the active scene refreshes idle pages without restarting pending work. The app requests additional iOS execution time for HTTP requests, the initial SIM status read, and SIM/eSIM interactions; idle SIM subscriptions suspend in the background. If the extra time expires, the app cancels unfinished work and releases resources. iOS suspension or termination can still interrupt long operations. Refresh the backend state before retrying a write whose result is uncertain.
+
 ## Verification
 
 Run **Product → Test** in Xcode with the **Sigmo** scheme to execute `SigmoTests` and `SigmoUITests`. These tests use local fixtures; physical-device, carrier, and APNs checks are separate.

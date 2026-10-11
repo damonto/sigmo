@@ -3,6 +3,42 @@ import XCTest
 
 @MainActor
 final class BackendSessionTests: XCTestCase {
+    func testBackgroundingPreservesInFlightRefreshAndProtectedRequest() async throws {
+        let stub = BackendStub()
+        let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = BackendStore(file: ConfigurationFile(url: directory.appending(path: "connections.json")),
+                                 credentials: MemoryCredentials().store, makeAPI: { configuration in
+            BackendAPI(configuration: configuration) { try await stub.respond($0) }
+        })
+        let id = UUID()
+        XCTAssertTrue(store.saveBackend(id: id, name: "Home", address: "https://one.example"))
+        let session = try XCTUnwrap(store.sessions[id])
+        await stub.holdNextModemRequest()
+        let refresh = Task { await store.refreshAll() }
+        await stub.waitForHeldRequest()
+        store.setForeground(false)
+        XCTAssertTrue(session.isRefreshing)
+        await stub.release()
+        await refresh.value
+        XCTAssertTrue(session.isOnline)
+        XCTAssertFalse(session.foreground)
+
+        store.setForeground(true)
+        await stub.holdNextRequest("/auth/otp")
+        let request = Task {
+            try await session.protectedRequest { api, _ in try await api.sendOTP() }
+        }
+        await stub.waitForHeldRequest()
+        store.setForeground(false)
+        store.setForeground(true)
+        await stub.release()
+        try await request.value
+        XCTAssertTrue(session.foreground)
+        let count = await stub.count("/auth/otp")
+        XCTAssertEqual(count, 1)
+    }
+
     func testInitialLoadConnectsButRefreshKeepsOnlineStatus() async throws {
         let stub = BackendStub()
         let session = try testSession(stub)

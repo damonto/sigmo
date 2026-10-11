@@ -4,7 +4,6 @@ struct ModemSettingsView: View {
     let state: ModemSettingsState
     @State private var pending: AirplaneChange?
     @State private var presentedFailure: BackendFailure?
-    @Environment(\.scenePhase) private var scenePhase
 
     private struct AirplaneChange: Identifiable {
         let id = UUID()
@@ -72,9 +71,6 @@ struct ModemSettingsView: View {
             presentedFailure = state.failure
         }
         .onDisappear { pending = nil }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { pending = nil }
-        }
     }
 
     private var airplaneSection: some View {
@@ -113,12 +109,11 @@ struct ModemSettingsView: View {
 // snapshots while SwiftUI cancels the previous page's outstanding work.
 struct ModemSettingsForm<Content: View>: View {
     let state: ModemSettingsState
+    @Environment(\.scenePhase) private var scenePhase
     @ViewBuilder var content: () -> Content
     @State private var refreshID = 0
-    @Environment(\.scenePhase) private var scenePhase
 
     private struct RefreshIdentity: Equatable {
-        let background: Bool
         let accessRevision: Int
         let hasAccess: Bool
         let refreshID: Int
@@ -150,9 +145,8 @@ struct ModemSettingsForm<Content: View>: View {
             }
         }
         .environment(\.defaultMinListRowHeight, 44)
-        .task(id: RefreshIdentity(background: scenePhase == .background, accessRevision: state.session.accessRevision,
+        .foregroundTask(id: RefreshIdentity(accessRevision: state.session.accessRevision,
                                   hasAccess: state.hasAccess, refreshID: refreshID)) {
-            guard scenePhase != .background else { return }
             await state.load()
         }
         .refreshable { await state.load() }

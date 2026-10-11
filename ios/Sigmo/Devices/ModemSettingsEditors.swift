@@ -4,7 +4,6 @@ struct ModemNetworkModeView: View {
     let state: ModemSettingsState
     @State private var pending: ModeChange?
     @State private var presentedFailure: BackendFailure?
-    @Environment(\.scenePhase) private var scenePhase
 
     private struct ModeChange: Identifiable {
         let id = UUID()
@@ -53,7 +52,6 @@ struct ModemNetworkModeView: View {
             presentedFailure = state.failure
         }
         .onDisappear { pending = nil }
-        .onChange(of: scenePhase) { _, phase in if phase == .background { pending = nil } }
     }
 }
 

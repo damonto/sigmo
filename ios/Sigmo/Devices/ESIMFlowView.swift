@@ -72,11 +72,7 @@ struct ESIMFlowView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {
-                closing = false
                 if setupPage == .scanner { showManualFromScanner() }
-                callback = nil
-                sourceDeletionReply = nil
-                state.interrupt()
             }
         }
         .onChange(of: state.detail.session.accessRevision) { _, _ in

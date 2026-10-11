@@ -543,6 +543,70 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue((number.value as? String)?.contains("139") == true)
     }
 
+    func testDeletionReturnsToListAndDisablesProfile() {
+        for chinese in [false, true] {
+            let app = launch("detail-deletion-loading", chinese: chinese)
+            openActions(app)
+            tap(app.buttons[chinese ? "删除 eSIM" : "Delete eSIM"], in: app)
+            tap(app.buttons["confirmDetailAction"].firstMatch, in: app)
+
+            let row = app.buttons["profileActions-se-a:8986000000000000002"]
+            XCTAssertTrue(row.waitForExistence(timeout: 2))
+            XCTAssertTrue(row.label.contains(chinese ? "删除中" : "Deleting"), row.label)
+            XCTAssertFalse(row.label.contains(chinese ? "关闭" : "Off"), row.label)
+            XCTAssertFalse(row.isEnabled)
+            XCTAssertFalse(app.buttons["profileManagementInfo"].exists)
+            let other = app.buttons["profileActions-se-b:8986000000000000002"]
+            XCTAssertTrue(other.isEnabled)
+            XCTAssertTrue(other.label.contains(chinese ? "关闭" : "Off"), other.label)
+
+            XCTAssertTrue(row.waitForNonExistence(timeout: 12))
+            XCTAssertTrue(other.exists)
+            XCTAssertFalse(app.alerts.firstMatch.exists)
+            app.terminate()
+        }
+    }
+
+    func testForegroundRefreshDisablesActionsUntilSnapshotArrives() {
+        let app = launch("detail-loading")
+        let row = app.buttons["profileActions-se-a:8986000000000000002"]
+        XCTAssertTrue(row.waitForExistence(timeout: 12))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: row)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        let refreshing = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == false"), object: row)
+        XCTAssertEqual(XCTWaiter.wait(for: [refreshing], timeout: 2), .completed)
+        XCTAssertTrue(row.label.contains("Off"), row.label)
+
+        let refreshed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: row)
+        XCTAssertEqual(XCTWaiter.wait(for: [refreshed], timeout: 12), .completed)
+        openActions(app)
+    }
+
+    func testDeletionFailureRestoresProfileActions() {
+        let app = launch("detail-deletion-error")
+        openActions(app)
+        tap(app.buttons["Delete eSIM"], in: app)
+        tap(app.buttons["confirmDetailAction"].firstMatch, in: app)
+
+        let row = app.buttons["profileActions-se-a:8986000000000000002"]
+        XCTAssertTrue(row.waitForExistence(timeout: 2))
+        XCTAssertTrue(row.label.contains("Deleting"), row.label)
+        XCTAssertFalse(row.isEnabled)
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 12))
+        XCTAssertTrue(alert.staticTexts["The server could not complete the request."].exists)
+        alert.buttons["OK"].tap()
+
+        XCTAssertTrue(row.isEnabled)
+        XCTAssertTrue(row.label.contains("Off"), row.label)
+        XCTAssertFalse(row.label.contains("Deleting"), row.label)
+        openActions(app)
+        XCTAssertTrue(app.buttons["Delete eSIM"].isEnabled)
+    }
+
     func testScannerFallbackAndManualBackNavigation() {
         let app = launch(dark: true)
         installForm(app, manual: false)

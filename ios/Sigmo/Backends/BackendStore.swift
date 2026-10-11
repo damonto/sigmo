@@ -7,6 +7,7 @@ final class BackendStore {
     private(set) var sessions: [UUID: BackendSession] = [:]
     var failure: BackendFailure?
     private(set) var configurationLoaded = false
+    private(set) var foreground = true
 
     @ObservationIgnored private let file: ConfigurationFile
     @ObservationIgnored private let credentials: BackendCredentials
@@ -114,7 +115,14 @@ final class BackendStore {
     }
 
     private func makeSession(_ backend: BackendConfiguration) -> BackendSession {
-        BackendSession(configuration: backend, credentials: credentials, api: makeAPI(backend), clock: clock, gate: gate)
+        let session = BackendSession(configuration: backend, credentials: credentials, api: makeAPI(backend), clock: clock, gate: gate)
+        session.foreground = foreground
+        return session
+    }
+
+    func setForeground(_ foreground: Bool) {
+        self.foreground = foreground
+        for session in sessions.values { session.foreground = foreground }
     }
 
     func refreshAll(force: Bool = true) async {
@@ -131,7 +139,7 @@ final class BackendStore {
             for session in current {
                 group.addTask {
                     do { try await gate.run { await session.refreshUnreadCounts() } }
-                    catch { /* Backgrounding cancels queued badge reads. */ }
+                    catch { /* The caller can cancel queued badge reads. */ }
                 }
             }
         }

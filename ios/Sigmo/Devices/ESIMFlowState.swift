@@ -250,15 +250,17 @@ final class ESIMFlowState: Identifiable {
         do {
             await detail.session.invalidateModemReads(id)
             try await detail.session.protectedRequest { api, token in
-                let connection = try await api.socket(path, token: token)
-                try await withTaskCancellationHandler {
-                    try await self.exchange(connection, start: data, runID: runID, api: api, token: token)
-                } onCancel: { connection.close() }
+                try await BackgroundExecution.run(name: "eSIM operation") {
+                    let connection = try await api.socket(path, token: token)
+                    try await withTaskCancellationHandler {
+                        try await self.exchange(connection, start: data, runID: runID, api: api, token: token)
+                    } onCancel: { connection.close() }
+                }
             }
         } catch {
             guard current == revision, self.runID == runID, phase != .completed else { return }
             phase = .failed
-            failure = Task.isCancelled ? .local("detail.interrupted") : .wrapping(error)
+            failure = Task.isCancelled || error is CancellationError ? .local("detail.interrupted") : .wrapping(error)
         }
         if current == revision, !Task.isCancelled { await reconcile() }
     }

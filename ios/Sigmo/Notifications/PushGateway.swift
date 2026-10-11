@@ -8,7 +8,7 @@ final class PushGateway: Sendable {
 
     init(address: URL? = nil, transport: Transport? = nil) {
         let configured = Bundle.main.object(forInfoDictionaryKey: "SigmoPushGatewayURL") as? String
-        self.address = address ?? URL(string: configured ?? "https://sigmo-pro-api.id.workers.dev")
+        self.address = address ?? URL(string: configured ?? "https://sigmo-pro.952007.xyz")
         if let transport {
             self.session = nil
             self.transport = transport

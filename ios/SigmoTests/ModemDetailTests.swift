@@ -386,6 +386,68 @@ final class ModemDetailTests: XCTestCase {
         XCTAssertEqual(rename.url?.path, "/prefix/api/v1/modems/device-1/ses/se-a/esims/8986000000000000002/nickname")
     }
 
+    func testConfirmedDeletionRemovesProfileWhenRefreshFails() async throws {
+        for suffix in ["/modems/device-1", "/ses", "/esims"] {
+            let server = DetailFixtureServer()
+            let detail = try await make(server)
+            let profile = detail.groups[0].profiles[1]
+            let other = detail.groups[1].profiles[0]
+            await server.setStatus(suffix, 503)
+
+            let deleted = await detail.delete(profile)
+
+            XCTAssertTrue(deleted, suffix)
+            XCTAssertNil(detail.currentProfile(profile.id), suffix)
+            XCTAssertNotNil(detail.currentProfile(other.id), suffix)
+            XCTAssertEqual((detail.failure ?? detail.elementsFailure ?? detail.profilesFailure)?.status, 503, suffix)
+            XCTAssertFalse(detail.busy)
+            let count = await server.allRequests().count
+            let enabled = await detail.enable(profile)
+            let repeated = await detail.delete(profile)
+            XCTAssertFalse(enabled)
+            XCTAssertFalse(repeated)
+            let updatedCount = await server.allRequests().count
+            XCTAssertEqual(updatedCount, count)
+        }
+    }
+
+    func testDeletingProfileBlocksMutationsAndFailureAllowsRetry() async throws {
+        let server = DetailFixtureServer()
+        let detail = try await make(server)
+        let profile = detail.groups[0].profiles[1]
+        let suffix = "/ses/\(profile.seId)/esims/\(profile.iccid)"
+        await server.setStatus(suffix, 503)
+        await server.holdNext(suffix)
+        let deletion = Task { await detail.delete(profile) }
+        await server.waitForHeldRequest()
+
+        XCTAssertTrue(detail.busy)
+        XCTAssertNotNil(detail.currentProfile(profile.id))
+        let count = await server.allRequests().count
+        let enabled = await detail.enable(profile)
+        let renamed = await detail.rename(profile, name: "Changed")
+        let reminder = await detail.saveReminder(profile: profile, value: nil)
+        let repeated = await detail.delete(profile)
+        XCTAssertFalse(enabled)
+        XCTAssertFalse(renamed)
+        XCTAssertFalse(reminder)
+        XCTAssertFalse(repeated)
+        let updatedCount = await server.allRequests().count
+        XCTAssertEqual(updatedCount, count)
+
+        await server.release()
+        let deleted = await deletion.value
+        XCTAssertFalse(deleted)
+        XCTAssertFalse(detail.busy)
+        XCTAssertNotNil(detail.currentProfile(profile.id))
+        XCTAssertEqual(detail.failure?.status, 503)
+
+        await server.setStatus(suffix, 200)
+        let retried = await detail.delete(profile)
+        XCTAssertTrue(retried)
+        XCTAssertNil(detail.currentProfile(profile.id))
+    }
+
     func testConnectionsRetainPreferencesAndWiFiDisconnectDoesNotDisable() async throws {
         let server = DetailFixtureServer(), detail = try await make(server)
         let internet = InternetState(detail: detail, profileID: "se-a:8986000000000000001")
@@ -590,6 +652,26 @@ final class ModemDetailTests: XCTestCase {
         XCTAssertEqual(start.seId, "se-b"); XCTAssertEqual(start.activationCode, "secret")
     }
 
+    func testDownloadCompletesWhileInBackgroundWithoutReplay() async throws {
+        let server = DetailFixtureServer(), detail = try await make(server)
+        let flow = ESIMFlowState(detail: detail, seID: "se-b")
+        flow.input = LPAInput(smdp: "smdp.example")
+        flow.startDownload()
+        let run = Task { await flow.run() }
+        try await wait { flow.phase == .preview }
+        await flow.send(.init(type: "confirm", accept: true))
+        try await wait { flow.phase == .confirmation }
+        detail.session.foreground = false
+        await flow.send(.init(type: "confirmation_code", code: "1234"))
+        await run.value
+        XCTAssertEqual(flow.phase, .completed)
+        XCTAssertEqual(detail.groups[1].profiles.count, 2)
+        XCTAssertNil(flow.failure)
+        detail.session.foreground = true
+        let commands = try await server.allMessages().map { try JSONDecoder().decode(DetailCommand.self, from: $0).type }
+        XCTAssertEqual(commands.filter { $0 == "start" }.count, 1)
+    }
+
     func testCancellationDoesNotReplayDownload() async throws {
         let server = DetailFixtureServer(), detail = try await make(server)
         let flow = ESIMFlowState(detail: detail, seID: "se-a")
@@ -729,7 +811,7 @@ final class ModemDetailTests: XCTestCase {
         XCTAssertEqual(other.session.modems.count, 2)
     }
 
-    func testMalformedStreamAndBackgroundInterruption() async throws {
+    func testMalformedStreamAndExplicitInterruption() async throws {
         for malformed in [true, false] {
             let server = DetailFixtureServer(), detail = try await make(server)
             let flow = ESIMFlowState(detail: detail, seID: "se-a")

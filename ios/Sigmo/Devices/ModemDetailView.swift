@@ -54,6 +54,7 @@ private struct ModemDetailScreen: View {
     @State private var sheet: DetailSheet?
     @State private var confirmation: SIMSlot?
     @State private var pending: SlotChange?
+    @State private var deletion: ESIMProfile?
     @State private var presentedFailure: BackendFailure?
     @State private var preparingFlow: ESIMFlowState?
     @State private var availableFlow: ESIMFlowState?
@@ -63,7 +64,6 @@ private struct ModemDetailScreen: View {
     @State private var refreshID = 0
     @State private var tab = DetailTab.overview
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.scenePhase) private var scenePhase
 
     init(session: BackendSession, modemID: String, initialConversationID: String?, close: @escaping () -> Void, selectModem: @escaping (String) -> Void) {
         self.session = session
@@ -78,7 +78,6 @@ private struct ModemDetailScreen: View {
         _callHistory = State(initialValue: CallHistoryState(session: session, modemID: modemID))
     }
     private struct RefreshIdentity: Equatable {
-        let background: Bool
         let accessRevision: Int
         let refreshID: Int
         let tab: DetailTab
@@ -86,6 +85,7 @@ private struct ModemDetailScreen: View {
 
     private struct SIMObservationIdentity: Equatable {
         let refresh: RefreshIdentity
+        let suspended: Bool
         let canAccessDevices: Bool
         let sim: ModemSIMIdentity?
         let installing: Bool
@@ -93,7 +93,6 @@ private struct ModemDetailScreen: View {
 
     private var refreshIdentity: RefreshIdentity {
         RefreshIdentity(
-            background: scenePhase == .background,
             accessRevision: session.accessRevision,
             refreshID: refreshID,
             tab: tab
@@ -103,6 +102,7 @@ private struct ModemDetailScreen: View {
     private var simObservationIdentity: SIMObservationIdentity {
         SIMObservationIdentity(
             refresh: refreshIdentity,
+            suspended: sim.observationSuspended,
             canAccessDevices: session.canAccessDevices,
             sim: state.simIdentity,
             installing: addingESIM
@@ -158,6 +158,14 @@ private struct ModemDetailScreen: View {
     }
     private var presentedContent: some View {
         tabs
+        // The list owns deletion so dismissing profile actions does not cancel the request.
+        .task(id: deletion?.id) {
+            guard let profile = deletion else { return }
+            _ = await state.delete(profile)
+            guard deletion?.id == profile.id, !Task.isCancelled else { return }
+            deletion = nil
+            presentedFailure = state.failure ?? state.elementsFailure ?? state.profilesFailure
+        }
         .task(id: pending?.id) {
             guard let change = pending else { return }
             _ = await state.switchSlot(change.slot.slot)
@@ -236,10 +244,7 @@ private struct ModemDetailScreen: View {
         .onChange(of: tab) { _, value in
             if value != .overview { cancelPreparation() }
         }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { pending = nil; cancelPreparation(); sim.stop(); flow?.interrupt() }
-        }
-        .onDisappear { pending = nil; cancelPreparation(); sim.stop() }
+        .onDisappear { pending = nil; deletion = nil; cancelPreparation(); sim.stop() }
     }
 
     private var overview: some View {
@@ -278,13 +283,13 @@ private struct ModemDetailScreen: View {
         .labelStyle(.titleAndIcon)
         .refreshable { await reload() }
         .detailErrorAlert($presentedFailure, retry: { refreshID += 1 })
-        .task(id: refreshIdentity) {
-            guard scenePhase != .background, tab == .overview else { return }
+        .foregroundTask(id: refreshIdentity) {
+            guard tab == .overview else { return }
             await reload()
             offerPIN()
         }
         .task(id: simObservationIdentity) {
-            guard scenePhase != .background, tab == .overview, !addingESIM, state.modem != nil else { sim.stop(); return }
+            guard !sim.observationSuspended, tab == .overview, !addingESIM, state.modem != nil else { sim.stop(); return }
             await sim.observe()
         }
         .onDisappear { pending = nil; cancelPreparation(); sim.stop() }
@@ -446,8 +451,9 @@ private struct ModemDetailScreen: View {
     }
 
     private func profileRow(_ profile: ESIMProfile) -> some View {
-        NavigationLink {
-            ESIMProfileActionsView(state: state, profileID: profile.id)
+        let deleting = deletion?.id == profile.id
+        return NavigationLink {
+            ESIMProfileActionsView(state: state, profileID: profile.id, onDelete: { deletion = $0 })
         } label: {
             HStack(spacing: 12) {
                 ProfileAvatar(icon: profile.icon, region: profile.regionCode)
@@ -456,14 +462,21 @@ private struct ModemDetailScreen: View {
                     Text(profile.iccid).font(.caption.monospaced()).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 4)
-                Text(profile.enabled ? "detail.lineOn" : "detail.lineOff")
-                    .foregroundStyle(.secondary)
+                Group {
+                    if deleting {
+                        Text("detail.deletingProfile")
+                    } else {
+                        Text(profile.enabled ? "detail.lineOn" : "detail.lineOff")
+                    }
+                }
+                .foregroundStyle(.secondary)
                 if profile.reminder != nil {
                     Image(systemName: "bell").font(.caption).foregroundStyle(.secondary)
                         .accessibilityLabel(Text("detail.reminder"))
                 }
             }
         }
+        .disabled(deleting || state.loading)
         .accessibilityIdentifier("profileActions-" + profile.id)
     }
 
@@ -487,7 +500,7 @@ private struct ModemDetailScreen: View {
         }
         await prepared.discover()
         guard preparingFlow?.id == prepared.id, !Task.isCancelled,
-              tab == .overview, scenePhase != .background,
+              tab == .overview,
               session.canAccessDevices, state.canInstall, prepared.validSE,
               state.simIdentity == simIdentity else { return }
         if let discoveries = prepared.discoveries, !discoveries.isEmpty {
@@ -521,7 +534,7 @@ private struct ModemDetailScreen: View {
     }
     private func clear() {
         cancelPreparation()
-        flow?.interrupt(); flow = nil; sheet = nil; pending = nil; confirmation = nil; presentedFailure = nil
+        flow?.interrupt(); flow = nil; sheet = nil; pending = nil; deletion = nil; confirmation = nil; presentedFailure = nil
         state.clear(); settings.clear(); sim.stop()
         if session.authentication == .required || session.license == .activation {
             messages.clear()

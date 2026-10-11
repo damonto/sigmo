@@ -7,7 +7,6 @@ struct ReminderDestinationView: View {
     let seID: String
     @State private var state: ModemDetailState
     @State private var loaded = false
-    @Environment(\.scenePhase) private var scenePhase
 
     init(session: BackendSession, modemID: String, profileID: String, profileType: String, seID: String) {
         self.session = session
@@ -30,8 +29,7 @@ struct ReminderDestinationView: View {
                     ContentUnavailableView("push.resourceUnavailable", systemImage: "simcard", description: Text("push.lineUnavailable"))
                 }
             }
-            .task(id: scenePhase) {
-                guard scenePhase == .active else { return }
+            .foregroundTask {
                 await state.load()
                 if !Task.isCancelled { loaded = true }
             }

@@ -14,7 +14,6 @@ struct SkillDocument: FileDocument {
 
 struct MCPSettingsView: View {
     @Bindable var state: MCPState
-    @Environment(\.scenePhase) private var scenePhase
     @State private var creating = false
     @State private var pendingEnabled: Bool?
 
@@ -79,7 +78,7 @@ struct MCPSettingsView: View {
                 }
             }
             .refreshable { await state.load() }
-            .task(id: scenePhase == .background) { if scenePhase != .background && state.settings == nil { await state.load() } }
+            .foregroundTask { if state.settings == nil { await state.load() } }
         }
         .navigationTitle("settings.mcp.title").navigationBarTitleDisplayMode(.inline)
         .background {
@@ -101,9 +100,6 @@ struct MCPSettingsView: View {
             if !Task.isCancelled { self.pendingEnabled = nil }
         }
         .onDisappear { pendingEnabled = nil }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { pendingEnabled = nil }
-        }
     }
 
 }
@@ -113,7 +109,6 @@ private struct MCPKeyDetailView: View {
     let keyID: String
     @State private var revoking = false
     @State private var revocationRequested = false
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         SettingsAccessView(session: state.session) {
@@ -142,9 +137,6 @@ private struct MCPKeyDetailView: View {
             if !Task.isCancelled { revocationRequested = false }
         }
         .onDisappear { revocationRequested = false }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { revocationRequested = false }
-        }
     }
 
     @ViewBuilder private func keyDetails(_ key: MCPAPIKey) -> some View {

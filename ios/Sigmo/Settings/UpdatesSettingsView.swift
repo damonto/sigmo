@@ -2,11 +2,10 @@ import SwiftUI
 
 struct UpdatesSettingsView: View {
     @Bindable var state: UpdatesState
-    @Environment(\.scenePhase) private var scenePhase
     @State private var pendingPreferences: UpdatePreferences?
 
     private var observationActive: Bool {
-        scenePhase != .background && state.shouldPoll && !state.working
+        state.shouldPoll && !state.working
     }
 
     var body: some View {
@@ -76,8 +75,8 @@ struct UpdatesSettingsView: View {
                     RetryButton(id: "retry-updates") { await state.load() }.disabled(state.working)
                 }
             }
-            .task(id: scenePhase == .background) { if scenePhase != .background { await state.load() } }
-            .task(id: observationActive) {
+            .foregroundTask { await state.load() }
+            .foregroundTask(id: observationActive) {
                 if observationActive { await state.observe() }
             }
         }
@@ -88,9 +87,6 @@ struct UpdatesSettingsView: View {
             if !Task.isCancelled { self.pendingPreferences = nil }
         }
         .onDisappear { pendingPreferences = nil }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { pendingPreferences = nil }
-        }
     }
 
     private func save(automatic: Bool, channel: String) {

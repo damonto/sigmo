@@ -16,7 +16,6 @@ struct MessageThreadView: View {
     private struct ReadIdentity: Equatable {
         let messageID: Int64?
         let loading: Bool
-        let active: Bool
     }
 
     var body: some View {
@@ -35,8 +34,7 @@ struct MessageThreadView: View {
                     .toolbar(.hidden, for: .tabBar)
             }
         }
-        .task(id: scenePhase == .background) {
-            guard scenePhase != .background else { return }
+        .foregroundTask {
             await state.load()
         }
         .task(id: push?.eventRevision) { if scenePhase == .active { await state.load() } }
@@ -45,14 +43,13 @@ struct MessageThreadView: View {
             await state.send()
             if self.pendingSend == pendingSend { self.pendingSend = nil }
         }
-        .task(id: ReadIdentity(messageID: visibleMessageID, loading: state.loading, active: scenePhase == .active)) {
-            guard scenePhase == .active, !state.loading, let id = visibleMessageID else { return }
+        .foregroundTask(id: ReadIdentity(messageID: visibleMessageID, loading: state.loading)) {
+            guard !state.loading, let id = visibleMessageID else { return }
             await state.markRead(through: id)
         }
         .onAppear { push?.visibleConversation = identity }
         .onChange(of: identity) { _, value in push?.visibleConversation = value }
         .onDisappear { if push?.visibleConversation == identity { push?.visibleConversation = nil }; pendingSend = nil }
-        .onChange(of: scenePhase) { _, value in if value == .background { pendingSend = nil } }
         .task(id: state.badge) {
             if let value = state.badge {
                 push?.record(value, sessionID: state.session.id)
@@ -236,7 +233,6 @@ struct NewMessageView: View {
     @Bindable var state: MessagesState
     let completed: (SMSConversation?) -> Void
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
     @FocusState private var recipientFocused: Bool
     @State private var pendingSend: UUID?
     var body: some View {
@@ -267,6 +263,5 @@ struct NewMessageView: View {
             if state.newDraft.isEmpty { completed(conversation) }
         }
         .onDisappear { pendingSend = nil }
-        .onChange(of: scenePhase) { _, value in if value == .background { pendingSend = nil } }
     }
 }

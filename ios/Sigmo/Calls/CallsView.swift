@@ -11,7 +11,7 @@ struct CallsView: View {
     @State private var pendingDeletion: CallRecord?
     @State private var pendingDial: (number: String, line: CallLine)?
 
-    private struct Refresh: Equatable { let background: Bool; let access: Int; let line: String? }
+    private struct Refresh: Equatable { let access: Int; let line: String? }
 
     var body: some View {
         List {
@@ -67,8 +67,8 @@ struct CallsView: View {
             }
         }
         .refreshable { await state.load() }
-        .task(id: Refresh(background: scenePhase == .background, access: state.session.accessRevision, line: state.line?.id)) {
-            if scenePhase != .background { await state.load() }
+        .foregroundTask(id: Refresh(access: state.session.accessRevision, line: state.line?.id)) {
+            await state.load()
         }
         .task(id: calls.revision) { if scenePhase == .active { await state.load() } }
         .task(id: state.search) {
@@ -82,9 +82,6 @@ struct CallsView: View {
         }
         .onChange(of: state.session.accessRevision) { _, _ in clear() }
         .onChange(of: state.line?.id) { _, _ in clear() }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { pendingDeletion = nil; deleting = nil }
-        }
         .onDisappear { pendingDeletion = nil; deleting = nil }
         .sheet(isPresented: $dialing, onDismiss: {
             // Finish the sheet transition before presenting the global call screen.

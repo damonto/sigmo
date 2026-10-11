@@ -183,7 +183,7 @@ final class HomeTests: XCTestCase {
         XCTAssertEqual(session.unreadCounts["device-1"], 1)
     }
 
-    func testUnreadResponsesAfterLogoutAndBackgroundAreDiscarded() async throws {
+    func testUnreadResponsesAfterLogoutAndStopAreDiscarded() async throws {
         for logout in [false, true] {
             let stub = BackendStub()
             await stub.setConversations(try snapshot(revision: 1, counts: [("device-1", 2)]))

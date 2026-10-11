@@ -98,10 +98,11 @@ final class UpdatesState {
         let current = revision
         var restartStarted: Date?
         var delay = 1
-        while current == revision, shouldPoll, !Task.isCancelled {
+        while session.foreground, current == revision, shouldPoll, !Task.isCancelled {
             do {
                 try await clock.sleep(.seconds(recovering ? delay : 1))
                 try check(current)
+                guard session.foreground else { return }
                 if recovering {
                     if restartStarted == nil { restartStarted = clock.now() }
                     if let restartStarted, clock.now().timeIntervalSince(restartStarted) >= 120 {

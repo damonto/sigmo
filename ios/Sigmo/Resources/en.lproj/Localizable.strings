@@ -624,6 +624,7 @@
 "detail.profileState" = "Profile State";
 "detail.lineOn" = "On";
 "detail.lineOff" = "Off";
+"detail.deletingProfile" = "Deleting";
 "detail.next" = "Next";
 "detail.checkingESIM" = "Checking for eSIMs…";
 "detail.discoveriesAvailable" = "eSIMs Available to Download";

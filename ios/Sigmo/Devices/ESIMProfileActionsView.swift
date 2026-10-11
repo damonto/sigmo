@@ -3,44 +3,48 @@ import SwiftUI
 struct ESIMProfileActionsView: View {
     let state: ModemDetailState
     let profileID: String
+    // A list can own deletion; standalone reminder destinations must keep it in this view.
+    let onDelete: ((ESIMProfile) -> Void)?
 
     private enum Sheet { case number, rename, reminder, sim }
-    private enum Confirmation { case enable, delete }
-    private enum Operation { case enable, delete }
+    private enum Action { case enable, delete }
 
     private struct PendingOperation: Identifiable {
         let id = UUID()
-        let kind: Operation
+        let kind: Action
         let profile: ESIMProfile
     }
 
     private struct ObservationIdentity: Equatable {
-        let background: Bool
         let accessRevision: Int
         let enabled: Bool
         let sim: ModemSIMIdentity?
     }
 
+    private struct SIMObservationIdentity: Equatable {
+        let profile: ObservationIdentity
+        let suspended: Bool
+    }
+
     @State private var sheet: Sheet?
-    @State private var confirmation: Confirmation?
+    @State private var confirmation: Action?
     @State private var operation: PendingOperation?
     @State private var presentedFailure: BackendFailure?
     @State private var refreshID = 0
     @State private var sim: SIMApplicationState
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
 
-    init(state: ModemDetailState, profileID: String) {
+    init(state: ModemDetailState, profileID: String, onDelete: ((ESIMProfile) -> Void)? = nil) {
         self.state = state
         self.profileID = profileID
+        self.onDelete = onDelete
         _sim = State(initialValue: SIMApplicationState(session: state.session, modemID: state.modemID))
     }
 
     private var profile: ESIMProfile? { state.currentProfile(profileID) }
-    private var busy: Bool { state.busy || operation != nil }
+    private var busy: Bool { state.loading || state.busy || operation != nil }
     private var observationIdentity: ObservationIdentity {
         ObservationIdentity(
-            background: scenePhase == .background,
             accessRevision: state.session.accessRevision,
             enabled: profile?.enabled == true,
             sim: state.simIdentity
@@ -72,7 +76,7 @@ struct ESIMProfileActionsView: View {
                     confirmation == .delete ? "detail.deleteESIM" : "detail.confirm",
                     role: confirmation == .delete ? .destructive : nil
                 ) {
-                    begin(confirmation == .delete ? .delete : .enable)
+                    begin(confirmation)
                     self.confirmation = nil
                 }
                 .accessibilityIdentifier("confirmDetailAction")
@@ -93,12 +97,11 @@ struct ESIMProfileActionsView: View {
             .task(id: refreshID) {
                 if refreshID > 0 { await reload() }
             }
-            .task(id: observationIdentity) {
-                guard scenePhase != .background else { return }
+            .foregroundTask(id: observationIdentity) {
                 await reload()
             }
-            .task(id: observationIdentity) {
-                guard scenePhase != .background, profile?.enabled == true else {
+            .task(id: SIMObservationIdentity(profile: observationIdentity, suspended: sim.observationSuspended)) {
+                guard !sim.observationSuspended, profile?.enabled == true else {
                     sim.stop()
                     return
                 }
@@ -121,12 +124,6 @@ struct ESIMProfileActionsView: View {
                 presentedFailure = nil
                 sim.stop()
                 dismiss()
-            }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .background {
-                    operation = nil
-                    sim.stop()
-                }
             }
             .onDisappear {
                 operation = nil
@@ -264,8 +261,13 @@ struct ESIMProfileActionsView: View {
         .accessibilityValue(value)
     }
 
-    private func begin(_ kind: Operation) {
+    private func begin(_ kind: Action) {
         guard !busy, let profile else { return }
+        if kind == .delete, let onDelete {
+            onDelete(profile)
+            dismiss()
+            return
+        }
         operation = PendingOperation(kind: kind, profile: profile)
     }
 

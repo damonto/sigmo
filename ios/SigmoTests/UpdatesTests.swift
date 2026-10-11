@@ -3,6 +3,25 @@ import XCTest
 
 @MainActor
 final class UpdatesTests: XCTestCase {
+    func testBackgroundingFinishesCurrentPollWithoutStartingAnother() async throws {
+        let server = try SettingsTestServer()
+        let session = try settingsSession(server)
+        await session.refresh(force: true)
+        await server.setUpdateState("downloading")
+        let state = UpdatesState(session: session, clock: BackendClock(sleep: { _ in try Task.checkCancellation() }))
+        await state.load()
+        await server.holdNext("/update-installations/current")
+        let poll = Task { await state.observe() }
+        await server.waitForHeldRequest()
+        session.foreground = false
+        await server.release()
+        await poll.value
+        XCTAssertNotNil(state.snapshot)
+        XCTAssertNil(state.failure)
+        let requests = await server.allRequests()
+        XCTAssertEqual(requests.filter { $0.url?.path.hasSuffix("/update-installations/current") == true }.count, 1)
+    }
+
     func testClearedUpdatesCanReloadWithoutRestoringOlderSnapshot() async throws {
         let server = try SettingsTestServer()
         let session = try settingsSession(server)

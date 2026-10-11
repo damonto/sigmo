@@ -61,7 +61,6 @@ struct ESIMNotificationsView: View {
     @State private var pendingAction: PendingAction?
     @State private var presentedFailure: BackendFailure?
     @State private var refreshID = 0
-    @Environment(\.scenePhase) private var scenePhase
     init(session: BackendSession, modemID: String, elements: [SecureElement]) {
         self.session = session
         self.elements = elements
@@ -126,7 +125,7 @@ struct ESIMNotificationsView: View {
         .navigationTitle("detail.notifications").navigationBarTitleDisplayMode(.inline)
         .refreshable { await reload() }
         .detailErrorAlert($presentedFailure, retry: { refreshID += 1 })
-        .task(id: scenePhase == .background) { if scenePhase != .background { await reload() } }
+        .foregroundTask { await reload() }
         .task(id: refreshID) { if refreshID > 0 { await reload() } }
         .task(id: pendingAction?.id) {
             guard let pendingAction else { return }
@@ -143,7 +142,6 @@ struct ESIMNotificationsView: View {
         }
         .onChange(of: session.accessRevision) { _, _ in state.clear(); pendingAction = nil; deleting = nil; presentedFailure = nil }
         .onChange(of: session.canAccessDevices) { _, value in if !value { state.clear(); pendingAction = nil; deleting = nil } }
-        .onChange(of: scenePhase) { _, phase in if phase == .background { pendingAction = nil; deleting = nil } }
         .onDisappear { pendingAction = nil; deleting = nil }
     }
 

@@ -14,7 +14,6 @@ struct SettingsAccessView<Content: View>: View {
     @ViewBuilder var content: () -> Content
     @State private var login = false
     @State private var activation = false
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -38,8 +37,8 @@ struct SettingsAccessView<Content: View>: View {
         }
         .sheet(isPresented: $login) { AuthenticationView(session: session) }
         .sheet(isPresented: $activation) { ActivationView(session: session) }
-        .task(id: scenePhase == .background) {
-            if scenePhase != .background && !session.canAccessDevices { await session.refresh(force: true) }
+        .foregroundTask {
+            if !session.canAccessDevices { await session.refresh(force: true) }
         }
     }
 }

@@ -18,6 +18,12 @@ struct BackendHTTPResponse: Sendable {
     // Reading headers first lets an oversized or interrupted error preserve its
     // HTTP meaning. Successful downloads retain their existing size policy.
     static func receive(_ request: URLRequest, session: URLSession) async throws -> BackendHTTPResponse {
+        try await BackgroundExecution.run(name: "HTTP request") {
+            try await receiveResponse(request, session: session)
+        }
+    }
+
+    private static func receiveResponse(_ request: URLRequest, session: URLSession) async throws -> BackendHTTPResponse {
         let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse else {
             bytes.task.cancel()

@@ -185,7 +185,15 @@ final class ModemDetailState {
     func delete(_ profile: ESIMProfile) async -> Bool {
         guard let profile = currentProfile(profile.id), !profile.enabled else { return false }
         let id = modemID
-        return await mutate { api, token in try await api.detailMutation(id, path: ["ses", profile.seId, "esims", profile.iccid], method: "DELETE", token: token) }
+        let deleted = await mutate { api, token in
+            try await api.detailMutation(id, path: ["ses", profile.seId, "esims", profile.iccid], method: "DELETE", token: token)
+        }
+        guard deleted else { return false }
+        // DELETE already confirmed removal, even if the following snapshot refresh failed.
+        for index in groups.indices {
+            groups[index].profiles.removeAll { $0.id == profile.id }
+        }
+        return true
     }
     static func validNickname(_ value: String) -> Bool {
         let name = value.trimmingCharacters(in: .whitespacesAndNewlines)

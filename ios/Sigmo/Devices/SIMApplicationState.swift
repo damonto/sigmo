@@ -70,13 +70,22 @@ final class SIMApplicationState {
     var input = ""
     @ObservationIgnored private var socket: BackendSocket?
     @ObservationIgnored private var revision = 0
+    private var backgroundExecution: BackgroundExecution?
+    @ObservationIgnored private let backgroundAccess: BackgroundExecution.Access
 
-    init(session: BackendSession, modemID: String) { self.session = session; self.modemID = modemID }
+    var observationSuspended: Bool { !session.foreground && backgroundExecution == nil }
+
+    init(session: BackendSession, modemID: String, backgroundAccess: BackgroundExecution.Access = .system) {
+        self.session = session
+        self.modemID = modemID
+        self.backgroundAccess = backgroundAccess
+    }
 
     func observe() async {
         guard session.canAccessDevices, !Task.isCancelled else { return }
         stop()
         failure = nil
+        guard beginBackgroundExecution() else { return }
         let current = revision, id = modemID
         do {
             try await session.protectedRequest { api, token in
@@ -87,8 +96,8 @@ final class SIMApplicationState {
             }
         } catch {
             guard current == revision else { return }
-            available = false; page = nil; presented = false
-            if !Task.isCancelled { failure = .wrapping(error) }
+            stop()
+            if !Task.isCancelled, !(error is CancellationError) { failure = .wrapping(error) }
         }
     }
     private func exchange(_ conn: BackendSocket, current: Int) async throws {
@@ -124,10 +133,18 @@ final class SIMApplicationState {
         case "error": throw BackendFailure(code: "sim_application", message: value.message ?? detailText("detail.operationFailed"))
         default: throw BackendFailure.local("api.invalidResponse")
         }
+        if !presented {
+            // The initial status read is complete. An idle subscription is not
+            // a background operation, but a SIM interaction must finish or expire.
+            endBackgroundExecution()
+        } else if value.type != "status" {
+            _ = beginBackgroundExecution()
+        }
     }
     func open() { if available, let root { page = .menu(root); presented = true } }
     func send(_ reply: SIMApplicationReply) async {
         guard let socket, !busy, session.canAccessDevices, !Task.isCancelled else { return }
+        guard beginBackgroundExecution() else { return }
         busy = true
         let current = revision
         let page = pageRevision
@@ -154,10 +171,29 @@ final class SIMApplicationState {
         guard current == revision, page == pageRevision, !Task.isCancelled else { return }
         presented = false
         input = ""
+        endBackgroundExecution()
     }
+
     func stop() {
         revision += 1
+        endBackgroundExecution()
         socket?.close(); socket = nil
         available = false; profileICCID = ""; root = nil; page = nil; presented = false; input = ""; busy = false
+    }
+
+    private func beginBackgroundExecution() -> Bool {
+        if backgroundExecution != nil { return true }
+        let current = revision
+        backgroundExecution = BackgroundExecution.begin(name: "SIM application", access: backgroundAccess) { [weak self] in
+            guard let self, current == self.revision else { return }
+            self.failure = .local("detail.interrupted")
+            self.stop()
+        }
+        return backgroundExecution != nil
+    }
+
+    private func endBackgroundExecution() {
+        backgroundExecution?.end()
+        backgroundExecution = nil
     }
 }
