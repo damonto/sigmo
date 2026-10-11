@@ -1,0 +1,21 @@
+{
+  "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "envelope": {
+    "version": 1,
+    "subscriptionId": "00000000-0000-4000-8000-000000000001",
+    "eventId": "sms:42",
+    "nonce": "EBESExQVFhcYGRob",
+    "ciphertext": "BtzzfyetGInoBmVuLVVLMbYzJWt1ph7VxcPABT83P74+jXp1kMUagAwbomG6qCMqMZBlEYLoMpfSenRQnvKGUSceiqihEZ7R/Q7SVXfjxJxe1vzbA+8hW/SZT3Gn4MEvXjZ/hICZSKVaPORFWkrlqm3z0RbY3pid1J24hxvXnX374egEG4eykBbQ45rY635LnQ9KMDm9ro3nsGi3rpiCT6G6ojvrm+XOiVA9meFKDiSAB9PqjwKORsaajizDpdp5DehoeczPpsKDMIoEfjB4/ubAaipVlGyPUj7px0r1yeaZ32AMfEydTVJEmNZsodnQw05QTrCo/Ey7dJCyfjUxSaT4CYHLQFM5ct1kn39AyZaVPa0UfOAB7grNoQEQG5Do/owPP87pU8c="
+  },
+  "content": {
+    "kind": "sms",
+    "backendId": "backend-vector-000001",
+    "backendName": "测试后端",
+    "conversationId": "11223344556677889900aabbccddeeff",
+    "messageId": 42,
+    "modemId": "modem-vector",
+    "profileId": "8986001234567890123",
+    "sender": "+8613800000000",
+    "text": "你好，Sigmo 👋 https://example.com"
+  }
+}

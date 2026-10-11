@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/url"
 	"time"
+
+	"github.com/damonto/sigmo/internal/pkg/apierror"
 )
 
 const (
@@ -65,10 +68,36 @@ type codedError interface {
 	Code() string
 }
 
+// ErrorCode returns the stable business code carried by an update failure.
 func ErrorCode(err error) string {
 	var coded codedError
 	if errors.As(err, &coded) {
 		return coded.Code()
 	}
 	return ""
+}
+
+// snapshotError sanitizes upstream detail in successful polling responses,
+// where the HTTP error boundary is not involved.
+func snapshotError(err error) (string, string) {
+	var remote *apierror.Error
+	if errors.As(err, &remote) {
+		code := remote.ErrorCode
+		title, known := apierror.Title(code)
+		if remote.ParseErr != nil || !known {
+			code = "upstream_response_invalid"
+			title, _ = apierror.Title(code) // This fallback is part of the catalog.
+		}
+		return code, title
+	}
+	var requestErr *url.Error
+	if errors.As(err, &requestErr) {
+		code := "upstream_unavailable"
+		if requestErr.Timeout() {
+			code = "upstream_timeout"
+		}
+		title, _ := apierror.Title(code) // Both transport errors belong to the catalog.
+		return code, title
+	}
+	return ErrorCode(err), err.Error()
 }

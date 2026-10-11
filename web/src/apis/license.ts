@@ -1,5 +1,6 @@
 import type { LicensePairing, LicenseStatus } from '@/types/license'
 import { createApiError } from '@/lib/errorHandler'
+import { API_ACCEPT, fetchWithBoundedErrors } from '@/lib/apiProblem'
 
 const rawBaseURL = import.meta.env.VITE_API_BASE_URL
 const baseURL = rawBaseURL?.trim() ? rawBaseURL.replace(/\/+$/, '') : '/api/v1'
@@ -82,24 +83,27 @@ const decodeStatus = async (response: Response): Promise<LicenseStatus> => {
 
 export const useLicenseApi = () => ({
   async status(): Promise<Response> {
-    return fetch(`${baseURL}/license`, {
+    return fetchWithBoundedErrors(`${baseURL}/license`, {
       cache: 'no-store',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: API_ACCEPT },
     })
   },
   async createPairing(): Promise<LicensePairing> {
-    const response = await fetch(`${baseURL}/license/pairings`, {
+    const response = await fetchWithBoundedErrors(`${baseURL}/license/pairings`, {
       method: 'POST',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: API_ACCEPT },
     })
     if (!response.ok) throw await responseError(response)
     return decodePairing(response)
   },
   async pairing(id: string): Promise<LicensePairing> {
-    const response = await fetch(`${baseURL}/license/pairings/${encodeURIComponent(id)}`, {
-      cache: 'no-store',
-      headers: { Accept: 'application/json' },
-    })
+    const response = await fetchWithBoundedErrors(
+      `${baseURL}/license/pairings/${encodeURIComponent(id)}`,
+      {
+        cache: 'no-store',
+        headers: { Accept: API_ACCEPT },
+      },
+    )
     if (!response.ok) throw await responseError(response)
     return decodePairing(response)
   },

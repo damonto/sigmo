@@ -35,8 +35,9 @@ AGENTS*.md
 .mcp.json
 CLAUDE.md
 .claude
-.codex
+.codex/
 .cache/
+docs/
 
 # Tests
 tools/

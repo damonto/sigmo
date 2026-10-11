@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { Globe2, Phone, PhoneCall, RadioTower, Smartphone } from 'lucide-vue-next'
 import { computed } from 'vue'
+import { Globe2, RadioTower, Smartphone } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 
+import VoLTEIcon from '@/components/modem/VoLTEIcon.vue'
+import VoWiFiIcon from '@/components/modem/VoWiFiIcon.vue'
 import { Button } from '@/components/ui/button'
 import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 
@@ -37,7 +39,7 @@ const items = computed(() => {
       key: 'wifi-calling',
       title: t('modemDetail.settings.wifiCallingTitle'),
       description: t('modemDetail.settings.wifiCallingCategoryDescription'),
-      icon: Phone,
+      icon: VoWiFiIcon,
       routeName: 'modem-settings-wifi-calling',
       to: { name: 'modem-settings-wifi-calling', params: { id: modemId.value } },
     },
@@ -45,7 +47,7 @@ const items = computed(() => {
       key: 'volte',
       title: t('modemDetail.settings.volteTitle'),
       description: t('modemDetail.settings.volteCategoryDescription'),
-      icon: PhoneCall,
+      icon: VoLTEIcon,
       routeName: 'modem-settings-volte',
       to: { name: 'modem-settings-volte', params: { id: modemId.value } },
     },
@@ -78,7 +80,10 @@ const items = computed(() => {
       </p>
     </div>
 
-    <nav class="mt-2 space-y-1" :aria-label="t('modemDetail.settings.title')">
+    <nav
+      class="mt-2 space-y-1"
+      :aria-label="t('modemDetail.settings.title')"
+    >
       <Button
         v-for="item in items"
         :key="item.key"
@@ -95,7 +100,10 @@ const items = computed(() => {
           :to="item.to"
           :aria-current="route.name === item.routeName ? 'page' : undefined"
         >
-          <component :is="item.icon" class="mt-0.5 size-4 shrink-0" />
+          <component
+            :is="item.icon"
+            class="mt-0.5 size-4 shrink-0"
+          />
           <span class="min-w-0">
             <span class="block truncate text-sm font-medium">{{ item.title }}</span>
             <span

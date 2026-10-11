@@ -8,8 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -29,11 +27,12 @@ func authorizationRetryDelay(err error, backoff time.Duration) (time.Duration, b
 func retryableAuthorizationError(err error) bool {
 	var remote *serviceError
 	if errors.As(err, &remote) {
-		if isExplicitAuthorizationError(remote.ErrorCode) {
+		if explicitAuthorizationError(remote) {
 			return false
 		}
-		switch remote.ErrorCode {
-		case "license_challenge_invalid", "license_challenge_expired":
+		switch {
+		case remote.ErrorCode == "license_challenge_invalid" && remote.StatusCode == http.StatusForbidden,
+			remote.ErrorCode == "license_challenge_expired" && remote.StatusCode == http.StatusGone:
 			// A new transport challenge can retry the same pending rotation.
 			return true
 		}
@@ -55,15 +54,4 @@ func retryableAuthorizationError(err error) bool {
 	}
 	var networkErr net.Error
 	return errors.As(err, &networkErr) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
-}
-
-func parseRetryAfter(value string, now time.Time) time.Time {
-	value = strings.TrimSpace(value)
-	if seconds, err := strconv.ParseInt(value, 10, 32); err == nil && seconds >= 0 {
-		return now.Add(time.Duration(seconds) * time.Second)
-	}
-	if retryAt, err := http.ParseTime(value); err == nil && retryAt.After(now) {
-		return retryAt
-	}
-	return time.Time{}
 }

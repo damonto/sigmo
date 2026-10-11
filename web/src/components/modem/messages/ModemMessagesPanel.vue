@@ -18,6 +18,7 @@ const props = withDefaults(
   defineProps<{
     modemId: string
     selectedParticipant?: string
+    selectedConversation?: string
     compact?: boolean
   }>(),
   {
@@ -34,11 +35,17 @@ const { phoneCountry } = useModemPhoneCountry(modemIdRef)
 const searchQuery = ref('')
 const normalizedSearchQuery = computed(() => searchQuery.value.trim())
 const debouncedSearchQuery = refDebounced(normalizedSearchQuery, 250)
-const { items, count, isLoading, deleteConversation } = useModemMessages(
-  modemIdRef,
-  phoneCountry,
-  debouncedSearchQuery,
-)
+const {
+  items,
+  count,
+  unreadCount,
+  unreadOnly,
+  historical,
+  error,
+  isLoading,
+  deleteConversation,
+  markConversation,
+} = useModemMessages(modemIdRef, phoneCountry, debouncedSearchQuery)
 
 const deleteOpen = ref(false)
 const deleteLoading = ref(false)
@@ -65,7 +72,7 @@ const confirmDelete = async () => {
   if (!deleteTarget.value) return
   deleteLoading.value = true
   try {
-    await deleteConversation(deleteTarget.value.participantValue)
+    await deleteConversation(deleteTarget.value.key)
   } catch (err) {
     console.error('[ModemMessagesPanel] delete messages:', err)
   } finally {
@@ -89,9 +96,16 @@ const startConversation = async () => {
     class="flex min-w-0 flex-col lg:h-full lg:min-h-0"
     :class="props.compact ? 'gap-3' : 'gap-6'"
   >
-    <ModemMessagesHeader v-if="!props.compact" :count="count" :is-loading="isLoading" />
+    <ModemMessagesHeader
+      v-if="!props.compact"
+      :count="count"
+      :is-loading="isLoading"
+    />
 
-    <div v-else class="flex items-center justify-between gap-3">
+    <div
+      v-else
+      class="flex items-center justify-between gap-3"
+    >
       <div class="min-w-0">
         <h2 class="truncate text-base font-semibold text-foreground">
           {{ t('modemDetail.messages.title') }}
@@ -117,6 +131,39 @@ const startConversation = async () => {
 
     <ModemMessagesSearch v-model="searchQuery" />
 
+    <div class="flex flex-wrap gap-2 text-sm">
+      <Button
+        type="button"
+        size="sm"
+        :variant="unreadOnly ? 'outline' : 'default'"
+        @click="unreadOnly = false"
+      >
+        {{ t('modemDetail.messages.all') }}
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        :variant="unreadOnly ? 'default' : 'outline'"
+        @click="unreadOnly = true"
+      >
+        {{ t('modemDetail.messages.unread') }} ({{ unreadCount }})
+      </Button>
+      <label class="flex items-center gap-2">
+        <input
+          v-model="historical"
+          type="checkbox"
+        />
+        {{ t('modemDetail.messages.historical') }}
+      </label>
+    </div>
+    <p
+      v-if="error"
+      class="text-sm text-destructive"
+      role="alert"
+    >
+      {{ error }}
+    </p>
+
     <div class="scrollbar-none lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
       <ModemMessagesList
         :items="items"
@@ -124,12 +171,18 @@ const startConversation = async () => {
         :is-loading="isLoading"
         :empty-label="emptyLabel"
         :selected-participant="props.selectedParticipant"
+        :selected-conversation="props.selectedConversation"
         @delete="openDeleteDialog"
+        @mark="markConversation"
       />
     </div>
   </div>
 
-  <ModemMessagesFab class="lg:hidden" :disabled="isFabDisabled" @click="startConversation" />
+  <ModemMessagesFab
+    class="lg:hidden"
+    :disabled="isFabDisabled"
+    @click="startConversation"
+  />
 
   <ModemMessagesDeleteDialog
     v-model:open="deleteOpen"

@@ -88,6 +88,7 @@ jobs:
           SIGMO_RELEASE_PUBLIC_KEY: ${{ secrets.SIGMO_RELEASE_PUBLIC_KEY }}
           SIGMO_LICENSE_PUBLIC_KEY: ${{ secrets.SIGMO_LICENSE_PUBLIC_KEY }}
           SIGMO_PRO_WORKER_URL: ${{ vars.SIGMO_PRO_WORKER_URL }}
+          SIGMO_PUSH_GATEWAY_URL: ${{ vars.SIGMO_PUSH_GATEWAY_URL }}
         run: scripts/build-pro.sh
       - uses: actions/upload-artifact@v7
         with:

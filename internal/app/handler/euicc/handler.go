@@ -16,11 +16,6 @@ type Handler struct {
 	euicc    *euicc
 }
 
-const (
-	errorCodeEuiccNotSupported = "euicc_not_supported"
-	errorCodeGetEUICCFailed    = "get_euicc_failed"
-)
-
 func New(registry *mmodem.Registry, clients *lpa.Pool) *Handler {
 	return &Handler{
 		registry: registry,
@@ -32,14 +27,14 @@ func (h *Handler) Get(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeGetEUICCFailed)
+		return httpapi.ModemLookupError(c, err, "get_euicc_failed")
 	}
 	response, err := h.euicc.Get(ctx, modem)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
+			return httpapi.NotFound(c, "euicc_not_supported", err)
 		}
-		return httpapi.Internal(c, errorCodeGetEUICCFailed, err)
+		return httpapi.Internal(c, "get_euicc_failed", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }

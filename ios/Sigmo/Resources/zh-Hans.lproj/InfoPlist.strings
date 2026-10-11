@@ -1,0 +1,6 @@
+"NSLocalNetworkUsageDescription" = "连接局域网中的 Sigmo 服务并显示其设备。";
+
+"NSCameraUsageDescription" = "扫描 eSIM 激活二维码，将配置安装到 Sigmo 模块。";
+
+"NSMicrophoneUsageDescription" = "通过 Sigmo 设备通话时发送你的声音。";
+"NSContactsUsageDescription" = "在本机匹配联系人姓名。通讯录不会发送到 Sigmo 服务。";

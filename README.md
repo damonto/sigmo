@@ -157,7 +157,7 @@ To run Sigmo as a background service, use Systemd.
 
 If you wish to contribute or modify the source:
 
-1.  **Prerequisites**: Go 1.26.3, Bun (for Vue).
+1.  **Prerequisites**: Go 1.27.1, Bun (for Vue).
 2.  **Build Frontend**:
     ```bash
     cd web && bun install && bun run build

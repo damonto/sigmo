@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CheckCircle2, CircleX, LoaderCircle, RefreshCw, Settings2, Wifi } from 'lucide-vue-next'
+import { CheckCircle2, CircleX, LoaderCircle, RefreshCw, Settings2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
+import VoWiFiIcon from '@/components/modem/VoWiFiIcon.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 
@@ -141,7 +142,7 @@ const formatDuration = (seconds: number) => {
               : 'bg-primary/10 text-primary'
           "
         >
-          <Wifi class="size-6" />
+          <VoWiFiIcon class="size-6" />
           <span
             class="absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full border-2 border-card"
             :class="

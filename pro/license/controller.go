@@ -21,6 +21,7 @@ import (
 	"time"
 
 	appupdate "github.com/damonto/sigmo/internal/app/update"
+	"github.com/damonto/sigmo/internal/pkg/apierror"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -268,6 +269,10 @@ func (c *Controller) Run(ctx context.Context) error {
 		_, _, deadline = c.currentLeaseState()
 		slog.Warn("refresh product authorization", "error", err)
 		retryAt = time.Now().Add(leaseRefreshRetryDelay)
+		var remote *serviceError
+		if errors.As(err, &remote) && remote.RetryAt.After(retryAt) {
+			retryAt = remote.RetryAt
+		}
 		if retryAt.After(deadline) {
 			retryAt = deadline
 		}
@@ -372,16 +377,23 @@ func (c *Controller) prepareRotation(ctx context.Context) (*storedSession, error
 
 func (c *Controller) classifyAuthorizationError(err error) error {
 	var remote *serviceError
-	if errors.As(err, &remote) && isExplicitAuthorizationError(remote.ErrorCode) {
+	if errors.As(err, &remote) && explicitAuthorizationError(remote) {
 		return fmt.Errorf("%w: %w", errExplicitUnauthorized, err)
 	}
 	return err
 }
 
-func isExplicitAuthorizationError(code string) bool {
-	switch code {
-	case "license_device_unauthorized", "license_entitlement_inactive", "license_lease_expired", "license_session_superseded":
-		return true
+func explicitAuthorizationError(remote *serviceError) bool {
+	if remote.ParseErr != nil {
+		return false
+	}
+	switch remote.ErrorCode {
+	case "license_device_unauthorized", "license_entitlement_inactive":
+		return remote.StatusCode == http.StatusForbidden
+	case "license_lease_expired":
+		return remote.StatusCode == http.StatusUnauthorized || remote.StatusCode == http.StatusForbidden
+	case "license_session_superseded":
+		return remote.StatusCode == http.StatusConflict
 	default:
 		return false
 	}
@@ -550,7 +562,7 @@ func (c *Controller) doJSON(ctx context.Context, method string, path string, bod
 	if err != nil {
 		return 0, fmt.Errorf("create authorization request: %w", err)
 	}
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", "application/json, "+apierror.MediaType)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -562,34 +574,16 @@ func (c *Controller) doJSON(ctx context.Context, method string, path string, bod
 		return 0, fmt.Errorf("contact authorization service: %w", err)
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
-	if err != nil {
-		return resp.StatusCode, fmt.Errorf("read authorization response: %w", err)
-	}
-	if len(data) > maxResponseSize {
-		return resp.StatusCode, errors.New("authorization response exceeds size limit")
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var response errorResponse
-		if err := json.Unmarshal(data, &response); err != nil {
-			response = errorResponse{}
-		}
-		if response.ErrorCode == "" {
-			response.ErrorCode = "authorization_service_error"
-		}
-		if response.Message == "" {
-			response.Message = http.StatusText(resp.StatusCode)
-		}
-		return resp.StatusCode, &serviceError{
-			StatusCode: resp.StatusCode,
-			ErrorCode:  response.ErrorCode,
-			Message:    response.Message,
-			RetryAt:    parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
-		}
+		return resp.StatusCode, apierror.Read(resp)
 	}
 	if dst != nil {
+		data, err := readServiceJSON(resp)
+		if err != nil {
+			return resp.StatusCode, err
+		}
 		if err := json.Unmarshal(data, dst); err != nil {
-			return resp.StatusCode, fmt.Errorf("decode authorization response: %w", err)
+			return resp.StatusCode, invalidServiceResponse(resp, err)
 		}
 	}
 	return resp.StatusCode, nil

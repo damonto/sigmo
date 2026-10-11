@@ -14,6 +14,7 @@ import { useCallAudioSession } from '@/composables/useCallAudioSession'
 import { useCallRecording } from '@/composables/useCallRecording'
 import { usePhoneCalls } from '@/composables/usePhoneCalls'
 import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
+import { callInUseElsewhere, ownsCall } from '@/lib/callClient'
 import type { CallRecord } from '@/types/call'
 
 const liveDurationStates = new Set<CallRecord['state']>([
@@ -57,7 +58,10 @@ const createModemCallSession = (
   const callAudio = useCallAudioSession(modemId)
   const recordingCallId = computed(() => {
     const call = phoneCalls.activeCall.value
-    return call && imsMediaRoutes.has(call.route) && ['active', 'confirmed'].includes(call.state)
+    return call &&
+      ownsCall(call) &&
+      imsMediaRoutes.has(call.route) &&
+      ['active', 'confirmed'].includes(call.state)
       ? call.callID
       : ''
   })
@@ -193,6 +197,7 @@ const createModemCallSession = (
   const answerIncoming = async (call: CallRecord) => await phoneCalls.answer(call)
 
   const prepareAudioDevices = async (call: CallRecord) => {
+    if (callInUseElsewhere(call)) return false
     if (!usesBrowserAudio(call)) return false
     const ready = await callAudio.prepare()
     if (!ready) return false
@@ -223,7 +228,12 @@ const createModemCallSession = (
         stopDurationTimer()
       }
 
-      if (call && mediaSessionStates.has(call.state) && imsMediaRoutes.has(call.route)) {
+      if (
+        call &&
+        ownsCall(call) &&
+        mediaSessionStates.has(call.state) &&
+        imsMediaRoutes.has(call.route)
+      ) {
         callAudio.setInputEnabled(
           !localHoldStates.has(call.hold) && !remoteHoldStates.has(call.hold),
         )
@@ -231,7 +241,7 @@ const createModemCallSession = (
         audioCallID.value = call.callID
         void Promise.resolve(callAudio.start(call.callID)).then(() => {
           const current = phoneCalls.activeCall.value
-          if (current?.callID !== call.callID) return
+          if (current?.callID !== call.callID || !ownsCall(current)) return
           callAudio.setInputEnabled(
             !localHoldStates.has(current.hold) && !remoteHoldStates.has(current.hold),
           )

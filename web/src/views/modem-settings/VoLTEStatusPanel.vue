@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CheckCircle2, CircleX, LoaderCircle, PhoneCall } from 'lucide-vue-next'
+import { CheckCircle2, CircleX, LoaderCircle } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
+import VoLTEIcon from '@/components/modem/VoLTEIcon.vue'
 import { Card, CardContent } from '@/components/ui/card'
 
 const props = defineProps<{
@@ -97,14 +98,23 @@ const formatDuration = (seconds: number) => {
           class="relative flex size-11 shrink-0 items-center justify-center rounded-full"
           :class="isActive ? 'bg-emerald-500/10 text-emerald-600' : 'bg-primary/10 text-primary'"
         >
-          <PhoneCall class="size-6" />
+          <VoLTEIcon class="size-6" />
           <span
             class="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full border-2 border-card"
             :class="isActive ? 'bg-emerald-500 text-white' : 'bg-primary text-primary-foreground'"
           >
-            <CheckCircle2 v-if="isActive" class="size-3" />
-            <LoaderCircle v-else-if="isPending" class="size-3 animate-spin" />
-            <CircleX v-else class="size-3" />
+            <CheckCircle2
+              v-if="isActive"
+              class="size-3"
+            />
+            <LoaderCircle
+              v-else-if="isPending"
+              class="size-3 animate-spin"
+            />
+            <CircleX
+              v-else
+              class="size-3"
+            />
           </span>
         </div>
 

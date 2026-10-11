@@ -201,8 +201,7 @@ func (c *Controller) checkLatest(ctx context.Context) error {
 		c.state = StateFailed
 		c.latest = nil
 		c.available = false
-		c.lastErrorCode = ErrorCode(err)
-		c.lastError = err.Error()
+		c.lastErrorCode, c.lastError = snapshotError(err)
 		c.mu.Unlock()
 		return err
 	}
@@ -234,6 +233,7 @@ func (c *Controller) StartInstall(ctx context.Context) error {
 	installCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	c.installCancel = cancel
 	c.state = StateDownloading
+	c.lastErrorCode = ""
 	c.lastError = ""
 	c.operations.Add(1)
 	c.mu.Unlock()
@@ -327,6 +327,7 @@ func (c *Controller) install(ctx context.Context) {
 	c.latest = &release
 	c.available = false
 	c.state = StateRestarting
+	c.lastErrorCode = ""
 	c.lastError = ""
 	c.mu.Unlock()
 	if c.restart != nil {
@@ -393,7 +394,6 @@ func (c *Controller) setState(state string) {
 func (c *Controller) fail(err error) {
 	c.mu.Lock()
 	c.state = StateFailed
-	c.lastErrorCode = ErrorCode(err)
-	c.lastError = err.Error()
+	c.lastErrorCode, c.lastError = snapshotError(err)
 	c.mu.Unlock()
 }

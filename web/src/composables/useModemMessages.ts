@@ -1,20 +1,27 @@
-import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useMessageApi } from '@/apis/message'
 import { formatListTimestamp } from '@/lib/datetime'
+import { localizeErrorMessage } from '@/lib/errorHandler'
 import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
-import type { MessageResponse } from '@/types/message'
+import type { Conversation } from '@/types/message'
 
-export type ConversationItem = {
+/** Display values retain the stable SIM-specific identity for every action. */
+export interface ConversationItem {
   key: string
+  profileId: string
   participantLabel: string
   participantValue: string
   participantSearchValue: string
   preview: string
   timestampLabel: string
+  lineLabel: string
+  unreadCount: number
+  lastMessageId: number
 }
 
+/** Polls visible history and applies backend-owned unread state. */
 export const useModemMessages = (
   modemId: ComputedRef<string>,
   defaultCountry?: ComputedRef<string>,
@@ -22,88 +29,121 @@ export const useModemMessages = (
 ) => {
   const { t } = useI18n()
   const messageApi = useMessageApi()
-
-  const conversations = ref<MessageResponse[]>([])
+  const conversations = ref<Conversation[]>([])
   const isLoading = ref(false)
+  const unreadOnly = ref(false)
+  const historical = ref(false)
+  const error = ref('')
   let requestID = 0
+  let disposed = false
 
   const count = computed(() => conversations.value.length)
-  const hasMessages = computed(() => conversations.value.length > 0)
-
-  const getParticipantValue = (message: MessageResponse) => {
-    const value = message.incoming ? message.sender : message.recipient
-    return value.trim()
-  }
-
-  const getParticipantLabel = (message: MessageResponse) => {
-    const participant = getParticipantValue(message)
-    return (
-      formatPhoneDisplay(participant, defaultCountry?.value) ||
-      t('modemDetail.messages.unknownParticipant')
-    )
-  }
-
-  const getParticipantSearchValue = (message: MessageResponse) => {
-    const participant = getParticipantValue(message)
-    const display = formatPhoneDisplay(participant, defaultCountry?.value)
-    return [display, participant].join(' ').trim()
-  }
-
+  const hasMessages = computed(() => count.value > 0)
+  const unreadCount = computed(() =>
+    conversations.value.reduce((sum, value) => sum + value.unreadCount, 0),
+  )
   const items = computed<ConversationItem[]>(() =>
-    conversations.value.map((message) => ({
-      key: String(message.id),
-      participantValue: getParticipantValue(message),
-      participantLabel: getParticipantLabel(message),
-      participantSearchValue: getParticipantSearchValue(message),
-      preview: message.text,
-      timestampLabel: formatListTimestamp(message.timestamp),
-    })),
+    conversations.value
+      .filter((value) => !unreadOnly.value || value.unreadCount > 0)
+      .map((value) => {
+        const display = formatPhoneDisplay(value.participant, defaultCountry?.value)
+        return {
+          key: value.id,
+          profileId: value.profileId,
+          participantValue: value.participant,
+          participantLabel: display || t('modemDetail.messages.unknownParticipant'),
+          participantSearchValue: `${display} ${value.participant}`,
+          preview: value.latestMessage.text,
+          timestampLabel: formatListTimestamp(value.latestMessage.timestamp),
+          lineLabel:
+            value.lineLabel ||
+            value.lineNumber ||
+            t('modemDetail.messages.lineSuffix', { suffix: value.profileId.slice(-6) }),
+          unreadCount: value.unreadCount,
+          lastMessageId: value.lastMessageId,
+        }
+      }),
   )
 
-  const currentSearchQuery = () => searchQuery?.value.trim() ?? ''
-
-  const fetchMessages = async (id?: string, query?: string) => {
-    const targetId = id ?? modemId.value
-    if (!targetId || targetId === 'unknown') return
-    const targetQuery = query ?? currentSearchQuery()
-    const currentRequestID = ++requestID
+  const fetchMessages = async () => {
+    const id = modemId.value
+    if (disposed || !id || id === 'unknown') return
+    const current = ++requestID
     isLoading.value = true
     try {
-      const { data } = await messageApi.getMessages(targetId, targetQuery)
-      if (currentRequestID === requestID) {
-        conversations.value = data.value ?? []
-      }
+      const { data } = await messageApi.getConversations({
+        modemId: historical.value ? undefined : id,
+        q: searchQuery?.value.trim() ?? '',
+        unassigned: historical.value,
+      })
+      if (current !== requestID || disposed) return
+      conversations.value = data.value?.items ?? []
+      error.value = ''
+    } catch (err) {
+      if (current === requestID && !disposed) error.value = localizeErrorMessage(err)
     } finally {
-      if (currentRequestID === requestID) {
-        isLoading.value = false
-      }
+      if (current === requestID && !disposed) isLoading.value = false
     }
   }
 
-  const deleteConversation = async (participantValue: string) => {
-    const targetId = modemId.value
-    if (!targetId || targetId === 'unknown') return
-    if (!participantValue.trim()) return
-    await messageApi.deleteMessagesByParticipant(targetId, participantValue)
-    await fetchMessages(targetId, currentSearchQuery())
+  const deleteConversation = async (id: string) => {
+    const generation = requestID
+    await messageApi.deleteConversation(id)
+    if (!disposed && generation === requestID) await fetchMessages()
+  }
+
+  const markConversation = async (item: ConversationItem) => {
+    try {
+      await messageApi.updateConversation(
+        item.key,
+        item.unreadCount > 0
+          ? { readThroughMessageId: item.lastMessageId, markedUnread: false }
+          : { markedUnread: true },
+      )
+      if (!disposed) await fetchMessages()
+    } catch (err) {
+      if (!disposed) error.value = localizeErrorMessage(err)
+    }
   }
 
   watch(
-    [modemId, () => currentSearchQuery()],
-    async ([id, query]) => {
-      if (!id || id === 'unknown') return
-      await fetchMessages(id, query)
+    [modemId, () => searchQuery?.value, historical],
+    ([id], previous) => {
+      if (id !== previous?.[0]) conversations.value = []
+      void fetchMessages()
     },
     { immediate: true },
   )
+
+  const refreshVisible = () => {
+    if (document.visibilityState === 'visible') void fetchMessages()
+  }
+  let timer: ReturnType<typeof setInterval> | undefined
+  onMounted(() => {
+    timer = setInterval(refreshVisible, 10_000)
+    document.addEventListener('visibilitychange', refreshVisible)
+    window.addEventListener('sigmo:messages-changed', refreshVisible)
+  })
+  onUnmounted(() => {
+    disposed = true
+    requestID++
+    clearInterval(timer)
+    document.removeEventListener('visibilitychange', refreshVisible)
+    window.removeEventListener('sigmo:messages-changed', refreshVisible)
+  })
 
   return {
     conversations,
     items,
     count,
+    unreadCount,
+    unreadOnly,
+    historical,
+    error,
     hasMessages,
     isLoading,
     fetchMessages,
     deleteConversation,
+    markConversation,
   }
 }

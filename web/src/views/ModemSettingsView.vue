@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { Globe2, Phone, PhoneCall, RadioTower, Smartphone } from 'lucide-vue-next'
 import { computed, ref } from 'vue'
+import { Globe2, RadioTower, Smartphone } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 
+import VoLTEIcon from '@/components/modem/VoLTEIcon.vue'
+import VoWiFiIcon from '@/components/modem/VoWiFiIcon.vue'
 import ModemLineMsisdnDialog from '@/components/modem/settings/ModemLineMsisdnDialog.vue'
 import ModemLineSummaryCard from '@/components/modem/settings/ModemLineSummaryCard.vue'
 import ModemSettingsCategoryCard from '@/components/modem/settings/ModemSettingsCategoryCard.vue'
@@ -63,14 +65,14 @@ const categoryCards = computed(() => {
       key: 'wifi-calling',
       title: t('modemDetail.settings.wifiCallingTitle'),
       description: t('modemDetail.settings.wifiCallingCategoryDescription'),
-      icon: Phone,
+      icon: VoWiFiIcon,
       to: { name: 'modem-settings-wifi-calling', params: { id: modemId.value } },
     },
     {
       key: 'volte',
       title: t('modemDetail.settings.volteTitle'),
       description: t('modemDetail.settings.volteCategoryDescription'),
-      icon: PhoneCall,
+      icon: VoLTEIcon,
       to: { name: 'modem-settings-volte', params: { id: modemId.value } },
     },
     {

@@ -19,6 +19,7 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 type Config struct {
@@ -27,6 +28,7 @@ type Config struct {
 	Internet  *internet.Connector
 	LPA       *lpa.Pool
 	Reminders *reminder.Scheduler
+	Storage   *storage.Store
 }
 
 type Handler struct {
@@ -37,26 +39,6 @@ type Handler struct {
 	internet     *internet.Connector
 	reminders    *reminder.Scheduler
 }
-
-const (
-	errorCodeEuiccNotSupported                = "euicc_not_supported"
-	errorCodeListESIMsFailed                  = "list_esims_failed"
-	errorCodeDiscoverESIMsFailed              = "discover_esims_failed"
-	errorCodeICCIDRequired                    = "iccid_required"
-	errorCodeInvalidICCID                     = "invalid_iccid"
-	errorCodeEnableESIMBusy                   = "esim_enable_busy"
-	errorCodeEnableESIMTimeout                = "esim_enable_timeout"
-	errorCodeEnableESIMFailed                 = "enable_esim_failed"
-	errorCodeESIMProfileNotFound              = "esim_profile_not_found"
-	errorCodeDeleteESIMFailed                 = "delete_esim_failed"
-	errorCodeActiveESIMProfile                = "active_esim_profile"
-	errorCodeDownloadESIMFailed               = "download_esim_failed"
-	errorCodeUpdateESIMNicknameInvalidRequest = "update_esim_nickname_invalid_request"
-	errorCodeInvalidNickname                  = "invalid_nickname"
-	errorCodeUpdateESIMNicknameFailed         = "update_esim_nickname_failed"
-	errorCodeSERequired                       = "se_required"
-	errorCodeSENotFound                       = "se_not_found"
-)
 
 var (
 	errICCIDRequired = errors.New("iccid is required")
@@ -89,9 +71,11 @@ const (
 )
 
 func New(cfg Config) *Handler {
+	profiles := newProfile(cfg.Store, cfg.Reminders, cfg.LPA)
+	profiles.history = cfg.Storage
 	return &Handler{
 		registry:     cfg.Registry,
-		profile:      newProfile(cfg.Store, cfg.Reminders, cfg.LPA),
+		profile:      profiles,
 		provisioning: newProvisioning(cfg.LPA),
 		lifecycle:    newLifecycle(cfg.Store, cfg.Registry, cfg.LPA),
 		internet:     cfg.Internet,
@@ -102,14 +86,14 @@ func New(cfg Config) *Handler {
 func (h *Handler) List(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeListESIMsFailed)
+		return httpapi.ModemLookupError(c, err, "list_esims_failed")
 	}
 	response, err := h.profile.List(c.Request().Context(), modem)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
+			return httpapi.NotFound(c, "euicc_not_supported", err)
 		}
-		return httpapi.Internal(c, errorCodeListESIMsFailed, err)
+		return httpapi.Internal(c, "list_esims_failed", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -118,7 +102,7 @@ func (h *Handler) Discovery(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeDiscoverESIMsFailed)
+		return httpapi.ModemLookupError(c, err, "discover_esims_failed")
 	}
 	response, err := h.provisioning.Discovery(ctx, modem, c.Param("seId"))
 	if err != nil {
@@ -126,9 +110,9 @@ func (h *Handler) Discovery(c *echo.Context) error {
 			return seErr
 		}
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
+			return httpapi.NotFound(c, "euicc_not_supported", err)
 		}
-		return httpapi.Internal(c, errorCodeDiscoverESIMsFailed, err)
+		return httpapi.Internal(c, "discover_esims_failed", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -139,14 +123,14 @@ func (h *Handler) Enable(c *echo.Context) error {
 
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeEnableESIMFailed)
+		return httpapi.ModemLookupError(c, err, "enable_esim_failed")
 	}
 	iccid, err := iccidFromParam(c)
 	if err != nil {
 		if errors.Is(err, errICCIDRequired) {
-			return httpapi.BadRequest(c, errorCodeICCIDRequired, err)
+			return httpapi.BadRequest(c, "iccid_required", err)
 		}
-		return httpapi.BadRequest(c, errorCodeInvalidICCID, err)
+		return httpapi.BadRequest(c, "invalid_iccid", err)
 	}
 	session, err := h.lifecycle.PrepareEnable(ctx, modem, c.Param("seId"), iccid)
 	if err != nil {
@@ -155,7 +139,7 @@ func (h *Handler) Enable(c *echo.Context) error {
 	defer session.Close()
 
 	if err := h.restoreInternetBeforeProfileEnable(ctx, modem); err != nil {
-		return httpapi.Internal(c, errorCodeEnableESIMFailed, err)
+		return httpapi.Internal(c, "enable_esim_failed", err)
 	}
 	if err := session.Enable(ctx); err != nil {
 		return enableError(c, err)
@@ -182,7 +166,7 @@ func enablePrepareError(c *echo.Context, err error) error {
 
 func enableError(c *echo.Context, err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
-		return httpapi.RequestTimeout(c, errorCodeEnableESIMTimeout, errEnableTimeout)
+		return httpapi.RequestTimeout(c, "esim_enable_timeout", errEnableTimeout)
 	}
 	if errors.Is(err, context.Canceled) {
 		return nil
@@ -191,43 +175,43 @@ func enableError(c *echo.Context, err error) error {
 		return seErr
 	}
 	if errors.Is(err, lpa.ErrNoSupportedAID) {
-		return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
+		return httpapi.NotFound(c, "euicc_not_supported", err)
 	}
 	if errors.Is(err, sgp22.ErrCatBusy) {
-		return httpapi.Error(c, http.StatusConflict, errorCodeEnableESIMBusy, errEuiccBusy.Error())
+		return httpapi.Error(c, http.StatusConflict, "esim_enable_busy", errEuiccBusy.Error())
 	}
 	if errors.Is(err, errProfileNotFound) {
-		return httpapi.BadRequest(c, errorCodeESIMProfileNotFound, err)
+		return httpapi.BadRequest(c, "esim_profile_not_found", err)
 	}
-	return httpapi.Internal(c, errorCodeEnableESIMFailed, err)
+	return httpapi.Internal(c, "enable_esim_failed", err)
 }
 
 func (h *Handler) Delete(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeDeleteESIMFailed)
+		return httpapi.ModemLookupError(c, err, "delete_esim_failed")
 	}
 	iccid, err := iccidFromParam(c)
 	if err != nil {
 		if errors.Is(err, errICCIDRequired) {
-			return httpapi.BadRequest(c, errorCodeICCIDRequired, err)
+			return httpapi.BadRequest(c, "iccid_required", err)
 		}
-		return httpapi.BadRequest(c, errorCodeInvalidICCID, err)
+		return httpapi.BadRequest(c, "invalid_iccid", err)
 	}
 	if err := h.DeleteProfile(c.Request().Context(), modem, c.Param("seId"), iccid); err != nil {
 		if seErr := seRequestError(c, err); seErr != nil {
 			return seErr
 		}
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
+			return httpapi.NotFound(c, "euicc_not_supported", err)
 		}
 		if errors.Is(err, errActiveProfileCannotDelete) {
-			return httpapi.BadRequest(c, errorCodeActiveESIMProfile, err)
+			return httpapi.BadRequest(c, "active_esim_profile", err)
 		}
 		if errors.Is(err, errProfileNotFound) {
-			return httpapi.BadRequest(c, errorCodeESIMProfileNotFound, err)
+			return httpapi.BadRequest(c, "esim_profile_not_found", err)
 		}
-		return httpapi.Internal(c, errorCodeDeleteESIMFailed, err)
+		return httpapi.Internal(c, "delete_esim_failed", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -235,7 +219,7 @@ func (h *Handler) Delete(c *echo.Context) error {
 func (h *Handler) Download(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeDownloadESIMFailed)
+		return httpapi.ModemLookupError(c, err, "download_esim_failed")
 	}
 
 	conn, err := wsUpgrader.Upgrade(c.Response(), c.Request(), nil)
@@ -299,17 +283,17 @@ func (h *Handler) Download(c *echo.Context) error {
 func (h *Handler) UpdateNickname(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeUpdateESIMNicknameFailed)
+		return httpapi.ModemLookupError(c, err, "update_esim_nickname_failed")
 	}
 	iccid, err := iccidFromParam(c)
 	if err != nil {
 		if errors.Is(err, errICCIDRequired) {
-			return httpapi.BadRequest(c, errorCodeICCIDRequired, err)
+			return httpapi.BadRequest(c, "iccid_required", err)
 		}
-		return httpapi.BadRequest(c, errorCodeInvalidICCID, err)
+		return httpapi.BadRequest(c, "invalid_iccid", err)
 	}
 	var req UpdateNicknameRequest
-	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateESIMNicknameInvalidRequest); err != nil {
+	if err := httpapi.BindAndValidate(c, &req, "update_esim_nickname_invalid_request"); err != nil {
 		return err
 	}
 	if err := h.profile.UpdateNickname(c.Request().Context(), modem, c.Param("seId"), iccid, req.Nickname); err != nil {
@@ -317,22 +301,22 @@ func (h *Handler) UpdateNickname(c *echo.Context) error {
 			return seErr
 		}
 		if errors.Is(err, errInvalidNickname) {
-			return httpapi.BadRequest(c, errorCodeInvalidNickname, err)
+			return httpapi.BadRequest(c, "invalid_nickname", err)
 		}
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
+			return httpapi.NotFound(c, "euicc_not_supported", err)
 		}
-		return httpapi.Internal(c, errorCodeUpdateESIMNicknameFailed, err)
+		return httpapi.Internal(c, "update_esim_nickname_failed", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
 func seRequestError(c *echo.Context, err error) error {
 	if errors.Is(err, lpa.ErrSERequired) {
-		return httpapi.BadRequest(c, errorCodeSERequired, err)
+		return httpapi.BadRequest(c, "se_required", err)
 	}
 	if errors.Is(err, lpa.ErrSENotFound) {
-		return httpapi.NotFound(c, errorCodeSENotFound, err)
+		return httpapi.NotFound(c, "se_not_found", err)
 	}
 	return nil
 }

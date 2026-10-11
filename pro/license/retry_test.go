@@ -43,37 +43,12 @@ func TestRetryableAuthorizationError(t *testing.T) {
 		{name: "expired challenge", err: &serviceError{StatusCode: http.StatusGone, ErrorCode: "license_challenge_expired"}, want: true},
 		{name: "consumed challenge", err: &serviceError{StatusCode: http.StatusForbidden, ErrorCode: "license_challenge_invalid"}, want: true},
 		{name: "revoked entitlement", err: &serviceError{StatusCode: http.StatusForbidden, ErrorCode: "license_entitlement_inactive"}},
-		{name: "explicit rejection with unexpected status", err: &serviceError{StatusCode: http.StatusServiceUnavailable, ErrorCode: "license_device_unauthorized"}},
+		{name: "explicit rejection with unexpected status", err: &serviceError{StatusCode: http.StatusServiceUnavailable, ErrorCode: "license_device_unauthorized"}, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := retryableAuthorizationError(tt.err); got != tt.want {
 				t.Fatalf("retryableAuthorizationError() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseRetryAfter(t *testing.T) {
-	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
-	tests := []struct {
-		name  string
-		value string
-		want  time.Time
-	}{
-		{name: "seconds", value: "120", want: now.Add(2 * time.Minute)},
-		{name: "zero", value: "0", want: now},
-		{name: "HTTP date", value: now.Add(time.Minute).Format(http.TimeFormat), want: now.Add(time.Minute)},
-		{name: "past date", value: now.Add(-time.Minute).Format(http.TimeFormat)},
-		{name: "empty"},
-		{name: "negative", value: "-1"},
-		{name: "overflow", value: "99999999999999999999999"},
-		{name: "invalid", value: "later"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := parseRetryAfter(tt.value, now); !got.Equal(tt.want) {
-				t.Fatalf("parseRetryAfter() = %v, want %v", got, tt.want)
 			}
 		})
 	}

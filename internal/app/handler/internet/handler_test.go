@@ -27,16 +27,16 @@ func TestModemLookupError(t *testing.T) {
 		{
 			name:       "not found",
 			err:        mmodem.ErrNotFound,
-			code:       "current_failed",
+			code:       "current_internet_connection_failed",
 			wantStatus: http.StatusNotFound,
 			wantBody:   "modem_not_found",
 		},
 		{
 			name:       "internal",
 			err:        errors.New("modem unavailable"),
-			code:       "current_failed",
+			code:       "current_internet_connection_failed",
 			wantStatus: http.StatusInternalServerError,
-			wantBody:   "current_failed",
+			wantBody:   "current_internet_connection_failed",
 		},
 	}
 
@@ -76,43 +76,43 @@ func TestInternetError(t *testing.T) {
 			name:       "unsupported ip method",
 			err:        internetcore.ErrUnsupportedIPMethod,
 			wantStatus: http.StatusUnprocessableEntity,
-			wantBody:   errorCodeUnsupportedInternetConfiguration,
+			wantBody:   "internet_connection_unsupported_ip_method",
 		},
 		{
 			name:       "internal connect error",
 			err:        errors.New("permission denied"),
 			wantStatus: http.StatusInternalServerError,
-			wantBody:   errorCodeConnectInternetFailed,
+			wantBody:   "connect_internet_failed",
 		},
 		{
 			name:       "unsupported auth",
 			err:        mmodem.ErrUnsupportedBearerAuth,
 			wantStatus: http.StatusUnprocessableEntity,
-			wantBody:   errorCodeInternetAuthInvalidConfig,
+			wantBody:   "internet_auth_invalid_config",
 		},
 		{
 			name:       "unsupported ip type",
 			err:        mmodem.ErrUnsupportedBearerIPType,
 			wantStatus: http.StatusUnprocessableEntity,
-			wantBody:   errorCodeInternetIPTypeInvalidConfig,
+			wantBody:   "internet_ip_type_invalid_config",
 		},
 		{
 			name:       "profile required",
 			err:        internetcore.ErrProfileIDRequired,
 			wantStatus: http.StatusUnprocessableEntity,
-			wantBody:   errorCodeInternetProfileIDRequired,
+			wantBody:   "internet_profile_id_required",
 		},
 		{
 			name:       "not connected",
 			err:        internetcore.ErrNotConnected,
 			wantStatus: http.StatusConflict,
-			wantBody:   errorCodeInternetConnectionNotConnected,
+			wantBody:   "internet_connection_not_connected",
 		},
 		{
 			name:       "airplane mode",
 			err:        internetcore.ErrAirplaneMode,
 			wantStatus: http.StatusConflict,
-			wantBody:   errorCodeInternetAirplaneMode,
+			wantBody:   "internet_airplane_mode",
 		},
 	}
 
@@ -126,7 +126,7 @@ func TestInternetError(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
 
-			if err := internetError(c, tt.err, errorCodeConnectInternetFailed); err != nil {
+			if err := internetError(c, tt.err, "connect_internet_failed"); err != nil {
 				t.Fatalf("internetError() error = %v", err)
 			}
 			if rec.Code != tt.wantStatus {

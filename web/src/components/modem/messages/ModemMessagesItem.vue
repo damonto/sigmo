@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Trash2 } from 'lucide-vue-next'
+import { Mail, MailOpen, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 
@@ -15,6 +15,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'delete', item: ConversationItem): void
+  (event: 'mark', item: ConversationItem): void
 }>()
 
 const { t } = useI18n()
@@ -22,6 +23,7 @@ const { t } = useI18n()
 const threadRoute = computed(() => ({
   name: 'modem-message-thread',
   params: { id: props.modemId, participant: props.item.participantValue },
+  query: { conversation: props.item.key, profile: props.item.profileId },
 }))
 
 const avatarLabel = computed(() => {
@@ -52,7 +54,10 @@ const avatarTone = computed(() => {
     :class="props.selected ? 'bg-primary/5 ring-primary/20' : ''"
   >
     <div class="flex items-center gap-3">
-      <RouterLink :to="threadRoute" class="flex min-w-0 flex-1 items-center gap-3">
+      <RouterLink
+        :to="threadRoute"
+        class="flex min-w-0 flex-1 items-center gap-3"
+      >
         <span
           class="flex size-11 shrink-0 items-center justify-center rounded-full text-base font-semibold shadow-sm ring-1"
           :class="avatarTone"
@@ -73,8 +78,41 @@ const avatarTone = computed(() => {
           <span class="block truncate text-xs text-muted-foreground">
             {{ props.item.preview }}
           </span>
+          <span class="block truncate text-xs text-muted-foreground">{{
+            props.item.lineLabel
+          }}</span>
+          <span
+            v-if="props.item.unreadCount"
+            class="block text-xs font-semibold text-primary"
+          >
+            {{ t('modemDetail.messages.unread') }} · {{ props.item.unreadCount }}
+          </span>
         </span>
       </RouterLink>
+
+      <Button
+        variant="ghost"
+        size="icon"
+        type="button"
+        class="size-8 shrink-0"
+        :aria-label="
+          t(
+            props.item.unreadCount
+              ? 'modemDetail.messages.markRead'
+              : 'modemDetail.messages.markUnread',
+          )
+        "
+        @click.stop.prevent="emit('mark', props.item)"
+      >
+        <MailOpen
+          v-if="props.item.unreadCount"
+          class="size-4"
+        />
+        <Mail
+          v-else
+          class="size-4"
+        />
+      </Button>
 
       <Button
         variant="ghost"

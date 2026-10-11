@@ -1,7 +1,9 @@
+import { callClientId } from '@/lib/callClient'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { buildWebRTCSessionUrl, useCallApi } from '@/apis/call'
 import { getStoredToken, setStoredToken } from '@/lib/authStorage'
+import { problemResponse } from '@/lib/__tests__/httpProblem'
 
 describe('useCallApi', () => {
   beforeEach(() => {
@@ -14,22 +16,16 @@ describe('useCallApi', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            error_code: 'wifi_calling_not_connected',
-            message: 'wifi calling is not connected',
-            request_id: 'req-1',
-          }),
-          {
-            status: 503,
-            headers: { 'Content-Type': 'application/json' },
-          },
+      vi
+        .fn()
+        .mockResolvedValue(
+          problemResponse(503, 'wifi_calling_not_connected', 'wifi calling is not connected'),
         ),
-      ),
     )
 
-    await expect(useCallApi().dialCall('modem-1', { to: '+12242255559', route: 'auto' })).rejects.toMatchObject({
+    await expect(
+      useCallApi().dialCall('modem-1', { to: '+12242255559', route: 'auto' }),
+    ).rejects.toMatchObject({
       message: 'wifi calling is not connected',
       error_code: 'wifi_calling_not_connected',
       request_id: 'req-1',
@@ -42,12 +38,7 @@ describe('useCallApi', () => {
     setStoredToken('token-1')
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error_code: 'unauthorized', message: 'unauthorized', request_id: 'req-2' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      ),
+      vi.fn().mockResolvedValue(problemResponse(401, 'invalid_token', 'unauthorized', 'req-2')),
     )
 
     await expect(useCallApi().listCalls('modem-1')).rejects.toMatchObject({ status: 401 })
@@ -57,7 +48,10 @@ describe('useCallApi', () => {
 
   it('adds encoded search queries to call list requests', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -96,7 +90,7 @@ describe('useCallApi', () => {
       expect.stringContaining('/api/v1/modems/modem-1/calls/call%2F1'),
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ state: 'active' }),
+        body: JSON.stringify({ state: 'active', clientId: callClientId() }),
       }),
     )
   })
@@ -114,7 +108,7 @@ describe('useCallApi', () => {
       expect.stringContaining('/api/v1/modems/modem-1/calls/call%2F1'),
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ state: 'ended' }),
+        body: JSON.stringify({ state: 'ended', clientId: callClientId() }),
       }),
     )
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -137,7 +131,7 @@ describe('useCallApi', () => {
       expect.stringContaining('/api/v1/modems/modem-1/calls/call%2F1'),
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ hold: 'local' }),
+        body: JSON.stringify({ hold: 'local', clientId: callClientId() }),
       }),
     )
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -145,7 +139,7 @@ describe('useCallApi', () => {
       expect.stringContaining('/api/v1/modems/modem-1/calls/call%2F1'),
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ hold: 'none' }),
+        body: JSON.stringify({ hold: 'none', clientId: callClientId() }),
       }),
     )
   })
@@ -160,7 +154,7 @@ describe('useCallApi', () => {
       expect.stringContaining('/api/v1/modems/modem-1/calls/call%2F1/dtmf-events'),
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ digits: '1' }),
+        body: JSON.stringify({ digits: '1', clientId: callClientId() }),
       }),
     )
   })

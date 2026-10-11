@@ -1,0 +1,6 @@
+"NSLocalNetworkUsageDescription" = "Connect to your Sigmo connections and display their devices on your local network.";
+
+"NSCameraUsageDescription" = "Scan an eSIM activation QR code to install a profile on your Sigmo modem.";
+
+"NSMicrophoneUsageDescription" = "Send your voice during calls through your Sigmo devices.";
+"NSContactsUsageDescription" = "Match caller names on this device. Contacts are never sent to a Sigmo server.";

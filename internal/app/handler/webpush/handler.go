@@ -13,17 +13,6 @@ import (
 	push "github.com/damonto/sigmo/internal/pkg/webpush"
 )
 
-const (
-	errorCodeReadFailed       = "read_web_push_failed"
-	errorCodeUpdateFailed     = "update_web_push_failed"
-	errorCodeRegisterInvalid  = "register_web_push_subscription_invalid"
-	errorCodeRegisterFailed   = "register_web_push_subscription_failed"
-	errorCodeRenameInvalid    = "rename_web_push_subscription_invalid"
-	errorCodeRenameFailed     = "rename_web_push_subscription_failed"
-	errorCodeSubscriptionGone = "web_push_subscription_not_found"
-	errorCodeDeleteFailed     = "delete_web_push_subscription_failed"
-)
-
 var errEnabledRequired = errors.New("enabled is required")
 
 type Handler struct {
@@ -37,21 +26,21 @@ func New(client *push.Client) *Handler {
 func (h *Handler) Get(c *echo.Context) error {
 	overview, err := h.client.Overview(c.Request().Context())
 	if err != nil {
-		return httpapi.Internal(c, errorCodeReadFailed, err)
+		return httpapi.Internal(c, "read_web_push_failed", err)
 	}
 	return c.JSON(http.StatusOK, overviewFromService(overview))
 }
 
 func (h *Handler) Update(c *echo.Context) error {
 	var req updateRequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeUpdateFailed, err)
+	if err := httpapi.BindJSON(c, &req, "update_web_push_failed"); err != nil {
+		return err
 	}
 	if req.Enabled == nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateFailed, errEnabledRequired)
+		return httpapi.UnprocessableEntity(c, "update_web_push_failed", errEnabledRequired)
 	}
 	if err := h.client.SetEnabled(c.Request().Context(), *req.Enabled); err != nil {
-		return httpapi.Internal(c, errorCodeUpdateFailed, err)
+		return httpapi.Internal(c, "update_web_push_failed", err)
 	}
 	return h.Get(c)
 }
@@ -59,40 +48,40 @@ func (h *Handler) Update(c *echo.Context) error {
 func (h *Handler) ListSubscriptions(c *echo.Context) error {
 	overview, err := h.client.Overview(c.Request().Context())
 	if err != nil {
-		return httpapi.Internal(c, errorCodeReadFailed, err)
+		return httpapi.Internal(c, "read_web_push_failed", err)
 	}
 	return c.JSON(http.StatusOK, subscriptionsFromStorage(overview.Subscriptions))
 }
 
 func (h *Handler) Register(c *echo.Context) error {
 	var req push.RegisterRequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeRegisterInvalid, err)
+	if err := httpapi.BindJSON(c, &req, "register_web_push_subscription_invalid"); err != nil {
+		return err
 	}
 	subscription, err := h.client.Register(c.Request().Context(), req, c.Request().UserAgent())
 	if err != nil {
 		if errors.Is(err, push.ErrInvalidSubscription) || errors.Is(err, push.ErrInvalidDeviceLabel) {
-			return httpapi.UnprocessableEntity(c, errorCodeRegisterInvalid, err)
+			return httpapi.UnprocessableEntity(c, "register_web_push_subscription_invalid", err)
 		}
-		return httpapi.Internal(c, errorCodeRegisterFailed, err)
+		return httpapi.Internal(c, "register_web_push_subscription_failed", err)
 	}
 	return c.JSON(http.StatusCreated, subscriptionFromStorage(subscription))
 }
 
 func (h *Handler) Rename(c *echo.Context) error {
 	var req renameRequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeRenameInvalid, err)
+	if err := httpapi.BindJSON(c, &req, "rename_web_push_subscription_invalid"); err != nil {
+		return err
 	}
 	subscription, err := h.client.Rename(c.Request().Context(), c.Param("subscriptionId"), req.Label)
 	if err != nil {
 		switch {
 		case errors.Is(err, push.ErrInvalidDeviceLabel):
-			return httpapi.UnprocessableEntity(c, errorCodeRenameInvalid, err)
+			return httpapi.UnprocessableEntity(c, "rename_web_push_subscription_invalid", err)
 		case errors.Is(err, storage.ErrNotFound):
-			return httpapi.NotFound(c, errorCodeSubscriptionGone, err)
+			return httpapi.NotFound(c, "web_push_subscription_not_found", err)
 		default:
-			return httpapi.Internal(c, errorCodeRenameFailed, err)
+			return httpapi.Internal(c, "rename_web_push_subscription_failed", err)
 		}
 	}
 	return c.JSON(http.StatusOK, subscriptionFromStorage(subscription))
@@ -102,9 +91,9 @@ func (h *Handler) Delete(c *echo.Context) error {
 	id := strings.TrimSpace(c.Param("subscriptionId"))
 	if err := h.client.Delete(c.Request().Context(), id); err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			return httpapi.NotFound(c, errorCodeSubscriptionGone, fmt.Errorf("push subscription %q: %w", id, err))
+			return httpapi.NotFound(c, "web_push_subscription_not_found", fmt.Errorf("push subscription %q: %w", id, err))
 		}
-		return httpapi.Internal(c, errorCodeDeleteFailed, err)
+		return httpapi.Internal(c, "delete_web_push_subscription_failed", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

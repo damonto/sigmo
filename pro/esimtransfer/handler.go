@@ -22,16 +22,6 @@ type Handler struct {
 	runner   *transferRunner
 }
 
-const (
-	errorCodeListTransferSourcesFailed  = "list_transfer_sources_failed"
-	errorCodeListTransferProfilesFailed = "list_transfer_profiles_failed"
-	errorCodeTransferInvalidRequest     = "transfer_invalid_request"
-	errorCodeTransferSourceIMEIRequired = "transfer_source_imei_required"
-	errorCodeTransferSourceNotFound     = "transfer_source_not_found"
-	errorCodeTransferSourceUnsupported  = "transfer_source_unsupported"
-	errorCodeTransferESIMFailed         = "transfer_esim_failed"
-)
-
 var transferWSUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true
@@ -62,11 +52,11 @@ func (h *Handler) Sources(c *echo.Context) error {
 	ctx := c.Request().Context()
 	target, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeListTransferSourcesFailed)
+		return httpapi.ModemLookupError(c, err, "list_transfer_sources_failed")
 	}
 	response, err := h.runner.Sources(ctx, target)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeListTransferSourcesFailed, err)
+		return httpapi.Internal(c, "list_transfer_sources_failed", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -75,11 +65,11 @@ func (h *Handler) Profiles(c *echo.Context) error {
 	ctx := c.Request().Context()
 	target, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeListTransferProfilesFailed)
+		return httpapi.ModemLookupError(c, err, "list_transfer_profiles_failed")
 	}
 	var req ProfilesRequest
 	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeTransferInvalidRequest, err)
+		return httpapi.BadRequest(c, "transfer_invalid_request", err)
 	}
 	profiles, err := h.runner.Profiles(ctx, target, req)
 	if err != nil {
@@ -92,7 +82,7 @@ func (h *Handler) Transfer(c *echo.Context) error {
 	ctx := c.Request().Context()
 	target, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeTransferESIMFailed)
+		return httpapi.ModemLookupError(c, err, "transfer_esim_failed")
 	}
 	conn, err := transferWSUpgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
@@ -105,18 +95,18 @@ func (h *Handler) Transfer(c *echo.Context) error {
 
 func transferProfileError(c *echo.Context, err error) error {
 	if errors.Is(err, ErrSourceIMEIRequired) {
-		return httpapi.BadRequest(c, errorCodeTransferSourceIMEIRequired, err)
+		return httpapi.BadRequest(c, "transfer_source_imei_required", err)
 	}
 	if errors.Is(err, mmodem.ErrNotFound) {
-		return httpapi.NotFound(c, errorCodeTransferSourceNotFound, err)
+		return httpapi.NotFound(c, "transfer_source_not_found", err)
 	}
 	if errors.Is(err, ErrSourceUnsupported) {
-		return httpapi.BadRequest(c, errorCodeTransferSourceUnsupported, err)
+		return httpapi.BadRequest(c, "transfer_source_unsupported", err)
 	}
 	if errors.Is(err, ErrSourceIsTarget) {
-		return httpapi.BadRequest(c, errorCodeTransferInvalidRequest, err)
+		return httpapi.BadRequest(c, "transfer_invalid_request", err)
 	}
-	return httpapi.Internal(c, errorCodeListTransferProfilesFailed, err)
+	return httpapi.Internal(c, "list_transfer_profiles_failed", err)
 }
 
 func profileActionConfig(core *coreesim.Handler, cfg Config) (Config, error) {

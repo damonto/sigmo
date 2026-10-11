@@ -17,6 +17,7 @@ import ModemCallRecordingNotice from '@/components/modem/ModemCallRecordingNotic
 import { Button } from '@/components/ui/button'
 import type { ModemCallSession } from '@/composables/useModemCallSession'
 import type { CallRecord } from '@/types/call'
+import { ownsCall } from '@/lib/callClient'
 
 const props = defineProps<{
   session: ModemCallSession
@@ -50,6 +51,7 @@ const toggleRecording = () => {
 }
 
 const dtmfCall = computed(() => props.session.activeCall.value)
+const viewingCall = computed(() => !!dtmfCall.value && !ownsCall(dtmfCall.value))
 const isIMSCall = computed(() => {
   const call = dtmfCall.value
   return !!call && imsCallRoutes.has(call.route)
@@ -58,6 +60,7 @@ const dtmfAvailable = computed(() => {
   const call = dtmfCall.value
   return (
     !!call &&
+    !viewingCall.value &&
     isIMSCall.value &&
     dtmfCallStates.has(call.state) &&
     !props.session.isLocallyHeld(call) &&
@@ -157,6 +160,13 @@ const sendDTMF = (digit: string) => {
             </template>
           </p>
           <p
+            v-if="viewingCall"
+            class="text-xs text-muted-foreground"
+            role="status"
+          >
+            {{ $t('modemDetail.phone.inUseElsewhere') }}
+          </p>
+          <p
             v-if="props.session.activeCallDurationLabel.value"
             class="truncate text-xs font-medium text-foreground"
           >
@@ -193,7 +203,7 @@ const sendDTMF = (digit: string) => {
             {{ $t('modemDetail.phone.recording.unsupported') }}
           </p>
           <p
-            v-else-if="isIMSCall && !props.session.callAudio.localStream.value"
+            v-else-if="isIMSCall && !viewingCall && !props.session.callAudio.localStream.value"
             class="text-xs text-muted-foreground"
           >
             {{ $t('modemDetail.phone.recording.receiveOnly') }}
@@ -201,6 +211,7 @@ const sendDTMF = (digit: string) => {
         </div>
       </div>
       <div
+        v-if="!viewingCall"
         class="flex w-full shrink-0 flex-wrap items-center justify-end gap-2 border-t pt-3 sm:w-auto sm:border-0 sm:pt-0"
       >
         <ModemCallAudioDevices

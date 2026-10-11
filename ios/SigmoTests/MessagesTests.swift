@@ -1,0 +1,260 @@
+import XCTest
+@testable import Sigmo
+
+@MainActor
+final class MessagesTests: XCTestCase {
+    private func session(_ fixture: MessagesFixture) async throws -> BackendSession {
+        let configuration = try testConfiguration()
+        let session = BackendSession(configuration: configuration, credentials: MemoryCredentials().store,
+            api: BackendAPI(configuration: configuration) { try await fixture.respond($0) })
+        await session.refresh(force: true)
+        XCTAssertTrue(session.canAccessDevices)
+        return session
+    }
+
+    func testHistorySearchReadAndSIMIsolation() async throws {
+        let fixture = MessagesFixture()
+        let session = try await session(fixture)
+        let messages = MessagesState(session: session, modemID: "device-1")
+        await messages.load()
+        XCTAssertEqual(messages.items.count, 2)
+        XCTAssertEqual(messages.unreadCount, 2)
+        let active = try XCTUnwrap(messages.items.first { $0.id == "conversation-active" })
+        let inactive = try XCTUnwrap(messages.items.first { $0.id == "conversation-inactive" })
+        let first = messages.thread(active), second = messages.thread(inactive)
+        first.draft = "first draft"; second.draft = "second draft"
+        XCTAssertEqual(messages.thread(active).draft, "first draft")
+        XCTAssertFalse(second.canSend)
+        await second.load()
+        XCTAssertEqual(second.messages.count, 1)
+        await first.load()
+        await first.markRead(through: 1)
+        await messages.load()
+        XCTAssertEqual(messages.unreadCount, 1)
+        await messages.mark(active, unread: true)
+        XCTAssertTrue(messages.items.first { $0.id == active.id }?.markedUnread == true)
+        messages.search = "Balance"
+        await messages.load()
+        XCTAssertEqual(messages.items.map(\.id), [active.id])
+        messages.search = ""; messages.historical = true
+        await messages.load()
+        XCTAssertEqual(messages.items.map(\.id), ["conversation-history"])
+    }
+
+    func testSearchMatchesNumbersAndOlderTextWithExistingFilters() async throws {
+        let fixture = MessagesFixture()
+        let session = try await session(fixture)
+        let list = MessagesState(session: session, modemID: "device-1")
+        let cases: [(query: String, unread: Bool, historical: Bool, ids: [String])] = [
+            ("  10086  ", false, false, ["conversation-inactive", "conversation-active"]),
+            ("welcome", false, false, ["conversation-active"]),
+            ("欢迎", false, false, ["conversation-active"]),
+            ("Travel", false, false, ["conversation-inactive"]),
+            ("Travel", true, false, []),
+            ("10086", true, false, ["conversation-active"]),
+            ("Unassigned", false, true, ["conversation-history"]),
+            ("missing", false, false, []),
+            (" \n ", false, false, ["conversation-inactive", "conversation-active"]),
+        ]
+        for entry in cases {
+            list.search = entry.query
+            list.unreadOnly = entry.unread
+            list.historical = entry.historical
+            await list.load()
+            XCTAssertEqual(list.visibleItems.map(\.id), entry.ids, entry.query)
+            XCTAssertNil(list.failure)
+            XCTAssertEqual(session.unreadCounts["device-1"], 2, "Search must preserve the modem badge")
+            let requests = await fixture.requests
+            let request = try XCTUnwrap(requests.last)
+            let query = try XCTUnwrap(URLComponents(url: XCTUnwrap(request.url), resolvingAgainstBaseURL: false)).queryItems ?? []
+            XCTAssertEqual(query.first { $0.name == "q" }?.value, list.searchQuery.isEmpty ? nil : list.searchQuery)
+            XCTAssertEqual(query.first { $0.name == "modemId" }?.value, entry.historical ? nil : "device-1")
+            XCTAssertEqual(query.first { $0.name == "unassigned" }?.value, entry.historical ? "true" : nil)
+        }
+    }
+
+    func testSearchPreservesSpecialCharactersInRequest() async throws {
+        let fixture = MessagesFixture()
+        let session = try await session(fixture)
+        let list = MessagesState(session: session, modemID: "device-1")
+        list.search = "  +86 & 欢迎?  "
+        await list.load()
+        let requests = await fixture.requests
+        let request = try XCTUnwrap(requests.last)
+        let query = try XCTUnwrap(URLComponents(url: XCTUnwrap(request.url), resolvingAgainstBaseURL: false)).queryItems
+        XCTAssertEqual(query?.first { $0.name == "q" }?.value, "+86 & 欢迎?")
+    }
+
+    func testSearchDiscardsOldResponseDuringDebounceAndAfterNewResponse() async throws {
+        for loadNewQueryFirst in [false, true] {
+            let fixture = MessagesFixture()
+            let session = try await session(fixture)
+            let list = MessagesState(session: session, modemID: "device-1")
+            await list.load()
+            let original = list.items
+            list.search = "Balance"
+            await fixture.holdNext("/conversations")
+            let oldRequest = Task { await list.load() }
+            await fixture.waitForHeld()
+            list.search = "Travel"
+            if loadNewQueryFirst { await list.load() }
+            await fixture.release()
+            await oldRequest.value
+            if loadNewQueryFirst {
+                XCTAssertEqual(list.items.map(\.id), ["conversation-inactive"])
+            } else {
+                XCTAssertEqual(list.items, original, "A response for old input must not replace the snapshot during debounce")
+                await list.load()
+                XCTAssertEqual(list.items.map(\.id), ["conversation-inactive"])
+            }
+            XCTAssertFalse(list.loading)
+            XCTAssertNil(list.failure)
+        }
+    }
+
+    func testSearchCancellationKeepsLastSnapshot() async throws {
+        let fixture = MessagesFixture()
+        let session = try await session(fixture)
+        let list = MessagesState(session: session, modemID: "device-1")
+        await list.load()
+        let original = list.items
+        list.search = "Balance"
+        await fixture.holdNext("/conversations")
+        let request = Task { await list.load() }
+        await fixture.waitForHeld()
+        request.cancel()
+        await fixture.release()
+        await request.value
+        XCTAssertEqual(list.items, original)
+        XCTAssertFalse(list.loading)
+        XCTAssertNil(list.failure)
+    }
+
+    func testLegacySearchUsesServerQueryAndClearingRestoresMessages() async throws {
+        let fixture = MessagesFixture()
+        await fixture.setLegacy(true)
+        let session = try await session(fixture)
+        let list = MessagesState(session: session, modemID: "device-1")
+        for (query, expectedIDs) in [(" Welcome ", [Int64(1)]), ("missing", []), ("", [Int64(2)])] {
+            list.search = query
+            await list.load()
+            XCTAssertTrue(list.legacy)
+            XCTAssertEqual(list.items.map(\.latestMessage.id), expectedIDs)
+            XCTAssertNil(list.failure)
+        }
+    }
+
+    func testTimeoutRetainsDraftAndDoesNotResendOnRefresh() async throws {
+        let fixture = MessagesFixture()
+        let session = try await session(fixture)
+        let list = MessagesState(session: session, modemID: "device-1")
+        await list.load()
+        let thread = list.thread(try XCTUnwrap(list.items.first { $0.id == "conversation-active" }))
+        thread.draft = "timeout draft"
+        await fixture.setSendStatus(408)
+        await thread.send()
+        await thread.load()
+        XCTAssertEqual(thread.draft, "timeout draft")
+        XCTAssertEqual(thread.failure?.code, "messages.resultUnknown")
+        let count = await fixture.requestCount(method: "POST", suffix: "/messages")
+        XCTAssertEqual(count, 1)
+        await fixture.setSendStatus(409)
+        await thread.send()
+        XCTAssertEqual(thread.draft, "timeout draft")
+        XCTAssertEqual(thread.failure?.status, 409)
+    }
+
+    func testLogoutDiscardsLateResponsesAndDrafts() async throws {
+        let fixture = MessagesFixture()
+        let session = try await session(fixture)
+        let list = MessagesState(session: session, modemID: "device-1")
+        await fixture.holdNext("/conversations")
+        let load = Task { await list.load() }
+        await fixture.waitForHeld()
+        list.newDraft = "private draft"
+        list.search = "private query"
+        session.logout(); list.clear()
+        await fixture.release(); await load.value
+        XCTAssertTrue(list.items.isEmpty)
+        XCTAssertTrue(list.newDraft.isEmpty)
+        XCTAssertTrue(list.search.isEmpty)
+    }
+
+    func testClearedConversationsDiscardLateMarkAndDeleteResults() async throws {
+        for deleting in [false, true] {
+            let fixture = MessagesFixture()
+            let session = try await session(fixture)
+            let list = MessagesState(session: session, modemID: "device-1")
+            await list.load()
+            let conversation = try XCTUnwrap(list.items.first)
+            let readsBeforeAction = await fixture.requestCount(method: "GET", suffix: "/conversations")
+            await fixture.holdNext("/conversations/" + conversation.id)
+            let operation = Task {
+                if deleting { _ = await list.delete(conversation) }
+                else { await list.mark(conversation, unread: true) }
+            }
+            await fixture.waitForHeld()
+
+            list.clear()
+            await fixture.release()
+            await operation.value
+
+            XCTAssertTrue(list.items.isEmpty)
+            XCTAssertNil(list.badge)
+            XCTAssertFalse(list.loaded)
+            XCTAssertNil(list.failure)
+            let reads = await fixture.requestCount(method: "GET", suffix: "/conversations")
+            XCTAssertEqual(reads, readsBeforeAction, "An obsolete action must not reload a cleared page")
+        }
+    }
+
+    func testServerTimeoutRetainsNewAndExistingDraftsWithoutResending() async throws {
+        let fixture = MessagesFixture()
+        let session = try await session(fixture)
+        let list = MessagesState(session: session, modemID: "device-1")
+        await list.load()
+        await fixture.setSendStatus(504)
+        let thread = list.thread(try XCTUnwrap(list.items.first { $0.id == "conversation-active" }))
+        thread.draft = "Server timed out"
+        await thread.send()
+        await thread.load()
+        XCTAssertEqual(thread.draft, "Server timed out")
+        XCTAssertEqual(thread.failure?.code, "messages.resultUnknown")
+        list.newRecipient = "10086"
+        list.newDraft = "New conversation timeout"
+        let result = await list.sendNew()
+        XCTAssertNil(result)
+        await list.load()
+        XCTAssertEqual(list.newDraft, "New conversation timeout")
+        XCTAssertEqual(list.failure?.code, "messages.resultUnknown")
+        let submissions = await fixture.requestCount(method: "POST", suffix: "/messages")
+        XCTAssertEqual(submissions, 2)
+    }
+
+    func testOldBackendUsesExistingMessagesWithUpgradeState() async throws {
+        let fixture = MessagesFixture()
+        await fixture.setLegacy(true)
+        let session = try await session(fixture)
+        let list = MessagesState(session: session, modemID: "device-1")
+        await list.load()
+        XCTAssertTrue(list.legacy)
+        XCTAssertEqual(list.items.count, 1)
+        let thread = list.thread(try XCTUnwrap(list.items.first))
+        await thread.load()
+        XCTAssertEqual(thread.messages.count, 2)
+    }
+
+    func testNewMessageIncludesExpectedSIMAndClearsOnlyAfterSuccess() async throws {
+        let fixture = MessagesFixture()
+        let session = try await session(fixture)
+        let list = MessagesState(session: session, modemID: "device-1")
+        list.newRecipient = "10086"; list.newDraft = "hello"
+        let conversation = await list.sendNew()
+        XCTAssertNotNil(conversation)
+        XCTAssertTrue(list.newDraft.isEmpty)
+        let requests = await fixture.requests
+        let sent = try XCTUnwrap(requests.first { $0.httpMethod == "POST" })
+        struct Body: Decodable { let expectedProfileId: String }
+        XCTAssertEqual(try JSONDecoder().decode(Body.self, from: XCTUnwrap(sent.httpBody)).expectedProfileId, "8986000000000000000")
+    }
+}

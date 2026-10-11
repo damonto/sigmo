@@ -15,6 +15,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	push "github.com/damonto/sigmo/internal/pkg/webpush"
 )
@@ -40,16 +41,11 @@ func TestHandlerWebPushState(t *testing.T) {
 			req := httptest.NewRequest(tt.method, "/api/v1/web-push", strings.NewReader(tt.body))
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 			rec := httptest.NewRecorder()
-			c := echo.New().NewContext(req, rec)
-			var err error
-			if tt.method == http.MethodGet {
-				err = h.Get(c)
-			} else {
-				err = h.Update(c)
-			}
-			if err != nil {
-				t.Fatalf("handler error = %v", err)
-			}
+			e := echo.New()
+			e.HTTPErrorHandler = httpapi.HTTPErrorHandler
+			e.GET("/api/v1/web-push", h.Get)
+			e.PUT("/api/v1/web-push", h.Update)
+			e.ServeHTTP(rec, req)
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
 			}

@@ -12,12 +12,14 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 type profile struct {
 	store     *settings.Store
 	reminders *reminder.Scheduler
 	clients   *lpa.Pool
+	history   *storage.Store
 }
 
 var errInvalidNickname = errors.New("nickname must be valid utf-8 and 64 bytes or fewer")
@@ -84,6 +86,13 @@ func (p *profile) List(ctx context.Context, modem *mmodem.Modem) (*ProfilesRespo
 			client.Logger().Warn("close LPA client", "error", cerr)
 		}
 		response.SEs = append(response.SEs, group)
+		if p.history != nil {
+			for _, item := range group.Profiles {
+				if err := p.history.RecordMessageLine(ctx, storage.MessageLine{ProfileID: item.ICCID, ModemID: modem.EquipmentIdentifier, Label: item.Name}); err != nil {
+					return nil, fmt.Errorf("record eSIM message history: %w", err)
+				}
+			}
+		}
 	}
 	return response, nil
 }

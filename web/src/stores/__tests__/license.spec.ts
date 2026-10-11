@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useLicenseStore } from '@/stores/license'
+import { problemResponse } from '@/lib/__tests__/httpProblem'
 
 describe('license store', () => {
   beforeEach(() => {
@@ -13,7 +14,10 @@ describe('license store', () => {
   })
 
   it('recognizes Community only from an explicit 404', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 404 })))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(problemResponse(404, 'resource_not_found', 'not found')),
+    )
 
     const store = useLicenseStore()
     await expect(store.check()).resolves.toBe(true)
@@ -24,10 +28,19 @@ describe('license store', () => {
   it.each([
     {
       name: 'server error',
+      response: () => problemResponse(500, 'internal_server_error', 'internal'),
+    },
+    {
+      name: 'proxy 404',
       response: () =>
-        new Response(JSON.stringify({ error_code: 'internal_server_error', message: 'internal' }), {
-          status: 500,
+        new Response('<html>Not found</html>', {
+          status: 404,
+          headers: { 'Content-Type': 'text/html' },
         }),
+    },
+    {
+      name: 'unrelated business 404',
+      response: () => problemResponse(404, 'license_pairing_not_found', 'not found'),
     },
     {
       name: 'invalid success response',

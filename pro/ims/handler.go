@@ -74,26 +74,6 @@ type VoLTESettingsResponse struct {
 	DataPath        DataPath `json:"dataPath" jsonschema:"data path used for VoLTE traffic, such as qmap, legacy_bam_dmux, or qualcomm_410"`
 }
 
-const (
-	errorCodeGetSettingsFailed            = "get_ims_settings_failed"
-	errorCodeUpdateSettingsInvalidRequest = "update_ims_settings_invalid_request"
-	errorCodeUpdateSettingsFailed         = "update_ims_settings_failed"
-	errorCodeCreateSessionFailed          = "create_ims_session_failed"
-	errorCodeDeleteSessionFailed          = "delete_ims_session_failed"
-	errorCodeSessionUnavailable           = "ims_session_unavailable"
-	errorCodeStartWebsheetFailed          = "start_ims_websheet_failed"
-	errorCodeStartE911WebsheetFailed      = "start_ims_e911_websheet_failed"
-	errorCodeWebsheetNotPending           = "ims_websheet_not_pending"
-	errorCodeSetupPending                 = "ims_setup_pending"
-	errorCodeSetupDenied                  = "ims_setup_denied"
-	errorCodeWebsheetUnavailable          = "ims_websheet_unavailable"
-	errorCodeGetVoLTESettingsFailed       = "get_volte_settings_failed"
-	errorCodeUpdateVoLTEInvalidRequest    = "update_volte_settings_invalid_request"
-	errorCodeUpdateVoLTESettingsFailed    = "update_volte_settings_failed"
-	errorCodeVoLTEAirplaneMode            = "volte_airplane_mode"
-	errorCodeVoLTEUnavailable             = "volte_unavailable"
-)
-
 func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, connectivity *Connectivity) {
 	h := &Handler{registry: registry, connectivity: connectivity}
 	group.GET("/modems/:id/wifi-calling/settings", h.WiFiCallingSettings)
@@ -154,11 +134,11 @@ func (h *Handler) VoLTESettings(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeGetVoLTESettingsFailed)
+		return httpapi.ModemLookupError(c, err, "get_volte_settings_failed")
 	}
 	response, err := ReadVoLTESettings(ctx, modem, h.connectivity)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeGetVoLTESettingsFailed, err)
+		return httpapi.Internal(c, "get_volte_settings_failed", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -167,11 +147,11 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeUpdateVoLTESettingsFailed)
+		return httpapi.ModemLookupError(c, err, "update_volte_settings_failed")
 	}
 	var req VoLTESettingsRequest
 	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeUpdateVoLTEInvalidRequest, err)
+		return httpapi.BadRequest(c, "update_volte_settings_invalid_request", err)
 	}
 	if err := h.connectivity.ReplaceVoLTESettings(ctx, modem, VoLTESettings{
 		Enabled:  req.Enabled,
@@ -179,13 +159,13 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 	}); err != nil {
 		switch {
 		case errors.Is(err, ErrVoLTEDataPathRequired), errors.Is(err, ErrVoLTEDataPathUnsupported):
-			return httpapi.UnprocessableEntity(c, errorCodeUpdateVoLTEInvalidRequest, err)
+			return httpapi.UnprocessableEntity(c, "update_volte_settings_invalid_request", err)
 		case errors.Is(err, ErrVoLTEAirplaneMode):
-			return httpapi.Error(c, http.StatusConflict, errorCodeVoLTEAirplaneMode, err.Error())
+			return httpapi.Error(c, http.StatusConflict, "volte_airplane_mode", err.Error())
 		case errors.Is(err, ErrUnavailable):
-			return httpapi.BadRequest(c, errorCodeVoLTEUnavailable, err)
+			return httpapi.BadRequest(c, "volte_unavailable", err)
 		default:
-			return httpapi.Internal(c, errorCodeUpdateVoLTESettingsFailed, err)
+			return httpapi.Internal(c, "update_volte_settings_failed", err)
 		}
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -194,23 +174,23 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 func (h *Handler) UpdateWiFiCallingSettings(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeUpdateSettingsFailed)
+		return httpapi.ModemLookupError(c, err, "update_ims_settings_failed")
 	}
 	var req WiFiCallingSettingsRequest
-	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateSettingsInvalidRequest); err != nil {
+	if err := httpapi.BindAndValidate(c, &req, "update_ims_settings_invalid_request"); err != nil {
 		return err
 	}
 	if req.Underlay == nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateSettingsInvalidRequest, ErrInvalidWiFiCallingUnderlay)
+		return httpapi.UnprocessableEntity(c, "update_ims_settings_invalid_request", ErrInvalidWiFiCallingUnderlay)
 	}
 	if err := h.connectivity.ReplaceWiFiCallingSettings(c.Request().Context(), modem, WiFiCallingSettings{
 		Enabled:  req.Enabled,
 		Underlay: *req.Underlay,
 	}); err != nil {
 		if errors.Is(err, ErrInvalidWiFiCallingUnderlay) {
-			return httpapi.UnprocessableEntity(c, errorCodeUpdateSettingsInvalidRequest, err)
+			return httpapi.UnprocessableEntity(c, "update_ims_settings_invalid_request", err)
 		}
-		return httpapi.Internal(c, errorCodeUpdateSettingsFailed, err)
+		return httpapi.Internal(c, "update_ims_settings_failed", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -218,11 +198,11 @@ func (h *Handler) UpdateWiFiCallingSettings(c *echo.Context) error {
 func (h *Handler) WiFiCallingSettings(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeGetSettingsFailed)
+		return httpapi.ModemLookupError(c, err, "get_ims_settings_failed")
 	}
 	response, err := ReadWiFiCallingSettings(c.Request().Context(), modem, h.connectivity)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeGetSettingsFailed, err)
+		return httpapi.Internal(c, "get_ims_settings_failed", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -230,13 +210,13 @@ func (h *Handler) WiFiCallingSettings(c *echo.Context) error {
 func (h *Handler) CreateWiFiCallingSession(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeCreateSessionFailed)
+		return httpapi.ModemLookupError(c, err, "create_ims_session_failed")
 	}
 	if err := h.connectivity.ReconnectWiFiCalling(c.Request().Context(), modem); err != nil {
 		if errors.Is(err, ErrNotConnected) || errors.Is(err, ErrUnavailable) {
-			return httpapi.BadRequest(c, errorCodeSessionUnavailable, err)
+			return httpapi.BadRequest(c, "ims_session_unavailable", err)
 		}
-		return httpapi.Internal(c, errorCodeCreateSessionFailed, err)
+		return httpapi.Internal(c, "create_ims_session_failed", err)
 	}
 	return c.NoContent(http.StatusAccepted)
 }
@@ -244,10 +224,10 @@ func (h *Handler) CreateWiFiCallingSession(c *echo.Context) error {
 func (h *Handler) DeleteWiFiCallingSession(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeDeleteSessionFailed)
+		return httpapi.ModemLookupError(c, err, "delete_ims_session_failed")
 	}
 	if err := h.connectivity.DisconnectWiFiCalling(c.Request().Context(), modem); err != nil {
-		return httpapi.Internal(c, errorCodeDeleteSessionFailed, err)
+		return httpapi.Internal(c, "delete_ims_session_failed", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -255,14 +235,14 @@ func (h *Handler) DeleteWiFiCallingSession(c *echo.Context) error {
 func (h *Handler) CreateWiFiCallingWebsheet(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeStartWebsheetFailed)
+		return httpapi.ModemLookupError(c, err, "start_ims_websheet_failed")
 	}
 	info, err := h.connectivity.StartWiFiCallingWebsheet(c.Request().Context(), modem)
 	if err != nil {
 		if errors.Is(err, ErrWebsheetNotPending) {
-			return httpapi.BadRequest(c, errorCodeWebsheetNotPending, err)
+			return httpapi.BadRequest(c, "ims_websheet_not_pending", err)
 		}
-		return httpapi.Internal(c, errorCodeStartWebsheetFailed, err)
+		return httpapi.Internal(c, "start_ims_websheet_failed", err)
 	}
 	return c.JSON(http.StatusCreated, info)
 }
@@ -270,11 +250,11 @@ func (h *Handler) CreateWiFiCallingWebsheet(c *echo.Context) error {
 func (h *Handler) CreateWiFiCallingEmergencyAddressWebsheet(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeStartE911WebsheetFailed)
+		return httpapi.ModemLookupError(c, err, "start_ims_e911_websheet_failed")
 	}
 	info, err := h.connectivity.StartWiFiCallingEmergencyAddressUpdate(c.Request().Context(), modem)
 	if err != nil {
-		return wifiCallingWebsheetStartError(c, errorCodeStartE911WebsheetFailed, err)
+		return wifiCallingWebsheetStartError(c, "start_ims_e911_websheet_failed", err)
 	}
 	return c.JSON(http.StatusCreated, info)
 }
@@ -282,11 +262,11 @@ func (h *Handler) CreateWiFiCallingEmergencyAddressWebsheet(c *echo.Context) err
 func wifiCallingWebsheetStartError(c *echo.Context, fallbackCode string, err error) error {
 	switch {
 	case errors.Is(err, ErrWiFiCallingSetupPending):
-		return httpapi.TooManyRequests(c, errorCodeSetupPending, err)
+		return httpapi.TooManyRequests(c, "ims_setup_pending", err)
 	case errors.Is(err, ErrWiFiCallingSetupDenied):
-		return httpapi.BadRequest(c, errorCodeSetupDenied, err)
+		return httpapi.BadRequest(c, "ims_setup_denied", err)
 	case errors.Is(err, ErrUnavailable), errors.Is(err, ErrWebsheetUnavailable):
-		return httpapi.BadRequest(c, errorCodeWebsheetUnavailable, err)
+		return httpapi.BadRequest(c, "ims_websheet_unavailable", err)
 	default:
 		return httpapi.Internal(c, fallbackCode, err)
 	}

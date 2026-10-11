@@ -57,7 +57,7 @@ const dialpadRef = useTemplateRef<{ focus: () => void }>('dialpadRef')
 const { isStickyVisible } = useStickyTopBar(backButtonRef)
 
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
-const { phoneCountry } = useModemPhoneCountry(modemId)
+const { phoneCountry, profileID } = useModemPhoneCountry(modemId)
 const searchQuery = ref('')
 const normalizedSearchQuery = computed(() => searchQuery.value.trim())
 const debouncedSearchQuery = refDebounced(normalizedSearchQuery, 250)
@@ -181,7 +181,7 @@ const dialTarget = async (target: string, clearDigitsOnSuccess = false) => {
   const preparedAudio = shouldPrepareOutgoingAudio()
   const audioReady = preparedAudio ? callAudio.prepare() : Promise.resolve(false)
   dialpadOpen.value = false
-  const call = await dial(target)
+  const call = await dial(target, 'auto', profileID.value)
   if (call) {
     if (clearDigitsOnSuccess) {
       digits.value = ''
@@ -372,7 +372,10 @@ watch(dialpadOpen, async (open) => {
           class="inline-flex lg:hidden"
           :class="{ invisible: isStickyVisible }"
         >
-          <BackButton to="/" :label="t('modemDetail.back')" />
+          <BackButton
+            to="/"
+            :label="t('modemDetail.back')"
+          />
         </div>
         <h1 class="text-2xl font-semibold">{{ t('modemDetail.phone.title') }}</h1>
         <p class="text-sm text-muted-foreground">{{ t('modemDetail.phone.subtitle') }}</p>
@@ -409,7 +412,10 @@ watch(dialpadOpen, async (open) => {
           <p class="font-medium">{{ emptyLabel }}</p>
         </div>
 
-        <section v-else class="scrollbar-none space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+        <section
+          v-else
+          class="scrollbar-none space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto"
+        >
           <div
             v-for="call in recentCalls"
             :key="call.callID"
@@ -431,8 +437,14 @@ watch(dialpadOpen, async (open) => {
                 "
                 aria-hidden="true"
               >
-                <PhoneIncoming v-if="call.direction === 'incoming'" class="size-5" />
-                <PhoneOutgoing v-else class="size-5" />
+                <PhoneIncoming
+                  v-if="call.direction === 'incoming'"
+                  class="size-5"
+                />
+                <PhoneOutgoing
+                  v-else
+                  class="size-5"
+                />
               </span>
 
               <span class="min-w-0 flex-1 space-y-1">
@@ -465,12 +477,22 @@ watch(dialpadOpen, async (open) => {
                 :aria-label="t('modemDetail.phone.callBack')"
                 @click.stop="callBack(call)"
               >
-                <Spinner v-if="dialingCallBackID === call.callID" class="size-4" />
-                <PhoneCall v-else class="size-4" />
+                <Spinner
+                  v-if="dialingCallBackID === call.callID"
+                  class="size-4"
+                />
+                <PhoneCall
+                  v-else
+                  class="size-4"
+                />
               </Button>
             </div>
 
-            <div v-if="expandedCallID === call.callID" class="mt-4 border-t pt-4" @click.stop>
+            <div
+              v-if="expandedCallID === call.callID"
+              class="mt-4 border-t pt-4"
+              @click.stop
+            >
               <dl class="grid grid-cols-2 gap-3 text-sm xl:grid-cols-3">
                 <div class="space-y-1">
                   <dt class="text-xs font-medium text-muted-foreground">
@@ -526,7 +548,10 @@ watch(dialpadOpen, async (open) => {
                     }}
                   </dd>
                 </div>
-                <div v-if="call.reason" class="space-y-1">
+                <div
+                  v-if="call.reason"
+                  class="space-y-1"
+                >
                   <dt class="text-xs font-medium text-muted-foreground">
                     {{ t('modemDetail.phone.details.reason') }}
                   </dt>
@@ -534,7 +559,10 @@ watch(dialpadOpen, async (open) => {
                 </div>
               </dl>
 
-              <div v-if="terminalStates.has(call.state)" class="mt-4 flex justify-end">
+              <div
+                v-if="terminalStates.has(call.state)"
+                class="mt-4 flex justify-end"
+              >
                 <Button
                   variant="destructive"
                   size="sm"
@@ -542,8 +570,14 @@ watch(dialpadOpen, async (open) => {
                   :disabled="isDeletingCallID === call.callID"
                   @click="openDeleteDialog(call)"
                 >
-                  <Spinner v-if="isDeletingCallID === call.callID" class="size-4" />
-                  <Trash2 v-else class="size-4" />
+                  <Spinner
+                    v-if="isDeletingCallID === call.callID"
+                    class="size-4"
+                  />
+                  <Trash2
+                    v-else
+                    class="size-4"
+                  />
                   {{ t('modemDetail.phone.deleteRecord') }}
                 </Button>
               </div>
@@ -618,7 +652,10 @@ watch(dialpadOpen, async (open) => {
           </DialogDescription>
         </DialogHeader>
         <div class="space-y-4">
-          <div v-if="ussdReply" class="rounded-lg bg-muted px-4 py-3 text-sm whitespace-pre-wrap">
+          <div
+            v-if="ussdReply"
+            class="rounded-lg bg-muted px-4 py-3 text-sm whitespace-pre-wrap"
+          >
             {{ ussdReply }}
           </div>
           <input
@@ -628,11 +665,19 @@ watch(dialpadOpen, async (open) => {
             @keyup.enter="sendUssd"
           />
           <div class="grid grid-cols-2 gap-2">
-            <Button variant="outline" @click="closeUssd">{{
-              t('modemDetail.actions.cancel')
-            }}</Button>
-            <Button :disabled="isSendingUssd || !ussdDraft.trim()" @click="sendUssd">
-              <Spinner v-if="isSendingUssd" class="mr-2 size-4" />
+            <Button
+              variant="outline"
+              @click="closeUssd"
+              >{{ t('modemDetail.actions.cancel') }}</Button
+            >
+            <Button
+              :disabled="isSendingUssd || !ussdDraft.trim()"
+              @click="sendUssd"
+            >
+              <Spinner
+                v-if="isSendingUssd"
+                class="mr-2 size-4"
+              />
               {{ t('modemDetail.ussd.send') }}
             </Button>
           </div>
@@ -658,7 +703,10 @@ watch(dialpadOpen, async (open) => {
             :disabled="!!isDeletingCallID"
             @click="confirmDeleteRecord"
           >
-            <span v-if="isDeletingCallID" class="inline-flex items-center gap-2">
+            <span
+              v-if="isDeletingCallID"
+              class="inline-flex items-center gap-2"
+            >
               <Spinner class="size-4" />
               {{ t('modemDetail.actions.delete') }}
             </span>

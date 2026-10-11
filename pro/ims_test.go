@@ -125,3 +125,44 @@ func TestWiFiCallingOverview(t *testing.T) {
 		})
 	}
 }
+
+func TestVoLTEOverview(t *testing.T) {
+	errStatus := errors.New("status read")
+	tests := []struct {
+		name          string
+		status        pims.VoLTEStatus
+		err           error
+		wantEnabled   bool
+		wantConnected bool
+		wantErr       error
+	}{
+		{name: "connected", status: pims.VoLTEStatus{VoLTESettings: pims.VoLTESettings{Enabled: true}, Connected: true}, wantEnabled: true, wantConnected: true},
+		{name: "enabled and disconnected", status: pims.VoLTEStatus{VoLTESettings: pims.VoLTESettings{Enabled: true}}, wantEnabled: true},
+		{name: "disabled"},
+		{name: "unavailable", err: pims.ErrUnavailable},
+		{name: "missing profile", err: mmodem.ErrProfileIDMissing},
+		{name: "wraps status error", err: errStatus, wantErr: errStatus},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			device := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
+			extension := voLTEOverview(func(ctx context.Context, modem *mmodem.Modem) (pims.VoLTEStatus, error) {
+				if modem != device || ctx != t.Context() {
+					t.Fatal("status read must use the requested modem and context")
+				}
+				return tt.status, tt.err
+			})
+			fields := &modemstatus.Fields{WiFiCallingEnabled: true, WiFiCallingConnected: true}
+			err := extension(t.Context(), device, fields)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("voLTEOverview() error = %v, want %v", err, tt.wantErr)
+			}
+			if fields.VoLTEEnabled != tt.wantEnabled || fields.VoLTEConnected != tt.wantConnected {
+				t.Fatalf("VoLTE state = %v/%v, want %v/%v", fields.VoLTEEnabled, fields.VoLTEConnected, tt.wantEnabled, tt.wantConnected)
+			}
+			if !fields.WiFiCallingEnabled || !fields.WiFiCallingConnected {
+				t.Fatal("VoLTE status must not change Wi-Fi Calling state")
+			}
+		})
+	}
+}

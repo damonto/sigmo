@@ -1,3 +1,4 @@
+import { callClientId } from '@/lib/callClient'
 import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -224,6 +225,7 @@ describe('call audio session', () => {
     )
     expect(FakeWebSocket.instances[0]?.sent).toContainEqual({
       type: 'offer',
+      clientId: callClientId(),
       offer: {
         type: 'offer',
         sdp: 'offer-sdp',
@@ -286,6 +288,7 @@ describe('call audio session', () => {
     expect(FakeWebSocket.instances[0]?.sent).toEqual([
       {
         type: 'offer',
+        clientId: callClientId(),
         offer: {
           type: 'offer',
           sdp: 'offer-sdp',
@@ -871,6 +874,7 @@ describe('call audio session', () => {
     await expect(session.start('call-1')).resolves.toBe(true)
     expect(FakeWebSocket.instances[0]?.sent).toContainEqual({
       type: 'offer',
+      clientId: callClientId(),
       offer: {
         type: 'offer',
         sdp: 'offer-sdp',

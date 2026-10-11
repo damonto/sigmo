@@ -1,6 +1,6 @@
 module github.com/damonto/sigmo
 
-go 1.26.3
+go 1.27.1
 
 require (
 	github.com/damonto/euicc-go v1.1.3-0.20260813015305-1f7e0d0c2ffc

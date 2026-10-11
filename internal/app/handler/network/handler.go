@@ -33,32 +33,6 @@ type Config struct {
 	AirplaneModeLifecycle appconnectivity.AirplaneModeLifecycle
 }
 
-const (
-	errorCodeListNetworksFailed      = "list_networks_failed"
-	errorCodeStartNetworkScanFailed  = "start_network_scan_failed"
-	errorCodeGetNetworkScanFailed    = "get_network_scan_failed"
-	errorCodeNetworkScanNotFound     = "network_scan_not_found"
-	errorCodeOperatorCodeRequired    = "operator_code_required"
-	errorCodeGetRegistrationFailed   = "get_registration_failed"
-	errorCodeSetRegistrationFailed   = "set_registration_failed"
-	errorCodeSetRegistrationInvalid  = "set_registration_invalid_request"
-	errorCodeRegistrationModeInvalid = "registration_mode_invalid"
-	errorCodeGetModesFailed          = "get_modes_failed"
-	errorCodeSetModesFailed          = "set_modes_failed"
-	errorCodeSetModesInvalid         = "set_modes_invalid_request"
-	errorCodeUnsupportedMode         = "unsupported_mode"
-	errorCodeGetBandsFailed          = "get_bands_failed"
-	errorCodeSetBandsFailed          = "set_bands_failed"
-	errorCodeSetBandsInvalid         = "set_bands_invalid_request"
-	errorCodeBandsRequired           = "bands_required"
-	errorCodeUnsupportedBand         = "unsupported_band"
-	errorCodeDuplicateBand           = "duplicate_band"
-	errorCodeGetAirplaneModeFailed   = "get_airplane_mode_failed"
-	errorCodeSetAirplaneModeFailed   = "set_airplane_mode_failed"
-	errorCodeSetAirplaneModeInvalid  = "set_airplane_mode_invalid_request"
-	errorCodeAirplaneModeUnsupported = "airplane_mode_unsupported"
-)
-
 var errNetworkRegistryRequired = errors.New("modem registry is required")
 
 func New(cfg Config) (*Handler, error) {
@@ -85,11 +59,11 @@ func (h *Handler) List(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeListNetworksFailed)
+		return httpapi.ModemLookupError(c, err, "list_networks_failed")
 	}
 	response, err := h.networks.List(ctx, modem)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeListNetworksFailed, err)
+		return httpapi.Internal(c, "list_networks_failed", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -100,11 +74,11 @@ func (h *Handler) StartNetworkScan(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeStartNetworkScanFailed)
+		return httpapi.ModemLookupError(c, err, "start_network_scan_failed")
 	}
 	response, created, err := h.networks.StartScan(ctx, modem)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeStartNetworkScanFailed, err)
+		return httpapi.Internal(c, "start_network_scan_failed", err)
 	}
 	status := http.StatusOK
 	if created {
@@ -121,14 +95,14 @@ func (h *Handler) GetNetworkScan(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeGetNetworkScanFailed)
+		return httpapi.ModemLookupError(c, err, "get_network_scan_failed")
 	}
 	response, err := h.networks.Scan(ctx, modem, c.Param("scanID"))
 	if errors.Is(err, errNetworkScanNotFound) {
-		return httpapi.NotFound(c, errorCodeNetworkScanNotFound, err)
+		return httpapi.NotFound(c, "network_scan_not_found", err)
 	}
 	if err != nil {
-		return httpapi.Internal(c, errorCodeGetNetworkScanFailed, err)
+		return httpapi.Internal(c, "get_network_scan_failed", err)
 	}
 	setNetworkScanRetryHeader(header, response.Status)
 	return c.JSON(http.StatusOK, response)
@@ -145,11 +119,11 @@ func (h *Handler) Registration(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeGetRegistrationFailed)
+		return httpapi.ModemLookupError(c, err, "get_registration_failed")
 	}
 	response, err := h.networks.Registration(ctx, modem)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeGetRegistrationFailed, err)
+		return httpapi.Internal(c, "get_registration_failed", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -158,20 +132,20 @@ func (h *Handler) SetRegistration(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeSetRegistrationFailed)
+		return httpapi.ModemLookupError(c, err, "set_registration_failed")
 	}
 	var req SetRegistrationRequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeSetRegistrationInvalid, err)
+	if err := httpapi.BindJSON(c, &req, "set_registration_invalid_request"); err != nil {
+		return err
 	}
 	if err := h.networks.SetRegistration(ctx, modem, req); err != nil {
 		switch {
 		case errors.Is(err, errRegistrationModeInvalid):
-			return httpapi.BadRequest(c, errorCodeRegistrationModeInvalid, err)
+			return httpapi.BadRequest(c, "registration_mode_invalid", err)
 		case errors.Is(err, errOperatorCodeRequired):
-			return httpapi.BadRequest(c, errorCodeOperatorCodeRequired, err)
+			return httpapi.BadRequest(c, "operator_code_required", err)
 		default:
-			return httpapi.Internal(c, errorCodeSetRegistrationFailed, err)
+			return httpapi.Internal(c, "set_registration_failed", err)
 		}
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -181,11 +155,11 @@ func (h *Handler) Modes(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeGetModesFailed)
+		return httpapi.ModemLookupError(c, err, "get_modes_failed")
 	}
 	response, err := h.networks.Modes(ctx, modem)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeGetModesFailed, err)
+		return httpapi.Internal(c, "get_modes_failed", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -194,17 +168,17 @@ func (h *Handler) SetCurrentModes(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeSetModesFailed)
+		return httpapi.ModemLookupError(c, err, "set_modes_failed")
 	}
 	var req SetCurrentModesRequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeSetModesInvalid, err)
+	if err := httpapi.BindJSON(c, &req, "set_modes_invalid_request"); err != nil {
+		return err
 	}
 	if err := h.networks.SetCurrentModes(ctx, modem, req); err != nil {
 		if errors.Is(err, errUnsupportedMode) {
-			return httpapi.BadRequest(c, errorCodeUnsupportedMode, err)
+			return httpapi.BadRequest(c, "unsupported_mode", err)
 		}
-		return httpapi.Internal(c, errorCodeSetModesFailed, err)
+		return httpapi.Internal(c, "set_modes_failed", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -213,11 +187,11 @@ func (h *Handler) Bands(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeGetBandsFailed)
+		return httpapi.ModemLookupError(c, err, "get_bands_failed")
 	}
 	response, err := h.networks.Bands(ctx, modem)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeGetBandsFailed, err)
+		return httpapi.Internal(c, "get_bands_failed", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -226,22 +200,22 @@ func (h *Handler) SetCurrentBands(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeSetBandsFailed)
+		return httpapi.ModemLookupError(c, err, "set_bands_failed")
 	}
 	var req SetCurrentBandsRequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeSetBandsInvalid, err)
+	if err := httpapi.BindJSON(c, &req, "set_bands_invalid_request"); err != nil {
+		return err
 	}
 	if err := h.networks.SetCurrentBands(ctx, modem, req); err != nil {
 		switch {
 		case errors.Is(err, errBandsRequired):
-			return httpapi.BadRequest(c, errorCodeBandsRequired, err)
+			return httpapi.BadRequest(c, "bands_required", err)
 		case errors.Is(err, errUnsupportedBand):
-			return httpapi.BadRequest(c, errorCodeUnsupportedBand, err)
+			return httpapi.BadRequest(c, "unsupported_band", err)
 		case errors.Is(err, errDuplicateBand):
-			return httpapi.BadRequest(c, errorCodeDuplicateBand, err)
+			return httpapi.BadRequest(c, "duplicate_band", err)
 		default:
-			return httpapi.Internal(c, errorCodeSetBandsFailed, err)
+			return httpapi.Internal(c, "set_bands_failed", err)
 		}
 	}
 	return c.NoContent(http.StatusNoContent)
@@ -251,11 +225,11 @@ func (h *Handler) AirplaneMode(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeGetAirplaneModeFailed)
+		return httpapi.ModemLookupError(c, err, "get_airplane_mode_failed")
 	}
 	response, err := h.networks.AirplaneMode(ctx, modem)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeGetAirplaneModeFailed, err)
+		return httpapi.Internal(c, "get_airplane_mode_failed", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -264,17 +238,17 @@ func (h *Handler) SetAirplaneMode(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeSetAirplaneModeFailed)
+		return httpapi.ModemLookupError(c, err, "set_airplane_mode_failed")
 	}
 	var req SetAirplaneModeRequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeSetAirplaneModeInvalid, err)
+	if err := httpapi.BindJSON(c, &req, "set_airplane_mode_invalid_request"); err != nil {
+		return err
 	}
 	if err := h.networks.SetAirplaneMode(ctx, modem, req); err != nil {
 		if errors.Is(err, wwanmodem.ErrNotSupported) {
-			return httpapi.BadRequest(c, errorCodeAirplaneModeUnsupported, err)
+			return httpapi.BadRequest(c, "airplane_mode_unsupported", err)
 		}
-		return httpapi.Internal(c, errorCodeSetAirplaneModeFailed, err)
+		return httpapi.Internal(c, "set_airplane_mode_failed", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

@@ -3,6 +3,8 @@ package license
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/damonto/sigmo/internal/pkg/apierror"
 )
 
 const leaseSchemaVersion = 1
@@ -84,22 +86,4 @@ type releaseResponse struct {
 	DownloadURL string `json:"downloadUrl"`
 }
 
-type errorResponse struct {
-	ErrorCode string `json:"error_code"`
-	Message   string `json:"message"`
-}
-
-type serviceError struct {
-	StatusCode int
-	ErrorCode  string
-	Message    string
-	RetryAt    time.Time
-}
-
-func (e *serviceError) Error() string {
-	return e.Message
-}
-
-func (e *serviceError) Code() string {
-	return e.ErrorCode
-}
+type serviceError = apierror.Error

@@ -8,6 +8,7 @@ import App from './App.vue'
 import { useTheme } from './composables/useTheme'
 import i18n from './i18n'
 import { bootstrapWebPush } from './lib/webPush'
+import { prepareCallClient } from './lib/callClient'
 import router from './router'
 import { useLicenseStore } from './stores/license'
 
@@ -19,8 +20,8 @@ app.use(createPinia())
 app.use(i18n)
 app.use(router)
 
-app.mount('#app')
-
-void router.isReady().then(() => {
-  if (useLicenseStore().businessEnabled) return bootstrapWebPush()
+void prepareCallClient().then(async () => {
+  app.mount('#app')
+  await router.isReady()
+  if (useLicenseStore().businessEnabled) await bootstrapWebPush()
 })

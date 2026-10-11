@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Plane, SignalHigh, Wifi } from 'lucide-vue-next'
+import { Plane, SignalHigh } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
+import VoWiFiIcon from '@/components/modem/VoWiFiIcon.vue'
 import { Badge } from '@/components/ui/badge'
 import { useModemDisplay } from '@/composables/useModemDisplay'
 
@@ -90,7 +91,10 @@ const rootClass = computed(() =>
 </script>
 
 <template>
-  <div :class="rootClass" data-testid="modem-signal-status">
+  <div
+    :class="rootClass"
+    data-testid="modem-signal-status"
+  >
     <Plane
       v-if="props.airplaneMode"
       class="shrink-0"
@@ -105,10 +109,13 @@ const rootClass = computed(() =>
         :class="[iconSizeClass, signalToneClass, isSearching && 'animate-pulse']"
         :title="signalTitle"
       />
-      <span v-if="props.showSignalValue" :class="numberClass">
+      <span
+        v-if="props.showSignalValue"
+        :class="numberClass"
+      >
         {{ signalValue }}
       </span>
-      <Wifi
+      <VoWiFiIcon
         v-if="props.wifiCallingConnected"
         class="shrink-0 text-sky-500"
         :class="iconSizeClass"

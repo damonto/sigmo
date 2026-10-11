@@ -79,23 +79,23 @@ func TestCallActionErrorMapsExpectedFailures(t *testing.T) {
 		wantCode   string
 		wantMsg    string
 	}{
-		{name: "ussd dial string", err: ErrUSSDDialString, wantStatus: http.StatusBadRequest, wantCode: errorCodeUSSDDialString},
-		{name: "invalid number", err: ErrInvalidNumber, wantStatus: http.StatusBadRequest, wantCode: errorCodeCallNumberInvalid},
-		{name: "no call route available", err: ErrNoRouteAvailable, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeNoCallRouteAvailable},
-		{name: "wifi calling disconnected", err: ErrWiFiCallingNotConnected, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeWiFiCallingNotConnected},
-		{name: "volte disconnected", err: ErrVoLTENotConnected, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeVoLTENotConnected},
-		{name: "modem calling unavailable", err: ErrModemCallingUnavailable, wantStatus: http.StatusNotImplemented, wantCode: errorCodeModemCallingUnavailable},
-		{name: "invalid call state", err: ErrInvalidCallState, wantStatus: http.StatusBadRequest, wantCode: errorCodeInvalidCallState},
-		{name: "invalid call hold", err: ErrInvalidCallHold, wantStatus: http.StatusBadRequest, wantCode: errorCodeInvalidCallHold},
-		{name: "state and hold conflict", err: ErrCallUpdateConflict, wantStatus: http.StatusBadRequest, wantCode: errorCodeCallUpdateConflict},
-		{name: "dtmf digits required", err: ErrDTMFDigitsRequired, wantStatus: http.StatusBadRequest, wantCode: errorCodeDTMFDigitsRequired},
-		{name: "invalid dtmf digit", err: ErrInvalidDTMFDigit, wantStatus: http.StatusBadRequest, wantCode: errorCodeInvalidDTMFDigit},
-		{name: "invalid dtmf state", err: ErrInvalidDTMFCallState, wantStatus: http.StatusConflict, wantCode: errorCodeInvalidDTMFCallState},
-		{name: "call on hold", err: ErrCallOnHold, wantStatus: http.StatusConflict, wantCode: errorCodeCallOnHold},
-		{name: "dtmf unsupported", err: ErrUnsupportedDTMF, wantStatus: http.StatusNotImplemented, wantCode: errorCodeCallDTMFUnsupported},
-		{name: "active call record delete", err: ErrCallRecordActive, wantStatus: http.StatusConflict, wantCode: errorCodeCallRecordActive},
-		{name: "wrapped wifi calling disconnected", err: errors.Join(errors.New("dial route"), ErrWiFiCallingNotConnected), wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeWiFiCallingNotConnected},
-		{name: "dial rejection", err: errors.New("dial Wi-Fi Calling: Credit limit reached"), wantStatus: http.StatusBadGateway, wantCode: errorCodeDialCallFailed, wantMsg: "Credit limit reached"},
+		{name: "ussd dial string", err: ErrUSSDDialString, wantStatus: http.StatusBadRequest, wantCode: "ussd_dial_string"},
+		{name: "invalid number", err: ErrInvalidNumber, wantStatus: http.StatusBadRequest, wantCode: "call_number_invalid"},
+		{name: "no call route available", err: ErrNoRouteAvailable, wantStatus: http.StatusServiceUnavailable, wantCode: "no_call_route_available"},
+		{name: "wifi calling disconnected", err: ErrWiFiCallingNotConnected, wantStatus: http.StatusServiceUnavailable, wantCode: "wifi_calling_not_connected"},
+		{name: "volte disconnected", err: ErrVoLTENotConnected, wantStatus: http.StatusServiceUnavailable, wantCode: "volte_not_connected"},
+		{name: "modem calling unavailable", err: ErrModemCallingUnavailable, wantStatus: http.StatusNotImplemented, wantCode: "modem_calling_unavailable"},
+		{name: "invalid call state", err: ErrInvalidCallState, wantStatus: http.StatusBadRequest, wantCode: "invalid_call_state"},
+		{name: "invalid call hold", err: ErrInvalidCallHold, wantStatus: http.StatusBadRequest, wantCode: "invalid_call_hold"},
+		{name: "state and hold conflict", err: ErrCallUpdateConflict, wantStatus: http.StatusBadRequest, wantCode: "call_update_conflict"},
+		{name: "dtmf digits required", err: ErrDTMFDigitsRequired, wantStatus: http.StatusBadRequest, wantCode: "dtmf_digits_required"},
+		{name: "invalid dtmf digit", err: ErrInvalidDTMFDigit, wantStatus: http.StatusBadRequest, wantCode: "invalid_dtmf_digit"},
+		{name: "invalid dtmf state", err: ErrInvalidDTMFCallState, wantStatus: http.StatusConflict, wantCode: "invalid_dtmf_call_state"},
+		{name: "call on hold", err: ErrCallOnHold, wantStatus: http.StatusConflict, wantCode: "call_on_hold"},
+		{name: "dtmf unsupported", err: ErrUnsupportedDTMF, wantStatus: http.StatusNotImplemented, wantCode: "call_dtmf_unsupported"},
+		{name: "active call record delete", err: ErrCallRecordActive, wantStatus: http.StatusConflict, wantCode: "call_record_active"},
+		{name: "wrapped wifi calling disconnected", err: errors.Join(errors.New("dial route"), ErrWiFiCallingNotConnected), wantStatus: http.StatusServiceUnavailable, wantCode: "wifi_calling_not_connected"},
+		{name: "dial rejection", err: errors.New("dial Wi-Fi Calling: Credit limit reached"), wantStatus: http.StatusBadGateway, wantCode: "dial_call_failed", wantMsg: "Credit limit reached"},
 	}
 
 	for _, tt := range tests {
@@ -105,7 +105,7 @@ func TestCallActionErrorMapsExpectedFailures(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
 
-			if err := callActionError(c, tt.err, errorCodeDialCallFailed); err != nil {
+			if err := callActionError(c, tt.err, "dial_call_failed"); err != nil {
 				t.Fatalf("callActionError() error = %v", err)
 			}
 			if rec.Code != tt.wantStatus {
@@ -119,8 +119,8 @@ func TestCallActionErrorMapsExpectedFailures(t *testing.T) {
 			if got.ErrorCode != tt.wantCode {
 				t.Fatalf("error_code = %q, want %q", got.ErrorCode, tt.wantCode)
 			}
-			if tt.wantMsg != "" && got.Message != tt.wantMsg {
-				t.Fatalf("message = %q, want %q", got.Message, tt.wantMsg)
+			if tt.wantMsg != "" && got.Detail != tt.wantMsg {
+				t.Fatalf("detail = %q, want %q", got.Detail, tt.wantMsg)
 			}
 		})
 	}
@@ -133,9 +133,9 @@ func TestCallMediaErrorMapsExpectedFailures(t *testing.T) {
 		wantStatus int
 		wantCode   string
 	}{
-		{name: "unsupported codec", err: ErrUnsupportedCodec, wantStatus: http.StatusUnsupportedMediaType, wantCode: errorCodeCallMediaUnsupportedCodec},
-		{name: "media unavailable", err: ErrMediaUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeCallMediaUnavailable},
-		{name: "wifi calling disconnected", err: ErrWiFiCallingNotConnected, wantStatus: http.StatusServiceUnavailable, wantCode: errorCodeWiFiCallingNotConnected},
+		{name: "unsupported codec", err: ErrUnsupportedCodec, wantStatus: http.StatusUnsupportedMediaType, wantCode: "call_media_unsupported_codec"},
+		{name: "media unavailable", err: ErrMediaUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "call_media_unavailable"},
+		{name: "wifi calling disconnected", err: ErrWiFiCallingNotConnected, wantStatus: http.StatusServiceUnavailable, wantCode: "wifi_calling_not_connected"},
 	}
 
 	for _, tt := range tests {

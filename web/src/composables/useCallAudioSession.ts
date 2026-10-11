@@ -1,6 +1,7 @@
 import { computed, getCurrentInstance, onBeforeUnmount, ref, shallowRef, type Ref } from 'vue'
 
 import { buildWebRTCSessionUrl, useCallApi } from '@/apis/call'
+import { callClientId } from '@/lib/callClient'
 import type { WebRTCSessionDescriptionPayload, WebRTCSignalMessage } from '@/types/call'
 
 export type AudioStatus = 'idle' | 'preparing' | 'connecting' | 'ready' | 'closed' | 'error'
@@ -289,6 +290,7 @@ export const useCallAudioSession = (modemId: Ref<string>, options: Options = {})
       const answerPromise = waitForWebRTCAnswer(signal, nextAbort)
       sendWebRTCSignal({
         type: 'offer',
+        clientId: callClientId(),
         offer: {
           type: 'offer',
           sdp: localDescription.sdp,

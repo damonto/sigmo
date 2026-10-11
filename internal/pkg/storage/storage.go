@@ -190,7 +190,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 			return fmt.Errorf("migrate database: %w", err)
 		}
 	}
-	return nil
+	return s.migrateConversations(ctx)
 }
 
 func nowText() string {

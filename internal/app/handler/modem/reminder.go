@@ -12,33 +12,25 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 )
 
-const (
-	errorCodeUpdateSIMReminderInvalidRequest = "update_sim_reminder_invalid_request"
-	errorCodeUpdateSIMReminderInvalid        = "update_sim_reminder_invalid"
-	errorCodeUpdateSIMReminderFailed         = "update_sim_reminder_failed"
-	errorCodeDeleteSIMReminderFailed         = "delete_sim_reminder_failed"
-	errorCodeSIMProfileNotFound              = "sim_profile_not_found"
-)
-
 var errSIMProfileNotFound = errors.New("SIM profile not found")
 
 func (h *Handler) UpdateReminder(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeUpdateSIMReminderFailed)
+		return httpapi.ModemLookupError(c, err, "update_sim_reminder_failed")
 	}
 	iccid := strings.TrimSpace(c.Param("iccid"))
 	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
-		return httpapi.Internal(c, errorCodeUpdateSIMReminderFailed, fmt.Errorf("read current SIM profile: %w", err))
+		return httpapi.Internal(c, "update_sim_reminder_failed", fmt.Errorf("read current SIM profile: %w", err))
 	}
 	if iccid == "" || iccid != profileID {
-		return httpapi.NotFound(c, errorCodeSIMProfileNotFound, errSIMProfileNotFound)
+		return httpapi.NotFound(c, "sim_profile_not_found", errSIMProfileNotFound)
 	}
 
 	var req reminder.UpdateRequest
-	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateSIMReminderInvalidRequest); err != nil {
+	if err := httpapi.BindAndValidate(c, &req, "update_sim_reminder_invalid_request"); err != nil {
 		return err
 	}
 	profileName := profileID
@@ -47,10 +39,10 @@ func (h *Handler) UpdateReminder(c *echo.Context) error {
 	}
 	record, err := req.Record(reminder.ProfileTypePSIM, profileID, modem.EquipmentIdentifier, "", profileName)
 	if err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateSIMReminderInvalid, err)
+		return httpapi.UnprocessableEntity(c, "update_sim_reminder_invalid", err)
 	}
 	if err := h.reminders.Save(ctx, record); err != nil {
-		return httpapi.Internal(c, errorCodeUpdateSIMReminderFailed, err)
+		return httpapi.Internal(c, "update_sim_reminder_failed", err)
 	}
 	return c.JSON(http.StatusOK, reminder.DetailsFrom(record))
 }
@@ -58,14 +50,14 @@ func (h *Handler) UpdateReminder(c *echo.Context) error {
 func (h *Handler) DeleteReminder(c *echo.Context) error {
 	ctx := c.Request().Context()
 	if _, err := h.registry.Find(ctx, c.Param("id")); err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeDeleteSIMReminderFailed)
+		return httpapi.ModemLookupError(c, err, "delete_sim_reminder_failed")
 	}
 	iccid := strings.TrimSpace(c.Param("iccid"))
 	if iccid == "" {
-		return httpapi.NotFound(c, errorCodeSIMProfileNotFound, errSIMProfileNotFound)
+		return httpapi.NotFound(c, "sim_profile_not_found", errSIMProfileNotFound)
 	}
 	if err := h.reminders.Delete(ctx, reminder.ProfileTypePSIM, iccid); err != nil {
-		return httpapi.Internal(c, errorCodeDeleteSIMReminderFailed, err)
+		return httpapi.Internal(c, "delete_sim_reminder_failed", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

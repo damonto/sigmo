@@ -24,25 +24,25 @@ func TestUnlockSIMError(t *testing.T) {
 			name:     "pin required",
 			err:      mmodem.ErrSIMPINRequired,
 			wantCode: http.StatusBadRequest,
-			wantBody: errorCodeUnlockSIMInvalidRequest,
+			wantBody: "unlock_sim_invalid_request",
 		},
 		{
 			name:     "not required",
 			err:      mmodem.ErrSIMUnlockNotRequired,
 			wantCode: http.StatusBadRequest,
-			wantBody: errorCodeUnlockSIMNotRequired,
+			wantBody: "unlock_sim_not_required",
 		},
 		{
 			name:     "enable failed after unlock",
 			err:      mmodem.ErrEnableAfterSIMUnlock,
 			wantCode: http.StatusInternalServerError,
-			wantBody: errorCodeEnableModemAfterUnlockFailed,
+			wantBody: "enable_modem_after_unlock_failed",
 		},
 		{
 			name:     "send pin failed",
 			err:      errors.New("bad pin"),
 			wantCode: http.StatusInternalServerError,
-			wantBody: errorCodeUnlockSIMFailed,
+			wantBody: "unlock_sim_failed",
 		},
 	}
 

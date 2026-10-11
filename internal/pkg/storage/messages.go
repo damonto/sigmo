@@ -18,22 +18,26 @@ const (
 	MessageSourceRouted = "wifi_calling"
 )
 
+// Message retains SIM ownership and modem references alongside the stored SMS.
 type Message struct {
-	ID          int64
-	ModemID     string
-	ProfileID   string
-	Source      string
-	ExternalKey string
-	Fingerprint string
-	Sender      string
-	Recipient   string
-	Text        string
-	Timestamp   time.Time
-	Status      string
-	Incoming    bool
-	Routed      bool
-	ModemRefs   []ModemMessageRef
+	ID             int64
+	ConversationID string
+	ModemID        string
+	ProfileID      string
+	Source         string
+	ExternalKey    string
+	Fingerprint    string
+	Sender         string
+	Recipient      string
+	Text           string
+	Timestamp      time.Time
+	Status         string
+	Incoming       bool
+	Routed         bool
+	ModemRefs      []ModemMessageRef
 }
+
+const messageColumns = `id, profile_id, source, external_key, fingerprint, sender, recipient, text, timestamp, status, incoming, wifi_calling, modem_id, conversation_id`
 
 type ModemMessageRef struct {
 	ModemID    string
@@ -55,6 +59,7 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 		return false, err
 	}
 	now := nowText()
+	msg.ConversationID = ConversationID(msg.ProfileID, msg.Counterparty())
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("begin message insert: %w", err)
@@ -63,15 +68,22 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 		// Rollback is a no-op after a successful commit.
 		_ = tx.Rollback()
 	}()
+	var deleted bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM deleted_messages WHERE fingerprint = ?)`, msg.Fingerprint).Scan(&deleted); err != nil {
+		return false, fmt.Errorf("check deleted message: %w", err)
+	}
+	if deleted {
+		return false, nil
+	}
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO messages (
 			profile_id, source, external_key, fingerprint, sender, recipient, text,
-			timestamp, status, incoming, wifi_calling, created_at, updated_at
+			timestamp, status, incoming, wifi_calling, created_at, updated_at, modem_id, conversation_id
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT DO NOTHING
 	`, msg.ProfileID, msg.Source, msg.ExternalKey, msg.Fingerprint, msg.Sender, msg.Recipient, msg.Text,
-		timeText(msg.Timestamp), msg.Status, boolInt(msg.Incoming), boolInt(msg.Routed), now, now)
+		timeText(msg.Timestamp), msg.Status, boolInt(msg.Incoming), boolInt(msg.Routed), now, now, msg.ModemID, msg.ConversationID)
 	if err != nil {
 		return false, fmt.Errorf("insert message: %w", err)
 	}
@@ -88,6 +100,28 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 	messageID, err := result.LastInsertId()
 	if err != nil {
 		return false, fmt.Errorf("read inserted message id: %w", err)
+	}
+	msg.ID = messageID
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO conversations (id, profile_id, participant) VALUES (?, ?, ?)`, msg.ConversationID, msg.ProfileID, msg.Counterparty()); err != nil {
+		return false, fmt.Errorf("create message conversation: %w", err)
+	}
+	lineNumber := msg.Sender
+	if msg.Incoming {
+		lineNumber = msg.Recipient
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO message_lines (profile_id, modem_id, number) VALUES (?, ?, ?)
+		ON CONFLICT(profile_id) DO UPDATE SET
+			modem_id = CASE WHEN excluded.modem_id <> '' THEN excluded.modem_id ELSE message_lines.modem_id END,
+			number = CASE WHEN excluded.number <> '' THEN excluded.number ELSE message_lines.number END
+	`, msg.ProfileID, msg.ModemID, lineNumber); err != nil {
+		return false, fmt.Errorf("record message line: %w", err)
+	}
+	if err := advanceMessageState(ctx, tx); err != nil {
+		return false, err
+	}
+	if err := enqueueMessagePush(ctx, tx, msg); err != nil {
+		return false, err
 	}
 	for _, ref := range msg.ModemRefs {
 		modemID := strings.TrimSpace(ref.ModemID)
@@ -156,7 +190,7 @@ func (s *Store) ListConversations(ctx context.Context, profileID string, query s
 		searchSQL = " AND (" + strings.Join(clauses, " OR ") + ")"
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, profile_id, source, external_key, fingerprint, sender, recipient, text, timestamp, status, incoming, wifi_calling
+		SELECT `+messageColumns+`
 		FROM messages
 		WHERE profile_id = ?`+searchSQL+`
 		ORDER BY timestamp DESC, id DESC
@@ -203,7 +237,7 @@ func (s *Store) ListByParticipant(ctx context.Context, profileID string, partici
 		return nil, nil
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, profile_id, source, external_key, fingerprint, sender, recipient, text, timestamp, status, incoming, wifi_calling
+		SELECT `+messageColumns+`
 		FROM messages
 		WHERE profile_id = ? AND (sender = ? OR recipient = ?)
 		ORDER BY timestamp ASC, id ASC
@@ -252,6 +286,16 @@ func (s *Store) DeleteByParticipant(ctx context.Context, profileID string, parti
 	`, strings.TrimSpace(profileID), strings.TrimSpace(participant), strings.TrimSpace(participant))
 	if err != nil {
 		return nil, fmt.Errorf("delete messages by participant: %w", err)
+	}
+	conversationID := ConversationID(profileID, participant)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM native_push_outbox WHERE json_extract(content_json, '$.conversationId') = ?`, conversationID); err != nil {
+		return nil, fmt.Errorf("delete pending conversation alerts: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM conversations WHERE id = ?`, conversationID); err != nil {
+		return nil, fmt.Errorf("delete conversation state: %w", err)
+	}
+	if err := advanceMessageState(ctx, tx); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit message delete: %w", err)
@@ -385,6 +429,8 @@ func scanMessage(row messageScanner) (Message, error) {
 		&msg.Status,
 		&incoming,
 		&routed,
+		&msg.ModemID,
+		&msg.ConversationID,
 	); err != nil {
 		return Message{}, fmt.Errorf("scan message: %w", err)
 	}

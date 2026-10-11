@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/forwarder"
+	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	appsettings "github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -831,13 +832,12 @@ func postAuthTest(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecor
 	t.Helper()
 
 	e := echo.New()
+	e.HTTPErrorHandler = httpapi.HTTPErrorHandler
+	e.POST("/api/v1/settings/auth-tests", h.TestAuth)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/auth-tests", strings.NewReader(string(body)))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	if err := h.TestAuth(c); err != nil {
-		t.Fatalf("TestAuth() error = %v", err)
-	}
+	e.ServeHTTP(rec, req)
 	return rec
 }
 

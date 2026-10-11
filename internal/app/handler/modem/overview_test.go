@@ -231,23 +231,32 @@ func TestCatalogBuildResponseUsesCachedSIMWithoutTransport(t *testing.T) {
 func TestCatalogApplyOverviewExtensions(t *testing.T) {
 	errStatus := errors.New("status source")
 	tests := []struct {
-		name              string
-		extensions        []modemstatus.Extension
-		wantWiFiEnabled   bool
-		wantWiFiConnected bool
-		wantErr           error
+		name               string
+		extensions         []modemstatus.Extension
+		wantWiFiEnabled    bool
+		wantWiFiConnected  bool
+		wantVoLTEEnabled   bool
+		wantVoLTEConnected bool
+		wantErr            error
 	}{
 		{
-			name: "fills wifi calling fields",
+			name: "composes independent IMS fields",
 			extensions: []modemstatus.Extension{
 				func(ctx context.Context, modem *mmodem.Modem, fields *modemstatus.Fields) error {
 					fields.WiFiCallingEnabled = true
 					fields.WiFiCallingConnected = true
 					return nil
 				},
+				func(ctx context.Context, modem *mmodem.Modem, fields *modemstatus.Fields) error {
+					fields.VoLTEEnabled = true
+					fields.VoLTEConnected = true
+					return nil
+				},
 			},
-			wantWiFiEnabled:   true,
-			wantWiFiConnected: true,
+			wantWiFiEnabled:    true,
+			wantWiFiConnected:  true,
+			wantVoLTEEnabled:   true,
+			wantVoLTEConnected: true,
 		},
 		{
 			name: "skips nil extension",
@@ -286,6 +295,9 @@ func TestCatalogApplyOverviewExtensions(t *testing.T) {
 			}
 			if resp.WiFiCallingConnected != tt.wantWiFiConnected {
 				t.Fatalf("WiFiCallingConnected = %v, want %v", resp.WiFiCallingConnected, tt.wantWiFiConnected)
+			}
+			if resp.VoLTEEnabled != tt.wantVoLTEEnabled || resp.VoLTEConnected != tt.wantVoLTEConnected {
+				t.Fatalf("VoLTE state = %v/%v, want %v/%v", resp.VoLTEEnabled, resp.VoLTEConnected, tt.wantVoLTEEnabled, tt.wantVoLTEConnected)
 			}
 		})
 	}
@@ -353,6 +365,20 @@ func TestModemResponseJSONIncludesOverviewFields(t *testing.T) {
 				},
 			},
 			want: `"wifiCallingConnected":true`,
+		},
+		{
+			name: "VoLTE enabled",
+			resp: ModemResponse{Fields: modemstatus.Fields{VoLTEEnabled: true, VoLTEConnected: true}},
+			want: `"volteEnabled":true`,
+		},
+		{
+			name: "VoLTE connected",
+			resp: ModemResponse{Fields: modemstatus.Fields{VoLTEEnabled: true, VoLTEConnected: true}},
+			want: `"volteConnected":true`,
+		},
+		{
+			name: "VoLTE disabled on community and locked devices",
+			want: `"volteEnabled":false,"volteConnected":false`,
 		},
 		{
 			name: "primary port",

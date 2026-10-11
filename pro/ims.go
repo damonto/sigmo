@@ -33,6 +33,9 @@ func configureIMS(ctx context.Context, app *proApp) error {
 	})
 	runtime.SetInternetConnections(connectivity)
 	runtime.SetAirplaneModeLifecycle(connectivity)
+	if err := runtime.Storage.EndInterruptedCalls(ctx); err != nil {
+		return fmt.Errorf("reconcile interrupted calls: %w", err)
+	}
 	calls := procall.New(runtime.Storage, connectivity.WiFiCalling(), procall.VoiceRoute{
 		Route: procall.RouteVoLTE,
 		Voice: connectivity.VoLTE(),
@@ -42,11 +45,12 @@ func configureIMS(ctx context.Context, app *proApp) error {
 		return fmt.Errorf("configure call media: %w", err)
 	}
 
-	runtime.AddFeatures(pims.WiFiCallingFeatureName, pims.VoLTEFeatureName)
+	runtime.AddFeatures(pims.WiFiCallingFeatureName, pims.VoLTEFeatureName, "nativeCalls")
 	runtime.AddMCPTools(registerIMSMCP(runtime.Registry, connectivity, calls))
 	runtime.SetMessageRoute(connectivity.MessageRoute())
 	runtime.SetUSSDRoute(connectivity.USSDRoute())
 	runtime.AddModemOverview(wifiCallingOverview(connectivity.WiFiCallingStatus))
+	runtime.AddModemOverview(voLTEOverview(connectivity.VoLTEStatus))
 	runtime.AddRunner("IMS connectivity", connectivity.Run)
 	runtime.AddRunner("calls", calls.Run)
 	runtime.AddCleanup(media.Shutdown)
@@ -82,6 +86,23 @@ func wifiCallingOverview(readStatus wifiCallingStatusFunc) modemstatus.Extension
 		}
 		fields.WiFiCallingEnabled = status.Enabled
 		fields.WiFiCallingConnected = status.Connected
+		return nil
+	}
+}
+
+type voLTEStatusFunc func(context.Context, *mmodem.Modem) (pims.VoLTEStatus, error)
+
+func voLTEOverview(readStatus voLTEStatusFunc) modemstatus.Extension {
+	return func(ctx context.Context, modem *mmodem.Modem, fields *modemstatus.Fields) error {
+		status, err := readStatus(ctx, modem)
+		if errors.Is(err, pims.ErrUnavailable) || errors.Is(err, mmodem.ErrProfileIDMissing) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("fetch VoLTE status: %w", err)
+		}
+		fields.VoLTEEnabled = status.Enabled
+		fields.VoLTEConnected = status.Connected
 		return nil
 	}
 }

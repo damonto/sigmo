@@ -7,7 +7,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"slices"
 	"strings"
 	"time"
@@ -126,6 +128,33 @@ func (s *Messenger) Send(ctx context.Context, modem *mmodem.Modem, to string, te
 	return s.send(ctx, realModemDevice{modemRef: modem}, to, text)
 }
 
+// SendRequest pins a new client's submission to the line shown in its composer.
+type SendRequest struct {
+	To                string
+	Text              string
+	ExpectedProfileID string
+}
+
+// SendWithProfile reserves the SIM through validation and submission, including IMS routing.
+func (s *Messenger) SendWithProfile(ctx context.Context, modem *mmodem.Modem, req SendRequest) (string, error) {
+	if req.ExpectedProfileID == "" {
+		return s.Send(ctx, modem, req.To, req.Text)
+	}
+	release, err := modem.ReserveSIMSlot(ctx)
+	if err != nil {
+		return "", fmt.Errorf("reserve message SIM: %w", err)
+	}
+	defer release()
+	profileID, err := modem.ProfileID(ctx)
+	if err != nil {
+		return "", fmt.Errorf("read message SIM: %w", err)
+	}
+	if profileID != req.ExpectedProfileID {
+		return "", ErrProfileChanged
+	}
+	return s.send(ctx, realModemDevice{modemRef: modem}, req.To, req.Text)
+}
+
 func (s *Messenger) send(ctx context.Context, device modemDevice, to string, text string) (string, error) {
 	if strings.TrimSpace(to) == "" {
 		return "", ErrRecipientRequired
@@ -158,10 +187,18 @@ func (s *Messenger) send(ctx context.Context, device modemDevice, to string, tex
 	}
 	sms, err := device.sendSMS(ctx, to, text)
 	if err != nil {
+		// A timeout or disconnected transport may have already submitted the SMS.
+		// Switching routes in that case could send the same message twice.
+		if uncertainSubmission(err) {
+			return "", fmt.Errorf("send SMS to %s: %w: %w", to, ErrSendUnconfirmed, err)
+		}
 		if status.Connected && s.route != nil {
 			msg, routeErr := s.route.SendSMS(ctx, device.modem(), to, text)
 			if routeErr == nil {
 				return to, s.insertSentMessage(ctx, msg)
+			}
+			if uncertainSubmission(routeErr) {
+				return "", mapRouteSendError(to, routeErr)
 			}
 		}
 		return "", fmt.Errorf("send SMS to %s: %w", to, err)
@@ -184,10 +221,20 @@ func (s *Messenger) routeStatus(ctx context.Context, modem *mmodem.Modem) (Route
 }
 
 func mapRouteSendError(to string, err error) error {
+	if uncertainSubmission(err) {
+		return fmt.Errorf("send SMS to %s over selected route: %w: %w", to, ErrSendUnconfirmed, err)
+	}
 	if errors.Is(err, ErrRouteNotConnected) {
 		return fmt.Errorf("send SMS to %s over selected route: %w", to, ErrRouteNotConnected)
 	}
 	return fmt.Errorf("send SMS to %s over selected route: %w", to, err)
+}
+
+func uncertainSubmission(err error) bool {
+	var networkError net.Error
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) ||
+		(errors.As(err, &networkError) && networkError.Timeout())
 }
 
 func (s *Messenger) insertSentMessage(ctx context.Context, msg storage.Message) error {

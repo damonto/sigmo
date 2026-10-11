@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { usePhoneCalls } from '@/composables/usePhoneCalls'
 import type { CallDTMFMessage, CallRecord } from '@/types/call'
+import { callClientId } from '@/lib/callClient'
 
 const api = vi.hoisted(() => ({
   listCalls: vi.fn(),
@@ -89,7 +90,10 @@ class FakeNotification {
   onclose: ((event: Event) => void) | null = null
   closed = false
 
-  constructor(readonly title: string, readonly options?: NotificationOptions) {
+  constructor(
+    readonly title: string,
+    readonly options?: NotificationOptions,
+  ) {
     notifications.push(this)
   }
 
@@ -126,6 +130,15 @@ const deferredList = () => {
   return { promise, resolve }
 }
 
+const deferred = <T>() => {
+  // Promise executors run synchronously, before this fixture returns.
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
 const mountComposable = (initialSearch = '') => {
   const modemId = ref('modem-1')
   const phoneCountry = ref('US')
@@ -146,6 +159,32 @@ const mountComposable = (initialSearch = '') => {
 }
 
 describe('usePhoneCalls', () => {
+  it('ignores late ringing after a terminal event and prevents another owner controls', async () => {
+    const { phone } = mountComposable()
+    await flushPromises()
+    const socket = FakeWebSocket.instances[0]
+    socket?.message({ type: 'call', call: call({ state: 'ended' }) })
+    socket?.message({ type: 'call', call: call({ state: 'ringing' }) })
+    expect(phone.incomingCall.value).toBeNull()
+    const elsewhere = call({ callID: 'another', state: 'active', ownerClientId: 'ios-client' })
+    socket?.message({ type: 'call', call: elsewhere })
+    await phone.hangup(elsewhere)
+    await phone.hold(elsewhere)
+    await phone.sendDTMF(elsewhere, '1')
+    expect(api.hangupCall).not.toHaveBeenCalled()
+    expect(api.holdCall).not.toHaveBeenCalled()
+    expect(api.sendDTMF).not.toHaveBeenCalled()
+  })
+
+  it('reconciles an accepted dial after the response is lost', async () => {
+    const { phone } = mountComposable()
+    await flushPromises()
+    api.dialCall.mockRejectedValueOnce(new TypeError('connection lost'))
+    const accepted = call({ state: 'active', direction: 'outgoing', ownerClientId: callClientId() })
+    api.listCalls.mockResolvedValueOnce({ data: ref([accepted]) })
+    expect(await phone.dial(accepted.number)).toEqual(accepted)
+    expect(api.dialCall).toHaveBeenCalledTimes(1)
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useRealTimers()
@@ -158,9 +197,15 @@ describe('usePhoneCalls', () => {
     vi.stubGlobal('Notification', FakeNotification)
     api.listCalls.mockResolvedValue({ data: ref([]) })
     api.dialCall.mockResolvedValue({ data: ref(call({ direction: 'outgoing', state: 'dialing' })) })
-    api.answerCall.mockResolvedValue({ data: ref(call({ state: 'active', answeredAt: '2026-05-27T00:00:10Z' })) })
-    api.rejectCall.mockResolvedValue({ data: ref(call({ state: 'ended', endedAt: '2026-05-27T00:00:10Z' })) })
-    api.hangupCall.mockResolvedValue({ data: ref(call({ state: 'ended', endedAt: '2026-05-27T00:00:10Z' })) })
+    api.answerCall.mockResolvedValue({
+      data: ref(call({ state: 'active', answeredAt: '2026-05-27T00:00:10Z' })),
+    })
+    api.rejectCall.mockResolvedValue({
+      data: ref(call({ state: 'ended', endedAt: '2026-05-27T00:00:10Z' })),
+    })
+    api.hangupCall.mockResolvedValue({
+      data: ref(call({ state: 'ended', endedAt: '2026-05-27T00:00:10Z' })),
+    })
     api.holdCall.mockResolvedValue({ data: ref(call({ state: 'active', hold: 'local' })) })
     api.resumeCall.mockResolvedValue({ data: ref(call({ state: 'active', hold: 'none' })) })
     api.sendDTMF.mockResolvedValue({ data: ref(undefined) })
@@ -182,6 +227,87 @@ describe('usePhoneCalls', () => {
     expect(notifications).toHaveLength(1)
     expect(notifications[0]?.title).toBe('Incoming call')
     expect(notifications[0]?.options).toEqual({ body: '(224) 225-5559', tag: 'call-1' })
+  })
+
+  it('ignores an old dial after leaving and returning to the same modem', async () => {
+    const { wrapper, phone, modemId } = mountComposable()
+    await flushPromises()
+    const first = deferred<{ data: ReturnType<typeof ref<CallRecord>> }>()
+    const second = deferred<{ data: ReturnType<typeof ref<CallRecord>> }>()
+    api.dialCall.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const oldDial = phone.dial('10086')
+    const socket = FakeWebSocket.instances[0]
+    modemId.value = 'unknown'
+    await nextTick()
+    expect(socket?.closed).toBe(true)
+    socket?.message({ type: 'call', call: call() })
+    expect(phone.incomingCall.value).toBeNull()
+    modemId.value = 'modem-1'
+    await flushPromises()
+    const newDial = phone.dial('10010')
+    first.resolve({ data: ref(call({ direction: 'outgoing', state: 'active' })) })
+    expect(await oldDial).toBeNull()
+    expect(phone.isDialing.value).toBe(true)
+    expect(phone.activeCall.value).toBeNull()
+    const accepted = call({
+      callID: 'new-call',
+      direction: 'outgoing',
+      state: 'active',
+      number: '10010',
+    })
+    second.resolve({ data: ref(accepted) })
+    expect(await newDial).toEqual(accepted)
+    expect(phone.isDialing.value).toBe(false)
+    expect(phone.activeCall.value?.callID).toBe('new-call')
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['answer', 'answerCall'],
+    ['reject', 'rejectCall'],
+    ['hangup', 'hangupCall'],
+    ['hold', 'holdCall'],
+    ['resume', 'resumeCall'],
+    ['deleteRecord', 'deleteCall'],
+  ] as const)('isolates a late %s response from the next modem', async (action, request) => {
+    const { wrapper, phone, modemId } = mountComposable()
+    await flushPromises()
+    const response = deferred<{ data: ReturnType<typeof ref<CallRecord>> }>()
+    api[request].mockReturnValueOnce(response.promise)
+    const pending = phone[action](call({ state: action === 'deleteRecord' ? 'ended' : 'active' }))
+    modemId.value = 'modem-2'
+    await flushPromises()
+    // Backend call IDs can coincide; the previous request still must not update it.
+    const current = call({ state: 'active', number: '10010' })
+    FakeWebSocket.instances[FakeWebSocket.instances.length - 1]?.message({
+      type: 'call',
+      call: current,
+    })
+    response.resolve({ data: ref(call({ state: 'ended' })) })
+    await pending
+    expect(phone.activeCall.value).toEqual(current)
+    expect(phone.recentCalls.value).toEqual([current])
+    expect(phone.isDeletingCallID.value).toBe('')
+    wrapper.unmount()
+  })
+
+  it('drops queued DTMF after a terminal event without replaying it', async () => {
+    const { wrapper, phone } = mountComposable()
+    await flushPromises()
+    const current = call({ state: 'active' })
+    FakeWebSocket.instances[0]?.message({ type: 'call', call: current })
+    const response = deferred<{ data: ReturnType<typeof ref<undefined>> }>()
+    api.sendDTMF.mockReturnValueOnce(response.promise)
+    const first = phone.sendDTMF(current, '1')
+    await flushPromises()
+    expect(api.sendDTMF).toHaveBeenCalledTimes(1)
+    const second = phone.sendDTMF(current, '2')
+    FakeWebSocket.instances[0]?.message({ type: 'call', call: call({ state: 'ended' }) })
+    response.resolve({ data: ref(undefined) })
+    await first
+    expect(await second).toBe(false)
+    expect(api.sendDTMF).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
   })
 
   it('ignores remote DTMF without updating calls or triggering actions', async () => {
@@ -234,7 +360,9 @@ describe('usePhoneCalls', () => {
 
     await vi.advanceTimersByTimeAsync(1)
     expect(FakeWebSocket.instances).toHaveLength(2)
-    expect(FakeWebSocket.instances[1]?.url).toBe('ws://localhost/api/v1/modems/modem-1/calls/events')
+    expect(FakeWebSocket.instances[1]?.url).toBe(
+      'ws://localhost/api/v1/modems/modem-1/calls/events',
+    )
   })
 
   it('does not reconnect call events after the component is unmounted', async () => {
@@ -333,11 +461,14 @@ describe('usePhoneCalls', () => {
   })
 
   it('keeps incoming state when ringtone creation is blocked', async () => {
-    vi.stubGlobal('AudioContext', class {
-      constructor() {
-        throw new Error('blocked')
-      }
-    })
+    vi.stubGlobal(
+      'AudioContext',
+      class {
+        constructor() {
+          throw new Error('blocked')
+        }
+      },
+    )
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { phone } = mountComposable()
     await flushPromises()
@@ -414,11 +545,15 @@ describe('usePhoneCalls', () => {
     searchQuery.value = '224'
     await flushPromises()
 
-    second.resolve({ data: ref([call({ callID: 'new-search', number: '+12242255559', state: 'ended' })]) })
+    second.resolve({
+      data: ref([call({ callID: 'new-search', number: '+12242255559', state: 'ended' })]),
+    })
     await flushPromises()
     expect(phone.recentCalls.value.map((item) => item.callID)).toEqual(['new-search'])
 
-    first.resolve({ data: ref([call({ callID: 'old-search', number: '+15551234567', state: 'ended' })]) })
+    first.resolve({
+      data: ref([call({ callID: 'old-search', number: '+15551234567', state: 'ended' })]),
+    })
     await flushPromises()
 
     expect(phone.recentCalls.value.map((item) => item.callID)).toEqual(['new-search'])
@@ -502,7 +637,10 @@ describe('usePhoneCalls', () => {
 
     await expect(first).resolves.toBe(true)
     await expect(second).resolves.toBe(true)
-    expect(api.sendDTMF.mock.calls.map((args) => args[2])).toEqual([{ digits: '1' }, { digits: '2' }])
+    expect(api.sendDTMF.mock.calls.map((args) => args[2])).toEqual([
+      { digits: '1' },
+      { digits: '2' },
+    ])
   })
 
   it('keeps DTMF API failures handled inside the composable', async () => {

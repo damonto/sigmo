@@ -6,11 +6,19 @@ on:
     branches: [main]
     paths:
       - "pro-api/**"
+      - "internal/pkg/apierror/**"
+      - "scripts/sync-http-contract.py"
+      - "ios/Sigmo/Resources/HTTPProblems.json"
+      - "ios/SigmoTests/Fixtures/HTTPProblems.json"
       - ".github/workflows/pro-api.yml"
   pull_request:
     branches: [main]
     paths:
       - "pro-api/**"
+      - "internal/pkg/apierror/**"
+      - "scripts/sync-http-contract.py"
+      - "ios/Sigmo/Resources/HTTPProblems.json"
+      - "ios/SigmoTests/Fixtures/HTTPProblems.json"
       - ".github/workflows/pro-api.yml"
 
 permissions:
@@ -25,7 +33,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+      - run: python3 ../scripts/sync-http-contract.py --check
       - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run format:check
       - run: bun run type-check
       - run: bun run test
       - run: bun run dry-run

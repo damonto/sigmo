@@ -1,5 +1,7 @@
 # Sigmo Pro API
 
+The Worker also serves free Community/Pro APNs notifications. Installation credentials are independent of Pro licensing, and preview content is encrypted by the owning backend. See [Messages and APNs](../docs/ios-messages-push.md) for the API contract, signing, migrated D1 database, and recovery procedure.
+
 This Worker owns the Telegram device pairing flow, signed Pro leases, private
 release metadata, and short-lived R2 download tickets. The R2 bucket must stay
 private: do not enable an `r2.dev` hostname, public bucket access, or a custom
@@ -10,14 +12,14 @@ binding.
 
 The checked-in Wrangler configuration expects:
 
-- D1 database: `sigmo-licenses`
+- D1 database: `sigmo` (the retired `sigmo-licenses` database remains available for migration recovery)
 - private R2 bucket: `sigmo-pro-updates`
 - Telegram bot username: `SigmoProBot`
 
 Create new resources only when they do not already exist:
 
 ```bash
-bunx wrangler d1 create sigmo-licenses
+bunx wrangler d1 create sigmo
 bunx wrangler r2 bucket create sigmo-pro-updates
 ```
 
@@ -25,21 +27,21 @@ If D1 is recreated, copy the returned database ID into `wrangler.jsonc`.
 Apply the schema before deploying the Worker:
 
 ```bash
-bunx wrangler d1 migrations apply sigmo-licenses --remote
+bunx wrangler d1 migrations apply sigmo --remote
 ```
 
 ## Database access and migrations
 
 Runtime CRUD uses the native `D1Database` binding through the concrete
-`src/database.ts` data-access type. Checked-in SQL files under `migrations/`
+`src/storage/authorization.ts` and `src/storage/push.ts` data-access types. Checked-in SQL files under `migrations/`
 are the only database schema source and are applied with Wrangler.
 
 Create a migration after changing the data model, then review the generated SQL
 before applying it:
 
 ```bash
-bunx wrangler d1 migrations create sigmo-licenses describe_schema_change
-bunx wrangler d1 migrations apply sigmo-licenses --local
+bunx wrangler d1 migrations create sigmo describe_schema_change
+bunx wrangler d1 migrations apply sigmo --local
 ```
 
 Replace `describe_schema_change` with a concise migration name.
@@ -50,9 +52,28 @@ activation uses `D1Database.batch()` so its
 Session rotation uses a generation and refresh-token compare-and-swap in the
 same batch that consumes its challenge.
 
-The authorization schema is pre-release and intentionally has no upgrade path.
-Recreate the D1 database before deployment if an older copy of these migrations
-has already been applied.
+Apply pending migrations in order while preserving the existing database.
+Native push and Calls use incremental migrations `0004_native_push.sql` and
+`0005_native_calls.sql`. Deploy the gateway before the updated Go backend and
+iOS app; see [iOS Calls](../docs/ios-calls.md) for token separation and rollout.
+The HTTP error-format transition also requires coordinated Worker, Go/Web, and
+iOS versions; see [HTTP API contract](../docs/http-api-contract.md#发布与回滚).
+
+## Source layout
+
+`src/index.ts` exports the Worker lifecycle. Business modules use native
+`Request` and `Response`; Hono stays in the HTTP layer.
+
+| Directory | Responsibility |
+| --- | --- |
+| `http/` | Hono routes, middleware, Problem Details, bounded JSON parsing |
+| `license/` | Pairing, challenges, leases, device proof and validation |
+| `releases/` | Release manifests, download tickets and streaming downloads |
+| `push/` | Installation/subscription resources, delivery and APNs transport |
+| `storage/` | Typed, prepared D1 queries and atomic state changes |
+| `security/` | Cryptographic primitives |
+| `telegram/` | Webhook, commands, messages, pagination and Bot API client |
+| `observability/` | Structured error logging |
 
 ## Secrets and signing keys
 
@@ -167,19 +188,41 @@ POST /v1/license-challenges
 POST /v1/license-leases
 GET  /v1/release-channels/:channel/releases/latest?target=<target>
 GET  /v1/downloads/:ticket
+POST /v1/push-installations
+GET  /v1/push-installations/:id
+PUT  /v1/push-installations/:id
+DELETE /v1/push-installations/:id
+POST /v1/push-subscriptions
+DELETE /v1/push-subscriptions/:id
+POST /v1/push-deliveries
 ```
 
-Every JSON error uses a stable machine-readable code and an English message:
+Each route also supports OPTIONS with `204 + Allow`. GET routes support HEAD
+without a response body or business state changes. Download HEAD checks R2
+metadata without consuming a single-use Bootstrap ticket. Unknown paths return
+404; unsupported methods on known paths return `405 + Allow`.
+
+Every error uses `Content-Type: application/problem+json` and the same request
+ID in its body and `X-Request-ID` header:
 
 ```json
 {
+  "type": "https://sigmo-pro.952007.xyz/problems/license_pairing_not_found",
+  "title": "License Pairing Not Found",
+  "status": 404,
+  "detail": "pairing not found",
   "error_code": "license_pairing_not_found",
-  "message": "pairing not found"
+  "request_id": "6ccb36f4-025f-494c-b9b3-0649fcd18e06"
 }
 ```
 
-Clients must localize errors from `error_code`; `message` is the English
-fallback and is not a stable programmatic value.
+Clients identify registered problems by `type`, localize `error_code`, and use
+the actual HTTP status and headers. `detail` is only a display fallback.
+The legacy `error_code/message` representation is no longer supported or
+negotiated through Accept. See the [HTTP API contract](../docs/http-api-contract.md)
+for upstream mappings, authentication isolation and retry rules. The canonical
+catalog is `internal/pkg/apierror/catalog.json`; `GET /problems/:code` serves
+read-only metadata for its entries.
 
 ## Abuse protection
 
@@ -210,7 +253,7 @@ VALUES
 Import it with:
 
 ```bash
-bunx wrangler d1 execute sigmo-licenses --remote --file ./entitlements.sql
+bunx wrangler d1 execute sigmo --remote --file ./entitlements.sql
 ```
 
 Delete the local import file after verifying `/status <telegram_id>`.
@@ -219,14 +262,24 @@ Delete the local import file after verifying `/status <telegram_id>`.
 
 ```bash
 bun install --frozen-lockfile
+bun run lint
+bun run format:check
 bun run type-check
 bun run test
 bun run dry-run
 bun run deploy
 ```
 
+From the repository root, run `python3 scripts/sync-http-contract.py --check`
+to check the iOS copies of the shared problem catalog and contract fixtures.
+
 The generated `worker-configuration.d.ts` is committed; run `bun run types`
 after changing bindings, variables, or required secrets.
+
+Oxlint runs TypeScript-aware checks, including unhandled promises and unsafe
+JSON access. Prettier checks source formatting; run `bun run format` to apply it.
+Worker and Vitest entry points retain the default exports required by their
+runtimes. Generated types and external JSON field names follow their providers.
 
 ## R2 release layout and retention
 
@@ -268,7 +321,7 @@ the compressed bytes with `Content-Type: application/gzip` and never sets
 4. Ask the user to open the Bot and run `/start` to verify their Telegram ID and
    entitlement status.
 5. The user runs `/download stable` (or `/download dev`) and downloads the
-   matching `.gz` artifact from the 15-minute Worker link. After downloading,
+   matching `.gz` artifact from the 5-minute Worker link. After downloading,
    run `gzip -d sigmo-pro-<target>.gz` and `chmod +x sigmo-pro-<target>`.
 6. On first startup, the Pro client opens `/start <pairing_id>` and completes
    device authorization.

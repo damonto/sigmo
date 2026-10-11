@@ -15,6 +15,10 @@ export type CallHoldState = 'none' | 'local' | 'remote' | 'local_remote'
 
 export type CallRecord = {
   callID: string
+  backendId?: string
+  callUUID?: string
+  profileId?: string
+  ownerClientId?: string
   route: StoredCallRoute
   direction: CallDirection
   number: string
@@ -30,6 +34,7 @@ export type CallRecord = {
 export type DialCallRequest = {
   to: string
   route: CallRoute
+  expectedProfileId?: string
 }
 
 export type UpdateCallRequest = {
@@ -70,6 +75,7 @@ export type WebRTCICEServersPayload = {
 export type WebRTCSignalMessage =
   | {
       type: 'offer'
+      clientId?: string
       offer: WebRTCSessionDescriptionPayload
     }
   | {
@@ -83,4 +89,5 @@ export type WebRTCSignalMessage =
   | {
       type: 'error'
       message: string
+      code?: string
     }

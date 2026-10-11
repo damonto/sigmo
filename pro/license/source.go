@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
+	"time"
 
 	appupdate "github.com/damonto/sigmo/internal/app/update"
+	"github.com/damonto/sigmo/internal/pkg/apierror"
 )
 
 func (c *Controller) Latest(ctx context.Context, channel string, target string) (appupdate.Release, error) {
@@ -24,7 +27,7 @@ func (c *Controller) Latest(ctx context.Context, channel string, target string) 
 	if err != nil {
 		return appupdate.Release{}, err
 	}
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", "application/json, "+apierror.MediaType)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return appupdate.Release{}, fmt.Errorf("get Pro release: %w", err)
@@ -33,16 +36,13 @@ func (c *Controller) Latest(ctx context.Context, channel string, target string) 
 	if resp.StatusCode != http.StatusOK {
 		return appupdate.Release{}, c.authenticatedResponseError(resp, "get Pro release")
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
+	data, err := readServiceJSON(resp)
 	if err != nil {
 		return appupdate.Release{}, fmt.Errorf("read Pro release: %w", err)
 	}
-	if len(data) > maxResponseSize {
-		return appupdate.Release{}, errors.New("Pro release response exceeds size limit")
-	}
 	var remote releaseResponse
 	if err := json.Unmarshal(data, &remote); err != nil {
-		return appupdate.Release{}, fmt.Errorf("decode Pro release: %w", err)
+		return appupdate.Release{}, invalidServiceResponse(resp, err)
 	}
 	manifest, verified, err := appupdate.ParseManifest([]byte(remote.Manifest), remote.Signature, c.releasePublicKey)
 	if err != nil {
@@ -104,6 +104,7 @@ func (c *Controller) Download(ctx context.Context, release appupdate.Release) (i
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Accept", "application/gzip, "+apierror.MediaType)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("download Pro update: %w", err)
@@ -126,32 +127,33 @@ func (c *Controller) authenticatedResponseError(resp *http.Response, action stri
 }
 
 func readServiceResponseError(resp *http.Response, action string) error {
+	return fmt.Errorf("%s: %w", action, apierror.Read(resp))
+}
+
+func readServiceJSON(resp *http.Response) ([]byte, error) {
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		return nil, invalidServiceResponse(resp, errors.New("unexpected JSON media type"))
+	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize+1))
 	if err != nil {
-		return fmt.Errorf("%s: read response: %w", action, err)
+		return nil, invalidServiceResponse(resp, err)
 	}
 	if len(data) > maxResponseSize {
-		return fmt.Errorf("%s: response exceeds size limit", action)
+		return nil, invalidServiceResponse(resp, errors.New("response exceeds size limit"))
 	}
-	remote := errorResponse{
-		ErrorCode: "authorization_service_error",
-		Message:   http.StatusText(resp.StatusCode),
+	return data, nil
+}
+
+func invalidServiceResponse(resp *http.Response, cause error) *serviceError {
+	return &serviceError{
+		StatusCode:   resp.StatusCode,
+		Message:      "authorization service returned an invalid response",
+		RequestID:    resp.Header.Get("X-Request-ID"),
+		Allow:        resp.Header.Get("Allow"),
+		Authenticate: resp.Header.Get("WWW-Authenticate"),
+		RetryAfter:   resp.Header.Get("Retry-After"),
+		RetryAt:      apierror.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		ParseErr:     cause,
 	}
-	if err := json.Unmarshal(data, &remote); err != nil {
-		remote = errorResponse{
-			ErrorCode: "authorization_service_error",
-			Message:   http.StatusText(resp.StatusCode),
-		}
-	}
-	if remote.ErrorCode == "" {
-		remote.ErrorCode = "authorization_service_error"
-	}
-	if remote.Message == "" {
-		remote.Message = http.StatusText(resp.StatusCode)
-	}
-	return fmt.Errorf("%s: %w", action, &serviceError{
-		StatusCode: resp.StatusCode,
-		ErrorCode:  remote.ErrorCode,
-		Message:    remote.Message,
-	})
 }

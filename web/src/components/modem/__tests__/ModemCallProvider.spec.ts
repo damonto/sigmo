@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ModemCallProvider from '@/components/modem/ModemCallProvider.vue'
 import { useModemCallSession } from '@/composables/useModemCallSession'
 import type { CallRecord } from '@/types/call'
+import { callClientId } from '@/lib/callClient'
 
 const route = vi.hoisted(() => ({
   params: {
@@ -119,6 +120,24 @@ const mountProvider = () =>
   })
 
 describe('ModemCallProvider', () => {
+  it('does not attach media while viewing another client call and releases lost ownership', async () => {
+    const wrapper = mountProvider()
+    const session = wrapper
+      .findComponent({ name: 'ModemCallBanner' })
+      .props('session') as ReturnType<typeof useModemCallSession>
+    callsHarness.incomingCall.value = null
+    callsHarness.activeCall.value = call({ state: 'active', ownerClientId: 'ios-client' })
+    await flushPromises()
+    expect(session.callAudio.start).not.toHaveBeenCalled()
+    expect(session.callRecording.canStart.value).toBe(false)
+    callsHarness.activeCall.value = call({ state: 'active', ownerClientId: callClientId() })
+    await flushPromises()
+    expect(session.callAudio.start).toHaveBeenCalledTimes(1)
+    callsHarness.activeCall.value = call({ state: 'active', ownerClientId: 'ios-client' })
+    await flushPromises()
+    expect(session.callAudio.stop).toHaveBeenCalled()
+    wrapper.unmount()
+  })
   let srcObject: MediaProvider | null
 
   beforeEach(() => {

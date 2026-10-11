@@ -5,6 +5,7 @@ package call
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -47,6 +48,9 @@ func (r *callRecords) saveAndPublish(ctx context.Context, call storage.Call) (st
 		return storage.Call{}, err
 	}
 	if publish {
+		if err := r.store.EnqueueNativeCall(ctx, call); err != nil {
+			slog.WarnContext(ctx, "enqueue native call", "call_id", call.ID, "error", err)
+		}
 		r.events.publish(Event{Call: call})
 	}
 	return call, nil

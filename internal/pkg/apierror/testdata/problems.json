@@ -1,0 +1,316 @@
+[
+  {
+    "name": "local login expired",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1",
+      "WWW-Authenticate": "Bearer realm=\"sigmo-local\""
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "invalid_token",
+    "loginInvalid": true,
+    "revokePush": false
+  },
+  {
+    "name": "same code from push gateway does not log out",
+    "status": 401,
+    "source": "pushGateway",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "invalid_token",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "explicit push credentials revoked",
+    "status": 401,
+    "source": "pushGateway",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_push_credentials\",\"title\":\"Invalid Push Credentials\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_push_credentials\",\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "invalid_push_credentials",
+    "loginInvalid": false,
+    "revokePush": true
+  },
+  {
+    "name": "explicit push token unregistered",
+    "status": 410,
+    "source": "pushGateway",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/push_token_unregistered\",\"title\":\"Push Token Unregistered\",\"status\":410,\"detail\":\"request was rejected\",\"error_code\":\"push_token_unregistered\",\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "push_token_unregistered",
+    "loginInvalid": false,
+    "revokePush": true
+  },
+  {
+    "name": "wrong status cannot revoke push",
+    "status": 503,
+    "source": "pushGateway",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_push_credentials\",\"title\":\"Invalid Push Credentials\",\"status\":503,\"detail\":\"request was rejected\",\"error_code\":\"invalid_push_credentials\",\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "invalid_push_credentials",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "null extension is absent",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":null,\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "invalid_token",
+    "loginInvalid": true,
+    "revokePush": false
+  },
+  {
+    "name": "type identifies absent extension",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{\"type\": \"https://sigmo-pro.952007.xyz/problems/invalid_token\", \"title\": \"Invalid Access Token\", \"status\": 401, \"detail\": \"request was rejected\", \"request_id\": \"request-1\"}",
+    "repeat": 0,
+    "code": "invalid_token",
+    "loginInvalid": true,
+    "revokePush": false
+  },
+  {
+    "name": "unknown type",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/not_registered\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "foreign type",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{\"type\":\"https://other.example/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "code contradicts type",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"license_lease_expired\",\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "body status contradicts HTTP",
+    "status": 503,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1",
+      "Retry-After": "90"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "body request ID contradicts header",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"other-request\"}",
+    "repeat": 0,
+    "code": "",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "missing title",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "invalid JSON",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{",
+    "repeat": 0,
+    "code": "",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "empty body",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "",
+    "repeat": 0,
+    "code": "",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "HTML proxy",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "text/html",
+      "X-Request-ID": "request-1",
+      "Retry-After": "120"
+    },
+    "body": "<html>upstream rejected</html>",
+    "repeat": 0,
+    "code": "",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "oversized body",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "x",
+    "repeat": 65537,
+    "code": "",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "removed legacy format",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{\"error_code\":\"invalid_token\",\"message\":\"expired\"}",
+    "repeat": 0,
+    "code": "",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "legacy body with problem media type",
+    "status": 401,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1"
+    },
+    "body": "{\"error_code\":\"invalid_token\",\"message\":\"expired\"}",
+    "repeat": 0,
+    "code": "",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "method not allowed",
+    "status": 405,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1",
+      "Allow": "POST, OPTIONS"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/method_not_allowed\",\"title\":\"Method Not Allowed\",\"status\":405,\"detail\":\"request was rejected\",\"error_code\":\"method_not_allowed\",\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "method_not_allowed",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "numeric retry after",
+    "status": 429,
+    "source": "pushGateway",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1",
+      "Retry-After": "90"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/push_rate_limited\",\"title\":\"Push Rate Limited\",\"status\":429,\"detail\":\"request was rejected\",\"error_code\":\"push_rate_limited\",\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "push_rate_limited",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "HTTP date retry after",
+    "status": 503,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "request-1",
+      "Retry-After": "Fri, 09 Oct 2026 00:01:30 GMT"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/database_maintenance\",\"title\":\"Database Maintenance\",\"status\":503,\"detail\":\"request was rejected\",\"error_code\":\"database_maintenance\",\"request_id\":\"request-1\"}",
+    "repeat": 0,
+    "code": "database_maintenance",
+    "loginInvalid": false,
+    "revokePush": false
+  }
+]

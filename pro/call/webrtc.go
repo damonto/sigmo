@@ -38,6 +38,7 @@ const (
 	mediaCleanupTimeout         = 5 * time.Second
 )
 
+// Media owns the codec engine and the single audio bridge for each active call.
 type Media struct {
 	calls *Calls
 	codec *voicecodec.Engine
@@ -46,6 +47,7 @@ type Media struct {
 
 	bridgeMu sync.Mutex
 	bridges  map[*webRTCBridge]struct{}
+	clients  map[string]*webRTCBridge
 	closing  bool
 }
 
@@ -53,6 +55,7 @@ type WebRTCSession struct {
 	bridge *webRTCBridge
 }
 
+// NewMedia allocates the codec engine; callers must close it with Shutdown.
 func NewMedia(ctx context.Context, calls *Calls) (*Media, error) {
 	codec, err := voicecodec.NewEngine(ctx)
 	if err != nil {
@@ -63,6 +66,7 @@ func NewMedia(ctx context.Context, calls *Calls) (*Media, error) {
 		codec:   codec,
 		ice:     newWebRTCICEProvider(),
 		bridges: make(map[*webRTCBridge]struct{}),
+		clients: make(map[string]*webRTCBridge),
 	}, nil
 }
 
@@ -79,12 +83,48 @@ func (m *Media) Shutdown(ctx context.Context) error {
 	return m.Close(cleanupCtx)
 }
 
+// OpenWebRTCSession opens media for clients that do not send an endpoint identity.
 func (m *Media) OpenWebRTCSession(ctx context.Context, modem *mmodem.Modem, callID string) (*WebRTCSession, error) {
+	return m.OpenClientSession(ctx, modem, ClientMedia{CallID: callID})
+}
+
+// OpenClientSession replaces only this owner's previous bridge, after closing its
+// RTP reader. A different client must never steal packets from an existing call.
+func (m *Media) OpenClientSession(ctx context.Context, modem *mmodem.Modem, req ClientMedia) (*WebRTCSession, error) {
+	owner, err := clientID(req.ClientID)
+	if err != nil {
+		return nil, err
+	}
+	release, err := modem.ReserveSIMSlot(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reserve call media SIM: %w", err)
+	}
+	defer release()
+	call, err := m.calls.Get(ctx, modem, req.CallID)
+	if err != nil {
+		return nil, err
+	}
+	if call.State != StateEarlyMedia && call.State != StateActive && call.State != StateConfirmed {
+		return nil, ErrMediaUnavailable
+	}
+	if call.OwnerClientID != "" && call.OwnerClientID != owner {
+		return nil, ErrCallInUse
+	}
+	if call.OwnerClientID == "" {
+		claimed, err := m.calls.claimCall(ctx, call.ID, owner)
+		if err != nil {
+			return nil, err
+		}
+		if isTerminalCallState(claimed.State) {
+			return nil, ErrMediaUnavailable
+		}
+		m.calls.events.publish(Event{Call: claimed})
+	}
 	iceServers, err := m.webRTCICEServers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch WebRTC ICE servers: %w", err)
 	}
-	media, err := m.calls.OpenMedia(ctx, modem, callID)
+	media, err := m.calls.OpenMedia(ctx, modem, call.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -92,16 +132,25 @@ func (m *Media) OpenWebRTCSession(ctx context.Context, modem *mmodem.Modem, call
 	if err != nil {
 		return nil, err
 	}
+	m.bridgeMu.Lock()
+	previous := m.clients[call.ID]
+	m.bridgeMu.Unlock()
+	if previous != nil {
+		if owner == "legacy" {
+			return nil, ErrCallInUse
+		}
+		previous.close(ctx)
+	}
 	bridge, err := newWebRTCBridge(ctx, media, codec, m.codec, iceServers)
 	if err != nil {
 		return nil, err
 	}
-	if !m.registerBridge(bridge) {
+	bridge.onClose = func() {
+		m.unregisterBridge(call.ID, bridge)
+	}
+	if !m.registerBridge(call.ID, bridge) {
 		bridge.close(ctx)
 		return nil, ErrMediaUnavailable
-	}
-	bridge.onClose = func() {
-		m.unregisterBridge(bridge)
 	}
 	return &WebRTCSession{bridge: bridge}, nil
 }
@@ -157,20 +206,27 @@ func mediaCleanupContext(ctx context.Context) (context.Context, context.CancelFu
 	return context.WithTimeout(context.WithoutCancel(ctx), mediaCleanupTimeout)
 }
 
-func (m *Media) registerBridge(bridge *webRTCBridge) bool {
+func (m *Media) registerBridge(callID string, bridge *webRTCBridge) bool {
 	m.bridgeMu.Lock()
 	defer m.bridgeMu.Unlock()
 	if m.closing {
 		return false
 	}
+	if m.clients == nil {
+		m.clients = make(map[string]*webRTCBridge)
+	}
 	m.bridges[bridge] = struct{}{}
+	m.clients[callID] = bridge
 	return true
 }
 
-func (m *Media) unregisterBridge(bridge *webRTCBridge) {
+func (m *Media) unregisterBridge(callID string, bridge *webRTCBridge) {
 	m.bridgeMu.Lock()
+	defer m.bridgeMu.Unlock()
 	delete(m.bridges, bridge)
-	m.bridgeMu.Unlock()
+	if m.clients[callID] == bridge {
+		delete(m.clients, callID)
+	}
 }
 
 func (m *Media) Close(ctx context.Context) error {

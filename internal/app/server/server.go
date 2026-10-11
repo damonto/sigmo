@@ -32,6 +32,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/modemtask"
+	"github.com/damonto/sigmo/internal/pkg/nativepush"
 	"github.com/damonto/sigmo/internal/pkg/networkprefs"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
@@ -62,7 +63,6 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 		cfg.ListenAddress = "0.0.0.0:9527"
 	}
 	applyLogLevel(cfg.Debug)
-	httpapi.SetExposeInternalErrors(cfg.Debug)
 
 	appCtx, cancelApp := context.WithCancelCause(ctx)
 	signalCh := make(chan os.Signal, 1)
@@ -244,10 +244,22 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	if err != nil {
 		return fmt.Errorf("configure reminders: %w", err)
 	}
+	nativePush, err := nativepush.New(nativepush.Config{
+		Storage:  db,
+		Settings: store,
+		Authorized: func() bool {
+			return authorization == nil || authorization.Authorized()
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("configure native push: %w", err)
+	}
 	slog.Info("server starting", "version", cfg.Build.Version, "edition", cfg.Build.Edition, "channel", cfg.Build.Channel, "listen_address", cfg.ListenAddress, "db_path", resolvedDBPath)
 
 	server := echo.New()
 	server.Logger = slog.Default()
+	server.HTTPErrorHandler = httpapi.HTTPErrorHandler
+	server.Use(httpapi.ResponseHeaders)
 	server.Validator, err = validator.New()
 	if err != nil {
 		return fmt.Errorf("configure request validator: %w", err)
@@ -410,6 +422,7 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	}
 
 	startRunner("reminder", reminderScheduler.Run)
+	startRunner("native push", nativePush.Run)
 	startRunner("sms storage defaults", func(ctx context.Context) error {
 		return modemtask.RunSMSStorageDefaults(ctx, registry, wwanmodem.MessageStorageDevice)
 	})

@@ -7,5 +7,6 @@ export const useModemPhoneCountry = (modemId: ComputedRef<string>) => {
 
   return {
     phoneCountry: computed(() => modem.value?.sim.regionCode ?? ''),
+    profileID: computed(() => modem.value?.sim.identifier ?? ''),
   }
 }

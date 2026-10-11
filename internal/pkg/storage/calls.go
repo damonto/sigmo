@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -9,22 +10,46 @@ import (
 	"time"
 )
 
+// Call is a SIM-scoped call snapshot, including its exclusive media owner.
 type Call struct {
-	ID         string
-	ProfileID  string
-	ModemID    string
-	Route      string
-	Direction  string
-	Number     string
-	State      string
-	Hold       string
-	Reason     string
-	StartedAt  time.Time
-	AnsweredAt time.Time
-	EndedAt    time.Time
-	UpdatedAt  time.Time
+	BackendID     string
+	CallUUID      string
+	OwnerClientID string
+	ID            string
+	ProfileID     string
+	ModemID       string
+	Route         string
+	Direction     string
+	Number        string
+	State         string
+	Hold          string
+	Reason        string
+	StartedAt     time.Time
+	AnsweredAt    time.Time
+	EndedAt       time.Time
+	UpdatedAt     time.Time
 }
 
+const callColumns = `id, profile_id, modem_id, route, direction, number, state, hold_state, reason,
+	started_at, answered_at, ended_at, updated_at, owner_client_id,
+	(SELECT backend_id FROM message_state WHERE id = 1)`
+
+// EndInterruptedCalls retires snapshots from the previous server process before
+// IMS starts. Carrier and RTP sessions cannot survive a process restart.
+func (s *Store) EndInterruptedCalls(ctx context.Context) error {
+	now := timeText(time.Now())
+	_, err := s.db.ExecContext(ctx, `UPDATE calls SET state = 'ended', reason = 'server_restarted', ended_at = ?, updated_at = ? WHERE state NOT IN ('ended', 'failed')`, now, now)
+	if err != nil {
+		return fmt.Errorf("end interrupted calls: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `DELETE FROM native_call_outbox WHERE delivered = 0`)
+	if err != nil {
+		return fmt.Errorf("cancel interrupted call invitations: %w", err)
+	}
+	return nil
+}
+
+// SaveCall retains the existing answer time and client owner when an update omits them.
 func (s *Store) SaveCall(ctx context.Context, call Call) error {
 	call = normalizeCall(call)
 	if err := validateCall(call); err != nil {
@@ -33,9 +58,9 @@ func (s *Store) SaveCall(ctx context.Context, call Call) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO calls (
 			id, profile_id, modem_id, route, direction, number, state, hold_state, reason,
-			started_at, answered_at, ended_at, updated_at
+			started_at, answered_at, ended_at, updated_at, owner_client_id
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			profile_id = excluded.profile_id,
 			modem_id = excluded.modem_id,
@@ -51,26 +76,44 @@ func (s *Store) SaveCall(ctx context.Context, call Call) error {
 				ELSE excluded.answered_at
 			END,
 			ended_at = excluded.ended_at,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			owner_client_id = CASE WHEN excluded.owner_client_id <> '' THEN excluded.owner_client_id ELSE calls.owner_client_id END
 	`, call.ID, call.ProfileID, call.ModemID, call.Route, call.Direction, call.Number, call.State, call.Hold, call.Reason,
-		timeText(call.StartedAt), timeText(call.AnsweredAt), timeText(call.EndedAt), timeText(call.UpdatedAt), timeText(time.Time{}))
+		timeText(call.StartedAt), timeText(call.AnsweredAt), timeText(call.EndedAt), timeText(call.UpdatedAt), call.OwnerClientID, timeText(time.Time{}))
 	if err != nil {
 		return fmt.Errorf("save call: %w", err)
 	}
 	return nil
 }
 
+// SaveCallPreservingTerminal returns the stored snapshot and whether an update was committed.
+// Older events and nonterminal updates to ended calls leave the snapshot unchanged.
 func (s *Store) SaveCallPreservingTerminal(ctx context.Context, call Call) (Call, bool, error) {
 	call = normalizeCall(call)
 	if err := validateCall(call); err != nil {
 		return Call{}, false, err
 	}
-	row := s.db.QueryRowContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Call{}, false, fmt.Errorf("begin call update: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // A committed update has nothing to roll back.
+	existing, err := scanCall(tx.QueryRowContext(ctx,
+		`SELECT `+callColumns+` FROM calls WHERE id = ?`, call.ID))
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Call{}, false, fmt.Errorf("read current call: %w", err)
+	}
+	// RFC3339Nano text is not chronologically sortable at mixed precisions.
+	// Compare parsed times while the transaction protects the current snapshot.
+	if err == nil && call.UpdatedAt.Before(existing.UpdatedAt) {
+		return existing, false, nil
+	}
+	row := tx.QueryRowContext(ctx, `
 		INSERT INTO calls (
 			id, profile_id, modem_id, route, direction, number, state, hold_state, reason,
-			started_at, answered_at, ended_at, updated_at
+			started_at, answered_at, ended_at, updated_at, owner_client_id
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			profile_id = excluded.profile_id,
 			modem_id = excluded.modem_id,
@@ -86,22 +129,21 @@ func (s *Store) SaveCallPreservingTerminal(ctx context.Context, call Call) (Call
 				ELSE excluded.answered_at
 			END,
 			ended_at = excluded.ended_at,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			owner_client_id = CASE WHEN excluded.owner_client_id <> '' THEN excluded.owner_client_id ELSE calls.owner_client_id END
 		WHERE NOT (calls.state IN ('ended', 'failed') AND excluded.state NOT IN ('ended', 'failed'))
-		RETURNING id, profile_id, modem_id, route, direction, number, state, hold_state, reason,
-			started_at, answered_at, ended_at, updated_at
+		RETURNING `+callColumns+`
 	`, call.ID, call.ProfileID, call.ModemID, call.Route, call.Direction, call.Number, call.State, call.Hold, call.Reason,
-		timeText(call.StartedAt), timeText(call.AnsweredAt), timeText(call.EndedAt), timeText(call.UpdatedAt), timeText(time.Time{}))
+		timeText(call.StartedAt), timeText(call.AnsweredAt), timeText(call.EndedAt), timeText(call.UpdatedAt), call.OwnerClientID, timeText(time.Time{}))
 	saved, err := scanCall(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		existing, err := s.Call(ctx, call.ID)
-		if err != nil {
-			return Call{}, false, err
-		}
 		return existing, false, nil
 	}
 	if err != nil {
 		return Call{}, false, fmt.Errorf("save call preserving terminal state: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Call{}, false, fmt.Errorf("commit call update: %w", err)
 	}
 	return saved, true, nil
 }
@@ -112,8 +154,7 @@ func (s *Store) Call(ctx context.Context, id string) (Call, error) {
 		return Call{}, ErrNotFound
 	}
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, profile_id, modem_id, route, direction, number, state, hold_state, reason,
-			started_at, answered_at, ended_at, updated_at
+		SELECT `+callColumns+`
 		FROM calls
 		WHERE id = ?
 	`, id)
@@ -173,8 +214,7 @@ func (s *Store) ListCalls(ctx context.Context, profileID string, modemID string,
 	}
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, profile_id, modem_id, route, direction, number, state, hold_state, reason,
-			started_at, answered_at, ended_at, updated_at
+		SELECT `+callColumns+`
 		FROM calls
 		WHERE profile_id = ? AND modem_id = ?`+searchSQL+`
 		ORDER BY updated_at DESC
@@ -265,6 +305,8 @@ func scanCall(row callScanner) (Call, error) {
 		&answeredAt,
 		&endedAt,
 		&updatedAt,
+		&call.OwnerClientID,
+		&call.BackendID,
 	); err != nil {
 		return Call{}, fmt.Errorf("scan call: %w", err)
 	}
@@ -280,5 +322,37 @@ func scanCall(row callScanner) (Call, error) {
 	if call.UpdatedAt, err = parseTime(updatedAt); err != nil {
 		return Call{}, fmt.Errorf("parse call updated_at: %w", err)
 	}
+	call.CallUUID = CallUUID(call.BackendID, call.ModemID, call.ID)
 	return call, nil
+}
+
+// CallUUID gives push invitations and snapshots the same opaque UUID across restarts.
+func CallUUID(backendID, modemID, callID string) string {
+	sum := sha256.Sum256([]byte(backendID + "\x00" + modemID + "\x00" + callID))
+	sum[6] = sum[6]&0x0f | 0x80
+	sum[8] = sum[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
+}
+
+// ClaimCall changes only an unowned live call. The caller must separately serialize
+// its carrier action; a second installation can never overwrite an existing owner.
+func (s *Store) ClaimCall(ctx context.Context, callID, clientID string) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `UPDATE calls SET owner_client_id = ? WHERE id = ? AND owner_client_id = '' AND state NOT IN ('ended', 'failed')`, clientID, callID)
+	if err != nil {
+		return false, fmt.Errorf("claim call: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("count claimed calls: %w", err)
+	}
+	return count > 0, nil
+}
+
+// ReleaseCallClaim permits a retry after an unsuccessful answer, never after connection.
+func (s *Store) ReleaseCallClaim(ctx context.Context, callID, clientID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE calls SET owner_client_id = '' WHERE id = ? AND owner_client_id = ? AND state IN ('ringing', 'answering')`, callID, clientID)
+	if err != nil {
+		return fmt.Errorf("release call claim: %w", err)
+	}
+	return nil
 }

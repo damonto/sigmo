@@ -50,6 +50,7 @@ jobs:
           TARGET_ARM: ${{ matrix.target.arm }}
           TARGET_NAME: ${{ matrix.target.name }}
           RELEASE_PUBLIC_KEY: ${{ secrets.SIGMO_RELEASE_PUBLIC_KEY }}
+          PUSH_GATEWAY_URL: ${{ vars.SIGMO_PUSH_GATEWAY_URL }}
         run: |
           set -euo pipefail
           go generate ./...
@@ -68,6 +69,7 @@ jobs:
           ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Target=${TARGET_NAME}"
           ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Distribution=${distribution}"
           ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.ReleasePublicKey=${RELEASE_PUBLIC_KEY:-}"
+          ldflags+=" -X github.com/damonto/sigmo/internal/pkg/nativepush.GatewayURL=${PUSH_GATEWAY_URL:-https://sigmo-pro-api.id.workers.dev}"
           env_args=(GOOS=linux GOARCH="${TARGET_ARCH}" CGO_ENABLED=0)
           if [ -n "${TARGET_ARM:-}" ]; then env_args+=(GOARM="${TARGET_ARM}"); fi
           env "${env_args[@]}" go build -trimpath -ldflags="${ldflags}" -o "sigmo-${TARGET_NAME}" .

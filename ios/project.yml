@@ -1,0 +1,155 @@
+name: Sigmo
+options:
+  minimumXcodeGenVersion: 2.44.1
+  deploymentTarget:
+    iOS: "26.0"
+  developmentLanguage: en
+settings:
+  base:
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+    CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    STRING_CATALOG_GENERATE_SYMBOLS: YES
+    SWIFT_VERSION: "6.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: 465NH4KUMT
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SIGMO_BUNDLE_ID: com.damon.sigmo
+    SIGMO_PUSH_GATEWAY_URL: https://sigmo-pro-api.id.workers.dev
+  configs:
+    Debug:
+      SIGMO_APNS_ENVIRONMENT: development
+    Release:
+      SIGMO_APNS_ENVIRONMENT: production
+packages:
+  LiveKitWebRTC:
+    url: https://github.com/livekit/webrtc-xcframework
+    from: 150.7871.3
+  PhoneNumberKit:
+    url: https://github.com/PhoneNumberKit/PhoneNumberKit
+    from: 5.0.11
+targets:
+  Sigmo:
+    type: application
+    platform: iOS
+    sources:
+      - Sigmo
+    dependencies:
+      - package: LiveKitWebRTC
+      - package: PhoneNumberKit
+      - target: SigmoNotificationService
+        embed: true
+    entitlements:
+      path: .generated/Sigmo.entitlements
+      properties:
+        aps-environment: $(SIGMO_APNS_ENVIRONMENT)
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID)
+          - $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID).push
+    info:
+      path: .generated/Info.plist
+      properties:
+        CFBundleDisplayName: Sigmo
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        SigmoPushGatewayURL: $(SIGMO_PUSH_GATEWAY_URL)
+        SigmoAPNsEnvironment: $(SIGMO_APNS_ENVIRONMENT)
+        SigmoPushKeychainGroup: $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID).push
+        LSApplicationCategoryType: public.app-category.utilities
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        NSCameraUsageDescription: Scan an eSIM activation QR code to install a profile on your Sigmo modem.
+        NSMicrophoneUsageDescription: Use your microphone for calls through your Sigmo modem.
+        NSContactsUsageDescription: Choose phone numbers and show caller names for your Sigmo calls.
+        UIBackgroundModes:
+          - audio
+          - voip
+        NSUserActivityTypes:
+          - INStartCallIntent
+        NSLocalNetworkUsageDescription: Connect to your Sigmo connections and display their devices on your local network.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(SIGMO_BUNDLE_ID)
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Sigmo
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+  SigmoNotificationService:
+    type: app-extension
+    platform: iOS
+    sources:
+      - SigmoNotificationService
+      - Sigmo/Notifications/PushPayload.swift
+      - Sigmo/Notifications/PushKeychain.swift
+      - path: Sigmo/Resources
+        includes:
+          - "**/*.strings"
+    entitlements:
+      path: .generated/SigmoNotificationService.entitlements
+      properties:
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID).NotificationService
+          - $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID).push
+    info:
+      path: .generated/NotificationService-Info.plist
+      properties:
+        CFBundleDisplayName: Sigmo Notifications
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        SigmoPushKeychainGroup: $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID).push
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(SIGMO_BUNDLE_ID).NotificationService
+        APPLICATION_EXTENSION_API_ONLY: YES
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
+  SigmoTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - SigmoTests
+    dependencies:
+      - target: Sigmo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(SIGMO_BUNDLE_ID).Tests
+        GENERATE_INFOPLIST_FILE: YES
+  SigmoUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - SigmoUITests
+    dependencies:
+      - target: Sigmo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(SIGMO_BUNDLE_ID).UITests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Sigmo:
+    build:
+      targets:
+        Sigmo: all
+    test:
+      shouldUseLaunchSchemeArgsEnv: false
+      environmentVariables:
+        - variable: SIGMO_UNIT_TESTS
+          value: "1"
+      targets:
+        - SigmoTests
+        - SigmoUITests

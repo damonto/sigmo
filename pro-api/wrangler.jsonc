@@ -2,13 +2,20 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "sigmo-pro-api",
   "main": "src/index.ts",
+  "workers_dev": true,
   "compatibility_date": "2026-08-08",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "vars": {
     "BOT_USERNAME": "SigmoProBot",
+    "PUSH_TOPIC": "com.damon.sigmo",
+    "MAINTENANCE_MODE": "false",
   },
   "triggers": {
-    "crons": ["0 * * * *"],
+    "crons": [
+      "0 * * * *"
+    ],
   },
   "secrets": {
     "required": [
@@ -19,13 +26,16 @@
       "SIGMO_RELEASE_PUBLIC_KEY",
       "SIGMO_DOWNLOAD_TICKET_SECRET",
       "SIGMO_ADMIN_TELEGRAM_IDS",
+      "SIGMO_APNS_KEY_ID",
+      "SIGMO_APNS_TEAM_ID",
+      "SIGMO_APNS_PRIVATE_KEY",
     ],
   },
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "sigmo-licenses",
-      "database_id": "fee5caaf-9b56-48f7-b7ad-2873828ffde7",
+      "database_name": "sigmo",
+      "database_id": "939c5754-8109-47b5-b7e5-3342fd20487f",
       "migrations_dir": "migrations",
     },
   ],

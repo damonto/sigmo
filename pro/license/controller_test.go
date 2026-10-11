@@ -20,6 +20,7 @@ import (
 	"time"
 
 	appupdate "github.com/damonto/sigmo/internal/app/update"
+	"github.com/damonto/sigmo/internal/pkg/apierror"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -871,14 +872,25 @@ func signedProof(t *testing.T, privateKey ed25519.PrivateKey, lease Lease) signe
 	return signedLease{Lease: data, Signature: base64.RawStdEncoding.EncodeToString(ed25519.Sign(privateKey, data))}
 }
 
+type errorResponse struct {
+	ErrorCode string
+	Message   string
+}
+
 func response(status int, value any) *http.Response {
+	mediaType := "application/json"
+	if problem, ok := value.(errorResponse); ok {
+		title, _ := apierror.Title(problem.ErrorCode)
+		value = apierror.Problem{Type: apierror.TypePrefix + problem.ErrorCode, Title: title, Status: status, Detail: problem.Message, ErrorCode: problem.ErrorCode}
+		mediaType = apierror.MediaType
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		panic(fmt.Sprintf("encode test response: %v", err))
 	}
 	return &http.Response{
 		StatusCode: status,
-		Header:     make(http.Header),
+		Header:     http.Header{"Content-Type": []string{mediaType}},
 		Body:       io.NopCloser(strings.NewReader(string(data))),
 	}
 }

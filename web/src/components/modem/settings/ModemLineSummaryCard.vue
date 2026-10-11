@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Pencil, Plane, Smartphone, Wifi } from 'lucide-vue-next'
+import { Pencil, Plane, Smartphone } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
+import VoWiFiIcon from '@/components/modem/VoWiFiIcon.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { useModemDisplay } from '@/composables/useModemDisplay'
@@ -44,9 +45,7 @@ const signalLabel = computed(() =>
 </script>
 
 <template>
-  <Card
-    class="overflow-hidden border-primary/15 bg-primary/5 py-0 shadow-sm dark:bg-primary/10"
-  >
+  <Card class="overflow-hidden border-primary/15 bg-primary/5 py-0 shadow-sm dark:bg-primary/10">
     <CardContent class="p-0">
       <div class="flex items-center gap-3 border-b border-primary/10 p-3.5">
         <div
@@ -73,7 +72,10 @@ const signalLabel = computed(() =>
 
       <div class="flex items-center gap-3 px-3.5 py-2.5 text-xs">
         <div class="min-w-0 flex-1">
-          <p class="truncate font-medium text-foreground" :title="props.operatorLabel">
+          <p
+            class="truncate font-medium text-foreground"
+            :title="props.operatorLabel"
+          >
             {{ props.operatorLabel }}
           </p>
         </div>
@@ -91,7 +93,7 @@ const signalLabel = computed(() =>
           >
             {{ accessTechnologyLabel }}
           </span>
-          <Wifi
+          <VoWiFiIcon
             v-if="props.modem?.wifiCallingConnected && !props.modem?.airplaneMode"
             class="size-4 shrink-0 text-primary"
             title="Wi-Fi Calling"

@@ -143,8 +143,14 @@ func (s *Store) DeleteReminder(ctx context.Context, profileType, profileID strin
 	return nil
 }
 
+// ClaimReminder advances the matching revision and queues its native notification atomically.
 func (s *Store) ClaimReminder(ctx context.Context, reminder Reminder) (Reminder, bool, error) {
-	result, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Reminder{}, false, fmt.Errorf("begin reminder claim: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // A committed claim has nothing to roll back.
+	result, err := tx.ExecContext(ctx, `
 		UPDATE reminders
 		SET revision = revision + 1, updated_at = ?
 		WHERE profile_type = ? AND profile_id = ? AND revision = ?
@@ -158,6 +164,12 @@ func (s *Store) ClaimReminder(ctx context.Context, reminder Reminder) (Reminder,
 	}
 	if changed == 0 {
 		return Reminder{}, false, nil
+	}
+	if err := enqueueReminderPush(ctx, tx, reminder); err != nil {
+		return Reminder{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Reminder{}, false, fmt.Errorf("commit reminder claim: %w", err)
 	}
 	reminder.Revision++
 	return reminder, true, nil

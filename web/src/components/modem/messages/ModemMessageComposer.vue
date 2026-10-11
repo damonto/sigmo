@@ -13,6 +13,7 @@ const props = defineProps<{
   isSending: boolean
   isLoading: boolean
   defaultCountry?: string
+  disabled?: boolean
 }>()
 const emit = defineEmits<{
   (event: 'submit'): void
@@ -24,7 +25,9 @@ const { t } = useI18n()
 
 const messageLength = computed(() => message.value.length)
 const hasMessage = computed(() => message.value.trim().length > 0)
-const isSendDisabled = computed(() => props.isSending || props.isLoading || !hasMessage.value)
+const isSendDisabled = computed(
+  () => props.disabled || props.isSending || props.isLoading || !hasMessage.value,
+)
 
 const updateRecipient = (event: Event) => {
   const target = event.target as HTMLInputElement | null
@@ -37,7 +40,10 @@ const updateRecipient = (event: Event) => {
     class="mt-auto shrink-0 space-y-2 border-t border-border px-1 pt-3 pb-3"
     @submit.prevent="emit('submit')"
   >
-    <div v-if="props.isNewConversation" class="flex items-stretch gap-2">
+    <div
+      v-if="props.isNewConversation"
+      class="flex items-stretch gap-2"
+    >
       <Input
         :model-value="recipient"
         type="tel"
@@ -58,8 +64,15 @@ const updateRecipient = (event: Event) => {
         :placeholder="t('modemDetail.messages.replyPlaceholder')"
         :disabled="props.isSending || props.isLoading"
       />
-      <Button class="h-10" type="submit" :disabled="isSendDisabled">
-        <span v-if="props.isSending" class="inline-flex items-center gap-2">
+      <Button
+        class="h-10"
+        type="submit"
+        :disabled="isSendDisabled"
+      >
+        <span
+          v-if="props.isSending"
+          class="inline-flex items-center gap-2"
+        >
           <Spinner class="size-4" />
           {{ t('modemDetail.messages.send') }}
         </span>

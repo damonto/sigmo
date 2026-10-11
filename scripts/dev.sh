@@ -13,6 +13,7 @@ OUTPUT="${SIGMO_DEV_BIN:-${ROOT_DIR}/build/sigmo-dev}"
 GOPRIVATE_PATTERN="${GOPRIVATE:-${PRO_GOPRIVATE}}"
 KEYS_DIR="${SIGMO_KEYS_DIR:-${ROOT_DIR}/scripts/sigmo-keys}"
 PRO_WORKER_URL="${SIGMO_PRO_WORKER_URL:-https://sigmo-pro-api.id.workers.dev}"
+PUSH_GATEWAY_URL="${SIGMO_PUSH_GATEWAY_URL:-https://sigmo-pro-api.id.workers.dev}"
 
 LICENSE_PUBLIC_KEY="${SIGMO_LICENSE_PUBLIC_KEY:-}"
 if [ -z "${LICENSE_PUBLIC_KEY}" ]; then
@@ -77,6 +78,7 @@ if [ -n "${PRO_GO_TAGS}" ]; then
 fi
 ldflags="-X github.com/damonto/sigmo/internal/app/buildinfo.ReleasePublicKey=${RELEASE_PUBLIC_KEY}"
 ldflags+=" -X github.com/damonto/sigmo/pro/license.WorkerURL=${PRO_WORKER_URL}"
+ldflags+=" -X github.com/damonto/sigmo/internal/pkg/nativepush.GatewayURL=${PUSH_GATEWAY_URL}"
 ldflags+=" -X github.com/damonto/sigmo/pro/license.LicensePublicKey=${LICENSE_PUBLIC_KEY}"
 go_args+=(-ldflags="${ldflags}")
 

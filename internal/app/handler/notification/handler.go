@@ -20,17 +20,6 @@ type Handler struct {
 	notifications *notification
 }
 
-const (
-	errorCodeEuiccNotSupported        = "euicc_not_supported"
-	errorCodeListNotificationsFailed  = "list_notifications_failed"
-	errorCodeSequenceNumberRequired   = "sequence_number_required"
-	errorCodeInvalidSequenceNumber    = "invalid_sequence_number"
-	errorCodeResendNotificationFailed = "resend_notification_failed"
-	errorCodeDeleteNotificationFailed = "delete_notification_failed"
-	errorCodeSERequired               = "se_required"
-	errorCodeSENotFound               = "se_not_found"
-)
-
 var (
 	errSequenceRequired = errors.New("sequence number is required")
 	errInvalidSequence  = errors.New("invalid sequence number")
@@ -47,14 +36,14 @@ func (h *Handler) List(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeListNotificationsFailed)
+		return httpapi.ModemLookupError(c, err, "list_notifications_failed")
 	}
 	response, err := h.notifications.List(ctx, modem)
 	if err != nil {
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
+			return httpapi.NotFound(c, "euicc_not_supported", err)
 		}
-		return httpapi.Internal(c, errorCodeListNotificationsFailed, err)
+		return httpapi.Internal(c, "list_notifications_failed", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }
@@ -63,23 +52,23 @@ func (h *Handler) Resend(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeResendNotificationFailed)
+		return httpapi.ModemLookupError(c, err, "resend_notification_failed")
 	}
 	sequence, err := sequenceFromParam(c)
 	if err != nil {
 		if errors.Is(err, errSequenceRequired) {
-			return httpapi.BadRequest(c, errorCodeSequenceNumberRequired, err)
+			return httpapi.BadRequest(c, "sequence_number_required", err)
 		}
-		return httpapi.BadRequest(c, errorCodeInvalidSequenceNumber, err)
+		return httpapi.BadRequest(c, "invalid_sequence_number", err)
 	}
 	if err := h.notifications.Resend(ctx, modem, c.Param("seId"), sequence); err != nil {
 		if seErr := seRequestError(c, err); seErr != nil {
 			return seErr
 		}
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
+			return httpapi.NotFound(c, "euicc_not_supported", err)
 		}
-		return httpapi.Internal(c, errorCodeResendNotificationFailed, err)
+		return httpapi.Internal(c, "resend_notification_failed", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -88,33 +77,33 @@ func (h *Handler) Delete(c *echo.Context) error {
 	ctx := c.Request().Context()
 	modem, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeDeleteNotificationFailed)
+		return httpapi.ModemLookupError(c, err, "delete_notification_failed")
 	}
 	sequence, err := sequenceFromParam(c)
 	if err != nil {
 		if errors.Is(err, errSequenceRequired) {
-			return httpapi.BadRequest(c, errorCodeSequenceNumberRequired, err)
+			return httpapi.BadRequest(c, "sequence_number_required", err)
 		}
-		return httpapi.BadRequest(c, errorCodeInvalidSequenceNumber, err)
+		return httpapi.BadRequest(c, "invalid_sequence_number", err)
 	}
 	if err := h.notifications.Delete(ctx, modem, c.Param("seId"), sequence); err != nil {
 		if seErr := seRequestError(c, err); seErr != nil {
 			return seErr
 		}
 		if errors.Is(err, lpa.ErrNoSupportedAID) {
-			return httpapi.NotFound(c, errorCodeEuiccNotSupported, err)
+			return httpapi.NotFound(c, "euicc_not_supported", err)
 		}
-		return httpapi.Internal(c, errorCodeDeleteNotificationFailed, err)
+		return httpapi.Internal(c, "delete_notification_failed", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
 func seRequestError(c *echo.Context, err error) error {
 	if errors.Is(err, lpa.ErrSERequired) {
-		return httpapi.BadRequest(c, errorCodeSERequired, err)
+		return httpapi.BadRequest(c, "se_required", err)
 	}
 	if errors.Is(err, lpa.ErrSENotFound) {
-		return httpapi.NotFound(c, errorCodeSENotFound, err)
+		return httpapi.NotFound(c, "se_not_found", err)
 	}
 	return nil
 }

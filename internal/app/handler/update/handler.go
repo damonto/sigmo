@@ -58,7 +58,7 @@ func (h *Handler) CreateCheck(c *echo.Context) error {
 		if code == "" {
 			code = "update_check_failed"
 		}
-		return httpapi.Error(c, http.StatusBadGateway, code, err.Error())
+		return httpapi.UpstreamError(c, code, err)
 	}
 	return c.JSON(http.StatusOK, h.controller.Snapshot())
 }

@@ -3,8 +3,14 @@ import { shallowRef, type Ref } from 'vue'
 import { clearStoredToken, getStoredToken } from '@/lib/authStorage'
 import { resolveAPIURL, resolveAPIWebSocketURL } from '@/lib/apiUrl'
 import { handleError } from '@/lib/errorHandler'
+import { callClientId } from '@/lib/callClient'
+import {
+  API_ACCEPT,
+  createApiError,
+  fetchWithBoundedErrors,
+  isLocalAuthenticationError,
+} from '@/lib/apiProblem'
 
-import type { ApiErrorResponse } from '@/types/api'
 import type {
   CallRecord,
   DialCallRequest,
@@ -17,34 +23,8 @@ type CallApiResult<T> = {
   data: Ref<T | undefined>
 }
 
-type CallApiError = ApiErrorResponse & {
-  status?: number
-}
-
-const extractErrorResponse = (data: unknown): ApiErrorResponse | null => {
-  if (!data || typeof data !== 'object') return null
-  const record = data as Record<string, unknown>
-  if (
-    typeof record.error_code === 'string' &&
-    typeof record.message === 'string' &&
-    typeof record.request_id === 'string'
-  ) {
-    return {
-      error_code: record.error_code,
-      message: record.message,
-      request_id: record.request_id,
-    }
-  }
-  return null
-}
-
 const buildCallApiError = (response: Response, data: unknown) => {
-  const apiError: CallApiError = extractErrorResponse(data) ?? {
-    error_code: 'unknown_error',
-    message: `Error ${response.status}: ${response.statusText}`,
-    request_id: response.headers.get('X-Request-ID') ?? '',
-  }
-  apiError.status = response.status
+  const apiError = createApiError(response, data)
   return Object.assign(new Error(apiError.message), apiError)
 }
 
@@ -88,6 +68,7 @@ const requestCallMediaApi = async <T>(
 
 const requestApi = async <T>(url: string, init: RequestInit = {}): Promise<CallApiResult<T>> => {
   const headers = new Headers(init.headers)
+  headers.set('Accept', API_ACCEPT)
   const token = getStoredToken()
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
@@ -99,23 +80,28 @@ const requestApi = async <T>(url: string, init: RequestInit = {}): Promise<CallA
   let response: Response
   let data: unknown
   try {
-    response = await fetch(url, {
+    response = await fetchWithBoundedErrors(url, {
       ...init,
       headers,
       mode: 'cors',
     })
     const contentType = response.headers.get('Content-Type') ?? ''
-    data = contentType.includes('application/json') ? await response.json() : undefined
+    data = response.ok
+      ? contentType.includes('application/json')
+        ? await response.json()
+        : undefined
+      : await response.text()
   } catch (err) {
     handleError(err, 'Network error occurred')
     throw err instanceof Error ? err : new Error('Request failed')
   }
 
   if (!response.ok) {
-    if (response.status === 401) {
+    const error = buildCallApiError(response, data)
+    if (isLocalAuthenticationError(error)) {
       clearStoredToken()
     }
-    throw buildCallApiError(response, data)
+    throw error
   }
 
   const dataRef = shallowRef<T>()
@@ -131,14 +117,14 @@ export const useCallApi = () => {
   const dialCall = (id: string, payload: DialCallRequest) => {
     return requestCallApi<CallRecord>(id, '', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, clientId: callClientId() }),
     })
   }
 
   const updateCall = (id: string, callID: string, payload: UpdateCallRequest) => {
     return requestCallApi<CallRecord>(id, `/${encodeURIComponent(callID)}`, {
       method: 'PATCH',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, clientId: callClientId() }),
     })
   }
 
@@ -165,7 +151,7 @@ export const useCallApi = () => {
   const sendDTMF = (id: string, callID: string, payload: SendDTMFRequest) => {
     return requestCallApi<void>(id, `/${encodeURIComponent(callID)}/dtmf-events`, {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, clientId: callClientId() }),
     })
   }
 

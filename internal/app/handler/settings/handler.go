@@ -26,23 +26,6 @@ type Handler struct {
 	relay             *forwarder.Relay
 }
 
-const (
-	errorCodeUpdateAuthInvalidRequest         = "update_auth_invalid_request"
-	errorCodeUpdateAuthInvalid                = "update_auth_invalid"
-	errorCodeUpdateAuthFailed                 = "update_auth_failed"
-	errorCodeTestAuthInvalidRequest           = "test_auth_invalid_request"
-	errorCodeTestAuthInvalid                  = "test_auth_invalid"
-	errorCodeTestAuthFailed                   = "test_auth_failed"
-	errorCodeUpdateProxyInvalidRequest        = "update_proxy_invalid_request"
-	errorCodeUpdateProxyInvalid               = "update_proxy_invalid"
-	errorCodeUpdateProxyFailed                = "update_proxy_failed"
-	errorCodeUpdateNotificationInvalidRequest = "update_notification_invalid_request"
-	errorCodeUpdateNotificationInvalid        = "update_notification_invalid"
-	errorCodeUpdateNotificationFailed         = "update_notification_failed"
-	errorCodeReloadProxySettingsFailed        = "reload_proxy_settings_failed"
-	errorCodeReloadRelayFailed                = "reload_notification_relay_failed"
-)
-
 var (
 	errAuthProvidersRequired = errors.New("auth providers are required when otp is enabled")
 	errAuthTestFailed        = errors.New("authentication provider test failed")
@@ -63,12 +46,12 @@ func (h *Handler) Get(c *echo.Context) error {
 
 func (h *Handler) UpdateAuth(c *echo.Context) error {
 	var req UpdateAuthRequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeUpdateAuthInvalidRequest, err)
+	if err := httpapi.BindJSON(c, &req, "update_auth_invalid_request"); err != nil {
+		return err
 	}
 	req = normalizeAuthValues(req)
 	if err := c.Validate(&req); err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateAuthInvalid, err)
+		return httpapi.UnprocessableEntity(c, "update_auth_invalid", err)
 	}
 
 	var invalidErr error
@@ -78,10 +61,10 @@ func (h *Handler) UpdateAuth(c *echo.Context) error {
 		return invalidErr
 	})
 	if invalidErr != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateAuthInvalid, invalidErr)
+		return httpapi.UnprocessableEntity(c, "update_auth_invalid", invalidErr)
 	}
 	if err != nil {
-		return httpapi.Internal(c, errorCodeUpdateAuthFailed, fmt.Errorf("save auth settings: %w", err))
+		return httpapi.Internal(c, "update_auth_failed", fmt.Errorf("save auth settings: %w", err))
 	}
 
 	return c.JSON(http.StatusOK, responseFromSettings(saved))
@@ -89,8 +72,8 @@ func (h *Handler) UpdateAuth(c *echo.Context) error {
 
 func (h *Handler) TestAuth(c *echo.Context) error {
 	var req AuthTestRequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeTestAuthInvalidRequest, err)
+	if err := httpapi.BindJSON(c, &req, "test_auth_invalid_request"); err != nil {
+		return err
 	}
 	providers := normalizeNames(trimNames(req.AuthProviders))
 	candidate := appsettings.Settings{
@@ -107,18 +90,18 @@ func (h *Handler) TestAuth(c *echo.Context) error {
 		}
 	}
 	if err := validateSettings(candidate); err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeTestAuthInvalid, err)
+		return httpapi.UnprocessableEntity(c, "test_auth_invalid", err)
 	}
 
 	notifier, err := notify.New(&candidate)
 	if err != nil {
 		slog.Error("create authentication test notifier", "error", err, "providers", providers)
-		return httpapi.UnprocessableEntity(c, errorCodeTestAuthFailed, errAuthTestFailed)
+		return httpapi.UnprocessableEntity(c, "test_auth_failed", errAuthTestFailed)
 	}
 	lang := cmp.Or(httpapi.RequestLocale(c), h.store.Locale())
 	if err := notifier.Send(c.Request().Context(), lang, notifyevent.OTPEvent{Code: "000000"}, providers...); err != nil {
 		slog.Error("send authentication provider test", "error", err, "providers", providers)
-		return httpapi.UnprocessableEntity(c, errorCodeTestAuthFailed, errAuthTestFailed)
+		return httpapi.UnprocessableEntity(c, "test_auth_failed", errAuthTestFailed)
 	}
 
 	return c.NoContent(http.StatusCreated)
@@ -126,12 +109,12 @@ func (h *Handler) TestAuth(c *echo.Context) error {
 
 func (h *Handler) UpdateProxy(c *echo.Context) error {
 	var req ProxyValues
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeUpdateProxyInvalidRequest, err)
+	if err := httpapi.BindJSON(c, &req, "update_proxy_invalid_request"); err != nil {
+		return err
 	}
 	req = normalizeProxyValues(req)
 	if err := c.Validate(&req); err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateProxyInvalid, err)
+		return httpapi.UnprocessableEntity(c, "update_proxy_invalid", err)
 	}
 
 	proxy := proxySettingsFromValues(req)
@@ -140,11 +123,11 @@ func (h *Handler) UpdateProxy(c *echo.Context) error {
 		return nil
 	})
 	if err != nil {
-		return httpapi.Internal(c, errorCodeUpdateProxyFailed, fmt.Errorf("save proxy settings: %w", err))
+		return httpapi.Internal(c, "update_proxy_failed", fmt.Errorf("save proxy settings: %w", err))
 	}
 
 	if err := h.internetConnector.UpdateProxyConfig(internetProxyConfig(saved)); err != nil {
-		return httpapi.Internal(c, errorCodeReloadProxySettingsFailed, fmt.Errorf("saved proxy settings, reload proxy: %w", err))
+		return httpapi.Internal(c, "reload_proxy_settings_failed", fmt.Errorf("saved proxy settings, reload proxy: %w", err))
 	}
 
 	return c.JSON(http.StatusOK, responseFromSettings(saved))
@@ -155,18 +138,18 @@ func (h *Handler) UpdateNotificationChannel(c *echo.Context) error {
 	if _, ok := allowedChannelNames()[name]; !ok {
 		return httpapi.UnprocessableEntity(
 			c,
-			errorCodeUpdateNotificationInvalid,
+			"update_notification_invalid",
 			fmt.Errorf("notification channel %q is not supported", name),
 		)
 	}
 
 	var req ChannelValues
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeUpdateNotificationInvalidRequest, err)
+	if err := httpapi.BindJSON(c, &req, "update_notification_invalid_request"); err != nil {
+		return err
 	}
 	req = filterChannelValue(name, normalizeChannelValue(req))
 	if err := c.Validate(&req); err != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateNotificationInvalid, err)
+		return httpapi.UnprocessableEntity(c, "update_notification_invalid", err)
 	}
 
 	channel := channelSettingsFromValues(name, req)
@@ -176,14 +159,14 @@ func (h *Handler) UpdateNotificationChannel(c *echo.Context) error {
 		return invalidErr
 	})
 	if invalidErr != nil {
-		return httpapi.UnprocessableEntity(c, errorCodeUpdateNotificationInvalid, invalidErr)
+		return httpapi.UnprocessableEntity(c, "update_notification_invalid", invalidErr)
 	}
 	if err != nil {
-		return httpapi.Internal(c, errorCodeUpdateNotificationFailed, fmt.Errorf("save notification channel: %w", err))
+		return httpapi.Internal(c, "update_notification_failed", fmt.Errorf("save notification channel: %w", err))
 	}
 
 	if err := h.relay.Reload(); err != nil {
-		return httpapi.Internal(c, errorCodeReloadRelayFailed, fmt.Errorf("saved notification channel, reload notification relay: %w", err))
+		return httpapi.Internal(c, "reload_notification_relay_failed", fmt.Errorf("saved notification channel, reload notification relay: %w", err))
 	}
 
 	return c.JSON(http.StatusOK, responseFromSettings(saved))

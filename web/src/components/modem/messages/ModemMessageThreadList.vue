@@ -21,13 +21,25 @@ const emptyLabel = computed(() =>
 </script>
 
 <template>
-  <div v-if="hasItems" class="space-y-3">
-    <ModemMessageBubble v-for="item in props.items" :key="item.key" :item="item" />
+  <div
+    v-if="hasItems"
+    class="space-y-3"
+  >
+    <div
+      v-for="item in props.items"
+      :key="item.key"
+      :data-message-id="item.key"
+    >
+      <ModemMessageBubble :item="item" />
+    </div>
   </div>
 
   <ModemMessageThreadSkeletonList v-else-if="props.isLoading" />
 
-  <p v-else class="text-sm text-muted-foreground">
+  <p
+    v-else
+    class="text-sm text-muted-foreground"
+  >
     {{ emptyLabel }}
   </p>
 </template>

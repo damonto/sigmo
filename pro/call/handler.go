@@ -26,40 +26,6 @@ type Handler struct {
 	media    *Media
 }
 
-const (
-	errorCodeListCallsFailed           = "list_calls_failed"
-	errorCodeListWebRTCICEServers      = "list_webrtc_ice_servers_failed"
-	errorCodeDialCallInvalidRequest    = "dial_call_invalid_request"
-	errorCodeDialCallFailed            = "dial_call_failed"
-	errorCodeUpdateCallInvalidRequest  = "update_call_invalid_request"
-	errorCodeUpdateCallFailed          = "update_call_failed"
-	errorCodeSendDTMFInvalidRequest    = "send_dtmf_invalid_request"
-	errorCodeSendDTMFFailed            = "send_dtmf_failed"
-	errorCodeCallNumberRequired        = "call_number_required"
-	errorCodeCallNumberInvalid         = "call_number_invalid"
-	errorCodeUSSDDialString            = "ussd_dial_string"
-	errorCodeInvalidCallRoute          = "invalid_call_route"
-	errorCodeNoCallRouteAvailable      = "no_call_route_available"
-	errorCodeWiFiCallingNotConnected   = "wifi_calling_not_connected"
-	errorCodeVoLTENotConnected         = "volte_not_connected"
-	errorCodeModemCallingUnavailable   = "modem_calling_unavailable"
-	errorCodeCallNotFound              = "call_not_found"
-	errorCodeInvalidCallState          = "invalid_call_state"
-	errorCodeInvalidCallHold           = "invalid_call_hold"
-	errorCodeCallUpdateConflict        = "call_update_conflict"
-	errorCodeDTMFDigitsRequired        = "dtmf_digits_required"
-	errorCodeInvalidDTMFDigit          = "invalid_dtmf_digit"
-	errorCodeInvalidDTMFCallState      = "invalid_dtmf_call_state"
-	errorCodeCallOnHold                = "call_on_hold"
-	errorCodeCallRecordActive          = "call_record_active"
-	errorCodeCallDTMFUnsupported       = "call_dtmf_unsupported"
-	errorCodeHangupCallFailed          = "hangup_call_failed"
-	errorCodeDeleteCallFailed          = "delete_call_failed"
-	errorCodeCallMediaUnavailable      = "call_media_unavailable"
-	errorCodeCallMediaUnsupportedCodec = "call_media_unsupported_codec"
-	errorCodeSubscribeCallEventsFailed = "subscribe_call_events_failed"
-)
-
 var callWSUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return sameOrigin(r)
@@ -72,6 +38,7 @@ func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, calls *Calls, 
 	group.GET("/modems/:id/calls", h.List)
 	group.POST("/modems/:id/calls", h.Dial)
 	group.GET("/modems/:id/calls/events", h.Events)
+	group.GET("/modems/:id/calls/:callID", h.Get)
 	group.GET("/modems/:id/calls/:callID/webrtc/sessions", h.WebRTCSession)
 	group.POST("/modems/:id/calls/:callID/dtmf-events", h.SendDTMF)
 	group.PATCH("/modems/:id/calls/:callID", h.Update)
@@ -81,19 +48,32 @@ func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, calls *Calls, 
 func (h *Handler) List(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeListCallsFailed)
+		return httpapi.ModemLookupError(c, err, "list_calls_failed")
 	}
 	calls, err := h.calls.List(c.Request().Context(), modem, c.QueryParam("q"))
 	if err != nil {
-		return httpapi.Internal(c, errorCodeListCallsFailed, err)
+		return httpapi.Internal(c, "list_calls_failed", err)
 	}
 	return c.JSON(http.StatusOK, ResponsesFromCalls(calls))
+}
+
+// Get reconciles one call without depending on the history window.
+func (h *Handler) Get(c *echo.Context) error {
+	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return httpapi.ModemLookupError(c, err, "list_calls_failed")
+	}
+	call, err := h.calls.Get(c.Request().Context(), modem, callIDParam(c))
+	if err != nil {
+		return callActionError(c, err, "list_calls_failed")
+	}
+	return c.JSON(http.StatusOK, ResponseFromCall(call))
 }
 
 func (h *Handler) WebRTCICEServers(c *echo.Context) error {
 	servers, err := h.media.WebRTCICEServers(c.Request().Context())
 	if err != nil {
-		return httpapi.Internal(c, errorCodeListWebRTCICEServers, err)
+		return httpapi.Internal(c, "list_webrtc_ice_servers_failed", err)
 	}
 	return c.JSON(http.StatusOK, buildWebRTCICEServersResponse(servers))
 }
@@ -101,15 +81,15 @@ func (h *Handler) WebRTCICEServers(c *echo.Context) error {
 func (h *Handler) Dial(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeDialCallFailed)
+		return httpapi.ModemLookupError(c, err, "dial_call_failed")
 	}
 	var req DialRequest
-	if err := httpapi.BindAndValidate(c, &req, errorCodeDialCallInvalidRequest); err != nil {
+	if err := httpapi.BindAndValidate(c, &req, "dial_call_invalid_request"); err != nil {
 		return err
 	}
-	call, err := h.calls.Dial(c.Request().Context(), modem, req.To, req.Route)
+	call, err := h.calls.DialForClient(c.Request().Context(), modem, req)
 	if err != nil {
-		return callActionError(c, err, errorCodeDialCallFailed)
+		return callActionError(c, err, "dial_call_failed")
 	}
 	return c.JSON(http.StatusCreated, ResponseFromCall(call))
 }
@@ -117,19 +97,23 @@ func (h *Handler) Dial(c *echo.Context) error {
 func (h *Handler) Update(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeUpdateCallFailed)
+		return httpapi.ModemLookupError(c, err, "update_call_failed")
 	}
 	var req UpdateCallRequest
-	if err := httpapi.BindAndValidate(c, &req, errorCodeUpdateCallInvalidRequest); err != nil {
+	if err := httpapi.BindAndValidate(c, &req, "update_call_invalid_request"); err != nil {
 		return err
 	}
-	call, err := h.calls.Update(c.Request().Context(), modem, callIDParam(c), UpdateRequest{
-		State:  req.State,
-		Reason: req.Reason,
-		Hold:   req.Hold,
+	call, err := h.calls.UpdateForClient(c.Request().Context(), modem, ClientUpdate{
+		CallID:   callIDParam(c),
+		ClientID: req.ClientID,
+		Update: UpdateRequest{
+			State:  req.State,
+			Reason: req.Reason,
+			Hold:   req.Hold,
+		},
 	})
 	if err != nil {
-		return callActionError(c, err, errorCodeUpdateCallFailed)
+		return callActionError(c, err, "update_call_failed")
 	}
 	return c.JSON(http.StatusOK, ResponseFromCall(call))
 }
@@ -137,11 +121,11 @@ func (h *Handler) Update(c *echo.Context) error {
 func (h *Handler) Hangup(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeHangupCallFailed)
+		return httpapi.ModemLookupError(c, err, "hangup_call_failed")
 	}
 	call, err := h.calls.Hangup(c.Request().Context(), modem, callIDParam(c))
 	if err != nil {
-		return callActionError(c, err, errorCodeHangupCallFailed)
+		return callActionError(c, err, "hangup_call_failed")
 	}
 	return c.JSON(http.StatusOK, ResponseFromCall(call))
 }
@@ -149,14 +133,18 @@ func (h *Handler) Hangup(c *echo.Context) error {
 func (h *Handler) SendDTMF(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeSendDTMFFailed)
+		return httpapi.ModemLookupError(c, err, "send_dtmf_failed")
 	}
 	var req SendDTMFRequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, errorCodeSendDTMFInvalidRequest, err)
+	if err := httpapi.BindJSON(c, &req, "send_dtmf_invalid_request"); err != nil {
+		return err
 	}
-	if err := h.calls.SendDTMF(c.Request().Context(), modem, callIDParam(c), req.Digits); err != nil {
-		return callActionError(c, err, errorCodeSendDTMFFailed)
+	if err := h.calls.SendDTMFForClient(c.Request().Context(), modem, ClientDTMF{
+		CallID:   callIDParam(c),
+		ClientID: req.ClientID,
+		Digits:   req.Digits,
+	}); err != nil {
+		return callActionError(c, err, "send_dtmf_failed")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -164,10 +152,10 @@ func (h *Handler) SendDTMF(c *echo.Context) error {
 func (h *Handler) Delete(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeDeleteCallFailed)
+		return httpapi.ModemLookupError(c, err, "delete_call_failed")
 	}
 	if err := h.calls.Delete(c.Request().Context(), modem, callIDParam(c)); err != nil {
-		return callActionError(c, err, errorCodeDeleteCallFailed)
+		return callActionError(c, err, "delete_call_failed")
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -237,7 +225,7 @@ func isLoopbackHost(host string) bool {
 func (h *Handler) Events(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeSubscribeCallEventsFailed)
+		return httpapi.ModemLookupError(c, err, "subscribe_call_events_failed")
 	}
 	events, unsubscribe := h.calls.Subscribe(SubscriptionConfig{ModemID: modem.EquipmentIdentifier, Buffer: 16})
 	defer unsubscribe()
@@ -247,7 +235,7 @@ func (h *Handler) Events(c *echo.Context) error {
 	defer unsubscribeDTMF()
 	currentCalls, err := h.calls.List(c.Request().Context(), modem, "")
 	if err != nil {
-		return httpapi.Internal(c, errorCodeSubscribeCallEventsFailed, err)
+		return httpapi.Internal(c, "subscribe_call_events_failed", err)
 	}
 	conn, err := callWSUpgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
@@ -283,7 +271,7 @@ func (h *Handler) Events(c *echo.Context) error {
 func (h *Handler) WebRTCSession(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeCallMediaUnavailable)
+		return httpapi.ModemLookupError(c, err, "call_media_unavailable")
 	}
 	conn, err := callWSUpgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
@@ -316,9 +304,14 @@ func (h *Handler) serveWebRTCSession(ctx context.Context, conn *websocket.Conn, 
 				_ = writeWebRTCSignalError(conn, &writeMu, "invalid WebRTC offer")
 				return nil
 			}
-			nextSession, err := h.media.OpenWebRTCSession(ctx, modem, callID)
+			nextSession, err := h.media.OpenClientSession(ctx, modem, ClientMedia{CallID: callID, ClientID: message.ClientID})
 			if err != nil {
-				_ = writeWebRTCSignalError(conn, &writeMu, callMediaMessage(err))
+				code := "call_media_unavailable"
+				if errors.Is(err, ErrCallInUse) {
+					code = "call_in_use"
+				}
+				// The connection is closing; a second write cannot recover this error.
+				_ = writeWebRTCSignal(conn, &writeMu, WebRTCSignalMessage{Type: "error", Code: code, Message: callMediaMessage(err)})
 				return nil
 			}
 			session = nextSession
@@ -434,44 +427,50 @@ func currentCallEvents(calls []storage.Call, modemID string) []storage.Call {
 
 func callActionError(c *echo.Context, err error, fallback string) error {
 	switch {
+	case errors.Is(err, ErrCallInUse):
+		return httpapi.Error(c, http.StatusConflict, "call_in_use", err.Error())
+	case errors.Is(err, ErrCallProfileChanged):
+		return httpapi.Error(c, http.StatusConflict, "call_profile_changed", err.Error())
+	case errors.Is(err, ErrInvalidCallClient):
+		return httpapi.BadRequest(c, "invalid_call_client", err)
 	case errors.Is(err, ErrNumberRequired):
-		return httpapi.BadRequest(c, errorCodeCallNumberRequired, err)
+		return httpapi.BadRequest(c, "call_number_required", err)
 	case errors.Is(err, ErrInvalidNumber):
-		return httpapi.BadRequest(c, errorCodeCallNumberInvalid, err)
+		return httpapi.BadRequest(c, "call_number_invalid", err)
 	case errors.Is(err, ErrUSSDDialString):
-		return httpapi.BadRequest(c, errorCodeUSSDDialString, err)
+		return httpapi.BadRequest(c, "ussd_dial_string", err)
 	case errors.Is(err, ErrInvalidRoute):
-		return httpapi.BadRequest(c, errorCodeInvalidCallRoute, err)
+		return httpapi.BadRequest(c, "invalid_call_route", err)
 	case errors.Is(err, ErrNoRouteAvailable):
-		return httpapi.Error(c, http.StatusServiceUnavailable, errorCodeNoCallRouteAvailable, err.Error())
+		return httpapi.Error(c, http.StatusServiceUnavailable, "no_call_route_available", err.Error())
 	case errors.Is(err, ErrWiFiCallingNotConnected):
-		return httpapi.Error(c, http.StatusServiceUnavailable, errorCodeWiFiCallingNotConnected, err.Error())
+		return httpapi.Error(c, http.StatusServiceUnavailable, "wifi_calling_not_connected", err.Error())
 	case errors.Is(err, ErrVoLTENotConnected):
-		return httpapi.Error(c, http.StatusServiceUnavailable, errorCodeVoLTENotConnected, err.Error())
+		return httpapi.Error(c, http.StatusServiceUnavailable, "volte_not_connected", err.Error())
 	case errors.Is(err, ErrModemCallingUnavailable):
-		return httpapi.Error(c, http.StatusNotImplemented, errorCodeModemCallingUnavailable, err.Error())
+		return httpapi.Error(c, http.StatusNotImplemented, "modem_calling_unavailable", err.Error())
 	case errors.Is(err, ErrCallNotFound):
-		return httpapi.NotFound(c, errorCodeCallNotFound, err)
+		return httpapi.NotFound(c, "call_not_found", err)
 	case errors.Is(err, ErrInvalidCallState):
-		return httpapi.BadRequest(c, errorCodeInvalidCallState, err)
+		return httpapi.BadRequest(c, "invalid_call_state", err)
 	case errors.Is(err, ErrInvalidCallHold):
-		return httpapi.BadRequest(c, errorCodeInvalidCallHold, err)
+		return httpapi.BadRequest(c, "invalid_call_hold", err)
 	case errors.Is(err, ErrCallUpdateConflict):
-		return httpapi.BadRequest(c, errorCodeCallUpdateConflict, err)
+		return httpapi.BadRequest(c, "call_update_conflict", err)
 	case errors.Is(err, ErrDTMFDigitsRequired):
-		return httpapi.BadRequest(c, errorCodeDTMFDigitsRequired, err)
+		return httpapi.BadRequest(c, "dtmf_digits_required", err)
 	case errors.Is(err, ErrInvalidDTMFDigit):
-		return httpapi.BadRequest(c, errorCodeInvalidDTMFDigit, err)
+		return httpapi.BadRequest(c, "invalid_dtmf_digit", err)
 	case errors.Is(err, ErrInvalidDTMFCallState):
-		return httpapi.Error(c, http.StatusConflict, errorCodeInvalidDTMFCallState, err.Error())
+		return httpapi.Error(c, http.StatusConflict, "invalid_dtmf_call_state", err.Error())
 	case errors.Is(err, ErrCallOnHold):
-		return httpapi.Error(c, http.StatusConflict, errorCodeCallOnHold, err.Error())
+		return httpapi.Error(c, http.StatusConflict, "call_on_hold", err.Error())
 	case errors.Is(err, ErrCallRecordActive):
-		return httpapi.Error(c, http.StatusConflict, errorCodeCallRecordActive, err.Error())
+		return httpapi.Error(c, http.StatusConflict, "call_record_active", err.Error())
 	case errors.Is(err, ErrUnsupportedDTMF):
-		return httpapi.Error(c, http.StatusNotImplemented, errorCodeCallDTMFUnsupported, err.Error())
-	case fallback == errorCodeDialCallFailed:
-		return httpapi.Error(c, http.StatusBadGateway, errorCodeDialCallFailed, callActionMessage(err))
+		return httpapi.Error(c, http.StatusNotImplemented, "call_dtmf_unsupported", err.Error())
+	case fallback == "dial_call_failed":
+		return httpapi.Error(c, http.StatusBadGateway, "dial_call_failed", callActionMessage(err))
 	default:
 		return httpapi.Internal(c, fallback, err)
 	}
@@ -490,11 +489,11 @@ func callActionMessage(err error) string {
 func callMediaError(c *echo.Context, err error) error {
 	switch {
 	case errors.Is(err, ErrUnsupportedCodec):
-		return httpapi.Error(c, http.StatusUnsupportedMediaType, errorCodeCallMediaUnsupportedCodec, err.Error())
+		return httpapi.Error(c, http.StatusUnsupportedMediaType, "call_media_unsupported_codec", err.Error())
 	case errors.Is(err, ErrMediaUnavailable):
-		return httpapi.Error(c, http.StatusServiceUnavailable, errorCodeCallMediaUnavailable, err.Error())
+		return httpapi.Error(c, http.StatusServiceUnavailable, "call_media_unavailable", err.Error())
 	default:
-		return callActionError(c, err, errorCodeCallMediaUnavailable)
+		return callActionError(c, err, "call_media_unavailable")
 	}
 }
 
@@ -532,17 +531,21 @@ func ResponseFromCall(call storage.Call) CallResponse {
 		hold = HoldNone
 	}
 	return CallResponse{
-		ID:         call.ID,
-		Route:      call.Route,
-		Direction:  call.Direction,
-		Number:     call.Number,
-		State:      call.State,
-		Hold:       hold,
-		Reason:     call.Reason,
-		StartedAt:  callTime(call.StartedAt),
-		AnsweredAt: callTime(call.AnsweredAt),
-		EndedAt:    callTime(call.EndedAt),
-		UpdatedAt:  callTime(call.UpdatedAt),
+		BackendID:     call.BackendID,
+		CallUUID:      call.CallUUID,
+		ProfileID:     call.ProfileID,
+		OwnerClientID: call.OwnerClientID,
+		ID:            call.ID,
+		Route:         call.Route,
+		Direction:     call.Direction,
+		Number:        call.Number,
+		State:         call.State,
+		Hold:          hold,
+		Reason:        call.Reason,
+		StartedAt:     callTime(call.StartedAt),
+		AnsweredAt:    callTime(call.AnsweredAt),
+		EndedAt:       callTime(call.EndedAt),
+		UpdatedAt:     callTime(call.UpdatedAt),
 	}
 }
 

@@ -15,50 +15,45 @@ import (
 
 func TestWriteSendMessageError(t *testing.T) {
 	tests := []struct {
-		name           string
-		err            error
-		wantStatus     int
-		wantErrorCode  string
-		exposeInternal bool
+		name          string
+		err           error
+		wantStatus    int
+		wantErrorCode string
 	}{
 		{
 			name:          "invalid recipient",
 			err:           pmessage.ErrRecipientInvalid,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: errorCodeRecipientInvalid,
+			wantErrorCode: "invalid_recipient",
 		},
 		{
 			name:          "recipient required",
 			err:           pmessage.ErrRecipientRequired,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: errorCodeRecipientRequired,
+			wantErrorCode: "recipient_required",
 		},
 		{
 			name:          "text required",
 			err:           pmessage.ErrTextRequired,
 			wantStatus:    http.StatusBadRequest,
-			wantErrorCode: errorCodeTextRequired,
+			wantErrorCode: "text_required",
 		},
 		{
 			name:          "message route disconnected",
 			err:           pmessage.ErrRouteNotConnected,
 			wantStatus:    http.StatusServiceUnavailable,
-			wantErrorCode: errorCodeMessageRouteNotConnected,
+			wantErrorCode: "message_route_not_connected",
 		},
 		{
-			name:           "send failed",
-			err:            errors.New("send SMS"),
-			wantStatus:     http.StatusInternalServerError,
-			wantErrorCode:  errorCodeSendMessageFailed,
-			exposeInternal: true,
+			name:          "send failed",
+			err:           errors.New("send SMS"),
+			wantStatus:    http.StatusInternalServerError,
+			wantErrorCode: "send_message_failed",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			httpapi.SetExposeInternalErrors(tt.exposeInternal)
-			defer httpapi.SetExposeInternalErrors(false)
-
 			e := echo.New()
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/modems/1/messages", nil)
 			rec := httptest.NewRecorder()
@@ -76,6 +71,9 @@ func TestWriteSendMessageError(t *testing.T) {
 			}
 			if got.ErrorCode != tt.wantErrorCode {
 				t.Fatalf("error code = %q, want %q", got.ErrorCode, tt.wantErrorCode)
+			}
+			if tt.wantStatus == http.StatusInternalServerError && got.Detail != "internal server error" {
+				t.Fatalf("detail = %q, want redacted internal error", got.Detail)
 			}
 		})
 	}

@@ -61,7 +61,7 @@ func (c *Controller) createPairing(ctx *echo.Context) error {
 		"fingerprintHash":  c.identity.FingerprintHash,
 	}, "", &remote)
 	if err != nil {
-		return respondServiceError(ctx, "license_pairing_failed", err)
+		return httpapi.UpstreamError(ctx, "license_pairing_failed", err)
 	}
 	if err := validateCreatedPairing(remote, time.Now()); err != nil {
 		return httpapi.Error(ctx, http.StatusBadGateway, "license_pairing_invalid_response", err.Error())
@@ -95,14 +95,15 @@ func (c *Controller) getPairing(ctx *echo.Context) error {
 		return httpapi.Error(ctx, http.StatusNotFound, "license_pairing_not_found", "pairing is unknown or expired")
 	}
 	var remote pairing
-	status, err := c.doJSON(ctx.Request().Context(), http.MethodGet, "/v1/license-pairings/"+url.PathEscape(id), nil, session.PollToken, &remote)
+	_, err := c.doJSON(ctx.Request().Context(), http.MethodGet, "/v1/license-pairings/"+url.PathEscape(id), nil, session.PollToken, &remote)
 	if err != nil {
-		if status == http.StatusGone || status == http.StatusNotFound {
+		var problem *serviceError
+		if errors.As(err, &problem) && pairingUnavailable(problem) {
 			c.mu.Lock()
 			delete(c.pairings, id)
 			c.mu.Unlock()
 		}
-		return respondServiceError(ctx, "license_pairing_failed", err)
+		return httpapi.UpstreamError(ctx, "license_pairing_failed", err)
 	}
 	if err := validatePolledPairing(id, remote); err != nil {
 		return httpapi.Error(ctx, http.StatusBadGateway, "license_pairing_invalid_response", err.Error())
@@ -216,10 +217,8 @@ func validatePolledPairing(id string, remote pairing) error {
 	}
 }
 
-func respondServiceError(ctx *echo.Context, fallbackCode string, err error) error {
-	var remote *serviceError
-	if errors.As(err, &remote) {
-		return httpapi.Error(ctx, remote.StatusCode, remote.ErrorCode, remote.Message)
-	}
-	return httpapi.Error(ctx, http.StatusBadGateway, fallbackCode, err.Error())
+func pairingUnavailable(remote *serviceError) bool {
+	return remote.ParseErr == nil &&
+		((remote.StatusCode == http.StatusNotFound && remote.ErrorCode == "license_pairing_not_found") ||
+			(remote.StatusCode == http.StatusGone && remote.ErrorCode == "license_pairing_expired"))
 }

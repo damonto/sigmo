@@ -1,41 +1,12 @@
-import type { ApiErrorResponse } from '@/types/api'
-
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
 
+import { createApiError, isLocalAuthenticationError, type ApiError } from './apiProblem'
 import { clearStoredToken } from './authStorage'
 import { notifyError } from './notify'
 
-export type ApiError = ApiErrorResponse & {
-  status?: number
-}
-
-export const extractErrorResponse = (data: unknown): ApiErrorResponse | null => {
-  if (typeof data === 'string' && data.trim()) {
-    try {
-      return extractErrorResponse(JSON.parse(data) as unknown)
-    } catch {
-      return null
-    }
-  }
-
-  if (data && typeof data === 'object') {
-    const record = data as Record<string, unknown>
-    if (
-      typeof record.error_code === 'string' &&
-      typeof record.message === 'string'
-    ) {
-      const response: ApiErrorResponse = {
-        error_code: record.error_code,
-        message: record.message,
-      }
-      if (typeof record.request_id === 'string') response.request_id = record.request_id
-      return response
-    }
-  }
-
-  return null
-}
+export { createApiError } from './apiProblem'
+export type { ApiError } from './apiProblem'
 
 const titleFromStatus = (status?: number) => {
   switch (status) {
@@ -99,17 +70,6 @@ const resolveErrorInfo = (error: unknown, defaultMessage: string) => {
   return { message, title, requestId }
 }
 
-export const createApiError = (response: Response, data?: unknown): ApiError => {
-  const extracted = extractErrorResponse(data)
-  const apiError: ApiError = extracted ?? {
-    error_code: 'unknown_error',
-    message: `Error ${response.status}: ${response.statusText}`,
-    request_id: response.headers.get('X-Request-ID') ?? undefined,
-  }
-  apiError.status = response.status
-  return apiError
-}
-
 /**
  * Error handler for API errors
  * Shows error messages to users
@@ -129,7 +89,7 @@ export const handleError = (error: unknown, defaultMessage = 'An error occurred'
 export const handleResponseError = (response: Response, data?: unknown) => {
   const apiError = createApiError(response, data)
 
-  if (response.status === 401) {
+  if (isLocalAuthenticationError(apiError)) {
     clearStoredToken()
   }
 

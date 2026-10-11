@@ -5,8 +5,11 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "migrate:production": "wrangler d1 migrations apply sigmo-licenses --remote",
+    "migrate:production": "wrangler d1 migrations apply sigmo --remote",
     "deploy:production": "bun run migrate:production && bun run deploy",
+    "lint": "oxlint --deny-warnings src test vitest.config.ts",
+    "format": "prettier --write src test vitest.config.ts",
+    "format:check": "prettier --check src test vitest.config.ts",
     "test": "vitest run",
     "types": "wrangler types",
     "type-check": "wrangler types --check && tsc --noEmit",
@@ -15,8 +18,14 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@types/node": "^26.6.1",
+    "oxlint": "^1.87.0",
+    "oxlint-tsgolint": "^7.0.2003",
+    "prettier": "3.9.6",
     "typescript": "~7.0.2",
     "vitest": "^4.1.11",
     "wrangler": "^4.133.0"
+  },
+  "dependencies": {
+    "hono": "^4.13.13"
   }
 }

@@ -4,10 +4,12 @@ import { useRouter } from 'vue-router'
 
 import { useMessageApi } from '@/apis/message'
 import { formatListTimestamp } from '@/lib/datetime'
+import { localizeErrorMessage } from '@/lib/errorHandler'
 import { formatPhoneDisplay, normalizeAddressSubmission } from '@/lib/phoneNumberInput'
-import type { MessageResponse } from '@/types/message'
+import type { Conversation, MessageResponse } from '@/types/message'
 
-export type ThreadMessageItem = {
+/** A message rendered by the timeline; key is the acknowledged backend ID. */
+export interface ThreadMessageItem {
   key: string
   incoming: boolean
   text: string
@@ -16,40 +18,72 @@ export type ThreadMessageItem = {
   wifiCalling: boolean
 }
 
+/** Keeps a draft and sends bound to the conversation's SIM, including inactive history. */
 export const useModemMessageThread = ({
   modemId,
   participant,
   isNewConversation,
   defaultCountry,
+  conversationId,
+  activeProfileId,
+  profileId,
 }: {
   modemId: ComputedRef<string>
   participant: ComputedRef<string>
   isNewConversation: ComputedRef<boolean>
+  activeProfileId: ComputedRef<string>
   defaultCountry?: ComputedRef<string>
+  conversationId?: ComputedRef<string>
+  profileId?: ComputedRef<string>
 }) => {
   const { t } = useI18n()
   const router = useRouter()
-  const messageApi = useMessageApi()
-
+  const api = useMessageApi()
   const threadMessages = ref<MessageResponse[]>([])
+  const conversation = ref<Conversation | null>(null)
   const isLoading = ref(false)
   const isSending = ref(false)
   const isDeleting = ref(false)
   const messageDraft = ref('')
   const newRecipient = ref('')
-
+  const error = ref('')
+  const sendError = ref('')
+  const missing = ref(false)
+  let generation = 0
+  let requestID = 0
+  let disposed = false
+  let acknowledged = 0
+  const drafts = new Map<string, string>()
+  const identity = computed(
+    () =>
+      `${modemId.value}:${conversationId?.value || profileId?.value || activeProfileId.value}:${participant.value}`,
+  )
+  const selectedProfile = computed(
+    () => conversation.value?.profileId || profileId?.value || activeProfileId.value,
+  )
+  const canSend = computed(
+    () =>
+      !missing.value &&
+      !!selectedProfile.value &&
+      selectedProfile.value === activeProfileId.value &&
+      (conversation.value?.canSend ?? true),
+  )
+  const lineLabel = computed(
+    () =>
+      conversation.value?.lineLabel ||
+      conversation.value?.lineNumber ||
+      t('modemDetail.messages.lineSuffix', { suffix: selectedProfile.value.slice(-6) }),
+  )
   const participantLabel = computed(() => {
-    if (isNewConversation.value) {
-      const value = newRecipient.value.trim()
-      return value.length > 0
-        ? formatPhoneDisplay(value, defaultCountry?.value)
-        : t('modemDetail.messages.newConversation')
-    }
-    const value = participant.value.trim()
-    if (!value) return t('modemDetail.messages.unknownParticipant')
-    return formatPhoneDisplay(value, defaultCountry?.value)
+    const value = isNewConversation.value ? newRecipient.value.trim() : participant.value.trim()
+    return value
+      ? formatPhoneDisplay(value, defaultCountry?.value)
+      : t(
+          isNewConversation.value
+            ? 'modemDetail.messages.newConversation'
+            : 'modemDetail.messages.unknownParticipant',
+        )
   })
-
   const items = computed<ThreadMessageItem[]>(() =>
     threadMessages.value.map((message) => ({
       key: String(message.id),
@@ -61,93 +95,161 @@ export const useModemMessageThread = ({
     })),
   )
 
-  const fetchThreadMessages = async (id: string, target: string, force = false) => {
-    if (isLoading.value) return
-    if (isNewConversation.value && !force) {
-      threadMessages.value = []
-      return
-    }
-    if (!target.trim()) {
-      threadMessages.value = []
-      return
-    }
+  const fetchThreadMessages = async () => {
+    if (disposed || isNewConversation.value || isSending.value) return
+    const id = modemId.value
+    if (!id || id === 'unknown' || !participant.value.trim()) return
+    const current = generation
+    const request = ++requestID
+    const target = conversationId?.value
+    const profile = selectedProfile.value
+    const remote = participant.value.trim()
     isLoading.value = true
     try {
-      const { data } = await messageApi.getMessagesByParticipant(id, target)
-      threadMessages.value = data.value ?? []
+      const { data } = await api.getConversations(target ? {} : { modemId: id, profileId: profile })
+      if (current !== generation || request !== requestID || disposed) return
+      const selected = data.value?.items.find((item) =>
+        target ? item.id === target : item.profileId === profile && item.participant === remote,
+      )
+      conversation.value = selected ?? null
+      missing.value = !!target && !selected
+      if (!selected) {
+        threadMessages.value = []
+        error.value = missing.value ? t('modemDetail.messages.deleted') : ''
+        return
+      }
+      const result = await api.getConversationMessages(selected.id)
+      if (current !== generation || request !== requestID || disposed) return
+      threadMessages.value = result.data.value ?? []
+      acknowledged = Math.max(acknowledged, selected.readThroughMessageId)
+      error.value = ''
+    } catch (err) {
+      if (current === generation && request === requestID && !disposed)
+        error.value = localizeErrorMessage(err)
     } finally {
-      isLoading.value = false
+      if (current === generation && request === requestID && !disposed) isLoading.value = false
+    }
+  }
+
+  const markDisplayed = async (id: number) => {
+    const selected = conversation.value
+    if (
+      !selected ||
+      document.visibilityState !== 'visible' ||
+      (id <= acknowledged && !selected.markedUnread)
+    )
+      return
+    if (!threadMessages.value.some((message) => message.id === id)) return
+    const current = generation
+    try {
+      await api.updateConversation(selected.id, { readThroughMessageId: id, markedUnread: false })
+      if (current !== generation || disposed) return
+      acknowledged = Math.max(acknowledged, id)
+      selected.markedUnread = false
+      window.dispatchEvent(new Event('sigmo:messages-changed'))
+    } catch {
+      /* The next visible snapshot retries this watermark. */
     }
   }
 
   const deleteThread = async () => {
-    const targetId = modemId.value
-    const targetParticipant = participant.value.trim()
-    if (!targetId || targetId === 'unknown') return
-    if (!targetParticipant) return
+    const id = conversation.value?.id
+    if (!id || isDeleting.value) return
+    const current = generation
+    const modem = modemId.value
     isDeleting.value = true
     try {
-      await messageApi.deleteMessagesByParticipant(targetId, targetParticipant)
-      await router.push({ name: 'modem-messages', params: { id: targetId } })
+      await api.deleteConversation(id)
+      if (current !== generation || disposed) return
+      drafts.delete(identity.value)
+      await router.push({ name: 'modem-messages', params: { id: modem } })
     } catch (err) {
-      console.error('[useModemMessageThread] Failed to delete messages:', err)
+      if (current === generation && !disposed) error.value = localizeErrorMessage(err)
     } finally {
-      isDeleting.value = false
+      if (current === generation && !disposed) isDeleting.value = false
     }
   }
 
   const sendMessage = async () => {
-    const targetId = modemId.value
-    if (!targetId || targetId === 'unknown') return
+    const id = modemId.value
     const target = isNewConversation.value
       ? normalizeAddressSubmission(newRecipient.value)
       : participant.value.trim()
     const text = messageDraft.value.trim()
-    if (!target || !text || isSending.value) return
-    messageDraft.value = ''
+    const profile = selectedProfile.value
+    if (!id || id === 'unknown' || !target || !text || !canSend.value || isSending.value) return
+    const current = generation
+    const creating = isNewConversation.value
     isSending.value = true
+    sendError.value = ''
     try {
-      const { data } = await messageApi.sendMessage(targetId, target, text)
+      const { data } = await api.sendMessage(id, target, text, profile)
+      if (current !== generation || disposed) return
+      messageDraft.value = ''
+      drafts.delete(identity.value)
+      isSending.value = false
       const sentTo = data.value?.to?.trim() || target
-      if (isNewConversation.value) {
+      if (creating) {
         await router.replace({
           name: 'modem-message-thread',
-          params: { id: targetId, participant: sentTo },
+          params: { id, participant: sentTo },
+          query: { conversation: data.value?.conversationId, profile },
         })
-        newRecipient.value = ''
+        if (current === generation) newRecipient.value = ''
+      } else {
+        await fetchThreadMessages()
       }
-      await fetchThreadMessages(targetId, sentTo, true)
+      window.dispatchEvent(new Event('sigmo:messages-changed'))
     } catch (err) {
-      console.error('[useModemMessageThread] Failed to send message:', err)
-    } finally {
+      if (current !== generation || disposed) return
+      const status =
+        typeof err === 'object' && err !== null && 'status' in err ? err.status : undefined
+      sendError.value =
+        typeof status === 'number' && status >= 400 && status < 500 && status !== 408
+          ? localizeErrorMessage(err)
+          : t('modemDetail.messages.resultUnknown')
       isSending.value = false
+      await fetchThreadMessages()
+    } finally {
+      if (current === generation && !disposed) isSending.value = false
     }
   }
 
   watch(
-    [modemId, participant],
-    async ([id, target]) => {
-      if (!id || id === 'unknown') return
-      await fetchThreadMessages(id, target)
+    identity,
+    (value, previous) => {
+      if (previous) drafts.set(previous, messageDraft.value)
+      generation++
+      requestID++
+      acknowledged = 0
+      threadMessages.value = []
+      conversation.value = null
+      messageDraft.value = drafts.get(value) ?? ''
+      isLoading.value = false
+      isSending.value = false
+      isDeleting.value = false
+      missing.value = false
+      error.value = ''
+      sendError.value = ''
+      void fetchThreadMessages()
     },
     { immediate: true },
   )
 
-  let refreshTimer: ReturnType<typeof setInterval> | null = null
-
+  const refreshVisible = () => {
+    if (document.visibilityState === 'visible') void fetchThreadMessages()
+  }
+  let timer: ReturnType<typeof setInterval> | undefined
   onMounted(() => {
-    refreshTimer = setInterval(() => {
-      const id = modemId.value
-      if (!id || id === 'unknown') return
-      void fetchThreadMessages(id, participant.value)
-    }, 10000)
+    timer = setInterval(refreshVisible, 10_000)
+    document.addEventListener('visibilitychange', refreshVisible)
   })
-
   onUnmounted(() => {
-    if (refreshTimer) {
-      clearInterval(refreshTimer)
-      refreshTimer = null
-    }
+    disposed = true
+    generation++
+    clearInterval(timer)
+    document.removeEventListener('visibilitychange', refreshVisible)
+    drafts.clear()
   })
 
   return {
@@ -158,7 +260,13 @@ export const useModemMessageThread = ({
     messageDraft,
     newRecipient,
     participantLabel,
+    canSend,
+    lineLabel,
+    error,
+    sendError,
+    markDisplayed,
     sendMessage,
     deleteThread,
+    fetchThreadMessages,
   }
 }

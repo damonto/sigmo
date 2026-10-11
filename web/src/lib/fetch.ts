@@ -5,6 +5,12 @@ import { detectLocale } from '@/i18n/locale'
 import router from '@/router'
 
 import { getStoredToken } from './authStorage'
+import {
+  API_ACCEPT,
+  createApiError,
+  fetchWithBoundedErrors,
+  isLocalAuthenticationError,
+} from './apiProblem'
 import { handleError, handleResponseError } from './errorHandler'
 
 const rawBaseUrl = import.meta.env.VITE_API_BASE_URL
@@ -13,6 +19,7 @@ const baseUrl =
 
 const requestHeaders = (options: RequestInit) => {
   const headers = new Headers(options.headers)
+  if (!headers.has('Accept')) headers.set('Accept', API_ACCEPT)
   const token = getStoredToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
   // The server sends notifications, such as forwarded SMS, in the language
@@ -35,6 +42,7 @@ const requestHeaders = (options: RequestInit) => {
 export const useFetch = createFetch({
   baseUrl,
   options: {
+    fetch: fetchWithBoundedErrors,
     updateDataOnError: true,
     async beforeFetch({ options }) {
       options.headers = requestHeaders(options)
@@ -51,14 +59,15 @@ export const useFetch = createFetch({
       return { response, data }
     },
 
-    onFetchError({ response, error, data }) {
+    async onFetchError({ response, error, data }) {
       if (response && response.status <= 299) {
         return { response, error, data }
       }
 
       if (response) {
-        const handledError = handleResponseError(response, data)
-        if (response.status === 401 && router.currentRoute.value.name !== 'auth') {
+        const body = await response.text().catch(() => undefined)
+        const handledError = handleResponseError(response, body)
+        if (isLocalAuthenticationError(handledError) && router.currentRoute.value.name !== 'auth') {
           router.replace({ name: 'auth' })
         }
         console.error('[API] Response error:', response.status, data)
@@ -104,12 +113,15 @@ export const fetchJson = async <T>(
 
 // Expected restart windows must not pass through the global error notifier.
 export const fetchJsonQuietly = async <T>(url: string, options: RequestInit = {}): Promise<T> => {
-  const response = await fetch(`${baseUrl}/${url.replace(/^\/+/, '')}`, {
+  const response = await fetchWithBoundedErrors(`${baseUrl}/${url.replace(/^\/+/, '')}`, {
     ...options,
     headers: requestHeaders(options),
     mode: 'cors',
   })
-  if (!response.ok) throw new Error(`request returned HTTP ${response.status}`)
+  if (!response.ok) {
+    const error = createApiError(response, await response.text())
+    throw Object.assign(new Error(error.message), error)
+  }
 
   const data = parseResponseText<T>(await response.text())
   if (data === undefined) throw new Error('request returned an empty response')

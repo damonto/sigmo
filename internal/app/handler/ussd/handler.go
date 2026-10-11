@@ -20,15 +20,6 @@ type Handler struct {
 
 const executeTimeout = time.Minute
 
-const (
-	errorCodeExecuteUSSDInvalidRequest = "execute_ussd_invalid_request"
-	errorCodeUSSDTimeout               = "ussd_timeout"
-	errorCodeInvalidAction             = "invalid_action"
-	errorCodeUSSDSessionNotReady       = "ussd_session_not_ready"
-	errorCodeUnknownSessionStatus      = "unknown_session_status"
-	errorCodeExecuteUSDDFailed         = "execute_ussd_failed"
-)
-
 var errExecuteTimeout = errors.New("ussd request timed out, please retry")
 
 func New(registry *mmodem.Registry, route pussd.Route) *Handler {
@@ -41,10 +32,10 @@ func New(registry *mmodem.Registry, route pussd.Route) *Handler {
 func (h *Handler) Execute(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeExecuteUSDDFailed)
+		return httpapi.ModemLookupError(c, err, "execute_ussd_failed")
 	}
 	var req ExecuteRequest
-	if err := httpapi.BindAndValidate(c, &req, errorCodeExecuteUSSDInvalidRequest); err != nil {
+	if err := httpapi.BindAndValidate(c, &req, "execute_ussd_invalid_request"); err != nil {
 		return err
 	}
 
@@ -54,21 +45,21 @@ func (h *Handler) Execute(c *echo.Context) error {
 	response, err := h.execute(ctx, modem, req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return httpapi.RequestTimeout(c, errorCodeUSSDTimeout, errExecuteTimeout)
+			return httpapi.RequestTimeout(c, "ussd_timeout", errExecuteTimeout)
 		}
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}
 		if errors.Is(err, pussd.ErrInvalidAction) {
-			return httpapi.BadRequest(c, errorCodeInvalidAction, err)
+			return httpapi.BadRequest(c, "invalid_action", err)
 		}
 		if errors.Is(err, pussd.ErrSessionNotReady) {
-			return httpapi.BadRequest(c, errorCodeUSSDSessionNotReady, err)
+			return httpapi.BadRequest(c, "ussd_session_not_ready", err)
 		}
 		if errors.Is(err, pussd.ErrUnknownSessionStatus) {
-			return httpapi.BadRequest(c, errorCodeUnknownSessionStatus, err)
+			return httpapi.BadRequest(c, "unknown_session_status", err)
 		}
-		return httpapi.Internal(c, errorCodeExecuteUSDDFailed, err)
+		return httpapi.Internal(c, "execute_ussd_failed", err)
 	}
 	return c.JSON(http.StatusOK, response)
 }

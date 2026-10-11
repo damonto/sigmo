@@ -14,10 +14,7 @@ import (
 	mstk "github.com/damonto/sigmo/internal/pkg/modem/stk"
 )
 
-const (
-	errorCodeSIMApplicationFailed = "sim_application_failed"
-	simAppSessionMaxRetries       = 5
-)
+const simAppSessionMaxRetries = 5
 
 var simAppSessionRetryDelay = 2 * time.Second
 
@@ -44,7 +41,7 @@ func (h *Handler) Session(c *echo.Context) error {
 	ctx := c.Request().Context()
 	device, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
-		return httpapi.ModemLookupError(c, err, errorCodeSIMApplicationFailed)
+		return httpapi.ModemLookupError(c, err, "sim_application_failed")
 	}
 
 	conn, err := simAppWSUpgrader.Upgrade(c.Response(), c.Request(), nil)

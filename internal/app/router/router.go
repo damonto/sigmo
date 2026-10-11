@@ -22,6 +22,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/handler/mcpadmin"
 	"github.com/damonto/sigmo/internal/app/handler/message"
 	hmodem "github.com/damonto/sigmo/internal/app/handler/modem"
+	hnativepush "github.com/damonto/sigmo/internal/app/handler/nativepush"
 	"github.com/damonto/sigmo/internal/app/handler/network"
 	"github.com/damonto/sigmo/internal/app/handler/notification"
 	hsettings "github.com/damonto/sigmo/internal/app/handler/settings"
@@ -115,6 +116,13 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 	protected.Use(appmiddleware.Auth(authStore, deps.Store), appmiddleware.Locale(deps.Store))
 	{
 		{
+			h := hnativepush.New(deps.Storage)
+			protected.GET("/push-subscriptions", h.List)
+			protected.POST("/push-subscriptions", h.Register)
+			protected.PATCH("/push-subscriptions/:subscriptionId", h.Update)
+			protected.DELETE("/push-subscriptions/:subscriptionId", h.Delete)
+		}
+		{
 			h := hsettings.New(deps.Store, deps.InternetConnector, deps.Relay)
 			protected.GET("/settings", h.Get)
 			protected.POST("/settings/auth-tests", h.TestAuth)
@@ -161,6 +169,10 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 
 		{
 			h := message.New(deps.Registry, deps.Storage, deps.MessageRoute)
+			protected.GET("/conversations", h.Conversations)
+			protected.GET("/conversations/:conversationId/messages", h.ConversationMessages)
+			protected.PATCH("/conversations/:conversationId", h.UpdateConversation)
+			protected.DELETE("/conversations/:conversationId", h.DeleteConversation)
 			protected.GET("/modems/:id/messages", h.List)
 			protected.GET("/modems/:id/messages/:participant", h.ListByParticipant)
 			protected.POST("/modems/:id/messages", h.Send)
@@ -203,6 +215,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 
 		{
 			h := esim.New(esim.Config{
+				Storage:   deps.Storage,
 				Store:     deps.Store,
 				Registry:  deps.Registry,
 				LPA:       deps.LPAClients,

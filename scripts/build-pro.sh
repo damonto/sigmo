@@ -139,6 +139,7 @@ build_target() {
 	ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Distribution=standalone"
 	ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.ReleasePublicKey=${SIGMO_RELEASE_PUBLIC_KEY}"
 	ldflags+=" -X github.com/damonto/sigmo/pro/license.WorkerURL=${SIGMO_PRO_WORKER_URL}"
+	ldflags+=" -X github.com/damonto/sigmo/internal/pkg/nativepush.GatewayURL=${SIGMO_PUSH_GATEWAY_URL:-https://sigmo-pro-api.id.workers.dev}"
 	ldflags+=" -X github.com/damonto/sigmo/pro/license.LicensePublicKey=${SIGMO_LICENSE_PUBLIC_KEY}"
 	if [ "${musl}" = "1" ]; then
 		interpreter="$(musl_interpreter "${goarch}")"

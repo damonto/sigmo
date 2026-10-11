@@ -13,9 +13,7 @@ export const useLicenseStore = defineStore('license', () => {
   const checking = ref(false)
   let currentCheck: Promise<boolean> | undefined
 
-  const businessEnabled = computed(
-    () => mode.value === 'community' || mode.value === 'authorized',
-  )
+  const businessEnabled = computed(() => mode.value === 'community' || mode.value === 'authorized')
   const activationRequired = computed(() => mode.value === 'activation')
   const unavailable = computed(() => mode.value === 'unavailable')
 
@@ -28,14 +26,14 @@ export const useLicenseStore = defineStore('license', () => {
     try {
       const api = useLicenseApi()
       const response = await api.status()
-      if (response.status === 404) {
-        mode.value = 'community'
-        deviceId.value = ''
-        clearError()
-        return true
-      }
       if (!response.ok) {
         const error = await api.decodeError(response)
+        if (error.status === 404 && error.error_code === 'resource_not_found') {
+          mode.value = 'community'
+          deviceId.value = ''
+          clearError()
+          return true
+        }
         mode.value = 'unavailable'
         errorCode.value = error.error_code
         errorMessage.value = error.message
@@ -52,8 +50,7 @@ export const useLicenseStore = defineStore('license', () => {
         error && typeof error === 'object' && 'error_code' in error
           ? String(error.error_code)
           : 'license_status_unavailable'
-      errorMessage.value =
-        error instanceof Error ? error.message : 'license status is unavailable'
+      errorMessage.value = error instanceof Error ? error.message : 'license status is unavailable'
       return false
     }
   }

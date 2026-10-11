@@ -400,6 +400,11 @@ func TestRunPublishesDTMFWithoutSavingCall(t *testing.T) {
 				t.Fatalf("SaveCall() error = %v", err)
 			}
 			dtmf := &pims.VoiceDTMF{Digit: "5", At: at.Add(time.Second)}
+			snapshot, err := store.Call(ctx, stored.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored = snapshot
 			subscriber(pims.VoiceEvent{Call: voiceCall, DTMF: dtmf})
 			voiceCall.ID = "unpersisted-call"
 			subscriber(pims.VoiceEvent{Call: voiceCall, DTMF: dtmf})

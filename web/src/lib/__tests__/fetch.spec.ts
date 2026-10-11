@@ -25,28 +25,19 @@ vi.mock('@/lib/notify', () => ({
 }))
 
 import { fetchJson, fetchJsonQuietly } from '@/lib/fetch'
-
-const apiError = {
-  error_code: 'boom',
-  message: 'request rejected',
-  request_id: 'req-1',
-}
+import { getStoredToken, setStoredToken } from '@/lib/authStorage'
+import { problemResponse } from './httpProblem'
 
 describe('useFetch global error handling', () => {
   beforeEach(() => {
     notifyHarness.error.mockReset()
     routerHarness.replace.mockReset()
     routerHarness.routeName = 'home'
+    localStorage.clear()
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify(apiError), {
-          status: 500,
-          statusText: 'Internal Server Error',
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      ),
+      vi.fn().mockResolvedValue(problemResponse(500, 'remote_error', 'request rejected')),
     )
   })
 
@@ -58,19 +49,15 @@ describe('useFetch global error handling', () => {
   it('shows API errors as a non-blocking global toast', async () => {
     await expect(fetchJson('modems/1/ussd')).rejects.toThrow('request rejected')
 
-    expect(notifyHarness.error).toHaveBeenCalledWith('Server Error', 'request rejected')
+    expect(notifyHarness.error).toHaveBeenCalledWith(
+      'Server Error',
+      'The server could not complete the request.',
+    )
   })
 
   it('does not show a global toast when the active SIM has no eUICC application', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          error_code: 'euicc_not_supported',
-          message: 'no supported ISD-R AID found',
-          request_id: 'req-2',
-        }),
-        { status: 404, statusText: 'Not Found' },
-      ),
+      problemResponse(404, 'euicc_not_supported', 'no supported ISD-R AID found', 'req-2'),
     )
 
     await expect(fetchJson('modems/1/esims')).rejects.toThrow('no supported ISD-R AID found')
@@ -80,7 +67,7 @@ describe('useFetch global error handling', () => {
 
   it('keeps expected restart errors out of the global notifier', async () => {
     await expect(fetchJsonQuietly('update-installations/current')).rejects.toThrow(
-      'request returned HTTP 500',
+      'request rejected',
     )
 
     expect(notifyHarness.error).not.toHaveBeenCalled()
@@ -88,13 +75,7 @@ describe('useFetch global error handling', () => {
 
   it('localizes Worker errors without requiring a request ID', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          error_code: 'license_entitlement_inactive',
-          message: 'authorization revoked or expired',
-        }),
-        { status: 403, statusText: 'Forbidden' },
-      ),
+      problemResponse(403, 'license_entitlement_inactive', 'authorization revoked or expired', ''),
     )
 
     await expect(fetchJson('settings/updates')).rejects.toThrow('authorization revoked or expired')
@@ -123,5 +104,34 @@ describe('useFetch global error handling', () => {
     const { data } = await fetchJson<void>('modems/1/messages/+1', { method: 'DELETE' })
 
     expect(data.value).toBeUndefined()
+  })
+
+  it.each([
+    [401, 'invalid_token', true],
+    [401, 'invalid_otp', false],
+    [401, 'license_lease_expired', false],
+    [503, 'invalid_token', false],
+  ] as const)(
+    'changes login only for a local token failure: %s %s',
+    async (status, code, logout) => {
+      setStoredToken('login-token')
+      vi.mocked(fetch).mockResolvedValueOnce(problemResponse(status, code, 'rejected'))
+      await expect(fetchJson('modems')).rejects.toMatchObject({ status, error_code: code })
+      expect(getStoredToken()).toBe(logout ? null : 'login-token')
+      expect(routerHarness.replace).toHaveBeenCalledTimes(logout ? 1 : 0)
+    },
+  )
+
+  it('preserves login after an unrecognized proxy 401', async () => {
+    setStoredToken('login-token')
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response('<html>login</html>', { status: 401, headers: { 'Content-Type': 'text/html' } }),
+    )
+    await expect(fetchJson('modems')).rejects.toMatchObject({
+      status: 401,
+      error_code: 'unknown_error',
+    })
+    expect(getStoredToken()).toBe('login-token')
+    expect(routerHarness.replace).not.toHaveBeenCalled()
   })
 })

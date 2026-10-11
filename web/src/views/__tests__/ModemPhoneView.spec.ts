@@ -343,7 +343,7 @@ describe('ModemPhoneView phone interactions', () => {
     await callButton(wrapper)?.trigger('click')
     await flushPromises()
 
-    expect(phoneHarness.dial).toHaveBeenCalledWith('+12242255559')
+    expect(phoneHarness.dial).toHaveBeenCalledWith('+12242255559', 'auto', expect.any(String))
   })
 
   it('renders search and uses a search empty state', async () => {
@@ -452,7 +452,7 @@ describe('ModemPhoneView phone interactions', () => {
       ?.trigger('click')
     await flushPromises()
 
-    expect(phoneHarness.dial).toHaveBeenCalledWith('+12242255559')
+    expect(phoneHarness.dial).toHaveBeenCalledWith('+12242255559', 'auto', expect.any(String))
   })
 
   it('shows immediate loading feedback when calling back from recent records', async () => {
@@ -481,7 +481,7 @@ describe('ModemPhoneView phone interactions', () => {
 
     await button?.trigger('click')
 
-    expect(phoneHarness.dial).toHaveBeenCalledWith('+12242255559')
+    expect(phoneHarness.dial).toHaveBeenCalledWith('+12242255559', 'auto', expect.any(String))
     expect(button?.attributes('aria-busy')).toBe('true')
     expect(button?.attributes('disabled')).toBeDefined()
 
@@ -594,7 +594,7 @@ describe('ModemPhoneView phone interactions', () => {
     await flushPromises()
 
     expect(callAudioHarness.prepare).toHaveBeenCalled()
-    expect(phoneHarness.dial).toHaveBeenCalledWith('12')
+    expect(phoneHarness.dial).toHaveBeenCalledWith('12', 'auto', expect.any(String))
   })
 
   it('starts dialing even when browser audio preparation fails', async () => {
@@ -616,7 +616,7 @@ describe('ModemPhoneView phone interactions', () => {
     await flushPromises()
 
     expect(callAudioHarness.prepare).toHaveBeenCalled()
-    expect(phoneHarness.dial).toHaveBeenCalledWith('12')
+    expect(phoneHarness.dial).toHaveBeenCalledWith('12', 'auto', expect.any(String))
   })
 
   it('does not prepare outgoing audio when Wi-Fi Calling is disconnected', async () => {
@@ -630,7 +630,7 @@ describe('ModemPhoneView phone interactions', () => {
     await flushPromises()
 
     expect(callAudioHarness.prepare).not.toHaveBeenCalled()
-    expect(phoneHarness.dial).toHaveBeenCalledWith('12')
+    expect(phoneHarness.dial).toHaveBeenCalledWith('12', 'auto', expect.any(String))
   })
 
   it('prepares outgoing audio when VoLTE is enabled', async () => {
@@ -649,7 +649,7 @@ describe('ModemPhoneView phone interactions', () => {
     await flushPromises()
 
     expect(callAudioHarness.prepare).toHaveBeenCalled()
-    expect(phoneHarness.dial).toHaveBeenCalledWith('12')
+    expect(phoneHarness.dial).toHaveBeenCalledWith('12', 'auto', expect.any(String))
   })
 
   it('does not request VoLTE without the Pro capability', async () => {
@@ -688,7 +688,7 @@ describe('ModemPhoneView phone interactions', () => {
     await callButton(wrapper)?.trigger('click')
 
     expect(callAudioHarness.prepare).toHaveBeenCalled()
-    expect(phoneHarness.dial).toHaveBeenCalledWith('12')
+    expect(phoneHarness.dial).toHaveBeenCalledWith('12', 'auto', expect.any(String))
     expect(wrapper.findAll('input[type="tel"]')).toHaveLength(1)
     resolvePrepare(true)
     pendingDial.resolve(null)

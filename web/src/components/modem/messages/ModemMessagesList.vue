@@ -12,10 +12,12 @@ const props = defineProps<{
   isLoading: boolean
   emptyLabel?: string
   selectedParticipant?: string
+  selectedConversation?: string
 }>()
 
 const emit = defineEmits<{
   (event: 'delete', item: ConversationItem): void
+  (event: 'mark', item: ConversationItem): void
 }>()
 
 const { t } = useI18n()
@@ -26,16 +28,24 @@ const emptyStateLabel = computed(() => props.emptyLabel || t('modemDetail.messag
 
 <template>
   <section class="space-y-3">
-    <ModemMessagesSkeletonList v-if="props.isLoading" />
+    <ModemMessagesSkeletonList v-if="props.isLoading && !hasItems" />
 
-    <div v-else-if="hasItems" class="space-y-3">
+    <div
+      v-else-if="hasItems"
+      class="space-y-3"
+    >
       <ModemMessagesItem
         v-for="item in props.items"
         :key="item.key"
         :item="item"
         :modem-id="props.modemId"
-        :selected="item.participantValue === props.selectedParticipant"
+        :selected="
+          props.selectedConversation
+            ? item.key === props.selectedConversation
+            : item.participantValue === props.selectedParticipant
+        "
         @delete="emit('delete', $event)"
+        @mark="emit('mark', $event)"
       />
     </div>
 

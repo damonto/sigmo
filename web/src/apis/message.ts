@@ -1,6 +1,20 @@
 import { fetchJson } from '@/lib/fetch'
 
-import type { MessagesResponse, SendMessageResponse } from '@/types/message'
+import type {
+  ConversationRead,
+  ConversationsResponse,
+  MessageState,
+  MessagesResponse,
+  SendMessageResponse,
+} from '@/types/message'
+
+/** History filters do not require the selected SIM to be enabled. */
+export interface ConversationFilter {
+  modemId?: string
+  profileId?: string
+  q?: string
+  unassigned?: boolean
+}
 
 const messagesPath = (id: string, query?: string) => {
   const path = `modems/${id}/messages`
@@ -30,17 +44,42 @@ export const useMessageApi = () => {
     })
   }
 
-  const sendMessage = (id: string, to: string, text: string) => {
+  const sendMessage = (id: string, to: string, text: string, expectedProfileId?: string) => {
     return fetchJson<SendMessageResponse>(`modems/${id}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ to, text }),
+      body: JSON.stringify({ to, text, expectedProfileId }),
     })
   }
+
+  const getConversations = (filter: ConversationFilter = {}) => {
+    const query = new URLSearchParams()
+    if (filter.modemId) query.set('modemId', filter.modemId)
+    if (filter.profileId) query.set('profileId', filter.profileId)
+    if (filter.q?.trim()) query.set('q', filter.q.trim())
+    if (filter.unassigned) query.set('unassigned', 'true')
+    return fetchJson<ConversationsResponse>(`conversations?${query}`)
+  }
+
+  const getConversationMessages = (id: string) =>
+    fetchJson<MessagesResponse>(`conversations/${encodeURIComponent(id)}/messages`)
+
+  const updateConversation = (id: string, update: ConversationRead) =>
+    fetchJson<MessageState>(`conversations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(update),
+    })
+
+  const deleteConversation = (id: string) =>
+    fetchJson<void>(`conversations/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
   return {
     getMessages,
     getMessagesByParticipant,
     deleteMessagesByParticipant,
     sendMessage,
+    getConversations,
+    getConversationMessages,
+    updateConversation,
+    deleteConversation,
   }
 }

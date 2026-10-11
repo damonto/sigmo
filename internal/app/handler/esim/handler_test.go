@@ -33,13 +33,13 @@ func TestEnablePrepareError(t *testing.T) {
 			name:       "profile not found is bad request",
 			err:        errProfileNotFound,
 			wantStatus: http.StatusBadRequest,
-			wantBody:   errorCodeESIMProfileNotFound,
+			wantBody:   "esim_profile_not_found",
 		},
 		{
 			name:       "internal error",
 			err:        errors.New("lpa unavailable"),
 			wantStatus: http.StatusInternalServerError,
-			wantBody:   errorCodeEnableESIMFailed,
+			wantBody:   "enable_esim_failed",
 		},
 	}
 
@@ -79,19 +79,19 @@ func TestEnableError(t *testing.T) {
 			name:       "deadline exceeded maps to request timeout",
 			err:        context.DeadlineExceeded,
 			wantStatus: http.StatusRequestTimeout,
-			wantBody:   errorCodeEnableESIMTimeout,
+			wantBody:   "esim_enable_timeout",
 		},
 		{
 			name:       "internal error",
 			err:        errors.New("enable failed"),
 			wantStatus: http.StatusInternalServerError,
-			wantBody:   errorCodeEnableESIMFailed,
+			wantBody:   "enable_esim_failed",
 		},
 		{
 			name:       "cat busy maps to conflict",
 			err:        sgp22.ErrCatBusy,
 			wantStatus: http.StatusConflict,
-			wantBody:   errorCodeEnableESIMBusy,
+			wantBody:   "esim_enable_busy",
 		},
 	}
 

@@ -40,6 +40,8 @@ export type ModemApiResponse = {
   internetConnected?: boolean
   wifiCallingEnabled?: boolean
   wifiCallingConnected?: boolean
+  volteEnabled?: boolean
+  volteConnected?: boolean
 }
 
 export type ModemListResponse = ModemApiResponse[]

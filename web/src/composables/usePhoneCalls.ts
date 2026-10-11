@@ -2,6 +2,7 @@ import { computed, onBeforeUnmount, ref, watch, type ComputedRef, type Ref } fro
 
 import { buildCallEventsUrl, useCallApi } from '@/apis/call'
 import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
+import { callClientId, callInUseElsewhere } from '@/lib/callClient'
 import { hasWebPushSubscription } from '@/lib/webPush'
 import type { CallEventMessage, CallRecord, CallRoute } from '@/types/call'
 
@@ -27,6 +28,13 @@ const mergeCall = (items: CallRecord[], call: CallRecord) => {
   if (index === -1) {
     return [call, ...items]
   }
+  const previous = items[index]
+  if (
+    previous &&
+    ((terminalStates.has(previous.state) && !terminalStates.has(call.state)) ||
+      Date.parse(previous.updatedAt) > Date.parse(call.updatedAt))
+  )
+    return items
   const next = items.slice()
   next[index] = call
   return next.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
@@ -51,15 +59,19 @@ export const usePhoneCalls = (
   let eventReconnectTimer: number | null = null
   let eventReconnectAttempt = 0
   let loadRequestID = 0
+  let connectionRevision = 0
   let dtmfQueue = Promise.resolve()
   const incomingNotifications = new Map<string, Notification>()
+  const endedCalls = new Map<string, CallRecord>()
 
   const recentCalls = computed(() => calls.value)
   const hasRecentCalls = computed(() => recentCalls.value.length > 0)
   const incomingCall = computed(
     () =>
-      liveCalls.value.find((call) => call.state === 'ringing' && call.direction === 'incoming') ??
-      null,
+      liveCalls.value.find(
+        (call) =>
+          call.state === 'ringing' && call.direction === 'incoming' && !callInUseElsewhere(call),
+      ) ?? null,
   )
   const activeCall = computed(
     () =>
@@ -177,7 +189,6 @@ export const usePhoneCalls = (
       incomingNotifications.set(call.callID, notification)
       notification.onclick = () => {
         window.focus()
-        liveCalls.value = mergeCall(liveCalls.value, call)
       }
       notification.onclose = () => {
         incomingNotifications.delete(call.callID)
@@ -189,18 +200,36 @@ export const usePhoneCalls = (
 
   const setCallState = (call: CallRecord) => {
     call = normalizeCall(call)
+    const previous =
+      endedCalls.get(call.callID) ?? liveCalls.value.find((item) => item.callID === call.callID)
+    if (
+      previous &&
+      ((terminalStates.has(previous.state) && !terminalStates.has(call.state)) ||
+        Date.parse(previous.updatedAt) > Date.parse(call.updatedAt))
+    )
+      return
+    if (terminalStates.has(call.state)) {
+      endedCalls.set(call.callID, call)
+      if (endedCalls.size > 1000) {
+        const oldest = endedCalls.keys().next().value
+        if (oldest) endedCalls.delete(oldest)
+      }
+    }
     const previousIncoming = incomingCall.value
     const previousActive = activeCall.value
     calls.value = callMatchesSearch(call)
       ? mergeCall(calls.value, call)
       : calls.value.filter((item) => item.callID !== call.callID)
     liveCalls.value = mergeCall(liveCalls.value, call)
-    if (call.state === 'ringing' && call.direction === 'incoming') {
+    if (call.state === 'ringing' && call.direction === 'incoming' && !callInUseElsewhere(call)) {
       startRing()
       maybeNotifyIncoming(call)
       return
     }
-    if (previousIncoming?.callID === call.callID && call.state !== 'ringing') {
+    if (
+      previousIncoming?.callID === call.callID &&
+      (call.state !== 'ringing' || callInUseElsewhere(call))
+    ) {
       stopRing()
       closeIncomingNotification(call.callID)
     }
@@ -211,7 +240,18 @@ export const usePhoneCalls = (
   }
 
   const seedLiveCalls = (items: CallRecord[]) => {
-    liveCalls.value = items
+    liveCalls.value = items.map((call) => {
+      const old =
+        endedCalls.get(call.callID) ?? liveCalls.value.find((item) => item.callID === call.callID)
+      if (
+        old &&
+        ((terminalStates.has(old.state) && !terminalStates.has(call.state)) ||
+          Date.parse(old.updatedAt) > Date.parse(call.updatedAt))
+      )
+        return old
+      if (terminalStates.has(call.state)) endedCalls.set(call.callID, call)
+      return call
+    })
     const ringingCall = incomingCall.value
     if (ringingCall) {
       startRing()
@@ -264,6 +304,7 @@ export const usePhoneCalls = (
     const conn = new WebSocket(buildCallEventsUrl(id))
     ws = conn
     conn.onopen = () => {
+      if (eventReconnectAttempt > 0) void loadCalls()
       eventReconnectAttempt = 0
     }
     conn.onmessage = (event) => {
@@ -285,84 +326,129 @@ export const usePhoneCalls = (
     }
   }
 
-  const dial = async (number: string, route: CallRoute = 'auto') => {
+  const dial = async (number: string, route: CallRoute = 'auto', expectedProfileId?: string) => {
     const id = modemId.value
-    if (!id || id === 'unknown') return null
+    if (!id || id === 'unknown' || isDialing.value) return null
+    const revision = connectionRevision
     isDialing.value = true
     errorMessage.value = ''
     try {
-      const { data } = await callApi.dialCall(id, { to: number, route })
+      const { data } = await callApi.dialCall(id, {
+        to: number,
+        route,
+        ...(expectedProfileId ? { expectedProfileId } : {}),
+      })
+      if (revision !== connectionRevision) return null
       if (data.value) {
         setCallState(data.value)
       }
       return data.value ?? null
     } catch (err) {
+      if (revision !== connectionRevision) return null
       errorMessage.value = err instanceof Error ? err.message : 'Dial failed'
+      // A lost HTTP response may hide an accepted dial. Reconcile, never replay.
+      try {
+        const { data } = await callApi.listCalls(id)
+        if (revision !== connectionRevision) return null
+        const accepted = data.value?.find(
+          (call) =>
+            call.ownerClientId === callClientId() &&
+            call.number === number &&
+            !terminalStates.has(call.state),
+        )
+        if (accepted) {
+          setCallState(accepted)
+          errorMessage.value = ''
+          return accepted
+        }
+      } catch {
+        /* Keep the original uncertain result visible. */
+      }
       return null
     } finally {
-      isDialing.value = false
+      if (revision === connectionRevision) isDialing.value = false
     }
   }
 
   const answer = async (call: CallRecord) => {
+    if (callInUseElsewhere(call)) return
     const id = modemId.value
     if (!id || id === 'unknown') return
+    const revision = connectionRevision
     stopRing()
     errorMessage.value = ''
     try {
       const { data } = await callApi.answerCall(id, call.callID)
+      if (revision !== connectionRevision) return
       if (data.value) setCallState(data.value)
     } catch (err) {
+      if (revision !== connectionRevision) return
       errorMessage.value = err instanceof Error ? err.message : 'Answer failed'
     }
   }
 
   const reject = async (call: CallRecord) => {
+    if (callInUseElsewhere(call)) return
     const id = modemId.value
     if (!id || id === 'unknown') return
+    const revision = connectionRevision
     stopRing()
     errorMessage.value = ''
     try {
       const { data } = await callApi.rejectCall(id, call.callID)
+      if (revision !== connectionRevision) return
       if (data.value) setCallState(data.value)
     } catch (err) {
+      if (revision !== connectionRevision) return
       errorMessage.value = err instanceof Error ? err.message : 'Reject failed'
     }
   }
 
   const hangup = async (call: CallRecord) => {
+    if (callInUseElsewhere(call)) return
     const id = modemId.value
     if (!id || id === 'unknown') return
+    const revision = connectionRevision
     stopRing()
     errorMessage.value = ''
     try {
       const { data } = await callApi.hangupCall(id, call.callID)
+      if (revision !== connectionRevision) return
       if (data.value) setCallState(data.value)
     } catch (err) {
+      if (revision !== connectionRevision) return
       errorMessage.value = err instanceof Error ? err.message : 'Hang up failed'
     }
   }
 
   const hold = async (call: CallRecord) => {
+    if (callInUseElsewhere(call)) return
     const id = modemId.value
     if (!id || id === 'unknown') return
+    const revision = connectionRevision
     errorMessage.value = ''
     try {
       const { data } = await callApi.holdCall(id, call.callID)
+      if (revision !== connectionRevision) return
       if (data.value) setCallState(data.value)
     } catch (err) {
+      if (revision !== connectionRevision) return
       errorMessage.value = err instanceof Error ? err.message : 'Hold failed'
     }
   }
 
   const resume = async (call: CallRecord) => {
+    if (callInUseElsewhere(call)) return
     const id = modemId.value
     if (!id || id === 'unknown') return
+    const revision = connectionRevision
     errorMessage.value = ''
     try {
       const { data } = await callApi.resumeCall(id, call.callID)
+      if (revision !== connectionRevision) return
       if (data.value) setCallState(data.value)
     } catch (err) {
+      if (revision !== connectionRevision) return
       errorMessage.value = err instanceof Error ? err.message : 'Resume failed'
     }
   }
@@ -376,19 +462,28 @@ export const usePhoneCalls = (
   }
 
   const sendDTMF = (call: CallRecord, digits: string) => {
+    if (callInUseElsewhere(call)) return Promise.resolve(false)
     const id = modemId.value
     if (!id || id === 'unknown') return Promise.resolve(false)
     const callID = call.callID
-    const task = dtmfQueue.catch(() => undefined).then(async () => {
-      errorMessage.value = ''
-      try {
-        await callApi.sendDTMF(id, callID, { digits })
-        return true
-      } catch (err) {
-        errorMessage.value = err instanceof Error ? err.message : 'DTMF failed'
-        return false
-      }
-    })
+    const revision = connectionRevision
+    const task = dtmfQueue
+      .catch(() => undefined)
+      .then(async () => {
+        if (revision !== connectionRevision || endedCalls.has(callID)) return false
+        const current = liveCalls.value.find((item) => item.callID === callID)
+        if (current && (callInUseElsewhere(current) || (current.hold && current.hold !== 'none')))
+          return false
+        errorMessage.value = ''
+        try {
+          await callApi.sendDTMF(id, callID, { digits })
+          return revision === connectionRevision
+        } catch (err) {
+          if (revision !== connectionRevision) return false
+          errorMessage.value = err instanceof Error ? err.message : 'DTMF failed'
+          return false
+        }
+      })
     dtmfQueue = task.then(
       () => undefined,
       () => undefined,
@@ -399,11 +494,13 @@ export const usePhoneCalls = (
   const deleteRecord = async (call: CallRecord) => {
     const id = modemId.value
     if (!id || id === 'unknown' || isDeletingCallID.value) return false
+    const revision = connectionRevision
     isDeletingCallID.value = call.callID
     errorMessage.value = ''
     try {
       const wasIncoming = incomingCall.value?.callID === call.callID
       await callApi.deleteCall(id, call.callID)
+      if (revision !== connectionRevision) return false
       calls.value = calls.value.filter((item) => item.callID !== call.callID)
       liveCalls.value = liveCalls.value.filter((item) => item.callID !== call.callID)
       if (wasIncoming) {
@@ -412,20 +509,30 @@ export const usePhoneCalls = (
       }
       return true
     } catch (err) {
+      if (revision !== connectionRevision) return false
       errorMessage.value = err instanceof Error ? err.message : 'Delete failed'
       return false
     } finally {
-      isDeletingCallID.value = ''
+      if (revision === connectionRevision) isDeletingCallID.value = ''
     }
   }
 
   watch(
     modemId,
     () => {
+      connectionRevision++
+      loadRequestID++
+      isLoading.value = false
+      isDialing.value = false
+      isDeletingCallID.value = ''
+      errorMessage.value = ''
+      dtmfQueue = Promise.resolve()
       calls.value = []
       liveCalls.value = []
+      endedCalls.clear()
       stopRing()
       closeIncomingNotifications()
+      closeEvents()
       void loadCalls()
       openEvents()
     },
@@ -441,6 +548,8 @@ export const usePhoneCalls = (
   )
 
   onBeforeUnmount(() => {
+    connectionRevision++
+    loadRequestID++
     closeEvents()
     stopRing()
     closeIncomingNotifications()
