@@ -628,7 +628,7 @@ final class BackendFlowTests: XCTestCase {
     private func isExpectedNameTruncation(_ issue: XCUIAccessibilityAuditIssue) -> Bool {
         // Compact list text and navigation titles truncate visually; VoiceOver retains full labels.
         guard issue.auditType == .textClipped, let id = issue.element?.identifier else { return false }
-        return id == "detailModemTitle" || ["modemCarrier-", "modemBackend-"].contains { id.hasPrefix($0) }
+        return id == "detailModemTitle" || ["modemCarrier-", "modemBackend-", "modemName-"].contains { id.hasPrefix($0) }
     }
 
     private func attachScreenshot(_ app: XCUIApplication) {

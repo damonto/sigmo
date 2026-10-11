@@ -17,6 +17,7 @@ struct ModemRow: View {
                 number
                 HStack(spacing: 6) {
                     backendBadge
+                    modemBadge
                     simBadge.fixedSize()
                     Spacer(minLength: 4)
                     if unreadCount > 0 {
@@ -79,6 +80,12 @@ struct ModemRow: View {
 
     private var backendBadge: some View {
         tag(backendName).accessibilityIdentifier("modemBackend-\(identity)")
+    }
+
+    private var modemBadge: some View {
+        tag(modem.displayName)
+            .truncationMode(.tail)
+            .accessibilityIdentifier("modemName-\(identity)")
     }
 
     private func tag(_ title: String) -> some View {
