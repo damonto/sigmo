@@ -31,6 +31,10 @@ type Modem struct {
 	networkState   atomic.Uint64
 	onFailure      func(error)
 	onSIMChange    func(uint32, string)
+	onNumberChange func()
+	numberNotifyMu sync.Mutex
+	notifiedSIM    SIMIdentity
+	notifiedNumber string
 	deviceSessions deviceSessionStore
 	runtimeMu      sync.RWMutex
 	simRefreshMu   sync.Mutex

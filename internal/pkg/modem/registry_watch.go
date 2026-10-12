@@ -366,16 +366,36 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 
 func (r *Registry) watchModem(ctx context.Context, modem *Modem) {
 	r.trackSIMIdentity(modem)
-	modem.startRuntimeWatchers(ctx, func(err error) {
-		if r.failures == nil {
-			return
-		}
-		select {
-		case r.failures <- modemFailure{modem: modem, err: err}:
-		case <-ctx.Done():
-		}
-	}, func(previousSlot uint32, previousIdentifier string) {
-		r.publishSIMChanged(modem, previousSlot, previousIdentifier)
+	modem.startRuntimeWatchers(ctx, runtimeCallbacks{
+		onFailure: func(err error) {
+			if r.failures == nil {
+				return
+			}
+			select {
+			case r.failures <- modemFailure{modem: modem, err: err}:
+			case <-ctx.Done():
+			}
+		},
+		onSIMChange: func(previousSlot uint32, previousIdentifier string) {
+			r.publishSIMChanged(modem, previousSlot, previousIdentifier)
+		},
+		onNumberChange: func() {
+			r.publishNumberChanged(modem)
+		},
+	})
+}
+
+func (r *Registry) publishNumberChanged(current *Modem) {
+	r.mu.RLock()
+	path := r.keyForModemLocked(current)
+	if path == "" || r.closed {
+		r.mu.RUnlock()
+		return
+	}
+	subscribers := append([]subscription(nil), r.subs...)
+	r.mu.RUnlock()
+	r.publish(subscribers, ModemEvent{
+		Type: ModemEventNumberChanged, Modem: current, Path: path, Generation: current.Generation(),
 	})
 }
 

@@ -44,6 +44,7 @@ export const useModemDetail = () => {
       seEid: profile.seEid,
       name: profile.name,
       iccid: profile.iccid,
+      number: profile.number?.trim() ?? '',
       isdPAID: profile.isdPAID,
       enabled: profile.profileState === 1,
       serviceProviderName: profile.serviceProviderName,

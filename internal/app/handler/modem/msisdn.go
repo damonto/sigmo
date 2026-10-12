@@ -52,6 +52,10 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 	if !msisdnPhoneRE.MatchString(number) {
 		return errMSISDNInvalidNumber
 	}
+	identity := modem.Snapshot().SIMIdentity
+	if identity.ICCID == "" {
+		return mmodem.ErrProfileIDMissing
+	}
 	device, err := m.openDevice(modem)
 	if err != nil {
 		return fmt.Errorf("open modem device: %w", err)
@@ -64,11 +68,10 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 		return fmt.Errorf("update MSISDN: %w", err)
 	}
 
-	snapshot := modem.Snapshot()
-	target := mmodem.SIMTarget{Slot: snapshot.PrimarySIMSlot}
-	if snapshot.SIM != nil {
-		target.ICCID = snapshot.SIM.Identifier
+	if !modem.SetNumber(identity, number) {
+		return errors.New("update MSISDN: SIM activation changed")
 	}
+	target := mmodem.SIMTarget{Slot: identity.Slot, ICCID: identity.ICCID}
 	if _, err := m.refreshSIMAndWait(ctx, modem, target); err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("wait for modem: %w", err)

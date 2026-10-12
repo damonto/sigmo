@@ -14,7 +14,9 @@ type ProfileGroupResponse struct {
 	Profiles []ProfileResponse `json:"profiles" jsonschema:"profiles installed on this secure element"`
 }
 
+// ProfileResponse combines installed eSIM metadata with the last known number for its ICCID.
 type ProfileResponse struct {
+	Number              string               `json:"number" jsonschema:"last known phone number for this ICCID; empty when unknown"`
 	SEID                string               `json:"seId" jsonschema:"secure-element identifier containing this profile"`
 	SELabel             string               `json:"seLabel" jsonschema:"human-readable label of the containing secure element"`
 	EID                 string               `json:"seEid" jsonschema:"EID of the containing eUICC; empty when unavailable"`

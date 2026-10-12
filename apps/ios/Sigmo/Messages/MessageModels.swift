@@ -27,9 +27,15 @@ struct SMSConversation: Codable, Identifiable, Hashable, Sendable {
     let canSend: Bool
     var lastMessageId: Int64?
 
-    var lineDescription: String {
+    @MainActor func participantLabel(regionCode: String?) -> String {
+        let value = PhoneNumberDisplay.format(participant, regionCode: regionCode)
+        return value.isEmpty ? String(localized: "messages.unknownSender") : value
+    }
+
+    @MainActor func lineDescription(regionCode: String?) -> String {
         if !lineLabel.isEmpty { return lineLabel }
-        if !lineNumber.isEmpty { return lineNumber }
+        let number = PhoneNumberDisplay.format(lineNumber, regionCode: regionCode)
+        if !number.isEmpty { return number }
         return String(format: String(localized: "messages.lineSuffix"), String(profileId.suffix(6)))
     }
 

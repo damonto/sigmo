@@ -54,14 +54,6 @@ type ReadUpdate struct {
 	MarkedUnread         *bool  `json:"markedUnread,omitempty"`
 }
 
-// MessageLine records confirmed SIM ownership; empty metadata never erases known values.
-type MessageLine struct {
-	ProfileID string
-	ModemID   string
-	Label     string
-	Number    string
-}
-
 // ErrInvalidReadUpdate indicates an acknowledgment outside the selected conversation.
 var ErrInvalidReadUpdate = errors.New("invalid conversation read update")
 
@@ -77,17 +69,14 @@ func (s *Store) migrateConversations(ctx context.Context) error {
 		return fmt.Errorf("begin conversation migration: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }() // A committed transaction has nothing to roll back.
+	if err := migrateSIMProfiles(ctx, tx); err != nil {
+		return err
+	}
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS message_state (
 			id INTEGER PRIMARY KEY CHECK(id = 1),
 			backend_id TEXT NOT NULL,
 			revision INTEGER NOT NULL DEFAULT 0
-		)`,
-		`CREATE TABLE IF NOT EXISTS message_lines (
-			profile_id TEXT PRIMARY KEY,
-			modem_id TEXT NOT NULL DEFAULT '',
-			label TEXT NOT NULL DEFAULT '',
-			number TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS conversations (
 			id TEXT PRIMARY KEY,
@@ -140,16 +129,19 @@ func (s *Store) migrateConversations(ctx context.Context) error {
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO message_lines (profile_id, modem_id)
+			INSERT OR IGNORE INTO sim_profiles (profile_id, modem_id)
 			SELECT profile_id, CASE WHEN COUNT(DISTINCT NULLIF(modem_id, '')) = 1 THEN MAX(modem_id) ELSE '' END
 			FROM messages GROUP BY profile_id
 		`); err != nil {
-			return fmt.Errorf("backfill message lines: %w", err)
+			return fmt.Errorf("backfill SIM profiles: %w", err)
+		}
+		if err := backfillSIMProfileNumbers(ctx, tx); err != nil {
+			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO message_lines (profile_id, modem_id, label)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sim_profiles (profile_id, modem_id, label)
 		SELECT profile_id, modem_id, profile_name FROM reminders WHERE modem_id <> ''
-		ON CONFLICT(profile_id) DO UPDATE SET modem_id = excluded.modem_id, label = excluded.label WHERE message_lines.modem_id = ''`); err != nil {
+		ON CONFLICT(profile_id) DO UPDATE SET modem_id = excluded.modem_id, label = excluded.label WHERE sim_profiles.modem_id = ''`); err != nil {
 		return fmt.Errorf("backfill reminder line ownership: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id)`); err != nil {
@@ -192,35 +184,6 @@ func readHistoricalConversations(ctx context.Context, tx *sql.Tx) ([]Conversatio
 		return nil, fmt.Errorf("read historical conversations: %w", err)
 	}
 	return history, nil
-}
-
-// RecordMessageLine associates historical messages only with a confirmed SIM identity.
-func (s *Store) RecordMessageLine(ctx context.Context, line MessageLine) error {
-	if line.ProfileID == "" || line.ModemID == "" {
-		return nil
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin message line update: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }() // Keep line metadata and historical attribution together.
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO message_lines (profile_id, modem_id, label, number) VALUES (?, ?, ?, ?)
-		ON CONFLICT(profile_id) DO UPDATE SET
-			modem_id = excluded.modem_id,
-			label = CASE WHEN excluded.label <> '' THEN excluded.label ELSE message_lines.label END,
-			number = CASE WHEN excluded.number <> '' THEN excluded.number ELSE message_lines.number END
-	`, line.ProfileID, line.ModemID, line.Label, line.Number)
-	if err != nil {
-		return fmt.Errorf("record message line: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE messages SET modem_id = ? WHERE profile_id = ? AND modem_id = ''`, line.ModemID, line.ProfileID); err != nil {
-		return fmt.Errorf("backfill message device: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit message line update: %w", err)
-	}
-	return nil
 }
 
 const unreadExpression = `MAX(c.marked_unread, (SELECT COUNT(*) FROM messages unread WHERE unread.conversation_id = c.id AND unread.incoming = 1 AND unread.id > c.read_through_id))`
@@ -266,7 +229,7 @@ func (s *Store) Conversations(ctx context.Context, filter ConversationFilter) (C
 			(SELECT MAX(id) FROM messages last WHERE last.conversation_id = c.id),
 			m.id, m.sender, m.recipient, m.text, m.timestamp, m.status, m.incoming, m.wifi_calling
 		FROM conversations c
-		LEFT JOIN message_lines l ON l.profile_id = c.profile_id
+		LEFT JOIN sim_profiles l ON l.profile_id = c.profile_id
 		JOIN messages m ON m.id = (
 			SELECT id FROM messages last WHERE last.conversation_id = c.id
 			ORDER BY timestamp DESC, id DESC LIMIT 1
@@ -337,7 +300,7 @@ func (s *Store) Conversation(ctx context.Context, id string) (Conversation, erro
 			COALESCE(l.modem_id, ''), COALESCE(l.label, ''), COALESCE(l.number, ''),
 			c.read_through_id, c.marked_unread, `+unreadExpression+`
 		FROM conversations c
-		LEFT JOIN message_lines l ON l.profile_id = c.profile_id
+		LEFT JOIN sim_profiles l ON l.profile_id = c.profile_id
 		WHERE c.id = ?
 	`, id).Scan(
 		&c.ID, &c.ProfileID, &c.Participant, &c.ModemID, &c.LineLabel, &c.LineNumber,

@@ -226,7 +226,7 @@ describe('usePhoneCalls', () => {
     expect(phone.activeCall.value).toBeNull()
     expect(notifications).toHaveLength(1)
     expect(notifications[0]?.title).toBe('Incoming call')
-    expect(notifications[0]?.options).toEqual({ body: '(224) 225-5559', tag: 'call-1' })
+    expect(notifications[0]?.options).toEqual({ body: '+1 (224) 225-5559', tag: 'call-1' })
   })
 
   it('ignores an old dial after leaving and returning to the same modem', async () => {

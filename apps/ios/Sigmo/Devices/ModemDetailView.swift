@@ -500,7 +500,7 @@ private struct ModemDetailScreen: View {
                         ProfileAvatar(icon: profile.icon, region: profile.regionCode, plmn: profile.profileOwner.plmn)
                         Text(profile.name).font(.body).fixedSize(horizontal: false, vertical: true)
                     }
-                    Text(profile.iccid)
+                    Text(profile.numberLabel)
                         .font(.subheadline.monospaced())
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -511,7 +511,7 @@ private struct ModemDetailScreen: View {
                     ProfileAvatar(icon: profile.icon, region: profile.regionCode, plmn: profile.profileOwner.plmn)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(profile.name).font(.body).lineLimit(1)
-                        Text(profile.iccid)
+                        Text(profile.numberLabel)
                             .font(.subheadline.monospaced())
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

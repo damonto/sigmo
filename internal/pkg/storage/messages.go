@@ -109,13 +109,15 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 	if msg.Incoming {
 		lineNumber = msg.Recipient
 	}
+	// Imported SMS can predate an MSISDN change; only live SIM observations
+	// replace a number that is already known.
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO message_lines (profile_id, modem_id, number) VALUES (?, ?, ?)
+		INSERT INTO sim_profiles (profile_id, modem_id, number) VALUES (?, ?, ?)
 		ON CONFLICT(profile_id) DO UPDATE SET
-			modem_id = CASE WHEN excluded.modem_id <> '' THEN excluded.modem_id ELSE message_lines.modem_id END,
-			number = CASE WHEN excluded.number <> '' THEN excluded.number ELSE message_lines.number END
+			modem_id = CASE WHEN excluded.modem_id <> '' THEN excluded.modem_id ELSE sim_profiles.modem_id END,
+			number = CASE WHEN sim_profiles.number = '' THEN excluded.number ELSE sim_profiles.number END
 	`, msg.ProfileID, msg.ModemID, lineNumber); err != nil {
-		return false, fmt.Errorf("record message line: %w", err)
+		return false, fmt.Errorf("record message SIM profile: %w", err)
 	}
 	if err := advanceMessageState(ctx, tx); err != nil {
 		return false, err

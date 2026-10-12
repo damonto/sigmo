@@ -147,6 +147,26 @@ const buttonWithText = (wrapper: ReturnType<typeof mountSection>, text: string, 
 }
 
 describe('EsimProfileSection', () => {
+  it.each([
+    { number: '+12025550123', expected: '+1 (202) 555-0123' },
+    { number: ' +12025550123 ', expected: '+1 (202) 555-0123' },
+    { number: undefined, expected: 'modemDetail.esim.lineNoNumber' },
+    { number: '', expected: 'modemDetail.esim.lineNoNumber' },
+    { number: '  ', expected: 'modemDetail.esim.lineNoNumber' },
+  ])(
+    'shows the number or placeholder for active and inactive profiles: $number',
+    ({ number, expected }) => {
+      const wrapper = mountSection({
+        profiles: profiles.map((profile) => ({ ...profile, number })),
+      })
+      expect(wrapper.text()).toContain('Active')
+      expect(wrapper.text()).toContain('Inactive')
+      expect(wrapper.findAll('p').filter((item) => item.text() === expected)).toHaveLength(2)
+      expect(wrapper.text()).not.toContain('iccid-active')
+      expect(wrapper.text()).not.toContain('iccid-inactive')
+    },
+  )
+
   afterEach(() => {
     vi.restoreAllMocks()
   })

@@ -594,6 +594,7 @@ const en = {
       certificates: 'Certificates',
     },
     esim: {
+      lineNoNumber: 'No Number',
       listTitle: 'eSIMs',
       noProfiles: 'No eSIM profiles found.',
       installButton: 'Install eSIM',

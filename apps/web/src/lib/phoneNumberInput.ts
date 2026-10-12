@@ -1,6 +1,7 @@
 import parsePhoneNumberFromString, {
   AsYouType,
   getCountryCallingCode,
+  isSupportedCountry,
   type CountryCode,
 } from 'libphonenumber-js'
 
@@ -73,9 +74,11 @@ export const formatAddressInput = (value: string, defaultCountry?: string) => {
 }
 
 export const formatPhoneDisplay = (value: string, defaultCountry?: string) => {
-  const chars = phoneNumberChars(value)
-  if (!chars || chars === '+') return value.trim()
-  if (!shouldFormatPhoneChars(chars, defaultCountry)) return chars
+  const address = addressSubmissionChars(value)
+  // Sender names and service codes are display values, not phone input to sanitize.
+  if (!address.valid) return value.trim()
+  const chars = address.value
+  if (shortCodeRE.test(chars)) return chars
 
   const country = phoneCountry(defaultCountry)
   const number = chars.startsWith('+')
@@ -84,15 +87,11 @@ export const formatPhoneDisplay = (value: string, defaultCountry?: string) => {
       ? parsePhoneNumberFromString(chars, country)
       : undefined
   if (number?.isPossible()) {
-    if (
-      country &&
-      (number.country === country || number.countryCallingCode === getCountryCallingCode(country))
-    ) {
-      return number.formatNational()
-    }
-    return chars.startsWith('+') ? number.formatInternational() : number.formatNational()
+    // NANP national formatting has no trunk prefix, so it can safely follow +1.
+    if (number.countryCallingCode === '1') return `+1 ${number.formatNational()}`
+    return number.formatInternational()
   }
-  return formatPhoneInput(chars, defaultCountry) || value.trim()
+  return value.trim()
 }
 
 export const normalizeAddressSubmission = (value: string) => {
@@ -129,8 +128,7 @@ export const normalizePhoneSubmission = (value: string, defaultCountry?: string)
 
 const phoneCountry = (value?: string): CountryCode | undefined => {
   const country = value?.trim().toUpperCase()
-  if (!country || country === 'UN' || !/^[A-Z]{2}$/.test(country)) return undefined
-  return country as CountryCode
+  return country && isSupportedCountry(country) ? country : undefined
 }
 
 const shouldFormatPhoneChars = (chars: string, defaultCountry?: string) => {

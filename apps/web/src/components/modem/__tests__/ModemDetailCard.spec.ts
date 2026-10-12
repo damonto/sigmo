@@ -6,8 +6,7 @@ import type { Modem } from '@/types/modem'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) =>
-      key === 'modemDetail.fields.controlDevice' ? 'Control Device' : key,
+    t: (key: string) => (key === 'modemDetail.fields.controlDevice' ? 'Control Device' : key),
   }),
 }))
 
@@ -43,6 +42,15 @@ const modem: Modem = {
 }
 
 describe('ModemDetailCard', () => {
+  it('formats the phone number using the SIM region', () => {
+    const wrapper = mount(ModemDetailCard, {
+      props: { modem: { ...modem, number: '+12025550123' } },
+      global: { stubs: { Badge: true, RegionFlag: true } },
+    })
+    expect(wrapper.text()).toContain('+1 (202) 555-0123')
+    expect(wrapper.text()).not.toContain('+12025550123')
+  })
+
   it('shows the control device used by Sigmo', () => {
     const wrapper = mount(ModemDetailCard, {
       props: { modem },

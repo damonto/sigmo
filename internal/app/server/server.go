@@ -170,6 +170,14 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	if err != nil {
 		return fmt.Errorf("start modem registry: %w", err)
 	}
+	unsubscribeSIMProfiles, err := subscribeSIMProfiles(ctx, registry, db)
+	if err != nil {
+		return err
+	}
+	cleanups.Add(func(context.Context) error {
+		unsubscribeSIMProfiles()
+		return nil
+	})
 
 	networkPreferences, err := networkprefs.New(db)
 	if err != nil {

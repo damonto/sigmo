@@ -4,6 +4,15 @@ import XCTest
 
 @MainActor
 final class CallRecordingTests: XCTestCase {
+    func testRecordingPreservesRegionForNumberDisplay() throws {
+        let entry = CallRecording(id: UUID(), backendID: UUID(), modemID: "modem", profileID: "sim", callID: "call",
+            number: "2025550123", line: "Work", createdAt: .now, receiveOnly: false, regionCode: "US")
+        let restored = try JSONDecoder().decode(CallRecording.self, from: JSONEncoder().encode(entry))
+        XCTAssertEqual(restored.regionCode, "US")
+        XCTAssertEqual(restored.number, "2025550123")
+        XCTAssertEqual(PhoneNumberDisplay.format(restored.number, regionCode: restored.regionCode), "+1 (202) 555-0123")
+    }
+
     func testCallbackJitterAndBatchesPreserveEverySampleInBothTracks() async throws {
         let schedules: [(name: String, delays: [Double])] = [
             ("regular", [0, 0]),

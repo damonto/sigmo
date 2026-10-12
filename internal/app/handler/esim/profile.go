@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	sgp22 "github.com/damonto/euicc-go/v2"
@@ -88,13 +89,44 @@ func (p *profile) List(ctx context.Context, modem *mmodem.Modem) (*ProfilesRespo
 		response.SEs = append(response.SEs, group)
 		if p.history != nil {
 			for _, item := range group.Profiles {
-				if err := p.history.RecordMessageLine(ctx, storage.MessageLine{ProfileID: item.ICCID, ModemID: modem.EquipmentIdentifier, Label: item.Name}); err != nil {
-					return nil, fmt.Errorf("record eSIM message history: %w", err)
+				if err := p.history.RecordSIMProfile(ctx, storage.SIMProfile{ProfileID: item.ICCID, ModemID: modem.EquipmentIdentifier, Label: item.Name}); err != nil {
+					return nil, fmt.Errorf("record eSIM profile: %w", err)
 				}
 			}
 		}
 	}
+	if err := p.populateNumbers(ctx, modem.Snapshot(), response); err != nil {
+		return nil, err
+	}
 	return response, nil
+}
+
+func (p *profile) populateNumbers(ctx context.Context, snapshot mmodem.ModemSnapshot, response *ProfilesResponse) error {
+	var ids []string
+	for _, group := range response.SEs {
+		for _, item := range group.Profiles {
+			ids = append(ids, item.ICCID)
+		}
+	}
+	var numbers map[string]string
+	if p.history != nil {
+		var err error
+		numbers, err = p.history.SIMProfileNumbers(ctx, ids)
+		if err != nil {
+			return fmt.Errorf("read eSIM profile numbers: %w", err)
+		}
+	}
+	activeNumber := strings.TrimSpace(snapshot.Number)
+	for i := range response.SEs {
+		for j := range response.SEs[i].Profiles {
+			item := &response.SEs[i].Profiles[j]
+			item.Number = numbers[item.ICCID]
+			if item.ICCID == snapshot.SIMIdentity.ICCID && activeNumber != "" {
+				item.Number = activeNumber
+			}
+		}
+	}
+	return nil
 }
 
 func (p *profile) UpdateNickname(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID, nickname string) error {

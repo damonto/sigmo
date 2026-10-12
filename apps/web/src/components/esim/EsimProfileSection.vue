@@ -44,6 +44,7 @@ import EsimProfileAvatar from '@/components/esim/EsimProfileAvatar.vue'
 import { profilePLMN } from '@/lib/carrierLogo'
 import EsimProfileDetailsDialog from '@/components/esim/EsimProfileDetailsDialog.vue'
 import { validateOnInteraction } from '@/lib/formValidation'
+import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
 import type { EsimProfile } from '@/types/esim'
 import type { ReminderPayload } from '@/types/reminder'
 
@@ -451,7 +452,10 @@ watch(detailsOpen, (value) => {
                   {{ profile.name }}
                 </p>
                 <p class="truncate text-xs text-muted-foreground">
-                  {{ profile.iccid }}
+                  {{
+                    formatPhoneDisplay(profile.number ?? '', profile.regionCode) ||
+                    t('modemDetail.esim.lineNoNumber')
+                  }}
                 </p>
               </div>
             </div>

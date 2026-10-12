@@ -114,6 +114,9 @@ describe('useModemMessageThread', () => {
   })
 
   it('uses the participant display number from fetched thread messages', async () => {
+    api.getConversations.mockResolvedValueOnce({
+      data: ref({ items: [{ ...fixtureConversation, lineLabel: '', lineNumber: '+12025550123' }] }),
+    })
     api.getMessagesByParticipant.mockResolvedValueOnce({
       data: {
         value: [
@@ -130,6 +133,7 @@ describe('useModemMessageThread', () => {
         ],
       },
     })
+    const active = ref('sim-a')
     let thread!: ReturnType<typeof useModemMessageThread>
     wrappers.push(
       mount({
@@ -140,7 +144,7 @@ describe('useModemMessageThread', () => {
             participant: computed(() => '+12223334444'),
             isNewConversation: computed(() => false),
             defaultCountry: computed(() => 'US'),
-            activeProfileId: computed(() => 'sim-a'),
+            activeProfileId: computed(() => active.value),
           })
         },
       }),
@@ -148,7 +152,11 @@ describe('useModemMessageThread', () => {
 
     await flushPromises()
 
-    expect(thread.participantLabel.value).toBe('(222) 333-4444')
+    expect(thread.participantLabel.value).toBe('+1 (222) 333-4444')
+    expect(thread.lineLabel.value).toBe('+1 (202) 555-0123')
+    active.value = 'sim-b'
+    expect(thread.participantLabel.value).toBe('+1 (222) 333-4444')
+    expect(thread.lineLabel.value).toBe('+1 (202) 555-0123')
   })
 
   it('retains uncertain sends without resending on refresh and blocks an inactive SIM', async () => {

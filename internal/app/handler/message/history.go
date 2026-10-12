@@ -38,7 +38,7 @@ func (h *Handler) Conversations(c *echo.Context) error {
 				if slot == nil {
 					continue
 				}
-				if err := h.store.RecordMessageLine(ctx, storage.MessageLine{ProfileID: slot.Identifier, ModemID: modem.EquipmentIdentifier}); err != nil {
+				if err := h.store.RecordSIMProfile(ctx, storage.SIMProfile{ProfileID: slot.Identifier, ModemID: modem.EquipmentIdentifier}); err != nil {
 					return httpapi.Internal(c, "list_conversations_failed", err)
 				}
 			}
@@ -47,7 +47,7 @@ func (h *Handler) Conversations(c *echo.Context) error {
 			}
 			profileID := snapshot.SIM.Identifier
 			active[profileID] = modem.EquipmentIdentifier
-			if err := h.store.RecordMessageLine(ctx, storage.MessageLine{ProfileID: profileID, ModemID: modem.EquipmentIdentifier, Number: snapshot.Number}); err != nil {
+			if err := h.store.RecordSIMProfile(ctx, storage.SIMProfile{ProfileID: profileID, ModemID: modem.EquipmentIdentifier}); err != nil {
 				return httpapi.Internal(c, "list_conversations_failed", err)
 			}
 		}

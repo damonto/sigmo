@@ -86,6 +86,7 @@ func (m *Modem) applySIMInfo(info wwanmodem.SIMInfo) {
 		slices.Sort(m.SIMSlots)
 	}
 	m.runtimeMu.Unlock()
+	m.notifyNumberChanged()
 }
 
 func activeSIMSlot(slots map[uint32]*SIM) uint32 {
@@ -267,15 +268,25 @@ func (m *Modem) applySIMSlots(slots []wwanmodem.SIMSlot) {
 	m.invalidateSIMIdentityLocked(previousIdentity)
 }
 
-func (m *Modem) startRuntimeWatchers(parent context.Context, onFailure func(error), onSIMChange func(uint32, string)) {
+type runtimeCallbacks struct {
+	onFailure      func(error)
+	onSIMChange    func(uint32, string)
+	onNumberChange func()
+}
+
+func (m *Modem) startRuntimeWatchers(parent context.Context, callbacks runtimeCallbacks) {
 	if m == nil || m.core == nil {
 		return
 	}
 	m.watchOnce.Do(func() {
 		ctx, cancel := context.WithCancel(parent)
 		m.watchCancel = cancel
-		m.onFailure = onFailure
-		m.onSIMChange = onSIMChange
+		m.onFailure = callbacks.onFailure
+		m.onSIMChange = callbacks.onSIMChange
+		m.runtimeMu.Lock()
+		m.onNumberChange = callbacks.onNumberChange
+		m.runtimeMu.Unlock()
+		m.notifyNumberChanged()
 		m.watchWG.Add(2)
 		go m.watchStatus(ctx)
 		go m.watchSIM(ctx)

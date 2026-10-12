@@ -581,6 +581,7 @@ const zh = {
       certificates: '证书',
     },
     esim: {
+      lineNoNumber: '无号码',
       listTitle: 'eSIMs',
       noProfiles: '暂无 eSIM Profile。',
       installButton: '安装 eSIM',

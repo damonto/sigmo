@@ -126,7 +126,7 @@ func TestMSISDNUpdateUsesNativeDevice(t *testing.T) {
 			return &mmodem.Modem{}, nil
 		},
 	}
-	if err := service.Update(t.Context(), &mmodem.Modem{PrimarySIMSlot: 1}, "+15551234567"); err != nil {
+	if err := service.Update(t.Context(), &mmodem.Modem{PrimarySIMSlot: 1, SIM: &mmodem.SIM{Identifier: "profile-a"}}, "+15551234567"); err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 	if device.number != "+15551234567" {
@@ -138,13 +138,37 @@ func TestMSISDNUpdateUsesNativeDevice(t *testing.T) {
 }
 
 type fakeMSISDNDevice struct {
-	err    error
-	number string
+	err      error
+	number   string
+	onUpdate func()
 }
 
 func (f *fakeMSISDNDevice) UpdateMSISDN(_ context.Context, number string) error {
 	f.number = number
+	if f.onUpdate != nil {
+		f.onUpdate()
+	}
 	return f.err
+}
+
+func TestMSISDNUpdateDoesNotAttributeNumberToReplacementSIM(t *testing.T) {
+	current := &mmodem.Modem{PrimarySIMSlot: 1, SIM: &mmodem.SIM{Identifier: "sim-a"}}
+	device := &fakeMSISDNDevice{onUpdate: func() {
+		current.SIM = &mmodem.SIM{Identifier: "sim-b"}
+	}}
+	service := &msisdn{
+		openDevice: func(*mmodem.Modem) (msisdnDevice, error) { return device, nil },
+		refreshSIMAndWait: func(context.Context, *mmodem.Modem, mmodem.SIMTarget) (*mmodem.Modem, error) {
+			t.Fatal("refresh attempted after SIM changed during write")
+			return nil, nil
+		},
+	}
+	if err := service.Update(t.Context(), current, "+15551234567"); err == nil {
+		t.Fatal("Update accepted a replacement SIM")
+	}
+	if got := current.Snapshot().Number; got != "" {
+		t.Fatalf("replacement SIM number = %q", got)
+	}
 }
 
 type fakeMSISDNClient struct {

@@ -3,6 +3,7 @@ package modem
 import (
 	"sync"
 	"testing"
+	"time"
 
 	wwanmodem "github.com/damonto/wwan-go/modem"
 )
@@ -173,5 +174,68 @@ func TestFallbackNumberRecoversAfterSIMReactivation(t *testing.T) {
 				t.Fatalf("unchanged SIM published another event: %+v", events)
 			}
 		})
+	}
+}
+
+func TestNumberChangeNotifications(t *testing.T) {
+	m := &Modem{}
+	var observed []ModemSnapshot
+	m.onNumberChange = func() { observed = append(observed, m.Snapshot()) }
+	info := wwanmodem.SIMInfo{Slot: 1, ICCID: "sim-a", State: wwanmodem.SIMStateReady, OwnNumbers: []string{"+100"}}
+	m.applySIMInfo(info)
+	target := m.Snapshot().SIMIdentity
+	m.applySIMInfo(info)
+	if !m.SetFallbackNumber(target, "+900") {
+		t.Fatal("fallback rejected")
+	}
+	if len(observed) != 1 {
+		t.Fatalf("unchanged effective number emitted %d notifications", len(observed))
+	}
+	if !m.SetNumber(target, "+200") {
+		t.Fatal("manual number rejected")
+	}
+	m.applySIMInfo(wwanmodem.SIMInfo{Slot: 1, ICCID: "sim-b", State: wwanmodem.SIMStateReady})
+	if m.SetNumber(target, "+999") || m.SetFallbackNumber(target, "+999") {
+		t.Fatal("stale SIM number accepted")
+	}
+	if !m.SetFallbackNumber(m.Snapshot().SIMIdentity, "+300") {
+		t.Fatal("new SIM fallback rejected")
+	}
+	if len(observed) != 3 {
+		t.Fatalf("observations = %+v, want three", observed)
+	}
+	for i, want := range []struct{ iccid, number string }{{"sim-a", "+100"}, {"sim-a", "+200"}, {"sim-b", "+300"}} {
+		if got := observed[i]; got.SIMIdentity.ICCID != want.iccid || got.Number != want.number {
+			t.Fatalf("observation %d = %+v, want %+v", i, got, want)
+		}
+	}
+}
+
+func TestNumberChangeCallbackCanUpdateNumber(t *testing.T) {
+	m := &Modem{SIM: &SIM{Identifier: "sim-a"}}
+	target := m.Snapshot().SIMIdentity
+	var wg sync.WaitGroup
+	m.onNumberChange = func() {
+		if m.Snapshot().Number != "+100" {
+			return
+		}
+		updated := make(chan bool, 1)
+		wg.Go(func() { updated <- m.SetNumber(target, "+200") })
+		select {
+		case accepted := <-updated:
+			if !accepted {
+				t.Error("number update from subscriber rejected")
+			}
+		case <-time.After(time.Second):
+			t.Error("number update blocked until subscriber returned")
+		}
+	}
+	if !m.SetNumber(target, "+100") {
+		t.Fatal("initial number rejected")
+	}
+	// Even a failed assertion lets the subscriber return and release its lock.
+	wg.Wait()
+	if got := m.Snapshot().Number; got != "+200" {
+		t.Fatalf("number = %q, want subscriber's update", got)
 	}
 }

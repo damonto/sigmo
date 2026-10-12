@@ -84,6 +84,8 @@ const (
 	ModemEventRemoved
 	ModemEventChanged
 	ModemEventSIMChanged
+	// ModemEventNumberChanged reports a new nonempty number for the active SIM.
+	ModemEventNumberChanged
 )
 
 func (t ModemEventType) String() string {
@@ -96,6 +98,8 @@ func (t ModemEventType) String() string {
 		return "changed"
 	case ModemEventSIMChanged:
 		return "sim-changed"
+	case ModemEventNumberChanged:
+		return "number-changed"
 	default:
 		return "unknown"
 	}

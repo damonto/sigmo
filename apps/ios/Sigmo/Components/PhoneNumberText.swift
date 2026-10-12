@@ -33,7 +33,7 @@ enum PhoneNumberDisplay {
         let region = regionCode?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
         let countryCode = utility.countryCode(for: region)
         // Without a SIM region, a national number must not inherit this iPhone's region.
-        guard !raw.isEmpty, !raw.contains("*"), !raw.contains("#"),
+        guard !raw.isEmpty, raw.allSatisfy({ "0123456789+ -.()".contains($0) }),
               raw.filter(\.isNumber).count > 6,
               raw.hasPrefix("+") || countryCode != nil,
               let parsed = try? utility.parse(raw, withRegion: countryCode == nil ? "US" : region, ignoreType: true) else {
@@ -41,8 +41,9 @@ enum PhoneNumberDisplay {
         }
         // The fallback region is used only with an explicit + country code; the parser
         // requires valid metadata even when that prefix determines the number’s country.
-        let local = countryCode == parsed.countryCode
-        return utility.format(parsed, toType: local ? .national : .international)
+        // NANP national formatting has no trunk prefix, so it can safely follow +1.
+        if parsed.countryCode == 1 { return "+1 " + utility.format(parsed, toType: .national) }
+        return utility.format(parsed, toType: .international)
     }
 }
 

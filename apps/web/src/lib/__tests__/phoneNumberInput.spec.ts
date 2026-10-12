@@ -14,6 +14,40 @@ import {
 } from '@/lib/phoneNumberInput'
 
 describe('phoneNumberInput', () => {
+  it.each([
+    { number: '64210647889', region: 'NZ', expected: '+64 210 647 889' },
+    { number: '+64210647889', region: 'NZ', expected: '+64 210 647 889' },
+    { number: '0210647889', region: 'NZ', expected: '+64 210 647 889' },
+    { number: '447386042885', region: 'GB', expected: '+44 7386 042885' },
+    { number: '07386042885', region: 'GB', expected: '+44 7386 042885' },
+    { number: '12245556666', region: 'US', expected: '+1 (224) 555-6666' },
+    { number: '2245556666', region: 'US', expected: '+1 (224) 555-6666' },
+    { number: '+12245556666', region: 'US', expected: '+1 (224) 555-6666' },
+    { number: '8613800000000', region: 'CN', expected: '+86 138 0000 0000' },
+  ])('retains the calling code for $number in $region', ({ number, region, expected }) => {
+    expect(formatPhoneDisplay(number, region)).toBe(expected)
+  })
+
+  it.each([
+    'BANK123',
+    'BANK2025550123',
+    '1-800-FLOWERS',
+    '*123#',
+    '*13800000000#',
+    '10086',
+    '10690760295102',
+  ])('preserves non-phone addresses and service codes: %s', (value) => {
+    expect(formatPhoneDisplay(` ${value} `, 'US')).toBe(value)
+  })
+
+  it.each([undefined, '', 'UN', 'XX'])(
+    'formats only explicit international numbers without a known region: %s',
+    (region) => {
+      expect(formatPhoneDisplay('+12025550123', region)).toBe('+1 (202) 555-0123')
+      expect(formatPhoneDisplay('2025550123', region)).toBe('2025550123')
+    },
+  )
+
   it('formats international input when the number starts with plus', () => {
     expect(formatPhoneInput('+12223334444', 'US')).toBe('+1 222 333 4444')
     expect(formatPhoneInput('+8613344445555', 'US')).toBe('+86 133 4444 5555')
@@ -67,10 +101,10 @@ describe('phoneNumberInput', () => {
 
   it('formats display values without API-provided display fields', () => {
     expect(formatPhoneDisplay('+8613344445555', 'US')).toBe('+86 133 4444 5555')
-    expect(formatPhoneDisplay('+12223334444', 'US')).toBe('(222) 333-4444')
-    expect(formatPhoneDisplay('2223334444', 'US')).toBe('(222) 333-4444')
+    expect(formatPhoneDisplay('+12223334444', 'US')).toBe('+1 (222) 333-4444')
+    expect(formatPhoneDisplay('2223334444', 'US')).toBe('+1 (222) 333-4444')
     expect(formatPhoneDisplay('10690760295102', 'CN')).toBe('10690760295102')
-    expect(formatPhoneDisplay('0118613800138000', 'US')).toBe('0118613800138000')
+    expect(formatPhoneDisplay('0118613800138000', 'US')).toBe('+86 138 0013 8000')
   })
 
   it('normalizes address submissions without inferring E.164', () => {

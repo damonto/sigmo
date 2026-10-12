@@ -50,7 +50,7 @@ func TestConversationReadWatermarkAndSIMHistory(t *testing.T) {
 	if err != nil || state.UnreadCount != 2 {
 		t.Fatalf("manual unread plus other SIM = %d, error = %v", state.UnreadCount, err)
 	}
-	if err := s.RecordMessageLine(ctx, MessageLine{ProfileID: "sim-b", ModemID: "modem", Label: "Current SIM"}); err != nil {
+	if err := s.RecordSIMProfile(ctx, SIMProfile{ProfileID: "sim-b", ModemID: "modem", Label: "Current SIM"}); err != nil {
 		t.Fatal(err)
 	}
 	history, err := s.ConversationMessages(ctx, first.ConversationID)
@@ -78,13 +78,13 @@ func TestConversationReadWatermarkAndSIMHistory(t *testing.T) {
 func TestConversationMigrationPreservesHistoryAndReadBaseline(t *testing.T) {
 	s := testStore(t)
 	ctx := t.Context()
-	msg := Message{ProfileID: "legacy-sim", Source: MessageSourceModem, ExternalKey: "old", Sender: "10086", Recipient: "me", Text: "historical", Incoming: true, Timestamp: time.Now().Add(-time.Hour)}
+	msg := Message{ProfileID: "legacy-sim", Source: MessageSourceModem, ExternalKey: "old", Sender: "10086", Recipient: "+8613800000000", Text: "historical", Incoming: true, Timestamp: time.Now().Add(-time.Hour)}
 	if _, err := s.InsertMessage(ctx, msg); err != nil {
 		t.Fatal(err)
 	}
 	// Recreate the previous schema around real stored SMS rows.
 	for _, statement := range []string{
-		`DROP TABLE native_push_outbox`, `DROP TABLE native_push_subscriptions`, `DROP TABLE conversations`, `DROP TABLE message_lines`, `DROP TABLE message_state`, `DROP INDEX idx_messages_conversation`, `ALTER TABLE messages DROP COLUMN conversation_id`, `ALTER TABLE messages DROP COLUMN modem_id`,
+		`DROP TABLE native_push_outbox`, `DROP TABLE native_push_subscriptions`, `DROP TABLE conversations`, `DROP TABLE sim_profiles`, `DROP TABLE message_state`, `DROP INDEX idx_messages_conversation`, `ALTER TABLE messages DROP COLUMN conversation_id`, `ALTER TABLE messages DROP COLUMN modem_id`,
 	} {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
 			t.Fatal(err)
@@ -100,6 +100,9 @@ func TestConversationMigrationPreservesHistoryAndReadBaseline(t *testing.T) {
 	unknown, err := s.Conversations(ctx, ConversationFilter{Unassigned: true})
 	if err != nil || len(unknown.Items) != 1 {
 		t.Fatalf("unassigned history = %+v, error = %v", unknown, err)
+	}
+	if got := unknown.Items[0].LineNumber; got != msg.Recipient {
+		t.Fatalf("historical line number = %q, want %q", got, msg.Recipient)
 	}
 	msg.ExternalKey, msg.Text, msg.Timestamp = "new", "new incoming", time.Now()
 	if _, err := s.InsertMessage(ctx, msg); err != nil {

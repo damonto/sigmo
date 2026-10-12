@@ -3,6 +3,27 @@ import XCTest
 
 @MainActor
 final class MessagesTests: XCTestCase {
+    func testConversationDisplayFormatsNumbersAndPreservesSenderNames() {
+        let message = SMSMessage(id: 1, sender: "+12025550123", recipient: "+12025550124", text: "hello",
+            timestamp: .now, status: "received", incoming: true)
+        let cases: [(participant: String, label: String, region: String?, expectedParticipant: String, expectedLine: String)] = [
+            ("+12025550123", "", "US", "+1 (202) 555-0123", "+1 (202) 555-0124"),
+            ("+12025550123", "", nil, "+1 (202) 555-0123", "+1 (202) 555-0124"),
+            ("BANK123", "Work", "US", "BANK123", "Work"),
+            ("10086", "Travel", "CN", "10086", "Travel"),
+            ("", "Work", nil, String(localized: "messages.unknownSender"), "Work"),
+        ]
+        for item in cases {
+            let conversation = SMSConversation(id: "conversation", profileId: "sim", participant: item.participant,
+                modemId: "modem", lineLabel: item.label, lineNumber: "+12025550124", readThroughMessageId: 0,
+                markedUnread: false, unreadCount: 0, latestMessage: message, canSend: true)
+            XCTAssertEqual(conversation.participantLabel(regionCode: item.region), item.expectedParticipant)
+            XCTAssertEqual(conversation.lineDescription(regionCode: item.region), item.expectedLine)
+            XCTAssertEqual(conversation.participant, item.participant)
+            XCTAssertEqual(conversation.lineNumber, "+12025550124")
+        }
+    }
+
     private func session(_ fixture: MessagesFixture) async throws -> BackendSession {
         let configuration = try testConfiguration()
         let session = BackendSession(configuration: configuration, credentials: MemoryCredentials().store,

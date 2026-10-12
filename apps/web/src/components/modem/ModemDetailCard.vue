@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 
 import RegionFlag from '@/components/RegionFlag.vue'
 import { Badge } from '@/components/ui/badge'
+import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
 import type { SEsResponse } from '@/types/se'
 import type { Modem } from '@/types/modem'
 
@@ -66,7 +67,7 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
         </div>
         <div v-if="modem.number" class="flex justify-between">
           <span class="text-muted-foreground">Number</span>
-          <span class="font-mono">{{ modem.number }}</span>
+          <span class="font-mono">{{ formatPhoneDisplay(modem.number, modem.sim.regionCode) }}</span>
         </div>
       </div>
     </section>

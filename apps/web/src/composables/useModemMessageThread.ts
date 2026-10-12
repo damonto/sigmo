@@ -68,16 +68,19 @@ export const useModemMessageThread = ({
       selectedProfile.value === activeProfileId.value &&
       (conversation.value?.canSend ?? true),
   )
+  const displayCountry = computed(() =>
+    selectedProfile.value === activeProfileId.value ? defaultCountry?.value : undefined,
+  )
   const lineLabel = computed(
     () =>
       conversation.value?.lineLabel ||
-      conversation.value?.lineNumber ||
+      formatPhoneDisplay(conversation.value?.lineNumber ?? '', displayCountry.value) ||
       t('modemDetail.messages.lineSuffix', { suffix: selectedProfile.value.slice(-6) }),
   )
   const participantLabel = computed(() => {
     const value = isNewConversation.value ? newRecipient.value.trim() : participant.value.trim()
     return value
-      ? formatPhoneDisplay(value, defaultCountry?.value)
+      ? formatPhoneDisplay(value, displayCountry.value)
       : t(
           isNewConversation.value
             ? 'modemDetail.messages.newConversation'

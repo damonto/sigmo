@@ -104,6 +104,28 @@ const deferred = <T>() => {
 }
 
 describe('useModemDetail', () => {
+  it.each([undefined, '', '+15551234567'])(
+    'maps a profile number from the API: %s',
+    async (number) => {
+      const response = esimResponse('modem-1')
+      for (const group of response.ses) {
+        for (const profile of group.profiles) profile.number = number
+      }
+      esimApi.getEsims.mockResolvedValue({ data: ref(response) })
+      let detail: ReturnType<typeof useModemDetail> | undefined
+      mount({
+        template: '<div />',
+        setup() {
+          detail = useModemDetail()
+        },
+      })
+      if (!modemResource.modem) throw new Error('modem resource is unavailable')
+      modemResource.modem.value = modem('euicc')
+      await flushPromises()
+      expect(detail?.esimProfiles.value[0]?.number).toBe(number ?? '')
+    },
+  )
+
   beforeEach(() => {
     vi.clearAllMocks()
     modemResource.modem!.value = null

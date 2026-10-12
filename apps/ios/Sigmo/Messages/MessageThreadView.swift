@@ -9,6 +9,10 @@ struct MessageThreadView: View {
     @State private var visibleMessageID: Int64?
     @State private var atBottom = true
 
+    private var regionCode: String? {
+        state.modem?.sim.identifier == state.conversation.profileId ? state.modem?.sim.regionCode : nil
+    }
+
     private var identity: PushConversation {
         PushConversation(backendID: push?.backendID(sessionID: state.session.id) ?? state.badge?.backendId ?? "", conversationID: state.conversation.id)
     }
@@ -27,8 +31,8 @@ struct MessageThreadView: View {
                     }
             } else {
                 content
-                    .navigationTitle(state.conversation.participant)
-                    .navigationSubtitle(state.conversation.lineDescription)
+                    .navigationTitle(state.conversation.participantLabel(regionCode: regionCode))
+                    .navigationSubtitle(state.conversation.lineDescription(regionCode: regionCode))
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbarBackgroundVisibility(.automatic, for: .navigationBar)
                     .toolbar(.hidden, for: .tabBar)
@@ -81,11 +85,11 @@ struct MessageThreadView: View {
 
     private var conversationTitle: some View {
         VStack(spacing: 2) {
-            Text(state.conversation.participant)
+            Text(state.conversation.participantLabel(regionCode: regionCode))
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("message-participant")
-            Text(state.conversation.lineDescription)
+            Text(state.conversation.lineDescription(regionCode: regionCode))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("message-line")
@@ -243,7 +247,10 @@ struct NewMessageView: View {
                     .accessibilityIdentifier("message-recipient")
             }.padding(.horizontal).padding(.top)
             Divider()
-            if let modem = state.modem { Text(modem.number.isEmpty ? modem.carrier : modem.number).font(.caption).foregroundStyle(.secondary).padding(.horizontal) }
+            if let modem = state.modem {
+                Text(modem.number.isEmpty ? modem.carrier : PhoneNumberDisplay.format(modem.number, regionCode: modem.sim.regionCode))
+                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
+            }
             Spacer()
         }
         .safeAreaBar(edge: .bottom, spacing: 0) {

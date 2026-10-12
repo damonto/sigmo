@@ -135,7 +135,10 @@ struct MessagesView: View {
                     .listRowSeparator(.hidden)
                 }
                 ForEach(state.visibleItems) { conversation in
-                    Button { open(conversation) } label: { ConversationRow(conversation: conversation) }
+                    Button { open(conversation) } label: {
+                        ConversationRow(conversation: conversation,
+                            regionCode: state.modem?.sim.identifier == conversation.profileId ? state.modem?.sim.regionCode : nil)
+                    }
                         .buttonStyle(.plain)
                         .listRowBackground(selected?.id == conversation.id && sizeClass == .regular ? Color.accentColor.opacity(0.1) : Color(uiColor: .systemBackground))
                         .accessibilityIdentifier("conversation-\(conversation.id)")
@@ -167,6 +170,7 @@ struct MessagesView: View {
 
 private struct ConversationRow: View {
     let conversation: SMSConversation
+    let regionCode: String?
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: "person.crop.circle.fill").font(.system(size: 46)).foregroundStyle(.gray.opacity(0.55))
@@ -179,14 +183,14 @@ private struct ConversationRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(conversation.participant.isEmpty ? String(localized: "messages.unknownSender") : conversation.participant)
+                    Text(conversation.participantLabel(regionCode: regionCode))
                         .font(.headline).lineLimit(1)
                     Spacer(minLength: 4)
                     Text(conversation.latestMessage.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute())
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Text(conversation.latestMessage.text).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                Text(conversation.lineDescription).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                Text(conversation.lineDescription(regionCode: regionCode)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
             Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                 .accessibilityHidden(true)

@@ -213,8 +213,8 @@ describe('ModemCallProvider', () => {
     await flushPromises()
 
     expect(callsHarness.usePhoneCalls).toHaveBeenCalledTimes(1)
-    expect(wrapper.get('[data-testid="consumer"]').text()).toBe('(224) 225-5559')
-    expect(wrapper.text()).toContain('(224) 225-5559')
+    expect(wrapper.get('[data-testid="consumer"]').text()).toBe('+1 (224) 225-5559')
+    expect(wrapper.text()).toContain('+1 (224) 225-5559')
     expect(wrapper.text()).toContain('Wi-Fi Calling')
   })
 

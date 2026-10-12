@@ -90,10 +90,11 @@ struct DetailValue: View {
     let title: String
     let value: String?
     var copyable = false
+    var displayValue: String?
 
     var body: some View {
         LabeledContent {
-            Text(modemValue(value))
+            Text(modemValue(displayValue ?? value))
                 .multilineTextAlignment(.trailing)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .trailing)

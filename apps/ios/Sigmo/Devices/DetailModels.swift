@@ -53,6 +53,7 @@ struct ESIMProfile: Codable, Identifiable, Sendable, Equatable {
     let seLabel: String
     let seEid: String?
     var name: String
+    var number: String?
     let serviceProviderName: String
     let iccid: String
     let isdPAID: String?
@@ -67,6 +68,10 @@ struct ESIMProfile: Codable, Identifiable, Sendable, Equatable {
     var reminder: SIMReminder?
     var id: String { seId + ":" + iccid }
     var enabled: Bool { profileState == 1 }
+    @MainActor var numberLabel: String {
+        let value = PhoneNumberDisplay.format(number ?? "", regionCode: regionCode)
+        return value.isEmpty ? String(localized: "detail.noNumber") : value
+    }
 }
 
 struct ESIMOwner: Codable, Sendable, Equatable {

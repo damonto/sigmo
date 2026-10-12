@@ -553,7 +553,7 @@ final class BackendFlowTests: XCTestCase {
         attachScreenshot(app)
         let number = app.staticTexts["modemNumber-00000000-0000-0000-0000-000000000001-device-1"].firstMatch
         XCTAssertEqual(app.staticTexts["modemCarrier-00000000-0000-0000-0000-000000000001-device-1"].firstMatch.label, "Example Mobile")
-        XCTAssertEqual(number.label, "138 0000 0000")
+        XCTAssertEqual(number.label, "+86 138 0000 0000")
         XCTAssertGreaterThanOrEqual(modem.frame.minX, app.frame.minX)
         XCTAssertLessThanOrEqual(modem.frame.maxX, app.frame.maxX)
         try app.performAccessibilityAudit(for: [.sufficientElementDescription])

@@ -139,7 +139,7 @@ actor DetailFixtureServer {
         ESIMNotification(seId: seID, seLabel: seID, seEid: nil, sequenceNumber: sequence, iccid: "8986000000000000001", smdp: "smdp.example", operation: operation)
     }
     static func profile(se: String, iccid: String, name: String, active: Bool) -> ESIMProfile {
-        .init(seId: se, seLabel: se, seEid: nil, name: name, serviceProviderName: "Example Mobile", iccid: iccid,
+        .init(seId: se, seLabel: se, seEid: nil, name: name, number: active ? "+8613800000000" : nil, serviceProviderName: "Example Mobile", iccid: iccid,
               isdPAID: "A0000005591010", icon: "", profileName: name, profileNickname: nil, profileState: active ? 1 : 0,
               profileStateName: active ? "enabled" : "disabled", profileClass: "operational", profileOwner: .init(mcc: "460", mnc: "00", gid1: nil, gid2: nil), regionCode: "CN", reminder: nil)
     }
@@ -249,7 +249,17 @@ actor DetailFixtureServer {
             locked = false; return raw("", status: 204)
         }
         if path.contains("/sim-slots/") { slot = Int(parts.last ?? "") ?? 1; return raw("", status: 204) }
-        if path.hasSuffix("/msisdn") { number = try JSONDecoder().decode([String: String].self, from: request.httpBody ?? Data())["number"] ?? number; return raw("", status: 204) }
+        if path.hasSuffix("/msisdn") {
+            number = try JSONDecoder().decode([String: String].self, from: request.httpBody ?? Data())["number"] ?? number
+            if !physical {
+                for group in groups.indices where groups[group].id == activeSE {
+                    for profile in groups[group].profiles.indices where groups[group].profiles[profile].enabled {
+                        groups[group].profiles[profile].number = number
+                    }
+                }
+            }
+            return raw("", status: 204)
+        }
         if path.contains("/reminder") {
             let value: SIMReminder?
             if method == "DELETE" { value = nil }

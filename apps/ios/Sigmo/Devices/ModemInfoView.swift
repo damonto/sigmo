@@ -74,7 +74,10 @@ struct SIMInfoSections: View {
 
     var body: some View {
         Section("modem.sim") {
-            if !modem.number.isEmpty { DetailValue(title: "modem.number", value: modem.number, copyable: true) }
+            if !modem.number.isEmpty {
+                DetailValue(title: "modem.number", value: modem.number, copyable: true,
+                    displayValue: PhoneNumberDisplay.format(modem.number, regionCode: modem.sim.regionCode))
+            }
             DetailValue(title: "modem.carrier", value: modem.sim.operatorName)
             DetailValue(title: "modem.operatorCode", value: modem.sim.operatorIdentifier)
             DetailValue(title: "modem.region", value: modem.sim.regionCode)

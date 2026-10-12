@@ -45,7 +45,9 @@ export const useModemMessages = (
     conversations.value
       .filter((value) => !unreadOnly.value || value.unreadCount > 0)
       .map((value) => {
-        const display = formatPhoneDisplay(value.participant, defaultCountry?.value)
+        const region =
+          value.modemId === modemId.value && value.canSend ? defaultCountry?.value : undefined
+        const display = formatPhoneDisplay(value.participant, region)
         return {
           key: value.id,
           profileId: value.profileId,
@@ -56,7 +58,7 @@ export const useModemMessages = (
           timestampLabel: formatListTimestamp(value.latestMessage.timestamp),
           lineLabel:
             value.lineLabel ||
-            value.lineNumber ||
+            formatPhoneDisplay(value.lineNumber, region) ||
             t('modemDetail.messages.lineSuffix', { suffix: value.profileId.slice(-6) }),
           unreadCount: value.unreadCount,
         }

@@ -1042,3 +1042,5 @@
 "home.search" = "Search";
 "home.clearSearch" = "Clear search";
 "home.noNumber" = "No Number";
+
+"detail.noNumber" = "No Number";

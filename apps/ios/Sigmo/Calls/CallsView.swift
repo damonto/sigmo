@@ -49,7 +49,7 @@ struct CallsView: View {
                     Button { callback(record) } label: { Image(systemName: "phone.fill").frame(minWidth: 44, minHeight: 44) }
                         .buttonStyle(.borderless)
                         .accessibilityLabel(Text("calls.callback"))
-                        .accessibilityValue(record.number)
+                        .accessibilityValue(PhoneNumberDisplay.format(record.number, regionCode: state.line?.region))
                         .disabled(!record.terminal || calls.hasCall)
                 }
                 .padding(.vertical, 4)

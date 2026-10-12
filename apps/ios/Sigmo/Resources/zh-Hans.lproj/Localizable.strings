@@ -1042,3 +1042,5 @@
 "home.search" = "搜索";
 "home.clearSearch" = "清除搜索";
 "home.noNumber" = "无号码";
+
+"detail.noNumber" = "无号码";

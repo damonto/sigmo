@@ -3,6 +3,33 @@ import XCTest
 
 @MainActor
 final class ModemDetailTests: XCTestCase {
+    func testUpdatingNumberRefreshesESIMList() async throws {
+        let detail = try await make()
+        let updated = await detail.updateNumber("+8613900000000")
+        XCTAssertTrue(updated)
+        let active = try XCTUnwrap(detail.groups.flatMap(\.profiles).first { $0.enabled })
+        XCTAssertEqual(active.number, "+8613900000000")
+        XCTAssertEqual(active.numberLabel, "+86 139 0000 0000")
+        XCTAssertNil(detail.groups.flatMap(\.profiles).first { !$0.enabled }?.number)
+    }
+
+    func testProfileNumberDecodingAndDisplay() throws {
+        let legacy = #"{"seId":"se-a","seLabel":"SE1","name":"Travel","serviceProviderName":"Carrier","iccid":"8901","icon":"","profileName":"Travel","profileState":0,"profileStateName":"disabled","profileClass":"operational","profileOwner":{"mcc":"310","mnc":"260"}}"#
+        let original = try JSONDecoder().decode(ESIMProfile.self, from: Data(legacy.utf8))
+        XCTAssertNil(original.number)
+        XCTAssertEqual(original.numberLabel, String(localized: "detail.noNumber"))
+        let cases = [("", String(localized: "detail.noNumber")), ("  ", String(localized: "detail.noNumber")),
+                     ("+12025550123", "+1 (202) 555-0123"), (" +12025550123 ", "+1 (202) 555-0123")]
+        for (number, expected) in cases {
+            var profile = original
+            profile.number = number
+            let decoded = try JSONDecoder().decode(ESIMProfile.self, from: JSONEncoder().encode(profile))
+            XCTAssertEqual(decoded.numberLabel, expected)
+            XCTAssertEqual(decoded.number, number)
+            XCTAssertEqual(decoded.iccid, "8901")
+        }
+    }
+
     func testSecureElementStorageUsesWholeKiB() {
         let cases: [(bytes: Int64?, expected: String)] = [
             (nil, "—"), (0, "0KiB"), (1023, "0KiB"),

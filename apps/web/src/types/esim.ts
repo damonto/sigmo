@@ -1,7 +1,9 @@
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 import type { Reminder } from '@/types/reminder'
 
+/** Installed eSIM metadata; older servers may omit the last known number. */
 export type EsimProfileApiResponse = {
+  number?: string
   seId: string
   seLabel: string
   seEid?: string
@@ -57,7 +59,9 @@ export type EsimProfileOwner = {
   gid2?: string
 }
 
+/** Display metadata for an installed eSIM, including its last known number. */
 export type EsimProfile = {
+  number?: string
   id: string
   seId: string
   seLabel: string

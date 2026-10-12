@@ -67,7 +67,7 @@ struct CallRecordingRow: View {
 
     private var information: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(entry.number).font(.headline)
+            PhoneNumberText(number: entry.number, regionCode: entry.regionCode).font(.headline)
                 .accessibilityIdentifier("recording-number-\(entry.id)")
             Text(entry.line).font(.subheadline).foregroundStyle(.secondary)
             Text(entry.createdAt, format: .dateTime).font(.caption).foregroundStyle(.secondary)

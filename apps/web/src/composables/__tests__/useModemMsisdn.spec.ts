@@ -79,7 +79,7 @@ describe('useModemMsisdn', () => {
   it('formats the modem number for the edit field', () => {
     const { state } = mountComposable()
 
-    expect(state.msisdnInput.value).toBe('(224) 225-5559')
+    expect(state.msisdnInput.value).toBe('+1 (224) 225-5559')
   })
 
   it('formats user input while keeping the submitted national value raw', async () => {

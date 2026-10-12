@@ -16,6 +16,7 @@ struct CallRecording: Codable, Identifiable, Sendable {
     var receiveOnly: Bool
     var backendInstanceID: String?
     var callUUID: String?
+    var regionCode: String?
     var stem: String { id.uuidString }
 }
 
@@ -64,7 +65,7 @@ final class CallRecordings {
         let entry = CallRecording(id: UUID(), backendID: call.line.backendID, modemID: call.line.modemID,
             profileID: call.line.profileID, callID: record.callID, number: call.number,
             line: "\(call.line.backendName) · \(call.line.label)", createdAt: .now, receiveOnly: audio.receiveOnly,
-            backendInstanceID: record.backendId, callUUID: record.callUUID)
+            backendInstanceID: record.backendId, callUUID: record.callUUID, regionCode: call.line.region)
         do {
             try save(entry)
             // Keep a visible recovery entry even if opening one PCM file fails.

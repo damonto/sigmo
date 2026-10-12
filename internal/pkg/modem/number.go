@@ -25,12 +25,49 @@ func (m *Modem) SetFallbackNumber(target SIMIdentity, number string) bool {
 		return false
 	}
 	m.runtimeMu.Lock()
-	defer m.runtimeMu.Unlock()
 	if target != m.simIdentityLocked() {
+		m.runtimeMu.Unlock()
 		return false
 	}
 	m.fallbackNumber = strings.TrimSpace(number)
+	m.runtimeMu.Unlock()
+	m.notifyNumberChanged()
 	return true
+}
+
+// SetNumber records a successfully written MSISDN only while its SIM activation is current.
+func (m *Modem) SetNumber(target SIMIdentity, number string) bool {
+	if m == nil || target.ICCID == "" {
+		return false
+	}
+	m.runtimeMu.Lock()
+	if target != m.simIdentityLocked() {
+		m.runtimeMu.Unlock()
+		return false
+	}
+	m.Number = strings.TrimSpace(number)
+	m.runtimeMu.Unlock()
+	m.notifyNumberChanged()
+	return true
+}
+
+func (m *Modem) notifyNumberChanged() {
+	// Deduplicate observations, but never hold a lock across subscriber callbacks:
+	// a subscriber may synchronously update the modem again.
+	m.numberNotifyMu.Lock()
+	snapshot := m.Snapshot()
+	m.runtimeMu.RLock()
+	notify := m.onNumberChange
+	m.runtimeMu.RUnlock()
+	if notify == nil || (m.notifiedSIM == snapshot.SIMIdentity && m.notifiedNumber == snapshot.Number) {
+		m.numberNotifyMu.Unlock()
+		return
+	}
+	m.notifiedSIM, m.notifiedNumber = snapshot.SIMIdentity, snapshot.Number
+	m.numberNotifyMu.Unlock()
+	if snapshot.SIMIdentity.ICCID != "" && strings.TrimSpace(snapshot.Number) != "" {
+		notify()
+	}
 }
 
 func (m *Modem) simIdentityLocked() SIMIdentity {

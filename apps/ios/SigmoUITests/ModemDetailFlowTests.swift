@@ -104,6 +104,30 @@ final class ModemDetailFlowTests: XCTestCase {
         app.descendants(matching: .any)["esimNotification-" + id].firstMatch
     }
 
+    func testProfileRowsShowNumbersAndLocalizedPlaceholder() {
+        for chinese in [false, true] {
+            let app = launch(chinese: chinese, large: chinese)
+            let active = app.buttons["profileActions-se-a:8986000000000000001"]
+            let inactive = app.buttons["profileActions-se-a:8986000000000000002"]
+            XCTAssertTrue(active.waitForExistence(timeout: 5))
+            XCTAssertTrue(active.label.contains("Primary"), active.label)
+            XCTAssertTrue(active.label.contains("+86 138 0000 0000"), active.label)
+            XCTAssertFalse(active.label.contains("8986000000000000001"), active.label)
+            // Large Dynamic Type can leave the second lazy list row offscreen.
+            for _ in 0..<8 where !inactive.exists {
+                let top = app.descendants(matching: .any)["esimNetworkBar"].firstMatch.frame.maxY + 8
+                let bottom = app.tabBars.firstMatch.frame.minY - 8
+                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (top + (bottom - top) * 0.75 - app.frame.minY) / app.frame.height))
+                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (top + (bottom - top) * 0.25 - app.frame.minY) / app.frame.height))
+                start.press(forDuration: 0.1, thenDragTo: end)
+            }
+            XCTAssertTrue(inactive.waitForExistence(timeout: 5), "Inactive profile missing, Chinese: \(chinese)")
+            XCTAssertTrue(inactive.label.contains(chinese ? "无号码" : "No Number"), inactive.label)
+            XCTAssertFalse(inactive.label.contains("8986000000000000002"), inactive.label)
+            app.terminate()
+        }
+    }
+
     func testOverviewInfoAndNotifications() {
         let app = launch()
         XCTAssertTrue(app.buttons["modemInfo"].waitForExistence(timeout: 5))
