@@ -463,15 +463,76 @@ final class ModemDetailFlowTests: XCTestCase {
         smdp.typeText("LPA:1$smdp.example$code")
         screenshot(app, name: "Enter eSIM details")
         tap(app.buttons["startESIMDownload"], in: app)
+        XCTAssertTrue(app.staticTexts["downloadProfileName"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["downloadProfileName"].label, "Downloaded")
+        XCTAssertEqual(app.staticTexts["downloadProfileICCID"].label, "8986000000000000003")
+        XCTAssertEqual(app.staticTexts["downloadProfileProvider"].label, "Example Mobile")
+        XCTAssertFalse(app.staticTexts["Service provider"].exists)
+        XCTAssertFalse(app.staticTexts["Profile State"].exists)
+        XCTAssertEqual(app.buttons["confirmESIMPreview"].label, "Confirm Download")
+        XCTAssertEqual(app.buttons["copyDownloadICCID"].label, "Copy ICCID")
+        XCTAssertGreaterThanOrEqual(app.staticTexts["Ready to Add eSIM"].frame.minY, app.buttons["closeESIMFlow"].frame.maxY)
         screenshot(app, name: "Add eSIM preview")
         tap(app.buttons["confirmESIMPreview"], in: app)
         let code = app.secureTextFields["downloadConfirmation"]
         XCTAssertTrue(code.waitForExistence(timeout: 5)); code.tap(); code.typeText("1234")
         tap(app.buttons["Confirm"], in: app)
         XCTAssertTrue(app.staticTexts["eSIM Added"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["downloadProfileName"].label, "Downloaded")
+        XCTAssertEqual(app.staticTexts["downloadProfileICCID"].label, "8986000000000000003")
+        XCTAssertEqual(app.staticTexts["downloadProfileProvider"].label, "Example Mobile")
+        XCTAssertFalse(app.staticTexts["Service provider"].exists)
+        XCTAssertFalse(app.staticTexts["Profile State"].exists)
         screenshot(app, name: "Download completed")
-        app.buttons["closeESIMFlow"].tap()
+        app.buttons["closeCompletedESIM"].tap()
         XCTAssertTrue(app.buttons["addESIM-se-a"].waitForExistence(timeout: 5))
+    }
+
+    func testDownloadSummaryInChineseWithLargeTextAndDarkMode() {
+        let app = launch(chinese: true, large: true, dark: true)
+        tapOverviewRow(app.buttons["addESIM-se-b"], in: app)
+        tap(app.alerts.buttons["showESIMDiscoveries"].firstMatch, in: app)
+        tap(app.buttons["downloadDiscoveredESIM"], in: app)
+        XCTAssertTrue(app.buttons["confirmESIMPreview"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["confirmESIMPreview"].label, "确认下载")
+        XCTAssertGreaterThanOrEqual(app.staticTexts["准备添加 eSIM"].frame.minY, app.buttons["closeESIMFlow"].frame.maxY)
+        tap(app.buttons["copyDownloadICCID"], in: app)
+        let copyButton = app.buttons["copyDownloadICCID"]
+        XCTAssertEqual(copyButton.label, "复制 ICCID")
+        XCTAssertGreaterThanOrEqual(copyButton.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(copyButton.frame.height, 44)
+        let iccid = app.staticTexts["downloadProfileICCID"]
+        XCTAssertEqual(iccid.label, "8986000000000000003")
+        XCTAssertGreaterThanOrEqual(iccid.frame.minX, app.frame.minX)
+        XCTAssertLessThanOrEqual(iccid.frame.maxX, app.frame.maxX)
+        XCTAssertFalse(app.staticTexts["配置状态"].exists)
+        screenshot(app, name: "Download summary Chinese large dark")
+        tap(app.buttons["downloadEIDDetails"], in: app)
+        let eid = app.staticTexts.matching(NSPredicate(format: "label == %@", "89049032000000000000000000000002")).firstMatch
+        // Expanded rows can start below the viewport at accessibility text sizes.
+        tap(eid, in: app)
+        XCTAssertTrue(eid.isHittable, app.debugDescription)
+        tap(app.buttons["downloadProfileDetails"], in: app)
+        for name in ["GID1", "GID2"] {
+            let field = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
+            tap(field, in: app)
+            XCTAssertTrue(field.isHittable, app.debugDescription)
+        }
+        tap(app.buttons["confirmESIMPreview"], in: app)
+        let code = app.secureTextFields["downloadConfirmation"]
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        code.tap(); code.typeText("1234")
+        tap(app.buttons["confirmESIMCode"], in: app)
+        XCTAssertTrue(app.buttons["closeESIMFlow"].waitForExistence(timeout: 10))
+        tap(app.buttons["copyDownloadICCID"], in: app)
+        XCTAssertEqual(app.staticTexts["downloadProfileICCID"].label, "8986000000000000003")
+        XCTAssertFalse(app.staticTexts["配置状态"].exists)
+        screenshot(app, name: "Downloaded summary Chinese large dark")
+        tap(app.buttons["closeESIMFlow"], in: app)
+        XCTAssertTrue(app.buttons["closeESIMFlow"].waitForNonExistence(timeout: 5), app.debugDescription)
+        // The refreshed profile list can move SE 2 below the viewport at this text size.
+        XCTAssertTrue(app.buttons["modemInfo"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["modemInfo"].isHittable, app.debugDescription)
     }
 
     func testEveryTransferSourceRespondsAcrossItsRow() {
@@ -675,6 +736,8 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertFalse(app.alerts.firstMatch.debugDescription.lowercased().contains("secure element"))
         XCTAssertFalse(app.alerts.firstMatch.debugDescription.contains("SE 1"))
         tap(app.buttons["confirmDetailAction"].firstMatch, in: app)
+        XCTAssertTrue(app.buttons["profileActions-se-a:8986000000000000002"].waitForExistence(timeout: 2))
+        openActions(app)
         XCTAssertTrue(app.buttons["profileInternet"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Delete eSIM"].exists)
         app.buttons["Reminder"].tap()
@@ -717,6 +780,57 @@ final class ModemDetailFlowTests: XCTestCase {
         tap(app.buttons["Phone number"], in: app)
         XCTAssertTrue(number.waitForExistence(timeout: 5))
         XCTAssertTrue((number.value as? String)?.contains("139") == true)
+    }
+
+    func testActivationReturnsToListAndDisablesProfile() {
+        for chinese in [false, true] {
+            let app = launch("detail-activation-loading", chinese: chinese)
+            openActions(app)
+            tap(app.switches["profileEnabled-se-a:8986000000000000002"].switches.firstMatch, in: app)
+            tap(app.buttons["confirmDetailAction"].firstMatch, in: app)
+
+            let row = app.buttons["profileActions-se-a:8986000000000000002"]
+            XCTAssertTrue(row.waitForExistence(timeout: 2))
+            XCTAssertTrue(row.label.contains(chinese ? "正在启用" : "Enabling"), row.label)
+            XCTAssertFalse(row.label.contains(chinese ? "关闭" : "Off"), row.label)
+            XCTAssertFalse(row.isEnabled)
+            XCTAssertFalse(app.buttons["profileManagementInfo"].exists)
+            let other = app.buttons["profileActions-se-b:8986000000000000002"]
+            XCTAssertTrue(other.isEnabled)
+            XCTAssertTrue(other.label.contains(chinese ? "关闭" : "Off"), other.label)
+
+            let enabled = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "enabled == true AND label CONTAINS %@", chinese ? "开启" : "On"), object: row)
+            XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 12), .completed)
+            XCTAssertFalse(row.label.contains(chinese ? "正在启用" : "Enabling"), row.label)
+            XCTAssertFalse(app.alerts.firstMatch.exists)
+            openActions(app)
+            XCTAssertTrue(app.buttons["profileInternet"].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons[chinese ? "删除 eSIM" : "Delete eSIM"].exists)
+            app.terminate()
+        }
+    }
+
+    func testActivationFailureRestoresProfileActions() {
+        let app = launch("detail-activation-error")
+        openActions(app)
+        tap(app.switches["profileEnabled-se-a:8986000000000000002"].switches.firstMatch, in: app)
+        tap(app.buttons["confirmDetailAction"].firstMatch, in: app)
+
+        let row = app.buttons["profileActions-se-a:8986000000000000002"]
+        XCTAssertTrue(row.waitForExistence(timeout: 2))
+        XCTAssertTrue(row.label.contains("Enabling"), row.label)
+        XCTAssertFalse(row.isEnabled)
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 12))
+        XCTAssertTrue(alert.staticTexts["The server could not complete the request."].exists)
+        alert.buttons["OK"].tap()
+
+        XCTAssertTrue(row.isEnabled)
+        XCTAssertTrue(row.label.contains("Off"), row.label)
+        XCTAssertFalse(row.label.contains("Enabling"), row.label)
+        openActions(app)
+        XCTAssertTrue(app.switches["profileEnabled-se-a:8986000000000000002"].isEnabled)
     }
 
     func testDeletionReturnsToListAndDisablesProfile() {
@@ -878,7 +992,7 @@ final class ModemDetailFlowTests: XCTestCase {
     }
 
     func testDiscoveredProfilePreviewCancellation() {
-        let app = launch(dark: true)
+        let app = launch("detail-loading", dark: true)
         tapOverviewRow(app.buttons["addESIM-se-a"], in: app)
         tap(app.alerts.buttons["showESIMDiscoveries"].firstMatch, in: app)
         let download = app.buttons["downloadDiscoveredESIM"]
@@ -892,7 +1006,12 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertLessThanOrEqual(app.buttons["confirmESIMPreview"].frame.height, 56)
         screenshot(app, name: "Discovered profile preview")
         app.buttons["closeESIMFlow"].tap()
+        // Delayed reconciliation keeps the sheet visible long enough to catch a transient alert.
+        let unexpectedAlert = expectation(for: NSPredicate(format: "exists == true"), evaluatedWith: app.alerts.firstMatch)
+        unexpectedAlert.isInverted = true
+        wait(for: [unexpectedAlert], timeout: 3)
         XCTAssertTrue(app.buttons["addESIM-se-a"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.alerts.firstMatch.exists)
         XCTAssertFalse(app.staticTexts["Downloaded"].exists)
     }
 }

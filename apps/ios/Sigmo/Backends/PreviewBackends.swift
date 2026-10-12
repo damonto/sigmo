@@ -37,6 +37,8 @@ enum PreviewBackends {
                 case "detail-empty-profiles": fixture = .emptyProfiles
                 case "detail-deletion-loading": fixture = .delayedDeletion
                 case "detail-deletion-error": fixture = .deletionFailure
+                case "detail-activation-loading": fixture = .delayedActivation
+                case "detail-activation-error": fixture = .activationFailure
                 case "detail-settings-loading": fixture = .delayedSettings
                 case "detail-settings-unavailable": fixture = .unavailableSettings
                 case "detail-settings-unsupported": fixture = .unsupportedSettings

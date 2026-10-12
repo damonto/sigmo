@@ -510,6 +510,7 @@
 "detail.connect" = "Connect";
 "detail.connecting" = "Connecting…";
 "detail.copy" = "Copy";
+"detail.copyICCID" = "Copy ICCID";
 "detail.deleteNotification" = "Delete this eSIM notification?";
 "detail.deleteProfile" = "Are you sure you want to delete your eSIM?";
 "detail.disconnect" = "Disconnect";
@@ -597,6 +598,13 @@
 "detail.setupReady" = "Ready to Add eSIM";
 "detail.setupProgress" = "Setting Up eSIM";
 "detail.setupDone" = "eSIM Added";
+"detail.confirmDownload" = "Confirm Download";
+"detail.downloadPreviewDescription" = "Review the profile and destination before downloading.";
+"detail.downloadCompletedDescription" = "The profile has been added to the selected eSIM.";
+"detail.downloadTo" = "Download to";
+"detail.addedTo" = "Added to";
+"detail.eidSuffix" = "EID ending in";
+"detail.moreInformation" = "More information";
 
 "detail.download" = "Download";
 

@@ -510,6 +510,7 @@
 "detail.connect" = "连接";
 "detail.connecting" = "正在连接…";
 "detail.copy" = "复制";
+"detail.copyICCID" = "复制 ICCID";
 "detail.deleteNotification" = "删除此 eSIM 通知？";
 "detail.deleteProfile" = "确定要删除你的 eSIM 吗？";
 "detail.disconnect" = "断开连接";
@@ -597,6 +598,13 @@
 "detail.setupReady" = "准备添加 eSIM";
 "detail.setupProgress" = "正在设置 eSIM";
 "detail.setupDone" = "已添加 eSIM";
+"detail.confirmDownload" = "确认下载";
+"detail.downloadPreviewDescription" = "请确认配置和目标设备后开始下载。";
+"detail.downloadCompletedDescription" = "配置已添加到所选 eSIM 卡。";
+"detail.downloadTo" = "下载到";
+"detail.addedTo" = "已添加到";
+"detail.eidSuffix" = "EID 尾号";
+"detail.moreInformation" = "更多信息";
 
 "detail.download" = "下载";
 

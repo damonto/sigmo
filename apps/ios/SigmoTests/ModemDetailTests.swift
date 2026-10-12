@@ -648,11 +648,15 @@ final class ModemDetailTests: XCTestCase {
         flow.startDownload()
         let run = Task { await flow.run() }
         try await wait { flow.phase == .preview }
+        let preview = try XCTUnwrap(flow.preview)
         await flow.send(.init(type: "confirm", accept: true))
         try await wait { flow.phase == .confirmation }
         await flow.send(.init(type: "confirmation_code", code: "1234"))
         await run.value
         XCTAssertEqual(flow.phase, .completed)
+        XCTAssertEqual(flow.preview?.iccid, preview.iccid)
+        XCTAssertEqual(flow.preview?.profileName, preview.profileName)
+        XCTAssertEqual(flow.preview?.profileOwner, preview.profileOwner)
         XCTAssertEqual(detail.groups[1].profiles.count, 2)
         XCTAssertTrue(flow.input.activationCode.isEmpty)
         let requests = await server.allRequests()
@@ -693,12 +697,138 @@ final class ModemDetailTests: XCTestCase {
         await flow.cancel()
         await run.value
         await flow.run()
-        XCTAssertEqual(flow.phase, .failed)
+        XCTAssertEqual(flow.phase, .cancelled)
+        XCTAssertNil(flow.failure)
         XCTAssertNil(flow.runID)
-        let commands = try await server.allMessages().map { try JSONDecoder().decode(DetailCommand.self, from: $0).type }
-        XCTAssertEqual(commands.filter { $0 == "start" }.count, 1)
-        XCTAssertTrue(commands.contains("cancel"))
+        let commands = try await server.allMessages().map { try JSONDecoder().decode(DetailCommand.self, from: $0) }
+        XCTAssertEqual(commands.filter { $0.type == "start" }.count, 1)
+        XCTAssertEqual(commands.filter { $0.type == "confirm" && $0.accept == false }.count, 1)
+        XCTAssertFalse(commands.contains { $0.type == "cancel" })
         XCTAssertEqual(detail.groups[0].profiles.count, 2)
+    }
+
+    func testPreviewCancellationWaitsForServerWithoutPublishingFailure() async throws {
+        for response in [#"{"type":"completed"}"#, #"{"type":"error","message":"context canceled"}"#] {
+            let server = DetailFixtureServer(), detail = try await make(server)
+            await server.setPreviewCancellationResponse(nil)
+            let flow = ESIMFlowState(detail: detail, seID: "se-a")
+            flow.input = LPAInput(smdp: "smdp.example")
+            flow.startDownload()
+            let run = Task { await flow.run() }
+            try await wait { flow.phase == .preview }
+
+            let cancellation = Task { await flow.cancel() }
+            await server.waitForPreviewRejection()
+            XCTAssertTrue(flow.cancelling)
+            XCTAssertEqual(flow.phase, .preview)
+            XCTAssertNil(flow.failure)
+            // A second tap or a late confirm must not resume a rejected download.
+            await flow.cancel()
+            await flow.send(.init(type: "confirm", accept: true))
+            await server.emitRaw(response)
+            await cancellation.value
+            await run.value
+
+            XCTAssertEqual(flow.phase, .cancelled)
+            XCTAssertNil(flow.failure)
+            XCTAssertFalse(flow.cancelling)
+            XCTAssertEqual(detail.groups[0].profiles.count, 2)
+            let commands = try await server.allMessages().map { try JSONDecoder().decode(DetailCommand.self, from: $0) }
+            XCTAssertEqual(commands.map(\.type), ["start", "confirm"])
+            XCTAssertEqual(commands.last?.accept, false)
+        }
+    }
+
+    func testPreviewCancellationClosesUnresponsiveServerWithoutFailure() async throws {
+        let server = DetailFixtureServer(), detail = try await make(server)
+        await server.setPreviewCancellationResponse(nil)
+        let flow = ESIMFlowState(detail: detail, seID: "se-a")
+        flow.input = LPAInput(smdp: "smdp.example")
+        flow.startDownload()
+        let run = Task { await flow.run() }
+        try await wait { flow.phase == .preview }
+
+        await flow.cancel(gracePeriod: .milliseconds(50))
+        await run.value
+        XCTAssertEqual(flow.phase, .cancelled)
+        XCTAssertNil(flow.failure)
+        XCTAssertNil(flow.runID)
+    }
+
+    func testConfirmationCancellationStillSendsCancelWithoutFailure() async throws {
+        let server = DetailFixtureServer(), detail = try await make(server)
+        let flow = ESIMFlowState(detail: detail, seID: "se-a")
+        flow.input = LPAInput(smdp: "smdp.example")
+        flow.startDownload()
+        let run = Task { await flow.run() }
+        try await wait { flow.phase == .preview }
+        await flow.send(.init(type: "confirm", accept: true))
+        try await wait { flow.phase == .confirmation }
+
+        await flow.cancel()
+        await run.value
+        XCTAssertEqual(flow.phase, .cancelled)
+        XCTAssertNil(flow.failure)
+        let commands = try await server.allMessages().map { try JSONDecoder().decode(DetailCommand.self, from: $0).type }
+        XCTAssertEqual(commands, ["start", "confirm", "cancel"])
+    }
+
+    func testCancellationClosesSocketWhileSendIsSuspended() async throws {
+        for cancelTask in [false, true] {
+            let server = DetailFixtureServer(), detail = try await make(server)
+            let flow = ESIMFlowState(detail: detail, seID: "se-a")
+            flow.input = LPAInput(smdp: "smdp.example")
+            flow.startDownload()
+            let run = Task { await flow.run() }
+            try await wait { flow.phase == .preview }
+
+            await server.holdNextSocketSend()
+            let cancellation = Task {
+                await flow.cancel(gracePeriod: cancelTask ? .seconds(15) : .milliseconds(50))
+            }
+            await server.waitForHeldRequest()
+            if cancelTask { cancellation.cancel() }
+
+            // This fixture deliberately holds send even after close. The receive loop
+            // must still terminate before send returns, on either timeout or task cancellation.
+            try await wait { flow.phase == .cancelled }
+            XCTAssertNil(flow.failure)
+            await server.release()
+            await cancellation.value
+            await run.value
+            XCTAssertEqual(flow.phase, .cancelled)
+            XCTAssertNil(flow.failure)
+            XCTAssertNil(flow.runID)
+            XCTAssertFalse(flow.cancelling)
+            XCTAssertEqual(detail.groups[0].profiles.count, 2)
+        }
+    }
+
+    func testCancellationWhileConfirmationIsSendingCancelsSession() async throws {
+        let server = DetailFixtureServer(), detail = try await make(server)
+        let flow = ESIMFlowState(detail: detail, seID: "se-a")
+        flow.input = LPAInput(smdp: "smdp.example")
+        flow.startDownload()
+        let run = Task { await flow.run() }
+        try await wait { flow.phase == .preview }
+
+        await server.holdNextSocketSend()
+        let confirmation = Task { await flow.send(.init(type: "confirm", accept: true)) }
+        await server.waitForHeldRequest()
+        XCTAssertTrue(flow.sending)
+        XCTAssertEqual(flow.phase, .preview)
+
+        await flow.cancel()
+        await server.release()
+        await confirmation.value
+        await run.value
+
+        XCTAssertEqual(flow.phase, .cancelled)
+        XCTAssertNil(flow.failure)
+        XCTAssertNil(flow.runID)
+        XCTAssertFalse(flow.sending)
+        let commands = try await server.allMessages().map { try JSONDecoder().decode(DetailCommand.self, from: $0).type }
+        XCTAssertEqual(commands, ["start", "cancel"])
     }
 
     func testTransferIncludesUserInputSourceDeletionAndSourceRefresh() async throws {
@@ -886,4 +1016,4 @@ final class ModemDetailTests: XCTestCase {
 
 private struct DetailWiFiPayload: Decodable { let enabled: Bool; let underlay: WiFiUnderlay }
 private struct DetailStart: Decodable { let seId: String; let activationCode: String? }
-private struct DetailCommand: Decodable { let type: String }
+private struct DetailCommand: Decodable { let type: String; let accept: Bool? }

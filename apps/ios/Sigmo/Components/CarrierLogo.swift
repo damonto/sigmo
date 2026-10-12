@@ -25,12 +25,12 @@ struct CarrierLogo: View {
         Group {
             if let bitmap = Self.embeddedImage(icon) {
                 Image(uiImage: bitmap).resizable().scaledToFit()
-                    .frame(width: size * 2 / 3, height: size / 2)
+                    .frame(width: size, height: size * 3 / 4)
             } else if !AppLaunch.usesFixtures, let url = Self.url(plmn: plmn) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFit()
-                            .frame(width: size * 2 / 3, height: size / 2)
+                            .frame(width: size, height: size * 3 / 4)
                     } else { flag }
                 }
                 .id(url)

@@ -2,6 +2,26 @@ import XCTest
 @testable import Sigmo
 
 final class BackendAPITests: XCTestCase {
+    @MainActor
+    func testModemReadsAndESIMWritesAllowLongRequests() async throws {
+        let server = DetailFixtureServer()
+        let api = BackendAPI(configuration: try testConfiguration()) { try await server.respond($0) }
+        _ = try await api.modem("device-1", token: nil)
+        try await api.detailMutation("device-1", path: ["ses", "se-a", "esims", "8986000000000000002", "activation"],
+                                     method: "PUT", token: nil)
+        try await api.detailMutation("device-1", path: ["ses", "se-a", "esims", "8986000000000000002", "nickname"],
+                                     method: "PUT", value: ["nickname": "Travel"], token: nil)
+        try await api.detailMutation("device-1", path: ["ses", "se-b", "esims", "8986000000000000002"],
+                                     method: "DELETE", token: nil)
+        _ = try await api.discoverProfiles("device-1", seID: "se-a", token: nil)
+
+        let requests = await server.allRequests()
+        XCTAssertEqual(requests.count, 5)
+        for request in requests {
+            XCTAssertEqual(request.timeoutInterval, 600, request.url?.path ?? "")
+        }
+    }
+
     func testDisplayAddressPreservesServerPathAndRoundTripsToAPI() throws {
         for (input, display) in [
             ("https://example.com/api/v1", "https://example.com"),

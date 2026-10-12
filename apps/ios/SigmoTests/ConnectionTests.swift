@@ -142,7 +142,7 @@ final class ConnectionTests: XCTestCase {
         XCTAssertFalse(state.manual)
         let requests = await writes(server, suffix: "/networks/registration")
         XCTAssertEqual(requests.count, 2)
-        XCTAssertTrue(requests.allSatisfy { $0.timeoutInterval == 120 })
+        XCTAssertTrue(requests.allSatisfy { $0.timeoutInterval == 600 })
         let payload = try JSONDecoder().decode(NetworkRegistration.self, from: XCTUnwrap(requests.last?.httpBody))
         XCTAssertEqual(payload.mode, "automatic")
         XCTAssertNil(payload.operatorCode)
@@ -163,7 +163,7 @@ final class ConnectionTests: XCTestCase {
         XCTAssertEqual(state.networks.count, 2)
         let requests = await server.allRequests()
         XCTAssertTrue(requests.contains { $0.httpMethod == "GET" && $0.url?.path.hasSuffix("/network-scans/scan-1") == true })
-        XCTAssertTrue(requests.filter { $0.httpMethod == "GET" }.allSatisfy { $0.timeoutInterval == 15 })
+        XCTAssertTrue(requests.filter { $0.httpMethod == "GET" }.allSatisfy { $0.timeoutInterval == 600 })
     }
 
     func testScanFailuresAndEmptyResultsPreserveRegistration() async throws {
@@ -304,7 +304,7 @@ final class ConnectionTests: XCTestCase {
         XCTAssertEqual(sent, draft.submission)
         XCTAssertEqual(sent.apnPassword, " secret with spaces ")
         XCTAssertEqual(sent.apnAuth, "")
-        XCTAssertEqual(request.timeoutInterval, 120)
+        XCTAssertEqual(request.timeoutInterval, 600)
         await state.setConnected(false)
         XCTAssertFalse(state.connected)
         XCTAssertEqual(state.draft.apnPassword, sent.apnPassword)
@@ -511,7 +511,7 @@ final class ConnectionTests: XCTestCase {
         XCTAssertEqual(state.websheet?.id, "e911-device-1")
         let requests = await writes(server, suffix: "/emergency-address-websheets")
         XCTAssertEqual(requests.count, 1)
-        XCTAssertEqual(requests.first?.timeoutInterval, 120)
+        XCTAssertEqual(requests.first?.timeoutInterval, 600)
         for event in ["phoneServicesAccountStatusChanged", "FinishFlow", "cancel-button-clicked", "workflowCompleted"] {
             XCTAssertTrue(WiFiCallingState.terminalCallback(.init(event: event)), event)
         }
@@ -534,7 +534,7 @@ final class ConnectionTests: XCTestCase {
         XCTAssertEqual(state.settings?.dataPath, "legacy_bam_dmux")
         let requests = await writes(server, suffix: "/volte/settings")
         XCTAssertEqual(requests.count, 3)
-        XCTAssertTrue(requests.allSatisfy { $0.timeoutInterval == 120 })
+        XCTAssertTrue(requests.allSatisfy { $0.timeoutInterval == 600 })
     }
 
     func testMBIMOmitsQMIDataPathAndModemManagedStatusIsDistinct() async throws {

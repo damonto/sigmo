@@ -54,7 +54,7 @@ private struct ModemDetailScreen: View {
     @State private var sheet: DetailSheet?
     @State private var confirmation: SIMSlot?
     @State private var pending: SlotChange?
-    @State private var deletion: ESIMProfile?
+    @State private var profileOperation: ESIMProfileOperation?
     @State private var presentedFailure: BackendFailure?
     @State private var preparingFlow: ESIMFlowState?
     @State private var availableFlow: ESIMFlowState?
@@ -161,12 +161,15 @@ private struct ModemDetailScreen: View {
     }
     private var presentedContent: some View {
         tabs
-        // The list owns deletion so dismissing profile actions does not cancel the request.
-        .task(id: deletion?.id) {
-            guard let profile = deletion else { return }
-            _ = await state.delete(profile)
-            guard deletion?.id == profile.id, !Task.isCancelled else { return }
-            deletion = nil
+        // The list owns profile operations so dismissing their detail page does not cancel them.
+        .task(id: profileOperation?.id) {
+            guard let operation = profileOperation else { return }
+            switch operation.kind {
+            case .enable: _ = await state.enable(operation.profile)
+            case .delete: _ = await state.delete(operation.profile)
+            }
+            guard profileOperation?.id == operation.id, !Task.isCancelled else { return }
+            profileOperation = nil
             presentedFailure = state.failure ?? state.elementsFailure ?? state.profilesFailure
         }
         .task(id: pending?.id) {
@@ -248,7 +251,7 @@ private struct ModemDetailScreen: View {
         .onChange(of: tab) { _, value in
             if value != .overview { cancelPreparation() }
         }
-        .onDisappear { pending = nil; deletion = nil; cancelPreparation(); sim.stop() }
+        .onDisappear { pending = nil; profileOperation = nil; cancelPreparation(); sim.stop() }
     }
 
     private var overview: some View {
@@ -488,42 +491,44 @@ private struct ModemDetailScreen: View {
     }
 
     private func profileRow(_ profile: ESIMProfile) -> some View {
-        let deleting = deletion?.id == profile.id
-        return NavigationLink {
-            ESIMProfileActionsView(state: state, profileID: profile.id, onDelete: { deletion = $0 })
+        NavigationLink {
+            ESIMProfileActionsView(state: state, profileID: profile.id) { profileOperation = $0 }
         } label: {
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top, spacing: 12) {
                         ProfileAvatar(icon: profile.icon, region: profile.regionCode, plmn: profile.profileOwner.plmn)
-                        Text(profile.name).fixedSize(horizontal: false, vertical: true)
+                        Text(profile.name).font(.body).fixedSize(horizontal: false, vertical: true)
                     }
                     Text(profile.iccid)
-                        .font(.caption.monospaced())
+                        .font(.subheadline.monospaced())
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    HStack { profileStatus(profile, deleting: deleting) }
+                    HStack { profileStatus(profile) }
                 }
             } else {
                 HStack(spacing: 12) {
                     ProfileAvatar(icon: profile.icon, region: profile.regionCode, plmn: profile.profileOwner.plmn)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(profile.name).lineLimit(1)
-                        Text(profile.iccid).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        Text(profile.name).font(.body).lineLimit(1)
+                        Text(profile.iccid)
+                            .font(.subheadline.monospaced())
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 4)
-                    profileStatus(profile, deleting: deleting)
+                    profileStatus(profile)
                 }
             }
         }
-        .disabled(deleting || state.loading)
+        .disabled(profileOperation?.profile.id == profile.id || state.loading)
         .accessibilityIdentifier("profileActions-" + profile.id)
     }
 
-    @ViewBuilder private func profileStatus(_ profile: ESIMProfile, deleting: Bool) -> some View {
+    @ViewBuilder private func profileStatus(_ profile: ESIMProfile) -> some View {
         Group {
-            if deleting {
-                Text("detail.deletingProfile")
+            if let operation = profileOperation, operation.profile.id == profile.id {
+                Text(operation.kind == .enable ? "modem.value.enabling" : "detail.deletingProfile")
             } else {
                 Text(profile.enabled ? "detail.lineOn" : "detail.lineOff")
             }
@@ -606,7 +611,7 @@ private struct ModemDetailScreen: View {
     }
     private func clear() {
         cancelPreparation()
-        flow?.interrupt(); flow = nil; sheet = nil; pending = nil; deletion = nil; confirmation = nil; presentedFailure = nil
+        flow?.interrupt(); flow = nil; sheet = nil; pending = nil; profileOperation = nil; confirmation = nil; presentedFailure = nil
         state.clear(); settings.clear(); sim.stop()
         if session.authentication == .required || session.license == .activation {
             messages.clear()

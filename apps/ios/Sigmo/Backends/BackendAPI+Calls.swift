@@ -38,7 +38,7 @@ extension BackendAPI {
         struct Body: Encodable { let action, code: String }
         struct Reply: Decodable, Sendable { let reply: String }
         let value: Reply = try await decode(["modems", modemID, "ussd"], method: "POST",
-            body: JSONEncoder().encode(Body(action: action, code: code)), token: token, timeout: .connection)
+            body: JSONEncoder().encode(Body(action: action, code: code)), token: token)
         return value.reply
     }
 }

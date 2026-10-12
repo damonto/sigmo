@@ -47,6 +47,7 @@ actor DetailFixtureServer {
     enum Scenario {
         case standard, delayedProfiles, unavailableProfiles, singleHardware, notifications, delayedDiscoveries, noDiscoveries, unavailableDiscoveries, emptyProfiles
         case delayedDeletion, deletionFailure
+        case delayedActivation, activationFailure
         case delayedSettings, unavailableSettings, unsupportedSettings, settingsWriteFailure
         case connectionSetup, connectionScan, connectionScanError, connectionEmptyNetworks, connectionReadFailure, connectionWriteFailure, connectionMBIM, connectionCommunity
     }
@@ -72,6 +73,9 @@ actor DetailFixtureServer {
     private var nextProfile = 3
     private var holdSuffix: String?
     private var holdSocketSend = false
+    private var previewCancellationResponse: String? = #"{"type":"completed"}"#
+    private var previewRejected = false
+    private var previewRejectionWaiter: CheckedContinuation<Void, Never>?
     private var held: CheckedContinuation<Void, Never>?
     private var arrival: CheckedContinuation<Void, Never>?
     var requireConfirmation = true
@@ -156,6 +160,10 @@ actor DetailFixtureServer {
     func setConfirmation(_ value: Bool) { requireConfirmation = value }
     func holdNext(_ suffix: String) { holdSuffix = suffix }
     func holdNextSocketSend() { holdSocketSend = true }
+    func setPreviewCancellationResponse(_ response: String?) { previewCancellationResponse = response }
+    func waitForPreviewRejection() async {
+        if !previewRejected { await withCheckedContinuation { previewRejectionWaiter = $0 } }
+    }
     func waitForHeldRequest() async { if held == nil { await withCheckedContinuation { arrival = $0 } } }
     func release() { held?.resume(); held = nil }
     func allRequests() -> [URLRequest] { requests }
@@ -179,6 +187,13 @@ actor DetailFixtureServer {
            request.httpMethod == "DELETE", request.url?.path.contains("/esims/") == true {
             try await Task.sleep(for: .seconds(8))
             if scenario == .deletionFailure {
+                return HTTPProblem.response(status: 503, code: "remote_error", detail: "Fixture error")
+            }
+        }
+        if scenario == .delayedActivation || scenario == .activationFailure,
+           request.httpMethod == "PUT", request.url?.path.hasSuffix("/activation") == true {
+            try await Task.sleep(for: .seconds(8))
+            if scenario == .activationFailure {
                 return HTTPProblem.response(status: 503, code: "remote_error", detail: "Fixture error")
             }
         }
@@ -322,7 +337,13 @@ actor DetailFixtureServer {
             if session.kind == "transfer" { emit(#"{"type":"user_input","input":{"text":"Confirm transfer","freeText":true,"freeTextHint":"Verification code"}}"#) }
             return
         }
-        if command.type == "confirm", command.accept == false { session.buffer.close(); return }
+        if command.type == "confirm", command.accept == false {
+            previewRejected = true
+            previewRejectionWaiter?.resume()
+            previewRejectionWaiter = nil
+            if let previewCancellationResponse { emit(previewCancellationResponse) }
+            return
+        }
         if command.type == "confirm", requireConfirmation { emit(#"{"type":"confirmation_code_required"}"#); return }
         if command.type == "user_input" { emit(#"{"type":"source_deletion","iccid":"8986000000000000099"}"#); return }
         if command.type == "source_deletion", command.accept == false { emit(#"{"type":"error","message":"Source deletion declined"}"#); return }

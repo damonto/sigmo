@@ -1,19 +1,21 @@
 import SwiftUI
 
+struct ESIMProfileOperation: Identifiable {
+    enum Kind { case enable, delete }
+
+    // A late completion must not clear a later action on the same profile.
+    let id = UUID()
+    let kind: Kind
+    let profile: ESIMProfile
+}
+
 struct ESIMProfileActionsView: View {
     let state: ModemDetailState
     let profileID: String
-    // A list can own deletion; standalone reminder destinations must keep it in this view.
-    let onDelete: ((ESIMProfile) -> Void)?
+    // Lists own these tasks; standalone reminder destinations run them locally.
+    let onOperation: ((ESIMProfileOperation) -> Void)?
 
     private enum Sheet { case number, rename, reminder, sim }
-    private enum Action { case enable, delete }
-
-    private struct PendingOperation: Identifiable {
-        let id = UUID()
-        let kind: Action
-        let profile: ESIMProfile
-    }
 
     private struct ObservationIdentity: Equatable {
         let accessRevision: Int
@@ -27,16 +29,16 @@ struct ESIMProfileActionsView: View {
     }
 
     @State private var sheet: Sheet?
-    @State private var confirmation: Action?
-    @State private var operation: PendingOperation?
+    @State private var confirmation: ESIMProfileOperation.Kind?
+    @State private var operation: ESIMProfileOperation?
     @State private var presentedFailure: BackendFailure?
     @State private var sim: SIMApplicationState
     @Environment(\.dismiss) private var dismiss
 
-    init(state: ModemDetailState, profileID: String, onDelete: ((ESIMProfile) -> Void)? = nil) {
+    init(state: ModemDetailState, profileID: String, onOperation: ((ESIMProfileOperation) -> Void)? = nil) {
         self.state = state
         self.profileID = profileID
-        self.onDelete = onDelete
+        self.onOperation = onOperation
         _sim = State(initialValue: SIMApplicationState(session: state.session, modemID: state.modemID))
     }
 
@@ -200,14 +202,15 @@ struct ESIMProfileActionsView: View {
         }
     }
 
-    private func begin(_ kind: Action) {
+    private func begin(_ kind: ESIMProfileOperation.Kind) {
         guard !busy, let profile else { return }
-        if kind == .delete, let onDelete {
-            onDelete(profile)
+        let operation = ESIMProfileOperation(kind: kind, profile: profile)
+        if let onOperation {
+            onOperation(operation)
             dismiss()
             return
         }
-        operation = PendingOperation(kind: kind, profile: profile)
+        self.operation = operation
     }
 
     private func performOperation() async {

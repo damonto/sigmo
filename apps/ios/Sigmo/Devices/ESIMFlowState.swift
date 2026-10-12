@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 enum ESIMFlowPhase: Equatable {
-    case form, sources, profiles, connecting, progress, preview, confirmation, userInput, sourceDeletion, websheet, completed, failed
+    case form, sources, profiles, connecting, progress, preview, confirmation, userInput, sourceDeletion, websheet, completed, cancelled, failed
     var running: Bool {
         switch self {
         case .connecting, .progress, .preview, .confirmation, .userInput, .sourceDeletion, .websheet: true
@@ -59,6 +59,7 @@ final class ESIMFlowState: Identifiable {
     private(set) var failure: BackendFailure?
     private(set) var busy = false
     private(set) var sending = false
+    private(set) var cancelling = false
     private(set) var discoveries: [ESIMDiscovery]?
     private(set) var didDiscover = false
     private(set) var sources: [TransferSource] = []
@@ -73,6 +74,7 @@ final class ESIMFlowState: Identifiable {
     private(set) var websheetURL: URL?
     private(set) var runID: UUID?
     @ObservationIgnored private var socket: BackendSocket?
+    @ObservationIgnored private var operation: Task<Void, Error>?
     @ObservationIgnored private var revision = 0
     @ObservationIgnored private var profilesIMEI: String?
 
@@ -211,6 +213,7 @@ final class ESIMFlowState: Identifiable {
         revision += 1
         busy = false
         sending = false
+        cancelling = false
         failure = nil
         preview = nil
         prompt = nil
@@ -247,7 +250,7 @@ final class ESIMFlowState: Identifiable {
             return
         }
         input = LPAInput()
-        do {
+        let operation = Task {
             await detail.session.invalidateModemReads(id)
             try await detail.session.protectedRequest { api, token in
                 try await BackgroundExecution.run(name: "eSIM operation") {
@@ -257,12 +260,23 @@ final class ESIMFlowState: Identifiable {
                     } onCancel: { connection.close() }
                 }
             }
+        }
+        self.operation = operation
+        defer { if self.runID == runID { self.operation = nil } }
+        do {
+            try await withTaskCancellationHandler {
+                try await operation.value
+            } onCancel: { operation.cancel() }
         } catch {
             guard current == revision, self.runID == runID, phase != .completed else { return }
-            phase = .failed
-            failure = Task.isCancelled || error is CancellationError ? .local("detail.interrupted") : .wrapping(error)
+            if cancelling {
+                phase = .cancelled
+            } else {
+                phase = .failed
+                failure = Task.isCancelled || error is CancellationError ? .local("detail.interrupted") : .wrapping(error)
+            }
         }
-        if current == revision, !Task.isCancelled { await reconcile() }
+        if current == revision, !Task.isCancelled, !cancelling { await reconcile() }
     }
 
     private func exchange(_ connection: BackendSocket, start: Data, runID: UUID, api: BackendAPI, token: String?) async throws {
@@ -279,13 +293,17 @@ final class ESIMFlowState: Identifiable {
                 websheetURL = try CarrierWebsheetAddress.url(sheet, api: api, token: token)
             }
             try consume(event)
-            if phase == .completed || phase == .failed { return }
+            if phase == .completed || phase == .cancelled || phase == .failed { return }
         }
         throw CancellationError()
     }
 
     func consume(_ event: ESIMServerMessage) throws {
         guard phase.running else { return }
+        if cancelling {
+            if event.type == "completed" || event.type == "error" { phase = .cancelled }
+            return
+        }
         switch event.type {
         case "progress": stage = event.stage ?? stage; phase = .progress
         case "preview":
@@ -310,7 +328,7 @@ final class ESIMFlowState: Identifiable {
     }
 
     func send(_ message: ESIMClientMessage) async {
-        guard !Task.isCancelled, let socket, phase.running, !sending, detail.session.canAccessDevices else { return }
+        guard !Task.isCancelled, let socket, phase.running, !sending, !cancelling, detail.session.canAccessDevices else { return }
         sending = true
         let current = revision
         let previousPhase = phase
@@ -319,17 +337,17 @@ final class ESIMFlowState: Identifiable {
         }
         do {
             try await socket.send(JSONEncoder().encode(message))
-            guard current == revision, !Task.isCancelled else { return }
+            guard current == revision, !Task.isCancelled, !cancelling else { return }
             confirmation = ""
             response = ""
             if message.type != "cancel", phase == previousPhase { phase = .progress }
         } catch {
-            guard current == revision, !Task.isCancelled else { return }
+            guard current == revision, !Task.isCancelled, !cancelling else { return }
             if phase != .completed { phase = .failed; failure = .wrapping(error); socket.close() }
         }
     }
     func completeWebsheet(_ callback: CarrierCallback) async {
-        guard !Task.isCancelled, let websheet, phase == .websheet, !sending else { return }
+        guard !Task.isCancelled, let websheet, phase == .websheet, !sending, !cancelling else { return }
         sending = true
         let current = revision
         defer {
@@ -337,24 +355,52 @@ final class ESIMFlowState: Identifiable {
         }
         do {
             try await detail.session.protectedRequest { api, token in try await api.carrierCallback(websheet.id, callback: callback, token: token) }
-            guard current == revision, !Task.isCancelled, self.websheet?.id == websheet.id else { return }
+            guard current == revision, !Task.isCancelled, !cancelling, self.websheet?.id == websheet.id else { return }
             if phase == .websheet { self.websheet = nil; websheetURL = nil; phase = .progress }
         } catch { report(error, current: current) }
     }
-    func cancel() async {
+    func cancel(gracePeriod: Duration = .seconds(15)) async {
+        guard !cancelling else { return }
         let current = revision
+        // Once confirmation is in flight, a second confirm cannot undo it.
+        let rejectPreview = phase == .preview && !transfer && !sending
+        let operation = operation
+        cancelling = true
+        failure = nil
         if let socket {
-            defer { socket.close() }
-            do { try await socket.send(JSONEncoder().encode(ESIMClientMessage(type: "cancel"))) }
-            catch { /* Closing also cancels the server session when delivery is impossible. */ }
+            // Bound both sending the request and waiting for server cleanup.
+            let timeout = Task {
+                try await Task.sleep(for: gracePeriod)
+                socket.close()
+            }
+            defer {
+                timeout.cancel()
+                socket.close()
+            }
+            do {
+                try await withTaskCancellationHandler {
+                    try Task.checkCancellation()
+                    let message = rejectPreview ? ESIMClientMessage(type: "confirm", accept: false) : ESIMClientMessage(type: "cancel")
+                    try await socket.send(JSONEncoder().encode(message))
+                    if rejectPreview, let operation {
+                        // Keep the transport alive while the server cancels the eUICC and SM-DP+ session.
+                        _ = await operation.result
+                    }
+                } onCancel: { socket.close() }
+            } catch {
+                // Closing also cancels the server session when delivery is impossible.
+            }
         }
         // A suspended cancellation owns its original session, never a replacement run.
         guard current == revision else { return }
+        phase = .cancelled
         interrupt()
         await reconcile()
     }
     func interrupt() {
         revision += 1
+        operation?.cancel()
+        operation = nil
         socket?.close()
         socket = nil
         runID = nil
@@ -366,9 +412,10 @@ final class ESIMFlowState: Identifiable {
         busy = false
         sending = false
         if phase.running {
-            phase = .failed
-            failure = .local("detail.interrupted")
+            phase = cancelling ? .cancelled : .failed
+            if !cancelling { failure = .local("detail.interrupted") }
         }
+        cancelling = false
     }
     func reconcile() async {
         let current = revision
@@ -382,6 +429,6 @@ final class ESIMFlowState: Identifiable {
         }
     }
     private func report(_ error: Error, current: Int) {
-        if revision == current, !Task.isCancelled { failure = .wrapping(error) }
+        if revision == current, !Task.isCancelled, !cancelling { failure = .wrapping(error) }
     }
 }

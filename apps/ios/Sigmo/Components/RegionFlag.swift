@@ -16,7 +16,7 @@ struct RegionFlag: View {
                 Image(systemName: "globe").foregroundStyle(.secondary)
             }
         }
-        .frame(width: size * 2 / 3, height: size / 2)
+        .frame(width: size, height: size * 3 / 4)
         .clipShape(RoundedRectangle(cornerRadius: 2))
         .frame(width: size, height: size)
         .background(background, in: RoundedRectangle(cornerRadius: 12))

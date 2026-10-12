@@ -35,8 +35,13 @@ struct ESIMFlowView: View {
 
     var body: some View {
         page
+        .disabled(closing)
         .background(Color(uiColor: .systemGroupedBackground))
-        .overlay(alignment: .top) { navigationControls }
+        .overlay(alignment: .top) {
+            if state.phase != .preview && state.phase != .completed {
+                navigationControls
+            }
+        }
         .interactiveDismissDisabled()
         .detailErrorAlert($presentedFailure)
         .alert("detail.sourceDeletion", isPresented: $sourceDeletionPresented) {
@@ -45,7 +50,9 @@ struct ESIMFlowView: View {
         } message: {
             Text(String(format: detailText("detail.sourceDeletionMessage"), state.deletionICCID))
         }
-        .onChange(of: state.failure) { _, failure in presentedFailure = failure }
+        .onChange(of: state.failure) { _, failure in
+            if !closing { presentedFailure = failure }
+        }
         .onChange(of: state.ccidError) { _, message in
             if let message { presentedFailure = BackendFailure(code: "ccid", message: message) }
         }
@@ -99,9 +106,11 @@ struct ESIMFlowView: View {
                         .labelStyle(.iconOnly).frame(width: 20, height: 20)
                 }
                 .buttonBorderShape(.circle).disabled(state.busy)
-            } else if state.phase != .completed {
+            } else {
                 Button {
-                    if state.phase == .form {
+                    if state.phase == .completed {
+                        dismiss()
+                    } else if state.phase == .form {
                         // Setup has not changed the device. Its parent reloads after dismissal.
                         state.interrupt()
                         dismiss()
@@ -109,14 +118,14 @@ struct ESIMFlowView: View {
                         closing = true
                     }
                 } label: {
-                    Label("common.cancel", systemImage: "xmark")
+                    Label(state.phase == .completed ? "common.dismiss" : "common.cancel", systemImage: "xmark")
                         .font(.system(size: 17, weight: .semibold))
                         .labelStyle(.iconOnly).frame(width: 20, height: 20)
                         .opacity(closing ? 0 : 1)
                         .overlay { if closing { ProgressView() } }
                 }
                 .buttonBorderShape(.circle).disabled(closing)
-                .accessibilityIdentifier("closeESIMFlow")
+                .accessibilityIdentifier(state.phase == .completed ? "closeCompletedESIM" : "closeESIMFlow")
             }
             Spacer(minLength: 16)
             if state.phase == .form, setupPage == .manual {
@@ -129,7 +138,7 @@ struct ESIMFlowView: View {
         .font(.body.weight(.semibold))
         // Overlay navigation must stay compact when page content uses accessibility sizes.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-        .buttonStyle(.glassProminent).controlSize(.regular)
+        .buttonStyle(.glassProminent).controlSize(.large)
         .tint(Color(uiColor: .tertiarySystemGroupedBackground))
         .foregroundStyle(.primary)
         .padding(.horizontal, 16).padding(.top, 16)
@@ -149,6 +158,8 @@ struct ESIMFlowView: View {
             profileList
         case .confirmation, .userInput, .sourceDeletion:
             inputPage
+        case .cancelled:
+            ProgressView()
         }
     }
 
@@ -355,14 +366,26 @@ struct ESIMFlowView: View {
         }.padding(.vertical, 16).contentShape(Rectangle())
     }
     private var statusPage: some View {
-        ESIMSetupPage(symbol: statusHeading.symbol, title: statusHeading.title, description: statusHeading.description) {
-            if state.phase == .preview, let preview = state.preview {
-                ProfileAvatar(icon: preview.icon, region: preview.regionCode, plmn: preview.profileOwner.plmn)
-            }
-            if state.phase == .connecting || state.phase == .progress {
-                HStack(spacing: 12) {
-                    ProgressView()
-                    Text(stageLabel).foregroundStyle(.secondary)
+        Group {
+            if state.phase == .preview || state.phase == .completed {
+                ESIMDownloadSummaryView(
+                    profile: state.preview,
+                    deviceName: state.detail.modem?.displayName ?? state.detail.modemID,
+                    elementName: secureElementTitle(state.seID, elements: state.detail.elements),
+                    eid: state.detail.elements.first { $0.id == state.seID }?.eid,
+                    completed: state.phase == .completed
+                )
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    navigationControls.padding(.bottom, 8)
+                }
+            } else {
+                ESIMSetupPage(symbol: statusHeading.symbol, title: statusHeading.title, description: statusHeading.description) {
+                    if state.phase == .connecting || state.phase == .progress {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                            Text(stageLabel).foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
         }
@@ -371,7 +394,7 @@ struct ESIMFlowView: View {
                 VStack(spacing: 12) {
                     if state.phase == .preview {
                         AsyncActionButton(id: "confirmESIMPreview", minimumLabelHeight: nil, action: { await state.send(.init(type: "confirm", accept: true)) }) {
-                            Text("detail.setupContinue").frame(maxWidth: .infinity)
+                            Text("detail.confirmDownload").frame(maxWidth: .infinity)
                         }.buttonStyle(.glassProminent).disabled(state.sending)
                     } else if state.phase == .completed {
                         Button { dismiss() } label: { Text("common.done").frame(maxWidth: .infinity) }
@@ -394,10 +417,6 @@ struct ESIMFlowView: View {
         switch state.phase {
         case .connecting, .progress:
             ("antenna.radiowaves.left.and.right", "detail.setupProgress", detailText("detail.keepForeground"))
-        case .preview:
-            (nil, "detail.setupReady", String(format: detailText("detail.setupReadyDescription"), state.preview?.serviceProviderName ?? ""))
-        case .completed:
-            ("checkmark.circle", "detail.setupDone", state.preview?.serviceProviderName ?? "")
         default:
             ("exclamationmark.triangle", "detail.operationFailed", detailText("detail.reconcileHint"))
         }

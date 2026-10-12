@@ -7,7 +7,7 @@ extension BackendAPI {
 
     func setNetworkRegistration(_ modem: String, value: NetworkRegistration, token: String?) async throws {
         _ = try await request(["modems", modem, "networks", "registration"], method: "PUT",
-                              body: JSONEncoder().encode(value), token: token, timeout: .connection)
+                              body: JSONEncoder().encode(value), token: token)
     }
 
     func startNetworkScan(_ modem: String, token: String?) async throws -> NetworkScan {
@@ -20,12 +20,12 @@ extension BackendAPI {
 
     func connectInternet(_ modem: String, preferences: InternetPreferences, token: String?) async throws -> DetailInternet {
         try await decode(["modems", modem, "internet-connections"], method: "POST",
-                         body: JSONEncoder().encode(preferences.submission), token: token, timeout: .connection)
+                         body: JSONEncoder().encode(preferences.submission), token: token)
     }
 
     func disconnectInternet(_ modem: String, token: String?) async throws {
         _ = try await request(["modems", modem, "internet-connections", "current"], method: "DELETE",
-                              token: token, timeout: .connection)
+                              token: token)
     }
 
     func internetOptions(_ modem: String, value: InternetConnectionOptions, token: String?) async throws -> DetailInternet {
@@ -52,7 +52,7 @@ extension BackendAPI {
 
     func wifiCallingWebsheet(_ modem: String, emergencyAddress: Bool, token: String?) async throws -> CarrierWebsheet {
         try await decode(["modems", modem, "wifi-calling", emergencyAddress ? "emergency-address-websheets" : "websheets"],
-                         method: "POST", token: token, timeout: .connection)
+                         method: "POST", token: token)
     }
 
     func volteSettings(_ modem: String, token: String?) async throws -> VoLTESettings {
@@ -61,6 +61,6 @@ extension BackendAPI {
 
     func updateVoLTE(_ modem: String, settings: VoLTESubmission, token: String?) async throws {
         _ = try await request(["modems", modem, "volte", "settings"], method: "PUT",
-                              body: JSONEncoder().encode(settings), token: token, timeout: .connection)
+                              body: JSONEncoder().encode(settings), token: token)
     }
 }

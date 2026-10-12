@@ -1,10 +1,5 @@
 import Foundation
 
-enum BackendRequestTimeout: TimeInterval, Sendable {
-    case standard = 15
-    case connection = 120
-}
-
 final class BackendRedirects: NSObject, URLSessionTaskDelegate, Sendable {
     let origin: URL
     init(origin: URL) { self.origin = origin }
@@ -22,6 +17,8 @@ final class BackendRedirects: NSObject, URLSessionTaskDelegate, Sendable {
 }
 
 final class BackendAPI: Sendable {
+    // Modem and eSIM operations can take five minutes before returning any data.
+    private static let requestTimeout: TimeInterval = 10 * 60
     typealias Transport = @Sendable (URLRequest) async throws -> BackendHTTPResponse
     let backendID: UUID
     let address: URL
@@ -45,9 +42,8 @@ final class BackendAPI: Sendable {
             self.transport = transport
         } else {
             let configuration = URLSessionConfiguration.ephemeral
-            configuration.timeoutIntervalForRequest = 15
-            // Registration and bearer changes can outlast the ordinary read timeout.
-            configuration.timeoutIntervalForResource = BackendRequestTimeout.connection.rawValue
+            configuration.timeoutIntervalForRequest = Self.requestTimeout
+            configuration.timeoutIntervalForResource = Self.requestTimeout
             configuration.urlCache = nil
             configuration.httpCookieStorage = nil
             configuration.httpShouldSetCookies = false
@@ -114,9 +110,8 @@ final class BackendAPI: Sendable {
 
     func decode<Value: Decodable & Sendable>(_ path: [String], method: String = "GET",
                                             body: Data? = nil, token: String? = nil,
-                                            query: [URLQueryItem] = [],
-                                            timeout: BackendRequestTimeout = .standard) async throws -> Value {
-        let response = try await request(path, method: method, body: body, token: token, query: query, timeout: timeout)
+                                            query: [URLQueryItem] = []) async throws -> Value {
+        let response = try await request(path, method: method, body: body, token: token, query: query)
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .custom { decoder in
             let value = try decoder.singleValueContainer().decode(String.self)
@@ -135,9 +130,8 @@ final class BackendAPI: Sendable {
     }
 
     func request(_ path: [String], method: String, body: Data? = nil, token: String? = nil,
-                 query: [URLQueryItem] = [], accept: String = "application/json",
-                 timeout: BackendRequestTimeout = .standard) async throws -> BackendHTTPResponse {
-        let request = try makeRequest(path, method: method, body: body, token: token, query: query, accept: accept, timeout: timeout)
+                 query: [URLQueryItem] = [], accept: String = "application/json") async throws -> BackendHTTPResponse {
+        let request = try makeRequest(path, method: method, body: body, token: token, query: query, accept: accept)
         let requestID = request.value(forHTTPHeaderField: "X-Request-ID") ?? UUID().uuidString
         try Task.checkCancellation()
         let started = ContinuousClock.now
@@ -156,8 +150,7 @@ final class BackendAPI: Sendable {
         return response
     }
     func makeRequest(_ path: [String], method: String = "GET", body: Data? = nil, token: String? = nil,
-                     query: [URLQueryItem] = [], accept: String = "application/json",
-                     timeout: BackendRequestTimeout = .standard) throws -> URLRequest {
+                     query: [URLQueryItem] = [], accept: String = "application/json") throws -> URLRequest {
         guard var components = URLComponents(url: address, resolvingAgainstBaseURL: false) else {
             throw BackendFailure.local("address.invalid")
         }
@@ -171,7 +164,7 @@ final class BackendAPI: Sendable {
         components.percentEncodedPath += "/" + encoded.joined(separator: "/")
         if !query.isEmpty { components.queryItems = query }
         guard let url = components.url else { throw BackendFailure.local("address.invalid") }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout.rawValue)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: Self.requestTimeout)
         let requestID = UUID().uuidString
         request.setValue(requestID, forHTTPHeaderField: "X-Request-ID")
         request.httpMethod = method
