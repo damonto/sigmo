@@ -41,6 +41,7 @@ import ReminderDialog from '@/components/ReminderDialog.vue'
 import ReminderBadge from '@/components/ReminderBadge.vue'
 import ValidatedField from '@/components/ValidatedField.vue'
 import EsimProfileAvatar from '@/components/esim/EsimProfileAvatar.vue'
+import { profilePLMN } from '@/lib/carrierLogo'
 import EsimProfileDetailsDialog from '@/components/esim/EsimProfileDetailsDialog.vue'
 import { validateOnInteraction } from '@/lib/formValidation'
 import type { EsimProfile } from '@/types/esim'
@@ -442,6 +443,7 @@ watch(detailsOpen, (value) => {
               <EsimProfileAvatar
                 :name="profile.name"
                 :icon="profile.logoUrl"
+                :plmn="profilePLMN(profile.profileOwner)"
                 :region-code="profile.regionCode"
               />
               <div class="min-w-0">

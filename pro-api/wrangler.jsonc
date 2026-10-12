@@ -41,8 +41,8 @@
   ],
   "r2_buckets": [
     {
-      "bucket_name": "sigmo-pro-updates",
-      "binding": "sigmo_pro_updates",
+      "bucket_name": "sigmo",
+      "binding": "BUCKET",
     },
   ],
   "observability": {

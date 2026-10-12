@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import HomeView from '@/views/HomeView.vue'
 import type { Modem } from '@/types/modem'
 
+vi.mock('@/apis/esim', () => ({
+  useEsimApi: () => ({ getEsimsQuietly: vi.fn().mockResolvedValue({ ses: [] }) }),
+}))
+
 const modemHarness = vi.hoisted(() => ({
   nextModems: [] as Modem[],
   fetchModems: vi.fn(),
@@ -93,7 +97,8 @@ const mountView = async () => {
         HomeHeader: {
           props: ['subtitle', 'version', 'isLoading'],
           emits: ['refresh'],
-          template: '<button type="button" @click="$emit(\'refresh\')">{{ subtitle }} {{ version }}</button>',
+          template:
+            '<button type="button" @click="$emit(\'refresh\')">{{ subtitle }} {{ version }}</button>',
         },
         HomeModemList: {
           props: ['items', 'isLoading'],

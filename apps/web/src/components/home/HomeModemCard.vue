@@ -5,12 +5,15 @@ import { useI18n } from 'vue-i18n'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
-import RegionFlag from '@/components/RegionFlag.vue'
+import CarrierLogo from '@/components/CarrierLogo.vue'
 import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
 import type { SIMKind } from '@/types/modem'
 
 const props = defineProps<{
   name: string
+  icon?: string
+  plmn?: string
+  iconPending?: boolean
   regionCode: string
   operatorName: string
   registeredOperatorName: string
@@ -36,7 +39,9 @@ const getTech = (accessTechnology: string | null): '4G' | '5G' => {
 }
 
 const tech = computed(() => getTech(props.accessTechnology))
-const techVariant = computed(() => (tech.value === '5G' && !props.airplaneMode ? 'default' : 'secondary'))
+const techVariant = computed(() =>
+  tech.value === '5G' && !props.airplaneMode ? 'default' : 'secondary',
+)
 const isRoaming = computed(() => props.registrationState === 'Roaming')
 const showRoamingLabel = computed(
   () => !props.airplaneMode && isRoaming.value && Boolean(props.registeredOperatorCode),
@@ -67,7 +72,13 @@ const displayNumber = computed(() => {
       <div
         class="flex size-12 shrink-0 items-center justify-center rounded-xl border bg-background"
       >
-        <RegionFlag :region-code="props.regionCode" class="rounded-sm text-xl" />
+        <CarrierLogo
+          :name="props.operatorName"
+          :icon="props.icon"
+          :plmn="props.iconPending ? undefined : props.plmn"
+          :region-code="props.regionCode"
+          class="size-8 text-xl"
+        />
       </div>
       <div class="flex min-w-0 flex-1 flex-col gap-0.5">
         <div class="flex items-center justify-between gap-2">
@@ -88,7 +99,10 @@ const displayNumber = computed(() => {
         </div>
         <p class="truncate text-xs font-normal text-foreground/70">
           <span>{{ operatorLine }}</span>
-          <span v-if="showRoamingLabel" class="ml-1 text-muted-foreground">
+          <span
+            v-if="showRoamingLabel"
+            class="ml-1 text-muted-foreground"
+          >
             ({{ roamingLabel }})
           </span>
         </p>

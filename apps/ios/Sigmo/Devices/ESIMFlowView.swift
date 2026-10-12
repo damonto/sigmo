@@ -356,6 +356,9 @@ struct ESIMFlowView: View {
     }
     private var statusPage: some View {
         ESIMSetupPage(symbol: statusHeading.symbol, title: statusHeading.title, description: statusHeading.description) {
+            if state.phase == .preview, let preview = state.preview {
+                ProfileAvatar(icon: preview.icon, region: preview.regionCode, plmn: preview.profileOwner.plmn)
+            }
             if state.phase == .connecting || state.phase == .progress {
                 HStack(spacing: 12) {
                     ProgressView()

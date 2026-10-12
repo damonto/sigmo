@@ -94,6 +94,7 @@
 "capability.esimTransfer" = "eSIM Quick Transfer";
 "capability.wifiCalling" = "Wi-Fi Calling";
 "capability.volte" = "VoLTE";
+"capability.nativeCalls" = "Native Calls";
 "devices.title" = "Devices";
 "devices.count" = "Device count";
 "devices.empty" = "No devices connected";

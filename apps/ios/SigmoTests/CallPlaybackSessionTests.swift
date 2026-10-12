@@ -130,7 +130,8 @@ final class CallPlaybackSessionTests: XCTestCase {
 }
 
 /// Records boundary calls without depending on the simulator's audio hardware.
-private final class PlaybackAudioProbe: AVAudioPlayer {
+/// Its additional mutable state is protected by a mutex for cross-thread assertions.
+private final class PlaybackAudioProbe: AVAudioPlayer, @unchecked Sendable {
     struct Calls {
         var preparations = 0
         var stops = 0

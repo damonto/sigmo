@@ -218,8 +218,8 @@ async function publishRelease(
       executableSha256: '1'.repeat(64),
     })),
   });
-  await env.sigmo_pro_updates.put(`${channel}/latest/manifest.json`, manifest);
-  await env.sigmo_pro_updates.put(
+  await env.BUCKET.put(`${channel}/latest/manifest.json`, manifest);
+  await env.BUCKET.put(
     `${channel}/versions/${version}/manifest.json.sig`,
     await signEd25519(
       env.SIGMO_LICENSE_PRIVATE_KEY,
@@ -936,7 +936,7 @@ describe('Telegram pairing', () => {
   it('does not mint downloads when a release is missing', async () => {
     const telegramId = 3216;
     await grant(telegramId);
-    await env.sigmo_pro_updates.delete('dev/latest/manifest.json');
+    await env.BUCKET.delete('dev/latest/manifest.json');
     const messages = mockTelegram();
 
     await activatePairing({ id: 'unused' }, telegramId, '/download dev');
@@ -1784,7 +1784,7 @@ describe('private releases', () => {
     const telegramId = 5801;
     await grant(telegramId);
     await publishRelease('stable', 'v4.0.0', ['linux-amd64']);
-    await env.sigmo_pro_updates.put(
+    await env.BUCKET.put(
       'stable/versions/v4.0.0/sigmo-pro-linux-amd64.gz',
       '0123456789',
       {
@@ -1804,7 +1804,7 @@ describe('private releases', () => {
     assert(button);
 
     const consume = vi.spyOn(Database.prototype, 'consumeDownloadGrant');
-    const objectRead = vi.spyOn(env.sigmo_pro_updates, 'get');
+    const objectRead = vi.spyOn(env.BUCKET, 'get');
     const head = await request(button.url, {
       method: 'HEAD',
       headers: { range: 'bytes=3-6' },
@@ -1877,7 +1877,7 @@ describe('private releases', () => {
     const telegramId = 5851;
     const { identity, proof } = await authorizedDevice(telegramId);
     await publishRelease('stable', 'v4.1.0', ['linux-amd64']);
-    await env.sigmo_pro_updates.put(
+    await env.BUCKET.put(
       'stable/versions/v4.1.0/manifest.json.sig',
       'invalid-signature',
     );
@@ -2024,22 +2024,22 @@ describe('private releases', () => {
         },
       ],
     });
-    await env.sigmo_pro_updates.put('stable/latest/manifest.json', manifest);
-    await env.sigmo_pro_updates.put(
+    await env.BUCKET.put('stable/latest/manifest.json', manifest);
+    await env.BUCKET.put(
       'stable/versions/v1.0.0/manifest.json.sig',
       await signEd25519(
         env.SIGMO_LICENSE_PRIVATE_KEY,
         TEXT_ENCODER.encode('old manifest'),
       ),
     );
-    await env.sigmo_pro_updates.put(
+    await env.BUCKET.put(
       'stable/versions/v2.0.0/manifest.json.sig',
       await signEd25519(
         env.SIGMO_LICENSE_PRIVATE_KEY,
         TEXT_ENCODER.encode(manifest),
       ),
     );
-    await env.sigmo_pro_updates.put(
+    await env.BUCKET.put(
       'stable/versions/v2.0.0/sigmo-pro-linux-amd64.gz',
       '0123456789',
     );

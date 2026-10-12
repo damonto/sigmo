@@ -44,7 +44,7 @@ struct BackendDetailView: View {
                         }
                     }
                     ForEach(features.subtracting(["esimTransfer", "wifiCalling", "volte"]).sorted(), id: \.self) { feature in
-                        LabeledContent(feature, value: String(localized: "capabilities.supported"))
+                        LabeledContent(featureName(feature), value: String(localized: "capabilities.supported"))
                     }
                 } else { Text("capabilities.notLoaded").foregroundStyle(Color.secondary) }
             }

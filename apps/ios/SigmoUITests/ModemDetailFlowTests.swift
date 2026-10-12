@@ -1,3 +1,4 @@
+import CoreGraphics
 import XCTest
 
 @MainActor
@@ -18,11 +19,50 @@ final class ModemDetailFlowTests: XCTestCase {
     private func tap(_ element: XCUIElement, in app: XCUIApplication) {
         _ = element.waitForExistence(timeout: 2)
         for _ in 0..<12 {
-            if element.exists && element.isHittable { break }
+            if element.exists && element.isHittable {
+                element.tap()
+                return
+            }
             app.swipeUp()
         }
-        XCTAssertTrue(element.exists && element.isHittable, "Missing element: \(element)\n\(app.debugDescription)")
-        element.tap()
+        XCTFail("Cannot reach element: \(element)\n\(app.debugDescription)")
+    }
+    private func tapOverviewRow(_ element: XCUIElement, in app: XCUIApplication) {
+        let bar = app.descendants(matching: .any)["esimNetworkBar"].firstMatch
+        guard bar.waitForExistence(timeout: 5) else {
+            XCTFail("Missing eSIM network bar")
+            return
+        }
+        for _ in 0..<12 {
+            let frame = app.frame
+            let top = bar.frame.maxY + 8
+            let bottom = app.tabBars.firstMatch.frame.minY - 8
+            let viewport = CGRect(x: frame.minX, y: top, width: frame.width, height: bottom - top)
+            guard viewport.height >= 44 else {
+                XCTFail("No tappable list area below the network bar")
+                return
+            }
+            if element.exists {
+                let visible = element.frame.intersection(viewport)
+                if element.isHittable, !visible.isNull, visible.height >= 44 {
+                    let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: element)
+                    XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
+                    app.coordinate(withNormalizedOffset: CGVector(
+                        dx: (visible.midX - frame.minX) / frame.width,
+                        dy: (visible.midY - frame.minY) / frame.height
+                    )).tap()
+                    return
+                }
+            }
+            // Keep gestures inside the list; dragging on the fixed bar cannot scroll it.
+            let down = element.exists && element.frame.midY < top
+            let startY = top + viewport.height * (down ? 0.25 : 0.75)
+            let endY = top + viewport.height * (down ? 0.75 : 0.25)
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (startY - frame.minY) / frame.height))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (endY - frame.minY) / frame.height))
+            start.press(forDuration: 0.1, thenDragTo: end)
+        }
+        XCTFail("Cannot reach overview row: \(element)\n\(app.debugDescription)")
     }
     private func screenshot(_ app: XCUIApplication, name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
@@ -36,8 +76,10 @@ final class ModemDetailFlowTests: XCTestCase {
             XCTAssertTrue(app.buttons[id].waitForNonExistence(timeout: 5))
         }
         if !app.buttons["modemInfo"].isHittable { app.navigationBars.buttons.element(boundBy: 0).tap() }
-        tap(app.buttons["profileActions-" + profile], in: app)
-        XCTAssertTrue(app.buttons["profileManagementInfo"].waitForExistence(timeout: 5))
+        tapOverviewRow(app.buttons["profileActions-" + profile], in: app)
+        let opened = app.switches["profileEnabled-" + profile].waitForExistence(timeout: 5)
+        if !opened { screenshot(app, name: "Profile navigation failure") }
+        XCTAssertTrue(opened, app.debugDescription)
     }
     private func expectToggle(_ element: XCUIElement, value: String) {
         let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: element)
@@ -49,7 +91,7 @@ final class ModemDetailFlowTests: XCTestCase {
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count) + value)
     }
     private func installForm(_ app: XCUIApplication, manual: Bool = true) {
-        tap(app.buttons["addESIM-se-a"], in: app)
+        tapOverviewRow(app.buttons["addESIM-se-a"], in: app)
         tap(app.alerts.buttons["skipESIMDiscoveries"].firstMatch, in: app)
         XCTAssertTrue(app.alerts.firstMatch.waitForNonExistence(timeout: 5))
         if manual {
@@ -72,6 +114,8 @@ final class ModemDetailFlowTests: XCTestCase {
         }
         app.tabBars.buttons["SIM"].tap()
         XCTAssertFalse(app.staticTexts["Quectel"].exists)
+        XCTAssertFalse(app.staticTexts["Device information"].exists)
+        XCTAssertFalse(app.staticTexts["device-1"].exists)
         screenshot(app, name: "Detail overview")
         app.buttons["modemInfo"].tap()
         XCTAssertTrue(app.staticTexts["Quectel"].waitForExistence(timeout: 5))
@@ -145,6 +189,9 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["SIM 1"].exists)
         XCTAssertFalse(app.staticTexts["SE 1"].exists)
         XCTAssertTrue(app.staticTexts["eSIMs"].firstMatch.exists)
+        XCTAssertEqual(app.buttons["seEID-se-a"].value as? String, "89049032000000000000000000000001")
+        XCTAssertEqual(app.staticTexts["seStorage-se-a"].value as? String, "64KiB")
+        XCTAssertFalse(app.buttons["seEID-se-b"].exists)
         screenshot(app, name: "Single SIM and eSIM overview")
         app.buttons["modemInfo"].tap()
         XCTAssertTrue(app.staticTexts["eSIM"].firstMatch.waitForExistence(timeout: 5))
@@ -190,7 +237,8 @@ final class ModemDetailFlowTests: XCTestCase {
         let app = launch("detail-loading")
         let skeleton = app.descendants(matching: .any)["profileLoading"].firstMatch
         XCTAssertTrue(skeleton.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.descendants(matching: .any)["hardwareLoading"].firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["seEID-se-a"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["seStorage-se-a"].value as? String, "64KiB")
         XCTAssertTrue(skeleton.exists)
         XCTAssertFalse(app.buttons["profileActions-se-a:8986000000000000001"].exists)
         XCTAssertFalse(app.buttons["addESIM-se-a"].exists)
@@ -214,6 +262,94 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["The server could not complete the request."].exists)
         XCTAssertFalse(app.descendants(matching: .any)["profileLoading"].firstMatch.exists)
         XCTAssertFalse(app.buttons["Retry"].exists)
+        XCTAssertTrue(app.buttons["seEID-se-a"].exists)
+        XCTAssertTrue(app.buttons["seEID-se-b"].exists)
+        XCTAssertEqual(app.staticTexts["seStorage-se-a"].value as? String, "64KiB")
+    }
+
+    func testSignalBarsRemainVisibleInGlass() throws {
+        let app = launch()
+        let signal = app.descendants(matching: .any)["signal-device-1"].firstMatch
+        XCTAssertTrue(signal.waitForExistence(timeout: 5))
+        XCTAssertEqual(signal.value as? String, "78%")
+        let image = try XCTUnwrap(signal.screenshot().image.cgImage)
+        var pixels = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let darkPixels = try pixels.withUnsafeMutableBytes { buffer in
+            let context = try XCTUnwrap(CGContext(
+                data: buffer.baseAddress, width: image.width, height: image.height,
+                bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            var count = 0
+            for offset in stride(from: 0, to: buffer.count, by: 4) {
+                if buffer[offset] < 100 && buffer[offset + 1] < 100 && buffer[offset + 2] < 100 && buffer[offset + 3] > 200 {
+                    count += 1
+                }
+            }
+            return count
+        }
+        screenshot(app, name: "Signal and SE heading contrast")
+        XCTAssertGreaterThan(darkPixels, image.width * image.height / 10, "78% signal must render filled bars, not an all-gray icon")
+    }
+
+    func testSecureElementMetadataAndCopy() {
+        let app = launch()
+        XCTAssertTrue(app.buttons["addESIM-se-a"].waitForExistence(timeout: 5))
+        screenshot(app, name: "SE metadata below headings")
+        for (id, eid, storage) in [
+            ("se-a", "89049032000000000000000000000001", "64KiB"),
+            ("se-b", "89049032000000000000000000000002", "32KiB")
+        ] {
+            let identifier = app.buttons["seEID-" + id]
+            XCTAssertTrue(identifier.waitForExistence(timeout: 5))
+            XCTAssertEqual(identifier.value as? String, eid)
+            XCTAssertEqual(app.staticTexts["seStorage-" + id].value as? String, storage)
+            XCTAssertLessThan(identifier.frame.maxY, app.buttons["addESIM-" + id].frame.minY)
+            identifier.press(forDuration: 1)
+            screenshot(app, name: "EID copy menu " + id)
+            let copy = app.buttons["Copy"]
+            XCTAssertTrue(copy.waitForExistence(timeout: 5), app.debugDescription)
+            copy.tap()
+            openActions(app)
+            app.buttons["Label"].tap()
+            let input = app.textFields["detailInput"]
+            replace(input, value: "")
+            input.press(forDuration: 1)
+            let paste = app.descendants(matching: .any)["Paste"].firstMatch
+            XCTAssertTrue(paste.waitForExistence(timeout: 5))
+            paste.tap()
+            XCTAssertTrue(input.value as? String == eid, "Pasted EID does not match \(id)")
+            app.buttons["Cancel"].tap()
+            XCTAssertTrue(input.waitForNonExistence(timeout: 5))
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+        }
+        screenshot(app, name: "SE metadata below headings")
+    }
+
+    func testNetworkBarStaysFixedWhileScrolling() {
+        for chinese in [false, true] {
+            let app = launch(chinese: chinese, large: true, dark: chinese)
+            let eid = app.buttons["seEID-se-a"]
+            XCTAssertTrue(eid.waitForExistence(timeout: 5))
+            let bar = app.descendants(matching: .any)["esimNetworkBar"].firstMatch
+            XCTAssertTrue(bar.exists)
+            let original = bar.frame
+            let eidY = eid.frame.minY
+            screenshot(app, name: "Large text fixed network bar \(chinese)")
+            app.swipeUp()
+            XCTAssertEqual(bar.frame.minY, original.minY, accuracy: 1)
+            XCTAssertEqual(bar.frame.height, original.height, accuracy: 1)
+            XCTAssertTrue(!eid.isHittable || eid.frame.minY < eidY)
+            XCTAssertTrue(app.buttons["simSlotPicker"].isHittable)
+            screenshot(app, name: "Fixed network bar after scrolling \(chinese)")
+            openActions(app, profile: "se-a:8986000000000000001")
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+            tapOverviewRow(app.buttons["addESIM-se-a"], in: app)
+            XCTAssertTrue(app.alerts.buttons["skipESIMDiscoveries"].firstMatch.waitForExistence(timeout: 5))
+            app.terminate()
+        }
     }
 
     func testIncorrectPINAlertPreservesEditor() {
@@ -244,7 +380,7 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertEqual(install.label, "Add eSIM")
         XCTAssertGreaterThanOrEqual(install.frame.height, 44)
         XCTAssertFalse(app.buttons["installESIM"].exists)
-        tap(app.buttons["addESIM-se-b"], in: app)
+        tapOverviewRow(app.buttons["addESIM-se-b"], in: app)
         XCTAssertTrue(app.activityIndicators.firstMatch.waitForExistence(timeout: 2))
         XCTAssertFalse(app.buttons["addESIM-se-a"].isEnabled)
         XCTAssertFalse(app.buttons["addESIM-se-b"].isEnabled)
@@ -269,7 +405,7 @@ final class ModemDetailFlowTests: XCTestCase {
 
     func testLeavingDetailCancelsPendingESIMSetup() {
         let app = launch("detail-discovery-loading")
-        tap(app.buttons["addESIM-se-a"], in: app)
+        tapOverviewRow(app.buttons["addESIM-se-a"], in: app)
         XCTAssertTrue(app.activityIndicators.firstMatch.waitForExistence(timeout: 2))
         app.tabBars.buttons["Messages"].tap()
         XCTAssertFalse(app.alerts.firstMatch.waitForExistence(timeout: 6))
@@ -278,7 +414,7 @@ final class ModemDetailFlowTests: XCTestCase {
         let install = app.buttons["addESIM-se-a"]
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: install)
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
-        tap(install, in: app)
+        tapOverviewRow(install, in: app)
         XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 10))
         tap(app.alerts.buttons["skipESIMDiscoveries"].firstMatch, in: app)
         XCTAssertTrue(app.buttons["scanESIM"].waitForExistence(timeout: 5))
@@ -384,6 +520,7 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue(physical.buttons["modemInfo"].waitForExistence(timeout: 5))
         XCTAssertTrue(physical.tabBars.buttons["SIM"].isSelected)
         XCTAssertFalse(physical.buttons["addESIM-se-a"].exists)
+        XCTAssertFalse(physical.descendants(matching: .any)["esimNetworkBar"].exists)
         XCTAssertFalse(physical.staticTexts["Quectel"].exists)
         XCTAssertFalse(physical.staticTexts["/dev/cdc-wdm0"].exists)
         XCTAssertTrue(physical.staticTexts["+8613800000000"].exists)
@@ -421,11 +558,11 @@ final class ModemDetailFlowTests: XCTestCase {
         screenshot(app, name: "Chinese large text information")
         try app.performAccessibilityAudit(for: [.sufficientElementDescription, .textClipped])
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        tap(app.buttons["profileActions-se-a:8986000000000000001"], in: app)
+        tapOverviewRow(app.buttons["profileActions-se-a:8986000000000000001"], in: app)
         screenshot(app, name: "Chinese large text profile actions")
         try app.performAccessibilityAudit(for: [.sufficientElementDescription, .textClipped])
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        tap(app.buttons["addESIM-se-a"], in: app)
+        tapOverviewRow(app.buttons["addESIM-se-a"], in: app)
         tap(app.alerts.buttons["skipESIMDiscoveries"].firstMatch, in: app)
         XCTAssertFalse(app.staticTexts["选择 SE"].exists)
         XCTAssertTrue(app.staticTexts["设置 eSIM"].waitForExistence(timeout: 5))
@@ -635,7 +772,7 @@ final class ModemDetailFlowTests: XCTestCase {
             ("detail-discovery-error", true)
         ] {
             let app = launch(scenario)
-            tap(app.buttons["addESIM-se-a"], in: app)
+            tapOverviewRow(app.buttons["addESIM-se-a"], in: app)
             let alert = app.alerts.firstMatch
             if failed {
                 XCTAssertTrue(alert.waitForExistence(timeout: 5))
@@ -662,7 +799,7 @@ final class ModemDetailFlowTests: XCTestCase {
     func testEmptyProfileListsRetainAddESIM() {
         let app = launch("detail-empty-profiles")
         XCTAssertTrue(app.buttons["addESIM-se-a"].waitForExistence(timeout: 5))
-        tap(app.buttons["addESIM-se-b"], in: app)
+        tapOverviewRow(app.buttons["addESIM-se-b"], in: app)
         tap(app.alerts.buttons["skipESIMDiscoveries"].firstMatch, in: app)
         XCTAssertTrue(app.buttons["scanESIM"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["targetEUICC-se-b"].exists)
@@ -685,7 +822,7 @@ final class ModemDetailFlowTests: XCTestCase {
 
     func testDiscoveryDownloadUsesTheOwningSecureElement() {
         let app = launch()
-        tap(app.buttons["addESIM-se-b"], in: app)
+        tapOverviewRow(app.buttons["addESIM-se-b"], in: app)
         tap(app.alerts.buttons["showESIMDiscoveries"].firstMatch, in: app)
         tap(app.buttons["downloadDiscoveredESIM"], in: app)
         tap(app.buttons["confirmESIMPreview"], in: app)
@@ -696,14 +833,14 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["eSIM Added"].waitForExistence(timeout: 10))
         app.buttons["closeESIMFlow"].tap()
         let downloaded = app.buttons["profileActions-se-b:8986000000000000003"]
-        tap(downloaded, in: app)
+        tapOverviewRow(downloaded, in: app)
         XCTAssertTrue(app.buttons["profileManagementInfo"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["profileActions-se-a:8986000000000000003"].exists)
     }
 
     func testDiscoveredProfilePreviewCancellation() {
         let app = launch(dark: true)
-        tap(app.buttons["addESIM-se-a"], in: app)
+        tapOverviewRow(app.buttons["addESIM-se-a"], in: app)
         tap(app.alerts.buttons["showESIMDiscoveries"].firstMatch, in: app)
         let download = app.buttons["downloadDiscoveredESIM"]
         XCTAssertTrue(download.waitForExistence(timeout: 5))

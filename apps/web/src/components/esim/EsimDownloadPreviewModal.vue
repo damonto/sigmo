@@ -4,7 +4,8 @@ import { ChevronDown, ChevronUp } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogContent.vue'
-import RegionFlag from '@/components/RegionFlag.vue'
+import CarrierLogo from '@/components/CarrierLogo.vue'
+import { profilePLMN } from '@/lib/carrierLogo'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -84,7 +85,10 @@ watch(
 </script>
 
 <template>
-  <Dialog :open="props.open" @update:open="handleOpenChange">
+  <Dialog
+    :open="props.open"
+    @update:open="handleOpenChange"
+  >
     <EsimPersistentDialogContent class="sm:max-w-sm">
       <DialogHeader>
         <DialogTitle>{{ title }}</DialogTitle>
@@ -95,8 +99,13 @@ watch(
           <div
             class="flex size-12 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30"
           >
-            <img v-if="logoUrl" :src="logoUrl" class="size-7 object-contain" />
-            <RegionFlag v-else :region-code="regionCode" class="rounded-sm text-base" />
+            <CarrierLogo
+              :name="profileName"
+              :icon="logoUrl"
+              :plmn="profilePLMN(props.profile?.profileOwner)"
+              :region-code="regionCode"
+              class="size-7 text-base"
+            />
           </div>
           <div class="min-w-0">
             <p class="truncate text-sm font-semibold text-foreground">{{ profileName }}</p>
@@ -104,7 +113,10 @@ watch(
           </div>
         </CardContent>
       </Card>
-      <div v-if="profile" class="space-y-2">
+      <div
+        v-if="profile"
+        class="space-y-2"
+      >
         <Button
           variant="ghost"
           type="button"
@@ -112,14 +124,21 @@ watch(
           @click="detailsOpen = !detailsOpen"
         >
           <span>
-            {{
-              t(detailsOpen ? 'modemDetail.esim.hideDetails' : 'modemDetail.esim.showDetails')
-            }}
+            {{ t(detailsOpen ? 'modemDetail.esim.hideDetails' : 'modemDetail.esim.showDetails') }}
           </span>
-          <ChevronUp v-if="detailsOpen" class="size-4" />
-          <ChevronDown v-else class="size-4" />
+          <ChevronUp
+            v-if="detailsOpen"
+            class="size-4"
+          />
+          <ChevronDown
+            v-else
+            class="size-4"
+          />
         </Button>
-        <dl v-if="detailsOpen" class="rounded-md border border-border bg-muted/20 p-3 text-xs">
+        <dl
+          v-if="detailsOpen"
+          class="rounded-md border border-border bg-muted/20 p-3 text-xs"
+        >
           <div
             v-for="row in detailRows"
             :key="row.label"
@@ -131,7 +150,11 @@ watch(
         </dl>
       </div>
       <DialogFooter class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Button type="button" class="order-1 w-full sm:order-2" @click="emit('confirm')">
+        <Button
+          type="button"
+          class="order-1 w-full sm:order-2"
+          @click="emit('confirm')"
+        >
           {{ confirmLabel }}
         </Button>
         <Button

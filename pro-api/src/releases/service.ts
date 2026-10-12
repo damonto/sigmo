@@ -39,7 +39,7 @@ async function loadLatestManifest(
   env: Env,
   channel: ReleaseChannel,
 ): Promise<ReleaseSnapshot> {
-  const manifestObject = await env.sigmo_pro_updates.get(
+  const manifestObject = await env.BUCKET.get(
     `${channel}/latest/manifest.json`,
   );
   if (!manifestObject) {
@@ -71,7 +71,7 @@ async function loadLatestManifest(
       'release manifest is invalid',
     );
   }
-  const signatureObject = await env.sigmo_pro_updates.get(
+  const signatureObject = await env.BUCKET.get(
     `${channel}/versions/${manifest.version}/manifest.json.sig`,
   );
   if (!signatureObject) {
@@ -345,7 +345,7 @@ export async function download(
   }
   const bootstrap = 'purpose' in ticket;
   if (request.method === 'HEAD') {
-    const object = await env.sigmo_pro_updates.head(ticket.path);
+    const object = await env.BUCKET.head(ticket.path);
     if (!object) {
       return apiError('release_artifact_not_found', 'artifact not found', 404);
     }
@@ -357,7 +357,7 @@ export async function download(
   // Bootstrap grants authorize one full transfer. Ignoring Range avoids
   // consuming the grant on a partial representation that cannot be resumed.
   if (!bootstrap && request.headers.has('range')) {
-    const metadata = await env.sigmo_pro_updates.head(ticket.path);
+    const metadata = await env.BUCKET.head(ticket.path);
     if (!metadata) {
       return apiError('release_artifact_not_found', 'artifact not found', 404);
     }
@@ -387,8 +387,8 @@ export async function download(
     }
   }
   const object = range
-    ? await env.sigmo_pro_updates.get(ticket.path, { range })
-    : await env.sigmo_pro_updates.get(ticket.path);
+    ? await env.BUCKET.get(ticket.path, { range })
+    : await env.BUCKET.get(ticket.path);
   if (!object) {
     return apiError('release_artifact_not_found', 'artifact not found', 404);
   }

@@ -5,22 +5,23 @@ The Worker also serves free Community/Pro APNs notifications. Installation crede
 This Worker owns the Telegram device pairing flow, signed Pro leases, private
 release metadata, and short-lived R2 download tickets. The R2 bucket must stay
 private: do not enable an `r2.dev` hostname, public bucket access, or a custom
-domain for it. Binaries are read only through the `sigmo_pro_updates` Worker
-binding.
+domain for it. Binaries are read only through the `BUCKET` Worker
+binding. Public carrier PNGs share this bucket under `logos/`; only catalogued
+images are exposed through `/logo/:plmn`.
 
 ## Resources
 
 The checked-in Wrangler configuration expects:
 
 - D1 database: `sigmo` (the retired `sigmo-licenses` database remains available for migration recovery)
-- private R2 bucket: `sigmo-pro-updates`
+- private R2 bucket: `sigmo`
 - Telegram bot username: `SigmoProBot`
 
 Create new resources only when they do not already exist:
 
 ```bash
 bunx wrangler d1 create sigmo
-bunx wrangler r2 bucket create sigmo-pro-updates
+bunx wrangler r2 bucket create sigmo
 ```
 
 If D1 is recreated, copy the returned database ID into `wrangler.jsonc`.
@@ -112,9 +113,9 @@ Also configure these repository values for Pro publishing:
 - Secrets: `SIGMO_RELEASE_PRIVATE_KEY`, `SIGMO_RELEASE_PUBLIC_KEY`,
   `SIGMO_LICENSE_PUBLIC_KEY`, `SIGMO_R2_ACCESS_KEY_ID`,
   `SIGMO_R2_SECRET_ACCESS_KEY`, and `SIGMO_R2_ACCOUNT_ID`.
-- Variables: `SIGMO_PRO_WORKER_URL` and `SIGMO_R2_BUCKET`.
+- Variable: `SIGMO_PRO_WORKER_URL`. The publishing workflow uses the `sigmo` bucket.
 
-The R2 access key should be scoped only to the Pro update bucket.
+The R2 access key should be scoped only to the `sigmo` bucket.
 
 ## Telegram webhook
 

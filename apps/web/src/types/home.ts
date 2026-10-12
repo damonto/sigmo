@@ -3,6 +3,9 @@ import type { SIMKind } from '@/types/modem'
 export type HomeModemItem = {
   id: string
   name: string
+  icon?: string
+  plmn?: string
+  iconPending?: boolean
   regionCode: string
   operatorName: string
   registeredOperatorName: string

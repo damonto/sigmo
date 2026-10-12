@@ -74,6 +74,12 @@ struct ESIMOwner: Codable, Sendable, Equatable {
     let mnc: String
     let gid1: String?
     let gid2: String?
+
+    var plmn: String? {
+        guard mcc.utf8.count == 3, (2...3).contains(mnc.utf8.count) else { return nil }
+        let value = mcc + mnc
+        return value.utf8.allSatisfy({ (48...57).contains($0) }) ? value : nil
+    }
 }
 
 struct ESIMPreview: Codable, Sendable {

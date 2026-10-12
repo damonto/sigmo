@@ -146,7 +146,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.SIGMO_R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           SIGMO_R2_ACCOUNT_ID: ${{ secrets.SIGMO_R2_ACCOUNT_ID }}
-          SIGMO_R2_BUCKET: ${{ vars.SIGMO_R2_BUCKET }}
+          SIGMO_R2_BUCKET: sigmo
           CHANNEL: ${{ needs.metadata.outputs.channel }}
           VERSION: ${{ needs.metadata.outputs.version }}
         run: |

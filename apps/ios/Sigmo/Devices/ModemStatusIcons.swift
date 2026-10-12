@@ -56,17 +56,12 @@ struct ModemStatusIcons: View {
                     .accessibilityLabel(Text("modem.airplane"))
                     .accessibilityIdentifier("airplane-\(identity ?? modem.id)")
             } else {
-                HStack(alignment: .bottom, spacing: 2) {
-                    ForEach(0..<4) { index in
-                        RoundedRectangle(cornerRadius: 1.5)
-                            .fill(modem.signalPercent > index * 25 ? foreground : Color(uiColor: .systemGray4))
-                            .frame(width: iconSize / 4, height: iconSize * Double(index + 1) / 4)
-                    }
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Text("modem.signal"))
-                .accessibilityValue("\(modem.signalPercent)%")
-                .accessibilityIdentifier("signal-\(identity ?? modem.id)")
+                Image(systemName: "cellularbars", variableValue: Double(modem.signalPercent) / 100)
+                    .symbolRenderingMode(.hierarchical)
+                    .frame(width: iconSize + 6, height: iconSize)
+                    .accessibilityLabel(Text("modem.signal"))
+                    .accessibilityValue("\(modem.signalPercent)%")
+                    .accessibilityIdentifier("signal-\(identity ?? modem.id)")
             }
         }
     }

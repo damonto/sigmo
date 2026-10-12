@@ -32,6 +32,7 @@ import {
 import { PushDatabase } from '../storage/push';
 import { download, latestRelease } from '../releases/service';
 import { telegramWebhook } from '../telegram/webhook';
+import { carrierLogo } from '../logos/service';
 
 interface ApiEnv {
   Bindings: Env;
@@ -126,6 +127,13 @@ function routeParameter(c: Context<ApiEnv>, name: string): string {
   }
   return value;
 }
+
+app.get('/logo/:plmn', async (c) =>
+  finishResponse(
+    await carrierLogo(c.req.raw, c.env.BUCKET, c.req.param('plmn')),
+    c.get('requestId'),
+  ),
+);
 
 app.post(
   '/v1/telegram-updates',

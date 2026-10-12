@@ -3,6 +3,17 @@ import XCTest
 
 @MainActor
 final class ModemDetailTests: XCTestCase {
+    func testSecureElementStorageUsesWholeKiB() {
+        let cases: [(bytes: Int64?, expected: String)] = [
+            (nil, "—"), (0, "0KiB"), (1023, "0KiB"),
+            (1024, "1KiB"), (1536, "1KiB"), (65536, "64KiB"),
+            (1048576, "1024KiB")
+        ]
+        for item in cases {
+            XCTAssertEqual(SecureElementMetadata.storageText(item.bytes), item.expected)
+        }
+    }
+
     private func make(_ server: DetailFixtureServer = DetailFixtureServer(), host: String = "detail.example") async throws -> ModemDetailState {
         let config = BackendConfiguration(name: host, address: try BackendAddress.normalize("https://\(host)/prefix"))
         let session = BackendSession(configuration: config, credentials: MemoryCredentials().store,

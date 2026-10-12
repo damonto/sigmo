@@ -8,6 +8,57 @@ func secureElementTitle(_ id: String, elements: [SecureElement]) -> String {
     return "SE \(index + 1)"
 }
 
+struct SecureElementMetadata: View {
+    let element: SecureElement
+
+    static func storageText(_ bytes: Int64?) -> String {
+        bytes.map { "\($0 / 1024)KiB" } ?? "—"
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                eid.fixedSize()
+                Spacer(minLength: 0)
+                storage.fixedSize()
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                eid.fixedSize(horizontal: false, vertical: true)
+                storage
+            }
+        }
+        .font(.caption.monospaced())
+        .foregroundStyle(Color.secondary)
+        .textCase(nil)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var eid: some View {
+        Menu {
+            if let eid = element.eid, !eid.isEmpty {
+                Button("detail.copy", systemImage: "document.on.document") {
+                    UIPasteboard.general.string = eid
+                }
+            }
+        } label: {
+            Text(modemValue(element.eid))
+                .multilineTextAlignment(.leading)
+        }
+        .buttonStyle(.plain)
+        .disabled(element.eid?.isEmpty != false)
+        .accessibilityLabel(Text("detail.eid"))
+        .accessibilityValue(modemValue(element.eid))
+        .accessibilityIdentifier("seEID-" + element.id)
+    }
+
+    private var storage: some View {
+        Text(Self.storageText(element.freeSpace))
+            .accessibilityLabel(Text("detail.storage"))
+            .accessibilityValue(Self.storageText(element.freeSpace))
+            .accessibilityIdentifier("seStorage-" + element.id)
+    }
+}
+
 struct DetailValue: View {
     let title: String
     let value: String?
@@ -88,20 +139,10 @@ private struct DetailErrorAlert: ViewModifier {
 struct ProfileAvatar: View {
     let icon: String?
     let region: String?
+    var plmn: String? = nil
     @ScaledMetric(relativeTo: .body) private var size = 32.0
-    private var bitmap: UIImage? {
-        guard let icon, icon.hasPrefix("data:image/"), let comma = icon.firstIndex(of: ","),
-              icon[..<comma].hasSuffix(";base64"),
-              let data = Data(base64Encoded: String(icon[icon.index(after: comma)...])) else { return nil }
-        return UIImage(data: data)
-    }
     var body: some View {
-        Group {
-            if let bitmap { Image(uiImage: bitmap).resizable().scaledToFit() }
-            else { RegionFlag(regionCode: region ?? "", background: .clear).scaleEffect(size / 48).frame(width: size, height: size) }
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
+        CarrierLogo(icon: icon, plmn: plmn, regionCode: region ?? "", size: size)
     }
 }
 

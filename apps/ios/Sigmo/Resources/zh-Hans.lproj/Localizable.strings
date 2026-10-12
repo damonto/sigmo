@@ -94,6 +94,7 @@
 "capability.esimTransfer" = "eSIM 快速转移";
 "capability.wifiCalling" = "Wi-Fi 通话";
 "capability.volte" = "VoLTE";
+"capability.nativeCalls" = "原生通话";
 "devices.title" = "设备";
 "devices.count" = "设备数量";
 "devices.empty" = "尚无已连接设备";

@@ -64,6 +64,7 @@ private struct ModemDetailScreen: View {
     @State private var refreshID = 0
     @State private var tab = DetailTab.overview
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(session: BackendSession, modemID: String, initialConversationID: String?, close: @escaping () -> Void, selectModem: @escaping (String) -> Void) {
         self.session = session
@@ -255,11 +256,10 @@ private struct ModemDetailScreen: View {
                         Label("detail.simLocked", systemImage: "lock")
                         Button("detail.unlock") { sheet = .pin }
                     }
-                } else {
+                } else if !state.esim {
                     slotSection(modem)
                 }
                 if state.esim {
-                    summary
                     profiles
                 } else if modem.simKind == "physical" {
                     physicalActions(modem)
@@ -281,6 +281,11 @@ private struct ModemDetailScreen: View {
         .environment(\.defaultMinListRowHeight, 44)
         .environment(\.horizontalSizeClass, horizontalSizeClass)
         .labelStyle(.titleAndIcon)
+        .safeAreaBar(edge: .top, spacing: 0) {
+            if state.esim, !state.needsPIN, let modem = state.modem {
+                networkBar(modem)
+            }
+        }
         .refreshable { await reload() }
         .detailErrorAlert($presentedFailure)
         .foregroundTask(id: refreshIdentity) {
@@ -346,12 +351,49 @@ private struct ModemDetailScreen: View {
         Section("modem.sim") {
             LabeledContent {
                 HStack(spacing: 12) {
-                    ModemStatusIcons(modem: modem, capabilities: session.capabilities ?? [])
-                    if let slots = modem.slots, slots.count > 1 {
-                        slotMenu(slots, selectedSlot: modem.sim.slot)
-                    }
+                    networkItems(modem)
                 }
             } label: { Text(modem.carrier) }
+        }
+    }
+
+    private func networkBar(_ modem: Modem) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                Text(modem.carrier).fixedSize()
+                Spacer(minLength: 0)
+                networkControls(modem)
+            }
+            VStack(spacing: 8) {
+                Text(modem.carrier)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                networkControls(modem)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .font(.subheadline)
+        .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 44 : 20)
+        .padding(.vertical, 10)
+        .frame(minHeight: 44)
+        .glassEffect(.regular, in: Capsule())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("esimNetworkBar")
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    private func networkControls(_ modem: Modem) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) { networkItems(modem) }
+            VStack(spacing: 8) { networkItems(modem) }
+        }
+    }
+
+    @ViewBuilder private func networkItems(_ modem: Modem) -> some View {
+        ModemStatusIcons(modem: modem, capabilities: session.capabilities ?? [])
+        if let slots = modem.slots, slots.count > 1 {
+            slotMenu(slots, selectedSlot: modem.sim.slot)
         }
     }
 
@@ -382,40 +424,16 @@ private struct ModemDetailScreen: View {
         .accessibilityIdentifier("simSlotPicker")
     }
 
-    private var summary: some View {
-        Section("modem.device") {
-            DetailValue(title: "detail.imei", value: state.modemID, copyable: true)
-            if !state.elementsLoaded, state.failure == nil {
-                Group {
-                    DetailValue(title: "detail.eid", value: "89049032000000000000000000000000")
-                    DetailValue(title: "detail.storage", value: "64 KB")
-                }
-                .detailSkeleton("detail.loadingInformation")
-                .accessibilityIdentifier("hardwareLoading")
-            } else {
-                ForEach(Array(state.elements.enumerated()), id: \.element.id) { index, element in
-                    DetailValue(title: state.elements.count > 1 ? "EID \(index + 1)" : "detail.eid", value: element.eid, copyable: true)
-                }
-                DetailValue(title: "detail.storage", value: storageValue)
-            }
-        }
-    }
-    private var storageValue: String {
-        state.elements.enumerated().map { index, element in
-            let space = element.freeSpace.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .binary) } ?? "—"
-            return state.elements.count > 1 ? "SE \(index + 1): \(space)" : space
-        }.joined(separator: "  ·  ")
-    }
     @ViewBuilder private var profiles: some View {
-        if !state.profilesLoaded, state.failure == nil {
-            Section("detail.profiles") { ProfileSkeletonRows() }
-        } else if state.groups.allSatisfy({ $0.profiles.isEmpty }), state.profilesFailure != nil {
-            Section("detail.profiles") {
-                ContentUnavailableView("detail.profilesUnavailable", systemImage: "simcard")
-            }
-        } else {
+        if !state.elements.isEmpty {
             ForEach(state.elements) { element in
                 profileSection(element)
+            }
+        } else if !state.elementsLoaded, state.failure == nil {
+            Section("detail.profiles") { ProfileSkeletonRows() }
+        } else if state.elementsFailure != nil || state.profilesFailure != nil {
+            Section("detail.profiles") {
+                ContentUnavailableView("detail.profilesUnavailable", systemImage: "simcard")
             }
         }
     }
@@ -423,27 +441,39 @@ private struct ModemDetailScreen: View {
     private func profileSection(_ element: SecureElement) -> some View {
         let profiles = state.groups.first { $0.id == element.id }?.profiles ?? []
         return Section {
-            ForEach(profiles) { profile in
-                profileRow(profile)
-            }
-            if profiles.isEmpty, state.profilesLoaded, state.profilesFailure == nil {
-                Text("detail.noProfiles").foregroundStyle(.secondary)
-            }
-            AsyncActionButton(id: "addESIM-" + element.id, minimumLabelHeight: nil, action: {
-                await prepareFlow(seID: element.id)
-            }) {
-                Text("detail.setupTitle").frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .disabled(!state.canInstall || addingESIM)
-            .accessibilityValue(preparingFlow?.seID == element.id ? detailText("detail.checkingESIM") : "")
-        } header: {
-            HStack {
-                Text("detail.profiles")
-                if state.elements.count > 1 {
-                    Text("· \(secureElementTitle(element.id, elements: state.elements))")
+            if !state.profilesLoaded, state.failure == nil {
+                ProfileSkeletonRows()
+            } else if profiles.isEmpty, state.profilesFailure != nil {
+                ContentUnavailableView("detail.profilesUnavailable", systemImage: "simcard")
+            } else {
+                ForEach(profiles) { profile in
+                    profileRow(profile)
                 }
-                Spacer()
-                Text(profiles.count.formatted()).monospacedDigit()
+                if profiles.isEmpty, state.profilesLoaded {
+                    Text("detail.noProfiles").foregroundStyle(.secondary)
+                }
+                AsyncActionButton(id: "addESIM-" + element.id, minimumLabelHeight: nil, action: {
+                    await prepareFlow(seID: element.id)
+                }) {
+                    Text("detail.setupTitle").frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .disabled(!state.canInstall || addingESIM)
+                .accessibilityValue(preparingFlow?.seID == element.id ? detailText("detail.checkingESIM") : "")
+            }
+        } header: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("detail.profiles")
+                    if state.elements.count > 1 {
+                        Text("· \(secureElementTitle(element.id, elements: state.elements))")
+                    }
+                    Spacer()
+                    if state.profilesLoaded, state.profilesFailure == nil || !profiles.isEmpty {
+                        Text(profiles.count.formatted()).monospacedDigit()
+                    }
+                }
+                .foregroundStyle(Color(uiColor: .label))
+                SecureElementMetadata(element: element)
             }
         }
     }
@@ -453,29 +483,47 @@ private struct ModemDetailScreen: View {
         return NavigationLink {
             ESIMProfileActionsView(state: state, profileID: profile.id, onDelete: { deletion = $0 })
         } label: {
-            HStack(spacing: 12) {
-                ProfileAvatar(icon: profile.icon, region: profile.regionCode)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(profile.name).lineLimit(1)
-                    Text(profile.iccid).font(.caption.monospaced()).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 4)
-                Group {
-                    if deleting {
-                        Text("detail.deletingProfile")
-                    } else {
-                        Text(profile.enabled ? "detail.lineOn" : "detail.lineOff")
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ProfileAvatar(icon: profile.icon, region: profile.regionCode, plmn: profile.profileOwner.plmn)
+                        Text(profile.name).fixedSize(horizontal: false, vertical: true)
                     }
+                    Text(profile.iccid)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack { profileStatus(profile, deleting: deleting) }
                 }
-                .foregroundStyle(.secondary)
-                if profile.reminder != nil {
-                    Image(systemName: "bell").font(.caption).foregroundStyle(.secondary)
-                        .accessibilityLabel(Text("detail.reminder"))
+            } else {
+                HStack(spacing: 12) {
+                    ProfileAvatar(icon: profile.icon, region: profile.regionCode, plmn: profile.profileOwner.plmn)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(profile.name).lineLimit(1)
+                        Text(profile.iccid).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 4)
+                    profileStatus(profile, deleting: deleting)
                 }
             }
         }
         .disabled(deleting || state.loading)
         .accessibilityIdentifier("profileActions-" + profile.id)
+    }
+
+    @ViewBuilder private func profileStatus(_ profile: ESIMProfile, deleting: Bool) -> some View {
+        Group {
+            if deleting {
+                Text("detail.deletingProfile")
+            } else {
+                Text(profile.enabled ? "detail.lineOn" : "detail.lineOff")
+            }
+        }
+        .foregroundStyle(.secondary)
+        if profile.reminder != nil {
+            Image(systemName: "bell").font(.caption).foregroundStyle(.secondary)
+                .accessibilityLabel(Text("detail.reminder"))
+        }
     }
 
     @ViewBuilder private func physicalActions(_ modem: Modem) -> some View {

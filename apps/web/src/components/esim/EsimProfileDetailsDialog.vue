@@ -3,6 +3,7 @@ import { computed, useTemplateRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import EsimProfileAvatar from '@/components/esim/EsimProfileAvatar.vue'
+import { profilePLMN } from '@/lib/carrierLogo'
 import {
   Dialog,
   DialogContent,
@@ -71,7 +72,11 @@ const focusDialogTitle = (event: Event) => {
       @open-auto-focus="focusDialogTitle"
     >
       <DialogHeader>
-        <div ref="focusTarget" tabindex="-1" class="space-y-1 outline-none">
+        <div
+          ref="focusTarget"
+          tabindex="-1"
+          class="space-y-1 outline-none"
+        >
           <DialogTitle>{{ t('modemDetail.esim.profileDetailsTitle') }}</DialogTitle>
           <DialogDescription class="sr-only">
             {{ t('modemDetail.esim.profileDetailsTitle') }}
@@ -79,11 +84,15 @@ const focusDialogTitle = (event: Event) => {
         </div>
       </DialogHeader>
 
-      <div v-if="props.profile" class="space-y-6">
+      <div
+        v-if="props.profile"
+        class="space-y-6"
+      >
         <div class="flex min-w-0 items-center gap-3">
           <EsimProfileAvatar
             :name="props.profile.name"
             :icon="props.profile.logoUrl"
+            :plmn="profilePLMN(props.profile.profileOwner)"
             :region-code="props.profile.regionCode"
           />
           <div class="min-w-0">

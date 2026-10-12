@@ -141,7 +141,7 @@ actor DetailFixtureServer {
     }
     static var elements: SecureElements {
         SecureElements(ses: ["se-a", "se-b"].enumerated().map { index, id in
-            SecureElement(id: id, label: "eUICC \(index == 0 ? "A" : "B")", aid: nil, eid: "8904903200000000000000000000000\(index + 1)", freeSpace: 65536,
+            SecureElement(id: id, label: "eUICC \(index == 0 ? "A" : "B")", aid: nil, eid: "8904903200000000000000000000000\(index + 1)", freeSpace: index == 0 ? 65536 : 32768,
                           sasUp: .init(name: "Example accredited site", region: "CN"), certificates: ["GSMA Root CI"])
         })
     }
