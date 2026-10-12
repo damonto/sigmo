@@ -3,7 +3,6 @@ import SwiftUI
 struct VoLTEView: View {
     @State private var state: VoLTEState
     @State private var action: ConnectionAction<Bool>?
-    @State private var refreshID = 0
 
     init(detail: ModemDetailState, profileID: String) {
         _state = State(initialValue: VoLTEState(detail: detail, profileID: profileID))
@@ -12,7 +11,6 @@ struct VoLTEView: View {
     var body: some View {
         Form {
             ConnectionRadioNotice(scope: state.scope)
-            ConnectionReadFailure(failure: state.loadFailure, retry: { refreshID += 1 })
             Section {
                 if let settings = state.settings {
                     Toggle("connection.enableVoLTE", isOn: Binding(
@@ -41,7 +39,7 @@ struct VoLTEView: View {
             }
         }
         .navigationTitle("capability.volte")
-        .modifier(ConnectionLifecycle(scope: state.scope, refreshID: refreshID,
+        .modifier(ConnectionLifecycle(scope: state.scope,
                                       reload: { await state.reload() }, cancelAction: { action = nil }))
         .task(id: action?.id) {
             guard let action else { return }
@@ -49,7 +47,7 @@ struct VoLTEView: View {
             if self.action?.id == action.id, !Task.isCancelled { self.action = nil }
         }
         .refreshable { await state.reload() }
-        .detailErrorAlert($state.failure, retry: { refreshID += 1 })
+        .detailErrorAlert($state.failure)
     }
 }
 
@@ -60,11 +58,9 @@ private func dataPathName(_ path: String) -> String {
 private struct VoLTEDataPathView: View {
     @Bindable var state: VoLTEState
     @State private var action: ConnectionAction<VoLTEDataPath>?
-    @State private var refreshID = 0
 
     var body: some View {
         Form {
-            ConnectionReadFailure(failure: state.loadFailure, retry: { refreshID += 1 })
             if let settings = state.settings {
                 if settings.dataPath == "mbim" {
                     Section {
@@ -94,13 +90,13 @@ private struct VoLTEDataPathView: View {
             }
         }
         .navigationTitle("connection.dataPath")
-        .modifier(ConnectionLifecycle(scope: state.scope, refreshID: refreshID,
+        .modifier(ConnectionLifecycle(scope: state.scope,
                                       reload: { await state.reload() }, cancelAction: { action = nil }))
         .task(id: action?.id) {
             guard let action else { return }
             await state.selectDataPath(action.value)
             if self.action?.id == action.id, !Task.isCancelled { self.action = nil }
         }
-        .detailErrorAlert($state.failure, retry: { refreshID += 1 })
+        .detailErrorAlert($state.failure)
     }
 }

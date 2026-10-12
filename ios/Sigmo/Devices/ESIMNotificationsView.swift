@@ -60,7 +60,6 @@ struct ESIMNotificationsView: View {
     @State private var deleting: ESIMNotification?
     @State private var pendingAction: PendingAction?
     @State private var presentedFailure: BackendFailure?
-    @State private var refreshID = 0
     init(session: BackendSession, modemID: String, elements: [SecureElement]) {
         self.session = session
         self.elements = elements
@@ -90,7 +89,6 @@ struct ESIMNotificationsView: View {
                     ContentUnavailableView("detail.noNotifications", systemImage: "tray")
                 } else {
                     ContentUnavailableView("detail.notificationsUnavailable", systemImage: "tray")
-                    RetryButton { refreshID += 1 }
                 }
             }
             ForEach(state.groups.filter { !$0.notifications.isEmpty }) { group in
@@ -124,9 +122,8 @@ struct ESIMNotificationsView: View {
         .disabled(state.busy || pendingAction != nil)
         .navigationTitle("detail.notifications").navigationBarTitleDisplayMode(.inline)
         .refreshable { await reload() }
-        .detailErrorAlert($presentedFailure, retry: { refreshID += 1 })
+        .detailErrorAlert($presentedFailure)
         .foregroundTask { await reload() }
-        .task(id: refreshID) { if refreshID > 0 { await reload() } }
         .task(id: pendingAction?.id) {
             guard let pendingAction else { return }
             await state.perform(pendingAction.notification, delete: pendingAction.action == .delete)

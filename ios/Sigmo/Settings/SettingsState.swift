@@ -56,6 +56,7 @@ final class SettingsState {
         guard !busy, !Task.isCancelled, snapshot == nil else { return }
         let current = revision
         busy = true
+        failure = nil
         defer { if current == revision { busy = false } }
         do {
             let response = try await session.protectedRequest { api, token in

@@ -92,7 +92,6 @@ struct SettingsFormView: View {
             Form {
                 if state.snapshot == nil {
                     if state.busy { ProgressView() }
-                    else { RetryButton { await state.load() } }
                 } else {
                     if case .notification = section {
                         Section {
@@ -113,9 +112,11 @@ struct SettingsFormView: View {
                             .disabled(state.validation(for: section) != nil)
                     }
                 }
-                SettingsFeedback(failure: state.failure, message: state.message)
+                SettingsFeedback(message: state.message)
             }
             .disabled(state.busy)
+            .detailErrorAlert(state.failure)
+            .refreshable { await state.load() }
             .foregroundTask { await state.load() }
         }
         .navigationTitle(settingsText(title)).navigationBarTitleDisplayMode(.inline)
@@ -136,10 +137,10 @@ struct NotificationSettingsView: View {
                 }
                 if state.snapshot == nil {
                     if state.busy { ProgressView() }
-                    else { RetryButton { await state.load() } }
                 }
-                SettingsFeedback(failure: state.failure)
             }
+            .detailErrorAlert(state.failure)
+            .refreshable { await state.load() }
             .foregroundTask { await state.load() }
         }
         .navigationTitle("settings.notificationTitle").navigationBarTitleDisplayMode(.inline)

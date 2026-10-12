@@ -15,6 +15,7 @@ private enum BackendListSheet: Identifiable {
 struct BackendListView: View {
     @Environment(BackendStore.self) private var store
     @State private var sheet: BackendListSheet?
+    @State private var refreshFailure: BackendFailure?
     var open: (BackendDestination) -> Void
 
     var body: some View {
@@ -43,7 +44,6 @@ struct BackendListView: View {
                     }
                 }
             }
-            if let failure = store.failure { FailureView(failure: failure) }
             #if DEBUG
             Section {
                 NavigationLink { DiagnosticsView() } label: {
@@ -61,7 +61,13 @@ struct BackendListView: View {
         }
         .navigationTitle("backends.manage")
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await store.refreshAll() }
+        .refreshable {
+            refreshFailure = nil
+            await store.refreshAll()
+            guard !Task.isCancelled else { return }
+            refreshFailure = store.orderedSessions().compactMap(\.failure).first
+        }
+        .detailErrorAlert(sheet == nil ? store.failure ?? refreshFailure : nil)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("backends.reorder", systemImage: "arrow.up.arrow.down") { sheet = .order }
@@ -69,18 +75,10 @@ struct BackendListView: View {
                     .accessibilityIdentifier("reorderBackends")
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button { sheet = .editor(nil) } label: {
-                    Image(systemName: "plus").font(.title3.weight(.semibold))
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .controlSize(.large)
-                .frame(minWidth: 44, minHeight: 44)
-                .accessibilityLabel(Text("backends.add"))
-                .disabled(!store.configurationLoaded)
-                .accessibilityIdentifier("addBackend")
+                Button("backends.add", systemImage: "plus") { sheet = .editor(nil) }
+                    .disabled(!store.configurationLoaded)
+                    .accessibilityIdentifier("addBackend")
             }
-            .sharedBackgroundVisibility(.hidden)
         }
         .sheet(item: $sheet) { value in
             switch value {
@@ -102,8 +100,8 @@ private struct BackendOrderView: View {
                     Text(backend.name).accessibilityIdentifier("orderBackend-\(backend.id)")
                 }
                 .onMove { store.moveBackends(from: $0, to: $1) }
-                if let failure = store.failure { FailureView(failure: failure) }
             }
+            .detailErrorAlert(Binding(get: { store.failure }, set: { store.failure = $0 }))
             .environment(\.editMode, .constant(.active))
             .navigationTitle("backends.reorder")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("common.done") { dismiss() } } }

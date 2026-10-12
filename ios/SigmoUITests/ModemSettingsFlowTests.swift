@@ -215,11 +215,20 @@ final class ModemSettingsFlowTests: XCTestCase {
 
     func testPartialFailureAndUnsupportedControlsRemainUsable() {
         var app = launch("detail-settings-unavailable")
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 10))
+        XCTAssertEqual(alert.buttons.count, 1)
+        XCTAssertFalse(alert.buttons["Retry"].exists)
+        alert.buttons["OK"].tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.buttons["modemNetworkMode"].isEnabled)
         XCTAssertFalse(app.buttons["modemFrequencyBands"].isEnabled)
-        XCTAssertTrue(app.buttons["retryModemSettings-bands"].exists)
+        XCTAssertFalse(app.buttons["retryModemSettings-bands"].exists)
         screenshot(app, name: "Partial settings failure")
         tap(app.buttons["modemDeviceSettings"], in: app)
+        XCTAssertTrue(alert.waitForExistence(timeout: 10))
+        alert.buttons["OK"].tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
         waitEnabled(app.textFields["modemAlias"])
         app.terminate()
         app = launch("detail-settings-unsupported")

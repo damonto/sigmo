@@ -24,7 +24,6 @@ final class WiFiCallingState {
     private(set) var observedAt = Date()
     private(set) var websheet: ConnectionWebsheet?
     private(set) var sendingCallback = false
-    private(set) var failedCallback: CarrierCallback?
     var failure: BackendFailure?
     @ObservationIgnored private var readRevision = 0
     @ObservationIgnored private var presentationRevision = 0
@@ -81,6 +80,8 @@ final class WiFiCallingState {
         defer { clearIfUnavailable() }
         guard scope.available, !Task.isCancelled else { return }
         await load()
+        guard !Task.isCancelled else { return }
+        failure = loadFailure
         await presentSetupIfNeeded()
     }
 
@@ -166,14 +167,12 @@ final class WiFiCallingState {
         showSetupAfterEnable = false
         websheet = nil
         callbacks = []
-        failedCallback = nil
     }
 
     func completeWebsheet(_ callback: CarrierCallback) async {
         guard scope.available, let websheet, !sendingCallback, !callbacks.contains(callback), !Task.isCancelled else { return }
         let revision = presentationRevision
         sendingCallback = true
-        failedCallback = nil
         failure = nil
         defer { sendingCallback = false; clearIfUnavailable() }
         do {
@@ -183,10 +182,10 @@ final class WiFiCallingState {
             if Self.terminalCallback(callback) {
                 closeWebsheet()
                 await load(reconciling: true)
+                if !Task.isCancelled { failure = loadFailure }
             }
         } catch {
             guard revision == presentationRevision, scope.available, !Task.isCancelled else { return }
-            failedCallback = callback
             failure = .wrapping(error)
         }
     }

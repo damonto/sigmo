@@ -3,7 +3,6 @@ import SwiftUI
 struct ModemInfoView: View {
     let state: ModemDetailState
     @State private var presentedFailure: BackendFailure?
-    @State private var refreshID = 0
     var body: some View {
         Form {
             if let modem = state.modem {
@@ -23,10 +22,7 @@ struct ModemInfoView: View {
         .navigationTitle("common.details")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await reload() }
-        .detailErrorAlert($presentedFailure, retry: { refreshID += 1 })
-        .task(id: refreshID) {
-            if refreshID > 0 { await reload() }
-        }
+        .detailErrorAlert($presentedFailure)
         .foregroundTask {
             await reload()
         }

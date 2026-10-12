@@ -127,7 +127,9 @@ struct ESIMFlowView: View {
             }
         }
         .font(.body.weight(.semibold))
-        .buttonStyle(.glassProminent).controlSize(.large)
+        // Overlay navigation must stay compact when page content uses accessibility sizes.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .buttonStyle(.glassProminent).controlSize(.regular)
         .tint(Color(uiColor: .tertiarySystemGroupedBackground))
         .foregroundStyle(.primary)
         .padding(.horizontal, 16).padding(.top, 16)

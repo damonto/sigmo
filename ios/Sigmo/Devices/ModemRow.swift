@@ -4,21 +4,19 @@ struct ModemRow: View {
     let modem: Modem
     let capabilities: Set<String>
     let backendID: UUID
-    let backendName: String
     let unreadCount: Int
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var identity: String { "\(backendID)-\(modem.id)" }
 
     var body: some View {
-        HStack(spacing: 12) {
-            RegionFlag(regionCode: modem.sim.regionCode, size: 56)
-            VStack(alignment: .leading, spacing: 5) {
+        HStack(alignment: .center, spacing: 12) {
+            RegionFlag(regionCode: modem.sim.regionCode, size: 40, background: .clear)
+            VStack(alignment: .leading, spacing: 4) {
                 header
                 number
                 HStack(spacing: 6) {
-                    backendBadge
-                    modemBadge
-                    simBadge.fixedSize()
+                    metadata
                     Spacer(minLength: 4)
                     if unreadCount > 0 {
                         Text(unreadCount > 99 ? "99+" : unreadCount.formatted())
@@ -32,7 +30,6 @@ struct ModemRow: View {
                             .accessibilityIdentifier("modemUnread-\(identity)")
                     }
                 }
-                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -41,20 +38,27 @@ struct ModemRow: View {
         .accessibilityHint(modem.displayName)
     }
 
+    @ViewBuilder
     private var header: some View {
-        HStack(spacing: 8) {
-            carrier.frame(maxWidth: .infinity, alignment: .leading)
-            indicators
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 4) {
+                carrier
+                indicators
+            }
+        } else {
+            HStack(spacing: 8) {
+                carrier.frame(maxWidth: .infinity, alignment: .leading)
+                indicators
+            }
         }
-        .font(.headline)
-        .lineLimit(1)
     }
 
     private var carrier: some View {
         Text(modem.carrier.isEmpty ? modemValue(nil) : modem.carrier)
+            .font(.headline)
             .foregroundStyle(.primary)
             .accessibilityIdentifier("modemCarrier-\(identity)")
-            .lineLimit(1)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
     }
 
     @ViewBuilder
@@ -62,42 +66,31 @@ struct ModemRow: View {
         Group {
             if modem.number.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text("home.noNumber")
+                    .foregroundStyle(.secondary)
             } else {
                 PhoneNumberText(number: modem.number, regionCode: modem.sim.regionCode)
+                    .foregroundStyle(.primary)
             }
         }
         .font(.subheadline)
-        .minimumScaleFactor(0.5)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
+        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityIdentifier("modemNumber-\(identity)")
     }
 
-    private var simBadge: some View {
-        tag(modem.sim.identifier.isEmpty ? String(localized: "modem.simUnavailable") : modemValue(modem.simKind))
-            .accessibilityIdentifier("modemSIM-\(identity)")
-    }
-
-    private var backendBadge: some View {
-        tag(backendName).accessibilityIdentifier("modemBackend-\(identity)")
-    }
-
-    private var modemBadge: some View {
-        tag(modem.displayName)
-            .truncationMode(.tail)
-            .accessibilityIdentifier("modemName-\(identity)")
-    }
-
-    private func tag(_ title: String) -> some View {
-        Text(title)
-            .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-            .padding(.horizontal, 8).padding(.vertical, 3)
-            .background(Color(uiColor: .tertiarySystemGroupedBackground), in: Capsule())
-            .lineLimit(1)
+    private var metadata: some View {
+        let sim = modem.sim.identifier.isEmpty ? String(localized: "modem.simUnavailable") : modemValue(modem.simKind)
+        return Text("\(modem.displayName) · \(sim)")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+            .truncationMode(.middle)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("modemMetadata-\(identity)")
     }
 
     private var indicators: some View {
-        ModemStatusIcons(modem: modem, capabilities: capabilities, identity: identity)
+        ModemStatusIcons(modem: modem, capabilities: capabilities, identity: identity, foreground: .secondary)
             // Preserve a compact glyph row; VoiceOver still announces every status.
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .fixedSize()

@@ -3,6 +3,7 @@ import SwiftUI
 struct RegionFlag: View {
     let regionCode: String
     var size: CGFloat = 48
+    var background: Color = Color(uiColor: .tertiarySystemGroupedBackground)
 
     private var code: String { regionCode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
 
@@ -18,7 +19,7 @@ struct RegionFlag: View {
         .frame(width: size * 2 / 3, height: size / 2)
         .clipShape(RoundedRectangle(cornerRadius: 2))
         .frame(width: size, height: size)
-        .background(Color(uiColor: .tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+        .background(background, in: RoundedRectangle(cornerRadius: 12))
         .accessibilityLabel(Locale.current.localizedString(forRegionCode: code.uppercased()) ?? String(localized: "modem.region"))
     }
 }

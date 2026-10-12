@@ -72,11 +72,8 @@ struct MCPSettingsView: View {
                     } header: { Text("settings.mcp.auditTitle") }
                 }
                 if state.busy { ProgressView("settings.native.working") }
-                SettingsFeedback(failure: state.failure)
-                if state.failure != nil || state.settings == nil && !state.busy {
-                    RetryButton { await state.load() }
-                }
             }
+            .detailErrorAlert(creating ? nil : state.failure)
             .refreshable { await state.load() }
             .foregroundTask { if state.settings == nil { await state.load() } }
         }
@@ -120,8 +117,8 @@ private struct MCPKeyDetailView: View {
                             .disabled(state.busy).accessibilityIdentifier("revoke-\(key.id)")
                     }
                 }
-                SettingsFeedback(failure: state.failure)
             }
+            .detailErrorAlert(state.failure)
         }
         .navigationTitle(state.keys.first { $0.id == keyID }?.name ?? settingsText("settings.mcp.keysTitle"))
         .navigationBarTitleDisplayMode(.inline)
@@ -233,7 +230,6 @@ private struct MCPCreateKeyView: View {
                             }
                         }
                     }
-                    SettingsFeedback(failure: state.failure)
                     Section {
                         AsyncActionButton(title: "settings.mcp.createKey", id: "submit-mcp-key") {
                             await state.create(payload)
@@ -242,6 +238,7 @@ private struct MCPCreateKeyView: View {
                 }
             }
             .disabled(state.busy)
+            .detailErrorAlert(state.failure)
             .textInputAutocapitalization(.never).autocorrectionDisabled()
             .navigationTitle(state.secret == nil ? "settings.mcp.createKey" : "settings.mcp.secretTitle")
             .navigationBarTitleDisplayMode(.inline)

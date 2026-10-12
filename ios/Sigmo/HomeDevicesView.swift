@@ -39,7 +39,8 @@ struct HomeDevicesView: View {
                 list
             }
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(Color(uiColor: .systemGroupedBackground))
+        .detailErrorAlert(store.failure)
     }
 
     private var emptyState: some View {
@@ -64,17 +65,10 @@ struct HomeDevicesView: View {
 
     private var list: some View {
         List {
-            if let failure = store.failure {
-                FailureView(failure: failure)
-                if !store.configurationLoaded {
-                    RetryButton { store.reloadConfiguration() }
-                } else {
-                    Button("common.dismiss") { store.failure = nil }
-                }
-            }
             if !store.settings.backends.isEmpty {
                 let sessions = store.orderedSessions(backendID: backendID)
                 let devices = store.homeDevices(backendID: backendID, search: search)
+                let groups = Dictionary(grouping: devices, by: { $0.session.id })
                 if devices.isEmpty && !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     ContentUnavailableView.search(text: search)
                         .listRowSeparator(.hidden)
@@ -84,30 +78,40 @@ struct HomeDevicesView: View {
                         .listRowSeparator(.hidden)
                         .accessibilityIdentifier("homeDevicesEmpty")
                 }
-                ForEach(devices) { device in
-                    Button { open(device.id) } label: {
-                        HStack {
-                            ModemRow(modem: device.modem, capabilities: device.session.capabilities ?? [],
-                                      backendID: device.session.id, backendName: device.session.configuration.name,
-                                      unreadCount: device.session.unreadCounts[device.modem.id] ?? 0)
-                            Image(systemName: "chevron.forward")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                                .accessibilityHidden(true)
+                ForEach(sessions) { session in
+                    if let devices = groups[session.id] {
+                        Section {
+                            ForEach(devices) { device in
+                                deviceRow(device)
+                            }
+                        } header: {
+                            Text(session.configuration.name)
+                                .accessibilityIdentifier("backendHeading-\(session.id)")
                         }
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .listRowSeparator(device.id == devices.first?.id ? .hidden : .visible, edges: .top)
-                    .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
-                    .alignmentGuide(.listRowSeparatorLeading) { _ in 68 }
-                    .accessibilityIdentifier("modem-\(device.session.id)-\(device.modem.id)")
                 }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
         .scrollDismissesKeyboard(.interactively)
-        .scrollContentBackground(.hidden)
-        .scrollEdgeEffectHidden(for: .top)
+    }
+
+    private func deviceRow(_ device: HomeDevice) -> some View {
+        Button { open(device.id) } label: {
+            HStack(spacing: 8) {
+                ModemRow(modem: device.modem, capabilities: device.session.capabilities ?? [],
+                         backendID: device.session.id,
+                         unreadCount: device.session.unreadCounts[device.modem.id] ?? 0)
+                Image(systemName: "chevron.forward")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 52 }
+        .accessibilityIdentifier("modem-\(device.session.id)-\(device.modem.id)")
     }
 }

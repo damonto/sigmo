@@ -1,10 +1,8 @@
 import SwiftUI
 
 struct SettingsFeedback: View {
-    var failure: BackendFailure?
     var message: String?
     var body: some View {
-        if let failure { Section { FailureView(failure: failure) } }
         if let message { Section { Label(LocalizedStringKey(message), systemImage: "checkmark.circle").foregroundStyle(.secondary) } }
     }
 }
@@ -27,12 +25,10 @@ struct SettingsAccessView<Content: View>: View {
                             Button("activation.start") { activation = true }
                         } else if session.authentication == .required {
                             Button("auth.login") { login = true }
-                        } else {
-                            RetryButton { await session.refresh(force: true) }
                         }
                     }
-                    SettingsFeedback(failure: session.failure)
                 }
+                .detailErrorAlert(session.failure)
             }
         }
         .sheet(isPresented: $login) { AuthenticationView(session: session) }

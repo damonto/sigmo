@@ -9,6 +9,7 @@ struct HomeView: View {
     @State private var selectedDevice: BackendDestination?
     @State private var selectedBackendID: UUID?
     @State private var search = ""
+    @State private var refreshFailure: BackendFailure?
 
     var body: some View {
         Group {
@@ -29,7 +30,9 @@ struct HomeView: View {
             }
         }
         .onChange(of: store.onlineSessions.map(\.id)) { _, ids in
-            if let selectedBackendID, !ids.contains(selectedBackendID) { self.selectedBackendID = nil }
+            if ids.count < 2 || selectedBackendID.map({ !ids.contains($0) }) == true {
+                selectedBackendID = nil
+            }
         }
         .onChange(of: push?.pendingNavigation?.id, initial: true) { _, _ in navigateFromNotification() }
         .onChange(of: store.configurationLoaded) { _, _ in navigateFromNotification() }
@@ -46,60 +49,40 @@ struct HomeView: View {
         NavigationStack(path: $path) {
             HomeDevicesView(backendID: selectedBackendID, search: search, add: { adding = true }, open: { selectedDevice = $0 })
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    if !store.settings.backends.isEmpty {
+                    if store.onlineSessions.count > 1 {
                         BackendFilterBar(selection: $selectedBackendID)
                             .padding(.horizontal, 16)
                             .padding(.bottom, 4)
                     }
                 }
                 .navigationTitle("Sigmo")
-                .navigationBarTitleDisplayMode(.inline)
+                .navigationBarTitleDisplayMode(.large)
                 .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "home.search")
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-                .refreshable { await store.refreshAll() }
+                .refreshable {
+                    await store.refreshAll()
+                    guard !Task.isCancelled else { return }
+                    refreshFailure = store.orderedSessions(backendID: selectedBackendID).compactMap(\.failure).first
+                }
+                .detailErrorAlert($refreshFailure)
                 .navigationDestination(for: BackendDestination.self) { destination in
                     destinationView(destination)
                 }
                 .toolbar {
-                    // Keep the toolbar aligned while opening a 10-point search gap.
-                    ToolbarItem(placement: .principal) {
-                        Text("Sigmo")
-                            .font(.headline)
-                            .accessibilityAddTraits(.isHeader)
-                            .offset(y: -5)
-                    }
                     ToolbarItem(placement: .topBarLeading) {
-                        toolbarButton("backends.manage", symbol: "server.rack") {
+                        Button("backends.manage", systemImage: "server.rack") {
                             path.append(.management)
                         }
                         .accessibilityIdentifier("manageBackends")
-                        .offset(y: -5)
                     }
-                    .sharedBackgroundVisibility(.hidden)
                     ToolbarItem(placement: .topBarTrailing) {
-                        toolbarButton("backends.add", symbol: "plus") { adding = true }
+                        Button("backends.add", systemImage: "plus") { adding = true }
                             .disabled(!store.configurationLoaded)
                             .accessibilityIdentifier("addBackend")
-                            .offset(y: -5)
                     }
-                    .sharedBackgroundVisibility(.hidden)
                 }
         }
-    }
-
-    private func toolbarButton(_ title: LocalizedStringKey, symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 20, weight: .semibold))
-                .frame(width: 24, height: 24)
-        }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
-        .controlSize(.large)
-        .frame(minWidth: 44, minHeight: 44)
-        .accessibilityLabel(Text(title))
     }
 
     @ViewBuilder

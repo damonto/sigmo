@@ -25,8 +25,8 @@ struct BackendEditor: View {
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .accessibilityIdentifier("backendAddress")
                 }
-                if let failure = store.failure { Section { FailureView(failure: failure) } }
             }
+            .detailErrorAlert(Binding(get: { store.failure }, set: { store.failure = $0 }))
             .navigationTitle(isNew ? "backends.add" : "backends.edit")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("common.cancel") { dismiss() } }

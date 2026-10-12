@@ -119,6 +119,8 @@ actor DetailFixtureServer {
         case .connectionReadFailure:
             connection.statuses["GET /internet-connections/current"] = 503
             connection.statuses["GET /networks/registration"] = 503
+            connection.statuses["GET /wifi-calling/settings"] = 503
+            connection.statuses["GET /volte/settings"] = 503
         case .connectionWriteFailure:
             connection.statuses["PUT /internet-connections/current/preferences"] = 503
             connection.statuses["PUT /volte/settings"] = 503

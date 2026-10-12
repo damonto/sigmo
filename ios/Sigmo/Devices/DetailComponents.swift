@@ -30,17 +30,20 @@ struct DetailValue: View {
 }
 
 extension View {
-    func detailErrorAlert(_ failure: Binding<BackendFailure?>, retry: (() -> Void)? = nil) -> some View {
+    func detailErrorAlert(_ failure: Binding<BackendFailure?>) -> some View {
         alert(
             "detail.operationFailed",
             isPresented: Binding(get: { failure.wrappedValue != nil }, set: { if !$0 { failure.wrappedValue = nil } }),
             presenting: failure.wrappedValue
         ) { _ in
-            if let retry { Button("common.retry", action: retry) }
             Button("common.ok", role: .cancel) { failure.wrappedValue = nil }
         } message: { failure in
             Text(failure.message)
         }
+    }
+
+    func detailErrorAlert(_ failure: BackendFailure?) -> some View {
+        modifier(DetailErrorAlert(failure: failure))
     }
 
     func detailSkeleton(_ label: String) -> some View {
@@ -49,6 +52,36 @@ extension View {
             .allowsHitTesting(false)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text(detailText(label)))
+    }
+}
+
+private struct DetailErrorAlert: ViewModifier {
+    let failure: BackendFailure?
+    // Dismissing an alert must not clear a read failure that protects unavailable controls.
+    @State private var presentedFailure: BackendFailure?
+    @State private var lastFailure: BackendFailure?
+    @State private var visible = false
+
+    func body(content: Content) -> some View {
+        content
+            .detailErrorAlert($presentedFailure)
+            .onAppear {
+                visible = true
+                presentFailure()
+            }
+            .onChange(of: failure) { _, _ in
+                if visible { presentFailure() }
+            }
+            .onDisappear {
+                visible = false
+                presentedFailure = nil
+            }
+    }
+
+    private func presentFailure() {
+        guard failure != lastFailure else { return }
+        lastFailure = failure
+        presentedFailure = failure
     }
 }
 
@@ -65,7 +98,7 @@ struct ProfileAvatar: View {
     var body: some View {
         Group {
             if let bitmap { Image(uiImage: bitmap).resizable().scaledToFit() }
-            else { RegionFlag(regionCode: region ?? "").scaleEffect(size / 48).frame(width: size, height: size) }
+            else { RegionFlag(regionCode: region ?? "", background: .clear).scaleEffect(size / 48).frame(width: size, height: size) }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)

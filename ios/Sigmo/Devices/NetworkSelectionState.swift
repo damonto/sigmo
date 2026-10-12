@@ -54,7 +54,9 @@ final class NetworkSelectionState {
         defer { clearIfUnavailable() }
         guard scope.available, !Task.isCancelled else { return }
         await load()
-        if manual, !scanned, scanFailure == nil, canChange { await scan() }
+        guard !Task.isCancelled else { return }
+        failure = loadFailure
+        if manual, !scanned, canChange { await scan() }
     }
 
     func setAutomatic(_ automatic: Bool) async {
@@ -137,6 +139,7 @@ final class NetworkSelectionState {
         } catch {
             guard revision == scanRevision, scope.available, !Task.isCancelled else { return }
             scanFailure = .wrapping(error)
+            failure = scanFailure
         }
     }
 

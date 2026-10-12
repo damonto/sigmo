@@ -4,7 +4,6 @@ struct NetworkSelectionView: View {
     private enum Action { case automatic(Bool), select(NetworkOperator), scan }
     @State private var state: NetworkSelectionState
     @State private var action: ConnectionAction<Action>?
-    @State private var refreshID = 0
 
     init(detail: ModemDetailState, profileID: String) {
         _state = State(initialValue: NetworkSelectionState(detail: detail, profileID: profileID))
@@ -13,7 +12,6 @@ struct NetworkSelectionView: View {
     var body: some View {
         Form {
             ConnectionRadioNotice(scope: state.scope)
-            ConnectionReadFailure(failure: state.loadFailure, retry: { refreshID += 1 })
             Section {
                 if state.registration?.automatic == nil {
                     ConnectionInitialValue(title: "connection.automatic", loading: state.registration == nil && state.loadFailure == nil)
@@ -34,14 +32,11 @@ struct NetworkSelectionView: View {
                     if state.scanning {
                         ConnectionProgress(title: "connection.searchingNetworks")
                             .accessibilityIdentifier("networkScanning")
-                    } else if let failure = state.scanFailure {
-                        Text(failure.message).foregroundStyle(.secondary)
-                        RetryButton { action = .init(value: .scan) }
-                            .disabled(!state.canChange)
-                            .accessibilityIdentifier("retryNetworkScan")
                     } else if state.networks.isEmpty {
-                        Text("connection.noNetworks").foregroundStyle(.secondary)
-                        scanButton
+                        if state.scanFailure == nil {
+                            Text("connection.noNetworks").foregroundStyle(.secondary)
+                            scanButton
+                        }
                     } else {
                         ForEach(state.networks) { network in
                             Button { action = .init(value: .select(network)) } label: {
@@ -72,11 +67,11 @@ struct NetworkSelectionView: View {
             }
         }
         .navigationTitle("connection.networkSelection")
-        .modifier(ConnectionLifecycle(scope: state.scope, refreshID: refreshID,
+        .modifier(ConnectionLifecycle(scope: state.scope,
                                       reload: { await state.reload() }, cancelAction: { action = nil; state.leave() }))
         .task(id: action?.id) { await perform() }
         .refreshable { await state.reload() }
-        .detailErrorAlert($state.failure, retry: { refreshID += 1 })
+        .detailErrorAlert($state.failure)
     }
 
     private var scanButton: some View {

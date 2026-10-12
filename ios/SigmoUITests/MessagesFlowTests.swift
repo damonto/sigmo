@@ -98,13 +98,12 @@ final class MessagesFlowTests: XCTestCase {
         XCTAssertTrue(active.exists)
     }
 
-    func testReturningHomePreservesSearchAndConnectionFilter() {
+    func testReturningHomePreservesSearch() {
         let app = launch()
         app.buttons["backToDevices"].tap()
         let homeSearch = app.searchFields["Search"]
         XCTAssertTrue(homeSearch.waitForExistence(timeout: 5))
-        let filter = app.segmentedControls["backendFilterSegments"].buttons["Home"]
-        filter.tap()
+        XCTAssertFalse(app.segmentedControls["backendFilterSegments"].exists)
         homeSearch.tap()
         homeSearch.typeText("Home\n")
         let modem = app.buttons["modem-00000000-0000-0000-0000-000000000001-device-1"]
@@ -120,7 +119,7 @@ final class MessagesFlowTests: XCTestCase {
         app.buttons["backToDevices"].tap()
         XCTAssertTrue(homeSearch.waitForExistence(timeout: 5))
         XCTAssertEqual(homeSearch.value as? String, "Home")
-        XCTAssertTrue(filter.isSelected)
+        XCTAssertFalse(app.segmentedControls["backendFilterSegments"].exists)
         XCTAssertTrue(modem.exists)
         XCTAssertFalse(messageSearch.exists)
     }

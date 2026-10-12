@@ -20,7 +20,9 @@ struct ReminderDestinationView: View {
         SettingsAccessView(session: session) {
             Group {
                 if !loaded { ProgressView() }
-                else if let failure = state.failure ?? state.profilesFailure { FailureView(failure: failure) }
+                else if state.failure != nil || state.profilesFailure != nil {
+                    ContentUnavailableView("push.resourceUnavailable", systemImage: "simcard")
+                }
                 else if profileType == "esim", state.currentProfile(seID + ":" + profileID) != nil {
                     ESIMProfileActionsView(state: state, profileID: seID + ":" + profileID)
                 } else if profileType == "psim", state.modem?.sim.identifier == profileID {
@@ -29,6 +31,7 @@ struct ReminderDestinationView: View {
                     ContentUnavailableView("push.resourceUnavailable", systemImage: "simcard", description: Text("push.lineUnavailable"))
                 }
             }
+            .detailErrorAlert(state.failure ?? state.profilesFailure)
             .foregroundTask {
                 await state.load()
                 if !Task.isCancelled { loaded = true }

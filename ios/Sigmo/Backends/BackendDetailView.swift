@@ -15,11 +15,9 @@ struct BackendDetailView: View {
                     Text(session.configuration.displayAddress).textSelection(.enabled)
                         .accessibilityIdentifier("backendDisplayAddress")
                 }
-                if let failure = session.failure { FailureView(failure: failure) }
             }
             Section("auth.title") {
                 LabeledContent("auth.status", value: NSLocalizedString("auth.\(session.authentication.rawValue)", comment: ""))
-                if let failure = session.authFailure { FailureView(failure: failure) }
                 if session.authentication == .required {
                     Button("auth.login", systemImage: "lock.open") { login = true }
                         .accessibilityIdentifier("loginBackend")
@@ -39,9 +37,7 @@ struct BackendDetailView: View {
                 }
             }
             Section("capabilities.title") {
-                if let failure = session.capabilityFailure {
-                    FailureView(failure: failure)
-                } else if let features = session.capabilities {
+                if let features = session.capabilities {
                     ForEach(["esimTransfer", "wifiCalling", "volte"], id: \.self) { feature in
                         LabeledContent(featureName(feature)) {
                             Text(features.contains(feature) ? "capabilities.supported" : "capabilities.unsupported")
@@ -72,6 +68,7 @@ struct BackendDetailView: View {
         .navigationTitle(session.configuration.name)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await session.refresh(force: true) }
+        .detailErrorAlert(login || activation || editing ? nil : session.failure ?? session.authFailure ?? session.capabilityFailure)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) { Button("common.edit", systemImage: "pencil") { editing = true } }
         }
@@ -128,8 +125,8 @@ struct AuthenticationView: View {
                         .disabled(seconds > 0 || session.isSendingOTP)
                     }
                 }
-                if let failure = session.authFailure { Section { FailureView(failure: failure) } }
             }
+            .detailErrorAlert(session.authFailure)
             .navigationTitle("auth.login")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("common.done") { dismiss() } } }
         }
@@ -188,9 +185,8 @@ struct ActivationView: View {
                         Label("common.refresh", systemImage: "arrow.clockwise")
                     }
                 }
-                if let failure = session.pairingFailure { Section { FailureView(failure: failure) } }
-                if let failure = linkFailure { Section { FailureView(failure: failure) } }
             }
+            .detailErrorAlert(linkFailure ?? session.pairingFailure ?? session.failure)
             .navigationTitle("activation.title")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("common.done") { dismiss() } } }
         }

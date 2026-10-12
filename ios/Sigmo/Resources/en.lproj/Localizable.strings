@@ -15,7 +15,6 @@
 "common.save" = "Save";
 "common.done" = "Done";
 "common.ok" = "OK";
-"common.retry" = "Retry";
 "common.refresh" = "Refresh";
 "common.dismiss" = "Dismiss";
 "common.unknown" = "Unknown";
@@ -243,7 +242,6 @@
 "settings.updates.developerBuildDescription" = "Developer builds can check releases, but they cannot replace their own executable.";
 "settings.updates.releaseKeyMissingDescription" = "This build has no embedded release verification key and cannot install updates.";
 "settings.updates.loadFailed" = "Update settings could not be loaded.";
-"settings.updates.retry" = "Retry";
 "settings.updates.status.idle" = "Idle";
 "settings.updates.status.checking" = "Checking";
 "settings.updates.status.downloading" = "Downloading";
@@ -424,7 +422,7 @@
 "settings.native.headerName" = "Header name";
 "settings.native.headerValue" = "Header value";
 "settings.native.invalidHeader" = "Enter a unique, nonempty header name.";
-"settings.native.restartTimeout" = "The Sigmo has not reconnected after two minutes. Retry to read its current state.";
+"settings.native.restartTimeout" = "The Sigmo has not reconnected after two minutes. Pull down to refresh its current state.";
 "settings.native.checkedAt" = "Last checked";
 "settings.native.licenseName" = "Name";
 "settings.native.username" = "Username";
@@ -666,8 +664,8 @@
 "modemSettings.noBands" = "No supported frequency bands reported.";
 "modemSettings.bandRequired" = "Select at least one frequency band.";
 "modemSettings.bandsHint" = "Select the allowed bands, then tap Done to apply them together.";
-"modemSettings.savedRefreshPending" = "Your settings were saved, but the latest device status could not be loaded. Retry to refresh the status.";
-"modemSettings.confirmationPending" = "The change could not be confirmed. Retry to read the current device settings.";
+"modemSettings.savedRefreshPending" = "Your settings were saved, but the latest device status could not be loaded. Pull down to refresh the status.";
+"modemSettings.confirmationPending" = "The change could not be confirmed. Pull down to refresh the current device settings.";
 "apiError.get_modes_failed" = "Could not read network modes. Try again.";
 "apiError.set_modes_failed" = "Could not change the network mode. Check the current settings before trying again.";
 "apiError.set_modes_invalid_request" = "The network mode is invalid.";

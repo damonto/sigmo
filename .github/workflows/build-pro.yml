@@ -7,6 +7,7 @@ on:
     tags: [v*]
     paths-ignore:
       - "**/*.md"
+      - "ios/**"
       - "pro-api/**"
 
 permissions:

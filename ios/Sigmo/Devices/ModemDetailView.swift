@@ -282,7 +282,7 @@ private struct ModemDetailScreen: View {
         .environment(\.horizontalSizeClass, horizontalSizeClass)
         .labelStyle(.titleAndIcon)
         .refreshable { await reload() }
-        .detailErrorAlert($presentedFailure, retry: { refreshID += 1 })
+        .detailErrorAlert($presentedFailure)
         .foregroundTask(id: refreshIdentity) {
             guard tab == .overview else { return }
             await reload()
@@ -412,8 +412,6 @@ private struct ModemDetailScreen: View {
         } else if state.groups.allSatisfy({ $0.profiles.isEmpty }), state.profilesFailure != nil {
             Section("detail.profiles") {
                 ContentUnavailableView("detail.profilesUnavailable", systemImage: "simcard")
-                RetryButton { refreshID += 1 }
-                    .disabled(state.loading || state.busy)
             }
         } else {
             ForEach(state.elements) { element in

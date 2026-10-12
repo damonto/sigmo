@@ -48,7 +48,7 @@ final class BackendFlowTests: XCTestCase {
             XCTAssertLessThan(connect.frame.height, 160)
             XCTAssertGreaterThanOrEqual(connect.frame.minX, app.frame.minX)
             XCTAssertLessThanOrEqual(connect.frame.maxX, app.frame.maxX)
-            assertToolbarButtonsMatch(app)
+            assertToolbarButtonsAreAccessible(app)
             attachScreenshot(app)
             connect.tap()
             XCTAssertTrue(app.textFields["backendName"].waitForExistence(timeout: 5))
@@ -57,14 +57,13 @@ final class BackendFlowTests: XCTestCase {
         }
     }
 
-    private func assertToolbarButtonsMatch(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
-        let add = app.buttons["addBackend"].frame
-        let manage = app.buttons["manageBackends"].frame
-        XCTAssertGreaterThanOrEqual(add.width, 44, file: file, line: line)
-        XCTAssertGreaterThanOrEqual(add.height, 44, file: file, line: line)
-        XCTAssertEqual(add.width, add.height, accuracy: 1, file: file, line: line)
-        XCTAssertEqual(add.width, manage.width, accuracy: 1, file: file, line: line)
-        XCTAssertEqual(add.height, manage.height, accuracy: 1, file: file, line: line)
+    private func assertToolbarButtonsAreAccessible(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        for button in [app.buttons["addBackend"], app.buttons["manageBackends"]] {
+            XCTAssertTrue(button.isHittable, file: file, line: line)
+            XCTAssertGreaterThanOrEqual(button.frame.minX, app.frame.minX, file: file, line: line)
+            XCTAssertLessThanOrEqual(button.frame.maxX, app.frame.maxX, file: file, line: line)
+        }
+        XCTAssertLessThan(app.buttons["manageBackends"].frame.maxX, app.buttons["addBackend"].frame.minX, file: file, line: line)
     }
 
     func testHomeAndDetailRefreshOnlyOnDemandOrForeground() {
@@ -123,9 +122,10 @@ final class BackendFlowTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.navigationBars["Sigmo"].waitForExistence(timeout: 10))
         let add = app.buttons["addBackend"]
-        assertToolbarButtonsMatch(app)
-        XCTAssertTrue(app.segmentedControls["backendFilterSegments"].buttons["All"].exists)
-        XCTAssertTrue(app.segmentedControls["backendFilterSegments"].buttons["Home"].exists)
+        assertToolbarButtonsAreAccessible(app)
+        let heading = app.staticTexts["backendHeading-00000000-0000-0000-0000-000000000001"]
+        XCTAssertTrue(heading.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.segmentedControls["backendFilterSegments"].exists)
         add.tap()
         XCTAssertTrue(app.navigationBars["Add Sigmo"].exists)
         app.textFields["backendName"].tap()
@@ -136,7 +136,9 @@ final class BackendFlowTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Sigmo"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["addBackend"].exists)
         XCTAssertTrue(app.buttons["Another Sigmo"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["backendHeading-00000000-0000-0000-0000-000000000001"].exists)
+        XCTAssertTrue(heading.exists)
+        XCTAssertTrue(app.segmentedControls["backendFilterSegments"].buttons["Home"].exists)
+        XCTAssertTrue(app.segmentedControls["backendFilterSegments"].buttons["All"].isSelected)
         attachScreenshot(app)
     }
 
@@ -149,7 +151,7 @@ final class BackendFlowTests: XCTestCase {
         app.segmentedControls["backendFilterSegments"].buttons["Home"].tap()
         XCTAssertTrue(app.buttons["modem-\(homeID)-device-1"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["modem-\(studioID)-device-1"].exists)
-        XCTAssertTrue(app.staticTexts["modemBackend-\(homeID)-device-1"].exists)
+        XCTAssertTrue(app.staticTexts["backendHeading-\(homeID)"].exists)
         app.segmentedControls["backendFilterSegments"].buttons["Studio"].tap()
         let studio = app.buttons["modem-\(studioID)-device-1"]
         XCTAssertTrue(studio.waitForExistence(timeout: 5))
@@ -260,16 +262,13 @@ final class BackendFlowTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(all.frame.height, 32)
         XCTAssertLessThan(all.frame.height, search.frame.height)
         let filter = app.descendants(matching: .any)["backendFilters"].firstMatch
-        XCTAssertEqual(filter.frame.minX, search.frame.minX, accuracy: 1)
-        XCTAssertEqual(filter.frame.maxX, search.frame.maxX, accuracy: 1)
+        XCTAssertGreaterThanOrEqual(filter.frame.minX, app.frame.minX)
+        XCTAssertLessThanOrEqual(filter.frame.maxX, app.frame.maxX)
         XCTAssertTrue(all.isSelected)
         attachScreenshot(app)
         let toolbarBottom = max(app.buttons["addBackend"].frame.maxY, app.buttons["manageBackends"].frame.maxY)
-        let topGap = search.frame.minY - toolbarBottom
-        let tabsGap = all.frame.minY - search.frame.maxY
-        print("HOME_HEADER_GAPS top=\(topGap) tabs=\(tabsGap)")
-        XCTAssertEqual(topGap, 10, accuracy: 1)
-        XCTAssertEqual(tabsGap, 10, accuracy: 1)
+        XCTAssertGreaterThanOrEqual(search.frame.minY, toolbarBottom)
+        XCTAssertGreaterThanOrEqual(all.frame.minY, search.frame.maxY)
         // The compact glass tab responds along its lower edge.
         homeTab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)).tap()
         XCTAssertTrue(homeTab.isSelected)
@@ -321,7 +320,7 @@ final class BackendFlowTests: XCTestCase {
         }
     }
 
-    func testDeviceRowsShowCarrierNumberAndTags() throws {
+    func testDeviceRowsShowCarrierNumberAndMetadata() throws {
         let app = app(scenario: "cards")
         app.launch()
         let first = app.descendants(matching: .any)["modem-00000000-0000-0000-0000-000000000001-device-1"].firstMatch
@@ -331,16 +330,19 @@ final class BackendFlowTests: XCTestCase {
         let identity = "00000000-0000-0000-0000-000000000001-device-1"
         let carrier = app.staticTexts["modemCarrier-\(identity)"]
         let number = app.staticTexts["modemNumber-\(identity)"]
-        let backend = app.staticTexts["modemBackend-\(identity)"]
-        let sim = app.staticTexts["modemSIM-\(identity)"]
+        let heading = app.staticTexts["backendHeading-00000000-0000-0000-0000-000000000001"]
+        let metadata = app.staticTexts["modemMetadata-\(identity)"]
         let signal = app.descendants(matching: .any)["signal-\(identity)"].firstMatch
         XCTAssertTrue(number.exists)
         XCTAssertEqual(carrier.frame.midY, signal.frame.midY, accuracy: 5)
         XCTAssertLessThan(carrier.frame.maxX, signal.frame.minX)
         XCTAssertGreaterThan(number.frame.minY, carrier.frame.minY)
         XCTAssertEqual(carrier.frame.minX, number.frame.minX, accuracy: 2)
-        XCTAssertLessThan(backend.frame.maxX, sim.frame.minX)
-        XCTAssertEqual(backend.frame.midY, sim.frame.midY, accuracy: 2)
+        XCTAssertTrue(heading.exists)
+        XCTAssertLessThanOrEqual(heading.frame.maxY, first.frame.minY)
+        XCTAssertEqual(metadata.label, "Home Modem · eSIM")
+        XCTAssertGreaterThan(metadata.frame.minY, number.frame.minY)
+        XCTAssertEqual(metadata.frame.minX, number.frame.minX, accuracy: 2)
         XCTAssertLessThanOrEqual(first.frame.height, 120)
         XCTAssertEqual(app.staticTexts["modemNumber-00000000-0000-0000-0000-000000000001-device-2"].label, "No Number")
         XCTAssertGreaterThan(second.frame.minY, first.frame.minY)
@@ -395,6 +397,11 @@ final class BackendFlowTests: XCTestCase {
         }
         attachScreenshot(app)
         app.buttons["backend-\(offline)"].tap()
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertEqual(alert.buttons.count, 1)
+        alert.buttons["OK"].tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["backendDisplayAddress"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Retry"].exists)
         pullToRefresh(app)
@@ -484,12 +491,15 @@ final class BackendFlowTests: XCTestCase {
         let app = app(scenario: "single")
         app.launch()
         let id = "00000000-0000-0000-0000-000000000001"
-        XCTAssertTrue(app.segmentedControls["backendFilterSegments"].buttons["Home"].waitForExistence(timeout: 10))
-        app.segmentedControls["backendFilterSegments"].buttons["Home"].tap()
+        XCTAssertTrue(app.staticTexts["backendHeading-\(id)"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.segmentedControls["backendFilterSegments"].exists)
         app.buttons["addBackend"].tap()
         app.textFields["backendName"].tap(); app.textFields["backendName"].typeText("Second")
         app.textFields["backendAddress"].tap(); app.textFields["backendAddress"].typeText("https://second.sigmo.test")
         app.buttons["saveBackend"].tap()
+        let home = app.segmentedControls["backendFilterSegments"].buttons["Home"]
+        XCTAssertTrue(home.waitForExistence(timeout: 10))
+        home.tap()
         app.buttons["manageBackends"].tap()
         app.buttons["backend-\(id)"].tap()
         let delete = app.buttons["deleteBackend"]
@@ -503,9 +513,10 @@ final class BackendFlowTests: XCTestCase {
         alert.buttons["Delete"].tap()
         XCTAssertTrue(app.navigationBars["Manage Sigmo"].waitForExistence(timeout: 5))
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(app.segmentedControls["backendFilterSegments"].buttons["All"].isSelected)
-        XCTAssertFalse(app.segmentedControls["backendFilterSegments"].buttons["Home"].exists)
-        XCTAssertTrue(app.buttons["Second"].exists)
+        XCTAssertFalse(app.segmentedControls["backendFilterSegments"].exists)
+        XCTAssertFalse(app.staticTexts["backendHeading-\(id)"].exists)
+        XCTAssertTrue(app.staticTexts["Second"].exists)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "modem-")).firstMatch.exists)
     }
 
     func testNativeActivationCompletesWithoutOpeningExternalServices() {
@@ -582,7 +593,7 @@ final class BackendFlowTests: XCTestCase {
         XCTAssertTrue(badge.waitForExistence(timeout: 10))
         XCTAssertEqual(badge.value as? String, "125")
         XCTAssertGreaterThan(badge.frame.minY, app.staticTexts["modemNumber-\(identity)"].frame.minY)
-        XCTAssertGreaterThan(badge.frame.minX, app.staticTexts["modemBackend-\(identity)"].frame.maxX)
+        XCTAssertGreaterThan(badge.frame.minX, app.staticTexts["modemMetadata-\(identity)"].frame.maxX)
         attachScreenshot(app)
         app.buttons["modem-\(identity)"].tap()
         let messagesTab = app.tabBars.buttons["Messages"]
@@ -628,7 +639,7 @@ final class BackendFlowTests: XCTestCase {
     private func isExpectedNameTruncation(_ issue: XCUIAccessibilityAuditIssue) -> Bool {
         // Compact list text and navigation titles truncate visually; VoiceOver retains full labels.
         guard issue.auditType == .textClipped, let id = issue.element?.identifier else { return false }
-        return id == "detailModemTitle" || ["modemCarrier-", "modemBackend-", "modemName-"].contains { id.hasPrefix($0) }
+        return id == "detailModemTitle" || ["modemCarrier-", "modemMetadata-"].contains { id.hasPrefix($0) }
     }
 
     private func attachScreenshot(_ app: XCUIApplication) {

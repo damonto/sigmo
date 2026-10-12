@@ -26,7 +26,6 @@ struct ModemSettingsView: View {
                 .disabled(!state.radioAvailable || state.modes == nil || state.failures[.mode] != nil)
                 .accessibilityIdentifier("modemNetworkMode")
                 .modifier(ModemSettingsLoading(loading: state.modes == nil && state.failures[.mode] == nil))
-                ModemSettingsReadError(state: state, section: .mode)
 
                 NavigationLink {
                     ModemFrequencyBandsView(state: state)
@@ -40,7 +39,6 @@ struct ModemSettingsView: View {
                 .disabled(!state.radioAvailable || state.bands == nil || state.failures[.bands] != nil)
                 .accessibilityIdentifier("modemFrequencyBands")
                 .modifier(ModemSettingsLoading(loading: state.bands == nil && state.failures[.bands] == nil))
-                ModemSettingsReadError(state: state, section: .bands)
             } header: {
                 Text("modemSettings.network")
             } footer: {
@@ -59,7 +57,6 @@ struct ModemSettingsView: View {
                 .disabled(state.busy || state.device == nil || state.failures[.device] != nil)
                 .accessibilityIdentifier("modemDeviceSettings")
                 .modifier(ModemSettingsLoading(loading: state.device == nil && state.failures[.device] == nil))
-                ModemSettingsReadError(state: state, section: .device)
             }
         }
         .detailErrorAlert($presentedFailure)
@@ -88,7 +85,6 @@ struct ModemSettingsView: View {
             .disabled(!state.canChangeAirplane || pending != nil)
             .accessibilityIdentifier("modemAirplaneMode")
             .modifier(ModemSettingsLoading(loading: state.airplane == nil && state.failures[.airplane] == nil))
-            ModemSettingsReadError(state: state, section: .airplane)
         } footer: {
             Text(state.airplane?.supported == false ? "modemSettings.airplaneUnsupported" : "modemSettings.airplaneHint")
         }
@@ -112,6 +108,7 @@ struct ModemSettingsForm<Content: View>: View {
     @Environment(\.scenePhase) private var scenePhase
     @ViewBuilder var content: () -> Content
     @State private var refreshID = 0
+    @State private var presentedFailure: BackendFailure?
 
     private struct RefreshIdentity: Equatable {
         let accessRevision: Int
@@ -127,16 +124,6 @@ struct ModemSettingsForm<Content: View>: View {
                     Section {
                         Text(state.writeAcknowledged ? "modemSettings.savedRefreshPending" : "modemSettings.confirmationPending")
                             .foregroundStyle(.secondary)
-                        RetryButton(id: "retryModemSettingsConfirmation") {
-                            await state.load()
-                        }
-                        .disabled(!state.loading.isEmpty)
-                    }
-                }
-                if let failure = state.session.detailFailures[state.modemID], !state.needsConfirmation {
-                    Section {
-                        Text(failure.message).foregroundStyle(.secondary)
-                        RetryButton { refreshID += 1 }
                     }
                 }
             } else {
@@ -147,9 +134,10 @@ struct ModemSettingsForm<Content: View>: View {
         .environment(\.defaultMinListRowHeight, 44)
         .foregroundTask(id: RefreshIdentity(accessRevision: state.session.accessRevision,
                                   hasAccess: state.hasAccess, refreshID: refreshID)) {
-            await state.load()
+            await reload()
         }
-        .refreshable { await state.load() }
+        .refreshable { await reload() }
+        .detailErrorAlert($presentedFailure)
         .onChange(of: state.session.accessRevision) { _, _ in state.clear() }
         .onChange(of: state.hasAccess) { _, value in if !value { state.clear() } }
         .onChange(of: state.busy) { _, busy in
@@ -159,6 +147,13 @@ struct ModemSettingsForm<Content: View>: View {
             if !state.busy, value != state.airplane?.enabled { refreshID += 1 }
         }
     }
+
+    private func reload() async {
+        await state.load()
+        guard !Task.isCancelled else { return }
+        presentedFailure = ModemSettingsSection.allCases.compactMap { state.failures[$0] }.first
+            ?? state.session.detailFailures[state.modemID]
+    }
 }
 
 struct ModemSettingsLoading: ViewModifier {
@@ -167,22 +162,5 @@ struct ModemSettingsLoading: ViewModifier {
     func body(content: Content) -> some View {
         if loading { content.detailSkeleton("modemSettings.loading") }
         else { content }
-    }
-}
-
-struct ModemSettingsReadError: View {
-    let state: ModemSettingsState
-    let section: ModemSettingsSection
-
-    var body: some View {
-        if let failure = state.failures[section] {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(failure.message).font(.footnote).foregroundStyle(.secondary)
-                RetryButton(id: "retryModemSettings-" + section.rawValue) {
-                    await state.load([section])
-                }
-                .disabled(state.busy || state.loading.contains(section))
-            }
-        }
     }
 }

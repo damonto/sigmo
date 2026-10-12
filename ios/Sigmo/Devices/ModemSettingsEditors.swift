@@ -35,8 +35,6 @@ struct ModemNetworkModeView: View {
                     }
                     if modes.supported.isEmpty { Text("modemSettings.noModes").foregroundStyle(.secondary) }
                 }
-                ModemSettingsReadError(state: state, section: .mode)
-                ModemSettingsReadError(state: state, section: .airplane)
             } footer: {
                 if state.airplane?.enabled == true { Text("modemSettings.radioOff") }
             }
@@ -94,8 +92,6 @@ struct ModemFrequencyBandsView: View {
                     }
                     if bands.supported.isEmpty { Text("modemSettings.noBands").foregroundStyle(.secondary) }
                 }
-                ModemSettingsReadError(state: state, section: .bands)
-                ModemSettingsReadError(state: state, section: .airplane)
             } footer: {
                 if state.airplane?.enabled == true { Text("modemSettings.radioOff") }
                 else if selected?.isEmpty == true { Text("modemSettings.bandRequired") }
@@ -180,9 +176,6 @@ struct ModemDeviceSettingsView: View {
                         Text("modemSettings.mssInvalid").foregroundStyle(.red)
                     }
                 }
-            }
-            if state.failures[.device] != nil {
-                Section { ModemSettingsReadError(state: state, section: .device) }
             }
         }
         .navigationTitle("modemSettings.device")

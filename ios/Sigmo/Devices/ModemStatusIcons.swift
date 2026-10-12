@@ -4,6 +4,7 @@ struct ModemStatusIcons: View {
     let modem: Modem
     let capabilities: Set<String>
     var identity: String?
+    var foreground: Color = .primary
     @ScaledMetric(relativeTo: .caption) private var iconSize = 14.0
 
     var body: some View {
@@ -45,7 +46,7 @@ struct ModemStatusIcons: View {
             signal
         }
         .font(.system(size: iconSize, weight: .medium))
-        .foregroundStyle(.primary)
+        .foregroundStyle(foreground)
     }
 
     private var signal: some View {
@@ -58,7 +59,7 @@ struct ModemStatusIcons: View {
                 HStack(alignment: .bottom, spacing: 2) {
                     ForEach(0..<4) { index in
                         RoundedRectangle(cornerRadius: 1.5)
-                            .fill(modem.signalPercent > index * 25 ? Color.primary : Color(uiColor: .systemGray4))
+                            .fill(modem.signalPercent > index * 25 ? foreground : Color(uiColor: .systemGray4))
                             .frame(width: iconSize / 4, height: iconSize * Double(index + 1) / 4)
                     }
                 }

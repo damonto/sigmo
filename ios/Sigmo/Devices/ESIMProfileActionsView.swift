@@ -30,7 +30,6 @@ struct ESIMProfileActionsView: View {
     @State private var confirmation: Action?
     @State private var operation: PendingOperation?
     @State private var presentedFailure: BackendFailure?
-    @State private var refreshID = 0
     @State private var sim: SIMApplicationState
     @Environment(\.dismiss) private var dismiss
 
@@ -94,9 +93,6 @@ struct ESIMProfileActionsView: View {
     var body: some View {
         presentedForm
             .task(id: operation?.id) { await performOperation() }
-            .task(id: refreshID) {
-                if refreshID > 0 { await reload() }
-            }
             .foregroundTask(id: observationIdentity) {
                 await reload()
             }
@@ -154,7 +150,7 @@ struct ESIMProfileActionsView: View {
         .navigationTitle(profile?.name ?? detailText("detail.profileActions"))
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await reload() }
-        .detailErrorAlert($presentedFailure, retry: { refreshID += 1 })
+        .detailErrorAlert($presentedFailure)
     }
 
     private func identitySection(_ profile: ESIMProfile) -> some View {

@@ -24,7 +24,6 @@ struct CallsView: View {
                 if let line = state.line, !calls.available(line) {
                     Label("calls.upgrade", systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
                 }
-                if let failure = state.failure { FailureView(failure: failure) }
             }
             if !state.loaded && state.loading {
                 ProgressView("calls.loading").frame(maxWidth: .infinity)
@@ -67,6 +66,7 @@ struct CallsView: View {
             }
         }
         .refreshable { await state.load() }
+        .detailErrorAlert($state.failure)
         .foregroundTask(id: Refresh(access: state.session.accessRevision, line: state.line?.id)) {
             await state.load()
         }

@@ -70,11 +70,9 @@ struct UpdatesSettingsView: View {
                     }
                 } else if state.working { ProgressView() }
                 if state.working && state.snapshot != nil { ProgressView("settings.native.working") }
-                SettingsFeedback(failure: state.failure)
-                if state.failure != nil || state.snapshot == nil && !state.working {
-                    RetryButton(id: "retry-updates") { await state.load() }.disabled(state.working)
-                }
             }
+            .detailErrorAlert(state.failure)
+            .refreshable { await state.load() }
             .foregroundTask { await state.load() }
             .foregroundTask(id: observationActive) {
                 if observationActive { await state.observe() }

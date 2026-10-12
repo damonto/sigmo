@@ -231,16 +231,40 @@ final class ConnectionFlowTests: XCTestCase {
         XCTAssertFalse(inactive.buttons["profileInternet"].exists)
     }
 
-    func testReadFailuresAndEmptyScanHaveRecoveryControls() {
+    func testReadFailuresUseDismissOnlyAlerts() {
         let app = launch("detail-connection-read-error")
-        tap(app.buttons["profileInternet"], in: app)
-        XCTAssertTrue(app.buttons["retryConnectionRead"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.switches["internetConnected"].exists)
-        back(app)
+        for (entry, control) in [("profileInternet", "internetConnected"), ("profileNetworkSelection", "networkAutomatic"),
+                                 ("profileWiFiCalling", "wifiCallingEnabled"), ("profileVoLTE", "volteEnabled")] {
+            tap(app.buttons[entry], in: app)
+            let alert = app.alerts.firstMatch
+            XCTAssertTrue(alert.waitForExistence(timeout: 10))
+            XCTAssertEqual(alert.buttons.count, 1)
+            XCTAssertFalse(alert.buttons["Retry"].exists)
+            alert.buttons["OK"].tap()
+            XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["retryConnectionRead"].exists)
+            XCTAssertFalse(app.switches[control].exists)
+            back(app)
+        }
+    }
+
+    func testScanFailureUsesDismissOnlyAlert() {
+        let app = launch("detail-connection-scan-error")
         tap(app.buttons["profileNetworkSelection"], in: app)
-        XCTAssertTrue(app.buttons["retryConnectionRead"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.switches["networkAutomatic"].exists)
-        app.terminate()
+        toggle("networkAutomatic", in: app)
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 10))
+        XCTAssertEqual(alert.buttons.count, 1)
+        alert.buttons["OK"].tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Retry"].exists)
+        XCTAssertFalse(app.buttons["retryNetworkScan"].exists)
+        XCTAssertFalse(app.buttons["rescanNetworks"].exists)
+        XCTAssertFalse(app.staticTexts["No Networks Found"].exists)
+        XCTAssertTrue(app.switches["networkAutomatic"].isEnabled)
+    }
+
+    func testEmptyScanKeepsSearchAvailable() {
         let empty = launch("detail-connection-empty")
         tap(empty.buttons["profileNetworkSelection"], in: empty)
         toggle("networkAutomatic", in: empty)

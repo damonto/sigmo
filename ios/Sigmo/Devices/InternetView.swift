@@ -22,27 +22,25 @@ private enum InternetPageKind {
 }
 
 private struct InternetPage: View {
-    private enum Action { case connect(Bool), options(InternetConnectionOptions), publicInfo }
+    private enum Action { case connect(Bool), options(InternetConnectionOptions) }
     @Bindable var state: InternetState
     let page: InternetPageKind
     @State private var action: ConnectionAction<Action>?
-    @State private var refreshID = 0
 
     var body: some View {
         Form {
             if page == .connection { ConnectionRadioNotice(scope: state.scope) }
-            ConnectionReadFailure(failure: state.loadFailure, retry: { refreshID += 1 })
             switch page {
             case .connection: connectionSections
             case .apn: apnSections
             }
         }
         .navigationTitle(Text(detailText(page.title)))
-        .modifier(ConnectionLifecycle(scope: state.scope, refreshID: refreshID,
+        .modifier(ConnectionLifecycle(scope: state.scope,
                                       reload: { await state.reload() }, cancelAction: { action = nil }))
         .task(id: action?.id) { await perform() }
         .refreshable { await state.reload() }
-        .detailErrorAlert($state.failure, retry: { refreshID += 1 })
+        .detailErrorAlert($state.failure)
     }
 
     private var connectionSections: some View {
@@ -185,12 +183,6 @@ private struct InternetPage: View {
                 valueRow(title: "connection.publicIP", value: state.publicInfo?.ip, copyable: true)
                 valueRow(title: "connection.country", value: state.publicInfo?.country)
                 valueRow(title: "connection.organization", value: state.publicInfo?.organization)
-                if let failure = state.publicFailure {
-                    Text(failure.message).foregroundStyle(.secondary)
-                    RetryButton { action = .init(value: .publicInfo) }
-                        .disabled(state.publicLoading || state.busy || action != nil)
-                        .accessibilityIdentifier("retryInternetPublic")
-                }
             }
             if connection.preferences.proxyEnabled {
                 Section("connection.proxyDetails") {
@@ -226,7 +218,6 @@ private struct InternetPage: View {
         switch action.value {
         case .connect(let enabled): await state.setConnected(enabled)
         case .options(let options): await state.updateOptions(options)
-        case .publicInfo: await state.loadPublic()
         }
         if self.action?.id == action.id, !Task.isCancelled { self.action = nil }
     }

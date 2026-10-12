@@ -15,7 +15,6 @@
 "common.save" = "保存";
 "common.done" = "完成";
 "common.ok" = "好";
-"common.retry" = "重试";
 "common.refresh" = "刷新";
 "common.dismiss" = "关闭";
 "common.unknown" = "未知";
@@ -243,7 +242,6 @@
 "settings.updates.developerBuildDescription" = "开发构建可以检查新版本，但不能替换自身可执行文件。";
 "settings.updates.releaseKeyMissingDescription" = "当前构建未内置发布验签公钥，无法安装更新。";
 "settings.updates.loadFailed" = "无法加载更新设置。";
-"settings.updates.retry" = "重试";
 "settings.updates.status.idle" = "空闲";
 "settings.updates.status.checking" = "正在检查";
 "settings.updates.status.downloading" = "正在下载";
@@ -424,7 +422,7 @@
 "settings.native.headerName" = "名称";
 "settings.native.headerValue" = "值";
 "settings.native.invalidHeader" = "请输入非空且不重复的请求头名称。";
-"settings.native.restartTimeout" = "两分钟内未能重新连接 Sigmo。请重试以读取当前状态。";
+"settings.native.restartTimeout" = "两分钟内未能重新连接 Sigmo。请下拉刷新当前状态。";
 "settings.native.checkedAt" = "上次检查";
 "settings.native.licenseName" = "名称";
 "settings.native.username" = "用户名";
@@ -666,8 +664,8 @@
 "modemSettings.noBands" = "模块未上报支持的频段。";
 "modemSettings.bandRequired" = "请至少选择一个频段。";
 "modemSettings.bandsHint" = "选择允许使用的频段，轻点“完成”统一应用。";
-"modemSettings.savedRefreshPending" = "设置已保存，但未能读取最新设备状态。请重试刷新状态。";
-"modemSettings.confirmationPending" = "尚未确认修改结果。请重试读取设备当前设置。";
+"modemSettings.savedRefreshPending" = "设置已保存，但未能读取最新设备状态。请下拉刷新状态。";
+"modemSettings.confirmationPending" = "尚未确认修改结果。请下拉刷新设备当前设置。";
 "apiError.get_modes_failed" = "无法读取网络制式，请重试。";
 "apiError.set_modes_failed" = "无法修改网络制式，请检查当前设置后重试。";
 "apiError.set_modes_invalid_request" = "网络制式参数无效。";

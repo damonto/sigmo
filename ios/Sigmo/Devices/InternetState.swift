@@ -71,7 +71,9 @@ final class InternetState {
         defer { clearIfUnavailable() }
         guard scope.available, !Task.isCancelled else { return }
         await load()
-        if connected, publicConnectionID == nil, publicFailure == nil, !busy { await loadPublic() }
+        guard !Task.isCancelled else { return }
+        failure = loadFailure
+        if connected, publicConnectionID == nil, loadFailure == nil, !busy { await loadPublic() }
     }
 
     func loadPublic() async {
@@ -90,6 +92,7 @@ final class InternetState {
         } catch {
             guard revision == publicRevision, scope.available, !Task.isCancelled, connection?.connectionID == key else { return }
             publicFailure = .wrapping(error)
+            failure = publicFailure
         }
     }
 

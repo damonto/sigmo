@@ -20,6 +20,37 @@ final class ConnectionTests: XCTestCase {
         await server.allRequests().filter { $0.httpMethod != "GET" && $0.url?.path.hasSuffix(suffix) == true }
     }
 
+    func testReadFailureAlertsPreserveUnavailableControlsAfterDismissal() async throws {
+        let detail = try await make(DetailFixtureServer(scenario: .connectionReadFailure))
+        let internet = InternetState(detail: detail, profileID: profileID)
+        await internet.reload()
+        XCTAssertEqual(internet.failure?.status, 503)
+        internet.failure = nil
+        XCTAssertNotNil(internet.loadFailure)
+        XCTAssertFalse(internet.canChange)
+
+        let network = NetworkSelectionState(detail: detail, profileID: profileID)
+        await network.reload()
+        XCTAssertEqual(network.failure?.status, 503)
+        network.failure = nil
+        XCTAssertNotNil(network.loadFailure)
+        XCTAssertFalse(network.canChange)
+
+        let wifi = WiFiCallingState(detail: detail, profileID: profileID)
+        await wifi.reload()
+        XCTAssertEqual(wifi.failure?.status, 503)
+        wifi.failure = nil
+        XCTAssertNotNil(wifi.loadFailure)
+        XCTAssertFalse(wifi.canChange)
+
+        let volte = VoLTEState(detail: detail, profileID: profileID)
+        await volte.reload()
+        XCTAssertEqual(volte.failure?.status, 503)
+        volte.failure = nil
+        XCTAssertNotNil(volte.loadFailure)
+        XCTAssertFalse(volte.canChange)
+    }
+
     func testManualSelectionCommitsOnlyAfterChoosingAnOperator() async throws {
         let server = DetailFixtureServer()
         let detail = try await make(server)
@@ -82,6 +113,7 @@ final class ConnectionTests: XCTestCase {
             await state.setAutomatic(false)
             XCTAssertTrue(state.networks.isEmpty, outcome)
             XCTAssertEqual(state.scanFailure == nil, outcome == "completed", outcome)
+            XCTAssertEqual(state.failure, state.scanFailure, outcome)
             XCTAssertEqual(state.registration?.mode, "automatic", outcome)
         }
     }
@@ -253,7 +285,7 @@ final class ConnectionTests: XCTestCase {
         XCTAssertEqual(requests.count, 1)
     }
 
-    func testPublicInformationRejectsOldBearerAndRetriesIndependently() async throws {
+    func testPublicInformationRejectsOldBearerAndRecoversOnRefresh() async throws {
         let server = DetailFixtureServer()
         let detail = try await make(server)
         let state = InternetState(detail: detail, profileID: profileID)
@@ -272,11 +304,14 @@ final class ConnectionTests: XCTestCase {
         await server.setConnectionFixture(fixture)
         await state.loadPublic()
         XCTAssertNotNil(state.publicFailure)
+        XCTAssertEqual(state.failure, state.publicFailure)
+        state.failure = nil
+        XCTAssertNotNil(state.publicFailure)
         XCTAssertTrue(state.connected)
         XCTAssertTrue(state.canChange)
         fixture.statuses = [:]
         await server.setConnectionFixture(fixture)
-        await state.loadPublic()
+        await state.reload()
         XCTAssertEqual(state.publicInfo?.ip, "203.0.113.9")
         XCTAssertNil(state.publicFailure)
         await state.setConnected(false)
@@ -378,7 +413,7 @@ final class ConnectionTests: XCTestCase {
         XCTAssertFalse(state.setupRequired)
     }
 
-    func testCarrierCallbackFailureCanRetryWithoutClosingPage() async throws {
+    func testCarrierCallbackFailureAllowsLaterCarrierEvent() async throws {
         let server = DetailFixtureServer(scenario: .connectionSetup)
         let detail = try await make(server)
         let state = WiFiCallingState(detail: detail, profileID: profileID)
@@ -388,12 +423,11 @@ final class ConnectionTests: XCTestCase {
         let callback = CarrierCallback(event: "entitlementChanged")
         await state.completeWebsheet(callback)
         XCTAssertNotNil(state.websheet)
-        XCTAssertEqual(state.failedCallback, callback)
+        XCTAssertEqual(state.failure?.status, 503)
         await server.setStatus("/callback", 200)
         await state.completeWebsheet(callback)
         XCTAssertNil(state.websheet)
         XCTAssertNil(state.failure)
-        XCTAssertNil(state.failedCallback)
     }
 
     func testEmergencyAddressAvailabilityAndTerminalEventClassification() async throws {

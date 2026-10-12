@@ -28,13 +28,11 @@ struct NativePushSettingsView: View {
                 } else {
                     Section { Text("push.pending").foregroundStyle(.secondary) }
                 }
-                SettingsFeedback(failure: push.failures[session.id] ?? push.failure)
-                SettingsFeedback(failure: push.voipFailure)
-                Section { RetryButton { push.retry() } }
             }
         }
         .navigationTitle("push.thisDevice")
         .navigationBarTitleDisplayMode(.inline)
+        .detailErrorAlert(push.flatMap { $0.failures[session.id] ?? $0.failure ?? $0.voipFailure })
         .accessibilityIdentifier("native-push-settings")
     }
 }

@@ -44,6 +44,8 @@ final class VoLTEState {
         defer { clearIfUnavailable() }
         guard scope.available, !Task.isCancelled else { return }
         await load()
+        guard !Task.isCancelled else { return }
+        failure = loadFailure
     }
 
     func setEnabled(_ enabled: Bool) async {

@@ -33,22 +33,6 @@ struct ConnectionLifecycle: ViewModifier {
     }
 }
 
-struct ConnectionReadFailure: View {
-    let failure: BackendFailure?
-    let retry: () -> Void
-
-    var body: some View {
-        if let failure {
-            Section {
-                Text(failure.message).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                RetryButton { retry() }
-                    .accessibilityIdentifier("retryConnectionRead")
-            }
-        }
-    }
-}
-
 struct ConnectionRadioNotice: View {
     let scope: ProfileConnectionScope
 

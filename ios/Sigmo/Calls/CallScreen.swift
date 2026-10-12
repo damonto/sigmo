@@ -13,6 +13,7 @@ struct CallScreen: View {
                 } else { ContentUnavailableView("calls.ended", systemImage: "phone.down") }
             }
             .background(Color(uiColor: .systemGroupedBackground))
+            .detailErrorAlert(calls.failure ?? calls.audio.failure ?? calls.recordings.failure)
             .navigationTitle("detail.tab.calls")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -65,9 +66,6 @@ private struct ActiveCallContent: View {
                 }
                 if calls.audio.connecting { ProgressView("calls.connectingAudio") }
                 controls
-            }
-            if let error = calls.failure ?? calls.audio.failure ?? calls.recordings.failure {
-                FailureView(failure: error)
             }
         }
     }

@@ -55,21 +55,16 @@ struct WiFiCallingView: View {
                                     .accessibilityIdentifier("closeWiFiWebsheet")
                             }
                         }
-                        .detailErrorAlert($state.failure, retry: {
-                            if let callback = state.failedCallback {
-                                callbacks.append(.init(sheetID: websheet.id, callback: callback))
-                            }
-                        })
+                        .detailErrorAlert($state.failure)
                     }
                     .presentationDetents([.large])
                 }
             }
-            .detailErrorAlert($state.failure, retry: { refreshID += 1 })
+            .detailErrorAlert($state.failure)
     }
 
     private var form: some View {
         Form {
-            ConnectionReadFailure(failure: state.loadFailure, retry: { refreshID += 1 })
             Section {
                 if let settings = state.settings {
                     Toggle("connection.wifiCallingOnLine", isOn: Binding(
@@ -150,11 +145,9 @@ struct WiFiCallingView: View {
 private struct WiFiUplinkView: View {
     @Bindable var state: WiFiCallingState
     @State private var action: ConnectionAction<WiFiUnderlay>?
-    @State private var refreshID = 0
 
     var body: some View {
         Form {
-            ConnectionReadFailure(failure: state.loadFailure, retry: { refreshID += 1 })
             Section {
                 ForEach(state.uplinks) { uplink in
                     Button { action = .init(value: uplink.underlay) } label: {
@@ -175,13 +168,13 @@ private struct WiFiUplinkView: View {
             if state.updating { Section { ConnectionProgress() } }
         }
         .navigationTitle("connection.uplink")
-        .modifier(ConnectionLifecycle(scope: state.scope, refreshID: refreshID,
+        .modifier(ConnectionLifecycle(scope: state.scope,
                                       reload: { await state.reload() }, cancelAction: { action = nil }))
         .task(id: action?.id) {
             guard let action else { return }
             await state.selectUplink(action.value)
             if self.action?.id == action.id, !Task.isCancelled { self.action = nil }
         }
-        .detailErrorAlert($state.failure, retry: { refreshID += 1 })
+        .detailErrorAlert($state.failure)
     }
 }

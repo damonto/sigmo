@@ -201,19 +201,19 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue(app.buttons["addESIM-se-a"].exists)
     }
 
-    func testProfileLoadErrorUsesRetryableAlert() {
+    func testProfileLoadErrorUsesDismissOnlyAlert() {
         let app = launch("detail-unavailable")
         let alert = app.alerts.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
         XCTAssertTrue(alert.staticTexts["The server could not complete the request."].exists)
+        XCTAssertEqual(alert.buttons.count, 1)
+        XCTAssertFalse(alert.buttons["Retry"].exists)
         screenshot(app, name: "Detail load error alert")
         alert.buttons["OK"].tap()
         XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["The server could not complete the request."].exists)
         XCTAssertFalse(app.descendants(matching: .any)["profileLoading"].firstMatch.exists)
-        tap(app.buttons["Retry"], in: app)
-        XCTAssertTrue(alert.waitForExistence(timeout: 5))
-        XCTAssertTrue(alert.buttons["Retry"].exists)
+        XCTAssertFalse(app.buttons["Retry"].exists)
     }
 
     func testIncorrectPINAlertPreservesEditor() {

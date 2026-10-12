@@ -43,6 +43,7 @@ struct MessagesView: View {
             }
         }
         .background(Color(uiColor: .systemBackground))
+        .detailErrorAlert(composing ? nil : state.failure)
         .sheet(isPresented: $composing) {
             NavigationStack {
                 NewMessageView(state: state) { conversation in
@@ -113,7 +114,6 @@ struct MessagesView: View {
                 }
                 .listRowSeparator(.hidden)
                 if state.legacy { Text("messages.upgrade").font(.footnote).foregroundStyle(.secondary) }
-                if let failure = state.failure { FailureView(failure: failure) }
             }
             if !state.loaded && state.loading {
                 ForEach(0..<5) { _ in

@@ -34,6 +34,7 @@ struct MessageThreadView: View {
                     .toolbar(.hidden, for: .tabBar)
             }
         }
+        .detailErrorAlert(state.failure)
         .foregroundTask {
             await state.load()
         }
@@ -60,19 +61,16 @@ struct MessageThreadView: View {
 
     private var content: some View {
         VStack(spacing: 0) {
-            if let failure = state.failure {
-                FailureView(failure: failure).padding(.horizontal)
-            }
             timeline
         }
         .background(Color(uiColor: .systemBackground))
         .safeAreaBar(edge: .bottom, spacing: 0) {
-            VStack(spacing: 4) {
+            VStack(alignment: .leading, spacing: 4) {
                 if !state.canSend {
                     Text("messages.inactiveLine")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal)
+                        .padding(.horizontal, 16)
                 }
                 MessageComposer(text: $state.draft, sending: state.sending, enabled: state.canSend) {
                     pendingSend = UUID()
@@ -246,13 +244,13 @@ struct NewMessageView: View {
             }.padding(.horizontal).padding(.top)
             Divider()
             if let modem = state.modem { Text(modem.number.isEmpty ? modem.carrier : modem.number).font(.caption).foregroundStyle(.secondary).padding(.horizontal) }
-            if let failure = state.failure { FailureView(failure: failure).padding(.horizontal) }
             Spacer()
         }
         .safeAreaBar(edge: .bottom, spacing: 0) {
             MessageComposer(text: $state.newDraft, sending: state.sending, enabled: !state.newRecipient.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { pendingSend = UUID() }
         }
         .navigationTitle("messages.new").navigationBarTitleDisplayMode(.inline)
+        .detailErrorAlert(state.failure)
         .toolbar { ToolbarItem(placement: .cancellationAction) { Button("common.cancel") { dismiss() } } }
         .task { recipientFocused = true }
         .task(id: pendingSend) {

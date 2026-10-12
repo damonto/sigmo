@@ -148,7 +148,7 @@ final class ModemSettingsState {
     }
 
     // A 204 confirms the write even when its subsequent GET is unavailable.
-    // The caller may close its editor; the shared page retains a read-only retry.
+    // The caller may close its editor; pending confirmation keeps edits disabled until a refresh succeeds.
     func save(_ change: ModemSettingsChange) async -> Bool {
         guard !Task.isCancelled, canSubmit(change) else { return false }
         revision += 1

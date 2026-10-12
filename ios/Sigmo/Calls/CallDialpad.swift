@@ -42,6 +42,7 @@ struct CallDialpad: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle(ussd.opened ? "calls.ussd" : "calls.keypad")
             .navigationBarTitleDisplayMode(.inline)
+            .detailErrorAlert($ussd.failure)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("common.done") { ussd.close(); dismiss() } } }
             .sheet(isPresented: $contactsPresented) {
                 CallContactPicker { selected, name in number = CallDigits.normalize(selected); calls.contacts.remember(number: selected, name: name) }
@@ -148,7 +149,6 @@ struct CallDialpad: View {
     private var service: some View {
         VStack(alignment: .leading, spacing: 20) {
             ForEach(Array(ussd.messages.enumerated()), id: \.offset) { _, message in Text(message).textSelection(.enabled) }
-            if let error = ussd.failure { FailureView(failure: error) }
             if ussd.busy { ProgressView("calls.ussdWaiting") }
             if !ussd.ended {
                 TextField("calls.ussdReply", text: $ussd.reply).textFieldStyle(.roundedBorder).keyboardType(.numbersAndPunctuation)
