@@ -1,4 +1,4 @@
-import catalog from '../../../internal/pkg/apierror/catalog.json'
+import catalog from '../../../../internal/pkg/apierror/catalog.json'
 import type { ApiErrorResponse } from '@/types/api'
 
 export const PROBLEM_MEDIA_TYPE = 'application/problem+json'

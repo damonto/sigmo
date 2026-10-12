@@ -73,7 +73,7 @@ When migrating from the LAN or separate-terminal workflow, stop the old source, 
 | Gateway status (either machine, through the forward on Linux) | `http://127.0.0.1:8765/health`                               |
 | Linux snapshots                                               | `build/ios/snapshots/<revision>.tar.gz`                      |
 | Mac workspace                                                 | `~/Library/Developer/SigmoMCP/workspace/`                    |
-| Mac project                                                   | `~/Library/Developer/SigmoMCP/workspace/ios/Sigmo.xcodeproj` |
+| Mac project                                                   | `~/Library/Developer/SigmoMCP/workspace/apps/ios/Sigmo.xcodeproj` |
 
 ## Codex project configuration
 
@@ -121,7 +121,7 @@ uv run scripts/ios/mcp_client.py list
 uv run scripts/ios/mcp_client.py call GatewayStatus
 uv run scripts/ios/mcp_client.py call SyncProject
 uv run scripts/ios/mcp_client.py call XcodeOpenWorkspace \
-  --arguments '{"path":"/Users/damon/Library/Developer/SigmoMCP/workspace/ios/Sigmo.xcodeproj"}'
+  --arguments '{"path":"/Users/damon/Library/Developer/SigmoMCP/workspace/apps/ios/Sigmo.xcodeproj"}'
 
 # Replace the tool and arguments with values from the live tool list.
 uv run scripts/ios/mcp_client.py --timeout 1200 --output build/ios/mcp-result.json \
@@ -132,6 +132,7 @@ The default endpoint is `http://127.0.0.1:8765/mcp` on the development host. Ove
 
 ## Manual reconnection
 
+- After updating to the `apps/ios/` layout, restart the Linux source service and rerun the Mac bootstrap command above to load the updated gateway. It checks the previous `ios/` files for local edits before syncing into `apps/ios/`. Open `workspace/apps/ios/Sigmo.xcodeproj`; the old generated project is no longer used.
 - After a network change, rerun the same curl command. SSH checks the connection every 15 idle seconds and exits after approximately three unanswered checks. The launcher then stops the gateway and exits; use Ctrl-C first if it has not exited yet. There is no automatic reconnect or background service.
 - Keep the Linux source service running. The Mac command recreates both the SSH tunnel and gateway, reusing the Python environment and synchronized workspace.
 - Check `http://127.0.0.1:8765/health` from the development host, then run `mcp_client.py list` and `mcp_client.py call GatewayStatus`. A listening SSH port alone does not establish gateway or Xcode readiness. An MCP session may need to be reinitialized, or the Codex session reloaded, after transport loss.
@@ -141,7 +142,7 @@ The default endpoint is `http://127.0.0.1:8765/mcp` on the development host. Ove
 
 ## Synchronization behavior
 
-- Only saved, non-ignored regular files under `ios/` and `scripts/ios/` are exported, including uncommitted files. No commit is required.
+- Only saved, non-ignored regular files under `apps/ios/` and `scripts/ios/` are exported, including uncommitted files. No commit is required.
 - Snapshots are immutable archives named by their SHA-256. The manifest includes a hash for every file. Unchanged source reuses the same archive, including after a source-service restart.
 - The service checks for source changes while preparing an archive and publishes only a complete snapshot. Save the files and retry if concurrent edits are detected.
 - The Mac verifies the archive and file hashes before updating the workspace. Managed files changed or deleted on the Mac cause a conflict; preserve and resolve those changes before resuming synchronization. Source paths containing symlinks, including parent directories, are rejected before they can redirect writes outside the workspace.

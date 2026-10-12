@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 
+	"github.com/damonto/sigmo/apps/web"
 	"github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/app/buildinfo"
 	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
@@ -44,7 +45,6 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	pussd "github.com/damonto/sigmo/internal/pkg/ussd"
 	"github.com/damonto/sigmo/internal/pkg/webpush"
-	"github.com/damonto/sigmo/web"
 )
 
 type Extension func(*echo.Group, RegisterConfig) error

@@ -13,7 +13,7 @@ A native SwiftUI client for iPhone and iPad, with English and Simplified Chinese
 The Xcode project is generated from [project.yml](project.yml). From the repository root on a Mac:
 
 ```sh
-cd ios
+cd apps/ios
 xcodegen generate --spec project.yml
 open Sigmo.xcodeproj
 ```
@@ -22,7 +22,7 @@ Select the **Sigmo** scheme and an iPhone or iPad simulator, then run the app. A
 
 For physical-device builds, configure `DEVELOPMENT_TEAM` and `SIGMO_BUNDLE_ID` in `project.yml` for your Apple developer account. Push notifications also require the corresponding App ID capability and APNs configuration.
 
-For Linux development with builds on a Mac, follow the [Xcode MCP workflow](../scripts/ios/MCP.md). Edit source in the Linux repository; the synchronized Mac workspace is a build copy.
+For Linux development with builds on a Mac, follow the [Xcode MCP workflow](../../scripts/ios/MCP.md). Edit source in the Linux repository; the synchronized Mac workspace is a build copy.
 
 ## Connect to Sigmo
 
@@ -39,5 +39,5 @@ Run **Product → Test** in Xcode with the **Sigmo** scheme to execute `SigmoTes
 From the repository root, check English/Chinese resources and settings fixtures without Xcode or a live backend:
 
 ```sh
-python3 ios/scripts/check_settings.py
+python3 apps/ios/scripts/check_settings.py
 ```

@@ -1,4 +1,4 @@
-import catalog from '../../../../internal/pkg/apierror/catalog.json'
+import catalog from '../../../../../internal/pkg/apierror/catalog.json'
 
 /** problemResponse creates the same wire representation as the two servers. */
 export function problemResponse(

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import fixtures from '../../../../internal/pkg/apierror/testdata/problems.json'
+import fixtures from '../../../../../internal/pkg/apierror/testdata/problems.json'
 import {
   createApiError,
   fetchWithBoundedErrors,

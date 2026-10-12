@@ -1,5 +1,7 @@
 .git
 .github
+go.work
+go.work.sum
 
 config.toml
 *.local
@@ -20,10 +22,10 @@ build/
 pro/
 dist/
 tmp/
-web/node_modules/
-web/dist/
-web/.eslintcache
-web/*.tsbuildinfo
+apps/web/node_modules/
+apps/web/dist/
+apps/web/.eslintcache
+apps/web/*.tsbuildinfo
 
 .env
 .env.*

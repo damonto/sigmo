@@ -24,11 +24,11 @@ class SnapshotTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.repo = Path(self.temporary.name)
-        (self.repo / "ios").mkdir()
+        (self.repo / "apps/ios").mkdir(parents=True)
         (self.repo / "scripts/ios").mkdir(parents=True)
         (self.repo / ".gitignore").write_text("build/\n*.local.xcconfig\n")
-        (self.repo / "ios/project.yml").write_text("name: Sigmo\n")
-        (self.repo / "ios/App.swift").write_text("// committed source\n")
+        (self.repo / "apps/ios/project.yml").write_text("name: Sigmo\n")
+        (self.repo / "apps/ios/App.swift").write_text("// committed source\n")
         (self.repo / "scripts/ios/mcp_gateway.py").write_text("# gateway fixture\n")
         (self.repo / "scripts/ios/start-mac.sh").write_bytes(Path(__file__).with_name("start-mac.sh").read_bytes())
         (self.repo / "server-private.txt").write_text("outside the source scope\n")
@@ -52,13 +52,13 @@ class SnapshotTests(unittest.TestCase):
         return files
 
     def test_saved_uncommitted_files_are_included_and_private_files_are_excluded(self):
-        (self.repo / "ios/App.swift").write_text("// saved edit\n")
-        (self.repo / "ios/New.swift").write_text("// new source\n")
-        (self.repo / "ios/Signing.local.xcconfig").write_text("private configuration\n")
+        (self.repo / "apps/ios/App.swift").write_text("// saved edit\n")
+        (self.repo / "apps/ios/New.swift").write_text("// new source\n")
+        (self.repo / "apps/ios/Signing.local.xcconfig").write_text("private configuration\n")
         files = self.contents(self.snapshots.current())
-        self.assertEqual(files["ios/App.swift"], b"// saved edit\n")
-        self.assertIn("ios/New.swift", files)
-        self.assertNotIn("ios/Signing.local.xcconfig", files)
+        self.assertEqual(files["apps/ios/App.swift"], b"// saved edit\n")
+        self.assertIn("apps/ios/New.swift", files)
+        self.assertNotIn("apps/ios/Signing.local.xcconfig", files)
         self.assertNotIn("server-private.txt", files)
         self.assertFalse(any(name.startswith("build/") for name in files))
 
@@ -72,11 +72,11 @@ class SnapshotTests(unittest.TestCase):
     def test_edits_and_deletions_preserve_earlier_snapshots(self):
         first = self.snapshots.current()
         original = self.contents(first)
-        (self.repo / "ios/App.swift").unlink()
-        (self.repo / "ios/New.swift").write_text("// replacement\n")
+        (self.repo / "apps/ios/App.swift").unlink()
+        (self.repo / "apps/ios/New.swift").write_text("// replacement\n")
         second = self.snapshots.current()
         self.assertNotEqual(first["revision"], second["revision"])
-        self.assertNotIn("ios/App.swift", self.contents(second))
+        self.assertNotIn("apps/ios/App.swift", self.contents(second))
         self.assertEqual(self.contents(first), original)
 
     def test_source_changes_during_snapshot_do_not_publish_a_manifest(self):
@@ -84,8 +84,8 @@ class SnapshotTests(unittest.TestCase):
 
         def add_and_change(archive, info, content):
             original_add(archive, info, content)
-            if info.name == "ios/App.swift":
-                (self.repo / "ios/App.swift").write_text("// concurrent edit\n")
+            if info.name == "apps/ios/App.swift":
+                (self.repo / "apps/ios/App.swift").write_text("// concurrent edit\n")
 
         with patch.object(tarfile.TarFile, "addfile", add_and_change):
             with self.assertRaisesRegex(ValueError, "source changed during snapshot"):
@@ -97,13 +97,13 @@ class SnapshotTests(unittest.TestCase):
         for kind in ("symlink", "missing project"):
             with self.subTest(kind=kind):
                 if kind == "symlink":
-                    link = self.repo / "ios/External.swift"
+                    link = self.repo / "apps/ios/External.swift"
                     link.symlink_to(self.repo / "server-private.txt")
                     with self.assertRaisesRegex(ValueError, "symlinks"):
                         self.snapshots.current()
                     link.unlink()
                 else:
-                    (self.repo / "ios/project.yml").unlink()
+                    (self.repo / "apps/ios/project.yml").unlink()
                     with self.assertRaisesRegex(ValueError, "required"):
                         self.snapshots.current()
 

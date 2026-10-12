@@ -10,8 +10,8 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     copies = {
-        "internal/pkg/apierror/catalog.json": "ios/Sigmo/Resources/HTTPProblems.json",
-        "internal/pkg/apierror/testdata/problems.json": "ios/SigmoTests/Fixtures/HTTPProblems.json",
+        "internal/pkg/apierror/catalog.json": "apps/ios/Sigmo/Resources/HTTPProblems.json",
+        "internal/pkg/apierror/testdata/problems.json": "apps/ios/SigmoTests/Fixtures/HTTPProblems.json",
     }
     for source, destination in copies.items():
         data = (root / source).read_bytes()

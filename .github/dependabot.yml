@@ -20,7 +20,7 @@ updates:
 
   - package-ecosystem: "bun"
     directories:
-      - "/web"
+      - "/apps/web"
       - "/pro-api"
     schedule:
       interval: "weekly"

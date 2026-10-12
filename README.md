@@ -155,12 +155,16 @@ To run Sigmo as a background service, use Systemd.
 
 ## 🏗️ Development
 
+Client applications live in `apps/`: [Web](apps/web/README.md) and
+[iOS](apps/ios/README.md).
+The Go backend remains in the root module, with Pro extensions in `pro/`.
+
 If you wish to contribute or modify the source:
 
 1.  **Prerequisites**: Go 1.27.1, Bun (for Vue).
 2.  **Build Frontend**:
     ```bash
-    cd web && bun install && bun run build
+    (cd apps/web && bun install && bun run build)
     ```
 3.  **Run Backend**:
 
@@ -168,7 +172,7 @@ If you wish to contribute or modify the source:
     go run ./ --listen-address=0.0.0.0:9527 --db-path=./sigmo.db --debug
     ```
 
-    _Or for frontend hot-reload:_ `cd web && bun run dev`
+    _Or for frontend hot-reload:_ `cd apps/web && bun run dev`
 
 4.  **Build Docker Image**:
     ```bash

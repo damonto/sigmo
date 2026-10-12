@@ -25,6 +25,8 @@ See [Vite Configuration Reference](https://vite.dev/config/).
 
 ## Project Setup
 
+Run these commands from `apps/web/`.
+
 ```sh
 bun install
 ```

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WEB_DIR="${SIGMO_WEB_DIR:-${ROOT_DIR}/web}"
+WEB_DIR="${SIGMO_WEB_DIR:-${ROOT_DIR}/apps/web}"
 UI_DIR="${SIGMO_SHADCN_UI_DIR:-${WEB_DIR}/src/components/ui}"
 
 if ! command -v bun >/dev/null 2>&1; then

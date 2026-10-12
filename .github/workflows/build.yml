@@ -7,13 +7,13 @@ on:
     tags: [v*]
     paths-ignore:
       - "**/*.md"
-      - "ios/**"
+      - "apps/ios/**"
       - "pro/**"
       - "pro-api/**"
   pull_request:
     branches: [main]
     paths-ignore:
-      - "ios/**"
+      - "apps/ios/**"
       - "pro/**"
       - "pro-api/**"
 
@@ -43,7 +43,7 @@ jobs:
         with: { go-version-file: go.mod }
       - name: Build frontend
         run: |
-          cd web
+          cd apps/web
           bun install --frozen-lockfile
           bun run build --mode prod
       - name: Build Community binary

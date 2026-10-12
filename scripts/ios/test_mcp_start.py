@@ -177,13 +177,15 @@ import asyncio
 import os
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 sys.path.insert(0, {str(SCRIPT.parent)!r})
 import mcp_gateway
 from fastmcp.client.transports import StdioTransport
 
 directory = Path(os.environ["SIGMO_TEST_DIR"])
-mcp_gateway.platform.system = lambda: "Darwin"
+# Only the gateway needs to see macOS; HTTP/TLS dependencies must see the real OS.
+mcp_gateway.platform = SimpleNamespace(system=lambda: "Darwin")
 mcp_gateway.shutil.which = lambda command: command
 mcp_gateway.SourceSync.run = AsyncMock()
 mcp_gateway.subprocess.run = lambda *args, **kwargs: None

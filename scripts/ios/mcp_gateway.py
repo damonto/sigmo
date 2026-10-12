@@ -78,15 +78,17 @@ class SourceSync:
         with self.opener.open(target, timeout=15) as response:
             return response.read()
 
-    def source_path(self, name):
+    def source_path(self, name, *, allow_legacy=False):
         path = PurePosixPath(name)
         if (
             path.is_absolute()
             or path.as_posix() != name
             or ".." in path.parts
             or not (
-                len(path.parts) >= 2 and path.parts[0] == "ios"
+                len(path.parts) >= 3 and path.parts[:2] == ("apps", "ios")
                 or len(path.parts) >= 3 and path.parts[:2] == ("scripts", "ios")
+                # Existing Mac state still names ios/ until its first sync after the move.
+                or allow_legacy and len(path.parts) >= 2 and path.parts[0] == "ios"
             )
         ):
             raise ValueError(f"invalid source manifest path: {name}")
@@ -99,7 +101,7 @@ class SourceSync:
 
     def check_local_edits(self, incoming):
         for name, expected in self.state["files"].items():
-            target = self.source_path(name)
+            target = self.source_path(name, allow_legacy=True)
             if not target.is_file() or file_hash(target) != expected:
                 raise ValueError(
                     f"Mac source changed locally; preserve and resolve it before syncing: {name}"
@@ -144,7 +146,7 @@ class SourceSync:
         if self.state.get("needs_project_generation"):
             subprocess.run(
                 ["xcodegen", "generate", "--spec", "project.yml"],
-                cwd=self.workspace / "ios",
+                cwd=self.workspace / "apps/ios",
                 check=True,
             )
             self.state["needs_project_generation"] = False
@@ -162,9 +164,9 @@ class SourceSync:
         if hashlib.sha256(content).hexdigest() != manifest["revision"]:
             raise ValueError("snapshot checksum mismatch")
         regenerate = (
-            not (self.workspace / "ios/Sigmo.xcodeproj").exists()
-            or incoming.get("ios/project.yml")
-            != self.state["files"].get("ios/project.yml")
+            not (self.workspace / "apps/ios/Sigmo.xcodeproj").exists()
+            or incoming.get("apps/ios/project.yml")
+            != self.state["files"].get("apps/ios/project.yml")
             or set(incoming) != set(self.state["files"])
         )
         with tempfile.TemporaryDirectory(
@@ -198,7 +200,7 @@ class SourceSync:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(staging / name, target)
             for name in self.state["files"].keys() - incoming.keys():
-                self.source_path(name).unlink()
+                self.source_path(name, allow_legacy=True).unlink()
         self.state = manifest
         self.state["needs_project_generation"] = regenerate
         # Record the installed files even if XcodeGen fails, allowing a retry
@@ -349,7 +351,7 @@ async def main():
         await sync.run()
         await asyncio.to_thread(
             subprocess.run,
-            ["open", "-a", "Xcode", str(sync.workspace / "ios/Sigmo.xcodeproj")], check=True
+            ["open", "-a", "Xcode", str(sync.workspace / "apps/ios/Sigmo.xcodeproj")], check=True
         )
         bridge = Client(
             StdioTransport(

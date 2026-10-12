@@ -17,7 +17,7 @@
     "lint:eslint": "eslint . --fix --cache",
     "lint": "run-s lint:*",
     "format": "prettier --write --experimental-cli src/",
-    "ui:update": "../scripts/update-shadcn-vue-ui.sh"
+    "ui:update": "../../scripts/update-shadcn-vue-ui.sh"
   },
   "dependencies": {
     "@lucide/vue": "^1.47.0",

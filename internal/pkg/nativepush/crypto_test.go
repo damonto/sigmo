@@ -14,7 +14,7 @@ import (
 )
 
 func TestEncryptionCrossLanguageVector(t *testing.T) {
-	data, err := os.ReadFile("../../../ios/SigmoTests/Fixtures/native_push.json")
+	data, err := os.ReadFile("../../../apps/ios/SigmoTests/Fixtures/native_push.json")
 	if err != nil {
 		t.Fatal(err)
 	}

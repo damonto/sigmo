@@ -28,7 +28,7 @@ class Snapshots:
 
     def source_files(self):
         names = subprocess.check_output(
-            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "ios", "scripts/ios"],
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "apps/ios", "scripts/ios"],
             cwd=self.repo,
         ).decode().split("\0")
         files = {}
@@ -38,7 +38,7 @@ class Snapshots:
                 raise ValueError(f"source symlinks are not supported: {name}")
             if path.is_file():
                 files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
-        if not {"ios/project.yml", "scripts/ios/mcp_gateway.py"}.issubset(files):
+        if not {"apps/ios/project.yml", "scripts/ios/mcp_gateway.py"}.issubset(files):
             raise ValueError("iOS project and MCP gateway source are required")
         return files
 

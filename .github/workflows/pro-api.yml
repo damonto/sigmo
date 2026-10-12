@@ -8,8 +8,8 @@ on:
       - "pro-api/**"
       - "internal/pkg/apierror/**"
       - "scripts/sync-http-contract.py"
-      - "ios/Sigmo/Resources/HTTPProblems.json"
-      - "ios/SigmoTests/Fixtures/HTTPProblems.json"
+      - "apps/ios/Sigmo/Resources/HTTPProblems.json"
+      - "apps/ios/SigmoTests/Fixtures/HTTPProblems.json"
       - ".github/workflows/pro-api.yml"
   pull_request:
     branches: [main]
@@ -17,8 +17,8 @@ on:
       - "pro-api/**"
       - "internal/pkg/apierror/**"
       - "scripts/sync-http-contract.py"
-      - "ios/Sigmo/Resources/HTTPProblems.json"
-      - "ios/SigmoTests/Fixtures/HTTPProblems.json"
+      - "apps/ios/Sigmo/Resources/HTTPProblems.json"
+      - "apps/ios/SigmoTests/Fixtures/HTTPProblems.json"
       - ".github/workflows/pro-api.yml"
 
 permissions:

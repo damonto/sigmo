@@ -65,7 +65,7 @@ configure_pro_auth() {
 
 build_frontend() {
 	if [ "${SIGMO_SKIP_FRONTEND_BUILD:-0}" = "1" ]; then return; fi
-	(cd "${ROOT_DIR}/web" && bun install --frozen-lockfile && bun run build --mode prod)
+	(cd "${ROOT_DIR}/apps/web" && bun install --frozen-lockfile && bun run build --mode prod)
 }
 
 root_path() {

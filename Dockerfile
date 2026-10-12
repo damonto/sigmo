@@ -6,14 +6,15 @@ ARG ALPINE_VERSION=3.20
 
 FROM --platform=$BUILDPLATFORM oven/bun:${BUN_VERSION}-alpine AS frontend
 
-WORKDIR /app/web
+WORKDIR /app/apps/web
 
 RUN apk add --no-cache nodejs
 
-COPY web/package.json web/bun.lock ./
+COPY apps/web/package.json apps/web/bun.lock ./
 RUN bun install --frozen-lockfile
 
-COPY web/ ./
+COPY apps/web/ ./
+COPY internal/pkg/apierror/ /app/internal/pkg/apierror/
 
 RUN bun run build -- --mode prod
 
@@ -28,7 +29,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-COPY --from=frontend /app/web/dist ./web/dist
+COPY --from=frontend /app/apps/web/dist ./apps/web/dist
 
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-w -s \
     -X github.com/damonto/sigmo/internal/app/buildinfo.Version=${BUILD_VERSION} \

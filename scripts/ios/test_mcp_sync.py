@@ -23,7 +23,7 @@ class SyncTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.sync = SourceSync("http://localhost:8766", Path(self.temporary.name) / "workspace")
-        self.files = {"ios/project.yml": b"name: Sigmo\n", "ios/Sigmo/App.swift": b"// initial source\n"}
+        self.files = {"apps/ios/project.yml": b"name: Sigmo\n", "apps/ios/Sigmo/App.swift": b"// initial source\n"}
 
     def remote_files(self, files):
         archive = io.BytesIO()
@@ -42,7 +42,8 @@ class SyncTests(unittest.TestCase):
         return {"manifest.json": json.dumps(manifest).encode(), "/snapshots/example.tar.gz": data}
 
     def generate(self, *args, **kwargs):
-        (self.sync.workspace / "ios/Sigmo.xcodeproj").mkdir(exist_ok=True)
+        self.assertEqual(kwargs["cwd"], self.sync.workspace / "apps/ios")
+        (self.sync.workspace / "apps/ios/Sigmo.xcodeproj").mkdir(exist_ok=True)
 
     def install(self, files):
         responses = self.remote_files(files)
@@ -52,18 +53,48 @@ class SyncTests(unittest.TestCase):
 
     def test_saved_changes_and_deletions_are_applied(self):
         self.install(self.files)
-        changed = {"ios/project.yml": self.files["ios/project.yml"], "ios/Sigmo/New.swift": b"// new source\n"}
+        changed = {"apps/ios/project.yml": self.files["apps/ios/project.yml"], "apps/ios/Sigmo/New.swift": b"// new source\n"}
         self.install(changed)
-        self.assertFalse((self.sync.workspace / "ios/Sigmo/App.swift").exists())
-        self.assertEqual((self.sync.workspace / "ios/Sigmo/New.swift").read_bytes(), b"// new source\n")
+        self.assertFalse((self.sync.workspace / "apps/ios/Sigmo/App.swift").exists())
+        self.assertEqual((self.sync.workspace / "apps/ios/Sigmo/New.swift").read_bytes(), b"// new source\n")
 
     def test_local_edits_are_not_overwritten(self):
         self.install(self.files)
-        path = self.sync.workspace / "ios/Sigmo/App.swift"
+        path = self.sync.workspace / "apps/ios/Sigmo/App.swift"
         path.write_bytes(b"// Mac edit\n")
         with self.assertRaisesRegex(ValueError, "changed locally"):
-            self.install({**self.files, "ios/Sigmo/App.swift": b"// remote edit\n"})
+            self.install({**self.files, "apps/ios/Sigmo/App.swift": b"// remote edit\n"})
         self.assertEqual(path.read_bytes(), b"// Mac edit\n")
+
+    def test_legacy_workspace_migrates_only_without_local_edits(self):
+        for edited in (False, True):
+            with self.subTest(edited=edited):
+                self.sync = SourceSync(
+                    "http://localhost:8766", Path(self.temporary.name) / f"legacy-{edited}"
+                )
+                legacy = {name.removeprefix("apps/"): data for name, data in self.files.items()}
+                for name, data in legacy.items():
+                    target = self.sync.workspace / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(data)
+                self.sync.state = {
+                    "files": {name: hashlib.sha256(data).hexdigest() for name, data in legacy.items()}
+                }
+                self.sync.save_state()
+                self.sync = SourceSync("http://localhost:8766", self.sync.workspace)
+                old_source = self.sync.workspace / "ios/Sigmo/App.swift"
+                if edited:
+                    old_source.write_bytes(b"// Mac edit\n")
+                    with self.assertRaisesRegex(ValueError, "changed locally"):
+                        self.install(self.files)
+                    self.assertEqual(old_source.read_bytes(), b"// Mac edit\n")
+                    self.assertFalse((self.sync.workspace / "apps/ios").exists())
+                else:
+                    self.install(self.files)
+                    for name, data in self.files.items():
+                        self.assertEqual((self.sync.workspace / name).read_bytes(), data)
+                        self.assertFalse((self.sync.workspace / name.removeprefix("apps/")).exists())
+                    self.assertEqual(set(self.sync.state["files"]), set(self.files))
 
     def test_bad_archive_is_rejected_before_writing(self):
         responses = self.remote_files(self.files)
@@ -71,10 +102,13 @@ class SyncTests(unittest.TestCase):
         with patch.object(self.sync, "fetch", side_effect=responses.__getitem__):
             with self.assertRaisesRegex(ValueError, "checksum mismatch"):
                 self.sync.sync()
-        self.assertFalse((self.sync.workspace / "ios/project.yml").exists())
+        self.assertFalse((self.sync.workspace / "apps/ios/project.yml").exists())
 
     def test_paths_outside_the_source_scope_are_rejected(self):
-        for name in ("../escape", "/ios/escape", "ios/../escape", "scripts/outside.py", "ios/./App.swift"):
+        for name in (
+            "../escape", "/apps/ios/escape", "apps/ios/../escape", "scripts/outside.py",
+            "apps/ios/./App.swift", "apps/web/App.swift", "ios/App.swift", "apps/ios",
+        ):
             with self.subTest(path=name):
                 responses = self.remote_files({name: b"bad"})
                 with patch.object(self.sync, "fetch", side_effect=responses.__getitem__):
@@ -83,13 +117,13 @@ class SyncTests(unittest.TestCase):
 
     def test_symlinked_parent_is_rejected_without_changing_its_files(self):
         self.install(self.files)
-        original = self.sync.workspace / "ios/Sigmo"
+        original = self.sync.workspace / "apps/ios/Sigmo"
         outside = Path(self.temporary.name) / "outside"
         original.rename(outside)
         original.symlink_to(outside, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, "symlink"):
-            self.install({**self.files, "ios/Sigmo/App.swift": b"// remote edit\n"})
-        self.assertEqual((outside / "App.swift").read_bytes(), self.files["ios/Sigmo/App.swift"])
+            self.install({**self.files, "apps/ios/Sigmo/App.swift": b"// remote edit\n"})
+        self.assertEqual((outside / "App.swift").read_bytes(), self.files["apps/ios/Sigmo/App.swift"])
 
     def test_fetch_bypasses_environment_proxy(self):
         directory = Path(self.temporary.name)
@@ -139,9 +173,9 @@ sys.stdout.buffer.write(sync.fetch("manifest.json"))
                 self.sync.sync()
         self.assertEqual(self.sync.state["revision"], revision)
         self.assertTrue(self.sync.last_error)
-        self.install({**self.files, "ios/Sigmo/App.swift": b"// reconnected\n"})
+        self.install({**self.files, "apps/ios/Sigmo/App.swift": b"// reconnected\n"})
         self.assertEqual(self.sync.last_error, "")
-        self.assertEqual((self.sync.workspace / "ios/Sigmo/App.swift").read_bytes(), b"// reconnected\n")
+        self.assertEqual((self.sync.workspace / "apps/ios/Sigmo/App.swift").read_bytes(), b"// reconnected\n")
 
 
 if __name__ == "__main__":

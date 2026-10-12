@@ -5,11 +5,11 @@ from pathlib import Path
 import re
 import sys
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def localized_strings(locale):
-    path = ROOT / f"ios/Sigmo/Resources/{locale}.lproj/Localizable.strings"
+    path = ROOT / f"apps/ios/Sigmo/Resources/{locale}.lproj/Localizable.strings"
     result = {}
     for line in path.read_text().splitlines():
         match = re.fullmatch(r'("(?:[^"\\]|\\.)*")\s*=\s*("(?:[^"\\]|\\.)*");', line.strip())
@@ -27,7 +27,7 @@ def localized_strings(locale):
 def main():
     en, zh = localized_strings("en"), localized_strings("zh-Hans")
     assert en.keys() == zh.keys(), f"Locale key mismatch: {en.keys() ^ zh.keys()}"
-    source = (ROOT / "ios/Sigmo/Settings/SettingsFixtureData.swift").read_text()
+    source = (ROOT / "apps/ios/Sigmo/Settings/SettingsFixtureData.swift").read_text()
     fixture = json.loads(source.split('#"""', 1)[1].split('"""#', 1)[0])
     schema = fixture["schema"]
     expected_channels = {"telegram", "bark", "gotify", "sc3", "lark", "wecom", "http", "email"}
@@ -56,9 +56,9 @@ def main():
                 check_texts(item)
     check_texts(schema)
     used = set()
-    ui_sources = list((ROOT / "ios/Sigmo/Settings").glob("*.swift"))
-    ui_sources += list((ROOT / "ios/Sigmo/Devices").glob("ModemSettings*.swift"))
-    ui_sources += list((ROOT / "ios/Sigmo/Calls").glob("*.swift"))
+    ui_sources = list((ROOT / "apps/ios/Sigmo/Settings").glob("*.swift"))
+    ui_sources += list((ROOT / "apps/ios/Sigmo/Devices").glob("ModemSettings*.swift"))
+    ui_sources += list((ROOT / "apps/ios/Sigmo/Calls").glob("*.swift"))
     for path in ui_sources:
         if "Fixture" in path.name:
             continue
