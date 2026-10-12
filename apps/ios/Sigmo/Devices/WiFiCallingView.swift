@@ -13,7 +13,7 @@ struct WiFiCallingView: View {
     @State private var refreshID = 0
     @State private var callbacks: [PendingCallback] = []
 
-    init(detail: ModemDetailState, profileID: String) {
+    init(detail: ModemDetailState, profileID: String?) {
         _state = State(initialValue: WiFiCallingState(detail: detail, profileID: profileID))
     }
 

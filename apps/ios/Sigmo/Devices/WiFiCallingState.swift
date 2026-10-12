@@ -30,7 +30,7 @@ final class WiFiCallingState {
     @ObservationIgnored private var showSetupAfterEnable = false
     @ObservationIgnored private var callbacks: Set<CarrierCallback> = []
 
-    init(detail: ModemDetailState, profileID: String) {
+    init(detail: ModemDetailState, profileID: String?) {
         scope = ProfileConnectionScope(detail: detail, profileID: profileID, capability: "wifiCalling")
     }
 

@@ -12,7 +12,7 @@ final class VoLTEState {
     var failure: BackendFailure?
     @ObservationIgnored private var readRevision = 0
 
-    init(detail: ModemDetailState, profileID: String) {
+    init(detail: ModemDetailState, profileID: String?) {
         scope = ProfileConnectionScope(detail: detail, profileID: profileID, capability: "volte")
     }
 

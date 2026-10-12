@@ -132,7 +132,7 @@ struct ESIMProfileActionsView: View {
             if let profile {
                 identitySection(profile)
                 lineSection(profile)
-                if state.isActiveProfile(profileID) { connectionSection }
+                if state.isActiveProfile(profileID) { LineConnectionSection(state: state, profileID: profileID) }
                 servicesSection(profile)
                 if !profile.enabled {
                     Section {
@@ -155,10 +155,10 @@ struct ESIMProfileActionsView: View {
 
     private func identitySection(_ profile: ESIMProfile) -> some View {
         Section {
-            editRow("detail.lineLabel", value: profile.name) { sheet = .rename }
+            DetailEditRow(title: "detail.lineLabel", value: profile.name) { sheet = .rename }
             if profile.enabled {
-                editRow(
-                    "modem.number",
+                DetailEditRow(
+                    title: "modem.number",
                     value: PhoneNumberDisplay.format(state.modem?.number ?? "", regionCode: state.modem?.sim.regionCode)
                 ) { sheet = .number }
             }
@@ -178,51 +178,15 @@ struct ESIMProfileActionsView: View {
         }
     }
 
-    @ViewBuilder private var connectionSection: some View {
-        Section {
-            NavigationLink {
-                NetworkSelectionView(detail: state, profileID: profileID)
-            } label: {
-                LabeledContent("connection.networkSelection", value: state.modem?.networkSelectionName ?? detailText("common.unknown"))
-            }
-            .accessibilityIdentifier("profileNetworkSelection")
-            NavigationLink {
-                InternetView(detail: state, profileID: profileID)
-            } label: {
-                LabeledContent("connection.internet", value: state.modem?.internetConnected.map {
-                    detailText($0 ? "common.connected" : "common.disconnected")
-                } ?? detailText("common.unknown"))
-            }
-            .accessibilityIdentifier("profileInternet")
-            if state.canUseWiFi {
-                NavigationLink {
-                    WiFiCallingView(detail: state, profileID: profileID)
-                } label: {
-                    LabeledContent("capability.wifiCalling", value: ConnectionFormat.enabled(state.modem?.wifiCallingEnabled))
-                }
-                .accessibilityIdentifier("profileWiFiCalling")
-            }
-            if state.session.capabilities?.contains("volte") == true {
-                NavigationLink {
-                    VoLTEView(detail: state, profileID: profileID)
-                } label: {
-                    LabeledContent("capability.volte", value: ConnectionFormat.enabled(state.modem?.volteEnabled))
-                }
-                .accessibilityIdentifier("profileVoLTE")
-            }
-        }
-        .disabled(state.needsPIN)
-    }
-
     @ViewBuilder private func servicesSection(_ profile: ESIMProfile) -> some View {
         Section {
-            editRow("detail.reminder") { sheet = .reminder }
+            DetailEditRow(title: "detail.reminder") { sheet = .reminder }
         } footer: {
             if let reminder = profile.reminder { ReminderSummary(reminder: reminder) }
         }
         Section {
             if profile.enabled, sim.available, sim.profileICCID == profile.iccid {
-                editRow("detail.simApplication") {
+                DetailEditRow(title: "detail.simApplication") {
                     sim.open()
                     sheet = .sim
                 }
@@ -234,27 +198,6 @@ struct ESIMProfileActionsView: View {
             }
             .accessibilityIdentifier("profileManagementInfo")
         }
-    }
-
-    private func editRow(_ title: String, value: String = "", action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                LabeledContent {
-                    if !value.isEmpty {
-                        Text(value).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
-                    }
-                } label: {
-                    Text(detailText(title))
-                }
-                .frame(maxWidth: .infinity)
-                Image(systemName: "chevron.right")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .foregroundStyle(.primary)
-        .accessibilityLabel(Text(detailText(title)))
-        .accessibilityValue(value)
     }
 
     private func begin(_ kind: Action) {

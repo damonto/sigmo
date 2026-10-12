@@ -713,8 +713,6 @@ const en = {
       all: 'All',
       unread: 'Unread',
       historical: 'Historical lines',
-      markRead: 'Mark as read',
-      markUnread: 'Mark as unread',
       lineSuffix: 'Line ending {suffix}',
       inactiveLine: 'Enable this SIM line before replying. Its history remains available.',
       deleted: 'This conversation has been deleted.',

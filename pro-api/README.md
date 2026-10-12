@@ -1,7 +1,5 @@
 # Sigmo Pro API
 
-The Worker also serves free Community/Pro APNs notifications. Installation credentials are independent of Pro licensing, and preview content is encrypted by the owning backend. See [Messages and APNs](../docs/ios-messages-push.md) for the API contract, signing, migrated D1 database, and recovery procedure.
-
 This Worker owns the Telegram device pairing flow, signed Pro leases, private
 release metadata, and short-lived R2 download tickets. The R2 bucket must stay
 private: do not enable an `r2.dev` hostname, public bucket access, or a custom
@@ -65,16 +63,16 @@ iOS versions; see [HTTP API contract](../docs/http-api-contract.md#发布与回�
 `src/index.ts` exports the Worker lifecycle. Business modules use native
 `Request` and `Response`; Hono stays in the HTTP layer.
 
-| Directory | Responsibility |
-| --- | --- |
-| `http/` | Hono routes, middleware, Problem Details, bounded JSON parsing |
-| `license/` | Pairing, challenges, leases, device proof and validation |
-| `releases/` | Release manifests, download tickets and streaming downloads |
-| `push/` | Installation/subscription resources, delivery and APNs transport |
-| `storage/` | Typed, prepared D1 queries and atomic state changes |
-| `security/` | Cryptographic primitives |
-| `telegram/` | Webhook, commands, messages, pagination and Bot API client |
-| `observability/` | Structured error logging |
+| Directory        | Responsibility                                                   |
+| ---------------- | ---------------------------------------------------------------- |
+| `http/`          | Hono routes, middleware, Problem Details, bounded JSON parsing   |
+| `license/`       | Pairing, challenges, leases, device proof and validation         |
+| `releases/`      | Release manifests, download tickets and streaming downloads      |
+| `push/`          | Installation/subscription resources, delivery and APNs transport |
+| `storage/`       | Typed, prepared D1 queries and atomic state changes              |
+| `security/`      | Cryptographic primitives                                         |
+| `telegram/`      | Webhook, commands, messages, pagination and Bot API client       |
+| `observability/` | Structured error logging                                         |
 
 ## Secrets and signing keys
 

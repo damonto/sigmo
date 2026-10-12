@@ -18,7 +18,7 @@ final class NetworkSelectionState {
     @ObservationIgnored private var readRevision = 0
     @ObservationIgnored private var scanRevision = 0
 
-    init(detail: ModemDetailState, profileID: String) {
+    init(detail: ModemDetailState, profileID: String?) {
         scope = ProfileConnectionScope(detail: detail, profileID: profileID)
     }
 

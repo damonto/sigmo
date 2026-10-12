@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Mail, MailOpen, Trash2 } from 'lucide-vue-next'
+import { Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 
@@ -15,7 +15,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'delete', item: ConversationItem): void
-  (event: 'mark', item: ConversationItem): void
 }>()
 
 const { t } = useI18n()
@@ -89,30 +88,6 @@ const avatarTone = computed(() => {
           </span>
         </span>
       </RouterLink>
-
-      <Button
-        variant="ghost"
-        size="icon"
-        type="button"
-        class="size-8 shrink-0"
-        :aria-label="
-          t(
-            props.item.unreadCount
-              ? 'modemDetail.messages.markRead'
-              : 'modemDetail.messages.markUnread',
-          )
-        "
-        @click.stop.prevent="emit('mark', props.item)"
-      >
-        <MailOpen
-          v-if="props.item.unreadCount"
-          class="size-4"
-        />
-        <Mail
-          v-else
-          class="size-4"
-        />
-      </Button>
 
       <Button
         variant="ghost"

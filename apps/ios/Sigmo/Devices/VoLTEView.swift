@@ -4,7 +4,7 @@ struct VoLTEView: View {
     @State private var state: VoLTEState
     @State private var action: ConnectionAction<Bool>?
 
-    init(detail: ModemDetailState, profileID: String) {
+    init(detail: ModemDetailState, profileID: String?) {
         _state = State(initialValue: VoLTEState(detail: detail, profileID: profileID))
     }
 

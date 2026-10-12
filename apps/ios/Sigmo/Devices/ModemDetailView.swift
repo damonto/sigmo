@@ -24,7 +24,7 @@ struct ModemDetailView: View {
 }
 
 private enum DetailSheet {
-    case pin, reminder, sim
+    case pin, number, reminder, sim
 }
 
 private enum DetailTab {
@@ -111,6 +111,8 @@ private struct ModemDetailScreen: View {
     }
 
     private var addingESIM: Bool { preparingFlow != nil || availableFlow != nil || flow != nil }
+    private var isPhysicalSIM: Bool { state.modem?.simKind == "physical" }
+    private var showsNetworkBar: Bool { !state.needsPIN && (state.esim || isPhysicalSIM) }
 
     private var tabs: some View {
         TabView(selection: $tab) {
@@ -204,6 +206,7 @@ private struct ModemDetailScreen: View {
             NavigationStack {
                 switch sheet {
                 case .pin: DetailTextForm(state: state, kind: .pin)
+                case .number: DetailTextForm(state: state, kind: .number)
                 case .reminder: DetailReminderForm(state: state, profile: nil)
                 case .sim: SIMApplicationView(state: sim)
                 case nil: EmptyView()
@@ -256,14 +259,14 @@ private struct ModemDetailScreen: View {
                         Label("detail.simLocked", systemImage: "lock")
                         Button("detail.unlock") { sheet = .pin }
                     }
-                } else if !state.esim {
+                } else if !state.esim, !isPhysicalSIM {
                     slotSection(modem)
                 }
                 if state.esim {
                     profiles
-                } else if modem.simKind == "physical" {
+                } else if isPhysicalSIM {
                     physicalActions(modem)
-                    SIMInfoSections(modem: modem, capabilities: session.capabilities ?? [])
+                        .disabled(state.loading || state.busy)
                 } else {
                     ModemInfoSections(modem: modem, elements: [], capabilities: session.capabilities ?? [])
                 }
@@ -281,8 +284,10 @@ private struct ModemDetailScreen: View {
         .environment(\.defaultMinListRowHeight, 44)
         .environment(\.horizontalSizeClass, horizontalSizeClass)
         .labelStyle(.titleAndIcon)
+        // Let content show through around the glass capsule without a full-width edge backdrop.
+        .scrollEdgeEffectHidden(showsNetworkBar, for: .top)
         .safeAreaBar(edge: .top, spacing: 0) {
-            if state.esim, !state.needsPIN, let modem = state.modem {
+            if showsNetworkBar, let modem = state.modem {
                 networkBar(modem)
             }
         }
@@ -325,10 +330,12 @@ private struct ModemDetailScreen: View {
             .accessibilityLabel(Text("detail.switchModem"))
             .accessibilityValue((state.modem?.displayName ?? "") + " · " + session.configuration.name)
         }
-        if tab == .overview, state.esim || state.modem?.simKind == "physical" {
+        if tab == .overview, state.esim || isPhysicalSIM {
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink { ModemInfoView(state: state) } label: { Label("common.details", systemImage: "info.circle") }
-                    .accessibilityIdentifier("modemInfo")
+                NavigationLink { ModemInfoView(state: state) } label: {
+                    Label("common.details", systemImage: "info.circle").labelStyle(.iconOnly)
+                }
+                .accessibilityIdentifier("modemInfo")
             }
 
         }
@@ -380,7 +387,9 @@ private struct ModemDetailScreen: View {
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("esimNetworkBar")
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.top, 8)
+        // The grouped list already supplies the physical SIM's section spacing below the bar.
+        .padding(.bottom, isPhysicalSIM ? 0 : 8)
     }
 
     private func networkControls(_ modem: Modem) -> some View {
@@ -528,10 +537,27 @@ private struct ModemDetailScreen: View {
 
     @ViewBuilder private func physicalActions(_ modem: Modem) -> some View {
         Section {
-            if !modem.sim.identifier.isEmpty { Button("detail.reminder", systemImage: "bell") { sheet = .reminder } }
-            if sim.available { Button("detail.simApplication", systemImage: "simcard") { sim.open(); sheet = .sim } }
-            if let reminder = modem.sim.reminder { ReminderSummary(reminder: reminder) }
-        }.disabled(state.busy)
+            DetailEditRow(
+                title: "modem.number",
+                value: PhoneNumberDisplay.format(modem.number, regionCode: modem.sim.regionCode)
+            ) { sheet = .number }
+        }
+        .disabled(state.needsPIN || modem.sim.identifier.isEmpty)
+        LineConnectionSection(state: state, profileID: nil)
+            .disabled(modem.sim.identifier.isEmpty)
+        if !modem.sim.identifier.isEmpty {
+            Section {
+                DetailEditRow(title: "detail.reminder") { sheet = .reminder }
+            } footer: {
+                if let reminder = modem.sim.reminder { ReminderSummary(reminder: reminder) }
+            }
+        }
+        if sim.available {
+            Section {
+                DetailEditRow(title: "detail.simApplication") { sim.open(); sheet = .sim }
+            }
+            .disabled(state.needsPIN)
+        }
     }
     private func offerPIN() {
         if state.needsPIN, !pinDismissed, sheet == nil, !addingESIM { sheet = .pin }

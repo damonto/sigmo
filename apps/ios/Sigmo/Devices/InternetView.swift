@@ -3,7 +3,7 @@ import SwiftUI
 struct InternetView: View {
     @State private var state: InternetState
 
-    init(detail: ModemDetailState, profileID: String) {
+    init(detail: ModemDetailState, profileID: String?) {
         _state = State(initialValue: InternetState(detail: detail, profileID: profileID))
     }
 

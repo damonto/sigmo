@@ -18,7 +18,6 @@ export interface ConversationItem {
   timestampLabel: string
   lineLabel: string
   unreadCount: number
-  lastMessageId: number
 }
 
 /** Polls visible history and applies backend-owned unread state. */
@@ -60,7 +59,6 @@ export const useModemMessages = (
             value.lineNumber ||
             t('modemDetail.messages.lineSuffix', { suffix: value.profileId.slice(-6) }),
           unreadCount: value.unreadCount,
-          lastMessageId: value.lastMessageId,
         }
       }),
   )
@@ -90,20 +88,6 @@ export const useModemMessages = (
     const generation = requestID
     await messageApi.deleteConversation(id)
     if (!disposed && generation === requestID) await fetchMessages()
-  }
-
-  const markConversation = async (item: ConversationItem) => {
-    try {
-      await messageApi.updateConversation(
-        item.key,
-        item.unreadCount > 0
-          ? { readThroughMessageId: item.lastMessageId, markedUnread: false }
-          : { markedUnread: true },
-      )
-      if (!disposed) await fetchMessages()
-    } catch (err) {
-      if (!disposed) error.value = localizeErrorMessage(err)
-    }
   }
 
   watch(
@@ -144,6 +128,5 @@ export const useModemMessages = (
     isLoading,
     fetchMessages,
     deleteConversation,
-    markConversation,
   }
 }

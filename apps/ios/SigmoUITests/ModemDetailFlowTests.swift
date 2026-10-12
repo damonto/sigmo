@@ -342,7 +342,12 @@ final class ModemDetailFlowTests: XCTestCase {
             XCTAssertEqual(bar.frame.minY, original.minY, accuracy: 1)
             XCTAssertEqual(bar.frame.height, original.height, accuracy: 1)
             XCTAssertTrue(!eid.isHittable || eid.frame.minY < eidY)
-            XCTAssertTrue(app.buttons["simSlotPicker"].isHittable)
+            // The glass bar's menu wrapper can report false for isHittable; verify the actual interaction.
+            let slotPicker = app.buttons["simSlotPicker"]
+            slotPicker.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            XCTAssertTrue(app.buttons["simSlot-2"].waitForExistence(timeout: 5), app.debugDescription)
+            app.buttons["simSlot-2"].tap()
+            app.alerts.buttons[chinese ? "取消" : "Cancel"].tap()
             screenshot(app, name: "Fixed network bar after scrolling \(chinese)")
             openActions(app, profile: "se-a:8986000000000000001")
             app.navigationBars.buttons.element(boundBy: 0).tap()
@@ -520,17 +525,25 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue(physical.buttons["modemInfo"].waitForExistence(timeout: 5))
         XCTAssertTrue(physical.tabBars.buttons["SIM"].isSelected)
         XCTAssertFalse(physical.buttons["addESIM-se-a"].exists)
-        XCTAssertFalse(physical.descendants(matching: .any)["esimNetworkBar"].exists)
+        XCTAssertTrue(physical.descendants(matching: .any)["esimNetworkBar"].exists)
+        XCTAssertTrue(physical.buttons["simSlotPicker"].exists)
         XCTAssertFalse(physical.staticTexts["Quectel"].exists)
         XCTAssertFalse(physical.staticTexts["/dev/cdc-wdm0"].exists)
-        XCTAssertTrue(physical.staticTexts["+8613800000000"].exists)
-        XCTAssertTrue(physical.staticTexts["8986000000000000001"].exists)
+        XCTAssertTrue(physical.buttons["Phone number"].exists)
+        XCTAssertFalse(physical.staticTexts["8986000000000000001"].exists)
+        XCTAssertFalse(physical.buttons["Label"].exists)
+        XCTAssertFalse(physical.switches["Turn On This Line"].exists)
+        XCTAssertFalse(physical.buttons["profileManagementInfo"].exists)
+        for entry in ["profileNetworkSelection", "profileInternet", "profileWiFiCalling", "profileVoLTE"] {
+            XCTAssertTrue(physical.buttons[entry].exists)
+        }
         screenshot(physical, name: "Physical SIM overview")
         physical.buttons["modemInfo"].tap()
         XCTAssertTrue(physical.staticTexts["Quectel"].waitForExistence(timeout: 5))
         XCTAssertTrue(physical.staticTexts["/dev/cdc-wdm0"].exists)
         XCTAssertFalse(physical.buttons["esimNotifications"].exists)
         screenshot(physical, name: "Physical modem information")
+        tap(physical.staticTexts["8986000000000000001"], in: physical)
         physical.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(physical.buttons["modemInfo"].waitForExistence(timeout: 5))
         XCTAssertFalse(physical.staticTexts["Quectel"].exists)
@@ -547,6 +560,32 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue(pin.waitForExistence(timeout: 5)); pin.tap(); pin.typeText("1234")
         tap(locked.buttons["saveDetail"], in: locked)
         XCTAssertTrue(locked.buttons["addESIM-se-a"].waitForExistence(timeout: 5))
+    }
+
+    func testPhysicalSIMConnectionNavigationAndNumberEditing() {
+        let app = launch("detail-physical")
+        for (entry, control) in [("profileNetworkSelection", "networkAutomatic"), ("profileInternet", "internetConnected"),
+                                 ("profileWiFiCalling", "wifiCallingEnabled"), ("profileVoLTE", "volteEnabled")] {
+            tapOverviewRow(app.buttons[entry], in: app)
+            XCTAssertTrue(app.switches[control].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.switches[control].isEnabled)
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+        }
+        tapOverviewRow(app.buttons["Phone number"], in: app)
+        let number = app.textFields["detailInput"]
+        replace(number, value: "+8613900000000")
+        tap(app.buttons["saveDetail"], in: app)
+        XCTAssertTrue(app.buttons["saveDetail"].waitForNonExistence(timeout: 5))
+        tapOverviewRow(app.buttons["Phone number"], in: app)
+        XCTAssertTrue(number.waitForExistence(timeout: 5))
+        XCTAssertTrue((number.value as? String)?.contains("139") == true)
+        app.buttons["Cancel"].tap()
+        app.buttons["simSlotPicker"].tap()
+        tap(app.buttons["simSlot-2"], in: app)
+        tap(app.alerts.buttons["confirmDetailAction"].firstMatch, in: app)
+        let switched = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "SIM 2"), object: app.buttons["simSlotPicker"])
+        XCTAssertEqual(XCTWaiter.wait(for: [switched], timeout: 10), .completed)
+        XCTAssertTrue(app.buttons["profileInternet"].exists)
     }
 
     func testChineseLargeTextAndDarkInfo() throws {

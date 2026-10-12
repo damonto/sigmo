@@ -59,6 +59,33 @@ struct SecureElementMetadata: View {
     }
 }
 
+struct DetailEditRow: View {
+    let title: String
+    var value = ""
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                LabeledContent {
+                    if !value.isEmpty {
+                        Text(value).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                    }
+                } label: {
+                    Text(detailText(title))
+                }
+                .frame(maxWidth: .infinity)
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .foregroundStyle(.primary)
+        .accessibilityLabel(Text(detailText(title)))
+        .accessibilityValue(value)
+    }
+}
+
 struct DetailValue: View {
     let title: String
     let value: String?

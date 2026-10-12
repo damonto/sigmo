@@ -19,7 +19,7 @@ final class InternetState {
     @ObservationIgnored private var publicConnectionID: String?
     @ObservationIgnored private var draftBaseline: InternetPreferences?
 
-    init(detail: ModemDetailState, profileID: String) {
+    init(detail: ModemDetailState, profileID: String?) {
         scope = ProfileConnectionScope(detail: detail, profileID: profileID)
     }
 

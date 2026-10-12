@@ -12,12 +12,78 @@ final class ConnectionTests: XCTestCase {
         await session.refresh(force: true)
         let detail = ModemDetailState(session: session, modemID: "device-1")
         await detail.load()
-        XCTAssertTrue(detail.isActiveProfile(profileID))
+        if detail.esim { XCTAssertTrue(detail.isActiveProfile(profileID)) }
         return detail
     }
 
     private func writes(_ server: DetailFixtureServer, suffix: String) async -> [URLRequest] {
         await server.allRequests().filter { $0.httpMethod != "GET" && $0.url?.path.hasSuffix(suffix) == true }
+    }
+
+    func testPhysicalSIMConnectionsAndSlotChange() async throws {
+        let server = DetailFixtureServer(physical: true)
+        let detail = try await make(server)
+        let network = NetworkSelectionState(detail: detail, profileID: nil)
+        let internet = InternetState(detail: detail, profileID: nil)
+        let wifi = WiFiCallingState(detail: detail, profileID: nil)
+        let volte = VoLTEState(detail: detail, profileID: nil)
+        await network.load()
+        await internet.load()
+        await wifi.load()
+        await volte.load()
+        XCTAssertTrue(network.canChange)
+        XCTAssertTrue(internet.canChange)
+        XCTAssertTrue(wifi.canChange)
+        XCTAssertTrue(volte.canChange)
+
+        await network.setAutomatic(false)
+        await network.select(try XCTUnwrap(network.networks.last))
+        await internet.setConnected(false)
+        await wifi.setEnabled(true)
+        await volte.setEnabled(false)
+        XCTAssertEqual(network.registration?.operatorCode, "23410")
+        XCTAssertFalse(internet.connected)
+        XCTAssertEqual(wifi.settings?.enabled, true)
+        XCTAssertEqual(volte.settings?.enabled, false)
+        XCTAssertNil(network.failure)
+        XCTAssertNil(internet.failure)
+        XCTAssertNil(wifi.failure)
+        XCTAssertNil(volte.failure)
+
+        let switched = await detail.switchSlot(2)
+        XCTAssertTrue(switched)
+        let before = await server.allRequests().count
+        await network.setAutomatic(true)
+        await internet.setConnected(true)
+        await wifi.setEnabled(false)
+        await volte.setEnabled(true)
+        let after = await server.allRequests().count
+        XCTAssertEqual(after, before, "Retained pages must not write to the replacement SIM")
+        await network.load()
+        await internet.load()
+        await wifi.load()
+        await volte.load()
+        XCTAssertFalse(internet.scope.available)
+        XCTAssertNil(network.registration)
+        XCTAssertNil(internet.connection)
+        XCTAssertNil(wifi.settings)
+        XCTAssertNil(volte.settings)
+        XCTAssertTrue(ProfileConnectionScope(detail: detail, profileID: nil).available)
+    }
+
+    func testConnectionScopeRequiresMatchingSIMKindAndCapabilities() async throws {
+        for physical in [false, true] {
+            let server = DetailFixtureServer(physical: physical)
+            await server.setCapabilities([])
+            let detail = try await make(server)
+            for (id, available) in [(Optional<String>.none, physical), (Optional(profileID), !physical),
+                                    (Optional("se-a:8986000000000000002"), false)] {
+                XCTAssertEqual(ProfileConnectionScope(detail: detail, profileID: id).available, available)
+                for capability in ["wifiCalling", "volte"] {
+                    XCTAssertFalse(ProfileConnectionScope(detail: detail, profileID: id, capability: capability).available)
+                }
+            }
+        }
     }
 
     func testReadFailureAlertsPreserveUnavailableControlsAfterDismissal() async throws {

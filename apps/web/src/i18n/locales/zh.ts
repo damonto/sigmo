@@ -698,8 +698,6 @@ const zh = {
       all: '全部',
       unread: '未读',
       historical: '历史线路',
-      markRead: '标记为已读',
-      markUnread: '标记为未读',
       lineSuffix: '尾号 {suffix} 的线路',
       inactiveLine: '回复前请启用此 SIM 线路，你仍可查看该线路的历史消息。',
       deleted: '此会话已被删除。',

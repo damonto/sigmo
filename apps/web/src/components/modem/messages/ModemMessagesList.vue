@@ -17,7 +17,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'delete', item: ConversationItem): void
-  (event: 'mark', item: ConversationItem): void
 }>()
 
 const { t } = useI18n()
@@ -45,7 +44,6 @@ const emptyStateLabel = computed(() => props.emptyLabel || t('modemDetail.messag
             : item.participantValue === props.selectedParticipant
         "
         @delete="emit('delete', $event)"
-        @mark="emit('mark', $event)"
       />
     </div>
 

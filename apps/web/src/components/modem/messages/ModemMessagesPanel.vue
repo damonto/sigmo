@@ -35,17 +35,8 @@ const { phoneCountry } = useModemPhoneCountry(modemIdRef)
 const searchQuery = ref('')
 const normalizedSearchQuery = computed(() => searchQuery.value.trim())
 const debouncedSearchQuery = refDebounced(normalizedSearchQuery, 250)
-const {
-  items,
-  count,
-  unreadCount,
-  unreadOnly,
-  historical,
-  error,
-  isLoading,
-  deleteConversation,
-  markConversation,
-} = useModemMessages(modemIdRef, phoneCountry, debouncedSearchQuery)
+const { items, count, unreadCount, unreadOnly, historical, error, isLoading, deleteConversation } =
+  useModemMessages(modemIdRef, phoneCountry, debouncedSearchQuery)
 
 const deleteOpen = ref(false)
 const deleteLoading = ref(false)
@@ -173,7 +164,6 @@ const startConversation = async () => {
         :selected-participant="props.selectedParticipant"
         :selected-conversation="props.selectedConversation"
         @delete="openDeleteDialog"
-        @mark="markConversation"
       />
     </div>
   </div>

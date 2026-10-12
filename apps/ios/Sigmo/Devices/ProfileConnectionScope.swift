@@ -5,12 +5,13 @@ import Foundation
 @MainActor
 struct ProfileConnectionScope {
     let detail: ModemDetailState
-    let profileID: String
+    // No profile ID means a physical SIM; an eSIM still requires its active profile.
+    let profileID: String?
     let capability: String?
     private let sim: ModemSIMIdentity?
     private let accessRevision: Int
 
-    init(detail: ModemDetailState, profileID: String, capability: String? = nil) {
+    init(detail: ModemDetailState, profileID: String?, capability: String? = nil) {
         self.detail = detail
         self.profileID = profileID
         self.capability = capability
@@ -20,8 +21,12 @@ struct ProfileConnectionScope {
 
     var available: Bool {
         detail.session.canAccessDevices && detail.session.accessRevision == accessRevision
-            && detail.simIdentity == sim && detail.isActiveProfile(profileID)
+            && detail.simIdentity == sim && lineAvailable
             && (capability.map { detail.session.capabilities?.contains($0) == true } ?? true)
+    }
+    private var lineAvailable: Bool {
+        if let profileID { return detail.isActiveProfile(profileID) }
+        return sim?.kind == "physical" && sim?.iccid.isEmpty == false
     }
     var radioAvailable: Bool { available && detail.modem?.airplaneMode == false && detail.modem?.state != "locked" }
     var modemID: String { detail.modemID }

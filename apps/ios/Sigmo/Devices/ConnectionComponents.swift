@@ -1,5 +1,46 @@
 import SwiftUI
 
+struct LineConnectionSection: View {
+    let state: ModemDetailState
+    let profileID: String?
+
+    var body: some View {
+        Section {
+            NavigationLink {
+                NetworkSelectionView(detail: state, profileID: profileID)
+            } label: {
+                LabeledContent("connection.networkSelection", value: state.modem?.networkSelectionName ?? detailText("common.unknown"))
+            }
+            .accessibilityIdentifier("profileNetworkSelection")
+            NavigationLink {
+                InternetView(detail: state, profileID: profileID)
+            } label: {
+                LabeledContent("connection.internet", value: state.modem?.internetConnected.map {
+                    detailText($0 ? "common.connected" : "common.disconnected")
+                } ?? detailText("common.unknown"))
+            }
+            .accessibilityIdentifier("profileInternet")
+            if state.canUseWiFi {
+                NavigationLink {
+                    WiFiCallingView(detail: state, profileID: profileID)
+                } label: {
+                    LabeledContent("capability.wifiCalling", value: ConnectionFormat.enabled(state.modem?.wifiCallingEnabled))
+                }
+                .accessibilityIdentifier("profileWiFiCalling")
+            }
+            if state.session.capabilities?.contains("volte") == true {
+                NavigationLink {
+                    VoLTEView(detail: state, profileID: profileID)
+                } label: {
+                    LabeledContent("capability.volte", value: ConnectionFormat.enabled(state.modem?.volteEnabled))
+                }
+                .accessibilityIdentifier("profileVoLTE")
+            }
+        }
+        .disabled(state.needsPIN)
+    }
+}
+
 struct ConnectionAction<Value>: Identifiable {
     let id = UUID()
     let value: Value

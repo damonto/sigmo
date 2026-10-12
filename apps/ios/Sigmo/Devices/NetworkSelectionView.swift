@@ -5,7 +5,7 @@ struct NetworkSelectionView: View {
     @State private var state: NetworkSelectionState
     @State private var action: ConnectionAction<Action>?
 
-    init(detail: ModemDetailState, profileID: String) {
+    init(detail: ModemDetailState, profileID: String?) {
         _state = State(initialValue: NetworkSelectionState(detail: detail, profileID: profileID))
     }
 
