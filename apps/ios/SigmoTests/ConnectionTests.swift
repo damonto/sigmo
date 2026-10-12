@@ -311,6 +311,159 @@ final class ConnectionTests: XCTestCase {
         XCTAssertTrue(state.draft.alwaysOn)
     }
 
+    func testInternetRefreshRetriesBusyReadsWithoutAlertingOrLosingDraft() async throws {
+        let server = DetailFixtureServer()
+        let detail = try await make(server)
+        let state = InternetState(detail: detail, profileID: profileID)
+        await state.load()
+        state.draft.apn = "draft.apn"
+        let before = await server.allRequests().count
+        var fixture = await server.currentConnections()
+        fixture.busyInternetReads = ["/internet-connections/current": 2, "/internet-connections/public": 1]
+        await server.setConnectionFixture(fixture)
+
+        await state.reload()
+
+        XCTAssertTrue(state.connected)
+        XCTAssertTrue(state.canChange)
+        XCTAssertEqual(state.draft.apn, "draft.apn")
+        XCTAssertEqual(state.publicInfo?.ip, "203.0.113.1")
+        XCTAssertNil(state.failure)
+        XCTAssertNil(state.loadFailure)
+        XCTAssertNil(state.publicFailure)
+        let requests = await server.allRequests().dropFirst(before)
+        XCTAssertEqual(requests.filter { $0.url?.path.hasSuffix("/internet-connections/current") == true }.count, 3)
+        XCTAssertEqual(requests.filter { $0.url?.path.hasSuffix("/internet-connections/public") == true }.count, 2)
+        XCTAssertTrue(requests.allSatisfy { $0.httpMethod == "GET" })
+    }
+
+    func testInternetBusyReadRetriesAreBounded() async throws {
+        for resource in ["current", "public"] {
+            let server = DetailFixtureServer()
+            var fixture = ConnectionFixture()
+            let suffix = "/internet-connections/" + resource
+            fixture.busyInternetReads[suffix] = 10
+            await server.setConnectionFixture(fixture)
+            let api = BackendAPI(configuration: try testConfiguration()) { try await server.respond($0) }
+
+            do {
+                if resource == "current" { _ = try await api.detailInternet("device-1", token: nil) }
+                else { _ = try await api.internetPublicInfo("device-1", token: nil) }
+                XCTFail("Expected persistent contention to remain an error")
+            } catch let failure as BackendFailure {
+                XCTAssertEqual(failure.status, 409)
+                XCTAssertEqual(failure.code, "internet_operation_in_progress")
+            }
+            let requests = await server.allRequests()
+            XCTAssertEqual(requests.count, 5, resource)
+            XCTAssertTrue(requests.allSatisfy { $0.httpMethod == "GET" && $0.url?.path.hasSuffix(suffix) == true })
+        }
+    }
+
+    func testInternetRefreshDoesNotRetryUnrelatedFailures() async throws {
+        for status in [409, 503] {
+            let server = DetailFixtureServer()
+            let detail = try await make(server)
+            let state = InternetState(detail: detail, profileID: profileID)
+            await state.load()
+            let before = await server.allRequests().count
+            var fixture = await server.currentConnections()
+            fixture.statuses["GET /internet-connections/current"] = status
+            await server.setConnectionFixture(fixture)
+
+            await state.reload()
+
+            XCTAssertEqual(state.failure?.status, status)
+            XCTAssertFalse(state.canChange)
+            XCTAssertFalse(state.loading)
+            XCTAssertTrue(state.connected)
+            let requests = await server.allRequests().dropFirst(before)
+            XCTAssertEqual(requests.filter { $0.url?.path.hasSuffix("/internet-connections/current") == true }.count, 1)
+        }
+    }
+
+    func testCancelingInternetBusyReadStopsRetries() async throws {
+        let server = DetailFixtureServer()
+        var fixture = ConnectionFixture()
+        fixture.busyInternetReads["/internet-connections/current"] = 10
+        await server.setConnectionFixture(fixture)
+        let receivedBusy = expectation(description: "received busy response")
+        let api = BackendAPI(configuration: try testConfiguration()) { request in
+            let response = try await server.respond(request)
+            receivedBusy.fulfill()
+            return response
+        }
+        let read = Task { try await api.detailInternet("device-1", token: nil) }
+        await fulfillment(of: [receivedBusy], timeout: 2)
+        read.cancel()
+        do {
+            _ = try await read.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {}
+        let requests = await server.allRequests()
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    func testInternetRefreshDoesNotOverlapAnExistingRead() async throws {
+        for hasSnapshot in [false, true] {
+            let server = DetailFixtureServer()
+            let detail = try await make(server)
+            let state = InternetState(detail: detail, profileID: profileID)
+            if hasSnapshot { await state.load() }
+            let before = await server.allRequests().count
+            await server.holdNext("/internet-connections/current")
+            let first = Task { await state.reload() }
+            await server.waitForHeldRequest()
+            XCTAssertTrue(state.loading)
+            await state.reload()
+            await state.reload()
+            let requests = await server.allRequests().dropFirst(before)
+            XCTAssertEqual(requests.filter { $0.url?.path.hasSuffix("/internet-connections/current") == true }.count, 1)
+            XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/internet-connections/public") == true })
+            await server.release()
+            await first.value
+            XCTAssertFalse(state.loading)
+            XCTAssertTrue(state.connected)
+            XCTAssertNotNil(state.publicInfo)
+            XCTAssertNil(state.failure)
+        }
+    }
+
+    func testInternetMutationReconcilesWhileAnOldReadIsPending() async throws {
+        let server = DetailFixtureServer()
+        let detail = try await make(server)
+        let state = InternetState(detail: detail, profileID: profileID)
+        await state.load()
+        await server.holdNext("/internet-connections/current")
+        let oldRead = Task { await state.reload() }
+        await server.waitForHeldRequest()
+        let next = InternetConnectionOptions(defaultRoute: true, proxyEnabled: false, alwaysOn: false)
+        await state.updateOptions(next)
+        XCTAssertEqual(state.options, next)
+        await server.release()
+        await oldRead.value
+        XCTAssertEqual(state.options, next)
+        XCTAssertNil(state.failure)
+    }
+
+    func testOldInternetRefreshDoesNotClearAMutationFailure() async throws {
+        let server = DetailFixtureServer()
+        let detail = try await make(server)
+        let state = InternetState(detail: detail, profileID: profileID)
+        await state.load()
+        await server.holdNext("/internet-connections/current")
+        let oldRead = Task { await state.reload() }
+        await server.waitForHeldRequest()
+        var fixture = await server.currentConnections()
+        fixture.statuses["PUT /internet-connections/current/preferences"] = 503
+        await server.setConnectionFixture(fixture)
+        await state.updateOptions(.init(defaultRoute: true, proxyEnabled: false, alwaysOn: false))
+        XCTAssertEqual(state.failure?.status, 503)
+        await server.release()
+        await oldRead.value
+        XCTAssertEqual(state.failure?.status, 503)
+    }
+
     func testInternetOptionFailurePreservesConfirmedValuesAndAPN() async throws {
         let server = DetailFixtureServer()
         let detail = try await make(server)

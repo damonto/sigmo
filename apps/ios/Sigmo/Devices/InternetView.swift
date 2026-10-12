@@ -189,10 +189,8 @@ private struct InternetPage: View {
                     valueRow(title: "connection.status", value: ConnectionFormat.enabled(connection.proxy?.enabled))
                     valueRow(title: "connection.username", value: connection.proxy?.username, copyable: true)
                     ConnectionSecretValue(title: "connection.password", value: connection.proxy?.password)
-                    valueRow(title: "connection.httpProxy", value: connection.proxy?.httpAddress, copyable: true)
-                    copyProxy(connection.proxy, socks: false)
-                    valueRow(title: "connection.socksProxy", value: connection.proxy?.socks5Address, copyable: true)
-                    copyProxy(connection.proxy, socks: true)
+                    proxyRow(connection.proxy, socks: false)
+                    proxyRow(connection.proxy, socks: true)
                 }
             }
         }
@@ -205,12 +203,30 @@ private struct InternetPage: View {
             .accessibilityValue(modemValue(value))
     }
 
-    private func copyProxy(_ proxy: InternetProxy?, socks: Bool) -> some View {
-        Button(socks ? "connection.copySOCKSURL" : "connection.copyHTTPURL", systemImage: "document.on.document") {
-            if let url = proxy?.url(socks: socks) { UIPasteboard.general.string = url }
-        }
-        .disabled(proxy?.url(socks: socks) == nil)
-        .accessibilityIdentifier(socks ? "copySOCKSProxy" : "copyHTTPProxy")
+    private func proxyRow(_ proxy: InternetProxy?, socks: Bool) -> some View {
+        let address = socks ? proxy?.socks5Address : proxy?.httpAddress
+        let url = proxy?.url(socks: socks)
+
+        return LabeledContent {
+            HStack {
+                Text(modemValue(address))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.trailing)
+                    .textSelection(.enabled)
+                    .contextMenu {
+                        if let address, !address.isEmpty {
+                            Button("detail.copy", systemImage: "document.on.document") { UIPasteboard.general.string = address }
+                        }
+                    }
+                Button(socks ? "connection.copySOCKSURL" : "connection.copyHTTPURL", systemImage: "document.on.document") {
+                    if let url { UIPasteboard.general.string = url }
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .disabled(url == nil)
+                .accessibilityIdentifier(socks ? "copySOCKSProxy" : "copyHTTPProxy")
+            }
+        } label: { Text(socks ? "connection.socksProxy" : "connection.httpProxy") }
     }
 
     private func perform() async {

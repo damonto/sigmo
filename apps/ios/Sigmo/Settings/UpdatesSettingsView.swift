@@ -46,6 +46,7 @@ struct UpdatesSettingsView: View {
                         }
                         if snapshot.checkedAt != nil && snapshot.state == "idle" && !snapshot.updateAvailable && snapshot.error == nil {
                             Label("settings.updates.upToDate", systemImage: "checkmark.shield")
+                                .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
                                 .accessibilityIdentifier("up-to-date")
                         }
                         AsyncActionButton(title: "settings.updates.checkNow", id: "check-updates") { await state.check() }.disabled(!state.canCheck)

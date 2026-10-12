@@ -86,6 +86,7 @@ struct HomeDevicesView: View {
                             }
                         } header: {
                             Text(session.configuration.name)
+                                .listRowInsets(.top, 0)
                                 .accessibilityIdentifier("backendHeading-\(session.id)")
                         }
                     }
@@ -93,6 +94,7 @@ struct HomeDevicesView: View {
             }
         }
         .listStyle(.insetGrouped)
+        .contentMargins(.top, 0, for: .scrollContent)
         .scrollDismissesKeyboard(.interactively)
     }
 

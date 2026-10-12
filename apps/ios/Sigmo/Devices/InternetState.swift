@@ -37,12 +37,32 @@ final class InternetState {
     func load(reconciling: Bool = false, acceptPreferences: Bool = false) async {
         clearIfUnavailable()
         guard scope.available, !Task.isCancelled, reconciling || !busy else { return }
+        loading = true
+        readRevision += 1
+        await loadSnapshot(revision: readRevision, acceptPreferences: acceptPreferences)
+    }
+
+    func reload() async {
+        clearIfUnavailable()
+        guard scope.available, !Task.isCancelled, !busy, !loading else { return }
+        loading = true
         readRevision += 1
         let revision = readRevision
-        loading = connection == nil
-        defer { if revision == readRevision { loading = false }; clearIfUnavailable() }
+        await loadSnapshot(revision: revision)
+        guard revision == readRevision, !Task.isCancelled else { return }
+        failure = loadFailure
+        if connected, publicConnectionID == nil, loadFailure == nil, !busy { await loadPublic() }
+    }
+
+    private func loadSnapshot(revision: Int, acceptPreferences: Bool = false) async {
+        defer {
+            if revision == readRevision { loading = false }
+            clearIfUnavailable()
+        }
+        guard revision == readRevision else { return }
         do {
             try await scope.refreshModem()
+            guard revision == readRevision else { return }
             let id = scope.modemID
             let value = try await scope.read { api, token in try await api.detailInternet(id, token: token) }
             guard revision == readRevision else { return }
@@ -65,15 +85,6 @@ final class InternetState {
             guard revision == readRevision, scope.available, !Task.isCancelled else { return }
             loadFailure = .wrapping(error)
         }
-    }
-
-    func reload() async {
-        defer { clearIfUnavailable() }
-        guard scope.available, !Task.isCancelled else { return }
-        await load()
-        guard !Task.isCancelled else { return }
-        failure = loadFailure
-        if connected, publicConnectionID == nil, loadFailure == nil, !busy { await loadPublic() }
     }
 
     func loadPublic() async {

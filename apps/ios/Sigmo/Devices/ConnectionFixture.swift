@@ -29,6 +29,7 @@ struct ConnectionFixture: Sendable {
                               modemRegistered: false, dataPath: "qmap")
     var wifiRequiresSetup = false
     var statuses: [String: Int] = [:]
+    var busyInternetReads: [String: Int] = [:]
     var disconnectAfterWrite = false
     private var sheets: Set<String> = []
 
@@ -38,6 +39,10 @@ struct ConnectionFixture: Sendable {
                 || resource.hasPrefix("/network-scans") else { return nil }
         let method = request.httpMethod ?? "GET"
         if let status = statuses[method + " " + resource], status >= 400 { return error("remote_error", status: status) }
+        if method == "GET", let remaining = busyInternetReads[resource], remaining > 0 {
+            busyInternetReads[resource] = remaining - 1
+            return error("internet_operation_in_progress", status: 409)
+        }
         let data = request.httpBody ?? Data()
         switch (method, resource) {
         case ("GET", "/networks/registration"):

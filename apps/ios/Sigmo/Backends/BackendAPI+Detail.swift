@@ -30,9 +30,6 @@ extension BackendAPI {
     func esimNotifications(_ modem: String, token: String?) async throws -> ESIMNotifications {
         try await decode(["modems", modem, "notifications"], token: token)
     }
-    func detailInternet(_ modem: String, token: String?) async throws -> DetailInternet {
-        try await decode(["modems", modem, "internet-connections", "current"], token: token)
-    }
     func detailWiFi(_ modem: String, token: String?) async throws -> DetailWiFiSettings {
         try await decode(["modems", modem, "wifi-calling", "settings"], token: token)
     }
