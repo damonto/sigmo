@@ -6,6 +6,7 @@ struct CallsView: View {
     @Binding var dialing: Bool
     @Binding var recordingsPresented: Bool
     @Environment(CallsState.self) private var calls
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
     @State private var deleting: CallRecord?
     @State private var pendingDeletion: CallRecord?
@@ -31,26 +32,29 @@ struct CallsView: View {
             ForEach(state.visibleItems) { record in
                 HStack(spacing: 16) {
                     Button { selected = record } label: {
-                        HStack(spacing: 12) {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Image(systemName: record.direction == "incoming" ? "phone.arrow.down.left" : "phone.arrow.up.right")
                                 .foregroundStyle(.secondary).accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(calls.contacts.name(for: record.number, region: state.line?.region ?? "")
                                     ?? PhoneNumberDisplay.format(record.number, regionCode: state.line?.region ?? ""))
-                                    .font(.headline).foregroundStyle(record.missed ? .red : .primary).lineLimit(2)
-                                Text(record.terminal ? record.routeLabel : record.stateLabel)
-                                    .font(.subheadline).foregroundStyle(.secondary)
+                                    .font(.headline).foregroundStyle(record.missed ? .red : .primary)
+                                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                                    .minimumScaleFactor(0.85)
+                                metadata(for: record)
                             }
-                            Spacer(minLength: 2)
-                            Text(record.date, format: .dateTime.month(.abbreviated).day().hour().minute())
-                                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.trailing)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }.contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityIdentifier("call-record-\(record.id)")
-                    Button { callback(record) } label: { Image(systemName: "phone.fill").frame(minWidth: 44, minHeight: 44) }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel(Text("calls.callback"))
-                        .accessibilityValue(PhoneNumberDisplay.format(record.number, regionCode: state.line?.region))
-                        .disabled(!record.terminal || calls.hasCall)
+                    Button { callback(record) } label: {
+                        Image(systemName: "phone.fill")
+                            .frame(minWidth: 44, minHeight: 44)
+                            .background(Color(uiColor: .secondarySystemBackground), in: Circle())
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(Text("calls.callback"))
+                    .accessibilityValue(PhoneNumberDisplay.format(record.number, regionCode: state.line?.region))
+                    .disabled(!record.terminal || calls.hasCall)
                 }
                 .padding(.vertical, 4)
                 .swipeActions(allowsFullSwipe: false) {
@@ -105,6 +109,25 @@ struct CallsView: View {
         } message: { Text("calls.deleteExplanation") }
         .disabled(state.deleting || pendingDeletion != nil)
         .accessibilityIdentifier("calls-list")
+    }
+
+    private func metadata(for record: CallRecord) -> some View {
+        let route = Text(record.terminal ? record.routeLabel : record.stateLabel).font(.subheadline)
+        let date = Text(record.date, format: .dateTime.month(.abbreviated).day().hour().minute()).font(.caption)
+
+        // Keep the timestamp from competing with the number for horizontal space.
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                route
+                Spacer(minLength: 0)
+                date
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                route
+                date
+            }
+        }
+        .foregroundStyle(.secondary)
     }
 
     private func clear() {

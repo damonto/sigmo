@@ -23,8 +23,11 @@ struct ModemRow: View {
                         Text(unreadCount > 99 ? "99+" : unreadCount.formatted())
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 7).padding(.vertical, 3)
-                            .background(.red, in: Capsule())
+                            .padding(.horizontal, 7)
+                            .background {
+                                // Extend the capsule without increasing the metadata row's height.
+                                Capsule().fill(.red).padding(.vertical, -3)
+                            }
                             .fixedSize()
                             .accessibilityLabel(Text("messages.unread"))
                             .accessibilityValue(unreadCount.formatted())
