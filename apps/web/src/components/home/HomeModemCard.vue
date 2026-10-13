@@ -13,7 +13,6 @@ const props = defineProps<{
   name: string
   icon?: string
   plmn?: string
-  iconPending?: boolean
   regionCode: string
   operatorName: string
   registeredOperatorName: string
@@ -75,7 +74,7 @@ const displayNumber = computed(() => {
         <CarrierLogo
           :name="props.operatorName"
           :icon="props.icon"
-          :plmn="props.iconPending ? undefined : props.plmn"
+          :plmn="props.plmn"
           :region-code="props.regionCode"
           class="size-8 text-xl"
         />

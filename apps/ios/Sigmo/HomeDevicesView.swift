@@ -103,8 +103,7 @@ struct HomeDevicesView: View {
             HStack(spacing: 8) {
                 ModemRow(modem: device.modem, capabilities: device.session.capabilities ?? [],
                          backendID: device.session.id,
-                         unreadCount: device.session.unreadCounts[device.modem.id] ?? 0,
-                         session: device.session)
+                         unreadCount: device.session.unreadCounts[device.modem.id] ?? 0)
                 Image(systemName: "chevron.forward")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.tertiary)

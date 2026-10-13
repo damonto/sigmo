@@ -5,18 +5,14 @@ struct ModemRow: View {
     let capabilities: Set<String>
     let backendID: UUID
     let unreadCount: Int
-    var session: BackendSession? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var identity: String { "\(backendID)-\(modem.id)" }
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            if let session {
-                HomeModemLogo(session: session, modem: modem)
-            } else {
-                CarrierLogo(plmn: modem.sim.operatorIdentifier, regionCode: modem.sim.regionCode, size: 40)
-            }
+            CarrierLogo(icon: modem.sim.icon, plmn: modem.sim.operatorIdentifier,
+                        regionCode: modem.sim.regionCode, size: 40)
             VStack(alignment: .leading, spacing: 4) {
                 header
                 number

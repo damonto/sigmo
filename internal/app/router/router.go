@@ -151,7 +151,10 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.GET("/settings/mcp/skills/sigmo-control", h.DownloadSkill)
 		}
 
-		h := hmodem.New(deps.Store, deps.Registry, deps.InternetConnector, deps.Reminders, deps.ModemOverview...)
+		h := hmodem.New(hmodem.Config{
+			Store: deps.Store, Registry: deps.Registry, Internet: deps.InternetConnector,
+			Reminders: deps.Reminders, LPA: deps.LPAClients, OverviewExtensions: deps.ModemOverview,
+		})
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
 		protected.POST("/modems/:id/sim-unlocks", h.UnlockSIM)

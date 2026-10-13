@@ -1,4 +1,4 @@
-import { fetchJson, fetchJsonQuietly } from '@/lib/fetch'
+import { fetchJson } from '@/lib/fetch'
 
 import type {
   EsimDiscoverResponse,
@@ -8,11 +8,6 @@ import type {
 } from '@/types/esim'
 
 export const useEsimApi = () => {
-  const getEsimsQuietly = (id: string, signal: AbortSignal) =>
-    fetchJsonQuietly<EsimProfilesResponse>(`modems/${id}/esims`, {
-      signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
-    })
-
   const getEsims = (id: string) => {
     return fetchJson<EsimProfilesResponse>(`modems/${id}/esims`)
   }
@@ -57,7 +52,6 @@ export const useEsimApi = () => {
   }
 
   return {
-    getEsimsQuietly,
     getEsims,
     discoverEsims,
     updateEsimNickname,

@@ -6,14 +6,12 @@ import HomeHeader from '@/components/home/HomeHeader.vue'
 import HomeModemList from '@/components/home/HomeModemList.vue'
 import { useAppInfo } from '@/composables/useAppInfo'
 import { useModems } from '@/composables/useModems'
-import { useModemIcons } from '@/composables/useModemIcons'
 import type { HomeModemItem } from '@/types/home'
 
 const { t } = useI18n()
 
 const { version, fetchAppInfo } = useAppInfo()
 const { modems, isLoading, fetchModems } = useModems()
-const { icons, refreshIcons } = useModemIcons(modems)
 
 const modemCount = computed(() => modems.value.length)
 const subtitle = computed(() => t('home.subtitle', { count: modemCount.value }))
@@ -22,8 +20,7 @@ const modemItems = computed<HomeModemItem[]>(() =>
   modems.value.map((modem) => ({
     id: modem.id,
     name: modem.name,
-    icon: icons.value[modem.id]?.icon,
-    iconPending: icons.value[modem.id]?.pending,
+    icon: modem.sim.icon,
     plmn: modem.sim.operatorIdentifier,
     regionCode: modem.sim.regionCode,
     operatorName: modem.sim.operatorName,
@@ -39,11 +36,6 @@ const modemItems = computed<HomeModemItem[]>(() =>
   })),
 )
 
-const handleRefresh = async () => {
-  await fetchModems()
-  refreshIcons()
-}
-
 onMounted(() => {
   void fetchAppInfo()
   void fetchModems()
@@ -57,7 +49,7 @@ onMounted(() => {
         :subtitle="subtitle"
         :version="version"
         :is-loading="isLoading"
-        @refresh="handleRefresh"
+        @refresh="fetchModems"
       />
 
       <HomeModemList

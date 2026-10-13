@@ -7,6 +7,7 @@ struct SIMSlot: Codable, Identifiable, Sendable, Equatable {
     let operatorIdentifier: String
     let regionCode: String
     let identifier: String
+    var icon: String?
     var reminder: SIMReminder?
     var id: Int { slot }
 }

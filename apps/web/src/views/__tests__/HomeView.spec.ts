@@ -1,12 +1,11 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import HomeView from '@/views/HomeView.vue'
+import HomeModemList from '@/components/home/HomeModemList.vue'
 import type { Modem } from '@/types/modem'
 
-vi.mock('@/apis/esim', () => ({
-  useEsimApi: () => ({ getEsimsQuietly: vi.fn().mockResolvedValue({ ses: [] }) }),
-}))
+enableAutoUnmount(afterEach)
 
 const modemHarness = vi.hoisted(() => ({
   nextModems: [] as Modem[],
@@ -120,10 +119,12 @@ describe('HomeView', () => {
     modemHarness.fetchModems.mockReset()
     modemHarness.fetchModems.mockResolvedValue(undefined)
     modemHarness.nextModems = []
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected home request')))
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it.each([
@@ -139,5 +140,25 @@ describe('HomeView', () => {
     expect(modemHarness.fetchModems).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('v1.2.3')
     expect(wrapper.get('[data-testid="modem-list"]').text()).toBe(wantCount)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('uses overview icons and refreshes them without fetching eSIM lists', async () => {
+    const first = modem('modem-1')
+    const second = modem('modem-2')
+    first.sim.icon = 'data:image/png;base64,first'
+    second.sim.icon = 'data:image/png;base64,second'
+    modemHarness.nextModems = [first, second]
+    const wrapper = await mountView()
+    const list = wrapper.getComponent(HomeModemList)
+    expect(list.props('items').map((item) => item.icon)).toEqual([first.sim.icon, second.sim.icon])
+
+    modemHarness.nextModems = [modem('modem-1'), second]
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+
+    expect(modemHarness.fetchModems).toHaveBeenCalledTimes(2)
+    expect(list.props('items').map((item) => item.icon)).toEqual([undefined, second.sim.icon])
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

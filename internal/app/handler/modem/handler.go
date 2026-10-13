@@ -12,11 +12,23 @@ import (
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/pkg/internet"
+	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
+// Config supplies the modem endpoints and their optional overview data sources.
+type Config struct {
+	Store              *settings.Store
+	Registry           *mmodem.Registry
+	Internet           *internet.Connector
+	Reminders          *reminder.Scheduler
+	LPA                *lpa.Pool
+	OverviewExtensions []modemstatus.Extension
+}
+
+// Handler serves modem resources using the shared registry and LPA pool.
 type Handler struct {
 	registry  *mmodem.Registry
 	catalog   *catalog
@@ -37,18 +49,22 @@ var (
 	errUpdateMSISDNTimeout  = errors.New("updating MSISDN timed out, please refresh to confirm the active slot")
 )
 
-func New(store *settings.Store, registry *mmodem.Registry, internetConnector *internet.Connector, reminders *reminder.Scheduler, overviewExtensions ...modemstatus.Extension) *Handler {
-	catalog := newCatalog(store, registry, overviewExtensions...)
-	catalog.internet = internetConnector
-	catalog.reminders = reminders
+// New creates modem endpoints with the configured overview readers.
+func New(cfg Config) *Handler {
+	catalog := newCatalog(cfg.Store, cfg.Registry, cfg.OverviewExtensions...)
+	catalog.internet = cfg.Internet
+	catalog.reminders = cfg.Reminders
+	if cfg.LPA != nil {
+		catalog.profiles = cfg.LPA
+	}
 	return &Handler{
-		registry:  registry,
+		registry:  cfg.Registry,
 		catalog:   catalog,
-		simSlot:   newSIMSlot(registry),
-		msisdn:    newMSISDN(registry),
-		settings:  newSettings(store),
-		internet:  internetConnector,
-		reminders: reminders,
+		simSlot:   newSIMSlot(cfg.Registry),
+		msisdn:    newMSISDN(cfg.Registry),
+		settings:  newSettings(cfg.Store),
+		internet:  cfg.Internet,
+		reminders: cfg.Reminders,
 	}
 }
 

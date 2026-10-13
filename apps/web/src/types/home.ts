@@ -5,7 +5,6 @@ export type HomeModemItem = {
   name: string
   icon?: string
   plmn?: string
-  iconPending?: boolean
   regionCode: string
   operatorName: string
   registeredOperatorName: string

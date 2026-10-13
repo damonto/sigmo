@@ -6,7 +6,6 @@ enum BackendAuthentication: String { case unknown, notRequired, required, authen
 
 @MainActor @Observable
 final class BackendSession: Identifiable {
-    let modemIcons = ModemIcons()
     private(set) var configuration: BackendConfiguration
     nonisolated let id: UUID
     private(set) var license: BackendLicense = .unknown
@@ -94,7 +93,6 @@ final class BackendSession: Identifiable {
         guard !Task.isCancelled else { return }
         if let refreshTask { await refreshTask.value; return }
         guard force || clock.now() >= nextRefresh else { return }
-        if force { modemIcons.reset() }
         let current = generation
         isRefreshing = true
         let task = Task { [weak self] in
@@ -170,7 +168,6 @@ final class BackendSession: Identifiable {
                     throw BackendFailure.local("api.invalidResponse")
                 }
                 if revision == deviceRevision { modems = devices }
-                modemIcons.retain(modems)
                 unreadCounts = unreadCounts.filter { id, _ in modems.contains { $0.id == id } }
                 hasLoadedModems = true
                 detailFailures = detailFailures.filter { id, _ in modems.contains { $0.id == id } }
@@ -201,7 +198,6 @@ final class BackendSession: Identifiable {
     }
 
     func stop() {
-        modemIcons.reset()
         generation += 1
         refreshTask?.cancel()
         refreshTask = nil
@@ -286,7 +282,6 @@ final class BackendSession: Identifiable {
     }
 
     private func clearDevices() {
-        modemIcons.reset()
         modems = []
         unreadCounts = [:]
         unreadRevision = -1
@@ -428,7 +423,6 @@ final class BackendSession: Identifiable {
                 try check(current)
                 guard revision == deviceRevision else { return }
                 if let index = modems.firstIndex(where: { $0.id == id }) { modems[index] = device }
-                modemIcons.retain(modems)
                 detailFailures[id] = nil
             } catch {
                 guard isCurrent(current), revision == deviceRevision else { return }
@@ -436,7 +430,6 @@ final class BackendSession: Identifiable {
                 if failure.isLocalAuthenticationFailure { revokeAccess(); return }
                 if failure.status == 404 {
                     modems.removeAll { $0.id == id }
-                    modemIcons.retain(modems)
                     unreadCounts[id] = nil
                 }
                 detailFailures[id] = failure

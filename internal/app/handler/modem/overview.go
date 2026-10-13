@@ -24,6 +24,7 @@ type catalog struct {
 	internet           internetStatusReader
 	overviewExtensions []modemstatus.Extension
 	reminders          *reminder.Scheduler
+	profiles           activeProfileReader
 }
 
 type internetStatusReader interface {
@@ -53,6 +54,9 @@ func (c *catalog) buildListResponse(ctx context.Context, devices []*mmodem.Modem
 		wg.Go(func() {
 			modemResp, err := c.buildResponse(ctx, device)
 			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
 				slog.Warn("build degraded modem overview", "imei", device.EquipmentIdentifier, "path", device.Path(), "error", err)
 				modemResp = c.buildBasicResponse(device)
 			}
@@ -168,6 +172,10 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		return nil, fmt.Errorf("read primary SIM reminder: %w", err)
 	}
 	if err := c.applyOverviewExtensions(ctx, device, resp); err != nil {
+		return nil, err
+	}
+	resp.SIM.Icon = c.profileIcon(ctx, device, snapshot)
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	return resp, nil

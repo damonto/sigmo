@@ -8,6 +8,8 @@ export type SlotInfo = {
   operatorIdentifier: string
   regionCode: string
   identifier: string
+  /** Embedded active-profile icon supplied by the modem endpoint. */
+  icon?: string
   reminder?: Reminder
 }
 
