@@ -39,8 +39,14 @@ struct MCPSettingsView: View {
                         Text(verbatim: state.clientConfiguration).font(.footnote.monospaced()).textSelection(.enabled)
                             .accessibilityLabel(Text("settings.mcp.clientConfig")).accessibilityValue(state.clientConfiguration)
                         SettingsCopyButton(title: "settings.mcp.copyConfig", value: state.clientConfiguration)
-                        AsyncActionButton(title: "settings.mcp.downloadSkill", id: "download-skill") { await state.download() }.disabled(state.busy)
-
+                            .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
+                        AsyncActionButton(id: "download-skill") {
+                            await state.download()
+                        } label: {
+                            Label("settings.mcp.downloadSkill", systemImage: "arrow.down.circle")
+                        }
+                        .disabled(state.busy)
+                        .alignmentGuide(.listRowSeparatorLeading) { $0[.leading] }
                     }
                     Section("settings.mcp.keysTitle") {
                         Button("settings.mcp.createKey", systemImage: "plus") { creating = true }
