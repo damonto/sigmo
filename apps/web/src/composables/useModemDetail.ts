@@ -1,11 +1,13 @@
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 
 import { useEsimApi } from '@/apis/esim'
 import { useSEApi } from '@/apis/se'
 import { useModemResource } from '@/composables/useModemResource'
+import { sessionRevision } from '@/lib/authSession'
 import type { EsimProfile, EsimProfileApiResponse } from '@/types/esim'
 import type { SEsResponse } from '@/types/se'
 
+/** Owns inventory for one device identity; status updates reuse its current snapshot. */
 export const useModemDetail = () => {
   const esimApi = useEsimApi()
   const seApi = useSEApi()
@@ -21,15 +23,21 @@ export const useModemDetail = () => {
   const esimProfiles = ref<EsimProfile[]>([])
   const isSELoading = ref(false)
   const isEsimProfilesLoading = ref(false)
-  let seRequestID = 0
-  let esimProfilesRequestID = 0
+  let seRequest: Promise<void> | undefined
+  let profileRequest: Promise<void> | undefined
+  let detailRequest:
+    | { id: string; revision: number; refreshingOverview: boolean; promise: Promise<void> }
+    | undefined
+  let generation = 0
+  let disposed = false
 
   const isCurrentEsimModem = (id: string) =>
-    modem.value?.id === id && modem.value.simKind === 'euicc'
+    !disposed && modem.value?.id === id && modem.value.simKind === 'euicc'
 
   const resetEsimData = () => {
-    seRequestID++
-    esimProfilesRequestID++
+    generation++
+    seRequest = undefined
+    profileRequest = undefined
     seInfo.value = null
     esimProfiles.value = []
     isSELoading.value = false
@@ -59,31 +67,31 @@ export const useModemDetail = () => {
     }
   }
 
-  const fetchSEs = async (id: string) => {
-    const requestID = ++seRequestID
+  const readSEs = async (id: string) => {
+    const current = generation
     isSELoading.value = true
 
     try {
       const { data } = await seApi.getSEs(id)
-      if (requestID !== seRequestID || !isCurrentEsimModem(id)) return
+      if (current !== generation || !isCurrentEsimModem(id)) return
       seInfo.value = data.value ?? null
     } catch (err) {
-      if (requestID !== seRequestID || !isCurrentEsimModem(id)) return
+      if (current !== generation || !isCurrentEsimModem(id)) return
       console.error('[useModemDetail] Failed to fetch SE info:', err)
       seInfo.value = null
     } finally {
-      if (requestID === seRequestID) {
+      if (current === generation) {
         isSELoading.value = false
       }
     }
   }
 
-  const fetchEsimProfiles = async (id: string) => {
-    const requestID = ++esimProfilesRequestID
+  const readEsimProfiles = async (id: string) => {
+    const current = generation
     isEsimProfilesLoading.value = true
     try {
       const { data } = await esimApi.getEsims(id)
-      if (requestID !== esimProfilesRequestID || !isCurrentEsimModem(id)) return
+      if (current !== generation || !isCurrentEsimModem(id)) return
       if (data.value) {
         esimProfiles.value = data.value.ses.flatMap((group) =>
           group.profiles.map((profile) =>
@@ -99,31 +107,92 @@ export const useModemDetail = () => {
         esimProfiles.value = []
       }
     } catch (err) {
-      if (requestID !== esimProfilesRequestID || !isCurrentEsimModem(id)) return
+      if (current !== generation || !isCurrentEsimModem(id)) return
       console.error('[useModemDetail] Failed to fetch eSIM profiles:', err)
       esimProfiles.value = []
     } finally {
-      if (requestID === esimProfilesRequestID) {
+      if (current === generation) {
         isEsimProfilesLoading.value = false
       }
     }
   }
 
-  const fetchModemDetail = async (id: string) => {
-    resetEsimData()
-    modemId.value = id
-
-    await refreshModemResource()
+  const fetchSEs = (id: string): Promise<void> => {
+    if (!isCurrentEsimModem(id)) return Promise.resolve()
+    if (seRequest) return seRequest
+    const request = readSEs(id).finally(() => {
+      if (seRequest === request) seRequest = undefined
+    })
+    seRequest = request
+    return request
+  }
+  const fetchEsimProfiles = (id: string): Promise<void> => {
+    if (!isCurrentEsimModem(id)) return Promise.resolve()
+    if (profileRequest) return profileRequest
+    const request = readEsimProfiles(id).finally(() => {
+      if (profileRequest === request) profileRequest = undefined
+    })
+    profileRequest = request
+    return request
   }
 
-  watch([modem, isLoading], ([current, loading]) => {
-    if (loading) return
-    if (!current || current.simKind !== 'euicc') {
-      resetEsimData()
-      return
+  const fetchModemDetail = (id: string): Promise<void> => {
+    if (disposed) return Promise.resolve()
+    const revision = sessionRevision()
+    if (detailRequest?.id === id && detailRequest.revision === revision)
+      return detailRequest.promise
+
+    // Publish ownership before changing modemId, which can synchronously rebind the resource.
+    const request = {
+      id,
+      revision,
+      refreshingOverview: true,
+      promise: Promise.resolve()
+        .then(async () => {
+          if (detailRequest !== request) return
+          await refreshModemResource()
+          if (detailRequest !== request || revision !== sessionRevision()) return
+          request.refreshingOverview = false
+          await Promise.all([fetchSEs(id), fetchEsimProfiles(id)])
+        })
+        .finally(() => {
+          if (detailRequest === request) detailRequest = undefined
+        }),
     }
-    void fetchSEs(current.id)
-    void fetchEsimProfiles(current.id)
+    detailRequest = request
+    modemId.value = id
+    return request.promise
+  }
+
+  watch(
+    sessionRevision,
+    () => {
+      detailRequest = undefined
+      resetEsimData()
+    },
+    { flush: 'sync' },
+  )
+
+  watch(
+    [
+      () => modem.value?.id,
+      () => modem.value?.simKind,
+      () => modem.value?.sim.identifier,
+      () => modem.value?.sim.slot,
+    ],
+    () => {
+      resetEsimData()
+      const current = modem.value
+      if (!current || detailRequest?.refreshingOverview) return
+      void fetchSEs(current.id)
+      void fetchEsimProfiles(current.id)
+    },
+    { flush: 'sync' },
+  )
+  onScopeDispose(() => {
+    disposed = true
+    detailRequest = undefined
+    resetEsimData()
   })
 
   return {

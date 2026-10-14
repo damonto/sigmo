@@ -1,30 +1,39 @@
 package settings
 
+import appsettings "github.com/damonto/sigmo/internal/pkg/settings"
+
 type Response struct {
 	Schema Schema `json:"schema"`
 	Values Values `json:"values"`
 }
 
 type Values struct {
-	Auth     AuthValues               `json:"auth" validate:"required"`
-	Proxy    ProxyValues              `json:"proxy" validate:"required"`
-	Channels map[string]ChannelValues `json:"channels" validate:"omitempty,dive"`
+	Notifications appsettings.Notifications `json:"notifications"`
+	Auth          AuthValues                `json:"auth" validate:"required"`
+	Proxy         ProxyValues               `json:"proxy" validate:"required"`
+	Channels      map[string]ChannelValues  `json:"channels" validate:"omitempty,dive"`
 }
 
+// AuthValues flattens the nested policy for the schema-driven settings editors.
 type AuthValues struct {
-	AuthProviders     []string `json:"authProviders"`
-	OTPRequired       bool     `json:"otpRequired"`
-	TokenValidityDays int      `json:"tokenValidityDays"`
+	Mode                  string   `json:"mode"`
+	SessionMaxDays        int      `json:"sessionMaxDays"`
+	OTPChannels           []string `json:"otpChannels"`
+	OIDCIssuer            string   `json:"oidcIssuer"`
+	OIDCClientID          string   `json:"oidcClientId"`
+	OIDCClientSecret      string   `json:"oidcClientSecret"`
+	OIDCAllowedSubjects   []string `json:"oidcAllowedSubjects"`
+	AccessTeamDomain      string   `json:"accessTeamDomain"`
+	AccessAudience        string   `json:"accessAudience"`
+	AccessAllowedSubjects []string `json:"accessAllowedSubjects"`
 }
 
-type UpdateAuthRequest struct {
-	AuthProviders     []string `json:"authProviders" validate:"omitempty,dive,required"`
-	OTPRequired       bool     `json:"otpRequired"`
-	TokenValidityDays *int     `json:"tokenValidityDays" validate:"omitempty,gte=1,lte=180"`
-}
+// UpdateAuthRequest carries a complete policy; an empty secret retains the stored secret.
+type UpdateAuthRequest AuthValues
 
+// AuthTestRequest selects delivery destinations without changing their other uses.
 type AuthTestRequest struct {
-	AuthProviders []string `json:"authProviders"`
+	Channels []string `json:"channels"`
 }
 
 type ProxyValues struct {
@@ -35,8 +44,6 @@ type ProxyValues struct {
 }
 
 type ChannelValues struct {
-	Enabled *bool `json:"enabled,omitempty" validate:"required"`
-
 	Endpoint string `json:"endpoint,omitempty" validate:"omitempty,http_url"`
 
 	BotToken   string   `json:"botToken,omitempty"`

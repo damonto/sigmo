@@ -19,7 +19,9 @@
         window.XMLHttpRequest.prototype.open = function(method, url) {
           const args = Array.prototype.slice.call(arguments);
           args[1] = rewriteCarrierPath(url);
-          return originalOpen.apply(this, args);
+          const result = originalOpen.apply(this, args);
+          this.withCredentials = true;
+          return result;
         };
       }
     } catch (_) {}
@@ -31,7 +33,7 @@
           if (typeof input === "string") {
             input = rewriteCarrierPath(input);
           }
-          return originalFetch.call(this, input, init);
+          return originalFetch.call(this, input, Object.assign({}, init, {credentials: "include"}));
         };
       }
     } catch (_) {}
@@ -61,7 +63,7 @@
       } catch (_) {}
     }
     try {
-      fetch(callbackURL, {method: "POST", mode: "no-cors", headers: {"Content-Type": "text/plain;charset=UTF-8"}, body: JSON.stringify(payload), credentials: "omit"})
+      fetch(callbackURL, {method: "POST", mode: "no-cors", headers: {"Content-Type": "text/plain;charset=UTF-8"}, body: JSON.stringify(payload), credentials: "include"})
         .then(function(){ notifyParent(payload); })
         .catch(function(){ notifyParent(payload); });
     } catch (_) {

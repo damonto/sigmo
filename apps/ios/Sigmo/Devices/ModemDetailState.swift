@@ -15,6 +15,7 @@ struct ModemSIMIdentity: Equatable {
 
 @MainActor @Observable
 final class ModemDetailState {
+    var deletedHistoryProfileID: String?
     let session: BackendSession
     let modemID: String
     private(set) var elements: [SecureElement] = []
@@ -29,6 +30,7 @@ final class ModemDetailState {
     private(set) var message: String?
     @ObservationIgnored private var revision = 0
     @ObservationIgnored private var loadedSIM: ModemSIMIdentity?
+    @ObservationIgnored private var profilesLoadedAt = Date.distantPast
 
     init(session: BackendSession, modemID: String) {
         self.session = session
@@ -42,17 +44,17 @@ final class ModemDetailState {
     var canTransfer: Bool { session.capabilities?.contains("esimTransfer") == true }
     var canInstall: Bool { esim && !elements.isEmpty && elementsFailure == nil && !loading && !busy && !needsPIN }
 
-    func load() async {
+    func load(force: Bool = true) async {
         guard !loading, !busy, !Task.isCancelled, session.canAccessDevices else { return }
         loading = true
         let current = revision
         defer {
             if current == revision { loading = false }
         }
-        await loadSnapshot(current)
+        await loadSnapshot(current, force: force)
     }
 
-    private func loadSnapshot(_ current: Int) async {
+    private func loadSnapshot(_ current: Int, force: Bool = true) async {
         guard current == revision, !Task.isCancelled else { return }
         await session.refreshModem(modemID)
         guard current == revision, !Task.isCancelled else { return }
@@ -70,9 +72,12 @@ final class ModemDetailState {
         if loadedSIM?.slot != identity?.slot || loadedSIM?.kind != identity?.kind {
             clearSIMData()
         }
+        let unchanged = loadedSIM == identity
         loadedSIM = identity
         failure = nil
         guard esim else { return }
+        if !force, unchanged, profilesLoaded, elementsLoaded, elementsFailure == nil,
+           profilesFailure == nil, Date().timeIntervalSince(profilesLoadedAt) < 30 { return }
         await loadElements(current)
         guard current == revision, !Task.isCancelled else { return }
         guard session.canAccessDevices else {
@@ -107,6 +112,7 @@ final class ModemDetailState {
             groups = result.ses
             profilesFailure = nil
             profilesLoaded = true
+            profilesLoadedAt = Date()
         } catch {
             if current == revision, !Task.isCancelled {
                 profilesFailure = .wrapping(error)
@@ -151,6 +157,7 @@ final class ModemDetailState {
             try await session.protectedRequest(operation)
             guard current == revision, !Task.isCancelled else { return false }
             await session.invalidateModemReads(modemID)
+            session.invalidateCommunicationLines()
             // Keep the write locked until its authoritative snapshot has been reconciled.
             await loadSnapshot(current)
             guard current == revision, !Task.isCancelled else { return false }
@@ -189,6 +196,7 @@ final class ModemDetailState {
             try await api.detailMutation(id, path: ["ses", profile.seId, "esims", profile.iccid], method: "DELETE", token: token)
         }
         guard deleted else { return false }
+        if session.capabilities?.contains("historyAssignments") == true { deletedHistoryProfileID = profile.iccid }
         // DELETE already confirmed removal, even if the following snapshot refresh failed.
         for index in groups.indices {
             groups[index].profiles.removeAll { $0.id == profile.id }

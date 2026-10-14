@@ -104,6 +104,18 @@ final class ModemDetailFlowTests: XCTestCase {
         app.descendants(matching: .any)["esimNotification-" + id].firstMatch
     }
 
+    func testContactsOnOlderBackendShowsUpgradeAndKeepsDeviceNavigation() {
+        let app = launch()
+        let contacts = app.tabBars.buttons["Contacts"]
+        XCTAssertTrue(contacts.waitForExistence(timeout: 5)); contacts.tap()
+        XCTAssertTrue(app.staticTexts["Update this Sigmo backend to use this feature."].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["modem-contact-actions"].exists)
+        app.tabBars.buttons["SIM"].tap()
+        XCTAssertTrue(app.buttons["modemInfo"].waitForExistence(timeout: 5))
+        app.buttons["backToDevices"].tap()
+        XCTAssertTrue(app.navigationBars["Sigmo"].waitForExistence(timeout: 5))
+    }
+
     func testProfileRowsShowNumbersAndLocalizedPlaceholder() {
         for chinese in [false, true] {
             let app = launch(chinese: chinese, large: chinese)
@@ -132,7 +144,7 @@ final class ModemDetailFlowTests: XCTestCase {
         let app = launch()
         XCTAssertTrue(app.buttons["modemInfo"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["addESIM-se-a"].exists)
-        for title in ["Messages", "Calls", "Settings"] {
+        for title in ["Messages", "Calls", "Contacts"] {
             app.tabBars.buttons[title].tap()
             XCTAssertFalse(app.buttons["addESIM-se-a"].exists)
         }
@@ -140,6 +152,11 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Quectel"].exists)
         XCTAssertFalse(app.staticTexts["Device information"].exists)
         XCTAssertFalse(app.staticTexts["device-1"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Settings"].exists)
+        XCTAssertLessThan(app.buttons["modemSettings"].frame.midX, app.buttons["modemInfo"].frame.midX)
+        app.buttons["modemSettings"].tap()
+        XCTAssertTrue(app.buttons["modemDeviceSettings"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
         screenshot(app, name: "Detail overview")
         app.buttons["modemInfo"].tap()
         XCTAssertTrue(app.staticTexts["Quectel"].waitForExistence(timeout: 5))
@@ -585,6 +602,36 @@ final class ModemDetailFlowTests: XCTestCase {
         // The fixture takes three seconds per device read; dismissal must not wait for it.
         XCTAssertTrue(close.waitForNonExistence(timeout: 2))
         XCTAssertFalse(app.buttons["scanESIM"].exists)
+    }
+
+    func testTransferShowsOnlySupportedProfiles() {
+        let app = launch("detail-transfer-mixed")
+        installForm(app, manual: false)
+        tap(app.buttons["transferESIM"], in: app)
+        tap(app.buttons["transferSource-modem:device-2"], in: app)
+        let profile = app.buttons.containing(.staticText, identifier: "Inactive line").firstMatch
+        XCTAssertTrue(profile.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Unsupported line"].exists)
+        XCTAssertTrue(profile.isEnabled)
+        XCTAssertFalse(app.buttons["startESIMTransfer"].isEnabled)
+        tap(profile, in: app)
+        XCTAssertTrue(app.buttons["startESIMTransfer"].isEnabled)
+        tap(app.buttons["backESIMSetup"], in: app)
+        tap(app.buttons["transferSource-modem:device-2"], in: app)
+        XCTAssertTrue(profile.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["startESIMTransfer"].isEnabled)
+    }
+
+    func testUnsupportedTransferProfilesShowEmptyState() {
+        let app = launch("detail-transfer-unsupported")
+        installForm(app, manual: false)
+        tap(app.buttons["transferESIM"], in: app)
+        tap(app.buttons["transferSource-modem:device-2"], in: app)
+        XCTAssertTrue(app.staticTexts["No eSIMs available to transfer"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Unsupported line"].exists)
+        XCTAssertFalse(app.buttons["startESIMTransfer"].isEnabled)
+        tap(app.buttons["backESIMSetup"], in: app)
+        XCTAssertTrue(app.buttons["transferSource-modem:device-2"].waitForExistence(timeout: 5))
     }
 
     func testTransferPromptsAndSourceDeletion() {

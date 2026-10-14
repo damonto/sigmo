@@ -1,6 +1,16 @@
 import SwiftUI
 
+private enum HomeTab: Hashable { case devices, messages, calls, contacts }
+
 struct HomeView: View {
+    private struct CommunicationIdentity: Hashable {
+        let session: ObjectIdentifier
+        let backendID: String
+        let accessRevision: Int
+    }
+
+    @State private var homeTab = HomeTab.devices
+    @AppStorage("communication.backend") private var communicationBackend = ""
     @Environment(BackendStore.self) private var store
     @Environment(\.nativePush) private var push
     @Environment(\.scenePhase) private var scenePhase
@@ -16,12 +26,13 @@ struct HomeView: View {
             if let selectedDevice {
                 destinationView(selectedDevice)
             } else {
-                homeNavigation
+                homeTabs
             }
         }
         .modifier(CallPresentation())
         .sheet(isPresented: $adding) { BackendEditor() }
-        .onChange(of: store.settings.backends.map(\.id)) { _, ids in
+        .onChange(of: store.settings.backends.map(\.id), initial: true) { _, ids in
+            if !ids.contains(where: { $0.uuidString == communicationBackend }) { communicationBackend = "" }
             if let id = selectedDevice?.backendID, !ids.contains(id) { selectedDevice = nil }
             if let removed = path.firstIndex(where: { destination in
                 destination.backendID.map { !ids.contains($0) } ?? false
@@ -41,6 +52,36 @@ struct HomeView: View {
         .alert("push.notification", isPresented: Binding(get: { push?.navigationFailure != nil }, set: { if !$0 { push?.navigationFailure = nil } })) {
             Button("common.done") { push?.navigationFailure = nil }
         } message: { Text(push?.navigationFailure?.message ?? "") }
+    }
+
+    private var homeTabs: some View {
+        TabView(selection: $homeTab) {
+            Tab("communication.devices", systemImage: "server.rack", value: HomeTab.devices) { homeNavigation }
+            Tab("communication.messages", systemImage: "message", value: HomeTab.messages) { communicationTab(.messages) }
+            Tab("communication.calls", systemImage: "phone", value: HomeTab.calls) { communicationTab(.calls) }
+            Tab("communication.contacts", systemImage: "person.crop.circle", value: HomeTab.contacts) { communicationTab(.contacts) }
+        }
+    }
+
+    private func communicationTab(_ section: CommunicationSection) -> some View {
+        NavigationStack {
+            let sessions = store.orderedSessions(backendID: UUID(uuidString: communicationBackend))
+            CommunicationWorkspace(sessions: sessions, section: section)
+                .id(sessions.map {
+                    CommunicationIdentity(session: ObjectIdentifier($0), backendID: $0.communicationBackendID,
+                                          accessRevision: $0.accessRevision)
+                })
+                .toolbar {
+                    if store.settings.backends.count > 1 {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            CommunicationBackendFilter(selection: Binding(
+                                get: { UUID(uuidString: communicationBackend) },
+                                set: { communicationBackend = $0?.uuidString ?? "" }
+                            ))
+                        }
+                    }
+                }
+        }.id(communicationBackend)
     }
 
     // Device tabs own their navigation stacks; keeping Home outside them also

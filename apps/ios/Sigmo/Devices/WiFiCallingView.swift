@@ -45,7 +45,7 @@ struct WiFiCallingView: View {
                     NavigationStack {
                         CarrierWebsheetView(url: websheet.url, callback: { callback in
                             callbacks.append(.init(sheetID: websheet.id, callback: callback))
-                        }, failure: { state.failure = $0 }, fixtureHTML: carrierFixtureHTML)
+                        }, failure: { state.failure = $0 }, fixtureHTML: carrierFixtureHTML, session: state.scope.detail.session)
                         .id(websheet.id)
                         .navigationTitle(websheet.sheet.title ?? detailText("capability.wifiCalling"))
                         .navigationBarTitleDisplayMode(.inline)

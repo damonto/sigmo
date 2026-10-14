@@ -91,8 +91,8 @@ export function isLocalAuthenticationError(value: unknown): boolean {
     isRecord(value) &&
     value.source === 'backend' &&
     value.status === 401 &&
-    value.type === `${TYPE_PREFIX}invalid_token` &&
-    value.error_code === 'invalid_token'
+    value.type === `${TYPE_PREFIX}invalid_session` &&
+    value.error_code === 'invalid_session'
   )
 }
 

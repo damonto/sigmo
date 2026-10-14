@@ -23,7 +23,7 @@ struct BackendDetailView: View {
                         .accessibilityIdentifier("loginBackend")
                 }
                 if session.authentication == .authenticated {
-                    Button("auth.logout", role: .destructive) { session.logout() }
+                    AsyncActionButton { await session.logout() } label: { Text("auth.logout").foregroundStyle(.red) }
                 }
             }
             Section("license.title") {
@@ -89,12 +89,22 @@ struct AuthenticationView: View {
     @State private var verificationCode: String?
 
     private var loginComplete: Bool {
-        !session.isVerifyingOTP && (session.authentication == .authenticated || session.authentication == .notRequired)
+        !session.isVerifyingOTP && !session.isBrowserLogin && (session.authentication == .authenticated || session.authentication == .notRequired)
     }
 
     var body: some View {
         NavigationStack {
             Form {
+                if session.supportsBrowserLogin {
+                    Section {
+                        AsyncActionButton { await session.loginWithBrowser() } label: {
+                            Label("auth.browserLogin", systemImage: "safari")
+                        }
+                        .disabled(session.isBrowserLogin)
+                        if session.isBrowserLogin { ProgressView() }
+                    }
+                }
+                if session.supportsOTP {
                 Section {
                     Text(session.configuration.name).font(.headline)
                     Text("auth.description").foregroundStyle(Color.secondary)
@@ -124,6 +134,7 @@ struct AuthenticationView: View {
                         }
                         .disabled(seconds > 0 || session.isSendingOTP)
                     }
+                }
                 }
             }
             .detailErrorAlert(session.authFailure)

@@ -3,11 +3,12 @@ import SwiftUI
 struct MessageThreadView: View {
     @Bindable var state: MessageThreadState
     var inline = false
+    @Environment(CallsState.self) private var calls
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.nativePush) private var push
+    @State private var confirmCall = false
     @State private var pendingSend: UUID?
     @State private var visibleMessageID: Int64?
-    @State private var atBottom = true
 
     private var regionCode: String? {
         state.modem?.sim.identifier == state.conversation.profileId ? state.modem?.sim.regionCode : nil
@@ -15,6 +16,14 @@ struct MessageThreadView: View {
 
     private var identity: PushConversation {
         PushConversation(backendID: push?.backendID(sessionID: state.session.id) ?? state.badge?.backendId ?? "", conversationID: state.conversation.id)
+    }
+
+    private var sendingLine: String {
+        if state.sendingProfileID != state.conversation.profileId,
+           let modem = state.modem, modem.sim.identifier == state.sendingProfileID {
+            return modem.communicationLabel
+        }
+        return state.conversation.lineDescription(regionCode: regionCode)
     }
 
     private struct ReadIdentity: Equatable {
@@ -31,11 +40,25 @@ struct MessageThreadView: View {
                     }
             } else {
                 content
-                    .navigationTitle(state.conversation.participantLabel(regionCode: regionCode))
-                    .navigationSubtitle(state.conversation.lineDescription(regionCode: regionCode))
+                    .navigationTitle(calls.name(number: state.conversation.participant, session: state.session, region: regionCode))
+                    .toolbar { ToolbarItem(placement: .principal) { conversationTitle } }
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbarBackgroundVisibility(.automatic, for: .navigationBar)
                     .toolbar(.hidden, for: .tabBar)
+            }
+        }
+        .confirmationDialog("communication.useCurrentLine", isPresented: $confirmCall) {
+            Button("communication.useCurrentLine") { dialCurrent() }
+            Button("common.cancel", role: .cancel) { }
+        }
+        .toolbar {
+            if state.session.capabilities?.contains("nativeCalls") == true {
+                Button("communication.dial", systemImage: "phone") {
+                    if state.canUseActive { confirmCall = true } else { dialCurrent() }
+                }.disabled(calls.hasCall || state.modem == nil)
+            }
+            if state.session.capabilities?.contains("contacts") == true {
+                NavigationLink { SaveContactNumberView(session: state.session, number: state.conversation.participant) } label: { Label("communication.addContact", systemImage: "person.crop.circle.badge.plus") }
             }
         }
         .detailErrorAlert(state.failure)
@@ -63,6 +86,11 @@ struct MessageThreadView: View {
         }
     }
 
+    private func dialCurrent() {
+        guard let modem = state.modem else { return }
+        Task { await calls.dial(number: state.conversation.participant, line: CallLine(session: state.session, modem: modem)) }
+    }
+
     private var content: some View {
         VStack(spacing: 0) {
             timeline
@@ -85,101 +113,41 @@ struct MessageThreadView: View {
 
     private var conversationTitle: some View {
         VStack(spacing: 2) {
-            Text(state.conversation.participantLabel(regionCode: regionCode))
+            Text(calls.name(number: state.conversation.participant, session: state.session, region: regionCode))
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("message-participant")
-            Text(state.conversation.lineDescription(regionCode: regionCode))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("message-line")
+            if state.canUseActive {
+                Menu {
+                    Button { state.useActiveProfile() } label: {
+                        Text("\(detailText("communication.useCurrentLine")) · \(state.modem?.communicationLabel ?? "")")
+                    }
+                        .accessibilityIdentifier("message-use-current-sim")
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(sendingLine)
+                            .accessibilityIdentifier("message-line")
+                        Image(systemName: "chevron.down")
+                    }.font(.caption)
+                }
+                .accessibilityIdentifier("message-line-picker")
+            } else {
+                Text(sendingLine)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("message-line")
+            }
         }
         .lineLimit(1)
     }
 
     private var timeline: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 8) {
-                    if state.loading && !state.loaded { ProgressView("messages.loading").padding() }
-                    ForEach(Array(state.messages.enumerated()), id: \.element.id) { index, message in
-                        if index == 0 || !Calendar.current.isDate(message.timestamp, inSameDayAs: state.messages[index-1].timestamp) {
-                            Text(message.timestamp, format: .dateTime.year().month(.abbreviated).day())
-                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.vertical, 12)
-                        }
-                        SMSBubble(message: message)
-                            .id(message.id)
-                            .onScrollVisibilityChange(threshold: 0.1) { visible in
-                                if visible { visibleMessageID = max(visibleMessageID ?? 0, message.id) }
-                            }
-                    }
-                    Color.clear.frame(height: 1).id("bottom")
-                        .onScrollVisibilityChange { visible in atBottom = visible }
-                }.padding(.horizontal, 14).padding(.vertical, 8)
-            }
-            .defaultScrollAnchor(.bottom)
-            .refreshable { await state.load() }
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: state.messages.last?.id) { old, _ in
-                if old == nil || atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if !atBottom && !state.messages.isEmpty {
-                    Button("messages.latest", systemImage: "arrow.down") { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
-                        .buttonStyle(.glass).buttonBorderShape(.capsule).padding()
-                }
-            }
-        }
+        MessageTimeline(messages: state.messages.map(MessageTimelineItem.init), loading: state.loading && !state.loaded,
+                        visibilityThreshold: 0.1, visible: { id, visible in
+                            if visible { visibleMessageID = max(visibleMessageID ?? 0, id) }
+                        }, refresh: { await state.load() })
     }
 }
 
-private struct SMSBubble: View {
-    let message: SMSMessage
-    private static let linkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
-
-    private var attributed: AttributedString {
-        var value = AttributedString(message.text)
-        guard let detector = Self.linkDetector else { return value }
-        for match in detector.matches(in: message.text, range: NSRange(message.text.startIndex..., in: message.text)) {
-            if let range = Range(match.range, in: message.text), let attributedRange = Range(range, in: value), let url = match.url {
-                value[attributedRange].link = url
-            }
-        }
-        return value
-    }
-
-    var body: some View {
-        HStack {
-            if !message.incoming { Spacer(minLength: 44) }
-            VStack(alignment: message.incoming ? .leading : .trailing, spacing: 3) {
-                Text(attributed).textSelection(.enabled)
-                    .padding(.horizontal, 13).padding(.vertical, 9)
-                    .foregroundStyle(message.incoming ? Color.primary : .white)
-                    .tint(message.incoming ? .blue : .white)
-                    .background(message.incoming ? Color(uiColor: .secondarySystemBackground) : Color.green,
-                                in: RoundedRectangle(cornerRadius: 20))
-                    .contextMenu { Button("common.copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text } }
-                HStack(spacing: 5) {
-                    Text(message.timestamp, format: .dateTime.hour().minute())
-                    if !message.incoming { Text(status) }
-                }.font(.caption2).foregroundStyle(.secondary).padding(.horizontal, 4)
-            }
-            if message.incoming { Spacer(minLength: 44) }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("message-\(message.id)")
-    }
-
-    private var status: String {
-        switch message.status {
-        case "sent", "stored-sent": String(localized: "messages.status.sent")
-        case "delivered": String(localized: "messages.status.delivered")
-        case "failed", "delivery-failed": String(localized: "messages.status.failed")
-        case "stored-unsent", "pending", "sending": String(localized: "messages.status.pending")
-        default: message.status
-        }
-    }
-}
 
 struct MessageComposer: View {
     @Binding var text: String
@@ -257,6 +225,11 @@ struct NewMessageView: View {
             MessageComposer(text: $state.newDraft, sending: state.sending, enabled: !state.newRecipient.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { pendingSend = UUID() }
         }
         .navigationTitle("messages.new").navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if state.session.capabilities?.contains("contacts") == true {
+                NavigationLink { SaveContactNumberView(session: state.session, number: state.newRecipient) } label: { Label("communication.addContact", systemImage: "person.crop.circle.badge.plus") }
+            }
+        }
         .detailErrorAlert(state.failure)
         .toolbar { ToolbarItem(placement: .cancellationAction) { Button("common.cancel") { dismiss() } } }
         .task { recipientFocused = true }

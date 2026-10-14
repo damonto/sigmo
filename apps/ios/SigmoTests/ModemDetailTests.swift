@@ -3,6 +3,19 @@ import XCTest
 
 @MainActor
 final class ModemDetailTests: XCTestCase {
+    func testReturningToSIMReusesInventoryUntilExplicitRefresh() async throws {
+        let server = DetailFixtureServer()
+        let detail = try await make(server)
+        let initial = await server.allRequests().filter { $0.url?.path.hasSuffix("/esims") == true }.count
+        await detail.load(force: false)
+        await detail.load(force: false)
+        let reused = await server.allRequests().filter { $0.url?.path.hasSuffix("/esims") == true }.count
+        XCTAssertEqual(reused, initial)
+        await detail.load()
+        let refreshed = await server.allRequests().filter { $0.url?.path.hasSuffix("/esims") == true }.count
+        XCTAssertEqual(refreshed, initial + 1)
+    }
+
     func testUpdatingNumberRefreshesESIMList() async throws {
         let detail = try await make()
         let updated = await detail.updateNumber("+8613900000000")
@@ -310,6 +323,51 @@ final class ModemDetailTests: XCTestCase {
         XCTAssertNil(sim.failure)
         sim.stop()
         await replacement.value
+    }
+
+    func testTransferProfilesIncludeOnlySupportedLines() async throws {
+        let inactive = DetailFixtureServer.transferProfile("Inactive line", enabled: false)
+        let active = DetailFixtureServer.transferProfile("Active line")
+        let unsupported = DetailFixtureServer.transferProfile("Unsupported line", supported: false)
+        let cases: [(name: String, profiles: [TransferProfile], ids: [String])] = [
+            ("mixed", [unsupported, inactive, active], [inactive.id, active.id]),
+            ("all supported", [active, inactive], [active.id, inactive.id]),
+            ("all unsupported", [unsupported], []),
+            ("empty", [], [])
+        ]
+        for sourceType in ["modem", "ccid"] {
+            for item in cases {
+                let server = DetailFixtureServer()
+                await server.setTransferProfiles(item.profiles)
+                let flow = ESIMFlowState(detail: try await make(server), seID: "se-a")
+                await flow.loadSources()
+                flow.selectSource(try XCTUnwrap(flow.sources.first { $0.type == sourceType }))
+                await flow.loadProfiles()
+
+                XCTAssertEqual(flow.profiles.map(\.id), item.ids, "\(sourceType): \(item.name)")
+                XCTAssertEqual(flow.phase, .profiles)
+                XCTAssertNil(flow.failure)
+                XCTAssertNil(flow.selectedProfile)
+                XCTAssertFalse(flow.canTransfer)
+                flow.selectProfile(unsupported)
+                XCTAssertNil(flow.selectedProfile)
+                if let profile = flow.profiles.first {
+                    flow.selectProfile(profile)
+                    XCTAssertTrue(flow.canTransfer)
+                    await server.setTransferProfiles([unsupported])
+                    await flow.loadProfiles()
+                    XCTAssertTrue(flow.profiles.isEmpty)
+                    XCTAssertNil(flow.selectedProfile)
+                    XCTAssertFalse(flow.canTransfer)
+                    flow.selectProfile(profile)
+                    XCTAssertNil(flow.selectedProfile)
+                }
+                flow.startTransfer()
+                XCTAssertEqual(flow.phase, .profiles)
+                XCTAssertNil(flow.runID)
+                flow.interrupt()
+            }
+        }
     }
 
     func testEditedTransferIMEIIgnoresObsoleteProfileResponsesAndErrors() async throws {
@@ -1032,11 +1090,11 @@ final class ModemDetailTests: XCTestCase {
         XCTAssertTrue(request.url!.absoluteString.hasSuffix("/modems/one%2Ftwo%20%3F/ses/a%2Fb"))
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
         let sheet = CarrierWebsheet(id: "sheet", embedUrl: "/api/v1/websheets/sheet", title: nil, url: "https://carrier.example", method: "GET")
-        let url = try CarrierWebsheetAddress.url(sheet, api: api, token: "secret")
+        let url = try CarrierWebsheetAddress.url(sheet, api: api)
         XCTAssertEqual(url.path, "/sigmo/api/v1/websheets/sheet")
-        XCTAssertEqual(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first?.value, "secret")
+        XCTAssertNil(url.query)
         let evil = CarrierWebsheet(id: "sheet", embedUrl: "https://evil.example/api/v1/websheets/sheet", title: nil, url: "https://carrier.example", method: "GET")
-        XCTAssertThrowsError(try CarrierWebsheetAddress.url(evil, api: api, token: "secret"))
+        XCTAssertThrowsError(try CarrierWebsheetAddress.url(evil, api: api))
         XCTAssertNotEqual(config.id, api.backendID)
     }
 }

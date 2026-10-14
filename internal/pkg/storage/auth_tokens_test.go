@@ -1,99 +1,87 @@
 package storage
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
-func TestAuthTokenStorage(t *testing.T) {
-	t.Parallel()
-
+func TestAuthSessionPersistence(t *testing.T) {
 	ctx := t.Context()
-	store := testStore(t)
-	now := time.Now().UTC().Truncate(time.Millisecond)
-	expiresAt := now.Add(time.Hour)
-
-	if err := store.CreateAuthToken(ctx, "valid-token-hash", expiresAt); err != nil {
-		t.Fatalf("CreateAuthToken() error = %v", err)
-	}
-
-	tests := []struct {
-		name      string
-		tokenHash string
-		now       time.Time
-		want      bool
-	}{
-		{name: "valid before expiration", tokenHash: "valid-token-hash", now: expiresAt.Add(-time.Millisecond), want: true},
-		{name: "invalid at expiration", tokenHash: "valid-token-hash", now: expiresAt},
-		{name: "invalid after expiration", tokenHash: "valid-token-hash", now: expiresAt.Add(time.Millisecond)},
-		{name: "unknown token", tokenHash: "unknown", now: now},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			valid, err := store.AuthTokenValid(ctx, tt.tokenHash, tt.now)
-			if err != nil {
-				t.Fatalf("AuthTokenValid() error = %v", err)
-			}
-			if valid != tt.want {
-				t.Fatalf("AuthTokenValid() = %v, want %v", valid, tt.want)
-			}
-		})
-	}
-}
-
-func TestCreateAuthTokenDeletesExpiredTokens(t *testing.T) {
-	t.Parallel()
-
-	ctx := t.Context()
-	store := testStore(t)
-	if err := store.CreateAuthToken(ctx, "expired", time.Now().Add(-time.Hour)); err != nil {
-		t.Fatalf("CreateAuthToken() expired error = %v", err)
-	}
-	if err := store.CreateAuthToken(ctx, "valid", time.Now().Add(time.Hour)); err != nil {
-		t.Fatalf("CreateAuthToken() valid error = %v", err)
-	}
-
-	var expiredCount int
-	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM auth_tokens WHERE token_hash = 'expired'`).Scan(&expiredCount); err != nil {
-		t.Fatalf("count expired tokens: %v", err)
-	}
-	if expiredCount != 0 {
-		t.Fatalf("expired token count = %d, want 0", expiredCount)
-	}
-}
-
-func TestAuthTokenPersistsAcrossReopen(t *testing.T) {
-	t.Parallel()
-
-	ctx := t.Context()
-	path := filepath.Join(t.TempDir(), "sigmo.db")
-	store, err := Open(ctx, path)
+	path := filepath.Join(t.TempDir(), "auth.db")
+	s, err := Open(ctx, path)
 	if err != nil {
-		t.Fatalf("Open() error = %v", err)
+		t.Fatal(err)
 	}
-	expiresAt := time.Now().Add(time.Hour)
-	if err := store.CreateAuthToken(ctx, "persistent", expiresAt); err != nil {
-		t.Fatalf("CreateAuthToken() error = %v", err)
+	session := AuthSession{ID: "device", Method: "otp", Issuer: "sigmo", Subject: "owner", PolicyID: "policy", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}
+	credentials := []AuthCredential{{Hash: "access-digest", Kind: "access", ExpiresAt: session.ExpiresAt}, {Hash: "refresh-digest", Kind: "refresh", ExpiresAt: session.ExpiresAt}}
+	if err := s.CreateAuthSession(ctx, session, credentials); err != nil {
+		t.Fatal(err)
 	}
-	if err := store.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
 	}
-
-	reopened, err := Open(ctx, path)
+	s, err = Open(ctx, path)
 	if err != nil {
-		t.Fatalf("Open() reopened error = %v", err)
+		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := reopened.Close(); err != nil {
-			t.Fatalf("Close() reopened error = %v", err)
+		if err := s.Close(); err != nil {
+			t.Error(err)
 		}
 	})
-	valid, err := reopened.AuthTokenValid(ctx, "persistent", time.Now())
-	if err != nil {
-		t.Fatalf("AuthTokenValid() error = %v", err)
+	got, err := s.AuthSessionByCredential(ctx, "access-digest", "access")
+	if err != nil || got.ID != session.ID {
+		t.Fatalf("reopened session=%+v, %v", got, err)
 	}
-	if !valid {
-		t.Fatal("AuthTokenValid() = false after reopening database, want true")
+	if active, err := s.AuthSessionActive(ctx, session.ID, "wrong policy"); err != nil || active {
+		t.Fatalf("policy mismatch=%v %v", active, err)
+	}
+	if err := s.RevokeAuthSession(ctx, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AuthSessionByCredential(ctx, "access-digest", "access"); !errors.Is(err, ErrInvalidSession) {
+		t.Fatal(err)
+	}
+}
+func TestCredentialExpiryAndAtomicRotation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		lifetime time.Duration
+	}{{"live", time.Hour}, {"expired", -time.Second}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			ctx := t.Context()
+			expiry := time.Now().Add(tc.lifetime)
+			session := AuthSession{ID: "id", Method: "otp", ExpiresAt: expiry, CreatedAt: time.Now()}
+			if err := s.CreateAuthSession(ctx, session, []AuthCredential{{Hash: "refresh", Kind: "refresh", ExpiresAt: expiry}}); err != nil {
+				t.Fatal(err)
+			}
+			next := []AuthCredential{{Hash: "next", Kind: "access", ExpiresAt: time.Now().Add(2 * time.Hour)}}
+			_, err := s.RotateAuthCredentials(ctx, "refresh", next)
+			if tc.lifetime < 0 {
+				if !errors.Is(err, ErrInvalidSession) {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var storedExpiry int64
+			if err := s.db.QueryRowContext(ctx, `SELECT expires_at FROM auth_credentials WHERE token_hash='next'`).Scan(&storedExpiry); err != nil {
+				t.Fatal(err)
+			}
+			if storedExpiry != expiry.UnixMilli() {
+				t.Fatal("credential exceeds absolute session expiry")
+			}
+			if _, err := s.RotateAuthCredentials(ctx, "refresh", next); !errors.Is(err, ErrInvalidSession) {
+				t.Fatal(err)
+			}
+			if _, err := s.AuthSessionByCredential(ctx, "next", "access"); !errors.Is(err, ErrInvalidSession) {
+				t.Fatal("replay did not revoke new credential")
+			}
+		})
 	}
 }

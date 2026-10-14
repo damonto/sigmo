@@ -18,7 +18,7 @@ actor SettingsTestServer {
     func setMCPEndpoint(_ path: String) {
         server.mcp = MCPSettings(enabled: false, endpointPath: path, auditRetentionDays: 90, permissions: [])
     }
-    func setOTP(_ required: Bool) { server.settings.values.auth["otpRequired"] = .toggle(required) }
+    func setOTP(_ required: Bool) { server.settings.values.auth["mode"] = .text(required ? "otp" : "none") }
     func setProxyPort(_ port: Int) { server.settings.values.proxy["httpPort"] = .number(port) }
     func setDistribution(_ value: String, reason: String? = nil) { server.distribution = value; server.unsupportedReason = reason }
     func setEdition(_ value: String) { server.edition = value }
@@ -37,15 +37,17 @@ actor SettingsTestServer {
         if let transportError { throw URLError(transportError) }
         let path = request.url?.path ?? ""
         if let entry = errors.first(where: { path.hasSuffix($0.key) }) {
-            return HTTPProblem.response(status: entry.value, code: entry.value == 401 ? "invalid_token" : "remote_error", detail: "Fixture failure")
+            return HTTPProblem.response(status: entry.value, code: entry.value == 401 ? "invalid_session" : "remote_error", detail: "Fixture failure")
         }
         let result: BackendHTTPResponse
         if let response = try server.respond(request) { result = response }
         else if path.hasSuffix("/license") { result = HTTPProblem.response(status: 404, code: "resource_not_found", detail: "Not found") }
         else if path.hasSuffix("/app") { result = BackendHTTPResponse(data: try JSONEncoder().encode(server.app), status: 200) }
         else if path.hasSuffix("/capabilities") { result = reply(200, #"{"features":[]}"#) }
-        else if path.hasSuffix("/auth/otp/required") { result = reply(200, #"{"otpRequired":\#(server.otpRequired)}"#) }
-        else if path.hasSuffix("/auth/otp/verify") { result = reply(200, #"{"token":"fixture-token"}"#) }
+        else if path.hasSuffix("/auth/methods") { result = reply(200, AuthenticationFixture.methods(required: server.otpRequired)) }
+        else if path.hasSuffix("/auth/otp/challenges") { result = reply(201, AuthenticationFixture.challenge) }
+        else if path.hasSuffix("/auth/sessions/current") { result = reply(204, "") }
+        else if path.hasSuffix("/auth/sessions") { result = reply(200, AuthenticationFixture.tokens("fixture-token")) }
         else if path.hasSuffix("/modems") { result = reply(200, "[\(PreviewBackendServer.modemJSON())]") }
         else { result = HTTPProblem.response(status: 404, code: "resource_not_found", detail: "Not found") }
         if let suffix = holdSuffix, path.hasSuffix(suffix) {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/damonto/euicc-go/driver"
 	eccid "github.com/damonto/euicc-go/driver/ccid"
+	"github.com/damonto/euicc-go/driver/iso7816"
 	sgp22 "github.com/damonto/euicc-go/v2"
 	"github.com/damonto/ts43-go"
 	"github.com/damonto/wwan-go/at"
@@ -44,8 +45,8 @@ func (s *transferRunner) sourceEID(ctx context.Context, currentSettings *setting
 			return "", fmt.Errorf("open source eUICC: %w", err)
 		}
 		sourceLPA = client
-	case SourceCCID:
-		client, err := newCCIDLPAClient(ctx, currentSettings, start)
+	case SourceCCID, SourceClientCCID:
+		client, err := s.newCCIDLPAClient(ctx, currentSettings, start)
 		if err != nil {
 			return "", fmt.Errorf("open source eUICC: %w", err)
 		}
@@ -87,8 +88,8 @@ func (s *transferRunner) openSource(ctx context.Context, currentSettings *settin
 			release: release,
 			device:  device,
 		}, nil
-	case SourceCCID:
-		channel, release, err := openCCIDSource(ctx, start.SourceID, sourceLogger(start))
+	case SourceCCID, SourceClientCCID:
+		channel, release, err := s.openCCIDSource(ctx, start)
 		if err != nil {
 			return nil, fmt.Errorf("open CCID reader: %w", err)
 		}
@@ -134,8 +135,8 @@ func releaseSource(ch sourceCloser, logger *slog.Logger) func() {
 	}
 }
 
-func openCCIDSource(ctx context.Context, readerName string, logger *slog.Logger) (ts43.Channel, func(), error) {
-	tx, err := ccid.Open(ctx, readerName)
+func (s *transferRunner) openCCIDSource(ctx context.Context, start startRequest) (ts43.Channel, func(), error) {
+	tx, err := s.openReader(ctx, start)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -143,7 +144,7 @@ func openCCIDSource(ctx context.Context, readerName string, logger *slog.Logger)
 	if err != nil {
 		return nil, nil, errors.Join(err, tx.Close())
 	}
-	return sourceFromReader(ctx, reader, logger)
+	return sourceFromReader(ctx, reader, sourceLogger(start))
 }
 
 func openATSource(ctx context.Context, modem *mmodem.Modem) (usimcard.Reader, error) {
@@ -189,15 +190,15 @@ func (s *transferRunner) activateSourceProfile(ctx context.Context, currentSetti
 			return err
 		}
 		return s.enableModemSourceProfile(ctx, modem, option.SEID, iccid)
-	case SourceCCID:
-		return enableCCIDSourceProfile(ctx, currentSettings, start, iccid)
+	case SourceCCID, SourceClientCCID:
+		return s.enableCCIDSourceProfile(ctx, currentSettings, start, iccid)
 	default:
 		return ErrSourceUnsupported
 	}
 }
 
-func enableCCIDSourceProfile(ctx context.Context, currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {
-	sourceLPA, err := newCCIDLPAClient(ctx, currentSettings, start)
+func (s *transferRunner) enableCCIDSourceProfile(ctx context.Context, currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {
+	sourceLPA, err := s.newCCIDLPAClient(ctx, currentSettings, start)
 	if err != nil {
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
@@ -230,8 +231,8 @@ func (s *transferRunner) deleteSourceProfile(ctx context.Context, currentSetting
 	switch start.SourceType {
 	case SourceModem:
 		return s.deleteModemSourceProfile(ctx, currentSettings, start, iccid)
-	case SourceCCID:
-		return deleteCCIDSourceProfile(ctx, currentSettings, start, iccid)
+	case SourceCCID, SourceClientCCID:
+		return s.deleteCCIDSourceProfile(ctx, currentSettings, start, iccid)
 	default:
 		return ErrSourceUnsupported
 	}
@@ -318,8 +319,8 @@ func (s *transferRunner) deleteModemProfile(ctx context.Context, modem *mmodem.M
 	return s.deleteProfile(ctx, modem, seID, iccid)
 }
 
-func deleteCCIDSourceProfile(ctx context.Context, currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {
-	sourceLPA, err := newCCIDLPAClient(ctx, currentSettings, start)
+func (s *transferRunner) deleteCCIDSourceProfile(ctx context.Context, currentSettings *settings.Settings, start startRequest, iccid sgp22.ICCID) error {
+	sourceLPA, err := s.newCCIDLPAClient(ctx, currentSettings, start)
 	if err != nil {
 		return fmt.Errorf("create source LPA client: %w", err)
 	}
@@ -399,7 +400,7 @@ func sourceLockKey(sourceType SourceType, sourceID string) string {
 
 func sourceLogger(start startRequest) *slog.Logger {
 	switch start.SourceType {
-	case SourceCCID:
+	case SourceCCID, SourceClientCCID:
 		logger := mmodem.LoggerForIMEI(start.SourceIMEI)
 		if reader := strings.TrimSpace(start.SourceID); reader != "" {
 			logger = logger.With("reader", reader)
@@ -424,12 +425,37 @@ func ccidServiceUnavailable(err error) bool {
 	return strings.Contains(msg, scardNoServiceName) || strings.Contains(msg, scardNoServiceCode)
 }
 
-func newCCIDLPAClient(ctx context.Context, currentSettings *settings.Settings, start startRequest) (*ilpa.Client, error) {
+func (s *transferRunner) newCCIDLPAClient(ctx context.Context, currentSettings *settings.Settings, start startRequest) (*ilpa.Client, error) {
 	return ilpa.NewWithChannelFactory(ctx, ilpa.ChannelConfig{
-		LockKey:  sourceLockKey(SourceCCID, start.SourceID),
+		LockKey:  s.readerLockKey(start),
 		Settings: currentSettings,
 		Logger:   sourceLogger(start),
-	}, func(context.Context) (driver.SmartCardChannel, error) {
+	}, func(ctx context.Context) (driver.SmartCardChannel, error) {
+		if start.SourceType == SourceClientCCID {
+			tx, err := s.openReader(ctx, start)
+			if err != nil {
+				return nil, err
+			}
+			return iso7816.NewChannel(tx), nil
+		}
 		return eccid.NewWithReader(start.SourceID), nil
 	})
+}
+
+func (s *transferRunner) openReader(ctx context.Context, start startRequest) (usimcard.Transmitter, error) {
+	if start.SourceType == SourceCCID {
+		return ccid.Open(ctx, start.SourceID)
+	}
+	if start.SourceType != SourceClientCCID || s.remote == nil || s.remote.sourceID != start.SourceID {
+		return nil, ErrSourceUnsupported
+	}
+	return s.remote.open(ctx)
+}
+
+func (s *transferRunner) readerLockKey(start startRequest) string {
+	if start.SourceType == SourceClientCCID && s.remote != nil {
+		// Reader names are local to each client, not global to the server.
+		return s.remote.lockKey
+	}
+	return sourceLockKey(start.SourceType, start.SourceID)
 }

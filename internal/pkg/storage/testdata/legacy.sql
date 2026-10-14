@@ -1,0 +1,141 @@
+-- Historical schema before conversations, SIM profiles and native push.
+-- This fixture must not be regenerated from current migrations.
+
+CREATE TABLE IF NOT EXISTS app_state (
+	scope TEXT NOT NULL,
+	key TEXT NOT NULL,
+	value_json TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	PRIMARY KEY (scope, key)
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	profile_id TEXT NOT NULL,
+	source TEXT NOT NULL,
+	external_key TEXT NOT NULL,
+	fingerprint TEXT NOT NULL DEFAULT '',
+	sender TEXT NOT NULL,
+	recipient TEXT NOT NULL,
+	text TEXT NOT NULL,
+	timestamp TEXT NOT NULL,
+	status TEXT NOT NULL,
+	incoming INTEGER NOT NULL,
+	wifi_calling INTEGER NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	UNIQUE (profile_id, source, external_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_profile_timestamp ON messages(profile_id, timestamp);
+
+CREATE INDEX IF NOT EXISTS idx_messages_profile_participants ON messages(profile_id, sender, recipient);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_fingerprint ON messages(fingerprint) WHERE fingerprint <> '';
+
+CREATE TABLE IF NOT EXISTS modem_message_refs (
+	message_id INTEGER NOT NULL,
+	modem_id TEXT NOT NULL,
+	generation INTEGER NOT NULL DEFAULT 0,
+	storage INTEGER NOT NULL,
+	ref_id INTEGER NOT NULL,
+	PRIMARY KEY (message_id, modem_id, generation, storage, ref_id),
+	FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_modem_message_ref ON modem_message_refs(modem_id, generation, storage, ref_id);
+
+CREATE TABLE IF NOT EXISTS calls (
+	id TEXT PRIMARY KEY,
+	profile_id TEXT NOT NULL,
+	modem_id TEXT NOT NULL,
+	route TEXT NOT NULL,
+	direction TEXT NOT NULL,
+	number TEXT NOT NULL,
+	state TEXT NOT NULL,
+	hold_state TEXT NOT NULL DEFAULT 'none',
+	reason TEXT NOT NULL,
+	started_at TEXT NOT NULL,
+	answered_at TEXT NOT NULL,
+	ended_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_calls_profile_modem_updated ON calls(profile_id, modem_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS reminders (
+	profile_type TEXT NOT NULL,
+	profile_id TEXT NOT NULL,
+	modem_id TEXT NOT NULL,
+	se_id TEXT NOT NULL,
+	profile_name TEXT NOT NULL,
+	next_at TEXT NOT NULL,
+	repeat_days INTEGER,
+	content TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	revision INTEGER NOT NULL DEFAULT 1,
+	PRIMARY KEY (profile_type, profile_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_reminders_next_at ON reminders(next_at);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+	id TEXT PRIMARY KEY,
+	endpoint TEXT NOT NULL UNIQUE,
+	p256dh TEXT NOT NULL,
+	auth TEXT NOT NULL,
+	label TEXT NOT NULL,
+	user_agent TEXT NOT NULL,
+	platform TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_updated_at ON push_subscriptions(updated_at);
+
+CREATE TABLE IF NOT EXISTS auth_tokens (
+	token_hash TEXT PRIMARY KEY,
+	expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires_at ON auth_tokens(expires_at);
+
+CREATE TABLE IF NOT EXISTS mcp_api_keys (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	token_hash TEXT NOT NULL UNIQUE,
+	token_hint TEXT NOT NULL,
+	all_modems INTEGER NOT NULL,
+	created_at INTEGER NOT NULL,
+	expires_at INTEGER NOT NULL,
+	revoked_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_api_keys_expires_at ON mcp_api_keys(expires_at);
+
+CREATE TABLE IF NOT EXISTS mcp_api_key_modems (
+	key_id TEXT NOT NULL REFERENCES mcp_api_keys(id) ON DELETE CASCADE,
+	modem_id TEXT NOT NULL,
+	PRIMARY KEY (key_id, modem_id)
+);
+
+CREATE TABLE IF NOT EXISTS mcp_api_key_permissions (
+	key_id TEXT NOT NULL REFERENCES mcp_api_keys(id) ON DELETE CASCADE,
+	permission TEXT NOT NULL,
+	PRIMARY KEY (key_id, permission)
+);
+
+CREATE TABLE IF NOT EXISTS mcp_audit_events (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	key_id TEXT NOT NULL,
+	key_name TEXT NOT NULL,
+	tool TEXT NOT NULL,
+	modem_ids_json TEXT NOT NULL,
+	outcome TEXT NOT NULL,
+	error_code TEXT NOT NULL,
+	duration_ms INTEGER NOT NULL,
+	created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_audit_events_created_at ON mcp_audit_events(created_at);

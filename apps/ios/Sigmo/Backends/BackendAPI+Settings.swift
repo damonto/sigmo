@@ -11,7 +11,7 @@ extension BackendAPI {
 
     func testAuthentication(_ providers: [String], token: String?) async throws {
         _ = try await request(["settings", "auth-tests"], method: "POST",
-                              body: JSONEncoder().encode(["authProviders": providers]), token: token)
+                              body: JSONEncoder().encode(["channels": providers]), token: token)
     }
 
     func mcpSettings(token: String?) async throws -> MCPSettings {

@@ -115,6 +115,7 @@ struct TransferSource: Codable, Identifiable, Sendable, Equatable {
     let name: String
     let detail: String?
     let requiresSourceImei: Bool
+    var cardPresent: Bool? = nil
     var key: String { type + ":" + id }
 }
 

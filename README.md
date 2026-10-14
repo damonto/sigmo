@@ -12,7 +12,7 @@ Sigmo focuses on advanced eSIM operations, SMS management, and network control. 
 - **📱 eSIM Management**: List, download (SM-DP+), enable, rename, and delete eSIM profiles.
 - **📩 SMS Center**: Full conversational view for SMS, send/delete capability, and USSD session support.
 - **⚙️ Modem Control**: SIM slot switching, network scanning, manual registration, and preference configuration (Alias, MSS).
-- **🔒 Secure Access**: OTP-based login system via Telegram, HTTP, Email, and more.
+- **🔒 Secure Access**: Independent OTP delivery, standard OIDC, and Cloudflare Access for Web and iOS. See the [authentication setup and migration guide](internal/app/auth/README.md).
 - **🔔 Notifications**: Forward incoming SMS and login tokens to Telegram, Bark, Gotify, Email, etc.
 - **🚀 Portable**: Single Go binary with no mandatory modem-control daemon.
 
@@ -124,7 +124,7 @@ Startup configuration is provided through flags:
 
 Runtime settings are managed in the Web UI and stored in SQLite:
 
-- Login OTP policy and auth providers.
+- Authentication mode, OTP delivery channels, OIDC, and Cloudflare Access.
 - Notification channels: Telegram, Bark, Gotify, ServerChan, HTTP webhook, and Email.
 - Internet proxy listener and password.
 - Modem alias, compatibility mode, and APDU MSS.
@@ -172,7 +172,7 @@ If you wish to contribute or modify the source:
     go run ./ --listen-address=0.0.0.0:9527 --db-path=./sigmo.db --debug
     ```
 
-    _Or for frontend hot-reload:_ `cd apps/web && bun run dev`
+    _Or for frontend hot-reload:_ `cd apps/web && bun run dev`. Vite proxies `/api` to `http://127.0.0.1:9527`, keeping browser requests and authentication cookies on the frontend origin. For a different backend, set `SIGMO_DEV_BACKEND=http://<host>:<port>` in `apps/web/.env.local` or the shell. Keep `VITE_API_BASE_URL=/api/v1`; an absolute backend URL bypasses the proxy.
 
 4.  **Build Docker Image**:
     ```bash

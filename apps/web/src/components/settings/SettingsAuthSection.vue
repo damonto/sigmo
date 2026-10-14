@@ -2,9 +2,9 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import SettingsChannelPicker from '@/components/settings/SettingsChannelPicker.vue'
 import SettingsField from '@/components/settings/SettingsField.vue'
 import { Card, CardContent } from '@/components/ui/card'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import type {
   SettingsAuth,
@@ -14,7 +14,7 @@ import type {
 
 const props = defineProps<{
   auth: SettingsAuth | null
-  enabledChannels: SettingsChannelSchema[]
+  configuredChannels: SettingsChannelSchema[]
   fields: SettingsFieldSchema[]
   disabled?: boolean
 }>()
@@ -24,69 +24,56 @@ const emit = defineEmits<{
 }>()
 
 const { t, te } = useI18n()
-const authProviders = computed(() => props.auth?.authProviders ?? [])
+const otpChannels = computed(() => props.auth?.otpChannels ?? [])
 
 const schemaText = (value: string | undefined) => {
   return value && te(value) ? t(value) : (value ?? '')
 }
 
-const fieldID = (key: string, channel = '') => {
-  return channel ? `settings-auth-${channel}-${key}` : `settings-auth-${key}`
-}
+const fieldID = (key: string) => `settings-auth-${key}`
 
 const fieldValue = (key: string) => {
   if (!props.auth) return undefined
-  return (props.auth as unknown as Record<string, unknown>)[key]
+  return key in props.auth ? props.auth[key as keyof SettingsAuth] : undefined
 }
 
-const isAuthProvider = (channel: string) => {
-  return authProviders.value.includes(channel)
-}
-
-const toggleAuthProvider = (channel: string, enabled: boolean) => {
-  if (enabled) {
-    if (!isAuthProvider(channel)) {
-      emit('update-field', 'authProviders', [...authProviders.value, channel].sort())
-    }
-    return
-  }
-  emit(
-    'update-field',
-    'authProviders',
-    authProviders.value.filter((item) => item !== channel),
-  )
-}
+const visibleFields = computed(() =>
+  props.fields.filter((field) => {
+    if (field.key === 'mode') return true
+    if (props.auth?.mode === 'cloudflare_access') return field.key.startsWith('access')
+    if (props.auth?.mode === 'otp') return ['sessionMaxDays', 'otpChannels'].includes(field.key)
+    if (props.auth?.mode === 'oidc') return field.key.startsWith('oidc')
+    return false
+  }),
+)
 </script>
 
 <template>
   <Card class="gap-4 border-0 py-4 shadow-sm">
     <CardContent class="space-y-4 px-4">
-      <div v-for="field in fields" :key="field.key" class="space-y-2">
-        <div v-if="field.control === 'channelList'" class="space-y-3">
+      <div
+        v-for="field in visibleFields"
+        :key="field.key"
+        class="space-y-2"
+      >
+        <div
+          v-if="field.control === 'channelList'"
+          class="space-y-3"
+        >
           <Label>{{ schemaText(field.label) }}</Label>
-          <div v-if="enabledChannels.length > 0" class="grid gap-3 sm:grid-cols-3">
-            <div
-              v-for="channel in enabledChannels"
-              :key="channel.key"
-              class="flex items-center gap-2"
-            >
-              <Checkbox
-                :id="fieldID('auth_provider', channel.key)"
-                :model-value="isAuthProvider(channel.key)"
-                :disabled="disabled"
-                @update:model-value="toggleAuthProvider(channel.key, $event === true)"
-              />
-              <Label
-                :for="fieldID('auth_provider', channel.key)"
-                class="cursor-pointer text-sm font-normal"
-              >
-                {{ schemaText(channel.label) }}
-              </Label>
-            </div>
-          </div>
-          <p v-else class="text-xs text-muted-foreground">
-            {{ t('settings.noEnabledChannels') }}
+          <p
+            v-if="field.description"
+            class="text-xs text-muted-foreground"
+          >
+            {{ schemaText(field.description) }}
           </p>
+          <SettingsChannelPicker
+            :id="fieldID(field.key)"
+            :model-value="otpChannels"
+            :channels="configuredChannels"
+            :disabled="disabled"
+            @update:model-value="emit('update-field', 'otpChannels', $event)"
+          />
         </div>
 
         <SettingsField

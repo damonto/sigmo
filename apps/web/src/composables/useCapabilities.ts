@@ -11,6 +11,7 @@ export const FEATURE = {
 const features = ref<string[]>([])
 const isLoading = ref(false)
 const hasLoaded = ref(false)
+let pending: Promise<void> | undefined
 
 export const useCapabilities = () => {
   const capabilityApi = useCapabilityApi()
@@ -20,9 +21,21 @@ export const useCapabilities = () => {
   const hasFeature = (feature: string) => featureSet.value.has(feature)
 
   const fetchCapabilities = async () => {
-    if (isLoading.value || hasLoaded.value) return
+    if (hasLoaded.value) return
+    // Split views mount together; every consumer must await the same capability read.
+    if (pending) return pending
 
     isLoading.value = true
+    pending = loadCapabilities()
+    try {
+      await pending
+    } finally {
+      pending = undefined
+      isLoading.value = false
+    }
+  }
+
+  const loadCapabilities = async () => {
     try {
       const { data } = await capabilityApi.getCapabilities()
       features.value = data.value?.features ?? []
@@ -30,8 +43,6 @@ export const useCapabilities = () => {
     } catch (err) {
       console.error('[useCapabilities] Failed to fetch capabilities:', err)
       features.value = []
-    } finally {
-      isLoading.value = false
     }
   }
 

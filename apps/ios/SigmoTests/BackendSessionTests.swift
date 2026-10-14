@@ -25,7 +25,7 @@ final class BackendSessionTests: XCTestCase {
         XCTAssertFalse(session.foreground)
 
         store.setForeground(true)
-        await stub.holdNextRequest("/auth/otp")
+        await stub.holdNextRequest("/auth/otp/challenges")
         let request = Task {
             try await session.protectedRequest { api, _ in try await api.sendOTP() }
         }
@@ -35,7 +35,7 @@ final class BackendSessionTests: XCTestCase {
         await stub.release()
         try await request.value
         XCTAssertTrue(session.foreground)
-        let count = await stub.count("/auth/otp")
+        let count = await stub.count("/auth/otp/challenges")
         XCTAssertEqual(count, 1)
     }
 
@@ -76,17 +76,18 @@ final class BackendSessionTests: XCTestCase {
     }
 
     func testCancelledAuthenticationActionsReleaseBusyStateAndAllowRetry() async throws {
-        for path in ["/auth/otp", "/auth/otp/verify", "/license/pairings"] {
+        for path in ["/auth/otp/challenges", "/auth/sessions", "/license/pairings"] {
             let stub = BackendStub()
             await stub.setRequired(true)
             if path == "/license/pairings" { await stub.setLicense(authorized: false) }
             let session = try testSession(stub)
             await session.refresh(force: true)
+            if path == "/auth/sessions" { await session.sendOTP() }
             await stub.holdNextRequest(path)
             let perform: @MainActor () async -> Void = {
                 switch path {
-                case "/auth/otp": await session.sendOTP()
-                case "/auth/otp/verify": await session.verifyOTP("123456")
+                case "/auth/otp/challenges": await session.sendOTP()
+                case "/auth/sessions": await session.verifyOTP("123456")
                 default: await session.createPairing()
                 }
             }
@@ -114,11 +115,12 @@ final class BackendSessionTests: XCTestCase {
         await stub.waitForHeldRequest()
         let login = Task {
             withUnsafeCurrentTask { $0?.cancel() }
+            await session.sendOTP()
             await session.verifyOTP("123456")
         }
         await login.value
         XCTAssertTrue(session.isRefreshing)
-        let count = await stub.count("/auth/otp/verify")
+        let count = await stub.count("/auth/sessions")
         XCTAssertEqual(count, 0)
         await stub.release()
         await refresh.value
@@ -150,7 +152,7 @@ final class BackendSessionTests: XCTestCase {
         await stub.holdNextModemRequest()
         let request = Task { await session.refresh(force: true) }
         await stub.waitForHeldRequest()
-        session.logout()
+        await session.logout()
         await stub.release()
         await request.value
         XCTAssertTrue(session.modems.isEmpty)
@@ -189,7 +191,7 @@ final class BackendSessionTests: XCTestCase {
         let credentials = MemoryCredentials()
         let firstConfig = try testConfiguration("one.example")
         let secondConfig = try testConfiguration("two.example")
-        credentials.tokens = [firstConfig.id: "one-token", secondConfig.id: "two-token"]
+        credentials.tokens = [firstConfig.id: storedCredential("one-token"), secondConfig.id: storedCredential("two-token")]
         let stub = BackendStub()
         await stub.setRequired(true)
         let first = try testSession(stub, configuration: firstConfig, credentials: credentials)
@@ -200,7 +202,7 @@ final class BackendSessionTests: XCTestCase {
         XCTAssertEqual(first.authentication, .required)
         XCTAssertTrue(first.modems.isEmpty)
         XCTAssertNil(credentials.tokens[first.id])
-        XCTAssertEqual(credentials.tokens[secondConfig.id], "two-token")
+        XCTAssertEqual(credentials.tokens[secondConfig.id], storedCredential("two-token"))
     }
 
     func testCapabilityFailureDoesNotBlockDevices() async throws {
@@ -234,21 +236,23 @@ final class BackendSessionTests: XCTestCase {
         let time = TestTime()
         let session = try testSession(stub, clock: time.clock)
         await session.refresh(force: true)
-        let initial = await stub.count("/auth/otp")
+        let initial = await stub.count("/auth/otp/challenges")
         XCTAssertEqual(initial, 0)
         await session.sendOTP()
         await session.sendOTP()
-        let once = await stub.count("/auth/otp")
+        let once = await stub.count("/auth/otp/challenges")
         XCTAssertEqual(once, 1)
         time.advance(60)
         await stub.setSendStatus(429)
         await session.sendOTP()
         XCTAssertEqual(session.authFailure?.status, 429)
         XCTAssertEqual(session.resendAvailableAt, time.now().addingTimeInterval(60))
+        await session.sendOTP()
         await session.verifyOTP("000000")
-        XCTAssertEqual(session.authFailure?.code, "invalid_otp")
+        XCTAssertEqual(session.authFailure?.code, "authentication_failed")
         XCTAssertEqual(session.authFailure?.requestID, "otp-request")
         XCTAssertEqual(session.authentication, .required)
+        await session.sendOTP()
         await session.verifyOTP("123456")
         XCTAssertEqual(session.authentication, .authenticated)
         XCTAssertEqual(session.modems.count, 1)
@@ -258,18 +262,20 @@ final class BackendSessionTests: XCTestCase {
         let stub = BackendStub()
         let credentials = MemoryCredentials()
         let config = try testConfiguration()
-        credentials.tokens[config.id] = "old-token"
+        credentials.tokens[config.id] = storedCredential("old-token")
         await stub.setRequired(true)
         await stub.setModemStatus(401)
         await stub.holdNextModemRequest()
         let session = try testSession(stub, configuration: config, credentials: credentials)
         let old = Task { await session.refresh(force: true) }
         await stub.waitForHeldRequest()
+        await session.logout()
         await stub.setModemStatus(200)
+        await session.sendOTP()
         await session.verifyOTP("123456")
         await stub.release()
         await old.value
-        XCTAssertEqual(credentials.tokens[config.id], "new-token")
+        XCTAssertEqual(credentials.tokens[config.id], storedCredential("new-token"))
         XCTAssertEqual(session.authentication, .authenticated)
         XCTAssertEqual(session.modems.count, 1)
     }
@@ -316,7 +322,9 @@ final class BackendSessionTests: XCTestCase {
         await session.refresh(force: true)
         XCTAssertEqual(session.failure?.code, "storage.keychainError")
         credentials.readFailure = false
+        await session.refresh(force: true)
         credentials.writeFailure = true
+        await session.sendOTP()
         await session.verifyOTP("123456")
         XCTAssertEqual(session.authFailure?.code, "storage.keychainError")
         XCTAssertTrue(session.modems.isEmpty)

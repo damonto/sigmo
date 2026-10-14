@@ -36,10 +36,10 @@ final class SettingsTests: XCTestCase {
     }
 
     func testNullAndOmittedCollectionsDecode() throws {
-        let json = SettingsFixtureData.settings.replacingOccurrences(of: #""authProviders": ["#, with: #""unusedProviders": ["#)
+        let json = SettingsFixtureData.settings.replacingOccurrences(of: #""otpChannels": ["#, with: #""unusedProviders": ["#)
         var response = try JSONDecoder().decode(SettingsResponse.self, from: Data(json.utf8))
-        response.values.auth["authProviders"] = .null
-        XCTAssertEqual(response.values.auth["authProviders"]?.strings, [])
+        response.values.auth["otpChannels"] = .null
+        XCTAssertEqual(response.values.auth["otpChannels"]?.strings, [])
         let keys = try JSONDecoder().decode(MCPKeys.self, from: Data(#"{"apiKeys":null}"#.utf8))
         XCTAssertNil(keys.apiKeys)
         let audit = try JSONDecoder().decode(MCPAudit.self, from: Data(#"{}"#.utf8))
@@ -64,16 +64,35 @@ final class SettingsTests: XCTestCase {
         state.proxy["httpPort"] = .text("9090")
         let payload = SettingsState.payload(state.proxy, fields: state.snapshot!.schema.proxy)
         XCTAssertEqual(payload["httpPort"], .number(9090))
-        state.auth["otpRequired"] = .toggle(true); state.auth["authProviders"] = .list([])
+        state.auth["mode"] = .text("otp"); state.auth["otpChannels"] = .list([])
         XCTAssertNotNil(state.validation(for: .authentication))
-        state.auth["authProviders"] = .list(["telegram"])
-        for value in ["0", "181", "2.5"] { state.auth["tokenValidityDays"] = .text(value); XCTAssertNotNil(state.validation(for: .authentication)) }
-        state.auth["tokenValidityDays"] = .text("180"); XCTAssertNil(state.validation(for: .authentication))
+        state.auth["otpChannels"] = .list(["telegram"])
+        for value in ["0", "181", "2.5"] { state.auth["sessionMaxDays"] = .text(value); XCTAssertNotNil(state.validation(for: .authentication)) }
+        state.auth["sessionMaxDays"] = .text("180"); XCTAssertNil(state.validation(for: .authentication))
         let emailFields = state.channelSchemas.first { $0.key == "email" }!.fields
         XCTAssertNil(state.validation(fields: emailFields, values: ["enabled": .toggle(false)], enabled: false))
         let defaults = SettingsState.payload(["enabled": .toggle(false)], fields: emailFields)
         XCTAssertEqual(defaults["tlsPolicy"], .text("mandatory"))
         XCTAssertEqual(defaults["ssl"], .toggle(false))
+    }
+
+    func testAuthenticationModesHaveIndependentConfigurationFields() async throws {
+        let server = try SettingsTestServer()
+        let session = try settingsSession(server)
+        await session.refresh(force: true)
+        let state = SettingsState(session: session)
+        await state.load()
+        let cases: [(String, Set<String>)] = [
+            ("none", ["mode"]),
+            ("otp", ["mode", "sessionMaxDays", "otpChannels"]),
+            ("oidc", ["mode", "oidcIssuer", "oidcClientId", "oidcClientSecret", "oidcAllowedSubjects"]),
+            ("cloudflare_access", ["mode", "accessTeamDomain", "accessAudience", "accessAllowedSubjects"]),
+        ]
+        for (mode, expected) in cases {
+            state.auth["mode"] = .text(mode)
+            XCTAssertEqual(Set(state.fields(for: .authentication).map(\.key)), expected, mode)
+        }
+        XCTAssertEqual(state.snapshot?.schema.auth.first?.options?.map(\.value), cases.map(\.0))
     }
 
     func testFailedSavePreservesDraftAndUnrelatedDrafts() async throws {
@@ -83,7 +102,7 @@ final class SettingsTests: XCTestCase {
         let state = SettingsState(session: session)
         await state.load()
         state.proxy["httpPort"] = .text("9090")
-        state.auth["tokenValidityDays"] = .text("45")
+        state.auth["sessionMaxDays"] = .text("45")
         await server.setError("/settings/proxy", status: 500)
         await state.save(.proxy)
         XCTAssertEqual(state.proxy["httpPort"], .text("9090"))
@@ -92,46 +111,47 @@ final class SettingsTests: XCTestCase {
         await server.setError("/settings/proxy", status: nil)
         await state.save(.proxy)
         XCTAssertEqual(state.proxy["httpPort"], .number(9090))
-        XCTAssertEqual(state.auth["tokenValidityDays"], .text("45"))
+        XCTAssertEqual(state.auth["sessionMaxDays"], .text("45"))
         XCTAssertNil(state.failure)
     }
 
-    func testAuthTestDoesNotSaveAndChannelChangesReconcileProviders() async throws {
+    func testOTPChannelsRemainConfiguredWithoutBusinessNotifications() async throws {
         let server = try SettingsTestServer()
         let session = try settingsSession(server)
         await session.refresh(force: true)
         let state = SettingsState(session: session)
         await state.load()
-        state.auth["tokenValidityDays"] = .number(60)
+        state.auth["sessionMaxDays"] = .number(60)
         await state.testAuth()
-        XCTAssertEqual(state.snapshot?.values.auth["tokenValidityDays"], .number(30))
-        state.channels["telegram"]?["enabled"] = .toggle(false)
-        await state.save(.notification("telegram"))
-        XCTAssertEqual(state.auth["authProviders"], .list([]))
-        XCTAssertTrue(state.enabledChannels.isEmpty)
+        XCTAssertEqual(state.snapshot?.values.auth["sessionMaxDays"], .number(30))
+        state.notifications["channels"] = .list([])
+        await state.save(.notifications)
+        XCTAssertEqual(state.auth["otpChannels"], .list(["telegram"]))
+        XCTAssertEqual(state.configuredChannels.map(\.key), ["telegram"])
+        XCTAssertEqual(state.snapshot?.values.notifications["channels"], .list([]))
         let requests = await server.allRequests()
         XCTAssertEqual(requests.filter { $0.url?.path.hasSuffix("/settings/auth-tests") == true }.count, 1)
         XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/settings/auth") == true })
     }
 
-    func testEnableOTPRequiresLoginAndLastProviderCannotBeDisabled() async throws {
+    func testEnableOTPRequiresLoginAndIndependentDeliverySelection() async throws {
         let server = try SettingsTestServer()
         let session = try settingsSession(server)
         await session.refresh(force: true)
         let state = SettingsState(session: session)
         await state.load()
-        state.auth["otpRequired"] = .toggle(true)
+        state.notifications["channels"] = .list([])
+        await state.save(.notifications)
+        state.auth["mode"] = .text("otp")
         await state.save(.authentication)
         XCTAssertEqual(session.authentication, .required)
         XCTAssertFalse(session.canAccessDevices)
+        await session.sendOTP()
         await session.verifyOTP("123456")
         XCTAssertTrue(session.canAccessDevices)
-        state.channels["telegram"]?["enabled"] = .toggle(false)
-        XCTAssertNotNil(state.validation(for: .notification("telegram")))
-        await state.save(.notification("telegram"))
-        let requests = await server.allRequests()
-        XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/settings/notifications/telegram") == true })
-        XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/auth/otp") == true })
+        XCTAssertEqual(state.auth["otpChannels"], .list(["telegram"]))
+        state.auth["otpChannels"] = .list([])
+        XCTAssertNotNil(state.validation(for: .authentication))
     }
 
     func testUnauthorizedSettingsOnlyRevokesOwningBackend() async throws {
@@ -312,8 +332,8 @@ final class SettingsTests: XCTestCase {
     func testUnknownSchemaControlPreservesOtherSettings() throws {
         let response = SettingsFixtureData.settings.replacingOccurrences(of: #""control": "number""#, with: #""control": "futureWidget""#)
         let settings = try JSONDecoder().decode(SettingsResponse.self, from: Data(response.utf8))
-        XCTAssertEqual(settings.schema.auth.first { $0.key == "tokenValidityDays" }?.control, .unsupported)
-        XCTAssertEqual(settings.values.auth["tokenValidityDays"], .number(30))
+        XCTAssertEqual(settings.schema.auth.first { $0.key == "sessionMaxDays" }?.control, .unsupported)
+        XCTAssertEqual(settings.values.auth["sessionMaxDays"], .number(30))
         XCTAssertEqual(settings.schema.channels.count, 8)
     }
 

@@ -1,4 +1,3 @@
-#if DEBUG
 import Foundation
 
 struct ConnectionFixture: Sendable {
@@ -211,4 +210,3 @@ struct ConnectionFixtureInternet: Encodable, Sendable {
                                         httpAddress: "192.0.2.1:8080", socks5Address: "[2001:db8::1]:1080"), forKey: .proxy)
     }
 }
-#endif

@@ -21,7 +21,7 @@ func (s *transferRunner) sourceProfileOptions(ctx context.Context, currentSettin
 	switch req.SourceType {
 	case SourceModem:
 		return s.modemProfileOptions(ctx, currentSettings, req)
-	case SourceCCID:
+	case SourceCCID, SourceClientCCID:
 		return s.ccidProfileOptions(ctx, currentSettings, req)
 	default:
 		return nil, ErrSourceUnsupported
@@ -44,7 +44,7 @@ func (s *transferRunner) modemProfileOptions(ctx context.Context, currentSetting
 }
 
 func (s *transferRunner) ccidProfileOptions(ctx context.Context, currentSettings *settings.Settings, req ProfilesRequest) ([]ProfileResponse, error) {
-	profiles, err := sourceCCIDProfiles(ctx, currentSettings, req)
+	profiles, err := s.sourceCCIDProfiles(ctx, currentSettings, req)
 	if err == nil {
 		return esimOptions(profiles, ""), nil
 	}
@@ -73,13 +73,13 @@ func (s *transferRunner) physicalProfileOptions(ctx context.Context, currentSett
 	return []ProfileResponse{option}, nil
 }
 
-func sourceCCIDProfiles(ctx context.Context, currentSettings *settings.Settings, req ProfilesRequest) ([]*sgp22.ProfileInfo, error) {
+func (s *transferRunner) sourceCCIDProfiles(ctx context.Context, currentSettings *settings.Settings, req ProfilesRequest) ([]*sgp22.ProfileInfo, error) {
 	start := startRequest{
-		SourceType: SourceCCID,
+		SourceType: req.SourceType,
 		SourceID:   req.SourceID,
 		SourceIMEI: req.SourceIMEI,
 	}
-	sourceLPA, err := newCCIDLPAClient(ctx, currentSettings, start)
+	sourceLPA, err := s.newCCIDLPAClient(ctx, currentSettings, start)
 	if err != nil {
 		return nil, fmt.Errorf("create source LPA client: %w", err)
 	}

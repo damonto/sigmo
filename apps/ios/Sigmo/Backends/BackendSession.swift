@@ -6,9 +6,19 @@ enum BackendAuthentication: String { case unknown, notRequired, required, authen
 
 @MainActor @Observable
 final class BackendSession: Identifiable {
+    private(set) var savedContacts: [SigmoContact] = []
+    @ObservationIgnored private var contactsRevision = 0
+    @ObservationIgnored private var contactsTask: Task<Void, Error>?
+    @ObservationIgnored private var contactsLoadedAt = Date.distantPast
+    @ObservationIgnored private var linesTask: Task<[CommunicationLine], Error>?
+    @ObservationIgnored private var linesRevision = 0
+    @ObservationIgnored private var cachedLines: [CommunicationLine] = []
+    @ObservationIgnored private var linesLoadedAt = Date.distantPast
+    private(set) var communicationBackendID = ""
     private(set) var configuration: BackendConfiguration
     nonisolated let id: UUID
     private(set) var license: BackendLicense = .unknown
+    var isDemo: Bool { api.isDemo }
     private(set) var authentication: BackendAuthentication = .unknown
     private(set) var information: AppInformation?
     private(set) var licenseDeviceID = ""
@@ -23,6 +33,16 @@ final class BackendSession: Identifiable {
     private(set) var isSendingOTP = false
     private(set) var isVerifyingOTP = false
     private(set) var authFailure: BackendFailure?
+    private(set) var authMethods: AuthMethods?
+    private(set) var isBrowserLogin = false
+    var supportsOTP: Bool { authMethods?.mode == "otp" }
+    var supportsBrowserLogin: Bool { accessChallenge != nil || authMethods?.mode == "oidc" }
+    @ObservationIgnored private var accessChallenge: AccessChallenge?
+    @ObservationIgnored private var otpChallenge: String?
+    @ObservationIgnored private var credential: SessionCredential?
+    @ObservationIgnored private var credentialRefresh: Task<String?, any Error>?
+    @ObservationIgnored private let browser = BrowserAuthentication()
+    @ObservationIgnored private let managedAccess = ManagedAccess()
     private(set) var resendAvailableAt = Date.distantPast
     private(set) var pairing: LicensePairing?
     private(set) var pairingFailure: BackendFailure?
@@ -112,7 +132,25 @@ final class BackendSession: Identifiable {
     private func load(_ current: Int) async {
         var checkingLicense = true
         do {
-            let status = try await api.license()
+            if pendingCredentialRemoval {
+                try credentials.write(id, nil)
+                pendingCredentialRemoval = false
+            }
+            if credential == nil, let saved = try credentials.read(id) {
+                credential = try JSONDecoder().decode(SessionCredential.self, from: Data(saved.utf8))
+            }
+            token = try await freshToken()
+            let methods = try await api.authMethods(token: token)
+            try check(current)
+            authMethods = methods
+            if methods.mode == "none" {
+                try credentials.write(id, nil)
+                credential = nil
+                token = nil
+            }
+            if methods.mode != "cloudflare_access" { accessChallenge = nil }
+            authentication = methods.mode == "none" ? .notRequired : (token == nil ? .required : .authenticated)
+            let status = try await api.license(token: token)
             try check(current)
             checkingLicense = false
             if let status {
@@ -130,31 +168,24 @@ final class BackendSession: Identifiable {
                 }
             }
             // A 404 is only a community server after the build-info contract succeeds.
-            let app = try await api.app()
+            let app = try await api.app(token: token)
             try check(current)
             information = app
             if status == nil { license = .community; licenseDeviceID = "" }
             else { license = .authorized }
             waitingForRestart = false
             do {
-                let features = try await api.capabilities()
+                let features = try await api.capabilities(token: token)
                 try check(current)
                 capabilities = features
+                if !features.contains("contacts") { clearContactCache() }
                 capabilityFailure = nil
             } catch {
                 try check(current)
                 capabilities = nil
                 capabilityFailure = .wrapping(error)
             }
-            let required = try await api.otpRequirement()
-            try check(current)
-            if pendingCredentialRemoval {
-                try credentials.write(id, nil)
-                pendingCredentialRemoval = false
-            }
-            token = required ? try credentials.read(id) : nil
-            authentication = required ? (token == nil ? .required : .authenticated) : .notRequired
-            if required && token == nil {
+            if authentication == .required {
                 clearDevices()
                 failure = nil
                 finishRefresh()
@@ -185,6 +216,19 @@ final class BackendSession: Identifiable {
             }
         } catch {
             guard isCurrent(current) else { return }
+            if let challenge = error as? AccessChallenge {
+                accessChallenge = challenge
+                revokeAccess()
+                authFailure = nil
+                failure = nil
+                finishRefresh()
+                return
+            }
+            if (error as? BackendFailure)?.isLocalAuthenticationFailure == true {
+                revokeAccess()
+                failure = nil
+                return
+            }
             if checkingLicense { license = .unavailable }
             failure = .wrapping(error)
             failures += 1
@@ -199,6 +243,10 @@ final class BackendSession: Identifiable {
 
     func stop() {
         generation += 1
+        browser.cancel()
+        isBrowserLogin = false
+        credentialRefresh?.cancel()
+        credentialRefresh = nil
         refreshTask?.cancel()
         refreshTask = nil
         for task in actionTasks.values { task.cancel() }
@@ -219,6 +267,7 @@ final class BackendSession: Identifiable {
         accessRevision += 1
         cancelCallRequests()
         token = nil
+        credential = nil
         pendingCredentialRemoval = true
         clearDevices()
         authentication = .required
@@ -226,18 +275,113 @@ final class BackendSession: Identifiable {
         pendingCredentialRemoval = false
     }
 
-    func logout() {
+    func logout() async {
+        var saved = credential
+        // Stop operations immediately. An expired access token must be refreshed
+        // before revocation, otherwise its still-valid refresh token would survive logout.
+        stop()
+        cancelCallRequests()
+        authentication = .required
+        clearDevices()
         do {
-            try removeCredentials()
+            if let current = saved, current.access == nil {
+                if let expiry = current.sessionExpiresAt, expiry <= clock.now() { saved = nil }
+                else { _ = try await freshToken(); saved = credential }
+            }
+        } catch {
+            let remoteFailure = BackendFailure.wrapping(error)
+            do { try removeCredentials() } catch { authFailure = .wrapping(error); return }
+            authFailure = remoteFailure
+            return
+        }
+        do { try removeCredentials() }
+        catch { authFailure = .wrapping(error); return }
+        do {
+            if let saved {
+                if saved.access != nil { try await managedAccess.revoke(saved) }
+                else { try await api.revokeSession(token: saved.accessToken) }
+            }
             authFailure = nil
             failure = nil
-        } catch { authFailure = .wrapping(error) }
+        } catch {
+            let remoteFailure = BackendFailure.wrapping(error)
+            authFailure = remoteFailure
+        }
     }
 
     private func revokeAccess() {
-        logout()
-        // Keychain failures must stay visible; no stale token is reused in memory.
+        do { try removeCredentials(); authFailure = nil }
+        catch { authFailure = .wrapping(error) }
         nextRefresh = clock.now().addingTimeInterval(30)
+    }
+
+    private func saveCredential(_ value: SessionCredential) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let data = try encoder.encode(value)
+        try credentials.write(id, String(decoding: data, as: UTF8.self))
+        credential = value
+        token = value.accessToken
+        pendingCredentialRemoval = false
+    }
+
+    private func freshToken() async throws -> String? {
+        if let credentialRefresh { return try await credentialRefresh.value }
+        guard let saved = credential else { return nil }
+        if saved.expiresAt.timeIntervalSince(clock.now()) > 60 { return saved.accessToken }
+        let current = generation
+        let task = Task<String?, any Error> {
+            guard saved.sessionExpiresAt == nil || saved.sessionExpiresAt! > clock.now(),
+                  let refresh = saved.refreshToken else { throw BackendFailure.local("status.loginRequired") }
+            let next: SessionCredential
+            if saved.access != nil { next = try await managedAccess.refresh(saved) }
+            else { next = try await api.refreshSession(refresh).credential() }
+            try check(current)
+            try saveCredential(next)
+            return next.accessToken
+        }
+        credentialRefresh = task
+        defer { if current == generation { credentialRefresh = nil } }
+        do { return try await task.value }
+        catch {
+            // A lost refresh response has an unknown outcome. Never replay a rotating credential.
+            if isCurrent(current) { revokeAccess() }
+            throw error
+        }
+    }
+
+    func loginWithBrowser() async {
+        guard !isBrowserLogin, supportsBrowserLogin else { return }
+        stop()
+        let current = generation
+        isBrowserLogin = true
+        authFailure = nil
+        defer { if current == generation { isBrowserLogin = false } }
+        do {
+            let proof = try LoginProof()
+            let next: SessionCredential
+            if let challenge = accessChallenge {
+                let registration = try await managedAccess.register(challenge, backend: api.address)
+                try check(current)
+                let callback = try await browser.open(managedAccess.authorizationURL(registration, proof: proof))
+                let code = try proof.code(from: callback)
+                next = try await managedAccess.exchange(registration, code: code, proof: proof)
+            } else {
+                let target = try await api.browserLogin(proof)
+                try check(current)
+                let callback = try await browser.open(target)
+                let code = try proof.code(from: callback)
+                next = try await api.completeBrowserLogin(code: code, proof: proof).credential()
+            }
+            try check(current)
+            try saveCredential(next)
+            authentication = .authenticated
+            await refresh(force: true)
+        } catch is CancellationError {
+            // Closing the browser leaves the connection ready for another login.
+        } catch {
+            if isCurrent(current) { authFailure = .wrapping(error) }
+        }
     }
 
     // Cancel only the previous refresh. Unrelated settings operations keep their
@@ -262,7 +406,8 @@ final class BackendSession: Identifiable {
         let current = generation
         let requestID = UUID()
         let api = api
-        let token = token
+        let token = try await freshToken()
+        try check(current)
         let task = Task {
             try Task.checkCancellation()
             return try await operation(api, token)
@@ -282,6 +427,7 @@ final class BackendSession: Identifiable {
     }
 
     private func clearDevices() {
+        clearCommunicationCache()
         modems = []
         unreadCounts = [:]
         unreadRevision = -1
@@ -303,7 +449,13 @@ final class BackendSession: Identifiable {
             let snapshot = try await protectedRequest { api, token in
                 try await api.conversations(modemID: nil, token: token)
             }
-            guard isCurrent(current), request == unreadRequest, snapshot.revision >= unreadRevision else { return }
+            guard isCurrent(current), request == unreadRequest else { return }
+            if communicationBackendID != snapshot.backendId {
+                communicationBackendID = snapshot.backendId
+                clearCommunicationCache()
+                unreadRevision = -1
+            }
+            guard snapshot.revision >= unreadRevision else { return }
             let ids = Set(modems.map(\.id))
             var counts: [String: Int] = [:]
             for conversation in snapshot.items where ids.contains(conversation.modemId) {
@@ -332,7 +484,8 @@ final class BackendSession: Identifiable {
         let revision = accessRevision
         let requestID = UUID()
         let api = api
-        let token = token
+        let token = try await freshToken()
+        guard accessRevision == revision else { throw CancellationError() }
         let task = Task { try await operation(api, token) }
         callCancellations[requestID] = { task.cancel() }
         defer { callCancellations[requestID] = nil }
@@ -354,14 +507,15 @@ final class BackendSession: Identifiable {
     }
 
     func sendOTP() async {
-        guard !Task.isCancelled, !isSendingOTP, clock.now() >= resendAvailableAt, authentication == .required else { return }
+        guard !Task.isCancelled, !isSendingOTP, supportsOTP, clock.now() >= resendAvailableAt, authentication == .required else { return }
         isSendingOTP = true
         authFailure = nil
         await action { current in
             defer { if current == self.generation { self.isSendingOTP = false } }
             do {
-                try await self.api.sendOTP()
+                let challenge = try await self.api.sendOTP()
                 try self.check(current)
+                self.otpChallenge = challenge.id
                 self.resendAvailableAt = self.clock.now().addingTimeInterval(60)
             } catch {
                 guard self.isCurrent(current) else { return }
@@ -373,7 +527,7 @@ final class BackendSession: Identifiable {
     }
 
     func verifyOTP(_ code: String) async {
-        guard !Task.isCancelled, !isVerifyingOTP, code.count == 6, code.utf8.allSatisfy({ (48...57).contains($0) }) else { return }
+        guard !Task.isCancelled, !isVerifyingOTP, let challenge = otpChallenge, supportsOTP, code.count == 6, code.utf8.allSatisfy({ (48...57).contains($0) }) else { return }
         // Cancel earlier reads before a new credential can become authoritative.
         stop()
         isVerifyingOTP = true
@@ -381,11 +535,10 @@ final class BackendSession: Identifiable {
         await action { current in
             defer { if current == self.generation { self.isVerifyingOTP = false } }
             do {
-                let token = try await self.api.verifyOTP(code)
+                let tokens = try await self.api.verifyOTP(code, challenge: challenge)
                 try self.check(current)
-                try self.credentials.write(self.id, token)
-                self.token = token
-                self.pendingCredentialRemoval = false
+                try self.saveCredential(tokens.credential())
+                self.otpChallenge = nil
                 self.authentication = .authenticated
                 await self.refresh(force: true)
             } catch {
@@ -419,7 +572,8 @@ final class BackendSession: Identifiable {
                 }
             }
             do {
-                let device = try await gate.run { try await self.api.modem(id, token: self.token) }
+                let token = try await freshToken()
+                let device = try await gate.run { try await self.api.modem(id, token: token) }
                 try check(current)
                 guard revision == deviceRevision else { return }
                 if let index = modems.firstIndex(where: { $0.id == id }) { modems[index] = device }
@@ -446,7 +600,8 @@ final class BackendSession: Identifiable {
         await action { current in
             defer { if current == self.generation { self.isCreatingPairing = false } }
             do {
-                let result = try await self.api.createPairing()
+                let token = try await self.freshToken()
+                let result = try await self.api.createPairing(token: token)
                 try self.check(current)
                 guard result.expiresAt > self.clock.now() else { throw BackendFailure.local("activation.expired") }
                 self.pairing = result
@@ -486,7 +641,8 @@ final class BackendSession: Identifiable {
             return
         }
         do {
-            let result = try await api.pairing(pairing.id)
+            let token = try await freshToken()
+            let result = try await api.pairing(pairing.id, token: token)
             try check(current)
             self.pairing = result
             pairingFailure = nil
@@ -509,8 +665,9 @@ final class BackendSession: Identifiable {
 
     private func recoverActivation(_ current: Int) async -> Bool {
         do {
-            guard let status = try await api.license(), status.authorized else { return false }
-            let app = try await api.app()
+            let token = try await freshToken()
+            guard let status = try await api.license(token: token), status.authorized else { return false }
+            let app = try await api.app(token: token)
             try check(current)
             information = app
             license = .authorized
@@ -534,5 +691,76 @@ final class BackendSession: Identifiable {
     private func isCurrent(_ value: Int) -> Bool { value == generation && !Task.isCancelled }
     private func check(_ value: Int) throws {
         guard isCurrent(value) else { throw CancellationError() }
+    }
+}
+
+extension BackendSession {
+    func clearCommunicationCache() {
+        clearContactCache()
+        invalidateCommunicationLines()
+    }
+
+    private func clearContactCache() {
+        contactsRevision += 1
+        contactsTask?.cancel()
+        contactsTask = nil
+        contactsLoadedAt = .distantPast
+        savedContacts = []
+    }
+    func invalidateCommunicationLines() {
+        linesRevision += 1
+        linesTask?.cancel()
+        linesTask = nil
+        cachedLines = []
+        linesLoadedAt = .distantPast
+    }
+    func refreshContacts(force: Bool = false) async throws {
+        guard canAccessDevices, capabilities?.contains("contacts") == true else {
+            clearContactCache()
+            return
+        }
+        if !force, let task = contactsTask { return try await task.value }
+        if !force, clock.now().timeIntervalSince(contactsLoadedAt) < 15 { return }
+        contactsTask?.cancel()
+        contactsRevision += 1
+        let request = contactsRevision
+        let revision = accessRevision
+        let task = Task { @MainActor in
+            defer { if request == contactsRevision { contactsTask = nil } }
+            let result = try await protectedRequest { api, token in try await api.contacts(token: token) }
+            guard !Task.isCancelled, revision == accessRevision, request == contactsRevision,
+                  canAccessDevices, capabilities?.contains("contacts") == true else { throw CancellationError() }
+            savedContacts = result
+            contactsLoadedAt = clock.now()
+        }
+        contactsTask = task
+        try await task.value
+    }
+    func communicationLines() async throws -> [CommunicationLine] {
+        guard canAccessDevices else {
+            invalidateCommunicationLines()
+            throw CancellationError()
+        }
+        if let task = linesTask { return try await task.value }
+        if clock.now().timeIntervalSince(linesLoadedAt) < 15 { return cachedLines }
+        let revision = accessRevision, request = linesRevision
+        let task = Task { @MainActor in
+            defer { if request == linesRevision { linesTask = nil } }
+            let result = try await protectedRequest { api, token in try await api.communicationLines(token: token, cached: true) }
+            guard !Task.isCancelled, revision == accessRevision, request == linesRevision, canAccessDevices else { throw CancellationError() }
+            cachedLines = result
+            linesLoadedAt = clock.now()
+            return result
+        }
+        linesTask = task
+        return try await task.value
+    }
+    func contacts(matching number: String) -> [SigmoContact] {
+        let key = PhoneNumberDisplay.submission(number, regionCode: nil)
+        return savedContacts.filter { $0.numbers.contains { $0.key == key || $0.number == number } }
+    }
+    func contact(for number: String) -> SigmoContact? {
+        let matches = contacts(matching: number)
+        return matches.count == 1 ? matches[0] : nil
     }
 }

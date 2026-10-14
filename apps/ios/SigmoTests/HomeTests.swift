@@ -159,7 +159,7 @@ final class HomeTests: XCTestCase {
         await two.refresh(force: true)
         XCTAssertEqual(one.unreadCounts["device-1"], 2)
         XCTAssertEqual(two.unreadCounts["device-1"], 8)
-        one.logout()
+        await one.logout()
         XCTAssertTrue(one.unreadCounts.isEmpty)
         XCTAssertEqual(two.unreadCounts["device-1"], 8)
     }
@@ -193,7 +193,7 @@ final class HomeTests: XCTestCase {
             await stub.holdNextConversationRequest()
             let pending = Task { await session.refreshUnreadCounts() }
             await stub.waitForHeldRequest()
-            if logout { session.logout() } else { session.stop() }
+            if logout { await session.logout() } else { session.stop() }
             await stub.release()
             await pending.value
             XCTAssertEqual(session.unreadCounts["device-1"], logout ? nil : 2)

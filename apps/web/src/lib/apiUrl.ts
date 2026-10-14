@@ -11,16 +11,12 @@ export const resolveAPIURL = (rawURL: string) => {
   return new URL(rawURL, base).toString()
 }
 
-export const resolveAPIWebSocketURL = (rawURL: string, token?: string | null) => {
+export const resolveAPIWebSocketURL = (rawURL: string) => {
   const apiURL = new URL(resolveAPIURL(rawURL))
   if (apiURL.protocol === 'https:') {
     apiURL.protocol = 'wss:'
   } else if (apiURL.protocol === 'http:') {
     apiURL.protocol = 'ws:'
-  }
-  const trimmedToken = token?.trim()
-  if (trimmedToken) {
-    apiURL.searchParams.set('token', trimmedToken)
   }
   return apiURL.toString()
 }

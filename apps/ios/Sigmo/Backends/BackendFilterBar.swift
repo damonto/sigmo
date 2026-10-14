@@ -4,12 +4,18 @@ import UIKit
 struct BackendFilterBar: View {
     @Environment(BackendStore.self) private var store
     @Binding var selection: UUID?
+    var includesAll = true
     @ScaledMetric(relativeTo: .subheadline) private var height: CGFloat = 32
 
     var body: some View {
-        BackendFilterControl(items: [.init(id: nil, title: String(localized: "home.all"))]
-            + store.onlineSessions.map { .init(id: $0.id, title: $0.configuration.name) }, selection: $selection)
+        BackendFilterControl(items: items, selection: $selection)
             .frame(height: height)
+    }
+
+    private var items: [BackendFilterItem] {
+        let sessions = includesAll ? store.onlineSessions : store.orderedSessions()
+        let backends = sessions.map { BackendFilterItem(id: $0.id, title: $0.configuration.name) }
+        return includesAll ? [.init(id: nil, title: String(localized: "home.all"))] + backends : backends
     }
 }
 
@@ -128,5 +134,43 @@ private final class BackendFilterSegments: UISegmentedControl {
             return scroll.contentSize.width > scroll.bounds.width
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+}
+
+// A connection stays the filtering unit; its active SIM labels provide context.
+struct CommunicationBackendFilter: View {
+    @Environment(BackendStore.self) private var store
+    @Binding var selection: UUID?
+    private var selectedName: String {
+        store.orderedSessions().first { $0.id == selection }?.configuration.name ?? detailText("home.all")
+    }
+
+    var body: some View {
+        Menu {
+            Button { selection = nil } label: {
+                Label {
+                    Text("home.all")
+                } icon: {
+                    if selection == nil { Image(systemName: "checkmark") }
+                }
+            }
+            .accessibilityIdentifier("communication-backend-all")
+            .accessibilityAddTraits(selection == nil ? .isSelected : [])
+            ForEach(store.orderedSessions()) { session in
+                Button { selection = session.id } label: {
+                    Label {
+                        Text(session.configuration.name)
+                        Text(session.modems.map(\.communicationLabel).joined(separator: " · "))
+                    } icon: {
+                        if selection == session.id { Image(systemName: "checkmark") }
+                    }
+                }
+                .accessibilityIdentifier("communication-backend-\(session.configuration.name)")
+                .accessibilityAddTraits(selection == session.id ? .isSelected : [])
+            }
+        } label: {
+            Label("\(detailText("communication.chooseBackend")): \(selectedName)", systemImage: "line.3.horizontal.decrease")
+        }
+        .accessibilityIdentifier("communication-backend-filter")
     }
 }

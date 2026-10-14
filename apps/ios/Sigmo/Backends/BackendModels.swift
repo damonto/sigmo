@@ -107,7 +107,7 @@ struct BackendFailure: Error, LocalizedError, Equatable, Sendable {
 
     var errorDescription: String? { message }
     var isLocalAuthenticationFailure: Bool {
-        source == .backend && status == 401 && code == "invalid_token" && problemType == HTTPProblem.typePrefix + "invalid_token"
+        source == .backend && status == 401 && code == "invalid_session" && problemType == HTTPProblem.typePrefix + "invalid_session"
     }
 
     static func local(_ key: String) -> BackendFailure {
@@ -172,10 +172,6 @@ struct LicensePairing: Codable, Sendable {
 struct CapabilityResponse: Decodable, Sendable {
     let features: [String]?
 }
-
-struct OTPRequirement: Decodable, Sendable { let otpRequired: Bool }
-struct OTPToken: Decodable, Sendable { let token: String }
-struct OTPVerification: Encodable, Sendable { let code: String }
 
 struct BackendClock: Sendable {
     var now: @Sendable () -> Date = { Date() }

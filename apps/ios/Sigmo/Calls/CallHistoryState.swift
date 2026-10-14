@@ -27,14 +27,13 @@ final class CallHistoryState {
 
     func canMessage(_ record: CallRecord) -> Bool {
         guard session.canAccessDevices, let line, !line.profileID.isEmpty else { return false }
-        return record.profileId == line.profileID
-            && !record.number.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return !record.number.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     func messageDraft(for record: CallRecord) -> MessagesState? {
         guard canMessage(record) else { return nil }
-        // Preserve any unsent draft in the Messages tab and keep this reply on its original SIM.
-        let draft = MessagesState(session: session, modemID: modemID, expectedProfileID: record.profileId)
+        // Preserve the Messages tab draft and pin the SIM chosen for this action.
+        let draft = MessagesState(session: session, modemID: modemID, expectedProfileID: line?.profileID)
         draft.newRecipient = record.number
         return draft
     }
@@ -46,7 +45,11 @@ final class CallHistoryState {
         loading = true
         defer { if current == revision { loading = false } }
         do {
-            let records = try await session.protectedRequest { api, token in try await api.calls(modemID: modemID, search: query, token: token) }
+            let aggregate = session.capabilities?.contains("callHistory") == true
+            let records = try await session.protectedRequest { api, token in
+                if aggregate { return try await api.callHistory(search: query, cursor: "", modemID: modemID, token: token).items }
+                return try await api.calls(modemID: modemID, search: query, token: token)
+            }
             guard current == revision, self.line?.matches(line) == true, !Task.isCancelled else { return }
             items = records.sorted { $0.date > $1.date }
             loaded = true
@@ -55,13 +58,17 @@ final class CallHistoryState {
     }
 
     func delete(_ record: CallRecord) async -> Bool {
-        guard record.terminal, let line, record.profileId == nil || record.profileId == line.profileID, !deleting else { return false }
+        guard record.terminal, let line, !deleting else { return false }
         revision += 1
         let current = revision, modemID = modemID
         deleting = true
         defer { if current == revision { deleting = false } }
         do {
-            try await session.protectedRequest { api, token in try await api.deleteCall(modemID: modemID, id: record.id, token: token) }
+            let aggregate = session.capabilities?.contains("callHistory") == true
+            try await session.protectedRequest { api, token in
+                if aggregate { try await api.deleteCallHistory(record.id, token: token) }
+                else { try await api.deleteCall(modemID: modemID, id: record.id, token: token) }
+            }
             guard current == revision, self.line?.matches(line) == true, !Task.isCancelled else { return false }
             items.removeAll { $0.id == record.id }
             failure = nil

@@ -48,7 +48,7 @@ const resendRemaining = computed(() => {
 })
 
 const canResend = computed(
-  () => authStore.otpRequired && resendRemaining.value === 0 && !authStore.isSending,
+  () => authStore.hasOTP && resendRemaining.value === 0 && !authStore.isSending,
 )
 const resendLabel = computed(() =>
   resendRemaining.value > 0
@@ -62,12 +62,10 @@ const handleResend = async () => {
   ensureTicker()
 }
 
+const reloadLogin = () => window.location.reload()
+
 onMounted(async () => {
-  if (!authStore.otpRequired) {
-    await router.replace({ name: 'home' })
-    return
-  }
-  await authStore.sendCode()
+  if (authStore.hasOTP && !authStore.hasOIDC) await authStore.sendCode()
   ensureTicker()
 })
 
@@ -117,14 +115,45 @@ watch(
           </p>
         </header>
 
-        <div class="space-y-6">
+        <p
+          v-if="authStore.failed"
+          role="alert"
+          class="text-sm text-destructive"
+        >
+          {{ t('auth.loginFailed') }}
+        </p>
+        <Button
+          v-if="!authStore.configuration"
+          class="w-full"
+          @click="reloadLogin"
+          >{{ t('auth.retry') }}</Button
+        >
+        <Button
+          v-if="authStore.hasOIDC"
+          class="w-full"
+          :disabled="authStore.isOpeningBrowser"
+          @click="authStore.browserLogin"
+          >{{ t('auth.browserLogin') }}</Button
+        >
+        <div
+          v-if="authStore.hasOTP"
+          class="space-y-6"
+        >
           <p class="text-center text-sm text-muted-foreground">
             {{ t('auth.prompt') }}
           </p>
           <div class="flex justify-center">
-            <InputOTP v-model="pin" :maxlength="CODE_LENGTH" :disabled="authStore.isVerifying">
+            <InputOTP
+              v-model="pin"
+              :maxlength="CODE_LENGTH"
+              :disabled="authStore.isVerifying"
+            >
               <InputOTPGroup>
-                <InputOTPSlot v-for="index in CODE_LENGTH" :key="index" :index="index - 1" />
+                <InputOTPSlot
+                  v-for="index in CODE_LENGTH"
+                  :key="index"
+                  :index="index - 1"
+                />
               </InputOTPGroup>
             </InputOTP>
           </div>

@@ -30,6 +30,7 @@ struct ESIMProfileActionsView: View {
 
     @State private var sheet: Sheet?
     @State private var confirmation: ESIMProfileOperation.Kind?
+    @State private var showAssignment = false
     @State private var operation: ESIMProfileOperation?
     @State private var presentedFailure: BackendFailure?
     @State private var sim: SIMApplicationState
@@ -94,6 +95,7 @@ struct ESIMProfileActionsView: View {
 
     var body: some View {
         presentedForm
+            .sheet(isPresented: $showAssignment, onDismiss: { dismiss() }) { HistoryAssignmentView(session: state.session, sourceID: profileID) }
             .task(id: operation?.id) { await performOperation() }
             .foregroundTask(id: observationIdentity) {
                 await reload()
@@ -223,7 +225,9 @@ struct ESIMProfileActionsView: View {
         guard self.operation?.id == operation.id, !Task.isCancelled else { return }
         self.operation = nil
         presentedFailure = state.failure
-        if deleted { dismiss() }
+        if deleted {
+            if state.session.capabilities?.contains("historyAssignments") == true { showAssignment = true } else { dismiss() }
+        }
     }
 
     private func reload() async {

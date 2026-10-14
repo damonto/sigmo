@@ -1,9 +1,5 @@
-import {
-  TRANSFER_CLIENT_ERROR,
-  TRANSFER_MESSAGE,
-} from '@/constants/esimTransfer'
+import { TRANSFER_CLIENT_ERROR, TRANSFER_MESSAGE } from '@/constants/esimTransfer'
 import { resolveAPIWebSocketURL } from '@/lib/apiUrl'
-import { getStoredToken } from '@/lib/authStorage'
 import type { EsimDownloadPreview } from '@/types/esim'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 
@@ -60,7 +56,7 @@ export const useEsimTransferSession = (handlers: Handlers) => {
   }
 
   const buildWsUrl = (id: string) => {
-    return resolveAPIWebSocketURL(`modems/${id}/esim-transfers/sessions`, getStoredToken())
+    return resolveAPIWebSocketURL(`modems/${id}/esim-transfers/sessions`)
   }
 
   const start = (modemId: string, message: TransferStartMessage) => {

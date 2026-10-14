@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { reduceEsimTransferStatus, useEsimTransfer } from '@/composables/useEsimTransfer'
+import type { EsimTransferProfile, EsimTransferSource } from '@/types/esim'
 import {
   TRANSFER_CLIENT_ERROR,
   TRANSFER_MESSAGE,
@@ -52,6 +53,73 @@ describe('useEsimTransfer', () => {
     vi.clearAllMocks()
     FakeWebSocket.instances = []
     vi.stubGlobal('WebSocket', FakeWebSocket)
+  })
+
+  const source: EsimTransferSource = {
+    type: 'modem',
+    id: 'source-1',
+    name: 'Source',
+    requiresSourceImei: false,
+  }
+  const inactive: EsimTransferProfile = {
+    id: 'inactive',
+    type: 'esim',
+    name: 'Inactive line',
+    iccid: '8901',
+    enabled: false,
+    supported: true,
+  }
+  const physical: EsimTransferProfile = {
+    ...inactive,
+    id: 'physical',
+    type: 'physical',
+    enabled: true,
+  }
+  const unsupported: EsimTransferProfile = { ...inactive, id: 'unsupported', supported: false }
+
+  it.each([
+    {
+      name: 'mixed support',
+      profiles: [unsupported, inactive, physical],
+      ids: ['inactive', 'physical'],
+    },
+    { name: 'all supported', profiles: [physical, inactive], ids: ['physical', 'inactive'] },
+    { name: 'all unsupported', profiles: [unsupported], ids: [] },
+    { name: 'empty response', profiles: [], ids: [] },
+  ])('loads only transferable profiles for $name', async ({ profiles, ids }) => {
+    api.getTransferProfiles.mockResolvedValueOnce({ data: ref(profiles) })
+    const transfer = useEsimTransfer(ref('target'))
+    transfer.selectSource(source)
+
+    await transfer.loadProfiles()
+
+    expect(transfer.profiles.value.map((profile) => profile.id)).toEqual(ids)
+    expect(transfer.state.value).toBe(TRANSFER_STATE.ready)
+    expect(transfer.selectedProfile.value).toBeNull()
+    expect(transfer.canStartTransfer.value).toBe(false)
+  })
+
+  it('clears a previous selection when reloading or changing sources', async () => {
+    api.getTransferProfiles
+      .mockResolvedValueOnce({ data: ref([inactive]) })
+      .mockResolvedValueOnce({ data: ref([unsupported]) })
+    const transfer = useEsimTransfer(ref('target'))
+    transfer.selectSource(source)
+    await transfer.loadProfiles()
+    transfer.selectedProfile.value = inactive
+    expect(transfer.canStartTransfer.value).toBe(true)
+
+    const reload = transfer.loadProfiles()
+    expect(transfer.selectedProfile.value).toBeNull()
+    expect(transfer.canStartTransfer.value).toBe(false)
+    await reload
+    expect(transfer.profiles.value).toEqual([])
+    expect(transfer.selectedProfile.value).toBeNull()
+
+    transfer.selectedProfile.value = inactive
+    transfer.selectSource({ ...source, id: 'source-2' })
+    expect(transfer.selectedProfile.value).toBeNull()
+    expect(transfer.canStartTransfer.value).toBe(false)
   })
 
   it('records the preview profile and completes the transfer progress', () => {

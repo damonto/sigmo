@@ -2,13 +2,14 @@ package storage
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/damonto/sigmo/internal/pkg/storage/query"
 )
 
 // Conversation identifies a correspondent on a SIM, independently of its activation.
@@ -63,141 +64,14 @@ func ConversationID(profileID, participant string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-func (s *Store) migrateConversations(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin conversation migration: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }() // A committed transaction has nothing to roll back.
-	if err := migrateSIMProfiles(ctx, tx); err != nil {
-		return err
-	}
-	statements := []string{
-		`CREATE TABLE IF NOT EXISTS message_state (
-			id INTEGER PRIMARY KEY CHECK(id = 1),
-			backend_id TEXT NOT NULL,
-			revision INTEGER NOT NULL DEFAULT 0
-		)`,
-		`CREATE TABLE IF NOT EXISTS conversations (
-			id TEXT PRIMARY KEY,
-			profile_id TEXT NOT NULL,
-			participant TEXT NOT NULL,
-			read_through_id INTEGER NOT NULL DEFAULT 0,
-			marked_unread INTEGER NOT NULL DEFAULT 0,
-			UNIQUE(profile_id, participant)
-		)`,
-		`CREATE TABLE IF NOT EXISTS deleted_messages (fingerprint TEXT PRIMARY KEY)`,
-	}
-	for _, statement := range statements {
-		if _, err := tx.ExecContext(ctx, statement); err != nil {
-			return fmt.Errorf("create conversation schema: %w", err)
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO message_state (id, backend_id) VALUES (1, ?)`, rand.Text()); err != nil {
-		return fmt.Errorf("create backend identity: %w", err)
-	}
-	var migrated bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('messages') WHERE name = 'conversation_id')`).Scan(&migrated); err != nil {
-		return fmt.Errorf("inspect message schema: %w", err)
-	}
-	if !migrated {
-		for _, statement := range []string{
-			`ALTER TABLE messages ADD COLUMN conversation_id TEXT NOT NULL DEFAULT ''`,
-			`ALTER TABLE messages ADD COLUMN modem_id TEXT NOT NULL DEFAULT ''`,
-		} {
-			if _, err := tx.ExecContext(ctx, statement); err != nil {
-				return fmt.Errorf("extend message schema: %w", err)
-			}
-		}
-		history, err := readHistoricalConversations(ctx, tx)
-		if err != nil {
-			return err
-		}
-		for _, c := range history {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO conversations (id, profile_id, participant, read_through_id) VALUES (?, ?, ?, ?)`, c.ID, c.ProfileID, c.Participant, c.ReadThroughMessageID); err != nil {
-				return fmt.Errorf("backfill conversation: %w", err)
-			}
-			if _, err := tx.ExecContext(ctx, `
-				UPDATE messages
-				SET conversation_id = ?, modem_id = COALESCE((
-					SELECT CASE WHEN COUNT(DISTINCT modem_id) = 1 THEN MAX(modem_id) ELSE '' END
-					FROM modem_message_refs WHERE message_id = messages.id
-				), '')
-				WHERE profile_id = ? AND CASE WHEN incoming = 1 THEN sender ELSE recipient END = ?
-			`, c.ID, c.ProfileID, c.Participant); err != nil {
-				return fmt.Errorf("backfill message identity: %w", err)
-			}
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO sim_profiles (profile_id, modem_id)
-			SELECT profile_id, CASE WHEN COUNT(DISTINCT NULLIF(modem_id, '')) = 1 THEN MAX(modem_id) ELSE '' END
-			FROM messages GROUP BY profile_id
-		`); err != nil {
-			return fmt.Errorf("backfill SIM profiles: %w", err)
-		}
-		if err := backfillSIMProfileNumbers(ctx, tx); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sim_profiles (profile_id, modem_id, label)
-		SELECT profile_id, modem_id, profile_name FROM reminders WHERE modem_id <> ''
-		ON CONFLICT(profile_id) DO UPDATE SET modem_id = excluded.modem_id, label = excluded.label WHERE sim_profiles.modem_id = ''`); err != nil {
-		return fmt.Errorf("backfill reminder line ownership: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id)`); err != nil {
-		return fmt.Errorf("index conversations: %w", err)
-	}
-	if err := migrateNativePush(ctx, tx); err != nil {
-		return err
-	}
-	if err := migrateNativeCalls(ctx, tx); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit conversation migration: %w", err)
-	}
-	return nil
-}
-
-// readHistoricalConversations closes the cursor before migration writes reuse
-// the transaction's connection. Existing messages establish the read watermark.
-func readHistoricalConversations(ctx context.Context, tx *sql.Tx) ([]Conversation, error) {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT profile_id, CASE WHEN incoming = 1 THEN sender ELSE recipient END, MAX(id)
-		FROM messages
-		GROUP BY profile_id, CASE WHEN incoming = 1 THEN sender ELSE recipient END
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("read historical conversations: %w", err)
-	}
-	defer func() { _ = rows.Close() }() // Rows.Err reports iteration errors; preserve earlier scan errors.
-	var history []Conversation
-	for rows.Next() {
-		var conversation Conversation
-		if err := rows.Scan(&conversation.ProfileID, &conversation.Participant, &conversation.ReadThroughMessageID); err != nil {
-			return nil, fmt.Errorf("scan historical conversation: %w", err)
-		}
-		conversation.ID = ConversationID(conversation.ProfileID, conversation.Participant)
-		history = append(history, conversation)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read historical conversations: %w", err)
-	}
-	return history, nil
-}
-
-const unreadExpression = `MAX(c.marked_unread, (SELECT COUNT(*) FROM messages unread WHERE unread.conversation_id = c.id AND unread.incoming = 1 AND unread.id > c.read_through_id))`
+const unreadExpression = `MAX(c.marked_unread, (SELECT COUNT(*) FROM messages unread WHERE unread.conversation_id = c.id AND unread.incoming = 1 AND unread.is_read = 0))`
 
 func readMessageState(ctx context.Context, tx *sql.Tx) (MessageState, error) {
-	var state MessageState
-	err := tx.QueryRowContext(ctx, `
-		SELECT backend_id, revision, COALESCE((SELECT SUM(`+unreadExpression+`) FROM conversations c), 0)
-		FROM message_state WHERE id = 1
-	`).Scan(&state.BackendID, &state.Revision, &state.UnreadCount)
+	row, err := query.New(tx).ReadMessageState(ctx)
 	if err != nil {
-		return state, fmt.Errorf("read message state: %w", err)
+		return MessageState{}, fmt.Errorf("read message state: %w", err)
 	}
-	return state, nil
+	return MessageState{BackendID: row.BackendID, Revision: row.Revision, UnreadCount: int(row.UnreadCount)}, nil
 }
 
 // MessagesState returns authoritative counts, including inactive SIMs.
@@ -294,25 +168,19 @@ func (s *Store) Conversations(ctx context.Context, filter ConversationFilter) (C
 
 // Conversation finds a thread without consulting modem hardware.
 func (s *Store) Conversation(ctx context.Context, id string) (Conversation, error) {
-	var c Conversation
-	err := s.db.QueryRowContext(ctx, `
-		SELECT c.id, c.profile_id, c.participant,
-			COALESCE(l.modem_id, ''), COALESCE(l.label, ''), COALESCE(l.number, ''),
-			c.read_through_id, c.marked_unread, `+unreadExpression+`
-		FROM conversations c
-		LEFT JOIN sim_profiles l ON l.profile_id = c.profile_id
-		WHERE c.id = ?
-	`, id).Scan(
-		&c.ID, &c.ProfileID, &c.Participant, &c.ModemID, &c.LineLabel, &c.LineNumber,
-		&c.ReadThroughMessageID, &c.MarkedUnread, &c.UnreadCount,
-	)
+	row, err := query.New(s.db).ReadConversation(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return c, ErrNotFound
+		return Conversation{}, ErrNotFound
 	}
 	if err != nil {
-		return c, fmt.Errorf("read conversation: %w", err)
+		return Conversation{}, fmt.Errorf("read conversation: %w", err)
 	}
-	return c, nil
+	return Conversation{
+		ID: row.ID, ProfileID: row.ProfileID, Participant: row.Participant,
+		ModemID: row.ModemID, LineLabel: row.LineLabel, LineNumber: row.LineNumber,
+		ReadThroughMessageID: row.ReadThroughID, MarkedUnread: row.MarkedUnread != 0,
+		UnreadCount: int(row.UnreadCount),
+	}, nil
 }
 
 // ConversationMessages also works for an inactive or removed SIM.
@@ -341,19 +209,19 @@ func (s *Store) UpdateConversationRead(ctx context.Context, update ReadUpdate) e
 		return fmt.Errorf("begin read acknowledgment: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }() // Rollback after commit is a no-op.
-	var previous int64
-	var marked bool
-	err = tx.QueryRowContext(ctx, `SELECT read_through_id, marked_unread FROM conversations WHERE id = ?`, update.ConversationID).Scan(&previous, &marked)
+	queries := query.New(tx)
+	state, err := queries.ReadConversationAcknowledgment(ctx, update.ConversationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("read acknowledgment state: %w", err)
 	}
+	previous, marked := state.ReadThroughID, state.MarkedUnread != 0
 	next, nextMarked := previous, marked
 	if update.ReadThroughMessageID != nil {
-		var valid bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messages WHERE conversation_id = ? AND id = ?)`, update.ConversationID, *update.ReadThroughMessageID).Scan(&valid); err != nil {
+		valid, err := queries.ValidConversationWatermark(ctx, query.ValidConversationWatermarkParams{ConversationID: update.ConversationID, ID: *update.ReadThroughMessageID})
+		if err != nil {
 			return fmt.Errorf("validate read watermark: %w", err)
 		}
 		if !valid {
@@ -364,10 +232,21 @@ func (s *Store) UpdateConversationRead(ctx context.Context, update ReadUpdate) e
 	if update.MarkedUnread != nil {
 		nextMarked = *update.MarkedUnread
 	}
-	if next == previous && nextMarked == marked {
+	if update.ReadThroughMessageID != nil {
+		err := queries.AcknowledgeConversationMessages(ctx, query.AcknowledgeConversationMessagesParams{
+			ConversationID: update.ConversationID, ReadThroughID: *update.ReadThroughMessageID,
+		})
+		if err != nil {
+			return fmt.Errorf("acknowledge message reads: %w", err)
+		}
+	}
+	if next == previous && nextMarked == marked && update.ReadThroughMessageID == nil {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE conversations SET read_through_id = ?, marked_unread = ? WHERE id = ?`, next, nextMarked, update.ConversationID); err != nil {
+	err = queries.AcknowledgeConversation(ctx, query.AcknowledgeConversationParams{
+		ID: update.ConversationID, ReadThroughID: next, MarkedUnread: int64(boolInt(nextMarked)),
+	})
+	if err != nil {
 		return fmt.Errorf("acknowledge conversation: %w", err)
 	}
 	if err := advanceMessageState(ctx, tx); err != nil {

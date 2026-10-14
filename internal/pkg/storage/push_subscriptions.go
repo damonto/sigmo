@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/damonto/sigmo/internal/pkg/storage/query"
 )
 
+// PushSubscription retains the browser endpoint and keys needed to deliver notifications.
 type PushSubscription struct {
 	ID        string    `json:"id"`
 	Endpoint  string    `json:"endpoint"`
@@ -21,80 +24,64 @@ type PushSubscription struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// UpsertPushSubscription preserves the identity of an already registered endpoint.
 func (s *Store) UpsertPushSubscription(ctx context.Context, subscription PushSubscription) (PushSubscription, error) {
 	now := nowText()
-	row := s.db.QueryRowContext(ctx, `
-		INSERT INTO push_subscriptions (
-			id, endpoint, p256dh, auth, label, user_agent, platform, created_at, updated_at
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(endpoint) DO UPDATE SET
-			p256dh = excluded.p256dh,
-			auth = excluded.auth,
-			label = excluded.label,
-			user_agent = excluded.user_agent,
-			platform = excluded.platform,
-			updated_at = excluded.updated_at
-		RETURNING id, endpoint, p256dh, auth, label, user_agent, platform, created_at, updated_at
-	`, subscription.ID, subscription.Endpoint, subscription.P256DH, subscription.Auth, subscription.Label,
-		subscription.UserAgent, subscription.Platform, now, now)
-	stored, err := scanPushSubscription(row)
+	row, err := query.New(s.db).UpsertPushSubscription(ctx, query.UpsertPushSubscriptionParams{
+		ID:        subscription.ID,
+		Endpoint:  subscription.Endpoint,
+		P256DH:    subscription.P256DH,
+		Auth:      subscription.Auth,
+		Label:     subscription.Label,
+		UserAgent: subscription.UserAgent,
+		Platform:  subscription.Platform,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
 	if err != nil {
 		return PushSubscription{}, fmt.Errorf("save push subscription: %w", err)
 	}
-	return stored, nil
+	return pushSubscriptionFromRow(row)
 }
 
+// ListPushSubscriptions returns subscriptions ordered by their display labels.
 func (s *Store) ListPushSubscriptions(ctx context.Context) ([]PushSubscription, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, endpoint, p256dh, auth, label, user_agent, platform, created_at, updated_at
-		FROM push_subscriptions
-		ORDER BY label COLLATE NOCASE, created_at
-	`)
+	rows, err := query.New(s.db).ListPushSubscriptions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list push subscriptions: %w", err)
 	}
-	defer rows.Close()
-
-	subscriptions := []PushSubscription{}
-	for rows.Next() {
-		subscription, err := scanPushSubscription(rows)
+	subscriptions := make([]PushSubscription, 0, len(rows))
+	for _, row := range rows {
+		subscription, err := pushSubscriptionFromRow(row)
 		if err != nil {
 			return nil, err
 		}
 		subscriptions = append(subscriptions, subscription)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list push subscriptions: %w", err)
-	}
 	return subscriptions, nil
 }
 
+// RenamePushSubscription returns ErrNotFound when the subscription no longer exists.
 func (s *Store) RenamePushSubscription(ctx context.Context, id string, label string) (PushSubscription, error) {
-	row := s.db.QueryRowContext(ctx, `
-		UPDATE push_subscriptions
-		SET label = ?, updated_at = ?
-		WHERE id = ?
-		RETURNING id, endpoint, p256dh, auth, label, user_agent, platform, created_at, updated_at
-	`, strings.TrimSpace(label), nowText(), strings.TrimSpace(id))
-	stored, err := scanPushSubscription(row)
+	row, err := query.New(s.db).RenamePushSubscription(ctx, query.RenamePushSubscriptionParams{
+		ID:        strings.TrimSpace(id),
+		Label:     strings.TrimSpace(label),
+		UpdatedAt: nowText(),
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return PushSubscription{}, ErrNotFound
 	}
 	if err != nil {
 		return PushSubscription{}, fmt.Errorf("rename push subscription: %w", err)
 	}
-	return stored, nil
+	return pushSubscriptionFromRow(row)
 }
 
+// DeletePushSubscription returns ErrNotFound when the subscription no longer exists.
 func (s *Store) DeletePushSubscription(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM push_subscriptions WHERE id = ?`, strings.TrimSpace(id))
+	affected, err := query.New(s.db).DeletePushSubscription(ctx, strings.TrimSpace(id))
 	if err != nil {
 		return fmt.Errorf("delete push subscription: %w", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("read deleted push subscription count: %w", err)
 	}
 	if affected == 0 {
 		return ErrNotFound
@@ -102,34 +89,24 @@ func (s *Store) DeletePushSubscription(ctx context.Context, id string) error {
 	return nil
 }
 
-type pushSubscriptionScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanPushSubscription(row pushSubscriptionScanner) (PushSubscription, error) {
-	var subscription PushSubscription
-	var createdAt, updatedAt string
-	if err := row.Scan(
-		&subscription.ID,
-		&subscription.Endpoint,
-		&subscription.P256DH,
-		&subscription.Auth,
-		&subscription.Label,
-		&subscription.UserAgent,
-		&subscription.Platform,
-		&createdAt,
-		&updatedAt,
-	); err != nil {
-		return PushSubscription{}, err
-	}
-	var err error
-	subscription.CreatedAt, err = parseTime(createdAt)
+func pushSubscriptionFromRow(row query.PushSubscription) (PushSubscription, error) {
+	createdAt, err := parseTime(row.CreatedAt)
 	if err != nil {
 		return PushSubscription{}, fmt.Errorf("parse push subscription created time: %w", err)
 	}
-	subscription.UpdatedAt, err = parseTime(updatedAt)
+	updatedAt, err := parseTime(row.UpdatedAt)
 	if err != nil {
 		return PushSubscription{}, fmt.Errorf("parse push subscription updated time: %w", err)
 	}
-	return subscription, nil
+	return PushSubscription{
+		ID:        row.ID,
+		Endpoint:  row.Endpoint,
+		P256DH:    row.P256DH,
+		Auth:      row.Auth,
+		Label:     row.Label,
+		UserAgent: row.UserAgent,
+		Platform:  row.Platform,
+		CreatedAt: createdAt,
+		UpdatedAt: updatedAt,
+	}, nil
 }

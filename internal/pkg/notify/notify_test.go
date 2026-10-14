@@ -165,14 +165,12 @@ func TestNotifierSend(t *testing.T) {
 	})
 }
 
-func TestNewSkipsDisabledChannels(t *testing.T) {
+func TestNewSkipsUnselectedChannels(t *testing.T) {
 	t.Parallel()
 
-	enabled := false
 	notifier, err := New(&settings.Settings{
 		Channels: map[string]settings.Channel{
 			"telegram": {
-				Enabled:  &enabled,
 				BotToken: "draft-token",
 			},
 		},

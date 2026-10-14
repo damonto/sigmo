@@ -132,6 +132,7 @@ func TestForwardCallNotifiesIncomingRingingOnce(t *testing.T) {
 	defer db.Close()
 
 	current := settings.Default()
+	current.Notifications.Channels = []string{"http"}
 	current.Channels = map[string]settings.Channel{
 		"http": {Endpoint: server.URL},
 	}
@@ -230,6 +231,7 @@ func TestForwardCallIncludesModemNumber(t *testing.T) {
 			defer db.Close()
 
 			current := settings.Default()
+			current.Notifications.Channels = []string{"http"}
 			current.Channels = map[string]settings.Channel{"http": {Endpoint: server.URL}}
 			relay, err := New(settings.NewMemoryStore(current), tt.registry, db, nil)
 			if err != nil {
@@ -285,6 +287,7 @@ func TestForwardCallKeepsDedupeWhenWebPushFails(t *testing.T) {
 		t.Fatalf("webpush.New() error = %v", err)
 	}
 	current := settings.Default()
+	current.Notifications.Channels = []string{"http"}
 	current.Channels = map[string]settings.Channel{"http": {Endpoint: server.URL}}
 	relay, err := New(settings.NewMemoryStore(current), nil, db, pushClient)
 	if err != nil {
@@ -555,6 +558,7 @@ func TestForwardStoredModemSMSIsolatesNotificationFailures(t *testing.T) {
 			t.Cleanup(server.Close)
 			relay, store, notifications := newSMSRelay(t)
 			current := relay.store.Snapshot()
+			current.Notifications.Channels = append(current.Notifications.Channels, "bark")
 			current.Channels["bark"] = settings.Channel{
 				Endpoint: server.URL, Recipients: settings.Recipients{"missing-device"},
 			}
@@ -785,6 +789,7 @@ func newSMSRelay(t *testing.T) (*Relay, *storage.Store, *atomic.Int32) {
 		}
 	})
 	current := settings.Default()
+	current.Notifications.Channels = []string{"http"}
 	current.Channels = map[string]settings.Channel{"http": {Endpoint: server.URL}}
 	relay, err := New(settings.NewMemoryStore(current), nil, store, nil)
 	if err != nil {

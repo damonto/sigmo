@@ -8,9 +8,9 @@
       "X-Request-ID": "request-1",
       "WWW-Authenticate": "Bearer realm=\"sigmo-local\""
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
     "repeat": 0,
-    "code": "invalid_token",
+    "code": "invalid_session",
     "loginInvalid": true,
     "revokePush": false
   },
@@ -22,9 +22,9 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
     "repeat": 0,
-    "code": "invalid_token",
+    "code": "invalid_session",
     "loginInvalid": false,
     "revokePush": false
   },
@@ -78,9 +78,9 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":null,\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":null,\"request_id\":\"request-1\"}",
     "repeat": 0,
-    "code": "invalid_token",
+    "code": "invalid_session",
     "loginInvalid": true,
     "revokePush": false
   },
@@ -92,9 +92,9 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\": \"https://sigmo-pro.952007.xyz/problems/invalid_token\", \"title\": \"Invalid Access Token\", \"status\": 401, \"detail\": \"request was rejected\", \"request_id\": \"request-1\"}",
+    "body": "{\"type\": \"https://sigmo-pro.952007.xyz/problems/invalid_session\", \"title\": \"Invalid Session\", \"status\": 401, \"detail\": \"request was rejected\", \"request_id\": \"request-1\"}",
     "repeat": 0,
-    "code": "invalid_token",
+    "code": "invalid_session",
     "loginInvalid": true,
     "revokePush": false
   },
@@ -106,7 +106,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/not_registered\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/not_registered\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "",
     "loginInvalid": false,
@@ -120,7 +120,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://other.example/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://other.example/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "",
     "loginInvalid": false,
@@ -134,7 +134,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"license_lease_expired\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"license_lease_expired\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "",
     "loginInvalid": false,
@@ -149,7 +149,7 @@
       "X-Request-ID": "request-1",
       "Retry-After": "90"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "",
     "loginInvalid": false,
@@ -163,7 +163,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"Invalid Access Token\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"other-request\"}",
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"other-request\"}",
     "repeat": 0,
     "code": "",
     "loginInvalid": false,
@@ -177,7 +177,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_token\",\"title\":\"\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_token\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "",
     "loginInvalid": false,
@@ -248,7 +248,7 @@
       "Content-Type": "application/json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"error_code\":\"invalid_token\",\"message\":\"expired\"}",
+    "body": "{\"error_code\":\"invalid_session\",\"message\":\"expired\"}",
     "repeat": 0,
     "code": "",
     "loginInvalid": false,
@@ -262,7 +262,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"error_code\":\"invalid_token\",\"message\":\"expired\"}",
+    "body": "{\"error_code\":\"invalid_session\",\"message\":\"expired\"}",
     "repeat": 0,
     "code": "",
     "loginInvalid": false,

@@ -69,15 +69,9 @@ struct SettingsFormView: View {
         switch section {
         case .authentication: "settings.authTitle"
         case .proxy: "settings.proxyTitle"
+        case .notifications: "settings.businessChannels"
         case .notification(let channel): channelSchema?.label ?? channel
         }
-    }
-
-    private var channelEnabled: Binding<Bool> {
-        Binding(
-            get: { state[section]["enabled"]?.bool == true },
-            set: { state[section]["enabled"] = .toggle($0) }
-        )
     }
 
     private func binding(_ key: String) -> Binding<SettingValue> {
@@ -93,20 +87,14 @@ struct SettingsFormView: View {
                 if state.snapshot == nil {
                     if state.busy { ProgressView() }
                 } else {
-                    if case .notification = section {
-                        Section {
-                            Toggle("settings.native.enabled", isOn: channelEnabled)
-                                .accessibilityIdentifier("channel-enabled")
-                        } footer: { if let description = channelSchema?.description { Text(settingsText(description)) } }
-                    }
                     ForEach(state.fields(for: section)) { field in
-                        SettingsFieldRow(field: field, value: binding(field.key), channels: state.enabledChannels)
+                        SettingsFieldRow(field: field, value: binding(field.key), channels: state.configuredChannels, stacked: section == .authentication && field.control != .number)
                     }
                     if let validation = state.validation(for: section) { Section { Text(validation).foregroundStyle(.secondary) } }
                     Section {
-                        if section == .authentication {
+                        if section == .authentication && state.auth["mode"]?.text == "otp" {
                             AsyncActionButton(title: "settings.test", id: "test-auth") { await state.testAuth() }
-                                .disabled((state.auth["authProviders"]?.strings ?? []).isEmpty)
+                                .disabled((state.auth["otpChannels"]?.strings ?? []).isEmpty)
                         }
                         AsyncActionButton(title: "common.save", id: "save-settings") { await state.save(section) }
                             .disabled(state.validation(for: section) != nil)
@@ -128,10 +116,13 @@ struct NotificationSettingsView: View {
     var body: some View {
         SettingsAccessView(session: state.session) {
             Form {
+                Section {
+                    NavigationLink { SettingsFormView(state: state, section: .notifications) } label: { Text("settings.businessChannels") }
+                }
                 ForEach(state.channelSchemas) { channel in
                     NavigationLink { SettingsFormView(state: state, section: .notification(channel.key)) } label: {
                         LabeledContent(settingsText(channel.label)) {
-                            Text(state.snapshot?.values.channels?[channel.key]?["enabled"]?.bool == true ? "settings.native.on" : "settings.native.off")
+                            Text(state.snapshot?.values.channels?[channel.key] != nil ? "settings.native.configured" : "settings.native.notConfigured")
                         }
                     }.accessibilityIdentifier("channel-\(channel.key)")
                 }

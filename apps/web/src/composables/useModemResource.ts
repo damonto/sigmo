@@ -1,6 +1,7 @@
 import { computed, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 
 import { useModemApi } from '@/apis/modem'
+import { sessionRevision } from '@/lib/authSession'
 import { createSIMKindRetry } from '@/composables/simKindRetry'
 import type { Modem } from '@/types/modem'
 
@@ -15,6 +16,7 @@ type ModemResourceState = {
 }
 
 const resources = new Map<string, ModemResourceState>()
+watch(sessionRevision, () => resources.clear(), { flush: 'sync' })
 
 const usableModemID = (value: string) => {
   const id = value.trim()
@@ -43,14 +45,17 @@ const createResource = (
     if (request) return request
     if (loaded && !force) return Promise.resolve()
 
+    const revision = sessionRevision()
     isLoading.value = true
     error.value = null
     request = (async () => {
       try {
         const { data } = await modemApi.getModem(id)
+        if (revision !== sessionRevision()) return
         modem.value = data.value ?? null
         loaded = true
       } catch (err) {
+        if (revision !== sessionRevision()) return
         modem.value = null
         loaded = false
         error.value = err instanceof Error ? err.message : 'Load modem failed'
@@ -96,8 +101,8 @@ export const useModemResource = (modemId: ComputedRef<string>) => {
   const current = shallowRef<ModemResourceState | null>(null)
 
   watch(
-    modemId,
-    (value, _previous, onCleanup) => {
+    [modemId, sessionRevision],
+    ([value], _previous, onCleanup) => {
       const id = usableModemID(value)
       if (!id) {
         current.value = null

@@ -32,11 +32,11 @@ const emit = defineEmits<{
           class="text-sm font-medium"
           role="status"
         >
-          {{ $t('modemDetail.phone.recording.ready') }}
+          {{ $t('modemDetail.calls.recording.ready') }}
         </p>
         <p class="truncate text-xs text-muted-foreground">{{ props.filename }}</p>
         <p class="mt-1 text-xs text-muted-foreground">
-          {{ $t('modemDetail.phone.recording.temporary') }}
+          {{ $t('modemDetail.calls.recording.temporary') }}
         </p>
       </template>
     </div>
@@ -44,7 +44,7 @@ const emit = defineEmits<{
       v-if="props.filename"
       size="icon"
       variant="outline"
-      :aria-label="$t('modemDetail.phone.recording.download')"
+      :aria-label="$t('modemDetail.calls.recording.download')"
       @click="emit('download')"
     >
       <Download class="size-4" />
@@ -52,7 +52,7 @@ const emit = defineEmits<{
     <Button
       size="icon"
       variant="ghost"
-      :aria-label="$t('modemDetail.phone.recording.dismiss')"
+      :aria-label="$t('modemDetail.calls.recording.dismiss')"
       @click="emit('dismiss')"
     >
       <X class="size-4" />

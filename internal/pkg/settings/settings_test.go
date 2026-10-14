@@ -127,16 +127,14 @@ func TestStorePersistsSettings(t *testing.T) {
 		t.Fatalf("NewStore() error = %v", err)
 	}
 
-	enabled := true
 	_, err = store.Update(ctx, func(current *Settings) error {
 		current.Auth = Auth{
-			OTPRequired:       true,
-			AuthProviders:     []string{"telegram"},
-			TokenValidityDays: 90,
+			Mode:           "otp",
+			OTP:            OTP{Channels: []string{"telegram"}},
+			SessionMaxDays: 90,
 		}
 		current.Channels = map[string]Channel{
 			"telegram": {
-				Enabled:    &enabled,
 				BotToken:   "token",
 				Recipients: Recipients{"123456"},
 			},
@@ -165,14 +163,14 @@ func TestStorePersistsSettings(t *testing.T) {
 		t.Fatalf("NewStore() reload error = %v", err)
 	}
 	got := reloaded.Snapshot()
-	if !got.Auth.OTPRequired {
+	if !got.Auth.HasMethod("otp") {
 		t.Fatal("OTPRequired = false, want true")
 	}
-	if got.Auth.AuthProviders[0] != "telegram" {
-		t.Fatalf("AuthProviders = %#v, want telegram", got.Auth.AuthProviders)
+	if got.Auth.OTP.Channels[0] != "telegram" {
+		t.Fatalf("AuthProviders = %#v, want telegram", got.Auth.OTP.Channels)
 	}
-	if got.Auth.TokenValidityDays != 90 {
-		t.Fatalf("TokenValidityDays = %d, want 90", got.Auth.TokenValidityDays)
+	if got.Auth.SessionMaxDays != 90 {
+		t.Fatalf("SessionMaxDays = %d, want 90", got.Auth.SessionMaxDays)
 	}
 	if got.Channels["telegram"].BotToken != "token" {
 		t.Fatalf("telegram bot token = %q, want token", got.Channels["telegram"].BotToken)
@@ -235,11 +233,11 @@ func TestStoreDefaultsEmptyDatabase(t *testing.T) {
 	}
 
 	got := store.Snapshot()
-	if got.Auth.OTPRequired {
+	if got.Auth.HasMethod("otp") {
 		t.Fatal("OTPRequired = true, want false")
 	}
-	if got.Auth.TokenValidityDays != DefaultTokenValidityDays {
-		t.Fatalf("TokenValidityDays = %d, want %d", got.Auth.TokenValidityDays, DefaultTokenValidityDays)
+	if got.Auth.SessionMaxDays != DefaultSessionMaxDays {
+		t.Fatalf("SessionMaxDays = %d, want %d", got.Auth.SessionMaxDays, DefaultSessionMaxDays)
 	}
 	if len(got.Channels) != 0 {
 		t.Fatalf("Channels length = %d, want 0", len(got.Channels))
@@ -294,28 +292,13 @@ func TestStorePersistsExplicitUpdateSettings(t *testing.T) {
 	}
 }
 
-func TestStoreDefaultsLegacyAuthSettings(t *testing.T) {
-	t.Parallel()
-
-	ctx := t.Context()
+func TestStoreRejectsUnmigratedAuthSettings(t *testing.T) {
 	db := openTestStore(t)
-	legacy := struct {
-		AuthProviders []string `json:"authProviders"`
-		OTPRequired   bool     `json:"otpRequired"`
-	}{
-		AuthProviders: []string{"telegram"},
-		OTPRequired:   true,
+	if err := db.Put(t.Context(), globalScopeKey, authSettingsKey, map[string]bool{"otpRequired": true}); err != nil {
+		t.Fatal(err)
 	}
-	if err := db.Put(ctx, globalScopeKey, authSettingsKey, legacy); err != nil {
-		t.Fatalf("Put() legacy auth error = %v", err)
-	}
-
-	store, err := NewStore(ctx, db)
-	if err != nil {
-		t.Fatalf("NewStore() error = %v", err)
-	}
-	if got := store.Snapshot().Auth.TokenValidityDays; got != DefaultTokenValidityDays {
-		t.Fatalf("TokenValidityDays = %d, want %d", got, DefaultTokenValidityDays)
+	if _, err := NewStore(t.Context(), db); err == nil {
+		t.Fatal("accepted authentication without explicit mode")
 	}
 }
 

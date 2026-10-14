@@ -31,7 +31,12 @@ func TestSIMProfileMigrationPreservesHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	removeCommunicationSchema(t, s)
 	if _, err := s.db.ExecContext(ctx, `ALTER TABLE sim_profiles RENAME TO message_lines`); err != nil {
+		t.Fatal(err)
+	}
+	// Historical releases had no migration ledger.
+	if _, err := s.db.ExecContext(ctx, `DROP TABLE goose_db_version`); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -106,6 +111,52 @@ func TestRecordSIMProfile(t *testing.T) {
 	}
 }
 
+func TestSIMDisplayRejectsReadsStartedBeforeInvalidation(t *testing.T) {
+	for _, refreshFirst := range []bool{false, true} {
+		name := "cache remains invalid"
+		if refreshFirst {
+			name = "new branding is preserved"
+		}
+		t.Run(name, func(t *testing.T) {
+			s := testStore(t)
+			ctx := t.Context()
+			stale := SIMProfile{
+				ProfileID: "sim-a", ModemID: "modem", Label: "Old", Icon: "old-icon",
+				DisplayKnown: true, DisplayRevision: s.SIMDisplayRevision(),
+			}
+			if err := s.RecordSIMProfile(ctx, stale); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.InvalidateSIMDisplay(ctx, "sim-a"); err != nil {
+				t.Fatal(err)
+			}
+			if refreshFirst {
+				fresh := stale
+				fresh.DisplayRevision = s.SIMDisplayRevision()
+				fresh.Label, fresh.Icon = "New", "new-icon"
+				if err := s.RecordSIMProfile(ctx, fresh); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stale.Number = "+100"
+			if err := s.RecordSIMProfile(ctx, stale); err != nil {
+				t.Fatal(err)
+			}
+			display, found, err := s.ReadSIMDisplay(ctx, "sim-a")
+			if err != nil || found != refreshFirst {
+				t.Fatalf("ReadSIMDisplay() = %+v, %v, %v", display, found, err)
+			}
+			if found && (display.Label != "New" || display.Icon != "new-icon") {
+				t.Fatalf("stale read replaced branding: %+v", display)
+			}
+			numbers, err := s.SIMProfileNumbers(ctx, []string{"sim-a"})
+			if err != nil || numbers["sim-a"] != "+100" {
+				t.Fatalf("identity metadata was lost: %v, %v", numbers, err)
+			}
+		})
+	}
+}
+
 func TestSIMProfileMigrationBackfillsMissingNumbers(t *testing.T) {
 	s := testStore(t)
 	ctx := t.Context()
@@ -122,7 +173,9 @@ func TestSIMProfileMigrationBackfillsMissingNumbers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	removeCommunicationSchema(t, s)
 	for _, statement := range []string{
+		`DROP TABLE goose_db_version`, // Historical releases had no migration ledger.
 		`UPDATE sim_profiles SET number = ''`,
 		`ALTER TABLE sim_profiles RENAME TO message_lines`,
 	} {

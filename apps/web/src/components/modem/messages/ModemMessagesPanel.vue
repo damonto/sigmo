@@ -10,6 +10,7 @@ import ModemMessagesFab from '@/components/modem/messages/ModemMessagesFab.vue'
 import ModemMessagesHeader from '@/components/modem/messages/ModemMessagesHeader.vue'
 import ModemMessagesList from '@/components/modem/messages/ModemMessagesList.vue'
 import ModemMessagesSearch from '@/components/modem/messages/ModemMessagesSearch.vue'
+import CommunicationHistoryFilter from '@/components/communication/CommunicationHistoryFilter.vue'
 import { Button } from '@/components/ui/button'
 import { useModemPhoneCountry } from '@/composables/useModemPhoneCountry'
 import { useModemMessages, type ConversationItem } from '@/composables/useModemMessages'
@@ -123,22 +124,12 @@ const startConversation = async () => {
     <ModemMessagesSearch v-model="searchQuery" />
 
     <div class="flex flex-wrap gap-2 text-sm">
-      <Button
-        type="button"
-        size="sm"
-        :variant="unreadOnly ? 'outline' : 'default'"
-        @click="unreadOnly = false"
-      >
-        {{ t('modemDetail.messages.all') }}
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        :variant="unreadOnly ? 'default' : 'outline'"
-        @click="unreadOnly = true"
-      >
-        {{ t('modemDetail.messages.unread') }} ({{ unreadCount }})
-      </Button>
+      <CommunicationHistoryFilter
+        v-model="unreadOnly"
+        :label="t('communication.filters')"
+        :all-label="t('modemDetail.messages.all')"
+        :filtered-label="`${t('modemDetail.messages.unread')} (${unreadCount})`"
+      />
       <label class="flex items-center gap-2">
         <input
           v-model="historical"

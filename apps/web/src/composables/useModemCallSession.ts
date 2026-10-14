@@ -10,9 +10,11 @@ import {
 } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { useCallLabels } from '@/composables/useCallLabels'
 import { useCallAudioSession } from '@/composables/useCallAudioSession'
 import { useCallRecording } from '@/composables/useCallRecording'
-import { usePhoneCalls } from '@/composables/usePhoneCalls'
+import { useContacts } from '@/composables/useContacts'
+import { useCalls } from '@/composables/useCalls'
 import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
 import { callInUseElsewhere, ownsCall } from '@/lib/callClient'
 import type { CallRecord } from '@/types/call'
@@ -54,10 +56,11 @@ const createModemCallSession = (
   const setSearchQuery = (value: string) => {
     sessionSearchQuery.value = value.trim()
   }
-  const phoneCalls = usePhoneCalls(modemId, defaultCountry, sessionSearchQuery)
+  const contacts = useContacts()
+  const calls = useCalls(modemId, defaultCountry, sessionSearchQuery)
   const callAudio = useCallAudioSession(modemId)
   const recordingCallId = computed(() => {
-    const call = phoneCalls.activeCall.value
+    const call = calls.activeCall.value
     return call &&
       ownsCall(call) &&
       imsMediaRoutes.has(call.route) &&
@@ -77,50 +80,16 @@ const createModemCallSession = (
   const preparedIncomingCallID = ref('')
   let durationTimer: number | null = null
 
-  const routeLabel = (value: string) => {
-    switch (value) {
-      case 'wifi_calling':
-        return t('modemDetail.phone.routes.wifiCalling')
-      case 'volte':
-        return t('modemDetail.phone.routes.volte')
-      case 'modem':
-        return t('modemDetail.phone.routes.modem')
-      default:
-        return t('modemDetail.phone.routes.auto')
-    }
-  }
-
-  const stateLabel = (value: string) => {
-    switch (value) {
-      case 'dialing':
-        return t('modemDetail.phone.states.dialing')
-      case 'ringing':
-        return t('modemDetail.phone.states.ringing')
-      case 'answering':
-        return t('modemDetail.phone.states.answering')
-      case 'early_media':
-        return t('modemDetail.phone.states.earlyMedia')
-      case 'active':
-        return t('modemDetail.phone.states.active')
-      case 'confirmed':
-        return t('modemDetail.phone.states.confirmed')
-      case 'ending':
-        return t('modemDetail.phone.states.ending')
-      case 'failed':
-        return t('modemDetail.phone.states.failed')
-      default:
-        return t('modemDetail.phone.states.ended')
-    }
-  }
+  const { routeLabel, stateLabel, callDurationLabel } = useCallLabels(() => durationTick.value)
 
   const holdLabel = (value: string) => {
     switch (value) {
       case 'local':
-        return t('modemDetail.phone.holdStates.local')
+        return t('modemDetail.calls.holdStates.local')
       case 'remote':
-        return t('modemDetail.phone.holdStates.remote')
+        return t('modemDetail.calls.holdStates.remote')
       case 'local_remote':
-        return t('modemDetail.phone.holdStates.localRemote')
+        return t('modemDetail.calls.holdStates.localRemote')
       default:
         return ''
     }
@@ -131,50 +100,25 @@ const createModemCallSession = (
   const usesBrowserAudio = (call: CallRecord | null) => !!call && imsMediaRoutes.has(call.route)
 
   const primaryLine = (call: CallRecord) =>
-    formatPhoneDisplay(call.number, defaultCountry?.value) || t('modemDetail.phone.unknownNumber')
-
-  const callStartedAt = (call: CallRecord) => Date.parse(call.answeredAt)
-
-  const callEndedAt = (call: CallRecord) => {
-    if (call.endedAt) return Date.parse(call.endedAt)
-    if (liveDurationStates.has(call.state)) {
-      return durationTick.value
-    }
-    return Date.parse(call.updatedAt)
-  }
-
-  const callDurationLabel = (call: CallRecord) => {
-    const start = callStartedAt(call)
-    if (!Number.isFinite(start)) return ''
-    const end = callEndedAt(call)
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start)
-      return t('modemDetail.phone.durationEmpty')
-    const seconds = Math.max(0, Math.floor((end - start) / 1000))
-    const minutes = Math.floor(seconds / 60)
-    const remaining = seconds % 60
-    if (minutes >= 60) {
-      const hours = Math.floor(minutes / 60)
-      const hourMinutes = minutes % 60
-      return `${hours}:${String(hourMinutes).padStart(2, '0')}:${String(remaining).padStart(2, '0')}`
-    }
-    return `${minutes}:${String(remaining).padStart(2, '0')}`
-  }
+    contacts.match(call.number)?.name ||
+    formatPhoneDisplay(call.number, defaultCountry?.value) ||
+    t('modemDetail.calls.unknownNumber')
 
   const activeCallDurationLabel = computed(() =>
-    phoneCalls.activeCall.value ? callDurationLabel(phoneCalls.activeCall.value) : '',
+    calls.activeCall.value ? callDurationLabel(calls.activeCall.value) : '',
   )
 
   const audioMessage = computed(() => {
     if (callAudio.errorMessage.value) return callAudio.errorMessage.value
     switch (callAudio.deviceNotice.value) {
       case 'list_failed':
-        return t('modemDetail.phone.audioDevices.listFailed')
+        return t('modemDetail.calls.audioDevices.listFailed')
       case 'input_switch_failed':
-        return t('modemDetail.phone.audioDevices.inputSwitchFailed')
+        return t('modemDetail.calls.audioDevices.inputSwitchFailed')
       case 'output_switch_failed':
-        return t('modemDetail.phone.audioDevices.outputSwitchFailed')
+        return t('modemDetail.calls.audioDevices.outputSwitchFailed')
       case 'device_fallback':
-        return t('modemDetail.phone.audioDevices.deviceFallback')
+        return t('modemDetail.calls.audioDevices.deviceFallback')
       default:
         return ''
     }
@@ -194,7 +138,7 @@ const createModemCallSession = (
     durationTimer = null
   }
 
-  const answerIncoming = async (call: CallRecord) => await phoneCalls.answer(call)
+  const answerIncoming = async (call: CallRecord) => await calls.answer(call)
 
   const prepareAudioDevices = async (call: CallRecord) => {
     if (callInUseElsewhere(call)) return false
@@ -202,8 +146,8 @@ const createModemCallSession = (
     const ready = await callAudio.prepare()
     if (!ready) return false
     const callStillExists =
-      phoneCalls.incomingCall.value?.callID === call.callID ||
-      phoneCalls.activeCall.value?.callID === call.callID
+      calls.incomingCall.value?.callID === call.callID ||
+      calls.activeCall.value?.callID === call.callID
     if (!callStillExists) {
       callAudio.stop()
       return false
@@ -215,11 +159,11 @@ const createModemCallSession = (
   }
 
   const toggleHold = async (call: CallRecord) => {
-    await phoneCalls.toggleHold(call)
+    await calls.toggleHold(call)
   }
 
   watch(
-    phoneCalls.activeCall,
+    calls.activeCall,
     (call) => {
       let audioStopped = false
       if (call?.answeredAt && liveDurationStates.has(call.state)) {
@@ -240,7 +184,7 @@ const createModemCallSession = (
         if (audioCallID.value === call.callID) return
         audioCallID.value = call.callID
         void Promise.resolve(callAudio.start(call.callID)).then(() => {
-          const current = phoneCalls.activeCall.value
+          const current = calls.activeCall.value
           if (current?.callID !== call.callID || !ownsCall(current)) return
           callAudio.setInputEnabled(
             !localHoldStates.has(current.hold) && !remoteHoldStates.has(current.hold),
@@ -261,12 +205,12 @@ const createModemCallSession = (
     { immediate: true },
   )
 
-  watch(phoneCalls.incomingCall, (call, previous) => {
+  watch(calls.incomingCall, (call, previous) => {
     if (!previous || previous.callID !== preparedIncomingCallID.value) return
     if (call?.callID === previous.callID) return
     queueMicrotask(() => {
       if (preparedIncomingCallID.value !== previous.callID) return
-      if (phoneCalls.activeCall.value?.callID === previous.callID) return
+      if (calls.activeCall.value?.callID === previous.callID) return
       preparedIncomingCallID.value = ''
       callAudio.stop()
     })
@@ -275,7 +219,7 @@ const createModemCallSession = (
   onBeforeUnmount(stopDurationTimer)
 
   return {
-    ...phoneCalls,
+    ...calls,
     callAudio,
     callRecording,
     routeLabel,
@@ -284,6 +228,7 @@ const createModemCallSession = (
     isLocallyHeld,
     isRemotelyHeld,
     usesBrowserAudio,
+    observeCall: calls.observeCall,
     primaryLine,
     callDurationLabel,
     activeCallDurationLabel,

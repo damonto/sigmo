@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import ModemMessageBubble from '@/components/modem/messages/ModemMessageBubble.vue'
-import ModemMessageThreadSkeletonList from '@/components/modem/messages/ModemMessageThreadSkeletonList.vue'
+import MessageThreadSkeleton from '@/components/communication/MessageThreadSkeleton.vue'
 import type { ThreadMessageItem } from '@/composables/useModemMessageThread'
 
 const props = defineProps<{
@@ -34,7 +34,7 @@ const emptyLabel = computed(() =>
     </div>
   </div>
 
-  <ModemMessageThreadSkeletonList v-else-if="props.isLoading" />
+  <MessageThreadSkeleton v-else-if="props.isLoading" />
 
   <p
     v-else

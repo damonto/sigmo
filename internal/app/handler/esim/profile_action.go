@@ -11,6 +11,7 @@ import (
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 const reminderCleanupTimeout = 15 * time.Second
@@ -35,7 +36,25 @@ func (h *Handler) EnableProfile(ctx context.Context, modem *mmodem.Modem, seID s
 }
 
 func (h *Handler) DeleteProfile(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
+	if h.profile != nil && h.profile.history != nil {
+		if err := h.profile.history.RecordSIMProfile(ctx, storage.SIMProfile{ProfileID: iccid.String(), ModemID: modem.EquipmentIdentifier, Kind: "esim", SEID: seID}); err != nil {
+			return err
+		}
+		if err := h.profile.history.MarkProfileDeletion(ctx, iccid.String(), "pending"); err != nil {
+			return err
+		}
+	}
 	deleteErr := h.lifecycle.Delete(ctx, modem, seID, iccid)
+	if errors.Is(deleteErr, errActiveProfileCannotDelete) && h.profile != nil && h.profile.history != nil {
+		if err := h.profile.history.MarkProfileDeletion(ctx, iccid.String(), ""); err != nil {
+			return errors.Join(deleteErr, err)
+		}
+	}
+	if h.profile != nil && h.profile.history != nil && (deleteErr == nil || errors.Is(deleteErr, errProfileNotFound)) {
+		if err := h.profile.history.MarkProfileDeletion(ctx, iccid.String(), "deleted"); err != nil {
+			return err
+		}
+	}
 	if deleteErr != nil && !errors.Is(deleteErr, errProfileNotFound) {
 		return deleteErr
 	}
@@ -61,4 +80,9 @@ func (h *Handler) DeleteProfile(ctx context.Context, modem *mmodem.Modem, seID s
 		return fmt.Errorf("delete profile reminder: %w", err)
 	}
 	return nil
+}
+
+// ProfileInventory reuses the authenticated device inventory for line selection.
+func (h *Handler) ProfileInventory(ctx context.Context, modem *mmodem.Modem) (*ProfilesResponse, error) {
+	return h.profile.List(ctx, modem)
 }

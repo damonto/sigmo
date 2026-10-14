@@ -4,7 +4,6 @@ import type { Ref } from 'vue'
 import { detectLocale } from '@/i18n/locale'
 import router from '@/router'
 
-import { getStoredToken } from './authStorage'
 import {
   API_ACCEPT,
   createApiError,
@@ -20,8 +19,6 @@ const baseUrl =
 const requestHeaders = (options: RequestInit) => {
   const headers = new Headers(options.headers)
   if (!headers.has('Accept')) headers.set('Accept', API_ACCEPT)
-  const token = getStoredToken()
-  if (token) headers.set('Authorization', `Bearer ${token}`)
   // The server sends notifications, such as forwarded SMS, in the language
   // of the last UI that called it, so every request says which one it shows.
   // detectLocale is what i18n starts with; the UI has no language switcher,
@@ -81,7 +78,8 @@ export const useFetch = createFetch({
     },
   },
   fetchOptions: {
-    mode: 'cors',
+    mode: 'same-origin',
+    credentials: 'same-origin',
   },
 })
 
@@ -116,7 +114,8 @@ export const fetchJsonQuietly = async <T>(url: string, options: RequestInit = {}
   const response = await fetchWithBoundedErrors(`${baseUrl}/${url.replace(/^\/+/, '')}`, {
     ...options,
     headers: requestHeaders(options),
-    mode: 'cors',
+    mode: 'same-origin',
+    credentials: 'same-origin',
   })
   if (!response.ok) {
     const error = createApiError(response, await response.text())

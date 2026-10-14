@@ -4,55 +4,28 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/damonto/sigmo/internal/pkg/storage/query"
 )
 
 // SIMProfile stores the last known identity and display metadata of a physical SIM or eSIM.
 type SIMProfile struct {
-	ProfileID string
-	ModemID   string
-	Label     string
-	Number    string
-}
+	Icon         string
+	DisplayKnown bool
 
-func migrateSIMProfiles(ctx context.Context, tx *sql.Tx) error {
-	var legacy bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'message_lines')`).Scan(&legacy); err != nil {
-		return fmt.Errorf("inspect SIM profile schema: %w", err)
-	}
-	if legacy {
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE message_lines RENAME TO sim_profiles`); err != nil {
-			return fmt.Errorf("rename SIM profile table: %w", err)
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS sim_profiles (
-		profile_id TEXT PRIMARY KEY,
-		modem_id TEXT NOT NULL DEFAULT '',
-		label TEXT NOT NULL DEFAULT '',
-		number TEXT NOT NULL DEFAULT ''
-	)`); err != nil {
-		return fmt.Errorf("create SIM profile schema: %w", err)
-	}
-	if legacy {
-		return backfillSIMProfileNumbers(ctx, tx)
-	}
-	return nil
-}
-
-// backfillSIMProfileNumbers runs only when upgrading a legacy schema. Existing
-// observations take precedence over SMS, which may predate a number change.
-func backfillSIMProfileNumbers(ctx context.Context, tx *sql.Tx) error {
-	_, err := tx.ExecContext(ctx, `UPDATE sim_profiles SET number = COALESCE((
-		SELECT TRIM(CASE WHEN incoming = 1 THEN recipient ELSE sender END)
-		FROM messages WHERE profile_id = sim_profiles.profile_id
-			AND TRIM(CASE WHEN incoming = 1 THEN recipient ELSE sender END) <> ''
-		ORDER BY timestamp DESC, id DESC LIMIT 1
-	), '') WHERE number = ''`)
-	if err != nil {
-		return fmt.Errorf("backfill SIM profile numbers: %w", err)
-	}
-	return nil
+	// DisplayRevision is captured before a card read when DisplayKnown is true.
+	// Cached branding must never be passed back as a fresh observation.
+	DisplayRevision uint64
+	Region          string
+	Kind            string
+	SEID            string
+	ProfileID       string
+	ModemID         string
+	Label           string
+	Number          string
 }
 
 // SIMProfileNumbers returns known numbers for the requested ICCIDs, including inactive SIMs.
@@ -66,21 +39,12 @@ func (s *Store) SIMProfileNumbers(ctx context.Context, profileIDs []string) (map
 	if err != nil {
 		return nil, fmt.Errorf("encode SIM profile IDs: %w", err)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT profile_id, number FROM sim_profiles
-		WHERE profile_id IN (SELECT value FROM json_each(?))`, string(ids))
+	rows, err := query.New(s.db).SIMProfileNumbers(ctx, string(ids))
 	if err != nil {
 		return nil, fmt.Errorf("read SIM profile numbers: %w", err)
 	}
-	defer func() { _ = rows.Close() }() // Rows.Err preserves iteration failures.
-	for rows.Next() {
-		var id, number string
-		if err := rows.Scan(&id, &number); err != nil {
-			return nil, fmt.Errorf("scan SIM profile number: %w", err)
-		}
-		numbers[id] = number
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read SIM profile numbers: %w", err)
+	for _, row := range rows {
+		numbers[row.ProfileID] = row.Number
 	}
 	return numbers, nil
 }
@@ -95,26 +59,102 @@ func (s *Store) RecordSIMProfile(ctx context.Context, profile SIMProfile) error 
 	if profile.ProfileID == "" || profile.ModemID == "" {
 		return nil
 	}
+	if profile.DisplayKnown {
+		s.simDisplayMu.RLock()
+		defer s.simDisplayMu.RUnlock()
+		if profile.DisplayRevision != s.simDisplayRevision {
+			profile.Label = ""
+			profile.DisplayKnown = false
+		}
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin SIM profile update: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }() // Keep SIM metadata and historical attribution together.
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO sim_profiles (profile_id, modem_id, label, number) VALUES (?, ?, ?, ?)
-		ON CONFLICT(profile_id) DO UPDATE SET
-			modem_id = excluded.modem_id,
-			label = CASE WHEN excluded.label <> '' THEN excluded.label ELSE sim_profiles.label END,
-			number = CASE WHEN excluded.number <> '' THEN excluded.number ELSE sim_profiles.number END
-	`, profile.ProfileID, profile.ModemID, profile.Label, profile.Number)
+	queries := query.New(tx)
+	previousRegion := ""
+	if profile.Region != "" {
+		previousRegion, err = queries.SIMProfileRegion(ctx, profile.ProfileID)
+		if err != nil {
+			return fmt.Errorf("read previous SIM region: %w", err)
+		}
+	}
+	err = queries.RecordSIMProfile(ctx, query.RecordSIMProfileParams{
+		ProfileID: profile.ProfileID, ModemID: profile.ModemID, Label: profile.Label,
+		Number: profile.Number, Region: profile.Region, Kind: profile.Kind, SEID: profile.SEID,
+	})
 	if err != nil {
 		return fmt.Errorf("record SIM profile: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE messages SET modem_id = ? WHERE profile_id = ? AND modem_id = ''`, profile.ModemID, profile.ProfileID); err != nil {
+	if profile.DisplayKnown {
+		if err := queries.RecordSIMDisplay(ctx, query.RecordSIMDisplayParams{ProfileID: profile.ProfileID, Icon: profile.Icon}); err != nil {
+			return fmt.Errorf("record SIM display: %w", err)
+		}
+	}
+	if err := queries.BackfillMessageModem(ctx, query.BackfillMessageModemParams{ModemID: profile.ModemID, ProfileID: profile.ProfileID}); err != nil {
 		return fmt.Errorf("backfill message device: %w", err)
+	}
+	if profile.Region != "" && profile.Region != previousRegion {
+		if err := updateConversationKeys(ctx, queries, profile.ProfileID); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit SIM profile update: %w", err)
+	}
+	return nil
+}
+
+// SIMDisplay is confirmed eSIM branding, cached independently of live availability.
+type SIMDisplay struct {
+	Label string
+	Icon  string
+}
+
+// ReadSIMDisplay returns persisted branding without accessing the card.
+func (s *Store) ReadSIMDisplay(ctx context.Context, profileID string) (SIMDisplay, bool, error) {
+	row, err := query.New(s.db).ReadSIMDisplay(ctx, profileID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SIMDisplay{}, false, nil
+	}
+	if err != nil {
+		return SIMDisplay{}, false, fmt.Errorf("read SIM display: %w", err)
+	}
+	return SIMDisplay{Label: row.Label, Icon: row.Icon}, true, nil
+}
+
+// SIMDisplayRevision must be captured before reading branding from a card.
+// It only tracks in-flight reads; persisted branding survives process restarts.
+func (s *Store) SIMDisplayRevision() uint64 {
+	s.simDisplayMu.RLock()
+	defer s.simDisplayMu.RUnlock()
+	return s.simDisplayRevision
+}
+
+// InvalidateSIMDisplay requests a fresh card read after a successful nickname change.
+func (s *Store) InvalidateSIMDisplay(ctx context.Context, profileID string) error {
+	s.simDisplayMu.Lock()
+	defer s.simDisplayMu.Unlock()
+	s.simDisplayRevision++
+	if err := query.New(s.db).InvalidateSIMDisplay(ctx, profileID); err != nil {
+		return fmt.Errorf("invalidate SIM display: %w", err)
+	}
+	return nil
+}
+
+func updateConversationKeys(ctx context.Context, queries *query.Queries, profileID string) error {
+	participants, err := queries.ProfileConversationParticipants(ctx, profileID)
+	if err != nil {
+		return fmt.Errorf("read historical participants: %w", err)
+	}
+	for _, participant := range participants {
+		err := queries.UpdateConversationParticipantKey(ctx, query.UpdateConversationParticipantKeyParams{
+			ID: participant.ID, ParticipantKey: ParticipantKey(participant.Participant, participant.Region),
+		})
+		if err != nil {
+			return fmt.Errorf("normalize historical participant: %w", err)
+		}
 	}
 	return nil
 }

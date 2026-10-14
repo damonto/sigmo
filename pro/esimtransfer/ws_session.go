@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -26,6 +27,11 @@ const (
 )
 
 type wsSession struct {
+	readerWG       sync.WaitGroup
+	writeMu        sync.Mutex
+	cardMu         sync.Mutex
+	cardPending    *cardRequest
+	cardReplies    chan cardReply
 	conn           *websocket.Conn
 	disconnectCh   chan struct{}
 	disconnectOnce sync.Once
@@ -34,21 +40,36 @@ type wsSession struct {
 	deleteCh       chan wsClientMessage
 }
 
-func newWSSession(conn *websocket.Conn, cancel context.CancelFunc) *wsSession {
+func newWSSession(ctx context.Context, conn *websocket.Conn, cancel context.CancelFunc) *wsSession {
 	session := &wsSession{
 		conn:         conn,
 		disconnectCh: make(chan struct{}),
 		startCh:      make(chan wsClientMessage, 1),
 		inputCh:      make(chan wsClientMessage, 1),
 		deleteCh:     make(chan wsClientMessage, 1),
+		cardReplies:  make(chan cardReply, 1),
 	}
-	go session.readLoop(cancel)
+	conn.SetReadLimit(128 << 10)
+	session.readerWG.Go(func() {
+		stop := context.AfterFunc(ctx, session.disconnect)
+		defer stop()
+		session.readLoop(cancel)
+	})
 	return session
+}
+
+func (s *wsSession) close() {
+	s.disconnect()
+	s.readerWG.Wait()
 }
 
 func (s *wsSession) disconnect() {
 	s.disconnectOnce.Do(func() {
 		close(s.disconnectCh)
+		// Wake the reader and cancel the transfer even when the peer is silent.
+		if s.conn != nil {
+			_ = s.conn.Close() // The connection is terminal; close errors add no recovery path.
+		}
 	})
 }
 
@@ -63,14 +84,25 @@ func (s *wsSession) readLoop(cancel context.CancelFunc) {
 			return
 		}
 		switch msg.Type {
-		case wsTypeStart:
-			sendLatest(s.startCh, msg)
+		case wsTypeStart, "source", "profiles":
+			select {
+			case s.startCh <- msg:
+			default:
+				return
+			}
+		case "card_response":
+			if !s.acceptCardReply(msg.Card) {
+				return
+			}
+		case "card_invalidated":
+			return
 		case wsTypeUserInput:
 			sendLatest(s.inputCh, msg)
 		case wsTypeSourceDeletion:
 			sendLatest(s.deleteCh, msg)
 		case wsTypeCancel:
 			cancel()
+			return
 		}
 	}
 }
@@ -88,11 +120,37 @@ func sendLatest(ch chan wsClientMessage, msg wsClientMessage) {
 }
 
 func (s *wsSession) send(msg wsServerMessage) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	select {
+	case <-s.disconnectCh:
+		return errSessionDisconnected
+	default:
+	}
+	if err := s.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		s.disconnect()
+		return fmt.Errorf("set transfer write deadline: %w", errors.Join(errSessionDisconnected, err))
+	}
 	if err := s.conn.WriteJSON(msg); err != nil {
 		s.disconnect()
 		return fmt.Errorf("send transfer message: %w", errors.Join(errSessionDisconnected, err))
 	}
 	return nil
+}
+
+func (s *wsSession) acceptCardReply(reply *cardReply) bool {
+	s.cardMu.Lock()
+	defer s.cardMu.Unlock()
+	if reply == nil || s.cardPending == nil || reply.ID != s.cardPending.ID || reply.ConnectionID != s.cardPending.ConnectionID {
+		return false
+	}
+	s.cardPending = nil
+	select {
+	case s.cardReplies <- *reply:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *wsSession) sendIfConnected(msg wsServerMessage) {

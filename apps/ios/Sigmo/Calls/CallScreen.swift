@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CallScreen: View {
     @Environment(CallsState.self) private var calls
+    @Environment(\.demoSession) private var demoSession
 
     var body: some View {
         NavigationStack {
@@ -12,17 +13,20 @@ struct CallScreen: View {
                         .id(call.id)
                 } else { ContentUnavailableView("calls.ended", systemImage: "phone.down") }
             }
-            .background(Color(uiColor: .systemGroupedBackground))
             .detailErrorAlert(calls.failure ?? calls.audio.failure ?? calls.recordings.failure)
-            .navigationTitle("detail.tab.calls")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if demoSession != nil {
+                    ToolbarItem(placement: .principal) { Text("demo.simulatedCall").font(.subheadline) }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("calls.minimize", systemImage: "chevron.down") { calls.presented = false }
                         .accessibilityIdentifier("calls-minimize")
                 }
             }
         }
+        .preferredColorScheme(.dark)
     }
 }
 
@@ -47,6 +51,10 @@ private struct ActiveCallContent: View {
                 }
             }
         }
+        .background {
+            let contact = calls.store.sessions[call.line.backendID]?.contact(for: call.number)
+            ContactBackdrop(color: contact?.avatarColor ?? "", hasPhoto: contact?.hasAvatar == true)
+        }
         .onChange(of: calls.incoming?.id) { _, id in
             if id != nil { keypad = false }
         }
@@ -54,8 +62,8 @@ private struct ActiveCallContent: View {
 
     private var callControls: some View {
         VStack(spacing: 28) {
-            identity.padding(.top, 24)
-            Spacer(minLength: 0)
+            identity.padding(.top, 12)
+            Spacer(minLength: 24)
             if let incoming = calls.incoming {
                 incomingControls(incoming)
             }
@@ -72,19 +80,22 @@ private struct ActiveCallContent: View {
 
     private var identity: some View {
         VStack(spacing: 10) {
-            Image(systemName: "person.crop.circle.fill")
-                .font(.system(size: 84)).foregroundStyle(.secondary).accessibilityHidden(true)
+            if let session = calls.store.sessions[call.line.backendID] {
+                ContactAvatarView(session: session, contact: session.contact(for: call.number), fallback: calls.name(call), size: 112)
+            } else {
+                Image(systemName: "person.crop.circle.fill").font(.system(size: 84)).foregroundStyle(.secondary).accessibilityHidden(true)
+            }
             Text(calls.name(call))
                 .font(.largeTitle.weight(.medium)).textSelection(.enabled)
             Text("\(call.line.backendName) · \(call.line.label)")
                 .font(.subheadline).foregroundStyle(.secondary)
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 VStack(spacing: 4) {
-                    Text(call.record?.stateLabel ?? callText("calls.state.dialing"))
                     if let record = call.record {
                         let duration = record.duration(at: context.date)
                         if !duration.isEmpty { Text(duration).monospacedDigit() }
-                    }
+                        else { Text(record.stateLabel) }
+                    } else { Text("calls.state.dialing") }
                     if call.record?.localHold == true { Text("calls.localHold") }
                     if call.record?.remoteHold == true { Text("calls.remoteHold") }
                 }.font(.body).foregroundStyle(.secondary)
@@ -167,16 +178,18 @@ private struct ActiveCallContent: View {
     }
 
     private var controls: some View {
-        GlassEffectContainer(spacing: 12) {
-            Grid(alignment: .top, horizontalSpacing: 12, verticalSpacing: 28) {
-                GridRow {
+        VStack(spacing: 24) {
+            GlassEffectContainer(spacing: 20) {
+                HStack(alignment: .top, spacing: 20) {
                     muteControl
-                    audioControl
-                    holdControl
-                }
-                GridRow {
                     CallControl(label: "calls.keypad", symbol: "circle.grid.3x3.fill", identifier: "calls-show-keypad") { keypad = true }
                         .disabled(call.record?.canSendDTMF != true)
+                    audioControl
+                }
+            }
+            GlassEffectContainer(spacing: 20) {
+                HStack(alignment: .top, spacing: 20) {
+                    holdControl
                     endControl
                     recordingControl
                 }
@@ -245,7 +258,7 @@ private struct CallControl: View {
             if let prominentTint {
                 button.buttonStyle(.glassProminent).tint(prominentTint)
             } else if selected {
-                button.buttonStyle(.glassProminent).tint(.accentColor)
+                button.buttonStyle(.glassProminent).tint(.white).foregroundStyle(.black)
             } else {
                 button.buttonStyle(.glass).tint(.primary)
             }
@@ -269,7 +282,7 @@ private struct CallControlIcon: View {
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: min(symbolSize, 32), weight: .medium))
-            .frame(width: 56, height: 56)
+            .frame(width: 64, height: 64)
     }
 }
 

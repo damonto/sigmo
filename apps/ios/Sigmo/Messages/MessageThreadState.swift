@@ -7,6 +7,7 @@ final class MessageThreadState {
     private(set) var conversation: SMSConversation
     let legacy: Bool
     var draft = ""
+    private var replacementProfileID: String?
     private(set) var messages: [SMSMessage] = []
     private(set) var loaded = false
     private(set) var loading = false
@@ -28,9 +29,12 @@ final class MessageThreadState {
     }
 
     var modem: Modem? { session.modems.first { $0.id == conversation.modemId } }
+    var sendingProfileID: String { replacementProfileID ?? conversation.profileId }
+    var canUseActive: Bool { modem.map { !$0.sim.identifier.isEmpty && $0.state != "locked" && $0.sim.identifier != sendingProfileID } ?? false }
+    func useActiveProfile() { replacementProfileID = modem?.sim.identifier }
     var canSend: Bool {
         session.canAccessDevices && !conversation.modemId.isEmpty &&
-        modem?.sim.identifier == conversation.profileId && modem?.state != "locked"
+        modem?.sim.identifier == sendingProfileID && modem?.state != "locked"
     }
 
     func load() async {
@@ -80,14 +84,24 @@ final class MessageThreadState {
         guard canSend, !sending, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         revision += 1
         let current = revision
-        let submission = SMSSubmission(to: conversation.participant, text: draft, expectedProfileId: conversation.profileId)
+        let submission = SMSSubmission(to: conversation.participant, text: draft, expectedProfileId: sendingProfileID)
         let modemID = conversation.modemId
         sending = true
         sendFailure = nil
         do {
-            _ = try await session.protectedRequest { api, token in try await api.sendMessage(modemID: modemID, submission: submission, token: token) }
+            let sent = try await session.protectedRequest { api, token in try await api.sendMessage(modemID: modemID, submission: submission, token: token) }
             guard current == revision else { return }
             draft = ""
+            if let id = sent.conversationId, id != conversation.id,
+               let snapshot = try? await session.protectedRequest({ api, token in try await api.conversations(modemID: modemID, token: token) }) {
+                guard current == revision else { return }
+                if let replacement = snapshot.items.first(where: { $0.id == id }) {
+                    conversation = replacement
+                    replacementProfileID = nil
+                    acknowledged = replacement.readThroughMessageId
+                    manuallyUnread = replacement.markedUnread
+                }
+            }
             sending = false
             await load()
         } catch {
@@ -105,6 +119,7 @@ final class MessageThreadState {
         revision += 1
         messages = []
         draft = ""
+        replacementProfileID = nil
         sending = false
         loading = false
         loaded = false

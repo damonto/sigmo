@@ -141,4 +141,18 @@ describe('ModemDesktopTopNav', () => {
       params: { id: '869710031623555' },
     })
   })
+
+  it('keeps Contacts open when switching modems from a contact detail', async () => {
+    route.name = 'modem-contact'
+    modemHarness.modems = [modem('869710031623444', 'RM520N'), modem('869710031623555', 'Office')]
+    const wrapper = mountNav()
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('Office'))
+      ?.trigger('click')
+    expect(router.push).toHaveBeenCalledWith({
+      name: 'modem-contacts',
+      params: { id: '869710031623555' },
+    })
+  })
 })

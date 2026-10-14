@@ -12,6 +12,8 @@ import {
   Square,
 } from 'lucide-vue-next'
 
+import ContactAvatar from '@/components/contacts/ContactAvatar.vue'
+import { useContacts } from '@/composables/useContacts'
 import ModemCallAudioDevices from '@/components/modem/ModemCallAudioDevices.vue'
 import ModemCallRecordingNotice from '@/components/modem/ModemCallRecordingNotice.vue'
 import { Button } from '@/components/ui/button'
@@ -23,18 +25,23 @@ const props = defineProps<{
   session: ModemCallSession
 }>()
 
+const { match } = useContacts()
+const contact = computed(() =>
+  match((props.session.incomingCall.value ?? props.session.activeCall.value)?.number ?? ''),
+)
+
 const dtmfKeys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#']
 const imsCallRoutes = new Set<CallRecord['route']>(['wifi_calling', 'volte'])
 const dtmfCallStates = new Set<CallRecord['state']>(['early_media', 'active', 'confirmed'])
 const dtmfOpen = ref(false)
 const recording = computed(() => props.session.callRecording)
 const recordingErrorKey = computed(() =>
-  recording.value.error.value ? `modemDetail.phone.recording.${recording.value.error.value}` : '',
+  recording.value.error.value ? `modemDetail.calls.recording.${recording.value.error.value}` : '',
 )
 const recordingActionKey = computed(() =>
   recording.value.isRecording.value
-    ? 'modemDetail.phone.recording.stop'
-    : 'modemDetail.phone.recording.start',
+    ? 'modemDetail.calls.recording.stop'
+    : 'modemDetail.calls.recording.start',
 )
 const recordingDisabled = computed(
   () =>
@@ -87,6 +94,13 @@ const sendDTMF = (digit: string) => {
     class="fixed inset-x-0 top-3 z-40 mx-auto flex w-[calc(100%-1.5rem)] max-w-2xl flex-col items-stretch justify-between gap-3 rounded-xl border bg-background/95 px-4 py-3 shadow-lg backdrop-blur sm:flex-row sm:items-center"
   >
     <div class="flex min-w-0 items-center gap-3">
+      <ContactAvatar
+        v-if="contact"
+        :id="contact.id"
+        :name="contact.name"
+        :has-avatar="contact.hasAvatar"
+        :updated-at="contact.updatedAt"
+      />
       <span
         class="grid size-10 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-700"
       >
@@ -118,7 +132,7 @@ const sendDTMF = (digit: string) => {
       <Button
         size="icon"
         variant="destructive"
-        :aria-label="$t('modemDetail.phone.reject')"
+        :aria-label="$t('modemDetail.calls.reject')"
         @click="props.session.reject(props.session.incomingCall.value)"
       >
         <PhoneOff class="size-4" />
@@ -126,7 +140,7 @@ const sendDTMF = (digit: string) => {
       <Button
         size="icon"
         class="bg-emerald-600 hover:bg-emerald-700"
-        :aria-label="$t('modemDetail.phone.answer')"
+        :aria-label="$t('modemDetail.calls.answer')"
         @click="props.session.answerIncoming(props.session.incomingCall.value)"
       >
         <PhoneCall class="size-4" />
@@ -143,6 +157,13 @@ const sendDTMF = (digit: string) => {
   >
     <div class="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
       <div class="flex min-w-0 items-center gap-3">
+        <ContactAvatar
+          v-if="contact"
+          :id="contact.id"
+          :name="contact.name"
+          :has-avatar="contact.hasAvatar"
+          :updated-at="contact.updatedAt"
+        />
         <span
           class="grid size-10 shrink-0 place-items-center rounded-full bg-primary/10 text-primary"
         >
@@ -164,13 +185,13 @@ const sendDTMF = (digit: string) => {
             class="text-xs text-muted-foreground"
             role="status"
           >
-            {{ $t('modemDetail.phone.inUseElsewhere') }}
+            {{ $t('modemDetail.calls.inUseElsewhere') }}
           </p>
           <p
             v-if="props.session.activeCallDurationLabel.value"
             class="truncate text-xs font-medium text-foreground"
           >
-            {{ $t('modemDetail.phone.duration') }} ·
+            {{ $t('modemDetail.calls.duration') }} ·
             {{ props.session.activeCallDurationLabel.value }}
           </p>
           <p
@@ -187,26 +208,26 @@ const sendDTMF = (digit: string) => {
               class="size-2 rounded-full bg-destructive"
               aria-hidden="true"
             />
-            {{ $t('modemDetail.phone.recording.active') }} · {{ recording.durationLabel.value }}
+            {{ $t('modemDetail.calls.recording.active') }} · {{ recording.durationLabel.value }}
           </p>
           <p
             v-else-if="recording.isBusy.value"
             class="text-xs text-muted-foreground"
             role="status"
           >
-            {{ $t(`modemDetail.phone.recording.${recording.status.value}`) }}
+            {{ $t(`modemDetail.calls.recording.${recording.status.value}`) }}
           </p>
           <p
             v-if="isIMSCall && !recording.isSupported.value"
             class="text-xs text-muted-foreground"
           >
-            {{ $t('modemDetail.phone.recording.unsupported') }}
+            {{ $t('modemDetail.calls.recording.unsupported') }}
           </p>
           <p
             v-else-if="isIMSCall && !viewingCall && !props.session.callAudio.localStream.value"
             class="text-xs text-muted-foreground"
           >
-            {{ $t('modemDetail.phone.recording.receiveOnly') }}
+            {{ $t('modemDetail.calls.recording.receiveOnly') }}
           </p>
         </div>
       </div>
@@ -245,8 +266,8 @@ const sendDTMF = (digit: string) => {
           :aria-pressed="dtmfOpen"
           :aria-label="
             dtmfOpen
-              ? $t('modemDetail.phone.closeInCallDialpad')
-              : $t('modemDetail.phone.openInCallDialpad')
+              ? $t('modemDetail.calls.closeInCallDialpad')
+              : $t('modemDetail.calls.openInCallDialpad')
           "
           @click="dtmfOpen = !dtmfOpen"
         >
@@ -258,8 +279,8 @@ const sendDTMF = (digit: string) => {
           variant="outline"
           :aria-label="
             props.session.isLocallyHeld(props.session.activeCall.value)
-              ? $t('modemDetail.phone.resume')
-              : $t('modemDetail.phone.hold')
+              ? $t('modemDetail.calls.resume')
+              : $t('modemDetail.calls.hold')
           "
           @click="props.session.toggleHold(props.session.activeCall.value)"
         >
@@ -275,7 +296,7 @@ const sendDTMF = (digit: string) => {
         <Button
           size="icon"
           variant="destructive"
-          :aria-label="$t('modemDetail.phone.hangup')"
+          :aria-label="$t('modemDetail.calls.hangup')"
           @click="props.session.hangup(props.session.activeCall.value)"
         >
           <PhoneOff class="size-4" />
@@ -292,7 +313,7 @@ const sendDTMF = (digit: string) => {
         :key="key"
         type="button"
         class="flex h-12 touch-manipulation items-center justify-center rounded-full bg-muted text-base font-semibold transition hover:bg-muted/70 active:scale-95"
-        :aria-label="$t('modemDetail.phone.sendDtmf', { digit: key })"
+        :aria-label="$t('modemDetail.calls.sendDtmf', { digit: key })"
         @click="sendDTMF(key)"
       >
         {{ key }}

@@ -1,297 +1,136 @@
 package auth
 
 import (
+	"bytes"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
 
 	appauth "github.com/damonto/sigmo/internal/app/auth"
-	"github.com/damonto/sigmo/internal/pkg/locale"
+	"github.com/damonto/sigmo/internal/app/httpapi"
+	"github.com/damonto/sigmo/internal/app/middleware"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
-func TestOTPSend(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		settings settings.Settings
-		want     error
-	}{
-		{
-			name: "rejects missing auth providers",
-			settings: settings.Settings{
-				Auth: settings.Auth{
-					OTPRequired: true,
-				},
-			},
-			want: errAuthProviderRequired,
-		},
-		{
-			name: "rejects disabled auth provider",
-			settings: settings.Settings{
-				Auth: settings.Auth{
-					OTPRequired:   true,
-					AuthProviders: []string{"telegram"},
-				},
-				Channels: map[string]settings.Channel{
-					"telegram": {
-						Enabled:    new(false),
-						BotToken:   "draft-token",
-						Recipients: settings.Recipients{"123456"},
-					},
-				},
-			},
-			want: errAuthProviderUnavailable,
-		},
-		{
-			name: "rejects missing configured channel",
-			settings: settings.Settings{
-				Auth: settings.Auth{
-					OTPRequired:   true,
-					AuthProviders: []string{"telegram"},
-				},
-			},
-			want: errAuthProviderUnavailable,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			store := newAuthTestStore(t)
-			settingsStore := settings.NewMemoryStore(&tt.settings)
-			otp := newOTP(settingsStore, store)
-
-			err := otp.Send(t.Context(), locale.English)
-			if !errors.Is(err, tt.want) {
-				t.Fatalf("Send() error = %v, want %v", err, tt.want)
-			}
-			if _, _, err := store.IssueOTP(); err != nil {
-				t.Fatalf("IssueOTP() after rejected Send() error = %v", err)
-			}
-		})
-	}
-}
-
-func TestOTPSendLanguage(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		recorded locale.Tag
-		lang     locale.Tag
-		want     string
-	}{
-		{name: "uses the language of the login page", recorded: locale.English, lang: locale.Chinese, want: "验证码"},
-		{name: "falls back to the recorded language", recorded: locale.Chinese, want: "验证码"},
-		{name: "defaults to english", want: "Verification code"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			texts := make(chan string, 1)
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestOTPHTTPFlow(t *testing.T) {
+	for _, client := range []string{"web", "native"} {
+		t.Run(client, func(t *testing.T) {
+			var code string
+			delivery := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var body struct {
-					Content struct {
-						Text string `json:"text"`
-					} `json:"content"`
+					Payload struct {
+						Code string `json:"code"`
+					} `json:"payload"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-					t.Errorf("Decode() error = %v", err)
+					t.Error(err)
 				}
-				texts <- body.Content.Text
+				code = body.Payload.Code
+				w.WriteHeader(200)
 			}))
-			t.Cleanup(server.Close)
-
-			settingsStore := settings.NewMemoryStore(&settings.Settings{
-				Auth:     settings.Auth{OTPRequired: true, AuthProviders: []string{"lark"}},
-				Channels: map[string]settings.Channel{"lark": {Endpoint: server.URL}},
-			})
-			if err := settingsStore.SetLocale(t.Context(), tt.recorded); err != nil {
-				t.Fatalf("SetLocale() error = %v", err)
-			}
-			if err := newOTP(settingsStore, newAuthTestStore(t)).Send(t.Context(), tt.lang); err != nil {
-				t.Fatalf("Send() error = %v", err)
-			}
-			if got := <-texts; !strings.Contains(got, tt.want) {
-				t.Fatalf("sent text = %q, want it to contain %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestEnabledAuthProviders(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		settings settings.Settings
-		want     []string
-	}{
-		{
-			name: "normalizes provider names",
-			settings: settings.Settings{
-				Auth: settings.Auth{
-					AuthProviders: []string{" Telegram "},
-				},
-				Channels: map[string]settings.Channel{
-					"telegram": {
-						Enabled: new(true),
-					},
-				},
-			},
-			want: []string{"telegram"},
-		},
-		{
-			name: "matches channel names case-insensitively",
-			settings: settings.Settings{
-				Auth: settings.Auth{
-					AuthProviders: []string{"telegram"},
-				},
-				Channels: map[string]settings.Channel{
-					"Telegram": {
-						Enabled: new(true),
-					},
-				},
-			},
-			want: []string{"telegram"},
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got, err := enabledAuthProviders(tt.settings)
+			defer delivery.Close()
+			db, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "auth.db"))
 			if err != nil {
-				t.Fatalf("enabledAuthProviders() error = %v", err)
+				t.Fatal(err)
 			}
-			if !slices.Equal(got, tt.want) {
-				t.Fatalf("enabledAuthProviders() = %v, want %v", got, tt.want)
+			t.Cleanup(func() {
+				if err := db.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			cfg := settings.Default()
+			cfg.Auth.Mode = "otp"
+
+			cfg.Auth.OTP.Channels = []string{"http"}
+			cfg.Channels["http"] = settings.Channel{Endpoint: delivery.URL}
+			store := settings.NewMemoryStore(cfg)
+			s, err := appauth.NewStore(db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := New(store, s)
+			e := echo.New()
+			e.HTTPErrorHandler = httpapi.HTTPErrorHandler
+			e.POST("/challenges", h.CreateOTPChallenge)
+			e.POST("/sessions", h.CreateSession)
+			e.POST("/refreshes", h.RefreshSession)
+			e.GET("/current", h.CurrentSession, middleware.Auth(s, store))
+			e.DELETE("/current", h.DeleteSession, middleware.Auth(s, store))
+			send := func(method, path, body, token string, cookie *http.Cookie) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(method, "https://sigmo.example"+path, strings.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Origin", "https://sigmo.example")
+				if token != "" {
+					req.Header.Set("Authorization", "Bearer "+token)
+				}
+				if cookie != nil {
+					req.AddCookie(cookie)
+				}
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+				return rec
+			}
+			challenge := send("POST", "/challenges", "{}", "", nil)
+			if challenge.Code != 201 || code == "" {
+				t.Fatalf("challenge %d %s", challenge.Code, challenge.Body)
+			}
+			var issued struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal(challenge.Body.Bytes(), &issued); err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(map[string]string{"method": "otp", "client": client, "challengeId": issued.ID, "code": code})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response := send("POST", "/sessions", string(body), "", nil)
+			if response.Code != 201 {
+				t.Fatalf("login %d %s", response.Code, response.Body)
+			}
+			var tokens appauth.Tokens
+			var cookie *http.Cookie
+			if client == "web" {
+				if response.Body.Len() != 0 {
+					t.Fatal("browser received raw credentials")
+				}
+				cookies := response.Result().Cookies()
+				if len(cookies) != 1 {
+					t.Fatal("missing cookie")
+				}
+				cookie = cookies[0]
+				if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode || cookie.Domain != "" {
+					t.Fatalf("unsafe cookie: %+v", cookie)
+				}
+			} else {
+				if err := json.Unmarshal(response.Body.Bytes(), &tokens); err != nil {
+					t.Fatal(err)
+				}
+				if tokens.AccessToken == "" || tokens.RefreshToken == "" {
+					t.Fatal("missing native credentials")
+				}
+			}
+			if rec := send("GET", "/current", "", tokens.AccessToken, cookie); rec.Code != 200 {
+				t.Fatalf("session %d %s", rec.Code, rec.Body)
+			}
+			if rec := send("POST", "/sessions", string(body), "", nil); rec.Code != 401 {
+				t.Fatal("OTP replay accepted")
+			}
+			if rec := send("DELETE", "/current", "", tokens.AccessToken, cookie); rec.Code != 204 {
+				t.Fatal("logout failed")
+			}
+			if rec := send("GET", "/current", "", tokens.AccessToken, cookie); rec.Code != 401 {
+				t.Fatal("logout did not revoke server state")
+			}
+			if bytes.Contains(challenge.Body.Bytes(), []byte(code)) {
+				t.Fatal("challenge response exposed OTP")
 			}
 		})
 	}
-}
-
-func TestSendOTPRejectsInvalidAuthProviderConfig(t *testing.T) {
-	t.Parallel()
-
-	h := New(settings.NewMemoryStore(&settings.Settings{
-		Auth: settings.Auth{
-			OTPRequired:   true,
-			AuthProviders: []string{"telegram"},
-		},
-		Channels: map[string]settings.Channel{
-			"telegram": {
-				Enabled:    new(false),
-				BotToken:   "draft-token",
-				Recipients: settings.Recipients{"123456"},
-			},
-		},
-	}), newAuthTestStore(t))
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/otp", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	if err := h.SendOTP(c); err != nil {
-		t.Fatalf("SendOTP() error = %v", err)
-	}
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
-	}
-}
-
-func TestOTPVerify(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name      string
-		required  bool
-		issueCode bool
-		code      string
-		wantErr   error
-		wantToken bool
-	}{
-		{
-			name:    "disabled rejects verify",
-			code:    "000000",
-			wantErr: errOTPNotRequired,
-		},
-		{
-			name:     "enabled rejects invalid code",
-			required: true,
-			code:     "000000",
-			wantErr:  errInvalidOTP,
-		},
-		{
-			name:      "enabled accepts issued code",
-			required:  true,
-			issueCode: true,
-			wantToken: true,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			store := newAuthTestStore(t)
-			code := tt.code
-			if tt.issueCode {
-				issued, _, err := store.IssueOTP()
-				if err != nil {
-					t.Fatalf("IssueOTP() error = %v", err)
-				}
-				code = issued
-			}
-
-			settingsStore := settings.NewMemoryStore(&settings.Settings{Auth: settings.Auth{OTPRequired: tt.required}})
-			otp := newOTP(settingsStore, store)
-			token, err := otp.Verify(t.Context(), code)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("Verify() error = %v, want %v", err, tt.wantErr)
-			}
-			if gotToken := token != ""; gotToken != tt.wantToken {
-				t.Fatalf("Verify() token present = %v, want %v", gotToken, tt.wantToken)
-			}
-			if tt.wantToken {
-				if _, err := otp.Verify(t.Context(), code); !errors.Is(err, errInvalidOTP) {
-					t.Fatalf("Verify() reused OTP error = %v, want %v", err, errInvalidOTP)
-				}
-			}
-		})
-	}
-}
-
-func newAuthTestStore(t *testing.T) *appauth.Store {
-	t.Helper()
-	db, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
-	if err != nil {
-		t.Fatalf("storage.Open() error = %v", err)
-	}
-	t.Cleanup(func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("Close() error = %v", err)
-		}
-	})
-	store, err := appauth.NewStore(db)
-	if err != nil {
-		t.Fatalf("appauth.NewStore() error = %v", err)
-	}
-	return store
 }

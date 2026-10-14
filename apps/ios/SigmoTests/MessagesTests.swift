@@ -62,6 +62,27 @@ final class MessagesTests: XCTestCase {
         XCTAssertEqual(messages.items.map(\.id), ["conversation-history"])
     }
 
+    func testInactiveReplyCanAdoptCurrentSIM() async throws {
+        let fixture = MessagesFixture(), session = try await session(fixture)
+        let list = MessagesState(session: session, modemID: "device-1")
+        await list.load()
+        let historical = try XCTUnwrap(list.items.first { $0.id == "conversation-inactive" })
+        let thread = list.thread(historical)
+        thread.draft = "Reply using current SIM"
+        XCTAssertFalse(thread.canSend)
+        XCTAssertTrue(thread.canUseActive)
+        thread.useActiveProfile()
+        XCTAssertTrue(thread.canSend)
+        await thread.send()
+        XCTAssertNil(thread.failure)
+        XCTAssertTrue(thread.draft.isEmpty)
+        let requests = await fixture.requests
+        let request = try XCTUnwrap(requests.last { $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/messages") == true })
+        let body = try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: String]
+        XCTAssertEqual(body?["expectedProfileId"], session.modems.first?.sim.identifier)
+        XCTAssertNotEqual(thread.conversation.id, historical.id)
+    }
+
     func testSearchMatchesNumbersAndOlderTextWithExistingFilters() async throws {
         let fixture = MessagesFixture()
         let session = try await session(fixture)
@@ -194,7 +215,7 @@ final class MessagesTests: XCTestCase {
         await fixture.waitForHeld()
         list.newDraft = "private draft"
         list.search = "private query"
-        session.logout(); list.clear()
+        await session.logout(); list.clear()
         await fixture.release(); await load.value
         XCTAssertTrue(list.items.isEmpty)
         XCTAssertTrue(list.newDraft.isEmpty)

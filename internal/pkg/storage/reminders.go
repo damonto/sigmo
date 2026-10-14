@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/damonto/sigmo/internal/pkg/storage/query"
 )
 
+// Reminder keeps the SIM identity and revision used to claim scheduled notifications.
 type Reminder struct {
 	ProfileType string
 	ProfileID   string
@@ -23,34 +26,35 @@ type Reminder struct {
 
 const maxReminderRepeatDays = 3650
 
+// UpsertReminder replaces the schedule and increments its revision.
 func (s *Store) UpsertReminder(ctx context.Context, reminder Reminder) error {
 	if err := validateReminderRecord(reminder); err != nil {
 		return err
 	}
 	now := nowText()
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO reminders (
-			profile_type, profile_id, modem_id, se_id, profile_name,
-			next_at, repeat_days, content, created_at, updated_at, revision
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-		ON CONFLICT(profile_type, profile_id) DO UPDATE SET
-			modem_id = excluded.modem_id,
-			se_id = excluded.se_id,
-			profile_name = excluded.profile_name,
-			next_at = excluded.next_at,
-			repeat_days = excluded.repeat_days,
-			content = excluded.content,
-			updated_at = excluded.updated_at,
-			revision = reminders.revision + 1
-	`, reminder.ProfileType, reminder.ProfileID, reminder.ModemID, reminder.SEID,
-		reminder.ProfileName, reminderTimeText(reminder.NextAt), reminder.RepeatDays,
-		reminder.Content, now, now)
+	var repeatDays sql.NullInt64
+	if reminder.RepeatDays != nil {
+		repeatDays = sql.NullInt64{Int64: int64(*reminder.RepeatDays), Valid: true}
+	}
+	err := query.New(s.db).UpsertReminder(ctx, query.UpsertReminderParams{
+		ProfileType: reminder.ProfileType,
+		ProfileID:   reminder.ProfileID,
+		ModemID:     reminder.ModemID,
+		SEID:        reminder.SEID,
+		ProfileName: reminder.ProfileName,
+		NextAt:      reminderTimeText(reminder.NextAt),
+		RepeatDays:  repeatDays,
+		Content:     reminder.Content,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
 	if err != nil {
 		return fmt.Errorf("save reminder: %w", err)
 	}
 	return nil
 }
 
+// Reminder reports whether the requested SIM has a reminder.
 func (s *Store) Reminder(ctx context.Context, profileType, profileID string) (Reminder, bool, error) {
 	profileType = strings.TrimSpace(profileType)
 	profileID = strings.TrimSpace(profileID)
@@ -58,64 +62,43 @@ func (s *Store) Reminder(ctx context.Context, profileType, profileID string) (Re
 		return Reminder{}, false, errors.New("reminder profile identity is required")
 	}
 
-	var reminder Reminder
-	var nextAt string
-	var repeatDays sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `
-		SELECT profile_type, profile_id, modem_id, se_id, profile_name,
-			next_at, repeat_days, content, revision
-		FROM reminders
-		WHERE profile_type = ? AND profile_id = ?
-	`, profileType, profileID).Scan(
-		&reminder.ProfileType, &reminder.ProfileID, &reminder.ModemID, &reminder.SEID,
-		&reminder.ProfileName, &nextAt, &repeatDays, &reminder.Content, &reminder.Revision,
-	)
+	row, err := query.New(s.db).Reminder(ctx, query.ReminderParams{
+		ProfileType: profileType,
+		ProfileID:   profileID,
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return Reminder{}, false, nil
 	}
 	if err != nil {
 		return Reminder{}, false, fmt.Errorf("read reminder: %w", err)
 	}
-	if reminder.NextAt, err = parseReminderTime(nextAt); err != nil {
+	reminder, err := reminderFromRow(row)
+	if err != nil {
 		return Reminder{}, false, err
-	}
-	if repeatDays.Valid {
-		days := int(repeatDays.Int64)
-		reminder.RepeatDays = &days
 	}
 	return reminder, true, nil
 }
 
+// DueReminders returns reminders in scheduled order, preserving subsecond precision.
 func (s *Store) DueReminders(ctx context.Context, now time.Time) ([]Reminder, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT profile_type, profile_id, modem_id, se_id, profile_name,
-			next_at, repeat_days, content, revision
-		FROM reminders
-		WHERE next_at <= ?
-		ORDER BY next_at ASC
-	`, reminderTimeText(now))
+	rows, err := query.New(s.db).DueReminders(ctx, reminderTimeText(now))
 	if err != nil {
 		return nil, fmt.Errorf("list due reminders: %w", err)
 	}
-	defer rows.Close()
-
-	reminders := make([]Reminder, 0)
-	for rows.Next() {
-		reminder, err := scanReminder(rows)
+	reminders := make([]Reminder, 0, len(rows))
+	for _, row := range rows {
+		reminder, err := reminderFromRow(row)
 		if err != nil {
 			return nil, err
 		}
 		reminders = append(reminders, reminder)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list due reminders: %w", err)
-	}
 	return reminders, nil
 }
 
+// NextReminderAt reports the earliest scheduled notification time.
 func (s *Store) NextReminderAt(ctx context.Context) (time.Time, bool, error) {
-	var raw string
-	err := s.db.QueryRowContext(ctx, `SELECT next_at FROM reminders ORDER BY next_at ASC LIMIT 1`).Scan(&raw)
+	raw, err := query.New(s.db).NextReminderAt(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, false, nil
 	}
@@ -129,15 +112,17 @@ func (s *Store) NextReminderAt(ctx context.Context) (time.Time, bool, error) {
 	return nextAt, true, nil
 }
 
+// DeleteReminder removes the reminder if it exists.
 func (s *Store) DeleteReminder(ctx context.Context, profileType, profileID string) error {
 	profileType = strings.TrimSpace(profileType)
 	profileID = strings.TrimSpace(profileID)
 	if profileType == "" || profileID == "" {
 		return errors.New("reminder profile identity is required")
 	}
-	if _, err := s.db.ExecContext(ctx, `
-		DELETE FROM reminders WHERE profile_type = ? AND profile_id = ?
-	`, profileType, profileID); err != nil {
+	if err := query.New(s.db).DeleteReminder(ctx, query.DeleteReminderParams{
+		ProfileType: profileType,
+		ProfileID:   profileID,
+	}); err != nil {
 		return fmt.Errorf("delete reminder: %w", err)
 	}
 	return nil
@@ -150,17 +135,14 @@ func (s *Store) ClaimReminder(ctx context.Context, reminder Reminder) (Reminder,
 		return Reminder{}, false, fmt.Errorf("begin reminder claim: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }() // A committed claim has nothing to roll back.
-	result, err := tx.ExecContext(ctx, `
-		UPDATE reminders
-		SET revision = revision + 1, updated_at = ?
-		WHERE profile_type = ? AND profile_id = ? AND revision = ?
-	`, nowText(), reminder.ProfileType, reminder.ProfileID, reminder.Revision)
+	changed, err := query.New(tx).ClaimReminder(ctx, query.ClaimReminderParams{
+		UpdatedAt:   nowText(),
+		ProfileType: reminder.ProfileType,
+		ProfileID:   reminder.ProfileID,
+		Revision:    reminder.Revision,
+	})
 	if err != nil {
 		return Reminder{}, false, fmt.Errorf("claim reminder: %w", err)
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return Reminder{}, false, fmt.Errorf("read claimed reminder count: %w", err)
 	}
 	if changed == 0 {
 		return Reminder{}, false, nil
@@ -175,33 +157,30 @@ func (s *Store) ClaimReminder(ctx context.Context, reminder Reminder) (Reminder,
 	return reminder, true, nil
 }
 
+// DeleteClaimedReminder deletes only the claimed revision, preserving concurrent edits.
 func (s *Store) DeleteClaimedReminder(ctx context.Context, reminder Reminder) (bool, error) {
-	result, err := s.db.ExecContext(ctx, `
-		DELETE FROM reminders
-		WHERE profile_type = ? AND profile_id = ? AND revision = ?
-	`, reminder.ProfileType, reminder.ProfileID, reminder.Revision)
+	changed, err := query.New(s.db).DeleteClaimedReminder(ctx, query.DeleteClaimedReminderParams{
+		ProfileType: reminder.ProfileType,
+		ProfileID:   reminder.ProfileID,
+		Revision:    reminder.Revision,
+	})
 	if err != nil {
 		return false, fmt.Errorf("delete claimed reminder: %w", err)
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("read deleted reminder count: %w", err)
 	}
 	return changed > 0, nil
 }
 
+// AdvanceClaimedReminder reschedules only the claimed revision, preserving concurrent edits.
 func (s *Store) AdvanceClaimedReminder(ctx context.Context, reminder Reminder, nextAt time.Time) (bool, error) {
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE reminders
-		SET next_at = ?, updated_at = ?, revision = revision + 1
-		WHERE profile_type = ? AND profile_id = ? AND revision = ?
-	`, reminderTimeText(nextAt), nowText(), reminder.ProfileType, reminder.ProfileID, reminder.Revision)
+	changed, err := query.New(s.db).AdvanceClaimedReminder(ctx, query.AdvanceClaimedReminderParams{
+		NextAt:      reminderTimeText(nextAt),
+		UpdatedAt:   nowText(),
+		ProfileType: reminder.ProfileType,
+		ProfileID:   reminder.ProfileID,
+		Revision:    reminder.Revision,
+	})
 	if err != nil {
 		return false, fmt.Errorf("advance claimed reminder: %w", err)
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("read advanced reminder count: %w", err)
 	}
 	return changed > 0, nil
 }
@@ -237,22 +216,23 @@ func reminderTimeText(value time.Time) string {
 	return value.UTC().Format("2006-01-02T15:04:05.000000000Z")
 }
 
-func scanReminder(rows *sql.Rows) (Reminder, error) {
-	var reminder Reminder
-	var nextAt string
-	var repeatDays sql.NullInt64
-	if err := rows.Scan(
-		&reminder.ProfileType, &reminder.ProfileID, &reminder.ModemID, &reminder.SEID,
-		&reminder.ProfileName, &nextAt, &repeatDays, &reminder.Content, &reminder.Revision,
-	); err != nil {
-		return Reminder{}, fmt.Errorf("scan reminder: %w", err)
-	}
-	var err error
-	if reminder.NextAt, err = parseReminderTime(nextAt); err != nil {
+func reminderFromRow(row query.Reminder) (Reminder, error) {
+	nextAt, err := parseReminderTime(row.NextAt)
+	if err != nil {
 		return Reminder{}, err
 	}
-	if repeatDays.Valid {
-		days := int(repeatDays.Int64)
+	reminder := Reminder{
+		ProfileType: row.ProfileType,
+		ProfileID:   row.ProfileID,
+		ModemID:     row.ModemID,
+		SEID:        row.SEID,
+		ProfileName: row.ProfileName,
+		NextAt:      nextAt,
+		Content:     row.Content,
+		Revision:    row.Revision,
+	}
+	if row.RepeatDays.Valid {
+		days := int(row.RepeatDays.Int64)
 		reminder.RepeatDays = &days
 	}
 	return reminder, nil

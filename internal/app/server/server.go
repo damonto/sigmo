@@ -272,7 +272,16 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	if err != nil {
 		return fmt.Errorf("configure request validator: %w", err)
 	}
-	requestLogger := middleware.RequestLogger()
+	// Callback queries contain credentials; log only the matched route template.
+	requestLogger := middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		LogRoutePath: true, LogMethod: true, LogStatus: true, LogLatency: true,
+		HandleError: true,
+		LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
+			slog.InfoContext(c.Request().Context(), "http request", "route", v.RoutePath,
+				"method", v.Method, "status", v.Status, "duration", v.Latency)
+			return nil
+		},
+	})
 	server.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		logged := requestLogger(next)
 		return func(c *echo.Context) error {
@@ -284,11 +293,6 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	})
 	server.Use(middleware.RequestID())
 	server.Use(middleware.Recover())
-	server.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{"*"},
-		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch, http.MethodHead, http.MethodOptions},
-		AllowHeaders: []string{"*"},
-	}))
 	lpaClients, err := lpa.NewPool(ctx, store, registry)
 	if err != nil {
 		return fmt.Errorf("configure LPA client pool: %w", err)

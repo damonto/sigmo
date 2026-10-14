@@ -1,9 +1,59 @@
 package storage
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestReminderClaimRollsBackWithPush(t *testing.T) {
+	s := testStore(t)
+	ctx := t.Context()
+	if err := s.UpsertNativeSubscription(ctx, NativeSubscription{
+		ID:             "subscription",
+		InstallationID: "phone",
+		SendToken:      strings.Repeat("s", 32),
+		EncryptionKey:  make([]byte, 32),
+		Reminders:      true,
+		Enabled:        true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertReminder(ctx, Reminder{
+		ProfileType: "esim",
+		ProfileID:   "sim-a",
+		NextAt:      time.Now(),
+		Content:     "renew",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, found, err := s.Reminder(ctx, "esim", "sim-a")
+	if err != nil || !found {
+		t.Fatalf("reminder before claim: found = %v, error = %v", found, err)
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TRIGGER reject_reminder_push BEFORE INSERT ON native_push_outbox
+		BEGIN SELECT RAISE(ABORT, 'injected push failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err := s.ClaimReminder(ctx, before); err == nil || claimed {
+		t.Fatalf("claim with push failure: claimed = %v, error = %v", claimed, err)
+	}
+	after, found, err := s.Reminder(ctx, "esim", "sim-a")
+	if err != nil || !found || after.Revision != before.Revision {
+		t.Fatalf("claim survived rollback: reminder = %+v, found = %v, error = %v", after, found, err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DROP TRIGGER reject_reminder_push`); err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, err := s.ClaimReminder(ctx, before)
+	if err != nil || !ok || claimed.Revision != before.Revision+1 {
+		t.Fatalf("retry claim: reminder = %+v, claimed = %v, error = %v", claimed, ok, err)
+	}
+	var deliveries int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM native_push_outbox WHERE event_id LIKE 'reminder:%'`).Scan(&deliveries); err != nil || deliveries != 1 {
+		t.Fatalf("reminder deliveries = %d, want 1, error = %v", deliveries, err)
+	}
+}
 
 func TestReminderStorage(t *testing.T) {
 	ctx := t.Context()

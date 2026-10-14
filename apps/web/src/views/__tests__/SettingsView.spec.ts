@@ -1,11 +1,12 @@
 import { defineComponent, nextTick, ref, type Ref } from 'vue'
+import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter, RouterView, type Router } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SettingsKeyValueField from '@/components/settings/SettingsKeyValueField.vue'
 import SettingsLayout from '@/layouts/SettingsLayout.vue'
-import type { SettingsResponse, SettingsValues } from '@/types/settings'
+import type { SettingsAuth, SettingsResponse, SettingsValues } from '@/types/settings'
 import SettingsAuthView from '@/views/SettingsAuthView.vue'
 import SettingsNotificationsView from '@/views/SettingsNotificationsView.vue'
 import SettingsProxyView from '@/views/SettingsProxyView.vue'
@@ -18,6 +19,7 @@ const api = vi.hoisted(() => ({
   updateAuth: vi.fn(),
   updateProxy: vi.fn(),
   updateNotificationChannel: vi.fn(),
+  updateNotifications: vi.fn(),
 }))
 
 const toast = vi.hoisted(() => ({
@@ -46,10 +48,19 @@ type SettingsApiResult = { data: Ref<SettingsResponse | undefined> }
 
 const values = (): SettingsValues => ({
   auth: {
-    authProviders: [],
-    otpRequired: false,
-    tokenValidityDays: 30,
+    otpChannels: [],
+    mode: 'otp',
+
+    oidcIssuer: '',
+    oidcClientId: '',
+    oidcClientSecret: '',
+    oidcAllowedSubjects: [],
+    accessTeamDomain: '',
+    accessAudience: '',
+    accessAllowedSubjects: [],
+    sessionMaxDays: 30,
   },
+  notifications: { channels: [] },
   proxy: {
     listenAddress: '127.0.0.1',
     httpPort: 8080,
@@ -58,7 +69,6 @@ const values = (): SettingsValues => ({
   },
   channels: {
     telegram: {
-      enabled: true,
       botToken: 'secret',
       recipients: ['10001'],
       headers: {
@@ -72,17 +82,12 @@ const response = (): SettingsResponse => ({
   schema: {
     auth: [
       {
-        key: 'otpRequired',
-        label: 'OTP required',
-        control: 'switch',
-      },
-      {
-        key: 'authProviders',
+        key: 'otpChannels',
         label: 'Auth providers',
         control: 'channelList',
       },
       {
-        key: 'tokenValidityDays',
+        key: 'sessionMaxDays',
         label: 'Token validity',
         control: 'number',
         min: 1,
@@ -273,6 +278,11 @@ const createSettingsRouter = () =>
 const mountSettings = async (path: string, settings = response()) => {
   api.getSettings.mockResolvedValue({ data: ref<SettingsResponse>(clone(settings)) })
   api.testAuth.mockResolvedValue({ data: ref<void>() })
+  api.updateNotifications.mockImplementation(async (payload: SettingsValues['notifications']) => {
+    const updated = clone(settings)
+    updated.values.notifications = clone(payload)
+    return { data: ref<SettingsResponse>(updated) }
+  })
   api.updateAuth.mockImplementation(async (payload: SettingsValues['auth']) => {
     const updated = clone(settings)
     updated.values.auth = clone(payload)
@@ -287,14 +297,14 @@ const mountSettings = async (path: string, settings = response()) => {
     async (channel: string, payload: SettingsValues['channels'][string]) => {
       const updated = clone(settings)
       updated.values.channels[channel] = clone(payload)
-      if (payload.enabled !== true) {
-        updated.values.auth.authProviders = updated.values.auth.authProviders.filter(
-          (provider) => provider !== channel,
-        )
-      }
       return { data: ref<SettingsResponse>(updated) }
     },
   )
+  api.updateNotifications.mockImplementation(async (payload: SettingsValues['notifications']) => {
+    const updated = clone(settings)
+    updated.values.notifications = clone(payload)
+    return { data: ref<SettingsResponse>(updated) }
+  })
 
   const router = createSettingsRouter()
   await router.push(path)
@@ -302,7 +312,7 @@ const mountSettings = async (path: string, settings = response()) => {
 
   const wrapper = mount(Root, {
     global: {
-      plugins: [router],
+      plugins: [createPinia(), router],
       stubs,
     },
   })
@@ -377,7 +387,7 @@ describe('Settings routes', () => {
   it('keeps unsaved edits while navigating and saves each module independently', async () => {
     const { wrapper, router } = await mountSettings('/settings/auth')
 
-    await wrapper.get('#settings-auth-otpRequired').trigger('click')
+    await wrapper.get('#settings-auth-sessionMaxDays').setValue('45')
     await navigate(router, '/settings/proxy')
     await wrapper.get('#settings-proxy-httpPort').setValue('9090')
     await save(wrapper)
@@ -386,10 +396,12 @@ describe('Settings routes', () => {
     expect(api.updateAuth).not.toHaveBeenCalled()
 
     await navigate(router, '/settings/auth')
-    expect(wrapper.get('#settings-auth-otpRequired').attributes('aria-checked')).toBe('true')
+    expect((wrapper.get('#settings-auth-sessionMaxDays').element as HTMLInputElement).value).toBe(
+      '45',
+    )
     await save(wrapper)
 
-    expect(api.updateAuth).toHaveBeenCalledWith(expect.objectContaining({ otpRequired: true }))
+    expect(api.updateAuth).toHaveBeenCalledWith(expect.objectContaining({ sessionMaxDays: 45 }))
   })
 
   it('does not include unsaved notification drafts in the auth save', async () => {
@@ -412,8 +424,7 @@ describe('Settings routes', () => {
   it('renders schema fields and saves selected auth providers', async () => {
     const { wrapper } = await mountSettings('/settings/auth')
 
-    expect(wrapper.get('#settings-auth-otpRequired').attributes('role')).toBe('switch')
-    const tokenValidity = wrapper.get('#settings-auth-tokenValidityDays')
+    const tokenValidity = wrapper.get('#settings-auth-sessionMaxDays')
     expect((tokenValidity.element as HTMLInputElement).value).toBe('30')
     expect(tokenValidity.attributes('min')).toBe('1')
     expect(tokenValidity.attributes('max')).toBe('180')
@@ -423,8 +434,8 @@ describe('Settings routes', () => {
     await authProvider.trigger('click')
     await save(wrapper)
 
-    expect(api.updateAuth.mock.calls[0]?.[0].authProviders).toEqual(['telegram'])
-    expect(api.updateAuth.mock.calls[0]?.[0].tokenValidityDays).toBe(90)
+    expect(api.updateAuth.mock.calls[0]?.[0].otpChannels).toEqual(['telegram'])
+    expect(api.updateAuth.mock.calls[0]?.[0].sessionMaxDays).toBe(90)
   })
 
   it('renders the responsive auth test action above save', async () => {
@@ -459,7 +470,7 @@ describe('Settings routes', () => {
     await testButton?.trigger('click')
     await flushPromises()
 
-    expect(api.testAuth).toHaveBeenCalledWith({ authProviders: ['telegram'] })
+    expect(api.testAuth).toHaveBeenCalledWith({ channels: ['telegram'] })
     expect(api.updateAuth).not.toHaveBeenCalled()
     expect(toast.success).toHaveBeenCalledWith('settings.authTestSuccess')
   })
@@ -496,22 +507,46 @@ describe('Settings routes', () => {
     const settings = response()
     settings.schema.auth[0] = {
       ...settings.schema.auth[0]!,
-      label: 'settings.schema.auth.otpRequired.label',
-      description: 'settings.schema.auth.otpRequired.description',
+      label: 'settings.schema.auth.otpChannels',
+      description: 'settings.schema.auth.sessionMaxDaysDescription',
     }
-    settings.schema.auth.push({
-      key: 'mystery',
-      label: 'Mystery',
+    settings.schema.auth[1] = {
+      key: 'sessionMaxDays',
+      label: 'Session days',
       control: 'unsupported' as never,
-    })
+    }
 
     const { wrapper } = await mountSettings('/settings/auth', settings)
 
-    expect(wrapper.text()).toContain('settings.schema.auth.otpRequired.label')
-    expect(wrapper.text()).toContain('settings.schema.auth.otpRequired.description')
+    expect(wrapper.text()).toContain('settings.schema.auth.otpChannels')
+    expect(wrapper.text()).toContain('settings.schema.auth.sessionMaxDaysDescription')
     expect(wrapper.text()).toContain('Unsupported control: unsupported')
-    expect(wrapper.find('input#settings-auth-mystery').exists()).toBe(false)
+    expect(wrapper.find('input#settings-auth-sessionMaxDays').exists()).toBe(false)
   })
+
+  it.each<SettingsAuth['mode']>(['none', 'otp', 'oidc', 'cloudflare_access'])(
+    'shows only configuration fields for %s',
+    async (mode) => {
+      const settings = response()
+      settings.values.auth.mode = mode
+      settings.schema.auth.push(
+        { key: 'oidcIssuer', label: 'OIDC issuer', control: 'text' },
+        { key: 'accessTeamDomain', label: 'Access team URL', control: 'text' },
+        { key: 'accessAudience', label: 'Access application AUD', control: 'text' },
+      )
+      const { wrapper } = await mountSettings('/settings/auth', settings)
+
+      expect(wrapper.find('#settings-auth-sessionMaxDays').exists()).toBe(mode === 'otp')
+      expect(wrapper.find('[role="checkbox"]').exists()).toBe(mode === 'otp')
+      expect(wrapper.find('#settings-auth-oidcIssuer').exists()).toBe(mode === 'oidc')
+      expect(wrapper.findAll('button').some((button) => button.text() === 'settings.test')).toBe(
+        mode === 'otp',
+      )
+      for (const key of ['accessTeamDomain', 'accessAudience']) {
+        expect(wrapper.find(`#settings-auth-${key}`).exists()).toBe(mode === 'cloudflare_access')
+      }
+    },
+  )
 })
 
 describe('Settings notifications', () => {
@@ -519,7 +554,7 @@ describe('Settings notifications', () => {
     vi.clearAllMocks()
   })
 
-  it('renders each channel as a card and expands the first enabled channel', async () => {
+  it('renders each channel as a card and expands the first configured channel', async () => {
     const { wrapper } = await mountSettings('/settings/notifications')
 
     expect(wrapper.findAll('main [data-slot="card"]')).toHaveLength(2)
@@ -531,22 +566,101 @@ describe('Settings notifications', () => {
     expect(wrapper.find('.fixed.inset-x-0.bottom-0').exists()).toBe(false)
   })
 
-  it('expands a disabled channel without enabling it', async () => {
+  it('expands an unconfigured channel without saving or selecting it', async () => {
     const { wrapper } = await mountSettings('/settings/notifications')
 
-    expect(wrapper.get('#settings-channel-email-enabled').attributes('aria-checked')).toBe('false')
+    expect(api.updateNotificationChannel).not.toHaveBeenCalled()
     await wrapper.get('button[aria-controls="settings-channel-email-details"]').trigger('click')
 
     expect(wrapper.find('#settings-channel-email-smtpHost').exists()).toBe(true)
-    expect(wrapper.get('#settings-channel-email-enabled').attributes('aria-checked')).toBe('false')
+    expect(api.updateNotificationChannel).not.toHaveBeenCalled()
   })
 
-  it('saves one disabled channel, preserves its fields, and removes it from auth providers', async () => {
+  it('offers a new channel for notifications and OTP only after its configuration is saved', async () => {
     const settings = response()
-    settings.values.auth.authProviders = ['telegram']
+    settings.values.channels = {}
+    const { wrapper, router } = await mountSettings('/settings/notifications', settings)
+
+    expect(wrapper.text()).toContain('settings.noConfiguredChannels')
+    expect(wrapper.find('[role="checkbox"]').exists()).toBe(false)
+    await wrapper.get('button[aria-controls="settings-channel-telegram-details"]').trigger('click')
+    await wrapper.get('#settings-channel-telegram-botToken').setValue('secret')
+    await wrapper.get('#settings-channel-telegram-recipients .tags-input-add').trigger('click')
+    expect(wrapper.find('[role="checkbox"]').exists()).toBe(false)
+
+    await wrapper.get('#settings-channel-telegram-save').trigger('click')
+    await flushPromises()
+    expect(
+      wrapper.get('#settings-notifications-channels-telegram').attributes('aria-checked'),
+    ).toBe('false')
+    expect(api.updateNotifications).not.toHaveBeenCalled()
+
+    await navigate(router, '/settings/auth')
+    expect(wrapper.get('#settings-auth-otpChannels-telegram').attributes('aria-checked')).toBe(
+      'false',
+    )
+    expect(api.updateAuth).not.toHaveBeenCalled()
+  })
+
+  it('saves notification selection independently and permits disabling every notification channel', async () => {
+    const settings = response()
+    settings.values.auth.otpChannels = ['telegram']
+    const { wrapper, router } = await mountSettings('/settings/notifications', settings)
+
+    await wrapper.get('#settings-notifications-channels-telegram').trigger('click')
+    expect(api.updateNotifications).not.toHaveBeenCalled()
+    await wrapper.get('#settings-notifications-save').trigger('click')
+    await flushPromises()
+
+    expect(api.updateNotifications).toHaveBeenLastCalledWith({ channels: ['telegram'] })
+    expect(toast.success).toHaveBeenCalledWith('settings.saveSuccess')
+    expect(api.updateAuth).not.toHaveBeenCalled()
+    expect(api.updateNotificationChannel).not.toHaveBeenCalled()
+
+    await wrapper.get('#settings-notifications-channels-telegram').trigger('click')
+    await wrapper.get('#settings-notifications-save').trigger('click')
+    await flushPromises()
+    expect(api.updateNotifications).toHaveBeenLastCalledWith({ channels: [] })
+
+    await navigate(router, '/settings/auth')
+    expect(wrapper.get('#settings-auth-otpChannels-telegram').attributes('aria-checked')).toBe(
+      'true',
+    )
+  })
+
+  it('keeps notification selections after an unsuccessful save and releases the saving state', async () => {
+    const { wrapper } = await mountSettings('/settings/notifications')
+    let resolveSave: ((value: SettingsApiResult) => void) | undefined
+    api.updateNotifications.mockImplementationOnce(
+      () =>
+        new Promise<SettingsApiResult>((resolve) => {
+          resolveSave = resolve
+        }),
+    )
+    await wrapper.get('#settings-notifications-channels-telegram').trigger('click')
+    await wrapper.get('#settings-notifications-save').trigger('click')
+    expect(
+      wrapper.get('#settings-notifications-channels-telegram').attributes('disabled'),
+    ).toBeDefined()
+    expect(wrapper.get('#settings-channel-telegram-save').attributes('disabled')).toBeDefined()
+    expect(toast.success).not.toHaveBeenCalled()
+
+    resolveSave?.({ data: ref(undefined) })
+    await flushPromises()
+    expect(
+      wrapper.get('#settings-notifications-channels-telegram').attributes('aria-checked'),
+    ).toBe('true')
+    expect(wrapper.get('#settings-notifications-save').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('#settings-channel-telegram-save').attributes('disabled')).toBeUndefined()
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it('saves channel configuration independently from authentication and notification routing', async () => {
+    const settings = response()
+    settings.values.auth.otpChannels = ['telegram']
     const { wrapper } = await mountSettings('/settings/notifications', settings)
 
-    await wrapper.get('#settings-channel-telegram-enabled').trigger('click')
+    await wrapper.get('#settings-channel-telegram-botToken').setValue('new-secret')
     expect(wrapper.find('#settings-channel-telegram-recipients').exists()).toBe(true)
     await wrapper.get('#settings-channel-telegram-save').trigger('click')
     await flushPromises()
@@ -556,8 +670,7 @@ describe('Settings notifications', () => {
     expect(api.updateNotificationChannel).toHaveBeenCalledTimes(1)
     expect(api.updateNotificationChannel.mock.calls[0]?.[0]).toBe('telegram')
     expect(api.updateNotificationChannel.mock.calls[0]?.[1]).toMatchObject({
-      enabled: false,
-      botToken: 'secret',
+      botToken: 'new-secret',
       recipients: ['10001'],
       headers: { Authorization: 'Bearer token' },
     })
@@ -656,7 +769,6 @@ describe('Settings notifications', () => {
     const settings = response()
     settings.values.channels = {
       email: {
-        enabled: true,
         tlsPolicy: 'opportunistic',
       },
     }

@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Trash2 } from 'lucide-vue-next'
-import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
 
-import { Button } from '@/components/ui/button'
+import MessageConversationRow from '@/components/communication/MessageConversationRow.vue'
 import type { ConversationItem } from '@/composables/useModemMessages'
 
 const props = defineProps<{
@@ -16,8 +13,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'delete', item: ConversationItem): void
 }>()
-
-const { t } = useI18n()
 
 const threadRoute = computed(() => ({
   name: 'modem-message-thread',
@@ -48,57 +43,23 @@ const avatarTone = computed(() => {
 </script>
 
 <template>
-  <div
-    class="rounded-lg bg-card px-4 py-3 shadow-sm ring-1 ring-transparent transition hover:shadow-md"
-    :class="props.selected ? 'bg-primary/5 ring-primary/20' : ''"
+  <MessageConversationRow
+    :to="threadRoute"
+    :name="item.participantLabel"
+    :preview="item.preview"
+    :timestamp="item.timestampLabel"
+    :line="item.lineLabel"
+    :unread-count="item.unreadCount"
+    :selected="selected"
+    @delete="emit('delete', item)"
   >
-    <div class="flex items-center gap-3">
-      <RouterLink
-        :to="threadRoute"
-        class="flex min-w-0 flex-1 items-center gap-3"
+    <template #avatar>
+      <span
+        class="flex size-11 shrink-0 items-center justify-center rounded-full text-base font-semibold"
+        :class="avatarTone"
+        aria-hidden="true"
+        >{{ avatarLabel }}</span
       >
-        <span
-          class="flex size-11 shrink-0 items-center justify-center rounded-full text-base font-semibold shadow-sm ring-1"
-          :class="avatarTone"
-          aria-hidden="true"
-        >
-          {{ avatarLabel }}
-        </span>
-
-        <span class="min-w-0 flex-1 space-y-1">
-          <span class="flex min-w-0 items-center justify-between gap-3">
-            <span class="truncate text-sm font-semibold text-foreground">
-              {{ props.item.participantLabel }}
-            </span>
-            <span class="shrink-0 text-xs font-medium text-muted-foreground">
-              {{ props.item.timestampLabel }}
-            </span>
-          </span>
-          <span class="block truncate text-xs text-muted-foreground">
-            {{ props.item.preview }}
-          </span>
-          <span class="block truncate text-xs text-muted-foreground">{{
-            props.item.lineLabel
-          }}</span>
-          <span
-            v-if="props.item.unreadCount"
-            class="block text-xs font-semibold text-primary"
-          >
-            {{ t('modemDetail.messages.unread') }} · {{ props.item.unreadCount }}
-          </span>
-        </span>
-      </RouterLink>
-
-      <Button
-        variant="ghost"
-        size="icon"
-        type="button"
-        class="size-8 shrink-0 opacity-80 transition hover:text-destructive focus-visible:opacity-100"
-        :aria-label="t('modemDetail.actions.delete')"
-        @click.stop.prevent="emit('delete', props.item)"
-      >
-        <Trash2 class="size-4" />
-      </Button>
-    </div>
-  </div>
+    </template>
+  </MessageConversationRow>
 </template>

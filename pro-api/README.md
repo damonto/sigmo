@@ -56,7 +56,6 @@ Native push and Calls use incremental migrations `0004_native_push.sql` and
 `0005_native_calls.sql`. Deploy the gateway before the updated Go backend and
 iOS app; see [iOS Calls](../docs/ios-calls.md) for token separation and rollout.
 The HTTP error-format transition also requires coordinated Worker, Go/Web, and
-iOS versions; see [HTTP API contract](../docs/http-api-contract.md#发布与回滚).
 
 ## Source layout
 
@@ -328,3 +327,15 @@ the compressed bytes with `Content-Type: application/gzip` and never sets
    update flow.
 8. Remove legacy Telegram file-distribution secrets and scripts after the Bot
    download flow is verified in production.
+
+## Native sign-in callback
+
+The Worker hosts `/auth/callback` and `/.well-known/apple-app-site-association` on
+`sigmo-pro.952007.xyz`. The callback is a static fallback for iOS HTTPS browser
+authentication and never reflects authorization parameters. Automatic invocation
+logs and traces are disabled so callback queries do not enter request telemetry.
+
+The AASA app ID must match the signing team and bundle ID in `apps/ios/project.yml`.
+These routes need no new database migration or secret. See the
+[authentication guide](../internal/app/auth/README.md) for provider setup,
+deployment checks, migration, and recovery.

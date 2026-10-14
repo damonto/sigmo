@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useCapabilities } from '@/composables/useCapabilities'
+import HistoryAssignments from '@/components/communication/HistoryAssignments.vue'
 import { computed, ref, watch } from 'vue'
 import { useForm } from '@tanstack/vue-form'
 import { EllipsisVertical } from 'lucide-vue-next'
@@ -125,6 +127,8 @@ const detailsProfile = ref<EsimProfile | null>(null)
 
 const deleteOpen = ref(false)
 const deleteProfile = ref<EsimProfile | null>(null)
+const communicationCapabilities = useCapabilities()
+const historySource = ref('')
 const deleteLoading = ref(false)
 
 const reminderOpen = ref(false)
@@ -244,6 +248,7 @@ const confirmDelete = async (event?: Event) => {
   deleteLoading.value = true
   try {
     await esimApi.deleteEsim(props.modemId, deleteProfile.value.seId, deleteProfile.value.iccid)
+    historySource.value = deleteProfile.value.iccid
     profiles.value = profiles.value.filter((profile) => profile.id !== deleteProfile.value?.id)
     closeDeleteDialog()
   } catch (err) {
@@ -370,6 +375,10 @@ watch(detailsOpen, (value) => {
 </script>
 
 <template>
+  <HistoryAssignments
+    v-if="historySource && communicationCapabilities.hasFeature('historyAssignments')"
+    :source-id="historySource"
+  />
   <section class="space-y-3">
     <div class="flex items-center justify-between">
       <h2 class="text-sm font-semibold text-muted-foreground">

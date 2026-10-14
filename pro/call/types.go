@@ -44,21 +44,24 @@ type SendDTMFRequest struct {
 
 // CallResponse shares stable call identity and ownership with web and native clients.
 type CallResponse struct {
-	BackendID     string `json:"backendId" jsonschema:"persistent backend instance identifier"`
-	CallUUID      string `json:"callUUID" jsonschema:"stable UUID shared by call snapshots and native incoming-call invitations"`
-	ProfileID     string `json:"profileId" jsonschema:"SIM profile identifier for the original call line"`
-	OwnerClientID string `json:"ownerClientId" jsonschema:"exclusive controlling client identifier; empty until the call is claimed"`
-	ID            string `json:"callID" jsonschema:"Sigmo call-record identifier; use this exact value as callId when deleting the record"`
-	Route         string `json:"route" jsonschema:"call transport route, such as VoLTE or Wi-Fi Calling"`
-	Direction     string `json:"direction" jsonschema:"call direction: incoming or outgoing"`
-	Number        string `json:"number" jsonschema:"remote party phone number"`
-	State         string `json:"state" jsonschema:"last recorded call state"`
-	Hold          string `json:"hold" jsonschema:"last recorded hold state; none when the call was not held"`
-	Reason        string `json:"reason" jsonschema:"termination or state-change reason; empty when unavailable"`
-	StartedAt     string `json:"startedAt" jsonschema:"call start time as an RFC 3339 timestamp"`
-	AnsweredAt    string `json:"answeredAt" jsonschema:"answer time as an RFC 3339 timestamp; empty when unanswered"`
-	EndedAt       string `json:"endedAt" jsonschema:"end time as an RFC 3339 timestamp; empty while not ended"`
-	UpdatedAt     string `json:"updatedAt" jsonschema:"last record update time as an RFC 3339 timestamp"`
+	ModemID          string `json:"modemId" jsonschema:"original modem identifier; retained when history is assigned to another SIM"`
+	LineLabel        string `json:"lineLabel" jsonschema:"display label of the original SIM"`
+	HistoryProfileID string `json:"historyProfileId" jsonschema:"SIM currently owning the archived record"`
+	BackendID        string `json:"backendId" jsonschema:"persistent backend instance identifier"`
+	CallUUID         string `json:"callUUID" jsonschema:"stable UUID shared by call snapshots and native incoming-call invitations"`
+	ProfileID        string `json:"profileId" jsonschema:"SIM profile identifier for the original call line"`
+	OwnerClientID    string `json:"ownerClientId" jsonschema:"exclusive controlling client identifier; empty until the call is claimed"`
+	ID               string `json:"callID" jsonschema:"Sigmo call-record identifier; use this exact value as callId when deleting the record"`
+	Route            string `json:"route" jsonschema:"call transport route, such as VoLTE or Wi-Fi Calling"`
+	Direction        string `json:"direction" jsonschema:"call direction: incoming or outgoing"`
+	Number           string `json:"number" jsonschema:"remote party phone number"`
+	State            string `json:"state" jsonschema:"last recorded call state"`
+	Hold             string `json:"hold" jsonschema:"last recorded hold state; none when the call was not held"`
+	Reason           string `json:"reason" jsonschema:"termination or state-change reason; empty when unavailable"`
+	StartedAt        string `json:"startedAt" jsonschema:"call start time as an RFC 3339 timestamp"`
+	AnsweredAt       string `json:"answeredAt" jsonschema:"answer time as an RFC 3339 timestamp; empty when unanswered"`
+	EndedAt          string `json:"endedAt" jsonschema:"end time as an RFC 3339 timestamp; empty while not ended"`
+	UpdatedAt        string `json:"updatedAt" jsonschema:"last record update time as an RFC 3339 timestamp"`
 }
 
 type EventMessage struct {

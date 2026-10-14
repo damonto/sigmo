@@ -1,7 +1,6 @@
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 
 import { resolveAPIWebSocketURL } from '@/lib/apiUrl'
-import { getStoredToken } from '@/lib/authStorage'
 import type {
   SimApplicationMenu,
   SimApplicationMenuItem,
@@ -183,9 +182,7 @@ export const useSimApplicationSession = (modemId: Ref<string>) => {
     clearError()
     if (!id || id === 'unknown') return
 
-    const conn = new WebSocket(
-      resolveAPIWebSocketURL(`modems/${id}/sim-application/sessions`, getStoredToken()),
-    )
+    const conn = new WebSocket(resolveAPIWebSocketURL(`modems/${id}/sim-application/sessions`))
     ws = conn
     conn.onmessage = (event) => {
       if (ws !== conn) return

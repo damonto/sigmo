@@ -16,7 +16,7 @@ type websheetState struct {
 
 func (p *proApp) Websheets() *websheet.Broker {
 	if p.websheet.broker == nil {
-		p.websheet.broker = websheet.New(websheet.Config{})
+		p.websheet.broker = websheet.New(websheet.Config{PolicyID: func() string { return p.runtime.Store.Snapshot().Auth.PolicyID() }})
 	}
 	return p.websheet.broker
 }
@@ -26,8 +26,8 @@ func (p *proApp) RegisterWebsheets() {
 		return
 	}
 	p.websheet.routesRegistered = true
-	p.runtime.AddRoute(func(group *echo.Group, _ router.RegisterConfig) error {
-		websheet.RegisterRoutes(group, p.Websheets())
+	p.runtime.AddRoute(func(_ *echo.Group, deps router.RegisterConfig) error {
+		websheet.RegisterRoutes(deps.ResourceRoutes, p.Websheets())
 		return nil
 	})
 }

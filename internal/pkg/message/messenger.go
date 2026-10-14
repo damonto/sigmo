@@ -155,7 +155,7 @@ func (s *Messenger) SendWithProfile(ctx context.Context, modem *mmodem.Modem, re
 	return s.send(ctx, realModemDevice{modemRef: modem}, req.To, req.Text)
 }
 
-func (s *Messenger) send(ctx context.Context, device modemDevice, to string, text string) (string, error) {
+func (s *Messenger) send(ctx context.Context, device modemDevice, to string, text string) (recipient string, sendErr error) {
 	if strings.TrimSpace(to) == "" {
 		return "", ErrRecipientRequired
 	}
@@ -171,6 +171,16 @@ func (s *Messenger) send(ctx context.Context, device modemDevice, to string, tex
 	if err != nil {
 		return "", err
 	}
+	// A deferred success check covers legacy and pinned sends, including IMS fallback.
+	defer func() {
+		if sendErr != nil {
+			return
+		}
+		if err := s.store.RememberCommunication(ctx, storage.CommunicationPreference{Participant: recipient, ProfileID: profileID}); err != nil {
+			// The carrier already accepted the SMS; a send failure would invite duplicates.
+			slog.WarnContext(ctx, "remember sent message line", "error", err)
+		}
+	}()
 	status, err := s.routeStatus(ctx, device.modem())
 	if err != nil {
 		return "", fmt.Errorf("read message route status: %w", err)

@@ -2,17 +2,17 @@
 package nativepush
 
 import (
-	"crypto/sha256"
+	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"net/http"
 	"regexp"
-	"strings"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/httpapi"
+	"github.com/damonto/sigmo/internal/app/middleware"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -68,6 +68,10 @@ func (h *Handler) Register(c *echo.Context) error {
 		len(req.Label) > 128 || len(req.BackendName) > 256 {
 		return httpapi.UnprocessableEntity(c, "invalid_native_push_subscription", errors.New("invalid native push subscription"))
 	}
+	binding, err := h.requestSession(c)
+	if err != nil {
+		return httpapi.Internal(c, "bind_push_session_failed", err)
+	}
 	sub := storage.NativeSubscription{
 		ID:             req.ID,
 		InstallationID: req.InstallationID,
@@ -75,7 +79,7 @@ func (h *Handler) Register(c *echo.Context) error {
 		BackendName:    req.BackendName,
 		SendToken:      req.SendToken,
 		EncryptionKey:  key,
-		AuthTokenHash:  requestTokenHash(c),
+		AuthSessionID:  binding,
 		SMS:            req.SMS,
 		Reminders:      req.Reminders,
 		Calls:          req.Calls,
@@ -102,13 +106,17 @@ func (h *Handler) Update(c *echo.Context) error {
 	if req.Label != nil && len(*req.Label) > 128 {
 		return httpapi.UnprocessableEntity(c, "invalid_native_push_subscription", errors.New("push device name is too long"))
 	}
+	binding, err := h.requestSession(c)
+	if err != nil {
+		return httpapi.Internal(c, "bind_push_session_failed", err)
+	}
 	sub, err := h.store.UpdateNativeSubscription(c.Request().Context(), c.Param("subscriptionId"), storage.NativeSubscriptionUpdate{
 		SMS:           req.SMS,
 		Reminders:     req.Reminders,
 		Calls:         req.Calls,
 		Enabled:       req.Enabled,
 		Label:         req.Label,
-		AuthTokenHash: requestTokenHash(c),
+		AuthSessionID: binding,
 	})
 	if errors.Is(err, storage.ErrNotFound) {
 		return httpapi.Error(c, http.StatusNotFound, "native_push_subscription_not_found", "push subscription not found")
@@ -127,14 +135,15 @@ func (h *Handler) Delete(c *echo.Context) error {
 	return c.NoContent(http.StatusNoContent)
 }
 
-func requestTokenHash(c *echo.Context) string {
-	token := strings.TrimSpace(strings.TrimPrefix(c.Request().Header.Get("Authorization"), "Bearer "))
-	if token == "" {
-		token = strings.TrimSpace(c.QueryParam("token"))
+func (h *Handler) requestSession(c *echo.Context) (string, error) {
+	session := middleware.CurrentSession(c)
+	if session.Method != "cloudflare_access" {
+		return session.ID, nil
 	}
-	if token == "" {
-		return ""
+	// Edge authorization is a lease bounded by the assertion, never an indefinite push grant.
+	session.ID, session.CreatedAt = rand.Text(), time.Now()
+	if err := h.store.CreateAuthSession(c.Request().Context(), session, nil); err != nil {
+		return "", err
 	}
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
+	return session.ID, nil
 }

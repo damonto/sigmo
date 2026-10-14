@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/damonto/sigmo/internal/pkg/storage/query"
 )
 
 // NativeSubscription contains only one installation's delegated gateway credentials.
@@ -24,7 +26,7 @@ type NativeSubscription struct {
 	Enabled        bool   `json:"enabled"`
 	SendToken      string `json:"-"`
 	EncryptionKey  []byte `json:"-"`
-	AuthTokenHash  string `json:"-"`
+	AuthSessionID  string `json:"-"`
 }
 
 // NativeSubscriptionUpdate changes selected preferences and renews backend access.
@@ -35,7 +37,7 @@ type NativeSubscriptionUpdate struct {
 	Calls         *bool
 	Enabled       *bool
 	Label         *string
-	AuthTokenHash string
+	AuthSessionID string
 }
 
 // PushContent is encrypted before it leaves the owning Sigmo backend.
@@ -68,42 +70,8 @@ type NativeDelivery struct {
 	ExpiresAt    time.Time
 }
 
-func migrateNativePush(ctx context.Context, tx *sql.Tx) error {
-	statements := []string{
-		`CREATE TABLE IF NOT EXISTS native_push_subscriptions (
-			id TEXT PRIMARY KEY,
-			installation_id TEXT NOT NULL UNIQUE,
-			label TEXT NOT NULL,
-			backend_name TEXT NOT NULL,
-			send_token TEXT NOT NULL,
-			encryption_key BLOB NOT NULL,
-			auth_token_hash TEXT NOT NULL,
-			sms INTEGER NOT NULL,
-			reminders INTEGER NOT NULL,
-			enabled INTEGER NOT NULL
-		)`,
-		`CREATE TABLE IF NOT EXISTS native_push_outbox (
-			subscription_id TEXT NOT NULL REFERENCES native_push_subscriptions(id) ON DELETE CASCADE,
-			event_id TEXT NOT NULL,
-			revision INTEGER NOT NULL,
-			content_json TEXT NOT NULL,
-			attempts INTEGER NOT NULL DEFAULT 0,
-			next_at INTEGER NOT NULL,
-			expires_at INTEGER NOT NULL,
-			PRIMARY KEY(subscription_id, event_id)
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_native_push_due ON native_push_outbox(next_at)`,
-	}
-	for _, statement := range statements {
-		if _, err := tx.ExecContext(ctx, statement); err != nil {
-			return fmt.Errorf("create native push schema: %w", err)
-		}
-	}
-	return nil
-}
-
 func advanceMessageState(ctx context.Context, tx *sql.Tx) error {
-	if _, err := tx.ExecContext(ctx, `UPDATE message_state SET revision = revision + 1 WHERE id = 1`); err != nil {
+	if err := query.New(tx).AdvanceMessageState(ctx); err != nil {
 		return fmt.Errorf("advance message state: %w", err)
 	}
 	return enqueueNativePush(ctx, tx, pushRecord{EventID: "badge", Content: PushContent{Kind: "badge"}})
@@ -120,20 +88,13 @@ func enqueueNativePush(ctx context.Context, tx *sql.Tx, record pushRecord) error
 		return fmt.Errorf("encode notification record: %w", err)
 	}
 	now := time.Now()
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO native_push_outbox (subscription_id, event_id, revision, content_json, next_at, expires_at)
-		SELECT id, ?, (SELECT revision FROM message_state WHERE id = 1), ?, ?, ?
-		FROM native_push_subscriptions
-		WHERE ? = 'badge' OR (enabled = 1 AND ((? = 'sms' AND sms = 1) OR (? = 'reminder' AND reminders = 1)))
-		ON CONFLICT(subscription_id, event_id) DO UPDATE SET
-			revision = excluded.revision,
-			content_json = excluded.content_json,
-			next_at = MAX(native_push_outbox.next_at, excluded.next_at),
-			expires_at = excluded.expires_at,
-			attempts = 0
-		WHERE excluded.event_id = 'badge'
-	`, record.EventID, string(content), now.UnixMilli(), now.Add(24*time.Hour).UnixMilli(),
-		record.Content.Kind, record.Content.Kind, record.Content.Kind)
+	err = query.New(tx).EnqueueNativePush(ctx, query.EnqueueNativePushParams{
+		EventID:     record.EventID,
+		ContentJSON: string(content),
+		NextAt:      now.UnixMilli(),
+		ExpiresAt:   now.Add(24 * time.Hour).UnixMilli(),
+		Kind:        record.Content.Kind,
+	})
 	if err != nil {
 		return fmt.Errorf("enqueue native push: %w", err)
 	}
@@ -184,39 +145,27 @@ func (s *Store) UpsertNativeSubscription(ctx context.Context, sub NativeSubscrip
 		return fmt.Errorf("begin push registration: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }() // Rollback after commit is harmless.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM native_push_subscriptions WHERE installation_id = ? AND id <> ?`, sub.InstallationID, sub.ID); err != nil {
+	queries := query.New(tx)
+	if err := queries.DeleteReplacedNativeSubscription(ctx, query.DeleteReplacedNativeSubscriptionParams{
+		InstallationID: sub.InstallationID, ID: sub.ID,
+	}); err != nil {
 		return fmt.Errorf("replace push grant: %w", err)
 	}
-	result, err := tx.ExecContext(ctx, `
-		INSERT INTO native_push_subscriptions (
-			id, installation_id, label, backend_name, send_token, encryption_key,
-			auth_token_hash, sms, reminders, enabled, calls
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			installation_id = excluded.installation_id,
-			label = excluded.label,
-			backend_name = excluded.backend_name,
-			send_token = excluded.send_token,
-			encryption_key = excluded.encryption_key,
-			auth_token_hash = excluded.auth_token_hash,
-			sms = excluded.sms,
-			reminders = excluded.reminders,
-			enabled = excluded.enabled,
-			calls = excluded.calls
-		WHERE installation_id <> excluded.installation_id OR label <> excluded.label
-			OR backend_name <> excluded.backend_name OR send_token <> excluded.send_token
-			OR encryption_key <> excluded.encryption_key OR auth_token_hash <> excluded.auth_token_hash
-			OR sms <> excluded.sms OR reminders <> excluded.reminders
-			OR enabled <> excluded.enabled OR calls <> excluded.calls
-	`, sub.ID, sub.InstallationID, sub.Label, sub.BackendName, sub.SendToken, sub.EncryptionKey,
-		sub.AuthTokenHash, sub.SMS, sub.Reminders, sub.Enabled, sub.Calls)
+	changed, err := queries.UpsertNativeSubscription(ctx, query.UpsertNativeSubscriptionParams{
+		ID:             sub.ID,
+		InstallationID: sub.InstallationID,
+		Label:          sub.Label,
+		BackendName:    sub.BackendName,
+		SendToken:      sub.SendToken,
+		EncryptionKey:  sub.EncryptionKey,
+		AuthSessionID:  sub.AuthSessionID,
+		Sms:            sub.SMS,
+		Reminders:      sub.Reminders,
+		Enabled:        sub.Enabled,
+		Calls:          sub.Calls,
+	})
 	if err != nil {
 		return fmt.Errorf("register native push: %w", err)
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("count updated subscriptions: %w", err)
 	}
 	if changed == 0 {
 		return nil
@@ -230,31 +179,32 @@ func (s *Store) UpsertNativeSubscription(ctx context.Context, sub NativeSubscrip
 	return nil
 }
 
-const nativeSubscriptionColumns = `id, installation_id, label, backend_name, sms, reminders,
-	enabled, send_token, encryption_key, auth_token_hash, calls`
-
 // NativeSubscription reads the current grant before sending a queued invitation.
 func (s *Store) NativeSubscription(ctx context.Context, id string) (NativeSubscription, error) {
-	return scanNativeSubscription(s.db.QueryRowContext(ctx,
-		`SELECT `+nativeSubscriptionColumns+` FROM native_push_subscriptions WHERE id = ?`, id))
-}
-
-type nativeSubscriptionScanner interface {
-	Scan(...any) error
-}
-
-func scanNativeSubscription(row nativeSubscriptionScanner) (NativeSubscription, error) {
-	var sub NativeSubscription
-	err := row.Scan(
-		&sub.ID, &sub.InstallationID, &sub.Label, &sub.BackendName, &sub.SMS, &sub.Reminders, &sub.Enabled,
-		&sub.SendToken, &sub.EncryptionKey, &sub.AuthTokenHash, &sub.Calls)
+	row, err := query.New(s.db).NativeSubscription(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return NativeSubscription{}, ErrNotFound
 	}
 	if err != nil {
 		return NativeSubscription{}, fmt.Errorf("read native subscription: %w", err)
 	}
-	return sub, nil
+	return nativeSubscriptionFromRow(row), nil
+}
+
+func nativeSubscriptionFromRow(row query.NativePushSubscription) NativeSubscription {
+	return NativeSubscription{
+		ID:             row.ID,
+		InstallationID: row.InstallationID,
+		Label:          row.Label,
+		BackendName:    row.BackendName,
+		SMS:            row.Sms,
+		Reminders:      row.Reminders,
+		Calls:          row.Calls,
+		Enabled:        row.Enabled,
+		SendToken:      row.SendToken,
+		EncryptionKey:  row.EncryptionKey,
+		AuthSessionID:  row.AuthSessionID,
+	}
 }
 
 // UpdateNativeSubscription keeps preference changes and their badge in one transaction.
@@ -265,11 +215,15 @@ func (s *Store) UpdateNativeSubscription(ctx context.Context, id string, update 
 		return NativeSubscription{}, fmt.Errorf("begin push preference update: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }() // A committed update has nothing to roll back.
-	sub, err := scanNativeSubscription(tx.QueryRowContext(ctx,
-		`SELECT `+nativeSubscriptionColumns+` FROM native_push_subscriptions WHERE id = ?`, id))
-	if err != nil {
-		return NativeSubscription{}, err
+	queries := query.New(tx)
+	row, err := queries.NativeSubscription(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return NativeSubscription{}, ErrNotFound
 	}
+	if err != nil {
+		return NativeSubscription{}, fmt.Errorf("read native subscription: %w", err)
+	}
+	sub := nativeSubscriptionFromRow(row)
 	previous := sub
 	if update.SMS != nil {
 		sub.SMS = *update.SMS
@@ -286,17 +240,16 @@ func (s *Store) UpdateNativeSubscription(ctx context.Context, id string, update 
 	if update.Label != nil {
 		sub.Label = *update.Label
 	}
-	sub.AuthTokenHash = update.AuthTokenHash
+	sub.AuthSessionID = update.AuthSessionID
 	if sub.SMS == previous.SMS && sub.Reminders == previous.Reminders &&
 		sub.Calls == previous.Calls && sub.Enabled == previous.Enabled &&
-		sub.Label == previous.Label && sub.AuthTokenHash == previous.AuthTokenHash {
+		sub.Label == previous.Label && sub.AuthSessionID == previous.AuthSessionID {
 		return sub, nil
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE native_push_subscriptions
-		SET sms = ?, reminders = ?, calls = ?, enabled = ?, label = ?, auth_token_hash = ?
-		WHERE id = ?
-	`, sub.SMS, sub.Reminders, sub.Calls, sub.Enabled, sub.Label, sub.AuthTokenHash, id); err != nil {
+	if err := queries.UpdateNativeSubscription(ctx, query.UpdateNativeSubscriptionParams{
+		Sms: sub.SMS, Reminders: sub.Reminders, Calls: sub.Calls, Enabled: sub.Enabled,
+		Label: sub.Label, AuthSessionID: sub.AuthSessionID, ID: id,
+	}); err != nil {
 		return NativeSubscription{}, fmt.Errorf("update push preferences: %w", err)
 	}
 	if err := advanceMessageState(ctx, tx); err != nil {
@@ -310,28 +263,20 @@ func (s *Store) UpdateNativeSubscription(ctx context.Context, id string, update 
 
 // NativeSubscriptions lists registrations; its JSON representation excludes secrets.
 func (s *Store) NativeSubscriptions(ctx context.Context) ([]NativeSubscription, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+nativeSubscriptionColumns+` FROM native_push_subscriptions ORDER BY label, id`)
+	rows, err := query.New(s.db).NativeSubscriptions(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list native subscriptions: %w", err)
 	}
-	defer rows.Close()
-	result := []NativeSubscription{}
-	for rows.Next() {
-		sub, err := scanNativeSubscription(rows)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, sub)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list native subscriptions: %w", err)
+	result := make([]NativeSubscription, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, nativeSubscriptionFromRow(row))
 	}
 	return result, nil
 }
 
 // DeleteNativeSubscription also cancels its pending deliveries.
 func (s *Store) DeleteNativeSubscription(ctx context.Context, id string) error {
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM native_push_subscriptions WHERE id = ?`, id); err != nil {
+	if err := query.New(s.db).DeleteNativeSubscription(ctx, id); err != nil {
 		return fmt.Errorf("delete native subscription: %w", err)
 	}
 	return nil
@@ -340,66 +285,47 @@ func (s *Store) DeleteNativeSubscription(ctx context.Context, id string) error {
 // DeleteNativeSubscriptionIfCurrent revokes only the credential used by an
 // in-flight request. A later registration must survive an older HTTP response.
 func (s *Store) DeleteNativeSubscriptionIfCurrent(ctx context.Context, sub NativeSubscription) (bool, error) {
-	result, err := s.db.ExecContext(ctx, `
-		DELETE FROM native_push_subscriptions
-		WHERE id = ? AND installation_id = ? AND send_token = ? AND auth_token_hash = ?
-	`, sub.ID, sub.InstallationID, sub.SendToken, sub.AuthTokenHash)
+	count, err := query.New(s.db).DeleteNativeSubscriptionIfCurrent(ctx, query.DeleteNativeSubscriptionIfCurrentParams{
+		ID: sub.ID, InstallationID: sub.InstallationID, SendToken: sub.SendToken, AuthSessionID: sub.AuthSessionID,
+	})
 	if err != nil {
 		return false, fmt.Errorf("revoke current native subscription: %w", err)
-	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("count revoked native subscriptions: %w", err)
 	}
 	return count != 0, nil
 }
 
 // NativeDeliveries returns a bounded batch; the server runs exactly one dispatcher.
 func (s *Store) NativeDeliveries(ctx context.Context, now time.Time) ([]NativeDelivery, error) {
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM native_push_outbox WHERE expires_at <= ?`, now.UnixMilli()); err != nil {
+	queries := query.New(s.db)
+	if err := queries.DeleteExpiredNativeDeliveries(ctx, now.UnixMilli()); err != nil {
 		return nil, fmt.Errorf("expire native deliveries: %w", err)
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT s.id, s.installation_id, s.label, s.backend_name, s.sms, s.reminders,
-			s.enabled, s.send_token, s.encryption_key, s.auth_token_hash, s.calls,
-			o.event_id, o.revision, o.content_json, o.attempts, o.expires_at
-		FROM native_push_outbox o
-		JOIN native_push_subscriptions s ON s.id = o.subscription_id
-		WHERE o.next_at <= ?
-		ORDER BY o.next_at, o.event_id LIMIT 20
-	`, now.UnixMilli())
+	rows, err := queries.NativeDeliveries(ctx, now.UnixMilli())
 	if err != nil {
 		return nil, fmt.Errorf("read native deliveries: %w", err)
 	}
-	defer rows.Close()
 	var result []NativeDelivery
-	for rows.Next() {
-		var item NativeDelivery
-		var raw string
-		var expires int64
-		sub := &item.Subscription
-		if err := rows.Scan(
-			&sub.ID, &sub.InstallationID, &sub.Label, &sub.BackendName, &sub.SMS, &sub.Reminders,
-			&sub.Enabled, &sub.SendToken, &sub.EncryptionKey, &sub.AuthTokenHash, &sub.Calls,
-			&item.EventID, &item.Revision, &raw, &item.Attempts, &expires,
-		); err != nil {
-			return nil, fmt.Errorf("scan native delivery: %w", err)
+	for _, row := range rows {
+		item := NativeDelivery{
+			Subscription: nativeSubscriptionFromRow(row.NativePushSubscription),
+			EventID:      row.EventID,
+			Revision:     row.Revision,
+			Attempts:     int(row.Attempts),
+			ExpiresAt:    time.UnixMilli(row.ExpiresAt),
 		}
-		if err := json.Unmarshal([]byte(raw), &item.Content); err != nil {
+		if err := json.Unmarshal([]byte(row.ContentJSON), &item.Content); err != nil {
 			return nil, fmt.Errorf("decode native delivery: %w", err)
 		}
-		item.ExpiresAt = time.UnixMilli(expires)
 		result = append(result, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read native deliveries: %w", err)
 	}
 	return result, nil
 }
 
 // FinishNativeDelivery never removes a newer badge that arrived during an HTTP request.
 func (s *Store) FinishNativeDelivery(ctx context.Context, item NativeDelivery) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM native_push_outbox WHERE subscription_id = ? AND event_id = ? AND revision = ?`, item.Subscription.ID, item.EventID, item.Revision)
+	err := query.New(s.db).FinishNativeDelivery(ctx, query.FinishNativeDeliveryParams{
+		SubscriptionID: item.Subscription.ID, EventID: item.EventID, Revision: item.Revision,
+	})
 	if err != nil {
 		return fmt.Errorf("finish native delivery: %w", err)
 	}
@@ -412,10 +338,13 @@ func (s *Store) RetryNativeDelivery(ctx context.Context, item NativeDelivery, re
 	delay := time.Duration(1<<min(item.Attempts+1, 7)) * time.Second
 	now := time.Now()
 	next := now.Add(delay)
+	queries := query.New(s.db)
 	if retryAt.After(now) {
 		// A newer badge can arrive before or after this response. Preserve the
 		// gateway's wait in either order without finishing the newer revision.
-		if _, err := s.db.ExecContext(ctx, `UPDATE native_push_outbox SET next_at = MAX(next_at, ?) WHERE subscription_id = ? AND event_id = ?`, retryAt.UnixMilli(), item.Subscription.ID, item.EventID); err != nil {
+		if err := queries.DeferNativeDelivery(ctx, query.DeferNativeDeliveryParams{
+			NextAt: retryAt.UnixMilli(), SubscriptionID: item.Subscription.ID, EventID: item.EventID,
+		}); err != nil {
 			return fmt.Errorf("defer native delivery: %w", err)
 		}
 	}
@@ -425,7 +354,9 @@ func (s *Store) RetryNativeDelivery(ctx context.Context, item NativeDelivery, re
 	if !next.Before(item.ExpiresAt) {
 		return s.FinishNativeDelivery(ctx, item)
 	}
-	_, err := s.db.ExecContext(ctx, `UPDATE native_push_outbox SET attempts = attempts + 1, next_at = MAX(next_at, ?) WHERE subscription_id = ? AND event_id = ? AND revision = ?`, next.UnixMilli(), item.Subscription.ID, item.EventID, item.Revision)
+	err := queries.RetryNativeDelivery(ctx, query.RetryNativeDeliveryParams{
+		NextAt: next.UnixMilli(), SubscriptionID: item.Subscription.ID, EventID: item.EventID, Revision: item.Revision,
+	})
 	if err != nil {
 		return fmt.Errorf("retry native delivery: %w", err)
 	}

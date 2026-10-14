@@ -16,6 +16,10 @@ enum PreviewBackends {
         var tokens: [UUID: String] = [:]
         let credentials = BackendCredentials(read: { tokens[$0] }, write: { tokens[$0] = $1 })
         let store = BackendStore(file: file, credentials: credentials, makeAPI: { configuration in
+            if scenario.hasPrefix("communication") {
+                let fixture = CommunicationFixture(contactName: configuration.id == studioID ? "Studio Contact" : "Alice", includesHistory: ["communication-history", "communication-multiple"].contains(scenario), modemContacts: scenario == "communication-modem")
+                return BackendAPI(configuration: configuration, transport: { try await fixture.respond($0) })
+            }
             if scenario.hasPrefix("calls") {
                 let fixture = CallsFixture(incoming: scenario == "calls-incoming")
                 return BackendAPI(configuration: configuration, transport: { try await fixture.respond($0) }, socketFactory: { await fixture.socket($0) })
@@ -35,6 +39,8 @@ enum PreviewBackends {
                 case "detail-no-discoveries": fixture = .noDiscoveries
                 case "detail-discovery-error": fixture = .unavailableDiscoveries
                 case "detail-empty-profiles": fixture = .emptyProfiles
+                case "detail-transfer-mixed": fixture = .mixedTransferProfiles
+                case "detail-transfer-unsupported": fixture = .unsupportedTransferProfiles
                 case "detail-deletion-loading": fixture = .delayedDeletion
                 case "detail-deletion-error": fixture = .deletionFailure
                 case "detail-activation-loading": fixture = .delayedActivation
@@ -63,12 +69,15 @@ enum PreviewBackends {
             })
         })
         if ProcessInfo.processInfo.environment["SIGMO_UI_RESET"] == "1" || !FileManager.default.fileExists(atPath: file.url.path) {
+            if scenario.hasPrefix("communication") { UserDefaults.standard.removeObject(forKey: "communication.backend") }
             do {
                 try file.save(BackendSettings())
                 store.reloadConfiguration()
                 if scenario != "empty" {
                     store.saveBackend(id: homeID, name: "Home", address: "https://home.sigmo.test")
-                    if !["single", "airplane", "ims-disabled", "messages", "refresh"].contains(scenario) && !scenario.hasPrefix("calls") && !scenario.hasPrefix("messages") {
+                    if scenario == "communication-multiple" {
+                        store.saveBackend(id: studioID, name: "Studio", address: "https://studio.sigmo.test")
+                    } else if !["single", "airplane", "ims-disabled", "messages", "refresh"].contains(scenario) && !scenario.hasPrefix("communication") && !scenario.hasPrefix("calls") && !scenario.hasPrefix("messages") {
                         store.saveBackend(id: studioID, name: "Studio", address: "https://studio.sigmo.test")
                         store.saveBackend(id: lockedID, name: "Locked", address: "https://locked.sigmo.test")
                         store.saveBackend(id: offlineID, name: "Offline", address: "https://offline.sigmo.test")
@@ -130,15 +139,16 @@ actor PreviewBackendServer {
         if path.hasSuffix("/capabilities") {
             return reply(200, host == "home.sigmo.test" ? #"{"features":["wifiCalling","esimTransfer","volte"]}"# : #"{"features":null}"#)
         }
-        if path.hasSuffix("/auth/otp/required") { return reply(200, #"{"otpRequired":\#(requiresOTP)}"#) }
-        if path.hasSuffix("/auth/otp/verify") {
-            if request.httpBody == Data(#"{"code":"123456"}"#.utf8) { return reply(200, #"{"token":"fixture-token"}"#) }
-            return HTTPProblem.response(status: 401, code: "invalid_otp", detail: "Invalid verification code", requestID: "fixture-request")
+        if path.hasSuffix("/auth/sessions/current") { return reply(204, "") }
+        if path.hasSuffix("/auth/methods") { return reply(200, AuthenticationFixture.methods(required: requiresOTP)) }
+        if path.hasSuffix("/auth/sessions") {
+            if AuthenticationFixture.validCode(request) { return reply(200, AuthenticationFixture.tokens("fixture-token")) }
+            return HTTPProblem.response(status: 401, code: "invalid_session", detail: "Invalid verification code", requestID: "fixture-request")
         }
-        if path.hasSuffix("/auth/otp") { return reply(201, "") }
+        if path.hasSuffix("/auth/otp/challenges") { return reply(201, AuthenticationFixture.challenge) }
         if path.contains("/modems") {
             if requiresOTP && request.value(forHTTPHeaderField: "Authorization") != "Bearer fixture-token" {
-                return HTTPProblem.response(status: 401, code: "invalid_token", detail: "Login required")
+                return HTTPProblem.response(status: 401, code: "invalid_session", detail: "Login required")
             }
             if path.hasSuffix("/ses") { return reply(200, #"{"ses":[]}"#) }
             if path.hasSuffix("/esims") { return reply(200, #"{"ses":[]}"#) }

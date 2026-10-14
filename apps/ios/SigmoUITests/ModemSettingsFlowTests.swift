@@ -16,7 +16,8 @@ final class ModemSettingsFlowTests: XCTestCase {
         let modem = app.descendants(matching: .any)["modem-00000000-0000-0000-0000-000000000001-device-1"].firstMatch
         XCTAssertTrue(modem.waitForExistence(timeout: 10))
         modem.tap()
-        let settings = app.tabBars.buttons[chinese ? "设置" : "Settings"]
+        XCTAssertFalse(app.tabBars.buttons[chinese ? "设置" : "Settings"].exists)
+        let settings = app.buttons["modemSettings"]
         XCTAssertTrue(settings.waitForExistence(timeout: 10))
         settings.tap()
         if waitForLoad { waitEnabled(app.buttons["modemDeviceSettings"]) }

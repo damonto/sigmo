@@ -1,17 +1,10 @@
 import { computed, onBeforeUnmount, ref, type Ref } from 'vue'
 
 import { resolveAPIWebSocketURL } from '@/lib/apiUrl'
-import { getStoredToken } from '@/lib/authStorage'
 import type { EsimDownloadPreview } from '@/types/esim'
 
 export type EsimDownloadState =
-  | 'idle'
-  | 'connecting'
-  | 'progress'
-  | 'preview'
-  | 'confirmation'
-  | 'completed'
-  | 'error'
+  'idle' | 'connecting' | 'progress' | 'preview' | 'confirmation' | 'completed' | 'error'
 
 export type EsimDownloadStage = 'initializing' | 'connecting' | 'installing' | ''
 
@@ -124,7 +117,7 @@ export const useEsimDownload = (modemId: Ref<string>, options?: Options) => {
   }
 
   const buildWsUrl = (id: string) => {
-    return resolveAPIWebSocketURL(`modems/${id}/esim-downloads/sessions`, getStoredToken())
+    return resolveAPIWebSocketURL(`modems/${id}/esim-downloads/sessions`)
   }
 
   const handleServerMessage = (message: DownloadServerMessage) => {

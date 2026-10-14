@@ -13,15 +13,16 @@ import (
 )
 
 const (
-	globalScopeKey      = "global"
-	authSettingsKey     = "auth.settings"
-	channelSettingsKey  = "notification.channels"
-	mcpSettingsKey      = "mcp.settings"
-	proxySettingsKey    = "proxy.settings"
-	modemSettingsKey    = "modem.settings"
-	modemSettingsPrefix = "modem:"
-	updateSettingsKey   = "update.settings"
-	localeKey           = "ui.locale"
+	globalScopeKey           = "global"
+	authSettingsKey          = "auth.settings"
+	channelSettingsKey       = "delivery.channels"
+	notificationsSettingsKey = "notification.settings"
+	mcpSettingsKey           = "mcp.settings"
+	proxySettingsKey         = "proxy.settings"
+	modemSettingsKey         = "modem.settings"
+	modemSettingsPrefix      = "modem:"
+	updateSettingsKey        = "update.settings"
+	localeKey                = "ui.locale"
 )
 
 var errStorageRequired = errors.New("settings storage is required")
@@ -68,18 +69,6 @@ func (s *Store) Snapshot() Settings {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.current.Clone()
-}
-
-func (s *Store) OTPRequired() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.current.Auth.OTPRequired
-}
-
-func (s *Store) TokenValidityDays() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.current.Auth.TokenValidityDays
 }
 
 func (s *Store) FindModem(id string) Modem {
@@ -140,6 +129,9 @@ func (s *Store) Update(ctx context.Context, update func(*Settings) error) (Setti
 		return Settings{}, err
 	}
 	next.ApplyDefaults()
+	if err := next.Validate(); err != nil {
+		return Settings{}, err
+	}
 	if err := s.save(ctx, next, s.updatesConfigured); err != nil {
 		return Settings{}, err
 	}
@@ -154,6 +146,9 @@ func (s *Store) SetUpdateSettings(ctx context.Context, updates Updates) (Setting
 	next := s.current.Clone()
 	next.Updates = updates
 	next.ApplyDefaults()
+	if err := next.Validate(); err != nil {
+		return Settings{}, err
+	}
 	if err := s.save(ctx, next, true); err != nil {
 		return Settings{}, err
 	}
@@ -187,6 +182,9 @@ func load(ctx context.Context, db *storage.Store) (Settings, bool, error) {
 		return Settings{}, false, err
 	}
 	if ok {
+		if auth.Mode == "" {
+			return Settings{}, false, errors.New("authentication mode is missing")
+		}
 		current.Auth = auth
 	}
 
@@ -199,6 +197,9 @@ func load(ctx context.Context, db *storage.Store) (Settings, bool, error) {
 		current.Channels = channels
 	}
 
+	if _, err := get(ctx, db, globalScopeKey, notificationsSettingsKey, &current.Notifications); err != nil {
+		return Settings{}, false, err
+	}
 	var proxy Proxy
 	ok, err = get(ctx, db, globalScopeKey, proxySettingsKey, &proxy)
 	if err != nil {
@@ -232,6 +233,9 @@ func load(ctx context.Context, db *storage.Store) (Settings, bool, error) {
 	}
 	current.Modems = modems
 	current.ApplyDefaults()
+	if err := current.Validate(); err != nil {
+		return Settings{}, false, fmt.Errorf("validate settings: %w", err)
+	}
 	return current, updatesConfigured, nil
 }
 
@@ -262,21 +266,29 @@ func (s *Store) save(ctx context.Context, current Settings, updatesConfigured bo
 	if s.db == nil {
 		return errStorageRequired
 	}
-	if err := s.db.Put(ctx, globalScopeKey, authSettingsKey, current.Auth); err != nil {
-		return err
-	}
-	if err := s.db.Put(ctx, globalScopeKey, channelSettingsKey, current.Channels); err != nil {
-		return err
-	}
-	if err := s.db.Put(ctx, globalScopeKey, mcpSettingsKey, current.MCP); err != nil {
-		return err
+	values := map[string]json.RawMessage{}
+	entries := []struct {
+		key   string
+		value any
+	}{
+		{authSettingsKey, current.Auth}, {channelSettingsKey, current.Channels},
+		{notificationsSettingsKey, current.Notifications}, {mcpSettingsKey, current.MCP},
+		{proxySettingsKey, current.ProxySettings()},
 	}
 	if updatesConfigured {
-		if err := s.db.Put(ctx, globalScopeKey, updateSettingsKey, current.Updates); err != nil {
-			return err
-		}
+		entries = append(entries, struct {
+			key   string
+			value any
+		}{updateSettingsKey, current.Updates})
 	}
-	return s.db.Put(ctx, globalScopeKey, proxySettingsKey, current.ProxySettings())
+	for _, entry := range entries {
+		data, err := json.Marshal(entry.value)
+		if err != nil {
+			return fmt.Errorf("encode %s: %w", entry.key, err)
+		}
+		values[entry.key] = data
+	}
+	return s.db.PutBatch(ctx, globalScopeKey, values)
 }
 
 func (s *Store) putModem(ctx context.Context, id string, modem Modem) error {

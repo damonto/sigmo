@@ -7,10 +7,10 @@ final class ModemSettingsTests: XCTestCase {
                       authenticated: Bool = false) async throws -> ModemSettingsState {
         let configuration = BackendConfiguration(name: host, address: try BackendAddress.normalize("https://\(host)/prefix"))
         let credentials = MemoryCredentials()
-        credentials.tokens[configuration.id] = "settings-token"
+        credentials.tokens[configuration.id] = storedCredential("settings-token")
         let api = BackendAPI(configuration: configuration, transport: { request in
-            if authenticated, request.url?.path.hasSuffix("/auth/otp/required") == true {
-                return BackendHTTPResponse(data: Data(#"{"otpRequired":true}"#.utf8), status: 200)
+            if authenticated, request.url?.path.hasSuffix("/auth/methods") == true {
+                return BackendHTTPResponse(data: Data(#"{"version":1,"mode":"otp","methods":["otp"]}"#.utf8), status: 200)
             }
             return try await server.respond(request)
         })
@@ -305,7 +305,7 @@ final class ModemSettingsTests: XCTestCase {
         await server.holdNext("/settings")
         let read = Task { await state.load([.device]) }
         await server.waitForHeldRequest()
-        state.session.logout()
+        await state.session.logout()
         state.clear()
         await server.release()
         await read.value

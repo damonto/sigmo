@@ -243,7 +243,7 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
         sourceId: source.id,
         sourceImei: sourceImei.value.trim(),
       })
-      profiles.value = data.value ?? []
+      profiles.value = (data.value ?? []).filter((profile) => profile.supported === true)
       applyTransferEvent({ type: 'ready' })
     } catch (err) {
       applyTransferEvent({ type: 'error', message: err instanceof Error ? err.message : '' })
@@ -254,7 +254,8 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
     const targetId = modemId.value
     const source = selectedSource.value
     const profile = selectedProfile.value
-    if (!targetId || targetId === 'unknown' || !seId.trim() || !source || !profile?.supported) return
+    if (!targetId || targetId === 'unknown' || !seId.trim() || !source || !profile?.supported)
+      return
     session.close()
     applyTransferEvent({ type: 'connecting' })
     previewProfile.value = null

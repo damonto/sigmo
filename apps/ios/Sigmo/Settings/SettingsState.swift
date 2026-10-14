@@ -6,6 +6,7 @@ final class SettingsState {
     let session: BackendSession
     private(set) var snapshot: SettingsResponse?
     var auth: SettingsFields = [:]
+    var notifications: SettingsFields = [:]
     var proxy: SettingsFields = [:]
     var channels: [String: SettingsFields] = [:]
     private(set) var failure: BackendFailure?
@@ -22,14 +23,15 @@ final class SettingsState {
         snapshot?.schema.channels.filter { $0.key.lowercased() != "webpush" } ?? []
     }
 
-    var enabledChannels: [NotificationSchema] {
-        channelSchemas.filter { snapshot?.values.channels?[$0.key]?["enabled"]?.bool == true }
+    var configuredChannels: [NotificationSchema] {
+        channelSchemas.filter { snapshot?.values.channels?[$0.key] != nil }
     }
 
     subscript(section: SettingsSection) -> SettingsFields {
         get {
             switch section {
             case .authentication: auth
+            case .notifications: notifications
             case .proxy: proxy
             case .notification(let channel): channels[channel] ?? [:]
             }
@@ -37,6 +39,7 @@ final class SettingsState {
         set {
             switch section {
             case .authentication: auth = newValue
+            case .notifications: notifications = newValue
             case .proxy: proxy = newValue
             case .notification(let channel): channels[channel] = newValue
             }
@@ -46,7 +49,8 @@ final class SettingsState {
 
     func fields(for section: SettingsSection) -> [SettingsField] {
         switch section {
-        case .authentication: snapshot?.schema.auth ?? []
+        case .authentication: (snapshot?.schema.auth ?? []).filter { authFieldVisible($0.key) }
+        case .notifications: [SettingsField(key: "channels", label: "settings.businessChannels", description: "settings.businessChannelsDescription", control: .channelList, required: false, secret: false, placeholder: nil, min: nil, max: nil, options: nil)]
         case .proxy: snapshot?.schema.proxy ?? []
         case .notification(let channel): channelSchemas.first { $0.key == channel }?.fields ?? []
         }
@@ -65,10 +69,11 @@ final class SettingsState {
             try check(current)
             snapshot = response
             auth = response.values.auth
+            notifications = response.values.notifications
             proxy = response.values.proxy
             channels = response.values.channels ?? [:]
             for channel in channelSchemas where channels[channel.key] == nil {
-                channels[channel.key] = ["enabled": .toggle(false)]
+                channels[channel.key] = [:]
             }
             failure = nil
         } catch {
@@ -81,6 +86,7 @@ final class SettingsState {
         busy = false
         snapshot = nil
         auth = [:]
+        notifications = [:]
         proxy = [:]
         channels = [:]
         failure = nil
@@ -89,22 +95,18 @@ final class SettingsState {
 
     func validation(for section: SettingsSection) -> String? {
         let values = self[section]
-        switch section {
-        case .authentication:
-            if values["otpRequired"]?.bool == true && values["authProviders"]?.strings.isEmpty != false {
-                return settingsText("settings.native.authProviderRequired")
-            }
-        case .notification(let channel):
-            let providers = snapshot?.values.auth["authProviders"]?.strings ?? []
-            if values["enabled"]?.bool != true && snapshot?.values.auth["otpRequired"]?.bool == true
-                && providers == [channel] {
-                return settingsText("settings.native.lastProvider")
-            }
-            return validation(fields: fields(for: section), values: values, enabled: values["enabled"]?.bool == true)
-        case .proxy:
-            break
+        if section == .authentication, values["mode"]?.text == "otp", values["otpChannels"]?.strings.isEmpty != false {
+            return settingsText("settings.native.authProviderRequired")
         }
         return validation(fields: fields(for: section), values: values)
+    }
+
+    private func authFieldVisible(_ key: String) -> Bool {
+        let mode = auth["mode"]?.text ?? "none"
+        if key == "mode" { return true }
+        if key.hasPrefix("access") { return mode == "cloudflare_access" }
+        if key.hasPrefix("oidc") { return mode == "oidc" }
+        return mode == "otp" && ["sessionMaxDays", "otpChannels"].contains(key)
     }
 
     func validation(fields: [SettingsField], values: SettingsFields, enabled: Bool = true) -> String? {
@@ -143,7 +145,9 @@ final class SettingsState {
             failure = BackendFailure(code: "validation", message: invalid)
             return
         }
-        let payload = Self.payload(self[section], fields: fields(for: section))
+        let payloadFields = section == .authentication ? snapshot?.schema.auth ?? [] : fields(for: section)
+        let payload = Self.payload(self[section], fields: payloadFields)
+        let request = payload
         let current = revision
         busy = true
         failure = nil
@@ -151,7 +155,7 @@ final class SettingsState {
         defer { if current == revision { busy = false } }
         do {
             let saved = try await session.protectedRequest { api, token in
-                try await api.saveSettings(section, fields: payload, token: token)
+                try await api.saveSettings(section, fields: request, token: token)
             }
             try check(current)
             snapshot = saved
@@ -159,22 +163,22 @@ final class SettingsState {
             case .authentication:
                 auth = saved.values.auth
                 await session.refreshAfterSettingsChange()
+            case .notifications:
+                notifications = saved.values.notifications
             case .proxy:
                 proxy = saved.values.proxy
             case .notification(let channel):
                 channels[channel] = saved.values.channels?[channel] ?? [:]
-                let enabled = Set(enabledChannels.map(\.key))
-                auth["authProviders"] = .list((auth["authProviders"]?.strings ?? []).filter { enabled.contains($0) })
+
             }
             try check(current)
-            message = "settings.saveSuccess"
         } catch {
             report(error, revision: current)
         }
     }
 
     func testAuth() async {
-        let providers = auth["authProviders"]?.strings ?? []
+        let providers = auth["otpChannels"]?.strings ?? []
         guard !busy, !Task.isCancelled, !providers.isEmpty else { return }
         let current = revision
         busy = true

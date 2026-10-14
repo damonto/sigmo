@@ -151,7 +151,7 @@ final class WiFiCallingState {
             let id = scope.modemID
             let presentation = try await scope.read { api, token in
                 let sheet = try await api.wifiCallingWebsheet(id, emergencyAddress: emergencyAddress, token: token)
-                return ConnectionWebsheet(sheet: sheet, url: try CarrierWebsheetAddress.url(sheet, api: api, token: token))
+                return ConnectionWebsheet(sheet: sheet, url: try CarrierWebsheetAddress.url(sheet, api: api))
             }
             guard revision == presentationRevision else { return }
             callbacks = []

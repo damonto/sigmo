@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import ModemMessagesItem from '@/components/modem/messages/ModemMessagesItem.vue'
-import ModemMessagesSkeletonList from '@/components/modem/messages/ModemMessagesSkeletonList.vue'
+import MessageListSkeleton from '@/components/communication/MessageListSkeleton.vue'
 import type { ConversationItem } from '@/composables/useModemMessages'
 
 const props = defineProps<{
@@ -27,7 +27,7 @@ const emptyStateLabel = computed(() => props.emptyLabel || t('modemDetail.messag
 
 <template>
   <section class="space-y-3">
-    <ModemMessagesSkeletonList v-if="props.isLoading && !hasItems" />
+    <MessageListSkeleton v-if="props.isLoading && !hasItems" />
 
     <div
       v-else-if="hasItems"

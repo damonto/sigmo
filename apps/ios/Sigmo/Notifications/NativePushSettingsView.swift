@@ -3,11 +3,14 @@ import SwiftUI
 struct NativePushSettingsView: View {
     let session: BackendSession
     @Environment(\.nativePush) private var push
+    @Environment(\.demoSession) private var demo
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         Form {
-            if let push {
+            if session.isDemo {
+                if let demo { DemoNotificationSettings(preferences: demo.notifications(for: session.id)) }
+            } else if let push {
                 Section {
                     LabeledContent("push.permission", value: push.allowed ? String(localized: "push.allowed") : String(localized: "push.denied"))
                     Button("push.systemSettings") {

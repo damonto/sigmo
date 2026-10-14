@@ -1,0 +1,36 @@
+name: Check database queries and migrations
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "internal/pkg/storage/**"
+      - "sqlc.yaml"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/storage.yml"
+  pull_request:
+    paths:
+      - "internal/pkg/storage/**"
+      - "sqlc.yaml"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/storage.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  storage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod }
+      - name: Check generated queries
+        run: |
+          go generate ./internal/pkg/storage
+          git diff --exit-code -- internal/pkg/storage/query
+          test -z "$(git status --porcelain -- internal/pkg/storage/query)"
+      - name: Test queries and database upgrades
+        run: go test ./internal/pkg/storage

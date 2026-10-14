@@ -16,12 +16,15 @@ export const useSettings = () => {
   const isTestingAuth = ref(false)
   const isSavingAuth = ref(false)
   const isSavingProxy = ref(false)
+  const isSavingNotifications = ref(false)
   const savingNotificationChannels = ref<Record<string, boolean>>({})
-  const isSavingNotification = computed(
-    () => Object.keys(savingNotificationChannels.value).length > 0,
-  )
+  const isSavingChannel = computed(() => Object.keys(savingNotificationChannels.value).length > 0)
   const isSaving = computed(
-    () => isSavingAuth.value || isSavingProxy.value || isSavingNotification.value,
+    () =>
+      isSavingAuth.value ||
+      isSavingProxy.value ||
+      isSavingChannel.value ||
+      isSavingNotifications.value,
   )
 
   const fetchSettings = async () => {
@@ -52,12 +55,12 @@ export const useSettings = () => {
   }
 
   const testAuth = async () => {
-    const authProviders = values.value?.auth.authProviders
-    if (!authProviders?.length || isSaving.value || isTestingAuth.value) return false
+    const otpChannels = values.value?.auth.otpChannels
+    if (!otpChannels?.length || isSaving.value || isTestingAuth.value) return false
 
     isTestingAuth.value = true
     try {
-      await configApi.testAuth({ authProviders: clone(authProviders) })
+      await configApi.testAuth({ channels: clone(otpChannels) })
       return true
     } finally {
       isTestingAuth.value = false
@@ -95,16 +98,25 @@ export const useSettings = () => {
       if (savedChannel) {
         values.value.channels[channel] = clone(savedChannel)
       }
-      if (savedChannel?.enabled !== true) {
-        values.value.auth.authProviders = values.value.auth.authProviders.filter(
-          (provider) => provider !== channel,
-        )
-      }
       return data.value
     } finally {
       const next = { ...savingNotificationChannels.value }
       delete next[channel]
       savingNotificationChannels.value = next
+    }
+  }
+
+  const saveNotifications = async () => {
+    if (!values.value || isSaving.value) return null
+    isSavingNotifications.value = true
+    try {
+      const { data } = await configApi.updateNotifications(clone(values.value.notifications))
+      if (!data.value) return null
+      settings.value = data.value
+      values.value.notifications = clone(data.value.values.notifications)
+      return data.value
+    } finally {
+      isSavingNotifications.value = false
     }
   }
 
@@ -116,11 +128,13 @@ export const useSettings = () => {
     isSaving,
     isSavingAuth,
     isSavingProxy,
+    isSavingNotifications,
     savingNotificationChannels,
     fetchSettings,
     saveAuth,
     saveProxy,
     saveNotificationChannel,
+    saveNotifications,
     testAuth,
   }
 }

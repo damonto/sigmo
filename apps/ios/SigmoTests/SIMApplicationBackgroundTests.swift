@@ -81,7 +81,7 @@ final class SIMApplicationBackgroundTests: XCTestCase {
         fixture.sim.open()
         await fixture.sim.send(.init(type: "menu_selection", itemId: 2))
         try await wait { if case .input = fixture.sim.page { true } else { false } }
-        fixture.session.logout()
+        await fixture.session.logout()
         await stream.value
         XCTAssertFalse(fixture.sim.available)
         XCTAssertNil(fixture.sim.failure)

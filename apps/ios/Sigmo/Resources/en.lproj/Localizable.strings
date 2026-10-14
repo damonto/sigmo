@@ -249,12 +249,6 @@
 "settings.updates.status.verifying" = "Verifying";
 "settings.updates.status.restarting" = "Restarting";
 "settings.updates.status.failed" = "Failed";
-"settings.schema.auth.otpRequired.label" = "OTP required";
-"settings.schema.auth.otpRequired.description" = "Require one-time password verification before using the API.";
-"settings.schema.auth.tokenValidityDays.label" = "Token validity (days)";
-"settings.schema.auth.tokenValidityDays.description" = "Number of days a login token remains valid, from 1 to 180.";
-"settings.schema.auth.authProviders.label" = "Authentication providers";
-"settings.schema.auth.authProviders.description" = "Enabled channels allowed to send login OTPs.";
 "settings.schema.proxy.listenAddress.label" = "Listen address";
 "settings.schema.proxy.listenAddress.description" = "Proxy listener address.";
 "settings.schema.proxy.listenAddress.placeholder" = "127.0.0.1";
@@ -526,7 +520,6 @@
 "detail.interrupted" = "The operation was interrupted. Refresh to check its actual result.";
 "detail.isdp" = "ISD-P AID";
 "detail.keepForeground" = "Keep Sigmo in the foreground until this operation finishes.";
-"detail.loadProfiles" = "Load source profiles";
 "detail.manualInput" = "Enter Details Manually";
 "detail.nickname" = "Nickname";
 "detail.nicknameLimit" = "Enter a name using no more than 64 UTF-8 bytes.";
@@ -643,6 +636,12 @@
 "detail.scanInstructions" = "Position the QR code provided by your carrier in the frame.";
 "detail.confirmationHint" = "Enter the confirmation code provided by your carrier to continue.";
 "detail.transferSourceHint" = "Choose the device that has the eSIM you want to transfer.";
+"detail.localReader" = "Connected to this iPhone or iPad";
+"detail.localReaderInsertCard" = "Connected to this iPhone or iPad · Insert a SIM";
+"detail.localReaderHTTPS" = "Use an HTTPS connection to Sigmo to transfer from a local card reader.";
+"detail.localReaderUnavailable" = "The local reader or SIM is unavailable. Insert the card and try again.";
+"detail.remoteCardInterrupted" = "The reader connection was interrupted. A card command may have completed. Check the source card and target modem before trying again.";
+"detail.remoteCardUnsupported" = "This Sigmo backend does not support local card readers. Update the backend and try again.";
 "detail.selectTransferProfile" = "Choose an eSIM to Transfer";
 "detail.noTransferProfiles" = "No eSIMs available to transfer";
 "detail.setupHeading" = "Set Up eSIM";
@@ -892,7 +891,7 @@
 "calls.details" = "Call Details";
 "calls.direction" = "Direction";
 "calls.route" = "Call Route";
-"calls.line" = "Device";
+"calls.line" = "Line";
 "calls.sim" = "SIM";
 "calls.time" = "Time";
 "calls.duration" = "Duration";
@@ -1044,3 +1043,170 @@
 "home.noNumber" = "No Number";
 
 "detail.noNumber" = "No Number";
+
+// Contacts and backend-wide communication.
+"communication.devices" = "Devices";
+"communication.messages" = "Messages";
+"communication.calls" = "Calls";
+"communication.contacts" = "Contacts";
+"communication.navigation" = "Primary navigation";
+"communication.newContact" = "New contact";
+"communication.editContact" = "Edit contact";
+"communication.contactDescription" = "Saved to this Sigmo backend.";
+"communication.name" = "Name";
+"communication.number" = "Phone number";
+"communication.label" = "Label";
+"communication.region" = "Country code for local numbers";
+"communication.addNumber" = "Add phone number";
+"communication.notes" = "Notes";
+"communication.avatar" = "Photo";
+"communication.removeAvatar" = "Remove photo";
+"communication.remove" = "Remove";
+"communication.save" = "Save";
+"communication.delete" = "Delete";
+"communication.searchContacts" = "Search names or numbers";
+"communication.emptyContacts" = "No contacts yet. Add your first contact.";
+"communication.back" = "Back";
+"communication.deleteContactDescription" = "Delete this contact? Messages and call history will be kept.";
+"communication.zoom" = "Zoom";
+"communication.horizontal" = "Horizontal position";
+"communication.vertical" = "Vertical position";
+"communication.avatarTooLarge" = "Choose a photo smaller than 5 MiB.";
+"communication.dial" = "Call";
+"communication.newMessage" = "New message";
+"communication.message" = "Message";
+"communication.send" = "Send";
+"communication.line" = "Line";
+"communication.chooseLine" = "Choose the number to use";
+"communication.lineUnavailable" = "The previously used line is unavailable. Choose another line.";
+"communication.noLines" = "No available lines. Activate a SIM in Devices first.";
+"communication.loading" = "Loading…";
+"communication.upgrade" = "Update this Sigmo backend to use this feature.";
+"communication.upgradeCalls" = "Call history requires a backend with calling support.";
+"communication.deletedNumber" = "Number deleted";
+"communication.deletedLines" = "History from deleted numbers";
+"communication.assign" = "Assign history";
+"communication.assignDescription" = "Choose a replacement number. Original numbers, read status and recordings are preserved.";
+"communication.inactive" = "(inactive)";
+"communication.later" = "Later";
+"communication.search" = "Search names, numbers or messages";
+"communication.emptyMessages" = "No messages yet.";
+"communication.emptyCalls" = "No calls yet.";
+"communication.more" = "Load more";
+"communication.older" = "Older messages";
+"communication.originalLine" = "Original line retained after history assignment";
+"communication.addContact" = "Save to contacts";
+"communication.all" = "All";
+"communication.missed" = "Missed";
+"communication.deleteThreadDescription" = "Delete this conversation across all lines on this backend?";
+"communication.deleteCallDescription" = "Delete this call record? Recordings are kept separately.";
+"communication.edit" = "Edit Contact";
+"communication.contact" = "Contact";
+"communication.numbers" = "Phone numbers";
+"communication.import" = "Import from Contacts";
+"communication.chooseNumber" = "Choose a phone number";
+"communication.chooseBackend" = "Choose a Sigmo backend";
+"communication.backend" = "Backend";
+"communication.addExisting" = "Add to existing contact";
+"communication.invalidPhoto" = "Choose a supported photo smaller than 20 MiB.";
+
+"communication.allLines" = "All lines";
+
+"apiError.avatar_invalid" = "Choose a valid PNG or JPEG image.";
+
+"apiError.avatar_too_large" = "Choose an image smaller than 5 MiB.";
+
+"apiError.communication_not_found" = "This item is no longer available.";
+
+"apiError.communication_invalid" = "Check the contact details or history selection.";
+
+"apiError.communication_failed" = "Could not load or save this item. Try again.";
+
+"apiError.history_assignment_invalid" = "Choose another verified line in this backend.";
+
+"apiError.thread_read_invalid" = "The displayed messages have changed. Refresh and try again.";
+
+"apiError.contact_invalid" = "Check the contact name and phone numbers.";
+
+"auth.browserLogin" = "Sign in with browser";
+"auth.loginFailed" = "Sign-in could not be completed. Try again.";
+"auth.accessSetupRequired" = "Enable Managed OAuth and dynamic client registration for this Cloudflare Access application.";
+"auth.revocationUnavailable" = "The server does not offer token revocation. Local credentials were removed.";
+"settings.authNone" = "None";
+"settings.authAccess" = "Cloudflare Access";
+"settings.authOTP" = "OTP";
+"settings.authOIDC" = "OIDC";
+"settings.noConfiguredChannels" = "Configure and save a delivery channel first.";
+"settings.businessChannels" = "Notification Channels";
+"settings.businessChannelsDescription" = "SMS and call notifications use these channels. OTP delivery is selected separately.";
+"settings.native.configured" = "Configured";
+"settings.native.notConfigured" = "Not configured";
+"settings.schema.auth.mode" = "Authentication mode";
+"settings.schema.auth.sessionMaxDays" = "Session days";
+"settings.schema.auth.sessionMaxDaysDescription" = "Sign in again when this many days have passed.";
+"settings.schema.auth.otpChannels" = "OTP delivery channels";
+"settings.schema.auth.oidcIssuer" = "OIDC issuer";
+"settings.schema.auth.oidcClientId" = "OIDC client ID";
+"settings.schema.auth.oidcClientSecret" = "OIDC client secret";
+"settings.schema.auth.keepSecret" = "Leave empty to retain the saved secret.";
+"settings.schema.auth.oidcAllowedSubjects" = "Allowed OIDC subjects (sub)";
+"settings.schema.auth.accessTeamDomain" = "Access team URL";
+"settings.schema.auth.accessAudience" = "Access application AUD";
+"settings.schema.auth.accessAllowedSubjects" = "Allowed Access subjects (sub)";
+
+"apiError.authentication_failed" = "Sign-in was not accepted. Start again.";
+"apiError.create_session_failed" = "Could not create a session. Try again.";
+"apiError.invalid_auth_policy" = "Check the authentication settings.";
+"apiError.invalid_browser_request" = "The browser sign-in request is invalid.";
+"apiError.invalid_login_request" = "The sign-in request is invalid.";
+"apiError.invalid_notification_settings" = "Check the selected notification channels.";
+"apiError.invalid_refresh_request" = "The session refresh request is invalid. Sign in again.";
+"apiError.invalid_session" = "Your session has expired. Sign in again.";
+"apiError.login_rate_limited" = "Too many sign-in attempts. Wait a minute and try again.";
+"apiError.origin_not_allowed" = "Open Sigmo using its configured public URL.";
+"apiError.origin_required" = "The browser request is missing its origin. Reload and try again.";
+"apiError.otp_delivery_failed" = "The code could not be delivered. Check the OTP channels.";
+"apiError.reload_notifications_failed" = "Could not reload notification settings.";
+"apiError.revoke_session_failed" = "Could not revoke the session. Try again.";
+"apiError.save_notifications_failed" = "Could not save notification settings.";
+"apiError.validate_session_failed" = "Could not validate the session. Try again.";
+
+"communication.searchMessages" = "Search messages";
+"communication.searchCalls" = "Search calls";
+"communication.filters" = "Filter history";
+"communication.cropPhoto" = "Crop Photo";
+"communication.contactOptions" = "Contact options";
+"communication.addPhoto" = "Add Photo";
+"communication.changePhoto" = "Change Photo";
+"communication.photoOptions" = "Photo options";
+
+"communication.chooseModem" = "Choose a modem";
+"communication.modemUnavailable" = "This modem is unavailable. Choose another modem.";
+"communication.noModems" = "No modems available.";
+"communication.useCurrentLine" = "Use the current active SIM";
+
+"demo.try" = "Try Demo";
+"demo.title" = "Demo Mode";
+"demo.exit" = "Exit Demo";
+"demo.entryDescription" = "Explore Sigmo with sample devices. No server, account, or SIM is required.";
+"demo.description" = "All devices and data in this mode are simulated. Messages, calls, carrier setup, and SIM/eSIM operations stay on this device. No real messages or calls are sent. Changes are reset when you exit.";
+"demo.inputs" = "Use a sample activation code, confirmation code 123456, or SIM PIN 1234. Demo recordings contain a sample tone. Carrier services and remote push delivery are simulated.";
+"demo.receiveMessage" = "Receive Sample Message";
+"demo.receiveCall" = "Simulate Incoming Call";
+"demo.reset" = "Reset Demo Data";
+"demo.startFailed" = "Could not open Demo Mode. Please try again.";
+"demo.noConnection" = "Add a demo connection or reset the demo to receive sample messages and calls.";
+"demo.unsupportedRequest" = "This demo request is unavailable. Reset the demo and try again.";
+"demo.messageWelcome" = "Welcome to Sigmo! This is a sample conversation.";
+"demo.messageReply" = "Messages sent in Demo Mode stay on this device.";
+"demo.messageTravel" = "Your travel line history remains available when you switch SIMs.";
+"demo.messageIncoming" = "This incoming message was generated locally for the demo.";
+"demo.ussdReply" = "Demo balance: 20.00. No carrier request was sent.";
+"demo.carrierTitle" = "Demo Carrier Setup";
+"demo.carrierDescription" = "This local page simulates carrier authorization. No carrier account or personal information is needed.";
+"demo.carrierComplete" = "Complete Demo Setup";
+"demo.notificationDescription" = "These preferences apply only to the demo. Use Demo Mode options to generate sample messages and incoming calls. Remote push delivery is simulated.";
+"demo.useActivation" = "Use Sample Activation Code";
+"demo.simulatedCall" = "Demo Call";
+"demo.simulatedSIM" = "Demo operation. No real SIM is changed.";
+"demo.updateNotes" = "Sample backend update. Installation is simulated on this device.";

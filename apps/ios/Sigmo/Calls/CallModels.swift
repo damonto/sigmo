@@ -4,7 +4,10 @@ struct CallRecord: Codable, Hashable, Identifiable, Sendable {
     let callID: String
     var backendId: String?
     var callUUID: String?
+    var modemId: String?
+    var historyProfileId: String?
     var profileId: String?
+    var lineLabel: String?
     var ownerClientId: String?
     var route: String
     var direction: String

@@ -17,12 +17,14 @@ const createSettingsContext = () => {
     isTestingAuth,
     isSavingAuth,
     isSavingProxy,
+    isSavingNotifications,
     savingNotificationChannels,
     fetchSettings,
     testAuth: testAuthSettings,
     saveAuth: saveAuthSettings,
     saveProxy: saveProxySettings,
     saveNotificationChannel,
+    saveNotifications: saveNotificationSettings,
   } = useSettings()
   const form = useSettingsForm(settings, values)
 
@@ -63,6 +65,14 @@ const createSettingsContext = () => {
     return true
   }
 
+  const saveNotifications = async () => {
+    const response = await saveNotificationSettings()
+    if (!response) return false
+
+    toast.success(t('settings.saveSuccess'))
+    return true
+  }
+
   return {
     settings,
     values,
@@ -71,12 +81,14 @@ const createSettingsContext = () => {
     isTestingAuth,
     isSavingAuth,
     isSavingProxy,
+    isSavingNotifications,
     savingNotificationChannels,
     ...form,
     load,
     saveAuth,
     saveProxy,
     saveChannel,
+    saveNotifications,
     testAuth,
   }
 }

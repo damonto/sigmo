@@ -2,7 +2,7 @@ import { callClientId } from '@/lib/callClient'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { buildWebRTCSessionUrl, useCallApi } from '@/apis/call'
-import { getStoredToken, setStoredToken } from '@/lib/authStorage'
+import { sessionRevision } from '@/lib/authSession'
 import { problemResponse } from '@/lib/__tests__/httpProblem'
 
 describe('useCallApi', () => {
@@ -35,15 +35,15 @@ describe('useCallApi', () => {
   })
 
   it('clears the stored token on call auth failures', async () => {
-    setStoredToken('token-1')
+    const revision = sessionRevision()
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(problemResponse(401, 'invalid_token', 'unauthorized', 'req-2')),
+      vi.fn().mockResolvedValue(problemResponse(401, 'invalid_session', 'unauthorized', 'req-2')),
     )
 
     await expect(useCallApi().listCalls('modem-1')).rejects.toMatchObject({ status: 401 })
 
-    expect(getStoredToken()).toBeNull()
+    expect(sessionRevision()).toBe(revision + 1)
   })
 
   it('adds encoded search queries to call list requests', async () => {
@@ -172,7 +172,7 @@ describe('useCallApi', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/call-media/ice-servers'),
-      expect.objectContaining({ mode: 'cors' }),
+      expect.objectContaining({ mode: 'same-origin', credentials: 'same-origin' }),
     )
   })
 

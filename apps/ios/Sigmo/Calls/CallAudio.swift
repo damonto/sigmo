@@ -37,17 +37,31 @@ final class CallAudio {
     @ObservationIgnored private var captureSink: (@Sendable (CallPCM) -> Void)?
     @ObservationIgnored private var renderSink: (@Sendable (CallPCM) -> Void)?
     @ObservationIgnored private var inputEnabled = true
-    #if DEBUG
-    func startFixture() {
+    @ObservationIgnored private var local = false
+    func startLocal() {
         stop()
+        local = true
+        receiveOnly = false
+        routes = [CallAudioRoute(id: "speaker", name: callText("calls.speaker")),
+                  CallAudioRoute(id: "receiver", name: callText("calls.receiver"))]
+        microphones = []
+        routeName = callText("calls.speaker")
         ready = true
         onReady?()
     }
+
+    #if DEBUG
+    func startFixture() { startLocal() }
 
     func emitFixturePCM(_ pcm: CallPCM, remote: Bool) {
         if remote { renderSink?(pcm) } else { captureSink?(pcm) }
     }
     #endif
+
+    func emitDemoRecording() {
+        let samples = (0..<24_000).map { Float(sin(2 * .pi * 440 * Double($0) / 8_000)) * 0.08 }
+        renderSink?(CallPCM(samples: samples, sampleRate: 8_000, time: ProcessInfo.processInfo.systemUptime))
+    }
 
     func prepare() throws {
         try CallWebRTC.configureAudio()
@@ -189,6 +203,7 @@ final class CallAudio {
     }
 
     func stop() {
+        local = false
         generation = UUID()
         receiveTask?.cancel(); receiveTask = nil
         sendTask?.cancel(); sendTask = nil
@@ -222,6 +237,10 @@ final class CallAudio {
     }
 
     func selectRoute(_ id: String) {
+        if local {
+            if let route = routes.first(where: { $0.id == id }) { routeName = route.name }
+            return
+        }
         let session = AVAudioSession.sharedInstance()
         do {
             try session.overrideOutputAudioPort(id == "speaker" ? .speaker : .none)
@@ -234,12 +253,14 @@ final class CallAudio {
     }
 
     func selectMicrophone(_ id: String) {
+        guard !local else { return }
         do { try AVAudioSession.sharedInstance().setPreferredInput(AVAudioSession.sharedInstance().availableInputs?.first { $0.uid == id }) }
         catch { failure = .wrapping(error) }
         refreshRoutes()
     }
 
     func refreshRoutes() {
+        guard !local else { return }
         let session = AVAudioSession.sharedInstance()
         microphones = (session.availableInputs ?? []).map { CallAudioRoute(id: $0.uid, name: $0.portName) }
         routes = [CallAudioRoute(id: "speaker", name: callText("calls.speaker"))]

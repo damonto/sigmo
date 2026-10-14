@@ -7,7 +7,6 @@ import SettingsKeyValueField from '@/components/settings/SettingsKeyValueField.v
 import SettingsSaveButton from '@/components/settings/SettingsSaveButton.vue'
 import { Card } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { Switch } from '@/components/ui/switch'
 import type { SettingsChannel, SettingsChannelSchema } from '@/types/settings'
 
 const props = defineProps<{
@@ -19,7 +18,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'toggle-channel': [schema: SettingsChannelSchema, enabled: boolean]
   'toggle-details': [channel: string]
   'update-field': [channel: string, key: string, value: unknown]
   'save-channel': [channel: string]
@@ -37,10 +35,6 @@ const fieldID = (key: string, channel: string) => {
 
 const channelValue = (channel: string, key: string) => {
   return props.channels[channel]?.[key as keyof SettingsChannel]
-}
-
-const isChannelEnabled = (channel: string) => {
-  return props.channels[channel]?.enabled === true
 }
 
 const isChannelExpanded = (channel: string) => {
@@ -110,15 +104,6 @@ const isChannelDisabled = (channel: string) => {
               </span>
             </button>
           </CollapsibleTrigger>
-
-          <div class="shrink-0" @click.stop>
-            <Switch
-              :id="fieldID('enabled', channel.key)"
-              :model-value="isChannelEnabled(channel.key)"
-              :disabled="isChannelDisabled(channel.key)"
-              @update:model-value="emit('toggle-channel', channel, $event === true)"
-            />
-          </div>
         </div>
 
         <CollapsibleContent

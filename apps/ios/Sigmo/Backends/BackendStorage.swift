@@ -72,7 +72,7 @@ struct BackendCredentials {
 
     private static func keychainQuery(_ id: UUID) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: "com.damon.sigmo.backend-token",
+         kSecAttrService as String: "com.damon.sigmo.backend-session-v2",
          kSecAttrAccount as String: id.uuidString]
     }
 

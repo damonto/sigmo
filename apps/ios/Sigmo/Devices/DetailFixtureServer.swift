@@ -1,8 +1,8 @@
-#if DEBUG
 import Foundation
 import Synchronization
 
-// Test scenarios use this backend exclusively. No URLSession is created for these writes.
+// In-memory device behavior shared by explicit demo sessions and automated tests.
+// These transports never create a URLSession or access physical hardware.
 final class DetailFixtureBuffer: Sendable {
     private struct State {
         var queue: [Data] = []
@@ -48,6 +48,7 @@ actor DetailFixtureServer {
         case standard, delayedProfiles, unavailableProfiles, singleHardware, notifications, delayedDiscoveries, noDiscoveries, unavailableDiscoveries, emptyProfiles
         case delayedDeletion, deletionFailure
         case delayedActivation, activationFailure
+        case mixedTransferProfiles, unsupportedTransferProfiles
         case delayedSettings, unavailableSettings, unsupportedSettings, settingsWriteFailure
         case connectionSetup, connectionScan, connectionScanError, connectionEmptyNetworks, connectionReadFailure, connectionWriteFailure, connectionMBIM, connectionCommunity
     }
@@ -66,6 +67,7 @@ actor DetailFixtureServer {
     private var modemSettings: [String: ModemSettingsFixture] = [:]
     private var requestStatus: [String: Int] = [:]
     private var profilesOverride: Data?
+    private var transferProfilesOverride: [TransferProfile]?
     private var discoveries = [ESIMDiscovery(eventId: "event-1", address: "smdp.example")]
     private(set) var requests: [URLRequest] = []
     private(set) var messages: [Data] = []
@@ -80,13 +82,20 @@ actor DetailFixtureServer {
     private var arrival: CheckedContinuation<Void, Never>?
     var requireConfirmation = true
 
-    init(physical: Bool = false, locked: Bool = false, scenario: Scenario = .standard) {
+    init(physical: Bool = false, locked: Bool = false, scenario: Scenario = .standard, number: String = "+8613800000000",
+         initialConnection: ConnectionFixture = ConnectionFixture()) {
+        self.number = number
         self.physical = physical; self.locked = locked
         self.scenario = scenario
         groups = [
             ESIMProfileGroup(id: "se-a", label: "eUICC A", aid: nil, eid: "89049032000000000000000000000001", profiles: [Self.profile(se: "se-a", iccid: "8986000000000000001", name: "Primary", active: true), Self.profile(se: "se-a", iccid: "8986000000000000002", name: "Travel", active: false)]),
             ESIMProfileGroup(id: "se-b", label: "eUICC B", aid: nil, eid: "89049032000000000000000000000002", profiles: [Self.profile(se: "se-b", iccid: "8986000000000000002", name: "Backup", active: false)])
         ]
+        for group in groups.indices {
+            for profile in groups[group].profiles.indices where groups[group].profiles[profile].enabled {
+                groups[group].profiles[profile].number = number
+            }
+        }
         notifications = [
             ESIMNotificationGroup(id: "se-a", label: "eUICC A", eid: nil, notifications: [Self.notification(sequence: "18446744073709551615", operation: "install")]),
             ESIMNotificationGroup(id: "se-b", label: "eUICC B", eid: nil, notifications: [])
@@ -112,7 +121,12 @@ actor DetailFixtureServer {
         if scenario == .emptyProfiles {
             for index in groups.indices { groups[index].profiles = [] }
         }
-        var connection = ConnectionFixture()
+        if scenario == .mixedTransferProfiles {
+            transferProfilesOverride = [Self.transferProfile("Unsupported line", supported: false), Self.transferProfile("Inactive line", enabled: false)]
+        } else if scenario == .unsupportedTransferProfiles {
+            transferProfilesOverride = [Self.transferProfile("Unsupported line", supported: false)]
+        }
+        var connection = initialConnection
         switch scenario {
         case .connectionSetup:
             connection.wifiRequiresSetup = true
@@ -149,6 +163,11 @@ actor DetailFixtureServer {
                           sasUp: .init(name: "Example accredited site", region: "CN"), certificates: ["GSMA Root CI"])
         })
     }
+    static func transferProfile(_ name: String, supported: Bool = true, enabled: Bool = true) -> TransferProfile {
+        TransferProfile(id: name, seId: "se-a", type: "esim", name: name, serviceProviderName: "Example Mobile",
+                        iccid: name, icon: nil, regionCode: "CN", enabled: enabled, supported: supported,
+                        unsupportedReason: supported ? nil : "Carrier does not support transfer", carrierName: nil)
+    }
     func setStatus(_ suffix: String, _ status: Int) { requestStatus[suffix] = status }
     func setConnectionFixture(_ value: ConnectionFixture, modemID: String = "device-1") { connections[modemID] = value }
     func currentConnections(_ id: String = "device-1") -> ConnectionFixture { connections[id] ?? ConnectionFixture() }
@@ -156,6 +175,7 @@ actor DetailFixtureServer {
     func setModemSettings(_ value: ModemSettingsFixture, modemID: String = "device-1") { modemSettings[modemID] = value }
     func currentModemSettings(_ id: String = "device-1") -> ModemSettingsFixture { settingsFixture(id) }
     func setProfilesData(_ data: Data?) { profilesOverride = data }
+    func setTransferProfiles(_ values: [TransferProfile]) { transferProfilesOverride = values }
     func setDiscoveries(_ values: [ESIMDiscovery]) { discoveries = values }
     func setConfirmation(_ value: Bool) { requireConfirmation = value }
     func holdNext(_ suffix: String) { holdSuffix = suffix }
@@ -207,13 +227,14 @@ actor DetailFixtureServer {
     private func response(_ request: URLRequest) throws -> BackendHTTPResponse {
         let path = request.url?.path ?? "", method = request.httpMethod ?? "GET"
         for (suffix, status) in requestStatus where path.hasSuffix(suffix) && status >= 400 {
-            let code = status == 401 ? "invalid_token" : "remote_error"
+            let code = status == 401 ? "invalid_session" : "remote_error"
             return HTTPProblem.response(status: status, code: code, detail: "Fixture error")
         }
         if path.hasSuffix("/license") { return HTTPProblem.response(status: 404, code: "resource_not_found", detail: "Not found") }
         if path.hasSuffix("/app") { return raw(#"{"version":"1","commit":"fixture","channel":"stable","edition":"pro","target":"linux-arm64","distribution":"local"}"#) }
         if path.hasSuffix("/capabilities") { return try reply(["features": capabilities]) }
-        if path.hasSuffix("/auth/otp/required") { return raw(#"{"otpRequired":false}"#) }
+        if path.hasSuffix("/auth/sessions/current") { return raw("", status: 204) }
+        if path.hasSuffix("/auth/methods") { return raw(AuthenticationFixture.methods(required: false)) }
         let parts = path.components(separatedBy: "/")
         if path.contains("/websheets/"), path.hasSuffix("/callback"), method == "POST" {
             let callback = try JSONDecoder().decode(CarrierCallback.self, from: request.httpBody ?? Data())
@@ -289,6 +310,7 @@ actor DetailFixtureServer {
             return try reply(TransferSources(sources: [.init(type: "modem", id: "device-2", name: "Source modem", detail: "Example Mobile", requiresSourceImei: false), .init(type: "ccid", id: "reader-1", name: "USB reader", detail: nil, requiresSourceImei: true)], ccidError: nil))
         }
         if path.hasSuffix("/esim-transfers/source-profiles") {
+            if let transferProfilesOverride { return try reply(transferProfilesOverride) }
             return try reply([TransferProfile(id: "source-profile", seId: "se-a", type: "esim", name: "Source profile", serviceProviderName: "Example Mobile", iccid: "8986000000000000099", icon: nil, regionCode: "CN", enabled: true, supported: true, unsupportedReason: nil, carrierName: nil)])
         }
         if path.hasSuffix("/notifications") { return try reply(ESIMNotifications(ses: notifications)) }
@@ -338,6 +360,15 @@ actor DetailFixtureServer {
             case 4: emit(#"{"type":"confirm","text":"Run SIM service?","command":"send_sms"}"#)
             default: break
             }
+            return
+        }
+        if command.type == "source" {
+            emit(#"{"type":"source_ready","version":1}"#)
+            return
+        }
+        if command.type == "profiles" {
+            struct Profiles: Encodable { let type = "profiles"; let profiles: [TransferProfile] }
+            session.buffer.push(try JSONEncoder().encode(Profiles(profiles: [Self.transferProfile("Demo SIM")])))
             return
         }
         if command.type == "start" {
@@ -403,4 +434,3 @@ actor DetailFixtureServer {
         return BackendHTTPResponse(data: try encoder.encode(value), status: 200)
     }
 }
-#endif

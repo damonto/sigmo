@@ -19,10 +19,8 @@ export const useSettingsForm = (
   const authFields = computed(() => schema.value?.auth ?? [])
   const proxyFields = computed(() => schema.value?.proxy ?? [])
   const channelSchemas = computed(() => schema.value?.channels ?? [])
-  const enabledChannelSchemas = computed(() =>
-    channelSchemas.value.filter(
-      (channel) => settings.value?.values.channels[channel.key]?.enabled === true,
-    ),
+  const configuredChannelSchemas = computed(() =>
+    channelSchemas.value.filter((channel) => Boolean(settings.value?.values.channels[channel.key])),
   )
   const isReady = computed(() => values.value !== null && schema.value !== undefined)
   const authValues = computed(() => values.value?.auth ?? null)
@@ -41,9 +39,49 @@ export const useSettingsForm = (
   }
 
   const setAuthValue = (key: string, value: unknown) => {
-    if (!values.value) return
-    const record = values.value.auth as unknown as Record<string, unknown>
-    record[key] = value
+    const auth = values.value?.auth
+    if (!auth) return
+    if (
+      key === 'mode' &&
+      (value === 'none' || value === 'otp' || value === 'oidc' || value === 'cloudflare_access')
+    ) {
+      auth.mode = value
+    } else if (key === 'sessionMaxDays' && typeof value === 'number') auth.sessionMaxDays = value
+    else if (
+      ['otpChannels', 'oidcAllowedSubjects', 'accessAllowedSubjects'].includes(key) &&
+      Array.isArray(value) &&
+      value.every((item): item is string => typeof item === 'string')
+    ) {
+      switch (key) {
+        case 'otpChannels':
+          auth.otpChannels = value
+          break
+        case 'oidcAllowedSubjects':
+          auth.oidcAllowedSubjects = value
+          break
+        case 'accessAllowedSubjects':
+          auth.accessAllowedSubjects = value
+          break
+      }
+    } else if (typeof value === 'string') {
+      switch (key) {
+        case 'oidcIssuer':
+          auth.oidcIssuer = value
+          break
+        case 'oidcClientId':
+          auth.oidcClientId = value
+          break
+        case 'oidcClientSecret':
+          auth.oidcClientSecret = value
+          break
+        case 'accessTeamDomain':
+          auth.accessTeamDomain = value
+          break
+        case 'accessAudience':
+          auth.accessAudience = value
+          break
+      }
+    }
   }
 
   const setChannelValue = (channel: string, key: string, value: unknown) => {
@@ -52,22 +90,8 @@ export const useSettingsForm = (
     record[key] = value
   }
 
-  const isChannelEnabled = (channel: string) => {
-    return values.value?.channels[channel]?.enabled === true
-  }
-
-  const toggleChannel = (schema: SettingsChannelSchema, enabled: boolean) => {
-    if (!values.value) return
-    const channel = values.value.channels[schema.key] ?? defaultChannel(schema, enabled)
-    channel.enabled = enabled
-    values.value.channels[schema.key] = channel
-    if (enabled) {
-      expandedChannels.value = { ...expandedChannels.value, [schema.key]: true }
-    }
-  }
-
-  const defaultChannel = (schema: SettingsChannelSchema, enabled = true): SettingsChannel => {
-    const channel: Record<string, unknown> = { enabled }
+  const defaultChannel = (schema: SettingsChannelSchema): SettingsChannel => {
+    const channel: Record<string, unknown> = {}
     for (const field of schema.fields) {
       if (field.control === 'switch') channel[field.key] = false
       if (field.control === 'number') channel[field.key] = 0
@@ -81,18 +105,15 @@ export const useSettingsForm = (
   const initializeMissingChannels = () => {
     if (!values.value) return
     for (const channel of channelSchemas.value) {
-      values.value.channels[channel.key] ??= defaultChannel(channel, false)
+      values.value.channels[channel.key] ??= defaultChannel(channel)
     }
   }
 
   const initializeExpandedChannels = () => {
     initializeMissingChannels()
-    const firstEnabled = channelSchemas.value.find((channel) => isChannelEnabled(channel.key))?.key
+    const firstConfigured = configuredChannelSchemas.value[0]?.key
     expandedChannels.value = Object.fromEntries(
-      channelSchemas.value.map((channel) => [
-        channel.key,
-        channel.key === firstEnabled && isChannelEnabled(channel.key),
-      ]),
+      channelSchemas.value.map((channel) => [channel.key, channel.key === firstConfigured]),
     )
   }
 
@@ -112,7 +133,7 @@ export const useSettingsForm = (
     authValues,
     channels,
     channelSchemas,
-    enabledChannelSchemas,
+    configuredChannelSchemas,
     expandedChannels,
     initializeExpandedChannels,
     isReady,
@@ -121,7 +142,6 @@ export const useSettingsForm = (
     setAuthValue,
     setChannelValue,
     setRootValue,
-    toggleChannel,
     toggleChannelDetails,
   }
 }

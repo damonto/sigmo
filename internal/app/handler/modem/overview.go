@@ -15,10 +15,12 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 type catalog struct {
+	storage            *storage.Store
 	store              *settings.Store
 	registry           *mmodem.Registry
 	internet           internetStatusReader
@@ -174,7 +176,25 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 	if err := c.applyOverviewExtensions(ctx, device, resp); err != nil {
 		return nil, err
 	}
-	resp.SIM.Icon = c.profileIcon(ctx, device, snapshot)
+	var displayRevision uint64
+	if c.storage != nil {
+		displayRevision = c.storage.SIMDisplayRevision()
+	}
+	freshDisplay := c.applyProfileDisplay(ctx, device, snapshot, &resp.SIM)
+	if c.storage != nil && resp.SIM.Identifier != "" && device.Snapshot().SIMIdentity == snapshot.SIMIdentity {
+		label := resp.SIM.Label
+		if !freshDisplay && snapshot.SIMKind() != mmodem.SIMKindPhysical {
+			// Only fresh card branding can update saved eSIM labels.
+			label = ""
+		}
+		if err := c.storage.RecordSIMProfile(ctx, storage.SIMProfile{
+			ProfileID: resp.SIM.Identifier, ModemID: resp.ID, Label: label,
+			Number: resp.Number, Region: resp.SIM.RegionCode, Icon: resp.SIM.Icon,
+			DisplayKnown: freshDisplay, DisplayRevision: displayRevision,
+		}); err != nil {
+			return nil, fmt.Errorf("cache active SIM label: %w", err)
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -294,6 +314,7 @@ func slotResponse(sim *mmodem.SIM) SlotResponse {
 		Slot:               sim.Slot,
 		Active:             sim.Active,
 		OperatorName:       operatorName,
+		Label:              operatorName,
 		OperatorIdentifier: sim.OperatorIdentifier,
 		RegionCode:         carrierInfo.Region,
 		Identifier:         sim.Identifier,

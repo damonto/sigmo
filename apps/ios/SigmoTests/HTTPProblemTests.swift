@@ -72,14 +72,14 @@ final class HTTPProblemTests: XCTestCase {
     func testUnrelated401DoesNotRemoveLocalLogin() async throws {
         let cases: [(Int, String, FailureSource)] = [
             (401, "invalid_otp", .backend), (401, "license_lease_expired", .backend),
-            (401, "invalid_token", .pushGateway), (503, "invalid_token", .backend),
+            (401, "invalid_session", .pushGateway), (503, "invalid_session", .backend),
         ]
         for (status, code, source) in cases {
             let stub = BackendStub()
             await stub.setRequired(true)
             let config = try testConfiguration()
             let credentials = MemoryCredentials()
-            credentials.tokens[config.id] = "login-token"
+            credentials.tokens[config.id] = storedCredential("login-token")
             let session = try testSession(stub, configuration: config, credentials: credentials)
             await session.refresh(force: true)
             let failure = HTTPProblem.failure(HTTPProblem.response(status: status, code: code, detail: "Rejected"), source: source)
@@ -89,7 +89,7 @@ final class HTTPProblemTests: XCTestCase {
             } catch let error as BackendFailure {
                 XCTAssertEqual(error, failure)
             }
-            XCTAssertEqual(credentials.tokens[config.id], "login-token", code)
+            XCTAssertEqual(credentials.tokens[config.id], storedCredential("login-token"), code)
             XCTAssertEqual(session.authentication, .authenticated, code)
         }
     }

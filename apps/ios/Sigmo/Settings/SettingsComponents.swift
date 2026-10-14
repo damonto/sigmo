@@ -43,6 +43,8 @@ struct SettingsFieldRow: View {
     let field: SettingsField
     @Binding var value: SettingValue
     var channels: [NotificationSchema] = []
+    var stacked = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var text: Binding<String> {
         Binding(get: { value.text }, set: { value = .text($0) })
@@ -51,21 +53,73 @@ struct SettingsFieldRow: View {
         Binding(get: { value.bool }, set: { value = .toggle($0) })
     }
 
+    private var selection: Binding<String> {
+        Binding(get: { value.text.isEmpty ? field.options?.first?.value ?? "" : value.text }, set: { value = .text($0) })
+    }
+
+    private var selectionLabel: String {
+        field.options?.first(where: { $0.value == selection.wrappedValue })?.label ?? selection.wrappedValue
+    }
+
+    private var picker: some View {
+        Picker(settingsText(field.label), selection: selection) {
+            ForEach(field.options ?? []) { Text(settingsText($0.label)).tag($0.value) }
+        }
+    }
+
+    private var stackedInput: Bool { stacked || (field.control == .number && dynamicTypeSize.isAccessibilitySize) }
+
+    private var inputLabel: some View {
+        Text(settingsText(field.label))
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("label-\(field.key)")
+    }
+
+    @ViewBuilder private var input: some View {
+        Group {
+            if field.secret == true || field.control == .password {
+                SecureField("", text: text)
+            } else {
+                TextField("", text: text, prompt: field.placeholder.map { Text(settingsText($0)) })
+                    .keyboardType(field.control == .number ? .numbersAndPunctuation : .default)
+            }
+        }
+        .multilineTextAlignment(stackedInput ? .leading : .trailing)
+        .textInputAutocapitalization(.never).autocorrectionDisabled()
+        .accessibilityLabel(settingsText(field.label))
+        .accessibilityIdentifier(field.key)
+    }
+
     var body: some View {
         Section {
             switch field.control {
             case .toggle:
                 Toggle(settingsText(field.label), isOn: toggle).accessibilityIdentifier(field.key)
             case .select:
-                Picker(settingsText(field.label), selection: Binding(get: {
-                    value.text.isEmpty ? field.options?.first?.value ?? "" : value.text
-                }, set: { value = .text($0) })) {
-                    ForEach(field.options ?? []) { Text(settingsText($0.label)).tag($0.value) }
+                Menu { picker } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(settingsText(field.label))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(settingsText(selectionLabel))
+                                .multilineTextAlignment(.trailing)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.caption)
+                                .accessibilityHidden(true)
+                        }
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
                 }
+                .accessibilityLabel(settingsText(field.label))
+                .accessibilityValue(settingsText(selectionLabel))
                 .accessibilityIdentifier(field.key)
             case .channelList:
                 Text(settingsText(field.label)).font(.headline)
-                if channels.isEmpty { Text("settings.noEnabledChannels").foregroundStyle(.secondary) }
+                if channels.isEmpty { Text("settings.noConfiguredChannels").foregroundStyle(.secondary) }
                 ForEach(channels) { channel in
                     Toggle(settingsText(channel.label), isOn: Binding(get: { value.strings.contains(channel.key) }, set: { enabled in
                         var names = value.strings.filter { $0 != channel.key }
@@ -78,27 +132,13 @@ struct SettingsFieldRow: View {
             case .keyValue:
                 SettingsHeadersField(title: settingsText(field.label), value: $value)
             case .text, .password, .number:
-                LabeledContent {
-                    if field.secret == true || field.control == .password {
-                        SecureField("", text: text)
-                            .multilineTextAlignment(.trailing)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .accessibilityLabel(settingsText(field.label))
-                            .accessibilityIdentifier(field.key)
-                    } else {
-                        TextField("", text: text, prompt: field.placeholder.map { Text(settingsText($0)) })
-                            .multilineTextAlignment(.trailing)
-                            .keyboardType(field.control == .number ? .numbersAndPunctuation : .default)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .accessibilityLabel(settingsText(field.label))
-                            .accessibilityIdentifier(field.key)
+                if stackedInput {
+                    VStack(alignment: .leading, spacing: 8) {
+                        inputLabel
+                        input
                     }
-                } label: {
-                    Text(settingsText(field.label))
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("label-\(field.key)")
+                } else {
+                    LabeledContent { input } label: { inputLabel }
                 }
             default:
                 LabeledContent(settingsText(field.label), value: value.text)

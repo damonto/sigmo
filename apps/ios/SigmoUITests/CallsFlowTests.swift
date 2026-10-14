@@ -213,6 +213,7 @@ final class CallsFlowTests: XCTestCase {
 
     func testDetailsAndGlobalCallSurviveTabNavigation() {
         let app = launch()
+        capture(app, "Aligned call history")
         app.buttons["call-record-past-call"].tap()
         XCTAssertTrue(app.staticTexts["Call Route"].waitForExistence(timeout: 5))
         capture(app, "Native Calls details")
@@ -223,16 +224,18 @@ final class CallsFlowTests: XCTestCase {
         XCTAssertTrue(app.buttons["calls-minimize"].waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.buttons["calls-return"].waitForExistence(timeout: 5))
         capture(app, "Minimized call above navigation")
-        let settings = app.tabBars.buttons["Settings"]
-        if !settings.exists {
+        let sim = app.tabBars.buttons["SIM"]
+        if !sim.exists {
             let back = app.navigationBars.buttons.element(boundBy: 0)
             XCTAssertGreaterThanOrEqual(back.frame.minY, app.buttons["calls-return"].frame.maxY - 1, "The call bar must not cover navigation")
             back.tap()
         }
-        XCTAssertTrue(settings.waitForExistence(timeout: 5), app.debugDescription)
-        settings.tap()
+        XCTAssertTrue(sim.waitForExistence(timeout: 5), app.debugDescription)
+        sim.tap()
+        app.buttons["modemSettings"].tap()
         XCTAssertTrue(app.buttons["calls-return"].exists)
         app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["backToDevices"].tap()
         XCTAssertTrue(app.buttons["calls-return"].exists, "The call survives returning to Home")
         app.buttons["calls-return"].tap()
         XCTAssertTrue(app.buttons["calls-end"].waitForExistence(timeout: 5))
@@ -278,8 +281,8 @@ final class CallsFlowTests: XCTestCase {
         let call = app.buttons["call-detail-call"]
         let message = app.buttons["call-detail-message"]
         reveal(message, in: app)
-        XCTAssertEqual(call.label, "拨打")
-        XCTAssertEqual(message.label, "信息")
+        XCTAssertEqual(call.label, "拨号")
+        XCTAssertEqual(message.label, "短信")
         XCTAssertEqual(call.frame.width, message.frame.width, accuracy: 1)
         XCTAssertEqual(call.frame.midY, message.frame.midY, accuracy: 1)
         XCTAssertEqual(call.frame.width, call.frame.height, accuracy: 1)
@@ -327,8 +330,8 @@ final class CallsFlowTests: XCTestCase {
         app.buttons["calls-dial"].tap()
         XCTAssertTrue(app.buttons["calls-end"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertFalse(app.buttons["calls-dial"].exists)
-        let topRow = ["calls-mute", "calls-audio", "calls-hold"].map { app.buttons[$0] }
-        let bottomRow = ["calls-show-keypad", "calls-end", "calls-record"].map { app.buttons[$0] }
+        let topRow = ["calls-mute", "calls-show-keypad", "calls-audio"].map { app.buttons[$0] }
+        let bottomRow = ["calls-hold", "calls-end", "calls-record"].map { app.buttons[$0] }
         for row in [topRow, bottomRow] {
             for button in row {
                 XCTAssertTrue(button.isHittable)
@@ -337,9 +340,12 @@ final class CallsFlowTests: XCTestCase {
                 XCTAssertEqual(button.frame.width, button.frame.height, accuracy: 1)
             }
             XCTAssertLessThan(row[0].frame.maxX, row[1].frame.minX)
-            XCTAssertLessThan(row[1].frame.maxX, row[2].frame.minX)
+            if row.count == 3 { XCTAssertLessThan(row[1].frame.maxX, row[2].frame.minX) }
         }
         XCTAssertLessThan(topRow[0].frame.maxY, bottomRow[0].frame.minY)
+        for (top, bottom) in zip(topRow, bottomRow) {
+            XCTAssertEqual(top.frame.midX, bottom.frame.midX, accuracy: 1)
+        }
         app.buttons["calls-mute"].tap()
         XCTAssertTrue(app.buttons["calls-mute"].isSelected)
         XCTAssertEqual(app.buttons["calls-mute"].frame.width, app.buttons["calls-mute"].frame.height, accuracy: 1)
@@ -423,8 +429,9 @@ final class CallsFlowTests: XCTestCase {
         app.buttons["calls-keypad"].tap()
         let contacts = app.buttons["calls-contacts"]
         reveal(contacts, in: app)
-        XCTAssertGreaterThan(contacts.frame.width, contacts.frame.height,
-            "The Contacts action must have enough width at accessibility sizes")
+        XCTAssertEqual(contacts.label, "通讯录")
+        XCTAssertTrue(contacts.isHittable)
+        XCTAssertTrue(app.frame.contains(contacts.frame))
         capture(app, "Keypad Chinese large text actions")
         reveal(app.buttons["call-key-0"], in: app)
         app.buttons["call-key-0"].press(forDuration: 0.7)

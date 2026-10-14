@@ -42,6 +42,12 @@ struct ESIMFlowView: View {
                 navigationControls
             }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if state.detail.session.isDemo {
+                Text("demo.simulatedSIM").font(.footnote).foregroundStyle(.secondary)
+                    .padding(8).frame(maxWidth: .infinity).background(.bar)
+            }
+        }
         .interactiveDismissDisabled()
         .detailErrorAlert($presentedFailure)
         .alert("detail.sourceDeletion", isPresented: $sourceDeletionPresented) {
@@ -170,8 +176,12 @@ struct ESIMFlowView: View {
                 callback: { callback = PendingCallback(value: $0) },
                 failure: {
                     presentedFailure = $0
-                    if $0.isLocalAuthenticationFailure { state.detail.session.logout() }
-                }
+                    if $0.isLocalAuthenticationFailure {
+                        do { try state.detail.session.removeCredentials() }
+                        catch { presentedFailure = .wrapping(error) }
+                    }
+                },
+                session: state.detail.session
             )
             .id(state.websheet?.id)
             .padding(.top, 76)
@@ -278,6 +288,14 @@ struct ESIMFlowView: View {
     private var methodSelection: some View {
         ESIMSetupPage(title: "detail.setupHeading", description: detailText("detail.setupDescription")) {
             ESIMSetupGroup {
+                if state.detail.session.isDemo {
+                    Button {
+                        state.input = LPAInput(smdp: "smdp.demo.invalid", activationCode: "DEMO")
+                        state.startDownload()
+                    } label: { methodLabel("demo.useActivation", symbol: "play.rectangle") }
+                    .accessibilityIdentifier("demoActivationCode")
+                    Divider().padding(.leading, methodIconWidth + 12)
+                }
                 if state.detail.canTransfer {
                     AsyncActionButton(id: "transferESIM", minimumLabelHeight: nil, action: { await state.loadSources() }) {
                         methodLabel("detail.transfer", symbol: "iphone.gen3.radiowaves.left.and.right")
@@ -431,7 +449,7 @@ struct ESIMFlowView: View {
                         state.selectSource(source)
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: source.type == "ccid" ? "simcard" : "iphone.gen3")
+                            Image(systemName: source.type == "modem" ? "iphone.gen3" : "simcard")
                                 .font(.title3).foregroundStyle(.tint).frame(width: 28)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(source.name)
@@ -440,6 +458,7 @@ struct ESIMFlowView: View {
                             Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                         }.foregroundStyle(.primary).padding(.vertical, 16).contentShape(Rectangle())
                     }.accessibilityIdentifier("transferSource-" + source.key)
+                    .disabled(source.type == "client_ccid" && source.cardPresent != true)
                 }
             }
         }
@@ -450,9 +469,6 @@ struct ESIMFlowView: View {
             if state.source?.requiresSourceImei == true {
                 ESIMSetupGroup {
                     TextField("detail.sourceIMEI", text: $state.sourceIMEI).keyboardType(.numberPad)
-                        .padding(.vertical, 16)
-                    Divider()
-                    AsyncActionButton(title: "detail.loadProfiles", minimumLabelHeight: nil) { await state.loadProfiles() }
                         .padding(.vertical, 16).disabled(state.busy)
                 }
             }
@@ -489,7 +505,14 @@ struct ESIMFlowView: View {
             .padding(.horizontal, 38).padding(.top, 16).padding(.bottom, 8)
             .frame(maxWidth: 560).frame(maxWidth: .infinity)
         }
-        .task { if state.source?.requiresSourceImei != true { await state.loadProfiles() } }
+        .task(id: state.sourceIMEI) {
+            if state.source?.requiresSourceImei == true {
+                do { try await Task.sleep(for: .milliseconds(500)) }
+                catch { return }
+            }
+            guard !Task.isCancelled else { return }
+            await state.loadProfiles()
+        }
     }
     private var stageLabel: String {
         switch state.stage {

@@ -189,6 +189,19 @@ describe('useModemMessageThread', () => {
     expect(thread.canSend.value).toBe(false)
     await thread.sendMessage()
     expect(api.sendMessage).toHaveBeenCalledTimes(1)
+    expect(thread.canUseActive.value).toBe(true)
+    thread.useActiveProfile()
+    expect(thread.canSend.value).toBe(true)
+    await thread.sendMessage()
+    expect(api.sendMessage).toHaveBeenLastCalledWith(
+      'modem-1',
+      '+12223334444',
+      'keep this draft',
+      'sim-b',
+    )
+    expect(router.replace).toHaveBeenCalledWith(
+      expect.objectContaining({ query: { conversation: 'conversation-a', profile: 'sim-b' } }),
+    )
   })
 
   it('acknowledges displayed IDs only, without using the modem SMS status', async () => {

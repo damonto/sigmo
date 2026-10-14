@@ -1,7 +1,6 @@
-#if DEBUG
 import Foundation
 
-// In-memory fixtures are reachable only through explicit Debug test scenarios.
+// In-memory settings shared by explicit demo sessions and automated tests.
 // Every mutation stays here, including notification tests and update installs.
 struct SettingsFixtureServer {
     var settings: SettingsResponse
@@ -11,14 +10,17 @@ struct SettingsFixtureServer {
     var audit: [MCPAuditEvent] = []
     var preferences = UpdatePreferences(automatic: false, channel: "stable")
     var version = "1.0.0"
+    var commit = "fixture"
+    var licenseDisplayName = "Fixture User"
+    var updateNotes = "Improve backend reliability.\n<strong>Plain text</strong>"
     var edition = "pro"
     var distribution = "standalone"
     var unsupportedReason: String?
     var updateState = "idle"
     var checkedAt: Date?
     var installationPolls = 0
-    var app: AppInformation { .init(version: version, commit: "fixture", channel: preferences.channel, edition: edition, target: "linux-arm64", distribution: distribution) }
-    var otpRequired: Bool { settings.values.auth["otpRequired"]?.bool == true }
+    var app: AppInformation { .init(version: version, commit: commit, channel: preferences.channel, edition: edition, target: "linux-arm64", distribution: distribution) }
+    var otpRequired: Bool { settings.values.auth["mode"]?.text == "otp" }
 
     init() throws { settings = try JSONDecoder().decode(SettingsResponse.self, from: Data(SettingsFixtureData.settings.utf8)) }
 
@@ -28,7 +30,7 @@ struct SettingsFixtureServer {
         guard !path.contains("/modems/"),
               path.contains("/settings") || path.contains("/update-") else { return nil }
         if otpRequired && request.value(forHTTPHeaderField: "Authorization") != "Bearer fixture-token" {
-            return HTTPProblem.response(status: 401, code: "invalid_token", detail: "Login required")
+            return HTTPProblem.response(status: 401, code: "invalid_session", detail: "Login required")
         }
         if path.hasSuffix("/settings") { return try reply(settings) }
         if path.hasSuffix("/settings/auth-tests") { return BackendHTTPResponse(data: Data(), status: 201) }
@@ -40,14 +42,15 @@ struct SettingsFixtureServer {
             settings.values.proxy = try decode(SettingsFields.self, request)
             return try reply(settings)
         }
-        if path.contains("/settings/notifications/") {
+        if path.hasSuffix("/settings/notifications") {
+            settings.values.notifications = try decode(SettingsFields.self, request)
+            return try reply(settings)
+        }
+        if path.contains("/settings/channels/") {
             let channel = request.url!.lastPathComponent
             let values = try decode(SettingsFields.self, request)
             settings.values.channels = settings.values.channels ?? [:]
             settings.values.channels?[channel] = values
-            if settings.values.channels?[channel]?["enabled"]?.bool != true {
-                settings.values.auth["authProviders"] = .list((settings.values.auth["authProviders"]?.strings ?? []).filter { $0 != channel })
-            }
             return try reply(settings)
         }
         if path.hasSuffix("/settings/mcp") {
@@ -97,8 +100,8 @@ struct SettingsFixtureServer {
 
     func updateSnapshot() -> UpdateSnapshot {
         .init(settings: preferences, current: app,
-              latest: checkedAt == nil ? nil : .init(version: "1.1.0", notes: "Improve backend reliability.\n<strong>Plain text</strong>", publishedAt: Date(timeIntervalSince1970: 1_790_000_000)),
-              license: edition == "pro" ? .init(status: "active", deviceId: "fixture-device", telegramId: 10001, displayName: "Fixture User", username: "fixture", expiresAt: nil, offlineUntil: nil) : nil,
+              latest: checkedAt == nil ? nil : .init(version: "1.1.0", notes: updateNotes, publishedAt: Date(timeIntervalSince1970: 1_790_000_000)),
+              license: edition == "pro" ? .init(status: "active", deviceId: "fixture-device", telegramId: 10001, displayName: licenseDisplayName, username: "fixture", expiresAt: nil, offlineUntil: nil) : nil,
               state: updateState, checkedAt: checkedAt, updateAvailable: checkedAt != nil && version != "1.1.0",
               selfUpdateSupported: unsupportedReason == nil && distribution != "container", unsupportedReason: unsupportedReason, errorCode: nil, error: nil)
     }
@@ -119,4 +122,3 @@ private struct MCPFixtureKeyRequest: Decodable {
     let modemIds: [String]
     let permissions: [String]
 }
-#endif

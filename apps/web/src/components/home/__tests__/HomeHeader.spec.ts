@@ -14,7 +14,6 @@ const mountHeader = (version?: string) =>
     props: {
       subtitle: 'home.subtitle',
       version,
-      isLoading: false,
     },
     global: {
       stubs: {
@@ -37,5 +36,8 @@ describe('HomeHeader', () => {
 
     expect(wrapper.text()).toContain('home.title')
     expect(wrapper.text().includes('v1.2.3')).toBe(wantVersion)
+    expect(wrapper.text()).toContain('home.settings')
+    expect(wrapper.findAll('button')).toHaveLength(1)
+    expect(wrapper.find('svg').exists()).toBe(false)
   })
 })

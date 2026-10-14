@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Info, MessageSquare, Phone, Settings } from 'lucide-vue-next'
+import { ContactRound, Info, MessageSquare, Phone, Settings } from 'lucide-vue-next'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterView, useRoute } from 'vue-router'
@@ -30,11 +30,19 @@ const tabItems = computed(() => [
     icon: MessageSquare,
   },
   {
-    key: 'phone',
-    routeName: 'modem-phone',
-    to: { name: 'modem-phone', params: { id: modemId.value } },
-    label: t('modemDetail.tabs.phone'),
+    key: 'calls',
+    routeName: 'modem-calls',
+    to: { name: 'modem-calls', params: { id: modemId.value } },
+    label: t('modemDetail.tabs.calls'),
     icon: Phone,
+  },
+  {
+    key: 'contacts',
+    routeName: 'modem-contacts',
+    activeRouteNames: ['modem-contact'],
+    to: { name: 'modem-contacts', params: { id: modemId.value } },
+    label: t('communication.contacts'),
+    icon: ContactRound,
   },
   {
     key: 'settings',
@@ -54,16 +62,22 @@ const tabItems = computed(() => [
 
 <template>
   <div class="min-h-dvh bg-background">
-    <ModemDesktopTopNav :items="tabItems" :modem-id="modemId" />
+    <ModemDesktopTopNav
+      :items="tabItems"
+      :modem-id="modemId"
+    />
 
     <div
-      class="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 py-4 pb-20 lg:max-w-7xl lg:px-8 lg:py-6 lg:pb-8"
+      class="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 py-4 pb-[calc(5rem+env(safe-area-inset-bottom))] lg:max-w-7xl lg:px-8 lg:py-6 lg:pb-8"
     >
       <RouterView />
     </div>
   </div>
 
   <div class="lg:hidden">
-    <BottomTabBar :items="tabItems" container-class="max-w-4xl" />
+    <BottomTabBar
+      :items="tabItems"
+      container-class="max-w-4xl"
+    />
   </div>
 </template>

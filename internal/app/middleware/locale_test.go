@@ -56,7 +56,7 @@ func TestLocale(t *testing.T) {
 			if err != nil {
 				t.Fatalf("auth.NewStore() error = %v", err)
 			}
-			settingsStore := settings.NewMemoryStore(&settings.Settings{Auth: settings.Auth{OTPRequired: tt.otpRequired}})
+			settingsStore := settings.NewMemoryStore(&settings.Settings{Auth: localeAuthPolicy(tt.otpRequired)})
 			if err := settingsStore.SetLocale(t.Context(), locale.English); err != nil {
 				t.Fatalf("SetLocale() error = %v", err)
 			}
@@ -84,4 +84,13 @@ func TestLocale(t *testing.T) {
 			}
 		})
 	}
+}
+
+func localeAuthPolicy(required bool) settings.Auth {
+	cfg := settings.Auth{Mode: "none"}
+	if required {
+		cfg.Mode = "otp"
+
+	}
+	return cfg
 }

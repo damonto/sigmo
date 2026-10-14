@@ -1,4 +1,3 @@
-#if DEBUG
 import Foundation
 
 // A value per modem keeps fixture writes isolated just like the backend routes.
@@ -30,7 +29,7 @@ struct ModemSettingsFixture: Sendable {
         guard paths.contains(resource) else { return nil }
         let method = request.httpMethod ?? "GET"
         if let status = statuses[method + " " + resource], status >= 400 {
-            return error(status == 401 ? "invalid_token" : "remote_error", status: status)
+            return error(status == 401 ? "invalid_session" : "remote_error", status: status)
         }
         if method == "PUT", failNextWrite {
             failNextWrite = false
@@ -91,4 +90,3 @@ struct ModemSettingsFixture: Sendable {
         HTTPProblem.response(status: status, code: code, detail: "Fixture settings error")
     }
 }
-#endif

@@ -134,12 +134,17 @@ struct MessagesView: View {
                     // Keep empty results below the filters and scrollable at large text sizes.
                     .listRowSeparator(.hidden)
                 }
-                ForEach(state.visibleItems) { conversation in
+                let conversations = state.visibleItems
+                ForEach(conversations) { conversation in
                     Button { open(conversation) } label: {
-                        ConversationRow(conversation: conversation,
-                            regionCode: state.modem?.sim.identifier == conversation.profileId ? state.modem?.sim.regionCode : nil)
+                        MessageConversationRow(session: state.session, participant: conversation.participant,
+                            preview: conversation.latestMessage.text, timestamp: conversation.latestMessage.timestamp,
+                            unread: conversation.unreadCount > 0 || conversation.markedUnread,
+                            region: state.modem?.sim.identifier == conversation.profileId ? state.modem?.sim.regionCode : nil,
+                            line: conversation.lineDescription(regionCode: state.modem?.sim.identifier == conversation.profileId ? state.modem?.sim.regionCode : nil))
                     }
                         .buttonStyle(.plain)
+                        .listRowSeparator(conversation.id == conversations.first?.id ? .hidden : .automatic, edges: .top)
                         .listRowBackground(selected?.id == conversation.id && sizeClass == .regular ? Color.accentColor.opacity(0.1) : Color(uiColor: .systemBackground))
                         .accessibilityIdentifier("conversation-\(conversation.id)")
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -165,39 +170,5 @@ struct MessagesView: View {
     private func open(_ conversation: SMSConversation) {
         if sizeClass == .regular { selected = conversation }
         else { pushed = conversation }
-    }
-}
-
-private struct ConversationRow: View {
-    let conversation: SMSConversation
-    let regionCode: String?
-    var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(systemName: "person.crop.circle.fill").font(.system(size: 46)).foregroundStyle(.gray.opacity(0.55))
-                // Keep the unread marker in the list gutter without indenting the row.
-                .overlay(alignment: .leading) {
-                    if conversation.unreadCount > 0 {
-                        Circle().fill(.blue).frame(width: 8, height: 8).offset(x: -14)
-                    }
-                }
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(conversation.participantLabel(regionCode: regionCode))
-                        .font(.headline).lineLimit(1)
-                    Spacer(minLength: 4)
-                    Text(conversation.latestMessage.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute())
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Text(conversation.latestMessage.text).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                Text(conversation.lineDescription(regionCode: regionCode)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-            }
-            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
-        }
-        .padding(.vertical, 5)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(conversation.unreadCount > 0 ? String(localized: "messages.unread") : "")
     }
 }

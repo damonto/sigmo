@@ -58,15 +58,20 @@ export const useModemMessageThread = ({
     () =>
       `${modemId.value}:${conversationId?.value || profileId?.value || activeProfileId.value}:${participant.value}`,
   )
+  const replacementProfile = ref('')
   const selectedProfile = computed(
     () => conversation.value?.profileId || profileId?.value || activeProfileId.value,
   )
+  const sendingProfile = computed(() => replacementProfile.value || selectedProfile.value)
+  const canUseActive = computed(
+    () => !!activeProfileId.value && sendingProfile.value !== activeProfileId.value,
+  )
+  const useActiveProfile = () => {
+    replacementProfile.value = activeProfileId.value
+  }
   const canSend = computed(
     () =>
-      !missing.value &&
-      !!selectedProfile.value &&
-      selectedProfile.value === activeProfileId.value &&
-      (conversation.value?.canSend ?? true),
+      !missing.value && !!sendingProfile.value && sendingProfile.value === activeProfileId.value,
   )
   const displayCountry = computed(() =>
     selectedProfile.value === activeProfileId.value ? defaultCountry?.value : undefined,
@@ -179,7 +184,7 @@ export const useModemMessageThread = ({
       ? normalizeAddressSubmission(newRecipient.value)
       : participant.value.trim()
     const text = messageDraft.value.trim()
-    const profile = selectedProfile.value
+    const profile = sendingProfile.value
     if (!id || id === 'unknown' || !target || !text || !canSend.value || isSending.value) return
     const current = generation
     const creating = isNewConversation.value
@@ -192,7 +197,7 @@ export const useModemMessageThread = ({
       drafts.delete(identity.value)
       isSending.value = false
       const sentTo = data.value?.to?.trim() || target
-      if (creating) {
+      if (creating || profile !== selectedProfile.value) {
         await router.replace({
           name: 'modem-message-thread',
           params: { id, participant: sentTo },
@@ -227,6 +232,9 @@ export const useModemMessageThread = ({
       acknowledged = 0
       threadMessages.value = []
       conversation.value = null
+      replacementProfile.value = ''
+      if (isNewConversation.value && participant.value !== 'new')
+        newRecipient.value = participant.value
       messageDraft.value = drafts.get(value) ?? ''
       isLoading.value = false
       isSending.value = false
@@ -264,6 +272,8 @@ export const useModemMessageThread = ({
     newRecipient,
     participantLabel,
     canSend,
+    canUseActive,
+    useActiveProfile,
     lineLabel,
     error,
     sendError,

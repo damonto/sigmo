@@ -6,10 +6,10 @@ struct CallsView: View {
     @Binding var dialing: Bool
     @Binding var recordingsPresented: Bool
     @Environment(CallsState.self) private var calls
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
     @State private var deleting: CallRecord?
     @State private var pendingDeletion: CallRecord?
+    @State private var replacementCall: CallRecord?
     @State private var pendingDial: (number: String, line: CallLine)?
 
     private struct Refresh: Equatable { let access: Int; let line: String? }
@@ -30,33 +30,9 @@ struct CallsView: View {
                 ProgressView("calls.loading").frame(maxWidth: .infinity)
             }
             ForEach(state.visibleItems) { record in
-                HStack(spacing: 16) {
-                    Button { selected = record } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Image(systemName: record.direction == "incoming" ? "phone.arrow.down.left" : "phone.arrow.up.right")
-                                .foregroundStyle(.secondary).accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(calls.contacts.name(for: record.number, region: state.line?.region ?? "")
-                                    ?? PhoneNumberDisplay.format(record.number, regionCode: state.line?.region ?? ""))
-                                    .font(.headline).foregroundStyle(record.missed ? .red : .primary)
-                                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
-                                    .minimumScaleFactor(0.85)
-                                metadata(for: record)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }.contentShape(Rectangle())
-                    }.buttonStyle(.plain).accessibilityIdentifier("call-record-\(record.id)")
-                    Button { callback(record) } label: {
-                        Image(systemName: "phone.fill")
-                            .frame(minWidth: 44, minHeight: 44)
-                            .background(Color(uiColor: .secondarySystemBackground), in: Circle())
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel(Text("calls.callback"))
-                    .accessibilityValue(PhoneNumberDisplay.format(record.number, regionCode: state.line?.region))
-                    .disabled(!record.terminal || calls.hasCall)
-                }
-                .padding(.vertical, 4)
+                CallHistoryRow(record: record, session: state.session, region: state.line?.region,
+                               source: record.lineLabel ?? state.session.modems.first { $0.id == state.modemID }?.communicationLabel,
+                               select: { selected = record }, callback: { callback(record) })
                 .swipeActions(allowsFullSwipe: false) {
                     if record.terminal { Button("common.delete", systemImage: "trash", role: .destructive) { deleting = record } }
                 }
@@ -87,6 +63,10 @@ struct CallsView: View {
         .onChange(of: state.session.accessRevision) { _, _ in clear() }
         .onChange(of: state.line?.id) { _, _ in clear() }
         .onDisappear { pendingDeletion = nil; deleting = nil }
+        .confirmationDialog("communication.useCurrentLine", isPresented: Binding(get: { replacementCall != nil }, set: { if !$0 { replacementCall = nil } })) {
+            Button("communication.useCurrentLine") { if let record = replacementCall { dialCurrent(record) }; replacementCall = nil }
+            Button("common.cancel", role: .cancel) { replacementCall = nil }
+        }
         .sheet(isPresented: $dialing, onDismiss: {
             // Finish the sheet transition before presenting the global call screen.
             guard let selection = pendingDial else { return }
@@ -111,25 +91,6 @@ struct CallsView: View {
         .accessibilityIdentifier("calls-list")
     }
 
-    private func metadata(for record: CallRecord) -> some View {
-        let route = Text(record.terminal ? record.routeLabel : record.stateLabel).font(.subheadline)
-        let date = Text(record.date, format: .dateTime.month(.abbreviated).day().hour().minute()).font(.caption)
-
-        // Keep the timestamp from competing with the number for horizontal space.
-        return ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                route
-                Spacer(minLength: 0)
-                date
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                route
-                date
-            }
-        }
-        .foregroundStyle(.secondary)
-    }
-
     private func clear() {
         state.clear()
         selected = nil
@@ -140,7 +101,11 @@ struct CallsView: View {
     }
 
     private func callback(_ record: CallRecord) {
-        if let line = state.line, record.profileId == line.profileID, calls.available(line) {
+        if record.profileId != state.line?.profileID { replacementCall = record }
+        else { dialCurrent(record) }
+    }
+    private func dialCurrent(_ record: CallRecord) {
+        if let line = state.line, calls.available(line) {
             Task { await calls.dial(number: record.number, line: line) }
         } else { calls.callbackNumber = record.number }
     }

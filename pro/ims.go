@@ -45,7 +45,7 @@ func configureIMS(ctx context.Context, app *proApp) error {
 		return fmt.Errorf("configure call media: %w", err)
 	}
 
-	runtime.AddFeatures(pims.WiFiCallingFeatureName, pims.VoLTEFeatureName, "nativeCalls")
+	runtime.AddFeatures(pims.WiFiCallingFeatureName, pims.VoLTEFeatureName, "nativeCalls", "callHistory")
 	runtime.AddMCPTools(registerIMSMCP(runtime.Registry, connectivity, calls))
 	runtime.SetMessageRoute(connectivity.MessageRoute())
 	runtime.SetUSSDRoute(connectivity.USSDRoute())

@@ -5,6 +5,7 @@ import type {
   SettingsAuthTest,
   SettingsChannel,
   SettingsProxy,
+  SettingsNotifications,
   SettingsResponse,
 } from '@/types/settings'
 
@@ -35,13 +36,18 @@ export const useSettingsApi = () => {
   }
 
   const updateNotificationChannel = (channel: string, payload: SettingsChannel) => {
-    return fetchJson<SettingsResponse>(`settings/notifications/${encodeURIComponent(channel)}`, {
+    return fetchJson<SettingsResponse>(`settings/channels/${encodeURIComponent(channel)}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     })
   }
 
   return {
+    updateNotifications: (payload: SettingsNotifications) =>
+      fetchJson<SettingsResponse>('settings/notifications', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
     getSettings,
     testAuth,
     updateAuth,

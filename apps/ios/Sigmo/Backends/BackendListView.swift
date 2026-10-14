@@ -14,6 +14,9 @@ private enum BackendListSheet: Identifiable {
 
 struct BackendListView: View {
     @Environment(BackendStore.self) private var store
+    @Environment(CallsState.self) private var calls
+    @Environment(\.demoSession) private var demoSession
+    @State private var demo: DemoPresentation?
     @State private var sheet: BackendListSheet?
     @State private var refreshFailure: BackendFailure?
     var open: (BackendDestination) -> Void
@@ -44,6 +47,18 @@ struct BackendListView: View {
                     }
                 }
             }
+            if demoSession == nil {
+                Section {
+                    Button {
+                        do { demo = try DemoPresentation() }
+                        catch { store.failure = .wrapping(error) }
+                    } label: {
+                        Label("demo.try", systemImage: "play.rectangle")
+                    }
+                    .disabled(calls.hasCall)
+                    .accessibilityIdentifier("tryDemo")
+                } footer: { Text("demo.entryDescription") }
+            }
             #if DEBUG
             Section {
                 NavigationLink { DiagnosticsView() } label: {
@@ -52,12 +67,6 @@ struct BackendListView: View {
                 .accessibilityIdentifier("openDiagnostics")
             }
             #endif
-        }
-        .overlay {
-            if store.configurationLoaded && store.settings.backends.isEmpty {
-                ContentUnavailableView("backends.empty.title", systemImage: "server.rack")
-                    .allowsHitTesting(false)
-            }
         }
         .navigationTitle("backends.manage")
         .navigationBarTitleDisplayMode(.inline)
@@ -80,12 +89,25 @@ struct BackendListView: View {
                     .accessibilityIdentifier("addBackend")
             }
         }
+        .fullScreenCover(item: demoBinding) { demo in
+            DemoView(presentation: demo, liveCalls: calls)
+        }
         .sheet(item: $sheet) { value in
             switch value {
             case .editor(let configuration): BackendEditor(configuration: configuration)
             case .order: BackendOrderView()
             }
         }
+    }
+
+    private var demoBinding: Binding<DemoPresentation?> {
+        Binding(get: { demo }, set: { next in
+            let previous = demo
+            demo = next
+            if previous?.id != next?.id {
+                Task { await previous?.close() }
+            }
+        })
     }
 }
 

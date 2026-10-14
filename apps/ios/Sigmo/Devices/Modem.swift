@@ -7,6 +7,7 @@ struct SIMSlot: Codable, Identifiable, Sendable, Equatable {
     let operatorIdentifier: String
     let regionCode: String
     let identifier: String
+    var label: String?
     var icon: String?
     var reminder: SIMReminder?
     var id: Int { slot }
@@ -45,6 +46,7 @@ struct Modem: Codable, Identifiable, Sendable, Equatable {
     var wifiCallingStatus: IMSConnectionState { .init(enabled: wifiCallingEnabled, connected: wifiCallingConnected) }
     var volteStatus: IMSConnectionState { .init(enabled: volteEnabled, connected: volteConnected) }
 
+    var communicationLabel: String { sim.label.flatMap { $0.isEmpty ? nil : $0 } ?? (sim.operatorName.isEmpty ? displayName : sim.operatorName) }
     var displayName: String { name.isEmpty ? id : name }
     var carrier: String {
         registeredOperator.name.isEmpty ? sim.operatorName : registeredOperator.name

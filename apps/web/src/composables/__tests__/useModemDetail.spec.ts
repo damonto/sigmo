@@ -3,6 +3,7 @@ import { ref, type Ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useModemDetail } from '@/composables/useModemDetail'
+import { invalidateSession } from '@/lib/authSession'
 import type { EsimProfilesResponse } from '@/types/esim'
 import type { Modem } from '@/types/modem'
 import type { SEsResponse } from '@/types/se'
@@ -104,6 +105,146 @@ const deferred = <T>() => {
 }
 
 describe('useModemDetail', () => {
+  it('shares overlapping explicit refreshes and keeps the previous snapshot while refreshing', async () => {
+    let detail: ReturnType<typeof useModemDetail> | undefined
+    mount({
+      template: '<div />',
+      setup() {
+        detail = useModemDetail()
+      },
+    })
+    if (!detail || !modemResource.modem) throw new Error('missing modem resource')
+    esimApi.getEsims.mockResolvedValue({ data: ref(esimResponse('modem-1')) })
+    modemResource.modem.value = modem('euicc')
+    await flushPromises()
+    esimApi.getEsims.mockClear()
+    const overview = deferred<void>()
+    modemResource.refresh.mockReturnValueOnce(overview.promise)
+    const first = detail.fetchModemDetail('modem-1')
+    await flushPromises()
+    const second = detail.fetchModemDetail('modem-1')
+    expect(first).toBe(second)
+    expect(detail.esimProfiles.value[0]?.name).toBe('profile-modem-1')
+    overview.resolve()
+    await Promise.all([first, second])
+    expect(modemResource.refresh).toHaveBeenCalledTimes(1)
+    expect(esimApi.getEsims).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['session', 'SIM', 'unmount'])(
+    'discards a pending inventory read after %s changes',
+    async (change) => {
+      const pending = deferred<{ data: Ref<EsimProfilesResponse> }>()
+      esimApi.getEsims.mockReturnValueOnce(pending.promise)
+      let detail: ReturnType<typeof useModemDetail> | undefined
+      const wrapper = mount({
+        template: '<div />',
+        setup() {
+          detail = useModemDetail()
+        },
+      })
+      if (!detail || !modemResource.modem) throw new Error('missing modem resource')
+      modemResource.modem.value = modem('euicc')
+      await flushPromises()
+      if (change === 'session') invalidateSession()
+      else if (change === 'SIM') modemResource.modem.value.sim.identifier = 'replacement'
+      else wrapper.unmount()
+      pending.resolve({ data: ref(esimResponse('old')) })
+      await flushPromises()
+      expect(detail.esimProfiles.value).toEqual([])
+      expect(detail.isEsimProfilesLoading.value).toBe(false)
+      if (change !== 'unmount') {
+        esimApi.getEsims.mockResolvedValueOnce({ data: ref(esimResponse('new')) })
+        await detail.fetchModemDetail('modem-1')
+        expect(detail.esimProfiles.value[0]?.name).toBe('profile-new')
+      }
+    },
+  )
+
+  it('does not start inventory reads after a stale overview finishes', async () => {
+    let detail: ReturnType<typeof useModemDetail> | undefined
+    mount({
+      template: '<div />',
+      setup() {
+        detail = useModemDetail()
+      },
+    })
+    if (!detail || !modemResource.modem) throw new Error('missing modem resource')
+    modemResource.modem.value = modem('euicc')
+    await flushPromises()
+    esimApi.getEsims.mockClear()
+    const overview = deferred<void>()
+    modemResource.refresh.mockReturnValueOnce(overview.promise)
+    const refresh = detail.fetchModemDetail('modem-1')
+    await flushPromises()
+    invalidateSession()
+    overview.resolve()
+    await refresh
+    expect(esimApi.getEsims).not.toHaveBeenCalled()
+  })
+
+  it('reloads the replacement SIM when it changes during an explicit inventory refresh', async () => {
+    let detail: ReturnType<typeof useModemDetail> | undefined
+    mount({
+      template: '<div />',
+      setup() {
+        detail = useModemDetail()
+      },
+    })
+    if (!detail || !modemResource.modem) throw new Error('missing modem resource')
+    modemResource.modem.value = modem('euicc')
+    await flushPromises()
+    const old = deferred<{ data: Ref<EsimProfilesResponse> }>()
+    esimApi.getEsims.mockReturnValueOnce(old.promise)
+    const refresh = detail.fetchModemDetail('modem-1')
+    await flushPromises()
+    esimApi.getEsims.mockResolvedValue({ data: ref(esimResponse('replacement')) })
+    modemResource.modem.value.sim.identifier = 'replacement'
+    await flushPromises()
+    expect(detail.esimProfiles.value[0]?.name).toBe('profile-replacement')
+    old.resolve({ data: ref(esimResponse('old')) })
+    await refresh
+    expect(detail.esimProfiles.value[0]?.name).toBe('profile-replacement')
+  })
+
+  it('does not enumerate the card for status-only updates and refreshes after an explicit reload', async () => {
+    let detail: ReturnType<typeof useModemDetail> | undefined
+    mount({
+      template: '<div />',
+      setup() {
+        detail = useModemDetail()
+      },
+    })
+    const resource = modemResource.modem
+    if (!resource || !detail) throw new Error('missing modem resource')
+    resource.value = modem('euicc')
+    await flushPromises()
+    resource.value = { ...modem('euicc'), signalQuality: 45 }
+    await flushPromises()
+    expect(esimApi.getEsims).toHaveBeenCalledTimes(1)
+    expect(seApi.getSEs).toHaveBeenCalledTimes(1)
+    await detail.fetchModemDetail('modem-1')
+    expect(esimApi.getEsims).toHaveBeenCalledTimes(2)
+    expect(seApi.getSEs).toHaveBeenCalledTimes(2)
+  })
+
+  it('coalesces concurrent inventory reads', async () => {
+    let detail: ReturnType<typeof useModemDetail> | undefined
+    mount({
+      template: '<div />',
+      setup() {
+        detail = useModemDetail()
+      },
+    })
+    const resource = modemResource.modem
+    if (!resource || !detail) throw new Error('missing modem resource')
+    resource.value = modem('euicc')
+    await flushPromises()
+    esimApi.getEsims.mockClear()
+    await Promise.all([detail.fetchEsimProfiles('modem-1'), detail.fetchEsimProfiles('modem-1')])
+    expect(esimApi.getEsims).toHaveBeenCalledTimes(1)
+  })
+
   it.each([undefined, '', '+15551234567'])(
     'maps a profile number from the API: %s',
     async (number) => {

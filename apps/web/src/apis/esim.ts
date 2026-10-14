@@ -1,4 +1,5 @@
 import { fetchJson } from '@/lib/fetch'
+import { invalidateCommunicationDirectory } from '@/apis/communication'
 
 import type {
   EsimDiscoverResponse,
@@ -8,8 +9,10 @@ import type {
 } from '@/types/esim'
 
 export const useEsimApi = () => {
-  const getEsims = (id: string) => {
-    return fetchJson<EsimProfilesResponse>(`modems/${id}/esims`)
+  const getEsims = async (id: string) => {
+    const result = await fetchJson<EsimProfilesResponse>(`modems/${id}/esims`)
+    invalidateCommunicationDirectory()
+    return result
   }
 
   const discoverEsims = (id: string, seId: string) => {
@@ -18,23 +21,29 @@ export const useEsimApi = () => {
     })
   }
 
-  const updateEsimNickname = (id: string, seId: string, iccid: string, nickname: string) => {
-    return fetchJson<void>(`modems/${id}/ses/${seId}/esims/${iccid}/nickname`, {
+  const updateEsimNickname = async (id: string, seId: string, iccid: string, nickname: string) => {
+    const result = await fetchJson<void>(`modems/${id}/ses/${seId}/esims/${iccid}/nickname`, {
       method: 'PUT',
       body: JSON.stringify({ nickname }),
     })
+    invalidateCommunicationDirectory()
+    return result
   }
 
-  const enableEsim = (id: string, seId: string, iccid: string) => {
-    return fetchJson<void>(`modems/${id}/ses/${seId}/esims/${iccid}/activation`, {
+  const enableEsim = async (id: string, seId: string, iccid: string) => {
+    const result = await fetchJson<void>(`modems/${id}/ses/${seId}/esims/${iccid}/activation`, {
       method: 'PUT',
     })
+    invalidateCommunicationDirectory()
+    return result
   }
 
-  const deleteEsim = (id: string, seId: string, iccid: string) => {
-    return fetchJson<void>(`modems/${id}/ses/${seId}/esims/${iccid}`, {
+  const deleteEsim = async (id: string, seId: string, iccid: string) => {
+    const result = await fetchJson<void>(`modems/${id}/ses/${seId}/esims/${iccid}`, {
       method: 'DELETE',
     })
+    invalidateCommunicationDirectory()
+    return result
   }
 
   const getTransferSources = (id: string) => {

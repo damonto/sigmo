@@ -34,6 +34,9 @@ var callWSUpgrader = websocket.Upgrader{
 
 func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, calls *Calls, media *Media) {
 	h := &Handler{registry: registry, calls: calls, media: media}
+	group.GET("/calls", h.history)
+	group.GET("/calls/:callID", h.historyRecord)
+	group.DELETE("/calls/:callID", h.deleteHistory)
 	group.GET("/call-media/ice-servers", h.WebRTCICEServers)
 	group.GET("/modems/:id/calls", h.List)
 	group.POST("/modems/:id/calls", h.Dial)
@@ -449,7 +452,7 @@ func callActionError(c *echo.Context, err error, fallback string) error {
 		return httpapi.Error(c, http.StatusServiceUnavailable, "volte_not_connected", err.Error())
 	case errors.Is(err, ErrModemCallingUnavailable):
 		return httpapi.Error(c, http.StatusNotImplemented, "modem_calling_unavailable", err.Error())
-	case errors.Is(err, ErrCallNotFound):
+	case errors.Is(err, ErrCallNotFound), errors.Is(err, storage.ErrNotFound):
 		return httpapi.NotFound(c, "call_not_found", err)
 	case errors.Is(err, ErrInvalidCallState):
 		return httpapi.BadRequest(c, "invalid_call_state", err)
@@ -531,6 +534,7 @@ func ResponseFromCall(call storage.Call) CallResponse {
 		hold = HoldNone
 	}
 	return CallResponse{
+		LineLabel: call.LineLabel, ModemID: call.ModemID, HistoryProfileID: call.HistoryProfileID,
 		BackendID:     call.BackendID,
 		CallUUID:      call.CallUUID,
 		ProfileID:     call.ProfileID,

@@ -143,9 +143,9 @@ func (d *Dispatcher) deliver(ctx context.Context, item storage.NativeDelivery) e
 		return err
 	}
 	valid := d.authorized == nil || d.authorized()
-	if valid && d.settings != nil && d.settings.OTPRequired() {
+	if valid && d.settings != nil && d.settings.Snapshot().Auth.Mode != "none" {
 		var err error
-		valid, err = d.store.AuthTokenValid(ctx, sub.AuthTokenHash, time.Now())
+		valid, err = d.store.AuthSessionActive(ctx, sub.AuthSessionID, d.settings.Snapshot().Auth.PolicyID())
 		if err != nil {
 			return err
 		}

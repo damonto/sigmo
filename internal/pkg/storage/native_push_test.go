@@ -17,7 +17,7 @@ func TestUpdateNativeSubscriptionPreservesRegistration(t *testing.T) {
 		BackendName:    "backend",
 		SendToken:      strings.Repeat("s", 32),
 		EncryptionKey:  bytes.Repeat([]byte{1}, 32),
-		AuthTokenHash:  "login",
+		AuthSessionID:  "login",
 		SMS:            true,
 		Reminders:      true,
 		Enabled:        true,
@@ -37,12 +37,12 @@ func TestUpdateNativeSubscriptionPreservesRegistration(t *testing.T) {
 		t.Fatal(err)
 	}
 	sms, label := false, "renamed phone"
-	update := NativeSubscriptionUpdate{SMS: &sms, Label: &label, AuthTokenHash: "renewed-login"}
+	update := NativeSubscriptionUpdate{SMS: &sms, Label: &label, AuthSessionID: "renewed-login"}
 	got, err := s.UpdateNativeSubscription(t.Context(), sub.ID, update)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.SMS || got.Label != label || got.AuthTokenHash != update.AuthTokenHash {
+	if got.SMS || got.Label != label || got.AuthSessionID != update.AuthSessionID {
 		t.Fatal("preference update did not apply the requested fields")
 	}
 	if got.SendToken != sub.SendToken || !bytes.Equal(got.EncryptionKey, sub.EncryptionKey) ||
@@ -180,13 +180,13 @@ func TestDeleteNativeSubscriptionIfCurrent(t *testing.T) {
 	}{
 		{name: "same credential"},
 		{name: "send token rotated", rotate: func(s *NativeSubscription) { s.SendToken = strings.Repeat("n", 32) }},
-		{name: "backend login replaced", rotate: func(s *NativeSubscription) { s.AuthTokenHash = "new-login" }},
+		{name: "backend login replaced", rotate: func(s *NativeSubscription) { s.AuthSessionID = "new-login" }},
 		{name: "installation replaced", rotate: func(s *NativeSubscription) { s.InstallationID = "new-phone" }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := testStore(t)
-			old := NativeSubscription{ID: "subscription", InstallationID: "phone", SendToken: strings.Repeat("s", 32), EncryptionKey: make([]byte, 32), AuthTokenHash: "old-login", Enabled: true}
+			old := NativeSubscription{ID: "subscription", InstallationID: "phone", SendToken: strings.Repeat("s", 32), EncryptionKey: make([]byte, 32), AuthSessionID: "old-login", Enabled: true}
 			if err := s.UpsertNativeSubscription(t.Context(), old); err != nil {
 				t.Fatal(err)
 			}
@@ -206,7 +206,7 @@ func TestDeleteNativeSubscriptionIfCurrent(t *testing.T) {
 				if !errors.Is(err, ErrNotFound) {
 					t.Fatalf("read revoked subscription: %v", err)
 				}
-			} else if err != nil || got.SendToken != current.SendToken || got.AuthTokenHash != current.AuthTokenHash || got.InstallationID != current.InstallationID {
+			} else if err != nil || got.SendToken != current.SendToken || got.AuthSessionID != current.AuthSessionID || got.InstallationID != current.InstallationID {
 				t.Fatalf("rotated credential was changed: %v", err)
 			}
 			items, err := s.NativeDeliveries(t.Context(), time.Now())

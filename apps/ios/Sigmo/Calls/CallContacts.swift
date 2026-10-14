@@ -15,9 +15,12 @@ final class CallContacts {
     @ObservationIgnored private let status: @MainActor () -> CNAuthorizationStatus
     @ObservationIgnored private let readNames: @Sendable () async throws -> [CallContactName]
     @ObservationIgnored private var revision = 0
+    @ObservationIgnored private let requestAccess: @MainActor () async throws -> Void
 
     init(status: @escaping @MainActor () -> CNAuthorizationStatus = { CNContactStore.authorizationStatus(for: .contacts) },
-         readNames: @escaping @Sendable () async throws -> [CallContactName] = CallContacts.fetchNames) {
+         readNames: @escaping @Sendable () async throws -> [CallContactName] = CallContacts.fetchNames,
+         requestAccess: @escaping @MainActor () async throws -> Void = { _ = try await CNContactStore().requestAccess(for: .contacts) }) {
+        self.requestAccess = requestAccess
         self.status = status; self.readNames = readNames
         authorization = status()
     }
@@ -35,7 +38,7 @@ final class CallContacts {
     }
 
     func authorize() async {
-        do { _ = try await CNContactStore().requestAccess(for: .contacts); await reload() }
+        do { try await requestAccess(); await reload() }
         catch { failure = .wrapping(error); await reload() }
     }
 

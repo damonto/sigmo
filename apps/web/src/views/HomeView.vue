@@ -43,19 +43,15 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="min-h-dvh bg-background">
-    <div class="mx-auto flex w-full max-w-7xl flex-col gap-5 px-6 py-10 lg:px-8">
-      <HomeHeader
-        :subtitle="subtitle"
-        :version="version"
-        :is-loading="isLoading"
-        @refresh="fetchModems"
-      />
+  <main class="flex flex-col gap-5">
+    <HomeHeader
+      :subtitle="subtitle"
+      :version="version"
+    />
 
-      <HomeModemList
-        :items="modemItems"
-        :is-loading="isLoading"
-      />
-    </div>
-  </div>
+    <HomeModemList
+      :items="modemItems"
+      :is-loading="isLoading"
+    />
+  </main>
 </template>

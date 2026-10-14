@@ -18,9 +18,17 @@ describe('useSettingsApi', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await useSettingsApi().updateAuth({
-      otpRequired: true,
-      authProviders: ['telegram'],
-      tokenValidityDays: 30,
+      mode: 'otp',
+
+      oidcIssuer: '',
+      oidcClientId: '',
+      oidcClientSecret: '',
+      oidcAllowedSubjects: [],
+      accessTeamDomain: '',
+      accessAudience: '',
+      accessAllowedSubjects: [],
+      otpChannels: ['telegram'],
+      sessionMaxDays: 30,
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -28,9 +36,17 @@ describe('useSettingsApi', () => {
       expect.objectContaining({
         method: 'PUT',
         body: JSON.stringify({
-          otpRequired: true,
-          authProviders: ['telegram'],
-          tokenValidityDays: 30,
+          mode: 'otp',
+
+          oidcIssuer: '',
+          oidcClientId: '',
+          oidcClientSecret: '',
+          oidcAllowedSubjects: [],
+          accessTeamDomain: '',
+          accessAudience: '',
+          accessAllowedSubjects: [],
+          otpChannels: ['telegram'],
+          sessionMaxDays: 30,
         }),
       }),
     )
@@ -40,13 +56,13 @@ describe('useSettingsApi', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 201 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await useSettingsApi().testAuth({ authProviders: ['telegram'] })
+    await useSettingsApi().testAuth({ channels: ['telegram'] })
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/v1/settings/auth-tests'),
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ authProviders: ['telegram'] }),
+        body: JSON.stringify({ channels: ['telegram'] }),
       }),
     )
   })
@@ -91,15 +107,14 @@ describe('useSettingsApi', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await useSettingsApi().updateNotificationChannel('telegram', {
-      enabled: false,
       botToken: 'draft-token',
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/api/v1/settings/notifications/telegram'),
+      expect.stringContaining('/api/v1/settings/channels/telegram'),
       expect.objectContaining({
         method: 'PUT',
-        body: JSON.stringify({ enabled: false, botToken: 'draft-token' }),
+        body: JSON.stringify({ botToken: 'draft-token' }),
       }),
     )
   })

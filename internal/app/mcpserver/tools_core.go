@@ -67,7 +67,7 @@ func RegisterCoreTools(catalog *Catalog, cfg CoreToolsConfig) error {
 	tools := &coreTools{
 		registry: cfg.Registry,
 		modems: modemhandler.New(modemhandler.Config{
-			Store: cfg.Store, Registry: cfg.Registry, Internet: cfg.InternetConnector,
+			Store: cfg.Store, Storage: cfg.Storage, Registry: cfg.Registry, Internet: cfg.InternetConnector,
 			Reminders: cfg.Reminders, LPA: cfg.LPAClients, OverviewExtensions: cfg.ModemOverview,
 		}),
 		network: cfg.Network,

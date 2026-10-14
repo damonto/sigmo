@@ -17,12 +17,14 @@ final class CallsState {
     var failure: BackendFailure?
     var callbackNumber: String?
     let audio = CallAudio()
-    let contacts = CallContacts()
+    let contacts: CallContacts
     let recordings: CallRecordings
     private(set) var clientID: String
     let store: BackendStore
     let system: CallKitBridge
     @ObservationIgnored private let fixtures: Bool
+    private let demo: Bool
+    private var demoStopped = false
     @ObservationIgnored private let identity: PushPersistence
     @ObservationIgnored private var monitors: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private var mediaTask: Task<Void, Never>?
@@ -37,14 +39,16 @@ final class CallsState {
     }
     @ObservationIgnored private var callbackRoutes: [String: [CallLine]] = [:]
 
-    init(store: BackendStore, fixtures: Bool = false, clientID: String? = nil, recordings: CallRecordings? = nil,
-         identity: PushPersistence = .keychain) {
+    init(store: BackendStore, fixtures: Bool = false, demo: Bool = false, clientID: String? = nil, recordings: CallRecordings? = nil,
+         identity: PushPersistence = .keychain, contacts: CallContacts = CallContacts()) {
+        self.demo = demo
+        self.contacts = contacts
         self.store = store
-        self.fixtures = fixtures
+        self.fixtures = fixtures || demo
         self.identity = identity
-        self.system = CallKitBridge(enabled: !fixtures)
-        self.recordings = recordings ?? CallRecordings(directory: fixtures ? URL.temporaryDirectory.appending(path: "SigmoCalls-\(UUID())") : nil)
-        self.clientID = clientID ?? (fixtures ? "fixture-call-client" : "")
+        self.system = CallKitBridge(enabled: !fixtures && !demo)
+        self.recordings = recordings ?? CallRecordings(directory: (fixtures || demo) ? URL.temporaryDirectory.appending(path: "SigmoCalls-\(UUID())") : nil)
+        self.clientID = clientID ?? (demo ? "demo-\(UUID().uuidString)" : fixtures ? "fixture-call-client" : "")
         restoreClientIdentity()
         system.perform = { [weak self] action in
             guard let self else { throw CancellationError() }
@@ -92,8 +96,14 @@ final class CallsState {
     }
 
     func name(_ call: ActiveCall) -> String {
-        contacts.name(for: call.number, region: call.line.region)
-            ?? PhoneNumberDisplay.format(call.number, regionCode: call.line.region)
+        name(number: call.number, session: store.sessions[call.line.backendID], region: call.line.region)
+    }
+
+    func name(number: String, session: BackendSession?, region: String? = nil) -> String {
+        let matches = session?.contacts(matching: number) ?? []
+        if matches.count == 1 { return matches[0].displayName }
+        if matches.isEmpty, let name = contacts.name(for: number, region: region ?? "") { return name }
+        return PhoneNumberDisplay.format(number, regionCode: region)
     }
 
     func available(_ line: CallLine) -> Bool {
@@ -142,7 +152,8 @@ final class CallsState {
             failure = .local(hasCall ? "calls.alreadyCalling" : "calls.lineUnavailable")
             return
         }
-        let normalized = PhoneNumberDisplay.submission(CallDigits.normalize(number), regionCode: line.region)
+        // The entered prefix determines international dialing; SIM region is only display metadata.
+        let normalized = CallDigits.normalize(number)
         let id = UUID()
         calls[id] = ActiveCall(id: id, line: line, number: normalized, ownsCall: true)
         access[id] = store.sessions[line.backendID]?.accessRevision
@@ -173,8 +184,9 @@ final class CallsState {
         if recordings.activeID != nil { await recordings.stop(audio: audio)?.value }
         else if let call = primary {
             recordings.start(call: call, audio: audio)
+            if demo, recordings.activeCallID == call.id { audio.emitDemoRecording() }
             #if DEBUG
-            if fixtures, recordings.activeCallID == call.id { CallsFixture.emitRecordingAudio(to: audio) }
+            if fixtures && !demo, recordings.activeCallID == call.id { CallsFixture.emitRecordingAudio(to: audio) }
             #endif
         }
     }
@@ -286,7 +298,7 @@ final class CallsState {
     }
 
     func ingest(_ record: CallRecord, line: CallLine, id suppliedID: UUID? = nil) {
-        guard record.profileId == line.profileID, available(line),
+        guard !demoStopped, record.profileId == line.profileID, available(line),
               record.backendId?.isEmpty == false, let recordID = record.callUUID.flatMap(UUID.init(uuidString:)) else { return }
         let key = CallIdentity(record, line: line)
         guard ended[key] == nil, endedUUIDs[recordID] == nil else { return }
@@ -429,7 +441,7 @@ final class CallsState {
 
     func run() async {
         defer { for task in monitors.values { task.cancel() }; monitors.removeAll() }
-        while !Task.isCancelled {
+        while !Task.isCancelled && !demoStopped {
             // A PushKit cold launch may precede the first unlock after reboot.
             // Retry the same saved owner once Keychain becomes accessible.
             restoreClientIdentity()
@@ -504,13 +516,11 @@ final class CallsState {
         guard mediaID != id, let call = calls[id], let record = call.record, record.hasMedia else { return }
         stopMedia()
         mediaID = id
-        #if DEBUG
         if fixtures {
-            audio.startFixture()
+            audio.startLocal()
             updateAudioInput()
             return
         }
-        #endif
         mediaTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -548,7 +558,14 @@ final class CallsState {
         }
     }
 
-    func reloadContacts() async { await contacts.reload(); updateSystemLabels() }
+    func reloadContacts() async {
+        await contacts.reload()
+        for session in store.onlineSessions {
+            do { try await session.refreshContacts() }
+            catch { /* Keep local names as a fallback while an address book is unavailable. */ }
+        }
+        updateSystemLabels()
+    }
 
     private func stopMedia() { mediaTask?.cancel(); mediaTask = nil; mediaID = nil; audio.stop() }
 
@@ -567,6 +584,21 @@ final class CallsState {
         if report { system.ended(id, reason: reason) }
         if calls.isEmpty { presented = false; mediaAttempts = 0 }
         updateSystemLabels()
+    }
+
+    func stopDemo() async {
+        guard demo else { return }
+        demoStopped = true
+        let tasks = Array(monitors.values) + Array(bootstraps.values)
+        for task in tasks { task.cancel() }
+        monitors.removeAll()
+        bootstraps.removeAll()
+        for task in tasks { await task.value }
+        await recordings.stop(audio: audio)?.value
+        await recordings.playback.stop()?.value
+        stopMedia()
+        calls.removeAll()
+        presented = false
     }
 
     private func reset() {

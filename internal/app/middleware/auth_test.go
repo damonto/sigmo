@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,116 +14,106 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
-func TestAuth(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		required   bool
-		withToken  bool
-		wantStatus int
+func TestAuthenticationBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name, mode, transport, method, origin string
+		want                                  int
 	}{
-		{
-			name:       "disabled allows request without token",
-			wantStatus: http.StatusNoContent,
-		},
-		{
-			name:       "enabled rejects missing token",
-			required:   true,
-			wantStatus: http.StatusUnauthorized,
-		},
-		{
-			name:       "enabled accepts valid token",
-			required:   true,
-			withToken:  true,
-			wantStatus: http.StatusNoContent,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
+		{"anonymous", "none", "", "GET", "", 204},
+		{"missing credential", "otp", "", "GET", "", 401},
+		{"native bearer", "otp", "bearer", "GET", "", 204},
+		{"query credential rejected", "otp", "query", "GET", "", 401},
+		{"cookie read", "otp", "cookie", "GET", "", 204},
+		{"cookie mutation missing origin", "otp", "cookie", "POST", "", 403},
+		{"cookie same origin", "otp", "cookie", "POST", "https://sigmo.example", 204},
+		{"cookie cross origin", "otp", "cookie", "POST", "https://evil.example", 403},
+		{"native cannot use cookie credential", "otp", "wrong-kind", "GET", "", 401},
+		{"Access cannot be bypassed by app token", "cloudflare_access", "bearer", "GET", "", 401},
+		{"unknown policy fails closed", "unknown", "", "GET", "", 503},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			db := openAuthTestStorage(t)
-			authStore, err := auth.NewStore(db)
+			s, err := auth.NewStore(db)
 			if err != nil {
-				t.Fatalf("auth.NewStore() error = %v", err)
+				t.Fatal(err)
 			}
-			settingsStore := settings.NewMemoryStore(&settings.Settings{Auth: settings.Auth{OTPRequired: tt.required}})
-			token := ""
-			if tt.withToken {
-				issued, _, err := authStore.IssueToken(t.Context(), 30*24*time.Hour)
-				if err != nil {
-					t.Fatalf("IssueToken() error = %v", err)
-				}
-				token = issued
+			cfg := settings.Default()
+			cfg.Auth.Mode = tc.mode
+			store := settings.NewMemoryStore(cfg)
+			cfg.Auth = store.Snapshot().Auth
+			tokens, err := s.IssueSession(t.Context(), auth.SessionIssue{Native: tc.transport != "cookie" && tc.transport != "wrong-kind", Session: storage.AuthSession{Method: "otp", PolicyID: cfg.Auth.PolicyID(), ExpiresAt: time.Now().Add(time.Hour)}})
+			if err != nil {
+				t.Fatal(err)
 			}
-
-			e := echo.New()
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			if token != "" {
-				req.Header.Set("Authorization", "Bearer "+token)
+			target := "https://sigmo.example/"
+			if tc.transport == "query" {
+				target += "?token=" + tokens.AccessToken
+			}
+			req := httptest.NewRequest(tc.method, target, nil)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.transport == "bearer" || tc.transport == "wrong-kind" {
+				req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
+			}
+			if tc.transport == "cookie" {
+				req.AddCookie(&http.Cookie{Name: SessionCookie, Value: tokens.AccessToken})
 			}
 			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
-			handler := Auth(authStore, settingsStore)(func(c *echo.Context) error {
-				return c.NoContent(http.StatusNoContent)
-			})
-
-			if err := handler(c); err != nil {
-				t.Fatalf("handler() error = %v", err)
+			e := echo.New()
+			if err := Auth(s, store)(func(c *echo.Context) error { return c.NoContent(204) })(e.NewContext(req, rec)); err != nil {
+				t.Fatal(err)
 			}
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
+			if rec.Code != tc.want {
+				t.Fatalf("status=%d want=%d body=%s", rec.Code, tc.want, rec.Body)
 			}
 		})
 	}
 }
-
-func TestAuthReturnsInternalErrorWhenStorageFails(t *testing.T) {
-	db := openAuthTestStorage(t)
-	authStore, err := auth.NewStore(db)
-	if err != nil {
-		t.Fatalf("auth.NewStore() error = %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer token")
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-	handler := Auth(
-		authStore,
-		settings.NewMemoryStore(&settings.Settings{Auth: settings.Auth{OTPRequired: true}}),
-	)(func(c *echo.Context) error {
-		return c.NoContent(http.StatusNoContent)
-	})
-
-	if err := handler(c); err != nil {
-		t.Fatalf("handler() error = %v", err)
-	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
-	}
-	if !strings.Contains(rec.Body.String(), `"error_code":"validate_token_failed"`) {
-		t.Fatalf("body = %s, want validate_token_failed", rec.Body.String())
-	}
-}
-
 func openAuthTestStorage(t *testing.T) *storage.Store {
 	t.Helper()
-	db, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sigmo.db"))
+	s, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "auth.db"))
 	if err != nil {
-		t.Fatalf("storage.Open() error = %v", err)
+		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := db.Close(); err != nil {
-			t.Fatalf("Close() error = %v", err)
+		if err := s.Close(); err != nil {
+			t.Error(err)
 		}
 	})
-	return db
+	return s
+}
+
+func TestResourcePreflightDoesNotBypassActualAccessRequests(t *testing.T) {
+	s, err := auth.NewStore(openAuthTestStorage(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := settings.Default()
+	cfg.Auth.Mode = "cloudflare_access"
+	store := settings.NewMemoryStore(cfg)
+	for _, tc := range []struct {
+		name     string
+		boundary echo.MiddlewareFunc
+		method   string
+		want     int
+	}{
+		{"resource preflight", ResourceAccessBoundary(s, store), http.MethodOptions, http.StatusNoContent},
+		{"resource read", ResourceAccessBoundary(s, store), http.MethodGet, http.StatusUnauthorized},
+		{"resource mutation", ResourceAccessBoundary(s, store), http.MethodPost, http.StatusUnauthorized},
+		{"general preflight", AccessBoundary(s, store), http.MethodOptions, http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, "/", nil)
+			req.Header.Set("Origin", "null")
+			if err := tc.boundary(func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })(e.NewContext(req, rec)); err != nil {
+				t.Fatal(err)
+			}
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.want)
+			}
+		})
+	}
 }

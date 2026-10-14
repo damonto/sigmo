@@ -94,12 +94,17 @@ actor BackendStub {
             return reply(appStatus, #"{"version":"1","commit":"abc","channel":"dev","edition":"community","target":"linux-arm64","distribution":"local"}"#)
         }
         if path.hasSuffix("/capabilities") { return reply(capabilitiesStatus, #"{"features":\#(featuresJSON)}"#) }
-        if path.hasSuffix("/auth/otp/required") { return reply(200, #"{"otpRequired":\#(required)}"#) }
-        if path.hasSuffix("/auth/otp/verify") {
-            if request.httpBody == Data(#"{"code":"123456"}"#.utf8) { return reply(200, #"{"token":"new-token"}"#) }
-            return HTTPProblem.response(status: 401, code: "invalid_otp", detail: "Invalid code", requestID: "otp-request")
+        if path.hasSuffix("/auth/sessions/current") { return reply(204, "") }
+        if path.hasSuffix("/auth/session-refreshes") {
+            let json = AuthenticationFixture.tokens("rotated-token").replacingOccurrences(of: "2033-05-18T03:33:20Z", with: "2033-05-18T04:33:20Z")
+            return reply(200, json)
         }
-        if path.hasSuffix("/auth/otp") { return reply(sendStatus, "") }
+        if path.hasSuffix("/auth/methods") { return reply(200, AuthenticationFixture.methods(required: required)) }
+        if path.hasSuffix("/auth/sessions") {
+            if AuthenticationFixture.validCode(request) { return reply(200, AuthenticationFixture.tokens("new-token")) }
+            return HTTPProblem.response(status: 401, code: "authentication_failed", detail: "Invalid code", requestID: "otp-request")
+        }
+        if path.hasSuffix("/auth/otp/challenges") { return reply(sendStatus, AuthenticationFixture.challenge) }
         if path.hasSuffix("/conversations") {
             let status = conversationsStatus
             let json = conversationsJSON
@@ -108,7 +113,7 @@ actor BackendStub {
                 await withCheckedContinuation { held = $0; arrival?.resume(); arrival = nil }
             }
             if status >= 400 {
-                return HTTPProblem.response(status: status, code: status == 401 ? "invalid_token" : "resource_not_found", detail: "Conversations unavailable")
+                return HTTPProblem.response(status: status, code: status == 401 ? "invalid_session" : "resource_not_found", detail: "Conversations unavailable")
             }
             return reply(status, json)
         }
@@ -119,7 +124,7 @@ actor BackendStub {
                 holdModems = false
                 await withCheckedContinuation { held = $0; arrival?.resume(); arrival = nil }
             }
-            if status != 200 { return HTTPProblem.response(status: status, code: "invalid_token", detail: "No access", requestID: "modem-request") }
+            if status != 200 { return HTTPProblem.response(status: status, code: "invalid_session", detail: "No access", requestID: "modem-request") }
             return reply(200, path.hasSuffix("/modems") ? "[\(modem)]" : modem)
         }
         return HTTPProblem.response(status: 404, code: "resource_not_found", detail: "Not found")
@@ -148,4 +153,13 @@ func testSession(_ stub: BackendStub, configuration: BackendConfiguration? = nil
     let configuration = try configuration ?? testConfiguration()
     return BackendSession(configuration: configuration, credentials: credentials.store,
                           api: BackendAPI(configuration: configuration) { try await stub.respond($0) }, clock: clock, gate: gate)
+}
+
+func storedCredential(_ token: String) -> String {
+    let value = SessionCredential(accessToken: token, refreshToken: "refresh-" + token,
+                                  expiresAt: Date(timeIntervalSince1970: 2_000_000_000),
+                                  sessionExpiresAt: Date(timeIntervalSince1970: 2_000_086_400))
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    return String(decoding: try! encoder.encode(value), as: UTF8.self)
 }

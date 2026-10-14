@@ -66,7 +66,7 @@ describe('locales', () => {
     })
     const tests = [
       { path: 'settings.authTitle', want: 'Authentication' },
-      { path: 'settings.schema.auth.authProviders.label', want: 'Authentication providers' },
+      { path: 'settings.schema.auth.otpChannels', want: 'OTP delivery channels' },
     ] as const
 
     for (const tt of tests) {

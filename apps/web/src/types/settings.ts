@@ -1,11 +1,22 @@
-export type SettingsAuth = {
-  authProviders: string[]
-  otpRequired: boolean
-  tokenValidityDays: number
+/** SettingsAuth is the schema editor's flattened representation of the backend policy. */
+export interface SettingsAuth {
+  mode: 'none' | 'otp' | 'oidc' | 'cloudflare_access'
+  sessionMaxDays: number
+  otpChannels: string[]
+  oidcIssuer: string
+  oidcClientId: string
+  oidcClientSecret: string
+  oidcAllowedSubjects: string[]
+  accessTeamDomain: string
+  accessAudience: string
+  accessAllowedSubjects: string[]
 }
 
-export type SettingsAuthTest = {
-  authProviders: string[]
+export interface SettingsAuthTest {
+  channels: string[]
+}
+export interface SettingsNotifications {
+  channels: string[]
 }
 
 export type SettingsProxy = {
@@ -16,7 +27,6 @@ export type SettingsProxy = {
 }
 
 export type SettingsChannel = {
-  enabled?: boolean
   endpoint?: string
   botToken?: string
   recipients?: string[]
@@ -33,19 +43,13 @@ export type SettingsChannel = {
 
 export type SettingsValues = {
   auth: SettingsAuth
+  notifications: SettingsNotifications
   proxy: SettingsProxy
   channels: Record<string, SettingsChannel>
 }
 
 export type SettingsFieldControl =
-  | 'text'
-  | 'password'
-  | 'number'
-  | 'switch'
-  | 'select'
-  | 'list'
-  | 'keyValue'
-  | 'channelList'
+  'text' | 'password' | 'number' | 'switch' | 'select' | 'list' | 'keyValue' | 'channelList'
 
 export type SettingsOption = {
   label: string

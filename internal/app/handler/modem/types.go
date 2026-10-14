@@ -13,6 +13,7 @@ type SlotResponse struct {
 	OperatorIdentifier string            `json:"operatorIdentifier" jsonschema:"SIM operator identifier, typically the MCC and MNC; empty when unknown"`
 	RegionCode         string            `json:"regionCode" jsonschema:"carrier region code; empty when unknown"`
 	Identifier         string            `json:"identifier" jsonschema:"SIM ICCID; use slot rather than this value when selecting a physical slot"`
+	Label              string            `json:"label" jsonschema:"active SIM display label; eSIM nickname or profile name, falling back to the carrier name"`
 	Icon               string            `json:"icon,omitempty" jsonschema:"embedded icon of the active eSIM profile as a data URL; omitted when unavailable"`
 	Reminder           *reminder.Details `json:"reminder" jsonschema:"reminder attached to this SIM; null when none is configured"`
 }

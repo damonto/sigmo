@@ -82,7 +82,9 @@ func TestDispatchEncryptionRevocationAndRetry(t *testing.T) {
 				return problemResponse(t, tc.status, tc.code), nil
 			})}
 			cfg := settings.Default()
-			cfg.Auth.OTPRequired = tc.requireAuth
+			if tc.requireAuth {
+				cfg.Auth.Mode = "otp"
+			}
 			d, err := New(Config{Storage: s, Settings: settings.NewMemoryStore(cfg), URL: "https://gateway.example", Client: client})
 			if err != nil {
 				t.Fatal(err)

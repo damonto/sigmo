@@ -20,6 +20,8 @@ type ProfileType string
 const (
 	SourceModem SourceType = "modem"
 	SourceCCID  SourceType = "ccid"
+	// SourceClientCCID identifies a reader bound to the current WebSocket client.
+	SourceClientCCID SourceType = "client_ccid"
 
 	ProfileESIM     ProfileType = "esim"
 	ProfilePhysical ProfileType = "physical"

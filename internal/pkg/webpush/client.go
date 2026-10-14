@@ -297,7 +297,7 @@ func payloadForEvent(event notifyevent.Event) (notificationPayload, int, urgency
 			Modem:   strings.TrimSpace(event.Modem),
 			From:    strings.TrimSpace(event.From),
 			To:      strings.TrimSpace(event.To),
-			URL:     "/modems/" + url.PathEscape(event.ModemID) + "/phone",
+			URL:     "/modems/" + url.PathEscape(event.ModemID) + "/calls",
 			Tag:     "call:" + event.ID,
 		}, 60, urgencyHigh, true
 	case notifyevent.ReminderEvent:

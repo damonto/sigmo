@@ -18,10 +18,37 @@ type Handler struct {
 
 func RegisterRoutes(group *echo.Group, broker *Broker) {
 	h := &Handler{broker: broker}
+	group = group.Group("", h.capability)
 	group.GET("/websheets/:id", h.Bootstrap)
 	group.Match(proxyMethods, "/websheets/:id/proxy", h.Proxy)
 	group.Match(proxyMethods, "/websheets/:id/proxy/*", h.Proxy)
 	group.POST("/websheets/:id/callback", h.Callback)
+	group.OPTIONS("/websheets/:id/callback", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	group.OPTIONS("/websheets/:id/proxy", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	group.OPTIONS("/websheets/:id/proxy/*", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+}
+
+// capability confines an untrusted carrier document to one expiring random ID.
+// The outer router still verifies Access assertions when Access owns the boundary.
+func (h *Handler) capability(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		if _, err := h.session(c); err != nil {
+			return websheetError(c, err)
+		}
+		headers := c.Response().Header()
+		headers.Set("Cache-Control", "no-store")
+		headers.Set("Referrer-Policy", "no-referrer")
+		// Never grant the carrier document Sigmo's browser origin, even if opened directly.
+		headers.Set("Content-Security-Policy", "sandbox allow-scripts allow-forms; frame-ancestors 'self'; object-src 'none'")
+		if c.Request().Header.Get("Origin") == "null" {
+			headers.Set("Access-Control-Allow-Origin", "null")
+			headers.Set("Access-Control-Allow-Credentials", "true")
+			headers.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			headers.Set("Access-Control-Allow-Headers", "Content-Type, Accept")
+			headers.Add("Vary", "Origin")
+		}
+		return next(c)
+	}
 }
 
 var proxyMethods = []string{

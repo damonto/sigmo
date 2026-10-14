@@ -4,7 +4,7 @@ Sigmo Pro is released under the [MIT License](../LICENSE).
 
 End-to-end production provisioning, Telegram authorization, private R2 release,
 Bootstrap, and update operations are documented in the
-[完整部署指南](../docs/deployment.md).
+[complete deployment guide](../docs/deployment.md).
 
 Sigmo Pro is the nested Go module for features that should not affect the public
 `go.mod`: eSIM Quick Transfer, IMS access, carrier Websheets, WebRTC call media,

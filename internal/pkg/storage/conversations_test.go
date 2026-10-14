@@ -83,7 +83,9 @@ func TestConversationMigrationPreservesHistoryAndReadBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Recreate the previous schema around real stored SMS rows.
+	removeCommunicationSchema(t, s)
 	for _, statement := range []string{
+		`DROP TABLE goose_db_version`, // Historical releases had no migration ledger.
 		`DROP TABLE native_push_outbox`, `DROP TABLE native_push_subscriptions`, `DROP TABLE conversations`, `DROP TABLE sim_profiles`, `DROP TABLE message_state`, `DROP INDEX idx_messages_conversation`, `ALTER TABLE messages DROP COLUMN conversation_id`, `ALTER TABLE messages DROP COLUMN modem_id`,
 	} {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {

@@ -20,6 +20,9 @@ struct SigmoApp: App {
                     if phase != .active { appDelegate.calls.recordings.stopPlayback() }
                     store.setForeground(phase != .background)
                 }
+                .onChange(of: store.settings.backends.map(\.id), initial: true) { _, _ in
+                    appDelegate.registerVoIPIfNeeded()
+                }
                 .task { AppDiagnostics.record("app launched") }
                 .task { await appDelegate.calls.run() }
                 .task { await appDelegate.calls.recordings.recover() }

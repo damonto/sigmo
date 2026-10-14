@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 
 import { Button } from '@/components/ui/button'
@@ -16,6 +17,7 @@ const props = withDefaults(
 )
 
 const route = useRoute()
+const { t } = useI18n()
 
 const tabs = computed(() =>
   props.items.map((item) => ({
@@ -28,11 +30,18 @@ const tabs = computed(() =>
 
 <template>
   <nav
-    aria-label="Primary navigation"
-    class="fixed bottom-0 left-0 right-0 z-20 h-16 w-full border-t border-white/40 bg-white/50 px-6 py-2 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-2xl backdrop-saturate-125 dark:border-white/10 dark:bg-slate-950/40"
+    :aria-label="t('communication.navigation')"
+    class="fixed bottom-0 left-0 right-0 z-20 h-[calc(4rem+env(safe-area-inset-bottom))] w-full border-t border-white/40 bg-white/50 px-6 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur-2xl backdrop-saturate-125 dark:border-white/10 dark:bg-slate-950/40"
   >
-    <div class="mx-auto flex h-full w-full items-center" :class="props.containerClass">
-      <div v-for="item in tabs" :key="item.key" class="flex flex-1 justify-center">
+    <div
+      class="mx-auto flex h-full w-full items-center"
+      :class="props.containerClass"
+    >
+      <div
+        v-for="item in tabs"
+        :key="item.key"
+        class="flex flex-1 justify-center"
+      >
         <Button
           as-child
           variant="ghost"
@@ -44,8 +53,14 @@ const tabs = computed(() =>
               : 'text-muted-foreground'
           "
         >
-          <RouterLink :to="item.to" :aria-current="item.isActive ? 'page' : undefined">
-            <component :is="item.icon" class="size-5" />
+          <RouterLink
+            :to="item.to"
+            :aria-current="item.isActive ? 'page' : undefined"
+          >
+            <component
+              :is="item.icon"
+              class="size-5"
+            />
             <span class="sr-only">{{ item.label }}</span>
           </RouterLink>
         </Button>

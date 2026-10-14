@@ -2,7 +2,7 @@ import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
 
 import { createApiError, isLocalAuthenticationError, type ApiError } from './apiProblem'
-import { clearStoredToken } from './authStorage'
+import { invalidateSession } from './authSession'
 import { notifyError } from './notify'
 
 export { createApiError } from './apiProblem'
@@ -90,7 +90,7 @@ export const handleResponseError = (response: Response, data?: unknown) => {
   const apiError = createApiError(response, data)
 
   if (isLocalAuthenticationError(apiError)) {
-    clearStoredToken()
+    invalidateSession()
   }
 
   // A removable card can advertise eUICC capability in its ATR while not

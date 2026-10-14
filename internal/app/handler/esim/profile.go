@@ -30,6 +30,10 @@ func newProfile(store *settings.Store, reminders *reminder.Scheduler, clients *l
 }
 
 func (p *profile) List(ctx context.Context, modem *mmodem.Modem) (*ProfilesResponse, error) {
+	var displayRevision uint64
+	if p.history != nil {
+		displayRevision = p.history.SIMDisplayRevision()
+	}
 	ses, err := p.clients.SecureElements(ctx, modem)
 	if err != nil {
 		return nil, fmt.Errorf("discover eUICC SEs: %w", err)
@@ -89,7 +93,11 @@ func (p *profile) List(ctx context.Context, modem *mmodem.Modem) (*ProfilesRespo
 		response.SEs = append(response.SEs, group)
 		if p.history != nil {
 			for _, item := range group.Profiles {
-				if err := p.history.RecordSIMProfile(ctx, storage.SIMProfile{ProfileID: item.ICCID, ModemID: modem.EquipmentIdentifier, Label: item.Name}); err != nil {
+				if err := p.history.RecordSIMProfile(ctx, storage.SIMProfile{
+					ProfileID: item.ICCID, ModemID: modem.EquipmentIdentifier, Label: item.Name,
+					Kind: "esim", SEID: item.SEID, Region: item.RegionCode, Icon: item.Icon,
+					DisplayKnown: true, DisplayRevision: displayRevision,
+				}); err != nil {
 					return nil, fmt.Errorf("record eSIM profile: %w", err)
 				}
 			}
@@ -145,6 +153,9 @@ func (p *profile) UpdateNickname(ctx context.Context, modem *mmodem.Modem, seID 
 
 	if err := client.SetNickname(iccid, nickname); err != nil {
 		return fmt.Errorf("set nickname for %s: %w", iccid.String(), err)
+	}
+	if p.history != nil {
+		return p.history.InvalidateSIMDisplay(ctx, iccid.String())
 	}
 	return nil
 }

@@ -43,6 +43,8 @@ var (
 var websheetBridgeJS string
 
 type Config struct {
+	// PolicyID invalidates carrier capabilities when authentication settings change.
+	PolicyID          func() string
 	TTL               time.Duration
 	BasePath          string
 	AllowPrivateHosts bool
@@ -50,6 +52,7 @@ type Config struct {
 }
 
 type Broker struct {
+	policyID          func() string
 	mu                sync.Mutex
 	sessions          map[string]*Session
 	ttl               time.Duration
@@ -93,6 +96,8 @@ type Callback struct {
 }
 
 type Session struct {
+	policyID          string
+	currentPolicy     func() string
 	id                string
 	target            *url.URL
 	userData          string
@@ -123,6 +128,7 @@ func New(cfg Config) *Broker {
 		now = time.Now
 	}
 	return &Broker{
+		policyID:          cfg.PolicyID,
 		sessions:          make(map[string]*Session),
 		ttl:               ttl,
 		basePath:          basePath,
@@ -152,6 +158,7 @@ func (b *Broker) Create(ctx context.Context, req Request) (*Session, error) {
 		return nil, err
 	}
 	session := &Session{
+		currentPolicy:     b.policyID,
 		id:                id,
 		target:            target,
 		userData:          strings.TrimSpace(req.UserData),
@@ -164,6 +171,9 @@ func (b *Broker) Create(ctx context.Context, req Request) (*Session, error) {
 		now:               b.now,
 		allowPrivateHosts: b.allowPrivateHosts,
 		callbackCh:        make(chan Callback, 1),
+	}
+	if b.policyID != nil {
+		session.policyID = b.policyID()
 	}
 	session.client = client
 	session.client.Jar = jar
@@ -234,12 +244,11 @@ func (s *Session) ServeBootstrap(w http.ResponseWriter, r *http.Request) error {
 	if s.expired() {
 		return ErrExpired
 	}
-	token := strings.TrimSpace(r.URL.Query().Get("token"))
 	target := *s.target
 	if s.method() == http.MethodGet && s.userData != "" {
 		appendRawQuery(&target, s.userData)
 	}
-	proxyURL := s.proxyURL(target.String(), token)
+	proxyURL := s.proxyURL(target.String())
 	if s.method() == http.MethodGet {
 		http.Redirect(w, r, proxyURL, http.StatusFound)
 		return nil
@@ -304,12 +313,11 @@ func (s *Session) Proxy(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return fmt.Errorf("read websheet response: %w", err)
 		}
-		token := strings.TrimSpace(r.URL.Query().Get("token"))
 		base := target
 		if resp.Request != nil && resp.Request.URL != nil {
 			base = resp.Request.URL
 		}
-		html := s.rewriteHTML(string(data), base, token, requestOrigin(r), shouldInjectBridge(r))
+		html := s.rewriteHTML(string(data), base, requestOrigin(r), shouldInjectBridge(r))
 		_, err = io.WriteString(w, html)
 		return err
 	}
@@ -325,17 +333,14 @@ func (s *Session) method() string {
 }
 
 func (s *Session) expired() bool {
-	return !s.now().Before(s.expiresAt)
+	return !s.now().Before(s.expiresAt) || (s.currentPolicy != nil && s.currentPolicy() != s.policyID)
 }
 
-func (s *Session) proxyURL(rawTarget string, token string) string {
+func (s *Session) proxyURL(rawTarget string) string {
 	if target, err := url.Parse(rawTarget); err == nil && target.Scheme != "" && target.Host != "" {
 		values := url.Values{}
 		if target.RawQuery != "" {
 			values.Set(targetQueryParam, target.RawQuery)
-		}
-		if token != "" {
-			values.Set("token", token)
 		}
 		proxyPath := s.basePath + "/" + url.PathEscape(s.id) + "/proxy/" + target.Scheme + "/" + target.Host + target.EscapedPath()
 		if target.EscapedPath() == "" {
@@ -348,9 +353,6 @@ func (s *Session) proxyURL(rawTarget string, token string) string {
 	}
 	values := url.Values{}
 	values.Set("target", rawTarget)
-	if token != "" {
-		values.Set("token", token)
-	}
 	return s.basePath + "/" + url.PathEscape(s.id) + "/proxy?" + values.Encode()
 }
 
@@ -385,11 +387,8 @@ func (s *Session) proxyPathTarget(r *http.Request) string {
 	return target.String()
 }
 
-func (s *Session) callbackURL(token string) string {
+func (s *Session) callbackURL() string {
 	values := url.Values{}
-	if token != "" {
-		values.Set("token", token)
-	}
 	path := s.basePath + "/" + url.PathEscape(s.id) + "/callback"
 	if encoded := values.Encode(); encoded != "" {
 		path += "?" + encoded
@@ -423,7 +422,7 @@ func (s *Session) postBootstrapHTML(action string) string {
 	return body.String()
 }
 
-func (s *Session) rewriteHTML(doc string, base *url.URL, token string, publicOrigin string, injectBridge bool) string {
+func (s *Session) rewriteHTML(doc string, base *url.URL, publicOrigin string, injectBridge bool) string {
 	docBase := s.documentBaseURL(doc, base)
 	rewritten := attrURLPattern.ReplaceAllStringFunc(doc, func(match string) string {
 		parts := attrURLPattern.FindStringSubmatch(match)
@@ -438,7 +437,7 @@ func (s *Session) rewriteHTML(doc string, base *url.URL, token string, publicOri
 		if raw == "" {
 			raw = parts[5]
 		}
-		next, ok := s.rewriteURL(raw, docBase, token, publicOrigin)
+		next, ok := s.rewriteURL(raw, docBase, publicOrigin)
 		if !ok {
 			return match
 		}
@@ -447,7 +446,7 @@ func (s *Session) rewriteHTML(doc string, base *url.URL, token string, publicOri
 	if !injectBridge {
 		return rewritten
 	}
-	script := s.bridgeScript(token, publicOrigin, docBase)
+	script := s.bridgeScript(publicOrigin, docBase)
 	lower := strings.ToLower(rewritten)
 	if idx := strings.Index(lower, "<head"); idx >= 0 {
 		if end := strings.Index(rewritten[idx:], ">"); end >= 0 {
@@ -499,7 +498,7 @@ func (s *Session) documentBaseURL(doc string, fallback *url.URL) *url.URL {
 	return fallback.ResolveReference(ref)
 }
 
-func (s *Session) rewriteURL(raw string, base *url.URL, token string, publicOrigin string) (string, bool) {
+func (s *Session) rewriteURL(raw string, base *url.URL, publicOrigin string) (string, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || strings.HasPrefix(raw, "#") {
 		return raw, false
@@ -513,23 +512,23 @@ func (s *Session) rewriteURL(raw string, base *url.URL, token string, publicOrig
 		return raw, false
 	}
 	target := base.ResolveReference(ref)
-	return absoluteLocalURL(s.proxyURL(target.String(), token), publicOrigin), true
+	return absoluteLocalURL(s.proxyURL(target.String()), publicOrigin), true
 }
 
-func (s *Session) bridgeScript(token string, publicOrigin string, carrierBase *url.URL) string {
-	callbackURL := absoluteLocalURL(s.callbackURL(token), publicOrigin)
+func (s *Session) bridgeScript(publicOrigin string, carrierBase *url.URL) string {
+	callbackURL := absoluteLocalURL(s.callbackURL(), publicOrigin)
 	script := strings.ReplaceAll(websheetBridgeJS, callbackURLToken, jsString(callbackURL))
-	script = strings.ReplaceAll(script, "{{ABSOLUTE_PATH_PROXY_PREFIX}}", jsString(s.absolutePathProxyPrefix(carrierBase, token, publicOrigin)))
+	script = strings.ReplaceAll(script, "{{ABSOLUTE_PATH_PROXY_PREFIX}}", jsString(s.absolutePathProxyPrefix(carrierBase, publicOrigin)))
 	script = strings.ReplaceAll(script, "{{WFC_CLIENT_NAME}}", jsString(s.clientName))
 	return "<script>\n" + script + "\n</script>"
 }
 
-func (s *Session) absolutePathProxyPrefix(carrierBase *url.URL, token string, publicOrigin string) string {
+func (s *Session) absolutePathProxyPrefix(carrierBase *url.URL, publicOrigin string) string {
 	origin := targetOrigin(carrierBase)
 	if origin == "" {
 		return ""
 	}
-	return strings.TrimRight(absoluteLocalURL(s.proxyURL(origin+"/", token), publicOrigin), "/")
+	return strings.TrimRight(absoluteLocalURL(s.proxyURL(origin+"/"), publicOrigin), "/")
 }
 
 var (
@@ -568,13 +567,8 @@ func absoluteLocalURL(raw string, publicOrigin string) string {
 }
 
 func copyProxyHeaders(dst http.Header, src http.Header) {
-	for key, values := range src {
-		switch strings.ToLower(key) {
-		case "authorization", "cookie", "host", "referer", "origin", "content-length", "accept-encoding",
-			"connection", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user":
-			continue
-		}
-		for _, value := range values {
+	for _, key := range []string{"Accept", "Accept-Language", "Content-Type", "User-Agent", "Range", "If-None-Match", "If-Modified-Since"} {
+		for _, value := range src.Values(key) {
 			dst.Add(key, value)
 		}
 	}
@@ -590,7 +584,7 @@ func targetOrigin(target *url.URL) string {
 func copyResponseHeaders(dst http.Header, src http.Header) {
 	for key, values := range src {
 		switch strings.ToLower(key) {
-		case "content-security-policy", "content-security-policy-report-only", "x-frame-options", "content-length", "set-cookie":
+		case "content-security-policy", "content-security-policy-report-only", "x-frame-options", "content-length", "set-cookie", "access-control-allow-origin", "access-control-allow-credentials", "referrer-policy", "cache-control":
 			continue
 		}
 		for _, value := range values {

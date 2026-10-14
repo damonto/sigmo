@@ -33,12 +33,44 @@ type Notifier struct {
 	channels map[string]Sender
 }
 
+// SendOTP succeeds when at least one selected destination accepts the code.
+// Partial delivery must not invalidate a code already received by another destination.
+func (n *Notifier) SendOTP(ctx context.Context, lang locale.Tag, event notifyevent.OTPEvent) error {
+	if len(n.channels) == 0 {
+		return errors.New("OTP has no delivery targets")
+	}
+	message, err := notifycontent.Compose(lang, event)
+	if err != nil {
+		return err
+	}
+	delivered := false
+	var combined error
+	for name, sender := range n.channels {
+		if err := sender.Send(ctx, message); err != nil {
+			combined = errors.Join(combined, fmt.Errorf("%s delivery: %w", name, err))
+			slog.Warn("OTP delivery rejected", "channel", name)
+			continue
+		}
+		delivered = true
+	}
+	if delivered {
+		return nil
+	}
+	return combined
+}
+
 // New creates a new Notifier from the current settings.
 func New(currentSettings *settings.Settings) (*Notifier, error) {
+	return ForChannels(currentSettings, currentSettings.Notifications.Channels)
+}
+
+// ForChannels constructs only the explicitly selected delivery channels.
+func ForChannels(currentSettings *settings.Settings, targets []string) (*Notifier, error) {
 	channels := make(map[string]Sender, len(currentSettings.Channels))
-	for name, channel := range currentSettings.Channels {
-		if !channel.IsEnabled() {
-			continue
+	for _, name := range targets {
+		channel, ok := currentSettings.Channels[name]
+		if !ok {
+			return nil, fmt.Errorf("channel %q is not configured", name)
 		}
 		channelName := strings.ToLower(name)
 		sender, err := createSender(channelName, channel)

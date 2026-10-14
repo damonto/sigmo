@@ -28,7 +28,7 @@ private enum DetailSheet {
 }
 
 private enum DetailTab {
-    case overview, messages, calls, settings
+    case overview, messages, calls, contacts
 }
 
 private struct SlotChange: Identifiable {
@@ -62,6 +62,7 @@ private struct ModemDetailScreen: View {
     @State private var showDiscoveries = false
     @State private var pinDismissed = false
     @State private var refreshID = 0
+    @State private var loadedRefreshID = -1
     @State private var tab = DetailTab.overview
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -142,8 +143,10 @@ private struct ModemDetailScreen: View {
                         }
                 }
             }
-            Tab("common.settings", systemImage: "gearshape", value: DetailTab.settings) {
-                tabContent(.settings) { ModemSettingsView(state: settings) }
+            Tab("communication.contacts", systemImage: "person.crop.circle", value: DetailTab.contacts) {
+                tabContent(.contacts) {
+                    CommunicationWorkspace(session: session, section: .contacts, modemID: state.modemID)
+                }
             }
         }
         // Keep native tabs at the bottom on iPad; each page restores its real size class.
@@ -161,6 +164,9 @@ private struct ModemDetailScreen: View {
     }
     private var presentedContent: some View {
         tabs
+        .sheet(isPresented: Binding(get: { state.deletedHistoryProfileID != nil }, set: { if !$0 { state.deletedHistoryProfileID = nil } })) {
+            if let id = state.deletedHistoryProfileID { HistoryAssignmentView(session: session, sourceID: id) }
+        }
         // The list owns profile operations so dismissing their detail page does not cancel them.
         .task(id: profileOperation?.id) {
             guard let operation = profileOperation else { return }
@@ -298,7 +304,8 @@ private struct ModemDetailScreen: View {
         .detailErrorAlert($presentedFailure)
         .foregroundTask(id: refreshIdentity) {
             guard tab == .overview else { return }
-            await reload()
+            await reload(force: loadedRefreshID != refreshID)
+            if !Task.isCancelled { loadedRefreshID = refreshID }
             offerPIN()
         }
         .task(id: simObservationIdentity) {
@@ -333,14 +340,23 @@ private struct ModemDetailScreen: View {
             .accessibilityLabel(Text("detail.switchModem"))
             .accessibilityValue((state.modem?.displayName ?? "") + " · " + session.configuration.name)
         }
-        if tab == .overview, state.esim || isPhysicalSIM {
-            ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink { ModemInfoView(state: state) } label: {
-                    Label("common.details", systemImage: "info.circle").labelStyle(.iconOnly)
+        if tab == .overview {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                NavigationLink {
+                    ModemSettingsView(state: settings)
+                        .navigationTitle(settings.modem?.displayName ?? detailText("common.settings"))
+                        .navigationBarTitleDisplayMode(.inline)
+                } label: {
+                    Label("common.settings", systemImage: "gearshape").labelStyle(.iconOnly)
                 }
-                .accessibilityIdentifier("modemInfo")
+                .accessibilityIdentifier("modemSettings")
+                if state.esim || isPhysicalSIM {
+                    NavigationLink { ModemInfoView(state: state) } label: {
+                        Label("common.details", systemImage: "info.circle").labelStyle(.iconOnly)
+                    }
+                    .accessibilityIdentifier("modemInfo")
+                }
             }
-
         }
         if tab == .messages {
             ToolbarItem(placement: .topBarTrailing) {
@@ -595,8 +611,8 @@ private struct ModemDetailScreen: View {
         preparingFlow = nil
         availableFlow = nil
     }
-    private func reload() async {
-        await state.load()
+    private func reload(force: Bool = true) async {
+        await state.load(force: force)
         guard !Task.isCancelled else { return }
         presentedFailure = session.failure ?? state.failure ?? state.elementsFailure ?? state.profilesFailure
     }

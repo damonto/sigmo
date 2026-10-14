@@ -227,6 +227,8 @@ func (h *Handler) Download(c *echo.Context) error {
 		return err
 	}
 	defer conn.Close()
+	stopClose := context.AfterFunc(c.Request().Context(), func() { _ = conn.Close() }) // Unblock reads when authorization expires.
+	defer stopClose()
 
 	start, err := readStartMessage(conn)
 	if err != nil {

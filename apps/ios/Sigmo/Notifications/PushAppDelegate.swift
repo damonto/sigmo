@@ -21,13 +21,19 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         calls.foreground = application.applicationState != .background
         UNUserNotificationCenter.current().delegate = self
-        if !AppLaunch.usesFixtures {
+        registerVoIPIfNeeded()
+        return true
+    }
+
+    func registerVoIPIfNeeded() {
+        // An empty installation can explore the offline demo before connecting
+        // a server. Register VoIP only once there is a real connection to use it.
+        if !AppLaunch.usesFixtures, voip == nil, !store.settings.backends.isEmpty {
             let registry = PKPushRegistry(queue: .main)
             registry.delegate = self
             voip = registry
             registry.desiredPushTypes = [.voIP]
         }
-        return true
     }
 
     func pushRegistry(_ registry: PKPushRegistry, didUpdate pushCredentials: PKPushCredentials, for type: PKPushType) {

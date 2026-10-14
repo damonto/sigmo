@@ -87,15 +87,15 @@ const mountBanner = (session: ModemCallSession) =>
       mocks: {
         $t: (key: string, params?: Record<string, string>) =>
           ({
-            'modemDetail.phone.answer': 'Answer',
-            'modemDetail.phone.reject': 'Reject',
-            'modemDetail.phone.hangup': 'Hang up',
-            'modemDetail.phone.hold': 'Hold',
-            'modemDetail.phone.resume': 'Resume',
-            'modemDetail.phone.duration': 'Duration',
-            'modemDetail.phone.openInCallDialpad': 'Open in-call dialpad',
-            'modemDetail.phone.closeInCallDialpad': 'Close in-call dialpad',
-            'modemDetail.phone.sendDtmf': `Send ${params?.digit ?? ''}`,
+            'modemDetail.calls.answer': 'Answer',
+            'modemDetail.calls.reject': 'Reject',
+            'modemDetail.calls.hangup': 'Hang up',
+            'modemDetail.calls.hold': 'Hold',
+            'modemDetail.calls.resume': 'Resume',
+            'modemDetail.calls.duration': 'Duration',
+            'modemDetail.calls.openInCallDialpad': 'Open in-call dialpad',
+            'modemDetail.calls.closeInCallDialpad': 'Close in-call dialpad',
+            'modemDetail.calls.sendDtmf': `Send ${params?.digit ?? ''}`,
           })[key] ?? key,
       },
       stubs: {
@@ -175,7 +175,7 @@ describe('ModemCallBanner', () => {
     const wrapper = mountBanner(session)
 
     expect(wrapper.find('[data-testid="audio-devices"]').exists()).toBe(false)
-    expect(wrapper.find('button[aria-label="modemDetail.phone.recording.start"]').exists()).toBe(
+    expect(wrapper.find('button[aria-label="modemDetail.calls.recording.start"]').exists()).toBe(
       false,
     )
   })
@@ -281,12 +281,12 @@ describe('ModemCallBanner', () => {
   it('starts and stops recording independently of hanging up', async () => {
     const session = makeSession({ activeCall: call({ state: 'active' }) })
     const wrapper = mountBanner(session)
-    await wrapper.get('button[aria-label="modemDetail.phone.recording.start"]').trigger('click')
+    await wrapper.get('button[aria-label="modemDetail.calls.recording.start"]').trigger('click')
     expect(session.callRecording.start).toHaveBeenCalledOnce()
     await wrapper.vm.$nextTick()
-    expect(wrapper.text()).toContain('modemDetail.phone.recording.active')
+    expect(wrapper.text()).toContain('modemDetail.calls.recording.active')
     expect(wrapper.text()).toContain('0:00')
-    const stop = wrapper.get('button[aria-label="modemDetail.phone.recording.stop"]')
+    const stop = wrapper.get('button[aria-label="modemDetail.calls.recording.stop"]')
     expect(stop.attributes('aria-pressed')).toBe('true')
     await stop.trigger('click')
     expect(session.callRecording.stop).toHaveBeenCalledOnce()
@@ -300,7 +300,7 @@ describe('ModemCallBanner', () => {
       const wrapper = mountBanner(session)
       expect(
         wrapper
-          .get('button[aria-label="modemDetail.phone.recording.start"]')
+          .get('button[aria-label="modemDetail.calls.recording.start"]')
           .attributes('disabled'),
       ).toBeDefined()
     },
@@ -314,8 +314,8 @@ describe('ModemCallBanner', () => {
     const wrapper = mountBanner(session)
     expect(wrapper.find('button[aria-label="Hang up"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('sigmo-call.webm')
-    await wrapper.get('button[aria-label="modemDetail.phone.recording.download"]').trigger('click')
-    await wrapper.get('button[aria-label="modemDetail.phone.recording.dismiss"]').trigger('click')
+    await wrapper.get('button[aria-label="modemDetail.calls.recording.download"]').trigger('click')
+    await wrapper.get('button[aria-label="modemDetail.calls.recording.dismiss"]').trigger('click')
     expect(session.callRecording.download).toHaveBeenCalledOnce()
     expect(session.callRecording.dismiss).toHaveBeenCalledOnce()
   })

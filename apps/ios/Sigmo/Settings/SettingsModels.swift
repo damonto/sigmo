@@ -44,13 +44,15 @@ typealias SettingsFields = [String: SettingValue]
 enum SettingsSection: Equatable, Sendable {
     case authentication
     case proxy
+    case notifications
     case notification(String)
 
     var path: [String] {
         switch self {
         case .authentication: ["auth"]
         case .proxy: ["proxy"]
-        case .notification(let channel): ["notifications", channel]
+        case .notifications: ["notifications"]
+        case .notification(let channel): ["channels", channel]
         }
     }
 }
@@ -102,6 +104,7 @@ struct SettingsSchema: Codable, Sendable {
 
 struct SettingsValues: Codable, Sendable {
     var auth: SettingsFields
+    var notifications: SettingsFields
     var proxy: SettingsFields
     var channels: [String: SettingsFields]?
 }

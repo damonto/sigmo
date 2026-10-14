@@ -11,7 +11,6 @@ struct CallDialpad: View {
     @State private var contactsPresented = false
     @State private var accessPresented = false
     @State private var ussd: CallUSSD
-    @FocusState private var editing: Bool
 
     init(line: CallLine, session: BackendSession, dial: @escaping (String) -> Void) {
         self.line = line
@@ -24,26 +23,30 @@ struct CallDialpad: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    Text("\(line.backendName) · \(line.label)").font(.subheadline).foregroundStyle(.secondary)
-                    if ussd.opened { service }
+                    HStack(spacing: 8) {
+                        Image(systemName: "simcard.fill").foregroundStyle(.blue)
+                        Text(line.label).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer()
+                    }
+                    if ussd.opened { CallServiceView(ussd: ussd) }
                     else {
-                        numberEntry
-                        editingControls
-                        CallKeypad(allowsPlus: true) { digit in
-                            editing = false
-                            if number.count < 128 { number += digit }
-                        }
-                        dialButton
+                        CallDialpadSurface(number: $number, canDial: canDial, dial: dialNumber)
                         if !calls.available(line) { Text("calls.upgrade").font(.footnote).foregroundStyle(.secondary) }
                         contactAccess
                     }
                 }.padding(24).frame(maxWidth: 408).frame(maxWidth: .infinity)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle(ussd.opened ? "calls.ussd" : "calls.keypad")
+            .background(Color(uiColor: .systemBackground))
+            .navigationTitle(ussd.opened ? LocalizedStringKey("calls.ussd") : LocalizedStringKey("calls.keypad"))
             .navigationBarTitleDisplayMode(.inline)
-            .detailErrorAlert($ussd.failure)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("common.done") { ussd.close(); dismiss() } } }
+            .detailErrorAlert(ussd.opened ? nil : ussd.failure)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("common.done", systemImage: "xmark") { ussd.close(); dismiss() }.labelStyle(.iconOnly) }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("calls.contacts", systemImage: "person.crop.circle") { contactsPresented = true }
+                        .accessibilityIdentifier("calls-contacts")
+                }
+            }
             .sheet(isPresented: $contactsPresented) {
                 CallContactPicker { selected, name in number = CallDigits.normalize(selected); calls.contacts.remember(number: selected, name: name) }
             }
@@ -55,80 +58,17 @@ struct CallDialpad: View {
         .presentationDragIndicator(.visible)
     }
 
-    private var numberEntry: some View {
-        VStack(spacing: 8) {
-            TextField("calls.number", text: $number)
-                .font(.largeTitle).multilineTextAlignment(.center).keyboardType(.phonePad)
-                .textContentType(.telephoneNumber).focused($editing)
-                .accessibilityIdentifier("calls-number")
-            Text(PhoneNumberDisplay.format(number, regionCode: line.region))
-                .font(.callout).foregroundStyle(.secondary).accessibilityHidden(true)
-        }.frame(minHeight: 84)
-    }
-
     private var canDial: Bool {
         CallDigits.callable(number) && (CallDigits.isService(number) || (!calls.hasCall && calls.available(line)))
     }
 
-    private var dialButton: some View {
-        Button(action: dialNumber) {
-            Label(CallDigits.isService(number) ? "calls.sendCode" : "calls.dial", systemImage: "phone.fill")
-                .labelStyle(.iconOnly).font(.title2.weight(.semibold))
-                .frame(width: 56, height: 56)
-        }
-        .buttonStyle(.glassProminent).buttonBorderShape(.circle).tint(.green)
-        .disabled(!canDial)
-        .accessibilityIdentifier("calls-dial")
-    }
-
     private func dialNumber() {
-        editing = false
         if CallDigits.isService(number) {
             ussd.send(number, initial: true)
             return
         }
         dial(CallDigits.normalize(number))
         dismiss()
-    }
-
-    private var editingControls: some View {
-        GlassEffectContainer(spacing: 12) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    pasteButton
-                    Spacer(minLength: 0)
-                    contactsButton.fixedSize()
-                    Spacer(minLength: 0)
-                    deleteButton
-                }
-                VStack(spacing: 12) {
-                    contactsButton
-                    HStack {
-                        pasteButton
-                        Spacer()
-                        deleteButton
-                    }
-                }
-            }
-            .buttonStyle(.glass).buttonBorderShape(.capsule).controlSize(.large)
-        }
-    }
-
-    private var pasteButton: some View {
-        PasteButton(payloadType: String.self) { values in
-            if let value = values.first { number = CallDigits.normalize(value) }
-        }.labelStyle(.iconOnly).buttonBorderShape(.circle)
-    }
-
-    private var contactsButton: some View {
-        Button("calls.contacts", systemImage: "person.crop.circle") { editing = false; contactsPresented = true }
-            .accessibilityIdentifier("calls-contacts")
-    }
-
-    private var deleteButton: some View {
-        Button("calls.deleteDigit", systemImage: "delete.left") { if !number.isEmpty { number.removeLast() } }
-            .labelStyle(.iconOnly).buttonBorderShape(.circle).disabled(number.isEmpty)
-            .accessibilityIdentifier("calls-delete-digit")
     }
 
     @ViewBuilder private var contactAccess: some View {
@@ -146,7 +86,12 @@ struct CallDialpad: View {
         }
     }
 
-    private var service: some View {
+}
+
+struct CallServiceView: View {
+    @Bindable var ussd: CallUSSD
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             ForEach(Array(ussd.messages.enumerated()), id: \.offset) { _, message in Text(message).textSelection(.enabled) }
             if ussd.busy { ProgressView("calls.ussdWaiting") }
@@ -156,7 +101,9 @@ struct CallDialpad: View {
                     .buttonStyle(.glassProminent).disabled(ussd.busy || ussd.reply.isEmpty)
             }
             Text("calls.ussdHint").font(.footnote).foregroundStyle(.secondary)
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .detailErrorAlert($ussd.failure)
     }
 }
 
@@ -181,8 +128,14 @@ struct CallKeypad: View {
     ]
 
     var body: some View {
-        GlassEffectContainer(spacing: 12) {
-            Grid(horizontalSpacing: 20, verticalSpacing: compact ? 8 : 16) {
+        Group {
+            if allowsPlus { keys.buttonStyle(.plain) }
+            else { GlassEffectContainer(spacing: 12) { keys.buttonStyle(.glass).buttonBorderShape(.circle).tint(.primary) } }
+        }.frame(maxWidth: 360).frame(maxWidth: .infinity)
+    }
+
+    private var keys: some View {
+            Grid(horizontalSpacing: allowsPlus ? 24 : 20, verticalSpacing: compact ? 8 : 16) {
                 ForEach(Self.rows.indices, id: \.self) { row in
                     GridRow {
                         ForEach(Self.rows[row]) { key in
@@ -195,8 +148,6 @@ struct CallKeypad: View {
                     }
                 }
             }
-            .buttonStyle(.glass).buttonBorderShape(.circle).tint(.primary)
-        }.frame(maxWidth: 360).frame(maxWidth: .infinity)
     }
 
     private func keyButton(_ key: Key) -> some View {
@@ -204,11 +155,14 @@ struct CallKeypad: View {
         return Button { pressed(key.digit) } label: {
             VStack(spacing: 0) {
                 // Bound the glyph sizes so the telephone grid stays usable at accessibility sizes.
-                Text(key.digit).font(.system(size: min(digitSize, compact ? 24 : 44), design: .rounded)).lineLimit(1).minimumScaleFactor(0.5)
+                Text(key.digit).font(.system(size: allowsPlus ? 40 : min(digitSize, compact ? 24 : 44), design: allowsPlus ? .default : .rounded)).lineLimit(1).minimumScaleFactor(0.5)
                 Text(letters.isEmpty ? " " : letters).font(.system(size: min(lettersSize, compact ? 10 : 16), weight: .semibold)).tracking(1.5)
                     .lineLimit(1).minimumScaleFactor(0.5)
                     .frame(height: compact ? 12 : 20)
-            }.frame(maxWidth: .infinity, minHeight: compact ? 36 : 64)
+            }
+            .frame(width: allowsPlus ? 80 : nil, height: allowsPlus ? 80 : nil)
+            .frame(maxWidth: allowsPlus ? nil : .infinity, minHeight: compact ? 36 : 64)
+            .background { if allowsPlus { Color(uiColor: .systemGray5).clipShape(Circle()) } }
         }
         .accessibilityLabel(key.digit).accessibilityValue(letters).accessibilityIdentifier("call-key-\(key.digit)")
     }

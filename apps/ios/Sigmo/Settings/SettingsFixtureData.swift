@@ -1,4 +1,3 @@
-#if DEBUG
 import Foundation
 
 enum SettingsFixtureData {
@@ -7,27 +6,76 @@ enum SettingsFixtureData {
   "schema": {
     "auth": [
       {
-        "key": "otpRequired",
-        "label": "settings.schema.auth.otpRequired.label",
-        "description": "settings.schema.auth.otpRequired.description",
-        "control": "switch",
-        "required": false
+        "key": "mode",
+        "label": "settings.schema.auth.mode",
+        "control": "select",
+        "options": [
+          {
+            "label": "settings.authNone",
+            "value": "none"
+          },
+          {
+            "label": "settings.authOTP",
+            "value": "otp"
+          },
+          {
+            "label": "settings.authOIDC",
+            "value": "oidc"
+          },
+          {
+            "label": "settings.authAccess",
+            "value": "cloudflare_access"
+          }
+        ]
       },
       {
-        "key": "tokenValidityDays",
-        "label": "settings.schema.auth.tokenValidityDays.label",
-        "description": "settings.schema.auth.tokenValidityDays.description",
+        "key": "sessionMaxDays",
+        "label": "settings.schema.auth.sessionMaxDays",
         "control": "number",
-        "required": true,
         "min": 1,
-        "max": 180
+        "max": 180,
+        "required": true,
+        "description": "settings.schema.auth.sessionMaxDaysDescription"
       },
       {
-        "key": "authProviders",
-        "label": "settings.schema.auth.authProviders.label",
-        "description": "settings.schema.auth.authProviders.description",
-        "control": "channelList",
-        "required": false
+        "key": "otpChannels",
+        "label": "settings.schema.auth.otpChannels",
+        "control": "channelList"
+      },
+      {
+        "key": "oidcIssuer",
+        "label": "settings.schema.auth.oidcIssuer",
+        "control": "text"
+      },
+      {
+        "key": "oidcClientId",
+        "label": "settings.schema.auth.oidcClientId",
+        "control": "text"
+      },
+      {
+        "key": "oidcClientSecret",
+        "label": "settings.schema.auth.oidcClientSecret",
+        "control": "password"
+      },
+      {
+        "key": "oidcAllowedSubjects",
+        "label": "settings.schema.auth.oidcAllowedSubjects",
+        "control": "list"
+      },
+      {
+        "key": "accessTeamDomain",
+        "label": "settings.schema.auth.accessTeamDomain",
+        "control": "text"
+      },
+      {
+        "key": "accessAudience",
+        "label": "settings.schema.auth.accessAudience",
+        "control": "text"
+      },
+      {
+        "key": "accessAllowedSubjects",
+        "label": "settings.schema.auth.accessAllowedSubjects",
+        "control": "list"
       }
     ],
     "proxy": [
@@ -292,9 +340,16 @@ enum SettingsFixtureData {
   },
   "values": {
     "auth": {
-      "otpRequired": false,
-      "tokenValidityDays": 30,
-      "authProviders": [
+      "oidcIssuer": "",
+      "oidcClientId": "",
+      "oidcClientSecret": "",
+      "oidcAllowedSubjects": [],
+      "accessTeamDomain": "",
+      "accessAudience": "",
+      "accessAllowedSubjects": [],
+      "mode": "none",
+      "sessionMaxDays": 30,
+      "otpChannels": [
         "telegram"
       ]
     },
@@ -306,36 +361,18 @@ enum SettingsFixtureData {
     },
     "channels": {
       "telegram": {
-        "enabled": true,
         "botToken": "fixture-bot",
         "recipients": [
           "123456"
         ]
-      },
-      "bark": {
-        "enabled": false
-      },
-      "gotify": {
-        "enabled": false
-      },
-      "sc3": {
-        "enabled": false
-      },
-      "lark": {
-        "enabled": false
-      },
-      "wecom": {
-        "enabled": false
-      },
-      "http": {
-        "enabled": false
-      },
-      "email": {
-        "enabled": false
       }
+    },
+    "notifications": {
+      "channels": [
+        "telegram"
+      ]
     }
   }
 }
 """#
 }
-#endif

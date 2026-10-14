@@ -7,25 +7,25 @@ import type { ModemCallSession } from '@/composables/useModemCallSession'
 import type { CallRecord } from '@/types/call'
 
 const labels: Record<string, string> = {
-  'modemDetail.phone.audioDevices.microphone': 'Microphone',
-  'modemDetail.phone.audioDevices.output': 'Audio output',
-  'modemDetail.phone.audioDevices.systemDefault': 'System default',
-  'modemDetail.phone.audioDevices.outputUnsupported': 'Output is controlled by the system',
+  'modemDetail.calls.audioDevices.microphone': 'Microphone',
+  'modemDetail.calls.audioDevices.output': 'Audio output',
+  'modemDetail.calls.audioDevices.systemDefault': 'System default',
+  'modemDetail.calls.audioDevices.outputUnsupported': 'Output is controlled by the system',
 }
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, string | number>) => {
-      if (key === 'modemDetail.phone.audioDevices.microphoneFallback') {
+      if (key === 'modemDetail.calls.audioDevices.microphoneFallback') {
         return `Microphone ${params?.index}`
       }
-      if (key === 'modemDetail.phone.audioDevices.outputFallback') {
+      if (key === 'modemDetail.calls.audioDevices.outputFallback') {
         return `Audio output ${params?.index}`
       }
-      if (key === 'modemDetail.phone.audioDevices.selectMicrophone') {
+      if (key === 'modemDetail.calls.audioDevices.selectMicrophone') {
         return `Select microphone, current: ${params?.device}`
       }
-      if (key === 'modemDetail.phone.audioDevices.selectOutput') {
+      if (key === 'modemDetail.calls.audioDevices.selectOutput') {
         return `Select audio output, current: ${params?.device}`
       }
       return labels[key] ?? key

@@ -1,74 +1,99 @@
 import { defineStore } from 'pinia'
 
 import { useAuthApi } from '@/apis/auth'
-import { clearStoredToken, getStoredToken, setStoredToken } from '@/lib/authStorage'
+import { invalidateSession } from '@/lib/authSession'
+import type { AuthMethods } from '@/types/auth'
 
-const RESEND_COOLDOWN_MS = 60_000
-const CODE_LENGTH = 6
-
+/** useAuthStore tracks authentication state, never cookie or provider credentials. */
 export const useAuthStore = defineStore('auth', {
   state: () => ({
-    token: getStoredToken(),
+    configuration: null as AuthMethods | null,
+    authenticated: false,
     isSending: false,
     isVerifying: false,
+    isOpeningBrowser: false,
     resendAvailableAt: 0,
-    otpRequired: true,
+    challengeId: '',
+    failed: false,
   }),
   getters: {
-    isAuthenticated: (state) => Boolean(state.token),
+    hasOTP: (state) => state.configuration?.methods.includes('otp') === true,
+    hasOIDC: (state) => state.configuration?.methods.includes('oidc') === true,
+    isAuthenticated: (state) => state.authenticated,
   },
   actions: {
-    setToken(token: string) {
-      this.token = token
-      setStoredToken(token)
-    },
-    clearToken() {
-      this.token = null
-      clearStoredToken()
-    },
-    async fetchOtpRequirement() {
+    async check(): Promise<boolean> {
       try {
-        const { data } = await useAuthApi().getOtpRequirement()
-        const required = data.value?.otpRequired
-        this.otpRequired = required ?? true
-        return this.otpRequired
+        // Discard the retired browser bearer credential during the one-way migration.
+        window.localStorage.removeItem('sigmo:token')
+        const configuration = await useAuthApi().methods()
+        if (
+          configuration.version !== 1 ||
+          !['none', 'otp', 'oidc', 'cloudflare_access'].includes(configuration.mode)
+        )
+          throw new Error('Unsupported authentication protocol')
+        this.configuration = configuration
+        this.authenticated = configuration.mode === 'none' || (await useAuthApi().session())
+        this.failed = false
       } catch {
-        this.otpRequired = true
-        return this.otpRequired
+        this.configuration = null
+        this.authenticated = false
+        this.failed = true
       }
+      return this.authenticated
     },
-    async sendCode() {
-      if (this.isSending) return
-      if (!this.otpRequired) return
-      if (this.resendAvailableAt > Date.now()) return
-
+    async sendCode(): Promise<void> {
+      if (!this.hasOTP || this.isSending || this.resendAvailableAt > Date.now()) return
       this.isSending = true
       try {
-        await useAuthApi().sendCode()
-        this.resendAvailableAt = Date.now() + RESEND_COOLDOWN_MS
+        const challenge = await useAuthApi().challenge()
+        this.challengeId = challenge.id
+        this.resendAvailableAt = Date.now() + 60_000
+        this.failed = false
       } catch {
-        return
+        this.failed = true
       } finally {
         this.isSending = false
       }
     },
-    async verifyCode(code: string) {
-      if (this.isVerifying) return null
-      if (code.trim().length !== CODE_LENGTH) return null
-
+    async verifyCode(code: string): Promise<boolean> {
+      if (this.isVerifying || !this.challengeId || !/^\d{6}$/.test(code)) return false
       this.isVerifying = true
       try {
-        const { data } = await useAuthApi().verifyCode({ code })
-        const token = data.value?.token
-        if (!token) return null
-
-        this.setToken(token)
-        return token
+        await useAuthApi().verify(this.challengeId, code)
+        invalidateSession()
+        this.authenticated = true
+        this.failed = false
+        return true
       } catch {
-        return null
+        this.failed = true
+        return false
       } finally {
         this.isVerifying = false
       }
+    },
+    async browserLogin(): Promise<void> {
+      if (this.isOpeningBrowser) return
+      this.isOpeningBrowser = true
+      try {
+        window.location.assign(await useAuthApi().browser())
+      } catch {
+        this.failed = true
+      } finally {
+        this.isOpeningBrowser = false
+      }
+    },
+    async logout(): Promise<void> {
+      if (this.configuration?.mode === 'cloudflare_access') {
+        invalidateSession()
+        this.authenticated = false
+        window.location.assign('/cdn-cgi/access/logout')
+        return
+      }
+      await useAuthApi().logout()
+      invalidateSession()
+      this.authenticated = false
+      this.challengeId = ''
     },
   },
 })

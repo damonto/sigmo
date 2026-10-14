@@ -15,9 +15,12 @@ export type CallHoldState = 'none' | 'local' | 'remote' | 'local_remote'
 
 export type CallRecord = {
   callID: string
+  modemId?: string
+  historyProfileId?: string
   backendId?: string
   callUUID?: string
   profileId?: string
+  lineLabel?: string
   ownerClientId?: string
   route: StoredCallRoute
   direction: CallDirection

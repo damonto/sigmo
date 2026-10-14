@@ -1,0 +1,26 @@
+version: "2"
+sql:
+  - engine: sqlite
+    schema: internal/pkg/storage/migrations
+    queries: internal/pkg/storage/queries
+    gen:
+      go:
+        package: query
+        out: internal/pkg/storage/query
+        sql_package: database/sql
+        emit_empty_slices: true
+        omit_unused_structs: true
+        initialisms: [id, url, api, json, se]
+        rename:
+          p256dh: P256DH
+        overrides:
+          - column: native_push_subscriptions.sms
+            go_type: bool
+          - column: native_push_subscriptions.reminders
+            go_type: bool
+          - column: native_push_subscriptions.enabled
+            go_type: bool
+          - column: native_push_subscriptions.calls
+            go_type: bool
+          - column: native_call_outbox.delivered
+            go_type: bool

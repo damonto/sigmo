@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -72,6 +73,11 @@ func (c *Calls) DialForClient(ctx context.Context, modem *mmodem.Modem, req Dial
 		return storage.Call{}, err
 	}
 	c.events.publish(Event{Call: call})
+	if call.State != StateFailed {
+		if err := c.records.store.RememberCommunication(ctx, storage.CommunicationPreference{Participant: call.Number, ProfileID: call.ProfileID, UpdatedAt: storage.CommunicationTime(call.StartedAt)}); err != nil {
+			slog.WarnContext(ctx, "remember dialed line", "error", err)
+		}
+	}
 	return call, nil
 }
 

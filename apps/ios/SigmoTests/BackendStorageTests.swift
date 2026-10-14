@@ -81,7 +81,7 @@ final class BackendStorageTests: XCTestCase {
         let one = UUID(), two = UUID()
         store.saveBackend(id: one, name: "One", address: "https://one.example")
         store.saveBackend(id: two, name: "Two", address: "https://two.example")
-        credentials.tokens = [one: "one", two: "two"]
+        credentials.tokens = [one: storedCredential("one"), two: storedCredential("two")]
         let old = try XCTUnwrap(store.sessions[one])
         await stub.holdNextModemRequest()
         let oldRequest = Task { await old.refresh(force: true) }
@@ -90,7 +90,7 @@ final class BackendStorageTests: XCTestCase {
         await stub.release()
         await oldRequest.value
         XCTAssertNil(credentials.tokens[one])
-        XCTAssertEqual(credentials.tokens[two], "two")
+        XCTAssertEqual(credentials.tokens[two], storedCredential("two"))
         XCTAssertFalse(store.sessions[one] === old)
         XCTAssertTrue(try XCTUnwrap(store.sessions[one]).modems.isEmpty)
         XCTAssertTrue(old.modems.isEmpty)
@@ -107,7 +107,7 @@ final class BackendStorageTests: XCTestCase {
         let first = BackendStore(file: file, credentials: credentials.store, makeAPI: factory)
         first.saveBackend(name: "Saved", address: "https://one.example")
         let id = try XCTUnwrap(first.settings.backends.first?.id)
-        credentials.tokens[id] = "saved-token"
+        credentials.tokens[id] = storedCredential("saved-token")
         await first.refreshAll()
         XCTAssertEqual(first.sessions[id]?.modems.count, 1)
         let second = BackendStore(file: file, credentials: credentials.store, makeAPI: factory)

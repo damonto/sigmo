@@ -3,6 +3,7 @@
   "name": "sigmo-pro-api",
   "main": "src/index.ts",
   "workers_dev": true,
+  "routes": [{ "pattern": "sigmo-pro.952007.xyz", "custom_domain": true }],
   "compatibility_date": "2026-08-08",
   "compatibility_flags": [
     "nodejs_compat"
@@ -49,10 +50,12 @@
     "enabled": true,
     "logs": {
       "enabled": true,
+      "invocation_logs": false,
       "head_sampling_rate": 1,
     },
     "traces": {
-      "enabled": true,
+      // Automatic request spans can retain OAuth callback query parameters.
+      "enabled": false,
       "head_sampling_rate": 0.01,
     },
   },

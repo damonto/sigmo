@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/damonto/sigmo/internal/pkg/storage/query"
 )
 
 const (
@@ -102,7 +104,16 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 		return false, fmt.Errorf("read inserted message id: %w", err)
 	}
 	msg.ID = messageID
-	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO conversations (id, profile_id, participant) VALUES (?, ?, ?)`, msg.ConversationID, msg.ProfileID, msg.Counterparty()); err != nil {
+	queries := query.New(tx)
+	region, err := queries.SIMProfileRegion(ctx, msg.ProfileID)
+	if err != nil {
+		return false, fmt.Errorf("read participant region: %w", err)
+	}
+	err = queries.RecordMessageConversation(ctx, query.RecordMessageConversationParams{
+		ID: msg.ConversationID, ProfileID: msg.ProfileID, Participant: msg.Counterparty(),
+		ParticipantKey: ParticipantKey(msg.Counterparty(), region),
+	})
+	if err != nil {
 		return false, fmt.Errorf("create message conversation: %w", err)
 	}
 	lineNumber := msg.Sender

@@ -7,7 +7,6 @@ import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogC
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Spinner } from '@/components/ui/spinner'
 import { resolveAPIURL } from '@/lib/apiUrl'
-import { getStoredToken } from '@/lib/authStorage'
 import { fetchJson } from '@/lib/fetch'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 
@@ -29,10 +28,6 @@ const iframeEl = useTemplateRef<HTMLIFrameElement>('iframeEl')
 const iframeSrc = computed(() => {
   if (!props.websheet?.embedUrl) return ''
   const u = new URL(resolveAPIURL(props.websheet.embedUrl))
-  const token = getStoredToken()
-  if (token) {
-    u.searchParams.set('token', token)
-  }
   return u.toString()
 })
 
@@ -123,7 +118,8 @@ watch(
           :key="iframeSrc"
           :src="iframeSrc"
           class="block size-full border-0"
-          sandbox="allow-forms allow-same-origin allow-scripts allow-popups allow-popups-to-escape-sandbox"
+          sandbox="allow-forms allow-scripts"
+          referrerpolicy="no-referrer"
           @load="loaded = true"
         />
       </div>

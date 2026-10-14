@@ -249,12 +249,6 @@
 "settings.updates.status.verifying" = "正在验签";
 "settings.updates.status.restarting" = "正在重启";
 "settings.updates.status.failed" = "失败";
-"settings.schema.auth.otpRequired.label" = "启用 OTP";
-"settings.schema.auth.otpRequired.description" = "使用 API 前要求一次性验证码验证。";
-"settings.schema.auth.tokenValidityDays.label" = "登录有效天数";
-"settings.schema.auth.tokenValidityDays.description" = "登录 Token 的有效天数，可设置为 1 至 180 天。";
-"settings.schema.auth.authProviders.label" = "认证渠道";
-"settings.schema.auth.authProviders.description" = "允许发送登录验证码的已启用渠道。";
 "settings.schema.proxy.listenAddress.label" = "监听地址";
 "settings.schema.proxy.listenAddress.description" = "代理服务监听地址。";
 "settings.schema.proxy.listenAddress.placeholder" = "127.0.0.1";
@@ -526,7 +520,6 @@
 "detail.interrupted" = "操作已中断，请刷新查看实际结果。";
 "detail.isdp" = "ISD-P AID";
 "detail.keepForeground" = "请保持 Sigmo 在前台，直到操作完成。";
-"detail.loadProfiles" = "加载来源配置";
 "detail.manualInput" = "手动输入详细信息";
 "detail.nickname" = "昵称";
 "detail.nicknameLimit" = "名称不能为空，且不能超过 64 个 UTF-8 字节。";
@@ -643,6 +636,12 @@
 "detail.scanInstructions" = "将运营商提供的二维码放入取景框中。";
 "detail.confirmationHint" = "输入运营商提供的确认码以继续。";
 "detail.transferSourceHint" = "选择当前装有待转移 eSIM 的设备。";
+"detail.localReader" = "连接到此 iPhone 或 iPad";
+"detail.localReaderInsertCard" = "连接到此 iPhone 或 iPad · 请插入 SIM 卡";
+"detail.localReaderHTTPS" = "请使用 HTTPS 连接 Sigmo，以便从本机读卡器转移。";
+"detail.localReaderUnavailable" = "本机读卡器或 SIM 卡不可用，请插入卡片后重试。";
+"detail.remoteCardInterrupted" = "读卡器连接已中断，卡指令可能已经执行。请检查源卡和目标 Modem 的状态后再重试。";
+"detail.remoteCardUnsupported" = "此 Sigmo 服务端不支持本机读卡器，请更新服务端后重试。";
 "detail.selectTransferProfile" = "选择要转移的 eSIM";
 "detail.noTransferProfiles" = "没有可转移的 eSIM";
 "detail.setupHeading" = "设置 eSIM";
@@ -892,7 +891,7 @@
 "calls.details" = "通话详情";
 "calls.direction" = "方向";
 "calls.route" = "实际通话线路";
-"calls.line" = "设备";
+"calls.line" = "线路";
 "calls.sim" = "SIM";
 "calls.time" = "时间";
 "calls.duration" = "通话时长";
@@ -1044,3 +1043,170 @@
 "home.noNumber" = "无号码";
 
 "detail.noNumber" = "无号码";
+
+// Contacts and backend-wide communication.
+"communication.devices" = "设备";
+"communication.messages" = "短信";
+"communication.calls" = "通话";
+"communication.contacts" = "联系人";
+"communication.navigation" = "主导航";
+"communication.newContact" = "新建联系人";
+"communication.editContact" = "编辑联系人";
+"communication.contactDescription" = "保存到当前 Sigmo 后端。";
+"communication.name" = "姓名";
+"communication.number" = "电话号码";
+"communication.label" = "标签";
+"communication.region" = "本地号码的国家代码";
+"communication.addNumber" = "添加电话号码";
+"communication.notes" = "备注";
+"communication.avatar" = "头像";
+"communication.removeAvatar" = "移除头像";
+"communication.remove" = "移除";
+"communication.save" = "保存";
+"communication.delete" = "删除";
+"communication.searchContacts" = "搜索姓名或号码";
+"communication.emptyContacts" = "暂无联系人，添加第一位联系人。";
+"communication.back" = "返回";
+"communication.deleteContactDescription" = "删除此联系人？短信和通话记录会保留。";
+"communication.zoom" = "缩放";
+"communication.horizontal" = "水平位置";
+"communication.vertical" = "垂直位置";
+"communication.avatarTooLarge" = "请选择小于 5 MiB 的图片。";
+"communication.dial" = "拨号";
+"communication.newMessage" = "新建短信";
+"communication.message" = "短信";
+"communication.send" = "发送";
+"communication.line" = "线路";
+"communication.chooseLine" = "选择要使用的号码";
+"communication.lineUnavailable" = "上次使用的线路不可用，请重新选择。";
+"communication.noLines" = "没有可用线路，请先在设备中启用 SIM。";
+"communication.loading" = "正在加载…";
+"communication.upgrade" = "请升级此 Sigmo 后端以使用此功能。";
+"communication.upgradeCalls" = "通话记录需要支持通话的后端。";
+"communication.deletedNumber" = "号码已删除";
+"communication.deletedLines" = "已删除号码的历史记录";
+"communication.assign" = "接管历史记录";
+"communication.assignDescription" = "选择接管号码。原始号码、已读状态和录音关联会保留。";
+"communication.inactive" = "（未启用）";
+"communication.later" = "稍后处理";
+"communication.search" = "搜索姓名、号码或短信";
+"communication.emptyMessages" = "暂无短信。";
+"communication.emptyCalls" = "暂无通话记录。";
+"communication.more" = "加载更多";
+"communication.older" = "更早的短信";
+"communication.originalLine" = "接管后仍保留原线路信息";
+"communication.addContact" = "保存到联系人";
+"communication.all" = "全部";
+"communication.missed" = "未接来电";
+"communication.deleteThreadDescription" = "删除此后端全部线路中与该号码的短信会话？";
+"communication.deleteCallDescription" = "删除此通话记录？录音会单独保留。";
+"communication.edit" = "编辑联系人";
+"communication.contact" = "联系人";
+"communication.numbers" = "电话号码";
+"communication.import" = "从系统通讯录导入";
+"communication.chooseNumber" = "选择电话号码";
+"communication.chooseBackend" = "选择 Sigmo 后端";
+"communication.backend" = "后端";
+"communication.addExisting" = "添加到现有联系人";
+"communication.invalidPhoto" = "请选择小于 20 MiB 的有效照片。";
+
+"communication.allLines" = "所有线路";
+
+"apiError.avatar_invalid" = "请选择有效的 PNG 或 JPEG 图片。";
+
+"apiError.avatar_too_large" = "请选择小于 5 MiB 的图片。";
+
+"apiError.communication_not_found" = "此项目已不可用。";
+
+"apiError.communication_invalid" = "请检查联系人信息或历史记录选择。";
+
+"apiError.communication_failed" = "读取或保存失败，请重试。";
+
+"apiError.history_assignment_invalid" = "请选择当前后端中已确认存在的其他线路。";
+
+"apiError.thread_read_invalid" = "显示的短信已变化，请刷新后重试。";
+
+"apiError.contact_invalid" = "请检查联系人姓名和电话号码。";
+
+"auth.browserLogin" = "通过浏览器登录";
+"auth.loginFailed" = "未能完成登录，请重试。";
+"auth.accessSetupRequired" = "请为此 Cloudflare Access 应用开启 Managed OAuth 和动态客户端注册。";
+"auth.revocationUnavailable" = "服务器未提供凭据撤销接口，已移除本机凭据。";
+"settings.authNone" = "无需认证";
+"settings.authAccess" = "Cloudflare Access";
+"settings.authOTP" = "OTP";
+"settings.authOIDC" = "OIDC";
+"settings.noConfiguredChannels" = "请先配置并保存一个投递渠道。";
+"settings.businessChannels" = "通知渠道";
+"settings.businessChannelsDescription" = "短信和来电通知使用这些渠道，OTP 投递单独选择。";
+"settings.native.configured" = "已配置";
+"settings.native.notConfigured" = "未配置";
+"settings.schema.auth.mode" = "认证模式";
+"settings.schema.auth.sessionMaxDays" = "登录有效天数";
+"settings.schema.auth.sessionMaxDaysDescription" = "超过此天数后需重新登录。";
+"settings.schema.auth.otpChannels" = "OTP 投递渠道";
+"settings.schema.auth.oidcIssuer" = "OIDC Issuer";
+"settings.schema.auth.oidcClientId" = "OIDC 客户端 ID";
+"settings.schema.auth.oidcClientSecret" = "OIDC 客户端密钥";
+"settings.schema.auth.keepSecret" = "留空保留已保存的密钥。";
+"settings.schema.auth.oidcAllowedSubjects" = "允许的 OIDC 主体（sub）";
+"settings.schema.auth.accessTeamDomain" = "Access 团队 URL";
+"settings.schema.auth.accessAudience" = "Access 应用 AUD";
+"settings.schema.auth.accessAllowedSubjects" = "允许的 Access 主体（sub）";
+
+"apiError.authentication_failed" = "登录未通过验证，请重新登录。";
+"apiError.create_session_failed" = "无法创建会话，请重试。";
+"apiError.invalid_auth_policy" = "请检查认证配置。";
+"apiError.invalid_browser_request" = "浏览器登录请求无效。";
+"apiError.invalid_login_request" = "登录请求无效。";
+"apiError.invalid_notification_settings" = "请检查所选通知渠道。";
+"apiError.invalid_refresh_request" = "会话刷新请求无效，请重新登录。";
+"apiError.invalid_session" = "会话已失效，请重新登录。";
+"apiError.login_rate_limited" = "登录尝试过于频繁，请稍后重试。";
+"apiError.origin_not_allowed" = "请通过配置的公开地址访问 Sigmo。";
+"apiError.origin_required" = "浏览器请求缺少来源信息，请刷新后重试。";
+"apiError.otp_delivery_failed" = "验证码发送失败，请检查 OTP 渠道。";
+"apiError.reload_notifications_failed" = "无法重新加载通知配置。";
+"apiError.revoke_session_failed" = "无法撤销会话，请重试。";
+"apiError.save_notifications_failed" = "无法保存通知配置。";
+"apiError.validate_session_failed" = "无法验证会话，请重试。";
+
+"communication.searchMessages" = "搜索短信";
+"communication.searchCalls" = "搜索通话";
+"communication.filters" = "筛选记录";
+"communication.cropPhoto" = "裁剪照片";
+"communication.contactOptions" = "联系人选项";
+"communication.addPhoto" = "添加照片";
+"communication.changePhoto" = "更换照片";
+"communication.photoOptions" = "照片选项";
+
+"communication.chooseModem" = "选择 Modem";
+"communication.modemUnavailable" = "此 Modem 已不可用，请选择其他 Modem。";
+"communication.noModems" = "暂无可用 Modem。";
+"communication.useCurrentLine" = "使用当前激活的 SIM";
+
+"demo.try" = "体验演示";
+"demo.title" = "演示模式";
+"demo.exit" = "退出演示";
+"demo.entryDescription" = "使用示例设备体验 Sigmo，无需服务器、账号或 SIM 卡。";
+"demo.description" = "此模式中的设备和数据均为模拟。短信、通话、运营商设置和 SIM/eSIM 操作仅在本机演示，不会发送真实短信或拨打电话。退出后恢复示例数据。";
+"demo.inputs" = "可使用任意示例激活码，确认码为 123456，SIM PIN 为 1234。演示录音包含示例音频，运营商服务及远程推送均为模拟。";
+"demo.receiveMessage" = "接收示例短信";
+"demo.receiveCall" = "模拟来电";
+"demo.reset" = "重置演示数据";
+"demo.startFailed" = "无法打开演示模式，请重试。";
+"demo.noConnection" = "请添加演示连接或重置演示，以接收示例短信和来电。";
+"demo.unsupportedRequest" = "此演示请求不可用，请重置演示后重试。";
+"demo.messageWelcome" = "欢迎使用 Sigmo！这是一段示例对话。";
+"demo.messageReply" = "演示模式中发送的短信仅保留在本机。";
+"demo.messageTravel" = "切换 SIM 卡后，仍可查看旅行线路的历史消息。";
+"demo.messageIncoming" = "这条来信由本地演示生成。";
+"demo.ussdReply" = "演示余额：20.00。未向运营商发送请求。";
+"demo.carrierTitle" = "演示运营商设置";
+"demo.carrierDescription" = "此本地页面模拟运营商授权，无需运营商账号或个人信息。";
+"demo.carrierComplete" = "完成演示设置";
+"demo.notificationDescription" = "这些偏好仅用于演示。可通过演示模式选项生成示例短信和来电，远程推送为模拟。";
+"demo.useActivation" = "使用示例激活码";
+"demo.simulatedCall" = "演示通话";
+"demo.simulatedSIM" = "演示操作，不会更改真实 SIM 卡。";
+"demo.updateNotes" = "示例后端更新。安装过程仅在本机模拟。";

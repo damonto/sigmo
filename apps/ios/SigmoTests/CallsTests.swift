@@ -34,6 +34,25 @@ final class CallsTests: XCTestCase {
         return id
     }
 
+    func testDialPreservesLocalNumbersWithoutAddingCountryCode() async throws {
+        let cases = [
+            ("415 555 2671", "4155552671"),
+            ("1 415 555 2671", "14155552671"),
+            ("44 20 7946 0018", "442079460018"),
+            ("020 7946 0018", "02079460018"),
+            ("+1 415 555 2671", "+14155552671"),
+            ("10086", "10086")
+        ]
+        for (input, expected) in cases {
+            let (calls, _, line) = try await setup(CallsFixture())
+            await calls.dial(number: input, line: line)
+            let accepted = try XCTUnwrap(calls.primary)
+            XCTAssertEqual(accepted.number, expected, input)
+            XCTAssertEqual(accepted.record?.number, expected, input)
+            await calls.act(.end(accepted.id))
+        }
+    }
+
     func testRecordingFinalizesForLocalRemoteAndMediaFirstHangup() async throws {
         for scenario in ["local", "remote", "media-first"] {
             let (calls, _, line) = try await setup(CallsFixture())
@@ -263,7 +282,7 @@ final class CallsTests: XCTestCase {
             await gate.waitForCaller()
             switch action {
             case "background": session.foreground = false
-            case "logout": session.logout()
+            case "logout": await session.logout()
             default: request.cancel()
             }
             await gate.release()
@@ -283,7 +302,7 @@ final class CallsTests: XCTestCase {
             let fixture = CallsFixture()
             let (calls, session, line) = try await setup(fixture)
             switch action {
-            case "logout": session.logout()
+            case "logout": await session.logout()
             case "remove": calls.store.deleteBackend(session.id)
             case "address":
                 XCTAssertTrue(calls.store.saveBackend(id: session.id, name: "Changed", address: "https://new.sigmo.test"))
@@ -334,7 +353,7 @@ final class CallsTests: XCTestCase {
         calls.receivePush(content: content, id: id, connection: session.configuration) { completion.fulfill() }
         await fulfillment(of: [completion], timeout: 1)
         await gate.waitForCaller()
-        session.logout()
+        await session.logout()
         await gate.release()
         // A system action waits for bootstrap before consulting the call table.
         await calls.answer(id)
@@ -473,8 +492,8 @@ final class CallsTests: XCTestCase {
         let (_, session, _) = try await setup(CallsFixture())
         let cases: [(name: String, profile: String?, number: String, modemID: String, allowed: Bool)] = [
             ("current SIM", CallsFixture.profile, "10086", "device-1", true),
-            ("different SIM", "other-profile", "10086", "device-1", false),
-            ("unknown SIM", nil, "10086", "device-1", false),
+            ("different SIM", "other-profile", "10086", "device-1", true),
+            ("unknown SIM", nil, "10086", "device-1", true),
             ("empty recipient", CallsFixture.profile, "  ", "device-1", false),
             ("missing modem", CallsFixture.profile, "10086", "missing", false),
         ]
@@ -493,7 +512,7 @@ final class CallsTests: XCTestCase {
             }
         }
         let history = CallHistoryState(session: session, modemID: "device-1")
-        session.logout()
+        await session.logout()
         XCTAssertNil(history.messageDraft(for: CallsFixture.record(state: "ended")))
     }
 
@@ -507,7 +526,7 @@ final class CallsTests: XCTestCase {
 
         await fixture.changeSIM(to: "other-profile")
         await session.refresh(force: true)
-        XCTAssertFalse(history.canMessage(record))
+        XCTAssertTrue(history.canMessage(record))
         let conversation = await draft.sendNew()
         XCTAssertNil(conversation)
         XCTAssertEqual(draft.sendFailure?.code, "messages.inactiveLine")
@@ -539,7 +558,7 @@ final class CallsTests: XCTestCase {
         calls.ingest(stale, line: line)
         XCTAssertEqual(calls.primary?.record?.state, "active")
         XCTAssertEqual(calls.callbackLine(for: "10086"), line)
-        session.logout()
+        await session.logout()
         XCTAssertNil(calls.callbackLine(for: "10086"))
         await calls.act(.hold(try XCTUnwrap(calls.primary?.id), true))
         XCTAssertEqual(calls.failure?.code, "calls.lineUnavailable")

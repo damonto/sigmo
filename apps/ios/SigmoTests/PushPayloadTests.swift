@@ -70,7 +70,7 @@ final class PushPayloadTests: XCTestCase {
     }
 
     @MainActor
-    func testLogoutDisablesPreviewsAndRetainsNavigationUntilConnectionRemoval() throws {
+    func testLogoutDisablesPreviewsAndRetainsNavigationUntilConnectionRemoval() async throws {
         let vector = try vector()
         let configuration = try testConfiguration()
         let file = ConfigurationFile(url: URL.temporaryDirectory.appending(path: "PushLifecycle-\(UUID()).json"))
@@ -85,7 +85,7 @@ final class PushPayloadTests: XCTestCase {
         memory.values["installation"] = try JSONEncoder().encode(identity)
         memory.values[account] = try JSONEncoder().encode(PushDecryptionKey(backendID: vector.content.backendId, key: vector.key))
         let push = NativePushState(disabled: true, identity: identity, persistence: memory.persistence)
-        store.sessions[configuration.id]?.logout()
+        await store.sessions[configuration.id]?.logout()
         memory.rejectedWrite = account
         XCTAssertThrowsError(try push.removeInvalidConnections(store))
         XCTAssertEqual(try memory.identity().revocations, [binding.id])

@@ -33,6 +33,7 @@ import { PushDatabase } from '../storage/push';
 import { download, latestRelease } from '../releases/service';
 import { telegramWebhook } from '../telegram/webhook';
 import { carrierLogo } from '../logos/service';
+import { appleAssociation, nativeCallback } from './native-auth';
 
 interface ApiEnv {
   Bindings: Env;
@@ -127,6 +128,9 @@ function routeParameter(c: Context<ApiEnv>, name: string): string {
   }
   return value;
 }
+
+app.get('/.well-known/apple-app-site-association', () => appleAssociation());
+app.get('/auth/callback', () => nativeCallback());
 
 app.get('/logo/:plmn', async (c) =>
   finishResponse(

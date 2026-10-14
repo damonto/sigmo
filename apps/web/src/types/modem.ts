@@ -8,6 +8,8 @@ export type SlotInfo = {
   operatorIdentifier: string
   regionCode: string
   identifier: string
+  /** SIM/eSIM display label supplied without a separate profile inventory request. */
+  label?: string
   /** Embedded active-profile icon supplied by the modem endpoint. */
   icon?: string
   reminder?: Reminder

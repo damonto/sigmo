@@ -20,6 +20,7 @@ final class BackendAPI: Sendable {
     // Modem and eSIM operations can take five minutes before returning any data.
     private static let requestTimeout: TimeInterval = 10 * 60
     typealias Transport = @Sendable (URLRequest) async throws -> BackendHTTPResponse
+    let isDemo: Bool
     let backendID: UUID
     let address: URL
     private let transport: Transport
@@ -27,9 +28,18 @@ final class BackendAPI: Sendable {
     let socketFactory: SocketFactory
     typealias SocketFactory = @Sendable (URLRequest) async throws -> BackendSocket
 
-    init(configuration: BackendConfiguration, transport: Transport? = nil, socketFactory: SocketFactory? = nil) {
+    init(configuration: BackendConfiguration, transport: Transport? = nil, socketFactory: SocketFactory? = nil, isDemo: Bool = false) {
+        self.isDemo = isDemo
         backendID = configuration.id
         address = configuration.address
+        if isDemo {
+            // A missing demo transport is an implementation error, never a
+            // reason to connect the sample address to a real network service.
+            self.session = nil
+            self.transport = transport ?? { _ in throw BackendFailure.local("demo.unsupportedRequest") }
+            self.socketFactory = socketFactory ?? { _ in throw BackendFailure.local("demo.unsupportedRequest") }
+            return
+        }
         if let socketFactory {
             self.socketFactory = socketFactory
         } else if transport == nil {
@@ -59,9 +69,9 @@ final class BackendAPI: Sendable {
 
     deinit { session?.invalidateAndCancel() }
 
-    func license() async throws -> LicenseStatus? {
+    func license(token: String? = nil) async throws -> LicenseStatus? {
         do {
-            let status: LicenseStatus = try await decode(["license"])
+            let status: LicenseStatus = try await decode(["license"], token: token)
             guard status.deviceId.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil else {
                 throw BackendFailure.local("api.invalidResponse")
             }
@@ -71,23 +81,10 @@ final class BackendAPI: Sendable {
         }
     }
 
-    func app() async throws -> AppInformation { try await decode(["app"]) }
-    func capabilities() async throws -> Set<String> {
-        let response: CapabilityResponse = try await decode(["capabilities"])
+    func app(token: String? = nil) async throws -> AppInformation { try await decode(["app"], token: token) }
+    func capabilities(token: String? = nil) async throws -> Set<String> {
+        let response: CapabilityResponse = try await decode(["capabilities"], token: token)
         return Set(response.features ?? [])
-    }
-    func otpRequirement() async throws -> Bool {
-        let response: OTPRequirement = try await decode(["auth", "otp", "required"])
-        return response.otpRequired
-    }
-    func sendOTP() async throws { _ = try await request(["auth", "otp"], method: "POST") }
-    func verifyOTP(_ code: String) async throws -> String {
-        let data = try JSONEncoder().encode(OTPVerification(code: code))
-        let response: OTPToken = try await decode(["auth", "otp", "verify"], method: "POST", body: data)
-        guard !response.token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw BackendFailure.local("api.invalidResponse")
-        }
-        return response.token
     }
     func modems(token: String?) async throws -> [Modem] { try await decode(["modems"], token: token) }
     func modem(_ id: String, token: String?) async throws -> Modem {
@@ -95,14 +92,14 @@ final class BackendAPI: Sendable {
         guard modem.id == id else { throw BackendFailure.local("api.invalidResponse") }
         return modem
     }
-    func createPairing() async throws -> LicensePairing {
-        let pairing: LicensePairing = try await decode(["license", "pairings"], method: "POST")
+    func createPairing(token: String? = nil) async throws -> LicensePairing {
+        let pairing: LicensePairing = try await decode(["license", "pairings"], method: "POST", token: token)
         _ = try pairing.validatedURL()
         guard pairing.status == "pending" else { throw BackendFailure.local("api.invalidResponse") }
         return pairing
     }
-    func pairing(_ id: String) async throws -> LicensePairing {
-        let pairing: LicensePairing = try await decode(["license", "pairings", id])
+    func pairing(_ id: String, token: String? = nil) async throws -> LicensePairing {
+        let pairing: LicensePairing = try await decode(["license", "pairings", id], token: token)
         _ = try pairing.validatedURL()
         guard pairing.id == id else { throw BackendFailure.local("api.invalidResponse") }
         return pairing
@@ -130,8 +127,8 @@ final class BackendAPI: Sendable {
     }
 
     func request(_ path: [String], method: String, body: Data? = nil, token: String? = nil,
-                 query: [URLQueryItem] = [], accept: String = "application/json") async throws -> BackendHTTPResponse {
-        let request = try makeRequest(path, method: method, body: body, token: token, query: query, accept: accept)
+                 query: [URLQueryItem] = [], accept: String = "application/json", contentType: String = "application/json") async throws -> BackendHTTPResponse {
+        let request = try makeRequest(path, method: method, body: body, token: token, query: query, accept: accept, contentType: contentType)
         let requestID = request.value(forHTTPHeaderField: "X-Request-ID") ?? UUID().uuidString
         try Task.checkCancellation()
         let started = ContinuousClock.now
@@ -144,13 +141,15 @@ final class BackendAPI: Sendable {
         try Task.checkCancellation()
         // IDs and timings are useful across backends; bodies and credentials never enter logs.
         AppDiagnostics.record("backend=\(backendID) request=\(requestID) method=\(method) status=\(response.status) duration=\(started.duration(to: .now))")
+        if response.status == 401, let challenge = AccessChallenge(response: response, backend: address) { throw challenge }
+        if (300..<400).contains(response.status) { throw BackendFailure.local("auth.accessSetupRequired") }
         guard (200..<300).contains(response.status) else {
             throw HTTPProblem.failure(response, source: .backend)
         }
         return response
     }
     func makeRequest(_ path: [String], method: String = "GET", body: Data? = nil, token: String? = nil,
-                     query: [URLQueryItem] = [], accept: String = "application/json") throws -> URLRequest {
+                     query: [URLQueryItem] = [], accept: String = "application/json", contentType: String = "application/json") throws -> URLRequest {
         guard var components = URLComponents(url: address, resolvingAgainstBaseURL: false) else {
             throw BackendFailure.local("address.invalid")
         }
@@ -171,7 +170,7 @@ final class BackendAPI: Sendable {
         request.httpBody = body
         request.setValue("\(accept), \(HTTPProblem.mediaType)", forHTTPHeaderField: "Accept")
         request.setValue(Locale.preferredLanguages.first ?? "en", forHTTPHeaderField: "Accept-Language")
-        if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        if body != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         return request
     }

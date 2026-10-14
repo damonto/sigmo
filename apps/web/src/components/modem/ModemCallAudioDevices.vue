@@ -33,13 +33,13 @@ const selectedOutputValue = computed(
 )
 
 const inputDeviceLabel = (deviceID: string, label: string, index: number) => {
-  if (!deviceID) return t('modemDetail.phone.audioDevices.systemDefault')
-  return label || t('modemDetail.phone.audioDevices.microphoneFallback', { index: index + 1 })
+  if (!deviceID) return t('modemDetail.calls.audioDevices.systemDefault')
+  return label || t('modemDetail.calls.audioDevices.microphoneFallback', { index: index + 1 })
 }
 
 const outputDeviceLabel = (deviceID: string, label: string, index: number) => {
-  if (!deviceID) return t('modemDetail.phone.audioDevices.systemDefault')
-  return label || t('modemDetail.phone.audioDevices.outputFallback', { index: index + 1 })
+  if (!deviceID) return t('modemDetail.calls.audioDevices.systemDefault')
+  return label || t('modemDetail.calls.audioDevices.outputFallback', { index: index + 1 })
 }
 
 const selectedInputLabel = computed(() => {
@@ -103,21 +103,30 @@ const selectOutput = (deviceID: unknown) => {
         :disabled="inputButtonDisabled"
         :aria-label="
           props.session.callAudio.mediaStatus.value === 'preparing'
-            ? t('modemDetail.phone.audioDevices.preparing')
-            : t('modemDetail.phone.audioDevices.selectMicrophone', { device: selectedInputLabel })
+            ? t('modemDetail.calls.audioDevices.preparing')
+            : t('modemDetail.calls.audioDevices.selectMicrophone', { device: selectedInputLabel })
         "
       >
         <Mic class="size-4" />
       </Button>
     </DropdownMenuTrigger>
-    <DropdownMenuContent align="end" class="w-64">
+    <DropdownMenuContent
+      align="end"
+      class="w-64"
+    >
       <DropdownMenuLabel>
-        {{ t('modemDetail.phone.audioDevices.microphone') }}
+        {{ t('modemDetail.calls.audioDevices.microphone') }}
       </DropdownMenuLabel>
       <DropdownMenuSeparator />
-      <DropdownMenuRadioGroup :model-value="selectedInputValue" @update:model-value="selectInput">
-        <DropdownMenuRadioItem :value="defaultDeviceValue" :disabled="inputItemDisabled">
-          {{ t('modemDetail.phone.audioDevices.systemDefault') }}
+      <DropdownMenuRadioGroup
+        :model-value="selectedInputValue"
+        @update:model-value="selectInput"
+      >
+        <DropdownMenuRadioItem
+          :value="defaultDeviceValue"
+          :disabled="inputItemDisabled"
+        >
+          {{ t('modemDetail.calls.audioDevices.systemDefault') }}
         </DropdownMenuRadioItem>
         <DropdownMenuRadioItem
           v-for="(device, index) in props.session.callAudio.inputDevices.value"
@@ -145,29 +154,35 @@ const selectOutput = (deviceID: unknown) => {
         "
         :aria-label="
           props.session.callAudio.outputSelectionSupported.value
-            ? t('modemDetail.phone.audioDevices.selectOutput', { device: selectedOutputLabel })
-            : t('modemDetail.phone.audioDevices.outputUnsupported')
+            ? t('modemDetail.calls.audioDevices.selectOutput', { device: selectedOutputLabel })
+            : t('modemDetail.calls.audioDevices.outputUnsupported')
         "
         :title="
           props.session.callAudio.outputSelectionSupported.value
             ? undefined
-            : t('modemDetail.phone.audioDevices.outputUnsupported')
+            : t('modemDetail.calls.audioDevices.outputUnsupported')
         "
       >
         <Volume2 class="size-4" />
       </Button>
     </DropdownMenuTrigger>
-    <DropdownMenuContent align="end" class="w-64">
+    <DropdownMenuContent
+      align="end"
+      class="w-64"
+    >
       <DropdownMenuLabel>
-        {{ t('modemDetail.phone.audioDevices.output') }}
+        {{ t('modemDetail.calls.audioDevices.output') }}
       </DropdownMenuLabel>
       <DropdownMenuSeparator />
-      <DropdownMenuRadioGroup :model-value="selectedOutputValue" @update:model-value="selectOutput">
+      <DropdownMenuRadioGroup
+        :model-value="selectedOutputValue"
+        @update:model-value="selectOutput"
+      >
         <DropdownMenuRadioItem
           :value="defaultDeviceValue"
           :disabled="props.session.callAudio.isSwitchingOutput.value"
         >
-          {{ t('modemDetail.phone.audioDevices.systemDefault') }}
+          {{ t('modemDetail.calls.audioDevices.systemDefault') }}
         </DropdownMenuRadioItem>
         <DropdownMenuRadioItem
           v-for="(device, index) in props.session.callAudio.outputDevices.value"

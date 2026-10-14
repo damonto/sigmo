@@ -86,17 +86,34 @@ defineExpose({
 </script>
 
 <template>
-  <div class="flex min-h-0 flex-col" :class="classes.root">
-    <header v-if="props.showHeader" :class="classes.header">
-      <h2 class="font-semibold text-foreground" :class="classes.title">
-        {{ t('modemDetail.phone.dialpad') }}
+  <div
+    class="flex min-h-0 flex-col"
+    :class="classes.root"
+  >
+    <header
+      v-if="props.showHeader"
+      :class="classes.header"
+    >
+      <h2
+        class="font-semibold text-foreground"
+        :class="classes.title"
+      >
+        {{ t('modemDetail.calls.dialpad') }}
       </h2>
-      <p class="text-muted-foreground" :class="classes.description">
-        {{ t('modemDetail.phone.dialpadDescription') }}
+      <p
+        class="text-muted-foreground"
+        :class="classes.description"
+      >
+        <slot name="description">{{ t('modemDetail.calls.dialpadDescription') }}</slot>
       </p>
     </header>
 
-    <div class="relative flex items-center" :class="classes.inputWrap">
+    <slot name="line" />
+
+    <div
+      class="relative flex items-center"
+      :class="classes.inputWrap"
+    >
       <input
         ref="inputRef"
         :value="props.digits"
@@ -105,7 +122,7 @@ defineExpose({
         autocomplete="tel"
         class="w-full bg-transparent text-center font-semibold tracking-normal outline-none"
         :class="[classes.input, props.inputClass]"
-        :aria-label="t('modemDetail.phone.numberPlaceholder')"
+        :aria-label="t('modemDetail.calls.numberPlaceholder')"
         @input="updateDigits"
         @keydown.enter.prevent="emit('dial')"
       />
@@ -115,14 +132,17 @@ defineExpose({
         variant="ghost"
         class="absolute top-1/2 right-0 -translate-y-1/2 touch-manipulation"
         :class="classes.backspaceButton"
-        :aria-label="t('modemDetail.phone.backspace')"
+        :aria-label="t('modemDetail.calls.backspace')"
         @click="emit('backspace')"
       >
         <Delete :class="classes.deleteIcon" />
       </Button>
     </div>
 
-    <div class="mx-auto grid w-full grid-cols-3" :class="classes.keyGrid">
+    <div
+      class="mx-auto grid w-full grid-cols-3"
+      :class="classes.keyGrid"
+    >
       <button
         v-for="key in props.keys"
         :key="key.value"
@@ -136,22 +156,34 @@ defineExpose({
         @pointerleave="emit('clear-plus')"
       >
         <span>{{ key.value }}</span>
-        <span class="font-medium text-muted-foreground" :class="classes.keyLetters">
+        <span
+          class="font-medium text-muted-foreground"
+          :class="classes.keyLetters"
+        >
           {{ key.letters }}
         </span>
       </button>
     </div>
 
-    <div class="mx-auto grid w-full grid-cols-3" :class="classes.keyGrid">
+    <div
+      class="mx-auto grid w-full grid-cols-3"
+      :class="classes.keyGrid"
+    >
       <button
         type="button"
         class="col-start-2 flex aspect-square min-h-0 touch-manipulation items-center justify-center rounded-full bg-emerald-600 text-white transition hover:bg-emerald-700 active:scale-95 disabled:pointer-events-none disabled:opacity-50"
         :disabled="!props.canDial"
-        :aria-label="t('modemDetail.phone.call')"
+        :aria-label="t('modemDetail.calls.call')"
         @click="emit('dial')"
       >
-        <PhoneCall v-if="!props.isDialing" :class="classes.callIcon" />
-        <Spinner v-else :class="classes.spinner" />
+        <PhoneCall
+          v-if="!props.isDialing"
+          :class="classes.callIcon"
+        />
+        <Spinner
+          v-else
+          :class="classes.spinner"
+        />
       </button>
     </div>
   </div>

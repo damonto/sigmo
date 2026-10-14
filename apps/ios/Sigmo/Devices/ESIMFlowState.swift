@@ -27,6 +27,9 @@ struct ESIMServerMessage: Decodable, Sendable {
     let input: TransferPrompt?
     let iccid: String?
     let websheet: CarrierWebsheet?
+    var version: Int? = nil
+    var card: RemoteCardRequest? = nil
+    var profiles: [TransferProfile]? = nil
 }
 
 struct ESIMClientMessage: Encodable, Sendable {
@@ -42,6 +45,8 @@ struct ESIMClientMessage: Encodable, Sendable {
     var accept: Bool?
     var code: String?
     var response: String?
+    var version: Int?
+    var card: RemoteCardReply?
 }
 
 @MainActor @Observable
@@ -77,10 +82,15 @@ final class ESIMFlowState: Identifiable {
     @ObservationIgnored private var operation: Task<Void, Error>?
     @ObservationIgnored private var revision = 0
     @ObservationIgnored private var profilesIMEI: String?
+    @ObservationIgnored private let smartCards: SmartCardAccess
+    @ObservationIgnored private var remoteCard: RemoteAPDUSession?
+    @ObservationIgnored private var stopReaderObservation: (() -> Void)?
 
-    init(detail: ModemDetailState, seID: String) {
+    init(detail: ModemDetailState, seID: String, smartCards: SmartCardAccess? = nil) {
         self.detail = detail
         self.seID = seID
+        self.smartCards = smartCards ?? (detail.session.isDemo ? .demo : .system)
+        if detail.session.isDemo { sourceIMEI = "490154203237518"; confirmation = "123456" }
     }
     var validSE: Bool { detail.elements.contains { $0.id == seID } }
     private var normalizedSourceIMEI: String {
@@ -123,6 +133,7 @@ final class ESIMFlowState: Identifiable {
     }
     func loadSources() async {
         guard !phase.running, detail.canTransfer, validSE, !busy else { return }
+        closeRemoteCard()
         busy = true
         failure = nil
         discoveries = nil
@@ -135,6 +146,10 @@ final class ESIMFlowState: Identifiable {
             let result = try await detail.session.protectedRequest { api, token in try await api.transferSources(id, token: token) }
             guard current == revision, !Task.isCancelled else { return }
             sources = result.sources
+            refreshLocalReaders()
+            if stopReaderObservation == nil {
+                stopReaderObservation = smartCards.observe { [weak self] in self?.refreshLocalReaders() }
+            }
             ccidError = result.ccidError
             transfer = true
             // Changing the step removes its initiating button and cancels that button's task.
@@ -144,6 +159,8 @@ final class ESIMFlowState: Identifiable {
     }
     func selectSource(_ value: TransferSource) {
         guard phase == .sources, !busy else { return }
+        guard value.type != "client_ccid" || sources.contains(where: { $0.key == value.key && $0.cardPresent == true }) else { return }
+        closeRemoteCard()
         source = value
         sourceIMEI = value.requiresSourceImei ? detail.modemID : ""
         profiles = []
@@ -167,10 +184,15 @@ final class ESIMFlowState: Identifiable {
             if current == revision { busy = false }
         }
         do {
-            let result = try await detail.session.protectedRequest { api, token in try await api.transferProfiles(id, source: source, imei: imei, token: token) }
+            let result: [TransferProfile]
+            if source.type == "client_ccid" {
+                result = try await loadLocalProfiles(source: source, imei: imei)
+            } else {
+                result = try await detail.session.protectedRequest { api, token in try await api.transferProfiles(id, source: source, imei: imei, token: token) }
+            }
             guard current == revision, !Task.isCancelled,
                   self.source == source, normalizedSourceIMEI == imei else { return }
-            profiles = result
+            profiles = result.filter(\.supported)
             profilesIMEI = imei
         } catch {
             guard self.source == source, normalizedSourceIMEI == imei else { return }
@@ -185,6 +207,9 @@ final class ESIMFlowState: Identifiable {
     }
     func backToForm() {
         guard !phase.running else { return }
+        stopReaderObservation?()
+        stopReaderObservation = nil
+        closeRemoteCard()
         revision += 1
         runID = nil
         busy = false
@@ -206,6 +231,10 @@ final class ESIMFlowState: Identifiable {
     }
     func startTransfer() {
         guard canTransfer, detail.canTransfer, !phase.running else { return }
+        if source?.type == "client_ccid", remoteCard?.closed != false {
+            failure = .local("detail.remoteCardInterrupted")
+            return
+        }
         transfer = true
         prepare()
     }
@@ -250,13 +279,16 @@ final class ESIMFlowState: Identifiable {
             return
         }
         input = LPAInput()
+        let local = remoteCard
         let operation = Task {
             await detail.session.invalidateModemReads(id)
             try await detail.session.protectedRequest { api, token in
                 try await BackgroundExecution.run(name: "eSIM operation") {
-                    let connection = try await api.socket(path, token: token)
+                    let connection: BackendSocket
+                    if let local { connection = local.socket }
+                    else { connection = try await api.socket(path, token: token) }
                     try await withTaskCancellationHandler {
-                        try await self.exchange(connection, start: data, runID: runID, api: api, token: token)
+                        try await self.exchange(connection, start: data, runID: runID, api: api, token: token, remote: local)
                     } onCancel: { connection.close() }
                 }
             }
@@ -273,24 +305,26 @@ final class ESIMFlowState: Identifiable {
                 phase = .cancelled
             } else {
                 phase = .failed
-                failure = Task.isCancelled || error is CancellationError ? .local("detail.interrupted") : .wrapping(error)
+                if local != nil { failure = .local("detail.remoteCardInterrupted") }
+                else { failure = Task.isCancelled || error is CancellationError ? .local("detail.interrupted") : .wrapping(error) }
             }
         }
         if current == revision, !Task.isCancelled, !cancelling { await reconcile() }
     }
 
-    private func exchange(_ connection: BackendSocket, start: Data, runID: UUID, api: BackendAPI, token: String?) async throws {
+    private func exchange(_ connection: BackendSocket, start: Data, runID: UUID, api: BackendAPI, token: String?, remote: RemoteAPDUSession? = nil) async throws {
         guard self.runID == runID, !Task.isCancelled else { connection.close(); throw CancellationError() }
         socket = connection
-        defer { connection.close(); if self.runID == runID { socket = nil } }
+        defer { connection.close(); remote?.close(); if self.runID == runID { socket = nil } }
         try await connection.send(start)
         while !Task.isCancelled, self.runID == runID {
-            let data = try await connection.receive()
+            let event: ESIMServerMessage
+            if let remote { event = try await remote.receive() }
+            else { event = try JSONDecoder().decode(ESIMServerMessage.self, from: await connection.receive()) }
             try Task.checkCancellation()
             guard self.runID == runID, detail.session.canAccessDevices else { throw CancellationError() }
-            let event = try JSONDecoder().decode(ESIMServerMessage.self, from: data)
             if let sheet = event.websheet, event.type == "websheet" {
-                websheetURL = try CarrierWebsheetAddress.url(sheet, api: api, token: token)
+                websheetURL = try CarrierWebsheetAddress.url(sheet, api: api)
             }
             try consume(event)
             if phase == .completed || phase == .cancelled || phase == .failed { return }
@@ -399,6 +433,9 @@ final class ESIMFlowState: Identifiable {
     }
     func interrupt() {
         revision += 1
+        stopReaderObservation?()
+        stopReaderObservation = nil
+        closeRemoteCard()
         operation?.cancel()
         operation = nil
         socket?.close()
@@ -428,6 +465,56 @@ final class ESIMFlowState: Identifiable {
             await detail.session.refreshModem(sourceID)
         }
     }
+    private func loadLocalProfiles(source: TransferSource, imei: String) async throws -> [TransferProfile] {
+        let current = revision
+        if remoteCard?.closed == true { closeRemoteCard() }
+        do {
+            return try await detail.session.protectedRequest { api, token in
+                try await BackgroundExecution.run(name: "Read local SIM") {
+                    try await self.localProfiles(api: api, token: token, source: source, imei: imei, revision: current)
+                }
+            }
+        } catch {
+            if current == revision { closeRemoteCard() }
+            throw error
+        }
+    }
+
+    private func localProfiles(api: BackendAPI, token: String?, source: TransferSource, imei: String, revision: Int) async throws -> [TransferProfile] {
+        guard api.address.scheme == "https" else { throw BackendFailure.local("detail.localReaderHTTPS") }
+        if remoteCard == nil {
+            let connection = try await api.socket(["modems", detail.modemID, "esim-transfers", "sessions"], token: token)
+            guard self.revision == revision, self.source == source, !Task.isCancelled else {
+                connection.close()
+                throw CancellationError()
+            }
+            let remote = RemoteAPDUSession(socket: connection, source: source)
+            remoteCard = remote
+            try await remote.connect(access: smartCards) { [weak self, weak remote] in
+                guard let self, remoteCard === remote else { return }
+                profiles = []
+                selectedProfile = nil
+                failure = .local("detail.remoteCardInterrupted")
+            }
+        }
+        guard let remoteCard, !remoteCard.closed else { throw BackendFailure.local("detail.remoteCardInterrupted") }
+        return try await remoteCard.profiles(imei: imei)
+    }
+
+    private func closeRemoteCard() {
+        remoteCard?.close()
+        remoteCard = nil
+    }
+
+    private func refreshLocalReaders() {
+        sources.removeAll { $0.type == "client_ccid" }
+        sources += smartCards.readers().map {
+            TransferSource(type: "client_ccid", id: $0.name, name: $0.name,
+                           detail: detailText($0.cardPresent ? "detail.localReader" : "detail.localReaderInsertCard"),
+                           requiresSourceImei: true, cardPresent: $0.cardPresent)
+        }
+    }
+
     private func report(_ error: Error, current: Int) {
         if revision == current, !Task.isCancelled, !cancelling { failure = .wrapping(error) }
     }

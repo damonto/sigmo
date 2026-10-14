@@ -25,7 +25,7 @@ vi.mock('@/lib/notify', () => ({
 }))
 
 import { fetchJson, fetchJsonQuietly } from '@/lib/fetch'
-import { getStoredToken, setStoredToken } from '@/lib/authStorage'
+import { sessionRevision } from '@/lib/authSession'
 import { problemResponse } from './httpProblem'
 
 describe('useFetch global error handling', () => {
@@ -107,23 +107,23 @@ describe('useFetch global error handling', () => {
   })
 
   it.each([
-    [401, 'invalid_token', true],
+    [401, 'invalid_session', true],
     [401, 'invalid_otp', false],
     [401, 'license_lease_expired', false],
-    [503, 'invalid_token', false],
+    [503, 'invalid_session', false],
   ] as const)(
     'changes login only for a local token failure: %s %s',
     async (status, code, logout) => {
-      setStoredToken('login-token')
+      const revision = sessionRevision()
       vi.mocked(fetch).mockResolvedValueOnce(problemResponse(status, code, 'rejected'))
       await expect(fetchJson('modems')).rejects.toMatchObject({ status, error_code: code })
-      expect(getStoredToken()).toBe(logout ? null : 'login-token')
+      expect(sessionRevision()).toBe(revision + (logout ? 1 : 0))
       expect(routerHarness.replace).toHaveBeenCalledTimes(logout ? 1 : 0)
     },
   )
 
   it('preserves login after an unrecognized proxy 401', async () => {
-    setStoredToken('login-token')
+    const revision = sessionRevision()
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response('<html>login</html>', { status: 401, headers: { 'Content-Type': 'text/html' } }),
     )
@@ -131,7 +131,7 @@ describe('useFetch global error handling', () => {
       status: 401,
       error_code: 'unknown_error',
     })
-    expect(getStoredToken()).toBe('login-token')
+    expect(sessionRevision()).toBe(revision)
     expect(routerHarness.replace).not.toHaveBeenCalled()
   })
 })

@@ -1,6 +1,6 @@
 import { shallowRef, type Ref } from 'vue'
 
-import { clearStoredToken, getStoredToken } from '@/lib/authStorage'
+import { invalidateSession } from '@/lib/authSession'
 import { resolveAPIURL, resolveAPIWebSocketURL } from '@/lib/apiUrl'
 import { handleError } from '@/lib/errorHandler'
 import { callClientId } from '@/lib/callClient'
@@ -42,7 +42,7 @@ const buildCallMediaHttpUrl = (path: string) => {
 }
 
 const buildCallWebSocketUrl = (id: string, path: string) => {
-  return resolveAPIWebSocketURL(`modems/${id}/calls${path}`, getStoredToken())
+  return resolveAPIWebSocketURL(`modems/${id}/calls${path}`)
 }
 
 export const buildCallEventsUrl = (id: string) => buildCallWebSocketUrl(id, '/events')
@@ -69,10 +69,6 @@ const requestCallMediaApi = async <T>(
 const requestApi = async <T>(url: string, init: RequestInit = {}): Promise<CallApiResult<T>> => {
   const headers = new Headers(init.headers)
   headers.set('Accept', API_ACCEPT)
-  const token = getStoredToken()
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`)
-  }
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
@@ -83,7 +79,8 @@ const requestApi = async <T>(url: string, init: RequestInit = {}): Promise<CallA
     response = await fetchWithBoundedErrors(url, {
       ...init,
       headers,
-      mode: 'cors',
+      mode: 'same-origin',
+      credentials: 'same-origin',
     })
     const contentType = response.headers.get('Content-Type') ?? ''
     data = response.ok
@@ -99,7 +96,7 @@ const requestApi = async <T>(url: string, init: RequestInit = {}): Promise<CallA
   if (!response.ok) {
     const error = buildCallApiError(response, data)
     if (isLocalAuthenticationError(error)) {
-      clearStoredToken()
+      invalidateSession()
     }
     throw error
   }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -17,6 +18,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/handler/appinfo"
 	hauth "github.com/damonto/sigmo/internal/app/handler/auth"
 	"github.com/damonto/sigmo/internal/app/handler/capability"
+	"github.com/damonto/sigmo/internal/app/handler/communication"
 	"github.com/damonto/sigmo/internal/app/handler/esim"
 	"github.com/damonto/sigmo/internal/app/handler/euicc"
 	hinternet "github.com/damonto/sigmo/internal/app/handler/internet"
@@ -50,6 +52,9 @@ import (
 type Extension func(*echo.Group, RegisterConfig) error
 
 type RegisterConfig struct {
+	// ResourceRoutes is for short-lived capability URLs validated by their owner.
+	// Actual requests retain the Access boundary; OPTIONS returns only CORS metadata.
+	ResourceRoutes      *echo.Group
 	Build               buildinfo.Info
 	Store               *settings.Store
 	Registry            *modem.Registry
@@ -85,15 +90,22 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			return strings.HasPrefix(path, "/api/") || path == mcpserver.EndpointPath || strings.HasPrefix(path, mcpserver.EndpointPath+"/")
 		},
 	}))
+
+	authStore, err := auth.NewStore(deps.Storage)
+	if err != nil {
+		return fmt.Errorf("configure auth store: %w", err)
+	}
 	if deps.MCP != nil {
 		e.Match(
 			[]string{http.MethodGet, http.MethodPost, http.MethodDelete},
 			mcpserver.EndpointPath,
 			echo.WrapHandler(deps.MCP.Handler()),
+			appmiddleware.AccessBoundary(authStore, deps.Store),
 		)
 	}
 
-	v1 := e.Group("/api/v1")
+	v1 := e.Group("/api/v1", appmiddleware.AccessBoundary(authStore, deps.Store))
+	deps.ResourceRoutes = e.Group("/api/v1", appmiddleware.ResourceAccessBoundary(authStore, deps.Store))
 	if deps.LicenseRoutes != nil {
 		deps.LicenseRoutes(v1)
 	}
@@ -101,19 +113,21 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 	appInfoHandler := appinfo.New(deps.Build)
 	v1.GET("/app", appInfoHandler.Get)
 
-	capabilityHandler := capability.New(deps.Features)
+	capabilityHandler := capability.New(append(slices.Clone(deps.Features), "contacts", "messageThreads", "historyAssignments"))
 	v1.GET("/capabilities", capabilityHandler.List)
 
-	authStore, err := auth.NewStore(deps.Storage)
-	if err != nil {
-		return fmt.Errorf("configure auth store: %w", err)
-	}
 	authHandler := hauth.New(deps.Store, authStore)
-	v1.GET("/auth/otp/required", authHandler.OTPRequirement)
-	v1.POST("/auth/otp", authHandler.SendOTP)
-	v1.POST("/auth/otp/verify", authHandler.VerifyOTP)
+	v1.GET("/auth/methods", authHandler.Methods)
+	v1.POST("/auth/otp/challenges", authHandler.CreateOTPChallenge)
+	v1.POST("/auth/sessions", authHandler.CreateSession)
+	v1.POST("/auth/session-refreshes", authHandler.RefreshSession)
+	v1.POST("/auth/browser-sessions", authHandler.CreateBrowserSession)
+	v1.GET("/auth/browser-sessions/:id", authHandler.StartBrowserSession)
+	v1.GET("/auth/oidc/callback", authHandler.OIDCCallback)
 	protected := v1.Group("")
 	protected.Use(appmiddleware.Auth(authStore, deps.Store), appmiddleware.Locale(deps.Store))
+	protected.GET("/auth/sessions/current", authHandler.CurrentSession)
+	protected.DELETE("/auth/sessions/current", authHandler.DeleteSession)
 	{
 		{
 			h := hnativepush.New(deps.Storage)
@@ -128,7 +142,8 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.POST("/settings/auth-tests", h.TestAuth)
 			protected.PUT("/settings/auth", h.UpdateAuth)
 			protected.PUT("/settings/proxy", h.UpdateProxy)
-			protected.PUT("/settings/notifications/:channel", h.UpdateNotificationChannel)
+			protected.PUT("/settings/channels/:channel", h.UpdateNotificationChannel)
+			protected.PUT("/settings/notifications", h.UpdateNotifications)
 		}
 
 		if deps.Updates != nil {
@@ -152,7 +167,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		}
 
 		h := hmodem.New(hmodem.Config{
-			Store: deps.Store, Registry: deps.Registry, Internet: deps.InternetConnector,
+			Store: deps.Store, Storage: deps.Storage, Registry: deps.Registry, Internet: deps.InternetConnector,
 			Reminders: deps.Reminders, LPA: deps.LPAClients, OverviewExtensions: deps.ModemOverview,
 		})
 		protected.GET("/modems", h.List)
@@ -225,6 +240,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 				Internet:  deps.InternetConnector,
 				Reminders: deps.Reminders,
 			})
+			communication.New(communication.Config{Storage: deps.Storage, Registry: deps.Registry, ESIM: h, CallsEnabled: slices.Contains(deps.Features, "nativeCalls")}).Register(protected)
 			protected.GET("/modems/:id/esims", h.List)
 			protected.POST("/modems/:id/ses/:seId/esim-discoveries", h.Discovery)
 			protected.GET("/modems/:id/esim-downloads/sessions", h.Download)

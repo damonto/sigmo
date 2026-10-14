@@ -5,6 +5,8 @@ package esimtransfer
 import "github.com/damonto/sigmo/pro/websheet"
 
 type wsClientMessage struct {
+	Version    int        `json:"version,omitempty"`
+	Card       *cardReply `json:"card,omitempty"`
 	Type       string     `json:"type"`
 	SEID       string     `json:"seId,omitempty"`
 	SourceType SourceType `json:"sourceType,omitempty"`
@@ -16,6 +18,9 @@ type wsClientMessage struct {
 }
 
 type wsServerMessage struct {
+	Version  int                `json:"version,omitempty"`
+	Card     *cardRequest       `json:"card,omitempty"`
+	Profiles []ProfileResponse  `json:"profiles,omitempty"`
 	Type     string             `json:"type"`
 	Stage    string             `json:"stage,omitempty"`
 	Message  string             `json:"message,omitempty"`

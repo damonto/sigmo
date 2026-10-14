@@ -27,8 +27,7 @@ type Handler struct {
 }
 
 var (
-	errAuthProvidersRequired = errors.New("auth providers are required when otp is enabled")
-	errAuthTestFailed        = errors.New("authentication provider test failed")
+	errAuthTestFailed = errors.New("authentication provider test failed")
 )
 
 func New(store *appsettings.Store, internetConnector *internet.Connector, relay *forwarder.Relay) *Handler {
@@ -75,14 +74,10 @@ func (h *Handler) TestAuth(c *echo.Context) error {
 	if err := httpapi.BindJSON(c, &req, "test_auth_invalid_request"); err != nil {
 		return err
 	}
-	providers := normalizeNames(trimNames(req.AuthProviders))
-	candidate := appsettings.Settings{
-		Auth: appsettings.Auth{
-			OTPRequired:   true,
-			AuthProviders: providers,
-		},
-		Channels: make(map[string]appsettings.Channel, len(providers)),
-	}
+	providers := normalizeNames(trimNames(req.Channels))
+	candidate := appsettings.Default().Clone()
+	candidate.Auth.Mode = "otp"
+	candidate.Auth.OTP.Channels = providers
 	current := h.store.Snapshot()
 	for _, provider := range providers {
 		if channel, ok := current.Channels[provider]; ok {
@@ -93,13 +88,13 @@ func (h *Handler) TestAuth(c *echo.Context) error {
 		return httpapi.UnprocessableEntity(c, "test_auth_invalid", err)
 	}
 
-	notifier, err := notify.New(&candidate)
+	notifier, err := notify.ForChannels(&candidate, providers)
 	if err != nil {
 		slog.Error("create authentication test notifier", "error", err, "providers", providers)
 		return httpapi.UnprocessableEntity(c, "test_auth_failed", errAuthTestFailed)
 	}
 	lang := cmp.Or(httpapi.RequestLocale(c), h.store.Locale())
-	if err := notifier.Send(c.Request().Context(), lang, notifyevent.OTPEvent{Code: "000000"}, providers...); err != nil {
+	if err := notifier.SendOTP(c.Request().Context(), lang, notifyevent.OTPEvent{Code: "000000"}); err != nil {
 		slog.Error("send authentication provider test", "error", err, "providers", providers)
 		return httpapi.UnprocessableEntity(c, "test_auth_failed", errAuthTestFailed)
 	}
@@ -179,17 +174,11 @@ func applyAuthSettings(current *appsettings.Settings, auth appsettings.Auth) err
 
 func applyNotificationChannelSettings(current *appsettings.Settings, name string, channel appsettings.Channel) error {
 	current.Channels[name] = channel
-	if !channel.IsEnabled() {
-		current.Auth.AuthProviders = slices.DeleteFunc(
-			current.Auth.AuthProviders,
-			func(provider string) bool { return provider == name },
-		)
-	}
-	if err := validateSettings(*current); err != nil {
+	// Saved channels become selectable in both clients even before either use is enabled.
+	if _, err := notify.ForChannels(current, []string{name}); err != nil {
 		return err
 	}
-	_, err := notify.New(current)
-	return err
+	return validateSettings(*current)
 }
 
 func responseFromSettings(current appsettings.Settings) Response {
@@ -201,32 +190,68 @@ func responseFromSettings(current appsettings.Settings) Response {
 
 func valuesFromSettings(current appsettings.Settings) Values {
 	return Values{
-		Auth:     authValuesFromSettings(current.Auth),
-		Proxy:    proxyValuesFromSettings(current.ProxySettings()),
-		Channels: channelValuesFromSettings(current.Channels),
+		Auth:          authValuesFromSettings(current.Auth),
+		Notifications: current.Notifications,
+		Proxy:         proxyValuesFromSettings(current.ProxySettings()),
+		Channels:      channelValuesFromSettings(current.Channels),
 	}
 }
 
 func normalizeAuthValues(auth UpdateAuthRequest) UpdateAuthRequest {
-	auth.AuthProviders = trimNames(auth.AuthProviders)
+	auth.Mode = strings.TrimSpace(auth.Mode)
+	auth.OTPChannels = normalizeNames(trimNames(auth.OTPChannels))
+	// The issuer is an exact identifier; a trailing slash can be significant.
+	auth.OIDCIssuer = strings.TrimSpace(auth.OIDCIssuer)
+	auth.OIDCClientID = strings.TrimSpace(auth.OIDCClientID)
+	auth.OIDCAllowedSubjects = normalizeNames(trimStringSlice(auth.OIDCAllowedSubjects))
+	auth.AccessTeamDomain = strings.TrimRight(strings.TrimSpace(auth.AccessTeamDomain), "/")
+	auth.AccessAudience = strings.TrimSpace(auth.AccessAudience)
+	auth.AccessAllowedSubjects = normalizeNames(trimStringSlice(auth.AccessAllowedSubjects))
 	return auth
 }
 
-func authSettingsFromRequest(current appsettings.Auth, auth UpdateAuthRequest) appsettings.Auth {
-	current.AuthProviders = normalizeNames(auth.AuthProviders)
-	current.OTPRequired = auth.OTPRequired
-	if auth.TokenValidityDays != nil {
-		current.TokenValidityDays = *auth.TokenValidityDays
+func authSettingsFromRequest(current appsettings.Auth, req UpdateAuthRequest) appsettings.Auth {
+	secret := req.OIDCClientSecret
+	if secret == "" && current.OIDC.Issuer == req.OIDCIssuer && current.OIDC.ClientID == req.OIDCClientID {
+		secret = current.OIDC.ClientSecret
 	}
-	return current
+	return appsettings.Auth{
+		Mode: req.Mode, SessionMaxDays: req.SessionMaxDays,
+		OTP:              appsettings.OTP{Channels: req.OTPChannels},
+		OIDC:             appsettings.OIDC{Issuer: req.OIDCIssuer, ClientID: req.OIDCClientID, ClientSecret: secret, AllowedSubjects: req.OIDCAllowedSubjects},
+		CloudflareAccess: appsettings.CloudflareAccess{TeamDomain: req.AccessTeamDomain, Audience: req.AccessAudience, AllowedSubjects: req.AccessAllowedSubjects},
+	}
 }
 
 func authValuesFromSettings(auth appsettings.Auth) AuthValues {
-	return AuthValues{
-		AuthProviders:     slices.Clone(auth.AuthProviders),
-		OTPRequired:       auth.OTPRequired,
-		TokenValidityDays: auth.TokenValidityDays,
+	return AuthValues{Mode: auth.Mode, SessionMaxDays: auth.SessionMaxDays,
+		OTPChannels: slices.Clone(auth.OTP.Channels), OIDCIssuer: auth.OIDC.Issuer, OIDCClientID: auth.OIDC.ClientID, OIDCAllowedSubjects: slices.Clone(auth.OIDC.AllowedSubjects),
+		AccessTeamDomain: auth.CloudflareAccess.TeamDomain, AccessAudience: auth.CloudflareAccess.Audience, AccessAllowedSubjects: slices.Clone(auth.CloudflareAccess.AllowedSubjects)}
+}
+
+// UpdateNotifications changes only the routing of business events.
+func (h *Handler) UpdateNotifications(c *echo.Context) error {
+	var req appsettings.Notifications
+	if err := httpapi.BindJSON(c, &req, "invalid_notification_settings"); err != nil {
+		return err
 	}
+	req.Channels = normalizeNames(trimNames(req.Channels))
+	var invalid error
+	saved, err := h.store.Update(c.Request().Context(), func(current *appsettings.Settings) error {
+		current.Notifications = req
+		invalid = validateSettings(*current)
+		return invalid
+	})
+	if invalid != nil {
+		return httpapi.UnprocessableEntity(c, "invalid_notification_settings", invalid)
+	}
+	if err != nil {
+		return httpapi.Internal(c, "save_notifications_failed", err)
+	}
+	if err := h.relay.Reload(); err != nil {
+		return httpapi.Internal(c, "reload_notifications_failed", err)
+	}
+	return c.JSON(http.StatusOK, responseFromSettings(saved))
 }
 
 func normalizeProxyValues(proxy ProxyValues) ProxyValues {
@@ -266,9 +291,7 @@ func normalizeChannelValue(channel ChannelValues) ChannelValues {
 }
 
 func filterChannelValue(name string, channel ChannelValues) ChannelValues {
-	values := ChannelValues{
-		Enabled: channel.Enabled,
-	}
+	values := ChannelValues{}
 	switch name {
 	case "telegram":
 		values.Endpoint = channel.Endpoint
@@ -304,9 +327,7 @@ func filterChannelValue(name string, channel ChannelValues) ChannelValues {
 }
 
 func channelSettingsFromValues(name string, channel ChannelValues) appsettings.Channel {
-	normalized := appsettings.Channel{
-		Enabled: channel.Enabled,
-	}
+	normalized := appsettings.Channel{}
 	switch name {
 	case "telegram":
 		normalized.Endpoint = channel.Endpoint
@@ -350,10 +371,7 @@ func channelValuesFromSettings(channels map[string]appsettings.Channel) map[stri
 }
 
 func channelSettingsValues(name string, channel appsettings.Channel) ChannelValues {
-	enabled := channel.IsEnabled()
-	values := ChannelValues{
-		Enabled: &enabled,
-	}
+	values := ChannelValues{}
 	switch name {
 	case "telegram":
 		values.Endpoint = channel.Endpoint
@@ -451,16 +469,12 @@ func validateSettings(current appsettings.Settings) error {
 			return fmt.Errorf("unsupported channel %q", name)
 		}
 	}
-	if current.Auth.OTPRequired && len(current.Auth.AuthProviders) == 0 {
-		return errAuthProvidersRequired
+	if err := current.Validate(); err != nil {
+		return err
 	}
-	for _, provider := range current.Auth.AuthProviders {
-		channel, ok := current.Channels[provider]
-		if !ok || !channel.IsEnabled() {
-			return fmt.Errorf("auth provider %q must be an enabled channel", provider)
-		}
-	}
-	return nil
+	targets := append(slices.Clone(current.Notifications.Channels), current.Auth.OTP.Channels...)
+	_, err := notify.ForChannels(&current, targets)
+	return err
 }
 
 func allowedChannelNames() map[string]struct{} {

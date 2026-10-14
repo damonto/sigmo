@@ -55,7 +55,7 @@ describe('CarrierWebsheetDialog', () => {
     localStorage.clear()
   })
 
-  it('loads the websheet iframe with auth token and carrier-compatible sandbox flags', () => {
+  it('isolates carrier content without exposing the application session', () => {
     localStorage.setItem('sigmo:token', 'sigmo-token')
 
     const wrapper = mountDialog()
@@ -63,9 +63,9 @@ describe('CarrierWebsheetDialog', () => {
     const src = new URL(iframe.attributes('src') ?? '')
 
     expect(src.pathname).toBe('/api/v1/websheets/sheet-1')
-    expect(src.searchParams.get('token')).toBe('sigmo-token')
-    expect(iframe.attributes('sandbox')).toContain('allow-same-origin')
-    expect(iframe.attributes('sandbox')).toContain('allow-popups-to-escape-sandbox')
+    expect(src.searchParams.has('token')).toBe(false)
+    expect(iframe.attributes('sandbox')).not.toContain('allow-same-origin')
+    expect(iframe.attributes('referrerpolicy')).toBe('no-referrer')
   })
 
   it('renders the browser-style frame and emits cancel from its close button', async () => {

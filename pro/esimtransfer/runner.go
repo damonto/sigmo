@@ -49,6 +49,8 @@ var (
 )
 
 type transferRunner struct {
+	// remote belongs to one connection; shared HTTP runners never have one.
+	remote        *remoteCard
 	store         *settings.Store
 	registry      *mmodem.Registry
 	lpaClients    *ilpa.Pool
@@ -177,10 +179,22 @@ func (s *transferRunner) Profiles(ctx context.Context, target *mmodem.Modem, req
 func (s *transferRunner) Serve(ctx context.Context, conn *websocket.Conn, target *mmodem.Modem) error {
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	session := newWSSession(conn, cancel)
+	session := newWSSession(sessionCtx, conn, cancel)
+	defer session.close()
 	startMsg, err := session.waitMessage(sessionCtx, session.startCh)
 	if err != nil {
 		return nil
+	}
+	// A client reader must be usable while browsing profiles, before start.
+	if startMsg.Type == "source" {
+		local := *s
+		local.remote = newRemoteCard(session, startMsg.SourceID)
+		startMsg, err = local.browseRemoteSource(sessionCtx, startMsg, target)
+		if err != nil {
+			session.sendIfConnected(wsServerMessage{Type: wsTypeError, Message: err.Error()})
+			return nil
+		}
+		s = &local
 	}
 	start := startRequest{
 		SEID:       strings.TrimSpace(startMsg.SEID),
@@ -188,6 +202,10 @@ func (s *transferRunner) Serve(ctx context.Context, conn *websocket.Conn, target
 		SourceID:   strings.TrimSpace(startMsg.SourceID),
 		ProfileID:  strings.TrimSpace(startMsg.ProfileID),
 		SourceIMEI: strings.TrimSpace(startMsg.SourceIMEI),
+	}
+	if start.SourceType == SourceClientCCID && (s.remote == nil || start.SourceID != s.remote.sourceID) {
+		session.sendIfConnected(wsServerMessage{Type: wsTypeError, Message: ErrSourceUnsupported.Error()})
+		return nil
 	}
 	if err := s.run(sessionCtx, session, target, start); err != nil {
 		_ = session.send(wsServerMessage{Type: wsTypeError, Message: err.Error()})
@@ -240,7 +258,7 @@ func validateStart(start startRequest) error {
 	}
 	switch start.SourceType {
 	case SourceModem:
-	case SourceCCID:
+	case SourceCCID, SourceClientCCID:
 		if start.SourceIMEI == "" {
 			return ErrSourceIMEIRequired
 		}

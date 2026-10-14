@@ -46,6 +46,10 @@ targets:
       path: .generated/Sigmo.entitlements
       properties:
         aps-environment: $(SIGMO_APNS_ENVIRONMENT)
+        com.apple.security.smartcard: true
+        com.apple.developer.associated-domains:
+          - webcredentials:sigmo-pro.952007.xyz
+          - applinks:sigmo-pro.952007.xyz
         keychain-access-groups:
           - $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID)
           - $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID).push
@@ -154,3 +158,9 @@ schemes:
       targets:
         - SigmoTests
         - SigmoUITests
+  Sigmo Release:
+    build:
+      targets:
+        Sigmo: all
+    run:
+      config: Release

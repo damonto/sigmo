@@ -86,7 +86,7 @@ describe('webPush', () => {
           modemId: 'modem-1',
           modem: 'Office',
           from: '10010',
-          url: '/modems/modem-1/phone',
+          url: '/modems/modem-1/calls',
           tag: 'call:call-1',
         },
         language: 'zh-CN',
@@ -119,7 +119,7 @@ describe('webPush', () => {
       modemId: 'modem-1',
       modem: 'Office',
       from: '10010',
-      url: '/modems/modem-1/phone',
+      url: '/modems/modem-1/calls',
       tag: 'call:call-1',
     }
     expect(notificationContent(payload, 'en-US').options.body).toBe('10010 · Office')
@@ -133,8 +133,8 @@ describe('webPush', () => {
     const tests = [
       {
         name: 'relative application path',
-        value: '/modems/modem-1/phone',
-        want: 'https://sigmo.example/modems/modem-1/phone',
+        value: '/modems/modem-1/calls',
+        want: 'https://sigmo.example/modems/modem-1/calls',
       },
       {
         name: 'same-origin absolute URL',

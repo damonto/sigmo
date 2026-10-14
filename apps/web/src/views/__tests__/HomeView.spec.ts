@@ -94,10 +94,8 @@ const mountView = async () => {
     global: {
       stubs: {
         HomeHeader: {
-          props: ['subtitle', 'version', 'isLoading'],
-          emits: ['refresh'],
-          template:
-            '<button type="button" @click="$emit(\'refresh\')">{{ subtitle }} {{ version }}</button>',
+          props: ['subtitle', 'version'],
+          template: '<header>{{ subtitle }} {{ version }}</header>',
         },
         HomeModemList: {
           props: ['items', 'isLoading'],
@@ -143,7 +141,7 @@ describe('HomeView', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('uses overview icons and refreshes them without fetching eSIM lists', async () => {
+  it('uses overview icons without fetching eSIM lists', async () => {
     const first = modem('modem-1')
     const second = modem('modem-2')
     first.sim.icon = 'data:image/png;base64,first'
@@ -153,12 +151,6 @@ describe('HomeView', () => {
     const list = wrapper.getComponent(HomeModemList)
     expect(list.props('items').map((item) => item.icon)).toEqual([first.sim.icon, second.sim.icon])
 
-    modemHarness.nextModems = [modem('modem-1'), second]
-    await wrapper.get('button').trigger('click')
-    await flushPromises()
-
-    expect(modemHarness.fetchModems).toHaveBeenCalledTimes(2)
-    expect(list.props('items').map((item) => item.icon)).toEqual([undefined, second.sim.icon])
     expect(fetch).not.toHaveBeenCalled()
   })
 })

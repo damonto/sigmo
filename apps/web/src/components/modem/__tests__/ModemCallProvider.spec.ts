@@ -1,11 +1,20 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { computed, defineComponent, nextTick, ref } from 'vue'
+import { computed, defineComponent, nextTick, ref, type ComputedRef } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { useRoute } from 'vue-router'
 import ModemCallProvider from '@/components/modem/ModemCallProvider.vue'
 import { useModemCallSession } from '@/composables/useModemCallSession'
 import type { CallRecord } from '@/types/call'
 import { callClientId } from '@/lib/callClient'
+
+vi.mock('@/apis/communication', () => ({
+  communicationApi: { contacts: vi.fn().mockResolvedValue({ items: [] }) },
+}))
+vi.mock('@/composables/useCallMonitor', () => ({ useCallMonitor: vi.fn() }))
+vi.mock('@/composables/useCapabilities', () => ({
+  useCapabilities: () => ({ hasFeature: () => false, fetchCapabilities: async () => undefined }),
+}))
 
 const route = vi.hoisted(() => ({
   params: {
@@ -21,7 +30,7 @@ const callsHarness = vi.hoisted(() => ({
   bindOutputElement: vi.fn(),
   prepareAudio: vi.fn(),
   stopAudio: vi.fn(),
-  usePhoneCalls: vi.fn(),
+  useCalls: vi.fn(),
   useCallAudioSession: vi.fn(),
 }))
 
@@ -40,37 +49,39 @@ const call = (patch: Partial<CallRecord> = {}): CallRecord => ({
   ...patch,
 })
 
-vi.mock('vue-router', () => ({
-  useRoute: () => route,
-}))
+vi.mock('vue-router', async () => {
+  const { reactive } = await import('vue')
+  const state = reactive(route)
+  return { useRoute: () => state }
+})
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string) =>
       ({
-        'modemDetail.phone.routes.wifiCalling': 'Wi-Fi Calling',
-        'modemDetail.phone.routes.modem': 'Modem',
-        'modemDetail.phone.routes.auto': 'Auto',
-        'modemDetail.phone.states.dialing': 'Dialing',
-        'modemDetail.phone.states.ringing': 'Ringing',
-        'modemDetail.phone.states.answering': 'Answering',
-        'modemDetail.phone.states.earlyMedia': 'Early media',
-        'modemDetail.phone.states.active': 'In call',
-        'modemDetail.phone.states.confirmed': 'Connected',
-        'modemDetail.phone.states.ending': 'Ending',
-        'modemDetail.phone.states.failed': 'Failed',
-        'modemDetail.phone.states.ended': 'Ended',
-        'modemDetail.phone.holdStates.local': 'On hold',
-        'modemDetail.phone.holdStates.remote': 'Remote hold',
-        'modemDetail.phone.holdStates.localRemote': 'Both on hold',
-        'modemDetail.phone.unknownNumber': 'Unknown number',
-        'modemDetail.phone.durationEmpty': '0:00',
+        'modemDetail.calls.routes.wifiCalling': 'Wi-Fi Calling',
+        'modemDetail.calls.routes.modem': 'Modem',
+        'modemDetail.calls.routes.auto': 'Auto',
+        'modemDetail.calls.states.dialing': 'Dialing',
+        'modemDetail.calls.states.ringing': 'Ringing',
+        'modemDetail.calls.states.answering': 'Answering',
+        'modemDetail.calls.states.earlyMedia': 'Early media',
+        'modemDetail.calls.states.active': 'In call',
+        'modemDetail.calls.states.confirmed': 'Connected',
+        'modemDetail.calls.states.ending': 'Ending',
+        'modemDetail.calls.states.failed': 'Failed',
+        'modemDetail.calls.states.ended': 'Ended',
+        'modemDetail.calls.holdStates.local': 'On hold',
+        'modemDetail.calls.holdStates.remote': 'Remote hold',
+        'modemDetail.calls.holdStates.localRemote': 'Both on hold',
+        'modemDetail.calls.unknownNumber': 'Unknown number',
+        'modemDetail.calls.durationEmpty': '0:00',
       })[key] ?? key,
   }),
 }))
 
-vi.mock('@/composables/usePhoneCalls', () => ({
-  usePhoneCalls: callsHarness.usePhoneCalls,
+vi.mock('@/composables/useCalls', () => ({
+  useCalls: callsHarness.useCalls,
 }))
 
 vi.mock('@/composables/useCallAudioSession', () => ({
@@ -99,12 +110,12 @@ const mountProvider = () =>
       mocks: {
         $t: (key: string) =>
           ({
-            'modemDetail.phone.answer': 'Answer',
-            'modemDetail.phone.reject': 'Reject',
-            'modemDetail.phone.hangup': 'Hang up',
-            'modemDetail.phone.hold': 'Hold',
-            'modemDetail.phone.resume': 'Resume',
-            'modemDetail.phone.duration': 'Duration',
+            'modemDetail.calls.answer': 'Answer',
+            'modemDetail.calls.reject': 'Reject',
+            'modemDetail.calls.hangup': 'Hang up',
+            'modemDetail.calls.hold': 'Hold',
+            'modemDetail.calls.resume': 'Resume',
+            'modemDetail.calls.duration': 'Duration',
           })[key] ?? key,
       },
       stubs: {
@@ -154,8 +165,8 @@ describe('ModemCallProvider', () => {
     callsHarness.incomingCall = ref<CallRecord | null>(call())
     callsHarness.remoteStream = ref<MediaStream | null>(null)
     callsHarness.audioReady = ref(false)
-    callsHarness.usePhoneCalls.mockReset()
-    callsHarness.usePhoneCalls.mockReturnValue({
+    callsHarness.useCalls.mockReset()
+    callsHarness.useCalls.mockReturnValue({
       recentCalls: computed(() => []),
       hasRecentCalls: computed(() => false),
       activeCall: callsHarness.activeCall,
@@ -212,10 +223,28 @@ describe('ModemCallProvider', () => {
     const wrapper = mountProvider()
     await flushPromises()
 
-    expect(callsHarness.usePhoneCalls).toHaveBeenCalledTimes(1)
+    expect(callsHarness.useCalls).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-testid="consumer"]').text()).toBe('+1 (224) 225-5559')
     expect(wrapper.text()).toContain('+1 (224) 225-5559')
     expect(wrapper.text()).toContain('Wi-Fi Calling')
+  })
+
+  it('pins active audio to its modem while navigating other devices', async () => {
+    callsHarness.incomingCall.value = null
+    const routed = useRoute()
+    routed.params.id = 'modem-1'
+    const wrapper = mountProvider()
+    const bound = callsHarness.useCalls.mock.calls[0]?.[0] as ComputedRef<string>
+    expect(bound.value).toBe('modem-1')
+    callsHarness.activeCall.value = call({ state: 'active', ownerClientId: callClientId() })
+    await nextTick()
+    routed.params.id = 'modem-2'
+    await nextTick()
+    expect(bound.value).toBe('modem-1')
+    callsHarness.activeCall.value = null
+    await nextTick()
+    expect(bound.value).toBe('modem-2')
+    wrapper.unmount()
   })
 
   it('plays the remote call audio stream when it is attached', async () => {
@@ -312,12 +341,12 @@ describe('ModemCallProvider', () => {
     const incoming = callsHarness.incomingCall.value
     const banner = wrapper.findComponent({ name: 'ModemCallBanner' })
     const session = banner.props('session') as ReturnType<typeof useModemCallSession>
-    const phoneCalls = callsHarness.usePhoneCalls.mock.results[0]?.value
+    const calls = callsHarness.useCalls.mock.results[0]?.value
 
     expect(incoming).toBeTruthy()
     await session.answerIncoming(incoming!)
 
-    expect(phoneCalls.answer).toHaveBeenCalledWith(incoming)
+    expect(calls.answer).toHaveBeenCalledWith(incoming)
     expect(callsHarness.prepareAudio).not.toHaveBeenCalled()
   })
 

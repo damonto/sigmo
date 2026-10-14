@@ -17,7 +17,7 @@ func TestBridgeClientName(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { broker.Delete(session.Info().ID) })
-			script := session.bridgeScript("token", "https://sigmo.example", session.target)
+			script := session.bridgeScript("https://sigmo.example", session.target)
 			if strings.Contains(script, "{{WFC_CLIENT_NAME}}") || strings.Count(script, "</script>") != 1 {
 				t.Fatalf("bridge contains an unresolved name or unescaped script delimiter: %s", script)
 			}

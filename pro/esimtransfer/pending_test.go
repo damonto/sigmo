@@ -120,7 +120,7 @@ func TestPendingTransferContinuesSameSession(t *testing.T) {
 				defer conn.Close()
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
-				session := newWSSession(conn, cancel)
+				session := newWSSession(ctx, conn, cancel)
 				runner := &transferRunner{}
 				active := &transferState{ts43Client: client, logger: slog.New(slog.DiscardHandler)}
 				next, done, err := runner.handleEvent(ctx, session, active, startRequest{}, result)
@@ -243,7 +243,7 @@ func TestDelayedDownloadRequiresCarrierCode(t *testing.T) {
 				defer conn.Close()
 				ctx, cancel := context.WithCancel(t.Context())
 				defer cancel()
-				session := newWSSession(conn, cancel)
+				session := newWSSession(ctx, conn, cancel)
 				config, err := session.delayedDownloadConfig(ctx, ts43.DelayedDownloadEvent{TargetIMEI: "222222222222222"})
 				finished <- outcome{config, err}
 			}))

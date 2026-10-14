@@ -16,10 +16,12 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 // Config supplies the modem endpoints and their optional overview data sources.
 type Config struct {
+	Storage            *storage.Store
 	Store              *settings.Store
 	Registry           *mmodem.Registry
 	Internet           *internet.Connector
@@ -52,6 +54,7 @@ var (
 // New creates modem endpoints with the configured overview readers.
 func New(cfg Config) *Handler {
 	catalog := newCatalog(cfg.Store, cfg.Registry, cfg.OverviewExtensions...)
+	catalog.storage = cfg.Storage
 	catalog.internet = cfg.Internet
 	catalog.reminders = cfg.Reminders
 	if cfg.LPA != nil {

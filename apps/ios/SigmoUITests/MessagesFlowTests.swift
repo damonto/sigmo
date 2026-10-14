@@ -83,7 +83,7 @@ final class MessagesFlowTests: XCTestCase {
         cancelSearch(app)
         XCTAssertTrue(inactive.waitForExistence(timeout: 5))
 
-        for tab in ["Detail", "Settings", "Calls"] {
+        for tab in ["SIM", "Contacts", "Calls"] {
             app.tabBars.buttons[tab].tap()
             XCTAssertTrue(app.searchFields.allElementsBoundByIndex.allSatisfy {
                 $0.placeholderValue != "Search numbers or messages"
@@ -115,7 +115,9 @@ final class MessagesFlowTests: XCTestCase {
         messageSearch.tap()
         messageSearch.typeText("Welcome\n")
         XCTAssertTrue(app.buttons["conversation-conversation-inactive"].waitForNonExistence(timeout: 5))
-        app.tabBars.buttons["Settings"].tap()
+        app.tabBars.buttons["SIM"].tap()
+        app.buttons["modemSettings"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
         app.buttons["backToDevices"].tap()
         XCTAssertTrue(homeSearch.waitForExistence(timeout: 5))
         XCTAssertEqual(homeSearch.value as? String, "Home")

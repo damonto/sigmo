@@ -45,7 +45,7 @@ describe('foreground Web Push delivery', () => {
           modemId: 'modem-1',
           modem: 'Office',
           from: '10086',
-          url: '/modems/modem-1/phone',
+          url: '/modems/modem-1/calls',
           tag: 'call:call-1',
         },
       },

@@ -102,6 +102,17 @@ func TestSendRoutesMessages(t *testing.T) {
 			} else if err != nil {
 				t.Fatalf("send() error = %v", err)
 			}
+			pref, prefErr := store.PreferredCommunication(ctx, "777")
+			if prefErr != nil {
+				t.Fatal(prefErr)
+			}
+			wantProfile := ""
+			if err == nil {
+				wantProfile = "profile-a"
+			}
+			if pref.ProfileID != wantProfile {
+				t.Fatalf("successful send preference = %q, want %q", pref.ProfileID, wantProfile)
+			}
 			if got != tt.wantTo {
 				t.Fatalf("send() = %q, want %q", got, tt.wantTo)
 			}

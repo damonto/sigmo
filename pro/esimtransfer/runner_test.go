@@ -295,7 +295,7 @@ func TestWSSessionCancelCancelsContext(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		_ = newWSSession(conn, cancel)
+		_ = newWSSession(ctx, conn, cancel)
 
 		select {
 		case <-ctx.Done():
@@ -333,7 +333,7 @@ func TestWSSessionWaitForStartStopsOnDisconnect(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		session := newWSSession(conn, cancel)
+		session := newWSSession(ctx, conn, cancel)
 		_, err = session.waitMessage(ctx, session.startCh)
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, errSessionDisconnected) {
 			done <- errors.New("waitMessage() did not report cancellation or disconnection")
