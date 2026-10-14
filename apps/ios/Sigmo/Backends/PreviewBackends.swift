@@ -17,7 +17,13 @@ enum PreviewBackends {
         let credentials = BackendCredentials(read: { tokens[$0] }, write: { tokens[$0] = $1 })
         let store = BackendStore(file: file, credentials: credentials, makeAPI: { configuration in
             if scenario.hasPrefix("communication") {
-                let fixture = CommunicationFixture(contactName: configuration.id == studioID ? "Studio Contact" : "Alice", includesHistory: ["communication-history", "communication-multiple"].contains(scenario), modemContacts: scenario == "communication-modem")
+                let modemNames = configuration.id == studioID ? ["device-1": "Studio Modem", "device-2": "Studio Source Modem"] : [:]
+                let fixture = CommunicationFixture(
+                    contactName: configuration.id == studioID ? "Studio Contact" : "Alice",
+                    includesHistory: ["communication-history", "communication-multiple"].contains(scenario),
+                    modemContacts: scenario == "communication-modem",
+                    modemNames: modemNames
+                )
                 return BackendAPI(configuration: configuration, transport: { try await fixture.respond($0) })
             }
             if scenario.hasPrefix("calls") {

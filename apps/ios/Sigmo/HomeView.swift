@@ -124,12 +124,13 @@ struct HomeView: View {
                     }
                 }
         }
+        .toolbarVisibility(path.isEmpty ? .visible : .hidden, for: .tabBar)
     }
 
     @ViewBuilder
     private func destinationView(_ destination: BackendDestination) -> some View {
         if destination == .management {
-            BackendListView { path.append($0) }
+            BackendListView()
         } else if let id = destination.backendID, let session = store.sessions[id] {
             Group {
                 switch destination {

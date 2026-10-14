@@ -16,34 +16,45 @@ struct CallsView: View {
 
     var body: some View {
         List {
-            Section {
-                Picker("calls.filter", selection: $state.missedOnly) {
-                    Text("calls.all").tag(false)
-                    Text("calls.missed").tag(true)
-                }.pickerStyle(.segmented).listRowSeparator(.hidden)
-                    .accessibilityIdentifier("calls-filter")
-                if let line = state.line, !calls.available(line) {
-                    Label("calls.upgrade", systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
-                }
+            if let line = state.line, !calls.available(line) {
+                Label("calls.upgrade", systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
             }
             if !state.loaded && state.loading {
                 ProgressView("calls.loading").frame(maxWidth: .infinity)
             }
-            ForEach(state.visibleItems) { record in
+            let records = state.visibleItems
+            ForEach(records) { record in
                 CallHistoryRow(record: record, session: state.session, region: state.line?.region,
                                source: record.lineLabel ?? state.session.modems.first { $0.id == state.modemID }?.communicationLabel,
                                select: { selected = record }, callback: { callback(record) })
+                .listRowSeparator(record.id == records.first?.id ? .hidden : .automatic, edges: .top)
                 .swipeActions(allowsFullSwipe: false) {
-                    if record.terminal { Button("common.delete", systemImage: "trash", role: .destructive) { deleting = record } }
+                    if record.terminal {
+                        Button { deleting = record } label: { Image(systemName: "trash") }
+                            .tint(.red)
+                            .accessibilityLabel(Text("common.delete"))
+                    }
                 }
             }
         }
         .listStyle(.plain)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .accessibilityIdentifier("calls-list")
         .overlay {
             if state.loaded && state.visibleItems.isEmpty && state.failure == nil {
                 ContentUnavailableView(state.search.isEmpty ? "calls.empty" : "calls.noResults", systemImage: "phone", description: Text("calls.emptyDescription"))
-                    .padding(.top, 65).allowsHitTesting(false)
+                    .allowsHitTesting(false)
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Picker("calls.filter", selection: $state.missedOnly) {
+                Text("calls.all").tag(false)
+                Text("calls.missed").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("calls-filter")
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
         }
         .refreshable { await state.load() }
         .detailErrorAlert($state.failure)
@@ -78,7 +89,7 @@ struct CallsView: View {
             }
         }
         .sheet(isPresented: $recordingsPresented) {
-            NavigationStack { CallRecordingsView() }
+            NavigationStack { CallRecordingsView(backendID: state.session.id) }
         }
         .alert("calls.deleteTitle", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("common.delete", role: .destructive) {
@@ -88,7 +99,6 @@ struct CallsView: View {
             Button("common.cancel", role: .cancel) { deleting = nil }
         } message: { Text("calls.deleteExplanation") }
         .disabled(state.deleting || pendingDeletion != nil)
-        .accessibilityIdentifier("calls-list")
     }
 
     private func clear() {

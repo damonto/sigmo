@@ -1180,7 +1180,7 @@
 "communication.changePhoto" = "更换照片";
 "communication.photoOptions" = "照片选项";
 
-"communication.chooseModem" = "选择 Modem";
+"communication.chooseModem" = "选择线路";
 "communication.modemUnavailable" = "此 Modem 已不可用，请选择其他 Modem。";
 "communication.noModems" = "暂无可用 Modem。";
 "communication.useCurrentLine" = "使用当前激活的 SIM";

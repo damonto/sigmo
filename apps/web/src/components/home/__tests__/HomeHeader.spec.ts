@@ -15,16 +15,6 @@ const mountHeader = (version?: string) =>
       subtitle: 'home.subtitle',
       version,
     },
-    global: {
-      stubs: {
-        Button: {
-          template: '<button type="button"><slot /></button>',
-        },
-        RouterLink: {
-          template: '<a><slot /></a>',
-        },
-      },
-    },
   })
 
 describe('HomeHeader', () => {
@@ -36,8 +26,7 @@ describe('HomeHeader', () => {
 
     expect(wrapper.text()).toContain('home.title')
     expect(wrapper.text().includes('v1.2.3')).toBe(wantVersion)
-    expect(wrapper.text()).toContain('home.settings')
-    expect(wrapper.findAll('button')).toHaveLength(1)
+    expect(wrapper.text()).toContain('home.subtitle')
     expect(wrapper.find('svg').exists()).toBe(false)
   })
 })

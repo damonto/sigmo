@@ -49,6 +49,10 @@ final class CallRecordings {
         } catch { failure = .wrapping(error) }
     }
 
+    func items(for backendID: UUID) -> [CallRecording] {
+        items.filter { $0.backendID == backendID }
+    }
+
     private func load() throws {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         var recordings: [CallRecording] = []

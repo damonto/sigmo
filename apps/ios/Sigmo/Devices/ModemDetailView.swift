@@ -323,22 +323,20 @@ private struct ModemDetailScreen: View {
         ToolbarItem(placement: .principal) {
             Menu {
                 ForEach(session.modems) { modem in
-                    Button(modem.displayName) { selectModem(modem.id) }
+                    Button(modem.selectionLabel) {
+                        selectModem(modem.id)
+                    }
                 }
             } label: {
                 HStack(spacing: 4) {
-                    VStack(spacing: 1) {
-                        Text(state.modem?.displayName ?? detailText("devices.title")).font(.headline).lineLimit(1).truncationMode(.tail)
-                            .accessibilityIdentifier("detailModemTitle")
-                        Text(session.configuration.name).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                            .accessibilityIdentifier("detailBackendName")
-                    }
+                    Text(state.modem?.displayName ?? detailText("devices.title")).font(.headline).lineLimit(1).truncationMode(.tail)
+                        .accessibilityIdentifier("detailModemTitle")
                     Image(systemName: "chevron.down").font(.caption)
                 }.frame(width: horizontalSizeClass == .regular ? 320 : 200, height: 44).clipped()
             }
             .disabled(state.busy || settings.busy || pending != nil)
             .accessibilityLabel(Text("detail.switchModem"))
-            .accessibilityValue((state.modem?.displayName ?? "") + " · " + session.configuration.name)
+            .accessibilityValue(state.modem?.displayName ?? "")
         }
         if tab == .overview {
             ToolbarItemGroup(placement: .topBarTrailing) {

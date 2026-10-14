@@ -1,18 +1,20 @@
 import SwiftUI
 
 struct CallRecordingsView: View {
+    let backendID: UUID
     @Environment(CallsState.self) private var calls
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        let entries = calls.recordings.items(for: backendID)
         List {
             Section {
                 Text("calls.recordingsLocal").font(.footnote).foregroundStyle(.secondary)
                 if let failure = calls.recordings.failure { FailureView(failure: failure) }
                 if calls.recordings.busy { ProgressView("calls.savingRecording") }
             }
-            ForEach(calls.recordings.items) { CallRecordingRow(entry: $0) }
-            if calls.recordings.items.isEmpty { ContentUnavailableView("calls.noRecordings", systemImage: "waveform") }
+            ForEach(entries) { CallRecordingRow(entry: $0) }
+            if entries.isEmpty { ContentUnavailableView("calls.noRecordings", systemImage: "waveform") }
         }
         .navigationTitle("calls.recordings")
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("common.done") { dismiss() } } }
@@ -53,8 +55,9 @@ struct CallRecordingRow: View {
             if recordings.activeID != entry.id {
                 // The destructive role belongs to confirmation, so opening the
                 // alert cannot optimistically remove the row from the list.
-                Button("common.delete", systemImage: "trash") { deleting = true }
+                Button { deleting = true } label: { Image(systemName: "trash") }
                     .tint(.red)
+                    .accessibilityLabel(Text("common.delete"))
                     .disabled(recordings.busy)
                     .accessibilityIdentifier("recording-delete-\(entry.id)")
             }

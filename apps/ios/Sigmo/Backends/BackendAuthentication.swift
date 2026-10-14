@@ -118,14 +118,21 @@ private extension Data {
 }
 
 @MainActor
-final class BrowserAuthentication: NSObject, ASWebAuthenticationPresentationContextProviding {
+final class BrowserAuthentication {
     nonisolated static let callback = URL(string: "https://sigmo-pro.952007.xyz/auth/callback")!
     private var session: ASWebAuthenticationSession?
+    // The authentication session holds its presentation context weakly.
+    private var presentationContext: BrowserPresentationContext?
     private var pending: CheckedContinuation<URL, any Error>?
     private var operation: UUID?
 
     func open(_ url: URL) async throws -> URL {
         guard session == nil, !Task.isCancelled else { throw CancellationError() }
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive })
+            ?? scenes.first(where: { $0.activationState == .foregroundInactive }) else {
+            throw BackendFailure.local("auth.loginFailed")
+        }
         let id = UUID()
         operation = id
         return try await withTaskCancellationHandler {
@@ -140,7 +147,9 @@ final class BrowserAuthentication: NSObject, ASWebAuthenticationPresentationCont
                         } else { self.finish(.failure(BackendFailure.local("auth.loginFailed"))) }
                     }
                 }
-                browser.presentationContextProvider = self
+                let context = BrowserPresentationContext(windowScene: scene)
+                presentationContext = context
+                browser.presentationContextProvider = context
                 // Keep the IdP's browser session for the user's next explicit login.
                 browser.prefersEphemeralWebBrowserSession = false
                 session = browser
@@ -161,10 +170,21 @@ final class BrowserAuthentication: NSObject, ASWebAuthenticationPresentationCont
         pending = nil
         operation = nil
         session = nil
+        presentationContext = nil
         continuation?.resume(with: result)
     }
+}
+
+@MainActor
+private final class BrowserPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding {
+    private let anchor: ASPresentationAnchor
+
+    init(windowScene: UIWindowScene) {
+        anchor = windowScene.keyWindow ?? ASPresentationAnchor(windowScene: windowScene)
+        super.init()
+    }
+
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows).first(where: \.isKeyWindow) ?? ASPresentationAnchor()
+        anchor
     }
 }

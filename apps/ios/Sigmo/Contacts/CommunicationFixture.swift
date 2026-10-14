@@ -3,7 +3,7 @@ import Foundation
 
 // All communication UI tests use this in-memory backend, including mutations.
 actor CommunicationFixture {
-    private let devices = DetailFixtureServer()
+    private let devices: DetailFixtureServer
     private var contacts = [SigmoContact(id: "alice", name: "Alice", notes: "Fixture note", numbers: [ContactPhone(label: "mobile", number: "+14155552671", region: "US", key: "+14155552671"), ContactPhone(label: "work", number: "+442079460018", region: "GB", key: "+442079460018")])]
     private var modemOverrides: [Modem]?
     private var avatars: [String: Data] = [:]
@@ -15,7 +15,8 @@ actor CommunicationFixture {
     private var requests: [URLRequest] = []
     private var lines = [CommunicationFixture.line("a"), CommunicationFixture.line("b", available: false)]
     private let includesHistory: Bool
-    init(contactName: String = "Alice", includesHistory: Bool = false, modemContacts: Bool = false) {
+    init(contactName: String = "Alice", includesHistory: Bool = false, modemContacts: Bool = false, modemNames: [String: String] = [:]) {
+        devices = DetailFixtureServer(modemNames: modemNames)
         contacts[0].name = contactName
         self.includesHistory = includesHistory
         if modemContacts {

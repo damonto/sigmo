@@ -27,6 +27,20 @@ final class CommunicationFlowTests: XCTestCase {
         } catch { print("Screenshot export: \(error)") }
     }
 
+    private func chooseStudioModem(_ app: XCUIApplication) {
+        let picker = app.buttons["communication-modem-picker"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        picker.tap()
+        let choices = app.collectionViews.buttons
+        let modem = choices["Studio Modem"]
+        XCTAssertTrue(modem.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(choices["Studio Source Modem"].exists)
+        XCTAssertFalse(choices["Home Modem"].exists)
+        XCTAssertFalse(choices["Source Modem"].exists)
+        modem.tap()
+        XCTAssertEqual(picker.label, "Studio Modem")
+    }
+
     func testRootTabsContactDetailsAndCancelEdit() {
         let app = launch()
         let contacts = app.tabBars.buttons["Contacts"]
@@ -114,7 +128,8 @@ final class CommunicationFlowTests: XCTestCase {
         app.staticTexts["Studio Contact"].firstMatch.tap()
         let modem = app.buttons["communication-modem-picker"]
         XCTAssertTrue(modem.waitForExistence(timeout: 10))
-        XCTAssertTrue(modem.label.contains("Studio"))
+        XCTAssertEqual(modem.label, "Studio Modem")
+        chooseStudioModem(app)
         capture(app, name: "All backends message source")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.tabBars.buttons["Calls"].tap()
@@ -124,7 +139,8 @@ final class CommunicationFlowTests: XCTestCase {
         app.staticTexts["Studio Contact"].firstMatch.tap()
         app.buttons["call-detail-call"].tap()
         XCTAssertTrue(modem.waitForExistence(timeout: 10))
-        XCTAssertTrue(modem.label.contains("Studio"))
+        XCTAssertEqual(modem.label, "Studio Modem")
+        chooseStudioModem(app)
         app.buttons["Cancel"].tap()
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.tabBars.buttons["Contacts"].tap()
@@ -173,9 +189,7 @@ final class CommunicationFlowTests: XCTestCase {
             XCTAssertTrue(app.buttons.matching(identifier: "communication-create-Studio").firstMatch.waitForExistence(timeout: 5))
             capture(app, name: "All backends choose destination \(tab)")
             app.buttons.matching(identifier: "communication-create-Studio").firstMatch.tap()
-            let modem = app.buttons["communication-modem-picker"]
-            XCTAssertTrue(modem.waitForExistence(timeout: 10))
-            XCTAssertTrue(modem.label.contains("Studio"))
+            chooseStudioModem(app)
             app.buttons["Cancel"].tap()
         }
         app.tabBars.buttons["Contacts"].tap()
@@ -311,6 +325,8 @@ final class CommunicationFlowTests: XCTestCase {
         XCTAssertTrue(add.waitForExistence(timeout: 10)); add.tap()
         XCTAssertTrue(app.textFields["Name"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Add Photo"].exists)
+        XCTAssertFalse(app.staticTexts["Backend"].exists)
+        XCTAssertFalse(app.staticTexts["Backend, Home"].exists)
         XCTAssertFalse(app.buttons["Save"].isEnabled)
         app.buttons["Add phone number"].tap()
         XCTAssertTrue(app.textFields["Phone number"].exists)
@@ -383,7 +399,7 @@ final class CommunicationFlowTests: XCTestCase {
         app.tabBars.buttons[chinese ? "联系人" : "Contacts"].tap()
         XCTAssertTrue(app.staticTexts["Alice"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertEqual(app.staticTexts["detailModemTitle"].label, "Home Modem")
-        XCTAssertEqual(app.staticTexts["detailBackendName"].label, "Home")
+        XCTAssertFalse(app.staticTexts["detailBackendName"].exists)
         capture(app, name: chinese ? "Modem contacts Chinese large text" : "Modem contacts")
         return app
     }

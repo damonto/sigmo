@@ -16,7 +16,12 @@ final class SettingsFlowTests: XCTestCase {
     }
 
     private func openSettings(_ app: XCUIApplication) {
-        // Returning from Settings now leaves us in the connection list.
+        let settings = app.buttons["settingsBackend-00000000-0000-0000-0000-000000000001"]
+        if settings.exists {
+            settings.tap()
+            XCTAssertTrue(app.buttons["settings-auth"].waitForExistence(timeout: 5))
+            return
+        }
         let row = app.buttons["backend-00000000-0000-0000-0000-000000000001"]
         if !row.exists {
             let menu = app.buttons["manageBackends"]
@@ -24,8 +29,9 @@ final class SettingsFlowTests: XCTestCase {
             menu.tap()
         }
         XCTAssertTrue(row.waitForExistence(timeout: 10))
-        row.swipeLeft()
-        app.buttons["settingsBackend-00000000-0000-0000-0000-000000000001"].tap()
+        row.tap()
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.tap()
         XCTAssertTrue(app.buttons["settings-auth"].waitForExistence(timeout: 5))
     }
 

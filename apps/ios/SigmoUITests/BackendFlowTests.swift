@@ -157,8 +157,10 @@ final class BackendFlowTests: XCTestCase {
         XCTAssertTrue(studio.waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["modem-\(homeID)-device-1"].exists)
         studio.tap()
-        XCTAssertTrue(app.staticTexts["detailBackendName"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["detailBackendName"].label, "Studio")
+        XCTAssertTrue(app.staticTexts["detailModemTitle"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["detailModemTitle"].label, "Studio Modem")
+        XCTAssertFalse(app.staticTexts["detailBackendName"].exists)
+        XCTAssertEqual(app.buttons["Switch modem"].value as? String, "Studio Modem")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.segmentedControls["backendFilterSegments"].buttons["All"].tap()
         for _ in 0..<6 where !app.buttons["modem-\(homeID)-device-1"].isHittable { app.swipeUp() }
@@ -191,7 +193,7 @@ final class BackendFlowTests: XCTestCase {
             XCTAssertTrue(studio.isSelected)
             XCTAssertTrue(all.isHittable)
             app.buttons["modem-\(id)-device-1"].tap()
-            XCTAssertTrue(app.staticTexts["detailBackendName"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts["detailModemTitle"].waitForExistence(timeout: 5))
             app.navigationBars.buttons.element(boundBy: 0).tap()
             XCTAssertTrue(studio.isHittable, app.debugDescription)
             XCTAssertTrue(studio.isSelected)
@@ -222,8 +224,8 @@ final class BackendFlowTests: XCTestCase {
         let modem = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "modem-")).firstMatch
         XCTAssertTrue(modem.waitForExistence(timeout: 5))
         modem.tap()
-        XCTAssertTrue(app.staticTexts["detailBackendName"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["detailBackendName"].label, name)
+        XCTAssertTrue(app.staticTexts["detailModemTitle"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["detailModemTitle"].label, "Studio Modem")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(segment.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(segment.isHittable, app.debugDescription)
@@ -418,8 +420,8 @@ final class BackendFlowTests: XCTestCase {
         for _ in 0..<5 where !studio.isHittable { app.swipeUp() }
         XCTAssertTrue(studio.isHittable)
         studio.tap()
-        XCTAssertTrue(app.staticTexts["detailBackendName"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["detailBackendName"].label, "Studio")
+        XCTAssertTrue(app.staticTexts["detailModemTitle"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["detailModemTitle"].label, "Studio Modem")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.buttons["manageBackends"].tap()
         let locked = app.buttons["backend-00000000-0000-0000-0000-000000000003"]
@@ -452,21 +454,27 @@ final class BackendFlowTests: XCTestCase {
         XCTAssertTrue(app.buttons["modem-00000000-0000-0000-0000-000000000001-device-1"].exists)
     }
 
-    func testManagementSwipeSettingsEditAndDetails() {
+    func testManagementDetailsSettingsEditAndReturn() {
         let app = app(scenario: "dashboard")
         app.launch()
         let id = "00000000-0000-0000-0000-000000000001"
         app.buttons["manageBackends"].tap()
         let row = app.buttons["backend-\(id)"]
         XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.tabBars.firstMatch.exists)
         XCTAssertTrue(app.staticTexts["https://home.sigmo.test"].exists)
         XCTAssertFalse(app.staticTexts["https://home.sigmo.test/api/v1"].exists)
-        row.swipeLeft()
+        XCTAssertFalse(app.buttons["settingsBackend-\(id)"].exists, app.debugDescription)
+        XCTAssertFalse(app.buttons["editBackend-\(id)"].exists, app.debugDescription)
+        row.tap()
+        XCTAssertTrue(app.buttons["settingsBackend-\(id)"].waitForExistence(timeout: 5))
+        XCTAssertLessThan(app.buttons["settingsBackend-\(id)"].frame.midX, app.buttons["editBackend-\(id)"].frame.midX)
+        XCTAssertFalse(app.tabBars.firstMatch.exists)
         app.buttons["settingsBackend-\(id)"].tap()
         XCTAssertTrue(app.buttons["settings-auth"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["settings-mcp"].exists)
+        XCTAssertFalse(app.tabBars.firstMatch.exists)
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        row.swipeLeft()
         app.buttons["editBackend-\(id)"].tap()
         XCTAssertEqual(app.textFields["backendName"].value as? String, "Home")
         XCTAssertEqual(app.textFields["backendAddress"].value as? String, "https://home.sigmo.test")
@@ -474,7 +482,6 @@ final class BackendFlowTests: XCTestCase {
         app.textFields["backendName"].typeText(" Updated")
         app.buttons["saveBackend"].tap()
         XCTAssertTrue(app.staticTexts["Home Updated"].waitForExistence(timeout: 5))
-        row.tap()
         XCTAssertTrue(app.staticTexts["backendDisplayAddress"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["backendDisplayAddress"].label.contains("https://home.sigmo.test"))
         XCTAssertFalse(app.staticTexts["backendDisplayAddress"].label.contains("/api/v1"))
@@ -485,6 +492,7 @@ final class BackendFlowTests: XCTestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.segmentedControls["backendFilterSegments"].buttons["Home Updated"].exists)
+        XCTAssertTrue(app.tabBars.buttons["Devices"].exists)
     }
 
     func testDeletingSelectedConnectionReturnsToAll() {
@@ -559,8 +567,8 @@ final class BackendFlowTests: XCTestCase {
         try app.performAccessibilityAudit(for: [.sufficientElementDescription])
         if !modem.isHittable { app.swipeUp() }
         modem.tap()
-        XCTAssertTrue(app.staticTexts["detailBackendName"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.staticTexts["detailBackendName"].label, "Home")
+        XCTAssertTrue(app.staticTexts["detailModemTitle"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["detailModemTitle"].label, "Home Modem")
         if app.buttons["modemInfo"].exists { app.buttons["modemInfo"].tap() }
         attachScreenshot(app)
         try app.performAccessibilityAudit(for: [.textClipped]) { issue in

@@ -222,6 +222,7 @@ struct SigmoContactDetail: View {
 
 struct ContactEditView: View {
     let session: BackendSession
+    @Environment(BackendStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var contact: SigmoContact
     @State private var avatar: UIImage?
@@ -240,6 +241,7 @@ struct ContactEditView: View {
         _avatar = State(initialValue: draft.avatar.flatMap(UIImage.init(data:)))
     }
     var body: some View {
+        let hasAvatar = avatar != nil || contact.hasAvatar && !removingAvatar
         NavigationStack {
             Form {
                 Section {
@@ -252,11 +254,11 @@ struct ContactEditView: View {
                         }
                         HStack(spacing: 12) {
                             PhotosPicker(selection: $photo, matching: .images) {
-                                Text(avatar != nil || contact.hasAvatar && !removingAvatar ? LocalizedStringKey("communication.changePhoto") : LocalizedStringKey("communication.addPhoto"))
+                                Text(hasAvatar ? LocalizedStringKey("communication.changePhoto") : LocalizedStringKey("communication.addPhoto"))
                                     .font(.subheadline.weight(.medium)).padding(.horizontal, 8)
                             }
                             .buttonStyle(.glass).buttonBorderShape(.capsule)
-                            if avatar != nil || contact.hasAvatar && !removingAvatar {
+                            if hasAvatar {
                                 Menu {
                                     if avatar != nil { Button("communication.cropPhoto", systemImage: "crop") { cropping = true } }
                                     Button("communication.removeAvatar", systemImage: "trash", role: .destructive) { avatar = nil; photo = nil; removingAvatar = true }
@@ -270,8 +272,10 @@ struct ContactEditView: View {
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 0, trailing: 0))
 
-                Section {
-                    LabeledContent("communication.backend", value: session.configuration.name)
+                if store.settings.backends.count > 1 {
+                    Section {
+                        LabeledContent("communication.backend", value: session.configuration.name)
+                    }
                 }
                 Section {
                     TextField("communication.name", text: $contact.name).textContentType(.name)

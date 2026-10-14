@@ -48,7 +48,7 @@ struct CommunicationComposerView: View {
                     ScrollView {
                         VStack(spacing: 16) {
                             if let ussd {
-                                Text("\(ussd.line.backendName) · \(ussd.line.label)").font(.subheadline).foregroundStyle(.secondary)
+                                Text(ussd.line.label).font(.subheadline).foregroundStyle(.secondary)
                                 CallServiceView(ussd: ussd)
                             } else {
                                 CommunicationModemPicker(state: state)
@@ -124,13 +124,13 @@ struct CommunicationModemPicker: View {
                     Picker("communication.chooseModem", selection: Binding(get: { state.selectedID }, set: { state.selectModem($0) })) {
                         Text("communication.chooseModem").tag("")
                         ForEach(state.availableModems) { modem in
-                            Text("\(state.session.configuration.name) · \(modem.communicationLabel)").tag(modem.id)
+                            Text(modem.selectionLabel).tag(modem.id)
                         }
                     }
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "server.rack").foregroundStyle(.blue)
-                        Text("\(state.session.configuration.name) · \(state.selected?.communicationLabel ?? detailText("communication.chooseModem"))")
+                        Text(state.selected?.selectionLabel ?? detailText("communication.chooseModem"))
                             .lineLimit(1)
                         Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(.secondary)
                     }.font(compact ? .caption : .subheadline).contentShape(Rectangle())
@@ -138,7 +138,7 @@ struct CommunicationModemPicker: View {
                 .buttonStyle(.plain).disabled(state.busy)
                 .accessibilityIdentifier("communication-modem-picker")
             } else if let modem = state.selected {
-                Text(state.fixedModemID == nil ? "\(state.session.configuration.name) · \(modem.communicationLabel)" : modem.communicationLabel).font(compact ? .caption : .subheadline).lineLimit(1).foregroundStyle(.secondary)
+                Text(modem.communicationLabel).font(compact ? .caption : .subheadline).lineLimit(1).foregroundStyle(.secondary)
             }
             if !compact && state.unavailable && state.selectedID.isEmpty {
                 Text("communication.modemUnavailable").font(.footnote).foregroundStyle(.secondary)

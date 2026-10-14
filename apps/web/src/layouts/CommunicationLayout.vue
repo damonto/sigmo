@@ -42,9 +42,6 @@ const tabs = computed<NavigationItem[]>(() => [
     label: t('communication.contacts'),
     icon: ContactRound,
   },
-])
-const desktopTabs = computed<NavigationItem[]>(() => [
-  ...tabs.value,
   {
     key: 'settings',
     routeName: 'settings',
@@ -74,7 +71,7 @@ const desktopTabs = computed<NavigationItem[]>(() => [
           class="text-lg font-semibold tracking-tight"
           >{{ t('home.title') }}</RouterLink
         >
-        <DesktopTabNav :items="desktopTabs" />
+        <DesktopTabNav :items="tabs" />
       </div>
     </header>
     <div

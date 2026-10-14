@@ -1,7 +1,7 @@
 const zh = {
   communication: {
     modem: 'Modem',
-    chooseModem: '选择 Modem',
+    chooseModem: '选择线路',
     currentModem: '使用所选 Modem 当前激活的 SIM。',
     currentModemUnavailable: '当前 Modem 不可用，请检查其激活的 SIM 后重试。',
     modemUnavailable: '此 Modem 已不可用，请选择其他 Modem。',

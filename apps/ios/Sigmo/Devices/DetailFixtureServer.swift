@@ -56,6 +56,7 @@ actor DetailFixtureServer {
     private var physical: Bool
     private var locked: Bool
     private let scenario: Scenario
+    private let modemNames: [String: String]
     private var slot = 1
     private var number = "+8613800000000"
     private var physicalReminder: SIMReminder?
@@ -83,10 +84,11 @@ actor DetailFixtureServer {
     var requireConfirmation = true
 
     init(physical: Bool = false, locked: Bool = false, scenario: Scenario = .standard, number: String = "+8613800000000",
-         initialConnection: ConnectionFixture = ConnectionFixture()) {
+         initialConnection: ConnectionFixture = ConnectionFixture(), modemNames: [String: String] = [:]) {
         self.number = number
         self.physical = physical; self.locked = locked
         self.scenario = scenario
+        self.modemNames = modemNames
         groups = [
             ESIMProfileGroup(id: "se-a", label: "eUICC A", aid: nil, eid: "89049032000000000000000000000001", profiles: [Self.profile(se: "se-a", iccid: "8986000000000000001", name: "Primary", active: true), Self.profile(se: "se-a", iccid: "8986000000000000002", name: "Travel", active: false)]),
             ESIMProfileGroup(id: "se-b", label: "eUICC B", aid: nil, eid: "89049032000000000000000000000002", profiles: [Self.profile(se: "se-b", iccid: "8986000000000000002", name: "Backup", active: false)])
@@ -414,7 +416,7 @@ actor DetailFixtureServer {
     private func modem(_ id: String) -> Modem {
         let settings = settingsFixture(id)
         let connection = currentConnections(id)
-        let defaultName = id == "device-1" ? "Home Modem" : "Source Modem"
+        let defaultName = modemNames[id] ?? (id == "device-1" ? "Home Modem" : "Source Modem")
         let profileICCID = groups.first { $0.id == activeSE }?.profiles.first { $0.enabled }?.iccid ?? "8986000000000000001"
         let sim = SIMSlot(slot: slot, active: true, operatorName: "Example Mobile", operatorIdentifier: "46000", regionCode: "CN", identifier: slot == 1 ? profileICCID : "8986000000000000099", reminder: physicalReminder)
         let slots = [SIMSlot(slot: 1, active: slot == 1, operatorName: "Example Mobile", operatorIdentifier: "46000", regionCode: "CN", identifier: "8986000000000000001"), SIMSlot(slot: 2, active: slot == 2, operatorName: "Travel", operatorIdentifier: "23410", regionCode: "GB", identifier: "8986000000000000099")]

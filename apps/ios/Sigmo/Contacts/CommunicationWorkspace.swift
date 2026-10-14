@@ -173,13 +173,23 @@ struct CommunicationWorkspace: View {
                     }
                     .listRowSeparator(item.id == threads.first?.id ? .hidden : .automatic, edges: .top)
                     .accessibilityIdentifier("conversation-\(item.value.id)")
-                    .swipeActions { Button("communication.delete", role: .destructive) { deleting = item.id } }
+                    .swipeActions(allowsFullSwipe: false) {
+                        Button { deleting = item.id } label: { Image(systemName: "trash") }
+                            .tint(.red)
+                            .accessibilityLabel(Text("communication.delete"))
+                    }
                 }
             case .calls:
-                ForEach(state.calls) { item in
+                let calls = state.calls
+                ForEach(calls) { item in
                     callRow(item)
-                        .swipeActions {
-                            if item.value.terminal { Button("communication.delete", role: .destructive) { deleting = item.id } }
+                        .listRowSeparator(item.id == calls.first?.id ? .hidden : .automatic, edges: .top)
+                        .swipeActions(allowsFullSwipe: false) {
+                            if item.value.terminal {
+                                Button { deleting = item.id } label: { Image(systemName: "trash") }
+                                    .tint(.red)
+                                    .accessibilityLabel(Text("communication.delete"))
+                            }
                         }
                 }
             }
@@ -280,7 +290,7 @@ struct CommunicationWorkspace: View {
             .accessibilityIdentifier("modem-contact-actions")
         } else {
             Button { begin(section == .calls ? .call : .message) } label: {
-                Label(section == .calls ? LocalizedStringKey("communication.dial") : LocalizedStringKey("communication.newMessage"), systemImage: section == .calls ? "plus" : "square.and.pencil")
+                Label(section == .calls ? LocalizedStringKey("communication.dial") : LocalizedStringKey("communication.newMessage"), systemImage: section == .calls ? "circle.grid.3x3.fill" : "square.and.pencil")
             }
         }
     }

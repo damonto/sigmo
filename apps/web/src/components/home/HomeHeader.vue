@@ -1,8 +1,5 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
-
-import { Button } from '@/components/ui/button'
 
 const props = defineProps<{
   subtitle: string
@@ -30,16 +27,6 @@ const { t } = useI18n()
         <p class="text-sm text-muted-foreground md:text-base">
           {{ props.subtitle }}
         </p>
-      </div>
-      <div class="shrink-0 lg:hidden">
-        <Button
-          as-child
-          variant="outline"
-        >
-          <RouterLink :to="{ name: 'settings' }">
-            {{ t('home.settings') }}
-          </RouterLink>
-        </Button>
       </div>
     </div>
   </header>

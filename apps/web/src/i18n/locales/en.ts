@@ -1,7 +1,7 @@
 const en = {
   communication: {
     modem: 'Modem',
-    chooseModem: 'Choose a modem',
+    chooseModem: 'Choose a line',
     currentModem: 'Uses the selected modem’s active SIM.',
     currentModemUnavailable: 'This modem is unavailable. Check its active SIM before trying again.',
     modemUnavailable: 'This modem is unavailable. Choose another modem.',

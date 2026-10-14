@@ -48,6 +48,10 @@ struct Modem: Codable, Identifiable, Sendable, Equatable {
 
     var communicationLabel: String { sim.label.flatMap { $0.isEmpty ? nil : $0 } ?? (sim.operatorName.isEmpty ? displayName : sim.operatorName) }
     var displayName: String { name.isEmpty ? id : name }
+    var selectionLabel: String {
+        let profileLabel = sim.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return profileLabel.isEmpty ? displayName : "\(displayName) · \(profileLabel)"
+    }
     var carrier: String {
         registeredOperator.name.isEmpty ? sim.operatorName : registeredOperator.name
     }

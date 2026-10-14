@@ -1,15 +1,9 @@
 import SwiftUI
 
-private enum BackendListSheet: Identifiable {
-    case editor(BackendConfiguration?)
-    case order
+private enum BackendListSheet: String, Identifiable {
+    case add, order
 
-    var id: String {
-        switch self {
-        case .editor(let configuration): "edit-\(configuration?.id.uuidString ?? "new")"
-        case .order: "order"
-        }
-    }
+    var id: Self { self }
 }
 
 struct BackendListView: View {
@@ -19,31 +13,24 @@ struct BackendListView: View {
     @State private var demo: DemoPresentation?
     @State private var sheet: BackendListSheet?
     @State private var refreshFailure: BackendFailure?
-    var open: (BackendDestination) -> Void
 
     var body: some View {
         List {
             ForEach(store.settings.backends) { backend in
                 if let session = store.sessions[backend.id] {
-                    NavigationLink(value: BackendDestination.backend(backend.id)) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text(backend.name).font(.headline)
-                                BackendStatusLabel(session: session)
-                                    .labelStyle(.iconOnly)
+                    Section {
+                        NavigationLink(value: BackendDestination.backend(backend.id)) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    Text(backend.name).font(.headline)
+                                    BackendStatusLabel(session: session)
+                                        .labelStyle(.iconOnly)
+                                }
+                                Text(backend.displayAddress).font(.subheadline).foregroundStyle(.secondary)
                             }
-                            Text(backend.displayAddress).font(.subheadline).foregroundStyle(.secondary)
+                            .padding(.vertical, 4)
                         }
-                        .padding(.vertical, 4)
-                    }
-                    .accessibilityIdentifier("backend-\(backend.id)")
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button("common.edit", systemImage: "pencil") { sheet = .editor(backend) }
-                            .tint(.orange)
-                            .accessibilityIdentifier("editBackend-\(backend.id)")
-                        Button("common.settings", systemImage: "gearshape") { open(.settings(backend.id)) }
-                            .tint(.blue)
-                            .accessibilityIdentifier("settingsBackend-\(backend.id)")
+                        .accessibilityIdentifier("backend-\(backend.id)")
                     }
                 }
             }
@@ -68,6 +55,8 @@ struct BackendListView: View {
             }
             #endif
         }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(12)
         .navigationTitle("backends.manage")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
@@ -84,7 +73,7 @@ struct BackendListView: View {
                     .accessibilityIdentifier("reorderBackends")
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button("backends.add", systemImage: "plus") { sheet = .editor(nil) }
+                Button("backends.add", systemImage: "plus") { sheet = .add }
                     .disabled(!store.configurationLoaded)
                     .accessibilityIdentifier("addBackend")
             }
@@ -94,7 +83,7 @@ struct BackendListView: View {
         }
         .sheet(item: $sheet) { value in
             switch value {
-            case .editor(let configuration): BackendEditor(configuration: configuration)
+            case .add: BackendEditor()
             case .order: BackendOrderView()
             }
         }

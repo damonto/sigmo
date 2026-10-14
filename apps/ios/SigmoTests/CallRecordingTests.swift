@@ -4,6 +4,29 @@ import XCTest
 
 @MainActor
 final class CallRecordingTests: XCTestCase {
+    func testBackendScopeSeparatesRecordingsWithMatchingCallIDs() throws {
+        let directory = URL.temporaryDirectory.appending(path: "RecordingTests-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try FileManager.default.removeItem(at: directory) }
+        let firstBackend = UUID(), secondBackend = UUID()
+        let first = CallRecording(id: UUID(), backendID: firstBackend, modemID: "modem", profileID: "sim", callID: "call",
+                                 number: "10086", line: "First", createdAt: .now, receiveOnly: false)
+        let second = CallRecording(id: UUID(), backendID: secondBackend, modemID: "modem", profileID: "sim", callID: "call",
+                                  number: "10086", line: "Second", createdAt: .now, receiveOnly: false)
+        for entry in [first, second] {
+            try JSONEncoder().encode(entry).write(to: directory.appending(path: "\(entry.stem).json"))
+        }
+        let library = CallRecordings(directory: directory)
+        XCTAssertNil(library.failure)
+        XCTAssertEqual(library.items(for: firstBackend).map(\.id), [first.id])
+        XCTAssertEqual(library.items(for: secondBackend).map(\.id), [second.id])
+        XCTAssertTrue(library.items(for: UUID()).isEmpty)
+        library.delete(first)
+        XCTAssertTrue(library.items(for: firstBackend).isEmpty)
+        XCTAssertEqual(library.items(for: secondBackend).map(\.id), [second.id])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appending(path: "\(second.stem).json").path))
+    }
+
     func testRecordingPreservesRegionForNumberDisplay() throws {
         let entry = CallRecording(id: UUID(), backendID: UUID(), modemID: "modem", profileID: "sim", callID: "call",
             number: "2025550123", line: "Work", createdAt: .now, receiveOnly: false, regionCode: "US")

@@ -91,8 +91,8 @@ struct CallHistoryDetail: View {
     }
 
     private var recordings: some View {
-        let entries = calls.recordings.items.filter {
-            $0.backendID == session.id && $0.modemID == modemID
+        let entries = calls.recordings.items(for: session.id).filter {
+            $0.modemID == modemID
                 && $0.callID == record.id && $0.profileID == record.profileId
                 && ($0.backendInstanceID == nil || $0.backendInstanceID == record.backendId)
                 && ($0.callUUID == nil || $0.callUUID == record.callUUID)

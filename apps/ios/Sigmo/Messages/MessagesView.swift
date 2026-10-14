@@ -99,22 +99,7 @@ struct MessagesView: View {
 
     private var list: some View {
         List {
-            Section {
-                HStack {
-                    Picker("messages.filter", selection: $state.unreadOnly) {
-                        Text("messages.all").tag(false)
-                        Text("messages.unread").tag(true)
-                    }.pickerStyle(.segmented).disabled(state.legacy)
-                        .accessibilityIdentifier("messages-unread-filter")
-                    Menu {
-                        Toggle("messages.historical", isOn: $state.historical)
-                    } label: { Image(systemName: "line.3.horizontal.decrease") }
-                        .accessibilityLabel("messages.lines")
-                        .accessibilityIdentifier("messages-history-filter")
-                }
-                .listRowSeparator(.hidden)
-                if state.legacy { Text("messages.upgrade").font(.footnote).foregroundStyle(.secondary) }
-            }
+            if state.legacy { Text("messages.upgrade").font(.footnote).foregroundStyle(.secondary) }
             if !state.loaded && state.loading {
                 ForEach(0..<5) { _ in
                     HStack(spacing: 12) {
@@ -148,7 +133,9 @@ struct MessagesView: View {
                         .listRowBackground(selected?.id == conversation.id && sizeClass == .regular ? Color.accentColor.opacity(0.1) : Color(uiColor: .systemBackground))
                         .accessibilityIdentifier("conversation-\(conversation.id)")
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button("common.delete", systemImage: "trash", role: .destructive) { deleteCandidate = conversation }
+                            Button { deleteCandidate = conversation } label: { Image(systemName: "trash") }
+                                .tint(.red)
+                                .accessibilityLabel(Text("common.delete"))
                         }
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
                             if !state.legacy {
@@ -161,10 +148,31 @@ struct MessagesView: View {
             }
         }
         .listStyle(.plain)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .accessibilityIdentifier("messages-list")
+        .safeAreaInset(edge: .top, spacing: 0) {
+            filters.padding(.horizontal, 16).padding(.bottom, 8)
+        }
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await state.load() }
         .disabled(action != nil)
-        .accessibilityIdentifier("messages-list")
+    }
+
+    private var filters: some View {
+        HStack {
+            Picker("messages.filter", selection: $state.unreadOnly) {
+                Text("messages.all").tag(false)
+                Text("messages.unread").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .disabled(state.legacy)
+            .accessibilityIdentifier("messages-unread-filter")
+            Menu {
+                Toggle("messages.historical", isOn: $state.historical)
+            } label: { Image(systemName: "line.3.horizontal.decrease") }
+                .accessibilityLabel("messages.lines")
+                .accessibilityIdentifier("messages-history-filter")
+        }
     }
 
     private func open(_ conversation: SMSConversation) {

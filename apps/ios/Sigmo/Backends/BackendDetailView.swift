@@ -70,7 +70,14 @@ struct BackendDetailView: View {
         .refreshable { await session.refresh(force: true) }
         .detailErrorAlert(login || activation || editing ? nil : session.failure ?? session.authFailure ?? session.capabilityFailure)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) { Button("common.edit", systemImage: "pencil") { editing = true } }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                NavigationLink(value: BackendDestination.settings(session.id)) {
+                    Label("common.settings", systemImage: "gearshape")
+                }
+                .accessibilityIdentifier("settingsBackend-\(session.id)")
+                Button("common.edit", systemImage: "pencil") { editing = true }
+                    .accessibilityIdentifier("editBackend-\(session.id)")
+            }
         }
         .sheet(isPresented: $editing) { BackendEditor(configuration: session.configuration) }
         .sheet(isPresented: $login) { AuthenticationView(session: session) }

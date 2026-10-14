@@ -1180,7 +1180,7 @@
 "communication.changePhoto" = "Change Photo";
 "communication.photoOptions" = "Photo options";
 
-"communication.chooseModem" = "Choose a modem";
+"communication.chooseModem" = "Choose a line";
 "communication.modemUnavailable" = "This modem is unavailable. Choose another modem.";
 "communication.noModems" = "No modems available.";
 "communication.useCurrentLine" = "Use the current active SIM";
