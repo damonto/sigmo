@@ -73,7 +73,7 @@ struct HomeView: View {
                 })
                 .toolbar {
                     if store.settings.backends.count > 1 {
-                        ToolbarItem(placement: .topBarTrailing) {
+                        ToolbarItem(placement: .topBarLeading) {
                             CommunicationBackendFilter(selection: Binding(
                                 get: { UUID(uuidString: communicationBackend) },
                                 set: { communicationBackend = $0?.uuidString ?? "" }
