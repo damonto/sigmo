@@ -330,7 +330,18 @@ extension DemoBackend {
             return try reply(badge)
         }
         let selected = messages.filter(matching).sorted { $0.id < $1.id }
-        return unified ? try reply(DemoPage(items: value("cursor").isEmpty ? selected : [])) : try reply(selected.map(\.sms))
+        if !unified {
+            let cursor = value("cursor").split(separator: ":").compactMap { Int64($0) }
+            let snapshot = cursor.first ?? (nextMessageID - 1)
+            let before = cursor.count == 2 ? cursor[1] : Int64.max
+            let eligible = selected.filter { $0.id <= snapshot && $0.id < before }
+            let items = Array(eligible.suffix(50)).map(\.sms)
+            let next = eligible.count > 50 ? "\(snapshot):\(items.first!.id)" : ""
+            return try reply(ConversationMessagePage(backendId: id, revision: revision, unreadCount: unreadCount,
+                conversation: ConversationMetadata(id: key, readThroughMessageId: selected.filter(\.read).map(\.id).max() ?? 0,
+                    markedUnread: false, unreadCount: selected.filter { $0.incoming && !$0.read }.count), items: items, nextCursor: next))
+        }
+        return try reply(DemoPage(items: value("cursor").isEmpty ? selected : []))
     }
 
     private func sendMessage(_ request: URLRequest) async throws -> BackendHTTPResponse {

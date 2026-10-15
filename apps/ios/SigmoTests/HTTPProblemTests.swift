@@ -2,6 +2,56 @@ import XCTest
 @testable import Sigmo
 
 final class HTTPProblemTests: XCTestCase {
+    @MainActor
+    func testSuccessfulResponseLimitChecksDeclaredAndStreamingSizes() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SizedResponseProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        for declared in [false, true] {
+            for size in [31, 32, 33] {
+                let url = try XCTUnwrap(URL(string: "https://response.test/200/\(size)?declared=\(declared)"))
+                do {
+                    let response = try await BackendHTTPResponse.receive(URLRequest(url: url), session: session, maximumBytes: 32)
+                    XCTAssertLessThanOrEqual(size, 32)
+                    XCTAssertEqual(response.data.count, size)
+                } catch let error as BackendFailure {
+                    XCTAssertEqual(size, 33)
+                    XCTAssertEqual(error.code, "response_too_large")
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func testOversizedErrorRetainsHTTPMeaningDespiteSmallSuccessLimit() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SizedResponseProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let url = try XCTUnwrap(URL(string: "https://response.test/401/\(HTTPProblem.maxBytes + 1)?declared=true"))
+        let response = try await BackendHTTPResponse.receive(URLRequest(url: url), session: session, maximumBytes: 32)
+        XCTAssertEqual(response.status, 401)
+        XCTAssertEqual(response.authenticate, "Bearer test")
+        XCTAssertTrue(response.data.isEmpty)
+    }
+
+    @MainActor
+    func testInjectedTransportUsesJSONAndArchiveResponseLimits() async throws {
+        let body = Data(repeating: 0, count: 8 * 1024 * 1024 + 1)
+        let api = BackendAPI(configuration: try testConfiguration(), transport: { _ in
+            BackendHTTPResponse(data: body, status: 200)
+        })
+        do {
+            _ = try await api.request(["settings"], method: "GET")
+            XCTFail("Oversized JSON must be rejected before decoding")
+        } catch let error as BackendFailure {
+            XCTAssertEqual(error.code, "response_too_large")
+        }
+        let archive = try await api.skill(token: nil)
+        XCTAssertEqual(archive.count, body.count)
+    }
+
     private struct Fixture: Decodable {
         let name: String
         let status: Int
@@ -93,4 +143,22 @@ final class HTTPProblemTests: XCTestCase {
             XCTAssertEqual(session.authentication, .authenticated, code)
         }
     }
+}
+
+// Only the test's isolated URLSession uses this protocol; no network is involved.
+private final class SizedResponseProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard let url = request.url else { return }
+        let path = url.pathComponents
+        guard path.count == 3, let status = Int(path[1]), let size = Int(path[2]) else { return }
+        var headers = ["Content-Type": "application/json", "WWW-Authenticate": "Bearer test"]
+        if url.query == "declared=true" { headers["Content-Length"] = String(size) }
+        guard let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers) else { return }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(repeating: 0, count: size))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }

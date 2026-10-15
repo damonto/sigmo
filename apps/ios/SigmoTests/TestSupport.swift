@@ -28,6 +28,8 @@ final class TestTime: Sendable {
 actor BackendStub {
     var required = false
     var offline = false
+    var refreshError: URLError.Code?
+    var accessChallengeSuffix: String?
     var modemStatus = 200
     var capabilitiesStatus = 200
     var modemJSON = PreviewBackendServer.modemJSON()
@@ -50,6 +52,8 @@ actor BackendStub {
     private var arrival: CheckedContinuation<Void, Never>?
 
     func setOffline(_ value: Bool) { offline = value }
+    func setRefreshError(_ value: URLError.Code?) { refreshError = value }
+    func setAccessChallenge(_ suffix: String?) { accessChallengeSuffix = suffix }
     func setRequired(_ value: Bool) { required = value }
     func setModemJSON(_ value: String) { modemJSON = value }
     func setModemStatus(_ value: Int) { modemStatus = value }
@@ -80,6 +84,10 @@ actor BackendStub {
         requests.append(request)
         if offline { throw URLError(.notConnectedToInternet) }
         let path = request.url?.path ?? ""
+        if let suffix = accessChallengeSuffix, path.hasSuffix(suffix), let url = request.url {
+            let metadata = url.deletingLastPathComponent().appending(path: ".well-known/oauth-protected-resource")
+            return BackendHTTPResponse(data: Data(), status: 401, authenticate: "Bearer resource_metadata=\"\(metadata.absoluteString)\"")
+        }
         if let suffix = holdSuffix, path.hasSuffix(suffix) {
             holdSuffix = nil
             await withCheckedContinuation { held = $0; arrival?.resume(); arrival = nil }
@@ -96,6 +104,7 @@ actor BackendStub {
         if path.hasSuffix("/capabilities") { return reply(capabilitiesStatus, #"{"features":\#(featuresJSON)}"#) }
         if path.hasSuffix("/auth/sessions/current") { return reply(204, "") }
         if path.hasSuffix("/auth/session-refreshes") {
+            if let refreshError { throw URLError(refreshError) }
             let json = AuthenticationFixture.tokens("rotated-token").replacingOccurrences(of: "2033-05-18T03:33:20Z", with: "2033-05-18T04:33:20Z")
             return reply(200, json)
         }

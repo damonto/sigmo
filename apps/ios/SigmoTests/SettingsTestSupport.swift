@@ -7,6 +7,7 @@ actor SettingsTestServer {
     var errors: [String: Int] = [:]
     var offline = false
     var transportError: URLError.Code?
+    var requiredAppToken: String?
     private var holdSuffix: String?
     private var held: CheckedContinuation<Void, Never>?
     private var arrival: CheckedContinuation<Void, Never>?
@@ -14,6 +15,7 @@ actor SettingsTestServer {
     init() throws { server = try SettingsFixtureServer() }
     func setError(_ suffix: String, status: Int?) { errors[suffix] = status }
     func setTransportError(_ code: URLError.Code?) { transportError = code }
+    func requireAppToken(_ token: String) { requiredAppToken = token }
     func setOffline(_ value: Bool) { offline = value }
     func setMCPEndpoint(_ path: String) {
         server.mcp = MCPSettings(enabled: false, endpointPath: path, auditRetentionDays: 90, permissions: [])
@@ -36,6 +38,11 @@ actor SettingsTestServer {
         if offline { throw URLError(.notConnectedToInternet) }
         if let transportError { throw URLError(transportError) }
         let path = request.url?.path ?? ""
+        if path.hasSuffix("/app"), let requiredAppToken,
+           request.value(forHTTPHeaderField: "Authorization") != "Bearer \(requiredAppToken)" {
+            return BackendHTTPResponse(data: Data(), status: 401,
+                authenticate: "Bearer resource_metadata=\"https://settings.example/.well-known/oauth-protected-resource\"")
+        }
         if let entry = errors.first(where: { path.hasSuffix($0.key) }) {
             return HTTPProblem.response(status: entry.value, code: entry.value == 401 ? "invalid_session" : "remote_error", detail: "Fixture failure")
         }

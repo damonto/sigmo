@@ -12,6 +12,8 @@ actor CallsFixture {
     private var endFailure = false
     private var ussdTimeout = false
     private var activeProfile = CallsFixture.profile
+    private var callReadFailure: BackendHTTPResponse?
+    private var pagedHistory: [CallRecord]?
     private(set) var requests: [URLRequest] = []
     private(set) var digits: [String] = []
     static let profile = "8986000000000000000"
@@ -48,6 +50,8 @@ actor CallsFixture {
     }
 
     func changeSIM(to profile: String) { activeProfile = profile }
+    func setCallReadFailure(_ failure: BackendHTTPResponse?) { callReadFailure = failure }
+    func setPagedHistory(_ records: [CallRecord]) { pagedHistory = records.sorted { $0.date > $1.date } }
 
     func publish(_ record: CallRecord) throws {
         records.removeAll { $0.id == record.id }; records.insert(record, at: 0)
@@ -71,7 +75,20 @@ actor CallsFixture {
             return try await messages.respond(request)
         }
         let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] } ?? [:]
-        if path.hasSuffix("/capabilities") { return response(#"{"features":["nativeCalls","wifiCalling","volte"]}"#) }
+        if path.hasSuffix("/capabilities") {
+            return pagedHistory == nil ? response(#"{"features":["nativeCalls","wifiCalling","volte"]}"#)
+                : response(#"{"features":["nativeCalls","wifiCalling","volte","callHistory"]}"#)
+        }
+        if path.hasSuffix("/api/v1/calls"), method == "GET", let pagedHistory {
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            func value(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
+            let matching = pagedHistory.filter { (value("missed") != "true" || $0.missed)
+                && (value("q").isEmpty || $0.number.contains(value("q"))) }
+            let offset = Int(value("cursor")) ?? 0
+            let items = Array(matching.dropFirst(offset).prefix(50))
+            struct Page: Encodable { let items: [CallRecord]; let nextCursor: String }
+            return try encoded(Page(items: items, nextCursor: offset + items.count < matching.count ? String(offset + items.count) : ""))
+        }
         if path.hasSuffix("/ussd") {
             if ussdTimeout { return HTTPProblem.response(status: 408, code: "ussd_timeout", detail: "Timed out") }
             return response(body["action"] == "reply" ? #"{"reply":"Balance: 100.00 / 余额 100.00"}"# : #"{"reply":"1. Balance / 余额\n2. Usage / 用量"}"#)
@@ -93,7 +110,10 @@ actor CallsFixture {
             let id = pieces.last?.components(separatedBy: "/").first ?? ""
             guard let index = records.firstIndex(where: { $0.id == id }) else { return HTTPProblem.response(status: 404, code: "call_not_found", detail: "Not found") }
             var record = records[index]
-            if method == "GET" { return try encoded(record) }
+            if method == "GET" {
+                if let callReadFailure { return callReadFailure }
+                return try encoded(record)
+            }
             if method == "DELETE", record.terminal { records.remove(at: index); return response("", status: 204) }
             guard record.ownerClientId?.isEmpty != false || record.ownerClientId == body["clientId"] else {
                 return HTTPProblem.response(status: 409, code: "call_in_use", detail: "In use")

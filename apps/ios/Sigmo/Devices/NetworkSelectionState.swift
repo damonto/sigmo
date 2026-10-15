@@ -30,7 +30,7 @@ final class NetworkSelectionState {
         registration?.automatic == false ? registration?.operatorCode : scope.detail.modem?.registeredOperator.code
     }
 
-    func load(reconciling: Bool = false) async {
+    func load(reconciling: Bool = false, refreshModem: Bool = true) async {
         clearIfUnavailable()
         guard scope.available, !Task.isCancelled, reconciling || (!updating && !scope.detail.busy) else { return }
         readRevision += 1
@@ -38,7 +38,7 @@ final class NetworkSelectionState {
         loading = registration == nil
         defer { if revision == readRevision { loading = false }; clearIfUnavailable() }
         do {
-            try await scope.refreshModem()
+            if refreshModem { try await scope.refreshModem() }
             let id = scope.modemID
             let value = try await scope.read { api, token in try await api.networkRegistration(id, token: token) }
             guard revision == readRevision else { return }
@@ -97,7 +97,7 @@ final class NetworkSelectionState {
             writeFailure = .wrapping(error)
         }
         // Even a timed-out write may have reached the modem. Read before offering another action.
-        await load(reconciling: true)
+        await load(reconciling: true, refreshModem: writeFailure != nil)
         guard scope.available, !Task.isCancelled else { return }
         failure = writeFailure ?? loadFailure
     }

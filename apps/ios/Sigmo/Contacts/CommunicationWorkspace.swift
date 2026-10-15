@@ -378,9 +378,6 @@ struct CommunicationThreadView: View {
                         older: state.cursor.isEmpty ? nil : { Task { await state.load(more: true) } },
                         visible: { id, visible in
                             if visible { visibleIDs.insert(id) } else { visibleIDs.remove(id) }
-                            if visible && scenePhase == .active, let message = state.messages.first(where: { $0.id == id }) {
-                                Task { await acknowledge(message) }
-                            }
                         }, refresh: { await state.load() })
         .navigationTitle(calls.name(number: thread.participant, session: session))
         .navigationBarTitleDisplayMode(.inline)
@@ -414,15 +411,25 @@ struct CommunicationThreadView: View {
             }
         }
         .task { await composer.load(); if !Task.isCancelled { state.failure = composer.failure } }
+        .task(id: push?.eventRevision) { if scenePhase == .active { await state.poll() } }
+        .foregroundTask(id: visibleIDs) {
+            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            await acknowledgeVisibleMessages()
+        }
         .task(id: pendingSend) {
             guard let pendingSend, !Task.isCancelled else { return }
             if await composer.send() { await state.load(preserve: true) }
             else if !Task.isCancelled { state.failure = composer.failure }
             if self.pendingSend == pendingSend { self.pendingSend = nil }
         }
-        .onDisappear { pendingSend = nil }
+        .onAppear { updateVisibility() }
+        .onChange(of: visibility) { _, _ in updateVisibility() }
+        .onDisappear {
+            pendingSend = nil
+            if push?.visibleThread == visibility { push?.visibleThread = nil }
+        }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { for message in state.messages where visibleIDs.contains(message.id) { Task { await acknowledge(message) } } }
+            updateVisibility()
         }
     }
     private var timeline: [MessageTimelineItem] {
@@ -431,10 +438,21 @@ struct CommunicationThreadView: View {
         }
     }
 
-    private func acknowledge(_ message: CommunicationMessage) async {
-        guard let badge = await state.acknowledge(message) else { return }
+    private var visibility: PushThread {
+        PushThread(backendID: push?.backendID(sessionID: session.id) ?? "", participant: thread.participant,
+                   conversationIDs: Set(state.messages.map(\.conversationId)).union([thread.latestMessage.conversationId]))
+    }
+
+    private func updateVisibility() {
+        if scenePhase == .active { push?.visibleThread = visibility }
+        else if push?.visibleThread == visibility { push?.visibleThread = nil }
+    }
+
+    private func acknowledgeVisibleMessages() async {
+        let conversations = Set(state.messages.filter { visibleIDs.contains($0.id) && $0.incoming && !$0.read }.map(\.conversationId))
+        guard let badge = await state.acknowledge(visibleIDs) else { return }
         push?.record(badge, sessionID: session.id)
-        await push?.removeNotifications(backendID: badge.backendId, conversationID: message.conversationId)
+        for id in conversations { await push?.removeNotifications(backendID: badge.backendId, conversationID: id) }
         await session.refreshUnreadCounts(minimumRevision: badge.revision)
     }
 }

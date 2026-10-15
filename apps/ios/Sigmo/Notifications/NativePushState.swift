@@ -40,6 +40,7 @@ final class NativePushState {
     var navigationFailure: BackendFailure?
     var pendingNavigation: PushNavigation?
     var visibleConversation: PushConversation?
+    var visibleThread: PushThread?
 
     private var identity: PushIdentity?
     @ObservationIgnored private let disabled: Bool
@@ -191,7 +192,16 @@ final class NativePushState {
             return false
         }
         if tapped { pendingNavigation = PushNavigation(content: content) }
-        return content.kind == "sms" && visibleConversation == PushConversation(backendID: content.backendId, conversationID: content.conversationId ?? "")
+        guard content.kind == "sms" else { return false }
+        if visibleConversation == PushConversation(backendID: content.backendId, conversationID: content.conversationId ?? "") { return true }
+        guard let thread = visibleThread, thread.backendID == content.backendId else { return false }
+        if let id = content.conversationId, thread.conversationIDs.contains(id) { return true }
+        // A new SIM can create another source conversation for the visible correspondent.
+        guard let sender = content.sender, !sender.isEmpty else { return false }
+        if sender.trimmingCharacters(in: .whitespacesAndNewlines) == thread.participant { return true }
+        let phoneCharacters = CharacterSet.decimalDigits.union(.whitespacesAndNewlines).union(CharacterSet(charactersIn: "+()- ."))
+        guard sender.unicodeScalars.allSatisfy(phoneCharacters.contains) else { return false }
+        return PhoneNumberDisplay.submission(sender, regionCode: nil) == thread.participant
     }
 
     nonisolated func receiveResponse(_ content: PushContent?, action: String, completion: @escaping @Sendable () -> Void) {

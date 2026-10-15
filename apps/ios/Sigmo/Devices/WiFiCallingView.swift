@@ -5,7 +5,7 @@ struct WiFiCallingView: View {
     private struct PendingCallback: Identifiable {
         let id = UUID()
         let sheetID: String
-        let callback: CarrierCallback
+        let callback: CarrierCallbackDelivery
     }
     @State private var state: WiFiCallingState
     @State private var action: ConnectionAction<Action>?
@@ -26,11 +26,13 @@ struct WiFiCallingView: View {
                 confirmEnable = false
                 callbacks = []
                 state.closeWebsheet()
-            }))
+            }, observe: { await state.observePending() }))
             .task(id: action?.id) { await perform() }
             .task(id: callbacks.first?.id) {
                 guard let pending = callbacks.first else { return }
-                if state.websheet?.id == pending.sheetID { await state.completeWebsheet(pending.callback) }
+                if state.websheet?.id == pending.sheetID {
+                    await state.completeWebsheet(pending.callback.callback, delivery: pending.callback.status)
+                }
                 if !Task.isCancelled, callbacks.first?.id == pending.id { callbacks.removeFirst() }
             }
             .refreshable { await state.reload() }
@@ -169,7 +171,8 @@ private struct WiFiUplinkView: View {
         }
         .navigationTitle("connection.uplink")
         .modifier(ConnectionLifecycle(scope: state.scope,
-                                      reload: { await state.reload() }, cancelAction: { action = nil }))
+                                      reload: { await state.reload() }, cancelAction: { action = nil },
+                                      observe: { await state.observePending() }))
         .task(id: action?.id) {
             guard let action else { return }
             await state.selectUplink(action.value)

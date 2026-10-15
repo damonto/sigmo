@@ -154,10 +154,11 @@ func TestDispatchCancellationAndAlreadyRead(t *testing.T) {
 	if _, err := s.InsertMessage(t.Context(), storage.Message{ProfileID: "SIM", Source: storage.MessageSourceModem, ExternalKey: "first", Sender: "10086", Text: "read", Incoming: true, Timestamp: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	items, err := s.ConversationMessages(t.Context(), storage.ConversationID("SIM", "10086"))
-	if err != nil {
-		t.Fatal(err)
+	page, err := s.ConversationMessagesPage(t.Context(), storage.ConversationID("SIM", "10086"), storage.HistoryFilter{})
+	if err != nil || len(page.Items) != 1 || page.NextCursor != "" {
+		t.Fatalf("conversation page = %+v, error = %v", page, err)
 	}
+	items := page.Items
 	if err := s.UpdateConversationRead(t.Context(), storage.ReadUpdate{ConversationID: items[0].ConversationID, ReadThroughMessageID: &items[0].ID}); err != nil {
 		t.Fatal(err)
 	}

@@ -55,6 +55,66 @@ final class BackendStorageTests: XCTestCase {
         XCTAssertNotNil(store.failure)
     }
 
+    func testFailedAddressChangeAndDeletionPreserveLoginAndPendingWork() async throws {
+        for deletes in [false, true] {
+            let configurationFile = ConfigurationFile(url: directory.appending(path: "\(deletes).json"))
+            let credentials = MemoryCredentials()
+            let stub = BackendStub()
+            await stub.setRequired(true)
+            let store = BackendStore(file: configurationFile, credentials: credentials.store, makeAPI: { configuration in
+                BackendAPI(configuration: configuration) { try await stub.respond($0) }
+            })
+            let id = UUID()
+            XCTAssertTrue(store.saveBackend(id: id, name: "Original", address: "https://one.example"))
+            credentials.tokens[id] = storedCredential("old-token")
+            let session = try XCTUnwrap(store.sessions[id])
+            await session.refresh(force: true)
+            let original = store.settings
+            await stub.holdNextModemRequest()
+            let pending = Task { await session.refresh(force: true) }
+            await stub.waitForHeldRequest()
+            try FileManager.default.removeItem(at: configurationFile.url)
+            try FileManager.default.createDirectory(at: configurationFile.url, withIntermediateDirectories: false)
+
+            if deletes { store.deleteBackend(id) }
+            else { XCTAssertFalse(store.saveBackend(id: id, name: "Replacement", address: "https://two.example")) }
+
+            XCTAssertEqual(store.settings, original)
+            XCTAssertTrue(store.sessions[id] === session)
+            XCTAssertEqual(credentials.tokens[id], storedCredential("old-token"))
+            XCTAssertEqual(session.authentication, .authenticated)
+            XCTAssertTrue(session.isRefreshing)
+            XCTAssertNotNil(store.failure)
+            await stub.release()
+            await pending.value
+            XCTAssertTrue(session.isOnline)
+        }
+    }
+
+    func testCredentialRemovalFailureDoesNotChangeAddressOrLiveSession() async throws {
+        let credentials = MemoryCredentials()
+        let stub = BackendStub()
+        await stub.setRequired(true)
+        let store = BackendStore(file: file, credentials: credentials.store, makeAPI: { configuration in
+            BackendAPI(configuration: configuration) { try await stub.respond($0) }
+        })
+        let id = UUID()
+        XCTAssertTrue(store.saveBackend(id: id, name: "Original", address: "https://one.example"))
+        credentials.tokens[id] = storedCredential("old-token")
+        let session = try XCTUnwrap(store.sessions[id])
+        await session.refresh(force: true)
+        let original = store.settings
+        credentials.writeFailure = true
+
+        XCTAssertFalse(store.saveBackend(id: id, name: "Replacement", address: "https://two.example"))
+
+        XCTAssertEqual(try file.load(), original)
+        XCTAssertEqual(store.settings, original)
+        XCTAssertTrue(store.sessions[id] === session)
+        XCTAssertTrue(session.isOnline)
+        XCTAssertEqual(credentials.tokens[id], storedCredential("old-token"))
+    }
+
     func testUnreadableConfigurationIsNotTreatedAsFirstLaunch() throws {
         let original = BackendSettings(backends: [try testConfiguration()])
         try file.save(original)
@@ -92,6 +152,7 @@ final class BackendStorageTests: XCTestCase {
         XCTAssertNil(credentials.tokens[one])
         XCTAssertEqual(credentials.tokens[two], storedCredential("two"))
         XCTAssertFalse(store.sessions[one] === old)
+        XCTAssertNotEqual(store.sessions[one]?.incarnationID, old.incarnationID)
         XCTAssertTrue(try XCTUnwrap(store.sessions[one]).modems.isEmpty)
         XCTAssertTrue(old.modems.isEmpty)
         store.deleteBackend(two)

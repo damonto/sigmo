@@ -110,7 +110,7 @@ final class UpdatesState {
                         failure = .local("settings.native.restartTimeout")
                         return
                     }
-                    _ = try await session.protectedRequest { api, _ in try await api.app() }
+                    _ = try await session.protectedRequest { api, token in try await api.app(token: token) }
                     try check(current)
                 }
                 let next = try await session.protectedRequest { api, token in

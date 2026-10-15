@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-struct ModemSIMIdentity: Equatable {
+struct ModemSIMIdentity: Equatable, Sendable {
     let kind: String
     let slot: Int
     let iccid: String
@@ -11,6 +11,15 @@ struct ModemSIMIdentity: Equatable {
         slot = modem.sim.slot
         iccid = modem.sim.identifier
     }
+}
+
+struct ModemSIMTarget: Equatable, Sendable {
+    let identity: ModemSIMIdentity?
+    let accessRevision: Int
+}
+
+enum ModemReconciliation {
+    case inventory, connection
 }
 
 @MainActor @Observable
@@ -38,6 +47,7 @@ final class ModemDetailState {
     }
     var modem: Modem? { session.modems.first { $0.id == modemID } }
     var simIdentity: ModemSIMIdentity? { modem.map(ModemSIMIdentity.init) }
+    var simTarget: ModemSIMTarget { .init(identity: simIdentity, accessRevision: session.accessRevision) }
     var esim: Bool { modem?.simKind == "euicc" }
     var needsSIMUnlock: Bool { modem?.state == "locked" }
     var needsPIN: Bool { modem?.state == "locked" && modem?.unlockSupported == true }
@@ -55,7 +65,7 @@ final class ModemDetailState {
         await loadSnapshot(current, force: force)
     }
 
-    private func loadSnapshot(_ current: Int, force: Bool = true) async {
+    private func loadSnapshot(_ current: Int, force: Bool = true, reconciliation: ModemReconciliation = .inventory) async {
         guard current == revision, !Task.isCancelled else { return }
         await session.refreshModem(modemID)
         guard current == revision, !Task.isCancelled else { return }
@@ -70,12 +80,14 @@ final class ModemDetailState {
         }
 
         let identity = simIdentity
-        if loadedSIM?.slot != identity?.slot || loadedSIM?.kind != identity?.kind {
+        if loadedSIM?.slot != identity?.slot || loadedSIM?.kind != identity?.kind
+            || (reconciliation == .connection && loadedSIM != identity) {
             clearSIMData()
         }
         let unchanged = loadedSIM == identity
         loadedSIM = identity
         failure = nil
+        guard reconciliation == .inventory else { return }
         guard esim else { return }
         if !force, unchanged, profilesLoaded, elementsLoaded, elementsFailure == nil,
            profilesFailure == nil, Date().timeIntervalSince(profilesLoadedAt) < 30 { return }
@@ -142,8 +154,10 @@ final class ModemDetailState {
         profilesFailure = nil
     }
 
-    func mutate(_ operation: @escaping @Sendable (BackendAPI, String?) async throws -> Void) async -> Bool {
+    func mutate(reconciliation: ModemReconciliation = .inventory, target: ModemSIMTarget? = nil,
+                _ operation: @escaping @Sendable (BackendAPI, String?) async throws -> Void) async -> Bool {
         guard !busy, !Task.isCancelled, session.canAccessDevices else { return false }
+        guard target == nil || target == simTarget else { return false }
         revision += 1
         let current = revision
         loading = false
@@ -154,14 +168,18 @@ final class ModemDetailState {
         failure = nil
         message = nil
         await session.invalidateModemReads(modemID)
-        guard current == revision, !Task.isCancelled else { return false }
+        guard current == revision, !Task.isCancelled, target == nil || target == simTarget else { return false }
         do {
-            try await session.protectedRequest(operation)
+            try await session.protectedRequest { api, token in
+                // Token renewal can suspend before a write; recheck the captured target afterwards.
+                try await self.checkTarget(target)
+                try await operation(api, token)
+            }
             guard current == revision, !Task.isCancelled else { return false }
             await session.invalidateModemReads(modemID)
             session.invalidateCommunicationLines()
             // Keep the write locked until its authoritative snapshot has been reconciled.
-            await loadSnapshot(current)
+            await loadSnapshot(current, reconciliation: reconciliation)
             guard current == revision, !Task.isCancelled else { return false }
             message = String(localized: "detail.saved")
             return true
@@ -174,6 +192,11 @@ final class ModemDetailState {
             }
             return false
         }
+    }
+
+    private func checkTarget(_ target: ModemSIMTarget?) throws {
+        try Task.checkCancellation()
+        guard target == nil || target == simTarget else { throw CancellationError() }
     }
 
     func unlock(_ pin: String) async -> Bool {
@@ -231,25 +254,29 @@ final class ModemDetailState {
                                          value: ["nickname": name.trimmingCharacters(in: .whitespacesAndNewlines)], token: token)
         }
     }
-    func updateNumber(_ number: String) async -> Bool {
+    func updateNumber(_ number: String, target: ModemSIMTarget? = nil) async -> Bool {
+        let target = target ?? simTarget
+        guard target == simTarget else { return false }
         let value = PhoneNumberDisplay.submission(number, regionCode: modem?.sim.regionCode)
         guard !value.isEmpty else { return false }
         let id = modemID
-        return await mutate { api, token in try await api.detailMutation(id, path: ["msisdn"], method: "PUT", value: ["number": value], token: token) }
+        return await mutate(target: target) { api, token in try await api.detailMutation(id, path: ["msisdn"], method: "PUT", value: ["number": value], token: token) }
     }
     func reminderPath(profile: ESIMProfile?) -> [String]? {
         if let profile { return ["ses", profile.seId, "esims", profile.iccid, "reminder"] }
         guard let iccid = modem?.sim.identifier, !iccid.isEmpty else { return nil }
         return ["sims", iccid, "reminder"]
     }
-    func saveReminder(profile: ESIMProfile?, value: ReminderSubmission?) async -> Bool {
+    func saveReminder(profile: ESIMProfile?, value: ReminderSubmission?, target: ModemSIMTarget? = nil) async -> Bool {
+        let target = target ?? simTarget
+        guard target == simTarget else { return false }
         guard let path = reminderPath(profile: profile) else { return false }
         if let value, !value.isValid() {
             failure = .local("detail.invalidReminder")
             return false
         }
         let id = modemID
-        return await mutate { api, token in
+        return await mutate(target: target) { api, token in
             if let value { try await api.detailMutation(id, path: path, method: "PUT", value: value, token: token) }
             else { try await api.detailMutation(id, path: path, method: "DELETE", token: token) }
         }

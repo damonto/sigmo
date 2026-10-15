@@ -9,8 +9,9 @@ extension BackendAPI {
         return try await decode(["conversations"], token: token, query: query)
     }
 
-    func conversationMessages(_ id: String, token: String?) async throws -> [SMSMessage] {
-        try await decode(["conversations", id, "messages"], token: token)
+    func conversationMessagePage(_ id: String, cursor: String = "", token: String?) async throws -> ConversationMessagePage {
+        try await decode(["conversations", id, "messages"], token: token,
+                         query: [.init(name: "limit", value: "50"), .init(name: "cursor", value: cursor)])
     }
 
     func updateConversation(_ id: String, read: ConversationRead, token: String?) async throws -> MessageBadge {
@@ -22,6 +23,6 @@ extension BackendAPI {
     }
 
     func sendMessage(modemID: String, submission: SMSSubmission, token: String?) async throws -> SMSSubmitted {
-        try await decode(["modems", modemID, "messages"], method: "POST", body: JSONEncoder().encode(submission), token: token)
+        try await decode(["modems", modemID, "messages"], method: "POST", body: JSONEncoder().encode(submission), token: token, timeout: .hardware)
     }
 }

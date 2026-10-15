@@ -131,6 +131,7 @@ func TestSIMDisplayUpgradeRollsBackAndRetries(t *testing.T) {
 func prepareSIMDisplayUpgrade(t *testing.T, s *Store, version int) {
 	t.Helper()
 	for _, statement := range []string{
+		`DROP INDEX idx_messages_conversation_time`,
 		`ALTER TABLE sim_profiles DROP COLUMN icon`,
 		`ALTER TABLE sim_profiles DROP COLUMN display_known`,
 	} {

@@ -178,6 +178,15 @@ struct CarrierCallback: Codable, Sendable, Hashable {
     var controller: String?
 }
 
+struct CarrierCallbackDelivery: Decodable, Sendable {
+    enum Status: String, Decodable, Sendable {
+        case native, submitted, failed
+    }
+
+    let callback: CarrierCallback
+    let status: Status
+}
+
 struct LPAInput: Equatable {
     var smdp = ""
     var activationCode = ""

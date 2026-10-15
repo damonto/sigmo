@@ -2,7 +2,7 @@ import Foundation
 
 extension BackendAPI {
     func simPINStatus(_ modem: String, token: String?) async throws -> SIMPINStatus {
-        try await decode(["modems", modem, "sim-pin"], token: token)
+        try await decode(["modems", modem, "sim-pin"], token: token, timeout: .hardware)
     }
 
     // One request per credential submission; callers refresh status after errors.
@@ -52,6 +52,6 @@ extension BackendAPI {
                 simToken: simToken
             ))
         }
-        _ = try await request(path, method: method, body: body, token: token)
+        _ = try await request(path, method: method, body: body, token: token, timeout: .hardware)
     }
 }

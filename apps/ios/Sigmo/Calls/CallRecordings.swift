@@ -22,21 +22,31 @@ struct CallRecording: Codable, Identifiable, Sendable {
 
 @MainActor @Observable
 final class CallRecordings {
+    struct Index: Sendable {
+        var items: [CallRecording] = []
+        var hasInvalidEntries = false
+    }
     private(set) var items: [CallRecording] = []
+    private(set) var loaded = false
+    private(set) var loading = false
     private(set) var activeID: UUID?
     private(set) var activeCallID: UUID?
     private(set) var savingID: UUID?
     private(set) var recoveringID: UUID?
     private(set) var entryFailures: [UUID: BackendFailure] = [:]
-    var busy: Bool { savingID != nil || recoveringID != nil }
+    var busy: Bool { loading || savingID != nil || recoveringID != nil }
     let playback: CallRecordingPlayer
     var failure: BackendFailure?
     let directory: URL
     @ObservationIgnored private var writer: CallRecordingWriter?
     @ObservationIgnored private var finalization: Task<Void, Never>?
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private let readIndex: @Sendable (URL) async throws -> Index
 
-    init(directory: URL? = nil, playback: CallRecordingPlayer = CallRecordingPlayer()) {
+    init(directory: URL? = nil, playback: CallRecordingPlayer = CallRecordingPlayer(),
+         readIndex: @escaping @Sendable (URL) async throws -> Index = CallRecordings.readIndex) {
         self.playback = playback
+        self.readIndex = readIndex
         self.directory = directory ?? URL.applicationSupportDirectory.appending(path: "Sigmo/Recordings", directoryHint: .isDirectory)
         do {
             try FileManager.default.createDirectory(at: self.directory, withIntermediateDirectories: true,
@@ -45,7 +55,6 @@ final class CallRecordings {
             var values = URLResourceValues()
             values.isExcludedFromBackup = true
             try url.setResourceValues(values)
-            try load()
         } catch { failure = .wrapping(error) }
     }
 
@@ -53,18 +62,38 @@ final class CallRecordings {
         items.filter { $0.backendID == backendID }
     }
 
-    private func load() throws {
-        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-        var recordings: [CallRecording] = []
-        for file in files where file.pathExtension == "json" {
-            do { recordings.append(try JSONDecoder().decode(CallRecording.self, from: Data(contentsOf: file))) }
-            catch { failure = .local("calls.recordingRecoveryFailed") }
+    // The library owns its initial read, so cancelling a view cannot leave a
+    // half-loaded index. Writes are admitted only after this snapshot is published.
+    func load() async {
+        if let loadTask { await loadTask.value; return }
+        guard !loaded else { return }
+        loading = true
+        let task = Task {
+            defer { loading = false; loadTask = nil }
+            do {
+                let index = try await readIndex(directory)
+                items = index.items
+                loaded = true
+                failure = index.hasInvalidEntries ? .local("calls.recordingRecoveryFailed") : nil
+            } catch { failure = .wrapping(error) }
         }
-        items = recordings.sorted { $0.createdAt > $1.createdAt }
+        loadTask = task
+        await task.value
+    }
+
+    @concurrent private static func readIndex(_ directory: URL) async throws -> Index {
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        var index = Index()
+        for file in files where file.pathExtension == "json" {
+            do { index.items.append(try JSONDecoder().decode(CallRecording.self, from: Data(contentsOf: file))) }
+            catch { index.hasInvalidEntries = true }
+        }
+        index.items.sort { $0.createdAt > $1.createdAt }
+        return index
     }
 
     func start(call: ActiveCall, audio: CallAudio) {
-        guard !busy, activeID == nil, let record = call.record, record.hasMedia, call.ownsCall, audio.ready else { return }
+        guard loaded, !busy, activeID == nil, let record = call.record, record.hasMedia, call.ownsCall, audio.ready else { return }
         stopPlayback()
         let entry = CallRecording(id: UUID(), backendID: call.line.backendID, modemID: call.line.modemID,
             profileID: call.line.profileID, callID: record.callID, number: call.number,
@@ -109,7 +138,8 @@ final class CallRecordings {
     }
 
     func recover(_ id: UUID? = nil) async {
-        guard !busy, activeID == nil, !Task.isCancelled else { return }
+        await load()
+        guard loaded, !busy, activeID == nil, !Task.isCancelled else { return }
         defer { recoveringID = nil }
         let pending = items.filter { !$0.complete && (id == nil || $0.id == id) }
         for entry in pending {
@@ -175,7 +205,7 @@ final class CallRecordings {
     }
 
     func delete(_ entry: CallRecording) {
-        guard activeID != entry.id, !busy else { return }
+        guard loaded, activeID != entry.id, !busy else { return }
         failure = nil
         entryFailures[entry.id] = nil
         if playback.selectedID == entry.id { stopPlayback() }

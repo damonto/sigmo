@@ -112,6 +112,7 @@ const zh = {
     emptyCalls: '暂无通话记录。',
     more: '加载更多',
     older: '更早的短信',
+    invalidHistoryResponse: '短信历史响应无效，请尝试刷新。',
     originalLine: '接管后仍保留原线路信息',
     addContact: '保存到联系人',
     all: '全部',

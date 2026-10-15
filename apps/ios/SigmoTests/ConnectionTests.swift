@@ -20,6 +20,185 @@ final class ConnectionTests: XCTestCase {
         await server.allRequests().filter { $0.httpMethod != "GET" && $0.url?.path.hasSuffix(suffix) == true }
     }
 
+    private func wait(_ predicate: @MainActor () -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while !predicate(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(predicate(), "The pending connection did not settle")
+    }
+
+    func testConnectionWritesReadOnlyTheirSettingsAndOneModemSnapshot() async throws {
+        for kind in ["internet", "network", "wifi", "volte"] {
+            let server = DetailFixtureServer()
+            let detail = try await make(server)
+            let internet = InternetState(detail: detail, profileID: profileID)
+            let network = NetworkSelectionState(detail: detail, profileID: profileID)
+            let wifi = WiFiCallingState(detail: detail, profileID: profileID)
+            let volte = VoLTEState(detail: detail, profileID: profileID)
+            await internet.load()
+            await network.load()
+            await network.setAutomatic(false)
+            await wifi.load()
+            await volte.load()
+            let before = await server.allRequests().count
+            switch kind {
+            case "internet": await internet.setConnected(false)
+            case "network": await network.select(try XCTUnwrap(network.networks.last))
+            case "wifi": await wifi.setEnabled(true)
+            default: await volte.setEnabled(false)
+            }
+            let requests = await server.allRequests().dropFirst(before)
+            let reads = requests.filter { $0.httpMethod == "GET" }
+            XCTAssertEqual(reads.count, 2, kind)
+            XCTAssertEqual(reads.filter { $0.url?.path.hasSuffix("/modems/device-1") == true }.count, 1, kind)
+            XCTAssertFalse(reads.contains { $0.url?.path.hasSuffix("/ses") == true || $0.url?.path.hasSuffix("/esims") == true }, kind)
+            XCTAssertTrue(detail.isActiveProfile(profileID), "Connection readback must retain unchanged profile inventory")
+            XCTAssertNil(internet.failure)
+            XCTAssertNil(network.failure)
+            XCTAssertNil(wifi.failure)
+            XCTAssertNil(volte.failure)
+        }
+    }
+
+    func testWiFiObservationPresentsSetupAfterDelayedConnection() async throws {
+        var fixture = ConnectionFixture()
+        fixture.wifiRequiresSetup = true
+        fixture.wifiPendingReads = 2
+        let server = DetailFixtureServer(initialConnection: fixture)
+        let detail = try await make(server)
+        let state = WiFiCallingState(detail: detail, profileID: profileID)
+        await state.load()
+        await state.setEnabled(true)
+        XCTAssertEqual(state.settings?.state, "connecting")
+        XCTAssertNil(state.websheet)
+        let observer = Task { await state.observePending(interval: .milliseconds(5)) }
+        defer { observer.cancel() }
+        try await wait { state.websheet != nil }
+        XCTAssertTrue(state.setupRequired)
+        XCTAssertNil(state.failure)
+        let changes = await writes(server, suffix: "/wifi-calling/settings")
+        XCTAssertEqual(changes.count, 1)
+        observer.cancel()
+        await observer.value
+    }
+
+    func testVoLTEObservationSettlesWithoutRepeatingWritesOrPollingIdleState() async throws {
+        var fixture = ConnectionFixture()
+        fixture.volte.enabled = false
+        fixture.volte.connected = false
+        fixture.volte.state = "disconnected"
+        fixture.voltePendingReads = 2
+        let server = DetailFixtureServer(initialConnection: fixture)
+        let detail = try await make(server)
+        let state = VoLTEState(detail: detail, profileID: profileID)
+        await state.load()
+        await state.setEnabled(true)
+        XCTAssertEqual(state.settings?.state, "connecting")
+        let observer = Task { await state.observePending(interval: .milliseconds(5)) }
+        defer { observer.cancel() }
+        try await wait { state.settings?.connected == true && !state.loading }
+        let settled = await server.allRequests().count
+        try await Task.sleep(for: .milliseconds(30))
+        let after = await server.allRequests().count
+        XCTAssertEqual(after, settled)
+        let changes = await writes(server, suffix: "/volte/settings")
+        XCTAssertEqual(changes.count, 1)
+        observer.cancel()
+        await observer.value
+    }
+
+    func testIMSObservationPausesInBackgroundAndStopsAfterCancellation() async throws {
+        var fixture = ConnectionFixture()
+        fixture.wifi.enabled = true
+        fixture.wifi.state = "connecting"
+        fixture.wifiPendingReads = 100
+        let server = DetailFixtureServer(initialConnection: fixture)
+        let detail = try await make(server)
+        let state = WiFiCallingState(detail: detail, profileID: profileID)
+        await state.load()
+        detail.session.foreground = false
+        let before = await server.allRequests().count
+        await state.observePending(interval: .milliseconds(5))
+        let background = await server.allRequests().count
+        XCTAssertEqual(background, before)
+        detail.session.foreground = true
+        let observer = Task { await state.observePending(interval: .milliseconds(5)) }
+        try await Task.sleep(for: .milliseconds(30))
+        observer.cancel()
+        await observer.value
+        let cancelled = await server.allRequests().count
+        try await Task.sleep(for: .milliseconds(30))
+        let after = await server.allRequests().count
+        XCTAssertGreaterThan(cancelled, background)
+        XCTAssertEqual(after, cancelled)
+    }
+
+    func testIMSObservationAndManualRefreshDoNotDuplicateASlowRead() async throws {
+        for useWiFi in [true, false] {
+            var fixture = ConnectionFixture()
+            fixture.wifi.enabled = true
+            fixture.wifi.state = "connecting"
+            fixture.wifiPendingReads = 100
+            fixture.volte.connected = false
+            fixture.volte.state = "connecting"
+            fixture.voltePendingReads = 100
+            let server = DetailFixtureServer(initialConnection: fixture)
+            let detail = try await make(server)
+            let wifi = WiFiCallingState(detail: detail, profileID: profileID)
+            let volte = VoLTEState(detail: detail, profileID: profileID)
+            let suffix = useWiFi ? "/wifi-calling/settings" : "/volte/settings"
+            let reload: @MainActor () async -> Void = {
+                if useWiFi { await wifi.reload() } else { await volte.reload() }
+            }
+            await reload()
+            let before = await server.allRequests().count
+            await server.holdNext(suffix)
+            let refresh = Task { await reload() }
+            await server.waitForHeldRequest()
+            let observer = Task {
+                if useWiFi { await wifi.observePending(interval: .milliseconds(5)) }
+                else { await volte.observePending(interval: .milliseconds(5)) }
+            }
+            await reload()
+            await reload()
+            try await Task.sleep(for: .milliseconds(50))
+            let pending = await server.allRequests().dropFirst(before)
+            XCTAssertEqual(pending.filter { $0.url?.path.hasSuffix(suffix) == true }.count, 1, suffix)
+            XCTAssertEqual(pending.filter { $0.url?.path.hasSuffix("/modems/device-1") == true }.count, 1, suffix)
+            observer.cancel()
+            await observer.value
+            refresh.cancel()
+            await server.release()
+            await refresh.value
+
+            let afterCancellation = await server.allRequests().count
+            await reload()
+            let resumed = await server.allRequests().dropFirst(afterCancellation)
+            XCTAssertEqual(resumed.filter { $0.url?.path.hasSuffix(suffix) == true }.count, 1,
+                           "Cancellation must release the in-flight read marker")
+            XCTAssertNil(useWiFi ? wifi.failure : volte.failure)
+        }
+    }
+
+    func testWiFiWriteReconcilesWhileAnOlderReadIsHeld() async throws {
+        let server = DetailFixtureServer()
+        let detail = try await make(server)
+        let state = WiFiCallingState(detail: detail, profileID: profileID)
+        await state.load()
+        await server.holdNext("/wifi-calling/settings")
+        let oldRead = Task { await state.reload() }
+        await server.waitForHeldRequest()
+        await state.setEnabled(true)
+        XCTAssertEqual(state.settings?.enabled, true)
+        XCTAssertEqual(state.settings?.connected, true)
+        await server.release()
+        await oldRead.value
+        XCTAssertEqual(state.settings?.enabled, true)
+        XCTAssertEqual(state.settings?.connected, true)
+        XCTAssertNil(state.failure)
+        let requests = await writes(server, suffix: "/wifi-calling/settings")
+        XCTAssertEqual(requests.count, 1)
+    }
+
     func testPhysicalSIMConnectionsAndSlotChange() async throws {
         let server = DetailFixtureServer(physical: true)
         let detail = try await make(server)
@@ -159,15 +338,20 @@ final class ConnectionTests: XCTestCase {
         fixture.scanPolls = 1
         await server.setConnectionFixture(fixture)
         let detail = try await make(server)
+        // Bootstrap metadata uses the standard timeout. Only the following
+        // modem registration and scan operations require the hardware timeout.
+        let before = await server.allRequests().count
         let state = NetworkSelectionState(detail: detail, profileID: profileID)
         await state.load()
         XCTAssertTrue(state.manual)
         XCTAssertEqual(state.selectedOperator, "23410")
         await state.scan()
         XCTAssertEqual(state.networks.count, 2)
-        let requests = await server.allRequests()
+        let requests = await server.allRequests().dropFirst(before)
         XCTAssertTrue(requests.contains { $0.httpMethod == "GET" && $0.url?.path.hasSuffix("/network-scans/scan-1") == true })
-        XCTAssertTrue(requests.filter { $0.httpMethod == "GET" }.allSatisfy { $0.timeoutInterval == 600 })
+        for request in requests {
+            XCTAssertEqual(request.timeoutInterval, 600, request.url?.path ?? "")
+        }
     }
 
     func testScanFailuresAndEmptyResultsPreserveRegistration() async throws {
@@ -651,6 +835,40 @@ final class ConnectionTests: XCTestCase {
         await state.completeWebsheet(callback)
         XCTAssertNil(state.websheet)
         XCTAssertNil(state.failure)
+    }
+
+    func testSubmittedCarrierCallbackClosesWithoutASecondPOST() async throws {
+        let server = DetailFixtureServer(scenario: .connectionSetup)
+        let detail = try await make(server)
+        let state = WiFiCallingState(detail: detail, profileID: profileID)
+        await state.load()
+        await state.setEnabled(true)
+        let sheet = try XCTUnwrap(state.websheet)
+        let callback = CarrierCallback(event: "entitlementChanged")
+        // The resource loader already received the HTTP acknowledgment from the bridge's POST.
+        try await detail.session.protectedRequest { api, token in
+            try await api.carrierCallback(sheet.id, callback: callback, token: token)
+        }
+        await server.setStatus("/callback", 404)
+        await state.completeWebsheet(callback, delivery: .submitted)
+        XCTAssertNil(state.websheet)
+        XCTAssertNil(state.failure)
+        XCTAssertEqual(state.settings?.connected, true)
+        let callbacks = await writes(server, suffix: "/callback")
+        XCTAssertEqual(callbacks.count, 1)
+    }
+
+    func testFailedCarrierDeliveryDoesNotReplayItsUncertainWrite() async throws {
+        let server = DetailFixtureServer(scenario: .connectionSetup)
+        let detail = try await make(server)
+        let state = WiFiCallingState(detail: detail, profileID: profileID)
+        await state.load()
+        await state.setEnabled(true)
+        let before = await server.allRequests().count
+        await state.completeWebsheet(.init(event: "entitlementChanged"), delivery: .failed)
+        XCTAssertNotNil(state.websheet)
+        let after = await server.allRequests().count
+        XCTAssertEqual(after, before)
     }
 
     func testEmergencyAddressAvailabilityAndTerminalEventClassification() async throws {

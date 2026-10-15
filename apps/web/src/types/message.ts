@@ -46,6 +46,13 @@ export interface ConversationsResponse extends MessageState {
   items: Conversation[]
 }
 
+/** One chronological page of an original SIM conversation and its current read state. */
+export interface ConversationMessagesResponse extends MessageState {
+  items: MessageResponse[]
+  conversation: Omit<Conversation, 'latestMessage' | 'canSend'>
+  nextCursor: string
+}
+
 /** Acknowledges only the message IDs already displayed by this client. */
 export interface ConversationRead {
   readThroughMessageId?: number

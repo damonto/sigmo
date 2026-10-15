@@ -40,6 +40,15 @@ actor MessagesFixture {
     func setSendStatus(_ value: Int) { sendStatus = value }
     func setOffline(_ value: Bool) { offline = value }
     func setConversationStatus(_ value: Int) { conversationStatus = value }
+    func insertIncoming(timestamp: Date) -> Int64 {
+        let id = nextID
+        nextID += 1; revision += 1
+        messages["conversation-active", default: []].append(SMSMessage(id: id, conversationId: "conversation-active",
+            profileId: activeProfile, sender: "10086", recipient: "+8613800000000", text: "Backdated import",
+            timestamp: timestamp, status: "received-unread", incoming: true))
+        messages["conversation-active"]?.sort { ($0.timestamp, $0.id) < ($1.timestamp, $1.id) }
+        return id
+    }
     func holdNext(_ suffix: String) { holdPath = suffix }
     func waitForHeld() async {
         if held != nil { return }
@@ -57,6 +66,9 @@ actor MessagesFixture {
             await withCheckedContinuation { held = $0; arrived?.resume(); arrived = nil }
         }
         let method = request.httpMethod ?? "GET"
+        if path.hasSuffix("/capabilities") {
+            return try response(["features": [String]()])
+        }
         if path.contains("/conversations") {
             if conversationStatus >= 400 { return response(status: conversationStatus) }
             let components = path.components(separatedBy: "/conversations")
@@ -84,7 +96,21 @@ actor MessagesFixture {
                 revision += 1
                 return try response(MessageBadge(backendId: "fixture-backend", revision: revision, unreadCount: badge))
             }
-            return try response(messages[id] ?? [])
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let cursor = query.first { $0.name == "cursor" }?.value ?? ""
+            let values = cursor.split(separator: ":")
+            let snapshot = values.first.flatMap { Int64($0) } ?? (nextID - 1)
+            let beforeTime = values.count == 3 ? Double(values[1]) ?? .infinity : .infinity
+            let beforeID = values.count == 3 ? Int64(values[2]) ?? .max : .max
+            let eligible = (messages[id] ?? []).filter {
+                $0.id <= snapshot && ($0.timestamp.timeIntervalSince1970, $0.id) < (beforeTime, beforeID)
+            }.sorted { ($0.timestamp, $0.id) > ($1.timestamp, $1.id) }
+            let items = Array(eligible.prefix(50).reversed())
+            let next = eligible.count > 50 ? "\(snapshot):\(items.first!.timestamp.timeIntervalSince1970):\(items.first!.id)" : ""
+            let conversation = conversations().first { $0.id == id }!
+            return try response(ConversationMessagePage(backendId: "fixture-backend", revision: revision, unreadCount: badge,
+                conversation: ConversationMetadata(id: id, readThroughMessageId: conversation.readThroughMessageId,
+                    markedUnread: conversation.markedUnread, unreadCount: conversation.unreadCount), items: items, nextCursor: next))
         }
         if path.contains("/messages") {
             if method == "POST" {

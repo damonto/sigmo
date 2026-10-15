@@ -4,6 +4,7 @@ struct DetailTextForm: View {
     enum Kind { case pin, number, rename(ESIMProfile) }
     let state: ModemDetailState
     let kind: Kind
+    @State private var target: ModemSIMTarget
     @State private var value: String
     @State private var presentedFailure: BackendFailure?
     @FocusState private var focused: Bool
@@ -12,6 +13,7 @@ struct DetailTextForm: View {
     init(state: ModemDetailState, kind: Kind) {
         self.state = state
         self.kind = kind
+        _target = State(initialValue: state.simTarget)
         let initial: String
         switch kind {
         case .pin: initial = ""
@@ -62,7 +64,7 @@ struct DetailTextForm: View {
                     let success: Bool
                     switch kind {
                     case .pin: success = await state.unlock(value)
-                    case .number: success = await state.updateNumber(value)
+                    case .number: success = await state.updateNumber(value, target: target)
                     case .rename(let profile): success = await state.rename(profile, name: value)
                     }
                     if success { value = ""; dismiss() }
@@ -72,6 +74,7 @@ struct DetailTextForm: View {
         }
         .task { focused = true }
         .interactiveDismissDisabled(state.busy)
+        .onChange(of: state.simTarget) { _, current in if current != target { dismiss() } }
         .onDisappear { value = "" }
     }
     private var isNumber: Bool { if case .number = kind { true } else { false } }
@@ -80,6 +83,7 @@ struct DetailTextForm: View {
 struct DetailReminderForm: View {
     let state: ModemDetailState
     let profile: ESIMProfile?
+    @State private var target: ModemSIMTarget
     @State private var scheduled: Date
     @State private var repeatDays: String
     @State private var content: String
@@ -90,6 +94,7 @@ struct DetailReminderForm: View {
 
     init(state: ModemDetailState, profile: ESIMProfile?) {
         self.state = state; self.profile = profile
+        _target = State(initialValue: state.simTarget)
         let reminder = profile == nil ? state.modem?.sim.reminder : profile?.reminder
         _scheduled = State(initialValue: reminder?.nextAt ?? Date().addingTimeInterval(3600))
         _repeatDays = State(initialValue: reminder?.repeatDays.map(String.init) ?? "")
@@ -121,7 +126,7 @@ struct DetailReminderForm: View {
             ToolbarItem(placement: .confirmationAction) {
                 AsyncActionButton(title: "common.done", id: "saveReminder") {
                     let value = ReminderSubmission(scheduledAt: scheduled, repeatDays: Int(repeatDays), content: content.trimmingCharacters(in: .whitespacesAndNewlines))
-                    if await state.saveReminder(profile: profile, value: value) { dismiss() }
+                    if await state.saveReminder(profile: profile, value: value, target: target) { dismiss() }
                     else if !Task.isCancelled { presentedFailure = state.failure }
                 }.disabled(!valid || state.busy)
             }
@@ -135,12 +140,13 @@ struct DetailReminderForm: View {
         }
         .task(id: clearing) {
             if clearing {
-                if await state.saveReminder(profile: profile, value: nil) { dismiss() }
+                if await state.saveReminder(profile: profile, value: nil, target: target) { dismiss() }
                 else if !Task.isCancelled { presentedFailure = state.failure }
                 clearing = false
             }
         }
         .onDisappear { clearing = false }
+        .onChange(of: state.simTarget) { _, current in if current != target { dismiss() } }
     }
 }
 

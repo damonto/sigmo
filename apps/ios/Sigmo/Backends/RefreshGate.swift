@@ -1,6 +1,7 @@
 import Foundation
 
-// Shared by this app's sessions, so a manual refresh also respects the limit.
+// Bound work within one backend. A stalled backend must not consume another
+// backend's refresh capacity.
 actor RefreshGate {
     private var active: Set<UUID> = []
     private var waiting: [(UUID, CheckedContinuation<UUID, Error>)] = []

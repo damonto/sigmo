@@ -31,8 +31,8 @@ final class DemoTests: XCTestCase {
             try await api.sendMessage(modemID: modem.id, submission: SMSSubmission(to: "+12025550101", text: "Demo write", expectedProfileId: modem.sim.identifier), token: token)
         }
         let conversation = try XCTUnwrap(sent.conversationId)
-        let deviceMessages = try await session.protectedRequest { api, token in try await api.conversationMessages(conversation, token: token) }
-        XCTAssertEqual(deviceMessages.last?.text, "Demo write")
+        let deviceMessages = try await session.protectedRequest { api, token in try await api.conversationMessagePage(conversation, token: token) }
+        XCTAssertEqual(deviceMessages.items.last?.text, "Demo write")
         let threads = try await session.protectedRequest { api, token in try await api.messageThreads(search: "", cursor: "", token: token) }
         let thread = try XCTUnwrap(threads.items.first { $0.participant == "+12025550101" })
         XCTAssertEqual(thread.latestMessage.text, "Demo write")
@@ -131,7 +131,11 @@ final class DemoTests: XCTestCase {
         let url = try await session.protectedRequest { api, _ in try CarrierWebsheetAddress.url(sheet, api: api) }
         let received = expectation(description: "Demo carrier callback")
         var callback: CarrierCallback?
-        let page = CarrierWebsheetView(url: url, callback: { callback = $0; received.fulfill() }, failure: { XCTFail($0.message) }, session: session)
+        let page = CarrierWebsheetView(url: url, callback: { delivery in
+            XCTAssertEqual(delivery.status, .native)
+            callback = delivery.callback
+            received.fulfill()
+        }, failure: { XCTFail($0.message) }, session: session)
         let coordinator = page.makeCoordinator()
         let webView = page.configuredWebView(coordinator: coordinator)
         defer { CarrierWebsheetView.dismantleUIView(webView, coordinator: coordinator) }

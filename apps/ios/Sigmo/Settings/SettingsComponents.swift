@@ -25,6 +25,7 @@ struct SettingsAccessView<Content: View>: View {
                             Button("activation.start") { activation = true }
                         } else if session.authentication == .required {
                             Button("auth.login") { login = true }
+                                .disabled(session.isLoggingOut)
                         }
                     }
                 }

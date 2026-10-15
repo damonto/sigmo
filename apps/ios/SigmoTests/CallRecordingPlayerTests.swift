@@ -17,7 +17,9 @@ final class CallRecordingPlayerTests: XCTestCase {
         entry.duration = try await writer.finish()
         entry.complete = true
         try JSONEncoder().encode(entry).write(to: directory.appending(path: entry.stem + ".json"))
-        return (CallRecordings(directory: library.directory), entry)
+        let loaded = CallRecordings(directory: library.directory)
+        await loaded.load()
+        return (loaded, entry)
     }
 
     func testPauseResumeSeekAndStopUseTheAudioTimeline() async throws {

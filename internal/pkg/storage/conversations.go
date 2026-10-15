@@ -175,25 +175,16 @@ func (s *Store) Conversation(ctx context.Context, id string) (Conversation, erro
 	if err != nil {
 		return Conversation{}, fmt.Errorf("read conversation: %w", err)
 	}
+	return conversationFromRow(row), nil
+}
+
+func conversationFromRow(row query.ReadConversationRow) Conversation {
 	return Conversation{
 		ID: row.ID, ProfileID: row.ProfileID, Participant: row.Participant,
 		ModemID: row.ModemID, LineLabel: row.LineLabel, LineNumber: row.LineNumber,
 		ReadThroughMessageID: row.ReadThroughID, MarkedUnread: row.MarkedUnread != 0,
 		UnreadCount: int(row.UnreadCount),
-	}, nil
-}
-
-// ConversationMessages also works for an inactive or removed SIM.
-func (s *Store) ConversationMessages(ctx context.Context, id string) ([]Message, error) {
-	if _, err := s.Conversation(ctx, id); err != nil {
-		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+messageColumns+` FROM messages WHERE conversation_id = ? ORDER BY timestamp ASC, id ASC`, id)
-	if err != nil {
-		return nil, fmt.Errorf("read conversation messages: %w", err)
-	}
-	defer rows.Close()
-	return scanMessages(rows)
 }
 
 // UpdateConversationRead never acknowledges messages that arrived after the client's snapshot.

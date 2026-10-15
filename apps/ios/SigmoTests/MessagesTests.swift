@@ -62,6 +62,74 @@ final class MessagesTests: XCTestCase {
         XCTAssertEqual(messages.items.map(\.id), ["conversation-history"])
     }
 
+    func testDeviceHistoryPagesWithoutFetchingAllConversations() async throws {
+        let fixture = MessagesFixture(unreadMessages: 125), session = try await session(fixture)
+        let list = MessagesState(session: session, modemID: "device-1")
+        await list.load()
+        let conversation = try XCTUnwrap(list.items.first { $0.id == "conversation-active" })
+        let before = await fixture.requestCount(method: "GET", suffix: "/conversations")
+        let thread = list.thread(conversation)
+        await thread.load()
+        XCTAssertEqual(thread.messages.count, 50)
+        XCTAssertNil(thread.badge, "Loading history must not acknowledge reads or dismiss notifications")
+        XCTAssertNotNil(thread.snapshotBadge)
+        XCTAssertFalse(thread.cursor.isEmpty)
+        await thread.load(more: true)
+        XCTAssertEqual(thread.messages.count, 100)
+        await thread.load(more: true)
+        XCTAssertEqual(thread.messages.map(\.id), (5...129).map(Int64.init))
+        XCTAssertTrue(thread.cursor.isEmpty)
+        let after = await fixture.requestCount(method: "GET", suffix: "/conversations")
+        XCTAssertEqual(before, after)
+    }
+
+    func testCachedThreadRefreshesManualUnreadStateFromItsPage() async throws {
+        let fixture = MessagesFixture()
+        let session = try await session(fixture)
+        let list = MessagesState(session: session, modemID: "device-1")
+        await list.load()
+        let thread = list.thread(try XCTUnwrap(list.items.first { $0.id == "conversation-active" }))
+        await thread.load()
+        XCTAssertEqual(thread.messages.count, 2)
+        XCTAssertTrue(thread.cursor.isEmpty)
+        XCTAssertNil(thread.failure)
+        await thread.markRead(through: 2)
+        await list.mark(thread.conversation, unread: true)
+        await thread.load()
+        XCTAssertTrue(thread.conversation.markedUnread)
+        await thread.markRead(through: 2)
+        await list.load()
+        XCTAssertFalse(list.items.first { $0.id == thread.conversation.id }?.markedUnread ?? true)
+    }
+
+    func testRefreshMakesBackdatedImportsReachableWithoutResettingStablePaging() async throws {
+        let fixture = MessagesFixture(unreadMessages: 125), session = try await session(fixture)
+        let list = MessagesState(session: session, modemID: "device-1")
+        await list.load()
+        let thread = list.thread(try XCTUnwrap(list.items.first { $0.id == "conversation-active" }))
+        await thread.load()
+        await thread.load(more: true)
+        XCTAssertEqual(thread.messages.count, 100)
+        let oldCursor = thread.cursor
+        await thread.load()
+        XCTAssertEqual(thread.cursor, oldCursor, "An unchanged head must preserve older-page progress")
+
+        let imported = await fixture.insertIncoming(timestamp: Date(timeIntervalSince1970: 1_790_000_550))
+        await thread.load()
+        XCTAssertNotEqual(thread.cursor, oldCursor, "A new snapshot must include backdated arrivals")
+        XCTAssertEqual(thread.messages.count, 100)
+        let before = await fixture.requestCount(method: "GET", suffix: "/messages")
+        await thread.load(more: true)
+        XCTAssertNil(thread.failure)
+        XCTAssertEqual(thread.messages.count, 126)
+        XCTAssertEqual(thread.messages.prefix(3).map(\.id), [5, imported, 6])
+        XCTAssertTrue(thread.cursor.isEmpty)
+        let after = await fixture.requestCount(method: "GET", suffix: "/messages")
+        XCTAssertEqual(after - before, 2, "Skip the retained page and fetch the next unseen records in one action")
+        await thread.load()
+        XCTAssertTrue(thread.cursor.isEmpty, "Stable polling must not reopen exhausted pagination")
+    }
+
     func testInactiveReplyCanAdoptCurrentSIM() async throws {
         let fixture = MessagesFixture(), session = try await session(fixture)
         let list = MessagesState(session: session, modemID: "device-1")

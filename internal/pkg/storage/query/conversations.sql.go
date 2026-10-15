@@ -38,6 +38,216 @@ func (q *Queries) AcknowledgeConversationMessages(ctx context.Context, arg Ackno
 	return err
 }
 
+const listConversationMessagePage = `-- name: ListConversationMessagePage :many
+SELECT id, conversation_id, profile_id, modem_id, sender, recipient, text,
+    timestamp, status, incoming, wifi_calling
+FROM messages INDEXED BY idx_messages_conversation_time
+WHERE conversation_id = ?1 AND id <= ?2
+ORDER BY julianday(timestamp) DESC, id DESC
+LIMIT ?3
+`
+
+type ListConversationMessagePageParams struct {
+	ConversationID string
+	Snapshot       int64
+	PageLimit      int64
+}
+
+type ListConversationMessagePageRow struct {
+	ID             int64
+	ConversationID string
+	ProfileID      string
+	ModemID        string
+	Sender         string
+	Recipient      string
+	Text           string
+	Timestamp      string
+	Status         string
+	Incoming       int64
+	WifiCalling    int64
+}
+
+// Keep ordering on the timestamp index instead of scanning the snapshot's ID range.
+func (q *Queries) ListConversationMessagePage(ctx context.Context, arg ListConversationMessagePageParams) ([]ListConversationMessagePageRow, error) {
+	rows, err := q.db.QueryContext(ctx, listConversationMessagePage, arg.ConversationID, arg.Snapshot, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListConversationMessagePageRow{}
+	for rows.Next() {
+		var i ListConversationMessagePageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ConversationID,
+			&i.ProfileID,
+			&i.ModemID,
+			&i.Sender,
+			&i.Recipient,
+			&i.Text,
+			&i.Timestamp,
+			&i.Status,
+			&i.Incoming,
+			&i.WifiCalling,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listConversationMessagesAtTime = `-- name: ListConversationMessagesAtTime :many
+SELECT id, conversation_id, profile_id, modem_id, sender, recipient, text,
+    timestamp, status, incoming, wifi_calling
+FROM messages INDEXED BY idx_messages_conversation_time
+WHERE conversation_id = ?1 AND id <= ?2
+    AND julianday(timestamp) = julianday(CAST(?3 AS TEXT))
+    AND id < ?4
+ORDER BY id DESC
+LIMIT ?5
+`
+
+type ListConversationMessagesAtTimeParams struct {
+	ConversationID  string
+	Snapshot        int64
+	CursorTimestamp string
+	CursorID        int64
+	PageLimit       int64
+}
+
+type ListConversationMessagesAtTimeRow struct {
+	ID             int64
+	ConversationID string
+	ProfileID      string
+	ModemID        string
+	Sender         string
+	Recipient      string
+	Text           string
+	Timestamp      string
+	Status         string
+	Incoming       int64
+	WifiCalling    int64
+}
+
+func (q *Queries) ListConversationMessagesAtTime(ctx context.Context, arg ListConversationMessagesAtTimeParams) ([]ListConversationMessagesAtTimeRow, error) {
+	rows, err := q.db.QueryContext(ctx, listConversationMessagesAtTime,
+		arg.ConversationID,
+		arg.Snapshot,
+		arg.CursorTimestamp,
+		arg.CursorID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListConversationMessagesAtTimeRow{}
+	for rows.Next() {
+		var i ListConversationMessagesAtTimeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ConversationID,
+			&i.ProfileID,
+			&i.ModemID,
+			&i.Sender,
+			&i.Recipient,
+			&i.Text,
+			&i.Timestamp,
+			&i.Status,
+			&i.Incoming,
+			&i.WifiCalling,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listConversationMessagesBeforeTime = `-- name: ListConversationMessagesBeforeTime :many
+SELECT id, conversation_id, profile_id, modem_id, sender, recipient, text,
+    timestamp, status, incoming, wifi_calling
+FROM messages INDEXED BY idx_messages_conversation_time
+WHERE conversation_id = ?1 AND id <= ?2
+    AND julianday(timestamp) < julianday(CAST(?3 AS TEXT))
+ORDER BY julianday(timestamp) DESC, id DESC
+LIMIT ?4
+`
+
+type ListConversationMessagesBeforeTimeParams struct {
+	ConversationID  string
+	Snapshot        int64
+	CursorTimestamp string
+	PageLimit       int64
+}
+
+type ListConversationMessagesBeforeTimeRow struct {
+	ID             int64
+	ConversationID string
+	ProfileID      string
+	ModemID        string
+	Sender         string
+	Recipient      string
+	Text           string
+	Timestamp      string
+	Status         string
+	Incoming       int64
+	WifiCalling    int64
+}
+
+func (q *Queries) ListConversationMessagesBeforeTime(ctx context.Context, arg ListConversationMessagesBeforeTimeParams) ([]ListConversationMessagesBeforeTimeRow, error) {
+	rows, err := q.db.QueryContext(ctx, listConversationMessagesBeforeTime,
+		arg.ConversationID,
+		arg.Snapshot,
+		arg.CursorTimestamp,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListConversationMessagesBeforeTimeRow{}
+	for rows.Next() {
+		var i ListConversationMessagesBeforeTimeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ConversationID,
+			&i.ProfileID,
+			&i.ModemID,
+			&i.Sender,
+			&i.Recipient,
+			&i.Text,
+			&i.Timestamp,
+			&i.Status,
+			&i.Incoming,
+			&i.WifiCalling,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const readConversation = `-- name: ReadConversation :one
 SELECT c.id, c.profile_id, c.participant,
     CAST(COALESCE(l.modem_id, '') AS TEXT) AS modem_id,

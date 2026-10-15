@@ -22,6 +22,15 @@ final class BackendAPITests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testMetadataSettingsAndAvatarsUseShortRequestTimeouts() throws {
+        let api = BackendAPI(configuration: try testConfiguration())
+        for path in [["auth", "methods"], ["app"], ["settings"], ["contacts", "one", "avatar"]] {
+            XCTAssertEqual(try api.makeRequest(path).timeoutInterval, 30)
+        }
+        XCTAssertEqual(try api.makeRequest(["modems", "one"], timeout: .hardware).timeoutInterval, 600)
+    }
+
     func testDisplayAddressPreservesServerPathAndRoundTripsToAPI() throws {
         for (input, display) in [
             ("https://example.com/api/v1", "https://example.com"),

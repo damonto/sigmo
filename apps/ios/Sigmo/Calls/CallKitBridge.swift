@@ -15,15 +15,26 @@ enum CallAction: Sendable {
 // the SDK boundary here so the call state can also run without system calls.
 @MainActor
 final class CallKitBridge: NSObject, @preconcurrency CXProviderDelegate {
+    enum Completion: Equatable {
+        case fulfilled, failed
+    }
+
     var perform: (@MainActor (CallAction) async throws -> Void)?
     var reset: (@MainActor () -> Void)?
     var audioActivated: (@MainActor (Bool) -> Void)?
     private let provider: CXProvider?
     private let controller: CXCallController?
-    private var actions: [UUID: Task<Void, Never>] = [:]
+    private let didComplete: (@MainActor (UUID, Completion) -> Void)?
+    private struct PendingAction {
+        let value: CallAction
+        let action: CXCallAction
+        let task: Task<Void, Never>
+    }
+    private var actions: [UUID: PendingAction] = [:]
     private var actionTail: Task<Void, Never>?
 
-    init(enabled: Bool) {
+    init(enabled: Bool, didComplete: (@MainActor (UUID, Completion) -> Void)? = nil) {
+        self.didComplete = didComplete
         if enabled {
             let configuration = CXProviderConfiguration()
             configuration.supportsVideo = false
@@ -94,26 +105,66 @@ final class CallKitBridge: NSObject, @preconcurrency CXProviderDelegate {
     func ended(_ id: UUID, reason: CXCallEndedReason) { provider?.reportCall(with: id, endedAt: .now, reason: reason) }
 
     func providerDidReset(_ provider: CXProvider) {
-        for task in actions.values { task.cancel() }
+        for action in actions.values { action.task.cancel() }
         actions.removeAll()
+        actionTail = nil
+        CallWebRTC.deactivate(AVAudioSession.sharedInstance())
+        audioActivated?(false)
         reset?()
     }
 
-    private func execute(_ action: CXCallAction, _ value: CallAction) {
-        let previous = actionTail
+    @discardableResult
+    func execute(_ action: CXCallAction, _ value: CallAction) -> Task<Void, Never> {
+        let local: Bool
+        if case .mute = value { local = true } else { local = false }
+        if case .end(let id) = value {
+            // Stop waiting for optional remote controls before ending this call.
+            // Start/answer must still resolve whether a carrier action was accepted.
+            let pendingControls = actions.values.filter { pending in
+                guard pending.value.id == id else { return false }
+                switch pending.value {
+                case .hold, .digits: return true
+                default: return false
+                }
+            }
+            for pending in pendingControls {
+                pending.task.cancel()
+                complete(pending.action, with: .failed)
+            }
+        }
+        let previous = local ? nil : actionTail
+        let didComplete = didComplete
         let task = Task { [weak self] in
+            defer { self?.actions[action.uuid] = nil }
             await previous?.value
             guard !Task.isCancelled else { return }
-            guard let self else { action.fail(); return }
-            defer { self.actions[action.uuid] = nil }
+            guard let self else {
+                if !action.isComplete {
+                    action.fail()
+                    didComplete?(action.uuid, .failed)
+                }
+                return
+            }
             do {
                 try await self.perform?(value)
                 guard !Task.isCancelled else { return }
-                action.fulfill()
-            } catch { if !Task.isCancelled { action.fail() } }
+                self.complete(action, with: .fulfilled)
+            } catch { if !Task.isCancelled { self.complete(action, with: .failed) } }
         }
-        actions[action.uuid] = task
-        actionTail = task
+        actions[action.uuid] = PendingAction(value: value, action: action, task: task)
+        if !local { actionTail = task }
+        return task
+    }
+
+    private func complete(_ action: CXCallAction, with completion: Completion) {
+        // Relinquish ownership before calling the SDK. A late result or another
+        // end request must not complete an already preempted or timed-out action.
+        guard actions.removeValue(forKey: action.uuid) != nil, !action.isComplete else { return }
+        switch completion {
+        case .fulfilled: action.fulfill()
+        case .failed: action.fail()
+        }
+        didComplete?(action.uuid, completion)
     }
 
     func provider(_ provider: CXProvider, perform action: CXStartCallAction) { execute(action, .start(action.callUUID, action.handle.value)) }
@@ -123,8 +174,11 @@ final class CallKitBridge: NSObject, @preconcurrency CXProviderDelegate {
     func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) { execute(action, .mute(action.callUUID, action.isMuted)) }
     func provider(_ provider: CXProvider, perform action: CXPlayDTMFCallAction) { execute(action, .digits(action.callUUID, action.digits)) }
     func provider(_ provider: CXProvider, timedOutPerforming action: CXAction) {
-        actions.removeValue(forKey: action.uuid)?.cancel()
-        action.fail()
+        timedOut(action)
+    }
+    func timedOut(_ action: CXAction) {
+        // CallKit has already completed this action; only cancel our remaining work.
+        actions.removeValue(forKey: action.uuid)?.task.cancel()
     }
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
         CallWebRTC.activate(audioSession)

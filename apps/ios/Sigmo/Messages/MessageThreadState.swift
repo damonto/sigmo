@@ -8,6 +8,7 @@ final class MessageThreadState {
     var draft = ""
     private var replacementProfileID: String?
     private(set) var messages: [SMSMessage] = []
+    private(set) var cursor = ""
     private(set) var loaded = false
     private(set) var loading = false
     private(set) var sending = false
@@ -15,9 +16,11 @@ final class MessageThreadState {
     private(set) var sendFailure: BackendFailure?
     var failure: BackendFailure? { sendFailure ?? loadFailure }
     private(set) var badge: MessageBadge?
+    private(set) var snapshotBadge: MessageBadge?
     @ObservationIgnored private var revision = 0
     @ObservationIgnored private var acknowledged: Int64
     @ObservationIgnored private var manuallyUnread: Bool
+    @ObservationIgnored private var headCursor: String?
 
     init(session: BackendSession, conversation: SMSConversation) {
         self.session = session
@@ -35,28 +38,63 @@ final class MessageThreadState {
         modem?.sim.identifier == sendingProfileID && modem?.state != "locked"
     }
 
-    func load() async {
-        guard !sending, !Task.isCancelled, session.canAccessDevices else { return }
+    func load(more: Bool = false) async {
+        guard !sending, !Task.isCancelled, session.canAccessDevices, !more || (!loading && !cursor.isEmpty) else { return }
         revision += 1
-        let current = revision, conversation = conversation
+        let current = revision
         loading = true
         defer { if current == revision { loading = false } }
         do {
-            let result = try await session.protectedRequest { api, token in
-                try await api.conversationMessages(conversation.id, token: token)
-            }
-            guard current == revision, !Task.isCancelled else { return }
-            messages = result
-            let snapshot = try await session.protectedRequest { api, token in try await api.conversations(modemID: nil, token: token) }
-            guard current == revision, !Task.isCancelled else { return }
-            if let latest = snapshot.items.first(where: { $0.id == conversation.id }), snapshot.revision >= (badge?.revision ?? -1) {
-                self.conversation = latest
-                acknowledged = max(acknowledged, latest.readThroughMessageId)
-                manuallyUnread = latest.markedUnread
-            }
-            loaded = true
-            loadFailure = nil
+            try await loadPage(more: more, current: current)
         } catch { if current == revision, !Task.isCancelled { loadFailure = .wrapping(error) } }
+    }
+
+    private func loadPage(more: Bool, current: Int) async throws {
+        let id = conversation.id, next = more ? cursor : ""
+        var page = try await session.protectedRequest { api, token in
+            try await api.conversationMessagePage(id, cursor: next, token: token)
+        }
+        var received = page.items
+        var receivedIDs = Set(received.map(\.id))
+        let refreshedHead = page.nextCursor
+        let known = Set(messages.map(\.id))
+        var overlapping = !known.isDisjoint(with: page.items.map(\.id))
+        var visited: Set<String> = [next]
+        // Backdated arrivals require the new snapshot even when its head overlaps.
+        // Skip already displayed pages on demand instead of refetching them on every poll.
+        while !page.nextCursor.isEmpty {
+            let catchingUp = !more && loaded && !known.isEmpty && !overlapping && received.count < 1000
+            let skippingKnown = more && !page.items.isEmpty && page.items.allSatisfy { known.contains($0.id) }
+            guard catchingUp || skippingKnown else { break }
+            let next = page.nextCursor
+            guard visited.insert(next).inserted else { throw BackendFailure.local("api.invalidResponse") }
+            page = try await session.protectedRequest { api, token in
+                try await api.conversationMessagePage(id, cursor: next, token: token)
+            }
+            let ids = Set(page.items.map(\.id))
+            guard ids.isEmpty ? page.nextCursor.isEmpty : !ids.isSubset(of: receivedIDs) else {
+                throw BackendFailure.local("api.invalidResponse")
+            }
+            receivedIDs.formUnion(ids)
+            received.append(contentsOf: page.items)
+            overlapping = !known.isDisjoint(with: page.items.map(\.id))
+        }
+        guard current == revision, !Task.isCancelled, page.conversation.id == id else { return }
+        var byID = Dictionary(uniqueKeysWithValues: (more || overlapping ? messages : []).map { ($0.id, $0) })
+        for message in received { byID[message.id] = message }
+        messages = byID.values.sorted { ($0.timestamp, $0.id) < ($1.timestamp, $1.id) }
+        if more || !loaded || !overlapping || refreshedHead != headCursor { cursor = page.nextCursor }
+        if !more { headCursor = refreshedHead }
+        if page.revision >= max(badge?.revision ?? -1, snapshotBadge?.revision ?? -1) {
+            conversation.readThroughMessageId = page.conversation.readThroughMessageId
+            conversation.markedUnread = page.conversation.markedUnread
+            conversation.unreadCount = page.conversation.unreadCount
+            acknowledged = max(acknowledged, conversation.readThroughMessageId)
+            manuallyUnread = conversation.markedUnread
+            snapshotBadge = MessageBadge(backendId: page.backendId, revision: page.revision, unreadCount: page.unreadCount)
+        }
+        loaded = true
+        loadFailure = nil
     }
 
     func markRead(through id: Int64) async {
@@ -92,6 +130,7 @@ final class MessageThreadState {
                 guard current == revision else { return }
                 if let replacement = snapshot.items.first(where: { $0.id == id }) {
                     conversation = replacement
+                    messages = []; cursor = ""; headCursor = nil; loaded = false; badge = nil; snapshotBadge = nil
                     replacementProfileID = nil
                     acknowledged = replacement.readThroughMessageId
                     manuallyUnread = replacement.markedUnread
@@ -113,6 +152,8 @@ final class MessageThreadState {
     func clear() {
         revision += 1
         messages = []
+        cursor = ""
+        headCursor = nil
         draft = ""
         replacementProfileID = nil
         sending = false
@@ -121,5 +162,6 @@ final class MessageThreadState {
         loadFailure = nil
         sendFailure = nil
         badge = nil
+        snapshotBadge = nil
     }
 }

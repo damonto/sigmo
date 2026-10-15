@@ -26,6 +26,28 @@ final class ModemDetailTests: XCTestCase {
         XCTAssertNil(detail.groups.flatMap(\.profiles).first { !$0.enabled }?.number)
     }
 
+    func testRetainedNumberAndReminderTargetsRejectReplacementSIM() async throws {
+        for physical in [false, true] {
+            let server = DetailFixtureServer(physical: physical)
+            let detail = try await make(server)
+            let target = detail.simTarget
+            let reminder = ReminderSubmission(scheduledAt: Date().addingTimeInterval(3600), repeatDays: nil, content: "Original SIM")
+            let saved = await detail.saveReminder(profile: nil, value: reminder, target: target)
+            XCTAssertTrue(saved)
+            let switched = await detail.switchSlot(2)
+            XCTAssertTrue(switched)
+            let before = await server.allRequests().count
+            let numberSaved = await detail.updateNumber("+12025550123", target: target)
+            let reminderSaved = await detail.saveReminder(profile: nil, value: reminder, target: target)
+            let reminderCleared = await detail.saveReminder(profile: nil, value: nil, target: target)
+            XCTAssertFalse(numberSaved)
+            XCTAssertFalse(reminderSaved)
+            XCTAssertFalse(reminderCleared)
+            let after = await server.allRequests().count
+            XCTAssertEqual(after, before, "A retained draft must not issue requests against the replacement SIM")
+        }
+    }
+
     func testProfileNumberDecodingAndDisplay() throws {
         let withoutNumber = #"{"seId":"se-a","seLabel":"SE1","name":"Travel","serviceProviderName":"Carrier","iccid":"8901","icon":"","profileName":"Travel","profileState":0,"profileStateName":"disabled","profileClass":"operational","profileOwner":{"mcc":"310","mnc":"260"}}"#
         let original = try JSONDecoder().decode(ESIMProfile.self, from: Data(withoutNumber.utf8))
@@ -736,7 +758,6 @@ final class ModemDetailTests: XCTestCase {
         XCTAssertEqual(flow.input.smdp, "smdp.example")
         XCTAssertEqual(flow.discoveries?.first?.address, discovery.address)
         XCTAssertNil(flow.runID)
-        flow.input = LPAInput(smdp: "smdp.example", activationCode: " secret ")
         flow.startDownload()
         let run = Task { await flow.run() }
         try await wait { flow.phase == .preview }
@@ -756,7 +777,26 @@ final class ModemDetailTests: XCTestCase {
         XCTAssertTrue(socketRequest.url!.absoluteString.contains("/prefix/api/v1/modems/device-1/esim-downloads/sessions"))
         let messages = await server.allMessages()
         let start = try JSONDecoder().decode(DetailStart.self, from: XCTUnwrap(messages.first))
-        XCTAssertEqual(start.seId, "se-b"); XCTAssertEqual(start.activationCode, "secret")
+        XCTAssertEqual(start.seId, "se-b"); XCTAssertEqual(start.activationCode, discovery.eventId)
+    }
+
+    func testDiscoveryDownloadPreservesSelectedEventAtSharedAddress() async throws {
+        let server = DetailFixtureServer(), detail = try await make(server)
+        await server.setDiscoveries([
+            .init(eventId: "first-event", address: "smdp.example"),
+            .init(eventId: "selected-event", address: "smdp.example")
+        ])
+        let flow = ESIMFlowState(detail: detail, seID: "se-a")
+        await flow.discover()
+        flow.selectDiscovery(try XCTUnwrap(flow.discoveries?.last))
+        flow.startDownload()
+        let run = Task { await flow.run() }
+        try await wait { flow.phase == .preview }
+        let messages = await server.allMessages()
+        let start = try JSONDecoder().decode(DetailStart.self, from: XCTUnwrap(messages.first))
+        XCTAssertEqual(start.activationCode, "selected-event")
+        await flow.cancel()
+        await run.value
     }
 
     func testDownloadCompletesWhileInBackgroundWithoutReplay() async throws {

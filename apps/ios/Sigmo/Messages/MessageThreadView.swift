@@ -82,6 +82,9 @@ struct MessageThreadView: View {
                 await push?.removeNotifications(backendID: value.backendId, conversationID: state.conversation.id)
             }
         }
+        .task(id: state.snapshotBadge) {
+            if let value = state.snapshotBadge { push?.record(value, sessionID: state.session.id) }
+        }
     }
 
     private func dialCurrent() {
@@ -140,6 +143,7 @@ struct MessageThreadView: View {
 
     private var timeline: some View {
         MessageTimeline(messages: state.messages.map(MessageTimelineItem.init), loading: state.loading && !state.loaded,
+                        older: state.cursor.isEmpty ? nil : { Task { await state.load(more: true) } },
                         visibilityThreshold: 0.1, visible: { id, visible in
                             if visible { visibleMessageID = max(visibleMessageID ?? 0, id) }
                         }, refresh: { await state.load() })

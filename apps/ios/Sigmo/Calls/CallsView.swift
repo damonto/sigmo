@@ -13,6 +13,7 @@ struct CallsView: View {
     @State private var pendingDial: (number: String, line: CallLine)?
 
     private struct Refresh: Equatable { let access: Int; let line: String? }
+    private struct Filter: Equatable { let search: String; let missed: Bool }
 
     var body: some View {
         List {
@@ -35,6 +36,11 @@ struct CallsView: View {
                             .accessibilityLabel(Text("common.delete"))
                     }
                 }
+            }
+            if state.hasMore {
+                AsyncActionButton(title: "communication.more") { await state.load(more: true) }
+                    .disabled(state.loading)
+                    .accessibilityIdentifier("calls-load-more")
             }
         }
         .listStyle(.plain)
@@ -62,7 +68,7 @@ struct CallsView: View {
             await state.load()
         }
         .task(id: calls.revision) { if scenePhase == .active { await state.load() } }
-        .task(id: state.search) {
+        .task(id: Filter(search: state.search, missed: state.missedOnly)) {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             if scenePhase == .active { await state.load() }
         }

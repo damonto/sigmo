@@ -82,3 +82,9 @@ struct PushConversation: Equatable, Sendable {
     let backendID: String
     let conversationID: String
 }
+
+struct PushThread: Equatable, Sendable {
+    let backendID: String
+    let participant: String
+    let conversationIDs: Set<String>
+}

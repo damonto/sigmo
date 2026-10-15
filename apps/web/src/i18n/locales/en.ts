@@ -116,6 +116,7 @@ const en = {
     emptyCalls: 'No calls yet.',
     more: 'Load more',
     older: 'Older messages',
+    invalidHistoryResponse: 'The message history response is invalid. Try refreshing.',
     originalLine: 'Original line retained after history assignment',
     addContact: 'Save to contacts',
     all: 'All',

@@ -23,7 +23,7 @@ enum DemoResources {
         <style>body { font: -apple-system-body; padding: 24px; } button { font: inherit; min-height: 48px; width: 100%; }</style>
         </head><body><h1>\(String(localized: "demo.carrierTitle"))</h1>
         <p>\(String(localized: "demo.carrierDescription"))</p>
-        <button onclick="window.webkit.messageHandlers.sigmoNative.postMessage(JSON.stringify({event:'entitlementChanged'}))">\(String(localized: "demo.carrierComplete"))</button>
+        <button onclick="window.postMessage({type:'sigmo-websheet-callback',callback:{event:'entitlementChanged'}}, '*')">\(String(localized: "demo.carrierComplete"))</button>
         </body></html>
         """
     }

@@ -15,21 +15,37 @@ struct BackendHTTPResponse: Sendable {
     var allow: String?
     var authenticate: String?
 
+    // File exports have a separate bound from JSON and contact images. All
+    // successful payloads are bounded before decoding or constructing a bitmap.
+    static func successfulBodyLimit(for request: URLRequest) -> Int {
+        let accepted = request.value(forHTTPHeaderField: "Accept") ?? "application/json"
+        return accepted.hasPrefix("application/zip") ? 32 * 1024 * 1024 : 8 * 1024 * 1024
+    }
+
+    static func oversizedResponse() -> BackendFailure {
+        BackendFailure(code: "response_too_large", message: NSLocalizedString("api.invalidResponse", comment: ""))
+    }
+
     // Reading headers first lets an oversized or interrupted error preserve its
-    // HTTP meaning. Successful downloads retain their existing size policy.
-    static func receive(_ request: URLRequest, session: URLSession) async throws -> BackendHTTPResponse {
-        try await BackgroundExecution.run(name: "HTTP request") {
-            try await receiveResponse(request, session: session)
+    // HTTP meaning instead of hiding a 401/429 behind a payload error.
+    static func receive(_ request: URLRequest, session: URLSession, maximumBytes: Int? = nil) async throws -> BackendHTTPResponse {
+        let maximumBytes = maximumBytes ?? successfulBodyLimit(for: request)
+        return try await BackgroundExecution.run(name: "HTTP request") {
+            try await receiveResponse(request, session: session, maximumBytes: maximumBytes)
         }
     }
 
-    private static func receiveResponse(_ request: URLRequest, session: URLSession) async throws -> BackendHTTPResponse {
+    private static func receiveResponse(_ request: URLRequest, session: URLSession, maximumBytes: Int) async throws -> BackendHTTPResponse {
         let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse else {
             bytes.task.cancel()
             throw BackendFailure.local("api.invalidResponse")
         }
         let isError = !(200..<300).contains(response.statusCode)
+        if !isError, response.expectedContentLength > Int64(maximumBytes) {
+            bytes.task.cancel()
+            throw oversizedResponse()
+        }
         var data = Data()
         do {
             for try await byte in bytes {
@@ -37,6 +53,10 @@ struct BackendHTTPResponse: Sendable {
                     bytes.task.cancel()
                     data.removeAll()
                     break
+                }
+                if !isError, data.count >= maximumBytes {
+                    bytes.task.cancel()
+                    throw oversizedResponse()
                 }
                 data.append(byte)
             }

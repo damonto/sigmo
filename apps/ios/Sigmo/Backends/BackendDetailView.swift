@@ -20,6 +20,7 @@ struct BackendDetailView: View {
                 LabeledContent("auth.status", value: NSLocalizedString("auth.\(session.authentication.rawValue)", comment: ""))
                 if session.authentication == .required {
                     Button("auth.login", systemImage: "lock.open") { login = true }
+                        .disabled(session.isLoggingOut)
                         .accessibilityIdentifier("loginBackend")
                 }
                 if session.authentication == .authenticated {

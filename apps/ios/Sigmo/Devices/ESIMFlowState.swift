@@ -129,7 +129,7 @@ final class ESIMFlowState: Identifiable {
         }
     }
     func selectDiscovery(_ value: ESIMDiscovery) {
-        input = LPAInput(smdp: LPAInput.compact(value.address))
+        input = LPAInput(smdp: LPAInput.compact(value.address), activationCode: value.eventId)
     }
     func loadSources() async {
         guard !phase.running, detail.canTransfer, validSE, !busy else { return }
@@ -380,7 +380,8 @@ final class ESIMFlowState: Identifiable {
             if phase != .completed { phase = .failed; failure = .wrapping(error); socket.close() }
         }
     }
-    func completeWebsheet(_ callback: CarrierCallback) async {
+    func completeWebsheet(_ callback: CarrierCallback, delivery: CarrierCallbackDelivery.Status = .native) async {
+        guard delivery != .failed else { return }
         guard !Task.isCancelled, let websheet, phase == .websheet, !sending, !cancelling else { return }
         sending = true
         let current = revision
@@ -388,7 +389,9 @@ final class ESIMFlowState: Identifiable {
             if current == revision { sending = false }
         }
         do {
-            try await detail.session.protectedRequest { api, token in try await api.carrierCallback(websheet.id, callback: callback, token: token) }
+            if delivery == .native {
+                try await detail.session.protectedRequest { api, token in try await api.carrierCallback(websheet.id, callback: callback, token: token) }
+            }
             guard current == revision, !Task.isCancelled, !cancelling, self.websheet?.id == websheet.id else { return }
             if phase == .websheet { self.websheet = nil; websheetURL = nil; phase = .progress }
         } catch { report(error, current: current) }

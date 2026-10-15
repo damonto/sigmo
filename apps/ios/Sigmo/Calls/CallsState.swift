@@ -26,7 +26,17 @@ final class CallsState {
     private let demo: Bool
     private var demoStopped = false
     @ObservationIgnored private let identity: PushPersistence
-    @ObservationIgnored private var monitors: [String: Task<Void, Never>] = [:]
+    private struct MonitorKey: Hashable {
+        let line: String
+        let address: String
+        let session: ObjectIdentifier
+        let access: Int
+    }
+    private struct Monitor {
+        let id: UUID
+        let task: Task<Void, Never>
+    }
+    @ObservationIgnored private var monitors: [MonitorKey: Monitor] = [:]
     @ObservationIgnored private var mediaTask: Task<Void, Never>?
     @ObservationIgnored private var mediaID: UUID?
     @ObservationIgnored private var mediaAttempts = 0
@@ -181,8 +191,12 @@ final class CallsState {
     }
 
     func toggleRecording() async {
+        guard !demoStopped else { return }
         if recordings.activeID != nil { await recordings.stop(audio: audio)?.value }
-        else if let call = primary {
+        else {
+            guard let id = primary?.id else { return }
+            await recordings.load()
+            guard !Task.isCancelled, !demoStopped, let call = primary, call.id == id, recordings.activeID == nil else { return }
             recordings.start(call: call, audio: audio)
             if demo, recordings.activeCallID == call.id { audio.emitDemoRecording() }
             #if DEBUG
@@ -268,6 +282,12 @@ final class CallsState {
                 }
             }
         } catch {
+            if Task.isCancelled {
+                switch action {
+                case .hold, .digits, .mute: throw CancellationError()
+                default: break
+                }
+            }
             calls[call.id]?.answering = false
             calls[call.id]?.failure = .wrapping(error)
             if case .answer = action { finish(call.id, reason: (error as? BackendFailure)?.code == "call_in_use" ? .answeredElsewhere : .failed) }
@@ -374,7 +394,8 @@ final class CallsState {
         }
     }
 
-    func receivePush(content: PushContent?, id: UUID, connection: BackendConfiguration?, completion: @escaping @Sendable () -> Void) {
+    @discardableResult
+    func receivePush(content: PushContent?, id: UUID, connection: BackendConfiguration?, completion: @escaping @Sendable () -> Void) -> Task<Void, Never>? {
         let duplicate = calls[id] != nil || reporting.contains(id) || bootstraps[id] != nil
         let valid = content?.callUUID.flatMap(UUID.init(uuidString:)) == id
             && content?.kind == "call" && endedUUIDs[id] == nil
@@ -390,7 +411,7 @@ final class CallsState {
             result.continuation.yield(accepted)
             result.continuation.finish()
         }
-        guard !duplicate else { return }
+        guard !duplicate else { return nil }
         // Install the task before returning to PushKit. A system answer delivered
         // immediately afterward waits for this snapshot, never for audio activation.
         bootstraps[id] = Task { [weak self] in
@@ -430,8 +451,13 @@ final class CallsState {
                 self.updateSystemLabels()
                 self.reconcileMonitors()
                 Task { [weak self] in await self?.reloadContacts() }
-            } catch { self.endInvitation(id, reason: .failed); self.failure = .wrapping(error) }
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.endInvitation(id, reason: .failed)
+                self.failure = .wrapping(error)
+            }
         }
+        return bootstraps[id]
     }
 
     private func endInvitation(_ id: UUID, reason: CXCallEndedReason) {
@@ -440,31 +466,43 @@ final class CallsState {
     }
 
     func run() async {
-        defer { for task in monitors.values { task.cancel() }; monitors.removeAll() }
+        defer { for monitor in monitors.values { monitor.task.cancel() }; monitors.removeAll() }
         while !Task.isCancelled && !demoStopped {
-            // A PushKit cold launch may precede the first unlock after reboot.
-            // Retry the same saved owner once Keychain becomes accessible.
-            restoreClientIdentity()
-            reconcileMonitors()
-            await reconcileCalls()
+            await reconcile()
             ended = ended.filter { $0.value > Date().addingTimeInterval(-3600) }
             endedUUIDs = endedUUIDs.filter { $0.value > Date().addingTimeInterval(-3600) }
             do { try await Task.sleep(for: .seconds(2)) } catch { return }
         }
     }
 
+    func reconcile() async {
+        guard !Task.isCancelled, !demoStopped else { return }
+        // A PushKit cold launch may precede the first unlock after reboot.
+        restoreClientIdentity()
+        reconcileMonitors()
+        await reconcileCalls()
+    }
+
     private func reconcileMonitors() {
-        var wanted: Set<String> = []
+        var wanted: Set<MonitorKey> = []
         for session in store.sessions.values where session.canAccessDevices && session.capabilities?.contains("nativeCalls") == true {
             for modem in session.modems {
                 let line = CallLine(session: session, modem: modem)
                 guard foreground || calls.values.contains(where: { $0.line.id == line.id }) else { continue }
-                let key = "\(line.id):\(session.accessRevision)"
+                let key = MonitorKey(line: line.id, address: line.address,
+                                     session: ObjectIdentifier(session), access: session.accessRevision)
                 wanted.insert(key)
-                if monitors[key] == nil { monitors[key] = Task { [weak self] in await self?.monitor(line) } }
+                if monitors[key] == nil {
+                    let id = UUID()
+                    let task = Task { [weak self] in
+                        await self?.monitor(line)
+                        if self?.monitors[key]?.id == id { self?.monitors[key] = nil }
+                    }
+                    monitors[key] = Monitor(id: id, task: task)
+                }
             }
         }
-        for key in Array(monitors.keys) where !wanted.contains(key) { monitors.removeValue(forKey: key)?.cancel() }
+        for key in Array(monitors.keys) where !wanted.contains(key) { monitors.removeValue(forKey: key)?.task.cancel() }
     }
 
     private func monitor(_ line: CallLine) async {
@@ -504,10 +542,20 @@ final class CallsState {
                 let latest = try await session.callRequest { api, token in try await api.call(modemID: call.line.modemID, id: record.id, token: token) }
                 guard calls[call.id] != nil else { continue }
                 ingest(latest, line: call.line, id: call.id)
+                calls[call.id]?.failure = nil
                 if latest.incoming, Date().timeIntervalSince(latest.date) > 60 { finish(call.id, reason: .unanswered) }
             } catch {
-                if let error = error as? BackendFailure, error.isNetwork { continue }
-                finish(call.id, reason: .failed)
+                guard !Task.isCancelled else { return }
+                let failure = BackendFailure.wrapping(error)
+                let session = try? session(for: call.line)
+                let accessChanged = session == nil || access[call.id] != session?.accessRevision
+                let missing = failure.source == .backend && failure.status == 404 && failure.code == "call_not_found"
+                if accessChanged || missing { finish(call.id, reason: .failed) }
+                else {
+                    // A failed observation does not prove that the carrier call ended.
+                    // Keep media and identity so the next event/read can recover it.
+                    calls[call.id]?.failure = failure
+                }
             }
         }
     }
@@ -589,11 +637,12 @@ final class CallsState {
     func stopDemo() async {
         guard demo else { return }
         demoStopped = true
-        let tasks = Array(monitors.values) + Array(bootstraps.values)
+        let tasks = monitors.values.map(\.task) + Array(bootstraps.values)
         for task in tasks { task.cancel() }
         monitors.removeAll()
         bootstraps.removeAll()
         for task in tasks { await task.value }
+        await recordings.load()
         await recordings.stop(audio: audio)?.value
         await recordings.playback.stop()?.value
         stopMedia()
@@ -602,6 +651,13 @@ final class CallsState {
     }
 
     private func reset() {
+        // Invitations are system calls even before their backend snapshot arrives.
+        // Tombstone them before cancelling so a late result cannot recreate one.
+        for id in Set(bootstraps.keys).union(reporting) { endedUUIDs[id] = .now }
+        for task in bootstraps.values { task.cancel() }
+        bootstraps.removeAll()
+        reporting.removeAll()
+        systemAudioActive = false
         for call in Array(calls.values) {
             let revision = access[call.id]
             finish(call.id, reason: .failed, report: false)
@@ -613,5 +669,7 @@ final class CallsState {
                 }
             }
         }
+        stopMedia()
+        updatePlaybackAvailability()
     }
 }

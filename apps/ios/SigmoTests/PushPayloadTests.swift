@@ -180,6 +180,27 @@ final class PushPayloadTests: XCTestCase {
         _ = push.receive(nil, tapped: true)
         XCTAssertEqual(push.navigationFailure?.code, "push.unavailableNotification")
     }
+
+    @MainActor
+    func testVisibleAggregateThreadSuppressesConstituentAndNewSIMNotifications() throws {
+        let first = try testConfiguration("one.example"), second = try testConfiguration("two.example")
+        let identity = PushIdentity(id: "installation", managementToken: "test", connections: [
+            PushConnection(configurationID: first.id, backendID: "one", address: first.address),
+            PushConnection(configurationID: second.id, backendID: "two", address: second.address)
+        ])
+        let push = NativePushState(disabled: true, identity: identity)
+        push.visibleThread = PushThread(backendID: "one", participant: "+14155552671", conversationIDs: ["sim-a", "sim-b"])
+        XCTAssertTrue(push.receive(PushContent(kind: "sms", backendId: "one", backendName: "", conversationId: "sim-b"), tapped: false))
+        XCTAssertTrue(push.receive(PushContent(kind: "sms", backendId: "one", backendName: "", conversationId: "sim-c", sender: "+14155552671"), tapped: false))
+        XCTAssertFalse(push.receive(PushContent(kind: "sms", backendId: "two", backendName: "", conversationId: "sim-b", sender: "+14155552671"), tapped: false))
+        XCTAssertFalse(push.receive(PushContent(kind: "sms", backendId: "one", backendName: "", conversationId: "other", sender: "10086"), tapped: false))
+        push.visibleThread = PushThread(backendID: "one", participant: "10086", conversationIDs: [])
+        XCTAssertFalse(push.receive(PushContent(kind: "sms", backendId: "one", backendName: "", conversationId: "bank", sender: "BANK10086"), tapped: false))
+        push.visibleThread = PushThread(backendID: "one", participant: "BANK10086", conversationIDs: [])
+        XCTAssertTrue(push.receive(PushContent(kind: "sms", backendId: "one", backendName: "", conversationId: "new-bank", sender: "BANK10086"), tapped: false))
+        push.visibleThread = nil
+        XCTAssertFalse(push.receive(PushContent(kind: "sms", backendId: "one", backendName: "", conversationId: "sim-b"), tapped: false))
+    }
 }
 
 @MainActor

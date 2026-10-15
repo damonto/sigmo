@@ -519,7 +519,7 @@ private struct ModemDetailScreen: View {
                         Text(profile.name).font(.body).fixedSize(horizontal: false, vertical: true)
                     }
                     Text(profile.numberLabel)
-                        .font(.subheadline.monospaced())
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack { profileStatus(profile) }
@@ -530,7 +530,7 @@ private struct ModemDetailScreen: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(profile.name).font(.body).lineLimit(1)
                         Text(profile.numberLabel)
-                            .font(.subheadline.monospaced())
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }

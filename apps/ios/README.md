@@ -46,7 +46,10 @@ From the repository root, check English/Chinese resources and settings fixtures 
 
 ```sh
 python3 apps/ios/scripts/check_settings.py
+python3 apps/ios/scripts/sync_carrier_bridge.py --check
 ```
+
+The carrier WebKit regression tests run a copy of the server's bridge script. After changing `pro/websheet/bridge.js`, refresh that fixture with `python3 apps/ios/scripts/sync_carrier_bridge.py` before synchronizing the iOS workspace to a Mac.
 
 ## Offline demo and App Review
 

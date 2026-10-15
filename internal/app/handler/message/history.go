@@ -3,6 +3,7 @@ package message
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/labstack/echo/v5"
 
@@ -63,13 +64,24 @@ func (h *Handler) Conversations(c *echo.Context) error {
 	return c.JSON(http.StatusOK, response)
 }
 
-// ConversationMessages reads a stable thread ID rather than whichever SIM is currently active.
+// ConversationMessages pages a stable thread ID rather than whichever SIM is currently active.
 func (h *Handler) ConversationMessages(c *echo.Context) error {
-	messages, err := h.store.ConversationMessages(c.Request().Context(), c.Param("conversationId"))
+	limit := 50
+	if value := c.QueryParam("limit"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > 100 {
+			return httpapi.BadRequest(c, "invalid_history_cursor", storage.ErrInvalidHistoryCursor)
+		}
+		limit = parsed
+	}
+	page, err := h.store.ConversationMessagesPage(c.Request().Context(), c.Param("conversationId"), storage.HistoryFilter{Limit: limit, Cursor: c.QueryParam("cursor")})
 	if err != nil {
 		return historyError(c, err)
 	}
-	return c.JSON(http.StatusOK, ResponsesFromMessages(messages))
+	return c.JSON(http.StatusOK, struct {
+		storage.ConversationMessagePage
+		Items []MessageResponse `json:"items"`
+	}{ConversationMessagePage: page, Items: ResponsesFromMessages(page.Items)})
 }
 
 // UpdateConversation acknowledges a displayed watermark or manually marks a thread unread.
@@ -98,6 +110,9 @@ func (h *Handler) DeleteConversation(c *echo.Context) error {
 }
 
 func historyError(c *echo.Context, err error) error {
+	if errors.Is(err, storage.ErrInvalidHistoryCursor) {
+		return httpapi.BadRequest(c, "invalid_history_cursor", err)
+	}
 	if errors.Is(err, storage.ErrNotFound) {
 		return httpapi.Error(c, http.StatusNotFound, "conversation_not_found", "conversation not found")
 	}

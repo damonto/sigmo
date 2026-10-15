@@ -6,7 +6,7 @@ import { useMessageApi } from '@/apis/message'
 import { formatListTimestamp } from '@/lib/datetime'
 import { localizeErrorMessage } from '@/lib/errorHandler'
 import { formatPhoneDisplay, normalizeAddressSubmission } from '@/lib/phoneNumberInput'
-import type { Conversation, MessageResponse } from '@/types/message'
+import type { ConversationMessagesResponse, MessageResponse } from '@/types/message'
 
 /** A message rendered by the timeline; key is the acknowledged backend ID. */
 export interface ThreadMessageItem {
@@ -40,7 +40,8 @@ export const useModemMessageThread = ({
   const router = useRouter()
   const api = useMessageApi()
   const threadMessages = ref<MessageResponse[]>([])
-  const conversation = ref<Conversation | null>(null)
+  const conversation = ref<ConversationMessagesResponse['conversation'] | null>(null)
+  const cursor = ref('')
   const isLoading = ref(false)
   const isSending = ref(false)
   const isDeleting = ref(false)
@@ -53,6 +54,12 @@ export const useModemMessageThread = ({
   let requestID = 0
   let disposed = false
   let acknowledged = 0
+  let loaded = false
+  let resolvedConversationID = ''
+  let locatedConversation = false
+  let snapshotRevision = -1
+  let snapshotBackendID = ''
+  let headCursor = ''
   const drafts = new Map<string, string>()
   const identity = computed(
     () =>
@@ -103,37 +110,113 @@ export const useModemMessageThread = ({
     })),
   )
 
-  const fetchThreadMessages = async () => {
-    if (disposed || isNewConversation.value || isSending.value) return
+  const fetchThreadMessages = async (more = false) => {
+    if (disposed || isNewConversation.value || isSending.value || isLoading.value) return
+    if (more && !cursor.value) return
     const id = modemId.value
     if (!id || id === 'unknown' || !participant.value.trim()) return
     const current = generation
     const request = ++requestID
-    const target = conversationId?.value
     const profile = selectedProfile.value
     const remote = participant.value.trim()
     isLoading.value = true
     try {
-      const { data } = await api.getConversations(target ? {} : { modemId: id, profileId: profile })
-      if (current !== generation || request !== requestID || disposed) return
-      const selected = data.value?.items.find((item) =>
-        target ? item.id === target : item.profileId === profile && item.participant === remote,
-      )
-      conversation.value = selected ?? null
-      missing.value = !!target && !selected
-      if (!selected) {
-        threadMessages.value = []
-        error.value = missing.value ? t('modemDetail.messages.deleted') : ''
-        return
+      let conversationID = conversationId?.value || resolvedConversationID
+      if (!conversationID && !locatedConversation) {
+        const { data } = await api.getConversations({ modemId: id, profileId: profile })
+        if (current !== generation || request !== requestID || disposed) return
+        if (!data.value) throw new Error(t('communication.invalidHistoryResponse'))
+        conversationID =
+          data.value.items.find((item) => item.profileId === profile && item.participant === remote)
+            ?.id ?? ''
+        resolvedConversationID = conversationID
+        locatedConversation = true
       }
-      const result = await api.getConversationMessages(selected.id)
+      if (!conversationID) return
+      const readPage = async (cursor: string) => {
+        const result = await api.getConversationMessages(conversationID, cursor)
+        const page = result.data.value
+        if (
+          !page ||
+          page.conversation.id !== conversationID ||
+          (page.nextCursor && page.nextCursor === cursor)
+        )
+          throw new Error(t('communication.invalidHistoryResponse'))
+        return page
+      }
+      let page = await readPage(more ? cursor.value : '')
       if (current !== generation || request !== requestID || disposed) return
-      threadMessages.value = result.data.value ?? []
-      acknowledged = Math.max(acknowledged, selected.readThroughMessageId)
+      const head = page
+      const sameBackend = !snapshotBackendID || page.backendId === snapshotBackendID
+      if (more && !sameBackend) throw new Error(t('communication.invalidHistoryResponse'))
+      const received = new Map(page.items.map((message) => [message.id, message]))
+      const known = new Set(sameBackend ? threadMessages.value.map((message) => message.id) : [])
+      let overlapping = page.items.some((message) => known.has(message.id))
+      let hasNewItems = page.items.some((message) => !known.has(message.id))
+      let state = page
+      const visited = new Set([more ? cursor.value : ''])
+      // A refresh connects its newest page to retained history. Older-page loads skip
+      // known rows; each skipped page must add IDs, so known.size bounds the work.
+      while (
+        page.nextCursor &&
+        (more ? !hasNewItems : loaded && known.size > 0 && !overlapping && received.size < 1000)
+      ) {
+        if (!page.items.length || visited.has(page.nextCursor))
+          throw new Error(t('communication.invalidHistoryResponse'))
+        visited.add(page.nextCursor)
+        page = await readPage(page.nextCursor)
+        if (current !== generation || request !== requestID || disposed) return
+        if (page.backendId !== head.backendId)
+          throw new Error(t('communication.invalidHistoryResponse'))
+        const previousSize = received.size
+        for (const message of page.items) received.set(message.id, message)
+        if (page.nextCursor && (received.size === previousSize || visited.has(page.nextCursor)))
+          throw new Error(t('communication.invalidHistoryResponse'))
+        overlapping = page.items.some((message) => known.has(message.id))
+        hasNewItems = page.items.some((message) => !known.has(message.id))
+        if (page.revision >= state.revision) state = page
+      }
+      const byID = new Map(
+        (more || overlapping ? threadMessages.value : []).map((message) => [message.id, message]),
+      )
+      for (const message of received.values()) byID.set(message.id, message)
+      threadMessages.value = [...byID.values()].sort(
+        (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp) || a.id - b.id,
+      )
+      // New snapshots include late imports with old timestamps. Reusing their old
+      // cursor would permanently exclude those messages from the loaded history.
+      if (more || !loaded || !overlapping || head.nextCursor !== headCursor)
+        cursor.value = page.nextCursor
+      if (!more) headCursor = head.nextCursor
+      if (!sameBackend) {
+        snapshotRevision = -1
+        acknowledged = 0
+      }
+      if (state.revision >= snapshotRevision) {
+        conversation.value = state.conversation
+        snapshotBackendID = state.backendId
+        snapshotRevision = state.revision
+        acknowledged = Math.max(acknowledged, state.conversation.readThroughMessageId)
+      }
+      loaded = true
+      missing.value = false
       error.value = ''
     } catch (err) {
-      if (current === generation && request === requestID && !disposed)
-        error.value = localizeErrorMessage(err)
+      if (current !== generation || request !== requestID || disposed) return
+      const status =
+        typeof err === 'object' && err !== null && 'status' in err ? err.status : undefined
+      if (status === 404) {
+        missing.value = true
+        conversation.value = null
+        threadMessages.value = []
+        cursor.value = ''
+        loaded = false
+        acknowledged = 0
+        snapshotRevision = -1
+        snapshotBackendID = ''
+        headCursor = ''
+        error.value = t('modemDetail.messages.deleted')
+      } else error.value = localizeErrorMessage(err)
     } finally {
       if (current === generation && request === requestID && !disposed) isLoading.value = false
     }
@@ -150,10 +233,30 @@ export const useModemMessageThread = ({
     if (!threadMessages.value.some((message) => message.id === id)) return
     const current = generation
     try {
-      await api.updateConversation(selected.id, { readThroughMessageId: id, markedUnread: false })
-      if (current !== generation || disposed) return
+      const { data } = await api.updateConversation(selected.id, {
+        readThroughMessageId: id,
+        markedUnread: false,
+      })
+      if (
+        current !== generation ||
+        disposed ||
+        missing.value ||
+        conversation.value?.id !== selected.id
+      )
+        return
+      if (
+        !data.value ||
+        data.value.backendId !== snapshotBackendID ||
+        data.value.revision < snapshotRevision
+      )
+        return
+      snapshotRevision = data.value.revision
       acknowledged = Math.max(acknowledged, id)
-      selected.markedUnread = false
+      conversation.value.readThroughMessageId = Math.max(
+        conversation.value.readThroughMessageId,
+        id,
+      )
+      conversation.value.markedUnread = false
       window.dispatchEvent(new Event('sigmo:messages-changed'))
     } catch {
       /* The next visible snapshot retries this watermark. */
@@ -188,6 +291,9 @@ export const useModemMessageThread = ({
     if (!id || id === 'unknown' || !target || !text || !canSend.value || isSending.value) return
     const current = generation
     const creating = isNewConversation.value
+    // A snapshot started before the send must not replace its readback.
+    requestID++
+    isLoading.value = false
     isSending.value = true
     sendError.value = ''
     try {
@@ -205,6 +311,7 @@ export const useModemMessageThread = ({
         })
         if (current === generation) newRecipient.value = ''
       } else {
+        if (data.value?.conversationId) resolvedConversationID = data.value.conversationId
         await fetchThreadMessages()
       }
       window.dispatchEvent(new Event('sigmo:messages-changed'))
@@ -230,8 +337,15 @@ export const useModemMessageThread = ({
       generation++
       requestID++
       acknowledged = 0
+      loaded = false
+      resolvedConversationID = ''
+      locatedConversation = false
+      snapshotRevision = -1
+      snapshotBackendID = ''
+      headCursor = ''
       threadMessages.value = []
       conversation.value = null
+      cursor.value = ''
       replacementProfile.value = ''
       if (isNewConversation.value && participant.value !== 'new')
         newRecipient.value = participant.value
@@ -265,6 +379,7 @@ export const useModemMessageThread = ({
 
   return {
     items,
+    cursor,
     isLoading,
     isSending,
     isDeleting,

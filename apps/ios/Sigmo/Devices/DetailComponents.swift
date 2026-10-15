@@ -192,7 +192,7 @@ struct ProfileSkeletonRows: View {
                 ProfileAvatar(icon: nil, region: nil)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Example Mobile").font(.body)
-                    Text("8986000000000000000").font(.subheadline.monospaced()).foregroundStyle(.secondary)
+                    Text("8986000000000000000").font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold))

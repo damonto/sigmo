@@ -40,7 +40,8 @@ struct VoLTEView: View {
         }
         .navigationTitle("capability.volte")
         .modifier(ConnectionLifecycle(scope: state.scope,
-                                      reload: { await state.reload() }, cancelAction: { action = nil }))
+                                      reload: { await state.reload() }, cancelAction: { action = nil },
+                                      observe: { await state.observePending() }))
         .task(id: action?.id) {
             guard let action else { return }
             await state.setEnabled(action.value)
@@ -91,7 +92,8 @@ private struct VoLTEDataPathView: View {
         }
         .navigationTitle("connection.dataPath")
         .modifier(ConnectionLifecycle(scope: state.scope,
-                                      reload: { await state.reload() }, cancelAction: { action = nil }))
+                                      reload: { await state.reload() }, cancelAction: { action = nil },
+                                      observe: { await state.observePending() }))
         .task(id: action?.id) {
             guard let action else { return }
             await state.selectDataPath(action.value)

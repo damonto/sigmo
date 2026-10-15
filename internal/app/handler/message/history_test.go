@@ -2,6 +2,7 @@ package message
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -52,6 +53,53 @@ func TestConversationUpdateRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestConversationMessagesUsesDefaultPageWithoutQueryParameters(t *testing.T) {
+	s, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "history.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	stamp := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+	for i := range 51 {
+		if _, err := s.InsertMessage(t.Context(), storage.Message{ProfileID: "inactive", Source: storage.MessageSourceModem,
+			ExternalKey: fmt.Sprint(i), Sender: "10086", Text: fmt.Sprint(i), Timestamp: stamp.Add(time.Duration(i) * time.Second), Incoming: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	id := storage.ConversationID("inactive", "10086")
+	e := echo.New()
+	e.GET("/conversations/:conversationId/messages", New(nil, s, nil).ConversationMessages)
+	read := func(cursor string) (items []MessageResponse, next string) {
+		t.Helper()
+		res := httptest.NewRecorder()
+		path := "/conversations/" + id + "/messages"
+		if cursor != "" {
+			path += "?cursor=" + cursor
+		}
+		e.ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))
+		var page struct {
+			storage.ConversationMessagePage
+			Items []MessageResponse `json:"items"`
+		}
+		if err := json.Unmarshal(res.Body.Bytes(), &page); err != nil || res.Code != http.StatusOK || page.Conversation.ID != id {
+			t.Fatalf("read page = %d %s, %v", res.Code, res.Body, err)
+		}
+		return page.Items, page.NextCursor
+	}
+	first, cursor := read("")
+	if len(first) != 50 || first[0].Text != "1" || first[49].Text != "50" || cursor == "" {
+		t.Fatalf("default page = %+v, cursor = %q", first, cursor)
+	}
+	last, cursor := read(cursor)
+	if len(last) != 1 || last[0].Text != "0" || cursor != "" {
+		t.Fatalf("older page = %+v, cursor = %q", last, cursor)
+	}
+}
+
 func TestArchivedConversationHTTPContract(t *testing.T) {
 	s, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "history.db"))
 	if err != nil {
@@ -91,8 +139,20 @@ func TestArchivedConversationHTTPContract(t *testing.T) {
 		t.Fatalf("history = %+v", list)
 	}
 	id := list.Items[0].ID
-	if res := request(http.MethodGet, "/conversations/"+id+"/messages", ""); res.Code != 200 {
-		t.Fatalf("read inactive history=%d", res.Code)
+	for _, query := range []string{"", "?limit=50"} {
+		paged := request(http.MethodGet, "/conversations/"+id+"/messages"+query, "")
+		var page struct {
+			storage.ConversationMessagePage
+			Items []MessageResponse `json:"items"`
+		}
+		if err := json.Unmarshal(paged.Body.Bytes(), &page); err != nil || paged.Code != 200 || len(page.Items) != 1 || page.Conversation.ID != id || page.BackendID == "" {
+			t.Fatalf("paged contract %q = %s, %v", query, paged.Body, err)
+		}
+	}
+	for _, query := range []string{"limit=0", "limit=101", "limit=invalid", "limit=50&cursor=invalid"} {
+		if res := request(http.MethodGet, "/conversations/"+id+"/messages?"+query, ""); res.Code != 400 {
+			t.Fatalf("invalid pagination %s = %d: %s", query, res.Code, res.Body)
+		}
 	}
 	if res := request(http.MethodPatch, "/conversations/"+id, `{"readThroughMessageId":999}`); res.Code != 400 {
 		t.Fatalf("foreign watermark=%d", res.Code)

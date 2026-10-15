@@ -51,11 +51,17 @@ struct ConnectionLifecycle: ViewModifier {
     var refreshID = 0
     let reload: @MainActor () async -> Void
     let cancelAction: @MainActor () -> Void
+    var observe: (@MainActor () async -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
 
     private struct Identity: Equatable {
         let available: Bool
         let refresh: Int
+    }
+
+    private struct ObservationIdentity: Equatable {
+        let available: Bool
+        let foreground: Bool
     }
 
     func body(content: Content) -> some View {
@@ -66,6 +72,10 @@ struct ConnectionLifecycle: ViewModifier {
             .foregroundTask(id: Identity(available: scope.available, refresh: refreshID)) {
                 guard scope.available else { return }
                 await reload()
+            }
+            .task(id: ObservationIdentity(available: scope.available, foreground: scope.detail.session.foreground)) {
+                guard scope.available, scope.detail.session.foreground else { return }
+                await observe?()
             }
             .onChange(of: scope.available) { _, available in
                 if !available { cancelAction(); dismiss() }

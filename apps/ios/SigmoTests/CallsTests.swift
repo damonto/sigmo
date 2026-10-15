@@ -5,6 +5,8 @@ import XCTest
 @MainActor
 final class CallsTests: XCTestCase {
     private func setup(_ fixture: CallsFixture, playback: CallRecordingPlayer = CallRecordingPlayer(),
+                       recordings: CallRecordings? = nil,
+                       socketOpened: (@Sendable (URLRequest) -> Void)? = nil,
                        afterResponse: (@Sendable (URLRequest) async -> Void)? = nil) async throws -> (CallsState, BackendSession, CallLine) {
         let directory = URL.temporaryDirectory.appending(path: "CallTests-\(UUID())")
         let store = BackendStore(file: ConfigurationFile(url: directory.appending(path: "backends.json")), credentials: MemoryCredentials().store,
@@ -12,15 +14,146 @@ final class CallsTests: XCTestCase {
                 let response = try await fixture.respond(request)
                 await afterResponse?(request)
                 return response
-            }, socketFactory: { await fixture.socket($0) }) })
+            }, socketFactory: { request in
+                let socket = await fixture.socket(request)
+                socketOpened?(request)
+                return socket
+            }) })
         let id = UUID()
         XCTAssertTrue(store.saveBackend(id: id, name: "Home", address: "https://home.sigmo.test"))
         let session = try XCTUnwrap(store.sessions[id])
         await session.refresh(force: true)
         let line = CallLine(session: session, modem: try XCTUnwrap(session.modems.first))
         let calls = CallsState(store: store, fixtures: true,
-            recordings: CallRecordings(directory: directory.appending(path: "recordings"), playback: playback))
+            recordings: recordings ?? CallRecordings(directory: directory.appending(path: "recordings"), playback: playback))
         return (calls, session, line)
+    }
+
+    func testRecordingRequestDoesNotFollowANewCallDuringIndexLoading() async throws {
+        let gate = SettingsRequestGate()
+        let directory = URL.temporaryDirectory.appending(path: "CallIndexTests-\(UUID())")
+        let library = CallRecordings(directory: directory, readIndex: { _ in
+            await gate.wait()
+            return CallRecordings.Index()
+        })
+        addTeardownBlock { try FileManager.default.removeItem(at: directory) }
+        let fixture = CallsFixture()
+        let (calls, _, line) = try await setup(fixture, recordings: library)
+        await calls.dial(number: "10086", line: line)
+        let first = try XCTUnwrap(calls.primary?.id)
+        let recording = Task { await calls.toggleRecording() }
+        await gate.waitForCaller()
+        await calls.act(.end(first))
+        let next = CallsFixture.record("second-index-call", state: "ringing", direction: "incoming", owner: "")
+        try await fixture.publish(next)
+        calls.ingest(next, line: line)
+        let second = try XCTUnwrap(calls.incoming?.id)
+        await calls.answer(second)
+        XCTAssertTrue(calls.audio.ready)
+        await gate.release()
+        await recording.value
+        XCTAssertNil(library.activeID)
+        XCTAssertTrue(library.items.isEmpty)
+        XCTAssertNotEqual(first, second)
+        await calls.act(.end(second))
+    }
+
+    func testTemporaryStatusFailuresPreserveMediaRecordingAndRecovery() async throws {
+        for status in [500, 502, 429] {
+            let fixture = CallsFixture()
+            let (calls, _, line) = try await setup(fixture)
+            await calls.dial(number: "10086", line: line)
+            let id = try XCTUnwrap(calls.primary?.id)
+            let recording = try await beginRecording(calls)
+            await fixture.setCallReadFailure(HTTPProblem.response(status: status, code: "temporarily_unavailable", detail: "Retry later"))
+            await calls.reconcile()
+            XCTAssertEqual(calls.primary?.id, id)
+            XCTAssertEqual(calls.recordings.activeID, recording)
+            XCTAssertTrue(calls.audio.ready)
+            XCTAssertEqual(calls.primary?.failure?.status, status)
+
+            await fixture.setCallReadFailure(nil)
+            var recovered = try XCTUnwrap(calls.primary?.record)
+            recovered.hold = "remote"
+            recovered.updatedAt = Date.now.addingTimeInterval(1).ISO8601Format()
+            try await fixture.publish(recovered)
+            await calls.reconcile()
+            XCTAssertEqual(calls.primary?.record?.hold, "remote", "Healthy state must not be rejected by a terminal cache")
+            XCTAssertNil(calls.primary?.failure)
+            await calls.act(.end(id))
+            await calls.recordings.stop(audio: calls.audio)?.value
+            calls.foreground = false
+            await calls.reconcile()
+        }
+    }
+
+    func testEndpointReplacementStartsANewCallMonitorWithTheSameAccessRevision() async throws {
+        let first = expectation(description: "old endpoint monitor")
+        let second = expectation(description: "replacement endpoint monitor")
+        let fixture = CallsFixture()
+        let (calls, session, _) = try await setup(fixture, socketOpened: { request in
+            if request.url?.host == "home.sigmo.test" { first.fulfill() }
+            if request.url?.host == "new.sigmo.test" { second.fulfill() }
+        })
+        await calls.reconcile()
+        await fulfillment(of: [first], timeout: 2)
+        XCTAssertEqual(session.accessRevision, 0)
+        XCTAssertTrue(calls.store.saveBackend(id: session.id, name: "Home", address: "https://new.sigmo.test"))
+        let replacement = try XCTUnwrap(calls.store.sessions[session.id])
+        await replacement.refresh(force: true)
+        XCTAssertEqual(replacement.accessRevision, 0)
+        await calls.reconcile()
+        await fulfillment(of: [second], timeout: 2)
+        calls.foreground = false
+        await calls.reconcile()
+    }
+
+    func testProviderResetCannotRestoreAnInvitationFromPendingPushRecovery() async throws {
+        let gate = SettingsRequestGate()
+        let fixture = CallsFixture()
+        let (calls, session, line) = try await setup(fixture, afterResponse: { request in
+            if request.url?.path.hasSuffix("/calls/reset-push") == true { await gate.wait() }
+        })
+        let record = CallsFixture.record("reset-push", state: "ringing", direction: "incoming", owner: "")
+        try await fixture.publish(record)
+        let id = try XCTUnwrap(record.callUUID.flatMap(UUID.init(uuidString:)))
+        let content = PushContent(kind: "call", backendId: CallsFixture.backend, backendName: "Home",
+            modemId: line.modemID, profileId: line.profileID, sender: record.number,
+            callId: record.id, callUUID: record.callUUID, expiresAt: Int64(Date.now.timeIntervalSince1970) + 45)
+        let recovery = try XCTUnwrap(calls.receivePush(content: content, id: id, connection: session.configuration) {})
+        await gate.waitForCaller()
+        calls.system.reset?()
+        await gate.release()
+        await recovery.value
+        calls.ingest(record, line: line)
+        XCTAssertFalse(calls.hasCall)
+        XCTAssertTrue(calls.recordings.playback.allowed)
+        XCTAssertNil(calls.failure)
+        XCTAssertTrue(session.canAccessDevices, "A system reset does not revoke backend access")
+    }
+
+    func testPagedDeviceHistoryLoadsOlderCallsAndFiltersMissedOnTheServer() async throws {
+        let fixture = CallsFixture()
+        var records: [CallRecord] = []
+        for index in 0..<61 {
+            var record = CallsFixture.record("history-\(index)", state: "ended", direction: index == 60 ? "incoming" : "outgoing")
+            record.startedAt = Date.now.addingTimeInterval(-Double(index) * 60).ISO8601Format()
+            if index == 60 { record.answeredAt = "" }
+            records.append(record)
+        }
+        await fixture.setPagedHistory(records)
+        let (_, session, _) = try await setup(fixture)
+        let history = CallHistoryState(session: session, modemID: "device-1")
+        await history.load()
+        XCTAssertEqual(history.items.count, 50)
+        XCTAssertTrue(history.hasMore)
+        await history.load(more: true)
+        XCTAssertEqual(history.items.count, 61)
+        XCTAssertFalse(history.hasMore)
+        history.missedOnly = true
+        await history.load()
+        XCTAssertEqual(history.items.map(\.id), ["history-60"])
+        XCTAssertFalse(history.hasMore)
     }
 
     private func beginRecording(_ calls: CallsState, audio: Bool = true) async throws -> UUID {
@@ -83,6 +216,7 @@ final class CallsTests: XCTestCase {
             let file = try AVAudioFile(forReading: calls.recordings.url(for: entry))
             XCTAssertGreaterThan(file.length, 0)
             let reloaded = CallRecordings(directory: calls.recordings.directory)
+            await reloaded.load()
             XCTAssertTrue(try XCTUnwrap(reloaded.items.first).complete)
         }
     }
@@ -213,9 +347,9 @@ final class CallsTests: XCTestCase {
     func testDialEventBeforeHTTPResponseKeepsOneSystemIdentity() async throws {
         let gate = SettingsRequestGate()
         let fixture = CallsFixture()
-        let (calls, session, line) = try await setup(fixture) { request in
+        let (calls, session, line) = try await setup(fixture, afterResponse: { request in
             if request.httpMethod == "POST", request.url?.path.hasSuffix("/calls") == true { await gate.wait() }
-        }
+        })
         let dial = Task { await calls.dial(number: "10086", line: line) }
         await gate.waitForCaller()
         let original = try XCTUnwrap(calls.primary?.id)
@@ -340,9 +474,9 @@ final class CallsTests: XCTestCase {
     func testLogoutDuringPushBootstrapCannotRestoreAnInvitation() async throws {
         let gate = SettingsRequestGate()
         let fixture = CallsFixture()
-        let (calls, session, line) = try await setup(fixture) { request in
+        let (calls, session, line) = try await setup(fixture, afterResponse: { request in
             if request.url?.path.hasSuffix("/calls/push-call") == true { await gate.wait() }
-        }
+        })
         let record = CallsFixture.record("push-call", state: "ringing", direction: "incoming", owner: "")
         try await fixture.publish(record)
         let id = try XCTUnwrap(record.callUUID.flatMap(UUID.init(uuidString:)))

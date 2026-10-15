@@ -47,6 +47,22 @@ struct MessageSnapshot: Decodable, Sendable {
     let items: [SMSConversation]
 }
 
+struct ConversationMetadata: Codable, Sendable {
+    let id: String
+    let readThroughMessageId: Int64
+    let markedUnread: Bool
+    let unreadCount: Int
+}
+
+struct ConversationMessagePage: Codable, Sendable {
+    let backendId: String
+    let revision: Int64
+    let unreadCount: Int
+    let conversation: ConversationMetadata
+    let items: [SMSMessage]
+    let nextCursor: String
+}
+
 struct MessageBadge: Codable, Equatable, Sendable {
     let backendId: String
     let revision: Int64

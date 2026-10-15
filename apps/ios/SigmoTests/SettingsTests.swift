@@ -115,6 +115,32 @@ final class SettingsTests: XCTestCase {
         XCTAssertNil(state.failure)
     }
 
+    func testExplicitRefreshUpdatesCleanSectionsAndPreservesDrafts() async throws {
+        let server = try SettingsTestServer()
+        let session = try settingsSession(server)
+        await session.refresh(force: true)
+        let state = SettingsState(session: session)
+        await state.load()
+        state.auth["sessionMaxDays"] = .text("45")
+        state.channels["telegram"]?["botToken"] = .text("draft-token")
+        await server.setProxyPort(9090)
+
+        await state.load(force: true)
+
+        XCTAssertEqual(state.proxy["httpPort"], .number(9090))
+        XCTAssertEqual(state.snapshot?.values.proxy["httpPort"], .number(9090))
+        XCTAssertEqual(state.auth["sessionMaxDays"], .text("45"))
+        XCTAssertEqual(state.channels["telegram"]?["botToken"], .text("draft-token"))
+        let requests = await server.allRequests()
+        XCTAssertEqual(requests.filter { $0.url?.path.hasSuffix("/settings") == true }.count, 2)
+
+        await server.setError("/settings", status: 503)
+        await state.load(force: true)
+        XCTAssertEqual(state.proxy["httpPort"], .number(9090))
+        XCTAssertEqual(state.auth["sessionMaxDays"], .text("45"))
+        XCTAssertNotNil(state.failure)
+    }
+
     func testOTPChannelsRemainConfiguredWithoutBusinessNotifications() async throws {
         let server = try SettingsTestServer()
         let session = try settingsSession(server)

@@ -104,7 +104,7 @@ struct SettingsFormView: View {
             }
             .disabled(state.busy)
             .detailErrorAlert(state.failure)
-            .refreshable { await state.load() }
+            .refreshable { await state.load(force: true) }
             .foregroundTask { await state.load() }
         }
         .navigationTitle(settingsText(title)).navigationBarTitleDisplayMode(.inline)
@@ -131,7 +131,7 @@ struct NotificationSettingsView: View {
                 }
             }
             .detailErrorAlert(state.failure)
-            .refreshable { await state.load() }
+            .refreshable { await state.load(force: true) }
             .foregroundTask { await state.load() }
         }
         .navigationTitle("settings.notificationTitle").navigationBarTitleDisplayMode(.inline)

@@ -53,9 +53,9 @@ func TestConversationReadWatermarkAndSIMHistory(t *testing.T) {
 	if err := s.RecordSIMProfile(ctx, SIMProfile{ProfileID: "sim-b", ModemID: "modem", Label: "Current SIM"}); err != nil {
 		t.Fatal(err)
 	}
-	history, err := s.ConversationMessages(ctx, first.ConversationID)
-	if err != nil || len(history) != 2 {
-		t.Fatalf("inactive SIM history length = %d, error = %v", len(history), err)
+	history, err := s.ConversationMessagesPage(ctx, first.ConversationID, HistoryFilter{})
+	if err != nil || len(history.Items) != 2 || history.NextCursor != "" {
+		t.Fatalf("inactive SIM history = %+v, error = %v", history, err)
 	}
 	for _, filter := range []ConversationFilter{{ModemID: "modem"}, {ProfileID: "sim-a"}, {Query: "arrived"}} {
 		snapshot, err := s.Conversations(ctx, filter)

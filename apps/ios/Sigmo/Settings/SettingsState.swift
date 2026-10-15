@@ -56,8 +56,9 @@ final class SettingsState {
         }
     }
 
-    func load() async {
-        guard !busy, !Task.isCancelled, snapshot == nil else { return }
+    func load(force: Bool = false) async {
+        guard !busy, !Task.isCancelled, snapshot == nil || force else { return }
+        let previous = snapshot
         let current = revision
         busy = true
         failure = nil
@@ -67,11 +68,19 @@ final class SettingsState {
                 try await api.settings(token: token)
             }
             try check(current)
+            // Refresh clean sections from the server while retaining explicit
+            // edits in other forms sharing this state.
+            if previous == nil || auth == previous?.values.auth { auth = response.values.auth }
+            if previous == nil || notifications == previous?.values.notifications { notifications = response.values.notifications }
+            if previous == nil || proxy == previous?.values.proxy { proxy = response.values.proxy }
+            var nextChannels = response.values.channels ?? [:]
+            if let previous {
+                for (key, draft) in channels where draft != (previous.values.channels?[key] ?? [:]) {
+                    nextChannels[key] = draft
+                }
+            }
             snapshot = response
-            auth = response.values.auth
-            notifications = response.values.notifications
-            proxy = response.values.proxy
-            channels = response.values.channels ?? [:]
+            channels = nextChannels
             for channel in channelSchemas where channels[channel.key] == nil {
                 channels[channel.key] = [:]
             }

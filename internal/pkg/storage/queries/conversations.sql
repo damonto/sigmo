@@ -33,3 +33,31 @@ UPDATE messages SET is_read = 1 WHERE conversation_id = ? AND id <= sqlc.arg(rea
 
 -- name: AcknowledgeConversation :exec
 UPDATE conversations SET read_through_id = ?, marked_unread = ? WHERE id = ?;
+
+-- Keep ordering on the timestamp index instead of scanning the snapshot's ID range.
+-- name: ListConversationMessagePage :many
+SELECT id, conversation_id, profile_id, modem_id, sender, recipient, text,
+    timestamp, status, incoming, wifi_calling
+FROM messages INDEXED BY idx_messages_conversation_time
+WHERE conversation_id = sqlc.arg(conversation_id) AND id <= sqlc.arg(snapshot)
+ORDER BY julianday(timestamp) DESC, id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: ListConversationMessagesAtTime :many
+SELECT id, conversation_id, profile_id, modem_id, sender, recipient, text,
+    timestamp, status, incoming, wifi_calling
+FROM messages INDEXED BY idx_messages_conversation_time
+WHERE conversation_id = sqlc.arg(conversation_id) AND id <= sqlc.arg(snapshot)
+    AND julianday(timestamp) = julianday(CAST(sqlc.arg(cursor_timestamp) AS TEXT))
+    AND id < sqlc.arg(cursor_id)
+ORDER BY id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: ListConversationMessagesBeforeTime :many
+SELECT id, conversation_id, profile_id, modem_id, sender, recipient, text,
+    timestamp, status, incoming, wifi_calling
+FROM messages INDEXED BY idx_messages_conversation_time
+WHERE conversation_id = sqlc.arg(conversation_id) AND id <= sqlc.arg(snapshot)
+    AND julianday(timestamp) < julianday(CAST(sqlc.arg(cursor_timestamp) AS TEXT))
+ORDER BY julianday(timestamp) DESC, id DESC
+LIMIT sqlc.arg(page_limit);

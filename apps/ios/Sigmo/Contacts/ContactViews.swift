@@ -26,13 +26,13 @@ struct ContactAvatarView: View {
             }
         }
         .frame(width: size, height: size).clipShape(Circle()).accessibilityHidden(true)
-        .task(id: "\(contact?.id ?? ""):\(contact?.updatedAt ?? ""):\(session.accessRevision)") {
+        .task(id: "\(session.incarnationID):\(contact?.id ?? ""):\(contact?.updatedAt ?? ""):\(session.accessRevision)") {
             image = nil
             guard let contact, contact.hasAvatar else { return }
             do {
-                let data = try await session.protectedRequest { api, token in try await api.contactAvatar(contact.id, token: token) }
+                let loaded = try await ContactAvatarCache.shared.image(for: contact, session: session)
                 guard !Task.isCancelled else { return }
-                image = UIImage(data: data)
+                image = loaded
             } catch { /* A missing avatar keeps the contact's initials visible. */ }
         }
     }
@@ -222,11 +222,14 @@ struct SigmoContactDetail: View {
 
 struct ContactEditView: View {
     let session: BackendSession
+    private let initialAvatar: Data?
     @Environment(BackendStore.self) private var store
     @Environment(\.dismiss) private var dismiss
     @State private var contact: SigmoContact
     @State private var avatar: UIImage?
     @State private var photo: PhotosPickerItem?
+    @State private var imageLoadID: UUID?
+    @State private var didLoadInitialAvatar = false
     @State private var zoom = 1.0
     @State private var horizontal = 0.5
     @State private var vertical = 0.5
@@ -237,8 +240,8 @@ struct ContactEditView: View {
     @State private var failure: BackendFailure?
     init(session: BackendSession, draft: ContactDraft) {
         self.session = session
+        initialAvatar = draft.avatar
         _contact = State(initialValue: draft.contact)
-        _avatar = State(initialValue: draft.avatar.flatMap(UIImage.init(data:)))
     }
     var body: some View {
         let hasAvatar = avatar != nil || contact.hasAvatar && !removingAvatar
@@ -246,8 +249,8 @@ struct ContactEditView: View {
             Form {
                 Section {
                     VStack(spacing: 14) {
-                        if let preview = croppedAvatar() {
-                            Image(uiImage: preview).resizable().scaledToFit()
+                        if let avatar {
+                            AvatarCropPreview(image: avatar, zoom: zoom, horizontal: horizontal, vertical: vertical)
                                 .frame(width: 168, height: 168).clipShape(Circle())
                         } else {
                             ContactAvatarView(session: session, contact: removingAvatar ? nil : contact, size: 168)
@@ -261,7 +264,9 @@ struct ContactEditView: View {
                             if hasAvatar {
                                 Menu {
                                     if avatar != nil { Button("communication.cropPhoto", systemImage: "crop") { cropping = true } }
-                                    Button("communication.removeAvatar", systemImage: "trash", role: .destructive) { avatar = nil; photo = nil; removingAvatar = true }
+                                    Button("communication.removeAvatar", systemImage: "trash", role: .destructive) {
+                                        imageLoadID = nil; avatar = nil; photo = nil; removingAvatar = true
+                                    }
                                 } label: { Label("communication.photoOptions", systemImage: "ellipsis") }
                                 .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle)
                             }
@@ -325,7 +330,7 @@ struct ContactEditView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("communication.save", systemImage: "checkmark") { Task { await save() } }
-                        .labelStyle(.iconOnly).disabled(saving || !session.canAccessDevices || (contact.name.isEmpty && contact.numbers.isEmpty))
+                        .labelStyle(.iconOnly).disabled(saving || loadingAvatar || !session.canAccessDevices || (contact.name.isEmpty && contact.numbers.isEmpty))
                 }
             }
             .alert("communication.delete", isPresented: $deleting) {
@@ -337,18 +342,30 @@ struct ContactEditView: View {
             .detailErrorAlert($failure)
             .sheet(isPresented: $cropping) { cropEditor }
             .task(id: photo) {
-                guard let photo else { return }
+                let initial = didLoadInitialAvatar ? nil : initialAvatar
+                didLoadInitialAvatar = true
+                guard photo != nil || initial != nil else { return }
+                let request = UUID()
+                imageLoadID = request
+                defer { if imageLoadID == request { imageLoadID = nil } }
                 do {
-                    guard let data = try await photo.loadTransferable(type: Data.self), data.count <= 20 * 1024 * 1024, let image = UIImage(data: data) else { throw BackendFailure.local("communication.invalidPhoto") }
-                    guard !Task.isCancelled else { return }
+                    let data: Data
+                    if let photo {
+                        guard let selected = try await photo.loadTransferable(type: Data.self) else { throw BackendFailure.local("communication.invalidPhoto") }
+                        data = selected
+                    } else if let initial { data = initial }
+                    else { return }
+                    let image = try await AvatarImage.load(data)
+                    guard !Task.isCancelled, imageLoadID == request else { return }
                     avatar = image; zoom = 1; horizontal = 0.5; vertical = 0.5; removingAvatar = false
-                    cropping = true
+                    if photo != nil { cropping = true }
                 } catch { if !Task.isCancelled { failure = .wrapping(error) } }
             }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
+    private var loadingAvatar: Bool { imageLoadID != nil || (!didLoadInitialAvatar && initialAvatar != nil) }
     private func remove() async {
         guard !saving else { return }
         saving = true
@@ -365,8 +382,8 @@ struct ContactEditView: View {
         NavigationStack {
             Form {
                 Section {
-                    if let preview = croppedAvatar() {
-                        Image(uiImage: preview).resizable().scaledToFit()
+                    if let avatar {
+                        AvatarCropPreview(image: avatar, zoom: zoom, horizontal: horizontal, vertical: vertical)
                             .frame(maxWidth: .infinity).accessibilityLabel("communication.avatar")
                     }
                 }
@@ -406,7 +423,7 @@ struct ContactEditView: View {
         }
     }
     private func save() async {
-        guard !saving else { return }
+        guard !saving, !loadingAvatar else { return }
         saving = true
         defer { saving = false }
         do {
@@ -421,6 +438,27 @@ struct ContactEditView: View {
             try await session.refreshContacts(force: true)
             dismiss()
         } catch { failure = .wrapping(error) }
+    }
+}
+
+private struct AvatarCropPreview: View {
+    let image: UIImage
+    let zoom: Double
+    let horizontal: Double
+    let vertical: Double
+
+    var body: some View {
+        GeometryReader { geometry in
+            let size = geometry.size.width
+            let scale = size / max(1, min(image.size.width, image.size.height)) * zoom
+            let width = image.size.width * scale, height = image.size.height * scale
+            Image(uiImage: image).resizable()
+                .frame(width: width, height: height)
+                .offset(x: -(width - size) * horizontal, y: -(height - size) * vertical)
+                .frame(width: size, height: size, alignment: .topLeading)
+                .clipped()
+        }
+        .aspectRatio(1, contentMode: .fit)
     }
 }
 

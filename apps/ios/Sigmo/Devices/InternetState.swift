@@ -34,12 +34,12 @@ final class InternetState {
         return connection.connected ? "common.connected" : "common.disconnected"
     }
 
-    func load(reconciling: Bool = false, acceptPreferences: Bool = false) async {
+    func load(reconciling: Bool = false, acceptPreferences: Bool = false, refreshModem: Bool = true) async {
         clearIfUnavailable()
         guard scope.available, !Task.isCancelled, reconciling || !busy else { return }
         loading = true
         readRevision += 1
-        await loadSnapshot(revision: readRevision, acceptPreferences: acceptPreferences)
+        await loadSnapshot(revision: readRevision, acceptPreferences: acceptPreferences, refreshModem: refreshModem)
     }
 
     func reload() async {
@@ -54,14 +54,14 @@ final class InternetState {
         if connected, publicConnectionID == nil, loadFailure == nil, !busy { await loadPublic() }
     }
 
-    private func loadSnapshot(revision: Int, acceptPreferences: Bool = false) async {
+    private func loadSnapshot(revision: Int, acceptPreferences: Bool = false, refreshModem: Bool = true) async {
         defer {
             if revision == readRevision { loading = false }
             clearIfUnavailable()
         }
         guard revision == readRevision else { return }
         do {
-            try await scope.refreshModem()
+            if refreshModem { try await scope.refreshModem() }
             guard revision == readRevision else { return }
             let id = scope.modemID
             let value = try await scope.read { api, token in try await api.detailInternet(id, token: token) }
@@ -148,7 +148,7 @@ final class InternetState {
             guard scope.available, !Task.isCancelled else { return }
             writeFailure = .wrapping(error)
         }
-        await load(reconciling: true, acceptPreferences: acceptPreferences && writeFailure == nil)
+        await load(reconciling: true, acceptPreferences: acceptPreferences && writeFailure == nil, refreshModem: writeFailure != nil)
         guard scope.available, !Task.isCancelled else { return }
         failure = writeFailure ?? loadFailure
     }

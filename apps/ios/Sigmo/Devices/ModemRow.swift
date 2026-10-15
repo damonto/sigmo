@@ -72,7 +72,7 @@ struct ModemRow: View {
                 Text("home.noNumber")
                     .foregroundStyle(.secondary)
             } else {
-                PhoneNumberText(number: modem.number, regionCode: modem.sim.regionCode)
+                Text(PhoneNumberDisplay.format(modem.number, regionCode: modem.sim.regionCode))
                     .foregroundStyle(.primary)
             }
         }

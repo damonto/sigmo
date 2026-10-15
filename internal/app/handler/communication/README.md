@@ -36,6 +36,7 @@ All routes use the existing authenticated `/api/v1` group.
 | GET | `/message-threads` | List threads; `conversationId` resolves an old conversation to `{id}` |
 | GET | `/message-threads/:id` | Thread summary |
 | GET | `/message-threads/:id/messages` | Paged messages with original source identities |
+| GET | `/conversations/:conversationId/messages` | Original SIM conversation pages and read state |
 | PATCH | `/message-threads/:id` | Acknowledge displayed `messageIds`, or set `markedUnread` |
 | DELETE | `/message-threads/:id` | Delete source conversations and preserve deduplication tombstones |
 | GET | `/calls` | Pro call archive; `missed=true` filters before pagination |
@@ -50,6 +51,16 @@ Insertion snapshots and timestamp/ID cursors prevent concurrent arrivals from
 shifting subsequent pages. Thread message pages are returned oldest first within
 each page; prepend older pages. Reading a page does not mark it read: acknowledge
 only displayed message IDs. Incoming messages arriving later stay unread.
+
+Conversation message requests always return a page, defaulting to 50 messages;
+`limit` accepts 1–100 and `cursor` loads the next older page. The response contains
+`items`, `nextCursor`, `conversation` metadata and the backend-wide `backendId`,
+`revision`, and `unreadCount`. This path filters by the immutable conversation ID,
+so assigning history to another SIM does not mix source conversations. When a
+refreshed head has a different cursor, clients adopt the new snapshot so that
+backdated imports remain reachable. They catch up new pages until reaching retained
+history and skip already displayed pages when loading older messages. An unchanged
+head cursor preserves the reader's existing pagination progress.
 
 Contacts accept `name`, `notes` and `numbers` (`label`, `number`, optional two-letter
 `region`). Name-only entries are valid. The server computes number `key` values;

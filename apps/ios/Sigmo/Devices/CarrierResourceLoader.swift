@@ -66,24 +66,21 @@ final class CarrierResourceLoader: NSObject, URLSessionTaskDelegate, Sendable {
         defer { session.invalidateAndCancel() }
         var request = input
         if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
-        let (bytes, response) = try await session.bytes(for: request)
-        guard let response = response as? HTTPURLResponse else { throw BackendFailure.local("api.invalidResponse") }
-        var data = Data()
-        for try await byte in bytes {
-            guard data.count < 8 * 1024 * 1024 else { throw BackendFailure.local("api.invalidResponse") }
-            data.append(byte)
+        var result = try await BackendHTTPResponse.receive(request, session: session, maximumBytes: 8 * 1024 * 1024)
+        if result.status == 401, let challenge = AccessChallenge(response: result, backend: root) {
+            throw challenge
         }
-        let contentType = response.value(forHTTPHeaderField: "Content-Type")
-        var result = BackendHTTPResponse(data: data, status: response.statusCode, contentType: contentType)
         guard (200..<300).contains(result.status) else { throw HTTPProblem.failure(result, source: .backend) }
-        if contentType?.lowercased().contains("html") == true, let html = String(data: data, encoding: .utf8) {
+        if result.contentType?.lowercased().contains("html") == true, let html = String(data: result.data, encoding: .utf8) {
             // The proxy emits absolute callback and resource URLs. Rewrite only this
             // capability's URLs; other backend paths never acquire native credentials.
             var unprefixed = URLComponents(url: root, resolvingAgainstBaseURL: false)!
             unprefixed.path = "/api/v1/websheets/" + root.lastPathComponent
             let rewritten = html.replacingOccurrences(of: root.absoluteString, with: Self.localURL(root).absoluteString)
                 .replacingOccurrences(of: unprefixed.url!.absoluteString, with: Self.localURL(root).absoluteString)
-            result = BackendHTTPResponse(data: Data(rewritten.utf8), status: result.status, contentType: contentType)
+            result = BackendHTTPResponse(data: Data(rewritten.utf8), status: result.status,
+                                         requestID: result.requestID, contentType: result.contentType,
+                                         retryAfter: result.retryAfter, allow: result.allow, authenticate: result.authenticate)
         }
         return result
     }

@@ -26,6 +26,7 @@ final class WiFiCallingState {
     private(set) var sendingCallback = false
     var failure: BackendFailure?
     @ObservationIgnored private var readRevision = 0
+    @ObservationIgnored private var readInFlight: Int?
     @ObservationIgnored private var presentationRevision = 0
     @ObservationIgnored private var showSetupAfterEnable = false
     @ObservationIgnored private var callbacks: Set<CarrierCallback> = []
@@ -54,15 +55,23 @@ final class WiFiCallingState {
     }
     var uplinkName: String { uplinks.first { $0.underlay == settings?.underlay }?.name ?? String(localized: "common.unknown") }
 
-    func load(reconciling: Bool = false) async {
+    func load(reconciling: Bool = false, refreshModem: Bool = true) async {
         clearIfUnavailable()
         guard scope.available, !Task.isCancelled, reconciling || !busy else { return }
+        // Ordinary refreshes share the pending read. A write's reconciliation
+        // can replace it; the token keeps the older read from clearing that one.
+        guard reconciling || readInFlight == nil else { return }
         readRevision += 1
         let revision = readRevision
+        readInFlight = revision
         loading = settings == nil
-        defer { if revision == readRevision { loading = false }; clearIfUnavailable() }
+        defer {
+            if readInFlight == revision { readInFlight = nil }
+            if revision == readRevision { loading = false }
+            clearIfUnavailable()
+        }
         do {
-            try await scope.refreshModem()
+            if refreshModem { try await scope.refreshModem() }
             let id = scope.modemID
             let value = try await scope.read { api, token in try await api.detailWiFi(id, token: token) }
             guard revision == readRevision else { return }
@@ -78,11 +87,18 @@ final class WiFiCallingState {
 
     func reload() async {
         defer { clearIfUnavailable() }
-        guard scope.available, !Task.isCancelled else { return }
+        guard scope.available, !Task.isCancelled, readInFlight == nil else { return }
         await load()
         guard !Task.isCancelled else { return }
         failure = loadFailure
         await presentSetupIfNeeded()
+    }
+
+    func observePending(interval: Duration = .seconds(2)) async {
+        await scope.observePending(interval: interval, needsRefresh: {
+            self.readInFlight == nil && !self.busy && self.websheet == nil && self.settings?.enabled == true
+                && ["connecting", "waiting_for_uplink"].contains(self.settings?.state ?? "")
+        }, refresh: { await self.reload() })
     }
 
     func setEnabled(_ enabled: Bool) async {
@@ -128,7 +144,7 @@ final class WiFiCallingState {
             writeFailure = .wrapping(error)
             showSetupAfterEnable = false
         }
-        await load(reconciling: true)
+        await load(reconciling: true, refreshModem: writeFailure != nil)
         guard scope.available, !Task.isCancelled else { return }
         failure = writeFailure ?? loadFailure
     }
@@ -169,14 +185,19 @@ final class WiFiCallingState {
         callbacks = []
     }
 
-    func completeWebsheet(_ callback: CarrierCallback) async {
+    func completeWebsheet(_ callback: CarrierCallback, delivery: CarrierCallbackDelivery.Status = .native) async {
+        // A failed web request is reported by the loader. Its outcome is uncertain;
+        // the parent notification must not automatically repeat that write.
+        guard delivery != .failed else { return }
         guard scope.available, let websheet, !sendingCallback, !callbacks.contains(callback), !Task.isCancelled else { return }
         let revision = presentationRevision
         sendingCallback = true
         failure = nil
         defer { sendingCallback = false; clearIfUnavailable() }
         do {
-            try await scope.read { api, token in try await api.carrierCallback(websheet.id, callback: callback, token: token) }
+            if delivery == .native {
+                try await scope.read { api, token in try await api.carrierCallback(websheet.id, callback: callback, token: token) }
+            }
             guard revision == presentationRevision else { return }
             callbacks.insert(callback)
             if Self.terminalCallback(callback) {
@@ -205,6 +226,7 @@ final class WiFiCallingState {
     private func clearIfUnavailable() {
         guard !scope.available else { return }
         readRevision += 1
+        readInFlight = nil
         closeWebsheet()
         settings = nil
         loadFailure = nil

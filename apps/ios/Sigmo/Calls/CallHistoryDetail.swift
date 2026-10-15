@@ -33,6 +33,7 @@ struct CallHistoryDetail: View {
             }
         }
         .listStyle(.insetGrouped)
+        .task { await calls.recordings.load() }
         .onDisappear { calls.recordings.stopPlayback() }
         .navigationTitle("calls.details")
         .navigationBarTitleDisplayMode(.inline)

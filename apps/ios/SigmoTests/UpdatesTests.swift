@@ -105,6 +105,32 @@ final class UpdatesTests: XCTestCase {
         XCTAssertEqual(requests.filter { $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/update-installations") == true }.count, 1)
     }
 
+    func testRestartRecoveryAuthenticatesTheAppReadinessProbe() async throws {
+        let server = try SettingsTestServer()
+        await server.setOTP(true)
+        await server.requireAppToken("fixture-token")
+        let credentials = MemoryCredentials()
+        let session = try settingsSession(server, credentials: credentials)
+        credentials.tokens[session.id] = storedCredential("fixture-token")
+        await session.refresh(force: true)
+        let time = TestTime()
+        let state = UpdatesState(session: session, clock: BackendClock(now: { time.now() }, sleep: { _ in
+            time.advance(5)
+            try Task.checkCancellation()
+        }))
+        await state.load()
+        await state.check()
+        await state.install()
+        await state.observe()
+
+        XCTAssertEqual(state.snapshot?.state, "idle")
+        XCTAssertEqual(state.snapshot?.current.version, "1.1.0")
+        XCTAssertNil(state.failure)
+        let requests = await server.allRequests().filter { $0.url?.path.hasSuffix("/app") == true }
+        XCTAssertGreaterThanOrEqual(requests.count, 3)
+        XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-token" })
+    }
+
     func testRestartTimeoutRequiresReadBeforeAnotherInstallation() async throws {
         let server = try SettingsTestServer()
         let session = try settingsSession(server)

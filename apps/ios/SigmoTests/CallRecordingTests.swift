@@ -1,10 +1,47 @@
 import AVFAudio
+import Synchronization
 import XCTest
 @testable import Sigmo
 
 @MainActor
 final class CallRecordingTests: XCTestCase {
-    func testBackendScopeSeparatesRecordingsWithMatchingCallIDs() throws {
+    func testIndexLoadingIsDeferredSharedAndProtectsConcurrentWrites() async throws {
+        let directory = URL.temporaryDirectory.appending(path: "RecordingIndexTests-\(UUID())")
+        let gate = SettingsRequestGate()
+        let reads = RecordingIndexReads()
+        let entry = CallRecording(id: UUID(), backendID: UUID(), modemID: "modem", profileID: "sim", callID: "call",
+            number: "10086", line: "Test", createdAt: .now, receiveOnly: false)
+        let library = CallRecordings(directory: directory, readIndex: { _ in
+            reads.increment()
+            await gate.wait()
+            return CallRecordings.Index(items: [entry])
+        })
+        addTeardownBlock { try FileManager.default.removeItem(at: directory) }
+        let metadata = directory.appending(path: entry.stem + ".json")
+        try JSONEncoder().encode(entry).write(to: metadata)
+        XCTAssertEqual(reads.count, 0, "Constructing the call owner must not scan the library")
+        XCTAssertFalse(library.loaded)
+        let first = Task { await library.load() }
+        await gate.waitForCaller()
+        let second = Task { await library.load() }
+        library.delete(entry)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: metadata.path), "The pending snapshot must not overwrite a concurrent deletion")
+        first.cancel()
+        await gate.release()
+        await first.value
+        await second.value
+        XCTAssertEqual(reads.count, 1)
+        XCTAssertTrue(library.loaded)
+        XCTAssertFalse(library.busy)
+        XCTAssertEqual(library.items.map(\.id), [entry.id])
+        library.delete(entry)
+        await library.load()
+        XCTAssertTrue(library.items.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: metadata.path))
+        XCTAssertEqual(reads.count, 1)
+    }
+
+    func testBackendScopeSeparatesRecordingsWithMatchingCallIDs() async throws {
         let directory = URL.temporaryDirectory.appending(path: "RecordingTests-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try FileManager.default.removeItem(at: directory) }
@@ -17,6 +54,7 @@ final class CallRecordingTests: XCTestCase {
             try JSONEncoder().encode(entry).write(to: directory.appending(path: "\(entry.stem).json"))
         }
         let library = CallRecordings(directory: directory)
+        await library.load()
         XCTAssertNil(library.failure)
         XCTAssertEqual(library.items(for: firstBackend).map(\.id), [first.id])
         XCTAssertEqual(library.items(for: secondBackend).map(\.id), [second.id])
@@ -267,7 +305,7 @@ final class CallRecordingTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appending(path: entry.stem + ".m4a").path))
     }
 
-    func testDeletionFailureKeepsTheEntryAndCanBeRetried() throws {
+    func testDeletionFailureKeepsTheEntryAndCanBeRetried() async throws {
         let directory = URL.temporaryDirectory.appending(path: "RecordingTests-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock {
@@ -278,6 +316,7 @@ final class CallRecordingTests: XCTestCase {
             number: "10086", line: "Test", createdAt: .now, complete: true, receiveOnly: true)
         try JSONEncoder().encode(entry).write(to: directory.appending(path: entry.stem + ".json"))
         let library = CallRecordings(directory: directory)
+        await library.load()
         try Data("audio placeholder".utf8).write(to: library.url(for: entry))
         library.playback.play(entry, url: directory.appending(path: "missing.m4a"))
         XCTAssertEqual(library.failure(for: entry.id)?.code, "calls.recordingFileMissing")
@@ -301,4 +340,10 @@ final class CallRecordingTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: library.url(for: entry).path))
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
     }
+}
+
+private final class RecordingIndexReads: Sendable {
+    private let value = Mutex(0)
+    var count: Int { value.withLock { $0 } }
+    func increment() { value.withLock { $0 += 1 } }
 }

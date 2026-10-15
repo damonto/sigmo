@@ -40,14 +40,15 @@ struct ESIMDownloadSummaryView: View {
 
     private var heading: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Use explicit label colors to avoid inheriting the section header's dimmed style.
             Text(completed ? "detail.setupDone" : "detail.setupReady")
                 .font(.title2.bold())
-                .foregroundStyle(.primary)
+                .foregroundStyle(Color(uiColor: .label))
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             Text(completed ? "detail.downloadCompletedDescription" : "detail.downloadPreviewDescription")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color(uiColor: .secondaryLabel))
                 .fixedSize(horizontal: false, vertical: true)
         }
     }

@@ -10,8 +10,9 @@ final class CommunicationThreadState {
     private(set) var loaded = false
     private(set) var loading = false
     var failure: BackendFailure?
-    @ObservationIgnored private var acknowledging: Set<Int64> = []
     @ObservationIgnored private var acknowledged: Set<Int64> = []
+    @ObservationIgnored private var acknowledgmentTask: Task<MessageBadge?, Never>?
+    @ObservationIgnored private var headCursor: String?
 
     init(session: BackendSession, threadID: String) {
         self.session = session
@@ -30,14 +31,39 @@ final class CommunicationThreadState {
         defer { loading = false }
         let id = threadID, next = more ? cursor : ""
         do {
-            let page = try await session.protectedRequest { api, token in
+            var page = try await session.protectedRequest { api, token in
                 try await api.threadMessages(id, cursor: next, token: token)
             }
+            var received = page.items
+            var receivedIDs = Set(received.map(\.id))
+            let refreshedHead = page.nextCursor
+            let known = Set(messages.map(\.id))
+            var overlapping = !known.isDisjoint(with: page.items.map(\.id))
+            var visited: Set<String> = [next]
+            // A changed snapshot may include backdated imports beyond the head.
+            // Rebase its cursor, skipping retained pages when the reader asks for more.
+            while !page.nextCursor.isEmpty {
+                let catchingUp = !more && preserve && loaded && !known.isEmpty && !overlapping && received.count < 1000
+                let skippingKnown = more && !page.items.isEmpty && page.items.allSatisfy { known.contains($0.id) }
+                guard catchingUp || skippingKnown else { break }
+                let cursor = page.nextCursor
+                guard visited.insert(cursor).inserted else { throw BackendFailure.local("api.invalidResponse") }
+                page = try await session.protectedRequest { api, token in
+                    try await api.threadMessages(id, cursor: cursor, token: token)
+                }
+                let ids = Set(page.items.map(\.id))
+                guard ids.isEmpty ? page.nextCursor.isEmpty : !ids.isSubset(of: receivedIDs) else {
+                    throw BackendFailure.local("api.invalidResponse")
+                }
+                receivedIDs.formUnion(ids)
+                received.append(contentsOf: page.items)
+                overlapping = !known.isDisjoint(with: page.items.map(\.id))
+            }
             try Task.checkCancellation()
-            let retainingHistory = more || (preserve && loaded)
+            let retainingHistory = more || (preserve && loaded && overlapping)
             var byID: [Int64: CommunicationMessage] = [:]
             for message in retainingHistory ? messages : [] { byID[message.id] = message }
-            for var message in page.items {
+            for var message in received {
                 // A read snapshot started before an acknowledgment cannot undo it.
                 if acknowledged.contains(message.id) { message.read = true }
                 byID[message.id] = message
@@ -46,9 +72,8 @@ final class CommunicationThreadState {
             messages = byID.values.map { (message: $0, date: CallRecord.date($0.timestamp) ?? .distantPast) }
                 .sorted { ($0.date, $0.message.id) < ($1.date, $1.message.id) }
                 .map(\.message)
-            // Polls retain the older-page snapshot, but a successful first read
-            // must establish a cursor even when it follows an initial failure.
-            if !preserve || !loaded { cursor = page.nextCursor }
+            if more || !preserve || !loaded || !overlapping || refreshedHead != headCursor { cursor = page.nextCursor }
+            if !more { headCursor = refreshedHead }
             loaded = true
             failure = nil
         } catch {
@@ -57,21 +82,42 @@ final class CommunicationThreadState {
     }
 
     func acknowledge(_ message: CommunicationMessage) async -> MessageBadge? {
-        guard message.incoming, !message.read, !acknowledged.contains(message.id),
-              !acknowledging.contains(message.id), !Task.isCancelled else { return nil }
-        acknowledging.insert(message.id)
-        defer { acknowledging.remove(message.id) }
+        await acknowledge([message.id])
+    }
+
+    func acknowledge(_ visibleIDs: Set<Int64>) async -> MessageBadge? {
+        // Visibility changes may cancel the debounce caller, but not an accepted
+        // read batch. Serialize successors so overlapping IDs are never skipped.
+        while let pending = acknowledgmentTask {
+            _ = await pending.value
+            if Task.isCancelled { return nil }
+        }
+        guard !Task.isCancelled else { return nil }
+        let task = Task { @MainActor in
+            defer { acknowledgmentTask = nil }
+            return await acknowledgeBatch(visibleIDs)
+        }
+        acknowledgmentTask = task
+        return await task.value
+    }
+
+    private func acknowledgeBatch(_ visibleIDs: Set<Int64>) async -> MessageBadge? {
+        let ids = messages.filter {
+            visibleIDs.contains($0.id) && $0.incoming && !$0.read &&
+                !acknowledged.contains($0.id)
+        }.prefix(1000).map(\.id)
+        guard !ids.isEmpty, !Task.isCancelled else { return nil }
         let id = threadID
         do {
             let badge = try await session.protectedRequest { api, token in
-                try await api.readThread(id, messageIDs: [message.id], token: token)
+                try await api.readThread(id, messageIDs: ids, token: token)
             }
             try Task.checkCancellation()
-            acknowledged.insert(message.id)
-            if let index = messages.firstIndex(where: { $0.id == message.id }) { messages[index].read = true }
+            acknowledged.formUnion(ids)
+            for index in messages.indices where acknowledged.contains(messages[index].id) { messages[index].read = true }
             return badge
         } catch {
-            if !Task.isCancelled { failure = .wrapping(error) }
+            if !Task.isCancelled, session.canAccessDevices { failure = .wrapping(error) }
             return nil
         }
     }

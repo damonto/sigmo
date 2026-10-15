@@ -10,9 +10,13 @@ final class CallHistoryState {
     private(set) var items: [CallRecord] = []
     private(set) var loading = false
     private(set) var loaded = false
+    private(set) var cursor = ""
     private(set) var deleting = false
     var failure: BackendFailure?
     @ObservationIgnored private var revision = 0
+    @ObservationIgnored private var loadedSearch = ""
+    @ObservationIgnored private var loadedMissed = false
+    var hasMore: Bool { !cursor.isEmpty }
 
     init(session: BackendSession, modemID: String) {
         self.session = session
@@ -38,20 +42,31 @@ final class CallHistoryState {
         return draft
     }
 
-    func load() async {
+    func load(more: Bool = false) async {
         guard session.canAccessDevices, let line, !deleting, !Task.isCancelled else { return }
+        let query = CallDigits.normalize(search), missed = missedOnly
+        guard !more || (loaded && !loading && hasMore && loadedSearch == query && loadedMissed == missed) else { return }
         revision += 1
-        let current = revision, modemID = modemID, query = CallDigits.normalize(search)
+        let current = revision, modemID = modemID, next = more ? cursor : ""
         loading = true
         defer { if current == revision { loading = false } }
         do {
             let aggregate = session.capabilities?.contains("callHistory") == true
-            let records = try await session.protectedRequest { api, token in
-                if aggregate { return try await api.callHistory(search: query, cursor: "", modemID: modemID, token: token).items }
-                return try await api.calls(modemID: modemID, search: query, token: token)
+            let (records, cursor) = try await session.protectedRequest { api, token in
+                if aggregate {
+                    let page = try await api.callHistory(search: query, cursor: next, missed: missed, modemID: modemID, token: token)
+                    return (page.items, page.nextCursor)
+                }
+                return (try await api.calls(modemID: modemID, search: query, token: token), "")
             }
             guard current == revision, self.line?.matches(line) == true, !Task.isCancelled else { return }
-            items = records.sorted { $0.date > $1.date }
+            var byID = Dictionary((more ? items : []).map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+            for record in records { byID[record.id] = record }
+            items = byID.values.map { (record: $0, date: $0.date) }
+                .sorted { ($0.date, $0.record.id) > ($1.date, $1.record.id) }.map(\.record)
+            self.cursor = cursor
+            loadedSearch = query
+            loadedMissed = missed
             loaded = true
             failure = nil
         } catch { if current == revision, !Task.isCancelled { failure = .wrapping(error) } }
@@ -60,6 +75,7 @@ final class CallHistoryState {
     func delete(_ record: CallRecord) async -> Bool {
         guard record.terminal, let line, !deleting else { return false }
         revision += 1
+        loading = false
         let current = revision, modemID = modemID
         deleting = true
         defer { if current == revision { deleting = false } }
@@ -76,7 +92,7 @@ final class CallHistoryState {
         } catch { if current == revision, !Task.isCancelled { failure = .wrapping(error) }; return false }
     }
 
-    func clear() { revision += 1; items = []; loaded = false; loading = false; deleting = false; failure = nil }
+    func clear() { revision += 1; items = []; cursor = ""; loaded = false; loading = false; deleting = false; failure = nil }
 }
 
 @MainActor @Observable

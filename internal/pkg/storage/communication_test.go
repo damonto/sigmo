@@ -340,8 +340,8 @@ func TestSIMRegionUpdateOnlyRegroupsItsOwnHistory(t *testing.T) {
 			if err != nil || thread != ThreadID(tt.participant) {
 				t.Fatalf("thread = %q, error = %v", thread, err)
 			}
-			messages, err := s.ConversationMessages(t.Context(), conversationID)
-			if err != nil || len(messages) != 1 || messages[0].Sender != "(415) 555-2671" {
+			messages, err := s.ConversationMessagesPage(t.Context(), conversationID, HistoryFilter{})
+			if err != nil || len(messages.Items) != 1 || messages.Items[0].Sender != "(415) 555-2671" || messages.NextCursor != "" {
 				t.Fatalf("original messages = %+v, error = %v", messages, err)
 			}
 		})

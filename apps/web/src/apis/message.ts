@@ -2,6 +2,7 @@ import { fetchJson } from '@/lib/fetch'
 
 import type {
   ConversationRead,
+  ConversationMessagesResponse,
   ConversationsResponse,
   MessageState,
   MessagesResponse,
@@ -60,8 +61,13 @@ export const useMessageApi = () => {
     return fetchJson<ConversationsResponse>(`conversations?${query}`)
   }
 
-  const getConversationMessages = (id: string) =>
-    fetchJson<MessagesResponse>(`conversations/${encodeURIComponent(id)}/messages`)
+  const getConversationMessages = (id: string, cursor = '') => {
+    const query = new URLSearchParams({ limit: '50' })
+    if (cursor) query.set('cursor', cursor)
+    return fetchJson<ConversationMessagesResponse>(
+      `conversations/${encodeURIComponent(id)}/messages?${query}`,
+    )
+  }
 
   const updateConversation = (id: string, update: ConversationRead) =>
     fetchJson<MessageState>(`conversations/${encodeURIComponent(id)}`, {

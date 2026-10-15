@@ -47,6 +47,7 @@ const activeProfileId = computed(() => modem.value?.sim.identifier ?? '')
 
 const {
   items,
+  cursor,
   isLoading,
   isSending,
   isDeleting,
@@ -54,6 +55,7 @@ const {
   newRecipient,
   participantLabel,
   sendMessage,
+  fetchThreadMessages,
   deleteThread,
   markDisplayed,
   canSend,
@@ -104,6 +106,18 @@ const atBottom = ref(true)
 const updateScrollPosition = () => {
   const element = messagesContainerRef.value
   if (element) atBottom.value = element.scrollHeight - element.scrollTop - element.clientHeight < 80
+}
+
+const loadOlder = async () => {
+  const target = route.fullPath
+  const element = messagesContainerRef.value
+  const previousHeight = element?.scrollHeight ?? 0
+  const previousTop = element?.scrollTop ?? 0
+  await fetchThreadMessages(true)
+  await nextTick()
+  if (element && element === messagesContainerRef.value && route.fullPath === target) {
+    element.scrollTop = previousTop + element.scrollHeight - previousHeight
+  }
 }
 
 const canDelete = computed(() => !isNewConversation.value && participant.value.trim().length > 0)
@@ -202,6 +216,15 @@ watch(
         class="scrollbar-none min-h-0 flex-1 overflow-y-auto py-3"
         @scroll="updateScrollPosition"
       >
+        <Button
+          v-if="cursor"
+          variant="outline"
+          class="mb-3 w-full"
+          :disabled="isLoading"
+          @click="loadOlder"
+        >
+          {{ t('communication.older') }}
+        </Button>
         <ModemMessageThreadList
           :items="items"
           :is-loading="isLoading"

@@ -53,8 +53,21 @@ struct ProfileConnectionScope {
     func write(_ operation: @escaping @Sendable (BackendAPI, String?) async throws -> Void) async throws {
         try check()
         guard !detail.busy else { throw BackendFailure.local("connection.busy") }
-        let completed = await detail.mutate(operation)
+        let target = ModemSIMTarget(identity: sim, accessRevision: accessRevision)
+        let completed = await detail.mutate(reconciliation: .connection, target: target, operation)
         try check()
         if !completed { throw detail.failure ?? BackendFailure.local("connection.refreshRequired") }
+        if let failure = detail.failure { throw failure }
+    }
+
+    // The visible page owns this observer. Settled states make no network requests;
+    // backgrounding and navigation end observation without replaying a write.
+    func observePending(interval: Duration, needsRefresh: () -> Bool, refresh: () async -> Void) async {
+        while available, detail.session.foreground, !Task.isCancelled {
+            do { try await Task.sleep(for: interval) }
+            catch { return }
+            guard available, detail.session.foreground, !Task.isCancelled else { return }
+            if needsRefresh() { await refresh() }
+        }
     }
 }

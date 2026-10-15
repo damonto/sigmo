@@ -20,7 +20,7 @@ struct ESIMFlowView: View {
     @State private var sourceDeletionReply: SourceDeletionReply?
     private struct PendingCallback: Identifiable {
         let id = UUID()
-        let value: CarrierCallback
+        let value: CarrierCallbackDelivery
     }
 
     @State private var callback: PendingCallback?
@@ -79,7 +79,7 @@ struct ESIMFlowView: View {
         .task { presentedFailure = state.failure }
         .task(id: callback?.id) {
             guard let callback else { return }
-            await state.completeWebsheet(callback.value)
+            await state.completeWebsheet(callback.value.callback, delivery: callback.value.status)
             guard self.callback?.id == callback.id, !Task.isCancelled else { return }
             self.callback = nil
         }

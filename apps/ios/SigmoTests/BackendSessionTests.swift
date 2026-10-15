@@ -3,6 +3,35 @@ import XCTest
 
 @MainActor
 final class BackendSessionTests: XCTestCase {
+    func testSlowBackendsDoNotBlockAnotherConnectionRefresh() async throws {
+        let stubs = (0..<4).map { _ in BackendStub() }
+        let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = BackendStore(file: ConfigurationFile(url: directory.appending(path: "connections.json")),
+                                 credentials: MemoryCredentials().store, makeAPI: { configuration in
+            let index = Int(configuration.name)!
+            return BackendAPI(configuration: configuration) { try await stubs[index].respond($0) }
+        })
+        for index in stubs.indices {
+            XCTAssertTrue(store.saveBackend(name: String(index), address: "https://backend-\(index).example"))
+        }
+        let sessions = store.orderedSessions()
+        for stub in stubs.prefix(3) { await stub.holdNextModemRequest() }
+        let slow = sessions.prefix(3).map { session in Task { await session.refresh(force: true) } }
+        for stub in stubs.prefix(3) { await stub.waitForHeldRequest() }
+
+        let completed = expectation(description: "Healthy backend refresh is independent")
+        let healthy = Task {
+            await sessions[3].refresh(force: true)
+            completed.fulfill()
+        }
+        await fulfillment(of: [completed], timeout: 2)
+        for stub in stubs.prefix(3) { await stub.release() }
+        for task in slow { await task.value }
+        await healthy.value
+        XCTAssertTrue(sessions[3].isOnline)
+    }
+
     func testBackgroundingPreservesInFlightRefreshAndProtectedRequest() async throws {
         let stub = BackendStub()
         let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)

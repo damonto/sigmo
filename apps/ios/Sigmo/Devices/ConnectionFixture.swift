@@ -27,6 +27,8 @@ struct ConnectionFixture: Sendable {
     var volte = VoLTESettings(enabled: true, connected: true, state: "connected", durationSeconds: 120,
                               modemRegistered: false, dataPath: "qmap")
     var wifiRequiresSetup = false
+    var wifiPendingReads = 0
+    var voltePendingReads = 0
     var statuses: [String: Int] = [:]
     var busyInternetReads: [String: Int] = [:]
     var disconnectAfterWrite = false
@@ -89,6 +91,12 @@ struct ConnectionFixture: Sendable {
             guard internet.connected else { return error("internet_connection_not_connected", status: 409) }
             return try reply(InternetPublicInfo(ip: "203.0.113.\(internet.bearer)", country: "GB", organization: "Fixture Mobile Network"))
         case ("GET", "/wifi-calling/settings"):
+            if wifi.state == "connecting", wifiPendingReads > 0 {
+                let response = try reply(wifi)
+                wifiPendingReads -= 1
+                if wifiPendingReads == 0 { updateWiFi(modemID: modemID) }
+                return response
+            }
             return try reply(wifi)
         case ("PUT", "/wifi-calling/settings"):
             struct Submission: Decodable { let enabled: Bool; let underlay: WiFiUnderlay }
@@ -116,6 +124,10 @@ struct ConnectionFixture: Sendable {
         case ("GET", "/volte/settings"):
             var current = volte
             if airplane { current.connected = false; current.modemRegistered = false; current.state = "disconnected" }
+            if volte.state == "connecting", voltePendingReads > 0 {
+                voltePendingReads -= 1
+                if voltePendingReads == 0 { volte.connected = true; volte.state = "connected" }
+            }
             return try reply(current)
         case ("PUT", "/volte/settings"):
             if airplane { return error("volte_airplane_mode", status: 409) }
@@ -128,8 +140,8 @@ struct ConnectionFixture: Sendable {
                 volte.dataPath = path
             }
             volte.enabled = value.enabled
-            volte.connected = value.enabled
-            volte.state = value.enabled ? "connected" : "disconnected"
+            volte.connected = value.enabled && voltePendingReads == 0
+            volte.state = value.enabled ? (voltePendingReads == 0 ? "connected" : "connecting") : "disconnected"
         default:
             return error("method_not_allowed", status: 405)
         }
@@ -158,6 +170,12 @@ struct ConnectionFixture: Sendable {
     }
 
     private mutating func updateWiFi(modemID: String) {
+        if wifi.enabled, wifiPendingReads > 0 {
+            wifi.connected = false
+            wifi.state = "connecting"
+            wifi.websheet = nil
+            return
+        }
         wifi.connected = wifi.enabled && !wifiRequiresSetup
         wifi.state = !wifi.enabled ? "disconnected" : wifiRequiresSetup ? "websheet_required" : "connected"
         wifi.durationSeconds = 0

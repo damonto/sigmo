@@ -6,7 +6,10 @@ enum BackendAuthentication: String { case unknown, notRequired, required, authen
 
 @MainActor @Observable
 final class BackendSession: Identifiable {
-    private(set) var savedContacts: [SigmoContact] = []
+    private(set) var savedContacts: [SigmoContact] = [] {
+        didSet { contactIndex = ContactIndex(savedContacts) }
+    }
+    @ObservationIgnored private var contactIndex = ContactIndex([])
     @ObservationIgnored private var contactsRevision = 0
     @ObservationIgnored private var contactsTask: Task<Void, Error>?
     @ObservationIgnored private var contactsLoadedAt = Date.distantPast
@@ -17,6 +20,8 @@ final class BackendSession: Identifiable {
     private(set) var communicationBackendID = ""
     private(set) var configuration: BackendConfiguration
     nonisolated let id: UUID
+    // A saved connection ID survives endpoint changes; a live session never does.
+    nonisolated let incarnationID = UUID()
     private(set) var license: BackendLicense = .unknown
     var isDemo: Bool { api.isDemo }
     private(set) var authentication: BackendAuthentication = .unknown
@@ -35,12 +40,14 @@ final class BackendSession: Identifiable {
     private(set) var authFailure: BackendFailure?
     private(set) var authMethods: AuthMethods?
     private(set) var isBrowserLogin = false
+    private(set) var isLoggingOut = false
     var supportsOTP: Bool { authMethods?.mode == "otp" }
     var supportsBrowserLogin: Bool { accessChallenge != nil || authMethods?.mode == "oidc" }
     @ObservationIgnored private var accessChallenge: AccessChallenge?
     @ObservationIgnored private var otpChallenge: String?
     @ObservationIgnored private var credential: SessionCredential?
     @ObservationIgnored private var credentialRefresh: Task<String?, any Error>?
+    @ObservationIgnored private var logoutTask: Task<Void, Never>?
     @ObservationIgnored private let browser = BrowserAuthentication()
     @ObservationIgnored private let managedAccess = ManagedAccess()
     private(set) var resendAvailableAt = Date.distantPast
@@ -110,7 +117,7 @@ final class BackendSession: Identifiable {
     }
 
     func refresh(force: Bool = false) async {
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, !isLoggingOut else { return }
         if let refreshTask { await refreshTask.value; return }
         guard force || clock.now() >= nextRefresh else { return }
         let current = generation
@@ -207,25 +214,13 @@ final class BackendSession: Identifiable {
                 await refreshUnreadCounts()
             } catch {
                 try check(current)
-                if (error as? BackendFailure)?.isLocalAuthenticationFailure == true {
-                    revokeAccess()
-                    return
-                }
                 throw error
             }
         } catch {
             guard isCurrent(current) else { return }
-            if let challenge = error as? AccessChallenge {
-                accessChallenge = challenge
-                revokeAccess()
-                authFailure = nil
+            if handleAuthenticationFailure(error) {
                 failure = nil
                 finishRefresh()
-                return
-            }
-            if (error as? BackendFailure)?.isLocalAuthenticationFailure == true {
-                revokeAccess()
-                failure = nil
                 return
             }
             if checkingLicense { license = .unavailable }
@@ -262,23 +257,46 @@ final class BackendSession: Identifiable {
     }
 
     func removeCredentials() throws {
+        discardCredentials()
+        pendingCredentialRemoval = true
+        try credentials.write(id, nil)
+        pendingCredentialRemoval = false
+    }
+
+    // Configuration commits use this after removing credentials from storage.
+    // Keeping invalidation separate permits a failed file write to restore the
+    // Keychain item without interrupting the still-configured live session.
+    func discardCredentials() {
         stop()
         accessRevision += 1
         cancelCallRequests()
         token = nil
         credential = nil
-        pendingCredentialRemoval = true
+        pendingCredentialRemoval = false
         clearDevices()
         authentication = .required
-        try credentials.write(id, nil)
-        pendingCredentialRemoval = false
     }
 
     func logout() async {
+        if let logoutTask { await logoutTask.value; return }
+        isLoggingOut = true
+        // The session owns revocation even when publishing the logged-out state
+        // removes the initiating button, or the caller leaves the page.
+        let task = Task {
+            await performLogout()
+            isLoggingOut = false
+            logoutTask = nil
+        }
+        logoutTask = task
+        await task.value
+    }
+
+    private func performLogout() async {
         var saved = credential
         // Stop operations immediately. An expired access token must be refreshed
         // before revocation, otherwise its still-valid refresh token would survive logout.
         stop()
+        let current = generation
         cancelCallRequests()
         authentication = .required
         clearDevices()
@@ -288,21 +306,26 @@ final class BackendSession: Identifiable {
                 else { _ = try await freshToken(); saved = credential }
             }
         } catch {
+            guard current == generation else { return }
             let remoteFailure = BackendFailure.wrapping(error)
             do { try removeCredentials() } catch { authFailure = .wrapping(error); return }
             authFailure = remoteFailure
             return
         }
+        guard current == generation else { return }
         do { try removeCredentials() }
         catch { authFailure = .wrapping(error); return }
+        let revision = accessRevision
         do {
             if let saved {
                 if saved.access != nil { try await managedAccess.revoke(saved) }
                 else { try await api.revokeSession(token: saved.accessToken) }
             }
+            guard revision == accessRevision else { return }
             authFailure = nil
             failure = nil
         } catch {
+            guard revision == accessRevision else { return }
             let remoteFailure = BackendFailure.wrapping(error)
             authFailure = remoteFailure
         }
@@ -312,6 +335,18 @@ final class BackendSession: Identifiable {
         do { try removeCredentials(); authFailure = nil }
         catch { authFailure = .wrapping(error) }
         nextRefresh = clock.now().addingTimeInterval(30)
+    }
+
+    @discardableResult
+    private func handleAuthenticationFailure(_ error: Error) -> Bool {
+        if let challenge = error as? AccessChallenge {
+            accessChallenge = challenge
+        } else if (error as? BackendFailure)?.isLocalAuthenticationFailure != true {
+            return false
+        }
+        revokeAccess()
+        failure = nil
+        return true
     }
 
     private func saveCredential(_ value: SessionCredential) throws {
@@ -344,13 +379,17 @@ final class BackendSession: Identifiable {
         do { return try await task.value }
         catch {
             // A lost refresh response has an unknown outcome. Never replay a rotating credential.
-            if isCurrent(current) { revokeAccess() }
+            // A connection that could not be established did not rotate the
+            // credential. Timeouts and lost connections still have unknown outcomes.
+            if isCurrent(current), BackendFailure.wrapping(error).transportCode != .notConnectedToInternet {
+                if !handleAuthenticationFailure(error) { revokeAccess() }
+            }
             throw error
         }
     }
 
     func loginWithBrowser() async {
-        guard !isBrowserLogin, supportsBrowserLogin else { return }
+        guard !Task.isCancelled, !isLoggingOut, !isBrowserLogin, supportsBrowserLogin else { return }
         stop()
         let current = generation
         isBrowserLogin = true
@@ -420,7 +459,9 @@ final class BackendSession: Identifiable {
             return value
         } catch {
             try check(current)
-            if (error as? BackendFailure)?.isLocalAuthenticationFailure == true { revokeAccess() }
+            if handleAuthenticationFailure(error), error is AccessChallenge {
+                throw BackendFailure.local("status.loginRequired")
+            }
             throw error
         }
     }
@@ -491,7 +532,9 @@ final class BackendSession: Identifiable {
             return value
         } catch {
             try Task.checkCancellation()
-            if accessRevision == revision, (error as? BackendFailure)?.isLocalAuthenticationFailure == true { revokeAccess() }
+            if accessRevision == revision, handleAuthenticationFailure(error), error is AccessChallenge {
+                throw BackendFailure.local("status.loginRequired")
+            }
             throw error
         }
     }
@@ -502,7 +545,7 @@ final class BackendSession: Identifiable {
     }
 
     func sendOTP() async {
-        guard !Task.isCancelled, !isSendingOTP, supportsOTP, clock.now() >= resendAvailableAt, authentication == .required else { return }
+        guard !Task.isCancelled, !isLoggingOut, !isSendingOTP, supportsOTP, clock.now() >= resendAvailableAt, authentication == .required else { return }
         isSendingOTP = true
         authFailure = nil
         await action { current in
@@ -522,7 +565,7 @@ final class BackendSession: Identifiable {
     }
 
     func verifyOTP(_ code: String) async {
-        guard !Task.isCancelled, !isVerifyingOTP, let challenge = otpChallenge, supportsOTP, code.count == 6, code.utf8.allSatisfy({ (48...57).contains($0) }) else { return }
+        guard !Task.isCancelled, !isLoggingOut, !isVerifyingOTP, let challenge = otpChallenge, supportsOTP, code.count == 6, code.utf8.allSatisfy({ (48...57).contains($0) }) else { return }
         // Cancel earlier reads before a new credential can become authoritative.
         stop()
         isVerifyingOTP = true
@@ -575,8 +618,8 @@ final class BackendSession: Identifiable {
                 detailFailures[id] = nil
             } catch {
                 guard isCurrent(current), revision == deviceRevision else { return }
+                if handleAuthenticationFailure(error) { return }
                 let failure = BackendFailure.wrapping(error)
-                if failure.isLocalAuthenticationFailure { revokeAccess(); return }
                 if failure.status == 404 {
                     modems.removeAll { $0.id == id }
                     unreadCounts[id] = nil
@@ -751,8 +794,9 @@ extension BackendSession {
         return try await task.value
     }
     func contacts(matching number: String) -> [SigmoContact] {
-        let key = PhoneNumberDisplay.submission(number, regionCode: nil)
-        return savedContacts.filter { $0.numbers.contains { $0.key == key || $0.number == number } }
+        // Register the observable dependency; the derived index is not observed.
+        _ = savedContacts
+        return contactIndex.matches(number)
     }
     func contact(for number: String) -> SigmoContact? {
         let matches = contacts(matching: number)

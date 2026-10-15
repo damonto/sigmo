@@ -11,12 +11,14 @@ struct CallRecordingsView: View {
             Section {
                 Text("calls.recordingsLocal").font(.footnote).foregroundStyle(.secondary)
                 if let failure = calls.recordings.failure { FailureView(failure: failure) }
-                if calls.recordings.busy { ProgressView("calls.savingRecording") }
+                if calls.recordings.loading { ProgressView("communication.loading") }
+                else if calls.recordings.busy { ProgressView("calls.savingRecording") }
             }
             ForEach(entries) { CallRecordingRow(entry: $0) }
-            if entries.isEmpty { ContentUnavailableView("calls.noRecordings", systemImage: "waveform") }
+            if calls.recordings.loaded, entries.isEmpty { ContentUnavailableView("calls.noRecordings", systemImage: "waveform") }
         }
         .navigationTitle("calls.recordings")
+        .task { await calls.recordings.load() }
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("common.done") { dismiss() } } }
         .onDisappear { calls.recordings.stopPlayback() }
     }

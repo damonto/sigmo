@@ -16,7 +16,7 @@ enum CarrierWebsheetAddress {
 
 struct CarrierWebsheetView: UIViewRepresentable {
     let url: URL
-    let callback: (CarrierCallback) -> Void
+    let callback: (CarrierCallbackDelivery) -> Void
     let failure: (BackendFailure) -> Void
     var fixtureHTML: String? = nil
     var session: BackendSession? = nil
@@ -58,17 +58,46 @@ struct CarrierWebsheetView: UIViewRepresentable {
             } catch (_) {}
             return value;
           };
+          // The server bridge posts first, then notifies its parent. Preserve that
+          // acknowledgment so native UI never submits the same callback again.
+          const deliveries = new Map();
+          const remember = (key, status) => {
+            deliveries.set(key, status);
+            if (deliveries.size > 64) deliveries.delete(deliveries.keys().next().value);
+          };
+          const callbackKey = (input, init) => {
+            try {
+              const target = new URL(input instanceof Request ? input.url : input, location.href);
+              if (target.host !== root.host || target.pathname !== root.pathname + '/callback') return null;
+              if ((init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase() !== 'POST') return null;
+              if (typeof init?.body !== 'string') return null;
+              return JSON.stringify(JSON.parse(init.body));
+            } catch (_) { return null; }
+          };
           const fetch = window.fetch;
           window.fetch = function(input, init) {
             if (input instanceof Request) input = new Request(rewrite(input.url), input);
             else input = rewrite(input);
-            return fetch.call(this, input, init);
+            const key = callbackKey(input, init);
+            try {
+              const result = fetch.call(this, input, init);
+              if (key === null) return result;
+              // The native resource loader rejects unsuccessful HTTP responses.
+              return result.then(response => { remember(key, 'submitted'); return response; }, error => {
+                remember(key, 'failed'); throw error;
+              });
+            } catch (error) {
+              if (key !== null) remember(key, 'failed');
+              throw error;
+            }
           };
           const open = XMLHttpRequest.prototype.open;
           XMLHttpRequest.prototype.open = function(method, url, ...rest) { return open.call(this, method, rewrite(url), ...rest); };
           window.addEventListener('message', event => {
             if (event.source !== window || event.origin !== location.origin || event.data?.type !== 'sigmo-websheet-callback') return;
-            window.webkit.messageHandlers.sigmoNative.postMessage(JSON.stringify(event.data.callback));
+            const callback = event.data.callback;
+            const status = deliveries.get(JSON.stringify(callback)) || 'native';
+            window.webkit.messageHandlers.sigmoNative.postMessage(JSON.stringify({callback, status}));
           });
         })();
         """
@@ -135,7 +164,7 @@ struct CarrierWebsheetView: UIViewRepresentable {
             guard message.frameInfo.isMainFrame, let origin = message.frameInfo.request.url,
                   (BackendAddress.sameOrigin(parent.url, origin) || BackendAddress.sameOrigin(CarrierResourceLoader.localURL(parent.url), origin)),
                   let raw = message.body as? String, let data = raw.data(using: .utf8) else { return }
-            do { parent.callback(try JSONDecoder().decode(CarrierCallback.self, from: data)) }
+            do { parent.callback(try JSONDecoder().decode(CarrierCallbackDelivery.self, from: data)) }
             catch { parent.failure(.local("api.invalidResponse")) }
         }
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
