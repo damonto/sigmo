@@ -325,7 +325,7 @@ struct ContactEditView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("communication.save", systemImage: "checkmark") { Task { await save() } }
-                        .labelStyle(.iconOnly).disabled(saving || !session.canAccessDevices || session.capabilities?.contains("contacts") != true || (contact.name.isEmpty && contact.numbers.isEmpty))
+                        .labelStyle(.iconOnly).disabled(saving || !session.canAccessDevices || (contact.name.isEmpty && contact.numbers.isEmpty))
                 }
             }
             .alert("communication.delete", isPresented: $deleting) {

@@ -38,6 +38,7 @@ enum PreviewBackends {
                 let fixture: DetailFixtureServer.Scenario
                 switch scenario {
                 case "detail-loading": fixture = .delayedProfiles
+                case "detail-refresh": fixture = .profileRefresh
                 case "detail-unavailable": fixture = .unavailableProfiles
                 case "detail-single": fixture = .singleHardware
                 case "detail-notifications": fixture = .notifications
@@ -143,7 +144,12 @@ actor PreviewBackendServer {
             return BackendHTTPResponse(data: try JSONEncoder().encode(settingsServer.app), status: 200)
         }
         if path.hasSuffix("/capabilities") {
-            return reply(200, host == "home.sigmo.test" ? #"{"features":["wifiCalling","esimTransfer","volte"]}"# : #"{"features":null}"#)
+            return reply(200, host == "home.sigmo.test" ? #"{"features":["contacts","messageThreads","historyAssignments","wifiCalling","esimTransfer","volte"]}"# : #"{"features":["contacts","messageThreads","historyAssignments"]}"#)
+        }
+        if request.httpMethod == "GET" {
+            if path.hasSuffix("/contacts") || path.hasSuffix("/sim-profiles") { return reply(200, #"{"items":[]}"#) }
+            if path.hasSuffix("/message-threads") { return reply(200, #"{"items":[],"nextCursor":""}"#) }
+            if path.hasSuffix("/conversations") { return reply(200, #"{"backendId":"fixture-preview","revision":0,"unreadCount":0,"items":[]}"#) }
         }
         if path.hasSuffix("/auth/sessions/current") { return reply(204, "") }
         if path.hasSuffix("/auth/methods") { return reply(200, AuthenticationFixture.methods(required: requiresOTP)) }

@@ -93,6 +93,7 @@ func corePermissions() []Permission {
 		{Name: "sim.read", Module: "sim"},
 		{Name: "sim.switch", Module: "sim"},
 		{Name: "sim.update", Module: "sim"},
+		{Name: "sim.pin", Module: "sim"},
 		{Name: "esim.read", Module: "esim"},
 		{Name: "esim.download", Module: "esim"},
 		{Name: "esim.manage", Module: "esim"},
@@ -139,6 +140,9 @@ func (t *coreTools) getNetworkStatus(ctx context.Context, _ *mcp.CallToolRequest
 }
 
 func (t *coreTools) register(c *Catalog) error {
+	if err := t.registerSIMPIN(c); err != nil {
+		return err
+	}
 	registrations := []func() error{
 		func() error {
 			return AddTool(c, "network.read", ReadTool("get_network_status", "Get current network registration, operator, signal and radio technology"), modemID, t.getNetworkStatus)

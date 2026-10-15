@@ -128,6 +128,7 @@ func (l *lifecycle) PrepareEnable(ctx context.Context, modem *mmodem.Modem, seID
 func (s *enableSession) Enable(ctx context.Context) error {
 	defer s.Close()
 
+	s.modem.InvalidateSIMActivation()
 	if err := s.client.EnableProfile(s.iccid, true); err != nil {
 		return fmt.Errorf("enable profile %s: %w", s.iccid.String(), err)
 	}

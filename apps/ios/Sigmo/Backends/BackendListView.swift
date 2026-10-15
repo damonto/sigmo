@@ -8,9 +8,6 @@ private enum BackendListSheet: String, Identifiable {
 
 struct BackendListView: View {
     @Environment(BackendStore.self) private var store
-    @Environment(CallsState.self) private var calls
-    @Environment(\.demoSession) private var demoSession
-    @State private var demo: DemoPresentation?
     @State private var sheet: BackendListSheet?
     @State private var refreshFailure: BackendFailure?
 
@@ -33,18 +30,6 @@ struct BackendListView: View {
                         .accessibilityIdentifier("backend-\(backend.id)")
                     }
                 }
-            }
-            if demoSession == nil {
-                Section {
-                    Button {
-                        do { demo = try DemoPresentation() }
-                        catch { store.failure = .wrapping(error) }
-                    } label: {
-                        Label("demo.try", systemImage: "play.rectangle")
-                    }
-                    .disabled(calls.hasCall)
-                    .accessibilityIdentifier("tryDemo")
-                } footer: { Text("demo.entryDescription") }
             }
             #if DEBUG
             Section {
@@ -78,25 +63,12 @@ struct BackendListView: View {
                     .accessibilityIdentifier("addBackend")
             }
         }
-        .fullScreenCover(item: demoBinding) { demo in
-            DemoView(presentation: demo, liveCalls: calls)
-        }
         .sheet(item: $sheet) { value in
             switch value {
             case .add: BackendEditor()
             case .order: BackendOrderView()
             }
         }
-    }
-
-    private var demoBinding: Binding<DemoPresentation?> {
-        Binding(get: { demo }, set: { next in
-            let previous = demo
-            demo = next
-            if previous?.id != next?.id {
-                Task { await previous?.close() }
-            }
-        })
     }
 }
 

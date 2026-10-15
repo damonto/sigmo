@@ -99,7 +99,6 @@ struct MessagesView: View {
 
     private var list: some View {
         List {
-            if state.legacy { Text("messages.upgrade").font(.footnote).foregroundStyle(.secondary) }
             if !state.loaded && state.loading {
                 ForEach(0..<5) { _ in
                     HStack(spacing: 12) {
@@ -138,11 +137,9 @@ struct MessagesView: View {
                                 .accessibilityLabel(Text("common.delete"))
                         }
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                            if !state.legacy {
-                                Button(conversation.unreadCount > 0 ? "messages.markRead" : "messages.markUnread", systemImage: conversation.unreadCount > 0 ? "envelope.open" : "envelope.badge") {
-                                    action = ConversationAction(conversation: conversation, kind: conversation.unreadCount > 0 ? .read : .unread)
-                                }.tint(.blue)
-                            }
+                            Button(conversation.unreadCount > 0 ? "messages.markRead" : "messages.markUnread", systemImage: conversation.unreadCount > 0 ? "envelope.open" : "envelope.badge") {
+                                action = ConversationAction(conversation: conversation, kind: conversation.unreadCount > 0 ? .read : .unread)
+                            }.tint(.blue)
                         }
                 }
             }
@@ -165,7 +162,6 @@ struct MessagesView: View {
                 Text("messages.unread").tag(true)
             }
             .pickerStyle(.segmented)
-            .disabled(state.legacy)
             .accessibilityIdentifier("messages-unread-filter")
             Menu {
                 Toggle("messages.historical", isOn: $state.historical)

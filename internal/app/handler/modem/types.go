@@ -28,7 +28,10 @@ type UpdateMSISDNRequest struct {
 }
 
 type UnlockSIMRequest struct {
-	PIN string `json:"pin"`
+	PIN      string `json:"pin"`
+	PUK      string `json:"puk"`
+	NewPIN   string `json:"newPin"`
+	SIMToken string `json:"simToken"`
 }
 
 type UpdateModemSettingsRequest struct {

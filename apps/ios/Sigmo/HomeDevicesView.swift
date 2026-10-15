@@ -26,8 +26,12 @@ extension BackendStore {
 
 struct HomeDevicesView: View {
     @Environment(BackendStore.self) private var store
+    @Environment(CallsState.self) private var calls
+    @Environment(\.demoSession) private var demoSession
+    @State private var demo: DemoPresentation?
+    @State private var demoFailure: BackendFailure?
     let backendID: UUID?
-    let search: String
+    @Binding var search: String
     var add: () -> Void
     var open: (BackendDestination) -> Void
 
@@ -41,26 +45,72 @@ struct HomeDevicesView: View {
         }
         .background(Color(uiColor: .systemGroupedBackground))
         .detailErrorAlert(store.failure)
+        .fullScreenCover(item: demoBinding) { demo in
+            DemoView(presentation: demo, liveCalls: calls)
+        }
     }
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("backends.empty.title", systemImage: "server.rack")
-        } description: {
-            Text("backends.empty.description")
-        } actions: {
-            Button(action: add) {
-                HStack(spacing: 8) {
-                    Image(systemName: "plus").accessibilityHidden(true)
-                    Text("backends.connect").fixedSize(horizontal: false, vertical: true)
+        ScrollView {
+            VStack(spacing: 32) {
+                VStack(spacing: 16) {
+                    Image(systemName: "server.rack")
+                        .font(.largeTitle)
+                        .imageScale(.large)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text("home.welcome.title")
+                        .font(.title.bold())
+                        .accessibilityAddTraits(.isHeader)
+                    Text("home.welcome.description")
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(spacing: 16) {
+                    Button("backends.connect", systemImage: "server.rack", action: add)
+                        .buttonStyle(.glassProminent)
+                        .controlSize(.large)
+                        .buttonSizing(.flexible)
+                        .accessibilityIdentifier("connectSigmo")
+
+                    if demoSession == nil {
+                        Button {
+                            do { demo = try DemoPresentation() }
+                            catch { demoFailure = .wrapping(error) }
+                        } label: {
+                            Text("demo.try")
+                                .font(.body.weight(.semibold))
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless)
+                        .tint(.accentColor)
+                        .disabled(calls.hasCall)
+                        .accessibilityHint(Text("demo.entryDescription"))
+                        .accessibilityIdentifier("tryDemo")
+                    }
                 }
             }
-            .buttonStyle(.borderedProminent)
-            .buttonBorderShape(.capsule)
-            .controlSize(.large)
+            .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
-            .accessibilityIdentifier("connectSigmo")
+            .frame(maxWidth: 480)
+            .padding(24)
+            .frame(maxWidth: .infinity)
         }
+        .defaultScrollAnchor(.center, for: .alignment)
+        .scrollBounceBehavior(.basedOnSize)
+        .detailErrorAlert($demoFailure)
+        .accessibilityIdentifier("homeWelcome")
+    }
+
+    private var demoBinding: Binding<DemoPresentation?> {
+        Binding(get: { demo }, set: { next in
+            let previous = demo
+            demo = next
+            if previous?.id != next?.id {
+                Task { await previous?.close() }
+            }
+        })
     }
 
     private var list: some View {
@@ -96,6 +146,9 @@ struct HomeDevicesView: View {
         .listStyle(.insetGrouped)
         .contentMargins(.top, 0, for: .scrollContent)
         .scrollDismissesKeyboard(.interactively)
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "home.search")
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
     }
 
     private func deviceRow(_ device: HomeDevice) -> some View {

@@ -23,15 +23,16 @@ struct CarrierWebsheetView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> WKWebView {
         let view = configuredWebView(coordinator: context.coordinator)
-        #if DEBUG
-        if let fixtureHTML {
-            view.loadHTMLString(fixtureHTML, baseURL: url)
-            return view
-        }
-        #endif
         view.load(URLRequest(url: CarrierResourceLoader.localURL(url)))
         return view
     }
+    private var localHTML: String? {
+        #if DEBUG
+        if let fixtureHTML { return fixtureHTML }
+        #endif
+        return session?.isDemo == true ? DemoResources.carrierHTML : nil
+    }
+
     // Separating configuration permits local HTML to exercise the real bridge without network access.
     func configuredWebView(coordinator: Coordinator) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -99,13 +100,13 @@ struct CarrierWebsheetView: UIViewRepresentable {
                     guard let session = parent.session else { throw BackendFailure.local("detail.websheetInvalid") }
                     let request = try resources.request(urlSchemeTask.request)
                     let result: BackendHTTPResponse
-                    if session.isDemo {
+                    if let html = parent.localHTML {
                         // Keep the same WebKit origin and native callback bridge,
-                        // but serve demo content without creating a URLSession.
+                        // but serve local content without creating a URLSession.
                         guard request.url == parent.url, request.httpMethod == "GET" else {
                             throw BackendFailure.local("demo.unsupportedRequest")
                         }
-                        result = BackendHTTPResponse(data: Data(DemoResources.carrierHTML.utf8), status: 200, contentType: "text/html; charset=utf-8")
+                        result = BackendHTTPResponse(data: Data(html.utf8), status: 200, contentType: "text/html; charset=utf-8")
                     } else {
                         let resources = resources
                         result = try await session.protectedRequest { _, token in try await resources.load(request, token: token) }

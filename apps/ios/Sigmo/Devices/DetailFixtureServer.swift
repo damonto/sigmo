@@ -46,7 +46,7 @@ final class DetailFixtureBuffer: Sendable {
 actor DetailFixtureServer {
     enum Scenario {
         case standard, delayedProfiles, unavailableProfiles, singleHardware, notifications, delayedDiscoveries, noDiscoveries, unavailableDiscoveries, emptyProfiles
-        case delayedDeletion, deletionFailure
+        case delayedDeletion, deletionFailure, profileRefresh
         case delayedActivation, activationFailure
         case mixedTransferProfiles, unsupportedTransferProfiles
         case delayedSettings, unavailableSettings, unsupportedSettings, settingsWriteFailure
@@ -64,7 +64,8 @@ actor DetailFixtureServer {
     private var notifications: [ESIMNotificationGroup]
     private var activeSE = "se-a"
     private var connections: [String: ConnectionFixture] = [:]
-    private var capabilities = ["wifiCalling", "volte", "esimTransfer"]
+    private var capabilities = ["contacts", "messageThreads", "historyAssignments", "wifiCalling", "volte", "esimTransfer"]
+    private var pinFixtures: [String: SIMPINFixture] = [:]
     private var modemSettings: [String: ModemSettingsFixture] = [:]
     private var requestStatus: [String: Int] = [:]
     private var profilesOverride: Data?
@@ -145,7 +146,7 @@ actor DetailFixtureServer {
             connection.statuses["PUT /internet-connections/current/preferences"] = 503
             connection.statuses["PUT /volte/settings"] = 503
         case .connectionMBIM: connection.volte.dataPath = "mbim"
-        case .connectionCommunity: capabilities = []
+        case .connectionCommunity: capabilities = ["contacts", "messageThreads", "historyAssignments"]
         default: break
         }
         connections["device-1"] = connection
@@ -173,7 +174,7 @@ actor DetailFixtureServer {
     func setStatus(_ suffix: String, _ status: Int) { requestStatus[suffix] = status }
     func setConnectionFixture(_ value: ConnectionFixture, modemID: String = "device-1") { connections[modemID] = value }
     func currentConnections(_ id: String = "device-1") -> ConnectionFixture { connections[id] ?? ConnectionFixture() }
-    func setCapabilities(_ value: [String]) { capabilities = value }
+    func setCapabilities(_ value: [String]) { capabilities = ["contacts", "messageThreads", "historyAssignments"] + value }
     func setModemSettings(_ value: ModemSettingsFixture, modemID: String = "device-1") { modemSettings[modemID] = value }
     func currentModemSettings(_ id: String = "device-1") -> ModemSettingsFixture { settingsFixture(id) }
     func setProfilesData(_ data: Data?) { profilesOverride = data }
@@ -235,6 +236,11 @@ actor DetailFixtureServer {
         if path.hasSuffix("/license") { return HTTPProblem.response(status: 404, code: "resource_not_found", detail: "Not found") }
         if path.hasSuffix("/app") { return raw(#"{"version":"1","commit":"fixture","channel":"stable","edition":"pro","target":"linux-arm64","distribution":"local"}"#) }
         if path.hasSuffix("/capabilities") { return try reply(["features": capabilities]) }
+        if method == "GET" {
+            if path.hasSuffix("/contacts") || path.hasSuffix("/sim-profiles") { return raw(#"{"items":[]}"#) }
+            if path.hasSuffix("/message-threads") { return raw(#"{"items":[],"nextCursor":""}"#) }
+            if path.hasSuffix("/conversations") { return raw(#"{"backendId":"fixture-detail","revision":0,"unreadCount":0,"items":[]}"#) }
+        }
         if path.hasSuffix("/auth/sessions/current") { return raw("", status: 204) }
         if path.hasSuffix("/auth/methods") { return raw(AuthenticationFixture.methods(required: false)) }
         let parts = path.components(separatedBy: "/")
@@ -253,6 +259,13 @@ actor DetailFixtureServer {
             var settings = settingsFixture(modemID)
             defer { modemSettings[modemID] = settings }
             let resource = "/" + parts.dropFirst(modemIndex + 2).joined(separator: "/")
+            let pinKey = "\(modemID):\(slot):\(activeSE):\(groups.flatMap(\.profiles).first { $0.enabled }?.iccid ?? "")"
+            var pin = pinFixtures[pinKey] ?? SIMPINFixture(locked: locked, token: pinKey)
+            if let result = try pin.respond(request, resource: resource) {
+                pinFixtures[pinKey] = pin
+                locked = pin.lock != .unlocked
+                return result
+            }
             if let result = try settings.respond(request, resource: resource) { return result }
             var connection = currentConnections(modemID)
             defer { connections[modemID] = connection }
@@ -264,12 +277,11 @@ actor DetailFixtureServer {
         if path.hasSuffix("/esims"), method == "GET" {
             if scenario == .unavailableProfiles { return HTTPProblem.response(status: 503, code: "remote_error", detail: "Fixture error") }
             if let profilesOverride { return BackendHTTPResponse(data: profilesOverride, status: 200) }
+            if scenario == .profileRefresh,
+               requests.filter({ $0.httpMethod == "GET" && $0.url?.path == path }).count > 1 {
+                groups[0].profiles[1].name = "Travel Refreshed"
+            }
             return try reply(ESIMProfiles(ses: groups))
-        }
-        if path.hasSuffix("/sim-unlocks") {
-            let value = try JSONDecoder().decode([String: String].self, from: request.httpBody ?? Data())
-            if value["pin"] != "1234" { return HTTPProblem.response(status: 400, code: "remote_error", detail: "Incorrect PIN") }
-            locked = false; return raw("", status: 204)
         }
         if path.contains("/sim-slots/") { slot = Int(parts.last ?? "") ?? 1; return raw("", status: 204) }
         if path.hasSuffix("/msisdn") {

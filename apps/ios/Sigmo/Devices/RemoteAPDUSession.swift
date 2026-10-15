@@ -43,7 +43,7 @@ final class RemoteAPDUSession {
             // No APDU may execute before the protocol version is acknowledged.
             let ready = try await readEvent(browsing: true)
             guard ready.type == "source_ready", ready.version == 1 else {
-                throw BackendFailure.local("detail.remoteCardUnsupported")
+                throw BackendFailure.local("api.invalidResponse")
             }
         } catch {
             close()
@@ -93,8 +93,8 @@ final class RemoteAPDUSession {
     }
 
     private func readEvent(browsing: Bool) async throws -> ESIMServerMessage {
-        // An older backend may ignore the handshake. Interactive carrier waits
-        // remain unbounded; each browsing wait has a deadline.
+        // Bound protocol handshakes and profile reads while allowing the user
+        // to take as long as needed at interactive carrier prompts.
         let timeout: Task<Void, Error>? = browsing ? Task { [weak self] in
             try await Task.sleep(for: .seconds(45))
             self?.close()

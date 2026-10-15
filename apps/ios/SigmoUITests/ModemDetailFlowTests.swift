@@ -12,6 +12,7 @@ final class ModemDetailFlowTests: XCTestCase {
         app.launchEnvironment["SIGMO_UI_APPEARANCE"] = dark ? "dark" : "light"
         app.launchArguments = ["-AppleLanguages", chinese ? "(zh-Hans)" : "(en)", "-AppleLocale", chinese ? "zh_CN" : "en_US", "-UIPreferredContentSizeCategoryName", large ? "UICTContentSizeCategoryAccessibilityXXXL" : "UICTContentSizeCategoryL"]
         app.launch()
+        if scenario == "detail-reminder" { return app }
         let modem = app.descendants(matching: .any)["modem-00000000-0000-0000-0000-000000000001-device-1"].firstMatch
         XCTAssertTrue(modem.waitForExistence(timeout: 10)); modem.tap()
         return app
@@ -104,12 +105,25 @@ final class ModemDetailFlowTests: XCTestCase {
         app.descendants(matching: .any)["esimNotification-" + id].firstMatch
     }
 
-    func testContactsOnOlderBackendShowsUpgradeAndKeepsDeviceNavigation() {
+    func testDeletingReminderProfileKeepsHistoryAssignmentOpen() {
+        let app = launch("detail-reminder")
+        XCTAssertTrue(app.switches["profileEnabled-se-a:8986000000000000002"].waitForExistence(timeout: 10))
+        tap(app.buttons["Delete eSIM"], in: app)
+        tap(app.alerts.buttons["confirmDetailAction"].firstMatch, in: app)
+        let assignment = app.descendants(matching: .any)["history-assignment-8986000000000000002"].firstMatch
+        XCTAssertTrue(assignment.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        app.buttons["historyAssignmentLater"].tap()
+        XCTAssertTrue(assignment.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["manageBackends"].waitForExistence(timeout: 5))
+    }
+
+    func testContactsKeepsDeviceNavigation() {
         let app = launch()
         let contacts = app.tabBars.buttons["Contacts"]
         XCTAssertTrue(contacts.waitForExistence(timeout: 5)); contacts.tap()
-        XCTAssertTrue(app.staticTexts["Update this Sigmo backend to use this feature."].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["modem-contact-actions"].exists)
+        XCTAssertTrue(app.staticTexts["No contacts yet. Add your first contact."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["modem-contact-actions"].isEnabled)
         app.tabBars.buttons["SIM"].tap()
         XCTAssertTrue(app.buttons["modemInfo"].waitForExistence(timeout: 5))
         app.buttons["backToDevices"].tap()
@@ -398,23 +412,83 @@ final class ModemDetailFlowTests: XCTestCase {
         }
     }
 
-    func testIncorrectPINAlertPreservesEditor() {
+    func testIncorrectPINClearsCredentialsAndRefreshesAttempts() {
         let app = launch("detail-locked")
-        let pin = app.secureTextFields["detailInput"]
+        let pin = app.secureTextFields["simUnlockPIN"]
         XCTAssertTrue(pin.waitForExistence(timeout: 5))
-        pin.typeText("0000")
-        tap(app.buttons["saveDetail"], in: app)
-        let alert = app.alerts.firstMatch
-        XCTAssertTrue(alert.waitForExistence(timeout: 5))
-        XCTAssertTrue(alert.staticTexts["Incorrect PIN"].exists)
-        screenshot(app, name: "PIN error alert")
-        alert.buttons["OK"].tap()
-        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(pin.exists)
-        XCTAssertTrue(app.buttons["saveDetail"].isEnabled)
-        pin.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4) + "1234")
-        tap(app.buttons["saveDetail"], in: app)
+        XCTAssertEqual(app.secureTextFields.count, 1)
+        XCTAssertFalse(app.switches["simPINProtection"].exists)
+        pin.tap(); pin.typeText("0000")
+        tap(app.buttons["simUnlockSubmit"], in: app)
+        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.alerts.staticTexts["Incorrect PIN. Check the remaining attempts before trying again."].exists)
+        app.alerts.buttons["OK"].tap()
+        XCTAssertTrue(app.staticTexts["PIN attempts remaining: 2"].exists)
+        XCTAssertFalse(app.buttons["simUnlockSubmit"].isEnabled)
+        screenshot(app, name: "PIN error and remaining attempts")
+        pin.tap(); pin.typeText("1234")
+        tap(app.buttons["simUnlockSubmit"], in: app)
         XCTAssertTrue(pin.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["addESIM-se-a"].waitForExistence(timeout: 5))
+    }
+
+    func testSIMPINManagementUsesNativeFailureAlert() {
+        let app = launch("detail-physical")
+        tapOverviewRow(app.buttons["physicalSIMPIN"], in: app)
+        let protection = app.switches["simPINProtection"]
+        XCTAssertTrue(protection.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Refresh status"].exists)
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: protection)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
+        protection.switches.firstMatch.tap()
+        let pin = app.secureTextFields["simPINCurrent"]
+        XCTAssertTrue(pin.waitForExistence(timeout: 5), app.debugDescription)
+        pin.tap(); pin.typeText("0000")
+        tap(app.buttons["simPINSubmit"], in: app)
+        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 5))
+        app.alerts.buttons["OK"].tap()
+        XCTAssertTrue(pin.exists)
+        XCTAssertFalse(app.buttons["simPINSubmit"].isEnabled)
+        XCTAssertTrue(app.staticTexts["PIN attempts remaining: 2"].exists)
+        pin.tap(); pin.typeText("1234")
+        tap(app.buttons["simPINSubmit"], in: app)
+        expectToggle(protection, value: "0")
+        XCTAssertFalse(app.staticTexts["The operation succeeded. Refresh status before another change."].exists)
+        protection.switches.firstMatch.tap()
+        pin.tap(); pin.typeText("1234")
+        tap(app.buttons["simPINSubmit"], in: app)
+        expectToggle(protection, value: "1")
+        tap(app.buttons["Change PIN"], in: app)
+        pin.tap(); pin.typeText("1234")
+        let replacement = app.secureTextFields["simPINNew"]
+        replacement.tap(); replacement.typeText("0001")
+        app.secureTextFields["simPINConfirmation"].tap()
+        app.secureTextFields["simPINConfirmation"].typeText("0001")
+        tap(app.buttons["simPINSubmit"], in: app)
+        XCTAssertTrue(pin.waitForNonExistence(timeout: 5))
+        screenshot(app, name: "SIM PIN settings")
+    }
+
+    func testPINTransitionsToPUKInUnlockSheet() {
+        let app = launch("detail-locked")
+        let current = app.secureTextFields["simUnlockPIN"]
+        for remaining in [2, 1, 0] {
+            XCTAssertTrue(current.waitForExistence(timeout: 5))
+            current.tap(); current.typeText("0000")
+            tap(app.buttons["simUnlockSubmit"], in: app)
+            XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 5))
+            app.alerts.buttons["OK"].tap()
+            let attempts = remaining == 0 ? "PUK attempts remaining: 10" : "PIN attempts remaining: \(remaining)"
+            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", attempts)).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
+        }
+        let replacement = app.secureTextFields["simUnlockNewPIN"]
+        XCTAssertTrue(replacement.waitForExistence(timeout: 5))
+        current.tap(); current.typeText("12345678")
+        replacement.tap(); replacement.typeText("0001")
+        app.secureTextFields["simUnlockConfirmation"].tap()
+        app.secureTextFields["simUnlockConfirmation"].typeText("0001")
+        tap(app.buttons["simUnlockSubmit"], in: app)
+        XCTAssertTrue(current.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.buttons["addESIM-se-a"].waitForExistence(timeout: 5))
     }
 
@@ -688,9 +762,9 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue(physical.buttons["saveReminder"].exists)
         physical.terminate()
         let locked = launch("detail-locked")
-        let pin = locked.secureTextFields["detailInput"]
+        let pin = locked.secureTextFields["simUnlockPIN"]
         XCTAssertTrue(pin.waitForExistence(timeout: 5)); pin.tap(); pin.typeText("1234")
-        tap(locked.buttons["saveDetail"], in: locked)
+        tap(locked.buttons["simUnlockSubmit"], in: locked)
         XCTAssertTrue(locked.buttons["addESIM-se-a"].waitForExistence(timeout: 5))
     }
 
@@ -769,15 +843,19 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue(app.buttons["confirmESIMPreview"].waitForExistence(timeout: 5))
         XCUIDevice.shared.press(.home)
         app.activate()
-        let alert = app.alerts.firstMatch
-        XCTAssertTrue(alert.waitForExistence(timeout: 5))
-        alert.buttons["OK"].tap()
-        XCTAssertTrue(app.staticTexts["Operation did not complete"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["Refresh"].exists)
-        XCTAssertFalse(app.buttons["confirmESIMPreview"].exists)
-        screenshot(app, name: "Interrupted download")
-        app.buttons["closeESIMFlow"].tap()
-        XCTAssertTrue(app.buttons["closeESIMFlow"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["confirmESIMPreview"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        XCTAssertFalse(app.buttons["startESIMDownload"].exists)
+        screenshot(app, name: "Download preview after returning to foreground")
+        tap(app.buttons["confirmESIMPreview"], in: app)
+        let code = app.secureTextFields["downloadConfirmation"]
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        code.tap()
+        code.typeText("1234")
+        tap(app.buttons["Confirm"], in: app)
+        XCTAssertTrue(app.staticTexts["eSIM Added"].waitForExistence(timeout: 10))
+        app.buttons["closeCompletedESIM"].tap()
+        XCTAssertTrue(app.buttons["addESIM-se-a"].waitForExistence(timeout: 5))
     }
 
     func testSlotActivationAndScopedDeletion() {
@@ -821,6 +899,10 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue(app.alerts.staticTexts["This cannot be undone."].exists)
         screenshot(app, name: "Delete eSIM confirmation")
         tap(app.buttons["confirmDetailAction"].firstMatch, in: app)
+        let later = app.buttons["historyAssignmentLater"]
+        XCTAssertTrue(later.waitForExistence(timeout: 5))
+        later.tap()
+        XCTAssertTrue(later.waitForNonExistence(timeout: 5))
         let deleted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["profileActions-se-b:8986000000000000002"])
         XCTAssertEqual(XCTWaiter.wait(for: [deleted], timeout: 5), .completed, app.debugDescription)
         XCTAssertTrue(app.buttons["profileActions-se-a:8986000000000000002"].exists)
@@ -921,28 +1003,39 @@ final class ModemDetailFlowTests: XCTestCase {
             XCTAssertTrue(other.isEnabled)
             XCTAssertTrue(other.label.contains(chinese ? "关闭" : "Off"), other.label)
 
-            XCTAssertTrue(row.waitForNonExistence(timeout: 12))
+            let later = app.buttons["historyAssignmentLater"]
+            XCTAssertTrue(later.waitForExistence(timeout: 12))
+            later.tap()
+            XCTAssertTrue(later.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(row.waitForNonExistence(timeout: 5))
             XCTAssertTrue(other.exists)
             XCTAssertFalse(app.alerts.firstMatch.exists)
             app.terminate()
         }
     }
 
-    func testForegroundRefreshDisablesActionsUntilSnapshotArrives() {
-        let app = launch("detail-loading")
+    func testExplicitRefreshReloadsProfileSnapshot() {
+        let app = launch("detail-refresh")
         let row = app.buttons["profileActions-se-a:8986000000000000002"]
         XCTAssertTrue(row.waitForExistence(timeout: 12))
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: row)
         XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 5), .completed)
+        XCTAssertFalse(row.label.contains("Travel Refreshed"))
 
-        XCUIDevice.shared.press(.home)
-        app.activate()
-        let refreshing = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == false"), object: row)
-        XCTAssertEqual(XCTWaiter.wait(for: [refreshing], timeout: 2), .completed)
+        let bar = app.descendants(matching: .any)["esimNetworkBar"].firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        let frame = app.frame
+        let top = bar.frame.maxY + 20
+        let bottom = app.tabBars.firstMatch.frame.minY - 20
+        XCTAssertGreaterThan(bottom - top, 100)
+        // Pull within the list; the fixed network bar does not forward scrolling.
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (top - frame.minY) / frame.height))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (bottom - frame.minY) / frame.height))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        let refreshed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'Travel Refreshed'"), object: row)
+        XCTAssertEqual(XCTWaiter.wait(for: [refreshed], timeout: 10), .completed, app.debugDescription)
         XCTAssertTrue(row.label.contains("Off"), row.label)
-
-        let refreshed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: row)
-        XCTAssertEqual(XCTWaiter.wait(for: [refreshed], timeout: 12), .completed)
+        XCTAssertTrue(row.isEnabled)
         openActions(app)
     }
 

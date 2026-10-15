@@ -245,7 +245,8 @@ func (h *Handler) Download(c *echo.Context) error {
 	downloadCtx, cancel := context.WithCancel(c.Request().Context())
 	defer cancel()
 
-	session := newDownloadSession(conn, cancel)
+	session := newDownloadSession(downloadCtx, conn, cancel)
+	defer session.close()
 
 	opts := &elpa.DownloadOptions{
 		OnProgress: func(stage elpa.DownloadStage) {
@@ -336,6 +337,7 @@ func iccidFromParam(c *echo.Context) (sgp22.ICCID, error) {
 }
 
 func readStartMessage(conn *websocket.Conn) (downloadClientMessage, error) {
+	conn.SetReadLimit(downloadMessageLimit)
 	var start downloadClientMessage
 	if err := conn.ReadJSON(&start); err != nil {
 		return downloadClientMessage{}, err

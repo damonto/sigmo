@@ -149,24 +149,6 @@ final class CommunicationTests: XCTestCase {
         XCTAssertEqual(requests.filter { $0.url?.path.hasSuffix("/sim-profiles") == true }.count, 2)
     }
 
-    func testCapabilityRemovalInvalidatesPendingContacts() async throws {
-        let server = CommunicationFixture(), session = try await make(server)
-        try await session.refreshContacts()
-        await server.holdNextRead()
-        let oldRead = Task { try? await session.refreshContacts(force: true) }
-        await server.waitForRead()
-        await server.setCapabilities([])
-        await session.refresh(force: true)
-        XCTAssertTrue(session.savedContacts.isEmpty)
-        await server.releaseRead()
-        await oldRead.value
-        XCTAssertTrue(session.savedContacts.isEmpty)
-        await server.setCapabilities(["contacts"])
-        await session.refresh(force: true)
-        try await session.refreshContacts()
-        XCTAssertEqual(session.savedContacts.count, 1)
-    }
-
     func testInvalidatedDirectoryRejectsLateResponse() async throws {
         let server = CommunicationFixture(), session = try await make(server)
         await server.holdNextRead("/sim-profiles")

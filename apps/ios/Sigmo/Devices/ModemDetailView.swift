@@ -43,6 +43,7 @@ private struct ModemDetailScreen: View {
     @State private var state: ModemDetailState
     @State private var settings: ModemSettingsState
     @State private var sim: SIMApplicationState
+    @State private var pinState: SIMPINState
     @State private var messages: MessagesState
     @State private var messageConversation: SMSConversation?
     @State private var composingMessage = false
@@ -76,6 +77,7 @@ private struct ModemDetailScreen: View {
         _state = State(initialValue: ModemDetailState(session: session, modemID: modemID))
         _settings = State(initialValue: ModemSettingsState(session: session, modemID: modemID))
         _sim = State(initialValue: SIMApplicationState(session: session, modemID: modemID))
+        _pinState = State(initialValue: SIMPINState(session: session, modemID: modemID))
         _messages = State(initialValue: MessagesState(session: session, modemID: modemID))
         _callHistory = State(initialValue: CallHistoryState(session: session, modemID: modemID))
     }
@@ -113,7 +115,7 @@ private struct ModemDetailScreen: View {
 
     private var addingESIM: Bool { preparingFlow != nil || availableFlow != nil || flow != nil }
     private var isPhysicalSIM: Bool { state.modem?.simKind == "physical" }
-    private var showsNetworkBar: Bool { !state.needsPIN && (state.esim || isPhysicalSIM) }
+    private var showsNetworkBar: Bool { !state.needsSIMUnlock && (state.esim || isPhysicalSIM) }
 
     private var tabs: some View {
         TabView(selection: $tab) {
@@ -211,10 +213,11 @@ private struct ModemDetailScreen: View {
         } message: { _ in
             Text("detail.discoveriesAvailableMessage")
         }
-        .sheet(isPresented: Binding(get: { sheet != nil }, set: { if !$0 { sheet = nil } }), onDismiss: { pinDismissed = state.needsPIN }) {
+        .sheet(isPresented: Binding(get: { sheet != nil }, set: { if !$0 { sheet = nil } }), onDismiss: { pinDismissed = state.needsSIMUnlock }) {
             NavigationStack {
                 switch sheet {
-                case .pin: DetailTextForm(state: state, kind: .pin)
+                case .pin:
+                    SIMUnlockView(session: session, modemID: state.modemID) { refreshID += 1 }
                 case .number: DetailTextForm(state: state, kind: .number)
                 case .reminder: DetailReminderForm(state: state, profile: nil)
                 case .sim: SIMApplicationView(state: sim)
@@ -234,6 +237,7 @@ private struct ModemDetailScreen: View {
     }
     var body: some View {
         presentedContent
+        .task(id: pinState.identity) { pinState.reset(); await pinState.load() }
         .onChange(of: sim.presented) { _, shown in
             if shown, sheet == nil, !addingESIM { sheet = .sim }
             if !shown, case .sim = sheet { sheet = nil }
@@ -248,7 +252,7 @@ private struct ModemDetailScreen: View {
             cancelPreparation()
             if !state.loading, !state.busy { refreshID += 1 }
         }
-        .onChange(of: state.needsPIN) { _, _ in updatePINPresentation() }
+        .onChange(of: state.needsSIMUnlock) { _, _ in updatePINPresentation() }
         .onChange(of: state.busy) { _, busy in
             if !busy { updatePINPresentation() }
         }
@@ -263,7 +267,7 @@ private struct ModemDetailScreen: View {
     private var overview: some View {
         List {
             if let modem = state.modem {
-                if state.needsPIN {
+                if state.needsSIMUnlock {
                     Section {
                         Label("detail.simLocked", systemImage: "lock")
                         Button("detail.unlock") { sheet = .pin }
@@ -561,7 +565,7 @@ private struct ModemDetailScreen: View {
                 value: PhoneNumberDisplay.format(modem.number, regionCode: modem.sim.regionCode)
             ) { sheet = .number }
         }
-        .disabled(state.needsPIN || modem.sim.identifier.isEmpty)
+        .disabled(state.needsSIMUnlock || modem.sim.identifier.isEmpty)
         LineConnectionSection(state: state, profileID: nil)
             .disabled(modem.sim.identifier.isEmpty)
         if !modem.sim.identifier.isEmpty {
@@ -571,15 +575,21 @@ private struct ModemDetailScreen: View {
                 if let reminder = modem.sim.reminder { ReminderSummary(reminder: reminder) }
             }
         }
-        if sim.available {
+        if pinState.available || sim.available {
             Section {
-                DetailEditRow(title: "detail.simApplication") { sim.open(); sheet = .sim }
+                if pinState.available {
+                    NavigationLink("simPin.title") { SIMPINView(state: pinState) }
+                        .accessibilityIdentifier("physicalSIMPIN")
+                }
+                if sim.available {
+                    DetailEditRow(title: "detail.simApplication") { sim.open(); sheet = .sim }
+                }
             }
-            .disabled(state.needsPIN)
+            .disabled(state.needsSIMUnlock)
         }
     }
     private func offerPIN() {
-        if state.needsPIN, !pinDismissed, sheet == nil, !addingESIM { sheet = .pin }
+        if state.needsSIMUnlock, !pinDismissed, sheet == nil, !addingESIM { sheet = .pin }
     }
     private func prepareFlow(seID: String) async {
         guard state.canInstall, !addingESIM else { return }
@@ -615,7 +625,7 @@ private struct ModemDetailScreen: View {
         presentedFailure = session.failure ?? state.failure ?? state.elementsFailure ?? state.profilesFailure
     }
     private func updatePINPresentation() {
-        if state.needsPIN {
+        if state.needsSIMUnlock {
             offerPIN()
             return
         }
@@ -625,7 +635,7 @@ private struct ModemDetailScreen: View {
     }
     private func clear() {
         cancelPreparation()
-        flow?.interrupt(); flow = nil; sheet = nil; pending = nil; profileOperation = nil; confirmation = nil; presentedFailure = nil
+        pinState.reset(); flow?.interrupt(); flow = nil; sheet = nil; pending = nil; profileOperation = nil; confirmation = nil; presentedFailure = nil
         state.clear(); settings.clear(); sim.stop()
         if session.authentication == .required || session.license == .activation {
             messages.clear()

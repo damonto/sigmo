@@ -7,6 +7,7 @@ struct ReminderDestinationView: View {
     let seID: String
     @State private var state: ModemDetailState
     @State private var loaded = false
+    @State private var resolvedProfileID: String?
 
     init(session: BackendSession, modemID: String, profileID: String, profileType: String, seID: String) {
         self.session = session
@@ -19,13 +20,15 @@ struct ReminderDestinationView: View {
     var body: some View {
         SettingsAccessView(session: session) {
             Group {
-                if !loaded { ProgressView() }
+                // Deleting the profile must not destroy the page that owns the
+                // operation and presents the subsequent history assignment.
+                if let resolvedProfileID {
+                    ESIMProfileActionsView(state: state, profileID: resolvedProfileID)
+                } else if !loaded { ProgressView() }
                 else if state.failure != nil || state.profilesFailure != nil {
                     ContentUnavailableView("push.resourceUnavailable", systemImage: "simcard")
                 }
-                else if profileType == "esim", state.currentProfile(seID + ":" + profileID) != nil {
-                    ESIMProfileActionsView(state: state, profileID: seID + ":" + profileID)
-                } else if profileType == "psim", state.modem?.sim.identifier == profileID {
+                else if profileType == "psim", state.modem?.sim.identifier == profileID {
                     DetailReminderForm(state: state, profile: nil)
                 } else {
                     ContentUnavailableView("push.resourceUnavailable", systemImage: "simcard", description: Text("push.lineUnavailable"))
@@ -34,10 +37,18 @@ struct ReminderDestinationView: View {
             .detailErrorAlert(state.failure ?? state.profilesFailure)
             .foregroundTask {
                 await state.load()
-                if !Task.isCancelled { loaded = true }
+                guard !Task.isCancelled else { return }
+                if resolvedProfileID == nil, profileType == "esim", state.currentProfile(seID + ":" + profileID) != nil {
+                    resolvedProfileID = seID + ":" + profileID
+                }
+                loaded = true
             }
         }
         .navigationTitle("push.generic.reminder")
-        .onChange(of: session.accessRevision) { _, _ in state.clear(); loaded = false }
+        .onChange(of: session.accessRevision) { _, _ in
+            state.clear()
+            loaded = false
+            resolvedProfileID = nil
+        }
     }
 }

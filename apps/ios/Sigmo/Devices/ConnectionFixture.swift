@@ -5,8 +5,8 @@ struct ConnectionFixture: Sendable {
     <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
     <style>body { font: -apple-system-body; padding: 20px; } button { font: inherit; min-height: 48px; margin: 12px 0; width: 100%; }</style></head>
     <body><h1>Carrier Setup</h1><p>Local carrier fixture</p>
-    <button onclick="window.postMessage({type:'sigmo-websheet-callback',callback:{event:'progress'}},location.origin)">Continue Setup</button>
-    <button onclick="window.postMessage({type:'sigmo-websheet-callback',callback:{event:'progress'}},location.origin); window.postMessage({type:'sigmo-websheet-callback',callback:{event:'entitlementChanged'}},location.origin)">Complete Setup</button>
+    <button onclick="window.postMessage({type:'sigmo-websheet-callback',callback:{event:'progress'}},'*')">Continue Setup</button>
+    <button onclick="window.postMessage({type:'sigmo-websheet-callback',callback:{event:'progress'}},'*'); window.postMessage({type:'sigmo-websheet-callback',callback:{event:'entitlementChanged'}},'*')">Complete Setup</button>
     </body></html>
     """
     var registration = NetworkRegistration(mode: "automatic", operatorCode: nil)

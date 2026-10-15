@@ -155,7 +155,10 @@ final class BackendAPI: Sendable {
         }
         let segmentCharacters = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
         let encoded = try path.map { segment in
-            guard let value = segment.addingPercentEncoding(withAllowedCharacters: segmentCharacters) else {
+            // Dot segments can be normalized by URLSession or a reverse proxy,
+            // changing which resource a request (including DELETE) addresses.
+            guard segment != ".", segment != "..",
+                  let value = segment.addingPercentEncoding(withAllowedCharacters: segmentCharacters) else {
                 throw BackendFailure.local("address.invalid")
             }
             return value

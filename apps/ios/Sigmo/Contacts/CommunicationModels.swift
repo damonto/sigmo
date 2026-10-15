@@ -82,9 +82,6 @@ enum CommunicationSection: String, Hashable {
         case .contacts: "communication.searchContacts"
         }
     }
-    var capability: String {
-        switch self { case .messages: "messageThreads"; case .calls: "callHistory"; case .contacts: "contacts" }
-    }
     var icon: String {
         switch self { case .messages: "message"; case .calls: "phone"; case .contacts: "person.crop.circle" }
     }

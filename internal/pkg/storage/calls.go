@@ -38,15 +38,21 @@ type Call struct {
 // EndInterruptedCalls retires snapshots from the previous server process before
 // IMS starts. Carrier and RTP sessions cannot survive a process restart.
 func (s *Store) EndInterruptedCalls(ctx context.Context) error {
-	now := timeText(time.Now())
-	queries := query.New(s.db)
-	err := queries.EndInterruptedCalls(ctx, now)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("begin interrupted call cleanup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // Retire calls and their invitations together.
+	queries := query.New(tx)
+	now := timeText(time.Now())
+	if err := queries.EndInterruptedCalls(ctx, now); err != nil {
 		return fmt.Errorf("end interrupted calls: %w", err)
 	}
-	err = queries.CancelInterruptedCallInvitations(ctx)
-	if err != nil {
+	if err := queries.CancelInterruptedCallInvitations(ctx); err != nil {
 		return fmt.Errorf("cancel interrupted call invitations: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit interrupted call cleanup: %w", err)
 	}
 	return nil
 }

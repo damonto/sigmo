@@ -17,7 +17,7 @@ struct CallsView: View {
     var body: some View {
         List {
             if let line = state.line, !calls.available(line) {
-                Label("calls.upgrade", systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
+                Label("calls.unavailable", systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
             }
             if !state.loaded && state.loading {
                 ProgressView("calls.loading").frame(maxWidth: .infinity)

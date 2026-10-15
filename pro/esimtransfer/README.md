@@ -50,7 +50,7 @@ iOS observes both reader-list changes and individual slot states. A connected re
 
 Binding a reader pins one `TKSmartCard` object across native sessions and observes its validity. Removing either the reader or SIM invalidates the grant, closes the socket, releases pending native operations and clears the selectable profiles. A quick reinsert does not revive that grant. Returning to the source list, selecting a source and reading its profiles again starts a new session. Leaving the flow also releases the card and observers. Native session cleanup balances successful `beginSession` calls, including callbacks arriving after cancellation.
 
-The native operation deadline is 25 seconds; the server's card-operation deadline is 30 seconds. Browsing waits up to 45 seconds per server message, including the handshake with an older backend. Interactive transfer prompts retain the existing unbounded user wait. iOS background execution is finite; expiration cancels the operation.
+The native operation deadline is 25 seconds; the server's card-operation deadline is 30 seconds. Browsing waits up to 45 seconds per server message, including the initial protocol handshake. Interactive transfer prompts retain the existing unbounded user wait. iOS background execution is finite; expiration cancels the operation.
 
 There is no automatic reconnect or APDU replay. After a disconnect, an APDU may already have executed even if its response was lost. Check the source and target state before manually retrying.
 

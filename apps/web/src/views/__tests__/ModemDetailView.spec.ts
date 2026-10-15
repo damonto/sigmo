@@ -56,6 +56,10 @@ const toastHarness = vi.hoisted(() => ({
   error: vi.fn(),
 }))
 
+vi.mock('@/apis/simPin', () => ({
+  useSimPinApi: () => ({ status: vi.fn().mockRejectedValue({ status: 404 }), submit: vi.fn() }),
+}))
+
 vi.mock('@/apis/modem', () => ({
   useModemApi: () => api,
 }))
@@ -552,6 +556,7 @@ describe('ModemDetailView SIM PIN unlock', () => {
     const actions = wrapper.findAll('button').map((button) => button.text())
     expect(actions).toContain('modemDetail.reminder.title')
     expect(actions).toContain('modemDetail.simApplication.title')
+    expect(wrapper.find('[aria-label="simPin.simActions"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Renew the plan')
     expect(wrapper.text()).toContain('modemDetail.reminder.everyDays')
 

@@ -30,10 +30,11 @@ struct ESIMProfileActionsView: View {
 
     @State private var sheet: Sheet?
     @State private var confirmation: ESIMProfileOperation.Kind?
-    @State private var showAssignment = false
+    @State private var deletedProfile: ESIMProfile?
     @State private var operation: ESIMProfileOperation?
     @State private var presentedFailure: BackendFailure?
     @State private var sim: SIMApplicationState
+    @State private var pinState: SIMPINState
     @Environment(\.dismiss) private var dismiss
 
     init(state: ModemDetailState, profileID: String, onOperation: ((ESIMProfileOperation) -> Void)? = nil) {
@@ -41,6 +42,7 @@ struct ESIMProfileActionsView: View {
         self.profileID = profileID
         self.onOperation = onOperation
         _sim = State(initialValue: SIMApplicationState(session: state.session, modemID: state.modemID))
+        _pinState = State(initialValue: SIMPINState(session: state.session, modemID: state.modemID))
     }
 
     private var profile: ESIMProfile? { state.currentProfile(profileID) }
@@ -95,7 +97,10 @@ struct ESIMProfileActionsView: View {
 
     var body: some View {
         presentedForm
-            .sheet(isPresented: $showAssignment, onDismiss: { dismiss() }) { HistoryAssignmentView(session: state.session, sourceID: profileID) }
+            .sheet(item: $deletedProfile, onDismiss: { dismiss() }) { profile in
+                HistoryAssignmentView(session: state.session, sourceID: profile.iccid)
+            }
+            .task(id: observationIdentity) { pinState.reset(); if profile?.enabled == true { await pinState.load() } }
             .task(id: operation?.id) { await performOperation() }
             .foregroundTask(id: observationIdentity) {
                 await reload()
@@ -175,7 +180,7 @@ struct ESIMProfileActionsView: View {
                 get: { profile.enabled },
                 set: { if $0 { confirmation = .enable } }
             ))
-            .disabled(profile.enabled || busy || state.needsPIN)
+            .disabled(profile.enabled || busy || state.needsSIMUnlock)
             .accessibilityIdentifier("profileEnabled-" + profile.id)
         } footer: {
             if profile.enabled { Text("detail.activeLineHint") }
@@ -189,6 +194,10 @@ struct ESIMProfileActionsView: View {
             if let reminder = profile.reminder { ReminderSummary(reminder: reminder) }
         }
         Section {
+            if profile.enabled, pinState.available, state.modem?.sim.identifier == profile.iccid {
+                NavigationLink("simPin.title") { SIMPINView(state: pinState) }
+                    .accessibilityIdentifier("profileSIMPIN")
+            }
             if profile.enabled, sim.available, sim.profileICCID == profile.iccid {
                 DetailEditRow(title: "detail.simApplication") {
                     sim.open()
@@ -226,7 +235,7 @@ struct ESIMProfileActionsView: View {
         self.operation = nil
         presentedFailure = state.failure
         if deleted {
-            if state.session.capabilities?.contains("historyAssignments") == true { showAssignment = true } else { dismiss() }
+            deletedProfile = operation.profile
         }
     }
 

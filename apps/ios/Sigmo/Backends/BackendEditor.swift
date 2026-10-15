@@ -7,6 +7,7 @@ struct BackendEditor: View {
     private let isNew: Bool
     @State private var name: String
     @State private var address: String
+    @FocusState private var nameFocused: Bool
 
     init(configuration: BackendConfiguration? = nil) {
         backendID = configuration?.id ?? UUID()
@@ -19,7 +20,9 @@ struct BackendEditor: View {
         NavigationStack {
             Form {
                 Section("backends.connection") {
-                    TextField("configuration.name", text: $name).accessibilityIdentifier("backendName")
+                    TextField("configuration.name", text: $name)
+                        .focused($nameFocused)
+                        .accessibilityIdentifier("backendName")
                     TextField("backends.address", text: $address)
                         .keyboardType(.URL).textContentType(.URL)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -43,6 +46,9 @@ struct BackendEditor: View {
                     .accessibilityIdentifier("saveBackend")
                 }
             }
+        }
+        .task {
+            if isNew { nameFocused = true }
         }
     }
 }

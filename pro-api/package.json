@@ -17,13 +17,13 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
-    "@types/node": "^26.6.1",
-    "oxlint": "^1.87.0",
-    "oxlint-tsgolint": "^7.0.2003",
+    "@types/node": "^26.6.5",
+    "oxlint": "^1.88.0",
+    "oxlint-tsgolint": "^7.0.2004",
     "prettier": "3.9.6",
     "typescript": "~7.0.2",
     "vitest": "^4.1.11",
-    "wrangler": "^4.133.0"
+    "wrangler": "^4.151.0"
   },
   "dependencies": {
     "hono": "^4.13.13"

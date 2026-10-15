@@ -25,7 +25,9 @@ final class CommunicationState {
         self.section = section
     }
 
-    var supported: Bool { session.capabilities?.contains(section.capability) == true }
+    var supported: Bool {
+        section != .calls || session.capabilities?.contains("callHistory") == true
+    }
 
     var contacts: [SigmoContact] {
         guard !search.isEmpty else { return session.savedContacts }
@@ -177,16 +179,24 @@ final class CommunicationComposerState {
         return modem
     }
     func send() async -> Bool {
-        guard canSubmit else { return false }
+        guard canSubmit, !Task.isCancelled else { return false }
+        let recipient = PhoneNumberDisplay.submission(number, regionCode: nil)
+        guard !recipient.isEmpty else { failure = .local("apiError.invalid_recipient"); return false }
+        let draft = text
         busy = true
+        failure = nil
         defer { busy = false }
         guard let modem = await currentModem() else { return false }
-        let submission = SMSSubmission(to: PhoneNumberDisplay.submission(number, regionCode: nil), text: text, expectedProfileId: modem.sim.identifier)
+        let submission = SMSSubmission(to: recipient, text: draft, expectedProfileId: modem.sim.identifier)
         do {
             _ = try await session.protectedRequest { api, token in try await api.sendMessage(modemID: modem.id, submission: submission, token: token) }
             guard !Task.isCancelled else { return false }
-            text = ""
+            if text == draft { text = "" }
             return true
-        } catch { failure = .wrapping(error); return false }
+        } catch {
+            let error = BackendFailure.wrapping(error)
+            failure = error.unconfirmedMessageSend || Task.isCancelled ? .local("messages.resultUnknown") : error
+            return false
+        }
     }
 }

@@ -83,6 +83,26 @@ export const useFetch = createFetch({
   },
 })
 
+// Credential forms render their own errors and never log response payloads.
+const useQuietFetch = createFetch({
+  baseUrl,
+  options: {
+    fetch: fetchWithBoundedErrors,
+    beforeFetch({ options }) {
+      options.headers = requestHeaders(options)
+      return { options }
+    },
+    async onFetchError({ response, error, data }) {
+      if (response && response.status <= 299) return { response, error, data }
+      if (!response) throw error || new Error('Request failed')
+      const problem = createApiError(response, await response.text().catch(() => undefined))
+      if (isLocalAuthenticationError(problem)) void router.replace({ name: 'auth' })
+      throw Object.assign(new Error(problem.message), problem)
+    },
+  },
+  fetchOptions: { mode: 'same-origin', credentials: 'same-origin' },
+})
+
 export type ApiFetchReturn<T> = Omit<UseFetchReturn<string>, 'data'> & {
   data: Ref<T | undefined>
 }
@@ -95,10 +115,12 @@ const parseResponseText = <T>(value: string | null) => {
 export const fetchJson = async <T>(
   url: string,
   options?: RequestInit,
+  quiet = false,
 ): Promise<ApiFetchReturn<T>> => {
+  const fetcher = quiet ? useQuietFetch : useFetch
   const request = options
-    ? useFetch<string>(url, options, { immediate: false }).text()
-    : useFetch<string>(url, { immediate: false }).text()
+    ? fetcher<string>(url, options, { immediate: false }).text()
+    : fetcher<string>(url, { immediate: false }).text()
 
   await request.execute(true)
 

@@ -12,7 +12,7 @@ actor MessagesFixture {
     private var unread: Set<String> = []
     private var sendStatus = 200
     private var offline = false
-    private var legacy = false
+    private var conversationStatus = 200
     private var holdPath: String?
     private var held: CheckedContinuation<Void, Never>?
     private var arrived: CheckedContinuation<Void, Never>?
@@ -39,7 +39,7 @@ actor MessagesFixture {
 
     func setSendStatus(_ value: Int) { sendStatus = value }
     func setOffline(_ value: Bool) { offline = value }
-    func setLegacy(_ value: Bool) { legacy = value }
+    func setConversationStatus(_ value: Int) { conversationStatus = value }
     func holdNext(_ suffix: String) { holdPath = suffix }
     func waitForHeld() async {
         if held != nil { return }
@@ -58,7 +58,7 @@ actor MessagesFixture {
         }
         let method = request.httpMethod ?? "GET"
         if path.contains("/conversations") {
-            if legacy { return response(status: 404) }
+            if conversationStatus >= 400 { return response(status: conversationStatus) }
             let components = path.components(separatedBy: "/conversations")
             let tail = components.last ?? ""
             if tail.isEmpty {
@@ -100,20 +100,7 @@ actor MessagesFixture {
                 struct Sent: Encodable { let to, conversationId: String }
                 return try response(Sent(to: body.to, conversationId: "conversation-active"))
             }
-            var items = messages["conversation-active"] ?? []
-            if path.hasSuffix("/messages") {
-                let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
-                if let search = query.first(where: { $0.name == "q" })?.value, !search.isEmpty {
-                    items = items.filter {
-                        $0.sender.localizedCaseInsensitiveContains(search)
-                            || $0.recipient.localizedCaseInsensitiveContains(search)
-                            || $0.text.localizedCaseInsensitiveContains(search)
-                    }
-                }
-                // The legacy endpoint returns the latest matching message per participant.
-                items = items.last.map { [$0] } ?? []
-            }
-            return try response(items)
+            return response(status: 405)
         }
         return try await base.respond(request)
     }

@@ -50,9 +50,11 @@ python3 apps/ios/scripts/check_settings.py
 
 ## Offline demo and App Review
 
-Open **Devices → Manage Sigmo → Try Demo**. The public entry is available without a server or account, including in Release builds. The demo uses the regular app screens with two isolated sample connections. Tap **Demo Mode** to generate an incoming message or call, read sample input instructions, or reset the data. **Exit Demo** returns to the original connections.
+With no saved connections, the **Devices** welcome page shows **Connect to Sigmo** as the primary button, with a plain **Try Demo** text button below it. Tap **Try Demo** to explore without a server or account, including in Release builds. The demo uses the regular app screens with two isolated sample connections. Tap **Demo Mode** to generate an incoming message or call, read sample input instructions, or reset the data. **Exit Demo** returns to the welcome page. **Manage Sigmo** only manages connections and no longer contains the demo entry.
 
 Messages, contacts, call history, eSIM changes, and settings are kept locally for the current demo session. Calls use local simulated media; demo recordings contain a sample tone. The eSIM setup page offers **Use Sample Activation Code**, and transfers include a virtual local USB reader. Carrier setup uses bundled HTML. No real modem, SIM, carrier service, remote push delivery, or external notification channel is exercised. The demo does not modify real connection credentials or recordings. It closes if a real call needs attention.
+
+SIM PIN management is available in active SIM details. The local demo starts with PIN `1234` and PUK `12345678`. Incorrect codes decrement local attempt counters; exhausting PIN attempts opens the PUK flow. These operations never reach a real SIM.
 
 The demo bundles the public MCP skill for offline downloads. After changing `skills/sigmo-control/`, regenerate the archive with `python3 apps/ios/scripts/build_demo_assets.py` from the repository root.
 
@@ -60,4 +62,4 @@ The **Sigmo Release** scheme builds the same application with the Release config
 
 After verifying the submitted build, include its build number and these instructions in Beta App Review Information:
 
-> To access the built-in offline demo, open Devices, tap Manage Sigmo, then tap Try Demo. No credentials, server, SIM, or external hardware are required. Demo Mode is labeled throughout the experience. Tap its label for sample incoming messages/calls and Reset Demo Data. Use Sample Activation Code in eSIM setup; the confirmation code is 123456 and the SIM PIN is 1234. Modem, carrier, hardware, and remote push interactions are simulated locally. Normal operation connects to a user-hosted Sigmo server and its hardware.
+> Tap Try Demo directly on the welcome page. No credentials, server, SIM, or external hardware are required. Demo Mode is labeled throughout the experience. Tap its label for sample incoming messages/calls and Reset Demo Data. Use Sample Activation Code in eSIM setup; the confirmation code is 123456 and the SIM PIN is 1234. Modem, carrier, hardware, and remote push interactions are simulated locally. Normal operation connects to a user-hosted Sigmo server and its hardware.

@@ -312,5 +312,75 @@
     "code": "database_maintenance",
     "loginInvalid": false,
     "revokePush": false
+  },
+  {
+    "name": "sim_pin_incorrect",
+    "status": 422,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "pin-request"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/sim_pin_incorrect\",\"title\":\"Incorrect SIM PIN\",\"status\":422,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"sim_pin_incorrect\",\"request_id\":\"pin-request\"}",
+    "repeat": 0,
+    "code": "sim_pin_incorrect",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "sim_puk_required",
+    "status": 409,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "pin-request"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/sim_puk_required\",\"title\":\"SIM PUK Required\",\"status\":409,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"sim_puk_required\",\"request_id\":\"pin-request\"}",
+    "repeat": 0,
+    "code": "sim_puk_required",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "sim_target_changed",
+    "status": 409,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "pin-request"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/sim_target_changed\",\"title\":\"Active SIM Changed\",\"status\":409,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"sim_target_changed\",\"request_id\":\"pin-request\"}",
+    "repeat": 0,
+    "code": "sim_target_changed",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "sim_pin_result_unknown",
+    "status": 504,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "pin-request"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/sim_pin_result_unknown\",\"title\":\"SIM PIN Result Unknown\",\"status\":504,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"sim_pin_result_unknown\",\"request_id\":\"pin-request\"}",
+    "repeat": 0,
+    "code": "sim_pin_result_unknown",
+    "loginInvalid": false,
+    "revokePush": false
+  },
+  {
+    "name": "enable_modem_after_unlock_failed",
+    "status": 500,
+    "source": "backend",
+    "headers": {
+      "Content-Type": "application/problem+json",
+      "X-Request-ID": "pin-request"
+    },
+    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/enable_modem_after_unlock_failed\",\"title\":\"Enable Modem After Unlock Failed\",\"status\":500,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"enable_modem_after_unlock_failed\",\"request_id\":\"pin-request\"}",
+    "repeat": 0,
+    "code": "enable_modem_after_unlock_failed",
+    "loginInvalid": false,
+    "revokePush": false
   }
 ]

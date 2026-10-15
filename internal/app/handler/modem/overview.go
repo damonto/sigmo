@@ -261,15 +261,27 @@ func modemStateValue(snapshot mmodem.ModemSnapshot) string {
 }
 
 func unlockRequired(snapshot mmodem.ModemSnapshot) string {
+	if snapshot.SIM != nil {
+		switch snapshot.SIM.PINStatus.Lock {
+		case wwanmodem.SIMLockPIN:
+			return "sim-pin"
+		case wwanmodem.SIMLockPUK:
+			return "sim-puk"
+		case wwanmodem.SIMLockBlocked:
+			return "sim-blocked"
+		case wwanmodem.SIMLockOther:
+			return "other"
+		}
+	}
 	if snapshot.Locked() {
-		return "sim-pin"
+		return "unknown"
 	}
 	return "none"
 }
 
 func unlockSupported(device *mmodem.Modem) bool {
 	snapshot := device.Snapshot()
-	return snapshot.Locked()
+	return snapshot.SIM != nil && snapshot.SIM.PINStatus.Lock == wwanmodem.SIMLockPIN
 }
 
 func (c *catalog) buildSlotsResponse(ctx context.Context, snapshot mmodem.ModemSnapshot) ([]SlotResponse, error) {

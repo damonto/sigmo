@@ -211,6 +211,29 @@ final class CommunicationOverviewTests: XCTestCase {
             XCTAssertTrue(state.hasMore)
         }
     }
+
+    func testBackgroundPausesAutomaticRefreshWithoutDiscardingPendingRead() async throws {
+        for section in [CommunicationSection.messages, .calls] {
+            let server = OverviewHistoryFixture(name: "First", days: [4])
+            let session = try await session("First", server: server)
+            let state = CommunicationOverviewState(sessions: [session], section: section)
+            await server.holdNextHistoryRead()
+            let pending = Task { await state.load(automatic: true) }
+            await server.waitForHistoryRead()
+            session.foreground = false
+            await server.releaseHistoryRead()
+            await pending.value
+            XCTAssertFalse(state.isEmpty)
+            await state.load(automatic: true)
+            let backgroundRequests = await server.historyRequests()
+            XCTAssertEqual(backgroundRequests.count, 1)
+
+            session.foreground = true
+            await state.load(automatic: true)
+            let foregroundRequests = await server.historyRequests()
+            XCTAssertEqual(foregroundRequests.count, 2)
+        }
+    }
 }
 
 private actor OverviewHistoryFixture {

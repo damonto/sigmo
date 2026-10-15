@@ -28,10 +28,8 @@ struct CallHistoryDetail: View {
             callSummary
             lineDetails
             recordings
-            if session.capabilities?.contains("contacts") == true {
-                NavigationLink { SaveContactNumberView(session: session, number: record.number) } label: {
-                    Label("communication.addContact", systemImage: "person.crop.circle.badge.plus")
-                }
+            NavigationLink { SaveContactNumberView(session: session, number: record.number) } label: {
+                Label("communication.addContact", systemImage: "person.crop.circle.badge.plus")
             }
         }
         .listStyle(.insetGrouped)

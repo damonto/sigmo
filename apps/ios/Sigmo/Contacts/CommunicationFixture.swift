@@ -10,7 +10,7 @@ actor CommunicationFixture {
     private var held: CheckedContinuation<Void, Never>?
     private var arrival: CheckedContinuation<Void, Never>?
     private var heldPath: String?
-    private var features = ["contacts", "messageThreads", "historyAssignments", "callHistory", "nativeCalls"]
+    private let features = ["contacts", "messageThreads", "historyAssignments", "callHistory", "nativeCalls"]
     private var directoryUnavailable = false
     private var requests: [URLRequest] = []
     private var lines = [CommunicationFixture.line("a"), CommunicationFixture.line("b", available: false)]
@@ -26,7 +26,6 @@ actor CommunicationFixture {
     func setModems(_ value: [Modem]) { modemOverrides = value }
     func setContacts(_ value: [SigmoContact]) { contacts = value }
     func setLines(_ value: [CommunicationLine]) { lines = value }
-    func setCapabilities(_ value: [String]) { features = value }
     func setDirectoryUnavailable(_ value: Bool) { directoryUnavailable = value }
     func holdNextRead(_ path: String = "/contacts") { heldPath = path }
     private func holdIfNeeded(_ path: String) async {

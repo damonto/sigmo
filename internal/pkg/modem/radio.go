@@ -97,6 +97,7 @@ func (m *Modem) validatePrimarySIMSlot(slot uint32) error {
 }
 
 func (m *Modem) setPrimarySIMSlot(ctx context.Context, slot uint32) error {
+	m.InvalidateSIMActivation()
 	if err := m.core.SetPrimarySIMSlot(ctx, uint8(slot)); err != nil {
 		return err
 	}

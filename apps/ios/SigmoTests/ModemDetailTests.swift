@@ -27,8 +27,8 @@ final class ModemDetailTests: XCTestCase {
     }
 
     func testProfileNumberDecodingAndDisplay() throws {
-        let legacy = #"{"seId":"se-a","seLabel":"SE1","name":"Travel","serviceProviderName":"Carrier","iccid":"8901","icon":"","profileName":"Travel","profileState":0,"profileStateName":"disabled","profileClass":"operational","profileOwner":{"mcc":"310","mnc":"260"}}"#
-        let original = try JSONDecoder().decode(ESIMProfile.self, from: Data(legacy.utf8))
+        let withoutNumber = #"{"seId":"se-a","seLabel":"SE1","name":"Travel","serviceProviderName":"Carrier","iccid":"8901","icon":"","profileName":"Travel","profileState":0,"profileStateName":"disabled","profileClass":"operational","profileOwner":{"mcc":"310","mnc":"260"}}"#
+        let original = try JSONDecoder().decode(ESIMProfile.self, from: Data(withoutNumber.utf8))
         XCTAssertNil(original.number)
         XCTAssertEqual(original.numberLabel, String(localized: "detail.noNumber"))
         let cases = [("", String(localized: "detail.noNumber")), ("  ", String(localized: "detail.noNumber")),
@@ -95,9 +95,13 @@ final class ModemDetailTests: XCTestCase {
         await server.waitForHeldRequest()
         XCTAssertTrue(detail.elementsLoaded)
         XCTAssertTrue(detail.profilesLoaded)
+        XCTAssertTrue(detail.loading)
+        XCTAssertFalse(detail.canInstall)
         XCTAssertEqual(detail.groups.flatMap(\.profiles).map(\.id), profileIDs)
         await server.release()
         await refresh.value
+        XCTAssertFalse(detail.loading)
+        XCTAssertTrue(detail.canInstall)
     }
 
     func testEmptyAndFailedProfileReadsFinishLoading() async throws {
@@ -476,10 +480,13 @@ final class ModemDetailTests: XCTestCase {
         let removed = await detail.delete(detail.groups[1].profiles[0])
         XCTAssertTrue(removed)
         XCTAssertTrue(detail.groups[1].profiles.isEmpty)
+        XCTAssertEqual(detail.deletedHistoryProfileID, "8986000000000000002")
         let requests = await server.allRequests()
         let rename = try XCTUnwrap(requests.first { $0.url?.path.hasSuffix("/nickname") == true })
         XCTAssertEqual(rename.httpMethod, "PUT")
         XCTAssertEqual(rename.url?.path, "/prefix/api/v1/modems/device-1/ses/se-a/esims/8986000000000000002/nickname")
+        detail.clear()
+        XCTAssertNil(detail.deletedHistoryProfileID)
     }
 
     func testConfirmedDeletionRemovesProfileWhenRefreshFails() async throws {

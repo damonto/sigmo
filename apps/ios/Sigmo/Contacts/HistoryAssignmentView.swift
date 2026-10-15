@@ -7,24 +7,22 @@ struct HistoryAssignmentSection: View {
     @State private var selected: CommunicationLine?
     @State private var failure: BackendFailure?
     var body: some View {
-        if session.capabilities?.contains("historyAssignments") == true {
-            Section {
-                ForEach(lines.filter { $0.deletionState == "deleted" }) { line in
-                    Button { selected = line } label: {
-                        Label {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(line.title)
-                                if showsBackend { Text(session.configuration.name).font(.caption).foregroundStyle(.secondary) }
-                            }
-                        } icon: { Image(systemName: "simcard") }
-                        .badge(Text("communication.assign"))
-                    }
+        Section {
+            ForEach(lines.filter { $0.deletionState == "deleted" }) { line in
+                Button { selected = line } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(line.title)
+                            if showsBackend { Text(session.configuration.name).font(.caption).foregroundStyle(.secondary) }
+                        }
+                    } icon: { Image(systemName: "simcard") }
+                    .badge(Text("communication.assign"))
                 }
             }
-            .task { await load() }
-            .sheet(item: $selected, onDismiss: { Task { await load() } }) { line in HistoryAssignmentView(session: session, sourceID: line.id) }
-            .detailErrorAlert($failure)
         }
+        .task { await load() }
+        .sheet(item: $selected, onDismiss: { Task { await load() } }) { line in HistoryAssignmentView(session: session, sourceID: line.id) }
+        .detailErrorAlert($failure)
     }
     private func load() async {
         do { lines = try await session.communicationLines() }
@@ -56,7 +54,8 @@ struct HistoryAssignmentView: View {
                 Button("communication.assign") { Task { await assign() } }.disabled(busy || target.isEmpty)
             }
             .navigationTitle("communication.assign").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("communication.later") { dismiss() }.disabled(busy) } }
+            .accessibilityIdentifier("history-assignment-" + sourceID)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("communication.later") { dismiss() }.disabled(busy).accessibilityIdentifier("historyAssignmentLater") } }
             .interactiveDismissDisabled(busy)
             .detailErrorAlert($failure)
             .task {

@@ -29,7 +29,7 @@ Use `sigmo://grant` to inspect the current immutable modem and permission grant.
 - Do not auto-accept profile installation or any write-operation confirmation.
 - Never reuse an SMS or USSD `idempotencyKey` for changed input or a different operation.
 - If a tool returns `interaction_required`, tell the user to continue in the Sigmo Web UI. Do not bypass the carrier flow.
-- Do not repeat SMS bodies, phone numbers, PINs, activation codes, or confirmation codes unless required by the user's immediate request.
+- Do not repeat SMS bodies, phone numbers, PINs, PUKs, activation codes, or confirmation codes unless required by the user's immediate request.
 - Treat `permission_denied` and an absent tool as a hard authorization boundary.
 
 ## Load detailed references only when needed

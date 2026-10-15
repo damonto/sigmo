@@ -20,9 +20,10 @@ final class BackendFlowTests: XCTestCase {
         XCTAssertTrue(app.textFields["backendName"].exists)
         XCTAssertTrue(app.textFields["backendAddress"].exists)
         XCTAssertFalse(app.staticTexts["Group"].exists)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         attachScreenshot(app)
-        app.textFields["backendName"].tap()
-        app.textFields["backendName"].typeText("Test Backend")
+        app.typeText("Test Backend")
+        XCTAssertEqual(app.textFields["backendName"].value as? String, "Test Backend")
         app.textFields["backendAddress"].tap()
         app.textFields["backendAddress"].typeText("https://test.sigmo.test")
         app.buttons["saveBackend"].tap()
@@ -34,18 +35,27 @@ final class BackendFlowTests: XCTestCase {
         attachScreenshot(app)
     }
 
-    func testEmptyConnectionButtonKeepsCompactShape() {
-        for chinese in [false, true] {
-            let app = app(scenario: "empty", chinese: chinese, largeText: chinese)
+    func testWelcomeActionsAdaptToLanguageAndTextSize() {
+        for (chinese, largeText) in [(false, false), (true, false), (false, true), (true, true)] {
+            let app = app(scenario: "empty", chinese: chinese, largeText: largeText)
             app.launchEnvironment["SIGMO_UI_APPEARANCE"] = chinese ? "dark" : "light"
             app.launch()
+            let demo = app.buttons["tryDemo"]
+            XCTAssertTrue(demo.waitForExistence(timeout: 10))
+            XCTAssertEqual(demo.label, chinese ? "体验演示" : "Try Demo")
+            XCTAssertFalse(app.searchFields.firstMatch.exists)
+            for _ in 0..<6 where !demo.isHittable { app.swipeUp() }
+            XCTAssertTrue(demo.isHittable)
+            XCTAssertGreaterThanOrEqual(demo.frame.height, 44)
             let connect = app.buttons["connectSigmo"]
-            XCTAssertTrue(connect.waitForExistence(timeout: 10))
+            XCTAssertTrue(connect.exists)
+            XCTAssertLessThanOrEqual(connect.frame.maxY, demo.frame.minY)
+            if !largeText { XCTAssertTrue(connect.isHittable) }
+            attachScreenshot(app)
+            for _ in 0..<6 where !connect.isHittable { app.swipeDown() }
             XCTAssertTrue(connect.isHittable)
-            XCTAssertTrue(connect.label.contains(chinese ? "连接 Sigmo" : "Connect Sigmo"))
+            XCTAssertTrue(connect.label.contains(chinese ? "连接 Sigmo" : "Connect to Sigmo"))
             XCTAssertGreaterThanOrEqual(connect.frame.height, 44)
-            XCTAssertGreaterThan(connect.frame.width, connect.frame.height)
-            XCTAssertLessThan(connect.frame.height, 160)
             XCTAssertGreaterThanOrEqual(connect.frame.minX, app.frame.minX)
             XCTAssertLessThanOrEqual(connect.frame.maxX, app.frame.maxX)
             assertToolbarButtonsAreAccessible(app)
@@ -53,6 +63,7 @@ final class BackendFlowTests: XCTestCase {
             connect.tap()
             XCTAssertTrue(app.textFields["backendName"].waitForExistence(timeout: 5))
             XCTAssertTrue(app.textFields["backendAddress"].exists)
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
             app.terminate()
         }
     }

@@ -5,7 +5,6 @@ import Observation
 final class MessageThreadState {
     let session: BackendSession
     private(set) var conversation: SMSConversation
-    let legacy: Bool
     var draft = ""
     private var replacementProfileID: String?
     private(set) var messages: [SMSMessage] = []
@@ -20,10 +19,9 @@ final class MessageThreadState {
     @ObservationIgnored private var acknowledged: Int64
     @ObservationIgnored private var manuallyUnread: Bool
 
-    init(session: BackendSession, conversation: SMSConversation, legacy: Bool = false) {
+    init(session: BackendSession, conversation: SMSConversation) {
         self.session = session
         self.conversation = conversation
-        self.legacy = legacy
         acknowledged = conversation.readThroughMessageId
         manuallyUnread = conversation.markedUnread
     }
@@ -40,24 +38,21 @@ final class MessageThreadState {
     func load() async {
         guard !sending, !Task.isCancelled, session.canAccessDevices else { return }
         revision += 1
-        let current = revision, conversation = conversation, legacy = legacy
+        let current = revision, conversation = conversation
         loading = true
         defer { if current == revision { loading = false } }
         do {
             let result = try await session.protectedRequest { api, token in
-                if legacy { return try await api.legacyMessages(modemID: conversation.modemId, participant: conversation.participant, token: token) }
-                return try await api.conversationMessages(conversation.id, token: token)
+                try await api.conversationMessages(conversation.id, token: token)
             }
             guard current == revision, !Task.isCancelled else { return }
             messages = result
-            if !legacy {
-                let snapshot = try await session.protectedRequest { api, token in try await api.conversations(modemID: nil, token: token) }
-                guard current == revision, !Task.isCancelled else { return }
-                if let latest = snapshot.items.first(where: { $0.id == conversation.id }), snapshot.revision >= (badge?.revision ?? -1) {
-                    self.conversation = latest
-                    acknowledged = max(acknowledged, latest.readThroughMessageId)
-                    manuallyUnread = latest.markedUnread
-                }
+            let snapshot = try await session.protectedRequest { api, token in try await api.conversations(modemID: nil, token: token) }
+            guard current == revision, !Task.isCancelled else { return }
+            if let latest = snapshot.items.first(where: { $0.id == conversation.id }), snapshot.revision >= (badge?.revision ?? -1) {
+                self.conversation = latest
+                acknowledged = max(acknowledged, latest.readThroughMessageId)
+                manuallyUnread = latest.markedUnread
             }
             loaded = true
             loadFailure = nil
@@ -65,7 +60,7 @@ final class MessageThreadState {
     }
 
     func markRead(through id: Int64) async {
-        guard !legacy, session.canAccessDevices, id > acknowledged || manuallyUnread else { return }
+        guard session.canAccessDevices, id > acknowledged || manuallyUnread else { return }
         let conversationID = conversation.id
         let current = revision
         do {

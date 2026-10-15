@@ -101,13 +101,16 @@ func (h *Handler) UnlockSIM(c *echo.Context) error {
 	if err := httpapi.BindJSON(c, &req, "unlock_sim_invalid_request"); err != nil {
 		return err
 	}
-	if err := modem.UnlockSIMPINAndEnable(c.Request().Context(), req.PIN); err != nil {
+	if err := modem.UnlockSIM(c.Request().Context(), mmodem.SIMUnlock{PIN: req.PIN, PUK: req.PUK, NewPIN: req.NewPIN, SIMToken: req.SIMToken}); err != nil {
 		return unlockSIMError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
 func unlockSIMError(c *echo.Context, err error) error {
+	if status, code, detail := SIMPINProblem(err); code != "" {
+		return httpapi.Error(c, status, code, detail)
+	}
 	switch {
 	case errors.Is(err, mmodem.ErrSIMPINRequired):
 		return httpapi.BadRequest(c, "unlock_sim_invalid_request", err)

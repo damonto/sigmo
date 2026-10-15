@@ -217,6 +217,67 @@ func TestRestartRetiresLiveCallsAndPendingInvitations(t *testing.T) {
 	}
 }
 
+func TestRestartCallCleanupRollsBackAndCanRetry(t *testing.T) {
+	store := testStore(t)
+	ctx := t.Context()
+	sub := NativeSubscription{ID: "sub", InstallationID: "phone", SendToken: strings.Repeat("s", 32), EncryptionKey: make([]byte, 32), Calls: true, Enabled: true}
+	if err := store.UpsertNativeSubscription(ctx, sub); err != nil {
+		t.Fatal(err)
+	}
+	call := Call{ID: "incoming", ProfileID: "sim", ModemID: "modem", Route: "volte", Direction: "incoming", State: "ringing", StartedAt: time.Now()}
+	if err := store.SaveCall(ctx, call); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.EnqueueNativeCall(ctx, call); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `CREATE TRIGGER reject_call_cleanup BEFORE DELETE ON native_call_outbox
+		BEGIN SELECT RAISE(ABORT, 'injected cleanup failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.EndInterruptedCalls(ctx); err == nil {
+		t.Fatal("expected cleanup failure")
+	}
+	stored, err := store.Call(ctx, call.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.State != "ringing" || !stored.EndedAt.IsZero() || stored.Reason != "" {
+		t.Fatalf("failed cleanup changed call: %+v", stored)
+	}
+	items, err := store.NativeCallDeliveries(ctx, time.Now())
+	if err != nil || len(items) != 1 {
+		t.Fatalf("invitations after rollback = %v, error = %v", items, err)
+	}
+	if _, err := store.db.ExecContext(ctx, `DROP TRIGGER reject_call_cleanup`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.EndInterruptedCalls(ctx); err != nil {
+		t.Fatal(err)
+	}
+	retired, err := store.Call(ctx, call.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired.State != "ended" || retired.Reason != "server_restarted" || retired.EndedAt.IsZero() {
+		t.Fatalf("retry did not retire call: %+v", retired)
+	}
+	if err := store.EndInterruptedCalls(ctx); err != nil {
+		t.Fatal(err)
+	}
+	repeated, err := store.Call(ctx, call.ID)
+	if err != nil || repeated != retired {
+		t.Fatalf("repeated cleanup changed terminal history: %+v, error = %v", repeated, err)
+	}
+	var pending int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM native_call_outbox WHERE delivered = 0`).Scan(&pending); err != nil {
+		t.Fatal(err)
+	}
+	if pending != 0 {
+		t.Fatalf("pending invitations after retry = %d", pending)
+	}
+}
+
 func TestWithdrawnInvitationsDoNotDelayNewCalls(t *testing.T) {
 	store := testStore(t)
 	sub := NativeSubscription{ID: "sub", InstallationID: "phone", SendToken: strings.Repeat("s", 32), EncryptionKey: make([]byte, 32), Calls: true, Enabled: true}

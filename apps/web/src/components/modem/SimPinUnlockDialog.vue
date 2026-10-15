@@ -30,7 +30,7 @@ const open = defineModel<boolean>('open', { required: true })
 const pin = defineModel<string>('pin', { required: true })
 
 const trimmedPin = computed(() => pin.value.trim())
-const canSubmit = computed(() => trimmedPin.value.length > 0 && !props.isSubmitting)
+const canSubmit = computed(() => /^[0-9]{4,8}$/.test(trimmedPin.value) && !props.isSubmitting)
 
 const handleOpenChange = (nextOpen: boolean) => {
   open.value = nextOpen
@@ -66,7 +66,7 @@ watch(open, (value) => {
             v-model="pin"
             type="password"
             inputmode="numeric"
-            autocomplete="one-time-code"
+            autocomplete="off"
             :disabled="isSubmitting"
             :placeholder="t('modemDetail.unlock.pinPlaceholder')"
             :aria-invalid="error ? 'true' : undefined"

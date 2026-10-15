@@ -21,6 +21,14 @@ struct HomeView: View {
     @State private var search = ""
     @State private var refreshFailure: BackendFailure?
 
+    init() {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["SIGMO_UI_SCENARIO"] == "detail-reminder" {
+            _path = State(initialValue: [.reminder(PreviewBackends.homeID, "device-1", "8986000000000000002", "esim", "se-a")])
+        }
+        #endif
+    }
+
     var body: some View {
         Group {
             if let selectedDevice {
@@ -88,7 +96,7 @@ struct HomeView: View {
     // preserves its search and connection filter while switching workspaces.
     private var homeNavigation: some View {
         NavigationStack(path: $path) {
-            HomeDevicesView(backendID: selectedBackendID, search: search, add: { adding = true }, open: { selectedDevice = $0 })
+            HomeDevicesView(backendID: selectedBackendID, search: $search, add: { adding = true }, open: { selectedDevice = $0 })
                 .safeAreaInset(edge: .top, spacing: 0) {
                     if store.onlineSessions.count > 1 {
                         BackendFilterBar(selection: $selectedBackendID)
@@ -98,9 +106,6 @@ struct HomeView: View {
                 }
                 .navigationTitle("Sigmo")
                 .navigationBarTitleDisplayMode(.large)
-                .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "home.search")
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
                 .refreshable {
                     await store.refreshAll()
                     guard !Task.isCancelled else { return }

@@ -50,6 +50,8 @@ type Modem struct {
 	slotSIMs       map[uint32]*SIM
 	statusKnown    bool
 	simRevision    uint64
+	simPINToken    string
+	simPINDevice   simPINDevice
 	fallbackNumber string
 
 	Device              string

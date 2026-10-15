@@ -2,12 +2,16 @@ import XCTest
 
 @MainActor
 final class ConnectionFlowTests: XCTestCase {
-    private func launch(_ scenario: String = "detail", chinese: Bool = false, large: Bool = false,
+    override func setUp() {
+        continueAfterFailure = false
+    }
+
+    private func launch(_ scenario: String = "detail", chinese: Bool = false, large: Bool = false, dark: Bool = false,
                         profile: String = "se-a:8986000000000000001") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment = ["SIGMO_UI_SCENARIO": scenario, "SIGMO_UI_RESET": "1"]
         app.launchArguments = ["-AppleLanguages", chinese ? "(zh-Hans)" : "(en)", "-AppleLocale", chinese ? "zh_CN" : "en_US",
-                               "-AppleInterfaceStyle", large ? "Dark" : "Light",
+                               "-AppleInterfaceStyle", large || dark ? "Dark" : "Light",
                                "-UIPreferredContentSizeCategoryName", large ? "UICTContentSizeCategoryAccessibilityXXXL" : "UICTContentSizeCategoryL"]
         app.launch()
         tap(app.descendants(matching: .any)["modem-00000000-0000-0000-0000-000000000001-device-1"].firstMatch, in: app)
@@ -33,6 +37,25 @@ final class ConnectionFlowTests: XCTestCase {
             if app.switches["internetConnected"].isHittable { break }
             app.swipeDown()
         }
+    }
+
+    private func revealFullText(_ element: XCUIElement, in app: XCUIApplication) {
+        let top = app.navigationBars.firstMatch.frame.maxY + 8
+        let bottom = app.tabBars.firstMatch.frame.minY - 8
+        let viewport = CGRect(x: app.frame.minX, y: top, width: app.frame.width, height: bottom - top)
+        for _ in 0..<12 {
+            guard element.waitForExistence(timeout: 1) else {
+                app.swipeUp()
+                continue
+            }
+            if element.isHittable, viewport.contains(element.frame) { return }
+            XCTAssertLessThanOrEqual(element.frame.height, viewport.height)
+            let distance = min(max(element.frame.midY - viewport.midY, -viewport.height / 3), viewport.height / 3)
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: viewport.midY / app.frame.height))
+            start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -distance)))
+        }
+        XCTAssertTrue(viewport.contains(element.frame), "Text is obscured by navigation or tab bars: \(element.debugDescription)")
+        XCTAssertTrue(element.isHittable)
     }
 
     private func toggle(_ id: String, in app: XCUIApplication) {
@@ -77,13 +100,16 @@ final class ConnectionFlowTests: XCTestCase {
         } catch { XCTFail("Save connection screenshot: \(error)") }
     }
 
-    private func audit(_ app: XCUIApplication, name: String) throws {
+    private func audit(_ app: XCUIApplication, name: String,
+                       types: XCUIAccessibilityAuditType = [.sufficientElementDescription, .textClipped]) throws {
+        print("CONNECTION_AUDIT_BEGIN \(name)")
         capture(app, name: name)
-        try app.performAccessibilityAudit(for: [.sufficientElementDescription, .textClipped]) { issue in
+        try app.performAccessibilityAudit(for: types) { issue in
             print("CONNECTION_AUDIT \(name): \(issue.compactDescription): \(issue.detailedDescription)")
-            print(issue.element?.debugDescription ?? "No element identified")
+            print(issue.element?.debugDescription ?? app.debugDescription)
             return false
         }
+        print("CONNECTION_AUDIT_PASS \(name)")
     }
 
     func testNativeNetworkSelectionAndUncommittedReturn() {
@@ -274,30 +300,55 @@ final class ConnectionFlowTests: XCTestCase {
     }
 
     func testChineseLargeTextDarkConnectionPages() throws {
-        let app = launch(chinese: true, large: true)
-        capture(app, name: "Chinese profile connection entries")
+        // textClipped cycles through Dynamic Type sizes. Start that sweep at the
+        // default size so shrinking a scrolled Form does not recycle its target rows.
+        // Separately verify maximum-size startup and fully visible, scrollable text.
+        try auditConnectionPages(large: false)
+        try auditConnectionPages(large: true)
+    }
+
+    private func auditConnectionPages(large: Bool) throws {
+        let app = launch(chinese: true, large: large, dark: true)
+        defer { app.terminate() }
+        let variant = large ? "Chinese maximum text" : "Chinese Dynamic Type sweep"
+        let types: XCUIAccessibilityAuditType = large ? [.sufficientElementDescription] : [.sufficientElementDescription, .textClipped]
+        capture(app, name: variant + " profile connection entries")
         for (entry, control) in [("profileNetworkSelection", "networkAutomatic"), ("profileInternet", "internetConnected"),
                                  ("profileWiFiCalling", "wifiCallingEnabled"), ("profileVoLTE", "volteEnabled")] {
             tap(app.buttons[entry], in: app)
             XCTAssertTrue(app.switches[control].waitForExistence(timeout: 10))
             XCTAssertGreaterThanOrEqual(app.switches[control].frame.height, 44)
-            try audit(app, name: "Chinese large text " + entry)
+            try audit(app, name: variant + " " + entry, types: types)
             if entry == "profileInternet" {
-                reveal(app.switches["internetAlwaysOn"], in: app)
-                try audit(app, name: "Chinese large text Internet options")
+                if large {
+                    for hint in ["internetDefaultRouteHint", "internetProxyHint", "internetAlwaysOnHint"] {
+                        revealFullText(app.staticTexts[hint], in: app)
+                        try audit(app, name: variant + " " + hint, types: types)
+                    }
+                } else {
+                    reveal(app.switches["internetAlwaysOn"], in: app)
+                    try audit(app, name: variant + " Internet options", types: types)
+                }
                 reveal(app.descendants(matching: .any)["internetInterface"].firstMatch, in: app)
-                try audit(app, name: "Chinese large text Internet details")
+                try audit(app, name: variant + " Internet details", types: types)
             }
             back(app)
         }
     }
 
-    func testBackgroundDoesNotReplayUncommittedNetworkSelection() {
+    func testBackgroundPreservesUncommittedNetworkBrowsing() {
         let app = launch("detail-connection-scan")
         tap(app.buttons["profileNetworkSelection"], in: app)
         toggle("networkAutomatic", in: app)
+        XCTAssertTrue(app.buttons["networkOperator-23410"].waitForExistence(timeout: 10))
         XCUIDevice.shared.press(.home)
         app.activate()
+        expectToggle("networkAutomatic", value: "0", in: app)
+        XCTAssertTrue(app.buttons["networkOperator-23410"].exists)
+        XCTAssertFalse(app.buttons["networkOperator-23410"].isSelected)
+        back(app)
+        XCTAssertTrue(app.buttons["profileNetworkSelection"].label.contains("Example Mobile"))
+        tap(app.buttons["profileNetworkSelection"], in: app)
         expectToggle("networkAutomatic", value: "1", in: app)
         XCTAssertFalse(app.buttons["networkOperator-23410"].exists)
     }

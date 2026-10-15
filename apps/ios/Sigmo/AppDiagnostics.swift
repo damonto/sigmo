@@ -11,11 +11,7 @@ enum AppDiagnostics {
     )
 
     static func record(_ event: String) {
+        // Keep diagnostics independent of stdout, which can fail when the debug console disconnects.
         logger.notice("\(event, privacy: .public)")
-        #if DEBUG
-        // Device console capture reads stdout; OSLog remains available in Console.
-        let line = "[Sigmo] \(event)\n"
-        FileHandle.standardOutput.write(Data(line.utf8))
-        #endif
     }
 }

@@ -1,4 +1,53 @@
 const en = {
+  simPin: {
+    title: 'SIM PIN',
+    protection: 'PIN Protection',
+    simActions: 'SIM actions',
+    description:
+      'PIN protects your SIM. Incorrect codes consume attempts. Get your PUK from your carrier.',
+    loading: 'Reading SIM PIN status…',
+    submitting: 'Submitting…',
+    pinAttempts: 'PIN attempts remaining: {count}',
+    pukAttempts: 'PUK attempts remaining: {count}',
+    currentPin: 'Current PIN',
+    puk: 'PUK',
+    newPin: 'New PIN',
+    confirmPin: 'Confirm new PIN',
+    format: 'PIN: 4–8 digits. PUK: 8 digits. Preserve leading zeros.',
+    cancel: 'Cancel',
+    done: 'Done',
+    actions: {
+      enable: 'Enable SIM PIN',
+      disable: 'Disable SIM PIN',
+      change: 'Change PIN',
+      pin: 'Unlock SIM',
+      puk: 'Unblock SIM',
+    },
+    locks: {
+      none: 'SIM unlocked',
+      pin: 'Enter your SIM PIN to unlock.',
+      puk: 'PIN attempts exhausted. Enter the PUK from your carrier and choose a new PIN.',
+      permanently_blocked:
+        'This SIM is permanently blocked. Contact your carrier for a replacement.',
+      other: 'This lock cannot be managed here. Contact your carrier.',
+      unknown: 'SIM PIN status is unavailable.',
+    },
+    errors: {
+      sim_pin_invalid_request: 'Enter a PIN of 4–8 digits or a PUK of 8 digits.',
+      sim_pin_incorrect: 'Incorrect PIN. Check the remaining attempts before trying again.',
+      sim_puk_incorrect: 'Incorrect PUK. Check the code with your carrier before trying again.',
+      sim_puk_required: 'PIN attempts exhausted. Use your carrier’s PUK.',
+      sim_permanently_blocked: 'This SIM is permanently blocked. Contact your carrier.',
+      sim_target_changed: 'The active SIM changed. Review its status before continuing.',
+      sim_pin_state_conflict: 'The SIM state changed. Review its status before continuing.',
+      sim_pin_unsupported: 'SIM PIN management is unavailable.',
+      sim_pin_unavailable: 'Unable to read SIM PIN status. Close and reopen this dialog to try again.',
+      sim_pin_result_unknown:
+        'The result could not be confirmed. Reopen SIM PIN to check before trying again.',
+      enable_modem_after_unlock_failed:
+        'SIM unlocked, but the modem could not be enabled. Turn off airplane mode without entering the code again.',
+    },
+  },
   communication: {
     modem: 'Modem',
     chooseModem: 'Choose a line',
@@ -568,6 +617,7 @@ const en = {
         modem_read: 'Read modem status',
         sim_read: 'Read SIM cards and secure elements',
         sim_switch: 'Switch SIM slot',
+        sim_pin: 'Manage SIM PIN and PUK',
         sim_update: 'Update locally stored SIM phone number',
         esim_read: 'Read and discover eSIM profiles',
         esim_download: 'Download eSIM profiles',

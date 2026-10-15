@@ -31,7 +31,7 @@ struct CallDialpad: View {
                     if ussd.opened { CallServiceView(ussd: ussd) }
                     else {
                         CallDialpadSurface(number: $number, canDial: canDial, dial: dialNumber)
-                        if !calls.available(line) { Text("calls.upgrade").font(.footnote).foregroundStyle(.secondary) }
+                        if !calls.available(line) { Text("calls.unavailable").font(.footnote).foregroundStyle(.secondary) }
                         contactAccess
                     }
                 }.padding(24).frame(maxWidth: 408).frame(maxWidth: .infinity)

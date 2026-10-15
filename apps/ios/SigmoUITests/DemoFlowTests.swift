@@ -11,10 +11,9 @@ final class DemoFlowTests: XCTestCase {
         app.launchEnvironment["SIGMO_UI_RESET"] = "1"
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
-        XCTAssertTrue(app.buttons["manageBackends"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.buttons["tryDemo"].exists)
-        app.buttons["manageBackends"].tap()
-        XCTAssertTrue(app.buttons["tryDemo"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["tryDemo"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["tryDemo"].isHittable)
+        XCTAssertTrue(app.buttons["connectSigmo"].isHittable)
         app.buttons["tryDemo"].tap()
         XCTAssertTrue(app.buttons["demoOptions"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Demo Home"].waitForExistence(timeout: 10))
@@ -38,5 +37,9 @@ final class DemoFlowTests: XCTestCase {
         app.buttons["tryDemo"].tap()
         XCTAssertTrue(app.staticTexts["Demo Home"].waitForExistence(timeout: 10))
         app.buttons["exitDemo"].tap()
+        XCTAssertTrue(app.buttons["tryDemo"].waitForExistence(timeout: 10))
+        app.buttons["manageBackends"].tap()
+        XCTAssertTrue(app.navigationBars["Manage Sigmo"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["tryDemo"].exists)
     }
 }

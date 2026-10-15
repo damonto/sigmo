@@ -384,6 +384,7 @@
 "settings.mcp.permissionLabels.modem_read" = "Read modem status";
 "settings.mcp.permissionLabels.sim_read" = "Read SIM cards and secure elements";
 "settings.mcp.permissionLabels.sim_switch" = "Switch SIM slot";
+"settings.mcp.permissionLabels.sim_pin" = "Manage SIM PIN and PUK";
 "settings.mcp.permissionLabels.sim_update" = "Update locally stored SIM phone number";
 "settings.mcp.permissionLabels.esim_read" = "Read and discover eSIM profiles";
 "settings.mcp.permissionLabels.esim_download" = "Download eSIM profiles";
@@ -527,7 +528,7 @@
 "detail.noNotifications" = "No eSIM notifications";
 "detail.noProfiles" = "No installed profiles";
 "detail.noSources" = "No transfer sources available";
-"detail.notifications" = "eSIM notifications";
+"detail.notifications" = "SIM Notifications";
 "detail.once" = "Once";
 "detail.operationFailed" = "Operation did not complete";
 "detail.owner" = "Profile owner";
@@ -535,7 +536,7 @@
 "detail.preview" = "Profile preview";
 "detail.profileActions" = "Profile actions";
 "detail.profileClass" = "Profile class";
-"detail.profileDetails" = "Profile information";
+"detail.profileDetails" = "Profile Information";
 "detail.profileName" = "Profile name";
 "detail.profiles" = "eSIMs";
 "detail.provider" = "Service provider";
@@ -641,7 +642,6 @@
 "detail.localReaderHTTPS" = "Use an HTTPS connection to Sigmo to transfer from a local card reader.";
 "detail.localReaderUnavailable" = "The local reader or SIM is unavailable. Insert the card and try again.";
 "detail.remoteCardInterrupted" = "The reader connection was interrupted. A card command may have completed. Check the source card and target modem before trying again.";
-"detail.remoteCardUnsupported" = "This Sigmo backend does not support local card readers. Update the backend and try again.";
 "detail.selectTransferProfile" = "Choose an eSIM to Transfer";
 "detail.noTransferProfiles" = "No eSIMs available to transfer";
 "detail.setupHeading" = "Set Up eSIM";
@@ -813,6 +813,7 @@
 "apiError.volte_airplane_mode" = "Turn off Airplane Mode on this device before changing VoLTE.";
 "apiError.volte_unavailable" = "This device does not support Sigmo-managed VoLTE.";
 // Messages and installation push notifications.
+"apiError.invalid_recipient" = "Enter a valid recipient phone number.";
 "messages.lineSuffix" = "Line ending %@";
 "messages.resultUnknown" = "The send result is not yet confirmed. Refresh to check before sending again.";
 "messages.inactiveLine" = "Enable this SIM line before replying. Its history remains available.";
@@ -843,7 +844,6 @@
 "messages.search" = "Search numbers or messages";
 "messages.unknownSender" = "Unknown Sender";
 "messages.unread" = "Unread";
-"messages.upgrade" = "Update this Sigmo to enable shared read status, line history, and push notifications.";
 "push.allowed" = "Allowed";
 "push.denied" = "Not allowed";
 "push.enabled" = "Allow Notifications";
@@ -878,7 +878,7 @@
 "calls.empty" = "No Calls";
 "calls.noResults" = "No Matching Calls";
 "calls.emptyDescription" = "Your calls on this device appear here.";
-"calls.upgrade" = "Call history and service codes are available. Upgrade this Sigmo to use native audio calls.";
+"calls.unavailable" = "Native audio calls are unavailable on this line. Service codes remain available.";
 "calls.callback" = "Call Back";
 "calls.message" = "Message";
 "calls.incomingCall" = "Incoming Call";
@@ -1036,7 +1036,9 @@
 "apiError.call_media_unsupported_codec" = "This line cannot negotiate a supported audio format.";
 "apiError.subscribe_call_events_failed" = "Live call updates are unavailable. Reconnecting…";
 "backends.manage" = "Manage Sigmo";
-"backends.connect" = "Connect Sigmo";
+"backends.connect" = "Connect to Sigmo";
+"home.welcome.title" = "Welcome to Sigmo";
+"home.welcome.description" = "Connect to your server or explore the app in Demo Mode.";
 "home.all" = "All";
 "home.search" = "Search";
 "home.clearSearch" = "Clear search";
@@ -1081,8 +1083,7 @@
 "communication.lineUnavailable" = "The previously used line is unavailable. Choose another line.";
 "communication.noLines" = "No available lines. Activate a SIM in Devices first.";
 "communication.loading" = "Loading…";
-"communication.upgrade" = "Update this Sigmo backend to use this feature.";
-"communication.upgradeCalls" = "Call history requires a backend with calling support.";
+"communication.callsUnavailable" = "Call history is unavailable on this Sigmo backend.";
 "communication.deletedNumber" = "Number deleted";
 "communication.deletedLines" = "History from deleted numbers";
 "communication.assign" = "Assign history";
@@ -1188,7 +1189,7 @@
 "demo.try" = "Try Demo";
 "demo.title" = "Demo Mode";
 "demo.exit" = "Exit Demo";
-"demo.entryDescription" = "Explore Sigmo with sample devices. No server, account, or SIM is required.";
+"demo.entryDescription" = "Explore without an account or server";
 "demo.description" = "All devices and data in this mode are simulated. Messages, calls, carrier setup, and SIM/eSIM operations stay on this device. No real messages or calls are sent. Changes are reset when you exit.";
 "demo.inputs" = "Use a sample activation code, confirmation code 123456, or SIM PIN 1234. Demo recordings contain a sample tone. Carrier services and remote push delivery are simulated.";
 "demo.receiveMessage" = "Receive Sample Message";
@@ -1210,3 +1211,40 @@
 "demo.simulatedCall" = "Demo Call";
 "demo.simulatedSIM" = "Demo operation. No real SIM is changed.";
 "demo.updateNotes" = "Sample backend update. Installation is simulated on this device.";
+
+// SIM PIN and PUK
+"simPin.title" = "SIM PIN";
+"simPin.simActions" = "SIM actions";
+"simPin.description" = "PIN protects your SIM. Incorrect codes consume attempts. Get your PUK from your carrier.";
+"simPin.loading" = "Reading SIM PIN status…";
+"simPin.submitting" = "Submitting…";
+"simPin.pinAttempts" = "PIN attempts remaining: %lld";
+"simPin.pukAttempts" = "PUK attempts remaining: %lld";
+"simPin.currentPin" = "Current PIN";
+"simPin.puk" = "PUK";
+"simPin.newPin" = "New PIN";
+"simPin.confirmPin" = "Confirm new PIN";
+"simPin.format" = "PIN: 4–8 digits. PUK: 8 digits. Preserve leading zeros.";
+"simPin.cancel" = "Cancel";
+"simPin.done" = "Done";
+"simPin.actions.enable" = "Enable SIM PIN";
+"simPin.actions.disable" = "Disable SIM PIN";
+"simPin.actions.change" = "Change PIN";
+"simPin.actions.pin" = "Unlock SIM";
+"simPin.actions.puk" = "Unblock SIM";
+"simPin.locks.none" = "SIM unlocked";
+"simPin.locks.pin" = "Enter your SIM PIN to unlock.";
+"simPin.locks.puk" = "PIN attempts exhausted. Enter the PUK from your carrier and choose a new PIN.";
+"simPin.locks.permanently_blocked" = "This SIM is permanently blocked. Contact your carrier for a replacement.";
+"simPin.locks.other" = "This lock cannot be managed here. Contact your carrier.";
+"simPin.locks.unknown" = "SIM PIN status is unavailable.";
+"simPin.errors.sim_pin_invalid_request" = "Enter a PIN of 4–8 digits or a PUK of 8 digits.";
+"simPin.errors.sim_pin_incorrect" = "Incorrect PIN. Check the remaining attempts before trying again.";
+"simPin.errors.sim_puk_incorrect" = "Incorrect PUK. Check the code with your carrier before trying again.";
+"simPin.errors.sim_puk_required" = "PIN attempts exhausted. Use your carrier’s PUK.";
+"simPin.errors.sim_permanently_blocked" = "This SIM is permanently blocked. Contact your carrier.";
+"simPin.errors.sim_pin_state_conflict" = "The SIM state changed. Review its status before continuing.";
+"simPin.errors.sim_pin_unsupported" = "SIM PIN management is unavailable.";
+"simPin.errors.sim_pin_unavailable" = "Unable to read SIM PIN status. Close and reopen this page to try again.";
+"simPin.errors.sim_pin_result_unknown" = "The result could not be confirmed. Reopen SIM PIN to check before trying again.";
+"simPin.errors.enable_modem_after_unlock_failed" = "SIM unlocked, but the modem could not be enabled. Turn off airplane mode without entering the code again.";

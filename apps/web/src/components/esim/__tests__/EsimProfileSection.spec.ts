@@ -443,4 +443,24 @@ describe('EsimProfileSection', () => {
       id: 'active',
     })
   })
+
+  it('places SIM PIN immediately above SIM Application with separators', async () => {
+    const wrapper = mountSection({
+      simPinAvailable: true,
+      simPinProfileIccid: 'iccid-active',
+      simApplicationAvailable: true,
+      simApplicationProfileIccid: 'iccid-active',
+    })
+    const menus = wrapper.findAllComponents({ name: 'DropdownMenu' })
+    const pin = menus[0].findAll('button').find((button) => button.text() === 'simPin.title')
+    expect(pin).toBeDefined()
+    expect(pin?.element.previousElementSibling?.tagName).toBe('HR')
+    expect(pin?.element.nextElementSibling?.tagName).toBe('HR')
+    expect(pin?.element.nextElementSibling?.nextElementSibling?.textContent).toBe(
+      'modemDetail.simApplication.title',
+    )
+    expect(menus[1].text()).not.toContain('simPin.title')
+    await pin?.trigger('click')
+    expect(wrapper.emitted('open-sim-pin')).toHaveLength(1)
+  })
 })

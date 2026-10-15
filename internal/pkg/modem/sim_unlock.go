@@ -3,10 +3,7 @@ package modem
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
-
-	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
 var (
@@ -17,26 +14,7 @@ var (
 	ErrPrimarySIMMissing    = errors.New("primary SIM is not available")
 )
 
+// UnlockSIMPINAndEnable preserves the historical PIN-only entry point.
 func (m *Modem) UnlockSIMPINAndEnable(ctx context.Context, pin string) error {
-	if m == nil {
-		return errModemRequired
-	}
-	pin = strings.TrimSpace(pin)
-	if pin == "" {
-		return ErrSIMPINRequired
-	}
-	snapshot := m.Snapshot()
-	if snapshot.Status.SIM != wwanmodem.SIMStateLocked {
-		return ErrSIMUnlockNotRequired
-	}
-	if snapshot.SIM == nil {
-		return ErrPrimarySIMMissing
-	}
-	if err := snapshot.SIM.SendPIN(ctx, pin); err != nil {
-		return fmt.Errorf("%w: %w", ErrSIMUnlockFailed, err)
-	}
-	if err := m.Enable(ctx); err != nil {
-		return fmt.Errorf("%w: %w", ErrEnableAfterSIMUnlock, err)
-	}
-	return nil
+	return m.UnlockSIM(ctx, SIMUnlock{PIN: strings.TrimSpace(pin)})
 }

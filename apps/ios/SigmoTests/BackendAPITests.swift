@@ -120,6 +120,18 @@ final class BackendAPITests: XCTestCase {
     }
 
     @MainActor
+    func testResourceIDsCannotTraverseTheAPIPath() throws {
+        let api = BackendAPI(configuration: try testConfiguration())
+        for id in [".", ".."] {
+            XCTAssertThrowsError(try api.makeRequest(["contacts", id], method: "DELETE"))
+        }
+        for (id, encoded) in [("a.b", "a.b"), ("../settings", "..%2Fsettings"), ("%2e%2e", "%252e%252e")] {
+            let request = try api.makeRequest(["contacts", id], method: "DELETE")
+            XCTAssertTrue(try XCTUnwrap(request.url).absoluteString.hasSuffix("/contacts/" + encoded))
+        }
+    }
+
+    @MainActor
     func testSettingsFixtureDoesNotInterceptDeviceStatus() async throws {
         let fixture = PreviewBackendServer()
         let config = try testConfiguration("home.sigmo.test")

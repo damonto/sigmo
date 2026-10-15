@@ -57,9 +57,7 @@ struct MessageThreadView: View {
                     if state.canUseActive { confirmCall = true } else { dialCurrent() }
                 }.disabled(calls.hasCall || state.modem == nil)
             }
-            if state.session.capabilities?.contains("contacts") == true {
-                NavigationLink { SaveContactNumberView(session: state.session, number: state.conversation.participant) } label: { Label("communication.addContact", systemImage: "person.crop.circle.badge.plus") }
-            }
+            NavigationLink { SaveContactNumberView(session: state.session, number: state.conversation.participant) } label: { Label("communication.addContact", systemImage: "person.crop.circle.badge.plus") }
         }
         .detailErrorAlert(state.failure)
         .foregroundTask {
@@ -212,6 +210,7 @@ struct NewMessageView: View {
                 TextField("messages.recipient", text: $state.newRecipient)
                     .keyboardType(.phonePad).textContentType(.telephoneNumber)
                     .autocorrectionDisabled().focused($recipientFocused)
+                    .disabled(state.sending)
                     .accessibilityIdentifier("message-recipient")
             }.padding(.horizontal).padding(.top)
             Divider()
@@ -226,9 +225,7 @@ struct NewMessageView: View {
         }
         .navigationTitle("messages.new").navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if state.session.capabilities?.contains("contacts") == true {
-                NavigationLink { SaveContactNumberView(session: state.session, number: state.newRecipient) } label: { Label("communication.addContact", systemImage: "person.crop.circle.badge.plus") }
-            }
+            NavigationLink { SaveContactNumberView(session: state.session, number: state.newRecipient) } label: { Label("communication.addContact", systemImage: "person.crop.circle.badge.plus") }
         }
         .detailErrorAlert(state.failure)
         .toolbar { ToolbarItem(placement: .cancellationAction) { Button("common.cancel") { dismiss() } } }

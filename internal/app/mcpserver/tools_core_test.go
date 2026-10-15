@@ -23,7 +23,7 @@ func TestCorePermissions(t *testing.T) {
 	}
 	want := []string{
 		"modem.read",
-		"sim.read", "sim.switch", "sim.update",
+		"sim.read", "sim.switch", "sim.update", "sim.pin",
 		"esim.read", "esim.download", "esim.manage", "esim.delete",
 		"sms.read", "sms.send", "sms.delete", "ussd.execute",
 		"network.read", "network.register", "network.power",
@@ -112,6 +112,7 @@ func TestCoreToolSchemasRegister(t *testing.T) {
 		gotTools = append(gotTools, tool.name)
 	}
 	wantTools := []string{
+		"get_sim_pin_status", "set_sim_pin_protection", "change_sim_pin", "unlock_sim_pin", "unblock_sim_pin",
 		"get_network_status",
 		"list_authorized_modems", "get_modem_status",
 		"list_sim_cards", "list_secure_elements", "switch_sim_slot", "update_msisdn",

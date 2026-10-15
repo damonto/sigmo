@@ -90,7 +90,8 @@ final class CommunicationOverviewState {
 
     func load(more: Bool = false, force: Bool = false, automatic: Bool = false) async {
         let current = availableSources.filter { source in
-            (!more || !source.cursor.isEmpty) && (!automatic || !source.hasLoadedMore)
+            (!more || !source.cursor.isEmpty)
+                && (!automatic || (source.session.foreground && !source.hasLoadedMore))
         }
         // Each source owns its cursor, request generation and error. A slow or unavailable
         // backend does not hold back records that have already arrived from another one.

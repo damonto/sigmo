@@ -247,7 +247,7 @@ final class SettingsFlowTests: XCTestCase {
             // This simulator reports clipping for fully visible field and symbol labels.
             // Verify these layouts with field geometry and retained screenshots instead.
             try app.performAccessibilityAudit(for: [.sufficientElementDescription]) { issue in
-                print("AUTH_LAYOUT_ISSUE \(language) \(mode) \(issue.detailedDescription) \(issue.element?.debugDescription ?? "No element")")
+                print("AUTH_LAYOUT_ISSUE \(language) \(mode) \(issue.detailedDescription) \(issue.element?.debugDescription ?? app.debugDescription)")
                 return false
             }
             print("AUTH_LAYOUT_PASS \(language) largeText=\(largeText) \(mode)")
@@ -289,7 +289,7 @@ final class SettingsFlowTests: XCTestCase {
             }
             screenshot(app)
             try app.performAccessibilityAudit(for: [.sufficientElementDescription, .textClipped]) { issue in
-                print("SETTINGS_AUDIT \(language) \(page) \(issue.detailedDescription) \(issue.element?.debugDescription ?? "No element")")
+                print("SETTINGS_AUDIT \(language) \(page) \(issue.detailedDescription) \(issue.element?.debugDescription ?? app.debugDescription)")
                 return false
             }
             print("SETTINGS_AUDIT_PASS \(language) \(page)")

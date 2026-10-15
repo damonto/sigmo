@@ -172,18 +172,25 @@ final class MessagesTests: XCTestCase {
         XCTAssertNil(list.failure)
     }
 
-    func testLegacySearchUsesServerQueryAndClearingRestoresMessages() async throws {
+    func testConversationFailurePreservesSnapshotAndSurfacesError() async throws {
         let fixture = MessagesFixture()
-        await fixture.setLegacy(true)
         let session = try await session(fixture)
         let list = MessagesState(session: session, modemID: "device-1")
-        for (query, expectedIDs) in [(" Welcome ", [Int64(1)]), ("missing", []), ("", [Int64(2)])] {
-            list.search = query
+        await list.load()
+        let original = list.items
+        XCTAssertFalse(original.isEmpty)
+        for status in [404, 500] {
+            await fixture.setConversationStatus(status)
             await list.load()
-            XCTAssertTrue(list.legacy)
-            XCTAssertEqual(list.items.map(\.latestMessage.id), expectedIDs)
-            XCTAssertNil(list.failure)
+            XCTAssertEqual(list.items, original)
+            XCTAssertEqual(list.failure?.status, status)
+            XCTAssertFalse(list.loading)
         }
+        let oldEndpointReads = await fixture.requestCount(method: "GET", suffix: "/modems/device-1/messages")
+        XCTAssertEqual(oldEndpointReads, 0)
+        await fixture.setConversationStatus(200)
+        await list.load()
+        XCTAssertNil(list.failure)
     }
 
     func testTimeoutRetainsDraftAndDoesNotResendOnRefresh() async throws {
@@ -273,17 +280,32 @@ final class MessagesTests: XCTestCase {
         XCTAssertEqual(submissions, 2)
     }
 
-    func testOldBackendUsesExistingMessagesWithUpgradeState() async throws {
-        let fixture = MessagesFixture()
-        await fixture.setLegacy(true)
-        let session = try await session(fixture)
+    func testMalformedSuccessResponseLeavesBothSendResultsUnknown() async throws {
+        let fixture = MessagesFixture(), configuration = try testConfiguration()
+        let session = BackendSession(configuration: configuration, credentials: MemoryCredentials().store,
+            api: BackendAPI(configuration: configuration) { request in
+                let response = try await fixture.respond(request)
+                if request.httpMethod == "POST", request.url?.path.hasSuffix("/messages") == true {
+                    return BackendHTTPResponse(data: Data("truncated response".utf8), status: 200)
+                }
+                return response
+            })
+        await session.refresh(force: true)
         let list = MessagesState(session: session, modemID: "device-1")
         await list.load()
-        XCTAssertTrue(list.legacy)
-        XCTAssertEqual(list.items.count, 1)
-        let thread = list.thread(try XCTUnwrap(list.items.first))
-        await thread.load()
-        XCTAssertEqual(thread.messages.count, 2)
+        let thread = list.thread(try XCTUnwrap(list.items.first { $0.id == "conversation-active" }))
+        thread.draft = "Existing conversation"
+        await thread.send()
+        XCTAssertEqual(thread.failure?.code, "messages.resultUnknown")
+        XCTAssertEqual(thread.draft, "Existing conversation")
+        list.newRecipient = "10086"
+        list.newDraft = "New conversation"
+        let result = await list.sendNew()
+        XCTAssertNil(result)
+        XCTAssertEqual(list.failure?.code, "messages.resultUnknown")
+        XCTAssertEqual(list.newDraft, "New conversation")
+        let submissions = await fixture.requestCount(method: "POST", suffix: "/messages")
+        XCTAssertEqual(submissions, 2)
     }
 
     func testNewMessageIncludesExpectedSIMAndClearsOnlyAfterSuccess() async throws {

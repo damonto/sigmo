@@ -61,6 +61,8 @@ const props = withDefaults(
     wifiCallingEnabled?: boolean
     wifiCallingConnected?: boolean
     wifiCallingBusy?: boolean
+    simPinAvailable?: boolean
+    simPinProfileIccid?: string
     simApplicationAvailable?: boolean
     simApplicationProfileIccid?: string
   }>(),
@@ -72,11 +74,14 @@ const props = withDefaults(
     wifiCallingEnabled: false,
     wifiCallingConnected: false,
     wifiCallingBusy: false,
+    simPinAvailable: false,
+    simPinProfileIccid: '',
     simApplicationAvailable: false,
     simApplicationProfileIccid: '',
   },
 )
 const emit = defineEmits<{
+  (event: 'open-sim-pin'): void
   (event: 'success', message: string): void
   (event: 'toggle-network', profile: EsimProfile, nextValue: boolean): void
   (event: 'toggle-wifi-calling', profile: EsimProfile, nextValue: boolean): void
@@ -540,6 +545,14 @@ watch(detailsOpen, (value) => {
                     <DropdownMenuItem @click="handlePhoneNumberClick(profile)">
                       {{ t('modemDetail.settings.msisdnTitle') }}
                     </DropdownMenuItem>
+                    <template
+                      v-if="props.simPinAvailable && props.simPinProfileIccid === profile.iccid"
+                    >
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem @click="emit('open-sim-pin')">{{
+                        t('simPin.title')
+                      }}</DropdownMenuItem>
+                    </template>
                     <DropdownMenuSeparator v-if="isProfileSimApplicationAvailable(profile)" />
                     <DropdownMenuItem
                       v-if="isProfileSimApplicationAvailable(profile)"

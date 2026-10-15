@@ -17,9 +17,7 @@ struct NativePushSettingsView: View {
                         if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
                     }
                 }
-                if push.unsupported.contains(session.id) {
-                    Section { Text("messages.upgrade") }
-                } else if let binding = push.binding(sessionID: session.id) {
+                if let binding = push.binding(sessionID: session.id) {
                     Section {
                         Toggle("push.enabled", isOn: Binding(get: { binding.enabled }, set: { push.setPreferences(sessionID: session.id, enabled: $0) }))
                         Toggle("push.sms", isOn: Binding(get: { binding.sms }, set: { push.setPreferences(sessionID: session.id, sms: $0) }))

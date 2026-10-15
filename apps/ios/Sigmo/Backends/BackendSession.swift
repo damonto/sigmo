@@ -178,7 +178,6 @@ final class BackendSession: Identifiable {
                 let features = try await api.capabilities(token: token)
                 try check(current)
                 capabilities = features
-                if !features.contains("contacts") { clearContactCache() }
                 capabilityFailure = nil
             } catch {
                 try check(current)
@@ -464,13 +463,9 @@ final class BackendSession: Identifiable {
             unreadCounts = counts
             unreadRevision = snapshot.revision
         } catch {
-            guard isCurrent(current), request == unreadRequest else { return }
-            if let failure = error as? BackendFailure, failure.status == 404 {
-                unreadCounts = [:]
-                unreadRevision = -1
-            }
+            // Retain confirmed counts when the badge request fails. Authentication
+            // revocation clears device data through protectedRequest.
             // An unavailable badge must not hide successfully loaded devices.
-            // Transient errors retain the last confirmed counts; legacy servers omit them.
         }
     }
 
@@ -715,7 +710,7 @@ extension BackendSession {
         linesLoadedAt = .distantPast
     }
     func refreshContacts(force: Bool = false) async throws {
-        guard canAccessDevices, capabilities?.contains("contacts") == true else {
+        guard canAccessDevices else {
             clearContactCache()
             return
         }
@@ -729,7 +724,7 @@ extension BackendSession {
             defer { if request == contactsRevision { contactsTask = nil } }
             let result = try await protectedRequest { api, token in try await api.contacts(token: token) }
             guard !Task.isCancelled, revision == accessRevision, request == contactsRevision,
-                  canAccessDevices, capabilities?.contains("contacts") == true else { throw CancellationError() }
+                  canAccessDevices else { throw CancellationError() }
             savedContacts = result
             contactsLoadedAt = clock.now()
         }

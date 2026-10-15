@@ -38,15 +38,6 @@ struct SMSConversation: Codable, Identifiable, Hashable, Sendable {
         if !number.isEmpty { return number }
         return String(format: String(localized: "messages.lineSuffix"), String(profileId.suffix(6)))
     }
-
-    static func legacy(_ message: SMSMessage, modem: Modem) -> SMSConversation {
-        let participant = message.incoming ? message.sender : message.recipient
-        return SMSConversation(id: message.conversationId ?? "legacy:\(modem.sim.identifier):\(participant)",
-            profileId: message.profileId ?? modem.sim.identifier, participant: participant,
-            modemId: modem.id, lineLabel: modem.carrier, lineNumber: modem.number,
-            readThroughMessageId: 0, markedUnread: false, unreadCount: 0,
-            latestMessage: message, canSend: true)
-    }
 }
 
 struct MessageSnapshot: Decodable, Sendable {
@@ -82,6 +73,6 @@ extension BackendFailure {
     var unconfirmedMessageSend: Bool {
         // A proxy/server timeout or an invalid/lost response can follow an accepted SMS.
         guard let status else { return true }
-        return isNetwork || status == 408 || status >= 500
+        return isNetwork || code == "invalid_response" || status == 408 || status >= 500
     }
 }

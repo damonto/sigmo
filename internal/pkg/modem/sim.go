@@ -15,6 +15,7 @@ type SIMs struct{ modem *Modem }
 func (m *Modem) SIMs() *SIMs { return &SIMs{modem: m} }
 
 type SIM struct {
+	PINStatus          wwanmodem.SIMPINStatus
 	modem              *Modem
 	Slot               uint32
 	Active             bool
@@ -71,7 +72,8 @@ func (s *SIMs) Get(ctx context.Context, slot uint32) (*SIM, error) {
 
 func simFromInfo(m *Modem, info wwanmodem.SIMInfo) *SIM {
 	return &SIM{
-		modem: m, Slot: uint32(info.Slot), Active: true,
+		PINStatus: info.PINStatus,
+		modem:     m, Slot: uint32(info.Slot), Active: true,
 		Identifier: strings.TrimSpace(info.ICCID), ATR: slices.Clone(info.ATR),
 		EID: strings.TrimSpace(info.EID), IMSI: strings.TrimSpace(info.IMSI),
 		OperatorIdentifier: strings.TrimSpace(info.OperatorID), OperatorName: strings.TrimSpace(info.OperatorName),

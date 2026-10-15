@@ -36,12 +36,40 @@ final class NativeCallPushTests: XCTestCase {
         await push.reconcile(store: store)
         let waiting = await fixture.gatewayCount()
         XCTAssertEqual(waiting, initial)
-        XCTAssertTrue(push.unsupported.isEmpty)
+        XCTAssertNil(push.failures[id])
         await fixture.setGatewayFailure(nil)
         time.advance(1)
         await push.reconcile(store: store)
         XCTAssertTrue(push.voipReady)
         XCTAssertFalse(push.registered.isEmpty)
+    }
+
+    func testMissingPushEndpointSurfacesBackendFailureAndCanRecover() async throws {
+        let fixture = CallPushRegistrationFixture()
+        await fixture.setBackendFailure(HTTPProblem.response(status: 404, code: "resource_not_found", detail: "Missing endpoint"))
+        let directory = URL.temporaryDirectory.appending(path: "PushEndpoint-\(UUID())")
+        let store = BackendStore(file: ConfigurationFile(url: directory.appending(path: "backends.json")), credentials: MemoryCredentials().store,
+            makeAPI: { BackendAPI(configuration: $0, transport: { try await fixture.backend($0) }) })
+        addTeardownBlock { try FileManager.default.removeItem(at: directory) }
+        let id = UUID()
+        XCTAssertTrue(store.saveBackend(id: id, name: "Home", address: "https://calls.example"))
+        await store.sessions[id]?.refresh(force: true)
+        let access = PushNotificationAccess(status: { .denied }, request: {}, register: {}, setBadge: { _ in })
+        let memory = PushMemoryPersistence()
+        let push = NativePushState(identity: PushIdentity(id: "installation", managementToken: "test-credential"), persistence: memory.persistence,
+            gateway: PushGateway(address: URL(string: "https://gateway.example"), transport: { try await fixture.gateway($0) }), notificationAccess: access)
+
+        await push.reconcile(store: store)
+        XCTAssertEqual(push.failures[id]?.status, 404)
+        XCTAssertEqual(push.failures[id]?.code, "resource_not_found")
+        XCTAssertEqual(push.failures[id]?.source, .backend)
+        XCTAssertNil(push.backendID(sessionID: id))
+        await fixture.setBackendFailure(nil)
+        await push.reconcile(store: store)
+        XCTAssertNil(push.failures[id])
+        XCTAssertEqual(push.backendID(sessionID: id), "fixture-call-backend")
+        let gatewayRequests = await fixture.gatewayCount()
+        XCTAssertEqual(gatewayRequests, 0)
     }
 
     func testPendingNotificationPromptDoesNotBlockVoIPSubscription() async throws {
@@ -110,15 +138,18 @@ private actor CallPushRegistrationFixture {
     private var subscription: Subscription?
     private var tokens: [String] = []
     private var failure: BackendHTTPResponse?
+    private var backendFailure: BackendHTTPResponse?
     private var count = 0
 
     func latestSubscription() -> Subscription? { subscription }
     func installations() -> [String] { tokens }
     func gatewayCount() -> Int { count }
     func setGatewayFailure(_ response: BackendHTTPResponse?) { failure = response }
+    func setBackendFailure(_ response: BackendHTTPResponse?) { backendFailure = response }
 
     func backend(_ request: URLRequest) async throws -> BackendHTTPResponse {
         if request.url?.path.hasSuffix("/push-subscriptions") == true {
+            if let backendFailure { return backendFailure }
             if request.httpMethod == "POST" {
                 subscription = try JSONDecoder().decode(Subscription.self, from: XCTUnwrap(request.httpBody))
                 return BackendHTTPResponse(data: Data("{}".utf8), status: 200)

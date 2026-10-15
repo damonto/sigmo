@@ -150,9 +150,13 @@ func TestCatalogBuildResponseLockedModem(t *testing.T) {
 	tests := []struct {
 		name            string
 		wantSupported   bool
+		lock            wwanmodem.SIMLock
 		wantUnlockLabel string
 	}{
-		{name: "supports sim pin unlock", wantSupported: true, wantUnlockLabel: "sim-pin"},
+		{name: "supports sim pin unlock", lock: wwanmodem.SIMLockPIN, wantSupported: true, wantUnlockLabel: "sim-pin"},
+		{name: "puk requires new client", lock: wwanmodem.SIMLockPUK, wantUnlockLabel: "sim-puk"},
+		{name: "permanently blocked", lock: wwanmodem.SIMLockBlocked, wantUnlockLabel: "sim-blocked"},
+		{name: "unknown lock", lock: wwanmodem.SIMLockUnknown, wantUnlockLabel: "unknown"},
 	}
 
 	for _, tt := range tests {
@@ -164,7 +168,7 @@ func TestCatalogBuildResponseLockedModem(t *testing.T) {
 				Manufacturer:        "Quectel",
 				Model:               "RM520N",
 				Status:              wwanmodem.Status{Power: wwanmodem.PowerStateOn, SIM: wwanmodem.SIMStateLocked},
-				SIM:                 &mmodem.SIM{Slot: 1, Active: true, ATR: []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}},
+				SIM:                 &mmodem.SIM{PINStatus: wwanmodem.SIMPINStatus{Supported: true, Lock: tt.lock}, Slot: 1, Active: true, ATR: []byte{0x3B, 0x80, 0x81, 0x2F, 0x82, 0xAC}},
 			}
 
 			got, err := catalog.buildResponse(t.Context(), device)

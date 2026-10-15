@@ -329,5 +329,15 @@
   "reload_notifications_failed": "Reload Notifications Failed",
   "revoke_session_failed": "Revoke Session Failed",
   "save_notifications_failed": "Save Notifications Failed",
-  "validate_session_failed": "Validate Session Failed"
+  "validate_session_failed": "Validate Session Failed",
+  "sim_pin_invalid_request": "Invalid SIM PIN Request",
+  "sim_pin_incorrect": "Incorrect SIM PIN",
+  "sim_puk_incorrect": "Incorrect SIM PUK",
+  "sim_puk_required": "SIM PUK Required",
+  "sim_permanently_blocked": "SIM Permanently Blocked",
+  "sim_target_changed": "Active SIM Changed",
+  "sim_pin_state_conflict": "SIM PIN State Conflict",
+  "sim_pin_unsupported": "SIM PIN Unsupported",
+  "sim_pin_unavailable": "SIM PIN Status Unavailable",
+  "sim_pin_result_unknown": "SIM PIN Result Unknown"
 }

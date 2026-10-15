@@ -29,7 +29,7 @@ final class CarrierLogoTests: XCTestCase {
         await session.refresh(force: true)
         XCTAssertEqual(session.modems.first?.sim.icon, icon)
 
-        // Older servers and profiles without an icon keep the PLMN/flag fallback.
+        // Profiles without an icon use the PLMN/flag fallback.
         await stub.setModemJSON(original)
         await session.refresh(force: true)
         XCTAssertNil(session.modems.first?.sim.icon)

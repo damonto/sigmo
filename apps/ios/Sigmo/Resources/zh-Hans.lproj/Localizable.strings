@@ -384,6 +384,7 @@
 "settings.mcp.permissionLabels.modem_read" = "查看 Modem 状态";
 "settings.mcp.permissionLabels.sim_read" = "查看 SIM 与安全芯片";
 "settings.mcp.permissionLabels.sim_switch" = "切换 SIM 卡槽";
+"settings.mcp.permissionLabels.sim_pin" = "管理 SIM PIN 和 PUK";
 "settings.mcp.permissionLabels.sim_update" = "更新 SIM 本地号码记录";
 "settings.mcp.permissionLabels.esim_read" = "查看与发现 eSIM Profile";
 "settings.mcp.permissionLabels.esim_download" = "下载 eSIM Profile";
@@ -641,7 +642,6 @@
 "detail.localReaderHTTPS" = "请使用 HTTPS 连接 Sigmo，以便从本机读卡器转移。";
 "detail.localReaderUnavailable" = "本机读卡器或 SIM 卡不可用，请插入卡片后重试。";
 "detail.remoteCardInterrupted" = "读卡器连接已中断，卡指令可能已经执行。请检查源卡和目标 Modem 的状态后再重试。";
-"detail.remoteCardUnsupported" = "此 Sigmo 服务端不支持本机读卡器，请更新服务端后重试。";
 "detail.selectTransferProfile" = "选择要转移的 eSIM";
 "detail.noTransferProfiles" = "没有可转移的 eSIM";
 "detail.setupHeading" = "设置 eSIM";
@@ -813,6 +813,7 @@
 "apiError.volte_airplane_mode" = "请先关闭此设备的飞行模式，再更改 VoLTE。";
 "apiError.volte_unavailable" = "此设备不支持由 Sigmo 管理 VoLTE。";
 // Messages and installation push notifications.
+"apiError.invalid_recipient" = "请输入有效的收件人电话号码。";
 "messages.lineSuffix" = "尾号 %@ 的线路";
 "messages.resultUnknown" = "发送结果尚未确认，请刷新核对后再决定是否重发。";
 "messages.inactiveLine" = "回复前请启用此 SIM 线路。你仍可查看该线路的历史消息。";
@@ -843,7 +844,6 @@
 "messages.search" = "搜索号码或信息";
 "messages.unknownSender" = "未知发件人";
 "messages.unread" = "未读";
-"messages.upgrade" = "升级此 Sigmo 以启用共享阅读状态、线路历史和推送通知。";
 "push.allowed" = "已允许";
 "push.denied" = "未允许";
 "push.enabled" = "允许通知";
@@ -878,7 +878,7 @@
 "calls.empty" = "暂无通话";
 "calls.noResults" = "没有匹配的通话";
 "calls.emptyDescription" = "此设备的通话记录会显示在这里。";
-"calls.upgrade" = "可查看通话记录和使用服务码。请升级此 Sigmo 以使用原生语音通话。";
+"calls.unavailable" = "此线路暂时无法使用原生语音通话，仍可使用服务码。";
 "calls.callback" = "回拨";
 "calls.message" = "信息";
 "calls.incomingCall" = "来电";
@@ -1037,6 +1037,8 @@
 "apiError.subscribe_call_events_failed" = "暂时无法获取实时通话状态，正在重新连接…";
 "backends.manage" = "管理 Sigmo";
 "backends.connect" = "连接 Sigmo";
+"home.welcome.title" = "欢迎使用 Sigmo";
+"home.welcome.description" = "连接你的服务器，或通过演示模式体验 Sigmo。";
 "home.all" = "全部";
 "home.search" = "搜索";
 "home.clearSearch" = "清除搜索";
@@ -1081,8 +1083,7 @@
 "communication.lineUnavailable" = "上次使用的线路不可用，请重新选择。";
 "communication.noLines" = "没有可用线路，请先在设备中启用 SIM。";
 "communication.loading" = "正在加载…";
-"communication.upgrade" = "请升级此 Sigmo 后端以使用此功能。";
-"communication.upgradeCalls" = "通话记录需要支持通话的后端。";
+"communication.callsUnavailable" = "此 Sigmo 后端不支持通话记录。";
 "communication.deletedNumber" = "号码已删除";
 "communication.deletedLines" = "已删除号码的历史记录";
 "communication.assign" = "接管历史记录";
@@ -1188,7 +1189,7 @@
 "demo.try" = "体验演示";
 "demo.title" = "演示模式";
 "demo.exit" = "退出演示";
-"demo.entryDescription" = "使用示例设备体验 Sigmo，无需服务器、账号或 SIM 卡。";
+"demo.entryDescription" = "无需账号或服务器，即可体验";
 "demo.description" = "此模式中的设备和数据均为模拟。短信、通话、运营商设置和 SIM/eSIM 操作仅在本机演示，不会发送真实短信或拨打电话。退出后恢复示例数据。";
 "demo.inputs" = "可使用任意示例激活码，确认码为 123456，SIM PIN 为 1234。演示录音包含示例音频，运营商服务及远程推送均为模拟。";
 "demo.receiveMessage" = "接收示例短信";
@@ -1210,3 +1211,40 @@
 "demo.simulatedCall" = "演示通话";
 "demo.simulatedSIM" = "演示操作，不会更改真实 SIM 卡。";
 "demo.updateNotes" = "示例后端更新。安装过程仅在本机模拟。";
+
+// SIM PIN and PUK
+"simPin.title" = "SIM PIN";
+"simPin.simActions" = "SIM 卡操作";
+"simPin.description" = "PIN 用于保护 SIM 卡。输入错误会消耗尝试次数。PUK 请向运营商获取。";
+"simPin.loading" = "正在读取 SIM PIN 状态…";
+"simPin.submitting" = "正在提交…";
+"simPin.pinAttempts" = "PIN 剩余尝试次数：%lld";
+"simPin.pukAttempts" = "PUK 剩余尝试次数：%lld";
+"simPin.currentPin" = "当前 PIN";
+"simPin.puk" = "PUK";
+"simPin.newPin" = "新 PIN";
+"simPin.confirmPin" = "确认新 PIN";
+"simPin.format" = "PIN 为 4–8 位数字，PUK 为 8 位数字。请保留开头的零。";
+"simPin.cancel" = "取消";
+"simPin.done" = "完成";
+"simPin.actions.enable" = "启用 SIM PIN";
+"simPin.actions.disable" = "关闭 SIM PIN";
+"simPin.actions.change" = "更改 PIN";
+"simPin.actions.pin" = "解锁 SIM 卡";
+"simPin.actions.puk" = "使用 PUK 解锁";
+"simPin.locks.none" = "SIM 卡已解锁";
+"simPin.locks.pin" = "请输入 SIM PIN 以解锁。";
+"simPin.locks.puk" = "PIN 尝试次数已耗尽。请输入运营商提供的 PUK，并设置新 PIN。";
+"simPin.locks.permanently_blocked" = "SIM 卡已永久锁定。请联系运营商更换卡片。";
+"simPin.locks.other" = "此处不支持管理该锁定类型。请联系运营商。";
+"simPin.locks.unknown" = "暂时无法获取 SIM PIN 状态。";
+"simPin.errors.sim_pin_invalid_request" = "请输入 4–8 位数字的 PIN 或 8 位数字的 PUK。";
+"simPin.errors.sim_pin_incorrect" = "PIN 不正确。请确认剩余次数后再试。";
+"simPin.errors.sim_puk_incorrect" = "PUK 不正确。请向运营商核对后再试。";
+"simPin.errors.sim_puk_required" = "PIN 尝试次数已耗尽，请使用运营商提供的 PUK。";
+"simPin.errors.sim_permanently_blocked" = "SIM 卡已永久锁定，请联系运营商。";
+"simPin.errors.sim_pin_state_conflict" = "SIM 卡状态已改变。请查看状态后继续。";
+"simPin.errors.sim_pin_unsupported" = "当前不支持管理 SIM PIN。";
+"simPin.errors.sim_pin_unavailable" = "无法读取 SIM PIN 状态，请关闭后重新打开页面。";
+"simPin.errors.sim_pin_result_unknown" = "暂时无法确认操作结果。请重新打开 SIM PIN 查看状态后再试。";
+"simPin.errors.enable_modem_after_unlock_failed" = "SIM 卡已解锁，但无法启用设备。请关闭飞行模式，无需再次输入凭据。";

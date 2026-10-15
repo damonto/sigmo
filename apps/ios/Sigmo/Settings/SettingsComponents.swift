@@ -44,7 +44,6 @@ struct SettingsFieldRow: View {
     @Binding var value: SettingValue
     var channels: [NotificationSchema] = []
     var stacked = false
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var text: Binding<String> {
         Binding(get: { value.text }, set: { value = .text($0) })
@@ -67,8 +66,6 @@ struct SettingsFieldRow: View {
         }
     }
 
-    private var stackedInput: Bool { stacked || (field.control == .number && dynamicTypeSize.isAccessibilitySize) }
-
     private var inputLabel: some View {
         Text(settingsText(field.label))
             .fixedSize(horizontal: false, vertical: true)
@@ -85,7 +82,7 @@ struct SettingsFieldRow: View {
                     .keyboardType(field.control == .number ? .numbersAndPunctuation : .default)
             }
         }
-        .multilineTextAlignment(stackedInput ? .leading : .trailing)
+        .multilineTextAlignment(stacked ? .leading : .trailing)
         .textInputAutocapitalization(.never).autocorrectionDisabled()
         .accessibilityLabel(settingsText(field.label))
         .accessibilityIdentifier(field.key)
@@ -132,7 +129,7 @@ struct SettingsFieldRow: View {
             case .keyValue:
                 SettingsHeadersField(title: settingsText(field.label), value: $value)
             case .text, .password, .number:
-                if stackedInput {
+                if stacked {
                     VStack(alignment: .leading, spacing: 8) {
                         inputLabel
                         input

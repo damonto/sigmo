@@ -15,7 +15,6 @@ final class MessagesState: Identifiable {
     private(set) var loading = false
     private(set) var loaded = false
     private(set) var sending = false
-    private(set) var legacy = false
     private var loadFailure: BackendFailure?
     private(set) var sendFailure: BackendFailure?
     var failure: BackendFailure? { sendFailure ?? loadFailure }
@@ -54,27 +53,14 @@ final class MessagesState: Identifiable {
             guard isCurrent() else { return }
             items = snapshot.items
             badge = MessageBadge(backendId: snapshot.backendId, revision: snapshot.revision, unreadCount: snapshot.unreadCount)
-            legacy = false
             loaded = true
             loadFailure = nil
-        } catch let error as BackendFailure where error.status == 404 {
-            guard let modem, isCurrent() else { return }
-            do {
-                let messages = try await session.protectedRequest { api, token in
-                    try await api.legacyMessages(modemID: modemID, search: query, token: token)
-                }
-                guard isCurrent() else { return }
-                items = historical ? [] : messages.map { SMSConversation.legacy($0, modem: modem) }
-                loaded = true
-                legacy = true
-                loadFailure = nil
-            } catch { if isCurrent() { loadFailure = .wrapping(error) } }
         } catch { if isCurrent() { loadFailure = .wrapping(error) } }
     }
 
     func thread(_ conversation: SMSConversation) -> MessageThreadState {
         if let thread = threads[conversation.id] { return thread }
-        let thread = MessageThreadState(session: session, conversation: conversation, legacy: legacy)
+        let thread = MessageThreadState(session: session, conversation: conversation)
         threads[conversation.id] = thread
         return thread
     }
@@ -93,7 +79,7 @@ final class MessagesState: Identifiable {
     }
 
     func mark(_ conversation: SMSConversation, unread: Bool) async {
-        guard !legacy, !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return }
         let current = generation
         let read = unread ? ConversationRead(markedUnread: true) : ConversationRead(readThroughMessageId: conversation.lastMessageId ?? conversation.latestMessage.id, markedUnread: false)
         do {
@@ -109,11 +95,9 @@ final class MessagesState: Identifiable {
     func delete(_ conversation: SMSConversation) async -> Bool {
         guard !Task.isCancelled else { return false }
         let current = generation
-        let legacy = legacy
         do {
             try await session.protectedRequest { api, token in
-                if legacy { try await api.deleteLegacyMessages(modemID: conversation.modemId, participant: conversation.participant, token: token) }
-                else { try await api.deleteConversation(conversation.id, token: token) }
+                try await api.deleteConversation(conversation.id, token: token)
             }
             guard current == generation, !Task.isCancelled else { return false }
             threads[conversation.id]?.clear()

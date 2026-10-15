@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bell, CreditCard, Download } from 'lucide-vue-next'
+import { Bell, CreditCard, Download, EllipsisVertical } from 'lucide-vue-next'
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -23,6 +23,14 @@ import ModemDetailCard from '@/components/modem/ModemDetailCard.vue'
 import ModemDetailHeader from '@/components/modem/ModemDetailHeader.vue'
 import ModemLineMsisdnDialog from '@/components/modem/settings/ModemLineMsisdnDialog.vue'
 import SimApplicationDialog from '@/components/modem/SimApplicationDialog.vue'
+import SimPinDialog from '@/components/modem/SimPinDialog.vue'
+import { useSimPin } from '@/composables/useSimPin'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import SimPinUnlockDialog from '@/components/modem/SimPinUnlockDialog.vue'
 import SimSlotSwitcher from '@/components/modem/SimSlotSwitcher.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -67,6 +75,20 @@ const {
   fetchModemDetail,
   fetchEsimProfiles,
 } = useModemDetail()
+
+const simPinIdentity = computed(
+  () =>
+    `${modem.value?.sim.slot ?? ''}:${modem.value?.sim.identifier ?? ''}:${esimProfiles.value
+      .filter((profile) => profile.enabled)
+      .map((profile) => profile.id)
+      .join(',')}`,
+)
+const simPin = useSimPin(modemId, simPinIdentity)
+const needsSIMUnlock = computed(
+  () =>
+    modem.value?.state === 'locked' && (simPin.legacy.value ? modem.value.unlockSupported : true),
+)
+const openSIMUnlock = () => (simPin.legacy.value ? openPinUnlockDialog() : simPin.show())
 
 const {
   available: simApplicationAvailable,
@@ -204,19 +226,26 @@ const openPinUnlockDialog = () => {
 const handlePinUnlockSubmit = async () => {
   if (!modemId.value || modemId.value === 'unknown' || isPinUnlocking.value) return
 
+  const targetId = modemId.value
+  const targetSIM = simPinIdentity.value
   isPinUnlocking.value = true
   pinUnlockError.value = ''
   try {
-    await modemApi.unlockSim(modemId.value, pinUnlockInput.value)
+    await modemApi.unlockSim(targetId, pinUnlockInput.value)
+    if (targetId !== modemId.value || targetSIM !== simPinIdentity.value) return
     pinUnlockDismissedFor.value = ''
     pinUnlockDialogOpen.value = false
     pinUnlockInput.value = ''
     toast.success(t('modemDetail.unlock.success'))
     await refreshModem()
   } catch (err) {
+    if (targetId !== modemId.value || targetSIM !== simPinIdentity.value) return
     pinUnlockError.value = err instanceof Error ? err.message : t('modemDetail.unlock.error')
   } finally {
-    isPinUnlocking.value = false
+    if (targetId === modemId.value && targetSIM === simPinIdentity.value) {
+      pinUnlockInput.value = ''
+      isPinUnlocking.value = false
+    }
   }
 }
 
@@ -347,7 +376,7 @@ watch(downloadState, (value) => {
 })
 
 watch(
-  [needsPinUnlock, modemId],
+  [needsPinUnlock, modemId, simPin.legacy],
   ([needsUnlock, id]) => {
     if (!needsUnlock) {
       pinUnlockDialogOpen.value = false
@@ -355,15 +384,19 @@ watch(
       pinUnlockError.value = ''
       return
     }
-    if (pinUnlockDismissedFor.value !== id) {
+    if (simPin.legacy.value && pinUnlockDismissedFor.value !== id) {
       pinUnlockDialogOpen.value = true
     }
   },
   { immediate: true },
 )
 
-watch(modemId, () => {
+watch([modemId, simPinIdentity], () => {
   activeProfileActionsProfileId.value = null
+  pinUnlockInput.value = ''
+  pinUnlockError.value = ''
+  pinUnlockDialogOpen.value = false
+  isPinUnlocking.value = false
 })
 
 watch(simApplicationErrorMessage, (message) => {
@@ -430,6 +463,11 @@ void fetchCapabilities()
     @open-details="detailDialogOpen = true"
   />
 
+  <SimPinDialog
+    :controller="simPin"
+    @updated="refreshModem"
+  />
+
   <SimPinUnlockDialog
     v-if="modem"
     v-model:open="pinUnlockDialogOpen"
@@ -448,11 +486,18 @@ void fetchCapabilities()
     {{ t('modemDetail.unknown') }}
   </div>
 
-  <Alert v-if="needsPinUnlock && !pinUnlockDialogOpen">
+  <Alert v-if="needsSIMUnlock && !pinUnlockDialogOpen && !simPin.open.value">
     <AlertTitle>{{ t('modemDetail.unlock.lockedTitle') }}</AlertTitle>
     <AlertDescription class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <span>{{ t('modemDetail.unlock.lockedDescription') }}</span>
-      <Button type="button" size="sm" class="w-full sm:w-auto" @click="openPinUnlockDialog">
+      <span>{{
+        simPin.legacy.value ? t('modemDetail.unlock.lockedDescription') : t('simPin.description')
+      }}</span>
+      <Button
+        type="button"
+        size="sm"
+        class="w-full sm:w-auto"
+        @click="openSIMUnlock"
+      >
         {{ t('modemDetail.unlock.submit') }}
       </Button>
     </AlertDescription>
@@ -473,10 +518,19 @@ void fetchCapabilities()
   />
 
   <!-- eSIM modem: show original layout -->
-  <div v-if="modem && isEsimModem" class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+  <div
+    v-if="modem && isEsimModem"
+    class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]"
+  >
     <div class="min-w-0 space-y-3">
-      <EsimSummaryCard :modem="modem" :se-info="seInfo" />
+      <EsimSummaryCard
+        :modem="modem"
+        :se-info="seInfo"
+      />
       <EsimProfileSection
+        :sim-pin-available="simPin.available.value"
+        :sim-pin-profile-iccid="modem.sim.identifier"
+        @open-sim-pin="simPin.show"
         v-model:profiles="esimProfiles"
         :loading="isEsimProfilesLoading"
         :modem-id="modemId"
@@ -500,14 +554,36 @@ void fetchCapabilities()
 
     <aside class="hidden xl:block">
       <div class="sticky top-(--modem-desktop-sticky-top)">
-        <ModemDetailCard :modem="modem" :se-info="seInfo" />
+        <ModemDetailCard
+          :modem="modem"
+          :se-info="seInfo"
+        />
       </div>
     </aside>
   </div>
 
   <!-- Physical modem: show detail card -->
-  <div v-else-if="modem && isPhysicalModem" class="space-y-3">
+  <div
+    v-else-if="modem && isPhysicalModem"
+    class="space-y-3"
+  >
     <div class="flex flex-wrap items-center gap-2">
+      <DropdownMenu v-if="simPin.available.value">
+        <DropdownMenuTrigger as-child>
+          <Button
+            variant="outline"
+            size="icon"
+            :aria-label="t('simPin.simActions')"
+            ><EllipsisVertical class="size-4"
+          /></Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          class="w-56"
+        >
+          <DropdownMenuItem @click="simPin.show">{{ t('simPin.title') }}</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <Button
         v-if="modem.sim.identifier"
         type="button"
@@ -546,15 +622,24 @@ void fetchCapabilities()
         <p class="whitespace-pre-wrap break-words">{{ modem.sim.reminder.content }}</p>
       </AlertDescription>
     </Alert>
-    <ModemDetailCard :modem="modem" :se-info="null" />
+    <ModemDetailCard
+      :modem="modem"
+      :se-info="null"
+    />
   </div>
 
   <div v-else-if="modem && isSIMKindUnknown">
-    <ModemDetailCard :modem="modem" :se-info="null" />
+    <ModemDetailCard
+      :modem="modem"
+      :se-info="null"
+    />
   </div>
 
   <Dialog v-model:open="detailDialogOpen">
-    <DialogContent v-if="modem && isEsimModem" class="sm:max-w-lg">
+    <DialogContent
+      v-if="modem && isEsimModem"
+      class="sm:max-w-lg"
+    >
       <DialogHeader>
         <DialogTitle>{{ t('modemDetail.tabs.detail') }}</DialogTitle>
         <DialogDescription class="sr-only">
@@ -562,7 +647,10 @@ void fetchCapabilities()
         </DialogDescription>
       </DialogHeader>
       <ScrollArea class="pr-2 **:data-[slot=scroll-area-viewport]:max-h-[70vh]">
-        <ModemDetailCard :modem="modem" :se-info="seInfo" />
+        <ModemDetailCard
+          :modem="modem"
+          :se-info="seInfo"
+        />
       </ScrollArea>
     </DialogContent>
   </Dialog>

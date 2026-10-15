@@ -5,7 +5,7 @@ go 1.27.1
 require (
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/damonto/euicc-go v1.1.3-0.20260813015305-1f7e0d0c2ffc
-	github.com/damonto/wwan-go v0.0.0-20261007095419-5d7ddad9d65f
+	github.com/damonto/wwan-go v0.0.0-20261014154240-cf57a4a65e90
 	github.com/go-playground/locales v0.14.2
 	github.com/go-playground/universal-translator v0.18.2
 	github.com/go-playground/validator/v10 v10.30.5
@@ -25,7 +25,7 @@ require (
 
 require (
 	github.com/gabriel-vasile/mimetype v1.4.15 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.5 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect

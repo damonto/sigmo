@@ -48,3 +48,17 @@ Use only explicit APN values. Never infer proxy credentials or unrelated interna
 
 - Use `list_calls` only to view or search call records for an authorized modem.
 - Confirm the exact `callId` before `delete_call_record`, then state that deletion is irreversible.
+
+
+## SIM PIN and PUK
+
+1. Read `get_sim_pin_status` using `sim.read`. Manage only the active SIM PIN1. Ask the user to switch cards first if another SIM is intended; do not switch implicitly.
+2. Obtain the exact code from the user. PIN is a string of 4–8 ASCII digits; PUK is exactly eight. Preserve leading zeros. Never guess or enumerate codes.
+3. Require an independent `sim.pin` grant. `sim.update` does not permit credential operations.
+4. Use the observed `simToken` and a new `idempotencyKey`. `set_sim_pin_protection` takes `enabled,pin`; `change_sim_pin` takes `oldPin,newPin`; `unlock_sim_pin` takes `pin`; `unblock_sim_pin` takes `puk,newPin`. All require `modemId,simToken,idempotencyKey`.
+5. Confirm the action through form elicitation without asking for or displaying credentials in that form. Credentials are supplied only as tool arguments. Do not repeat them in chat or summaries.
+6. After success or failure, read status before any further operation. Wrong credentials consume attempts. A `puk` lock requires the carrier-provided PUK; `permanently_blocked` requires carrier assistance. Unknown counts do not imply remaining attempts.
+7. Do not automatically resend after errors, timeouts, or interruption, and never try a different code automatically. The existing 30-minute in-memory idempotency cache deduplicates delivery of identical requests; it is not a reason to retry credentials after cache loss.
+8. `enable_modem_after_unlock_failed` means the SIM was unlocked. Enable the modem separately; do not submit the credential again.
+
+The audit records only the action, modem, outcome and error code. Credentials are neither stored by Sigmo nor returned in status or errors.

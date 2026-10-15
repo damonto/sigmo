@@ -33,7 +33,6 @@ final class NativePushState {
     private(set) var authorization: UNAuthorizationStatus = .notDetermined
     private(set) var eventRevision = 0
     private(set) var configurationRevision = 0
-    private(set) var unsupported: Set<UUID> = []
     private(set) var failures: [UUID: BackendFailure] = [:]
     private(set) var registered: Set<String> = []
     var failure: BackendFailure?
@@ -346,7 +345,6 @@ final class NativePushState {
         do {
             let overview = try await session.protectedRequest { api, token in try await api.nativePush(token: token) }
             guard !Task.isCancelled, store?.sessions[session.id] === session else { return }
-            unsupported.remove(session.id)
             guard var next = identity else { return }
             let connection = PushConnection(configurationID: session.id, backendID: overview.backendId, address: session.configuration.address)
             next.connections.removeAll { $0.configurationID == session.id }
@@ -386,9 +384,6 @@ final class NativePushState {
                 registrationStamps[binding.id] = stamp
             }
             registered.insert(binding.id)
-            failures[session.id] = nil
-        } catch let error as BackendFailure where error.source == .backend && error.status == 404 && error.code == "resource_not_found" {
-            unsupported.insert(session.id)
             failures[session.id] = nil
         } catch {
             if !Task.isCancelled { failures[session.id] = recordFailure(error) }

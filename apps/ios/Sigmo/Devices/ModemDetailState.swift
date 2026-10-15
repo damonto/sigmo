@@ -39,10 +39,11 @@ final class ModemDetailState {
     var modem: Modem? { session.modems.first { $0.id == modemID } }
     var simIdentity: ModemSIMIdentity? { modem.map(ModemSIMIdentity.init) }
     var esim: Bool { modem?.simKind == "euicc" }
+    var needsSIMUnlock: Bool { modem?.state == "locked" }
     var needsPIN: Bool { modem?.state == "locked" && modem?.unlockSupported == true }
     var canUseWiFi: Bool { session.capabilities?.contains("wifiCalling") == true }
     var canTransfer: Bool { session.capabilities?.contains("esimTransfer") == true }
-    var canInstall: Bool { esim && !elements.isEmpty && elementsFailure == nil && !loading && !busy && !needsPIN }
+    var canInstall: Bool { esim && !elements.isEmpty && elementsFailure == nil && !loading && !busy && !needsSIMUnlock }
 
     func load(force: Bool = true) async {
         guard !loading, !busy, !Task.isCancelled, session.canAccessDevices else { return }
@@ -124,6 +125,7 @@ final class ModemDetailState {
     func clear() {
         revision += 1
         clearSIMData()
+        deletedHistoryProfileID = nil
         failure = nil
         message = nil
         loading = false
@@ -196,7 +198,7 @@ final class ModemDetailState {
             try await api.detailMutation(id, path: ["ses", profile.seId, "esims", profile.iccid], method: "DELETE", token: token)
         }
         guard deleted else { return false }
-        if session.capabilities?.contains("historyAssignments") == true { deletedHistoryProfileID = profile.iccid }
+        deletedHistoryProfileID = profile.iccid
         // DELETE already confirmed removal, even if the following snapshot refresh failed.
         for index in groups.indices {
             groups[index].profiles.removeAll { $0.id == profile.id }

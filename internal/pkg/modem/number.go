@@ -85,3 +85,19 @@ func (m *Modem) invalidateSIMIdentityLocked(previous SIMIdentity) {
 	m.simRevision++
 	m.fallbackNumber = ""
 }
+
+// InvalidateSIMActivation retires observations before a slot or profile refresh.
+// Callers must hold ReserveSIMSlot. Even a timed-out switch may change the SIM
+// before firmware exposes its new ICCID, so invalidate before sending it.
+func (m *Modem) InvalidateSIMActivation() {
+	if m == nil {
+		return
+	}
+	m.runtimeMu.Lock()
+	defer m.runtimeMu.Unlock()
+	m.simRevision++
+	m.fallbackNumber = ""
+	if m.SIM != nil {
+		m.SIM.PINStatus = wwanmodem.SIMPINStatus{Lock: wwanmodem.SIMLockUnknown}
+	}
+}

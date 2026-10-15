@@ -140,13 +140,25 @@ private struct InternetPage: View {
         Group {
             Section {
                 option("connection.defaultRoute", keyPath: \.defaultRoute, identifier: "internetDefaultRoute")
-            } footer: { Text("connection.defaultRouteHint").fixedSize(horizontal: false, vertical: true) }
+            } footer: {
+                Text("connection.defaultRouteHint")
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("internetDefaultRouteHint")
+            }
             Section {
                 option("connection.proxy", keyPath: \.proxyEnabled, identifier: "internetProxyEnabled")
-            } footer: { Text("connection.proxyHint").fixedSize(horizontal: false, vertical: true) }
+            } footer: {
+                Text("connection.proxyHint")
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("internetProxyHint")
+            }
             Section {
                 option("connection.alwaysOn", keyPath: \.alwaysOn, identifier: "internetAlwaysOn")
-            } footer: { Text("connection.alwaysOnHint").fixedSize(horizontal: false, vertical: true) }
+            } footer: {
+                Text("connection.alwaysOnHint")
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("internetAlwaysOnHint")
+            }
         }
     }
 

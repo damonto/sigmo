@@ -200,7 +200,7 @@ final class HomeTests: XCTestCase {
         }
     }
 
-    func testUnreadFailuresAndLegacyCompatibility() async throws {
+    func testUnreadFailuresPreserveCountsUntilAccessIsRevoked() async throws {
         for status in [500, 404, 401] {
             let stub = BackendStub()
             await stub.setConversations(try snapshot(revision: 1, counts: [("device-1", 3)]))
@@ -208,7 +208,7 @@ final class HomeTests: XCTestCase {
             await session.refresh(force: true)
             await stub.setConversations("", status: status)
             await session.refreshUnreadCounts()
-            XCTAssertEqual(session.unreadCounts["device-1"], status == 500 ? 3 : nil)
+            XCTAssertEqual(session.unreadCounts["device-1"], status == 401 ? nil : 3)
             XCTAssertEqual(session.hasLoadedModems, status != 401)
             XCTAssertNil(session.failure)
         }

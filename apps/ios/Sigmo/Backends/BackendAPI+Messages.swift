@@ -24,14 +24,4 @@ extension BackendAPI {
     func sendMessage(modemID: String, submission: SMSSubmission, token: String?) async throws -> SMSSubmitted {
         try await decode(["modems", modemID, "messages"], method: "POST", body: JSONEncoder().encode(submission), token: token)
     }
-
-    func legacyMessages(modemID: String, participant: String? = nil, search: String = "", token: String?) async throws -> [SMSMessage] {
-        let path = ["modems", modemID, "messages"] + (participant.map { [$0] } ?? [])
-        let query = search.isEmpty ? [] : [URLQueryItem(name: "q", value: search)]
-        return try await decode(path, token: token, query: query)
-    }
-
-    func deleteLegacyMessages(modemID: String, participant: String, token: String?) async throws {
-        _ = try await request(["modems", modemID, "messages", participant], method: "DELETE", token: token)
-    }
 }

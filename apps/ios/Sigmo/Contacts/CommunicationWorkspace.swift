@@ -24,7 +24,6 @@ struct CommunicationWorkspace: View {
     }
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.scenePhase) private var scenePhase
     let section: CommunicationSection
     let modemID: String?
     @State private var state: CommunicationOverviewState
@@ -55,7 +54,7 @@ struct CommunicationWorkspace: View {
             } else if state.sources.count == 1, let source = state.sources.first, !source.session.canAccessDevices {
                 SettingsAccessView(session: source.session) { EmptyView() }
             } else if state.sources.count == 1, let source = state.sources.first, !source.supported {
-                ContentUnavailableView("communication.upgrade", systemImage: section.icon)
+                ContentUnavailableView("communication.callsUnavailable", systemImage: section.icon)
             } else {
                 list
             }
@@ -110,7 +109,7 @@ struct CommunicationWorkspace: View {
             await state.load(automatic: true)
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(15)) } catch { return }
-                if scenePhase == .active && !state.loading { await state.load(automatic: true) }
+                if !state.loading { await state.load(automatic: true) }
             }
         }
         .alert("communication.delete", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { id in
@@ -229,7 +228,7 @@ struct CommunicationWorkspace: View {
             } else if !source.supported {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(source.session.configuration.name)
-                    Text("communication.upgrade").font(.footnote).foregroundStyle(.secondary)
+                    Text("communication.callsUnavailable").font(.footnote).foregroundStyle(.secondary)
                 }
             } else if let failure = source.failure {
                 VStack(alignment: .leading, spacing: 4) {
@@ -361,31 +360,28 @@ struct CommunicationThreadView: View {
     let session: BackendSession
     let thread: CommunicationThread
     var lines: [CommunicationLine] = []
-    @State private var messages: [CommunicationMessage] = []
-    @State private var cursor = ""
-    @State private var failure: BackendFailure?
+    @State private var state: CommunicationThreadState
     @State private var action: CommunicationAction?
-    @State private var loading = false
     @State private var composer: CommunicationComposerState
     @State private var pendingSend: UUID?
     @State private var visibleIDs: Set<Int64> = []
-    @State private var acknowledging: Set<Int64> = []
     @Environment(\.nativePush) private var push
     @Environment(\.scenePhase) private var scenePhase
     init(session: BackendSession, thread: CommunicationThread, lines: [CommunicationLine] = []) {
         self.session = session; self.thread = thread; self.lines = lines
+        _state = State(initialValue: CommunicationThreadState(session: session, threadID: thread.id))
         _composer = State(initialValue: CommunicationComposerState(session: session, action: CommunicationAction(number: thread.participant, preferredModemID: thread.latestMessage.modemId)))
     }
 
     var body: some View {
-        MessageTimeline(messages: timeline, loading: loading,
-                        older: cursor.isEmpty ? nil : { Task { await load(more: true) } },
+        MessageTimeline(messages: timeline, loading: state.loading,
+                        older: state.cursor.isEmpty ? nil : { Task { await state.load(more: true) } },
                         visible: { id, visible in
                             if visible { visibleIDs.insert(id) } else { visibleIDs.remove(id) }
-                            if visible && scenePhase == .active, let message = messages.first(where: { $0.id == id }) {
+                            if visible && scenePhase == .active, let message = state.messages.first(where: { $0.id == id }) {
                                 Task { await acknowledge(message) }
                             }
-                        }, refresh: { await load() })
+                        }, refresh: { await state.load() })
         .navigationTitle(calls.name(number: thread.participant, session: session))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
@@ -408,58 +404,37 @@ struct CommunicationThreadView: View {
               } label: { Image(systemName: "ellipsis.circle") }
             }
         }
-        .communicationActions($action, session: session, sent: { Task { await load() } })
-        .detailErrorAlert($failure)
+        .communicationActions($action, session: session, sent: { Task { await state.load() } })
+        .detailErrorAlert($state.failure)
         .foregroundTask {
-            await load()
+            await state.load()
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(10)) } catch { return }
-                await load(preserve: true)
+                await state.poll()
             }
         }
-        .task { await composer.load(); if !Task.isCancelled { failure = composer.failure } }
+        .task { await composer.load(); if !Task.isCancelled { state.failure = composer.failure } }
         .task(id: pendingSend) {
             guard let pendingSend, !Task.isCancelled else { return }
-            if await composer.send() { await load(preserve: true) }
-            else if !Task.isCancelled { failure = composer.failure }
+            if await composer.send() { await state.load(preserve: true) }
+            else if !Task.isCancelled { state.failure = composer.failure }
             if self.pendingSend == pendingSend { self.pendingSend = nil }
         }
         .onDisappear { pendingSend = nil }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { for message in messages where visibleIDs.contains(message.id) { Task { await acknowledge(message) } } }
+            if phase == .active { for message in state.messages where visibleIDs.contains(message.id) { Task { await acknowledge(message) } } }
         }
     }
     private var timeline: [MessageTimelineItem] {
-        messages.map { message in
+        state.messages.map { message in
             MessageTimelineItem(message, source: "\(session.configuration.name) · \(message.lineTitle)")
         }
     }
 
-    private func load(more: Bool = false, preserve: Bool = false) async {
-        guard !loading else { return }
-        loading = true
-        defer { loading = false }
-        let id = thread.id, next = more ? cursor : ""
-        do {
-            let page = try await session.protectedRequest { api, token in try await api.threadMessages(id, cursor: next, token: token) }
-            guard !Task.isCancelled else { return }
-            if preserve {
-                let ids = Set(page.items.map(\.id))
-                messages = (messages.filter { !ids.contains($0.id) } + page.items).sorted { ($0.timestamp, $0.id) < ($1.timestamp, $1.id) }
-            } else { messages = more ? page.items + messages : page.items; cursor = page.nextCursor }
-        } catch { if !Task.isCancelled { failure = .wrapping(error) } }
-    }
     private func acknowledge(_ message: CommunicationMessage) async {
-        guard message.incoming, !message.read, !acknowledging.contains(message.id) else { return }
-        acknowledging.insert(message.id)
-        defer { acknowledging.remove(message.id) }
-        let id = thread.id
-        do {
-            let badge = try await session.protectedRequest { api, token in try await api.readThread(id, messageIDs: [message.id], token: token) }
-            push?.record(badge, sessionID: session.id)
-            await push?.removeNotifications(backendID: badge.backendId, conversationID: message.conversationId)
-            if let index = messages.firstIndex(where: { $0.id == message.id }) { messages[index].read = true }
-            await session.refreshUnreadCounts()
-        } catch { if !Task.isCancelled { failure = .wrapping(error) } }
+        guard let badge = await state.acknowledge(message) else { return }
+        push?.record(badge, sessionID: session.id)
+        await push?.removeNotifications(backendID: badge.backendId, conversationID: message.conversationId)
+        await session.refreshUnreadCounts(minimumRevision: badge.revision)
     }
 }

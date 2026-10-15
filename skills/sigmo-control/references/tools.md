@@ -5,9 +5,10 @@
 | Permission | Tools |
 | --- | --- |
 | `modem.read` | `get_modem_status` |
-| `sim.read` | `list_sim_cards`, `list_secure_elements` |
+| `sim.read` | `list_sim_cards`, `list_secure_elements`, `get_sim_pin_status` |
 | `sim.switch` | `switch_sim_slot` |
 | `sim.update` | `update_msisdn` |
+| `sim.pin` | `set_sim_pin_protection`, `change_sim_pin`, `unlock_sim_pin`, `unblock_sim_pin` |
 | `esim.read` | `list_esim_profiles`, `discover_esim_profiles` |
 | `esim.download` | `download_esim_profile` |
 | `esim.manage` | `enable_esim_profile`, `rename_esim_profile` |
@@ -41,6 +42,7 @@ Use `structuredContent` for every successful tool call. The server returns a fix
 | --- | --- | --- |
 | `list_authorized_modems` | `{ "modems": [] }` | `modems[].id` is the modem IMEI and the exact `modemId` for later tools; `name` is its configured alias or model. |
 | `get_modem_status` | `{ "modem": { ... } }` | Returns device identity, revision, lifecycle state, and lock status. SIM, network, and IMS state use their dedicated tools. |
+| `get_sim_pin_status` | `supported`, `enabled`, `lock`, `pinRetries`, `pukRetries`, `simToken` | `enabled` and retry counts may be null. Never interpret unknown as disabled or zero. The token binds writes to this modem and active SIM activation. |
 | `list_sim_cards` | `{ "sims": [] }` | `sims[].identifier` is the SIM ICCID; `active` marks the selected slot. |
 | `list_secure_elements` | `{ "ses": [] }` | `ses[].id` is the exact `seId`; `freeSpace` is measured in bytes. |
 | `list_esim_profiles` | `{ "ses": [] }` | Use a profile's exact `seId` and `iccid` for management tools. |
