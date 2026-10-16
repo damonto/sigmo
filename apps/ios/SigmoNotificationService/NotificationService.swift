@@ -15,14 +15,13 @@ final class NotificationService: UNNotificationServiceExtension {
             finish(request.content)
             return
         }
-        if content.kind == "sms" {
-            updated.title = content.sender ?? String(localized: "push.generic.message")
-            updated.subtitle = [content.backendName, content.modemName ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
-        } else {
-            updated.title = String(localized: "push.generic.reminder")
-            updated.subtitle = [content.backendName, content.profileName ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+        let settings = (try? PushKeychain.read(PushPreviewSettings.keychainAccount, shared: true)).flatMap {
+            try? JSONDecoder().decode(PushPreviewSettings.self, from: $0)
         }
-        updated.body = content.text ?? ""
+        let preview = PushPreview(content: content, settings: settings ?? PushPreviewSettings())
+        updated.title = preview.title
+        updated.subtitle = preview.subtitle
+        updated.body = preview.body
         finish(updated)
     }
 

@@ -97,6 +97,7 @@ targets:
     sources:
       - SigmoNotificationService
       - Sigmo/Notifications/PushPayload.swift
+      - Sigmo/Notifications/PushPreview.swift
       - Sigmo/Notifications/PushKeychain.swift
       - path: Sigmo/Resources
         includes:

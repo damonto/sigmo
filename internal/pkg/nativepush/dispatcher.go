@@ -169,6 +169,7 @@ func (d *Dispatcher) deliver(ctx context.Context, item storage.NativeDelivery) e
 			if conversation.ReadThroughMessageID >= item.Content.MessageID {
 				return nil
 			}
+			item.Content.ProfileName = conversation.LineLabel
 		case "reminder":
 			if !sub.Reminders {
 				return nil

@@ -58,13 +58,22 @@ func TestDispatchEncryptionRevocationAndRetry(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := pushStore(t)
-			sub := storage.NativeSubscription{ID: "subscription", InstallationID: "installation", SendToken: strings.Repeat("s", 32), EncryptionKey: make([]byte, 32), SMS: true, Enabled: true}
+			sub := storage.NativeSubscription{ID: "subscription", InstallationID: "installation", BackendName: "Home", SendToken: strings.Repeat("s", 32), EncryptionKey: make([]byte, 32), SMS: true, Enabled: true}
 			if err := s.UpsertNativeSubscription(t.Context(), sub); err != nil {
 				t.Fatal(err)
 			}
 			msg := storage.Message{ModemID: "modem", ProfileID: "SIM", Source: storage.MessageSourceModem, ExternalKey: "first", Sender: "10086", Text: "private preview", Incoming: true, Timestamp: time.Now()}
 			if _, err := s.InsertMessage(t.Context(), msg); err != nil {
 				t.Fatal(err)
+			}
+			// Resolve the source SIM's latest label even after another SIM uses its modem.
+			for _, profile := range []storage.SIMProfile{
+				{ProfileID: "SIM", ModemID: "modem", Label: "Work"},
+				{ProfileID: "other-SIM", ModemID: "modem", Label: "Travel"},
+			} {
+				if err := s.RecordSIMProfile(t.Context(), profile); err != nil {
+					t.Fatal(err)
+				}
 			}
 			var mu sync.Mutex
 			var requests []deliveryRequest
@@ -82,6 +91,7 @@ func TestDispatchEncryptionRevocationAndRetry(t *testing.T) {
 				return problemResponse(t, tc.status, tc.code), nil
 			})}
 			cfg := settings.Default()
+			cfg.Modems["modem"] = settings.Modem{Alias: "Mobile"}
 			if tc.requireAuth {
 				cfg.Auth.Mode = "otp"
 			}
@@ -103,6 +113,13 @@ func TestDispatchEncryptionRevocationAndRetry(t *testing.T) {
 					plain, err := decryptPreview(sub.EncryptionKey, *body.Envelope)
 					if err != nil || !strings.Contains(string(plain), msg.Text) {
 						t.Fatalf("preview = %s, %v", plain, err)
+					}
+					var content storage.PushContent
+					if err := json.Unmarshal(plain, &content); err != nil {
+						t.Fatal(err)
+					}
+					if content.BackendName != "Home" || content.ModemName != "Mobile" || content.ProfileName != "Work" {
+						t.Errorf("preview names = %q, %q, %q", content.BackendName, content.ModemName, content.ProfileName)
 					}
 				}
 			}

@@ -71,6 +71,7 @@ final class NativePushState {
     @ObservationIgnored private var badges: [String: MessageBadge] = [:]
     @ObservationIgnored private var badgeTask: Task<Void, Never>?
     @ObservationIgnored private var registrationStamps: [String: String] = [:]
+    @ObservationIgnored private var previewSettings: PushPreviewSettings?
     @ObservationIgnored private var gatewayRetryAt: Date?
     @ObservationIgnored private let now: () -> Date
 
@@ -287,6 +288,16 @@ final class NativePushState {
     func reconcile(store: BackendStore) async {
         self.store = store
         guard store.configurationLoaded else { return }
+        do {
+            let settings = PushPreviewSettings(includesBackendName: store.settings.backends.count != 1)
+            if previewSettings != settings {
+                try persistence.write(PushPreviewSettings.keychainAccount, JSONEncoder().encode(settings), true)
+                previewSettings = settings
+            }
+        } catch {
+            // Preview formatting must not block revocation or push registration.
+            AppDiagnostics.record(error, category: "push", operation: "preview.settings.write.failed")
+        }
         restoreIdentity()
         guard identity != nil else { return }
         if canContactGateway { failure = nil }

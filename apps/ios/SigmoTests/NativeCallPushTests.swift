@@ -4,6 +4,36 @@ import XCTest
 
 @MainActor
 final class NativeCallPushTests: XCTestCase {
+    func testPreviewWriteFailureDoesNotBlockRevocationOrVoIPSubscription() async throws {
+        let fixture = CallPushRegistrationFixture()
+        let directory = URL.temporaryDirectory.appending(path: "PushPreviewFailure-\(UUID())")
+        let store = BackendStore(file: ConfigurationFile(url: directory.appending(path: "backends.json")), credentials: MemoryCredentials().store,
+            makeAPI: { BackendAPI(configuration: $0, transport: { try await fixture.backend($0) }) })
+        addTeardownBlock { try FileManager.default.removeItem(at: directory) }
+        let id = UUID()
+        XCTAssertTrue(store.saveBackend(id: id, name: "Home", address: "https://calls.example"))
+        await store.sessions[id]?.refresh(force: true)
+        let access = PushNotificationAccess(status: { .denied }, request: {}, register: {}, setBadge: { _ in })
+        let memory = PushMemoryPersistence()
+        memory.rejectedWrite = PushPreviewSettings.keychainAccount
+        let identity = PushIdentity(id: "installation", managementToken: "test-credential", revocations: ["obsolete-grant"])
+        let push = NativePushState(identity: identity, persistence: memory.persistence,
+            gateway: PushGateway(address: URL(string: "https://gateway.example"), transport: { try await fixture.gateway($0) }), notificationAccess: access)
+        push.registeredVoIP(token: Data(repeating: 1, count: 32))
+        await push.reconcile(store: store)
+        XCTAssertTrue(try memory.identity().revocations.isEmpty)
+        XCTAssertTrue(push.voipReady)
+        XCTAssertFalse(push.registered.isEmpty)
+        let registration = await fixture.latestSubscription()
+        XCTAssertTrue(try XCTUnwrap(registration).calls)
+        XCTAssertNil(push.failure)
+        XCTAssertNil(memory.values[PushPreviewSettings.keychainAccount])
+        memory.rejectedWrite = nil
+        await push.reconcile(store: store)
+        let data = try XCTUnwrap(memory.values[PushPreviewSettings.keychainAccount])
+        XCTAssertFalse(try JSONDecoder().decode(PushPreviewSettings.self, from: data).includesBackendName)
+    }
+
     func testGatewayRetryDeadlinePreservesBackendDiscovery() async throws {
         let fixture = CallPushRegistrationFixture()
         let time = TestTime()
