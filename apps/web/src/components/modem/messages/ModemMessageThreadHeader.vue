@@ -34,13 +34,17 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <div class="flex items-center gap-3 border-b border-border pb-3">
+  <div
+    class="grid grid-cols-[5rem_minmax(0,1fr)_5rem] items-center gap-3 border-b border-border pb-3 lg:flex"
+  >
     <BackButton
       class="justify-self-start lg:hidden"
       :label="t('modemDetail.back')"
       @click="emit('back')"
     />
-    <h2 class="min-w-0 flex-1 truncate text-lg font-semibold text-foreground">
+    <h2
+      class="min-w-0 flex-1 truncate text-center text-lg font-semibold text-foreground lg:text-left"
+    >
       {{ props.title }}
     </h2>
     <div class="ml-auto hidden items-center justify-end gap-2 lg:flex">
@@ -66,7 +70,7 @@ const { t } = useI18n()
         <Button
           variant="outline"
           size="icon"
-          class="shrink-0 lg:hidden"
+          class="shrink-0 justify-self-end lg:hidden"
           :aria-label="t('communication.actions')"
         >
           <Ellipsis class="size-4" />

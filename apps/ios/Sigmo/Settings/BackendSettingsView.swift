@@ -90,7 +90,7 @@ struct SettingsFormView: View {
                     ForEach(state.fields(for: section)) { field in
                         SettingsFieldRow(field: field, value: binding(field.key), channels: state.configuredChannels, stacked: section == .authentication && field.control != .number)
                     }
-                    if let validation = state.validation(for: section) { Section { Text(validation).foregroundStyle(.secondary) } }
+                    if channelSchema == nil, let validation = state.validation(for: section) { Section { Text(validation).foregroundStyle(.secondary) } }
                     Section {
                         if section == .authentication && state.auth["mode"]?.text == "otp" {
                             AsyncActionButton(title: "settings.test", id: "test-auth") { await state.testAuth() }
