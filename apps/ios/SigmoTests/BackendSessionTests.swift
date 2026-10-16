@@ -62,7 +62,7 @@ final class BackendSessionTests: XCTestCase {
         store.setForeground(false)
         store.setForeground(true)
         await stub.release()
-        try await request.value
+        _ = try await request.value
         XCTAssertTrue(session.foreground)
         let count = await stub.count("/auth/otp/challenges")
         XCTAssertEqual(count, 1)

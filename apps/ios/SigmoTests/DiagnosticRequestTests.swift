@@ -293,7 +293,8 @@ final class DiagnosticRequestTests: XCTestCase {
     }
 
     func testRawErrorsAndUnknownServerCodesCannotDiscloseSecrets() async throws {
-        log.record(NSError(domain: "domain-secret", code: 1, userInfo: [NSLocalizedDescriptionKey: "description-secret", NSURLErrorFailingURLStringErrorKey: "url-secret"]),
+        let failingURL = try XCTUnwrap(URL(string: "https://url-secret.example"))
+        log.record(NSError(domain: "domain-secret", code: 1, userInfo: [NSLocalizedDescriptionKey: "description-secret", NSURLErrorFailingURLErrorKey: failingURL]),
                    category: "app", operation: "local.failed")
         log.record(BackendFailure(code: "code-secret", message: "message-secret"), category: "app", operation: "local.failed")
         let data = try await log.snapshot()
