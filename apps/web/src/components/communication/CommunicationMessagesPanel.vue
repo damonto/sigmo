@@ -38,6 +38,7 @@ const {
   load,
   deleteCurrent,
   match,
+  formatNumber,
   sourceLabel,
 } = useCommunicationHistory('messages')
 const composing = ref(false)
@@ -108,7 +109,10 @@ const remove = async () => {
           v-for="thread in threads"
           :key="thread.id"
           :to="{ name: 'message-thread', params: { threadId: thread.id } }"
-          :name="match(thread.participant)?.name || thread.participant"
+          :name="
+            match(thread.participant)?.name ||
+            formatNumber(thread.participant, thread.latestMessage.profileId)
+          "
           :preview="thread.latestMessage.text"
           :line="sourceLabel(thread.latestMessage.profileId, thread.latestMessage.lineLabel)"
           :timestamp="formatListTimestamp(thread.latestMessage.timestamp)"

@@ -19,37 +19,35 @@ const { t } = useI18n()
 </script>
 
 <template>
-  <div class="grid min-w-0 gap-4">
-    <div class="space-y-4">
-      <div class="flex flex-col items-center gap-3 lg:flex-row lg:gap-4">
-        <ContactAvatar
-          class="size-20 text-2xl lg:size-14 lg:text-lg"
-          :id="contact.id"
-          :name="contact.name"
-          :has-avatar="contact.hasAvatar"
-          :updated-at="contact.updatedAt"
-          :color="contact.avatarColor"
-        />
-        <h2
-          id="contact-name"
-          class="min-w-0 max-w-full break-words text-center text-lg font-semibold lg:text-left"
-        >
-          {{ contact.name || contact.numbers[0]?.number }}
-        </h2>
-      </div>
-      <ContactQuickActions
-        class="justify-center lg:justify-start"
-        :numbers="contact.numbers"
-        @action="(number, mode) => emit('action', number, mode)"
+  <div class="grid min-w-0 gap-x-2 gap-y-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+    <div class="flex flex-col items-center gap-3 lg:col-span-full lg:flex-row lg:gap-4">
+      <ContactAvatar
+        class="size-20 text-2xl lg:size-14 lg:text-lg"
+        :id="contact.id"
+        :name="contact.name"
+        :has-avatar="contact.hasAvatar"
+        :updated-at="contact.updatedAt"
+        :color="contact.avatarColor"
+      />
+      <h2
+        id="contact-name"
+        class="min-w-0 max-w-full break-words text-center text-lg font-semibold lg:text-left"
       >
-        <template #label="{ label }">
-          <span class="sr-only lg:not-sr-only">{{ label }}</span>
-        </template>
-      </ContactQuickActions>
+        {{ contact.name || contact.numbers[0]?.number }}
+      </h2>
     </div>
+    <ContactQuickActions
+      class="order-1 justify-center lg:order-4 lg:flex-nowrap lg:justify-end"
+      :numbers="contact.numbers"
+      @action="(number, mode) => emit('action', number, mode)"
+    >
+      <template #label="{ label }">
+        <span class="sr-only lg:not-sr-only">{{ label }}</span>
+      </template>
+    </ContactQuickActions>
     <dl
       v-if="contact.numbers.length || contact.notes"
-      class="grid gap-4"
+      class="order-2 grid gap-4 lg:col-span-full"
     >
       <div
         v-for="(phone, index) in contact.numbers"
@@ -69,8 +67,8 @@ const { t } = useI18n()
         <dd class="whitespace-pre-wrap break-words text-sm leading-relaxed">{{ contact.notes }}</dd>
       </div>
     </dl>
-    <Separator />
-    <DialogFooter class="flex-col sm:flex-col lg:flex-row">
+    <Separator class="order-3 lg:col-span-full" />
+    <DialogFooter class="order-4 flex-col sm:flex-col lg:flex-row">
       <Button @click="emit('edit')">
         <Pencil class="size-4" />{{ t('communication.editContact') }}
       </Button>

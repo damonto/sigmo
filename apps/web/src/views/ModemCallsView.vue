@@ -411,17 +411,15 @@ watch(dialpadOpen, async (open) => {
                 :duration="callDurationLabel(call)"
               />
 
-              <ContactQuickActions
-                class="mx-auto mt-4"
-                :numbers="call.number ? [{ number: call.number, label: '' }] : []"
-                :call-disabled="isDialing || !terminalStates.has(call.state)"
-                @action="(_, mode) => historyAction(call, mode)"
-              />
-              <div
-                v-if="terminalStates.has(call.state)"
-                class="mt-4 flex justify-end"
-              >
+              <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:justify-end">
+                <ContactQuickActions
+                  class="flex-col lg:flex-row lg:flex-nowrap"
+                  :numbers="call.number ? [{ number: call.number, label: '' }] : []"
+                  :call-disabled="isDialing || !terminalStates.has(call.state)"
+                  @action="(_, mode) => historyAction(call, mode)"
+                />
                 <CommunicationActionButton
+                  v-if="terminalStates.has(call.state)"
                   destructive
                   :disabled="isDeletingCallID === call.callID"
                   @click="openDeleteDialog(call)"

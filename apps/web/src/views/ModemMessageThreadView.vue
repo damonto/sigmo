@@ -13,7 +13,6 @@ import {
 } from '@/components/ui/dialog'
 import { useCommunicationDial } from '@/composables/useCommunicationDial'
 import { Button } from '@/components/ui/button'
-import CommunicationActionButton from '@/components/communication/CommunicationActionButton.vue'
 import ModemMessageComposer from '@/components/modem/messages/ModemMessageComposer.vue'
 import ModemMessagesPanel from '@/components/modem/messages/ModemMessagesPanel.vue'
 import ModemMessageThreadDeleteDialog from '@/components/modem/messages/ModemMessageThreadDeleteDialog.vue'
@@ -177,14 +176,15 @@ watch(
         @back="handleBack"
         @delete="openDeleteDialog"
       >
-        <template #actions>
-          <CommunicationActionButton
+        <template #actions="{ actionComponent, activateEvent }">
+          <component
+            :is="actionComponent"
             v-if="!isNewConversation && hasFeature('callHistory')"
             :disabled="!dial || !activeProfileId || dialing"
-            @click="callParticipant"
+            @[activateEvent]="callParticipant"
           >
             <Phone class="size-4" />{{ t('communication.dial') }}
-          </CommunicationActionButton>
+          </component>
         </template>
       </ModemMessageThreadHeader>
 

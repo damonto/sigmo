@@ -46,6 +46,7 @@ const zh = {
     },
   },
   communication: {
+    actions: '更多操作',
     modem: 'Modem',
     chooseModem: '选择线路',
     currentModem: '使用所选 Modem 当前激活的 SIM。',

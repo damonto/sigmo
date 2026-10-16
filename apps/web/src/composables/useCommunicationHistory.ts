@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { communicationApi } from '@/apis/communication'
 import { useContacts } from '@/composables/useContacts'
 import { useCapabilities } from '@/composables/useCapabilities'
+import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
 import type { MessageThread, ThreadMessage, SIMLine } from '@/types/communication'
 import type { CallRecord } from '@/types/call'
 
@@ -30,11 +31,17 @@ export const useCommunicationHistory = (kind: 'messages' | 'thread' | 'calls') =
       : threads.value,
   )
   const lines = ref<SIMLine[]>([])
+  const linesByProfileId = computed(
+    () => new Map(lines.value.map((line) => [line.profileId, line])),
+  )
+  const sourceLine = (profileID: string) => linesByProfileId.value.get(profileID)
   const thread = ref<MessageThread>()
   const threadID = computed(() =>
     kind === 'thread' && typeof route.params.threadId === 'string' ? route.params.threadId : '',
   )
   const participant = computed(() => thread.value?.participant ?? '')
+  const formatNumber = (number: string, profileID = '') =>
+    formatPhoneDisplay(number, sourceLine(profileID)?.region)
   const visibleCalls = computed(() =>
     missedOnly.value
       ? calls.value.filter(
@@ -200,21 +207,24 @@ export const useCommunicationHistory = (kind: 'messages' | 'thread' | 'calls') =
     missedOnly,
     threadID,
     participant,
+    participantLabel: computed(() =>
+      formatNumber(participant.value, thread.value?.latestMessage.profileId),
+    ),
     originalModemID: computed(() => thread.value?.latestMessage.modemId ?? ''),
     supported,
     load,
     deleteCurrent,
     acknowledge,
+    formatNumber,
     sourceLabel: (profileID: string, label = '') => {
-      const line = lines.value.find((line) => line.profileId === profileID)
-      const title = label || line?.label || line?.number || profileID
-      return title
+      const line = sourceLine(profileID)
+      return (
+        label || line?.label || formatPhoneDisplay(line?.number ?? '', line?.region) || profileID
+      )
     },
-    sourceLine: (id: string) => lines.value.find((line) => line.profileId === id),
+    sourceLine,
     lineDeleted: (id: string) =>
-      lines.value.some(
-        (line) => line.profileId === id && ['deleted', 'assigned'].includes(line.deletionState),
-      ),
+      ['deleted', 'assigned'].includes(sourceLine(id)?.deletionState ?? ''),
     match: contacts.match,
   }
 }

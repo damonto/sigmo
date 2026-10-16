@@ -39,6 +39,7 @@ const {
   load,
   deleteCurrent,
   match,
+  formatNumber,
   sourceLabel,
   lineDeleted,
 } = useCommunicationHistory('calls')
@@ -116,7 +117,7 @@ const remove = async () => {
                 v-for="call in visibleCalls"
                 :key="call.callID"
                 :call="call"
-                :title="match(call.number)?.name || call.number"
+                :title="match(call.number)?.name || formatNumber(call.number, call.profileId)"
                 :source="sourceLabel(call.profileId || '', call.lineLabel)"
                 :state="stateLabel(call.state)"
                 :route="routeLabel(call.route)"
@@ -166,9 +167,12 @@ const remove = async () => {
           if (!open) selection = undefined
         }
       "
-      ><DialogContent
+      ><DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto lg:max-w-2xl"
         ><DialogHeader
-          ><DialogTitle>{{ match(selection?.number || '')?.name || selection?.number }}</DialogTitle
+          ><DialogTitle>{{
+            match(selection?.number || '')?.name ||
+            formatNumber(selection?.number || '', selection?.profileId)
+          }}</DialogTitle
           ><DialogDescription>{{
             selection ? stateLabel(selection.state) : ''
           }}</DialogDescription></DialogHeader
@@ -185,13 +189,13 @@ const remove = async () => {
         <p v-if="selection?.profileId !== selection?.historyProfileId">
           {{ t('communication.originalLine') }}
         </p>
-        <ContactQuickActions
-          class="mx-auto"
-          :numbers="selectedNumbers"
-          :call-disabled="selection?.state !== 'ended' && selection?.state !== 'failed'"
-          @action="contactAction"
-        />
-        <div class="flex flex-wrap justify-end gap-2 border-t pt-3">
+        <div class="flex flex-col gap-2 border-t pt-3 lg:flex-row lg:justify-end">
+          <ContactQuickActions
+            class="flex-col lg:flex-row lg:flex-nowrap"
+            :numbers="selectedNumbers"
+            :call-disabled="selection?.state !== 'ended' && selection?.state !== 'failed'"
+            @action="contactAction"
+          />
           <CommunicationActionButton as-child
             ><RouterLink :to="{ name: 'contacts', query: { number: selection?.number } }"
               ><UserPlus class="size-4" />{{ t('communication.addContact') }}</RouterLink

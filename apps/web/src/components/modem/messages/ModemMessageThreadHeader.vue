@@ -1,9 +1,16 @@
 <script setup lang="ts">
-import { Trash2 } from 'lucide-vue-next'
+import { Ellipsis, Trash2 } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 import BackButton from '@/components/BackButton.vue'
 import CommunicationActionButton from '@/components/communication/CommunicationActionButton.vue'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 const props = defineProps<{
   title: string
@@ -15,11 +22,19 @@ const emit = defineEmits<{
   (event: 'delete'): void
 }>()
 
+// Consumers declare each action once; the header supplies its control and activation event.
+defineSlots<{
+  actions?(props: {
+    actionComponent: typeof CommunicationActionButton | typeof DropdownMenuItem
+    activateEvent: 'click' | 'select'
+  }): unknown
+}>()
+
 const { t } = useI18n()
 </script>
 
 <template>
-  <div class="flex flex-wrap items-center gap-3 border-b border-border pb-3">
+  <div class="flex items-center gap-3 border-b border-border pb-3">
     <BackButton
       class="justify-self-start lg:hidden"
       :label="t('modemDetail.back')"
@@ -28,8 +43,12 @@ const { t } = useI18n()
     <h2 class="min-w-0 flex-1 truncate text-lg font-semibold text-foreground">
       {{ props.title }}
     </h2>
-    <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
-      <slot name="actions" />
+    <div class="ml-auto hidden items-center justify-end gap-2 lg:flex">
+      <slot
+        name="actions"
+        :action-component="CommunicationActionButton"
+        activate-event="click"
+      />
       <CommunicationActionButton
         destructive
         type="button"
@@ -42,5 +61,34 @@ const { t } = useI18n()
         {{ t('modemDetail.actions.delete') }}
       </CommunicationActionButton>
     </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger as-child>
+        <Button
+          variant="outline"
+          size="icon"
+          class="shrink-0 lg:hidden"
+          :aria-label="t('communication.actions')"
+        >
+          <Ellipsis class="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        class="lg:hidden"
+      >
+        <slot
+          name="actions"
+          :action-component="DropdownMenuItem"
+          activate-event="select"
+        />
+        <DropdownMenuItem
+          variant="destructive"
+          :disabled="!props.canDelete"
+          @select="emit('delete')"
+        >
+          <Trash2 class="size-4" />{{ t('modemDetail.actions.delete') }}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   </div>
 </template>

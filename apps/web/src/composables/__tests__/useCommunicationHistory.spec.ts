@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { useCommunicationHistory } from '@/composables/useCommunicationHistory'
 import { invalidateSession } from '@/lib/authSession'
-import type { MessageThread, ThreadMessage } from '@/types/communication'
+import type { MessageThread, SIMLine, ThreadMessage } from '@/types/communication'
 
 enableAutoUnmount(afterEach)
 const api = vi.hoisted(() => ({
@@ -46,6 +46,23 @@ const thread: MessageThread = {
   unreadCount: 1,
   markedUnread: false,
 }
+const line: SIMLine = {
+  profileId: 'sim',
+  modemId: 'modem',
+  label: '',
+  number: '02070313000',
+  region: 'GB',
+  kind: 'physical',
+  seId: '',
+  deletionState: '',
+  successorId: '',
+  messageCount: 1,
+  callCount: 0,
+  present: true,
+  active: true,
+  canMessage: true,
+  canCall: true,
+}
 const mountHistory = () => {
   let list: ReturnType<typeof useCommunicationHistory> | undefined
   let detail: ReturnType<typeof useCommunicationHistory> | undefined
@@ -74,7 +91,8 @@ beforeEach(() => {
 
 describe('communication split view', () => {
   it('loads history while optional line metadata is still pending', async () => {
-    let finish: ((value: { items: [] }) => void) | undefined
+    let finish: ((value: { items: SIMLine[] }) => void) | undefined
+    api.thread.mockResolvedValue({ ...thread, participant: '07386042885' })
     api.lines.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -85,8 +103,28 @@ describe('communication split view', () => {
     await flushPromises()
     expect(detail.messages.value).toEqual([message])
     expect(detail.loading.value).toBe(false)
-    finish?.({ items: [] })
+    expect(detail.participantLabel.value).toBe('07386042885')
+    finish?.({ items: [line] })
     await flushPromises()
+    expect(detail.participantLabel.value).toBe('+44 7386 042885')
+    expect(detail.participant.value).toBe('07386042885')
+  })
+
+  it('formats history numbers with their SIM region and preserves named line labels', async () => {
+    api.lines.mockResolvedValue({
+      items: [line, { ...line, profileId: 'us', region: 'US', label: 'Work' }],
+    })
+    const { list } = mountHistory()
+    await flushPromises()
+    expect(list.formatNumber('07386042885', 'sim')).toBe('+44 7386 042885')
+    expect(list.formatNumber('2025550123', 'us')).toBe('+1 (202) 555-0123')
+    expect(list.formatNumber('02070313000', 'missing')).toBe('02070313000')
+    expect(list.formatNumber('+4915510594552')).toBe('+49 15510 594552')
+    expect(list.formatNumber('10086', 'sim')).toBe('10086')
+    expect(list.formatNumber('BANK123', 'us')).toBe('BANK123')
+    expect(list.sourceLabel('sim')).toBe('+44 20 7031 3000')
+    expect(list.sourceLabel('us')).toBe('Work')
+    expect(list.sourceLabel('sim', 'Personal')).toBe('Personal')
   })
 
   it('keeps history usable when optional metadata fails', async () => {
@@ -99,13 +137,17 @@ describe('communication split view', () => {
   })
 
   it('clears the participant and modem when the login session changes', async () => {
+    api.lines.mockResolvedValue({ items: [line] })
     const { detail } = mountHistory()
     await flushPromises()
     expect(detail.participant.value).toBe('10086')
+    expect(detail.sourceLine('sim')).toEqual(line)
     invalidateSession()
     expect(detail.participant.value).toBe('')
     expect(detail.originalModemID.value).toBe('')
     expect(detail.messages.value).toEqual([])
+    expect(detail.sourceLine('sim')).toBeUndefined()
+    expect(detail.formatNumber('02070313000', 'sim')).toBe('02070313000')
   })
 
   it('coalesces read receipts and discards late errors after logout', async () => {

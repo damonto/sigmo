@@ -134,7 +134,7 @@ const restoreListFocus = (event: Event) => {
             :class="
               selected?.id === contact.id ? 'bg-primary/5 ring-1 ring-inset ring-primary/15' : ''
             "
-            class="flex min-h-16 items-center gap-3 px-3 py-3 transition-colors hover:bg-muted/50 focus-visible:bg-muted/50"
+            class="flex min-h-16 items-center gap-3 px-3 py-3 transition-colors first:rounded-t-[inherit] last:rounded-b-[inherit] hover:bg-muted/50 focus-visible:bg-muted/50"
             @click="rememberContactLink"
             ><ContactAvatar
               class="size-10 text-sm"

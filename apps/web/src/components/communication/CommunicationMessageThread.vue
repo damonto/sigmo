@@ -5,7 +5,6 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink, useRouter } from 'vue-router'
 
 import CommunicationComposer from '@/components/communication/CommunicationComposer.vue'
-import CommunicationActionButton from '@/components/communication/CommunicationActionButton.vue'
 import HistoryMessage from '@/components/communication/HistoryMessage.vue'
 import MessageThreadSkeleton from '@/components/communication/MessageThreadSkeleton.vue'
 import ModemMessageThreadHeader from '@/components/modem/messages/ModemMessageThreadHeader.vue'
@@ -28,6 +27,7 @@ const {
   messages,
   threadID,
   participant,
+  participantLabel,
   originalModemID,
   supported,
   load,
@@ -69,28 +69,31 @@ const remove = async () => {
     class="flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden bg-background lg:rounded-xl lg:border lg:bg-card/40 lg:p-4"
   >
     <ModemMessageThreadHeader
-      :title="match(participant)?.name || participant || t('communication.messages')"
+      :title="match(participant)?.name || participantLabel || t('communication.messages')"
       :can-delete="supported && !!participant"
       @back="router.push({ name: 'messages' })"
       @delete="deleting = true"
     >
       <template
         v-if="supported"
-        #actions
+        #actions="{ actionComponent, activateEvent }"
       >
-        <CommunicationActionButton
+        <component
+          :is="actionComponent"
           :disabled="!participant"
-          @click="action = 'call'"
-          ><Phone class="size-4" />{{ t('communication.dial') }}</CommunicationActionButton
+          @[activateEvent]="action = 'call'"
         >
-        <CommunicationActionButton
+          <Phone class="size-4" />{{ t('communication.dial') }}
+        </component>
+        <component
+          :is="actionComponent"
           v-if="participant"
           as-child
         >
-          <RouterLink :to="{ name: 'contacts', query: { number: participant } }"
-            ><UserPlus class="size-4" />{{ t('communication.addContact') }}</RouterLink
-          >
-        </CommunicationActionButton>
+          <RouterLink :to="{ name: 'contacts', query: { number: participant } }">
+            <UserPlus class="size-4" />{{ t('communication.addContact') }}
+          </RouterLink>
+        </component>
       </template>
     </ModemMessageThreadHeader>
     <p

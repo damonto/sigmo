@@ -49,6 +49,7 @@ const en = {
     },
   },
   communication: {
+    actions: 'More actions',
     modem: 'Modem',
     chooseModem: 'Choose a line',
     currentModem: 'Uses the selected modem’s active SIM.',
