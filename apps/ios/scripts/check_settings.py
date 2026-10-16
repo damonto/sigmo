@@ -57,19 +57,20 @@ def main():
     check_texts(schema)
     used = set()
     ui_sources = list((ROOT / "apps/ios/Sigmo/Settings").glob("*.swift"))
+    ui_sources.append(ROOT / "apps/ios/Sigmo/DiagnosticsView.swift")
     ui_sources += list((ROOT / "apps/ios/Sigmo/Devices").glob("ModemSettings*.swift"))
     ui_sources += list((ROOT / "apps/ios/Sigmo/Calls").glob("*.swift"))
     for path in ui_sources:
         if "Fixture" in path.name:
             continue
-        used.update(re.findall(r'"((?:settings|modemSettings|calls)\.[A-Za-z][A-Za-z0-9_.]*)"', path.read_text()))
+        used.update(re.findall(r'"((?:settings|modemSettings|calls|diagnostics)\.[A-Za-z][A-Za-z0-9_.]*)"', path.read_text()))
     # Prefixes used to construct dynamic keys are checked through fixture metadata.
     missing = {key for key in used if not key.endswith(".") and key not in en}
     assert not missing, f"Missing UI localizations: {missing}"
     for key in en:
-        if key.startswith(("settings.", "modemSettings.", "calls.", "apiError.")):
+        if key.startswith(("settings.", "modemSettings.", "calls.", "apiError.", "diagnostics.")):
             assert re.findall(r'%[0-9$]*[@dflds]', en[key]) == re.findall(r'%[0-9$]*[@dflds]', zh[key]), key
-    print(f"PASS: {len(en)} bilingual keys; {len(used)} settings/Calls UI keys; {len(fixture_fields)} backend fields; 8 notification channels")
+    print(f"PASS: {len(en)} bilingual keys; {len(used)} settings/Calls/diagnostics UI keys; {len(fixture_fields)} backend fields; 8 notification channels")
 
 
 if __name__ == "__main__":

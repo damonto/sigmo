@@ -119,7 +119,7 @@ struct CarrierWebsheetView: UIViewRepresentable {
         private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
         init(_ parent: CarrierWebsheetView, resources: CarrierResourceLoader? = nil) {
             self.parent = parent
-            self.resources = resources ?? CarrierResourceLoader(root: parent.url)
+            self.resources = resources ?? CarrierResourceLoader(root: parent.url, backendID: parent.session?.id)
         }
         func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
             let id = ObjectIdentifier(urlSchemeTask)

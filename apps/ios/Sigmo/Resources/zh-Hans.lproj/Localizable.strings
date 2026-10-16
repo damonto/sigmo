@@ -5,8 +5,15 @@
 "diagnostics.bundleIdentifier" = "应用标识";
 "diagnostics.version" = "版本";
 "diagnostics.writeLog" = "写入诊断日志";
-"diagnostics.eventCount" = "已写入事件";
-"diagnostics.description" = "使用此开发页面核对已安装的应用，并向控制台日志写入诊断事件。";
+"diagnostics.eventCount" = "已保存事件";
+"diagnostics.enabled" = "记录诊断日志";
+"diagnostics.size" = "日志大小";
+"diagnostics.export" = "导出日志";
+"diagnostics.clear" = "清空日志";
+"diagnostics.clearConfirmation" = "清空所有已保存的诊断日志？";
+"diagnostics.storageFailed" = "无法读取或写入诊断日志，请检查可用存储空间后重试。";
+"diagnostics.exportFailed" = "无法导出诊断日志，请重试。";
+"diagnostics.description" = "日志默认关闭。启用后，请求概要和应用错误会保存在本机，重启应用后继续记录。最多保留 5 MiB，较早的日志会自动删除。日志不包含请求和响应正文、凭据、消息内容或音频。关闭记录后，已有日志仍可导出或清空。日志仅在你主动导出时分享。";
 
 "common.add" = "添加";
 "common.edit" = "编辑";
@@ -543,6 +550,7 @@
 "detail.quickActions" = "连接控制";
 "detail.reconcileHint" = "部分更改可能已经生效，请先检查设备中的 eSIM，再决定是否重试。";
 "detail.reminder" = "提醒";
+"detail.addReminder" = "添加提醒";
 "detail.reminderContent" = "提醒内容";
 "detail.rename" = "重命名";
 "detail.repeatDays" = "重复间隔天数（可选）";

@@ -188,10 +188,8 @@ struct ESIMProfileActionsView: View {
     }
 
     @ViewBuilder private func servicesSection(_ profile: ESIMProfile) -> some View {
-        Section {
-            DetailEditRow(title: "detail.reminder") { sheet = .reminder }
-        } footer: {
-            if let reminder = profile.reminder { ReminderSummary(reminder: reminder) }
+        Section("detail.reminder") {
+            ReminderRow(reminder: profile.reminder) { sheet = .reminder }
         }
         Section {
             if profile.enabled, pinState.available, state.modem?.sim.identifier == profile.iccid {

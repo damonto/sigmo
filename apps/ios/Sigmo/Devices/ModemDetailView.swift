@@ -569,10 +569,8 @@ private struct ModemDetailScreen: View {
         LineConnectionSection(state: state, profileID: nil)
             .disabled(modem.sim.identifier.isEmpty)
         if !modem.sim.identifier.isEmpty {
-            Section {
-                DetailEditRow(title: "detail.reminder") { sheet = .reminder }
-            } footer: {
-                if let reminder = modem.sim.reminder { ReminderSummary(reminder: reminder) }
+            Section("detail.reminder") {
+                ReminderRow(reminder: modem.sim.reminder) { sheet = .reminder }
             }
         }
         if pinState.available || sim.available {

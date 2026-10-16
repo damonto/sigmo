@@ -14,6 +14,7 @@ struct BackendHTTPResponse: Sendable {
     var retryAfter: String?
     var allow: String?
     var authenticate: String?
+    var diagnosticRequest: DiagnosticRequest?
 
     // File exports have a separate bound from JSON and contact images. All
     // successful payloads are bounded before decoding or constructing a bitmap.
@@ -95,6 +96,8 @@ enum HTTPProblem {
         var request_id: String?
     }
 
+    static func isKnownCode(_ code: String) -> Bool { catalog[code] != nil }
+
     static func failure(_ response: BackendHTTPResponse, source: FailureSource, now: Date = Date()) -> BackendFailure {
         var failure = BackendFailure(status: response.status, code: "http_\(response.status)",
                                      message: HTTPURLResponse.localizedString(forStatusCode: response.status),
@@ -107,7 +110,7 @@ enum HTTPProblem {
         failure.problemType = body.type
         guard body.type.hasPrefix(typePrefix) else { return failure }
         let code = String(body.type.dropFirst(typePrefix.count))
-        guard catalog[code] != nil, body.status == response.status, !body.title.isEmpty,
+        guard isKnownCode(code), body.status == response.status, !body.title.isEmpty,
               body.error_code == nil || body.error_code == code,
               response.requestID == nil || body.request_id == nil || body.request_id == "" || response.requestID == body.request_id else { return failure }
         failure.code = code

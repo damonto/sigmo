@@ -31,6 +31,19 @@ final class AuthenticationTests: XCTestCase {
     }
 
     @MainActor
+    func testAnonymousOriginClearsSigmoCredentials() async throws {
+        let stub = BackendStub()
+        let credentials = MemoryCredentials()
+        let configuration = try testConfiguration()
+        credentials.tokens[configuration.id] = storedCredential("old-token")
+        let session = try testSession(stub, configuration: configuration, credentials: credentials)
+        await session.refresh(force: true)
+        XCTAssertEqual(session.authentication, .notRequired)
+        XCTAssertTrue(session.isOnline)
+        XCTAssertNil(credentials.tokens[configuration.id])
+    }
+
+    @MainActor
     func testLogoutRevokesTheSessionAfterAccessTokenExpiration() async throws {
         let stub = BackendStub()
         await stub.setRequired(true)

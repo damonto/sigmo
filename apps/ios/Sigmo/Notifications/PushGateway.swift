@@ -5,8 +5,10 @@ final class PushGateway: Sendable {
     private let address: URL?
     private let session: URLSession?
     private let transport: Transport
+    private let diagnostics: DiagnosticLogStore
 
-    init(address: URL? = nil, transport: Transport? = nil) {
+    init(address: URL? = nil, diagnostics: DiagnosticLogStore = AppDiagnostics.store, transport: Transport? = nil) {
+        self.diagnostics = diagnostics
         let configured = Bundle.main.object(forInfoDictionaryKey: "SigmoPushGatewayURL") as? String
         self.address = address ?? URL(string: configured ?? "https://sigmo-pro.952007.xyz")
         if let transport {
@@ -35,14 +37,14 @@ final class PushGateway: Sendable {
         return try await decode(["push-installations"], method: "POST", credential: identity.managementToken, body: data)
     }
 
-    func register(binding: PushBinding, identity: PushIdentity) async throws -> GatewayRegistration {
+    func register(binding: PushBinding, identity: PushIdentity, backendID: UUID? = nil) async throws -> GatewayRegistration {
         struct Body: Encodable {
             let id, installationId, backendId, sendToken: String
             let enabled, sms, reminders, calls: Bool
         }
         let body = Body(id: binding.id, installationId: identity.id, backendId: binding.backendID, sendToken: binding.sendToken,
                         enabled: binding.enabled, sms: binding.sms, reminders: binding.reminders, calls: binding.allowsCalls)
-        return try await decode(["push-subscriptions"], method: "POST", credential: identity.managementToken, body: JSONEncoder().encode(body))
+        return try await decode(["push-subscriptions"], method: "POST", credential: identity.managementToken, body: JSONEncoder().encode(body), backendID: backendID)
     }
 
     func revoke(_ subscriptionID: String, identity: PushIdentity) async throws {
@@ -53,11 +55,16 @@ final class PushGateway: Sendable {
         try await decode(["push-installations", identity.id], credential: identity.managementToken)
     }
 
-    private func decode(_ path: [String], method: String = "GET", credential: String, body: Data? = nil) async throws -> GatewayRegistration {
-        try JSONDecoder().decode(GatewayRegistration.self, from: await request(path, method: method, credential: credential, body: body))
+    private func decode(_ path: [String], method: String = "GET", credential: String, body: Data? = nil, backendID: UUID? = nil) async throws -> GatewayRegistration {
+        let response = try await request(path, method: method, credential: credential, body: body, backendID: backendID)
+        do { return try JSONDecoder().decode(GatewayRegistration.self, from: response.data) }
+        catch {
+            response.diagnosticRequest?.decodingFailed(error, response: response)
+            throw error
+        }
     }
 
-    private func request(_ path: [String], method: String, credential: String, body: Data? = nil) async throws -> Data {
+    private func request(_ path: [String], method: String, credential: String, body: Data? = nil, backendID: UUID? = nil) async throws -> BackendHTTPResponse {
         guard let address, address.scheme == "https", address.host != nil, address.user == nil,
               address.password == nil, address.query == nil, address.fragment == nil else {
             throw BackendFailure.local("push.gatewayUnavailable")
@@ -70,18 +77,28 @@ final class PushGateway: Sendable {
         request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json, \(HTTPProblem.mediaType)", forHTTPHeaderField: "Accept")
-        try Task.checkCancellation()
-        let response: BackendHTTPResponse
-        do { response = try await transport(request) }
-        catch {
+        let diagnostic = DiagnosticRequest(store: diagnostics, service: .pushGateway, method: method, path: path, backendID: backendID)
+        var received: BackendHTTPResponse?
+        do {
             try Task.checkCancellation()
-            throw BackendFailure.wrapping(error, source: .pushGateway)
+            var response: BackendHTTPResponse
+            do { response = try await transport(request) }
+            catch {
+                try Task.checkCancellation()
+                throw BackendFailure.wrapping(error, source: .pushGateway)
+            }
+            received = response
+            guard (200..<300).contains(response.status) else {
+                throw HTTPProblem.failure(response, source: .pushGateway)
+            }
+            try Task.checkCancellation()
+            diagnostic?.completed(response)
+            response.diagnosticRequest = diagnostic
+            return response
+        } catch {
+            diagnostic?.failed(error, response: received)
+            throw error
         }
-        guard (200..<300).contains(response.status) else {
-            throw HTTPProblem.failure(response, source: .pushGateway)
-        }
-        try Task.checkCancellation()
-        return response.data
     }
 }
 

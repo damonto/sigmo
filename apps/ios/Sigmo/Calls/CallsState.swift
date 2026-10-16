@@ -14,7 +14,13 @@ final class CallsState {
         didSet { updatePlaybackAvailability() }
     }
     private var systemAudioActive = false
-    var failure: BackendFailure?
+    var failure: BackendFailure? {
+        didSet {
+            if let failure, failure != oldValue {
+                AppDiagnostics.record(failure, category: "calls", operation: "call.failed")
+            }
+        }
+    }
     var callbackNumber: String?
     let audio = CallAudio()
     let contacts: CallContacts
@@ -402,11 +408,13 @@ final class CallsState {
             && (content?.expiresAt ?? 0) > Int64(Date().timeIntervalSince1970)
             && connection != nil && content?.callId?.isEmpty == false
             && content?.modemId?.isEmpty == false && content?.profileId?.isEmpty == false
+        AppDiagnostics.record("voip.received", category: "push", fields: ["valid": String(valid), "duplicate": String(duplicate)])
         // Even an expired or undecryptable VoIP invitation is reported before
         // asynchronous work. Reporting the same UUID makes duplicate delivery safe.
         let result = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
         if !duplicate { reporting.insert(id) }
         system.incoming(id: id, number: valid ? content?.sender ?? "" : "", name: nil) { accepted in
+            AppDiagnostics.record("voip.reported", category: "push", fields: ["accepted": String(accepted)])
             completion()
             result.continuation.yield(accepted)
             result.continuation.finish()
@@ -450,8 +458,10 @@ final class CallsState {
                 self.rememberRoute(number: record.number, line: line)
                 self.updateSystemLabels()
                 self.reconcileMonitors()
+                AppDiagnostics.record("voip.processed", category: "push", fields: ["backendID": connection.id.uuidString])
                 Task { [weak self] in await self?.reloadContacts() }
             } catch {
+                AppDiagnostics.record(error, category: "push", operation: "voip.processing.failed", backendID: connection.id)
                 guard !Task.isCancelled else { return }
                 self.endInvitation(id, reason: .failed)
                 self.failure = .wrapping(error)
@@ -461,6 +471,7 @@ final class CallsState {
     }
 
     private func endInvitation(_ id: UUID, reason: CXCallEndedReason) {
+        AppDiagnostics.record("voip.ended", category: "push", fields: ["reason": String(reason.rawValue)])
         endedUUIDs[id] = .now
         system.ended(id, reason: reason)
     }

@@ -5,8 +5,15 @@
 "diagnostics.bundleIdentifier" = "Bundle identifier";
 "diagnostics.version" = "Version";
 "diagnostics.writeLog" = "Write a diagnostic log";
-"diagnostics.eventCount" = "Events written";
-"diagnostics.description" = "Use this development screen to check the installed app and write events to its console logs.";
+"diagnostics.eventCount" = "Saved events";
+"diagnostics.enabled" = "Record diagnostic logs";
+"diagnostics.size" = "Log size";
+"diagnostics.export" = "Export logs";
+"diagnostics.clear" = "Clear logs";
+"diagnostics.clearConfirmation" = "Clear all saved diagnostic logs?";
+"diagnostics.storageFailed" = "Diagnostic logs could not be read or written. Check available storage and retry.";
+"diagnostics.exportFailed" = "The diagnostic logs could not be exported. Please retry.";
+"diagnostics.description" = "Logging is off by default. When enabled, request summaries and app errors are saved on this device, including after restarting the app. Up to 5 MiB is retained; older logs are removed automatically. Request and response bodies, credentials, messages and audio are excluded. Turning logging off keeps saved logs available for export or clearing. Logs are shared only when you export them.";
 
 "common.add" = "Add";
 "common.edit" = "Edit";
@@ -543,6 +550,7 @@
 "detail.quickActions" = "Connection controls";
 "detail.reconcileHint" = "Some changes may already have taken effect. Check the device’s eSIMs before trying again.";
 "detail.reminder" = "Reminder";
+"detail.addReminder" = "Add reminder";
 "detail.reminderContent" = "Reminder content";
 "detail.rename" = "Rename";
 "detail.repeatDays" = "Repeat interval in days (optional)";

@@ -6,10 +6,15 @@ final class CarrierResourceLoader: NSObject, URLSessionTaskDelegate, Sendable {
     static let scheme = "sigmo-carrier"
     let root: URL
     private let configuration: @Sendable () -> URLSessionConfiguration
+    private let diagnostics: DiagnosticLogStore
+    private let backendID: UUID?
 
-    init(root: URL, configuration: @escaping @Sendable () -> URLSessionConfiguration = { .ephemeral }) {
+    init(root: URL, backendID: UUID? = nil, diagnostics: DiagnosticLogStore = AppDiagnostics.store,
+         configuration: @escaping @Sendable () -> URLSessionConfiguration = { .ephemeral }) {
         self.root = root
+        self.backendID = backendID
         self.configuration = configuration
+        self.diagnostics = diagnostics
     }
 
     static func localURL(_ url: URL) -> URL {
@@ -55,34 +60,46 @@ final class CarrierResourceLoader: NSObject, URLSessionTaskDelegate, Sendable {
     }
 
     func load(_ input: URLRequest, token: String?) async throws -> BackendHTTPResponse {
-        guard let url = input.url, allowed(url) else { throw BackendFailure.local("detail.websheetInvalid") }
-        let config = configuration()
-        config.httpCookieStorage = nil
-        config.httpShouldSetCookies = false
-        config.urlCredentialStorage = nil
-        config.urlCache = nil
-        config.timeoutIntervalForResource = 45
-        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
-        var request = input
-        if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
-        var result = try await BackendHTTPResponse.receive(request, session: session, maximumBytes: 8 * 1024 * 1024)
-        if result.status == 401, let challenge = AccessChallenge(response: result, backend: root) {
-            throw challenge
+        // The sheet's capability and arbitrary resource names never enter logs.
+        let diagnostic = DiagnosticRequest(store: diagnostics, service: .carrier, method: input.httpMethod ?? "GET",
+                                           path: ["websheets", ":id", "resources"], backendID: backendID)
+        var received: BackendHTTPResponse?
+        do {
+            guard let url = input.url, allowed(url) else { throw BackendFailure.local("detail.websheetInvalid") }
+            let config = configuration()
+            config.httpCookieStorage = nil
+            config.httpShouldSetCookies = false
+            config.urlCredentialStorage = nil
+            config.urlCache = nil
+            config.timeoutIntervalForResource = 45
+            let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+            defer { session.invalidateAndCancel() }
+            var request = input
+            if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
+            var result = try await BackendHTTPResponse.receive(request, session: session, maximumBytes: 8 * 1024 * 1024)
+            received = result
+            if result.status == 401, let challenge = AccessChallenge(response: result, backend: root) {
+                throw challenge
+            }
+            guard (200..<300).contains(result.status) else { throw HTTPProblem.failure(result, source: .backend) }
+            if result.contentType?.lowercased().contains("html") == true, let html = String(data: result.data, encoding: .utf8) {
+                // The proxy emits absolute callback and resource URLs. Rewrite only this
+                // capability's URLs; other backend paths never acquire native credentials.
+                var unprefixed = URLComponents(url: root, resolvingAgainstBaseURL: false)!
+                unprefixed.path = "/api/v1/websheets/" + root.lastPathComponent
+                let rewritten = html.replacingOccurrences(of: root.absoluteString, with: Self.localURL(root).absoluteString)
+                    .replacingOccurrences(of: unprefixed.url!.absoluteString, with: Self.localURL(root).absoluteString)
+                result = BackendHTTPResponse(data: Data(rewritten.utf8), status: result.status,
+                                             requestID: result.requestID, contentType: result.contentType,
+                                             retryAfter: result.retryAfter, allow: result.allow, authenticate: result.authenticate)
+            }
+            diagnostic?.completed(result)
+            result.diagnosticRequest = diagnostic
+            return result
+        } catch {
+            diagnostic?.failed(error, response: received)
+            throw error
         }
-        guard (200..<300).contains(result.status) else { throw HTTPProblem.failure(result, source: .backend) }
-        if result.contentType?.lowercased().contains("html") == true, let html = String(data: result.data, encoding: .utf8) {
-            // The proxy emits absolute callback and resource URLs. Rewrite only this
-            // capability's URLs; other backend paths never acquire native credentials.
-            var unprefixed = URLComponents(url: root, resolvingAgainstBaseURL: false)!
-            unprefixed.path = "/api/v1/websheets/" + root.lastPathComponent
-            let rewritten = html.replacingOccurrences(of: root.absoluteString, with: Self.localURL(root).absoluteString)
-                .replacingOccurrences(of: unprefixed.url!.absoluteString, with: Self.localURL(root).absoluteString)
-            result = BackendHTTPResponse(data: Data(rewritten.utf8), status: result.status,
-                                         requestID: result.requestID, contentType: result.contentType,
-                                         retryAfter: result.retryAfter, allow: result.allow, authenticate: result.authenticate)
-        }
-        return result
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,

@@ -24,20 +24,44 @@ final class BackendSession: Identifiable {
     nonisolated let incarnationID = UUID()
     private(set) var license: BackendLicense = .unknown
     var isDemo: Bool { api.isDemo }
-    private(set) var authentication: BackendAuthentication = .unknown
+    private(set) var authentication: BackendAuthentication = .unknown {
+        didSet {
+            if authentication != oldValue {
+                AppDiagnostics.record("authentication.changed", category: "auth", fields: ["backendID": id.uuidString, "state": authentication.rawValue])
+            }
+        }
+    }
     private(set) var information: AppInformation?
     private(set) var licenseDeviceID = ""
     private(set) var capabilities: Set<String>?
-    private(set) var capabilityFailure: BackendFailure?
+    private(set) var capabilityFailure: BackendFailure? {
+        didSet {
+            if let capabilityFailure, capabilityFailure != oldValue {
+                AppDiagnostics.record(capabilityFailure, category: "backend", operation: "capabilities.failed", backendID: id)
+            }
+        }
+    }
     private(set) var modems: [Modem] = []
     private(set) var unreadCounts: [String: Int] = [:]
     private(set) var hasLoadedModems = false
     private(set) var lastRefresh: Date?
-    private(set) var failure: BackendFailure?
+    private(set) var failure: BackendFailure? {
+        didSet {
+            if let failure, failure != oldValue {
+                AppDiagnostics.record(failure, category: "backend", operation: "refresh.failed", backendID: id)
+            }
+        }
+    }
     private(set) var isRefreshing = false
     private(set) var isSendingOTP = false
     private(set) var isVerifyingOTP = false
-    private(set) var authFailure: BackendFailure?
+    private(set) var authFailure: BackendFailure? {
+        didSet {
+            if let authFailure, authFailure != oldValue {
+                AppDiagnostics.record(authFailure, category: "auth", operation: "authentication.failed", backendID: id)
+            }
+        }
+    }
     private(set) var authMethods: AuthMethods?
     private(set) var isBrowserLogin = false
     private(set) var isLoggingOut = false
@@ -47,12 +71,19 @@ final class BackendSession: Identifiable {
     @ObservationIgnored private var otpChallenge: String?
     @ObservationIgnored private var credential: SessionCredential?
     @ObservationIgnored private var credentialRefresh: Task<String?, any Error>?
+    @ObservationIgnored private var browserLoginTask: Task<Void, Never>?
     @ObservationIgnored private var logoutTask: Task<Void, Never>?
-    @ObservationIgnored private let browser = BrowserAuthentication()
-    @ObservationIgnored private let managedAccess = ManagedAccess()
+    @ObservationIgnored private let browser: any BrowserAuthenticating
+    @ObservationIgnored private let managedAccess: ManagedAccess
     private(set) var resendAvailableAt = Date.distantPast
     private(set) var pairing: LicensePairing?
-    private(set) var pairingFailure: BackendFailure?
+    private(set) var pairingFailure: BackendFailure? {
+        didSet {
+            if let pairingFailure, pairingFailure != oldValue {
+                AppDiagnostics.record(pairingFailure, category: "auth", operation: "pairing.failed", backendID: id)
+            }
+        }
+    }
     private(set) var isCreatingPairing = false
     private(set) var waitingForRestart = false
     private(set) var detailFailures: [String: BackendFailure] = [:]
@@ -78,9 +109,12 @@ final class BackendSession: Identifiable {
     @ObservationIgnored private var unreadRequest = 0
 
     init(configuration: BackendConfiguration, credentials: BackendCredentials = .keychain,
-         api: BackendAPI? = nil, clock: BackendClock = BackendClock(), gate: RefreshGate = RefreshGate()) {
+         api: BackendAPI? = nil, clock: BackendClock = BackendClock(), gate: RefreshGate = RefreshGate(),
+         browser: any BrowserAuthenticating = BrowserAuthentication(), managedAccess: ManagedAccess? = nil) {
         self.id = configuration.id
         self.configuration = configuration
+        self.browser = browser
+        self.managedAccess = managedAccess ?? ManagedAccess(backendID: configuration.id)
         self.credentials = credentials
         self.api = api ?? BackendAPI(configuration: configuration)
         self.clock = clock
@@ -117,6 +151,13 @@ final class BackendSession: Identifiable {
     }
 
     func refresh(force: Bool = false) async {
+        // Browser presentation can reactivate the scene. An unauthenticated
+        // discovery request would revoke access and cancel that same login.
+        guard !isBrowserLogin else { return }
+        await refreshConnection(force: force)
+    }
+
+    private func refreshConnection(force: Bool) async {
         guard !Task.isCancelled, !isLoggingOut else { return }
         if let refreshTask { await refreshTask.value; return }
         guard force || clock.now() >= nextRefresh else { return }
@@ -150,13 +191,16 @@ final class BackendSession: Identifiable {
             let methods = try await api.authMethods(token: token)
             try check(current)
             authMethods = methods
-            if methods.mode == "none" {
+            // The origin's authentication mode does not describe its Access edge.
+            // Keep managed OAuth credentials even when Sigmo itself allows anonymous access.
+            let usesManagedAccess = credential?.access != nil
+            if methods.mode == "none", !usesManagedAccess {
                 try credentials.write(id, nil)
                 credential = nil
                 token = nil
             }
-            if methods.mode != "cloudflare_access" { accessChallenge = nil }
-            authentication = methods.mode == "none" ? .notRequired : (token == nil ? .required : .authenticated)
+            if methods.mode != "cloudflare_access", !usesManagedAccess { accessChallenge = nil }
+            authentication = methods.mode == "none" && !usesManagedAccess ? .notRequired : (token == nil ? .required : .authenticated)
             let status = try await api.license(token: token)
             try check(current)
             checkingLicense = false
@@ -237,8 +281,7 @@ final class BackendSession: Identifiable {
 
     func stop() {
         generation += 1
-        browser.cancel()
-        isBrowserLogin = false
+        cancelBrowserLogin()
         credentialRefresh?.cancel()
         credentialRefresh = nil
         refreshTask?.cancel()
@@ -389,12 +432,33 @@ final class BackendSession: Identifiable {
     }
 
     func loginWithBrowser() async {
-        guard !Task.isCancelled, !isLoggingOut, !isBrowserLogin, supportsBrowserLogin else { return }
+        guard !Task.isCancelled, !isLoggingOut, supportsBrowserLogin else { return }
+        if let browserLoginTask { await browserLoginTask.value; return }
         stop()
         let current = generation
         isBrowserLogin = true
         authFailure = nil
-        defer { if current == generation { isBrowserLogin = false } }
+        // The session owns login and its final refresh, even when authentication
+        // changes remove the initiating button or the caller leaves the page.
+        let task = Task { await performBrowserLogin(current) }
+        browserLoginTask = task
+        await task.value
+    }
+
+    func cancelBrowserLogin() {
+        browserLoginTask?.cancel()
+        browserLoginTask = nil
+        browser.cancel()
+        isBrowserLogin = false
+    }
+
+    private func performBrowserLogin(_ current: Int) async {
+        defer {
+            if current == generation {
+                isBrowserLogin = false
+                browserLoginTask = nil
+            }
+        }
         do {
             let proof = try LoginProof()
             let next: SessionCredential
@@ -402,19 +466,21 @@ final class BackendSession: Identifiable {
                 let registration = try await managedAccess.register(challenge, backend: api.address)
                 try check(current)
                 let callback = try await browser.open(managedAccess.authorizationURL(registration, proof: proof))
+                try check(current)
                 let code = try proof.code(from: callback)
                 next = try await managedAccess.exchange(registration, code: code, proof: proof)
             } else {
                 let target = try await api.browserLogin(proof)
                 try check(current)
                 let callback = try await browser.open(target)
+                try check(current)
                 let code = try proof.code(from: callback)
                 next = try await api.completeBrowserLogin(code: code, proof: proof).credential()
             }
             try check(current)
             try saveCredential(next)
             authentication = .authenticated
-            await refresh(force: true)
+            await refreshConnection(force: true)
         } catch is CancellationError {
             // Closing the browser leaves the connection ready for another login.
         } catch {

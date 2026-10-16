@@ -63,7 +63,13 @@ final class SIMApplicationState {
     private(set) var profileICCID = ""
     private(set) var root: SIMApplicationMenu?
     private(set) var page: SIMApplicationPage?
-    private(set) var failure: BackendFailure?
+    private(set) var failure: BackendFailure? {
+        didSet {
+            if let failure, failure != oldValue {
+                AppDiagnostics.record(failure, category: "sim", operation: "simApplication.failed", backendID: session.id)
+            }
+        }
+    }
     private(set) var busy = false
     private(set) var pageRevision = 0
     var presented = false

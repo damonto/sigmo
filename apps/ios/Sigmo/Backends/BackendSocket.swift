@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 // Closures make the bidirectional transport replaceable without mocking URLSession.
 struct BackendSocket: Sendable {
@@ -6,7 +7,7 @@ struct BackendSocket: Sendable {
     let receive: @Sendable () async throws -> Data
     let close: @Sendable () -> Void
 
-    static func live(_ request: URLRequest) throws -> BackendSocket {
+    static func live(_ request: URLRequest, diagnostics: DiagnosticSocket) throws -> BackendSocket {
         guard let url = request.url,
               var origin = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             throw BackendFailure.local("address.invalid")
@@ -19,7 +20,7 @@ struct BackendSocket: Sendable {
         configuration.timeoutIntervalForResource = 0
         configuration.httpCookieStorage = nil
         configuration.urlCredentialStorage = nil
-        let session = URLSession(configuration: configuration, delegate: BackendRedirects(origin: originURL), delegateQueue: nil)
+        let session = URLSession(configuration: configuration, delegate: SocketDelegate(origin: originURL, diagnostics: diagnostics), delegateQueue: nil)
         let task = session.webSocketTask(with: request)
         task.resume()
         return BackendSocket(send: { data in
@@ -44,6 +45,78 @@ struct BackendSocket: Sendable {
         }, close: {
             task.cancel(with: .goingAway, reason: nil)
             session.invalidateAndCancel()
+        }).recording(diagnostics)
+    }
+
+    func recording(_ diagnostics: DiagnosticSocket) -> BackendSocket {
+        BackendSocket(send: { data in
+            do { try await send(data) }
+            catch { diagnostics.failed(error); throw error }
+        }, receive: {
+            do { return try await receive() }
+            catch { diagnostics.failed(error); throw error }
+        }, close: {
+            diagnostics.closed()
+            close()
         })
+    }
+}
+
+// Sending, receiving, delegate callbacks and explicit closing can race. Report a
+// single terminal event, without ever inspecting a message or close reason.
+final class DiagnosticSocket: Sendable {
+    private let request: DiagnosticRequest?
+    private let finished = Mutex(false)
+
+    init(request: DiagnosticRequest?) { self.request = request }
+
+    func opened() {
+        finished.withLock { finished in
+            if !finished { request?.record("socket.opened") }
+        }
+    }
+
+    func failed(_ error: any Error, status: Int? = nil) {
+        finished.withLock { finished in
+            guard !finished else { return }
+            finished = true
+            request?.record(DiagnosticError.isCancellation(error) ? "operation.cancelled" : "socket.failed", error: error, status: status)
+        }
+    }
+
+    func closed(code: Int? = nil) {
+        finished.withLock { finished in
+            guard !finished else { return }
+            finished = true
+            request?.record("socket.closed", extra: code.map { ["closeCode": String($0)] } ?? [:])
+        }
+    }
+}
+
+private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, Sendable {
+    private let redirects: BackendRedirects
+    private let diagnostics: DiagnosticSocket
+
+    init(origin: URL, diagnostics: DiagnosticSocket) {
+        redirects = BackendRedirects(origin: origin)
+        self.diagnostics = diagnostics
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        redirects.urlSession(session, task: task, willPerformHTTPRedirection: response, newRequest: request, completionHandler: completionHandler)
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+        diagnostics.opened()
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        diagnostics.closed(code: closeCode.rawValue)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+        if let error { diagnostics.failed(error, status: (task.response as? HTTPURLResponse)?.statusCode) }
     }
 }

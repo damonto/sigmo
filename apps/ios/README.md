@@ -32,6 +32,14 @@ Use HTTPS with a system-trusted certificate, or local-network HTTP. Allow local-
 
 Switching to the background lets in-flight requests and eSIM operations finish and pauses automatic polling between requests. Returning to the active scene refreshes idle pages without restarting pending work. The app requests additional iOS execution time for HTTP requests, the initial SIM status read, and SIM/eSIM interactions; idle SIM subscriptions suspend in the background. If the extra time expires, the app cancels unfinished work and releases resources. iOS suspension or termination can still interrupt long operations. Refresh the backend state before retrying a write whose result is uncertain.
 
+## Diagnostic logs
+
+Open **Manage Sigmo → Development diagnostics** to enable local diagnostic logging, including in Release builds. Logging is off by default. The switch and saved events survive app restarts. Turning logging off stops collection and keeps existing logs available for export or clearing.
+
+Logs contain HTTP request summaries, network and decoding failures, WebSocket lifecycle events, and key app errors. Request and response bodies, credentials, query values, message content, and audio are excluded; dynamic resource identifiers in paths are hidden. The main app's notification registration and processing are included; the notification extension and full system crash reports are outside this log.
+
+The app retains up to five 1 MiB files in private storage, excluded from backups, and rotates out the oldest events. **Export logs** saves a UTF-8 text snapshot through the system file exporter, with app/build and iOS version information. Logs are not uploaded automatically. **Clear logs** deletes the saved events without changing the logging switch.
+
 ## Transfer from a local SIM reader
 
 With an HTTPS backend providing `esimTransfer`, connect an iOS-compatible CCID reader to the iPhone or iPad and choose it from the transfer source list. Readers and SIM insertion/removal update live. Empty readers show an insert-SIM hint; inserting a ready card makes them selectable. The backend performs the transfer to its target modem over [Remote APDU](../../pro/esimtransfer/README.md), including profile reads and any source-deletion confirmation.

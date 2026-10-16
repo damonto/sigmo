@@ -33,7 +33,13 @@ final class ModemDetailState {
     private(set) var profilesLoaded = false
     private(set) var loading = false
     private(set) var busy = false
-    private(set) var failure: BackendFailure?
+    private(set) var failure: BackendFailure? {
+        didSet {
+            if let failure, failure != oldValue {
+                AppDiagnostics.record(failure, category: "device", operation: "device.failed", backendID: session.id)
+            }
+        }
+    }
     private(set) var elementsFailure: BackendFailure?
     private(set) var profilesFailure: BackendFailure?
     private(set) var message: String?

@@ -43,6 +43,7 @@ final class BackendStore {
             configurationLoaded = true
             failure = nil
         } catch {
+            AppDiagnostics.record(error, category: "storage", operation: "configuration.load.failed")
             configurationLoaded = false
             failure = .wrapping(error)
         }
@@ -64,7 +65,11 @@ final class BackendStore {
                 next.backends.append(BackendConfiguration(id: backendID, name: name, address: endpoint))
             }
             return persist(next)
-        } catch { failure = .wrapping(error); return false }
+        } catch {
+            AppDiagnostics.record(error, category: "storage", operation: "configuration.save.failed")
+            failure = .wrapping(error)
+            return false
+        }
     }
 
     func deleteBackend(_ id: UUID) {
@@ -104,10 +109,12 @@ final class BackendStore {
             }
             try file.save(next)
         } catch {
+            AppDiagnostics.record(error, category: "storage", operation: "configuration.persist.failed")
             failure = .wrapping(error)
             for (id, saved) in removedCredentials {
                 do { try credentials.write(id, saved) }
                 catch {
+                    AppDiagnostics.record(error, category: "storage", operation: "credentials.restore.failed", backendID: id)
                     // A failed compensation must fail closed rather than leave
                     // an in-memory login whose persisted credential was lost.
                     sessions[id]?.discardCredentials()

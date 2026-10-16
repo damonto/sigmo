@@ -174,14 +174,53 @@ struct ProfileAvatar: View {
     }
 }
 
-struct ReminderSummary: View {
-    let reminder: SIMReminder
+struct ReminderRow: View {
+    let reminder: SIMReminder?
+    let action: () -> Void
+    @ScaledMetric(relativeTo: .body) private var iconSize = 34.0
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label { Text(reminder.nextAt, format: .dateTime) } icon: { Image(systemName: "bell") }
-            Text(reminder.repeatDays.map { String(format: detailText("detail.repeatEvery"), $0) } ?? detailText("detail.once"))
-            Text(reminder.content).fixedSize(horizontal: false, vertical: true)
-        }.font(.subheadline).foregroundStyle(.secondary)
+        if let reminder {
+            Button(action: action) {
+                HStack(spacing: 12) {
+                    Image(systemName: "bell")
+                        .font(.body)
+                        .foregroundStyle(Color.accentColor)
+                        .frame(width: iconSize, height: iconSize)
+                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(reminder.content)
+                            .font(.body.weight(.medium))
+                        Text(scheduleText(reminder))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.right")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .foregroundStyle(.primary)
+            .accessibilityLabel(Text("detail.reminder"))
+            .accessibilityValue("\(reminder.content), \(scheduleText(reminder))")
+        } else {
+            DetailEditRow(title: "detail.addReminder", action: action)
+                .accessibilityLabel(Text("detail.reminder"))
+                .accessibilityValue(Text("detail.addReminder"))
+        }
+    }
+
+    private func scheduleText(_ reminder: SIMReminder) -> String {
+        let date = reminder.nextAt.formatted(date: .numeric, time: .shortened)
+        let repetition = reminder.repeatDays.map { String(format: detailText("detail.repeatEvery"), $0) } ?? detailText("detail.once")
+        return "\(date) · \(repetition)"
     }
 }
 

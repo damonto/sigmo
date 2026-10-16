@@ -31,14 +31,12 @@ struct BackendListView: View {
                     }
                 }
             }
-            #if DEBUG
             Section {
                 NavigationLink { DiagnosticsView() } label: {
                     Label("diagnostics.title", systemImage: "stethoscope")
                 }
                 .accessibilityIdentifier("openDiagnostics")
             }
-            #endif
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(12)

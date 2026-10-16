@@ -118,7 +118,13 @@ private extension Data {
 }
 
 @MainActor
-final class BrowserAuthentication {
+protocol BrowserAuthenticating {
+    func open(_ url: URL) async throws -> URL
+    func cancel()
+}
+
+@MainActor
+final class BrowserAuthentication: BrowserAuthenticating {
     nonisolated static let callback = URL(string: "https://sigmo-pro.952007.xyz/auth/callback")!
     private var session: ASWebAuthenticationSession?
     // The authentication session holds its presentation context weakly.

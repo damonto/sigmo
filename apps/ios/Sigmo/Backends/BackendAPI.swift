@@ -35,27 +35,23 @@ final class BackendAPI: Sendable {
     let address: URL
     private let transport: Transport
     private let session: URLSession?
-    let socketFactory: SocketFactory
+    private let diagnostics: DiagnosticLogStore
+    private let socketFactory: SocketFactory?
     typealias SocketFactory = @Sendable (URLRequest) async throws -> BackendSocket
 
-    init(configuration: BackendConfiguration, transport: Transport? = nil, socketFactory: SocketFactory? = nil, isDemo: Bool = false) {
+    init(configuration: BackendConfiguration, diagnostics: DiagnosticLogStore = AppDiagnostics.store,
+         transport: Transport? = nil, socketFactory: SocketFactory? = nil, isDemo: Bool = false) {
         self.isDemo = isDemo
         backendID = configuration.id
         address = configuration.address
+        self.diagnostics = diagnostics
+        self.socketFactory = socketFactory
         if isDemo {
             // A missing demo transport is an implementation error, never a
             // reason to connect the sample address to a real network service.
             self.session = nil
             self.transport = transport ?? { _ in throw BackendFailure.local("demo.unsupportedRequest") }
-            self.socketFactory = socketFactory ?? { _ in throw BackendFailure.local("demo.unsupportedRequest") }
             return
-        }
-        if let socketFactory {
-            self.socketFactory = socketFactory
-        } else if transport == nil {
-            self.socketFactory = { try BackendSocket.live($0) }
-        } else {
-            self.socketFactory = { _ in throw BackendFailure.local("detail.socketUnavailable") }
         }
         if let transport {
             self.session = nil
@@ -131,6 +127,7 @@ final class BackendAPI: Sendable {
         }
         do { return try decoder.decode(Value.self, from: response.data) }
         catch {
+            response.diagnosticRequest?.decodingFailed(error, response: response)
             throw BackendFailure(status: response.status, code: "invalid_response",
                                  message: NSLocalizedString("api.invalidResponse", comment: ""), requestID: response.requestID)
         }
@@ -140,41 +137,48 @@ final class BackendAPI: Sendable {
                  query: [URLQueryItem] = [], accept: String = "application/json", contentType: String = "application/json",
                  timeout: BackendRequestTimeout = .standard) async throws -> BackendHTTPResponse {
         let request = try makeRequest(path, method: method, body: body, token: token, query: query, accept: accept, contentType: contentType, timeout: timeout)
-        let requestID = request.value(forHTTPHeaderField: "X-Request-ID") ?? UUID().uuidString
-        try Task.checkCancellation()
-        let started = ContinuousClock.now
-        let response: BackendHTTPResponse
+        let diagnostic = DiagnosticRequest(store: diagnostics, service: .backend, method: method, path: path,
+                                           backendID: backendID, requestID: request.value(forHTTPHeaderField: "X-Request-ID"))
+        var received: BackendHTTPResponse?
         do {
-            // URLRequest's timeout resets as bytes arrive. This bounds the whole
-            // request as well, including a server that only trickles a response.
-            response = try await withThrowingTaskGroup(of: BackendHTTPResponse.self) { group in
-                group.addTask { try await self.transport(request) }
-                group.addTask {
-                    try await Task.sleep(for: .seconds(timeout.interval))
-                    throw URLError(.timedOut)
-                }
-                defer { group.cancelAll() }
-                guard let response = try await group.next() else { throw CancellationError() }
-                return response
-            }
-        }
-        catch {
             try Task.checkCancellation()
-            throw BackendFailure.wrapping(error, source: .backend)
+            var response: BackendHTTPResponse
+            do {
+                // URLRequest's timeout resets as bytes arrive. This bounds the whole
+                // request as well, including a server that only trickles a response.
+                response = try await withThrowingTaskGroup(of: BackendHTTPResponse.self) { group in
+                    group.addTask { try await self.transport(request) }
+                    group.addTask {
+                        try await Task.sleep(for: .seconds(timeout.interval))
+                        throw URLError(.timedOut)
+                    }
+                    defer { group.cancelAll() }
+                    guard let response = try await group.next() else { throw CancellationError() }
+                    return response
+                }
+            }
+            catch {
+                try Task.checkCancellation()
+                throw BackendFailure.wrapping(error, source: .backend)
+            }
+            received = response
+            try Task.checkCancellation()
+            if response.status == 401, let challenge = AccessChallenge(response: response, backend: address) { throw challenge }
+            if (300..<400).contains(response.status) { throw BackendFailure.local("auth.accessSetupRequired") }
+            guard (200..<300).contains(response.status) else {
+                throw HTTPProblem.failure(response, source: .backend)
+            }
+            // Injected transports must obey the same boundary as streamed HTTP.
+            guard response.data.count <= BackendHTTPResponse.successfulBodyLimit(for: request) else {
+                throw BackendHTTPResponse.oversizedResponse()
+            }
+            diagnostic?.completed(response)
+            response.diagnosticRequest = diagnostic
+            return response
+        } catch {
+            diagnostic?.failed(error, response: received)
+            throw error
         }
-        try Task.checkCancellation()
-        // IDs and timings are useful across backends; bodies and credentials never enter logs.
-        AppDiagnostics.record("backend=\(backendID) request=\(requestID) method=\(method) status=\(response.status) duration=\(started.duration(to: .now))")
-        if response.status == 401, let challenge = AccessChallenge(response: response, backend: address) { throw challenge }
-        if (300..<400).contains(response.status) { throw BackendFailure.local("auth.accessSetupRequired") }
-        guard (200..<300).contains(response.status) else {
-            throw HTTPProblem.failure(response, source: .backend)
-        }
-        // Injected transports must obey the same boundary as streamed HTTP.
-        guard response.data.count <= BackendHTTPResponse.successfulBodyLimit(for: request) else {
-            throw BackendHTTPResponse.oversizedResponse()
-        }
-        return response
     }
     func makeRequest(_ path: [String], method: String = "GET", body: Data? = nil, token: String? = nil,
                      query: [URLQueryItem] = [], accept: String = "application/json", contentType: String = "application/json",
@@ -217,7 +221,17 @@ final class BackendAPI: Sendable {
         components.scheme = components.scheme == "https" ? "wss" : "ws"
         guard let socketURL = components.url else { throw BackendFailure.local("address.invalid") }
         request.url = socketURL
-        return try await socketFactory(request)
+        let diagnostic = DiagnosticSocket(request: DiagnosticRequest(store: diagnostics, service: .backend, method: "GET", path: path,
+            backendID: backendID, requestID: request.value(forHTTPHeaderField: "X-Request-ID"), kind: .websocket))
+        do {
+            if let socketFactory { return try await socketFactory(request).recording(diagnostic) }
+            guard !isDemo else { throw BackendFailure.local("demo.unsupportedRequest") }
+            guard session != nil else { throw BackendFailure.local("detail.socketUnavailable") }
+            return try BackendSocket.live(request, diagnostics: diagnostic)
+        } catch {
+            diagnostic.failed(error)
+            throw error
+        }
     }
 
 }

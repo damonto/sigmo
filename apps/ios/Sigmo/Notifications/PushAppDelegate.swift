@@ -11,6 +11,8 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     private var voip: PKPushRegistry?
 
     override init() {
+        // Restore the diagnostic preference before configuration, credentials or push initialization.
+        AppDiagnostics.record("app.launched")
         let store = AppLaunch.makeStore()
         self.store = store
         self.push = NativePushState(disabled: AppLaunch.usesFixtures)
@@ -67,12 +69,14 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        AppDiagnostics.record(error, category: "push", operation: "registration.failed")
         push.failure = .wrapping(error)
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         let content = NativePushState.envelopeData(notification.request.content.userInfo).flatMap { try? PushPayload.decode($0, forPreview: true) }
         let suppress = await push.receive(content, tapped: false)
+        AppDiagnostics.record("notification.processed", category: "push", fields: ["tapped": "false", "suppressed": String(suppress)])
         return suppress ? [.badge] : [.banner, .list, .sound, .badge]
     }
 

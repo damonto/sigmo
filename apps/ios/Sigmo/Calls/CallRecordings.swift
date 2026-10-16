@@ -55,7 +55,10 @@ final class CallRecordings {
             var values = URLResourceValues()
             values.isExcludedFromBackup = true
             try url.setResourceValues(values)
-        } catch { failure = .wrapping(error) }
+        } catch {
+            AppDiagnostics.record(error, category: "recording", operation: "recording.storage.failed")
+            failure = .wrapping(error)
+        }
     }
 
     func items(for backendID: UUID) -> [CallRecording] {
@@ -75,7 +78,11 @@ final class CallRecordings {
                 items = index.items
                 loaded = true
                 failure = index.hasInvalidEntries ? .local("calls.recordingRecoveryFailed") : nil
-            } catch { failure = .wrapping(error) }
+                if let failure { AppDiagnostics.record(failure, category: "recording", operation: "recording.index.invalid") }
+            } catch {
+                AppDiagnostics.record(error, category: "recording", operation: "recording.index.failed")
+                failure = .wrapping(error)
+            }
         }
         loadTask = task
         await task.value
@@ -176,6 +183,7 @@ final class CallRecordings {
     }
 
     private func recordFailure(_ error: BackendFailure, id: UUID) {
+        AppDiagnostics.record(error, category: "recording", operation: "recording.failed")
         entryFailures[id] = error
         failure = error
     }

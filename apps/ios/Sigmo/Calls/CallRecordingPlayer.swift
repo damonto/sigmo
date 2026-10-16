@@ -131,6 +131,7 @@ final class CallRecordingPlayer: NSObject, AVAudioPlayerDelegate {
             do { try await deactivation.value }
             catch {
                 guard let self, self.generation == current else { return }
+                AppDiagnostics.record(error, category: "recording", operation: "playback.deactivation.failed")
                 self.failureID = id
                 self.failure = .local("calls.recordingPlaybackFailed")
             }
@@ -153,9 +154,11 @@ final class CallRecordingPlayer: NSObject, AVAudioPlayerDelegate {
     }
 
     private func fail(_ key: String, id: UUID) {
+        let failure = BackendFailure.local(key)
+        AppDiagnostics.record(failure, category: "recording", operation: "playback.failed")
         stop()
         failureID = id
-        failure = .local(key)
+        self.failure = failure
     }
 
     private func clearFailure() { failure = nil; failureID = nil }

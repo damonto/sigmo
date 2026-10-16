@@ -61,7 +61,13 @@ final class ESIMFlowState: Identifiable {
     private(set) var phase: ESIMFlowPhase = .form
     private(set) var transfer = false
     private(set) var stage = ""
-    private(set) var failure: BackendFailure?
+    private(set) var failure: BackendFailure? {
+        didSet {
+            if let failure, failure != oldValue {
+                AppDiagnostics.record(failure, category: "esim", operation: "esim.failed", backendID: detail.session.id)
+            }
+        }
+    }
     private(set) var busy = false
     private(set) var sending = false
     private(set) var cancelling = false

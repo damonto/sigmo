@@ -24,12 +24,16 @@ struct SettingsAccessView<Content: View>: View {
                         else if session.license == .activation {
                             Button("activation.start") { activation = true }
                         } else if session.authentication == .required {
-                            Button("auth.login") { login = true }
-                                .disabled(session.isLoggingOut)
+                            if session.supportsBrowserLogin {
+                                BrowserLoginButton(session: session)
+                            } else {
+                                Button("auth.login") { login = true }
+                                    .disabled(session.isLoggingOut)
+                            }
                         }
                     }
                 }
-                .detailErrorAlert(session.failure)
+                .detailErrorAlert(login || activation ? nil : session.authFailure ?? session.failure)
             }
         }
         .sheet(isPresented: $login) { AuthenticationView(session: session) }

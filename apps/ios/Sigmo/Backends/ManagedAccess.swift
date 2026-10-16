@@ -34,8 +34,12 @@ private final class OAuthRedirects: NSObject, URLSessionTaskDelegate, Sendable {
 
 final class ManagedAccess: Sendable {
     private let session: URLSession
-    init() {
-        let config = URLSessionConfiguration.ephemeral
+    private let diagnostics: DiagnosticLogStore
+    private let backendID: UUID?
+    init(backendID: UUID? = nil, diagnostics: DiagnosticLogStore = AppDiagnostics.store, configuration: URLSessionConfiguration = .ephemeral) {
+        self.backendID = backendID
+        self.diagnostics = diagnostics
+        let config = configuration
         config.httpCookieStorage = nil
         config.httpShouldSetCookies = false
         config.urlCredentialStorage = nil
@@ -83,7 +87,7 @@ final class ManagedAccess: Sendable {
 
     func register(_ challenge: AccessChallenge, backend: URL) async throws -> AccessRegistration {
         guard BackendAddress.sameOrigin(challenge.metadata, backend) else { throw BackendFailure.local("auth.loginFailed") }
-        let resource: Resource = try await json(challenge.metadata)
+        let resource: Resource = try await json(challenge.metadata, operation: "resource-metadata")
         guard resource.resource.scheme == "https", BackendAddress.sameOrigin(resource.resource, backend),
               resource.resource.user == nil, resource.resource.query == nil, resource.resource.fragment == nil,
               resource.authorization_servers.count == 1,
@@ -91,7 +95,7 @@ final class ManagedAccess: Sendable {
               issuer.scheme == "https", issuer.host?.hasSuffix(".cloudflareaccess.com") == true,
               issuer.user == nil, issuer.port == nil, issuer.query == nil, issuer.fragment == nil,
               issuer.path.isEmpty || issuer.path == "/" else { throw BackendFailure.local("auth.accessSetupRequired") }
-        let metadata: Metadata = try await json(issuer.appending(path: ".well-known/oauth-authorization-server"))
+        let metadata: Metadata = try await json(issuer.appending(path: ".well-known/oauth-authorization-server"), operation: "server-metadata")
         // Access documents its issuer as a bare team hostname; also accept the RFC URL form.
         guard [issuer.absoluteString, issuer.host ?? ""].contains(metadata.issuer),
               metadata.token_endpoint_auth_methods_supported.contains("none"),
@@ -102,7 +106,7 @@ final class ManagedAccess: Sendable {
             throw BackendFailure.local("auth.loginFailed")
         }
         let body = try JSONEncoder().encode(RegistrationRequest(resource: resource.resource.absoluteString))
-        let registration: RegistrationResponse = try await json(metadata.registration_endpoint, method: "POST", body: body)
+        let registration: RegistrationResponse = try await json(metadata.registration_endpoint, operation: "registration", method: "POST", body: body)
         guard !registration.client_id.isEmpty, registration.token_endpoint_auth_method == "none",
               registration.redirect_uris == [BrowserAuthentication.callback.absoluteString] else { throw BackendFailure.local("auth.loginFailed") }
         return AccessRegistration(resource: resource.resource, issuer: issuer,
@@ -138,14 +142,14 @@ final class ManagedAccess: Sendable {
         }
         // Revoke both forms; RFC 7009 does not require access-token revocation to revoke a refresh token.
         for token in [credential.refreshToken, credential.accessToken].compactMap({ $0 }) {
-            _ = try await data(endpoint, method: "POST", body: Self.form(["token": token, "client_id": registration.clientID]), contentType: "application/x-www-form-urlencoded")
+            _ = try await data(endpoint, operation: "revocation", method: "POST", body: Self.form(["token": token, "client_id": registration.clientID]), contentType: "application/x-www-form-urlencoded")
         }
     }
     private func token(_ registration: AccessRegistration, fields: [String: String]) async throws -> SessionCredential {
         var fields = fields
         fields["client_id"] = registration.clientID
         fields["resource"] = registration.resource.absoluteString
-        let result: TokenResponse = try await json(registration.tokenEndpoint, method: "POST", body: Self.form(fields), contentType: "application/x-www-form-urlencoded")
+        let result: TokenResponse = try await json(registration.tokenEndpoint, operation: "token", method: "POST", body: Self.form(fields), contentType: "application/x-www-form-urlencoded")
         guard result.token_type.lowercased() == "bearer", !result.access_token.isEmpty,
               result.expires_in.isFinite, result.expires_in > 0, result.expires_in <= 86_400,
               result.resource == nil || BackendAddress.sameOrigin(result.resource!, registration.resource) else { throw BackendFailure.local("auth.loginFailed") }
@@ -158,25 +162,45 @@ final class ManagedAccess: Sendable {
             "\($0.key.addingPercentEncoding(withAllowedCharacters: allowed)!)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed)!)"
         }.joined(separator: "&").utf8)
     }
-    private func json<Value: Decodable>(_ url: URL, method: String = "GET", body: Data? = nil, contentType: String = "application/json") async throws -> Value {
-        try JSONDecoder().decode(Value.self, from: await data(url, method: method, body: body, contentType: contentType))
+    private func json<Value: Decodable>(_ url: URL, operation: String, method: String = "GET", body: Data? = nil, contentType: String = "application/json") async throws -> Value {
+        let response = try await data(url, operation: operation, method: method, body: body, contentType: contentType)
+        do { return try JSONDecoder().decode(Value.self, from: response.data) }
+        catch {
+            response.diagnosticRequest?.decodingFailed(error, response: response)
+            throw error
+        }
     }
-    private func data(_ url: URL, method: String, body: Data?, contentType: String) async throws -> Data {
+    private func data(_ url: URL, operation: String, method: String, body: Data?, contentType: String) async throws -> BackendHTTPResponse {
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         request.httpMethod = method
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if body != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
-        let (bytes, response) = try await session.bytes(for: request)
-        guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
-            bytes.task.cancel()
-            throw BackendFailure.local("auth.loginFailed")
+        // OAuth endpoint paths are server-defined and may themselves contain secrets.
+        let diagnostic = DiagnosticRequest(store: diagnostics, service: .oauth, method: method, path: ["oauth", operation], backendID: backendID)
+        var received: BackendHTTPResponse?
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            if let response = response as? HTTPURLResponse {
+                received = BackendHTTPResponse(data: Data(), status: response.statusCode,
+                                               requestID: response.value(forHTTPHeaderField: "X-Request-ID"))
+            }
+            guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
+                bytes.task.cancel()
+                throw BackendFailure.local("auth.loginFailed")
+            }
+            var result = Data()
+            for try await byte in bytes {
+                guard result.count < 65_536 else { bytes.task.cancel(); throw BackendFailure.local("api.invalidResponse") }
+                result.append(byte)
+            }
+            let resultResponse = BackendHTTPResponse(data: result, status: response.statusCode, requestID: received?.requestID,
+                                                     diagnosticRequest: diagnostic)
+            diagnostic?.completed(resultResponse)
+            return resultResponse
+        } catch {
+            diagnostic?.failed(error, response: received)
+            throw error
         }
-        var result = Data()
-        for try await byte in bytes {
-            guard result.count < 65_536 else { bytes.task.cancel(); throw BackendFailure.local("api.invalidResponse") }
-            result.append(byte)
-        }
-        return result
     }
 }

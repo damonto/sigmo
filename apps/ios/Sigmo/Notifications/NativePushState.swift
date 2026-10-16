@@ -30,14 +30,26 @@ struct PushNotificationAccess {
 
 @MainActor @Observable
 final class NativePushState {
-    private(set) var authorization: UNAuthorizationStatus = .notDetermined
+    private(set) var authorization: UNAuthorizationStatus = .notDetermined {
+        didSet {
+            if authorization != oldValue {
+                AppDiagnostics.record("authorization.changed", category: "push", fields: ["state": String(authorization.rawValue)])
+            }
+        }
+    }
     private(set) var eventRevision = 0
     private(set) var configurationRevision = 0
     private(set) var failures: [UUID: BackendFailure] = [:]
     private(set) var registered: Set<String> = []
     var failure: BackendFailure?
     private(set) var voipFailure: BackendFailure?
-    var navigationFailure: BackendFailure?
+    var navigationFailure: BackendFailure? {
+        didSet {
+            if let navigationFailure, navigationFailure != oldValue {
+                AppDiagnostics.record(navigationFailure, category: "push", operation: "notification.navigation.failed")
+            }
+        }
+    }
     var pendingNavigation: PushNavigation?
     var visibleConversation: PushConversation?
     var visibleThread: PushThread?
@@ -81,6 +93,7 @@ final class NativePushState {
 
     func registeredVoIP(token: Data?) {
         guard !disabled else { return }
+        AppDiagnostics.record(token == nil ? "voip.token.invalidated" : "voip.token.registered", category: "push")
         let value = token?.map { String(format: "%02x", $0) }.joined() ?? ""
         voipToken = value
         registerVoIP(value)
@@ -96,6 +109,7 @@ final class NativePushState {
             do {
                 _ = try await self.gateway.register(identity: identity, voipToken: value, environment: self.environment, label: UIDevice.current.name)
                 self.registeredVoIPToken = value
+                AppDiagnostics.record("voip.registration.completed", category: "push")
                 self.voipFailure = nil
                 self.registered.removeAll()
                 self.configurationRevision += 1
@@ -122,6 +136,7 @@ final class NativePushState {
     func registered(token: Data) {
         let value = token.map { String(format: "%02x", $0) }.joined()
         guard deviceToken != value else { return }
+        AppDiagnostics.record("notification.token.registered", category: "push")
         deviceToken = value
         registered.removeAll()
         configurationRevision += 1
@@ -143,7 +158,10 @@ final class NativePushState {
                 try persist(value)
             }
             failure = nil
-        } catch { failure = .local("push.keychainUnavailable") }
+        } catch {
+            _ = recordFailure(error)
+            failure = .local("push.keychainUnavailable")
+        }
     }
 
     func binding(sessionID: UUID) -> PushBinding? {
@@ -167,7 +185,10 @@ final class NativePushState {
             registered.remove(binding.id)
             configurationRevision += 1
             applyBadge()
-        } catch { failure = .local("push.keychainUnavailable") }
+        } catch {
+            _ = recordFailure(error)
+            failure = .local("push.keychainUnavailable")
+        }
     }
 
     func record(_ badge: MessageBadge, sessionID: UUID) {
@@ -177,6 +198,7 @@ final class NativePushState {
     }
 
     func receive(_ content: PushContent?, tapped: Bool) -> Bool {
+        AppDiagnostics.record("notification.received", category: "push", fields: ["decoded": String(content != nil), "tapped": String(tapped)])
         eventRevision += 1
         guard let content else {
             if tapped { navigationFailure = .local("push.unavailableNotification") }
@@ -211,8 +233,9 @@ final class NativePushState {
             defer { completion() }
             guard action == UNNotificationDefaultActionIdentifier else { return }
             let state = UIApplication.shared.applicationState.rawValue
-            AppDiagnostics.record("notification default action received; decoded=\(content != nil); applicationState=\(state)")
-            _ = receive(content, tapped: true)
+            AppDiagnostics.record("notification.defaultAction", category: "push", fields: ["decoded": String(content != nil), "applicationState": String(state)])
+            let suppress = receive(content, tapped: true)
+            AppDiagnostics.record("notification.processed", category: "push", fields: ["tapped": "true", "suppressed": String(suppress)])
         }
     }
 
@@ -270,6 +293,7 @@ final class NativePushState {
         do {
             try removeInvalidConnections(store)
         } catch {
+            _ = recordFailure(error)
             failure = .local("push.keychainUnavailable")
             return
         }
@@ -332,7 +356,7 @@ final class NativePushState {
             do {
                 try await self.notificationAccess.request()
                 self.authorization = await self.notificationAccess.status()
-            } catch { self.failure = .wrapping(error) }
+            } catch { self.failure = self.recordFailure(error) }
         }
     }
 
@@ -343,6 +367,7 @@ final class NativePushState {
     private var canContactGateway: Bool { gatewayRetryAt.map { $0 <= now() } ?? true }
 
     private func recordFailure(_ error: Error) -> BackendFailure {
+        AppDiagnostics.record(error, category: "push", operation: "push.failed")
         let value = BackendFailure.wrapping(error)
         if value.source == .pushGateway, let deadline = value.retryAt {
             gatewayRetryAt = max(gatewayRetryAt ?? deadline, deadline)
@@ -383,7 +408,7 @@ final class NativePushState {
             let remote = overview.subscriptions.first { $0.id == binding.id }
             if registrationStamps[binding.id] != stamp || remote == nil || remote?.enabled != binding.enabled || remote?.sms != binding.sms || remote?.reminders != binding.reminders || (remote?.calls ?? false) != binding.allowsCalls {
                 guard canContactGateway else { return }
-                _ = try await gateway.register(binding: binding, identity: identity)
+                _ = try await gateway.register(binding: binding, identity: identity, backendID: session.id)
                 try Task.checkCancellation()
                 guard let keyData = try persistence.read("key-" + binding.id, true) else { throw PushPayloadError.missingKey }
                 let key = try JSONDecoder().decode(PushDecryptionKey.self, from: keyData)
@@ -482,7 +507,7 @@ final class NativePushState {
         badgeTask = Task {
             guard !Task.isCancelled else { return }
             do { try await notificationAccess.setBadge(count) }
-            catch { if !Task.isCancelled { failure = .wrapping(error) } }
+            catch { if !Task.isCancelled { failure = recordFailure(error) } }
         }
     }
 }

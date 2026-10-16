@@ -19,9 +19,13 @@ struct BackendDetailView: View {
             Section("auth.title") {
                 LabeledContent("auth.status", value: NSLocalizedString("auth.\(session.authentication.rawValue)", comment: ""))
                 if session.authentication == .required {
-                    Button("auth.login", systemImage: "lock.open") { login = true }
-                        .disabled(session.isLoggingOut)
-                        .accessibilityIdentifier("loginBackend")
+                    if session.supportsBrowserLogin {
+                        BrowserLoginButton(session: session)
+                    } else {
+                        Button("auth.login", systemImage: "lock.open") { login = true }
+                            .disabled(session.isLoggingOut)
+                            .accessibilityIdentifier("loginBackend")
+                    }
                 }
                 if session.authentication == .authenticated {
                     AsyncActionButton { await session.logout() } label: { Text("auth.logout").foregroundStyle(.red) }
@@ -43,9 +47,6 @@ struct BackendDetailView: View {
                         LabeledContent(featureName(feature)) {
                             Text(features.contains(feature) ? "capabilities.supported" : "capabilities.unsupported")
                         }
-                    }
-                    ForEach(features.subtracting(["esimTransfer", "wifiCalling", "volte"]).sorted(), id: \.self) { feature in
-                        LabeledContent(featureName(feature), value: String(localized: "capabilities.supported"))
                     }
                 } else { Text("capabilities.notLoaded").foregroundStyle(Color.secondary) }
             }
@@ -103,15 +104,6 @@ struct AuthenticationView: View {
     var body: some View {
         NavigationStack {
             Form {
-                if session.supportsBrowserLogin {
-                    Section {
-                        AsyncActionButton { await session.loginWithBrowser() } label: {
-                            Label("auth.browserLogin", systemImage: "safari")
-                        }
-                        .disabled(session.isBrowserLogin)
-                        if session.isBrowserLogin { ProgressView() }
-                    }
-                }
                 if session.supportsOTP {
                 Section {
                     Text(session.configuration.name).font(.headline)

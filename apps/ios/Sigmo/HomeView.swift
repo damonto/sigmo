@@ -182,7 +182,7 @@ struct HomeView: View {
             selectedDevice = nil
             path = [destination]
         }
-        AppDiagnostics.record("notification navigation applied to active scene")
+        AppDiagnostics.record("notification.navigation.applied", category: "push")
     }
 }
 

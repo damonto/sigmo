@@ -197,6 +197,7 @@ final class CallAudio {
     }
 
     private func fail(_ error: BackendFailure) {
+        AppDiagnostics.record(error, category: "audio", operation: "audio.failed")
         stop()
         failure = error
         onFailure?(error)
@@ -249,13 +250,19 @@ final class CallAudio {
                     ?? session.availableInputs?.first { $0.portType == .builtInMic })
             }
             refreshRoutes()
-        } catch { failure = .wrapping(error) }
+        } catch {
+            AppDiagnostics.record(error, category: "audio", operation: "route.failed")
+            failure = .wrapping(error)
+        }
     }
 
     func selectMicrophone(_ id: String) {
         guard !local else { return }
         do { try AVAudioSession.sharedInstance().setPreferredInput(AVAudioSession.sharedInstance().availableInputs?.first { $0.uid == id }) }
-        catch { failure = .wrapping(error) }
+        catch {
+            AppDiagnostics.record(error, category: "audio", operation: "microphone.failed")
+            failure = .wrapping(error)
+        }
         refreshRoutes()
     }
 

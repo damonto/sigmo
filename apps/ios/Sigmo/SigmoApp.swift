@@ -16,6 +16,7 @@ struct SigmoApp: App {
                 .preferredColorScheme(AppLaunch.colorScheme)
                 .foregroundTask { await store.refreshAll() }
                 .onChange(of: scenePhase, initial: true) { _, phase in
+                    AppDiagnostics.record("scene.changed", fields: ["state": phase == .active ? "active" : phase == .background ? "background" : "inactive"])
                     appDelegate.calls.foreground = phase != .background
                     if phase != .active { appDelegate.calls.recordings.stopPlayback() }
                     store.setForeground(phase != .background)
@@ -23,7 +24,6 @@ struct SigmoApp: App {
                 .onChange(of: store.settings.backends.map(\.id), initial: true) { _, _ in
                     appDelegate.registerVoIPIfNeeded()
                 }
-                .task { AppDiagnostics.record("app launched") }
                 .task { await appDelegate.calls.run() }
                 .task { await appDelegate.calls.recordings.recover() }
                 .task(id: appDelegate.push.eventRevision) {
