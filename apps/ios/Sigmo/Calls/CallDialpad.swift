@@ -1,6 +1,11 @@
 import Contacts
 import SwiftUI
 
+struct CallDialpadRequest: Identifiable, Equatable {
+    let id = UUID()
+    var number = ""
+}
+
 struct CallDialpad: View {
     let line: CallLine
     let session: BackendSession
@@ -12,10 +17,11 @@ struct CallDialpad: View {
     @State private var accessPresented = false
     @State private var ussd: CallUSSD
 
-    init(line: CallLine, session: BackendSession, dial: @escaping (String) -> Void) {
+    init(line: CallLine, session: BackendSession, initialNumber: String = "", dial: @escaping (String) -> Void) {
         self.line = line
         self.session = session
         self.dial = dial
+        _number = State(initialValue: CallDigits.normalize(initialNumber))
         _ussd = State(initialValue: CallUSSD(session: session, line: line))
     }
 

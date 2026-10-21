@@ -1,6 +1,7 @@
 import AVFAudio
 import CallKit
 import Foundation
+import Intents
 import Observation
 
 @MainActor @Observable
@@ -22,12 +23,14 @@ final class CallsState {
         }
     }
     var callbackNumber: String?
+    private(set) var systemCallback: SystemCallbackRequest?
     let audio = CallAudio()
     let contacts: CallContacts
     let recordings: CallRecordings
     private(set) var clientID: String
     let store: BackendStore
     let system: CallKitBridge
+    @ObservationIgnored private let diagnostics: CallDiagnostics
     @ObservationIgnored private let fixtures: Bool
     private let demo: Bool
     private var demoStopped = false
@@ -42,6 +45,12 @@ final class CallsState {
         let id: UUID
         let task: Task<Void, Never>
     }
+    private struct CallbackRoutesFile: Codable {
+        static let currentVersion = 1
+
+        let version: Int
+        let routes: [String: CallbackRoute]
+    }
     @ObservationIgnored private var monitors: [MonitorKey: Monitor] = [:]
     @ObservationIgnored private var mediaTask: Task<Void, Never>?
     @ObservationIgnored private var mediaID: UUID?
@@ -53,16 +62,18 @@ final class CallsState {
     @ObservationIgnored private var reporting: Set<UUID> = [] {
         didSet { updatePlaybackAvailability() }
     }
-    @ObservationIgnored private var callbackRoutes: [String: [CallLine]] = [:]
+    @ObservationIgnored private var callbackRoutes: [String: CallbackRoute] = [:]
+    @ObservationIgnored private var callbackResolution: (requestID: UUID, destination: SystemCallbackDestination)?
 
     init(store: BackendStore, fixtures: Bool = false, demo: Bool = false, clientID: String? = nil, recordings: CallRecordings? = nil,
-         identity: PushPersistence = .keychain, contacts: CallContacts = CallContacts()) {
+         identity: PushPersistence = .keychain, contacts: CallContacts = CallContacts(), diagnostics: DiagnosticLogStore = AppDiagnostics.store) {
         self.demo = demo
         self.contacts = contacts
         self.store = store
         self.fixtures = fixtures || demo
         self.identity = identity
-        self.system = CallKitBridge(enabled: !fixtures && !demo)
+        self.diagnostics = CallDiagnostics(store: diagnostics)
+        self.system = CallKitBridge(enabled: !fixtures && !demo, diagnostics: diagnostics)
         self.recordings = recordings ?? CallRecordings(directory: (fixtures || demo) ? URL.temporaryDirectory.appending(path: "SigmoCalls-\(UUID())") : nil)
         self.clientID = clientID ?? (demo ? "demo-\(UUID().uuidString)" : fixtures ? "fixture-call-client" : "")
         restoreClientIdentity()
@@ -77,9 +88,15 @@ final class CallsState {
             self?.updatePlaybackAvailability()
         }
         audio.onFailure = { [weak self] error in self?.mediaFailed(error) }
-        audio.onReady = { [weak self] in self?.mediaAttempts = 0 }
+        audio.onReady = { [weak self] in
+            self?.diagnostics.record("call.media.ready", id: self?.mediaID)
+            self?.mediaAttempts = 0
+        }
         if let data = try? Data(contentsOf: self.recordings.directory.appending(path: "callback-routes.data")),
-           let routes = try? JSONDecoder().decode([String: [CallLine]].self, from: data) { callbackRoutes = routes }
+           let file = try? JSONDecoder().decode(CallbackRoutesFile.self, from: data),
+           file.version == CallbackRoutesFile.currentVersion {
+            callbackRoutes = file.routes
+        }
     }
 
     var primary: ActiveCall? {
@@ -132,18 +149,74 @@ final class CallsState {
             .filter { available($0) }.sorted { ($0.backendName, $0.label, $0.id) < ($1.backendName, $1.label, $1.id) }
     }
 
-    func callbackLine(for number: String) -> CallLine? {
-        let routes = callbackRoutes[CallDigits.normalize(number)] ?? []
-        guard routes.count == 1, let line = routes.first, available(line) else { return nil }
-        return line
+    @discardableResult
+    func requestCallback(_ intent: INStartCallIntent) -> Bool {
+        let contacts: [INPerson]
+        if let requested = intent.contacts, !requested.isEmpty {
+            contacts = requested
+        } else {
+            contacts = intent.callRecordToCallBack?.participants ?? []
+        }
+        // Sigmo supports one remote phone number per call.
+        guard intent.callCapability != .videoCall, contacts.count == 1,
+              let handle = contacts.first?.personHandle, handle.type == .phoneNumber,
+              let number = handle.value else { return false }
+        let normalized = CallDigits.normalize(number)
+        guard CallDigits.callable(normalized), !CallDigits.isService(normalized) else { return false }
+        guard systemCallback?.number != normalized else { return true }
+        // Keep the request until the root view has restored backend state and
+        // selected the appropriate dialing surface.
+        systemCallback = SystemCallbackRequest(number: normalized)
+        return true
     }
 
-    private func rememberRoute(number: String, line: CallLine) {
+    func callbackLine(for number: String) -> CallLine? {
+        guard let route = callbackRoutes[CallDigits.normalize(number)], available(route.line) else { return nil }
+        return route.line
+    }
+
+    func resolveSystemCallback(_ request: SystemCallbackRequest) async -> SystemCallbackDestination {
+        if let callbackResolution, callbackResolution.requestID == request.id { return callbackResolution.destination }
+        await store.refreshAll()
+        let destination = callbackDestination(for: request.number)
+        if systemCallback?.id == request.id { callbackResolution = (request.id, destination) }
+        return destination
+    }
+
+    func consumeSystemCallback(_ request: SystemCallbackRequest) {
+        guard systemCallback?.id == request.id else { return }
+        systemCallback = nil
+        callbackResolution = nil
+    }
+
+    private func callbackDestination(for number: String) -> SystemCallbackDestination {
+        guard let route = callbackRoutes[CallDigits.normalize(number)],
+              let session = store.sessions[route.line.backendID] else {
+            return .home(number: number, backendID: nil)
+        }
+        guard let modem = session.modems.first(where: { $0.id == route.line.modemID }) else {
+            return .home(number: number, backendID: session.id)
+        }
+        let line = CallLine(session: session, modem: modem)
+        guard session.configuration.address.absoluteString == route.line.address,
+              session.isOnline,
+              modem.sim.active,
+              modem.state != "locked",
+              modem.sim.identifier == route.line.profileID,
+              available(line) else {
+            return .modem(number: number, backendID: session.id, modemID: modem.id)
+        }
+        return .dial(number: number, line: line)
+    }
+
+    func rememberCallbackRoute(number: String, line: CallLine, startedAt: String) {
         let key = CallDigits.normalize(number)
-        guard callbackRoutes[key]?.contains(where: { $0.id == line.id && $0.address == line.address }) != true else { return }
-        callbackRoutes[key, default: []].append(line)
+        let route = CallbackRoute(line: line, startedAt: startedAt)
+        if let existing = callbackRoutes[key], existing.date > route.date { return }
+        callbackRoutes[key] = route
         do {
-            try JSONEncoder().encode(callbackRoutes).write(to: recordings.directory.appending(path: "callback-routes.data"), options: .atomic)
+            let file = CallbackRoutesFile(version: CallbackRoutesFile.currentVersion, routes: callbackRoutes)
+            try JSONEncoder().encode(file).write(to: recordings.directory.appending(path: "callback-routes.data"), options: .atomic)
         } catch { failure = .local("calls.callbackRouteNotSaved") }
     }
 
@@ -177,7 +250,7 @@ final class CallsState {
         presented = true
         failure = nil
         do { try await system.request(.start(id, normalized)) }
-        catch { finish(id, reason: .failed); failure = .wrapping(error) }
+        catch { finish(id, reason: .failed, cause: "start_request_failed"); failure = .wrapping(error) }
     }
 
     func answer(_ id: UUID, endCurrent: Bool = false) async {
@@ -212,6 +285,8 @@ final class CallsState {
     }
 
     private func perform(_ action: CallAction) async throws {
+        diagnostics.record("call.action.started", id: action.id,
+                           fields: ["action": action.diagnosticName, "waitingForBootstrap": String(bootstraps[action.id] != nil)])
         await bootstraps[action.id]?.value
         switch action {
         case .start, .answer:
@@ -221,7 +296,11 @@ final class CallsState {
             try Task.checkCancellation()
         default: break
         }
-        guard let call = calls[action.id] else { throw BackendFailure.local("calls.ended") }
+        guard let call = calls[action.id] else {
+            diagnostics.record("call.action.unavailable", id: action.id,
+                               fields: ["action": action.diagnosticName, "alreadyEnded": String(endedUUIDs[action.id] != nil)])
+            throw BackendFailure.local("calls.ended")
+        }
         do {
             let session = try session(for: call.line)
             guard access[call.id] == session.accessRevision else { throw BackendFailure.local("calls.lineUnavailable") }
@@ -266,13 +345,13 @@ final class CallsState {
                 if call.record != nil {
                     do { _ = try await update(call, CallUpdate(clientId: clientID, state: "ended", reason: call.record?.incoming == true ? "busy" : nil)) }
                     catch {
-                        if (error as? BackendFailure)?.code == "call_in_use" { finish(call.id, reason: .answeredElsewhere); return }
+                        if (error as? BackendFailure)?.code == "call_in_use" { finish(call.id, reason: .answeredElsewhere, cause: "other_owner"); return }
                         calls[call.id]?.endRequested = false
                         failure = .local("calls.endUnconfirmed")
                         throw error
                     }
                 }
-                finish(call.id, reason: .remoteEnded, report: false)
+                finish(call.id, reason: .remoteEnded, report: false, cause: "end_action")
             case .hold(_, let held):
                 guard call.ownsCall else { throw BackendFailure.local("calls.ended") }
                 let result = try await update(call, CallUpdate(clientId: clientID, hold: held ? "local" : "none"))
@@ -288,6 +367,7 @@ final class CallsState {
                 }
             }
         } catch {
+            diagnostics.record("call.action.failed", id: action.id, fields: ["action": action.diagnosticName], error: error)
             if Task.isCancelled {
                 switch action {
                 case .hold, .digits, .mute: throw CancellationError()
@@ -296,8 +376,8 @@ final class CallsState {
             }
             calls[call.id]?.answering = false
             calls[call.id]?.failure = .wrapping(error)
-            if case .answer = action { finish(call.id, reason: (error as? BackendFailure)?.code == "call_in_use" ? .answeredElsewhere : .failed) }
-            if case .start = action { finish(call.id, reason: .failed) }
+            if case .answer = action { finish(call.id, reason: (error as? BackendFailure)?.code == "call_in_use" ? .answeredElsewhere : .failed, cause: "answer_failed") }
+            if case .start = action { finish(call.id, reason: .failed, cause: "start_failed") }
             failure = failure ?? .wrapping(error)
             throw error
         }
@@ -306,13 +386,19 @@ final class CallsState {
     private func update(_ call: ActiveCall, _ change: CallUpdate) async throws -> CallRecord {
         let session = try session(for: call.line)
         guard let id = call.record?.id else { throw BackendFailure.local("calls.ended") }
+        diagnostics.record("call.update.started", id: call.id,
+                           fields: ["backendID": call.line.backendID.uuidString, "operation": change.state == "active" ? "answer" : change.state == "ended" ? "end" : "hold"])
         do {
-            return try await session.callRequest { api, token in try await api.updateCall(modemID: call.line.modemID, id: id, update: change, token: token) }
+            let record = try await session.callRequest { api, token in try await api.updateCall(modemID: call.line.modemID, id: id, update: change, token: token) }
+            diagnostics.record("call.update.completed", id: call.id, fields: CallDiagnostics.snapshot(record, clientID: clientID))
+            return record
         } catch {
+            diagnostics.record("call.update.failed", id: call.id, error: error)
             let failure = BackendFailure.wrapping(error)
             guard failure.isNetwork || (failure.status ?? 0) >= 500 || failure.status == 408 else { throw error }
             // A dropped response is not permission to replay a carrier action.
             guard let latest = try? await session.callRequest({ api, token in try await api.call(modemID: call.line.modemID, id: id, token: token) }) else { throw error }
+            diagnostics.record("call.update.reconciled", id: call.id, fields: CallDiagnostics.snapshot(latest, clientID: clientID))
             if change.state == "ended", latest.terminal { return latest }
             if latest.ownerClientId == clientID {
                 if change.state == "active", latest.connected { return latest }
@@ -323,7 +409,7 @@ final class CallsState {
         }
     }
 
-    func ingest(_ record: CallRecord, line: CallLine, id suppliedID: UUID? = nil) {
+    func ingest(_ record: CallRecord, line: CallLine, id suppliedID: UUID? = nil, source: String = #function) {
         guard !demoStopped, record.profileId == line.profileID, available(line),
               record.backendId?.isEmpty == false, let recordID = record.callUUID.flatMap(UUID.init(uuidString:)) else { return }
         let key = CallIdentity(record, line: line)
@@ -342,8 +428,13 @@ final class CallsState {
         if let old = calls[id]?.record {
             guard record.supersedes(old), old != record else { return }
         }
+        var snapshot = CallDiagnostics.snapshot(record, clientID: clientID)
+        snapshot["backendID"] = line.backendID.uuidString
+        snapshot["source"] = source
+        snapshot["previousState"] = calls[id]?.record.map { CallDiagnostics.snapshot($0, clientID: clientID)["state"] ?? "other" } ?? "none"
+        diagnostics.record("call.state.changed", id: id, fields: snapshot)
         if record.ownerClientId?.isEmpty == false && record.ownerClientId != clientID {
-            finish(id, reason: .answeredElsewhere)
+            finish(id, reason: .answeredElsewhere, cause: "other_owner")
             return
         }
         revision += 1
@@ -352,11 +443,13 @@ final class CallsState {
                 failure = BackendFailure(code: "call_failed", message: record.reason.isEmpty ? record.stateLabel : record.reasonLabel)
             }
             ended[key] = .now
-            finish(id, reason: record.state == "failed" ? .failed : .remoteEnded)
+            finish(id, reason: record.state == "failed" ? .failed : .remoteEnded, cause: "backend_terminal")
             return
         }
         guard calls[id] != nil || bootstraps[id] == nil else { return }
-        if record.incoming || record.ownerClientId == clientID { rememberRoute(number: record.number, line: line) }
+        if record.incoming || record.ownerClientId == clientID {
+            rememberCallbackRoute(number: record.number, line: line, startedAt: record.startedAt)
+        }
         if calls[id] == nil {
             if record.incoming {
                 guard Date().timeIntervalSince(record.date) < 90 else { return }
@@ -369,14 +462,14 @@ final class CallsState {
                 Task { [weak self] in
                     guard let self else { return }
                     do { try await self.system.request(.start(id, record.number)) }
-                    catch { self.finish(id, reason: .failed); self.failure = .wrapping(error) }
+                    catch { self.finish(id, reason: .failed, cause: "restore_request_failed"); self.failure = .wrapping(error) }
                 }
             }
             return
         }
         calls[id]?.record = record
         if !record.incoming, record.ownerClientId != clientID {
-            finish(id, reason: .answeredElsewhere)
+            finish(id, reason: .answeredElsewhere, cause: "not_incoming_or_other_owner")
             return
         }
         if record.ownerClientId == clientID { calls[id]?.ownsCall = true }
@@ -395,7 +488,7 @@ final class CallsState {
         system.incoming(id: id, number: call.number, name: name(call)) { [weak self] accepted in
             Task { @MainActor in
                 self?.reporting.remove(id)
-                if !accepted { self?.finish(id, reason: .unanswered, report: false) }
+                if !accepted { self?.finish(id, reason: .unanswered, report: false, cause: "incoming_report_rejected") }
             }
         }
     }
@@ -403,18 +496,21 @@ final class CallsState {
     @discardableResult
     func receivePush(content: PushContent?, id: UUID, connection: BackendConfiguration?, completion: @escaping @Sendable () -> Void) -> Task<Void, Never>? {
         let duplicate = calls[id] != nil || reporting.contains(id) || bootstraps[id] != nil
-        let valid = content?.callUUID.flatMap(UUID.init(uuidString:)) == id
-            && content?.kind == "call" && endedUUIDs[id] == nil
-            && (content?.expiresAt ?? 0) > Int64(Date().timeIntervalSince1970)
-            && connection != nil && content?.callId?.isEmpty == false
-            && content?.modemId?.isEmpty == false && content?.profileId?.isEmpty == false
-        AppDiagnostics.record("voip.received", category: "push", fields: ["valid": String(valid), "duplicate": String(duplicate)])
+        let issues = CallDiagnostics.validationIssues(content: content, id: id, connection: connection, ended: endedUUIDs[id] != nil)
+        let valid = issues.isEmpty
+        let started = ContinuousClock.now
+        let diagnostics = diagnostics
+        var fields = ["valid": String(valid), "duplicate": String(duplicate), "validationIssues": issues.joined(separator: ",")]
+        fields["backendID"] = connection?.id.uuidString
+        if let expiry = content?.expiresAt { fields["expiresAt"] = String(expiry) }
+        diagnostics.record("voip.received", id: id, category: "push", fields: fields)
         // Even an expired or undecryptable VoIP invitation is reported before
         // asynchronous work. Reporting the same UUID makes duplicate delivery safe.
         let result = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
         if !duplicate { reporting.insert(id) }
         system.incoming(id: id, number: valid ? content?.sender ?? "" : "", name: nil) { accepted in
-            AppDiagnostics.record("voip.reported", category: "push", fields: ["accepted": String(accepted)])
+            diagnostics.record("voip.reported", id: id, category: "push",
+                               fields: ["accepted": String(accepted), "durationMS": CallDiagnostics.durationMS(since: started)])
             completion()
             result.continuation.yield(accepted)
             result.continuation.finish()
@@ -428,50 +524,72 @@ final class CallsState {
             var accepted = false
             for await value in result.stream { accepted = value }
             guard accepted else { return }
-            guard valid, let content, let connection else { self.endInvitation(id, reason: .failed); return }
+            guard valid, let content, let connection else { self.endInvitation(id, reason: .failed, cause: "invalid_push"); return }
+            var phase = "restore_identity"
             do {
+                diagnostics.record("voip.bootstrap.started", id: id, category: "push", fields: ["backendID": connection.id.uuidString])
                 self.restoreClientIdentity()
+                phase = "resolve_session"
                 guard let session = self.store.sessions[connection.id], session.configuration.address == connection.address else { throw BackendFailure.local("calls.lineUnavailable") }
+                phase = "refresh_session"
                 if !session.canAccessDevices || !session.hasLoadedModems { await session.refresh(force: true) }
                 let revision = session.accessRevision
+                phase = "resolve_line"
                 guard let modem = session.modems.first(where: { $0.id == content.modemId && $0.sim.identifier == content.profileId }) else { throw BackendFailure.local("calls.lineUnavailable") }
                 let line = CallLine(session: session, modem: modem)
+                phase = "fetch_snapshot"
+                diagnostics.record("voip.snapshot.started", id: id, category: "push", fields: ["backendID": connection.id.uuidString])
                 let record = try await session.callRequest { api, token in try await api.call(modemID: modem.id, id: content.callId ?? "", token: token) }
+                var snapshot = CallDiagnostics.snapshot(record, clientID: self.clientID)
+                snapshot["backendID"] = connection.id.uuidString
+                snapshot["durationMS"] = CallDiagnostics.durationMS(since: started)
+                diagnostics.record("voip.snapshot.received", id: id, category: "push", fields: snapshot)
+                phase = "validate_snapshot"
+                diagnostics.record("voip.snapshot.validated", id: id, category: "push", fields: [
+                    "backendMatches": String(record.backendId == content.backendId),
+                    "profileMatches": String(record.profileId == line.profileID),
+                    "uuidMatches": String(record.callUUID.flatMap(UUID.init(uuidString:)) == id)
+                ])
                 guard record.backendId == content.backendId, record.profileId == line.profileID,
                       record.callUUID.flatMap(UUID.init(uuidString:)) == id else { throw BackendFailure.local("calls.ended") }
                 try Task.checkCancellation()
                 _ = try self.session(for: line)
                 guard session === self.store.sessions[connection.id], session.accessRevision == revision,
                       self.available(line) else { throw BackendFailure.local("calls.lineUnavailable") }
-                guard self.endedUUIDs[id] == nil else { self.endInvitation(id, reason: .remoteEnded); return }
-                if record.terminal { self.endInvitation(id, reason: record.state == "failed" ? .failed : .remoteEnded); return }
+                guard self.endedUUIDs[id] == nil else { self.endInvitation(id, reason: .remoteEnded, cause: "already_ended"); return }
+                if record.terminal { self.endInvitation(id, reason: record.state == "failed" ? .failed : .remoteEnded, cause: "backend_terminal"); return }
                 if !record.incoming || (record.ownerClientId?.isEmpty == false && record.ownerClientId != self.clientID) {
-                    self.endInvitation(id, reason: .answeredElsewhere)
+                    self.endInvitation(id, reason: .answeredElsewhere, cause: "not_incoming_or_other_owner")
                     return
                 }
                 guard (content.expiresAt ?? 0) > Int64(Date().timeIntervalSince1970) else {
-                    self.endInvitation(id, reason: .unanswered)
+                    self.endInvitation(id, reason: .unanswered, cause: "push_expired")
                     return
                 }
                 self.calls[id] = ActiveCall(id: id, line: line, record: record, number: record.number, ownsCall: false)
                 self.access[id] = revision
-                self.rememberRoute(number: record.number, line: line)
+                self.rememberCallbackRoute(number: record.number, line: line, startedAt: record.startedAt)
                 self.updateSystemLabels()
                 self.reconcileMonitors()
-                AppDiagnostics.record("voip.processed", category: "push", fields: ["backendID": connection.id.uuidString])
+                diagnostics.record("voip.processed", id: id, category: "push",
+                                   fields: ["backendID": connection.id.uuidString, "durationMS": CallDiagnostics.durationMS(since: started)])
                 Task { [weak self] in await self?.reloadContacts() }
             } catch {
-                AppDiagnostics.record(error, category: "push", operation: "voip.processing.failed", backendID: connection.id)
+                diagnostics.record("voip.processing.failed", id: id, category: "push",
+                                   fields: ["backendID": connection.id.uuidString, "phase": phase, "durationMS": CallDiagnostics.durationMS(since: started)], error: error)
                 guard !Task.isCancelled else { return }
-                self.endInvitation(id, reason: .failed)
+                self.endInvitation(id, reason: .failed, cause: "bootstrap_failed")
                 self.failure = .wrapping(error)
             }
         }
         return bootstraps[id]
     }
 
-    private func endInvitation(_ id: UUID, reason: CXCallEndedReason) {
-        AppDiagnostics.record("voip.ended", category: "push", fields: ["reason": String(reason.rawValue)])
+    private func endInvitation(_ id: UUID, reason: CXCallEndedReason, cause: String, source: String = #function) {
+        var fields = CallDiagnostics.ending(reason)
+        fields["cause"] = cause
+        fields["source"] = source
+        diagnostics.record("voip.ended", id: id, category: "push", fields: fields)
         endedUUIDs[id] = .now
         system.ended(id, reason: reason)
     }
@@ -554,14 +672,14 @@ final class CallsState {
                 guard calls[call.id] != nil else { continue }
                 ingest(latest, line: call.line, id: call.id)
                 calls[call.id]?.failure = nil
-                if latest.incoming, Date().timeIntervalSince(latest.date) > 60 { finish(call.id, reason: .unanswered) }
+                if latest.incoming, Date().timeIntervalSince(latest.date) > 60 { finish(call.id, reason: .unanswered, cause: "incoming_timeout") }
             } catch {
                 guard !Task.isCancelled else { return }
                 let failure = BackendFailure.wrapping(error)
                 let session = try? session(for: call.line)
                 let accessChanged = session == nil || access[call.id] != session?.accessRevision
                 let missing = failure.source == .backend && failure.status == 404 && failure.code == "call_not_found"
-                if accessChanged || missing { finish(call.id, reason: .failed) }
+                if accessChanged || missing { finish(call.id, reason: .failed, cause: accessChanged ? "access_changed" : "call_not_found") }
                 else {
                     // A failed observation does not prove that the carrier call ended.
                     // Keep media and identity so the next event/read can recover it.
@@ -575,6 +693,7 @@ final class CallsState {
         guard mediaID != id, let call = calls[id], let record = call.record, record.hasMedia else { return }
         stopMedia()
         mediaID = id
+        diagnostics.record("call.media.started", id: id, fields: ["attempt": String(mediaAttempts + 1)])
         if fixtures {
             audio.startLocal()
             updateAudioInput()
@@ -596,9 +715,10 @@ final class CallsState {
 
     private func mediaFailed(_ error: BackendFailure) {
         guard let id = mediaID else { return }
+        diagnostics.record("call.media.failed", id: id, fields: ["attempt": String(mediaAttempts + 1)], error: error)
         stopMedia()
         mediaAttempts += 1
-        if error.code == "call_in_use" { finish(id, reason: .answeredElsewhere); return }
+        if error.code == "call_in_use" { finish(id, reason: .answeredElsewhere, cause: "media_other_owner"); return }
         guard mediaAttempts <= 2 else { failure = error; Task { [weak self] in await self?.act(.end(id)) }; return }
         mediaTask = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(1)) } catch { return }
@@ -626,13 +746,25 @@ final class CallsState {
         updateSystemLabels()
     }
 
-    private func stopMedia() { mediaTask?.cancel(); mediaTask = nil; mediaID = nil; audio.stop() }
+    private func stopMedia() {
+        if let id = mediaID { diagnostics.record("call.media.stopped", id: id) }
+        mediaTask?.cancel(); mediaTask = nil; mediaID = nil; audio.stop()
+    }
 
-    private func finish(_ id: UUID, reason: CXCallEndedReason, report: Bool = true) {
+    private func finish(_ id: UUID, reason: CXCallEndedReason, report: Bool = true, cause: String, source: String = #function) {
         guard let call = calls.removeValue(forKey: id) else {
-            if bootstraps[id] != nil || reporting.contains(id) { endInvitation(id, reason: reason) }
+            if bootstraps[id] != nil || reporting.contains(id) { endInvitation(id, reason: reason, cause: cause, source: source) }
             return
         }
+        // Keep the final state and timestamps within the log store's 16-field
+        // limit. Routing/hold details are already in the state-change events.
+        var fields = call.record.map { CallDiagnostics.snapshot($0, clientID: clientID).filter { !["direction", "route", "hold"].contains($0.key) } } ?? [:]
+        fields.merge(CallDiagnostics.ending(reason)) { _, new in new }
+        fields["backendID"] = call.line.backendID.uuidString
+        fields["cause"] = cause
+        fields["source"] = source
+        fields["reportToCallKit"] = String(report)
+        diagnostics.record("call.finished", id: id, fields: fields)
         endedUUIDs[id] = .now
         if let uuid = call.record?.callUUID.flatMap(UUID.init(uuidString:)) { endedUUIDs[uuid] = .now }
         if let record = call.record { ended[CallIdentity(record, line: call.line)] = .now }
@@ -671,7 +803,7 @@ final class CallsState {
         systemAudioActive = false
         for call in Array(calls.values) {
             let revision = access[call.id]
-            finish(call.id, reason: .failed, report: false)
+            finish(call.id, reason: .failed, report: false, cause: "provider_reset")
             Task { [weak self] in
                 guard let self, let session = try? self.session(for: call.line), session.accessRevision == revision else { return }
                 do { _ = try await self.update(call, CallUpdate(clientId: self.clientID, state: "ended")) }

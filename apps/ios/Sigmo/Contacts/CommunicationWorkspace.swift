@@ -7,7 +7,7 @@ private struct BackendContactDraft: Identifiable {
 }
 
 private enum CommunicationCreation {
-    case contact, importContact, message, call
+    case contact, importContact, message, call(CommunicationDialRequest?)
 }
 
 struct CommunicationWorkspace: View {
@@ -26,6 +26,7 @@ struct CommunicationWorkspace: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let section: CommunicationSection
     let modemID: String?
+    @Binding private var callbackDial: CommunicationDialRequest?
     @State private var state: CommunicationOverviewState
     @State private var editor: BackendContactDraft?
     @State private var importSession: BackendSession?
@@ -36,13 +37,16 @@ struct CommunicationWorkspace: View {
     @State private var selectedCall: CommunicationRecord<CallRecord>?
     @State private var selectedContact: CommunicationRecord<SigmoContact>?
 
-    init(session: BackendSession, section: CommunicationSection, modemID: String? = nil) {
-        self.init(sessions: [session], section: section, modemID: modemID)
+    init(session: BackendSession, section: CommunicationSection, modemID: String? = nil,
+         callbackDial: Binding<CommunicationDialRequest?> = .constant(nil)) {
+        self.init(sessions: [session], section: section, modemID: modemID, callbackDial: callbackDial)
     }
 
-    init(sessions: [BackendSession], section: CommunicationSection, modemID: String? = nil) {
+    init(sessions: [BackendSession], section: CommunicationSection, modemID: String? = nil,
+         callbackDial: Binding<CommunicationDialRequest?> = .constant(nil)) {
         self.section = section
         self.modemID = modemID
+        _callbackDial = callbackDial
         _state = State(initialValue: CommunicationOverviewState(sessions: sessions, section: section))
     }
 
@@ -104,6 +108,7 @@ struct CommunicationWorkspace: View {
             Button("common.cancel", role: .cancel) { creation = nil }
         }
         .detailErrorAlert($state.failure)
+        .task(id: callbackDial?.id) { applyCallbackDial() }
         .foregroundTask(id: refreshIdentity) {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             await state.load(automatic: true)
@@ -288,7 +293,7 @@ struct CommunicationWorkspace: View {
             }
             .accessibilityIdentifier("modem-contact-actions")
         } else {
-            Button { begin(section == .calls ? .call : .message) } label: {
+            Button { begin(section == .calls ? .call(nil) : .message) } label: {
                 Label(section == .calls ? LocalizedStringKey("communication.dial") : LocalizedStringKey("communication.newMessage"), systemImage: section == .calls ? "circle.grid.3x3.fill" : "square.and.pencil")
             }
         }
@@ -310,8 +315,30 @@ struct CommunicationWorkspace: View {
             editor = BackendContactDraft(session: session, draft: ContactDraft(contact: SigmoContact()))
         case .importContact:
             importSession = session
-        case .message, .call:
-            action = BackendCommunicationAction(session: session, action: CommunicationAction(number: "", calling: operation == .call, modemID: modemID))
+        case .message:
+            action = BackendCommunicationAction(session: session, action: CommunicationAction(number: "", modemID: modemID))
+        case .call(let request):
+            action = BackendCommunicationAction(
+                session: session,
+                action: CommunicationAction(number: request?.number ?? "", calling: true, modemID: request?.modemID ?? modemID)
+            )
+        }
+    }
+
+    private func applyCallbackDial() {
+        guard section == .calls, let request = callbackDial else { return }
+        callbackDial = nil
+
+        if let backendID = request.backendID,
+           let session = state.creationSessions.first(where: { $0.id == backendID }) {
+            create(.call(request), session: session)
+            return
+        }
+        let sessions = state.creationSessions
+        if sessions.count == 1, let session = sessions.first {
+            create(.call(request), session: session)
+        } else if !sessions.isEmpty {
+            creation = .call(request)
         }
     }
 }

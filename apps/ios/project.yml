@@ -42,6 +42,8 @@ targets:
       - package: PhoneNumberKit
       - target: SigmoNotificationService
         embed: true
+      - target: SigmoIntents
+        embed: true
     entitlements:
       path: .generated/Sigmo.entitlements
       properties:
@@ -53,6 +55,7 @@ targets:
         keychain-access-groups:
           - $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID)
           - $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID).push
+        com.apple.developer.siri: true
     info:
       path: .generated/Info.plist
       properties:
@@ -74,6 +77,7 @@ targets:
         NSCameraUsageDescription: Scan an eSIM activation QR code to install a profile on your Sigmo modem.
         NSMicrophoneUsageDescription: Use your microphone for calls through your Sigmo modem.
         NSContactsUsageDescription: Choose phone numbers and show caller names for your Sigmo calls.
+        NSSiriUsageDescription: Start calls through your Sigmo modem when you choose a previous call in Recents.
         UIBackgroundModes:
           - audio
           - voip
@@ -121,6 +125,29 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(SIGMO_BUNDLE_ID).NotificationService
+        APPLICATION_EXTENSION_API_ONLY: YES
+        GENERATE_INFOPLIST_FILE: YES
+        SKIP_INSTALL: YES
+  SigmoIntents:
+    type: app-extension
+    platform: iOS
+    sources:
+      - SigmoIntents
+    info:
+      path: .generated/Intents-Info.plist
+      properties:
+        CFBundleDisplayName: Sigmo Intents
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.intents-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).IntentHandler
+          NSExtensionAttributes:
+            IntentsSupported:
+              - INStartCallIntent
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(SIGMO_BUNDLE_ID).Intents
         APPLICATION_EXTENSION_API_ONLY: YES
         GENERATE_INFOPLIST_FILE: YES
         SKIP_INSTALL: YES

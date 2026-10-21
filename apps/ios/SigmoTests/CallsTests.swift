@@ -1,4 +1,5 @@
 import AVFAudio
+import Intents
 import XCTest
 @testable import Sigmo
 
@@ -6,6 +7,7 @@ import XCTest
 final class CallsTests: XCTestCase {
     private func setup(_ fixture: CallsFixture, playback: CallRecordingPlayer = CallRecordingPlayer(),
                        recordings: CallRecordings? = nil,
+                       diagnostics: DiagnosticLogStore = AppDiagnostics.store,
                        socketOpened: (@Sendable (URLRequest) -> Void)? = nil,
                        afterResponse: (@Sendable (URLRequest) async -> Void)? = nil) async throws -> (CallsState, BackendSession, CallLine) {
         let directory = URL.temporaryDirectory.appending(path: "CallTests-\(UUID())")
@@ -25,8 +27,41 @@ final class CallsTests: XCTestCase {
         await session.refresh(force: true)
         let line = CallLine(session: session, modem: try XCTUnwrap(session.modems.first))
         let calls = CallsState(store: store, fixtures: true,
-            recordings: recordings ?? CallRecordings(directory: directory.appending(path: "recordings"), playback: playback))
+            recordings: recordings ?? CallRecordings(directory: directory.appending(path: "recordings"), playback: playback), diagnostics: diagnostics)
         return (calls, session, line)
+    }
+
+    func testEndedPushSnapshotLogsTheBackendStateAndExplicitEndCause() async throws {
+        let directory = URL.temporaryDirectory.appending(path: "CallPushDiagnostics-\(UUID())")
+        let diagnostics = DiagnosticLogStore(directory: directory, defaults: nil)
+        addTeardownBlock { try FileManager.default.removeItem(at: directory) }
+        await diagnostics.setEnabled(true)
+        let fixture = CallsFixture()
+        let (calls, session, line) = try await setup(fixture, diagnostics: diagnostics)
+        let record = CallsFixture.record("terminal-push", state: "ended", direction: "incoming", owner: "")
+        try await fixture.publish(record)
+        let id = try XCTUnwrap(record.callUUID.flatMap(UUID.init(uuidString:)))
+        let content = PushContent(kind: "call", backendId: CallsFixture.backend, backendName: "Home",
+                                  modemId: line.modemID, profileId: line.profileID, sender: record.number,
+                                  callId: record.id, callUUID: record.callUUID, expiresAt: Int64(Date.now.timeIntervalSince1970) + 45)
+        let recovery = try XCTUnwrap(calls.receivePush(content: content, id: id, connection: session.configuration) {})
+        await recovery.value
+        let events = try diagnosticEvents(await diagnostics.snapshot())
+        let snapshot = try XCTUnwrap(events.first { $0.event == "voip.snapshot.received" })
+        XCTAssertEqual(snapshot.fields["callUUID"], id.uuidString)
+        XCTAssertEqual(snapshot.fields["state"], "ended")
+        XCTAssertEqual(snapshot.fields["backendReason"], "normal")
+        let validation = try XCTUnwrap(events.first { $0.event == "voip.snapshot.validated" })
+        XCTAssertEqual(validation.fields["uuidMatches"], "true")
+        XCTAssertEqual(snapshot.fields["endedAt"], record.endedAt)
+        let ending = try XCTUnwrap(events.first { $0.event == "voip.ended" })
+        XCTAssertEqual(ending.fields["callUUID"], id.uuidString)
+        XCTAssertEqual(ending.fields["cause"], "backend_terminal")
+        XCTAssertEqual(ending.fields["endReason"], "remote_ended")
+        XCTAssertFalse(events.contains { $0.event == "voip.processed" })
+        XCTAssertFalse(calls.hasCall)
+        let updates = await fixture.count(method: "PATCH", suffix: "/calls/terminal-push")
+        XCTAssertEqual(updates, 0)
     }
 
     func testRecordingRequestDoesNotFollowANewCallDuringIndexLoading() async throws {
@@ -463,7 +498,7 @@ final class CallsTests: XCTestCase {
         calls.ingest(first, line: firstLine)
         calls.ingest(other, line: secondLine)
         XCTAssertEqual(calls.calls.count, 2)
-        XCTAssertNil(calls.callbackLine(for: "10086"))
+        XCTAssertEqual(calls.callbackLine(for: "10086"), secondLine)
         first.state = "ended"
         calls.ingest(first, line: firstLine)
         XCTAssertEqual(calls.calls.count, 1)
@@ -682,6 +717,189 @@ final class CallsTests: XCTestCase {
         XCTAssertEqual(sent, 1)
         XCTAssertFalse(calls.hasCall)
         XCTAssertEqual(ussd.failure?.code, "calls.ussdUnconfirmed")
+    }
+
+    private func callbackPerson(_ number: String, type: INPersonHandleType = .phoneNumber) -> INPerson {
+        INPerson(personHandle: INPersonHandle(value: number, type: type),
+                 nameComponents: nil, displayName: nil, image: nil, contactIdentifier: nil, customIdentifier: nil)
+    }
+
+    private func callbackLine(backendID: UUID, modemID: String, profileID: String, address: String) -> CallLine {
+        CallLine(backendID: backendID, modemID: modemID, profileID: profileID,
+                 backendName: "Home", label: "Line", region: "CN", address: address)
+    }
+
+    private func callbackIntent(contacts: [INPerson]? = nil, record: INCallRecord? = nil,
+                                capability: INCallCapability = .audioCall) -> INStartCallIntent {
+        INStartCallIntent(callRecordFilter: nil, callRecordToCallBack: record,
+                          audioRoute: .unknown, destinationType: .normal, contacts: contacts, callCapability: capability)
+    }
+
+    func testSystemCallbackQueuesTheNumberBeforeDialing() async throws {
+        let fixture = CallsFixture()
+        let (calls, _, _) = try await setup(fixture)
+        let person = callbackPerson("+86 (138) 0013-8000")
+        var callbackID: UUID?
+        for capability in [INCallCapability.audioCall, .unknown] {
+            calls.requestCallback(callbackIntent(contacts: [person], capability: capability))
+            XCTAssertEqual(calls.systemCallback?.number, "+8613800138000")
+            if let callbackID {
+                XCTAssertEqual(calls.systemCallback?.id, callbackID, "Repeated activities must reuse the pending request")
+            } else {
+                callbackID = calls.systemCallback?.id
+            }
+        }
+        XCTAssertNil(calls.callbackNumber)
+        XCTAssertFalse(calls.hasCall, "Receiving the activity must wait for callback line validation")
+        let writes = await fixture.count(method: "POST", suffix: "/calls")
+        XCTAssertEqual(writes, 0)
+    }
+
+    func testSystemCallbackUsesMissedCallRecordWithoutContacts() async throws {
+        let (calls, _, _) = try await setup(CallsFixture())
+        let record = INCallRecord(identifier: "missed-call", caller: callbackPerson("10086"),
+                                  callRecordType: .missed, callCapability: .audioCall)
+        let contactsOptions: [[INPerson]?] = [nil, []]
+        for contacts in contactsOptions {
+            calls.requestCallback(callbackIntent(contacts: contacts, record: record))
+            XCTAssertEqual(calls.systemCallback?.number, "10086")
+        }
+    }
+
+    func testSystemCallbackRejectsMissingNumbersAndServiceCodes() async throws {
+        let (calls, _, _) = try await setup(CallsFixture())
+        calls.requestCallback(callbackIntent(contacts: [callbackPerson("10086")]))
+        let invalid = [callbackIntent(), callbackIntent(contacts: [])]
+        for intent in invalid {
+            calls.requestCallback(intent)
+            XCTAssertEqual(calls.systemCallback?.number, "10086")
+        }
+        for number in ["", "Unknown", "+", "12+34", " *123#", "#31#10086", String(repeating: "1", count: 129)] {
+            let person = callbackPerson(number)
+            calls.requestCallback(callbackIntent(contacts: [person]))
+            XCTAssertEqual(calls.systemCallback?.number, "10086", "Invalid activities must not replace a pending callback")
+        }
+        XCTAssertFalse(calls.hasCall)
+    }
+
+    func testSystemCallbackRejectsMultipleContactsNonPhoneHandlesAndVideo() async throws {
+        let fixture = CallsFixture()
+        let (calls, _, _) = try await setup(fixture)
+        let person = callbackPerson("10086")
+        let unsupported = [
+            callbackIntent(contacts: [person, callbackPerson("10010")]),
+            callbackIntent(contacts: [callbackPerson("user1234@example.com", type: .emailAddress)]),
+            callbackIntent(contacts: [callbackPerson("user1234", type: .unknown)]),
+            callbackIntent(contacts: [person], capability: .videoCall),
+        ]
+        calls.requestCallback(callbackIntent(contacts: [callbackPerson("10000")]))
+        for intent in unsupported {
+            calls.requestCallback(intent)
+            XCTAssertEqual(calls.systemCallback?.number, "10000", "Unsupported intents must not change a pending callback")
+        }
+        XCTAssertFalse(calls.hasCall)
+        let writes = await fixture.count(method: "POST", suffix: "/calls")
+        XCTAssertEqual(writes, 0)
+    }
+
+    func testSystemCallbackRestoresOriginalLineAfterRelaunch() async throws {
+        let fixture = CallsFixture()
+        let (calls, _, line) = try await setup(fixture)
+        await calls.dial(number: "10086", line: line)
+        await calls.act(.end(try XCTUnwrap(calls.primary?.id)))
+        calls.store.reloadConfiguration()
+        let restored = CallsState(store: calls.store, fixtures: true, recordings: calls.recordings)
+        restored.requestCallback(callbackIntent(contacts: [callbackPerson("10086")]))
+        XCTAssertFalse(restored.hasCall)
+        let request = try XCTUnwrap(restored.systemCallback)
+        guard case .dial(let number, let restoredLine) = await restored.resolveSystemCallback(request) else {
+            return XCTFail("A complete saved route must dial directly")
+        }
+        XCTAssertEqual(restoredLine, line)
+        restored.consumeSystemCallback(request)
+        XCTAssertNil(restored.systemCallback)
+        await restored.dial(number: number, line: restoredLine)
+        XCTAssertEqual(restored.primary?.number, "10086")
+        let writes = await fixture.count(method: "POST", suffix: "/calls")
+        XCTAssertEqual(writes, 2, "Each user dial must create exactly one backend call")
+        await restored.act(.end(try XCTUnwrap(restored.primary?.id)))
+    }
+
+    func testSystemCallbackWithoutSavedRouteUsesHomeDialer() async throws {
+        let (calls, _, _) = try await setup(CallsFixture())
+        calls.requestCallback(callbackIntent(contacts: [callbackPerson("10086")]))
+        let request = try XCTUnwrap(calls.systemCallback)
+        guard case .home(let number, let backendID) = await calls.resolveSystemCallback(request) else {
+            return XCTFail("A callback without a saved route must use the home dialer")
+        }
+        XCTAssertEqual(number, "10086")
+        XCTAssertNil(backendID)
+    }
+
+    func testSystemCallbackMissingBackendOrModemUsesHomeDialer() async throws {
+        let (calls, _, line) = try await setup(CallsFixture())
+        let removedBackend = UUID()
+        let missingBackendRoute = callbackLine(
+            backendID: removedBackend, modemID: line.modemID, profileID: line.profileID, address: line.address
+        )
+        calls.rememberCallbackRoute(number: "10086", line: missingBackendRoute, startedAt: Date.now.ISO8601Format())
+        calls.requestCallback(callbackIntent(contacts: [callbackPerson("10086")]))
+        let firstRequest = try XCTUnwrap(calls.systemCallback)
+        guard case .home(let number, let backendID) = await calls.resolveSystemCallback(firstRequest) else {
+            return XCTFail("A removed backend must use the home dialer")
+        }
+        XCTAssertEqual(number, "10086")
+        XCTAssertNil(backendID)
+        calls.consumeSystemCallback(firstRequest)
+
+        let missingModemRoute = callbackLine(
+            backendID: line.backendID, modemID: "missing-modem", profileID: line.profileID, address: line.address
+        )
+        calls.rememberCallbackRoute(number: "10086", line: missingModemRoute,
+                                    startedAt: Date.now.addingTimeInterval(1).ISO8601Format())
+        calls.requestCallback(callbackIntent(contacts: [callbackPerson("10086")]))
+        guard case .home(_, let retainedBackend) = await calls.resolveSystemCallback(try XCTUnwrap(calls.systemCallback)) else {
+            return XCTFail("A removed modem must use the home dialer")
+        }
+        XCTAssertEqual(retainedBackend, line.backendID)
+    }
+
+    func testSystemCallbackInactiveOrMissingLineUsesModemDialer() async throws {
+        let fixture = CallsFixture()
+        let (calls, _, line) = try await setup(fixture)
+        let inactive = callbackLine(
+            backendID: line.backendID, modemID: line.modemID, profileID: "old-profile", address: line.address
+        )
+        calls.rememberCallbackRoute(number: "10086", line: inactive, startedAt: Date.now.ISO8601Format())
+        calls.requestCallback(callbackIntent(contacts: [callbackPerson("10086")]))
+        guard case .modem(let number, let backendID, let modemID) =
+                await calls.resolveSystemCallback(try XCTUnwrap(calls.systemCallback)) else {
+            return XCTFail("An unavailable saved line must use the modem dialer")
+        }
+        XCTAssertEqual(number, "10086")
+        XCTAssertEqual(backendID, line.backendID)
+        XCTAssertEqual(modemID, line.modemID)
+        let writes = await fixture.count(method: "POST", suffix: "/calls")
+        XCTAssertEqual(writes, 0)
+    }
+
+    func testSystemCallbackLockedOrOfflineModemDoesNotAutoDial() async throws {
+        for mode in ["locked", "offline"] {
+            let fixture = CallsFixture()
+            let (calls, session, line) = try await setup(fixture)
+            calls.rememberCallbackRoute(number: "10086", line: line, startedAt: Date.now.ISO8601Format())
+            if mode == "locked" {
+                await fixture.setModemState("locked")
+                await session.refresh(force: true)
+            } else {
+                await fixture.setOffline(true)
+            }
+            calls.requestCallback(callbackIntent(contacts: [callbackPerson("10086")]))
+            guard case .modem = await calls.resolveSystemCallback(try XCTUnwrap(calls.systemCallback)) else {
+                return XCTFail("\(mode) modem must use the modem dialer")
+            }
+            XCTAssertFalse(calls.hasCall, mode)
+        }
     }
 
     func testStaleSnapshotAndOriginalLineCallback() async throws {

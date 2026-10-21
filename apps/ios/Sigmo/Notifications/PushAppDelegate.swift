@@ -1,7 +1,6 @@
 import UIKit
 import UserNotifications
 import PushKit
-import Intents
 
 @MainActor
 final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, @preconcurrency PKPushRegistryDelegate {
@@ -16,7 +15,8 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
         let store = AppLaunch.makeStore()
         self.store = store
         self.push = NativePushState(disabled: AppLaunch.usesFixtures)
-        self.calls = CallsState(store: store, fixtures: AppLaunch.usesFixtures)
+        let calls = CallsState(store: store, fixtures: AppLaunch.usesFixtures)
+        self.calls = calls
         super.init()
     }
 
@@ -49,19 +49,20 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     func pushRegistry(_ registry: PKPushRegistry, didReceiveIncomingPushWith payload: PKPushPayload,
                       for type: PKPushType, completion: @escaping @Sendable () -> Void) {
         guard type == .voIP else { completion(); return }
-        let content = NativePushState.envelopeData(payload.dictionaryPayload).flatMap { try? PushPayload.decode($0) }
         let id = (payload.dictionaryPayload["callUUID"] as? String).flatMap(UUID.init(uuidString:)) ?? UUID()
+        let diagnostics = CallDiagnostics(store: AppDiagnostics.store)
+        let content: PushContent?
+        if let data = NativePushState.envelopeData(payload.dictionaryPayload) {
+            do { content = try PushPayload.decode(data) }
+            catch {
+                diagnostics.record("voip.decode.failed", id: id, category: "push", error: error)
+                content = nil
+            }
+        } else {
+            diagnostics.record("voip.decode.failed", id: id, category: "push", fields: ["errorCode": "missing_push_envelope"])
+            content = nil
+        }
         calls.receivePush(content: content, id: id, connection: content.flatMap { push.connection(for: $0, in: store) }, completion: completion)
-    }
-
-    func application(_ application: UIApplication, continue userActivity: NSUserActivity,
-                     restorationHandler: @escaping ([any UIUserActivityRestoring]?) -> Void) -> Bool {
-        guard let intent = userActivity.interaction?.intent as? INStartCallIntent,
-              let number = intent.contacts?.first?.personHandle?.value,
-              CallDigits.callable(number), !CallDigits.isService(number) else { return false }
-        calls.callbackNumber = number
-        restorationHandler(nil)
-        return true
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {

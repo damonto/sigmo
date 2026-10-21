@@ -12,6 +12,7 @@ struct HomeView: View {
     @State private var homeTab = HomeTab.devices
     @AppStorage("communication.backend") private var communicationBackend = ""
     @Environment(BackendStore.self) private var store
+    @Environment(CallsState.self) private var calls
     @Environment(\.nativePush) private var push
     @Environment(\.scenePhase) private var scenePhase
     @State private var path: [BackendDestination] = []
@@ -20,6 +21,8 @@ struct HomeView: View {
     @State private var selectedBackendID: UUID?
     @State private var search = ""
     @State private var refreshFailure: BackendFailure?
+    @State private var communicationDial: CommunicationDialRequest?
+    @State private var modemDial: ModemDialRequest?
 
     init() {
         #if DEBUG
@@ -57,6 +60,7 @@ struct HomeView: View {
         .onChange(of: store.configurationLoaded) { _, _ in navigateFromNotification() }
         .onChange(of: push?.hasIdentity) { _, _ in navigateFromNotification() }
         .onChange(of: scenePhase) { _, _ in navigateFromNotification() }
+        .task(id: calls.systemCallback?.id) { await applySystemCallback() }
         .alert("push.notification", isPresented: Binding(get: { push?.navigationFailure != nil }, set: { if !$0 { push?.navigationFailure = nil } })) {
             Button("common.done") { push?.navigationFailure = nil }
         } message: { Text(push?.navigationFailure?.message ?? "") }
@@ -74,7 +78,8 @@ struct HomeView: View {
     private func communicationTab(_ section: CommunicationSection) -> some View {
         NavigationStack {
             let sessions = store.orderedSessions(backendID: UUID(uuidString: communicationBackend))
-            CommunicationWorkspace(sessions: sessions, section: section)
+            CommunicationWorkspace(sessions: sessions, section: section,
+                                   callbackDial: section == .calls ? $communicationDial : .constant(nil))
                 .id(sessions.map {
                     CommunicationIdentity(session: ObjectIdentifier($0), backendID: $0.communicationBackendID,
                                           accessRevision: $0.accessRevision)
@@ -143,7 +148,16 @@ struct HomeView: View {
                 case .backend: BackendDetailView(session: session)
                 case .settings: BackendSettingsView(session: session)
                 case .modem(_, let modemID):
-                    ModemDetailView(session: session, modemID: modemID) { selectedDevice = nil }
+                    let request = modemDialRequest(backendID: id, modemID: modemID)
+                    ModemDetailView(
+                        session: session,
+                        modemID: modemID,
+                        callRequest: request,
+                        callRequestHandled: {
+                            guard let request, modemDial?.id == request.id else { return }
+                            modemDial = nil
+                        }
+                    ) { selectedDevice = nil }
                 case .messages(_, let modemID, let conversationID):
                     if session.canAccessDevices {
                         ModemDetailView(session: session, modemID: modemID, initialConversationID: conversationID) {
@@ -183,6 +197,50 @@ struct HomeView: View {
             path = [destination]
         }
         AppDiagnostics.record("notification.navigation.applied", category: "push")
+    }
+
+    private func modemDialRequest(backendID: UUID, modemID: String) -> ModemDialRequest? {
+        guard let modemDial, modemDial.backendID == backendID, modemDial.modemID == modemID else { return nil }
+        return modemDial
+    }
+
+    private func applySystemCallback() async {
+        guard let request = calls.systemCallback else { return }
+        let destination = await calls.resolveSystemCallback(request)
+        guard !Task.isCancelled, calls.systemCallback?.id == request.id else { return }
+        prepareForCallbackNavigation()
+        let route: String
+        switch destination {
+        case .home(let number, let backendID):
+            route = "home"
+            homeTab = .calls
+            let existingBackend = backendID.flatMap { store.sessions[$0] == nil ? nil : $0 }
+            if let existingBackend { communicationBackend = existingBackend.uuidString }
+            communicationDial = CommunicationDialRequest(number: number, backendID: existingBackend, modemID: nil)
+            modemDial = nil
+            calls.consumeSystemCallback(request)
+        case .modem(let number, let backendID, let modemID):
+            route = "modem"
+            homeTab = .devices
+            selectedDevice = .modem(backendID, modemID)
+            modemDial = ModemDialRequest(backendID: backendID, modemID: modemID, number: number)
+            communicationDial = nil
+            calls.consumeSystemCallback(request)
+        case .dial(let number, let line):
+            route = "dial"
+            homeTab = .calls
+            communicationBackend = line.backendID.uuidString
+            await calls.dial(number: number, line: line)
+            guard calls.systemCallback?.id == request.id else { return }
+            calls.consumeSystemCallback(request)
+        }
+        AppDiagnostics.record("callback.navigation.applied", category: "calls", fields: ["route": route])
+    }
+
+    private func prepareForCallbackNavigation() {
+        adding = false
+        selectedDevice = nil
+        path = []
     }
 }
 

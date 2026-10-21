@@ -3,6 +3,8 @@ import SwiftUI
 struct ModemDetailView: View {
     let session: BackendSession
     var initialConversationID: String?
+    var callRequest: ModemDialRequest?
+    var callRequestHandled: () -> Void
     let close: () -> Void
     @State private var selectedID: String
 
@@ -11,14 +13,20 @@ struct ModemDetailView: View {
         let modemID: String
     }
 
-    init(session: BackendSession, modemID: String, initialConversationID: String? = nil, close: @escaping () -> Void) {
+    init(session: BackendSession, modemID: String, initialConversationID: String? = nil,
+         callRequest: ModemDialRequest? = nil, callRequestHandled: @escaping () -> Void = {},
+         close: @escaping () -> Void) {
         self.session = session
         self.close = close
         self.initialConversationID = initialConversationID
+        self.callRequest = callRequest
+        self.callRequestHandled = callRequestHandled
         _selectedID = State(initialValue: modemID)
     }
     var body: some View {
-        ModemDetailScreen(session: session, modemID: selectedID, initialConversationID: initialConversationID, close: close, selectModem: { selectedID = $0 })
+        ModemDetailScreen(session: session, modemID: selectedID, initialConversationID: initialConversationID,
+                          callRequest: callRequest, callRequestHandled: callRequestHandled,
+                          close: close, selectModem: { selectedID = $0 })
             .id(ScreenIdentity(session: ObjectIdentifier(session), modemID: selectedID))
     }
 }
@@ -40,6 +48,8 @@ private struct ModemDetailScreen: View {
     let session: BackendSession
     let close: () -> Void
     let selectModem: (String) -> Void
+    let callRequest: ModemDialRequest?
+    let callRequestHandled: () -> Void
     @State private var state: ModemDetailState
     @State private var settings: ModemSettingsState
     @State private var sim: SIMApplicationState
@@ -49,7 +59,7 @@ private struct ModemDetailScreen: View {
     @State private var composingMessage = false
     @State private var callHistory: CallHistoryState
     @State private var callRecord: CallRecord?
-    @State private var dialing = false
+    @State private var dialpad: CallDialpadRequest?
     @State private var recordingsPresented = false
     let initialConversationID: String?
     @State private var sheet: DetailSheet?
@@ -68,12 +78,17 @@ private struct ModemDetailScreen: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    init(session: BackendSession, modemID: String, initialConversationID: String?, close: @escaping () -> Void, selectModem: @escaping (String) -> Void) {
+    init(session: BackendSession, modemID: String, initialConversationID: String?,
+         callRequest: ModemDialRequest?, callRequestHandled: @escaping () -> Void,
+         close: @escaping () -> Void, selectModem: @escaping (String) -> Void) {
         self.session = session
         self.close = close
         self.selectModem = selectModem
         self.initialConversationID = initialConversationID
-        _tab = State(initialValue: initialConversationID == nil ? .overview : .messages)
+        self.callRequest = callRequest
+        self.callRequestHandled = callRequestHandled
+        _tab = State(initialValue: callRequest != nil ? .calls : initialConversationID == nil ? .overview : .messages)
+        _dialpad = State(initialValue: callRequest.map { CallDialpadRequest(number: $0.number) })
         _state = State(initialValue: ModemDetailState(session: session, modemID: modemID))
         _settings = State(initialValue: ModemSettingsState(session: session, modemID: modemID))
         _sim = State(initialValue: SIMApplicationState(session: session, modemID: modemID))
@@ -136,7 +151,8 @@ private struct ModemDetailScreen: View {
             .badge(session.unreadCounts[state.modemID] ?? 0)
             Tab("detail.tab.calls", systemImage: "phone", value: DetailTab.calls) {
                 tabContent(.calls) {
-                    CallsView(state: callHistory, selected: $callRecord, dialing: $dialing, recordingsPresented: $recordingsPresented)
+                    CallsView(state: callHistory, selected: $callRecord, dialpad: $dialpad,
+                              recordingsPresented: $recordingsPresented)
                         .searchable(text: $callHistory.search, placement: .navigationBarDrawer(displayMode: .always), prompt: "calls.search")
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -237,6 +253,12 @@ private struct ModemDetailScreen: View {
     }
     var body: some View {
         presentedContent
+        .task(id: callRequest?.id) {
+            guard let callRequest else { return }
+            tab = .calls
+            dialpad = CallDialpadRequest(number: callRequest.number)
+            callRequestHandled()
+        }
         .task(id: pinState.identity) { pinState.reset(); await pinState.load() }
         .onChange(of: sim.presented) { _, shown in
             if shown, sheet == nil, !addingESIM { sheet = .sim }
@@ -370,7 +392,9 @@ private struct ModemDetailScreen: View {
         if tab == .calls {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button("calls.recordings", systemImage: "waveform") { recordingsPresented = true }
-                Button("calls.keypad", systemImage: "circle.grid.3x3.fill") { dialing = true }
+                Button("calls.keypad", systemImage: "circle.grid.3x3.fill") {
+                    dialpad = CallDialpadRequest()
+                }
                     .disabled(callHistory.line == nil).accessibilityIdentifier("calls-keypad")
             }
         }

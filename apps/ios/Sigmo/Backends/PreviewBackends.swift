@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import Intents
 
 // Only explicit Debug launch arguments enable fixtures; normal app launches use the network.
 @MainActor
@@ -94,6 +95,36 @@ enum PreviewBackends {
             } catch { store.failure = .wrapping(error) }
         }
         return store
+    }
+
+    static func requestCallbackIfNeeded(store: BackendStore, calls: CallsState) async {
+        guard let mode = ProcessInfo.processInfo.environment["SIGMO_UI_CALLBACK"] else { return }
+        await store.refreshAll()
+        guard !Task.isCancelled, let session = store.onlineSessions.first,
+              let modem = session.modems.first else { return }
+        let line = CallLine(session: session, modem: modem)
+        let number = "10086"
+        switch mode {
+        case "home":
+            break
+        case "modem":
+            calls.rememberCallbackRoute(
+                number: number,
+                line: CallLine(backendID: line.backendID, modemID: line.modemID, profileID: "inactive-profile",
+                               backendName: line.backendName, label: line.label, region: line.region, address: line.address),
+                startedAt: Date.now.ISO8601Format()
+            )
+        case "dial":
+            calls.rememberCallbackRoute(number: number, line: line, startedAt: Date.now.ISO8601Format())
+        default:
+            return
+        }
+        let person = INPerson(personHandle: INPersonHandle(value: number, type: .phoneNumber),
+                              nameComponents: nil, displayName: nil, image: nil,
+                              contactIdentifier: nil, customIdentifier: nil)
+        calls.requestCallback(INStartCallIntent(callRecordFilter: nil, callRecordToCallBack: nil,
+                                                audioRoute: .unknown, destinationType: .normal,
+                                                contacts: [person], callCapability: .audioCall))
     }
 }
 

@@ -9,6 +9,17 @@ enum CallAction: Sendable {
         case .start(let id, _), .answer(let id), .end(let id), .hold(let id, _), .mute(let id, _), .digits(let id, _): id
         }
     }
+
+    var diagnosticName: String {
+        switch self {
+        case .start: "start"
+        case .answer: "answer"
+        case .end: "end"
+        case .hold: "hold"
+        case .mute: "mute"
+        case .digits: "dtmf"
+        }
+    }
 }
 
 // CXProvider delivers callbacks on the explicitly configured main queue. Keep
@@ -24,17 +35,21 @@ final class CallKitBridge: NSObject, @preconcurrency CXProviderDelegate {
     var audioActivated: (@MainActor (Bool) -> Void)?
     private let provider: CXProvider?
     private let controller: CXCallController?
+    private let diagnostics: CallDiagnostics
     private let didComplete: (@MainActor (UUID, Completion) -> Void)?
     private struct PendingAction {
         let value: CallAction
         let action: CXCallAction
         let task: Task<Void, Never>
+        let started: ContinuousClock.Instant
     }
     private var actions: [UUID: PendingAction] = [:]
     private var actionTail: Task<Void, Never>?
 
-    init(enabled: Bool, didComplete: (@MainActor (UUID, Completion) -> Void)? = nil) {
+    init(enabled: Bool, diagnostics: DiagnosticLogStore = AppDiagnostics.store,
+         didComplete: (@MainActor (UUID, Completion) -> Void)? = nil) {
         self.didComplete = didComplete
+        self.diagnostics = CallDiagnostics(store: diagnostics)
         if enabled {
             let configuration = CXProviderConfiguration()
             configuration.supportsVideo = false
@@ -59,11 +74,18 @@ final class CallKitBridge: NSObject, @preconcurrency CXProviderDelegate {
     }
 
     func request(_ actions: [CallAction]) async throws {
+        for action in actions { diagnostics.record("callkit.action.requested", id: action.id, fields: ["action": action.diagnosticName]) }
         guard let controller else {
             for action in actions { try await perform?(action) }
             return
         }
-        try await controller.request(CXTransaction(actions: actions.map(systemAction)))
+        do {
+            try await controller.request(CXTransaction(actions: actions.map(systemAction)))
+            for action in actions { diagnostics.record("callkit.action.accepted", id: action.id, fields: ["action": action.diagnosticName]) }
+        } catch {
+            for action in actions { diagnostics.record("callkit.action.rejected", id: action.id, fields: ["action": action.diagnosticName], error: error) }
+            throw error
+        }
     }
 
     private func systemAction(_ action: CallAction) -> CXCallAction {
@@ -78,8 +100,17 @@ final class CallKitBridge: NSObject, @preconcurrency CXProviderDelegate {
     }
 
     func incoming(id: UUID, number: String, name: String?, completion: @escaping @Sendable (Bool) -> Void) {
-        guard let provider else { completion(true); return }
+        let started = ContinuousClock.now
+        let diagnostics = diagnostics
+        diagnostics.record("callkit.incoming.started", id: id, fields: ["systemEnabled": String(provider != nil)])
+        guard let provider else {
+            diagnostics.record("callkit.incoming.reported", id: id, fields: ["accepted": "true", "durationMS": CallDiagnostics.durationMS(since: started)])
+            completion(true)
+            return
+        }
         provider.reportNewIncomingCall(with: id, update: update(number: number, name: name, holding: true)) { error in
+            diagnostics.record("callkit.incoming.reported", id: id,
+                               fields: ["accepted": String(error == nil), "durationMS": CallDiagnostics.durationMS(since: started)], error: error)
             completion(error == nil)
         }
     }
@@ -102,10 +133,18 @@ final class CallKitBridge: NSObject, @preconcurrency CXProviderDelegate {
 
     func connecting(_ id: UUID) { provider?.reportOutgoingCall(with: id, startedConnectingAt: .now) }
     func connected(_ id: UUID, at date: Date?) { provider?.reportOutgoingCall(with: id, connectedAt: date ?? .now) }
-    func ended(_ id: UUID, reason: CXCallEndedReason) { provider?.reportCall(with: id, endedAt: .now, reason: reason) }
+    func ended(_ id: UUID, reason: CXCallEndedReason) {
+        diagnostics.record("callkit.ended", id: id, fields: CallDiagnostics.ending(reason))
+        provider?.reportCall(with: id, endedAt: .now, reason: reason)
+    }
 
     func providerDidReset(_ provider: CXProvider) {
-        for action in actions.values { action.task.cancel() }
+        diagnostics.record("callkit.reset", fields: ["pendingActions": String(actions.count)])
+        for action in actions.values {
+            diagnostics.record("callkit.action.cancelled", id: action.value.id,
+                               fields: ["action": action.value.diagnosticName, "actionID": action.action.uuid.uuidString, "cause": "provider_reset"])
+            action.task.cancel()
+        }
         actions.removeAll()
         actionTail = nil
         CallWebRTC.deactivate(AVAudioSession.sharedInstance())
@@ -115,6 +154,8 @@ final class CallKitBridge: NSObject, @preconcurrency CXProviderDelegate {
 
     @discardableResult
     func execute(_ action: CXCallAction, _ value: CallAction) -> Task<Void, Never> {
+        let started = ContinuousClock.now
+        diagnostics.record("callkit.action.received", id: value.id, fields: ["action": value.diagnosticName, "actionID": action.uuid.uuidString])
         let local: Bool
         if case .mute = value { local = true } else { local = false }
         if case .end(let id) = value {
@@ -128,12 +169,15 @@ final class CallKitBridge: NSObject, @preconcurrency CXProviderDelegate {
                 }
             }
             for pending in pendingControls {
+                diagnostics.record("callkit.action.cancelled", id: pending.value.id,
+                                   fields: ["action": pending.value.diagnosticName, "actionID": pending.action.uuid.uuidString, "cause": "end_requested"])
                 pending.task.cancel()
                 complete(pending.action, with: .failed)
             }
         }
         let previous = local ? nil : actionTail
         let didComplete = didComplete
+        let diagnostics = diagnostics
         let task = Task { [weak self] in
             defer { self?.actions[action.uuid] = nil }
             await previous?.value
@@ -145,13 +189,19 @@ final class CallKitBridge: NSObject, @preconcurrency CXProviderDelegate {
                 }
                 return
             }
+            diagnostics.record("callkit.action.started", id: value.id,
+                               fields: ["action": value.diagnosticName, "actionID": action.uuid.uuidString, "queueMS": CallDiagnostics.durationMS(since: started)])
             do {
                 try await self.perform?(value)
                 guard !Task.isCancelled else { return }
                 self.complete(action, with: .fulfilled)
-            } catch { if !Task.isCancelled { self.complete(action, with: .failed) } }
+            } catch {
+                diagnostics.record("callkit.action.error", id: value.id,
+                                   fields: ["action": value.diagnosticName, "actionID": action.uuid.uuidString], error: error)
+                if !Task.isCancelled { self.complete(action, with: .failed) }
+            }
         }
-        actions[action.uuid] = PendingAction(value: value, action: action, task: task)
+        actions[action.uuid] = PendingAction(value: value, action: action, task: task, started: started)
         if !local { actionTail = task }
         return task
     }
@@ -159,7 +209,10 @@ final class CallKitBridge: NSObject, @preconcurrency CXProviderDelegate {
     private func complete(_ action: CXCallAction, with completion: Completion) {
         // Relinquish ownership before calling the SDK. A late result or another
         // end request must not complete an already preempted or timed-out action.
-        guard actions.removeValue(forKey: action.uuid) != nil, !action.isComplete else { return }
+        guard let pending = actions.removeValue(forKey: action.uuid), !action.isComplete else { return }
+        diagnostics.record("callkit.action.completed", id: pending.value.id,
+                           fields: ["action": pending.value.diagnosticName, "actionID": action.uuid.uuidString,
+                                    "completion": completion == .fulfilled ? "fulfilled" : "failed", "durationMS": CallDiagnostics.durationMS(since: pending.started)])
         switch completion {
         case .fulfilled: action.fulfill()
         case .failed: action.fail()
@@ -178,13 +231,17 @@ final class CallKitBridge: NSObject, @preconcurrency CXProviderDelegate {
     }
     func timedOut(_ action: CXAction) {
         // CallKit has already completed this action; only cancel our remaining work.
+        diagnostics.record("callkit.action.timed_out", id: (action as? CXCallAction)?.callUUID,
+                           fields: ["actionID": action.uuid.uuidString, "action": actions[action.uuid]?.value.diagnosticName ?? "unknown"])
         actions.removeValue(forKey: action.uuid)?.task.cancel()
     }
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+        diagnostics.record("callkit.audio.activated")
         CallWebRTC.activate(audioSession)
         audioActivated?(true)
     }
     func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+        diagnostics.record("callkit.audio.deactivated")
         CallWebRTC.deactivate(audioSession)
         audioActivated?(false)
     }

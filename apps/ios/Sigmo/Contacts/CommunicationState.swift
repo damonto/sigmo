@@ -29,6 +29,10 @@ final class CommunicationState {
         section != .calls || session.capabilities?.contains("callHistory") == true
     }
 
+    var supportsComposer: Bool {
+        section != .calls || session.capabilities?.contains("nativeCalls") == true
+    }
+
     var contacts: [SigmoContact] {
         guard !search.isEmpty else { return session.savedContacts }
         return session.savedContacts.filter { contact in

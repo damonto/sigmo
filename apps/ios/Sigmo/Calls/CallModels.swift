@@ -68,6 +68,17 @@ struct CallLine: Codable, Hashable, Sendable, Identifiable {
 
     func matches(_ other: CallLine) -> Bool { id == other.id && address == other.address }
 
+    init(backendID: UUID, modemID: String, profileID: String, backendName: String,
+         label: String, region: String, address: String) {
+        self.backendID = backendID
+        self.modemID = modemID
+        self.profileID = profileID
+        self.backendName = backendName
+        self.label = label
+        self.region = region
+        self.address = address
+    }
+
     @MainActor init(session: BackendSession, modem: Modem) {
         backendID = session.id
         modemID = modem.id
@@ -77,6 +88,38 @@ struct CallLine: Codable, Hashable, Sendable, Identifiable {
         region = modem.sim.regionCode
         address = session.configuration.address.absoluteString
     }
+}
+
+struct CallbackRoute: Codable, Hashable, Sendable {
+    let line: CallLine
+    let startedAt: String
+
+    var date: Date { CallRecord.date(startedAt) ?? .distantPast }
+}
+
+struct SystemCallbackRequest: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let number: String
+}
+
+enum SystemCallbackDestination: Equatable, Sendable {
+    case home(number: String, backendID: UUID?)
+    case modem(number: String, backendID: UUID, modemID: String)
+    case dial(number: String, line: CallLine)
+}
+
+struct CommunicationDialRequest: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let number: String
+    let backendID: UUID?
+    let modemID: String?
+}
+
+struct ModemDialRequest: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let backendID: UUID
+    let modemID: String
+    let number: String
 }
 
 // A local connection and its server instance both matter: changing an address,

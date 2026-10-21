@@ -34,6 +34,16 @@ final class CommunicationOverviewTests: XCTestCase {
         XCTAssertEqual(state.contacts.map(\.session.id), [second.id])
     }
 
+    func testNativeCallsWithoutHistoryKeepsDialComposerAvailable() async throws {
+        let stub = BackendStub()
+        await stub.setCapabilities(status: 200, json: #"["nativeCalls"]"#)
+        let session = try testSession(stub)
+        await session.refresh(force: true)
+        let state = CommunicationOverviewState(sessions: [session], section: .calls)
+        XCTAssertFalse(state.sources[0].supported)
+        XCTAssertEqual(state.creationSessions.map(\.id), [session.id])
+    }
+
     func testHistoryMergesChronologicallyWithIndependentPaginationAndFilters() async throws {
         for section in [CommunicationSection.messages, .calls] {
             let firstServer = OverviewHistoryFixture(name: "First", days: [3, 1])

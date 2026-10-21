@@ -38,6 +38,8 @@ Open **Manage Sigmo → Development diagnostics** to enable local diagnostic log
 
 Logs contain HTTP request summaries, network and decoding failures, WebSocket lifecycle events, and key app errors. Request and response bodies, credentials, query values, message content, and audio are excluded; dynamic resource identifiers in paths are hidden. The main app's notification registration and processing are included; the notification extension and full system crash reports are outside this log.
 
+Call diagnostics correlate VoIP invitations, CallKit actions, backend state changes, and media startup using the call UUID. They include invitation validation/decryption failures, sanitized call states and timestamps, ownership (`none`, `self`, or `other`), explicit end causes, and CallKit error domains/codes, action completion, timeouts, resets, and audio activation. Phone numbers, contact names, client identities, DTMF digits, SDP, and ICE candidates are excluded. Unknown backend state/reason strings are recorded as `other`.
+
 The app retains up to five 1 MiB files in private storage, excluded from backups, and rotates out the oldest events. **Export logs** saves a UTF-8 text snapshot through the system file exporter, with app/build and iOS version information. Logs are not uploaded automatically. **Clear logs** deletes the saved events without changing the logging switch.
 
 ## Transfer from a local SIM reader

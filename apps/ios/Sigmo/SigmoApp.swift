@@ -1,5 +1,6 @@
 import SwiftUI
 import Contacts
+import Intents
 
 @main
 struct SigmoApp: App {
@@ -14,6 +15,17 @@ struct SigmoApp: App {
                 .environment(appDelegate.calls)
                 .environment(\.nativePush, appDelegate.push)
                 .preferredColorScheme(AppLaunch.colorScheme)
+                // SwiftUI scenes receive system call activities instead of the app delegate.
+                .onContinueUserActivity("INStartCallIntent") { activity in
+                    guard let intent = activity.interaction?.intent as? INStartCallIntent else {
+                        AppDiagnostics.record("callback.activity.ignored", category: "calls",
+                                              fields: ["typeMatched": "false", "activityType": activity.activityType])
+                        return
+                    }
+                    let handled = appDelegate.calls.requestCallback(intent)
+                    AppDiagnostics.record("callback.activity.received", category: "calls",
+                                          fields: ["handled": String(handled), "activityType": activity.activityType])
+                }
                 .foregroundTask { await store.refreshAll() }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     AppDiagnostics.record("scene.changed", fields: ["state": phase == .active ? "active" : phase == .background ? "background" : "inactive"])
@@ -24,6 +36,9 @@ struct SigmoApp: App {
                 .onChange(of: store.settings.backends.map(\.id), initial: true) { _, _ in
                     appDelegate.registerVoIPIfNeeded()
                 }
+                #if DEBUG
+                .task { await PreviewBackends.requestCallbackIfNeeded(store: store, calls: appDelegate.calls) }
+                #endif
                 .task { await appDelegate.calls.run() }
                 .task { await appDelegate.calls.recordings.recover() }
                 .task(id: appDelegate.push.eventRevision) {

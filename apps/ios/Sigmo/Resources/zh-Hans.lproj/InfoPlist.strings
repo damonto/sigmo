@@ -4,3 +4,4 @@
 
 "NSMicrophoneUsageDescription" = "通过 Sigmo 设备通话时发送你的声音。";
 "NSContactsUsageDescription" = "在本机匹配联系人姓名。通讯录不会发送到 Sigmo 服务。";
+"NSSiriUsageDescription" = "从系统最近通话选择 Sigmo 记录时，通过 Sigmo 模块发起通话。";

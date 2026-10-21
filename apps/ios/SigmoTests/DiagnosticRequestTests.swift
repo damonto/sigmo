@@ -137,6 +137,20 @@ final class DiagnosticRequestTests: XCTestCase {
         XCTAssertEqual(events.last?.level, .info)
     }
 
+    func testCallEventAndMediaPathsRemainDistinctWithoutResourceIdentifiers() async throws {
+        let paths = [
+            ["modems", "modem-secret", "calls", "events"],
+            ["modems", "modem-secret", "calls", "call-secret", "webrtc", "sessions"]
+        ]
+        for path in paths {
+            _ = DiagnosticRequest(store: log, service: .backend, method: "GET", path: path, kind: .websocket)
+        }
+        let data = try await log.snapshot()
+        XCTAssertEqual(try diagnosticEvents(data).compactMap { $0.fields["path"] },
+                       ["/modems/:id/calls/events", "/modems/:id/calls/:id/webrtc/sessions"])
+        assertNoSecrets(data, ["modem-secret", "call-secret"])
+    }
+
     func testDecodeFailureKeepsTheRequestCorrelationWithoutItsBody() async throws {
         let api = BackendAPI(configuration: try testConfiguration(), diagnostics: log, transport: { _ in
             BackendHTTPResponse(data: Data("{\"secret\":\"decode-body-secret\"}".utf8), status: 200)

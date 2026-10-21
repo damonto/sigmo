@@ -1,5 +1,10 @@
 import SwiftUI
 
+private enum CallControlMetrics {
+    static let size: CGFloat = 80
+    static let iconSize: CGFloat = 64
+}
+
 struct CallScreen: View {
     @Environment(CallsState.self) private var calls
     @Environment(\.demoSession) private var demoSession
@@ -91,11 +96,7 @@ private struct ActiveCallContent: View {
                 .font(.subheadline).foregroundStyle(.secondary)
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 VStack(spacing: 4) {
-                    if let record = call.record {
-                        let duration = record.duration(at: context.date)
-                        if !duration.isEmpty { Text(duration).monospacedDigit() }
-                        else { Text(record.stateLabel) }
-                    } else { Text("calls.state.dialing") }
+                    Text(callStatus(at: context.date)).monospacedDigit()
                     if call.record?.localHold == true { Text("calls.localHold") }
                     if call.record?.remoteHold == true { Text("calls.remoteHold") }
                 }.font(.body).foregroundStyle(.secondary)
@@ -108,24 +109,26 @@ private struct ActiveCallContent: View {
             // The keypad replaces the call identity and controls. Its bottom
             // actions never participate in a scroll view, even at large text sizes.
             if geometry.size.width > geometry.size.height {
-                HStack(spacing: 24) {
+                HStack(alignment: .top, spacing: 24) {
                     toneKeys(compact: true)
                     VStack(spacing: 16) {
-                        sentDigits
+                        keypadHeader
+                        Spacer(minLength: 8)
                         keypadActions
                     }
                 }
                 .padding(.horizontal, 24)
+                .padding(.vertical, 16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                VStack(spacing: 16) {
-                    sentDigits
-                    Spacer(minLength: 0)
+                VStack(spacing: 0) {
+                    keypadHeader
+                    Spacer(minLength: 16)
                     toneKeys(compact: geometry.size.height < 560)
-                    Spacer(minLength: 0)
+                    keypadActions.padding(.top, 32)
                 }
                 .padding(.top, 16)
-                .safeAreaInset(edge: .bottom, spacing: 16) { keypadActions.padding(.bottom, 16) }
+                .padding(.bottom, 16)
                 .frame(maxWidth: 460)
                 .padding(.horizontal, 24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -133,10 +136,28 @@ private struct ActiveCallContent: View {
         }
     }
 
-    private var sentDigits: some View {
-        Text(digits.isEmpty ? calls.name(call) : digits)
-            .font(.title2.monospacedDigit()).lineLimit(1).minimumScaleFactor(0.5)
-            .accessibilityLabel(Text("calls.sentDigits")).accessibilityValue(digits)
+    private var keypadHeader: some View {
+        VStack(spacing: 4) {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(callStatus(at: context.date))
+                    .font(.title3).monospacedDigit().foregroundStyle(.secondary)
+                    .accessibilityIdentifier("calls-keypad-duration")
+            }
+            keypadValue
+        }
+    }
+
+    private func callStatus(at date: Date) -> String {
+        guard let record = call.record else { return callText("calls.state.dialing") }
+        let duration = record.duration(at: date)
+        return duration.isEmpty ? record.stateLabel : duration
+    }
+
+    private var keypadValue: some View {
+        Text(digits.isEmpty ? call.number : digits)
+            .font(.largeTitle.monospacedDigit()).lineLimit(1).minimumScaleFactor(0.5)
+            .accessibilityLabel(digits.isEmpty ? Text("calls.number") : Text("calls.sentDigits"))
+            .accessibilityValue(digits.isEmpty ? call.number : digits)
             .accessibilityIdentifier("calls-sent-digits")
     }
 
@@ -148,12 +169,18 @@ private struct ActiveCallContent: View {
     }
 
     private var keypadActions: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                CallControl(label: "calls.hideKeypad", symbol: "circle.grid.3x3.fill", identifier: "calls-hide-keypad") { keypad = false }
-                endControl
-                Spacer(minLength: 0).frame(maxWidth: .infinity)
+        HStack(alignment: .top, spacing: 12) {
+            Spacer(minLength: 0).frame(maxWidth: .infinity)
+            endControl
+            Button { keypad = false } label: {
+                Text("calls.hideKeypad")
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, minHeight: CallControlMetrics.size)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("calls-hide-keypad")
         }
     }
 
@@ -216,11 +243,16 @@ private struct ActiveCallContent: View {
                         }
                     }
                 }
-            } label: { CallControlIcon(symbol: "speaker.wave.2.fill") }
-                .buttonStyle(.glass).buttonBorderShape(.circle).tint(.primary)
-                .accessibilityLabel(Text("calls.audio"))
-                .accessibilityValue(calls.audio.routeName)
-                .accessibilityIdentifier("calls-audio")
+            } label: {
+                CallControlIcon(symbol: "speaker.wave.2.fill")
+                    .frame(width: CallControlMetrics.size, height: CallControlMetrics.size)
+                    .glassEffect(.regular, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .frame(width: CallControlMetrics.size, height: CallControlMetrics.size)
+            .accessibilityLabel(Text("calls.audio"))
+            .accessibilityValue(calls.audio.routeName)
+            .accessibilityIdentifier("calls-audio")
             CallControlCaption(label: "calls.audio")
         }.frame(maxWidth: .infinity).disabled(!calls.audio.ready)
     }
@@ -269,6 +301,7 @@ private struct CallControl: View {
     private var button: some View {
         Button(action: action) { CallControlIcon(symbol: symbol) }
             .buttonBorderShape(.circle)
+            .frame(width: CallControlMetrics.size, height: CallControlMetrics.size)
             .accessibilityLabel(Text(label))
             .accessibilityAddTraits(selected ? .isSelected : [])
             .accessibilityIdentifier(identifier)
@@ -282,7 +315,7 @@ private struct CallControlIcon: View {
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: min(symbolSize, 32), weight: .medium))
-            .frame(width: 64, height: 64)
+            .frame(width: CallControlMetrics.iconSize, height: CallControlMetrics.iconSize)
     }
 }
 

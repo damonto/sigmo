@@ -3,7 +3,7 @@ import SwiftUI
 struct CallsView: View {
     @Bindable var state: CallHistoryState
     @Binding var selected: CallRecord?
-    @Binding var dialing: Bool
+    @Binding var dialpad: CallDialpadRequest?
     @Binding var recordingsPresented: Bool
     @Environment(CallsState.self) private var calls
     @Environment(\.scenePhase) private var scenePhase
@@ -84,14 +84,14 @@ struct CallsView: View {
             Button("communication.useCurrentLine") { if let record = replacementCall { dialCurrent(record) }; replacementCall = nil }
             Button("common.cancel", role: .cancel) { replacementCall = nil }
         }
-        .sheet(isPresented: $dialing, onDismiss: {
+        .sheet(item: $dialpad, onDismiss: {
             // Finish the sheet transition before presenting the global call screen.
             guard let selection = pendingDial else { return }
             pendingDial = nil
             Task { await calls.dial(number: selection.number, line: selection.line) }
-        }) {
+        }) { request in
             if let line = state.line {
-                CallDialpad(line: line, session: state.session) { pendingDial = ($0, line) }
+                CallDialpad(line: line, session: state.session, initialNumber: request.number) { pendingDial = ($0, line) }
             }
         }
         .sheet(isPresented: $recordingsPresented) {
@@ -111,7 +111,7 @@ struct CallsView: View {
         state.clear()
         selected = nil
         pendingDial = nil
-        dialing = false
+        dialpad = nil
         pendingDeletion = nil
         deleting = nil
     }

@@ -20,6 +20,20 @@ final class CallsFlowTests: XCTestCase {
         return app
     }
 
+    private func launchCallback(scenario: String, mode: String) -> XCUIApplication {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["SIGMO_UI_SCENARIO"] = scenario
+        app.launchEnvironment["SIGMO_UI_CALLBACK"] = mode
+        app.launchEnvironment["SIGMO_UI_RESET"] = "1"
+        app.launchEnvironment["SIGMO_UI_APPEARANCE"] = "light"
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryL"]
+        app.launch()
+        return app
+    }
+
     private func capture(_ app: XCUIApplication, _ name: String) {
         let image = XCTAttachment(screenshot: app.screenshot())
         image.name = name; image.lifetime = .keepAlways; add(image)
@@ -341,6 +355,8 @@ final class CallsFlowTests: XCTestCase {
             }
             XCTAssertLessThan(row[0].frame.maxX, row[1].frame.minX)
             if row.count == 3 { XCTAssertLessThan(row[1].frame.maxX, row[2].frame.minX) }
+            XCTAssertGreaterThanOrEqual(row[1].frame.minX - row[0].frame.maxX, 32)
+            if row.count == 3 { XCTAssertGreaterThanOrEqual(row[2].frame.minX - row[1].frame.maxX, 32) }
         }
         XCTAssertLessThan(topRow[0].frame.maxY, bottomRow[0].frame.minY)
         for (top, bottom) in zip(topRow, bottomRow) {
@@ -370,6 +386,27 @@ final class CallsFlowTests: XCTestCase {
         assertInCallKeypadVisible(app)
         app.buttons["calls-end"].tap()
         XCTAssertTrue(app.buttons["call-record-past-call"].waitForExistence(timeout: 5))
+    }
+
+    func testSystemCallbackOpensHomeDialerWithNumber() {
+        let app = launchCallback(scenario: "calls", mode: "home")
+        let number = app.textFields["calls-number"]
+        XCTAssertTrue(number.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(number.value as? String, "10086")
+    }
+
+    func testSystemCallbackOpensModemDialerWithNumber() {
+        let app = launchCallback(scenario: "communication-modem", mode: "modem")
+        let number = app.textFields["calls-number"]
+        XCTAssertTrue(number.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertEqual(number.value as? String, "10086")
+    }
+
+    func testSystemCallbackDialsCompleteRouteDirectly() {
+        let app = launchCallback(scenario: "calls", mode: "dial")
+        XCTAssertTrue(app.buttons["calls-end"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.buttons["calls-show-keypad"].exists)
+        XCTAssertTrue(app.staticTexts["10086"].firstMatch.exists)
     }
 
     func testInCallKeypadFitsLargeTextAndLandscapeWithoutScrolling() {
@@ -405,6 +442,23 @@ final class CallsFlowTests: XCTestCase {
             XCTAssertTrue(app.frame.contains(button.frame), "Offscreen: \(id) \(button.frame)", file: file, line: line)
             XCTAssertGreaterThanOrEqual(button.frame.height, 44, id, file: file, line: line)
         }
+        let duration = app.staticTexts["calls-keypad-duration"]
+        let number = app.staticTexts["calls-sent-digits"]
+        XCTAssertTrue(duration.exists, file: file, line: line)
+        XCTAssertLessThan(duration.frame.maxY, number.frame.minY, "Duration must appear above the number",
+                          file: file, line: line)
+        if app.frame.width < app.frame.height {
+            XCTAssertLessThan(number.frame.maxY, app.buttons["call-key-1"].frame.minY,
+                              "The number must appear above the keypad", file: file, line: line)
+            XCTAssertEqual(app.buttons["calls-end"].frame.midX, app.frame.midX, accuracy: 1,
+                           "End Call must stay centered below the keypad", file: file, line: line)
+            let keys = ["call-key-*", "call-key-0", "call-key-#"].map { app.buttons[$0] }
+            let keypadBottom = keys.map(\.frame.maxY).max() ?? 0
+            XCTAssertLessThanOrEqual(app.buttons["calls-end"].frame.minY - keypadBottom, 48,
+                                     "Keypad actions must stay close to the keys", file: file, line: line)
+        }
+        XCTAssertGreaterThan(app.buttons["calls-hide-keypad"].frame.midX, app.buttons["calls-end"].frame.midX,
+                             "Hide Keypad must stay to the right of End Call", file: file, line: line)
         XCTAssertFalse(app.scrollViews.firstMatch.exists, file: file, line: line)
     }
 

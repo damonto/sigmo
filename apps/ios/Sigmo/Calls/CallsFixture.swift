@@ -11,6 +11,8 @@ actor CallsFixture {
     private var lostUpdate = false
     private var endFailure = false
     private var ussdTimeout = false
+    private var modemState = "registered"
+    private var offline = false
     private var activeProfile = CallsFixture.profile
     private var callReadFailure: BackendHTTPResponse?
     private var pagedHistory: [CallRecord]?
@@ -49,6 +51,8 @@ actor CallsFixture {
         self.lostUpdate = lostUpdate
     }
 
+    func setModemState(_ value: String) { modemState = value }
+    func setOffline(_ value: Bool) { offline = value }
     func changeSIM(to profile: String) { activeProfile = profile }
     func setCallReadFailure(_ failure: BackendHTTPResponse?) { callReadFailure = failure }
     func setPagedHistory(_ records: [CallRecord]) { pagedHistory = records.sorted { $0.date > $1.date } }
@@ -70,6 +74,7 @@ actor CallsFixture {
 
     func respond(_ request: URLRequest) async throws -> BackendHTTPResponse {
         requests.append(request)
+        if offline { throw URLError(.notConnectedToInternet) }
         let path = request.url?.path ?? "", method = request.httpMethod ?? "GET"
         if path.contains("/messages") || path.contains("/conversations") {
             return try await messages.respond(request)
@@ -134,7 +139,10 @@ actor CallsFixture {
         let result = try await base.respond(request)
         if path.hasSuffix("/modems") || path.hasSuffix("/modems/device-1"),
            let text = String(data: result.data, encoding: .utf8) {
-            return BackendHTTPResponse(data: Data(text.replacingOccurrences(of: Self.profile, with: activeProfile).utf8), status: result.status)
+            let updated = text
+                .replacingOccurrences(of: Self.profile, with: activeProfile)
+                .replacingOccurrences(of: #""state":"registered""#, with: #""state":"\#(modemState)""#)
+            return BackendHTTPResponse(data: Data(updated.utf8), status: result.status)
         }
         return result
     }

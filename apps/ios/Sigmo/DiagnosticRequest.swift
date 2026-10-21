@@ -67,7 +67,7 @@ struct DiagnosticRequest: Sendable {
         "activation", "nickname", "notifications", "esim-discoveries", "esim-transfers", "sources", "source-profiles",
         "networks", "registration", "network-scans", "internet-connections", "current", "preferences", "public",
         "wifi-calling", "volte", "sessions", "websheets", "emergency-address-websheets", "resources", "callback",
-        "messages", "conversations", "contacts", "avatar", "cached", "calls", "call-media", "ice-servers", "dtmf-events", "ussd",
+        "messages", "conversations", "contacts", "avatar", "cached", "calls", "events", "webrtc", "call-media", "ice-servers", "dtmf-events", "ussd",
         "communication-preferences", "message-threads", "history-assignment", "airplane-mode", "bands", "modes",
         "current-bands", "current-modes", "sim-pin", "sim-pin-changes", "sim-unlocks", "sim-application", "protection",
         "push-subscriptions", "push-installations", "mcp", "api-keys", "audit-events", "auth-tests", "channels",

@@ -1,3 +1,4 @@
+import CallKit
 import Foundation
 
 /// Selects fixed error identifiers without descriptions, URLs or userInfo.
@@ -27,9 +28,16 @@ enum DiagnosticError {
         if let error = error as? URLError {
             return ["errorDomain": NSURLErrorDomain, "errorCode": String(error.code.rawValue)]
         }
+        if let error = error as? PushPayloadError {
+            switch error {
+            case .invalidEnvelope: return ["errorCode": "invalid_push_envelope"]
+            case .missingKey: return ["errorCode": "missing_push_key"]
+            }
+        }
         if error is DecodingError { return ["errorCode": "invalid_response"] }
         let error = error as NSError
-        let domains = [NSCocoaErrorDomain, NSOSStatusErrorDomain, "AVFoundationErrorDomain", "com.apple.AuthenticationServices.WebAuthenticationSession"]
+        let domains = [NSCocoaErrorDomain, NSOSStatusErrorDomain, "AVFoundationErrorDomain", "com.apple.AuthenticationServices.WebAuthenticationSession",
+                       CXErrorDomain, CXErrorDomainIncomingCall, CXErrorDomainRequestTransaction]
         return ["errorDomain": domains.contains(error.domain) ? error.domain : "other", "errorCode": String(error.code)]
     }
 }
