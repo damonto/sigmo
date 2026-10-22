@@ -3,10 +3,22 @@ import { Database } from './storage/authorization';
 import { logError } from './observability/log';
 import { PushDatabase } from './storage/push';
 import { reconcileTelegramCommands } from './telegram/commands';
+import { CARRIER_LOGO_CRON, synchronizeCarrierLogos } from './logos/catalog';
 
 export default {
   fetch: app.fetch,
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    if (controller.cron === CARRIER_LOGO_CRON) {
+      try {
+        await synchronizeCarrierLogos(env.BUCKET);
+      } catch (caught) {
+        logError('sync scheduled carrier logos', caught, {
+          cron: controller.cron,
+        });
+        throw caught;
+      }
+      return;
+    }
     if (String(env.MAINTENANCE_MODE) === 'true') {
       return;
     }

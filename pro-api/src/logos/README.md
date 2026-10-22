@@ -1,27 +1,25 @@
 # Carrier logos
 
-`carriers.json` contains only `{ "logo": "filename.png", "plmns": ["310070"] }`
-records. PLMNs stay strings to preserve leading zeroes. Images are stored at
-`logos/{filename}` in the shared private `sigmo` R2 bucket. Release artifacts
-keep their existing `stable/` and `dev/` paths in the same bucket.
+The Worker synchronizes
+[`https://simdex.simb.workers.dev/data/index.json`](https://simdex.simb.workers.dev/data/index.json)
+daily at `03:17 UTC`. It validates the upstream index, keeps the first record
+for each 5- or 6-digit PLMN, and atomically writes the normalized map to
+`carrier-logos/catalog.json` in the private `sigmo` R2 bucket. A failed refresh
+leaves the previous catalog unchanged.
 
-The public `GET/HEAD /logo/{plmn}` endpoint looks up a filename in this catalog.
-It returns PNG, ETag, and one-day caching. Missing images return a five-minute
-cached 404; storage failures return an uncached 503. The route never reads
-release objects or calls an external logo provider. Web/iOS try an embedded
-profile icon first, then this endpoint, then their built-in flag.
+`GET|HEAD /logo/{plmn}` reads that catalog and proxies the selected
+`/icons/...` path from Simdex. SVG files containing `<text>`, `<tspan>`, or
+`<textPath>` elements are discarded and return the same short-lived 404 as an
+unknown PLMN, allowing Web and iOS to show their built-in flags. Other SVGs are
+rasterized to 128-pixel-wide transparent PNGs with
+`@resvg/resvg-wasm`. PNG sources are validated and passed through without
+re-encoding.
 
-The one-time import merged the PROXIES.SX registry and the supplied Netify
-`logos.json`, keeping existing mappings where sources overlapped. The resulting
-186 PNGs cover 365 PLMNs. PROXIES.SX is attributed under CC BY 4.0; the supplied
-Netify file does not specify a license. Logo.dev self-hosting authorization was
-confirmed separately. Full provenance and import reports are retained with the
-local images in `build/carrier-logos/`.
+Every successful response has `Content-Type: image/png`, an ETag, and one-day
+browser/edge caching. The Cloudflare Cache API keys rendered PNGs by source icon
+path, so PLMNs sharing an icon reuse one conversion. Storage, upstream, and
+rasterization failures return an uncached 503.
 
-Logo.dev images use `size=128&format=png&retina=true` (256×256 pixels). Netify
-images are 128×128 PNGs; non-square images were fitted proportionally with
-transparent padding, and ICOs were converted. Client display size is independent
-of the pixel dimensions and matches the built-in flag area.
-
-For a later data update, upload PNGs to `sigmo/logos/`, edit this compact catalog,
-and deploy the Worker. Clients continue to use the same `/logo/{plmn}` URL.
+The catalog is seeded lazily on the first valid logo request after a fresh
+deployment. `bun run deploy` includes the daily Cron Trigger from
+`wrangler.jsonc`; no manual image upload is required.

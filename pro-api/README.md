@@ -4,8 +4,8 @@ This Worker owns the Telegram device pairing flow, signed Pro leases, private
 release metadata, and short-lived R2 download tickets. The R2 bucket must stay
 private: do not enable an `r2.dev` hostname, public bucket access, or a custom
 domain for it. Binaries are read only through the `BUCKET` Worker
-binding. Public carrier PNGs share this bucket under `logos/`; only catalogued
-images are exposed through `/logo/:plmn`.
+binding. The Worker keeps a normalized carrier catalog at
+`carrier-logos/catalog.json` and serves proxied PNGs through `/logo/:plmn`.
 
 ## Resources
 
@@ -199,6 +199,10 @@ Each route also supports OPTIONS with `204 + Allow`. GET routes support HEAD
 without a response body or business state changes. Download HEAD checks R2
 metadata without consuming a single-use Bootstrap ticket. Unknown paths return
 404; unsupported methods on known paths return `405 + Allow`.
+
+`GET|HEAD /logo/:plmn` proxies Simdex carrier icons as PNGs. The daily Cron
+Trigger refreshes a first-record-wins PLMN catalog; SVG text badges are treated
+as missing so Web and iOS fall back to their embedded flags.
 
 Every error uses `Content-Type: application/problem+json` and the same request
 ID in its body and `X-Request-ID` header:

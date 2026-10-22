@@ -26,6 +26,7 @@
     "wrangler": "^4.151.0"
   },
   "dependencies": {
+    "@resvg/resvg-wasm": "2.6.2",
     "hono": "^4.13.13"
   }
 }

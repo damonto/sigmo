@@ -134,7 +134,12 @@ app.get('/auth/callback', () => nativeCallback());
 
 app.get('/logo/:plmn', async (c) =>
   finishResponse(
-    await carrierLogo(c.req.raw, c.env.BUCKET, c.req.param('plmn')),
+    await carrierLogo(
+      c.req.raw,
+      c.env.BUCKET,
+      c.req.param('plmn'),
+      c.executionCtx,
+    ),
     c.get('requestId'),
   ),
 );
