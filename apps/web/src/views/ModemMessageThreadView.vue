@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Phone } from 'lucide-vue-next'
+import { CircleAlert, Phone } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   Dialog,
   DialogContent,
@@ -196,21 +197,6 @@ watch(
       >
         {{ callError || sendError || error }}
       </p>
-      <p
-        v-if="!canSend"
-        class="px-1 py-2 text-sm text-muted-foreground"
-      >
-        {{ t('modemDetail.messages.inactiveLine') }}
-      </p>
-
-      <Button
-        v-if="canUseActive"
-        variant="outline"
-        class="self-start"
-        @click="useActiveProfile"
-      >
-        {{ t('communication.useCurrentLine') }}
-      </Button>
       <div
         ref="messagesContainerRef"
         class="scrollbar-none min-h-0 flex-1 overflow-y-auto py-3"
@@ -231,6 +217,28 @@ watch(
           :participant-label="participantLabel"
         />
       </div>
+
+      <Alert
+        v-if="!canSend"
+        class="my-2 shrink-0"
+      >
+        <CircleAlert />
+        <AlertTitle>{{ t('modemDetail.messages.inactiveLineTitle') }}</AlertTitle>
+        <AlertDescription
+          class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <span>{{ t('modemDetail.messages.inactiveLine') }}</span>
+          <Button
+            v-if="canUseActive"
+            type="button"
+            size="sm"
+            class="w-full shrink-0 sm:w-auto"
+            @click="useActiveProfile"
+          >
+            {{ t('communication.useCurrentLine') }}
+          </Button>
+        </AlertDescription>
+      </Alert>
 
       <ModemMessageComposer
         v-model:message="messageDraft"

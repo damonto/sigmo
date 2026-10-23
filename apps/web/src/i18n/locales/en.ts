@@ -883,6 +883,7 @@ const en = {
       unread: 'Unread',
       historical: 'Historical lines',
       lineSuffix: 'Line ending {suffix}',
+      inactiveLineTitle: 'Inactive SIM line',
       inactiveLine: 'Enable this SIM line before replying. Its history remains available.',
       deleted: 'This conversation has been deleted.',
       resultUnknown:

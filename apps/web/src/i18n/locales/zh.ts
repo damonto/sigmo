@@ -864,6 +864,7 @@ const zh = {
       unread: '未读',
       historical: '历史线路',
       lineSuffix: '尾号 {suffix} 的线路',
+      inactiveLineTitle: 'SIM 线路未启用',
       inactiveLine: '回复前请启用此 SIM 线路，你仍可查看该线路的历史消息。',
       deleted: '此会话已被删除。',
       resultUnknown: '发送结果尚未确认，请核对刷新后的会话再决定是否重发。',
