@@ -7,12 +7,15 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/app/forwarder"
+	"github.com/damonto/sigmo/internal/app/handler/authpage"
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/notify"
@@ -24,17 +27,19 @@ type Handler struct {
 	store             *appsettings.Store
 	internetConnector *internet.Connector
 	relay             *forwarder.Relay
+	authStore         *auth.Store
 }
 
 var (
 	errAuthTestFailed = errors.New("authentication provider test failed")
 )
 
-func New(store *appsettings.Store, internetConnector *internet.Connector, relay *forwarder.Relay) *Handler {
+func New(store *appsettings.Store, internetConnector *internet.Connector, relay *forwarder.Relay, authStore *auth.Store) *Handler {
 	return &Handler{
 		store:             store,
 		internetConnector: internetConnector,
 		relay:             relay,
+		authStore:         authStore,
 	}
 }
 
@@ -100,6 +105,104 @@ func (h *Handler) TestAuth(c *echo.Context) error {
 	}
 
 	return c.NoContent(http.StatusCreated)
+}
+
+// CreateOIDCTest creates a real login attempt for the unsaved OIDC policy.
+func (h *Handler) CreateOIDCTest(c *echo.Context) error {
+	var req OIDCTestSessionRequest
+	if err := httpapi.BindJSON(c, &req, "test_auth_invalid_request"); err != nil {
+		return err
+	}
+	if req.Client != "web" && req.Client != "native" {
+		return httpapi.UnprocessableEntity(c, "test_auth_invalid", errors.New("test client must be web or native"))
+	}
+	candidate, err := h.authTestCandidate(UpdateAuthRequest(req.Auth), "oidc")
+	if err != nil {
+		return httpapi.UnprocessableEntity(c, "test_auth_invalid", err)
+	}
+	origin := c.Scheme() + "://" + c.Request().Host
+	if c.Scheme() != "https" {
+		return httpapi.UnprocessableEntity(
+			c,
+			"test_auth_https_required",
+			errors.New("OIDC authentication tests require HTTPS; open Sigmo through its HTTPS URL"),
+		)
+	}
+	id, expiresAt, err := h.authStore.CreateOIDCTest(auth.OIDCTestRequest{
+		Policy: candidate, Origin: origin, BasePath: req.BasePath,
+		Native: req.Client == "native", State: req.State,
+	})
+	if errors.Is(err, auth.ErrRateLimited) {
+		return httpapi.TooManyRequests(c, "too_many_requests", err)
+	}
+	if err != nil {
+		return httpapi.UnprocessableEntity(c, "test_auth_invalid", err)
+	}
+	target := origin + req.BasePath + "/api/v1/settings/auth-tests/oidc/" + url.PathEscape(id) + "/browser"
+	return c.JSON(http.StatusCreated, OIDCTestSessionResponse{
+		ID: id, AuthorizationURL: target, ExpiresAt: expiresAt,
+	})
+}
+
+// StartOIDCTest establishes the browser binding cookie and enters the provider flow.
+func (h *Handler) StartOIDCTest(c *echo.Context) error {
+	result, err := h.authStore.StartOIDCTest(c.Request().Context(), auth.OIDCTestStartRequest{
+		ID: c.Param("id"), Origin: c.Scheme() + "://" + c.Request().Host,
+	})
+	if err != nil {
+		status, _ := h.authStore.OIDCTestResult(c.Param("id"))
+		slog.Error("start OIDC test", "error", err, "test_id", c.Param("id"))
+		return authpage.Write(c, status.Status == auth.AuthTestStatusSucceeded, h.store.Locale())
+	}
+	c.SetCookie(&http.Cookie{
+		Name: "sigmo_login_" + result.State, Value: result.Binding, Path: "/", MaxAge: 300,
+		HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
+	})
+	c.Response().Header().Set("Referrer-Policy", "no-referrer")
+	return c.Redirect(http.StatusSeeOther, result.URL)
+}
+
+// GetOIDCTest returns the pending or terminal outcome for the initiating client.
+func (h *Handler) GetOIDCTest(c *echo.Context) error {
+	result, ok := h.authStore.OIDCTestResult(c.Param("id"))
+	if !ok {
+		return httpapi.NotFound(c, "resource_not_found", errors.New("authentication test was not found or has expired"))
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+// TestCloudflareAccess verifies candidate fields against the request's signed edge assertion.
+func (h *Handler) TestCloudflareAccess(c *echo.Context) error {
+	var req UpdateAuthRequest
+	if err := httpapi.BindJSON(c, &req, "test_auth_invalid_request"); err != nil {
+		return err
+	}
+	candidate, err := h.authTestCandidate(req, "cloudflare_access")
+	if err != nil {
+		return httpapi.UnprocessableEntity(c, "test_auth_invalid", err)
+	}
+	result := h.authStore.TestCloudflareAccess(
+		c.Request().Context(),
+		candidate,
+		c.Request().Header.Get("Cf-Access-Jwt-Assertion"),
+	)
+	return c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) authTestCandidate(req UpdateAuthRequest, mode string) (appsettings.Auth, error) {
+	req = normalizeAuthValues(req)
+	if req.Mode != mode {
+		return appsettings.Auth{}, fmt.Errorf("test policy mode must be %s", mode)
+	}
+	current := h.store.Snapshot()
+	candidate := authSettingsFromRequest(current.Auth, req)
+	current.Auth = candidate
+	if err := validateSettingsWithOptions(current, appsettings.ValidationOptions{
+		AllowEmptyAccessSubjects: mode == "cloudflare_access",
+	}); err != nil {
+		return appsettings.Auth{}, err
+	}
+	return candidate, nil
 }
 
 func (h *Handler) UpdateProxy(c *echo.Context) error {
@@ -463,13 +566,17 @@ func normalizeHeaders(headers map[string]string) map[string]string {
 }
 
 func validateSettings(current appsettings.Settings) error {
+	return validateSettingsWithOptions(current, appsettings.ValidationOptions{})
+}
+
+func validateSettingsWithOptions(current appsettings.Settings, options appsettings.ValidationOptions) error {
 	allowedChannels := allowedChannelNames()
 	for name := range current.Channels {
 		if _, ok := allowedChannels[name]; !ok {
 			return fmt.Errorf("unsupported channel %q", name)
 		}
 	}
-	if err := current.Validate(); err != nil {
+	if err := current.ValidateWithOptions(options); err != nil {
 		return err
 	}
 	targets := append(slices.Clone(current.Notifications.Channels), current.Auth.OTP.Channels...)

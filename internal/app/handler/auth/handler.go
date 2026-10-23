@@ -5,11 +5,13 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/labstack/echo/v5"
 
 	"github.com/damonto/sigmo/internal/app/auth"
+	"github.com/damonto/sigmo/internal/app/handler/authpage"
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/app/middleware"
 	"github.com/damonto/sigmo/internal/pkg/notify"
@@ -230,6 +232,29 @@ func (h *Handler) OIDCCallback(c *echo.Context) error {
 	c.Response().Header().Set("Referrer-Policy", "no-referrer")
 	query := c.Request().URL.Query()
 	state := query.Get("state")
+	if len(query["state"]) == 1 && len(state) <= 128 && h.store.IsOIDCTest(state) {
+		cookie, _ := c.Cookie("sigmo_login_" + state)
+		binding := ""
+		if cookie != nil {
+			binding = cookie.Value
+			c.SetCookie(&http.Cookie{Name: cookie.Name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+		}
+		code := ""
+		if len(query["code"]) == 1 {
+			code = query.Get("code")
+		}
+		completion := h.store.CompleteOIDCTest(c.Request().Context(), auth.OIDCTestCallback{
+			Origin: browserOrigin(c), State: state, Code: code, Binding: binding,
+		})
+		if completion.Native {
+			target := auth.NativeRedirectURL + "?" + url.Values{
+				"code":  {completion.TestID},
+				"state": {completion.NativeState},
+			}.Encode()
+			return c.Redirect(http.StatusSeeOther, target)
+		}
+		return authpage.Write(c, completion.Result.Status == auth.AuthTestStatusSucceeded, h.settings.Locale())
+	}
 	if len(query["state"]) != 1 || len(query["code"]) != 1 || query.Has("error") || len(state) > 128 {
 		return h.loginError(c, auth.ErrInvalidLogin)
 	}

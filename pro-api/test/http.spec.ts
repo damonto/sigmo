@@ -247,10 +247,12 @@ describe('HTTP contract', () => {
   it('serves the same registered type on either hostname', async () => {
     const response = await send('/problems/invalid_token');
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
+    const problem = await response.json();
+    expect(problem).toMatchObject({
       type: PROBLEM_TYPE_PREFIX + 'invalid_token',
       error_code: 'invalid_token',
     });
+    expect(problem).not.toHaveProperty('documentation');
     const head = await send('/problems/invalid_token', { method: 'HEAD' });
     expect(head.status).toBe(200);
     expect(await head.text()).toBe('');

@@ -16,6 +16,9 @@ import SettingsWebPushView from '@/views/SettingsWebPushView.vue'
 const api = vi.hoisted(() => ({
   getSettings: vi.fn(),
   testAuth: vi.fn(),
+  createOIDCTest: vi.fn(),
+  getOIDCTest: vi.fn(),
+  testCloudflareAccess: vi.fn(),
   updateAuth: vi.fn(),
   updateProxy: vi.fn(),
   updateNotificationChannel: vi.fn(),
@@ -27,6 +30,8 @@ const toast = vi.hoisted(() => ({
   error: vi.fn(),
   warning: vi.fn(),
 }))
+
+let testLocationProtocol = 'https:'
 
 vi.mock('@/apis/settings', () => ({
   useSettingsApi: () => api,
@@ -278,6 +283,19 @@ const createSettingsRouter = () =>
 const mountSettings = async (path: string, settings = response()) => {
   api.getSettings.mockResolvedValue({ data: ref<SettingsResponse>(clone(settings)) })
   api.testAuth.mockResolvedValue({ data: ref<void>() })
+  api.createOIDCTest.mockResolvedValue({
+    data: ref({
+      id: 'oidc-test',
+      authorizationUrl: `${window.location.origin}/api/v1/settings/auth-tests/oidc/oidc-test/browser`,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    }),
+  })
+  api.getOIDCTest.mockResolvedValue({
+    data: ref({ status: 'succeeded', subject: 'owner' }),
+  })
+  api.testCloudflareAccess.mockResolvedValue({
+    data: ref({ status: 'succeeded', subject: 'owner' }),
+  })
   api.updateNotifications.mockImplementation(async (payload: SettingsValues['notifications']) => {
     const updated = clone(settings)
     updated.values.notifications = clone(payload)
@@ -337,6 +355,14 @@ const navigate = async (router: Router, path: string) => {
 describe('Settings routes', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    testLocationProtocol = 'https:'
+    vi.spyOn(window, 'location', 'get').mockImplementation(
+      () =>
+        ({
+          protocol: testLocationProtocol,
+          origin: 'https://localhost:3000',
+        }) as Location,
+    )
   })
 
   afterEach(() => {
@@ -472,7 +498,185 @@ describe('Settings routes', () => {
 
     expect(api.testAuth).toHaveBeenCalledWith({ channels: ['telegram'] })
     expect(api.updateAuth).not.toHaveBeenCalled()
-    expect(toast.success).toHaveBeenCalledWith('settings.authTestSuccess')
+    expect(toast.success).toHaveBeenCalledWith('settings.authTestOTPSuccess')
+  })
+
+  it('tests OIDC in a popup without saving or changing the session', async () => {
+    const popup = {
+      opener: {},
+      closed: false,
+      close: vi.fn(),
+      location: { replace: vi.fn() },
+    } as unknown as Window
+    vi.spyOn(window, 'open').mockReturnValue(popup)
+    const settings = response()
+    settings.values.auth = {
+      ...settings.values.auth,
+      mode: 'oidc',
+      oidcIssuer: 'https://issuer.example',
+      oidcClientId: 'client',
+      oidcAllowedSubjects: ['owner'],
+    }
+    const { wrapper } = await mountSettings('/settings/auth', settings)
+
+    const testButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('settings.test'))
+    await testButton?.trigger('click')
+    await flushPromises()
+
+    expect(api.createOIDCTest).toHaveBeenCalledWith({
+      client: 'web',
+      basePath: '',
+      state: '',
+      auth: expect.objectContaining({ mode: 'oidc', oidcIssuer: 'https://issuer.example' }),
+    })
+    expect(popup.location.replace).toHaveBeenCalledWith(
+      `${window.location.origin}/api/v1/settings/auth-tests/oidc/oidc-test/browser`,
+    )
+    expect(api.getOIDCTest).toHaveBeenCalledWith('oidc-test')
+    expect(api.updateAuth).not.toHaveBeenCalled()
+    expect(toast.success).toHaveBeenCalledWith('settings.authTestOIDCSuccess')
+    expect(popup.close).toHaveBeenCalled()
+  })
+
+  it('reports Cloudflare Access test failures without saving', async () => {
+    api.testCloudflareAccess.mockResolvedValueOnce({
+      data: ref({ status: 'failed', reason: 'subject_not_allowed', subject: 'stranger' }),
+    })
+    const settings = response()
+    settings.values.auth = {
+      ...settings.values.auth,
+      mode: 'cloudflare_access',
+      accessTeamDomain: 'https://team.cloudflareaccess.com',
+      accessAudience: 'aud',
+      accessAllowedSubjects: ['owner'],
+    }
+    const { wrapper } = await mountSettings('/settings/auth', settings)
+
+    const testButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('settings.test'))
+    await testButton?.trigger('click')
+    await flushPromises()
+
+    expect(api.testCloudflareAccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'cloudflare_access',
+        accessTeamDomain: 'https://team.cloudflareaccess.com',
+      }),
+    )
+    expect(api.updateAuth).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('settings.authTestSubjectNotAllowed')
+  })
+
+  it('reports a blocked OIDC test popup', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null)
+    const settings = response()
+    settings.values.auth = { ...settings.values.auth, mode: 'oidc' }
+    const { wrapper } = await mountSettings('/settings/auth', settings)
+
+    const testButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('settings.test'))
+    await testButton?.trigger('click')
+    await flushPromises()
+
+    expect(api.createOIDCTest).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('settings.authTestPopupBlocked')
+  })
+
+  it('requires HTTPS before starting an OIDC test', async () => {
+    testLocationProtocol = 'http:'
+    const settings = response()
+    settings.values.auth = { ...settings.values.auth, mode: 'oidc' }
+    const { wrapper } = await mountSettings('/settings/auth', settings)
+
+    const testButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('settings.test'))
+    await testButton?.trigger('click')
+    await flushPromises()
+
+    expect(api.createOIDCTest).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('settings.authTestHTTPSRequired')
+  })
+
+  it('reports local OIDC test failures instead of swallowing them', async () => {
+    const popup = {
+      opener: {},
+      closed: false,
+      close: vi.fn(),
+      location: { replace: vi.fn() },
+    } as unknown as Window
+    vi.spyOn(window, 'open').mockReturnValue(popup)
+    api.createOIDCTest.mockRejectedValueOnce(new Error('invalid response'))
+    const settings = response()
+    settings.values.auth = { ...settings.values.auth, mode: 'oidc' }
+    const { wrapper } = await mountSettings('/settings/auth', settings)
+
+    const testButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('settings.test'))
+    await testButton?.trigger('click')
+    await flushPromises()
+
+    expect(toast.error).toHaveBeenCalledWith('settings.authTestFailed')
+  })
+
+  it('reports an OIDC test failure returned by the status endpoint', async () => {
+    const popup = {
+      opener: {},
+      closed: false,
+      close: vi.fn(),
+      location: { replace: vi.fn() },
+    } as unknown as Window
+    vi.spyOn(window, 'open').mockReturnValue(popup)
+    api.getOIDCTest.mockResolvedValueOnce({
+      data: ref({ status: 'failed', reason: 'discovery_failed' }),
+    })
+    const settings = response()
+    settings.values.auth = { ...settings.values.auth, mode: 'oidc' }
+    const { wrapper } = await mountSettings('/settings/auth', settings)
+
+    const testButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('settings.test'))
+    await testButton?.trigger('click')
+    await flushPromises()
+
+    expect(api.getOIDCTest).toHaveBeenCalledWith('oidc-test')
+    expect(api.updateAuth).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('settings.authTestOIDCDiscoveryFailed')
+  })
+
+  it('stops waiting when the OIDC test window is closed', async () => {
+    const popupState = {
+      opener: {},
+      closed: false,
+      close: vi.fn(),
+      location: { replace: vi.fn() },
+    }
+    const popup = popupState as unknown as Window
+    vi.spyOn(window, 'open').mockReturnValue(popup)
+    api.getOIDCTest.mockImplementationOnce(async () => {
+      popupState.closed = true
+      return {
+        data: ref({ status: 'pending', expiresAt: new Date(Date.now() + 60_000).toISOString() }),
+      }
+    })
+    const settings = response()
+    settings.values.auth = { ...settings.values.auth, mode: 'oidc' }
+    const { wrapper } = await mountSettings('/settings/auth', settings)
+
+    const testButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('settings.test'))
+    await testButton?.trigger('click')
+    await flushPromises()
+
+    expect(api.getOIDCTest).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalledWith('settings.authTestCancelled')
   })
 
   it('blocks repeated actions while testing authentication providers', async () => {
@@ -540,7 +744,7 @@ describe('Settings routes', () => {
       expect(wrapper.find('[role="checkbox"]').exists()).toBe(mode === 'otp')
       expect(wrapper.find('#settings-auth-oidcIssuer').exists()).toBe(mode === 'oidc')
       expect(wrapper.findAll('button').some((button) => button.text() === 'settings.test')).toBe(
-        mode === 'otp',
+        ['otp', 'oidc', 'cloudflare_access'].includes(mode),
       )
       for (const key of ['accessTeamDomain', 'accessAudience']) {
         expect(wrapper.find(`#settings-auth-${key}`).exists()).toBe(mode === 'cloudflare_access')

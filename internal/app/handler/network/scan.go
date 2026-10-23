@@ -37,11 +37,7 @@ var (
 	errNetworkScanStoreClosed = errors.New("network scan store is closed")
 )
 
-// NetworkScanResponse describes one modem-scoped network scan task.
-//
-// A scan is a resource because a full-band modem scan can take minutes. The
-// response is deliberately small while the task is running; the network list
-// is attached only after the task completes.
+// NetworkScanResponse describes one modem-scoped scan resource.
 type NetworkScanResponse struct {
 	ID        string            `json:"id"`
 	Status    string            `json:"status"`
@@ -79,10 +75,7 @@ func newNetwork(preferences *networkprefs.Store, store *storage.Store, lifecycle
 	}, nil
 }
 
-// scanTaskStore owns all scans started by the HTTP and MCP surfaces. The
-// active map is keyed by modem generation, so two browsers cannot start two
-// firmware-level scans on the same modem while different modems remain
-// independent.
+// scanTaskStore shares one firmware scan per modem generation across surfaces.
 type scanTaskStore struct {
 	mu       sync.Mutex
 	active   map[*mmodem.Modem]*scanTask

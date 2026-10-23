@@ -12,7 +12,7 @@ Sigmo focuses on advanced eSIM operations, SMS management, and network control. 
 - **📱 eSIM Management**: List, download (SM-DP+), enable, rename, and delete eSIM profiles.
 - **📩 SMS Center**: Full conversational view for SMS, send/delete capability, and USSD session support.
 - **⚙️ Modem Control**: SIM slot switching, network scanning, manual registration, and preference configuration (Alias, MSS).
-- **🔒 Secure Access**: Independent OTP delivery, standard OIDC, and Cloudflare Access for Web and iOS. See the [authentication setup and migration guide](internal/app/auth/README.md).
+- **🔒 Secure Access**: Independent OTP delivery, standard OIDC, and Cloudflare Access for Web and iOS. See [OIDC](#oidc) and [Cloudflare Access](#cloudflare-access).
 - **🔔 Notifications**: Forward incoming SMS and login tokens to Telegram, Bark, Gotify, Email, etc.
 - **🚀 Portable**: Single Go binary with no mandatory modem-control daemon.
 
@@ -130,6 +130,26 @@ Runtime settings are managed in the Web UI and stored in SQLite:
 - Modem alias, compatibility mode, and APDU MSS.
 - Internet APN preferences and Always On state.
 - Network mode, bands, and manual registration preferences.
+
+### OIDC
+
+1. Create a confidential OIDC client with the exact callback
+   `https://<Sigmo host>/api/v1/auth/oidc/callback`.
+2. In **Settings > Authentication**, select `OIDC` and enter the HTTPS issuer,
+   client ID, client secret, and allowed `sub` values.
+3. Use **Test**, then save.
+
+### Cloudflare Access
+
+1. Put Sigmo behind a Cloudflare Access Self-hosted application and block
+   direct access to the origin. Enable Managed OAuth and Dynamic Client
+   Registration with `https://sigmo-pro.952007.xyz/auth/callback` as the
+   callback.
+2. In **Settings > Authentication**, select `Cloudflare Access` and enter the
+   team URL, application AUD, and allowed `sub` values.
+3. Use **Test**, then save.
+
+Use HTTPS and keep the proxy's external `Host` and `X-Forwarded-Proto`.
 
 ---
 

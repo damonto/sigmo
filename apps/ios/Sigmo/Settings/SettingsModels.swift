@@ -114,6 +114,45 @@ struct SettingsResponse: Codable, Sendable {
     var values: SettingsValues
 }
 
+struct OIDCTestRequest: Codable, Sendable {
+    let client: String
+    let basePath: String
+    let state: String
+    let auth: SettingsFields
+}
+
+struct OIDCTestSession: Codable, Sendable {
+    let id: String
+    let authorizationUrl: URL
+    let expiresAt: Date
+
+    func validated(backend: URL) throws -> Self {
+        guard !id.isEmpty, authorizationUrl.scheme == "https",
+              BackendAddress.sameOrigin(backend, authorizationUrl),
+              authorizationUrl.user == nil, authorizationUrl.query == nil,
+              authorizationUrl.fragment == nil,
+              authorizationUrl.path.hasSuffix("/settings/auth-tests/oidc/\(id)/browser"),
+              expiresAt > Date() else {
+            throw BackendFailure.local("api.invalidResponse")
+        }
+        return self
+    }
+}
+
+struct SettingsAuthTestResult: Codable, Sendable {
+    let status: String
+    let reason: String?
+    let subject: String?
+
+    func validated(allowsPending: Bool) throws -> Self {
+        let allowed = allowsPending ? ["pending", "succeeded", "failed"] : ["succeeded", "failed"]
+        guard allowed.contains(status), reason?.isEmpty != true, subject?.isEmpty != true else {
+            throw BackendFailure.local("api.invalidResponse")
+        }
+        return self
+    }
+}
+
 struct MCPSettings: Codable, Sendable {
     var enabled: Bool
     let endpointPath: String

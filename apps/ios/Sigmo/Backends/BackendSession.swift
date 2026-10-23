@@ -452,6 +452,12 @@ final class BackendSession: Identifiable {
         isBrowserLogin = false
     }
 
+    /// Opens an OIDC configuration test without changing the current application session.
+    func openAuthenticationTest(_ target: URL) async throws -> URL {
+        try Task.checkCancellation()
+        return try await browser.open(target)
+    }
+
     private func performBrowserLogin(_ current: Int) async {
         defer {
             if current == generation {

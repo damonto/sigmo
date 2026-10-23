@@ -13,7 +13,6 @@ export const useSettings = () => {
   const settings = ref<SettingsResponse | null>(null)
   const values = ref<SettingsValues | null>(null)
   const isLoading = ref(false)
-  const isTestingAuth = ref(false)
   const isSavingAuth = ref(false)
   const isSavingProxy = ref(false)
   const isSavingNotifications = ref(false)
@@ -41,7 +40,7 @@ export const useSettings = () => {
   }
 
   const saveAuth = async () => {
-    if (!values.value || isSaving.value || isTestingAuth.value) return null
+    if (!values.value || isSaving.value) return null
     isSavingAuth.value = true
     try {
       const { data } = await configApi.updateAuth(values.value.auth)
@@ -51,19 +50,6 @@ export const useSettings = () => {
       return data.value
     } finally {
       isSavingAuth.value = false
-    }
-  }
-
-  const testAuth = async () => {
-    const otpChannels = values.value?.auth.otpChannels
-    if (!otpChannels?.length || isSaving.value || isTestingAuth.value) return false
-
-    isTestingAuth.value = true
-    try {
-      await configApi.testAuth({ channels: clone(otpChannels) })
-      return true
-    } finally {
-      isTestingAuth.value = false
     }
   }
 
@@ -124,7 +110,6 @@ export const useSettings = () => {
     settings,
     values,
     isLoading,
-    isTestingAuth,
     isSaving,
     isSavingAuth,
     isSavingProxy,
@@ -135,6 +120,5 @@ export const useSettings = () => {
     saveProxy,
     saveNotificationChannel,
     saveNotifications,
-    testAuth,
   }
 }

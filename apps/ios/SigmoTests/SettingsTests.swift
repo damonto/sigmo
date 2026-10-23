@@ -148,6 +148,7 @@ final class SettingsTests: XCTestCase {
         let state = SettingsState(session: session)
         await state.load()
         state.auth["sessionMaxDays"] = .number(60)
+        state.auth["mode"] = .text("otp")
         await state.testAuth()
         XCTAssertEqual(state.snapshot?.values.auth["sessionMaxDays"], .number(30))
         state.notifications["channels"] = .list([])
@@ -157,6 +158,52 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(state.snapshot?.values.notifications["channels"], .list([]))
         let requests = await server.allRequests()
         XCTAssertEqual(requests.filter { $0.url?.path.hasSuffix("/settings/auth-tests") == true }.count, 1)
+        XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/settings/auth") == true })
+    }
+
+    func testOIDCTestUsesBrowserWithoutSavingSettings() async throws {
+        let server = try SettingsTestServer()
+        let browser = SettingsFixtureBrowser(server: server)
+        let session = try settingsSession(server, browser: browser)
+        await session.refresh(force: true)
+        let state = SettingsState(session: session)
+        await state.load()
+        state.auth["mode"] = .text("oidc")
+        state.auth["oidcIssuer"] = .text("https://issuer.example")
+        state.auth["oidcClientId"] = .text("client")
+        state.auth["oidcClientSecret"] = .text("secret")
+        state.auth["oidcAllowedSubjects"] = .list(["owner"])
+
+        await state.testAuth()
+
+        XCTAssertEqual(state.message, "settings.authTestOIDCSuccess")
+        XCTAssertNil(state.failure)
+        XCTAssertEqual(browser.opened?.host, "settings.example")
+        let requests = await server.allRequests()
+        XCTAssertTrue(requests.contains { $0.url?.path.hasSuffix("/settings/auth-tests/oidc") == true })
+        XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/settings/auth") == true })
+    }
+
+    func testCloudflareAccessTestReportsSubjectWithoutSaving() async throws {
+        let server = try SettingsTestServer()
+        await server.setAuthTestResult(
+            .init(status: "failed", reason: "subject_not_allowed", subject: "stranger")
+        )
+        let session = try settingsSession(server)
+        await session.refresh(force: true)
+        let state = SettingsState(session: session)
+        await state.load()
+        state.auth["mode"] = .text("cloudflare_access")
+        state.auth["accessTeamDomain"] = .text("https://team.cloudflareaccess.com")
+        state.auth["accessAudience"] = .text("aud")
+        state.auth["accessAllowedSubjects"] = .list(["owner"])
+
+        await state.testAuth()
+
+        XCTAssertEqual(state.failure?.code, "settings.authTestSubjectNotAllowed")
+        XCTAssertTrue(state.failure?.message.contains("stranger") == true)
+        let requests = await server.allRequests()
+        XCTAssertTrue(requests.contains { $0.url?.path.hasSuffix("/settings/auth-tests/cloudflare-access") == true })
         XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/settings/auth") == true })
     }
 
@@ -375,4 +422,21 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(state.endpoint.isEmpty)
     }
 
+}
+
+@MainActor
+private final class SettingsFixtureBrowser: BrowserAuthenticating {
+    private let server: SettingsTestServer
+    private(set) var opened: URL?
+
+    init(server: SettingsTestServer) {
+        self.server = server
+    }
+
+    func open(_ url: URL) async throws -> URL {
+        opened = url
+        return await server.oidcTestCallback()
+    }
+
+    func cancel() {}
 }

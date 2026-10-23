@@ -38,6 +38,7 @@ type Store struct {
 	db         *storage.Store
 	challenges map[string]*challenge
 	logins     map[string]login
+	tests      map[string]*oidcTest
 	limits     map[string]rateLimit
 	providers  map[string]*oidc.Provider
 	keys       map[string]*oidc.RemoteKeySet
@@ -69,7 +70,10 @@ func NewStore(db *storage.Store) (*Store, error) {
 	client := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
-	return &Store{db: db, challenges: map[string]*challenge{}, logins: map[string]login{}, limits: map[string]rateLimit{}, providers: map[string]*oidc.Provider{}, keys: map[string]*oidc.RemoteKeySet{}, client: client}, nil
+	return &Store{
+		db: db, challenges: map[string]*challenge{}, logins: map[string]login{}, tests: map[string]*oidcTest{},
+		limits: map[string]rateLimit{}, providers: map[string]*oidc.Provider{}, keys: map[string]*oidc.RemoteKeySet{}, client: client,
+	}, nil
 }
 
 // AllowLogin bounds both memory and unauthenticated work per source and operation.

@@ -1,11 +1,42 @@
-import { inject, provide } from 'vue'
+import { computed, inject, provide } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 
+import { useAuthTest } from '@/composables/useAuthTest'
 import { useSettings } from '@/composables/useSettings'
 import { useSettingsForm } from '@/composables/useSettingsForm'
+import { isApiError } from '@/lib/apiProblem'
 
 const settingsContextKey = Symbol('settings-context')
+
+const authTestFailureKey = (reason: string | undefined) => {
+  switch (reason) {
+    case 'discovery_failed':
+      return 'settings.authTestOIDCDiscoveryFailed'
+    case 'authorization_failed':
+      return 'settings.authTestOIDCAuthorizationFailed'
+    case 'token_exchange_failed':
+      return 'settings.authTestOIDCTokenExchangeFailed'
+    case 'token_invalid':
+      return 'settings.authTestOIDCTokenInvalid'
+    case 'subject_not_allowed':
+      return 'settings.authTestSubjectNotAllowed'
+    case 'access_assertion_missing':
+      return 'settings.authTestAccessAssertionMissing'
+    case 'access_assertion_invalid':
+      return 'settings.authTestAccessAssertionInvalid'
+    case 'popup_blocked':
+      return 'settings.authTestPopupBlocked'
+    case 'cancelled':
+      return 'settings.authTestCancelled'
+    case 'expired':
+      return 'settings.authTestExpired'
+    case 'https_required':
+      return 'settings.authTestHTTPSRequired'
+    default:
+      return 'settings.authTestFailed'
+  }
+}
 
 const createSettingsContext = () => {
   const { t } = useI18n()
@@ -14,19 +45,21 @@ const createSettingsContext = () => {
     values,
     isLoading,
     isSaving,
-    isTestingAuth,
     isSavingAuth,
     isSavingProxy,
     isSavingNotifications,
     savingNotificationChannels,
     fetchSettings,
-    testAuth: testAuthSettings,
     saveAuth: saveAuthSettings,
     saveProxy: saveProxySettings,
     saveNotificationChannel,
     saveNotifications: saveNotificationSettings,
   } = useSettings()
   const form = useSettingsForm(settings, values)
+  const { isTesting: isTestingAuth, test: runAuthTest } = useAuthTest(
+    computed(() => values.value?.auth ?? null),
+    isSaving,
+  )
 
   const load = async () => {
     await fetchSettings()
@@ -34,6 +67,7 @@ const createSettingsContext = () => {
   }
 
   const saveAuth = async () => {
+    if (isTestingAuth.value) return false
     const response = await saveAuthSettings()
     if (!response) return false
 
@@ -42,11 +76,26 @@ const createSettingsContext = () => {
   }
 
   const testAuth = async () => {
-    const tested = await testAuthSettings()
-    if (!tested) return false
-
-    toast.success(t('settings.authTestSuccess'))
-    return true
+    try {
+      const result = await runAuthTest()
+      if (!result || result.status === 'pending') return false
+      if (result.status === 'succeeded') {
+        const mode = values.value?.auth.mode
+        const key =
+          mode === 'oidc'
+            ? 'settings.authTestOIDCSuccess'
+            : mode === 'cloudflare_access'
+              ? 'settings.authTestAccessSuccess'
+              : 'settings.authTestOTPSuccess'
+        toast.success(t(key))
+        return true
+      }
+      toast.error(t(authTestFailureKey(result.reason), { subject: result.subject ?? '' }))
+      return false
+    } catch (error) {
+      if (!isApiError(error)) toast.error(t('settings.authTestFailed'))
+      return false
+    }
   }
 
   const saveProxy = async () => {

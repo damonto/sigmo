@@ -14,6 +14,34 @@ extension BackendAPI {
                               body: JSONEncoder().encode(["channels": providers]), token: token)
     }
 
+    func createOIDCTest(_ auth: SettingsFields, state: String, token: String?) async throws -> OIDCTestSession {
+        guard let parts = URLComponents(url: address, resolvingAgainstBaseURL: false),
+              parts.percentEncodedPath.hasSuffix("/api/v1") else {
+            throw BackendFailure.local("api.invalidResponse")
+        }
+        let basePath = String(parts.percentEncodedPath.dropLast("/api/v1".count))
+        let body = OIDCTestRequest(client: "native", basePath: basePath, state: state, auth: auth)
+        let result: OIDCTestSession = try await decode(
+            ["settings", "auth-tests", "oidc"], method: "POST", body: JSONEncoder().encode(body), token: token
+        )
+        return try result.validated(backend: address)
+    }
+
+    func oidcTest(_ id: String, token: String?) async throws -> SettingsAuthTestResult {
+        let result: SettingsAuthTestResult = try await decode(
+            ["settings", "auth-tests", "oidc", id], token: token
+        )
+        return try result.validated(allowsPending: true)
+    }
+
+    func testCloudflareAccess(_ auth: SettingsFields, token: String?) async throws -> SettingsAuthTestResult {
+        let result: SettingsAuthTestResult = try await decode(
+            ["settings", "auth-tests", "cloudflare-access"],
+            method: "POST", body: JSONEncoder().encode(auth), token: token
+        )
+        return try result.validated(allowsPending: false)
+    }
+
     func mcpSettings(token: String?) async throws -> MCPSettings {
         try await decode(["settings", "mcp"], token: token)
     }

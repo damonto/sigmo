@@ -74,6 +74,10 @@ struct SettingsFormView: View {
         }
     }
 
+    private var authMode: String {
+        state.auth["mode"]?.text ?? "none"
+    }
+
     private func binding(_ key: String) -> Binding<SettingValue> {
         Binding(
             get: { state[section][key] ?? .null },
@@ -92,9 +96,9 @@ struct SettingsFormView: View {
                     }
                     if channelSchema == nil, let validation = state.validation(for: section) { Section { Text(validation).foregroundStyle(.secondary) } }
                     Section {
-                        if section == .authentication && state.auth["mode"]?.text == "otp" {
+                        if section == .authentication && ["otp", "oidc", "cloudflare_access"].contains(authMode) {
                             AsyncActionButton(title: "settings.test", id: "test-auth") { await state.testAuth() }
-                                .disabled((state.auth["otpChannels"]?.strings ?? []).isEmpty)
+                                .disabled(authMode == "otp" && (state.auth["otpChannels"]?.strings ?? []).isEmpty)
                         }
                         AsyncActionButton(title: "common.save", id: "save-settings") { await state.save(section) }
                             .disabled(state.validation(for: section) != nil)

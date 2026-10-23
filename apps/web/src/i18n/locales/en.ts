@@ -144,6 +144,10 @@ const en = {
     reload_notifications_failed: 'Could not reload notification settings.',
     revoke_session_failed: 'Could not revoke the session. Try again.',
     save_notifications_failed: 'Could not save notification settings.',
+    test_auth_failed: 'The authentication test failed. Check the configuration and try again.',
+    test_auth_https_required:
+      'OIDC testing requires HTTPS. Open this Sigmo through its HTTPS URL and try again.',
+    test_auth_invalid: 'The authentication test configuration is invalid.',
     validate_session_failed: 'Could not validate the session. Try again.',
     contact_invalid: 'Check the contact name and phone numbers.',
     thread_read_invalid: 'The displayed messages have changed. Refresh and try again.',
@@ -293,6 +297,29 @@ const en = {
     test: 'Test',
     save: 'Save',
     authTestSuccess: 'Test verification code sent.',
+    authTestOTPSuccess: 'Test verification code sent.',
+    authTestOIDCSuccess: 'OIDC sign-in test succeeded.',
+    authTestAccessSuccess: 'Cloudflare Access test succeeded.',
+    authTestOIDCDiscoveryFailed:
+      'OIDC discovery failed. Check the issuer URL and its network access.',
+    authTestOIDCAuthorizationFailed:
+      'OIDC sign-in did not complete. Check the callback URL and try again.',
+    authTestOIDCTokenExchangeFailed:
+      'The OIDC token exchange failed. Check the client ID, client secret, and registered callback.',
+    authTestOIDCTokenInvalid:
+      'The OIDC token was rejected. Check the issuer, client ID, callback, and server time.',
+    authTestSubjectNotAllowed:
+      'The signed-in subject "{subject}" is not in the allowed subjects list.',
+    authTestAccessAssertionMissing:
+      'No Cloudflare Access assertion reached Sigmo. Verify that this request passes through the Access application.',
+    authTestAccessAssertionInvalid:
+      'Cloudflare Access rejected the request. Check the team URL, application AUD, and Access policy.',
+    authTestPopupBlocked: 'Allow the browser to open a window so the OIDC sign-in can be tested.',
+    authTestCancelled: 'The authentication test was not completed.',
+    authTestExpired: 'The authentication test expired. Start another test.',
+    authTestHTTPSRequired:
+      'OIDC testing requires HTTPS. Open this Sigmo through its HTTPS URL and try again.',
+    authTestFailed: 'The authentication test failed. Check the configuration and try again.',
     saveSuccess: 'Settings saved.',
     notificationSaveSuccess: 'Notification channel saved.',
     updates: {
@@ -362,9 +389,13 @@ const en = {
         oidcClientSecret: 'OIDC client secret',
         keepSecret: 'Leave empty to retain the saved secret.',
         oidcAllowedSubjects: 'Allowed OIDC subjects (sub)',
+        oidcAllowedSubjectsDescription:
+          'Leave empty to accept any subject authenticated by this issuer and client. Use Test to see the current subject.',
         accessTeamDomain: 'Cloudflare Access team URL',
         accessAudience: 'Cloudflare Access application AUD',
         accessAllowedSubjects: 'Allowed Access subjects (sub)',
+        accessAllowedSubjectsDescription:
+          'Use Test to discover the signed-in subject. A saved Access policy needs at least one exact subject.',
       },
       proxy: {
         listenAddress: {

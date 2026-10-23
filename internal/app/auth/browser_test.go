@@ -22,7 +22,7 @@ import (
 
 // A TLS provider exercises discovery, PKCE exchange, signed claims and JWKS together.
 func TestOIDCBrowserFlow(t *testing.T) {
-	for _, scenario := range []string{"web", "alternate origin", "HTTPS port", "web prefix", "native", "native prefix", "wrong nonce", "wrong audience", "wrong issuer", "unlisted subject", "expired", "wrong binding", "wrong state", "wrong callback origin", "policy changed", "PKCE mismatch"} {
+	for _, scenario := range []string{"web", "empty admission list", "alternate origin", "HTTPS port", "web prefix", "native", "native prefix", "wrong nonce", "wrong audience", "wrong issuer", "unlisted subject", "expired", "wrong binding", "wrong state", "wrong callback origin", "policy changed", "PKCE mismatch"} {
 		t.Run(scenario, func(t *testing.T) {
 			key, err := rsa.GenerateKey(rand.Reader, 2048)
 			if err != nil {
@@ -92,6 +92,9 @@ func TestOIDCBrowserFlow(t *testing.T) {
 			cfg := otpPolicy()
 			cfg.Mode = "oidc"
 			cfg.OIDC = settings.OIDC{Issuer: issuer, ClientID: "client", ClientSecret: "secret", AllowedSubjects: []string{"owner"}}
+			if scenario == "empty admission list" {
+				cfg.OIDC.AllowedSubjects = nil
+			}
 			native := scenario == "native" || scenario == "native prefix" || scenario == "PKCE mismatch"
 			verifier := strings.Repeat("a", 43)
 			target, err := s.CreateBrowserLogin(BrowserRequest{Policy: cfg, Origin: origin, BasePath: basePath, Native: native, State: strings.Repeat("s", 32), CodeChallenge: pkce(verifier)})
@@ -129,7 +132,7 @@ func TestOIDCBrowserFlow(t *testing.T) {
 				callback.Policy.SessionMaxDays++
 			}
 			result, err := s.CompleteBrowserLogin(t.Context(), callback)
-			if scenario != "web" && scenario != "alternate origin" && scenario != "HTTPS port" && scenario != "web prefix" && !native {
+			if scenario != "web" && scenario != "empty admission list" && scenario != "alternate origin" && scenario != "HTTPS port" && scenario != "web prefix" && !native {
 				if err == nil {
 					t.Fatal("accepted invalid login")
 				}
@@ -289,6 +292,221 @@ func TestAccessAssertion(t *testing.T) {
 				t.Fatalf("invalid assertion accepted: %v", err)
 			}
 		})
+	}
+}
+
+func TestOIDCTestFlow(t *testing.T) {
+	for _, scenario := range []string{"success", "subject not allowed", "empty admission list", "wrong nonce", "token exchange failed"} {
+		t.Run(scenario, func(t *testing.T) {
+			key, err := rsa.GenerateKey(rand.Reader, 2048)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s := testAuthStore(t)
+			var issuer, nonce string
+			provider := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/.well-known/openid-configuration":
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"issuer": issuer, "authorization_endpoint": issuer + "/authorize",
+						"token_endpoint": issuer + "/token", "jwks_uri": issuer + "/keys",
+						"id_token_signing_alg_values_supported": []string{"RS256"},
+					})
+				case "/keys":
+					_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{
+						"kty": "RSA", "kid": "key", "use": "sig", "alg": "RS256",
+						"n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
+						"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
+					}}})
+				case "/token":
+					if scenario == "token exchange failed" {
+						w.WriteHeader(http.StatusUnauthorized)
+						_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_client"})
+						return
+					}
+					if err := r.ParseForm(); err != nil {
+						t.Error(err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					if len(r.Form.Get("code_verifier")) < 43 {
+						t.Error("OIDC test used an invalid PKCE verifier")
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					tokenNonce := nonce
+					if scenario == "wrong nonce" {
+						tokenNonce = "wrong"
+					}
+					subject := "owner"
+					if scenario == "subject not allowed" {
+						subject = "stranger"
+					}
+					claims := map[string]any{
+						"iss": issuer, "sub": subject, "aud": "client", "nonce": tokenNonce,
+						"iat": time.Now().Unix(), "exp": time.Now().Add(time.Minute).Unix(),
+					}
+					_ = json.NewEncoder(w).Encode(map[string]string{
+						"access_token": "upstream-secret", "token_type": "Bearer", "id_token": signedTestJWT(t, key, claims),
+					})
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer provider.Close()
+			issuer = provider.URL
+			s.client = provider.Client()
+
+			cfg := otpPolicy()
+			cfg.Mode = "oidc"
+			cfg.OIDC = settings.OIDC{
+				Issuer: issuer, ClientID: "client", ClientSecret: "secret", AllowedSubjects: []string{"owner"},
+			}
+			if scenario == "empty admission list" {
+				cfg.OIDC.AllowedSubjects = nil
+			}
+			origin := "https://sigmo.example"
+			id, expiresAt, err := s.CreateOIDCTest(OIDCTestRequest{
+				Policy: cfg, Origin: origin, BasePath: "/sigmo",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !expiresAt.After(time.Now()) {
+				t.Fatal("test did not receive a deadline")
+			}
+			pending, ok := s.OIDCTestResult(id)
+			if !ok || pending.Status != AuthTestStatusPending {
+				t.Fatalf("pending result = %+v, %v", pending, ok)
+			}
+			start, err := s.StartOIDCTest(t.Context(), OIDCTestStartRequest{ID: id, Origin: origin})
+			if err != nil {
+				t.Fatal(err)
+			}
+			authorization, err := url.Parse(start.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			nonce = authorization.Query().Get("nonce")
+			if nonce == "" || authorization.Query().Get("code_challenge_method") != "S256" {
+				t.Fatal("test login did not include PKCE and nonce")
+			}
+			completion := s.CompleteOIDCTest(t.Context(), OIDCTestCallback{
+				Origin: origin, State: start.State, Code: "code", Binding: start.Binding,
+			})
+			result := completion.Result
+			switch scenario {
+			case "success":
+				if result.Status != AuthTestStatusSucceeded || result.Subject != "owner" {
+					t.Fatalf("result = %+v", result)
+				}
+			case "subject not allowed":
+				if result.Status != AuthTestStatusFailed || result.Reason != AuthTestReasonSubjectNotAllowed || result.Subject != "stranger" {
+					t.Fatalf("result = %+v", result)
+				}
+			case "empty admission list":
+				if result.Status != AuthTestStatusSucceeded || result.Subject != "owner" {
+					t.Fatalf("result = %+v", result)
+				}
+			case "wrong nonce":
+				if result.Status != AuthTestStatusFailed || result.Reason != AuthTestReasonTokenInvalid {
+					t.Fatalf("result = %+v", result)
+				}
+			case "token exchange failed":
+				if result.Status != AuthTestStatusFailed || result.Reason != AuthTestReasonTokenExchangeFailed {
+					t.Fatalf("result = %+v", result)
+				}
+			}
+			if _, ok := s.OIDCTestResult(id); !ok {
+				t.Fatal("terminal test result disappeared")
+			}
+			if s.IsOIDCTest(start.State) {
+				t.Fatal("test callback remained replayable")
+			}
+		})
+	}
+}
+
+func TestOIDCTestDiscoveryFailureAndExpiry(t *testing.T) {
+	s := testAuthStore(t)
+	cfg := otpPolicy()
+	cfg.Mode = "oidc"
+	cfg.OIDC = settings.OIDC{
+		Issuer: "https://127.0.0.1:1", ClientID: "client", ClientSecret: "secret", AllowedSubjects: []string{"owner"},
+	}
+	id, _, err := s.CreateOIDCTest(OIDCTestRequest{Policy: cfg, Origin: "https://sigmo.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.StartOIDCTest(t.Context(), OIDCTestStartRequest{ID: id, Origin: "https://sigmo.example"}); err == nil {
+		t.Fatal("unreachable issuer was accepted")
+	}
+	result, ok := s.OIDCTestResult(id)
+	if !ok || result.Reason != AuthTestReasonDiscoveryFailed {
+		t.Fatalf("result = %+v, %v", result, ok)
+	}
+
+	expiredID, _, err := s.CreateOIDCTest(OIDCTestRequest{Policy: cfg, Origin: "https://sigmo.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	s.tests[expiredID].expiresAt = time.Now().Add(-time.Second)
+	s.mu.Unlock()
+	if _, ok := s.OIDCTestResult(expiredID); ok {
+		t.Fatal("expired test remained available")
+	}
+}
+
+func TestOIDCLoginRejectsMismatchedTransactionPolicy(t *testing.T) {
+	s := testAuthStore(t)
+	cfg := otpPolicy()
+	cfg.Mode = "oidc"
+	_, err := s.beginOIDCLogin(t.Context(), cfg, login{policyID: "another-policy"})
+	var failure *oidcStartFailure
+	if !errors.As(err, &failure) || failure.kind != oidcStartAuthorization || !errors.Is(err, ErrInvalidLogin) {
+		t.Fatalf("error = %v, want authorization failure", err)
+	}
+}
+
+func TestCloudflareAccessTestResult(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{
+			"kty": "RSA", "kid": "key", "alg": "RS256",
+			"n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()), "e": "AQAB",
+		}}})
+	}))
+	defer server.Close()
+	s := testAuthStore(t)
+	s.client = server.Client()
+	cfg := settings.Auth{
+		Mode: "cloudflare_access",
+		CloudflareAccess: settings.CloudflareAccess{
+			TeamDomain: server.URL, Audience: "app-aud", AllowedSubjects: []string{"owner"},
+		},
+	}
+	claims := map[string]any{
+		"iss": server.URL, "aud": []string{"app-aud"}, "sub": "owner",
+		"exp": time.Now().Add(time.Minute).Unix(), "iat": time.Now().Unix(),
+	}
+	assertion := signedTestJWT(t, key, claims)
+	if result := s.TestCloudflareAccess(t.Context(), cfg, assertion); result.Status != AuthTestStatusSucceeded || result.Subject != "owner" {
+		t.Fatalf("valid result = %+v", result)
+	}
+	if result := s.TestCloudflareAccess(t.Context(), cfg, ""); result.Reason != AuthTestReasonAccessAssertionMissing {
+		t.Fatalf("missing result = %+v", result)
+	}
+	claims["sub"] = "stranger"
+	if result := s.TestCloudflareAccess(t.Context(), cfg, signedTestJWT(t, key, claims)); result.Reason != AuthTestReasonSubjectNotAllowed || result.Subject != "stranger" {
+		t.Fatalf("subject result = %+v", result)
+	}
+	if result := s.TestCloudflareAccess(t.Context(), cfg, "not-a-jwt"); result.Reason != AuthTestReasonAccessAssertionInvalid {
+		t.Fatalf("invalid result = %+v", result)
 	}
 }
 

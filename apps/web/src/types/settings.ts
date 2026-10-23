@@ -15,6 +15,32 @@ export interface SettingsAuth {
 export interface SettingsAuthTest {
   channels: string[]
 }
+
+export type SettingsAuthTestStatus = 'pending' | 'succeeded' | 'failed'
+
+export interface SettingsAuthTestResult {
+  status: SettingsAuthTestStatus
+  reason?: string
+  subject?: string
+}
+
+export interface SettingsOIDCTest extends SettingsAuthTestResult {
+  expiresAt: string
+}
+
+export interface SettingsOIDCTestRequest {
+  client: 'web' | 'native'
+  basePath: string
+  state: string
+  auth: SettingsAuth
+}
+
+export interface SettingsOIDCTestSession {
+  id: string
+  authorizationUrl: string
+  expiresAt: string
+}
+
 export interface SettingsNotifications {
   channels: string[]
 }

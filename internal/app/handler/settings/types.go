@@ -1,5 +1,7 @@
 package settings
 
+import "time"
+
 import appsettings "github.com/damonto/sigmo/internal/pkg/settings"
 
 type Response struct {
@@ -34,6 +36,20 @@ type UpdateAuthRequest AuthValues
 // AuthTestRequest selects delivery destinations without changing their other uses.
 type AuthTestRequest struct {
 	Channels []string `json:"channels"`
+}
+
+// OIDCTestSessionRequest creates a temporary browser login from unsaved values.
+type OIDCTestSessionRequest struct {
+	Client   string     `json:"client"`
+	BasePath string     `json:"basePath"`
+	State    string     `json:"state"`
+	Auth     AuthValues `json:"auth"`
+}
+
+type OIDCTestSessionResponse struct {
+	ID               string    `json:"id"`
+	AuthorizationURL string    `json:"authorizationUrl"`
+	ExpiresAt        time.Time `json:"expiresAt"`
 }
 
 type ProxyValues struct {

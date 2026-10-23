@@ -240,6 +240,7 @@
   "telegram_update_invalid": "Telegram Update Invalid",
   "telegram_webhook_unauthorized": "Telegram Webhook Unauthorized",
   "test_auth_failed": "Test Auth Failed",
+  "test_auth_https_required": "Test Auth HTTPS Required",
   "test_auth_invalid": "Test Auth Invalid",
   "test_auth_invalid_request": "Test Auth Invalid Request",
   "text_required": "Text Required",

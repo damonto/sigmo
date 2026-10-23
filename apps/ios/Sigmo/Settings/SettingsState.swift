@@ -187,22 +187,98 @@ final class SettingsState {
     }
 
     func testAuth() async {
+        let mode = auth["mode"]?.text ?? "none"
         let providers = auth["otpChannels"]?.strings ?? []
-        guard !busy, !Task.isCancelled, !providers.isEmpty else { return }
+        guard !busy, !Task.isCancelled, snapshot != nil,
+              ["otp", "oidc", "cloudflare_access"].contains(mode),
+              mode != "otp" || !providers.isEmpty else { return }
         let current = revision
         busy = true
         failure = nil
         message = nil
         defer { if current == revision { busy = false } }
         do {
-            try await session.protectedRequest { api, token in
-                try await api.testAuthentication(providers, token: token)
+            let payload = Self.payload(auth, fields: snapshot?.schema.auth ?? [])
+            switch mode {
+            case "otp":
+                try await testOTP(providers, revision: current)
+            case "oidc":
+                try await testOIDC(payload, revision: current)
+            case "cloudflare_access":
+                try await testCloudflareAccess(payload, revision: current)
+            default:
+                return
             }
-            try check(current)
-            message = "settings.authTestSuccess"
+        } catch is CancellationError {
+            if !Task.isCancelled, current == revision {
+                failure = .local("settings.authTestCancelled")
+            }
         } catch {
             report(error, revision: current)
         }
+    }
+
+    private func testOTP(_ providers: [String], revision current: Int) async throws {
+        try await session.protectedRequest { api, token in
+            try await api.testAuthentication(providers, token: token)
+        }
+        try check(current)
+        message = "settings.authTestOTPSuccess"
+    }
+
+    private func testOIDC(_ payload: SettingsFields, revision current: Int) async throws {
+        let proof = try LoginProof()
+        let oidcTest = try await session.protectedRequest { api, token in
+            try await api.createOIDCTest(payload, state: proof.state, token: token)
+        }
+        try check(current)
+        let callback = try await session.openAuthenticationTest(oidcTest.authorizationUrl)
+        try check(current)
+        let callbackCode = try proof.code(from: callback)
+        guard callbackCode == oidcTest.id else {
+            throw BackendFailure.local("auth.loginFailed")
+        }
+        let result = try await session.protectedRequest { api, token in
+            try await api.oidcTest(oidcTest.id, token: token)
+        }
+        try check(current)
+        try applyAuthTestResult(result, mode: "oidc")
+    }
+
+    private func testCloudflareAccess(_ payload: SettingsFields, revision current: Int) async throws {
+        let result = try await session.protectedRequest { api, token in
+            try await api.testCloudflareAccess(payload, token: token)
+        }
+        try check(current)
+        try applyAuthTestResult(result, mode: "cloudflare_access")
+    }
+
+    private func applyAuthTestResult(_ result: SettingsAuthTestResult, mode: String) throws {
+        guard result.status != "pending" else {
+            throw BackendFailure.local("settings.authTestFailed")
+        }
+        if result.status == "succeeded" {
+            message = mode == "oidc" ? "settings.authTestOIDCSuccess" : "settings.authTestAccessSuccess"
+            return
+        }
+        let key: String
+        switch result.reason {
+        case "discovery_failed": key = "settings.authTestOIDCDiscoveryFailed"
+        case "authorization_failed": key = "settings.authTestOIDCAuthorizationFailed"
+        case "token_exchange_failed": key = "settings.authTestOIDCTokenExchangeFailed"
+        case "token_invalid": key = "settings.authTestOIDCTokenInvalid"
+        case "subject_not_allowed": key = "settings.authTestSubjectNotAllowed"
+        case "access_assertion_missing": key = "settings.authTestAccessAssertionMissing"
+        case "access_assertion_invalid": key = "settings.authTestAccessAssertionInvalid"
+        default: key = "settings.authTestFailed"
+        }
+        let text: String
+        if result.reason == "subject_not_allowed", let subject = result.subject {
+            text = String(format: settingsText("settings.authTestSubjectNotAllowedFormat"), subject)
+        } else {
+            text = settingsText(key)
+        }
+        throw BackendFailure(code: key, message: text)
     }
 
     static func payload(_ values: SettingsFields, fields: [SettingsField]) -> SettingsFields {

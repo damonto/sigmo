@@ -4,6 +4,7 @@ import fixtures from '../../../../../internal/pkg/apierror/testdata/problems.jso
 import {
   createApiError,
   fetchWithBoundedErrors,
+  isApiError,
   isLocalAuthenticationError,
   parseRetryAfter,
 } from '../apiProblem'
@@ -15,6 +16,13 @@ afterEach(() => {
 })
 
 describe('HTTP Problem Details', () => {
+  it('distinguishes backend errors already handled by the fetch layer', () => {
+    expect(isApiError({ source: 'backend', status: 422, error_code: 'test_auth_invalid' })).toBe(
+      true,
+    )
+    expect(isApiError(new Error('invalid response'))).toBe(false)
+  })
+
   it.each(fixtures)('decodes the shared fixture: $name', (fixture) => {
     const now = Date.parse('2026-10-09T00:00:00Z')
     vi.useFakeTimers()

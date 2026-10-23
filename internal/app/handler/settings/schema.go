@@ -22,10 +22,10 @@ func settingsSchema() Schema {
 			textField("oidcIssuer", "settings.schema.auth.oidcIssuer", "", "", false),
 			textField("oidcClientId", "settings.schema.auth.oidcClientId", "", "", false),
 			passwordField("oidcClientSecret", "settings.schema.auth.oidcClientSecret", "settings.schema.auth.keepSecret", false),
-			listField("oidcAllowedSubjects", "settings.schema.auth.oidcAllowedSubjects", "", false),
+			listField("oidcAllowedSubjects", "settings.schema.auth.oidcAllowedSubjects", "settings.schema.auth.oidcAllowedSubjectsDescription", false),
 			textField("accessTeamDomain", "settings.schema.auth.accessTeamDomain", "", "", false),
 			textField("accessAudience", "settings.schema.auth.accessAudience", "", "", false),
-			listField("accessAllowedSubjects", "settings.schema.auth.accessAllowedSubjects", "", false),
+			listField("accessAllowedSubjects", "settings.schema.auth.accessAllowedSubjects", "settings.schema.auth.accessAllowedSubjectsDescription", false),
 		},
 		Proxy: []Field{
 			textField("listenAddress", "settings.schema.proxy.listenAddress.label", "settings.schema.proxy.listenAddress.description", "settings.schema.proxy.listenAddress.placeholder", true),

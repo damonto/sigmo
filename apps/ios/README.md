@@ -26,7 +26,7 @@ For Linux development with builds on a Mac, follow the [Xcode MCP workflow](../.
 
 ## Connect to Sigmo
 
-Use **Add Sigmo (+)** to enter a name and server URL, including any reverse-proxy prefix. The app appends `/api/v1` automatically. Complete OTP or browser login (OIDC / Cloudflare Access), then Pro activation if required. Each connection has independent Keychain credentials. Cloudflare Access requires Managed OAuth; a redirect-only login page is insufficient. See the [authentication setup and migration guide](../../internal/app/auth/README.md) for callback hosting and signing requirements.
+Use **Add Sigmo (+)** to enter a name and server URL, including any reverse-proxy prefix. The app appends `/api/v1` automatically. Complete OTP or browser login (OIDC / Cloudflare Access), then Pro activation if required. Each connection has independent Keychain credentials. Cloudflare Access requires Managed OAuth; a redirect-only login page is insufficient. See [OIDC](../../README.md#oidc) and [Cloudflare Access](../../README.md#cloudflare-access) for provider configuration.
 
 Use HTTPS with a system-trusted certificate, or local-network HTTP. Allow local-network access when prompted. Connections are saved locally, and authentication tokens are stored in Keychain.
 

@@ -209,6 +209,19 @@
 "settings.test" = "测试";
 "settings.save" = "保存";
 "settings.authTestSuccess" = "测试验证码已发送。";
+"settings.authTestOTPSuccess" = "测试验证码已发送。";
+"settings.authTestOIDCSuccess" = "OIDC 登录测试成功。";
+"settings.authTestAccessSuccess" = "Cloudflare Access 验证成功。";
+"settings.authTestOIDCDiscoveryFailed" = "OIDC Discovery 失败，请检查 Issuer 地址及其网络可访问性。";
+"settings.authTestOIDCAuthorizationFailed" = "OIDC 登录未完成，请检查回调地址后重试。";
+"settings.authTestOIDCTokenExchangeFailed" = "OIDC 换取令牌失败，请检查 Client ID、Client Secret 和已登记的回调地址。";
+"settings.authTestOIDCTokenInvalid" = "OIDC 令牌验证失败，请检查 Issuer、Client ID、回调地址和服务器时间。";
+"settings.authTestSubjectNotAllowed" = "当前登录主体不在允许的主体列表中。";
+"settings.authTestSubjectNotAllowedFormat" = "当前登录主体“%@”不在允许的主体列表中。";
+"settings.authTestAccessAssertionMissing" = "Sigmo 未收到 Cloudflare Access 断言，请确认当前请求已经过 Access 应用。";
+"settings.authTestAccessAssertionInvalid" = "Cloudflare Access 拒绝了当前请求，请检查团队地址、应用 AUD 和 Access 策略。";
+"settings.authTestCancelled" = "身份认证测试未完成。";
+"settings.authTestFailed" = "身份认证测试失败，请检查配置后重试。";
 "settings.saveSuccess" = "设置已保存。";
 "settings.notificationSaveSuccess" = "通知渠道已保存。";
 "settings.updates.title" = "更新设置";
@@ -1159,9 +1172,11 @@
 "settings.schema.auth.oidcClientSecret" = "OIDC 客户端密钥";
 "settings.schema.auth.keepSecret" = "留空保留已保存的密钥。";
 "settings.schema.auth.oidcAllowedSubjects" = "允许的 OIDC 主体（sub）";
+"settings.schema.auth.oidcAllowedSubjectsDescription" = "留空时允许此 Issuer 和 Client 验证通过的任何主体；可通过“测试”查看当前主体的 sub。";
 "settings.schema.auth.accessTeamDomain" = "Access 团队 URL";
 "settings.schema.auth.accessAudience" = "Access 应用 AUD";
 "settings.schema.auth.accessAllowedSubjects" = "允许的 Access 主体（sub）";
+"settings.schema.auth.accessAllowedSubjectsDescription" = "可先通过“测试”获取当前登录主体的 sub；保存 Access 配置时至少需要一个准确的主体。";
 
 "apiError.authentication_failed" = "登录未通过验证，请重新登录。";
 "apiError.create_session_failed" = "无法创建会话，请重试。";
@@ -1175,6 +1190,8 @@
 "apiError.origin_not_allowed" = "请通过配置的公开地址访问 Sigmo。";
 "apiError.origin_required" = "浏览器请求缺少来源信息，请刷新后重试。";
 "apiError.otp_delivery_failed" = "验证码发送失败，请检查 OTP 渠道。";
+"apiError.test_auth_https_required" = "OIDC 测试需要 HTTPS，请通过 Sigmo 的 HTTPS 地址打开后重试。";
+"apiError.test_auth_invalid" = "身份认证测试配置无效。";
 "apiError.reload_notifications_failed" = "无法重新加载通知配置。";
 "apiError.revoke_session_failed" = "无法撤销会话，请重试。";
 "apiError.save_notifications_failed" = "无法保存通知配置。";

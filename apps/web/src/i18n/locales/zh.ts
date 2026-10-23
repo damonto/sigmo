@@ -140,6 +140,9 @@ const zh = {
     reload_notifications_failed: '无法重新加载通知配置。',
     revoke_session_failed: '无法撤销会话，请重试。',
     save_notifications_failed: '无法保存通知配置。',
+    test_auth_failed: '身份认证测试失败，请检查配置后重试。',
+    test_auth_https_required: 'OIDC 测试需要 HTTPS，请通过 Sigmo 的 HTTPS 地址打开后重试。',
+    test_auth_invalid: '身份认证测试配置无效。',
     validate_session_failed: '无法验证会话，请重试。',
     contact_invalid: '请检查联系人姓名和电话号码。',
     thread_read_invalid: '显示的短信已变化，请刷新后重试。',
@@ -285,6 +288,24 @@ const zh = {
     test: '测试',
     save: '保存',
     authTestSuccess: '测试验证码已发送。',
+    authTestOTPSuccess: '测试验证码已发送。',
+    authTestOIDCSuccess: 'OIDC 登录测试成功。',
+    authTestAccessSuccess: 'Cloudflare Access 验证成功。',
+    authTestOIDCDiscoveryFailed: 'OIDC Discovery 失败，请检查 Issuer 地址及其网络可访问性。',
+    authTestOIDCAuthorizationFailed: 'OIDC 登录未完成，请检查回调地址后重试。',
+    authTestOIDCTokenExchangeFailed:
+      'OIDC 换取令牌失败，请检查 Client ID、Client Secret 和已登记的回调地址。',
+    authTestOIDCTokenInvalid: 'OIDC 令牌验证失败，请检查 Issuer、Client ID、回调地址和服务器时间。',
+    authTestSubjectNotAllowed: '当前登录主体“{subject}”不在允许的主体列表中。',
+    authTestAccessAssertionMissing:
+      'Sigmo 未收到 Cloudflare Access 断言，请确认当前请求已经过 Access 应用。',
+    authTestAccessAssertionInvalid:
+      'Cloudflare Access 拒绝了当前请求，请检查团队地址、应用 AUD 和 Access 策略。',
+    authTestPopupBlocked: '浏览器阻止了新窗口，请允许弹窗后再测试 OIDC 登录。',
+    authTestCancelled: '身份认证测试未完成。',
+    authTestExpired: '身份认证测试已过期，请重新测试。',
+    authTestHTTPSRequired: 'OIDC 测试需要 HTTPS，请通过 Sigmo 的 HTTPS 地址打开后重试。',
+    authTestFailed: '身份认证测试失败，请检查配置后重试。',
     saveSuccess: '设置已保存。',
     notificationSaveSuccess: '通知渠道已保存。',
     updates: {
@@ -350,9 +371,13 @@ const zh = {
         oidcClientSecret: 'OIDC Client Secret',
         keepSecret: '留空保留已保存的密钥。',
         oidcAllowedSubjects: '允许登录的 OIDC 主体（sub）',
+        oidcAllowedSubjectsDescription:
+          '留空时允许此 Issuer 和 Client 验证通过的任何主体；可通过“测试”查看当前主体的 sub。',
         accessTeamDomain: 'Cloudflare Access 团队地址',
         accessAudience: 'Cloudflare Access 应用 AUD',
         accessAllowedSubjects: '允许登录的 Access 主体（sub）',
+        accessAllowedSubjectsDescription:
+          '可先通过“测试”获取当前登录主体的 sub；保存 Access 配置时至少需要一个准确的主体。',
       },
       proxy: {
         listenAddress: {

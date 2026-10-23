@@ -21,6 +21,7 @@ actor SettingsTestServer {
         server.mcp = MCPSettings(enabled: false, endpointPath: path, auditRetentionDays: 90, permissions: [])
     }
     func setOTP(_ required: Bool) { server.settings.values.auth["mode"] = .text(required ? "otp" : "none") }
+    func setAuthTestResult(_ result: SettingsAuthTestResult) { server.authTestResult = result }
     func setProxyPort(_ port: Int) { server.settings.values.proxy["httpPort"] = .number(port) }
     func setDistribution(_ value: String, reason: String? = nil) { server.distribution = value; server.unsupportedReason = reason }
     func setEdition(_ value: String) { server.edition = value }
@@ -32,6 +33,14 @@ actor SettingsTestServer {
         await withCheckedContinuation { arrival = $0 }
     }
     func release() { held?.resume(); held = nil }
+    func oidcTestCallback() -> URL {
+        var parts = URLComponents(string: "https://sigmo-pro.952007.xyz/auth/callback")!
+        parts.queryItems = [
+            URLQueryItem(name: "state", value: server.oidcTestState),
+            URLQueryItem(name: "code", value: server.oidcTestID),
+        ]
+        return parts.url!
+    }
 
     func respond(_ request: URLRequest) async throws -> BackendHTTPResponse {
         requests.append(request)
@@ -67,10 +76,16 @@ actor SettingsTestServer {
 }
 
 @MainActor
-func settingsSession(_ server: SettingsTestServer, host: String = "settings.example", credentials: MemoryCredentials = MemoryCredentials()) throws -> BackendSession {
+func settingsSession(
+    _ server: SettingsTestServer,
+    host: String = "settings.example",
+    credentials: MemoryCredentials = MemoryCredentials(),
+    browser: (any BrowserAuthenticating)? = nil
+) throws -> BackendSession {
     let configuration = try testConfiguration(host)
     return BackendSession(configuration: configuration, credentials: credentials.store,
-                          api: BackendAPI(configuration: configuration) { try await server.respond($0) })
+                          api: BackendAPI(configuration: configuration) { try await server.respond($0) },
+                          browser: browser ?? BrowserAuthentication())
 }
 
 // Hold a caller before it starts a request, including callers already cancelled

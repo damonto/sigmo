@@ -96,7 +96,5 @@ export function problemDescription(code: string): Response {
     error_code: code,
     description:
       'Use the HTTP status and registered problem type to interpret this failure. Detail and title are for display only.',
-    documentation:
-      'https://github.com/damonto/sigmo/blob/main/docs/http-api-contract.md',
   });
 }

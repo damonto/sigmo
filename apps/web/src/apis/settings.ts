@@ -3,7 +3,11 @@ import { fetchJson } from '@/lib/fetch'
 import type {
   SettingsAuth,
   SettingsAuthTest,
+  SettingsAuthTestResult,
   SettingsChannel,
+  SettingsOIDCTest,
+  SettingsOIDCTestRequest,
+  SettingsOIDCTestSession,
   SettingsProxy,
   SettingsNotifications,
   SettingsResponse,
@@ -28,6 +32,24 @@ export const useSettingsApi = () => {
     })
   }
 
+  const createOIDCTest = (payload: SettingsOIDCTestRequest) => {
+    return fetchJson<SettingsOIDCTestSession>('settings/auth-tests/oidc', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  const getOIDCTest = (id: string) => {
+    return fetchJson<SettingsOIDCTest>(`settings/auth-tests/oidc/${encodeURIComponent(id)}`)
+  }
+
+  const testCloudflareAccess = (auth: SettingsAuth) => {
+    return fetchJson<SettingsAuthTestResult>('settings/auth-tests/cloudflare-access', {
+      method: 'POST',
+      body: JSON.stringify(auth),
+    })
+  }
+
   const updateProxy = (payload: SettingsProxy) => {
     return fetchJson<SettingsResponse>('settings/proxy', {
       method: 'PUT',
@@ -49,7 +71,10 @@ export const useSettingsApi = () => {
         body: JSON.stringify(payload),
       }),
     getSettings,
+    createOIDCTest,
+    getOIDCTest,
     testAuth,
+    testCloudflareAccess,
     updateAuth,
     updateProxy,
     updateNotificationChannel,

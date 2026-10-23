@@ -209,6 +209,19 @@
 "settings.test" = "Test";
 "settings.save" = "Save";
 "settings.authTestSuccess" = "Test verification code sent.";
+"settings.authTestOTPSuccess" = "Test verification code sent.";
+"settings.authTestOIDCSuccess" = "OIDC sign-in test succeeded.";
+"settings.authTestAccessSuccess" = "Cloudflare Access test succeeded.";
+"settings.authTestOIDCDiscoveryFailed" = "OIDC discovery failed. Check the issuer URL and its network access.";
+"settings.authTestOIDCAuthorizationFailed" = "OIDC sign-in did not complete. Check the callback URL and try again.";
+"settings.authTestOIDCTokenExchangeFailed" = "The OIDC token exchange failed. Check the client ID, client secret, and registered callback.";
+"settings.authTestOIDCTokenInvalid" = "The OIDC token was rejected. Check the issuer, client ID, callback, and server time.";
+"settings.authTestSubjectNotAllowed" = "The signed-in subject is not in the allowed subjects list.";
+"settings.authTestSubjectNotAllowedFormat" = "The signed-in subject \"%@\" is not in the allowed subjects list.";
+"settings.authTestAccessAssertionMissing" = "No Cloudflare Access assertion reached Sigmo. Verify that this request passes through the Access application.";
+"settings.authTestAccessAssertionInvalid" = "Cloudflare Access rejected the request. Check the team URL, application AUD, and Access policy.";
+"settings.authTestCancelled" = "The authentication test was not completed.";
+"settings.authTestFailed" = "The authentication test failed. Check the configuration and try again.";
 "settings.saveSuccess" = "Settings saved.";
 "settings.notificationSaveSuccess" = "Notification channel saved.";
 "settings.updates.title" = "Updates";
@@ -1159,9 +1172,11 @@
 "settings.schema.auth.oidcClientSecret" = "OIDC client secret";
 "settings.schema.auth.keepSecret" = "Leave empty to retain the saved secret.";
 "settings.schema.auth.oidcAllowedSubjects" = "Allowed OIDC subjects (sub)";
+"settings.schema.auth.oidcAllowedSubjectsDescription" = "Leave empty to accept any subject authenticated by this issuer and client. Use Test to see the current subject.";
 "settings.schema.auth.accessTeamDomain" = "Access team URL";
 "settings.schema.auth.accessAudience" = "Access application AUD";
 "settings.schema.auth.accessAllowedSubjects" = "Allowed Access subjects (sub)";
+"settings.schema.auth.accessAllowedSubjectsDescription" = "Use Test to discover the signed-in subject. A saved Access policy needs at least one exact subject.";
 
 "apiError.authentication_failed" = "Sign-in was not accepted. Start again.";
 "apiError.create_session_failed" = "Could not create a session. Try again.";
@@ -1175,6 +1190,8 @@
 "apiError.origin_not_allowed" = "Open Sigmo using its configured public URL.";
 "apiError.origin_required" = "The browser request is missing its origin. Reload and try again.";
 "apiError.otp_delivery_failed" = "The code could not be delivered. Check the OTP channels.";
+"apiError.test_auth_https_required" = "OIDC testing requires HTTPS. Open Sigmo through its HTTPS URL and try again.";
+"apiError.test_auth_invalid" = "The authentication test configuration is invalid.";
 "apiError.reload_notifications_failed" = "Could not reload notification settings.";
 "apiError.revoke_session_failed" = "Could not revoke the session. Try again.";
 "apiError.save_notifications_failed" = "Could not save notification settings.";

@@ -11,9 +11,11 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
+	appauth "github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/internet"
@@ -149,6 +151,9 @@ func TestUpdateAuth(t *testing.T) {
 		{"retired combined mode", UpdateAuthRequest{Mode: "sigmo", SessionMaxDays: 30}, 422},
 		{"missing OTP destination", UpdateAuthRequest{Mode: "otp", SessionMaxDays: 30}, 422},
 		{"OTP independently of notifications", UpdateAuthRequest{Mode: "otp", OTPChannels: []string{"http"}, SessionMaxDays: 90}, 200},
+		{"OIDC accepts an empty admission list", UpdateAuthRequest{Mode: "oidc", OIDCIssuer: "https://issuer.example", OIDCClientID: "client", OIDCClientSecret: "secret", SessionMaxDays: 30}, 200},
+		{"OIDC rejects a blank admission entry", UpdateAuthRequest{Mode: "oidc", OIDCIssuer: "https://issuer.example", OIDCClientID: "client", OIDCClientSecret: "secret", OIDCAllowedSubjects: []string{" "}, SessionMaxDays: 30}, 422},
+		{"OIDC with admission list", UpdateAuthRequest{Mode: "oidc", OIDCIssuer: "https://issuer.example", OIDCClientID: "client", OIDCClientSecret: "secret", OIDCAllowedSubjects: []string{"owner"}, SessionMaxDays: 30}, 200},
 		{"invalid lifetime", UpdateAuthRequest{Mode: "none", SessionMaxDays: 181}, 422},
 		{"explicit anonymous", UpdateAuthRequest{Mode: "none", SessionMaxDays: 30}, 200},
 	} {
@@ -361,6 +366,201 @@ func TestAuthTestDelivery(t *testing.T) {
 	}
 }
 
+func TestOIDCTestCandidatePreservesSavedSecret(t *testing.T) {
+	store, h := newTestHandler(t)
+	if _, err := store.Update(t.Context(), func(current *appsettings.Settings) error {
+		current.Auth = appsettings.Auth{
+			Mode: "oidc", SessionMaxDays: 30,
+			OIDC: appsettings.OIDC{
+				Issuer: "https://issuer.example", ClientID: "client", ClientSecret: "saved",
+				AllowedSubjects: []string{"owner"},
+			},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := UpdateAuthRequest{
+		Mode: "oidc", SessionMaxDays: 30, OIDCIssuer: "https://issuer.example",
+		OIDCClientID: "client", OIDCAllowedSubjects: []string{"owner"},
+	}
+	candidate, err := h.authTestCandidate(base, "oidc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.OIDC.ClientSecret != "saved" {
+		t.Fatalf("client secret = %q, want saved", candidate.OIDC.ClientSecret)
+	}
+	base.OIDCClientID = "other-client"
+	if _, err := h.authTestCandidate(base, "oidc"); err == nil {
+		t.Fatal("changed client without a secret was accepted")
+	}
+}
+
+func TestAuthTestAllowsEmptyAdmissionListForSubjectDiscovery(t *testing.T) {
+	_, h := newTestHandler(t)
+	for _, test := range []struct {
+		mode string
+		req  UpdateAuthRequest
+	}{
+		{
+			mode: "oidc",
+			req: UpdateAuthRequest{
+				Mode: "oidc", SessionMaxDays: 30, OIDCIssuer: "https://issuer.example",
+				OIDCClientID: "client", OIDCClientSecret: "secret",
+			},
+		},
+		{
+			mode: "cloudflare_access",
+			req: UpdateAuthRequest{
+				Mode: "cloudflare_access", SessionMaxDays: 30,
+				AccessTeamDomain: "https://team.cloudflareaccess.com", AccessAudience: "aud",
+			},
+		},
+	} {
+		t.Run(test.mode, func(t *testing.T) {
+			candidate, err := h.authTestCandidate(test.req, test.mode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.mode == "oidc" && len(candidate.OIDC.AllowedSubjects) != 0 {
+				t.Fatal("test candidate changed the OIDC admission list")
+			}
+			if test.mode == "cloudflare_access" && len(candidate.CloudflareAccess.AllowedSubjects) != 0 {
+				t.Fatal("test candidate changed the Access admission list")
+			}
+		})
+	}
+}
+
+func TestCreateOIDCTestDoesNotPersistCandidate(t *testing.T) {
+	store, h := newTestHandler(t)
+	before := store.Snapshot()
+	body, err := json.Marshal(OIDCTestSessionRequest{
+		Client: "web", BasePath: "/sigmo",
+		Auth: AuthValues{
+			Mode: "oidc", SessionMaxDays: 30, OIDCIssuer: "https://issuer.example",
+			OIDCClientID: "client", OIDCClientSecret: "draft-secret",
+			OIDCAllowedSubjects: []string{"owner"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := echo.New()
+	e.HTTPErrorHandler = httpapi.HTTPErrorHandler
+	req := httptest.NewRequest(http.MethodPost, "https://sigmo.example/sigmo/api/v1/settings/auth-tests/oidc", strings.NewReader(string(body)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := h.CreateOIDCTest(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var response OIDCTestSessionResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.ID == "" || !strings.HasPrefix(response.AuthorizationURL, "https://sigmo.example/sigmo/api/v1/settings/auth-tests/oidc/") {
+		t.Fatalf("response = %+v", response)
+	}
+	if strings.Contains(rec.Body.String(), "draft-secret") {
+		t.Fatal("response exposed the OIDC client secret")
+	}
+	statusRequest := httptest.NewRequest(http.MethodGet, "/api/v1/settings/auth-tests/oidc/"+response.ID, nil)
+	statusRecorder := httptest.NewRecorder()
+	statusContext := e.NewContext(statusRequest, statusRecorder)
+	statusContext.SetPathValues(echo.PathValues{{Name: "id", Value: response.ID}})
+	if err := h.GetOIDCTest(statusContext); err != nil {
+		t.Fatal(err)
+	}
+	var status struct {
+		Status    string    `json:"status"`
+		ExpiresAt time.Time `json:"expiresAt"`
+	}
+	if err := json.Unmarshal(statusRecorder.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Status != string(appauth.AuthTestStatusPending) || !status.ExpiresAt.After(time.Now()) {
+		t.Fatalf("status = %+v", status)
+	}
+	if after := store.Snapshot(); !reflect.DeepEqual(after, before) {
+		t.Fatal("creating an OIDC test changed stored settings")
+	}
+}
+
+func TestCreateOIDCTestRequiresHTTPS(t *testing.T) {
+	_, h := newTestHandler(t)
+	body, err := json.Marshal(OIDCTestSessionRequest{
+		Client: "web",
+		Auth: AuthValues{
+			Mode: "oidc", SessionMaxDays: 30, OIDCIssuer: "https://issuer.example",
+			OIDCClientID: "client", OIDCClientSecret: "secret",
+			OIDCAllowedSubjects: []string{"owner"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := echo.New()
+	e.HTTPErrorHandler = httpapi.HTTPErrorHandler
+	req := httptest.NewRequest(http.MethodPost, "http://sigmo.example/api/v1/settings/auth-tests/oidc", strings.NewReader(string(body)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	if err := h.CreateOIDCTest(e.NewContext(req, rec)); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"error_code":"test_auth_https_required"`) {
+		t.Fatalf("body = %s, want HTTPS-required problem code", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "require HTTPS") {
+		t.Fatalf("body = %s, want HTTPS guidance", rec.Body.String())
+	}
+}
+
+func TestCloudflareAccessTestReturnsMissingAssertionWithoutPersisting(t *testing.T) {
+	store, h := newTestHandler(t)
+	before := store.Snapshot()
+	body, err := json.Marshal(UpdateAuthRequest{
+		Mode: "cloudflare_access", SessionMaxDays: 30,
+		AccessTeamDomain: "https://team.cloudflareaccess.com", AccessAudience: "aud",
+		AccessAllowedSubjects: []string{"owner"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := echo.New()
+	e.HTTPErrorHandler = httpapi.HTTPErrorHandler
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/auth-tests/cloudflare-access", strings.NewReader(string(body)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := h.TestCloudflareAccess(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var result struct {
+		Status string `json:"status"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "failed" || result.Reason != "access_assertion_missing" {
+		t.Fatalf("result = %+v", result)
+	}
+	if after := store.Snapshot(); !reflect.DeepEqual(after, before) {
+		t.Fatal("Access test changed stored settings")
+	}
+}
+
 func TestUpdateProxy(t *testing.T) {
 	t.Parallel()
 
@@ -543,7 +743,11 @@ func TestUpdateProxyPersistsSettingsWhenReloadFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("internet.NewConnector() error = %v", err)
 	}
-	h := New(store, internetConnector, relay)
+	authStore, err := appauth.NewStore(testStorage(t))
+	if err != nil {
+		t.Fatalf("auth.NewStore() error = %v", err)
+	}
+	h := New(store, internetConnector, relay, authStore)
 
 	reqBody := ProxyValues{
 		ListenAddress: "127.0.0.1",
@@ -598,7 +802,11 @@ func newTestHandler(t *testing.T) (*appsettings.Store, *Handler) {
 	if err != nil {
 		t.Fatalf("internet.NewConnector() error = %v", err)
 	}
-	return store, New(store, internetConnector, relay)
+	authStore, err := appauth.NewStore(testStorage(t))
+	if err != nil {
+		t.Fatalf("auth.NewStore() error = %v", err)
+	}
+	return store, New(store, internetConnector, relay, authStore)
 }
 
 func putAuth(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecorder {

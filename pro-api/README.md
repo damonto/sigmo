@@ -54,8 +54,8 @@ same batch that consumes its challenge.
 Apply pending migrations in order while preserving the existing database.
 Native push and Calls use incremental migrations `0004_native_push.sql` and
 `0005_native_calls.sql`. Deploy the gateway before the updated Go backend and
-iOS app; see [iOS Calls](../docs/ios-calls.md) for token separation and rollout.
-The HTTP error-format transition also requires coordinated Worker, Go/Web, and
+iOS app. The Worker and local backend use separate authentication boundaries;
+see the [iOS client guide](../apps/ios/README.md).
 
 ## Source layout
 
@@ -174,58 +174,6 @@ the automatic reconciliation point after a deployment. Command names,
 descriptions, and help usage come from one catalog; BotFather does not need a
 separate command update.
 
-## HTTP API
-
-The Worker exposes resource-oriented endpoints under `/v1`:
-
-```text
-POST /v1/telegram-updates
-POST /v1/license-pairings
-GET  /v1/license-pairings/:id
-POST /v1/license-challenges
-POST /v1/license-leases
-GET  /v1/release-channels/:channel/releases/latest?target=<target>
-GET  /v1/downloads/:ticket
-POST /v1/push-installations
-GET  /v1/push-installations/:id
-PUT  /v1/push-installations/:id
-DELETE /v1/push-installations/:id
-POST /v1/push-subscriptions
-DELETE /v1/push-subscriptions/:id
-POST /v1/push-deliveries
-```
-
-Each route also supports OPTIONS with `204 + Allow`. GET routes support HEAD
-without a response body or business state changes. Download HEAD checks R2
-metadata without consuming a single-use Bootstrap ticket. Unknown paths return
-404; unsupported methods on known paths return `405 + Allow`.
-
-`GET|HEAD /logo/:plmn` proxies Simdex carrier icons as PNGs. The daily Cron
-Trigger refreshes a first-record-wins PLMN catalog; SVG text badges are treated
-as missing so Web and iOS fall back to their embedded flags.
-
-Every error uses `Content-Type: application/problem+json` and the same request
-ID in its body and `X-Request-ID` header:
-
-```json
-{
-  "type": "https://sigmo-pro.952007.xyz/problems/license_pairing_not_found",
-  "title": "License Pairing Not Found",
-  "status": 404,
-  "detail": "pairing not found",
-  "error_code": "license_pairing_not_found",
-  "request_id": "6ccb36f4-025f-494c-b9b3-0649fcd18e06"
-}
-```
-
-Clients identify registered problems by `type`, localize `error_code`, and use
-the actual HTTP status and headers. `detail` is only a display fallback.
-The legacy `error_code/message` representation is no longer supported or
-negotiated through Accept. See the [HTTP API contract](../docs/http-api-contract.md)
-for upstream mappings, authentication isolation and retry rules. The canonical
-catalog is `internal/pkg/apierror/catalog.json`; `GET /problems/:code` serves
-read-only metadata for its entries.
-
 ## Abuse protection
 
 The Worker limits each device to three unexpired pairing resources and one
@@ -340,6 +288,6 @@ authentication and never reflects authorization parameters. Automatic invocation
 logs and traces are disabled so callback queries do not enter request telemetry.
 
 The AASA app ID must match the signing team and bundle ID in `apps/ios/project.yml`.
-These routes need no new database migration or secret. See the
-[authentication guide](../internal/app/auth/README.md) for provider setup,
-deployment checks, migration, and recovery.
+These routes need no new database migration or secret. See the root
+[Cloudflare Access configuration](../README.md#cloudflare-access) for provider
+setup.

@@ -25,9 +25,13 @@ const {
 } = useSettingsContext()
 
 const isAuthBusy = computed(() => isSaving.value || isTestingAuth.value)
-const isTestDisabled = computed(
-  () => isAuthBusy.value || (authValues.value?.otpChannels.length ?? 0) === 0,
-)
+const canTestAuth = computed(() => {
+  return ['otp', 'oidc', 'cloudflare_access'].includes(authValues.value?.mode ?? '')
+})
+const isTestDisabled = computed(() => {
+  if (isAuthBusy.value) return true
+  return authValues.value?.mode === 'otp' && authValues.value.otpChannels.length === 0
+})
 </script>
 
 <template>
@@ -59,7 +63,7 @@ const isTestDisabled = computed(
       >
         <div class="mx-auto grid w-full max-w-4xl gap-2 lg:max-w-none">
           <Button
-            v-if="authValues?.mode === 'otp'"
+            v-if="canTestAuth"
             type="button"
             variant="outline"
             :disabled="isTestDisabled"

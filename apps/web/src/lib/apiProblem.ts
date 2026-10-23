@@ -96,6 +96,16 @@ export function isLocalAuthenticationError(value: unknown): boolean {
   )
 }
 
+/** isApiError distinguishes backend failures already shown by the fetch layer. */
+export function isApiError(value: unknown): value is ApiError {
+  return (
+    isRecord(value) &&
+    value.source === 'backend' &&
+    typeof value.status === 'number' &&
+    typeof value.error_code === 'string'
+  )
+}
+
 /** fetchWithBoundedErrors stops reading failures at 64 KiB before VueUse or a
  * resource API decodes them. Success bodies keep their existing streaming rules.
  */

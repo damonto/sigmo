@@ -39,9 +39,7 @@ const (
 
 var networkRegistrationRestoreRetryInterval = 5 * time.Second
 
-// networkRegistrationPreference is saved per SIM profile. A manual selection
-// is a property of one subscription: it must follow that profile and must be
-// released before another profile uses the same modem.
+// networkRegistrationPreference stores a manual selection for one SIM profile.
 type networkRegistrationPreference struct {
 	Mode         RegistrationMode `json:"mode"`
 	OperatorCode string           `json:"operatorCode"`
@@ -94,10 +92,7 @@ func readSelection(ctx context.Context, registrar networkRegistrar, modem *mmode
 	return selection, nil
 }
 
-// Registration reports the selection the modem currently applies. The modem
-// answer wins over the saved preference because firmware keeps a manual
-// selection across profile switches and restarts, which is exactly the state
-// the UI needs to surface.
+// Registration reports the selection the modem currently applies.
 func (n *network) Registration(ctx context.Context, modem *mmodem.Modem) (*RegistrationResponse, error) {
 	saved, err := loadRegistrationPreference(ctx, n.store, modem)
 	if err != nil {
@@ -194,10 +189,7 @@ func loadRegistrationScope(ctx context.Context, store *storage.Store, scope stri
 	return pref, nil
 }
 
-// RunRegistrationRestore reapplies each SIM profile's selection preference.
-// It runs once per modem generation and again whenever the active profile
-// changes, because a manual selection left behind by the previous profile
-// would otherwise keep the new profile off its own network.
+// RunRegistrationRestore reapplies preferences after modem or SIM changes.
 func RunRegistrationRestore(ctx context.Context, registry modemtask.Registry, store *storage.Store) error {
 	if store == nil {
 		return errNetworkRegistrationStorageRequired

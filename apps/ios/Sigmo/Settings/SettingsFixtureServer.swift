@@ -19,6 +19,9 @@ struct SettingsFixtureServer {
     var updateState = "idle"
     var checkedAt: Date?
     var installationPolls = 0
+    var oidcTestID = "oidc-test"
+    var oidcTestState = ""
+    var authTestResult = SettingsAuthTestResult(status: "succeeded", reason: nil, subject: "owner")
     var app: AppInformation { .init(version: version, commit: commit, channel: preferences.channel, edition: edition, target: "linux-arm64", distribution: distribution) }
     var otpRequired: Bool { settings.values.auth["mode"]?.text == "otp" }
 
@@ -33,6 +36,21 @@ struct SettingsFixtureServer {
             return HTTPProblem.response(status: 401, code: "invalid_session", detail: "Login required")
         }
         if path.hasSuffix("/settings") { return try reply(settings) }
+        if path.hasSuffix("/settings/auth-tests/oidc") && method == "POST" {
+            let value = try decode(OIDCTestRequest.self, request)
+            oidcTestState = value.state
+            let target = URL(string: "https://settings.example/api/v1/settings/auth-tests/oidc/\(oidcTestID)/browser")!
+            return try reply(
+                OIDCTestSession(id: oidcTestID, authorizationUrl: target, expiresAt: Date().addingTimeInterval(300)),
+                status: 201
+            )
+        }
+        if path.contains("/settings/auth-tests/oidc/") && method == "GET" {
+            return try reply(authTestResult)
+        }
+        if path.hasSuffix("/settings/auth-tests/cloudflare-access") {
+            return try reply(authTestResult)
+        }
         if path.hasSuffix("/settings/auth-tests") { return BackendHTTPResponse(data: Data(), status: 201) }
         if path.hasSuffix("/settings/auth") {
             settings.values.auth = try decode(SettingsFields.self, request)

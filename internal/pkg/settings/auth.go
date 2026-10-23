@@ -40,6 +40,11 @@ type CloudflareAccess struct {
 	AllowedSubjects []string `json:"allowedSubjects"`
 }
 
+// ValidationOptions relax rules that are temporarily incomplete during an authentication test.
+type ValidationOptions struct {
+	AllowEmptyAccessSubjects bool
+}
+
 // HasMethod reports whether the selected mode permits this login method.
 func (a Auth) HasMethod(method string) bool {
 	return (method == "otp" || method == "oidc") && a.Mode == method
@@ -81,6 +86,11 @@ func (a Auth) PolicyID() string {
 
 // Validate checks references before settings become visible to concurrent requests.
 func (s Settings) Validate() error {
+	return s.ValidateWithOptions(ValidationOptions{})
+}
+
+// ValidateWithOptions checks policy references under an explicit draft-validation policy.
+func (s Settings) ValidateWithOptions(options ValidationOptions) error {
 	a := s.Auth
 	if a.SessionMaxDays < 1 || a.SessionMaxDays > MaxSessionMaxDays {
 		return errors.New("session max days must be between 1 and 180")
@@ -112,15 +122,15 @@ func (s Settings) Validate() error {
 		if !secureURL(a.OIDC.Issuer) {
 			return errors.New("configure OIDC: issuer must be an HTTPS URL without query or fragment")
 		}
-		if a.OIDC.ClientID == "" || a.OIDC.ClientSecret == "" || !validSubjects(a.OIDC.AllowedSubjects) {
-			return errors.New("configure OIDC: client credentials and allowed subjects are required")
+		if a.OIDC.ClientID == "" || a.OIDC.ClientSecret == "" || !validSubjectList(a.OIDC.AllowedSubjects, true) {
+			return errors.New("configure OIDC: client credentials are required and allowed subjects cannot contain blanks")
 		}
 	case "cloudflare_access":
 		u, err := url.Parse(a.CloudflareAccess.TeamDomain)
 		if err != nil || !secureURL(a.CloudflareAccess.TeamDomain) || u.Path != "" || !strings.HasSuffix(u.Hostname(), ".cloudflareaccess.com") || u.Port() != "" {
 			return errors.New("Access team domain must be https://<team>.cloudflareaccess.com")
 		}
-		if a.CloudflareAccess.Audience == "" || !validSubjects(a.CloudflareAccess.AllowedSubjects) {
+		if a.CloudflareAccess.Audience == "" || !validSubjectList(a.CloudflareAccess.AllowedSubjects, options.AllowEmptyAccessSubjects) {
 			return errors.New("Access audience and allowed subjects are required")
 		}
 	default:
@@ -134,6 +144,9 @@ func secureURL(raw string) bool {
 	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
 }
 
-func validSubjects(subjects []string) bool {
-	return len(subjects) > 0 && !slices.ContainsFunc(subjects, func(s string) bool { return strings.TrimSpace(s) == "" })
+func validSubjectList(subjects []string, allowEmpty bool) bool {
+	if len(subjects) == 0 {
+		return allowEmpty
+	}
+	return !slices.ContainsFunc(subjects, func(s string) bool { return strings.TrimSpace(s) == "" })
 }

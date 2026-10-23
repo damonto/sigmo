@@ -124,6 +124,8 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 	v1.POST("/auth/browser-sessions", authHandler.CreateBrowserSession)
 	v1.GET("/auth/browser-sessions/:id", authHandler.StartBrowserSession)
 	v1.GET("/auth/oidc/callback", authHandler.OIDCCallback)
+	settingsHandler := hsettings.New(deps.Store, deps.InternetConnector, deps.Relay, authStore)
+	v1.GET("/settings/auth-tests/oidc/:id/browser", settingsHandler.StartOIDCTest)
 	protected := v1.Group("")
 	protected.Use(appmiddleware.Auth(authStore, deps.Store), appmiddleware.Locale(deps.Store))
 	protected.GET("/auth/sessions/current", authHandler.CurrentSession)
@@ -137,13 +139,15 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.DELETE("/push-subscriptions/:subscriptionId", h.Delete)
 		}
 		{
-			h := hsettings.New(deps.Store, deps.InternetConnector, deps.Relay)
-			protected.GET("/settings", h.Get)
-			protected.POST("/settings/auth-tests", h.TestAuth)
-			protected.PUT("/settings/auth", h.UpdateAuth)
-			protected.PUT("/settings/proxy", h.UpdateProxy)
-			protected.PUT("/settings/channels/:channel", h.UpdateNotificationChannel)
-			protected.PUT("/settings/notifications", h.UpdateNotifications)
+			protected.GET("/settings", settingsHandler.Get)
+			protected.POST("/settings/auth-tests", settingsHandler.TestAuth)
+			protected.POST("/settings/auth-tests/oidc", settingsHandler.CreateOIDCTest)
+			protected.GET("/settings/auth-tests/oidc/:id", settingsHandler.GetOIDCTest)
+			protected.POST("/settings/auth-tests/cloudflare-access", settingsHandler.TestCloudflareAccess)
+			protected.PUT("/settings/auth", settingsHandler.UpdateAuth)
+			protected.PUT("/settings/proxy", settingsHandler.UpdateProxy)
+			protected.PUT("/settings/channels/:channel", settingsHandler.UpdateNotificationChannel)
+			protected.PUT("/settings/notifications", settingsHandler.UpdateNotifications)
 		}
 
 		if deps.Updates != nil {

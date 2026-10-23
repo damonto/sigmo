@@ -243,6 +243,7 @@ final class SettingsFlowTests: XCTestCase {
                 assertStacked("accessTeamDomain", app: app)
                 assertStacked("accessAudience", app: app)
             }
+            scrollTo(app.buttons["test-auth"], app: app)
             screenshot(app)
             // This simulator reports clipping for fully visible field and symbol labels.
             // Verify these layouts with field geometry and retained screenshots instead.

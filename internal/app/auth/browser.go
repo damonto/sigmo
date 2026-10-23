@@ -18,12 +18,22 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
+type loginKind string
+
+const (
+	loginKindStart        loginKind = "start"
+	loginKindCallback     loginKind = "callback"
+	loginKindHandoff      loginKind = "handoff"
+	loginKindTestCallback loginKind = "test-callback"
+)
+
 type login struct {
-	kind, policyID, nativeState, challenge, verifier, nonce, binding string
-	origin, basePath                                                 string
-	native                                                           bool
-	expiresAt                                                        time.Time
-	identity                                                         storage.AuthSession
+	kind                                                               loginKind
+	policyID, nativeState, challenge, verifier, nonce, binding, testID string
+	origin, basePath                                                   string
+	native                                                             bool
+	expiresAt                                                          time.Time
+	identity                                                           storage.AuthSession
 }
 
 // BrowserRequest binds the callback to the request origin and the native handoff to PKCE.
@@ -47,7 +57,7 @@ func (s *Store) CreateBrowserLogin(req BrowserRequest) (string, error) {
 		return "", ErrInvalidLogin
 	}
 	id := rand.Text()
-	err := s.saveLogin(id, login{kind: "start", policyID: req.Policy.PolicyID(), origin: req.Origin, basePath: req.BasePath, native: req.Native, nativeState: req.State, challenge: req.CodeChallenge, expiresAt: time.Now().Add(transactionTTL)})
+	err := s.saveLogin(id, login{kind: loginKindStart, policyID: req.Policy.PolicyID(), origin: req.Origin, basePath: req.BasePath, native: req.Native, nativeState: req.State, challenge: req.CodeChallenge, expiresAt: time.Now().Add(transactionTTL)})
 	if err != nil {
 		return "", err
 	}
@@ -65,23 +75,46 @@ type BrowserStart struct{ URL, State, Binding string }
 
 // StartBrowserLogin binds the provider callback to the browser that opened the login.
 func (s *Store) StartBrowserLogin(ctx context.Context, req BrowserStartRequest) (BrowserStart, error) {
-	transaction, err := s.takeLogin(req.ID, "start", req.Policy.PolicyID())
+	transaction, err := s.takeLogin(req.ID, loginKindStart, req.Policy.PolicyID())
 	if err != nil {
 		return BrowserStart{}, err
 	}
 	if req.Origin != transaction.origin {
 		return BrowserStart{}, ErrInvalidLogin
 	}
-	provider, err := s.provider(ctx, req.Policy.OIDC.Issuer)
+	transaction.kind = loginKindCallback
+	return s.beginOIDCLogin(ctx, req.Policy, transaction)
+}
+
+type oidcStartFailureKind uint8
+
+const (
+	oidcStartDiscovery oidcStartFailureKind = iota
+	oidcStartAuthorization
+)
+
+type oidcStartFailure struct {
+	kind oidcStartFailureKind
+	err  error
+}
+
+func (e *oidcStartFailure) Error() string { return e.err.Error() }
+func (e *oidcStartFailure) Unwrap() error { return e.err }
+
+func (s *Store) beginOIDCLogin(ctx context.Context, policy settings.Auth, transaction login) (BrowserStart, error) {
+	if transaction.policyID != policy.PolicyID() {
+		return BrowserStart{}, &oidcStartFailure{kind: oidcStartAuthorization, err: ErrInvalidLogin}
+	}
+	provider, err := s.provider(ctx, policy.OIDC.Issuer)
 	if err != nil {
-		return BrowserStart{}, err
+		return BrowserStart{}, &oidcStartFailure{kind: oidcStartDiscovery, err: err}
 	}
 	state, binding := rand.Text(), rand.Text()
-	transaction.kind, transaction.verifier, transaction.nonce, transaction.binding = "callback", oauth2.GenerateVerifier(), rand.Text(), Hash(binding)
+	transaction.verifier, transaction.nonce, transaction.binding = oauth2.GenerateVerifier(), rand.Text(), Hash(binding)
 	if err := s.saveLogin(state, transaction); err != nil {
-		return BrowserStart{}, err
+		return BrowserStart{}, &oidcStartFailure{kind: oidcStartAuthorization, err: err}
 	}
-	config := oauthConfig(req.Policy, provider, transaction.origin+transaction.basePath)
+	config := oauthConfig(policy, provider, transaction.origin+transaction.basePath)
 	target := config.AuthCodeURL(state, oidc.Nonce(transaction.nonce), oauth2.S256ChallengeOption(transaction.verifier))
 	return BrowserStart{URL: target, State: state, Binding: binding}, nil
 }
@@ -102,50 +135,25 @@ type BrowserResult struct {
 
 // CompleteBrowserLogin validates both protocol claims and explicit local admission.
 func (s *Store) CompleteBrowserLogin(ctx context.Context, req BrowserCallback) (BrowserResult, error) {
-	transaction, err := s.takeLogin(req.State, "callback", req.Policy.PolicyID())
+	transaction, err := s.takeLogin(req.State, loginKindCallback, req.Policy.PolicyID())
 	if err != nil {
 		return BrowserResult{}, err
 	}
 	if !req.Policy.HasMethod("oidc") || req.Origin != transaction.origin || req.Code == "" || !equal(transaction.binding, Hash(req.Binding)) {
 		return BrowserResult{}, ErrInvalidLogin
 	}
-	provider, err := s.provider(ctx, req.Policy.OIDC.Issuer)
-	if err != nil {
-		return BrowserResult{}, err
-	}
-	config := oauthConfig(req.Policy, provider, transaction.origin+transaction.basePath)
-	token, err := config.Exchange(oidc.ClientContext(ctx, s.client), req.Code, oauth2.VerifierOption(transaction.verifier))
-	if err != nil {
-		return BrowserResult{}, fmt.Errorf("exchange OIDC code: %w", err)
-	}
-	raw, ok := token.Extra("id_token").(string)
-	if !ok {
-		return BrowserResult{}, ErrInvalidLogin
-	}
-	verified, err := provider.Verifier(&oidc.Config{ClientID: req.Policy.OIDC.ClientID}).Verify(ctx, raw)
-	if err != nil {
-		return BrowserResult{}, fmt.Errorf("verify ID token: %w", err)
-	}
-	if !equal(verified.Nonce, transaction.nonce) || verified.Subject == "" || !slices.Contains(req.Policy.OIDC.AllowedSubjects, verified.Subject) {
-		return BrowserResult{}, ErrInvalidLogin
-	}
-	var claims struct {
-		AuthorizedParty string `json:"azp"`
-	}
-	if err := verified.Claims(&claims); err != nil {
-		return BrowserResult{}, fmt.Errorf("read ID claims: %w", err)
-	}
-	if (len(verified.Audience) > 1 || claims.AuthorizedParty != "") && claims.AuthorizedParty != req.Policy.OIDC.ClientID {
-		return BrowserResult{}, ErrInvalidLogin
+	identity, failure := s.completeOIDCIdentity(ctx, req.Policy, transaction, req.Code)
+	if failure != nil {
+		return BrowserResult{}, failure.browserError()
 	}
 	// Reauthentication is bounded even when an administrator selects long OTP sessions.
 	expires := time.Now().Add(min(time.Duration(req.Policy.SessionMaxDays)*24*time.Hour, 24*time.Hour))
-	identity := storage.AuthSession{Method: "oidc", Issuer: verified.Issuer, Subject: verified.Subject, PolicyID: req.Policy.PolicyID(), ExpiresAt: expires}
+	identity.ExpiresAt = expires
 	if !transaction.native {
 		return BrowserResult{Identity: identity, RedirectURL: transaction.origin + transaction.basePath + "/"}, nil
 	}
 	code := rand.Text()
-	transaction.kind, transaction.identity, transaction.expiresAt = "handoff", identity, time.Now().Add(time.Minute)
+	transaction.kind, transaction.identity, transaction.expiresAt = loginKindHandoff, identity, time.Now().Add(time.Minute)
 	if err := s.saveLogin(code, transaction); err != nil {
 		return BrowserResult{}, err
 	}
@@ -161,7 +169,7 @@ type HandoffRequest struct {
 
 // CompleteHandoff atomically consumes an app-specific, short-lived authorization result.
 func (s *Store) CompleteHandoff(req HandoffRequest) (storage.AuthSession, error) {
-	transaction, err := s.takeLogin(req.Code, "handoff", req.Policy.PolicyID())
+	transaction, err := s.takeLogin(req.Code, loginKindHandoff, req.Policy.PolicyID())
 	if err != nil {
 		return storage.AuthSession{}, err
 	}
@@ -179,9 +187,29 @@ type AccessRequest struct {
 
 // VerifyAccess authenticates a signed edge assertion, never an unsigned identity header.
 func (s *Store) VerifyAccess(ctx context.Context, req AccessRequest) (storage.AuthSession, error) {
+	verification, err := s.verifyAccess(ctx, req)
+	return verification.Session, err
+}
+
+type accessFailureReason uint8
+
+const (
+	accessFailureNone accessFailureReason = iota
+	accessFailureMissing
+	accessFailureInvalid
+	accessFailureSubjectNotAllowed
+)
+
+type accessVerification struct {
+	Session storage.AuthSession
+	Failure accessFailureReason
+	Subject string
+}
+
+func (s *Store) verifyAccess(ctx context.Context, req AccessRequest) (accessVerification, error) {
 	cfg := req.Policy.CloudflareAccess
 	if req.Policy.Mode != "cloudflare_access" || req.Assertion == "" {
-		return storage.AuthSession{}, storage.ErrInvalidSession
+		return accessVerification{Failure: accessFailureMissing}, storage.ErrInvalidSession
 	}
 	s.mu.Lock()
 	keys := s.keys[cfg.TeamDomain]
@@ -192,18 +220,104 @@ func (s *Store) VerifyAccess(ctx context.Context, req AccessRequest) (storage.Au
 	s.mu.Unlock()
 	token, err := oidc.NewVerifier(cfg.TeamDomain, keys, &oidc.Config{ClientID: cfg.Audience, SupportedSigningAlgs: []string{"RS256"}}).Verify(ctx, req.Assertion)
 	if err != nil {
-		return storage.AuthSession{}, storage.ErrInvalidSession
+		return accessVerification{Failure: accessFailureInvalid}, storage.ErrInvalidSession
 	}
 	var claims struct {
 		NotBefore int64 `json:"nbf"`
 	}
 	if err := token.Claims(&claims); err != nil {
-		return storage.AuthSession{}, storage.ErrInvalidSession
+		return accessVerification{Failure: accessFailureInvalid}, storage.ErrInvalidSession
 	}
-	if token.Subject == "" || claims.NotBefore > time.Now().Unix() || !slices.Contains(cfg.AllowedSubjects, token.Subject) {
-		return storage.AuthSession{}, storage.ErrInvalidSession
+	if token.Subject == "" || claims.NotBefore > time.Now().Unix() {
+		return accessVerification{Failure: accessFailureInvalid}, storage.ErrInvalidSession
 	}
-	return storage.AuthSession{Method: "cloudflare_access", Issuer: token.Issuer, Subject: token.Subject, PolicyID: req.Policy.PolicyID(), ExpiresAt: token.Expiry}, nil
+	if !slices.Contains(cfg.AllowedSubjects, token.Subject) {
+		return accessVerification{Failure: accessFailureSubjectNotAllowed, Subject: token.Subject}, storage.ErrInvalidSession
+	}
+	return accessVerification{
+		Session: storage.AuthSession{
+			Method: "cloudflare_access", Issuer: token.Issuer, Subject: token.Subject,
+			PolicyID: req.Policy.PolicyID(), ExpiresAt: token.Expiry,
+		},
+		Subject: token.Subject,
+	}, nil
+}
+
+type oidcIdentityFailureKind uint8
+
+const (
+	oidcFailureDiscovery oidcIdentityFailureKind = iota
+	oidcFailureTokenExchange
+	oidcFailureTokenInvalid
+	oidcFailureSubjectNotAllowed
+)
+
+type oidcIdentityFailure struct {
+	kind    oidcIdentityFailureKind
+	subject string
+	err     error
+}
+
+func (e *oidcIdentityFailure) Error() string { return e.err.Error() }
+func (e *oidcIdentityFailure) Unwrap() error { return e.err }
+
+func (e *oidcIdentityFailure) browserError() error {
+	if e.kind == oidcFailureDiscovery || e.kind == oidcFailureTokenExchange {
+		return e.err
+	}
+	if e.kind == oidcFailureTokenInvalid && !errors.Is(e.err, ErrInvalidLogin) {
+		return e.err
+	}
+	return ErrInvalidLogin
+}
+
+func (s *Store) completeOIDCIdentity(ctx context.Context, cfg settings.Auth, transaction login, code string) (storage.AuthSession, *oidcIdentityFailure) {
+	provider, err := s.provider(ctx, cfg.OIDC.Issuer)
+	if err != nil {
+		return storage.AuthSession{}, &oidcIdentityFailure{kind: oidcFailureDiscovery, err: err}
+	}
+	config := oauthConfig(cfg, provider, transaction.origin+transaction.basePath)
+	token, err := config.Exchange(oidc.ClientContext(ctx, s.client), code, oauth2.VerifierOption(transaction.verifier))
+	if err != nil {
+		return storage.AuthSession{}, &oidcIdentityFailure{
+			kind: oidcFailureTokenExchange,
+			err:  fmt.Errorf("exchange OIDC code: %w", err),
+		}
+	}
+	raw, ok := token.Extra("id_token").(string)
+	if !ok {
+		return storage.AuthSession{}, &oidcIdentityFailure{kind: oidcFailureTokenInvalid, err: ErrInvalidLogin}
+	}
+	verified, err := provider.Verifier(&oidc.Config{ClientID: cfg.OIDC.ClientID}).Verify(ctx, raw)
+	if err != nil {
+		return storage.AuthSession{}, &oidcIdentityFailure{
+			kind: oidcFailureTokenInvalid,
+			err:  fmt.Errorf("verify ID token: %w", err),
+		}
+	}
+	if !equal(verified.Nonce, transaction.nonce) || verified.Subject == "" {
+		return storage.AuthSession{}, &oidcIdentityFailure{kind: oidcFailureTokenInvalid, err: ErrInvalidLogin}
+	}
+	if len(cfg.OIDC.AllowedSubjects) > 0 && !slices.Contains(cfg.OIDC.AllowedSubjects, verified.Subject) {
+		return storage.AuthSession{}, &oidcIdentityFailure{
+			kind: oidcFailureSubjectNotAllowed, subject: verified.Subject, err: ErrInvalidLogin,
+		}
+	}
+	var claims struct {
+		AuthorizedParty string `json:"azp"`
+	}
+	if err := verified.Claims(&claims); err != nil {
+		return storage.AuthSession{}, &oidcIdentityFailure{
+			kind: oidcFailureTokenInvalid,
+			err:  fmt.Errorf("read ID claims: %w", err),
+		}
+	}
+	if (len(verified.Audience) > 1 || claims.AuthorizedParty != "") && claims.AuthorizedParty != cfg.OIDC.ClientID {
+		return storage.AuthSession{}, &oidcIdentityFailure{kind: oidcFailureTokenInvalid, err: ErrInvalidLogin}
+	}
+	return storage.AuthSession{
+		Method: "oidc", Issuer: verified.Issuer, Subject: verified.Subject, PolicyID: cfg.PolicyID(),
+	}, nil
 }
 
 func (s *Store) provider(ctx context.Context, issuer string) (*oidc.Provider, error) {
@@ -270,7 +384,7 @@ func (s *Store) saveLogin(id string, transaction login) error {
 	return nil
 }
 
-func (s *Store) takeLogin(id, kind, policyID string) (login, error) {
+func (s *Store) takeLogin(id string, kind loginKind, policyID string) (login, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.logins[id]
