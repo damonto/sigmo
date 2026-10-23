@@ -9,6 +9,7 @@ import worker from '../src/index';
 import {
   CARRIER_LOGO_CATALOG_KEY,
   CARRIER_LOGO_CRON,
+  SIMDEX_ORIGIN,
   SIMDEX_INDEX_URL,
 } from '../src/logos/catalog';
 import { carrierLogoCacheKey } from '../src/logos/service';
@@ -29,7 +30,7 @@ const SVG_FIXTURE =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="#e20074"/></svg>';
 const CACHE_ICON_PATHS = [
   '/icons/test/lazy.png',
-  '/icons/test/shared.svg',
+  '/icons/test/shared.svg?v=test1',
   '/icons/test/text.svg',
   '/icons/test/text-tspan.svg',
   '/icons/test/text-path.svg',
@@ -73,7 +74,7 @@ function mockUpstream(
     async (input, init): Promise<Response> => {
       const request = new Request(input, init);
       const url = new URL(request.url);
-      calls.push(url.pathname);
+      calls.push(`${url.pathname}${url.search}`);
       if (url.href === SIMDEX_INDEX_URL) {
         return Response.json(index, {
           headers: { etag: '"simdex-test"' },
@@ -133,11 +134,16 @@ describe('carrier logo catalog', () => {
   it('keeps the first PLMN record and ignores invalid paths', async () => {
     const calls = mockUpstream(
       sourceIndex([
-        { icon: '/icons/test/first.png', plmns: ['310070'] },
+        {
+          icon: '/icons/carriers/First.svg?v=test1',
+          plmns: ['310070'],
+        },
         { icon: '/icons/test/second.png', plmns: ['310070'] },
         { icon: null, plmns: ['20433'] },
         { icon: '/icons/test/late.svg', plmns: ['20433'] },
         { icon: '/icons/../escape.png', plmns: ['310120'] },
+        { icon: 'https://example.com/icon.svg', plmns: ['310130'] },
+        { icon: '/icons/test/fragment.svg#icon', plmns: ['310131'] },
         { icon: '/icons/test/ok.svg', plmns: ['310-070'] },
       ]),
     );
@@ -155,9 +161,11 @@ describe('carrier logo catalog', () => {
     }>();
     expect(catalog.schemaVersion).toBe(1);
     expect(catalog.generatedAt).toBe('2026-10-22');
-    expect(catalog.logos['310070']).toBe('/icons/test/first.png');
+    expect(catalog.logos['310070']).toBe('/icons/carriers/First.svg?v=test1');
     expect(catalog.logos['20433']).toBeUndefined();
     expect(catalog.logos['310120']).toBeUndefined();
+    expect(catalog.logos['310130']).toBeUndefined();
+    expect(catalog.logos['310131']).toBeUndefined();
     expect(catalog.logos['310-070']).toBeUndefined();
     expect(calls).toEqual(['/data/index.json']);
   });
@@ -229,8 +237,8 @@ describe('carrier logo proxy', () => {
 
   it('rasterizes one shared SVG and reuses its cached PNG', async () => {
     await seedCatalog({
-      310070: '/icons/test/shared.svg',
-      310410: '/icons/test/shared.svg',
+      310070: '/icons/test/shared.svg?v=test1',
+      310410: '/icons/test/shared.svg?v=test1',
     });
     const calls = mockUpstream(undefined, {
       '/icons/test/shared.svg': {
@@ -251,7 +259,10 @@ describe('carrier logo proxy', () => {
     const second = await send('310410');
     expect(second.status).toBe(200);
     expect(await second.arrayBuffer()).toEqual(firstBytes.buffer);
-    expect(calls).toEqual(['/icons/test/shared.svg']);
+    expect(calls).toEqual(['/icons/test/shared.svg?v=test1']);
+    expect(carrierLogoCacheKey('/icons/test/shared.svg?v=test1').url).toBe(
+      `${SIMDEX_ORIGIN}/icons/test/shared.svg?v=test1&sigmo-png=v1`,
+    );
   });
 
   it.each([

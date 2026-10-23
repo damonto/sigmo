@@ -10,7 +10,7 @@ const MIN_CATALOG_SIZE = 100;
 const MAX_INDEX_BYTES = 4 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 10_000;
 const PLMN_PATTERN = /^[0-9]{5,6}$/;
-const ICON_PATH_PATTERN =
+const ICON_PATHNAME_PATTERN =
   /^\/icons\/(?:[a-z0-9][a-z0-9._-]*\/)*[a-z0-9][a-z0-9._-]*\.(?:png|svg)$/i;
 
 interface CarrierLogoCatalog {
@@ -38,10 +38,24 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-function iconPath(value: unknown): string | null {
-  return typeof value === 'string' && ICON_PATH_PATTERN.test(value)
-    ? value
-    : null;
+function iconReference(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.startsWith('/icons/')) {
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(value, SIMDEX_ORIGIN);
+  } catch {
+    return null;
+  }
+  if (
+    url.origin !== SIMDEX_ORIGIN ||
+    url.hash !== '' ||
+    !ICON_PATHNAME_PATTERN.test(url.pathname)
+  ) {
+    return null;
+  }
+  return `${url.pathname}${url.search}`;
 }
 
 function parseStoredCatalog(value: unknown): CarrierLogoCatalog {
@@ -64,7 +78,7 @@ function parseStoredCatalog(value: unknown): CarrierLogoCatalog {
   }
   const validLogos: Record<string, string> = {};
   for (const [plmn, icon] of entries) {
-    const validIcon = iconPath(icon);
+    const validIcon = iconReference(icon);
     if (!isPLMN(plmn) || !validIcon) {
       throw new Error('invalid carrier logo catalog');
     }
@@ -102,7 +116,7 @@ function normalizeIndex(value: unknown): {
       ignoredEntries++;
       continue;
     }
-    const icon = iconPath(carrier.icon);
+    const icon = iconReference(carrier.icon);
     if (carrier.icon !== null && icon === null) {
       ignoredEntries++;
     }

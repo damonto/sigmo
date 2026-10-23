@@ -12,7 +12,9 @@ const MAX_ICON_BYTES = 2 * 1024 * 1024;
 const TEXT_ELEMENT_PATTERN = /<(?:text|tspan|textPath)(?:\s|>)/i;
 
 export function carrierLogoCacheKey(icon: string): Request {
-  return new Request(`${SIMDEX_ORIGIN}${icon}?sigmo-png-${CACHE_VERSION}`);
+  const url = new URL(icon, SIMDEX_ORIGIN);
+  url.searchParams.set('sigmo-png', CACHE_VERSION);
+  return new Request(url);
 }
 
 function missingLogo(): Response {
@@ -70,7 +72,8 @@ function conditionalResponse(request: Request, response: Response): Response {
 }
 
 async function fetchPng(icon: string): Promise<Uint8Array | null> {
-  const response = await fetch(`${SIMDEX_ORIGIN}${icon}`, {
+  const iconURL = new URL(icon, SIMDEX_ORIGIN);
+  const response = await fetch(iconURL, {
     headers: { accept: 'image/png,image/svg+xml' },
     redirect: 'manual',
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -91,7 +94,7 @@ async function fetchPng(icon: string): Promise<Uint8Array | null> {
     'simdex carrier icon',
   );
 
-  if (icon.toLowerCase().endsWith('.svg')) {
+  if (iconURL.pathname.toLowerCase().endsWith('.svg')) {
     if (contentType !== 'image/svg+xml') {
       throw new Error('unexpected carrier logo content type');
     }
