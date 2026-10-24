@@ -12,7 +12,7 @@ require (
 	github.com/labstack/echo/v5 v5.4.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/pion/interceptor v0.1.49
-	github.com/pion/rtp v1.10.5
+	github.com/pion/rtp v1.10.6
 	github.com/pion/webrtc/v4 v4.2.23
 )
 
