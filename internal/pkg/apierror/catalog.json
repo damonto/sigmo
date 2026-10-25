@@ -340,5 +340,8 @@
   "sim_pin_state_conflict": "SIM PIN State Conflict",
   "sim_pin_unsupported": "SIM PIN Unsupported",
   "sim_pin_unavailable": "SIM PIN Status Unavailable",
-  "sim_pin_result_unknown": "SIM PIN Result Unknown"
+  "sim_pin_result_unknown": "SIM PIN Result Unknown",
+  "configuration_invalid_recipient": "Invalid Configuration Recipient",
+  "configuration_rate_limited": "Configuration Download Rate Limited",
+  "configuration_unavailable": "Carrier Configuration Unavailable"
 }

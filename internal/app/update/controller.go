@@ -153,9 +153,6 @@ func (c *Controller) UpdateSettings(ctx context.Context, next settings.Updates) 
 	if next.Channel != settings.UpdateChannelStable && next.Channel != settings.UpdateChannelDev {
 		return Snapshot{}, errors.New("update channel must be stable or dev")
 	}
-	if c.build.Edition == buildinfo.EditionCommunity && next.Channel != settings.UpdateChannelStable {
-		return Snapshot{}, errors.New("community edition only supports stable updates")
-	}
 	if !c.selfUpdateSupported() {
 		next.Automatic = false
 	}
@@ -355,9 +352,6 @@ func (c *Controller) effectiveSettings() settings.Updates {
 	current, configured := c.settings.UpdateSettings()
 	if !configured {
 		current.Channel = defaultChannel(c.build)
-	}
-	if c.build.Edition == buildinfo.EditionCommunity {
-		current.Channel = settings.UpdateChannelStable
 	}
 	if !c.selfUpdateSupported() {
 		current.Automatic = false

@@ -50,7 +50,7 @@ actor DetailFixtureServer {
         case delayedActivation, activationFailure
         case mixedTransferProfiles, unsupportedTransferProfiles
         case delayedSettings, unavailableSettings, unsupportedSettings, settingsWriteFailure
-        case connectionSetup, connectionScan, connectionScanError, connectionEmptyNetworks, connectionReadFailure, connectionWriteFailure, connectionMBIM, connectionCommunity
+        case connectionSetup, connectionScan, connectionScanError, connectionEmptyNetworks, connectionReadFailure, connectionWriteFailure, connectionMBIM, connectionUnlicensed
     }
 
     private var physical: Bool
@@ -146,7 +146,7 @@ actor DetailFixtureServer {
             connection.statuses["PUT /internet-connections/current/preferences"] = 503
             connection.statuses["PUT /volte/settings"] = 503
         case .connectionMBIM: connection.volte.dataPath = "mbim"
-        case .connectionCommunity: capabilities = ["contacts", "messageThreads", "historyAssignments"]
+        case .connectionUnlicensed: capabilities = ["contacts", "messageThreads", "historyAssignments"]
         default: break
         }
         connections["device-1"] = connection
@@ -234,7 +234,7 @@ actor DetailFixtureServer {
             return HTTPProblem.response(status: status, code: code, detail: "Fixture error")
         }
         if path.hasSuffix("/license") { return HTTPProblem.response(status: 404, code: "resource_not_found", detail: "Not found") }
-        if path.hasSuffix("/app") { return raw(#"{"version":"1","commit":"fixture","channel":"stable","edition":"pro","target":"linux-arm64","distribution":"local"}"#) }
+        if path.hasSuffix("/app") { return raw(#"{"version":"1","commit":"fixture","channel":"stable","target":"linux-arm64","distribution":"local"}"#) }
         if path.hasSuffix("/capabilities") { return try reply(["features": capabilities]) }
         if method == "GET" {
             if path.hasSuffix("/contacts") || path.hasSuffix("/sim-profiles") { return raw(#"{"items":[]}"#) }

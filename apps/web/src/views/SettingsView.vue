@@ -1,14 +1,27 @@
 <script setup lang="ts">
-import { Bell, Bot, Download, Globe2, Keyboard, MessageSquare } from 'lucide-vue-next'
+import { Bell, Bot, Download, Globe2, Keyboard, MessageSquare, ShieldCheck } from 'lucide-vue-next'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import SettingsCategoryCard from '@/components/settings/SettingsCategoryCard.vue'
 import SettingsHeader from '@/components/settings/SettingsHeader.vue'
+import { useLicenseStore } from '@/stores/license'
 
 const { t } = useI18n()
+const licenseStore = useLicenseStore()
 
 const cards = computed(() => [
+  ...(licenseStore.deviceId && licenseStore.mode !== 'authorized'
+    ? [
+        {
+          key: 'activation',
+          title: t('activate.title'),
+          description: t('activate.description'),
+          icon: ShieldCheck,
+          to: { name: 'activate' },
+        },
+      ]
+    : []),
   {
     key: 'auth',
     title: t('settings.authTitle'),

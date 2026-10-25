@@ -11,7 +11,6 @@ struct SettingsAccessView<Content: View>: View {
     let session: BackendSession
     @ViewBuilder var content: () -> Content
     @State private var login = false
-    @State private var activation = false
 
     var body: some View {
         Group {
@@ -21,9 +20,7 @@ struct SettingsAccessView<Content: View>: View {
                     Section {
                         Text(session.configuration.name).font(.headline)
                         if session.isRefreshing { ProgressView() }
-                        else if session.license == .activation {
-                            Button("activation.start") { activation = true }
-                        } else if session.authentication == .required {
+                        else if session.authentication == .required {
                             if session.supportsBrowserLogin {
                                 BrowserLoginButton(session: session)
                             } else {
@@ -33,11 +30,10 @@ struct SettingsAccessView<Content: View>: View {
                         }
                     }
                 }
-                .detailErrorAlert(login || activation ? nil : session.authFailure ?? session.failure)
+                .detailErrorAlert(login ? nil : session.authFailure ?? session.failure)
             }
         }
         .sheet(isPresented: $login) { AuthenticationView(session: session) }
-        .sheet(isPresented: $activation) { ActivationView(session: session) }
         .foregroundTask {
             if !session.canAccessDevices { await session.refresh(force: true) }
         }

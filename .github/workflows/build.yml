@@ -1,4 +1,4 @@
-name: Build and Release Community
+name: Build and Release Sigmo
 
 on:
   workflow_dispatch:
@@ -8,87 +8,110 @@ on:
     paths-ignore:
       - "**/*.md"
       - "apps/ios/**"
-      - "pro/**"
       - "pro-api/**"
+
   pull_request:
     branches: [main]
     paths-ignore:
       - "apps/ios/**"
-      - "pro/**"
       - "pro-api/**"
 
 permissions:
   contents: read
 
+concurrency:
+  group: sigmo-${{ github.event_name == 'pull_request' && github.ref || (github.ref_type == 'tag' && 'stable' || 'dev') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.release.outputs.channel }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - id: release
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "channel=stable" >> "${GITHUB_OUTPUT}"
+            echo "version=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "channel=dev" >> "${GITHUB_OUTPUT}"
+            echo "version=dev-${GITHUB_SHA::8}" >> "${GITHUB_OUTPUT}"
+          fi
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: |
+          cd apps/web
+          bun install --frozen-lockfile
+          bun run build --mode prod
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-dist
+          path: apps/web/dist/**
+          if-no-files-found: error
+          retention-days: 1
+
   build:
-    name: Build ${{ matrix.target.name }}
+    name: Build ${{ matrix.target }}
+    needs: [metadata, frontend]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         target:
-          - { arch: 386, name: linux-i386 }
-          - { arch: amd64, name: linux-amd64 }
-          - { arch: arm, arm: 7, name: linux-armhf }
-          - { arch: arm64, name: linux-arm64 }
-          - { arch: ppc64le, name: linux-ppc64le }
-          - { arch: s390x, name: linux-s390x }
-          - { arch: riscv64, name: linux-riscv64 }
+          - linux-amd64
+          - linux-amd64-musl
+          - linux-arm64
+          - linux-arm64-musl
+          - linux-arm
+          - linux-arm-musl
+          - linux-386
+          - linux-ppc64le
+          - linux-riscv64
+          - linux-s390x
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/download-artifact@v8
+        with: { name: web-dist, path: apps/web/dist }
       - uses: actions/setup-go@v7
-        with: { go-version-file: go.mod }
-      - name: Build frontend
-        run: |
-          cd apps/web
-          bun install --frozen-lockfile
-          bun run build --mode prod
-      - name: Build Community binary
-        env:
-          TARGET_ARCH: ${{ matrix.target.arch }}
-          TARGET_ARM: ${{ matrix.target.arm }}
-          TARGET_NAME: ${{ matrix.target.name }}
-          RELEASE_PUBLIC_KEY: ${{ secrets.SIGMO_RELEASE_PUBLIC_KEY }}
-          PUSH_GATEWAY_URL: ${{ vars.SIGMO_PUSH_GATEWAY_URL }}
-        run: |
-          set -euo pipefail
-          go generate ./...
-          version="dev-${GITHUB_SHA::8}"
-          distribution="developer"
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            : "${RELEASE_PUBLIC_KEY:?SIGMO_RELEASE_PUBLIC_KEY is required for release builds}"
-            version="${GITHUB_REF_NAME}"
-            distribution="standalone"
-          fi
-          ldflags="-w -s"
-          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Version=${version}"
-          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Commit=${GITHUB_SHA}"
-          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Channel=stable"
-          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Edition=community"
-          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Target=${TARGET_NAME}"
-          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Distribution=${distribution}"
-          ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.ReleasePublicKey=${RELEASE_PUBLIC_KEY:-}"
-          ldflags+=" -X github.com/damonto/sigmo/internal/pkg/nativepush.GatewayURL=${PUSH_GATEWAY_URL:-https://sigmo-pro-api.id.workers.dev}"
-          env_args=(GOOS=linux GOARCH="${TARGET_ARCH}" CGO_ENABLED=0)
-          if [ -n "${TARGET_ARM:-}" ]; then env_args+=(GOARM="${TARGET_ARM}"); fi
-          env "${env_args[@]}" go build -trimpath -ldflags="${ldflags}" -o "sigmo-${TARGET_NAME}" .
-      - uses: actions/upload-artifact@v7
-        if: startsWith(github.ref, 'refs/tags/v')
         with:
-          name: sigmo-${{ matrix.target.name }}
-          path: sigmo-${{ matrix.target.name }}
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+      - name: Build once for target
+        env:
+          SIGMO_DISTRIBUTION: ${{ github.event_name == 'pull_request' && 'developer' || 'standalone' }}
+          SIGMO_BUILD_DIR: build/releases
+          SIGMO_TARGETS: ${{ matrix.target }}
+          SIGMO_SKIP_FRONTEND_BUILD: "1"
+          SIGMO_BUILD_VERSION: ${{ needs.metadata.outputs.version }}
+          SIGMO_BUILD_CHANNEL: ${{ needs.metadata.outputs.channel }}
+          SIGMO_BUILD_COMMIT: ${{ github.sha }}
+          SIGMO_RELEASE_PUBLIC_KEY: ${{ secrets.SIGMO_RELEASE_PUBLIC_KEY }}
+          SIGMO_LICENSE_PUBLIC_KEY: ${{ secrets.SIGMO_LICENSE_PUBLIC_KEY }}
+          SIGMO_WORKER_URL: ${{ vars.SIGMO_WORKER_URL }}
+          SIGMO_PUSH_GATEWAY_URL: ${{ vars.SIGMO_PUSH_GATEWAY_URL }}
+        run: scripts/build.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sigmo-${{ matrix.target }}
+          path: build/releases/sigmo-${{ matrix.target }}
           if-no-files-found: error
           retention-days: 1
+          compression-level: 0
 
-  release:
-    name: Publish signed GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-latest
+  publish:
     permissions: { contents: write }
+    if: github.event_name != 'pull_request'
+    name: Publish Sigmo ${{ needs.metadata.outputs.channel }}
+    needs: [metadata, build]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
@@ -98,24 +121,82 @@ jobs:
         with:
           pattern: sigmo-*
           merge-multiple: true
-      - name: Generate signed update manifest
+      - name: Compress artifacts
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          artifacts=(sigmo-linux-*)
+          if [ "${#artifacts[@]}" -eq 0 ]; then
+            echo "no artifacts found" >&2
+            exit 1
+          fi
+          for artifact in "${artifacts[@]}"; do
+            gzip -9 -n "${artifact}"
+          done
+      - name: Generate signed manifest
         env:
           SIGMO_RELEASE_PRIVATE_KEY: ${{ secrets.SIGMO_RELEASE_PRIVATE_KEY }}
+          CHANNEL: ${{ needs.metadata.outputs.channel }}
+          VERSION: ${{ needs.metadata.outputs.version }}
         run: |
+          git log -1 --pretty=%B > release-notes.txt
+          args=()
+          for artifact in sigmo-linux-*.gz; do
+            target="${artifact#sigmo-}"
+            args+=(-artifact "${target%.gz}=${artifact}")
+          done
           go run ./cmd/updatemanifest \
-            -edition community -channel stable -version "${GITHUB_REF_NAME}" -commit "${GITHUB_SHA}" \
-            -output sigmo-update.json \
-            -artifact linux-i386=sigmo-linux-i386 \
-            -artifact linux-amd64=sigmo-linux-amd64 \
-            -artifact linux-armhf=sigmo-linux-armhf \
-            -artifact linux-arm64=sigmo-linux-arm64 \
-            -artifact linux-ppc64le=sigmo-linux-ppc64le \
-            -artifact linux-s390x=sigmo-linux-s390x \
-            -artifact linux-riscv64=sigmo-linux-riscv64
+            -channel "${CHANNEL}" -version "${VERSION}" -commit "${GITHUB_SHA}" \
+            -notes-file release-notes.txt -output sigmo-update.json -compression gzip "${args[@]}"
+      - name: Upload immutable release and switch latest
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.SIGMO_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.SIGMO_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          SIGMO_R2_ACCOUNT_ID: ${{ secrets.SIGMO_R2_ACCOUNT_ID }}
+          SIGMO_R2_BUCKET: sigmo
+          CHANNEL: ${{ needs.metadata.outputs.channel }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          : "${SIGMO_R2_ACCOUNT_ID:?SIGMO_R2_ACCOUNT_ID is required}"
+          : "${SIGMO_R2_BUCKET:?SIGMO_R2_BUCKET is required}"
+          endpoint="https://${SIGMO_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          prefix="${CHANNEL}/versions/${VERSION}"
+          artifacts=(sigmo-linux-*.gz)
+          if [ "${#artifacts[@]}" -eq 0 ]; then
+            echo "no artifacts found" >&2
+            exit 1
+          fi
+          for artifact in "${artifacts[@]}"; do
+            aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
+              --key "${prefix}/${artifact}" --body "${artifact}" --content-type application/gzip
+          done
+          aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
+            --key "${prefix}/manifest.json" --body sigmo-update.json --content-type application/json
+          aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
+            --key "${prefix}/manifest.json.sig" --body sigmo-update.json.sig --content-type text/plain
+          aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
+            --key "${CHANNEL}/latest/manifest.json" --body sigmo-update.json --content-type application/json
+      - name: Move development tag
+        if: needs.metadata.outputs.channel == 'dev'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/dev" >/dev/null 2>&1; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/dev" -f sha="${GITHUB_SHA}" -F force=true
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" -f ref=refs/tags/dev -f sha="${GITHUB_SHA}"
+          fi
       - uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ needs.metadata.outputs.channel == 'dev' && 'dev' || needs.metadata.outputs.version }}
+          name: ${{ needs.metadata.outputs.version }}
+          prerelease: ${{ needs.metadata.outputs.channel == 'dev' }}
+          make_latest: ${{ needs.metadata.outputs.channel == 'stable' }}
           generate_release_notes: true
           files: |
-            sigmo-linux-*
+            sigmo-linux-*.gz
             sigmo-update.json
             sigmo-update.json.sig

@@ -78,7 +78,10 @@ const decodeStatus = async (response: Response): Promise<LicenseStatus> => {
   ) {
     throw new Error('invalid license status response')
   }
-  return { authorized: data.authorized, deviceId: data.deviceId }
+  return {
+    authorized: data.authorized,
+    deviceId: data.deviceId,
+  }
 }
 
 export const useLicenseApi = () => ({

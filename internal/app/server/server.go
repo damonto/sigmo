@@ -21,6 +21,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/damonto/sigmo/internal/app/buildinfo"
+	"github.com/damonto/sigmo/internal/app/feature"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	hnetwork "github.com/damonto/sigmo/internal/app/handler/network"
 	"github.com/damonto/sigmo/internal/app/httpapi"
@@ -29,6 +30,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/router"
 	appupdate "github.com/damonto/sigmo/internal/app/update"
 	"github.com/damonto/sigmo/internal/pkg/internet"
+	"github.com/damonto/sigmo/internal/pkg/license"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/modemtask"
@@ -47,8 +49,6 @@ type Config struct {
 	ListenAddress string
 	DBPath        string
 	Debug         bool
-	Authorize     AuthorizationFactory
-	Configure     Extension
 }
 
 var (
@@ -142,19 +142,14 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 		return fmt.Errorf("load settings: %w", err)
 	}
 
-	var authorization Authorization
-	if cfg.Authorize != nil {
-		authorization, err = cfg.Authorize(ctx, AuthorizationConfig{
-			Build:    cfg.Build,
-			Restart:  restart,
-			StateDir: filepath.Dir(resolvedDBPath),
-			Store:    store,
-			Storage:  db,
-		})
-		if err != nil {
-			return fmt.Errorf("configure authorization: %w", err)
-		}
+	authorization, err := license.New(ctx, license.Config{
+		BaseURL: license.WorkerURL, LicensePublicKey: license.LicensePublicKey,
+		IdentityPath: filepath.Join(filepath.Dir(resolvedDBPath), "device.identity"), Storage: db,
+	})
+	if err != nil {
+		return fmt.Errorf("configure authorization: %w", err)
 	}
+	policy := feature.NewPolicy(authorization.Authorized)
 
 	registry, err := modem.NewRegistry()
 	if err != nil {
@@ -221,8 +216,7 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 		slog.Error("recover internet connections", "error", err)
 	}
 	cancelStartup()
-	// Authorization may need the very connection these tasks restore. Keep
-	// them running during validation and reuse them after startup succeeds.
+	// Network recovery runs independently of official service authorization.
 	startRunner("modem enable", func(ctx context.Context) error {
 		return modemtask.RunEnableDisabled(ctx, registry, enableDisabledPolicy)
 	})
@@ -236,13 +230,6 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	startRunner("network registration restore", func(ctx context.Context) error {
 		return hnetwork.RunRegistrationRestore(ctx, registry, db)
 	})
-	authorized, err := startAuthorization(ctx, authorization)
-	if err != nil {
-		return err
-	}
-	if !authorized {
-		return runActivationServer(ctx, cfg, authorization)
-	}
 
 	webPush, err := webpush.New(ctx, db)
 	if err != nil {
@@ -255,14 +242,11 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	nativePush, err := nativepush.New(nativepush.Config{
 		Storage:  db,
 		Settings: store,
-		Authorized: func() bool {
-			return authorization == nil || authorization.Authorized()
-		},
 	})
 	if err != nil {
 		return fmt.Errorf("configure native push: %w", err)
 	}
-	slog.Info("server starting", "version", cfg.Build.Version, "edition", cfg.Build.Edition, "channel", cfg.Build.Channel, "listen_address", cfg.ListenAddress, "db_path", resolvedDBPath)
+	slog.Info("server starting", "version", cfg.Build.Version, "channel", cfg.Build.Channel, "listen_address", cfg.ListenAddress, "db_path", resolvedDBPath)
 
 	server := echo.New()
 	server.Logger = slog.Default()
@@ -319,6 +303,7 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 		WebPush:               webPush,
 		Reminders:             reminderScheduler,
 		License:               authorization,
+		Policy:                policy,
 		airplaneModeLifecycle: internetConnector,
 	}
 	cleanups.Add(func(ctx context.Context) error {
@@ -327,18 +312,14 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 		}
 		return nil
 	})
-	if cfg.Configure != nil {
-		if err := cfg.Configure(ctx, runtime); err != nil {
-			return fmt.Errorf("configure extensions: %w", err)
-		}
+	if err := configureFeatures(ctx, runtime); err != nil {
+		return fmt.Errorf("configure features: %w", err)
 	}
-	if runtime.UpdateSource == nil {
-		runtime.UpdateSource = appupdate.NewGitHubSource(nil, "", cfg.Build.ReleasePublicKey)
-	}
+
 	updateController, err := appupdate.NewController(appupdate.ControllerConfig{
 		Build:    cfg.Build,
 		Settings: store,
-		Source:   runtime.UpdateSource,
+		Source:   appupdate.NewGitHubSource(nil, "", cfg.Build.ReleasePublicKey),
 		License:  runtime.License,
 		Restart:  restart,
 	})
@@ -363,6 +344,7 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 		return fmt.Errorf("configure MCP API keys: %w", err)
 	}
 	mcpCatalog := mcpserver.NewCatalog()
+	mcpCatalog.SetFeaturePolicy(policy)
 	if err := mcpserver.RegisterCoreTools(mcpCatalog, mcpserver.CoreToolsConfig{
 		Store:               store,
 		Registry:            registry,
@@ -414,24 +396,19 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 		USSDRoute:           runtime.ussdRoute,
 		ModemOverview:       runtime.modemOverview,
 		Features:            runtime.features,
+		Policy:              policy,
 		Extensions:          runtime.routes,
 		MCP:                 mcpController,
 		MCPKeys:             mcpKeys,
 		Updates:             updateController,
-		LicenseRoutes: func(group *echo.Group) {
-			if authorization != nil {
-				authorization.RegisterStatusRoute(group)
-			}
-		},
+		LicenseRoutes:       authorization.RegisterRoutes,
 	}); err != nil {
 		return fmt.Errorf("configure router: %w", err)
 	}
 
 	startRunner("update", updateController.Run)
 
-	if authorization != nil {
-		startRunner("authorization", authorization.Run)
-	}
+	startRunner("authorization", authorization.Run)
 
 	startRunner("reminder", reminderScheduler.Run)
 	startRunner("native push", nativePush.Run)

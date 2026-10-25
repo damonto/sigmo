@@ -46,7 +46,7 @@ func TestUpdateSnapshotHidesUpstreamDetails(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			source := &fakeSource{err: fmt.Errorf("get release: %w", tt.err)}
 			controller, err := NewController(ControllerConfig{
-				Build:    buildinfo.Info{Edition: buildinfo.EditionPro, Channel: buildinfo.ChannelStable},
+				Build:    buildinfo.Info{Channel: buildinfo.ChannelStable},
 				Settings: settings.NewMemoryStore(settings.Default()),
 				Source:   source,
 			})

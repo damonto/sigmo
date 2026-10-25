@@ -19,7 +19,6 @@ sigmo-*
 coverage.out
 
 build/
-pro/
 dist/
 tmp/
 apps/web/node_modules/
@@ -30,3 +29,13 @@ apps/web/*.tsbuildinfo
 .env
 .env.*
 .DS_Store
+
+# Private configuration and deployment credentials never enter build contexts.
+scripts/sigmo-keys/
+**/entitlement.json
+**/wfc.json
+**/ims.json
+pro-api/node_modules/
+**/.dev.vars*
+.codex/
+.agents/

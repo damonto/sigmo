@@ -19,14 +19,14 @@ func TestHandlerGet(t *testing.T) {
 		{
 			name: "release metadata",
 			build: buildinfo.Info{
-				Version:      "v1.2.3",
-				Commit:       "0123456789abcdef",
-				Channel:      buildinfo.ChannelStable,
-				Edition:      buildinfo.EditionCommunity,
+				Version: "v1.2.3",
+				Commit:  "0123456789abcdef",
+				Channel: buildinfo.ChannelStable,
+
 				Target:       "linux-amd64",
 				Distribution: buildinfo.DistributionStandalone,
 			},
-			want: `{"version":"v1.2.3","commit":"0123456789abcdef","channel":"stable","edition":"community","target":"linux-amd64","distribution":"standalone"}` + "\n",
+			want: `{"version":"v1.2.3","commit":"0123456789abcdef","channel":"stable","target":"linux-amd64","distribution":"standalone"}` + "\n",
 		},
 	}
 

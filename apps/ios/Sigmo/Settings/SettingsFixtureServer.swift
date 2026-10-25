@@ -13,7 +13,6 @@ struct SettingsFixtureServer {
     var commit = "fixture"
     var licenseDisplayName = "Fixture User"
     var updateNotes = "Improve backend reliability.\n<strong>Plain text</strong>"
-    var edition = "pro"
     var distribution = "standalone"
     var unsupportedReason: String?
     var updateState = "idle"
@@ -22,7 +21,7 @@ struct SettingsFixtureServer {
     var oidcTestID = "oidc-test"
     var oidcTestState = ""
     var authTestResult = SettingsAuthTestResult(status: "succeeded", reason: nil, subject: "owner")
-    var app: AppInformation { .init(version: version, commit: commit, channel: preferences.channel, edition: edition, target: "linux-arm64", distribution: distribution) }
+    var app: AppInformation { .init(version: version, commit: commit, channel: preferences.channel, target: "linux-arm64", distribution: distribution) }
     var otpRequired: Bool { settings.values.auth["mode"]?.text == "otp" }
 
     init() throws { settings = try JSONDecoder().decode(SettingsResponse.self, from: Data(SettingsFixtureData.settings.utf8)) }
@@ -119,7 +118,7 @@ struct SettingsFixtureServer {
     func updateSnapshot() -> UpdateSnapshot {
         .init(settings: preferences, current: app,
               latest: checkedAt == nil ? nil : .init(version: "1.1.0", notes: updateNotes, publishedAt: Date(timeIntervalSince1970: 1_790_000_000)),
-              license: edition == "pro" ? .init(status: "active", deviceId: "fixture-device", telegramId: 10001, displayName: licenseDisplayName, username: "fixture", expiresAt: nil, offlineUntil: nil) : nil,
+              license: .init(status: "active", deviceId: "fixture-device", telegramId: 10001, displayName: licenseDisplayName, username: "fixture", expiresAt: nil, offlineUntil: nil),
               state: updateState, checkedAt: checkedAt, updateAvailable: checkedAt != nil && version != "1.1.0",
               selfUpdateSupported: unsupportedReason == nil && distribution != "container", unsupportedReason: unsupportedReason, errorCode: nil, error: nil)
     }

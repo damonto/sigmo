@@ -36,7 +36,7 @@ struct BackendDetailView: View {
                 if !session.licenseDeviceID.isEmpty {
                     LabeledContent("license.deviceID") { Text(session.licenseDeviceID).textSelection(.enabled) }
                 }
-                if session.license == .activation {
+                if session.serviceActivationAvailable {
                     Button("activation.start", systemImage: "key") { activation = true }
                         .accessibilityIdentifier("activateBackend")
                 }
@@ -53,7 +53,6 @@ struct BackendDetailView: View {
             if let information = session.information {
                 Section("backends.server") {
                     LabeledContent("backends.version", value: information.version)
-                    LabeledContent("backends.edition", value: information.edition)
                     LabeledContent("backends.channel", value: information.channel)
                     LabeledContent("backends.commit", value: information.commit)
                     LabeledContent("backends.target", value: information.target)
@@ -165,9 +164,7 @@ struct ActivationView: View {
                 Section {
                     Label(session.configuration.name, systemImage: "server.rack").font(.headline)
                     Text("activation.description").foregroundStyle(Color.secondary)
-                    if session.waitingForRestart {
-                        ProgressView("activation.restarting")
-                    } else if let pairing = session.pairing {
+                    if let pairing = session.pairing {
                         Text(LocalizedStringKey(pairing.statusKey))
                             .accessibilityIdentifier("pairingStatus")
                         if pairing.status == "pending" {

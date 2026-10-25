@@ -14,7 +14,7 @@ import (
 func TestSIMPINToolsRequireIndependentPermission(t *testing.T) {
 	c := NewCatalog()
 	for _, p := range corePermissions() {
-		if err := c.AddPermission(p.Name, p.Module); err != nil {
+		if err := c.AddPermission(p); err != nil {
 			t.Fatal(err)
 		}
 	}

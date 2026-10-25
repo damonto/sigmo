@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 
 import { useLicenseApi } from '@/apis/license'
 
-type LicenseMode = 'unknown' | 'community' | 'authorized' | 'activation' | 'unavailable'
+type LicenseMode = 'unknown' | 'unlicensed' | 'authorized' | 'unavailable'
 
 export const useLicenseStore = defineStore('license', () => {
   const mode = ref<LicenseMode>('unknown')
@@ -13,8 +13,7 @@ export const useLicenseStore = defineStore('license', () => {
   const checking = ref(false)
   let currentCheck: Promise<boolean> | undefined
 
-  const businessEnabled = computed(() => mode.value === 'community' || mode.value === 'authorized')
-  const activationRequired = computed(() => mode.value === 'activation')
+  const authorized = computed(() => mode.value === 'authorized')
   const unavailable = computed(() => mode.value === 'unavailable')
 
   const clearError = () => {
@@ -28,12 +27,6 @@ export const useLicenseStore = defineStore('license', () => {
       const response = await api.status()
       if (!response.ok) {
         const error = await api.decodeError(response)
-        if (error.status === 404 && error.error_code === 'resource_not_found') {
-          mode.value = 'community'
-          deviceId.value = ''
-          clearError()
-          return true
-        }
         mode.value = 'unavailable'
         errorCode.value = error.error_code
         errorMessage.value = error.message
@@ -42,8 +35,8 @@ export const useLicenseStore = defineStore('license', () => {
       const status = await api.decodeStatus(response)
       deviceId.value = status.deviceId
       clearError()
-      mode.value = status.authorized ? 'authorized' : 'activation'
-      return status.authorized
+      mode.value = status.authorized ? 'authorized' : 'unlicensed'
+      return authorized.value
     } catch (error) {
       mode.value = 'unavailable'
       errorCode.value =
@@ -56,7 +49,7 @@ export const useLicenseStore = defineStore('license', () => {
   }
 
   const check = (force = false): Promise<boolean> => {
-    if (!force && mode.value !== 'unknown') return Promise.resolve(businessEnabled.value)
+    if (!force && mode.value !== 'unknown') return Promise.resolve(authorized.value)
     if (currentCheck) return currentCheck
 
     checking.value = true
@@ -73,8 +66,7 @@ export const useLicenseStore = defineStore('license', () => {
     errorCode,
     errorMessage,
     checking,
-    businessEnabled,
-    activationRequired,
+    authorized,
     unavailable,
     check,
   }

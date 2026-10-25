@@ -34,6 +34,7 @@ import { download, latestRelease } from '../releases/service';
 import { telegramWebhook } from '../telegram/webhook';
 import { carrierLogo } from '../logos/service';
 import { appleAssociation, nativeCallback } from './native-auth';
+import { configuration } from '../configurations/service';
 
 interface ApiEnv {
   Bindings: Env;
@@ -163,6 +164,10 @@ app.post(
 app.post(
   '/v1/license-leases',
   business((c, ctx) => createLease(c.req.raw, ctx)),
+);
+app.get(
+  '/v1/configurations/current',
+  business((c, ctx) => configuration(c.req.raw, ctx)),
 );
 app.get(
   '/v1/release-channels/:channel/releases/latest',

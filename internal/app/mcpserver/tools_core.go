@@ -80,7 +80,7 @@ func RegisterCoreTools(catalog *Catalog, cfg CoreToolsConfig) error {
 		ussd:     ussdcore.New(cfg.USSDRoute),
 	}
 	for _, permission := range corePermissions() {
-		if err := catalog.AddPermission(permission.Name, permission.Module); err != nil {
+		if err := catalog.AddPermission(permission); err != nil {
 			return err
 		}
 	}

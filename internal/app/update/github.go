@@ -45,11 +45,15 @@ func NewGitHubSource(client *http.Client, latestURL string, publicKey string) *G
 }
 
 func (s *GitHubSource) Latest(ctx context.Context, channel string, target string) (Release, error) {
-	if channel != "stable" {
-		return Release{}, errors.New("community update channel must be stable")
+	if channel != "stable" && channel != "dev" {
+		return Release{}, errors.New("update channel must be stable or dev")
 	}
 	var release githubRelease
-	if err := s.getJSON(ctx, s.latestURL, &release); err != nil {
+	latestURL := s.latestURL
+	if channel == "dev" {
+		latestURL = strings.TrimSuffix(latestURL, "/latest") + "/tags/dev"
+	}
+	if err := s.getJSON(ctx, latestURL, &release); err != nil {
 		return Release{}, fmt.Errorf("get latest GitHub release: %w", err)
 	}
 	manifestURL, ok := githubAssetURL(release.Assets, manifestAssetName)
@@ -72,7 +76,7 @@ func (s *GitHubSource) Latest(ctx context.Context, channel string, target string
 	if err != nil {
 		return Release{}, err
 	}
-	if manifest.Edition != "community" || manifest.Channel != channel || manifest.Version != release.TagName {
+	if manifest.Channel != channel || (channel == "stable" && manifest.Version != release.TagName) || (channel == "dev" && release.TagName != "dev") {
 		return Release{}, fmt.Errorf("%w: GitHub release metadata does not match manifest", ErrInvalidManifest)
 	}
 	artifact, err := FindArtifact(manifest, target)

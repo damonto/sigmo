@@ -46,7 +46,6 @@
 "backends.address" = "Sigmo address";
 "backends.server" = "Server";
 "backends.version" = "Version";
-"backends.edition" = "Edition";
 "backends.channel" = "Channel";
 "backends.commit" = "Commit";
 "backends.target" = "Target";
@@ -56,7 +55,6 @@
 "status.offline" = "Offline";
 "status.unavailable" = "Connection unavailable";
 "status.loginRequired" = "Login required";
-"status.activationRequired" = "Activation required";
 "status.connecting" = "Connecting…";
 "status.notConnected" = "Not connected";
 "auth.title" = "Authentication";
@@ -78,16 +76,13 @@
 "license.status" = "Authorization status";
 "license.deviceID" = "Server device ID";
 "license.unknown" = "Not checked";
-"license.community" = "Community edition";
 "license.authorized" = "Authorized";
-"license.activation" = "Activation required";
 "license.unavailable" = "Authorization unavailable";
 "activation.title" = "Activate Pro";
 "activation.start" = "Activate Pro";
 "activation.description" = "Create a pairing, open Telegram to authorize this Sigmo, then return here to finish connecting.";
 "activation.create" = "Create Pairing";
 "activation.openTelegram" = "Open Telegram";
-"activation.restarting" = "Authorized. Waiting for the server…";
 "activation.pending" = "Waiting for authorization";
 "activation.active" = "Authorized";
 "activation.expired" = "Pairing expired. Create a new pairing to continue.";
@@ -232,7 +227,6 @@
 "settings.updates.automaticDescription" = "Check two minutes after startup and every six hours, then install verified updates.";
 "settings.updates.channel" = "Update channel";
 "settings.updates.channelProDescription" = "Stable follows version tags. Dev follows the latest main commit.";
-"settings.updates.channelCommunityDescription" = "Community edition only receives Stable releases.";
 "settings.updates.versionTitle" = "Version status";
 "settings.updates.installedVersion" = "Current version";
 "settings.updates.serverVersion" = "Server version";
@@ -1273,3 +1267,4 @@
 "simPin.errors.sim_pin_unavailable" = "Unable to read SIM PIN status. Close and reopen this page to try again.";
 "simPin.errors.sim_pin_result_unknown" = "The result could not be confirmed. Reopen SIM PIN to check before trying again.";
 "simPin.errors.enable_modem_after_unlock_failed" = "SIM unlocked, but the modem could not be enabled. Turn off airplane mode without entering the code again.";
+"license.unlicensed" = "No Pro authorization";

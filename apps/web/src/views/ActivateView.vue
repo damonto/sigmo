@@ -4,7 +4,6 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
-import { useAppApi } from '@/apis/app'
 import { useLicenseApi } from '@/apis/license'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
@@ -14,7 +13,6 @@ import type { LicensePairing } from '@/types/license'
 
 const { t } = useI18n()
 const router = useRouter()
-const appApi = useAppApi()
 const api = useLicenseApi()
 const licenseStore = useLicenseStore()
 const pairing = ref<LicensePairing>()
@@ -30,9 +28,8 @@ const stopPolling = () => {
 
 const enterAppIfReady = async () => {
   try {
-    if (!(await appApi.ready())) return false
-    const authorized = await licenseStore.check(true)
-    if (!active || !authorized) return false
+    await licenseStore.check(true)
+    if (!active || licenseStore.mode !== 'authorized') return false
     stopPolling()
     await router.replace({ name: 'home' })
     return true
@@ -61,8 +58,7 @@ const poll = async () => {
     }
     if (pairing.value.status === 'expired') return
   } catch (error) {
-    // Activation restarts the process. If the polling response was lost, the
-    // status resource on the new process is the source of truth.
+    // The pairing response can be lost after authorization was committed.
     if (!active) return
     if (await enterAppIfReady()) return
     const code =
@@ -87,10 +83,7 @@ const createPairing = async () => {
     timer = window.setTimeout(poll, 2000)
   } catch (error) {
     if (!active) return
-    // The authorization callback restarts the Go server. A stale activation
-    // page can race that restart and hit the full server, where pairing routes
-    // are intentionally unavailable. Recheck the status before showing an
-    // error so the page follows the newly authorized process.
+    // Recheck authorization if the pairing response was lost.
     if (await enterAppIfReady()) return
     failure.value = localizeErrorMessage(error, t('activate.failed'))
   } finally {

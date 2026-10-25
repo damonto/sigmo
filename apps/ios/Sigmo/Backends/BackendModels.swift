@@ -131,7 +131,6 @@ struct AppInformation: Codable, Sendable, Equatable {
     let version: String
     let commit: String
     let channel: String
-    let edition: String
     let target: String
     let distribution: String
 }

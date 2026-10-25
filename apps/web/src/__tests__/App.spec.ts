@@ -52,7 +52,7 @@ describe('App', () => {
   it('renders the call banner at the app shell level', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
-    useLicenseStore().mode = 'community'
+    useLicenseStore().mode = 'unlicensed'
     const wrapper = mount(App, {
       global: {
         plugins: [pinia],

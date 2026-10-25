@@ -381,7 +381,7 @@ func TestModemResponseJSONIncludesOverviewFields(t *testing.T) {
 			want: `"volteConnected":true`,
 		},
 		{
-			name: "VoLTE disabled on community and locked devices",
+			name: "VoLTE disabled without capabilities or access",
 			want: `"volteEnabled":false,"volteConnected":false`,
 		},
 		{

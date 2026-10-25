@@ -257,7 +257,7 @@ function delivery(
   };
 }
 
-describe('community push registration', () => {
+describe('base push registration', () => {
   it.each(['deviceToken', 'voipToken'])(
     'keeps the previous registration when updating to an occupied %s',
     async (channel) => {

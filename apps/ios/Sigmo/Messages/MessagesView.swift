@@ -91,7 +91,7 @@ struct MessagesView: View {
         .onChange(of: state.badge) { _, value in if let value { push?.record(value, sessionID: state.session.id) } }
         .onChange(of: state.session.accessRevision) { _, _ in state.clear(); selected = nil; pushed = nil; composing = false }
         .onChange(of: state.session.canAccessDevices) { _, value in
-            if !value && (state.session.authentication == .required || state.session.license == .activation) {
+            if !value && (state.session.authentication == .required) {
                 state.clear(); selected = nil; pushed = nil
             }
         }

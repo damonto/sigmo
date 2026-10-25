@@ -11,13 +11,13 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[3]
-    source = root / "pro/websheet/bridge.js"
+    source = root / "internal/app/websheet/bridge.js"
     fixture = root / "apps/ios/SigmoTests/Fixtures/carrier_bridge.js"
     expected = source.read_bytes()
     if args.check:
         if not fixture.exists() or fixture.read_bytes() != expected:
             parser.exit(1, "Carrier bridge fixture is stale; run python3 apps/ios/scripts/sync_carrier_bridge.py\n")
-        print("Carrier bridge fixture matches pro/websheet/bridge.js")
+        print("Carrier bridge fixture matches internal/app/websheet/bridge.js")
     else:
         fixture.write_bytes(expected)
         print("Updated apps/ios/SigmoTests/Fixtures/carrier_bridge.js")

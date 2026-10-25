@@ -55,14 +55,14 @@ func TestControllerCommunitySettingsAndAvailability(t *testing.T) {
 	store := settings.NewMemoryStore(settings.Default())
 	source := &fakeSource{release: Release{Manifest: Manifest{Channel: "stable", Version: "v1.2.0"}}}
 	controller, err := NewController(ControllerConfig{
-		Build:    buildinfo.Info{Edition: "community", Channel: "stable", Version: "v1.1.0", Distribution: "standalone", ReleasePublicKey: "key"},
+		Build:    buildinfo.Info{Channel: "stable", Version: "v1.1.0", Distribution: "standalone", ReleasePublicKey: "key"},
 		Settings: store, Source: source, Executable: "/tmp/sigmo-test",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := controller.UpdateSettings(t.Context(), settings.Updates{Channel: "dev"}); err == nil {
-		t.Fatal("UpdateSettings(dev) error = nil")
+	if _, err := controller.UpdateSettings(t.Context(), settings.Updates{Channel: "dev"}); err != nil {
+		t.Fatal(err)
 	}
 	if err := controller.Check(t.Context()); err != nil {
 		t.Fatalf("Check() error = %v", err)
@@ -72,16 +72,16 @@ func TestControllerCommunitySettingsAndAvailability(t *testing.T) {
 	}
 }
 
-func TestControllerForcesStoredCommunityChannelToStable(t *testing.T) {
+func TestControllerKeepsSelectedChannel(t *testing.T) {
 	current := settings.Default()
 	current.Updates = settings.Updates{Automatic: true, Channel: settings.UpdateChannelDev}
 	source := &fakeSource{release: Release{Manifest: Manifest{
-		Channel: settings.UpdateChannelStable,
+		Channel: settings.UpdateChannelDev,
 		Version: "v1.2.0",
 	}}}
 	controller, err := NewController(ControllerConfig{
 		Build: buildinfo.Info{
-			Edition:          buildinfo.EditionCommunity,
+
 			Channel:          buildinfo.ChannelStable,
 			Version:          "v1.1.0",
 			Target:           "linux-amd64",
@@ -95,15 +95,15 @@ func TestControllerForcesStoredCommunityChannelToStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := controller.Snapshot().Settings.Channel; got != settings.UpdateChannelStable {
-		t.Fatalf("Snapshot().Settings.Channel = %q, want stable", got)
+	if got := controller.Snapshot().Settings.Channel; got != settings.UpdateChannelDev {
+		t.Fatalf("Snapshot().Settings.Channel = %q, want dev", got)
 	}
 	if err := controller.Check(t.Context()); err != nil {
 		t.Fatalf("Check() error = %v", err)
 	}
 	source.mu.Lock()
 	defer source.mu.Unlock()
-	if source.channel != settings.UpdateChannelStable || source.target != "linux-amd64" {
+	if source.channel != settings.UpdateChannelDev || source.target != "linux-amd64" {
 		t.Fatalf("Latest() channel = %q, target = %q", source.channel, source.target)
 	}
 }
@@ -116,7 +116,7 @@ func TestControllerDefaultsUpdateChannelToCurrentBuild(t *testing.T) {
 	}}}
 	controller, err := NewController(ControllerConfig{
 		Build: buildinfo.Info{
-			Edition:          buildinfo.EditionPro,
+
 			Channel:          buildinfo.ChannelStable,
 			Version:          "dev-11111111",
 			Commit:           "1111111111111111111111111111111111111111",
@@ -153,7 +153,7 @@ func TestControllerDefaultsUpdateChannelToCurrentBuild(t *testing.T) {
 func TestControllerSerializesChecks(t *testing.T) {
 	source := &fakeSource{started: make(chan struct{}), unblock: make(chan struct{})}
 	controller, err := NewController(ControllerConfig{
-		Build:    buildinfo.Info{Edition: "community", Distribution: "developer"},
+		Build:    buildinfo.Info{Distribution: "developer"},
 		Settings: settings.NewMemoryStore(settings.Default()), Source: source, Executable: "/tmp/sigmo-test",
 	})
 	if err != nil {
@@ -179,7 +179,7 @@ func TestControllerDisablesAutomaticInstallForContainer(t *testing.T) {
 	current := settings.Default()
 	current.Updates.Automatic = true
 	controller, err := NewController(ControllerConfig{
-		Build:    buildinfo.Info{Edition: "community", Distribution: "container"},
+		Build:    buildinfo.Info{Distribution: "container"},
 		Settings: settings.NewMemoryStore(current), Source: &fakeSource{}, Executable: "/tmp/sigmo-test",
 	})
 	if err != nil {
@@ -198,7 +198,7 @@ func TestControllerSerializesSettingsChangesWithChecks(t *testing.T) {
 	source := &fakeSource{started: make(chan struct{}), unblock: make(chan struct{})}
 	controller, err := NewController(ControllerConfig{
 		Build: buildinfo.Info{
-			Edition:          buildinfo.EditionPro,
+
 			Distribution:     buildinfo.DistributionStandalone,
 			ReleasePublicKey: "release-key",
 		},
@@ -228,7 +228,7 @@ func TestControllerSerializesSettingsChangesWithChecks(t *testing.T) {
 func TestControllerPersistsAutomaticOffWithoutReleaseKey(t *testing.T) {
 	controller, err := NewController(ControllerConfig{
 		Build: buildinfo.Info{
-			Edition:      buildinfo.EditionCommunity,
+
 			Distribution: buildinfo.DistributionStandalone,
 		},
 		Settings: settings.NewMemoryStore(settings.Default()),
@@ -261,7 +261,7 @@ func TestControllerSavesChannelWithoutRemoteCheck(t *testing.T) {
 	}}}
 	controller, err := NewController(ControllerConfig{
 		Build: buildinfo.Info{
-			Edition:          buildinfo.EditionPro,
+
 			Channel:          buildinfo.ChannelStable,
 			Version:          "v1.0.0",
 			Distribution:     buildinfo.DistributionStandalone,
@@ -299,7 +299,7 @@ func TestControllerClearsStaleReleaseAfterCheckFailure(t *testing.T) {
 	}}}
 	controller, err := NewController(ControllerConfig{
 		Build: buildinfo.Info{
-			Edition:          buildinfo.EditionCommunity,
+
 			Channel:          buildinfo.ChannelStable,
 			Version:          "v1.0.0",
 			Distribution:     buildinfo.DistributionStandalone,
@@ -335,7 +335,7 @@ func TestControllerRejectsConcurrentInstallations(t *testing.T) {
 	}}
 	controller, err := NewController(ControllerConfig{
 		Build: buildinfo.Info{
-			Edition:          buildinfo.EditionCommunity,
+
 			Channel:          buildinfo.ChannelStable,
 			Version:          "v1.0.0",
 			Distribution:     buildinfo.DistributionStandalone,

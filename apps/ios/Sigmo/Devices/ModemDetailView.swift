@@ -659,7 +659,7 @@ private struct ModemDetailScreen: View {
         cancelPreparation()
         pinState.reset(); flow?.interrupt(); flow = nil; sheet = nil; pending = nil; profileOperation = nil; confirmation = nil; presentedFailure = nil
         state.clear(); settings.clear(); sim.stop()
-        if session.authentication == .required || session.license == .activation {
+        if session.authentication == .required {
             messages.clear()
             messageConversation = nil
             composingMessage = false

@@ -73,6 +73,6 @@ CLI does not include the registered Go migrations and cannot upgrade a Sigmo
 database on its own. Automatic down migrations are not provided.
 
 After changing migrations, regenerate queries and run the public module tests.
-Also run `go test -tags=esim_transfer,ims ./...` from `pro/` to verify consumers of
+The root `go test ./...` also verifies IMS and transfer consumers of
 the public module. After changing Go dependencies, run `go mod tidy` in each
 affected module and review both `go.mod` and `go.sum`.

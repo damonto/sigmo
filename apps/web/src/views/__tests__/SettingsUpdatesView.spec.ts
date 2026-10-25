@@ -40,13 +40,13 @@ const snapshot = (overrides: Partial<UpdateSnapshot> = {}): UpdateSnapshot => ({
     version: 'v1.0.0',
     commit: '1111111111111111111111111111111111111111',
     channel: 'stable',
-    edition: 'community',
+
     target: 'linux-amd64',
     distribution: 'standalone',
   },
   latest: {
     schemaVersion: 1,
-    edition: 'community',
+
     channel: 'stable',
     version: 'v1.1.0',
     commit: '2222222222222222222222222222222222222222',
@@ -113,30 +113,30 @@ describe('SettingsUpdatesView', () => {
     vi.useRealTimers()
   })
 
-  it('renders Community as Stable-only and keeps release notes as text', async () => {
+  it('renders both update channels and keeps release notes as text', async () => {
     const wrapper = await render(snapshot())
 
-    expect(wrapper.get('[data-testid="channel-select"]').attributes('data-disabled')).toBe('true')
+    expect(wrapper.get('[data-testid="channel-select"]').attributes('data-disabled')).toBe('false')
     expect(wrapper.text()).toContain('v1.0.0')
     expect(wrapper.text()).toContain('v1.1.0')
     expect(wrapper.text()).toContain('<strong>shown as text</strong>')
     expect(wrapper.find('strong').exists()).toBe(false)
   })
 
-  it('renders Pro channels and authorization identity', async () => {
+  it('renders the development channel and authorization identity', async () => {
     const value = snapshot({
       settings: { automatic: true, channel: 'dev' },
       current: {
         version: 'dev-11111111',
         commit: '1111111111111111111111111111111111111111',
         channel: 'dev',
-        edition: 'pro',
+
         target: 'linux-amd64-musl',
         distribution: 'standalone',
       },
       latest: {
         schemaVersion: 1,
-        edition: 'pro',
+
         channel: 'dev',
         version: 'dev-22222222',
         commit: '2222222222222222222222222222222222222222',
@@ -160,9 +160,7 @@ describe('SettingsUpdatesView', () => {
     expect(wrapper.text()).toContain('Alice Example')
     expect(wrapper.text()).toContain('@alice')
     expect(wrapper.text()).toContain('Telegram ID: 10001')
-    expect(wrapper.text()).toContain(
-      'settings.updates.deviceId: 0123456789abcdef0123456789abcdef',
-    )
+    expect(wrapper.text()).toContain('settings.updates.deviceId: 0123456789abcdef0123456789abcdef')
     expect(wrapper.text()).toContain('settings.updates.licenseExpires')
     expect(wrapper.text()).toContain('settings.updates.licenseOfflineUntil')
   })
@@ -173,7 +171,7 @@ describe('SettingsUpdatesView', () => {
         version: 'v1.0.0',
         commit: '1111111111111111111111111111111111111111',
         channel: 'stable',
-        edition: 'community',
+
         target: 'linux-amd64',
         distribution: 'container',
       },
@@ -195,7 +193,7 @@ describe('SettingsUpdatesView', () => {
       snapshot({
         latest: {
           schemaVersion: 1,
-          edition: 'community',
+
           channel: 'stable',
           version: 'v1.0.0',
           commit: '1111111111111111111111111111111111111111',

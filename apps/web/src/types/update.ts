@@ -5,7 +5,6 @@ export type UpdateChannel = 'stable' | 'dev'
 
 export type UpdateManifest = {
   schemaVersion: number
-  edition: 'community' | 'pro'
   channel: UpdateChannel
   version: string
   commit: string

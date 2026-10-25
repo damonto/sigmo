@@ -202,7 +202,7 @@ async function publishRelease(
   const commit = '0123456789abcdef0123456789abcdef01234567';
   const manifest = JSON.stringify({
     schemaVersion: 1,
-    edition: 'pro',
+
     channel,
     version,
     commit,
@@ -210,7 +210,7 @@ async function publishRelease(
     notes: 'release notes',
     artifacts: targets.map((target) => ({
       target,
-      name: `sigmo-pro-${target}.gz`,
+      name: `sigmo-${target}.gz`,
       compression: 'gzip' as const,
       size: 10,
       sha256: '0'.repeat(64),
@@ -517,7 +517,7 @@ describe('release manifests', () => {
   it('requires gzip artifacts and executable metadata', () => {
     const artifact = {
       target: 'linux-amd64',
-      name: 'sigmo-pro-linux-amd64.gz',
+      name: 'sigmo-linux-amd64.gz',
       compression: 'gzip',
       size: 10,
       sha256: '0'.repeat(64),
@@ -526,7 +526,7 @@ describe('release manifests', () => {
     };
     const manifest = {
       schemaVersion: 1,
-      edition: 'pro',
+
       channel: 'stable',
       version: 'v1.0.0',
       commit: '0123456789abcdef0123456789abcdef01234567',
@@ -538,7 +538,7 @@ describe('release manifests', () => {
 
     const invalidArtifacts = [
       { ...artifact, compression: 'none' },
-      { ...artifact, name: 'sigmo-pro-linux-amd64' },
+      { ...artifact, name: 'sigmo-linux-amd64' },
       { ...artifact, executableSize: 0 },
       { ...artifact, executableSha256: 'invalid' },
     ];
@@ -557,7 +557,7 @@ describe('download tickets', () => {
         channel: 'stable',
         version: 'v1.0.0',
         target: 'linux-amd64',
-        path: 'stable/versions/v1.0.0/sigmo-pro-linux-amd64.gz',
+        path: 'stable/versions/v1.0.0/sigmo-linux-amd64.gz',
         expiresAt: Math.floor(Date.now() / 1000) + 300,
       });
       expect(
@@ -573,7 +573,7 @@ describe('download tickets', () => {
       channel: 'dev',
       version: 'dev-01234567',
       target: 'linux-amd64',
-      path: 'dev/versions/dev-01234567/sigmo-pro-linux-amd64.gz',
+      path: 'dev/versions/dev-01234567/sigmo-linux-amd64.gz',
       expiresAt: 200,
     });
     await expect(parseTicket(secret, ticket, 100_000)).resolves.toMatchObject({
@@ -599,7 +599,7 @@ describe('download tickets', () => {
       channel: 'stable' as const,
       version: 'v1.0.0',
       target: 'linux-amd64',
-      path: 'stable/versions/v1.0.0/sigmo-pro-linux-amd64.gz',
+      path: 'stable/versions/v1.0.0/sigmo-linux-amd64.gz',
       expiresAt: 200,
     };
     const ticket = await createTicket(secret, fields);
@@ -611,7 +611,7 @@ describe('download tickets', () => {
 
     const wrongPath = await createTicket(secret, {
       ...fields,
-      path: 'dev/versions/v1.0.0/sigmo-pro-linux-amd64.gz',
+      path: 'dev/versions/v1.0.0/sigmo-linux-amd64.gz',
     });
     await expect(parseTicket(secret, wrongPath, 100_000)).resolves.toBeNull();
     const mixedIdentity = await createTicket(secret, {
@@ -630,7 +630,7 @@ describe('download tickets', () => {
         channel: 'stable',
         version: 'v1.0.0',
         target: 'linux-amd64',
-        path: 'stable/versions/v1.0.0/sigmo-pro-linux-amd64.gz',
+        path: 'stable/versions/v1.0.0/sigmo-linux-amd64.gz',
         expiresAt: 200,
       }),
     ).rejects.toThrow('at least 32 characters');
@@ -1785,7 +1785,7 @@ describe('private releases', () => {
     await grant(telegramId);
     await publishRelease('stable', 'v4.0.0', ['linux-amd64']);
     await env.BUCKET.put(
-      'stable/versions/v4.0.0/sigmo-pro-linux-amd64.gz',
+      'stable/versions/v4.0.0/sigmo-linux-amd64.gz',
       '0123456789',
       {
         httpMetadata: {
@@ -1839,7 +1839,7 @@ describe('private releases', () => {
     expect(fullResponse.headers.get('content-type')).toBe('application/gzip');
     expect(fullResponse.headers.get('content-encoding')).toBeNull();
     expect(fullResponse.headers.get('content-disposition')).toBe(
-      'attachment; filename="sigmo-pro-linux-amd64.gz"',
+      'attachment; filename="sigmo-linux-amd64.gz"',
     );
     expect(new TextDecoder().decode(await fullResponse.arrayBuffer())).toBe(
       '0123456789',
@@ -1912,7 +1912,7 @@ describe('private releases', () => {
       channel: 'stable' as const,
       version: 'v4.1.0',
       target: 'linux-amd64',
-      path: 'stable/versions/v4.1.0/sigmo-pro-linux-amd64.gz',
+      path: 'stable/versions/v4.1.0/sigmo-linux-amd64.gz',
       expiresAt,
     };
     const valid = await createTicket(env.SIGMO_DOWNLOAD_TICKET_SECRET, fields);
@@ -2006,7 +2006,7 @@ describe('private releases', () => {
     const { identity, proof } = await authorizedDevice(6001);
     const manifest = JSON.stringify({
       schemaVersion: 1,
-      edition: 'pro',
+
       channel: 'stable',
       version: 'v2.0.0',
       commit: '0123456789abcdef0123456789abcdef01234567',
@@ -2015,7 +2015,7 @@ describe('private releases', () => {
       artifacts: [
         {
           target: 'linux-amd64',
-          name: 'sigmo-pro-linux-amd64.gz',
+          name: 'sigmo-linux-amd64.gz',
           compression: 'gzip',
           size: 10,
           sha256: '0'.repeat(64),
@@ -2040,7 +2040,7 @@ describe('private releases', () => {
       ),
     );
     await env.BUCKET.put(
-      'stable/versions/v2.0.0/sigmo-pro-linux-amd64.gz',
+      'stable/versions/v2.0.0/sigmo-linux-amd64.gz',
       '0123456789',
     );
 

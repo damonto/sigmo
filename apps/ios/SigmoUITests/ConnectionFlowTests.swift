@@ -246,7 +246,7 @@ final class ConnectionFlowTests: XCTestCase {
     }
 
     func testCapabilitiesAndInactiveProfilesHideUnavailableEntries() {
-        let app = launch("detail-connection-community")
+        let app = launch("detail-connection-unlicensed")
         XCTAssertTrue(app.buttons["profileInternet"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["profileWiFiCalling"].exists)
         XCTAssertFalse(app.buttons["profileVoLTE"].exists)

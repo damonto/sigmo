@@ -1,0 +1,224 @@
+package ims
+
+import (
+	"errors"
+	"testing"
+
+	"github.com/damonto/ims-go/wfcsetup"
+	"github.com/damonto/sigmo/internal/app/websheet"
+)
+
+func TestWFCWebsheetRequestFromSetupErrors(t *testing.T) {
+	tests := []struct {
+		name            string
+		err             error
+		wantURL         string
+		wantUserData    string
+		wantContentType string
+		wantClientName  string
+	}{
+		{
+			name: "nsds",
+			err: &wfcsetup.Error{
+				Err: wfcsetup.ErrUserActionRequired,
+				Result: wfcsetup.Result{
+					Scheme:  wfcsetup.SchemeNSDS,
+					Carrier: "Carrier",
+					Websheet: &wfcsetup.Websheet{
+						Kind:  wfcsetup.WebsheetKindEmergencyAddress,
+						URL:   "https://example.com/nsds",
+						Data:  "token=abc",
+						Title: "Wi-Fi Calling",
+					},
+				},
+			},
+			wantURL:         "https://example.com/nsds",
+			wantUserData:    "token=abc",
+			wantContentType: "application/x-www-form-urlencoded",
+		},
+		{
+			name: "ts43",
+			err: &wfcsetup.Error{
+				Err: wfcsetup.ErrUserActionRequired,
+				Result: wfcsetup.Result{
+					Scheme:  wfcsetup.SchemeTS43,
+					Carrier: "Carrier",
+					Websheet: &wfcsetup.Websheet{
+						Kind:       wfcsetup.WebsheetKindEmergencyAddress,
+						URL:        "https://example.com/ts43?existing=1",
+						ClientName: "CarrierWFC",
+						Data:       "token=abc",
+						Title:      "Wi-Fi Calling",
+					},
+				},
+			},
+			wantURL:        "https://example.com/ts43?existing=1&token=abc",
+			wantClientName: "CarrierWFC",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &coordinator{websheets: websheet.New(websheet.Config{AllowPrivateHosts: true})}
+			req, ok := c.wfcWebsheetRequest(tt.err)
+			if !ok {
+				t.Fatal("wfcWebsheetRequest() ok = false")
+			}
+			if req.URL != tt.wantURL {
+				t.Fatalf("URL = %q, want %q", req.URL, tt.wantURL)
+			}
+			if req.UserData != tt.wantUserData {
+				t.Fatalf("UserData = %q, want %q", req.UserData, tt.wantUserData)
+			}
+			if req.ContentType != tt.wantContentType {
+				t.Fatalf("ContentType = %q, want %q", req.ContentType, tt.wantContentType)
+			}
+			if req.ClientName != tt.wantClientName {
+				t.Errorf("ClientName = %q, want %q", req.ClientName, tt.wantClientName)
+			}
+		})
+	}
+}
+
+func TestCreateWFCWebsheetFromSetupResult(t *testing.T) {
+	tests := []struct {
+		name       string
+		result     wfcsetup.Result
+		wantMethod string
+		wantErr    error
+	}{
+		{
+			name: "opens emergency address websheet",
+			result: wfcsetup.Result{
+				Scheme:  wfcsetup.SchemeNSDS,
+				Carrier: "Carrier",
+				Action:  wfcsetup.ActionOpenWebsheet,
+				Websheet: &wfcsetup.Websheet{
+					Kind:  wfcsetup.WebsheetKindEmergencyAddress,
+					URL:   "http://127.0.0.1/e911",
+					Data:  "token=abc",
+					Title: "E911",
+				},
+			},
+			wantMethod: "POST",
+		},
+		{
+			name: "pending",
+			result: wfcsetup.Result{
+				Action:  wfcsetup.ActionWait,
+				Pending: true,
+			},
+			wantErr: ErrWiFiCallingSetupPending,
+		},
+		{
+			name: "denied",
+			result: wfcsetup.Result{
+				Action: wfcsetup.ActionDenied,
+			},
+			wantErr: ErrWiFiCallingSetupDenied,
+		},
+		{
+			name: "missing websheet",
+			result: wfcsetup.Result{
+				Action: wfcsetup.ActionOpenWebsheet,
+			},
+			wantErr: ErrWebsheetUnavailable,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &coordinator{websheets: websheet.New(websheet.Config{AllowPrivateHosts: true})}
+			info, err := c.createWFCWebsheet(t.Context(), tt.result, nil)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("createWFCWebsheet() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("createWFCWebsheet() error = %v", err)
+			}
+			if info.Method != tt.wantMethod {
+				t.Fatalf("Method = %q, want %q", info.Method, tt.wantMethod)
+			}
+		})
+	}
+}
+
+func TestWFCWebsheetCallbackResult(t *testing.T) {
+	tests := []struct {
+		name     string
+		callback websheet.Callback
+		want     wfcWebsheetCallbackAction
+	}{
+		{
+			name:     "carrier setup changed retries connection",
+			callback: websheet.Callback{Source: "vowifi", Controller: "VoWiFiWebServiceFlow", Method: "entitlementChanged", Event: "entitlementChanged", ResultCode: "success"},
+			want:     wfcWebsheetCallbackRetry,
+		},
+		{
+			name:     "manual done retries connection",
+			callback: websheet.Callback{Event: "finishFlow"},
+			want:     wfcWebsheetCallbackRetry,
+		},
+		{
+			name:     "dismiss cancels pending connection",
+			callback: websheet.Callback{Source: "vowifi", Controller: "VoWiFiWebServiceFlow", Method: "dismissFlow", Event: "dismissFlow", ResultCode: "cancel"},
+			want:     wfcWebsheetCallbackDismiss,
+		},
+		{
+			name:     "close webview rechecks pending connection",
+			callback: websheet.Callback{Source: "vowifi", Controller: "WiFiCallingWebViewController", Method: "CloseWebView"},
+			want:     wfcWebsheetCallbackRetry,
+		},
+		{
+			name:     "status update retries connection",
+			callback: websheet.Callback{Source: "vowifi", Controller: "WiFiCallingWebViewController", Method: "phoneServicesAccountStatusChanged", Event: "phoneServicesAccountStatusChanged"},
+			want:     wfcWebsheetCallbackRetry,
+		},
+		{
+			name:     "workflow completed",
+			callback: websheet.Callback{Event: "workflowCompleted"},
+			want:     wfcWebsheetCallbackRetry,
+		},
+		{
+			name:     "workflow abandoned still rechecks entitlement",
+			callback: websheet.Callback{Method: "workflowAbandoned"},
+			want:     wfcWebsheetCallbackRetry,
+		},
+		{
+			name:     "cancel button event without method",
+			callback: websheet.Callback{Event: "cancelButtonPressed"},
+			want:     wfcWebsheetCallbackDismiss,
+		},
+		{
+			name:     "cancel overrides reported success",
+			callback: websheet.Callback{Method: "cancelButtonClicked", ResultCode: "success"},
+			want:     wfcWebsheetCallbackDismiss,
+		},
+		{
+			name:     "unknown callback keeps waiting",
+			callback: websheet.Callback{Event: "pageLoaded"},
+			want:     wfcWebsheetCallbackWait,
+		},
+		{
+			name:     "known method behind an unknown event",
+			callback: websheet.Callback{Event: "callback", Method: "CloseWebView"},
+			want:     wfcWebsheetCallbackRetry,
+		},
+		{
+			name:     "dismiss method overrides success event",
+			callback: websheet.Callback{Event: "success", Method: "dismissFlow"},
+			want:     wfcWebsheetCallbackDismiss,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := wfcWebsheetCallbackResult(tt.callback); got != tt.want {
+				t.Fatalf("wfcWebsheetCallbackResult() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

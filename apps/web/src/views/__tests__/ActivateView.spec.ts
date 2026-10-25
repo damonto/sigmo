@@ -3,14 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ActivateView from '@/views/ActivateView.vue'
 
-const appApi = vi.hoisted(() => ({
-  ready: vi.fn(),
-}))
 const licenseApi = vi.hoisted(() => ({
   createPairing: vi.fn(),
   pairing: vi.fn(),
 }))
 const licenseStore = vi.hoisted(() => ({
+  mode: 'authorized',
   deviceId: '0123456789abcdef0123456789abcdef',
   check: vi.fn(),
 }))
@@ -18,9 +16,6 @@ const router = vi.hoisted(() => ({
   replace: vi.fn(),
 }))
 
-vi.mock('@/apis/app', () => ({
-  useAppApi: () => appApi,
-}))
 vi.mock('@/apis/license', () => ({
   useLicenseApi: () => licenseApi,
 }))
@@ -37,6 +32,7 @@ vi.mock('vue-router', () => ({
 describe('ActivateView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    licenseStore.mode = 'authorized'
     vi.useFakeTimers()
     licenseApi.createPairing.mockResolvedValue({
       id: 'pairing-id',
@@ -50,7 +46,7 @@ describe('ActivateView', () => {
       status: 'active',
       expiresAt: '2026-08-10T12:05:00Z',
     })
-    appApi.ready.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+
     licenseStore.check.mockResolvedValue(true)
     router.replace.mockResolvedValue(undefined)
   })
@@ -59,34 +55,37 @@ describe('ActivateView', () => {
     vi.useRealTimers()
   })
 
-  it('waits for the full server before entering the app after authorization', async () => {
+  it('enters the app after authorization without a restart', async () => {
     const wrapper = mount(ActivateView)
     await flushPromises()
 
     await vi.advanceTimersByTimeAsync(2000)
     await flushPromises()
     expect(wrapper.text()).toContain('activate.success')
-    expect(router.replace).not.toHaveBeenCalled()
 
-    await vi.advanceTimersByTimeAsync(1000)
-    await flushPromises()
-
-    expect(appApi.ready).toHaveBeenCalledTimes(2)
     expect(licenseStore.check).toHaveBeenCalledWith(true)
     expect(router.replace).toHaveBeenCalledWith({ name: 'home' })
   })
 
-  it('recovers when pairing creation races the authorization restart', async () => {
+  it('recovers when pairing creation loses the success response', async () => {
     licenseApi.createPairing.mockRejectedValueOnce(new Error('Not Found'))
-    appApi.ready.mockReset()
-    appApi.ready.mockResolvedValue(true)
+
     licenseStore.check.mockResolvedValue(true)
 
     mount(ActivateView)
     await flushPromises()
 
-    expect(appApi.ready).toHaveBeenCalledTimes(1)
     expect(licenseStore.check).toHaveBeenCalledWith(true)
     expect(router.replace).toHaveBeenCalledWith({ name: 'home' })
+  })
+
+  it('keeps optional service activation open until the device is authorized', async () => {
+    licenseStore.mode = 'unlicensed'
+    licenseApi.createPairing.mockRejectedValueOnce(new Error('pairing unavailable'))
+
+    mount(ActivateView)
+    await flushPromises()
+    expect(licenseStore.check).toHaveBeenCalledWith(true)
+    expect(router.replace).not.toHaveBeenCalled()
   })
 })

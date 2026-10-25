@@ -446,7 +446,7 @@ final class NativePushState {
         let removed = next.bindings.filter { binding in
             !next.connections.contains { connection in
                 guard connection.backendID == binding.backendID, let session = store.sessions[connection.configurationID] else { return false }
-                return session.authentication != .required && session.license != .activation
+                return session.authentication != .required
             }
         }
         next.bindings.removeAll { binding in removed.contains { $0.id == binding.id } }

@@ -22,7 +22,7 @@ func TestGitHubSourceLatest(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := Manifest{
-		SchemaVersion: 1, Edition: "community", Channel: "stable", Version: "v1.2.3",
+		SchemaVersion: 1, Channel: "stable", Version: "v1.2.3",
 		Commit: testCommit, PublishedAt: time.Now().UTC(), Notes: "signed notes",
 		Artifacts: []Artifact{{
 			Target: "linux-amd64", Name: "sigmo-linux-amd64", Compression: ArtifactCompressionNone,
@@ -79,5 +79,51 @@ func TestGitHubSourceLatest(t *testing.T) {
 	defer body.Close()
 	if release.Artifact.Size != 6 {
 		t.Fatalf("artifact size = %d", release.Artifact.Size)
+	}
+}
+
+func TestGitHubSourceDevelopmentChannel(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := Manifest{
+		SchemaVersion: 1, Channel: "dev", Version: "dev-" + testCommit[:8], Commit: testCommit,
+		PublishedAt: time.Now().UTC(), Artifacts: []Artifact{{
+			Target: "linux-amd64", Name: "sigmo-linux-amd64.gz", Compression: ArtifactCompressionGzip,
+			Size: 3, SHA256: strings.Repeat("0", 64), ExecutableSize: 4, ExecutableSHA256: strings.Repeat("1", 64),
+		}},
+	}
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature := base64.RawStdEncoding.EncodeToString(ed25519.Sign(privateKey, data))
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		var body string
+		switch r.URL.Path {
+		case "/releases/tags/dev":
+			release, err := json.Marshal(githubRelease{TagName: "dev", Assets: []githubAsset{
+				{Name: manifestAssetName, BrowserDownloadURL: "https://updates.example/manifest"},
+				{Name: signatureAssetName, BrowserDownloadURL: "https://updates.example/signature"},
+				{Name: "sigmo-linux-amd64.gz", BrowserDownloadURL: "https://updates.example/binary"},
+			}})
+			if err != nil {
+				return nil, err
+			}
+			body = string(release)
+		case "/manifest":
+			body = string(data)
+		case "/signature":
+			body = signature
+		default:
+			t.Errorf("unexpected request: %s", r.URL.Path)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	source := NewGitHubSource(client, "https://updates.example/releases/latest", base64.RawStdEncoding.EncodeToString(publicKey))
+	release, err := source.Latest(t.Context(), "dev", "linux-amd64")
+	if err != nil || !release.Verified || release.Manifest.Version != manifest.Version {
+		t.Fatalf("development release = %+v, %v", release, err)
 	}
 }

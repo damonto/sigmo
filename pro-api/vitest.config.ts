@@ -46,6 +46,7 @@ export default defineConfig(async () => {
             SIGMO_LICENSE_PRIVATE_KEY: privateKey,
             SIGMO_LICENSE_PUBLIC_KEY: publicKey,
             SIGMO_RELEASE_PUBLIC_KEY: publicKey,
+            SIGMO_CONFIG_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
             SIGMO_DOWNLOAD_TICKET_SECRET:
               'test-download-ticket-secret-32-bytes',
             SIGMO_ADMIN_TELEGRAM_IDS: '1001',

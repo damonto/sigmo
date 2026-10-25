@@ -40,7 +40,6 @@ let readinessDelay = 1000
 const busy = computed(() =>
   ['checking', 'downloading', 'verifying', 'restarting'].includes(snapshot.value?.state ?? ''),
 )
-const isPro = computed(() => snapshot.value?.current.edition === 'pro')
 const isContainer = computed(() => snapshot.value?.current.distribution === 'container')
 const upToDate = computed(
   () =>
@@ -227,8 +226,7 @@ onUnmounted(() => {
         <AlertDescription class="space-y-2">
           <p>{{ t('settings.updates.containerDescription') }}</p>
           <pre class="overflow-x-auto rounded bg-muted p-2 text-xs">
-docker compose pull &amp;&amp; docker compose up -d</pre
-          >
+docker compose pull &amp;&amp; docker compose up -d</pre>
         </AlertDescription>
       </Alert>
 
@@ -262,7 +260,7 @@ docker compose pull &amp;&amp; docker compose up -d</pre
             <Label>{{ t('settings.updates.channel') }}</Label>
             <Select
               :model-value="snapshot.settings.channel"
-              :disabled="saving || !isPro"
+              :disabled="saving"
               @update:model-value="setChannel"
             >
               <SelectTrigger
@@ -272,19 +270,11 @@ docker compose pull &amp;&amp; docker compose up -d</pre
               /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="stable">Stable</SelectItem>
-                <SelectItem
-                  v-if="isPro"
-                  value="dev"
-                  >Dev</SelectItem
-                >
+                <SelectItem value="dev">Dev</SelectItem>
               </SelectContent>
             </Select>
             <p class="text-xs text-muted-foreground">
-              {{
-                isPro
-                  ? t('settings.updates.channelProDescription')
-                  : t('settings.updates.channelCommunityDescription')
-              }}
+              {{ t('settings.updates.channelDescription') }}
             </p>
           </div>
         </CardContent>
@@ -330,8 +320,7 @@ docker compose pull &amp;&amp; docker compose up -d</pre
             <Label>{{ t('settings.updates.notes') }}</Label>
             <pre
               class="max-h-72 overflow-auto whitespace-pre-wrap wrap-break-word rounded-lg bg-muted p-3 font-sans text-sm"
-              >{{ snapshot.latest.notes }}</pre
-            >
+              >{{ snapshot.latest.notes }}</pre>
           </div>
           <p
             v-if="snapshot.error"

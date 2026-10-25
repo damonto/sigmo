@@ -170,6 +170,25 @@ export class Database {
     this.session = binding.withSession('first-primary');
   }
 
+  // The upsert increments the device's current minute atomically across requests.
+  recordConfigurationDownload(
+    deviceId: string,
+    minute: number,
+  ): Promise<number | null> {
+    return this.session
+      .prepare(
+        `INSERT INTO configuration_downloads (device_id, minute, count)
+       VALUES (?, ?, 1)
+       ON CONFLICT(device_id) DO UPDATE SET
+         minute = excluded.minute,
+         count = CASE WHEN configuration_downloads.minute = excluded.minute
+           THEN configuration_downloads.count + 1 ELSE 1 END
+       RETURNING count`,
+      )
+      .bind(deviceId, minute)
+      .first<number>('count');
+  }
+
   async deleteExpiredState(timestamp: string): Promise<void> {
     await this.session.batch([
       this.session

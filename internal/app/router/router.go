@@ -14,6 +14,7 @@ import (
 	"github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/app/buildinfo"
 	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
+	"github.com/damonto/sigmo/internal/app/feature"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	"github.com/damonto/sigmo/internal/app/handler/appinfo"
 	hauth "github.com/damonto/sigmo/internal/app/handler/auth"
@@ -69,7 +70,8 @@ type RegisterConfig struct {
 	MessageRoute        pmessage.Route
 	USSDRoute           pussd.Route
 	ModemOverview       []modemstatus.Extension
-	Features            []string
+	Features            []feature.Name
+	Policy              feature.Policy
 	Extensions          []Extension
 	MCP                 *mcpserver.Controller
 	MCPKeys             *mcpauth.Store
@@ -106,14 +108,11 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 
 	v1 := e.Group("/api/v1", appmiddleware.AccessBoundary(authStore, deps.Store))
 	deps.ResourceRoutes = e.Group("/api/v1", appmiddleware.ResourceAccessBoundary(authStore, deps.Store))
-	if deps.LicenseRoutes != nil {
-		deps.LicenseRoutes(v1)
-	}
 
 	appInfoHandler := appinfo.New(deps.Build)
 	v1.GET("/app", appInfoHandler.Get)
 
-	capabilityHandler := capability.New(append(slices.Clone(deps.Features), "contacts", "messageThreads", "historyAssignments"))
+	capabilityHandler := capability.New(append(slices.Clone(deps.Features), feature.Contacts, feature.MessageThreads, feature.HistoryAssignments), deps.Policy)
 	v1.GET("/capabilities", capabilityHandler.List)
 
 	authHandler := hauth.New(deps.Store, authStore)
@@ -128,6 +127,9 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 	v1.GET("/settings/auth-tests/oidc/:id/browser", settingsHandler.StartOIDCTest)
 	protected := v1.Group("")
 	protected.Use(appmiddleware.Auth(authStore, deps.Store), appmiddleware.Locale(deps.Store))
+	if deps.LicenseRoutes != nil {
+		deps.LicenseRoutes(protected)
+	}
 	protected.GET("/auth/sessions/current", authHandler.CurrentSession)
 	protected.DELETE("/auth/sessions/current", authHandler.DeleteSession)
 	{
@@ -247,7 +249,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 				Internet:  deps.InternetConnector,
 				Reminders: deps.Reminders,
 			})
-			communication.New(communication.Config{Storage: deps.Storage, Registry: deps.Registry, ESIM: h, CallsEnabled: slices.Contains(deps.Features, "nativeCalls")}).Register(protected)
+			communication.New(communication.Config{Storage: deps.Storage, Registry: deps.Registry, ESIM: h}).Register(protected)
 			protected.GET("/modems/:id/esims", h.List)
 			protected.POST("/modems/:id/ses/:seId/esim-discoveries", h.Discovery)
 			protected.GET("/modems/:id/esim-downloads/sessions", h.Download)

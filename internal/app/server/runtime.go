@@ -6,12 +6,13 @@ import (
 	"slices"
 
 	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
+	"github.com/damonto/sigmo/internal/app/feature"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	"github.com/damonto/sigmo/internal/app/mcpserver"
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/app/router"
-	appupdate "github.com/damonto/sigmo/internal/app/update"
 	"github.com/damonto/sigmo/internal/pkg/internet"
+	"github.com/damonto/sigmo/internal/pkg/license"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	"github.com/damonto/sigmo/internal/pkg/message"
 	"github.com/damonto/sigmo/internal/pkg/modem"
@@ -22,8 +23,6 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/ussd"
 	"github.com/damonto/sigmo/internal/pkg/webpush"
 )
-
-type Extension func(context.Context, *Runtime) error
 
 type Runner func(context.Context) error
 
@@ -45,8 +44,8 @@ type Runtime struct {
 	Storage             *storage.Store
 	WebPush             *webpush.Client
 	Reminders           *reminder.Scheduler
-	UpdateSource        appupdate.Source
-	License             appupdate.LicenseProvider
+	License             *license.Controller
+	Policy              feature.Policy
 
 	messageRoute          message.Route
 	ussdRoute             ussd.Route
@@ -55,7 +54,7 @@ type Runtime struct {
 	routes                []router.Extension
 	runners               []namedRunner
 	cleanups              []Cleanup
-	features              []string
+	features              []feature.Name
 	airplaneModeLifecycle appconnectivity.AirplaneModeLifecycle
 }
 
@@ -109,14 +108,6 @@ func (r *Runtime) close(ctx context.Context) error {
 	return result
 }
 
-func (r *Runtime) AddFeatures(features ...string) {
+func (r *Runtime) AddFeatures(features ...feature.Name) {
 	r.features = append(r.features, features...)
-}
-
-func (r *Runtime) SetUpdateSource(source appupdate.Source) {
-	r.UpdateSource = source
-}
-
-func (r *Runtime) SetLicenseProvider(provider appupdate.LicenseProvider) {
-	r.License = provider
 }

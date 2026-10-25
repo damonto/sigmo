@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-enum BackendLicense: String { case unknown, community, authorized, activation, unavailable }
+enum BackendLicense: String { case unknown, unlicensed, authorized, unavailable }
 enum BackendAuthentication: String { case unknown, notRequired, required, authenticated }
 
 @MainActor @Observable
@@ -85,7 +85,6 @@ final class BackendSession: Identifiable {
         }
     }
     private(set) var isCreatingPairing = false
-    private(set) var waitingForRestart = false
     private(set) var detailFailures: [String: BackendFailure] = [:]
     private(set) var refreshingDetails: Set<String> = []
     private(set) var nextRefresh = Date.distantPast
@@ -123,22 +122,21 @@ final class BackendSession: Identifiable {
 
     var statusKey: String {
         if let failure { return failure.isNetwork ? "status.offline" : "status.unavailable" }
-        if license == .activation { return "status.activationRequired" }
         if authentication == .required { return "status.loginRequired" }
         if isOnline { return "status.online" }
         return isRefreshing ? "status.connecting" : "status.notConnected"
     }
 
+    var serviceActivationAvailable: Bool { license == .unlicensed && !licenseDeviceID.isEmpty }
+
     var activationReady: Bool {
-        (license == .authorized || license == .community)
-            && information != nil && !isRefreshing && !waitingForRestart
+        license == .authorized && information != nil && !isRefreshing
     }
 
     var foreground = true
 
     var canAccessDevices: Bool {
-        (license == .community || license == .authorized)
-            && (authentication == .authenticated || authentication == .notRequired)
+        authentication == .authenticated || authentication == .notRequired
     }
 
     // A refresh keeps a usable snapshot online until it fails or access is revoked.
@@ -178,7 +176,6 @@ final class BackendSession: Identifiable {
     }
 
     private func load(_ current: Int) async {
-        var checkingLicense = true
         do {
             if pendingCredentialRemoval {
                 try credentials.write(id, nil)
@@ -201,30 +198,20 @@ final class BackendSession: Identifiable {
             }
             if methods.mode != "cloudflare_access", !usesManagedAccess { accessChallenge = nil }
             authentication = methods.mode == "none" && !usesManagedAccess ? .notRequired : (token == nil ? .required : .authenticated)
-            let status = try await api.license(token: token)
-            try check(current)
-            checkingLicense = false
-            if let status {
+            do {
+                let status = try await api.license(token: token)
+                try check(current)
                 licenseDeviceID = status.deviceId
-                if !status.authorized {
-                    license = .activation
-                    clearDevices()
-                    capabilities = nil
-                    capabilityFailure = nil
-                    information = nil
-                    authentication = .unknown
-                    failure = nil
-                    finishRefresh()
-                    return
-                }
+                license = status.authorized ? .authorized : .unlicensed
+            } catch {
+                try check(current)
+                let problem = BackendFailure.wrapping(error)
+                if problem.isLocalAuthenticationFailure { throw error }
+                license = .unavailable
             }
-            // A 404 is only a community server after the build-info contract succeeds.
             let app = try await api.app(token: token)
             try check(current)
             information = app
-            if status == nil { license = .community; licenseDeviceID = "" }
-            else { license = .authorized }
-            waitingForRestart = false
             do {
                 let features = try await api.capabilities(token: token)
                 try check(current)
@@ -267,7 +254,6 @@ final class BackendSession: Identifiable {
                 finishRefresh()
                 return
             }
-            if checkingLicense { license = .unavailable }
             failure = .wrapping(error)
             failures += 1
             nextRefresh = clock.now().addingTimeInterval([30.0, 60, 120][min(failures - 1, 2)])
@@ -704,7 +690,7 @@ final class BackendSession: Identifiable {
     }
 
     func createPairing() async {
-        guard !Task.isCancelled, !isCreatingPairing, license == .activation else { return }
+        guard !Task.isCancelled, !isCreatingPairing, serviceActivationAvailable else { return }
         isCreatingPairing = true
         pairingFailure = nil
         await action { current in
@@ -715,7 +701,6 @@ final class BackendSession: Identifiable {
                 try self.check(current)
                 guard result.expiresAt > self.clock.now() else { throw BackendFailure.local("activation.expired") }
                 self.pairing = result
-                self.waitingForRestart = false
             } catch {
                 guard self.isCurrent(current) else { return }
                 if await self.recoverActivation(current) { return }
@@ -728,8 +713,8 @@ final class BackendSession: Identifiable {
     // Finish the current poll on backgrounding; only start new polls in the foreground.
     func observePairing() async {
         await action { current in
-            while self.foreground, self.isCurrent(current), self.license == .activation || self.waitingForRestart {
-                if self.pairing != nil || self.waitingForRestart {
+            while self.foreground, self.isCurrent(current), self.serviceActivationAvailable {
+                if self.pairing != nil {
                     await self.pollPairing(current)
                 }
                 do { try await self.clock.sleep(.seconds(2)) }
@@ -739,7 +724,7 @@ final class BackendSession: Identifiable {
     }
 
     private func pollPairing(_ current: Int) async {
-        if waitingForRestart {
+        if pairing?.status == "active" {
             _ = await recoverActivation(current)
             return
         }
@@ -757,12 +742,11 @@ final class BackendSession: Identifiable {
             self.pairing = result
             pairingFailure = nil
             if result.status == "active" {
-                waitingForRestart = true
                 _ = await recoverActivation(current)
             }
         } catch {
             guard isCurrent(current) else { return }
-            // The success response can be lost as the activation server restarts.
+            // Authorization can succeed even when the pairing response is lost.
             if await recoverActivation(current) { return }
             guard isCurrent(current) else { return }
             let failure = BackendFailure.wrapping(error)
@@ -776,13 +760,13 @@ final class BackendSession: Identifiable {
     private func recoverActivation(_ current: Int) async -> Bool {
         do {
             let token = try await freshToken()
-            guard let status = try await api.license(token: token), status.authorized else { return false }
+            let status = try await api.license(token: token)
+            guard status.authorized else { return false }
             let app = try await api.app(token: token)
             try check(current)
             information = app
             license = .authorized
             licenseDeviceID = status.deviceId
-            waitingForRestart = false
             pairingFailure = nil
             await refresh(force: true)
             return true

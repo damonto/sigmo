@@ -44,7 +44,7 @@ The app retains up to five 1 MiB files in private storage, excluded from backups
 
 ## Transfer from a local SIM reader
 
-With an HTTPS backend providing `esimTransfer`, connect an iOS-compatible CCID reader to the iPhone or iPad and choose it from the transfer source list. Readers and SIM insertion/removal update live. Empty readers show an insert-SIM hint; inserting a ready card makes them selectable. The backend performs the transfer to its target modem over [Remote APDU](../../pro/esimtransfer/README.md), including profile reads and any source-deletion confirmation.
+With an HTTPS backend providing `esimTransfer`, connect an iOS-compatible CCID reader to the iPhone or iPad and choose it from the transfer source list. Readers and SIM insertion/removal update live. Empty readers show an insert-SIM hint; inserting a ready card makes them selectable. The backend performs the transfer to its target modem over [Remote APDU](../../internal/app/esimtransfer/README.md), including profile reads and any source-deletion confirmation.
 
 Unplugging the selected reader or SIM stops the session and clears its profiles. Reinserting it does not resume or replay commands. Check the source and target state, then select the reader again to retry. Real reader compatibility and carrier transfers need physical-device validation; simulator tests use fake readers.
 
@@ -59,7 +59,7 @@ python3 apps/ios/scripts/check_settings.py
 python3 apps/ios/scripts/sync_carrier_bridge.py --check
 ```
 
-The carrier WebKit regression tests run a copy of the server's bridge script. After changing `pro/websheet/bridge.js`, refresh that fixture with `python3 apps/ios/scripts/sync_carrier_bridge.py` before synchronizing the iOS workspace to a Mac.
+The carrier WebKit regression tests run a copy of the server's bridge script. After changing `internal/app/websheet/bridge.js`, refresh that fixture with `python3 apps/ios/scripts/sync_carrier_bridge.py` before synchronizing the iOS workspace to a Mac.
 
 ## Offline demo and App Review
 

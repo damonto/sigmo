@@ -57,9 +57,6 @@ func ValidateManifest(manifest Manifest) error {
 	if manifest.SchemaVersion != ManifestSchemaVersion {
 		return fmt.Errorf("%w: schema version %d", ErrInvalidManifest, manifest.SchemaVersion)
 	}
-	if manifest.Edition != "community" && manifest.Edition != "pro" {
-		return fmt.Errorf("%w: edition must be community or pro", ErrInvalidManifest)
-	}
 	if manifest.Channel != "stable" && manifest.Channel != "dev" {
 		return fmt.Errorf("%w: channel must be stable or dev", ErrInvalidManifest)
 	}
@@ -98,16 +95,10 @@ func ValidateManifest(manifest Manifest) error {
 		}
 		switch artifact.Compression {
 		case ArtifactCompressionNone:
-			if manifest.Edition != "community" {
-				return fmt.Errorf("%w: Pro artifacts must use gzip compression", ErrInvalidManifest)
-			}
 			if artifact.Size != artifact.ExecutableSize || !strings.EqualFold(artifact.SHA256, artifact.ExecutableSHA256) {
 				return fmt.Errorf("%w: uncompressed artifact metadata must match the executable", ErrInvalidManifest)
 			}
 		case ArtifactCompressionGzip:
-			if manifest.Edition != "pro" {
-				return fmt.Errorf("%w: Community artifacts must not be compressed", ErrInvalidManifest)
-			}
 			if !strings.HasSuffix(artifact.Name, ".gz") {
 				return fmt.Errorf("%w: gzip artifact name %q must end in .gz", ErrInvalidManifest, artifact.Name)
 			}

@@ -100,7 +100,7 @@ func TestCoreToolSchemasRegister(t *testing.T) {
 	catalog := NewCatalog()
 	permissions := corePermissions()
 	for _, permission := range permissions {
-		if err := catalog.AddPermission(permission.Name, permission.Module); err != nil {
+		if err := catalog.AddPermission(permission); err != nil {
 			t.Fatalf("AddPermission(%q) error = %v", permission.Name, err)
 		}
 	}
@@ -146,7 +146,7 @@ func TestCoreToolSchemasRegister(t *testing.T) {
 func TestCoreToolOutputSchemasDescribeEveryField(t *testing.T) {
 	catalog := NewCatalog()
 	for _, permission := range corePermissions() {
-		if err := catalog.AddPermission(permission.Name, permission.Module); err != nil {
+		if err := catalog.AddPermission(permission); err != nil {
 			t.Fatalf("AddPermission(%q) error = %v", permission.Name, err)
 		}
 	}

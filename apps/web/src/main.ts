@@ -10,7 +10,6 @@ import i18n from './i18n'
 import { bootstrapWebPush } from './lib/webPush'
 import { prepareCallClient } from './lib/callClient'
 import router from './router'
-import { useLicenseStore } from './stores/license'
 
 useTheme()
 
@@ -23,5 +22,5 @@ app.use(router)
 void prepareCallClient().then(async () => {
   app.mount('#app')
   await router.isReady()
-  if (useLicenseStore().businessEnabled) await bootstrapWebPush()
+  await bootstrapWebPush()
 })

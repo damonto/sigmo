@@ -20,11 +20,11 @@ func TestParseManifestSignature(t *testing.T) {
 	}
 	manifest := Manifest{
 		SchemaVersion: ManifestSchemaVersion,
-		Edition:       "community",
-		Channel:       "stable",
-		Version:       "v1.2.3",
-		Commit:        testCommit,
-		PublishedAt:   time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC),
+
+		Channel:     "stable",
+		Version:     "v1.2.3",
+		Commit:      testCommit,
+		PublishedAt: time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC),
 		Artifacts: []Artifact{{
 			Target: "linux-amd64", Name: "sigmo-linux-amd64", Compression: ArtifactCompressionNone,
 			Size: 6, SHA256: "9a3a45d01531a20e89ac6ae10b0b0beb0492acd7216a368aa062d1a5fecaf9cd",
@@ -56,11 +56,11 @@ func TestParseManifestSignature(t *testing.T) {
 func TestValidateManifestRejectsInvalidReleaseIdentity(t *testing.T) {
 	base := Manifest{
 		SchemaVersion: ManifestSchemaVersion,
-		Edition:       "community",
-		Channel:       "stable",
-		Version:       "v1.2.3",
-		Commit:        testCommit,
-		PublishedAt:   time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC),
+
+		Channel:     "stable",
+		Version:     "v1.2.3",
+		Commit:      testCommit,
+		PublishedAt: time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC),
 		Artifacts: []Artifact{{
 			Target: "linux-amd64", Name: "sigmo-linux-amd64", Compression: ArtifactCompressionNone,
 			Size: 6, SHA256: "9a3a45d01531a20e89ac6ae10b0b0beb0492acd7216a368aa062d1a5fecaf9cd",
@@ -71,7 +71,6 @@ func TestValidateManifestRejectsInvalidReleaseIdentity(t *testing.T) {
 		name   string
 		mutate func(*Manifest)
 	}{
-		{name: "edition", mutate: func(manifest *Manifest) { manifest.Edition = "enterprise" }},
 		{name: "channel", mutate: func(manifest *Manifest) { manifest.Channel = "nightly" }},
 		{name: "short commit", mutate: func(manifest *Manifest) { manifest.Commit = "01234567" }},
 		{name: "uppercase commit", mutate: func(manifest *Manifest) { manifest.Commit = strings.ToUpper(testCommit) }},
@@ -107,29 +106,28 @@ func TestFindArtifactRejectsUnknownTarget(t *testing.T) {
 
 func TestValidateManifestArtifactCompression(t *testing.T) {
 	checksum := "9a3a45d01531a20e89ac6ae10b0b0beb0492acd7216a368aa062d1a5fecaf9cd"
-	community := Manifest{
+	uncompressed := Manifest{
 		SchemaVersion: ManifestSchemaVersion,
-		Edition:       "community",
-		Channel:       "stable",
-		Version:       "v1.2.3",
-		Commit:        testCommit,
-		PublishedAt:   time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC),
+
+		Channel:     "stable",
+		Version:     "v1.2.3",
+		Commit:      testCommit,
+		PublishedAt: time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC),
 		Artifacts: []Artifact{{
 			Target: "linux-amd64", Name: "sigmo-linux-amd64", Compression: ArtifactCompressionNone,
 			Size: 6, SHA256: checksum, ExecutableSize: 6, ExecutableSHA256: checksum,
 		}},
 	}
-	pro := community
-	pro.Edition = "pro"
-	pro.Artifacts = []Artifact{{
-		Target: "linux-amd64", Name: "sigmo-pro-linux-amd64.gz", Compression: ArtifactCompressionGzip,
+	compressed := uncompressed
+	compressed.Artifacts = []Artifact{{
+		Target: "linux-amd64", Name: "sigmo-linux-amd64.gz", Compression: ArtifactCompressionGzip,
 		Size: 5, SHA256: checksum, ExecutableSize: 6, ExecutableSHA256: checksum,
 	}}
-	if err := ValidateManifest(community); err != nil {
-		t.Fatalf("ValidateManifest(community) error = %v", err)
+	if err := ValidateManifest(uncompressed); err != nil {
+		t.Fatalf("ValidateManifest(uncompressed) error = %v", err)
 	}
-	if err := ValidateManifest(pro); err != nil {
-		t.Fatalf("ValidateManifest(pro) error = %v", err)
+	if err := ValidateManifest(compressed); err != nil {
+		t.Fatalf("ValidateManifest(compressed) error = %v", err)
 	}
 
 	tests := []struct {
@@ -138,27 +136,27 @@ func TestValidateManifestArtifactCompression(t *testing.T) {
 		mutate   func(*Artifact)
 	}{
 		{
-			name: "community gzip", manifest: community,
+			name: "uncompressed gzip", manifest: uncompressed,
 			mutate: func(artifact *Artifact) { artifact.Compression = ArtifactCompressionGzip },
 		},
 		{
-			name: "community executable size", manifest: community,
+			name: "uncompressed executable size", manifest: uncompressed,
 			mutate: func(artifact *Artifact) { artifact.ExecutableSize++ },
 		},
 		{
-			name: "community executable checksum", manifest: community,
+			name: "uncompressed executable checksum", manifest: uncompressed,
 			mutate: func(artifact *Artifact) { artifact.ExecutableSHA256 = strings.Repeat("0", 64) },
 		},
 		{
-			name: "pro uncompressed", manifest: pro,
+			name: "compressed uncompressed", manifest: compressed,
 			mutate: func(artifact *Artifact) { artifact.Compression = ArtifactCompressionNone },
 		},
 		{
-			name: "gzip suffix", manifest: pro,
-			mutate: func(artifact *Artifact) { artifact.Name = "sigmo-pro-linux-amd64" },
+			name: "gzip suffix", manifest: compressed,
+			mutate: func(artifact *Artifact) { artifact.Name = "sigmo-linux-amd64" },
 		},
 		{
-			name: "unknown compression", manifest: pro,
+			name: "unknown compression", manifest: compressed,
 			mutate: func(artifact *Artifact) { artifact.Compression = "zstd" },
 		},
 	}

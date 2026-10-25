@@ -10,7 +10,6 @@ export function manifest(value: unknown): Manifest | null {
   if (
     !isRecord(value) ||
     value.schemaVersion !== 1 ||
-    value.edition !== 'pro' ||
     (value.channel !== 'stable' && value.channel !== 'dev') ||
     !isNonEmptyString(value.version) ||
     !isNonEmptyString(value.commit) ||
@@ -70,7 +69,7 @@ export function manifest(value: unknown): Manifest | null {
   }
   return {
     schemaVersion: 1,
-    edition: 'pro',
+
     channel: value.channel,
     version: value.version,
     commit: value.commit,

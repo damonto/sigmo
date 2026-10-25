@@ -24,7 +24,7 @@ actor SettingsTestServer {
     func setAuthTestResult(_ result: SettingsAuthTestResult) { server.authTestResult = result }
     func setProxyPort(_ port: Int) { server.settings.values.proxy["httpPort"] = .number(port) }
     func setDistribution(_ value: String, reason: String? = nil) { server.distribution = value; server.unsupportedReason = reason }
-    func setEdition(_ value: String) { server.edition = value }
+    func setVersion(_ value: String) { server.version = value }
     func setUpdateState(_ value: String) { server.updateState = value }
     func allRequests() -> [URLRequest] { requests }
     func holdNext(_ suffix: String) { holdSuffix = suffix }
@@ -57,7 +57,7 @@ actor SettingsTestServer {
         }
         let result: BackendHTTPResponse
         if let response = try server.respond(request) { result = response }
-        else if path.hasSuffix("/license") { result = HTTPProblem.response(status: 404, code: "resource_not_found", detail: "Not found") }
+        else if path.hasSuffix("/license") { result = reply(200, #"{"authorized":false,"deviceId":"0123456789abcdef0123456789abcdef"}"#) }
         else if path.hasSuffix("/app") { result = BackendHTTPResponse(data: try JSONEncoder().encode(server.app), status: 200) }
         else if path.hasSuffix("/capabilities") { result = reply(200, #"{"features":[]}"#) }
         else if path.hasSuffix("/auth/methods") { result = reply(200, AuthenticationFixture.methods(required: server.otpRequired)) }

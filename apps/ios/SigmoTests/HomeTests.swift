@@ -22,7 +22,7 @@ final class HomeTests: XCTestCase {
         XCTAssertEqual(store.homeDevices(backendID: nil).map(\.session.id), [first, second])
         XCTAssertEqual(store.onlineSessions.map(\.id), [first, second])
 
-        for status in ["status.offline", "status.unavailable", "status.loginRequired", "status.activationRequired"] {
+        for status in ["status.offline", "status.unavailable", "status.loginRequired"] {
             switch status {
             case "status.offline": await changing.setOffline(true)
             case "status.unavailable": await changing.setModemStatus(500)
@@ -45,7 +45,7 @@ final class HomeTests: XCTestCase {
             await changing.setOffline(false)
             await changing.setModemStatus(200)
             await changing.setRequired(false)
-            await changing.setLicense(status: 404, authorized: false)
+            await changing.setLicense(authorized: false)
             await store.refreshAll()
             XCTAssertEqual(session.statusKey, "status.online", status)
             XCTAssertEqual(store.homeDevices(backendID: nil).map(\.session.id), [first, second], status)

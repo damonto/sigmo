@@ -7,6 +7,7 @@ import {
 
 import { useAuthStore } from '@/stores/auth'
 import { useLicenseStore } from '@/stores/license'
+import { useCapabilities } from '@/composables/useCapabilities'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -15,11 +16,6 @@ const router = createRouter({
       path: '/activate',
       name: 'activate',
       component: () => import('@/views/ActivateView.vue'),
-    },
-    {
-      path: '/unavailable',
-      name: 'license-unavailable',
-      component: () => import('@/views/LicenseUnavailableView.vue'),
     },
     {
       path: '/auth',
@@ -181,7 +177,6 @@ const router = createRouter({
 
 const AUTH_ROUTE_NAME = 'auth'
 const ACTIVATE_ROUTE_NAME = 'activate'
-const LICENSE_UNAVAILABLE_ROUTE_NAME = 'license-unavailable'
 
 export const enforceRouteAccess = async (
   to: Pick<RouteLocationNormalized, 'name'>,
@@ -195,19 +190,10 @@ export const enforceRouteAccess = async (
   if (to.name === AUTH_ROUTE_NAME) return { name: 'home' }
 
   const licenseStore = useLicenseStore()
+  const previousMode = licenseStore.mode
   await licenseStore.check(true)
-  if (licenseStore.unavailable) {
-    if (to.name !== LICENSE_UNAVAILABLE_ROUTE_NAME) {
-      return { name: LICENSE_UNAVAILABLE_ROUTE_NAME }
-    }
-    return
-  }
-  if (to.name === LICENSE_UNAVAILABLE_ROUTE_NAME) return { name: 'home' }
-  if (licenseStore.activationRequired) {
-    if (to.name !== ACTIVATE_ROUTE_NAME) return { name: ACTIVATE_ROUTE_NAME }
-    return
-  }
-  if (to.name === ACTIVATE_ROUTE_NAME) return { name: 'home' }
+  if (previousMode !== licenseStore.mode) await useCapabilities().fetchCapabilities(true)
+  if (to.name === ACTIVATE_ROUTE_NAME && licenseStore.authorized) return { name: 'home' }
 }
 
 router.beforeEach(enforceRouteAccess)

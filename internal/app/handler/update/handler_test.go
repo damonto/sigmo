@@ -47,7 +47,7 @@ func (*source) Download(context.Context, appupdate.Release) (io.ReadCloser, erro
 func TestCreateCheckReturnsConflictWhileBusy(t *testing.T) {
 	releaseSource := &source{started: make(chan struct{}), unblock: make(chan struct{})}
 	controller := newController(t, buildinfo.Info{
-		Edition:      buildinfo.EditionCommunity,
+
 		Distribution: buildinfo.DistributionDeveloper,
 	}, releaseSource)
 	done := make(chan error, 1)
@@ -78,7 +78,7 @@ func TestCreateInstallationRejectsUnsupportedDistribution(t *testing.T) {
 		Version: "v2.0.0",
 	}}}
 	controller := newController(t, buildinfo.Info{
-		Edition:          buildinfo.EditionCommunity,
+
 		Channel:          buildinfo.ChannelStable,
 		Version:          "v1.0.0",
 		Distribution:     buildinfo.DistributionContainer,

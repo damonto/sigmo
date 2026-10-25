@@ -45,7 +45,7 @@ final class UpdatesState {
     func save(automatic: Bool, channel: String) async {
         guard let snapshot, canCheck else { return }
         guard snapshot.selfUpdateSupported || automatic == snapshot.settings.automatic,
-              channel == "stable" || (snapshot.current.edition == "pro" && channel == "dev") else { return }
+              channel == "stable" || channel == "dev" else { return }
         let channelChanged = snapshot.settings.channel != channel
         let preferences = UpdatePreferences(automatic: automatic, channel: channel)
         await perform { current in

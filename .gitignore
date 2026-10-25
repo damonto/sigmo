@@ -31,9 +31,7 @@ data/
 .DS_Store
 
 # AI
-AGENTS*.md
 .mcp.json
-CLAUDE.md
 .claude
 .codex/
 .cache/
@@ -44,3 +42,10 @@ tools/
 
 # Others
 sigmo.db*
+
+# Private carrier data and deployment keys must never be committed.
+/scripts/sigmo-keys/
+/scripts/carrier-config/
+/entitlement.json
+/wfc.json
+/ims.json

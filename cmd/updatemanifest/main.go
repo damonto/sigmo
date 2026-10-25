@@ -31,9 +31,8 @@ func (f *artifactFlags) Set(value string) error {
 
 func main() {
 	var artifacts artifactFlags
-	var edition, channel, version, commit, notes, notesFile, output, privateKeyEnv, compression string
+	var channel, version, commit, notes, notesFile, output, privateKeyEnv, compression string
 	var publishedAt string
-	flag.StringVar(&edition, "edition", "", "community or pro")
 	flag.StringVar(&channel, "channel", "", "stable or dev")
 	flag.StringVar(&version, "version", "", "release version")
 	flag.StringVar(&commit, "commit", "", "full Git commit SHA")
@@ -47,7 +46,7 @@ func main() {
 	flag.Parse()
 
 	if err := run(config{
-		edition: edition, channel: channel, version: version, commit: commit,
+		channel: channel, version: version, commit: commit,
 		notes: notes, notesFile: notesFile, publishedAt: publishedAt,
 		output: output, privateKey: os.Getenv(privateKeyEnv), compression: compression, artifacts: artifacts,
 	}); err != nil {
@@ -57,16 +56,16 @@ func main() {
 }
 
 type config struct {
-	edition, channel, version, commit string
-	notes, notesFile, publishedAt     string
-	output, privateKey                string
-	compression                       string
-	artifacts                         []string
+	channel, version, commit      string
+	notes, notesFile, publishedAt string
+	output, privateKey            string
+	compression                   string
+	artifacts                     []string
 }
 
 func run(cfg config) error {
-	if cfg.edition == "" || cfg.channel == "" || cfg.version == "" || cfg.commit == "" {
-		return errors.New("edition, channel, version, and commit are required")
+	if cfg.channel == "" || cfg.version == "" || cfg.commit == "" {
+		return errors.New("channel, version, and commit are required")
 	}
 	if len(cfg.artifacts) == 0 {
 		return errors.New("at least one artifact is required")
@@ -94,12 +93,12 @@ func run(cfg config) error {
 	}
 	manifest := appupdate.Manifest{
 		SchemaVersion: appupdate.ManifestSchemaVersion,
-		Edition:       cfg.edition,
-		Channel:       cfg.channel,
-		Version:       cfg.version,
-		Commit:        cfg.commit,
-		PublishedAt:   publishedAt,
-		Notes:         strings.TrimSpace(cfg.notes),
+
+		Channel:     cfg.channel,
+		Version:     cfg.version,
+		Commit:      cfg.commit,
+		PublishedAt: publishedAt,
+		Notes:       strings.TrimSpace(cfg.notes),
 	}
 	for _, value := range cfg.artifacts {
 		target, path, ok := strings.Cut(value, "=")

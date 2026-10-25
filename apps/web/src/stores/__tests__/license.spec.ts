@@ -5,6 +5,22 @@ import { useLicenseStore } from '@/stores/license'
 import { problemResponse } from '@/lib/__tests__/httpProblem'
 
 describe('license store', () => {
+  it('records an unlicensed installation', async () => {
+    setActivePinia(createPinia())
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          authorized: false,
+          deviceId: '0123456789abcdef0123456789abcdef',
+        }),
+      ),
+    )
+    const store = useLicenseStore()
+    await expect(store.check()).resolves.toBe(false)
+    expect(store.mode).toBe('unlicensed')
+    expect(store.deviceId).not.toBe('')
+  })
   beforeEach(() => {
     setActivePinia(createPinia())
   })
@@ -13,16 +29,15 @@ describe('license store', () => {
     vi.unstubAllGlobals()
   })
 
-  it('recognizes Community only from an explicit 404', async () => {
+  it('treats a missing license endpoint as unavailable', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(problemResponse(404, 'resource_not_found', 'not found')),
     )
 
     const store = useLicenseStore()
-    await expect(store.check()).resolves.toBe(true)
-    expect(store.mode).toBe('community')
-    expect(store.businessEnabled).toBe(true)
+    await expect(store.check()).resolves.toBe(false)
+    expect(store.mode).toBe('unavailable')
   })
 
   it.each([
@@ -52,7 +67,7 @@ describe('license store', () => {
     const store = useLicenseStore()
     await expect(store.check()).resolves.toBe(false)
     expect(store.mode).toBe('unavailable')
-    expect(store.businessEnabled).toBe(false)
+    expect(store.authorized).toBe(false)
   })
 
   it('fails closed on a network error', async () => {
@@ -61,7 +76,7 @@ describe('license store', () => {
     const store = useLicenseStore()
     await expect(store.check()).resolves.toBe(false)
     expect(store.mode).toBe('unavailable')
-    expect(store.businessEnabled).toBe(false)
+    expect(store.authorized).toBe(false)
   })
 
   it('shares an in-flight status request between concurrent callers', async () => {

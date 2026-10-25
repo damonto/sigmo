@@ -19,7 +19,7 @@ const INSTALLATION_COLUMNS =
 const SUBSCRIPTION_COLUMNS =
   'id, installation_id AS installationId, backend_id AS backendId, send_hash AS sendHash, enabled, sms, reminders, calls';
 
-/** PushDatabase keeps community push permissions independent of Pro entitlements. */
+/** PushDatabase keeps base push permissions independent of Pro entitlements. */
 export class PushDatabase {
   constructor(private readonly db: D1Database) {}
 

@@ -15,5 +15,5 @@ type Fields struct {
 	VoLTEConnected       bool `json:"volteConnected" jsonschema:"whether the modem currently has an active VoLTE IMS connection"`
 }
 
-// Extension adds edition-specific connection state to a modem response.
+// Extension adds feature-specific connection state to a modem response.
 type Extension func(context.Context, *mmodem.Modem, *Fields) error

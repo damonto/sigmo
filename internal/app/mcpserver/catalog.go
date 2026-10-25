@@ -12,6 +12,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/damonto/sigmo/internal/app/feature"
 	"github.com/damonto/sigmo/internal/app/mcpauth"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
@@ -19,8 +20,9 @@ import (
 const AuditRetention = 90 * 24 * time.Hour
 
 type Permission struct {
-	Name   string `json:"name"`
-	Module string `json:"module"`
+	Name    string       `json:"name"`
+	Module  string       `json:"module"`
+	Feature feature.Name `json:"-"`
 }
 
 type Extension func(*Catalog) error
@@ -33,6 +35,7 @@ type registration struct {
 }
 
 type Catalog struct {
+	policy      feature.Policy
 	mu          sync.RWMutex
 	permissions map[string]Permission
 	tools       []registration
@@ -42,18 +45,22 @@ func NewCatalog() *Catalog {
 	return &Catalog{permissions: make(map[string]Permission)}
 }
 
-func (c *Catalog) AddPermission(name string, module string) error {
-	name = strings.TrimSpace(name)
-	module = strings.TrimSpace(module)
-	if name == "" || module == "" {
+// SetFeaturePolicy configures the shared entitlement boundary before tools are served.
+func (c *Catalog) SetFeaturePolicy(policy feature.Policy) { c.policy = policy }
+
+// AddPermission registers a permission and its optional capability requirement.
+func (c *Catalog) AddPermission(permission Permission) error {
+	permission.Name = strings.TrimSpace(permission.Name)
+	permission.Module = strings.TrimSpace(permission.Module)
+	if permission.Name == "" || permission.Module == "" {
 		return errors.New("MCP permission name and module are required")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if current, ok := c.permissions[name]; ok && current.Module != module {
-		return fmt.Errorf("MCP permission %q already belongs to module %q", name, current.Module)
+	if current, ok := c.permissions[permission.Name]; ok && current != permission {
+		return fmt.Errorf("MCP permission %q already has a different registration", permission.Name)
 	}
-	c.permissions[name] = Permission{Name: name, Module: module}
+	c.permissions[permission.Name] = permission
 	return nil
 }
 
@@ -62,7 +69,9 @@ func (c *Catalog) Permissions() []Permission {
 	defer c.mu.RUnlock()
 	permissions := make([]Permission, 0, len(c.permissions))
 	for _, permission := range c.permissions {
-		permissions = append(permissions, permission)
+		if permission.Feature == "" || c.policy.Allows(permission.Feature) {
+			permissions = append(permissions, permission)
+		}
 	}
 	slices.SortFunc(permissions, func(a, b Permission) int {
 		return strings.Compare(a.Name, b.Name)
@@ -129,17 +138,24 @@ func addTool[In, Out any](c *Catalog, permission string, tool *mcp.Tool, modemID
 					ids = modemIDs(input)
 				}
 				started := time.Now()
-				if err := exec.authorize(permission, ids); err != nil {
+				if err := c.authorize(exec, permission, ids); err != nil {
 					exec.record(ctx, name, ids, started, err)
 					var zero Out
 					return nil, zero, err
+				}
+				authorizedHandler := func(ctx context.Context, req *mcp.CallToolRequest, grant mcpauth.Grant, input In) (Out, error) {
+					if err := c.authorize(exec, permission, ids); err != nil {
+						var zero Out
+						return zero, err
+					}
+					return handler(ctx, req, grant, input)
 				}
 				var out Out
 				var err error
 				if policy.Confirmation == nil {
 					out, err = handler(ctx, req, exec.grant, input)
 				} else {
-					out, err = executeGuardedTool(ctx, req, exec, name, policy, handler, input)
+					out, err = executeGuardedTool(ctx, req, exec, name, policy, authorizedHandler, input)
 				}
 				exec.record(ctx, name, ids, started, err)
 				if err != nil {
@@ -157,10 +173,27 @@ func (c *Catalog) registerTools(server *mcp.Server, exec *execution) {
 	tools := slices.Clone(c.tools)
 	c.mu.RUnlock()
 	for _, tool := range tools {
-		if tool.permission == "" || exec.grant.HasPermission(tool.permission) {
+		if c.allowsPermission(tool.permission) && (tool.permission == "" || exec.grant.HasPermission(tool.permission)) {
 			tool.register(server, exec)
 		}
 	}
+}
+
+func (c *Catalog) allowsPermission(name string) bool {
+	if name == "" {
+		return true
+	}
+	c.mu.RLock()
+	permission, ok := c.permissions[name]
+	c.mu.RUnlock()
+	return ok && (permission.Feature == "" || c.policy.Allows(permission.Feature))
+}
+
+func (c *Catalog) authorize(exec *execution, permission string, ids []string) error {
+	if !c.allowsPermission(permission) {
+		return NewToolError("license_entitlement_inactive", "an active Pro authorization is required", nil)
+	}
+	return exec.authorize(permission, ids)
 }
 
 type execution struct {

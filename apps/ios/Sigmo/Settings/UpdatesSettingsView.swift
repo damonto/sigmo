@@ -22,9 +22,9 @@ struct UpdatesSettingsView: View {
                             save(automatic: snapshot.settings.automatic, channel: value)
                         })) {
                             Text("Stable").tag("stable")
-                            if snapshot.current.edition == "pro" { Text("Dev").tag("dev") }
+                            Text("Dev").tag("dev")
                         }
-                        .disabled(state.working || pendingPreferences != nil || snapshot.busy || state.recovering || snapshot.current.edition != "pro")
+                        .disabled(state.working || pendingPreferences != nil || snapshot.busy || state.recovering)
                         .accessibilityIdentifier("update-channel")
                     }
                     Section("settings.updates.versionTitle") {

@@ -6,9 +6,6 @@ import (
 )
 
 const (
-	EditionCommunity = "community"
-	EditionPro       = "pro"
-
 	ChannelStable = "stable"
 	ChannelDev    = "dev"
 
@@ -23,7 +20,6 @@ var (
 	Version          string
 	Commit           string
 	Channel          string
-	Edition          string
 	Target           string
 	Distribution     string
 	ReleasePublicKey string
@@ -33,7 +29,6 @@ type Info struct {
 	Version          string `json:"version"`
 	Commit           string `json:"commit"`
 	Channel          string `json:"channel"`
-	Edition          string `json:"edition"`
 	Target           string `json:"target"`
 	Distribution     string `json:"distribution"`
 	ReleasePublicKey string `json:"-"`
@@ -44,7 +39,6 @@ func Current() Info {
 		Version:          strings.TrimSpace(Version),
 		Commit:           strings.ToLower(strings.TrimSpace(Commit)),
 		Channel:          strings.ToLower(strings.TrimSpace(Channel)),
-		Edition:          strings.ToLower(strings.TrimSpace(Edition)),
 		Target:           strings.ToLower(strings.TrimSpace(Target)),
 		Distribution:     strings.ToLower(strings.TrimSpace(Distribution)),
 		ReleasePublicKey: strings.TrimSpace(ReleasePublicKey),
@@ -54,9 +48,6 @@ func Current() Info {
 	}
 	if info.Channel != ChannelDev {
 		info.Channel = ChannelStable
-	}
-	if info.Edition != EditionPro {
-		info.Edition = EditionCommunity
 	}
 	if info.Target == "" {
 		info.Target = runtime.GOOS + "-" + runtime.GOARCH

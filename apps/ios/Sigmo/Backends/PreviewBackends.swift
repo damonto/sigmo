@@ -64,7 +64,7 @@ enum PreviewBackends {
                 case "detail-connection-read-error": fixture = .connectionReadFailure
                 case "detail-connection-write-error": fixture = .connectionWriteFailure
                 case "detail-connection-mbim": fixture = .connectionMBIM
-                case "detail-connection-community": fixture = .connectionCommunity
+                case "detail-connection-unlicensed": fixture = .connectionUnlicensed
                 default: fixture = .standard
                 }
                 let detail = DetailFixtureServer(physical: scenario == "detail-physical", locked: scenario == "detail-locked", scenario: fixture)
@@ -169,7 +169,7 @@ actor PreviewBackendServer {
             if activation {
                 return reply(200, #"{"authorized":\#(paired),"deviceId":"0123456789abcdef0123456789abcdef"}"#)
             }
-            return HTTPProblem.response(status: 404, code: "resource_not_found", detail: "Not Found")
+            return reply(200, #"{"authorized":true,"deviceId":"0123456789abcdef0123456789abcdef"}"#)
         }
         if path.hasSuffix("/app") {
             return BackendHTTPResponse(data: try JSONEncoder().encode(settingsServer.app), status: 200)

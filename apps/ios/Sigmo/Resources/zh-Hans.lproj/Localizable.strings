@@ -46,7 +46,6 @@
 "backends.address" = "Sigmo 地址";
 "backends.server" = "服务器";
 "backends.version" = "版本";
-"backends.edition" = "版本类型";
 "backends.channel" = "渠道";
 "backends.commit" = "提交";
 "backends.target" = "目标平台";
@@ -56,7 +55,6 @@
 "status.offline" = "离线";
 "status.unavailable" = "连接不可用";
 "status.loginRequired" = "需要登录";
-"status.activationRequired" = "需要激活";
 "status.connecting" = "正在连接…";
 "status.notConnected" = "尚未连接";
 "auth.title" = "认证";
@@ -78,16 +76,13 @@
 "license.status" = "授权状态";
 "license.deviceID" = "服务器设备 ID";
 "license.unknown" = "尚未检查";
-"license.community" = "社区版";
 "license.authorized" = "已授权";
-"license.activation" = "需要激活";
 "license.unavailable" = "授权不可用";
 "activation.title" = "激活 Pro";
 "activation.start" = "激活 Pro";
 "activation.description" = "创建配对后，在 Telegram 中授权此 Sigmo，再返回这里完成连接。";
 "activation.create" = "创建配对";
 "activation.openTelegram" = "打开 Telegram";
-"activation.restarting" = "已授权，正在等待服务器就绪…";
 "activation.pending" = "等待授权";
 "activation.active" = "已授权";
 "activation.expired" = "配对已过期，请创建新配对以继续。";
@@ -232,7 +227,6 @@
 "settings.updates.automaticDescription" = "启动两分钟后检查，并每六小时检查一次；发现新版本后验签安装。";
 "settings.updates.channel" = "更新渠道";
 "settings.updates.channelProDescription" = "Stable 跟随版本 Tag，Dev 跟随 main 最新 Commit。";
-"settings.updates.channelCommunityDescription" = "Community 版本只接收 Stable 正式版。";
 "settings.updates.versionTitle" = "版本状态";
 "settings.updates.installedVersion" = "当前版本";
 "settings.updates.serverVersion" = "服务器版本";
@@ -1273,3 +1267,4 @@
 "simPin.errors.sim_pin_unavailable" = "无法读取 SIM PIN 状态，请关闭后重新打开页面。";
 "simPin.errors.sim_pin_result_unknown" = "暂时无法确认操作结果。请重新打开 SIM PIN 查看状态后再试。";
 "simPin.errors.enable_modem_after_unlock_failed" = "SIM 卡已解锁，但无法启用设备。请关闭飞行模式，无需再次输入凭据。";
+"license.unlicensed" = "未授权 Pro";

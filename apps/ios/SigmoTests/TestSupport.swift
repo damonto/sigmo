@@ -34,7 +34,7 @@ actor BackendStub {
     var capabilitiesStatus = 200
     var modemJSON = PreviewBackendServer.modemJSON()
     var featuresJSON = #"["wifiCalling","futureFeature"]"#
-    var licenseStatus = 404
+    var licenseStatus = 200
     var authorized = false
     var appStatus = 200
     var sendStatus = 201
@@ -99,7 +99,7 @@ actor BackendStub {
             return reply(licenseStatus, #"{"authorized":\#(authorized),"deviceId":"0123456789abcdef0123456789abcdef"}"#)
         }
         if path.hasSuffix("/app") {
-            return reply(appStatus, #"{"version":"1","commit":"abc","channel":"dev","edition":"community","target":"linux-arm64","distribution":"local"}"#)
+            return reply(appStatus, #"{"version":"1","commit":"abc","channel":"dev","target":"linux-arm64","distribution":"local"}"#)
         }
         if path.hasSuffix("/capabilities") { return reply(capabilitiesStatus, #"{"features":\#(featuresJSON)}"#) }
         if path.hasSuffix("/auth/sessions/current") { return reply(204, "") }

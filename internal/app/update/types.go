@@ -19,7 +19,6 @@ const (
 
 type Manifest struct {
 	SchemaVersion int        `json:"schemaVersion"`
-	Edition       string     `json:"edition"`
 	Channel       string     `json:"channel"`
 	Version       string     `json:"version"`
 	Commit        string     `json:"commit"`

@@ -75,16 +75,12 @@ final class BackendAPI: Sendable {
 
     deinit { session?.invalidateAndCancel() }
 
-    func license(token: String? = nil) async throws -> LicenseStatus? {
-        do {
-            let status: LicenseStatus = try await decode(["license"], token: token)
-            guard status.deviceId.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil else {
-                throw BackendFailure.local("api.invalidResponse")
-            }
-            return status
-        } catch let failure as BackendFailure where failure.source == .backend && failure.status == 404 && failure.code == "resource_not_found" {
-            return nil
+    func license(token: String? = nil) async throws -> LicenseStatus {
+        let status: LicenseStatus = try await decode(["license"], token: token)
+        guard status.deviceId.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil else {
+            throw BackendFailure.local("api.invalidResponse")
         }
+        return status
     }
 
     func app(token: String? = nil) async throws -> AppInformation { try await decode(["app"], token: token) }

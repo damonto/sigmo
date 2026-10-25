@@ -2,7 +2,7 @@ export type ReleaseChannel = 'stable' | 'dev';
 
 export interface Manifest {
   schemaVersion: 1;
-  edition: 'pro';
+
   channel: ReleaseChannel;
   version: string;
   commit: string;

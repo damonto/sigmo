@@ -33,26 +33,25 @@ final class UpdatesTests: XCTestCase {
 
         state.clear()
         XCTAssertFalse(state.working)
-        await server.setEdition("community")
+        await server.setVersion("2.0.0")
         await state.load()
-        XCTAssertEqual(state.snapshot?.current.edition, "community")
+        XCTAssertEqual(state.snapshot?.current.version, "2.0.0")
 
         await server.release()
         await previous.value
-        XCTAssertEqual(state.snapshot?.current.edition, "community")
+        XCTAssertEqual(state.snapshot?.current.version, "2.0.0")
         XCTAssertFalse(state.working)
         XCTAssertNil(state.failure)
     }
 
-    func testCommunityAndUnsupportedDistributions() async throws {
-        for (edition, distribution, reason) in [
-            ("community", "standalone", nil as String?),
-            ("pro", "container", "container"),
-            ("pro", "developer", "developer_build"),
-            ("pro", "standalone", "release_key_missing")
+    func testUpdateChannelsAndUnsupportedDistributions() async throws {
+        for (distribution, reason) in [
+            ("standalone", nil as String?),
+            ("container", "container"),
+            ("developer", "developer_build"),
+            ("standalone", "release_key_missing")
         ] {
             let server = try SettingsTestServer()
-            await server.setEdition(edition)
             await server.setDistribution(distribution, reason: reason)
             let session = try settingsSession(server)
             await session.refresh(force: true)
@@ -63,7 +62,7 @@ final class UpdatesTests: XCTestCase {
             await state.check()
             XCTAssertEqual(state.canInstall, reason == nil)
             await state.save(automatic: false, channel: "dev")
-            XCTAssertEqual(state.snapshot?.settings.channel, edition == "community" ? "stable" : "dev")
+            XCTAssertEqual(state.snapshot?.settings.channel, "dev")
         }
     }
 

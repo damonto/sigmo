@@ -5,7 +5,7 @@
 
 **Sigmo** is a modern, self-hosted web UI and API for managing cellular modems through QMI and MBIM. It ships as a single binary with an embedded Vue 3 frontend, designed to be lightweight and easy to deploy.
 
-Sigmo focuses on advanced eSIM operations, SMS management, and network control. Pro-only features are documented in [pro/README.md](pro/README.md).
+Sigmo focuses on advanced eSIM operations, SMS management, and network control. IMS, eSIM Quick Transfer and official carrier configuration delivery are documented in [CARRIER_CONFIG.md](CARRIER_CONFIG.md).
 
 ## ✨ Features
 
@@ -60,7 +60,8 @@ Grab the latest release for your architecture from the [GitHub Releases](https:/
 
 ```bash
 # Example for Linux AMD64
-curl -LO https://github.com/damonto/sigmo/releases/latest/download/sigmo-linux-amd64
+curl -LO https://github.com/damonto/sigmo/releases/latest/download/sigmo-linux-amd64.gz
+gzip -d sigmo-linux-amd64.gz
 chmod +x sigmo-linux-amd64
 sudo install -m 0755 sigmo-linux-amd64 /usr/local/bin/sigmo
 ```
@@ -177,7 +178,7 @@ To run Sigmo as a background service, use Systemd.
 
 Client applications live in `apps/`: [Web](apps/web/README.md) and
 [iOS](apps/ios/README.md).
-The Go backend remains in the root module, with Pro extensions in `pro/`.
+The Go backend, including IMS and eSIM transfer, uses the root Go module. Official carrier configuration is delivered through the existing Pro API.
 
 If you wish to contribute or modify the source:
 
@@ -203,5 +204,7 @@ If you wish to contribute or modify the source:
 
 ## 📄 License
 
-This repository, including the `pro/` module, is released under the
-[MIT License](LICENSE).
+Sigmo's original source code is released under the [MIT License](LICENSE).
+The unified binary links `ts43-go` and `ims-go`, which are licensed under GPLv3.
+See [source and distribution licenses](THIRD_PARTY_NOTICES.md) for the combined
+binary's distribution requirements and third-party notices.

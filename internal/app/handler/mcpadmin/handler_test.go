@@ -210,7 +210,7 @@ func newTestHandler(t *testing.T) (*Handler, *mcpauth.Store, *mcpserver.Controll
 		t.Fatalf("mcpauth.NewStore() error = %v", err)
 	}
 	catalog := mcpserver.NewCatalog()
-	if err := catalog.AddPermission("modem.read", "modem"); err != nil {
+	if err := catalog.AddPermission(mcpserver.Permission{Name: "modem.read", Module: "modem"}); err != nil {
 		t.Fatalf("AddPermission() error = %v", err)
 	}
 	controller, err := mcpserver.New(mcpserver.Config{BuildVersion: "test", Settings: store, Keys: keys, Storage: db, Catalog: catalog})

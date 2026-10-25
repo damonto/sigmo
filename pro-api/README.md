@@ -1,7 +1,7 @@
 # Sigmo Pro API
 
-This Worker owns the Telegram device pairing flow, signed Pro leases, private
-release metadata, and short-lived R2 download tickets. The R2 bucket must stay
+This Worker owns the Telegram device pairing flow, signed Pro leases, release
+metadata, encrypted carrier configurations, and short-lived R2 download tickets. See the [configuration publishing guide](../CARRIER_CONFIG.md) for the storage secret, upload script and rollout order. The R2 bucket must stay
 private: do not enable an `r2.dev` hostname, public bucket access, or a custom
 domain for it. Binaries are read only through the `BUCKET` Worker
 binding. The Worker keeps a normalized carrier catalog at
@@ -53,7 +53,7 @@ same batch that consumes its challenge.
 
 Apply pending migrations in order while preserving the existing database.
 Native push and Calls use incremental migrations `0004_native_push.sql` and
-`0005_native_calls.sql`. Deploy the gateway before the updated Go backend and
+`0005_native_calls.sql`. Configuration delivery adds `0006_configuration_downloads.sql`. Deploy the gateway before the updated Go backend and
 iOS app. The Worker and local backend use separate authentication boundaries;
 see the [iOS client guide](../apps/ios/README.md).
 
@@ -83,6 +83,7 @@ bunx wrangler secret put SIGMO_TELEGRAM_BOT_TOKEN
 bunx wrangler secret put SIGMO_TELEGRAM_WEBHOOK_SECRET
 bunx wrangler secret put SIGMO_LICENSE_PRIVATE_KEY
 bunx wrangler secret put SIGMO_LICENSE_PUBLIC_KEY
+bunx wrangler secret put SIGMO_CONFIG_ENCRYPTION_KEY
 bunx wrangler secret put SIGMO_RELEASE_PUBLIC_KEY
 bunx wrangler secret put SIGMO_DOWNLOAD_TICKET_SECRET
 bunx wrangler secret put SIGMO_ADMIN_TELEGRAM_IDS
@@ -90,6 +91,7 @@ bunx wrangler secret put SIGMO_ADMIN_TELEGRAM_IDS
 
 Formats:
 
+- `SIGMO_CONFIG_ENCRYPTION_KEY`: Base64-encoded 32-byte AES key for encrypted carrier objects.
 - `SIGMO_LICENSE_PRIVATE_KEY`: Base64-encoded Ed25519 PKCS#8 private key.
 - `SIGMO_LICENSE_PUBLIC_KEY`: Base64-encoded 32-byte raw Ed25519 public key.
 - `SIGMO_RELEASE_PUBLIC_KEY`: Base64-encoded 32-byte raw Ed25519 public key
@@ -105,12 +107,12 @@ Ed25519 private key or Base64 PKCS#8 key as `SIGMO_RELEASE_PRIVATE_KEY`; release
 binaries embed the corresponding Base64 raw 32-byte public key through
 `SIGMO_RELEASE_PUBLIC_KEY`.
 
-Also configure these repository values for Pro publishing:
+Also configure these repository values for publishing:
 
 - Secrets: `SIGMO_RELEASE_PRIVATE_KEY`, `SIGMO_RELEASE_PUBLIC_KEY`,
   `SIGMO_LICENSE_PUBLIC_KEY`, `SIGMO_R2_ACCESS_KEY_ID`,
   `SIGMO_R2_SECRET_ACCESS_KEY`, and `SIGMO_R2_ACCOUNT_ID`.
-- Variable: `SIGMO_PRO_WORKER_URL`. The publishing workflow uses the `sigmo` bucket.
+- Variable: `SIGMO_WORKER_URL`. The publishing workflow uses the `sigmo` bucket.
 
 The R2 access key should be scoped only to the `sigmo` bucket.
 

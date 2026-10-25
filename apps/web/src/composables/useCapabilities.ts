@@ -12,6 +12,7 @@ const features = ref<string[]>([])
 const isLoading = ref(false)
 const hasLoaded = ref(false)
 let pending: Promise<void> | undefined
+let refreshRequested = false
 
 export const useCapabilities = () => {
   const capabilityApi = useCapabilityApi()
@@ -20,15 +21,22 @@ export const useCapabilities = () => {
 
   const hasFeature = (feature: string) => featureSet.value.has(feature)
 
-  const fetchCapabilities = async () => {
-    if (hasLoaded.value) return
-    // Split views mount together; every consumer must await the same capability read.
+  const fetchCapabilities = (force = false): Promise<void> => {
+    if (force) refreshRequested = true
+    // A forced refresh arriving during a request is included in the shared task.
     if (pending) return pending
-
+    if (hasLoaded.value && !force) return Promise.resolve()
     isLoading.value = true
-    pending = loadCapabilities()
+    pending = refreshCapabilities()
+    return pending
+  }
+
+  const refreshCapabilities = async () => {
     try {
-      await pending
+      do {
+        refreshRequested = false
+        await loadCapabilities()
+      } while (refreshRequested)
     } finally {
       pending = undefined
       isLoading.value = false
@@ -38,11 +46,17 @@ export const useCapabilities = () => {
   const loadCapabilities = async () => {
     try {
       const { data } = await capabilityApi.getCapabilities()
-      features.value = data.value?.features ?? []
-      hasLoaded.value = true
+      // Authorization changed while this response was in flight. Wait for the
+      // queued refresh before publishing capabilities from the current state.
+      if (!refreshRequested) {
+        features.value = data.value?.features ?? []
+        hasLoaded.value = true
+      }
     } catch (err) {
-      console.error('[useCapabilities] Failed to fetch capabilities:', err)
-      features.value = []
+      if (!refreshRequested) {
+        console.error('[useCapabilities] Failed to fetch capabilities:', err)
+        features.value = []
+      }
     }
   }
 

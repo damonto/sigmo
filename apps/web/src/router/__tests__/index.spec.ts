@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 const licenseStore = vi.hoisted(() => ({
-  activationRequired: false,
+  authorized: false,
+  mode: 'unlicensed',
   unavailable: false,
   check: vi.fn(),
 }))
@@ -14,7 +15,7 @@ import router, { enforceRouteAccess } from '@/router'
 describe('route access', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    licenseStore.activationRequired = false
+    licenseStore.authorized = false
     licenseStore.unavailable = false
     licenseStore.check.mockResolvedValue(true)
     authStore.check.mockResolvedValue(true)
@@ -25,17 +26,16 @@ describe('route access', () => {
     expect(licenseStore.check).not.toHaveBeenCalled()
   })
   it('checks the license after authentication', async () => {
-    licenseStore.activationRequired = true
-    await expect(enforceRouteAccess({ name: 'home' })).resolves.toEqual({ name: 'activate' })
+    licenseStore.authorized = false
+    await expect(enforceRouteAccess({ name: 'home' })).resolves.toBeUndefined()
     expect(licenseStore.check).toHaveBeenCalledWith(true)
   })
-  it('keeps business routes closed while the license is unavailable', async () => {
+  it('keeps base routes accessible while authorization is unavailable', async () => {
     licenseStore.unavailable = true
-    await expect(enforceRouteAccess({ name: 'home' })).resolves.toEqual({
-      name: 'license-unavailable',
-    })
+    await expect(enforceRouteAccess({ name: 'home' })).resolves.toBeUndefined()
   })
   it('leaves the activation page after authorization', async () => {
+    licenseStore.authorized = true
     await expect(enforceRouteAccess({ name: 'activate' })).resolves.toEqual({ name: 'home' })
   })
   it('uses Calls as the modem route and redirects old notification links', async () => {

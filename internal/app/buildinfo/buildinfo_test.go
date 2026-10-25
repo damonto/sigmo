@@ -4,16 +4,16 @@ import "testing"
 
 func TestCurrentDefaults(t *testing.T) {
 	oldVersion, oldCommit, oldChannel := Version, Commit, Channel
-	oldEdition, oldTarget, oldDistribution := Edition, Target, Distribution
+	oldTarget, oldDistribution := Target, Distribution
 	t.Cleanup(func() {
 		Version, Commit, Channel = oldVersion, oldCommit, oldChannel
-		Edition, Target, Distribution = oldEdition, oldTarget, oldDistribution
+		Target, Distribution = oldTarget, oldDistribution
 	})
 
 	Version, Commit, Channel = "", "ABCDEF", "unknown"
-	Edition, Target, Distribution = "", "", "unknown"
+	Target, Distribution = "", "unknown"
 	got := Current()
-	if got.Version != "dev" || got.Channel != ChannelStable || got.Edition != EditionCommunity {
+	if got.Version != "dev" || got.Channel != ChannelStable {
 		t.Fatalf("Current() = %+v", got)
 	}
 	if got.Target == "" || got.Distribution != DistributionDeveloper {

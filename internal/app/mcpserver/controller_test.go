@@ -223,7 +223,7 @@ func newControllerTestEnv(t *testing.T) controllerTestEnv {
 	}
 	catalog := NewCatalog()
 	for _, permission := range []string{"test.read", "test.write"} {
-		if err := catalog.AddPermission(permission, "test"); err != nil {
+		if err := catalog.AddPermission(Permission{Name: permission, Module: "test"}); err != nil {
 			t.Fatalf("AddPermission(%q) error = %v", permission, err)
 		}
 	}

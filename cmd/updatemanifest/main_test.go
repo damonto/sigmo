@@ -43,7 +43,7 @@ func TestRunWritesVerifiableManifest(t *testing.T) {
 	}
 	output := filepath.Join(dir, "sigmo-update.json")
 	err = run(config{
-		edition: "community", channel: "stable", version: "v1.2.3",
+		channel: "stable", version: "v1.2.3",
 		commit: "0123456789abcdef0123456789abcdef01234567", publishedAt: "2026-08-09T12:00:00Z",
 		output: output, privateKey: base64.RawStdEncoding.EncodeToString(privateKey),
 		artifacts: []string{"linux-amd64=" + artifact},
@@ -82,13 +82,13 @@ func TestRunWritesGzipMetadata(t *testing.T) {
 	dir := t.TempDir()
 	executable := []byte("compressed executable")
 	archive := gzipData(t, executable)
-	artifactPath := filepath.Join(dir, "sigmo-pro-linux-amd64.gz")
+	artifactPath := filepath.Join(dir, "sigmo-linux-amd64.gz")
 	if err := os.WriteFile(artifactPath, archive, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	output := filepath.Join(dir, "manifest.json")
 	if err := run(config{
-		edition: "pro", channel: "stable", version: "v1.2.3",
+		channel: "stable", version: "v1.2.3",
 		commit: "0123456789abcdef0123456789abcdef01234567", publishedAt: "2026-08-09T12:00:00Z",
 		output: output, privateKey: base64.RawStdEncoding.EncodeToString(privateKey),
 		compression: appupdate.ArtifactCompressionGzip,
@@ -118,7 +118,7 @@ func TestRunWritesGzipMetadata(t *testing.T) {
 	artifact := manifest.Artifacts[0]
 	archiveSum := sha256.Sum256(archive)
 	executableSum := sha256.Sum256(executable)
-	if artifact.Name != "sigmo-pro-linux-amd64.gz" ||
+	if artifact.Name != "sigmo-linux-amd64.gz" ||
 		artifact.Compression != appupdate.ArtifactCompressionGzip ||
 		artifact.Size != int64(len(archive)) ||
 		artifact.SHA256 != hex.EncodeToString(archiveSum[:]) ||

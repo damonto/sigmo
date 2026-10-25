@@ -41,7 +41,8 @@ const en = {
       sim_target_changed: 'The active SIM changed. Review its status before continuing.',
       sim_pin_state_conflict: 'The SIM state changed. Review its status before continuing.',
       sim_pin_unsupported: 'SIM PIN management is unavailable.',
-      sim_pin_unavailable: 'Unable to read SIM PIN status. Close and reopen this dialog to try again.',
+      sim_pin_unavailable:
+        'Unable to read SIM PIN status. Close and reopen this dialog to try again.',
       sim_pin_result_unknown:
         'The result could not be confirmed. Reopen SIM PIN to check before trying again.',
       enable_modem_after_unlock_failed:
@@ -219,6 +220,9 @@ const en = {
     license_pairing_not_found: 'The pairing is unknown or expired.',
     license_save_failed: 'The authorization lease could not be saved.',
     license_service_unavailable: 'The Pro authorization service is unavailable.',
+    configuration_invalid_recipient: 'The configuration encryption key is invalid.',
+    configuration_rate_limited: 'Configuration requests are too frequent. Try again later.',
+    configuration_unavailable: 'The official carrier configuration is unavailable.',
     license_status_unavailable: 'The product authorization status is unavailable.',
     method_not_allowed: 'This operation is not allowed for the requested resource.',
     release_artifact_not_found: 'The update artifact is unavailable.',
@@ -239,11 +243,6 @@ const en = {
     update_unavailable: 'No update is currently available.',
     self_update_unsupported: 'This build cannot install updates automatically.',
     start_update_failed: 'The update installation could not be started.',
-  },
-  licenseUnavailable: {
-    title: 'Authorization service unavailable',
-    description: 'Sigmo could not verify whether business features may start.',
-    retry: 'Retry authorization check',
   },
   nav: {
     modems: 'Modems',
@@ -331,8 +330,7 @@ const en = {
       automaticDescription:
         'Check two minutes after startup and every six hours, then install verified updates.',
       channel: 'Update channel',
-      channelProDescription: 'Stable follows version tags. Dev follows the latest main commit.',
-      channelCommunityDescription: 'Community edition only receives Stable releases.',
+      channelDescription: 'Stable follows version tags. Dev follows the latest main commit.',
       versionTitle: 'Version status',
       installedVersion: 'Current version',
       serverVersion: 'Server version',
@@ -702,7 +700,7 @@ const en = {
     openTelegram: 'Open Telegram and confirm this device with the Sigmo bot.',
     authorize: 'Authorize with Telegram',
     waiting: 'This page checks activation automatically. The link expires after five minutes.',
-    success: 'Authorized. Sigmo is restarting…',
+    success: 'Authorized. Opening Sigmo…',
     expired: 'This activation link expired.',
     retry: 'Create a new link',
     failed: 'Could not create an activation link.',

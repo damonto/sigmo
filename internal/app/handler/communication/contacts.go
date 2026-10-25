@@ -22,10 +22,9 @@ import (
 
 // Config keeps persistence and live inventory in their existing ownership boundaries.
 type Config struct {
-	Storage      *storage.Store
-	Registry     *modem.Registry
-	ESIM         *esim.Handler
-	CallsEnabled bool
+	Storage  *storage.Store
+	Registry *modem.Registry
+	ESIM     *esim.Handler
 }
 
 // Handler exposes authenticated, backend-scoped communication resources.

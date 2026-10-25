@@ -245,18 +245,18 @@ final class BackendSessionTests: XCTestCase {
         XCTAssertEqual(session.statusKey, "status.online")
     }
 
-    func testCommunityRequiresValidAppAndActivationSkipsBusinessRoutes() async throws {
+    func testUnlicensedBackendKeepsBaseDevicesAccessible() async throws {
         let stub = BackendStub()
         await stub.setAppStatus(404)
         let session = try testSession(stub)
         await session.refresh(force: true)
-        XCTAssertEqual(session.license, .unknown)
+        XCTAssertEqual(session.license, .unlicensed)
         XCTAssertNotNil(session.failure)
         await stub.setLicense(authorized: false)
+        await stub.setAppStatus(200)
         await session.refresh(force: true)
-        XCTAssertEqual(session.license, .activation)
-        let count = await stub.count("/modems")
-        XCTAssertEqual(count, 0)
+        XCTAssertEqual(session.license, .unlicensed)
+        XCTAssertEqual(session.modems.count, 1)
     }
 
     func testOTPIsExplicitCooldownAndInvalidCodeAreIsolated() async throws {
@@ -413,7 +413,7 @@ final class BackendSessionTests: XCTestCase {
         XCTAssertEqual(session.modems.count, 1)
     }
 
-    func testActivationWaitsForBusinessServerReadiness() async throws {
+    func testAuthorizationRemainsIndependentOfAppAvailability() async throws {
         let stub = BackendStub()
         await stub.setLicense(authorized: false)
         let session = try testSession(stub)
@@ -421,7 +421,7 @@ final class BackendSessionTests: XCTestCase {
         await stub.setLicense(authorized: true)
         await stub.setAppStatus(503)
         await session.refresh(force: true)
-        XCTAssertEqual(session.license, .activation)
+        XCTAssertEqual(session.license, .authorized)
         XCTAssertFalse(session.activationReady)
         await stub.setAppStatus(200)
         await session.refresh(force: true)

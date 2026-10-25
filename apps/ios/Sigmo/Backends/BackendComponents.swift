@@ -22,7 +22,6 @@ struct BackendStatusLabel: View {
         switch session.statusKey {
         case "status.online": "checkmark.circle.fill"
         case "status.loginRequired": "lock.fill"
-        case "status.activationRequired": "key.fill"
         case "status.offline", "status.unavailable": "exclamationmark.circle"
         default: "circle.dotted"
         }

@@ -80,7 +80,7 @@ func (h *Handler) inventory(ctx context.Context) ([]storage.SIMLine, error) {
 		line.Present = present[line.ProfileID]
 		line.Active = active[line.ProfileID]
 		line.CanMessage = line.Active
-		line.CanCall = line.Active && h.config.CallsEnabled
+		line.CanCall = line.Active
 		before, known := observed[line.ProfileID]
 		if !known || before.DeletionState != line.DeletionState || before.SuccessorID != line.SuccessorID {
 			// This inventory started before the latest operation. The next poll can reconcile it.
