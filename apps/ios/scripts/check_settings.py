@@ -2,7 +2,6 @@
 """Check settings fixtures and localized resources without Xcode or a live backend."""
 import json
 from pathlib import Path
-import plistlib
 import re
 import sys
 
@@ -23,20 +22,6 @@ def localized_strings(locale):
             raise ValueError(f"Duplicate localization key: {locale}/{key}")
         result[key] = value
     return result
-
-
-def intent_phrases(locale):
-    path = ROOT / f"apps/ios/SigmoIntents/{locale}.lproj/AppIntentVocabulary.plist"
-    with path.open("rb") as file:
-        vocabulary = plistlib.load(file)
-    phrases = {
-        item["IntentName"]: item.get("IntentExamples", [])
-        for item in vocabulary.get("IntentPhrases", [])
-    }
-    examples = phrases.get("INStartCallIntent", [])
-    assert examples and all(isinstance(example, str) and example.strip() for example in examples), \
-        f"Missing INStartCallIntent examples: {path}"
-    return phrases
 
 
 def main():
@@ -85,10 +70,8 @@ def main():
     for key in en:
         if key.startswith(("settings.", "modemSettings.", "calls.", "apiError.", "diagnostics.")):
             assert re.findall(r'%[0-9$]*[@dflds]', en[key]) == re.findall(r'%[0-9$]*[@dflds]', zh[key]), key
-    intent_phrases("en")
-    intent_phrases("zh-Hans")
     print(f"PASS: {len(en)} bilingual keys; {len(used)} settings/Calls/diagnostics UI keys; "
-          f"{len(fixture_fields)} backend fields; 8 notification channels; 2 Siri intent phrase sets")
+          f"{len(fixture_fields)} backend fields; 8 notification channels")
 
 
 if __name__ == "__main__":

@@ -409,6 +409,27 @@ final class CallsFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["10086"].firstMatch.exists)
     }
 
+    func testAudioCallIntentCallbackDialsCompleteRouteDirectly() {
+        let app = launchCallback(scenario: "calls", mode: "audio")
+        XCTAssertTrue(app.buttons["calls-end"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["10086"].firstMatch.exists)
+    }
+
+    func testAmbiguousSystemCallbackShowsAllBackendsBeforeDialing() {
+        let app = launchCallback(scenario: "communication-multiple", mode: "ambiguous")
+        let chooser = app.sheets["Choose a Sigmo backend"]
+        let home = chooser.buttons["Home"]
+        let studio = chooser.buttons["Studio"]
+        XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(studio.exists)
+        XCTAssertFalse(app.buttons["calls-end"].exists)
+        studio.tap()
+        let number = app.textFields["calls-number"]
+        XCTAssertTrue(number.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(number.value as? String, "10086")
+        XCTAssertFalse(app.buttons["calls-end"].exists, "Choosing a backend still requires explicit dialing")
+    }
+
     func testInCallKeypadFitsLargeTextAndLandscapeWithoutScrolling() {
         let app = launch(chinese: true, large: true)
         app.buttons["call-record-past-call"].tap()

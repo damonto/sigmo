@@ -498,7 +498,7 @@ final class CallsTests: XCTestCase {
         calls.ingest(first, line: firstLine)
         calls.ingest(other, line: secondLine)
         XCTAssertEqual(calls.calls.count, 2)
-        XCTAssertEqual(calls.callbackLine(for: "10086"), secondLine)
+        XCTAssertNil(calls.callbackLine(for: "10086"), "The same number on different backends requires line selection")
         first.state = "ended"
         calls.ingest(first, line: firstLine)
         XCTAssertEqual(calls.calls.count, 1)
@@ -755,6 +755,35 @@ final class CallsTests: XCTestCase {
         XCTAssertEqual(writes, 0)
     }
 
+    func testSystemCallbackAcceptsAudioCallIntents() async throws {
+        let (calls, _, _) = try await setup(CallsFixture())
+        let person = callbackPerson("+86 (138) 0013-8000")
+        XCTAssertTrue(calls.requestCallback(INStartAudioCallIntent(contacts: [person])))
+        let request = try XCTUnwrap(calls.systemCallback)
+        XCTAssertEqual(request.number, "+8613800138000")
+        XCTAssertTrue(calls.requestCallback(callbackIntent(contacts: [person])))
+        XCTAssertEqual(calls.systemCallback?.id, request.id)
+
+        for contacts in [[], [person, person], [callbackPerson("*123#")],
+                         [callbackPerson("user@example.com", type: .emailAddress)]] {
+            XCTAssertFalse(calls.requestCallback(INStartAudioCallIntent(contacts: contacts)))
+            XCTAssertEqual(calls.systemCallback?.id, request.id)
+        }
+        XCTAssertFalse(calls.requestCallback(NSUserActivity(activityType: INStartCallIntentIdentifier)))
+        XCTAssertEqual(calls.systemCallback?.id, request.id)
+    }
+
+    func testSystemCallbackBundleUsesAppActivitiesWithoutSiriExtension() throws {
+        let activities = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "NSUserActivityTypes") as? [String])
+        XCTAssertTrue(activities.contains(INStartCallIntentIdentifier))
+        XCTAssertTrue(activities.contains(INStartAudioCallIntentIdentifier))
+        XCTAssertNil(Bundle.main.object(forInfoDictionaryKey: "NSSiriUsageDescription"))
+        if let directory = Bundle.main.builtInPlugInsURL {
+            let extensions = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            XCTAssertFalse(extensions.contains { $0.lastPathComponent == "SigmoIntents.appex" })
+        }
+    }
+
     func testSystemCallbackUsesMissedCallRecordWithoutContacts() async throws {
         let (calls, _, _) = try await setup(CallsFixture())
         let record = INCallRecord(identifier: "missed-call", caller: callbackPerson("10086"),
@@ -825,6 +854,55 @@ final class CallsTests: XCTestCase {
         await restored.act(.end(try XCTUnwrap(restored.primary?.id)))
     }
 
+    func testSystemCallbackDoesNotRepeatAnActiveCall() async throws {
+        let fixture = CallsFixture()
+        let (calls, _, line) = try await setup(fixture)
+        let person = callbackPerson("10086")
+        let intent = callbackIntent(contacts: [person])
+        calls.requestCallback(intent)
+        let request = try XCTUnwrap(calls.systemCallback)
+        await calls.dial(number: request.number, line: line)
+        calls.consumeSystemCallback(request)
+
+        XCTAssertTrue(calls.requestCallback(intent))
+        XCTAssertTrue(calls.requestCallback(INStartAudioCallIntent(contacts: [person])))
+        XCTAssertNil(calls.systemCallback)
+        XCTAssertNil(calls.failure)
+        let writes = await fixture.count(method: "POST", suffix: "/calls")
+        XCTAssertEqual(writes, 1)
+
+        await calls.act(.end(try XCTUnwrap(calls.primary?.id)))
+        XCTAssertTrue(calls.requestCallback(intent), "A later user callback is allowed after the call ends")
+        XCTAssertNotNil(calls.systemCallback)
+    }
+
+    func testSystemCallbackRetainsLineAmbiguityAfterRelaunch() async throws {
+        for change in ["backend", "modem", "sim", "address"] {
+            let (calls, _, line) = try await setup(CallsFixture())
+            let other = callbackLine(
+                backendID: change == "backend" ? UUID() : line.backendID,
+                modemID: change == "modem" ? "other-modem" : line.modemID,
+                profileID: change == "sim" ? "other-sim" : line.profileID,
+                address: change == "address" ? "https://other.sigmo.test" : line.address
+            )
+            calls.rememberCallbackRoute(number: "10086", line: line, startedAt: "2026-10-25T10:00:00Z")
+            // Out-of-order events must still record that more than one line was used.
+            calls.rememberCallbackRoute(number: "10086", line: other, startedAt: "2026-10-24T10:00:00Z")
+            calls.rememberCallbackRoute(number: "10086", line: line, startedAt: "2026-10-25T11:00:00Z")
+
+            let restored = CallsState(store: calls.store, fixtures: true, recordings: calls.recordings)
+            XCTAssertNil(restored.callbackLine(for: "10086"), change)
+            restored.requestCallback(callbackIntent(contacts: [callbackPerson("10086")]))
+            guard case .home(let number, let backendID) =
+                    await restored.resolveSystemCallback(try XCTUnwrap(restored.systemCallback)) else {
+                return XCTFail("An ambiguous \(change) route must require manual selection")
+            }
+            XCTAssertEqual(number, "10086")
+            XCTAssertNil(backendID, "Do not restrict selection to the most recent backend")
+            XCTAssertFalse(restored.hasCall)
+        }
+    }
+
     func testSystemCallbackWithoutSavedRouteUsesHomeDialer() async throws {
         let (calls, _, _) = try await setup(CallsFixture())
         calls.requestCallback(callbackIntent(contacts: [callbackPerson("10086")]))
@@ -855,9 +933,9 @@ final class CallsTests: XCTestCase {
         let missingModemRoute = callbackLine(
             backendID: line.backendID, modemID: "missing-modem", profileID: line.profileID, address: line.address
         )
-        calls.rememberCallbackRoute(number: "10086", line: missingModemRoute,
+        calls.rememberCallbackRoute(number: "10010", line: missingModemRoute,
                                     startedAt: Date.now.addingTimeInterval(1).ISO8601Format())
-        calls.requestCallback(callbackIntent(contacts: [callbackPerson("10086")]))
+        calls.requestCallback(callbackIntent(contacts: [callbackPerson("10010")]))
         guard case .home(_, let retainedBackend) = await calls.resolveSystemCallback(try XCTUnwrap(calls.systemCallback)) else {
             return XCTFail("A removed modem must use the home dialer")
         }

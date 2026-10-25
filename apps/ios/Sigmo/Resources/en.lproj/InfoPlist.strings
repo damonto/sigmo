@@ -4,4 +4,3 @@
 
 "NSMicrophoneUsageDescription" = "Send your voice during calls through your Sigmo devices.";
 "NSContactsUsageDescription" = "Match caller names on this device. Contacts are never sent to a Sigmo server.";
-"NSSiriUsageDescription" = "Start calls through your Sigmo modem when you choose a previous call in Recents.";

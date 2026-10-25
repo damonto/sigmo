@@ -32,6 +32,14 @@ Use HTTPS with a system-trusted certificate, or local-network HTTP. Allow local-
 
 Switching to the background lets in-flight requests and eSIM operations finish and pauses automatic polling between requests. Returning to the active scene refreshes idle pages without restarting pending work. The app requests additional iOS execution time for HTTP requests, the initial SIM status read, and SIM/eSIM interactions; idle SIM subscriptions suspend in the background. If the extra time expires, the app cancels unfinished work and releases resources. iOS suspension or termination can still interrupt long operations. Refresh the backend state before retrying a write whose result is uncertain.
 
+## Calls from system Recents
+
+Tapping a Sigmo entry in the Phone app's Recents opens Sigmo through a system call activity. Phone Recents can deliver either `INStartCallIntent` or `INStartAudioCallIntent`; the app handles both and uses CallKit to place the call. This entry does not require a Siri extension or Siri voice support.
+
+Sigmo restores the backend state before dialing. A verified, unambiguous saved line can dial directly. If the same number has used different backends or SIMs, the app opens the dialer for the user to choose and confirm a line. Unavailable backends, removed modems, and changed or locked SIMs open the appropriate dialer instead of placing a call automatically.
+
+Simulator fixtures cover parsing, navigation, and dialing decisions. Before release, verify Phone Recents on an iPhone with the app running, backgrounded, and terminated, including a number called from multiple SIMs. These system entry checks are separate from fixture tests.
+
 ## Diagnostic logs
 
 Open **Manage Sigmo → Development diagnostics** to enable local diagnostic logging, including in Release builds. Logging is off by default. The switch and saved events survive app restarts. Turning logging off stops collection and keeps existing logs available for export or clearing.

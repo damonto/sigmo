@@ -150,19 +150,42 @@ final class CallsState {
     }
 
     @discardableResult
-    func requestCallback(_ intent: INStartCallIntent) -> Bool {
+    func requestCallback(_ activity: NSUserActivity) -> Bool {
+        guard let intent = activity.interaction?.intent else { return false }
+        return requestCallback(intent)
+    }
+
+    @discardableResult
+    func requestCallback(_ intent: INIntent) -> Bool {
         let contacts: [INPerson]
-        if let requested = intent.contacts, !requested.isEmpty {
-            contacts = requested
-        } else {
-            contacts = intent.callRecordToCallBack?.participants ?? []
+        switch intent {
+        case let intent as INStartCallIntent:
+            guard intent.callCapability != .videoCall else { return false }
+            if let requested = intent.contacts, !requested.isEmpty {
+                contacts = requested
+            } else {
+                contacts = intent.callRecordToCallBack?.participants ?? []
+            }
+        case let intent as INStartAudioCallIntent:
+            // Phone Recents can still deliver this deprecated intent.
+            contacts = intent.contacts ?? []
+        default:
+            return false
         }
+        return requestCallback(contacts: contacts)
+    }
+
+    private func requestCallback(contacts: [INPerson]) -> Bool {
         // Sigmo supports one remote phone number per call.
-        guard intent.callCapability != .videoCall, contacts.count == 1,
+        guard contacts.count == 1,
               let handle = contacts.first?.personHandle, handle.type == .phoneNumber,
               let number = handle.value else { return false }
         let normalized = CallDigits.normalize(number)
         guard CallDigits.callable(normalized), !CallDigits.isService(normalized) else { return false }
+        // The system can repeat an activity after its original request was consumed.
+        if calls.values.contains(where: { !$0.endRequested && CallDigits.normalize($0.number) == normalized }) {
+            return true
+        }
         guard systemCallback?.number != normalized else { return true }
         // Keep the request until the root view has restored backend state and
         // selected the appropriate dialing surface.
@@ -171,8 +194,8 @@ final class CallsState {
     }
 
     func callbackLine(for number: String) -> CallLine? {
-        guard let route = callbackRoutes[CallDigits.normalize(number)], available(route.line) else { return nil }
-        return route.line
+        guard case .dial(_, let line) = callbackDestination(for: number) else { return nil }
+        return line
     }
 
     func resolveSystemCallback(_ request: SystemCallbackRequest) async -> SystemCallbackDestination {
@@ -191,6 +214,7 @@ final class CallsState {
 
     private func callbackDestination(for number: String) -> SystemCallbackDestination {
         guard let route = callbackRoutes[CallDigits.normalize(number)],
+              !route.requiresSelection,
               let session = store.sessions[route.line.backendID] else {
             return .home(number: number, backendID: nil)
         }
@@ -211,8 +235,18 @@ final class CallsState {
 
     func rememberCallbackRoute(number: String, line: CallLine, startedAt: String) {
         let key = CallDigits.normalize(number)
-        let route = CallbackRoute(line: line, startedAt: startedAt)
-        if let existing = callbackRoutes[key], existing.date > route.date { return }
+        var route = CallbackRoute(line: line, startedAt: startedAt)
+        if let existing = callbackRoutes[key] {
+            // A number can belong to several system Recents entries with different
+            // SIMs. Retain that ambiguity even when an older event arrives later.
+            let requiresSelection = existing.requiresSelection || !existing.line.matches(line)
+            if existing.date > route.date {
+                route = CallbackRoute(line: existing.line, startedAt: existing.startedAt, requiresSelection: requiresSelection)
+            } else {
+                route = CallbackRoute(line: line, startedAt: startedAt, requiresSelection: requiresSelection)
+            }
+            if route == existing { return }
+        }
         callbackRoutes[key] = route
         do {
             let file = CallbackRoutesFile(version: CallbackRoutesFile.currentVersion, routes: callbackRoutes)

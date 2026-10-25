@@ -215,7 +215,7 @@ struct HomeView: View {
             route = "home"
             homeTab = .calls
             let existingBackend = backendID.flatMap { store.sessions[$0] == nil ? nil : $0 }
-            if let existingBackend { communicationBackend = existingBackend.uuidString }
+            communicationBackend = existingBackend?.uuidString ?? ""
             communicationDial = CommunicationDialRequest(number: number, backendID: existingBackend, modemID: nil)
             modemDial = nil
             calls.consumeSystemCallback(request)

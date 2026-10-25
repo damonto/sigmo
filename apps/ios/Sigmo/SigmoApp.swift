@@ -16,16 +16,8 @@ struct SigmoApp: App {
                 .environment(\.nativePush, appDelegate.push)
                 .preferredColorScheme(AppLaunch.colorScheme)
                 // SwiftUI scenes receive system call activities instead of the app delegate.
-                .onContinueUserActivity("INStartCallIntent") { activity in
-                    guard let intent = activity.interaction?.intent as? INStartCallIntent else {
-                        AppDiagnostics.record("callback.activity.ignored", category: "calls",
-                                              fields: ["typeMatched": "false", "activityType": activity.activityType])
-                        return
-                    }
-                    let handled = appDelegate.calls.requestCallback(intent)
-                    AppDiagnostics.record("callback.activity.received", category: "calls",
-                                          fields: ["handled": String(handled), "activityType": activity.activityType])
-                }
+                .onContinueUserActivity(INStartCallIntentIdentifier, perform: continueCall)
+                .onContinueUserActivity(INStartAudioCallIntentIdentifier, perform: continueCall)
                 .foregroundTask { await store.refreshAll() }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     AppDiagnostics.record("scene.changed", fields: ["state": phase == .active ? "active" : phase == .background ? "background" : "inactive"])
@@ -57,6 +49,12 @@ struct SigmoApp: App {
                     await appDelegate.push.run(store: store)
                 }
         }
+    }
+
+    private func continueCall(_ activity: NSUserActivity) {
+        let handled = appDelegate.calls.requestCallback(activity)
+        AppDiagnostics.record("callback.activity.received", category: "calls",
+                              fields: ["handled": String(handled), "activityType": activity.activityType])
     }
 }
 

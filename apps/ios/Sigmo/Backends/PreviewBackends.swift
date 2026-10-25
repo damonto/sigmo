@@ -114,17 +114,29 @@ enum PreviewBackends {
                                backendName: line.backendName, label: line.label, region: line.region, address: line.address),
                 startedAt: Date.now.ISO8601Format()
             )
-        case "dial":
+        case "dial", "audio":
             calls.rememberCallbackRoute(number: number, line: line, startedAt: Date.now.ISO8601Format())
+        case "ambiguous":
+            guard let other = store.onlineSessions.first(where: { $0.id != session.id }),
+                  let otherModem = other.modems.first else { return }
+            calls.rememberCallbackRoute(number: number, line: line, startedAt: Date.now.ISO8601Format())
+            calls.rememberCallbackRoute(number: number, line: CallLine(session: other, modem: otherModem),
+                                        startedAt: Date.now.ISO8601Format())
+            // Verify that a saved backend filter cannot hide the other callback line.
+            UserDefaults.standard.set(session.id.uuidString, forKey: "communication.backend")
         default:
             return
         }
         let person = INPerson(personHandle: INPersonHandle(value: number, type: .phoneNumber),
                               nameComponents: nil, displayName: nil, image: nil,
                               contactIdentifier: nil, customIdentifier: nil)
-        calls.requestCallback(INStartCallIntent(callRecordFilter: nil, callRecordToCallBack: nil,
-                                                audioRoute: .unknown, destinationType: .normal,
-                                                contacts: [person], callCapability: .audioCall))
+        if mode == "audio" {
+            calls.requestCallback(INStartAudioCallIntent(contacts: [person]))
+        } else {
+            calls.requestCallback(INStartCallIntent(callRecordFilter: nil, callRecordToCallBack: nil,
+                                                    audioRoute: .unknown, destinationType: .normal,
+                                                    contacts: [person], callCapability: .audioCall))
+        }
     }
 }
 
