@@ -20,7 +20,7 @@
     "@types/node": "^26.6.5",
     "oxlint": "^1.89.0",
     "oxlint-tsgolint": "^7.0.2005",
-    "prettier": "3.9.6",
+    "prettier": "3.9.10",
     "typescript": "~7.0.2",
     "vitest": "^4.1.12",
     "wrangler": "^4.152.0"
