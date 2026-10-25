@@ -23,7 +23,7 @@
     "@lucide/vue": "^1.61.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/vue-form": "^1.33.5",
-    "@vueuse/core": "^14.4.0",
+    "@vueuse/core": "^15.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "flag-icons": "^7.6.0",
