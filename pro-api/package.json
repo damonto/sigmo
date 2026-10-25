@@ -18,16 +18,16 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@types/node": "^26.6.5",
-    "oxlint": "^1.88.0",
-    "oxlint-tsgolint": "^7.0.2004",
+    "oxlint": "^1.89.0",
+    "oxlint-tsgolint": "^7.0.2005",
     "prettier": "3.9.6",
     "typescript": "~7.0.2",
-    "vitest": "^4.1.11",
-    "wrangler": "^4.151.0"
+    "vitest": "^4.1.12",
+    "wrangler": "^4.152.0"
   },
   "dependencies": {
     "@resvg/resvg-wasm": "2.6.2",
-    "hono": "^4.13.13",
+    "hono": "^4.13.14",
     "jose": "6.2.13"
   }
 }
