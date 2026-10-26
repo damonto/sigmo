@@ -5,15 +5,13 @@
 
 version: 2
 
-registries:
-  github-damonto:
-    type: git
-    url: https://github.com
-    username: x-access-token
-    password: ${{secrets.SIGMO_PRO_MODULE_TOKEN}}
-
 updates:
   - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -24,15 +22,3 @@ updates:
       - "/pro-api"
     schedule:
       interval: "weekly"
-
-  - package-ecosystem: "gomod"
-    directories:
-      - "/"
-      - "/pro"
-    registries:
-      - github-damonto
-    schedule:
-      interval: "weekly"
-    groups:
-      gomod-dependencies:
-        group-by: dependency-name
