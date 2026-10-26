@@ -17,7 +17,9 @@ const { source, loaded, onLoad, onError } = useCarrierLogo(
 </script>
 
 <template>
-  <span class="relative inline-flex size-7 shrink-0 items-center justify-center">
+  <span
+    class="relative inline-flex size-full shrink-0 items-center justify-center overflow-hidden rounded-[inherit]"
+  >
     <img
       v-if="source"
       v-show="loaded"
@@ -25,7 +27,7 @@ const { source, loaded, onLoad, onError } = useCarrierLogo(
       :src="source"
       :alt="props.name"
       referrerpolicy="no-referrer"
-      class="absolute h-[1em] w-[1.333333em] object-contain"
+      class="absolute inset-0 size-full object-contain"
       @load="onLoad"
       @error="onError"
     />

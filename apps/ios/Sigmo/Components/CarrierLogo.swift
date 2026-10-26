@@ -25,12 +25,12 @@ struct CarrierLogo: View {
         Group {
             if let bitmap = Self.embeddedImage(icon) {
                 Image(uiImage: bitmap).resizable().scaledToFit()
-                    .frame(width: size, height: size * 3 / 4)
+                    .frame(width: size, height: size)
             } else if !AppLaunch.usesFixtures, let url = Self.url(plmn: plmn) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFit()
-                            .frame(width: size, height: size * 3 / 4)
+                            .frame(width: size, height: size)
                     } else { flag }
                 }
                 .id(url)
@@ -39,6 +39,8 @@ struct CarrierLogo: View {
             }
         }
         .frame(width: size, height: size)
+        .background(Color(uiColor: .tertiarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: size / 4, style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(name)
         .accessibilityHidden(name.isEmpty)

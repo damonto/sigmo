@@ -97,14 +97,14 @@ watch(
       <Card class="border-0 py-0 shadow-sm">
         <CardContent class="flex items-center gap-3 p-3">
           <div
-            class="flex size-12 shrink-0 items-center justify-center rounded-md border border-border bg-muted/30"
+            class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-muted/30"
           >
             <CarrierLogo
               :name="profileName"
               :icon="logoUrl"
               :plmn="profilePLMN(props.profile?.profileOwner)"
               :region-code="regionCode"
-              class="size-7 text-base"
+              class="text-base"
             />
           </div>
           <div class="min-w-0">
