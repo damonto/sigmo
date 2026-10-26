@@ -130,13 +130,9 @@ enum PreviewBackends {
         let person = INPerson(personHandle: INPersonHandle(value: number, type: .phoneNumber),
                               nameComponents: nil, displayName: nil, image: nil,
                               contactIdentifier: nil, customIdentifier: nil)
-        if mode == "audio" {
-            calls.requestCallback(INStartAudioCallIntent(contacts: [person]))
-        } else {
-            calls.requestCallback(INStartCallIntent(callRecordFilter: nil, callRecordToCallBack: nil,
-                                                    audioRoute: .unknown, destinationType: .normal,
-                                                    contacts: [person], callCapability: .audioCall))
-        }
+        calls.requestCallback(INStartCallIntent(callRecordFilter: nil, callRecordToCallBack: nil,
+                                                audioRoute: .unknown, destinationType: .normal,
+                                                contacts: [person], callCapability: mode == "dial" ? .unknown : .audioCall))
     }
 }
 

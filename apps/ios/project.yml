@@ -79,7 +79,6 @@ targets:
           - voip
         NSUserActivityTypes:
           - INStartCallIntent
-          - INStartAudioCallIntent
         NSLocalNetworkUsageDescription: Connect to your Sigmo connections and display their devices on your local network.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

@@ -758,15 +758,15 @@ final class CallsTests: XCTestCase {
     func testSystemCallbackAcceptsAudioCallIntents() async throws {
         let (calls, _, _) = try await setup(CallsFixture())
         let person = callbackPerson("+86 (138) 0013-8000")
-        XCTAssertTrue(calls.requestCallback(INStartAudioCallIntent(contacts: [person])))
+        XCTAssertTrue(calls.requestCallback(callbackIntent(contacts: [person])))
         let request = try XCTUnwrap(calls.systemCallback)
         XCTAssertEqual(request.number, "+8613800138000")
-        XCTAssertTrue(calls.requestCallback(callbackIntent(contacts: [person])))
+        XCTAssertTrue(calls.requestCallback(callbackIntent(contacts: [person], capability: .unknown)))
         XCTAssertEqual(calls.systemCallback?.id, request.id)
 
         for contacts in [[], [person, person], [callbackPerson("*123#")],
                          [callbackPerson("user@example.com", type: .emailAddress)]] {
-            XCTAssertFalse(calls.requestCallback(INStartAudioCallIntent(contacts: contacts)))
+            XCTAssertFalse(calls.requestCallback(callbackIntent(contacts: contacts)))
             XCTAssertEqual(calls.systemCallback?.id, request.id)
         }
         XCTAssertFalse(calls.requestCallback(NSUserActivity(activityType: INStartCallIntentIdentifier)))
@@ -775,8 +775,7 @@ final class CallsTests: XCTestCase {
 
     func testSystemCallbackBundleUsesAppActivitiesWithoutSiriExtension() throws {
         let activities = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "NSUserActivityTypes") as? [String])
-        XCTAssertTrue(activities.contains(INStartCallIntentIdentifier))
-        XCTAssertTrue(activities.contains(INStartAudioCallIntentIdentifier))
+        XCTAssertEqual(activities, [INStartCallIntentIdentifier])
         XCTAssertNil(Bundle.main.object(forInfoDictionaryKey: "NSSiriUsageDescription"))
         if let directory = Bundle.main.builtInPlugInsURL {
             let extensions = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
@@ -865,7 +864,7 @@ final class CallsTests: XCTestCase {
         calls.consumeSystemCallback(request)
 
         XCTAssertTrue(calls.requestCallback(intent))
-        XCTAssertTrue(calls.requestCallback(INStartAudioCallIntent(contacts: [person])))
+        XCTAssertTrue(calls.requestCallback(callbackIntent(contacts: [person], capability: .unknown)))
         XCTAssertNil(calls.systemCallback)
         XCTAssertNil(calls.failure)
         let writes = await fixture.count(method: "POST", suffix: "/calls")

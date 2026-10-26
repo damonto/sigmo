@@ -157,20 +157,13 @@ final class CallsState {
 
     @discardableResult
     func requestCallback(_ intent: INIntent) -> Bool {
+        guard let intent = intent as? INStartCallIntent,
+              intent.callCapability != .videoCall else { return false }
         let contacts: [INPerson]
-        switch intent {
-        case let intent as INStartCallIntent:
-            guard intent.callCapability != .videoCall else { return false }
-            if let requested = intent.contacts, !requested.isEmpty {
-                contacts = requested
-            } else {
-                contacts = intent.callRecordToCallBack?.participants ?? []
-            }
-        case let intent as INStartAudioCallIntent:
-            // Phone Recents can still deliver this deprecated intent.
-            contacts = intent.contacts ?? []
-        default:
-            return false
+        if let requested = intent.contacts, !requested.isEmpty {
+            contacts = requested
+        } else {
+            contacts = intent.callRecordToCallBack?.participants ?? []
         }
         return requestCallback(contacts: contacts)
     }

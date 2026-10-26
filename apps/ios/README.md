@@ -34,7 +34,7 @@ Switching to the background lets in-flight requests and eSIM operations finish a
 
 ## Calls from system Recents
 
-Tapping a Sigmo entry in the Phone app's Recents opens Sigmo through a system call activity. Phone Recents can deliver either `INStartCallIntent` or `INStartAudioCallIntent`; the app handles both and uses CallKit to place the call. This entry does not require a Siri extension or Siri voice support.
+Tapping a Sigmo entry in the Phone app's Recents opens Sigmo through an `INStartCallIntent` system call activity. The app accepts audio calls and calls with an unspecified capability, and uses CallKit to place the call. This entry does not require a Siri extension or Siri voice support.
 
 Sigmo restores the backend state before dialing. A verified, unambiguous saved line can dial directly. If the same number has used different backends or SIMs, the app opens the dialer for the user to choose and confirm a line. Unavailable backends, removed modems, and changed or locked SIMs open the appropriate dialer instead of placing a call automatically.
 

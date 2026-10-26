@@ -17,7 +17,6 @@ struct SigmoApp: App {
                 .preferredColorScheme(AppLaunch.colorScheme)
                 // SwiftUI scenes receive system call activities instead of the app delegate.
                 .onContinueUserActivity(INStartCallIntentIdentifier, perform: continueCall)
-                .onContinueUserActivity(INStartAudioCallIntentIdentifier, perform: continueCall)
                 .foregroundTask { await store.refreshAll() }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     AppDiagnostics.record("scene.changed", fields: ["state": phase == .active ? "active" : phase == .background ? "background" : "inactive"])
