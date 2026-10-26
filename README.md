@@ -5,7 +5,7 @@
 
 **Sigmo** is a modern, self-hosted web UI and API for managing cellular modems through QMI and MBIM. It ships as a single binary with an embedded Vue 3 frontend, designed to be lightweight and easy to deploy.
 
-Sigmo focuses on advanced eSIM operations, SMS management, and network control. IMS, eSIM Quick Transfer and official carrier configuration delivery are documented in [CARRIER_CONFIG.md](CARRIER_CONFIG.md).
+Sigmo focuses on advanced eSIM operations, SMS management, and network control.
 
 ## ✨ Features
 
@@ -199,6 +199,23 @@ If you wish to contribute or modify the source:
     ```bash
     docker build -t sigmo:local .
     ```
+
+### Carrier configuration publishing
+
+From the repository root, use a private directory containing `entitlement.json`,
+`wfc.json`, and `ims.json`, and reuse the existing encryption key at
+`scripts/sigmo-keys/config-encryption.raw.b64`. Keep the carrier files and key
+outside version control.
+
+```sh
+cd pro-api
+bun install --frozen-lockfile
+bunx wrangler secret put SIGMO_CONFIG_ENCRYPTION_KEY < ../scripts/sigmo-keys/config-encryption.raw.b64
+cd ..
+scripts/publish-configs.sh /path/to/private/carrier-files --publish
+cd pro-api
+bun run deploy:production
+```
 
 ---
 

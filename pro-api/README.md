@@ -1,8 +1,10 @@
 # Sigmo Pro API
 
 This Worker owns the Telegram device pairing flow, signed Pro leases, release
-metadata, encrypted carrier configurations, and short-lived R2 download tickets. See the [configuration publishing guide](../CARRIER_CONFIG.md) for the storage secret, upload script and rollout order. The R2 bucket must stay
-private: do not enable an `r2.dev` hostname, public bucket access, or a custom
+metadata, encrypted carrier configurations, and short-lived R2 download tickets.
+See [carrier configuration publishing](../README.md#carrier-configuration-publishing)
+for the storage secret, upload script, and deployment commands. The R2 bucket must
+stay private: do not enable an `r2.dev` hostname, public bucket access, or a custom
 domain for it. Binaries are read only through the `BUCKET` Worker
 binding. The Worker keeps a normalized carrier catalog at
 `carrier-logos/catalog.json` and serves proxied PNGs through `/logo/:plmn`.

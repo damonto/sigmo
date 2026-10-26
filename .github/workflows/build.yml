@@ -2,6 +2,14 @@ name: Build and Release Sigmo
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild Dev even when no release files have changed
+        type: boolean
+        default: false
+  schedule:
+    # 00:00 UTC.
+    - cron: "0 0 * * *"
   push:
     branches: [main]
     tags: [v*]
@@ -20,8 +28,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: sigmo-${{ github.event_name == 'pull_request' && github.ref || (github.ref_type == 'tag' && 'stable' || 'dev') }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: sigmo-${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')) && github.ref || (github.ref_type == 'tag' && 'stable' || 'dev') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch') }}
 
 jobs:
   metadata:
@@ -29,18 +37,79 @@ jobs:
     outputs:
       channel: ${{ steps.release.outputs.channel }}
       version: ${{ steps.release.outputs.version }}
+      publish: ${{ steps.release.outputs.publish }}
+      targets: ${{ steps.release.outputs.targets }}
+      should_build: ${{ steps.changes.outputs.should_build }}
     steps:
       - id: release
         run: |
+          publish=false
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             echo "channel=stable" >> "${GITHUB_OUTPUT}"
             echo "version=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
+            publish=true
           else
             echo "channel=dev" >> "${GITHUB_OUTPUT}"
             echo "version=dev-${GITHUB_SHA::8}" >> "${GITHUB_OUTPUT}"
+            if [[ "${GITHUB_EVENT_NAME}" == "schedule" || "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+              publish=true
+            fi
           fi
+          targets='["linux-amd64"]'
+          if [[ "${publish}" == "true" ]]; then
+            targets='["linux-amd64","linux-amd64-musl","linux-arm64","linux-arm64-musl","linux-arm","linux-arm-musl","linux-386","linux-ppc64le","linux-riscv64","linux-s390x"]'
+          fi
+          echo "publish=${publish}" >> "${GITHUB_OUTPUT}"
+          echo "targets=${targets}" >> "${GITHUB_OUTPUT}"
+      - uses: actions/checkout@v7
+        if: steps.release.outputs.channel == 'dev' && steps.release.outputs.publish == 'true' && !inputs.force
+        with: { fetch-depth: 0 }
+      - name: Check changes since the published Dev release
+        id: changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ steps.release.outputs.channel }}
+          PUBLISH: ${{ steps.release.outputs.publish }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          should_build=true
+          if [[ "${CHANNEL}" == "dev" && "${PUBLISH}" == "true" && "${FORCE}" != "true" ]]; then
+            release_file="${RUNNER_TEMP}/dev-release.json"
+            status=$(curl --silent --show-error --output "${release_file}" --write-out '%{http_code}' \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "Accept: application/vnd.github+json" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/tags/dev")
+            case "${status}" in
+              200)
+                # Use the published manifest; the moving tag may precede a failed release.
+                manifest_url=$(jq -er '.assets[] | select(.name == "sigmo-update.json") | .url' "${release_file}")
+                previous_commit=$(gh api --header 'Accept: application/octet-stream' "${manifest_url}" \
+                  | jq -er '.commit | select(test("^[0-9a-f]{40}$"))')
+                if ! git cat-file -e "${previous_commit}^{commit}"; then
+                  git fetch --no-tags origin "${previous_commit}"
+                fi
+                git diff --name-only "${previous_commit}" "${GITHUB_SHA}" -- \
+                  . ':(exclude,glob)**/*.md' ':(exclude,glob)apps/ios/**' ':(exclude,glob)pro-api/**' \
+                  > "${RUNNER_TEMP}/dev-changes.txt"
+                if [[ ! -s "${RUNNER_TEMP}/dev-changes.txt" ]]; then
+                  should_build=false
+                  echo "No release files have changed since ${previous_commit}; skipping Dev release."
+                fi
+                ;;
+              404)
+                echo "No Dev release exists yet; building the first release."
+                ;;
+              *)
+                echo "Cannot check the published Dev release: HTTP ${status}" >&2
+                exit 1
+                ;;
+            esac
+          fi
+          echo "should_build=${should_build}" >> "${GITHUB_OUTPUT}"
 
   frontend:
+    needs: metadata
+    if: needs.metadata.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -59,21 +128,12 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     needs: [metadata, frontend]
+    if: needs.metadata.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - linux-amd64
-          - linux-amd64-musl
-          - linux-arm64
-          - linux-arm64-musl
-          - linux-arm
-          - linux-arm-musl
-          - linux-386
-          - linux-ppc64le
-          - linux-riscv64
-          - linux-s390x
+        target: ${{ fromJSON(needs.metadata.outputs.targets) }}
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
@@ -86,7 +146,7 @@ jobs:
             go.sum
       - name: Build once for target
         env:
-          SIGMO_DISTRIBUTION: ${{ github.event_name == 'pull_request' && 'developer' || 'standalone' }}
+          SIGMO_DISTRIBUTION: ${{ needs.metadata.outputs.publish == 'true' && 'standalone' || 'developer' }}
           SIGMO_BUILD_DIR: build/releases
           SIGMO_TARGETS: ${{ matrix.target }}
           SIGMO_SKIP_FRONTEND_BUILD: "1"
@@ -108,7 +168,7 @@ jobs:
 
   publish:
     permissions: { contents: write }
-    if: github.event_name != 'pull_request'
+    if: needs.metadata.outputs.publish == 'true'
     name: Publish Sigmo ${{ needs.metadata.outputs.channel }}
     needs: [metadata, build]
     runs-on: ubuntu-latest
