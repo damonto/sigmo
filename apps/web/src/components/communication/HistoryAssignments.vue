@@ -1,29 +1,30 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { useHistoryAssignments } from '@/composables/useHistoryAssignments'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from '@/components/ui/dialog'
 import {
   Select,
-  SelectTrigger,
-  SelectValue,
   SelectContent,
   SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/components/ui/select'
+import { useHistoryAssignments } from '@/composables/useHistoryAssignments'
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 const props = defineProps<{ sourceId?: string }>()
 const emit = defineEmits<{ changed: [] }>()
 const { t } = useI18n()
-const { source, target, busy, error, pending, candidates, assign, choose } = useHistoryAssignments(
-  computed(() => props.sourceId),
-  () => emit('changed'),
-)
+const { source, target, busy, error, pending, candidates, canAssign, assign, choose } =
+  useHistoryAssignments(
+    computed(() => props.sourceId),
+    () => emit('changed'),
+  )
 </script>
 <template>
   <div
@@ -72,8 +73,11 @@ const { source, target, busy, error, pending, candidates, assign, choose } = use
       <Select
         v-model="target"
         :disabled="busy"
-        ><SelectTrigger><SelectValue :placeholder="t('communication.chooseLine')" /></SelectTrigger
-        ><SelectContent
+      >
+        <SelectTrigger class="w-full">
+          <SelectValue :placeholder="t('communication.chooseLine')"
+        /></SelectTrigger>
+        <SelectContent
           ><SelectItem
             v-for="line in candidates"
             :key="line.profileId"
@@ -91,7 +95,7 @@ const { source, target, busy, error, pending, candidates, assign, choose } = use
           @click="source = undefined"
           >{{ t('communication.later') }}</Button
         ><Button
-          :disabled="busy || !target"
+          :disabled="busy || !canAssign"
           @click="assign"
           >{{ t('communication.assign') }}</Button
         >

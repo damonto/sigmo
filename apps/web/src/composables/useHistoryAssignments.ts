@@ -13,11 +13,18 @@ export const useHistoryAssignments = (
   const busy = ref(false)
   const error = ref('')
   const pending = computed(() => lines.value.filter((line) => line.deletionState === 'deleted'))
-  const candidates = computed(() =>
-    lines.value.filter(
-      (line) => line.present && !line.deletionState && line.profileId !== source.value?.profileId,
-    ),
-  )
+  const candidates = computed(() => {
+    const sourceLine = source.value
+    if (!sourceLine?.modemId || sourceLine.deletionState !== 'deleted') return []
+    return lines.value.filter(
+      (line) =>
+        line.modemId === sourceLine.modemId &&
+        line.present &&
+        !line.deletionState &&
+        line.profileId !== sourceLine.profileId,
+    )
+  })
+  const canAssign = computed(() => candidates.value.some((line) => line.profileId === target.value))
   const load = async (cached = false) => {
     lines.value = (await communicationApi.lines(cached)).items
   }
@@ -40,7 +47,7 @@ export const useHistoryAssignments = (
     { immediate: true },
   )
   const assign = async () => {
-    if (!source.value || !target.value) return
+    if (!source.value || !canAssign.value) return
     busy.value = true
     error.value = ''
     try {
@@ -67,5 +74,5 @@ export const useHistoryAssignments = (
       busy.value = false
     }
   }
-  return { choose, source, target, busy, error, pending, candidates, assign }
+  return { choose, source, target, busy, error, pending, candidates, canAssign, assign }
 }
