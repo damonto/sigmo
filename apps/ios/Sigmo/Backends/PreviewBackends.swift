@@ -23,7 +23,8 @@ enum PreviewBackends {
                     contactName: configuration.id == studioID ? "Studio Contact" : "Alice",
                     includesHistory: ["communication-history", "communication-multiple"].contains(scenario),
                     modemContacts: scenario == "communication-modem",
-                    modemNames: modemNames
+                    modemNames: modemNames,
+                    historyAssignment: CommunicationFixture.HistoryAssignmentScenario(rawValue: scenario)
                 )
                 return BackendAPI(configuration: configuration, transport: { try await fixture.respond($0) })
             }

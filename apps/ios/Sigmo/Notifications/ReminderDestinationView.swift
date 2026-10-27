@@ -35,7 +35,9 @@ struct ReminderDestinationView: View {
                 }
             }
             .detailErrorAlert(state.failure ?? state.profilesFailure)
-            .foregroundTask {
+            .foregroundTask(id: session.hasLoadedModems) {
+                // Detail refreshes update devices already in the session inventory.
+                guard session.hasLoadedModems else { return }
                 await state.load()
                 guard !Task.isCancelled else { return }
                 if resolvedProfileID == nil, profileType == "esim", state.currentProfile(seID + ":" + profileID) != nil {

@@ -140,7 +140,9 @@ struct CommunicationWorkspace: View {
             backendStatus
             if section != .contacts {
                 ForEach(state.availableSources, id: \.session.id) { source in
-                    HistoryAssignmentSection(session: source.session, showsBackend: state.sources.count > 1)
+                    HistoryAssignmentSection(session: source.session, lines: source.lines, showsBackend: state.sources.count > 1) {
+                        await source.load(force: true)
+                    }
                 }
             }
             switch section {
