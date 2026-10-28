@@ -26,7 +26,7 @@ struct HomeView: View {
 
     init() {
         #if DEBUG
-        if ProcessInfo.processInfo.environment["SIGMO_UI_SCENARIO"] == "detail-reminder" {
+        if ["detail-reminder", "detail-reminder-empty-history"].contains(ProcessInfo.processInfo.environment["SIGMO_UI_SCENARIO"] ?? "") {
             _path = State(initialValue: [.reminder(PreviewBackends.homeID, "device-1", "8986000000000000002", "esim", "se-a")])
         }
         #endif

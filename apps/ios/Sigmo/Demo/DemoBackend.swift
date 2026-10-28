@@ -180,6 +180,10 @@ actor DemoBackend {
         var labels = Dictionary(profiles.map { ($0.iccid, $0.name) }, uniquingKeysWith: { first, _ in first })
         labels[modem.sim.identifier] = labels[modem.sim.identifier] ?? "Demo SIM"
         for message in messages where labels[message.historyProfileId] == nil { labels[message.historyProfileId] = "History" }
+        for call in calls {
+            guard let profile = call.historyProfileId, !profile.isEmpty, labels[profile] == nil else { continue }
+            labels[profile] = "History"
+        }
         return labels.keys.sorted().map { profile in
             let active = profile == modem.sim.identifier
             let present = active || (!physical && profiles.contains { $0.iccid == profile })

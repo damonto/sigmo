@@ -1,21 +1,31 @@
 import { computed, ref, watch, type Ref } from 'vue'
 import { communicationApi } from '@/apis/communication'
+import { sessionRevision } from '@/lib/authSession'
 import type { SIMLine } from '@/types/communication'
 
-/** Retries only the database handover after hardware deletion has completed. */
+type AssignmentPhase = 'idle' | 'loading' | 'ready' | 'assigning'
+
+const hasAssignableHistory = (line: SIMLine) =>
+  line.deletionState === 'deleted' && (line.messageCount > 0 || line.callCount > 0)
+
+/** Manages deleted-line history with freshly verified replacement candidates. */
 export const useHistoryAssignments = (
-  sourceID: Readonly<Ref<string | undefined>>,
+  sourceId: Readonly<Ref<string | undefined>>,
   changed: () => void,
 ) => {
   const lines = ref<SIMLine[]>([])
   const source = ref<SIMLine>()
   const target = ref('')
-  const busy = ref(false)
+  const phase = ref<AssignmentPhase>('idle')
+  const busy = computed(() => phase.value === 'assigning')
+  const loading = computed(() => phase.value === 'loading')
   const error = ref('')
-  const pending = computed(() => lines.value.filter((line) => line.deletionState === 'deleted'))
+  let generation = 0
+  const pending = computed(() => lines.value.filter(hasAssignableHistory))
   const candidates = computed(() => {
+    if (phase.value !== 'ready' && phase.value !== 'assigning') return []
     const sourceLine = source.value
-    if (!sourceLine?.modemId || sourceLine.deletionState !== 'deleted') return []
+    if (!sourceLine?.modemId || !hasAssignableHistory(sourceLine)) return []
     return lines.value.filter(
       (line) =>
         line.modemId === sourceLine.modemId &&
@@ -24,55 +34,105 @@ export const useHistoryAssignments = (
         line.profileId !== sourceLine.profileId,
     )
   })
-  const canAssign = computed(() => candidates.value.some((line) => line.profileId === target.value))
-  const load = async (cached = false) => {
-    lines.value = (await communicationApi.lines(cached)).items
+  const canAssign = computed(
+    () =>
+      phase.value === 'ready' && candidates.value.some((line) => line.profileId === target.value),
+  )
+  const reset = () => {
+    generation++
+    source.value = undefined
+    target.value = ''
+    error.value = ''
+    phase.value = 'idle'
+  }
+  const close = () => {
+    if (!busy.value) reset()
+  }
+  const choose = async (line: SIMLine) => {
+    if (busy.value || !hasAssignableHistory(line)) return
+    const current = ++generation
+    source.value = line
+    target.value = ''
+    error.value = ''
+    phase.value = 'loading'
+    try {
+      const response = await communicationApi.lines(false)
+      if (current !== generation) return
+      lines.value = response.items
+      const latest = pending.value.find((entry) => entry.profileId === line.profileId)
+      if (!latest) {
+        close()
+        return
+      }
+      source.value = latest
+      phase.value = 'ready'
+    } catch (reason) {
+      if (current !== generation) return
+      error.value = reason instanceof Error ? reason.message : String(reason)
+      phase.value = 'idle'
+    }
+  }
+  const retry = () => {
+    if (source.value) return choose(source.value)
   }
   watch(
-    sourceID,
-    async (id, _, cleanup) => {
-      let cancelled = false
+    [sourceId, sessionRevision],
+    async ([id, revision], previous, cleanup) => {
+      reset()
+      const current = generation
       cleanup(() => {
-        cancelled = true
+        generation++
       })
+      lines.value = []
       try {
-        const response = await communicationApi.lines(!id)
-        if (cancelled) return
+        // Deletion already updated the database; opening the dialog must not wait for hardware.
+        const response = await communicationApi.lines(true)
+        if (current !== generation) return
         lines.value = response.items
-        if (id) source.value = lines.value.find((line) => line.profileId === id)
+        const changedSession = previous[1] !== undefined && previous[1] !== revision
+        const deleted = changedSession
+          ? undefined
+          : pending.value.find((line) => line.profileId === id)
+        if (deleted) await choose(deleted)
       } catch (reason) {
-        if (!cancelled) error.value = reason instanceof Error ? reason.message : String(reason)
+        if (current === generation)
+          error.value = reason instanceof Error ? reason.message : String(reason)
       }
     },
-    { immediate: true },
+    { immediate: true, flush: 'sync' },
   )
   const assign = async () => {
     if (!source.value || !canAssign.value) return
-    busy.value = true
+    const current = generation
+    phase.value = 'assigning'
     error.value = ''
     try {
       await communicationApi.assign(source.value.profileId, target.value)
+      if (current !== generation) return
       source.value = undefined
       target.value = ''
-      await load(true)
       changed()
+      const response = await communicationApi.lines(true)
+      if (current === generation) lines.value = response.items
     } catch (reason) {
-      error.value = reason instanceof Error ? reason.message : String(reason)
+      if (current === generation)
+        error.value = reason instanceof Error ? reason.message : String(reason)
     } finally {
-      busy.value = false
+      if (current === generation) phase.value = source.value ? 'ready' : 'idle'
     }
   }
-  const choose = async (line: SIMLine) => {
-    source.value = line
-    target.value = ''
-    busy.value = true
-    try {
-      await load()
-    } catch (reason) {
-      error.value = reason instanceof Error ? reason.message : String(reason)
-    } finally {
-      busy.value = false
-    }
+  return {
+    choose,
+    close,
+    retry,
+    source,
+    target,
+    busy,
+    loading,
+    error,
+    pending,
+    candidates,
+    canAssign,
+    assign,
   }
-  return { choose, source, target, busy, error, pending, candidates, canAssign, assign }
 }

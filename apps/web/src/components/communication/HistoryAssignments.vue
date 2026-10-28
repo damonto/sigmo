@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -15,20 +18,36 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useHistoryAssignments } from '@/composables/useHistoryAssignments'
-import { computed } from 'vue'
-import { useI18n } from 'vue-i18n'
+
 const props = defineProps<{ sourceId?: string }>()
 const emit = defineEmits<{ changed: [] }>()
 const { t } = useI18n()
-const { source, target, busy, error, pending, candidates, canAssign, assign, choose } =
-  useHistoryAssignments(
-    computed(() => props.sourceId),
-    () => emit('changed'),
-  )
+const {
+  source,
+  target,
+  busy,
+  loading,
+  error,
+  pending,
+  candidates,
+  canAssign,
+  assign,
+  choose,
+  close,
+  retry,
+} = useHistoryAssignments(
+  computed(() => props.sourceId),
+  () => emit('changed'),
+)
+
+const handleOpenChange = (open: boolean) => {
+  if (!open) close()
+}
 </script>
+
 <template>
   <div
-    v-if="pending.length"
+    v-if="!props.sourceId && pending.length"
     class="rounded-2xl border bg-muted/40 p-4"
   >
     <p class="font-medium">{{ t('communication.deletedLines') }}</p>
@@ -36,12 +55,14 @@ const { source, target, busy, error, pending, candidates, canAssign, assign, cho
       v-for="line in pending"
       :key="line.profileId"
       variant="link"
+      :disabled="busy"
       @click="choose(line)"
-      >{{ line.number || line.label || line.profileId }} · {{ t('communication.assign') }}</Button
     >
+      {{ line.number || line.label || line.profileId }} · {{ t('communication.assign') }}
+    </Button>
   </div>
   <p
-    v-if="error"
+    v-if="error && !source"
     role="alert"
     class="text-sm text-destructive"
   >
@@ -49,18 +70,13 @@ const { source, target, busy, error, pending, candidates, canAssign, assign, cho
   </p>
   <Dialog
     :open="!!source"
-    @update:open="
-      (open: boolean) => {
-        if (!open && !busy) source = undefined
-      }
-    "
-    ><DialogContent
-      ><DialogHeader
-        ><DialogTitle>{{ t('communication.assign') }}</DialogTitle
-        ><DialogDescription>{{
-          t('communication.assignDescription')
-        }}</DialogDescription></DialogHeader
-      >
+    @update:open="handleOpenChange"
+  >
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>{{ t('communication.assign') }}</DialogTitle>
+        <DialogDescription>{{ t('communication.assignDescription') }}</DialogDescription>
+      </DialogHeader>
       <p>{{ source?.number || source?.label || source?.profileId }}</p>
       <p class="text-sm text-muted-foreground">
         {{
@@ -72,34 +88,60 @@ const { source, target, busy, error, pending, candidates, canAssign, assign, cho
       </p>
       <Select
         v-model="target"
-        :disabled="busy"
+        :disabled="busy || loading"
       >
         <SelectTrigger class="w-full">
-          <SelectValue :placeholder="t('communication.chooseLine')"
-        /></SelectTrigger>
-        <SelectContent
-          ><SelectItem
+          <SelectValue :placeholder="t('communication.chooseLine')" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem
             v-for="line in candidates"
             :key="line.profileId"
             :value="line.profileId"
-            >{{ line.number || line.label || line.profileId }} · {{ line.modemId }}
-            {{ line.active ? '' : t('communication.inactive') }}</SelectItem
-          ></SelectContent
-        ></Select
+          >
+            {{ line.number || line.label || line.profileId }} · {{ line.modemId }}
+            {{ line.active ? '' : t('communication.inactive') }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      <p
+        v-if="loading || busy"
+        role="status"
+        class="text-sm text-muted-foreground"
       >
-      <p v-if="!candidates.length">{{ t('communication.noLines') }}</p>
+        {{ t('communication.loading') }}
+      </p>
+      <p v-else-if="!error && !candidates.length">{{ t('communication.noLines') }}</p>
+      <div v-if="error">
+        <p
+          role="alert"
+          class="text-sm text-destructive"
+        >
+          {{ error }}
+        </p>
+        <Button
+          variant="outline"
+          :disabled="busy || loading"
+          @click="retry"
+        >
+          {{ t('communication.retry') }}
+        </Button>
+      </div>
       <div class="flex justify-end gap-2">
         <Button
           variant="outline"
           :disabled="busy"
-          @click="source = undefined"
-          >{{ t('communication.later') }}</Button
-        ><Button
-          :disabled="busy || !canAssign"
-          @click="assign"
-          >{{ t('communication.assign') }}</Button
+          @click="close"
         >
+          {{ t('communication.later') }}
+        </Button>
+        <Button
+          :disabled="!canAssign"
+          @click="assign"
+        >
+          {{ t('communication.assign') }}
+        </Button>
       </div>
-    </DialogContent></Dialog
-  >
+    </DialogContent>
+  </Dialog>
 </template>

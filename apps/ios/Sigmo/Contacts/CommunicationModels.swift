@@ -25,6 +25,7 @@ struct CommunicationLine: Codable, Hashable, Identifiable, Sendable {
     var id: String { profileId }
     var displayLabel: String { label.isEmpty ? (number.isEmpty ? profileId : number) : label }
     var deleted: Bool { deletionState == "deleted" || deletionState == "assigned" }
+    var hasAssignableHistory: Bool { deletionState == "deleted" && (messageCount > 0 || callCount > 0) }
     var title: String {
         let source = "\(number.isEmpty ? (label.isEmpty ? profileId : label) : number) · \(modemId)"
         return deleted ? "\(source) · \(detailText("communication.deletedNumber"))" : source

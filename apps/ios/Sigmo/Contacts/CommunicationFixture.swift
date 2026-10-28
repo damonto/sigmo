@@ -8,6 +8,7 @@ actor CommunicationFixture {
         case single = "communication-assignment-1"
         case multiple = "communication-assignment-2"
         case retry = "communication-assignment-retry"
+        case noHistory = "communication-assignment-no-history"
     }
 
     private let devices: DetailFixtureServer
@@ -34,7 +35,9 @@ actor CommunicationFixture {
         if let historyAssignment {
             failAssignmentRead = historyAssignment == .retry
             lines = [
-                Self.line("deleted", available: false, label: "Travel", deletionState: "deleted", present: false),
+                Self.line("deleted", available: false, label: "Travel", deletionState: "deleted", present: false,
+                          messageCount: historyAssignment == .noHistory ? 0 : 2),
+                Self.line("empty-deleted", available: false, deletionState: "deleted", present: false),
                 Self.line("foreign", modemID: "device-2", label: "Other Modem Line")
             ]
             if historyAssignment != .empty { lines.append(Self.line("work", label: "Work")) }
@@ -137,8 +140,8 @@ actor CommunicationFixture {
         if path.hasSuffix("/message-threads") || path.hasSuffix("/calls") { return raw(#"{"items":[],"nextCursor":""}"#) }
         return try await devices.respond(request)
     }
-    static func line(_ id: String, available: Bool = true, modemID: String = "device-1", label: String? = nil, deletionState: String = "", present: Bool = true) -> CommunicationLine {
-        CommunicationLine(profileId: id, modemId: modemID, label: label ?? id, number: "+14155550000", region: "US", kind: "esim", seId: "se-a", deletionState: deletionState, successorId: "", messageCount: 0, callCount: 0, present: present, active: available, canMessage: available, canCall: available)
+    static func line(_ id: String, available: Bool = true, modemID: String = "device-1", label: String? = nil, deletionState: String = "", present: Bool = true, messageCount: Int = 0, callCount: Int = 0) -> CommunicationLine {
+        CommunicationLine(profileId: id, modemId: modemID, label: label ?? id, number: "+14155550000", region: "US", kind: "esim", seId: "se-a", deletionState: deletionState, successorId: "", messageCount: messageCount, callCount: callCount, present: present, active: available, canMessage: available, canCall: available)
     }
     private func raw(_ text: String) -> BackendHTTPResponse { .init(data: Data(text.utf8), status: 200) }
     private func reply<Value: Encodable>(_ value: Value) throws -> BackendHTTPResponse { .init(data: try JSONEncoder().encode(value), status: 200) }

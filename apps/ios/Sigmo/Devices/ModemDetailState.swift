@@ -161,6 +161,7 @@ final class ModemDetailState {
     }
 
     func mutate(reconciliation: ModemReconciliation = .inventory, target: ModemSIMTarget? = nil,
+                afterWrite: (@MainActor () async -> Void)? = nil,
                 _ operation: @escaping @Sendable (BackendAPI, String?) async throws -> Void) async -> Bool {
         guard !busy, !Task.isCancelled, session.canAccessDevices else { return false }
         guard target == nil || target == simTarget else { return false }
@@ -183,7 +184,11 @@ final class ModemDetailState {
             }
             guard current == revision, !Task.isCancelled else { return false }
             await session.invalidateModemReads(modemID)
+            guard current == revision, !Task.isCancelled else { return false }
             session.invalidateCommunicationLines()
+            // Publish follow-up UI before the snapshot refresh, under the same write lock.
+            await afterWrite?()
+            guard current == revision, !Task.isCancelled else { return false }
             // Keep the write locked until its authoritative snapshot has been reconciled.
             await loadSnapshot(current, reconciliation: reconciliation)
             guard current == revision, !Task.isCancelled else { return false }
@@ -223,17 +228,40 @@ final class ModemDetailState {
     func delete(_ profile: ESIMProfile) async -> Bool {
         guard let profile = currentProfile(profile.id), !profile.enabled else { return false }
         let id = modemID
-        let deleted = await mutate { api, token in
+        let deleted = await mutate(afterWrite: {
+            self.removeProfile(profile)
+            await self.prepareHistoryAssignment(for: profile.iccid)
+        }) { api, token in
             try await api.detailMutation(id, path: ["ses", profile.seId, "esims", profile.iccid], method: "DELETE", token: token)
         }
         guard deleted else { return false }
-        deletedHistoryProfileID = profile.iccid
-        // DELETE already confirmed removal, even if the following snapshot refresh failed.
+        // A stale inventory response cannot undo the confirmed deletion.
+        removeProfile(profile)
+        return true
+    }
+
+    private func removeProfile(_ profile: ESIMProfile) {
         for index in groups.indices {
             groups[index].profiles.removeAll { $0.id == profile.id }
         }
-        return true
     }
+
+    private func prepareHistoryAssignment(for profileID: String) async {
+        let current = revision
+        deletedHistoryProfileID = nil
+        guard session.capabilities?.contains("historyAssignments") == true else { return }
+        do {
+            // The deletion response is authoritative; history lookup must not wait for hardware refresh.
+            let lines = try await session.communicationLines()
+            guard current == revision, !Task.isCancelled, session.canAccessDevices else { return }
+            deletedHistoryProfileID = lines.first { $0.id == profileID && $0.hasAssignableHistory }?.id
+        } catch {
+            guard current == revision, !Task.isCancelled else { return }
+            // History can still be assigned from Messages or Calls after a metadata read failure.
+            AppDiagnostics.record(BackendFailure.wrapping(error), category: "communication", operation: "history.load", backendID: session.id)
+        }
+    }
+
     static func validNickname(_ value: String) -> Bool {
         let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return !name.isEmpty && name.utf8.count <= 64

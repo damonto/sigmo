@@ -502,7 +502,7 @@ final class ModemDetailTests: XCTestCase {
         let removed = await detail.delete(detail.groups[1].profiles[0])
         XCTAssertTrue(removed)
         XCTAssertTrue(detail.groups[1].profiles.isEmpty)
-        XCTAssertEqual(detail.deletedHistoryProfileID, "8986000000000000002")
+        XCTAssertNil(detail.deletedHistoryProfileID)
         let requests = await server.allRequests()
         let rename = try XCTUnwrap(requests.first { $0.url?.path.hasSuffix("/nickname") == true })
         XCTAssertEqual(rename.httpMethod, "PUT")
@@ -534,6 +534,83 @@ final class ModemDetailTests: XCTestCase {
             let updatedCount = await server.allRequests().count
             XCTAssertEqual(updatedCount, count)
         }
+    }
+
+    func testDeletionChecksFreshHistoryBeforePresentingAssignment() async throws {
+        for counts in [(messages: 0, calls: 0), (messages: 1, calls: 0), (messages: 0, calls: 1)] {
+            let server = DetailFixtureServer()
+            let detail = try await make(server)
+            let profile = detail.groups[0].profiles[1]
+            await server.setCommunicationLines([
+                CommunicationFixture.line(profile.iccid, available: false, messageCount: counts.messages, callCount: counts.calls)
+            ])
+            // Prime the cache with the live source; deletion must invalidate it before checking history.
+            _ = try await detail.session.communicationLines()
+
+            let deleted = await detail.delete(profile)
+
+            XCTAssertTrue(deleted)
+            XCTAssertNil(detail.currentProfile(profile.id))
+            XCTAssertEqual(detail.deletedHistoryProfileID, counts.messages + counts.calls > 0 ? profile.iccid : nil)
+            let reads = await server.allRequests().filter { $0.url?.path.hasSuffix("/sim-profiles") == true }
+            XCTAssertEqual(reads.count, 2)
+            XCTAssertTrue(reads.allSatisfy { $0.url?.query == "cached=true" })
+        }
+    }
+
+    func testHistoryAssignmentOpensBeforeHardwareRefreshCompletes() async throws {
+        let server = DetailFixtureServer(includesHistory: true)
+        let detail = try await make(server)
+        let profile = detail.groups[0].profiles[1]
+        let other = detail.groups[1].profiles[0]
+        await server.holdNext("/esims")
+        let deletion = Task { await detail.delete(profile) }
+        await server.waitForHeldRequest()
+
+        XCTAssertEqual(detail.deletedHistoryProfileID, profile.iccid)
+        XCTAssertNil(detail.currentProfile(profile.id))
+        XCTAssertTrue(detail.busy)
+        let duplicate = await detail.rename(other, name: "Changed")
+        XCTAssertFalse(duplicate)
+
+        await server.release()
+        let deleted = await deletion.value
+        XCTAssertTrue(deleted)
+        XCTAssertFalse(detail.busy)
+        XCTAssertEqual(detail.deletedHistoryProfileID, profile.iccid)
+    }
+
+    func testHistoryReadFailureDoesNotRetryConfirmedDeletion() async throws {
+        let server = DetailFixtureServer(includesHistory: true)
+        let detail = try await make(server)
+        let profile = detail.groups[0].profiles[1]
+        await server.setStatus("/sim-profiles", 503)
+
+        let deleted = await detail.delete(profile)
+
+        XCTAssertTrue(deleted)
+        XCTAssertNil(detail.currentProfile(profile.id))
+        XCTAssertNil(detail.deletedHistoryProfileID)
+        let writes = await server.allRequests().filter { $0.httpMethod == "DELETE" }
+        XCTAssertEqual(writes.count, 1)
+    }
+
+    func testLateHistoryReadCannotPresentAssignmentAfterClearingDevice() async throws {
+        let server = DetailFixtureServer(includesHistory: true)
+        let detail = try await make(server)
+        let profile = detail.groups[0].profiles[1]
+        await server.holdNext("/sim-profiles")
+        let deletion = Task { await detail.delete(profile) }
+        await server.waitForHeldRequest()
+
+        detail.clear()
+        await server.release()
+        let deleted = await deletion.value
+
+        XCTAssertFalse(deleted)
+        XCTAssertNil(detail.deletedHistoryProfileID)
+        XCTAssertTrue(detail.groups.isEmpty)
+        XCTAssertFalse(detail.busy)
     }
 
     func testDeletingProfileBlocksMutationsAndFailureAllowsRetry() async throws {

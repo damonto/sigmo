@@ -82,6 +82,38 @@ final class DemoTests: XCTestCase {
         XCTAssertEqual(session.modems.first?.sim.identifier, travel.iccid)
     }
 
+    func testDeletedLineWithOnlyCallHistoryRemainsAssignable() async throws {
+        let (_, session) = try await makeDemo()
+        let detail = ModemDetailState(session: session, modemID: "device-1")
+        await detail.load()
+        let original = try XCTUnwrap(detail.groups.flatMap(\.profiles).first { $0.enabled })
+        let replacement = try XCTUnwrap(detail.groups.flatMap(\.profiles).first { !$0.enabled })
+        let threads = try await session.protectedRequest { api, token in
+            try await api.messageThreads(search: "", cursor: "", token: token)
+        }
+        for thread in threads.items where thread.latestMessage.profileId == original.iccid {
+            try await session.protectedRequest { api, token in try await api.deleteThread(thread.id, token: token) }
+        }
+        let enabled = await detail.enable(replacement)
+        XCTAssertTrue(enabled)
+        let deleted = await detail.delete(original)
+        XCTAssertTrue(deleted)
+        XCTAssertEqual(detail.deletedHistoryProfileID, original.iccid)
+
+        let assignment = HistoryAssignmentState(session: session, sourceID: original.iccid)
+        await assignment.load()
+        XCTAssertEqual(assignment.source?.messageCount, 0)
+        XCTAssertEqual(assignment.source?.callCount, 2)
+        XCTAssertTrue(assignment.canSubmit)
+        let assigned = await assignment.assign()
+        XCTAssertTrue(assigned)
+        let calls = try await session.protectedRequest { api, token in
+            try await api.callHistory(search: "", cursor: "", token: token)
+        }
+        XCTAssertEqual(calls.items.count, 2)
+        XCTAssertTrue(calls.items.allSatisfy { $0.profileId == original.iccid && $0.historyProfileId == replacement.iccid })
+    }
+
     func testDownloadSocketMutatesProfilesAndStopsOnExit() async throws {
         let (demo, session) = try await makeDemo()
         let socket = try await session.protectedRequest { api, token in

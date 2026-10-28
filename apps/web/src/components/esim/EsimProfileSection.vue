@@ -237,6 +237,7 @@ const handleRenameOpenChange = (open: boolean) => {
 
 const openDeleteDialog = (profile: EsimProfile) => {
   if (profile.enabled) return
+  historySource.value = ''
   deleteOpen.value = true
   deleteProfile.value = profile
 }
@@ -249,12 +250,13 @@ const closeDeleteDialog = () => {
 
 const confirmDelete = async (event?: Event) => {
   event?.preventDefault()
-  if (!deleteProfile.value) return
+  const profile = deleteProfile.value
+  if (!profile) return
   deleteLoading.value = true
   try {
-    await esimApi.deleteEsim(props.modemId, deleteProfile.value.seId, deleteProfile.value.iccid)
-    historySource.value = deleteProfile.value.iccid
-    profiles.value = profiles.value.filter((profile) => profile.id !== deleteProfile.value?.id)
+    await esimApi.deleteEsim(props.modemId, profile.seId, profile.iccid)
+    historySource.value = profile.iccid
+    profiles.value = profiles.value.filter((entry) => entry.id !== profile.id)
     closeDeleteDialog()
   } catch (err) {
     console.error('[EsimProfileSection] Failed to delete profile:', err)

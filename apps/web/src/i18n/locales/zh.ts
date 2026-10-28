@@ -108,6 +108,7 @@ const zh = {
     historyCounts: '{messages} 条短信 · {calls} 条通话',
     inactive: '（未启用）',
     later: '稍后处理',
+    retry: '重试',
     search: '搜索姓名、号码或短信',
     emptyMessages: '暂无短信。',
     emptyCalls: '暂无通话记录。',

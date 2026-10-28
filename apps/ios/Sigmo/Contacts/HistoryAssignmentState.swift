@@ -23,7 +23,7 @@ final class HistoryAssignmentState {
     }
 
     var source: CommunicationLine? {
-        lines.first { $0.id == sourceID && $0.deletionState == "deleted" && !$0.modemId.isEmpty }
+        lines.first { $0.id == sourceID && $0.hasAssignableHistory && !$0.modemId.isEmpty }
     }
     var candidates: [CommunicationLine] {
         guard let source else { return [] }

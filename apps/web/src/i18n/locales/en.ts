@@ -113,6 +113,7 @@ const en = {
     historyCounts: '{messages} messages · {calls} calls',
     inactive: '(inactive)',
     later: 'Later',
+    retry: 'Retry',
     search: 'Search names, numbers or messages',
     emptyMessages: 'No messages yet.',
     emptyCalls: 'No calls yet.',

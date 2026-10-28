@@ -12,7 +12,7 @@ final class ModemDetailFlowTests: XCTestCase {
         app.launchEnvironment["SIGMO_UI_APPEARANCE"] = dark ? "dark" : "light"
         app.launchArguments = ["-AppleLanguages", chinese ? "(zh-Hans)" : "(en)", "-AppleLocale", chinese ? "zh_CN" : "en_US", "-UIPreferredContentSizeCategoryName", large ? "UICTContentSizeCategoryAccessibilityXXXL" : "UICTContentSizeCategoryL"]
         app.launch()
-        if scenario == "detail-reminder" { return app }
+        if scenario.hasPrefix("detail-reminder") { return app }
         let modem = app.descendants(matching: .any)["modem-00000000-0000-0000-0000-000000000001-device-1"].firstMatch
         XCTAssertTrue(modem.waitForExistence(timeout: 10)); modem.tap()
         return app
@@ -116,6 +116,16 @@ final class ModemDetailFlowTests: XCTestCase {
         app.buttons["historyAssignmentLater"].tap()
         XCTAssertTrue(assignment.waitForNonExistence(timeout: 5))
         XCTAssertTrue(app.buttons["manageBackends"].waitForExistence(timeout: 5))
+    }
+
+    func testDeletingReminderProfileWithoutHistoryReturnsWithoutAssignment() {
+        let app = launch("detail-reminder-empty-history")
+        XCTAssertTrue(app.switches["profileEnabled-se-a:8986000000000000002"].waitForExistence(timeout: 10))
+        tap(app.buttons["Delete eSIM"], in: app)
+        tap(app.alerts.buttons["confirmDetailAction"].firstMatch, in: app)
+
+        XCTAssertTrue(app.buttons["manageBackends"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.buttons["historyAssignmentLater"].exists)
     }
 
     func testContactsKeepsDeviceNavigation() {
@@ -899,12 +909,9 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue(app.alerts.staticTexts["This cannot be undone."].exists)
         screenshot(app, name: "Delete eSIM confirmation")
         tap(app.buttons["confirmDetailAction"].firstMatch, in: app)
-        let later = app.buttons["historyAssignmentLater"]
-        XCTAssertTrue(later.waitForExistence(timeout: 5))
-        later.tap()
-        XCTAssertTrue(later.waitForNonExistence(timeout: 5))
         let deleted = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["profileActions-se-b:8986000000000000002"])
         XCTAssertEqual(XCTWaiter.wait(for: [deleted], timeout: 5), .completed, app.debugDescription)
+        XCTAssertFalse(app.buttons["historyAssignmentLater"].exists)
         XCTAssertTrue(app.buttons["profileActions-se-a:8986000000000000002"].exists)
     }
 
@@ -1003,15 +1010,25 @@ final class ModemDetailFlowTests: XCTestCase {
             XCTAssertTrue(other.isEnabled)
             XCTAssertTrue(other.label.contains(chinese ? "关闭" : "Off"), other.label)
 
-            let later = app.buttons["historyAssignmentLater"]
-            XCTAssertTrue(later.waitForExistence(timeout: 12))
-            later.tap()
-            XCTAssertTrue(later.waitForNonExistence(timeout: 5))
-            XCTAssertTrue(row.waitForNonExistence(timeout: 5))
+            XCTAssertTrue(row.waitForNonExistence(timeout: 12))
+            XCTAssertFalse(app.buttons["historyAssignmentLater"].exists)
             XCTAssertTrue(other.exists)
             XCTAssertFalse(app.alerts.firstMatch.exists)
             app.terminate()
         }
+    }
+
+    func testDeletionWithHistoryPresentsAssignment() {
+        let app = launch("detail-deletion-history")
+        openActions(app)
+        tap(app.buttons["Delete eSIM"], in: app)
+        tap(app.alerts.buttons["confirmDetailAction"].firstMatch, in: app)
+
+        let later = app.buttons["historyAssignmentLater"]
+        XCTAssertTrue(later.waitForExistence(timeout: 5), app.debugDescription)
+        later.tap()
+        XCTAssertTrue(later.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["profileActions-se-a:8986000000000000002"].waitForNonExistence(timeout: 5))
     }
 
     func testExplicitRefreshReloadsProfileSnapshot() {

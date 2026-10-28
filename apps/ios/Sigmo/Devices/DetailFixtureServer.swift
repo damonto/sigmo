@@ -61,6 +61,7 @@ actor DetailFixtureServer {
     private var number = "+8613800000000"
     private var physicalReminder: SIMReminder?
     private var groups: [ESIMProfileGroup]
+    private var communicationLines: [CommunicationLine] = []
     private var notifications: [ESIMNotificationGroup]
     private var activeSE = "se-a"
     private var connections: [String: ConnectionFixture] = [:]
@@ -85,7 +86,7 @@ actor DetailFixtureServer {
     var requireConfirmation = true
 
     init(physical: Bool = false, locked: Bool = false, scenario: Scenario = .standard, number: String = "+8613800000000",
-         initialConnection: ConnectionFixture = ConnectionFixture(), modemNames: [String: String] = [:]) {
+         initialConnection: ConnectionFixture = ConnectionFixture(), modemNames: [String: String] = [:], includesHistory: Bool = false) {
         self.number = number
         self.physical = physical; self.locked = locked
         self.scenario = scenario
@@ -150,6 +151,14 @@ actor DetailFixtureServer {
         default: break
         }
         connections["device-1"] = connection
+        if includesHistory {
+            communicationLines = groups[0].profiles.map { profile in
+                CommunicationLine(profileId: profile.iccid, modemId: "device-1", label: profile.name, number: profile.number ?? "",
+                                  region: "CN", kind: "esim", seId: profile.seId, deletionState: "", successorId: "",
+                                  messageCount: profile.enabled ? 0 : 2, callCount: 0, present: true,
+                                  active: profile.enabled, canMessage: profile.enabled, canCall: profile.enabled)
+            }
+        }
     }
 
     private static func notification(sequence: String, operation: String, seID: String = "se-a") -> ESIMNotification {
@@ -178,6 +187,7 @@ actor DetailFixtureServer {
     func setModemSettings(_ value: ModemSettingsFixture, modemID: String = "device-1") { modemSettings[modemID] = value }
     func currentModemSettings(_ id: String = "device-1") -> ModemSettingsFixture { settingsFixture(id) }
     func setProfilesData(_ data: Data?) { profilesOverride = data }
+    func setCommunicationLines(_ lines: [CommunicationLine]) { communicationLines = lines }
     func setTransferProfiles(_ values: [TransferProfile]) { transferProfilesOverride = values }
     func setDiscoveries(_ values: [ESIMDiscovery]) { discoveries = values }
     func setConfirmation(_ value: Bool) { requireConfirmation = value }
@@ -237,7 +247,8 @@ actor DetailFixtureServer {
         if path.hasSuffix("/app") { return raw(#"{"version":"1","commit":"fixture","channel":"stable","target":"linux-arm64","distribution":"local"}"#) }
         if path.hasSuffix("/capabilities") { return try reply(["features": capabilities]) }
         if method == "GET" {
-            if path.hasSuffix("/contacts") || path.hasSuffix("/sim-profiles") { return raw(#"{"items":[]}"#) }
+            if path.hasSuffix("/contacts") { return raw(#"{"items":[]}"#) }
+            if path.hasSuffix("/sim-profiles") { return try reply(["items": communicationLines]) }
             if path.hasSuffix("/message-threads") { return raw(#"{"items":[],"nextCursor":""}"#) }
             if path.hasSuffix("/conversations") { return raw(#"{"backendId":"fixture-detail","revision":0,"unreadCount":0,"items":[]}"#) }
         }
@@ -315,6 +326,14 @@ actor DetailFixtureServer {
                 activeSE = groups[g].id
             } else if method == "DELETE" {
                 if groups[g].profiles[p].enabled { return HTTPProblem.response(status: 409, code: "remote_error", detail: "Active profile") }
+                let profile = groups[g].profiles[p]
+                communicationLines = communicationLines.map { line in
+                    guard line.id == profile.iccid else { return line }
+                    return CommunicationLine(profileId: line.profileId, modemId: line.modemId, label: line.label, number: line.number,
+                                             region: line.region, kind: line.kind, seId: line.seId, deletionState: "deleted", successorId: "",
+                                             messageCount: line.messageCount, callCount: line.callCount,
+                                             present: false, active: false, canMessage: false, canCall: false)
+                }
                 groups[g].profiles.remove(at: p)
             }
             return raw("", status: 204)

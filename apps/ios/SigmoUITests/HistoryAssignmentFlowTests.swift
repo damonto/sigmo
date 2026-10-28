@@ -16,6 +16,7 @@ final class HistoryAssignmentFlowTests: XCTestCase {
         messages.tap()
         let source = app.buttons["historyAssignmentSource-deleted"]
         XCTAssertTrue(source.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.buttons["historyAssignmentSource-empty-deleted"].exists)
         source.tap()
         XCTAssertTrue(app.navigationBars[chinese ? "接管历史记录" : "Assign history"].waitForExistence(timeout: 5))
         return app

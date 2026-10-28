@@ -12,7 +12,47 @@ final class HistoryAssignmentTests: XCTestCase {
     }
 
     private var source: CommunicationLine {
-        CommunicationFixture.line("deleted", available: false, deletionState: "deleted", present: false)
+        CommunicationFixture.line("deleted", available: false, deletionState: "deleted", present: false, messageCount: 2)
+    }
+
+    func testOnlyDeletedLinesWithHistoryNeedAssignment() {
+        let cases: [(state: String, messages: Int, calls: Int, expected: Bool)] = [
+            ("deleted", 0, 0, false), ("deleted", 1, 0, true), ("deleted", 0, 1, true),
+            ("", 1, 1, false), ("pending", 1, 1, false), ("assigned", 1, 1, false)
+        ]
+        for item in cases {
+            let line = CommunicationFixture.line("source", deletionState: item.state,
+                                                 messageCount: item.messages, callCount: item.calls)
+            XCTAssertEqual(line.hasAssignableHistory, item.expected, "\(item)")
+        }
+    }
+
+    func testEmptyHistoryNeverOffersAssignmentTargets() async throws {
+        let server = CommunicationFixture(historyAssignment: .noHistory)
+        let state = try await make(server)
+        await state.load()
+
+        XCTAssertNil(state.source)
+        XCTAssertTrue(state.candidates.isEmpty)
+        XCTAssertFalse(state.canSubmit)
+        let assigned = await state.assign()
+        XCTAssertFalse(assigned)
+        let requests = await server.allRequests()
+        XCTAssertFalse(requests.contains { $0.httpMethod == "PUT" })
+    }
+
+    func testCallHistoryAloneAllowsAssignment() async throws {
+        let server = CommunicationFixture()
+        await server.setLines([
+            CommunicationFixture.line("deleted", available: false, deletionState: "deleted", present: false, callCount: 1),
+            CommunicationFixture.line("work")
+        ])
+        let state = try await make(server)
+        await state.load()
+
+        XCTAssertEqual(state.source?.callCount, 1)
+        XCTAssertEqual(state.selectedID, "work")
+        XCTAssertTrue(state.canSubmit)
     }
 
     func testCandidatesStayOnSourceModemAndKeepInactiveLinesSelectable() async throws {
@@ -71,7 +111,7 @@ final class HistoryAssignmentTests: XCTestCase {
         let foreign = CommunicationFixture.line("foreign", modemID: "device-2")
         let cases: [(String, [CommunicationLine])] = [
             ("missing source", [foreign]),
-            ("unknown modem", [CommunicationFixture.line("deleted", modemID: "", deletionState: "deleted"), foreign]),
+            ("unknown modem", [CommunicationFixture.line("deleted", modemID: "", deletionState: "deleted", messageCount: 1), foreign]),
             ("live source", [CommunicationFixture.line("deleted"), CommunicationFixture.line("active")]),
             ("no local target", [source, foreign]),
             ("absent local target", [source, CommunicationFixture.line("absent", present: false), foreign])

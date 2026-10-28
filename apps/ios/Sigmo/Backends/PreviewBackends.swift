@@ -68,7 +68,8 @@ enum PreviewBackends {
                 case "detail-connection-unlicensed": fixture = .connectionUnlicensed
                 default: fixture = .standard
                 }
-                let detail = DetailFixtureServer(physical: scenario == "detail-physical", locked: scenario == "detail-locked", scenario: fixture)
+                let detail = DetailFixtureServer(physical: scenario == "detail-physical", locked: scenario == "detail-locked", scenario: fixture,
+                                                 includesHistory: ["detail-reminder", "detail-deletion-history"].contains(scenario))
                 return BackendAPI(configuration: configuration, transport: { try await detail.respond($0) }, socketFactory: { try await detail.socket($0) })
             }
             return BackendAPI(configuration: configuration, transport: { try await server.respond($0) }, socketFactory: { _ in

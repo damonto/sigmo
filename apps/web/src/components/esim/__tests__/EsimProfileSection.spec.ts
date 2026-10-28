@@ -7,6 +7,11 @@ import type { EsimProfile } from '@/types/esim'
 enableAutoUnmount(afterEach)
 
 const updateEsimNickname = vi.hoisted(() => vi.fn())
+const deleteEsim = vi.hoisted(() => vi.fn())
+
+vi.mock('@/composables/useCapabilities', () => ({
+  useCapabilities: () => ({ hasFeature: () => true }),
+}))
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -18,7 +23,7 @@ vi.mock('@/apis/esim', () => ({
   useEsimApi: () => ({
     enableEsim: vi.fn(),
     updateEsimNickname,
-    deleteEsim: vi.fn(),
+    deleteEsim,
   }),
 }))
 
@@ -63,7 +68,7 @@ const profiles: EsimProfile[] = [
 ]
 
 const stubs = {
-  AlertDialog: { template: '<div><slot /></div>' },
+  AlertDialog: { props: ['open'], template: '<div v-if="open"><slot /></div>' },
   AlertDialogCancel: { template: '<button type="button"><slot /></button>' },
   AlertDialogContent: { template: '<div><slot /></div>' },
   AlertDialogDescription: { template: '<p><slot /></p>' },
@@ -95,6 +100,10 @@ const stubs = {
   DropdownMenuSeparator: { template: '<hr />' },
   DropdownMenuTrigger: { template: '<div><slot /></div>' },
   EsimProfileAvatar: { template: '<span />' },
+  HistoryAssignments: {
+    props: ['sourceId'],
+    template: '<div data-testid="history-assignment">{{ sourceId }}</div>',
+  },
   EsimProfileDetailsDialog: {
     props: ['open', 'profile'],
     template:
@@ -174,6 +183,24 @@ describe('EsimProfileSection', () => {
   beforeEach(() => {
     updateEsimNickname.mockReset()
     updateEsimNickname.mockResolvedValue({ data: { value: undefined } })
+    deleteEsim.mockReset()
+    deleteEsim.mockResolvedValue(undefined)
+  })
+
+  it('starts a fresh assignment flow when the same profile is restored and deleted again', async () => {
+    const wrapper = mountSection()
+    for (let deletion = 1; deletion <= 2; deletion++) {
+      await wrapper.setProps({ profiles: profiles.map((profile) => ({ ...profile })) })
+      await buttonWithText(wrapper, 'actions.delete', 1).trigger('click')
+      expect(wrapper.find('[data-testid="history-assignment"]').exists()).toBe(false)
+
+      await buttonWithText(wrapper, 'actions.confirm').trigger('click')
+      await flushPromises()
+      expect(deleteEsim).toHaveBeenCalledTimes(deletion)
+      expect(deleteEsim).toHaveBeenLastCalledWith('modem-1', 'default', 'iccid-inactive')
+      expect(wrapper.get('[data-testid="history-assignment"]').text()).toBe('iccid-inactive')
+      await wrapper.setProps({ profiles: [] })
+    }
   })
 
   it.each([

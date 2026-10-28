@@ -9,7 +9,7 @@ struct HistoryAssignmentSection: View {
     @State private var reloadID = 0
     var body: some View {
         Section {
-            ForEach(lines.filter { $0.deletionState == "deleted" }) { line in
+            ForEach(lines.filter(\.hasAssignableHistory)) { line in
                 Button { selected = line } label: {
                     Label {
                         VStack(alignment: .leading, spacing: 3) {
