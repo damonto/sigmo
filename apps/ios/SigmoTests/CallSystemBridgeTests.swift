@@ -1,14 +1,50 @@
-import CallKit
+import LiveCommunicationKit
 import XCTest
 @testable import Sigmo
 
 @MainActor
-final class CallKitBridgeTests: XCTestCase {
+final class CallSystemBridgeTests: XCTestCase {
     private enum TestFailure: Error { case rejected }
 
+    func testNativeConversationActionsMapToExistingCallOperations() async {
+        let id = UUID()
+        let handle = Handle(type: .phoneNumber, value: "+12025550100", displayName: "Fixture")
+        let cases: [(ConversationAction, CallAction)] = [
+            (StartConversationAction(conversationUUID: id, handles: [handle], isVideo: false), .start(id, handle.value)),
+            (JoinConversationAction(conversationUUID: id), .answer(id)),
+            (PauseConversationAction(conversationUUID: id, isPaused: true), .hold(id, true)),
+            (MuteConversationAction(conversationUUID: id, isMuted: true), .mute(id, true)),
+            (PlayToneAction(conversationUUID: id, digits: "1#", tone: .single), .digits(id, "1#")),
+            (EndConversationAction(conversationUUID: id), .end(id))
+        ]
+        let bridge = CallSystemBridge(enabled: false)
+        var received: [CallAction] = []
+        bridge.perform = { received.append($0) }
+        for (action, _) in cases { await bridge.execute(action)?.value }
+        XCTAssertEqual(received, cases.map { $0.1 })
+        let video = StartConversationAction(conversationUUID: id, handles: [handle], isVideo: true)
+        XCTAssertNil(bridge.execute(video))
+        XCTAssertEqual(received.count, cases.count)
+    }
+
+    func testSystemResetCancelsPendingWorkAndIgnoresLateResults() async {
+        let gate = SettingsRequestGate()
+        var completions: [UUID] = []
+        let bridge = CallSystemBridge(enabled: false, didComplete: { id, _ in completions.append(id) })
+        bridge.perform = { _ in await gate.wait() }
+        let action = JoinConversationAction(conversationUUID: UUID())
+        let pending = bridge.execute(action, .answer(action.conversationUUID))
+        await gate.waitForCaller()
+        bridge.resetFromSystem()
+        XCTAssertTrue(pending.isCancelled)
+        await gate.release()
+        await pending.value
+        XCTAssertTrue(completions.isEmpty)
+    }
+
     func testLocalMuteDoesNotWaitForRemoteDTMF() async {
-        var completions: [UUID: [CallKitBridge.Completion]] = [:]
-        let bridge = CallKitBridge(enabled: false, didComplete: { id, result in
+        var completions: [UUID: [CallSystemBridge.Completion]] = [:]
+        let bridge = CallSystemBridge(enabled: false, didComplete: { id, result in
             completions[id, default: []].append(result)
         })
         let gate = SettingsRequestGate()
@@ -21,10 +57,10 @@ final class CallKitBridgeTests: XCTestCase {
             }
         }
         let id = UUID()
-        let digit = CXPlayDTMFCallAction(call: id, digits: "1", type: .singleTone)
+        let digit = PlayToneAction(conversationUUID: id, digits: "1", tone: .single)
         let remote = bridge.execute(digit, .digits(id, "1"))
         await gate.waitForCaller()
-        let mute = CXSetMutedCallAction(call: id, muted: true)
+        let mute = MuteConversationAction(conversationUUID: id, isMuted: true)
         let local = bridge.execute(mute, .mute(id, true))
         await fulfillment(of: [muted], timeout: 1)
         await local.value
@@ -37,8 +73,8 @@ final class CallKitBridgeTests: XCTestCase {
     }
 
     func testEndCancelsAnOptionalRemoteControlBeforeRunning() async {
-        var completions: [UUID: [CallKitBridge.Completion]] = [:]
-        let bridge = CallKitBridge(enabled: false, didComplete: { id, result in
+        var completions: [UUID: [CallSystemBridge.Completion]] = [:]
+        let bridge = CallSystemBridge(enabled: false, didComplete: { id, result in
             completions[id, default: []].append(result)
         })
         let gate = SettingsRequestGate()
@@ -55,10 +91,10 @@ final class CallKitBridgeTests: XCTestCase {
             }
         }
         let id = UUID()
-        let hold = CXSetHeldCallAction(call: id, onHold: true)
+        let hold = PauseConversationAction(conversationUUID: id, isPaused: true)
         let pending = bridge.execute(hold, .hold(id, true))
         await gate.waitForCaller()
-        let end = CXEndCallAction(call: id)
+        let end = EndConversationAction(conversationUUID: id)
         let ending = bridge.execute(end, .end(id))
         XCTAssertEqual(completions[hold.uuid], [.failed], "Preemption completes the control before its task exits")
         await fulfillment(of: [ended], timeout: 1)
@@ -70,8 +106,8 @@ final class CallKitBridgeTests: XCTestCase {
 
     func testTimeoutCancelsWorkWithoutCompletingTheSystemActionAgain() async {
         for lateFailure in [false, true] {
-            var completions: [UUID: [CallKitBridge.Completion]] = [:]
-            let bridge = CallKitBridge(enabled: false, didComplete: { id, result in
+            var completions: [UUID: [CallSystemBridge.Completion]] = [:]
+            let bridge = CallSystemBridge(enabled: false, didComplete: { id, result in
                 completions[id, default: []].append(result)
             })
             let gate = SettingsRequestGate()
@@ -80,10 +116,10 @@ final class CallKitBridgeTests: XCTestCase {
                 if lateFailure { throw TestFailure.rejected }
             }
             let id = UUID()
-            let action = CXSetHeldCallAction(call: id, onHold: true)
+            let action = PauseConversationAction(conversationUUID: id, isPaused: true)
             let pending = bridge.execute(action, .hold(id, true))
             await gate.waitForCaller()
-            // Observe the bridge's SDK calls rather than a standalone CXAction's
+            // Observe the bridge's SDK calls rather than a standalone ConversationAction's
             // system-owned state. No transaction is submitted in these tests.
             bridge.timedOut(action)
             XCTAssertTrue(pending.isCancelled)
@@ -95,8 +131,8 @@ final class CallKitBridgeTests: XCTestCase {
     }
 
     func testRepeatedEndRequestsDoNotCompleteAPreemptedControlAgain() async {
-        var completions: [UUID: [CallKitBridge.Completion]] = [:]
-        let bridge = CallKitBridge(enabled: false, didComplete: { id, result in
+        var completions: [UUID: [CallSystemBridge.Completion]] = [:]
+        let bridge = CallSystemBridge(enabled: false, didComplete: { id, result in
             completions[id, default: []].append(result)
         })
         let gate = SettingsRequestGate()
@@ -107,10 +143,10 @@ final class CallKitBridgeTests: XCTestCase {
             }
         }
         let id = UUID()
-        let hold = CXSetHeldCallAction(call: id, onHold: true)
+        let hold = PauseConversationAction(conversationUUID: id, isPaused: true)
         let pending = bridge.execute(hold, .hold(id, true))
         await gate.waitForCaller()
-        let first = CXEndCallAction(call: id), second = CXEndCallAction(call: id)
+        let first = EndConversationAction(conversationUUID: id), second = EndConversationAction(conversationUUID: id)
         let firstEnd = bridge.execute(first, .end(id))
         let secondEnd = bridge.execute(second, .end(id))
         XCTAssertTrue(pending.isCancelled)
@@ -125,13 +161,13 @@ final class CallKitBridgeTests: XCTestCase {
     }
 
     func testActionFailureCompletesExactlyOnce() async {
-        var completions: [UUID: [CallKitBridge.Completion]] = [:]
-        let bridge = CallKitBridge(enabled: false, didComplete: { id, result in
+        var completions: [UUID: [CallSystemBridge.Completion]] = [:]
+        let bridge = CallSystemBridge(enabled: false, didComplete: { id, result in
             completions[id, default: []].append(result)
         })
         bridge.perform = { _ in throw TestFailure.rejected }
         let id = UUID()
-        let action = CXSetHeldCallAction(call: id, onHold: true)
+        let action = PauseConversationAction(conversationUUID: id, isPaused: true)
         await bridge.execute(action, .hold(id, true)).value
         XCTAssertEqual(completions[action.uuid], [.failed])
         bridge.timedOut(action)

@@ -113,6 +113,7 @@ final class CallPCMTap: NSObject, LKRTCAudioCustomProcessingDelegate, @unchecked
 @MainActor
 enum CallWebRTC {
     private(set) static var isActive = false
+    private static var isPaused = false
     static func factory(capture: CallPCMTap, render: CallPCMTap) -> LKRTCPeerConnectionFactory {
         return LKRTCPeerConnectionFactory(audioDeviceModuleType: .platformDefault,
             bypassVoiceProcessing: false, encoderFactory: nil, decoderFactory: nil,
@@ -131,7 +132,7 @@ enum CallWebRTC {
     static func configureAudio() throws {
         let rtc = LKRTCAudioSession.sharedInstance()
         rtc.useManualAudio = true
-        rtc.isAudioEnabled = isActive
+        rtc.isAudioEnabled = isActive && !isPaused
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
     }
@@ -140,7 +141,7 @@ enum CallWebRTC {
         isActive = true
         let rtc = LKRTCAudioSession.sharedInstance()
         rtc.audioSessionDidActivate(session)
-        rtc.isAudioEnabled = true
+        rtc.isAudioEnabled = !isPaused
     }
 
     static func deactivate(_ session: AVAudioSession) {
@@ -148,5 +149,10 @@ enum CallWebRTC {
         let rtc = LKRTCAudioSession.sharedInstance()
         rtc.isAudioEnabled = false
         rtc.audioSessionDidDeactivate(session)
+    }
+
+    static func setPaused(_ paused: Bool) {
+        isPaused = paused
+        LKRTCAudioSession.sharedInstance().isAudioEnabled = isActive && !paused
     }
 }

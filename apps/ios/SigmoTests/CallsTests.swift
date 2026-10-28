@@ -495,10 +495,11 @@ final class CallsTests: XCTestCase {
         var first = CallsFixture.record("same-id", state: "ringing", direction: "incoming", owner: "")
         var other = CallsFixture.record("same-id", state: "ringing", direction: "incoming", owner: "")
         other.backendId = "work-server"
+        other.startedAt = first.date.addingTimeInterval(1).ISO8601Format()
         calls.ingest(first, line: firstLine)
         calls.ingest(other, line: secondLine)
         XCTAssertEqual(calls.calls.count, 2)
-        XCTAssertNil(calls.callbackLine(for: "10086"), "The same number on different backends requires line selection")
+        XCTAssertEqual(calls.callbackLine(for: "10086"), secondLine)
         first.state = "ended"
         calls.ingest(first, line: firstLine)
         XCTAssertEqual(calls.calls.count, 1)
@@ -775,12 +776,48 @@ final class CallsTests: XCTestCase {
 
     func testSystemCallbackBundleUsesAppActivitiesWithoutSiriExtension() throws {
         let activities = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: "NSUserActivityTypes") as? [String])
-        XCTAssertEqual(activities, [INStartCallIntentIdentifier])
+        XCTAssertEqual(activities, [INStartCallIntentIdentifier, CallsState.legacyAudioActivityType])
         XCTAssertNil(Bundle.main.object(forInfoDictionaryKey: "NSSiriUsageDescription"))
         if let directory = Bundle.main.builtInPlugInsURL {
             let extensions = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             XCTAssertFalse(extensions.contains { $0.lastPathComponent == "SigmoIntents.appex" })
         }
+    }
+
+    func testSystemCallbackAcceptsLegacyAudioIntentAndDeduplicatesModernIntent() async throws {
+        let fixture = CallsFixture()
+        let (calls, _, line) = try await setup(fixture)
+        let person = callbackPerson("+86 (138) 0013-8000")
+        let intent = CallsFixture.legacyAudioIntent(contacts: [person])
+        calls.rememberCallbackRoute(number: "+8613800138000", line: line, startedAt: Date.now.ISO8601Format())
+        XCTAssertTrue(calls.requestCallback(intent))
+        let request = try XCTUnwrap(calls.systemCallback)
+        XCTAssertEqual(request.number, "+8613800138000")
+        XCTAssertFalse(calls.hasCall, "Receiving a legacy intent must still validate the saved line before dialing")
+        let writes = await fixture.count(method: "POST", suffix: "/calls")
+        XCTAssertEqual(writes, 0)
+        XCTAssertTrue(calls.requestCallback(callbackIntent(contacts: [person])))
+        XCTAssertEqual(calls.systemCallback?.id, request.id)
+        let destination = await calls.resolveSystemCallback(request)
+        XCTAssertEqual(destination, .dial(number: "+8613800138000", line: line))
+    }
+
+    func testSystemCallbackRejectsInvalidLegacyAudioIntents() async throws {
+        let (calls, _, _) = try await setup(CallsFixture())
+        XCTAssertTrue(calls.requestCallback(CallsFixture.legacyAudioIntent(contacts: [callbackPerson("10086")])))
+        let request = try XCTUnwrap(calls.systemCallback)
+        let invalid: [[INPerson]?] = [nil, [], [callbackPerson("10086"), callbackPerson("10010")],
+                                      [callbackPerson("*123#")], [callbackPerson("12+34")],
+                                      [callbackPerson("user@example.com", type: .emailAddress)],
+                                      [callbackPerson("10086", type: .unknown)]]
+        for contacts in invalid {
+            XCTAssertFalse(calls.requestCallback(CallsFixture.legacyAudioIntent(contacts: contacts)))
+            XCTAssertEqual(calls.systemCallback?.id, request.id)
+        }
+        XCTAssertFalse(calls.requestCallback(NSUserActivity(activityType: CallsState.legacyAudioActivityType)))
+        XCTAssertFalse(calls.requestCallback(CallsFixture.legacyVideoIntent(contacts: [callbackPerson("10086")])))
+        XCTAssertEqual(calls.systemCallback?.id, request.id)
+        XCTAssertFalse(calls.hasCall)
     }
 
     func testSystemCallbackUsesMissedCallRecordWithoutContacts() async throws {
@@ -875,7 +912,7 @@ final class CallsTests: XCTestCase {
         XCTAssertNotNil(calls.systemCallback)
     }
 
-    func testSystemCallbackRetainsLineAmbiguityAfterRelaunch() async throws {
+    func testSystemCallbackRetainsLatestLineAfterOlderEventsAndRelaunch() async throws {
         for change in ["backend", "modem", "sim", "address"] {
             let (calls, _, line) = try await setup(CallsFixture())
             let other = callbackLine(
@@ -885,21 +922,56 @@ final class CallsTests: XCTestCase {
                 address: change == "address" ? "https://other.sigmo.test" : line.address
             )
             calls.rememberCallbackRoute(number: "10086", line: line, startedAt: "2026-10-25T10:00:00Z")
-            // Out-of-order events must still record that more than one line was used.
+            // An older call from another line must not displace the latest route.
             calls.rememberCallbackRoute(number: "10086", line: other, startedAt: "2026-10-24T10:00:00Z")
             calls.rememberCallbackRoute(number: "10086", line: line, startedAt: "2026-10-25T11:00:00Z")
 
             let restored = CallsState(store: calls.store, fixtures: true, recordings: calls.recordings)
-            XCTAssertNil(restored.callbackLine(for: "10086"), change)
+            XCTAssertEqual(restored.callbackLine(for: "10086"), line, change)
             restored.requestCallback(callbackIntent(contacts: [callbackPerson("10086")]))
-            guard case .home(let number, let backendID) =
-                    await restored.resolveSystemCallback(try XCTUnwrap(restored.systemCallback)) else {
-                return XCTFail("An ambiguous \(change) route must require manual selection")
-            }
-            XCTAssertEqual(number, "10086")
-            XCTAssertNil(backendID, "Do not restrict selection to the most recent backend")
+            let destination = await restored.resolveSystemCallback(try XCTUnwrap(restored.systemCallback))
+            XCTAssertEqual(destination, .dial(number: "10086", line: line), change)
             XCTAssertFalse(restored.hasCall)
         }
+    }
+
+    func testSystemCallbackUsesMostRecentActiveLineAcrossBackends() async throws {
+        let (calls, _, firstLine) = try await setup(CallsFixture())
+        let secondID = UUID()
+        XCTAssertTrue(calls.store.saveBackend(id: secondID, name: "Work", address: "https://work.sigmo.test"))
+        let secondSession = try XCTUnwrap(calls.store.sessions[secondID])
+        await secondSession.refresh(force: true)
+        let secondLine = CallLine(session: secondSession, modem: try XCTUnwrap(secondSession.modems.first))
+        calls.rememberCallbackRoute(number: "10086", line: firstLine, startedAt: "2026-10-25T10:00:00Z")
+        calls.rememberCallbackRoute(number: "10086", line: secondLine, startedAt: "2026-10-25T11:00:00Z")
+        calls.rememberCallbackRoute(number: "10086", line: firstLine, startedAt: "2026-10-25T10:00:00Z")
+        let restored = CallsState(store: calls.store, fixtures: true, recordings: calls.recordings)
+        XCTAssertTrue(restored.available(firstLine))
+        XCTAssertTrue(restored.available(secondLine))
+        XCTAssertTrue(restored.requestCallback(CallsFixture.legacyAudioIntent(contacts: [callbackPerson("10086")])))
+        let destination = await restored.resolveSystemCallback(try XCTUnwrap(restored.systemCallback))
+        XCTAssertEqual(destination, .dial(number: "10086", line: secondLine))
+    }
+
+    func testSystemCallbackLoadsLegacyRouteWithoutRequiringLineSelection() async throws {
+        struct LegacyRoute: Encodable {
+            let line: CallLine
+            let startedAt: String
+            let requiresSelection: Bool
+        }
+        struct LegacyFile: Encodable {
+            let version: Int
+            let routes: [String: LegacyRoute]
+        }
+        let (calls, _, line) = try await setup(CallsFixture())
+        let file = LegacyFile(version: 1, routes: ["10086": LegacyRoute(
+            line: line, startedAt: "2026-10-25T10:00:00Z", requiresSelection: true
+        )])
+        try JSONEncoder().encode(file).write(to: calls.recordings.directory.appending(path: "callback-routes.data"))
+        let restored = CallsState(store: calls.store, fixtures: true, recordings: calls.recordings)
+        restored.requestCallback(callbackIntent(contacts: [callbackPerson("10086")]))
+        let destination = await restored.resolveSystemCallback(try XCTUnwrap(restored.systemCallback))
+        XCTAssertEqual(destination, .dial(number: "10086", line: line))
     }
 
     func testSystemCallbackWithoutSavedRouteUsesHomeDialer() async throws {

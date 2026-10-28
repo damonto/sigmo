@@ -24,6 +24,14 @@ For physical-device builds, configure `DEVELOPMENT_TEAM` and `SIGMO_BUNDLE_ID` i
 
 For Linux development with builds on a Mac, follow the [Xcode MCP workflow](../../scripts/ios/MCP.md). Edit source in the Linux repository; the synchronized Mac workspace is a build copy.
 
+## Encryption export compliance
+
+The app declares `ITSAppUsesNonExemptEncryption: false` in `targets.Sigmo.info.properties` in [project.yml](project.yml) for distribution excluding France. It uses Apple's system encryption and standard encryption supplied by native WebRTC. [Apple's documentation requirements](https://developer.apple.com/help/app-store-connect/reference/app-information/export-compliance-documentation-for-encryption/) require a French encryption declaration for standard algorithms outside Apple's operating system only when distributing in France.
+
+Before release, deselect **France** under **App Store Connect → Pricing and Availability → App Availability → Manage → Manage Availability**, then confirm the change. This setting is managed in App Store Connect; the plist does not restrict distribution. See [Apple's availability instructions](https://developer.apple.com/help/app-store-connect/manage-your-apps-availability/manage-availability-for-your-app-on-the-app-store/).
+
+Before adding France, complete the encryption questionnaire and upload the required declaration under **App Information → App Encryption Documentation**. After Apple approves it, set `ITSAppUsesNonExemptEncryption` to `true` and add the Apple-issued `ITSEncryptionExportComplianceCode` as a string alongside it in `project.yml`, regenerate the project, and upload a new build. Reassess the declaration when encryption dependencies or usage change.
+
 ## Connect to Sigmo
 
 Use **Add Sigmo (+)** to enter a name and server URL, including any reverse-proxy prefix. The app appends `/api/v1` automatically. Complete OTP or browser login (OIDC / Cloudflare Access), then Pro activation if required. Each connection has independent Keychain credentials. Cloudflare Access requires Managed OAuth; a redirect-only login page is insufficient. See [OIDC](../../README.md#oidc) and [Cloudflare Access](../../README.md#cloudflare-access) for provider configuration.
@@ -34,11 +42,15 @@ Switching to the background lets in-flight requests and eSIM operations finish a
 
 ## Calls from system Recents
 
-Tapping a Sigmo entry in the Phone app's Recents opens Sigmo through an `INStartCallIntent` system call activity. The app accepts audio calls and calls with an unspecified capability, and uses CallKit to place the call. This entry does not require a Siri extension or Siri voice support.
+Selecting Sigmo in a system contact card or tapping a Sigmo entry in the Phone app's Recents opens Sigmo through a system call activity. The app accepts `INStartCallIntent` for audio calls or calls with an unspecified capability, as well as the legacy `INStartAudioCallIntent` still used by system calling interfaces. Both use the same callback routing and LiveCommunicationKit call flow. This entry does not require a Siri extension or Siri voice support.
 
-Sigmo restores the backend state before dialing. A verified, unambiguous saved line can dial directly. If the same number has used different backends or SIMs, the app opens the dialer for the user to choose and confirm a line. Unavailable backends, removed modems, and changed or locked SIMs open the appropriate dialer instead of placing a call automatically.
+The legacy adapter intentionally uses deprecated SiriKit types. Swift 6.4 and newer suppress deprecation warnings only on the adapter declarations with `@diagnose`; older compilers retain those warnings and the same compatibility behavior.
+
+Sigmo restores the backend state before dialing, then uses the most recent saved line for that number when the backend, modem, and original SIM are still available for calls. Using different lines for the same number does not require selecting one again. A missing saved route, unavailable backend, removed modem, or changed, inactive, or locked SIM opens the appropriate dialer for line selection.
 
 Simulator fixtures cover parsing, navigation, and dialing decisions. Before release, verify Phone Recents on an iPhone with the app running, backgrounded, and terminated, including a number called from multiple SIMs. These system entry checks are separate from fixture tests.
+
+Calls use PushKit for incoming invitations, LiveCommunicationKit for system conversation actions, and the native WebRTC SDK for media. The app prefers Opus and retains PCMU for older backends. New backends bridge Opus to the negotiated IMS codec using pure Go `pion/opus`, preserving the existing 16 kHz wideband PCM path; PCMU fallback remains narrowband. Local hold pauses both capture and playback through WebRTC's manually managed audio session. Recordings continue to use the existing PCM taps and AAC export.
 
 ## Diagnostic logs
 
@@ -46,7 +58,7 @@ Open **Manage Sigmo → Development diagnostics** to enable local diagnostic log
 
 Logs contain HTTP request summaries, network and decoding failures, WebSocket lifecycle events, and key app errors. Request and response bodies, credentials, query values, message content, and audio are excluded; dynamic resource identifiers in paths are hidden. The main app's notification registration and processing are included; the notification extension and full system crash reports are outside this log.
 
-Call diagnostics correlate VoIP invitations, CallKit actions, backend state changes, and media startup using the call UUID. They include invitation validation/decryption failures, sanitized call states and timestamps, ownership (`none`, `self`, or `other`), explicit end causes, and CallKit error domains/codes, action completion, timeouts, resets, and audio activation. Phone numbers, contact names, client identities, DTMF digits, SDP, and ICE candidates are excluded. Unknown backend state/reason strings are recorded as `other`.
+Call diagnostics correlate VoIP invitations, LiveCommunicationKit actions, backend state changes, and media startup using the call UUID. System integration events use the `conversation.*` prefix. They include invitation validation/decryption failures, sanitized call states and timestamps, ownership (`none`, `self`, or `other`), explicit end causes, sanitized error domains/codes, action completion, timeouts, resets, and audio activation. Phone numbers, contact names, client identities, DTMF digits, SDP, and ICE candidates are excluded. Unknown backend state/reason strings are recorded as `other`.
 
 The app retains up to five 1 MiB files in private storage, excluded from backups, and rotates out the oldest events. **Export logs** saves a UTF-8 text snapshot through the system file exporter, with app/build and iOS version information. Logs are not uploaded automatically. **Clear logs** deletes the saved events without changing the logging switch.
 

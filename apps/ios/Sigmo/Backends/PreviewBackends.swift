@@ -85,7 +85,7 @@ enum PreviewBackends {
                 store.reloadConfiguration()
                 if scenario != "empty" {
                     store.saveBackend(id: homeID, name: "Home", address: "https://home.sigmo.test")
-                    if scenario == "communication-multiple" {
+                    if ["communication-multiple", "calls-multiple"].contains(scenario) {
                         store.saveBackend(id: studioID, name: "Studio", address: "https://studio.sigmo.test")
                     } else if !["single", "airplane", "ims-disabled", "messages", "refresh"].contains(scenario) && !scenario.hasPrefix("communication") && !scenario.hasPrefix("calls") && !scenario.hasPrefix("messages") {
                         store.saveBackend(id: studioID, name: "Studio", address: "https://studio.sigmo.test")
@@ -102,7 +102,7 @@ enum PreviewBackends {
     static func requestCallbackIfNeeded(store: BackendStore, calls: CallsState) async {
         guard let mode = ProcessInfo.processInfo.environment["SIGMO_UI_CALLBACK"] else { return }
         await store.refreshAll()
-        guard !Task.isCancelled, let session = store.onlineSessions.first,
+        guard !Task.isCancelled, let session = store.onlineSessions.first(where: { $0.id == homeID }),
               let modem = session.modems.first else { return }
         let line = CallLine(session: session, modem: modem)
         let number = "10086"
@@ -116,25 +116,34 @@ enum PreviewBackends {
                                backendName: line.backendName, label: line.label, region: line.region, address: line.address),
                 startedAt: Date.now.ISO8601Format()
             )
-        case "dial", "audio":
+        case "dial", "audio", "legacy-audio":
             calls.rememberCallbackRoute(number: number, line: line, startedAt: Date.now.ISO8601Format())
-        case "ambiguous":
-            guard let other = store.onlineSessions.first(where: { $0.id != session.id }),
+        case "latest-line":
+            guard let other = store.sessions[studioID],
                   let otherModem = other.modems.first else { return }
-            calls.rememberCallbackRoute(number: number, line: line, startedAt: Date.now.ISO8601Format())
+            calls.rememberCallbackRoute(number: number, line: line, startedAt: Date.now.addingTimeInterval(-60).ISO8601Format())
             calls.rememberCallbackRoute(number: number, line: CallLine(session: other, modem: otherModem),
                                         startedAt: Date.now.ISO8601Format())
-            // Verify that a saved backend filter cannot hide the other callback line.
-            UserDefaults.standard.set(session.id.uuidString, forKey: "communication.backend")
+            // The current backend filter must not override the last-used call line.
+            UserDefaults.standard.set(homeID.uuidString, forKey: "communication.backend")
+        case "unavailable-line":
+            let unavailable = CallLine(backendID: UUID(), modemID: line.modemID, profileID: line.profileID,
+                                       backendName: "Removed", label: line.label, region: line.region, address: line.address)
+            calls.rememberCallbackRoute(number: number, line: unavailable, startedAt: Date.now.ISO8601Format())
+            UserDefaults.standard.set(homeID.uuidString, forKey: "communication.backend")
         default:
             return
         }
         let person = INPerson(personHandle: INPersonHandle(value: number, type: .phoneNumber),
                               nameComponents: nil, displayName: nil, image: nil,
                               contactIdentifier: nil, customIdentifier: nil)
-        calls.requestCallback(INStartCallIntent(callRecordFilter: nil, callRecordToCallBack: nil,
-                                                audioRoute: .unknown, destinationType: .normal,
-                                                contacts: [person], callCapability: mode == "dial" ? .unknown : .audioCall))
+        if mode == "legacy-audio" {
+            calls.requestCallback(CallsFixture.legacyAudioIntent(contacts: [person]))
+        } else {
+            calls.requestCallback(INStartCallIntent(callRecordFilter: nil, callRecordToCallBack: nil,
+                                                    audioRoute: .unknown, destinationType: .normal,
+                                                    contacts: [person], callCapability: mode == "dial" ? .unknown : .audioCall))
+        }
     }
 }
 

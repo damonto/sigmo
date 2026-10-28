@@ -18,6 +18,7 @@ require (
 	github.com/ncruces/go-sqlite3 v0.35.6
 	github.com/nyaruka/phonenumbers v1.8.1
 	github.com/pion/interceptor v0.1.51
+	github.com/pion/opus v0.1.1-0.20261026214112-e7b8aa55508c
 	github.com/pion/rtp v1.10.6
 	github.com/pion/webrtc/v4 v4.2.25
 	github.com/pressly/goose/v3 v3.29.0

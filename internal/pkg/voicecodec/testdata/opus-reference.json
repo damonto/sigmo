@@ -1,0 +1,177 @@
+[
+  {
+    "name": "silk20",
+    "frames": [
+      {
+        "packet": "SIMQJIOvDgBHU14COVegW33SbYfRFft21gBqA7TxmV1/98UTdYKD+dGRwulW+4ZfRZsgHKFqkRuTwbKVNOfU",
+        "samples": 320,
+        "rms": 4282.824809632073
+      },
+      {
+        "packet": "SJ4hA3b5kMV25LmfmlGtCKdWBqzmK/eCMgN975FSLuM3/C5c/8udoL6MLja+5VT1ZIZ1QWAVtfNliEiA",
+        "samples": 320,
+        "rms": 5229.932136569747
+      },
+      {
+        "packet": "SJunD/vf5f0+syc7lAKCrZmespenNOsgQlAk09Oz0T/XkD18AW6H/Nl3Hoi646VvN97k+5Bem9Q=",
+        "samples": 320,
+        "rms": 5248.748571981229
+      },
+      {
+        "packet": "SJubZvUUnD96l9QACOp6dju2p1KYZPYTmtNGTPWGG5PSVmhgXgv+2yPtNyjh/PXOtHrsZtwgiamA",
+        "samples": 320,
+        "rms": 5281.085253643421
+      },
+      {
+        "packet": "SJubZvUUnD96l9QACKWXeuqHn3gFDszWpd9XyNB9b2vhpm4eqK4WVCQ+8vnMHoCkv79AI/pP/e7XwA==",
+        "samples": 320,
+        "rms": 5217.216313262754
+      },
+      {
+        "packet": "SJubZvUUnD96l9QACKPnRnixJfqtPbgxaSy4avo15ZPdEIHfUyxypLADcdXNBCLcnsHjHalS4BA=",
+        "samples": 320,
+        "rms": 5288.518225540591
+      }
+    ]
+  },
+  {
+    "name": "silk60",
+    "frames": [
+      {
+        "packet": "WODECSDrw3+sRrZHeoP3/34JkK7fDuH6WN1FcQUAOP2RhhmPfXekjJySNfKaA0hF9uPTGr4pgboR+h+ZN75aRLg3J4YwalgQRXlloQwEr24FqvJCiYLKoqh6BuCPkdvzTdUJQAz+EEEwOC+tPQkQoGZXY7LXH4VcCh7SRC6F/CHKdcJOWqjuldGniqD51EsqZMWAHWbbBPDiwVe/qKvzSg9YIv9JuAP9onFS/Ag=",
+        "samples": 960,
+        "rms": 4938.943579687192
+      },
+      {
+        "packet": "WObm2b4ySOtZP3AoHWya8mcUKujChh5WDJBfOdC3GO2VH810sVph6zTFdy6DRNFDoplSqtWtwx35XSKLPB8GCOZxU1YmSZBPAkFoP7jSJSfuiOfSsE2bmqGUZVTc16W00rVRKmMgR3WJtsnoxFRB4JEYs16ymy94xEl6Zi3zGR7tE0v7YYIAtFLNrJ6jnTwv/WqQvT+xkeKXK9xU3dp7cVehkZug8NA=",
+        "samples": 960,
+        "rms": 5267.650248015397
+      },
+      {
+        "packet": "WObm2b4ySOsjEeACPg4kmvixjkya4JsQxjXn0T9WeSbsP2yRO4Q7hwndVEe1b23ge4YVNgrTr4lnYnA3wGMeB8vhbEQTsoVaHR18Ql2ADf4ffJnxAC7MyKaABgdaroE33ee9b+fznVBDXDn6CJdkLgrxt04bdqcU7+yIwhzibZQWxWrlZEMwElGb0phTR2QV3ubN+d+iU1FhC3Wjxkg0",
+        "samples": 960,
+        "rms": 5259.329541296906
+      },
+      {
+        "packet": "WObm2b4ySOtZP3AoHVuUzxHnl2INJjSN7ejWQuJK/YXQkHf08Ee4Xaa7RYLQjgHOMGElJX43MoYr/tsY0T/kYBMgA0NHYohqjClgGShNWG3MAMk58YuMow20fem0bNlXXBlWWlL2a7p3g9iKn6+4fgX4vTERAHhyUr+P/r1OLkVSIrcp6C1FPofAFMtrSFDUNt6ywD1tdTJZk+q5sxVpu2b5BPbrTjV8EZA=",
+        "samples": 960,
+        "rms": 5241.847170845407
+      },
+      {
+        "packet": "WObpw/9wSE8W7AB+BFVt/PtROP8CY1P22QihdZIG77l/TN8YS4Y3I45meAIuebeI4HTQhmSIv4ZSS6PtnWrJ+wdPP7zpRGhYv9EHV+bl4dyh4DDtsaf/WfIIWSgFv8Sr8L0QE4h4LjntaGXIqoh8Dmc/jp+TGx6rnLdtSVpVoDyJXVD9NgVW18AASE8bBhXLSjU2y6ODE7bDzLZ8c27nnUkNyjA=",
+        "samples": 960,
+        "rms": 5246.44595893258
+      },
+      {
+        "packet": "WObm2b4ySOtZP3AoHX0GejdrXfOuU7BL0v6SqiMdzRJl94qujGQmo5dwLOKA9jcEmW3oGLgxxIz+oqmWf1j/F+5HVP6N5b83+vjsvsK0f6Iftlwpf1+HWxMfG5+clangix8icnV0YWck5viWfESjWBrhICEolKZyj+xnIdIFSdGmFA5TEu5mzSn4PzVYXoO9Xmb6bdM01YScc7WjU7/F22rOetA=",
+        "samples": 960,
+        "rms": 5260.255907807623
+      }
+    ]
+  },
+  {
+    "name": "hybrid20",
+    "frames": [
+      {
+        "packet": "eINsmRimhjqQ+XBGFnLMn0gwwHp61qqfnsGurhQnu+Hz98FFhhuugE15qLk7t/Dy1vpKsQoCmaSRW9eQhaKhc/3vHYlWYu1+qO9mOO9llsrO01ovFI4mxQH5Ahtox2Dpxpk=",
+        "samples": 320,
+        "rms": 4091.970136361579
+      },
+      {
+        "packet": "eKC+5b5qER+K9F0/ITS+KjnTFMyJ8iBc48BH3iGGkFRU1/MvbRBTSv5nSAclka/RpUoZ1nRgICtERJ2SrzRrzXUM1xD47qQQZUdbwg==",
+        "samples": 320,
+        "rms": 5219.356517450212
+      },
+      {
+        "packet": "eJ1UB+r+LHvqzGhV0Uc+H1IKHSQgHdjQNPEMk7tVDqQviQi1Wh9bYqcEa9D2yCNItxgAYYi3jh0o1QWte/cXVgJ/vis1Q84=",
+        "samples": 320,
+        "rms": 5246.973006529574
+      },
+      {
+        "packet": "eJ1UB+r+LH46mJSOfXHatEchjdJIS2/703TWHLZpb85p2/XPXQqZTlOaFpLKr/3IQhTBdxUx9Yfd7Wr/L8AjgihmPqXpBfmIdr4G",
+        "samples": 320,
+        "rms": 5290.094837583255
+      },
+      {
+        "packet": "eJ1UB+r+LH46mJSOfLRt7mv3/tC/IdzPiqD0LRN87vsCr6HypuzVpV3jFJn7nkVnUTm05PDRSsZNi34Smk1LvVgd3F4NYc0=",
+        "samples": 320,
+        "rms": 5216.024418798286
+      },
+      {
+        "packet": "eJ1UB+r+LH46mJSOe/9zqaQkrMsiI3h9T9gAFaafyng7huh/QhHsEWb/ApZuj7iST0cv8vxUdjYoLps1Iz13P1OhnUqOv4uc+LjO",
+        "samples": 320,
+        "rms": 5288.807019900612
+      }
+    ]
+  },
+  {
+    "name": "celt10",
+    "frames": [
+      {
+        "packet": "8LVAOlduP7dQSzowCfifPyO6bmZ8mpcRvU89+j7Nap4JSY9LnVCXDUZXQerGLeGIdNzRyHZqbjx3UhE6n22zGpvAHgkh",
+        "samples": 160,
+        "rms": 3180.077078468382
+      },
+      {
+        "packet": "8E7aai92uLb/tH4+J4vjSTerSY6wX9200IgOpOk8vg0CZnXzkmxTXYmg5UpWnMxOTQaAXp8=",
+        "samples": 160,
+        "rms": 5183.3352830248205
+      },
+      {
+        "packet": "8NZ9v8RKFmCQctAtpCiVb3aL+V2PmxbG0FwgWSOcef6kdRaZlYc6RrE=",
+        "samples": 160,
+        "rms": 5236.739271722433
+      },
+      {
+        "packet": "8K/TssR0W6qBVuE0wuoqI0A5a1f7Iapatk0c/YXLJ7XoZNDatZ/Ya04=",
+        "samples": 160,
+        "rms": 5270.085697239657
+      },
+      {
+        "packet": "8Ncp2ZWjQTjTdb4yavTBfcbKyuiaIy4soI6VhoBqfXe5LvlLA57lJrE=",
+        "samples": 160,
+        "rms": 5118.646054500155
+      },
+      {
+        "packet": "8Cut/wDj+hveeQpv5LAoJ0Ztzx153AsqYJ4a1sdpNbCJqwTXkzIR7rk=",
+        "samples": 160,
+        "rms": 5163.8032713301545
+      }
+    ]
+  },
+  {
+    "name": "celt20_stereo",
+    "frames": [
+      {
+        "packet": "/H54gzWwc0ttXL5JiFIhtoIjuqfNYHXyBoD0byltLs3eucRULcNtVXwBhrnpnu3V4Qkq5iOQ6JxtQ5xBhURQUHvtHYKLMagXhv53zI7lDigJtYMSStfxvRdQTwTFCkVWU2E3EdM38KdAmA5RyjZ0/pIbib/6x1+iCYDWl7hwZBoGbxqS6alOcF+iWNPwKdn6pG2S2xWZljq61t+lr/XuV/0=",
+        "samples": 320,
+        "rms": 3244.7305560323493
+      },
+      {
+        "packet": "/JadlwpR3YKgWpVx5UpA610Y05AcgDvj92uP4NmEyay/mHXnGBB5EnY6kjSat+cEIFLso/O8+Sthi0k87q1K5ydx+FCKM46LZiNDkAgjvaCx",
+        "samples": 320,
+        "rms": 3799.133501536897
+      },
+      {
+        "packet": "/Jft56w2U4Mqn1MJC6hrl5MCuu5Q0qjkBv0GoKWcgpP0dqsXYVsBcYfNmyIx9u2xTH7Hw8c/LJn/7Woiijmbs+wctg1AjMS6Y2CcLTiqpUex",
+        "samples": 320,
+        "rms": 3951.3531855397337
+      },
+      {
+        "packet": "/JZ43R33JJtn2BOzL7+Ywo29Y7gjjqmR23Bxb9pyLp1/dLu4N2Bbuh3AxyEyL0AvMMlB4Sus7Vj2kWLMIg1z8t1q4cViAd+jKKehoo1BkVax",
+        "samples": 320,
+        "rms": 4276.783352079574
+      },
+      {
+        "packet": "/B6tAYhG/cw8UUd0K3Pa4vlMSeAprC8QL5N38fmRhtqbO/cLgLhh+vuQUwWj0N1jGPAtMYBw2vikrq2VYsvnF/pFoJtHsxclmOAWTAgTrdPa",
+        "samples": 320,
+        "rms": 3738.6781266077187
+      },
+      {
+        "packet": "/JZ5VztMjD4gdw41OiYB8EQ2jDka/R3ZGCouMcrkySBUJLuNgd5+UvSBtnToxO9GC40Zoz66HaQvpCtoeYvKwyY09FgDhVEVX0rU+op/QSvR",
+        "samples": 320,
+        "rms": 3615.311194679512
+      }
+    ]
+  }
+]

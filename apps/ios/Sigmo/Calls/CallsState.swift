@@ -1,11 +1,15 @@
 import AVFAudio
-import CallKit
 import Foundation
 import Intents
 import Observation
 
 @MainActor @Observable
 final class CallsState {
+    #if compiler(>=6.4)
+    @diagnose(DeprecatedDeclaration, as: ignored, reason: "iOS still delivers legacy audio call activities from Contacts and Recents")
+    #endif
+    static let legacyAudioActivityType = INStartAudioCallIntentIdentifier
+
     private(set) var calls: [UUID: ActiveCall] = [:] {
         didSet { updatePlaybackAvailability() }
     }
@@ -29,7 +33,7 @@ final class CallsState {
     let recordings: CallRecordings
     private(set) var clientID: String
     let store: BackendStore
-    let system: CallKitBridge
+    let system: CallSystemBridge
     @ObservationIgnored private let diagnostics: CallDiagnostics
     @ObservationIgnored private let fixtures: Bool
     private let demo: Bool
@@ -46,7 +50,7 @@ final class CallsState {
         let task: Task<Void, Never>
     }
     private struct CallbackRoutesFile: Codable {
-        static let currentVersion = 1
+        static let currentVersion = 2
 
         let version: Int
         let routes: [String: CallbackRoute]
@@ -73,7 +77,7 @@ final class CallsState {
         self.fixtures = fixtures || demo
         self.identity = identity
         self.diagnostics = CallDiagnostics(store: diagnostics)
-        self.system = CallKitBridge(enabled: !fixtures && !demo, diagnostics: diagnostics)
+        self.system = CallSystemBridge(enabled: !fixtures && !demo, diagnostics: diagnostics)
         self.recordings = recordings ?? CallRecordings(directory: (fixtures || demo) ? URL.temporaryDirectory.appending(path: "SigmoCalls-\(UUID())") : nil)
         self.clientID = clientID ?? (demo ? "demo-\(UUID().uuidString)" : fixtures ? "fixture-call-client" : "")
         restoreClientIdentity()
@@ -94,7 +98,8 @@ final class CallsState {
         }
         if let data = try? Data(contentsOf: self.recordings.directory.appending(path: "callback-routes.data")),
            let file = try? JSONDecoder().decode(CallbackRoutesFile.self, from: data),
-           file.version == CallbackRoutesFile.currentVersion {
+           (1...CallbackRoutesFile.currentVersion).contains(file.version) {
+            // Version 1's obsolete requiresSelection field is ignored by decoding.
             callbackRoutes = file.routes
         }
     }
@@ -157,15 +162,27 @@ final class CallsState {
 
     @discardableResult
     func requestCallback(_ intent: INIntent) -> Bool {
-        guard let intent = intent as? INStartCallIntent,
-              intent.callCapability != .videoCall else { return false }
         let contacts: [INPerson]
-        if let requested = intent.contacts, !requested.isEmpty {
-            contacts = requested
-        } else {
-            contacts = intent.callRecordToCallBack?.participants ?? []
+        switch intent {
+        case let intent as INStartCallIntent:
+            guard intent.callCapability != .videoCall else { return false }
+            if let requested = intent.contacts, !requested.isEmpty {
+                contacts = requested
+            } else {
+                contacts = intent.callRecordToCallBack?.participants ?? []
+            }
+        default:
+            guard let legacy = Self.legacyAudioContacts(from: intent) else { return false }
+            contacts = legacy
         }
         return requestCallback(contacts: contacts)
+    }
+
+    #if compiler(>=6.4)
+    @diagnose(DeprecatedDeclaration, as: ignored, reason: "iOS still delivers legacy audio call intents from Contacts and Recents")
+    #endif
+    private static func legacyAudioContacts(from intent: INIntent) -> [INPerson]? {
+        (intent as? INStartAudioCallIntent)?.contacts
     }
 
     private func requestCallback(contacts: [INPerson]) -> Bool {
@@ -207,7 +224,6 @@ final class CallsState {
 
     private func callbackDestination(for number: String) -> SystemCallbackDestination {
         guard let route = callbackRoutes[CallDigits.normalize(number)],
-              !route.requiresSelection,
               let session = store.sessions[route.line.backendID] else {
             return .home(number: number, backendID: nil)
         }
@@ -228,17 +244,10 @@ final class CallsState {
 
     func rememberCallbackRoute(number: String, line: CallLine, startedAt: String) {
         let key = CallDigits.normalize(number)
-        var route = CallbackRoute(line: line, startedAt: startedAt)
+        let route = CallbackRoute(line: line, startedAt: startedAt)
         if let existing = callbackRoutes[key] {
-            // A number can belong to several system Recents entries with different
-            // SIMs. Retain that ambiguity even when an older event arrives later.
-            let requiresSelection = existing.requiresSelection || !existing.line.matches(line)
-            if existing.date > route.date {
-                route = CallbackRoute(line: existing.line, startedAt: existing.startedAt, requiresSelection: requiresSelection)
-            } else {
-                route = CallbackRoute(line: line, startedAt: startedAt, requiresSelection: requiresSelection)
-            }
-            if route == existing { return }
+            // Delayed events from an older call must not replace the last-used line.
+            if existing.date > route.date || route == existing { return }
         }
         callbackRoutes[key] = route
         do {
@@ -317,7 +326,7 @@ final class CallsState {
         await bootstraps[action.id]?.value
         switch action {
         case .start, .answer:
-            // Release playback before configuring/fulfilling CallKit's action.
+            // Release playback before configuring/fulfilling the system action.
             // A delayed deactivation must never tear down the new call session.
             await recordings.playback.stop()?.value
             try Task.checkCancellation()
@@ -612,7 +621,7 @@ final class CallsState {
         return bootstraps[id]
     }
 
-    private func endInvitation(_ id: UUID, reason: CXCallEndedReason, cause: String, source: String = #function) {
+    private func endInvitation(_ id: UUID, reason: CallEndReason, cause: String, source: String = #function) {
         var fields = CallDiagnostics.ending(reason)
         fields["cause"] = cause
         fields["source"] = source
@@ -755,6 +764,7 @@ final class CallsState {
 
     private func updateAudioInput() {
         guard let id = mediaID, let call = calls[id] else { return }
+        audio.setPaused(call.record?.localHold == true)
         audio.setInput(enabled: !call.muted && call.record?.localHold != true && call.record?.remoteHold != true)
     }
 
@@ -778,7 +788,7 @@ final class CallsState {
         mediaTask?.cancel(); mediaTask = nil; mediaID = nil; audio.stop()
     }
 
-    private func finish(_ id: UUID, reason: CXCallEndedReason, report: Bool = true, cause: String, source: String = #function) {
+    private func finish(_ id: UUID, reason: CallEndReason, report: Bool = true, cause: String, source: String = #function) {
         guard let call = calls.removeValue(forKey: id) else {
             if bootstraps[id] != nil || reporting.contains(id) { endInvitation(id, reason: reason, cause: cause, source: source) }
             return
@@ -790,7 +800,7 @@ final class CallsState {
         fields["backendID"] = call.line.backendID.uuidString
         fields["cause"] = cause
         fields["source"] = source
-        fields["reportToCallKit"] = String(report)
+        fields["reportToSystem"] = String(report)
         diagnostics.record("call.finished", id: id, fields: fields)
         endedUUIDs[id] = .now
         if let uuid = call.record?.callUUID.flatMap(UUID.init(uuidString:)) { endedUUIDs[uuid] = .now }

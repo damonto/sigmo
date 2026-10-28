@@ -1,4 +1,3 @@
-import CallKit
 import Foundation
 
 /// Records call lifecycle metadata without numbers, client identities or signaling payloads.
@@ -50,7 +49,7 @@ struct CallDiagnostics: Sendable {
         return fields
     }
 
-    static func ending(_ reason: CXCallEndedReason) -> [String: String] {
+    static func ending(_ reason: CallEndReason) -> [String: String] {
         let name: String
         switch reason {
         case .failed: name = "failed"
@@ -58,7 +57,6 @@ struct CallDiagnostics: Sendable {
         case .unanswered: name = "unanswered"
         case .answeredElsewhere: name = "answered_elsewhere"
         case .declinedElsewhere: name = "declined_elsewhere"
-        @unknown default: name = "unknown"
         }
         return ["reason": String(reason.rawValue), "endReason": name]
     }

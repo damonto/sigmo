@@ -1,4 +1,4 @@
-import CallKit
+import LiveCommunicationKit
 import XCTest
 @testable import Sigmo
 
@@ -47,21 +47,21 @@ final class CallDiagnosticsTests: XCTestCase {
                        ["uuid_mismatch", "wrong_kind", "already_ended", "expired", "missing_connection", "missing_call_id", "missing_modem_id", "missing_profile_id"])
     }
 
-    func testCallKitLogsCorrelateActionErrorsAndTimeoutsWithoutDigitsOrErrorDetails() async throws {
+    func testSystemCallLogsCorrelateActionErrorsAndTimeoutsWithoutDigitsOrErrorDetails() async throws {
         let directory = URL.temporaryDirectory.appending(path: "CallDiagnostics-\(UUID())")
         let store = DiagnosticLogStore(directory: directory, defaults: nil)
         addTeardownBlock { try FileManager.default.removeItem(at: directory) }
         await store.setEnabled(true)
-        let bridge = CallKitBridge(enabled: false, diagnostics: store)
+        let bridge = CallSystemBridge(enabled: false, diagnostics: store)
         bridge.perform = { _ in
-            throw NSError(domain: CXErrorDomainRequestTransaction, code: 4, userInfo: [NSLocalizedDescriptionKey: "error-description-secret"])
+            throw NSError(domain: NSCocoaErrorDomain, code: 4, userInfo: [NSLocalizedDescriptionKey: "error-description-secret"])
         }
         let id = UUID()
-        let action = CXPlayDTMFCallAction(call: id, digits: "1234567890#", type: .singleTone)
+        let action = PlayToneAction(conversationUUID: id, digits: "1234567890#", tone: .single)
         await bridge.execute(action, .digits(id, "1234567890#")).value
         let gate = SettingsRequestGate()
         bridge.perform = { _ in await gate.wait() }
-        let answer = CXAnswerCallAction(call: id)
+        let answer = JoinConversationAction(conversationUUID: id)
         let pending = bridge.execute(answer, .answer(id))
         await gate.waitForCaller()
         bridge.timedOut(answer)
@@ -72,12 +72,12 @@ final class CallDiagnosticsTests: XCTestCase {
         let data = try await store.snapshot()
         let events = try diagnosticEvents(data)
         XCTAssertTrue(events.allSatisfy { $0.fields["callUUID"] == id.uuidString })
-        let error = try XCTUnwrap(events.first { $0.event == "callkit.action.error" })
-        XCTAssertEqual(error.fields["errorDomain"], CXErrorDomainRequestTransaction)
+        let error = try XCTUnwrap(events.first { $0.event == "conversation.action.error" })
+        XCTAssertEqual(error.fields["errorDomain"], NSCocoaErrorDomain)
         XCTAssertEqual(error.fields["errorCode"], "4")
         XCTAssertEqual(error.fields["actionID"], action.uuid.uuidString)
-        XCTAssertEqual(events.first { $0.event == "callkit.action.completed" }?.fields["completion"], "failed")
-        XCTAssertEqual(events.first { $0.event == "callkit.action.timed_out" }?.fields["actionID"], answer.uuid.uuidString)
+        XCTAssertEqual(events.first { $0.event == "conversation.action.completed" }?.fields["completion"], "failed")
+        XCTAssertEqual(events.first { $0.event == "conversation.action.timed_out" }?.fields["actionID"], answer.uuid.uuidString)
         XCTAssertEqual(events.last?.fields["endReason"], "remote_ended")
         let text = String(decoding: data, as: UTF8.self)
         XCTAssertFalse(text.contains("1234567890#"))

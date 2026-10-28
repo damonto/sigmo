@@ -13,9 +13,10 @@ final class CallWebRTCTests: XCTestCase {
         XCTAssertTrue(processing.renderPreProcessingDelegate === render)
     }
 
-    func testFrameworkSupportsBackendPCMUCodec() {
+    func testFrameworkSupportsBackendOpusAndPCMUCodecs() {
         let factory = CallWebRTC.factory(capture: CallPCMTap(), render: CallPCMTap())
         let codecs = factory.rtpSenderCapabilities(forKind: "audio").codecs
         XCTAssertTrue(codecs.contains { $0.name == "PCMU" && $0.clockRate?.intValue == 8000 })
+        XCTAssertTrue(codecs.contains { $0.name.lowercased() == "opus" && $0.clockRate?.intValue == 48000 })
     }
 }

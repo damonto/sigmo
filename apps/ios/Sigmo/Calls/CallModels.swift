@@ -93,15 +93,8 @@ struct CallLine: Codable, Hashable, Sendable, Identifiable {
 struct CallbackRoute: Codable, Hashable, Sendable {
     let line: CallLine
     let startedAt: String
-    let requiresSelection: Bool
 
     var date: Date { CallRecord.date(startedAt) ?? .distantPast }
-
-    init(line: CallLine, startedAt: String, requiresSelection: Bool = false) {
-        self.line = line
-        self.startedAt = startedAt
-        self.requiresSelection = requiresSelection
-    }
 }
 
 struct SystemCallbackRequest: Identifiable, Equatable, Sendable {

@@ -92,7 +92,7 @@ private struct ActiveCallContent: View {
             }
             Text(calls.name(call))
                 .font(.largeTitle.weight(.medium)).textSelection(.enabled)
-            Text("\(call.line.backendName) · \(call.line.label)")
+            Text(lineDescription(for: call))
                 .font(.subheadline).foregroundStyle(.secondary)
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 VStack(spacing: 4) {
@@ -102,6 +102,17 @@ private struct ActiveCallContent: View {
                 }.font(.body).foregroundStyle(.secondary)
             }
         }.multilineTextAlignment(.center)
+    }
+
+    private func lineDescription(for call: ActiveCall) -> String {
+        let modem = calls.store.sessions[call.line.backendID]?.modems.first {
+            $0.id == call.line.modemID && $0.sim.identifier == call.line.profileID
+        }
+        let label = [call.record?.lineLabel, modem?.sim.label]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+        return [call.line.backendName, call.line.label, label ?? ""]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     private var keypadControls: some View {
@@ -189,7 +200,8 @@ private struct ActiveCallContent: View {
             if incoming.id != call.id {
                 Text("calls.secondIncoming").font(.headline)
                 Text(calls.name(incoming)).font(.title3)
-                Text("\(incoming.line.backendName) · \(incoming.line.label)").font(.caption).foregroundStyle(.secondary)
+                Text(lineDescription(for: incoming))
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             GlassEffectContainer(spacing: 12) {
                 HStack(alignment: .top, spacing: 20) {

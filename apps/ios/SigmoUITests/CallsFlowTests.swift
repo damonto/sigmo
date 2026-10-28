@@ -415,8 +415,21 @@ final class CallsFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["10086"].firstMatch.exists)
     }
 
-    func testAmbiguousSystemCallbackShowsAllBackendsBeforeDialing() {
-        let app = launchCallback(scenario: "communication-multiple", mode: "ambiguous")
+    func testLegacyAudioCallIntentCallbackDialsCompleteRouteDirectly() {
+        let app = launchCallback(scenario: "calls", mode: "legacy-audio")
+        XCTAssertTrue(app.buttons["calls-end"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["10086"].firstMatch.exists)
+    }
+
+    func testSystemCallbackUsesLastActiveLineAcrossBackends() {
+        let app = launchCallback(scenario: "calls-multiple", mode: "latest-line")
+        XCTAssertTrue(app.buttons["calls-end"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Studio ·")).firstMatch.exists)
+        XCTAssertFalse(app.sheets["Choose a Sigmo backend"].exists)
+    }
+
+    func testUnavailableSystemCallbackShowsAllBackendsBeforeDialing() {
+        let app = launchCallback(scenario: "communication-multiple", mode: "unavailable-line")
         let chooser = app.sheets["Choose a Sigmo backend"]
         let home = chooser.buttons["Home"]
         let studio = chooser.buttons["Studio"]

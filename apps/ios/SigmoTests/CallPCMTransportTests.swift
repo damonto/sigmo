@@ -5,7 +5,15 @@ import XCTest
 
 @MainActor
 final class CallPCMTransportTests: XCTestCase {
+    func testNativeOpusTransportsBothDirectionsWithoutMicrophoneHardware() async throws {
+        try await transport(codec: "opus", clockRate: 48000)
+    }
+
     func testNativePCMUTransportsBothDirectionsWithoutMicrophoneHardware() async throws {
+        try await transport(codec: "PCMU", clockRate: 8000)
+    }
+
+    private func transport(codec: String, clockRate: Int) async throws {
         let firstDevice = CallTestAudioDevice(frequency: 440)
         let secondDevice = CallTestAudioDevice(frequency: 880)
         let firstFactory = LKRTCPeerConnectionFactory(encoderFactory: nil, decoderFactory: nil, audioDevice: firstDevice)
@@ -20,7 +28,7 @@ final class CallPCMTransportTests: XCTestCase {
         defer { first.close(); second.close() }
         for (factory, peer) in [(firstFactory, first), (secondFactory, second)] {
             peer.add(factory.audioTrack(withTrackId: UUID().uuidString), streamIds: ["synthetic"])
-            let codecs = factory.rtpSenderCapabilities(forKind: "audio").codecs.filter { $0.name == "PCMU" }
+            let codecs = factory.rtpSenderCapabilities(forKind: "audio").codecs.filter { $0.name.lowercased() == codec.lowercased() }
             XCTAssertFalse(codecs.isEmpty)
             for transceiver in peer.transceivers {
                 // Swift keeps the error label to disambiguate the deprecated overload.
@@ -33,8 +41,7 @@ final class CallPCMTransportTests: XCTestCase {
         try await second.setLocalDescription(second.answer(for: constraints))
         try await gather(second)
         let answer = try XCTUnwrap(second.localDescription)
-        XCTAssertTrue(answer.sdp.contains("PCMU/8000"))
-        XCTAssertFalse(answer.sdp.lowercased().contains("opus/"))
+        XCTAssertTrue(answer.sdp.lowercased().contains("\(codec.lowercased())/\(clockRate)"))
         try await first.setRemoteDescription(answer)
         for _ in 0..<500 {
             firstDevice.tick(); secondDevice.tick()
@@ -55,6 +62,21 @@ final class CallPCMTransportTests: XCTestCase {
         XCTAssertTrue(LKRTCAudioSession.sharedInstance().isAudioEnabled)
         CallWebRTC.deactivate(AVAudioSession.sharedInstance())
         XCTAssertFalse(LKRTCAudioSession.sharedInstance().isAudioEnabled)
+    }
+
+    func testPauseStopsBothAudioDirectionsUntilResume() throws {
+        try CallWebRTC.configureAudio()
+        CallWebRTC.activate(AVAudioSession.sharedInstance())
+        defer {
+            CallWebRTC.setPaused(false)
+            CallWebRTC.deactivate(AVAudioSession.sharedInstance())
+        }
+        CallWebRTC.setPaused(true)
+        XCTAssertFalse(LKRTCAudioSession.sharedInstance().isAudioEnabled)
+        try CallWebRTC.configureAudio()
+        XCTAssertFalse(LKRTCAudioSession.sharedInstance().isAudioEnabled)
+        CallWebRTC.setPaused(false)
+        XCTAssertTrue(LKRTCAudioSession.sharedInstance().isAudioEnabled)
     }
 
     private func gather(_ peer: LKRTCPeerConnection) async throws {

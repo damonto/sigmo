@@ -29,6 +29,7 @@ import (
 
 const (
 	pcmuPayloadType             = 0
+	opusPayloadType             = 111
 	maxPCMUSilenceGapSamples    = pcmu.SampleRate
 	webRTCUDPPortMin            = 40000
 	webRTCUDPPortMax            = 40100
@@ -248,6 +249,7 @@ type webRTCBridge struct {
 	track *webrtc.TrackLocalStaticRTP
 	codec bridgeCodec
 	evs   *voicecodec.EVSTranscoder
+	opus  *voicecodec.OpusEncoder
 
 	cancel       context.CancelFunc
 	once         sync.Once
@@ -296,6 +298,15 @@ func newWebRTCBridge(ctx context.Context, media MediaSession, codec bridgeCodec,
 	}, webrtc.RTPCodecTypeAudio); err != nil {
 		return nil, fmt.Errorf("register PCMU codec: %w", err)
 	}
+	if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+		RTPCodecCapability: webrtc.RTPCodecCapability{
+			MimeType: webrtc.MimeTypeOpus, ClockRate: voicecodec.OpusClockRate, Channels: 2,
+			// Keep capability matching independent of the peer's receive-only
+			// Opus parameters. prepareAudioTrack supplies our answer parameters.
+		}, PayloadType: opusPayloadType,
+	}, webrtc.RTPCodecTypeAudio); err != nil {
+		return nil, fmt.Errorf("register Opus codec: %w", err)
+	}
 	interceptors := &interceptor.Registry{}
 	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, interceptors); err != nil {
 		return nil, fmt.Errorf("register WebRTC interceptors: %w", err)
@@ -317,21 +328,6 @@ func newWebRTCBridge(ctx context.Context, media MediaSession, codec bridgeCodec,
 	if err != nil {
 		return nil, fmt.Errorf("create WebRTC peer connection: %w", err)
 	}
-	track, err := webrtc.NewTrackLocalStaticRTP(
-		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypePCMU, ClockRate: pcmu.SampleRate, Channels: 1},
-		"audio",
-		"sigmo-call",
-	)
-	if err != nil {
-		_ = pc.Close()
-		return nil, fmt.Errorf("create WebRTC audio track: %w", err)
-	}
-	sender, err := pc.AddTrack(track)
-	if err != nil {
-		_ = pc.Close()
-		return nil, fmt.Errorf("add WebRTC audio track: %w", err)
-	}
-	go drainRTCP(sender)
 	var evsTranscoder *voicecodec.EVSTranscoder
 	if codec.evs {
 		local, _ := mediaAudioFormats(media.Media())
@@ -351,7 +347,6 @@ func newWebRTCBridge(ctx context.Context, media MediaSession, codec bridgeCodec,
 	bridge := &webRTCBridge{
 		media:    media,
 		pc:       pc,
-		track:    track,
 		codec:    codec,
 		evs:      evsTranscoder,
 		cancel:   cancel,
@@ -376,7 +371,7 @@ func newWebRTCBridge(ctx context.Context, media MediaSession, codec bridgeCodec,
 		}
 	})
 	pc.OnTrack(func(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
-		if !strings.EqualFold(track.Codec().MimeType, webrtc.MimeTypePCMU) {
+		if !strings.EqualFold(track.Codec().MimeType, webrtc.MimeTypePCMU) && !strings.EqualFold(track.Codec().MimeType, webrtc.MimeTypeOpus) {
 			return
 		}
 		bridge.startUplink(bridgeCtx, track, codec)
@@ -390,6 +385,11 @@ func (b *webRTCBridge) answer(ctx context.Context, offer WebRTCSessionDescriptio
 		SDP:  offer.SDP,
 	}); err != nil {
 		return WebRTCSessionDescription{}, fmt.Errorf("set WebRTC offer: %w", err)
+	}
+	// Select the sending codec from negotiated audio, including recvonly offers
+	// that never produce OnTrack. Limit the answer to that codec in both directions.
+	if err := b.prepareAudioTrack(); err != nil {
+		return WebRTCSessionDescription{}, err
 	}
 	answer, err := b.pc.CreateAnswer(nil)
 	if err != nil {
@@ -553,6 +553,10 @@ func (b *webRTCBridge) addWorker() bool {
 
 func (b *webRTCBridge) runDownlink(ctx context.Context, codec bridgeCodec) {
 	if codec.pcmu {
+		if b.opus != nil {
+			b.runOpusPCMUDownlink(ctx)
+			return
+		}
 		b.runPCMUPassthroughDownlink(ctx)
 		return
 	}
@@ -584,6 +588,7 @@ func (b *webRTCBridge) runDownlink(ctx context.Context, codec bridgeCodec) {
 	sequenceNumber := random16()
 	timestamp := random32()
 	ssrc := random32()
+	opusWriter := newOpusDownlinkWriter(b.track, b.opus)
 	for {
 		packet, err := b.media.ReadPacket(ctx)
 		if err != nil {
@@ -603,7 +608,7 @@ func (b *webRTCBridge) runDownlink(ctx context.Context, codec bridgeCodec) {
 		if err := payload.UnmarshalBinary(inbound.Payload); err != nil {
 			continue
 		}
-		for _, frame := range payload.Frames {
+		for frameIndex, frame := range payload.Frames {
 			if frame.FrameType == 15 || !frame.Quality {
 				continue
 			}
@@ -611,6 +616,14 @@ func (b *webRTCBridge) runDownlink(ctx context.Context, codec bridgeCodec) {
 			if err != nil {
 				b.stop()
 				return
+			}
+			if b.opus != nil {
+				timestamp := inbound.Timestamp + uint32(frameIndex*remote.ClockRate/50)
+				if err := opusWriter.write(pcm, voicecodec.AMRSampleRate(codec.amr), timestamp, remote.ClockRate); err != nil {
+					b.stop()
+					return
+				}
+				continue
 			}
 			pcm8, err := voicecodec.ResampleLinear(pcm, voicecodec.AMRSampleRate(codec.amr), pcmu.SampleRate)
 			if err != nil {
@@ -641,6 +654,7 @@ func (b *webRTCBridge) runEVSDownlink(ctx context.Context) {
 	sequenceNumber := random16()
 	timestamp := random32()
 	ssrc := random32()
+	opusWriter := newOpusDownlinkWriter(b.track, b.opus)
 	for {
 		packet, err := b.media.ReadPacket(ctx)
 		if err != nil {
@@ -660,11 +674,19 @@ func (b *webRTCBridge) runEVSDownlink(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		for _, frame := range frames {
+		for frameIndex, frame := range frames {
 			pcm, err := b.evs.Decode(ctx, frame)
 			if err != nil {
 				b.stop()
 				return
+			}
+			if b.opus != nil {
+				timestamp := inbound.Timestamp + uint32(frameIndex*remote.ClockRate/50)
+				if err := opusWriter.write(pcm, voicecodec.EVSSampleRate, timestamp, remote.ClockRate); err != nil {
+					b.stop()
+					return
+				}
+				continue
 			}
 			pcm8, err := voicecodec.ResampleLinear(pcm, voicecodec.EVSSampleRate, pcmu.SampleRate)
 			if err != nil {
@@ -719,6 +741,10 @@ func (b *webRTCBridge) runPCMUPassthroughDownlink(ctx context.Context) {
 
 func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote, codec bridgeCodec) {
 	if codec.pcmu {
+		if strings.EqualFold(track.Codec().MimeType, webrtc.MimeTypeOpus) {
+			b.runOpusPCMUUplink(ctx, track)
+			return
+		}
 		b.runPCMUPassthroughUplink(ctx, track)
 		return
 	}
@@ -752,19 +778,24 @@ func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote,
 	ssrc := random32()
 	var buffer []int16
 	frameSamples := voicecodec.AMRSamplesPerFrame(codec.amr)
+	input, err := newWebRTCAudioReader(track)
+	if err != nil {
+		b.stop()
+		return
+	}
 	for {
-		packet, _, err := track.ReadRTP()
+		inputPCM, inputRate, err := input.read()
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				b.stop()
 			}
 			return
 		}
-		if int(packet.PayloadType) != pcmuPayloadType {
-			continue
+		if input.skipped != 0 {
+			timestamp += uint32(len(buffer)) + uint32(uint64(input.skipped)*uint64(voicecodec.AMRSampleRate(codec.amr))/voicecodec.OpusClockRate)
+			buffer = buffer[:0]
 		}
-		pcm8 := pcmu.AppendDecode(nil, packet.Payload)
-		pcm, err := voicecodec.ResampleLinear(pcm8, pcmu.SampleRate, voicecodec.AMRSampleRate(codec.amr))
+		pcm, err := voicecodec.ResampleLinear(inputPCM, inputRate, voicecodec.AMRSampleRate(codec.amr))
 		if err != nil {
 			b.stop()
 			return
@@ -828,19 +859,24 @@ func (b *webRTCBridge) runUplink(ctx context.Context, track *webrtc.TrackRemote,
 func (b *webRTCBridge) runEVSUplink(ctx context.Context, track *webrtc.TrackRemote) {
 	writer := newEVSRTPWriter(0, false, random16(), random32(), random32())
 	var buffer []int16
+	input, err := newWebRTCAudioReader(track)
+	if err != nil {
+		b.stop()
+		return
+	}
 	for {
-		packet, _, err := track.ReadRTP()
+		inputPCM, inputRate, err := input.read()
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
 				b.stop()
 			}
 			return
 		}
-		if int(packet.PayloadType) != pcmuPayloadType {
-			continue
+		if input.skipped != 0 {
+			writer.timestamp += uint32(len(buffer)) + uint32(uint64(input.skipped)*voicecodec.EVSSampleRate/voicecodec.OpusClockRate)
+			buffer = buffer[:0]
 		}
-		pcm8 := pcmu.AppendDecode(nil, packet.Payload)
-		pcm, err := voicecodec.ResampleLinear(pcm8, pcmu.SampleRate, voicecodec.EVSSampleRate)
+		pcm, err := voicecodec.ResampleLinear(inputPCM, inputRate, voicecodec.EVSSampleRate)
 		if err != nil {
 			b.stop()
 			return
@@ -974,7 +1010,7 @@ func (b *webRTCBridge) runPCMUPassthroughUplink(ctx context.Context, track *webr
 			}
 			return
 		}
-		if int(packet.PayloadType) != pcmuPayloadType {
+		if packet.PayloadType != uint8(track.PayloadType()) {
 			continue
 		}
 		if firstPacket {

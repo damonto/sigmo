@@ -24,7 +24,7 @@ export default defineConfig(({ mode }) => {
     build: {
       rolldownOptions: {
         output: {
-          advancedChunks: {
+          codeSplitting: {
             groups: [
               {
                 name: 'vue-vendor',
@@ -54,6 +54,16 @@ export default defineConfig(({ mode }) => {
         filename: 'sw.ts',
         injectRegister: null,
         manifest: false,
+        integration: {
+          configureCustomSWViteBuild(config) {
+            const output = config.build?.rollupOptions?.output
+            if (!output || Array.isArray(output)) return
+
+            // vite-plugin-pwa 2 sets this legacy option for the service worker build.
+            delete output.inlineDynamicImports
+            output.codeSplitting = false
+          },
+        },
         injectManifest: {
           globPatterns: [
             '**/*.{css,html,js,woff2}',

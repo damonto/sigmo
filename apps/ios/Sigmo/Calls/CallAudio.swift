@@ -37,6 +37,7 @@ final class CallAudio {
     @ObservationIgnored private var captureSink: (@Sendable (CallPCM) -> Void)?
     @ObservationIgnored private var renderSink: (@Sendable (CallPCM) -> Void)?
     @ObservationIgnored private var inputEnabled = true
+    @ObservationIgnored private var paused = false
     @ObservationIgnored private var local = false
     func startLocal() {
         stop()
@@ -114,6 +115,15 @@ final class CallAudio {
             }
         }
         do {
+            if let factory {
+                let supported = factory.rtpSenderCapabilities(forKind: "audio").codecs
+                let preferred = ["opus", "pcmu"].flatMap { name in
+                    supported.filter { $0.name.lowercased() == name }
+                }
+                for transceiver in peer.transceivers {
+                    try transceiver.setCodecPreferences(preferred, error: ())
+                }
+            }
             let offer = try await peer.offer(for: LKRTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil))
             guard generation == current else { throw CancellationError() }
             try await peer.setLocalDescription(offer)
@@ -212,6 +222,7 @@ final class CallAudio {
         routeTask?.cancel(); routeTask = nil
         socket?.close(); socket = nil
         peer?.close(); peer = nil
+        if paused { CallWebRTC.setPaused(false); paused = false }
         delegate = nil
         input = nil
         offerSent = false; remoteSet = false
@@ -235,6 +246,13 @@ final class CallAudio {
     func recordingInterrupted() {
         capture.markDiscontinuity()
         render.markDiscontinuity()
+    }
+
+    func setPaused(_ paused: Bool) {
+        guard !local, self.paused != paused else { return }
+        self.paused = paused
+        CallWebRTC.setPaused(paused)
+        recordingInterrupted()
     }
 
     func selectRoute(_ id: String) {

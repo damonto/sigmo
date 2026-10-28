@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import Intents
 
 // This fixture owns only memory and local sockets. UI tests never dial a modem.
 actor CallsFixture {
@@ -21,6 +22,20 @@ actor CallsFixture {
     static let profile = "8986000000000000000"
     static let backend = "fixture-call-backend"
 
+    #if compiler(>=6.4)
+    @diagnose(DeprecatedDeclaration, as: ignored, reason: "Fixtures must exercise the legacy audio intent still delivered by iOS")
+    #endif
+    static func legacyAudioIntent(contacts: [INPerson]?) -> INIntent {
+        INStartAudioCallIntent(destinationType: .normal, contacts: contacts)
+    }
+
+    #if compiler(>=6.4)
+    @diagnose(DeprecatedDeclaration, as: ignored, reason: "Fixtures must verify that legacy video intents are rejected")
+    #endif
+    static func legacyVideoIntent(contacts: [INPerson]?) -> INIntent {
+        INStartVideoCallIntent(contacts: contacts)
+    }
+
     @MainActor static func emitRecordingAudio(to audio: CallAudio) {
         guard ProcessInfo.processInfo.environment["SIGMO_UI_RECORDINGS"] == "1" else { return }
         // A local tone exercises capture, resampling, saving and playback in UI
@@ -39,7 +54,7 @@ actor CallsFixture {
 
     static func record(_ id: String = "test-call", state: String = "active", direction: String = "outgoing", owner: String = "fixture-call-client") -> CallRecord {
         let now = Date.now
-        return CallRecord(callID: id, backendId: backend, callUUID: UUID().uuidString, profileId: profile, ownerClientId: owner,
+        return CallRecord(callID: id, backendId: backend, callUUID: UUID().uuidString, profileId: profile, lineLabel: "Personal", ownerClientId: owner,
             route: "wifi_calling", direction: direction, number: "10086", state: state, hold: "none", reason: state == "ended" ? "normal" : "",
             startedAt: now.addingTimeInterval(-40).ISO8601Format(),
             answeredAt: ["ringing", "dialing"].contains(state) ? "" : now.addingTimeInterval(-35).ISO8601Format(),
