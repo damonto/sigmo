@@ -9,7 +9,7 @@ export function problemResponse(
 ): Response {
   return Response.json(
     {
-      type: `https://sigmo-pro.952007.xyz/problems/${code}`,
+      type: `https://sigmo.952007.xyz/problems/${code}`,
       title: catalog[code],
       status,
       detail,

@@ -125,7 +125,7 @@ protocol BrowserAuthenticating {
 
 @MainActor
 final class BrowserAuthentication: BrowserAuthenticating {
-    nonisolated static let callback = URL(string: "https://sigmo-pro.952007.xyz/auth/callback")!
+    nonisolated static let callback = URL(string: "https://sigmo.952007.xyz/auth/callback")!
     private var session: ASWebAuthenticationSession?
     // The authentication session holds its presentation context weakly.
     private var presentationContext: BrowserPresentationContext?

@@ -24,7 +24,7 @@ import (
 )
 
 // GatewayURL may be set by official release builds; subscriptions cannot override it.
-var GatewayURL = "https://sigmo-pro-api.id.workers.dev"
+var GatewayURL = "https://sigmo.952007.xyz"
 
 // Config supplies backend-owned state and a transport replaceable in integration tests.
 type Config struct {

@@ -4,7 +4,7 @@ import XCTest
 @MainActor
 final class CarrierLogoTests: XCTestCase {
     func testPLMNValidationPreservesLeadingZeroes() {
-        XCTAssertEqual(CarrierLogo.url(plmn: "310070")?.absoluteString, "https://sigmo-pro.952007.xyz/logo/310070")
+        XCTAssertEqual(CarrierLogo.url(plmn: "310070")?.absoluteString, "https://sigmo.952007.xyz/logo/310070")
         XCTAssertEqual(ESIMOwner(mcc: "310", mnc: "070", gid1: nil, gid2: nil).plmn, "310070")
         XCTAssertEqual(ESIMOwner(mcc: "310", mnc: "70", gid1: nil, gid2: nil).plmn, "31070")
         for plmn in ["", "310-070", "3107", "3100700", "../logo", "３１００７０"] {

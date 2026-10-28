@@ -25,6 +25,7 @@ apps/web/node_modules/
 apps/web/dist/
 apps/web/.eslintcache
 apps/web/*.tsbuildinfo
+api/
 
 .env
 .env.*
@@ -35,7 +36,6 @@ scripts/sigmo-keys/
 **/entitlement.json
 **/wfc.json
 **/ims.json
-pro-api/node_modules/
 **/.dev.vars*
 .codex/
 .agents/

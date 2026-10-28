@@ -81,6 +81,7 @@ jobs:
             BUILD_VERSION=${{ env.BUILD_VERSION }}
             BUILD_COMMIT=${{ github.sha }}
             SIGMO_WORKER_URL=${{ vars.SIGMO_WORKER_URL }}
+            SIGMO_PUSH_GATEWAY_URL=${{ vars.SIGMO_PUSH_GATEWAY_URL }}
             SIGMO_LICENSE_PUBLIC_KEY=${{ secrets.SIGMO_LICENSE_PUBLIC_KEY }}
           provenance: true
           sbom: true

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "sigmo-pro-api",
+      "name": "sigmo-api",
       "dependencies": {
         "@resvg/resvg-wasm": "2.6.2",
         "hono": "^4.13.14",

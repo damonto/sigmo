@@ -22,7 +22,7 @@ const MediaType = "application/problem+json"
 const MaxBodySize = 64 * 1024
 
 // TypePrefix is independent of the host serving an API or its deployment alias.
-const TypePrefix = "https://sigmo-pro.952007.xyz/problems/"
+const TypePrefix = "https://sigmo.952007.xyz/problems/"
 
 // Problem is the wire representation shared by the Worker and local backend.
 type Problem struct {

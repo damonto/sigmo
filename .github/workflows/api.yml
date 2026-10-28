@@ -1,25 +1,25 @@
-name: Verify Pro API
+name: Verify API
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths:
-      - "pro-api/**"
+      - "api/**"
       - "internal/pkg/apierror/**"
       - "scripts/sync-http-contract.py"
       - "apps/ios/Sigmo/Resources/HTTPProblems.json"
       - "apps/ios/SigmoTests/Fixtures/HTTPProblems.json"
-      - ".github/workflows/pro-api.yml"
+      - ".github/workflows/api.yml"
   pull_request:
     branches: [main]
     paths:
-      - "pro-api/**"
+      - "api/**"
       - "internal/pkg/apierror/**"
       - "scripts/sync-http-contract.py"
       - "apps/ios/Sigmo/Resources/HTTPProblems.json"
       - "apps/ios/SigmoTests/Fixtures/HTTPProblems.json"
-      - ".github/workflows/pro-api.yml"
+      - ".github/workflows/api.yml"
 
 permissions:
   contents: read
@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: pro-api
+        working-directory: api
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2

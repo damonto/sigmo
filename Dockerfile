@@ -24,7 +24,8 @@ WORKDIR /app
 
 ARG BUILD_VERSION=dev
 ARG BUILD_COMMIT=
-ARG SIGMO_WORKER_URL=https://sigmo-pro.952007.xyz
+ARG SIGMO_WORKER_URL=https://sigmo.952007.xyz
+ARG SIGMO_PUSH_GATEWAY_URL=https://sigmo.952007.xyz
 ARG SIGMO_LICENSE_PUBLIC_KEY=
 
 COPY go.mod go.sum ./
@@ -50,7 +51,8 @@ RUN case "$(go env GOARCH)" in \
     -X github.com/damonto/sigmo/internal/app/buildinfo.Commit=${BUILD_COMMIT} \
     -X github.com/damonto/sigmo/internal/app/buildinfo.Channel=stable \
     -X github.com/damonto/sigmo/internal/app/buildinfo.Distribution=container \
-    -X github.com/damonto/sigmo/internal/pkg/license.WorkerURL=${SIGMO_WORKER_URL:-https://sigmo-pro.952007.xyz} \
+    -X github.com/damonto/sigmo/internal/pkg/license.WorkerURL=${SIGMO_WORKER_URL:-https://sigmo.952007.xyz} \
+    -X github.com/damonto/sigmo/internal/pkg/nativepush.GatewayURL=${SIGMO_PUSH_GATEWAY_URL:-https://sigmo.952007.xyz} \
     ${license_flags}" -o /app/sigmo .
 
 FROM alpine:${ALPINE_VERSION} AS runner

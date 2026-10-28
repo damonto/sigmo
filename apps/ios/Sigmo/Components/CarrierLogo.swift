@@ -18,7 +18,7 @@ struct CarrierLogo: View {
     nonisolated static func url(plmn: String?) -> URL? {
         guard let plmn, (5...6).contains(plmn.utf8.count),
               plmn.utf8.allSatisfy({ (48...57).contains($0) }) else { return nil }
-        return URL(string: "https://sigmo-pro.952007.xyz/logo/\(plmn)")
+        return URL(string: "https://sigmo.952007.xyz/logo/\(plmn)")
     }
 
     var body: some View {

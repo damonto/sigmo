@@ -21,8 +21,8 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
-// NativeRedirectURL is the app-associated callback hosted by pro-api.
-const NativeRedirectURL = "https://sigmo-pro.952007.xyz/auth/callback"
+// NativeRedirectURL is the app-associated callback hosted by the Sigmo API.
+const NativeRedirectURL = "https://sigmo.952007.xyz/auth/callback"
 const accessTTL = 15 * time.Minute
 const transactionTTL = 5 * time.Minute
 

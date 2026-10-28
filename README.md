@@ -144,7 +144,7 @@ Runtime settings are managed in the Web UI and stored in SQLite:
 
 1. Put Sigmo behind a Cloudflare Access Self-hosted application and block
    direct access to the origin. Enable Managed OAuth and Dynamic Client
-   Registration with `https://sigmo-pro.952007.xyz/auth/callback` as the
+   Registration with `https://sigmo.952007.xyz/auth/callback` as the
    callback.
 2. In **Settings > Authentication**, select `Cloudflare Access` and enter the
    team URL, application AUD, and allowed `sub` values.
@@ -178,7 +178,9 @@ To run Sigmo as a background service, use Systemd.
 
 Client applications live in `apps/`: [Web](apps/web/README.md) and
 [iOS](apps/ios/README.md).
-The Go backend, including IMS and eSIM transfer, uses the root Go module. Official carrier configuration is delivered through the existing Pro API.
+The Go backend, including IMS and eSIM transfer, uses the root Go module. Shared
+services, including official carrier configuration delivery, run in the
+[Sigmo API](api/README.md).
 
 If you wish to contribute or modify the source:
 
@@ -208,12 +210,12 @@ From the repository root, use a private directory containing `entitlement.json`,
 outside version control.
 
 ```sh
-cd pro-api
+cd api
 bun install --frozen-lockfile
 bunx wrangler secret put SIGMO_CONFIG_ENCRYPTION_KEY < ../scripts/sigmo-keys/config-encryption.raw.b64
 cd ..
 scripts/publish-configs.sh /path/to/private/carrier-files --publish
-cd pro-api
+cd api
 bun run deploy:production
 ```
 

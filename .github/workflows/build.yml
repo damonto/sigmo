@@ -16,13 +16,13 @@ on:
     paths-ignore:
       - "**/*.md"
       - "apps/ios/**"
-      - "pro-api/**"
+      - "api/**"
 
   pull_request:
     branches: [main]
     paths-ignore:
       - "apps/ios/**"
-      - "pro-api/**"
+      - "api/**"
 
 permissions:
   contents: read
@@ -89,7 +89,7 @@ jobs:
                   git fetch --no-tags origin "${previous_commit}"
                 fi
                 git diff --name-only "${previous_commit}" "${GITHUB_SHA}" -- \
-                  . ':(exclude,glob)**/*.md' ':(exclude,glob)apps/ios/**' ':(exclude,glob)pro-api/**' \
+                  . ':(exclude,glob)**/*.md' ':(exclude,glob)apps/ios/**' ':(exclude,glob)api/**' \
                   > "${RUNNER_TEMP}/dev-changes.txt"
                 if [[ ! -s "${RUNNER_TEMP}/dev-changes.txt" ]]; then
                   should_build=false

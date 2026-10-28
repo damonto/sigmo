@@ -11,11 +11,11 @@ if [ -z "${RELEASE_PUBLIC_KEY}" ] && [ -s "${KEYS_DIR}/release-public.raw.b64" ]
     RELEASE_PUBLIC_KEY="$(<"${KEYS_DIR}/release-public.raw.b64")"
 fi
 ldflags="-X github.com/damonto/sigmo/internal/app/buildinfo.ReleasePublicKey=${RELEASE_PUBLIC_KEY}"
-ldflags+=" -X github.com/damonto/sigmo/internal/pkg/license.WorkerURL=${SIGMO_WORKER_URL:-https://sigmo-pro.952007.xyz}"
+ldflags+=" -X github.com/damonto/sigmo/internal/pkg/license.WorkerURL=${SIGMO_WORKER_URL:-https://sigmo.952007.xyz}"
 if [ -n "${LICENSE_PUBLIC_KEY}" ]; then
     ldflags+=" -X github.com/damonto/sigmo/internal/pkg/license.LicensePublicKey=${LICENSE_PUBLIC_KEY}"
 fi
-ldflags+=" -X github.com/damonto/sigmo/internal/pkg/nativepush.GatewayURL=${SIGMO_PUSH_GATEWAY_URL:-https://sigmo-pro.952007.xyz}"
+ldflags+=" -X github.com/damonto/sigmo/internal/pkg/nativepush.GatewayURL=${SIGMO_PUSH_GATEWAY_URL:-https://sigmo.952007.xyz}"
 cd "${ROOT_DIR}"
 output="${SIGMO_DEV_BIN:-${ROOT_DIR}/build/sigmo-dev}"
 mkdir -p "$(dirname "${output}")"

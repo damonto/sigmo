@@ -219,7 +219,7 @@ final class AuthenticationTests: XCTestCase {
             valid + "&state=" + proof.state,
             valid + "&code=second", valid + "&error=denied", valid + "#fragment",
             valid.replacingOccurrences(of: proof.state, with: "different-state"),
-            valid.replacingOccurrences(of: "sigmo-pro.952007.xyz", with: "evil.example"),
+            valid.replacingOccurrences(of: "sigmo.952007.xyz", with: "evil.example"),
         ] {
             XCTAssertThrowsError(try proof.code(from: XCTUnwrap(URL(string: raw))))
         }

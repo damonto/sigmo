@@ -78,7 +78,7 @@ struct BackendHTTPResponse: Sendable {
 
 enum HTTPProblem {
     static let mediaType = "application/problem+json"
-    static let typePrefix = "https://sigmo-pro.952007.xyz/problems/"
+    static let typePrefix = "https://sigmo.952007.xyz/problems/"
     static let maxBytes = 64 * 1024
     private static let catalog: [String: String] = {
         guard let url = Bundle.main.url(forResource: "HTTPProblems", withExtension: "json"),

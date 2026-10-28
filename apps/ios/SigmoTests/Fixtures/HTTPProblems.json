@@ -8,7 +8,7 @@
       "X-Request-ID": "request-1",
       "WWW-Authenticate": "Bearer realm=\"sigmo-local\""
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "invalid_session",
     "loginInvalid": true,
@@ -22,7 +22,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "invalid_session",
     "loginInvalid": false,
@@ -36,7 +36,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_push_credentials\",\"title\":\"Invalid Push Credentials\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_push_credentials\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/invalid_push_credentials\",\"title\":\"Invalid Push Credentials\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_push_credentials\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "invalid_push_credentials",
     "loginInvalid": false,
@@ -50,7 +50,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/push_token_unregistered\",\"title\":\"Push Token Unregistered\",\"status\":410,\"detail\":\"request was rejected\",\"error_code\":\"push_token_unregistered\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/push_token_unregistered\",\"title\":\"Push Token Unregistered\",\"status\":410,\"detail\":\"request was rejected\",\"error_code\":\"push_token_unregistered\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "push_token_unregistered",
     "loginInvalid": false,
@@ -64,7 +64,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_push_credentials\",\"title\":\"Invalid Push Credentials\",\"status\":503,\"detail\":\"request was rejected\",\"error_code\":\"invalid_push_credentials\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/invalid_push_credentials\",\"title\":\"Invalid Push Credentials\",\"status\":503,\"detail\":\"request was rejected\",\"error_code\":\"invalid_push_credentials\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "invalid_push_credentials",
     "loginInvalid": false,
@@ -78,7 +78,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":null,\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":null,\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "invalid_session",
     "loginInvalid": true,
@@ -92,7 +92,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\": \"https://sigmo-pro.952007.xyz/problems/invalid_session\", \"title\": \"Invalid Session\", \"status\": 401, \"detail\": \"request was rejected\", \"request_id\": \"request-1\"}",
+    "body": "{\"type\": \"https://sigmo.952007.xyz/problems/invalid_session\", \"title\": \"Invalid Session\", \"status\": 401, \"detail\": \"request was rejected\", \"request_id\": \"request-1\"}",
     "repeat": 0,
     "code": "invalid_session",
     "loginInvalid": true,
@@ -106,7 +106,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/not_registered\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/not_registered\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "",
     "loginInvalid": false,
@@ -134,7 +134,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"license_lease_expired\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"license_lease_expired\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "",
     "loginInvalid": false,
@@ -149,7 +149,7 @@
       "X-Request-ID": "request-1",
       "Retry-After": "90"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "",
     "loginInvalid": false,
@@ -163,7 +163,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"other-request\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/invalid_session\",\"title\":\"Invalid Session\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"other-request\"}",
     "repeat": 0,
     "code": "",
     "loginInvalid": false,
@@ -177,7 +177,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "request-1"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/invalid_session\",\"title\":\"\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/invalid_session\",\"title\":\"\",\"status\":401,\"detail\":\"request was rejected\",\"error_code\":\"invalid_session\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "",
     "loginInvalid": false,
@@ -277,7 +277,7 @@
       "X-Request-ID": "request-1",
       "Allow": "POST, OPTIONS"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/method_not_allowed\",\"title\":\"Method Not Allowed\",\"status\":405,\"detail\":\"request was rejected\",\"error_code\":\"method_not_allowed\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/method_not_allowed\",\"title\":\"Method Not Allowed\",\"status\":405,\"detail\":\"request was rejected\",\"error_code\":\"method_not_allowed\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "method_not_allowed",
     "loginInvalid": false,
@@ -292,7 +292,7 @@
       "X-Request-ID": "request-1",
       "Retry-After": "90"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/push_rate_limited\",\"title\":\"Push Rate Limited\",\"status\":429,\"detail\":\"request was rejected\",\"error_code\":\"push_rate_limited\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/push_rate_limited\",\"title\":\"Push Rate Limited\",\"status\":429,\"detail\":\"request was rejected\",\"error_code\":\"push_rate_limited\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "push_rate_limited",
     "loginInvalid": false,
@@ -307,7 +307,7 @@
       "X-Request-ID": "request-1",
       "Retry-After": "Fri, 09 Oct 2026 00:01:30 GMT"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/database_maintenance\",\"title\":\"Database Maintenance\",\"status\":503,\"detail\":\"request was rejected\",\"error_code\":\"database_maintenance\",\"request_id\":\"request-1\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/database_maintenance\",\"title\":\"Database Maintenance\",\"status\":503,\"detail\":\"request was rejected\",\"error_code\":\"database_maintenance\",\"request_id\":\"request-1\"}",
     "repeat": 0,
     "code": "database_maintenance",
     "loginInvalid": false,
@@ -321,7 +321,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "pin-request"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/sim_pin_incorrect\",\"title\":\"Incorrect SIM PIN\",\"status\":422,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"sim_pin_incorrect\",\"request_id\":\"pin-request\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/sim_pin_incorrect\",\"title\":\"Incorrect SIM PIN\",\"status\":422,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"sim_pin_incorrect\",\"request_id\":\"pin-request\"}",
     "repeat": 0,
     "code": "sim_pin_incorrect",
     "loginInvalid": false,
@@ -335,7 +335,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "pin-request"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/sim_puk_required\",\"title\":\"SIM PUK Required\",\"status\":409,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"sim_puk_required\",\"request_id\":\"pin-request\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/sim_puk_required\",\"title\":\"SIM PUK Required\",\"status\":409,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"sim_puk_required\",\"request_id\":\"pin-request\"}",
     "repeat": 0,
     "code": "sim_puk_required",
     "loginInvalid": false,
@@ -349,7 +349,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "pin-request"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/sim_target_changed\",\"title\":\"Active SIM Changed\",\"status\":409,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"sim_target_changed\",\"request_id\":\"pin-request\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/sim_target_changed\",\"title\":\"Active SIM Changed\",\"status\":409,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"sim_target_changed\",\"request_id\":\"pin-request\"}",
     "repeat": 0,
     "code": "sim_target_changed",
     "loginInvalid": false,
@@ -363,7 +363,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "pin-request"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/sim_pin_result_unknown\",\"title\":\"SIM PIN Result Unknown\",\"status\":504,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"sim_pin_result_unknown\",\"request_id\":\"pin-request\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/sim_pin_result_unknown\",\"title\":\"SIM PIN Result Unknown\",\"status\":504,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"sim_pin_result_unknown\",\"request_id\":\"pin-request\"}",
     "repeat": 0,
     "code": "sim_pin_result_unknown",
     "loginInvalid": false,
@@ -377,7 +377,7 @@
       "Content-Type": "application/problem+json",
       "X-Request-ID": "pin-request"
     },
-    "body": "{\"type\":\"https://sigmo-pro.952007.xyz/problems/enable_modem_after_unlock_failed\",\"title\":\"Enable Modem After Unlock Failed\",\"status\":500,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"enable_modem_after_unlock_failed\",\"request_id\":\"pin-request\"}",
+    "body": "{\"type\":\"https://sigmo.952007.xyz/problems/enable_modem_after_unlock_failed\",\"title\":\"Enable Modem After Unlock Failed\",\"status\":500,\"detail\":\"Read SIM PIN status before continuing\",\"error_code\":\"enable_modem_after_unlock_failed\",\"request_id\":\"pin-request\"}",
     "repeat": 0,
     "code": "enable_modem_after_unlock_failed",
     "loginInvalid": false,

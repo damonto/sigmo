@@ -36,7 +36,7 @@ const (
 var (
 	// WorkerURL and LicensePublicKey are injected into official release builds. They
 	// are intentionally not configurable at runtime.
-	WorkerURL        = "https://sigmo-pro.952007.xyz"
+	WorkerURL        = "https://sigmo.952007.xyz"
 	LicensePublicKey = "Yajmu3q2ipF73eZ5KIXjItWQvteYlOTIp0gGreh1i3w="
 
 	errExplicitUnauthorized = errors.New("product authorization is revoked or expired")

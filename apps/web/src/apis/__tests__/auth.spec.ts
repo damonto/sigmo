@@ -9,7 +9,7 @@ describe('browser authentication transport', () => {
     fetchMock.mockResolvedValueOnce(
       Response.json(
         {
-          type: 'https://sigmo-pro.952007.xyz/problems/invalid_session',
+          type: 'https://sigmo.952007.xyz/problems/invalid_session',
           title: 'Invalid Session',
           status: 401,
         },

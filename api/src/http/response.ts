@@ -1,7 +1,7 @@
 import catalog from '../../../internal/pkg/apierror/catalog.json';
 
 export const PROBLEM_MEDIA_TYPE = 'application/problem+json';
-export const PROBLEM_TYPE_PREFIX = 'https://sigmo-pro.952007.xyz/problems/';
+export const PROBLEM_TYPE_PREFIX = 'https://sigmo.952007.xyz/problems/';
 export type ProblemCode = keyof typeof catalog;
 
 const JSON_HEADERS = {

@@ -1,5 +1,5 @@
 {
-  "name": "sigmo-pro-api",
+  "name": "sigmo-api",
   "private": true,
   "type": "module",
   "scripts": {

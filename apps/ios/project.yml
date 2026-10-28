@@ -18,7 +18,7 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     SIGMO_BUNDLE_ID: com.damon.sigmo
-    SIGMO_PUSH_GATEWAY_URL: https://sigmo-pro.952007.xyz
+    SIGMO_PUSH_GATEWAY_URL: https://sigmo.952007.xyz
   configs:
     Debug:
       SIGMO_APNS_ENVIRONMENT: development
@@ -48,8 +48,8 @@ targets:
         aps-environment: $(SIGMO_APNS_ENVIRONMENT)
         com.apple.security.smartcard: true
         com.apple.developer.associated-domains:
-          - webcredentials:sigmo-pro.952007.xyz
-          - applinks:sigmo-pro.952007.xyz
+          - webcredentials:sigmo.952007.xyz
+          - applinks:sigmo.952007.xyz
         keychain-access-groups:
           - $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID)
           - $(AppIdentifierPrefix)$(SIGMO_BUNDLE_ID).push

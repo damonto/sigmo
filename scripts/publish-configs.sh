@@ -22,7 +22,7 @@ revision="$(cd "${ROOT_DIR}" && go run ./cmd/carrierconfig "${args[@]}")"
 echo "Prepared encrypted configuration ${revision} in ${OUTPUT_DIR}"
 
 if [ "${2:-}" = "--publish" ]; then
-	cd "${ROOT_DIR}/pro-api"
+	cd "${ROOT_DIR}/api"
 	bucket="${SIGMO_CONFIG_BUCKET:-sigmo}"
 	# Publish the complete immutable snapshot before replacing the small pointer.
 	bunx wrangler r2 object put "${bucket}/configs/releases/${revision}.enc" \

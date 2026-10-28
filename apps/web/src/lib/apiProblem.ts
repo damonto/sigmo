@@ -3,7 +3,7 @@ import type { ApiErrorResponse } from '@/types/api'
 
 export const PROBLEM_MEDIA_TYPE = 'application/problem+json'
 export const API_ACCEPT = `application/json, ${PROBLEM_MEDIA_TYPE}`
-const TYPE_PREFIX = 'https://sigmo-pro.952007.xyz/problems/'
+const TYPE_PREFIX = 'https://sigmo.952007.xyz/problems/'
 const MAX_ERROR_BYTES = 64 * 1024
 
 /** ApiError is a UI model, not the Problem Details wire representation. */

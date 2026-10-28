@@ -20,7 +20,7 @@ Maintain the existing Sigmo architecture with small, reviewable changes. Prefer 
 | `internal/pkg/storage/` | Go SQLite persistence, sqlc queries, and goose migrations. |
 | `apps/web/` | Vue, TypeScript, Vite, and Bun client; production `dist` assets are embedded in the Go binary. |
 | `apps/ios/` | SwiftUI client; `project.yml` is the source for the generated Xcode project. |
-| `pro-api/` | Separate TypeScript/Hono Cloudflare Worker with its own persistence and tooling. |
+| `api/` | Separate TypeScript/Hono Cloudflare Worker with its own persistence and tooling. |
 
 - IMS, transfer and licensing share the root Go module. Keep `server.Runtime` extension points and register feature routes through `Runtime.AddRoute`. No private carrier JSON may be embedded in code or checked into Git.
 - Keep clients under `apps/`; use `apps/android/` if Android support is added.
@@ -45,7 +45,7 @@ Use the [Google Go Style Guide](https://google.github.io/styleguide/go/guide) as
 
 ## Go storage: sqlc and goose
 
-These rules apply to `internal/pkg/storage/`, not the separate `pro-api/` persistence implementation. Use the existing `github.com/ncruces/go-sqlite3` driver with `database/sql`, sqlc for query generation, and goose for migrations. sqlc is a SQL code generator, not an ORM. See the [storage guide](internal/pkg/storage/README.md) for implementation details.
+These rules apply to `internal/pkg/storage/`, not the separate `api/` persistence implementation. Use the existing `github.com/ncruces/go-sqlite3` driver with `database/sql`, sqlc for query generation, and goose for migrations. sqlc is a SQL code generator, not an ORM. See the [storage guide](internal/pkg/storage/README.md) for implementation details.
 
 ### Queries and generated code
 
@@ -77,7 +77,7 @@ Use fakes, temporary databases, and local test servers by default. Tests must no
 | Query SQL, schema migrations, sqlc config or generator | Repository root | `go generate ./internal/pkg/storage`; review output and confirm a second run produces identical files. Run public checks for storage implementation or schema changes. |
 | Web code | `apps/web/` | `bun run test:unit --run` and `bun run type-check` |
 | Web build or embedded assets | `apps/web/` | Also run `bun run build --mode prod` and the affected Go build. |
-| Pro API code | `pro-api/` | `bun run lint`, `bun run format:check`, `bun run type-check`, and `bun run test`; add `bun run dry-run` for build/config changes. |
+| API code | `api/` | `bun run lint`, `bun run format:check`, `bun run type-check`, and `bun run test`; add `bun run dry-run` for build/config changes. |
 | Shared HTTP error contract | Repository root | `python3 scripts/sync-http-contract.py --check` and affected consumer tests. |
 | iOS code | macOS/Xcode | Follow [apps/ios/README.md](apps/ios/README.md) and [scripts/ios/MCP.md](scripts/ios/MCP.md); build/test the `Sigmo` scheme with local fixtures. |
 | iOS settings or localization | Repository root | Also run `python3 apps/ios/scripts/check_settings.py`. |

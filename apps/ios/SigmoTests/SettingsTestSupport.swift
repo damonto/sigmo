@@ -34,7 +34,7 @@ actor SettingsTestServer {
     }
     func release() { held?.resume(); held = nil }
     func oidcTestCallback() -> URL {
-        var parts = URLComponents(string: "https://sigmo-pro.952007.xyz/auth/callback")!
+        var parts = URLComponents(string: "https://sigmo.952007.xyz/auth/callback")!
         parts.queryItems = [
             URLQueryItem(name: "state", value: server.oidcTestState),
             URLQueryItem(name: "code", value: server.oidcTestID),

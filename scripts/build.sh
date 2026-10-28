@@ -71,8 +71,8 @@ build_target() {
 	ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Target=${name}"
 	ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.Distribution=${SIGMO_DISTRIBUTION:-developer}"
 	ldflags+=" -X github.com/damonto/sigmo/internal/app/buildinfo.ReleasePublicKey=${SIGMO_RELEASE_PUBLIC_KEY:-}"
-	ldflags+=" -X github.com/damonto/sigmo/internal/pkg/license.WorkerURL=${SIGMO_WORKER_URL:-https://sigmo-pro.952007.xyz}"
-	ldflags+=" -X github.com/damonto/sigmo/internal/pkg/nativepush.GatewayURL=${SIGMO_PUSH_GATEWAY_URL:-https://sigmo-pro.952007.xyz}"
+	ldflags+=" -X github.com/damonto/sigmo/internal/pkg/license.WorkerURL=${SIGMO_WORKER_URL:-https://sigmo.952007.xyz}"
+	ldflags+=" -X github.com/damonto/sigmo/internal/pkg/nativepush.GatewayURL=${SIGMO_PUSH_GATEWAY_URL:-https://sigmo.952007.xyz}"
 	if [ -n "${SIGMO_LICENSE_PUBLIC_KEY:-}" ]; then
 		ldflags+=" -X github.com/damonto/sigmo/internal/pkg/license.LicensePublicKey=${SIGMO_LICENSE_PUBLIC_KEY}"
 	fi

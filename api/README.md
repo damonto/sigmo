@@ -1,13 +1,18 @@
-# Sigmo Pro API
+# Sigmo API
 
-This Worker owns the Telegram device pairing flow, signed Pro leases, release
-metadata, encrypted carrier configurations, and short-lived R2 download tickets.
+This Worker provides encrypted carrier configurations, carrier logos, native
+push, and the iOS sign-in callback. It also owns Telegram device pairing, signed
+Pro leases, release metadata, and short-lived R2 download tickets.
 See [carrier configuration publishing](../README.md#carrier-configuration-publishing)
 for the storage secret, upload script, and deployment commands. The R2 bucket must
 stay private: do not enable an `r2.dev` hostname, public bucket access, or a custom
 domain for it. Binaries are read only through the `BUCKET` Worker
 binding. The Worker keeps a normalized carrier catalog at
 `carrier-logos/catalog.json` and serves proxied PNGs through `/logo/:plmn`.
+
+The default API address is `https://sigmo.952007.xyz`.
+Deploy this API update before releasing backends and clients that use the new
+address. Problem Details type URIs also use `https://sigmo.952007.xyz/problems/`.
 
 ## Resources
 
@@ -115,6 +120,8 @@ Also configure these repository values for publishing:
   `SIGMO_LICENSE_PUBLIC_KEY`, `SIGMO_R2_ACCESS_KEY_ID`,
   `SIGMO_R2_SECRET_ACCESS_KEY`, and `SIGMO_R2_ACCOUNT_ID`.
 - Variable: `SIGMO_WORKER_URL`. The publishing workflow uses the `sigmo` bucket.
+- Variable: `SIGMO_PUSH_GATEWAY_URL` for a separate native push gateway. Both
+  API URLs default to `https://sigmo.952007.xyz` when unset or empty.
 
 The R2 access key should be scoped only to the `sigmo` bucket.
 
@@ -244,12 +251,12 @@ then switches the channel's fixed `latest` manifest:
 stable/latest/manifest.json
 stable/versions/v1.2.3/manifest.json
 stable/versions/v1.2.3/manifest.json.sig
-stable/versions/v1.2.3/sigmo-pro-<target>.gz
+stable/versions/v1.2.3/sigmo-<target>.gz
 
 dev/latest/manifest.json
 dev/versions/dev-01234567/manifest.json
 dev/versions/dev-01234567/manifest.json.sig
-dev/versions/dev-01234567/sigmo-pro-<target>.gz
+dev/versions/dev-01234567/sigmo-<target>.gz
 ```
 
 After the switch succeeds, CI removes every other version prefix in that
@@ -276,7 +283,7 @@ the compressed bytes with `Content-Type: application/gzip` and never sets
    entitlement status.
 5. The user runs `/download stable` (or `/download dev`) and downloads the
    matching `.gz` artifact from the 5-minute Worker link. After downloading,
-   run `gzip -d sigmo-pro-<target>.gz` and `chmod +x sigmo-pro-<target>`.
+   run `gzip -d sigmo-<target>.gz` and `chmod +x sigmo-<target>`.
 6. On first startup, the Pro client opens `/start <pairing_id>` and completes
    device authorization.
 7. The authorized device continues through the existing lease-based automatic
@@ -287,7 +294,7 @@ the compressed bytes with `Content-Type: application/gzip` and never sets
 ## Native sign-in callback
 
 The Worker hosts `/auth/callback` and `/.well-known/apple-app-site-association` on
-`sigmo-pro.952007.xyz`. The callback is a static fallback for iOS HTTPS browser
+`sigmo.952007.xyz`. The callback is a static fallback for iOS HTTPS browser
 authentication and never reflects authorization parameters. Automatic invocation
 logs and traces are disabled so callback queries do not enter request telemetry.
 
