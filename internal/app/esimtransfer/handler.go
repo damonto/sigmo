@@ -1,12 +1,9 @@
 package esimtransfer
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"net/http"
 
-	sgp22 "github.com/damonto/euicc-go/v2"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v5"
 
@@ -105,23 +102,4 @@ func transferProfileError(c *echo.Context, err error) error {
 		return httpapi.BadRequest(c, "transfer_invalid_request", err)
 	}
 	return httpapi.Internal(c, "list_transfer_profiles_failed", err)
-}
-
-func profileActionConfig(core *coreesim.Handler, cfg Config) (Config, error) {
-	if core == nil {
-		return Config{}, errors.New("eSIM handler is required")
-	}
-	cfg.EnableProfile = func(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
-		if err := core.EnableProfile(ctx, modem, seID, iccid); err != nil {
-			return fmt.Errorf("enable profile: %w", err)
-		}
-		return nil
-	}
-	cfg.DeleteProfile = func(ctx context.Context, modem *mmodem.Modem, seID string, iccid sgp22.ICCID) error {
-		if err := core.DeleteProfile(ctx, modem, seID, iccid); err != nil {
-			return fmt.Errorf("delete profile: %w", err)
-		}
-		return nil
-	}
-	return cfg, nil
 }

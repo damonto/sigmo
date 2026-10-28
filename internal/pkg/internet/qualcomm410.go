@@ -533,7 +533,7 @@ func configureQualcomm410Bearer(ctx context.Context, state connectionStateStore,
 func configureQualcomm410BearerWithOps(ctx context.Context, state connectionStateStore, modemID, interfaceName string, ip4, ip6 mmodem.BearerIPConfig, prefs Preferences, ops qualcomm410NetworkOps) (tracked trackedConnection, err error) {
 	interfaceName = strings.TrimSpace(interfaceName)
 	if interfaceName != mmodem.Qualcomm410InternetInterface {
-		return tracked, fmt.Errorf("Qualcomm 410 Internet bearer interface is %q, want %q", interfaceName, mmodem.Qualcomm410InternetInterface)
+		return tracked, fmt.Errorf("unexpected Qualcomm 410 Internet bearer interface %q, want %q", interfaceName, mmodem.Qualcomm410InternetInterface)
 	}
 
 	addresses, peers, routes, mtu, err := qualcomm410BearerNetwork(interfaceName, routeMetric(prefs.DefaultRoute), ip4, ip6)
@@ -680,7 +680,7 @@ func qualcomm410AddressPair(config mmodem.BearerIPConfig, family int) (netip.Pre
 	peer = peer.Unmap()
 	wantIPv4 := family == netlink.FamilyIPv4
 	if local.Is4() != wantIPv4 || peer.Is4() != wantIPv4 || local.IsUnspecified() || peer.IsUnspecified() {
-		return netip.Prefix{}, netip.Addr{}, false, fmt.Errorf("Qualcomm 410 bearer address %s and peer %s do not match IP family", local, peer)
+		return netip.Prefix{}, netip.Addr{}, false, fmt.Errorf("invalid Qualcomm 410 bearer address %s and peer %s for IP family", local, peer)
 	}
 	return netip.PrefixFrom(local, local.BitLen()), peer, true, nil
 }

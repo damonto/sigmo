@@ -143,6 +143,7 @@ func wifiCallingHTTPClient(underlay imsgo.Underlay) *http.Client {
 	}
 	transport.Proxy = nil
 	transport.DialContext = underlay.DialContext
+	//lint:ignore SA1019 Clear the legacy TLS hook so HTTPS uses the selected underlay through DialContext.
 	transport.DialTLS = nil
 	transport.DialTLSContext = nil
 	return &http.Client{Transport: transport, Timeout: 30 * time.Second}

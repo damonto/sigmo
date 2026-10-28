@@ -2,17 +2,12 @@ package license
 
 import (
 	"errors"
-	"fmt"
 	"github.com/damonto/sigmo/internal/pkg/apierror"
 	"io"
 	"mime"
 	"net/http"
 	"time"
 )
-
-func readServiceResponseError(resp *http.Response, action string) error {
-	return fmt.Errorf("%s: %w", action, apierror.Read(resp))
-}
 
 func readServiceJSON(resp *http.Response) ([]byte, error) {
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))

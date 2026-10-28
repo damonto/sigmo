@@ -128,10 +128,10 @@ func (s Settings) ValidateWithOptions(options ValidationOptions) error {
 	case "cloudflare_access":
 		u, err := url.Parse(a.CloudflareAccess.TeamDomain)
 		if err != nil || !secureURL(a.CloudflareAccess.TeamDomain) || u.Path != "" || !strings.HasSuffix(u.Hostname(), ".cloudflareaccess.com") || u.Port() != "" {
-			return errors.New("Access team domain must be https://<team>.cloudflareaccess.com")
+			return errors.New("configure Access: team domain must be https://<team>.cloudflareaccess.com")
 		}
 		if a.CloudflareAccess.Audience == "" || !validSubjectList(a.CloudflareAccess.AllowedSubjects, options.AllowEmptyAccessSubjects) {
-			return errors.New("Access audience and allowed subjects are required")
+			return errors.New("configure Access: audience and allowed subjects are required")
 		}
 	default:
 		return errors.New("unknown authentication mode")

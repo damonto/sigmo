@@ -285,7 +285,7 @@ func (s *wifiCallingSettingsStore) Get(ctx context.Context, profileID string) (W
 		}
 		return WiFiCallingSettings{}, fmt.Errorf("read wifi calling settings: %w", err)
 	}
-	return ResolveWiFiCallingSettings(nil, WiFiCallingSettings{Enabled: record.Enabled, Underlay: record.Underlay})
+	return ResolveWiFiCallingSettings(nil, WiFiCallingSettings(record))
 }
 
 func (s *wifiCallingSettingsStore) Put(ctx context.Context, profileID string, settings WiFiCallingSettings) error {
@@ -300,7 +300,7 @@ func (s *wifiCallingSettingsStore) Put(ctx context.Context, profileID string, se
 	if err != nil {
 		return err
 	}
-	record := wifiCallingSettingsRecord{Enabled: settings.Enabled, Underlay: settings.Underlay}
+	record := wifiCallingSettingsRecord(settings)
 	if err := s.store.Put(ctx, scope, keyWiFiCallingSettings, record); err != nil {
 		return fmt.Errorf("save wifi calling settings: %w", err)
 	}

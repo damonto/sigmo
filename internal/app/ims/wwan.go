@@ -193,7 +193,7 @@ func validateDedicatedQMIWWANConfig(cfg WWANConfig, validateLayout func() error)
 		return fmt.Errorf("unsupported dedicated QMI control port %q", controlPort)
 	}
 	if strings.TrimSpace(cfg.InterfaceName) != mmodem.Qualcomm410IMSInterface {
-		return fmt.Errorf("Qualcomm 410 IMS interface must be %s", mmodem.Qualcomm410IMSInterface)
+		return fmt.Errorf("invalid Qualcomm 410 IMS interface: must be %s", mmodem.Qualcomm410IMSInterface)
 	}
 	if err := validateLayout(); err != nil {
 		return fmt.Errorf("validate Qualcomm 410 layout: %w", err)

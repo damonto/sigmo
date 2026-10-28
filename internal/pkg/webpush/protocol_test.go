@@ -34,7 +34,7 @@ func TestVAPIDPrivateKeyTextRoundTrip(t *testing.T) {
 	if err := decoded.UnmarshalText(text); err != nil {
 		t.Fatalf("UnmarshalText() error = %v", err)
 	}
-	if decoded.D.Cmp(key.D) != 0 || !decoded.PublicKey.Equal(&key.PublicKey) {
+	if !decoded.PrivateKey.Equal(key) {
 		t.Fatal("UnmarshalText() key does not match original")
 	}
 }

@@ -174,7 +174,7 @@ func (c *Controller) refresh(ctx context.Context) error {
 	c.rotationMu.Lock()
 	defer c.rotationMu.Unlock()
 	if c.baseURL == "" || len(c.licensePublicKey) == 0 {
-		return errors.New("Pro authorization service is not configured")
+		return errors.New("authorization service for Pro is not configured")
 	}
 	session, err := c.prepareRotation(ctx)
 	if err != nil {

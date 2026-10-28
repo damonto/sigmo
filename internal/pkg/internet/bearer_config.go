@@ -154,10 +154,6 @@ func cleanupBearer(ctx context.Context, stateStore connectionStateStore, modemID
 	}, routeOps)
 }
 
-func cleanupApplied(ctx context.Context, stateStore connectionStateStore, tracked trackedConnection) error {
-	return cleanupAppliedWithRouteOps(ctx, stateStore, tracked, defaultRouteOperations())
-}
-
 func cleanupAppliedWithRouteOps(ctx context.Context, stateStore connectionStateStore, tracked trackedConnection, routeOps defaultRouteOps) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -368,21 +364,6 @@ func currentBearer(ctx context.Context, modem internetModem) (bearerState, error
 		}
 	}
 	return bearerState{bearer: fallback}, nil
-}
-
-func apnFromBearers(ctx context.Context, modem internetModem) (string, error) {
-	current, err := currentBearer(ctx, modem)
-	if err != nil {
-		return "", err
-	}
-	if current.bearer == nil {
-		return "", nil
-	}
-	apn, err := current.bearer.APN(ctx)
-	if err != nil {
-		return "", nil
-	}
-	return strings.TrimSpace(apn), nil
 }
 
 func modemAPNCriteria(modem internetModem) apnCriteria {

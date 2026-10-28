@@ -234,12 +234,12 @@ func newControllerTestEnv(t *testing.T) controllerTestEnv {
 	}
 	modemIDs := func(input controllerTestInput) []string { return []string{input.ModemID} }
 	if err := AddTool(catalog, "test.read", ReadTool("read_status", "Read status"), modemIDs, func(_ context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input controllerTestInput) (controllerTestOutput, error) {
-		return controllerTestOutput{ModemID: input.ModemID}, nil
+		return controllerTestOutput(input), nil
 	}); err != nil {
 		t.Fatalf("AddTool(read) error = %v", err)
 	}
 	if err := AddTool(catalog, "test.write", WriteTool("change_status", "Change status", true, false), modemIDs, func(_ context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input controllerTestInput) (controllerTestOutput, error) {
-		return controllerTestOutput{ModemID: input.ModemID}, nil
+		return controllerTestOutput(input), nil
 	}); err != nil {
 		t.Fatalf("AddTool(write) error = %v", err)
 	}

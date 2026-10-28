@@ -651,6 +651,7 @@ func newWebsheetHTTPClient(base *http.Client, allowPrivate bool, lookupNetIP fun
 	}
 	transport.Proxy = nil
 	transport.DialContext = validatedDialContext(lookupNetIP, dialContext)
+	//lint:ignore SA1019 Clear the legacy TLS hook so HTTPS cannot bypass address validation in DialContext.
 	transport.DialTLS = nil
 	transport.DialTLSContext = nil
 	client.Transport = transport

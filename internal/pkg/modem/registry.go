@@ -26,7 +26,7 @@ var (
 	ErrNotFound                          = errors.New("modem not found")
 	errModemRequired                     = errors.New("modem is required")
 	errRegistryClosed                    = errors.New("modem registry is closed")
-	errQualcomm410Data5PortNotDiscovered = errors.New("Qualcomm 410 DATA5 QMI control port is not mapped to a discovered port")
+	errQualcomm410Data5PortNotDiscovered = errors.New("dedicated Qualcomm 410 DATA5 QMI control port is not mapped to a discovered port")
 )
 
 type Registry struct {

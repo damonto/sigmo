@@ -151,10 +151,7 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return httpapi.BadRequest(c, "update_volte_settings_invalid_request", err)
 	}
-	if err := h.connectivity.ReplaceVoLTESettings(ctx, modem, VoLTESettings{
-		Enabled:  req.Enabled,
-		DataPath: req.DataPath,
-	}); err != nil {
+	if err := h.connectivity.ReplaceVoLTESettings(ctx, modem, VoLTESettings(req)); err != nil {
 		switch {
 		case errors.Is(err, ErrVoLTEDataPathRequired), errors.Is(err, ErrVoLTEDataPathUnsupported):
 			return httpapi.UnprocessableEntity(c, "update_volte_settings_invalid_request", err)

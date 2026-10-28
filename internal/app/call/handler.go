@@ -517,11 +517,7 @@ func ResponsesFromCalls(calls []storage.Call) []CallResponse {
 func buildWebRTCICEServersResponse(servers []WebRTCICEServer) WebRTCICEServersResponse {
 	out := make([]WebRTCICEServerResponse, 0, len(servers))
 	for _, server := range servers {
-		out = append(out, WebRTCICEServerResponse{
-			URLs:       server.URLs,
-			Username:   server.Username,
-			Credential: server.Credential,
-		})
+		out = append(out, WebRTCICEServerResponse(server))
 	}
 	return WebRTCICEServersResponse{ICEServers: out}
 }

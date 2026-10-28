@@ -61,7 +61,7 @@ func TestWiFiCallingSettingsStoreUnderlay(t *testing.T) {
 	if err := store.Get(ctx, "profile:profile-1", keyWiFiCallingSettings, &stored); err != nil {
 		t.Fatalf("read stored record: %v", err)
 	}
-	wantRecord := wifiCallingSettingsRecord{Enabled: want.Enabled, Underlay: want.Underlay}
+	wantRecord := wifiCallingSettingsRecord(want)
 	if stored != wantRecord {
 		t.Fatalf("stored record = %+v, want %+v", stored, wantRecord)
 	}
