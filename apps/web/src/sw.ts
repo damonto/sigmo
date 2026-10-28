@@ -144,5 +144,3 @@ function hashManifest(entries: typeof precacheManifest) {
   }
   return (hash >>> 0).toString(16)
 }
-
-export {}

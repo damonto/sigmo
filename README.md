@@ -182,7 +182,7 @@ The Go backend, including IMS and eSIM transfer, uses the root Go module. Offici
 
 If you wish to contribute or modify the source:
 
-1.  **Prerequisites**: Go 1.27.1, Bun (for Vue).
+1.  **Prerequisites**: Go 1.27.3, Bun (for Vue).
 2.  **Build Frontend**:
     ```bash
     (cd apps/web && bun install && bun run build)
