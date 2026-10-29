@@ -22,7 +22,10 @@ private enum InternetPageKind {
 }
 
 private struct InternetPage: View {
-    private enum Action { case connect(Bool), options(InternetConnectionOptions) }
+    private enum Action {
+        case connect(Bool)
+        case options(InternetConnectionOptions, keyPath: WritableKeyPath<InternetConnectionOptions, Bool>)
+    }
     @Bindable var state: InternetState
     let page: InternetPageKind
     @State private var action: ConnectionAction<Action>?
@@ -49,14 +52,15 @@ private struct InternetPage: View {
                 if state.connection == nil {
                     ConnectionInitialValue(loading: state.loadFailure == nil)
                 } else if state.connection?.knownStatus == true {
-                    Toggle("connection.internet", isOn: Binding(
+                    Toggle(isOn: Binding(
                         get: { state.connected }, set: { action = .init(value: .connect($0)) }
-                    ))
+                    )) {
+                        InlineProgressLabel(isWorking: changingConnection) { Text("connection.internet") }
+                    }
                     .disabled(!state.canChange || action != nil)
                     .accessibilityIdentifier("internetConnected")
                     valueRow(title: "connection.status", value: detailText(state.statusKey))
                 } else { ConnectionInitialValue(loading: false) }
-                if state.updating { ConnectionProgress() }
             }
             Section {
                 NavigationLink {
@@ -168,11 +172,25 @@ private struct InternetPage: View {
             set: { value in
                 var options = state.options
                 options[keyPath: keyPath] = value
-                action = .init(value: .options(options))
+                action = .init(value: .options(options, keyPath: keyPath))
             }
-        )) { Text(detailText(title)).fixedSize(horizontal: false, vertical: true) }
+        )) {
+            InlineProgressLabel(isWorking: changingOption(keyPath)) {
+                Text(detailText(title)).fixedSize(horizontal: false, vertical: true)
+            }
+        }
         .disabled(!state.canEditOptions || action != nil)
         .accessibilityIdentifier(identifier)
+    }
+
+    private var changingConnection: Bool {
+        if case .connect = action?.value { return true }
+        return false
+    }
+
+    private func changingOption(_ keyPath: WritableKeyPath<InternetConnectionOptions, Bool>) -> Bool {
+        if case .options(_, let pendingKeyPath) = action?.value { return pendingKeyPath == keyPath }
+        return false
     }
 
     @ViewBuilder private var detailSections: some View {
@@ -245,7 +263,7 @@ private struct InternetPage: View {
         guard let action else { return }
         switch action.value {
         case .connect(let enabled): await state.setConnected(enabled)
-        case .options(let options): await state.updateOptions(options)
+        case .options(let options, _): await state.updateOptions(options)
         }
         if self.action?.id == action.id, !Task.isCancelled { self.action = nil }
     }

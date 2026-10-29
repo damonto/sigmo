@@ -506,7 +506,7 @@ private struct ModemDetailScreen: View {
                 if profiles.isEmpty, state.profilesLoaded {
                     Text("detail.noProfiles").foregroundStyle(.secondary)
                 }
-                AsyncActionButton(id: "addESIM-" + element.id, minimumLabelHeight: nil, action: {
+                AsyncActionButton(id: "addESIM-" + element.id, action: {
                     await prepareFlow(seID: element.id)
                 }) {
                     Text("detail.setupTitle").frame(maxWidth: .infinity, alignment: .leading)

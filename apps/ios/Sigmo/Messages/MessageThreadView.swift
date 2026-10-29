@@ -180,15 +180,10 @@ struct MessageComposer: View {
     }
 
     private var sendButton: some View {
-        Button(action: send) {
+        LoadingButton(isWorking: sending, action: send) {
             Image(systemName: "arrow.up")
                 .font(.body.weight(.semibold))
                 .frame(minWidth: 20, minHeight: 20)
-                // Preserve the scaled button size while showing progress.
-                .opacity(sending ? 0 : 1)
-                .overlay {
-                    if sending { ProgressView() }
-                }
         }
         .buttonStyle(.glassProminent)
         .buttonBorderShape(.circle)

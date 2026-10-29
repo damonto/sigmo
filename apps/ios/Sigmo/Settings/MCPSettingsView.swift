@@ -22,9 +22,11 @@ struct MCPSettingsView: View {
             Form {
                 if let settings = state.settings {
                     Section {
-                        Toggle("settings.mcp.enabled", isOn: Binding(get: { settings.enabled }, set: { value in
+                        Toggle(isOn: Binding(get: { settings.enabled }, set: { value in
                             pendingEnabled = value
-                        }))
+                        })) {
+                            InlineProgressLabel(isWorking: pendingEnabled != nil) { Text("settings.mcp.enabled") }
+                        }
                         .disabled(state.busy || pendingEnabled != nil).accessibilityIdentifier("mcp-enabled")
                         Text("settings.mcp.securityDescription")
                             .font(.footnote).foregroundStyle(.secondary)
@@ -77,7 +79,7 @@ struct MCPSettingsView: View {
                         }
                     } header: { Text("settings.mcp.auditTitle") }
                 }
-                if state.busy { ProgressView("settings.native.working") }
+                if state.busy && state.settings == nil { ProgressView("settings.native.working") }
             }
             .detailErrorAlert(creating ? nil : state.failure)
             .refreshable { await state.load() }
@@ -119,8 +121,12 @@ private struct MCPKeyDetailView: View {
                 if let key = state.keys.first(where: { $0.id == keyID }) {
                     keyDetails(key)
                     if key.status == "active" {
-                        Button("settings.mcp.revoke", role: .destructive) { revoking = true }
-                            .disabled(state.busy).accessibilityIdentifier("revoke-\(key.id)")
+                        LoadingButton(role: .destructive, isWorking: revocationRequested) {
+                            revoking = true
+                        } label: {
+                            Text("settings.mcp.revoke")
+                        }
+                        .disabled(state.busy).accessibilityIdentifier("revoke-\(key.id)")
                     }
                 }
             }

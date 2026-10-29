@@ -50,6 +50,7 @@ actor DetailFixtureServer {
         case delayedActivation, activationFailure
         case mixedTransferProfiles, unsupportedTransferProfiles
         case delayedSettings, unavailableSettings, unsupportedSettings, settingsWriteFailure
+        case delayedSIMPIN
         case connectionSetup, connectionScan, connectionScanError, connectionEmptyNetworks, connectionReadFailure, connectionWriteFailure, connectionMBIM, connectionUnlicensed
     }
 
@@ -135,7 +136,9 @@ actor DetailFixtureServer {
         case .connectionSetup:
             connection.wifiRequiresSetup = true
             connection.wifi.emergencyAddressUpdateAvailable = true
-        case .connectionScan: connection.scanPolls = 2
+        case .connectionScan:
+            // Keep the busy control visible long enough for UI automation to inspect it.
+            connection.scanPolls = 8
         case .connectionScanError: connection.scanOutcome = "failed"
         case .connectionEmptyNetworks: connection.networks = []
         case .connectionReadFailure:
@@ -206,6 +209,10 @@ actor DetailFixtureServer {
 
     func respond(_ request: URLRequest) async throws -> BackendHTTPResponse {
         requests.append(request)
+        if scenario == .delayedSIMPIN, request.httpMethod == "GET", request.url?.path.hasSuffix("/sim-pin") == true,
+           requests.contains(where: { $0.httpMethod == "PUT" && $0.url?.path.hasSuffix("/sim-pin/protection") == true }) {
+            try await Task.sleep(for: .seconds(6))
+        }
         if scenario == .delayedSettings, request.httpMethod == "GET", let path = request.url?.path,
            path.contains("/networks/") || path.hasSuffix("/settings") {
             try await Task.sleep(for: .seconds(2))

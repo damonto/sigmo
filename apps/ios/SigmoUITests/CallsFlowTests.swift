@@ -505,6 +505,11 @@ final class CallsFlowTests: XCTestCase {
         }
         app.buttons["calls-dial"].tap()
         XCTAssertTrue(app.staticTexts["1. Balance / 余额\n2. Usage / 用量"].waitForExistence(timeout: 5), app.debugDescription)
+        let reply = app.textFields["ussdReply"]
+        reply.tap()
+        reply.typeText("1")
+        app.buttons["sendUSSDReply"].tap()
+        XCTAssertTrue(app.staticTexts["Balance: 100.00 / 余额 100.00"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["calls-return"].exists)
         app.buttons["Done"].tap()
         XCTAssertTrue(app.buttons["call-record-past-call"].exists)

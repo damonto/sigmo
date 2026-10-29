@@ -479,6 +479,30 @@ final class ModemDetailFlowTests: XCTestCase {
         screenshot(app, name: "SIM PIN settings")
     }
 
+    func testSIMPINRefreshKeepsProgressInSubmitButton() {
+        let app = launch("detail-physical-pin-loading")
+        tapOverviewRow(app.buttons["physicalSIMPIN"], in: app)
+        let protection = app.switches["simPINProtection"]
+        expectToggle(protection, value: "1")
+        protection.switches.firstMatch.tap()
+        let pin = app.secureTextFields["simPINCurrent"]
+        XCTAssertTrue(pin.waitForExistence(timeout: 5))
+        pin.tap(); pin.typeText("1234")
+        let submit = app.buttons["simPINSubmit"]
+        let size = submit.frame.size
+        tap(submit, in: app)
+        let working = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Working…"), object: submit)
+        XCTAssertEqual(XCTWaiter.wait(for: [working], timeout: 5), .completed, submit.debugDescription)
+        XCTAssertEqual(submit.label, "Disable SIM PIN")
+        XCTAssertFalse(submit.isEnabled)
+        XCTAssertEqual(submit.frame.width, size.width, accuracy: 1)
+        XCTAssertEqual(submit.frame.height, size.height, accuracy: 1)
+        XCTAssertFalse(app.staticTexts["Reading SIM PIN status…"].exists)
+        let completed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "0"), object: protection)
+        XCTAssertEqual(XCTWaiter.wait(for: [completed], timeout: 10), .completed, app.debugDescription)
+        XCTAssertTrue(submit.waitForNonExistence(timeout: 5))
+    }
+
     func testPINTransitionsToPUKInUnlockSheet() {
         let app = launch("detail-locked")
         let current = app.secureTextFields["simUnlockPIN"]
@@ -682,6 +706,7 @@ final class ModemDetailFlowTests: XCTestCase {
         installForm(app, manual: false)
         let close = app.buttons["closeESIMFlow"]
         XCTAssertTrue(close.waitForExistence(timeout: 5))
+        XCTAssertEqual(close.label, "Cancel")
         close.tap()
         // The fixture takes three seconds per device read; dismissal must not wait for it.
         XCTAssertTrue(close.waitForNonExistence(timeout: 2))

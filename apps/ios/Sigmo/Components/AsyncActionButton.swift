@@ -4,24 +4,18 @@ import SwiftUI
 struct AsyncActionButton<Label: View>: View {
     var role: ButtonRole?
     var id = ""
-    // Let Form rows and button styles provide their own padding and minimum size.
-    var minimumLabelHeight: CGFloat? = nil
+    var isWorking = false
     let action: @MainActor () async -> Void
     @ViewBuilder var label: () -> Label
     @State private var requestID: UUID?
 
     var body: some View {
-        Button(role: role) { requestID = UUID() } label: {
-            HStack {
-                label()
-                if requestID != nil {
-                    Spacer()
-                    ProgressView()
-                }
-            }
-            .frame(minHeight: minimumLabelHeight)
+        LoadingButton(role: role, isWorking: requestID != nil || isWorking) {
+            guard requestID == nil else { return }
+            requestID = UUID()
+        } label: {
+            label()
         }
-        .disabled(requestID != nil)
         .accessibilityIdentifier(id)
         .task(id: requestID) {
             guard let requestID, !Task.isCancelled else { return }
@@ -34,11 +28,32 @@ struct AsyncActionButton<Label: View>: View {
 }
 
 extension AsyncActionButton where Label == Text {
-    init(title: String, role: ButtonRole? = nil, id: String = "", minimumLabelHeight: CGFloat? = nil, action: @escaping @MainActor () async -> Void) {
+    init(
+        title: String,
+        role: ButtonRole? = nil,
+        id: String = "",
+        isWorking: Bool = false,
+        action: @escaping @MainActor () async -> Void
+    ) {
         self.role = role
         self.id = id
-        self.minimumLabelHeight = minimumLabelHeight
+        self.isWorking = isWorking
         self.action = action
         label = { Text(LocalizedStringKey(title)) }
+    }
+}
+
+// Toggles keep their title and on/off value visible during a write.
+struct InlineProgressLabel<Label: View>: View {
+    let isWorking: Bool
+    @ViewBuilder var label: () -> Label
+
+    var body: some View {
+        HStack(spacing: 8) {
+            label()
+            if isWorking {
+                ProgressView().controlSize(.small).accessibilityLabel(Text("common.working"))
+            }
+        }
     }
 }

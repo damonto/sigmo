@@ -4,7 +4,7 @@ import Observation
 @MainActor @Observable
 final class HistoryAssignmentState {
     enum LoadState: Equatable {
-        case idle, loading, loaded
+        case idle, loaded
         case failed(BackendFailure)
     }
 
@@ -14,6 +14,8 @@ final class HistoryAssignmentState {
     var failure: BackendFailure?
     private(set) var lines: [CommunicationLine] = []
     private(set) var loadState: LoadState = .idle
+    // Keep the last result visible while a retry is loading.
+    private(set) var loading = false
     private(set) var busy = false
     @ObservationIgnored private var loadRevision = 0
 
@@ -35,7 +37,7 @@ final class HistoryAssignmentState {
         }
     }
     var selected: CommunicationLine? { candidates.first { $0.id == selectedID } }
-    var canSubmit: Bool { loadState == .loaded && !busy && session.canAccessDevices && selected != nil }
+    var canSubmit: Bool { loadState == .loaded && !loading && !busy && session.canAccessDevices && selected != nil }
     var modemTitle: String? {
         guard let source else { return nil }
         return session.modems.first { $0.id == source.modemId }?.displayName ?? source.modemId
@@ -45,7 +47,8 @@ final class HistoryAssignmentState {
         guard !busy, !Task.isCancelled else { return }
         loadRevision += 1
         let current = loadRevision
-        loadState = .loading
+        loading = true
+        defer { if current == loadRevision { loading = false } }
         do {
             let lines = try await session.protectedRequest { api, token in
                 try await api.communicationLines(token: token)

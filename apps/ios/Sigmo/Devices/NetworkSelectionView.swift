@@ -16,26 +16,23 @@ struct NetworkSelectionView: View {
                 if state.registration?.automatic == nil {
                     ConnectionInitialValue(title: "connection.automatic", loading: state.registration == nil && state.loadFailure == nil)
                 } else {
-                    Toggle("connection.automatic", isOn: Binding(
+                    Toggle(isOn: Binding(
                         get: { !state.manual },
                         set: { action = .init(value: .automatic($0)) }
-                    ))
+                    )) {
+                        InlineProgressLabel(isWorking: changingAutomatic && state.updating) { Text("connection.automatic") }
+                    }
                     .disabled(!state.canChange || action != nil)
                     .accessibilityIdentifier("networkAutomatic")
                 }
-                if state.updating, state.pendingOperator == nil { ConnectionProgress() }
             } footer: {
                 if state.manual { Text("connection.manualHint") }
             }
             if state.manual {
                 Section {
-                    if state.scanning {
-                        ConnectionProgress(title: "connection.searchingNetworks")
-                            .accessibilityIdentifier("networkScanning")
-                    } else if state.networks.isEmpty {
-                        if state.scanFailure == nil {
+                    if state.networks.isEmpty {
+                        if !state.scanning, state.scanFailure == nil {
                             Text("connection.noNetworks").foregroundStyle(.secondary)
-                            scanButton
                         }
                     } else {
                         ForEach(state.networks) { network in
@@ -57,10 +54,12 @@ struct NetworkSelectionView: View {
                                     }
                                 }
                             }
-                            .disabled(!state.canChange || action != nil)
+                            .disabled(!state.canChange || action != nil || state.scanning)
                             .accessibilityIdentifier("networkOperator-" + network.id)
                             .accessibilityAddTraits(state.selectedOperator == network.id ? .isSelected : [])
                         }
+                    }
+                    if state.scanning || !state.networks.isEmpty || state.scanFailure == nil {
                         scanButton
                     }
                 }
@@ -74,10 +73,19 @@ struct NetworkSelectionView: View {
         .detailErrorAlert($state.failure)
     }
 
+    private var changingAutomatic: Bool {
+        if case .automatic = action?.value { return true }
+        return false
+    }
+
     private var scanButton: some View {
-        Button("connection.searchAgain") { action = .init(value: .scan) }
-            .disabled(!state.canChange || action != nil)
-            .accessibilityIdentifier("rescanNetworks")
+        LoadingButton(isWorking: state.scanning, progressValue: Text("connection.searchingNetworks")) {
+            action = .init(value: .scan)
+        } label: {
+            Text("connection.searchAgain")
+        }
+        .disabled(!state.canChange || action != nil)
+        .accessibilityIdentifier("rescanNetworks")
     }
 
     private func perform() async {

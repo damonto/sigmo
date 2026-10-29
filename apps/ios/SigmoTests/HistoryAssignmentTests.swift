@@ -160,8 +160,17 @@ final class HistoryAssignmentTests: XCTestCase {
         XCTAssertFalse(assigned)
 
         await server.setDirectoryUnavailable(false)
-        await state.load()
+        let previousFailure = state.loadState
+        await server.holdNextRead("/sim-profiles")
+        let retry = Task { await state.load() }
+        await server.waitForRead()
+        XCTAssertEqual(state.loadState, previousFailure)
+        XCTAssertTrue(state.loading)
+        XCTAssertFalse(state.canSubmit)
+        await server.releaseRead()
+        await retry.value
         XCTAssertEqual(state.loadState, .loaded)
+        XCTAssertFalse(state.loading)
         XCTAssertTrue(state.canSubmit)
     }
 
@@ -229,6 +238,7 @@ final class HistoryAssignmentTests: XCTestCase {
         await server.setLines([source, CommunicationFixture.line("replacement")])
         await state.load()
         XCTAssertEqual(state.selectedID, "replacement")
+        XCTAssertFalse(state.loading)
         XCTAssertTrue(state.canSubmit)
 
         await server.releaseRead()

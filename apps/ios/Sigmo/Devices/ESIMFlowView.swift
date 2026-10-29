@@ -106,14 +106,14 @@ struct ESIMFlowView: View {
     private var navigationControls: some View {
         HStack {
             if canGoBack {
-                AsyncActionButton(id: "backESIMSetup", minimumLabelHeight: nil, action: { await goBack() }) {
+                AsyncActionButton(id: "backESIMSetup", action: { await goBack() }) {
                     Label("detail.back", systemImage: "chevron.left")
                         .font(.system(size: 17, weight: .semibold))
                         .labelStyle(.iconOnly).frame(width: 20, height: 20)
                 }
                 .buttonBorderShape(.circle).disabled(state.busy)
             } else {
-                Button {
+                LoadingButton(isWorking: closing) {
                     if state.phase == .completed {
                         dismiss()
                     } else if state.phase == .form {
@@ -127,10 +127,8 @@ struct ESIMFlowView: View {
                     Label(state.phase == .completed ? "common.dismiss" : "common.cancel", systemImage: "xmark")
                         .font(.system(size: 17, weight: .semibold))
                         .labelStyle(.iconOnly).frame(width: 20, height: 20)
-                        .opacity(closing ? 0 : 1)
-                        .overlay { if closing { ProgressView() } }
                 }
-                .buttonBorderShape(.circle).disabled(closing)
+                .buttonBorderShape(.circle)
                 .accessibilityIdentifier(state.phase == .completed ? "closeCompletedESIM" : "closeESIMFlow")
             }
             Spacer(minLength: 16)
@@ -236,7 +234,7 @@ struct ESIMFlowView: View {
 
     @ViewBuilder private var promptActions: some View {
         if state.phase == .confirmation {
-            AsyncActionButton(id: "confirmESIMCode", minimumLabelHeight: nil, action: {
+            AsyncActionButton(id: "confirmESIMCode", action: {
                 await state.send(.init(type: "confirmation_code", code: state.confirmation.trimmingCharacters(in: .whitespacesAndNewlines)))
             }) {
                 Text("detail.confirm").frame(maxWidth: .infinity)
@@ -247,12 +245,12 @@ struct ESIMFlowView: View {
             .frame(maxWidth: 560).frame(maxWidth: .infinity)
         } else if state.phase == .userInput, let prompt = state.prompt {
             VStack(spacing: 12) {
-                AsyncActionButton(minimumLabelHeight: nil, action: {
+                AsyncActionButton(action: {
                     await state.send(.init(type: "user_input", accept: true, response: state.response))
                 }) {
                     Text(detailText(prompt.acceptLabel ?? "detail.confirm")).frame(maxWidth: .infinity)
                 }.buttonStyle(.glassProminent)
-                AsyncActionButton(minimumLabelHeight: nil, action: {
+                AsyncActionButton(action: {
                     await state.send(.init(type: "user_input", accept: false, response: ""))
                 }) {
                     Text(detailText(prompt.rejectLabel ?? "common.cancel")).frame(maxWidth: .infinity)
@@ -297,7 +295,7 @@ struct ESIMFlowView: View {
                     Divider().padding(.leading, methodIconWidth + 12)
                 }
                 if state.detail.canTransfer {
-                    AsyncActionButton(id: "transferESIM", minimumLabelHeight: nil, action: { await state.loadSources() }) {
+                    AsyncActionButton(id: "transferESIM", action: { await state.loadSources() }) {
                         methodLabel("detail.transfer", symbol: "iphone.gen3.radiowaves.left.and.right")
                     }
                     Divider().padding(.leading, methodIconWidth + 12)
@@ -411,7 +409,7 @@ struct ESIMFlowView: View {
             if state.phase == .preview || state.phase == .completed || state.phase == .failed {
                 VStack(spacing: 12) {
                     if state.phase == .preview {
-                        AsyncActionButton(id: "confirmESIMPreview", minimumLabelHeight: nil, action: { await state.send(.init(type: "confirm", accept: true)) }) {
+                        AsyncActionButton(id: "confirmESIMPreview", action: { await state.send(.init(type: "confirm", accept: true)) }) {
                             Text("detail.confirmDownload").frame(maxWidth: .infinity)
                         }.buttonStyle(.glassProminent).disabled(state.sending)
                     } else if state.phase == .completed {

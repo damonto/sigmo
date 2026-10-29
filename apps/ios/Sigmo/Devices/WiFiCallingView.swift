@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct WiFiCallingView: View {
-    private enum Action { case enabled(Bool), reconnect, disconnect, setup, emergencyAddress }
+    private enum Action: Equatable { case enabled(Bool), reconnect, disconnect, setup, emergencyAddress }
     private struct PendingCallback: Identifiable {
         let id = UUID()
         let sheetID: String
@@ -69,17 +69,18 @@ struct WiFiCallingView: View {
         Form {
             Section {
                 if let settings = state.settings {
-                    Toggle("connection.wifiCallingOnLine", isOn: Binding(
+                    Toggle(isOn: Binding(
                         get: { settings.enabled },
                         set: { enabled in
                             if enabled { confirmEnable = true }
                             else { action = .init(value: .enabled(false)) }
                         }
-                    ))
+                    )) {
+                        InlineProgressLabel(isWorking: changingEnabled) { Text("connection.wifiCallingOnLine") }
+                    }
                     .disabled(!state.canChange || action != nil)
                     .accessibilityIdentifier("wifiCallingEnabled")
                 } else { ConnectionInitialValue(loading: state.loadFailure == nil) }
-                if state.updating { ConnectionProgress() }
             } footer: { Text("connection.wifiHint") }
             if let settings = state.settings {
                 Section {
@@ -91,17 +92,17 @@ struct WiFiCallingView: View {
                         Text(error).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     if settings.enabled {
-                        Button("connection.reconnect") { action = .init(value: .reconnect) }
+                        actionButton("connection.reconnect", action: .reconnect)
                             .disabled(!state.canChange || action != nil || settings.state == "connecting")
                             .accessibilityIdentifier("wifiCallingReconnect")
-                        Button("connection.disconnect") { action = .init(value: .disconnect) }
+                        actionButton("connection.disconnect", action: .disconnect)
                             .disabled(!state.canChange || action != nil || settings.state == "disconnected" || settings.state == "idle")
                             .accessibilityIdentifier("wifiCallingDisconnect")
                     }
                 }
                 if state.setupRequired {
                     Section {
-                        Button("connection.continueSetup") { action = .init(value: .setup) }
+                        actionButton("connection.continueSetup", action: .setup)
                             .disabled(!state.canChange || action != nil)
                             .accessibilityIdentifier("wifiCallingSetup")
                     } footer: { Text("connection.setupHint") }
@@ -113,12 +114,25 @@ struct WiFiCallingView: View {
                     .disabled(state.busy || action != nil)
                     .accessibilityIdentifier("wifiCallingUplink")
                     if settings.emergencyAddressUpdateAvailable {
-                        Button("connection.emergencyAddress") { action = .init(value: .emergencyAddress) }
+                        actionButton("connection.emergencyAddress", action: .emergencyAddress)
                             .disabled(!state.canChange || action != nil)
                             .accessibilityIdentifier("wifiCallingEmergencyAddress")
                     }
                 }
             }
+        }
+    }
+
+    private var changingEnabled: Bool {
+        if case .enabled = action?.value { return true }
+        return false
+    }
+
+    private func actionButton(_ title: String, action value: Action) -> some View {
+        LoadingButton(isWorking: action?.value == value) {
+            action = .init(value: value)
+        } label: {
+            Text(detailText(title))
         }
     }
 
@@ -159,7 +173,11 @@ private struct WiFiUplinkView: View {
                                 if !uplink.available { Text("connection.uplinkUnavailable").font(.caption).foregroundStyle(.secondary) }
                             }
                             Spacer(minLength: 8)
-                            if state.settings?.underlay == uplink.underlay { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                            if action?.value == uplink.underlay {
+                                ProgressView().controlSize(.small).accessibilityLabel(Text("common.working"))
+                            } else if state.settings?.underlay == uplink.underlay {
+                                Image(systemName: "checkmark").foregroundStyle(.tint)
+                            }
                         }
                     }
                     .disabled(!state.canChange || action != nil || !uplink.available)
@@ -167,7 +185,6 @@ private struct WiFiUplinkView: View {
                     .accessibilityAddTraits(state.settings?.underlay == uplink.underlay ? .isSelected : [])
                 }
             } footer: { Text("connection.uplinkHint") }
-            if state.updating { Section { ConnectionProgress() } }
         }
         .navigationTitle("connection.uplink")
         .modifier(ConnectionLifecycle(scope: state.scope,

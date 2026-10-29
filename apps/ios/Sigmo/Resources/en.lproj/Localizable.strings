@@ -23,6 +23,7 @@
 "common.done" = "Done";
 "common.ok" = "OK";
 "common.refresh" = "Refresh";
+"common.working" = "Working…";
 "common.dismiss" = "Dismiss";
 "common.unknown" = "Unknown";
 "common.yes" = "Yes";

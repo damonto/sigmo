@@ -13,13 +13,14 @@ struct VoLTEView: View {
             ConnectionRadioNotice(scope: state.scope)
             Section {
                 if let settings = state.settings {
-                    Toggle("connection.enableVoLTE", isOn: Binding(
+                    Toggle(isOn: Binding(
                         get: { settings.enabled }, set: { action = .init(value: $0) }
-                    ))
+                    )) {
+                        InlineProgressLabel(isWorking: action != nil) { Text("connection.enableVoLTE") }
+                    }
                     .disabled(!state.canChange || action != nil)
                     .accessibilityIdentifier("volteEnabled")
                 } else { ConnectionInitialValue(loading: state.loadFailure == nil) }
-                if state.updating { ConnectionProgress() }
             } footer: { Text("connection.volteHint") }
             if let settings = state.settings {
                 Section {
@@ -78,7 +79,11 @@ private struct VoLTEDataPathView: View {
                                         Text(detailText(path.explanation)).font(.footnote).foregroundStyle(.secondary)
                                     }
                                     Spacer(minLength: 8)
-                                    if settings.dataPath == path.rawValue { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                                    if action?.value == path {
+                                        ProgressView().controlSize(.small).accessibilityLabel(Text("common.working"))
+                                    } else if settings.dataPath == path.rawValue {
+                                        Image(systemName: "checkmark").foregroundStyle(.tint)
+                                    }
                                 }
                             }
                             .disabled(!state.canChangeDataPath || action != nil)
@@ -87,7 +92,6 @@ private struct VoLTEDataPathView: View {
                         }
                     } footer: { Text("connection.dataPathHint") }
                 }
-                if state.updating { Section { ConnectionProgress() } }
             }
         }
         .navigationTitle("connection.dataPath")

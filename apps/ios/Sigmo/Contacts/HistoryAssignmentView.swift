@@ -79,7 +79,7 @@ struct HistoryAssignmentView: View {
 
     @ViewBuilder private var content: some View {
         switch state.loadState {
-        case .idle, .loading:
+        case .idle:
             Section {
                 HStack(spacing: 12) {
                     ProgressView()
@@ -201,9 +201,13 @@ struct HistoryAssignmentView: View {
     }
 
     private var retryButton: some View {
-        // The page owns reloads so replacing the retry row with a spinner cannot cancel them.
-        Button("communication.assignmentRetry") { reloadID += 1 }
-            .accessibilityIdentifier("historyAssignmentRetry")
+        // The page owns reloads, including when the retry succeeds and removes this row.
+        LoadingButton(isWorking: state.loading) {
+            reloadID += 1
+        } label: {
+            Text("communication.assignmentRetry")
+        }
+        .accessibilityIdentifier("historyAssignmentRetry")
     }
 
     private var confirmation: some View {

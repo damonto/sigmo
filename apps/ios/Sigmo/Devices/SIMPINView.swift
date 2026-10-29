@@ -9,7 +9,7 @@ struct SIMPINView: View {
 
     var body: some View {
         Form {
-            if state.loading {
+            if state.loading && !state.busy {
                 Section { ProgressView("simPin.loading") }
             }
             if let status = state.status {
@@ -55,11 +55,13 @@ struct SIMPINView: View {
                 .autocorrectionDisabled()
                 .disabled(state.busy || state.loading)
                 Section {
-                    Button(action.title) {
+                    LoadingButton(isWorking: submission != nil || state.busy) {
                         focus = nil
                         submission = UUID()
+                    } label: {
+                        Text(action.title)
                     }
-                    .disabled(!state.canSubmit || submission != nil)
+                    .disabled(!state.canSubmit)
                     .accessibilityIdentifier("simPINSubmit")
                     if action == .enable || action == .disable || action == .change {
                         Button("common.cancel", role: .cancel) { state.choose(nil) }

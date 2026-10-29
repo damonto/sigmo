@@ -16,7 +16,7 @@ struct SIMUnlockView: View {
 
     var body: some View {
         Form {
-            if state.loading {
+            if state.loading && !state.busy {
                 Section { ProgressView("simPin.loading") }
             }
             if state.action == .pin || state.action == .puk {

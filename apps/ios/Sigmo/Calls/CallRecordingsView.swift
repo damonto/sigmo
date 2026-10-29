@@ -12,7 +12,6 @@ struct CallRecordingsView: View {
                 Text("calls.recordingsLocal").font(.footnote).foregroundStyle(.secondary)
                 if let failure = calls.recordings.failure { FailureView(failure: failure) }
                 if calls.recordings.loading { ProgressView("communication.loading") }
-                else if calls.recordings.busy { ProgressView("calls.savingRecording") }
             }
             ForEach(entries) { CallRecordingRow(entry: $0) }
             if calls.recordings.loaded, entries.isEmpty { ContentUnavailableView("calls.noRecordings", systemImage: "waveform") }
@@ -90,11 +89,11 @@ struct CallRecordingRow: View {
             CallRecordingProgress(entry: entry, player: player)
         } else if recordings.activeID == entry.id {
             Text("calls.recording").font(.caption)
-        } else if recordings.savingID == entry.id || recordings.recoveringID == entry.id {
+        } else if recordings.savingID == entry.id {
             ProgressView("calls.savingRecording").accessibilityIdentifier("recording-saving")
         } else {
             Text("calls.recordingPending").font(.caption)
-            AsyncActionButton(title: "calls.recoverRecording", minimumLabelHeight: nil) {
+            AsyncActionButton(title: "calls.recoverRecording", isWorking: recordings.recoveringID == entry.id) {
                 await recordings.recover(entry.id)
             }
             .disabled(recordings.busy || recordings.activeID != nil)

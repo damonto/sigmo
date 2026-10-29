@@ -191,8 +191,19 @@ final class SettingsFlowTests: XCTestCase {
         let version = app.descendants(matching: .any)["latest-update-version"].firstMatch
         XCTAssertTrue(version.waitForExistence(timeout: 5))
         XCTAssertTrue(version.label.contains("1.1.0") || (version.value as? String) == "1.1.0")
-        tap(app.buttons["install-update"], app: app)
+        let install = app.buttons["install-update"]
+        scrollTo(install, app: app)
+        let size = install.frame.size
+        install.tap()
+        let working = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Working…"), object: install)
+        XCTAssertEqual(XCTWaiter.wait(for: [working], timeout: 5), .completed, install.debugDescription)
+        XCTAssertEqual(install.label, "Update now")
+        XCTAssertFalse(install.isEnabled)
+        XCTAssertEqual(install.frame.width, size.width, accuracy: 1)
+        XCTAssertEqual(install.frame.height, size.height, accuracy: 1)
+        XCTAssertFalse(app.staticTexts["Working…"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["up-to-date"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertNotEqual(install.value as? String, "Working…")
         screenshot(app)
     }
 

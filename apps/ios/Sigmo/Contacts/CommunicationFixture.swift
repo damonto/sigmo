@@ -22,6 +22,7 @@ actor CommunicationFixture {
     private var directoryUnavailable = false
     private var assignmentStatus = 204
     private var failAssignmentRead = false
+    private var delayAssignmentRetry = false
     private var requests: [URLRequest] = []
     private var lines = [CommunicationFixture.line("a"), CommunicationFixture.line("b", available: false)]
     private let includesHistory: Bool
@@ -98,7 +99,12 @@ actor CommunicationFixture {
             if directoryUnavailable { throw URLError(.cannotConnectToHost) }
             if failAssignmentRead, request.url?.query == nil {
                 failAssignmentRead = false
+                delayAssignmentRetry = true
                 return HTTPProblem.response(status: 503, code: "remote_error", detail: "Inventory unavailable")
+            }
+            if delayAssignmentRetry, request.url?.query == nil {
+                delayAssignmentRetry = false
+                try await Task.sleep(for: .seconds(6))
             }
             let response = try reply(["items": lines])
             await holdIfNeeded("/sim-profiles")

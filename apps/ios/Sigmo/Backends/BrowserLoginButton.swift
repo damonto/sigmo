@@ -4,18 +4,12 @@ struct BrowserLoginButton: View {
     let session: BackendSession
 
     var body: some View {
-        Button {
+        LoadingButton(isWorking: session.isBrowserLogin) {
             Task { await session.loginWithBrowser() }
         } label: {
-            HStack {
-                Label("auth.browserLogin", systemImage: "safari")
-                if session.isBrowserLogin {
-                    Spacer()
-                    ProgressView()
-                }
-            }
+            Label("auth.browserLogin", systemImage: "safari")
         }
-        .disabled(session.isBrowserLogin || session.isLoggingOut)
+        .disabled(session.isLoggingOut)
         .accessibilityIdentifier("loginBackend")
     }
 }

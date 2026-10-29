@@ -100,11 +100,17 @@ struct CallServiceView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             ForEach(Array(ussd.messages.enumerated()), id: \.offset) { _, message in Text(message).textSelection(.enabled) }
-            if ussd.busy { ProgressView("calls.ussdWaiting") }
-            if !ussd.ended {
+            if ussd.busy && ussd.messages.isEmpty { ProgressView("calls.ussdWaiting") }
+            if !ussd.ended && !ussd.messages.isEmpty {
                 TextField("calls.ussdReply", text: $ussd.reply).textFieldStyle(.roundedBorder).keyboardType(.numbersAndPunctuation)
-                Button("calls.sendReply") { ussd.send(ussd.reply) }
-                    .buttonStyle(.glassProminent).disabled(ussd.busy || ussd.reply.isEmpty)
+                    .accessibilityIdentifier("ussdReply")
+                LoadingButton(isWorking: ussd.busy, progressValue: Text("calls.ussdWaiting")) {
+                    ussd.send(ussd.reply)
+                } label: {
+                    Text("calls.sendReply")
+                }
+                .buttonStyle(.glassProminent).disabled(ussd.reply.isEmpty)
+                .accessibilityIdentifier("sendUSSDReply")
             }
             Text("calls.ussdHint").font(.footnote).foregroundStyle(.secondary)
         }

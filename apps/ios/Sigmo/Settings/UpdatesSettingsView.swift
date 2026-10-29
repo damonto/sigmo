@@ -2,7 +2,13 @@ import SwiftUI
 
 struct UpdatesSettingsView: View {
     @Bindable var state: UpdatesState
-    @State private var pendingPreferences: UpdatePreferences?
+    @State private var pendingPreferences: PreferenceChange?
+
+    private struct PreferenceChange: Equatable {
+        enum Field { case automatic, channel }
+        let value: UpdatePreferences
+        let field: Field
+    }
 
     private var observationActive: Bool {
         state.shouldPoll && !state.working
@@ -13,16 +19,24 @@ struct UpdatesSettingsView: View {
             Form {
                 if let snapshot = state.snapshot {
                     Section("settings.updates.preferences") {
-                        Toggle("settings.updates.automatic", isOn: Binding(get: { snapshot.settings.automatic }, set: { value in
-                            save(automatic: value, channel: snapshot.settings.channel)
-                        }))
+                        Toggle(isOn: Binding(get: { snapshot.settings.automatic }, set: { value in
+                            save(automatic: value, channel: snapshot.settings.channel, field: .automatic)
+                        })) {
+                            InlineProgressLabel(isWorking: pendingPreferences?.field == .automatic) {
+                                Text("settings.updates.automatic")
+                            }
+                        }
                         .disabled(state.working || pendingPreferences != nil || snapshot.busy || state.recovering || !snapshot.selfUpdateSupported)
                         .accessibilityIdentifier("automatic-updates")
-                        Picker("settings.updates.channel", selection: Binding(get: { snapshot.settings.channel }, set: { value in
-                            save(automatic: snapshot.settings.automatic, channel: value)
+                        Picker(selection: Binding(get: { snapshot.settings.channel }, set: { value in
+                            save(automatic: snapshot.settings.automatic, channel: value, field: .channel)
                         })) {
                             Text("Stable").tag("stable")
                             Text("Dev").tag("dev")
+                        } label: {
+                            InlineProgressLabel(isWorking: pendingPreferences?.field == .channel) {
+                                Text("settings.updates.channel")
+                            }
                         }
                         .disabled(state.working || pendingPreferences != nil || snapshot.busy || state.recovering)
                         .accessibilityIdentifier("update-channel")
@@ -40,7 +54,6 @@ struct UpdatesSettingsView: View {
                             .accessibilityValue(snapshot.current.target)
                         LabeledContent("settings.native.checkedAt", value: snapshot.checkedAt?.formatted(date: .abbreviated, time: .shortened) ?? settingsText("settings.updates.never"))
                         LabeledContent("settings.updates.state", value: settingsText("settings.updates.status.\(state.recovering ? "restarting" : snapshot.state)"))
-                        if state.shouldPoll { ProgressView().accessibilityLabel(Text("settings.updates.state")) }
                         if let error = snapshot.error {
                             Text(localizedError(error, code: snapshot.errorCode)).foregroundStyle(.red)
                         }
@@ -50,7 +63,7 @@ struct UpdatesSettingsView: View {
                                 .accessibilityIdentifier("up-to-date")
                         }
                         AsyncActionButton(title: "settings.updates.checkNow", id: "check-updates") { await state.check() }.disabled(!state.canCheck)
-                        AsyncActionButton(title: "settings.updates.installNow", id: "install-update") { await state.install() }.disabled(!state.canInstall)
+                        AsyncActionButton(title: "settings.updates.installNow", id: "install-update", isWorking: state.shouldPoll) { await state.install() }.disabled(!state.canInstall)
                     }
                     if let notes = snapshot.latest?.notes, !notes.isEmpty {
                         Section("settings.updates.notes") { Text(verbatim: notes).textSelection(.enabled) }
@@ -70,7 +83,6 @@ struct UpdatesSettingsView: View {
                         }
                     }
                 } else if state.working { ProgressView() }
-                if state.working && state.snapshot != nil { ProgressView("settings.native.working") }
             }
             .detailErrorAlert(state.failure)
             .refreshable { await state.load() }
@@ -82,15 +94,15 @@ struct UpdatesSettingsView: View {
         .navigationTitle("settings.updates.title").navigationBarTitleDisplayMode(.inline)
         .task(id: pendingPreferences) {
             guard let pendingPreferences, !Task.isCancelled else { return }
-            await state.save(automatic: pendingPreferences.automatic, channel: pendingPreferences.channel)
+            await state.save(automatic: pendingPreferences.value.automatic, channel: pendingPreferences.value.channel)
             if !Task.isCancelled { self.pendingPreferences = nil }
         }
         .onDisappear { pendingPreferences = nil }
     }
 
-    private func save(automatic: Bool, channel: String) {
+    private func save(automatic: Bool, channel: String, field: PreferenceChange.Field) {
         guard pendingPreferences == nil else { return }
-        pendingPreferences = UpdatePreferences(automatic: automatic, channel: channel)
+        pendingPreferences = PreferenceChange(value: UpdatePreferences(automatic: automatic, channel: channel), field: field)
     }
     private func localizedError(_ message: String, code: String?) -> String {
         guard let code else { return message }

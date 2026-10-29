@@ -117,9 +117,12 @@ struct AuthenticationView: View {
                             if digits != code { code = digits }
                             if digits.count == 6 { verificationCode = digits }
                         }
-                    Button("auth.verify") { verificationCode = code }
-                        .disabled(code.count != 6 || session.isVerifyingOTP)
-                    if session.isVerifyingOTP { ProgressView("auth.verifying") }
+                    LoadingButton(isWorking: verificationCode != nil || session.isVerifyingOTP, progressValue: Text("auth.verifying")) {
+                        verificationCode = code
+                    } label: {
+                        Text("auth.verify")
+                    }
+                    .disabled(code.count != 6)
                 }
                 Section {
                     TimelineView(.periodic(from: .now, by: 1)) { context in

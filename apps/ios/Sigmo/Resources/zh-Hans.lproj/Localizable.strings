@@ -23,6 +23,7 @@
 "common.done" = "完成";
 "common.ok" = "好";
 "common.refresh" = "刷新";
+"common.working" = "正在处理…";
 "common.dismiss" = "关闭";
 "common.unknown" = "未知";
 "common.yes" = "是";
