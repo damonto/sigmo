@@ -70,23 +70,24 @@ final class CallsState {
     @ObservationIgnored private var callbackResolution: (requestID: UUID, destination: SystemCallbackDestination)?
 
     init(store: BackendStore, fixtures: Bool = false, demo: Bool = false, clientID: String? = nil, recordings: CallRecordings? = nil,
-         identity: PushPersistence = .keychain, contacts: CallContacts = CallContacts(), diagnostics: DiagnosticLogStore = AppDiagnostics.store) {
+         identity: PushPersistence = .keychain, contacts: CallContacts = CallContacts(), diagnostics: DiagnosticLogStore = AppDiagnostics.store,
+         system: CallSystemBridge? = nil) {
         self.demo = demo
         self.contacts = contacts
         self.store = store
         self.fixtures = fixtures || demo
         self.identity = identity
         self.diagnostics = CallDiagnostics(store: diagnostics)
-        self.system = CallSystemBridge(enabled: !fixtures && !demo, diagnostics: diagnostics)
+        self.system = system ?? CallSystemBridge(enabled: !fixtures && !demo, diagnostics: diagnostics)
         self.recordings = recordings ?? CallRecordings(directory: (fixtures || demo) ? URL.temporaryDirectory.appending(path: "SigmoCalls-\(UUID())") : nil)
         self.clientID = clientID ?? (demo ? "demo-\(UUID().uuidString)" : fixtures ? "fixture-call-client" : "")
         restoreClientIdentity()
-        system.perform = { [weak self] action in
+        self.system.perform = { [weak self] action in
             guard let self else { throw CancellationError() }
             try await self.perform(action)
         }
-        system.reset = { [weak self] in self?.reset() }
-        system.audioActivated = { [weak self] active in
+        self.system.reset = { [weak self] in self?.reset() }
+        self.system.audioActivated = { [weak self] active in
             self?.systemAudioActive = active
             if !active { self?.audio.recordingInterrupted() }
             self?.updatePlaybackAvailability()
@@ -333,6 +334,7 @@ final class CallsState {
         default: break
         }
         guard let call = calls[action.id] else {
+            if case .end = action, endedUUIDs[action.id] != nil { return }
             diagnostics.record("call.action.unavailable", id: action.id,
                                fields: ["action": action.diagnosticName, "alreadyEnded": String(endedUUIDs[action.id] != nil)])
             throw BackendFailure.local("calls.ended")
@@ -383,8 +385,7 @@ final class CallsState {
                     catch {
                         if (error as? BackendFailure)?.code == "call_in_use" { finish(call.id, reason: .answeredElsewhere, cause: "other_owner"); return }
                         calls[call.id]?.endRequested = false
-                        failure = .local("calls.endUnconfirmed")
-                        throw error
+                        throw BackendFailure.local("calls.endUnconfirmed")
                     }
                 }
                 finish(call.id, reason: .remoteEnded, report: false, cause: "end_action")
@@ -726,7 +727,7 @@ final class CallsState {
     }
 
     private func startMedia(_ id: UUID) {
-        guard mediaID != id, let call = calls[id], let record = call.record, record.hasMedia else { return }
+        guard mediaID != id, let call = calls[id], !call.endRequested, let record = call.record, record.hasMedia else { return }
         stopMedia()
         mediaID = id
         diagnostics.record("call.media.started", id: id, fields: ["attempt": String(mediaAttempts + 1)])

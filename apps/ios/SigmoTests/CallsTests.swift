@@ -1,5 +1,7 @@
 import AVFAudio
+import CallKit
 import Intents
+import LiveCommunicationKit
 import XCTest
 @testable import Sigmo
 
@@ -8,6 +10,7 @@ final class CallsTests: XCTestCase {
     private func setup(_ fixture: CallsFixture, playback: CallRecordingPlayer = CallRecordingPlayer(),
                        recordings: CallRecordings? = nil,
                        diagnostics: DiagnosticLogStore = AppDiagnostics.store,
+                       system: CallSystemBridge? = nil,
                        socketOpened: (@Sendable (URLRequest) -> Void)? = nil,
                        afterResponse: (@Sendable (URLRequest) async -> Void)? = nil) async throws -> (CallsState, BackendSession, CallLine) {
         let directory = URL.temporaryDirectory.appending(path: "CallTests-\(UUID())")
@@ -27,8 +30,67 @@ final class CallsTests: XCTestCase {
         await session.refresh(force: true)
         let line = CallLine(session: session, modem: try XCTUnwrap(session.modems.first))
         let calls = CallsState(store: store, fixtures: true,
-            recordings: recordings ?? CallRecordings(directory: directory.appending(path: "recordings"), playback: playback), diagnostics: diagnostics)
+            recordings: recordings ?? CallRecordings(directory: directory.appending(path: "recordings"), playback: playback), diagnostics: diagnostics, system: system)
         return (calls, session, line)
+    }
+
+    func testUnconfirmedEndReturnsTheSpecificFailureToItsCaller() async throws {
+        let fixture = CallsFixture()
+        let (calls, _, line) = try await setup(fixture)
+        await calls.dial(number: "10086", line: line)
+        let id = try XCTUnwrap(calls.primary?.id)
+        await fixture.configure(endFailure: true)
+        do {
+            try await calls.system.perform?(.end(id))
+            XCTFail("An unconfirmed backend hangup must throw")
+        } catch {
+            XCTAssertEqual((error as? BackendFailure)?.code, "calls.endUnconfirmed")
+        }
+        XCTAssertTrue(calls.hasCall)
+        XCTAssertFalse(try XCTUnwrap(calls.primary).endRequested)
+        XCTAssertEqual(calls.failure?.code, "calls.endUnconfirmed")
+        XCTAssertEqual(calls.primary?.failure?.code, "calls.endUnconfirmed")
+        calls.audio.stop()
+    }
+
+    func testUnknownSystemCallStillEndsTheBackendCall() async throws {
+        for endFailure in [false, true] {
+            let system = CallSystemBridge(enabled: false, submit: { actions in
+                if actions.contains(where: { $0 is EndConversationAction }) {
+                    throw NSError(domain: CXErrorDomainRequestTransaction,
+                                  code: CXErrorCodeRequestTransactionError.unknownCallUUID.rawValue)
+                }
+            })
+            let fixture = CallsFixture()
+            let (calls, _, line) = try await setup(fixture, system: system)
+            await calls.dial(number: "10086", line: line)
+            let id = try XCTUnwrap(calls.primary?.id)
+            // Deliver the system's accepted start callback without registering a real call.
+            try await system.perform?(.start(id, "10086"))
+            let incoming = DetailFixtureBuffer()
+            try calls.audio.prepare()
+            defer { calls.audio.stop() }
+            try await calls.audio.start(socket: BackendSocket(send: { _ in }, receive: { try await incoming.receive() },
+                                                              close: { incoming.close() }), ice: [], clientID: calls.clientID)
+            XCTAssertTrue(calls.audio.connecting)
+            await fixture.configure(endFailure: endFailure)
+            await calls.act(.end(id))
+
+            XCTAssertEqual(calls.hasCall, endFailure)
+            XCTAssertEqual(calls.audio.connecting, endFailure)
+            XCTAssertFalse(calls.audio.ready)
+            if endFailure {
+                XCTAssertFalse(try XCTUnwrap(calls.primary).endRequested)
+                XCTAssertEqual(calls.failure?.code, "calls.endUnconfirmed")
+            } else {
+                XCTAssertNil(calls.failure)
+                XCTAssertFalse(calls.presented)
+                await calls.act(.end(id))
+                XCTAssertNil(calls.failure, "Ending an already finished local call is harmless")
+            }
+            let count = await fixture.count(method: "PATCH", suffix: "/calls/dialed-call")
+            XCTAssertEqual(count, 1, "System rejection must not discard or replay the backend hangup")
+        }
     }
 
     func testEndedPushSnapshotLogsTheBackendStateAndExplicitEndCause() async throws {

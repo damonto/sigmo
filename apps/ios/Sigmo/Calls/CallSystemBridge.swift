@@ -1,4 +1,5 @@
 import AVFAudio
+import CallKit
 @preconcurrency import LiveCommunicationKit
 import Foundation
 
@@ -70,6 +71,7 @@ final class CallSystemBridge: ConversationManagerDelegate {
     var reset: (@MainActor () -> Void)?
     var audioActivated: (@MainActor (Bool) -> Void)?
     private let manager: SystemConversationManager?
+    private let submit: (@MainActor ([ConversationAction]) async throws -> Void)?
     private let diagnostics: CallDiagnostics
     private let didComplete: (@MainActor (UUID, Completion) -> Void)?
     private struct PendingAction {
@@ -80,9 +82,11 @@ final class CallSystemBridge: ConversationManagerDelegate {
     }
     private var actions: [UUID: PendingAction] = [:]
     private var actionTail: Task<Void, Never>?
+    private var localEnds: [UUID: Task<Void, Error>] = [:]
 
     init(enabled: Bool, diagnostics: DiagnosticLogStore = AppDiagnostics.store,
-         didComplete: (@MainActor (UUID, Completion) -> Void)? = nil) {
+         didComplete: (@MainActor (UUID, Completion) -> Void)? = nil,
+         submit: (@MainActor ([ConversationAction]) async throws -> Void)? = nil) {
         self.didComplete = didComplete
         self.diagnostics = CallDiagnostics(store: diagnostics)
         if enabled {
@@ -95,6 +99,15 @@ final class CallSystemBridge: ConversationManagerDelegate {
         } else {
             manager = nil
         }
+        if let submit {
+            self.submit = submit
+        } else if let manager {
+            self.submit = { actions in
+                try await manager.perform(actions.map { NativeCallAction(value: $0) })
+            }
+        } else {
+            self.submit = nil
+        }
         manager?.value.delegate = self
     }
 
@@ -104,17 +117,39 @@ final class CallSystemBridge: ConversationManagerDelegate {
 
     func request(_ actions: [CallAction]) async throws {
         for action in actions { diagnostics.record("conversation.action.requested", id: action.id, fields: ["action": action.diagnosticName]) }
-        guard let manager else {
+        guard let submit else {
             for action in actions { try await perform?(action) }
             return
         }
         do {
-            try await manager.perform(actions.map { NativeCallAction(value: systemAction($0)) })
+            try await submit(actions.map(systemAction))
             for action in actions { diagnostics.record("conversation.action.accepted", id: action.id, fields: ["action": action.diagnosticName]) }
         } catch {
             for action in actions { diagnostics.record("conversation.action.rejected", id: action.id, fields: ["action": action.diagnosticName], error: error) }
-            throw error
+            let failure = error as NSError
+            guard actions.count == 1, case .end(let id) = actions[0],
+                  failure.domain == CXErrorDomainRequestTransaction,
+                  failure.code == CXErrorCodeRequestTransactionError.unknownCallUUID.rawValue else { throw error }
+            try await endWithoutSystem(id)
         }
+    }
+
+    private func endWithoutSystem(_ id: UUID) async throws {
+        if let pending = localEnds[id] { try await pending.value; return }
+        cancelPendingControls(for: id)
+        let previous = actionTail
+        let task = Task { [weak self] in
+            // A pending start/answer may still establish the backend call identity.
+            await previous?.value
+            try Task.checkCancellation()
+            guard let self else { throw CancellationError() }
+            self.diagnostics.record("conversation.end.without_system", id: id)
+            try await self.perform?(.end(id))
+        }
+        localEnds[id] = task
+        actionTail = Task { _ = await task.result }
+        defer { localEnds[id] = nil }
+        try await task.value
     }
 
     private func systemAction(_ action: CallAction) -> ConversationAction {
@@ -191,6 +226,7 @@ final class CallSystemBridge: ConversationManagerDelegate {
             action.task.cancel()
         }
         actions.removeAll()
+        for task in localEnds.values { task.cancel() }
         actionTail = nil
         CallWebRTC.deactivate(AVAudioSession.sharedInstance())
         audioActivated?(false)
@@ -204,21 +240,7 @@ final class CallSystemBridge: ConversationManagerDelegate {
         let local: Bool
         if case .mute = value { local = true } else { local = false }
         if case .end(let id) = value {
-            // Stop waiting for optional remote controls before ending this call.
-            // Start/answer must still resolve whether a carrier action was accepted.
-            let pendingControls = actions.values.filter { pending in
-                guard pending.value.id == id else { return false }
-                switch pending.value {
-                case .hold, .digits: return true
-                default: return false
-                }
-            }
-            for pending in pendingControls {
-                diagnostics.record("conversation.action.cancelled", id: pending.value.id,
-                                   fields: ["action": pending.value.diagnosticName, "actionID": pending.action.uuid.uuidString, "cause": "end_requested"])
-                pending.task.cancel()
-                complete(pending.action, with: .failed)
-            }
+            cancelPendingControls(for: id)
         }
         let previous = local ? nil : actionTail
         let didComplete = didComplete
@@ -249,6 +271,23 @@ final class CallSystemBridge: ConversationManagerDelegate {
         actions[action.uuid] = PendingAction(value: value, action: action, task: task, started: started)
         if !local { actionTail = task }
         return task
+    }
+
+    private func cancelPendingControls(for id: UUID) {
+        // Start/answer must resolve whether a carrier action was accepted.
+        let pendingControls = actions.values.filter { pending in
+            guard pending.value.id == id else { return false }
+            switch pending.value {
+            case .hold, .digits: return true
+            default: return false
+            }
+        }
+        for pending in pendingControls {
+            diagnostics.record("conversation.action.cancelled", id: pending.value.id,
+                               fields: ["action": pending.value.diagnosticName, "actionID": pending.action.uuid.uuidString, "cause": "end_requested"])
+            pending.task.cancel()
+            complete(pending.action, with: .failed)
+        }
     }
 
     private func complete(_ action: ConversationAction, with completion: Completion) {

@@ -27,6 +27,7 @@ final class CallAudio {
     @ObservationIgnored private var socket: BackendSocket?
     @ObservationIgnored private var receiveTask: Task<Void, Never>?
     @ObservationIgnored private var sendTask: Task<Void, Never>?
+    @ObservationIgnored private var connectionTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private var lossTask: Task<Void, Never>?
     @ObservationIgnored private var routeTask: Task<Void, Never>?
     @ObservationIgnored private var generation = UUID()
@@ -69,12 +70,25 @@ final class CallAudio {
         if factory == nil { factory = CallWebRTC.factory(capture: capture, render: render) }
     }
 
-    func start(socket: BackendSocket, ice: [CallICE], clientID: String) async throws {
+    /// Takes ownership of the socket, including when startup is cancelled or fails.
+    func start(socket: BackendSocket, ice: [CallICE], clientID: String, timeout: Duration = .seconds(20)) async throws {
+        guard !Task.isCancelled else { socket.close(); throw CancellationError() }
         stop()
         let current = generation
+        var started = false
+        defer { if !started, generation == current { stop() } }
         self.socket = socket
         connecting = true
         failure = nil
+        // A silent signaling server may never produce an ICE failure callback.
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        connectionTimeoutTask = Task { [weak self] in
+            do { try await Task.sleep(until: deadline, clock: .continuous) } catch { return }
+            guard let self, self.generation == current, !self.ready else { return }
+            AppDiagnostics.record("audio.connection.timed_out", category: "audio",
+                                  fields: ["offerSent": String(self.offerSent), "answerReceived": String(self.remoteSet)])
+            self.fail(.local("calls.audioFailed"))
+        }
         if factory == nil { factory = CallWebRTC.factory(capture: capture, render: render) }
         let configuration = LKRTCConfiguration()
         configuration.sdpSemantics = .unifiedPlan
@@ -114,30 +128,27 @@ final class CallAudio {
                 if !self.ready { self.fail(.wrapping(error)) }
             }
         }
-        do {
-            if let factory {
-                let supported = factory.rtpSenderCapabilities(forKind: "audio").codecs
-                let preferred = ["opus", "pcmu"].flatMap { name in
-                    supported.filter { $0.name.lowercased() == name }
-                }
-                for transceiver in peer.transceivers {
-                    try transceiver.setCodecPreferences(preferred, error: ())
-                }
+        if let factory {
+            let supported = factory.rtpSenderCapabilities(forKind: "audio").codecs
+            let preferred = ["opus", "pcmu"].flatMap { name in
+                supported.filter { $0.name.lowercased() == name }
             }
-            let offer = try await peer.offer(for: LKRTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil))
-            guard generation == current else { throw CancellationError() }
-            try await peer.setLocalDescription(offer)
-            guard generation == current else { throw CancellationError() }
-            try await socket.send(JSONEncoder().encode(CallSignal(type: "offer", clientId: clientID,
-                offer: CallSDP(type: "offer", sdp: offer.sdp))))
-            offerSent = true
-            for candidate in localCandidates { enqueue(CallSignal(type: "candidate", candidate: candidate)) }
-            localCandidates.removeAll()
-            observeRoutes()
-        } catch {
-            if generation == current { stop() }
-            throw error
+            for transceiver in peer.transceivers {
+                try transceiver.setCodecPreferences(preferred, error: ())
+            }
         }
+        let offer = try await peer.offer(for: LKRTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil))
+        guard generation == current, !Task.isCancelled else { throw CancellationError() }
+        try await peer.setLocalDescription(offer)
+        guard generation == current, !Task.isCancelled else { throw CancellationError() }
+        try await socket.send(JSONEncoder().encode(CallSignal(type: "offer", clientId: clientID,
+            offer: CallSDP(type: "offer", sdp: offer.sdp))))
+        guard generation == current, !Task.isCancelled else { throw CancellationError() }
+        offerSent = true
+        for candidate in localCandidates { enqueue(CallSignal(type: "candidate", candidate: candidate)) }
+        localCandidates.removeAll()
+        observeRoutes()
+        started = true
     }
 
     private func signal(_ message: CallSignal, generation current: UUID) async throws {
@@ -176,6 +187,8 @@ final class CallAudio {
             if offerSent { enqueue(CallSignal(type: "candidate", candidate: candidate)) }
             else { localCandidates.append(candidate) }
         case .connected:
+            connectionTimeoutTask?.cancel()
+            connectionTimeoutTask = nil
             lossTask?.cancel()
             lossTask = nil
             ready = true
@@ -218,6 +231,7 @@ final class CallAudio {
         generation = UUID()
         receiveTask?.cancel(); receiveTask = nil
         sendTask?.cancel(); sendTask = nil
+        connectionTimeoutTask?.cancel(); connectionTimeoutTask = nil
         lossTask?.cancel(); lossTask = nil
         routeTask?.cancel(); routeTask = nil
         socket?.close(); socket = nil

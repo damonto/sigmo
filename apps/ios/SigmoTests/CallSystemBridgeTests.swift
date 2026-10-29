@@ -1,3 +1,4 @@
+import CallKit
 import LiveCommunicationKit
 import XCTest
 @testable import Sigmo
@@ -5,6 +6,92 @@ import XCTest
 @MainActor
 final class CallSystemBridgeTests: XCTestCase {
     private enum TestFailure: Error { case rejected }
+
+    private var unknownCall: NSError {
+        NSError(domain: CXErrorDomainRequestTransaction, code: CXErrorCodeRequestTransactionError.unknownCallUUID.rawValue)
+    }
+
+    func testUnknownCallRecoveryWaitsForStartAndSharesRepeatedEndRequests() async throws {
+        let error = unknownCall
+        let requested = expectation(description: "both rejected end requests")
+        requested.expectedFulfillmentCount = 2
+        let bridge = CallSystemBridge(enabled: false, submit: { _ in requested.fulfill(); throw error })
+        let gate = SettingsRequestGate()
+        var received: [CallAction] = []
+        bridge.perform = { action in
+            received.append(action)
+            if case .start = action { await gate.wait() }
+        }
+        let id = UUID()
+        let handle = Handle(type: .phoneNumber, value: "10086", displayName: nil)
+        let start = StartConversationAction(conversationUUID: id, handles: [handle], isVideo: false)
+        let starting = bridge.execute(start, .start(id, "10086"))
+        await gate.waitForCaller()
+        let first = Task { try await bridge.request(.end(id)) }
+        let second = Task { try await bridge.request(.end(id)) }
+        await fulfillment(of: [requested], timeout: 1)
+        XCTAssertEqual(received, [.start(id, "10086")])
+        await gate.release()
+        await starting.value
+        try await first.value
+        try await second.value
+        XCTAssertEqual(received, [.start(id, "10086"), .end(id)])
+    }
+
+    func testUnknownCallRecoveryPropagatesBackendFailure() async {
+        let error = unknownCall
+        let bridge = CallSystemBridge(enabled: false, submit: { _ in throw error })
+        bridge.perform = { _ in throw TestFailure.rejected }
+        do {
+            try await bridge.request(.end(UUID()))
+            XCTFail("A rejected backend hangup must remain visible")
+        } catch {
+            XCTAssertTrue(error is TestFailure)
+        }
+    }
+
+    func testRecoveryOnlyHandlesSingleEndWithUnknownCallUUID() async {
+        let id = UUID()
+        let cases: [(NSError, [CallAction])] = [
+            (unknownCall, [.answer(id)]),
+            (unknownCall, [.end(id), .answer(UUID())]),
+            (NSError(domain: CXErrorDomainRequestTransaction, code: CXErrorCodeRequestTransactionError.unentitled.rawValue), [.end(id)]),
+            (NSError(domain: NSCocoaErrorDomain, code: unknownCall.code), [.end(id)])
+        ]
+        for (failure, actions) in cases {
+            let bridge = CallSystemBridge(enabled: false, submit: { _ in throw failure })
+            bridge.perform = { _ in XCTFail("Unrelated rejection must not execute a backend action") }
+            do {
+                try await bridge.request(actions)
+                XCTFail("Expected the original system rejection")
+            } catch {
+                XCTAssertEqual((error as NSError).domain, failure.domain)
+                XCTAssertEqual((error as NSError).code, failure.code)
+            }
+        }
+    }
+
+    func testResetCancelsRecoveryWhileStartIsPending() async {
+        let error = unknownCall
+        let rejected = expectation(description: "end rejected by system")
+        let bridge = CallSystemBridge(enabled: false, submit: { _ in rejected.fulfill(); throw error })
+        let gate = SettingsRequestGate()
+        bridge.perform = { action in
+            if case .answer = action { await gate.wait() }
+            else { XCTFail("Reset must prevent the backend hangup from starting") }
+        }
+        let id = UUID()
+        let answer = JoinConversationAction(conversationUUID: id)
+        let answering = bridge.execute(answer, .answer(id))
+        await gate.waitForCaller()
+        let ending = Task { try await bridge.request(.end(id)) }
+        await fulfillment(of: [rejected], timeout: 1)
+        bridge.resetFromSystem()
+        await gate.release()
+        await answering.value
+        do { try await ending.value; XCTFail("Recovery must be cancelled by reset") }
+        catch { XCTAssertTrue(error is CancellationError) }
+    }
 
     func testNativeConversationActionsMapToExistingCallOperations() async {
         let id = UUID()
