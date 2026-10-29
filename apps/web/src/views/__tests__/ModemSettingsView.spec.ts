@@ -161,6 +161,7 @@ describe('ModemSettingsView', () => {
   beforeEach(() => {
     harness.canUseWiFiCalling = false
     modem.number = '+12242255559'
+    modem.airplaneMode = false
     modem.wifiCallingConnected = false
     vi.clearAllMocks()
     harness.handleMsisdnUpdate.mockResolvedValue(true)
@@ -177,13 +178,22 @@ describe('ModemSettingsView', () => {
     expect(wrapper.find('[data-testid="line-signal-icon"]').exists()).toBe(true)
   })
 
-  it('renders a Wi-Fi Calling indicator when the current line is connected over Wi-Fi Calling', () => {
-    modem.wifiCallingConnected = true
+  it.each([
+    { airplaneMode: false, wifiCallingConnected: false },
+    { airplaneMode: false, wifiCallingConnected: true },
+    { airplaneMode: true, wifiCallingConnected: false },
+    { airplaneMode: true, wifiCallingConnected: true },
+  ])(
+    'shows Wi-Fi Calling by connection state (airplane mode: $airplaneMode, connected: $wifiCallingConnected)',
+    ({ airplaneMode, wifiCallingConnected }) => {
+      modem.airplaneMode = airplaneMode
+      modem.wifiCallingConnected = wifiCallingConnected
 
-    const wrapper = mountView()
+      const wrapper = mountView()
 
-    expect(wrapper.find('[aria-label="Wi-Fi Calling"]').exists()).toBe(true)
-  })
+      expect(wrapper.find('[aria-label="Wi-Fi Calling"]').exists()).toBe(wifiCallingConnected)
+    },
+  )
 
   it('renders the localized empty number label when the line has no number', () => {
     modem.number = ''

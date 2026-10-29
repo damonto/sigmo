@@ -115,13 +115,15 @@ const rootClass = computed(() =>
       >
         {{ signalValue }}
       </span>
-      <VoWiFiIcon
-        v-if="props.wifiCallingConnected"
-        class="shrink-0 text-sky-500"
-        :class="iconSizeClass"
-        title="Wi-Fi Calling"
-        aria-label="Wi-Fi Calling"
-      />
+    </template>
+    <VoWiFiIcon
+      v-if="props.wifiCallingConnected"
+      class="shrink-0 text-sky-500"
+      :class="iconSizeClass"
+      title="Wi-Fi Calling"
+      aria-label="Wi-Fi Calling"
+    />
+    <template v-if="!props.airplaneMode">
       <component
         v-if="showRegistrationIcon && registrationIcon"
         :is="registrationIcon"
