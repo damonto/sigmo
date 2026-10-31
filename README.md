@@ -5,16 +5,21 @@
 
 **Sigmo** is a modern, self-hosted web UI and API for managing cellular modems through QMI and MBIM. It ships as a single binary with an embedded Vue 3 frontend, designed to be lightweight and easy to deploy.
 
-Sigmo focuses on advanced eSIM operations, SMS management, and network control.
+Sigmo focuses on advanced eSIM operations and transfers, IMS calls and messaging, SMS management, and network control.
 
 ## ✨ Features
 
 - **📱 eSIM Management**: List, download (SM-DP+), enable, rename, and delete eSIM profiles.
+- **🔄 eSIM Quick Transfer**: Transfer eSIM or physical SIM lines from another modem or a compatible SIM reader to the target modem's eUICC, where supported by the carrier.
 - **📩 SMS Center**: Full conversational view for SMS, send/delete capability, and USSD session support.
+- **📞 VoLTE**: IMS calls, SMS, and USSD over LTE through compatible QMI and MBIM modems.
+- **📶 VoWiFi (Wi-Fi Calling)**: IMS calls, SMS, and USSD over an internet connection.
 - **⚙️ Modem Control**: SIM slot switching, network scanning, manual registration, and preference configuration (Alias, MSS).
 - **🔒 Secure Access**: Independent OTP delivery, standard OIDC, and Cloudflare Access for Web and iOS. See [OIDC](#oidc) and [Cloudflare Access](#cloudflare-access).
 - **🔔 Notifications**: Forward incoming SMS and login tokens to Telegram, Bark, Gotify, Email, etc.
 - **🚀 Portable**: Single Go binary with no mandatory modem-control daemon.
+
+VoLTE, VoWiFi, and eSIM Quick Transfer require active Sigmo Pro authorization, supported carrier configurations, and compatible hardware. VoWiFi also requires a working internet connection.
 
 ---
 
