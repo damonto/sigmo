@@ -116,22 +116,27 @@ final class HomeTests: XCTestCase {
                                      api: BackendAPI(configuration: configuration) { try await fixture.respond($0) })
         await session.refresh(force: true)
         XCTAssertEqual(session.unreadCounts["device-1"], 2)
+        XCTAssertEqual(session.unreadMessageCount, 2)
         let messages = MessagesState(session: session, modemID: "device-1")
         await messages.load()
         let active = try XCTUnwrap(messages.items.first { $0.id == "conversation-active" })
         let inactive = try XCTUnwrap(messages.items.first { $0.id == "conversation-inactive" })
         await messages.mark(inactive, unread: true)
         XCTAssertEqual(session.unreadCounts["device-1"], 3)
+        XCTAssertEqual(session.unreadMessageCount, 3)
         messages.search = "missing"
         await messages.load()
         XCTAssertTrue(messages.items.isEmpty)
         XCTAssertEqual(session.unreadCounts["device-1"], 3)
+        XCTAssertEqual(session.unreadMessageCount, 3)
         let thread = messages.thread(active)
         await thread.markRead(through: 2)
         XCTAssertEqual(session.unreadCounts["device-1"], 1)
+        XCTAssertEqual(session.unreadMessageCount, 1)
         let deleted = await messages.delete(inactive)
         XCTAssertTrue(deleted)
         XCTAssertEqual(session.unreadCounts["device-1"], 0)
+        XCTAssertEqual(session.unreadMessageCount, 0)
     }
 
     func testUnreadAggregationIgnoresUnassignedAndRemovedDevices() async throws {
@@ -140,6 +145,8 @@ final class HomeTests: XCTestCase {
         let session = try testSession(stub)
         await session.refresh(force: true)
         XCTAssertEqual(session.unreadCounts, ["device-1": 5])
+        // Home includes history that no longer belongs to an available device.
+        XCTAssertEqual(session.unreadMessageCount, 23)
         let requests = await stub.allRequests().filter { $0.url?.path.hasSuffix("/conversations") == true }
         XCTAssertEqual(requests.count, 1)
         XCTAssertNil(requests.first?.url?.query)
@@ -159,9 +166,13 @@ final class HomeTests: XCTestCase {
         await two.refresh(force: true)
         XCTAssertEqual(one.unreadCounts["device-1"], 2)
         XCTAssertEqual(two.unreadCounts["device-1"], 8)
+        XCTAssertEqual(one.unreadMessageCount, 2)
+        XCTAssertEqual(two.unreadMessageCount, 8)
         await one.logout()
         XCTAssertTrue(one.unreadCounts.isEmpty)
         XCTAssertEqual(two.unreadCounts["device-1"], 8)
+        XCTAssertEqual(one.unreadMessageCount, 0)
+        XCTAssertEqual(two.unreadMessageCount, 8)
     }
 
     func testOlderUnreadResponseCannotRestoreAcknowledgedCounts() async throws {
@@ -173,14 +184,90 @@ final class HomeTests: XCTestCase {
         let old = Task { await session.refreshUnreadCounts() }
         await stub.waitForHeldRequest()
         await stub.setConversations(try snapshot(revision: 2, counts: [("device-1", 1)]))
-        await session.refreshUnreadCounts(minimumRevision: 2)
+        await session.refreshUnreadCounts(after: MessageBadge(backendId: "test-backend", revision: 2, unreadCount: 1))
         await stub.release()
         await old.value
         XCTAssertEqual(session.unreadCounts["device-1"], 1)
+        XCTAssertEqual(session.unreadMessageCount, 1)
         // Even the newest request can reach a stale replica after an acknowledged write.
         await stub.setConversations(try snapshot(revision: 1, counts: [("device-1", 8)]))
         await session.refreshUnreadCounts()
         XCTAssertEqual(session.unreadCounts["device-1"], 1)
+        XCTAssertEqual(session.unreadMessageCount, 1)
+    }
+
+    func testAcknowledgedTotalUpdatesBeforeRefreshAndRejectsOlderSnapshots() async throws {
+        let stub = BackendStub()
+        await stub.setConversations(try snapshot(revision: 1, counts: [("device-1", 8)]))
+        let session = try testSession(stub)
+        await session.refresh(force: true)
+        await stub.holdNextConversationRequest()
+        let pending = Task {
+            await session.refreshUnreadCounts(after: MessageBadge(backendId: "test-backend", revision: 2, unreadCount: 1))
+        }
+        await stub.waitForHeldRequest()
+        XCTAssertEqual(session.unreadMessageCount, 1)
+        await stub.release()
+        await pending.value
+        XCTAssertEqual(session.unreadMessageCount, 1)
+        XCTAssertEqual(session.unreadCounts["device-1"], 8)
+
+        await stub.setConversations(try snapshot(revision: 2, counts: [("device-1", 1)]))
+        await session.refreshUnreadCounts()
+        XCTAssertEqual(session.unreadCounts["device-1"], 1)
+    }
+
+    func testAcknowledgedTotalSurvivesRefreshFailureAndOlderBadges() async throws {
+        let stub = BackendStub()
+        await stub.setConversations(try snapshot(revision: 1, counts: [("device-1", 8)]))
+        let session = try testSession(stub)
+        await session.refresh(force: true)
+        await stub.setConversations("", status: 503)
+        await session.refreshUnreadCounts(after: MessageBadge(backendId: "test-backend", revision: 3, unreadCount: 0))
+        XCTAssertEqual(session.unreadMessageCount, 0)
+        await session.refreshUnreadCounts(after: MessageBadge(backendId: "test-backend", revision: 2, unreadCount: 5))
+        XCTAssertEqual(session.unreadMessageCount, 0)
+        XCTAssertNil(session.failure)
+    }
+
+    func testBadgeFromAnotherBackendCannotChangeCountsOrBlockRefresh() async throws {
+        let stub = BackendStub()
+        await stub.setConversations(try snapshot(revision: 1, counts: [("device-1", 8)]))
+        let session = try testSession(stub)
+        await session.refresh(force: true)
+        await stub.setConversations(try snapshot(revision: 2, counts: [("device-1", 1)]))
+        await session.refreshUnreadCounts(after: MessageBadge(backendId: "other-backend", revision: 100, unreadCount: 99))
+        XCTAssertEqual(session.unreadMessageCount, 1)
+        XCTAssertEqual(session.unreadCounts["device-1"], 1)
+    }
+
+    func testAcknowledgedTotalDoesNotRequireAPreviousUnreadSnapshot() async throws {
+        let stub = BackendStub()
+        await stub.setConversations("", status: 503)
+        let session = try testSession(stub)
+        await session.refresh(force: true)
+        XCTAssertTrue(session.communicationBackendID.isEmpty)
+        await stub.setConversations(try snapshot(revision: 1, counts: [("device-1", 8)]))
+        await session.refreshUnreadCounts(after: MessageBadge(backendId: "test-backend", revision: 2, unreadCount: 1))
+        XCTAssertEqual(session.unreadMessageCount, 1)
+        XCTAssertEqual(session.communicationBackendID, "test-backend")
+        XCTAssertTrue(session.unreadCounts.isEmpty)
+    }
+
+    func testAcknowledgedTotalSurvivesCancellationWithoutStartingARefresh() async throws {
+        let stub = BackendStub()
+        await stub.setConversations(try snapshot(revision: 1, counts: [("device-1", 8)]))
+        let session = try testSession(stub)
+        await session.refresh(force: true)
+        let before = await stub.count("/conversations")
+        let pending = Task {
+            await session.refreshUnreadCounts(after: MessageBadge(backendId: "test-backend", revision: 2, unreadCount: 0))
+        }
+        pending.cancel()
+        await pending.value
+        XCTAssertEqual(session.unreadMessageCount, 0)
+        let after = await stub.count("/conversations")
+        XCTAssertEqual(after, before)
     }
 
     func testUnreadResponsesAfterLogoutAndStopAreDiscarded() async throws {
@@ -197,6 +284,7 @@ final class HomeTests: XCTestCase {
             await stub.release()
             await pending.value
             XCTAssertEqual(session.unreadCounts["device-1"], logout ? nil : 2)
+            XCTAssertEqual(session.unreadMessageCount, logout ? 0 : 2)
         }
     }
 
@@ -209,6 +297,7 @@ final class HomeTests: XCTestCase {
             await stub.setConversations("", status: status)
             await session.refreshUnreadCounts()
             XCTAssertEqual(session.unreadCounts["device-1"], status == 401 ? nil : 3)
+            XCTAssertEqual(session.unreadMessageCount, status == 401 ? 0 : 3)
             XCTAssertEqual(session.hasLoadedModems, status != 401)
             XCTAssertNil(session.failure)
         }
@@ -236,6 +325,8 @@ final class HomeTests: XCTestCase {
         await pending.value
         XCTAssertTrue(old.unreadCounts.isEmpty)
         XCTAssertTrue(try XCTUnwrap(store.sessions[id]).unreadCounts.isEmpty)
+        XCTAssertEqual(old.unreadMessageCount, 0)
+        XCTAssertEqual(try XCTUnwrap(store.sessions[id]).unreadMessageCount, 0)
     }
 
     private func snapshot(revision: Int64, counts: [(String, Int)]) throws -> String {

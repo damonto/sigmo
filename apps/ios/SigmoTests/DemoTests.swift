@@ -36,16 +36,25 @@ final class DemoTests: XCTestCase {
         let threads = try await session.protectedRequest { api, token in try await api.messageThreads(search: "", cursor: "", token: token) }
         let thread = try XCTUnwrap(threads.items.first { $0.participant == "+12025550101" })
         XCTAssertEqual(thread.latestMessage.text, "Demo write")
-        let timeline = try await session.protectedRequest { api, token in try await api.threadMessages(thread.id, cursor: "", token: token) }
-        _ = try await session.protectedRequest { api, token in try await api.readThread(thread.id, messageIDs: timeline.items.map(\.id), token: token) }
+        let history = CommunicationThreadState(session: session, threadID: thread.id)
+        await history.load()
+        let read = await history.acknowledge(Set(history.messages.map(\.id)))
+        XCTAssertNotNil(read)
         let snapshot = try await session.protectedRequest { api, token in try await api.conversations(modemID: nil, token: token) }
         XCTAssertEqual(snapshot.items.first { $0.id == conversation }?.unreadCount, 0)
+        XCTAssertEqual(session.unreadMessageCount, snapshot.unreadCount)
         try await demo.receiveMessage()
         let updated = try await session.protectedRequest { api, token in try await api.messageThreads(search: "", cursor: "", token: token) }
         XCTAssertEqual(updated.items.first { $0.id == thread.id }?.unreadCount, 1)
-        try await session.protectedRequest { api, token in try await api.deleteThread(thread.id, token: token) }
+        await session.refreshUnreadCounts()
+        let unreadBeforeDeletion = session.unreadMessageCount
+        let state = CommunicationState(session: session, section: .messages)
+        await state.delete(thread.id)
+        XCTAssertNil(state.failure)
         let deleted = try await session.protectedRequest { api, token in try await api.conversations(modemID: nil, token: token) }
         XCTAssertFalse(deleted.items.contains { $0.participant == thread.participant })
+        XCTAssertEqual(session.unreadMessageCount, deleted.unreadCount)
+        XCTAssertEqual(session.unreadMessageCount, unreadBeforeDeletion - 1)
     }
 
     func testContactsAndSettingsStayWithinTheirDemoConnection() async throws {

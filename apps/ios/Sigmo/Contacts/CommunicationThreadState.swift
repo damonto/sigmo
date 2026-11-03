@@ -98,7 +98,9 @@ final class CommunicationThreadState {
             return await acknowledgeBatch(visibleIDs)
         }
         acknowledgmentTask = task
-        return await task.value
+        let badge = await task.value
+        if let badge { await session.refreshUnreadCounts(after: badge) }
+        return badge
     }
 
     private func acknowledgeBatch(_ visibleIDs: Set<Int64>) async -> MessageBadge? {

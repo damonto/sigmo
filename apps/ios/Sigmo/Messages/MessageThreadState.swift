@@ -109,7 +109,7 @@ final class MessageThreadState {
             acknowledged = max(acknowledged, id)
             manuallyUnread = false
             badge = result
-            await session.refreshUnreadCounts(minimumRevision: result.revision)
+            await session.refreshUnreadCounts(after: result)
         } catch { /* A later visible-message acknowledgment retries a canceled/offline read. */ }
     }
 

@@ -86,7 +86,7 @@ final class MessagesState: Identifiable {
             let badge = try await session.protectedRequest { api, token in try await api.updateConversation(conversation.id, read: read, token: token) }
             guard current == generation, !Task.isCancelled else { return }
             self.badge = badge
-            await session.refreshUnreadCounts(minimumRevision: badge.revision)
+            await session.refreshUnreadCounts(after: badge)
             guard current == generation, !Task.isCancelled else { return }
             await load()
         } catch { if current == generation, !Task.isCancelled { loadFailure = .wrapping(error) } }

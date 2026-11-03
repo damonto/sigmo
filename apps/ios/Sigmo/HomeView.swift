@@ -70,14 +70,19 @@ struct HomeView: View {
         TabView(selection: $homeTab) {
             Tab("communication.devices", systemImage: "server.rack", value: HomeTab.devices) { homeNavigation }
             Tab("communication.messages", systemImage: "message", value: HomeTab.messages) { communicationTab(.messages) }
+                .badge(communicationSessions.reduce(0) { $0 + $1.unreadMessageCount })
             Tab("communication.calls", systemImage: "phone", value: HomeTab.calls) { communicationTab(.calls) }
             Tab("communication.contacts", systemImage: "person.crop.circle", value: HomeTab.contacts) { communicationTab(.contacts) }
         }
     }
 
+    private var communicationSessions: [BackendSession] {
+        store.orderedSessions(backendID: UUID(uuidString: communicationBackend))
+    }
+
     private func communicationTab(_ section: CommunicationSection) -> some View {
         NavigationStack {
-            let sessions = store.orderedSessions(backendID: UUID(uuidString: communicationBackend))
+            let sessions = communicationSessions
             CommunicationWorkspace(sessions: sessions, section: section,
                                    callbackDial: section == .calls ? $communicationDial : .constant(nil))
                 .id(sessions.map {

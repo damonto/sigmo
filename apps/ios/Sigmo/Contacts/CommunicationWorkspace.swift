@@ -482,6 +482,5 @@ struct CommunicationThreadView: View {
         guard let badge = await state.acknowledge(visibleIDs) else { return }
         push?.record(badge, sessionID: session.id)
         for id in conversations { await push?.removeNotifications(backendID: badge.backendId, conversationID: id) }
-        await session.refreshUnreadCounts(minimumRevision: badge.revision)
     }
 }

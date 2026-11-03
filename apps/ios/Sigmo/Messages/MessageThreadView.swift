@@ -155,7 +155,7 @@ struct MessageComposer: View {
     @Binding var text: String
     let sending: Bool
     let enabled: Bool
-    let send: () -> Void
+    let send: @MainActor () -> Void
 
     private var canSend: Bool {
         enabled && !sending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

@@ -611,6 +611,10 @@ final class BackendFlowTests: XCTestCase {
         let badge = app.staticTexts["modemUnread-\(identity)"]
         XCTAssertTrue(badge.waitForExistence(timeout: 10))
         XCTAssertEqual(badge.value as? String, "125")
+        let homeMessagesTab = app.tabBars.buttons["Messages"]
+        // Native tab badges can append a localized unit to their accessibility value.
+        let homeBadge = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value MATCHES %@", #"125(\D.*)?"#), object: homeMessagesTab)
+        XCTAssertEqual(XCTWaiter.wait(for: [homeBadge], timeout: 5), .completed, app.debugDescription)
         XCTAssertGreaterThan(badge.frame.minY, app.staticTexts["modemNumber-\(identity)"].frame.minY)
         XCTAssertGreaterThan(badge.frame.minX, app.staticTexts["modemMetadata-\(identity)"].frame.maxX)
         attachScreenshot(app)
@@ -629,6 +633,8 @@ final class BackendFlowTests: XCTestCase {
         XCTAssertTrue(home.waitForExistence(timeout: 5))
         let cleared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: badge)
         XCTAssertEqual(XCTWaiter.wait(for: [cleared], timeout: 5), .completed)
+        let homeBadgeCleared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == nil OR value == ''"), object: homeMessagesTab)
+        XCTAssertEqual(XCTWaiter.wait(for: [homeBadgeCleared], timeout: 5), .completed)
         attachScreenshot(app)
     }
 

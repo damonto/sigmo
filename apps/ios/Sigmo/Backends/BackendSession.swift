@@ -43,6 +43,7 @@ final class BackendSession: Identifiable {
     }
     private(set) var modems: [Modem] = []
     private(set) var unreadCounts: [String: Int] = [:]
+    private(set) var unreadMessageCount = 0
     private(set) var hasLoadedModems = false
     private(set) var lastRefresh: Date?
     private(set) var failure: BackendFailure? {
@@ -528,6 +529,7 @@ final class BackendSession: Identifiable {
         clearCommunicationCache()
         modems = []
         unreadCounts = [:]
+        unreadMessageCount = 0
         unreadRevision = -1
         unreadRequest += 1
         hasLoadedModems = false
@@ -537,9 +539,16 @@ final class BackendSession: Identifiable {
 
     // Only an unfiltered snapshot can replace all module counts. The response's
     // top-level unreadCount belongs to the entire Sigmo, including unassigned history.
-    func refreshUnreadCounts(minimumRevision: Int64? = nil) async {
-        guard !Task.isCancelled, canAccessDevices, hasLoadedModems else { return }
-        if let minimumRevision { unreadRevision = max(unreadRevision, minimumRevision) }
+    func refreshUnreadCounts(after badge: MessageBadge? = nil) async {
+        guard canAccessDevices, hasLoadedModems else { return }
+        if let badge, communicationBackendID.isEmpty { communicationBackendID = badge.backendId }
+        if let badge, badge.backendId == communicationBackendID, badge.revision >= unreadRevision {
+            // A successful read confirms the total even if refreshing device counts fails.
+            unreadMessageCount = max(0, badge.unreadCount)
+            unreadRevision = badge.revision
+        }
+        // An accepted read survives cancellation of its caller; only the refresh is optional.
+        guard !Task.isCancelled else { return }
         unreadRequest += 1
         let request = unreadRequest
         let current = generation
@@ -560,6 +569,7 @@ final class BackendSession: Identifiable {
                 counts[conversation.modemId, default: 0] += max(0, conversation.unreadCount)
             }
             unreadCounts = counts
+            unreadMessageCount = max(0, snapshot.unreadCount)
             unreadRevision = snapshot.revision
         } catch {
             // Retain confirmed counts when the badge request fails. Authentication

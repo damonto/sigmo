@@ -116,6 +116,7 @@ final class CommunicationState {
                 }
             }
             await load(force: true)
+            if section == .messages { await session.refreshUnreadCounts() }
         } catch { if !Task.isCancelled { failure = .wrapping(error) } }
     }
 }
