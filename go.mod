@@ -8,7 +8,7 @@ require (
 	github.com/damonto/ims-go v0.1.2
 	github.com/damonto/ts43-go v0.1.0
 	github.com/damonto/wwan-go v0.0.1
-	github.com/go-jose/go-jose/v4 v4.1.6
+	github.com/go-jose/go-jose/v4 v4.1.8
 	github.com/go-playground/locales v0.14.2
 	github.com/go-playground/universal-translator v0.18.2
 	github.com/go-playground/validator/v10 v10.30.5
