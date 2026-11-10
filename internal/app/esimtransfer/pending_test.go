@@ -35,6 +35,32 @@ func (c *transferTestChannel) AuthenticateAKA(context.Context, *ts43.AKARequest)
 	return &ts43.AKAResponse{Res: []byte{1}}, nil
 }
 
+func TestTransferRetryable(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		result *ts43.Result
+		err    error
+		want   bool
+	}{
+		{name: "no transfer", err: errors.New("network unavailable")},
+		{name: "completed transfer", result: &ts43.Result{State: ts43.StateDone}, err: errors.New("network unavailable")},
+		{name: "download network failure", result: &ts43.Result{State: ts43.StatePendingConfiguration}, err: errors.New("network unavailable"), want: true},
+		{name: "activation network failure", result: &ts43.Result{State: ts43.StatePendingActivation}, err: errors.New("network unavailable"), want: true},
+		{name: "download deactivated", result: &ts43.Result{State: ts43.StatePendingConfiguration}, err: &ts43.CarrierDeniedError{Operation: ts43.OperationAcquireConf, Result: &ts43.ODSAResponse{ServiceStatus: ts43.ServiceStatusDeactivated}}},
+		{name: "activation deactivated no reuse", result: &ts43.Result{State: ts43.StatePendingActivation}, err: &ts43.CarrierDeniedError{Operation: ts43.OperationAcquireConf, Result: &ts43.ODSAResponse{ServiceStatus: ts43.ServiceStatusDeactivatedNoReuse}}},
+		{name: "forbidden", result: &ts43.Result{State: ts43.StatePendingConfiguration}, err: &ts43.HTTPError{StatusCode: http.StatusForbidden}},
+		{name: "credential retries exhausted", result: &ts43.Result{State: ts43.StatePendingConfiguration}, err: &ts43.HTTPError{StatusCode: http.StatusNetworkAuthenticationRequired}},
+		{name: "server unavailable", result: &ts43.Result{State: ts43.StatePendingConfiguration}, err: &ts43.HTTPError{StatusCode: http.StatusServiceUnavailable}, want: true},
+		{name: "rate limited", result: &ts43.Result{State: ts43.StatePendingConfiguration}, err: &ts43.HTTPError{StatusCode: http.StatusTooManyRequests}, want: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := transferRetryable(tt.result, tt.err); got != tt.want {
+				t.Errorf("transferRetryable() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPendingTransferContinuesSameSession(t *testing.T) {
 	for _, tt := range []struct {
 		name                          string
@@ -217,12 +243,13 @@ func TestTransferSupportAndroidBackend(t *testing.T) {
 	}
 }
 
-func TestDelayedDownloadRequiresCarrierCode(t *testing.T) {
+func TestDelayedDownloadCanCheckAgainOrUseCarrierCode(t *testing.T) {
 	for _, tt := range []struct {
 		name, code        string
 		cancel, wantError bool
 	}{
 		{name: "carrier activation code", code: " LPA:1$smdp.example$matching-id "},
+		{name: "check configuration again"},
 		{name: "invalid code", code: "invalid", wantError: true},
 		{name: "cancel", cancel: true, wantError: true},
 	} {

@@ -41,13 +41,18 @@
 
   installRequestRewriter();
 
-  function notifyParent(payload) {
+  let delivery = Promise.resolve();
+  const callbackPrefix = Date.now().toString(36) + Math.random().toString(36).slice(2);
+  let callbackSequence = 0;
+
+  function notifyParent(payload, submitted) {
     try {
-      window.parent.postMessage({type:"sigmo-websheet-callback", callback: payload}, "*");
+      window.parent.postMessage({type:"sigmo-websheet-callback", callback: payload, submitted: submitted}, "*");
     } catch (_) {}
   }
 
   function post(payload) {
+    payload.callbackId = callbackPrefix + ":" + (++callbackSequence);
     if (!payload.at) payload.at = new Date().toISOString();
     payload.href = window.location && window.location.href ? window.location.href : "";
     if (payload.source === "odsa") {
@@ -62,13 +67,17 @@
         window.dispatchEvent(new CustomEvent("vowifi-callback", {detail: payload}));
       } catch (_) {}
     }
-    try {
-      fetch(callbackURL, {method: "POST", mode: "no-cors", headers: {"Content-Type": "text/plain;charset=UTF-8"}, body: JSON.stringify(payload), credentials: "include"})
-        .then(function(){ notifyParent(payload); })
-        .catch(function(){ notifyParent(payload); });
-    } catch (_) {
-      notifyParent(payload);
-    }
+    // Preserve the portal's event order even when HTTP requests take different
+    // amounts of time. The parent uses the acknowledgment to avoid reposting.
+    delivery = delivery.then(function() {
+      return fetch(callbackURL, {method: "POST", mode: "cors", headers: {"Content-Type": "text/plain;charset=UTF-8"}, body: JSON.stringify(payload), credentials: "include"});
+    }).then(function(response) {
+      if (!response.ok) throw new Error("Websheet callback was rejected");
+      notifyParent(payload, true);
+    });
+    // Keep the chain rejected after a failed event. Later events must not
+    // overtake a missing token invalidation, installation, or cancellation.
+    delivery.catch(function() { notifyParent(payload, false); });
   }
 
   function appendStorage(key, payload) {

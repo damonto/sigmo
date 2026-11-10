@@ -39,6 +39,7 @@ export type TransferEvent =
   | { type: 'user_input' }
   | { type: 'source_deletion' }
   | { type: 'websheet' }
+  | { type: 'websheet_closed' }
   | { type: 'completed' }
   | { type: 'error'; message: string }
 
@@ -74,7 +75,10 @@ export const reduceEsimTransferStatus = (
       const stage = event.stage ?? current.stage
       return {
         ...current,
-        state: TRANSFER_STATE.progress,
+        state:
+          current.state === TRANSFER_STATE.websheet
+            ? TRANSFER_STATE.websheet
+            : TRANSFER_STATE.progress,
         stage,
         progress: progressForStage(stage, current.progress),
       }
@@ -85,6 +89,10 @@ export const reduceEsimTransferStatus = (
       return { ...current, state: TRANSFER_STATE.sourceDeletion }
     case 'websheet':
       return { ...current, state: TRANSFER_STATE.websheet }
+    case 'websheet_closed':
+      return current.state === TRANSFER_STATE.websheet
+        ? { ...current, state: TRANSFER_STATE.progress }
+        : current
     case 'completed':
       return { ...current, state: TRANSFER_STATE.completed, progress: 100, errorMessage: '' }
     case 'error':
@@ -279,7 +287,8 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
   }
 
   const completeWebsheet = () => {
-    applyTransferEvent({ type: 'progress' })
+    carrierWebsheet.value = null
+    applyTransferEvent({ type: 'websheet_closed' })
   }
 
   const cancelTransfer = () => {

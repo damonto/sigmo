@@ -30,22 +30,46 @@ func (s *transferRunner) handleWebsheet(ctx context.Context, session *wsSession,
 	session.sendIfConnected(wsServerMessage{Type: wsTypeProgress, Stage: stageWebsheet})
 	session.sendIfConnected(wsServerMessage{Type: wsTypeWebsheet, Websheet: &info})
 
-	callback, err := websheetSession.WaitCallback(ctx)
-	if err != nil {
-		return result, err
-	}
-	answer, err := ts43WebsheetResult(callback)
-	if err != nil {
-		return result, err
-	}
-	next, err := active.ts43Client.Continue(ctx, result, ts43.ContinueRequest{Websheet: answer})
-	if err != nil {
-		if errors.Is(err, ts43.ErrWebsheetDismissed) {
-			return next, errCarrierDismissed
+	for {
+		callback, err := websheetSession.WaitCallback(ctx)
+		if err != nil {
+			return result, err
 		}
-		return next, err
+		answer, err := ts43WebsheetResult(callback)
+		if err != nil {
+			return result, err
+		}
+		next, err := active.ts43Client.Continue(ctx, result, ts43.ContinueRequest{Websheet: answer})
+		if err != nil {
+			if errors.Is(err, ts43.ErrWebsheetDismissed) {
+				return next, errCarrierDismissed
+			}
+			return next, err
+		}
+		if next.State == ts43.StateDismissed {
+			return next, nil
+		}
+		// These callbacks leave the carrier page open. Installation and
+		// activation can finish before the portal dismisses its own flow.
+		switch answer.Event {
+		case ts43.WebsheetEventProfileReadyWithActivationCode,
+			ts43.WebsheetEventProfileReadyWithDefaultSMDP,
+			ts43.WebsheetEventCheckProfileServiceStatus,
+			ts43.WebsheetEventDeleteToken:
+			if ready, ok := next.Event.(ts43.DownloadReadyEvent); ok {
+				next, err = s.downloadAndCompleteActivation(ctx, session, active, next, ready.Config)
+				if err != nil {
+					return next, err
+				}
+				if next.State == ts43.StateDismissed {
+					return next, nil
+				}
+			}
+			result = next
+			continue
+		}
+		return next, nil
 	}
-	return next, nil
 }
 
 func ts43WebsheetResult(callback websheet.Callback) (*ts43.WebsheetResult, error) {

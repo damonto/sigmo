@@ -88,7 +88,9 @@ func (h *Handler) Callback(c *echo.Context) error {
 	if err := json.NewDecoder(c.Request().Body).Decode(&callback); err != nil {
 		return httpapi.BadRequest(c, "websheet_callback_invalid", err)
 	}
-	session.Callback(callback)
+	if err := session.Callback(callback); err != nil {
+		return websheetError(c, err)
+	}
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -107,6 +109,8 @@ func websheetError(c *echo.Context, err error) error {
 		return httpapi.Error(c, http.StatusGone, "websheet_expired", err.Error())
 	case errors.Is(err, ErrUnsafeURL):
 		return httpapi.BadRequest(c, "websheet_unsafe_url", err)
+	case errors.Is(err, ErrCallbackQueueFull):
+		return httpapi.TooManyRequests(c, "too_many_requests", err)
 	default:
 		return httpapi.Internal(c, "websheet_proxy_failed", err)
 	}

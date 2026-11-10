@@ -96,7 +96,7 @@ struct CarrierWebsheetView: UIViewRepresentable {
           window.addEventListener('message', event => {
             if (event.source !== window || event.origin !== location.origin || event.data?.type !== 'sigmo-websheet-callback') return;
             const callback = event.data.callback;
-            const status = deliveries.get(JSON.stringify(callback)) || 'native';
+            const status = deliveries.get(JSON.stringify(callback)) || (event.data.submitted === false ? 'failed' : 'native');
             window.webkit.messageHandlers.sigmoNative.postMessage(JSON.stringify({callback, status}));
           });
         })();

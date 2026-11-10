@@ -27,14 +27,17 @@ const (
 	defaultTTL           = 10 * time.Minute
 	defaultClientTimeout = 45 * time.Second
 	defaultBasePath      = "/api/v1/websheets"
+	maxPendingCallbacks  = 64
+	maxRecentCallbackIDs = 256
 	callbackURLToken     = "{{CALLBACK_URL}}"
 	targetQueryParam     = "target_query"
 )
 
 var (
-	ErrNotFound  = errors.New("websheet session not found")
-	ErrExpired   = errors.New("websheet session expired")
-	ErrUnsafeURL = errors.New("websheet URL is not allowed")
+	ErrNotFound          = errors.New("websheet session not found")
+	ErrExpired           = errors.New("websheet session expired")
+	ErrUnsafeURL         = errors.New("websheet URL is not allowed")
+	ErrCallbackQueueFull = errors.New("websheet callback queue is full")
 )
 
 //go:embed bridge.js
@@ -79,6 +82,7 @@ type Info struct {
 }
 
 type Callback struct {
+	ID                 string `json:"callbackId,omitempty"`
 	Source             string `json:"source,omitempty"`
 	Controller         string `json:"controller,omitempty"`
 	Method             string `json:"method,omitempty"`
@@ -109,7 +113,11 @@ type Session struct {
 	now               func() time.Time
 	allowPrivateHosts bool
 
-	callbackCh chan Callback
+	callbackMu        sync.Mutex
+	callbacks         []Callback
+	callbackIDs       map[string]struct{}
+	recentCallbackIDs []string
+	callbackNotify    chan struct{}
 }
 
 func New(cfg Config) *Broker {
@@ -168,7 +176,8 @@ func (b *Broker) Create(ctx context.Context, req Request) (*Session, error) {
 		lookupNetIP:       req.LookupNetIP,
 		now:               b.now,
 		allowPrivateHosts: b.allowPrivateHosts,
-		callbackCh:        make(chan Callback, 1),
+		callbackIDs:       make(map[string]struct{}),
+		callbackNotify:    make(chan struct{}, 1),
 	}
 	if b.policyID != nil {
 		session.policyID = b.policyID()
@@ -225,17 +234,59 @@ func (s *Session) Info() Info {
 	}
 }
 
+// WaitCallback returns the next event for the session's single flow consumer.
 func (s *Session) WaitCallback(ctx context.Context) (Callback, error) {
-	select {
-	case callback := <-s.callbackCh:
-		return callback, nil
-	case <-ctx.Done():
-		return Callback{}, ctx.Err()
+	for {
+		if err := ctx.Err(); err != nil {
+			return Callback{}, err
+		}
+		s.callbackMu.Lock()
+		if len(s.callbacks) > 0 {
+			callback := s.callbacks[0]
+			s.callbacks[0] = Callback{}
+			s.callbacks = s.callbacks[1:]
+			s.callbackMu.Unlock()
+			return callback, nil
+		}
+		s.callbackMu.Unlock()
+		select {
+		case <-s.callbackNotify:
+		case <-ctx.Done():
+			return Callback{}, ctx.Err()
+		}
 	}
 }
 
-func (s *Session) Callback(callback Callback) {
-	sendLatest(s.callbackCh, callback)
+// Callback queues an event and ignores delivery retries with a recently seen ID.
+// A full queue rejects new events so callers can retry instead of losing them.
+func (s *Session) Callback(callback Callback) error {
+	s.callbackMu.Lock()
+	defer s.callbackMu.Unlock()
+	if callback.ID != "" {
+		if _, exists := s.callbackIDs[callback.ID]; exists {
+			return nil
+		}
+	}
+	if len(s.callbacks) >= maxPendingCallbacks {
+		return ErrCallbackQueueFull
+	}
+	if callback.ID != "" {
+		if len(s.recentCallbackIDs) == maxRecentCallbackIDs {
+			delete(s.callbackIDs, s.recentCallbackIDs[0])
+			s.recentCallbackIDs[0] = ""
+			s.recentCallbackIDs = s.recentCallbackIDs[1:]
+		}
+		s.callbackIDs[callback.ID] = struct{}{}
+		s.recentCallbackIDs = append(s.recentCallbackIDs, callback.ID)
+	}
+	// Callbacks are ordered protocol events; replacing an unread event can
+	// skip token invalidation or installation when the portal finishes quickly.
+	s.callbacks = append(s.callbacks, callback)
+	select {
+	case s.callbackNotify <- struct{}{}:
+	default:
+	}
+	return nil
 }
 
 func (s *Session) ServeBootstrap(w http.ResponseWriter, r *http.Request) error {
@@ -272,7 +323,9 @@ func (s *Session) Proxy(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if callback, ok := callbackFromURL(target); ok {
-		s.Callback(callback)
+		if err := s.Callback(callback); err != nil {
+			return err
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, err := io.WriteString(w, callbackHTML())
 		return err
@@ -836,16 +889,4 @@ func randomID() (string, error) {
 		return "", fmt.Errorf("generate websheet id: %w", err)
 	}
 	return hex.EncodeToString(raw[:]), nil
-}
-
-func sendLatest[T any](ch chan T, value T) {
-	select {
-	case ch <- value:
-	default:
-		select {
-		case <-ch:
-		default:
-		}
-		ch <- value
-	}
 }

@@ -240,7 +240,7 @@ func (s *transferRunner) run(ctx context.Context, session *wsSession, target *mm
 	result, err := active.ts43Client.Transfer(ctx)
 	for {
 		if err != nil {
-			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, errSessionDisconnected) || !transferPending(result) {
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, errSessionDisconnected) || !transferRetryable(result, err) {
 				return fmt.Errorf("transfer: %w", err)
 			}
 			active.Logger().Warn("TS.43 check interrupted; keeping transfer for retry", "error", err)
@@ -429,6 +429,10 @@ func (s *transferRunner) handleEvent(ctx context.Context, session *wsSession, ac
 		config, err := session.delayedDownloadConfig(ctx, event)
 		if err != nil {
 			return result, false, err
+		}
+		if config.ActivationCode == "" {
+			next, err := active.ts43Client.Continue(ctx, result, ts43.ContinueRequest{})
+			return next, false, err
 		}
 		next, err := s.downloadAndCompleteActivation(ctx, session, active, result, config)
 		return next, false, err

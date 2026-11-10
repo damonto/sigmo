@@ -273,8 +273,14 @@ describe('useEsimTransfer', () => {
     expect(transfer.state.value).toBe(TRANSFER_STATE.websheet)
     expect(transfer.carrierWebsheet.value?.id).toBe('sheet-1')
 
+    ws.message({ type: TRANSFER_MESSAGE.progress, stage: TRANSFER_STAGE.downloading })
+    expect(transfer.state.value).toBe(TRANSFER_STATE.websheet)
+    expect(transfer.stage.value).toBe(TRANSFER_STAGE.downloading)
+    expect(transfer.carrierWebsheet.value?.id).toBe('sheet-1')
+
     transfer.completeWebsheet()
     expect(transfer.state.value).toBe(TRANSFER_STATE.progress)
+    expect(transfer.carrierWebsheet.value).toBeNull()
   })
 
   it('enters an error state for unknown websocket message types', () => {

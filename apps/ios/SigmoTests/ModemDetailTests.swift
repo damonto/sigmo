@@ -1198,6 +1198,31 @@ final class ModemDetailTests: XCTestCase {
         XCTAssertEqual(callback.url?.path, "/prefix/api/v1/websheets/sheet/callback")
     }
 
+    func testTransferWebsheetSurvivesIntermediateCallbacksAndDownloadProgress() async throws {
+        let server = DetailFixtureServer(), detail = try await make(server)
+        let flow = ESIMFlowState(detail: detail, seID: "se-a")
+        await flow.loadSources()
+        flow.selectSource(try XCTUnwrap(flow.sources.first))
+        await flow.loadProfiles()
+        flow.selectProfile(try XCTUnwrap(flow.profiles.first))
+        flow.startTransfer()
+        try flow.consume(event(#"{"type":"websheet","websheet":{"id":"sheet","embedUrl":"/api/v1/websheets/sheet","url":"https://carrier.example","method":"POST"}}"#))
+
+        for name in ["deleteToken", "checkProfileServiceStatus", "profileReadyWithActivationCode", "profileReadyWithDefaultSmdp"] {
+            await flow.completeWebsheet(CarrierCallback(event: name))
+            XCTAssertEqual(flow.phase, .websheet, name)
+            XCTAssertEqual(flow.websheet?.id, "sheet", name)
+        }
+        try flow.consume(event(#"{"type":"progress","stage":"downloading"}"#))
+        XCTAssertEqual(flow.phase, .websheet)
+        XCTAssertEqual(flow.stage, "downloading")
+        XCTAssertEqual(flow.websheet?.id, "sheet")
+
+        await flow.completeWebsheet(CarrierCallback(event: "finishFlow"))
+        XCTAssertEqual(flow.phase, .progress)
+        XCTAssertNil(flow.websheet)
+    }
+
     func testExpiredOrEmptyReminderCannotSubmit() {
         let future = Date().addingTimeInterval(3600)
         XCTAssertFalse(ReminderSubmission(scheduledAt: .distantPast, repeatDays: nil, content: "Renew").isValid())

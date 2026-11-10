@@ -221,7 +221,9 @@ func TestSessionCallback(t *testing.T) {
 		t.Fatalf("Create() error = %v", err)
 	}
 
-	session.Callback(Callback{Event: "finishFlow", NextAction: "AcquireConfiguration"})
+	if err := session.Callback(Callback{Event: "finishFlow", NextAction: "AcquireConfiguration"}); err != nil {
+		t.Fatal(err)
+	}
 	callback, err := session.WaitCallback(t.Context())
 	if err != nil {
 		t.Fatalf("WaitCallback() error = %v", err)
@@ -337,8 +339,8 @@ func TestProxyRewritesHTMLAndStripsFrameHeaders(t *testing.T) {
 	if strings.Contains(body, callbackURLToken) {
 		t.Fatalf("proxied body contains unresolved bridge token: %s", body)
 	}
-	if !strings.Contains(body, "mode: \"no-cors\"") {
-		t.Fatalf("proxied body missing no-cors callback fetch: %s", body)
+	if !strings.Contains(body, "mode: \"cors\"") {
+		t.Fatalf("proxied body missing CORS callback fetch: %s", body)
 	}
 }
 

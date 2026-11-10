@@ -9,12 +9,12 @@ import (
 )
 
 func (s *wsSession) delayedDownloadConfig(ctx context.Context, event ts43.DelayedDownloadEvent) (ts43.DownloadConfig, error) {
-	// Only SMDSDiscoveryEvent authorizes discovery. A delayed download needs
-	// the carrier's out-of-band download information before installation.
+	// A delayed download can be checked through the same carrier session.
+	// Only SMDSDiscoveryEvent authorizes discovery through SM-DS.
 	answer, err := s.userInput(ctx, ts43.UserInputEvent{Message: ts43.Message{
-		Text:               "The carrier has delayed the download. Enter the activation code supplied by the carrier when it is ready.",
+		Text:               "The carrier has delayed the download. Check again when it is ready, or enter an activation code supplied by the carrier.",
 		AcceptButton:       true,
-		AcceptButtonLabel:  "Download",
+		AcceptButtonLabel:  "Check again",
 		RejectButton:       true,
 		RejectButtonLabel:  "Cancel",
 		AcceptFreeText:     true,
@@ -27,6 +27,9 @@ func (s *wsSession) delayedDownloadConfig(ctx context.Context, event ts43.Delaye
 		return ts43.DownloadConfig{}, context.Canceled
 	}
 	config := ts43.DownloadConfig{ActivationCode: strings.TrimSpace(answer.Response), IMEI: event.TargetIMEI}
+	if config.ActivationCode == "" {
+		return config, nil
+	}
 	if _, err := activationCode(config); err != nil {
 		return ts43.DownloadConfig{}, fmt.Errorf("parse carrier activation code: %w", err)
 	}

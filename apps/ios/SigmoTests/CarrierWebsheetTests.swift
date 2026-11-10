@@ -5,12 +5,26 @@ import Synchronization
 
 @MainActor
 final class CarrierWebsheetTests: XCTestCase {
+    func testCallbackDeliveryIDSurvivesNativeRelay() throws {
+        let data = Data(#"{"callbackId":"document:1","event":"finishFlow"}"#.utf8)
+        let callback = try JSONDecoder().decode(CarrierCallback.self, from: data)
+        XCTAssertEqual(callback.callbackId, "document:1")
+        let encoded = try JSONEncoder().encode(callback)
+        XCTAssertEqual(try JSONDecoder().decode(CarrierCallback.self, from: encoded), callback)
+        let legacy = try JSONDecoder().decode(CarrierCallback.self, from: Data(#"{"event":"finishFlow"}"#.utf8))
+        XCTAssertNil(legacy.callbackId)
+    }
+
     func testServerBridgeAcknowledgesOneCallbackThroughNativeLoader() async throws {
         try await checkServerBridge(callbackStatus: 204, delivery: .submitted)
     }
 
     func testServerBridgeReportsFailedDeliveryWithoutNativeFallback() async throws {
         try await checkServerBridge(callbackStatus: 500, delivery: .failed)
+    }
+
+    func testServerBridgeStopsLaterCallbacksAfterFailedDelivery() async throws {
+        try await checkServerBridge(callbackStatus: 500, delivery: .failed, repeatCallback: true)
     }
 
     func testCarrierAccessChallengeUsesBackendOriginAndPreservesErrorHeaders() async throws {
@@ -60,7 +74,7 @@ final class CarrierWebsheetTests: XCTestCase {
         }
     }
 
-    private func checkServerBridge(callbackStatus: Int, delivery: CarrierCallbackDelivery.Status) async throws {
+    private func checkServerBridge(callbackStatus: Int, delivery: CarrierCallbackDelivery.Status, repeatCallback: Bool = false) async throws {
         let stub = BackendStub()
         await stub.setRequired(true)
         let configuration = try testConfiguration("carrier-fixture.example")
@@ -82,12 +96,16 @@ final class CarrierWebsheetTests: XCTestCase {
         }
         let html = """
         <!doctype html><html><body><script>\(script)</script><script>
-        window.addEventListener('load', () => window.VoWiFiWebServiceFlow.entitlementChanged());
+        window.addEventListener('load', () => {
+            window.VoWiFiWebServiceFlow.entitlementChanged();
+            if (\(repeatCallback)) window.VoWiFiWebServiceFlow.entitlementChanged();
+        });
         </script></body></html>
         """
         CarrierBridgeFixtureProtocol.install(root: url, html: html, callbackStatus: callbackStatus)
         defer { CarrierBridgeFixtureProtocol.remove(root: url) }
         let received = expectation(description: "Real server bridge callback")
+        received.expectedFulfillmentCount = repeatCallback ? 2 : 1
         var failures: [BackendFailure] = []
         let parent = CarrierWebsheetView(url: url, callback: { value in
             XCTAssertEqual(value.callback.event, "entitlementChanged")

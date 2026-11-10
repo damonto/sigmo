@@ -345,7 +345,9 @@ final class ESIMFlowState: Identifiable {
             return
         }
         switch event.type {
-        case "progress": stage = event.stage ?? stage; phase = .progress
+        case "progress":
+            stage = event.stage ?? stage
+            if phase != .websheet { phase = .progress }
         case "preview":
             guard let profile = event.profile else { throw BackendFailure.local("api.invalidResponse") }
             preview = profile
@@ -399,6 +401,12 @@ final class ESIMFlowState: Identifiable {
                 try await detail.session.protectedRequest { api, token in try await api.carrierCallback(websheet.id, callback: callback, token: token) }
             }
             guard current == revision, !Task.isCancelled, !cancelling, self.websheet?.id == websheet.id else { return }
+            // These ODSA callbacks keep the carrier page open during download and status checks.
+            let event = (callback.event ?? callback.method ?? "").lowercased()
+            let intermediate: Set<String> = [
+                "deletetoken", "checkprofileservicestatus", "profilereadywithactivationcode", "profilereadywithdefaultsmdp"
+            ]
+            if intermediate.contains(event) { return }
             if phase == .websheet { self.websheet = nil; websheetURL = nil; phase = .progress }
         } catch { report(error, current: current) }
     }

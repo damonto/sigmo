@@ -2,12 +2,29 @@ package esimtransfer
 
 import (
 	"context"
+	"errors"
+	"net/http"
 
 	"github.com/damonto/ts43-go"
 )
 
 func transferPending(result *ts43.Result) bool {
 	return result != nil && (result.State == ts43.StatePendingConfiguration || result.State == ts43.StatePendingActivation)
+}
+
+func transferRetryable(result *ts43.Result, err error) bool {
+	var denied *ts43.CarrierDeniedError
+	if !transferPending(result) || errors.As(err, &denied) {
+		return false
+	}
+	var httpErr *ts43.HTTPError
+	if errors.As(err, &httpErr) {
+		// The library has already exhausted credential rejection retries.
+		return httpErr.StatusCode == http.StatusRequestTimeout ||
+			httpErr.StatusCode == http.StatusTooManyRequests ||
+			(httpErr.StatusCode >= 500 && httpErr.StatusCode != http.StatusNetworkAuthenticationRequired)
+	}
+	return true
 }
 
 func continuePendingTransfer(ctx context.Context, session *wsSession, active *transferState, result *ts43.Result) (*ts43.Result, error) {

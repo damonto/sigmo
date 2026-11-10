@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { X } from 'lucide-vue-next'
-import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import EsimPersistentDialogContent from '@/components/esim/EsimPersistentDialogContent.vue'
 import { Dialog, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Spinner } from '@/components/ui/spinner'
+import { useCarrierWebsheetCallbacks } from '@/composables/useCarrierWebsheetCallbacks'
 import { resolveAPIURL } from '@/lib/apiUrl'
-import { fetchJson } from '@/lib/fetch'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 
 const props = defineProps<{
@@ -33,40 +33,13 @@ const iframeSrc = computed(() => {
 
 const title = computed(() => props.websheet?.title || t('modemDetail.esim.carrierWebsheetTitle'))
 
-const sendCallback = async (callback: unknown) => {
-  const id = props.websheet?.id
-  if (!id || !callback || typeof callback !== 'object') return
-  try {
-    await fetchJson<void>(`websheets/${id}/callback`, {
-      method: 'POST',
-      body: JSON.stringify(callback),
-    })
-  } catch (err) {
-    console.error('[CarrierWebsheetDialog] Failed to relay websheet callback:', err)
-  }
-}
-
-const isTerminalCallback = (callback: unknown) => {
-  if (!callback || typeof callback !== 'object') return true
-  const record = callback as { event?: unknown; method?: unknown; resultCode?: unknown }
-  const value = String(record.event ?? record.method ?? record.resultCode ?? '').toLowerCase()
-  if (!value) return true
-  if (value.includes('phoneservicesaccountstatuschanged')) return props.closeOnStatusChange
-  return true
-}
-
-const onMessage = (event: MessageEvent) => {
-  if (event.source !== iframeEl.value?.contentWindow) return
-  const data = event.data as { type?: unknown; callback?: unknown } | null
-  if (!data || data.type !== 'sigmo-websheet-callback') return
-  void sendCallback(data.callback)
-  if (isTerminalCallback(data.callback)) {
-    emit('done')
-  }
-}
-
-onMounted(() => window.addEventListener('message', onMessage))
-onUnmounted(() => window.removeEventListener('message', onMessage))
+useCarrierWebsheetCallbacks({
+  iframe: iframeEl,
+  websheet: () => props.websheet,
+  open: () => props.open,
+  closeOnStatusChange: () => props.closeOnStatusChange ?? false,
+  onDone: () => emit('done'),
+})
 
 watch(
   () => props.websheet?.id,

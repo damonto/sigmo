@@ -165,6 +165,7 @@ struct CarrierWebsheet: Codable, Identifiable, Sendable, Equatable {
 }
 
 struct CarrierCallback: Codable, Sendable, Hashable {
+    var callbackId: String?
     var event: String?
     var method: String?
     var resultCode: String?
