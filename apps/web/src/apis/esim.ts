@@ -46,18 +46,24 @@ export const useEsimApi = () => {
     return result
   }
 
+  // The active dialog owns these read errors; abandoned reads must not show global notifications.
   const getTransferSources = (id: string) => {
-    return fetchJson<EsimTransferSourcesResponse>(`modems/${id}/esim-transfers/sources`)
+    return fetchJson<EsimTransferSourcesResponse>(
+      `modems/${id}/esim-transfers/sources`,
+      undefined,
+      true,
+    )
   }
 
   const getTransferProfiles = (
     id: string,
     payload: { sourceType: string; sourceId: string; sourceImei?: string },
   ) => {
-    return fetchJson<EsimTransferProfile[]>(`modems/${id}/esim-transfers/source-profiles`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    })
+    return fetchJson<EsimTransferProfile[]>(
+      `modems/${id}/esim-transfers/source-profiles`,
+      { method: 'POST', body: JSON.stringify(payload) },
+      true,
+    )
   }
 
   return {

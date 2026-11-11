@@ -227,8 +227,46 @@ describe('EsimInstallDialog', () => {
   ])('controls the transfer entry when $name', ({ allowTransfer, wantTransfer }) => {
     const wrapper = mountDialog(allowTransfer)
 
-    expect(wrapper.text().includes('modemDetail.esim.transferButton')).toBe(wantTransfer)
+    expect(wrapper.text().includes('modemDetail.esim.installTransferTitle')).toBe(wantTransfer)
+    expect(wrapper.text().includes('modemDetail.esim.installTransferDevice')).toBe(wantTransfer)
+    expect(wrapper.text().includes('modemDetail.esim.installTransferSigmo')).toBe(wantTransfer)
   })
+
+  it('requires a target eUICC for both transfer sources', async () => {
+    const wrapper = mountDialog(true)
+    await flushPromises()
+    const entries = wrapper.get('section[aria-label="modemDetail.esim.installTransferTitle"]')
+    const buttons = entries.findAll('button')
+    expect(buttons).toHaveLength(2)
+    for (const button of buttons) expect(button.attributes('disabled')).toBeDefined()
+
+    await wrapper.setProps({ ses: [{ id: 'default', label: 'eUICC' }] })
+    await flushPromises()
+    for (const button of buttons) expect(button.attributes('disabled')).toBeUndefined()
+  })
+
+  it.each([
+    { event: 'transfer', label: 'modemDetail.esim.installTransferDevice' },
+    { event: 'remote-transfer', label: 'modemDetail.esim.installTransferSigmo' },
+  ])(
+    'opens $event for the selected eUICC without submitting the download form',
+    async ({ event, label }) => {
+      const wrapper = mountDialog(true, [
+        { id: 'se0', label: 'SE1', eid: 'eid-1' },
+        { id: 'se1', label: 'SE2', eid: 'eid-2' },
+      ])
+      await flushPromises()
+      wrapper.findComponent(EsimSESelector).vm.$emit('update:selectedSeId', 'se1')
+      await flushPromises()
+      const entry = wrapper.findAll('button').find((button) => button.text().includes(label))
+      expect(entry).toBeDefined()
+      await entry?.trigger('click')
+
+      expect(wrapper.emitted(event)).toEqual([['se1']])
+      expect(wrapper.emitted('confirm')).toBeUndefined()
+      expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    },
+  )
 
   it('disables discover and install when no SE is selected', async () => {
     const wrapper = mountDialog(false)

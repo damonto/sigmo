@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 enum ESIMFlowPhase: Equatable {
-    case form, sources, profiles, connecting, progress, preview, confirmation, userInput, sourceDeletion, websheet, completed, cancelled, failed
+    case form, remoteAddress, sources, profiles, connecting, progress, preview, confirmation, userInput, sourceDeletion, websheet, completed, cancelled, failed
     var running: Bool {
         switch self {
         case .connecting, .progress, .preview, .confirmation, .userInput, .sourceDeletion, .websheet: true
@@ -30,6 +30,9 @@ struct ESIMServerMessage: Decodable, Sendable {
     var version: Int? = nil
     var card: RemoteCardRequest? = nil
     var profiles: [TransferProfile]? = nil
+    var sourceProfile: TransferProfile? = nil
+    var sourceName: String? = nil
+    var code: String? = nil
 }
 
 struct ESIMClientMessage: Encodable, Sendable {
@@ -42,6 +45,7 @@ struct ESIMClientMessage: Encodable, Sendable {
     var sourceId: String?
     var profileId: String?
     var sourceImei: String?
+    var sourceUrl: String?
     var accept: Bool?
     var code: String?
     var response: String?
@@ -51,6 +55,8 @@ struct ESIMClientMessage: Encodable, Sendable {
 
 @MainActor @Observable
 final class ESIMFlowState: Identifiable {
+    private static let peerVersion = 1
+
     let id = UUID()
     let detail: ModemDetailState
     let seID: String
@@ -58,6 +64,9 @@ final class ESIMFlowState: Identifiable {
     var confirmation = ""
     var response = ""
     var sourceIMEI = ""
+    var remoteAddress = ""
+    private(set) var remoteSigmo = false
+    private(set) var remoteSubmitted = false
     private(set) var phase: ESIMFlowPhase = .form
     private(set) var transfer = false
     private(set) var stage = ""
@@ -140,6 +149,7 @@ final class ESIMFlowState: Identifiable {
     func loadSources() async {
         guard !phase.running, detail.canTransfer, validSE, !busy else { return }
         closeRemoteCard()
+        remoteSigmo = false
         busy = true
         failure = nil
         discoveries = nil
@@ -164,7 +174,7 @@ final class ESIMFlowState: Identifiable {
         } catch { report(error, current: current) }
     }
     func selectSource(_ value: TransferSource) {
-        guard phase == .sources, !busy else { return }
+        guard !remoteSigmo, phase == .sources, !busy else { return }
         guard value.type != "client_ccid" || sources.contains(where: { $0.key == value.key && $0.cardPresent == true }) else { return }
         closeRemoteCard()
         source = value
@@ -176,7 +186,7 @@ final class ESIMFlowState: Identifiable {
         failure = nil
     }
     func loadProfiles() async {
-        guard phase == .profiles, let source, !busy,
+        guard !remoteSigmo, phase == .profiles, let source, !busy,
               !source.requiresSourceImei || !normalizedSourceIMEI.isEmpty else { return }
         busy = true
         failure = nil
@@ -207,12 +217,13 @@ final class ESIMFlowState: Identifiable {
     }
 
     func selectProfile(_ value: TransferProfile) {
-        guard phase == .profiles, !busy, profilesIMEI == normalizedSourceIMEI,
+        guard !remoteSigmo, phase == .profiles, !busy, profilesIMEI == normalizedSourceIMEI,
               let profile = profiles.first(where: { $0.id == value.id }), profile.supported else { return }
         selectedProfile = profile
     }
     func backToForm() {
         guard !phase.running else { return }
+        if remoteSigmo { interrupt(); remoteSigmo = false }
         stopReaderObservation?()
         stopReaderObservation = nil
         closeRemoteCard()
@@ -229,6 +240,23 @@ final class ESIMFlowState: Identifiable {
         parsed.confirmationCode = input.confirmationCode
         input = parsed
     }
+    func showRemoteAddress() {
+        guard phase == .form, validSE, detail.canTransfer else { return }
+        remoteSigmo = true
+        transfer = true
+        remoteSubmitted = false
+        phase = .remoteAddress
+    }
+    func connectRemote() {
+        guard phase == .remoteAddress, !remoteAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        revision += 1
+        sources = []
+        source = nil
+        selectedProfile = nil
+        failure = nil
+        phase = .connecting
+        runID = UUID()
+    }
     func startDownload() {
         applyLPA()
         guard canStart, !phase.running else { return }
@@ -236,7 +264,7 @@ final class ESIMFlowState: Identifiable {
         prepare()
     }
     func startTransfer() {
-        guard canTransfer, detail.canTransfer, !phase.running else { return }
+        guard !remoteSigmo, canTransfer, detail.canTransfer, !phase.running else { return }
         if source?.type == "client_ccid", remoteCard?.closed != false {
             failure = .local("detail.remoteCardInterrupted")
             return
@@ -266,7 +294,9 @@ final class ESIMFlowState: Identifiable {
         let isTransfer = transfer
         let path = ["modems", id, isTransfer ? "esim-transfers" : "esim-downloads", "sessions"]
         var start = ESIMClientMessage(type: "start", seId: seID)
-        if isTransfer {
+        if remoteSigmo {
+            start = ESIMClientMessage(type: "source", seId: seID, sourceType: "sigmo", sourceUrl: remoteAddress.trimmingCharacters(in: .whitespacesAndNewlines), version: Self.peerVersion)
+        } else if isTransfer {
             start.sourceType = source?.type
             start.sourceId = source?.id
             start.profileId = selectedProfile?.id
@@ -311,7 +341,8 @@ final class ESIMFlowState: Identifiable {
                 phase = .cancelled
             } else {
                 phase = .failed
-                if local != nil { failure = .local("detail.remoteCardInterrupted") }
+                if remoteSigmo { failure = .local(remoteSubmitted ? "peer.uncertain" : "peer.failed") }
+                else if local != nil { failure = .local("detail.remoteCardInterrupted") }
                 else { failure = Task.isCancelled || error is CancellationError ? .local("detail.interrupted") : .wrapping(error) }
             }
         }
@@ -345,6 +376,14 @@ final class ESIMFlowState: Identifiable {
             return
         }
         switch event.type {
+        case "source_selected" where remoteSigmo:
+            guard !remoteSubmitted, event.version == Self.peerVersion, let profile = event.sourceProfile,
+                  !profile.id.isEmpty, !profile.iccid.isEmpty,
+                  profile.supported, profile.type == "esim" else { throw BackendFailure.local("api.invalidResponse") }
+            selectedProfile = profile
+            remoteSubmitted = true
+            phase = .progress
+            stage = "preparing"
         case "progress":
             stage = event.stage ?? stage
             if phase != .websheet { phase = .progress }
@@ -364,6 +403,7 @@ final class ESIMFlowState: Identifiable {
             guard let sheet = event.websheet else { throw BackendFailure.local("api.invalidResponse") }
             websheet = sheet; phase = .websheet
         case "completed": phase = .completed; websheet = nil; websheetURL = nil; confirmation = ""; response = ""
+        case "error" where remoteSigmo: phase = .failed; failure = .local(event.code == "transfer_result_uncertain" ? "peer.uncertain" : event.code == "transfer_remote_unsupported" ? "peer.unsupported" : "peer.failed")
         case "error": phase = .failed; failure = BackendFailure(code: "esim_flow", message: event.message ?? detailText("detail.operationFailed"))
         default: throw BackendFailure.local("api.invalidResponse")
         }
@@ -473,7 +513,7 @@ final class ESIMFlowState: Identifiable {
     }
     func reconcile() async {
         let current = revision
-        let sourceID = transfer && source?.type == "modem" ? source?.id : nil
+        let sourceID = transfer && !remoteSigmo && source?.type == "modem" ? source?.id : nil
         await detail.session.invalidateModemReads(detail.modemID)
         guard current == revision, !Task.isCancelled else { return }
         await detail.load()

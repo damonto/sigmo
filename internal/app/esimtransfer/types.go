@@ -21,6 +21,8 @@ const (
 	SourceCCID  SourceType = "ccid"
 	// SourceClientCCID identifies a reader bound to the current WebSocket client.
 	SourceClientCCID SourceType = "client_ccid"
+	// SourceSigmo identifies a source bound to this transfer's remote session.
+	SourceSigmo SourceType = "sigmo"
 
 	ProfileESIM     ProfileType = "esim"
 	ProfilePhysical ProfileType = "physical"
@@ -41,6 +43,8 @@ type Config struct {
 	EnableProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
 	DeleteProfile func(context.Context, *mmodem.Modem, string, sgp22.ICCID) error
 	Websheets     *websheet.Broker
+	// Allowed is checked throughout remote sessions, including after approval.
+	Allowed func() bool
 }
 
 type SourceResponse struct {

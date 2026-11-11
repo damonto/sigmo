@@ -51,6 +51,8 @@ type transferRunner struct {
 	carrierConfig func(context.Context) (*carrierconfig.Config, error)
 	// remote belongs to one connection; shared HTTP runners never have one.
 	remote        *remoteCard
+	peer          *peerClient
+	allowed       func() bool
 	store         *settings.Store
 	registry      *mmodem.Registry
 	lpaClients    *ilpa.Pool
@@ -68,6 +70,7 @@ func newTransferRunner(opts Config) *transferRunner {
 		enableProfile: opts.EnableProfile,
 		deleteProfile: opts.DeleteProfile,
 		websheets:     opts.Websheets,
+		allowed:       opts.Allowed,
 	}
 }
 
@@ -142,7 +145,7 @@ func (s *transferRunner) Sources(ctx context.Context, target *mmodem.Modem) (Sou
 	currentSettings := s.settingsSnapshot()
 	response := make([]SourceResponse, 0, len(modems))
 	for _, modem := range modems {
-		if modem.EquipmentIdentifier == "" || modem.EquipmentIdentifier == target.EquipmentIdentifier {
+		if modem.EquipmentIdentifier == "" || (target != nil && modem.EquipmentIdentifier == target.EquipmentIdentifier) {
 			continue
 		}
 		response = append(response, SourceResponse{
@@ -187,7 +190,26 @@ func (s *transferRunner) Serve(ctx context.Context, conn *websocket.Conn, target
 		return nil
 	}
 	// A client reader must be usable while browsing profiles, before start.
-	if startMsg.Type == "source" {
+	if startMsg.Type == "source" && startMsg.SourceType == SourceSigmo {
+		local := *s
+		startMsg, local.peer, err = local.requestSigmoSource(sessionCtx, session, startMsg, target)
+		if err != nil {
+			code := "transfer_remote_failed"
+			if errors.Is(err, errPeerUnsupported) {
+				code = "transfer_remote_unsupported"
+			} else if errors.Is(err, errPeerResultUncertain) {
+				code = "transfer_result_uncertain"
+			}
+			session.sendIfConnected(wsServerMessage{Type: wsTypeError, Code: code, Message: err.Error()})
+			return nil
+		}
+		defer local.peer.close()
+		stop := context.AfterFunc(local.peer.wire.ctx, session.disconnect)
+		defer stop()
+		local.peer.startProgress()
+		session.onProgress = local.peer.reportProgress
+		s = &local
+	} else if startMsg.Type == "source" {
 		local := *s
 		local.remote = newRemoteCard(session, startMsg.SourceID)
 		startMsg, err = local.browseRemoteSource(sessionCtx, startMsg, target)
@@ -208,9 +230,24 @@ func (s *transferRunner) Serve(ctx context.Context, conn *websocket.Conn, target
 		session.sendIfConnected(wsServerMessage{Type: wsTypeError, Message: ErrSourceUnsupported.Error()})
 		return nil
 	}
-	if err := s.run(sessionCtx, session, target, start); err != nil {
-		_ = session.send(wsServerMessage{Type: wsTypeError, Message: err.Error()})
+	if start.SourceType == SourceSigmo && s.peer == nil {
+		session.sendIfConnected(wsServerMessage{Type: wsTypeError, Message: ErrSourceUnsupported.Error()})
 		return nil
+	}
+	if err := s.run(sessionCtx, session, target, start); err != nil {
+		code := ""
+		if s.peer != nil {
+			code = "transfer_result_uncertain"
+			_ = s.peer.finish(sessionCtx, "failed")
+		}
+		_ = session.send(wsServerMessage{Type: wsTypeError, Code: code, Message: err.Error()})
+		return nil
+	}
+	if s.peer != nil {
+		if err := s.peer.finish(sessionCtx, "completed"); err != nil {
+			session.sendIfConnected(wsServerMessage{Type: wsTypeError, Code: "transfer_result_uncertain", Message: "check both devices before retrying"})
+			return nil
+		}
 	}
 	_ = session.send(wsServerMessage{Type: wsTypeCompleted})
 	return nil
@@ -258,7 +295,7 @@ func validateStart(start startRequest) error {
 		return errors.New("source and profile are required")
 	}
 	switch start.SourceType {
-	case SourceModem:
+	case SourceModem, SourceSigmo:
 	case SourceCCID, SourceClientCCID:
 		if start.SourceIMEI == "" {
 			return ErrSourceIMEIRequired
@@ -350,6 +387,9 @@ func (s *transferRunner) prepare(ctx context.Context, target *mmodem.Modem, star
 	}
 	targetDevice := ts43Device(targetIMEI)
 	targetDevice.EID = strings.ToUpper(hex.EncodeToString(eid))
+	if s.peer != nil && (targetDevice.EID != s.peer.target.EID || targetDevice.IMEI != s.peer.target.IMEI) {
+		return nil, errors.New("remote transfer target changed")
+	}
 	logger := transferLogger(targetIMEI, source.device.IMEI)
 	targetChannel := &activationChannel{modem: target}
 	var carriers *ts43.EntitlementConfigs
@@ -471,8 +511,10 @@ func (s *transferRunner) handleSMDSDiscovery(ctx context.Context, session *wsSes
 }
 
 func (s *transferRunner) handleSourceProfileDeletion(ctx context.Context, session *wsSession, active *transferState, start startRequest, result *ts43.Result, event ts43.SourceProfileDeletionEvent) (*ts43.Result, error) {
-	if err := session.confirmSourceDeletion(ctx, event.ICCID); err != nil {
-		return result, err
+	if start.SourceType != SourceSigmo {
+		if err := session.confirmSourceDeletion(ctx, event.ICCID); err != nil {
+			return result, err
+		}
 	}
 	session.sendIfConnected(wsServerMessage{Type: wsTypeProgress, Stage: stageDeleting})
 	active.source.Close()

@@ -6,6 +6,7 @@ enum BackendAuthentication: String { case unknown, notRequired, required, authen
 
 @MainActor @Observable
 final class BackendSession: Identifiable {
+    let transferRequests = PeerTransferRequestsState()
     private(set) var savedContacts: [SigmoContact] = [] {
         didSet { contactIndex = ContactIndex(savedContacts) }
     }

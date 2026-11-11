@@ -14,6 +14,8 @@ export const TRANSFER_STATE = {
 
 export type EsimTransferState = (typeof TRANSFER_STATE)[keyof typeof TRANSFER_STATE]
 
+export const TRANSFER_PEER_VERSION = 1
+
 export const TRANSFER_MESSAGE = {
   start: 'start',
   progress: 'progress',
@@ -27,6 +29,7 @@ export const TRANSFER_MESSAGE = {
 } as const
 
 export const TRANSFER_STAGE = {
+  waitingAuthorization: 'waiting_authorization',
   preparing: 'preparing',
   carrier: 'carrier',
   websheet: 'websheet',
@@ -58,6 +61,7 @@ export const transferStageProgress: Record<string, number> = {
 }
 
 export const transferStageLabelKey: Record<string, string> = {
+  [TRANSFER_STAGE.waitingAuthorization]: 'esimPeer.waitingAuthorization',
   [TRANSFER_STAGE.preparing]: 'modemDetail.esim.transferStagePreparing',
   [TRANSFER_STAGE.carrier]: 'modemDetail.esim.transferStageCarrier',
   [TRANSFER_STAGE.websheet]: 'modemDetail.esim.transferStageWebsheet',

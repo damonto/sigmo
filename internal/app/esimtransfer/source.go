@@ -33,6 +33,11 @@ func (s *transferRunner) sourceEID(ctx context.Context, currentSettings *setting
 		Close() error
 	}
 	switch start.SourceType {
+	case SourceSigmo:
+		if s.peer == nil {
+			return "", ErrSourceUnsupported
+		}
+		return s.peer.device.EID, nil
 	case SourceModem:
 		modem, err := s.registry.Find(ctx, start.SourceID)
 		if err != nil {
@@ -66,6 +71,11 @@ func (s *transferRunner) sourceEID(ctx context.Context, currentSettings *setting
 
 func (s *transferRunner) openSource(ctx context.Context, currentSettings *settings.Settings, start startRequest) (*sourceConnection, error) {
 	switch start.SourceType {
+	case SourceSigmo:
+		if s.peer == nil {
+			return nil, ErrSourceUnsupported
+		}
+		return &sourceConnection{channel: s.peer, release: s.peer.closeSource, device: s.peer.device, simType: ts43.SIMTypeESIM}, nil
 	case SourceModem:
 		modem, err := s.registry.Find(ctx, start.SourceID)
 		if err != nil {
@@ -182,6 +192,11 @@ func (s *transferRunner) activateSourceProfile(ctx context.Context, currentSetti
 		return fmt.Errorf("parse source ICCID: %w", err)
 	}
 	switch start.SourceType {
+	case SourceSigmo:
+		if s.peer == nil {
+			return ErrSourceUnsupported
+		}
+		return nil
 	case SourceModem:
 		modem, err := s.registry.Find(ctx, start.SourceID)
 		if err != nil {
@@ -227,6 +242,11 @@ func (s *transferRunner) deleteSourceProfile(ctx context.Context, currentSetting
 		return errPhysicalSourceDeletion
 	}
 	switch start.SourceType {
+	case SourceSigmo:
+		if s.peer == nil {
+			return ErrSourceUnsupported
+		}
+		return s.peer.delete(ctx, rawICCID)
 	case SourceModem:
 		return s.deleteModemSourceProfile(ctx, currentSettings, start, iccid)
 	case SourceCCID, SourceClientCCID:

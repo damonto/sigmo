@@ -111,6 +111,7 @@ const installDialogRef = useTemplateRef<{
 const installDialogOpen = ref(false)
 const transferDialogOpen = ref(false)
 const transferSEID = ref('')
+const remoteTransfer = ref(false)
 const detailDialogOpen = ref(false)
 const pinUnlockDialogOpen = ref(false)
 const pinUnlockInput = ref('')
@@ -619,7 +620,7 @@ void fetchCapabilities()
               : t('modemDetail.reminder.once')
           }}
         </p>
-        <p class="whitespace-pre-wrap break-words">{{ modem.sim.reminder.content }}</p>
+        <p class="whitespace-pre-wrap wrap-break-word">{{ modem.sim.reminder.content }}</p>
       </AlertDescription>
     </Alert>
     <ModemDetailCard
@@ -703,7 +704,18 @@ void fetchCapabilities()
     :ses="seInfo?.ses ?? []"
     @confirm="startDownload"
     @discover="(seId) => openDiscoverDialog(seId)"
-    @transfer="openTransferDialog"
+    @transfer="
+      (seId) => {
+        remoteTransfer = false
+        openTransferDialog(seId)
+      }
+    "
+    @remote-transfer="
+      (seId) => {
+        remoteTransfer = true
+        openTransferDialog(seId)
+      }
+    "
   />
 
   <EsimTransferDialog
@@ -711,6 +723,7 @@ void fetchCapabilities()
     v-model:open="transferDialogOpen"
     :modem-id="modemId"
     :target-se-id="transferSEID"
+    :remote="remoteTransfer"
     @completed="fetchEsimProfiles(modemId)"
   />
 

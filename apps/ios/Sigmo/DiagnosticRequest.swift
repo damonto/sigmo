@@ -64,7 +64,7 @@ struct DiagnosticRequest: Sendable {
 
     private static let pathSegments: Set<String> = [
         "app", "capabilities", "license", "pairings", "modems", "ses", "esims", "sim-profiles", "settings",
-        "activation", "nickname", "notifications", "esim-discoveries", "esim-transfers", "sources", "source-profiles",
+        "activation", "nickname", "notifications", "esim-discoveries", "esim-transfers", "esim-transfer-requests", "remote-sessions", "events", "decisions", "sources", "source-profiles",
         "networks", "registration", "network-scans", "internet-connections", "current", "preferences", "public",
         "wifi-calling", "volte", "sessions", "websheets", "emergency-address-websheets", "resources", "callback",
         "messages", "conversations", "contacts", "avatar", "cached", "calls", "events", "webrtc", "call-media", "ice-servers", "dtmf-events", "ussd",

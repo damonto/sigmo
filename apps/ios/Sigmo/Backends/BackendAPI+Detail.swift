@@ -37,3 +37,10 @@ extension BackendAPI {
         _ = try await request(["websheets", id, "callback"], method: "POST", body: JSONEncoder().encode(callback), token: token, timeout: .hardware)
     }
 }
+
+extension BackendAPI {
+    func decidePeerTransfer(_ request: PeerTransferRequest, accept: Bool, selection: PeerTransferSelection?, token: String?) async throws {
+        let body = try JSONEncoder().encode(PeerTransferDecision(phase: request.phase, revision: request.revision, accept: accept, selection: accept ? selection : nil))
+        _ = try await self.request(["esim-transfer-requests", request.id, "decisions"], method: "POST", body: body, token: token)
+    }
+}

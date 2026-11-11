@@ -23,10 +23,7 @@ struct BackendEditor: View {
                     TextField("configuration.name", text: $name)
                         .focused($nameFocused)
                         .accessibilityIdentifier("backendName")
-                    TextField("backends.address", text: $address)
-                        .keyboardType(.URL).textContentType(.URL)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .accessibilityIdentifier("backendAddress")
+                    URLTextField(title: "backends.address", text: $address, id: "backendAddress")
                 }
             }
             .detailErrorAlert(Binding(get: { store.failure }, set: { store.failure = $0 }))

@@ -1,6 +1,11 @@
-import { TRANSFER_CLIENT_ERROR, TRANSFER_MESSAGE } from '@/constants/esimTransfer'
+import {
+  TRANSFER_CLIENT_ERROR,
+  TRANSFER_MESSAGE,
+  TRANSFER_PEER_VERSION,
+} from '@/constants/esimTransfer'
 import { resolveAPIWebSocketURL } from '@/lib/apiUrl'
-import type { EsimDownloadPreview } from '@/types/esim'
+import { parseTransferMessage } from '@/types/esimPeer'
+import type { EsimDownloadPreview, EsimTransferProfile } from '@/types/esim'
 import type { CarrierWebsheetInfo } from '@/types/websheet'
 
 export type TransferUserInput = {
@@ -9,16 +14,6 @@ export type TransferUserInput = {
   rejectLabel?: string
   freeText: boolean
   freeTextHint?: string
-}
-
-type TransferServerMessage = {
-  type: string
-  stage?: string
-  message?: string
-  iccid?: string
-  profile?: EsimDownloadPreview
-  input?: TransferUserInput
-  websheet?: CarrierWebsheetInfo
 }
 
 type TransferStartMessage = {
@@ -30,6 +25,7 @@ type TransferStartMessage = {
 }
 
 type Handlers = {
+  onSourceSelected?: (profile: EsimTransferProfile) => void
   onProgress: (stage: string) => void
   onPreview: (profile?: EsimDownloadPreview) => void
   onUserInput: (input: TransferUserInput | null) => void
@@ -59,26 +55,28 @@ export const useEsimTransferSession = (handlers: Handlers) => {
     return resolveAPIWebSocketURL(`modems/${id}/esim-transfers/sessions`)
   }
 
-  const start = (modemId: string, message: TransferStartMessage) => {
+  const connect = (modemId: string, initial: object, remote = false) => {
     close()
     const conn = new WebSocket(buildWsUrl(modemId))
+    let sourceSelected = false
     ws = conn
     conn.onopen = () => {
       if (ws !== conn) return
-      send({
-        type: TRANSFER_MESSAGE.start,
-        seId: message.seId,
-        sourceType: message.sourceType,
-        sourceId: message.sourceId,
-        profileId: message.profileId,
-        sourceImei: message.sourceImei,
-      })
+      send(initial)
     }
     conn.onmessage = (event) => {
       if (ws !== conn) return
-      let message: TransferServerMessage
+      let message: ReturnType<typeof parseTransferMessage>
       try {
-        message = JSON.parse(event.data) as TransferServerMessage
+        const value: unknown = JSON.parse(event.data)
+        if (
+          !value ||
+          typeof value !== 'object' ||
+          !('type' in value) ||
+          typeof value.type !== 'string'
+        )
+          throw new Error('invalid message')
+        message = parseTransferMessage(value)
       } catch (err) {
         console.error('[useEsimTransferSession] Failed to parse message:', err)
         handlers.onError(TRANSFER_CLIENT_ERROR.invalidResponse)
@@ -86,6 +84,23 @@ export const useEsimTransferSession = (handlers: Handlers) => {
         return
       }
       switch (message.type) {
+        case 'source_selected':
+          if (
+            !remote ||
+            sourceSelected ||
+            message.version !== TRANSFER_PEER_VERSION ||
+            !message.sourceProfile?.id ||
+            !message.sourceProfile.iccid ||
+            !message.sourceProfile.supported ||
+            message.sourceProfile.type !== 'esim'
+          ) {
+            handlers.onError(TRANSFER_CLIENT_ERROR.invalidResponse)
+            close()
+            return
+          }
+          sourceSelected = true
+          handlers.onSourceSelected?.(message.sourceProfile)
+          return
         case TRANSFER_MESSAGE.progress:
           handlers.onProgress(message.stage ?? '')
           return
@@ -106,7 +121,7 @@ export const useEsimTransferSession = (handlers: Handlers) => {
           close()
           return
         case TRANSFER_MESSAGE.error:
-          handlers.onError(message.message ?? '')
+          handlers.onError(message.code || message.message || '')
           close()
           return
         default:
@@ -117,14 +132,29 @@ export const useEsimTransferSession = (handlers: Handlers) => {
     }
     conn.onerror = () => {
       if (ws !== conn) return
-      handlers.onError('')
+      handlers.onError(sourceSelected ? 'transfer_result_uncertain' : '')
       close()
     }
     conn.onclose = () => {
       if (ws !== conn) return
       ws = null
-      handlers.onError(TRANSFER_CLIENT_ERROR.connectionClosed)
+      handlers.onError(
+        sourceSelected ? 'transfer_result_uncertain' : TRANSFER_CLIENT_ERROR.connectionClosed,
+      )
     }
+  }
+
+  const start = (modemId: string, message: TransferStartMessage) => {
+    const payload = { type: TRANSFER_MESSAGE.start, ...message }
+    connect(modemId, payload)
+  }
+
+  const connectRemote = (modemId: string, seId: string, sourceUrl: string) => {
+    connect(
+      modemId,
+      { type: 'source', version: TRANSFER_PEER_VERSION, sourceType: 'sigmo', sourceUrl, seId },
+      true,
+    )
   }
 
   const submitUserInput = (accept: boolean, response: string) => {
@@ -146,6 +176,7 @@ export const useEsimTransferSession = (handlers: Handlers) => {
 
   return {
     start,
+    connectRemote,
     submitUserInput,
     confirmSourceDeletion,
     cancel,

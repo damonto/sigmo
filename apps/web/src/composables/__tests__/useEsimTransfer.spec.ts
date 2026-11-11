@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { reduceEsimTransferStatus, useEsimTransfer } from '@/composables/useEsimTransfer'
@@ -48,6 +48,17 @@ class FakeWebSocket {
   }
 }
 
+const deferred = <T>() => {
+  let resolve: ((value: T) => void) | undefined
+  let reject: ((reason: unknown) => void) | undefined
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  if (!resolve || !reject) throw new Error('promise callbacks were not initialized')
+  return { promise, resolve, reject }
+}
+
 describe('useEsimTransfer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -76,6 +87,162 @@ describe('useEsimTransfer', () => {
     enabled: true,
   }
   const unsupported: EsimTransferProfile = { ...inactive, id: 'unsupported', supported: false }
+
+  const prepareTransfer = async (onCompleted?: () => void) => {
+    api.getTransferProfiles.mockResolvedValueOnce({ data: ref([inactive]) })
+    const transfer = useEsimTransfer(ref('modem-1'), { onCompleted })
+    transfer.selectSource(source)
+    await transfer.loadProfiles()
+    transfer.selectedProfile.value = inactive
+    return transfer
+  }
+
+  it('does not restart a transfer while it is running or after it completes', async () => {
+    api.getTransferProfiles.mockResolvedValueOnce({ data: ref([inactive]) })
+    const transfer = useEsimTransfer(ref('target'))
+    transfer.selectSource(source)
+    await transfer.loadProfiles()
+    transfer.selectedProfile.value = inactive
+    transfer.startTransfer('target-se')
+    const socket = FakeWebSocket.instances[0]
+    socket?.onopen?.()
+    transfer.startTransfer('target-se')
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(socket?.sent).toHaveLength(1)
+
+    socket?.message({ type: 'completed' })
+    transfer.startTransfer('target-se')
+    expect(transfer.state.value).toBe(TRANSFER_STATE.completed)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+  it('starts automatically with the source owner’s choice on the original connection', async () => {
+    const transfer = useEsimTransfer(ref('target'))
+    transfer.connectRemote('target-se', 'https://source.example/prefix')
+    const socket = FakeWebSocket.instances[0]
+    expect(socket).toBeDefined()
+    socket?.onopen?.()
+    expect(JSON.parse(socket?.sent[0] ?? '{}')).toEqual({
+      type: 'source',
+      version: 1,
+      sourceType: 'sigmo',
+      sourceUrl: 'https://source.example/prefix',
+      seId: 'target-se',
+    })
+    expect(transfer.sources.value).toEqual([])
+    socket?.message({ type: 'progress', stage: 'waiting_authorization' })
+    expect(transfer.sources.value).toEqual([])
+    transfer.selectSource(source)
+    await transfer.loadProfiles()
+    expect(api.getTransferProfiles).not.toHaveBeenCalled()
+    expect(transfer.selectedSource.value).toBeNull()
+    socket?.message({
+      type: 'source_selected',
+      version: 1,
+      sourceProfile: inactive,
+      sourceName: source.name,
+    })
+    expect(transfer.selectedProfile.value).toEqual(inactive)
+    expect(transfer.sources.value).toEqual([])
+    expect(transfer.state.value).toBe(TRANSFER_STATE.progress)
+    transfer.startTransfer('target-se')
+    expect(socket?.sent).toHaveLength(1)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    socket?.message({ type: 'completed' })
+    expect(transfer.state.value).toBe(TRANSFER_STATE.completed)
+    expect(socket?.readyState).toBe(3)
+    transfer.startTransfer('target-se')
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    transfer.cancelTransfer()
+    expect(transfer.remote.value).toBe(false)
+  })
+
+  it('rejects malformed source approval and preserves uncertain results', () => {
+    const transfer = useEsimTransfer(ref('target'))
+    transfer.connectRemote('se', 'https://source.example')
+    const socket = FakeWebSocket.instances[0]
+    socket?.message({
+      type: 'source_selected',
+      version: 1,
+      sourceProfile: { id: 'bad' },
+    })
+    expect(transfer.state.value).toBe(TRANSFER_STATE.error)
+    expect(socket?.readyState).toBe(3)
+    transfer.connectRemote('se', 'https://source.example')
+    FakeWebSocket.instances[1]?.message({ type: 'error', code: 'transfer_result_uncertain' })
+    expect(transfer.errorMessage.value).toBe('transfer_result_uncertain')
+    expect(FakeWebSocket.instances).toHaveLength(2)
+  })
+
+  it.each([undefined, 0, 2])('rejects a source approval with version %s', (version) => {
+    const transfer = useEsimTransfer(ref('target'))
+    transfer.connectRemote('se', 'https://source.example')
+    const socket = FakeWebSocket.instances[0]
+    socket?.message({ type: 'source_selected', version, sourceProfile: inactive })
+    expect(transfer.state.value).toBe(TRANSFER_STATE.error)
+    expect(transfer.errorMessage.value).toBe(TRANSFER_CLIENT_ERROR.invalidResponse)
+    expect(transfer.selectedProfile.value).toBeNull()
+    expect(socket?.readyState).toBe(3)
+  })
+
+  it.each(['error', 'close'])(
+    'reports an uncertain result on socket %s after approval',
+    (event) => {
+      const transfer = useEsimTransfer(ref('target'))
+      transfer.connectRemote('se', 'https://source.example')
+      const socket = FakeWebSocket.instances[0]
+      socket?.message({ type: 'source_selected', version: 1, sourceProfile: inactive })
+      if (event === 'error') socket?.onerror?.()
+      else socket?.onclose?.()
+      expect(transfer.state.value).toBe(TRANSFER_STATE.error)
+      expect(transfer.errorMessage.value).toBe('transfer_result_uncertain')
+      expect(FakeWebSocket.instances).toHaveLength(1)
+    },
+  )
+
+  it('rejects source approvals on a local transfer', async () => {
+    const transfer = await prepareTransfer()
+    transfer.startTransfer('se')
+    FakeWebSocket.instances[0]?.message({
+      type: 'source_selected',
+      version: 1,
+      sourceProfile: { ...inactive, id: 'other' },
+    })
+    expect(transfer.state.value).toBe(TRANSFER_STATE.error)
+    expect(transfer.errorMessage.value).toBe(TRANSFER_CLIENT_ERROR.invalidResponse)
+    expect(transfer.selectedProfile.value).toEqual(inactive)
+  })
+
+  it('rejects repeated approval without replacing the chosen profile', () => {
+    const transfer = useEsimTransfer(ref('target'))
+    transfer.connectRemote('se', 'https://source.example')
+    const socket = FakeWebSocket.instances[0]
+    socket?.message({ type: 'source_selected', version: 1, sourceProfile: inactive })
+    socket?.message({
+      type: 'source_selected',
+      version: 1,
+      sourceProfile: { ...inactive, id: 'other' },
+    })
+    expect(transfer.state.value).toBe(TRANSFER_STATE.error)
+    expect(transfer.selectedProfile.value).toEqual(inactive)
+    expect(socket?.readyState).toBe(3)
+  })
+
+  it('ignores old socket messages after starting another remote request', () => {
+    const transfer = useEsimTransfer(ref('target'))
+    transfer.connectRemote('se', 'https://source.example')
+    const previous = FakeWebSocket.instances[0]
+    transfer.connectRemote('se', 'https://another.example')
+    previous?.message({ type: 'source_selected', version: 1, sourceProfile: inactive })
+    expect(transfer.selectedProfile.value).toBeNull()
+    expect(transfer.errorMessage.value).toBe('')
+    FakeWebSocket.instances[1]?.message({
+      type: 'source_selected',
+      version: 1,
+      sourceProfile: inactive,
+    })
+    expect(transfer.selectedProfile.value).toEqual(inactive)
+  })
 
   it.each([
     {
@@ -122,24 +289,92 @@ describe('useEsimTransfer', () => {
     expect(transfer.canStartTransfer.value).toBe(false)
   })
 
-  it('records the preview profile and completes the transfer progress', () => {
-    const onCompleted = vi.fn()
-    const transfer = useEsimTransfer(ref('modem-1'), { onCompleted })
+  it.each(['response', 'error'])(
+    'ignores an old profile %s after selecting another source',
+    async (result) => {
+      const pending = deferred<{ data: Ref<EsimTransferProfile[]> }>()
+      const nextProfile = { ...inactive, id: 'next-line' }
+      api.getTransferProfiles
+        .mockReturnValueOnce(pending.promise)
+        .mockResolvedValueOnce({ data: ref([nextProfile]) })
+      const transfer = useEsimTransfer(ref('target'))
+      transfer.selectSource(source)
+      const previous = transfer.loadProfiles()
+      transfer.selectSource({ ...source, id: 'source-2' })
+      await transfer.loadProfiles()
 
-    transfer.selectedSource.value = {
-      type: 'modem',
-      id: 'source-1',
-      name: 'Source',
-      requiresSourceImei: false,
-    }
-    transfer.selectedProfile.value = {
-      id: 'profile-1',
-      type: 'esim',
-      name: 'Source line',
-      iccid: '8901',
-      enabled: true,
-      supported: true,
-    }
+      if (result === 'response') pending.resolve({ data: ref([inactive]) })
+      else pending.reject(new Error('Previous source unavailable'))
+      await previous
+
+      expect(transfer.selectedSource.value?.id).toBe('source-2')
+      expect(transfer.profiles.value).toEqual([nextProfile])
+      expect(transfer.state.value).toBe(TRANSFER_STATE.ready)
+      expect(transfer.errorMessage.value).toBe('')
+    },
+  )
+
+  it.each(['response', 'error'])(
+    'ignores a profile %s after returning to source selection',
+    async (result) => {
+      const pending = deferred<{ data: Ref<EsimTransferProfile[]> }>()
+      api.getTransferProfiles.mockReturnValueOnce(pending.promise)
+      api.getTransferSources.mockResolvedValueOnce({ data: ref({ sources: [source] }) })
+      const transfer = useEsimTransfer(ref('target'))
+      transfer.selectSource(source)
+      const previous = transfer.loadProfiles()
+      await transfer.loadSources()
+
+      if (result === 'response') pending.resolve({ data: ref([inactive]) })
+      else pending.reject(new Error('Previous source unavailable'))
+      await previous
+
+      expect(transfer.sources.value).toEqual([source])
+      expect(transfer.selectedSource.value).toBeNull()
+      expect(transfer.selectedProfile.value).toBeNull()
+      expect(transfer.profiles.value).toEqual([])
+      expect(transfer.state.value).toBe(TRANSFER_STATE.ready)
+      expect(transfer.errorMessage.value).toBe('')
+    },
+  )
+
+  it('clears the reader IMEI and selected line when returning to source selection', async () => {
+    api.getTransferProfiles.mockResolvedValueOnce({ data: ref([inactive]) })
+    api.getTransferSources.mockResolvedValueOnce({ data: ref({ sources: [source] }) })
+    const transfer = useEsimTransfer(ref('target'))
+    transfer.selectSource({ type: 'ccid', id: 'reader', name: 'Reader', requiresSourceImei: true })
+    await transfer.loadProfiles()
+    transfer.selectedProfile.value = inactive
+    transfer.sourceImei.value = '123456789012345'
+    await transfer.loadSources()
+
+    expect(transfer.sourceImei.value).toBe('')
+    expect(transfer.selectedSource.value).toBeNull()
+    expect(transfer.selectedProfile.value).toBeNull()
+    expect(transfer.profiles.value).toEqual([])
+    expect(transfer.canStartTransfer.value).toBe(false)
+  })
+
+  it.each(['cancel', 'remote'])('ignores an unfinished source refresh after %s', async (action) => {
+    const pending = deferred<{ data: Ref<{ sources: EsimTransferSource[] }> }>()
+    api.getTransferSources.mockReturnValueOnce(pending.promise)
+    const transfer = useEsimTransfer(ref('target'))
+    const previous = transfer.loadSources()
+    if (action === 'cancel') transfer.cancelTransfer()
+    else transfer.connectRemote('se', 'https://source.example')
+    pending.resolve({ data: ref({ sources: [source] }) })
+    await previous
+
+    expect(transfer.sources.value).toEqual([])
+    expect(transfer.state.value).toBe(
+      action === 'cancel' ? TRANSFER_STATE.idle : TRANSFER_STATE.progress,
+    )
+    expect(transfer.remote.value).toBe(action === 'remote')
+  })
+
+  it('records the preview profile and completes the transfer progress', async () => {
+    const onCompleted = vi.fn()
+    const transfer = await prepareTransfer(onCompleted)
 
     transfer.startTransfer('default')
     const ws = FakeWebSocket.instances[0]
@@ -151,7 +386,7 @@ describe('useEsimTransfer', () => {
       type: TRANSFER_MESSAGE.start,
       sourceType: 'modem',
       sourceId: 'source-1',
-      profileId: 'profile-1',
+      profileId: inactive.id,
     })
 
     ws.message({
@@ -173,7 +408,7 @@ describe('useEsimTransfer', () => {
     expect(onCompleted).toHaveBeenCalledOnce()
   })
 
-  it('defaults required CCID source IMEI to the current modem id', () => {
+  it('defaults required CCID source IMEI to the current modem id', async () => {
     const transfer = useEsimTransfer(ref('target-imei'))
 
     transfer.selectSource({
@@ -182,14 +417,9 @@ describe('useEsimTransfer', () => {
       name: 'Reader 1',
       requiresSourceImei: true,
     })
-    transfer.selectedProfile.value = {
-      id: 'profile-1',
-      type: 'esim',
-      name: 'Source line',
-      iccid: '8901',
-      enabled: true,
-      supported: true,
-    }
+    api.getTransferProfiles.mockResolvedValueOnce({ data: ref([inactive]) })
+    await transfer.loadProfiles()
+    transfer.selectedProfile.value = inactive
 
     expect(transfer.sourceImei.value).toBe('target-imei')
     expect(transfer.canStartTransfer.value).toBe(true)
@@ -204,28 +434,13 @@ describe('useEsimTransfer', () => {
       type: TRANSFER_MESSAGE.start,
       sourceType: 'ccid',
       sourceId: 'reader-1',
-      profileId: 'profile-1',
+      profileId: inactive.id,
       sourceImei: 'target-imei',
     })
   })
 
-  it('enters an error state for malformed websocket messages', () => {
-    const transfer = useEsimTransfer(ref('modem-1'))
-
-    transfer.selectedSource.value = {
-      type: 'modem',
-      id: 'source-1',
-      name: 'Source',
-      requiresSourceImei: false,
-    }
-    transfer.selectedProfile.value = {
-      id: 'profile-1',
-      type: 'esim',
-      name: 'Source line',
-      iccid: '8901',
-      enabled: true,
-      supported: true,
-    }
+  it('enters an error state for malformed websocket messages', async () => {
+    const transfer = await prepareTransfer()
 
     transfer.startTransfer('default')
     const ws = FakeWebSocket.instances[0]
@@ -237,23 +452,8 @@ describe('useEsimTransfer', () => {
     expect(transfer.errorMessage.value).toBe(TRANSFER_CLIENT_ERROR.invalidResponse)
   })
 
-  it('enters websheet state when carrier setup is required', () => {
-    const transfer = useEsimTransfer(ref('modem-1'))
-
-    transfer.selectedSource.value = {
-      type: 'modem',
-      id: 'source-1',
-      name: 'Source',
-      requiresSourceImei: false,
-    }
-    transfer.selectedProfile.value = {
-      id: 'profile-1',
-      type: 'esim',
-      name: 'Source line',
-      iccid: '8901',
-      enabled: true,
-      supported: true,
-    }
+  it('enters websheet state when carrier setup is required', async () => {
+    const transfer = await prepareTransfer()
 
     transfer.startTransfer('default')
     const ws = FakeWebSocket.instances[0]
@@ -283,23 +483,8 @@ describe('useEsimTransfer', () => {
     expect(transfer.carrierWebsheet.value).toBeNull()
   })
 
-  it('enters an error state for unknown websocket message types', () => {
-    const transfer = useEsimTransfer(ref('modem-1'))
-
-    transfer.selectedSource.value = {
-      type: 'modem',
-      id: 'source-1',
-      name: 'Source',
-      requiresSourceImei: false,
-    }
-    transfer.selectedProfile.value = {
-      id: 'profile-1',
-      type: 'esim',
-      name: 'Source line',
-      iccid: '8901',
-      enabled: true,
-      supported: true,
-    }
+  it('enters an error state for unknown websocket message types', async () => {
+    const transfer = await prepareTransfer()
 
     transfer.startTransfer('default')
     const ws = FakeWebSocket.instances[0]

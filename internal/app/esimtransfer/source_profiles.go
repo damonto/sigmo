@@ -25,6 +25,11 @@ func (s *transferRunner) sourceProfileOptions(ctx context.Context, currentSettin
 		configs = config.Entitlements
 	}
 	switch req.SourceType {
+	case SourceSigmo:
+		if s.peer == nil {
+			return nil, ErrSourceUnsupported
+		}
+		return []ProfileResponse{s.peer.option}, nil
 	case SourceModem:
 		return s.modemProfileOptions(ctx, currentSettings, req, configs)
 	case SourceCCID, SourceClientCCID:

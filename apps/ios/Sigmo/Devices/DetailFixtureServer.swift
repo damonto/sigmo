@@ -48,12 +48,13 @@ actor DetailFixtureServer {
         case standard, delayedProfiles, unavailableProfiles, singleHardware, notifications, delayedDiscoveries, noDiscoveries, unavailableDiscoveries, emptyProfiles
         case delayedDeletion, deletionFailure, profileRefresh
         case delayedActivation, activationFailure
-        case mixedTransferProfiles, unsupportedTransferProfiles
+        case mixedTransferProfiles, unsupportedTransferProfiles, peerApprovals
         case delayedSettings, unavailableSettings, unsupportedSettings, settingsWriteFailure
         case delayedSIMPIN
         case connectionSetup, connectionScan, connectionScanError, connectionEmptyNetworks, connectionReadFailure, connectionWriteFailure, connectionMBIM, connectionUnlicensed
     }
 
+    private var peerApprovalRound = 0
     private var physical: Bool
     private var locked: Bool
     private let scenario: Scenario
@@ -209,6 +210,22 @@ actor DetailFixtureServer {
 
     func respond(_ request: URLRequest) async throws -> BackendHTTPResponse {
         requests.append(request)
+        if scenario == .peerApprovals, request.httpMethod == "POST", request.url?.path.contains("/esim-transfer-requests/") == true {
+            struct Decision: Decodable { let phase: String; let revision: Int; let accept: Bool; let selection: PeerTransferSelection? }
+            let decision = try JSONDecoder().decode(Decision.self, from: request.httpBody ?? Data())
+            guard peerApprovalRound == 0, decision.phase == "authorization", decision.revision == 1 else {
+                return HTTPProblem.response(status: 409, code: "transfer_request_expired", detail: "Request already answered")
+            }
+            if decision.accept {
+                guard let selection = decision.selection, selection.sourceType == "modem", selection.sourceId == "device-2", selection.profileId == "Shared line" else {
+                    return HTTPProblem.response(status: 400, code: "transfer_invalid_request", detail: "Source selection required")
+                }
+            }
+            peerApprovalRound += 1
+            let snapshot = try peerSnapshot(phase: "ended", outcome: decision.accept ? "completed" : "failed")
+            for session in sessions.values where session.kind == "peer_events" { session.buffer.push(snapshot) }
+            return BackendHTTPResponse(data: Data(), status: 204)
+        }
         if scenario == .delayedSIMPIN, request.httpMethod == "GET", request.url?.path.hasSuffix("/sim-pin") == true,
            requests.contains(where: { $0.httpMethod == "PUT" && $0.url?.path.hasSuffix("/sim-pin/protection") == true }) {
             try await Task.sleep(for: .seconds(6))
@@ -375,8 +392,11 @@ actor DetailFixtureServer {
             throw BackendFailure(status: status, code: "socket_handshake", message: "Fixture handshake error")
         }
         let id = UUID(), buffer = DetailFixtureBuffer()
-        let kind = path.contains("sim-application") ? "sim" : (path.contains("esim-transfers") ? "transfer" : "download")
+        let kind = path.contains("esim-transfer-requests") ? "peer_events" : path.contains("sim-application") ? "sim" : (path.contains("esim-transfers") ? "transfer" : "download")
         sessions[id] = (buffer, kind, "se-a")
+        if kind == "peer_events" {
+            buffer.push(try scenario == .peerApprovals ? peerSnapshot(phase: "authorization") : Data(#"{"type":"requests","requests":[]}"#.utf8))
+        }
         if kind == "sim" { buffer.push(Data(#"{"type":"status","available":true,"profileIccid":"8986000000000000001","menu":{"kind":"root","title":"SIM services","items":[{"id":1,"label":"Balance"},{"id":2,"label":"Enter code"},{"id":3,"label":"Yes or no"},{"id":4,"label":"Confirm"}]}}"#.utf8)) }
         return BackendSocket(send: { data in try await self.send(data, sessionID: id) }, receive: { try await buffer.receive() }, close: { buffer.close() })
     }
@@ -388,7 +408,7 @@ actor DetailFixtureServer {
         }
         messages.append(data)
         guard var session = sessions[sessionID] else { throw CancellationError() }
-        struct Command: Decodable { let type: String; let seId: String?; let accept: Bool?; let itemId: Int? }
+        struct Command: Decodable { let type: String; let seId: String?; let accept: Bool?; let itemId: Int?; let sourceType: String? }
         let command = try JSONDecoder().decode(Command.self, from: data)
         func emit(_ text: String) { session.buffer.push(Data(text.utf8)) }
         if command.type == "cancel" { session.buffer.close(); sessions[sessionID] = nil; return }
@@ -402,6 +422,20 @@ actor DetailFixtureServer {
             }
             return
         }
+        if command.type == "source", command.sourceType == "sigmo" {
+            session.kind = "sigmo_transfer"; sessions[sessionID] = session
+            emit(#"{"type":"progress","stage":"waiting_authorization"}"#)
+            struct Selected: Encodable {
+                let type = "source_selected"
+                let version = 1
+                let sourceName = "Source Sigmo"
+                let sourceProfile: TransferProfile
+            }
+            session.buffer.push(try JSONEncoder().encode(Selected(sourceProfile: Self.transferProfile("Source profile"))))
+            session.buffer.push(Data(#"{"type":"progress","stage":"preparing"}"#.utf8))
+            session.buffer.push(Data(#"{"type":"completed"}"#.utf8))
+            return
+        }
         if command.type == "source" {
             emit(#"{"type":"source_ready","version":1}"#)
             return
@@ -411,6 +445,7 @@ actor DetailFixtureServer {
             session.buffer.push(try JSONEncoder().encode(Profiles(profiles: [Self.transferProfile("Demo SIM")])))
             return
         }
+
         if command.type == "start" {
             session.seID = command.seId ?? "se-a"; sessions[sessionID] = session
             emit(#"{"type":"progress","stage":"Authenticating Client"}"#)
@@ -435,6 +470,18 @@ actor DetailFixtureServer {
             emit(#"{"type":"progress","stage":"Installing"}"#)
             emit(#"{"type":"completed"}"#)
         }
+    }
+    private func peerSnapshot(phase: String, outcome: String? = nil) throws -> Data {
+        struct Snapshot: Encodable { let type = "requests"; let requests: [PeerTransferRequest] }
+        let approved = phase == "running" || outcome == "completed"
+        let request = PeerTransferRequest(id: "fixture-peer-request", revision: phase == "authorization" ? 1 : 3,
+            phase: phase, remoteAddress: "192.168.1.2", target: PeerTransferTarget(name: "Remote target", imei: "123456789012345", eid: String(repeating: "1", count: 32)),
+            sourceName: approved ? "Source modem" : nil, profile: approved ? Self.transferProfile("Shared line") : nil,
+            stage: nil, outcome: outcome, expiresAt: "2099-01-01T00:00:00Z",
+            sources: phase == "authorization" ? [PeerTransferSourceOption(
+                source: TransferSource(type: "modem", id: "device-2", name: "Source modem", detail: nil, requiresSourceImei: false),
+                profiles: [Self.transferProfile("Shared line")])] : nil)
+        return try JSONEncoder().encode(Snapshot(requests: [request]))
     }
     private func settingsFixture(_ id: String) -> ModemSettingsFixture {
         if let settings = modemSettings[id] { return settings }

@@ -1,27 +1,20 @@
 <script setup lang="ts">
-import { Bell, Bot, Download, Globe2, Keyboard, MessageSquare, ShieldCheck } from 'lucide-vue-next'
 import { computed } from 'vue'
+import { Bell, Bot, Download, Globe2, Keyboard, MessageSquare, ShieldCheck } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 
 import SettingsCategoryCard from '@/components/settings/SettingsCategoryCard.vue'
 import SettingsHeader from '@/components/settings/SettingsHeader.vue'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import { useLicenseStore } from '@/stores/license'
 
 const { t } = useI18n()
 const licenseStore = useLicenseStore()
+const showActivation = computed(() => licenseStore.deviceId && licenseStore.mode !== 'authorized')
 
 const cards = computed(() => [
-  ...(licenseStore.deviceId && licenseStore.mode !== 'authorized'
-    ? [
-        {
-          key: 'activation',
-          title: t('activate.title'),
-          description: t('activate.description'),
-          icon: ShieldCheck,
-          to: { name: 'activate' },
-        },
-      ]
-    : []),
   {
     key: 'auth',
     title: t('settings.authTitle'),
@@ -73,6 +66,24 @@ const cards = computed(() => [
       :title="t('settings.title')"
       :description="t('settings.description')"
     />
+
+    <Alert v-if="showActivation">
+      <ShieldCheck />
+      <div
+        class="col-start-2 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <div class="min-w-0 space-y-1">
+          <AlertTitle class="line-clamp-none">{{ t('activate.title') }}</AlertTitle>
+          <AlertDescription>{{ t('activate.description') }}</AlertDescription>
+        </div>
+        <Button
+          as-child
+          class="w-full shrink-0 sm:w-auto"
+        >
+          <RouterLink :to="{ name: 'activate' }">{{ t('activate.action') }}</RouterLink>
+        </Button>
+      </div>
+    </Alert>
 
     <div class="grid gap-3 xl:grid-cols-2">
       <SettingsCategoryCard

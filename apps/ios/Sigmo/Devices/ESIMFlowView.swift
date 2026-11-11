@@ -152,6 +152,8 @@ struct ESIMFlowView: View {
         switch state.phase {
         case .form:
             setup
+        case .remoteAddress:
+            remoteAddressPage
         case .websheet:
             carrierPage
         case .connecting, .progress, .preview, .completed, .failed:
@@ -189,14 +191,15 @@ struct ESIMFlowView: View {
     }
 
     private var canGoBack: Bool {
-        (state.phase == .form && !setupPath.isEmpty) || state.phase == .sources || state.phase == .profiles
+        (state.phase == .form && !setupPath.isEmpty) || state.phase == .remoteAddress || state.phase == .sources || state.phase == .profiles
     }
     private func goBack() async {
         manualField = nil
         switch state.phase {
         case .form: if !setupPath.isEmpty { setupPath.removeLast() }
-        case .sources: state.backToForm()
-        case .profiles: await state.loadSources()
+        case .remoteAddress, .sources: state.backToForm()
+        case .profiles:
+            await state.loadSources()
         default: break
         }
     }
@@ -295,6 +298,10 @@ struct ESIMFlowView: View {
                     Divider().padding(.leading, methodIconWidth + 12)
                 }
                 if state.detail.canTransfer {
+                    Button { state.showRemoteAddress() } label: {
+                        methodLabel("peer.entry", symbol: "network")
+                    }.accessibilityIdentifier("transferFromSigmo")
+                    Divider().padding(.leading, methodIconWidth + 12)
                     AsyncActionButton(id: "transferESIM", action: { await state.loadSources() }) {
                         methodLabel("detail.transfer", symbol: "iphone.gen3.radiowaves.left.and.right")
                     }
@@ -303,6 +310,19 @@ struct ESIMFlowView: View {
                 Button { setupPath.append(.scanner) } label: { methodLabel("detail.scan", symbol: "qrcode") }
                     .accessibilityIdentifier("scanESIM")
             }.disabled(!state.validSE || state.busy)
+        }
+    }
+
+    private var remoteAddressPage: some View {
+        ESIMSetupPage(title: "peer.entry", description: detailText("peer.address")) {
+            ESIMSetupGroup {
+                URLTextField(title: "peer.address", text: $state.remoteAddress, id: "peerAddress")
+                    .padding(.vertical, 16)
+            }
+            Button { state.connectRemote() } label: { Text("peer.request").frame(maxWidth: .infinity) }
+                .buttonStyle(.glassProminent).controlSize(.large).buttonBorderShape(.capsule)
+                .disabled(state.remoteAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("requestPeerTransfer")
         }
     }
 
@@ -489,6 +509,7 @@ struct ESIMFlowView: View {
                         }.foregroundStyle(.primary).padding(.vertical, 16).contentShape(Rectangle())
                     }
                     .disabled(!profile.supported || state.busy)
+                    .accessibilityIdentifier("transferProfile-" + profile.id)
                     .accessibilityAddTraits(state.selectedProfile?.id == profile.id ? .isSelected : [])
                 }
             }
@@ -517,6 +538,8 @@ struct ESIMFlowView: View {
         case "Authenticating Client": detailText("detail.stageClient")
         case "Authenticating Server": detailText("detail.stageServer")
         case "Installing": detailText("detail.stageInstalling")
+        case "waiting_authorization": detailText("peer.waitingAuthorization")
+        case "waiting_transfer_approval": detailText("peer.waitingTransfer")
         case "preparing": detailText("detail.stagePreparing")
         case "carrier": detailText("detail.stageCarrier")
         case "downloading": detailText("detail.stageDownloading")

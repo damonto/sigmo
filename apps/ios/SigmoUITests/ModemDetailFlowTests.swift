@@ -94,7 +94,7 @@ final class ModemDetailFlowTests: XCTestCase {
     private func installForm(_ app: XCUIApplication, manual: Bool = true) {
         tapOverviewRow(app.buttons["addESIM-se-a"], in: app)
         tap(app.alerts.buttons["skipESIMDiscoveries"].firstMatch, in: app)
-        XCTAssertTrue(app.alerts.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["closePeerTransferRequest"].waitForNonExistence(timeout: 5))
         if manual {
             tap(app.buttons["scanESIM"], in: app)
             tap(app.buttons["manualESIM"], in: app)
@@ -682,6 +682,107 @@ final class ModemDetailFlowTests: XCTestCase {
         // The refreshed profile list can move SE 2 below the viewport at this text size.
         XCTAssertTrue(app.buttons["modemInfo"].waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertTrue(app.buttons["modemInfo"].isHittable, app.debugDescription)
+    }
+
+    func testTransferFromAnotherSigmoStartsInsideDownload() {
+        let app = launch()
+        installForm(app, manual: false)
+        tap(app.buttons["transferFromSigmo"], in: app)
+        let address = app.textFields["peerAddress"]
+        XCTAssertTrue(address.waitForExistence(timeout: 5))
+        address.tap(); address.typeText("https://source.example")
+        tap(app.buttons["requestPeerTransfer"], in: app)
+        XCTAssertFalse(app.buttons["transferSource-modem:device-2"].exists)
+        XCTAssertFalse(app.buttons["startESIMTransfer"].exists)
+        XCTAssertTrue(app.buttons["closeCompletedESIM"].waitForExistence(timeout: 5))
+    }
+
+    private func launchPeerApprovals(chinese: Bool = false, large: Bool = false, dark: Bool = false) -> XCUIApplication {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication()
+        app.launchEnvironment["SIGMO_UI_SCENARIO"] = "detail-peer-approval"
+        app.launchEnvironment["SIGMO_UI_RESET"] = "1"
+        app.launchEnvironment["SIGMO_UI_APPEARANCE"] = dark ? "dark" : "light"
+        app.launchArguments = ["-AppleLanguages", chinese ? "(zh-Hans)" : "(en)", "-AppleLocale", chinese ? "zh_CN" : "en_US", "-UIPreferredContentSizeCategoryName", large ? "UICTContentSizeCategoryAccessibilityXXXL" : "UICTContentSizeCategoryL"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["peerTransferHeading"].waitForExistence(timeout: 10))
+        return app
+    }
+
+    private func revealPeerTransferElement(_ element: XCUIElement, in app: XCUIApplication) {
+        let scroll = app.scrollViews["peerTransferRequest"]
+        for _ in 0..<12 {
+            let viewport = CGRect(x: scroll.frame.minX, y: scroll.frame.minY + 8,
+                                  width: scroll.frame.width,
+                                  height: app.buttons["allowPeerTransfer"].frame.minY - 24 - scroll.frame.minY)
+            if element.exists && element.isHittable && viewport.contains(element.frame) { return }
+            // Keep gestures above the fixed action footer at accessibility text sizes.
+            let start = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: scroll.frame.midX,
+                dy: app.buttons["allowPeerTransfer"].frame.minY - 32
+            ))
+            let end = app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: scroll.frame.midX,
+                dy: scroll.frame.minY + 48
+            ))
+            start.press(forDuration: 0.1, thenDragTo: end)
+        }
+        XCTFail("Cannot reveal transfer details: \(element)\n\(app.debugDescription)")
+    }
+
+    private func choosePeerTransferProfile(in app: XCUIApplication) {
+        let source = app.buttons["peerTransferSource"]
+        revealPeerTransferElement(source, in: app)
+        source.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+        tap(app.buttons["Source modem"], in: app)
+        let profile = app.buttons["peerTransferProfilePicker"]
+        revealPeerTransferElement(profile, in: app)
+        profile.coordinate(withNormalizedOffset: CGVector(dx: 0.94, dy: 0.5)).tap()
+        tap(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Shared line")).firstMatch, in: app)
+    }
+
+    func testSourceApprovalsAppearOnTheHomePage() {
+        let app = launchPeerApprovals()
+        XCTAssertEqual(app.staticTexts["peerTransferHeading"].label, "Choose an eSIM to transfer")
+        XCTAssertFalse(app.buttons["allowPeerTransfer"].isEnabled)
+        XCTAssertFalse(app.staticTexts["peerTransferProfile"].exists)
+        let contentWidth = min(app.scrollViews["peerTransferRequest"].frame.width, 560) - 48
+        for identifier in ["peerTransferSource", "peerTransferProfilePicker"] {
+            let row = app.buttons[identifier]
+            XCTAssertEqual(row.frame.width, contentWidth, accuracy: 2)
+            XCTAssertGreaterThanOrEqual(row.frame.height, 44)
+        }
+        choosePeerTransferProfile(in: app)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Shared line")).firstMatch.exists)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "deletion of the source profile")).firstMatch.exists)
+        let allow = app.buttons["allowPeerTransfer"]
+        XCTAssertTrue(allow.isEnabled)
+        XCTAssertGreaterThanOrEqual(allow.frame.height, 44)
+        screenshot(app, name: "Sigmo source selection English")
+        allow.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).tap()
+        XCTAssertTrue(app.buttons["closePeerTransferRequest"].waitForExistence(timeout: 5))
+        app.buttons["closePeerTransferRequest"].tap()
+        XCTAssertTrue(app.buttons["closePeerTransferRequest"].waitForNonExistence(timeout: 5))
+    }
+
+    func testSourceApprovalDetailsInChineseLargeDark() {
+        let app = launchPeerApprovals(chinese: true, large: true, dark: true)
+        XCTAssertEqual(app.staticTexts["peerTransferHeading"].label, "选择要转出的 eSIM")
+        choosePeerTransferProfile(in: app)
+        let eid = app.staticTexts.matching(NSPredicate(format: "label == %@", String(repeating: "1", count: 32))).firstMatch
+        XCTAssertFalse(eid.exists)
+        let details = app.buttons["peerTransferDetails"]
+        revealPeerTransferElement(details, in: app)
+        details.tap()
+        revealPeerTransferElement(eid, in: app)
+        XCTAssertTrue(eid.isHittable, app.debugDescription)
+        XCTAssertTrue(app.buttons["rejectPeerTransfer"].isHittable)
+        screenshot(app, name: "Sigmo source selection Chinese large dark")
+        tap(app.buttons["rejectPeerTransfer"], in: app)
+        XCTAssertTrue(app.buttons["closePeerTransferRequest"].waitForExistence(timeout: 5))
+        tap(app.buttons["closePeerTransferRequest"], in: app)
+        XCTAssertTrue(app.buttons["closePeerTransferRequest"].waitForNonExistence(timeout: 5))
     }
 
     func testEveryTransferSourceRespondsAcrossItsRow() {

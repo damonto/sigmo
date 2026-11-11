@@ -25,6 +25,7 @@ const (
 )
 
 type wsSession struct {
+	onProgress     func(string)
 	readerWG       sync.WaitGroup
 	writeMu        sync.Mutex
 	cardMu         sync.Mutex
@@ -132,6 +133,9 @@ func (s *wsSession) send(msg wsServerMessage) error {
 	if err := s.conn.WriteJSON(msg); err != nil {
 		s.disconnect()
 		return fmt.Errorf("send transfer message: %w", errors.Join(errSessionDisconnected, err))
+	}
+	if msg.Type == wsTypeProgress && s.onProgress != nil {
+		s.onProgress(msg.Stage)
 	}
 	return nil
 }

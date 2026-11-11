@@ -11,21 +11,25 @@ type wsClientMessage struct {
 	SourceID   string     `json:"sourceId,omitempty"`
 	ProfileID  string     `json:"profileId,omitempty"`
 	SourceIMEI string     `json:"sourceImei,omitempty"`
+	SourceURL  string     `json:"sourceUrl,omitempty"`
 	Accept     *bool      `json:"accept,omitempty"`
 	Response   string     `json:"response,omitempty"`
 }
 
 type wsServerMessage struct {
-	Version  int                `json:"version,omitempty"`
-	Card     *cardRequest       `json:"card,omitempty"`
-	Profiles []ProfileResponse  `json:"profiles,omitempty"`
-	Type     string             `json:"type"`
-	Stage    string             `json:"stage,omitempty"`
-	Message  string             `json:"message,omitempty"`
-	ICCID    string             `json:"iccid,omitempty"`
-	Input    *wsUserInputPrompt `json:"input,omitempty"`
-	Profile  *downloadPreview   `json:"profile,omitempty"`
-	Websheet *websheet.Info     `json:"websheet,omitempty"`
+	Version       int                `json:"version,omitempty"`
+	Card          *cardRequest       `json:"card,omitempty"`
+	Profiles      []ProfileResponse  `json:"profiles,omitempty"`
+	Type          string             `json:"type"`
+	Stage         string             `json:"stage,omitempty"`
+	Message       string             `json:"message,omitempty"`
+	ICCID         string             `json:"iccid,omitempty"`
+	Input         *wsUserInputPrompt `json:"input,omitempty"`
+	Profile       *downloadPreview   `json:"profile,omitempty"`
+	Websheet      *websheet.Info     `json:"websheet,omitempty"`
+	SourceProfile *ProfileResponse   `json:"sourceProfile,omitempty"`
+	SourceName    string             `json:"sourceName,omitempty"`
+	Code          string             `json:"code,omitempty"`
 }
 
 type wsUserInputPrompt struct {

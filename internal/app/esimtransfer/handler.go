@@ -1,6 +1,7 @@
 package esimtransfer
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -15,6 +16,7 @@ import (
 type Handler struct {
 	registry *mmodem.Registry
 	runner   *transferRunner
+	peers    *peerBroker
 }
 
 var transferWSUpgrader = websocket.Upgrader{
@@ -24,17 +26,36 @@ var transferWSUpgrader = websocket.Upgrader{
 }
 
 func NewHandler(cfg Config) *Handler {
-	return &Handler{
-		registry: cfg.Registry,
-		runner:   newTransferRunner(cfg),
-	}
+	broker := newPeerBroker(cfg.Allowed)
+	runner := newTransferRunner(cfg)
+	return &Handler{registry: cfg.Registry, runner: runner, peers: broker}
 }
 
 func RegisterRoutes(group *echo.Group, cfg Config) {
 	h := NewHandler(cfg)
+	h.registerRoutes(group)
+}
+
+// RegisterWithPeerRoutes keeps remote grants outside UI login while preserving
+// the access and feature middleware supplied for each route group.
+func RegisterWithPeerRoutes(group, resources *echo.Group, cfg Config) *Handler {
+	h := NewHandler(cfg)
+	h.registerRoutes(group)
+	RegisterPeerRoutes(resources, h)
+	return h
+}
+
+func (h *Handler) registerRoutes(group *echo.Group) {
 	group.GET("/modems/:id/esim-transfers/sources", h.Sources)
 	group.POST("/modems/:id/esim-transfers/source-profiles", h.Profiles)
 	group.GET("/modems/:id/esim-transfers/sessions", h.Transfer)
+	h.RegisterPeerControlRoutes(group)
+}
+
+// RegisterPeerRoutes registers capability-scoped server connections separately
+// from UI login. The caller must retain its existing entry access boundary.
+func RegisterPeerRoutes(group *echo.Group, h *Handler) {
+	group.GET("/esim-transfers/remote-sessions", h.RemoteSession)
 }
 
 func ConfigFromCore(core *coreesim.Handler, cfg Config) Config {
@@ -74,7 +95,11 @@ func (h *Handler) Profiles(c *echo.Context) error {
 }
 
 func (h *Handler) Transfer(c *echo.Context) error {
-	ctx := c.Request().Context()
+	ctx, release, err := h.peers.begin(c.Request().Context())
+	if err != nil {
+		return httpapi.Error(c, http.StatusServiceUnavailable, "transfer_esim_failed", err.Error())
+	}
+	defer release()
 	target, err := h.registry.Find(ctx, c.Param("id"))
 	if err != nil {
 		return httpapi.ModemLookupError(c, err, "transfer_esim_failed")
@@ -103,3 +128,6 @@ func transferProfileError(c *echo.Context, err error) error {
 	}
 	return httpapi.Internal(c, "list_transfer_profiles_failed", err)
 }
+
+// Close cancels remote transfers and subscriptions before releasing device pools.
+func (h *Handler) Close(ctx context.Context) error { return h.peers.close(ctx) }

@@ -36,7 +36,7 @@ const { t } = useI18n()
       class="flex shrink-0 items-center gap-3 rounded-lg border border-transparent bg-card px-4 py-3 shadow-sm"
     >
       <EsimTransferSourceIcon :type="props.selectedSource.type" />
-      <span class="min-w-0">
+      <span class="min-w-0 flex-1">
         <span class="block text-xs font-medium text-muted-foreground">
           {{ t('modemDetail.esim.transferSource') }}
         </span>
@@ -47,9 +47,13 @@ const { t } = useI18n()
           {{ props.selectedSourceDetail }}
         </span>
       </span>
+      <slot name="source-actions" />
     </div>
 
-    <div v-if="props.loading" class="flex shrink-0 items-center gap-3 rounded-lg bg-muted/40 p-4">
+    <div
+      v-if="props.loading"
+      class="flex shrink-0 items-center gap-3 rounded-lg bg-muted/40 p-4"
+    >
       <Spinner class="size-5" />
       <div class="min-w-0">
         <p class="text-sm font-medium">{{ props.stageLabel }}</p>
@@ -59,8 +63,14 @@ const { t } = useI18n()
       </div>
     </div>
 
-    <div v-if="props.ready" class="flex flex-col gap-5">
-      <section v-if="props.profiles.length > 0" class="flex flex-col gap-3">
+    <div
+      v-if="props.ready"
+      class="flex flex-col gap-5"
+    >
+      <section
+        v-if="props.profiles.length > 0"
+        class="flex flex-col gap-3"
+      >
         <p class="shrink-0 text-sm font-medium">{{ t('modemDetail.esim.transferProfile') }}</p>
         <div class="space-y-3">
           <EsimLineItem
@@ -73,21 +83,30 @@ const { t } = useI18n()
         </div>
       </section>
 
-      <section v-if="props.needsSourceImei && props.selectedProfileId" class="space-y-2">
+      <section
+        v-if="props.needsSourceImei && props.selectedProfileId"
+        class="space-y-2"
+      >
         <Input
           v-model="sourceImei"
           :placeholder="t('modemDetail.esim.transferSourceImei')"
         />
       </section>
 
-      <Alert v-if="props.profiles.length === 0" class="border-dashed">
+      <Alert
+        v-if="props.profiles.length === 0"
+        class="border-dashed"
+      >
         <AlertDescription>
           {{ t('modemDetail.esim.transferNoProfiles') }}
         </AlertDescription>
       </Alert>
     </div>
 
-    <Alert v-if="props.errorMessage" variant="destructive">
+    <Alert
+      v-if="props.errorMessage"
+      variant="destructive"
+    >
       <AlertDescription>
         {{ props.errorMessage }}
       </AlertDescription>

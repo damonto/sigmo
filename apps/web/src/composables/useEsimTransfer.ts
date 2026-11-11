@@ -120,6 +120,7 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
   const progress = ref(0)
   const errorMessage = ref('')
   const ccidError = ref('')
+  const remote = ref(false)
   const sources = ref<EsimTransferSource[]>([])
   const profiles = ref<EsimTransferProfile[]>([])
   const selectedSource = ref<EsimTransferSource | null>(null)
@@ -130,6 +131,11 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
   const sourceDeletionICCID = ref('')
   const previewProfile = ref<EsimDownloadPreview | null>(null)
   const carrierWebsheet = ref<EsimTransferWebsheet | null>(null)
+  // Navigation and newer reads invalidate earlier discovery responses.
+  let readRevision = 0
+
+  const isCurrentRead = (revision: number, targetId: string) =>
+    revision === readRevision && targetId === modemId.value
 
   const hasSources = computed(() => sources.value.length > 0)
   const downloadedName = computed(() => {
@@ -144,7 +150,13 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
   })
   const needsSourceImei = computed(() => selectedSource.value?.requiresSourceImei ?? false)
   const canStartTransfer = computed(() => {
-    if (!selectedSource.value || !selectedProfile.value?.supported) return false
+    if (
+      state.value !== TRANSFER_STATE.ready ||
+      remote.value ||
+      !selectedSource.value ||
+      !selectedProfile.value?.supported
+    )
+      return false
     if (!needsSourceImei.value) return true
     return sourceImei.value.trim().length > 0
   })
@@ -160,6 +172,8 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
   }
 
   const resetAll = () => {
+    readRevision++
+    remote.value = false
     state.value = TRANSFER_STATE.idle
     stage.value = ''
     progress.value = 0
@@ -188,6 +202,10 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
   }
 
   const session = useEsimTransferSession({
+    onSourceSelected: (profile) => {
+      selectedProfile.value = profile
+      applyTransferEvent({ type: 'progress', stage: TRANSFER_STAGE.preparing })
+    },
     onProgress: (nextStage) => {
       applyTransferEvent({ type: 'progress', stage: nextStage })
     },
@@ -221,28 +239,36 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
     const targetId = modemId.value
     if (!targetId || targetId === 'unknown') return
     session.close()
+    remote.value = false
     resetAll()
+    const revision = readRevision
     applyTransferEvent({ type: 'loading_sources' })
     try {
       const { data } = await esimApi.getTransferSources(targetId)
+      if (!isCurrentRead(revision, targetId)) return
       sources.value = data.value?.sources ?? []
       ccidError.value = data.value?.ccidError ?? ''
       applyTransferEvent({ type: 'ready' })
     } catch (err) {
+      if (!isCurrentRead(revision, targetId)) return
       applyTransferEvent({ type: 'error', message: err instanceof Error ? err.message : '' })
     }
   }
 
   const selectSource = (source: EsimTransferSource) => {
+    if (remote.value) return
+    readRevision++
     selectedSource.value = source
     sourceImei.value = source.requiresSourceImei && modemId.value !== 'unknown' ? modemId.value : ''
     resetSelection()
   }
 
   const loadProfiles = async () => {
+    if (remote.value) return
     const targetId = modemId.value
     const source = selectedSource.value
     if (!targetId || targetId === 'unknown' || !source) return
+    const revision = ++readRevision
     applyTransferEvent({ type: 'loading_profiles' })
     resetSelection()
     try {
@@ -251,19 +277,23 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
         sourceId: source.id,
         sourceImei: sourceImei.value.trim(),
       })
+      if (!isCurrentRead(revision, targetId)) return
       profiles.value = (data.value ?? []).filter((profile) => profile.supported === true)
       applyTransferEvent({ type: 'ready' })
     } catch (err) {
+      if (!isCurrentRead(revision, targetId)) return
       applyTransferEvent({ type: 'error', message: err instanceof Error ? err.message : '' })
     }
   }
 
   const startTransfer = (seId: string) => {
+    if (!canStartTransfer.value) return
     const targetId = modemId.value
     const source = selectedSource.value
     const profile = selectedProfile.value
     if (!targetId || targetId === 'unknown' || !seId.trim() || !source || !profile?.supported)
       return
+    readRevision++
     session.close()
     applyTransferEvent({ type: 'connecting' })
     previewProfile.value = null
@@ -274,6 +304,13 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
       profileId: profile.id,
       sourceImei: sourceImei.value.trim(),
     })
+  }
+
+  const connectRemote = (seId: string, address: string) => {
+    resetAll()
+    remote.value = true
+    applyTransferEvent({ type: 'progress', stage: TRANSFER_STAGE.waitingAuthorization })
+    session.connectRemote(modemId.value, seId, address.trim())
   }
 
   const submitUserInput = (accept: boolean) => {
@@ -297,6 +334,7 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
   }
 
   onBeforeUnmount(() => {
+    readRevision++
     session.close()
   })
 
@@ -320,6 +358,8 @@ export const useEsimTransfer = (modemId: Readonly<Ref<string>>, options?: Option
     downloadedName,
     needsSourceImei,
     canStartTransfer,
+    remote,
+    connectRemote,
     loadSources,
     selectSource,
     loadProfiles,

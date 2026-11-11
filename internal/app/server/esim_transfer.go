@@ -20,13 +20,16 @@ func configureESIMTransfer(runtime *Runtime, websheets *websheet.Broker) {
 			LPA:      deps.LPAClients,
 			Internet: deps.InternetConnector,
 		})
-		transfer.RegisterRoutes(group.Group("", appmiddleware.RequireFeature(runtime.Policy, feature.ESIMTransfer)), transfer.ConfigFromCore(core, transfer.Config{
+		cfg := transfer.ConfigFromCore(core, transfer.Config{
 			Store:         deps.Store,
 			CarrierConfig: runtime.License.CarrierConfig,
 			Registry:      deps.Registry,
 			LPA:           deps.LPAClients,
 			Websheets:     websheets,
-		}))
+			Allowed:       func() bool { return runtime.Policy.Allows(feature.ESIMTransfer) },
+		})
+		handler := transfer.RegisterWithPeerRoutes(group.Group("", appmiddleware.RequireFeature(runtime.Policy, feature.ESIMTransfer)), deps.ResourceRoutes.Group("", appmiddleware.RequireFeature(runtime.Policy, feature.ESIMTransfer)), cfg)
+		runtime.AddCleanup(handler.Close)
 		return nil
 	})
 }

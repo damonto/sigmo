@@ -1,8 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useEsimApi } from '@/apis/esim'
+import * as notifications from '@/lib/notify'
 
 describe('useEsimApi', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
   beforeEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
@@ -47,4 +52,37 @@ describe('useEsimApi', () => {
       }),
     )
   })
+
+  it.each(['sources', 'profiles'])(
+    'leaves %s errors to the active transfer dialog',
+    async (resource) => {
+      const notify = vi.spyOn(notifications, 'notifyError').mockImplementation(() => {})
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              type: 'https://sigmo.952007.xyz/problems/transfer_esim_failed',
+              title: 'Transfer failed',
+              status: 409,
+              detail: 'Source is busy',
+            }),
+            { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
+          ),
+        ),
+      )
+      const api = useEsimApi()
+      const request =
+        resource === 'sources'
+          ? api.getTransferSources('target')
+          : api.getTransferProfiles('target', { sourceType: 'modem', sourceId: 'source' })
+
+      await expect(request).rejects.toMatchObject({
+        status: 409,
+        error_code: 'transfer_esim_failed',
+        message: 'Source is busy',
+      })
+      expect(notify).not.toHaveBeenCalled()
+    },
+  )
 })

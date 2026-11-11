@@ -2,7 +2,7 @@
 
 An iPhone or iPad can supply the source SIM/eUICC through a locally connected CCID reader. The target remains a modem managed by Sigmo. iOS discovers readers and forwards raw APDUs with CryptoTokenKit; the Sigmo backend continues to run the existing USIM, LPA and TS.43 code, including profile activation and source-deletion confirmation.
 
-This uses the existing `esimTransfer` feature and `esim_transfer` build tag. There is no separate feature flag. Server-attached readers and modem sources keep their existing behavior. Client readers are discovered by iOS and are not returned by the backend's HTTP source-list endpoint.
+This uses the existing `esimTransfer` feature. There is no separate feature flag. Server-attached readers and modem sources keep their existing behavior. Client readers are discovered by iOS and are not returned by the backend's HTTP source-list endpoint.
 
 ## Connection and browsing
 
@@ -57,3 +57,79 @@ There is no automatic reconnect or APDU replay. After a disconnect, an APDU may 
 ## Verification
 
 Go tests use a local WebSocket server and a fake card to exercise the ISO 7816 adapter, session binding, cancellation, stale responses and failures. Session cancellation also closes the socket to interrupt LPA calls that use a background context. iOS tests inject reader discovery and card operations to cover browsing-to-transfer socket reuse, hot plugging, removal during an APDU, cleanup, malformed messages, concurrent receivers and response loss. These tests do not access real readers or modems. Physical-device signing, reader compatibility and a real carrier transfer still require hardware validation.
+
+## Transfer from another Sigmo
+
+The download/add-eSIM screen offers **Transfer from another Sigmo**. Enter the
+source service's base URL, including any reverse-proxy prefix. The target backend
+connects directly to the source; neither client receives the other service's
+login credentials. HTTPS uses normal certificate verification. Plain HTTP is
+restricted to loopback, private network and CGNAT/VPN addresses, checked at dial
+time. Existing entry access controls still apply: a proxy that requires its own
+credentials must allow this direct connection through an operator-configured
+route. A remote transfer does not bypass that boundary.
+
+The requester supplies only the target device and source service address. The
+source owner receives the request on any authenticated Web/iOS page, selects a
+local modem or server-attached CCID reader and a transferable eSIM, and approves
+that exact profile moving to the target IMEI/EID. Approval includes deleting the
+source profile when required by the carrier. The target immediately begins the
+existing carrier and installation flow; it never chooses a source or profile.
+
+Available profiles are disclosed only through the source service's authenticated
+request subscription. The direct service connection receives no catalog: it
+learns only the approved profile after the source owner's decision. Physical SIMs
+and another iOS client's reader are excluded. Source activation, identity reads,
+AKA and deletion run on the source backend. Carrier interaction and installation
+run on the target backend. Source EID/ICCID and target IMEI/EID are rechecked
+before transfer. The source owner supplies the source IMEI for a CCID reader.
+No arbitrary APDU endpoint is exposed between services.
+
+The target client uses its existing authenticated transfer socket, beginning
+with `{"type":"source","version":1,"sourceType":"sigmo","sourceUrl":"https://source.example/prefix","seId":"target-se"}`.
+It waits at `waiting_authorization` until the source owner chooses and approves.
+A version-1 `source_selected` message contains only `sourceProfile` and
+`sourceName` for that choice; ordinary transfer progress/events follow without a
+second client command. Requester-supplied source IDs, profile IDs and source
+IMEIs are rejected.
+
+The direct service socket is `GET /api/v1/esim-transfers/remote-sessions`.
+Version 1 begins with an `authorize` request and a `pending` acknowledgement,
+then an `approved` response containing only the source owner's choice.
+Authenticated clients subscribe to `GET /api/v1/esim-transfer-requests/events`
+and receive complete `requests` snapshots, including local `sources` options
+while approval is pending. A decision is
+`POST /api/v1/esim-transfer-requests/:id/decisions` with
+`{phase: "authorization", revision, accept, selection: {sourceType, sourceId, profileId, sourceImei?}}`.
+Rejection omits `selection`. An accepted choice is resolved against the server's
+read-only catalog snapshot, never against client-supplied profile metadata.
+Stale, repeated and disconnected-session decisions return HTTP 409 with
+`transfer_request_expired`; invalid selections return HTTP 400.
+
+The request expires after five minutes, including source enumeration and
+selection. One connection grants one transfer, with no persistent pairing or
+reusable token. Success, refusal, expiry, cancellation, failure, shutdown or
+disconnect ends the grant. Passive approval subscriptions can reconnect to
+obtain pending requests; transfer/card operations never reconnect or replay.
+An interrupted operation may already have changed card state: both clients show
+an uncertain result and require the user to inspect source and target before
+starting another request.
+
+Local fake-peer tests cover source-owned selection, absence of requester catalog
+access, exact-profile deletion, revocation, concurrent decisions, device changes,
+unsupported protocol rejection and transport cleanup. Hardware and real carrier
+transfers remain separate validation.
+
+### Remote protocol lifecycle
+
+Once the source replies `ready`, each target-to-source operation carries an
+increasing numeric `id`, starting at 1. A `reply` echoes that exact `id`. A stale,
+duplicate or unmatched ID terminates the session; an uncertain operation is
+never replayed. Error frames use a stable `code` (`declined`, `expired`, `unsupported`, or
+`ended`); peer-provided diagnostic text is not used for error classification.
+Device, SIM identity and AKA payloads use Sigmo-owned JSON types rather than
+serializing a dependency's structs directly.
+
+Progress is coalesced separately from card operations so UI callbacks do not
+wait for remote acknowledgements. Feature shutdown cancels and joins the
+hijacked request scopes, including device cleanup, before closing shared pools.

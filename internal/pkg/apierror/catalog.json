@@ -246,6 +246,7 @@
   "text_required": "Text Required",
   "too_many_requests": "Too Many Requests",
   "transfer_esim_failed": "Transfer eSIM Failed",
+  "transfer_request_expired": "Transfer Request Expired",
   "transfer_invalid_request": "Transfer Invalid Request",
   "transfer_source_imei_required": "Transfer Source IMEI Required",
   "transfer_source_not_found": "Transfer Source Not Found",

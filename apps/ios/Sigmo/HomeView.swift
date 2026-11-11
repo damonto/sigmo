@@ -41,6 +41,7 @@ struct HomeView: View {
             }
         }
         .modifier(CallPresentation())
+        .modifier(PeerTransferPresentation())
         .sheet(isPresented: $adding) { BackendEditor() }
         .onChange(of: store.settings.backends.map(\.id), initial: true) { _, ids in
             if !ids.contains(where: { $0.uuidString == communicationBackend }) { communicationBackend = "" }

@@ -48,6 +48,7 @@ enum PreviewBackends {
                 case "detail-no-discoveries": fixture = .noDiscoveries
                 case "detail-discovery-error": fixture = .unavailableDiscoveries
                 case "detail-empty-profiles": fixture = .emptyProfiles
+                case "detail-peer-approval": fixture = configuration.id == Self.homeID ? .peerApprovals : .standard
                 case "detail-transfer-mixed": fixture = .mixedTransferProfiles
                 case "detail-transfer-unsupported": fixture = .unsupportedTransferProfiles
                 case "detail-deletion-loading": fixture = .delayedDeletion

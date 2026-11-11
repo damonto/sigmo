@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useForm } from '@tanstack/vue-form'
-import { ArrowRightLeft, CloudDownload, ScanQrCode } from 'lucide-vue-next'
+import { ChevronRight, CloudDownload, Router, ScanQrCode, Server } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { z } from 'zod'
 
@@ -51,6 +51,7 @@ const emit = defineEmits<{
   ): void
   (event: 'discover', seId: string): void
   (event: 'transfer', seId: string): void
+  (event: 'remote-transfer', seId: string): void
 }>()
 
 const open = defineModel<boolean>('open', { required: true })
@@ -291,31 +292,33 @@ watch(scanOpen, (value) => {
   <Dialog v-model:open="open">
     <EsimPersistentDialogContent class="sm:max-w-md">
       <DialogHeader>
-        <div class="flex items-center gap-2 pr-8">
+        <div class="flex flex-wrap items-center gap-2 pr-8">
           <DialogTitle>{{ t('modemDetail.esim.installTitle') }}</DialogTitle>
-          <Button
-            variant="outline"
-            size="icon"
-            type="button"
-            class="shrink-0"
-            :aria-label="t('modemDetail.esim.scan')"
-            :title="t('modemDetail.esim.scan')"
-            @click="openScanDialog"
-          >
-            <ScanQrCode class="size-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            type="button"
-            class="shrink-0"
-            :aria-label="t('modemDetail.esim.discover')"
-            :title="t('modemDetail.esim.discover')"
-            :disabled="props.isDiscovering || !hasSelectedSE"
-            @click="emit('discover', resolveSEID(selectedSEID))"
-          >
-            <CloudDownload class="size-4" />
-          </Button>
+          <div class="flex shrink-0 items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              type="button"
+              class="shrink-0"
+              :aria-label="t('modemDetail.esim.scan')"
+              :title="t('modemDetail.esim.scan')"
+              @click="openScanDialog"
+            >
+              <ScanQrCode class="size-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              type="button"
+              class="shrink-0"
+              :aria-label="t('modemDetail.esim.discover')"
+              :title="t('modemDetail.esim.discover')"
+              :disabled="props.isDiscovering || !hasSelectedSE"
+              @click="emit('discover', resolveSEID(selectedSEID))"
+            >
+              <CloudDownload class="size-4" />
+            </Button>
+          </div>
         </div>
         <DialogDescription class="sr-only">
           {{ t('modemDetail.esim.installTitle') }}
@@ -410,46 +413,91 @@ watch(scanOpen, (value) => {
           </ValidatedField>
         </InstallField>
 
-        <div class="space-y-4">
-          <Button
-            type="submit"
-            class="w-full"
-            :disabled="isSubmitting || !hasSelectedSE"
-          >
-            {{ t('modemDetail.esim.installConfirm') }}
-          </Button>
+        <Button
+          type="submit"
+          class="w-full"
+          :disabled="isSubmitting || !hasSelectedSE"
+        >
+          {{ t('modemDetail.esim.installConfirm') }}
+        </Button>
+      </form>
 
-          <div
-            v-if="props.allowTransfer"
-            class="flex items-center gap-4 text-sm text-muted-foreground"
-          >
-            <span class="h-px flex-1 bg-border" />
-            <span>{{ t('modemDetail.esim.installOr') }}</span>
-            <span class="h-px flex-1 bg-border" />
-          </div>
+      <section
+        v-if="props.allowTransfer"
+        class="space-y-3 pt-1"
+        :aria-label="t('modemDetail.esim.installTransferTitle')"
+      >
+        <div class="flex items-center gap-3 text-xs text-muted-foreground">
+          <span>{{ t('modemDetail.esim.installTransferTitle') }}</span>
+          <span
+            class="h-px flex-1 bg-border"
+            aria-hidden="true"
+          />
+        </div>
 
+        <div class="divide-y overflow-hidden rounded-lg border">
           <Button
-            v-if="props.allowTransfer"
-            variant="outline"
+            variant="ghost"
             type="button"
-            class="w-full border-primary text-primary hover:text-primary"
+            class="h-auto w-full min-w-0 justify-start gap-3 rounded-none px-3.5 py-3.5 text-left whitespace-normal focus-visible:ring-inset"
             :disabled="!hasSelectedSE"
             @click="emit('transfer', resolveSEID(selectedSEID))"
           >
-            <ArrowRightLeft class="size-3.5" />
-            {{ t('modemDetail.esim.transferButton') }}
+            <span
+              class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground"
+              aria-hidden="true"
+            >
+              <Router class="size-4" />
+            </span>
+            <span class="min-w-0 flex-1 space-y-1">
+              <span class="block">{{ t('modemDetail.esim.installTransferDevice') }}</span>
+              <span class="block text-xs leading-relaxed font-normal text-muted-foreground">
+                {{ t('modemDetail.esim.installTransferDeviceHint') }}
+              </span>
+            </span>
+            <ChevronRight
+              class="size-4 text-muted-foreground"
+              aria-hidden="true"
+            />
           </Button>
 
           <Button
             variant="ghost"
             type="button"
-            class="w-full"
-            @click="closeDialog"
+            class="h-auto w-full min-w-0 justify-start gap-3 rounded-none px-3.5 py-3.5 text-left whitespace-normal focus-visible:ring-inset"
+            :disabled="!hasSelectedSE"
+            @click="emit('remote-transfer', resolveSEID(selectedSEID))"
           >
-            {{ t('modemDetail.actions.cancel') }}
+            <span
+              class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground"
+              aria-hidden="true"
+            >
+              <Server class="size-4" />
+            </span>
+            <span class="min-w-0 flex-1 space-y-1">
+              <span class="block">{{ t('modemDetail.esim.installTransferSigmo') }}</span>
+              <span class="block text-xs leading-relaxed font-normal text-muted-foreground">
+                {{ t('modemDetail.esim.installTransferSigmoHint') }}
+              </span>
+            </span>
+            <ChevronRight
+              class="size-4 text-muted-foreground"
+              aria-hidden="true"
+            />
           </Button>
         </div>
-      </form>
+      </section>
+
+      <DialogFooter class="flex-row justify-end">
+        <Button
+          variant="ghost"
+          type="button"
+          class="text-muted-foreground"
+          @click="closeDialog"
+        >
+          {{ t('modemDetail.actions.cancel') }}
+        </Button>
+      </DialogFooter>
     </EsimPersistentDialogContent>
   </Dialog>
 

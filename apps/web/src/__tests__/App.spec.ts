@@ -5,6 +5,10 @@ import { describe, expect, it, vi } from 'vitest'
 import App from '@/App.vue'
 import { useLicenseStore } from '@/stores/license'
 
+vi.mock('@/components/esim/EsimTransferRequestProvider.vue', () => ({
+  default: { template: '<slot />' },
+}))
+
 vi.mock('@/apis/communication', () => ({
   communicationApi: { contacts: vi.fn().mockResolvedValue({ items: [] }) },
 }))
@@ -62,6 +66,7 @@ describe('App', () => {
             template:
               '<aside data-testid="call-banner">{{ session.activeCall.value.number }}</aside>',
           },
+          EsimTransferRequestProvider: { template: '<slot />' },
           Toaster: { template: '<div data-testid="toaster" />' },
         },
       },
