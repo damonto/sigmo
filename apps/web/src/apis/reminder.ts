@@ -21,7 +21,7 @@ export const useReminderApi = () => {
     payload: ReminderPayload,
   ) =>
     fetchJson<Reminder>(
-      `modems/${modemId}/ses/${encodeURIComponent(seId)}/esims/${encodeURIComponent(iccid)}/reminder`,
+      `modems/${modemId}/secure-elements/${encodeURIComponent(seId)}/esim-profiles/${encodeURIComponent(iccid)}/reminder`,
       {
         method: 'PUT',
         body: JSON.stringify(payload),
@@ -30,7 +30,7 @@ export const useReminderApi = () => {
 
   const deleteEsimReminder = (modemId: string, seId: string, iccid: string) =>
     fetchJson<void>(
-      `modems/${modemId}/ses/${encodeURIComponent(seId)}/esims/${encodeURIComponent(iccid)}/reminder`,
+      `modems/${modemId}/secure-elements/${encodeURIComponent(seId)}/esim-profiles/${encodeURIComponent(iccid)}/reminder`,
       { method: 'DELETE' },
     )
 

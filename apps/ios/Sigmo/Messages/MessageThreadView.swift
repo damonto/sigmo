@@ -180,7 +180,7 @@ struct MessageComposer: View {
     }
 
     private var sendButton: some View {
-        LoadingButton(isWorking: sending, action: send) {
+        LoadingButton(isWorking: sending, progressPlacement: .replacingLabel, action: send) {
             Image(systemName: "arrow.up")
                 .font(.body.weight(.semibold))
                 .frame(minWidth: 20, minHeight: 20)

@@ -17,6 +17,9 @@ import (
 
 type ProfileType string
 
+// ErrProfileMismatch means the reminder belongs to another modem or secure element.
+var ErrProfileMismatch = errors.New("reminder belongs to another modem or secure element")
+
 const (
 	ProfileTypePSIM ProfileType = "psim"
 	ProfileTypeESIM ProfileType = "esim"
@@ -70,6 +73,28 @@ func (s *Scheduler) Delete(ctx context.Context, profileType ProfileType, profile
 	}
 	s.signal()
 	return nil
+}
+
+// DeleteForProfile removes a reminder only within the requested modem and secure element.
+// An absent reminder succeeds. Ownership and revision are checked atomically at deletion.
+func (s *Scheduler) DeleteForProfile(ctx context.Context, profileType ProfileType, profileID, modemID, seID string) error {
+	for {
+		value, exists, err := s.Get(ctx, profileType, profileID)
+		if err != nil || !exists {
+			return err
+		}
+		if value.ModemID != modemID || strings.TrimSpace(value.SEID) != strings.TrimSpace(seID) {
+			return ErrProfileMismatch
+		}
+		deleted, err := s.store.DeleteClaimedReminder(ctx, value)
+		if err != nil {
+			return err
+		}
+		if deleted {
+			s.signal()
+			return nil
+		}
+	}
 }
 
 func (s *Scheduler) Run(ctx context.Context) error {

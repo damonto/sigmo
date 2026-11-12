@@ -18,7 +18,7 @@ export interface ConversationFilter {
 }
 
 const messagesPath = (id: string, query?: string) => {
-  const path = `modems/${id}/messages`
+  const path = `modems/${id}/message-conversations`
   const params = new URLSearchParams()
   const trimmed = query?.trim()
   if (trimmed) {
@@ -35,12 +35,12 @@ export const useMessageApi = () => {
 
   const getMessagesByParticipant = (id: string, participant: string) => {
     const encoded = encodeURIComponent(participant)
-    return fetchJson<MessagesResponse>(`modems/${id}/messages/${encoded}`)
+    return fetchJson<MessagesResponse>(`modems/${id}/message-conversations/${encoded}/messages`)
   }
 
   const deleteMessagesByParticipant = (id: string, participant: string) => {
     const encoded = encodeURIComponent(participant)
-    return fetchJson<void>(`modems/${id}/messages/${encoded}`, {
+    return fetchJson<void>(`modems/${id}/message-conversations/${encoded}`, {
       method: 'DELETE',
     })
   }

@@ -16,11 +16,31 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/app/mcpauth"
 	"github.com/damonto/sigmo/internal/app/mcpserver"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
+
+func TestSettingsRejectNullWithoutDisablingMCP(t *testing.T) {
+	h, _, _ := newTestHandler(t)
+	h.controller.SetEnabled(true)
+	before := h.settings.Snapshot().MCP.Enabled
+	e := echo.New()
+	e.HTTPErrorHandler = httpapi.HTTPErrorHandler
+	e.PUT("/settings/mcp", h.UpdateSettings)
+	req := httptest.NewRequest(http.MethodPut, "/settings/mcp", strings.NewReader("null"))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !h.controller.Enabled() || h.settings.Snapshot().MCP.Enabled != before {
+		t.Fatal("invalid JSON changed MCP configuration")
+	}
+}
 
 func TestAPIKeyLifecycle(t *testing.T) {
 	h, keys, _ := newTestHandler(t)

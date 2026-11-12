@@ -2,11 +2,11 @@ import Foundation
 
 extension BackendAPI {
     func networkRegistration(_ modem: String, token: String?) async throws -> NetworkRegistration {
-        try await decode(["modems", modem, "networks", "registration"], token: token, timeout: .hardware)
+        try await decode(["modems", modem, "network-settings", "registration"], token: token, timeout: .hardware)
     }
 
     func setNetworkRegistration(_ modem: String, value: NetworkRegistration, token: String?) async throws {
-        _ = try await request(["modems", modem, "networks", "registration"], method: "PUT",
+        _ = try await request(["modems", modem, "network-settings", "registration"], method: "PUT",
                               body: JSONEncoder().encode(value), token: token, timeout: .hardware)
     }
 

@@ -506,10 +506,10 @@ private struct ModemDetailScreen: View {
                 if profiles.isEmpty, state.profilesLoaded {
                     Text("detail.noProfiles").foregroundStyle(.secondary)
                 }
-                AsyncActionButton(id: "addESIM-" + element.id, action: {
+                AsyncActionButton(id: "addESIM-" + element.id, contentMaxWidth: .infinity, contentAlignment: .leading, action: {
                     await prepareFlow(seID: element.id)
                 }) {
-                    Text("detail.setupTitle").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("detail.setupTitle")
                 }
                 .disabled(!state.canInstall || addingESIM)
                 .accessibilityValue(preparingFlow?.seID == element.id ? detailText("detail.checkingESIM") : "")

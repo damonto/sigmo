@@ -43,8 +43,9 @@ final class ModemDetailFlowTests: XCTestCase {
                 XCTFail("No tappable list area below the network bar")
                 return
             }
-            if element.exists {
-                let visible = element.frame.intersection(viewport)
+            let rowFrame = element.waitForExistence(timeout: 1) ? element.frame : .null
+            if !rowFrame.isEmpty {
+                let visible = rowFrame.intersection(viewport)
                 if element.isHittable, !visible.isNull, visible.height >= 44 {
                     let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: element)
                     XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed)
@@ -56,7 +57,8 @@ final class ModemDetailFlowTests: XCTestCase {
                 }
             }
             // Keep gestures inside the list; dragging on the fixed bar cannot scroll it.
-            let down = element.exists && element.frame.midY < top
+            // A row without a layout frame does not establish a scroll direction.
+            let down = !rowFrame.isEmpty && rowFrame.midY < top
             let startY = top + viewport.height * (down ? 0.25 : 0.75)
             let endY = top + viewport.height * (down ? 0.75 : 0.25)
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (startY - frame.minY) / frame.height))

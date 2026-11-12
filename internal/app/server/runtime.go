@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
+	appesim "github.com/damonto/sigmo/internal/app/esim"
 	"github.com/damonto/sigmo/internal/app/feature"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	"github.com/damonto/sigmo/internal/app/mcpserver"
@@ -44,6 +45,7 @@ type Runtime struct {
 	Storage             *storage.Store
 	WebPush             *webpush.Client
 	Reminders           *reminder.Scheduler
+	ESIM                *appesim.Service
 	License             *license.Controller
 	Policy              feature.Policy
 

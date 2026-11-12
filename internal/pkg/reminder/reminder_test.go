@@ -199,6 +199,48 @@ func TestServiceRunStopsWithContext(t *testing.T) {
 	}
 }
 
+func TestDeleteForProfilePreservesOtherOwners(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		profileType   ProfileType
+		modemID, seID string
+		wantErr       error
+	}{
+		{"physical SIM", ProfileTypePSIM, "modem", "", nil},
+		{"physical SIM on another modem", ProfileTypePSIM, "other", "", ErrProfileMismatch},
+		{"eSIM", ProfileTypeESIM, "modem", "se0", nil},
+		{"eSIM on another modem", ProfileTypeESIM, "other", "se0", ErrProfileMismatch},
+		{"eSIM on another secure element", ProfileTypeESIM, "modem", "se1", ErrProfileMismatch},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store := openTestStore(t)
+			scheduler, err := New(store, settings.NewMemoryStore(settings.Default()), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			value := storage.Reminder{
+				ProfileType: tt.profileType.String(), ProfileID: "profile", ModemID: "modem",
+				NextAt: time.Now().Add(time.Hour), Content: "Renew",
+			}
+			if tt.profileType == ProfileTypeESIM {
+				value.SEID = "se0"
+			}
+			if err := scheduler.Save(t.Context(), value); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				err := scheduler.DeleteForProfile(t.Context(), tt.profileType, "profile", tt.modemID, tt.seID)
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("DeleteForProfile = %v, want %v", err, tt.wantErr)
+				}
+			}
+			if _, exists, err := scheduler.Get(t.Context(), tt.profileType, "profile"); err != nil || exists != (tt.wantErr != nil) {
+				t.Fatalf("reminder exists = %v, error = %v", exists, err)
+			}
+		})
+	}
+}
+
 func openTestStore(t *testing.T) *storage.Store {
 	t.Helper()
 	store, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))

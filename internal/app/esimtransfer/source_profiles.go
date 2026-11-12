@@ -181,7 +181,7 @@ func physicalOption(identity ts43.Identity, configs *ts43.EntitlementConfigs) Pr
 }
 
 func transferSupport(identity ts43.Identity, simType ts43.SIMType, label string, configs *ts43.EntitlementConfigs) (bool, string) {
-	entitlement, err := configs.Discover(identity, simType)
+	_, err := configs.Discover(identity, simType)
 	if err != nil {
 		if errors.Is(err, ts43.ErrEntitlementAmbiguous) {
 			return false, "carrier entitlement config is ambiguous"
@@ -190,9 +190,6 @@ func transferSupport(identity ts43.Identity, simType ts43.SIMType, label string,
 			return false, "carrier does not support " + label + " transfer"
 		}
 		return false, "carrier does not support " + label + " transfer"
-	}
-	if entitlement.SamsungAndroidEntitlement {
-		return false, "carrier requires an Android entitlement backend"
 	}
 	return true, ""
 }

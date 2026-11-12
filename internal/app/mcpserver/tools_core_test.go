@@ -12,8 +12,8 @@ import (
 	"github.com/damonto/wwan-go/qcom"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	modemhandler "github.com/damonto/sigmo/internal/app/handler/modem"
 	"github.com/damonto/sigmo/internal/app/mcpauth"
+	appmodem "github.com/damonto/sigmo/internal/app/modem"
 )
 
 func TestCorePermissions(t *testing.T) {
@@ -35,11 +35,11 @@ func TestCorePermissions(t *testing.T) {
 }
 
 func TestModemDiscoveryOutputExcludesOtherPermissionDomains(t *testing.T) {
-	full := &modemhandler.ModemResponse{
+	full := &appmodem.ModemResponse{
 		ID:                "123456789012345",
 		Name:              "Office modem",
 		Number:            "+12025550123",
-		Slots:             []modemhandler.SlotResponse{{Identifier: "8901000000000000000"}},
+		Slots:             []appmodem.SlotResponse{{Identifier: "8901000000000000000"}},
 		RegistrationState: "home",
 	}
 	full.WiFiCallingConnected = true

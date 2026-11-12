@@ -32,7 +32,7 @@ final class ESIMNotificationsState {
         defer { if current == revision { busy = false } }
         do {
             try await session.protectedRequest { api, token in
-                var path = ["ses", notification.seId, "notifications", notification.sequenceNumber]
+                var path = ["secure-elements", notification.seId, "notifications", notification.sequenceNumber]
                 if !delete { path.append("deliveries") }
                 try await api.detailMutation(id, path: path, method: delete ? "DELETE" : "POST", token: token)
             }

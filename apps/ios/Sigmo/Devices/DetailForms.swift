@@ -221,7 +221,7 @@ struct SIMApplicationView: View {
             }
             if needsBack {
                 ToolbarItem(placement: .topBarLeading) {
-                    AsyncActionButton(action: { await state.send(.init(type: "back")) }) {
+                    AsyncActionButton(progressPlacement: .replacingLabel, action: { await state.send(.init(type: "back")) }) {
                         Label("detail.back", systemImage: "chevron.left").labelStyle(.iconOnly)
                     }
                 }

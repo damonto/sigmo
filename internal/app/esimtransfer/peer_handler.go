@@ -9,17 +9,11 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
-// RegisterPeerControlRoutes exposes approvals to existing authenticated clients.
-func (h *Handler) RegisterPeerControlRoutes(group *echo.Group) {
-	group.GET("/esim-transfer-requests/events", h.PeerEvents)
-	group.POST("/esim-transfer-requests/:id/decisions", h.PeerDecision)
-}
-
 // PeerDecision atomically accepts one decision for the displayed request version.
 func (h *Handler) PeerDecision(c *echo.Context) error {
 	var decision peerDecision
-	if err := c.Bind(&decision); err != nil {
-		return httpapi.BadRequest(c, "transfer_invalid_request", err)
+	if err := httpapi.BindJSON(c, &decision, "transfer_invalid_request"); err != nil {
+		return err
 	}
 	if err := h.peers.decide(c.Param("id"), decision); err != nil {
 		if errors.Is(err, ErrProfileUnsupported) {

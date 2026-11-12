@@ -465,17 +465,6 @@ func (s *transferRunner) handleEvent(ctx context.Context, session *wsSession, ac
 	case ts43.SMDSDiscoveryEvent:
 		next, err := s.handleSMDSDiscovery(ctx, session, active, result, event)
 		return next, false, err
-	case ts43.DelayedDownloadEvent:
-		config, err := session.delayedDownloadConfig(ctx, event)
-		if err != nil {
-			return result, false, err
-		}
-		if config.ActivationCode == "" {
-			next, err := active.ts43Client.Continue(ctx, result, ts43.ContinueRequest{})
-			return next, false, err
-		}
-		next, err := s.downloadAndCompleteActivation(ctx, session, active, result, config)
-		return next, false, err
 	case ts43.ConfigurationPendingEvent:
 		active.Logger().Info("TS.43 download configuration is pending", "iccid", event.ICCID)
 		next, err := continuePendingTransfer(ctx, session, active, result)

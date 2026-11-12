@@ -13,6 +13,7 @@ import (
 const advanceClaimedReminder = `-- name: AdvanceClaimedReminder :execrows
 UPDATE reminders SET next_at = ?, updated_at = ?, revision = revision + 1
 WHERE profile_type = ? AND profile_id = ? AND revision = ?
+    AND modem_id = ? AND se_id = ?
 `
 
 type AdvanceClaimedReminderParams struct {
@@ -21,6 +22,8 @@ type AdvanceClaimedReminderParams struct {
 	ProfileType string
 	ProfileID   string
 	Revision    int64
+	ModemID     string
+	SEID        string
 }
 
 func (q *Queries) AdvanceClaimedReminder(ctx context.Context, arg AdvanceClaimedReminderParams) (int64, error) {
@@ -30,6 +33,8 @@ func (q *Queries) AdvanceClaimedReminder(ctx context.Context, arg AdvanceClaimed
 		arg.ProfileType,
 		arg.ProfileID,
 		arg.Revision,
+		arg.ModemID,
+		arg.SEID,
 	)
 	if err != nil {
 		return 0, err
@@ -40,6 +45,7 @@ func (q *Queries) AdvanceClaimedReminder(ctx context.Context, arg AdvanceClaimed
 const claimReminder = `-- name: ClaimReminder :execrows
 UPDATE reminders SET revision = revision + 1, updated_at = ?
 WHERE profile_type = ? AND profile_id = ? AND revision = ?
+    AND modem_id = ? AND se_id = ?
 `
 
 type ClaimReminderParams struct {
@@ -47,6 +53,8 @@ type ClaimReminderParams struct {
 	ProfileType string
 	ProfileID   string
 	Revision    int64
+	ModemID     string
+	SEID        string
 }
 
 func (q *Queries) ClaimReminder(ctx context.Context, arg ClaimReminderParams) (int64, error) {
@@ -55,6 +63,8 @@ func (q *Queries) ClaimReminder(ctx context.Context, arg ClaimReminderParams) (i
 		arg.ProfileType,
 		arg.ProfileID,
 		arg.Revision,
+		arg.ModemID,
+		arg.SEID,
 	)
 	if err != nil {
 		return 0, err
@@ -64,16 +74,25 @@ func (q *Queries) ClaimReminder(ctx context.Context, arg ClaimReminderParams) (i
 
 const deleteClaimedReminder = `-- name: DeleteClaimedReminder :execrows
 DELETE FROM reminders WHERE profile_type = ? AND profile_id = ? AND revision = ?
+    AND modem_id = ? AND se_id = ?
 `
 
 type DeleteClaimedReminderParams struct {
 	ProfileType string
 	ProfileID   string
 	Revision    int64
+	ModemID     string
+	SEID        string
 }
 
 func (q *Queries) DeleteClaimedReminder(ctx context.Context, arg DeleteClaimedReminderParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteClaimedReminder, arg.ProfileType, arg.ProfileID, arg.Revision)
+	result, err := q.db.ExecContext(ctx, deleteClaimedReminder,
+		arg.ProfileType,
+		arg.ProfileID,
+		arg.Revision,
+		arg.ModemID,
+		arg.SEID,
+	)
 	if err != nil {
 		return 0, err
 	}

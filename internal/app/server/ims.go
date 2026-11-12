@@ -6,12 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/labstack/echo/v5"
-
 	appcall "github.com/damonto/sigmo/internal/app/call"
 	"github.com/damonto/sigmo/internal/app/feature"
 	pims "github.com/damonto/sigmo/internal/app/ims"
-	appmiddleware "github.com/damonto/sigmo/internal/app/middleware"
 	"github.com/damonto/sigmo/internal/app/modemstatus"
 	"github.com/damonto/sigmo/internal/app/router"
 	"github.com/damonto/sigmo/internal/app/websheet"
@@ -57,11 +54,8 @@ func configureIMS(ctx context.Context, runtime *Runtime, websheets *websheet.Bro
 	runtime.AddRunner("call forwarding", func(ctx context.Context) error {
 		return forwardCalls(ctx, runtime.Relay, calls)
 	})
-	runtime.AddRoute(func(group *echo.Group, deps router.RegisterConfig) error {
-		pims.RegisterRoutes(group.Group("", appmiddleware.RequireFeature(runtime.Policy, feature.WiFiCalling)), deps.Registry, connectivity)
-		appcall.RegisterRoutes(group, deps.Registry, calls, media)
-		return nil
-	})
+	runtime.AddRoute(router.IMSRoutes(connectivity))
+	runtime.AddRoute(router.CallRoutes(calls, media))
 	return nil
 }
 

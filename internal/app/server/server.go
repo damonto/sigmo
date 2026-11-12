@@ -21,12 +21,14 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/damonto/sigmo/internal/app/buildinfo"
+	appesim "github.com/damonto/sigmo/internal/app/esim"
 	"github.com/damonto/sigmo/internal/app/feature"
 	"github.com/damonto/sigmo/internal/app/forwarder"
-	hnetwork "github.com/damonto/sigmo/internal/app/handler/network"
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/app/mcpauth"
 	"github.com/damonto/sigmo/internal/app/mcpserver"
+	appmodem "github.com/damonto/sigmo/internal/app/modem"
+	appnetwork "github.com/damonto/sigmo/internal/app/network"
 	"github.com/damonto/sigmo/internal/app/router"
 	appupdate "github.com/damonto/sigmo/internal/app/update"
 	"github.com/damonto/sigmo/internal/pkg/internet"
@@ -228,7 +230,7 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 		return modemtask.Run(ctx, registry, networkPreferences.Restore)
 	})
 	startRunner("network registration restore", func(ctx context.Context) error {
-		return hnetwork.RunRegistrationRestore(ctx, registry, db)
+		return appnetwork.RunRegistrationRestore(ctx, registry, db)
 	})
 
 	webPush, err := webpush.New(ctx, db)
@@ -312,6 +314,13 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 		}
 		return nil
 	})
+	runtime.ESIM, err = appesim.New(appesim.Config{
+		Store: store, Storage: db, Registry: registry, Internet: internetConnector,
+		LPA: lpaClients, Reminders: reminderScheduler,
+	})
+	if err != nil {
+		return fmt.Errorf("configure eSIM service: %w", err)
+	}
 	if err := configureFeatures(ctx, runtime); err != nil {
 		return fmt.Errorf("configure features: %w", err)
 	}
@@ -326,18 +335,22 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	if err != nil {
 		return fmt.Errorf("configure updater: %w", err)
 	}
-	networkHandler, err := hnetwork.New(hnetwork.Config{
+	networkService, err := appnetwork.New(appnetwork.Config{
 		Registry:              registry,
 		Preferences:           networkPreferences,
 		Store:                 db,
 		AirplaneModeLifecycle: runtime.airplaneModeLifecycle,
 	})
 	if err != nil {
-		return fmt.Errorf("configure network handler: %w", err)
+		return fmt.Errorf("configure network service: %w", err)
 	}
 	cleanups.Add(func(context.Context) error {
-		networkHandler.Close()
+		networkService.Close()
 		return nil
+	})
+	modems := appmodem.New(appmodem.Config{
+		Store: store, Storage: db, Registry: registry, Internet: internetConnector,
+		Reminders: reminderScheduler, LPA: lpaClients, OverviewExtensions: runtime.modemOverview,
 	})
 	mcpKeys, err := mcpauth.NewStore(db)
 	if err != nil {
@@ -346,18 +359,15 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	mcpCatalog := mcpserver.NewCatalog()
 	mcpCatalog.SetFeaturePolicy(policy)
 	if err := mcpserver.RegisterCoreTools(mcpCatalog, mcpserver.CoreToolsConfig{
-		Store:               store,
 		Registry:            registry,
-		InternetConnector:   internetConnector,
 		LPAClients:          lpaClients,
+		ESIM:                runtime.ESIM,
+		Modems:              modems,
 		InternetConnections: runtime.internetConnections,
-		Relay:               relay,
-		Network:             networkHandler,
+		Network:             networkService,
 		Storage:             db,
-		Reminders:           reminderScheduler,
 		MessageRoute:        runtime.messageRoute,
 		USSDRoute:           runtime.ussdRoute,
-		ModemOverview:       runtime.modemOverview,
 	}); err != nil {
 		return fmt.Errorf("configure MCP core tools: %w", err)
 	}
@@ -386,22 +396,23 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 		Registry:            registry,
 		InternetConnector:   internetConnector,
 		LPAClients:          lpaClients,
+		ESIM:                runtime.ESIM,
+		Modems:              modems,
 		InternetConnections: runtime.internetConnections,
 		Relay:               relay,
-		Network:             networkHandler,
+		Network:             networkService,
 		Storage:             db,
 		WebPush:             webPush,
 		Reminders:           reminderScheduler,
 		MessageRoute:        runtime.messageRoute,
 		USSDRoute:           runtime.ussdRoute,
-		ModemOverview:       runtime.modemOverview,
 		Features:            runtime.features,
 		Policy:              policy,
 		Extensions:          runtime.routes,
 		MCP:                 mcpController,
 		MCPKeys:             mcpKeys,
 		Updates:             updateController,
-		LicenseRoutes:       authorization.RegisterRoutes,
+		License:             authorization,
 	}); err != nil {
 		return fmt.Errorf("configure router: %w", err)
 	}

@@ -14,67 +14,55 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
-	"github.com/damonto/sigmo/internal/app/forwarder"
-	esimhandler "github.com/damonto/sigmo/internal/app/handler/esim"
-	euicchandler "github.com/damonto/sigmo/internal/app/handler/euicc"
+	appesim "github.com/damonto/sigmo/internal/app/esim"
+	appeuicc "github.com/damonto/sigmo/internal/app/euicc"
 	internethandler "github.com/damonto/sigmo/internal/app/handler/internet"
 	messagehandler "github.com/damonto/sigmo/internal/app/handler/message"
-	modemhandler "github.com/damonto/sigmo/internal/app/handler/modem"
-	networkhandler "github.com/damonto/sigmo/internal/app/handler/network"
 	ussdhandler "github.com/damonto/sigmo/internal/app/handler/ussd"
 	"github.com/damonto/sigmo/internal/app/mcpauth"
-	"github.com/damonto/sigmo/internal/app/modemstatus"
+	appmodem "github.com/damonto/sigmo/internal/app/modem"
+	appnetwork "github.com/damonto/sigmo/internal/app/network"
 	internetcore "github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	messagecore "github.com/damonto/sigmo/internal/pkg/message"
 	modemcore "github.com/damonto/sigmo/internal/pkg/modem"
-	"github.com/damonto/sigmo/internal/pkg/reminder"
-	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	ussdcore "github.com/damonto/sigmo/internal/pkg/ussd"
 )
 
 type CoreToolsConfig struct {
-	Store               *settings.Store
 	Registry            *modemcore.Registry
-	InternetConnector   *internetcore.Connector
 	LPAClients          *lpa.Pool
+	ESIM                *appesim.Service
+	Modems              *appmodem.Service
 	InternetConnections appconnectivity.InternetConnections
-	Relay               *forwarder.Relay
-	Network             *networkhandler.Handler
+	Network             *appnetwork.Service
 	Storage             *storage.Store
-	Reminders           *reminder.Scheduler
 	MessageRoute        messagecore.Route
 	USSDRoute           ussdcore.Route
-	ModemOverview       []modemstatus.Extension
 }
 
 type coreTools struct {
 	registry *modemcore.Registry
-	modems   *modemhandler.Handler
-	network  *networkhandler.Handler
-	euicc    *euicchandler.Handler
-	esim     *esimhandler.Handler
+	modems   *appmodem.Service
+	network  *appnetwork.Service
+	euicc    *appeuicc.Service
+	esim     *appesim.Service
 	internet appconnectivity.InternetConnections
 	messages *messagecore.Messenger
 	ussd     *ussdcore.Executor
 }
 
 func RegisterCoreTools(catalog *Catalog, cfg CoreToolsConfig) error {
-	if catalog == nil || cfg.Store == nil || cfg.Registry == nil || cfg.InternetConnector == nil || cfg.LPAClients == nil || cfg.InternetConnections == nil || cfg.Network == nil || cfg.Storage == nil {
+	if catalog == nil || cfg.Registry == nil || cfg.LPAClients == nil || cfg.InternetConnections == nil || cfg.Network == nil || cfg.Storage == nil || cfg.ESIM == nil || cfg.Modems == nil {
 		return errors.New("MCP core tool dependencies are required")
 	}
 	tools := &coreTools{
 		registry: cfg.Registry,
-		modems: modemhandler.New(modemhandler.Config{
-			Store: cfg.Store, Storage: cfg.Storage, Registry: cfg.Registry, Internet: cfg.InternetConnector,
-			Reminders: cfg.Reminders, LPA: cfg.LPAClients, OverviewExtensions: cfg.ModemOverview,
-		}),
-		network: cfg.Network,
-		euicc:   euicchandler.New(cfg.Registry, cfg.LPAClients),
-		esim: esimhandler.New(esimhandler.Config{
-			Store: cfg.Store, Registry: cfg.Registry, LPA: cfg.LPAClients, Internet: cfg.InternetConnector, Reminders: cfg.Reminders,
-		}),
+		modems:   cfg.Modems,
+		network:  cfg.Network,
+		euicc:    appeuicc.New(cfg.Registry, cfg.LPAClients),
+		esim:     cfg.ESIM,
 		internet: cfg.InternetConnections,
 		messages: messagecore.New(cfg.Storage, cfg.MessageRoute),
 		ussd:     ussdcore.New(cfg.USSDRoute),
@@ -120,10 +108,10 @@ type successOutput struct {
 }
 
 type networkStatusOutput struct {
-	RegistrationState  string                                  `json:"registrationState" jsonschema:"current network registration state, including Idle, Searching, Home, Roaming, or Denied"`
-	RegisteredOperator modemhandler.RegisteredOperatorResponse `json:"registeredOperator" jsonschema:"registered operator; empty when not registered"`
-	SignalQuality      uint32                                  `json:"signalQuality" jsonschema:"signal quality as a percentage"`
-	AccessTechnology   string                                  `json:"accessTechnology" jsonschema:"current radio access technology"`
+	RegistrationState  string                              `json:"registrationState" jsonschema:"current network registration state, including Idle, Searching, Home, Roaming, or Denied"`
+	RegisteredOperator appmodem.RegisteredOperatorResponse `json:"registeredOperator" jsonschema:"registered operator; empty when not registered"`
+	SignalQuality      uint32                              `json:"signalQuality" jsonschema:"signal quality as a percentage"`
+	AccessTechnology   string                              `json:"accessTechnology" jsonschema:"current radio access technology"`
 }
 
 func (t *coreTools) getNetworkStatus(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (networkStatusOutput, error) {
@@ -328,7 +316,7 @@ func (t *coreTools) getModemStatus(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 
 type simCardsOutput struct {
-	SIMs []modemhandler.SlotResponse `json:"sims" jsonschema:"SIM cards reported by the modem"`
+	SIMs []appmodem.SlotResponse `json:"sims" jsonschema:"SIM cards reported by the modem"`
 }
 
 func (t *coreTools) listSIMCards(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (simCardsOutput, error) {
@@ -338,14 +326,14 @@ func (t *coreTools) listSIMCards(ctx context.Context, _ *mcp.CallToolRequest, _ 
 	}
 	sims := value.Slots
 	if len(sims) == 0 && value.SIM.Identifier != "" {
-		sims = []modemhandler.SlotResponse{value.SIM}
+		sims = []appmodem.SlotResponse{value.SIM}
 	} else if sims == nil {
-		sims = []modemhandler.SlotResponse{}
+		sims = []appmodem.SlotResponse{}
 	}
 	return simCardsOutput{SIMs: sims}, nil
 }
 
-func (t *coreTools) listSecureElements(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*euicchandler.SEsResponse, error) {
+func (t *coreTools) listSecureElements(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*appeuicc.SEsResponse, error) {
 	value, err := t.euicc.SecureElements(ctx, input.ModemID)
 	if err != nil {
 		return nil, OperationError("list secure elements", err)
@@ -392,7 +380,7 @@ func (t *coreTools) updateMSISDN(ctx context.Context, _ *mcp.CallToolRequest, _ 
 	return successOutput{Success: true}, nil
 }
 
-func (t *coreTools) listESIMProfiles(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*esimhandler.ProfilesResponse, error) {
+func (t *coreTools) listESIMProfiles(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*appesim.Inventory, error) {
 	value, err := t.esim.Profiles(ctx, input.ModemID)
 	if err != nil {
 		return nil, OperationError("list eSIM profiles", err)
@@ -408,7 +396,7 @@ type esimSEInput struct {
 func esimSEModemIDs(input esimSEInput) []string { return []string{input.ModemID} }
 
 type discoveriesOutput struct {
-	Profiles []esimhandler.DiscoverResponse `json:"profiles" jsonschema:"profiles advertised by the eSIM discovery service"`
+	Profiles []appesim.Discovery `json:"profiles" jsonschema:"profiles advertised by the eSIM discovery service"`
 }
 
 func (t *coreTools) discoverESIMProfiles(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input esimSEInput) (discoveriesOutput, error) {
@@ -416,7 +404,7 @@ func (t *coreTools) discoverESIMProfiles(ctx context.Context, _ *mcp.CallToolReq
 	if err != nil {
 		return discoveriesOutput{}, OperationError("discover eSIM profiles", err)
 	}
-	return discoveriesOutput{Profiles: append([]esimhandler.DiscoverResponse{}, values...)}, nil
+	return discoveriesOutput{Profiles: append([]appesim.Discovery{}, values...)}, nil
 }
 
 type downloadESIMInput struct {
@@ -697,7 +685,7 @@ func (t *coreTools) executeUSSD(ctx context.Context, _ *mcp.CallToolRequest, _ m
 }
 
 type networksOutput struct {
-	Networks []networkhandler.NetworkResponse `json:"networks" jsonschema:"mobile networks visible to the modem"`
+	Networks []appnetwork.NetworkResponse `json:"networks" jsonschema:"mobile networks visible to the modem"`
 }
 
 func (t *coreTools) listNetworks(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (networksOutput, error) {
@@ -705,30 +693,30 @@ func (t *coreTools) listNetworks(ctx context.Context, _ *mcp.CallToolRequest, _ 
 	if err != nil {
 		return networksOutput{}, OperationError("list networks", err)
 	}
-	return networksOutput{Networks: append([]networkhandler.NetworkResponse{}, values...)}, nil
+	return networksOutput{Networks: append([]appnetwork.NetworkResponse{}, values...)}, nil
 }
-func (t *coreTools) getNetworkRegistration(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*networkhandler.RegistrationResponse, error) {
+func (t *coreTools) getNetworkRegistration(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*appnetwork.RegistrationResponse, error) {
 	value, err := t.network.NetworkRegistration(ctx, input.ModemID)
 	if err != nil {
 		return nil, OperationError("get network registration", err)
 	}
 	return value, nil
 }
-func (t *coreTools) getNetworkModes(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*networkhandler.ModesResponse, error) {
+func (t *coreTools) getNetworkModes(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*appnetwork.ModesResponse, error) {
 	value, err := t.network.NetworkModes(ctx, input.ModemID)
 	if err != nil {
 		return nil, OperationError("get network modes", err)
 	}
 	return value, nil
 }
-func (t *coreTools) getNetworkBands(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*networkhandler.BandsResponse, error) {
+func (t *coreTools) getNetworkBands(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*appnetwork.BandsResponse, error) {
 	value, err := t.network.NetworkBands(ctx, input.ModemID)
 	if err != nil {
 		return nil, OperationError("get network bands", err)
 	}
 	return value, nil
 }
-func (t *coreTools) getAirplaneMode(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*networkhandler.AirplaneModeResponse, error) {
+func (t *coreTools) getAirplaneMode(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, input modemInput) (*appnetwork.AirplaneModeResponse, error) {
 	value, err := t.network.AirplaneModeValue(ctx, input.ModemID)
 	if err != nil {
 		return nil, OperationError("get airplane mode", err)
@@ -737,14 +725,14 @@ func (t *coreTools) getAirplaneMode(ctx context.Context, _ *mcp.CallToolRequest,
 }
 
 type networkRegistrationInput struct {
-	ModemID      string                          `json:"modemId"`
-	Mode         networkhandler.RegistrationMode `json:"mode" jsonschema:"automatic lets the modem choose its network; manual pins operatorCode"`
-	OperatorCode string                          `json:"operatorCode,omitempty" jsonschema:"operator code from list_networks; required for manual mode"`
+	ModemID      string                      `json:"modemId"`
+	Mode         appnetwork.RegistrationMode `json:"mode" jsonschema:"automatic lets the modem choose its network; manual pins operatorCode"`
+	OperatorCode string                      `json:"operatorCode,omitempty" jsonschema:"operator code from list_networks; required for manual mode"`
 }
 
-func (input networkRegistrationInput) request() networkhandler.SetRegistrationRequest {
-	return networkhandler.SetRegistrationRequest{
-		Mode:         networkhandler.RegistrationMode(strings.TrimSpace(string(input.Mode))),
+func (input networkRegistrationInput) request() appnetwork.SetRegistrationRequest {
+	return appnetwork.SetRegistrationRequest{
+		Mode:         appnetwork.RegistrationMode(strings.TrimSpace(string(input.Mode))),
 		OperatorCode: strings.TrimSpace(input.OperatorCode),
 	}
 }
@@ -757,11 +745,11 @@ func (t *coreTools) setNetworkRegistrationPolicy() GuardedToolPolicy[networkRegi
 		Validate: func(ctx context.Context, input networkRegistrationInput) error {
 			req := input.request()
 			switch req.Mode {
-			case networkhandler.RegistrationModeManual:
+			case appnetwork.RegistrationModeManual:
 				if req.OperatorCode == "" {
 					return NewToolError("invalid_request", "operatorCode is required for manual mode", nil)
 				}
-			case networkhandler.RegistrationModeAutomatic:
+			case appnetwork.RegistrationModeAutomatic:
 			default:
 				return NewToolError("invalid_request", "mode must be automatic or manual", nil)
 			}
@@ -769,7 +757,7 @@ func (t *coreTools) setNetworkRegistrationPolicy() GuardedToolPolicy[networkRegi
 		},
 		Confirmation: func(input networkRegistrationInput) string {
 			req := input.request()
-			if req.Mode == networkhandler.RegistrationModeAutomatic {
+			if req.Mode == appnetwork.RegistrationModeAutomatic {
 				return fmt.Sprintf("Let modem %q select its network automatically? This can interrupt mobile service.", input.ModemID)
 			}
 			return fmt.Sprintf("Register modem %q with operator %q? This can interrupt mobile service.", input.ModemID, req.OperatorCode)

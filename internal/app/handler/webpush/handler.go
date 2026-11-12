@@ -65,6 +65,7 @@ func (h *Handler) Register(c *echo.Context) error {
 		}
 		return httpapi.Internal(c, "register_web_push_subscription_failed", err)
 	}
+	httpapi.SetResourceLocation(c, subscription.ID)
 	return c.JSON(http.StatusCreated, subscriptionFromStorage(subscription))
 }
 

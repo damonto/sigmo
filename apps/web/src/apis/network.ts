@@ -31,44 +31,44 @@ export const useNetworkApi = () => {
   }
 
   const getRegistration = (id: string) => {
-    return fetchJson<RegistrationResponse>(`modems/${id}/networks/registration`)
+    return fetchJson<RegistrationResponse>(`modems/${id}/network-settings/registration`)
   }
 
   const setRegistration = (id: string, payload: SetRegistrationRequest) => {
-    return fetchJson<void>(`modems/${id}/networks/registration`, {
+    return fetchJson<void>(`modems/${id}/network-settings/registration`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     })
   }
 
   const getModes = (id: string) => {
-    return fetchJson<ModesResponse>(`modems/${id}/networks/modes`)
+    return fetchJson<ModesResponse>(`modems/${id}/network-settings/modes`)
   }
 
   const setCurrentModes = (id: string, payload: SetCurrentModesRequest) => {
-    return fetchJson<void>(`modems/${id}/networks/current-modes`, {
+    return fetchJson<void>(`modems/${id}/network-settings/modes`, {
       method: 'PUT',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ current: payload }),
     })
   }
 
   const getBands = (id: string) => {
-    return fetchJson<BandsResponse>(`modems/${id}/networks/bands`)
+    return fetchJson<BandsResponse>(`modems/${id}/network-settings/bands`)
   }
 
   const setCurrentBands = (id: string, payload: SetCurrentBandsRequest) => {
-    return fetchJson<void>(`modems/${id}/networks/current-bands`, {
+    return fetchJson<void>(`modems/${id}/network-settings/bands`, {
       method: 'PUT',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ current: payload.bands }),
     })
   }
 
   const getAirplaneMode = (id: string) => {
-    return fetchJson<AirplaneModeResponse>(`modems/${id}/networks/airplane-mode`)
+    return fetchJson<AirplaneModeResponse>(`modems/${id}/network-settings/airplane-mode`)
   }
 
   const setAirplaneMode = (id: string, payload: SetAirplaneModeRequest) => {
-    return fetchJson<void>(`modems/${id}/networks/airplane-mode`, {
+    return fetchJson<void>(`modems/${id}/network-settings/airplane-mode`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     })

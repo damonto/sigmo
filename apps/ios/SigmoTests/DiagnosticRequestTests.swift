@@ -26,7 +26,7 @@ final class DiagnosticRequestTests: XCTestCase {
             received.withLock { $0.append(request) }
             return BackendHTTPResponse(data: Data("response-body-secret".utf8), status: 200, requestID: "server-request")
         })
-        _ = try await api.request(["modems", "device-secret", "ses", "se-secret", "esims", "iccid-secret"],
+        _ = try await api.request(["modems", "device-secret", "secure-elements", "se-secret", "esim-profiles", "iccid-secret"],
                                   method: "POST", body: Data("request-body-secret".utf8), token: "credential-secret",
                                   query: [URLQueryItem(name: "q", value: "query-secret")])
         let request = try XCTUnwrap(received.withLock { $0.first })
@@ -35,7 +35,7 @@ final class DiagnosticRequestTests: XCTestCase {
         let data = try await log.snapshot()
         let events = try diagnosticEvents(data)
         XCTAssertEqual(events.map(\.event), ["request.started", "request.completed"])
-        XCTAssertTrue(events.allSatisfy { $0.fields["path"] == "/modems/:id/ses/:id/esims/:id" })
+        XCTAssertTrue(events.allSatisfy { $0.fields["path"] == "/modems/:id/secure-elements/:id/esim-profiles/:id" })
         XCTAssertEqual(events.last?.fields["status"], "200")
         XCTAssertEqual(events.last?.fields["serverRequestID"], "server-request")
         XCTAssertEqual(events.last?.fields["backendID"], configuration.id.uuidString)

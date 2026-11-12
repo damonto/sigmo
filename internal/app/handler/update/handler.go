@@ -77,6 +77,7 @@ func (h *Handler) CreateInstallation(c *echo.Context) error {
 		}
 		return httpapi.Internal(c, "start_update_failed", err)
 	}
+	c.Response().Header().Set("Location", c.Request().URL.EscapedPath()+"/current")
 	return c.JSON(http.StatusAccepted, h.controller.Snapshot())
 }
 

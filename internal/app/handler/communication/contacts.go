@@ -11,63 +11,21 @@ import (
 	"image/png"
 	"io"
 	"net/http"
-	"strconv"
 
-	"github.com/damonto/sigmo/internal/app/handler/esim"
 	"github.com/damonto/sigmo/internal/app/httpapi"
-	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 	"github.com/labstack/echo/v5"
 )
 
-// Config keeps persistence and live inventory in their existing ownership boundaries.
-type Config struct {
-	Storage  *storage.Store
-	Registry *modem.Registry
-	ESIM     *esim.Handler
-}
+// ContactHandler manages contacts and their avatars.
+type ContactHandler struct{ store *storage.Store }
 
-// Handler exposes authenticated, backend-scoped communication resources.
-type Handler struct{ config Config }
+// NewContactHandler creates contact endpoints backed only by persistence.
+func NewContactHandler(store *storage.Store) *ContactHandler { return &ContactHandler{store: store} }
 
-// New uses the same store and modem registry as the existing device routes.
-func New(config Config) *Handler { return &Handler{config: config} }
-
-// Register adds public-module routes to the existing protected Echo group.
-func (h *Handler) Register(group *echo.Group) {
-	group.GET("/contacts", h.contacts)
-	group.POST("/contacts", h.saveContact)
-	group.GET("/contacts/:id", h.contact)
-	group.PUT("/contacts/:id", h.saveContact)
-	group.DELETE("/contacts/:id", h.deleteContact)
-	group.GET("/contacts/:id/avatar", h.avatar)
-	group.PUT("/contacts/:id/avatar", h.setAvatar)
-	group.DELETE("/contacts/:id/avatar", h.setAvatar)
-	group.GET("/message-threads", h.threads)
-	group.GET("/message-threads/:id", h.thread)
-	group.GET("/message-threads/:id/messages", h.threadMessages)
-	group.PATCH("/message-threads/:id", h.readThread)
-	group.DELETE("/message-threads/:id", h.deleteThread)
-	group.GET("/sim-profiles", h.lines)
-	group.GET("/communication-preferences", h.preference)
-	group.PUT("/sim-profiles/:profileId/history-assignment", h.assign)
-}
-
-func writeError(c *echo.Context, err error) error {
-	if errors.Is(err, storage.ErrNotFound) {
-		return httpapi.NotFound(c, "communication_not_found", err)
-	}
-	if errors.Is(err, storage.ErrInvalidContact) || errors.Is(err, storage.ErrInvalidReadUpdate) || errors.Is(err, storage.ErrInvalidHistoryCursor) {
-		return httpapi.BadRequest(c, "communication_invalid", err)
-	}
-	if errors.Is(err, storage.ErrInvalidAssignment) {
-		return httpapi.Error(c, http.StatusConflict, "history_assignment_invalid", err.Error())
-	}
-	return httpapi.Internal(c, "communication_failed", err)
-}
-
-func (h *Handler) contacts(c *echo.Context) error {
-	items, err := h.config.Storage.Contacts(c.Request().Context(), c.QueryParam("q"))
+// Contacts lists contacts matching the optional search query.
+func (h *ContactHandler) Contacts(c *echo.Context) error {
+	items, err := h.store.Contacts(c.Request().Context(), c.QueryParam("q"))
 	if err != nil {
 		return writeError(c, err)
 	}
@@ -75,44 +33,55 @@ func (h *Handler) contacts(c *echo.Context) error {
 		Items []storage.Contact `json:"items"`
 	}{items})
 }
-func (h *Handler) contact(c *echo.Context) error {
-	item, err := h.config.Storage.Contact(c.Request().Context(), c.Param("id"))
+
+// Contact returns one contact.
+func (h *ContactHandler) Contact(c *echo.Context) error {
+	item, err := h.store.Contact(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return writeError(c, err)
 	}
 	return c.JSON(http.StatusOK, item)
 }
-func (h *Handler) saveContact(c *echo.Context) error {
+
+// SaveContact creates or replaces a contact.
+func (h *ContactHandler) SaveContact(c *echo.Context) error {
 	var item storage.Contact
 	if err := httpapi.BindJSON(c, &item, "contact_invalid"); err != nil {
 		return err
 	}
 	item.ID = c.Param("id")
-	item, err := h.config.Storage.SaveContact(c.Request().Context(), item)
+	item, err := h.store.SaveContact(c.Request().Context(), item)
 	if err != nil {
 		return writeError(c, err)
 	}
 	status := http.StatusOK
 	if c.Request().Method == http.MethodPost {
 		status = http.StatusCreated
+		httpapi.SetResourceLocation(c, item.ID)
 	}
 	return c.JSON(status, item)
 }
-func (h *Handler) deleteContact(c *echo.Context) error {
-	if err := h.config.Storage.DeleteContact(c.Request().Context(), c.Param("id")); err != nil {
+
+// DeleteContact removes a contact.
+func (h *ContactHandler) DeleteContact(c *echo.Context) error {
+	if err := h.store.DeleteContact(c.Request().Context(), c.Param("id")); err != nil {
 		return writeError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
-func (h *Handler) avatar(c *echo.Context) error {
-	data, err := h.config.Storage.ContactAvatar(c.Request().Context(), c.Param("id"))
+
+// Avatar returns a contact's stored PNG thumbnail.
+func (h *ContactHandler) Avatar(c *echo.Context) error {
+	data, err := h.store.ContactAvatar(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return writeError(c, err)
 	}
 	c.Response().Header().Set("Cache-Control", "private, no-cache")
 	return c.Blob(http.StatusOK, "image/png", data)
 }
-func (h *Handler) setAvatar(c *echo.Context) error {
+
+// SetAvatar replaces or removes a contact's avatar.
+func (h *ContactHandler) SetAvatar(c *echo.Context) error {
 	var data []byte
 	var tint string
 	if c.Request().Method != http.MethodDelete {
@@ -129,7 +98,7 @@ func (h *Handler) setAvatar(c *echo.Context) error {
 			return httpapi.BadRequest(c, "avatar_invalid", err)
 		}
 	}
-	contact, err := h.config.Storage.SetContactAvatar(c.Request().Context(), c.Param("id"), data, tint)
+	contact, err := h.store.SetContactAvatar(c.Request().Context(), c.Param("id"), data, tint)
 	if err != nil {
 		return writeError(c, err)
 	}
@@ -176,66 +145,4 @@ func thumbnail(input []byte) ([]byte, string, error) {
 		return nil, "", fmt.Errorf("encode avatar: %w", err)
 	}
 	return out.Bytes(), tint, nil
-}
-
-func historyFilter(c *echo.Context) storage.HistoryFilter {
-	limit, _ := strconv.Atoi(c.QueryParam("limit"))
-	return storage.HistoryFilter{ModemID: c.QueryParam("modemId"), ProfileID: c.QueryParam("profileId"), Query: c.QueryParam("q"), Cursor: c.QueryParam("cursor"), Limit: limit}
-}
-func (h *Handler) threads(c *echo.Context) error {
-	if id := c.QueryParam("conversationId"); id != "" {
-		thread, err := h.config.Storage.ThreadForConversation(c.Request().Context(), id)
-		if err != nil {
-			return writeError(c, err)
-		}
-		return c.JSON(http.StatusOK, struct {
-			ID string `json:"id"`
-		}{thread})
-	}
-	page, err := h.config.Storage.MessageThreads(c.Request().Context(), historyFilter(c))
-	if err != nil {
-		return writeError(c, err)
-	}
-	return c.JSON(http.StatusOK, page)
-}
-func (h *Handler) thread(c *echo.Context) error {
-	thread, err := h.config.Storage.Thread(c.Request().Context(), c.Param("id"))
-	if err != nil {
-		return writeError(c, err)
-	}
-	return c.JSON(http.StatusOK, thread)
-}
-func (h *Handler) threadMessages(c *echo.Context) error {
-	page, err := h.config.Storage.ThreadMessages(c.Request().Context(), c.Param("id"), historyFilter(c))
-	if err != nil {
-		return writeError(c, err)
-	}
-	return c.JSON(http.StatusOK, page)
-}
-func (h *Handler) readThread(c *echo.Context) error {
-	var read storage.ThreadRead
-	if err := httpapi.BindJSON(c, &read, "thread_read_invalid"); err != nil {
-		return err
-	}
-	if err := h.config.Storage.ReadThread(c.Request().Context(), c.Param("id"), read); err != nil {
-		return writeError(c, err)
-	}
-	badge, err := h.config.Storage.MessagesState(c.Request().Context())
-	if err != nil {
-		return writeError(c, err)
-	}
-	return c.JSON(http.StatusOK, badge)
-}
-func (h *Handler) deleteThread(c *echo.Context) error {
-	if err := h.config.Storage.DeleteThread(c.Request().Context(), c.Param("id")); err != nil {
-		return writeError(c, err)
-	}
-	return c.NoContent(http.StatusNoContent)
-}
-func (h *Handler) preference(c *echo.Context) error {
-	preference, err := h.config.Storage.PreferredCommunication(c.Request().Context(), c.QueryParam("participant"))
-	if err != nil {
-		return writeError(c, err)
-	}
-	return c.JSON(http.StatusOK, preference)
 }

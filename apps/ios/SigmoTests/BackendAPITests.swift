@@ -7,11 +7,11 @@ final class BackendAPITests: XCTestCase {
         let server = DetailFixtureServer()
         let api = BackendAPI(configuration: try testConfiguration()) { try await server.respond($0) }
         _ = try await api.modem("device-1", token: nil)
-        try await api.detailMutation("device-1", path: ["ses", "se-a", "esims", "8986000000000000002", "activation"],
-                                     method: "PUT", token: nil)
-        try await api.detailMutation("device-1", path: ["ses", "se-a", "esims", "8986000000000000002", "nickname"],
+        try await api.detailMutation("device-1", path: ["secure-elements", "se-a", "active-esim-profile"],
+                                     method: "PUT", value: ["iccid": "8986000000000000002"], token: nil)
+        try await api.detailMutation("device-1", path: ["secure-elements", "se-a", "esim-profiles", "8986000000000000002", "nickname"],
                                      method: "PUT", value: ["nickname": "Travel"], token: nil)
-        try await api.detailMutation("device-1", path: ["ses", "se-b", "esims", "8986000000000000002"],
+        try await api.detailMutation("device-1", path: ["secure-elements", "se-b", "esim-profiles", "8986000000000000002"],
                                      method: "DELETE", token: nil)
         _ = try await api.discoverProfiles("device-1", seID: "se-a", token: nil)
 

@@ -24,8 +24,8 @@ struct ModemSettingsFixture: Sendable {
     var disconnectAfterWrite = false
 
     mutating func respond(_ request: URLRequest, resource: String) throws -> BackendHTTPResponse? {
-        let paths = ["/networks/airplane-mode", "/networks/modes", "/networks/current-modes",
-                     "/networks/bands", "/networks/current-bands", "/settings"]
+        let paths = ["/network-settings/airplane-mode", "/network-settings/modes",
+                     "/network-settings/bands", "/settings"]
         guard paths.contains(resource) else { return nil }
         let method = request.httpMethod ?? "GET"
         if let status = statuses[method + " " + resource], status >= 400 {
@@ -37,31 +37,32 @@ struct ModemSettingsFixture: Sendable {
         }
         let data = request.httpBody ?? Data()
         switch (method, resource) {
-        case ("GET", "/networks/airplane-mode"):
+        case ("GET", "/network-settings/airplane-mode"):
             return try reply(ModemAirplaneMode(supported: airplaneSupported, enabled: airplaneEnabled))
-        case ("PUT", "/networks/airplane-mode"):
+        case ("PUT", "/network-settings/airplane-mode"):
             guard airplaneSupported else { return error("airplane_mode_unsupported", status: 400) }
             struct Submission: Decodable { let enabled: Bool }
             airplaneEnabled = try JSONDecoder().decode(Submission.self, from: data).enabled
-        case ("GET", "/networks/modes"):
+        case ("GET", "/network-settings/modes"):
             let options = supportedModes.map {
                 ModemNetworkMode(allowed: $0.allowed, preferred: $0.preferred, allowedLabel: $0.allowedLabel,
                                  preferredLabel: $0.preferredLabel, current: $0.id == mode)
             }
             guard let current = options.first(where: { $0.current }) else { return error("get_modes_failed", status: 500) }
             return try reply(ModemNetworkModes(supported: options, current: current))
-        case ("PUT", "/networks/current-modes"):
-            let selection = try JSONDecoder().decode(ModemModeSelection.self, from: data)
+        case ("PUT", "/network-settings/modes"):
+            let selection = try JSONDecoder().decode([String: ModemModeSelection].self, from: data)["current"]
+            guard let selection else { return error("set_modes_invalid_request", status: 400) }
             guard supportedModes.contains(where: { $0.id == selection }) else { return error("unsupported_mode", status: 400) }
             mode = selection
-        case ("GET", "/networks/bands"):
+        case ("GET", "/network-settings/bands"):
             let options = supportedBands.map {
                 ModemNetworkBand(value: $0.value, label: $0.label, current: selectedBands.contains($0.value))
             }
             return try reply(ModemNetworkBands(supported: options, current: selectedBands))
-        case ("PUT", "/networks/current-bands"):
-            struct Submission: Decodable { let bands: [ModemBandValue] }
-            let bands = try JSONDecoder().decode(Submission.self, from: data).bands
+        case ("PUT", "/network-settings/bands"):
+            struct Submission: Decodable { let current: [ModemBandValue] }
+            let bands = try JSONDecoder().decode(Submission.self, from: data).current
             guard !bands.isEmpty else { return error("bands_required", status: 400) }
             guard Set(bands).count == bands.count else { return error("duplicate_band", status: 400) }
             guard Set(bands).isSubset(of: Set(supportedBands.map(\.value))) else { return error("unsupported_band", status: 400) }

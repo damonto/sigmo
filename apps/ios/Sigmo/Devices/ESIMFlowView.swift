@@ -106,14 +106,14 @@ struct ESIMFlowView: View {
     private var navigationControls: some View {
         HStack {
             if canGoBack {
-                AsyncActionButton(id: "backESIMSetup", action: { await goBack() }) {
+                AsyncActionButton(id: "backESIMSetup", progressPlacement: .replacingLabel, action: { await goBack() }) {
                     Label("detail.back", systemImage: "chevron.left")
                         .font(.system(size: 17, weight: .semibold))
                         .labelStyle(.iconOnly).frame(width: 20, height: 20)
                 }
                 .buttonBorderShape(.circle).disabled(state.busy)
             } else {
-                LoadingButton(isWorking: closing) {
+                LoadingButton(isWorking: closing, progressPlacement: .replacingLabel) {
                     if state.phase == .completed {
                         dismiss()
                     } else if state.phase == .form {
@@ -237,10 +237,10 @@ struct ESIMFlowView: View {
 
     @ViewBuilder private var promptActions: some View {
         if state.phase == .confirmation {
-            AsyncActionButton(id: "confirmESIMCode", action: {
+            AsyncActionButton(id: "confirmESIMCode", contentMaxWidth: .infinity, action: {
                 await state.send(.init(type: "confirmation_code", code: state.confirmation.trimmingCharacters(in: .whitespacesAndNewlines)))
             }) {
-                Text("detail.confirm").frame(maxWidth: .infinity)
+                Text("detail.confirm")
             }
             .buttonStyle(.glassProminent).controlSize(.large).buttonBorderShape(.capsule)
             .disabled(state.confirmation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.sending)
@@ -248,15 +248,15 @@ struct ESIMFlowView: View {
             .frame(maxWidth: 560).frame(maxWidth: .infinity)
         } else if state.phase == .userInput, let prompt = state.prompt {
             VStack(spacing: 12) {
-                AsyncActionButton(action: {
+                AsyncActionButton(contentMaxWidth: .infinity, action: {
                     await state.send(.init(type: "user_input", accept: true, response: state.response))
                 }) {
-                    Text(detailText(prompt.acceptLabel ?? "detail.confirm")).frame(maxWidth: .infinity)
+                    Text(detailText(prompt.acceptLabel ?? "detail.confirm"))
                 }.buttonStyle(.glassProminent)
-                AsyncActionButton(action: {
+                AsyncActionButton(contentMaxWidth: .infinity, action: {
                     await state.send(.init(type: "user_input", accept: false, response: ""))
                 }) {
-                    Text(detailText(prompt.rejectLabel ?? "common.cancel")).frame(maxWidth: .infinity)
+                    Text(detailText(prompt.rejectLabel ?? "common.cancel"))
                 }
                 .buttonStyle(.glass)
             }
@@ -429,8 +429,8 @@ struct ESIMFlowView: View {
             if state.phase == .preview || state.phase == .completed || state.phase == .failed {
                 VStack(spacing: 12) {
                     if state.phase == .preview {
-                        AsyncActionButton(id: "confirmESIMPreview", action: { await state.send(.init(type: "confirm", accept: true)) }) {
-                            Text("detail.confirmDownload").frame(maxWidth: .infinity)
+                        AsyncActionButton(id: "confirmESIMPreview", contentMaxWidth: .infinity, action: { await state.send(.init(type: "confirm", accept: true)) }) {
+                            Text("detail.confirmDownload")
                         }.buttonStyle(.glassProminent).disabled(state.sending)
                     } else if state.phase == .completed {
                         Button { dismiss() } label: { Text("common.done").frame(maxWidth: .infinity) }

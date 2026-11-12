@@ -89,7 +89,7 @@ final class HistoryAssignmentTests: XCTestCase {
         XCTAssertTrue(request.url?.path.hasSuffix("/sim-profiles/deleted/history-assignment") == true)
         let body = try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: String]
         XCTAssertEqual(body, ["targetProfileId": "inactive"])
-        XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/activation") == true })
+        XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/active-esim-profile") == true })
         let lines = try await state.session.communicationLines()
         let archived = try XCTUnwrap(lines.first { $0.id == "deleted" })
         XCTAssertEqual(archived.deletionState, "assigned")

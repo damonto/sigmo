@@ -88,6 +88,7 @@ func (h *Handler) Register(c *echo.Context) error {
 	if err := h.store.UpsertNativeSubscription(c.Request().Context(), sub); err != nil {
 		return httpapi.Internal(c, "register_native_push_failed", err)
 	}
+	httpapi.SetResourceLocation(c, sub.ID)
 	return c.JSON(http.StatusCreated, sub)
 }
 

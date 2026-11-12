@@ -44,19 +44,19 @@ final class ModemSettingsTests: XCTestCase {
 
         let requests = await writes(server)
         XCTAssertEqual(requests.map { $0.url?.path }, [
-            "/prefix/api/v1/modems/device-1/networks/current-modes",
-            "/prefix/api/v1/modems/device-1/networks/current-bands",
+            "/prefix/api/v1/modems/device-1/network-settings/modes",
+            "/prefix/api/v1/modems/device-1/network-settings/bands",
             "/prefix/api/v1/modems/device-1/settings",
-            "/prefix/api/v1/modems/device-1/networks/airplane-mode",
+            "/prefix/api/v1/modems/device-1/network-settings/airplane-mode",
         ])
         for request in requests {
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer settings-token")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
             XCTAssertNotNil(request.value(forHTTPHeaderField: "X-Request-ID"))
         }
-        XCTAssertEqual(try JSONDecoder().decode([String: UInt64].self, from: XCTUnwrap(requests[0].httpBody)), ["allowed": 4, "preferred": 0])
-        struct Bands: Decodable { let bands: [ModemBandValue] }
-        XCTAssertEqual(try JSONDecoder().decode(Bands.self, from: XCTUnwrap(requests[1].httpBody)).bands,
+        XCTAssertEqual(try JSONDecoder().decode([String: ModemModeSelection].self, from: XCTUnwrap(requests[0].httpBody)), ["current": .init(allowed: 4, preferred: 0)])
+        struct Bands: Decodable { let current: [ModemBandValue] }
+        XCTAssertEqual(try JSONDecoder().decode(Bands.self, from: XCTUnwrap(requests[1].httpBody)).current,
                        [.init(technology: 64, number: 1)])
         XCTAssertEqual(try JSONDecoder().decode(ModemDeviceSettings.self, from: XCTUnwrap(requests[2].httpBody)),
                        .init(alias: "Office", mss: 128))
@@ -64,8 +64,8 @@ final class ModemSettingsTests: XCTestCase {
 
         let configuration = state.session.configuration
         let api = BackendAPI(configuration: configuration, transport: { try await server.respond($0) })
-        let escaped = try api.makeRequest(["modems", "one/two ?", "networks", "airplane-mode"], token: "private")
-        XCTAssertTrue(try XCTUnwrap(escaped.url?.absoluteString).hasSuffix("/modems/one%2Ftwo%20%3F/networks/airplane-mode"))
+        let escaped = try api.makeRequest(["modems", "one/two ?", "network-settings", "airplane-mode"], token: "private")
+        XCTAssertTrue(try XCTUnwrap(escaped.url?.absoluteString).hasSuffix("/modems/one%2Ftwo%20%3F/network-settings/airplane-mode"))
     }
 
     func testUnsignedWireValuesAndCompositeIdentities() throws {
@@ -116,8 +116,8 @@ final class ModemSettingsTests: XCTestCase {
         let server = DetailFixtureServer()
         let state = try await make(server)
         var fixture = await server.currentModemSettings()
-        fixture.statuses["GET /networks/modes"] = 503
-        fixture.statuses["GET /networks/bands"] = 503
+        fixture.statuses["GET /network-settings/modes"] = 503
+        fixture.statuses["GET /network-settings/bands"] = 503
         await server.setModemSettings(fixture)
         await save(.airplane(true), state)
         XCTAssertTrue(state.canChangeAirplane)
@@ -269,7 +269,7 @@ final class ModemSettingsTests: XCTestCase {
     func testWritesStayExclusiveThroughAuthoritativeRefresh() async throws {
         let server = DetailFixtureServer()
         let state = try await make(server)
-        await server.holdNext("/networks/modes")
+        await server.holdNext("/network-settings/modes")
         let operation = Task { await state.save(.airplane(true)) }
         await server.waitForHeldRequest()
         XCTAssertTrue(state.busy)
@@ -286,7 +286,7 @@ final class ModemSettingsTests: XCTestCase {
     func testNewReadWinsOverLateSnapshot() async throws {
         let server = DetailFixtureServer()
         let state = try await make(server)
-        await server.holdNext("/networks/modes")
+        await server.holdNext("/network-settings/modes")
         let oldRead = Task { await state.load([.mode]) }
         await server.waitForHeldRequest()
         var fixture = await server.currentModemSettings()
@@ -320,7 +320,7 @@ final class ModemSettingsTests: XCTestCase {
         let state = try await make(server, authenticated: true)
         let other = try await make(host: "other.example")
         var fixture = await server.currentModemSettings()
-        fixture.statuses["GET /networks/modes"] = 401
+        fixture.statuses["GET /network-settings/modes"] = 401
         await server.setModemSettings(fixture)
         await state.load([.mode])
         XCTAssertFalse(state.hasAccess)
@@ -346,7 +346,7 @@ final class ModemSettingsTests: XCTestCase {
     func testCancelledWriteIsReconciledOnReturnWithoutReplay() async throws {
         let server = DetailFixtureServer()
         let state = try await make(server)
-        await server.holdNext("/networks/airplane-mode")
+        await server.holdNext("/network-settings/airplane-mode")
         let operation = Task { await state.save(.airplane(true)) }
         await server.waitForHeldRequest()
         operation.cancel()
@@ -383,7 +383,7 @@ final class ModemSettingsTests: XCTestCase {
     func testSessionStopLeavesUncertainWriteSilentUntilReload() async throws {
         let server = DetailFixtureServer()
         let state = try await make(server)
-        await server.holdNext("/networks/airplane-mode")
+        await server.holdNext("/network-settings/airplane-mode")
         let operation = Task { await state.save(.airplane(true)) }
         await server.waitForHeldRequest()
         state.session.stop()
@@ -433,7 +433,7 @@ final class ModemSettingsTests: XCTestCase {
         let server = DetailFixtureServer()
         let state = try await make(server)
         var fixture = await server.currentModemSettings()
-        fixture.statuses["GET /networks/airplane-mode"] = 503
+        fixture.statuses["GET /network-settings/airplane-mode"] = 503
         await server.setModemSettings(fixture)
         await save(.airplane(true), state)
         await save(.device(.init(alias: "Office", mss: 128)), state)

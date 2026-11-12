@@ -6,7 +6,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/damonto/euicc-go v1.2.0
 	github.com/damonto/ims-go v0.1.2
-	github.com/damonto/ts43-go v0.1.2
+	github.com/damonto/ts43-go v0.1.3
 	github.com/damonto/wwan-go v0.0.1
 	github.com/go-jose/go-jose/v4 v4.1.9
 	github.com/go-playground/locales v0.14.2

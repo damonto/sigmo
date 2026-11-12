@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"testing"
 
-	esimhandler "github.com/damonto/sigmo/internal/app/handler/esim"
-	euicchandler "github.com/damonto/sigmo/internal/app/handler/euicc"
+	appesim "github.com/damonto/sigmo/internal/app/esim"
+	appeuicc "github.com/damonto/sigmo/internal/app/euicc"
 	internethandler "github.com/damonto/sigmo/internal/app/handler/internet"
 	messagehandler "github.com/damonto/sigmo/internal/app/handler/message"
-	modemhandler "github.com/damonto/sigmo/internal/app/handler/modem"
-	networkhandler "github.com/damonto/sigmo/internal/app/handler/network"
+	appmodem "github.com/damonto/sigmo/internal/app/modem"
+	appnetwork "github.com/damonto/sigmo/internal/app/network"
 )
 
 func TestListOutputsEncodeEmptyCollectionsAsArrays(t *testing.T) {
@@ -20,12 +20,12 @@ func TestListOutputsEncodeEmptyCollectionsAsArrays(t *testing.T) {
 		want  string
 	}{
 		{name: "authorized modems", value: modemsOutput{Modems: []authorizedModem{}}, want: `"modems":[]`},
-		{name: "sim cards", value: simCardsOutput{SIMs: []modemhandler.SlotResponse{}}, want: `"sims":[]`},
-		{name: "secure elements", value: euicchandler.SEsResponse{SEs: []euicchandler.SEItemResponse{}}, want: `"ses":[]`},
-		{name: "eSIM profiles", value: esimhandler.ProfilesResponse{SEs: []esimhandler.ProfileGroupResponse{}}, want: `"ses":[]`},
-		{name: "discovered profiles", value: discoveriesOutput{Profiles: []esimhandler.DiscoverResponse{}}, want: `"profiles":[]`},
+		{name: "sim cards", value: simCardsOutput{SIMs: []appmodem.SlotResponse{}}, want: `"sims":[]`},
+		{name: "secure elements", value: appeuicc.SEsResponse{SEs: []appeuicc.SEItemResponse{}}, want: `"ses":[]`},
+		{name: "eSIM profiles", value: appesim.Inventory{SEs: []appesim.SecureElement{}}, want: `"ses":[]`},
+		{name: "discovered profiles", value: discoveriesOutput{Profiles: []appesim.Discovery{}}, want: `"profiles":[]`},
 		{name: "SMS", value: messagesOutput{Messages: []messagehandler.MessageResponse{}}, want: `"messages":[]`},
-		{name: "networks", value: networksOutput{Networks: []networkhandler.NetworkResponse{}}, want: `"networks":[]`},
+		{name: "networks", value: networksOutput{Networks: []appnetwork.NetworkResponse{}}, want: `"networks":[]`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

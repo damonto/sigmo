@@ -4,7 +4,7 @@ import type { SEsResponse } from '@/types/se'
 
 export const useSEApi = () => {
   const getSEs = (id: string) => {
-    return fetchJson<SEsResponse>(`modems/${id}/ses`)
+    return fetchJson<SEsResponse>(`modems/${id}/secure-elements`)
   }
 
   return {

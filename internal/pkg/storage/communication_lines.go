@@ -50,6 +50,18 @@ func (s *Store) MarkProfileDeletion(ctx context.Context, profileID, state string
 	return nil
 }
 
+// ConfirmESIMProfileDeletion records absence only at the last confirmed location.
+// Completed history assignments remain intact when a client retries deletion.
+func (s *Store) ConfirmESIMProfileDeletion(ctx context.Context, profileID, modemID, seID string) error {
+	err := query.New(s.db).ConfirmESIMProfileDeletion(ctx, query.ConfirmESIMProfileDeletionParams{
+		ProfileID: profileID, ModemID: modemID, SEID: seID,
+	})
+	if err != nil {
+		return fmt.Errorf("confirm eSIM profile deletion: %w", err)
+	}
+	return nil
+}
+
 // ProfileReconciliation describes the state observed before reading hardware.
 // A newer deletion or assignment must survive a delayed inventory response.
 type ProfileReconciliation struct {

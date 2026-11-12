@@ -8,6 +8,18 @@ describe('useModemApi', () => {
     vi.unstubAllGlobals()
   })
 
+  it('replaces the SIM slot selection with an explicit desired state', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await useModemApi().switchSimSlot('modem-1', 2)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/modems/modem-1/sim-slot-selection'),
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ slot: 2 }) }),
+    )
+  })
+
   it('loads Wi-Fi Calling settings from nested resources', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ enabled: true, connected: true }), {

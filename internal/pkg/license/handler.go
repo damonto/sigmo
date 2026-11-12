@@ -26,13 +26,8 @@ type pairingResponse struct {
 	ExpiresAt     time.Time `json:"expiresAt"`
 }
 
-func (c *Controller) RegisterRoutes(group *echo.Group) {
-	group.GET("/license", c.getLicense)
-	group.POST("/license/pairings", c.createPairing)
-	group.GET("/license/pairings/:id", c.getPairing)
-}
-
-func (c *Controller) getLicense(ctx *echo.Context) error {
+// GetLicense returns the current authorization status and device ID.
+func (c *Controller) GetLicense(ctx *echo.Context) error {
 	ctx.Response().Header().Set("Cache-Control", "no-store")
 	return ctx.JSON(http.StatusOK, statusResponse{
 		Authorized: c.Authorized(),
@@ -40,7 +35,8 @@ func (c *Controller) getLicense(ctx *echo.Context) error {
 	})
 }
 
-func (c *Controller) createPairing(ctx *echo.Context) error {
+// CreatePairing starts a device authorization pairing.
+func (c *Controller) CreatePairing(ctx *echo.Context) error {
 	ctx.Response().Header().Set("Cache-Control", "no-store")
 	if c.baseURL == "" || len(c.licensePublicKey) == 0 {
 		return httpapi.Error(ctx, http.StatusServiceUnavailable, "license_service_unavailable", "Pro authorization service is not configured")
@@ -71,6 +67,7 @@ func (c *Controller) createPairing(ctx *echo.Context) error {
 		ExpiresAt:           remote.ExpiresAt,
 	}
 	c.mu.Unlock()
+	httpapi.SetResourceLocation(ctx, remote.ID)
 	return ctx.JSON(http.StatusCreated, pairingResponse{
 		ID:            remote.ID,
 		ActivationURL: remote.ActivationURL,
@@ -79,7 +76,8 @@ func (c *Controller) createPairing(ctx *echo.Context) error {
 	})
 }
 
-func (c *Controller) getPairing(ctx *echo.Context) error {
+// GetPairing polls a pairing and persists an activated authorization session.
+func (c *Controller) GetPairing(ctx *echo.Context) error {
 	ctx.Response().Header().Set("Cache-Control", "no-store")
 	id := ctx.Param("id")
 	now := time.Now()

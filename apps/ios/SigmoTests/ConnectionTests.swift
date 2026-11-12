@@ -50,7 +50,7 @@ final class ConnectionTests: XCTestCase {
             let reads = requests.filter { $0.httpMethod == "GET" }
             XCTAssertEqual(reads.count, 2, kind)
             XCTAssertEqual(reads.filter { $0.url?.path.hasSuffix("/modems/device-1") == true }.count, 1, kind)
-            XCTAssertFalse(reads.contains { $0.url?.path.hasSuffix("/ses") == true || $0.url?.path.hasSuffix("/esims") == true }, kind)
+            XCTAssertFalse(reads.contains { $0.url?.path.hasSuffix("/secure-elements") == true || $0.url?.path.hasSuffix("/esim-profiles") == true }, kind)
             XCTAssertTrue(detail.isActiveProfile(profileID), "Connection readback must retain unchanged profile inventory")
             XCTAssertNil(internet.failure)
             XCTAssertNil(network.failure)
@@ -311,7 +311,7 @@ final class ConnectionTests: XCTestCase {
         XCTAssertTrue(state.manual)
         XCTAssertEqual(state.registration?.mode, "automatic")
         XCTAssertEqual(state.networks.count, 2)
-        let pendingWrites = await writes(server, suffix: "/networks/registration")
+        let pendingWrites = await writes(server, suffix: "/network-settings/registration")
         XCTAssertTrue(pendingWrites.isEmpty)
         state.leave()
         await state.load()
@@ -323,7 +323,7 @@ final class ConnectionTests: XCTestCase {
         XCTAssertEqual(detail.modem?.networkSelectionName, "Travel Mobile")
         await state.setAutomatic(true)
         XCTAssertFalse(state.manual)
-        let requests = await writes(server, suffix: "/networks/registration")
+        let requests = await writes(server, suffix: "/network-settings/registration")
         XCTAssertEqual(requests.count, 2)
         XCTAssertTrue(requests.allSatisfy { $0.timeoutInterval == 600 })
         let payload = try JSONDecoder().decode(NetworkRegistration.self, from: XCTUnwrap(requests.last?.httpBody))
@@ -387,7 +387,7 @@ final class ConnectionTests: XCTestCase {
         XCTAssertFalse(state.scanning)
         XCTAssertFalse(state.manual)
         XCTAssertTrue(state.networks.isEmpty)
-        let requests = await writes(server, suffix: "/networks/registration")
+        let requests = await writes(server, suffix: "/network-settings/registration")
         XCTAssertTrue(requests.isEmpty)
         let fixture = await server.currentConnections()
         XCTAssertTrue(fixture.scanStarted)
@@ -406,7 +406,7 @@ final class ConnectionTests: XCTestCase {
         XCTAssertEqual(state.registration?.mode, "manual")
         XCTAssertEqual(state.registration?.operatorCode, "23410")
         XCTAssertNotNil(state.failure)
-        let requests = await writes(server, suffix: "/networks/registration")
+        let requests = await writes(server, suffix: "/network-settings/registration")
         XCTAssertEqual(requests.count, 1)
     }
 
@@ -422,7 +422,7 @@ final class ConnectionTests: XCTestCase {
         XCTAssertFalse(state.canChange)
         XCTAssertNotNil(state.loadFailure)
         fixture.registration = .init(mode: "automatic", operatorCode: nil)
-        fixture.statuses["PUT /networks/registration"] = 503
+        fixture.statuses["PUT /network-settings/registration"] = 503
         await server.setConnectionFixture(fixture)
         await state.load()
         await state.setAutomatic(false)

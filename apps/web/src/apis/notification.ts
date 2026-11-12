@@ -8,13 +8,16 @@ export const useNotificationApi = () => {
   }
 
   const resendNotification = (id: string, seId: string, sequence: string) => {
-    return fetchJson<void>(`modems/${id}/ses/${seId}/notifications/${sequence}/deliveries`, {
-      method: 'POST',
-    })
+    return fetchJson<void>(
+      `modems/${id}/secure-elements/${seId}/notifications/${sequence}/deliveries`,
+      {
+        method: 'POST',
+      },
+    )
   }
 
   const deleteNotification = (id: string, seId: string, sequence: string) => {
-    return fetchJson<void>(`modems/${id}/ses/${seId}/notifications/${sequence}`, {
+    return fetchJson<void>(`modems/${id}/secure-elements/${seId}/notifications/${sequence}`, {
       method: 'DELETE',
     })
   }

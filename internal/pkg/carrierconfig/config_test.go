@@ -9,7 +9,7 @@ import (
 
 func TestPackUnpack(t *testing.T) {
 	files := Files{SchemaVersion: 1,
-		Entitlement: json.RawMessage(`[{"mccmnc":"00101","channel":"google","carrierName":"test","entitlementServer":"https://carrier.example","supportEsimToEsimTransfer":true,"transferTypeEsim":7}]`),
+		Entitlement: json.RawMessage(`[{"mccmnc":"00101","carrierName":"test","entitlementServer":"https://carrier.example","supportEsimToEsimTransfer":true,"transferTypeEsim":7}]`),
 		WFC:         json.RawMessage(`[]`), IMS: json.RawMessage(`[]`)}
 	compressed, revision, err := Pack(files)
 	if err != nil {

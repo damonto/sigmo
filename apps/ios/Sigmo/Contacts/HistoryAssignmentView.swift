@@ -218,12 +218,11 @@ struct HistoryAssignmentView: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("historyAssignmentPreserved")
-            AsyncActionButton(id: "historyAssignmentConfirm", action: {
+            AsyncActionButton(id: "historyAssignmentConfirm", contentMaxWidth: .infinity, action: {
                 if await state.assign() { dismiss() }
             }) {
                 Text(state.selected.map { String(format: detailText("communication.assignmentConfirm"), lineTitle($0)) }
                      ?? detailText("communication.assignmentChooseLine"))
-                    .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)

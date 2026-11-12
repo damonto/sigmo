@@ -53,7 +53,7 @@ describe('useSettingsApi', () => {
   })
 
   it('tests the selected authentication providers', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 201 }))
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
 
     await useSettingsApi().testAuth({ channels: ['telegram'] })

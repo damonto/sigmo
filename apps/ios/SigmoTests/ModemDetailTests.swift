@@ -6,13 +6,13 @@ final class ModemDetailTests: XCTestCase {
     func testReturningToSIMReusesInventoryUntilExplicitRefresh() async throws {
         let server = DetailFixtureServer()
         let detail = try await make(server)
-        let initial = await server.allRequests().filter { $0.url?.path.hasSuffix("/esims") == true }.count
+        let initial = await server.allRequests().filter { $0.url?.path.hasSuffix("/esim-profiles") == true }.count
         await detail.load(force: false)
         await detail.load(force: false)
-        let reused = await server.allRequests().filter { $0.url?.path.hasSuffix("/esims") == true }.count
+        let reused = await server.allRequests().filter { $0.url?.path.hasSuffix("/esim-profiles") == true }.count
         XCTAssertEqual(reused, initial)
         await detail.load()
-        let refreshed = await server.allRequests().filter { $0.url?.path.hasSuffix("/esims") == true }.count
+        let refreshed = await server.allRequests().filter { $0.url?.path.hasSuffix("/esim-profiles") == true }.count
         XCTAssertEqual(refreshed, initial + 1)
     }
 
@@ -101,7 +101,7 @@ final class ModemDetailTests: XCTestCase {
         XCTAssertFalse(detail.elementsLoaded)
         XCTAssertFalse(detail.profilesLoaded)
 
-        await server.holdNext("/ses")
+        await server.holdNext("/secure-elements")
         let initialLoad = Task { await detail.load() }
         await server.waitForHeldRequest()
         XCTAssertFalse(detail.elementsLoaded)
@@ -112,7 +112,7 @@ final class ModemDetailTests: XCTestCase {
         XCTAssertTrue(detail.profilesLoaded)
 
         let profileIDs = detail.groups.flatMap(\.profiles).map(\.id)
-        await server.holdNext("/ses")
+        await server.holdNext("/secure-elements")
         let refresh = Task { await detail.load() }
         await server.waitForHeldRequest()
         XCTAssertTrue(detail.elementsLoaded)
@@ -130,7 +130,7 @@ final class ModemDetailTests: XCTestCase {
         for status in [200, 503] {
             let server = DetailFixtureServer()
             await server.setProfilesData(Data(#"{"ses":[]}"#.utf8))
-            await server.setStatus("/esims", status)
+            await server.setStatus("/esim-profiles", status)
             let detail = try await make(server)
             XCTAssertTrue(detail.elementsLoaded, "HTTP \(status)")
             XCTAssertTrue(detail.profilesLoaded, "HTTP \(status)")
@@ -138,7 +138,7 @@ final class ModemDetailTests: XCTestCase {
             XCTAssertEqual(detail.profilesFailure?.status, status == 503 ? 503 : nil)
 
             await server.setProfilesData(nil)
-            await server.setStatus("/esims", 200)
+            await server.setStatus("/esim-profiles", 200)
             await detail.load()
             XCTAssertNil(detail.profilesFailure)
             XCTAssertFalse(detail.groups.isEmpty)
@@ -200,7 +200,7 @@ final class ModemDetailTests: XCTestCase {
         let server = DetailFixtureServer()
         let detail = try await make(server)
         let profile = detail.groups[0].profiles[1]
-        await server.holdNext("/esims")
+        await server.holdNext("/esim-profiles")
         let request = Task { await detail.rename(profile, name: "First") }
         await server.waitForHeldRequest()
 
@@ -259,8 +259,8 @@ final class ModemDetailTests: XCTestCase {
         let detail = try await make(server)
         let internet = InternetState(detail: detail, profileID: "se-a:8986000000000000001")
         await internet.load()
-        await server.setStatus("/ses", 503)
-        await server.setStatus("/esims", 503)
+        await server.setStatus("/secure-elements", 503)
+        await server.setStatus("/esim-profiles", 503)
 
         let switched = await detail.switchSlot(2)
         XCTAssertTrue(switched)
@@ -506,13 +506,13 @@ final class ModemDetailTests: XCTestCase {
         let requests = await server.allRequests()
         let rename = try XCTUnwrap(requests.first { $0.url?.path.hasSuffix("/nickname") == true })
         XCTAssertEqual(rename.httpMethod, "PUT")
-        XCTAssertEqual(rename.url?.path, "/prefix/api/v1/modems/device-1/ses/se-a/esims/8986000000000000002/nickname")
+        XCTAssertEqual(rename.url?.path, "/prefix/api/v1/modems/device-1/secure-elements/se-a/esim-profiles/8986000000000000002/nickname")
         detail.clear()
         XCTAssertNil(detail.deletedHistoryProfileID)
     }
 
     func testConfirmedDeletionRemovesProfileWhenRefreshFails() async throws {
-        for suffix in ["/modems/device-1", "/ses", "/esims"] {
+        for suffix in ["/modems/device-1", "/secure-elements", "/esim-profiles"] {
             let server = DetailFixtureServer()
             let detail = try await make(server)
             let profile = detail.groups[0].profiles[1]
@@ -563,7 +563,7 @@ final class ModemDetailTests: XCTestCase {
         let detail = try await make(server)
         let profile = detail.groups[0].profiles[1]
         let other = detail.groups[1].profiles[0]
-        await server.holdNext("/esims")
+        await server.holdNext("/esim-profiles")
         let deletion = Task { await detail.delete(profile) }
         await server.waitForHeldRequest()
 
@@ -617,7 +617,7 @@ final class ModemDetailTests: XCTestCase {
         let server = DetailFixtureServer()
         let detail = try await make(server)
         let profile = detail.groups[0].profiles[1]
-        let suffix = "/ses/\(profile.seId)/esims/\(profile.iccid)"
+        let suffix = "/secure-elements/\(profile.seId)/esim-profiles/\(profile.iccid)"
         await server.setStatus(suffix, 503)
         await server.holdNext(suffix)
         let deletion = Task { await detail.delete(profile) }
@@ -697,12 +697,12 @@ final class ModemDetailTests: XCTestCase {
     func testPartialFailuresRetainSnapshotAnd401IsIsolated() async throws {
         let server = DetailFixtureServer(), detail = try await make(server)
         let other = try await make(host: "other.example")
-        await server.setStatus("/ses", 503)
+        await server.setStatus("/secure-elements", 503)
         await detail.load()
         XCTAssertEqual(detail.elements.count, 2)
         XCTAssertEqual(detail.elementsFailure?.status, 503)
         XCTAssertEqual(detail.groups.count, 2)
-        await server.setStatus("/esims", 401)
+        await server.setStatus("/esim-profiles", 401)
         await detail.load()
         XCTAssertEqual(detail.session.authentication, .required)
         XCTAssertTrue(detail.session.modems.isEmpty)
@@ -713,7 +713,7 @@ final class ModemDetailTests: XCTestCase {
 
     func testClearedStateRejectsLateProfileResponse() async throws {
         let server = DetailFixtureServer(), detail = try await make(server)
-        await server.holdNext("/esims")
+        await server.holdNext("/esim-profiles")
         let request = Task { await detail.load() }
         await server.waitForHeldRequest()
         detail.clear()
@@ -756,7 +756,7 @@ final class ModemDetailTests: XCTestCase {
             await flow.discover()
             let requests = await server.allRequests().filter { $0.url?.path.hasSuffix("/esim-discoveries") == true }
             XCTAssertEqual(requests.count, 1)
-            XCTAssertTrue(requests.first?.url?.path.hasSuffix("/ses/\(seID)/esim-discoveries") == true)
+            XCTAssertTrue(requests.first?.url?.path.hasSuffix("/secure-elements/\(seID)/esim-discoveries") == true)
             let messages = await server.allMessages()
             XCTAssertTrue(messages.isEmpty)
 
@@ -1114,8 +1114,8 @@ final class ModemDetailTests: XCTestCase {
         XCTAssertFalse(remaining.contains { $0.id == item.id })
         XCTAssertTrue(remaining.contains { $0.seId == "se-b" && $0.sequenceNumber == item.sequenceNumber })
         let requests = await server.allRequests()
-        XCTAssertTrue(requests.contains { $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/ses/se-a/notifications/18446744073709551615/deliveries") == true })
-        XCTAssertTrue(requests.contains { $0.httpMethod == "DELETE" && $0.url?.path.hasSuffix("/ses/se-a/notifications/18446744073709551615") == true })
+        XCTAssertTrue(requests.contains { $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/secure-elements/se-a/notifications/18446744073709551615/deliveries") == true })
+        XCTAssertTrue(requests.contains { $0.httpMethod == "DELETE" && $0.url?.path.hasSuffix("/secure-elements/se-a/notifications/18446744073709551615") == true })
     }
 
     func testInterruptedNotificationRefreshDoesNotPublishSavedMessage() async throws {
@@ -1235,8 +1235,8 @@ final class ModemDetailTests: XCTestCase {
     func testWebsheetAndHTTPPathsPreservePrefixAndRejectOtherOrigins() async throws {
         let config = try testConfiguration()
         let api = BackendAPI(configuration: BackendConfiguration(name: "Proxy", address: try BackendAddress.normalize("https://proxy.example/sigmo")), transport: { _ in .init(data: Data(), status: 204) })
-        let request = try api.makeRequest(["modems", "one/two ?", "ses", "a/b"], token: "secret")
-        XCTAssertTrue(request.url!.absoluteString.hasSuffix("/modems/one%2Ftwo%20%3F/ses/a%2Fb"))
+        let request = try api.makeRequest(["modems", "one/two ?", "secure-elements", "a/b"], token: "secret")
+        XCTAssertTrue(request.url!.absoluteString.hasSuffix("/modems/one%2Ftwo%20%3F/secure-elements/a%2Fb"))
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
         let sheet = CarrierWebsheet(id: "sheet", embedUrl: "/api/v1/websheets/sheet", title: nil, url: "https://carrier.example", method: "GET")
         let url = try CarrierWebsheetAddress.url(sheet, api: api)

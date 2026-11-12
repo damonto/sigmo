@@ -6,8 +6,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	modemhandler "github.com/damonto/sigmo/internal/app/handler/modem"
 	"github.com/damonto/sigmo/internal/app/mcpauth"
+	appmodem "github.com/damonto/sigmo/internal/app/modem"
 	modemcore "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
@@ -79,7 +79,7 @@ func pinConfirmation(action, id string) string {
 }
 
 func pinToolError(err error) error {
-	_, code, detail := modemhandler.SIMPINProblem(err)
+	_, code, detail := appmodem.SIMPINProblem(err)
 	if code == "" {
 		code, detail = "sim_pin_state_conflict", "read get_sim_pin_status before continuing"
 	}
@@ -169,16 +169,16 @@ func (t *coreTools) simPINUnblockPolicy() GuardedToolPolicy[simPINUnblockInput] 
 	}
 }
 
-func (t *coreTools) getSIMPINStatus(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, i modemInput) (modemhandler.SIMPINResponse, error) {
+func (t *coreTools) getSIMPINStatus(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, i modemInput) (appmodem.SIMPINResponse, error) {
 	device, err := t.registry.Find(ctx, i.ModemID)
 	if err != nil {
-		return modemhandler.SIMPINResponse{}, OperationError("find modem", err)
+		return appmodem.SIMPINResponse{}, OperationError("find modem", err)
 	}
 	s, err := device.SIMPINStatus(ctx)
 	if err != nil {
-		return modemhandler.SIMPINResponse{}, pinToolError(err)
+		return appmodem.SIMPINResponse{}, pinToolError(err)
 	}
-	return modemhandler.NewSIMPINResponse(s), nil
+	return appmodem.NewSIMPINResponse(s), nil
 }
 
 func (t *coreTools) setSIMPINProtection(ctx context.Context, _ *mcp.CallToolRequest, _ mcpauth.Grant, i simPINProtectionInput) (successOutput, error) {

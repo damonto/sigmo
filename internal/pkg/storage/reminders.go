@@ -128,7 +128,7 @@ func (s *Store) DeleteReminder(ctx context.Context, profileType, profileID strin
 	return nil
 }
 
-// ClaimReminder advances the matching revision and queues its native notification atomically.
+// ClaimReminder advances the matching owner and revision and queues its native notification atomically.
 func (s *Store) ClaimReminder(ctx context.Context, reminder Reminder) (Reminder, bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -140,6 +140,8 @@ func (s *Store) ClaimReminder(ctx context.Context, reminder Reminder) (Reminder,
 		ProfileType: reminder.ProfileType,
 		ProfileID:   reminder.ProfileID,
 		Revision:    reminder.Revision,
+		ModemID:     reminder.ModemID,
+		SEID:        reminder.SEID,
 	})
 	if err != nil {
 		return Reminder{}, false, fmt.Errorf("claim reminder: %w", err)
@@ -157,12 +159,14 @@ func (s *Store) ClaimReminder(ctx context.Context, reminder Reminder) (Reminder,
 	return reminder, true, nil
 }
 
-// DeleteClaimedReminder deletes only the claimed revision, preserving concurrent edits.
+// DeleteClaimedReminder deletes only the observed owner and revision, preserving concurrent edits.
 func (s *Store) DeleteClaimedReminder(ctx context.Context, reminder Reminder) (bool, error) {
 	changed, err := query.New(s.db).DeleteClaimedReminder(ctx, query.DeleteClaimedReminderParams{
 		ProfileType: reminder.ProfileType,
 		ProfileID:   reminder.ProfileID,
 		Revision:    reminder.Revision,
+		ModemID:     reminder.ModemID,
+		SEID:        reminder.SEID,
 	})
 	if err != nil {
 		return false, fmt.Errorf("delete claimed reminder: %w", err)
@@ -170,7 +174,7 @@ func (s *Store) DeleteClaimedReminder(ctx context.Context, reminder Reminder) (b
 	return changed > 0, nil
 }
 
-// AdvanceClaimedReminder reschedules only the claimed revision, preserving concurrent edits.
+// AdvanceClaimedReminder reschedules only the claimed owner and revision, preserving concurrent edits.
 func (s *Store) AdvanceClaimedReminder(ctx context.Context, reminder Reminder, nextAt time.Time) (bool, error) {
 	changed, err := query.New(s.db).AdvanceClaimedReminder(ctx, query.AdvanceClaimedReminderParams{
 		NextAt:      reminderTimeText(nextAt),
@@ -178,6 +182,8 @@ func (s *Store) AdvanceClaimedReminder(ctx context.Context, reminder Reminder, n
 		ProfileType: reminder.ProfileType,
 		ProfileID:   reminder.ProfileID,
 		Revision:    reminder.Revision,
+		ModemID:     reminder.ModemID,
+		SEID:        reminder.SEID,
 	})
 	if err != nil {
 		return false, fmt.Errorf("advance claimed reminder: %w", err)

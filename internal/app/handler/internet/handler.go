@@ -78,6 +78,7 @@ func (h *Handler) Connect(c *echo.Context) error {
 	if err != nil {
 		return internetError(c, err, "connect_internet_failed")
 	}
+	httpapi.SetResourceLocation(c, "current")
 	return c.JSON(http.StatusCreated, ResponseFromConnection(response))
 }
 

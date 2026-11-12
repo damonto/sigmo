@@ -30,13 +30,13 @@ describe('useReminderApi', () => {
     {
       name: 'saves eSIM reminder',
       run: () => useReminderApi().saveEsimReminder('modem-1', 'se0', '8985', payload),
-      path: '/api/v1/modems/modem-1/ses/se0/esims/8985/reminder',
+      path: '/api/v1/modems/modem-1/secure-elements/se0/esim-profiles/8985/reminder',
       method: 'PUT',
     },
     {
       name: 'clears eSIM reminder',
       run: () => useReminderApi().deleteEsimReminder('modem-1', 'se0', '8985'),
-      path: '/api/v1/modems/modem-1/ses/se0/esims/8985/reminder',
+      path: '/api/v1/modems/modem-1/secure-elements/se0/esim-profiles/8985/reminder',
       method: 'DELETE',
     },
   ]

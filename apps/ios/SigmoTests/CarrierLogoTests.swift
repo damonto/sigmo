@@ -34,6 +34,6 @@ final class CarrierLogoTests: XCTestCase {
         await session.refresh(force: true)
         XCTAssertNil(session.modems.first?.sim.icon)
         let requests = await stub.allRequests()
-        XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/esims") == true })
+        XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/esim-profiles") == true })
     }
 }

@@ -2,10 +2,10 @@ import Foundation
 
 extension BackendAPI {
     func secureElements(_ modem: String, token: String?) async throws -> SecureElements {
-        try await decode(["modems", modem, "ses"], token: token, timeout: .hardware)
+        try await decode(["modems", modem, "secure-elements"], token: token, timeout: .hardware)
     }
     func profiles(_ modem: String, token: String?) async throws -> ESIMProfiles {
-        try await decode(["modems", modem, "esims"], token: token, timeout: .hardware)
+        try await decode(["modems", modem, "esim-profiles"], token: token, timeout: .hardware)
     }
     func detailMutation(_ modem: String, path: [String], method: String, token: String?) async throws {
         _ = try await request(["modems", modem] + path, method: method, token: token, timeout: .hardware)
@@ -17,7 +17,7 @@ extension BackendAPI {
         _ = try await request(["modems", modem] + path, method: method, body: encoder.encode(value), token: token, timeout: .hardware)
     }
     func discoverProfiles(_ modem: String, seID: String, token: String?) async throws -> [ESIMDiscovery] {
-        try await decode(["modems", modem, "ses", seID, "esim-discoveries"], method: "POST", token: token, timeout: .hardware)
+        try await decode(["modems", modem, "secure-elements", seID, "esim-discoveries"], method: "POST", token: token, timeout: .hardware)
     }
     func transferSources(_ modem: String, token: String?) async throws -> TransferSources {
         try await decode(["modems", modem, "esim-transfers", "sources"], token: token, timeout: .hardware)

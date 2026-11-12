@@ -9,6 +9,11 @@ UPDATE sim_profiles SET deletion_state = sqlc.arg(state),
     successor_id = CASE WHEN sqlc.arg(state) = '' THEN '' ELSE successor_id END
 WHERE profile_id = sqlc.arg(profile_id);
 
+-- name: ConfirmESIMProfileDeletion :exec
+UPDATE sim_profiles SET deletion_state = 'deleted'
+WHERE profile_id = ? AND modem_id = ? AND se_id = ? AND kind = 'esim'
+    AND deletion_state IN ('', 'pending');
+
 -- name: ReconcileProfileDeletion :execrows
 UPDATE sim_profiles SET deletion_state = sqlc.arg(new_state),
     successor_id = CASE WHEN sqlc.arg(new_state) = '' THEN '' ELSE successor_id END

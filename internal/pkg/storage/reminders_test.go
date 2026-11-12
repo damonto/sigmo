@@ -264,3 +264,64 @@ func TestReminderClaimProtectsNewerRevision(t *testing.T) {
 		})
 	}
 }
+
+func TestStaleReminderCannotChangeRecreatedOwner(t *testing.T) {
+	for _, owner := range []struct {
+		name, modemID, seID string
+	}{
+		{"another modem", "modem-2", "se0"},
+		{"another secure element", "modem-1", "se1"},
+	} {
+		for _, action := range []string{"claim", "delete", "advance"} {
+			t.Run(owner.name+"/"+action, func(t *testing.T) {
+				ctx := t.Context()
+				store := testStore(t)
+				original := Reminder{
+					ProfileType: "esim", ProfileID: "8985200012345678901",
+					ModemID: "modem-1", SEID: "se0", ProfileName: "Travel",
+					NextAt: time.Now().Add(-time.Minute), Content: "Original",
+				}
+				if err := store.UpsertReminder(ctx, original); err != nil {
+					t.Fatal(err)
+				}
+				stale, exists, err := store.Reminder(ctx, original.ProfileType, original.ProfileID)
+				if err != nil || !exists {
+					t.Fatalf("read original = %+v, %v, %v", stale, exists, err)
+				}
+				if err := store.DeleteReminder(ctx, original.ProfileType, original.ProfileID); err != nil {
+					t.Fatal(err)
+				}
+				replacement := original
+				replacement.ModemID, replacement.SEID = owner.modemID, owner.seID
+				replacement.NextAt = time.Now().Add(time.Hour)
+				replacement.Content = "Replacement"
+				if err := store.UpsertReminder(ctx, replacement); err != nil {
+					t.Fatal(err)
+				}
+				// Recreating the same ICCID resets the revision; ownership must
+				// still protect this record from an earlier request's snapshot.
+				recreated, exists, err := store.Reminder(ctx, original.ProfileType, original.ProfileID)
+				if err != nil || !exists || recreated.Revision != stale.Revision {
+					t.Fatalf("recreated = %+v, %v, %v; old revision = %d", recreated, exists, err, stale.Revision)
+				}
+				var applied bool
+				switch action {
+				case "claim":
+					_, applied, err = store.ClaimReminder(ctx, stale)
+				case "delete":
+					applied, err = store.DeleteClaimedReminder(ctx, stale)
+				case "advance":
+					applied, err = store.AdvanceClaimedReminder(ctx, stale, time.Now().Add(24*time.Hour))
+				}
+				if err != nil || applied {
+					t.Fatalf("stale %s = %v, %v", action, applied, err)
+				}
+				got, exists, err := store.Reminder(ctx, replacement.ProfileType, replacement.ProfileID)
+				if err != nil || !exists || got.ModemID != replacement.ModemID || got.SEID != replacement.SEID ||
+					got.Revision != recreated.Revision || got.Content != replacement.Content || !got.NextAt.Equal(replacement.NextAt) {
+					t.Fatalf("replacement changed = %+v, %v, %v", got, exists, err)
+				}
+			})
+		}
+	}
+}

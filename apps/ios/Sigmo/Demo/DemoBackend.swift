@@ -175,7 +175,7 @@ actor DemoBackend {
 
     private func lines() async throws -> [CommunicationLine] {
         let modem = try await currentModem()
-        let response = try await devices.respond(URLRequest(url: URL(string: "https://demo.invalid/api/v1/modems/device-1/esims")!))
+        let response = try await devices.respond(URLRequest(url: URL(string: "https://demo.invalid/api/v1/modems/device-1/esim-profiles")!))
         let profiles = try JSONDecoder().decode(ESIMProfiles.self, from: response.data).ses.flatMap(\.profiles)
         var labels = Dictionary(profiles.map { ($0.iccid, $0.name) }, uniquingKeysWith: { first, _ in first })
         labels[modem.sim.identifier] = labels[modem.sim.identifier] ?? "Demo SIM"

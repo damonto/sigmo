@@ -454,18 +454,17 @@ private struct PeerTransferRequestSheet: View {
     private var actions: some View {
         VStack(spacing: 12) {
             if request.needsDecision {
-                AsyncActionButton(id: "allowPeerTransfer", action: {
+                AsyncActionButton(id: "allowPeerTransfer", contentMaxWidth: .infinity, action: {
                     await state.decide(session: session, request: request, accept: true, selection: selection)
                 }) {
                     Text("peer.allowTransfer")
-                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glassProminent)
                 .disabled(state.sending || selection == nil)
-                AsyncActionButton(id: "rejectPeerTransfer", action: {
+                AsyncActionButton(id: "rejectPeerTransfer", contentMaxWidth: .infinity, action: {
                     await state.decide(session: session, request: request, accept: false)
                 }) {
-                    Text("peer.reject").frame(maxWidth: .infinity)
+                    Text("peer.reject")
                 }
                 .buttonStyle(.glass)
                 .disabled(state.sending)

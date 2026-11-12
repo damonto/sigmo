@@ -33,7 +33,8 @@ func TestCallbackEndpointRejectsOverflowWithoutLosingEvents(t *testing.T) {
 	// A retry of an accepted event remains successful even when the queue is full.
 	mustQueueCallback(t, session, Callback{ID: "0", Event: "checkProfileServiceStatus"})
 	e := echo.New()
-	RegisterRoutes(e.Group("/api/v1"), broker)
+	h := NewHandler(broker)
+	e.POST("/api/v1/websheets/:id/callback", h.Callback, h.Capability)
 	post := func(wantStatus int) {
 		t.Helper()
 		request := httptest.NewRequest(http.MethodPost, session.Info().EmbedURL+"/callback", strings.NewReader(`{"callbackId":"retry","event":"finishFlow"}`))

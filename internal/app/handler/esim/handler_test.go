@@ -2,17 +2,19 @@ package esim
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	sgp22 "github.com/damonto/euicc-go/v2"
 	"github.com/labstack/echo/v5"
 
-	sgp22 "github.com/damonto/euicc-go/v2"
-	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
-	wwanmodem "github.com/damonto/wwan-go/modem"
+	appesim "github.com/damonto/sigmo/internal/app/esim"
+	"github.com/damonto/sigmo/internal/app/httpapi"
+	"github.com/damonto/sigmo/internal/pkg/lpa"
 )
 
 func TestEnablePrepareError(t *testing.T) {
@@ -26,12 +28,12 @@ func TestEnablePrepareError(t *testing.T) {
 	}{
 		{
 			name:       "already active is idempotent success",
-			err:        errProfileAlreadyActive,
+			err:        appesim.ErrProfileAlreadyActive,
 			wantStatus: http.StatusNoContent,
 		},
 		{
 			name:       "profile not found is bad request",
-			err:        errProfileNotFound,
+			err:        appesim.ErrProfileNotFound,
 			wantStatus: http.StatusBadRequest,
 			wantBody:   "esim_profile_not_found",
 		},
@@ -76,6 +78,18 @@ func TestEnableError(t *testing.T) {
 		wantBody   string
 	}{
 		{
+			name:       "missing secure element maps to one not found response",
+			err:        lpa.ErrSENotFound,
+			wantStatus: http.StatusNotFound,
+			wantBody:   "se_not_found",
+		},
+		{
+			name:       "secure element required maps to one bad request response",
+			err:        lpa.ErrSERequired,
+			wantStatus: http.StatusBadRequest,
+			wantBody:   "se_required",
+		},
+		{
 			name:       "deadline exceeded maps to request timeout",
 			err:        context.DeadlineExceeded,
 			wantStatus: http.StatusRequestTimeout,
@@ -114,40 +128,9 @@ func TestEnableError(t *testing.T) {
 			if !strings.Contains(rec.Body.String(), tt.wantBody) {
 				t.Fatalf("body = %s, want it to contain %q", rec.Body.String(), tt.wantBody)
 			}
-		})
-	}
-}
-
-func TestRestoreInternetBeforeProfileEnable(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		modem   *mmodem.Modem
-		wantErr bool
-	}{
-		{
-			name: "skip current SIM internet restore while modem is locked",
-			modem: &mmodem.Modem{
-				Status: wwanmodem.Status{SIM: wwanmodem.SIMStateLocked},
-			},
-		},
-		{
-			name:    "unlocked modem requires internet connector",
-			modem:   &mmodem.Modem{Status: wwanmodem.Status{Power: wwanmodem.PowerStateOn, Registration: wwanmodem.RegistrationHome}},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			h := &Handler{}
-			err := h.restoreInternetBeforeProfileEnable(t.Context(), tt.modem)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("restoreInternetBeforeProfileEnable() error = %v, wantErr %v", err, tt.wantErr)
+			var problem httpapi.ErrorResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+				t.Fatalf("invalid problem response: %s, %v", rec.Body.String(), err)
 			}
 		})
 	}

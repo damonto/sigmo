@@ -13,7 +13,11 @@ import (
 	"github.com/damonto/sigmo/apps/web"
 	"github.com/damonto/sigmo/internal/app/auth"
 	"github.com/damonto/sigmo/internal/app/buildinfo"
+	"github.com/damonto/sigmo/internal/app/call"
 	appconnectivity "github.com/damonto/sigmo/internal/app/connectivity"
+	appesim "github.com/damonto/sigmo/internal/app/esim"
+	"github.com/damonto/sigmo/internal/app/esimtransfer"
+	"github.com/damonto/sigmo/internal/app/euicc"
 	"github.com/damonto/sigmo/internal/app/feature"
 	"github.com/damonto/sigmo/internal/app/forwarder"
 	"github.com/damonto/sigmo/internal/app/handler/appinfo"
@@ -21,25 +25,27 @@ import (
 	"github.com/damonto/sigmo/internal/app/handler/capability"
 	"github.com/damonto/sigmo/internal/app/handler/communication"
 	"github.com/damonto/sigmo/internal/app/handler/esim"
-	"github.com/damonto/sigmo/internal/app/handler/euicc"
 	hinternet "github.com/damonto/sigmo/internal/app/handler/internet"
 	"github.com/damonto/sigmo/internal/app/handler/mcpadmin"
 	"github.com/damonto/sigmo/internal/app/handler/message"
-	hmodem "github.com/damonto/sigmo/internal/app/handler/modem"
 	hnativepush "github.com/damonto/sigmo/internal/app/handler/nativepush"
-	"github.com/damonto/sigmo/internal/app/handler/network"
 	"github.com/damonto/sigmo/internal/app/handler/notification"
 	hsettings "github.com/damonto/sigmo/internal/app/handler/settings"
 	"github.com/damonto/sigmo/internal/app/handler/simapp"
 	hupdate "github.com/damonto/sigmo/internal/app/handler/update"
 	"github.com/damonto/sigmo/internal/app/handler/ussd"
 	hwebpush "github.com/damonto/sigmo/internal/app/handler/webpush"
+	"github.com/damonto/sigmo/internal/app/ims"
 	"github.com/damonto/sigmo/internal/app/mcpauth"
 	"github.com/damonto/sigmo/internal/app/mcpserver"
 	appmiddleware "github.com/damonto/sigmo/internal/app/middleware"
-	"github.com/damonto/sigmo/internal/app/modemstatus"
+	hmodem "github.com/damonto/sigmo/internal/app/modem"
+	"github.com/damonto/sigmo/internal/app/network"
+	"github.com/damonto/sigmo/internal/app/simprofile"
 	appupdate "github.com/damonto/sigmo/internal/app/update"
+	"github.com/damonto/sigmo/internal/app/websheet"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
+	"github.com/damonto/sigmo/internal/pkg/license"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	pmessage "github.com/damonto/sigmo/internal/pkg/message"
 	"github.com/damonto/sigmo/internal/pkg/modem"
@@ -61,27 +67,31 @@ type RegisterConfig struct {
 	Registry            *modem.Registry
 	InternetConnector   *pinternet.Connector
 	LPAClients          *lpa.Pool
+	ESIM                *appesim.Service
+	Modems              *hmodem.Service
 	InternetConnections appconnectivity.InternetConnections
 	Relay               *forwarder.Relay
-	Network             *network.Handler
+	Network             *network.Service
 	Storage             *storage.Store
 	WebPush             *webpush.Client
 	Reminders           *reminder.Scheduler
 	MessageRoute        pmessage.Route
 	USSDRoute           pussd.Route
-	ModemOverview       []modemstatus.Extension
 	Features            []feature.Name
 	Policy              feature.Policy
 	Extensions          []Extension
 	MCP                 *mcpserver.Controller
 	MCPKeys             *mcpauth.Store
 	Updates             *appupdate.Controller
-	LicenseRoutes       func(*echo.Group)
+	License             *license.Controller
 }
 
 func Register(e *echo.Echo, deps RegisterConfig) error {
+	if deps.Modems == nil {
+		return errors.New("configure modem routes: modem service is required")
+	}
 	if deps.Network == nil {
-		return errors.New("configure network routes: network handler is required")
+		return errors.New("configure network routes: network service is required")
 	}
 	e.Use(middleware.StaticWithConfig(middleware.StaticConfig{
 		Filesystem: web.Root(),
@@ -123,12 +133,17 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 	v1.POST("/auth/browser-sessions", authHandler.CreateBrowserSession)
 	v1.GET("/auth/browser-sessions/:id", authHandler.StartBrowserSession)
 	v1.GET("/auth/oidc/callback", authHandler.OIDCCallback)
-	settingsHandler := hsettings.New(deps.Store, deps.InternetConnector, deps.Relay, authStore)
-	v1.GET("/settings/auth-tests/oidc/:id/browser", settingsHandler.StartOIDCTest)
+	settingsReader := hsettings.NewReader(deps.Store)
+	authSettings := hsettings.NewAuthHandler(deps.Store, authStore)
+	proxySettings := hsettings.NewProxyHandler(deps.Store, deps.InternetConnector)
+	notificationSettings := hsettings.NewNotificationHandler(deps.Store, deps.Relay)
+	v1.GET("/settings/auth-tests/oidc/:id/browser", authSettings.StartOIDCTest)
 	protected := v1.Group("")
 	protected.Use(appmiddleware.Auth(authStore, deps.Store), appmiddleware.Locale(deps.Store))
-	if deps.LicenseRoutes != nil {
-		deps.LicenseRoutes(protected)
+	if deps.License != nil {
+		protected.GET("/license", deps.License.GetLicense)
+		protected.POST("/license/pairings", deps.License.CreatePairing)
+		protected.GET("/license/pairings/:id", deps.License.GetPairing)
 	}
 	protected.GET("/auth/sessions/current", authHandler.CurrentSession)
 	protected.DELETE("/auth/sessions/current", authHandler.DeleteSession)
@@ -141,15 +156,15 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.DELETE("/push-subscriptions/:subscriptionId", h.Delete)
 		}
 		{
-			protected.GET("/settings", settingsHandler.Get)
-			protected.POST("/settings/auth-tests", settingsHandler.TestAuth)
-			protected.POST("/settings/auth-tests/oidc", settingsHandler.CreateOIDCTest)
-			protected.GET("/settings/auth-tests/oidc/:id", settingsHandler.GetOIDCTest)
-			protected.POST("/settings/auth-tests/cloudflare-access", settingsHandler.TestCloudflareAccess)
-			protected.PUT("/settings/auth", settingsHandler.UpdateAuth)
-			protected.PUT("/settings/proxy", settingsHandler.UpdateProxy)
-			protected.PUT("/settings/channels/:channel", settingsHandler.UpdateNotificationChannel)
-			protected.PUT("/settings/notifications", settingsHandler.UpdateNotifications)
+			protected.GET("/settings", settingsReader.Get)
+			protected.POST("/settings/auth-tests", authSettings.TestAuth)
+			protected.POST("/settings/auth-tests/oidc", authSettings.CreateOIDCTest)
+			protected.GET("/settings/auth-tests/oidc/:id", authSettings.GetOIDCTest)
+			protected.POST("/settings/auth-tests/cloudflare-access", authSettings.TestCloudflareAccess)
+			protected.PUT("/settings/auth", authSettings.UpdateAuth)
+			protected.PUT("/settings/proxy", proxySettings.UpdateProxy)
+			protected.PUT("/settings/channels/:channel", notificationSettings.UpdateNotificationChannel)
+			protected.PUT("/settings/notifications", notificationSettings.UpdateNotifications)
 		}
 
 		if deps.Updates != nil {
@@ -172,22 +187,22 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.GET("/settings/mcp/skills/sigmo-control", h.DownloadSkill)
 		}
 
-		h := hmodem.New(hmodem.Config{
-			Store: deps.Store, Storage: deps.Storage, Registry: deps.Registry, Internet: deps.InternetConnector,
-			Reminders: deps.Reminders, LPA: deps.LPAClients, OverviewExtensions: deps.ModemOverview,
-		})
+		h := hmodem.NewHandler(deps.Modems)
+		sim := hmodem.NewSIMHandler(deps.Modems)
+		modemSettings := hmodem.NewSettingsHandler(deps.Modems)
+		modemReminders := hmodem.NewReminderHandler(deps.Registry, deps.Reminders)
 		protected.GET("/modems", h.List)
 		protected.GET("/modems/:id", h.Get)
-		protected.POST("/modems/:id/sim-unlocks", h.UnlockSIM)
-		protected.GET("/modems/:id/sim-pin", h.SIMPINStatus)
-		protected.PUT("/modems/:id/sim-pin/protection", h.SetSIMPINProtection)
-		protected.POST("/modems/:id/sim-pin-changes", h.ChangeSIMPIN)
-		protected.PUT("/modems/:id/sim-slots/:slot", h.SwitchSIMSlot)
-		protected.PUT("/modems/:id/msisdn", h.UpdateMSISDN)
-		protected.PUT("/modems/:id/sims/:iccid/reminder", h.UpdateReminder)
-		protected.DELETE("/modems/:id/sims/:iccid/reminder", h.DeleteReminder)
-		protected.GET("/modems/:id/settings", h.Settings)
-		protected.PUT("/modems/:id/settings", h.UpdateSettings)
+		protected.POST("/modems/:id/sim-unlocks", sim.UnlockSIM)
+		protected.GET("/modems/:id/sim-pin", sim.SIMPINStatus)
+		protected.PUT("/modems/:id/sim-pin/protection", sim.SetSIMPINProtection)
+		protected.POST("/modems/:id/sim-pin-changes", sim.ChangeSIMPIN)
+		protected.PUT("/modems/:id/sim-slot-selection", sim.SetSIMSlot)
+		protected.PUT("/modems/:id/msisdn", sim.UpdateMSISDN)
+		protected.PUT("/modems/:id/sims/:iccid/reminder", modemReminders.UpdateReminder)
+		protected.DELETE("/modems/:id/sims/:iccid/reminder", modemReminders.DeleteReminder)
+		protected.GET("/modems/:id/settings", modemSettings.Settings)
+		protected.PUT("/modems/:id/settings", modemSettings.UpdateSettings)
 
 		{
 			h := simapp.New(deps.Registry)
@@ -200,10 +215,10 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.GET("/conversations/:conversationId/messages", h.ConversationMessages)
 			protected.PATCH("/conversations/:conversationId", h.UpdateConversation)
 			protected.DELETE("/conversations/:conversationId", h.DeleteConversation)
-			protected.GET("/modems/:id/messages", h.List)
-			protected.GET("/modems/:id/messages/:participant", h.ListByParticipant)
+			protected.GET("/modems/:id/message-conversations", h.List)
+			protected.GET("/modems/:id/message-conversations/:participant/messages", h.ListByParticipant)
 			protected.POST("/modems/:id/messages", h.Send)
-			protected.DELETE("/modems/:id/messages/:participant", h.DeleteByParticipant)
+			protected.DELETE("/modems/:id/message-conversations/:participant", h.DeleteByParticipant)
 		}
 
 		{
@@ -212,18 +227,18 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		}
 
 		{
-			h := deps.Network
+			h := network.NewHandler(deps.Network)
 			protected.GET("/modems/:id/networks", h.List)
 			protected.POST("/modems/:id/network-scans", h.StartNetworkScan)
 			protected.GET("/modems/:id/network-scans/:scanID", h.GetNetworkScan)
-			protected.GET("/modems/:id/networks/airplane-mode", h.AirplaneMode)
-			protected.PUT("/modems/:id/networks/airplane-mode", h.SetAirplaneMode)
-			protected.GET("/modems/:id/networks/registration", h.Registration)
-			protected.PUT("/modems/:id/networks/registration", h.SetRegistration)
-			protected.GET("/modems/:id/networks/modes", h.Modes)
-			protected.PUT("/modems/:id/networks/current-modes", h.SetCurrentModes)
-			protected.GET("/modems/:id/networks/bands", h.Bands)
-			protected.PUT("/modems/:id/networks/current-bands", h.SetCurrentBands)
+			protected.GET("/modems/:id/network-settings/airplane-mode", h.AirplaneMode)
+			protected.PUT("/modems/:id/network-settings/airplane-mode", h.SetAirplaneMode)
+			protected.GET("/modems/:id/network-settings/registration", h.Registration)
+			protected.PUT("/modems/:id/network-settings/registration", h.SetRegistration)
+			protected.GET("/modems/:id/network-settings/modes", h.Modes)
+			protected.PUT("/modems/:id/network-settings/modes", h.SetCurrentModes)
+			protected.GET("/modems/:id/network-settings/bands", h.Bands)
+			protected.PUT("/modems/:id/network-settings/bands", h.SetCurrentBands)
 		}
 
 		{
@@ -236,35 +251,57 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		}
 
 		{
-			h := euicc.New(deps.Registry, deps.LPAClients)
-			protected.GET("/modems/:id/ses", h.Get)
+			h := euicc.NewHandler(euicc.New(deps.Registry, deps.LPAClients))
+			protected.GET("/modems/:id/secure-elements", h.Get)
 		}
 
 		{
-			h := esim.New(esim.Config{
-				Storage:   deps.Storage,
-				Store:     deps.Store,
-				Registry:  deps.Registry,
-				LPA:       deps.LPAClients,
-				Internet:  deps.InternetConnector,
-				Reminders: deps.Reminders,
-			})
-			communication.New(communication.Config{Storage: deps.Storage, Registry: deps.Registry, ESIM: h}).Register(protected)
-			protected.GET("/modems/:id/esims", h.List)
-			protected.POST("/modems/:id/ses/:seId/esim-discoveries", h.Discovery)
-			protected.GET("/modems/:id/esim-downloads/sessions", h.Download)
-			protected.PUT("/modems/:id/ses/:seId/esims/:iccid/activation", h.Enable)
-			protected.PUT("/modems/:id/ses/:seId/esims/:iccid/nickname", h.UpdateNickname)
-			protected.DELETE("/modems/:id/ses/:seId/esims/:iccid", h.Delete)
-			protected.PUT("/modems/:id/ses/:seId/esims/:iccid/reminder", h.UpdateReminder)
-			protected.DELETE("/modems/:id/ses/:seId/esims/:iccid/reminder", h.DeleteReminder)
+			contacts := communication.NewContactHandler(deps.Storage)
+			protected.GET("/contacts", contacts.Contacts)
+			protected.POST("/contacts", contacts.SaveContact)
+			protected.GET("/contacts/:id", contacts.Contact)
+			protected.PUT("/contacts/:id", contacts.SaveContact)
+			protected.DELETE("/contacts/:id", contacts.DeleteContact)
+			protected.GET("/contacts/:id/avatar", contacts.Avatar)
+			protected.PUT("/contacts/:id/avatar", contacts.SetAvatar)
+			protected.DELETE("/contacts/:id/avatar", contacts.SetAvatar)
+		}
+
+		{
+			threads := communication.NewThreadHandler(deps.Storage)
+			protected.GET("/message-threads", threads.Threads)
+			protected.GET("/message-threads/:id", threads.Thread)
+			protected.GET("/message-threads/:id/messages", threads.ThreadMessages)
+			protected.PATCH("/message-threads/:id", threads.ReadThread)
+			protected.DELETE("/message-threads/:id", threads.DeleteThread)
+		}
+
+		{
+			profiles := communication.NewSIMProfileHandler(simprofile.New(deps.Storage, deps.Registry, deps.ESIM))
+			protected.GET("/sim-profiles", profiles.Lines)
+			protected.GET("/communication-preferences", profiles.Preference)
+			protected.PUT("/sim-profiles/:profileId/history-assignment", profiles.AssignHistory)
+		}
+
+		{
+			h := esim.New(deps.Registry, deps.ESIM)
+			downloads := esim.NewDownloadHandler(deps.Registry, deps.ESIM)
+			protected.GET("/modems/:id/esim-profiles", h.List)
+			protected.POST("/modems/:id/secure-elements/:seId/esim-discoveries", h.Discovery)
+			protected.GET("/modems/:id/esim-downloads/sessions", downloads.Download)
+			protected.PUT("/modems/:id/secure-elements/:seId/active-esim-profile", h.SetActiveProfile)
+			protected.PUT("/modems/:id/secure-elements/:seId/esim-profiles/:iccid/nickname", h.UpdateNickname)
+			protected.DELETE("/modems/:id/secure-elements/:seId/esim-profiles/:iccid", h.Delete)
+			reminders := esim.NewReminderHandler(deps.Registry, deps.ESIM, deps.Reminders)
+			protected.PUT("/modems/:id/secure-elements/:seId/esim-profiles/:iccid/reminder", reminders.UpdateReminder)
+			protected.DELETE("/modems/:id/secure-elements/:seId/esim-profiles/:iccid/reminder", reminders.DeleteReminder)
 		}
 
 		{
 			h := notification.New(deps.Registry, deps.LPAClients)
 			protected.GET("/modems/:id/notifications", h.List)
-			protected.POST("/modems/:id/ses/:seId/notifications/:sequence/deliveries", h.Resend)
-			protected.DELETE("/modems/:id/ses/:seId/notifications/:sequence", h.Delete)
+			protected.POST("/modems/:id/secure-elements/:seId/notifications/:sequence/deliveries", h.Resend)
+			protected.DELETE("/modems/:id/secure-elements/:seId/notifications/:sequence", h.Delete)
 		}
 
 		{
@@ -284,4 +321,79 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		}
 	}
 	return nil
+}
+
+// IMSRoutes registers licensed IMS settings and carrier interaction endpoints.
+func IMSRoutes(connectivity *ims.Connectivity) Extension {
+	return func(group *echo.Group, deps RegisterConfig) error {
+		licensed := group.Group("", appmiddleware.RequireFeature(deps.Policy, feature.WiFiCalling))
+		h := ims.NewHandler(deps.Registry, connectivity)
+		licensed.GET("/modems/:id/wifi-calling/settings", h.WiFiCallingSettings)
+		licensed.PUT("/modems/:id/wifi-calling/settings", h.UpdateWiFiCallingSettings)
+		licensed.POST("/modems/:id/wifi-calling/sessions", h.CreateWiFiCallingSession)
+		licensed.DELETE("/modems/:id/wifi-calling/sessions/current", h.DeleteWiFiCallingSession)
+		licensed.POST("/modems/:id/wifi-calling/websheets", h.CreateWiFiCallingWebsheet)
+		licensed.POST("/modems/:id/wifi-calling/emergency-address-websheets", h.CreateWiFiCallingEmergencyAddressWebsheet)
+		licensed.GET("/modems/:id/volte/settings", h.VoLTESettings)
+		licensed.PUT("/modems/:id/volte/settings", h.UpdateVoLTESettings)
+
+		return nil
+	}
+}
+
+// CallRoutes registers base call resources independently of licensed IMS settings.
+func CallRoutes(calls *call.Calls, media *call.Media) Extension {
+	return func(group *echo.Group, deps RegisterConfig) error {
+		history := call.NewHistoryHandler(call.NewHistory(deps.Storage))
+		mediaHandler := call.NewMediaHandler(deps.Registry, media)
+		callHandler := call.NewHandler(deps.Registry, calls)
+		group.GET("/calls", history.History)
+		group.GET("/calls/:callID", history.HistoryRecord)
+		group.DELETE("/calls/:callID", history.DeleteHistory)
+		group.GET("/call-media/ice-servers", mediaHandler.WebRTCICEServers)
+		group.GET("/modems/:id/calls", callHandler.List)
+		group.POST("/modems/:id/calls", callHandler.Dial)
+		group.GET("/modems/:id/calls/events", callHandler.Events)
+		group.GET("/modems/:id/calls/:callID", callHandler.Get)
+		group.GET("/modems/:id/calls/:callID/webrtc/sessions", mediaHandler.WebRTCSession)
+		group.POST("/modems/:id/calls/:callID/dtmf-events", callHandler.SendDTMF)
+		group.PATCH("/modems/:id/calls/:callID", callHandler.Update)
+		group.DELETE("/modems/:id/calls/:callID", callHandler.Delete)
+		return nil
+	}
+}
+
+// WebsheetRoutes registers capability URLs outside UI login while retaining Access checks.
+func WebsheetRoutes(broker *websheet.Broker) Extension {
+	return func(_ *echo.Group, deps RegisterConfig) error {
+		h := websheet.NewHandler(broker)
+		group := deps.ResourceRoutes.Group("", appmiddleware.RequireFeature(deps.Policy, feature.WiFiCalling), h.Capability)
+		proxyMethods := []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete}
+		preflight := func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) }
+		group.GET("/websheets/:id", h.Bootstrap)
+		group.Match(proxyMethods, "/websheets/:id/proxy", h.Proxy)
+		group.Match(proxyMethods, "/websheets/:id/proxy/*", h.Proxy)
+		group.POST("/websheets/:id/callback", h.Callback)
+		group.OPTIONS("/websheets/:id/callback", preflight)
+		group.OPTIONS("/websheets/:id/proxy", preflight)
+		group.OPTIONS("/websheets/:id/proxy/*", preflight)
+		return nil
+	}
+}
+
+// ESIMTransferRoutes keeps peer approvals behind UI login and remote grants capability-scoped.
+func ESIMTransferRoutes(service *esimtransfer.Service) Extension {
+	return func(group *echo.Group, deps RegisterConfig) error {
+		h := esimtransfer.NewHandler(service)
+		licensed := group.Group("", appmiddleware.RequireFeature(deps.Policy, feature.ESIMTransfer))
+		licensed.GET("/modems/:id/esim-transfers/sources", h.Sources)
+		licensed.POST("/modems/:id/esim-transfers/source-profiles", h.Profiles)
+		licensed.GET("/modems/:id/esim-transfers/sessions", h.Transfer)
+		licensed.GET("/esim-transfer-requests/events", h.PeerEvents)
+		licensed.POST("/esim-transfer-requests/:id/decisions", h.PeerDecision)
+
+		resources := deps.ResourceRoutes.Group("", appmiddleware.RequireFeature(deps.Policy, feature.ESIMTransfer))
+		resources.GET("/esim-transfers/remote-sessions", h.RemoteSession)
+		return nil
+	}
 }

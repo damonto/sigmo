@@ -17,12 +17,7 @@ import EsimTransferUserInputPrompt from '@/components/esim/EsimTransferUserInput
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogFooter } from '@/components/ui/dialog'
 import { Field, FieldLabel } from '@/components/ui/field'
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-  InputGroupText,
-} from '@/components/ui/input-group'
+import { Input } from '@/components/ui/input'
 import { useEsimTransfer } from '@/composables/useEsimTransfer'
 import {
   TRANSFER_CLIENT_ERROR,
@@ -264,18 +259,13 @@ watch(
       >
         <Field class="gap-2">
           <FieldLabel :for="remoteAddressId">{{ t('esimPeer.address') }}</FieldLabel>
-          <InputGroup>
-            <InputGroupInput
-              :id="remoteAddressId"
-              v-model="remoteAddress"
-              type="url"
-              placeholder="https://sigmo.example.com"
-              required
-            />
-            <InputGroupAddon aria-hidden="true">
-              <InputGroupText>http(s)://</InputGroupText>
-            </InputGroupAddon>
-          </InputGroup>
+          <Input
+            :id="remoteAddressId"
+            v-model="remoteAddress"
+            type="url"
+            placeholder="https://sigmo.example.com"
+            required
+          />
         </Field>
         <Button
           type="submit"

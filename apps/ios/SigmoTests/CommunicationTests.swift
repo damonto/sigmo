@@ -53,7 +53,7 @@ final class CommunicationTests: XCTestCase {
         let request = try XCTUnwrap(requests.last { $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/modems/b/messages") == true })
         let body = try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: String]
         XCTAssertEqual(body?["expectedProfileId"], "replacement")
-        XCTAssertFalse(requests.contains { $0.url?.path.contains("/esims") == true || $0.url?.path.hasSuffix("/sim-profiles") == true })
+        XCTAssertFalse(requests.contains { $0.url?.path.contains("/esim-profiles") == true || $0.url?.path.hasSuffix("/sim-profiles") == true })
     }
     func testLateContactReadCannotRestoreLoggedOutData() async throws {
         let server = CommunicationFixture(), session = try await make()

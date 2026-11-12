@@ -50,7 +50,7 @@ struct SettingsFixtureServer {
         if path.hasSuffix("/settings/auth-tests/cloudflare-access") {
             return try reply(authTestResult)
         }
-        if path.hasSuffix("/settings/auth-tests") { return BackendHTTPResponse(data: Data(), status: 201) }
+        if path.hasSuffix("/settings/auth-tests") { return BackendHTTPResponse(data: Data(), status: 204) }
         if path.hasSuffix("/settings/auth") {
             settings.values.auth = try decode(SettingsFields.self, request)
             return try reply(settings)

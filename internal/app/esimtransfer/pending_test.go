@@ -77,7 +77,7 @@ func TestPendingTransferContinuesSameSession(t *testing.T) {
 			queries, manages := 0, 0
 			client, err := ts43.New(&ts43.Config{
 				Logger:      slog.New(slog.DiscardHandler),
-				Entitlement: ts43.Entitlement{Server: "https://carrier.example", Channel: ts43.EntitlementChannelSamsung, TransferType: ts43.TransferTypeTS43V8},
+				Entitlement: ts43.Entitlement{Server: "https://carrier.example", TransferType: ts43.TransferTypeTS43V8},
 				Source:      ts43.Endpoint{Channel: &transferTestChannel{identity: &ts43.Identity{MCC: "450", MNC: "05", IMSI: "450051234567890", ICCID: "source"}}, Device: ts43.Device{IMEI: "111111111111111"}},
 				Target:      ts43.Endpoint{Device: ts43.Device{IMEI: "222222222222222", EID: "89049032000001000000000000000000"}},
 				HTTPClient: transferTestDoer(func(req *http.Request) (*http.Response, error) {
@@ -101,7 +101,7 @@ func TestPendingTransferContinuesSameSession(t *testing.T) {
 						queries++
 						body = `{"APPLICATION":{"PrimaryConfiguration":{"ServiceStatus":1,"DownloadInfo":{"ProfileSmdpAddress":"smdp.example"}}}}`
 						if queries == 1 {
-							body = `{"APPLICATION":{"PrimaryConfiguration":{"ServiceStatus":2}}}`
+							body = `{"APPLICATION":{"PrimaryConfiguration":{"ServiceStatus":2,"PollingInterval":0}}}`
 							if tt.queryError {
 								code = http.StatusServiceUnavailable
 							}
@@ -225,79 +225,56 @@ func TestActivationChannelChecksInstalledProfile(t *testing.T) {
 	}
 }
 
-func TestTransferSupportAndroidBackend(t *testing.T) {
-	for _, tt := range []struct {
-		name, mcc, mnc string
-		want           bool
-	}{
-		{name: "Google takes precedence", mcc: "232", mnc: "05", want: true},
-		{name: "Ice requires Android", mcc: "242", mnc: "14"},
-		{name: "supplemental Verizon requires Android", mcc: "312", mnc: "012"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			got, reason := transferSupport(ts43.Identity{MCC: tt.mcc, MNC: tt.mnc}, ts43.SIMTypeESIM, "eSIM", testCarrierConfigs(t))
-			if got != tt.want {
-				t.Fatalf("transferSupport() = %t, %q, want %t", got, reason, tt.want)
-			}
-		})
+func TestTransferSupport(t *testing.T) {
+	carriers := testCarrierConfigs(t)
+	ambiguous := new(ts43.EntitlementConfigs)
+	if err := ambiguous.UnmarshalJSON([]byte(`[
+ {"mccmnc":"00101","carrierName":"first","entitlementServer":"https://first.example","supportEsimToEsimTransfer":true,"transferTypeEsim":7},
+ {"mccmnc":"00101","carrierName":"second","entitlementServer":"https://second.example","supportEsimToEsimTransfer":true,"transferTypeEsim":7}
+]`)); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestDelayedDownloadCanCheckAgainOrUseCarrierCode(t *testing.T) {
 	for _, tt := range []struct {
-		name, code        string
-		cancel, wantError bool
+		name     string
+		identity ts43.Identity
+		simType  ts43.SIMType
+		configs  *ts43.EntitlementConfigs
+		want     bool
+		reason   string
 	}{
-		{name: "carrier activation code", code: " LPA:1$smdp.example$matching-id "},
-		{name: "check configuration again"},
-		{name: "invalid code", code: "invalid", wantError: true},
-		{name: "cancel", cancel: true, wantError: true},
+		{
+			name: "supported eSIM", identity: ts43.Identity{MCC: "232", MNC: "05"},
+			configs: carriers, want: true,
+		},
+		{
+			name: "supported pSIM", identity: ts43.Identity{MCC: "204", MNC: "08"},
+			simType: ts43.SIMTypePSIM, configs: carriers, want: true,
+		},
+		{
+			name: "missing configuration", identity: ts43.Identity{MCC: "232", MNC: "05"},
+			reason: "carrier does not support eSIM transfer",
+		},
+		{
+			name: "missing carrier", identity: ts43.Identity{MCC: "242", MNC: "14"},
+			configs: carriers, reason: "carrier does not support eSIM transfer",
+		},
+		{
+			name: "unsupported direction", identity: ts43.Identity{MCC: "232", MNC: "05"},
+			simType: ts43.SIMTypePSIM, configs: carriers, reason: "carrier does not support pSIM transfer",
+		},
+		{
+			name: "ambiguous carrier", identity: ts43.Identity{MCC: "001", MNC: "01"},
+			configs: ambiguous, reason: "carrier entitlement config is ambiguous",
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			type outcome struct {
-				config ts43.DownloadConfig
-				err    error
+			label := "eSIM"
+			if tt.simType == ts43.SIMTypePSIM {
+				label = "pSIM"
 			}
-			finished := make(chan outcome, 1)
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				conn, err := testWSUpgrader.Upgrade(w, r, nil)
-				if err != nil {
-					finished <- outcome{err: err}
-					return
-				}
-				defer conn.Close()
-				ctx, cancel := context.WithCancel(t.Context())
-				defer cancel()
-				session := newWSSession(ctx, conn, cancel)
-				config, err := session.delayedDownloadConfig(ctx, ts43.DelayedDownloadEvent{TargetIMEI: "222222222222222"})
-				finished <- outcome{config, err}
-			}))
-			defer server.Close()
-			conn := dialTestWebSocket(t, server.URL)
-			defer conn.Close()
-			if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-				t.Fatal(err)
-			}
-			var prompt wsServerMessage
-			if err := conn.ReadJSON(&prompt); err != nil {
-				t.Fatal(err)
-			}
-			if prompt.Type != wsTypeUserInput || prompt.Input == nil || !prompt.Input.FreeText {
-				t.Fatalf("message = %+v, want activation code prompt", prompt)
-			}
-			accept := !tt.cancel
-			if err := conn.WriteJSON(wsClientMessage{Type: wsTypeUserInput, Accept: &accept, Response: tt.code}); err != nil {
-				t.Fatal(err)
-			}
-			got := <-finished
-			if (got.err != nil) != tt.wantError {
-				t.Fatalf("delayedDownloadConfig() error = %v", got.err)
-			}
-			if tt.cancel && !errors.Is(got.err, context.Canceled) {
-				t.Errorf("cancel error = %v", got.err)
-			}
-			if !tt.wantError && (got.config.ActivationCode != strings.TrimSpace(tt.code) || got.config.IMEI != "222222222222222") {
-				t.Errorf("config = %+v", got.config)
+			got, reason := transferSupport(tt.identity, tt.simType, label, tt.configs)
+			if got != tt.want || reason != tt.reason {
+				t.Fatalf("transferSupport() = %t, %q, want %t, %q", got, reason, tt.want, tt.reason)
 			}
 		})
 	}

@@ -218,12 +218,12 @@ final class ModemDetailState {
     }
     func switchSlot(_ slot: Int) async -> Bool {
         let id = modemID
-        return await mutate { api, token in try await api.detailMutation(id, path: ["sim-slots", String(slot)], method: "PUT", token: token) }
+        return await mutate { api, token in try await api.detailMutation(id, path: ["sim-slot-selection"], method: "PUT", value: ["slot": slot], token: token) }
     }
     func enable(_ profile: ESIMProfile) async -> Bool {
         guard let profile = currentProfile(profile.id), !profile.enabled else { return false }
         let id = modemID
-        return await mutate { api, token in try await api.detailMutation(id, path: ["ses", profile.seId, "esims", profile.iccid, "activation"], method: "PUT", token: token) }
+        return await mutate { api, token in try await api.detailMutation(id, path: ["secure-elements", profile.seId, "active-esim-profile"], method: "PUT", value: ["iccid": profile.iccid], token: token) }
     }
     func delete(_ profile: ESIMProfile) async -> Bool {
         guard let profile = currentProfile(profile.id), !profile.enabled else { return false }
@@ -232,7 +232,7 @@ final class ModemDetailState {
             self.removeProfile(profile)
             await self.prepareHistoryAssignment(for: profile.iccid)
         }) { api, token in
-            try await api.detailMutation(id, path: ["ses", profile.seId, "esims", profile.iccid], method: "DELETE", token: token)
+            try await api.detailMutation(id, path: ["secure-elements", profile.seId, "esim-profiles", profile.iccid], method: "DELETE", token: token)
         }
         guard deleted else { return false }
         // A stale inventory response cannot undo the confirmed deletion.
@@ -284,7 +284,7 @@ final class ModemDetailState {
         guard Self.validNickname(name) else { return false }
         let id = modemID
         return await mutate { api, token in
-            try await api.detailMutation(id, path: ["ses", profile.seId, "esims", profile.iccid, "nickname"], method: "PUT",
+            try await api.detailMutation(id, path: ["secure-elements", profile.seId, "esim-profiles", profile.iccid, "nickname"], method: "PUT",
                                          value: ["nickname": name.trimmingCharacters(in: .whitespacesAndNewlines)], token: token)
         }
     }
@@ -297,7 +297,7 @@ final class ModemDetailState {
         return await mutate(target: target) { api, token in try await api.detailMutation(id, path: ["msisdn"], method: "PUT", value: ["number": value], token: token) }
     }
     func reminderPath(profile: ESIMProfile?) -> [String]? {
-        if let profile { return ["ses", profile.seId, "esims", profile.iccid, "reminder"] }
+        if let profile { return ["secure-elements", profile.seId, "esim-profiles", profile.iccid, "reminder"] }
         guard let iccid = modem?.sim.identifier, !iccid.isEmpty else { return nil }
         return ["sims", iccid, "reminder"]
     }

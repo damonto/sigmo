@@ -38,7 +38,7 @@ func TestPairingSurvivesUnrelatedUpstreamErrors(t *testing.T) {
 			controller.pairings["pending"] = pairingSession{PollToken: "poll-token", ExpiresAt: time.Now().Add(time.Minute)}
 			e := echo.New()
 			e.HTTPErrorHandler = httpapi.HTTPErrorHandler
-			controller.RegisterRoutes(e.Group("/api/v1"))
+			e.GET("/api/v1/license/pairings/:id", controller.GetPairing)
 			rec := httptest.NewRecorder()
 			e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/license/pairings/pending", nil))
 			if rec.Code != tt.wantStatus {

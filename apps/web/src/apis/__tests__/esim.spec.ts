@@ -13,6 +13,21 @@ describe('useEsimApi', () => {
     vi.unstubAllGlobals()
   })
 
+  it('replaces the active profile selection with an explicit ICCID', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await useEsimApi().enableEsim('modem-1', 'se-1', '8986000000000000001')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/modems/modem-1/secure-elements/se-1/active-esim-profile'),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ iccid: '8986000000000000001' }),
+      }),
+    )
+  })
+
   it('loads eSIM transfer source resources', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ sources: [] }), {

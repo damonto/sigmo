@@ -214,8 +214,8 @@ actor PreviewBackendServer {
             if requiresOTP && request.value(forHTTPHeaderField: "Authorization") != "Bearer fixture-token" {
                 return HTTPProblem.response(status: 401, code: "invalid_session", detail: "Login required")
             }
-            if path.hasSuffix("/ses") { return reply(200, #"{"ses":[]}"#) }
-            if path.hasSuffix("/esims") { return reply(200, #"{"ses":[]}"#) }
+            if path.hasSuffix("/secure-elements") { return reply(200, #"{"ses":[]}"#) }
+            if path.hasSuffix("/esim-profiles") { return reply(200, #"{"ses":[]}"#) }
             if tracksRefreshes {
                 modemReads += 1
                 let modem = Self.modemJSON(name: "Read \(modemReads)")

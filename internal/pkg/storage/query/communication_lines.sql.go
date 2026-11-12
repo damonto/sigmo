@@ -79,6 +79,23 @@ func (q *Queries) CompleteHistoryAssignment(ctx context.Context, arg CompleteHis
 	return err
 }
 
+const confirmESIMProfileDeletion = `-- name: ConfirmESIMProfileDeletion :exec
+UPDATE sim_profiles SET deletion_state = 'deleted'
+WHERE profile_id = ? AND modem_id = ? AND se_id = ? AND kind = 'esim'
+    AND deletion_state IN ('', 'pending')
+`
+
+type ConfirmESIMProfileDeletionParams struct {
+	ProfileID string
+	ModemID   string
+	SEID      string
+}
+
+func (q *Queries) ConfirmESIMProfileDeletion(ctx context.Context, arg ConfirmESIMProfileDeletionParams) error {
+	_, err := q.db.ExecContext(ctx, confirmESIMProfileDeletion, arg.ProfileID, arg.ModemID, arg.SEID)
+	return err
+}
+
 const listCallHistory = `-- name: ListCallHistory :many
 SELECT c.id, c.profile_id, c.modem_id, c.route, c.direction, c.number, c.state, c.hold_state, c.reason, c.started_at, c.answered_at, c.ended_at, c.updated_at, c.owner_client_id, c.history_profile_id, CAST(COALESCE((SELECT p.label FROM sim_profiles p WHERE p.profile_id = c.profile_id), '') AS TEXT) AS line_label, CAST((SELECT backend_id FROM message_state WHERE id = 1) AS TEXT) AS backend_id
 FROM calls c WHERE

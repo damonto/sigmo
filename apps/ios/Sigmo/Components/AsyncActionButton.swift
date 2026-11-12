@@ -5,12 +5,17 @@ struct AsyncActionButton<Label: View>: View {
     var role: ButtonRole?
     var id = ""
     var isWorking = false
+    var progressPlacement: ButtonProgressPlacement = .trailing
+    var contentMaxWidth: CGFloat?
+    var contentAlignment: Alignment = .center
     let action: @MainActor () async -> Void
     @ViewBuilder var label: () -> Label
     @State private var requestID: UUID?
 
     var body: some View {
-        LoadingButton(role: role, isWorking: requestID != nil || isWorking) {
+        LoadingButton(role: role, isWorking: requestID != nil || isWorking,
+                      progressPlacement: progressPlacement, contentMaxWidth: contentMaxWidth,
+                      contentAlignment: contentAlignment) {
             guard requestID == nil else { return }
             requestID = UUID()
         } label: {
@@ -33,11 +38,17 @@ extension AsyncActionButton where Label == Text {
         role: ButtonRole? = nil,
         id: String = "",
         isWorking: Bool = false,
+        progressPlacement: ButtonProgressPlacement = .trailing,
+        contentMaxWidth: CGFloat? = nil,
+        contentAlignment: Alignment = .center,
         action: @escaping @MainActor () async -> Void
     ) {
         self.role = role
         self.id = id
         self.isWorking = isWorking
+        self.progressPlacement = progressPlacement
+        self.contentMaxWidth = contentMaxWidth
+        self.contentAlignment = contentAlignment
         self.action = action
         label = { Text(LocalizedStringKey(title)) }
     }

@@ -60,7 +60,7 @@ describe('useFetch global error handling', () => {
       problemResponse(404, 'euicc_not_supported', 'no supported ISD-R AID found', 'req-2'),
     )
 
-    await expect(fetchJson('modems/1/esims')).rejects.toThrow('no supported ISD-R AID found')
+    await expect(fetchJson('modems/1/esim-profiles')).rejects.toThrow('no supported ISD-R AID found')
 
     expect(notifyHarness.error).not.toHaveBeenCalled()
   })

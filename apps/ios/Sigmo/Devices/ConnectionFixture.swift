@@ -36,7 +36,7 @@ struct ConnectionFixture: Sendable {
 
     mutating func respond(_ request: URLRequest, resource: String, modemID: String, airplane: Bool) throws -> BackendHTTPResponse? {
         guard resource.hasPrefix("/internet-connections") || resource.hasPrefix("/wifi-calling/")
-                || resource == "/volte/settings" || resource == "/networks/registration"
+                || resource == "/volte/settings" || resource == "/network-settings/registration"
                 || resource.hasPrefix("/network-scans") else { return nil }
         let method = request.httpMethod ?? "GET"
         if let status = statuses[method + " " + resource], status >= 400 { return error("remote_error", status: status) }
@@ -46,9 +46,9 @@ struct ConnectionFixture: Sendable {
         }
         let data = request.httpBody ?? Data()
         switch (method, resource) {
-        case ("GET", "/networks/registration"):
+        case ("GET", "/network-settings/registration"):
             return try reply(registration)
-        case ("PUT", "/networks/registration"):
+        case ("PUT", "/network-settings/registration"):
             if airplane { return error("conflict", status: 409) }
             let value = try JSONDecoder().decode(NetworkRegistration.self, from: data)
             guard value.automatic != nil else { return error("registration_mode_invalid", status: 400) }

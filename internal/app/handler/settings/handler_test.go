@@ -262,14 +262,14 @@ func TestAuthTestDelivery(t *testing.T) {
 			name:          "tests only the selected provider",
 			providers:     []string{"http"},
 			larkStatus:    http.StatusOK,
-			wantStatus:    http.StatusCreated,
+			wantStatus:    http.StatusNoContent,
 			wantHTTPCalls: 1,
 		},
 		{
 			name:          "succeeds when all selected providers deliver",
 			providers:     []string{"http", "lark"},
 			larkStatus:    http.StatusOK,
-			wantStatus:    http.StatusCreated,
+			wantStatus:    http.StatusNoContent,
 			wantHTTPCalls: 1,
 			wantLarkCalls: 1,
 		},
@@ -277,7 +277,7 @@ func TestAuthTestDelivery(t *testing.T) {
 			name:          "succeeds when one selected provider delivers",
 			providers:     []string{"http", "lark"},
 			larkStatus:    http.StatusBadGateway,
-			wantStatus:    http.StatusCreated,
+			wantStatus:    http.StatusNoContent,
 			wantHTTPCalls: 1,
 			wantLarkCalls: 1,
 		},
@@ -465,6 +465,9 @@ func TestCreateOIDCTestDoesNotPersistCandidate(t *testing.T) {
 	}
 	if response.ID == "" || !strings.HasPrefix(response.AuthorizationURL, "https://sigmo.example/sigmo/api/v1/settings/auth-tests/oidc/") {
 		t.Fatalf("response = %+v", response)
+	}
+	if got, want := rec.Header().Get("Location"), "/sigmo/api/v1/settings/auth-tests/oidc/"+response.ID; got != want {
+		t.Fatalf("Location = %q, want %q", got, want)
 	}
 	if strings.Contains(rec.Body.String(), "draft-secret") {
 		t.Fatal("response exposed the OIDC client secret")
@@ -747,7 +750,7 @@ func TestUpdateProxyPersistsSettingsWhenReloadFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auth.NewStore() error = %v", err)
 	}
-	h := New(store, internetConnector, relay, authStore)
+	h := newTestHandlers(store, internetConnector, relay, authStore)
 
 	reqBody := ProxyValues{
 		ListenAddress: "127.0.0.1",
@@ -780,7 +783,7 @@ func TestUpdateProxyPersistsSettingsWhenReloadFails(t *testing.T) {
 	}
 }
 
-func newTestHandler(t *testing.T) (*appsettings.Store, *Handler) {
+func newTestHandler(t *testing.T) (*appsettings.Store, *testHandlers) {
 	t.Helper()
 
 	settings := appsettings.Default()
@@ -806,10 +809,10 @@ func newTestHandler(t *testing.T) (*appsettings.Store, *Handler) {
 	if err != nil {
 		t.Fatalf("auth.NewStore() error = %v", err)
 	}
-	return store, New(store, internetConnector, relay, authStore)
+	return store, newTestHandlers(store, internetConnector, relay, authStore)
 }
 
-func putAuth(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecorder {
+func putAuth(t *testing.T, h *testHandlers, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
 
 	e := echo.New()
@@ -824,7 +827,7 @@ func putAuth(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecorder {
 	return rec
 }
 
-func postAuthTest(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecorder {
+func postAuthTest(t *testing.T, h *testHandlers, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
 
 	e := echo.New()
@@ -837,7 +840,7 @@ func postAuthTest(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecor
 	return rec
 }
 
-func putProxy(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecorder {
+func putProxy(t *testing.T, h *testHandlers, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
 
 	e := echo.New()
@@ -852,7 +855,7 @@ func putProxy(t *testing.T, h *Handler, body []byte) *httptest.ResponseRecorder 
 	return rec
 }
 
-func putNotificationChannel(t *testing.T, h *Handler, channel string, body []byte) *httptest.ResponseRecorder {
+func putNotificationChannel(t *testing.T, h *testHandlers, channel string, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
 
 	e := echo.New()
@@ -925,5 +928,20 @@ func TestOIDCIssuerAndSecretRemainBoundToExactClient(t *testing.T) {
 	req.OIDCClientID = "different-client"
 	if got := authSettingsFromRequest(current, req).OIDC.ClientSecret; got != "" {
 		t.Fatal("secret moved to another client")
+	}
+}
+
+// testHandlers keeps the existing behavioral fixtures shared across independent adapters.
+type testHandlers struct {
+	*Reader
+	*AuthHandler
+	*ProxyHandler
+	*NotificationHandler
+}
+
+func newTestHandlers(store *appsettings.Store, connector *internet.Connector, relay *forwarder.Relay, authStore *appauth.Store) *testHandlers {
+	return &testHandlers{
+		Reader: NewReader(store), AuthHandler: NewAuthHandler(store, authStore),
+		ProxyHandler: NewProxyHandler(store, connector), NotificationHandler: NewNotificationHandler(store, relay),
 	}
 }

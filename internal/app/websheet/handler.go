@@ -14,21 +14,14 @@ type Handler struct {
 	broker *Broker
 }
 
-func RegisterRoutes(group *echo.Group, broker *Broker) {
-	h := &Handler{broker: broker}
-	group = group.Group("", h.capability)
-	group.GET("/websheets/:id", h.Bootstrap)
-	group.Match(proxyMethods, "/websheets/:id/proxy", h.Proxy)
-	group.Match(proxyMethods, "/websheets/:id/proxy/*", h.Proxy)
-	group.POST("/websheets/:id/callback", h.Callback)
-	group.OPTIONS("/websheets/:id/callback", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	group.OPTIONS("/websheets/:id/proxy", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	group.OPTIONS("/websheets/:id/proxy/*", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+// NewHandler creates HTTP handlers for capability-scoped carrier pages.
+func NewHandler(broker *Broker) *Handler {
+	return &Handler{broker: broker}
 }
 
-// capability confines an untrusted carrier document to one expiring random ID.
+// Capability confines an untrusted carrier document to one expiring random ID.
 // The outer router still verifies Access assertions when Access owns the boundary.
-func (h *Handler) capability(next echo.HandlerFunc) echo.HandlerFunc {
+func (h *Handler) Capability(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if _, err := h.session(c); err != nil {
 			return websheetError(c, err)
@@ -47,14 +40,6 @@ func (h *Handler) capability(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 		return next(c)
 	}
-}
-
-var proxyMethods = []string{
-	http.MethodGet,
-	http.MethodPost,
-	http.MethodPut,
-	http.MethodPatch,
-	http.MethodDelete,
 }
 
 func (h *Handler) Bootstrap(c *echo.Context) error {

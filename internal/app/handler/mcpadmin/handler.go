@@ -54,8 +54,8 @@ func (h *Handler) GetSettings(c *echo.Context) error {
 
 func (h *Handler) UpdateSettings(c *echo.Context) error {
 	var req updateSettingsRequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, "update_mcp_settings_invalid_request", err)
+	if err := httpapi.BindJSON(c, &req, "update_mcp_settings_invalid_request"); err != nil {
+		return err
 	}
 	h.updateMu.Lock()
 	defer h.updateMu.Unlock()
@@ -123,8 +123,8 @@ func (h *Handler) ListAPIKeys(c *echo.Context) error {
 
 func (h *Handler) CreateAPIKey(c *echo.Context) error {
 	var req createAPIKeyRequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, "create_mcp_api_key_invalid_request", err)
+	if err := httpapi.BindJSON(c, &req, "create_mcp_api_key_invalid_request"); err != nil {
+		return err
 	}
 	for _, permission := range req.Permissions {
 		if !h.controller.Catalog().SupportsPermission(strings.TrimSpace(permission)) {
@@ -142,6 +142,7 @@ func (h *Handler) CreateAPIKey(c *echo.Context) error {
 		return httpapi.UnprocessableEntity(c, "create_mcp_api_key_invalid", err)
 	}
 	c.Response().Header().Set("Cache-Control", "no-store")
+	httpapi.SetResourceLocation(c, grant.ID)
 	return c.JSON(http.StatusCreated, createAPIKeyResponse{APIKey: apiKeyFromGrant(grant), Token: token})
 }
 

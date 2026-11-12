@@ -27,11 +27,14 @@ DELETE FROM reminders WHERE profile_type = ? AND profile_id = ?;
 
 -- name: ClaimReminder :execrows
 UPDATE reminders SET revision = revision + 1, updated_at = ?
-WHERE profile_type = ? AND profile_id = ? AND revision = ?;
+WHERE profile_type = ? AND profile_id = ? AND revision = ?
+    AND modem_id = ? AND se_id = ?;
 
 -- name: DeleteClaimedReminder :execrows
-DELETE FROM reminders WHERE profile_type = ? AND profile_id = ? AND revision = ?;
+DELETE FROM reminders WHERE profile_type = ? AND profile_id = ? AND revision = ?
+    AND modem_id = ? AND se_id = ?;
 
 -- name: AdvanceClaimedReminder :execrows
 UPDATE reminders SET next_at = ?, updated_at = ?, revision = revision + 1
-WHERE profile_type = ? AND profile_id = ? AND revision = ?;
+WHERE profile_type = ? AND profile_id = ? AND revision = ?
+    AND modem_id = ? AND se_id = ?;

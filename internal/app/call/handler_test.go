@@ -324,7 +324,7 @@ func TestWebRTCICEServersRespondsWithEmptyListWhenTURNUnavailable(t *testing.T) 
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	defer server.Close()
-	h := &Handler{media: &Media{ice: webRTCICEProvider{client: server.Client(), endpoint: server.URL}}}
+	h := &MediaHandler{media: &Media{ice: webRTCICEProvider{client: server.Client(), endpoint: server.URL}}}
 	recorder := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/call-media/ice-servers", nil)
 	if err := h.WebRTCICEServers(echo.New().NewContext(req, recorder)); err != nil {

@@ -43,7 +43,7 @@ func TestIMSCallHistoryAvailableWithoutPro(t *testing.T) {
 	server := echo.New()
 	server.HTTPErrorHandler = httpapi.HTTPErrorHandler
 	for _, register := range runtime.routes {
-		if err := register(server.Group("/api/v1"), router.RegisterConfig{}); err != nil {
+		if err := register(server.Group("/api/v1"), router.RegisterConfig{Storage: store}); err != nil {
 			t.Fatal(err)
 		}
 	}

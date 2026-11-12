@@ -144,7 +144,7 @@ actor DetailFixtureServer {
         case .connectionEmptyNetworks: connection.networks = []
         case .connectionReadFailure:
             connection.statuses["GET /internet-connections/current"] = 503
-            connection.statuses["GET /networks/registration"] = 503
+            connection.statuses["GET /network-settings/registration"] = 503
             connection.statuses["GET /wifi-calling/settings"] = 503
             connection.statuses["GET /volte/settings"] = 503
         case .connectionWriteFailure:
@@ -231,24 +231,24 @@ actor DetailFixtureServer {
             try await Task.sleep(for: .seconds(6))
         }
         if scenario == .delayedSettings, request.httpMethod == "GET", let path = request.url?.path,
-           path.contains("/networks/") || path.hasSuffix("/settings") {
+           path.contains("/network-settings/") || path.hasSuffix("/settings") {
             try await Task.sleep(for: .seconds(2))
         }
-        if scenario == .delayedProfiles, let path = request.url?.path, path.hasSuffix("/ses") || path.hasSuffix("/esims") {
+        if scenario == .delayedProfiles, let path = request.url?.path, path.hasSuffix("/secure-elements") || path.hasSuffix("/esim-profiles") {
             try await Task.sleep(for: .seconds(3))
         }
         if scenario == .delayedDiscoveries, request.url?.path.hasSuffix("/esim-discoveries") == true {
             try await Task.sleep(for: .seconds(5))
         }
         if scenario == .delayedDeletion || scenario == .deletionFailure,
-           request.httpMethod == "DELETE", request.url?.path.contains("/esims/") == true {
+           request.httpMethod == "DELETE", request.url?.path.contains("/esim-profiles/") == true {
             try await Task.sleep(for: .seconds(8))
             if scenario == .deletionFailure {
                 return HTTPProblem.response(status: 503, code: "remote_error", detail: "Fixture error")
             }
         }
         if scenario == .delayedActivation || scenario == .activationFailure,
-           request.httpMethod == "PUT", request.url?.path.hasSuffix("/activation") == true {
+           request.httpMethod == "PUT", request.url?.path.hasSuffix("/active-esim-profile") == true {
             try await Task.sleep(for: .seconds(8))
             if scenario == .activationFailure {
                 return HTTPProblem.response(status: 503, code: "remote_error", detail: "Fixture error")
@@ -306,10 +306,10 @@ actor DetailFixtureServer {
             defer { connections[modemID] = connection }
             if let result = try connection.respond(request, resource: resource, modemID: modemID, airplane: settings.airplaneEnabled) { return result }
         }
-        if path.hasSuffix("/ses") {
+        if path.hasSuffix("/secure-elements") {
             return try reply(scenario == .singleHardware ? SecureElements(ses: Array(Self.elements.ses.prefix(1))) : Self.elements)
         }
-        if path.hasSuffix("/esims"), method == "GET" {
+        if path.hasSuffix("/esim-profiles"), method == "GET" {
             if scenario == .unavailableProfiles { return HTTPProblem.response(status: 503, code: "remote_error", detail: "Fixture error") }
             if let profilesOverride { return BackendHTTPResponse(data: profilesOverride, status: 200) }
             if scenario == .profileRefresh,
@@ -318,7 +318,21 @@ actor DetailFixtureServer {
             }
             return try reply(ESIMProfiles(ses: groups))
         }
-        if path.contains("/sim-slots/") { slot = Int(parts.last ?? "") ?? 1; return raw("", status: 204) }
+        if path.hasSuffix("/sim-slot-selection"), method == "PUT" {
+            slot = try JSONDecoder().decode([String: Int].self, from: request.httpBody ?? Data())["slot"] ?? slot
+            return raw("", status: 204)
+        }
+        if path.hasSuffix("/active-esim-profile"), method == "PUT" {
+            let iccid = try JSONDecoder().decode([String: String].self, from: request.httpBody ?? Data())["iccid"]
+            guard let si = parts.firstIndex(of: "secure-elements"), parts.indices.contains(si + 1),
+                  let g = groups.firstIndex(where: { $0.id == parts[si + 1] }),
+                  let p = groups[g].profiles.firstIndex(where: { $0.iccid == iccid }) else {
+                return HTTPProblem.response(status: 404, code: "esim_profile_not_found", detail: "Profile unavailable")
+            }
+            for pi in groups[g].profiles.indices { groups[g].profiles[pi].profileState = pi == p ? 1 : 0 }
+            activeSE = groups[g].id
+            return raw("", status: 204)
+        }
         if path.hasSuffix("/msisdn") {
             number = try JSONDecoder().decode([String: String].self, from: request.httpBody ?? Data())["number"] ?? number
             if !physical {
@@ -345,9 +359,7 @@ actor DetailFixtureServer {
         if let (g, p) = profileLocation(parts) {
             if path.hasSuffix("/nickname") {
                 groups[g].profiles[p].name = try JSONDecoder().decode([String: String].self, from: request.httpBody ?? Data())["nickname"] ?? ""
-            } else if path.hasSuffix("/activation") {
-                for pi in groups[g].profiles.indices { groups[g].profiles[pi].profileState = pi == p ? 1 : 0 }
-                activeSE = groups[g].id
+
             } else if method == "DELETE" {
                 if groups[g].profiles[p].enabled { return HTTPProblem.response(status: 409, code: "remote_error", detail: "Active profile") }
                 let profile = groups[g].profiles[p]
@@ -372,7 +384,7 @@ actor DetailFixtureServer {
         }
         if path.hasSuffix("/notifications") { return try reply(ESIMNotifications(ses: notifications)) }
         if path.contains("/notifications/"), method == "DELETE" {
-            guard let si = parts.firstIndex(of: "ses"), parts.indices.contains(si + 1),
+            guard let si = parts.firstIndex(of: "secure-elements"), parts.indices.contains(si + 1),
                   let sequence = parts.last,
                   let index = notifications.firstIndex(where: { $0.id == parts[si + 1] }) else {
                 return HTTPProblem.response(status: 404, code: "resource_not_found", detail: "Not found")
@@ -487,7 +499,7 @@ actor DetailFixtureServer {
         if let settings = modemSettings[id] { return settings }
         var settings = ModemSettingsFixture()
         switch scenario {
-        case .unavailableSettings: settings.statuses["GET /networks/bands"] = 503
+        case .unavailableSettings: settings.statuses["GET /network-settings/bands"] = 503
         case .unsupportedSettings:
             settings.airplaneSupported = false
             settings.mode = .init(allowed: 4, preferred: 0)
@@ -509,8 +521,8 @@ actor DetailFixtureServer {
                      slots: scenario == .singleHardware ? Array(slots.prefix(1)) : slots, accessTechnology: settings.airplaneEnabled ? nil : "lte", registrationState: settings.airplaneEnabled ? "" : connection.registrationState, registeredOperator: connection.registeredOperator, signalQuality: settings.airplaneEnabled ? 0 : 78, airplaneMode: settings.airplaneEnabled, simKind: physical ? "physical" : "euicc", internetConnected: connection.internet.connected && !settings.airplaneEnabled, wifiCallingEnabled: connection.wifi.enabled, wifiCallingConnected: connection.wifi.connected, volteEnabled: connection.volte.enabled, volteConnected: connection.volte.connected && !settings.airplaneEnabled)
     }
     private func profileLocation(_ parts: [String]) -> (Int, Int)? {
-        guard let si = parts.firstIndex(of: "ses"), parts.indices.contains(si + 1),
-              let pi = parts.firstIndex(of: "esims"), parts.indices.contains(pi + 1),
+        guard let si = parts.firstIndex(of: "secure-elements"), parts.indices.contains(si + 1),
+              let pi = parts.firstIndex(of: "esim-profiles"), parts.indices.contains(pi + 1),
               let g = groups.firstIndex(where: { $0.id == parts[si + 1] }),
               let p = groups[g].profiles.firstIndex(where: { $0.iccid == parts[pi + 1] }) else { return nil }
         return (g, p)

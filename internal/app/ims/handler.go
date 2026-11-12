@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 
@@ -72,16 +73,9 @@ type VoLTESettingsResponse struct {
 	DataPath        DataPath `json:"dataPath" jsonschema:"data path used for VoLTE traffic, such as qmap, legacy_bam_dmux, or qualcomm_410"`
 }
 
-func RegisterRoutes(group *echo.Group, registry *mmodem.Registry, connectivity *Connectivity) {
-	h := &Handler{registry: registry, connectivity: connectivity}
-	group.GET("/modems/:id/wifi-calling/settings", h.WiFiCallingSettings)
-	group.PUT("/modems/:id/wifi-calling/settings", h.UpdateWiFiCallingSettings)
-	group.POST("/modems/:id/wifi-calling/sessions", h.CreateWiFiCallingSession)
-	group.DELETE("/modems/:id/wifi-calling/sessions/current", h.DeleteWiFiCallingSession)
-	group.POST("/modems/:id/wifi-calling/websheets", h.CreateWiFiCallingWebsheet)
-	group.POST("/modems/:id/wifi-calling/emergency-address-websheets", h.CreateWiFiCallingEmergencyAddressWebsheet)
-	group.GET("/modems/:id/volte/settings", h.VoLTESettings)
-	group.PUT("/modems/:id/volte/settings", h.UpdateVoLTESettings)
+// NewHandler creates HTTP handlers for managed IMS connectivity.
+func NewHandler(registry *mmodem.Registry, connectivity *Connectivity) *Handler {
+	return &Handler{registry: registry, connectivity: connectivity}
 }
 
 func ReadWiFiCallingSettings(ctx context.Context, modem *mmodem.Modem, connectivity wifiCallingStatusReader) (WiFiCallingSettingsResponse, error) {
@@ -148,8 +142,8 @@ func (h *Handler) UpdateVoLTESettings(c *echo.Context) error {
 		return httpapi.ModemLookupError(c, err, "update_volte_settings_failed")
 	}
 	var req VoLTESettingsRequest
-	if err := c.Bind(&req); err != nil {
-		return httpapi.BadRequest(c, "update_volte_settings_invalid_request", err)
+	if err := httpapi.BindJSON(c, &req, "update_volte_settings_invalid_request"); err != nil {
+		return err
 	}
 	if err := h.connectivity.ReplaceVoLTESettings(ctx, modem, VoLTESettings(req)); err != nil {
 		switch {
@@ -213,6 +207,7 @@ func (h *Handler) CreateWiFiCallingSession(c *echo.Context) error {
 		}
 		return httpapi.Internal(c, "create_ims_session_failed", err)
 	}
+	c.Response().Header().Set("Location", strings.TrimSuffix(c.Request().URL.EscapedPath(), "/sessions")+"/settings")
 	return c.NoContent(http.StatusAccepted)
 }
 
@@ -239,6 +234,7 @@ func (h *Handler) CreateWiFiCallingWebsheet(c *echo.Context) error {
 		}
 		return httpapi.Internal(c, "start_ims_websheet_failed", err)
 	}
+	c.Response().Header().Set("Location", info.EmbedURL)
 	return c.JSON(http.StatusCreated, info)
 }
 
@@ -251,6 +247,7 @@ func (h *Handler) CreateWiFiCallingEmergencyAddressWebsheet(c *echo.Context) err
 	if err != nil {
 		return wifiCallingWebsheetStartError(c, "start_ims_e911_websheet_failed", err)
 	}
+	c.Response().Header().Set("Location", info.EmbedURL)
 	return c.JSON(http.StatusCreated, info)
 }
 
