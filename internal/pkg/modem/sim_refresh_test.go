@@ -60,6 +60,26 @@ func TestEnsureSIMVisibleSkipsPowerCycleWhenSIMIsVisible(t *testing.T) {
 	}
 }
 
+func TestReadCurrentModemWaitsForPendingSIMReset(t *testing.T) {
+	current := simRefreshTestModem("/sys/fake-modem", 1, true)
+	current.Status.SIM = wwanmodem.SIMStateReady
+	registry := &Registry{started: true, modems: map[string]*Modem{current.Path(): current}}
+	target := SIMTarget{ICCID: current.SIM.Identifier}
+	current.publishSIMRefresh(devicewwan.SIMRefreshEvent{Stage: devicewwan.SIMRefreshStart, Mode: devicewwan.SIMRefreshReset})
+	current.finishSIMRefresh()
+	read, err := registry.readCurrentModem(t.Context(), current, target)
+	if err != nil || read.SIMVisible {
+		t.Fatalf("readiness before reset replacement = %+v, %v", read, err)
+	}
+	replacement := simRefreshTestModem(current.Path(), 2, true)
+	replacement.Status.SIM = wwanmodem.SIMStateReady
+	registry.modems[current.Path()] = replacement
+	read, err = registry.readCurrentModem(t.Context(), current, target)
+	if err != nil || !read.SIMVisible || read.Modem != replacement || !read.ReloadObserved {
+		t.Fatalf("readiness after replacement = %+v, %v", read, err)
+	}
+}
+
 func TestEnsureSIMVisiblePublishesSIMProfileChange(t *testing.T) {
 	restoreSIMRefreshTiming(t, 0, time.Millisecond)
 	const (

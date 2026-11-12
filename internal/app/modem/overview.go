@@ -43,7 +43,7 @@ func newCatalog(store *settings.Store, registry *mmodem.Registry, overviewExtens
 }
 
 func (c *catalog) List(ctx context.Context) ([]*ModemResponse, error) {
-	modems, err := c.registry.Modems(ctx)
+	modems, err := c.registry.ReadyModems(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list modems: %w", err)
 	}
@@ -413,7 +413,7 @@ func registeredOperator(snapshot mmodem.ModemSnapshot) RegisteredOperatorRespons
 
 // ListIdentities returns cached modem identities without reading SIMs or connections.
 func (s *Service) ListIdentities(ctx context.Context) ([]*ModemResponse, error) {
-	devices, err := s.registry.Modems(ctx)
+	devices, err := s.registry.ReadyModems(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list modems: %w", err)
 	}

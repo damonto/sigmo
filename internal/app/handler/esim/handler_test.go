@@ -15,6 +15,7 @@ import (
 	appesim "github.com/damonto/sigmo/internal/app/esim"
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
+	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 )
 
 func TestEnablePrepareError(t *testing.T) {
@@ -77,6 +78,12 @@ func TestEnableError(t *testing.T) {
 		wantStatus int
 		wantBody   string
 	}{
+		{
+			name:       "physical removal takes precedence over operation cancellation",
+			err:        errors.Join(mmodem.ErrNotFound, context.Canceled),
+			wantStatus: http.StatusNotFound,
+			wantBody:   "modem_not_found",
+		},
 		{
 			name:       "missing secure element maps to one not found response",
 			err:        lpa.ErrSENotFound,

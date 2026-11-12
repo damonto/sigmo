@@ -192,7 +192,8 @@ func TestEnableSessionEnable(t *testing.T) {
 				},
 				sendErr: tt.notificationErr,
 			}
-			factoryClients := []lifecycleClient{notificationClient}
+			confirmationClient := &fakeLifecycleClient{profiles: []*sgp22.ProfileInfo{{ICCID: iccid, ProfileState: sgp22.ProfileEnabled}}}
+			factoryClients := []lifecycleClient{confirmationClient, notificationClient}
 
 			var ensureCalled bool
 			l := &lifecycle{
@@ -238,7 +239,10 @@ func TestEnableSessionEnable(t *testing.T) {
 				lastSeq:       1,
 			}
 
-			err := session.Enable(t.Context())
+			active, err := session.Enable(t.Context())
+			if active != nil {
+				session.notify(t.Context(), active, testModemFinder{visibleModem})
+			}
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("Enable() error = %v, want %v", err, tt.wantErr)
@@ -278,14 +282,14 @@ func TestSendPendingNotificationsKeepsFailedNotification(t *testing.T) {
 	}
 	modem := &mmodem.Modem{EquipmentIdentifier: "354015820228039"}
 
-	err := l.sendPendingNotifications(t.Context(), modem, "default", 1)
+	err := l.sendPendingNotifications(t.Context(), modem, "default", 1, nil)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("first sendPendingNotifications() error = %v, want %v", err, wantErr)
 	}
 	if client.removedNotifications != 0 || len(client.notifications) != 1 {
 		t.Fatalf("failed notification was removed: removed = %d, pending = %d", client.removedNotifications, len(client.notifications))
 	}
-	if err := l.sendPendingNotifications(t.Context(), modem, "default", 1); err != nil {
+	if err := l.sendPendingNotifications(t.Context(), modem, "default", 1, nil); err != nil {
 		t.Fatalf("second sendPendingNotifications() error = %v", err)
 	}
 	if client.sentNotifications != 2 || client.removedNotifications != 1 || len(client.notifications) != 0 {
@@ -294,6 +298,8 @@ func TestSendPendingNotificationsKeepsFailedNotification(t *testing.T) {
 }
 
 type fakeLifecycleClient struct {
+	eid                  []byte
+	eidErr               error
 	profiles             []*sgp22.ProfileInfo
 	notifications        []*sgp22.NotificationMetadata
 	enableErr            error
@@ -308,6 +314,10 @@ type fakeLifecycleClient struct {
 	enableRefreshes      []bool
 	sentNotifications    int
 	removedNotifications int
+}
+
+func (f *fakeLifecycleClient) EID() ([]byte, error) {
+	return f.eid, f.eidErr
 }
 
 func (f *fakeLifecycleClient) ListProfile(any, []bertlv.Tag) ([]*sgp22.ProfileInfo, error) {
@@ -378,22 +388,18 @@ func disabledProfiles(iccid sgp22.ICCID) []*sgp22.ProfileInfo {
 	}
 }
 
-func TestEnableNotificationRetriesRetiredGeneration(t *testing.T) {
+func TestEnableNotificationFollowsReplacementWithoutWaitingForOldProfile(t *testing.T) {
 	iccid, err := sgp22.NewICCID("8985200012345678901")
 	if err != nil {
 		t.Fatal(err)
 	}
 	old := &mmodem.Modem{EquipmentIdentifier: "modem"}
-	replacement := &mmodem.Modem{EquipmentIdentifier: "modem"}
+	replacement := &mmodem.Modem{EquipmentIdentifier: "modem", SIM: &mmodem.SIM{Identifier: "another-profile"}}
 	client := &fakeLifecycleClient{notifications: []*sgp22.NotificationMetadata{{SequenceNumber: 2}}}
-	probes := 0
 	lifecycle := &lifecycle{
 		ensureSIMVisible: func(context.Context, *mmodem.Modem, mmodem.SIMTarget) (*mmodem.Modem, error) {
-			probes++
-			if probes == 1 {
-				return old, nil
-			}
-			return replacement, nil
+			t.Fatal("notification retry must not wait for the previously active profile")
+			return nil, nil
 		},
 		newClient: func(_ context.Context, modem *mmodem.Modem, _ *settings.Settings, _ string) (lifecycleClient, error) {
 			if modem == old {
@@ -403,10 +409,8 @@ func TestEnableNotificationRetriesRetiredGeneration(t *testing.T) {
 		},
 	}
 	session := &enableSession{l: lifecycle, modem: old, iccid: iccid, lastSeq: 1}
-	if err := session.finish(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if probes != 2 || client.sentNotifications != 1 || client.removedNotifications != 1 {
-		t.Fatalf("probes=%d, sent=%d, removed=%d", probes, client.sentNotifications, client.removedNotifications)
+	session.notify(t.Context(), old, testModemFinder{replacement})
+	if client.sentNotifications != 1 || client.removedNotifications != 1 {
+		t.Fatalf("sent=%d, removed=%d", client.sentNotifications, client.removedNotifications)
 	}
 }

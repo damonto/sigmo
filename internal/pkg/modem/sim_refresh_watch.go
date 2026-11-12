@@ -17,9 +17,10 @@ var (
 )
 
 type simRefreshState struct {
-	version    uint64
-	inProgress bool
-	notify     chan struct{}
+	version       uint64
+	inProgress    bool
+	reloadPending bool
+	notify        chan struct{}
 }
 
 func (m *Modem) startSIMRefreshWatcher(ctx context.Context) {
@@ -90,6 +91,11 @@ func (m *Modem) consumeSIMRefreshStream(ctx context.Context, stream <-chan devic
 			endTimer.Stop()
 		}
 		m.finishSIMRefresh()
+		// A stream may close before END arrives. The START still invalidated
+		// this generation, so recovery must not depend on receiving END.
+		if endTimeout != nil && ctx.Err() == nil {
+			m.reloadAfterSIMRefresh(pendingMode)
+		}
 	}()
 
 	for {
@@ -112,7 +118,7 @@ func (m *Modem) consumeSIMRefreshStream(ctx context.Context, stream <-chan devic
 				"stage", event.Stage,
 				"mode", event.Mode,
 			)
-			m.publishSIMRefresh(event.Stage == devicewwan.SIMRefreshStart && simRefreshReenumeratesSIM(event.Mode))
+			m.publishSIMRefresh(event)
 
 			switch event.Stage {
 			case devicewwan.SIMRefreshStart:
@@ -178,14 +184,18 @@ func (m *Modem) reloadSIMAfterRefresh(ctx context.Context, reason string) {
 	m.applySIMRuntimeUpdate(probeCtx, info)
 }
 
-func (m *Modem) publishSIMRefresh(inProgress bool) {
+func (m *Modem) publishSIMRefresh(event devicewwan.SIMRefreshEvent) {
 	if m == nil {
 		return
 	}
 	m.simRefreshMu.Lock()
 	previous := m.simRefresh.notify
 	m.simRefresh.version++
-	m.simRefresh.inProgress = inProgress
+	reload := simRefreshReenumeratesSIM(event.Mode) && event.Stage != devicewwan.SIMRefreshWaitForOK
+	m.simRefresh.inProgress = reload && event.Stage == devicewwan.SIMRefreshStart
+	// END does not make the old generation usable again. Readiness requires
+	// the replacement whose clients were opened after the reset.
+	m.simRefresh.reloadPending = m.simRefresh.reloadPending || reload
 	m.simRefresh.notify = make(chan struct{})
 	m.simRefreshMu.Unlock()
 	if previous != nil {
@@ -222,4 +232,13 @@ func (m *Modem) currentSIMRefresh() (version uint64, inProgress bool, notify <-c
 		m.simRefresh.notify = make(chan struct{})
 	}
 	return m.simRefresh.version, m.simRefresh.inProgress, m.simRefresh.notify
+}
+
+func (m *Modem) simReloadPending() bool {
+	if m == nil {
+		return false
+	}
+	m.simRefreshMu.Lock()
+	defer m.simRefreshMu.Unlock()
+	return m.simRefresh.reloadPending
 }

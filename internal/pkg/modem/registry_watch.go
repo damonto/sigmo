@@ -229,8 +229,9 @@ func (r *Registry) reconcile(ctx context.Context) error {
 		if modem != nil && devicePresentInSnapshot(modem.deviceInfo, present) {
 			continue
 		}
-		r.removeModem(key, modem)
+		r.removeModemWithCause(key, modem, ErrNotFound)
 	}
+	r.abortAbsentSIMChanges(present)
 	return nil
 }
 
@@ -254,7 +255,8 @@ func (r *Registry) applyDeviceEvent(ctx context.Context, event wwanmodem.DeviceE
 		r.mu.RLock()
 		existingKey, existing := r.findByDeviceLocked(event.Device)
 		r.mu.RUnlock()
-		r.removeModem(existingKey, existing)
+		r.removeModemWithCause(existingKey, existing, ErrNotFound)
+		r.abortRemovedSIMChanges(event.Device)
 		return
 	}
 	if event.Type == wwanmodem.DeviceAdded {
@@ -410,6 +412,13 @@ func (r *Registry) handleModemFailure(ctx context.Context, failure modemFailure)
 		return
 	}
 
+	if errors.Is(failure.err, errSIMRefreshReload) {
+		r.mu.Lock()
+		change := r.holdSIMChangeLocked(failure.modem)
+		r.mu.Unlock()
+		defer r.releaseSIMChange(failure.modem.EquipmentIdentifier, change)
+	}
+
 	clientIDsExhausted := errors.Is(failure.err, qcom.QMIErrorClientIDsExhausted)
 	recoverySuspended := clientIDsExhausted && r.advanceCIDRecoveryState(key) == cidRecoverySuspended
 	message := "modem transport stopped"
@@ -493,6 +502,10 @@ func (r *Registry) recoverRemovedModem(ctx context.Context, failed *Modem) error
 }
 
 func (r *Registry) removeModem(key string, existing *Modem) {
+	r.removeModemWithCause(key, existing, nil)
+}
+
+func (r *Registry) removeModemWithCause(key string, existing *Modem, cause error) {
 	if existing == nil {
 		return
 	}
@@ -506,6 +519,9 @@ func (r *Registry) removeModem(key string, existing *Modem) {
 	}
 	delete(r.modems, key)
 	delete(r.simIdentities, existing)
+	if cause != nil {
+		r.abortSIMChangeLocked(existing.EquipmentIdentifier, cause)
+	}
 	snapshot := r.copyModemsLocked()
 	subscribers := append([]subscription(nil), r.subs...)
 	r.mu.Unlock()

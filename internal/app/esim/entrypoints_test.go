@@ -84,6 +84,14 @@ func (f testModemFinder) Find(ctx context.Context, id string) (*mmodem.Modem, er
 	return f.device, nil
 }
 
+func (f testModemFinder) WithSIMChange(ctx context.Context, current *mmodem.Modem, run func(context.Context, *mmodem.Modem) error) error {
+	active, err := f.Find(ctx, current.EquipmentIdentifier)
+	if err != nil {
+		return err
+	}
+	return run(ctx, active)
+}
+
 func TestActivateProfileTreatsAlreadyActiveAsSuccess(t *testing.T) {
 	device := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
 	iccid := mustTestICCID(t, "8985200012345678901")

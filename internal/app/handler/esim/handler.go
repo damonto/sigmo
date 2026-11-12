@@ -94,6 +94,9 @@ func enablePrepareError(c *echo.Context, err error) error {
 }
 
 func enableError(c *echo.Context, err error) error {
+	if errors.Is(err, mmodem.ErrNotFound) {
+		return httpapi.ModemLookupError(c, err, "enable_esim_failed")
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return httpapi.RequestTimeout(c, "esim_enable_timeout", errEnableTimeout)
 	}

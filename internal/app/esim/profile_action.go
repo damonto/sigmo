@@ -20,19 +20,33 @@ func (s *Service) EnableProfile(ctx context.Context, modem *mmodem.Modem, seID s
 	sessionCtx, cancel := context.WithTimeout(ctx, enableTimeout)
 	defer cancel()
 
-	session, err := s.lifecycle.PrepareEnable(sessionCtx, modem, seID, iccid)
-	if err != nil {
+	var session *enableSession
+	var active *mmodem.Modem
+	err := s.registry.WithSIMChange(sessionCtx, modem, func(ctx context.Context, current *mmodem.Modem) error {
+		var err error
+		session, err = s.lifecycle.PrepareEnable(ctx, current, seID, iccid)
 		if errors.Is(err, ErrProfileAlreadyActive) {
 			return nil
 		}
+		if err != nil {
+			return err
+		}
+		defer session.Close()
+		if err := s.restoreInternetBeforeProfileEnable(ctx, current); err != nil {
+			return fmt.Errorf("restore internet connection: %w", err)
+		}
+		active, err = session.Enable(ctx)
+		return err
+	})
+	if err != nil {
 		return err
 	}
-	defer session.Close()
-
-	if err := s.restoreInternetBeforeProfileEnable(sessionCtx, modem); err != nil {
-		return fmt.Errorf("restore internet connection: %w", err)
+	// Notification delivery is best effort and does not keep other requests
+	// waiting after the enabled profile and replacement modem are confirmed.
+	if active != nil {
+		session.notify(sessionCtx, active, s.registry)
 	}
-	return session.Enable(sessionCtx)
+	return nil
 }
 
 // DeleteProfile records deletion intent, updates the card, and cleans up reminders.

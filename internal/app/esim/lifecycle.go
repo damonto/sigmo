@@ -11,13 +11,17 @@ import (
 
 	"github.com/damonto/euicc-go/bertlv"
 	sgp22 "github.com/damonto/euicc-go/v2"
+	"github.com/damonto/wwan-go/qcom"
 
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 )
 
-const notificationAttempts = 3
+const (
+	profileConfirmAttempts = 3
+	notificationAttempts   = 3
+)
 
 type lifecycle struct {
 	settings         *settings.Settings
@@ -34,6 +38,7 @@ type enableSession struct {
 	previousICCID string
 	client        lifecycleClient
 	lastSeq       sgp22.SequenceNumber
+	eid           []byte
 }
 
 type deleteSession struct {
@@ -43,6 +48,7 @@ type deleteSession struct {
 }
 
 type lifecycleClient interface {
+	EID() ([]byte, error)
 	ListProfile(any, []bertlv.Tag) ([]*sgp22.ProfileInfo, error)
 	ListNotification(...sgp22.NotificationEvent) ([]*sgp22.NotificationMetadata, error)
 	RetrieveNotificationList(any) ([]*sgp22.PendingNotification, error)
@@ -119,6 +125,10 @@ func (l *lifecycle) PrepareEnable(ctx context.Context, modem *mmodem.Modem, seID
 	if profile.ProfileState == sgp22.ProfileEnabled {
 		return nil, ErrProfileAlreadyActive
 	}
+	session.eid, err = client.EID()
+	if err != nil {
+		return nil, fmt.Errorf("read eUICC identity: %w", err)
+	}
 
 	notifications, err := client.ListNotification()
 	if err != nil {
@@ -131,23 +141,47 @@ func (l *lifecycle) PrepareEnable(ctx context.Context, modem *mmodem.Modem, seID
 	return session, nil
 }
 
-func (s *enableSession) Enable(ctx context.Context) error {
+func (s *enableSession) Enable(ctx context.Context) (*mmodem.Modem, error) {
 	defer s.Close()
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	s.modem.InvalidateSIMActivation()
-	if err := s.client.EnableProfile(s.iccid, true); err != nil {
-		return fmt.Errorf("enable profile %s: %w", s.iccid.String(), err)
+	enableErr := s.client.EnableProfile(s.iccid, true)
+	if enableErr != nil && !isProfileTransportError(enableErr) {
+		return nil, fmt.Errorf("enable profile %s: %w", s.iccid.String(), enableErr)
 	}
 
 	if err := s.invalidateClient(); err != nil {
 		slog.Warn("invalidate LPA client after profile enable", "imei", s.modem.EquipmentIdentifier, "error", err)
 	}
-	return s.finish(ctx)
+	active, err := s.waitForEnabled(ctx, s.modem)
+	if err != nil {
+		if enableErr != nil {
+			return nil, errors.Join(fmt.Errorf("enable profile %s: %w", s.iccid.String(), enableErr), err)
+		}
+		return nil, err
+	}
+	if enableErr != nil {
+		slog.Info("confirmed eSIM profile enable after transport error", "imei", s.modem.EquipmentIdentifier, "error", enableErr)
+	}
+	return active, nil
 }
 
-func (s *enableSession) finish(ctx context.Context) error {
-	target := s.modem
-	for attempt := range notificationAttempts {
+// These transport errors do not establish whether the card accepted Enable.
+// Card-level rejections (including CAT busy and policy errors) remain errors.
+func isProfileTransportError(err error) bool {
+	return mmodem.IsTransientRestartError(err) || errors.Is(err, lpa.ErrModemRetired) ||
+		errors.Is(err, qcom.QMIErrorInternal) || errors.Is(err, qcom.QMIErrorInvalidArgument) ||
+		errors.Is(err, qcom.QMIErrorAborted) || errors.Is(err, qcom.QMIErrorInvalidClientID)
+}
+
+func (s *enableSession) waitForEnabled(ctx context.Context, target *mmodem.Modem) (*mmodem.Modem, error) {
+	for attempt := 1; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		var err error
 		target, err = s.l.ensureSIMVisible(ctx, target, mmodem.SIMTarget{
 			ICCID:         s.iccid.String(),
@@ -156,25 +190,80 @@ func (s *enableSession) finish(ctx context.Context) error {
 			AllowLocked:   true,
 		})
 		if err != nil {
-			return fmt.Errorf("wait for modem readiness: %w", err)
+			return nil, fmt.Errorf("wait for modem readiness: %w", err)
 		}
-		err = s.l.sendPendingNotifications(ctx, target, s.seID, s.lastSeq)
+		if err = s.confirmEnabled(ctx, target); err == nil {
+			return target, nil
+		}
+		if !isProfileTransportError(err) || attempt == profileConfirmAttempts {
+			return nil, err
+		}
+		if err := waitForProfileRetry(ctx); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func (s *enableSession) notify(ctx context.Context, target *mmodem.Modem, registry modemRegistry) {
+	var err error
+	for attempt := 1; attempt <= notificationAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return
+		}
+		err = s.l.sendPendingNotifications(ctx, target, s.seID, s.lastSeq, s.eid)
 		if err == nil {
-			return nil
+			return
 		}
-		if !errors.Is(err, lpa.ErrModemRetired) || attempt == notificationAttempts-1 {
-			slog.Warn("handle eSIM profile notifications", "error", err, "imei", s.modem.EquipmentIdentifier)
-			return nil
+		if !errors.Is(err, lpa.ErrModemRetired) || attempt == notificationAttempts {
+			break
 		}
-		// Let the registry publish the replacement before resolving readiness
-		// again. Notification records are removed only after successful delivery.
-		timer := time.NewTimer(time.Second)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
+		if err = waitForProfileRetry(ctx); err != nil {
+			break
 		}
+		// Another profile may already be enabled now that coordination is
+		// released. Notifications belong to the eUICC, not its active profile.
+		target, err = registry.Find(ctx, s.modem.EquipmentIdentifier)
+		if err != nil {
+			break
+		}
+	}
+	if ctx.Err() == nil {
+		slog.Warn("handle eSIM profile notifications", "error", err, "imei", s.modem.EquipmentIdentifier)
+	}
+}
+
+func waitForProfileRetry(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(time.Second):
+		return nil
+	}
+}
+
+func (s *enableSession) confirmEnabled(ctx context.Context, modem *mmodem.Modem) error {
+	client, err := s.l.newClient(ctx, modem, s.l.settingsSnapshot(), s.seID)
+	if err != nil {
+		return fmt.Errorf("create LPA client to confirm profile enable: %w", err)
+	}
+	defer func() {
+		if err := client.Close(); err != nil {
+			modem.Logger().Warn("close profile confirmation client", "error", err)
+		}
+	}()
+	eid, err := client.EID()
+	if err != nil {
+		return fmt.Errorf("confirm eUICC identity: %w", err)
+	}
+	if !bytes.Equal(eid, s.eid) {
+		return errors.New("eUICC changed during profile enable")
+	}
+	profiles, err := client.ListProfile(s.iccid, nil)
+	if err != nil {
+		return fmt.Errorf("confirm enabled profile: %w", err)
+	}
+	if !activeProfile(profiles, s.iccid) {
+		return errors.New("target eSIM profile is not enabled")
 	}
 	return nil
 }
@@ -269,7 +358,7 @@ func profileByICCID(profiles []*sgp22.ProfileInfo, iccid sgp22.ICCID) (*sgp22.Pr
 	return nil, false
 }
 
-func (l *lifecycle) sendPendingNotifications(ctx context.Context, modem *mmodem.Modem, seID string, lastSeq sgp22.SequenceNumber) error {
+func (l *lifecycle) sendPendingNotifications(ctx context.Context, modem *mmodem.Modem, seID string, lastSeq sgp22.SequenceNumber, expectedEID []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -283,6 +372,13 @@ func (l *lifecycle) sendPendingNotifications(ctx context.Context, modem *mmodem.
 			modem.Logger().Warn("failed to close LPA client", "error", cerr)
 		}
 	}()
+	eid, err := client.EID()
+	if err != nil {
+		return fmt.Errorf("read notification eUICC identity: %w", err)
+	}
+	if !bytes.Equal(eid, expectedEID) {
+		return errors.New("eUICC changed before notification delivery")
+	}
 	notifications, err := client.ListNotification()
 	if err != nil {
 		return fmt.Errorf("list notifications: %w", err)

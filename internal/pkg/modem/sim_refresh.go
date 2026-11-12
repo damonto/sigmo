@@ -225,7 +225,7 @@ func (r *Registry) ensureSIMVisible(ctx context.Context, current *Modem, target 
 		}
 
 		generation := active.Generation()
-		if !target.RequireActiveSlot && !probeTimedOut && !provisioned[generation] {
+		if !target.RequireActiveSlot && !probeTimedOut && !provisioned[generation] && !active.simReloadPending() {
 			provisionCtx, cancel := context.WithTimeout(ctx, simProbeTimeout)
 			provisionErr := r.activateProvisioningTransport(provisionCtx, active, target)
 			cancel()
@@ -292,6 +292,9 @@ func (r *Registry) readCurrentModemWithReload(ctx context.Context, current *Mode
 	}
 	reloaded := modem.Generation() != current.Generation() || modem.Path() != current.Path()
 	observedReload := reloadObserved || reloaded
+	if modem.simReloadPending() {
+		return currentModemRead{Modem: modem, ReloadObserved: observedReload}, nil
+	}
 	// A PIN-locked profile can hide its ICCID and active slot. Accept that
 	// state only after the registry has observed the modem generation created
 	// by the profile refresh, never from the generation that issued the switch.
@@ -328,6 +331,10 @@ func (r *Registry) readCurrentModemWithReload(ctx context.Context, current *Mode
 // retired modem generation as ready.
 func (r *Registry) confirmCurrentReadyModem(read currentModemRead) (currentModemRead, error) {
 	if read.Modem == nil || !read.SIMVisible {
+		return read, nil
+	}
+	if read.Modem.simReloadPending() {
+		read.SIMVisible = false
 		return read, nil
 	}
 	current, err := r.findModem(read.Modem.EquipmentIdentifier)

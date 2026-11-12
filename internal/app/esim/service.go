@@ -24,13 +24,14 @@ type Config struct {
 	Storage   *storage.Store
 }
 
-type modemFinder interface {
+type modemRegistry interface {
 	Find(context.Context, string) (*mmodem.Modem, error)
+	WithSIMChange(context.Context, *mmodem.Modem, func(context.Context, *mmodem.Modem) error) error
 }
 
 // Service coordinates inventory and lifecycle side effects for every transport.
 type Service struct {
-	registry     modemFinder
+	registry     modemRegistry
 	profile      *profile
 	provisioning *provisioning
 	lifecycle    *lifecycle

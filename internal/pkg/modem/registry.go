@@ -52,6 +52,7 @@ type Registry struct {
 	cidRecoveryStates map[string]cidRecoveryState
 	pendingOpens      map[string]struct{}
 	simIdentities     map[*Modem]SIMIdentity
+	simChanges        map[string]*simChange
 }
 
 type cidRecoveryState uint8
@@ -144,6 +145,8 @@ func (r *Registry) Start(ctx context.Context) error {
 	return r.ensureStarted(ctx)
 }
 
+// Modems returns current runtime membership without waiting for SIM changes.
+// Lifecycle subscribers need this view while retiring and replacing clients.
 func (r *Registry) Modems(ctx context.Context) (map[string]*Modem, error) {
 	if err := r.ensureStarted(ctx); err != nil {
 		return nil, err
@@ -153,11 +156,12 @@ func (r *Registry) Modems(ctx context.Context) (map[string]*Modem, error) {
 	return r.copyModemsLocked(), nil
 }
 
+// Find resolves a modem ID after any pending SIM change for that device settles.
 func (r *Registry) Find(ctx context.Context, id string) (*Modem, error) {
 	if err := r.ensureStarted(ctx); err != nil {
 		return nil, err
 	}
-	return r.findModem(id)
+	return r.findReadyModem(ctx, strings.TrimSpace(id))
 }
 
 // Reload retires one modem generation and waits for Registry to open its
@@ -253,6 +257,9 @@ func (r *Registry) Close() error {
 		return nil
 	}
 	r.closed = true
+	for id := range r.simChanges {
+		r.abortSIMChangeLocked(id, errRegistryClosed)
+	}
 	if r.done != nil {
 		close(r.done)
 	}
@@ -314,11 +321,15 @@ func (r *Registry) WaitForReloadedModem(ctx context.Context, current *Modem) (*M
 
 func (r *Registry) findModem(id string) (*Modem, error) {
 	id = strings.TrimSpace(id)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.findModemLocked(id)
+}
+
+func (r *Registry) findModemLocked(id string) (*Modem, error) {
 	if id == "" {
 		return nil, fmt.Errorf("%w: equipment identifier is empty", ErrNotFound)
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	for _, modem := range r.modems {
 		if strings.TrimSpace(modem.EquipmentIdentifier) == id {
 			return modem, nil

@@ -65,3 +65,33 @@ func waitForRefreshSignal(t *testing.T, signal <-chan struct{}) {
 		t.Fatal("timed out waiting for SIM refresh signal")
 	}
 }
+
+func TestSIMResetStreamClosureStillRequestsRecovery(t *testing.T) {
+	reload := make(chan error, 1)
+	modem := &Modem{onFailure: func(err error) { reload <- err }}
+	stream := make(chan devicewwan.SIMRefreshEvent, 1)
+	stream <- devicewwan.SIMRefreshEvent{Stage: devicewwan.SIMRefreshStart, Mode: devicewwan.SIMRefreshReset}
+	close(stream)
+	if err := modem.consumeSIMRefreshStream(t.Context(), stream); err == nil {
+		t.Fatal("closed refresh stream did not return an error")
+	}
+	select {
+	case err := <-reload:
+		if !errors.Is(err, errSIMRefreshReload) {
+			t.Fatalf("recovery = %v", err)
+		}
+	default:
+		t.Fatal("missing END left the modem waiting forever for recovery")
+	}
+	if !modem.simReloadPending() {
+		t.Fatal("reset generation was marked usable before recovery")
+	}
+}
+
+func TestSIMResetEndWithoutStartRequiresReplacement(t *testing.T) {
+	modem := &Modem{}
+	modem.publishSIMRefresh(devicewwan.SIMRefreshEvent{Stage: devicewwan.SIMRefreshEndWithSuccess, Mode: devicewwan.SIMRefreshReset})
+	if !modem.simReloadPending() {
+		t.Fatal("missed START allowed readiness before replacement")
+	}
+}
