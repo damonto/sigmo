@@ -21,7 +21,7 @@ require (
 	github.com/pion/opus v0.1.1-0.20261026214112-e7b8aa55508c
 	github.com/pion/rtp v1.10.6
 	github.com/pion/webrtc/v4 v4.2.26
-	github.com/pressly/goose/v3 v3.29.0
+	github.com/pressly/goose/v3 v3.30.0
 	github.com/things-go/go-socks5 v0.1.4
 	github.com/wneessen/go-mail v0.8.2
 	golang.org/x/mod v0.43.0
