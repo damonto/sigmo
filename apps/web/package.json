@@ -27,7 +27,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "flag-icons": "^7.6.0",
-    "libphonenumber-js": "^1.13.15",
+    "libphonenumber-js": "^1.13.16",
     "lucide-vue-next": "^1.0.0",
     "pinia": "^4.1.0",
     "reka-ui": "^2.11.0",
