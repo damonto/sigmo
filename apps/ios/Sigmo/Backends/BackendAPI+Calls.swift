@@ -18,10 +18,6 @@ extension BackendAPI {
         try await decode(["modems", modemID, "calls", id], method: "PATCH", body: JSONEncoder().encode(update), token: token)
     }
 
-    func deleteCall(modemID: String, id: String, token: String?) async throws {
-        _ = try await request(["modems", modemID, "calls", id], method: "DELETE", token: token)
-    }
-
     func callDTMF(modemID: String, id: String, clientID: String, digits: String, token: String?) async throws {
         struct Body: Encodable { let clientId, digits: String }
         _ = try await request(["modems", modemID, "calls", id, "dtmf-events"], method: "POST",

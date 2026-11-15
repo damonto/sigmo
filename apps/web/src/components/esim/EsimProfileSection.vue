@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useCapabilities } from '@/composables/useCapabilities'
 import HistoryAssignments from '@/components/communication/HistoryAssignments.vue'
 import { computed, ref, watch } from 'vue'
 import { useForm } from '@tanstack/vue-form'
@@ -132,7 +131,6 @@ const detailsProfile = ref<EsimProfile | null>(null)
 
 const deleteOpen = ref(false)
 const deleteProfile = ref<EsimProfile | null>(null)
-const communicationCapabilities = useCapabilities()
 const historySource = ref('')
 const deleteLoading = ref(false)
 
@@ -383,7 +381,7 @@ watch(detailsOpen, (value) => {
 
 <template>
   <HistoryAssignments
-    v-if="historySource && communicationCapabilities.hasFeature('historyAssignments')"
+    v-if="historySource"
     :source-id="historySource"
   />
   <section class="space-y-3">

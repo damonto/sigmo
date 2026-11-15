@@ -14,6 +14,7 @@ const phoneHarness = vi.hoisted(() => ({
   activeCall: null as CallRecord | null,
   incomingCall: null as CallRecord | null,
   isLoading: false,
+  hasMore: false,
   isDialing: false,
   isDeletingCallID: '',
   errorMessage: '',
@@ -23,6 +24,7 @@ const phoneHarness = vi.hoisted(() => ({
   hangup: vi.fn(),
   deleteRecord: vi.fn(),
   loadCalls: vi.fn(),
+  loadMoreCalls: vi.fn(),
   setSearchQuery: vi.fn(),
   sessionSearchQuery: null as { value: string } | null,
 }))
@@ -31,11 +33,13 @@ vi.mock('@/composables/useDeviceCallHistory', () => ({
   useDeviceCallHistory: () => ({
     recentCalls: computed(() => phoneHarness.recentCalls),
     hasRecentCalls: computed(() => phoneHarness.recentCalls.length > 0),
+    hasMore: computed(() => phoneHarness.hasMore),
     isLoading: computed(() => phoneHarness.isLoading),
     isDeletingCallID: computed(() => phoneHarness.isDeletingCallID),
     errorMessage: computed(() => phoneHarness.errorMessage),
     deleteRecord: phoneHarness.deleteRecord,
     loadCalls: phoneHarness.loadCalls,
+    loadMoreCalls: phoneHarness.loadMoreCalls,
     setSearchQuery: phoneHarness.setSearchQuery,
   }),
 }))
@@ -278,12 +282,38 @@ const deferredCall = () => {
 }
 
 describe('ModemCallsView phone interactions', () => {
+  it('offers older calls when another history page is available', async () => {
+    phoneHarness.recentCalls = [
+      {
+        callID: 'recent',
+        number: '10086',
+        route: 'volte',
+        direction: 'outgoing',
+        state: 'ended',
+        hold: 'none',
+        reason: '',
+        startedAt: '',
+        answeredAt: '',
+        endedAt: '',
+        updatedAt: '',
+      },
+    ]
+    phoneHarness.hasMore = true
+    const wrapper = mountView()
+    const more = wrapper.findAll('button').find((button) => button.text() === 'communication.more')
+    expect(more).toBeDefined()
+    await more?.trigger('click')
+    expect(phoneHarness.loadMoreCalls).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+
   beforeEach(() => {
     capabilityHarness.volte = true
     phoneHarness.recentCalls = []
     phoneHarness.activeCall = null
     phoneHarness.incomingCall = null
     phoneHarness.isLoading = false
+    phoneHarness.hasMore = false
     phoneHarness.isDialing = false
     phoneHarness.isDeletingCallID = ''
     phoneHarness.errorMessage = ''
@@ -296,6 +326,7 @@ describe('ModemCallsView phone interactions', () => {
     phoneHarness.deleteRecord.mockResolvedValue(true)
     phoneHarness.loadCalls.mockReset()
     phoneHarness.loadCalls.mockResolvedValue(undefined)
+    phoneHarness.loadMoreCalls.mockReset()
     phoneHarness.setSearchQuery.mockReset()
     phoneHarness.sessionSearchQuery = null
     callAudioHarness.errorMessage.value = ''

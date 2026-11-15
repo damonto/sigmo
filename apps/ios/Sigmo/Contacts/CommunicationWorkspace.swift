@@ -13,7 +13,6 @@ private enum CommunicationCreation {
 struct CommunicationWorkspace: View {
     private struct SourceIdentity: Equatable {
         let accessRevision: Int
-        let supported: Bool
         let accessible: Bool
     }
 
@@ -57,8 +56,6 @@ struct CommunicationWorkspace: View {
                                        description: Text("backends.empty.description"))
             } else if state.sources.count == 1, let source = state.sources.first, !source.session.canAccessDevices {
                 SettingsAccessView(session: source.session) { EmptyView() }
-            } else if state.sources.count == 1, let source = state.sources.first, !source.supported {
-                ContentUnavailableView("communication.callsUnavailable", systemImage: section.icon)
             } else {
                 list
             }
@@ -130,7 +127,7 @@ struct CommunicationWorkspace: View {
 
     private var refreshIdentity: RefreshIdentity {
         RefreshIdentity(search: state.search, missedOnly: state.missedOnly, sources: state.sources.map {
-            SourceIdentity(accessRevision: $0.session.accessRevision, supported: $0.supported,
+            SourceIdentity(accessRevision: $0.session.accessRevision,
                            accessible: $0.session.canAccessDevices)
         })
     }
@@ -231,11 +228,6 @@ struct CommunicationWorkspace: View {
                     SettingsAccessView(session: source.session) { EmptyView() }
                 } label: {
                     LabeledContent(source.session.configuration.name) { Text(LocalizedStringKey(source.session.statusKey)) }
-                }
-            } else if !source.supported {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(source.session.configuration.name)
-                    Text("communication.callsUnavailable").font(.footnote).foregroundStyle(.secondary)
                 }
             } else if let failure = source.failure {
                 VStack(alignment: .leading, spacing: 4) {

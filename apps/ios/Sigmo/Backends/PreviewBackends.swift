@@ -196,11 +196,12 @@ actor PreviewBackendServer {
             return BackendHTTPResponse(data: try JSONEncoder().encode(settingsServer.app), status: 200)
         }
         if path.hasSuffix("/capabilities") {
-            return reply(200, host == "home.sigmo.test" ? #"{"features":["contacts","messageThreads","historyAssignments","wifiCalling","esimTransfer","volte"]}"# : #"{"features":["contacts","messageThreads","historyAssignments"]}"#)
+            return reply(200, host == "home.sigmo.test" ? #"{"features":["wifiCalling","esimTransfer","volte"]}"# : #"{"features":[]}"#)
         }
         if request.httpMethod == "GET" {
             if path.hasSuffix("/contacts") || path.hasSuffix("/sim-profiles") { return reply(200, #"{"items":[]}"#) }
-            if path.hasSuffix("/message-threads") { return reply(200, #"{"items":[],"nextCursor":""}"#) }
+            if path.hasSuffix("/message-threads") || path.hasSuffix("/api/v1/calls") { return reply(200, #"{"items":[],"nextCursor":""}"#) }
+            if path.hasSuffix("/calls") { return reply(200, "[]") }
             if path.hasSuffix("/conversations") { return reply(200, #"{"backendId":"fixture-preview","revision":0,"unreadCount":0,"items":[]}"#) }
         }
         if path.hasSuffix("/auth/sessions/current") { return reply(204, "") }

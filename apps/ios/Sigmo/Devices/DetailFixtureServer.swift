@@ -67,7 +67,7 @@ actor DetailFixtureServer {
     private var notifications: [ESIMNotificationGroup]
     private var activeSE = "se-a"
     private var connections: [String: ConnectionFixture] = [:]
-    private var capabilities = ["contacts", "messageThreads", "historyAssignments", "wifiCalling", "volte", "esimTransfer"]
+    private var capabilities = ["wifiCalling", "volte", "esimTransfer"]
     private var pinFixtures: [String: SIMPINFixture] = [:]
     private var modemSettings: [String: ModemSettingsFixture] = [:]
     private var requestStatus: [String: Int] = [:]
@@ -151,7 +151,7 @@ actor DetailFixtureServer {
             connection.statuses["PUT /internet-connections/current/preferences"] = 503
             connection.statuses["PUT /volte/settings"] = 503
         case .connectionMBIM: connection.volte.dataPath = "mbim"
-        case .connectionUnlicensed: capabilities = ["contacts", "messageThreads", "historyAssignments"]
+        case .connectionUnlicensed: capabilities = []
         default: break
         }
         connections["device-1"] = connection
@@ -187,7 +187,7 @@ actor DetailFixtureServer {
     func setStatus(_ suffix: String, _ status: Int) { requestStatus[suffix] = status }
     func setConnectionFixture(_ value: ConnectionFixture, modemID: String = "device-1") { connections[modemID] = value }
     func currentConnections(_ id: String = "device-1") -> ConnectionFixture { connections[id] ?? ConnectionFixture() }
-    func setCapabilities(_ value: [String]) { capabilities = ["contacts", "messageThreads", "historyAssignments"] + value }
+    func setCapabilities(_ value: [String]) { capabilities = value }
     func setModemSettings(_ value: ModemSettingsFixture, modemID: String = "device-1") { modemSettings[modemID] = value }
     func currentModemSettings(_ id: String = "device-1") -> ModemSettingsFixture { settingsFixture(id) }
     func setProfilesData(_ data: Data?) { profilesOverride = data }
@@ -273,7 +273,8 @@ actor DetailFixtureServer {
         if method == "GET" {
             if path.hasSuffix("/contacts") { return raw(#"{"items":[]}"#) }
             if path.hasSuffix("/sim-profiles") { return try reply(["items": communicationLines]) }
-            if path.hasSuffix("/message-threads") { return raw(#"{"items":[],"nextCursor":""}"#) }
+            if path.hasSuffix("/message-threads") || path.hasSuffix("/api/v1/calls") { return raw(#"{"items":[],"nextCursor":""}"#) }
+            if path.hasSuffix("/calls") { return raw("[]") }
             if path.hasSuffix("/conversations") { return raw(#"{"backendId":"fixture-detail","revision":0,"unreadCount":0,"items":[]}"#) }
         }
         if path.hasSuffix("/auth/sessions/current") { return raw("", status: 204) }

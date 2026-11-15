@@ -25,13 +25,6 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/webpush"
 )
 
-type Runner func(context.Context) error
-
-type namedRunner struct {
-	name string
-	run  Runner
-}
-
 type Cleanup func(context.Context) error
 
 type Runtime struct {
@@ -54,7 +47,6 @@ type Runtime struct {
 	modemOverview         []modemstatus.Extension
 	mcpTools              []mcpserver.Extension
 	routes                []router.Extension
-	runners               []namedRunner
 	cleanups              []Cleanup
 	features              []feature.Name
 	airplaneModeLifecycle appconnectivity.AirplaneModeLifecycle
@@ -88,16 +80,11 @@ func (r *Runtime) AddRoute(route router.Extension) {
 	r.routes = append(r.routes, route)
 }
 
-// AddRunner registers a background task with a name used in failure reports.
-func (r *Runtime) AddRunner(name string, runner Runner) {
-	r.runners = append(r.runners, namedRunner{name: name, run: runner})
-}
-
 func (r *Runtime) AddCleanup(cleanups ...Cleanup) {
 	r.cleanups = append(r.cleanups, cleanups...)
 }
 
-// close releases extension-owned resources after all extension runners stop.
+// close releases extension-owned resources after all background tasks stop.
 func (r *Runtime) close(ctx context.Context) error {
 	var result error
 	for _, v := range slices.Backward(r.cleanups) {

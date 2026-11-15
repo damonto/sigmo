@@ -41,12 +41,12 @@ final class CommunicationOverviewState {
     }
 
     var availableSources: [CommunicationState] {
-        sources.filter { $0.supported && $0.session.canAccessDevices }
+        sources.filter { $0.session.canAccessDevices }
     }
     var loading: Bool { availableSources.contains(where: \.loading) }
     var hasMore: Bool { availableSources.contains { !$0.cursor.isEmpty } }
     var creationSessions: [BackendSession] {
-        sources.filter { $0.session.canAccessDevices && $0.supportsComposer }.map(\.session)
+        availableSources.map(\.session)
     }
 
     var isEmpty: Bool {

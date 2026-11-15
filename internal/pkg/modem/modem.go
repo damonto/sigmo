@@ -52,7 +52,8 @@ type Modem struct {
 	simRevision    uint64
 	simPINToken    string
 	simPINDevice   simPINDevice
-	fallbackNumber string
+	imsNumber      string
+	knownNumber    string
 
 	Device              string
 	Manufacturer        string
@@ -93,7 +94,7 @@ func (s ModemSnapshot) Locked() bool {
 }
 
 // Snapshot returns a consistent copy of modem state, including the effective
-// phone number and the SIM identity required for subsequent fallback updates.
+// phone number and the SIM identity required for subsequent number updates.
 func (m *Modem) Snapshot() ModemSnapshot {
 	if m == nil {
 		return ModemSnapshot{}
@@ -102,7 +103,10 @@ func (m *Modem) Snapshot() ModemSnapshot {
 	defer m.runtimeMu.RUnlock()
 	number := m.Number
 	if strings.TrimSpace(number) == "" {
-		number = m.fallbackNumber
+		number = m.imsNumber
+	}
+	if strings.TrimSpace(number) == "" {
+		number = m.knownNumber
 	}
 	return ModemSnapshot{
 		Status:         m.Status,
@@ -248,7 +252,8 @@ func (m *Modem) Close() error {
 		close(m.done)
 		m.runtimeMu.Lock()
 		m.simRevision++
-		m.fallbackNumber = ""
+		m.imsNumber = ""
+		m.knownNumber = ""
 		m.runtimeMu.Unlock()
 		if m.watchCancel != nil {
 			m.watchCancel()

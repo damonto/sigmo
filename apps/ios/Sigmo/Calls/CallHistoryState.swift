@@ -51,20 +51,15 @@ final class CallHistoryState {
         loading = true
         defer { if current == revision { loading = false } }
         do {
-            let aggregate = session.capabilities?.contains("callHistory") == true
-            let (records, cursor) = try await session.protectedRequest { api, token in
-                if aggregate {
-                    let page = try await api.callHistory(search: query, cursor: next, missed: missed, modemID: modemID, token: token)
-                    return (page.items, page.nextCursor)
-                }
-                return (try await api.calls(modemID: modemID, search: query, token: token), "")
+            let page = try await session.protectedRequest { api, token in
+                try await api.callHistory(search: query, cursor: next, missed: missed, modemID: modemID, token: token)
             }
             guard current == revision, self.line?.matches(line) == true, !Task.isCancelled else { return }
             var byID = Dictionary((more ? items : []).map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
-            for record in records { byID[record.id] = record }
+            for record in page.items { byID[record.id] = record }
             items = byID.values.map { (record: $0, date: $0.date) }
                 .sorted { ($0.date, $0.record.id) > ($1.date, $1.record.id) }.map(\.record)
-            self.cursor = cursor
+            cursor = page.nextCursor
             loadedSearch = query
             loadedMissed = missed
             loaded = true
@@ -76,14 +71,12 @@ final class CallHistoryState {
         guard record.terminal, let line, !deleting else { return false }
         revision += 1
         loading = false
-        let current = revision, modemID = modemID
+        let current = revision
         deleting = true
         defer { if current == revision { deleting = false } }
         do {
-            let aggregate = session.capabilities?.contains("callHistory") == true
             try await session.protectedRequest { api, token in
-                if aggregate { try await api.deleteCallHistory(record.id, token: token) }
-                else { try await api.deleteCall(modemID: modemID, id: record.id, token: token) }
+                try await api.deleteCallHistory(record.id, token: token)
             }
             guard current == revision, self.line?.matches(line) == true, !Task.isCancelled else { return false }
             items.removeAll { $0.id == record.id }

@@ -26,7 +26,7 @@ func (s *cleanupStack) Close(ctx context.Context) error {
 	return result
 }
 
-func superviseRunner(ctx context.Context, name string, runner Runner) error {
+func superviseRunner(ctx context.Context, name string, runner func(context.Context) error) error {
 	if runner == nil {
 		return fmt.Errorf("%s runner is nil", name)
 	}

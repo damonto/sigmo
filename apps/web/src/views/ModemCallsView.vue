@@ -79,10 +79,12 @@ const {
 const {
   recentCalls,
   hasRecentCalls,
+  hasMore,
   isLoading,
   isDeletingCallID,
   deleteRecord,
   loadCalls,
+  loadMoreCalls,
   setSearchQuery,
   errorMessage: historyError,
 } = useDeviceCallHistory(modemId)
@@ -437,6 +439,15 @@ watch(dialpadOpen, async (open) => {
               </div>
             </div>
           </CallHistoryRow>
+          <Button
+            v-if="hasMore"
+            class="w-full"
+            variant="outline"
+            :disabled="isLoading"
+            @click="loadMoreCalls"
+          >
+            {{ t('communication.more') }}
+          </Button>
         </section>
       </div>
 

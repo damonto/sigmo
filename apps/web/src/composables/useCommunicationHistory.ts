@@ -3,7 +3,6 @@ import { sessionRevision } from '@/lib/authSession'
 import { useRoute } from 'vue-router'
 import { communicationApi } from '@/apis/communication'
 import { useContacts } from '@/composables/useContacts'
-import { useCapabilities } from '@/composables/useCapabilities'
 import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
 import type { MessageThread, ThreadMessage, SIMLine } from '@/types/communication'
 import type { CallRecord } from '@/types/call'
@@ -12,10 +11,6 @@ import type { CallRecord } from '@/types/call'
 export const useCommunicationHistory = (kind: 'messages' | 'thread' | 'calls') => {
   const route = useRoute()
   const contacts = useContacts()
-  const capabilities = useCapabilities()
-  const supported = computed(() =>
-    capabilities.hasFeature(kind === 'calls' ? 'callHistory' : 'messageThreads'),
-  )
   const search = ref('')
   const loading = ref(true)
   const error = ref('')
@@ -82,8 +77,6 @@ export const useCommunicationHistory = (kind: 'messages' | 'thread' | 'calls') =
     loading.value = true
     error.value = ''
     try {
-      await capabilities.fetchCapabilities()
-      if (!supported.value || current !== generation) return
       void loadMetadata(current)
       if (kind === 'calls') {
         const page = await communicationApi.calls({
@@ -211,7 +204,6 @@ export const useCommunicationHistory = (kind: 'messages' | 'thread' | 'calls') =
       formatNumber(participant.value, thread.value?.latestMessage.profileId),
     ),
     originalModemID: computed(() => thread.value?.latestMessage.modemId ?? ''),
-    supported,
     load,
     deleteCurrent,
     acknowledge,

@@ -1,22 +1,18 @@
-// Package feature defines application capabilities and their authorization policy.
+// Package feature defines licensed features and their authorization policy.
 package feature
 
-// Name identifies an application capability in registration and policy checks.
+// Name identifies a licensed feature in registration and policy checks.
 type Name string
 
 const (
-	WiFiCalling        Name = "wifiCalling"
-	VoLTE              Name = "volte"
-	NativeCalls        Name = "nativeCalls"
-	CallHistory        Name = "callHistory"
-	ESIMTransfer       Name = "esimTransfer"
-	Contacts           Name = "contacts"
-	MessageThreads     Name = "messageThreads"
-	HistoryAssignments Name = "historyAssignments"
+	WiFiCalling  Name = "wifiCalling"
+	VoLTE        Name = "volte"
+	ESIMTransfer Name = "esimTransfer"
+	MDN          Name = "mdn"
 )
 
 // Policy evaluates the current user's entitlement on every request.
-// A zero policy permits base features and denies licensed features.
+// A zero policy denies all licensed features.
 type Policy struct{ authorized func() bool }
 
 // NewPolicy uses the live entitlement, including its expiry and revocation.
@@ -29,10 +25,8 @@ func (p Policy) Allows(name Name) bool {
 
 func allows(name Name, authorized bool) bool {
 	switch name {
-	case WiFiCalling, VoLTE, ESIMTransfer:
+	case WiFiCalling, VoLTE, ESIMTransfer, MDN:
 		return authorized
-	case NativeCalls, CallHistory, Contacts, MessageThreads, HistoryAssignments:
-		return true
 	default:
 		return false
 	}

@@ -29,7 +29,6 @@ const {
   participant,
   participantLabel,
   originalModemID,
-  supported,
   load,
   deleteCurrent,
   acknowledge,
@@ -70,14 +69,11 @@ const remove = async () => {
   >
     <ModemMessageThreadHeader
       :title="match(participant)?.name || participantLabel || t('communication.messages')"
-      :can-delete="supported && !!participant"
+      :can-delete="!!participant"
       @back="router.push({ name: 'messages' })"
       @delete="deleting = true"
     >
-      <template
-        v-if="supported"
-        #actions="{ actionComponent, activateEvent }"
-      >
+      <template #actions="{ actionComponent, activateEvent }">
         <component
           :is="actionComponent"
           :disabled="!participant"
@@ -110,12 +106,6 @@ const remove = async () => {
       @scroll="updateScrollPosition"
     >
       <MessageThreadSkeleton v-if="loading && !messages.length" />
-      <p
-        v-else-if="!supported"
-        class="text-sm text-muted-foreground"
-      >
-        {{ t('communication.upgrade') }}
-      </p>
       <template v-else>
         <Button
           v-if="cursor"
@@ -139,10 +129,7 @@ const remove = async () => {
         />
       </template>
     </div>
-    <div
-      v-if="supported"
-      class="border-t pt-3"
-    >
+    <div class="border-t pt-3">
       <Button
         class="w-full gap-2"
         :disabled="!participant"

@@ -30,7 +30,7 @@ func TestPackUnpack(t *testing.T) {
 }
 
 func TestPackValidatesAllFiles(t *testing.T) {
-	for _, name := range []string{"schema", "entitlement", "wfc", "ims"} {
+	for _, name := range []string{"schema", "entitlement", "wfc", "ims", "mdn", "empty mdn"} {
 		t.Run(name, func(t *testing.T) {
 			files := Files{SchemaVersion: 1, Entitlement: json.RawMessage(`[]`), WFC: json.RawMessage(`[]`), IMS: json.RawMessage(`[]`)}
 			switch name {
@@ -42,10 +42,31 @@ func TestPackValidatesAllFiles(t *testing.T) {
 				files.WFC = json.RawMessage(`{}`)
 			case "ims":
 				files.IMS = json.RawMessage(`[{"unknown":true}]`)
+			case "mdn":
+				files.MDN = json.RawMessage(`null`)
+			case "empty mdn":
+				files.MDN = json.RawMessage{}
 			}
 			if _, _, err := Pack(files); err == nil {
 				t.Fatal("accepted invalid files")
 			}
 		})
+	}
+}
+
+func TestMDNCatalogCompatibility(t *testing.T) {
+	files := Files{SchemaVersion: 1, Entitlement: json.RawMessage(`[]`), WFC: json.RawMessage(`[]`), IMS: json.RawMessage(`[]`)}
+	old, err := Parse(files)
+	if err != nil || old.MDN == nil || !old.MDN.Empty() {
+		t.Fatalf("legacy catalog = %+v, %v", old, err)
+	}
+	files.MDN = json.RawMessage(`[{"mcc":"001","mnc":"01","entitlementServer":"https://carrier.example/mdn","protocolVersion":"2","signingVersion":2,"userAgent":"test","countryISO":"GB"}]`)
+	data, rev, err := Pack(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Unpack(data, rev)
+	if err != nil || current.MDN.Empty() {
+		t.Fatalf("MDN catalog lost in packaging: %v", err)
 	}
 }

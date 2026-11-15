@@ -396,8 +396,7 @@ final class NativePushState {
             next.connections.removeAll { $0.configurationID == session.id }
             next.connections.append(connection)
             var binding = next.bindings.first { $0.backendID == overview.backendId }
-            let callsAvailable = session.capabilities?.contains("nativeCalls") == true && voipReady
-            if binding == nil && ((allowed && registeredToken != nil) || callsAvailable) {
+            if binding == nil && ((allowed && registeredToken != nil) || voipReady) {
                 let value = PushBinding(id: UUID().uuidString, backendID: overview.backendId, sendToken: PushIdentity.credential())
                 let record = PushDecryptionKey(backendID: overview.backendId, key: SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) })
                 try persistence.write("key-" + value.id, JSONEncoder().encode(record), true)
@@ -410,7 +409,7 @@ final class NativePushState {
             merge(MessageBadge(backendId: overview.backendId, revision: overview.revision, unreadCount: overview.unreadCount))
             guard backends.insert(overview.backendId).inserted else { failures[session.id] = nil; return }
             guard var binding, let identity else { failures[session.id] = nil; return }
-            binding.calls = binding.allowsCalls && callsAvailable
+            binding.calls = binding.allowsCalls && voipReady
             binding.enabled = binding.enabled && (allowed || binding.allowsCalls)
             binding.sms = binding.sms && allowed
             binding.reminders = binding.reminders && allowed

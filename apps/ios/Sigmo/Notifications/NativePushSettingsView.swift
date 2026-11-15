@@ -23,7 +23,6 @@ struct NativePushSettingsView: View {
                         Toggle("push.sms", isOn: Binding(get: { binding.sms }, set: { push.setPreferences(sessionID: session.id, sms: $0) }))
                         Toggle("push.reminders", isOn: Binding(get: { binding.reminders }, set: { push.setPreferences(sessionID: session.id, reminders: $0) }))
                         Toggle("calls.incomingCalls", isOn: Binding(get: { binding.allowsCalls }, set: { push.setPreferences(sessionID: session.id, calls: $0) }))
-                            .disabled(session.capabilities?.contains("nativeCalls") != true)
                         LabeledContent("push.status", value: push.registered.contains(binding.id) ? String(localized: "push.synced") : String(localized: "push.pending"))
                     } footer: { Text("push.previewExplanation") }
                 } else {

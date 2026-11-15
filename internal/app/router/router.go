@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -122,7 +121,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 	appInfoHandler := appinfo.New(deps.Build)
 	v1.GET("/app", appInfoHandler.Get)
 
-	capabilityHandler := capability.New(append(slices.Clone(deps.Features), feature.Contacts, feature.MessageThreads, feature.HistoryAssignments), deps.Policy)
+	capabilityHandler := capability.New(deps.Features, deps.Policy)
 	v1.GET("/capabilities", capabilityHandler.List)
 
 	authHandler := hauth.New(deps.Store, authStore)

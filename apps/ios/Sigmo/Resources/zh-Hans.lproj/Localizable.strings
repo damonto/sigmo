@@ -97,7 +97,6 @@
 "capability.esimTransfer" = "eSIM 快速转移";
 "capability.wifiCalling" = "Wi-Fi 通话";
 "capability.volte" = "VoLTE";
-"capability.nativeCalls" = "原生通话";
 "devices.title" = "设备";
 "devices.count" = "设备数量";
 "devices.empty" = "尚无已连接设备";
@@ -1099,7 +1098,6 @@
 "communication.lineUnavailable" = "上次使用的线路不可用，请重新选择。";
 "communication.noLines" = "没有可用线路，请先在设备中启用 SIM。";
 "communication.loading" = "正在加载…";
-"communication.callsUnavailable" = "此 Sigmo 后端不支持通话记录。";
 "communication.deletedNumber" = "号码已删除";
 "communication.deletedLines" = "已删除号码的历史记录";
 "communication.assign" = "接管历史记录";

@@ -35,7 +35,6 @@ const {
   cursor,
   visibleCalls,
   missedOnly,
-  supported,
   load,
   deleteCurrent,
   match,
@@ -80,86 +79,74 @@ const remove = async () => {
     >
       {{ error }}
     </p>
-    <template v-if="supported || loading">
-      <HistoryAssignments
-        v-if="supported"
-        @changed="load()"
-      />
-      <div class="grid flex-1 gap-6 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-stretch">
-        <div class="min-w-0 space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:gap-4 lg:space-y-0">
-          <CommunicationSearchInput
-            v-model="search"
-            :placeholder="t('modemDetail.calls.searchPlaceholder')"
-            :clear-label="t('modemDetail.calls.clearSearch')"
-          />
-          <CommunicationHistoryFilter
-            v-model="missedOnly"
-            :label="t('communication.filters')"
-            :all-label="t('communication.all')"
-            :filtered-label="t('communication.missed')"
-          />
-          <div
-            class="scrollbar-none space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto"
-            :aria-busy="loading"
-          >
-            <CallListSkeleton v-if="loading && !visibleCalls.length" />
-            <p
-              v-else-if="!visibleCalls.length && !error"
-              class="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground"
-            >
-              {{ t('communication.emptyCalls') }}
-            </p>
-            <div
-              v-else
-              class="space-y-3"
-            >
-              <CallHistoryRow
-                v-for="call in visibleCalls"
-                :key="call.callID"
-                :call="call"
-                :title="match(call.number)?.name || formatNumber(call.number, call.profileId)"
-                :source="sourceLabel(call.profileId || '', call.lineLabel)"
-                :state="stateLabel(call.state)"
-                :route="routeLabel(call.route)"
-                :duration="callDurationLabel(call)"
-                :callback-disabled="
-                  !call.number || (call.state !== 'ended' && call.state !== 'failed')
-                "
-                @select="selection = call"
-                @callback="dialpadRef?.open(call.number, call.modemId)"
-              >
-                <template #avatar>
-                  <ContactAvatar
-                    :id="match(call.number)?.id"
-                    :name="match(call.number)?.name || call.number"
-                    :has-avatar="match(call.number)?.hasAvatar"
-                    :updated-at="match(call.number)?.updatedAt"
-                  />
-                </template>
-              </CallHistoryRow>
-            </div>
-            <Button
-              v-if="cursor"
-              :disabled="loading"
-              variant="outline"
-              @click="load(true)"
-              >{{ t('communication.more') }}</Button
-            >
-          </div>
-        </div>
-        <CommunicationDialpad
-          v-if="supported"
-          ref="dialpadRef"
-          @dialed="load()"
+    <HistoryAssignments @changed="load()" />
+    <div class="grid flex-1 gap-6 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-stretch">
+      <div class="min-w-0 space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:gap-4 lg:space-y-0">
+        <CommunicationSearchInput
+          v-model="search"
+          :placeholder="t('modemDetail.calls.searchPlaceholder')"
+          :clear-label="t('modemDetail.calls.clearSearch')"
         />
+        <CommunicationHistoryFilter
+          v-model="missedOnly"
+          :label="t('communication.filters')"
+          :all-label="t('communication.all')"
+          :filtered-label="t('communication.missed')"
+        />
+        <div
+          class="scrollbar-none space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto"
+          :aria-busy="loading"
+        >
+          <CallListSkeleton v-if="loading && !visibleCalls.length" />
+          <p
+            v-else-if="!visibleCalls.length && !error"
+            class="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground"
+          >
+            {{ t('communication.emptyCalls') }}
+          </p>
+          <div
+            v-else
+            class="space-y-3"
+          >
+            <CallHistoryRow
+              v-for="call in visibleCalls"
+              :key="call.callID"
+              :call="call"
+              :title="match(call.number)?.name || formatNumber(call.number, call.profileId)"
+              :source="sourceLabel(call.profileId || '', call.lineLabel)"
+              :state="stateLabel(call.state)"
+              :route="routeLabel(call.route)"
+              :duration="callDurationLabel(call)"
+              :callback-disabled="
+                !call.number || (call.state !== 'ended' && call.state !== 'failed')
+              "
+              @select="selection = call"
+              @callback="dialpadRef?.open(call.number, call.modemId)"
+            >
+              <template #avatar>
+                <ContactAvatar
+                  :id="match(call.number)?.id"
+                  :name="match(call.number)?.name || call.number"
+                  :has-avatar="match(call.number)?.hasAvatar"
+                  :updated-at="match(call.number)?.updatedAt"
+                />
+              </template>
+            </CallHistoryRow>
+          </div>
+          <Button
+            v-if="cursor"
+            :disabled="loading"
+            variant="outline"
+            @click="load(true)"
+            >{{ t('communication.more') }}</Button
+          >
+        </div>
       </div>
-    </template>
-    <p
-      v-else
-      class="rounded-lg border border-dashed p-4 text-sm text-muted-foreground"
-    >
-      {{ t('communication.upgradeCalls') }}
-    </p>
+      <CommunicationDialpad
+        ref="dialpadRef"
+        @dialed="load()"
+      />
+    </div>
     <Dialog
       :open="!!selection"
       @update:open="

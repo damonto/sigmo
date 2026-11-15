@@ -24,6 +24,32 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
+func TestCapabilitiesContainOnlyLicensedFeatures(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		authorized bool
+		want       string
+	}{
+		{"without Pro", false, `{"features":[]}` + "\n"},
+		{"with Pro", true, `{"features":["esimTransfer","mdn","volte","wifiCalling"]}` + "\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			deps := newTestConfig(t)
+			deps.Features = []feature.Name{feature.WiFiCalling, feature.VoLTE, feature.ESIMTransfer, feature.MDN}
+			deps.Policy = feature.NewPolicy(func() bool { return tt.authorized })
+			server := echo.New()
+			if err := Register(server, deps); err != nil {
+				t.Fatal(err)
+			}
+			response := httptest.NewRecorder()
+			server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/capabilities", nil))
+			if response.Code != http.StatusOK || response.Body.String() != tt.want {
+				t.Fatalf("capabilities = %d %s, want %s", response.Code, response.Body.String(), tt.want)
+			}
+		})
+	}
+}
+
 func TestRouteAccessBoundaries(t *testing.T) {
 	for _, tt := range []struct {
 		name            string

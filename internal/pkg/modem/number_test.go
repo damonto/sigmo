@@ -8,17 +8,17 @@ import (
 	wwanmodem "github.com/damonto/wwan-go/modem"
 )
 
-func TestFallbackNumber(t *testing.T) {
+func TestIMSNumber(t *testing.T) {
 	tests := []struct {
-		name     string
-		own      []string
-		fallback string
-		want     string
+		name string
+		own  []string
+		ims  string
+		want string
 	}{
-		{name: "missing modem number", fallback: "+15551234567", want: "+15551234567"},
-		{name: "empty modem record", own: []string{" "}, fallback: "+15551234567", want: "+15551234567"},
-		{name: "modem takes precedence", own: []string{"+15557654321"}, fallback: "+15551234567", want: "+15557654321"},
-		{name: "cleared fallback"},
+		{name: "missing modem number", ims: "+15551234567", want: "+15551234567"},
+		{name: "empty modem record", own: []string{" "}, ims: "+15551234567", want: "+15551234567"},
+		{name: "modem takes precedence", own: []string{"+15557654321"}, ims: "+15551234567", want: "+15557654321"},
+		{name: "cleared IMS number"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -26,8 +26,8 @@ func TestFallbackNumber(t *testing.T) {
 			info := wwanmodem.SIMInfo{Slot: 1, ICCID: "profile-a", State: wwanmodem.SIMStateReady, OwnNumbers: tt.own}
 			m.applySIMInfo(info)
 			target := m.Snapshot().SIMIdentity
-			if !m.SetFallbackNumber(target, "+15550000000") || !m.SetFallbackNumber(target, tt.fallback) {
-				t.Fatal("SetFallbackNumber rejected current SIM")
+			if !m.SetIMSNumber(target, "+15550000000") || !m.SetIMSNumber(target, tt.ims) {
+				t.Fatal("SetIMSNumber rejected current SIM")
 			}
 			m.applySIMInfo(info)
 			if got := m.Snapshot().Number; got != tt.want {
@@ -40,7 +40,7 @@ func TestFallbackNumber(t *testing.T) {
 	}
 }
 
-func TestFallbackNumberRejectsStaleSIM(t *testing.T) {
+func TestIMSNumberRejectsStaleSIM(t *testing.T) {
 	tests := []struct {
 		name   string
 		change func(*Modem)
@@ -67,12 +67,12 @@ func TestFallbackNumberRejectsStaleSIM(t *testing.T) {
 			m := &Modem{}
 			m.applySIMInfo(wwanmodem.SIMInfo{Slot: 1, ICCID: "profile-a", State: wwanmodem.SIMStateReady})
 			target := m.Snapshot().SIMIdentity
-			if !m.SetFallbackNumber(target, "+15551234567") {
-				t.Fatal("SetFallbackNumber rejected current SIM")
+			if !m.SetIMSNumber(target, "+15551234567") {
+				t.Fatal("SetIMSNumber rejected current SIM")
 			}
 			tt.change(m)
-			if m.SetFallbackNumber(target, "+15551234567") {
-				t.Fatal("SetFallbackNumber accepted stale SIM")
+			if m.SetIMSNumber(target, "+15551234567") {
+				t.Fatal("SetIMSNumber accepted stale SIM")
 			}
 			if got := m.Snapshot().Number; got != "" {
 				t.Fatalf("Number = %q after SIM change", got)
@@ -81,7 +81,7 @@ func TestFallbackNumberRejectsStaleSIM(t *testing.T) {
 	}
 }
 
-func TestFallbackNumberRequiresCurrentModemAndICCID(t *testing.T) {
+func TestIMSNumberRequiresCurrentModemAndICCID(t *testing.T) {
 	tests := []struct {
 		name string
 		sim  *SIM
@@ -94,20 +94,20 @@ func TestFallbackNumberRequiresCurrentModemAndICCID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &Modem{SIM: tt.sim}
 			other := &Modem{SIM: tt.sim}
-			if other.SetFallbackNumber(m.Snapshot().SIMIdentity, "+15551234567") {
-				t.Fatal("SetFallbackNumber accepted unknown or foreign identity")
+			if other.SetIMSNumber(m.Snapshot().SIMIdentity, "+15551234567") {
+				t.Fatal("SetIMSNumber accepted unknown or foreign identity")
 			}
 		})
 	}
 }
 
-func TestFallbackNumberConcurrentSIMChange(t *testing.T) {
+func TestIMSNumberConcurrentSIMChange(t *testing.T) {
 	m := &Modem{SIM: &SIM{Identifier: "profile-a"}, PrimarySIMSlot: 1}
 	target := m.Snapshot().SIMIdentity
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		for range 100 {
-			m.SetFallbackNumber(target, "+15551234567")
+			m.SetIMSNumber(target, "+15551234567")
 			m.Snapshot()
 		}
 	})
@@ -118,7 +118,7 @@ func TestFallbackNumberConcurrentSIMChange(t *testing.T) {
 	}
 }
 
-func TestFallbackNumberRecoversAfterSIMReactivation(t *testing.T) {
+func TestIMSNumberRecoversAfterSIMReactivation(t *testing.T) {
 	tests := []struct {
 		name   string
 		update func(*Modem, wwanmodem.SIMState)
@@ -138,7 +138,7 @@ func TestFallbackNumberRecoversAfterSIMReactivation(t *testing.T) {
 			m := simRefreshTestModem(path, 1, false)
 			m.applySIMInfo(wwanmodem.SIMInfo{Slot: 1, ICCID: "profile-a", State: wwanmodem.SIMStateReady})
 			old := m.Snapshot().SIMIdentity
-			if !m.SetFallbackNumber(old, "+15551234567") {
+			if !m.SetIMSNumber(old, "+15551234567") {
 				t.Fatal("initial number rejected")
 			}
 			registry := &Registry{modems: map[string]*Modem{path: m}}
@@ -154,7 +154,7 @@ func TestFallbackNumberRecoversAfterSIMReactivation(t *testing.T) {
 			if len(events) != 1 || events[0].SIMIdentifier != "" {
 				t.Fatalf("removal events = %+v, want one event with no active ICCID", events)
 			}
-			if m.SetFallbackNumber(old, "+15551234567") || m.Snapshot().Number != "" {
+			if m.SetIMSNumber(old, "+15551234567") || m.Snapshot().Number != "" {
 				t.Fatal("removed SIM retained a number or accepted an old observation")
 			}
 
@@ -163,10 +163,10 @@ func TestFallbackNumberRecoversAfterSIMReactivation(t *testing.T) {
 				t.Fatalf("reactivation events = %+v, want a second event for profile-a", events)
 			}
 			current := events[1].Modem.Snapshot().SIMIdentity
-			if current == old || !m.SetFallbackNumber(current, "+15557654321") {
+			if current == old || !m.SetIMSNumber(current, "+15557654321") {
 				t.Fatal("reactivation did not accept a new observation")
 			}
-			if m.SetFallbackNumber(old, "+15551234567") || m.Snapshot().Number != "+15557654321" {
+			if m.SetIMSNumber(old, "+15551234567") || m.Snapshot().Number != "+15557654321" {
 				t.Fatal("delayed observation overwrote the reactivated SIM number")
 			}
 			tt.update(m, wwanmodem.SIMStateReady)
@@ -185,8 +185,8 @@ func TestNumberChangeNotifications(t *testing.T) {
 	m.applySIMInfo(info)
 	target := m.Snapshot().SIMIdentity
 	m.applySIMInfo(info)
-	if !m.SetFallbackNumber(target, "+900") {
-		t.Fatal("fallback rejected")
+	if !m.SetIMSNumber(target, "+900") {
+		t.Fatal("IMS number rejected")
 	}
 	if len(observed) != 1 {
 		t.Fatalf("unchanged effective number emitted %d notifications", len(observed))
@@ -195,11 +195,11 @@ func TestNumberChangeNotifications(t *testing.T) {
 		t.Fatal("manual number rejected")
 	}
 	m.applySIMInfo(wwanmodem.SIMInfo{Slot: 1, ICCID: "sim-b", State: wwanmodem.SIMStateReady})
-	if m.SetNumber(target, "+999") || m.SetFallbackNumber(target, "+999") {
+	if m.SetNumber(target, "+999") || m.SetIMSNumber(target, "+999") {
 		t.Fatal("stale SIM number accepted")
 	}
-	if !m.SetFallbackNumber(m.Snapshot().SIMIdentity, "+300") {
-		t.Fatal("new SIM fallback rejected")
+	if !m.SetIMSNumber(m.Snapshot().SIMIdentity, "+300") {
+		t.Fatal("new SIM IMS number rejected")
 	}
 	if len(observed) != 3 {
 		t.Fatalf("observations = %+v, want three", observed)
@@ -237,5 +237,44 @@ func TestNumberChangeCallbackCanUpdateNumber(t *testing.T) {
 	wg.Wait()
 	if got := m.Snapshot().Number; got != "+200" {
 		t.Fatalf("number = %q, want subscriber's update", got)
+	}
+}
+
+func TestKnownNumberPriorityAndActivation(t *testing.T) {
+	m := &Modem{}
+	m.applySIMInfo(wwanmodem.SIMInfo{Slot: 1, ICCID: "sim-a", State: wwanmodem.SIMStateReady})
+	target := m.Snapshot().SIMIdentity
+	if !m.SetKnownNumber(target, "+100") {
+		t.Fatal("known number rejected")
+	}
+	m.SetIMSNumber(target, "+200")
+	if m.Snapshot().Number != "+200" {
+		t.Fatal("IMS did not take precedence")
+	}
+	m.SetIMSNumber(target, "")
+	if m.Snapshot().Number != "+100" {
+		t.Fatal("clearing IMS erased known number")
+	}
+	m.SetNumber(target, "+300")
+	if m.SetKnownNumber(target, "+400") || m.Snapshot().Number != "+300" {
+		t.Fatal("MDN replaced a current number")
+	}
+	m.applySIMInfo(wwanmodem.SIMInfo{Slot: 1, ICCID: "sim-b", State: wwanmodem.SIMStateReady})
+	m.applySIMInfo(wwanmodem.SIMInfo{Slot: 1, ICCID: "sim-a", State: wwanmodem.SIMStateReady})
+	if m.SetKnownNumber(target, "+999") || m.Snapshot().Number != "" {
+		t.Fatal("stale activation retained a known number")
+	}
+	target = m.Snapshot().SIMIdentity
+	m.SetIMSNumber(target, "+500")
+	if m.SetKnownNumber(target, "+999") {
+		t.Fatal("delayed MDN replaced IMS number")
+	}
+	m.SetIMSNumber(target, "")
+	if !m.SetKnownNumber(target, "+600") {
+		t.Fatal("current activation rejected")
+	}
+	m.InvalidateSIMActivation()
+	if m.SetKnownNumber(target, "+999") || m.Snapshot().Number != "" {
+		t.Fatal("invalidation retained known number")
 	}
 }

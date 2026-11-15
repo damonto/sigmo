@@ -75,6 +75,10 @@ func TestPendingTransferContinuesSameSession(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			queries, manages := 0, 0
+			downloadQueries := 0
+			if tt.installed {
+				downloadQueries = 1
+			}
 			client, err := ts43.New(&ts43.Config{
 				Logger:      slog.New(slog.DiscardHandler),
 				Entitlement: ts43.Entitlement{Server: "https://carrier.example", TransferType: ts43.TransferTypeTS43V8},
@@ -92,15 +96,19 @@ func TestPendingTransferContinuesSameSession(t *testing.T) {
 						manages++
 						body = `{"APPLICATION":{"OperationResult":1,"SubscriptionResult":1,"SubscriptionServiceURL":"https://carrier.example/websheet"}}`
 						if tt.installed {
-							body = `{"APPLICATION":{"OperationResult":1,"SubscriptionResult":2,"DownloadInfo":{"ProfileSmdpAddress":"smdp.example"}}}`
+							body = `{"APPLICATION":{"OperationResult":1,"SubscriptionResult":4}}`
 							if manages > 1 {
 								body = `{"APPLICATION":{"OperationResult":1,"SubscriptionResult":3}}`
 							}
 						}
 					case ts43.OperationAcquireConf:
 						queries++
+						if tt.installed && manages == 1 {
+							body = `{"APPLICATION":{"PrimaryConfiguration":{"ServiceStatus":3,"DownloadInfo":{"ProfileSmdpAddress":"smdp.example"}}}}`
+							break
+						}
 						body = `{"APPLICATION":{"PrimaryConfiguration":{"ServiceStatus":1,"DownloadInfo":{"ProfileSmdpAddress":"smdp.example"}}}}`
-						if queries == 1 {
+						if queries == downloadQueries+1 {
 							body = `{"APPLICATION":{"PrimaryConfiguration":{"ServiceStatus":2,"PollingInterval":0}}}`
 							if tt.queryError {
 								code = http.StatusServiceUnavailable
@@ -172,7 +180,7 @@ func TestPendingTransferContinuesSameSession(t *testing.T) {
 				t.Fatal("pending event was reported as completed")
 			}
 			if tt.cancel {
-				if !errors.Is(got.err, context.Canceled) || queries != 1 {
+				if !errors.Is(got.err, context.Canceled) || queries != downloadQueries+1 {
 					t.Fatalf("cancel result = %+v, queries = %d", got, queries)
 				}
 				return
@@ -181,7 +189,7 @@ func TestPendingTransferContinuesSameSession(t *testing.T) {
 			if tt.installed {
 				wantState, wantManages = ts43.StateDone, 2
 			}
-			if got.err != nil || got.result.State != wantState || manages != wantManages || queries != 2 {
+			if got.err != nil || got.result.State != wantState || manages != wantManages || queries != downloadQueries+2 {
 				t.Fatalf("result = %+v, err = %v, manages = %d, queries = %d", got.result, got.err, manages, queries)
 			}
 		})

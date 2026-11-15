@@ -1,7 +1,6 @@
 import { onBeforeUnmount, onMounted, watch, type Ref } from 'vue'
 import { buildCallEventsUrl } from '@/apis/call'
 import { useModemApi } from '@/apis/modem'
-import { useCapabilities } from '@/composables/useCapabilities'
 import { sessionRevision } from '@/lib/authSession'
 import { callInUseElsewhere } from '@/lib/callClient'
 import type { CallRecord } from '@/types/call'
@@ -47,7 +46,6 @@ export const useCallMonitor = (
   const sockets = new Map<string, WebSocket>()
   const ringing = new Map<string, { modemID: string; call: CallRecord }>()
   const ended = new Set<string>()
-  const capabilities = useCapabilities()
   let stopped = false
   let refreshing = false
   let timer: ReturnType<typeof setInterval> | undefined
@@ -66,8 +64,6 @@ export const useCallMonitor = (
     refreshing = true
     const revision = sessionRevision()
     try {
-      await capabilities.fetchCapabilities()
-      if (!capabilities.hasFeature('callHistory')) return
       const { data } = await useModemApi().getModems()
       if (stopped || revision !== sessionRevision()) return
       const ids = new Set((data.value ?? []).map((modem) => modem.id))

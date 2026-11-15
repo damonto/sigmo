@@ -1,6 +1,6 @@
 # Sigmo for iOS
 
-A native SwiftUI client for iPhone and iPad, with English and Simplified Chinese support. Connect to multiple Sigmo backends to manage devices, SIM/eSIM profiles, messages, calls, and settings. Available features depend on each backend's capabilities and Pro activation.
+A native SwiftUI client for iPhone and iPad, with English and Simplified Chinese support. Connect to multiple Sigmo backends to manage devices, SIM/eSIM profiles, messages, calls, and settings. Wi-Fi Calling, VoLTE, and eSIM Quick Transfer require Pro activation on the corresponding backend.
 
 ## Requirements
 

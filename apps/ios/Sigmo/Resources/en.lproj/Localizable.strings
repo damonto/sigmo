@@ -97,7 +97,6 @@
 "capability.esimTransfer" = "eSIM Quick Transfer";
 "capability.wifiCalling" = "Wi-Fi Calling";
 "capability.volte" = "VoLTE";
-"capability.nativeCalls" = "Native Calls";
 "devices.title" = "Devices";
 "devices.count" = "Device count";
 "devices.empty" = "No devices connected";
@@ -1099,7 +1098,6 @@
 "communication.lineUnavailable" = "The previously used line is unavailable. Choose another line.";
 "communication.noLines" = "No available lines. Activate a SIM in Devices first.";
 "communication.loading" = "Loading…";
-"communication.callsUnavailable" = "Call history is unavailable on this Sigmo backend.";
 "communication.deletedNumber" = "Number deleted";
 "communication.deletedLines" = "History from deleted numbers";
 "communication.assign" = "Assign history";

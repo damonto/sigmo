@@ -31,6 +31,7 @@ import (
 	appnetwork "github.com/damonto/sigmo/internal/app/network"
 	"github.com/damonto/sigmo/internal/app/router"
 	appupdate "github.com/damonto/sigmo/internal/app/update"
+	"github.com/damonto/sigmo/internal/app/websheet"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/license"
 	"github.com/damonto/sigmo/internal/pkg/lpa"
@@ -112,7 +113,7 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	restart := func() {
 		cancelApp(ErrRestart)
 	}
-	startRunner := func(name string, runner Runner) {
+	startRunner := func(name string, runner func(context.Context) error) {
 		runners.Go(func() error {
 			err := superviseRunner(ctx, name, runner)
 			if err != nil {
@@ -321,9 +322,14 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	if err != nil {
 		return fmt.Errorf("configure eSIM service: %w", err)
 	}
-	if err := configureFeatures(ctx, runtime); err != nil {
-		return fmt.Errorf("configure features: %w", err)
+	websheets := websheet.New(websheet.Config{PolicyID: func() string { return store.Snapshot().Auth.PolicyID() }})
+	runtime.AddRoute(router.WebsheetRoutes(websheets))
+	imsConnectivity, calls, err := configureIMS(ctx, runtime, websheets)
+	if err != nil {
+		return fmt.Errorf("configure IMS: %w", err)
 	}
+	configureESIMTransfer(runtime, websheets)
+	mdnService := configureMDN(runtime)
 
 	updateController, err := appupdate.NewController(appupdate.ControllerConfig{
 		Build:    cfg.Build,
@@ -428,9 +434,12 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	})
 	startRunner("message relay", relay.Run)
 
-	for _, runner := range runtime.runners {
-		startRunner(runner.name, runner.run)
-	}
+	startRunner("IMS connectivity", imsConnectivity.Run)
+	startRunner("calls", calls.Run)
+	startRunner("call forwarding", func(ctx context.Context) error {
+		return forwardCalls(ctx, relay, calls)
+	})
+	startRunner("missing SIM numbers", mdnService.Run)
 
 	startConfig := echo.StartConfig{
 		Address:         cfg.ListenAddress,

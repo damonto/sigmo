@@ -16,7 +16,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
-func configureIMS(ctx context.Context, runtime *Runtime, websheets *websheet.Broker) error {
+func configureIMS(ctx context.Context, runtime *Runtime, websheets *websheet.Broker) (*pims.Connectivity, *appcall.Calls, error) {
 	connectivity := pims.NewConnectivity(pims.ConnectivityConfig{
 		Store:              runtime.Storage,
 		CarrierConfig:      runtime.License.CarrierConfig,
@@ -31,7 +31,7 @@ func configureIMS(ctx context.Context, runtime *Runtime, websheets *websheet.Bro
 	runtime.SetInternetConnections(connectivity)
 	runtime.SetAirplaneModeLifecycle(connectivity)
 	if err := runtime.Storage.EndInterruptedCalls(ctx); err != nil {
-		return fmt.Errorf("reconcile interrupted calls: %w", err)
+		return nil, nil, fmt.Errorf("reconcile interrupted calls: %w", err)
 	}
 	calls := appcall.New(runtime.Storage, connectivity.WiFiCalling(), appcall.VoiceRoute{
 		Route: appcall.RouteVoLTE,
@@ -39,24 +39,19 @@ func configureIMS(ctx context.Context, runtime *Runtime, websheets *websheet.Bro
 	})
 	media, err := appcall.NewMedia(ctx, calls)
 	if err != nil {
-		return fmt.Errorf("configure call media: %w", err)
+		return nil, nil, fmt.Errorf("configure call media: %w", err)
 	}
 
-	runtime.AddFeatures(feature.WiFiCalling, feature.VoLTE, feature.NativeCalls, feature.CallHistory)
+	runtime.AddFeatures(feature.WiFiCalling, feature.VoLTE)
 	runtime.AddMCPTools(registerIMSMCP(runtime.Registry, connectivity, calls))
 	runtime.SetMessageRoute(connectivity.MessageRoute())
 	runtime.SetUSSDRoute(connectivity.USSDRoute())
 	runtime.AddModemOverview(wifiCallingOverview(connectivity.WiFiCallingStatus))
 	runtime.AddModemOverview(voLTEOverview(connectivity.VoLTEStatus))
-	runtime.AddRunner("IMS connectivity", connectivity.Run)
-	runtime.AddRunner("calls", calls.Run)
 	runtime.AddCleanup(media.Shutdown)
-	runtime.AddRunner("call forwarding", func(ctx context.Context) error {
-		return forwardCalls(ctx, runtime.Relay, calls)
-	})
 	runtime.AddRoute(router.IMSRoutes(connectivity))
 	runtime.AddRoute(router.CallRoutes(calls, media))
-	return nil
+	return connectivity, calls, nil
 }
 
 type wifiCallingStatusFunc func(context.Context, *mmodem.Modem) (pims.WiFiCallingStatus, error)

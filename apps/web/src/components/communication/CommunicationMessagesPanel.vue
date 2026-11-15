@@ -34,7 +34,6 @@ const {
   cursor,
   visibleThreads: threads,
   unreadOnly,
-  supported,
   load,
   deleteCurrent,
   match,
@@ -62,7 +61,6 @@ const remove = async () => {
       :subtitle="t('communication.messagesDescription')"
     />
     <Button
-      v-if="supported"
       class="hidden w-full gap-2 lg:inline-flex"
       @click="composing = true"
     >
@@ -70,7 +68,6 @@ const remove = async () => {
     </Button>
     <ModemMessagesSearch v-model="search" />
     <CommunicationHistoryFilter
-      v-if="supported"
       v-model="unreadOnly"
       :label="t('communication.filters')"
       :all-label="t('modemDetail.messages.all')"
@@ -83,21 +80,12 @@ const remove = async () => {
     >
       {{ error }}
     </p>
-    <HistoryAssignments
-      v-if="supported"
-      @changed="load()"
-    />
+    <HistoryAssignments @changed="load()" />
     <div
       class="scrollbar-none space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto"
       :aria-busy="loading"
     >
       <MessageListSkeleton v-if="loading && !threads.length" />
-      <p
-        v-else-if="!supported"
-        class="rounded-lg border border-dashed p-4 text-sm text-muted-foreground"
-      >
-        {{ t('communication.upgrade') }}
-      </p>
       <template v-else>
         <p
           v-if="!threads.length && !error"
@@ -145,7 +133,7 @@ const remove = async () => {
       </template>
     </div>
     <ModemMessagesFab
-      v-if="supported && !props.selectedThread"
+      v-if="!props.selectedThread"
       class="lg:hidden"
       :disabled="false"
       @click="composing = true"

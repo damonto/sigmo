@@ -17,9 +17,6 @@ const api = vi.hoisted(() => ({
 const route = reactive({ params: { threadId: 'one' } })
 vi.mock('vue-router', () => ({ useRoute: () => route }))
 vi.mock('@/apis/communication', () => ({ communicationApi: api }))
-vi.mock('@/composables/useCapabilities', () => ({
-  useCapabilities: () => ({ hasFeature: () => true, fetchCapabilities: async () => {} }),
-}))
 vi.mock('@/composables/useContacts', () => ({
   useContacts: () => ({ load: async () => {}, match: () => undefined }),
 }))

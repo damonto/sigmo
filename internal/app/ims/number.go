@@ -59,7 +59,7 @@ func (c *Connectivity) updateNumber(access Access, session *sessionState, info i
 	}
 	previousConflict := numbers.conflict
 	number := numbers.resolve()
-	if !modem.SetFallbackNumber(numbers.target, number) {
+	if !modem.SetIMSNumber(numbers.target, number) {
 		return
 	}
 	if numbers.conflict && !previousConflict {

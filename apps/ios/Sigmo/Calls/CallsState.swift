@@ -147,7 +147,6 @@ final class CallsState {
 
     func available(_ line: CallLine) -> Bool {
         !line.profileID.isEmpty && (try? session(for: line)) != nil && !clientID.isEmpty
-            && store.sessions[line.backendID]?.capabilities?.contains("nativeCalls") == true
     }
 
     var availableLines: [CallLine] {
@@ -651,7 +650,7 @@ final class CallsState {
 
     private func reconcileMonitors() {
         var wanted: Set<MonitorKey> = []
-        for session in store.sessions.values where session.canAccessDevices && session.capabilities?.contains("nativeCalls") == true {
+        for session in store.sessions.values where session.canAccessDevices {
             for modem in session.modems {
                 let line = CallLine(session: session, modem: modem)
                 guard foreground || calls.values.contains(where: { $0.line.id == line.id }) else { continue }

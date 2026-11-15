@@ -6,7 +6,6 @@ import { useModemPhoneCountry } from '@/composables/useModemPhoneCountry'
 
 import { useCallMonitor } from '@/composables/useCallMonitor'
 import { useContacts } from '@/composables/useContacts'
-import { useCapabilities } from '@/composables/useCapabilities'
 import { communicationDialKey } from '@/composables/useCommunicationDial'
 
 /** Pins media to its accepted device while observing the rest of the backend. */
@@ -47,26 +46,19 @@ export const useWorkspaceCalls = () => {
   })
 
   const contacts = useContacts()
-  const capabilities = useCapabilities()
   onMounted(async () => {
-    await capabilities.fetchCapabilities()
-    if (capabilities.hasFeature('contacts')) {
-      try {
-        await contacts.load()
-      } catch {
-        /* Use numbers while offline. */
-      }
+    try {
+      await contacts.load()
+    } catch {
+      /* Use numbers while offline. */
     }
   })
   watch(hasLiveCall, async (active) => {
     if (!active) return
-    await capabilities.fetchCapabilities()
-    if (capabilities.hasFeature('contacts')) {
-      try {
-        await contacts.load()
-      } catch {
-        /* Keep the number visible. */
-      }
+    try {
+      await contacts.load()
+    } catch {
+      /* Keep the number visible. */
     }
   })
   useCallMonitor(hasLiveCall, async (id, call) => {

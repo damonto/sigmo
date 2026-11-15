@@ -15,9 +15,6 @@ vi.mock('vue-router', () => ({
 }))
 vi.mock('@vueuse/core', () => ({ useMediaQuery: () => ref(true) }))
 vi.mock('@/apis/communication', () => ({ communicationApi: api }))
-vi.mock('@/composables/useCapabilities', () => ({
-  useCapabilities: () => ({ hasFeature: () => true, fetchCapabilities: async () => {} }),
-}))
 vi.mock('@/composables/useContacts', () => ({
   useContacts: () => ({ contacts, load: api.load, match: () => undefined }),
 }))

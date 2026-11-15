@@ -249,7 +249,6 @@ final class ModemDetailState {
     private func prepareHistoryAssignment(for profileID: String) async {
         let current = revision
         deletedHistoryProfileID = nil
-        guard session.capabilities?.contains("historyAssignments") == true else { return }
         do {
             // The deletion response is authoritative; history lookup must not wait for hardware refresh.
             let lines = try await session.communicationLines()

@@ -19,7 +19,6 @@ import ModemMessagesPanel from '@/components/modem/messages/ModemMessagesPanel.v
 import ModemMessageThreadDeleteDialog from '@/components/modem/messages/ModemMessageThreadDeleteDialog.vue'
 import ModemMessageThreadHeader from '@/components/modem/messages/ModemMessageThreadHeader.vue'
 import ModemMessageThreadList from '@/components/modem/messages/ModemMessageThreadList.vue'
-import { useCapabilities } from '@/composables/useCapabilities'
 import { useModemMessageThread } from '@/composables/useModemMessageThread'
 import { useModemPhoneCountry } from '@/composables/useModemPhoneCountry'
 import { useModemResource } from '@/composables/useModemResource'
@@ -28,7 +27,6 @@ import { useMessageVisibility } from '@/composables/useMessageVisibility'
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
-const { hasFeature } = useCapabilities()
 
 const modemId = computed(() => (route.params.id ?? 'unknown') as string)
 const participant = computed(() => (route.params.participant ?? '') as string)
@@ -180,7 +178,7 @@ watch(
         <template #actions="{ actionComponent, activateEvent }">
           <component
             :is="actionComponent"
-            v-if="!isNewConversation && hasFeature('callHistory')"
+            v-if="!isNewConversation"
             :disabled="!dial || !activeProfileId || dialing"
             @[activateEvent]="callParticipant"
           >

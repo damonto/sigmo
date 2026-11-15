@@ -805,10 +805,10 @@ func TestRuntimeSIMRoundTripPublishesNewActivation(t *testing.T) {
 			if events[0].PreviousSIMIdentifier != "profile-a" || events[0].SIMIdentifier != "profile-a" {
 				t.Fatalf("SIM round-trip event = %+v", events[0])
 			}
-			if m.SetFallbackNumber(previous, "+15551234567") {
+			if m.SetIMSNumber(previous, "+15551234567") {
 				t.Fatal("accepted an observation from the previous activation")
 			}
-			if !m.SetFallbackNumber(currentSIMIdentity(m), "+15557654321") {
+			if !m.SetIMSNumber(currentSIMIdentity(m), "+15557654321") {
 				t.Fatal("rejected an observation from the new activation")
 			}
 			m.notifySIMChanged(previous)

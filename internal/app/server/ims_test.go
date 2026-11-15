@@ -10,7 +10,6 @@ import (
 	"time"
 
 	appcall "github.com/damonto/sigmo/internal/app/call"
-	"github.com/damonto/sigmo/internal/app/feature"
 	"github.com/damonto/sigmo/internal/app/httpapi"
 	pims "github.com/damonto/sigmo/internal/app/ims"
 	"github.com/damonto/sigmo/internal/app/modemstatus"
@@ -37,7 +36,7 @@ func TestIMSCallHistoryAvailableWithoutPro(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if err := configureIMS(t.Context(), runtime, nil); err != nil {
+	if _, _, err := configureIMS(t.Context(), runtime, nil); err != nil {
 		t.Fatal(err)
 	}
 	server := echo.New()
@@ -64,11 +63,6 @@ func TestIMSCallHistoryAvailableWithoutPro(t *testing.T) {
 				t.Fatalf("status = %d, want %d: %s", response.Code, test.status, response.Body.String())
 			}
 		})
-	}
-	for _, name := range []feature.Name{feature.NativeCalls, feature.CallHistory} {
-		if !runtime.Policy.Allows(name) {
-			t.Errorf("base feature %q requires Pro authorization", name)
-		}
 	}
 }
 

@@ -8,9 +8,6 @@ vi.mock('@/apis/call', () => ({ buildCallEventsUrl: (id: string) => `ws://fixtur
 vi.mock('@/apis/modem', () => ({
   useModemApi: () => ({ getModems: async () => ({ data: { value: [{ id: 'a' }, { id: 'b' }] } }) }),
 }))
-vi.mock('@/composables/useCapabilities', () => ({
-  useCapabilities: () => ({ hasFeature: () => true, fetchCapabilities: async () => undefined }),
-}))
 class Socket {
   static instances: Socket[] = []
   onmessage: ((event: MessageEvent<string>) => void) | null = null

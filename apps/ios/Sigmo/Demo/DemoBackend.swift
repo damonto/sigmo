@@ -110,7 +110,7 @@ actor DemoBackend {
         if path == "license" { return try reply(DemoLicense(authorized: true, deviceId: "0123456789abcdef0123456789abcdef")) }
         if path == "app" { return try reply(settings.app) }
         if path == "capabilities" {
-            return try reply(["features": ["contacts", "messageThreads", "historyAssignments", "callHistory", "nativeCalls", "wifiCalling", "volte", "esimTransfer"]])
+            return try reply(["features": ["wifiCalling", "volte", "esimTransfer"]])
         }
         if path == "auth/methods" { return raw(AuthenticationFixture.methods(required: settings.otpRequired)) }
         if path == "auth/otp/challenges" { return raw(AuthenticationFixture.challenge) }

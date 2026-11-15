@@ -18,7 +18,6 @@ actor CommunicationFixture {
     private var held: CheckedContinuation<Void, Never>?
     private var arrival: CheckedContinuation<Void, Never>?
     private var heldPath: String?
-    private let features = ["contacts", "messageThreads", "historyAssignments", "callHistory", "nativeCalls"]
     private var directoryUnavailable = false
     private var assignmentStatus = 204
     private var failAssignmentRead = false
@@ -71,7 +70,7 @@ actor CommunicationFixture {
             if path.hasSuffix("/messages"), method == "POST" { return raw(#"{"to":"10086","conversationId":"sent"}"#) }
         }
         if path.hasSuffix("/auth/methods") { return raw(#"{"version":1,"mode":"none","methods":[]}"#) }
-        if path.hasSuffix("/capabilities") { return try reply(["features": features]) }
+        if path.hasSuffix("/capabilities") { return raw(#"{"features":[]}"#) }
         if path.hasSuffix("/contacts") {
             if method == "GET" {
                 let response = try reply(["items": contacts])
@@ -139,11 +138,11 @@ actor CommunicationFixture {
             if path.hasSuffix("/message-threads/archive-thread/messages") {
                 return raw(#"{"items":[\#(message)],"nextCursor":""}"#)
             }
-            if path.hasSuffix("/calls") {
+            if path.hasSuffix("/api/v1/calls") {
                 return raw(#"{"items":[{"callID":"archive-call","profileId":"a","historyProfileId":"a","modemId":"device-1","number":"+14155552671","route":"wifi_calling","direction":"incoming","state":"ended","reason":"normal","startedAt":"2026-10-13T08:00:00Z","answeredAt":"2026-10-13T08:00:05Z","endedAt":"2026-10-13T08:01:05Z","updatedAt":"2026-10-13T08:01:05Z"}],"nextCursor":""}"#)
             }
         }
-        if path.hasSuffix("/message-threads") || path.hasSuffix("/calls") { return raw(#"{"items":[],"nextCursor":""}"#) }
+        if path.hasSuffix("/message-threads") || path.hasSuffix("/api/v1/calls") { return raw(#"{"items":[],"nextCursor":""}"#) }
         return try await devices.respond(request)
     }
     static func line(_ id: String, available: Bool = true, modemID: String = "device-1", label: String? = nil, deletionState: String = "", present: Bool = true, messageCount: Int = 0, callCount: Int = 0) -> CommunicationLine {

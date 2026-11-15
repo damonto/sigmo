@@ -66,7 +66,7 @@ func TestSuperviseRunner(t *testing.T) {
 	tests := []struct {
 		name        string
 		cancel      bool
-		runner      Runner
+		runner      func(context.Context) error
 		wantErr     error
 		wantMessage string
 	}{

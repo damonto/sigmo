@@ -56,7 +56,7 @@ func TestSIMProfileSubscription(t *testing.T) {
 	if !current.SetNumber(current.Snapshot().SIMIdentity, "+999") {
 		t.Fatal("old modem observation rejected before registry validation")
 	}
-	if !replacement.SetFallbackNumber(replacement.Snapshot().SIMIdentity, "+300") {
+	if !replacement.SetIMSNumber(replacement.Snapshot().SIMIdentity, "+300") {
 		t.Fatal("IMS number rejected")
 	}
 	for _, event := range []modem.ModemEvent{
@@ -68,7 +68,7 @@ func TestSIMProfileSubscription(t *testing.T) {
 		}
 	}
 	assertNumbers(map[string]string{"sim-a": "+200", "sim-b": "+300"})
-	if !replacement.SetFallbackNumber(replacement.Snapshot().SIMIdentity, "") {
+	if !replacement.SetIMSNumber(replacement.Snapshot().SIMIdentity, "") {
 		t.Fatal("clearing IMS number rejected")
 	}
 	if err := registry.notify(modem.ModemEvent{Type: modem.ModemEventNumberChanged, Modem: replacement}); err != nil {
@@ -82,7 +82,7 @@ func TestSIMProfileSubscription(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range 20 {
 		wg.Go(func() {
-			if !replacement.SetFallbackNumber(target, "+400"+strconv.Itoa(i)) {
+			if !replacement.SetIMSNumber(target, "+400"+strconv.Itoa(i)) {
 				t.Error("concurrent number update rejected")
 				return
 			}
@@ -111,4 +111,29 @@ func (r *profileRegistry) Modems(context.Context) (map[string]*modem.Modem, erro
 func (r *profileRegistry) Subscribe(_ context.Context, notify func(modem.ModemEvent) error) (func(), error) {
 	r.notify = notify
 	return func() { r.notify = nil }, nil
+}
+
+func TestKnownNumberPersistsThroughSIMProfileEvents(t *testing.T) {
+	store, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "profiles.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	current := &modem.Modem{EquipmentIdentifier: "modem", SIM: &modem.SIM{Identifier: "sim-a"}}
+	registry := &profileRegistry{present: map[string]*modem.Modem{"modem": current}}
+	unsubscribe, err := subscribeSIMProfiles(t.Context(), registry, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unsubscribe()
+	if !current.SetKnownNumber(current.Snapshot().SIMIdentity, "+15551234567") {
+		t.Fatal("MDN observation rejected")
+	}
+	if err := registry.notify(modem.ModemEvent{Type: modem.ModemEventNumberChanged, Modem: current}); err != nil {
+		t.Fatal(err)
+	}
+	numbers, err := store.SIMProfileNumbers(t.Context(), []string{"sim-a"})
+	if err != nil || numbers["sim-a"] != "+15551234567" {
+		t.Fatalf("persisted numbers = %v, %v", numbers, err)
+	}
 }

@@ -25,14 +25,6 @@ final class CommunicationState {
         self.section = section
     }
 
-    var supported: Bool {
-        section != .calls || session.capabilities?.contains("callHistory") == true
-    }
-
-    var supportsComposer: Bool {
-        section != .calls || session.capabilities?.contains("nativeCalls") == true
-    }
-
     var contacts: [SigmoContact] {
         guard !search.isEmpty else { return session.savedContacts }
         return session.savedContacts.filter { contact in
@@ -54,7 +46,7 @@ final class CommunicationState {
     }
 
     func load(more: Bool = false, force: Bool = false) async {
-        guard supported, session.canAccessDevices, !Task.isCancelled else { return }
+        guard session.canAccessDevices, !Task.isCancelled else { return }
         guard !more || (!loading && !cursor.isEmpty) else { return }
         generation += 1
         let current = generation

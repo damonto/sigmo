@@ -210,7 +210,8 @@ If you wish to contribute or modify the source:
 ### Carrier configuration publishing
 
 From the repository root, use a private directory containing `entitlement.json`,
-`wfc.json`, and `ims.json`, and reuse the existing encryption key at
+`wfc.json`, `ims.json`, and optionally `mdn.json` for Pro phone-number lookup.
+Reuse the existing encryption key at
 `scripts/sigmo-keys/config-encryption.raw.b64`. Keep the carrier files and key
 outside version control.
 

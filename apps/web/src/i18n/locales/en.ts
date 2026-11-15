@@ -179,8 +179,6 @@ const en = {
     lineUnavailable: 'The previously used line is unavailable. Choose another line.',
     noLines: 'No available lines. Activate a SIM in Devices first.',
     loading: 'Loading…',
-    upgrade: 'Update this Sigmo backend to use this feature.',
-    upgradeCalls: 'Call history requires a backend with calling support.',
     deletedNumber: 'Number deleted',
     deletedLines: 'History from deleted numbers',
     assign: 'Assign history',

@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/damonto/sigmo/internal/pkg/mdn"
+
 	imsgo "github.com/damonto/ims-go"
 	ts43 "github.com/damonto/ts43-go"
 )
@@ -30,6 +32,7 @@ type Files struct {
 	Entitlement   json.RawMessage `json:"entitlement"`
 	WFC           json.RawMessage `json:"wfc"`
 	IMS           json.RawMessage `json:"ims"`
+	MDN           json.RawMessage `json:"mdn,omitempty"`
 }
 
 // Config contains immutable library catalogs that can be shared across clients.
@@ -37,6 +40,7 @@ type Config struct {
 	Entitlements *ts43.EntitlementConfigs
 	WFC          *ts43.WFCConfigs
 	IMS          *imsgo.CarrierProfiles
+	MDN          *mdn.Configs
 }
 
 // Parse validates all catalogs before any of them can be activated.
@@ -48,6 +52,7 @@ func Parse(files Files) (*Config, error) {
 	config.Entitlements = new(ts43.EntitlementConfigs)
 	config.WFC = new(ts43.WFCConfigs)
 	config.IMS = new(imsgo.CarrierProfiles)
+	config.MDN = new(mdn.Configs)
 	if err := json.Unmarshal(files.Entitlement, config.Entitlements); err != nil {
 		return nil, fmt.Errorf("decode entitlement configs: %w", err)
 	}
@@ -57,10 +62,15 @@ func Parse(files Files) (*Config, error) {
 	if err := json.Unmarshal(files.IMS, config.IMS); err != nil {
 		return nil, fmt.Errorf("decode IMS profiles: %w", err)
 	}
+	if files.MDN != nil {
+		if err := json.Unmarshal(files.MDN, config.MDN); err != nil {
+			return nil, fmt.Errorf("decode MDN profiles: %w", err)
+		}
+	}
 	return &config, nil
 }
 
-// Pack validates and compresses the three files into one immutable revision.
+// Pack validates and compresses the catalogs into one immutable revision.
 func Pack(files Files) ([]byte, string, error) {
 	if _, err := Parse(files); err != nil {
 		return nil, "", err

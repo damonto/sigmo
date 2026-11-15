@@ -168,8 +168,6 @@ const zh = {
     lineUnavailable: '上次使用的线路不可用，请重新选择。',
     noLines: '没有可用线路，请先在设备中启用 SIM。',
     loading: '正在加载…',
-    upgrade: '请升级此 Sigmo 后端以使用此功能。',
-    upgradeCalls: '通话记录需要支持通话的后端。',
     deletedNumber: '号码已删除',
     deletedLines: '已删除号码的历史记录',
     assign: '接管历史记录',

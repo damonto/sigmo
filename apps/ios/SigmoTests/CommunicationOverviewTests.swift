@@ -34,13 +34,13 @@ final class CommunicationOverviewTests: XCTestCase {
         XCTAssertEqual(state.contacts.map(\.session.id), [second.id])
     }
 
-    func testNativeCallsWithoutHistoryKeepsDialComposerAvailable() async throws {
-        let stub = BackendStub()
-        await stub.setCapabilities(status: 200, json: #"["nativeCalls"]"#)
-        let session = try testSession(stub)
-        await session.refresh(force: true)
+    func testCallsAndComposerAreAvailableWithoutLicensedFeatures() async throws {
+        let server = OverviewHistoryFixture(name: "Backend", days: [3])
+        let session = try await session("Backend", server: server)
         let state = CommunicationOverviewState(sessions: [session], section: .calls)
-        XCTAssertFalse(state.sources[0].supported)
+        XCTAssertEqual(session.capabilities, [])
+        await state.load()
+        XCTAssertEqual(state.calls.count, 1)
         XCTAssertEqual(state.creationSessions.map(\.id), [session.id])
     }
 

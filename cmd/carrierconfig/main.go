@@ -17,7 +17,7 @@ import (
 )
 
 func main() {
-	directory := flag.String("input", "", "directory containing the three private JSON files")
+	directory := flag.String("input", "", "directory containing private entitlement, WFC, IMS and optional MDN JSON catalogs")
 	output := flag.String("output", "", "directory for encrypted release and current.json")
 	keyFile := flag.String("key-file", "", "file containing the base64 storage key; otherwise use SIGMO_CONFIG_ENCRYPTION_KEY")
 	flag.Parse()
@@ -56,6 +56,11 @@ func run(directory, output string) error {
 		}
 		*target = data
 	}
+	mdnData, err := os.ReadFile(filepath.Join(directory, "mdn.json"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read mdn.json: %w", err)
+	}
+	files.MDN = mdnData
 	compressed, revision, err := carrierconfig.Pack(files)
 	if err != nil {
 		return err

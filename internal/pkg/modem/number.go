@@ -17,10 +17,11 @@ type SIMIdentity struct {
 	revision uint64
 }
 
-// SetFallbackNumber records a network-derived number for the specified SIM.
-// An empty number clears it. Modem-reported numbers always take precedence.
+// SetIMSNumber records an IMS-derived number for the specified SIM.
+// An empty number clears only the IMS observation, preserving MDN/history.
+// Modem-reported numbers always take precedence.
 // It returns false if the SIM or modem activation has changed.
-func (m *Modem) SetFallbackNumber(target SIMIdentity, number string) bool {
+func (m *Modem) SetIMSNumber(target SIMIdentity, number string) bool {
 	if m == nil || target.ICCID == "" {
 		return false
 	}
@@ -29,7 +30,26 @@ func (m *Modem) SetFallbackNumber(target SIMIdentity, number string) bool {
 		m.runtimeMu.Unlock()
 		return false
 	}
-	m.fallbackNumber = strings.TrimSpace(number)
+	m.imsNumber = strings.TrimSpace(number)
+	m.runtimeMu.Unlock()
+	m.notifyNumberChanged()
+	return true
+}
+
+// SetKnownNumber fills an empty number from history or an MDN entitlement.
+// It rejects stale activations and never replaces a number learned meanwhile.
+// IMS can subsequently take precedence without erasing this observation.
+func (m *Modem) SetKnownNumber(target SIMIdentity, number string) bool {
+	if m == nil || target.ICCID == "" || strings.TrimSpace(number) == "" {
+		return false
+	}
+	m.runtimeMu.Lock()
+	if target != m.simIdentityLocked() || strings.TrimSpace(m.Number) != "" ||
+		strings.TrimSpace(m.imsNumber) != "" || m.knownNumber != "" {
+		m.runtimeMu.Unlock()
+		return false
+	}
+	m.knownNumber = strings.TrimSpace(number)
 	m.runtimeMu.Unlock()
 	m.notifyNumberChanged()
 	return true
@@ -83,7 +103,8 @@ func (m *Modem) invalidateSIMIdentityLocked(previous SIMIdentity) {
 		return
 	}
 	m.simRevision++
-	m.fallbackNumber = ""
+	m.imsNumber = ""
+	m.knownNumber = ""
 }
 
 // InvalidateSIMActivation retires observations before a slot or profile refresh.
@@ -96,7 +117,8 @@ func (m *Modem) InvalidateSIMActivation() {
 	m.runtimeMu.Lock()
 	defer m.runtimeMu.Unlock()
 	m.simRevision++
-	m.fallbackNumber = ""
+	m.imsNumber = ""
+	m.knownNumber = ""
 	if m.SIM != nil {
 		m.SIM.PINStatus = wwanmodem.SIMPINStatus{Lock: wwanmodem.SIMLockUnknown}
 	}

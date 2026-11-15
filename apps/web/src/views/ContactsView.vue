@@ -31,7 +31,6 @@ const {
   search,
   visible,
   selected,
-  supported,
   loading,
   error,
   editor,
@@ -94,7 +93,6 @@ const restoreListFocus = (event: Event) => {
           :subtitle="t('communication.contactsDescription')"
         />
         <Button
-          v-if="supported"
           class="w-full gap-2"
           @click="create"
         >
@@ -105,15 +103,9 @@ const restoreListFocus = (event: Event) => {
           :placeholder="t('communication.searchContacts')"
           :clear-label="t('modemDetail.messages.clearSearch')"
         />
-        <p
-          v-if="!loading && !supported"
-          class="rounded-lg border border-dashed p-4 text-sm text-muted-foreground"
-        >
-          {{ t('communication.upgrade') }}
-        </p>
         <ContactListSkeleton v-if="loading && !visible.length" />
         <p
-          v-else-if="supported && !visible.length && !error"
+          v-else-if="!visible.length && !error"
           class="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground"
         >
           {{ t(search ? 'communication.noMatchingContacts' : 'communication.emptyContacts') }}
@@ -162,7 +154,7 @@ const restoreListFocus = (event: Event) => {
       >
         <ContactDetailSkeleton v-if="loading && !selected" />
         <ContactDetails
-          v-else-if="supported && selected"
+          v-else-if="selected"
           class="shrink-0 rounded-xl border bg-card p-6"
           :contact="selected"
           @edit="editor = selected"
@@ -174,7 +166,7 @@ const restoreListFocus = (event: Event) => {
           class="flex min-h-64 flex-1 flex-col items-center justify-center gap-3 rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground"
         >
           <ContactRound class="size-8" />
-          <p>{{ t(supported ? 'communication.selectContact' : 'communication.upgrade') }}</p>
+          <p>{{ t('communication.selectContact') }}</p>
         </div>
       </section>
     </div>
@@ -200,7 +192,7 @@ const restoreListFocus = (event: Event) => {
           class="rounded-none border-0 p-0"
         />
         <ContactDetails
-          v-else-if="supported && selected"
+          v-else-if="selected"
           :contact="selected"
           @edit="editor = selected"
           @delete="deleting = true"
@@ -210,7 +202,7 @@ const restoreListFocus = (event: Event) => {
           v-else
           class="text-sm text-muted-foreground"
         >
-          {{ error || t(supported ? 'errors.communication_not_found' : 'communication.upgrade') }}
+          {{ error || t('errors.communication_not_found') }}
         </p>
       </DialogContent>
     </Dialog>

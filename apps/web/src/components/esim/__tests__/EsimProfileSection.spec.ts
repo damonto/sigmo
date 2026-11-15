@@ -9,10 +9,6 @@ enableAutoUnmount(afterEach)
 const updateEsimNickname = vi.hoisted(() => vi.fn())
 const deleteEsim = vi.hoisted(() => vi.fn())
 
-vi.mock('@/composables/useCapabilities', () => ({
-  useCapabilities: () => ({ hasFeature: () => true }),
-}))
-
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
     t: (key: string) => key,

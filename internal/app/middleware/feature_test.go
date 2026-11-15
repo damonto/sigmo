@@ -16,17 +16,17 @@ func TestFeatureAuthorizationChangesWithoutRestart(t *testing.T) {
 	policy := feature.NewPolicy(func() bool { return authorized })
 	e := echo.New()
 	e.HTTPErrorHandler = httpapi.HTTPErrorHandler
-	e.GET("/capabilities", capability.New([]feature.Name{feature.WiFiCalling, feature.Contacts, feature.NativeCalls, feature.CallHistory}, policy).List)
+	e.GET("/capabilities", capability.New([]feature.Name{feature.WiFiCalling}, policy).List)
 	e.GET("/licensed", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) }, RequireFeature(policy, feature.WiFiCalling))
 	for _, allowed := range []bool{false, true, false} {
 		authorized = allowed
 		rec := httptest.NewRecorder()
 		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/licensed", nil))
 		want := http.StatusForbidden
-		features := `{"features":["callHistory","contacts","nativeCalls"]}` + "\n"
+		features := `{"features":[]}` + "\n"
 		if allowed {
 			want = http.StatusNoContent
-			features = `{"features":["callHistory","contacts","nativeCalls","wifiCalling"]}` + "\n"
+			features = `{"features":["wifiCalling"]}` + "\n"
 		}
 		if rec.Code != want {
 			t.Fatalf("authorized=%v: HTTP %d, want %d", allowed, rec.Code, want)

@@ -3,7 +3,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { useMediaQuery } from '@vueuse/core'
 import { communicationApi } from '@/apis/communication'
 import { useContacts } from '@/composables/useContacts'
-import { useCapabilities } from '@/composables/useCapabilities'
 import { sessionRevision } from '@/lib/authSession'
 import type { Contact } from '@/types/communication'
 
@@ -31,8 +30,6 @@ export const useContactsPage = () => {
       ? { name: 'modem-contact', params: { id: modemId.value, contactId } }
       : { name: 'contact', params: { contactId } }
   const { contacts, load, match } = useContacts()
-  const capability = useCapabilities()
-  const supported = computed(() => capability.hasFeature('contacts'))
   const search = ref('')
   const error = ref('')
   const loading = ref(true)
@@ -75,9 +72,7 @@ export const useContactsPage = () => {
     loading.value = true
     error.value = ''
     try {
-      await capability.fetchCapabilities()
-      if (current !== generation) return false
-      if (supported.value) await load(force)
+      await load(force)
       return current === generation
     } catch (reason) {
       if (current === generation)
@@ -136,7 +131,6 @@ export const useContactsPage = () => {
     search,
     visible,
     selected,
-    supported,
     loading,
     error,
     editor,

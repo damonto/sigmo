@@ -12,9 +12,6 @@ vi.mock('@/apis/communication', () => ({
   communicationApi: { contacts: vi.fn().mockResolvedValue({ items: [] }) },
 }))
 vi.mock('@/composables/useCallMonitor', () => ({ useCallMonitor: vi.fn() }))
-vi.mock('@/composables/useCapabilities', () => ({
-  useCapabilities: () => ({ hasFeature: () => false, fetchCapabilities: async () => undefined }),
-}))
 
 const route = vi.hoisted(() => ({
   params: {

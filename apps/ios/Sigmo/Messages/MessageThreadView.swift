@@ -52,11 +52,9 @@ struct MessageThreadView: View {
             Button("common.cancel", role: .cancel) { }
         }
         .toolbar {
-            if state.session.capabilities?.contains("nativeCalls") == true {
-                Button("communication.dial", systemImage: "phone") {
-                    if state.canUseActive { confirmCall = true } else { dialCurrent() }
-                }.disabled(calls.hasCall || state.modem == nil)
-            }
+            Button("communication.dial", systemImage: "phone") {
+                if state.canUseActive { confirmCall = true } else { dialCurrent() }
+            }.disabled(calls.hasCall || state.modem == nil)
             NavigationLink { SaveContactNumberView(session: state.session, number: state.conversation.participant) } label: { Label("communication.addContact", systemImage: "person.crop.circle.badge.plus") }
         }
         .detailErrorAlert(state.failure)

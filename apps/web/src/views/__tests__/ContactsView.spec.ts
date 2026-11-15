@@ -31,7 +31,6 @@ vi.mock('@/composables/useContactsPage', () => ({
       contactRoute: (contactId: string) => ({ name: 'contact', params: { contactId } }),
       selected,
       visible: ref([]),
-      supported: ref(true),
       loading,
       error: ref(''),
       search: ref(''),

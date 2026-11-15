@@ -96,13 +96,13 @@ actor CallsFixture {
         }
         let body = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] } ?? [:]
         if path.hasSuffix("/capabilities") {
-            return pagedHistory == nil ? response(#"{"features":["nativeCalls","wifiCalling","volte"]}"#)
-                : response(#"{"features":["nativeCalls","wifiCalling","volte","callHistory"]}"#)
+            return response(#"{"features":["wifiCalling","volte"]}"#)
         }
-        if path.hasSuffix("/api/v1/calls"), method == "GET", let pagedHistory {
+        if path.hasSuffix("/api/v1/calls"), method == "GET" {
+            let history = pagedHistory ?? records
             let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
             func value(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
-            let matching = pagedHistory.filter { (value("missed") != "true" || $0.missed)
+            let matching = history.filter { (value("missed") != "true" || $0.missed)
                 && (value("q").isEmpty || $0.number.contains(value("q"))) }
             let offset = Int(value("cursor")) ?? 0
             let items = Array(matching.dropFirst(offset).prefix(50))

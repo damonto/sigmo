@@ -15,7 +15,7 @@ it('waits for the shared capability request before either pane decides support',
     await new Promise<void>((resolve) => {
       release = resolve
     })
-    return { data: ref({ features: ['contacts', 'messageThreads'] }) }
+    return { data: ref({ features: ['wifiCalling', 'esimTransfer'] }) }
   })
   const list = useCapabilities()
   const detail = useCapabilities()
@@ -29,8 +29,8 @@ it('waits for the shared capability request before either pane decides support',
   expect(api.getCapabilities).toHaveBeenCalledTimes(1)
   release?.()
   await Promise.all([readList, readDetail])
-  expect(list.hasFeature('messageThreads')).toBe(true)
-  expect(detail.hasFeature('messageThreads')).toBe(true)
+  expect(list.hasFeature('esimTransfer')).toBe(true)
+  expect(detail.hasFeature('esimTransfer')).toBe(true)
   expect(detail.isLoading.value).toBe(false)
 })
 
@@ -44,7 +44,7 @@ it('refreshes again when authorization changes during an in-flight request', asy
       })
       return { data: ref({ features: ['wifiCalling'] }) }
     })
-    .mockResolvedValueOnce({ data: ref({ features: ['contacts'] }) })
+    .mockResolvedValueOnce({ data: ref({ features: [] }) })
   const capabilities = useCapabilities()
   const original = capabilities.fetchCapabilities()
   const refreshed = capabilities.fetchCapabilities(true)
@@ -53,7 +53,7 @@ it('refreshes again when authorization changes during an in-flight request', asy
   await Promise.all([original, refreshed, shared])
   expect(api.getCapabilities).toHaveBeenCalledTimes(2)
   expect(capabilities.hasFeature('wifiCalling')).toBe(false)
-  expect(capabilities.hasFeature('contacts')).toBe(true)
+  expect(capabilities.features.value).toEqual([])
   expect(capabilities.isLoading.value).toBe(false)
   await capabilities.fetchCapabilities()
   expect(api.getCapabilities).toHaveBeenCalledTimes(2)
