@@ -13,7 +13,7 @@ require (
 	github.com/go-playground/universal-translator v0.18.2
 	github.com/go-playground/validator/v10 v10.30.6
 	github.com/gorilla/websocket v1.5.3
-	github.com/labstack/echo/v5 v5.4.4
+	github.com/labstack/echo/v5 v5.4.6
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/ncruces/go-sqlite3 v0.37.0
 	github.com/nyaruka/phonenumbers v1.8.1
@@ -21,7 +21,7 @@ require (
 	github.com/pion/opus v0.1.1-0.20261026214112-e7b8aa55508c
 	github.com/pion/rtp v1.10.6
 	github.com/pion/webrtc/v4 v4.2.26
-	github.com/pressly/goose/v3 v3.29.0
+	github.com/pressly/goose/v3 v3.30.1
 	github.com/things-go/go-socks5 v0.1.4
 	github.com/wneessen/go-mail v0.8.2
 	golang.org/x/mod v0.43.0
@@ -37,8 +37,8 @@ require (
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
-	github.com/mfridman/interpolate v0.0.2 // indirect
-	github.com/ncruces/go-sqlite3-wasm/v6 v6.5.35401 // indirect
+	github.com/mfridman/interpolate v0.2.0 // indirect
+	github.com/ncruces/go-sqlite3-wasm/v6 v6.7.35401 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/pion/datachannel v1.6.4 // indirect
 	github.com/pion/dtls/v3 v3.1.15 // indirect
@@ -60,7 +60,7 @@ require (
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/crypto v0.59.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
