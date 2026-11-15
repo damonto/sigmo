@@ -132,7 +132,7 @@ func TestConversationHistoryIndexUpgradeRollsBackAndPreservesData(t *testing.T) 
 	// Recreate version 10, then reject the ledger write after CREATE INDEX.
 	for _, statement := range []string{
 		`DROP INDEX idx_messages_conversation_time`,
-		`DELETE FROM goose_db_version WHERE version_id = 11`,
+		`DELETE FROM goose_db_version WHERE version_id >= 11`,
 		`CREATE TRIGGER reject_history_index BEFORE INSERT ON goose_db_version
 		 WHEN NEW.version_id = 11 BEGIN SELECT RAISE(ABORT, 'injected index migration failure'); END`,
 	} {

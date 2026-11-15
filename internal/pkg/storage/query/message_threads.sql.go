@@ -365,12 +365,3 @@ func (q *Queries) ThreadParticipant(ctx context.Context, id string) (string, err
 	err := row.Scan(&participant_key)
 	return participant_key, err
 }
-
-const tombstoneThreadMessages = `-- name: TombstoneThreadMessages :exec
-INSERT OR IGNORE INTO deleted_messages(fingerprint) SELECT fingerprint FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE participant_key = ?) AND fingerprint <> ''
-`
-
-func (q *Queries) TombstoneThreadMessages(ctx context.Context, participantKey string) error {
-	_, err := q.db.ExecContext(ctx, tombstoneThreadMessages, participantKey)
-	return err
-}

@@ -3,7 +3,6 @@ package ims
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -418,7 +417,7 @@ func (c *coordinator) forwardIncoming(ctx context.Context, modem *mmodem.Modem, 
 		ModemID:     modem.EquipmentIdentifier,
 		ProfileID:   profileID,
 		Source:      storage.MessageSourceRouted,
-		ExternalKey: incomingMessageKey(msg),
+		ExternalKey: strings.TrimSpace(msg.CallID),
 		Sender:      messagepkg.CanonicalAddress(ctx, modem, msg.From),
 		Recipient:   messagepkg.CanonicalAddress(ctx, modem, msg.To),
 		Text:        msg.Text,
@@ -430,20 +429,6 @@ func (c *coordinator) forwardIncoming(ctx context.Context, modem *mmodem.Modem, 
 	if err := c.onIncoming(ctx, IncomingSMS{ModemID: modem.EquipmentIdentifier, Message: stored}); err != nil {
 		slog.Warn("forward IMS SMS", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "error", err)
 	}
-}
-
-func incomingMessageKey(msg imsgo.SMS) string {
-	if callID := strings.TrimSpace(msg.CallID); callID != "" {
-		return callID
-	}
-	sum := sha256.Sum256([]byte(strings.Join([]string{
-		msg.From,
-		msg.To,
-		msg.ServiceCenter,
-		msg.Text,
-		msg.ReceivedAt.UTC().Format(time.RFC3339Nano),
-	}, "\x00")))
-	return "incoming:" + hex.EncodeToString(sum[:])
 }
 
 func newOutgoingMessageKey() (string, error) {

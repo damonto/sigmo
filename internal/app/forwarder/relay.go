@@ -283,14 +283,11 @@ func (r *Relay) ForwardRoutedSMS(ctx context.Context, modemID string, message st
 		slog.Debug("skipping stale routed SMS", "imei", modemID, "externalKey", message.ExternalKey, "timestamp", message.Timestamp)
 		return nil
 	}
-	inserted, err := r.messages.InsertMessage(ctx, message)
+	id, err := r.messages.InsertMessage(ctx, message)
 	if err != nil {
 		return err
 	}
-	if !inserted {
-		slog.Debug("skipping known routed SMS", "imei", modemID, "externalKey", message.ExternalKey)
-		return nil
-	}
+	message.ID = id
 	r.mu.Lock()
 	notifier := r.notifier
 	r.mu.Unlock()
@@ -336,15 +333,12 @@ func (r *Relay) forwardStoredModemSMS(ctx context.Context, receipt modemSMSRecei
 	if !receipt.stored.Incoming || receipt.stored.Source != storage.MessageSourceModem {
 		return nil
 	}
-	inserted, err := r.messages.InsertMessage(ctx, receipt.stored)
+	id, err := r.messages.InsertMessage(ctx, receipt.stored)
 	if err != nil {
 		return err
 	}
+	receipt.stored.ID = id
 	cleanupErr := r.deleteModemSMS(ctx, receipt)
-	if !inserted {
-		slog.Debug("skipping known modem SMS notification", "imei", receipt.stored.ModemID, "refs", receipt.refs)
-		return cleanupErr
-	}
 	if !freshIncomingMessage(receipt.stored, time.Now()) {
 		slog.Debug("skipping stale modem SMS notification", "imei", receipt.stored.ModemID, "refs", receipt.refs, "timestamp", receipt.stored.Timestamp)
 		return cleanupErr
@@ -403,7 +397,7 @@ func freshIncomingCall(call storage.Call, now time.Time) bool {
 
 func (r *Relay) formatStoredMessage(modemID string, message storage.Message) notifyevent.SMSEvent {
 	return notifyevent.SMSEvent{
-		ID:       storage.MessageFingerprint(message),
+		ID:       fmt.Sprintf("%s:%d", modemID, message.ID),
 		ModemID:  modemID,
 		Modem:    r.modemLabel(modemID),
 		From:     message.Sender,
@@ -495,17 +489,16 @@ func storageMessageFromModemSMS(ctx context.Context, m *modem.Modem, profileID s
 		sender, recipient = remote, number
 	}
 	return storage.Message{
-		ModemID:     m.EquipmentIdentifier,
-		ProfileID:   profileID,
-		Source:      storage.MessageSourceModem,
-		ExternalKey: messagepkg.ModemSMSKey(m.EquipmentIdentifier, sms),
-		Sender:      sender,
-		Recipient:   recipient,
-		Text:        sms.Text,
-		Timestamp:   sms.Timestamp,
-		Status:      messageStateName(sms.State),
-		Incoming:    incoming,
-		ModemRefs:   messagepkg.StorageModemRefs(m.EquipmentIdentifier, sms.Generation, sms.Refs),
+		ModemID:   m.EquipmentIdentifier,
+		ProfileID: profileID,
+		Source:    storage.MessageSourceModem,
+		Sender:    sender,
+		Recipient: recipient,
+		Text:      sms.Text,
+		Timestamp: sms.Timestamp,
+		Status:    messageStateName(sms.State),
+		Incoming:  incoming,
+		ModemRefs: messagepkg.StorageModemRefs(m.EquipmentIdentifier, sms.Generation, sms.Refs),
 	}
 }
 

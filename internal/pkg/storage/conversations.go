@@ -256,11 +256,6 @@ func (s *Store) DeleteConversation(ctx context.Context, id string) error {
 		return fmt.Errorf("begin conversation deletion: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }() // A committed deletion needs no rollback.
-	// Keep only the deduplication hashes. An inactive SIM can still contain these
-	// messages when it is next enabled; deleting history must not re-import them.
-	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO deleted_messages (fingerprint) SELECT fingerprint FROM messages WHERE conversation_id = ? AND fingerprint <> ''`, id); err != nil {
-		return fmt.Errorf("remember deleted messages: %w", err)
-	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM messages WHERE conversation_id = ?`, id); err != nil {
 		return fmt.Errorf("delete conversation messages: %w", err)
 	}

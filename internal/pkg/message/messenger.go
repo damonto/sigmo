@@ -1,18 +1,13 @@
 package message
 
 import (
-	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
-	"slices"
 	"strings"
-	"time"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -39,7 +34,6 @@ type modemDevice interface {
 	modem() *mmodem.Modem
 	profileID(context.Context) (string, error)
 	sendSMS(context.Context, string, string) (*mmodem.SMS, error)
-	listSMS(context.Context) ([]*mmodem.SMS, error)
 	deleteSMS(context.Context, []mmodem.MessageRef) error
 	modemID() string
 	generation() uint64
@@ -54,34 +48,22 @@ func New(store *storage.Store, route Route) *Messenger {
 	return &Messenger{store: store, route: route}
 }
 
+// ListConversations returns stored history for the modem's current SIM.
 func (s *Messenger) ListConversations(ctx context.Context, modem *mmodem.Modem, query string) ([]storage.Message, error) {
-	return s.listConversations(ctx, realModemDevice{modemRef: modem}, query)
-}
-
-func (s *Messenger) listConversations(ctx context.Context, device modemDevice, query string) ([]storage.Message, error) {
-	profileID, err := device.profileID(ctx)
+	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
-		return nil, err
-	}
-	if err := s.syncModemMessages(ctx, device, profileID); err != nil {
 		return nil, err
 	}
 	return s.store.ListConversations(ctx, profileID, query)
 }
 
+// ListByParticipant returns stored messages for a participant on the modem's current SIM.
 func (s *Messenger) ListByParticipant(ctx context.Context, modem *mmodem.Modem, participant string) ([]storage.Message, error) {
-	return s.listByParticipant(ctx, realModemDevice{modemRef: modem}, participant)
-}
-
-func (s *Messenger) listByParticipant(ctx context.Context, device modemDevice, participant string) ([]storage.Message, error) {
 	if strings.TrimSpace(participant) == "" {
 		return nil, ErrParticipantRequired
 	}
-	profileID, err := device.profileID(ctx)
+	profileID, err := modem.ProfileID(ctx)
 	if err != nil {
-		return nil, err
-	}
-	if err := s.syncModemMessages(ctx, device, profileID); err != nil {
 		return nil, err
 	}
 	return s.store.ListByParticipant(ctx, profileID, participant)
@@ -248,42 +230,12 @@ func uncertainSubmission(err error) bool {
 }
 
 func (s *Messenger) insertSentMessage(ctx context.Context, msg storage.Message) error {
-	inserted, err := s.store.InsertMessage(ctx, msg)
-	if err != nil {
+	if _, err := s.store.InsertMessage(ctx, msg); err != nil {
 		return err
-	}
-	if !inserted {
-		slog.Warn("sent SMS was not inserted",
-			"profile_id", msg.ProfileID,
-			"source", msg.Source,
-			"external_key", msg.ExternalKey,
-			"recipient", msg.Recipient,
-			"timestamp", msg.Timestamp,
-		)
 	}
 	if s.route != nil {
 		if err := s.route.ApplyPendingSMSStatus(ctx, msg); err != nil {
 			return fmt.Errorf("apply routed SMS status: %w", err)
-		}
-	}
-	return nil
-}
-
-func (s *Messenger) SyncModemMessages(ctx context.Context, modem *mmodem.Modem, profileID string) error {
-	return s.syncModemMessages(ctx, realModemDevice{modemRef: modem}, profileID)
-}
-
-func (s *Messenger) syncModemMessages(ctx context.Context, device modemDevice, profileID string) error {
-	messages, err := device.listSMS(ctx)
-	if err != nil {
-		return fmt.Errorf("list messages: %w", err)
-	}
-	for _, sms := range messages {
-		if sms == nil {
-			continue
-		}
-		if _, err := s.store.InsertMessage(ctx, messageFromModemSMS(ctx, device, profileID, sms)); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -297,53 +249,17 @@ func messageFromModemSMS(ctx context.Context, device modemDevice, profileID stri
 		sender, recipient = remote, device.phoneNumber()
 	}
 	return storage.Message{
-		ModemID:     device.modemID(),
-		ProfileID:   profileID,
-		Source:      storage.MessageSourceModem,
-		ExternalKey: ModemSMSKey(device.modemID(), sms),
-		Sender:      sender,
-		Recipient:   recipient,
-		Text:        sms.Text,
-		Timestamp:   sms.Timestamp,
-		Status:      messageStateName(sms.State),
-		Incoming:    incoming,
-		ModemRefs:   StorageModemRefs(device.modemID(), sms.Generation, sms.Refs),
+		ModemID:   device.modemID(),
+		ProfileID: profileID,
+		Source:    storage.MessageSourceModem,
+		Sender:    sender,
+		Recipient: recipient,
+		Text:      sms.Text,
+		Timestamp: sms.Timestamp,
+		Status:    messageStateName(sms.State),
+		Incoming:  incoming,
+		ModemRefs: StorageModemRefs(device.modemID(), sms.Generation, sms.Refs),
 	}
-}
-
-func ModemSMSKey(modemID string, sms *mmodem.SMS) string {
-	modemID = strings.TrimSpace(modemID)
-	if sms == nil {
-		return modemID + ":content:nil"
-	}
-	generation := ""
-	if sms.Generation != 0 {
-		generation = fmt.Sprintf("g%d:", sms.Generation)
-	}
-	refs := slices.Clone(sms.Refs)
-	slices.SortFunc(refs, func(a, b mmodem.MessageRef) int {
-		if a.Storage != b.Storage {
-			return cmp.Compare(a.Storage, b.Storage)
-		}
-		return cmp.Compare(a.ID, b.ID)
-	})
-	if len(refs) == 0 {
-		content := strings.Join([]string{
-			modemID,
-			fmt.Sprint(sms.State),
-			strings.TrimSpace(sms.Number),
-			sms.Text,
-			sms.Timestamp.UTC().Format(time.RFC3339Nano),
-		}, "\x00")
-		sum := sha256.Sum256([]byte(content))
-		return modemID + ":" + generation + "content:" + hex.EncodeToString(sum[:])
-	}
-	var key strings.Builder
-	key.WriteString(modemID + ":" + generation)
-	for _, ref := range refs {
-		key.WriteString(fmt.Sprintf("%d/%d,", ref.Storage, ref.ID))
-	}
-	return key.String()
 }
 
 func StorageModemRefs(modemID string, generation uint64, refs []mmodem.MessageRef) []storage.ModemMessageRef {
@@ -387,10 +303,6 @@ func (d realModemDevice) profileID(ctx context.Context) (string, error) {
 
 func (d realModemDevice) sendSMS(ctx context.Context, to string, text string) (*mmodem.SMS, error) {
 	return d.modemRef.Messaging().Send(ctx, to, text)
-}
-
-func (d realModemDevice) listSMS(ctx context.Context) ([]*mmodem.SMS, error) {
-	return d.modemRef.Messaging().List(ctx)
 }
 
 func (d realModemDevice) deleteSMS(ctx context.Context, refs []mmodem.MessageRef) error {

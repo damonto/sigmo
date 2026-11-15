@@ -20,21 +20,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return errors.New("storage is nil")
 	}
-	files, err := fs.Sub(migrations, "migrations")
+	provider, err := newMigrationProvider(s.db)
 	if err != nil {
-		return fmt.Errorf("open database migrations: %w", err)
-	}
-	provider, err := goose.NewProvider(goose.DialectSQLite3, s.db, files,
-		goose.WithDisableGlobalRegistry(true),
-		goose.WithGoMigrations(
-			goose.NewGoMigration(1, &goose.GoFunc{RunTx: migrateLegacy}, nil),
-			goose.NewGoMigration(3, &goose.GoFunc{RunTx: initializeMessageState}, nil),
-			goose.NewGoMigration(5, &goose.GoFunc{RunTx: migrateAuthentication}, nil),
-			goose.NewGoMigration(8, &goose.GoFunc{RunTx: migrateCommunicationKeys}, nil),
-		),
-	)
-	if err != nil {
-		return fmt.Errorf("configure database migrations: %w", err)
+		return err
 	}
 	current, target, err := provider.GetVersions(ctx)
 	if err != nil {
@@ -48,6 +36,26 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("migrate database: %w", err)
 	}
 	return nil
+}
+
+func newMigrationProvider(db *sql.DB) (*goose.Provider, error) {
+	files, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		return nil, fmt.Errorf("open database migrations: %w", err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, files,
+		goose.WithDisableGlobalRegistry(true),
+		goose.WithGoMigrations(
+			goose.NewGoMigration(1, &goose.GoFunc{RunTx: migrateLegacy}, nil),
+			goose.NewGoMigration(3, &goose.GoFunc{RunTx: initializeMessageState}, nil),
+			goose.NewGoMigration(5, &goose.GoFunc{RunTx: migrateAuthentication}, nil),
+			goose.NewGoMigration(8, &goose.GoFunc{RunTx: migrateCommunicationKeys}, nil),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("configure database migrations: %w", err)
+	}
+	return provider, nil
 }
 
 func initializeMessageState(ctx context.Context, tx *sql.Tx) error {

@@ -225,7 +225,7 @@ func TestReadAcknowledgmentCancellation(t *testing.T) {
 	}
 }
 
-func TestConversationDeleteDoesNotReturnOnModemSync(t *testing.T) {
+func TestConversationDeleteAllowsModemReimport(t *testing.T) {
 	s := testStore(t)
 	msg := Message{ProfileID: "sim-a", ModemID: "modem", Source: MessageSourceModem, ExternalKey: "old-ref", Sender: "10086", Recipient: "own", Text: "delete this", Incoming: true, Timestamp: time.Now()}
 	if _, err := s.InsertMessage(t.Context(), msg); err != nil {
@@ -243,11 +243,11 @@ func TestConversationDeleteDoesNotReturnOnModemSync(t *testing.T) {
 	}
 	msg.ExternalKey = "new-generation-ref"
 	msg.ProfileID = "sim-b"
-	if inserted, err := s.InsertMessage(t.Context(), msg); err != nil || inserted {
-		t.Fatalf("modem reimport = %v, %v", inserted, err)
+	if id, err := s.InsertMessage(t.Context(), msg); err != nil || id == 0 {
+		t.Fatalf("modem reimport = %v, %v", id, err)
 	}
 	snapshot, err := s.Conversations(t.Context(), ConversationFilter{})
-	if err != nil || len(snapshot.Items) != 1 || snapshot.Items[0].Participant != other.Sender {
+	if err != nil || len(snapshot.Items) != 2 {
 		t.Fatalf("remaining conversation = %+v, %v", snapshot, err)
 	}
 }

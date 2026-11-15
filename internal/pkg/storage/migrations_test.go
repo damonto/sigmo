@@ -98,8 +98,8 @@ func TestMigrationsRunOnce(t *testing.T) {
 		t.Fatalf("state after migration = %+v, want %+v, error = %v", after, before, err)
 	}
 	var versions int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM goose_db_version WHERE is_applied AND version_id > 0`).Scan(&versions); err != nil || versions != 10 {
-		t.Fatalf("applied migrations = %d, want 10, error = %v", versions, err)
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM goose_db_version WHERE is_applied AND version_id > 0`).Scan(&versions); err != nil || versions != 11 {
+		t.Fatalf("applied migrations = %d, want 11, error = %v", versions, err)
 	}
 }
 
@@ -214,6 +214,7 @@ func removeCommunicationSchema(t *testing.T, s *Store) {
 	// These tests simulate a complete historical schema, before authentication v2.
 	for _, statement := range []string{
 		`DROP INDEX idx_messages_conversation_time`,
+		`ALTER TABLE messages ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE sim_profiles DROP COLUMN icon`, `ALTER TABLE sim_profiles DROP COLUMN display_known`,
 		`DROP TABLE auth_credentials`, `DROP TABLE auth_sessions`,
 		`ALTER TABLE native_push_subscriptions RENAME COLUMN auth_session_id TO auth_token_hash`,

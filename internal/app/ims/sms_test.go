@@ -12,40 +12,6 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
-func TestIncomingMessageKey(t *testing.T) {
-	tests := []struct {
-		name string
-		msg  imsgo.SMS
-		want string
-	}{
-		{
-			name: "uses SIP call id",
-			msg: imsgo.SMS{
-				CallID: " sms-call-id ",
-			},
-			want: "sms-call-id",
-		},
-		{
-			name: "falls back to stable content hash",
-			msg: imsgo.SMS{
-				From:          "+100",
-				To:            "+200",
-				ServiceCenter: "+300",
-				Text:          "hello",
-				ReceivedAt:    time.Date(2026, 5, 24, 10, 0, 0, 0, time.UTC),
-			},
-			want: "incoming:43fb1fcec1abb693537998196debdb7c282d9b7136c646bbdd7ac549bd2a7774",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := incomingMessageKey(tt.msg); got != tt.want {
-				t.Fatalf("incomingMessageKey() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestNewOutgoingMessageKey(t *testing.T) {
 	first, err := newOutgoingMessageKey()
 	if err != nil {
@@ -375,12 +341,12 @@ func TestApplyPendingSMSStatusAfterStoreMiss(t *testing.T) {
 	}
 	c.updateStoredSMSStatus(t.Context(), msg.ModemID, msg.Recipient, statusUpdate)
 
-	inserted, err := store.InsertMessage(ctx, msg)
+	id, err := store.InsertMessage(ctx, msg)
 	if err != nil {
 		t.Fatalf("InsertMessage() error = %v", err)
 	}
-	if !inserted {
-		t.Fatal("InsertMessage() = false, want true")
+	if id == 0 {
+		t.Fatal("InsertMessage() returned a zero ID")
 	}
 	if err := c.ApplyPendingSMSStatus(ctx, msg); err != nil {
 		t.Fatalf("ApplyPendingSMSStatus() error = %v", err)
@@ -426,12 +392,12 @@ func TestApplyPendingSMSStatusIgnoresUnknown(t *testing.T) {
 		{Index: 0},
 	}})
 
-	inserted, err := store.InsertMessage(ctx, msg)
+	id, err := store.InsertMessage(ctx, msg)
 	if err != nil {
 		t.Fatalf("InsertMessage() error = %v", err)
 	}
-	if !inserted {
-		t.Fatal("InsertMessage() = false, want true")
+	if id == 0 {
+		t.Fatal("InsertMessage() returned a zero ID")
 	}
 	if err := c.ApplyPendingSMSStatus(ctx, msg); err != nil {
 		t.Fatalf("ApplyPendingSMSStatus() error = %v", err)

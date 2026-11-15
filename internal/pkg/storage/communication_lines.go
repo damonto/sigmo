@@ -129,7 +129,7 @@ type HistoryAssignment struct {
 // ErrInvalidAssignment prevents accidental movement of live or unidentified histories.
 var ErrInvalidAssignment = errors.New("history assignment requires a deleted source and a different existing target")
 
-// AssignHistory preserves carrier identities, read state, deduplication and recording keys.
+// AssignHistory preserves carrier identities, read state and recording keys.
 func (s *Store) AssignHistory(ctx context.Context, assignment HistoryAssignment) error {
 	source, target := assignment.SourceProfileID, assignment.TargetProfileID
 	if source == "" || target == "" || source == target {

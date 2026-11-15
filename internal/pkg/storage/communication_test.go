@@ -88,7 +88,7 @@ func insertThreadMessage(t *testing.T, s *Store, profile, number, key string) {
 	}
 }
 
-func TestThreadsKeepPerMessageReadsAndDeletionTombstones(t *testing.T) {
+func TestThreadsKeepPerMessageReadsAndDeleteHistory(t *testing.T) {
 	s := testStore(t)
 	insertThreadMessage(t, s, "a", "+14155552671", "first")
 	insertThreadMessage(t, s, "b", "+14155552671", "second")
@@ -119,9 +119,9 @@ func TestThreadsKeepPerMessageReadsAndDeletionTombstones(t *testing.T) {
 	if err := s.DeleteThread(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
-	var deleted int
-	if err := s.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM deleted_messages`).Scan(&deleted); err != nil || deleted != 2 {
-		t.Fatalf("tombstones = %d, %v", deleted, err)
+	remaining, err := s.MessageThreads(t.Context(), HistoryFilter{})
+	if err != nil || len(remaining.Items) != 1 || remaining.Items[0].ID != ThreadID("10086") {
+		t.Fatalf("threads after deletion = %+v, %v", remaining, err)
 	}
 	state, err = s.MessagesState(t.Context())
 	if err != nil || state.UnreadCount != 1 {

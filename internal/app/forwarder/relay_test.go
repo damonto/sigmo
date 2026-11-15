@@ -387,6 +387,32 @@ func TestModemSMSReady(t *testing.T) {
 	}
 }
 
+func TestForwardRoutedSMSProcessesRepeatedDelivery(t *testing.T) {
+	relay, store, notifications := newSMSRelay(t)
+	msg := storage.Message{
+		ProfileID: "sim-a", ModemID: "modem-a", Source: storage.MessageSourceRouted,
+		ExternalKey: "same-call", Sender: "10086", Recipient: "+100", Text: "hello",
+		Timestamp: time.Now(), Incoming: true, Routed: true, Status: "received",
+	}
+	for range 2 {
+		if err := relay.ForwardRoutedSMS(t.Context(), msg.ModemID, msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := notifications.Load(); got != 2 {
+		t.Fatalf("notifications = %d, want 2", got)
+	}
+	messages, err := store.ListByParticipant(t.Context(), msg.ProfileID, msg.Sender)
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("stored messages = %+v, %v", messages, err)
+	}
+	first := relay.formatStoredMessage(msg.ModemID, messages[0])
+	second := relay.formatStoredMessage(msg.ModemID, messages[1])
+	if first.ID == "" || second.ID == "" || first.ID == second.ID {
+		t.Fatalf("notification IDs = %q, %q, want distinct IDs", first.ID, second.ID)
+	}
+}
+
 func TestForwardStoredModemSMSStoresCleansAndNotifies(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
@@ -421,13 +447,14 @@ func TestForwardStoredModemSMSStoresCleansAndNotifies(t *testing.T) {
 			wantDeleteCalls: 1,
 		},
 		{
-			name:            "known replay",
-			incoming:        true,
-			timestamp:       now,
-			refs:            []modem.MessageRef{{Storage: wwanmodem.MessageStorageDevice, ID: 11}},
-			preinsert:       true,
-			wantStored:      1,
-			wantDeleteCalls: 1,
+			name:              "repeated delivery",
+			incoming:          true,
+			timestamp:         now,
+			refs:              []modem.MessageRef{{Storage: wwanmodem.MessageStorageDevice, ID: 11}},
+			preinsert:         true,
+			wantStored:        2,
+			wantDeleteCalls:   1,
+			wantNotifications: 1,
 		},
 		{
 			name:              "flash message without refs",
@@ -481,12 +508,12 @@ func TestForwardStoredModemSMSStoresCleansAndNotifies(t *testing.T) {
 				ModemRefs:   storedRefs,
 			}
 			if tt.preinsert {
-				inserted, err := store.InsertMessage(ctx, stored)
+				id, err := store.InsertMessage(ctx, stored)
 				if err != nil {
 					t.Fatalf("InsertMessage() error = %v", err)
 				}
-				if !inserted {
-					t.Fatal("InsertMessage() = false, want true")
+				if id == 0 {
+					t.Fatal("InsertMessage() returned a zero ID")
 				}
 			}
 
@@ -497,7 +524,10 @@ func TestForwardStoredModemSMSStoresCleansAndNotifies(t *testing.T) {
 					if err != nil {
 						t.Fatalf("ListByParticipant() before delete error = %v", err)
 					}
-					refsClearedBeforeDelete = len(messages) == 1 && len(messages[0].ModemRefs) == 0
+					refsClearedBeforeDelete = len(messages) == tt.wantStored
+					for _, message := range messages {
+						refsClearedBeforeDelete = refsClearedBeforeDelete && len(message.ModemRefs) == 0
+					}
 				},
 			}
 			err := relay.forwardStoredModemSMS(ctx, modemSMSReceipt{stored: stored, refs: tt.refs, deleter: deleter})
@@ -621,7 +651,7 @@ func TestForwardStoredModemSMSIsolatesNotificationFailures(t *testing.T) {
 	}
 }
 
-func TestForwardStoredModemSMSRetriesDeleteWithoutDuplicateNotification(t *testing.T) {
+func TestForwardStoredModemSMSProcessesRepeatedDelivery(t *testing.T) {
 	ctx := t.Context()
 	relay, store, notifications := newSMSRelay(t)
 	deleteErr := errors.New("modem storage busy")
@@ -665,8 +695,12 @@ func TestForwardStoredModemSMSRetriesDeleteWithoutDuplicateNotification(t *testi
 	if len(deleter.calls) != 2 {
 		t.Fatalf("modem delete calls = %d, want 2", len(deleter.calls))
 	}
-	if got := notifications.Load(); got != 1 {
-		t.Fatalf("notifications after retry = %d, want 1", got)
+	if got := notifications.Load(); got != 2 {
+		t.Fatalf("notifications after retry = %d, want 2", got)
+	}
+	messages, err = store.ListByParticipant(ctx, "profile-a", "+100")
+	if err != nil || len(messages) != 2 || messages[0].ID == messages[1].ID {
+		t.Fatalf("messages after retry = %+v, %v", messages, err)
 	}
 }
 

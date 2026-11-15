@@ -5,7 +5,6 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -219,8 +218,8 @@ func TestDeleteByParticipantSkipsStaleModemGenerationRefs(t *testing.T) {
 			},
 		},
 	} {
-		if inserted, err := store.InsertMessage(ctx, msg); err != nil || !inserted {
-			t.Fatalf("InsertMessage() = %v, %v", inserted, err)
+		if id, err := store.InsertMessage(ctx, msg); err != nil || id == 0 {
+			t.Fatalf("InsertMessage() = %v, %v", id, err)
 		}
 	}
 
@@ -230,59 +229,6 @@ func TestDeleteByParticipantSkipsStaleModemGenerationRefs(t *testing.T) {
 	want := []mmodem.MessageRef{{Storage: wwanmodem.MessageStorageSIM, ID: 2}}
 	if len(device.deleted) != 1 || !slices.Equal(device.deleted[0], want) {
 		t.Fatalf("deleted refs = %v, want current generation %v", device.deleted, want)
-	}
-}
-
-func TestModemSMSKey(t *testing.T) {
-	timestamp := time.Date(2026, 7, 31, 12, 34, 56, 789, time.FixedZone("UTC+8", 8*60*60))
-	stored := &mmodem.SMS{
-		Refs: []mmodem.MessageRef{
-			{Storage: wwanmodem.MessageStorageSIM, ID: 9},
-			{Storage: wwanmodem.MessageStorageDevice, ID: 3},
-		},
-		State:     wwanmodem.MessageStateReceivedUnread,
-		Number:    "+12025550199",
-		Text:      "balance",
-		Timestamp: timestamp,
-	}
-	reordered := *stored
-	reordered.Refs = slices.Clone(stored.Refs)
-	slices.Reverse(reordered.Refs)
-
-	if got, want := ModemSMSKey(" modem-1 ", stored), ModemSMSKey("modem-1", &reordered); got != want {
-		t.Fatalf("ModemSMSKey() depends on ref order: %q != %q", got, want)
-	}
-	if got := ModemSMSKey("modem-1", stored); strings.Contains(got, ":content:") {
-		t.Fatalf("ModemSMSKey() = %q, stored message must use typed refs", got)
-	}
-
-	withoutRefs := *stored
-	withoutRefs.Refs = nil
-	key := ModemSMSKey("modem-1", &withoutRefs)
-	if !strings.HasPrefix(key, "modem-1:content:") {
-		t.Fatalf("ModemSMSKey() = %q, want content key", key)
-	}
-	if got := ModemSMSKey("modem-1", &withoutRefs); got != key {
-		t.Fatalf("ModemSMSKey() = %q, want stable key %q", got, key)
-	}
-
-	tests := []struct {
-		name   string
-		mutate func(*mmodem.SMS)
-	}{
-		{name: "state", mutate: func(sms *mmodem.SMS) { sms.State = wwanmodem.MessageStateStoredSent }},
-		{name: "number", mutate: func(sms *mmodem.SMS) { sms.Number = "+12025550200" }},
-		{name: "text", mutate: func(sms *mmodem.SMS) { sms.Text = "usage" }},
-		{name: "timestamp", mutate: func(sms *mmodem.SMS) { sms.Timestamp = sms.Timestamp.Add(time.Nanosecond) }},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			changed := withoutRefs
-			tt.mutate(&changed)
-			if got := ModemSMSKey("modem-1", &changed); got == key {
-				t.Fatalf("ModemSMSKey() = %q after changing %s", got, tt.name)
-			}
-		})
 	}
 }
 
@@ -303,7 +249,7 @@ func TestStorageModemRefsPreservesMultipartReferences(t *testing.T) {
 func TestListConversationsPassesSearchQueryToStorage(t *testing.T) {
 	ctx := t.Context()
 	store := testStore(t)
-	device := &fakeModemDevice{profile: "profile-a"}
+	device := &mmodem.Modem{SIM: &mmodem.SIM{Identifier: "profile-a"}}
 	service := New(store, &fakeRoute{})
 	messages := []storage.Message{
 		{
@@ -333,12 +279,59 @@ func TestListConversationsPassesSearchQueryToStorage(t *testing.T) {
 		}
 	}
 
-	got, err := service.listConversations(ctx, device, "balance")
+	got, err := service.ListConversations(ctx, device, "balance")
 	if err != nil {
-		t.Fatalf("listConversations() error = %v", err)
+		t.Fatalf("ListConversations() error = %v", err)
 	}
 	if len(got) != 1 || got[0].Recipient != "777" {
-		t.Fatalf("listConversations() = %+v, want only 777 balance conversation", got)
+		t.Fatalf("ListConversations() = %+v, want only 777 balance conversation", got)
+	}
+}
+
+func TestHistoryReadsUseStoredMessages(t *testing.T) {
+	ctx := t.Context()
+	store := testStore(t)
+	service := New(store, nil)
+	// Cached SIM identity is sufficient for reading history without a modem transport.
+	device := &mmodem.Modem{EquipmentIdentifier: "modem-1", SIM: &mmodem.SIM{Identifier: "profile-a"}}
+	msg := storage.Message{
+		ModemID: "modem-1", ProfileID: "profile-a", Source: storage.MessageSourceModem,
+		Sender: "777", Recipient: "+12025550199", Text: "balance", Incoming: true,
+		Timestamp: time.Now(), Status: "received",
+	}
+	id, err := store.InsertMessage(ctx, msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateConversationRead(ctx, storage.ReadUpdate{
+		ConversationID: storage.ConversationID(msg.ProfileID, msg.Sender), ReadThroughMessageID: &id,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.MessagesState(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		conversations, err := service.ListConversations(ctx, device, "balance")
+		if err != nil || len(conversations) != 1 || conversations[0].ID != id {
+			t.Fatalf("ListConversations() = %+v, %v", conversations, err)
+		}
+		messages, err := service.ListByParticipant(ctx, device, msg.Sender)
+		if err != nil || len(messages) != 1 || messages[0].ID != id {
+			t.Fatalf("ListByParticipant() = %+v, %v", messages, err)
+		}
+	}
+	after, err := store.MessagesState(ctx)
+	if err != nil || after != before {
+		t.Fatalf("history reads changed message state: %+v, %v; want %+v", after, err, before)
+	}
+	if err := service.DeleteByParticipant(ctx, device, msg.Sender); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := service.ListByParticipant(ctx, device, msg.Sender)
+	if err != nil || len(messages) != 0 {
+		t.Fatalf("history after deletion = %+v, %v", messages, err)
 	}
 }
 
@@ -361,10 +354,6 @@ func (f *fakeModemDevice) profileID(context.Context) (string, error) {
 func (f *fakeModemDevice) sendSMS(context.Context, string, string) (*mmodem.SMS, error) {
 	f.sendCalls++
 	return nil, f.sendErr
-}
-
-func (f *fakeModemDevice) listSMS(context.Context) ([]*mmodem.SMS, error) {
-	return nil, nil
 }
 
 func (f *fakeModemDevice) deleteSMS(_ context.Context, refs []mmodem.MessageRef) error {

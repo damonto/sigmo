@@ -2,9 +2,7 @@ package storage
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -28,7 +26,6 @@ type Message struct {
 	ProfileID      string
 	Source         string
 	ExternalKey    string
-	Fingerprint    string
 	Sender         string
 	Recipient      string
 	Text           string
@@ -39,7 +36,7 @@ type Message struct {
 	ModemRefs      []ModemMessageRef
 }
 
-const messageColumns = `id, profile_id, source, external_key, fingerprint, sender, recipient, text, timestamp, status, incoming, wifi_calling, modem_id, conversation_id`
+const messageColumns = `id, profile_id, source, external_key, sender, recipient, text, timestamp, status, incoming, wifi_calling, modem_id, conversation_id`
 
 type ModemMessageRef struct {
 	ModemID    string
@@ -55,66 +52,56 @@ type MessageStatusUpdate struct {
 	Status      string
 }
 
-func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
+// InsertMessage stores an SMS and returns its new ID.
+func (s *Store) InsertMessage(ctx context.Context, msg Message) (int64, error) {
 	msg = normalizeMessage(msg)
 	if err := validateMessage(msg); err != nil {
-		return false, err
+		return 0, err
 	}
 	now := nowText()
-	msg.ConversationID = ConversationID(msg.ProfileID, msg.Counterparty())
+	participant := msg.Counterparty()
+	msg.ConversationID = ConversationID(msg.ProfileID, participant)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("begin message insert: %w", err)
+		return 0, fmt.Errorf("begin message insert: %w", err)
 	}
 	defer func() {
 		// Rollback is a no-op after a successful commit.
 		_ = tx.Rollback()
 	}()
-	var deleted bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM deleted_messages WHERE fingerprint = ?)`, msg.Fingerprint).Scan(&deleted); err != nil {
-		return false, fmt.Errorf("check deleted message: %w", err)
-	}
-	if deleted {
-		return false, nil
-	}
-	result, err := tx.ExecContext(ctx, `
-		INSERT INTO messages (
-			profile_id, source, external_key, fingerprint, sender, recipient, text,
-			timestamp, status, incoming, wifi_calling, created_at, updated_at, modem_id, conversation_id
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT DO NOTHING
-	`, msg.ProfileID, msg.Source, msg.ExternalKey, msg.Fingerprint, msg.Sender, msg.Recipient, msg.Text,
-		timeText(msg.Timestamp), msg.Status, boolInt(msg.Incoming), boolInt(msg.Routed), now, now, msg.ModemID, msg.ConversationID)
-	if err != nil {
-		return false, fmt.Errorf("insert message: %w", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("read inserted message count: %w", err)
-	}
-	if affected == 0 {
-		if err := tx.Commit(); err != nil {
-			return false, fmt.Errorf("commit existing message: %w", err)
-		}
-		return false, nil
-	}
-	messageID, err := result.LastInsertId()
-	if err != nil {
-		return false, fmt.Errorf("read inserted message id: %w", err)
-	}
-	msg.ID = messageID
 	queries := query.New(tx)
-	region, err := queries.SIMProfileRegion(ctx, msg.ProfileID)
-	if err != nil {
-		return false, fmt.Errorf("read participant region: %w", err)
-	}
-	err = queries.RecordMessageConversation(ctx, query.RecordMessageConversationParams{
-		ID: msg.ConversationID, ProfileID: msg.ProfileID, Participant: msg.Counterparty(),
-		ParticipantKey: ParticipantKey(msg.Counterparty(), region),
+	messageID, err := queries.InsertMessage(ctx, query.InsertMessageParams{
+		ProfileID:      msg.ProfileID,
+		Source:         msg.Source,
+		ExternalKey:    msg.ExternalKey,
+		Sender:         msg.Sender,
+		Recipient:      msg.Recipient,
+		Text:           msg.Text,
+		Timestamp:      timeText(msg.Timestamp),
+		Status:         msg.Status,
+		Incoming:       int64(boolInt(msg.Incoming)),
+		WifiCalling:    int64(boolInt(msg.Routed)),
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		ModemID:        msg.ModemID,
+		ConversationID: msg.ConversationID,
 	})
 	if err != nil {
-		return false, fmt.Errorf("create message conversation: %w", err)
+		return 0, fmt.Errorf("insert message: %w", err)
+	}
+	msg.ID = messageID
+	region, err := queries.SIMProfileRegion(ctx, msg.ProfileID)
+	if err != nil {
+		return 0, fmt.Errorf("read participant region: %w", err)
+	}
+	err = queries.RecordMessageConversation(ctx, query.RecordMessageConversationParams{
+		ID:             msg.ConversationID,
+		ProfileID:      msg.ProfileID,
+		Participant:    participant,
+		ParticipantKey: ParticipantKey(participant, region),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("create message conversation: %w", err)
 	}
 	lineNumber := msg.Sender
 	if msg.Incoming {
@@ -122,19 +109,16 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 	}
 	// Imported SMS can predate an MSISDN change; only live SIM observations
 	// replace a number that is already known.
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO sim_profiles (profile_id, modem_id, number) VALUES (?, ?, ?)
-		ON CONFLICT(profile_id) DO UPDATE SET
-			modem_id = CASE WHEN excluded.modem_id <> '' THEN excluded.modem_id ELSE sim_profiles.modem_id END,
-			number = CASE WHEN sim_profiles.number = '' THEN excluded.number ELSE sim_profiles.number END
-	`, msg.ProfileID, msg.ModemID, lineNumber); err != nil {
-		return false, fmt.Errorf("record message SIM profile: %w", err)
+	if err := queries.RecordMessageSIMProfile(ctx, query.RecordMessageSIMProfileParams{
+		ProfileID: msg.ProfileID, ModemID: msg.ModemID, Number: lineNumber,
+	}); err != nil {
+		return 0, fmt.Errorf("record message SIM profile: %w", err)
 	}
 	if err := advanceMessageState(ctx, tx); err != nil {
-		return false, err
+		return 0, err
 	}
 	if err := enqueueMessagePush(ctx, tx, msg); err != nil {
-		return false, err
+		return 0, err
 	}
 	for _, ref := range msg.ModemRefs {
 		modemID := strings.TrimSpace(ref.ModemID)
@@ -142,19 +126,19 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (bool, error) {
 			modemID = msg.ModemID
 		}
 		if modemID == "" {
-			return false, errors.New("modem message ref requires modem id")
+			return 0, errors.New("modem message ref requires modem id")
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO modem_message_refs (message_id, modem_id, generation, storage, ref_id)
 			VALUES (?, ?, ?, ?, ?)
 		`, messageID, modemID, ref.Generation, ref.Storage, ref.ID); err != nil {
-			return false, fmt.Errorf("insert modem message ref: %w", err)
+			return 0, fmt.Errorf("insert modem message ref: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("commit message insert: %w", err)
+		return 0, fmt.Errorf("commit message insert: %w", err)
 	}
-	return true, nil
+	return messageID, nil
 }
 
 func (s *Store) UpdateMessageStatus(ctx context.Context, update MessageStatusUpdate) (bool, error) {
@@ -379,15 +363,11 @@ func normalizeMessage(msg Message) Message {
 	msg.ModemID = strings.TrimSpace(msg.ModemID)
 	msg.Source = strings.TrimSpace(msg.Source)
 	msg.ExternalKey = strings.TrimSpace(msg.ExternalKey)
-	msg.Fingerprint = strings.TrimSpace(msg.Fingerprint)
 	msg.Sender = strings.TrimSpace(msg.Sender)
 	msg.Recipient = strings.TrimSpace(msg.Recipient)
 	msg.Status = strings.ToLower(strings.TrimSpace(msg.Status))
 	if msg.Timestamp.IsZero() {
 		msg.Timestamp = time.Now()
-	}
-	if msg.Fingerprint == "" {
-		msg.Fingerprint = MessageFingerprint(msg)
 	}
 	return msg
 }
@@ -398,9 +378,6 @@ func validateMessage(msg Message) error {
 	}
 	if msg.Source == "" {
 		return errors.New("message source is required")
-	}
-	if msg.ExternalKey == "" {
-		return errors.New("message external key is required")
 	}
 	return nil
 }
@@ -434,7 +411,6 @@ func scanMessage(row messageScanner) (Message, error) {
 		&msg.ProfileID,
 		&msg.Source,
 		&msg.ExternalKey,
-		&msg.Fingerprint,
 		&msg.Sender,
 		&msg.Recipient,
 		&msg.Text,
@@ -453,25 +429,6 @@ func scanMessage(row messageScanner) (Message, error) {
 	msg.Incoming = incoming != 0
 	msg.Routed = routed != 0
 	return msg, nil
-}
-
-func MessageFingerprint(msg Message) string {
-	direction := "out"
-	counterparty := msg.Recipient
-	if msg.Incoming {
-		direction = "in"
-		counterparty = msg.Sender
-	}
-	parts := []string{
-		strings.TrimSpace(msg.ModemID),
-		strings.TrimSpace(msg.Source),
-		direction,
-		strings.TrimSpace(counterparty),
-		msg.Text,
-		timeText(msg.Timestamp),
-	}
-	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
-	return hex.EncodeToString(sum[:])
 }
 
 func (m Message) Counterparty() string {

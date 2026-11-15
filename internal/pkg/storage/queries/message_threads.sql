@@ -50,9 +50,6 @@ UPDATE conversations SET marked_unread = ? WHERE participant_key = ?;
 -- name: ClearDisplayedThreadMarks :exec
 UPDATE conversations SET marked_unread = 0 WHERE id IN (SELECT conversation_id FROM messages WHERE id IN (SELECT value FROM json_each(CAST(sqlc.arg(message_json) AS TEXT))));
 
--- name: TombstoneThreadMessages :exec
-INSERT OR IGNORE INTO deleted_messages(fingerprint) SELECT fingerprint FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE participant_key = ?) AND fingerprint <> '';
-
 -- name: ClearThreadNotifications :exec
 DELETE FROM native_push_outbox WHERE json_extract(content_json, '$.conversationId') IN (SELECT id FROM conversations WHERE participant_key = ?);
 

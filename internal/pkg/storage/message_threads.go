@@ -296,9 +296,6 @@ func (s *Store) DeleteThread(ctx context.Context, id string) error {
 	}
 	defer func() { _ = tx.Rollback() }() // Preserve history when any statement fails.
 	queries := query.New(tx)
-	if err := queries.TombstoneThreadMessages(ctx, participant); err != nil {
-		return fmt.Errorf("preserve deleted message fingerprints: %w", err)
-	}
 	if err := queries.ClearThreadNotifications(ctx, participant); err != nil {
 		return fmt.Errorf("clear thread notifications: %w", err)
 	}

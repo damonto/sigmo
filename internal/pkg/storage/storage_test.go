@@ -64,9 +64,8 @@ func TestMessages(t *testing.T) {
 	base := time.Date(2026, 5, 24, 10, 0, 0, 0, time.UTC)
 
 	tests := []struct {
-		name       string
-		message    Message
-		wantInsert bool
+		name    string
+		message Message
 	}{
 		{
 			name: "new modem message",
@@ -82,7 +81,6 @@ func TestMessages(t *testing.T) {
 				Status:      "received",
 				Incoming:    true,
 			},
-			wantInsert: true,
 		},
 		{
 			name: "duplicate modem message",
@@ -98,7 +96,6 @@ func TestMessages(t *testing.T) {
 				Status:      "received",
 				Incoming:    true,
 			},
-			wantInsert: false,
 		},
 		{
 			name: "duplicate modem message with new profile and path",
@@ -114,7 +111,6 @@ func TestMessages(t *testing.T) {
 				Status:      "received",
 				Incoming:    true,
 			},
-			wantInsert: false,
 		},
 		{
 			name: "same content on different modem",
@@ -130,7 +126,6 @@ func TestMessages(t *testing.T) {
 				Status:      "received",
 				Incoming:    true,
 			},
-			wantInsert: true,
 		},
 		{
 			name: "wifi calling message",
@@ -146,18 +141,17 @@ func TestMessages(t *testing.T) {
 				Status:      "sent",
 				Routed:      true,
 			},
-			wantInsert: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			inserted, err := store.InsertMessage(ctx, tt.message)
+			id, err := store.InsertMessage(ctx, tt.message)
 			if err != nil {
 				t.Fatalf("InsertMessage() error = %v", err)
 			}
-			if inserted != tt.wantInsert {
-				t.Fatalf("InsertMessage() = %v, want %v", inserted, tt.wantInsert)
+			if id == 0 {
+				t.Fatal("InsertMessage() returned a zero ID")
 			}
 		})
 	}
@@ -180,16 +174,16 @@ func TestMessages(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListByParticipant() error = %v", err)
 		}
-		if len(messages) != 2 {
-			t.Fatalf("ListByParticipant() length = %d, want 2", len(messages))
+		if len(messages) != 3 {
+			t.Fatalf("ListByParticipant() length = %d, want 3", len(messages))
 		}
-		if messages[0].Text != "hello" || messages[1].Text != "reply" {
-			t.Fatalf("thread order = %q, %q; want hello, reply", messages[0].Text, messages[1].Text)
+		if messages[0].Text != "hello" || messages[1].Text != "hello" || messages[2].Text != "reply" {
+			t.Fatalf("thread order = %+v; want hello, hello, reply", messages)
 		}
 	})
 
 	t.Run("conversation search", func(t *testing.T) {
-		inserted, err := store.InsertMessage(ctx, Message{
+		id, err := store.InsertMessage(ctx, Message{
 			ModemID:     "modem-a",
 			ProfileID:   "891",
 			Source:      MessageSourceModem,
@@ -204,8 +198,8 @@ func TestMessages(t *testing.T) {
 		if err != nil {
 			t.Fatalf("InsertMessage(search) error = %v", err)
 		}
-		if !inserted {
-			t.Fatal("InsertMessage(search) = false, want true")
+		if id == 0 {
+			t.Fatal("InsertMessage(search) returned a zero ID")
 		}
 
 		tests := []struct {
@@ -278,12 +272,12 @@ func TestModemMessageRefsIncludeGenerationAndZeroID(t *testing.T) {
 		},
 	}
 	for _, msg := range messages {
-		inserted, err := store.InsertMessage(ctx, msg)
+		id, err := store.InsertMessage(ctx, msg)
 		if err != nil {
 			t.Fatalf("InsertMessage() error = %v", err)
 		}
-		if !inserted {
-			t.Fatal("InsertMessage() = false, want true")
+		if id == 0 {
+			t.Fatal("InsertMessage() returned a zero ID")
 		}
 	}
 
@@ -359,12 +353,12 @@ func TestDeleteModemMessageRefsDeletesExactReferencesTransactionally(t *testing.
 		},
 	}
 	for _, msg := range messages {
-		inserted, err := store.InsertMessage(ctx, msg)
+		id, err := store.InsertMessage(ctx, msg)
 		if err != nil {
 			t.Fatalf("InsertMessage() error = %v", err)
 		}
-		if !inserted {
-			t.Fatal("InsertMessage() = false, want true")
+		if id == 0 {
+			t.Fatal("InsertMessage() returned a zero ID")
 		}
 	}
 
