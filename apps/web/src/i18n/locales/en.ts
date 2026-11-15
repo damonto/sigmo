@@ -2,7 +2,7 @@ const en = {
   esimPeer: {
     unsupported:
       'The source Sigmo does not support remote eSIM transfer. Update that service and try again.',
-    entry: 'Transfer from another Sigmo',
+    entry: 'Transfer from Sigmo',
     address: 'Sigmo service address',
     request: 'Request access',
     waitingAuthorization:

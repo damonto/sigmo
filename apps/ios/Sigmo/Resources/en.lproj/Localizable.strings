@@ -1284,7 +1284,7 @@
 "license.unlicensed" = "No Pro authorization";
 
 // Remote Sigmo eSIM transfer.
-"peer.entry" = "Transfer from another Sigmo";
+"peer.entry" = "Transfer from Sigmo";
 "peer.address" = "Sigmo service address";
 "peer.request" = "Request access";
 "peer.waitingAuthorization" = "Waiting for the source Sigmo to choose an eSIM and approve the transfer…";

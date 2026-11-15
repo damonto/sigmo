@@ -58,9 +58,9 @@ There is no automatic reconnect or APDU replay. After a disconnect, an APDU may 
 
 Go tests use a local WebSocket server and a fake card to exercise the ISO 7816 adapter, session binding, cancellation, stale responses and failures. Session cancellation also closes the socket to interrupt LPA calls that use a background context. iOS tests inject reader discovery and card operations to cover browsing-to-transfer socket reuse, hot plugging, removal during an APDU, cleanup, malformed messages, concurrent receivers and response loss. These tests do not access real readers or modems. Physical-device signing, reader compatibility and a real carrier transfer still require hardware validation.
 
-## Transfer from another Sigmo
+## Transfer from Sigmo
 
-The download/add-eSIM screen offers **Transfer from another Sigmo**. Enter the
+The download/add-eSIM screen offers **Transfer from Sigmo**. Enter the
 source service's base URL, including any reverse-proxy prefix. The target backend
 connects directly to the source; neither client receives the other service's
 login credentials. HTTPS uses normal certificate verification. Plain HTTP is
