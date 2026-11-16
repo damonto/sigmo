@@ -411,6 +411,10 @@ const zh = {
       developerBuildDescription: '开发构建可以检查新版本，但不能替换自身可执行文件。',
       releaseKeyMissingDescription: '当前构建未内置发布验签公钥，无法安装更新。',
       loadFailed: '无法加载更新设置。',
+      reconnecting: '正在重新连接',
+      monitorStopped: '已停止观察更新状态',
+      monitorFailed: '无法读取更新状态，请重试以检查服务。',
+      recoveryTimedOut: '三分钟内未能重新连接服务，请检查服务后重试。更新可能仍在进行。',
       retry: '重试',
       status: {
         idle: '空闲',

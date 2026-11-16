@@ -5,6 +5,9 @@ import { describe, expect, it, vi } from 'vitest'
 import App from '@/App.vue'
 import { useLicenseStore } from '@/stores/license'
 
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/router', () => ({ default: { replace: vi.fn() } }))
+
 vi.mock('@/components/esim/EsimTransferRequestProvider.vue', () => ({
   default: { template: '<slot />' },
 }))

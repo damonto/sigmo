@@ -4,7 +4,6 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 
-import { useAppApi } from '@/apis/app'
 import { useUpdateApi } from '@/apis/update'
 import SettingsHeader from '@/components/settings/SettingsHeader.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -21,25 +20,22 @@ import {
 } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
+import { useAppUpdate } from '@/composables/useAppUpdate'
+import { isApiError } from '@/lib/apiProblem'
 import { localizeErrorMessage } from '@/lib/errorHandler'
-import type { UpdateChannel, UpdateSnapshot } from '@/types/update'
+import type { UpdateChannel } from '@/types/update'
 
 const { t, locale } = useI18n()
-const appApi = useAppApi()
 const api = useUpdateApi()
-const snapshot = ref<UpdateSnapshot>()
+const update = useAppUpdate()
+const { snapshot, updating, reconnecting, failure } = update
 const loading = ref(true)
 const loadFailed = ref(false)
 const saving = ref(false)
-const action = ref<'check' | 'install' | ''>('')
-let pollTimer: number | undefined
+const action = ref<'check' | ''>('')
 let active = false
-let installationStarted = false
-let readinessDelay = 1000
 
-const busy = computed(() =>
-  ['checking', 'downloading', 'verifying', 'restarting'].includes(snapshot.value?.state ?? ''),
-)
+const busy = computed(() => updating.value || snapshot.value?.state === 'checking')
 const isContainer = computed(() => snapshot.value?.current.distribution === 'container')
 const upToDate = computed(
   () =>
@@ -51,7 +47,20 @@ const upToDate = computed(
 const serverVersion = computed(
   () => snapshot.value?.latest?.version ?? t('settings.updates.notChecked'),
 )
-const statusText = computed(() => t(`settings.updates.status.${snapshot.value?.state ?? 'idle'}`))
+const statusText = computed(() =>
+  reconnecting.value
+    ? t('settings.updates.reconnecting')
+    : t(`settings.updates.status.${snapshot.value?.state ?? 'idle'}`),
+)
+const monitoringError = computed(() => {
+  if (!failure.value) return ''
+  return failure.value.kind === 'timeout'
+    ? t('settings.updates.recoveryTimedOut')
+    : localizeErrorMessage(
+        isApiError(failure.value.error) ? failure.value.error : undefined,
+        t('settings.updates.monitorFailed'),
+      )
+})
 const licenseStatus = computed(() =>
   snapshot.value?.license?.status === 'active'
     ? t('settings.updates.licenseActive')
@@ -81,7 +90,7 @@ const load = async () => {
   loadFailed.value = false
   try {
     const { data } = await api.settings()
-    if (active) snapshot.value = data.value
+    if (active && data.value) update.observe(data.value)
   } catch {
     if (active) loadFailed.value = true
   } finally {
@@ -90,13 +99,13 @@ const load = async () => {
 }
 
 const save = async (automatic: boolean, channel: UpdateChannel) => {
-  if (!snapshot.value || saving.value) return
+  if (!snapshot.value || saving.value || busy.value) return
   const channelChanged = snapshot.value.settings.channel !== channel
   saving.value = true
   try {
     const { data } = await api.saveSettings({ automatic, channel })
     if (!active) return
-    snapshot.value = data.value
+    if (data.value) update.observe(data.value)
     toast.success(t('settings.updates.saved'))
     if (channelChanged) await check()
   } catch {
@@ -118,7 +127,7 @@ const check = async () => {
   action.value = 'check'
   try {
     const { data } = await api.check()
-    if (active) snapshot.value = data.value
+    if (active && data.value) update.observe(data.value)
   } catch {
     // The shared fetch layer already presents the localized API error.
   } finally {
@@ -126,73 +135,21 @@ const check = async () => {
   }
 }
 
-const stopPolling = () => {
-  if (pollTimer !== undefined) window.clearTimeout(pollTimer)
-  pollTimer = undefined
-}
-const scheduleReadinessCheck = () => {
-  pollTimer = window.setTimeout(waitForRestart, readinessDelay)
-  readinessDelay = Math.min(readinessDelay * 2, 5000)
-}
-const waitForRestart = async () => {
-  pollTimer = undefined
-  if (!active) return
-  try {
-    if (await appApi.ready()) {
-      window.location.reload()
-      return
-    }
-  } catch {
-    // The reverse proxy has no healthy upstream while the process restarts.
-  }
-  if (active) scheduleReadinessCheck()
-}
-const pollInstallation = async () => {
-  pollTimer = undefined
-  if (!active) return
-  try {
-    const next = await api.installation()
-    if (!active) return
-    snapshot.value = next
-    if (installationStarted && snapshot.value?.state === 'idle') {
-      window.location.reload()
-      return
-    }
-    if (snapshot.value?.state === 'failed' || snapshot.value?.state === 'idle') {
-      action.value = ''
-      installationStarted = false
-      return
-    }
-  } catch {
-    if (snapshot.value) snapshot.value = { ...snapshot.value, state: 'restarting' }
-    readinessDelay = 1000
-    scheduleReadinessCheck()
-    return
-  }
-  if (active) pollTimer = window.setTimeout(pollInstallation, 1000)
-}
 const install = async () => {
-  action.value = 'install'
-  installationStarted = false
-  readinessDelay = 1000
   try {
-    const { data } = await api.install()
-    if (!active) return
-    snapshot.value = data.value
-    installationStarted = true
-    pollTimer = window.setTimeout(pollInstallation, 500)
+    await update.install()
   } catch {
-    if (active) action.value = ''
+    // Installation errors retain the shared fetch layer's normal notifications.
   }
 }
 
 onMounted(() => {
   active = true
-  void load()
+  if (updating.value) loading.value = false
+  else void load()
 })
 onUnmounted(() => {
   active = false
-  stopPolling()
 })
 </script>
 
@@ -251,7 +208,7 @@ docker compose pull &amp;&amp; docker compose up -d</pre>
             <Switch
               data-testid="automatic-updates"
               :model-value="snapshot.settings.automatic"
-              :disabled="saving || !snapshot.selfUpdateSupported"
+              :disabled="saving || busy || !snapshot.selfUpdateSupported"
               @update:model-value="setAutomatic($event === true)"
             />
           </div>
@@ -259,7 +216,7 @@ docker compose pull &amp;&amp; docker compose up -d</pre>
             <Label>{{ t('settings.updates.channel') }}</Label>
             <Select
               :model-value="snapshot.settings.channel"
-              :disabled="saving"
+              :disabled="saving || busy"
               @update:model-value="setChannel"
             >
               <SelectTrigger
@@ -327,6 +284,18 @@ docker compose pull &amp;&amp; docker compose up -d</pre>
           >
             {{ snapshotError }}
           </p>
+          <Alert v-if="monitoringError">
+            <CircleAlert />
+            <AlertTitle>{{ t('settings.updates.monitorStopped') }}</AlertTitle>
+            <AlertDescription class="space-y-2">
+              <p>{{ monitoringError }}</p>
+              <Button
+                variant="outline"
+                @click="load"
+                >{{ t('settings.updates.retry') }}</Button
+              >
+            </AlertDescription>
+          </Alert>
           <p
             v-if="upToDate"
             data-testid="up-to-date-message"
@@ -358,7 +327,7 @@ docker compose pull &amp;&amp; docker compose up -d</pre>
               "
               @click="install"
               ><Spinner
-                v-if="action === 'install'"
+                v-if="updating"
                 class="size-4"
               /><Download
                 v-else

@@ -83,7 +83,7 @@ export const useFetch = createFetch({
   },
 })
 
-// Credential forms render their own errors and never log response payloads.
+// Forms and background refreshes opt out of notifications and payload logging.
 const useQuietFetch = createFetch({
   baseUrl,
   options: {

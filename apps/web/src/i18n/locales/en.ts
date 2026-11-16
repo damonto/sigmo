@@ -437,6 +437,11 @@ const en = {
       releaseKeyMissingDescription:
         'This build has no embedded release verification key and cannot install updates.',
       loadFailed: 'Update settings could not be loaded.',
+      reconnecting: 'Reconnecting',
+      monitorStopped: 'Update monitoring stopped',
+      monitorFailed: 'Update status could not be read. Retry to check the server.',
+      recoveryTimedOut:
+        'The server has not reconnected within three minutes. Check the service and retry. The update may still be running.',
       retry: 'Retry',
       status: {
         idle: 'Idle',

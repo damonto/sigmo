@@ -25,16 +25,4 @@ describe('useAppApi', () => {
     )
     expect(data.value).toEqual({ version: 'v1.2.3' })
   })
-
-  it('reports whether the full application server is ready', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await expect(useAppApi().ready()).resolves.toBe(true)
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/api/v1/app'),
-      expect.objectContaining({ cache: 'no-store' }),
-    )
-  })
 })

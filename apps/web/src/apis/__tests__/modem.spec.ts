@@ -2,10 +2,25 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useModemApi } from '@/apis/modem'
 
+const notifier = vi.hoisted(() => ({ error: vi.fn() }))
+vi.mock('@/lib/notify', () => ({ notifyError: notifier.error }))
+
 describe('useModemApi', () => {
   beforeEach(() => {
+    notifier.error.mockReset()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it('keeps background inventory errors quiet while reporting user request errors', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(null, { status: 503 })))
+    await expect(useModemApi().getModems({ quiet: true })).rejects.toMatchObject({ status: 503 })
+    expect(notifier.error).not.toHaveBeenCalled()
+
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 503 }))
+    await expect(useModemApi().getModems()).rejects.toMatchObject({ status: 503 })
+    expect(notifier.error).toHaveBeenCalledTimes(1)
   })
 
   it('replaces the SIM slot selection with an explicit desired state', async () => {

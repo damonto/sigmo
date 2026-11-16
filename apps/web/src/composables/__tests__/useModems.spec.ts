@@ -8,6 +8,9 @@ import type { Modem } from '@/types/modem'
 const api = vi.hoisted(() => ({
   getModems: vi.fn(),
 }))
+const { updating } = await vi.hoisted(async () => ({ updating: (await import('vue')).ref(false) }))
+
+vi.mock('@/composables/useAppUpdate', () => ({ useAppUpdate: () => ({ updating }) }))
 
 vi.mock('@/apis/modem', () => ({
   useModemApi: () => api,
@@ -48,10 +51,12 @@ const modem = (simKind: Modem['simKind']): Modem => ({
 
 describe('useModems', () => {
   beforeEach(() => {
+    updating.value = false
     vi.clearAllMocks()
   })
 
   afterEach(() => {
+    updating.value = false
     vi.useRealTimers()
   })
 
@@ -100,5 +105,52 @@ describe('useModems', () => {
     await vi.advanceTimersByTimeAsync(30_000)
 
     expect(api.getModems).toHaveBeenCalledOnce()
+  })
+
+  it('pauses SIM classification retries during updates and resumes afterward', async () => {
+    vi.useFakeTimers()
+    api.getModems
+      .mockResolvedValueOnce({ data: ref([modem('unknown')]) })
+      .mockResolvedValueOnce({ data: ref([modem('euicc')]) })
+    let state!: ReturnType<typeof useModems>
+    mount({
+      template: '<div />',
+      setup() {
+        state = useModems()
+      },
+    })
+    await state.fetchModems()
+
+    updating.value = true
+    await state.fetchModems()
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(api.getModems).toHaveBeenCalledTimes(1)
+    expect(state.modems.value[0]?.simKind).toBe('unknown')
+
+    updating.value = false
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(api.getModems).toHaveBeenCalledTimes(2)
+    expect(state.modems.value[0]?.simKind).toBe('euicc')
+  })
+
+  it('continues SIM classification retries after a request fails', async () => {
+    vi.useFakeTimers()
+    api.getModems
+      .mockResolvedValueOnce({ data: ref([modem('unknown')]) })
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({ data: ref([modem('euicc')]) })
+    let state!: ReturnType<typeof useModems>
+    mount({
+      template: '<div />',
+      setup() {
+        state = useModems()
+      },
+    })
+    await state.fetchModems()
+    await vi.advanceTimersByTimeAsync(1000 + 2000)
+
+    expect(api.getModems).toHaveBeenCalledTimes(3)
+    expect(api.getModems).toHaveBeenLastCalledWith({ quiet: true })
+    expect(state.modems.value[0]?.simKind).toBe('euicc')
   })
 })

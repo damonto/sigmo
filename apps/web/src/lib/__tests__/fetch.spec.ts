@@ -60,7 +60,9 @@ describe('useFetch global error handling', () => {
       problemResponse(404, 'euicc_not_supported', 'no supported ISD-R AID found', 'req-2'),
     )
 
-    await expect(fetchJson('modems/1/esim-profiles')).rejects.toThrow('no supported ISD-R AID found')
+    await expect(fetchJson('modems/1/esim-profiles')).rejects.toThrow(
+      'no supported ISD-R AID found',
+    )
 
     expect(notifyHarness.error).not.toHaveBeenCalled()
   })
@@ -71,6 +73,13 @@ describe('useFetch global error handling', () => {
     )
 
     expect(notifyHarness.error).not.toHaveBeenCalled()
+  })
+
+  it('reports network errors for user actions', async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    await expect(fetchJson('modems')).rejects.toThrow('Failed to fetch')
+    expect(notifyHarness.error).toHaveBeenCalledTimes(1)
   })
 
   it('localizes Worker errors without requiring a request ID', async () => {

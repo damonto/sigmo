@@ -1,6 +1,6 @@
 [Unit]
 Description=Sigmo
-After=network.target ModemManager.service
+After=network-online.target ModemManager.service
 
 [Service]
 Type=simple

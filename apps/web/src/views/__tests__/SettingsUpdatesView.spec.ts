@@ -1,7 +1,8 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { useAppUpdate } from '@/composables/useAppUpdate'
 import type { UpdateSnapshot } from '@/types/update'
 import SettingsUpdatesView from '@/views/SettingsUpdatesView.vue'
 
@@ -12,15 +13,8 @@ const api = vi.hoisted(() => ({
   install: vi.fn(),
   installation: vi.fn(),
 }))
-const appApi = vi.hoisted(() => ({
-  ready: vi.fn(),
-}))
-
 vi.mock('@/apis/update', () => ({
   useUpdateApi: () => api,
-}))
-vi.mock('@/apis/app', () => ({
-  useAppApi: () => appApi,
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -103,13 +97,16 @@ const render = async (value: UpdateSnapshot) => {
   return wrapper
 }
 
+enableAutoUnmount(afterEach)
+
 describe('SettingsUpdatesView', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    appApi.ready.mockResolvedValue(false)
+    useAppUpdate().dispose()
+    vi.resetAllMocks()
   })
 
   afterEach(() => {
+    useAppUpdate().dispose()
     vi.useRealTimers()
   })
 
@@ -209,12 +206,12 @@ describe('SettingsUpdatesView', () => {
     )
   })
 
-  it('uses quiet readiness polling after the server starts restarting', async () => {
+  it('keeps monitoring across navigation and reuses progress when the page reopens', async () => {
     vi.useFakeTimers()
     api.install.mockResolvedValue({
       data: ref(snapshot({ state: 'downloading' })),
     })
-    api.installation.mockRejectedValue(new Error('request returned HTTP 502'))
+    api.installation.mockRejectedValue(new TypeError('Failed to fetch'))
     const wrapper = await render(snapshot())
     const install = wrapper
       .findAll('button')
@@ -223,23 +220,99 @@ describe('SettingsUpdatesView', () => {
     if (!install) throw new Error('install button not found')
     await install.trigger('click')
     await flushPromises()
-    await vi.advanceTimersByTimeAsync(500)
+    await vi.advanceTimersByTimeAsync(1000)
     await flushPromises()
 
     expect(api.installation).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).toContain('settings.updates.status.restarting')
+    expect(useAppUpdate().updating.value).toBe(true)
+    expect(wrapper.text()).toContain('settings.updates.reconnecting')
+    expect(wrapper.get('[data-testid="channel-select"]').attributes('data-disabled')).toBe('true')
+    wrapper.unmount()
+
+    expect(useAppUpdate().updating.value).toBe(true)
+    const reopened = await render(snapshot())
+    expect(api.settings).toHaveBeenCalledTimes(1)
+    expect(reopened.text()).toContain('settings.updates.reconnecting')
 
     await vi.advanceTimersByTimeAsync(1000)
     await flushPromises()
 
-    expect(appApi.ready).toHaveBeenCalledTimes(1)
-    expect(api.installation).toHaveBeenCalledTimes(1)
+    expect(api.installation).toHaveBeenCalledTimes(2)
 
     await vi.advanceTimersByTimeAsync(1999)
-    expect(appApi.ready).toHaveBeenCalledTimes(1)
+    expect(api.installation).toHaveBeenCalledTimes(2)
     await vi.advanceTimersByTimeAsync(1)
     await flushPromises()
-    expect(appApi.ready).toHaveBeenCalledTimes(2)
-    wrapper.unmount()
+    expect(api.installation).toHaveBeenCalledTimes(3)
+  })
+
+  it('resumes background requests when installation fails', async () => {
+    vi.useFakeTimers()
+    api.install.mockResolvedValue({ data: ref(snapshot({ state: 'downloading' })) })
+    api.installation.mockResolvedValue(snapshot({ state: 'failed', error: 'download failed' }))
+    const wrapper = await render(snapshot())
+    const install = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('settings.updates.installNow'))
+    if (!install) throw new Error('install button not found')
+
+    await install.trigger('click')
+    await flushPromises()
+    expect(useAppUpdate().updating.value).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(useAppUpdate().updating.value).toBe(false)
+    expect(wrapper.text()).toContain('download failed')
+    expect(install.attributes('disabled')).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(api.installation).toHaveBeenCalledTimes(1)
+  })
+
+  it('observes an installation already in progress when the page loads', async () => {
+    vi.useFakeTimers()
+    api.installation.mockResolvedValue(snapshot({ state: 'verifying' }))
+    await render(snapshot({ state: 'downloading' }))
+
+    expect(useAppUpdate().updating.value).toBe(true)
+    await vi.advanceTimersByTimeAsync(500)
+    expect(api.installation).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not pause background requests when installation is rejected', async () => {
+    api.install.mockRejectedValue(new Error('installation rejected'))
+    const wrapper = await render(snapshot())
+    const install = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('settings.updates.installNow'))
+    if (!install) throw new Error('install button not found')
+
+    await install.trigger('click')
+    await flushPromises()
+
+    expect(useAppUpdate().updating.value).toBe(false)
+    expect(api.installation).not.toHaveBeenCalled()
+  })
+
+  it('shows a recovery timeout and allows the user to check the server again', async () => {
+    vi.useFakeTimers()
+    api.installation.mockRejectedValue(new TypeError('Failed to fetch'))
+    const wrapper = await render(snapshot({ state: 'restarting' }))
+
+    await vi.advanceTimersByTimeAsync(180_000)
+    expect(useAppUpdate().updating.value).toBe(false)
+    expect(wrapper.text()).toContain('settings.updates.recoveryTimedOut')
+
+    api.settings.mockResolvedValue({
+      data: ref(snapshot({ state: 'failed', error: 'update failed' })),
+    })
+    const retry = wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'settings.updates.retry')
+    if (!retry) throw new Error('retry button not found')
+    await retry.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('settings.updates.recoveryTimedOut')
+    expect(wrapper.text()).toContain('update failed')
   })
 })

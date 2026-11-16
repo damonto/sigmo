@@ -19,9 +19,10 @@ export const useModemApi = () => {
   /**
    * Fetch all modems
    * GET /api/v1/modems
+   * Background refreshes use quiet mode to avoid repeated global notifications.
    */
-  const getModems = () => {
-    return fetchJson<ModemListResponse>('modems')
+  const getModems = (options: { quiet?: boolean } = {}) => {
+    return fetchJson<ModemListResponse>('modems', undefined, options.quiet)
   }
 
   /**

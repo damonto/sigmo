@@ -4,9 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCallMonitor } from '@/composables/useCallMonitor'
 import type { CallRecord } from '@/types/call'
 
+const api = vi.hoisted(() => ({ getModems: vi.fn() }))
+const { updating } = await vi.hoisted(async () => ({ updating: (await import('vue')).ref(false) }))
+
+vi.mock('@/composables/useAppUpdate', () => ({ useAppUpdate: () => ({ updating }) }))
+
 vi.mock('@/apis/call', () => ({ buildCallEventsUrl: (id: string) => `ws://fixture/${id}` }))
 vi.mock('@/apis/modem', () => ({
-  useModemApi: () => ({ getModems: async () => ({ data: { value: [{ id: 'a' }, { id: 'b' }] } }) }),
+  useModemApi: () => api,
 }))
 class Socket {
   static instances: Socket[] = []
@@ -39,13 +44,42 @@ const call: CallRecord = {
 }
 enableAutoUnmount(afterEach)
 beforeEach(() => {
+  updating.value = false
+  api.getModems.mockReset().mockResolvedValue({ data: { value: [{ id: 'a' }, { id: 'b' }] } })
   Socket.instances = []
   vi.stubGlobal('WebSocket', Socket)
 })
 afterEach(() => {
+  updating.value = false
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 describe('backend-wide call observation', () => {
+  it('pauses modem inventory requests during updates and resumes afterward', async () => {
+    vi.useFakeTimers()
+    updating.value = true
+    mount(
+      defineComponent({
+        setup() {
+          useCallMonitor(ref(false), vi.fn())
+          return () => null
+        },
+      }),
+    )
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(api.getModems).not.toHaveBeenCalled()
+
+    updating.value = false
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(api.getModems).toHaveBeenCalledTimes(1)
+    expect(api.getModems).toHaveBeenCalledWith({ quiet: true })
+
+    updating.value = true
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(api.getModems).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps the active audio owner until idle, then offers another device', async () => {
     const busy = ref(true),
       receive = vi.fn().mockResolvedValue(undefined)

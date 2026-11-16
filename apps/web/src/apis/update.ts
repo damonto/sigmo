@@ -10,6 +10,21 @@ export const useUpdateApi = () => ({
       body: JSON.stringify(settings),
     }),
   check: () => fetchJson<UpdateSnapshot>('update-checks', { method: 'POST' }),
-  install: () => fetchJson<UpdateSnapshot>('update-installations', { method: 'POST' }),
-  installation: () => fetchJsonQuietly<UpdateSnapshot>('update-installations/current'),
+  install: (signal?: AbortSignal) =>
+    fetchJson<UpdateSnapshot>('update-installations', { method: 'POST', signal }),
+  installation: async (signal?: AbortSignal) => {
+    const snapshot = await fetchJsonQuietly<UpdateSnapshot>('update-installations/current', {
+      cache: 'no-store',
+      signal,
+    })
+    if (
+      !snapshot ||
+      !['idle', 'checking', 'downloading', 'verifying', 'restarting', 'failed'].includes(
+        snapshot.state,
+      )
+    ) {
+      throw new Error('invalid update installation response')
+    }
+    return snapshot
+  },
 })
