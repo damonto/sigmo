@@ -66,20 +66,12 @@ const statusLabel = computed(() => {
 
 const statusDescription = computed(() => {
   switch (normalizedState.value) {
-    case 'loading':
-      return t('modemDetail.settings.wifiCallingStatusLoadingDescription')
-    case 'connected':
-      return t('modemDetail.settings.wifiCallingConnectedDescription')
-    case 'connecting':
-      return t('modemDetail.settings.wifiCallingConnectingDescription')
     case 'waiting_for_uplink':
       return t('modemDetail.settings.wifiCallingWaitingForUplinkDescription')
     case 'websheet_required':
       return t('modemDetail.settings.wifiCallingSetupRequiredDescription')
-    case 'disabled':
-      return t('modemDetail.settings.wifiCallingDisabledDescription')
     default:
-      return t('modemDetail.settings.wifiCallingDisconnectedDescription')
+      return ''
   }
 })
 
@@ -177,7 +169,10 @@ const formatDuration = (seconds: number) => {
           >
             {{ statusLabel }}
           </p>
-          <p class="truncate text-sm text-muted-foreground">
+          <p
+            v-if="statusDescription"
+            class="truncate text-sm text-muted-foreground"
+          >
             {{ statusDescription }}
           </p>
         </div>

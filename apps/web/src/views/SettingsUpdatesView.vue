@@ -239,7 +239,6 @@ docker compose pull &amp;&amp; docker compose up -d</pre>
       <Card>
         <CardHeader>
           <CardTitle>{{ t('settings.updates.preferences') }}</CardTitle>
-          <CardDescription>{{ t('settings.updates.preferencesDescription') }}</CardDescription>
         </CardHeader>
         <CardContent class="space-y-5">
           <div class="flex items-center justify-between gap-4 rounded-lg border p-3">

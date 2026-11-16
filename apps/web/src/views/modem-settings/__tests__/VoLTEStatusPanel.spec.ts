@@ -48,7 +48,6 @@ describe('VoLTEStatusPanel', () => {
     const wrapper = mountPanel('zh', { isLoading: true })
 
     expect(wrapper.text()).toContain('检查中')
-    expect(wrapper.text()).toContain('正在读取 VoLTE 状态')
     expect(wrapper.find('.animate-spin').exists()).toBe(true)
   })
 
@@ -56,7 +55,6 @@ describe('VoLTEStatusPanel', () => {
     const wrapper = mountPanel('en', { state: 'connecting' })
 
     expect(wrapper.text()).toContain('Connecting')
-    expect(wrapper.text()).toContain('VoLTE is registering with IMS')
     expect(wrapper.find('.animate-spin').exists()).toBe(true)
   })
 
@@ -84,7 +82,6 @@ describe('VoLTEStatusPanel', () => {
     const wrapper = mountPanel('zh', { enabled: false, state: 'idle' })
 
     expect(wrapper.text()).toContain('已关闭')
-    expect(wrapper.text()).toContain('当前模块未启用 VoLTE')
   })
 
   it('shows modem-managed VoLTE without inventing a duration', () => {

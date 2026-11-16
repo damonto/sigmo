@@ -43,22 +43,11 @@ const statusLabel = computed(() => {
   }
 })
 
-const statusDescription = computed(() => {
-  switch (normalizedState.value) {
-    case 'loading':
-      return t('modemDetail.settings.volteStatusLoadingDescription')
-    case 'connected':
-      return t('modemDetail.settings.volteConnectedDescription')
-    case 'connecting':
-      return t('modemDetail.settings.volteConnectingDescription')
-    case 'modem_managed':
-      return t('modemDetail.settings.volteModemRegisteredDescription')
-    case 'disabled':
-      return t('modemDetail.settings.volteDisabledDescription')
-    default:
-      return t('modemDetail.settings.volteDisconnectedDescription')
-  }
-})
+const statusDescription = computed(() =>
+  normalizedState.value === 'modem_managed'
+    ? t('modemDetail.settings.volteModemRegisteredDescription')
+    : '',
+)
 
 const isConnected = computed(() => normalizedState.value === 'connected')
 const isActive = computed(
@@ -125,7 +114,10 @@ const formatDuration = (seconds: number) => {
           >
             {{ statusLabel }}
           </p>
-          <p class="truncate text-sm text-muted-foreground">
+          <p
+            v-if="statusDescription"
+            class="truncate text-sm text-muted-foreground"
+          >
             {{ statusDescription }}
           </p>
         </div>

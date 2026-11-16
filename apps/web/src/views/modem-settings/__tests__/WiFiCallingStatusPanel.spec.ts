@@ -54,7 +54,6 @@ describe('WiFiCallingStatusPanel', () => {
     const wrapper = mountPanel('zh', { isLoading: true })
 
     expect(wrapper.text()).toContain('检查中')
-    expect(wrapper.text()).toContain('正在读取 Wi-Fi Calling 状态')
     expect(wrapper.find('.animate-spin').exists()).toBe(true)
     expect(wrapper.find('button').exists()).toBe(false)
   })
@@ -113,6 +112,5 @@ describe('WiFiCallingStatusPanel', () => {
     const wrapper = mountPanel('zh', { enabled: false, state: 'idle' })
 
     expect(wrapper.text()).toContain('已关闭')
-    expect(wrapper.text()).toContain('当前线路未启用 Wi-Fi Calling')
   })
 })

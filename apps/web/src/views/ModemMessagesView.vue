@@ -24,9 +24,6 @@ const modemId = computed(() => (route.params.id ?? 'unknown') as string)
         <h2 class="text-lg font-semibold text-foreground">
           {{ t('modemDetail.messages.desktopEmptyTitle') }}
         </h2>
-        <p class="mt-2 text-sm text-muted-foreground">
-          {{ t('modemDetail.messages.desktopEmptyDescription') }}
-        </p>
       </div>
     </section>
   </div>

@@ -55,10 +55,6 @@ const statusLabel = computed(() => {
   if (props.isConnected) return t('modemDetail.settings.internetConnected')
   return t('modemDetail.settings.internetDisconnected')
 })
-const statusDescription = computed(() => {
-  if (props.isConnected) return t('modemDetail.settings.internetConnectedDescription')
-  return t('modemDetail.settings.internetDisconnectedDescription')
-})
 const interfaceLabel = computed(
   () => props.connection?.interfaceName || t('modemDetail.settings.internetNone'),
 )
@@ -178,9 +174,6 @@ const formatBytes = (bytes: number) => {
               :class="props.isConnected ? 'text-emerald-600' : 'text-primary'"
             >
               {{ statusLabel }}
-            </p>
-            <p class="truncate text-sm text-muted-foreground">
-              {{ statusDescription }}
             </p>
           </div>
         </div>

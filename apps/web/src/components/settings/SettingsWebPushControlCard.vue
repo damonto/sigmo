@@ -47,9 +47,6 @@ const enableCurrentDisabled = computed(
           <div class="text-sm font-medium text-foreground">
             {{ t('settings.webPush.title') }}
           </div>
-          <p class="text-xs leading-5 text-muted-foreground">
-            {{ t('settings.webPush.description') }}
-          </p>
         </div>
         <Switch
           :model-value="props.enabled"

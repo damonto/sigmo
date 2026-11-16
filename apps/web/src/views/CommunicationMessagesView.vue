@@ -44,9 +44,6 @@ const threadID = computed(() =>
         <h2 class="text-lg font-semibold text-foreground">
           {{ t('modemDetail.messages.desktopEmptyTitle') }}
         </h2>
-        <p class="mt-2 text-sm text-muted-foreground">
-          {{ t('modemDetail.messages.desktopEmptyDescription') }}
-        </p>
       </div>
     </section>
   </main>
