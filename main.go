@@ -35,6 +35,12 @@ func main() {
 		fmt.Println(info.Version)
 		return
 	}
+	level := slog.LevelInfo
+	if debug {
+		level = slog.LevelDebug
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+
 	executable, err := os.Executable()
 	if err != nil {
 		slog.Error("resolve executable", "error", err)

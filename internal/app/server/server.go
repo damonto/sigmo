@@ -65,7 +65,6 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	if cfg.ListenAddress == "" {
 		cfg.ListenAddress = "0.0.0.0:9527"
 	}
-	applyLogLevel(cfg.Debug)
 
 	appCtx, cancelApp := context.WithCancelCause(ctx)
 	signalCh := make(chan os.Signal, 1)
@@ -493,14 +492,6 @@ func dataDir() (string, error) {
 		return "", fmt.Errorf("user home dir %q is relative", home)
 	}
 	return filepath.Join(home, ".local", "share"), nil
-}
-
-func applyLogLevel(debug bool) {
-	if debug {
-		slog.SetLogLoggerLevel(slog.LevelDebug)
-		return
-	}
-	slog.SetLogLoggerLevel(slog.LevelInfo)
 }
 
 type internetConnectorConfig struct {
