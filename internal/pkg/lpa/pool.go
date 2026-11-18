@@ -71,6 +71,21 @@ type poolEntry struct {
 	done    chan struct{}
 	err     error
 	lockKey string
+	cache   cardReadCache
+}
+
+func newPoolEntry(pool *Pool, key poolKey, client *Client, lockKey string) *poolEntry {
+	entry := &poolEntry{
+		pool:    pool,
+		key:     key,
+		modem:   key.modem,
+		client:  client,
+		gate:    make(chan struct{}, 1),
+		done:    make(chan struct{}),
+		lockKey: lockKey,
+	}
+	client.clientView.cache = &entry.cache
+	return entry
 }
 
 type poolSEKey struct {
@@ -372,15 +387,7 @@ func (p *Pool) createAndLease(ctx context.Context, key poolKey, aid []byte) (*Le
 		}
 		return lease(ctx, entry)
 	}
-	entry := &poolEntry{
-		pool:    p,
-		key:     key,
-		modem:   key.modem,
-		client:  client,
-		gate:    make(chan struct{}, 1),
-		done:    make(chan struct{}),
-		lockKey: lockKey,
-	}
+	entry := newPoolEntry(p, key, client, lockKey)
 	p.entries[key] = entry
 	p.mu.Unlock()
 	if ownsReady {
@@ -680,8 +687,9 @@ func poolSlots(m *modem.Modem) []uint8 {
 func normalizedPoolSlots(values ...uint32) []uint8 {
 	slots := make(map[uint8]struct{}, len(values))
 	for _, current := range values {
-		if current > 0 && current <= math.MaxUint8 {
-			slots[uint8(current)] = struct{}{}
+		if current <= math.MaxUint8 {
+			// Match ActiveSIMSlot's fallback when the modem omits the slot.
+			slots[uint8(max(current, 1))] = struct{}{}
 		}
 	}
 	result := make([]uint8, 0, len(slots))

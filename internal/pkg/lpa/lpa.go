@@ -548,25 +548,20 @@ func (l *Client) Logger() *slog.Logger {
 	return l.logger
 }
 
-func (l *Client) Info() (*Info, error) {
-	var info Info
-	eid, err := l.EID()
-	if err != nil {
-		return nil, fmt.Errorf("read EID: %w", err)
-	}
-	info.EID = hex.EncodeToString(eid)
-
-	tlv, err := l.EUICCInfo2()
+func (c *clientView) readInfo(eid string) (*Info, error) {
+	info := Info{EID: eid}
+	tlv, err := c.EUICCInfo2()
 	if err != nil {
 		return nil, fmt.Errorf("read eUICC info: %w", err)
 	}
-	if err := parseEUICCInfo2(&info, tlv); err != nil {
+	if err := info.UnmarshalBERTLV(tlv); err != nil {
 		return nil, err
 	}
 	return &info, nil
 }
 
-func parseEUICCInfo2(info *Info, tlv *bertlv.TLV) error {
+// UnmarshalBERTLV decodes EUICCInfo2. The EID is retained for supplier lookup.
+func (info *Info) UnmarshalBERTLV(tlv *bertlv.TLV) error {
 	if info == nil {
 		return errors.New("eUICC info destination is nil")
 	}
@@ -578,37 +573,44 @@ func parseEUICCInfo2(info *Info, tlv *bertlv.TLV) error {
 	if sasup == nil {
 		return errors.New("read SAS-UP version: field is missing")
 	}
-	info.SASUP = euicc.LookupSASUP(info.EID, string(sasup.Value))
-
 	certificateList := tlv.First(bertlv.ContextSpecific.Constructed(10))
 	if certificateList == nil {
 		return errors.New("read certificate issuers: field is missing")
 	}
-	for _, child := range certificateList.Children {
-		info.Certificates = append(info.Certificates, euicc.LookupCertificateIssuer(hex.EncodeToString(child.Value)))
-	}
-
 	resource := tlv.First(bertlv.ContextSpecific.Primitive(4))
 	if resource == nil {
 		return errors.New("read free non-volatile memory: resource field is missing")
 	}
-	data, err := resource.MarshalBinary()
-	if err != nil {
-		return fmt.Errorf("encode free non-volatile memory resource: %w", err)
+	// The primitive resource field contains a sequence of encoded TLVs.
+	reader := bytes.NewReader(resource.Value)
+	freeSpaceTag := bertlv.ContextSpecific.Primitive(2)
+	var freeSpace *bertlv.TLV
+	for reader.Len() > 0 {
+		var field bertlv.TLV
+		if _, err := field.ReadFrom(reader); err != nil {
+			return fmt.Errorf("decode free non-volatile memory resource: %w", err)
+		}
+		if freeSpace == nil && field.Tag.Equal(freeSpaceTag) {
+			freeSpace = &field
+		}
 	}
-	if len(data) == 0 {
-		return errors.New("decode free non-volatile memory resource: field is empty")
-	}
-	data[0] = 0x30
-	if err := resource.UnmarshalBinary(data); err != nil {
-		return fmt.Errorf("decode free non-volatile memory resource: %w", err)
-	}
-	freeSpace := resource.First(bertlv.ContextSpecific.Primitive(2))
 	if freeSpace == nil {
 		return errors.New("read free non-volatile memory: field is missing")
 	}
-	if err := primitive.UnmarshalInt(&info.FreeSpace).UnmarshalBinary(freeSpace.Value); err != nil {
+	var available int32
+	if err := freeSpace.UnmarshalValue(primitive.UnmarshalInt(&available)); err != nil {
 		return fmt.Errorf("decode free non-volatile memory: %w", err)
+	}
+
+	var certificates []string
+	for _, child := range certificateList.Children {
+		certificates = append(certificates, euicc.LookupCertificateIssuer(hex.EncodeToString(child.Value)))
+	}
+	*info = Info{
+		EID:          info.EID,
+		FreeSpace:    available,
+		SASUP:        euicc.LookupSASUP(info.EID, string(sasup.Value)),
+		Certificates: certificates,
 	}
 	return nil
 }

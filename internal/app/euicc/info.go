@@ -18,42 +18,28 @@ func newEUICC(clients *lpa.Pool) *euicc {
 }
 
 func (e *euicc) Get(ctx context.Context, modem *mmodem.Modem) (*SEsResponse, error) {
-	ses, err := e.clients.SecureElements(ctx, modem)
+	cards, err := e.clients.EUICCInfo(ctx, modem)
 	if err != nil {
-		return nil, fmt.Errorf("discover eUICC SEs: %w", err)
+		return nil, fmt.Errorf("fetch eUICC info: %w", err)
 	}
-	response := &SEsResponse{SEs: make([]SEItemResponse, 0, len(ses))}
-	for _, se := range ses {
-		item := SEItemResponse{
-			ID:    se.ID,
-			Label: se.Label,
-			AID:   hex.EncodeToString(se.AID),
+	response := &SEsResponse{SEs: make([]SEItemResponse, 0, len(cards))}
+	for _, card := range cards {
+		certificates := card.Info.Certificates
+		if certificates == nil {
+			certificates = []string{}
 		}
-		client, err := e.clients.Acquire(ctx, modem, se.ID)
-		if err != nil {
-			modem.Logger().Warn("create LPA client for eUICC info", "seId", se.ID, "error", err)
-			return nil, fmt.Errorf("create LPA client for %s: %w", se.ID, err)
-		}
-		info, err := client.Info()
-		if err != nil {
-			if cerr := client.Close(); cerr != nil {
-				client.Logger().Warn("failed to close LPA client", "error", cerr)
-			}
-			err = fmt.Errorf("fetch eUICC info for %s: %w", se.ID, err)
-			modem.Logger().Warn("fetch eUICC info", "seId", se.ID, "error", err)
-			return nil, err
-		}
-		item.EID = info.EID
-		item.FreeSpace = info.FreeSpace
-		item.SASUP = SASUPResponse{
-			Name:   info.SASUP.Name,
-			Region: info.SASUP.Region,
-		}
-		item.Certificates = append([]string{}, info.Certificates...)
-		if cerr := client.Close(); cerr != nil {
-			client.Logger().Warn("failed to close LPA client", "error", cerr)
-		}
-		response.SEs = append(response.SEs, item)
+		response.SEs = append(response.SEs, SEItemResponse{
+			ID:        card.SE.ID,
+			Label:     card.SE.Label,
+			AID:       hex.EncodeToString(card.SE.AID),
+			EID:       card.Info.EID,
+			FreeSpace: card.Info.FreeSpace,
+			SASUP: SASUPResponse{
+				Name:   card.Info.SASUP.Name,
+				Region: card.Info.SASUP.Region,
+			},
+			Certificates: certificates,
+		})
 	}
 	return response, nil
 }

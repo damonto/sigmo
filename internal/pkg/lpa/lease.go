@@ -22,6 +22,7 @@ const (
 // release and leave a closed client in the pool.
 type clientView struct {
 	client *euicclpa.Client
+	cache  *cardReadCache
 }
 
 func (c *clientView) EID() ([]byte, error) {
@@ -49,22 +50,28 @@ func (c *clientView) HandleNotification(notification *sgp22.PendingNotification)
 }
 
 func (c *clientView) RemoveNotificationFromList(sequenceNumber sgp22.SequenceNumber) error {
+	// Removing a stored notification can change the available card memory.
+	defer c.cache.invalidateInfo()
 	return c.client.RemoveNotificationFromList(sequenceNumber)
 }
 
 func (c *clientView) EnableProfile(identifier any, refresh bool) error {
+	defer c.cache.invalidateProfileData()
 	return c.client.EnableProfile(identifier, refresh)
 }
 
 func (c *clientView) DeleteProfile(identifier any) error {
+	defer c.cache.invalidateProfileData()
 	return c.client.DeleteProfile(identifier)
 }
 
 func (c *clientView) SetNickname(iccid sgp22.ICCID, nickname string) error {
+	defer c.cache.invalidateProfileData()
 	return c.client.SetNickname(iccid, nickname)
 }
 
 func (c *clientView) DownloadProfile(ctx context.Context, activationCode *euicclpa.ActivationCode, opts *euicclpa.DownloadOptions) (*sgp22.LoadBoundProfilePackageResponse, error) {
+	defer c.cache.invalidateProfileData()
 	return c.client.DownloadProfile(ctx, activationCode, opts)
 }
 
@@ -118,10 +125,6 @@ func (l *Lease) Logger() *slog.Logger {
 		return slog.Default()
 	}
 	return l.owner.Logger()
-}
-
-func (l *Lease) Info() (*Info, error) {
-	return l.owner.Info()
 }
 
 func (l *Lease) Delete(id sgp22.ICCID) error {

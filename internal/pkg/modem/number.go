@@ -7,14 +7,24 @@ import (
 )
 
 // SIMIdentity binds an observation to one activation of a SIM on a modem.
-// Obtain it from Snapshot; its private version rejects delayed writes even
-// when a SIM is removed and the same ICCID is subsequently reinserted.
+// Its private version distinguishes successive activations of the same ICCID.
 type SIMIdentity struct {
 	ICCID string
 	Slot  uint32
 
 	modem    *Modem
 	revision uint64
+	absent   bool
+}
+
+// SIMIdentity returns the identity of the current SIM activation.
+func (m *Modem) SIMIdentity() SIMIdentity {
+	if m == nil {
+		return SIMIdentity{}
+	}
+	m.runtimeMu.RLock()
+	defer m.runtimeMu.RUnlock()
+	return m.simIdentityLocked()
 }
 
 // SetIMSNumber records an IMS-derived number for the specified SIM.
@@ -91,8 +101,13 @@ func (m *Modem) notifyNumberChanged() {
 }
 
 func (m *Modem) simIdentityLocked() SIMIdentity {
-	identity := SIMIdentity{Slot: m.PrimarySIMSlot, modem: m, revision: m.simRevision}
-	if m.SIM != nil && m.Status.SIM != wwanmodem.SIMStateAbsent {
+	identity := SIMIdentity{
+		Slot:     m.PrimarySIMSlot,
+		modem:    m,
+		revision: m.simRevision,
+		absent:   m.Status.SIM == wwanmodem.SIMStateAbsent,
+	}
+	if m.SIM != nil && !identity.absent {
 		identity.ICCID = strings.TrimSpace(m.SIM.Identifier)
 	}
 	return identity

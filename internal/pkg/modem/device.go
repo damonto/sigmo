@@ -323,7 +323,7 @@ func ActiveSIMSlot(m *Modem) (uint8, error) {
 	if m == nil {
 		return 0, errModemRequired
 	}
-	slot := m.Snapshot().PrimarySIMSlot
+	slot := m.SIMIdentity().Slot
 	if slot == 0 {
 		return 1, nil
 	}

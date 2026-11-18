@@ -234,7 +234,8 @@ func (m *Modem) currentSIMRefresh() (version uint64, inProgress bool, notify <-c
 	return m.simRefresh.version, m.simRefresh.inProgress, m.simRefresh.notify
 }
 
-func (m *Modem) simReloadPending() bool {
+// SIMReloadPending reports whether a SIM reset has made this modem generation unusable.
+func (m *Modem) SIMReloadPending() bool {
 	if m == nil {
 		return false
 	}

@@ -35,50 +35,25 @@ func (p *profile) List(ctx context.Context, modem *mmodem.Modem) (*Inventory, er
 	if p.history != nil {
 		displayRevision = p.history.SIMDisplayRevision()
 	}
-	ses, err := p.clients.SecureElements(ctx, modem)
+	cards, err := p.clients.ProfileInventories(ctx, modem)
 	if err != nil {
-		return nil, fmt.Errorf("discover eUICC SEs: %w", err)
+		return nil, fmt.Errorf("list eSIM profiles: %w", err)
 	}
-	response := &Inventory{SEs: make([]SecureElement, 0, len(ses))}
-	for _, se := range ses {
+	response := &Inventory{SEs: make([]SecureElement, 0, len(cards))}
+	for _, card := range cards {
+		se := card.SE
 		group := SecureElement{
 			ID:       se.ID,
 			Label:    se.Label,
 			AID:      hex.EncodeToString(se.AID),
-			Profiles: []Profile{},
+			EID:      card.EID,
+			Profiles: make([]Profile, 0, len(card.Profiles)),
 		}
-		client, err := p.clients.Acquire(ctx, modem, se.ID)
-		if err != nil {
-			modem.Logger().Warn("create LPA client for eSIM profiles", "seId", se.ID, "error", err)
-			return nil, fmt.Errorf("create LPA client for %s: %w", se.ID, err)
-		}
-		eid, err := client.EID()
-		if err != nil {
-			if cerr := client.Close(); cerr != nil {
-				client.Logger().Warn("close LPA client", "error", cerr)
-			}
-			err = fmt.Errorf("read EID for %s: %w", se.ID, err)
-			modem.Logger().Warn("read eUICC EID for eSIM profiles", "seId", se.ID, "error", err)
-			return nil, err
-		}
-		group.EID = hex.EncodeToString(eid)
-		profiles, err := client.ListProfile(nil, nil)
-		if err != nil {
-			if cerr := client.Close(); cerr != nil {
-				client.Logger().Warn("close LPA client", "error", cerr)
-			}
-			err = fmt.Errorf("list profiles for %s: %w", se.ID, err)
-			modem.Logger().Warn("list eSIM profiles", "seId", se.ID, "error", err)
-			return nil, err
-		}
-		for _, item := range profiles {
+		for _, item := range card.Profiles {
 			profileResponse := profileResponseFrom(item, se.ID, se.Label, group.EID)
 			if p.reminders != nil {
 				value, ok, err := p.reminders.Get(ctx, reminder.ProfileTypeESIM, profileResponse.ICCID)
 				if err != nil {
-					if cerr := client.Close(); cerr != nil {
-						client.Logger().Warn("close LPA client", "error", cerr)
-					}
 					return nil, fmt.Errorf("read reminder for %s: %w", profileResponse.ICCID, err)
 				}
 				if ok {
@@ -87,9 +62,6 @@ func (p *profile) List(ctx context.Context, modem *mmodem.Modem) (*Inventory, er
 				}
 			}
 			group.Profiles = append(group.Profiles, profileResponse)
-		}
-		if cerr := client.Close(); cerr != nil {
-			client.Logger().Warn("close LPA client", "error", cerr)
 		}
 		response.SEs = append(response.SEs, group)
 		if p.history != nil {

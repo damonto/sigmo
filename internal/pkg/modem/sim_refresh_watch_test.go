@@ -83,7 +83,7 @@ func TestSIMResetStreamClosureStillRequestsRecovery(t *testing.T) {
 	default:
 		t.Fatal("missing END left the modem waiting forever for recovery")
 	}
-	if !modem.simReloadPending() {
+	if !modem.SIMReloadPending() {
 		t.Fatal("reset generation was marked usable before recovery")
 	}
 }
@@ -91,7 +91,7 @@ func TestSIMResetStreamClosureStillRequestsRecovery(t *testing.T) {
 func TestSIMResetEndWithoutStartRequiresReplacement(t *testing.T) {
 	modem := &Modem{}
 	modem.publishSIMRefresh(devicewwan.SIMRefreshEvent{Stage: devicewwan.SIMRefreshEndWithSuccess, Mode: devicewwan.SIMRefreshReset})
-	if !modem.simReloadPending() {
+	if !modem.SIMReloadPending() {
 		t.Fatal("missed START allowed readiness before replacement")
 	}
 }

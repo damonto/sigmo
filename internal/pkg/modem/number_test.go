@@ -177,6 +177,35 @@ func TestIMSNumberRecoversAfterSIMReactivation(t *testing.T) {
 	}
 }
 
+func TestSIMPresenceWithoutICCIDPublishesChanges(t *testing.T) {
+	const path = "/sys/devices/modem-1"
+	m := simRefreshTestModem(path, 1, false)
+	m.applySIMInfo(wwanmodem.SIMInfo{State: wwanmodem.SIMStateReady})
+	registry := &Registry{modems: map[string]*Modem{path: m}}
+	registry.trackSIMIdentity(m)
+	var events []ModemEvent
+	registry.subs = []subscription{{fn: func(event ModemEvent) error {
+		events = append(events, event)
+		return nil
+	}}}
+	m.onSIMChange = func(slot uint32, iccid string) { registry.publishSIMChanged(m, slot, iccid) }
+
+	original := m.SIMIdentity()
+	m.applyStatus(wwanmodem.Status{SIM: wwanmodem.SIMStateAbsent})
+	m.applyStatus(wwanmodem.Status{SIM: wwanmodem.SIMStateReady})
+	if current := m.SIMIdentity(); current == original || current.ICCID != "" || current.Slot != 0 {
+		t.Fatalf("SIM identity after reinsertion = %+v, original = %+v", current, original)
+	}
+	if len(events) != 2 {
+		t.Fatalf("SIM events = %+v, want one event per presence change", events)
+	}
+	for _, event := range events {
+		if event.Type != ModemEventSIMChanged || event.PreviousSIMSlot != 0 || event.SIMSlot != 0 || event.SIMIdentifier != "" {
+			t.Fatalf("SIM presence event = %+v, want unspecified slot and empty ICCID", event)
+		}
+	}
+}
+
 func TestNumberChangeNotifications(t *testing.T) {
 	m := &Modem{}
 	var observed []ModemSnapshot
