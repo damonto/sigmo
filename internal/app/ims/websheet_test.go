@@ -10,12 +10,13 @@ import (
 
 func TestWFCWebsheetRequestFromSetupErrors(t *testing.T) {
 	tests := []struct {
-		name            string
-		err             error
-		wantURL         string
-		wantUserData    string
-		wantContentType string
-		wantClientName  string
+		name                 string
+		err                  error
+		wantURL              string
+		wantUserData         string
+		wantContentType      string
+		wantClientName       string
+		wantPreservePostData bool
 	}{
 		{
 			name: "nsds",
@@ -52,8 +53,22 @@ func TestWFCWebsheetRequestFromSetupErrors(t *testing.T) {
 					},
 				},
 			},
-			wantURL:        "https://example.com/ts43?existing=1&token=abc",
-			wantClientName: "CarrierWFC",
+			wantURL:              "https://example.com/ts43?existing=1",
+			wantClientName:       "CarrierWFC",
+			wantUserData:         "token=abc",
+			wantContentType:      "application/x-www-form-urlencoded",
+			wantPreservePostData: true,
+		},
+		{
+			name: "ts43 without portal data",
+			err: &wfcsetup.Error{
+				Err: wfcsetup.ErrUserActionRequired,
+				Result: wfcsetup.Result{
+					Scheme:   wfcsetup.SchemeTS43,
+					Websheet: &wfcsetup.Websheet{URL: "https://example.com/ts43"},
+				},
+			},
+			wantURL: "https://example.com/ts43",
 		},
 	}
 
@@ -72,6 +87,9 @@ func TestWFCWebsheetRequestFromSetupErrors(t *testing.T) {
 			}
 			if req.ContentType != tt.wantContentType {
 				t.Fatalf("ContentType = %q, want %q", req.ContentType, tt.wantContentType)
+			}
+			if req.PreservePostData != tt.wantPreservePostData {
+				t.Errorf("PreservePostData = %t, want %t", req.PreservePostData, tt.wantPreservePostData)
 			}
 			if req.ClientName != tt.wantClientName {
 				t.Errorf("ClientName = %q, want %q", req.ClientName, tt.wantClientName)
@@ -129,7 +147,7 @@ func TestCreateWFCWebsheetFromSetupResult(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &coordinator{websheets: websheet.New(websheet.Config{AllowPrivateHosts: true})}
-			info, err := c.createWFCWebsheet(t.Context(), tt.result, nil)
+			info, err := c.createWFCWebsheet(t.Context(), tt.result, nil, nil)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("createWFCWebsheet() error = %v, want %v", err, tt.wantErr)

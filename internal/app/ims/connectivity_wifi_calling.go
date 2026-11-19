@@ -83,8 +83,16 @@ func (c *Connectivity) StartWiFiCallingEmergencyAddressUpdate(ctx context.Contex
 	}
 	var info websheet.Info
 	err := c.change(modem, func() error {
-		var err error
-		info, err = c.wifiCalling.StartEmergencyAddressUpdate(ctx, modem)
+		profileID, err := modem.ProfileID(ctx)
+		if err != nil {
+			return err
+		}
+		completion := emergencyAddressCallback(func(ctx context.Context) error {
+			return c.wifiCalling.recheckEmergencyAddress(ctx, modem, profileID)
+		})
+		info, err = c.wifiCalling.StartEmergencyAddressUpdate(ctx, modem, profileID, func(ctx context.Context, callback websheet.Callback) error {
+			return c.change(modem, func() error { return completion(ctx, callback) })
+		})
 		return err
 	})
 	return info, err

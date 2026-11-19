@@ -16,18 +16,18 @@
     "dry-run": "wrangler deploy --dry-run"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "^1.8.2",
+    "@cloudflare/vitest-plugin": "^1.8.5",
     "@types/node": "^26.6.6",
-    "oxlint": "^1.93.0",
+    "oxlint": "^1.94.0",
     "oxlint-tsgolint": "^7.0.2007",
     "prettier": "3.9.10",
     "typescript": "~7.0.2",
-    "vitest": "^5.1.0",
-    "wrangler": "^4.162.0"
+    "vitest": "^5.1.1",
+    "wrangler": "^4.165.0"
   },
   "dependencies": {
     "@resvg/resvg-wasm": "2.6.2",
-    "hono": "^4.13.18",
+    "hono": "^4.13.19",
     "jose": "6.2.17"
   }
 }

@@ -15,7 +15,7 @@ import (
 	usim "github.com/damonto/wwan-go/sim"
 )
 
-func (c *coordinator) StartEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem) (websheet.Info, error) {
+func (c *coordinator) StartEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem, profileID string, onCallback func(context.Context, websheet.Callback) error) (websheet.Info, error) {
 	if c.websheets == nil {
 		return websheet.Info{}, ErrUnavailable
 	}
@@ -30,11 +30,97 @@ func (c *coordinator) StartEmergencyAddressUpdate(ctx context.Context, modem *mm
 	if !supported {
 		return websheet.Info{}, ErrWebsheetUnavailable
 	}
-	result, underlay, err := c.checkEmergencyAddressUpdate(ctx, modem)
+	result, underlay, err := c.checkEmergencyAddress(ctx, modem, wfcsetup.PurposeEmergencyAddressUpdate)
 	if err != nil {
 		return websheet.Info{}, fmt.Errorf("check Wi-Fi Calling E911 setup: %w", err)
 	}
-	return c.createWFCWebsheet(ctx, result, underlay)
+	if result.Action == wfcsetup.ActionDisableWFC {
+		if err := c.disableWFCForProfile(ctx, modem, profileID); err != nil {
+			return websheet.Info{}, err
+		}
+	}
+	if result.Scheme != wfcsetup.SchemeTS43 && result.Scheme != wfcsetup.SchemeNSDS {
+		onCallback = nil
+	}
+	return c.createWFCWebsheet(ctx, result, underlay, onCallback)
+}
+
+// The caller serializes callback processing with other operations on this modem.
+func emergencyAddressCallback(recheck func(context.Context) error) func(context.Context, websheet.Callback) error {
+	var finished bool
+	return func(ctx context.Context, callback websheet.Callback) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if finished {
+			return nil
+		}
+		switch wfcWebsheetCallbackResult(callback) {
+		case wfcWebsheetCallbackRetry:
+			if err := recheck(ctx); err != nil {
+				return err
+			}
+		case wfcWebsheetCallbackDismiss:
+		default:
+			return nil
+		}
+		finished = true
+		return nil
+	}
+}
+
+func (c *coordinator) recheckEmergencyAddress(ctx context.Context, modem *mmodem.Modem, profileID string) error {
+	if err := checkWebsheetProfile(ctx, modem, profileID); err != nil {
+		return err
+	}
+	result, _, err := c.checkEmergencyAddress(ctx, modem, wfcsetup.PurposeEmergencyAddressRecheck)
+	if err != nil {
+		return fmt.Errorf("recheck Wi-Fi Calling E911 setup: %w", err)
+	}
+	switch result.Action {
+	case wfcsetup.ActionDisableWFC:
+		return c.disableWFCForProfile(ctx, modem, profileID)
+	case wfcsetup.ActionWait:
+		return ErrWiFiCallingSetupPending
+	case wfcsetup.ActionNone:
+		if result.Entitled {
+			return nil
+		}
+	}
+	return ErrWiFiCallingSetupDenied
+}
+
+func checkWebsheetProfile(ctx context.Context, modem *mmodem.Modem, profileID string) error {
+	current, err := modem.ProfileID(ctx)
+	if err != nil {
+		return err
+	}
+	if current != profileID {
+		return websheet.ErrExpired
+	}
+	return nil
+}
+
+func (c *coordinator) disableWFCForProfile(ctx context.Context, modem *mmodem.Modem, profileID string) error {
+	if err := checkWebsheetProfile(ctx, modem, profileID); err != nil {
+		return err
+	}
+	settings, err := c.wifiCallingSettings.Get(ctx, profileID)
+	if err != nil {
+		return err
+	}
+	settings.Enabled = false
+	if err := c.wifiCallingSettings.Put(ctx, profileID, settings); err != nil {
+		return err
+	}
+	modemID := modem.EquipmentIdentifier
+	c.mu.Lock()
+	session := c.sessions[modemID]
+	c.mu.Unlock()
+	if session != nil && session.profileID == profileID {
+		c.stopAsyncSession(ctx, modemID, session.id)
+	}
+	return nil
 }
 
 func (c *coordinator) EmergencyAddressUpdateAvailable(ctx context.Context, modem *mmodem.Modem) bool {
@@ -160,7 +246,7 @@ func (c modemWFCSetupCard) simPLMN() string {
 	return strings.TrimSpace(c.sim.OperatorIdentifier)
 }
 
-func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mmodem.Modem) (result wfcsetup.Result, underlay imsgo.Underlay, err error) {
+func (c *coordinator) checkEmergencyAddress(ctx context.Context, modem *mmodem.Modem, purpose wfcsetup.Purpose) (result wfcsetup.Result, underlay imsgo.Underlay, err error) {
 	reader, err := OpenWWAN(ctx, modem, WWANConfig{Access: AccessWiFiCalling})
 	if err != nil {
 		return wfcsetup.Result{}, nil, fmt.Errorf("open Wi-Fi Calling SIM reader: %w", err)
@@ -184,7 +270,7 @@ func (c *coordinator) checkEmergencyAddressUpdate(ctx context.Context, modem *mm
 		WFC:             cfg.WFC,
 		AuthenticateAKA: card.EAPAKA,
 		Device:          wfcSetupDevice(cfg.Terminal),
-		Purpose:         wfcsetup.PurposeEmergencyAddressUpdate,
+		Purpose:         purpose,
 		Logger:          cfg.Logger,
 		HTTPClient:      wifiCallingHTTPClient(cfg.Access.VoWiFi.Underlay),
 	})

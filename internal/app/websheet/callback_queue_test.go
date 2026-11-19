@@ -8,16 +8,43 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"testing"
 )
 
 func mustQueueCallback(t *testing.T, session *Session, callback Callback) {
 	t.Helper()
 	if err := session.Callback(callback); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCallbackEndpointDispatchesDirectlyWhenConfigured(t *testing.T) {
+	broker := New(Config{AllowPrivateHosts: true})
+	var received Callback
+	session, err := broker.Create(t.Context(), Request{
+		URL: "https://example.test/portal",
+		OnCallback: func(_ context.Context, callback Callback) error {
+			received = callback
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := echo.New()
+	h := NewHandler(broker)
+	e.POST("/api/v1/websheets/:id/callback", h.Callback, h.Capability)
+	req := httptest.NewRequest(http.MethodPost, session.Info().EmbedURL+"/callback", strings.NewReader(`{"event":"entitlementChanged"}`))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent || received.Event != "entitlementChanged" {
+		t.Fatalf("response = %d, callback = %+v", rec.Code, received)
+	}
+	if len(session.callbacks) != 0 {
+		t.Fatal("callback was also queued")
 	}
 }
 

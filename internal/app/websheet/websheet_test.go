@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -286,6 +288,72 @@ func TestSessionMethodUsesContentType(t *testing.T) {
 				t.Fatalf("Info().Method = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestInitialWebsheetPostPreservesCarrierData(t *testing.T) {
+	const carrierData = "z=first&a=%2b&a=two+words&raw=%"
+	const contentType = "application/x-www-form-urlencoded"
+	type carrierRequest struct{ method, body, contentType, query string }
+	var mu sync.Mutex
+	var requests []carrierRequest
+	carrier := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		mu.Lock()
+		requests = append(requests, carrierRequest{
+			method:      r.Method,
+			body:        string(data),
+			contentType: r.Header.Get("Content-Type"),
+			query:       r.URL.RawQuery,
+		})
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer carrier.Close()
+	session, err := New(Config{AllowPrivateHosts: true}).Create(t.Context(), Request{
+		URL: carrier.URL + "/setup%2Fstep?existing=1#start", UserData: carrierData,
+		ContentType: contentType, PreservePostData: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := httptest.NewRecorder()
+	if err := session.ServeBootstrap(page, httptest.NewRequestWithContext(t.Context(), http.MethodGet, session.Info().EmbedURL, nil)); err != nil {
+		t.Fatal(err)
+	}
+	_, action, ok := strings.Cut(page.Body.String(), `action="`)
+	if !ok || strings.Contains(page.Body.String(), carrierData) {
+		t.Fatal("bootstrap did not produce a form without the carrier data")
+	}
+	action, _, _ = strings.Cut(action, `"`)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, html.UnescapeString(action), nil)
+	if err := session.Proxy(httptest.NewRecorder(), req); err != nil {
+		t.Fatal(err)
+	}
+	// The initial POST selector must never attach the payload to another URL.
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, session.proxyURL(carrier.URL+"/next")+"?initial_post=1", strings.NewReader("browser=1"))
+	if err := session.Proxy(httptest.NewRecorder(), req); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got := len(requests); got != 2 {
+		t.Fatalf("carrier received %d requests, want 2", got)
+	}
+	want := carrierRequest{
+		method:      http.MethodPost,
+		body:        carrierData,
+		contentType: contentType,
+		query:       "existing=1",
+	}
+	if got := requests[0]; got != want {
+		t.Errorf("initial carrier request = %+v, want %+v", got, want)
+	}
+	if got := requests[1]; got.body != "browser=1" {
+		t.Errorf("subsequent body = %q, want browser data", got.body)
 	}
 }
 

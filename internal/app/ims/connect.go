@@ -86,6 +86,7 @@ type connectAttempt struct {
 	sessionID         uint64
 	imsProfile        wwan.IMSProfile
 	registrationGroup *registration.Group
+	wfcRecheck        bool
 }
 
 type managedVoLTEOps struct {
@@ -368,6 +369,10 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 			retry = 0
 			continue
 		}
+		setupErr, setupFailed := errors.AsType[*wfcsetup.Error](err)
+		if errors.Is(err, wfcsetup.ErrDenied) || (attempt.wfcRecheck && setupFailed) {
+			return nil, err
+		}
 		if errors.Is(err, wfcsetup.ErrUserActionRequired) {
 			slog.Warn("Wi-Fi Calling requires carrier websheet", "imei", modem.EquipmentIdentifier, "error", err)
 			if err := c.waitForWebsheet(ctx, modem.EquipmentIdentifier, attempt.sessionID); err != nil {
@@ -377,6 +382,7 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 				}
 				return nil, err
 			}
+			attempt.wfcRecheck = true
 			retry = 0
 			continue
 		}
@@ -385,6 +391,9 @@ func (c *coordinator) connectWithRetry(ctx context.Context, modem *mmodem.Modem,
 			return nil, err
 		}
 		delay := retryDelays[retry]
+		if setupFailed && errors.Is(setupErr, wfcsetup.ErrPending) {
+			delay = max(delay, setupErr.Result.RetryAfter)
+		}
 		retry++
 		slog.Warn("IMS access connect", "imei", modem.EquipmentIdentifier, "access", c.routeName(), "retryIn", delay, "error", err)
 		if err := sleep(ctx, delay); err != nil {
@@ -479,7 +488,11 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 		// that happen outside SIP transaction timers. The active client owns its
 		// own lifetime once Connect returns.
 		connectCtx, cancelConnect := context.WithTimeout(ctx, imsConnectTimeout)
-		err = client.Connect(connectCtx)
+		if attempt.wfcRecheck {
+			err = client.ConnectAfterWFCActivation(connectCtx)
+		} else {
+			err = client.Connect(connectCtx)
+		}
 		cancelConnect()
 		if err != nil {
 			if closeErr := client.Close(); closeErr != nil {
@@ -491,7 +504,7 @@ func (c *coordinator) connectOnce(ctx context.Context, modem *mmodem.Modem, atte
 				}
 				continue
 			}
-			if req, ok := c.wfcWebsheetRequest(err); ok {
+			if req, ok := c.wfcWebsheetRequest(err); ok && !attempt.wfcRecheck {
 				if cfg.Access.VoWiFi != nil {
 					req = wifiCallingWebsheetRequest(req, cfg.Access.VoWiFi.Underlay)
 				}

@@ -5,31 +5,6 @@ import (
 	"strings"
 )
 
-func wfcUserActionURL(rawURL, rawData string) string {
-	rawURL = strings.TrimSpace(rawURL)
-	rawData = wfcUserActionData(rawData)
-	if rawURL == "" || rawData == "" {
-		return rawURL
-	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return appendRawQuery(rawURL, rawData)
-	}
-	data := strings.TrimLeft(rawData, "?&")
-	values, ok := parseWFCUserActionData(data)
-	if !ok {
-		return appendRawQuery(rawURL, data)
-	}
-	query := parsed.Query()
-	for key, items := range values {
-		for _, item := range items {
-			query.Add(key, item)
-		}
-	}
-	parsed.RawQuery = query.Encode()
-	return parsed.String()
-}
-
 func wfcUserActionData(rawData string) string {
 	data := strings.TrimLeft(strings.TrimSpace(rawData), "?&")
 	values, ok := parseWFCUserActionData(data)
@@ -121,12 +96,4 @@ func hexNibble(b byte) (byte, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func appendRawQuery(rawURL, data string) string {
-	separator := "?"
-	if strings.Contains(rawURL, "?") {
-		separator = "&"
-	}
-	return rawURL + separator + data
 }

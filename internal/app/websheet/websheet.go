@@ -31,6 +31,7 @@ const (
 	maxRecentCallbackIDs = 256
 	callbackURLToken     = "{{CALLBACK_URL}}"
 	targetQueryParam     = "target_query"
+	initialPostParam     = "initial_post"
 )
 
 var (
@@ -66,11 +67,16 @@ type Request struct {
 	URL         string
 	UserData    string
 	ContentType string
-	Title       string
+	// PreservePostData sends UserData verbatim as the initial POST body when ContentType is set.
+	PreservePostData bool
+	Title            string
 	// ClientName selects the carrier's JavaScript callback object.
 	ClientName  string
 	HTTPClient  *http.Client
 	LookupNetIP func(context.Context, string, string) ([]netip.Addr, error)
+	// OnCallback handles callbacks synchronously instead of queuing them. It may
+	// be called concurrently and receives the delivery request's context.
+	OnCallback func(context.Context, Callback) error
 }
 
 type Info struct {
@@ -104,6 +110,7 @@ type Session struct {
 	target            *url.URL
 	userData          string
 	contentType       string
+	preservePostData  bool
 	title             string
 	clientName        string
 	expiresAt         time.Time
@@ -112,6 +119,7 @@ type Session struct {
 	lookupNetIP       func(context.Context, string, string) ([]netip.Addr, error)
 	now               func() time.Time
 	allowPrivateHosts bool
+	onCallback        func(context.Context, Callback) error
 
 	callbackMu        sync.Mutex
 	callbacks         []Callback
@@ -169,6 +177,7 @@ func (b *Broker) Create(ctx context.Context, req Request) (*Session, error) {
 		target:            target,
 		userData:          strings.TrimSpace(req.UserData),
 		contentType:       strings.TrimSpace(req.ContentType),
+		preservePostData:  req.PreservePostData,
 		title:             strings.TrimSpace(req.Title),
 		clientName:        strings.TrimSpace(req.ClientName),
 		expiresAt:         b.now().Add(b.ttl),
@@ -178,6 +187,10 @@ func (b *Broker) Create(ctx context.Context, req Request) (*Session, error) {
 		allowPrivateHosts: b.allowPrivateHosts,
 		callbackIDs:       make(map[string]struct{}),
 		callbackNotify:    make(chan struct{}, 1),
+		onCallback:        req.OnCallback,
+	}
+	if session.preservePostData {
+		session.userData = req.UserData
 	}
 	if b.policyID != nil {
 		session.policyID = b.policyID()
@@ -257,6 +270,16 @@ func (s *Session) WaitCallback(ctx context.Context) (Callback, error) {
 	}
 }
 
+func (s *Session) deliverCallback(ctx context.Context, callback Callback) error {
+	if s.expired() {
+		return ErrExpired
+	}
+	if s.onCallback != nil {
+		return s.onCallback(ctx, callback)
+	}
+	return s.Callback(callback)
+}
+
 // Callback queues an event and ignores delivery retries with a recently seen ID.
 // A full queue rejects new events so callers can retry instead of losing them.
 func (s *Session) Callback(callback Callback) error {
@@ -323,7 +346,7 @@ func (s *Session) Proxy(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if callback, ok := callbackFromURL(target); ok {
-		if err := s.Callback(callback); err != nil {
+		if err := s.deliverCallback(r.Context(), callback); err != nil {
 			return err
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -334,6 +357,11 @@ func (s *Session) Proxy(w http.ResponseWriter, r *http.Request) error {
 	var body io.Reader
 	if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
 		body = r.Body
+	}
+	initialPost := s.preservePostData && s.contentType != "" && r.Method == http.MethodPost &&
+		r.URL.Query().Get(initialPostParam) == "1" && rawTarget == s.target.String()
+	if initialPost {
+		body = strings.NewReader(s.userData)
 	}
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, target.String(), body)
 	if err != nil {
@@ -347,7 +375,7 @@ func (s *Session) Proxy(w http.ResponseWriter, r *http.Request) error {
 			req.Header.Set("Origin", origin)
 		}
 	}
-	if req.Header.Get("Content-Type") == "" && s.contentType != "" {
+	if initialPost || (req.Header.Get("Content-Type") == "" && s.contentType != "") {
 		req.Header.Set("Content-Type", s.contentType)
 	}
 	resp, err := s.client.Do(req)
@@ -448,12 +476,26 @@ func (s *Session) callbackURL() string {
 }
 
 func (s *Session) postBootstrapHTML(action string) string {
-	values, err := url.ParseQuery(strings.TrimLeft(s.userData, "?&"))
+	if s.preservePostData {
+		// The browser submits an empty form. The proxy supplies the carrier body
+		// from the session so the browser cannot re-encode it.
+		path, _, _ := strings.Cut(action, "?")
+		action = path + "?" + url.Values{initialPostParam: {"1"}, "target": {s.target.String()}}.Encode()
+	}
 	var body bytes.Buffer
 	body.WriteString("<!doctype html><html><body>")
 	body.WriteString(`<form id="websheet" method="post" action="`)
 	body.WriteString(html.EscapeString(action))
 	body.WriteString(`">`)
+	if !s.preservePostData {
+		writeWebsheetFormFields(&body, s.userData)
+	}
+	body.WriteString(`</form><script>document.getElementById("websheet").submit();</script></body></html>`)
+	return body.String()
+}
+
+func writeWebsheetFormFields(body *bytes.Buffer, userData string) {
+	values, err := url.ParseQuery(strings.TrimLeft(userData, "?&"))
 	if err == nil {
 		for key, items := range values {
 			for _, item := range items {
@@ -464,13 +506,11 @@ func (s *Session) postBootstrapHTML(action string) string {
 				body.WriteString(`">`)
 			}
 		}
-	} else if s.userData != "" {
+	} else if userData != "" {
 		body.WriteString(`<input type="hidden" name="payload" value="`)
-		body.WriteString(html.EscapeString(s.userData))
+		body.WriteString(html.EscapeString(userData))
 		body.WriteString(`">`)
 	}
-	body.WriteString(`</form><script>document.getElementById("websheet").submit();</script></body></html>`)
-	return body.String()
 }
 
 func (s *Session) rewriteHTML(doc string, base *url.URL, publicOrigin string, injectBridge bool) string {

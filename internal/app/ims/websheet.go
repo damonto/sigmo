@@ -9,6 +9,7 @@ import (
 	"github.com/damonto/ims-go/wfcsetup"
 	"github.com/damonto/sigmo/internal/app/websheet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	ts43 "github.com/damonto/ts43-go"
 )
 
 func (c *coordinator) StartWebsheet(ctx context.Context, modem *mmodem.Modem) (websheet.Info, error) {
@@ -38,7 +39,7 @@ func (c *coordinator) wfcWebsheetRequest(err error) (websheet.Request, bool) {
 	return wfcWebsheetRequestFromResult(setupErr.Result)
 }
 
-func (c *coordinator) createWFCWebsheet(ctx context.Context, result wfcsetup.Result, underlay imsgo.Underlay) (websheet.Info, error) {
+func (c *coordinator) createWFCWebsheet(ctx context.Context, result wfcsetup.Result, underlay imsgo.Underlay, onCallback func(context.Context, websheet.Callback) error) (websheet.Info, error) {
 	switch result.Action {
 	case wfcsetup.ActionOpenWebsheet:
 		req, ok := wfcWebsheetRequestFromResult(result)
@@ -46,6 +47,7 @@ func (c *coordinator) createWFCWebsheet(ctx context.Context, result wfcsetup.Res
 			return websheet.Info{}, ErrWebsheetUnavailable
 		}
 		req = wifiCallingWebsheetRequest(req, underlay)
+		req.OnCallback = onCallback
 		session, err := c.websheets.Create(ctx, req)
 		if err != nil {
 			return websheet.Info{}, err
@@ -84,11 +86,17 @@ func wfcWebsheetRequestFromResult(result wfcsetup.Result) (websheet.Request, boo
 			Title:       title,
 		}, true
 	}
-	return websheet.Request{
-		URL:        wfcUserActionURL(sheet.URL, sheet.Data),
+	req := websheet.Request{
+		URL:        strings.TrimSpace(sheet.URL),
 		Title:      title,
 		ClientName: sheet.ClientName,
-	}, true
+	}
+	if result.Scheme == wfcsetup.SchemeTS43 && sheet.Data != "" {
+		req.UserData = sheet.Data
+		req.ContentType = "application/x-www-form-urlencoded"
+		req.PreservePostData = true
+	}
+	return req, true
 }
 
 func firstNonEmpty(values ...string) string {
@@ -170,14 +178,18 @@ const (
 func wfcWebsheetCallbackResult(callback websheet.Callback) wfcWebsheetCallbackAction {
 	action := wfcWebsheetCallbackWait
 	for _, value := range [...]string{callback.Event, callback.Method, callback.ResultCode} {
-		switch normalizeWebsheetCallbackKey(value) {
-		case "dismissflow", "cancel", "cancelbuttonclicked", "cancelbuttonpressed":
-			// Explicit cancellation takes precedence over a generic success result.
+		switch ts43.VoWiFiWebsheetEvent(value) {
+		case ts43.WebsheetEventVoWiFiDismissFlow:
 			return wfcWebsheetCallbackDismiss
-		case "entitlementchanged", "finishflow", "done", "success",
-			"phoneservicesaccountstatuschanged", "closewebview", "onclosewebview",
-			"workflowcompleted", "workflowabandoned":
+		case ts43.WebsheetEventVoWiFiEntitlementChanged:
 			action = wfcWebsheetCallbackRetry
+		default:
+			switch normalizeWebsheetCallbackKey(value) {
+			case "cancel":
+				return wfcWebsheetCallbackDismiss
+			case "finishflow", "done", "success":
+				action = wfcWebsheetCallbackRetry
+			}
 		}
 	}
 	return action

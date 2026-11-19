@@ -73,7 +73,7 @@ func (h *Handler) Callback(c *echo.Context) error {
 	if err := json.NewDecoder(c.Request().Body).Decode(&callback); err != nil {
 		return httpapi.BadRequest(c, "websheet_callback_invalid", err)
 	}
-	if err := session.Callback(callback); err != nil {
+	if err := session.deliverCallback(c.Request().Context(), callback); err != nil {
 		return websheetError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
