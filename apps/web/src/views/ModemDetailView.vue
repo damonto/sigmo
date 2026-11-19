@@ -521,7 +521,7 @@ void fetchCapabilities()
   <!-- eSIM modem: show original layout -->
   <div
     v-if="modem && isEsimModem"
-    class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]"
+    class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]"
   >
     <div class="min-w-0 space-y-3">
       <EsimSummaryCard
@@ -553,7 +553,7 @@ void fetchCapabilities()
       />
     </div>
 
-    <aside class="hidden xl:block">
+    <aside class="hidden lg:block">
       <div class="sticky top-(--modem-desktop-sticky-top)">
         <ModemDetailCard
           :modem="modem"
