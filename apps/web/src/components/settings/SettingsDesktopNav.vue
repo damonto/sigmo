@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { Bell, Bot, Download, Globe2, Keyboard, MessageSquare } from 'lucide-vue-next'
 import { computed } from 'vue'
+import { ArrowLeft, Bell, Bot, Download, Globe2, Keyboard, MessageSquare } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
+import DesktopWorkspaceSidebar from '@/components/DesktopWorkspaceSidebar.vue'
 import { Button } from '@/components/ui/button'
 
 const route = useRoute()
+const router = useRouter()
 const { t } = useI18n()
+const returnPath = router.options.history.state.settingsReturnTo
+const backTo = typeof returnPath === 'string' ? returnPath : { name: 'home' }
 
 const items = computed(() => [
   {
@@ -62,18 +66,19 @@ const items = computed(() => [
 </script>
 
 <template>
-  <aside class="hidden rounded-xl border bg-card/60 p-3 shadow-sm lg:block">
-    <div class="px-2 py-2">
-      <p class="text-sm font-semibold text-foreground">
-        {{ t('settings.title') }}
-      </p>
-      <p class="mt-1 text-xs text-muted-foreground">
-        {{ t('settings.description') }}
-      </p>
+  <DesktopWorkspaceSidebar
+    :to="backTo"
+    :label="t('settings.backToDevices')"
+    :icon="ArrowLeft"
+    class="lg:sticky lg:top-6"
+  >
+    <div class="shrink-0 px-2 py-2">
+      <h2 class="text-sm font-semibold text-foreground">{{ t('settings.title') }}</h2>
+      <p class="mt-1 text-xs text-muted-foreground">{{ t('settings.description') }}</p>
     </div>
 
     <nav
-      class="mt-2 space-y-1"
+      class="mt-2 min-h-0 space-y-1 overflow-y-auto"
       :aria-label="t('settings.title')"
     >
       <Button
@@ -108,5 +113,5 @@ const items = computed(() => [
         </RouterLink>
       </Button>
     </nav>
-  </aside>
+  </DesktopWorkspaceSidebar>
 </template>

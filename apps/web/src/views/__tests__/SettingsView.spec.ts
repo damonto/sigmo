@@ -403,6 +403,7 @@ describe('Settings routes', () => {
     expect(wrapper.get('aside a[aria-current="page"]').attributes('href')).toBe(
       '/settings/notifications',
     )
+    expect(wrapper.get('aside a[aria-label="settings.backToDevices"]').attributes('href')).toBe('/')
     expect(wrapper.get('a[href="/settings"]').text()).toContain('settings.back')
     expect(wrapper.find('main a[href="/settings"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="settings-nav-description-auth"]').classes()).toContain(

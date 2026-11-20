@@ -11,6 +11,7 @@ import type { NavigationItem } from '@/types/navigation'
 const { t } = useI18n()
 const route = useRoute()
 const isSettings = computed(() => route.matched.some((record) => record.path === '/settings'))
+const isModemPage = computed(() => route.matched.some((record) => record.path === '/modems/:id'))
 const tabs = computed<NavigationItem[]>(() => [
   {
     key: 'devices',
@@ -63,6 +64,7 @@ const tabs = computed<NavigationItem[]>(() => [
 <template>
   <div class="min-h-dvh bg-background">
     <header
+      v-if="route.name !== 'home' && !isModemPage && !isSettings"
       class="sticky top-0 z-20 hidden border-b border-border bg-background/85 backdrop-blur-xl backdrop-saturate-125 lg:block"
     >
       <div class="mx-auto flex h-16 w-full max-w-7xl items-center gap-5 px-8">
@@ -71,7 +73,10 @@ const tabs = computed<NavigationItem[]>(() => [
           class="text-lg font-semibold tracking-tight"
           >{{ t('home.title') }}</RouterLink
         >
-        <DesktopTabNav :items="tabs" />
+        <DesktopTabNav
+          :items="tabs"
+          class="ml-auto"
+        />
       </div>
     </header>
     <div
@@ -82,7 +87,7 @@ const tabs = computed<NavigationItem[]>(() => [
     </div>
   </div>
   <div
-    v-if="!isSettings"
+    v-if="!isSettings && !isModemPage"
     class="lg:hidden"
   >
     <BottomTabBar

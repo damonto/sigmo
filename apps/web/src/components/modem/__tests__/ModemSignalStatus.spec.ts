@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { h } from 'vue'
 
 import ModemDetailHeader from '@/components/modem/ModemDetailHeader.vue'
 import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
@@ -169,6 +170,62 @@ describe('ModemSignalStatus', () => {
     expect(wrapper.text()).toContain('67%')
   })
 
+  it('groups roaming and both calling statuses below the signal and generation', async () => {
+    const wrapper = mount(ModemSignalStatus, {
+      props: {
+        signalQuality: 67,
+        registrationState: 'Roaming',
+        accessTechnology: 'LTE',
+        volteConnected: true,
+        wifiCallingConnected: true,
+        showSignalValue: false,
+        variant: 'stacked',
+      },
+    })
+
+    const signal = wrapper.get('[title="labels.signal: 67%"]')
+    const generation = wrapper.get('[title="labels.accessTech: LTE"]')
+    const roaming = wrapper.get('[aria-label="Roaming"]')
+    const volte = wrapper.get('[aria-label^="modemDetail.settings.volteTitle"]')
+    const wifiCalling = wrapper.get('[aria-label="Wi-Fi Calling"]')
+    expect(signal.element.nextElementSibling).toBe(generation.element)
+    expect(generation.text()).toBe('4G')
+    expect(signal.element.parentElement?.nextElementSibling).toBe(roaming.element.parentElement)
+    expect(roaming.element.parentElement).toBe(volte.element.parentElement)
+    expect(roaming.element.parentElement).toBe(wifiCalling.element.parentElement)
+
+    await wrapper.setProps({ airplaneMode: true })
+    expect(wrapper.find('[title="labels.accessTech: LTE"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="Roaming"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label^="modemDetail.settings.volteTitle"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="Wi-Fi Calling"]').exists()).toBe(true)
+  })
+
+  it.each([
+    ['edge', '2G'],
+    [' HSPA+ ', '3G'],
+    ['LTE Cat-M', '4G'],
+    ['LTE NB-IoT', '4G'],
+    ['5gnr', '5G'],
+    ['future radio', '?'],
+    ['   ', ''],
+    [null, ''],
+  ])('shows the compact generation for %j in the device list', (accessTechnology, generation) => {
+    const wrapper = mount(ModemSignalStatus, {
+      props: {
+        signalQuality: 72,
+        registrationState: 'Home',
+        accessTechnology,
+        showSignalValue: false,
+        variant: 'stacked',
+      },
+    })
+
+    expect(wrapper.text()).toBe(generation)
+    expect(wrapper.find('[aria-label^="modemDetail.settings.volteTitle"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="Wi-Fi Calling"]').exists()).toBe(false)
+  })
+
   it('shows only the signal percentage for ordinary registration states', () => {
     const wrapper = mount(ModemSignalStatus, {
       props: {
@@ -260,12 +317,14 @@ describe('ModemSignalStatus', () => {
 })
 
 describe('ModemDetailHeader', () => {
-  it('keeps detail actions free of signal status', () => {
+  it('places the same action in the regular and sticky headers', () => {
     const wrapper = mount(ModemDetailHeader, {
       props: {
         modem: modem(),
         isLoading: false,
-        showDetailsAction: true,
+      },
+      slots: {
+        actions: () => h('button', { type: 'button' }, 'Device details'),
       },
       global: {
         stubs: headerStubs,
@@ -274,10 +333,12 @@ describe('ModemDetailHeader', () => {
 
     const statuses = wrapper.findAll('[data-testid="modem-signal-status"]')
     expect(statuses).toHaveLength(0)
-    expect(wrapper.findAll('button[aria-label="modemDetail.tabs.detail"]')).toHaveLength(2)
+    const details = wrapper.findAll('button').filter((button) => button.text() === 'Device details')
+    expect(details).toHaveLength(2)
+    expect(wrapper.get('[data-testid="sticky-top-bar"] button').text()).toBe('Device details')
   })
 
-  it('keeps modem switching on mobile and a plain title on desktop', () => {
+  it('keeps modem switching in the mobile header', () => {
     const current = modem()
     modemHarness.modems = [
       current,
@@ -291,7 +352,6 @@ describe('ModemDetailHeader', () => {
       props: {
         modem: current,
         isLoading: false,
-        showDetailsAction: true,
       },
       global: {
         stubs: headerStubs,
@@ -301,8 +361,7 @@ describe('ModemDetailHeader', () => {
     expect(wrapper.find('.lg\\:hidden button[aria-label="modemDetail.switchModem"]').exists()).toBe(
       true,
     )
-    expect(wrapper.find('h1').classes()).toEqual(expect.arrayContaining(['hidden', 'lg:block']))
-    expect(wrapper.find('h1').text()).toBe('Modem 1')
+    expect(wrapper.classes()).toContain('lg:hidden')
   })
 
   it('constrains an overlong modem name on mobile', () => {
@@ -321,16 +380,12 @@ describe('ModemDetailHeader', () => {
       },
     })
 
-    const mobileTitle = wrapper
-      .findAll('.lg\\:hidden')
-      .find((element) => element.text().includes(current.name))
+    const mobileTitle = wrapper.get('h1').element.parentElement
 
-    expect(mobileTitle?.classes()).toEqual(
+    expect(Array.from(mobileTitle?.classList ?? [])).toEqual(
       expect.arrayContaining(['w-full', 'min-w-0', 'max-w-full']),
     )
-    expect(mobileTitle?.get('h1').classes()).toEqual(
-      expect.arrayContaining(['max-w-full', 'truncate']),
-    )
+    expect(wrapper.get('h1').classes()).toEqual(expect.arrayContaining(['max-w-full', 'truncate']))
   })
 
   it('switches modems from the mobile title menu', async () => {
@@ -347,7 +402,6 @@ describe('ModemDetailHeader', () => {
       props: {
         modem: current,
         isLoading: false,
-        showDetailsAction: true,
       },
       global: {
         stubs: headerStubs,
@@ -375,7 +429,7 @@ describe('ModemDetailHeader', () => {
       props: {
         modem: current,
         isLoading: false,
-        showDetailsAction: true,
+        variant: 'desktop',
       },
       global: {
         stubs: headerStubs,
@@ -404,7 +458,6 @@ describe('ModemDetailHeader', () => {
       props: {
         modem: current,
         isLoading: false,
-        showDetailsAction: true,
       },
       global: {
         stubs: headerStubs,
@@ -437,7 +490,6 @@ describe('ModemDetailHeader', () => {
       props: {
         modem: current,
         isLoading: false,
-        showDetailsAction: true,
       },
       global: {
         stubs: headerStubs,

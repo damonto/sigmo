@@ -155,14 +155,13 @@ watch(
 
 <template>
   <div
-    class="grid h-[calc(100dvh-6.5rem-env(safe-area-inset-bottom))] gap-6 overflow-hidden lg:h-(--modem-desktop-content-height) lg:grid-cols-[22rem_minmax(0,1fr)]"
+    class="grid h-[calc(100dvh-6.5rem-env(safe-area-inset-bottom))] gap-4 overflow-hidden lg:h-(--modem-desktop-content-height) lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]"
   >
-    <div class="hidden min-h-0 overflow-hidden rounded-xl border bg-card/40 p-4 lg:block">
+    <div class="hidden min-h-0 min-w-0 lg:block">
       <ModemMessagesPanel
         :modem-id="modemId"
         :selected-participant="participant"
         :selected-conversation="conversationId"
-        compact
       />
     </div>
 

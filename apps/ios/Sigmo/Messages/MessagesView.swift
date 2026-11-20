@@ -99,6 +99,10 @@ struct MessagesView: View {
 
     private var list: some View {
         List {
+            filters
+                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                .listRowSeparator(.hidden)
+
             if !state.loaded && state.loading {
                 ForEach(0..<5) { _ in
                     HStack(spacing: 12) {
@@ -147,9 +151,6 @@ struct MessagesView: View {
         .listStyle(.plain)
         .contentMargins(.top, 0, for: .scrollContent)
         .accessibilityIdentifier("messages-list")
-        .safeAreaInset(edge: .top, spacing: 0) {
-            filters.padding(.horizontal, 16).padding(.bottom, 8)
-        }
         .scrollDismissesKeyboard(.interactively)
         .refreshable { await state.load() }
         .disabled(action != nil)

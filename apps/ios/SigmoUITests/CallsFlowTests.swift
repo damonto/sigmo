@@ -225,6 +225,28 @@ final class CallsFlowTests: XCTestCase {
         XCTAssertEqual(app.staticTexts["recording-elapsed-\(secondID)"].label, "0:00")
     }
 
+    func testCommunicationFiltersAreInRefreshableLists() {
+        let app = launch()
+        let calls = app.descendants(matching: .any)["calls-list"].firstMatch
+        let missed = calls.segmentedControls["calls-filter"].buttons["Missed"]
+        XCTAssertTrue(missed.waitForExistence(timeout: 5), app.debugDescription)
+        calls.swipeDown()
+        missed.tap()
+        XCTAssertTrue(app.buttons["call-record-past-call"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["call-record-missed-call"].exists)
+
+        app.tabBars.buttons["Messages"].tap()
+        let messages = app.descendants(matching: .any)["messages-list"].firstMatch
+        let unread = messages.segmentedControls["messages-unread-filter"].buttons["Unread"]
+        let readConversation = app.buttons["conversation-conversation-inactive"]
+        XCTAssertTrue(readConversation.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(unread.exists, app.debugDescription)
+        messages.swipeDown()
+        unread.tap()
+        XCTAssertTrue(readConversation.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["conversation-conversation-active"].exists)
+    }
+
     func testDetailsAndGlobalCallSurviveTabNavigation() {
         let app = launch()
         capture(app, "Aligned call history")

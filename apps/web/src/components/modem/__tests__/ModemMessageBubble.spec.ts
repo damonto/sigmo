@@ -27,7 +27,7 @@ describe('ModemMessageBubble', () => {
     expect(meta.classes()).toContain('font-medium')
     expect(meta.text()).toContain('2:46 PM')
     expect(meta.text()).toContain('sent')
-    expect(wrapper.get('svg').classes()).toContain('text-primary-foreground/90')
+    expect(wrapper.get('[aria-label="Wi-Fi Calling"]').classes()).toContain('text-muted-foreground')
   })
 
   it('uses muted metadata on incoming messages', () => {
@@ -42,7 +42,7 @@ describe('ModemMessageBubble', () => {
     expect(meta.classes()).toContain('text-muted-foreground')
     expect(meta.classes()).not.toContain('text-primary-foreground/90')
     expect(meta.text()).not.toContain('sent')
-    expect(wrapper.get('svg').classes()).toContain('text-sky-500')
+    expect(wrapper.get('[aria-label="Wi-Fi Calling"]').classes()).toContain('text-muted-foreground')
   })
 
   it('shows delivered status for outgoing messages', () => {

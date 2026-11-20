@@ -82,7 +82,12 @@ const restoreListFocus = (event: Event) => {
       {{ error }}
     </p>
     <div
-      class="grid min-w-0 gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-[22rem_minmax(0,1fr)] lg:overflow-hidden"
+      class="grid min-w-0 gap-6 lg:min-h-0 lg:flex-1 lg:overflow-hidden"
+      :class="
+        modemId
+          ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]'
+          : 'lg:grid-cols-[22rem_minmax(0,1fr)]'
+      "
     >
       <section
         ref="contactsList"

@@ -318,6 +318,7 @@ const zh = {
     registeredOperator: '注册运营商',
   },
   home: {
+    deviceList: '设备列表',
     kicker: 'Sigmo',
     title: 'Sigmo',
     subtitle: '共 {count} 台设备',
@@ -327,6 +328,7 @@ const zh = {
     retry: '重试',
     refresh: '刷新',
     settings: '设置',
+    globalSettings: '全局设置',
   },
   settings: {
     authOTP: 'OTP',
@@ -341,6 +343,7 @@ const zh = {
     title: '配置',
     description: '管理 MCP 访问、全局认证、代理、浏览器推送与通知设置。',
     back: '返回',
+    backToDevices: '返回设备列表',
     loading: '加载设置',
     authTitle: '认证',
     authDescription: '配置 OTP、OIDC 或 Cloudflare Access，以及会话有效期。',
@@ -754,6 +757,7 @@ const zh = {
     failed: '无法生成激活链接。',
   },
   modemDetail: {
+    navigation: '当前设备的功能',
     back: '返回列表',
     kicker: 'Sigmo',
     subtitle: '查看 Modem 详情与 eSIM 配置。',

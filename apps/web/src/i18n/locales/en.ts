@@ -334,6 +334,7 @@ const en = {
     registeredOperator: 'Registered Operator',
   },
   home: {
+    deviceList: 'Device list',
     kicker: 'Sigmo',
     title: 'Sigmo',
     subtitle: '{count} devices',
@@ -343,6 +344,7 @@ const en = {
     retry: 'Retry',
     refresh: 'Refresh',
     settings: 'Settings',
+    globalSettings: 'Global settings',
   },
   settings: {
     authOTP: 'OTP',
@@ -358,6 +360,7 @@ const en = {
     description:
       'Manage MCP access, global authentication, proxy, browser push, and notification settings.',
     back: 'Back',
+    backToDevices: 'Back to device list',
     loading: 'Loading settings',
     authTitle: 'Authentication',
     authDescription: 'Configure OTP, OIDC, or Cloudflare Access and session lifetimes.',
@@ -785,6 +788,7 @@ const en = {
     failed: 'Could not create an activation link.',
   },
   modemDetail: {
+    navigation: 'Device sections',
     back: 'Back',
     kicker: 'Sigmo',
     subtitle: 'Manage modem details and eSIM profiles.',

@@ -23,10 +23,6 @@ const metaClass = computed(() =>
   props.item.incoming ? 'text-muted-foreground' : 'font-medium text-primary-foreground/90',
 )
 
-const wifiIconClass = computed(() =>
-  props.item.incoming ? 'text-sky-500' : 'text-primary-foreground/90',
-)
-
 const showStatus = computed(() => !props.item.incoming && Boolean(props.item.status))
 </script>
 
@@ -48,7 +44,6 @@ const showStatus = computed(() => !props.item.incoming && Boolean(props.item.sta
         <VoWiFiIcon
           v-if="props.item.wifiCalling"
           class="mr-1 inline size-3 align-[-2px]"
-          :class="wifiIconClass"
           title="Wi-Fi Calling"
           aria-label="Wi-Fi Calling"
         />

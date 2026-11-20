@@ -4,6 +4,7 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --container-modem-detail: 40rem;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -46,12 +47,12 @@
   --modem-desktop-nav-height: 4rem;
   --modem-desktop-content-padding-top: 1.5rem;
   --modem-desktop-content-padding-bottom: 2rem;
-  --modem-desktop-content-height: calc(
-    100dvh - var(--modem-desktop-nav-height) - var(--modem-desktop-content-padding-top) -
-      var(--modem-desktop-content-padding-bottom) - 1px
+  --desktop-workspace-columns: 17rem minmax(0, 1fr);
+  --desktop-workspace-height: calc(
+    100dvh - var(--modem-desktop-content-padding-top) - var(--modem-desktop-content-padding-bottom)
   );
-  --modem-desktop-sticky-top: calc(
-    var(--modem-desktop-nav-height) + var(--modem-desktop-content-padding-top)
+  --modem-desktop-content-height: calc(
+    var(--desktop-workspace-height) - var(--modem-desktop-nav-height) - 1px
   );
   --background: oklch(0.985 0.002 247.839);
   --foreground: oklch(0.129 0.042 264.695);

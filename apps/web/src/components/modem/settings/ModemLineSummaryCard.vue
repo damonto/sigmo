@@ -95,7 +95,7 @@ const signalLabel = computed(() =>
           </span>
           <VoWiFiIcon
             v-if="props.modem?.wifiCallingConnected"
-            class="size-4 shrink-0 text-primary"
+            class="size-4 shrink-0"
             title="Wi-Fi Calling"
             aria-label="Wi-Fi Calling"
           />

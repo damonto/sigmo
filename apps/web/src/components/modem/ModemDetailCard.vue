@@ -39,9 +39,9 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
     <section class="space-y-3">
       <h2 class="text-base font-semibold text-foreground">Basic Information</h2>
       <div class="grid gap-3 text-sm">
-        <div class="flex justify-between">
+        <div class="flex justify-between gap-3">
           <span class="text-muted-foreground">ID</span>
-          <span class="font-mono">{{ modem.id }}</span>
+          <span class="text-right font-mono wrap-anywhere">{{ modem.id }}</span>
         </div>
         <div class="flex items-center justify-between gap-4">
           <span class="text-muted-foreground">
@@ -49,21 +49,21 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
           </span>
           <span class="break-all text-right font-mono">{{ modem.primaryPort }}</span>
         </div>
-        <div class="flex justify-between">
+        <div class="flex justify-between gap-3">
           <span class="text-muted-foreground">Name</span>
-          <span>{{ modem.name }}</span>
+          <span class="text-right wrap-anywhere">{{ modem.name }}</span>
         </div>
-        <div class="flex justify-between">
+        <div class="flex justify-between gap-3">
           <span class="text-muted-foreground">Manufacturer</span>
-          <span>{{ modem.manufacturer }}</span>
+          <span class="text-right wrap-anywhere">{{ modem.manufacturer }}</span>
         </div>
-        <div class="flex justify-between">
+        <div class="flex justify-between gap-3">
           <span class="text-muted-foreground">Firmware Revision</span>
-          <span class="font-mono">{{ modem.firmwareRevision }}</span>
+          <span class="text-right font-mono wrap-anywhere">{{ modem.firmwareRevision }}</span>
         </div>
-        <div class="flex justify-between">
+        <div class="flex justify-between gap-3">
           <span class="text-muted-foreground">Hardware Revision</span>
-          <span class="font-mono">{{ modem.hardwareRevision }}</span>
+          <span class="text-right font-mono wrap-anywhere">{{ modem.hardwareRevision }}</span>
         </div>
         <div v-if="modem.number" class="flex justify-between">
           <span class="text-muted-foreground">Number</span>
@@ -77,7 +77,7 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
       <div class="grid gap-3 text-sm">
         <div class="flex items-center justify-between gap-4">
           <span class="text-muted-foreground">EID</span>
-          <span class="break-all font-mono">{{ eid }}</span>
+          <span class="text-right font-mono wrap-anywhere">{{ eid }}</span>
         </div>
         <div class="flex items-center justify-between gap-4">
           <span class="text-muted-foreground">Storage Remaining</span>
@@ -88,7 +88,7 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
         <div class="flex items-center justify-between gap-4">
           <span class="text-muted-foreground">SAS Accreditation</span>
           <span class="flex items-center justify-end gap-2 text-right">
-            <span>{{ sasUpName }}</span>
+            <span class="wrap-anywhere">{{ sasUpName }}</span>
             <RegionFlag :region-code="sasUpRegion" class="rounded-sm text-base" />
           </span>
         </div>
@@ -98,7 +98,7 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
             <span
               v-for="(cert, index) in certificates"
               :key="index"
-              class="rounded-md bg-muted px-2 py-1 text-xs text-foreground"
+              class="rounded-md bg-muted px-2 py-1 text-xs wrap-anywhere text-foreground"
             >
               {{ cert }}
             </span>
@@ -112,9 +112,9 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
     <section class="space-y-3">
       <h2 class="text-base font-semibold text-foreground">SIM Information</h2>
       <div class="grid gap-3 text-sm">
-        <div class="flex justify-between">
+        <div class="flex justify-between gap-3">
           <span class="text-muted-foreground">Operator</span>
-          <span>{{ modem.sim.operatorName }}</span>
+          <span class="text-right wrap-anywhere">{{ modem.sim.operatorName }}</span>
         </div>
         <div class="flex justify-between">
           <span class="text-muted-foreground">Operator ID</span>
@@ -126,9 +126,9 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
             <RegionFlag :region-code="modem.sim.regionCode" class="rounded-sm text-base" />
           </span>
         </div>
-        <div class="flex justify-between">
+        <div class="flex justify-between gap-3">
           <span class="text-muted-foreground">ICCID</span>
-          <span class="font-mono">{{ modem.sim.identifier }}</span>
+          <span class="text-right font-mono wrap-anywhere">{{ modem.sim.identifier }}</span>
         </div>
         <div class="flex justify-between">
           <span class="text-muted-foreground">Active</span>
@@ -158,9 +158,9 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
           <span class="text-muted-foreground">Registration State</span>
           <span>{{ modem.registrationState }}</span>
         </div>
-        <div class="flex justify-between">
+        <div class="flex justify-between gap-3">
           <span class="text-muted-foreground">Registered Operator</span>
-          <span>{{ modem.registeredOperator.name }}</span>
+          <span class="text-right wrap-anywhere">{{ modem.registeredOperator.name }}</span>
         </div>
         <div class="flex justify-between">
           <span class="text-muted-foreground">Operator Code</span>

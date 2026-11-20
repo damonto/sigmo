@@ -6,7 +6,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import type { NavigationItem } from '@/types/navigation'
 
-const props = defineProps<{ items: NavigationItem[] }>()
+const props = defineProps<{ items: NavigationItem[]; label?: string }>()
 const route = useRoute()
 const { t } = useI18n()
 const tabs = computed(() =>
@@ -20,8 +20,8 @@ const tabs = computed(() =>
 
 <template>
   <nav
-    class="ml-auto flex items-center gap-1"
-    :aria-label="t('communication.navigation')"
+    class="flex items-center gap-1"
+    :aria-label="props.label ?? t('communication.navigation')"
   >
     <Button
       v-for="item in tabs"

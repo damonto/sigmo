@@ -17,6 +17,15 @@ struct CallsView: View {
 
     var body: some View {
         List {
+            Picker("calls.filter", selection: $state.missedOnly) {
+                Text("calls.all").tag(false)
+                Text("calls.missed").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("calls-filter")
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+            .listRowSeparator(.hidden)
+
             if let line = state.line, !calls.available(line) {
                 Label("calls.unavailable", systemImage: "info.circle").font(.footnote).foregroundStyle(.secondary)
             }
@@ -51,16 +60,6 @@ struct CallsView: View {
                 ContentUnavailableView(state.search.isEmpty ? "calls.empty" : "calls.noResults", systemImage: "phone", description: Text("calls.emptyDescription"))
                     .allowsHitTesting(false)
             }
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            Picker("calls.filter", selection: $state.missedOnly) {
-                Text("calls.all").tag(false)
-                Text("calls.missed").tag(true)
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier("calls-filter")
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
         }
         .refreshable { await state.load() }
         .detailErrorAlert($state.failure)

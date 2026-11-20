@@ -26,7 +26,93 @@ const router = createRouter({
       path: '/',
       component: () => import('@/layouts/CommunicationLayout.vue'),
       children: [
-        { path: '', name: 'home', component: () => import('@/views/HomeView.vue') },
+        {
+          path: '',
+          component: () => import('@/layouts/ModemLayout.vue'),
+          children: [
+            { path: '', name: 'home', component: () => import('@/views/HomeView.vue') },
+            {
+              path: 'modems/:id',
+              children: [
+                {
+                  path: '',
+                  name: 'modem-detail',
+                  component: () => import('@/views/ModemDetailView.vue'),
+                },
+                {
+                  path: 'messages',
+                  name: 'modem-messages',
+                  component: () => import('@/views/ModemMessagesView.vue'),
+                },
+                {
+                  path: 'messages/:participant',
+                  name: 'modem-message-thread',
+                  component: () => import('@/views/ModemMessageThreadView.vue'),
+                },
+                {
+                  path: 'notifications',
+                  name: 'modem-notifications',
+                  component: () => import('@/views/ModemNotificationsView.vue'),
+                },
+                {
+                  path: 'calls',
+                  name: 'modem-calls',
+                  component: () => import('@/views/ModemCallsView.vue'),
+                },
+                {
+                  path: 'contacts',
+                  name: 'modem-contacts',
+                  component: () => import('@/views/ContactsView.vue'),
+                },
+                {
+                  path: 'contacts/:contactId',
+                  name: 'modem-contact',
+                  component: () => import('@/views/ContactsView.vue'),
+                },
+                {
+                  // Existing bookmarks and delivered notifications still resolve to Calls.
+                  path: 'phone',
+                  redirect: (to) => ({
+                    name: 'modem-calls',
+                    params: { id: to.params.id },
+                    query: to.query,
+                    hash: to.hash,
+                  }),
+                },
+                {
+                  path: 'settings',
+                  name: 'modem-settings',
+                  component: () => import('@/views/ModemSettingsView.vue'),
+                },
+                {
+                  path: 'settings/network',
+                  name: 'modem-settings-network',
+                  component: () => import('@/views/ModemSettingsNetworkView.vue'),
+                },
+                {
+                  path: 'settings/internet',
+                  name: 'modem-settings-internet',
+                  component: () => import('@/views/ModemSettingsInternetView.vue'),
+                },
+                {
+                  path: 'settings/device',
+                  name: 'modem-settings-device',
+                  component: () => import('@/views/ModemSettingsDeviceView.vue'),
+                },
+                {
+                  path: 'settings/wifi-calling',
+                  name: 'modem-settings-wifi-calling',
+                  component: () => import('@/views/ModemSettingsWiFiCallingView.vue'),
+                },
+                {
+                  path: 'settings/volte',
+                  name: 'modem-settings-volte',
+                  component: () => import('@/views/ModemSettingsVoLTEView.vue'),
+                },
+              ],
+            },
+          ],
+        },
         { path: 'contacts', name: 'contacts', component: () => import('@/views/ContactsView.vue') },
         {
           path: 'contacts/:contactId',
@@ -88,87 +174,6 @@ const router = createRouter({
               component: () => import('@/views/SettingsMCPView.vue'),
             },
           ],
-        },
-      ],
-    },
-    {
-      path: '/modems/:id',
-      component: () => import('@/layouts/ModemLayout.vue'),
-      children: [
-        {
-          path: '',
-          name: 'modem-detail',
-          component: () => import('@/views/ModemDetailView.vue'),
-        },
-        {
-          path: 'messages',
-          name: 'modem-messages',
-          component: () => import('@/views/ModemMessagesView.vue'),
-        },
-        {
-          path: 'messages/:participant',
-          name: 'modem-message-thread',
-          component: () => import('@/views/ModemMessageThreadView.vue'),
-        },
-        {
-          path: 'notifications',
-          name: 'modem-notifications',
-          component: () => import('@/views/ModemNotificationsView.vue'),
-        },
-        {
-          path: 'calls',
-          name: 'modem-calls',
-          component: () => import('@/views/ModemCallsView.vue'),
-        },
-        {
-          path: 'contacts',
-          name: 'modem-contacts',
-          component: () => import('@/views/ContactsView.vue'),
-        },
-        {
-          path: 'contacts/:contactId',
-          name: 'modem-contact',
-          component: () => import('@/views/ContactsView.vue'),
-        },
-        {
-          // Existing bookmarks and delivered notifications still resolve to Calls.
-          path: 'phone',
-          redirect: (to) => ({
-            name: 'modem-calls',
-            params: { id: to.params.id },
-            query: to.query,
-            hash: to.hash,
-          }),
-        },
-        {
-          path: 'settings',
-          name: 'modem-settings',
-          component: () => import('@/views/ModemSettingsView.vue'),
-        },
-        {
-          path: 'settings/network',
-          name: 'modem-settings-network',
-          component: () => import('@/views/ModemSettingsNetworkView.vue'),
-        },
-        {
-          path: 'settings/internet',
-          name: 'modem-settings-internet',
-          component: () => import('@/views/ModemSettingsInternetView.vue'),
-        },
-        {
-          path: 'settings/device',
-          name: 'modem-settings-device',
-          component: () => import('@/views/ModemSettingsDeviceView.vue'),
-        },
-        {
-          path: 'settings/wifi-calling',
-          name: 'modem-settings-wifi-calling',
-          component: () => import('@/views/ModemSettingsWiFiCallingView.vue'),
-        },
-        {
-          path: 'settings/volte',
-          name: 'modem-settings-volte',
-          component: () => import('@/views/ModemSettingsVoLTEView.vue'),
         },
       ],
     },

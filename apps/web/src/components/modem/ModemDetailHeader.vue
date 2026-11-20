@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { Info } from 'lucide-vue-next'
-import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import BackButton from '@/components/BackButton.vue'
+import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
 import ModemStickyTopBar from '@/components/modem/ModemStickyTopBar.vue'
 import ModemTitleSwitcher from '@/components/modem/ModemTitleSwitcher.vue'
-import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useModems } from '@/composables/useModems'
 import { useStickyTopBar } from '@/composables/useStickyTopBar'
+import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
 
 import type { Modem } from '@/types/modem'
 
@@ -18,21 +19,21 @@ const props = withDefaults(
   defineProps<{
     modem: Modem | null
     isLoading: boolean
-    showDetailsAction?: boolean
+    variant?: 'mobile' | 'desktop'
   }>(),
   {
-    showDetailsAction: false,
+    variant: 'mobile',
   },
 )
 
-const emit = defineEmits<{
-  (event: 'open-details'): void
+defineSlots<{
+  actions?(): unknown
 }>()
 
 const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
-const { modems, fetchModems } = useModems()
+const { modems } = useModems()
 
 const titleClickWindowMs = 1200
 const titleClickCount = ref(0)
@@ -52,9 +53,19 @@ const title = computed(() => {
   if (!props.modem) return t('modemDetail.unknown')
   return props.modem.name.trim() || props.modem.sim.operatorName || props.modem.id
 })
+const simKindLabel = computed(() => {
+  if (props.modem?.simKind === 'euicc') return t('labels.esim')
+  if (props.modem?.simKind === 'physical') return t('labels.psim')
+  return t('labels.simUnknown')
+})
+const phoneNumber = computed(() => {
+  const modem = props.modem
+  if (!modem?.number?.trim()) return ''
+  return formatPhoneDisplay(modem.number, modem.sim.regionCode)
+})
 
 const handleTitleClick = () => {
-  if (!props.modem?.id || props.modem.simKind !== 'euicc') return
+  if (route.name !== 'modem-detail' || !props.modem?.id || props.modem.simKind !== 'euicc') return
   const now = Date.now()
   titleClickCount.value =
     now - lastTitleClickAt.value > titleClickWindowMs ? 1 : titleClickCount.value + 1
@@ -65,7 +76,7 @@ const handleTitleClick = () => {
   void router.push({ name: 'modem-notifications', params: { id: props.modem.id } })
 }
 
-watch(currentModemId, () => {
+watch([currentModemId, () => route.name], () => {
   titleClickCount.value = 0
   lastTitleClickAt.value = 0
 })
@@ -84,15 +95,51 @@ const handleModemSwitch = (modem: Modem) => {
   if (modem.id === currentModemId.value) return
   void router.push({ name: switchRouteName.value, params: { id: modem.id } })
 }
-
-onMounted(() => {
-  if (modems.value.length > 0) return
-  void fetchModems()
-})
 </script>
 
 <template>
-  <div class="space-y-4">
+  <header
+    v-if="props.variant === 'desktop'"
+    class="min-w-0 space-y-1.5"
+  >
+    <Skeleton
+      v-if="props.isLoading"
+      class="h-9 w-48 rounded bg-muted"
+    />
+    <template v-else>
+      <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <h1
+          class="min-w-0 text-2xl font-semibold wrap-anywhere tracking-tight"
+          @click="handleTitleClick"
+        >
+          {{ title }}
+        </h1>
+        <Badge
+          v-if="props.modem"
+          variant="outline"
+          >{{ simKindLabel }}</Badge
+        >
+      </div>
+      <div
+        v-if="props.modem"
+        class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
+      >
+        <ModemSignalStatus
+          :signal-quality="props.modem.signalQuality"
+          :registration-state="props.modem.registrationState"
+          :access-technology="props.modem.accessTechnology"
+          :wifi-calling-connected="props.modem.wifiCallingConnected"
+          :airplane-mode="props.modem.airplaneMode"
+          :show-signal-value="false"
+        />
+        <span v-if="phoneNumber">{{ phoneNumber }}</span>
+      </div>
+    </template>
+  </header>
+  <div
+    v-else
+    class="space-y-4 lg:hidden"
+  >
     <ModemStickyTopBar
       :show="isStickyVisible"
       :title="topBarTitle"
@@ -100,60 +147,43 @@ onMounted(() => {
       back-to="/"
     >
       <template #right>
-        <Button
-          v-if="props.showDetailsAction"
-          variant="ghost"
-          size="icon"
-          type="button"
-          :aria-label="t('modemDetail.tabs.detail')"
-          :title="t('modemDetail.tabs.detail')"
-          @click="emit('open-details')"
-        >
-          <Info class="size-4 text-muted-foreground" />
-        </Button>
+        <slot name="actions" />
       </template>
     </ModemStickyTopBar>
 
     <div
-      class="flex items-center justify-between gap-3 lg:hidden"
+      class="flex items-center justify-between gap-3"
       :class="{ invisible: isStickyVisible }"
     >
-      <div ref="backButtonRef" class="inline-flex">
-        <BackButton :label="t('modemDetail.back')" @click="handleBack" />
+      <div
+        ref="backButtonRef"
+        class="inline-flex"
+      >
+        <BackButton
+          :label="t('modemDetail.back')"
+          @click="handleBack"
+        />
       </div>
-      <div v-if="props.showDetailsAction" class="flex items-center gap-1.5">
-        <Button
-          variant="ghost"
-          size="icon"
-          type="button"
-          :aria-label="t('modemDetail.tabs.detail')"
-          :title="t('modemDetail.tabs.detail')"
-          @click="emit('open-details')"
-        >
-          <Info class="size-4 text-muted-foreground" />
-        </Button>
-      </div>
+      <slot name="actions" />
     </div>
 
     <header class="min-w-0 space-y-3">
       <div class="flex min-w-0 max-w-full flex-wrap items-center gap-3">
-        <template v-if="!props.isLoading">
-          <div class="w-full min-w-0 max-w-full lg:hidden">
-            <ModemTitleSwitcher
-              :current-modem="props.modem"
-              :modems="modems"
-              @select="handleModemSwitch"
-              @title-click="handleTitleClick"
-            />
-          </div>
-          <h1
-            class="hidden text-3xl font-semibold tracking-tight text-foreground lg:block"
-            @click="handleTitleClick"
-          >
-            {{ title }}
-          </h1>
-        </template>
-        <Skeleton v-else class="h-9 w-48 rounded bg-muted" />
+        <div
+          v-if="!props.isLoading"
+          class="w-full min-w-0 max-w-full"
+        >
+          <ModemTitleSwitcher
+            :current-modem="props.modem"
+            :modems="modems"
+            @select="handleModemSwitch"
+            @title-click="handleTitleClick"
+          />
+        </div>
+        <Skeleton
+          v-else
+          class="h-9 w-48 rounded bg-muted"
+        />
       </div>
       <p class="text-sm text-muted-foreground">
         {{ subtitle }}

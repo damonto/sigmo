@@ -20,11 +20,9 @@ const props = withDefaults(
     modemId: string
     selectedParticipant?: string
     selectedConversation?: string
-    compact?: boolean
   }>(),
   {
     selectedParticipant: '',
-    compact: false,
   },
 )
 
@@ -85,19 +83,15 @@ const startConversation = async () => {
 
 <template>
   <div
-    class="flex min-w-0 flex-col lg:h-full lg:min-h-0"
-    :class="props.compact ? 'gap-3' : 'gap-6'"
+    class="flex min-w-0 flex-col gap-6 lg:h-full lg:min-h-0 lg:gap-3 lg:overflow-hidden lg:rounded-xl lg:border lg:bg-card/40 lg:p-4"
   >
     <ModemMessagesHeader
-      v-if="!props.compact"
+      class="lg:hidden"
       :count="count"
       :is-loading="isLoading"
     />
 
-    <div
-      v-else
-      class="flex items-center justify-between gap-3"
-    >
+    <div class="hidden items-center justify-between gap-3 lg:flex">
       <div class="min-w-0">
         <h2 class="truncate text-base font-semibold text-foreground">
           {{ t('modemDetail.messages.title') }}

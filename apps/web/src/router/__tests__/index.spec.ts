@@ -56,6 +56,6 @@ describe('route access', () => {
       params: { id: 'modem-1', contactId: 'alice' },
     })
     expect(detail.path).toBe('/modems/modem-1/contacts/alice')
-    expect(detail.matched[0]?.path).toBe('/modems/:id')
+    expect(detail.matched).toContainEqual(expect.objectContaining({ path: '/modems/:id' }))
   })
 })

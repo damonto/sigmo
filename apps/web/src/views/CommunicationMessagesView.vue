@@ -23,12 +23,8 @@ const threadID = computed(() =>
     "
   >
     <div
-      class="min-w-0 lg:min-h-0"
-      :class="
-        threadID
-          ? 'hidden lg:block lg:overflow-hidden lg:rounded-xl lg:border lg:bg-card/40 lg:p-4'
-          : ''
-      "
+      class="min-w-0 lg:block lg:min-h-0 lg:overflow-hidden lg:rounded-xl lg:border lg:bg-card/40 lg:p-4"
+      :class="{ hidden: threadID }"
     >
       <CommunicationMessagesPanel :selected-thread="threadID" />
     </div>

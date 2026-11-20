@@ -36,36 +36,36 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="min-w-0">
-    <div
-      class="mb-4 flex items-center justify-between gap-3 lg:justify-end"
-      :class="{ 'lg:hidden': !auth.configuration || auth.configuration.mode === 'none' }"
-    >
-      <BackButton
-        :to="backTo"
-        :label="t('settings.back')"
-        class="w-fit lg:hidden"
-      />
-      <Button
-        v-if="auth.configuration && auth.configuration.mode !== 'none'"
-        variant="outline"
-        :disabled="signingOut"
-        @click="logout"
-        >{{ t('auth.logout') }}</Button
+  <div class="grid min-w-0 gap-6 lg:grid-cols-(--desktop-workspace-columns) lg:items-start">
+    <SettingsDesktopNav />
+
+    <div class="min-w-0">
+      <div
+        class="mb-4 flex items-center justify-between gap-3 lg:justify-end"
+        :class="{ 'lg:hidden': !auth.configuration || auth.configuration.mode === 'none' }"
       >
-    </div>
-    <p
-      v-if="logoutFailed"
-      role="alert"
-      class="mb-4 text-sm text-destructive"
-    >
-      {{ t('errors.revoke_session_failed') }}
-    </p>
+        <BackButton
+          :to="backTo"
+          :label="t('settings.back')"
+          class="w-fit lg:hidden"
+        />
+        <Button
+          v-if="auth.configuration && auth.configuration.mode !== 'none'"
+          variant="outline"
+          :disabled="signingOut"
+          @click="logout"
+          >{{ t('auth.logout') }}</Button
+        >
+      </div>
+      <p
+        v-if="logoutFailed"
+        role="alert"
+        class="mb-4 text-sm text-destructive"
+      >
+        {{ t('errors.revoke_session_failed') }}
+      </p>
 
-    <div class="grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)] lg:items-start">
-      <SettingsDesktopNav />
-
-      <main class="min-w-0">
+      <main>
         <RouterView />
       </main>
     </div>

@@ -11,7 +11,7 @@ import type { HomeModemItem } from '@/types/home'
 const { t } = useI18n()
 
 const { version, fetchAppInfo } = useAppInfo()
-const { modems, isLoading, fetchModems } = useModems()
+const { modems, isLoading } = useModems()
 
 const modemCount = computed(() => modems.value.length)
 const subtitle = computed(() => t('home.subtitle', { count: modemCount.value }))
@@ -38,12 +38,11 @@ const modemItems = computed<HomeModemItem[]>(() =>
 
 onMounted(() => {
   void fetchAppInfo()
-  void fetchModems()
 })
 </script>
 
 <template>
-  <main class="flex flex-col gap-5">
+  <main class="flex flex-col gap-5 lg:hidden">
     <HomeHeader
       :subtitle="subtitle"
       :version="version"
@@ -54,4 +53,10 @@ onMounted(() => {
       :is-loading="isLoading"
     />
   </main>
+  <section
+    class="hidden grow items-center justify-center rounded-xl border border-dashed bg-card/40 p-8 text-center text-sm text-muted-foreground lg:flex"
+    :aria-busy="isLoading"
+  >
+    <p v-if="!isLoading && !modemCount">{{ t('home.noModems') }}</p>
+  </section>
 </template>

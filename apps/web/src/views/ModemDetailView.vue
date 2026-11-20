@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Bell, CreditCard, Download, EllipsisVertical } from 'lucide-vue-next'
+import { Bell, CreditCard, Download, EllipsisVertical, Info } from 'lucide-vue-next'
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -460,9 +460,26 @@ void fetchCapabilities()
   <ModemDetailHeader
     :modem="modem"
     :is-loading="isLoading"
-    :show-details-action="isEsimModem"
-    @open-details="detailDialogOpen = true"
-  />
+  >
+    <template #actions>
+      <Button
+        v-if="isEsimModem"
+        variant="ghost"
+        size="icon"
+        type="button"
+        class="@modem-detail/modem:hidden"
+        aria-haspopup="dialog"
+        :aria-label="t('modemDetail.tabs.detail')"
+        :title="t('modemDetail.tabs.detail')"
+        @click="detailDialogOpen = true"
+      >
+        <Info
+          class="size-4 text-muted-foreground"
+          aria-hidden="true"
+        />
+      </Button>
+    </template>
+  </ModemDetailHeader>
 
   <SimPinDialog
     :controller="simPin"
@@ -518,10 +535,9 @@ void fetchCapabilities()
     :on-switch="handleSimSwitch"
   />
 
-  <!-- eSIM modem: show original layout -->
   <div
     v-if="modem && isEsimModem"
-    class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]"
+    class="grid gap-4 @modem-detail/modem:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]"
   >
     <div class="min-w-0 space-y-3">
       <EsimSummaryCard
@@ -553,13 +569,13 @@ void fetchCapabilities()
       />
     </div>
 
-    <aside class="hidden lg:block">
-      <div class="sticky top-(--modem-desktop-sticky-top)">
-        <ModemDetailCard
-          :modem="modem"
-          :se-info="seInfo"
-        />
-      </div>
+    <aside
+      class="hidden min-w-0 self-start rounded-xl border bg-card p-4 @modem-detail/modem:block lg:block"
+    >
+      <ModemDetailCard
+        :modem="modem"
+        :se-info="seInfo"
+      />
     </aside>
   </div>
 
@@ -626,6 +642,7 @@ void fetchCapabilities()
     <ModemDetailCard
       :modem="modem"
       :se-info="null"
+      class="lg:rounded-xl lg:border lg:bg-card lg:p-4"
     />
   </div>
 
@@ -633,6 +650,7 @@ void fetchCapabilities()
     <ModemDetailCard
       :modem="modem"
       :se-info="null"
+      class="lg:rounded-xl lg:border lg:bg-card lg:p-4"
     />
   </div>
 

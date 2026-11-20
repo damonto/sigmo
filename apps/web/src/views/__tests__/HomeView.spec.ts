@@ -8,8 +8,7 @@ import type { Modem } from '@/types/modem'
 enableAutoUnmount(afterEach)
 
 const modemHarness = vi.hoisted(() => ({
-  nextModems: [] as Modem[],
-  fetchModems: vi.fn(),
+  modems: [] as Modem[],
 }))
 
 const appInfoHarness = vi.hoisted(() => ({
@@ -29,24 +28,12 @@ vi.mock('@/composables/useAppInfo', async () => {
 })
 
 vi.mock('@/composables/useModems', async () => {
-  const { computed, ref } = await vi.importActual<typeof import('vue')>('vue')
-
-  const modems = ref<Modem[]>([])
-  const isFetching = ref(false)
+  const { ref } = await vi.importActual<typeof import('vue')>('vue')
 
   return {
     useModems: () => ({
-      modems,
-      isLoading: computed(() => isFetching.value),
-      fetchModems: async () => {
-        isFetching.value = true
-        try {
-          await modemHarness.fetchModems()
-          modems.value = modemHarness.nextModems
-        } finally {
-          isFetching.value = false
-        }
-      },
+      modems: ref(modemHarness.modems),
+      isLoading: ref(false),
     }),
   }
 })
@@ -114,9 +101,7 @@ describe('HomeView', () => {
     appInfoHarness.fetchAppInfo.mockReset()
     appInfoHarness.fetchAppInfo.mockResolvedValue(undefined)
     appInfoHarness.version = 'v1.2.3'
-    modemHarness.fetchModems.mockReset()
-    modemHarness.fetchModems.mockResolvedValue(undefined)
-    modemHarness.nextModems = []
+    modemHarness.modems = []
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unexpected home request')))
   })
 
@@ -129,13 +114,12 @@ describe('HomeView', () => {
     { name: 'no modems', modems: [], wantCount: '0' },
     { name: 'one modem', modems: [modem('modem-1')], wantCount: '1' },
     { name: 'multiple modems', modems: [modem('modem-1'), modem('modem-2')], wantCount: '2' },
-  ])('loads and renders $name', async ({ modems, wantCount }) => {
-    modemHarness.nextModems = modems
+  ])('renders $name', async ({ modems, wantCount }) => {
+    modemHarness.modems = modems
 
     const wrapper = await mountView()
 
     expect(appInfoHarness.fetchAppInfo).toHaveBeenCalledTimes(1)
-    expect(modemHarness.fetchModems).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('v1.2.3')
     expect(wrapper.get('[data-testid="modem-list"]').text()).toBe(wantCount)
     expect(fetch).not.toHaveBeenCalled()
@@ -146,7 +130,7 @@ describe('HomeView', () => {
     const second = modem('modem-2')
     first.sim.icon = 'data:image/png;base64,first'
     second.sim.icon = 'data:image/png;base64,second'
-    modemHarness.nextModems = [first, second]
+    modemHarness.modems = [first, second]
     const wrapper = await mountView()
     const list = wrapper.getComponent(HomeModemList)
     expect(list.props('items').map((item) => item.icon)).toEqual([first.sim.icon, second.sim.icon])
