@@ -80,8 +80,11 @@ const tabs = computed<NavigationItem[]>(() => [
       </div>
     </header>
     <div
-      class="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 py-4 lg:max-w-7xl lg:px-8 lg:py-6 lg:pb-8"
-      :class="{ 'pb-[calc(5rem+env(safe-area-inset-bottom))]': !isSettings }"
+      class="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 py-4 lg:px-8 lg:py-6 lg:pb-8"
+      :class="[
+        isModemPage || route.name === 'home' ? 'lg:max-w-[112rem]' : 'lg:max-w-7xl',
+        { 'pb-[calc(5rem+env(safe-area-inset-bottom))]': !isSettings },
+      ]"
     >
       <RouterView />
     </div>

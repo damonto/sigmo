@@ -32,7 +32,7 @@ struct ModemDetailView: View {
 }
 
 private enum DetailSheet {
-    case pin, number, reminder, sim
+    case pin, number, reminder, automation, sim
 }
 
 private enum DetailTab {
@@ -63,6 +63,7 @@ private struct ModemDetailScreen: View {
     @State private var recordingsPresented = false
     let initialConversationID: String?
     @State private var sheet: DetailSheet?
+    @State private var automationLine: SIMAutomationLine?
     @State private var confirmation: SIMSlot?
     @State private var pending: SlotChange?
     @State private var profileOperation: ESIMProfileOperation?
@@ -236,6 +237,8 @@ private struct ModemDetailScreen: View {
                     SIMUnlockView(session: session, modemID: state.modemID) { refreshID += 1 }
                 case .number: DetailTextForm(state: state, kind: .number)
                 case .reminder: DetailReminderForm(state: state, profile: nil)
+                case .automation:
+                    if let automationLine { SIMAutomationForm(state: state, line: automationLine) }
                 case .sim: SIMApplicationView(state: sim)
                 case nil: EmptyView()
                 }
@@ -576,9 +579,9 @@ private struct ModemDetailScreen: View {
             }
         }
         .foregroundStyle(.secondary)
-        if profile.reminder != nil {
+        if profile.reminder != nil || state.automationSummary(profileID: profile.iccid, seID: profile.seId) != nil {
             Image(systemName: "bell").font(.caption).foregroundStyle(.secondary)
-                .accessibilityLabel(Text("detail.reminder"))
+                .accessibilityLabel(Text("detail.lineSchedule"))
         }
     }
 
@@ -595,6 +598,17 @@ private struct ModemDetailScreen: View {
         if !modem.sim.identifier.isEmpty {
             Section("detail.reminder") {
                 ReminderRow(reminder: modem.sim.reminder) { sheet = .reminder }
+            }
+            if state.supportsAutomation {
+                Section("automation.title") {
+                    SIMAutomationRow(summary: state.automationSummary(profileID: modem.sim.identifier)) {
+                        automationLine = SIMAutomationLine(
+                            profileID: modem.sim.identifier, modemID: state.modemID, label: modem.sim.operatorName
+                        )
+                        sheet = .automation
+                    }
+                    .accessibilityIdentifier("physicalSIMAutomations")
+                }
             }
         }
         if pinState.available || sim.available {

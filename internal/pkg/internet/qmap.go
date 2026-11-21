@@ -147,7 +147,7 @@ func (c *Connector) SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, ena
 			if err := modemlink.RestoreNonQMAPDataFormat(ctx, modem); err != nil {
 				return err
 			}
-			if _, err := c.connect(ctx, modemAccess{modem: modem}, prefs, false); err != nil {
+			if _, err := c.connect(ctx, modemAccess{modem: modem}, prefs, connectRestore); err != nil {
 				return err
 			}
 			c.deleteQMAPPendingNormal(modemID)
@@ -179,7 +179,7 @@ func (c *Connector) SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, ena
 		c.setQMAPEnabled(modemID, true)
 		if _, err := c.connectQMAPLocked(ctx, modem, prefs); err != nil {
 			c.setQMAPEnabled(modemID, false)
-			_, restoreErr := c.connect(ctx, access, prefs, false)
+			_, restoreErr := c.connect(ctx, access, prefs, connectRestore)
 			return errors.Join(fmt.Errorf("connect Internet over QMAP: %w", err), restoreErr)
 		}
 		return nil
@@ -229,7 +229,7 @@ func (c *Connector) SetQMAPEnabled(ctx context.Context, modem *mmodem.Modem, ena
 		return errors.Join(fmt.Errorf("restore non-QMAP data format: %w", err), restoreErr)
 	}
 	c.setQMAPEnabled(modemID, false)
-	if _, err := c.connect(ctx, access, prefs, false); err != nil {
+	if _, err := c.connect(ctx, access, prefs, connectRestore); err != nil {
 		c.setQMAPEnabled(modemID, true)
 		_, restoreErr := c.connectQMAPLocked(ctx, modem, prefs)
 		return errors.Join(fmt.Errorf("restore Internet bearer: %w", err), restoreErr)
@@ -262,6 +262,10 @@ func (c *Connector) qmapMigrationPreferences(ctx context.Context, modem internet
 }
 
 func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, prefs Preferences) (*Connection, error) {
+	return c.connectQMAPSessionLocked(ctx, modem, prefs, connectManual)
+}
+
+func (c *Connector) connectQMAPSessionLocked(ctx context.Context, modem *mmodem.Modem, prefs Preferences, mode connectionMode) (*Connection, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	prefs = normalizePreferences(prefs)
@@ -377,26 +381,30 @@ func (c *Connector) connectQMAPLocked(ctx context.Context, modem *mmodem.Modem, 
 			)
 		}
 	}
-	if err := c.syncAlwaysOnState(ctx, profileID, prefs); err != nil {
-		var proxyErr error
-		if prefs.ProxyEnabled {
-			proxyErr = c.cleanupProxy(ctx, modem.EquipmentIdentifier, connection.tracked.interfaceName)
+	if mode != connectTemporary {
+		if err := c.syncAlwaysOnState(ctx, profileID, prefs); err != nil {
+			var proxyErr error
+			if prefs.ProxyEnabled {
+				proxyErr = c.cleanupProxy(ctx, modem.EquipmentIdentifier, connection.tracked.interfaceName)
+			}
+			return nil, errors.Join(
+				fmt.Errorf("sync QMAP always on state: %w", err),
+				proxyErr,
+				connection.cleanup(ctx, c),
+				connection.close(),
+				c.removeQMAPMuxes(modem, internetQMAPMuxID),
+			)
 		}
-		return nil, errors.Join(
-			fmt.Errorf("sync QMAP always on state: %w", err),
-			proxyErr,
-			connection.cleanup(ctx, c),
-			connection.close(),
-			c.removeQMAPMuxes(modem, internetQMAPMuxID),
-		)
 	}
 	c.mu.Lock()
 	c.qmapConnections[modem.EquipmentIdentifier] = connection
-	if c.preferenceProfiles == nil {
-		c.preferenceProfiles = make(map[string]string)
+	if mode != connectTemporary {
+		if c.preferenceProfiles == nil {
+			c.preferenceProfiles = make(map[string]string)
+		}
+		c.preferenceProfiles[modem.EquipmentIdentifier] = profileID
+		c.preferences[modem.EquipmentIdentifier] = prefs
 	}
-	c.preferenceProfiles[modem.EquipmentIdentifier] = profileID
-	c.preferences[modem.EquipmentIdentifier] = prefs
 	c.mu.Unlock()
 	return c.qmapConnectionResponse(modem.EquipmentIdentifier, connection), nil
 }

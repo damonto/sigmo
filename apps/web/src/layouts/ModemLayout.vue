@@ -95,7 +95,7 @@ const tabItems = computed<NavigationItem[]>(() => [
 
 <template>
   <div
-    class="lg:grid lg:h-(--desktop-workspace-height) lg:grid-cols-(--desktop-workspace-columns) lg:gap-6"
+    class="lg:grid lg:h-(--desktop-workspace-height) lg:grid-cols-[minmax(17rem,1fr)_minmax(0,5fr)] lg:gap-6"
   >
     <ModemDesktopList
       v-if="desktop"
@@ -112,7 +112,7 @@ const tabItems = computed<NavigationItem[]>(() => [
         :modem-id="modemId"
       />
       <div
-        class="@container/modem flex min-w-0 flex-col gap-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:[--modem-desktop-content-height:100%]"
+        class="@container/modem flex min-w-0 flex-col gap-4 lg:-me-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pe-3 lg:scrollbar-thin lg:scrollbar-thumb-muted-foreground/75 lg:scrollbar-gutter-stable lg:[--modem-desktop-content-height:100%]"
       >
         <RouterView />
       </div>

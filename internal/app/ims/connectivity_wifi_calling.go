@@ -33,7 +33,7 @@ func (c *Connectivity) ReplaceWiFiCallingSettings(ctx context.Context, modem *mm
 	if c == nil || c.wifiCalling == nil {
 		return ErrUnavailable
 	}
-	return c.change(modem, func() error {
+	return c.change(ctx, modem, func() error {
 		settings, err := ResolveWiFiCallingSettings(modem, settings)
 		if err != nil {
 			return err
@@ -46,7 +46,7 @@ func (c *Connectivity) ReconnectWiFiCalling(ctx context.Context, modem *mmodem.M
 	if c == nil || c.wifiCalling == nil {
 		return ErrUnavailable
 	}
-	return c.change(modem, func() error {
+	return c.change(ctx, modem, func() error {
 		return c.wifiCalling.ReconnectWiFiCalling(ctx, modem)
 	})
 }
@@ -55,7 +55,7 @@ func (c *Connectivity) DisconnectWiFiCalling(ctx context.Context, modem *mmodem.
 	if c == nil || c.wifiCalling == nil {
 		return ErrUnavailable
 	}
-	return c.change(modem, func() error {
+	return c.change(ctx, modem, func() error {
 		return c.wifiCalling.Disconnect(ctx, modem)
 	})
 }
@@ -69,7 +69,7 @@ func (c *Connectivity) StartWiFiCallingWebsheet(ctx context.Context, modem *mmod
 		return websheet.Info{}, ErrUnavailable
 	}
 	var info websheet.Info
-	err := c.change(modem, func() error {
+	err := c.change(ctx, modem, func() error {
 		var err error
 		info, err = c.wifiCalling.StartWebsheet(ctx, modem)
 		return err
@@ -82,7 +82,7 @@ func (c *Connectivity) StartWiFiCallingEmergencyAddressUpdate(ctx context.Contex
 		return websheet.Info{}, ErrUnavailable
 	}
 	var info websheet.Info
-	err := c.change(modem, func() error {
+	err := c.change(ctx, modem, func() error {
 		profileID, err := modem.ProfileID(ctx)
 		if err != nil {
 			return err
@@ -91,7 +91,7 @@ func (c *Connectivity) StartWiFiCallingEmergencyAddressUpdate(ctx context.Contex
 			return c.wifiCalling.recheckEmergencyAddress(ctx, modem, profileID)
 		})
 		info, err = c.wifiCalling.StartEmergencyAddressUpdate(ctx, modem, profileID, func(ctx context.Context, callback websheet.Callback) error {
-			return c.change(modem, func() error { return completion(ctx, callback) })
+			return c.change(ctx, modem, func() error { return completion(ctx, callback) })
 		})
 		return err
 	})

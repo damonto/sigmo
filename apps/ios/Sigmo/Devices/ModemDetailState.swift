@@ -28,6 +28,8 @@ final class ModemDetailState {
     let session: BackendSession
     let modemID: String
     private(set) var elements: [SecureElement] = []
+    private var automationSummaries: [String: SIMAutomationSummary] = [:]
+    @ObservationIgnored private var automationRead = 0
     private(set) var groups: [ESIMProfileGroup] = []
     private(set) var elementsLoaded = false
     private(set) var profilesLoaded = false
@@ -61,14 +63,41 @@ final class ModemDetailState {
     var canTransfer: Bool { session.capabilities?.contains("esimTransfer") == true }
     var canInstall: Bool { esim && !elements.isEmpty && elementsFailure == nil && !loading && !busy && !needsSIMUnlock }
 
+    var supportsAutomation: Bool { session.capabilities?.contains("simAutomations") == true }
+
+    func automationSummary(profileID: String, seID: String? = nil) -> SIMAutomationSummary? {
+        guard supportsAutomation else { return nil }
+        return automationSummaries[SIMAutomationLine.key(profileID: profileID, seID: seID)]
+    }
+
+    func refreshAutomationSummaries() async {
+        guard supportsAutomation, session.canAccessDevices, !Task.isCancelled else { return }
+        automationRead += 1
+        let request = automationRead
+        let id = modemID
+        do {
+            let items = try await session.protectedRequest { api, token in
+                try await api.automationSummaries(modemID: id, token: token)
+            }
+            guard request == automationRead, !Task.isCancelled else { return }
+            automationSummaries = Dictionary(
+                items.map { (SIMAutomationLine.key(profileID: $0.profileId, seID: $0.seId), $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+        } catch {
+            // Snapshot fields remain available when the optional summary request fails.
+        }
+    }
+
     func load(force: Bool = true) async {
         guard !loading, !busy, !Task.isCancelled, session.canAccessDevices else { return }
         loading = true
         let current = revision
-        defer {
-            if current == revision { loading = false }
-        }
+        async let schedules: Void = refreshAutomationSummaries()
         await loadSnapshot(current, force: force)
+        // The inventory is usable while the optional summaries are still loading.
+        if current == revision { loading = false }
+        await schedules
     }
 
     private func loadSnapshot(_ current: Int, force: Bool = true, reconciliation: ModemReconciliation = .inventory) async {
@@ -142,6 +171,8 @@ final class ModemDetailState {
 
     func clear() {
         revision += 1
+        automationRead += 1
+        automationSummaries = [:]
         clearSIMData()
         deletedHistoryProfileID = nil
         failure = nil

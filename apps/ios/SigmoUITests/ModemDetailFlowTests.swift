@@ -152,14 +152,14 @@ final class ModemDetailFlowTests: XCTestCase {
             XCTAssertTrue(active.label.contains("+86 138 0000 0000"), active.label)
             XCTAssertFalse(active.label.contains("8986000000000000001"), active.label)
             // Large Dynamic Type can leave the second lazy list row offscreen.
+            let list = app.collectionViews.firstMatch
             for _ in 0..<8 where !inactive.exists {
-                let top = app.descendants(matching: .any)["esimNetworkBar"].firstMatch.frame.maxY + 8
-                let bottom = app.tabBars.firstMatch.frame.minY - 8
-                let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (top + (bottom - top) * 0.75 - app.frame.minY) / app.frame.height))
-                let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (top + (bottom - top) * 0.25 - app.frame.minY) / app.frame.height))
+                XCTAssertTrue(list.exists, app.debugDescription)
+                let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+                let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
                 start.press(forDuration: 0.1, thenDragTo: end)
             }
-            XCTAssertTrue(inactive.waitForExistence(timeout: 5), "Inactive profile missing, Chinese: \(chinese)")
+            XCTAssertTrue(inactive.waitForExistence(timeout: 5), "Inactive profile missing, Chinese: \(chinese)\n\(app.debugDescription)")
             XCTAssertTrue(inactive.label.contains(chinese ? "无号码" : "No Number"), inactive.label)
             XCTAssertFalse(inactive.label.contains("8986000000000000002"), inactive.label)
             app.terminate()
@@ -598,6 +598,47 @@ final class ModemDetailFlowTests: XCTestCase {
         screenshot(app, name: "SIM application")
         app.buttons["Confirm"].tap()
         tap(app.buttons["Done"], in: app)
+    }
+
+    func testPhysicalAutomationShowsActionAndNextRun() {
+        let app = launch("detail-physical-automation")
+        let row = app.buttons["physicalSIMAutomations"]
+        let scheduled = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value BEGINSWITH %@ AND value CONTAINS %@", "Send SMS, ", "2099"),
+            object: row
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [scheduled], timeout: 5), .completed)
+        tapOverviewRow(row, in: app)
+        let recipient = app.textFields["Phone number"]
+        XCTAssertTrue(recipient.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(recipient.value as? String, "+12025550123")
+    }
+
+    func testESIMAutomationDistinguishesCompletedAndUnsetLines() {
+        let app = launch("detail-esim-automation")
+        for profile in ["se-a:8986000000000000001", "se-a:8986000000000000002"] {
+            let row = app.buttons["profileActions-" + profile]
+            let bell = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "label CONTAINS %@", "Reminder or automation set"),
+                object: row
+            )
+            XCTAssertEqual(XCTWaiter.wait(for: [bell], timeout: 5), .completed, row.label)
+            XCTAssertFalse(row.label.contains("Use mobile data"), row.label)
+        }
+        openActions(app)
+        let row = app.buttons["esimAutomations"]
+        expectToggle(row, value: "Use mobile data, No upcoming run")
+        tap(row, in: app)
+        let amount = app.textFields["Amount"]
+        XCTAssertTrue(amount.waitForExistence(timeout: 5))
+        XCTAssertEqual(amount.value as? String, "1")
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertTrue(amount.waitForNonExistence(timeout: 5))
+        openActions(app, profile: "se-b:8986000000000000002")
+        expectToggle(row, value: "Add automation")
+        tap(row, in: app)
+        XCTAssertTrue(amount.waitForExistence(timeout: 5))
+        XCTAssertEqual(amount.value as? String, "Amount")
     }
 
     func testDownloadWithPreviewAndConfirmation() {

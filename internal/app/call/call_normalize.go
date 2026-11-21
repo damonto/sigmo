@@ -44,6 +44,15 @@ func isUSSDDialString(number string) bool {
 	return strings.HasPrefix(number, "*") || strings.HasPrefix(number, "#")
 }
 
+// NormalizePhoneNumber validates a voice dial destination using the call service's rules.
+func NormalizePhoneNumber(value string) (string, error) {
+	number := strings.TrimSpace(value)
+	if isUSSDDialString(number) {
+		return "", ErrUSSDDialString
+	}
+	return normalizeDialString(number)
+}
+
 func normalizeDialString(number string) (string, error) {
 	normalized, ok := compactDialString(number)
 	if !ok {

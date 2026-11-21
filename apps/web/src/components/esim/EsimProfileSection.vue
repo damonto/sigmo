@@ -42,16 +42,22 @@ import ReminderDialog from '@/components/ReminderDialog.vue'
 import ReminderBadge from '@/components/ReminderBadge.vue'
 import ValidatedField from '@/components/ValidatedField.vue'
 import EsimProfileAvatar from '@/components/esim/EsimProfileAvatar.vue'
+import AutomationScheduleBadge from '@/components/modem/AutomationScheduleBadge.vue'
+import { automationLineKey } from '@/composables/useScheduledAutomations'
 import { profilePLMN } from '@/lib/carrierLogo'
 import EsimProfileDetailsDialog from '@/components/esim/EsimProfileDetailsDialog.vue'
 import { validateOnInteraction } from '@/lib/formValidation'
 import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
+import type { ScheduledAutomation } from '@/types/automation'
 import type { EsimProfile } from '@/types/esim'
 import type { ReminderPayload } from '@/types/reminder'
 
 const props = withDefaults(
   defineProps<{
     modemId: string
+    automationsAvailable?: boolean
+    /** Upcoming schedules keyed by secure element and ICCID. */
+    automationSchedules?: ReadonlyMap<string, ScheduledAutomation>
     loading?: boolean
     refreshModem?: () => Promise<void>
     internetConnected?: boolean
@@ -81,6 +87,7 @@ const props = withDefaults(
 )
 const emit = defineEmits<{
   (event: 'open-sim-pin'): void
+  (event: 'open-automations', profile: EsimProfile): void
   (event: 'success', message: string): void
   (event: 'toggle-network', profile: EsimProfile, nextValue: boolean): void
   (event: 'toggle-wifi-calling', profile: EsimProfile, nextValue: boolean): void
@@ -96,15 +103,26 @@ const reminderApi = useReminderApi()
 const profileCount = computed(() => profiles.value.length)
 const hasProfiles = computed(() => profiles.value.length > 0)
 const isLoading = computed(() => props.loading)
+const scheduledFor = (profile: EsimProfile) =>
+  props.automationSchedules?.get(automationLineKey(profile.iccid, profile.seId))
 const hasMultipleSEs = computed(
   () => new Set(profiles.value.map((profile) => profile.seId)).size > 1,
+)
+const profilesWithSchedules = computed(() =>
+  profiles.value.map((profile) => ({ profile, automation: scheduledFor(profile) })),
 )
 const profileGroups = computed(() => {
   const groups = new Map<
     string,
-    { id: string; label: string; eid?: string; profiles: EsimProfile[] }
+    {
+      id: string
+      label: string
+      eid?: string
+      profiles: (typeof profilesWithSchedules.value)[number][]
+    }
   >()
-  for (const profile of profiles.value) {
+  for (const entry of profilesWithSchedules.value) {
+    const { profile } = entry
     if (!groups.has(profile.seId)) {
       groups.set(profile.seId, {
         id: profile.seId,
@@ -113,7 +131,7 @@ const profileGroups = computed(() => {
         profiles: [],
       })
     }
-    groups.get(profile.seId)?.profiles.push(profile)
+    groups.get(profile.seId)?.profiles.push(entry)
   }
   return Array.from(groups.values())
 })
@@ -448,7 +466,7 @@ watch(detailsOpen, (value) => {
           </Badge>
         </div>
         <div
-          v-for="profile in group.profiles"
+          v-for="{ profile, automation } in group.profiles"
           :key="profile.id"
           class="rounded-lg border bg-card px-4 py-3 shadow-sm transition"
           :class="profile.enabled ? 'border-primary/40 bg-primary/5' : 'border-transparent'"
@@ -498,6 +516,12 @@ watch(detailsOpen, (value) => {
                   <DropdownMenuItem @click="openReminderDialog(profile)">
                     {{ t('modemDetail.reminder.title') }}
                   </DropdownMenuItem>
+                  <template v-if="props.automationsAvailable">
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem @click="emit('open-automations', profile)">
+                      {{ t('automation.title') }}
+                    </DropdownMenuItem>
+                  </template>
                   <DropdownMenuSeparator />
                   <template v-if="profile.enabled">
                     <DropdownMenuItem
@@ -582,12 +606,19 @@ watch(detailsOpen, (value) => {
             </div>
           </div>
           <div
-            v-if="profile.reminder"
-            class="mt-3 border-t border-border/60 pt-2"
+            v-if="profile.reminder || automation"
+            class="mt-3 space-y-1.5 border-t border-border/60 pt-2"
           >
             <ReminderBadge
+              v-if="profile.reminder"
               :reminder="profile.reminder"
               :profile-name="profile.name"
+              @edit="openReminderDialog(profile)"
+            />
+            <AutomationScheduleBadge
+              v-if="automation"
+              :automation="automation"
+              @edit="emit('open-automations', profile)"
             />
           </div>
         </div>

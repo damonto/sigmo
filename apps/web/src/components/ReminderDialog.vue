@@ -1,22 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, useTemplateRef, watch } from 'vue'
+import { computed, useTemplateRef, watch } from 'vue'
 import { useForm } from '@tanstack/vue-form'
-import { Bell, CalendarClock, Save, Trash2 } from 'lucide-vue-next'
+import { Bell, Save } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { z } from 'zod'
 
+import ClearScheduleButton from '@/components/ClearScheduleButton.vue'
 import ValidatedField from '@/components/ValidatedField.vue'
 import { Button } from '@/components/ui/button'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import {
   Dialog,
   DialogContent,
@@ -99,7 +90,6 @@ const form = useForm({
 const ReminderField = form.Field
 const repeatDays = form.useSelector((state) => state.values.repeatDays)
 
-const clearOpen = ref(false)
 const focusTarget = useTemplateRef<HTMLElement>('focusTarget')
 const busy = computed(() => props.saving || props.deleting)
 const repeatDayUnit = computed(() => {
@@ -113,11 +103,6 @@ const dialogOpen = computed({
     open.value = value
   },
 })
-
-const confirmClear = () => {
-  clearOpen.value = false
-  emit('clear')
-}
 
 const handleOpenAutoFocus = (event: Event) => {
   event.preventDefault()
@@ -182,17 +167,11 @@ watch(
                 type="datetime-local"
                 step="60"
                 :placeholder="t('modemDetail.reminder.timePlaceholder')"
-                class="appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0"
+                class="appearance-none dark:scheme-dark"
                 :disabled="busy"
                 @update:model-value="(value: string | number) => field.handleChange(String(value))"
                 @blur="field.handleBlur"
               />
-              <InputGroupAddon
-                align="inline-end"
-                aria-hidden="true"
-              >
-                <CalendarClock class="size-4" />
-              </InputGroupAddon>
             </InputGroup>
           </ValidatedField>
         </ReminderField>
@@ -254,17 +233,15 @@ watch(
         </ReminderField>
 
         <DialogFooter class="gap-2 sm:justify-between">
-          <Button
+          <ClearScheduleButton
             v-if="props.reminder"
-            type="button"
-            variant="ghost"
-            class="text-destructive hover:text-destructive"
+            :label="t('modemDetail.reminder.clear')"
+            :title="t('modemDetail.reminder.clearTitle')"
+            :description="t('modemDetail.reminder.clearDescription')"
+            :cancel-label="t('modemDetail.actions.cancel')"
             :disabled="busy"
-            @click="clearOpen = true"
-          >
-            <Trash2 class="size-4" />
-            {{ t('modemDetail.reminder.clear') }}
-          </Button>
+            @clear="emit('clear')"
+          />
           <span v-else />
           <div class="flex gap-2">
             <Button
@@ -294,24 +271,4 @@ watch(
       </form>
     </DialogContent>
   </Dialog>
-
-  <AlertDialog v-model:open="clearOpen">
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>{{ t('modemDetail.reminder.clearTitle') }}</AlertDialogTitle>
-        <AlertDialogDescription>
-          {{ t('modemDetail.reminder.clearDescription') }}
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel>{{ t('modemDetail.actions.cancel') }}</AlertDialogCancel>
-        <AlertDialogAction
-          class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-          @click="confirmClear"
-        >
-          {{ t('modemDetail.reminder.clear') }}
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
 </template>

@@ -29,10 +29,7 @@ func (a *callActions) Dial(ctx context.Context, modem *mmodem.Modem, number stri
 	if !validRoute(route) {
 		return storage.Call{}, ErrInvalidRoute
 	}
-	if isUSSDDialString(number) {
-		return storage.Call{}, ErrUSSDDialString
-	}
-	number, err := normalizeDialString(number)
+	number, err := NormalizePhoneNumber(number)
 	if err != nil {
 		return storage.Call{}, err
 	}
@@ -57,11 +54,11 @@ func (a *callActions) Dial(ctx context.Context, modem *mmodem.Modem, number stri
 			return storage.Call{}, fmt.Errorf("dial %s: %w", routeLabel(selected), err)
 		}
 		stored := callFromIMS(call)
-		stored, err = a.records.saveAndPublish(ctx, stored)
+		saved, err := a.records.saveAndPublish(ctx, stored)
 		if err != nil {
-			return storage.Call{}, err
+			return stored, err
 		}
-		return stored, nil
+		return saved, nil
 	case RouteModem:
 		return storage.Call{}, ErrModemCallingUnavailable
 	default:

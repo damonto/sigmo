@@ -28,29 +28,32 @@ func TestResolveWiFiCallingSettingsUsesReplacementResource(t *testing.T) {
 
 func TestConnectivityLocksChangesPerModem(t *testing.T) {
 	connectivity := &Connectivity{}
-	unlockFirst := connectivity.lockModem("modem-1")
+	ctx := t.Context()
+	busy := &mmodem.Modem{EquipmentIdentifier: "modem-1"}
+	other := &mmodem.Modem{EquipmentIdentifier: "modem-2"}
+	if err := connectivity.operations.LockContext(ctx, busy.EquipmentIdentifier); err != nil {
+		t.Fatal(err)
+	}
+	defer connectivity.operations.Unlock(busy.EquipmentIdentifier)
 
-	sameModemAcquired := make(chan struct{})
-	go func() {
-		unlock := connectivity.lockModem("modem-1")
-		close(sameModemAcquired)
-		unlock()
-	}()
-
-	select {
-	case <-sameModemAcquired:
-		t.Fatal("second change acquired the same modem lock")
-	case <-time.After(20 * time.Millisecond):
+	waitCtx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	if err := connectivity.change(waitCtx, busy, func() error {
+		t.Error("applied a change while the modem lock was held")
+		return nil
+	}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("change() error = %v, want context deadline exceeded", err)
 	}
 
-	unlockOther := connectivity.lockModem("modem-2")
-	unlockOther()
-	unlockFirst()
-
-	select {
-	case <-sameModemAcquired:
-	case <-time.After(time.Second):
-		t.Fatal("second change did not acquire the released modem lock")
+	otherCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	applied := false
+	err := connectivity.change(otherCtx, other, func() error {
+		applied = true
+		return nil
+	})
+	if err != nil || !applied {
+		t.Fatalf("change on the other modem = %v, applied = %v", err, applied)
 	}
 }
 

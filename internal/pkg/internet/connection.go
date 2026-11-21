@@ -513,10 +513,18 @@ func (c *Connector) Connect(ctx context.Context, modem *mmodem.Modem, prefs Pref
 	if modem.PrimaryPortType() == wwanmodem.PortQMI && c.qmapEnabledFor(modem.EquipmentIdentifier) {
 		return c.connectQMAPLocked(ctx, modem, prefs)
 	}
-	return c.connect(ctx, access, prefs, true)
+	return c.connect(ctx, access, prefs, connectManual)
 }
 
-func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Preferences, clearAlwaysOnBefore bool) (*Connection, error) {
+type connectionMode uint8
+
+const (
+	connectManual connectionMode = iota
+	connectRestore
+	connectTemporary
+)
+
+func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Preferences, mode connectionMode) (result *Connection, resultErr error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	if err := ValidatePreferences(prefs); err != nil {
@@ -532,7 +540,7 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 		return nil, ErrProfileIDRequired
 	}
 	prefs = c.connectionPreferences(ctx, modem, prefs)
-	if err := c.disconnect(ctx, modem, clearAlwaysOnBefore); err != nil {
+	if err := c.disconnect(ctx, modem, mode == connectManual); err != nil {
 		return nil, fmt.Errorf("disconnect previous bearer: %w", err)
 	}
 	if c.qualcomm410SelectedFor(modemID) {
@@ -546,6 +554,10 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 	}
 
 	bearer, err := modem.connectBearer(ctx, bearerPropertiesFromPreferences(prefs))
+	if err != nil && mode == connectTemporary {
+		// Scheduled transfers own a scoped session, so leave other bearers alone.
+		return nil, fmt.Errorf("connect temporary bearer: %w", err)
+	}
 	if err != nil {
 		bearer, err = c.connectBearerAfterRecovery(ctx, modem, prefs, err)
 		if err != nil {
@@ -556,9 +568,21 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 
 	defer c.lockRoutes()()
 	tracked, err := c.configureConnectedBearer(ctx, modemID, bearer, prefs)
+	networkConfigured := err == nil
+	defer func() {
+		if resultErr == nil {
+			return
+		}
+		// The bearer belongs to this operation even if setup timed out.
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), connectionCleanupTimeout)
+		defer cancel()
+		if networkConfigured {
+			resultErr = errors.Join(resultErr, c.cleanupTracked(cleanupCtx, modemID, tracked))
+		}
+		resultErr = errors.Join(resultErr, bearer.Disconnect(cleanupCtx))
+	}()
 	if err != nil {
-		disconnectErr := bearer.Disconnect(ctx)
-		return nil, errors.Join(err, disconnectErr)
+		return nil, err
 	}
 	tracked.bearerPath = bearer.Path()
 	tracked.modemGeneration = modem.generation()
@@ -566,35 +590,33 @@ func (c *Connector) connect(ctx context.Context, modem internetModem, prefs Pref
 	tracked.prefs = prefs
 
 	if err := c.syncProxyPreference(ctx, modemID, tracked.interfaceName, tracked.dns, prefs); err != nil {
-		cleanupErr := c.cleanupTracked(ctx, modemID, tracked)
-		disconnectErr := bearer.Disconnect(ctx)
-		return nil, errors.Join(err, cleanupErr, disconnectErr)
+		return nil, err
 	}
 	if prefs.ProxyEnabled {
 		if err := c.persistence.saveProxyStateForModem(ctx, modemID, tracked.interfaceName); err != nil {
-			cleanupErr := c.cleanupTracked(ctx, modemID, tracked)
-			disconnectErr := bearer.Disconnect(ctx)
-			return nil, errors.Join(fmt.Errorf("save proxy state: %w", err), cleanupErr, disconnectErr)
+			return nil, fmt.Errorf("save proxy state: %w", err)
 		}
 	}
 
 	connection, err := c.connectionFromBearer(ctx, modemID, bearer, prefs, tracked.routeMetric)
 	if err != nil {
-		cleanupErr := c.cleanupTracked(ctx, modemID, tracked)
-		disconnectErr := bearer.Disconnect(ctx)
-		return nil, errors.Join(err, cleanupErr, disconnectErr)
+		return nil, err
 	}
-	if err := c.syncAlwaysOnState(ctx, profileID, prefs); err != nil {
-		cleanupErr := c.cleanupTracked(ctx, modemID, tracked)
-		disconnectErr := bearer.Disconnect(ctx)
-		return nil, errors.Join(fmt.Errorf("sync always on state: %w", err), cleanupErr, disconnectErr)
+	if mode != connectTemporary {
+		if err := c.syncAlwaysOnState(ctx, profileID, prefs); err != nil {
+			return nil, fmt.Errorf("sync always on state: %w", err)
+		}
 	}
 	if err := c.syncDefaultRouteTakeover(ctx, modemID, &tracked); err != nil {
-		cleanupErr := c.cleanupTracked(ctx, modemID, tracked)
-		disconnectErr := bearer.Disconnect(ctx)
-		return nil, errors.Join(fmt.Errorf("sync default route takeover: %w", err), cleanupErr, disconnectErr)
+		return nil, fmt.Errorf("sync default route takeover: %w", err)
 	}
-	c.setConnectionAndPreference(modemID, tracked, prefs)
+	if mode == connectTemporary {
+		c.mu.Lock()
+		c.connections[modemID] = tracked
+		c.mu.Unlock()
+	} else {
+		c.setConnectionAndPreference(modemID, tracked, prefs)
+	}
 	c.completeQualcomm410ConnectLocked(modemID)
 
 	return connection, nil
@@ -631,7 +653,12 @@ func (c *Connector) Restore(ctx context.Context, modem *mmodem.Modem) error {
 		return lockErr
 	}
 	defer unlock()
-	err := c.disconnect(ctx, access, false)
+	var err error
+	if c.qmapConnection(modem) != nil {
+		err = c.disconnectQMAPLocked(ctx, modem)
+	} else {
+		err = c.disconnect(ctx, access, false)
+	}
 	c.deleteConnectionAndPreference(access.id())
 	return err
 }

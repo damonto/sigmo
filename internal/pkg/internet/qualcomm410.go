@@ -92,7 +92,7 @@ func defaultQualcomm410Ops() qualcomm410Ops {
 			return connector.cleanupStaleConnectionState(ctx, modemID, mmodem.Qualcomm410InternetInterface)
 		},
 		reconnectBearer: func(ctx context.Context, connector *Connector, access internetModem, prefs Preferences) error {
-			_, err := connector.connect(ctx, access, prefs, false)
+			_, err := connector.connect(ctx, access, prefs, connectRestore)
 			return err
 		},
 		disconnectBearer: func(ctx context.Context, connector *Connector, access internetModem) error {

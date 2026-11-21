@@ -54,7 +54,7 @@ func (c *Connectivity) ReplaceVoLTESettings(ctx context.Context, modem *mmodem.M
 	if err != nil {
 		return err
 	}
-	return c.change(modem, func() error {
+	return c.change(ctx, modem, func() error {
 		airplaneMode, err := c.volte.airplaneModeEnabled(ctx, modem)
 		if err != nil {
 			return err
@@ -73,7 +73,7 @@ func (c *Connectivity) ChangeAirplaneMode(ctx context.Context, modem *mmodem.Mod
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return c.change(modem, func() error {
+	return c.change(ctx, modem, func() error {
 		stateErr := c.prepareVoLTEAirplaneModeChange(ctx, modem, targetEnabled)
 		beginInternetErr := c.beginInternetAirplaneModeChange(ctx, modem, targetEnabled)
 		applied, changeErr := apply()

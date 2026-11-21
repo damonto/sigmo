@@ -2,7 +2,7 @@ import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { useModems } from '@/composables/useModems'
+import { refreshModemList, useModems } from '@/composables/useModems'
 import type { Modem } from '@/types/modem'
 
 const api = vi.hoisted(() => ({
@@ -58,6 +58,36 @@ describe('useModems', () => {
   afterEach(() => {
     updating.value = false
     vi.useRealTimers()
+  })
+
+  it('keeps the new active profile when a superseded list request completes later', async () => {
+    const beforeSwitch = modem('euicc')
+    const afterSwitch = {
+      ...beforeSwitch,
+      sim: { ...beforeSwitch.sim, identifier: 'sim-2', operatorName: 'New carrier' },
+    }
+    let finishFirstRequest!: () => void
+    const blocked = new Promise<void>((resolve) => {
+      finishFirstRequest = resolve
+    })
+    api.getModems
+      .mockImplementationOnce(async () => {
+        await blocked
+        return { data: ref([beforeSwitch]) }
+      })
+      .mockResolvedValueOnce({ data: ref([afterSwitch]) })
+
+    const state = useModems()
+    const firstRequest = state.fetchModems()
+    await refreshModemList()
+    const activeProfile = state.getModemById(afterSwitch.id)?.sim
+    finishFirstRequest()
+    await firstRequest
+
+    expect(activeProfile).toEqual(afterSwitch.sim)
+    expect(state.getModemById(afterSwitch.id)?.sim).toEqual(afterSwitch.sim)
+    expect(state.isLoading.value).toBe(false)
+    expect(api.getModems).toHaveBeenCalledTimes(2)
   })
 
   it('continues polling after the fast retries while SIM classification is pending', async () => {

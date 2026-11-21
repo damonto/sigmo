@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import ReminderBadge from '@/components/ReminderBadge.vue'
@@ -7,9 +7,7 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }))
 
-afterEach(() => {
-  document.body.innerHTML = ''
-})
+enableAutoUnmount(afterEach)
 
 const mountBadge = () =>
   mount(ReminderBadge, {
@@ -33,12 +31,13 @@ describe('ReminderBadge', () => {
     expect(document.body.textContent).toContain('Renew the plan')
   })
 
-  it('opens details on click for touch devices', async () => {
+  it('opens the editor on click without opening the preview', async () => {
     const wrapper = mountBadge()
 
     await wrapper.get('button').trigger('click')
 
-    expect(document.body.textContent).toContain('Renew the plan')
+    expect(wrapper.emitted('edit')).toEqual([[]])
+    expect(document.body.textContent).not.toContain('Renew the plan')
   })
 
   it('opens details on keyboard focus', async () => {

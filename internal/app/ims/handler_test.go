@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -362,7 +361,6 @@ func TestDeleteSessionRouteDisconnectsCurrentSession(t *testing.T) {
 		},
 		connectivity: &Connectivity{
 			wifiCalling: wifiCalling,
-			operations:  make(map[string]*sync.Mutex),
 		},
 	}
 	e.DELETE("/modems/:id/wifi-calling/sessions/current", h.DeleteWiFiCallingSession)

@@ -48,6 +48,14 @@ func (c *Calls) DialForClient(ctx context.Context, modem *mmodem.Modem, req Dial
 		return storage.Call{}, fmt.Errorf("reserve call SIM: %w", err)
 	}
 	defer release()
+	dialed, err := c.dialForClientReserved(ctx, modem, req, owner)
+	if err != nil {
+		return storage.Call{}, err
+	}
+	return dialed, nil
+}
+
+func (c *Calls) dialForClientReserved(ctx context.Context, modem *mmodem.Modem, req DialRequest, owner string) (storage.Call, error) {
 	if req.ExpectedProfileID != "" {
 		profile, err := modem.ProfileID(ctx)
 		if err != nil {
@@ -57,19 +65,20 @@ func (c *Calls) DialForClient(ctx context.Context, modem *mmodem.Modem, req Dial
 			return storage.Call{}, ErrCallProfileChanged
 		}
 	}
-	call, err := c.Dial(ctx, modem, req.To, req.Route)
+	call, err := c.actions.Dial(ctx, modem, req.To, req.Route)
 	if err != nil {
 		return call, err
 	}
 	// The carrier can publish progress before Dial returns. Claim the latest row,
 	// rather than overwriting it with an older dialing snapshot.
 	if _, err := c.claimCall(ctx, call.ID, owner); err != nil {
-		return storage.Call{}, err
+		return call, err
 	}
-	call, err = c.Get(ctx, modem, call.ID)
+	latest, err := c.Get(ctx, modem, call.ID)
 	if err != nil {
-		return storage.Call{}, err
+		return call, err
 	}
+	call = latest
 	c.events.publish(Event{Call: call})
 	if call.State != StateFailed {
 		if err := c.records.store.RememberCommunication(ctx, storage.CommunicationPreference{Participant: call.Number, ProfileID: call.ProfileID, UpdatedAt: storage.CommunicationTime(call.StartedAt)}); err != nil {

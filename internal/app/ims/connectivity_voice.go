@@ -111,3 +111,29 @@ func (a *voiceAccess) SubscribeVoiceEvents(subscriber VoiceEventFunc) func() {
 	}
 	return a.access.SubscribeVoiceEvents(subscriber)
 }
+
+// HasOngoingCall reports live dialogs and pending outgoing calls on either IMS access.
+func (c *Connectivity) HasOngoingCall(modemID string) bool {
+	return c.wifiCalling.hasOngoingCall(modemID) || c.volte.hasOngoingCall(modemID)
+}
+
+func (c *coordinator) hasOngoingCall(modemID string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	session := c.sessions[modemID]
+	if session == nil {
+		return false
+	}
+	if session.pendingDial != nil {
+		return true
+	}
+	for _, call := range session.calls {
+		if call != nil && !isTerminalVoiceCallState(call.info.State) {
+			return true
+		}
+	}
+	return false
+}

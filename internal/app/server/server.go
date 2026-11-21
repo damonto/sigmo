@@ -20,6 +20,7 @@ import (
 	"github.com/labstack/echo/v5/middleware"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/damonto/sigmo/internal/app/automation"
 	"github.com/damonto/sigmo/internal/app/buildinfo"
 	appesim "github.com/damonto/sigmo/internal/app/esim"
 	"github.com/damonto/sigmo/internal/app/feature"
@@ -327,6 +328,12 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	if err != nil {
 		return fmt.Errorf("configure IMS: %w", err)
 	}
+	automations := automation.New(db, automation.NewExecution(db, registry, runtime.ESIM, imsConnectivity, calls, policy))
+	runtime.AddFeatures(feature.SIMAutomations)
+	runtime.AddRoute(func(group *echo.Group, _ router.RegisterConfig) error {
+		automations.RegisterRoutes(group)
+		return nil
+	})
 	configureESIMTransfer(runtime, websheets)
 	mdnService := configureMDN(runtime)
 
@@ -427,6 +434,7 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 	startRunner("authorization", authorization.Run)
 
 	startRunner("reminder", reminderScheduler.Run)
+	startRunner("SIM automations", automations.Run)
 	startRunner("native push", nativePush.Run)
 	startRunner("sms storage defaults", func(ctx context.Context) error {
 		return modemtask.RunSMSStorageDefaults(ctx, registry, wwanmodem.MessageStorageDevice)

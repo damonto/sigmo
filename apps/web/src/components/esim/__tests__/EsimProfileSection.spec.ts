@@ -2,6 +2,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import EsimProfileSection from '@/components/esim/EsimProfileSection.vue'
+import type { ScheduledAutomation } from '@/types/automation'
 import type { EsimProfile } from '@/types/esim'
 
 enableAutoUnmount(afterEach)
@@ -152,6 +153,70 @@ const buttonWithText = (wrapper: ReturnType<typeof mountSection>, text: string, 
 }
 
 describe('EsimProfileSection', () => {
+  it('opens the selected reminder from the profile summary', async () => {
+    const nextAt = new Date(2099, 10, 20, 10, 30).toISOString()
+    const wrapper = mountSection({
+      profiles: profiles.map((profile) => ({
+        ...profile,
+        reminder: { nextAt, content: `Reminder for ${profile.name}` },
+      })),
+    })
+
+    await buttonWithText(wrapper, 'modemDetail.reminder.nextAt', 1).trigger('click')
+
+    expect(wrapper.get('#reminder-content').element).toHaveProperty(
+      'value',
+      'Reminder for Inactive',
+    )
+    expect(wrapper.get('#reminder-time').element).toHaveProperty('value', '2099-11-20T10:30')
+  })
+
+  it.each(['2026-11-30T12:00:00Z', null])(
+    'edits the action beside its matching line with next run %s',
+    async (nextAt) => {
+      const schedule = {
+        id: 'automation-1',
+        profileId: 'iccid-inactive',
+        seId: 'default',
+        actionType: 'call',
+        nextAt,
+      } satisfies ScheduledAutomation
+      const wrapper = mountSection({
+        automationSchedules: new Map([
+          ['default:iccid-inactive', schedule],
+          ['other-element:iccid-active', { ...schedule, id: 'wrong', actionType: 'data' }],
+        ]),
+      })
+
+      const badge = buttonWithText(wrapper, 'automation.call')
+      if (nextAt === null) {
+        expect(wrapper.findAll('time')).toHaveLength(0)
+      } else {
+        expect(badge.get('time').attributes('datetime')).toBe(nextAt)
+        expect(wrapper.findAll('time')).toHaveLength(1)
+      }
+      await badge.trigger('click')
+      expect(wrapper.emitted('open-automations')).toEqual([[profiles[1]]])
+    },
+  )
+
+  it('separates Reminder from Automations when Automations is available', async () => {
+    const wrapper = mountSection({ automationsAvailable: true })
+    const reminder = buttonWithText(wrapper, 'modemDetail.reminder.title').element
+
+    expect(reminder.nextElementSibling?.tagName).toBe('HR')
+    expect(reminder.nextElementSibling?.nextElementSibling).toBe(
+      buttonWithText(wrapper, 'automation.title').element,
+    )
+
+    await wrapper.setProps({ automationsAvailable: false })
+
+    expect(reminder.nextElementSibling?.tagName).toBe('HR')
+    expect(reminder.nextElementSibling?.nextElementSibling).toBe(
+      buttonWithText(wrapper, 'modemDetail.settings.networkTitle').element,
+    )
+  })
+
   it.each([
     { number: '+12025550123', expected: '+1 (202) 555-0123' },
     { number: ' +12025550123 ', expected: '+1 (202) 555-0123' },

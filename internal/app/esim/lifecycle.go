@@ -31,14 +31,15 @@ type lifecycle struct {
 }
 
 type enableSession struct {
-	l             *lifecycle
-	modem         *mmodem.Modem
-	seID          string
-	iccid         sgp22.ICCID
-	previousICCID string
-	client        lifecycleClient
-	lastSeq       sgp22.SequenceNumber
-	eid           []byte
+	l               *lifecycle
+	modem           *mmodem.Modem
+	seID            string
+	iccid           sgp22.ICCID
+	previousICCID   string
+	previousEnabled bool
+	client          lifecycleClient
+	lastSeq         sgp22.SequenceNumber
+	eid             []byte
 }
 
 type deleteSession struct {
@@ -124,6 +125,11 @@ func (l *lifecycle) PrepareEnable(ctx context.Context, modem *mmodem.Modem, seID
 	}
 	if profile.ProfileState == sgp22.ProfileEnabled {
 		return nil, ErrProfileAlreadyActive
+	}
+	if previous, parseErr := sgp22.NewICCID(strings.TrimRight(session.previousICCID, "fF")); parseErr == nil {
+		if old, ok := profileByICCID(profiles, previous); ok {
+			session.previousEnabled = old.ProfileState == sgp22.ProfileEnabled
+		}
 	}
 	session.eid, err = client.EID()
 	if err != nil {

@@ -145,6 +145,24 @@ final class ModemDetailTests: XCTestCase {
         }
     }
 
+    func testAutomationSummaryDoesNotBlockProfileActions() async throws {
+        let server = DetailFixtureServer(scenario: .automations)
+        let detail = try await make(server)
+        XCTAssertTrue(detail.supportsAutomation)
+        detail.clear()
+        await server.holdNext("/automations")
+        let refresh = Task { await detail.load() }
+        await server.waitForHeldRequest()
+        try await wait { detail.profilesLoaded }
+
+        XCTAssertTrue(detail.canInstall)
+        XCTAssertNil(detail.automationSummary(profileID: "8986000000000000002", seID: "se-a"))
+        await server.release()
+        await refresh.value
+
+        XCTAssertEqual(detail.automationSummary(profileID: "8986000000000000002", seID: "se-a")?.actionType, .data)
+    }
+
     func testOldSIMReplyFailureDoesNotCloseReplacementSession() async throws {
         let server = DetailFixtureServer()
         let detail = try await make(server)

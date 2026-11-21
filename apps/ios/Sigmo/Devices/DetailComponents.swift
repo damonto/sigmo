@@ -174,42 +174,54 @@ struct ProfileAvatar: View {
     }
 }
 
-struct ReminderRow: View {
-    let reminder: SIMReminder?
+struct ScheduledLineRow: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
     let action: () -> Void
     @ScaledMetric(relativeTo: .body) private var iconSize = 34.0
 
     var body: some View {
-        if let reminder {
-            Button(action: action) {
-                HStack(spacing: 12) {
-                    Image(systemName: "bell")
-                        .font(.body)
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: iconSize, height: iconSize)
-                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(reminder.content)
-                            .font(.body.weight(.medium))
-                        Text(scheduleText(reminder))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.right")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .accessibilityHidden(true)
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.body)
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: iconSize, height: iconSize)
+                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.body.weight(.medium))
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
-            .foregroundStyle(.primary)
-            .accessibilityLabel(Text("detail.reminder"))
-            .accessibilityValue("\(reminder.content), \(scheduleText(reminder))")
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .foregroundStyle(.primary)
+    }
+}
+
+struct ReminderRow: View {
+    let reminder: SIMReminder?
+    let action: () -> Void
+
+    var body: some View {
+        if let reminder {
+            let schedule = scheduleText(reminder)
+            ScheduledLineRow(title: reminder.content, subtitle: schedule, systemImage: "bell", action: action)
+                .accessibilityLabel(Text("detail.reminder"))
+                .accessibilityValue("\(reminder.content), \(schedule)")
         } else {
             DetailEditRow(title: "detail.addReminder", action: action)
                 .accessibilityLabel(Text("detail.reminder"))

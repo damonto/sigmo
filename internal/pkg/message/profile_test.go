@@ -118,3 +118,22 @@ func TestExpectedSIMIsCheckedInsideReservation(t *testing.T) {
 	}
 	release()
 }
+
+func TestSendWithProfileRejectsSupersededSIMActivation(t *testing.T) {
+	device := &mmodem.Modem{SIM: &mmodem.SIM{Identifier: "sim-a"}}
+	original := device.SIMIdentity()
+	release, err := device.ReserveSIMSlot(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	device.InvalidateSIMActivation()
+	release()
+
+	messenger := new(Messenger)
+	_, err = messenger.SendWithProfile(t.Context(), device, SendRequest{
+		To: "10086", Text: "hello", ExpectedProfileID: original.ICCID, ExpectedSIM: original,
+	})
+	if !errors.Is(err, ErrProfileChanged) {
+		t.Fatalf("SendWithProfile() error = %v, want %v", err, ErrProfileChanged)
+	}
+}

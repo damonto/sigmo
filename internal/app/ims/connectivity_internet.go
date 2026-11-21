@@ -26,7 +26,7 @@ func (c *Connectivity) Connect(ctx context.Context, modem *mmodem.Modem, prefere
 		return nil, ErrUnavailable
 	}
 	var connection *pinternet.Connection
-	err := c.change(modem, func() error {
+	err := c.change(ctx, modem, func() error {
 		var err error
 		connection, err = c.internet.Connect(ctx, modem, preferences)
 		return err
@@ -39,7 +39,7 @@ func (c *Connectivity) UpdatePreferences(ctx context.Context, modem *mmodem.Mode
 		return nil, ErrUnavailable
 	}
 	var connection *pinternet.Connection
-	err := c.change(modem, func() error {
+	err := c.change(ctx, modem, func() error {
 		var err error
 		connection, err = c.internet.UpdatePreferences(ctx, modem, preferences)
 		return err
@@ -51,7 +51,27 @@ func (c *Connectivity) Disconnect(ctx context.Context, modem *mmodem.Modem) erro
 	if c == nil || c.internet == nil {
 		return ErrUnavailable
 	}
-	return c.change(modem, func() error {
+	return c.change(ctx, modem, func() error {
 		return c.internet.Disconnect(ctx, modem)
+	})
+}
+
+// WithAutomationConnection coordinates a scoped cellular connection with IMS configuration.
+func (c *Connectivity) WithAutomationConnection(ctx context.Context, modem *mmodem.Modem, profile mmodem.SIMIdentity, use func(*pinternet.Connection) error) error {
+	if c == nil || c.internet == nil || modem == nil {
+		return ErrUnavailable
+	}
+	return c.change(ctx, modem, func() error {
+		return c.internet.WithAutomationConnection(ctx, modem, profile, use)
+	})
+}
+
+// RestoreAutomationConnection restores a former SIM's Internet connection through the shared coordinator.
+func (c *Connectivity) RestoreAutomationConnection(ctx context.Context, modem *mmodem.Modem, profile mmodem.SIMIdentity, prefs pinternet.Preferences) error {
+	if c == nil || c.internet == nil || modem == nil {
+		return ErrUnavailable
+	}
+	return c.change(ctx, modem, func() error {
+		return c.internet.RestoreAutomationConnection(ctx, modem, profile, prefs)
 	})
 }

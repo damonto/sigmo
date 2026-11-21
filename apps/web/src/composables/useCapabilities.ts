@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useCapabilityApi } from '@/apis/capability'
 
 export const FEATURE = {
+  simAutomations: 'simAutomations',
   esimTransfer: 'esimTransfer',
   volte: 'volte',
   wifiCalling: 'wifiCalling',

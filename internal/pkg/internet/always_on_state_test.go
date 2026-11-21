@@ -177,7 +177,7 @@ func TestAlwaysOnRequiresProfileID(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewConnector() error = %v", err)
 			}
-			_, err = c.connect(t.Context(), fakeInternetModem{modemID: "modem-1"}, tt.prefs, true)
+			_, err = c.connect(t.Context(), fakeInternetModem{modemID: "modem-1"}, tt.prefs, connectManual)
 			if errors.Is(err, ErrProfileIDRequired) != tt.wantProfileErr {
 				t.Fatalf("connect() error = %v, profile error = %t, want %t", err, errors.Is(err, ErrProfileIDRequired), tt.wantProfileErr)
 			}

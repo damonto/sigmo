@@ -5,8 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/damonto/sigmo/internal/pkg/storage/query"
 	"time"
+
+	"github.com/damonto/sigmo/internal/pkg/storage/query"
 )
 
 // SIMLine includes archived identities; Present is established by a fresh inventory.
@@ -53,11 +54,23 @@ func (s *Store) MarkProfileDeletion(ctx context.Context, profileID, state string
 // ConfirmESIMProfileDeletion records absence only at the last confirmed location.
 // Completed history assignments remain intact when a client retries deletion.
 func (s *Store) ConfirmESIMProfileDeletion(ctx context.Context, profileID, modemID, seID string) error {
-	err := query.New(s.db).ConfirmESIMProfileDeletion(ctx, query.ConfirmESIMProfileDeletionParams{
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin eSIM deletion confirmation: %w", err)
+	}
+	defer tx.Rollback()
+	q := query.New(tx)
+	err = q.ConfirmESIMProfileDeletion(ctx, query.ConfirmESIMProfileDeletionParams{
 		ProfileID: profileID, ModemID: modemID, SEID: seID,
 	})
 	if err != nil {
 		return fmt.Errorf("confirm eSIM profile deletion: %w", err)
+	}
+	if err := stopDeletedSIMAutomations(ctx, q, profileID, modemID, seID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit eSIM deletion confirmation: %w", err)
 	}
 	return nil
 }
@@ -73,14 +86,37 @@ type ProfileReconciliation struct {
 
 // ReconcileProfileDeletion updates a state only when no operation has superseded it.
 func (s *Store) ReconcileProfileDeletion(ctx context.Context, change ProfileReconciliation) (bool, error) {
-	count, err := query.New(s.db).ReconcileProfileDeletion(ctx, query.ReconcileProfileDeletionParams{
+	params := query.ReconcileProfileDeletionParams{
 		ProfileID: change.ProfileID, ExpectedState: change.ExpectedState,
 		ExpectedSuccessor: change.ExpectedSuccessor, NewState: change.NewState,
-	})
+	}
+	if change.NewState != "deleted" {
+		count, err := query.New(s.db).ReconcileProfileDeletion(ctx, params)
+		if err != nil {
+			return false, fmt.Errorf("reconcile profile deletion: %w", err)
+		}
+		return count != 0, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin profile deletion reconciliation: %w", err)
+	}
+	defer tx.Rollback()
+	q := query.New(tx)
+	count, err := q.ReconcileProfileDeletion(ctx, params)
 	if err != nil {
 		return false, fmt.Errorf("reconcile profile deletion: %w", err)
 	}
-	return count != 0, nil
+	if count == 0 {
+		return false, nil
+	}
+	if err := stopDeletedSIMAutomations(ctx, q, change.ProfileID, "", ""); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit profile deletion reconciliation: %w", err)
+	}
+	return true, nil
 }
 
 // CommunicationPreference belongs to a correspondent, independently of contact records.

@@ -31,7 +31,7 @@ func TestConnectDoesNotHoldGlobalRoutesWhileWaitingForModem(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		defer c.lockModem("slow")()
-		_, err := c.connect(ctx, modem, Preferences{APN: "internet"}, false)
+		_, err := c.connect(ctx, modem, Preferences{APN: "internet"}, connectRestore)
 		done <- err
 	}()
 	defer func() { cancel(); <-done }()
@@ -64,7 +64,7 @@ func TestRejectedConnectionKeepsSuccessfulPreference(t *testing.T) {
 	calls := 0
 	rejected := &qcom.WDSStartNetworkError{Err: qcom.QMIErrorCallFailed}
 	modem := fakeInternetModem{modemID: "modem", connectCalls: &calls, connectErr: rejected}
-	_, err = c.connect(t.Context(), modem, Preferences{APN: "bad", APNUsername: "user", APNPassword: "secret"}, false)
+	_, err = c.connect(t.Context(), modem, Preferences{APN: "bad", APNUsername: "user", APNPassword: "secret"}, connectRestore)
 	if !errors.Is(err, rejected) {
 		t.Fatalf("connect() error = %v", err)
 	}
@@ -103,5 +103,22 @@ func TestCanceledOperationDoesNotWaitForModem(t *testing.T) {
 	cancel()
 	if err := c.Disconnect(ctx, &mmodem.Modem{EquipmentIdentifier: "busy"}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Disconnect() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestTemporaryConnectionFailureLeavesOtherBearersAlone(t *testing.T) {
+	c, err := NewConnector(ConnectorConfig{State: testStore(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantErr := errors.New("temporary bearer unavailable")
+	connects, reads := 0, 0
+	modem := fakeInternetModem{modemID: "modem", connectCalls: &connects, connectErr: wantErr, bearerReads: &reads}
+	_, err = c.connect(t.Context(), modem, Preferences{APN: "internet"}, connectTemporary)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("connect() error = %v, want %v", err, wantErr)
+	}
+	if connects != 1 || reads != 1 {
+		t.Fatalf("got %d connection attempts and %d bearer reads, want one each", connects, reads)
 	}
 }

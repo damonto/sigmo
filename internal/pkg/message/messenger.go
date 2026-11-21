@@ -110,16 +110,17 @@ func (s *Messenger) Send(ctx context.Context, modem *mmodem.Modem, to string, te
 	return s.send(ctx, realModemDevice{modemRef: modem}, to, text)
 }
 
-// SendRequest pins a new client's submission to the line shown in its composer.
+// SendRequest optionally pins submission to a profile or a particular SIM activation.
 type SendRequest struct {
 	To                string
 	Text              string
 	ExpectedProfileID string
+	ExpectedSIM       mmodem.SIMIdentity
 }
 
 // SendWithProfile reserves the SIM through validation and submission, including IMS routing.
 func (s *Messenger) SendWithProfile(ctx context.Context, modem *mmodem.Modem, req SendRequest) (string, error) {
-	if req.ExpectedProfileID == "" {
+	if req.ExpectedProfileID == "" && req.ExpectedSIM.ICCID == "" {
 		return s.Send(ctx, modem, req.To, req.Text)
 	}
 	release, err := modem.ReserveSIMSlot(ctx)
@@ -127,12 +128,17 @@ func (s *Messenger) SendWithProfile(ctx context.Context, modem *mmodem.Modem, re
 		return "", fmt.Errorf("reserve message SIM: %w", err)
 	}
 	defer release()
-	profileID, err := modem.ProfileID(ctx)
-	if err != nil {
-		return "", fmt.Errorf("read message SIM: %w", err)
-	}
-	if profileID != req.ExpectedProfileID {
+	if req.ExpectedSIM.ICCID != "" && !modem.MatchesSIMActivation(req.ExpectedSIM) {
 		return "", ErrProfileChanged
+	}
+	if req.ExpectedProfileID != "" {
+		profileID, err := modem.ProfileID(ctx)
+		if err != nil {
+			return "", fmt.Errorf("read message SIM: %w", err)
+		}
+		if profileID != req.ExpectedProfileID {
+			return "", ErrProfileChanged
+		}
 	}
 	return s.send(ctx, realModemDevice{modemRef: modem}, req.To, req.Text)
 }
@@ -144,7 +150,7 @@ func (s *Messenger) send(ctx context.Context, device modemDevice, to string, tex
 	if strings.TrimSpace(text) == "" {
 		return "", ErrTextRequired
 	}
-	to, err := normalizeSMSAddress(to)
+	to, err := NormalizeSMSAddress(to)
 	if err != nil {
 		return "", err
 	}

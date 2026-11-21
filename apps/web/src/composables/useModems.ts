@@ -1,13 +1,14 @@
-import { computed, getCurrentScope, onScopeDispose, ref, watch } from 'vue'
+import { computed, getCurrentScope, onScopeDispose, ref, shallowRef, watch } from 'vue'
 
 import { useModemApi } from '@/apis/modem'
 import { createSIMKindRetry } from '@/composables/simKindRetry'
 import { useAppUpdate } from '@/composables/useAppUpdate'
+import { sessionRevision } from '@/lib/authSession'
 import type { Modem } from '@/types/modem'
 
 // Global modems state
 const modems = ref<Modem[]>([])
-const isFetching = ref(false)
+const pendingRequest = shallowRef<{ revision: number }>()
 const simKindRetry = createSIMKindRetry()
 const modemApi = useModemApi()
 const { updating } = useAppUpdate()
@@ -23,24 +24,34 @@ const scheduleSIMKindRetry = () => {
 }
 
 const loadModems = async (quiet = false) => {
-  if (isFetching.value || updating.value) return
+  const revision = sessionRevision()
+  if (updating.value || pendingRequest.value?.revision === revision) return
 
-  isFetching.value = true
+  const request = { revision }
+  pendingRequest.value = request
   try {
     const { data } = await modemApi.getModems({ quiet })
 
-    if (data.value) {
+    if (pendingRequest.value === request && revision === sessionRevision() && data.value) {
       modems.value = data.value
     }
   } finally {
-    isFetching.value = false
-    scheduleSIMKindRetry()
+    if (pendingRequest.value === request) {
+      pendingRequest.value = undefined
+      scheduleSIMKindRetry()
+    }
   }
 }
 
-const fetchModems = async () => {
+const fetchModems = () => {
   simKindRetry.reset()
-  await loadModems()
+  return loadModems()
+}
+
+/** Refreshes the list after a mutation and discards earlier list requests. */
+export const refreshModemList = (): Promise<void> => {
+  pendingRequest.value = undefined
+  return fetchModems()
 }
 
 /**
@@ -66,7 +77,7 @@ export const useModems = () => {
   /**
    * Computed properties
    */
-  const isLoading = computed(() => isFetching.value)
+  const isLoading = computed(() => pendingRequest.value !== undefined)
 
   return {
     // State

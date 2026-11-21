@@ -56,13 +56,15 @@ export const useFetch = createFetch({
       return { response, data }
     },
 
-    async onFetchError({ response, error, data }) {
+    async onFetchError({ response, error, data, context }) {
+      context.options.signal?.throwIfAborted()
       if (response && response.status <= 299) {
         return { response, error, data }
       }
 
       if (response) {
         const body = await response.text().catch(() => undefined)
+        context.options.signal?.throwIfAborted()
         const handledError = handleResponseError(response, body)
         if (isLocalAuthenticationError(handledError) && router.currentRoute.value.name !== 'auth') {
           router.replace({ name: 'auth' })
@@ -92,10 +94,12 @@ const useQuietFetch = createFetch({
       options.headers = requestHeaders(options)
       return { options }
     },
-    async onFetchError({ response, error, data }) {
+    async onFetchError({ response, error, data, context }) {
+      context.options.signal?.throwIfAborted()
       if (response && response.status <= 299) return { response, error, data }
       if (!response) throw error || new Error('Request failed')
       const problem = createApiError(response, await response.text().catch(() => undefined))
+      context.options.signal?.throwIfAborted()
       if (isLocalAuthenticationError(problem)) void router.replace({ name: 'auth' })
       throw Object.assign(new Error(problem.message), problem)
     },
@@ -117,18 +121,26 @@ export const fetchJson = async <T>(
   options?: RequestInit,
   quiet = false,
 ): Promise<ApiFetchReturn<T>> => {
+  const signal = options?.signal
+  signal?.throwIfAborted()
   const fetcher = quiet ? useQuietFetch : useFetch
   const request = options
     ? fetcher<string>(url, options, { immediate: false }).text()
     : fetcher<string>(url, { immediate: false }).text()
 
-  await request.execute(true)
-
-  const text = request.data.value
-  const data = request.data as unknown as Ref<T | undefined>
-  data.value = parseResponseText<T>(text)
-
-  return request as unknown as ApiFetchReturn<T>
+  // VueUse supplies its own signal on execute. Forward caller cancellation to it.
+  const abort = () => request.abort(signal?.reason)
+  signal?.addEventListener('abort', abort, { once: true })
+  try {
+    await request.execute(true)
+    signal?.throwIfAborted()
+    const text = request.data.value
+    const data = request.data as unknown as Ref<T | undefined>
+    data.value = parseResponseText<T>(text)
+    return request as unknown as ApiFetchReturn<T>
+  } finally {
+    signal?.removeEventListener('abort', abort)
+  }
 }
 
 // Expected restart windows must not pass through the global error notifier.

@@ -82,6 +82,38 @@ describe('useFetch global error handling', () => {
     expect(notifyHarness.error).toHaveBeenCalledTimes(1)
   })
 
+  it.each([false, true])('cancels the underlying request with quiet = %s', async (quiet) => {
+    vi.mocked(fetch).mockImplementationOnce((_url, options) => {
+      const signal = options?.signal
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    })
+    const controller = new AbortController()
+    const response = fetchJson('modems/1/automations', { signal: controller.signal }, quiet)
+    const canceled = expect(response).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    const sentSignal = vi.mocked(fetch).mock.calls[0]?.[1]?.signal
+    controller.abort()
+
+    expect(sentSignal?.aborted).toBe(true)
+    await canceled
+    expect(notifyHarness.error).not.toHaveBeenCalled()
+    expect(routerHarness.replace).not.toHaveBeenCalled()
+  })
+
+  it('does not send a request with an already aborted signal', async () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(
+      fetchJson('modems/1/automations', { signal: controller.signal }),
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it('localizes Worker errors without requiring a request ID', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(
       problemResponse(403, 'license_entitlement_inactive', 'authorization revoked or expired', ''),

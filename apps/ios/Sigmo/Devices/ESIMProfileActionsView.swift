@@ -15,7 +15,7 @@ struct ESIMProfileActionsView: View {
     // Lists own these tasks; standalone reminder destinations run them locally.
     let onOperation: ((ESIMProfileOperation) -> Void)?
 
-    private enum Sheet { case number, rename, reminder, sim }
+    private enum Sheet { case number, rename, reminder, automation, sim }
 
     private struct ObservationIdentity: Equatable {
         let accessRevision: Int
@@ -63,6 +63,10 @@ struct ESIMProfileActionsView: View {
                         case .number: DetailTextForm(state: state, kind: .number)
                         case .rename: DetailTextForm(state: state, kind: .rename(profile))
                         case .reminder: DetailReminderForm(state: state, profile: profile)
+                        case .automation:
+                            SIMAutomationForm(state: state, line: SIMAutomationLine(
+                                profileID: profile.iccid, modemID: state.modemID, seID: profile.seId, label: profile.name
+                            ))
                         case .sim: SIMApplicationView(state: sim)
                         }
                     }
@@ -194,6 +198,14 @@ struct ESIMProfileActionsView: View {
     @ViewBuilder private func servicesSection(_ profile: ESIMProfile) -> some View {
         Section("detail.reminder") {
             ReminderRow(reminder: profile.reminder) { sheet = .reminder }
+        }
+        if state.supportsAutomation {
+            Section("automation.title") {
+                SIMAutomationRow(summary: state.automationSummary(profileID: profile.iccid, seID: profile.seId)) {
+                    sheet = .automation
+                }
+                .accessibilityIdentifier("esimAutomations")
+            }
         }
         Section {
             if profile.enabled, pinState.available, state.modem?.sim.identifier == profile.iccid {

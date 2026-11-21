@@ -8,7 +8,8 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/phonenumber"
 )
 
-func normalizeSMSAddress(value string) (string, error) {
+// NormalizeSMSAddress validates and compacts a recipient without changing its region.
+func NormalizeSMSAddress(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", ErrRecipientRequired

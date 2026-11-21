@@ -50,7 +50,7 @@ actor DetailFixtureServer {
         case delayedActivation, activationFailure
         case mixedTransferProfiles, unsupportedTransferProfiles, peerApprovals
         case delayedSettings, unavailableSettings, unsupportedSettings, settingsWriteFailure
-        case delayedSIMPIN
+        case delayedSIMPIN, automations
         case connectionSetup, connectionScan, connectionScanError, connectionEmptyNetworks, connectionReadFailure, connectionWriteFailure, connectionMBIM, connectionUnlicensed
     }
 
@@ -152,6 +152,13 @@ actor DetailFixtureServer {
             connection.statuses["PUT /volte/settings"] = 503
         case .connectionMBIM: connection.volte.dataPath = "mbim"
         case .connectionUnlicensed: capabilities = []
+        case .automations:
+            capabilities.append("simAutomations")
+            if !physical {
+                groups[0].profiles[0].reminder = SIMReminder(
+                    nextAt: Date().addingTimeInterval(3600), repeatDays: nil, content: "Renew the plan"
+                )
+            }
         default: break
         }
         connections["device-1"] = connection
@@ -273,6 +280,20 @@ actor DetailFixtureServer {
         if method == "GET" {
             if path.hasSuffix("/contacts") { return raw(#"{"items":[]}"#) }
             if path.hasSuffix("/sim-profiles") { return try reply(["items": communicationLines]) }
+            if scenario == .automations, path.hasSuffix("/modems/device-1/automations") {
+                return physical
+                    ? raw(#"{"items":[{"profileId":"8986000000000000001","actionType":"sms","nextAt":"2099-01-02T12:00:00Z"}]}"#)
+                    : raw(#"{"items":[{"profileId":"8986000000000000002","seId":"se-a","actionType":"data","nextAt":null}]}"#)
+            }
+            if scenario == .automations, path.contains("/sim-profiles/"), path.hasSuffix("/automations") {
+                if physical, path.hasSuffix("/8986000000000000001/automations") {
+                    return raw(#"{"items":[{"id":"sms","modemId":"device-1","nextAt":"2099-01-02T12:00:00Z","action":{"type":"sms","to":"+12025550123","text":"Fixture message"},"running":false,"restoring":false}]}"#)
+                }
+                if !physical, path.hasSuffix("/8986000000000000002/automations") {
+                    return raw(#"{"items":[{"id":"data","modemId":"device-1","seId":"se-a","nextAt":null,"action":{"type":"data","bytes":1024},"running":false,"restoring":false}]}"#)
+                }
+                return raw(#"{"items":[]}"#)
+            }
             if path.hasSuffix("/message-threads") || path.hasSuffix("/api/v1/calls") { return raw(#"{"items":[],"nextCursor":""}"#) }
             if path.hasSuffix("/calls") { return raw("[]") }
             if path.hasSuffix("/conversations") { return raw(#"{"backendId":"fixture-detail","revision":0,"unreadCount":0,"items":[]}"#) }

@@ -81,18 +81,18 @@ func TestNormalizeSMSAddress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := normalizeSMSAddress(tt.to)
+			got, err := NormalizeSMSAddress(tt.to)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
-					t.Fatalf("normalizeSMSAddress() error = %v, want %v", err, tt.wantErr)
+					t.Fatalf("NormalizeSMSAddress() error = %v, want %v", err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("normalizeSMSAddress() error = %v", err)
+				t.Fatalf("NormalizeSMSAddress() error = %v", err)
 			}
 			if got != tt.want {
-				t.Fatalf("normalizeSMSAddress() = %q, want %q", got, tt.want)
+				t.Fatalf("NormalizeSMSAddress() = %q, want %q", got, tt.want)
 			}
 		})
 	}

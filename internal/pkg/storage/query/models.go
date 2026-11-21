@@ -58,3 +58,20 @@ type Reminder struct {
 	UpdatedAt   string
 	Revision    int64
 }
+
+type SimAutomation struct {
+	ID           string
+	ProfileID    string
+	ModemID      string
+	SEID         string
+	Eid          string
+	ScheduledAt  int64
+	RepeatDays   int64
+	Action       string
+	NextAt       int64
+	RunningAt    int64
+	StartedAt    int64
+	LastRun      string
+	RestoreState string
+	Revision     int64
+}

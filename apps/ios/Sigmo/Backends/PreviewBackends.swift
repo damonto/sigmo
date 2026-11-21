@@ -60,6 +60,7 @@ enum PreviewBackends {
                 case "detail-settings-unsupported": fixture = .unsupportedSettings
                 case "detail-settings-write-error": fixture = .settingsWriteFailure
                 case "detail-physical-pin-loading": fixture = .delayedSIMPIN
+                case "detail-esim-automation", "detail-physical-automation": fixture = .automations
                 case "detail-connection-setup": fixture = .connectionSetup
                 case "detail-connection-scan": fixture = .connectionScan
                 case "detail-connection-scan-error": fixture = .connectionScanError
@@ -70,7 +71,7 @@ enum PreviewBackends {
                 case "detail-connection-unlicensed": fixture = .connectionUnlicensed
                 default: fixture = .standard
                 }
-                let detail = DetailFixtureServer(physical: ["detail-physical", "detail-physical-pin-loading"].contains(scenario), locked: scenario == "detail-locked", scenario: fixture,
+                let detail = DetailFixtureServer(physical: scenario.hasPrefix("detail-physical"), locked: scenario == "detail-locked", scenario: fixture,
                                                  includesHistory: ["detail-reminder", "detail-deletion-history"].contains(scenario))
                 return BackendAPI(configuration: configuration, transport: { try await detail.respond($0) }, socketFactory: { try await detail.socket($0) })
             }

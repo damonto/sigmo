@@ -27,6 +27,20 @@ func (m *Modem) SIMIdentity() SIMIdentity {
 	return m.simIdentityLocked()
 }
 
+// MatchesSIMActivation reports whether identity still belongs to the active SIM
+// on this modem generation. Reserve the SIM slot before checking and acting.
+func (m *Modem) MatchesSIMActivation(identity SIMIdentity) bool {
+	if identity.ICCID == "" || m.SIMIdentity() != identity || m.SIMReloadPending() {
+		return false
+	}
+	select {
+	case <-m.Done():
+		return false
+	default:
+		return true
+	}
+}
+
 // SetIMSNumber records an IMS-derived number for the specified SIM.
 // An empty number clears only the IMS observation, preserving MDN/history.
 // Modem-reported numbers always take precedence.

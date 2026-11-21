@@ -8,6 +8,7 @@ import ModemDetailView from '@/views/ModemDetailView.vue'
 
 const api = vi.hoisted(() => ({
   unlockSim: vi.fn(),
+  switchSimSlot: vi.fn(),
 }))
 
 const reminderApi = vi.hoisted(() => ({
@@ -23,6 +24,7 @@ const detailHarness = vi.hoisted(() => ({
   modem: undefined as Ref<Modem | null> | undefined,
   seInfo: undefined as Ref<SEsResponse | null> | undefined,
   isSELoading: undefined as Ref<boolean> | undefined,
+  refreshModemList: vi.fn(),
   fetchModemDetail: vi.fn(),
   fetchEsimProfiles: vi.fn(),
   resetMsisdnInput: vi.fn(),
@@ -62,6 +64,10 @@ vi.mock('@/apis/simPin', () => ({
 
 vi.mock('@/apis/modem', () => ({
   useModemApi: () => api,
+}))
+
+vi.mock('@/composables/useModems', () => ({
+  refreshModemList: detailHarness.refreshModemList,
 }))
 
 vi.mock('@/apis/reminder', () => ({
@@ -151,17 +157,6 @@ vi.mock('@/composables/useSimApplicationSession', async () => {
       submitInkey: simAppHarness.submitInkey,
       respondConfirm: simAppHarness.respondConfirm,
       back: simAppHarness.back,
-    }),
-  }
-})
-
-vi.mock('@/composables/useSimSlotSwitch', async () => {
-  const { ref } = await vi.importActual<typeof import('vue')>('vue')
-  return {
-    useSimSlotSwitch: () => ({
-      currentSimSlot: ref(''),
-      simSlots: ref([]),
-      handleSimSwitch: vi.fn(),
     }),
   }
 })
@@ -309,7 +304,11 @@ const mountView = () =>
     global: {
       stubs: {
         ModemDetailHeader: true,
-        SimSlotSwitcher: true,
+        SimSlotSwitcher: {
+          props: ['slots', 'onSwitch'],
+          template:
+            '<button v-if="slots.length" data-testid="switch-slot" @click="onSwitch(slots[0])">switch slot</button>',
+        },
         ModemDetailCard: true,
         ReminderDialog: {
           props: ['open'],
@@ -318,9 +317,10 @@ const mountView = () =>
         EsimSummaryCard: true,
         EsimProfileSection: {
           name: 'EsimProfileSection',
+          props: ['refreshModem'],
           emits: ['edit-phone-number', 'profile-actions-open-change'],
           template:
-            '<section data-testid="esim-profiles"><button data-testid="edit-msisdn" type="button" @click="$emit(\'edit-phone-number\', {})">edit</button></section>',
+            '<section data-testid="esim-profiles"><button data-testid="edit-msisdn" type="button" @click="$emit(\'edit-phone-number\', {})">edit</button><button data-testid="refresh-after-profile-switch" type="button" @click="refreshModem()">switch profile</button></section>',
         },
         DraggableFab: {
           props: ['disabled'],
@@ -390,6 +390,8 @@ describe('ModemDetailView SIM PIN unlock', () => {
     }
     vi.clearAllMocks()
     api.unlockSim.mockResolvedValue(undefined)
+    api.switchSimSlot.mockResolvedValue(undefined)
+    detailHarness.refreshModemList.mockResolvedValue(undefined)
     detailHarness.handleMsisdnUpdate.mockResolvedValue(true)
     detailHarness.handleInternetConnect.mockResolvedValue(undefined)
     detailHarness.handleInternetDisconnect.mockResolvedValue(undefined)
@@ -437,6 +439,29 @@ describe('ModemDetailView SIM PIN unlock', () => {
 
     expect(wrapper.find('[data-testid="pin-dialog"]').exists()).toBe(true)
   })
+
+  it.each([
+    { simKind: 'physical', action: 'switch-slot' },
+    { simKind: 'euicc', action: 'refresh-after-profile-switch' },
+  ] as const)(
+    'refreshes the list and detail after a $simKind switch',
+    async ({ simKind, action }) => {
+      const device = physicalModem()
+      const modem = detailHarness.modem
+      if (!modem) throw new Error('missing modem detail')
+      modem.value = { ...device, simKind, slots: [{ ...device.sim, slot: 2, active: false }] }
+      const wrapper = mountView()
+      await flushPromises()
+      expect(detailHarness.refreshModemList).not.toHaveBeenCalled()
+      detailHarness.fetchModemDetail.mockClear()
+
+      await wrapper.get(`[data-testid="${action}"]`).trigger('click')
+      await flushPromises()
+
+      expect(detailHarness.refreshModemList).toHaveBeenCalledOnce()
+      expect(detailHarness.fetchModemDetail).toHaveBeenCalledExactlyOnceWith(device.id)
+    },
+  )
 
   it('unlocks the SIM and refreshes modem details', async () => {
     const wrapper = mountView()
@@ -562,7 +587,7 @@ describe('ModemDetailView SIM PIN unlock', () => {
 
     await wrapper
       .findAll('button')
-      .find((button) => button.text().includes('reminder.title'))
+      .find((button) => button.text().includes('Renew the plan'))
       ?.trigger('click')
 
     expect(wrapper.find('[data-testid="reminder-dialog"]').exists()).toBe(true)

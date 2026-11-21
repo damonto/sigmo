@@ -141,7 +141,11 @@ func (c *Calls) List(ctx context.Context, modem *mmodem.Modem, query string) ([]
 }
 
 func (c *Calls) Dial(ctx context.Context, modem *mmodem.Modem, number string, route string) (storage.Call, error) {
-	return c.actions.Dial(ctx, modem, number, route)
+	dialed, err := c.actions.Dial(ctx, modem, number, route)
+	if err != nil {
+		return storage.Call{}, err
+	}
+	return dialed, nil
 }
 
 func (c *Calls) Answer(ctx context.Context, modem *mmodem.Modem, callID string) (storage.Call, error) {

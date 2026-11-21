@@ -15,14 +15,6 @@ vi.mock('vue-i18n', () => ({
 
 const passthrough = { template: '<div><slot /></div>' }
 const stubs = {
-  AlertDialog: { props: ['open'], template: '<div v-if="open"><slot /></div>' },
-  AlertDialogAction: { template: '<button type="button"><slot /></button>' },
-  AlertDialogCancel: { template: '<button type="button"><slot /></button>' },
-  AlertDialogContent: passthrough,
-  AlertDialogDescription: passthrough,
-  AlertDialogFooter: passthrough,
-  AlertDialogHeader: passthrough,
-  AlertDialogTitle: passthrough,
   Button: {
     props: ['disabled', 'type'],
     template: '<button :type="type || \'button\'" :disabled="disabled"><slot /></button>',
@@ -89,12 +81,9 @@ describe('ReminderDialog', () => {
     expect(header?.text()).toContain('modemDetail.reminder.description')
     expect(timeGroup.classes()).toContain('overflow-hidden')
     expect(timeInput.attributes('placeholder')).toBe('modemDetail.reminder.timePlaceholder')
-    expect(timeInput.classes()).toEqual(
-      expect.arrayContaining([
-        'appearance-none',
-        '[&::-webkit-calendar-picker-indicator]:opacity-0',
-      ]),
-    )
+    expect(timeInput.classes()).toContain('appearance-none')
+    expect(timeInput.attributes('type')).toBe('datetime-local')
+    expect(timeInput.attributes('step')).toBe('60')
   })
 
   it('focuses the dialog heading instead of opening the iOS time picker', () => {
@@ -136,24 +125,23 @@ describe('ReminderDialog', () => {
 
   it('prefills and clears an existing reminder', async () => {
     const nextAt = new Date(2026, 6, 18, 10, 30, 0, 0).toISOString()
-    const wrapper = mountDialog({ nextAt, repeatDays: 3, content: 'Top up' })
+    const wrapper = mountDialog({ nextAt, repeatDays: 3, content: 'Top up' }, document.body)
+    try {
+      expect(wrapper.get('#reminder-time').element).toHaveProperty('value', '2026-07-18T10:30')
+      expect(wrapper.get('#reminder-repeat').element).toHaveProperty('value', '3')
+      expect(wrapper.get('#reminder-content').element).toHaveProperty('value', 'Top up')
 
-    expect((wrapper.get('#reminder-time').element as HTMLInputElement).value).toBe(
-      '2026-07-18T10:30',
-    )
-    expect((wrapper.get('#reminder-repeat').element as HTMLInputElement).value).toBe('3')
-    expect((wrapper.get('#reminder-content').element as HTMLTextAreaElement).value).toBe('Top up')
+      await wrapper.get('[data-slot="alert-dialog-trigger"]').trigger('click')
+      expect(wrapper.emitted('clear')).toBeUndefined()
+      const confirm = Array.from(
+        document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button'),
+      ).find((button) => button.textContent?.trim() === 'modemDetail.reminder.clear')
+      confirm?.click()
 
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text().includes('reminder.clear'))
-      ?.trigger('click')
-    const clearButtons = wrapper
-      .findAll('button')
-      .filter((button) => button.text().includes('reminder.clear'))
-    await clearButtons[clearButtons.length - 1]?.trigger('click')
-
-    expect(wrapper.emitted('clear')).toHaveLength(1)
+      expect(wrapper.emitted('clear')).toHaveLength(1)
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it.each(['0', '-1', '1.5', '3651'])('rejects an invalid repeat interval %s', async (repeat) => {

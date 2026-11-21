@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { Bell, CreditCard, Download, EllipsisVertical, Info } from 'lucide-vue-next'
+import {
+  Bell,
+  CalendarClock,
+  ChevronRight,
+  CreditCard,
+  Download,
+  EllipsisVertical,
+  Info,
+} from 'lucide-vue-next'
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -19,9 +27,11 @@ import EsimProfileSection from '@/components/esim/EsimProfileSection.vue'
 import EsimSummaryCard from '@/components/esim/EsimSummaryCard.vue'
 import EsimTransferDialog from '@/components/esim/EsimTransferDialog.vue'
 import DraggableFab from '@/components/fab/DraggableFab.vue'
+import AutomationScheduleBadge from '@/components/modem/AutomationScheduleBadge.vue'
 import ModemDetailCard from '@/components/modem/ModemDetailCard.vue'
 import ModemDetailHeader from '@/components/modem/ModemDetailHeader.vue'
 import ModemLineMsisdnDialog from '@/components/modem/settings/ModemLineMsisdnDialog.vue'
+import SimAutomationsDialog from '@/components/modem/SimAutomationsDialog.vue'
 import SimApplicationDialog from '@/components/modem/SimApplicationDialog.vue'
 import SimPinDialog from '@/components/modem/SimPinDialog.vue'
 import { useSimPin } from '@/composables/useSimPin'
@@ -48,8 +58,11 @@ import { useEsimDiscover } from '@/composables/useEsimDiscover'
 import { useEsimDownload } from '@/composables/useEsimDownload'
 import { useEsimProfileQuickActions } from '@/composables/useEsimProfileQuickActions'
 import { useModemDetail } from '@/composables/useModemDetail'
+import { refreshModemList } from '@/composables/useModems'
+import { automationLineKey, useScheduledAutomations } from '@/composables/useScheduledAutomations'
 import { useSimApplicationSession } from '@/composables/useSimApplicationSession'
 import { useSimSlotSwitch } from '@/composables/useSimSlotSwitch'
+import type { AutomationLine } from '@/types/automation'
 import type { EsimProfile } from '@/types/esim'
 import type { ReminderPayload } from '@/types/reminder'
 
@@ -124,6 +137,46 @@ const resultErrorMessage = ref('')
 const resultErrorType = ref<'none' | 'failed' | 'disconnected'>('none')
 const resultName = ref('')
 const activeProfileActionsProfileId = ref<string | null>(null)
+const automationLine = ref<AutomationLine>()
+const canUseAutomations = computed(() => hasFeature(FEATURE.simAutomations))
+const scheduleModemId = computed(() => {
+  if (!canUseAutomations.value || modem.value?.id !== modemId.value) return
+  if (isEsimModem.value || isPhysicalModem.value) return modemId.value
+})
+const { schedules: automationSchedules, refresh: refreshAutomationSchedules } =
+  useScheduledAutomations(scheduleModemId)
+const physicalAutomation = computed(() =>
+  automationSchedules.value.get(automationLineKey(modem.value?.sim.identifier ?? '')),
+)
+const openESIMAutomations = (profile: EsimProfile) => {
+  automationLine.value = {
+    profileId: profile.iccid,
+    modemId: modemId.value,
+    seId: profile.seId,
+    label: profile.name,
+  }
+}
+const openPhysicalAutomations = () => {
+  if (!modem.value?.sim.identifier) return
+  automationLine.value = {
+    profileId: modem.value.sim.identifier,
+    modemId: modemId.value,
+    label: physicalProfileName.value,
+  }
+}
+watch(modemId, () => {
+  automationLine.value = undefined
+})
+watch(
+  () => modem.value?.sim.identifier,
+  (profileId) => {
+    const selected = automationLine.value
+    if (selected && !selected.seId && selected.profileId !== profileId) {
+      automationLine.value = undefined
+    }
+  },
+)
+
 const physicalReminderOpen = ref(false)
 const physicalReminderSaving = ref(false)
 const physicalReminderDeleting = ref(false)
@@ -202,6 +255,12 @@ const confirmationPlaceholder = computed(() =>
 const refreshModem = async (targetId = modemId.value) => {
   if (!targetId || targetId === 'unknown') return
   await fetchModemDetail(targetId)
+}
+
+const refreshAfterSimSwitch = () => {
+  // List refresh errors are reported by the API client independently of the SIM switch.
+  void refreshModemList().catch(() => undefined)
+  return refreshModem()
 }
 
 const openInstallDialog = () => {
@@ -334,7 +393,7 @@ const {
 const { currentSimSlot, simSlots, handleSimSwitch } = useSimSlotSwitch({
   modemId,
   modem,
-  refreshModem,
+  refreshModem: refreshAfterSimSwitch,
   onSuccess: showSuccess,
 })
 
@@ -537,7 +596,7 @@ void fetchCapabilities()
 
   <div
     v-if="modem && isEsimModem"
-    class="grid gap-4 @modem-detail/modem:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]"
+    class="grid gap-4 @modem-detail/modem:grid-cols-[minmax(22rem,1fr)_clamp(16rem,27vw,26rem)]"
   >
     <div class="min-w-0 space-y-3">
       <EsimSummaryCard
@@ -545,13 +604,16 @@ void fetchCapabilities()
         :se-info="seInfo"
       />
       <EsimProfileSection
+        :automations-available="canUseAutomations"
+        :automation-schedules="automationSchedules"
+        @open-automations="openESIMAutomations"
         :sim-pin-available="simPin.available.value"
         :sim-pin-profile-iccid="modem.sim.identifier"
         @open-sim-pin="simPin.show"
         v-model:profiles="esimProfiles"
         :loading="isEsimProfilesLoading"
         :modem-id="modemId"
-        :refresh-modem="refreshModem"
+        :refresh-modem="refreshAfterSimSwitch"
         :internet-connected="isInternetConnected"
         :internet-busy="isInternetBusy"
         :wifi-calling-available="canUseWiFiCalling"
@@ -612,6 +674,19 @@ void fetchCapabilities()
         {{ t('modemDetail.reminder.title') }}
       </Button>
       <Button
+        v-if="canUseAutomations && modem.sim.identifier"
+        type="button"
+        variant="outline"
+        class="justify-start gap-2"
+        @click="openPhysicalAutomations"
+      >
+        <CalendarClock
+          class="size-4"
+          aria-hidden="true"
+        />
+        {{ t('automation.title') }}
+      </Button>
+      <Button
         v-if="simApplicationAvailable"
         type="button"
         variant="outline"
@@ -622,23 +697,52 @@ void fetchCapabilities()
         {{ t('modemDetail.simApplication.title') }}
       </Button>
     </div>
-    <Alert v-if="modem.sim.reminder">
-      <AlertTitle>{{ t('modemDetail.reminder.title') }}</AlertTitle>
-      <AlertDescription class="space-y-1">
-        <p>
-          {{ t('modemDetail.reminder.nextAt') }}:
-          {{ formatReminderTimestamp(modem.sim.reminder.nextAt) }}
-        </p>
-        <p>
-          {{
-            modem.sim.reminder.repeatDays
-              ? t('modemDetail.reminder.everyDays', { days: modem.sim.reminder.repeatDays })
-              : t('modemDetail.reminder.once')
-          }}
-        </p>
-        <p class="whitespace-pre-wrap wrap-break-word">{{ modem.sim.reminder.content }}</p>
-      </AlertDescription>
-    </Alert>
+    <button
+      v-if="modem.sim.reminder"
+      type="button"
+      aria-haspopup="dialog"
+      class="flex w-full items-start gap-3 rounded-lg border bg-card px-4 py-3 text-left text-sm text-card-foreground transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      @click="physicalReminderOpen = true"
+    >
+      <Bell
+        class="mt-0.5 size-4 shrink-0 text-primary"
+        aria-hidden="true"
+      />
+      <span class="min-w-0 flex-1">
+        <span class="block font-medium">{{ t('modemDetail.reminder.title') }}</span>
+        <span class="mt-0.5 block space-y-1 leading-relaxed text-muted-foreground">
+          <span class="block">
+            {{ t('modemDetail.reminder.nextAt') }}:
+            <time :datetime="modem.sim.reminder.nextAt">{{
+              formatReminderTimestamp(modem.sim.reminder.nextAt)
+            }}</time>
+          </span>
+          <span class="block">
+            {{
+              modem.sim.reminder.repeatDays
+                ? t('modemDetail.reminder.everyDays', { days: modem.sim.reminder.repeatDays })
+                : t('modemDetail.reminder.once')
+            }}
+          </span>
+          <span class="block whitespace-pre-wrap wrap-break-word">{{
+            modem.sim.reminder.content
+          }}</span>
+        </span>
+      </span>
+      <ChevronRight
+        class="size-4 shrink-0 self-center text-muted-foreground"
+        aria-hidden="true"
+      />
+    </button>
+    <div
+      v-if="physicalAutomation"
+      class="rounded-lg border bg-card px-4 py-3"
+    >
+      <AutomationScheduleBadge
+        :automation="physicalAutomation"
+        @edit="openPhysicalAutomations"
+      />
+    </div>
     <ModemDetailCard
       :modem="modem"
       :se-info="null"
@@ -690,6 +794,11 @@ void fetchCapabilities()
     @submit-inkey="submitSimApplicationInkey"
     @respond-confirm="respondSimApplicationConfirm"
     @back="backSimApplication"
+  />
+
+  <SimAutomationsDialog
+    v-model="automationLine"
+    @changed="refreshAutomationSchedules"
   />
 
   <ReminderDialog

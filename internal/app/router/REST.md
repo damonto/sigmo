@@ -12,6 +12,7 @@ for methods, middleware, and handler bindings.
 | Physical SIM selection | Included in the modem representation | `PUT /modems/:id/sim-slot-selection` with `{"slot":2}`. Repeating the selected slot succeeds without switching again. |
 | Secure elements | `GET /modems/:id/secure-elements` | Installed profiles live under `/modems/:id/secure-elements/:seId/esim-profiles/:iccid`. |
 | eSIM inventory | `GET /modems/:id/esim-profiles` | Activation is a selection: `PUT /modems/:id/secure-elements/:seId/active-esim-profile` with `{"iccid":"..."}`. |
+| SIM automations | `GET /sim-profiles/:profileId/automations` lists the configuration for each binding of that profile. `GET /modems/:id/automations` summarizes configured actions with `nextAt` set to null when there is no upcoming run. | `POST` creates one automation per modem, ICCID, and secure element and returns `409` if it already exists. `PUT` edits it and `DELETE` clears it at `/sim-profiles/:profileId/automations/:automationId`. |
 | Modem message conversations | `GET /modems/:id/message-conversations` and `GET /modems/:id/message-conversations/:participant/messages` | Delete a modem conversation at `/modems/:id/message-conversations/:participant`. Send SMS with `POST /modems/:id/messages`. |
 
 Mode and band configuration responses retain `supported` metadata and the

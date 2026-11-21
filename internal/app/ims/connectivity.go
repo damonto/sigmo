@@ -4,13 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/damonto/sigmo/internal/pkg/carrierconfig"
 	"strings"
 	"sync"
 
 	imsgo "github.com/damonto/ims-go"
+
 	"github.com/damonto/sigmo/internal/app/websheet"
+	"github.com/damonto/sigmo/internal/pkg/carrierconfig"
 	pinternet "github.com/damonto/sigmo/internal/pkg/internet"
+	"github.com/damonto/sigmo/internal/pkg/keymutex"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
@@ -27,10 +29,9 @@ type Connectivity struct {
 	volteVoice       *VoLTE
 	reloadModem      func(context.Context, *mmodem.Modem) (*mmodem.Modem, error)
 
-	operationMu sync.Mutex
-	operations  map[string]*sync.Mutex
-	numberMu    sync.Mutex
-	numbers     map[string]*modemNumbers
+	operations keymutex.KeyMutex
+	numberMu   sync.Mutex
+	numbers    map[string]*modemNumbers
 }
 
 type ConnectivityConfig struct {
@@ -73,7 +74,6 @@ func NewConnectivity(cfg ConnectivityConfig) *Connectivity {
 		volte:            volte,
 		wifiCallingVoice: &WiFiCalling{voiceAccess: &voiceAccess{access: wifiCalling}},
 		volteVoice:       &VoLTE{voiceAccess: &voiceAccess{access: volte}},
-		operations:       make(map[string]*sync.Mutex),
 	}
 	if cfg.Registry != nil {
 		connectivity.reloadModem = cfg.Registry.Reload
@@ -117,28 +117,14 @@ func (c *Connectivity) Run(ctx context.Context) error {
 	return errors.Join(first, <-results)
 }
 
-func (c *Connectivity) change(modem *mmodem.Modem, change func() error) error {
-	modemID := ""
+func (c *Connectivity) change(ctx context.Context, modem *mmodem.Modem, apply func() error) error {
+	var modemID string
 	if modem != nil {
 		modemID = strings.TrimSpace(modem.EquipmentIdentifier)
 	}
-	unlock := c.lockModem(modemID)
-	defer unlock()
-	return change()
-}
-
-func (c *Connectivity) lockModem(modemID string) func() {
-	c.operationMu.Lock()
-	if c.operations == nil {
-		c.operations = make(map[string]*sync.Mutex)
+	if err := c.operations.LockContext(ctx, modemID); err != nil {
+		return err
 	}
-	lock := c.operations[modemID]
-	if lock == nil {
-		lock = new(sync.Mutex)
-		c.operations[modemID] = lock
-	}
-	c.operationMu.Unlock()
-
-	lock.Lock()
-	return lock.Unlock
+	defer c.operations.Unlock(modemID)
+	return apply()
 }

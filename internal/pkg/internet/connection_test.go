@@ -1882,7 +1882,7 @@ func TestConnectRejectsInvalidPreferencesBeforeReadingBearers(t *testing.T) {
 				t.Fatalf("NewConnector() error = %v", err)
 			}
 			bearerReads := 0
-			_, err = connector.connect(t.Context(), fakeInternetModem{modemID: "modem-1", bearerReads: &bearerReads}, tt.prefs, true)
+			_, err = connector.connect(t.Context(), fakeInternetModem{modemID: "modem-1", bearerReads: &bearerReads}, tt.prefs, connectManual)
 			if !errors.Is(err, tt.err) {
 				t.Fatalf("connect() error = %v, want %v", err, tt.err)
 			}
@@ -1969,7 +1969,7 @@ func TestConnectPreparesBearerDataPath(t *testing.T) {
 				connectErr:   errConnect,
 				connectCalls: &connectCalls,
 			}
-			_, err = connector.connect(t.Context(), modem, Preferences{APN: "internet", IPType: "ipv4"}, true)
+			_, err = connector.connect(t.Context(), modem, Preferences{APN: "internet", IPType: "ipv4"}, connectManual)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("connect() error = %v, want %v", err, tt.wantErr)
 			}

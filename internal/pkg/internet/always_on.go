@@ -159,7 +159,7 @@ func (c *Connector) restoreAlwaysOnLocked(ctx context.Context, modem *mmodem.Mod
 		return c.recoverAlwaysOn(ctx, access, current.bearer, prefs)
 	}
 
-	if _, err := c.connect(ctx, access, prefs, false); err != nil {
+	if _, err := c.connect(ctx, access, prefs, connectRestore); err != nil {
 		return fmt.Errorf("connect always on bearer: %w", err)
 	}
 	return nil
