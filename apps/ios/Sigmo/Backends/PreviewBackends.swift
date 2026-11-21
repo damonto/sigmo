@@ -63,6 +63,7 @@ enum PreviewBackends {
                 case "detail-esim-automation", "detail-physical-automation": fixture = .automations
                 case "detail-connection-setup": fixture = .connectionSetup
                 case "detail-connection-scan": fixture = .connectionScan
+                case "detail-connection-proxy-check": fixture = .connectionProxyCheck
                 case "detail-connection-scan-error": fixture = .connectionScanError
                 case "detail-connection-empty": fixture = .connectionEmptyNetworks
                 case "detail-connection-read-error": fixture = .connectionReadFailure

@@ -95,11 +95,10 @@ struct WiFiUplinkView: View {
                     Text("connection.wifiProxy.selection").tag("")
                     ForEach(proxies) { proxy in Text(proxy.name).tag(proxy.id) }
                 }
-                Button("connection.wifiProxy.check") { testConnection() }
-                    .disabled(selectedProxy == nil || checking)
-                if checking {
-                    ProgressView("connection.wifiProxy.checking")
+                LoadingButton(isWorking: checking, progressValue: Text("connection.wifiProxy.checking"), action: testConnection) {
+                    Text("connection.wifiProxy.check")
                 }
+                .disabled(selectedProxy == nil)
                 if let selectedProxy {
                     Button("connection.wifiProxy.edit") { editor = WiFiProxyEditor(proxy: selectedProxy) }
                     if state.usesProxy, state.settings?.underlay.proxyId != selectedProxy.id {

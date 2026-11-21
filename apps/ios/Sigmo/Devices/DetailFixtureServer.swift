@@ -51,7 +51,7 @@ actor DetailFixtureServer {
         case mixedTransferProfiles, unsupportedTransferProfiles, peerApprovals
         case delayedSettings, unavailableSettings, unsupportedSettings, settingsWriteFailure
         case delayedSIMPIN, automations
-        case connectionSetup, connectionScan, connectionScanError, connectionEmptyNetworks, connectionReadFailure, connectionWriteFailure, connectionMBIM, connectionUnlicensed
+        case connectionSetup, connectionScan, connectionScanError, connectionEmptyNetworks, connectionReadFailure, connectionWriteFailure, connectionMBIM, connectionUnlicensed, connectionProxyCheck
     }
 
     private var peerApprovalRound = 0
@@ -218,6 +218,10 @@ actor DetailFixtureServer {
 
     func respond(_ request: URLRequest) async throws -> BackendHTTPResponse {
         requests.append(request)
+        if scenario == .connectionProxyCheck, request.httpMethod == "POST",
+           request.url?.path.hasSuffix("/wifi-calling/connectivity-checks") == true {
+            try await Task.sleep(for: .seconds(4))
+        }
         if scenario == .peerApprovals, request.httpMethod == "POST", request.url?.path.contains("/esim-transfer-requests/") == true {
             struct Decision: Decodable { let phase: String; let revision: Int; let accept: Bool; let selection: PeerTransferSelection? }
             let decision = try JSONDecoder().decode(Decision.self, from: request.httpBody ?? Data())

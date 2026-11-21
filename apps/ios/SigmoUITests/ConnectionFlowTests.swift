@@ -223,7 +223,7 @@ final class ConnectionFlowTests: XCTestCase {
     }
 
     func testWiFiCallingSOCKS5ProxyCanBeTestedBeforeApplying() {
-        let app = launch()
+        let app = launch("detail-connection-proxy-check")
         tap(app.buttons["profileWiFiCalling"], in: app)
         tap(app.buttons["wifiCallingUplink"], in: app)
         tap(app.buttons["Add Proxy"], in: app)
@@ -240,10 +240,16 @@ final class ConnectionFlowTests: XCTestCase {
         tap(app.buttons["Save Proxy"], in: app)
 
         expectToggle("wifiProxyEnabled", value: "0", in: app)
-        tap(app.buttons["Test Connection"], in: app)
+        let check = app.buttons["Test Connection"]
+        tap(check, in: app)
+        let checking = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == false AND value == %@", "Testing Connection…"),
+                                                  object: check)
+        XCTAssertEqual(XCTWaiter.wait(for: [checking], timeout: 4), .completed)
+        XCTAssertFalse(app.staticTexts["Testing Connection…"].exists)
         let tcp = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@",
                                                                       "203.0.113.4", "203.0.113.4")).firstMatch
         XCTAssertTrue(tcp.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(check.isEnabled)
         let udp = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@",
                                                                       "[2001:db8::4]:40300", "[2001:db8::4]:40300")).firstMatch
         reveal(udp, in: app)
