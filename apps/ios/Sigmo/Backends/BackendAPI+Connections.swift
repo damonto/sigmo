@@ -54,6 +54,22 @@ extension BackendAPI {
         return try await decode(path, token: token, timeout: timeout)
     }
 
+    func wifiCallingProxies(token: String?) async throws -> [WiFiProxy] {
+        try await decode(["wifi-calling", "proxies"], token: token)
+    }
+
+    func saveWiFiProxy(_ id: String?, settings: WiFiProxySettings, token: String?) async throws -> WiFiProxy {
+        let collection = ["wifi-calling", "proxies"]
+        return try await decode(id.map { collection + [$0] } ?? collection,
+                                method: id == nil ? "POST" : "PUT",
+                                body: JSONEncoder().encode(settings), token: token)
+    }
+
+    func checkWiFiProxy(_ modem: String, proxyId: String, token: String?) async throws -> WiFiProxyCheck {
+        try await decode(["modems", modem, "wifi-calling", "connectivity-checks"], method: "POST",
+                         body: JSONEncoder().encode(["proxyId": proxyId]), token: token, timeout: .hardware)
+    }
+
     func updateWiFiCalling(_ modem: String, settings: WiFiSubmission, token: String?) async throws {
         _ = try await request(["modems", modem, "wifi-calling", "settings"], method: "PUT",
                               body: JSONEncoder().encode(settings), token: token, timeout: .hardware)

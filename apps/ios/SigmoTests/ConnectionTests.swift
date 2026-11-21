@@ -775,6 +775,37 @@ final class ConnectionTests: XCTestCase {
         XCTAssertEqual(sessions.count, 1)
     }
 
+    func testWiFiProxyCheckDoesNotChangeTheSIMUplink() async throws {
+        let server = DetailFixtureServer()
+        let detail = try await make(server)
+        let state = WiFiCallingState(detail: detail, profileID: profileID)
+        await state.load()
+        let original = state.settings?.underlay
+        let proxy = try await state.scope.read { api, token in
+            try await api.saveWiFiProxy(nil, settings: .init(name: "Office", host: "proxy.example", port: 1080,
+                                                          username: "user", password: "fixture-password"), token: token)
+        }
+        XCTAssertTrue(proxy.hasPassword)
+        let check = try await state.scope.read { api, token in
+            try await api.checkWiFiProxy("device-1", proxyId: proxy.id, token: token)
+        }
+        XCTAssertEqual(check.tcp.ip, "203.0.113.4")
+        XCTAssertEqual(check.udp.ipAndPort, "[2001:db8::4]:40300")
+        XCTAssertEqual(state.settings?.underlay, original)
+        let before = await writes(server, suffix: "/wifi-calling/settings")
+        XCTAssertTrue(before.isEmpty)
+
+        await state.selectProxy(proxy.id)
+        XCTAssertTrue(state.usesProxy)
+        XCTAssertEqual(state.settings?.underlay.directUnderlay, WiFiDirectUnderlay(mode: "modem", modemId: "device-2"))
+        await state.selectProxy(nil)
+        XCTAssertFalse(state.usesProxy)
+        XCTAssertEqual(state.settings?.underlay, WiFiUnderlay(mode: "modem", modemId: "device-2", proxyId: proxy.id))
+        await state.load()
+        XCTAssertEqual(state.settings?.underlay.proxyId, proxy.id)
+        XCTAssertNil(state.failure)
+    }
+
     func testUnavailableUplinkRemainsSelectedWithoutImplicitFallback() async throws {
         let server = DetailFixtureServer()
         var other = ConnectionFixture()

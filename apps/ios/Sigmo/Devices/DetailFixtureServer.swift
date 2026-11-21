@@ -67,6 +67,7 @@ actor DetailFixtureServer {
     private var notifications: [ESIMNotificationGroup]
     private var activeSE = "se-a"
     private var connections: [String: ConnectionFixture] = [:]
+    private var wifiProxy: WiFiProxy?
     private var capabilities = ["wifiCalling", "volte", "esimTransfer"]
     private var pinFixtures: [String: SIMPINFixture] = [:]
     private var modemSettings: [String: ModemSettingsFixture] = [:]
@@ -277,6 +278,21 @@ actor DetailFixtureServer {
         if path.hasSuffix("/license") { return HTTPProblem.response(status: 404, code: "resource_not_found", detail: "Not found") }
         if path.hasSuffix("/app") { return raw(#"{"version":"1","commit":"fixture","channel":"stable","target":"linux-arm64","distribution":"local"}"#) }
         if path.hasSuffix("/capabilities") { return try reply(["features": capabilities]) }
+        if method == "GET", path.hasSuffix("/wifi-calling/proxies") { return try reply([wifiProxy].compactMap { $0 }) }
+        if (method == "POST" && path.hasSuffix("/wifi-calling/proxies"))
+            || (method == "PUT" && path.hasSuffix("/wifi-calling/proxies/fixture-proxy")) {
+            struct ProxySettings: Decodable {
+                let name: String
+                let host: String
+                let port: Int
+                let username: String
+            }
+            let proxy = try JSONDecoder().decode(ProxySettings.self, from: request.httpBody ?? Data())
+            let saved = WiFiProxy(id: "fixture-proxy", name: proxy.name, host: proxy.host, port: proxy.port,
+                                  username: proxy.username, hasPassword: !proxy.username.isEmpty)
+            wifiProxy = saved
+            return try reply(saved)
+        }
         if method == "GET" {
             if path.hasSuffix("/contacts") { return raw(#"{"items":[]}"#) }
             if path.hasSuffix("/sim-profiles") { return try reply(["items": communicationLines]) }

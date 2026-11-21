@@ -11,7 +11,7 @@ type TestRef<T> = {
 const harness = vi.hoisted(() => ({
   handleInternetConnect: vi.fn(),
   handleInternetDisconnect: vi.fn(),
-  handleWiFiCallingUpdate: vi.fn(),
+  ensureWiFiCallingEnabled: vi.fn(),
   reconnectWiFiCalling: vi.fn(),
   disconnectWiFiCalling: vi.fn(),
   resetMsisdnInput: vi.fn(),
@@ -52,7 +52,7 @@ vi.mock('@/composables/useModemWiFiCallingSettings', async () => {
         isWiFiCallingSettingsUpdating: ref(false),
         isWiFiCallingReconnecting: ref(false),
         isWiFiCallingDisconnecting: ref(false),
-        handleWiFiCallingUpdate: harness.handleWiFiCallingUpdate,
+        ensureWiFiCallingEnabled: harness.ensureWiFiCallingEnabled,
         reconnectWiFiCalling: harness.reconnectWiFiCalling,
         disconnectWiFiCalling: harness.disconnectWiFiCalling,
       }
@@ -106,7 +106,7 @@ describe('useEsimProfileQuickActions', () => {
     vi.clearAllMocks()
     harness.handleInternetConnect.mockResolvedValue(undefined)
     harness.handleInternetDisconnect.mockResolvedValue(undefined)
-    harness.handleWiFiCallingUpdate.mockResolvedValue(undefined)
+    harness.ensureWiFiCallingEnabled.mockResolvedValue(true)
     harness.reconnectWiFiCalling.mockResolvedValue(undefined)
     harness.disconnectWiFiCalling.mockResolvedValue(undefined)
     harness.handleMsisdnUpdate.mockResolvedValue(true)
@@ -152,9 +152,17 @@ describe('useEsimProfileQuickActions', () => {
 
     await actions.handleWiFiCallingQuickToggle(profile, true)
 
-    expect(actions.settingsWiFiCallingEnabled.value).toBe(true)
-    expect(harness.handleWiFiCallingUpdate).toHaveBeenCalledTimes(1)
+    expect(harness.ensureWiFiCallingEnabled).toHaveBeenCalledTimes(1)
     expect(harness.reconnectWiFiCalling).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips reconnecting when the current settings could not be enabled', async () => {
+    harness.ensureWiFiCallingEnabled.mockResolvedValueOnce(false)
+    const actions = useActions()
+
+    await actions.handleWiFiCallingQuickToggle(profile, true)
+
+    expect(harness.reconnectWiFiCalling).not.toHaveBeenCalled()
   })
 
   it('disconnects Wi-Fi Calling without saving settings', async () => {
@@ -163,7 +171,7 @@ describe('useEsimProfileQuickActions', () => {
     await actions.handleWiFiCallingQuickToggle(profile, false)
 
     expect(harness.disconnectWiFiCalling).toHaveBeenCalledTimes(1)
-    expect(harness.handleWiFiCallingUpdate).not.toHaveBeenCalled()
+    expect(harness.ensureWiFiCallingEnabled).not.toHaveBeenCalled()
   })
 
   it('keeps Wi-Fi Calling busy after the connect request resolves while the backend is connecting', async () => {

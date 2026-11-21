@@ -1,9 +1,10 @@
-import { computed, onUnmounted, ref, watch, type ComputedRef } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useModemApi } from '@/apis/modem'
 import type {
   WiFiCallingSettings,
+  WiFiCallingSettingsRequest,
   WiFiCallingSettingsResponse,
   WiFiCallingUnderlay,
 } from '@/types/modem'
@@ -11,6 +12,7 @@ import type { CarrierWebsheetInfo } from '@/types/websheet'
 
 type Options = {
   modemId: ComputedRef<string>
+  simId?: ComputedRef<string | undefined>
   enabled: ComputedRef<boolean>
   onSuccess?: (message: string) => void
   onError?: (message: string) => void
@@ -18,22 +20,31 @@ type Options = {
 
 type FetchSettingsOptions = {
   silent?: boolean
-  applySettings?: boolean
+  reconcile?: boolean
 }
 
 const pollIntervalMs = 5000
 const systemUnderlay = (): WiFiCallingUnderlay => ({ mode: 'system' })
 
-export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onError }: Options) => {
+export const useModemWiFiCallingSettings = ({
+  modemId,
+  simId,
+  enabled,
+  onSuccess,
+  onError,
+}: Options) => {
   const { t } = useI18n()
   const modemApi = useModemApi()
 
-  const settingsWiFiCallingEnabled = ref(false)
-  const settingsWiFiCallingUnderlay = ref<WiFiCallingUnderlay>(systemUnderlay())
-  const confirmedWiFiCallingSettings = ref<WiFiCallingSettings>({
-    enabled: false,
-    underlay: systemUnderlay(),
-  })
+  const confirmedSettings = ref<WiFiCallingSettingsRequest>()
+  const pendingSettings = ref<WiFiCallingSettingsRequest>()
+  const currentSettings = computed(() => pendingSettings.value ?? confirmedSettings.value)
+  const hasWiFiCallingSettings = computed(() => confirmedSettings.value !== undefined)
+  const savedWiFiCallingProxyId = computed(() => confirmedSettings.value?.underlay.proxyId)
+  const settingsWiFiCallingEnabled = computed(() => currentSettings.value?.enabled ?? false)
+  const settingsWiFiCallingUnderlay = computed(
+    () => currentSettings.value?.underlay ?? systemUnderlay(),
+  )
   const settingsWiFiCallingConnected = ref(false)
   const settingsWiFiCallingState = ref('')
   const settingsWiFiCallingLastError = ref('')
@@ -43,21 +54,16 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
   const settingsWiFiCallingEmergencyAddressWebsheet = ref<CarrierWebsheetInfo | null>(null)
   const isWiFiCallingSettingsLoading = ref(false)
   const isWiFiCallingSettingsUpdating = ref(false)
-  const settingsRequestEpoch = ref(0)
+  let settingsRequestEpoch = 0
+  let settingsRead: { epoch: number; result: Promise<boolean> } | undefined
   const isWiFiCallingReconnecting = ref(false)
   const isWiFiCallingDisconnecting = ref(false)
   const isWiFiCallingWebsheetStarting = ref(false)
   const isWiFiCallingEmergencyAddressWebsheetStarting = ref(false)
-  const isWiFiCallingSettingsFetching = ref(false)
   const pollTimer = ref<number>()
   const durationTimer = ref<number>()
 
   const isWiFiCallingConnected = computed(() => settingsWiFiCallingConnected.value)
-
-  const advanceSettingsRequestEpoch = () => {
-    settingsRequestEpoch.value += 1
-    return settingsRequestEpoch.value
-  }
 
   const stopPolling = () => {
     if (pollTimer.value === undefined) return
@@ -91,9 +97,10 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
   const resetSettings = () => {
     stopPolling()
     stopDurationTimer()
-    settingsWiFiCallingEnabled.value = false
-    settingsWiFiCallingUnderlay.value = systemUnderlay()
-    confirmedWiFiCallingSettings.value = { enabled: false, underlay: systemUnderlay() }
+    confirmedSettings.value = undefined
+    pendingSettings.value = undefined
+    settingsRead = undefined
+    isWiFiCallingSettingsLoading.value = false
     settingsWiFiCallingConnected.value = false
     settingsWiFiCallingState.value = ''
     settingsWiFiCallingLastError.value = ''
@@ -103,83 +110,97 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
     settingsWiFiCallingEmergencyAddressWebsheet.value = null
   }
 
-  const fetchSettings = async (id: string, options?: FetchSettingsOptions) => {
-    if (!enabled.value || isWiFiCallingSettingsFetching.value) return
-    const requestEpoch = settingsRequestEpoch.value
-    const preserveSettings = isWiFiCallingSettingsUpdating.value
-    isWiFiCallingSettingsFetching.value = true
-    if (!options?.silent) {
-      isWiFiCallingSettingsLoading.value = true
-    }
-    try {
-      const { data } = await modemApi.getWiFiCallingSettings(id)
-      if (!enabled.value || modemId.value !== id) return
-      if (requestEpoch !== settingsRequestEpoch.value) return
-      const payload: WiFiCallingSettingsResponse | undefined = data.value
-      if (!preserveSettings || options?.applySettings) {
-        const settings = {
-          enabled: payload?.enabled ?? false,
-          underlay: payload?.underlay ?? systemUnderlay(),
+  const fetchSettings = (id: string, options?: FetchSettingsOptions): Promise<boolean> => {
+    if (!enabled.value || !id) return Promise.resolve(false)
+    const epoch = settingsRequestEpoch
+    if (settingsRead?.epoch === epoch && !options?.reconcile) return settingsRead.result
+
+    const applySettings = !isWiFiCallingSettingsUpdating.value || options?.reconcile
+    if (!options?.silent) isWiFiCallingSettingsLoading.value = true
+
+    const result = modemApi
+      .getWiFiCallingSettings(id, { quiet: options?.silent })
+      .then(({ data }) => {
+        if (
+          settingsRead?.result !== result ||
+          epoch !== settingsRequestEpoch ||
+          modemId.value !== id ||
+          !enabled.value
+        ) {
+          return false
         }
-        settingsWiFiCallingEnabled.value = settings.enabled
-        settingsWiFiCallingUnderlay.value = { ...settings.underlay }
-        confirmedWiFiCallingSettings.value = settings
-      }
-      settingsWiFiCallingConnected.value = data.value?.connected ?? false
-      settingsWiFiCallingState.value = data.value?.state ?? ''
-      settingsWiFiCallingLastError.value = payload?.lastError ?? ''
-      settingsWiFiCallingDurationSeconds.value = payload?.durationSeconds ?? 0
-      settingsWiFiCallingEmergencyAddressUpdateAvailable.value =
-        payload?.emergencyAddressUpdateAvailable ?? false
-    } finally {
-      if (!options?.silent) {
-        isWiFiCallingSettingsLoading.value = false
-      }
-      isWiFiCallingSettingsFetching.value = false
-    }
+        const payload: WiFiCallingSettingsResponse | undefined = data.value
+        if (!payload) return false
+        if (applySettings) {
+          confirmedSettings.value = {
+            enabled: payload.enabled,
+            underlay: payload.underlay ?? systemUnderlay(),
+          }
+        }
+        settingsWiFiCallingConnected.value = payload.connected ?? false
+        settingsWiFiCallingState.value = payload.state ?? ''
+        settingsWiFiCallingLastError.value = payload.lastError ?? ''
+        settingsWiFiCallingDurationSeconds.value = payload.durationSeconds ?? 0
+        settingsWiFiCallingEmergencyAddressUpdateAvailable.value =
+          payload.emergencyAddressUpdateAvailable ?? false
+        return true
+      })
+      .catch(() => false)
+      .finally(() => {
+        if (settingsRead?.result === result) {
+          settingsRead = undefined
+          isWiFiCallingSettingsLoading.value = false
+        }
+      })
+
+    settingsRead = { epoch, result }
+    return result
   }
 
   const updateWiFiCallingSettings = async (next: WiFiCallingSettings) => {
     const targetId = modemId.value
-    if (!enabled.value || !targetId) return
-    if (isWiFiCallingSettingsUpdating.value) return
-    const mutationEpoch = advanceSettingsRequestEpoch()
+    if (!enabled.value || !targetId || isWiFiCallingSettingsUpdating.value) return false
+    const epoch = ++settingsRequestEpoch
+    const isCurrent = () =>
+      enabled.value && modemId.value === targetId && settingsRequestEpoch === epoch
+    const settings = { enabled: next.enabled, underlay: next.underlay ?? systemUnderlay() }
     isWiFiCallingSettingsUpdating.value = true
-    const previous = {
-      enabled: confirmedWiFiCallingSettings.value.enabled,
-      underlay: { ...(confirmedWiFiCallingSettings.value.underlay ?? systemUnderlay()) },
-    }
-    const settings = {
-      enabled: next.enabled,
-      underlay: { ...(next.underlay ?? systemUnderlay()) },
-    }
-    settingsWiFiCallingEnabled.value = settings.enabled
-    settingsWiFiCallingUnderlay.value = { ...settings.underlay }
+    pendingSettings.value = settings
     try {
       await modemApi.updateWiFiCallingSettings(targetId, settings)
-      if (modemId.value !== targetId || settingsRequestEpoch.value !== mutationEpoch) return
-      confirmedWiFiCallingSettings.value = settings
-      await fetchSettings(targetId, { applySettings: true })
-      if (modemId.value !== targetId || settingsRequestEpoch.value !== mutationEpoch) return
+      if (!isCurrent()) return false
+      confirmedSettings.value = settings
+      pendingSettings.value = undefined
+      // The saved state is authoritative even if the status refresh needs a retry.
+      await fetchSettings(targetId, { silent: true, reconcile: true })
+      if (!isCurrent()) return false
       onSuccess?.(t('modemDetail.settings.wifiCallingSuccess'))
+      return true
     } catch (err) {
-      if (modemId.value !== targetId || settingsRequestEpoch.value !== mutationEpoch) return
-      settingsWiFiCallingEnabled.value = previous.enabled
-      settingsWiFiCallingUnderlay.value = { ...previous.underlay }
+      if (!isCurrent()) return false
       console.error('[useModemWiFiCallingSettings] Failed to update settings:', err)
       onError?.(t('modemDetail.settings.wifiCallingUpdateFailed'))
+      return false
     } finally {
-      if (settingsRequestEpoch.value === mutationEpoch) {
+      if (isCurrent()) {
+        pendingSettings.value = undefined
         isWiFiCallingSettingsUpdating.value = false
       }
     }
   }
 
-  const handleWiFiCallingUpdate = () =>
-    updateWiFiCallingSettings({
-      enabled: settingsWiFiCallingEnabled.value,
-      underlay: settingsWiFiCallingUnderlay.value,
-    })
+  const ensureWiFiCallingEnabled = async () => {
+    const id = modemId.value
+    const activeSIM = simId?.value
+    // Opening the shortcut can also start loading settings for this SIM.
+    await nextTick()
+    if (!enabled.value || id !== modemId.value || activeSIM !== simId?.value) return false
+    if (!confirmedSettings.value && !(await fetchSettings(id))) return false
+    const settings = confirmedSettings.value
+    return settings
+      ? settings.enabled || (await updateWiFiCallingSettings({ ...settings, enabled: true }))
+      : false
+  }
 
   const reconnectWiFiCalling = async () => {
     const targetId = modemId.value
@@ -274,16 +295,15 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
   }
 
   watch(
-    [modemId, enabled],
-    async ([id, canUseWiFiCalling]) => {
-      advanceSettingsRequestEpoch()
+    [modemId, enabled, () => simId?.value],
+    ([id, canUseWiFiCalling]) => {
+      settingsRequestEpoch += 1
       isWiFiCallingSettingsUpdating.value = false
       resetSettings()
       if (!canUseWiFiCalling || !id) {
         return
       }
-      await fetchSettings(id)
-      if (!enabled.value || modemId.value !== id) return
+      void fetchSettings(id)
       startPolling()
     },
     { immediate: true },
@@ -302,11 +322,15 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
   )
 
   onUnmounted(() => {
+    settingsRequestEpoch += 1
+    settingsRead = undefined
     stopPolling()
     stopDurationTimer()
   })
 
   return {
+    hasWiFiCallingSettings,
+    savedWiFiCallingProxyId,
     settingsWiFiCallingEnabled,
     settingsWiFiCallingUnderlay,
     settingsWiFiCallingConnected,
@@ -323,7 +347,7 @@ export const useModemWiFiCallingSettings = ({ modemId, enabled, onSuccess, onErr
     isWiFiCallingWebsheetStarting,
     isWiFiCallingEmergencyAddressWebsheetStarting,
     updateWiFiCallingSettings,
-    handleWiFiCallingUpdate,
+    ensureWiFiCallingEnabled,
     reconnectWiFiCalling,
     disconnectWiFiCalling,
     startWiFiCallingWebsheet,

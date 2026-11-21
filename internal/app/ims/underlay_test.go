@@ -22,6 +22,8 @@ func TestResolveWiFiCallingSettings(t *testing.T) {
 	}{
 		{name: "defaults to system", want: UnderlaySettings{Mode: UnderlayModeSystem}},
 		{name: "normalizes self", settings: WiFiCallingSettings{Underlay: UnderlaySettings{Mode: " SELF ", ModemID: "ignored"}}, want: UnderlaySettings{Mode: UnderlayModeSelf}},
+		{name: "normalizes SOCKS5 reference", settings: WiFiCallingSettings{Underlay: UnderlaySettings{Mode: " SOCKS5 ", ProxyID: " proxy-1 ", ModemID: "ignored"}}, want: UnderlaySettings{Mode: UnderlayModeSOCKS5, ProxyID: "proxy-1"}},
+		{name: "SOCKS5 requires a proxy id", settings: WiFiCallingSettings{Underlay: UnderlaySettings{Mode: UnderlayModeSOCKS5}}, wantErr: true},
 		{name: "keeps another modem", settings: WiFiCallingSettings{Underlay: UnderlaySettings{Mode: UnderlayModeModem, ModemID: " modem-2 "}}, want: UnderlaySettings{Mode: UnderlayModeModem, ModemID: "modem-2"}},
 		{name: "same modem becomes self", settings: WiFiCallingSettings{Underlay: UnderlaySettings{Mode: UnderlayModeModem, ModemID: "modem-1"}}, want: UnderlaySettings{Mode: UnderlayModeSelf}},
 		{name: "modem requires id", settings: WiFiCallingSettings{Underlay: UnderlaySettings{Mode: UnderlayModeModem}}, wantErr: true},
@@ -71,6 +73,95 @@ func TestWiFiCallingSettingsStoreUnderlay(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("Get() = %+v, want %+v", got, want)
+	}
+}
+
+func TestWiFiCallingProxyRouteSurvivesSwitchAndDisable(t *testing.T) {
+	ctx := t.Context()
+	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "sigmo.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	connectivity := NewConnectivity(ConnectivityConfig{Store: store})
+	c := connectivity.wifiCalling
+	first, err := c.wifiProxies.save(ctx, "", WiFiProxySettings{Name: "First", Host: "first.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := c.wifiProxies.save(ctx, "", WiFiProxySettings{Name: "Second", Host: "second.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, direct := range []DirectUnderlaySettings{
+		{Mode: UnderlayModeSystem},
+		{Mode: UnderlayModeSelf},
+		{Mode: UnderlayModeModem, ModemID: "uplink-2"},
+	} {
+		t.Run(string(direct.Mode), func(t *testing.T) {
+			ctx := t.Context()
+			profileID := "profile-" + string(direct.Mode)
+			modem := &mmodem.Modem{EquipmentIdentifier: "modem-1", SIM: &mmodem.SIM{Identifier: profileID}}
+			update := func(underlay UnderlaySettings) {
+				t.Helper()
+				err := connectivity.ReplaceWiFiCallingSettings(ctx, modem, WiFiCallingSettings{Underlay: underlay})
+				if err != nil {
+					t.Fatalf("write underlay %+v: %v", underlay, err)
+				}
+			}
+			read := func(want UnderlaySettings) {
+				t.Helper()
+				settings, err := newWiFiCallingSettingsStore(store).Get(ctx, profileID)
+				if err != nil || settings.Underlay != want {
+					t.Fatalf("read saved underlay = %+v, %v, want %+v", settings.Underlay, err, want)
+				}
+			}
+
+			update(UnderlaySettings{Mode: direct.Mode, ModemID: direct.ModemID})
+			read(UnderlaySettings{Mode: direct.Mode, ModemID: direct.ModemID})
+
+			update(UnderlaySettings{Mode: UnderlayModeSOCKS5, ProxyID: first.ID})
+			read(UnderlaySettings{Mode: UnderlayModeSOCKS5, ProxyID: first.ID, DirectUnderlay: direct})
+			err := connectivity.ReplaceWiFiCallingSettings(ctx, modem, WiFiCallingSettings{
+				Underlay: UnderlaySettings{Mode: UnderlayModeSOCKS5, ProxyID: "missing"},
+			})
+			if !errors.Is(err, ErrInvalidWiFiCallingUnderlay) {
+				t.Fatalf("switch to missing proxy: %v", err)
+			}
+			read(UnderlaySettings{Mode: UnderlayModeSOCKS5, ProxyID: first.ID, DirectUnderlay: direct})
+			update(UnderlaySettings{Mode: UnderlayModeSOCKS5, ProxyID: second.ID})
+			read(UnderlaySettings{Mode: UnderlayModeSOCKS5, ProxyID: second.ID, DirectUnderlay: direct})
+
+			update(UnderlaySettings{Mode: direct.Mode, ModemID: direct.ModemID})
+			read(UnderlaySettings{Mode: direct.Mode, ModemID: direct.ModemID, ProxyID: second.ID})
+		})
+	}
+
+	legacy := &mmodem.Modem{EquipmentIdentifier: "modem-1", SIM: &mmodem.SIM{Identifier: "legacy"}}
+	legacyRecord := wifiCallingSettingsRecord{Underlay: UnderlaySettings{Mode: UnderlayModeSOCKS5, ProxyID: first.ID}}
+	if err := store.Put(ctx, "profile:legacy", keyWiFiCallingSettings, legacyRecord); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := c.WiFiCallingSettings(ctx, legacy)
+	if err != nil || settings.Underlay != legacyRecord.Underlay {
+		t.Fatalf("read legacy proxy = %+v, %v", settings, err)
+	}
+	if err := connectivity.ReplaceWiFiCallingSettings(ctx, legacy, WiFiCallingSettings{
+		Underlay: UnderlaySettings{Mode: UnderlayModeSystem},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	settings, err = c.WiFiCallingSettings(ctx, legacy)
+	if err != nil || settings.Underlay != (UnderlaySettings{Mode: UnderlayModeSystem, ProxyID: first.ID}) {
+		t.Fatalf("read disabled legacy proxy = %+v, %v", settings, err)
+	}
+	if underlay, err := c.wifiCallingUnderlay(ctx, legacy, settings); underlay != nil || err != nil {
+		t.Fatalf("remembered proxy selected as effective network: %v, %v", underlay, err)
 	}
 }
 

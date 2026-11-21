@@ -10,7 +10,9 @@ import { FEATURE, useCapabilities } from '@/composables/useCapabilities'
 import { useFeedbackBanner } from '@/composables/useFeedbackBanner'
 import { useModemWiFiCallingSettings } from '@/composables/useModemWiFiCallingSettings'
 import { useModems } from '@/composables/useModems'
+import type { WiFiCallingUnderlay, WiFiDirectUnderlay } from '@/types/modem'
 import WiFiCallingEmergencyAddressPanel from '@/views/modem-settings/WiFiCallingEmergencyAddressPanel.vue'
+import WiFiCallingProxyPanel from '@/views/modem-settings/WiFiCallingProxyPanel.vue'
 import WiFiCallingSettingsPanel from '@/views/modem-settings/WiFiCallingSettingsPanel.vue'
 import WiFiCallingStatusPanel from '@/views/modem-settings/WiFiCallingStatusPanel.vue'
 
@@ -23,8 +25,13 @@ const { hasFeature } = useCapabilities()
 const canUseWiFiCalling = computed(() => hasFeature(FEATURE.wifiCalling))
 const { modems, fetchModems } = useModems()
 void fetchModems()
+const simId = computed(
+  () => modems.value.find((modem) => modem.id === modemId.value)?.sim?.identifier,
+)
 
 const {
+  hasWiFiCallingSettings,
+  savedWiFiCallingProxyId,
   settingsWiFiCallingEnabled,
   settingsWiFiCallingUnderlay,
   settingsWiFiCallingConnected,
@@ -47,10 +54,24 @@ const {
   completeWiFiCallingEmergencyAddressWebsheet,
 } = useModemWiFiCallingSettings({
   modemId,
+  simId,
   enabled: canUseWiFiCalling,
   onSuccess: showFeedback,
   onError: showError,
 })
+
+const updateWiFiCallingProxy = (proxyId: string | null) => {
+  const current = settingsWiFiCallingUnderlay.value
+  const directUnderlay: WiFiDirectUnderlay =
+    current.mode === 'socks5'
+      ? (current.directUnderlay ?? { mode: 'system' })
+      : { mode: current.mode, modemId: current.modemId }
+  const underlay: WiFiCallingUnderlay = proxyId
+    ? { mode: 'socks5', proxyId, directUnderlay }
+    : { ...directUnderlay, proxyId: current.proxyId }
+
+  return updateWiFiCallingSettings({ enabled: settingsWiFiCallingEnabled.value, underlay })
+}
 
 const closeWiFiCallingWebsheet = () => {
   settingsWiFiCallingWebsheet.value = null
@@ -87,13 +108,22 @@ const closeWiFiCallingEmergencyAddressWebsheet = () => {
         :underlay="settingsWiFiCallingUnderlay"
         :modems="modems"
         :modem-id="modemId"
-        :is-loading="isWiFiCallingSettingsLoading"
+        :is-loading="!hasWiFiCallingSettings || isWiFiCallingSettingsLoading"
         :is-updating="isWiFiCallingSettingsUpdating"
         :is-websheet-starting="isWiFiCallingWebsheetStarting"
         :state="settingsWiFiCallingState"
         :websheet="settingsWiFiCallingWebsheet"
         @update="updateWiFiCallingSettings"
         @start-websheet="startWiFiCallingWebsheet"
+      />
+
+      <WiFiCallingProxyPanel
+        :key="`${modemId}:${simId ?? ''}`"
+        :modem-id="modemId"
+        :saved-proxy-id="savedWiFiCallingProxyId"
+        :using-proxy="settingsWiFiCallingUnderlay.mode === 'socks5'"
+        :disabled="!hasWiFiCallingSettings || isWiFiCallingSettingsUpdating"
+        @update-proxy="updateWiFiCallingProxy"
       />
 
       <WiFiCallingEmergencyAddressPanel

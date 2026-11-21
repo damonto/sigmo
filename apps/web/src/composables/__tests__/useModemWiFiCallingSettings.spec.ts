@@ -24,7 +24,7 @@ vi.mock('@/apis/modem', () => ({
 
 describe('useModemWiFiCallingSettings', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     api.getWiFiCallingSettings.mockResolvedValue({
       data: {
         value: {
@@ -202,6 +202,99 @@ describe('useModemWiFiCallingSettings', () => {
     consoleError.mockRestore()
   })
 
+  it('keeps the proxy on if restoring the direct uplink fails', async () => {
+    const loggedError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const directUnderlay = { mode: 'modem', modemId: 'uplink-1' } as const
+    const active = { mode: 'socks5', proxyId: 'p-1', directUnderlay } as const
+    api.getWiFiCallingSettings.mockResolvedValueOnce({
+      data: { value: { enabled: true, underlay: active } },
+    })
+    api.updateWiFiCallingSettings.mockRejectedValueOnce(new Error('offline'))
+    const settings = useModemWiFiCallingSettings({
+      modemId: computed(() => 'modem-1'),
+      enabled: computed(() => true),
+    })
+    await vi.waitFor(() => expect(settings.settingsWiFiCallingUnderlay.value).toEqual(active))
+
+    await settings.updateWiFiCallingSettings({
+      enabled: true,
+      underlay: { ...directUnderlay, proxyId: 'p-1' },
+    })
+
+    expect(settings.settingsWiFiCallingUnderlay.value).toEqual(active)
+    loggedError.mockRestore()
+  })
+
+  it('keeps a committed proxy setting when the readback fails', async () => {
+    const onSuccess = vi.fn()
+    const onError = vi.fn()
+    const settings = useModemWiFiCallingSettings({
+      modemId: computed(() => 'modem-1'),
+      enabled: computed(() => true),
+      onSuccess,
+      onError,
+    })
+    await vi.waitFor(() => expect(settings.hasWiFiCallingSettings.value).toBe(true))
+
+    api.getWiFiCallingSettings.mockRejectedValueOnce(new Error('status refresh failed'))
+    const underlay = { mode: 'socks5', proxyId: 'p-1' } as const
+    expect(await settings.updateWiFiCallingSettings({ enabled: true, underlay })).toBe(true)
+
+    expect(settings.settingsWiFiCallingUnderlay.value).toEqual(underlay)
+    expect(settings.savedWiFiCallingProxyId.value).toBe('p-1')
+    expect(onSuccess).toHaveBeenCalledOnce()
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it('waits for a disabled SIM’s saved proxy before enabling it from a shortcut', async () => {
+    const enabled = ref(false)
+    const settings = useModemWiFiCallingSettings({
+      modemId: computed(() => 'modem-1'),
+      enabled: computed(() => enabled.value),
+    })
+    const underlay = { mode: 'socks5', proxyId: 'p-1', directUnderlay: { mode: 'self' } } as const
+    const readback = { data: { value: { enabled: true, underlay } } }
+    api.getWiFiCallingSettings.mockResolvedValueOnce({
+      data: { value: { enabled: false, underlay } },
+    })
+    api.getWiFiCallingSettings.mockResolvedValueOnce(readback)
+
+    enabled.value = true
+    expect(await settings.ensureWiFiCallingEnabled()).toBe(true)
+
+    expect(api.updateWiFiCallingSettings).toHaveBeenCalledExactlyOnceWith('modem-1', {
+      enabled: true,
+      underlay,
+    })
+    expect(settings.settingsWiFiCallingUnderlay.value).toEqual(underlay)
+  })
+
+  it('loads the next SIM while the previous SIM’s request is pending', async () => {
+    let resolvePrevious: ((value: { data: { value: { enabled: boolean } } }) => void) | undefined
+    const initialRead = new Promise<{ data: { value: { enabled: boolean } } }>((resolve) => {
+      resolvePrevious = resolve
+    })
+    api.getWiFiCallingSettings.mockReturnValueOnce(initialRead)
+    const simId = ref('sim-1')
+    const settings = useModemWiFiCallingSettings({
+      modemId: computed(() => 'modem-1'),
+      simId: computed(() => simId.value),
+      enabled: computed(() => true),
+    })
+    await vi.waitFor(() => expect(api.getWiFiCallingSettings).toHaveBeenCalledTimes(1))
+    simId.value = 'sim-2'
+    await vi.waitFor(() => expect(settings.hasWiFiCallingSettings.value).toBe(true))
+    expect(api.getWiFiCallingSettings).toHaveBeenCalledTimes(2)
+
+    resolvePrevious?.({ data: { value: { enabled: false } } })
+    await initialRead
+    expect(settings.settingsWiFiCallingEnabled.value).toBe(true)
+    expect(settings.settingsWiFiCallingUnderlay.value).toEqual({
+      mode: 'modem',
+      modemId: 'uplink-1',
+    })
+  })
+
   it('discards a settings response started before automatic saving', async () => {
     let resolveFetch:
       ((value: { data: { value: { enabled: boolean; connected: boolean } } }) => void) | undefined
@@ -216,6 +309,9 @@ describe('useModemWiFiCallingSettings', () => {
     })
     await vi.waitFor(() => expect(api.getWiFiCallingSettings).toHaveBeenCalledTimes(1))
 
+    api.getWiFiCallingSettings.mockResolvedValueOnce({
+      data: { value: { enabled: true, connected: false } },
+    })
     await settings.updateWiFiCallingSettings({ enabled: true })
     resolveFetch?.({
       data: { value: { enabled: false, connected: false } },

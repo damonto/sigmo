@@ -31,7 +31,7 @@ const detailHarness = vi.hoisted(() => ({
   handleMsisdnUpdate: vi.fn(),
   handleInternetConnect: vi.fn(),
   handleInternetDisconnect: vi.fn(),
-  handleWiFiCallingUpdate: vi.fn(),
+  ensureWiFiCallingEnabled: vi.fn(),
   reconnectWiFiCalling: vi.fn(),
   disconnectWiFiCalling: vi.fn(),
   wifiCallingFeature: false,
@@ -227,7 +227,7 @@ vi.mock('@/composables/useModemWiFiCallingSettings', async () => {
         isWiFiCallingSettingsUpdating: ref(false),
         isWiFiCallingReconnecting: ref(false),
         isWiFiCallingDisconnecting: ref(false),
-        handleWiFiCallingUpdate: detailHarness.handleWiFiCallingUpdate,
+        ensureWiFiCallingEnabled: detailHarness.ensureWiFiCallingEnabled,
         reconnectWiFiCalling: detailHarness.reconnectWiFiCalling,
         disconnectWiFiCalling: detailHarness.disconnectWiFiCalling,
       }
@@ -395,7 +395,7 @@ describe('ModemDetailView SIM PIN unlock', () => {
     detailHarness.handleMsisdnUpdate.mockResolvedValue(true)
     detailHarness.handleInternetConnect.mockResolvedValue(undefined)
     detailHarness.handleInternetDisconnect.mockResolvedValue(undefined)
-    detailHarness.handleWiFiCallingUpdate.mockResolvedValue(undefined)
+    detailHarness.ensureWiFiCallingEnabled.mockResolvedValue(true)
     detailHarness.reconnectWiFiCalling.mockResolvedValue(undefined)
     detailHarness.disconnectWiFiCalling.mockResolvedValue(undefined)
     detailHarness.wifiCallingFeature = false

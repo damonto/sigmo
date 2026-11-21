@@ -58,11 +58,12 @@ export const useEsimProfileQuickActions = ({
     isWiFiCallingSettingsUpdating,
     isWiFiCallingReconnecting,
     isWiFiCallingDisconnecting,
-    handleWiFiCallingUpdate,
+    ensureWiFiCallingEnabled,
     reconnectWiFiCalling,
     disconnectWiFiCalling,
   } = useModemWiFiCallingSettings({
     modemId,
+    simId: computed(() => modem.value?.sim?.identifier),
     enabled: shouldLoadWiFiCallingSettings,
     onSuccess,
   })
@@ -125,11 +126,7 @@ export const useEsimProfileQuickActions = ({
         await disconnectWiFiCalling()
         return
       }
-      if (!settingsWiFiCallingEnabled.value) {
-        settingsWiFiCallingEnabled.value = true
-        await handleWiFiCallingUpdate()
-      }
-      await reconnectWiFiCalling()
+      if (await ensureWiFiCallingEnabled()) await reconnectWiFiCalling()
     } finally {
       isWiFiCallingQuickActionRunning.value = false
     }

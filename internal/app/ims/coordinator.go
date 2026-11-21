@@ -44,6 +44,7 @@ type airplaneModePreferences interface {
 type coordinator struct {
 	carrierConfig       func(context.Context) (*carrierconfig.Config, error)
 	wifiCallingSettings *wifiCallingSettingsStore
+	wifiProxies         *wifiProxyCatalog
 	volteSettings       volteSettingsPersistence
 	store               *storage.Store
 	onIncoming          IncomingSMSFunc
@@ -115,6 +116,7 @@ func newCoordinator(cfg coordinatorConfig) *coordinator {
 	}
 	return &coordinator{
 		wifiCallingSettings: newWiFiCallingSettingsStore(cfg.Store),
+		wifiProxies:         &wifiProxyCatalog{store: cfg.Store},
 		volteSettings:       newVoLTESettingsStore(cfg.Store),
 		store:               cfg.Store,
 		carrierConfig:       cfg.CarrierConfig,
@@ -398,6 +400,19 @@ func (c *coordinator) UpdateWiFiCallingSettings(ctx context.Context, modem *mmod
 	if err != nil {
 		return err
 	}
+	if settings.Underlay.Mode == UnderlayModeSOCKS5 {
+		if _, err := c.wifiProxies.get(ctx, settings.Underlay.ProxyID); err != nil {
+			if errors.Is(err, errWiFiProxyNotFound) {
+				return errors.Join(ErrInvalidWiFiCallingUnderlay, err)
+			}
+			return err
+		}
+	}
+	current, err := c.wifiCallingSettings.Get(ctx, profileID)
+	if err != nil {
+		return err
+	}
+	settings.Underlay = settings.Underlay.withSavedRoute(current.Underlay)
 	if err := c.wifiCallingSettings.Put(ctx, profileID, settings); err != nil {
 		return err
 	}

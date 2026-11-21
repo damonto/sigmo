@@ -327,6 +327,10 @@ func IMSRoutes(connectivity *ims.Connectivity) Extension {
 	return func(group *echo.Group, deps RegisterConfig) error {
 		licensed := group.Group("", appmiddleware.RequireFeature(deps.Policy, feature.WiFiCalling))
 		h := ims.NewHandler(deps.Registry, connectivity)
+		licensed.GET("/wifi-calling/proxies", h.ListWiFiProxies)
+		licensed.POST("/wifi-calling/proxies", h.CreateWiFiProxy)
+		licensed.PUT("/wifi-calling/proxies/:proxyId", h.UpdateWiFiProxy)
+		licensed.POST("/modems/:id/wifi-calling/connectivity-checks", h.CheckWiFiProxy)
 		licensed.GET("/modems/:id/wifi-calling/settings", h.WiFiCallingSettings)
 		licensed.PUT("/modems/:id/wifi-calling/settings", h.UpdateWiFiCallingSettings)
 		licensed.POST("/modems/:id/wifi-calling/sessions", h.CreateWiFiCallingSession)

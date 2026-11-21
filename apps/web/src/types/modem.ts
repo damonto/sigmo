@@ -60,11 +60,47 @@ export type ModemSettings = {
 
 export type ModemSettingsResponse = ModemSettings
 
-export type WiFiCallingUnderlayMode = 'system' | 'self' | 'modem'
+export type WiFiCallingUnderlayMode = 'system' | 'self' | 'modem' | 'socks5'
+
+export type WiFiDirectUnderlay = {
+  mode: Exclude<WiFiCallingUnderlayMode, 'socks5'>
+  modemId?: string
+}
 
 export type WiFiCallingUnderlay = {
   mode: WiFiCallingUnderlayMode
   modemId?: string
+  proxyId?: string
+  directUnderlay?: WiFiDirectUnderlay
+}
+
+export type WiFiProxySettings = {
+  name: string
+  host: string
+  port: number
+  username: string
+  password: string
+}
+
+export type WiFiProxy = Omit<WiFiProxySettings, 'password'> & {
+  id: string
+  hasPassword: boolean
+}
+
+export type WiFiProxyCheckStep = {
+  durationMs: number
+  errorCode?: string
+  serverAddress?: string
+  relayAddress?: string
+  ip?: string
+  port?: number
+  addresses?: string[]
+}
+
+export type WiFiProxyCheck = {
+  tcp: WiFiProxyCheckStep
+  udp: WiFiProxyCheckStep
+  dns: WiFiProxyCheckStep
 }
 
 export type WiFiCallingSettings = {

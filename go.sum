@@ -133,6 +133,7 @@ go.uber.org/multierr v1.11.0/go.mod h1:20+QtiLqy0Nd6FdQB9TLXag12DsQkrbs3htMFfDN8
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=
 go.yaml.in/yaml/v3 v3.0.5/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=
 go.yaml.in/yaml/v3 v3.0.6 h1:zcDfvjXEqTQmpjniUBLc91xYJMB2c4QOFxEF/LCEckM=
+go.yaml.in/yaml/v3 v3.0.6/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=
 golang.org/x/crypto v0.58.0 h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=
 golang.org/x/crypto v0.58.0/go.mod h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=
 golang.org/x/crypto v0.59.0 h1:xS2jhqYbzNrpvkWP2YTDf4TJwBy3ykR03i8vFDxEc7c=
@@ -160,6 +161,7 @@ google.golang.org/protobuf v1.36.12/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j
 modernc.org/libc v1.78.0 h1:Lpm+e9K6ruVYEGwWfuBO1xXtYEaXDouFOG1SuWjFDP4=
 modernc.org/libc v1.78.0/go.mod h1:wvxR55nOF2/66NkJoNV7/coXBTCvT3HR22rcqW6lOuA=
 modernc.org/libc v1.80.2 h1:3+a4fJZvvzg920ZC0mOepnKPGn7cqCaVeDxm/UnrM1A=
+modernc.org/libc v1.80.2/go.mod h1:pvo25Rs3OJEbDqhUV9jdEGevxeLJrJeDmNid/AcQV1g=
 modernc.org/mathutil v1.7.1 h1:GCZVGXdaN8gTqB1Mf/usp1Y/hSqgI2vAGGP4jZMCxOU=
 modernc.org/mathutil v1.7.1/go.mod h1:4p5IwJITfppl0G4sUEDtCr4DthTaT47/N3aT6MhfgJg=
 modernc.org/memory v1.12.1 h1:nFMiWrpStgZczNl6XI9GnIk/rWhYIyHGUaR04pGbp9g=
@@ -167,3 +169,4 @@ modernc.org/memory v1.12.1/go.mod h1:/JP4VbVC+K5sU2wZi9bHoq2MAkCnrt2r98UGeSK7Mjw
 modernc.org/sqlite v1.60.1 h1:/blz53O951KWFOso4QQvEs/Fq6cDBKLtMVrYNSeJVKw=
 modernc.org/sqlite v1.60.1/go.mod h1:1dIoEagfDE72QytD5scH1lxARtaUgKgHC/NuApA27r0=
 modernc.org/sqlite v1.62.0 h1:gMaCjSM1qpl+iOjiWhR1LYP3zqrYDI+5GYLGt6veP2g=
+modernc.org/sqlite v1.62.0/go.mod h1:Jzjh1mt4s0HuQ0KvtB1LIuHiGRmU2D5pgj8dUhW7/SE=

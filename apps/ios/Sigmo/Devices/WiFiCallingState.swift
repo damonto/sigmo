@@ -38,22 +38,38 @@ final class WiFiCallingState {
     var busy: Bool { updating || scope.detail.busy || sendingCallback }
     var canChange: Bool { scope.available && settings != nil && loadFailure == nil && !busy }
     var setupRequired: Bool { settings?.state == "websheet_required" || settings?.websheet != nil }
+    var usesProxy: Bool { settings?.underlay.mode == "socks5" }
+    var directUplink: WiFiDirectUnderlay {
+        guard let underlay = settings?.underlay else { return .init(mode: "system") }
+        if usesProxy { return underlay.directUnderlay ?? .init(mode: "system") }
+        return .init(mode: underlay.mode, modemId: underlay.modemId)
+    }
+
+    func isDirectUplink(_ underlay: WiFiUnderlay) -> Bool {
+        directUplink == WiFiDirectUnderlay(mode: underlay.mode, modemId: underlay.modemId)
+    }
+
     var uplinks: [WiFiUplink] {
         var options = [WiFiUplink(underlay: .system, name: String(localized: "connection.systemNetwork"), available: true)]
         let modem = scope.detail.modem
-        if modem?.internetConnected == true || settings?.underlay.mode == "self" {
+        if modem?.internetConnected == true || directUplink.mode == "self" {
             options.append(.init(underlay: .current, name: String(localized: "connection.currentDevice"), available: modem?.internetConnected == true))
         }
         for modem in scope.detail.session.modems where modem.id != scope.modemID && modem.internetConnected == true {
             options.append(.init(underlay: .init(mode: "modem", modemId: modem.id), name: modem.displayName, available: true))
         }
-        if let selected = settings?.underlay, !options.contains(where: { $0.underlay == selected }) {
+        if !options.contains(where: { isDirectUplink($0.underlay) }) {
+            let selected = WiFiUnderlay(mode: directUplink.mode, modemId: directUplink.modemId)
             let name = scope.detail.session.modems.first { $0.id == selected.modemId }?.displayName ?? selected.modemId ?? selected.mode
             options.append(.init(underlay: selected, name: name, available: false))
         }
         return options
     }
-    var uplinkName: String { uplinks.first { $0.underlay == settings?.underlay }?.name ?? String(localized: "common.unknown") }
+    var uplinkName: String {
+        if usesProxy { return String(localized: "connection.wifiProxy.title") }
+        guard settings != nil else { return String(localized: "common.unknown") }
+        return uplinks.first { isDirectUplink($0.underlay) }?.name ?? String(localized: "common.unknown")
+    }
 
     func load(reconciling: Bool = false, refreshModem: Bool = true) async {
         clearIfUnavailable()
@@ -109,8 +125,23 @@ final class WiFiCallingState {
     }
 
     func selectUplink(_ underlay: WiFiUnderlay) async {
-        guard canChange, let settings, settings.underlay != underlay,
+        guard canChange, let settings, !usesProxy, !isDirectUplink(underlay),
               uplinks.contains(where: { $0.available && $0.underlay == underlay }) else { return }
+        var selection = underlay
+        selection.proxyId = settings.underlay.proxyId
+        await update(.init(enabled: settings.enabled, underlay: selection))
+    }
+
+    func selectProxy(_ id: String?) async {
+        guard canChange, let settings else { return }
+        let underlay: WiFiUnderlay
+        if let id {
+            guard !usesProxy || settings.underlay.proxyId != id else { return }
+            underlay = WiFiUnderlay(mode: "socks5", proxyId: id, directUnderlay: directUplink)
+        } else {
+            guard usesProxy else { return }
+            underlay = WiFiUnderlay(mode: directUplink.mode, modemId: directUplink.modemId, proxyId: settings.underlay.proxyId)
+        }
         await update(.init(enabled: settings.enabled, underlay: underlay))
     }
 

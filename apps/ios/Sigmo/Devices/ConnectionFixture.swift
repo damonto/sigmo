@@ -90,6 +90,10 @@ struct ConnectionFixture: Sendable {
         case ("GET", "/internet-connections/public"):
             guard internet.connected else { return error("internet_connection_not_connected", status: 409) }
             return try reply(InternetPublicInfo(ip: "203.0.113.\(internet.bearer)", country: "GB", organization: "Fixture Mobile Network"))
+        case ("POST", "/wifi-calling/connectivity-checks"):
+            let input = try JSONDecoder().decode([String: String].self, from: data)
+            guard input["proxyId"] == "fixture-proxy" else { return error("resource_not_found", status: 404) }
+            return BackendHTTPResponse(data: Data(#"{"tcp":{"ip":"203.0.113.4"},"udp":{"ip":"2001:db8::4","port":40300},"dns":{"addresses":["192.0.2.1"]}}"#.utf8), status: 200)
         case ("GET", "/wifi-calling/settings"):
             if wifi.state == "connecting", wifiPendingReads > 0 {
                 let response = try reply(wifi)
@@ -101,8 +105,18 @@ struct ConnectionFixture: Sendable {
         case ("PUT", "/wifi-calling/settings"):
             struct Submission: Decodable { let enabled: Bool; let underlay: WiFiUnderlay }
             let settings = try JSONDecoder().decode(Submission.self, from: data)
+            let previous = wifi.underlay
+            var selection = settings.underlay
+            if selection.mode == "socks5" {
+                selection.directUnderlay = previous.mode == "socks5"
+                    ? previous.directUnderlay ?? .init(mode: "system")
+                    : .init(mode: previous.mode, modemId: previous.modemId)
+            } else {
+                selection.directUnderlay = nil
+                selection.proxyId = selection.proxyId ?? previous.proxyId
+            }
             wifi.enabled = settings.enabled
-            wifi.underlay = settings.underlay
+            wifi.underlay = selection
             updateWiFi(modemID: modemID)
         case ("POST", "/wifi-calling/sessions"):
             guard wifi.enabled else { return error("ims_session_unavailable", status: 400) }

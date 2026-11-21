@@ -53,6 +53,7 @@ const (
 	UnderlayModeSystem UnderlayMode = "system"
 	UnderlayModeSelf   UnderlayMode = "self"
 	UnderlayModeModem  UnderlayMode = "modem"
+	UnderlayModeSOCKS5 UnderlayMode = "socks5"
 )
 
 var (
@@ -79,32 +80,83 @@ type WiFiCallingSettings struct {
 }
 
 type UnderlaySettings struct {
-	Mode    UnderlayMode `json:"mode" jsonschema:"outer network used by Wi-Fi Calling: system, self, or modem"`
+	Mode           UnderlayMode           `json:"mode" jsonschema:"outer network used by Wi-Fi Calling: system, self, modem, or socks5"`
+	ModemID        string                 `json:"modemId,omitempty" jsonschema:"stable modem identifier used when mode is modem"`
+	ProxyID        string                 `json:"proxyId,omitempty" jsonschema:"active SOCKS5 proxy or remembered proxy when using a direct network"`
+	DirectUnderlay DirectUnderlaySettings `json:"directUnderlay,omitzero" jsonschema:"direct network to restore when turning off SOCKS5"`
+}
+
+// DirectUnderlaySettings identifies a Wi-Fi Calling network that can be restored after using a proxy.
+type DirectUnderlaySettings struct {
+	Mode    UnderlayMode `json:"mode" jsonschema:"direct network: system, self, or modem"`
 	ModemID string       `json:"modemId,omitempty" jsonschema:"stable modem identifier used when mode is modem"`
 }
 
-func ResolveWiFiCallingSettings(modem *mmodem.Modem, settings WiFiCallingSettings) (WiFiCallingSettings, error) {
-	mode := UnderlayMode(strings.ToLower(strings.TrimSpace(string(settings.Underlay.Mode))))
-	if mode == "" {
-		mode = UnderlayModeSystem
+func (u UnderlaySettings) withSavedRoute(previous UnderlaySettings) UnderlaySettings {
+	if u.Mode != UnderlayModeSOCKS5 {
+		if u.ProxyID == "" {
+			u.ProxyID = previous.ProxyID
+		}
+		return u
 	}
-	modemID := strings.TrimSpace(settings.Underlay.ModemID)
+	if previous.Mode == UnderlayModeSOCKS5 {
+		u.DirectUnderlay = previous.DirectUnderlay
+	} else {
+		u.DirectUnderlay = DirectUnderlaySettings{Mode: previous.Mode, ModemID: previous.ModemID}
+	}
+	if u.DirectUnderlay.Mode == "" {
+		u.DirectUnderlay.Mode = UnderlayModeSystem
+	}
+	return u
+}
+
+func ResolveWiFiCallingSettings(modem *mmodem.Modem, settings WiFiCallingSettings) (WiFiCallingSettings, error) {
+	underlay := settings.Underlay
+	underlay.Mode = UnderlayMode(strings.ToLower(strings.TrimSpace(string(underlay.Mode))))
+	underlay.ProxyID = strings.TrimSpace(underlay.ProxyID)
+	if underlay.Mode == UnderlayModeSOCKS5 {
+		if underlay.ProxyID == "" {
+			return WiFiCallingSettings{}, fmt.Errorf("%w: proxy id is required for socks5 mode", ErrInvalidWiFiCallingUnderlay)
+		}
+		underlay.ModemID = ""
+		if underlay.DirectUnderlay != (DirectUnderlaySettings{}) {
+			direct, err := resolveDirectUnderlay(modem, underlay.DirectUnderlay)
+			if err != nil {
+				return WiFiCallingSettings{}, err
+			}
+			underlay.DirectUnderlay = direct
+		}
+	} else {
+		direct, err := resolveDirectUnderlay(modem, DirectUnderlaySettings{Mode: underlay.Mode, ModemID: underlay.ModemID})
+		if err != nil {
+			return WiFiCallingSettings{}, err
+		}
+		underlay.Mode, underlay.ModemID = direct.Mode, direct.ModemID
+		underlay.DirectUnderlay = DirectUnderlaySettings{}
+	}
+	settings.Underlay = underlay
+	return settings, nil
+}
+
+func resolveDirectUnderlay(modem *mmodem.Modem, direct DirectUnderlaySettings) (DirectUnderlaySettings, error) {
+	mode := UnderlayMode(strings.ToLower(strings.TrimSpace(string(direct.Mode))))
 	switch mode {
-	case UnderlayModeSystem, UnderlayModeSelf:
-		modemID = ""
+	case "", UnderlayModeSystem:
+		return DirectUnderlaySettings{Mode: UnderlayModeSystem}, nil
+	case UnderlayModeSelf:
+		return DirectUnderlaySettings{Mode: UnderlayModeSelf}, nil
 	case UnderlayModeModem:
+		modemID := strings.TrimSpace(direct.ModemID)
 		if modemID == "" {
-			return WiFiCallingSettings{}, fmt.Errorf("%w: modem id is required for modem mode", ErrInvalidWiFiCallingUnderlay)
+			return DirectUnderlaySettings{}, fmt.Errorf("%w: modem id is required for modem mode", ErrInvalidWiFiCallingUnderlay)
 		}
 		if modem != nil && modemID == strings.TrimSpace(modem.EquipmentIdentifier) {
-			mode = UnderlayModeSelf
-			modemID = ""
+			return DirectUnderlaySettings{Mode: UnderlayModeSelf}, nil
 		}
+		return DirectUnderlaySettings{Mode: mode, ModemID: modemID}, nil
 	default:
-		return WiFiCallingSettings{}, fmt.Errorf("%w: unsupported mode %q", ErrInvalidWiFiCallingUnderlay, mode)
+		return DirectUnderlaySettings{}, fmt.Errorf("%w: unsupported direct network mode %q", ErrInvalidWiFiCallingUnderlay, mode)
 	}
-	settings.Underlay = UnderlaySettings{Mode: mode, ModemID: modemID}
-	return settings, nil
 }
 
 type VoLTESettings struct {

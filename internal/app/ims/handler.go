@@ -16,6 +16,7 @@ import (
 type Handler struct {
 	registry     modemFinder
 	connectivity connectivityHTTP
+	proxies      *wifiProxyCatalog
 }
 
 type modemFinder interface {
@@ -75,7 +76,11 @@ type VoLTESettingsResponse struct {
 
 // NewHandler creates HTTP handlers for managed IMS connectivity.
 func NewHandler(registry *mmodem.Registry, connectivity *Connectivity) *Handler {
-	return &Handler{registry: registry, connectivity: connectivity}
+	handler := &Handler{registry: registry, connectivity: connectivity}
+	if connectivity != nil && connectivity.wifiCalling != nil {
+		handler.proxies = connectivity.wifiCalling.wifiProxies
+	}
+	return handler
 }
 
 func ReadWiFiCallingSettings(ctx context.Context, modem *mmodem.Modem, connectivity wifiCallingStatusReader) (WiFiCallingSettingsResponse, error) {

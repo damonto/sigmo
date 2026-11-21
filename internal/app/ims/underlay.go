@@ -32,6 +32,12 @@ func (c *coordinator) wifiCallingUnderlay(ctx context.Context, modem *mmodem.Mod
 		return nil, nil
 	case UnderlayModeSelf:
 		return newModemUnderlay(ctx, c.internet, modem)
+	case UnderlayModeSOCKS5:
+		proxy, err := c.wifiProxies.get(ctx, settings.Underlay.ProxyID)
+		if err != nil {
+			return nil, err
+		}
+		return socks5Underlay{proxy: proxy}, nil
 	case UnderlayModeModem:
 		if c.registry == nil {
 			return nil, fmt.Errorf("%w: modem registry is unavailable", ErrWiFiCallingUnderlayUnavailable)
@@ -135,6 +141,10 @@ func wifiCallingHTTPClient(underlay imsgo.Underlay) *http.Client {
 	if underlay == nil {
 		return nil
 	}
+	return wifiCallingHTTPClientWithDial(underlay.DialContext)
+}
+
+func wifiCallingHTTPClientWithDial(dialContext func(context.Context, string, string) (net.Conn, error)) *http.Client {
 	transport, ok := http.DefaultTransport.(*http.Transport)
 	if ok {
 		transport = transport.Clone()
@@ -142,7 +152,7 @@ func wifiCallingHTTPClient(underlay imsgo.Underlay) *http.Client {
 		transport = &http.Transport{}
 	}
 	transport.Proxy = nil
-	transport.DialContext = underlay.DialContext
+	transport.DialContext = dialContext
 	//lint:ignore SA1019 Clear the legacy TLS hook so HTTPS uses the selected underlay through DialContext.
 	transport.DialTLS = nil
 	transport.DialTLSContext = nil

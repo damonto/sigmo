@@ -222,6 +222,42 @@ final class ConnectionFlowTests: XCTestCase {
         expectToggle("wifiCallingEnabled", value: "1", in: app)
     }
 
+    func testWiFiCallingSOCKS5ProxyCanBeTestedBeforeApplying() {
+        let app = launch()
+        tap(app.buttons["profileWiFiCalling"], in: app)
+        tap(app.buttons["wifiCallingUplink"], in: app)
+        tap(app.buttons["Add Proxy"], in: app)
+
+        let name = app.textFields["wifiProxyName"]
+        XCTAssertEqual(name.placeholderValue, "Office proxy")
+        tap(name, in: app)
+        name.typeText("Office")
+        let host = app.textFields["wifiProxyHost"]
+        XCTAssertEqual(host.placeholderValue, "proxy.example.com")
+        XCTAssertEqual(app.textFields["wifiProxyPort"].placeholderValue, "1080")
+        tap(host, in: app)
+        host.typeText("proxy.example")
+        tap(app.buttons["Save Proxy"], in: app)
+
+        expectToggle("wifiProxyEnabled", value: "0", in: app)
+        tap(app.buttons["Test Connection"], in: app)
+        let tcp = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@",
+                                                                      "203.0.113.4", "203.0.113.4")).firstMatch
+        XCTAssertTrue(tcp.waitForExistence(timeout: 10), app.debugDescription)
+        let udp = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@",
+                                                                      "[2001:db8::4]:40300", "[2001:db8::4]:40300")).firstMatch
+        reveal(udp, in: app)
+        app.swipeDown()
+        toggle("wifiProxyEnabled", in: app)
+        expectToggle("wifiProxyEnabled", value: "1", in: app)
+        toggle("wifiProxyEnabled", in: app)
+        expectToggle("wifiProxyEnabled", value: "0", in: app)
+        let originalUplink = app.buttons["wifiUplink-modem-device-2"]
+        let restored = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true AND enabled == true"),
+                                                  object: originalUplink)
+        XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 10), .completed)
+    }
+
     func testVoLTEControlsAndDisabledDataPathEditing() {
         let app = launch()
         tap(app.buttons["profileVoLTE"], in: app)

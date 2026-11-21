@@ -60,7 +60,11 @@ func requestIPInfo(ctx context.Context, interfaceName string, dnsServers []strin
 		Transport: boundTransportWithTimeout(interfaceName, dnsServers, ipInfoTimeout),
 	}
 	defer client.CloseIdleConnections()
+	return LookupIPInfo(ctx, client)
+}
 
+// LookupIPInfo checks the public egress of the supplied HTTP client.
+func LookupIPInfo(ctx context.Context, client *http.Client) (IPInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ipInfoURL, nil)
 	if err != nil {
 		return IPInfo{}, fmt.Errorf("create ipinfo request: %w", err)

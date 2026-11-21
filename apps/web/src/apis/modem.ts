@@ -9,6 +9,9 @@ import type {
   WiFiCallingEmergencyAddressWebsheetResponse,
   WiFiCallingSettingsResponse,
   WiFiCallingWebsheetResponse,
+  WiFiProxy,
+  WiFiProxyCheck,
+  WiFiProxySettings,
 } from '@/types/modem'
 
 /**
@@ -85,8 +88,12 @@ export const useModemApi = () => {
    * Fetch Wi-Fi Calling settings
    * GET /api/v1/modems/:id/wifi-calling/settings
    */
-  const getWiFiCallingSettings = (id: string) => {
-    return fetchJson<WiFiCallingSettingsResponse>(`modems/${id}/wifi-calling/settings`)
+  const getWiFiCallingSettings = (id: string, options: { quiet?: boolean } = {}) => {
+    return fetchJson<WiFiCallingSettingsResponse>(
+      `modems/${id}/wifi-calling/settings`,
+      undefined,
+      options.quiet,
+    )
   }
 
   /**
@@ -99,6 +106,33 @@ export const useModemApi = () => {
       body: JSON.stringify(payload),
     })
   }
+
+  const listWiFiProxies = () => fetchJson<WiFiProxy[]>('wifi-calling/proxies', undefined, true)
+
+  const saveWiFiProxy = (proxyId: string, payload: WiFiProxySettings) => {
+    const path = proxyId
+      ? `wifi-calling/proxies/${encodeURIComponent(proxyId)}`
+      : 'wifi-calling/proxies'
+    return fetchJson<WiFiProxy>(
+      path,
+      {
+        method: proxyId ? 'PUT' : 'POST',
+        body: JSON.stringify(payload),
+      },
+      true,
+    )
+  }
+
+  const checkWiFiProxy = (id: string, proxyId: string, signal: AbortSignal) =>
+    fetchJson<WiFiProxyCheck>(
+      `modems/${id}/wifi-calling/connectivity-checks`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ proxyId }),
+        signal,
+      },
+      true,
+    )
 
   const createWiFiCallingSession = (id: string) => {
     return fetchJson<void>(`modems/${id}/wifi-calling/sessions`, {
@@ -137,6 +171,9 @@ export const useModemApi = () => {
     updateSettings,
     getWiFiCallingSettings,
     updateWiFiCallingSettings,
+    listWiFiProxies,
+    saveWiFiProxy,
+    checkWiFiProxy,
     createWiFiCallingSession,
     deleteWiFiCallingSession,
     startWiFiCallingWebsheet,

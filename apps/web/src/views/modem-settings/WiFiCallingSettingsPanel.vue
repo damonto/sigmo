@@ -42,11 +42,14 @@ const requiresWebsheet = computed(
   () => props.state === 'websheet_required' || props.websheet !== null,
 )
 
+const usingProxy = computed(() => props.underlay.mode === 'socks5')
+const directUnderlay = computed<WiFiCallingUnderlay>(() =>
+  usingProxy.value ? (props.underlay.directUnderlay ?? { mode: 'system' }) : props.underlay,
+)
+
 const underlayValue = computed(() => {
-  if (props.underlay.mode === 'modem' && props.underlay.modemId) {
-    return `modem:${props.underlay.modemId}`
-  }
-  return props.underlay.mode
+  const { mode, modemId } = directUnderlay.value
+  return mode === 'modem' && modemId ? `modem:${modemId}` : mode
 })
 
 const currentModemConnected = computed(
@@ -59,10 +62,9 @@ const otherModems = computed(() =>
 )
 
 const missingSelectedModem = computed(() => {
-  if (props.underlay.mode !== 'modem' || !props.underlay.modemId) return null
-  return otherModems.value.some((modem) => modem.id === props.underlay.modemId)
-    ? null
-    : props.underlay.modemId
+  const { mode, modemId } = directUnderlay.value
+  if (mode !== 'modem' || !modemId) return null
+  return otherModems.value.some((modem) => modem.id === modemId) ? null : modemId
 })
 
 const emitSettings = (enabled: boolean, underlay: WiFiCallingUnderlay) => {
@@ -74,20 +76,21 @@ const updateEnabled = (enabled: boolean) => {
 }
 
 const updateUnderlay = (value: AcceptableValue) => {
-  if (typeof value !== 'string') return
+  if (isInputDisabled.value || usingProxy.value || typeof value !== 'string') return
+  const proxyId = props.underlay.proxyId
   if (value === 'system') {
-    emitSettings(props.enabled, { mode: 'system' })
+    emitSettings(props.enabled, { mode: 'system', proxyId })
     return
   }
   if (value === 'self') {
     if (currentModemConnected.value) {
-      emitSettings(props.enabled, { mode: 'self' })
+      emitSettings(props.enabled, { mode: 'self', proxyId })
     }
     return
   }
   const modemId = value.startsWith('modem:') ? value.slice('modem:'.length) : ''
   if (otherModems.value.some((modem) => modem.id === modemId)) {
-    emitSettings(props.enabled, { mode: 'modem', modemId })
+    emitSettings(props.enabled, { mode: 'modem', modemId, proxyId })
   }
 }
 </script>
@@ -129,7 +132,7 @@ const updateUnderlay = (value: AcceptableValue) => {
         </div>
         <Select
           :model-value="underlayValue"
-          :disabled="isInputDisabled"
+          :disabled="isInputDisabled || usingProxy"
           @update:model-value="updateUnderlay"
         >
           <SelectTrigger id="modem-wifi-calling-underlay" class="w-full">
@@ -140,7 +143,7 @@ const updateUnderlay = (value: AcceptableValue) => {
               {{ t('modemDetail.settings.wifiCallingUnderlaySystem') }}
             </SelectItem>
             <SelectItem
-              v-if="currentModemConnected || props.underlay.mode === 'self'"
+              v-if="currentModemConnected || directUnderlay.mode === 'self'"
               value="self"
               :disabled="!currentModemConnected"
             >

@@ -160,11 +160,61 @@ struct InternetPublicInfo: Codable, Sendable, Equatable {
     let organization: String?
 }
 
+struct WiFiDirectUnderlay: Codable, Sendable, Equatable, Hashable {
+    let mode: String
+    var modemId: String? = nil
+}
+
 struct WiFiUnderlay: Codable, Sendable, Equatable, Hashable {
     let mode: String
     var modemId: String? = nil
+    var proxyId: String? = nil
+    var directUnderlay: WiFiDirectUnderlay? = nil
     static let system = Self(mode: "system")
     static let current = Self(mode: "self")
+}
+
+struct WiFiProxy: Codable, Identifiable, Sendable {
+    let id: String
+    let name: String
+    let host: String
+    let port: Int
+    let username: String
+    let hasPassword: Bool
+}
+
+struct WiFiProxySettings: Encodable, Sendable {
+    let name: String
+    let host: String
+    let port: Int
+    let username: String
+    let password: String
+}
+
+struct WiFiProxyCheck: Decodable, Sendable {
+    struct Step: Decodable, Sendable {
+        let errorCode: String?
+        let serverAddress: String?
+        let relayAddress: String?
+        let ip: String?
+        let port: Int?
+        let addresses: [String]?
+
+        var message: String {
+            guard let errorCode else { return "—" }
+            return String(localized: String.LocalizationValue("connection.wifiProxy.errors." + errorCode))
+        }
+
+        var ipAndPort: String {
+            guard let ip else { return message }
+            guard let port else { return ip }
+            return ip.contains(":") ? "[\(ip)]:\(port)" : "\(ip):\(port)"
+        }
+    }
+
+    let tcp: Step
+    let udp: Step
+    let dns: Step
 }
 
 struct DetailWiFiSettings: Codable, Sendable, Equatable {
