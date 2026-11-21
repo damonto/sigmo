@@ -86,7 +86,7 @@ export const useModemMessageThread = ({
   const lineLabel = computed(
     () =>
       conversation.value?.lineLabel ||
-      formatPhoneDisplay(conversation.value?.lineNumber ?? '', displayCountry.value) ||
+      formatPhoneDisplay(conversation.value?.lineNumber ?? '') ||
       t('modemDetail.messages.lineSuffix', { suffix: selectedProfile.value.slice(-6) }),
   )
   const participantLabel = computed(() => {

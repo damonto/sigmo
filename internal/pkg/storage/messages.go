@@ -107,8 +107,7 @@ func (s *Store) InsertMessage(ctx context.Context, msg Message) (int64, error) {
 	if msg.Incoming {
 		lineNumber = msg.Recipient
 	}
-	// Imported SMS can predate an MSISDN change; only live SIM observations
-	// replace a number that is already known.
+	// Imported SMS can predate an MSISDN change, so it only fills an empty number.
 	if err := queries.RecordMessageSIMProfile(ctx, query.RecordMessageSIMProfileParams{
 		ProfileID: msg.ProfileID, ModemID: msg.ModemID, Number: lineNumber,
 	}); err != nil {

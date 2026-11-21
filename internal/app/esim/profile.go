@@ -12,6 +12,7 @@ import (
 
 	"github.com/damonto/sigmo/internal/pkg/lpa"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/phonenumber"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -101,9 +102,9 @@ func (p *profile) populateNumbers(ctx context.Context, snapshot mmodem.ModemSnap
 	for i := range response.SEs {
 		for j := range response.SEs[i].Profiles {
 			item := &response.SEs[i].Profiles[j]
-			item.Number = numbers[item.ICCID]
-			if item.ICCID == snapshot.SIMIdentity.ICCID && activeNumber != "" {
-				item.Number = activeNumber
+			item.Number = phonenumber.NormalizeOwnNumber(numbers[item.ICCID], item.RegionCode)
+			if item.ICCID == snapshot.SIMIdentity.ICCID && item.Number == "" {
+				item.Number = phonenumber.NormalizeOwnNumber(activeNumber, item.RegionCode)
 			}
 		}
 	}

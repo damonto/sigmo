@@ -2,11 +2,7 @@ import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useModemApi } from '@/apis/modem'
-import {
-  formatPhoneDisplay,
-  formatPhoneInput,
-  normalizePhoneSubmission,
-} from '@/lib/phoneNumberInput'
+import { formatPhoneDisplay, formatPhoneInput, phoneNumberChars } from '@/lib/phoneNumberInput'
 import type { Modem } from '@/types/modem'
 
 type Options = {
@@ -30,11 +26,11 @@ export const useModemMsisdn = ({ modemId, modem, refreshModem, onSuccess }: Opti
       msisdnText.value = formatPhoneInput(value, phoneCountry.value)
     },
   })
-  const msisdnValue = computed(() => normalizePhoneSubmission(msisdnText.value, phoneCountry.value))
-  const isMsisdnValid = computed(() => msisdnValue.value.length > 0)
+  const msisdnValue = computed(() => phoneNumberChars(msisdnText.value))
+  const isMsisdnValid = computed(() => /^\+?\d{1,15}$/.test(msisdnValue.value))
   const resetMsisdnInput = () => {
     const value = modem.value
-    msisdnText.value = value?.number ? formatPhoneDisplay(value.number, value.sim?.regionCode) : ''
+    msisdnText.value = value?.number ? formatPhoneDisplay(value.number) : ''
   }
 
   watch(

@@ -15,6 +15,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/carrier"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/phonenumber"
 	"github.com/damonto/sigmo/internal/pkg/reminder"
 	"github.com/damonto/sigmo/internal/pkg/settings"
 	"github.com/damonto/sigmo/internal/pkg/storage"
@@ -122,6 +123,16 @@ func (c *catalog) Get(ctx context.Context, modem *mmodem.Modem) (*ModemResponse,
 
 func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*ModemResponse, error) {
 	snapshot := device.Snapshot()
+	if c.storage != nil && snapshot.SIMIdentity.ICCID != "" {
+		numbers, err := c.storage.SIMProfileNumbers(ctx, []string{snapshot.SIMIdentity.ICCID})
+		if err != nil {
+			return nil, err
+		}
+		if number := numbers[snapshot.SIMIdentity.ICCID]; number != "" {
+			snapshot.Number = number
+		}
+		snapshot.Number = phonenumber.NormalizeOwnNumber(snapshot.Number, carrier.Lookup(snapshot.SIM.OperatorIdentifier).Region)
+	}
 	if snapshot.Locked() {
 		return c.buildLockedResponse(device, snapshot)
 	}
@@ -190,7 +201,7 @@ func (c *catalog) buildResponse(ctx context.Context, device *mmodem.Modem) (*Mod
 		}
 		if err := c.storage.RecordSIMProfile(ctx, storage.SIMProfile{
 			ProfileID: resp.SIM.Identifier, ModemID: resp.ID, Label: label,
-			Number: resp.Number, Region: resp.SIM.RegionCode, Icon: resp.SIM.Icon,
+			Region: resp.SIM.RegionCode, Icon: resp.SIM.Icon,
 			DisplayKnown: freshDisplay, DisplayRevision: displayRevision,
 		}); err != nil {
 			return nil, fmt.Errorf("cache active SIM label: %w", err)

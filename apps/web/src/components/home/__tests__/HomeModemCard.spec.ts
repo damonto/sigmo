@@ -40,9 +40,10 @@ const mountCard = (number: string, simKind: 'unknown' | 'physical' | 'euicc' = '
 describe('HomeModemCard', () => {
   it.each([
     { number: '+12242255559', regionCode: 'US', expected: '+1 (224) 225-5559' },
-    { number: '64210647889', regionCode: 'NZ', expected: '+64 210 647 889' },
-    { number: '447386042885', regionCode: 'GB', expected: '+44 7386 042885' },
-  ])('formats $number with its calling code', async ({ number, regionCode, expected }) => {
+    { number: '+64210647889', regionCode: 'NZ', expected: '+64 210 647 889' },
+    { number: '+447386042885', regionCode: 'GB', expected: '+44 7386 042885' },
+    { number: '4915123456789', regionCode: 'DE', expected: '4915123456789' },
+  ])('displays the backend-provided number $number', async ({ number, regionCode, expected }) => {
     const wrapper = mountCard(number)
     await wrapper.setProps({ regionCode })
     expect(wrapper.text()).toContain(expected)

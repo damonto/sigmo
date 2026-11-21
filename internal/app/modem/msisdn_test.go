@@ -3,139 +3,124 @@ package modem
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	wwanmodem "github.com/damonto/wwan-go/modem"
 
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 func TestMSISDNUpdate(t *testing.T) {
-	transientUpdateErr := errors.New("control port disappeared")
-	current := &mmodem.Modem{
-		EquipmentIdentifier: "354015820228039",
-		PrimarySIMSlot:      1,
-		SIM:                 &mmodem.SIM{Identifier: "8986000000000000000"},
-		Ports: []mmodem.ModemPort{
-			{
-				PortType: wwanmodem.PortAT,
-				Device:   "/dev/ttyUSB2",
-			},
-		},
-	}
-
-	tests := []struct {
-		name        string
-		number      string
-		updateErr   error
-		refreshErr  error
-		wantErr     error
-		wantUpdate  bool
-		wantRefresh bool
+	for _, tt := range []struct {
+		name      string
+		number    string
+		nativeErr error
+		atErr     error
+		saveFails bool
+		wantErr   error
+		wantWrite bool
 	}{
-		{
-			name:        "update succeeds after SIM refresh",
-			number:      "+1234567890",
-			wantUpdate:  true,
-			wantRefresh: true,
-		},
-		{
-			name:        "refresh or wait timeout after update",
-			number:      "+1234567890",
-			refreshErr:  context.DeadlineExceeded,
-			wantErr:     context.DeadlineExceeded,
-			wantUpdate:  true,
-			wantRefresh: true,
-		},
-		{
-			name:       "return transient update error without SIM refresh",
-			number:     "+1234567890",
-			updateErr:  transientUpdateErr,
-			wantErr:    transientUpdateErr,
-			wantUpdate: true,
-		},
-		{
-			name:    "reject invalid phone number",
-			number:  "abc",
-			wantErr: errMSISDNInvalidNumber,
-		},
-	}
-
-	for _, tt := range tests {
+		{name: "native write", number: "+12025550123", wantWrite: true},
+		{name: "card refuses write", number: "+12025550123", nativeErr: errors.New("access denied"), wantWrite: true},
+		{name: "card write times out", number: "+12025550123", nativeErr: context.DeadlineExceeded, wantWrite: true},
+		{name: "AT fallback", number: "+12025550123", nativeErr: wwan.ErrUnsupported, wantWrite: true},
+		{name: "AT fallback is also best effort", number: "+12025550123", nativeErr: wwan.ErrUnsupported, atErr: errors.New("access denied"), wantWrite: true},
+		{name: "invalid number", number: "abc", wantErr: errMSISDNInvalidNumber},
+		{name: "storage failure stops card write", number: "+12025550123", saveFails: true},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
-			client := &fakeMSISDNClient{updateErr: tt.updateErr}
-			var refreshCalled bool
+			ctx := t.Context()
+			store := newTestNumberStore(t)
+			current := &mmodem.Modem{
+				EquipmentIdentifier: "device",
+				PrimarySIMSlot:      1,
+				SIM:                 &mmodem.SIM{Identifier: "sim-a"},
+				Number:              "+12025550100",
+				Ports:               []mmodem.ModemPort{{PortType: wwanmodem.PortAT, Device: "/dev/ttyUSB2"}},
+			}
+			device := &fakeMSISDNDevice{err: tt.nativeErr}
+			at := &fakeMSISDNClient{err: tt.atErr}
 			service := &msisdn{
+				store: store,
 				openDevice: func(*mmodem.Modem) (msisdnDevice, error) {
-					return &fakeMSISDNDevice{err: wwan.ErrUnsupported}, nil
+					numbers, err := store.SIMProfileNumbers(ctx, []string{"sim-a"})
+					if err != nil || numbers["sim-a"] != tt.number {
+						t.Fatalf("store before writing card = %v, %v", numbers, err)
+					}
+					return device, nil
 				},
-				newClient: func(device string) (msisdnClient, error) {
-					if device != "/dev/ttyUSB2" {
-						t.Fatalf("device = %q, want /dev/ttyUSB2", device)
+				newClient: func(ctx context.Context, port string) (msisdnClient, error) {
+					if _, ok := ctx.Deadline(); !ok || port != "/dev/ttyUSB2" {
+						t.Fatalf("AT port = %q, has deadline = %v", port, ok)
 					}
-					return client, nil
+					return at, nil
 				},
-				refreshSIMAndWait: func(ctx context.Context, modem *mmodem.Modem, target mmodem.SIMTarget) (*mmodem.Modem, error) {
-					_ = ctx.Err()
-					refreshCalled = true
-					if modem != current {
-						t.Fatalf("refresh SIM modem = %p, want %p", modem, current)
-					}
-					if target.Slot != 1 || target.ICCID != "8986000000000000000" {
-						t.Fatalf("refresh SIM target = %+v, want slot 1 ICCID", target)
-					}
-					if tt.refreshErr != nil {
-						return nil, tt.refreshErr
-					}
-					return &mmodem.Modem{EquipmentIdentifier: modem.EquipmentIdentifier}, nil
-				},
+			}
+			if tt.saveFails {
+				if err := store.Close(); err != nil {
+					t.Fatal(err)
+				}
 			}
 
-			err := service.Update(t.Context(), current, tt.number)
-			if tt.wantErr != nil {
-				if !errors.Is(err, tt.wantErr) {
-					t.Fatalf("Update() error = %v, want %v", err, tt.wantErr)
+			err := service.Update(ctx, current, tt.number)
+			if tt.saveFails {
+				if err == nil {
+					t.Fatal("Update succeeded with a closed database")
 				}
-			} else if err != nil {
-				t.Fatalf("Update() error = %v", err)
+			} else if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Update() error = %v, want %v", err, tt.wantErr)
 			}
-			if client.updated != tt.wantUpdate {
-				t.Fatalf("client updated = %v, want %v", client.updated, tt.wantUpdate)
+			wantNumber := "+12025550100"
+			if tt.wantWrite {
+				wantNumber = tt.number
 			}
-			if refreshCalled != tt.wantRefresh {
-				t.Fatalf("refresh called = %v, want %v", refreshCalled, tt.wantRefresh)
+			if got := current.Snapshot().Number; got != wantNumber {
+				t.Errorf("effective number = %q, want %q", got, wantNumber)
 			}
-			if tt.wantUpdate && !client.closed {
-				t.Fatalf("client closed = false, want true")
+			if (device.number != "") != tt.wantWrite {
+				t.Errorf("native write = %q, want attempt = %v", device.number, tt.wantWrite)
+			}
+			if errors.Is(tt.nativeErr, wwan.ErrUnsupported) && (at.number != tt.number || !at.closed) {
+				t.Errorf("AT fallback wrote %q, closed = %v", at.number, at.closed)
 			}
 		})
 	}
 }
 
-func TestMSISDNUpdateUsesNativeDevice(t *testing.T) {
-	device := &fakeMSISDNDevice{}
-	refreshed := false
+func TestMSISDNUpdateKeepsNumberWithOriginalSIM(t *testing.T) {
+	store := newTestNumberStore(t)
+	current := &mmodem.Modem{EquipmentIdentifier: "device", PrimarySIMSlot: 1, SIM: &mmodem.SIM{Identifier: "sim-a"}}
+	device := &fakeMSISDNDevice{onUpdate: func() {
+		current.InvalidateSIMActivation()
+		current.SIM = &mmodem.SIM{Identifier: "sim-b"}
+	}}
 	service := &msisdn{
+		store:      store,
 		openDevice: func(*mmodem.Modem) (msisdnDevice, error) { return device, nil },
-		newClient: func(string) (msisdnClient, error) {
-			t.Fatal("AT client opened for native update")
-			return nil, nil
-		},
-		refreshSIMAndWait: func(context.Context, *mmodem.Modem, mmodem.SIMTarget) (*mmodem.Modem, error) {
-			refreshed = true
-			return &mmodem.Modem{}, nil
-		},
 	}
-	if err := service.Update(t.Context(), &mmodem.Modem{PrimarySIMSlot: 1, SIM: &mmodem.SIM{Identifier: "profile-a"}}, "+15551234567"); err != nil {
-		t.Fatalf("Update() error = %v", err)
+	if err := service.Update(t.Context(), current, "+12025550123"); err != nil {
+		t.Fatal(err)
 	}
-	if device.number != "+15551234567" {
-		t.Fatalf("native number = %q", device.number)
+	numbers, err := store.SIMProfileNumbers(t.Context(), []string{"sim-a", "sim-b"})
+	if err != nil || numbers["sim-a"] != "+12025550123" || numbers["sim-b"] != "" {
+		t.Fatalf("stored numbers = %v, %v", numbers, err)
 	}
-	if !refreshed {
-		t.Fatal("SIM refresh was not called")
+	if got := current.Snapshot().Number; got != "" {
+		t.Fatalf("replacement SIM number = %q", got)
 	}
+}
+
+func newTestNumberStore(t *testing.T) *storage.Store {
+	t.Helper()
+	store, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sim.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
 }
 
 type fakeMSISDNDevice struct {
@@ -152,35 +137,15 @@ func (f *fakeMSISDNDevice) UpdateMSISDN(_ context.Context, number string) error 
 	return f.err
 }
 
-func TestMSISDNUpdateDoesNotAttributeNumberToReplacementSIM(t *testing.T) {
-	current := &mmodem.Modem{PrimarySIMSlot: 1, SIM: &mmodem.SIM{Identifier: "sim-a"}}
-	device := &fakeMSISDNDevice{onUpdate: func() {
-		current.SIM = &mmodem.SIM{Identifier: "sim-b"}
-	}}
-	service := &msisdn{
-		openDevice: func(*mmodem.Modem) (msisdnDevice, error) { return device, nil },
-		refreshSIMAndWait: func(context.Context, *mmodem.Modem, mmodem.SIMTarget) (*mmodem.Modem, error) {
-			t.Fatal("refresh attempted after SIM changed during write")
-			return nil, nil
-		},
-	}
-	if err := service.Update(t.Context(), current, "+15551234567"); err == nil {
-		t.Fatal("Update accepted a replacement SIM")
-	}
-	if got := current.Snapshot().Number; got != "" {
-		t.Fatalf("replacement SIM number = %q", got)
-	}
-}
-
 type fakeMSISDNClient struct {
-	updated   bool
-	closed    bool
-	updateErr error
+	number string
+	closed bool
+	err    error
 }
 
-func (f *fakeMSISDNClient) Update(string, string) error {
-	f.updated = true
-	return f.updateErr
+func (f *fakeMSISDNClient) Update(_, number string) error {
+	f.number = number
+	return f.err
 }
 
 func (f *fakeMSISDNClient) Close() error {

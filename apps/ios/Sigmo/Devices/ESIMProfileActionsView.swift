@@ -71,7 +71,7 @@ struct ESIMProfileActionsView: View {
                         }
                     }
                 }
-                .presentationDetents([.medium, .large])
+                .presentationDetents(sheet == .automation ? [.large] : [.medium, .large])
                 .presentationDragIndicator(.visible)
             }
             .alert(
@@ -176,7 +176,7 @@ struct ESIMProfileActionsView: View {
             if profile.enabled {
                 DetailEditRow(
                     title: "modem.number",
-                    value: PhoneNumberDisplay.format(state.modem?.number ?? "", regionCode: state.modem?.sim.regionCode)
+                    value: PhoneNumberDisplay.format(state.modem?.number ?? "")
                 ) { sheet = .number }
             }
         }

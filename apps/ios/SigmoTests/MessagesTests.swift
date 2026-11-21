@@ -18,7 +18,7 @@ final class MessagesTests: XCTestCase {
                 modemId: "modem", lineLabel: item.label, lineNumber: "+12025550124", readThroughMessageId: 0,
                 markedUnread: false, unreadCount: 0, latestMessage: message, canSend: true)
             XCTAssertEqual(conversation.participantLabel(regionCode: item.region), item.expectedParticipant)
-            XCTAssertEqual(conversation.lineDescription(regionCode: item.region), item.expectedLine)
+            XCTAssertEqual(conversation.lineDescription(), item.expectedLine)
             XCTAssertEqual(conversation.participant, item.participant)
             XCTAssertEqual(conversation.lineNumber, "+12025550124")
         }

@@ -2,11 +2,15 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
+	"github.com/damonto/sigmo/internal/pkg/carrier"
 	"github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/modemtask"
+	"github.com/damonto/sigmo/internal/pkg/phonenumber"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
@@ -28,12 +32,29 @@ func subscribeSIMProfiles(ctx context.Context, registry modemtask.Registry, stor
 			if active != current {
 				continue
 			}
-			snapshot := current.Snapshot()
-			return store.RecordSIMProfile(ctx, storage.SIMProfile{
-				ProfileID: snapshot.SIMIdentity.ICCID,
-				ModemID:   current.EquipmentIdentifier,
-				Number:    snapshot.Number,
+			target := current.SIMIdentity()
+			if target.ICCID == "" {
+				return nil
+			}
+			err := current.RestoreStoredNumber(target, func(snapshot modem.ModemSnapshot) (string, error) {
+				region := carrier.Lookup(snapshot.SIM.OperatorIdentifier).Region
+				number := phonenumber.NormalizeOwnNumber(snapshot.CardNumber, region)
+				if !strings.HasPrefix(number, "+") {
+					// Keep an unqualified reading available as a live fallback.
+					number = ""
+				}
+				if err := store.RecordSIMProfile(ctx, storage.SIMProfile{
+					ProfileID: target.ICCID, ModemID: current.EquipmentIdentifier, Number: number,
+				}); err != nil {
+					return "", err
+				}
+				numbers, err := store.SIMProfileNumbers(ctx, []string{target.ICCID})
+				return phonenumber.NormalizeOwnNumber(numbers[target.ICCID], region), err
 			})
+			if errors.Is(err, modem.ErrSIMActivationChanged) {
+				return nil
+			}
+			return err
 		}
 		return nil
 	}

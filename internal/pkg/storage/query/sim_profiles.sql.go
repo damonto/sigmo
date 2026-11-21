@@ -103,7 +103,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(profile_id) DO UPDATE SET
     modem_id = excluded.modem_id,
     label = CASE WHEN excluded.label <> '' THEN excluded.label ELSE sim_profiles.label END,
-    number = CASE WHEN excluded.number <> '' THEN excluded.number ELSE sim_profiles.number END,
+    number = CASE WHEN sim_profiles.number = '' THEN excluded.number ELSE sim_profiles.number END,
     region = CASE WHEN excluded.region <> '' THEN excluded.region ELSE sim_profiles.region END,
     kind = CASE WHEN excluded.kind <> '' THEN excluded.kind ELSE sim_profiles.kind END,
     se_id = CASE WHEN excluded.se_id <> '' THEN excluded.se_id ELSE sim_profiles.se_id END
@@ -174,6 +174,24 @@ func (q *Queries) SIMProfileRegion(ctx context.Context, profileID string) (strin
 	var region string
 	err := row.Scan(&region)
 	return region, err
+}
+
+const saveSIMProfileNumber = `-- name: SaveSIMProfileNumber :exec
+INSERT INTO sim_profiles (profile_id, modem_id, number)
+VALUES (?, ?, ?)
+ON CONFLICT(profile_id) DO UPDATE SET number = excluded.number
+WHERE sim_profiles.number <> excluded.number
+`
+
+type SaveSIMProfileNumberParams struct {
+	ProfileID string
+	ModemID   string
+	Number    string
+}
+
+func (q *Queries) SaveSIMProfileNumber(ctx context.Context, arg SaveSIMProfileNumberParams) error {
+	_, err := q.db.ExecContext(ctx, saveSIMProfileNumber, arg.ProfileID, arg.ModemID, arg.Number)
+	return err
 }
 
 const updateConversationParticipantKey = `-- name: UpdateConversationParticipantKey :exec

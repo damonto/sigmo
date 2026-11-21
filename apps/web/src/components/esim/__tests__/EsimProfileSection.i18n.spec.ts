@@ -17,11 +17,12 @@ describe('eSIM number display with real translations', () => {
     { locale: 'en', placeholder: 'No Number' },
     { locale: 'zh', placeholder: '无号码' },
   ])(
-    'uses each profile region and translates missing numbers in $locale',
+    'preserves unqualified numbers and translates missing numbers in $locale',
     ({ locale, placeholder }) => {
       const numbers = [
-        { number: '64210647889', regionCode: 'NZ', expected: '+64 210 647 889' },
-        { number: '447386042885', regionCode: 'GB', expected: '+44 7386 042885' },
+        { number: '+64210647889', regionCode: 'NZ', expected: '+64 210 647 889' },
+        { number: '+447386042885', regionCode: 'GB', expected: '+44 7386 042885' },
+        { number: '4915123456789', regionCode: 'DE', expected: '4915123456789' },
         { number: '+8613800000000', regionCode: 'CN', expected: '+86 138 0000 0000' },
         { number: ' +12025550123 ', regionCode: 'US', expected: '+1 (202) 555-0123' },
         { number: '+12025550123', regionCode: 'CN', expected: '+1 (202) 555-0123' },

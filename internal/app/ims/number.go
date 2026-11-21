@@ -1,7 +1,10 @@
 package ims
 
 import (
+	"context"
+	"errors"
 	"log/slog"
+	"time"
 
 	imsgo "github.com/damonto/ims-go"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -12,6 +15,7 @@ type numberRegistration struct {
 	registered bool
 	number     string
 	ambiguous  bool
+	persisted  bool
 }
 
 type modemNumbers struct {
@@ -48,22 +52,44 @@ func (c *Connectivity) updateNumber(access Access, session *sessionState, info i
 		}
 		c.numbers[modemID] = numbers
 	}
-	if previous := numbers.sources[access]; previous.sessionID > session.id {
+	previous := numbers.sources[access]
+	if previous.sessionID > session.id {
 		return
 	}
-	numbers.sources[access] = numberRegistration{
+	observation := numberRegistration{
 		sessionID:  session.id,
 		registered: info.Registered,
 		number:     info.MSISDN,
 		ambiguous:  info.MSISDNAmbiguous,
 	}
+	wasPersisted := previous.persisted
+	previous.persisted = false
+	observation.persisted = wasPersisted && observation == previous
+	numbers.sources[access] = observation
 	previousConflict := numbers.conflict
 	number := numbers.resolve()
-	if !modem.SetIMSNumber(numbers.target, number) {
-		return
-	}
 	if numbers.conflict && !previousConflict {
 		slog.Warn("conflicting IMS subscriber numbers", "imei", modemID)
+	}
+	if c.numberStore == nil {
+		modem.SetIMSNumber(numbers.target, number)
+		return
+	}
+	// The resolved value can contain an older observation after a disconnect.
+	// Only a fresh, agreed number supplied by the reporting access can persist.
+	if !observation.registered || number == "" || observation.number != number || observation.persisted {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := modem.UpdateStoredNumber(numbers.target, func(mmodem.ModemSnapshot) (string, error) {
+		return number, c.numberStore.SaveSIMProfileNumber(ctx, numbers.target.ICCID, modemID, number)
+	})
+	if err == nil {
+		observation.persisted = true
+		numbers.sources[access] = observation
+	} else if !errors.Is(err, mmodem.ErrSIMActivationChanged) {
+		slog.Warn("save IMS subscriber number", "imei", modemID, "error", err)
 	}
 }
 

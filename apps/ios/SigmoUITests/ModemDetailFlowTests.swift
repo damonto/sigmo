@@ -639,6 +639,11 @@ final class ModemDetailFlowTests: XCTestCase {
         tap(row, in: app)
         XCTAssertTrue(amount.waitForExistence(timeout: 5))
         XCTAssertEqual(amount.value as? String, "Amount")
+        let unit = app.buttons["automationDataUnit"]
+        XCTAssertTrue(unit.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(unit.isHittable)
+        unit.tap()
+        XCTAssertTrue(app.buttons["KiB"].waitForExistence(timeout: 5))
     }
 
     func testDownloadWithPreviewAndConfirmation() {

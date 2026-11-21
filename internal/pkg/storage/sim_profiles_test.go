@@ -24,7 +24,10 @@ func TestSIMProfileMigrationPreservesHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	const currentNumber = "+8613900000000"
-	if err := s.RecordSIMProfile(ctx, SIMProfile{ProfileID: "sim-a", ModemID: "modem", Label: "Travel", Number: currentNumber}); err != nil {
+	if err := s.RecordSIMProfile(ctx, SIMProfile{ProfileID: "sim-a", ModemID: "modem", Label: "Travel"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveSIMProfileNumber(ctx, "sim-a", "modem", currentNumber); err != nil {
 		t.Fatal(err)
 	}
 	before, err := s.MessagesState(ctx)
@@ -82,10 +85,10 @@ func TestRecordSIMProfile(t *testing.T) {
 		update SIMProfile
 		want   string
 	}{
-		{name: "replace number", update: SIMProfile{ProfileID: "sim-a", ModemID: "modem", Number: "+200"}, want: "+200"},
+		{name: "card reading retains saved number", update: SIMProfile{ProfileID: "sim-a", ModemID: "modem", Number: "+200"}, want: "+100"},
 		{name: "empty retains number", update: SIMProfile{ProfileID: "sim-a", ModemID: "modem"}, want: "+100"},
 		{name: "whitespace retains number", update: SIMProfile{ProfileID: "sim-a", ModemID: "modem", Number: " "}, want: "+100"},
-		{name: "trim identity and number", update: SIMProfile{ProfileID: " sim-a ", ModemID: " modem ", Number: " +200 "}, want: "+200"},
+		{name: "trim identity and preserve saved number", update: SIMProfile{ProfileID: " sim-a ", ModemID: " modem ", Number: " +200 "}, want: "+100"},
 		{name: "other SIM is independent", update: SIMProfile{ProfileID: "sim-b", ModemID: "modem", Number: "+200"}, want: "+100"},
 		{name: "missing identity is ignored", update: SIMProfile{ModemID: "modem", Number: "+200"}, want: "+100"},
 	}

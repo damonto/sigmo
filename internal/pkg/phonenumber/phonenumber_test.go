@@ -65,3 +65,22 @@ func TestDisplay(t *testing.T) {
 		})
 	}
 }
+func TestNormalizeOwnNumber(t *testing.T) {
+	for _, tt := range []struct{ value, region, want string }{
+		{"4915123456789", "DE", "4915123456789"},
+		{"+4915123456789", "DE", "+4915123456789"},
+		{"015123456789", "DE", "+4915123456789"},
+		{"62812345678", "ID", "62812345678"},
+		{"8613800000000", "CN", "+8613800000000"},
+		{"447400123456", "GB", "+447400123456"},
+		{"0118613800138000", "US", "+8613800138000"},
+		{"8613800000000", "", "8613800000000"},
+		{"10086", "CN", "10086"},
+	} {
+		t.Run(tt.region+"/"+tt.value, func(t *testing.T) {
+			if got := NormalizeOwnNumber(tt.value, tt.region); got != tt.want {
+				t.Errorf("NormalizeOwnNumber(%q, %q) = %q, want %q", tt.value, tt.region, got, tt.want)
+			}
+		})
+	}
+}

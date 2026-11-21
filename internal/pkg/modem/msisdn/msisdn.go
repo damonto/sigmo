@@ -2,6 +2,7 @@ package msisdn
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -18,8 +19,8 @@ type MSISDN struct {
 	runner Runner
 }
 
-func New(device string) (*MSISDN, error) {
-	conn, err := at.Open(device)
+func New(ctx context.Context, device string) (*MSISDN, error) {
+	conn, err := at.Open(ctx, device)
 	if err != nil {
 		return nil, err
 	}

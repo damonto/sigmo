@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/damonto/sigmo/internal/pkg/phonenumber"
 	"github.com/damonto/sigmo/internal/pkg/storage/query"
 )
 
@@ -37,7 +38,8 @@ func (s *Store) SIMLines(ctx context.Context) ([]SIMLine, error) {
 	}
 	items := make([]SIMLine, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, SIMLine{ProfileID: row.ProfileID, ModemID: row.ModemID, Label: row.Label, Number: row.Number, Region: row.Region, Kind: row.Kind, SEID: row.SEID, DeletionState: row.DeletionState, SuccessorID: row.SuccessorID, MessageCount: int(row.MessageCount), CallCount: int(row.CallCount)})
+		number := phonenumber.NormalizeOwnNumber(row.Number, row.Region)
+		items = append(items, SIMLine{ProfileID: row.ProfileID, ModemID: row.ModemID, Label: row.Label, Number: number, Region: row.Region, Kind: row.Kind, SEID: row.SEID, DeletionState: row.DeletionState, SuccessorID: row.SuccessorID, MessageCount: int(row.MessageCount), CallCount: int(row.CallCount)})
 	}
 	return items, nil
 }

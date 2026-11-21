@@ -1,6 +1,7 @@
 package modem
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -220,11 +221,10 @@ func TestNumberChangeNotifications(t *testing.T) {
 	if len(observed) != 1 {
 		t.Fatalf("unchanged effective number emitted %d notifications", len(observed))
 	}
-	if !m.SetNumber(target, "+200") {
-		t.Fatal("manual number rejected")
-	}
+	info.OwnNumbers = []string{"+200"}
+	m.applySIMInfo(info)
 	m.applySIMInfo(wwanmodem.SIMInfo{Slot: 1, ICCID: "sim-b", State: wwanmodem.SIMStateReady})
-	if m.SetNumber(target, "+999") || m.SetIMSNumber(target, "+999") {
+	if m.SetIMSNumber(target, "+999") {
 		t.Fatal("stale SIM number accepted")
 	}
 	if !m.SetIMSNumber(m.Snapshot().SIMIdentity, "+300") {
@@ -248,18 +248,20 @@ func TestNumberChangeCallbackCanUpdateNumber(t *testing.T) {
 		if m.Snapshot().Number != "+100" {
 			return
 		}
-		updated := make(chan bool, 1)
-		wg.Go(func() { updated <- m.SetNumber(target, "+200") })
+		updated := make(chan error, 1)
+		wg.Go(func() {
+			updated <- m.UpdateStoredNumber(target, func(ModemSnapshot) (string, error) { return "+200", nil })
+		})
 		select {
-		case accepted := <-updated:
-			if !accepted {
-				t.Error("number update from subscriber rejected")
+		case err := <-updated:
+			if err != nil {
+				t.Errorf("number update from subscriber: %v", err)
 			}
 		case <-time.After(time.Second):
 			t.Error("number update blocked until subscriber returned")
 		}
 	}
-	if !m.SetNumber(target, "+100") {
+	if !m.SetIMSNumber(target, "+100") {
 		t.Fatal("initial number rejected")
 	}
 	// Even a failed assertion lets the subscriber return and release its lock.
@@ -269,41 +271,28 @@ func TestNumberChangeCallbackCanUpdateNumber(t *testing.T) {
 	}
 }
 
-func TestKnownNumberPriorityAndActivation(t *testing.T) {
+func TestStoredNumberPriorityAndActivation(t *testing.T) {
 	m := &Modem{}
-	m.applySIMInfo(wwanmodem.SIMInfo{Slot: 1, ICCID: "sim-a", State: wwanmodem.SIMStateReady})
-	target := m.Snapshot().SIMIdentity
-	if !m.SetKnownNumber(target, "+100") {
-		t.Fatal("known number rejected")
+	info := wwanmodem.SIMInfo{Slot: 1, ICCID: "sim-a", State: wwanmodem.SIMStateReady, OwnNumbers: []string{"+100"}}
+	m.applySIMInfo(info)
+	target := m.SIMIdentity()
+	store := func(ModemSnapshot) (string, error) { return "+200", nil }
+	if err := m.UpdateStoredNumber(target, store); err != nil {
+		t.Fatal(err)
 	}
-	m.SetIMSNumber(target, "+200")
-	if m.Snapshot().Number != "+200" {
-		t.Fatal("IMS did not take precedence")
-	}
-	m.SetIMSNumber(target, "")
-	if m.Snapshot().Number != "+100" {
-		t.Fatal("clearing IMS erased known number")
-	}
-	m.SetNumber(target, "+300")
-	if m.SetKnownNumber(target, "+400") || m.Snapshot().Number != "+300" {
-		t.Fatal("MDN replaced a current number")
-	}
-	m.applySIMInfo(wwanmodem.SIMInfo{Slot: 1, ICCID: "sim-b", State: wwanmodem.SIMStateReady})
-	m.applySIMInfo(wwanmodem.SIMInfo{Slot: 1, ICCID: "sim-a", State: wwanmodem.SIMStateReady})
-	if m.SetKnownNumber(target, "+999") || m.Snapshot().Number != "" {
-		t.Fatal("stale activation retained a known number")
-	}
-	target = m.Snapshot().SIMIdentity
-	m.SetIMSNumber(target, "+500")
-	if m.SetKnownNumber(target, "+999") {
-		t.Fatal("delayed MDN replaced IMS number")
-	}
-	m.SetIMSNumber(target, "")
-	if !m.SetKnownNumber(target, "+600") {
-		t.Fatal("current activation rejected")
+	m.SetIMSNumber(target, "+300")
+	info.OwnNumbers = []string{"+400"}
+	m.applySIMInfo(info)
+	if got := m.Snapshot(); got.Number != "+200" || got.CardNumber != "+400" {
+		t.Fatalf("snapshot number = %q, card number = %q", got.Number, got.CardNumber)
 	}
 	m.InvalidateSIMActivation()
-	if m.SetKnownNumber(target, "+999") || m.Snapshot().Number != "" {
-		t.Fatal("invalidation retained known number")
+	if err := m.UpdateStoredNumber(target, store); !errors.Is(err, ErrSIMActivationChanged) {
+		t.Fatalf("stale number update = %v", err)
+	}
+	info.ICCID, info.OwnNumbers = "sim-b", nil
+	m.applySIMInfo(info)
+	if got := m.Snapshot().Number; got != "" {
+		t.Fatalf("replacement SIM inherited %q", got)
 	}
 }

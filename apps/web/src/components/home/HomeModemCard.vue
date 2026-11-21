@@ -61,7 +61,7 @@ const displayName = computed(() => (props.name.trim().length > 0 ? props.name : 
 const displayNumber = computed(() => {
   const number = props.number.trim()
   if (!number) return t('home.noNumber')
-  return formatPhoneDisplay(number, props.regionCode)
+  return formatPhoneDisplay(number)
 })
 </script>
 

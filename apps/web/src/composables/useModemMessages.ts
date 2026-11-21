@@ -58,7 +58,7 @@ export const useModemMessages = (
           timestampLabel: formatListTimestamp(value.latestMessage.timestamp),
           lineLabel:
             value.lineLabel ||
-            formatPhoneDisplay(value.lineNumber, region) ||
+            formatPhoneDisplay(value.lineNumber) ||
             t('modemDetail.messages.lineSuffix', { suffix: value.profileId.slice(-6) }),
           unreadCount: value.unreadCount,
         }

@@ -15,7 +15,7 @@ extension BackendStore {
             session.modems.compactMap { modem -> HomeDevice? in
                 if terms.isEmpty { return HomeDevice(session: session, modem: modem) }
                 let fields = [modem.displayName, modem.carrier, modem.number,
-                              PhoneNumberDisplay.format(modem.number, regionCode: modem.sim.regionCode),
+                              PhoneNumberDisplay.format(modem.number),
                               modem.number.filter(\.isNumber), session.configuration.name, modemValue(modem.simKind)]
                 guard terms.allSatisfy({ term in fields.contains { $0.localizedStandardContains(term) } }) else { return nil }
                 return HomeDevice(session: session, modem: modem)

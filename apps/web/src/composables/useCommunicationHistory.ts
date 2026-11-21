@@ -211,7 +211,7 @@ export const useCommunicationHistory = (kind: 'messages' | 'thread' | 'calls') =
     sourceLabel: (profileID: string, label = '') => {
       const line = sourceLine(profileID)
       return (
-        label || line?.label || formatPhoneDisplay(line?.number ?? '', line?.region) || profileID
+        label || line?.label || formatPhoneDisplay(line?.number ?? '') || profileID
       )
     },
     sourceLine,

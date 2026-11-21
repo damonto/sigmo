@@ -1,13 +1,59 @@
 package ims
 
 import (
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	imsgo "github.com/damonto/ims-go"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
+
+func TestIMSOnlyPersistsFreshAgreedNumbers(t *testing.T) {
+	ctx := t.Context()
+	store, err := storage.Open(ctx, filepath.Join(t.TempDir(), "ims.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	modem := &mmodem.Modem{EquipmentIdentifier: "modem", SIM: &mmodem.SIM{Identifier: "profile-a"}, Number: "+12025550100"}
+	target := modem.SIMIdentity()
+	session := &sessionState{id: 1, modem: modem, profileID: target.ICCID, numberTarget: target}
+	connectivity := &Connectivity{numberStore: store}
+	report := imsgo.RegistrationInfo{Registered: true, MSISDN: "+12025550123"}
+	assertNumber := func(want string) {
+		t.Helper()
+		numbers, err := store.SIMProfileNumbers(ctx, []string{target.ICCID})
+		if err != nil || numbers[target.ICCID] != want || modem.Snapshot().Number != want {
+			t.Fatalf("number in database = %q, snapshot = %q, want %q, error = %v", numbers[target.ICCID], modem.Snapshot().Number, want, err)
+		}
+	}
+	connectivity.updateNumber(AccessVoLTE, session, report)
+	assertNumber(report.MSISDN)
+
+	const manual = "+12025550199"
+	if err := modem.UpdateStoredNumber(target, func(mmodem.ModemSnapshot) (string, error) {
+		return manual, store.SaveSIMProfileNumber(ctx, target.ICCID, modem.EquipmentIdentifier, manual)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	connectivity.updateNumber(AccessVoLTE, session, report)
+	connectivity.updateNumber(AccessWiFiCalling, session, imsgo.RegistrationInfo{Registered: true, MSISDNAmbiguous: true})
+	connectivity.updateNumber(AccessWiFiCalling, session, imsgo.RegistrationInfo{})
+	connectivity.updateNumber(AccessVoLTE, session, imsgo.RegistrationInfo{})
+	assertNumber(manual)
+
+	connectivity.updateNumber(AccessVoLTE, session, report)
+	assertNumber(report.MSISDN)
+	modem.InvalidateSIMActivation()
+	connectivity.updateNumber(AccessVoLTE, session, imsgo.RegistrationInfo{Registered: true, MSISDN: "+12025550188"})
+	numbers, err := store.SIMProfileNumbers(ctx, []string{target.ICCID})
+	if err != nil || numbers[target.ICCID] != report.MSISDN {
+		t.Fatalf("stale registration updated the number: %v, %v", numbers, err)
+	}
+}
 
 func TestIMSNumberResolution(t *testing.T) {
 	type step struct {

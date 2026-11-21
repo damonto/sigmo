@@ -61,7 +61,7 @@ const simKindLabel = computed(() => {
 const phoneNumber = computed(() => {
   const modem = props.modem
   if (!modem?.number?.trim()) return ''
-  return formatPhoneDisplay(modem.number, modem.sim.regionCode)
+  return formatPhoneDisplay(modem.number)
 })
 
 const handleTitleClick = () => {

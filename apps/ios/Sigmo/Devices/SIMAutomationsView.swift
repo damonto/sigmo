@@ -187,6 +187,7 @@ struct SIMAutomationForm: View {
                 Picker("automation.unit", selection: $draft.unit) {
                     ForEach(AutomationDraft.Unit.allCases, id: \.self) { unit in Text(unit.rawValue).tag(unit) }
                 }
+                .accessibilityIdentifier("automationDataUnit")
             } footer: { Text("automation.dataHint") }
         case .sms:
             Section {

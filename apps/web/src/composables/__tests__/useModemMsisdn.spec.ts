@@ -97,20 +97,22 @@ describe('useModemMsisdn', () => {
   it('submits international numbers with plus', async () => {
     const { state } = mountComposable()
 
-    state.msisdnInput.value = '86 133 4444 5555'
+    state.msisdnInput.value = '+86 133 4444 5555'
     await state.handleMsisdnUpdate()
     await flushPromises()
 
     expect(api.updateMsisdn).toHaveBeenCalledWith('modem-1', '+8613344445555')
   })
 
-  it('keeps plus when a default-country number includes the country code', async () => {
-    const { state } = mountComposable()
+  it('preserves an ambiguous number in the edit field and sends the original digits', async () => {
+    const device = modem('4915123456789')
+    device.sim.regionCode = 'DE'
+    const { state } = mountComposable(device)
 
-    state.msisdnInput.value = '1 224 225 5559'
+    expect(state.msisdnInput.value).toBe('4915123456789')
     await state.handleMsisdnUpdate()
     await flushPromises()
 
-    expect(api.updateMsisdn).toHaveBeenCalledWith('modem-1', '+12242255559')
+    expect(api.updateMsisdn).toHaveBeenCalledWith('modem-1', '4915123456789')
   })
 })

@@ -67,7 +67,7 @@ const certificates = computed(() => primarySE.value?.certificates ?? [])
         </div>
         <div v-if="modem.number" class="flex justify-between">
           <span class="text-muted-foreground">Number</span>
-          <span class="font-mono">{{ formatPhoneDisplay(modem.number, modem.sim.regionCode) }}</span>
+          <span class="font-mono">{{ formatPhoneDisplay(modem.number) }}</span>
         </div>
       </div>
     </section>

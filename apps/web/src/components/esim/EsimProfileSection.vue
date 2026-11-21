@@ -485,7 +485,7 @@ watch(detailsOpen, (value) => {
                 </p>
                 <p class="truncate text-xs text-muted-foreground">
                   {{
-                    formatPhoneDisplay(profile.number ?? '', profile.regionCode) ||
+                    formatPhoneDisplay(profile.number ?? '') ||
                     t('modemDetail.esim.lineNoNumber')
                   }}
                 </p>

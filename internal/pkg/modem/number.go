@@ -1,10 +1,14 @@
 package modem
 
 import (
+	"errors"
 	"strings"
 
 	wwanmodem "github.com/damonto/wwan-go/modem"
 )
+
+// ErrSIMActivationChanged indicates that an observation no longer belongs to the active SIM.
+var ErrSIMActivationChanged = errors.New("SIM activation changed")
 
 // SIMIdentity binds an observation to one activation of a SIM on a modem.
 // Its private version distinguishes successive activations of the same ICCID.
@@ -41,9 +45,8 @@ func (m *Modem) MatchesSIMActivation(identity SIMIdentity) bool {
 	}
 }
 
-// SetIMSNumber records an IMS-derived number for the specified SIM.
-// An empty number clears only the IMS observation, preserving MDN/history.
-// Modem-reported numbers always take precedence.
+// SetIMSNumber records a live fallback for the specified SIM. An empty number
+// clears only the IMS observation. Saved numbers and card readings take precedence.
 // It returns false if the SIM or modem activation has changed.
 func (m *Modem) SetIMSNumber(target SIMIdentity, number string) bool {
 	if m == nil || target.ICCID == "" {
@@ -60,39 +63,43 @@ func (m *Modem) SetIMSNumber(target SIMIdentity, number string) bool {
 	return true
 }
 
-// SetKnownNumber fills an empty number from history or an MDN entitlement.
-// It rejects stale activations and never replaces a number learned meanwhile.
-// IMS can subsequently take precedence without erasing this observation.
-func (m *Modem) SetKnownNumber(target SIMIdentity, number string) bool {
-	if m == nil || target.ICCID == "" || strings.TrimSpace(number) == "" {
-		return false
-	}
-	m.runtimeMu.Lock()
-	if target != m.simIdentityLocked() || strings.TrimSpace(m.Number) != "" ||
-		strings.TrimSpace(m.imsNumber) != "" || m.knownNumber != "" {
-		m.runtimeMu.Unlock()
-		return false
-	}
-	m.knownNumber = strings.TrimSpace(number)
-	m.runtimeMu.Unlock()
-	m.notifyNumberChanged()
-	return true
+// UpdateStoredNumber serializes an explicit edit or network observation with
+// other number updates. An empty result leaves the number and revision unchanged.
+func (m *Modem) UpdateStoredNumber(target SIMIdentity, update func(ModemSnapshot) (string, error)) error {
+	return m.syncStoredNumber(target, update, true)
 }
 
-// SetNumber records a successfully written MSISDN only while its SIM activation is current.
-func (m *Modem) SetNumber(target SIMIdentity, number string) bool {
-	if m == nil || target.ICCID == "" {
-		return false
+// RestoreStoredNumber loads cached data without invalidating a pending network lookup.
+func (m *Modem) RestoreStoredNumber(target SIMIdentity, read func(ModemSnapshot) (string, error)) error {
+	return m.syncStoredNumber(target, read, false)
+}
+
+// The callback may access storage, but must not call back into the modem.
+func (m *Modem) syncStoredNumber(target SIMIdentity, update func(ModemSnapshot) (string, error), fresh bool) error {
+	if m == nil || target.ICCID == "" || m.SIMReloadPending() {
+		return ErrSIMActivationChanged
 	}
 	m.runtimeMu.Lock()
+	defer m.runtimeMu.Unlock()
 	if target != m.simIdentityLocked() {
-		m.runtimeMu.Unlock()
-		return false
+		return ErrSIMActivationChanged
 	}
-	m.Number = strings.TrimSpace(number)
-	m.runtimeMu.Unlock()
-	m.notifyNumberChanged()
-	return true
+	select {
+	case <-m.Done():
+		return ErrSIMActivationChanged
+	default:
+	}
+	number, err := update(m.snapshotLocked())
+	if err != nil {
+		return err
+	}
+	if number = strings.TrimSpace(number); number != "" {
+		m.storedNumber = number
+		if fresh {
+			m.numberRevision++
+		}
+	}
+	return nil
 }
 
 func (m *Modem) notifyNumberChanged() {
@@ -100,14 +107,19 @@ func (m *Modem) notifyNumberChanged() {
 	// a subscriber may synchronously update the modem again.
 	m.numberNotifyMu.Lock()
 	snapshot := m.Snapshot()
+	var operator string
+	if snapshot.SIM != nil {
+		operator = snapshot.SIM.OperatorIdentifier
+	}
 	m.runtimeMu.RLock()
 	notify := m.onNumberChange
 	m.runtimeMu.RUnlock()
-	if notify == nil || (m.notifiedSIM == snapshot.SIMIdentity && m.notifiedNumber == snapshot.Number) {
+	if notify == nil || (m.notifiedSIM == snapshot.SIMIdentity && m.notifiedNumber == snapshot.Number && m.notifiedPLMN == operator) {
 		m.numberNotifyMu.Unlock()
 		return
 	}
 	m.notifiedSIM, m.notifiedNumber = snapshot.SIMIdentity, snapshot.Number
+	m.notifiedPLMN = operator
 	m.numberNotifyMu.Unlock()
 	if snapshot.SIMIdentity.ICCID != "" && strings.TrimSpace(snapshot.Number) != "" {
 		notify()
@@ -133,7 +145,7 @@ func (m *Modem) invalidateSIMIdentityLocked(previous SIMIdentity) {
 	}
 	m.simRevision++
 	m.imsNumber = ""
-	m.knownNumber = ""
+	m.storedNumber = ""
 }
 
 // InvalidateSIMActivation retires observations before a slot or profile refresh.
@@ -147,7 +159,7 @@ func (m *Modem) InvalidateSIMActivation() {
 	defer m.runtimeMu.Unlock()
 	m.simRevision++
 	m.imsNumber = ""
-	m.knownNumber = ""
+	m.storedNumber = ""
 	if m.SIM != nil {
 		m.SIM.PINStatus = wwanmodem.SIMPINStatus{Lock: wwanmodem.SIMLockUnknown}
 	}

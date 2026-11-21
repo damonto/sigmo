@@ -7,12 +7,16 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 
 	wwanmodem "github.com/damonto/wwan-go/modem"
 
+	"github.com/damonto/sigmo/internal/pkg/carrier"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	msisdnclient "github.com/damonto/sigmo/internal/pkg/modem/msisdn"
 	wwan "github.com/damonto/sigmo/internal/pkg/modem/wwan"
+	"github.com/damonto/sigmo/internal/pkg/phonenumber"
+	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
 var errMSISDNInvalidNumber = errors.New("invalid phone number")
@@ -20,9 +24,9 @@ var errMSISDNInvalidNumber = errors.New("invalid phone number")
 var msisdnPhoneRE = regexp.MustCompile(`^\+?[0-9]{1,15}$`)
 
 type msisdn struct {
-	newClient         msisdnClientFactory
-	openDevice        func(*mmodem.Modem) (msisdnDevice, error)
-	refreshSIMAndWait func(context.Context, *mmodem.Modem, mmodem.SIMTarget) (*mmodem.Modem, error)
+	newClient  msisdnClientFactory
+	openDevice func(*mmodem.Modem) (msisdnDevice, error)
+	store      *storage.Store
 }
 
 type msisdnDevice interface {
@@ -34,17 +38,17 @@ type msisdnClient interface {
 	Close() error
 }
 
-type msisdnClientFactory func(string) (msisdnClient, error)
+type msisdnClientFactory func(context.Context, string) (msisdnClient, error)
 
-func newMSISDN(registry *mmodem.Registry) *msisdn {
+func newMSISDN(store *storage.Store) *msisdn {
 	return &msisdn{
-		newClient: func(device string) (msisdnClient, error) {
-			return msisdnclient.New(device)
+		newClient: func(ctx context.Context, device string) (msisdnClient, error) {
+			return msisdnclient.New(ctx, device)
 		},
 		openDevice: func(modem *mmodem.Modem) (msisdnDevice, error) {
 			return mmodem.OpenDevice(modem)
 		},
-		refreshSIMAndWait: registry.EnsureSIMVisible,
+		store: store,
 	}
 }
 
@@ -53,41 +57,60 @@ func (m *msisdn) Update(ctx context.Context, modem *mmodem.Modem, number string)
 	if !msisdnPhoneRE.MatchString(number) {
 		return errMSISDNInvalidNumber
 	}
-	identity := modem.Snapshot().SIMIdentity
+	identity := modem.SIMIdentity()
 	if identity.ICCID == "" {
 		return mmodem.ErrProfileIDMissing
 	}
-	device, err := m.openDevice(modem)
+	release, err := modem.ReserveSIMSlot(ctx)
 	if err != nil {
-		return fmt.Errorf("open modem device: %w", err)
+		return fmt.Errorf("reserve SIM slot: %w", err)
 	}
-	if err := device.UpdateMSISDN(ctx, number); errors.Is(err, wwan.ErrUnsupported) {
-		if err := m.updateWithAT(modem, number); err != nil {
-			return err
+	defer release()
+	if m.store == nil {
+		return errors.New("SIM number storage is unavailable")
+	}
+	if err := modem.UpdateStoredNumber(identity, func(snapshot mmodem.ModemSnapshot) (string, error) {
+		region := carrier.Lookup(snapshot.SIM.OperatorIdentifier).Region
+		if strings.HasPrefix(snapshot.StoredNumber, "+") && "+"+number == snapshot.StoredNumber {
+			number = snapshot.StoredNumber
 		}
-	} else if err != nil {
-		return fmt.Errorf("update MSISDN: %w", err)
+		number = phonenumber.NormalizeOwnNumber(number, region)
+		return number, m.store.SaveSIMProfileNumber(ctx, identity.ICCID, modem.EquipmentIdentifier, number)
+	}); err != nil {
+		return err
 	}
 
-	if !modem.SetNumber(identity, number) {
-		return errors.New("update MSISDN: SIM activation changed")
-	}
-	target := mmodem.SIMTarget{Slot: identity.Slot, ICCID: identity.ICCID}
-	if _, err := m.refreshSIMAndWait(ctx, modem, target); err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("wait for modem: %w", err)
+	writeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if modem.MatchesSIMActivation(identity) {
+		if err := m.writeCard(writeCtx, modem, identity, number); err != nil {
+			slog.Warn("write SIM number to card", "imei", modem.EquipmentIdentifier, "error", err)
 		}
-		return fmt.Errorf("read SIM after MSISDN update: %w", err)
 	}
 	return nil
 }
 
-func (m *msisdn) updateWithAT(modem *mmodem.Modem, number string) error {
+func (m *msisdn) writeCard(ctx context.Context, modem *mmodem.Modem, identity mmodem.SIMIdentity, number string) error {
+	device, err := m.openDevice(modem)
+	if err != nil {
+		return fmt.Errorf("open modem device: %w", err)
+	}
+	err = device.UpdateMSISDN(ctx, number)
+	if errors.Is(err, wwan.ErrUnsupported) {
+		if !modem.MatchesSIMActivation(identity) {
+			return mmodem.ErrSIMActivationChanged
+		}
+		return m.updateWithAT(ctx, modem, number)
+	}
+	return err
+}
+
+func (m *msisdn) updateWithAT(ctx context.Context, modem *mmodem.Modem, number string) error {
 	port, err := modem.Port(wwanmodem.PortAT)
 	if err != nil {
 		return fmt.Errorf("find AT port: %w", err)
 	}
-	client, err := m.newClient(port.Device)
+	client, err := m.newClient(ctx, port.Device)
 	if err != nil {
 		return fmt.Errorf("open MSISDN client: %w", err)
 	}

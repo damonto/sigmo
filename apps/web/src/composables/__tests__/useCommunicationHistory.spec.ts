@@ -119,7 +119,7 @@ describe('communication split view', () => {
     expect(list.formatNumber('+4915510594552')).toBe('+49 15510 594552')
     expect(list.formatNumber('10086', 'sim')).toBe('10086')
     expect(list.formatNumber('BANK123', 'us')).toBe('BANK123')
-    expect(list.sourceLabel('sim')).toBe('+44 20 7031 3000')
+    expect(list.sourceLabel('sim')).toBe('02070313000')
     expect(list.sourceLabel('us')).toBe('Work')
     expect(list.sourceLabel('sim', 'Personal')).toBe('Personal')
   })

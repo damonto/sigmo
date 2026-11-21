@@ -35,6 +35,7 @@ type Modem struct {
 	numberNotifyMu sync.Mutex
 	notifiedSIM    SIMIdentity
 	notifiedNumber string
+	notifiedPLMN   string
 	deviceSessions deviceSessionStore
 	runtimeMu      sync.RWMutex
 	simRefreshMu   sync.Mutex
@@ -53,7 +54,8 @@ type Modem struct {
 	simPINToken    string
 	simPINDevice   simPINDevice
 	imsNumber      string
-	knownNumber    string
+	storedNumber   string
+	numberRevision uint64
 
 	Device              string
 	Manufacturer        string
@@ -81,6 +83,9 @@ type ModemSnapshot struct {
 	SIMSlots       []uint32
 	Slots          []*SIM
 	Number         string
+	CardNumber     string
+	StoredNumber   string
+	NumberRevision uint64
 	StatusKnown    bool
 	SIMIdentity    SIMIdentity
 }
@@ -101,12 +106,16 @@ func (m *Modem) Snapshot() ModemSnapshot {
 	}
 	m.runtimeMu.RLock()
 	defer m.runtimeMu.RUnlock()
-	number := m.Number
+	return m.snapshotLocked()
+}
+
+func (m *Modem) snapshotLocked() ModemSnapshot {
+	number := m.storedNumber
 	if strings.TrimSpace(number) == "" {
-		number = m.imsNumber
+		number = m.Number
 	}
 	if strings.TrimSpace(number) == "" {
-		number = m.knownNumber
+		number = m.imsNumber
 	}
 	return ModemSnapshot{
 		Status:         m.Status,
@@ -115,6 +124,9 @@ func (m *Modem) Snapshot() ModemSnapshot {
 		SIMSlots:       slices.Clone(m.SIMSlots),
 		Slots:          cloneSIMSlots(m),
 		Number:         number,
+		CardNumber:     m.Number,
+		StoredNumber:   m.storedNumber,
+		NumberRevision: m.numberRevision,
 		SIMIdentity:    m.simIdentityLocked(),
 		StatusKnown:    m.statusKnown || m.Status != (wwanmodem.Status{}),
 	}
@@ -253,7 +265,7 @@ func (m *Modem) Close() error {
 		m.runtimeMu.Lock()
 		m.simRevision++
 		m.imsNumber = ""
-		m.knownNumber = ""
+		m.storedNumber = ""
 		m.runtimeMu.Unlock()
 		if m.watchCancel != nil {
 			m.watchCancel()

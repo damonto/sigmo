@@ -129,7 +129,7 @@ struct MessagesView: View {
                             preview: conversation.latestMessage.text, timestamp: conversation.latestMessage.timestamp,
                             unread: conversation.unreadCount > 0 || conversation.markedUnread,
                             region: state.modem?.sim.identifier == conversation.profileId ? state.modem?.sim.regionCode : nil,
-                            line: conversation.lineDescription(regionCode: state.modem?.sim.identifier == conversation.profileId ? state.modem?.sim.regionCode : nil))
+                            line: conversation.lineDescription())
                     }
                         .buttonStyle(.plain)
                         .listRowSeparator(conversation.id == conversations.first?.id ? .hidden : .automatic, edges: .top)

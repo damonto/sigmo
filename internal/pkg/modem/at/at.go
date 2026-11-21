@@ -2,6 +2,7 @@ package at
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -15,16 +16,20 @@ import (
 var commandTimeout = 10 * time.Second
 
 type AT struct {
+	ctx        context.Context
 	f          *os.File
 	reader     *bufio.Reader
 	oldTermios *unix.Termios
 	mutex      sync.Mutex
 }
 
-func Open(device string) (*AT, error) {
-	var at AT
+func Open(ctx context.Context, device string) (*AT, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	at := AT{ctx: ctx}
 	var err error
-	if at.f, err = os.OpenFile(device, os.O_RDWR|unix.O_NOCTTY, 0666); err != nil {
+	if at.f, err = os.OpenFile(device, os.O_RDWR|unix.O_NOCTTY|unix.O_NONBLOCK, 0666); err != nil {
 		return nil, err
 	}
 	if err := at.setTermios(); err != nil {
@@ -59,14 +64,15 @@ func (a *AT) setTermios() error {
 func (a *AT) Run(command string) (string, error) {
 	a.mutex.Lock()
 	defer a.mutex.Unlock()
-	if err := a.f.SetDeadline(time.Now().Add(commandTimeout)); err != nil {
-		if !errors.Is(err, os.ErrNoDeadline) {
-			return "", err
-		}
-	} else {
-		defer func() {
-			_ = a.f.SetDeadline(time.Time{})
-		}()
+	if err := a.ctx.Err(); err != nil {
+		return "", err
+	}
+	deadline := time.Now().Add(commandTimeout)
+	if limit, ok := a.ctx.Deadline(); ok && limit.Before(deadline) {
+		deadline = limit
+	}
+	if err := a.f.SetDeadline(deadline); err != nil {
+		return "", err
 	}
 	if _, err := a.f.WriteString(command + "\r\n"); err != nil {
 		return "", err

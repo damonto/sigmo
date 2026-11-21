@@ -53,8 +53,9 @@ func (r *fakeRegistry) emit(e modem.ModemEvent) {
 
 type fakeStore map[string]string
 
-func (s fakeStore) SIMProfileNumbers(context.Context, []string) (map[string]string, error) {
-	return maps.Clone(s), nil
+func (s fakeStore) SaveSIMProfileNumber(_ context.Context, profileID, _, number string) error {
+	s[profileID] = number
+	return nil
 }
 func readyModem() *modem.Modem {
 	return &modem.Modem{EquipmentIdentifier: "123456789012345", SIM: &modem.SIM{Identifier: "sim-a"}, Status: wwanmodem.Status{SIM: wwanmodem.SIMStateReady, Power: wwanmodem.PowerStateOn}}
@@ -93,35 +94,6 @@ func stopService(t *testing.T, cancel context.CancelFunc, done <-chan error) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-}
-func TestHistoryWithoutProAndRestart(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		allowed := new(atomic.Bool)
-		history := fakeStore{"sim-a": "+15551234567"}
-		for range 2 {
-			m := readyModem()
-			s, _ := testService(m, allowed, history)
-			s.config.CarrierConfig = func(context.Context) (*carrierconfig.Config, error) {
-				t.Error("non-Pro fetched configuration")
-				return nil, nil
-			}
-			s.query = func(context.Context, *modem.Modem, modem.SIMIdentity, *mdn.Configs, func() error) (string, error) {
-				t.Error("history triggered a query")
-				return "", nil
-			}
-			cancel, done := startService(t, s)
-			synctest.Wait()
-			if m.Snapshot().Number != history["sim-a"] {
-				t.Fatal("history not restored")
-			}
-			m.SetIMSNumber(m.Snapshot().SIMIdentity, "+200")
-			m.SetIMSNumber(m.Snapshot().SIMIdentity, "")
-			if m.Snapshot().Number != history["sim-a"] {
-				t.Fatal("IMS cleared restored history")
-			}
-			stopService(t, cancel, done)
-		}
-	})
 }
 func TestAuthorizationAndLatePublication(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -188,14 +160,13 @@ func TestConcurrentIMSAndGenerationChange(t *testing.T) {
 		}
 		cancel, done := startService(t, s)
 		synctest.Wait()
-		m.SetIMSNumber(m.Snapshot().SIMIdentity, "+200")
-		r.emit(modem.ModemEvent{Type: modem.ModemEventNumberChanged, Modem: m})
-		synctest.Wait()
+		if err := m.UpdateStoredNumber(m.SIMIdentity(), func(modem.ModemSnapshot) (string, error) { return "+200", nil }); err != nil {
+			t.Fatal(err)
+		}
 		close(release)
 		synctest.Wait()
-		m.SetIMSNumber(m.Snapshot().SIMIdentity, "")
-		if m.Snapshot().Number != "" {
-			t.Fatal("MDN was published behind an IMS number")
+		if m.Snapshot().Number != "+200" {
+			t.Fatal("a delayed MDN response replaced a fresher number")
 		}
 		replacement := readyModem()
 		r.mu.Lock()
@@ -359,7 +330,11 @@ func TestLookupPublishesAndKeepsNumber(t *testing.T) {
 		allowed := new(atomic.Bool)
 		allowed.Store(true)
 		m := readyModem()
-		s, r := testService(m, allowed, fakeStore{})
+		store := fakeStore{"sim-a": "+12025550100"}
+		if err := m.UpdateStoredNumber(m.SIMIdentity(), func(modem.ModemSnapshot) (string, error) { return store["sim-a"], nil }); err != nil {
+			t.Fatal(err)
+		}
+		s, r := testService(m, allowed, store)
 		var calls atomic.Int32
 		s.query = func(context.Context, *modem.Modem, modem.SIMIdentity, *mdn.Configs, func() error) (string, error) {
 			calls.Add(1)
@@ -367,7 +342,7 @@ func TestLookupPublishesAndKeepsNumber(t *testing.T) {
 		}
 		cancel, done := startService(t, s)
 		synctest.Wait()
-		if m.Snapshot().Number != "+15551234567" {
+		if m.Snapshot().Number != "+15551234567" || store["sim-a"] != "+15551234567" {
 			t.Fatal("successful lookup not published")
 		}
 		allowed.Store(false)

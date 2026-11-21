@@ -32,7 +32,7 @@ func TestProfileNumbers(t *testing.T) {
 		absent bool
 		want   string
 	}{
-		{name: "current number wins", iccid: "active", number: " +200 ", want: "+200"},
+		{name: "database number wins", iccid: "active", number: " +200 ", want: "+100"},
 		{name: "temporarily missing number", iccid: "active", want: "+100"},
 		{name: "other active SIM", iccid: "other", number: "+200", want: "+100"},
 		{name: "absent SIM retains stale metadata", iccid: "active", number: "+200", absent: true, want: "+100"},

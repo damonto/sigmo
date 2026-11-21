@@ -244,7 +244,7 @@ private struct ModemDetailScreen: View {
                 }
             }
             .presentationBackground(Color(uiColor: .systemGroupedBackground))
-            .presentationDetents([.medium, .large])
+            .presentationDetents(sheet == .automation ? [.large] : [.medium, .large])
             .presentationDragIndicator(.visible)
         }
         .sheet(item: $flow, onDismiss: { refreshID += 1 }) { flow in
@@ -589,7 +589,7 @@ private struct ModemDetailScreen: View {
         Section {
             DetailEditRow(
                 title: "modem.number",
-                value: PhoneNumberDisplay.format(modem.number, regionCode: modem.sim.regionCode)
+                value: PhoneNumberDisplay.format(modem.number)
             ) { sheet = .number }
         }
         .disabled(state.needsSIMUnlock || modem.sim.identifier.isEmpty)

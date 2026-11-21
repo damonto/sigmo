@@ -23,11 +23,10 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const { signalIcon } = useModemDisplay()
 
-const phoneCountry = computed(() => props.modem?.sim?.regionCode ?? '')
 const rawMsisdn = computed(() => props.modem?.number?.trim() ?? '')
 const displayMsisdn = computed(() => {
   if (!rawMsisdn.value) return t('modemDetail.settings.lineNoNumber')
-  return formatPhoneDisplay(rawMsisdn.value, phoneCountry.value)
+  return formatPhoneDisplay(rawMsisdn.value)
 })
 const accessTechnologyLabel = computed(() => {
   if (props.modem?.airplaneMode) return t('modemDetail.settings.networkAirplaneModeStatus')

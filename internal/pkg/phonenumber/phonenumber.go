@@ -23,7 +23,47 @@ var (
 
 	shortCodeRE = regexp.MustCompile(`^[0-9]{1,6}$`)
 	e164RE      = regexp.MustCompile(`^\+[1-9][0-9]{1,14}$`)
+	ownNumberRE = regexp.MustCompile(`^[0-9]{7,19}$`)
 )
+
+// NormalizeOwnNumber qualifies a SIM's own number only when its interpretation
+// is unambiguous. An explicit international number or an ambiguous value is
+// preserved as supplied.
+func NormalizeOwnNumber(value, region string) string {
+	value = strings.TrimSpace(value)
+	region = strings.ToUpper(strings.TrimSpace(region))
+	if !ownNumberRE.MatchString(value) || phonenumbers.GetCountryCodeForRegion(region) == 0 {
+		return value
+	}
+	national := validInternationalNumber(value, region)
+	international := validInternationalNumber("+"+value, "ZZ")
+	// Only consider the international interpretation if adding '+' is the
+	// entire change. The parser may otherwise strip a national prefix.
+	if international != "+"+value {
+		international = ""
+	}
+	switch {
+	case national == "":
+		if international != "" {
+			return international
+		}
+	case international == "" || national == international:
+		return national
+	}
+	return value
+}
+
+func validInternationalNumber(value, region string) string {
+	number, err := phonenumbers.Parse(value, region)
+	if err != nil || !phonenumbers.IsValidNumber(number) {
+		return ""
+	}
+	value = phonenumbers.Format(number, phonenumbers.E164)
+	if !e164RE.MatchString(value) {
+		return ""
+	}
+	return value
+}
 
 func Normalize(ctx context.Context, modem *mmodem.Modem, value string) (string, error) {
 	value = strings.TrimSpace(value)

@@ -4,8 +4,6 @@ import (
 	"context"
 	"maps"
 	"path/filepath"
-	"strconv"
-	"sync"
 	"testing"
 
 	"github.com/damonto/sigmo/internal/pkg/modem"
@@ -38,61 +36,38 @@ func TestSIMProfileSubscription(t *testing.T) {
 		}
 	}
 	assertNumbers(map[string]string{"sim-a": "+100"})
-	if !current.SetNumber(current.Snapshot().SIMIdentity, "+200") {
-		t.Fatal("number update rejected")
+	if err := store.SaveSIMProfileNumber(ctx, "sim-a", "modem", "+200"); err != nil {
+		t.Fatal(err)
 	}
 	if err := registry.notify(modem.ModemEvent{Type: modem.ModemEventNumberChanged, Modem: current}); err != nil {
 		t.Fatal(err)
 	}
 	assertNumbers(map[string]string{"sim-a": "+200"})
+	if current.Snapshot().Number != "+200" {
+		t.Fatal("the card number overrode the saved number")
+	}
 
-	// A different SIM on the same physical device retains the previous SIM's number.
-	replacement := &modem.Modem{EquipmentIdentifier: "modem", SIM: &modem.SIM{Identifier: "sim-b"}}
-	registry.present["modem"] = replacement
-	if err := registry.notify(modem.ModemEvent{Type: modem.ModemEventSIMChanged, Modem: replacement}); err != nil {
+	// A newly discovered modem must restore the same saved value after restart.
+	restarted := &modem.Modem{EquipmentIdentifier: "modem", SIM: &modem.SIM{Identifier: "sim-a"}, Number: "+100"}
+	registry.present["modem"] = restarted
+	if err := registry.notify(modem.ModemEvent{Type: modem.ModemEventChanged, Modem: restarted}); err != nil {
 		t.Fatal(err)
 	}
-	assertNumbers(map[string]string{"sim-a": "+200", "sim-b": ""})
-	if !current.SetNumber(current.Snapshot().SIMIdentity, "+999") {
-		t.Fatal("old modem observation rejected before registry validation")
+	if restarted.Snapshot().Number != "+200" {
+		t.Fatal("restart did not restore the saved number")
 	}
-	if !replacement.SetIMSNumber(replacement.Snapshot().SIMIdentity, "+300") {
-		t.Fatal("IMS number rejected")
-	}
+
+	replacement := &modem.Modem{EquipmentIdentifier: "modem", SIM: &modem.SIM{Identifier: "sim-b"}}
+	registry.present["modem"] = replacement
 	for _, event := range []modem.ModemEvent{
-		{Type: modem.ModemEventChanged, Modem: replacement},
+		{Type: modem.ModemEventSIMChanged, Modem: replacement},
 		{Type: modem.ModemEventNumberChanged, Modem: current},
 	} {
 		if err := registry.notify(event); err != nil {
 			t.Fatal(err)
 		}
 	}
-	assertNumbers(map[string]string{"sim-a": "+200", "sim-b": "+300"})
-	if !replacement.SetIMSNumber(replacement.Snapshot().SIMIdentity, "") {
-		t.Fatal("clearing IMS number rejected")
-	}
-	if err := registry.notify(modem.ModemEvent{Type: modem.ModemEventNumberChanged, Modem: replacement}); err != nil {
-		t.Fatal(err)
-	}
-	assertNumbers(map[string]string{"sim-a": "+200", "sim-b": "+300"})
-
-	// Callbacks can arrive concurrently and after a newer number is already set.
-	// The last stored observation must agree with the current modem snapshot.
-	target := replacement.Snapshot().SIMIdentity
-	var wg sync.WaitGroup
-	for i := range 20 {
-		wg.Go(func() {
-			if !replacement.SetIMSNumber(target, "+400"+strconv.Itoa(i)) {
-				t.Error("concurrent number update rejected")
-				return
-			}
-			if err := registry.notify(modem.ModemEvent{Type: modem.ModemEventNumberChanged, Modem: replacement}); err != nil {
-				t.Error(err)
-			}
-		})
-	}
-	wg.Wait()
-	assertNumbers(map[string]string{"sim-a": "+200", "sim-b": replacement.Snapshot().Number})
+	assertNumbers(map[string]string{"sim-a": "+200", "sim-b": ""})
 	unsubscribe()
 	if registry.notify != nil {
 		t.Fatal("subscription remained after cleanup")
@@ -111,29 +86,4 @@ func (r *profileRegistry) Modems(context.Context) (map[string]*modem.Modem, erro
 func (r *profileRegistry) Subscribe(_ context.Context, notify func(modem.ModemEvent) error) (func(), error) {
 	r.notify = notify
 	return func() { r.notify = nil }, nil
-}
-
-func TestKnownNumberPersistsThroughSIMProfileEvents(t *testing.T) {
-	store, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "profiles.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	current := &modem.Modem{EquipmentIdentifier: "modem", SIM: &modem.SIM{Identifier: "sim-a"}}
-	registry := &profileRegistry{present: map[string]*modem.Modem{"modem": current}}
-	unsubscribe, err := subscribeSIMProfiles(t.Context(), registry, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer unsubscribe()
-	if !current.SetKnownNumber(current.Snapshot().SIMIdentity, "+15551234567") {
-		t.Fatal("MDN observation rejected")
-	}
-	if err := registry.notify(modem.ModemEvent{Type: modem.ModemEventNumberChanged, Modem: current}); err != nil {
-		t.Fatal(err)
-	}
-	numbers, err := store.SIMProfileNumbers(t.Context(), []string{"sim-a"})
-	if err != nil || numbers["sim-a"] != "+15551234567" {
-		t.Fatalf("persisted numbers = %v, %v", numbers, err)
-	}
 }

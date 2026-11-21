@@ -59,7 +59,7 @@ func New(cfg Config) *Service {
 		registry: cfg.Registry,
 		catalog:  catalog,
 		simSlot:  newSIMSlot(cfg.Registry),
-		msisdn:   newMSISDN(cfg.Registry),
+		msisdn:   newMSISDN(cfg.Storage),
 		settings: newSettings(cfg.Store),
 		internet: cfg.Internet,
 	}

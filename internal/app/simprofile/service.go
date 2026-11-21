@@ -82,6 +82,7 @@ func (s *Service) inventory(ctx context.Context) ([]storage.SIMLine, error) {
 	}
 	present := make(map[string]bool)
 	active := make(map[string]bool)
+	cardNumbers := make(map[string]string)
 	confirmed := make(map[string]bool)
 	if s.registry == nil {
 		return s.store.SIMLines(ctx)
@@ -113,9 +114,10 @@ func (s *Service) inventory(ctx context.Context) ([]storage.SIMLine, error) {
 			present[slot.Identifier] = true
 		}
 		if snapshot.SIM != nil && snapshot.SIM.Identifier != "" {
+			cardNumbers[snapshot.SIM.Identifier] = snapshot.Number
 			active[snapshot.SIM.Identifier] = !snapshot.Locked()
 			present[snapshot.SIM.Identifier] = true
-			if err := s.store.RecordSIMProfile(ctx, storage.SIMProfile{ProfileID: snapshot.SIM.Identifier, ModemID: device.EquipmentIdentifier, Number: snapshot.Number, Region: carrier.Lookup(snapshot.SIM.OperatorIdentifier).Region}); err != nil {
+			if err := s.store.RecordSIMProfile(ctx, storage.SIMProfile{ProfileID: snapshot.SIM.Identifier, ModemID: device.EquipmentIdentifier, Region: carrier.Lookup(snapshot.SIM.OperatorIdentifier).Region}); err != nil {
 				return nil, err
 			}
 		}
@@ -140,6 +142,9 @@ func (s *Service) inventory(ctx context.Context) ([]storage.SIMLine, error) {
 		line := &lines[i]
 		line.Present = present[line.ProfileID]
 		line.Active = active[line.ProfileID]
+		if line.Number == "" {
+			line.Number = cardNumbers[line.ProfileID]
+		}
 		line.CanMessage = line.Active
 		line.CanCall = line.Active
 		before, known := observed[line.ProfileID]

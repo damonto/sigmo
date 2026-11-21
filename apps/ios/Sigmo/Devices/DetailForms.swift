@@ -17,7 +17,7 @@ struct DetailTextForm: View {
         let initial: String
         switch kind {
         case .pin: initial = ""
-        case .number: initial = PhoneNumberDisplay.format(state.modem?.number ?? "", regionCode: state.modem?.sim.regionCode)
+        case .number: initial = PhoneNumberDisplay.format(state.modem?.number ?? "")
         case .rename(let profile): initial = profile.name
         }
         _value = State(initialValue: initial)
@@ -32,7 +32,7 @@ struct DetailTextForm: View {
     private var valid: Bool {
         switch kind {
         case .pin: !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .number: !PhoneNumberDisplay.submission(value, regionCode: state.modem?.sim.regionCode).isEmpty
+        case .number: !PhoneNumberDisplay.submission(value, regionCode: nil).isEmpty
         case .rename: ModemDetailState.validNickname(value)
         }
     }

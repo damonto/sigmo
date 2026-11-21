@@ -38,6 +38,11 @@ final class PhoneNumberDisplayTests: XCTestCase {
         }
     }
 
+    func testOwnNumberPreservesUnqualifiedDigits() {
+        XCTAssertEqual(PhoneNumberDisplay.format("4915123456789"), "4915123456789")
+        XCTAssertEqual(PhoneNumberDisplay.format("+4915123456789"), "+49 1512 3456789")
+    }
+
     func testRadioGlyphDoesNotAssumeAnUnknownTechnologyIs4G() {
         for (input, expected) in [("LTE", "4G"), ("5gnr", "5G"), ("UMTS", "3G"), ("EDGE", "2G"), ("future", "?"), ("", "?")] {
             XCTAssertEqual(ModemStatusIcons.radioGlyph(input), expected)

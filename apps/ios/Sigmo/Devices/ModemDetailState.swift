@@ -321,7 +321,7 @@ final class ModemDetailState {
     func updateNumber(_ number: String, target: ModemSIMTarget? = nil) async -> Bool {
         let target = target ?? simTarget
         guard target == simTarget else { return false }
-        let value = PhoneNumberDisplay.submission(number, regionCode: modem?.sim.regionCode)
+        let value = PhoneNumberDisplay.submission(number, regionCode: nil)
         guard !value.isEmpty else { return false }
         let id = modemID
         return await mutate(target: target) { api, token in try await api.detailMutation(id, path: ["msisdn"], method: "PUT", value: ["number": value], token: token) }

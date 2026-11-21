@@ -69,7 +69,7 @@ struct ESIMProfile: Codable, Identifiable, Sendable, Equatable {
     var id: String { seId + ":" + iccid }
     var enabled: Bool { profileState == 1 }
     @MainActor var numberLabel: String {
-        let value = PhoneNumberDisplay.format(number ?? "", regionCode: regionCode)
+        let value = PhoneNumberDisplay.format(number ?? "")
         return value.isEmpty ? String(localized: "detail.noNumber") : value
     }
 }

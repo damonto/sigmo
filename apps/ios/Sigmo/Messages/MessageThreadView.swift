@@ -23,7 +23,7 @@ struct MessageThreadView: View {
            let modem = state.modem, modem.sim.identifier == state.sendingProfileID {
             return modem.communicationLabel
         }
-        return state.conversation.lineDescription(regionCode: regionCode)
+        return state.conversation.lineDescription()
     }
 
     private struct ReadIdentity: Equatable {
@@ -212,7 +212,7 @@ struct NewMessageView: View {
             }.padding(.horizontal).padding(.top)
             Divider()
             if let modem = state.modem {
-                Text(modem.number.isEmpty ? modem.carrier : PhoneNumberDisplay.format(modem.number, regionCode: modem.sim.regionCode))
+                Text(modem.number.isEmpty ? modem.carrier : PhoneNumberDisplay.format(modem.number))
                     .font(.caption).foregroundStyle(.secondary).padding(.horizontal)
             }
             Spacer()

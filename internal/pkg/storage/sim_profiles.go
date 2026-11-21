@@ -49,8 +49,23 @@ func (s *Store) SIMProfileNumbers(ctx context.Context, profileIDs []string) (map
 	return numbers, nil
 }
 
+// SaveSIMProfileNumber records an explicit edit or a fresh network observation for an ICCID.
+func (s *Store) SaveSIMProfileNumber(ctx context.Context, profileID, modemID, number string) error {
+	profileID, modemID, number = strings.TrimSpace(profileID), strings.TrimSpace(modemID), strings.TrimSpace(number)
+	if profileID == "" || modemID == "" || number == "" {
+		return errors.New("SIM profile, modem and number are required")
+	}
+	err := query.New(s.db).SaveSIMProfileNumber(ctx, query.SaveSIMProfileNumberParams{
+		ProfileID: profileID, ModemID: modemID, Number: number,
+	})
+	if err != nil {
+		return fmt.Errorf("save SIM profile number: %w", err)
+	}
+	return nil
+}
+
 // RecordSIMProfile saves confirmed SIM metadata and associates unassigned history.
-// Empty metadata preserves previously known values, including numbers of inactive SIMs.
+// An observed card number fills an empty value without replacing a saved number.
 func (s *Store) RecordSIMProfile(ctx context.Context, profile SIMProfile) error {
 	profile.ProfileID = strings.TrimSpace(profile.ProfileID)
 	profile.ModemID = strings.TrimSpace(profile.ModemID)

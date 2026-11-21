@@ -28,6 +28,7 @@ type Connectivity struct {
 	wifiCallingVoice *WiFiCalling
 	volteVoice       *VoLTE
 	reloadModem      func(context.Context, *mmodem.Modem) (*mmodem.Modem, error)
+	numberStore      *storage.Store
 
 	operations keymutex.KeyMutex
 	numberMu   sync.Mutex
@@ -74,6 +75,7 @@ func NewConnectivity(cfg ConnectivityConfig) *Connectivity {
 		volte:            volte,
 		wifiCallingVoice: &WiFiCalling{voiceAccess: &voiceAccess{access: wifiCalling}},
 		volteVoice:       &VoLTE{voiceAccess: &voiceAccess{access: volte}},
+		numberStore:      cfg.Store,
 	}
 	if cfg.Registry != nil {
 		connectivity.reloadModem = cfg.Registry.Reload

@@ -28,7 +28,7 @@ enum PhoneNumberDisplay {
         return chars
     }
 
-    static func format(_ number: String, regionCode: String?) -> String {
+    static func format(_ number: String, regionCode: String? = nil) -> String {
         let raw = number.trimmingCharacters(in: .whitespacesAndNewlines)
         let region = regionCode?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
         let countryCode = utility.countryCode(for: region)

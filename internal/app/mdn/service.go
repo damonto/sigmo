@@ -1,10 +1,9 @@
-// Package mdn fills missing active-line numbers from history and carrier entitlements.
+// Package mdn refreshes active-line numbers from carrier entitlements.
 package mdn
 
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/damonto/sigmo/internal/pkg/carrierconfig"
@@ -20,10 +19,10 @@ const (
 )
 
 type numberStore interface {
-	SIMProfileNumbers(context.Context, []string) (map[string]string, error)
+	SaveSIMProfileNumber(ctx context.Context, profileID, modemID, number string) error
 }
 
-// Config supplies the existing registry, ICCID history and live Pro authorization.
+// Config supplies the existing registry, SIM number storage and live Pro authorization.
 type Config struct {
 	Registry      modemtask.Registry
 	Store         numberStore
@@ -51,10 +50,11 @@ func (s *Service) Run(ctx context.Context) error {
 // lookup keeps cancellation, completion and the SIM target together. Its owner
 // retires canceled work even if authorization is restored before it returns.
 type lookup struct {
-	target  modem.SIMIdentity
-	cancel  context.CancelFunc
-	retired bool
-	done    chan struct{}
+	target   modem.SIMIdentity
+	revision uint64
+	cancel   context.CancelFunc
+	retired  bool
+	done     chan struct{}
 
 	// Written by the lookup goroutine and read only after done closes.
 	number string
@@ -66,14 +66,14 @@ func (l *lookup) retire() {
 	l.cancel()
 }
 
-func (s *Service) startLookup(ctx context.Context, m *modem.Modem, target modem.SIMIdentity, catalog *mdn.Configs) *lookup {
+func (s *Service) startLookup(ctx context.Context, m *modem.Modem, snapshot modem.ModemSnapshot, catalog *mdn.Configs) *lookup {
 	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
-	active := &lookup{target: target, cancel: cancel, done: make(chan struct{})}
+	active := &lookup{target: snapshot.SIMIdentity, revision: snapshot.NumberRevision, cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(active.done)
 		defer cancel()
-		check := func() error { return s.check(ctx, m, target) }
-		active.number, active.err = s.query(ctx, m, target, catalog, check)
+		check := func() error { return s.check(ctx, m, active.target) }
+		active.number, active.err = s.query(ctx, m, active.target, catalog, check)
 	}()
 	return active
 }
@@ -121,13 +121,10 @@ func (s *Service) runModem(ctx context.Context, m *modem.Modem) {
 			retry = retryState{}
 		}
 		ready := snapshot.Status.SIM == wwanmodem.SIMStateReady && !snapshot.AirplaneMode() && target.ICCID != ""
-		if ready && snapshot.Number == "" {
-			snapshot = s.restoreNumber(ctx, m, snapshot)
-		}
-		if active != nil && (!ready || snapshot.Number != "" || !allowed) {
+		if active != nil && (!ready || !allowed) {
 			active.retire()
 		}
-		if ready && snapshot.Number == "" && allowed && active == nil {
+		if ready && allowed && active == nil {
 			config, err := s.config.CarrierConfig(ctx)
 			if err != nil {
 				m.Logger().Debug("load MDN carrier configuration", "error", err)
@@ -137,7 +134,7 @@ func (s *Service) runModem(ctx context.Context, m *modem.Modem) {
 				}
 				catalog = config.MDN
 				if catalog != nil && retry.ready() {
-					active = s.startLookup(ctx, m, target, catalog)
+					active = s.startLookup(ctx, m, snapshot, catalog)
 				}
 			}
 		}
@@ -156,29 +153,28 @@ func (s *Service) runModem(ctx context.Context, m *modem.Modem) {
 			if completed.retired {
 				continue
 			}
-			if completed.err == nil && s.check(ctx, m, completed.target) == nil {
-				m.SetKnownNumber(completed.target, completed.number)
+			if completed.err == nil && completed.number != "" && s.check(ctx, m, completed.target) == nil {
+				if err := s.saveNumber(ctx, m, completed); err != nil && !errors.Is(err, modem.ErrSIMActivationChanged) {
+					m.Logger().Warn("save MDN subscriber number", "error", err)
+					retry.retryAt = time.Now().Add(reconcileInterval)
+					continue
+				}
 			}
 			retry.record(completed.err)
 			if completed.err != nil && !errors.Is(completed.err, context.Canceled) {
-				m.Logger().Debug("query missing SIM number", "error", completed.err, "retry", !retry.stopped)
+				m.Logger().Debug("query SIM number", "error", completed.err, "retry", !retry.stopped)
 			}
 		}
 	}
 }
 
-func (s *Service) restoreNumber(ctx context.Context, m *modem.Modem, snapshot modem.ModemSnapshot) modem.ModemSnapshot {
-	numbers, err := s.config.Store.SIMProfileNumbers(ctx, []string{snapshot.SIMIdentity.ICCID})
-	if err != nil {
-		m.Logger().Warn("restore SIM number", "error", err)
-		return snapshot
-	}
-	// Previously confirmed numbers remain available after Pro expires.
-	if number := strings.TrimSpace(numbers[snapshot.SIMIdentity.ICCID]); number != "" {
-		m.SetKnownNumber(snapshot.SIMIdentity, number)
-		return m.Snapshot()
-	}
-	return snapshot
+func (s *Service) saveNumber(ctx context.Context, m *modem.Modem, completed *lookup) error {
+	return m.UpdateStoredNumber(completed.target, func(snapshot modem.ModemSnapshot) (string, error) {
+		if snapshot.NumberRevision != completed.revision {
+			return "", nil
+		}
+		return completed.number, s.config.Store.SaveSIMProfileNumber(ctx, completed.target.ICCID, m.EquipmentIdentifier, completed.number)
+	})
 }
 
 func (s *Service) check(ctx context.Context, m *modem.Modem, target modem.SIMIdentity) error {
@@ -186,16 +182,11 @@ func (s *Service) check(ctx context.Context, m *modem.Modem, target modem.SIMIde
 		return err
 	}
 	snapshot := m.Snapshot()
-	if !s.config.Allowed() || snapshot.SIMIdentity != target || snapshot.Number != "" ||
+	if !s.config.Allowed() || !m.MatchesSIMActivation(target) ||
 		snapshot.Status.SIM != wwanmodem.SIMStateReady || snapshot.AirplaneMode() {
 		return context.Canceled
 	}
-	select {
-	case <-m.Done():
-		return context.Canceled
-	default:
-		return nil
-	}
+	return nil
 }
 
 type retryState struct {

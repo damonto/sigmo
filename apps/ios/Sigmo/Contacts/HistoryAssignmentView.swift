@@ -196,7 +196,7 @@ struct HistoryAssignmentView: View {
 
     private func lineTitle(_ line: CommunicationLine) -> String {
         if !line.label.isEmpty { return line.label }
-        if !line.number.isEmpty { return PhoneNumberDisplay.format(line.number, regionCode: line.region) }
+        if !line.number.isEmpty { return PhoneNumberDisplay.format(line.number) }
         return String(format: detailText("communication.assignmentUnnamedLine"), String(line.id.suffix(6)))
     }
 
