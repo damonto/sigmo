@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	pims "github.com/damonto/sigmo/internal/app/ims"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
@@ -23,15 +22,15 @@ var (
 const automationAnswerTimeout = 60 * time.Second
 
 // RunTimedCall dials on the pinned SIM activation and hangs up its own dialog
-// after the requested connected duration.
-func (c *Calls) RunTimedCall(ctx context.Context, modem *mmodem.Modem, identity mmodem.SIMIdentity, req DialRequest, duration time.Duration, busy func() bool) error {
+// after the requested connected duration. The optional check runs while the SIM is reserved.
+func (c *Calls) RunTimedCall(ctx context.Context, modem *mmodem.Modem, identity mmodem.SIMIdentity, req DialRequest, duration time.Duration, check func(context.Context) error) error {
 	if modem == nil {
 		return ErrCallProfileChanged
 	}
 	events, unsubscribe := c.Subscribe(SubscriptionConfig{ModemID: modem.EquipmentIdentifier, Buffer: 32})
 	defer unsubscribe()
 
-	started, err := c.dialTimed(ctx, modem, identity, req, busy)
+	started, err := c.dialTimed(ctx, modem, identity, req, check)
 	var deadline time.Time
 	if !started.AnsweredAt.IsZero() {
 		deadline = started.AnsweredAt.Add(duration)
@@ -77,7 +76,7 @@ func timedCallEnd(ended storage.Call, deadline time.Time) error {
 	return nil
 }
 
-func (c *Calls) dialTimed(ctx context.Context, modem *mmodem.Modem, identity mmodem.SIMIdentity, req DialRequest, busy func() bool) (storage.Call, error) {
+func (c *Calls) dialTimed(ctx context.Context, modem *mmodem.Modem, identity mmodem.SIMIdentity, req DialRequest, check func(context.Context) error) (storage.Call, error) {
 	owner, err := clientID(req.ClientID)
 	if err != nil {
 		return storage.Call{}, err
@@ -92,12 +91,13 @@ func (c *Calls) dialTimed(ctx context.Context, modem *mmodem.Modem, identity mmo
 	if !modem.MatchesSIMActivation(identity) {
 		return storage.Call{}, ErrCallProfileChanged
 	}
-	if busy() {
-		return storage.Call{}, ErrCallInUse
-	}
-
 	dialCtx, cancel := context.WithTimeout(ctx, automationAnswerTimeout)
 	defer cancel()
+	if check != nil {
+		if err := check(dialCtx); err != nil {
+			return storage.Call{}, err
+		}
+	}
 	started, err := c.dialForClientReserved(dialCtx, modem, req, owner)
 	if err != nil && started.AnsweredAt.IsZero() && ctx.Err() == nil &&
 		(errors.Is(dialCtx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded)) {
@@ -138,24 +138,4 @@ func (c *Calls) finishTimedCall(ctx context.Context, modem *mmodem.Modem, identi
 	}
 	_, err = c.records.saveAndPublish(cleanup, callFromIMS(ended))
 	return err
-}
-
-// AutomationRoute selects an authorized, currently connected voice route.
-func (c *Calls) AutomationRoute(ctx context.Context, modem *mmodem.Modem, wifi, volte bool) (string, error) {
-	for _, route := range []struct {
-		name    string
-		allowed bool
-	}{{RouteWiFiCalling, wifi}, {RouteVoLTE, volte}} {
-		if !route.allowed {
-			continue
-		}
-		status, available, err := c.routes.routeStatus(ctx, modem, route.name)
-		if err != nil && !errors.Is(err, pims.ErrNotConnected) {
-			return "", err
-		}
-		if available && status.Connected {
-			return route.name, nil
-		}
-	}
-	return "", ErrNoRouteAvailable
 }

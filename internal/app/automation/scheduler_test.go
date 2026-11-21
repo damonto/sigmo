@@ -356,7 +356,7 @@ func TestAutomationHTTPContract(t *testing.T) {
 	if err := json.Unmarshal(reply.Body.Bytes(), &task); err != nil {
 		t.Fatal(err)
 	}
-	if task.NextAt == nil || task.RepeatDays == nil || *task.RepeatDays != 2 || *task.Action.To != "+12025550123" || *task.Action.Text != " hello " {
+	if task.NextAt == nil || task.RepeatDays == nil || *task.RepeatDays != 2 || *task.Action.To != "+12025550123" || *task.Action.Text != " hello " || task.Action.WiFiCallingOnly {
 		t.Fatalf("created task = %+v", task)
 	}
 	member := collection + "/" + task.ID
@@ -371,6 +371,21 @@ func TestAutomationHTTPContract(t *testing.T) {
 	otherModem := request(http.MethodGet, "/api/v1/modems/other/automations", "", http.StatusOK)
 	if got := strings.TrimSpace(otherModem.Body.String()); got != `{"items":[]}` {
 		t.Fatalf("list schedules for another modem = %s, want no items", got)
+	}
+	const scheduledAt = `"scheduledAt":"2026-11-22T12:00:00Z"`
+	request(http.MethodPut, member, `{`+scheduledAt+`,"action":{"type":"data","bytes":1024,"wifiCallingOnly":true}}`, http.StatusUnprocessableEntity)
+	const strictSMS = `{` + scheduledAt + `,"action":{"type":"sms","to":"10086","text":"hello","wifiCallingOnly":true}}`
+	request(http.MethodPut, member, strictSMS, http.StatusOK)
+	list := request(http.MethodGet, collection, "", http.StatusOK)
+	if !strings.Contains(list.Body.String(), `"wifiCallingOnly":true`) {
+		t.Fatalf("list lost the saved Wi-Fi Calling Only option: %s", list.Body)
+	}
+	for _, field := range []string{"", `,"wifiCallingOnly":false`} {
+		request(http.MethodPut, member, strictSMS, http.StatusOK)
+		reply := request(http.MethodPut, member, `{`+scheduledAt+`,"action":{"type":"call","to":"+12025550123","durationSeconds":5`+field+`}}`, http.StatusOK)
+		if strings.Contains(reply.Body.String(), `"wifiCallingOnly"`) {
+			t.Fatalf("update with %q left Wi-Fi Calling Only set: %s", field, reply.Body)
+		}
 	}
 	request(http.MethodPut, member, `{"scheduledAt":"2026-11-22T12:00:00Z","action":{"type":"data","bytes":1024}}`, http.StatusOK)
 	record, err := s.store.SIMAutomation(t.Context(), "line", task.ID)

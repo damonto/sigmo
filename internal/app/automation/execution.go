@@ -14,10 +14,7 @@ import (
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
 	"github.com/damonto/sigmo/internal/pkg/modem/wwan"
 	"github.com/damonto/sigmo/internal/pkg/storage"
-	wwanmodem "github.com/damonto/wwan-go/modem"
 )
-
-const readinessTimeout = time.Minute
 
 type modemFinder interface {
 	Find(context.Context, string) (*mmodem.Modem, error)
@@ -33,16 +30,16 @@ type connections interface {
 	WithAutomationConnection(context.Context, *mmodem.Modem, mmodem.SIMIdentity, func(*internet.Connection) error) error
 	RestoreAutomationConnection(context.Context, *mmodem.Modem, mmodem.SIMIdentity, internet.Preferences) error
 	HasOngoingCall(string) bool
-	MessageRoute() message.Route
+	AutomationAccessStatus(context.Context, *mmodem.Modem, ims.Access) (enabled, connected bool, err error)
+	SendSMSVia(context.Context, *mmodem.Modem, ims.Access, string, string) (storage.Message, error)
 }
 
 type messages interface {
-	SendWithProfile(context.Context, *mmodem.Modem, message.SendRequest) (string, error)
+	SendWithProfileVia(context.Context, *mmodem.Modem, message.SendRequest, message.Sender, func(context.Context) error) (string, error)
 }
 
 type voiceCalls interface {
-	AutomationRoute(context.Context, *mmodem.Modem, bool, bool) (string, error)
-	RunTimedCall(context.Context, *mmodem.Modem, mmodem.SIMIdentity, call.DialRequest, time.Duration, func() bool) error
+	RunTimedCall(context.Context, *mmodem.Modem, mmodem.SIMIdentity, call.DialRequest, time.Duration, func(context.Context) error) error
 }
 
 // Execution coordinates the existing eSIM, SMS, IMS and cellular data services.
@@ -125,23 +122,23 @@ type restoration struct {
 
 func (e *Execution) execute(ctx context.Context, task storage.SIMAutomation, action Action, journal func(context.Context, restoration) error) outcome {
 	// Recheck the current license before any call-related SIM switch.
-	if action.Type == actionCall && !e.policy.Allows(feature.WiFiCalling) && !e.policy.Allows(feature.VoLTE) {
-		return failed("call_unavailable")
+	if action.Type == actionCall && !e.canCall(action) {
+		return failed(action.unavailableCode())
 	}
 	line, code := e.resolveLine(ctx, task, journal)
 	if code != "" {
 		return failed(code)
 	}
-	route, code := e.waitReady(ctx, line, action.Type)
+	route, code := e.waitReady(ctx, line, action)
 	if code != "" {
 		return failed(code)
 	}
 
 	switch action.Type {
 	case actionSMS:
-		return e.sendSMS(ctx, line, *action.To, *action.Text)
+		return e.sendSMS(ctx, line, action, route)
 	case actionCall:
-		return e.placeCall(ctx, task.ID, line, route, *action.To, time.Duration(*action.DurationSeconds)*time.Second)
+		return e.placeCall(ctx, task.ID, line, action, route)
 	case actionData:
 		return e.useData(ctx, line.device, line.identity, *action.Bytes)
 	default:
@@ -176,16 +173,24 @@ func (e *Execution) resolveLine(ctx context.Context, task storage.SIMAutomation,
 	return activeLine{device: device, identity: snapshot.SIMIdentity}, ""
 }
 
-func (e *Execution) sendSMS(ctx context.Context, line activeLine, to, text string) outcome {
+func (e *Execution) sendSMS(ctx context.Context, line activeLine, action Action, route string) outcome {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	req := message.SendRequest{
 		ExpectedProfileID: line.identity.ICCID,
 		ExpectedSIM:       line.identity,
-		To:                to,
-		Text:              text,
+		To:                *action.To,
+		Text:              *action.Text,
 	}
-	_, err := e.messages.SendWithProfile(ctx, line.device, req)
+	var sender message.Sender
+	if route != call.RouteModem {
+		sender = func(ctx context.Context, device *mmodem.Modem, to, text string) (storage.Message, error) {
+			return e.internet.SendSMSVia(ctx, device, ims.Access(route), to, text)
+		}
+	}
+	_, err := e.messages.SendWithProfileVia(ctx, line.device, req, sender, func(ctx context.Context) error {
+		return e.checkRoute(ctx, line.device, action, route)
+	})
 	switch {
 	case err == nil:
 		return outcome{Status: statusSucceeded}
@@ -193,15 +198,21 @@ func (e *Execution) sendSMS(ctx context.Context, line activeLine, to, text strin
 		return outcome{Status: statusUnconfirmed, Code: "sms_unconfirmed"}
 	case errors.Is(err, message.ErrProfileChanged):
 		return failed("line_unavailable")
+	case errors.Is(err, errRouteUnavailable), errors.Is(err, message.ErrRouteNotConnected), errors.Is(err, message.ErrRouteUnavailable):
+		return failed(action.unavailableCode())
 	default:
 		return failed("sms_failed")
 	}
 }
 
-func (e *Execution) placeCall(ctx context.Context, taskID string, line activeLine, route, to string, duration time.Duration) outcome {
-	req := call.DialRequest{ExpectedProfileID: line.identity.ICCID, To: to, Route: route, ClientID: "automation-" + taskID}
-	err := e.calls.RunTimedCall(ctx, line.device, line.identity, req, duration, func() bool {
-		return e.internet.HasOngoingCall(line.device.EquipmentIdentifier)
+func (e *Execution) placeCall(ctx context.Context, taskID string, line activeLine, action Action, route string) outcome {
+	req := call.DialRequest{ExpectedProfileID: line.identity.ICCID, To: *action.To, Route: route, ClientID: "automation-" + taskID}
+	duration := time.Duration(*action.DurationSeconds) * time.Second
+	err := e.calls.RunTimedCall(ctx, line.device, line.identity, req, duration, func(ctx context.Context) error {
+		if e.internet.HasOngoingCall(line.device.EquipmentIdentifier) {
+			return call.ErrCallInUse
+		}
+		return e.checkRoute(ctx, line.device, action, route)
 	})
 	switch {
 	case err == nil:
@@ -216,6 +227,8 @@ func (e *Execution) placeCall(ctx context.Context, taskID string, line activeLin
 		return failed("call_in_progress")
 	case errors.Is(err, call.ErrCallProfileChanged):
 		return failed("line_unavailable")
+	case errors.Is(err, errRouteUnavailable), errors.Is(err, call.ErrWiFiCallingNotConnected), errors.Is(err, call.ErrVoLTENotConnected):
+		return failed(action.unavailableCode())
 	default:
 		return failed("call_failed")
 	}
@@ -277,68 +290,6 @@ func (e *Execution) prepareESIM(ctx context.Context, task storage.SIMAutomation,
 		return activeLine{}, "switch_failed"
 	}
 	return activeLine{device: device, identity: selected}, ""
-}
-
-func (e *Execution) waitReady(ctx context.Context, line activeLine, action string) (route string, code string) {
-	ctx, cancel := context.WithTimeout(ctx, readinessTimeout)
-	defer cancel()
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	code = "network_unavailable"
-	if action == actionCall {
-		code = "call_unavailable"
-	}
-	device := line.device
-	for {
-		if ctx.Err() != nil {
-			return "", code
-		}
-		select {
-		case <-device.Done():
-			return "", "line_unavailable"
-		default:
-		}
-		snapshot := device.Snapshot()
-		if snapshot.SIMIdentity != line.identity || device.SIMReloadPending() {
-			return "", "line_unavailable"
-		}
-		if snapshot.Locked() {
-			return "", "sim_locked"
-		}
-		registered := snapshot.Status.Registration == wwanmodem.RegistrationHome || snapshot.Status.Registration == wwanmodem.RegistrationRoaming
-		if action == actionCall {
-			if e.internet.HasOngoingCall(device.EquipmentIdentifier) {
-				return "", "call_in_progress"
-			}
-			wifi, volte := e.policy.Allows(feature.WiFiCalling), e.policy.Allows(feature.VoLTE)
-			if !wifi && !volte {
-				return "", "call_unavailable"
-			}
-			if route, err := e.calls.AutomationRoute(ctx, device, wifi, volte); err == nil {
-				return route, ""
-			}
-		} else {
-			if registered && !snapshot.AirplaneMode() {
-				return "", ""
-			}
-			if action == actionSMS {
-				if route := e.internet.MessageRoute(); route != nil {
-					if status, err := route.Status(ctx, device); err == nil && status.Connected {
-						return "", ""
-					}
-				}
-			} else if snapshot.AirplaneMode() {
-				return "", "data_unavailable"
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return "", code
-		case <-device.Done():
-			return "", "line_unavailable"
-		case <-ticker.C:
-		}
-	}
 }
 
 func (e *Execution) useData(ctx context.Context, device *mmodem.Modem, identity mmodem.SIMIdentity, bytes int64) outcome {

@@ -576,6 +576,23 @@ final class ModemDetailFlowTests: XCTestCase {
         XCTAssertTrue(app.buttons["scanESIM"].waitForExistence(timeout: 5))
     }
 
+    func testReminderOpensAtFullHeightForPhysicalSIMAndESIM() {
+        for physicalSIM in [true, false] {
+            let app = launch(physicalSIM ? "detail-physical" : "detail")
+            let reminder = app.buttons["Reminder"]
+            if physicalSIM {
+                tapOverviewRow(reminder, in: app)
+            } else {
+                openActions(app)
+                tap(reminder, in: app)
+            }
+            let save = app.buttons["saveReminder"]
+            XCTAssertTrue(save.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertLessThan(save.frame.midY, app.frame.minY + app.frame.height / 3)
+            app.terminate()
+        }
+    }
+
     func testRenameReminderAndSIMApplication() {
         let app = launch()
         openActions(app)
@@ -612,6 +629,11 @@ final class ModemDetailFlowTests: XCTestCase {
         let recipient = app.textFields["Phone number"]
         XCTAssertTrue(recipient.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(recipient.value as? String, "+12025550123")
+        let wifiOnly = app.switches["automationWiFiCallingOnly"]
+        XCTAssertTrue(wifiOnly.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(wifiOnly.value as? String, "1")
+        let wifiOnlyHint = app.staticTexts["automationWiFiCallingOnlyHint"]
+        XCTAssertTrue(wifiOnlyHint.waitForExistence(timeout: 5), app.debugDescription)
     }
 
     func testESIMAutomationDistinguishesCompletedAndUnsetLines() {
@@ -632,6 +654,7 @@ final class ModemDetailFlowTests: XCTestCase {
         let amount = app.textFields["Amount"]
         XCTAssertTrue(amount.waitForExistence(timeout: 5))
         XCTAssertEqual(amount.value as? String, "1")
+        XCTAssertFalse(app.switches["automationWiFiCallingOnly"].exists)
         app.navigationBars.buttons["Cancel"].tap()
         XCTAssertTrue(amount.waitForNonExistence(timeout: 5))
         openActions(app, profile: "se-b:8986000000000000002")

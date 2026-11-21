@@ -55,7 +55,6 @@ import type { ReminderPayload } from '@/types/reminder'
 const props = withDefaults(
   defineProps<{
     modemId: string
-    automationsAvailable?: boolean
     /** Upcoming schedules keyed by secure element and ICCID. */
     automationSchedules?: ReadonlyMap<string, ScheduledAutomation>
     loading?: boolean
@@ -516,12 +515,10 @@ watch(detailsOpen, (value) => {
                   <DropdownMenuItem @click="openReminderDialog(profile)">
                     {{ t('modemDetail.reminder.title') }}
                   </DropdownMenuItem>
-                  <template v-if="props.automationsAvailable">
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem @click="emit('open-automations', profile)">
-                      {{ t('automation.title') }}
-                    </DropdownMenuItem>
-                  </template>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem @click="emit('open-automations', profile)">
+                    {{ t('automation.title') }}
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <template v-if="profile.enabled">
                     <DropdownMenuItem

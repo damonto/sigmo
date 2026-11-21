@@ -26,6 +26,10 @@ const en = {
     number: 'Phone number',
     message: 'Message',
     duration: 'Seconds after answer',
+    wifiCallingOnly: 'Wi-Fi Calling Only',
+    wifiCallingOnlyHint:
+      'When on, the task waits up to 60 seconds and runs only over Wi-Fi Calling. When off, it waits for enabled Wi-Fi Calling first and can use VoLTE if Wi-Fi Calling is disabled or times out.',
+    wifiCallingOnlySmsHint: 'If both services are disabled, SMS uses the modem network.',
     callHint: 'Requires Wi-Fi Calling or VoLTE. The call waits up to 60 seconds for an answer.',
     callSummary: '{to} · {seconds} s',
     next: 'Next run: {time}',
@@ -52,6 +56,7 @@ const en = {
       switch_unavailable: 'Cannot temporarily switch to this eSIM',
       switch_failed: 'eSIM activation failed',
       network_unavailable: 'Network unavailable',
+      wifi_calling_unavailable: 'Wi-Fi Calling unavailable',
       sms_unconfirmed: 'SMS submission unconfirmed',
       sms_failed: 'SMS submission failed',
       call_unavailable: 'Wi-Fi Calling or VoLTE unavailable',

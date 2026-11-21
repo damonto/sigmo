@@ -35,11 +35,15 @@ type Action struct {
 	To              *string `json:"to,omitempty"`
 	Text            *string `json:"text,omitempty"`
 	DurationSeconds *int    `json:"durationSeconds,omitempty"`
+	WiFiCallingOnly bool    `json:"wifiCallingOnly,omitempty"`
 }
 
 func (a *Action) validate() error {
 	switch a.Type {
 	case actionData:
+		if a.WiFiCallingOnly {
+			return errors.New("wifi calling only requires an SMS or call action")
+		}
 		if a.Bytes == nil || *a.Bytes < minDataBytes || *a.Bytes > maxDataBytes || *a.Bytes%minDataBytes != 0 || a.To != nil || a.Text != nil || a.DurationSeconds != nil {
 			return errors.New("provide between 1 KiB and 100 MiB in whole KiB")
 		}

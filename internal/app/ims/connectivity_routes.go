@@ -21,6 +21,51 @@ func (c *Connectivity) MessageRoute() pmessage.Route {
 	return connectivityMessageRoute{connectivity: c}
 }
 
+// SendSMSVia submits through one IMS access without consulting route preference.
+func (c *Connectivity) SendSMSVia(ctx context.Context, modem *mmodem.Modem, access Access, to, text string) (storage.Message, error) {
+	route := c.accessCoordinator(access)
+	if route == nil {
+		return storage.Message{}, pmessage.ErrRouteUnavailable
+	}
+	return sendSMSOnAccess(ctx, route, modem, to, text)
+}
+
+// AutomationAccessStatus reports saved enablement and the current SIM's session.
+func (c *Connectivity) AutomationAccessStatus(ctx context.Context, modem *mmodem.Modem, access Access) (enabled, connected bool, err error) {
+	route := c.accessCoordinator(access)
+	if route == nil {
+		return false, false, ErrUnavailable
+	}
+	if access == AccessWiFiCalling {
+		settings, err := route.WiFiCallingSettings(ctx, modem)
+		if err != nil {
+			return false, false, err
+		}
+		enabled = settings.Enabled
+	} else {
+		// A modem without a supported VoLTE port can still have a saved setting.
+		settings, err := route.volteStore().Get(ctx, modem.EquipmentIdentifier)
+		if err != nil {
+			return false, false, err
+		}
+		enabled = settings.Enabled
+	}
+	status, err := route.SessionStatus(ctx, modem, enabled)
+	return enabled, status.Connected, err
+}
+
+func (c *Connectivity) accessCoordinator(access Access) *coordinator {
+	if c != nil {
+		switch access {
+		case AccessWiFiCalling:
+			return c.wifiCalling
+		case AccessVoLTE:
+			return c.volte
+		}
+	}
+	return nil
+}
+
 func (c *Connectivity) USSDRoute() pussd.Route {
 	return connectivityUSSDRoute{connectivity: c}
 }
@@ -48,6 +93,10 @@ func (r connectivityMessageRoute) SendSMS(ctx context.Context, modem *mmodem.Mod
 	if route == nil {
 		return storage.Message{}, pmessage.ErrRouteNotConnected
 	}
+	return sendSMSOnAccess(ctx, route, modem, to, text)
+}
+
+func sendSMSOnAccess(ctx context.Context, route routedAccess, modem *mmodem.Modem, to, text string) (storage.Message, error) {
 	msg, err := route.SendSMS(ctx, modem, to, text)
 	if errors.Is(err, ErrNotConnected) {
 		return storage.Message{}, pmessage.ErrRouteNotConnected

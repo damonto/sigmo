@@ -118,10 +118,30 @@ type SendRequest struct {
 	ExpectedSIM       mmodem.SIMIdentity
 }
 
+// Sender submits an SMS through a specific IMS access.
+type Sender func(context.Context, *mmodem.Modem, string, string) (storage.Message, error)
+
+type sendRoute struct {
+	fixed  bool
+	sender Sender
+	check  func(context.Context) error
+}
+
 // SendWithProfile reserves the SIM through validation and submission, including IMS routing.
 func (s *Messenger) SendWithProfile(ctx context.Context, modem *mmodem.Modem, req SendRequest) (string, error) {
-	if req.ExpectedProfileID == "" && req.ExpectedSIM.ICCID == "" {
-		return s.Send(ctx, modem, req.To, req.Text)
+	return s.sendWithProfile(ctx, modem, req, sendRoute{})
+}
+
+// SendWithProfileVia uses only the given sender, or the modem if sender is nil.
+// The optional check runs on the reserved SIM before any submission.
+func (s *Messenger) SendWithProfileVia(ctx context.Context, modem *mmodem.Modem, req SendRequest, sender Sender, check func(context.Context) error) (string, error) {
+	return s.sendWithProfile(ctx, modem, req, sendRoute{fixed: true, sender: sender, check: check})
+}
+
+func (s *Messenger) sendWithProfile(ctx context.Context, modem *mmodem.Modem, req SendRequest, route sendRoute) (string, error) {
+	device := realModemDevice{modemRef: modem}
+	if !route.fixed && req.ExpectedProfileID == "" && req.ExpectedSIM.ICCID == "" {
+		return s.sendUsing(ctx, device, req.To, req.Text, route)
 	}
 	release, err := modem.ReserveSIMSlot(ctx)
 	if err != nil {
@@ -140,10 +160,14 @@ func (s *Messenger) SendWithProfile(ctx context.Context, modem *mmodem.Modem, re
 			return "", ErrProfileChanged
 		}
 	}
-	return s.send(ctx, realModemDevice{modemRef: modem}, req.To, req.Text)
+	return s.sendUsing(ctx, device, req.To, req.Text, route)
 }
 
-func (s *Messenger) send(ctx context.Context, device modemDevice, to string, text string) (recipient string, sendErr error) {
+func (s *Messenger) send(ctx context.Context, device modemDevice, to, text string) (string, error) {
+	return s.sendUsing(ctx, device, to, text, sendRoute{})
+}
+
+func (s *Messenger) sendUsing(ctx context.Context, device modemDevice, to, text string, route sendRoute) (recipient string, sendErr error) {
 	if strings.TrimSpace(to) == "" {
 		return "", ErrRecipientRequired
 	}
@@ -169,12 +193,23 @@ func (s *Messenger) send(ctx context.Context, device modemDevice, to string, tex
 			slog.WarnContext(ctx, "remember sent message line", "error", err)
 		}
 	}()
-	status, err := s.routeStatus(ctx, device.modem())
-	if err != nil {
-		return "", fmt.Errorf("read message route status: %w", err)
+	if route.check != nil {
+		if err := route.check(ctx); err != nil {
+			return "", err
+		}
 	}
-	if status.Preferred && status.Connected {
-		msg, err := s.route.SendSMS(ctx, device.modem(), to, text)
+	var status RouteStatus
+	if !route.fixed {
+		status, err = s.routeStatus(ctx, device.modem())
+		if err != nil {
+			return "", fmt.Errorf("read message route status: %w", err)
+		}
+		if status.Preferred && status.Connected {
+			route.sender = s.route.SendSMS
+		}
+	}
+	if route.sender != nil {
+		msg, err := route.sender(ctx, device.modem(), to, text)
 		if err != nil {
 			return "", mapRouteSendError(to, err)
 		}

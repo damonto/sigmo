@@ -23,6 +23,7 @@ interface Draft {
   to: string
   text: string
   duration: string | number
+  wifiCallingOnly: boolean
 }
 
 const emptyDraft = (): Draft => ({
@@ -34,6 +35,7 @@ const emptyDraft = (): Draft => ({
   to: '',
   text: '',
   duration: 10,
+  wifiCallingOnly: false,
 })
 
 /** Loads and edits the automation for the selected modem, ICCID and secure element. */
@@ -66,6 +68,7 @@ export const useSimAutomations = (
       draft.amount = action.bytes / (inMiB ? mib : kib)
     } else {
       draft.to = action.to
+      draft.wifiCallingOnly = action.wifiCallingOnly ?? false
       if (action.type === 'sms') draft.text = action.text
       else draft.duration = action.durationSeconds
     }
@@ -125,13 +128,14 @@ export const useSimAutomations = (
       return
     }
     if (!draft.to.trim()) return
+    const { wifiCallingOnly } = draft
     if (draft.type === 'sms') {
-      if (draft.text.trim()) return { type: 'sms', to: draft.to, text: draft.text }
+      if (draft.text.trim()) return { type: 'sms', to: draft.to, text: draft.text, wifiCallingOnly }
       return
     }
     const durationSeconds = Number(draft.duration)
     if (Number.isInteger(durationSeconds) && durationSeconds >= 1 && durationSeconds <= 300) {
-      return { type: 'call', to: draft.to, durationSeconds }
+      return { type: 'call', to: draft.to, durationSeconds, wifiCallingOnly }
     }
   })
 
@@ -148,7 +152,7 @@ export const useSimAutomations = (
     return { scheduledAt, repeatDays: repeat === '' ? null : days, action: action.value }
   })
 
-  const mutate = async (failure: string, operation: () => Promise<void>) => {
+  const mutate = async (failure: string, operation: () => Promise<unknown>) => {
     if (!loaded.value || locked.value || busy.value || loading.value || error.value === 'conflict')
       return
     const revision = generation
@@ -160,10 +164,9 @@ export const useSimAutomations = (
       if (revision === generation) onSaved()
     } catch (reason) {
       if (revision !== generation) return
-      error.value =
-        reason instanceof Error && 'status' in reason && reason.status === 409
-          ? 'conflict'
-          : failure
+      const status = reason instanceof Error && 'status' in reason ? reason.status : undefined
+      if (status === 409) error.value = 'conflict'
+      else error.value = failure
     } finally {
       if (revision === generation) busy.value = false
     }
@@ -178,18 +181,14 @@ export const useSimAutomations = (
       error.value = 'futureTime'
       return
     }
-    await mutate('saveFailed', async () => {
-      await automationApi.save(selected, value, taskId)
-    })
+    await mutate('saveFailed', () => automationApi.save(selected, value, taskId))
   }
 
   const remove = async () => {
     const selected = line.value
     const taskId = task.value?.id
     if (!selected || !taskId) return
-    await mutate('deleteFailed', async () => {
-      await automationApi.remove(selected.profileId, taskId)
-    })
+    await mutate('deleteFailed', () => automationApi.remove(selected.profileId, taskId))
   }
 
   return {

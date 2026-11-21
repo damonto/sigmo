@@ -244,7 +244,7 @@ private struct ModemDetailScreen: View {
                 }
             }
             .presentationBackground(Color(uiColor: .systemGroupedBackground))
-            .presentationDetents(sheet == .automation ? [.large] : [.medium, .large])
+            .presentationDetents(sheet == .reminder || sheet == .automation ? [.large] : [.medium, .large])
             .presentationDragIndicator(.visible)
         }
         .sheet(item: $flow, onDismiss: { refreshID += 1 }) { flow in
@@ -599,16 +599,14 @@ private struct ModemDetailScreen: View {
             Section("detail.reminder") {
                 ReminderRow(reminder: modem.sim.reminder) { sheet = .reminder }
             }
-            if state.supportsAutomation {
-                Section("automation.title") {
-                    SIMAutomationRow(summary: state.automationSummary(profileID: modem.sim.identifier)) {
-                        automationLine = SIMAutomationLine(
-                            profileID: modem.sim.identifier, modemID: state.modemID, label: modem.sim.operatorName
-                        )
-                        sheet = .automation
-                    }
-                    .accessibilityIdentifier("physicalSIMAutomations")
+            Section("automation.title") {
+                SIMAutomationRow(summary: state.automationSummary(profileID: modem.sim.identifier)) {
+                    automationLine = SIMAutomationLine(
+                        profileID: modem.sim.identifier, modemID: state.modemID, label: modem.sim.operatorName
+                    )
+                    sheet = .automation
                 }
+                .accessibilityIdentifier("physicalSIMAutomations")
             }
         }
         if pinState.available || sim.available {

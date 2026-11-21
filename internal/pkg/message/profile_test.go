@@ -57,6 +57,28 @@ func TestRoutedTimeoutPreservesUnconfirmedOutcome(t *testing.T) {
 	}
 }
 
+func TestExplicitSubmissionDoesNotUseAutomaticSMSRoutes(t *testing.T) {
+	automatic := &fakeRoute{status: RouteStatus{Preferred: true, Connected: true}}
+	messenger := New(testStore(t), automatic)
+	device := &fakeModemDevice{id: "modem", profile: "sim-a", sendErr: errors.New("modem rejected message")}
+	attempts := 0
+	fixed := sendRoute{
+		fixed: true,
+		sender: func(context.Context, *mmodem.Modem, string, string) (storage.Message, error) {
+			attempts++
+			return storage.Message{}, ErrRouteNotConnected
+		},
+	}
+	_, err := messenger.sendUsing(t.Context(), device, "10086", "example", fixed)
+	if !errors.Is(err, ErrRouteNotConnected) || attempts != 1 || device.sendCalls != 0 || automatic.sendSMSCalls != 0 {
+		t.Fatalf("explicit IMS submission = %v, sends: requested %d, modem %d, automatic %d", err, attempts, device.sendCalls, automatic.sendSMSCalls)
+	}
+	_, err = messenger.sendUsing(t.Context(), device, "10086", "example", sendRoute{fixed: true})
+	if !errors.Is(err, device.sendErr) || device.sendCalls != 1 || automatic.sendSMSCalls != 0 {
+		t.Fatalf("explicit modem submission = %v, sends: modem %d, automatic %d", err, device.sendCalls, automatic.sendSMSCalls)
+	}
+}
+
 type reservedRoute struct {
 	entered chan struct{}
 	release chan struct{}

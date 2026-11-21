@@ -153,7 +153,7 @@ actor DetailFixtureServer {
         case .connectionMBIM: connection.volte.dataPath = "mbim"
         case .connectionUnlicensed: capabilities = []
         case .automations:
-            capabilities.append("simAutomations")
+            capabilities = []
             if !physical {
                 groups[0].profiles[0].reminder = SIMReminder(
                     nextAt: Date().addingTimeInterval(3600), repeatDays: nil, content: "Renew the plan"
@@ -287,7 +287,7 @@ actor DetailFixtureServer {
             }
             if scenario == .automations, path.contains("/sim-profiles/"), path.hasSuffix("/automations") {
                 if physical, path.hasSuffix("/8986000000000000001/automations") {
-                    return raw(#"{"items":[{"id":"sms","modemId":"device-1","nextAt":"2099-01-02T12:00:00Z","action":{"type":"sms","to":"+12025550123","text":"Fixture message"},"running":false,"restoring":false}]}"#)
+                    return raw(#"{"items":[{"id":"sms","modemId":"device-1","nextAt":"2099-01-02T12:00:00Z","action":{"type":"sms","to":"+12025550123","text":"Fixture message","wifiCallingOnly":true},"running":false,"restoring":false}]}"#)
                 }
                 if !physical, path.hasSuffix("/8986000000000000002/automations") {
                     return raw(#"{"items":[{"id":"data","modemId":"device-1","seId":"se-a","nextAt":null,"action":{"type":"data","bytes":1024},"running":false,"restoring":false}]}"#)

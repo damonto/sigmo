@@ -8,8 +8,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
+	"github.com/damonto/sigmo/internal/app/call"
 	"github.com/damonto/sigmo/internal/app/esim"
+	"github.com/damonto/sigmo/internal/app/feature"
+	"github.com/damonto/sigmo/internal/app/ims"
 	"github.com/damonto/sigmo/internal/pkg/internet"
 	"github.com/damonto/sigmo/internal/pkg/message"
 	mmodem "github.com/damonto/sigmo/internal/pkg/modem"
@@ -53,6 +58,8 @@ type fakeDevice struct {
 	connected bool
 	restored  bool
 	switches  int
+	access    func(ims.Access) (enabled, connected bool, err error)
+	smsAccess ims.Access
 }
 
 func newFakeModem(iccid string) *mmodem.Modem {
@@ -94,7 +101,16 @@ func (f *fakeDevice) Current(context.Context, *mmodem.Modem) (*internet.Connecti
 	return &internet.Connection{Status: internet.StatusDisconnected}, nil
 }
 func (f *fakeDevice) HasOngoingCall(string) bool { return f.busy }
-func (*fakeDevice) MessageRoute() message.Route  { return nil }
+func (f *fakeDevice) AutomationAccessStatus(_ context.Context, _ *mmodem.Modem, access ims.Access) (bool, bool, error) {
+	if f.access == nil {
+		return false, false, nil
+	}
+	return f.access(access)
+}
+func (f *fakeDevice) SendSMSVia(_ context.Context, _ *mmodem.Modem, access ims.Access, _, _ string) (storage.Message, error) {
+	f.smsAccess = access
+	return storage.Message{}, nil
+}
 func (*fakeDevice) WithAutomationConnection(context.Context, *mmodem.Modem, mmodem.SIMIdentity, func(*internet.Connection) error) error {
 	return errors.New("unexpected data action")
 }
@@ -112,11 +128,18 @@ type fakeSMS struct {
 	err   error
 }
 
-func (f *fakeSMS) SendWithProfile(_ context.Context, device *mmodem.Modem, req message.SendRequest) (string, error) {
+func (f *fakeSMS) SendWithProfileVia(ctx context.Context, device *mmodem.Modem, req message.SendRequest, sender message.Sender, check func(context.Context) error) (string, error) {
 	f.pin = req.ExpectedProfileID
-	f.count++
-	if f.pin != device.SIMIdentity().ICCID {
+	if req.ExpectedSIM != device.SIMIdentity() || f.pin != device.SIMIdentity().ICCID {
 		return "", message.ErrProfileChanged
+	}
+	if err := check(ctx); err != nil {
+		return "", err
+	}
+	f.count++
+	if sender != nil {
+		_, err := sender(ctx, device, req.To, req.Text)
+		return req.To, err
 	}
 	return req.To, f.err
 }
@@ -159,5 +182,77 @@ func TestSMSOnTemporaryESIMWithRecovery(t *testing.T) {
 				t.Fatalf("restoration = %q, %v, connected %v", code, retry, device.restored)
 			}
 		})
+	}
+}
+
+func TestAutomationWaitsForEligibleRoute(t *testing.T) {
+	const disconnected = -1
+	for _, tt := range []struct {
+		name                  string
+		action                string
+		only, wifi, volte     bool
+		wifiReady, volteReady time.Duration
+		wantRoute, wantCode   string
+		wantWait              time.Duration
+	}{
+		{name: "SMS waits for Wi-Fi even with VoLTE ready", action: actionSMS, wifi: true, volte: true, wifiReady: 3 * time.Second, wantRoute: call.RouteWiFiCalling, wantWait: 3 * time.Second},
+		{name: "call waits for Wi-Fi even with VoLTE ready", action: actionCall, wifi: true, volte: true, wifiReady: 3 * time.Second, wantRoute: call.RouteWiFiCalling, wantWait: 3 * time.Second},
+		{name: "SMS falls back only at the deadline", action: actionSMS, wifi: true, volte: true, wifiReady: disconnected, wantRoute: call.RouteVoLTE, wantWait: readinessTimeout},
+		{name: "call falls back only at the deadline", action: actionCall, wifi: true, volte: true, wifiReady: disconnected, wantRoute: call.RouteVoLTE, wantWait: readinessTimeout},
+		{name: "SMS waits for VoLTE with Wi-Fi disabled", action: actionSMS, volte: true, volteReady: 2 * time.Second, wantRoute: call.RouteVoLTE, wantWait: 2 * time.Second},
+		{name: "IMS routes share the same wait", action: actionSMS, wifi: true, volte: true, wifiReady: disconnected, volteReady: readinessTimeout + time.Second, wantCode: "network_unavailable", wantWait: readinessTimeout},
+		{name: "Wi-Fi timeout cannot use the modem", action: actionSMS, wifi: true, wifiReady: disconnected, wantCode: "network_unavailable", wantWait: readinessTimeout},
+		{name: "VoLTE timeout cannot use the modem", action: actionSMS, volte: true, volteReady: disconnected, wantCode: "network_unavailable", wantWait: readinessTimeout},
+		{name: "SMS can use modem with both settings off", action: actionSMS, wantRoute: call.RouteModem},
+		{name: "call requires IMS", action: actionCall, wantCode: "call_unavailable"},
+		{name: "strict SMS stops if Wi-Fi is disabled", action: actionSMS, only: true, volte: true, wantCode: "wifi_calling_unavailable"},
+		{name: "strict call times out even with VoLTE ready", action: actionCall, only: true, wifi: true, volte: true, wifiReady: disconnected, wantCode: "wifi_calling_unavailable", wantWait: readinessTimeout},
+		{name: "strict SMS uses connected Wi-Fi", action: actionSMS, only: true, wifi: true, wantRoute: call.RouteWiFiCalling},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				start := time.Now()
+				device := &fakeDevice{device: newFakeModem("line"), access: func(access ims.Access) (bool, bool, error) {
+					if access == ims.AccessWiFiCalling {
+						return tt.wifi, tt.wifiReady >= 0 && time.Since(start) >= tt.wifiReady, nil
+					}
+					return tt.volte, tt.volteReady >= 0 && time.Since(start) >= tt.volteReady, nil
+				}}
+				exec := &Execution{internet: device, policy: feature.NewPolicy(func() bool { return true })}
+				line := activeLine{device: device.device, identity: device.device.SIMIdentity()}
+				route, code := exec.waitReady(t.Context(), line, Action{Type: tt.action, WiFiCallingOnly: tt.only})
+				if elapsed := time.Since(start); route != tt.wantRoute || code != tt.wantCode || elapsed != tt.wantWait {
+					t.Fatalf("ready = %q, %q after %v, want %q, %q after %v", route, code, elapsed, tt.wantRoute, tt.wantCode, tt.wantWait)
+				}
+			})
+		})
+	}
+}
+
+func TestSMSRechecksWiFiBeforeSubmission(t *testing.T) {
+	wifiConnected := true
+	device := &fakeDevice{device: newFakeModem("line"), access: func(access ims.Access) (bool, bool, error) {
+		return true, access != ims.AccessWiFiCalling || wifiConnected, nil
+	}}
+	sms := &fakeSMS{}
+	exec := &Execution{internet: device, messages: sms}
+	line := activeLine{device: device.device, identity: device.device.SIMIdentity()}
+	to, body := "10086", "example"
+	action := Action{Type: actionSMS, To: &to, Text: &body, WiFiCallingOnly: true}
+	route, code := exec.waitReady(t.Context(), line, action)
+	if route != call.RouteWiFiCalling || code != "" {
+		t.Fatalf("ready = %q, %q", route, code)
+	}
+	wifiConnected = false
+	if got := exec.sendSMS(t.Context(), line, action, route); got.Code != "wifi_calling_unavailable" || sms.count != 0 {
+		t.Fatalf("send on disconnected Wi-Fi = %+v, %d submissions", got, sms.count)
+	}
+	wifiConnected = true
+	if got := exec.sendSMS(t.Context(), line, action, route); got.Status != statusSucceeded || sms.count != 1 || device.smsAccess != ims.AccessWiFiCalling {
+		t.Fatalf("send on Wi-Fi = %+v, %d submissions on %q", got, sms.count, device.smsAccess)
+	}
+	device.device.InvalidateSIMActivation()
+	if got := exec.sendSMS(t.Context(), line, action, route); got.Code != "line_unavailable" || sms.count != 1 {
+		t.Fatalf("send after SIM activation changed = %+v, %d submissions", got, sms.count)
 	}
 }

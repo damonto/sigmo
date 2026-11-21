@@ -1,8 +1,8 @@
 /** The action determines which fields are sent to the automation service. */
 export type AutomationAction =
   | { type: 'data'; bytes: number }
-  | { type: 'sms'; to: string; text: string }
-  | { type: 'call'; to: string; durationSeconds: number }
+  | { type: 'sms'; to: string; text: string; wifiCallingOnly?: boolean }
+  | { type: 'call'; to: string; durationSeconds: number; wifiCallingOnly?: boolean }
 
 /** A schedule is submitted as an ISO timestamp and an optional interval in days. */
 export interface AutomationSchedule {

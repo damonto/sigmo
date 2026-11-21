@@ -1378,6 +1378,9 @@
 "automation.number" = "Phone number";
 "automation.message" = "Message";
 "automation.duration" = "Seconds after answer";
+"automation.wifiCallingOnly" = "Wi-Fi Calling Only";
+"automation.wifiCallingOnlyHint" = "When on, the task waits up to 60 seconds and runs only over Wi-Fi Calling. When off, it waits for enabled Wi-Fi Calling first and can use VoLTE if Wi-Fi Calling is disabled or times out.";
+"automation.wifiCallingOnlySmsHint" = "If both services are disabled, SMS uses the modem network.";
 "automation.callHint" = "Requires Wi-Fi Calling or VoLTE. The call waits up to 60 seconds for an answer.";
 "automation.callSummary" = "%@ · %lld s";
 "automation.next" = "Next run: %@";
@@ -1402,6 +1405,7 @@
 "automation.result.switch_unavailable" = "Cannot temporarily switch to this eSIM";
 "automation.result.switch_failed" = "eSIM activation failed";
 "automation.result.network_unavailable" = "Network unavailable";
+"automation.result.wifi_calling_unavailable" = "Wi-Fi Calling unavailable";
 "automation.result.sms_unconfirmed" = "SMS submission unconfirmed";
 "automation.result.sms_failed" = "SMS submission failed";
 "automation.result.call_unavailable" = "Wi-Fi Calling or VoLTE unavailable";

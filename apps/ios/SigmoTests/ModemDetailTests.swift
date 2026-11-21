@@ -148,7 +148,7 @@ final class ModemDetailTests: XCTestCase {
     func testAutomationSummaryDoesNotBlockProfileActions() async throws {
         let server = DetailFixtureServer(scenario: .automations)
         let detail = try await make(server)
-        XCTAssertTrue(detail.supportsAutomation)
+        XCTAssertEqual(detail.session.capabilities, [])
         detail.clear()
         await server.holdNext("/automations")
         let refresh = Task { await detail.load() }

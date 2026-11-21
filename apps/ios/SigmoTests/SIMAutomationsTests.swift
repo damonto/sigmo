@@ -13,16 +13,24 @@ final class SIMAutomationsTests: XCTestCase {
         draft.kind = .sms
         draft.to = "+12025550123"
         draft.text = " example "
-        XCTAssertEqual(try XCTUnwrap(draft.schedule).action.text, " example ")
+        let sms = try XCTUnwrap(draft.schedule).action
+        XCTAssertEqual(sms.text, " example ")
+        XCTAssertEqual(sms.wifiCallingOnly, false)
+        draft.wifiCallingOnly = true
+        XCTAssertEqual(try XCTUnwrap(draft.schedule).action.wifiCallingOnly, true)
         draft.kind = .call
         draft.repeatDays = "7"
         draft.duration = "300"
         let schedule = try XCTUnwrap(draft.schedule)
         XCTAssertEqual(schedule.repeatDays, 7)
         XCTAssertEqual(schedule.action.durationSeconds, 300)
+        XCTAssertEqual(schedule.action.wifiCallingOnly, true)
         XCTAssertNil(schedule.action.text)
         draft.duration = "301"
         XCTAssertNil(draft.schedule)
+        draft.kind = .data
+        draft.amount = "1"
+        XCTAssertNil(try XCTUnwrap(draft.schedule).action.wifiCallingOnly)
     }
 
     func testLineScopedAutomationRequestAndRestorationResult() async throws {
@@ -44,12 +52,14 @@ final class SIMAutomationsTests: XCTestCase {
                 XCTAssertEqual(payload["seId"] as? String, "se-a")
                 XCTAssertEqual(payload["repeatDays"] as? Int, 2)
                 XCTAssertEqual((payload["action"] as? [String: Any])?["durationSeconds"] as? Int, 15)
+                XCTAssertEqual((payload["action"] as? [String: Any])?["wifiCallingOnly"] as? Bool, true)
                 return .init(data: Data(), status: 201)
             case "PUT":
                 XCTAssertEqual(request.url?.path, collection + "/task")
                 let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any])
                 XCTAssertNil(payload["modemId"])
                 XCTAssertEqual((payload["action"] as? [String: Any])?["durationSeconds"] as? Int, 15)
+                XCTAssertEqual((payload["action"] as? [String: Any])?["wifiCallingOnly"] as? Bool, false)
                 return .init(data: Data(), status: 200)
             case "DELETE":
                 XCTAssertEqual(request.url?.path, collection + "/task")
@@ -60,14 +70,22 @@ final class SIMAutomationsTests: XCTestCase {
             }
         })
         let line = SIMAutomationLine(profileID: "8986000000000000001", modemID: "modem", seID: "se-a", label: "Travel")
-        let schedule = SIMAutomationSchedule(scheduledAt: Date().addingTimeInterval(3600), repeatDays: 2,
-                                             action: SIMAutomationAction(type: .call, to: "+12025550123", durationSeconds: 15))
+        var draft = AutomationDraft()
+        draft.kind = .call
+        draft.to = "+12025550123"
+        draft.duration = "15"
+        draft.repeatDays = "2"
+        draft.wifiCallingOnly = true
+        let schedule = try XCTUnwrap(draft.schedule)
         try await api.saveAutomation(line: line, id: nil, schedule: schedule, token: nil)
         let loaded = try await api.automation(line: line, token: nil)
         let task = try XCTUnwrap(loaded)
         XCTAssertEqual(task.id, "task")
         XCTAssertEqual(AutomationDraft(task: task).amount, "1")
-        try await api.saveAutomation(line: line, id: task.id, schedule: schedule, token: nil)
+        XCTAssertFalse(AutomationDraft(task: task).wifiCallingOnly)
+        draft.wifiCallingOnly = false
+        let updated = try XCTUnwrap(draft.schedule)
+        try await api.saveAutomation(line: line, id: task.id, schedule: updated, token: nil)
         let summaries = try await api.automationSummaries(modemID: line.modemID, token: nil)
         XCTAssertEqual(summaries.count, 2)
         XCTAssertEqual(summaries.first?.profileId, line.profileID)

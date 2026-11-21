@@ -329,7 +329,6 @@ func Run(ctx context.Context, cfg Config) (runErr error) {
 		return fmt.Errorf("configure IMS: %w", err)
 	}
 	automations := automation.New(db, automation.NewExecution(db, registry, runtime.ESIM, imsConnectivity, calls, policy))
-	runtime.AddFeatures(feature.SIMAutomations)
 	runtime.AddRoute(func(group *echo.Group, _ router.RegisterConfig) error {
 		automations.RegisterRoutes(group)
 		return nil

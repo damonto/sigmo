@@ -200,21 +200,15 @@ describe('EsimProfileSection', () => {
     },
   )
 
-  it('separates Reminder from Automations when Automations is available', async () => {
-    const wrapper = mountSection({ automationsAvailable: true })
+  it('offers Automations separately from Reminder', async () => {
+    const wrapper = mountSection()
     const reminder = buttonWithText(wrapper, 'modemDetail.reminder.title').element
+    const automation = buttonWithText(wrapper, 'automation.title')
 
     expect(reminder.nextElementSibling?.tagName).toBe('HR')
-    expect(reminder.nextElementSibling?.nextElementSibling).toBe(
-      buttonWithText(wrapper, 'automation.title').element,
-    )
-
-    await wrapper.setProps({ automationsAvailable: false })
-
-    expect(reminder.nextElementSibling?.tagName).toBe('HR')
-    expect(reminder.nextElementSibling?.nextElementSibling).toBe(
-      buttonWithText(wrapper, 'modemDetail.settings.networkTitle').element,
-    )
+    expect(reminder.nextElementSibling?.nextElementSibling).toBe(automation.element)
+    await automation.trigger('click')
+    expect(wrapper.emitted('open-automations')).toEqual([[profiles[0]]])
   })
 
   it.each([
@@ -435,8 +429,8 @@ describe('EsimProfileSection', () => {
     const wrapper = mountSection()
     const menus = wrapper.findAllComponents({ name: 'DropdownMenu' })
 
-    expect(menus[0].findAll('hr')).toHaveLength(6)
-    expect(menus[1].findAll('hr')).toHaveLength(3)
+    expect(menus[0].findAll('hr')).toHaveLength(7)
+    expect(menus[1].findAll('hr')).toHaveLength(4)
   })
 
   it('shows Reminder for active and inactive profiles', () => {

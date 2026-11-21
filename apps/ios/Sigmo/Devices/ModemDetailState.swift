@@ -63,15 +63,12 @@ final class ModemDetailState {
     var canTransfer: Bool { session.capabilities?.contains("esimTransfer") == true }
     var canInstall: Bool { esim && !elements.isEmpty && elementsFailure == nil && !loading && !busy && !needsSIMUnlock }
 
-    var supportsAutomation: Bool { session.capabilities?.contains("simAutomations") == true }
-
     func automationSummary(profileID: String, seID: String? = nil) -> SIMAutomationSummary? {
-        guard supportsAutomation else { return nil }
-        return automationSummaries[SIMAutomationLine.key(profileID: profileID, seID: seID)]
+        automationSummaries[SIMAutomationLine.key(profileID: profileID, seID: seID)]
     }
 
     func refreshAutomationSummaries() async {
-        guard supportsAutomation, session.canAccessDevices, !Task.isCancelled else { return }
+        guard session.canAccessDevices, !Task.isCancelled else { return }
         automationRead += 1
         let request = automationRead
         let id = modemID

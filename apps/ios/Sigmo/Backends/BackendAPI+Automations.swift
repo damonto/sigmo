@@ -24,6 +24,7 @@ struct SIMAutomationAction: Codable, Sendable {
     var to: String?
     var text: String?
     var durationSeconds: Int?
+    var wifiCallingOnly: Bool?
 }
 
 struct SIMAutomationSchedule: Encodable, Sendable {

@@ -41,6 +41,7 @@ struct AutomationDraft {
     var to = ""
     var text = ""
     var duration = "10"
+    var wifiCallingOnly = false
 
     init(task: SIMAutomationTask? = nil) {
         guard let task else { return }
@@ -50,6 +51,7 @@ struct AutomationDraft {
         to = task.action.to ?? ""
         text = task.action.text ?? ""
         duration = task.action.durationSeconds.map(String.init) ?? duration
+        wifiCallingOnly = task.action.wifiCallingOnly ?? false
         if let bytes = task.action.bytes {
             unit = bytes.isMultiple(of: Unit.MiB.multiplier) ? .MiB : .KiB
             amount = String(bytes / unit.multiplier)
@@ -72,10 +74,10 @@ struct AutomationDraft {
             action = SIMAutomationAction(type: kind, bytes: count)
         case .sms:
             guard !recipient.isEmpty, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-            action = SIMAutomationAction(type: kind, to: recipient, text: text)
+            action = SIMAutomationAction(type: kind, to: recipient, text: text, wifiCallingOnly: wifiCallingOnly)
         case .call:
             guard !recipient.isEmpty, let seconds = Int(duration), (1...300).contains(seconds) else { return nil }
-            action = SIMAutomationAction(type: kind, to: recipient, durationSeconds: seconds)
+            action = SIMAutomationAction(type: kind, to: recipient, durationSeconds: seconds, wifiCallingOnly: wifiCallingOnly)
         }
         return SIMAutomationSchedule(scheduledAt: date, repeatDays: repeatValue, action: action)
     }
@@ -199,6 +201,20 @@ struct SIMAutomationForm: View {
                 recipient
                 TextField("automation.duration", text: $draft.duration).keyboardType(.numberPad)
             } footer: { Text("automation.callHint") }
+        }
+        if draft.kind != .data {
+            Section {
+                Toggle("automation.wifiCallingOnly", isOn: $draft.wifiCallingOnly)
+                    .accessibilityIdentifier("automationWiFiCallingOnly")
+            } footer: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("automation.wifiCallingOnlyHint")
+                        .accessibilityIdentifier("automationWiFiCallingOnlyHint")
+                    if draft.kind == .sms {
+                        Text("automation.wifiCallingOnlySmsHint")
+                    }
+                }
+            }
         }
     }
 

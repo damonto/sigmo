@@ -26,6 +26,10 @@ const zh = {
     number: '电话号码',
     message: '短信内容',
     duration: '接通后持续秒数',
+    wifiCallingOnly: '仅使用 Wi-Fi Calling',
+    wifiCallingOnlyHint:
+      '开启时仅通过 Wi-Fi Calling 执行，最多等待 60 秒。关闭时优先等待已启用的 Wi-Fi Calling，若未启用或连接超时，则可使用 VoLTE。',
+    wifiCallingOnlySmsHint: '两项服务均关闭时，短信通过模组网络发送。',
     callHint: '需要 Wi-Fi Calling 或 VoLTE。最多等待接听 60 秒。',
     callSummary: '{to} · {seconds} 秒',
     next: '下次执行：{time}',
@@ -52,6 +56,7 @@ const zh = {
       switch_unavailable: '此 eSIM 无法临时切换',
       switch_failed: 'eSIM 启用失败',
       network_unavailable: '网络不可用',
+      wifi_calling_unavailable: 'Wi-Fi Calling 不可用',
       sms_unconfirmed: '短信提交结果待确认',
       sms_failed: '短信提交失败',
       call_unavailable: 'Wi-Fi Calling 或 VoLTE 不可用',

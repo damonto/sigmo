@@ -22,6 +22,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useSimAutomations } from '@/composables/useSimAutomations'
 import { formatReminderTimestamp } from '@/lib/datetime'
@@ -230,6 +231,25 @@ const result = (code: string | undefined, fallback: string) => {
                 required
               />
               <p class="text-xs text-muted-foreground">{{ t('automation.callHint') }}</p>
+            </div>
+            <div class="space-y-2">
+              <div class="flex items-center justify-between gap-4">
+                <Label for="automation-wifi-calling-only">{{
+                  t('automation.wifiCallingOnly')
+                }}</Label>
+                <Switch
+                  id="automation-wifi-calling-only"
+                  v-model="form.wifiCallingOnly"
+                  aria-describedby="automation-wifi-calling-only-hint"
+                />
+              </div>
+              <div
+                id="automation-wifi-calling-only-hint"
+                class="space-y-1 text-xs text-muted-foreground"
+              >
+                <p>{{ t('automation.wifiCallingOnlyHint') }}</p>
+                <p v-if="form.type === 'sms'">{{ t('automation.wifiCallingOnlySmsHint') }}</p>
+              </div>
             </div>
           </template>
         </fieldset>

@@ -37,14 +37,14 @@ describe('SIM automation editor', () => {
   it.each<{ action: AutomationAction; fields: [string, string][] }>([
     { action: { type: 'data', bytes: 2 * 1024 * 1024 }, fields: [['amount', '2']] },
     {
-      action: { type: 'sms', to: '+12025550123', text: 'example' },
+      action: { type: 'sms', to: '+12025550123', text: 'example', wifiCallingOnly: true },
       fields: [
         ['to', '+12025550123'],
         ['text', 'example'],
       ],
     },
     {
-      action: { type: 'call', to: '+12025550123', durationSeconds: 20 },
+      action: { type: 'call', to: '+12025550123', durationSeconds: 20, wifiCallingOnly: false },
       fields: [
         ['to', '+12025550123'],
         ['duration', '20'],
@@ -60,6 +60,18 @@ describe('SIM automation editor', () => {
       await wrapper.get('#automation-repeat').setValue('2')
       for (const [id, value] of fields) {
         await wrapper.get('#automation-' + id).setValue(value)
+      }
+      const route = wrapper.find('#automation-wifi-calling-only')
+      if (action.type === 'data') {
+        expect(route.exists()).toBe(false)
+        expect(wrapper.find('#automation-wifi-calling-only-hint').exists()).toBe(false)
+      } else {
+        expect(route.attributes('aria-checked')).toBe('false')
+        const hintId = route.attributes('aria-describedby')
+        const hint = wrapper.get(`#${hintId}`).text()
+        expect(hint).toContain('automation.wifiCallingOnlyHint')
+        expect(hint.includes('automation.wifiCallingOnlySmsHint')).toBe(action.type === 'sms')
+        if (action.wifiCallingOnly) await route.trigger('click')
       }
       expect(wrapper.get('[type="submit"]').attributes('disabled')).toBeUndefined()
       await wrapper.get('form').trigger('submit')
@@ -96,6 +108,7 @@ describe('SIM automation editor', () => {
     try {
       await flushPromises()
       expect(wrapper.get('#automation-text').element).toHaveProperty('value', 'original')
+      expect(wrapper.get('#automation-wifi-calling-only').attributes('aria-checked')).toBe('false')
       expect(wrapper.get('#automation-repeat').element).toHaveProperty('value', '3')
       await wrapper.get('#automation-text').setValue('updated')
       await wrapper.get('form').trigger('submit')
@@ -103,10 +116,43 @@ describe('SIM automation editor', () => {
 
       expect(api.save).toHaveBeenCalledExactlyOnceWith(
         line,
-        { scheduledAt, repeatDays: 3, action: { ...task.action, text: 'updated' } },
+        {
+          scheduledAt,
+          repeatDays: 3,
+          action: { ...task.action, text: 'updated', wifiCallingOnly: false },
+        },
         'sms-1',
       )
       expect(wrapper.emitted('update:modelValue')).toEqual([[undefined]])
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('loads the saved Wi-Fi Calling Only option and sends false when cleared', async () => {
+    const scheduledAt = new Date(2099, 10, 20, 10, 30).toISOString()
+    const task = {
+      id: 'call-1',
+      modemId: line.modemId,
+      seId: line.seId,
+      action: { type: 'call', to: '+12025550123', durationSeconds: 20, wifiCallingOnly: true },
+      nextAt: scheduledAt,
+      repeatDays: null,
+    }
+    api.list.mockResolvedValue({ items: [task] })
+    const wrapper = mountDialog()
+    try {
+      await flushPromises()
+      const route = wrapper.get('#automation-wifi-calling-only')
+      expect(route.attributes('aria-checked')).toBe('true')
+      await route.trigger('click')
+      await wrapper.get('form').trigger('submit')
+      await flushPromises()
+      expect(api.save).toHaveBeenCalledExactlyOnceWith(
+        line,
+        { scheduledAt, repeatDays: null, action: { ...task.action, wifiCallingOnly: false } },
+        task.id,
+      )
     } finally {
       wrapper.unmount()
     }

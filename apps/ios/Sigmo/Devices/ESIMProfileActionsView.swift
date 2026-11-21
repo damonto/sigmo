@@ -71,7 +71,7 @@ struct ESIMProfileActionsView: View {
                         }
                     }
                 }
-                .presentationDetents(sheet == .automation ? [.large] : [.medium, .large])
+                .presentationDetents(sheet == .reminder || sheet == .automation ? [.large] : [.medium, .large])
                 .presentationDragIndicator(.visible)
             }
             .alert(
@@ -199,13 +199,11 @@ struct ESIMProfileActionsView: View {
         Section("detail.reminder") {
             ReminderRow(reminder: profile.reminder) { sheet = .reminder }
         }
-        if state.supportsAutomation {
-            Section("automation.title") {
-                SIMAutomationRow(summary: state.automationSummary(profileID: profile.iccid, seID: profile.seId)) {
-                    sheet = .automation
-                }
-                .accessibilityIdentifier("esimAutomations")
+        Section("automation.title") {
+            SIMAutomationRow(summary: state.automationSummary(profileID: profile.iccid, seID: profile.seId)) {
+                sheet = .automation
             }
+            .accessibilityIdentifier("esimAutomations")
         }
         Section {
             if profile.enabled, pinState.available, state.modem?.sim.identifier == profile.iccid {

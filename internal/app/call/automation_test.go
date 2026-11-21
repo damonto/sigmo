@@ -38,7 +38,7 @@ func TestTimedCallHangsUpItsOwnDialogAfterAnswer(t *testing.T) {
 	defer cancel()
 	calls := New(testStore(t), voice)
 	req := DialRequest{ExpectedProfileID: "line", To: active.Number, Route: RouteWiFiCalling, ClientID: "automation"}
-	if err := calls.RunTimedCall(ctx, device, device.SIMIdentity(), req, duration, func() bool { return false }); err != nil {
+	if err := calls.RunTimedCall(ctx, device, device.SIMIdentity(), req, duration, nil); err != nil {
 		t.Fatal(err)
 	}
 	if hangups != 1 {
@@ -73,7 +73,7 @@ func TestTimedCallUsesTheRemoteEndTimestamp(t *testing.T) {
 			}
 			calls := New(testStore(t), voice)
 			req := DialRequest{ExpectedProfileID: "line", To: ended.Number, Route: RouteWiFiCalling, ClientID: "automation"}
-			err := calls.RunTimedCall(t.Context(), device, device.SIMIdentity(), req, 2*time.Second, func() bool { return false })
+			err := calls.RunTimedCall(t.Context(), device, device.SIMIdentity(), req, 2*time.Second, nil)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("RunTimedCall() error = %v, want %v", err, tt.wantErr)
 			}
@@ -93,9 +93,9 @@ func TestTimedCallReserveTimeoutIsNotAnUnansweredCall(t *testing.T) {
 	defer cancel()
 	calls := New(testStore(t), nil)
 	req := DialRequest{ExpectedProfileID: "line", To: "+12025550123", Route: RouteWiFiCalling}
-	err = calls.RunTimedCall(ctx, device, device.SIMIdentity(), req, time.Second, func() bool {
+	err = calls.RunTimedCall(ctx, device, device.SIMIdentity(), req, time.Second, func(context.Context) error {
 		t.Error("checked call state without the SIM reservation")
-		return true
+		return nil
 	})
 	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrAutomationUnanswered) {
 		t.Fatalf("RunTimedCall() error = %v, want reservation deadline", err)

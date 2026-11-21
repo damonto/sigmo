@@ -138,9 +138,8 @@ const resultErrorType = ref<'none' | 'failed' | 'disconnected'>('none')
 const resultName = ref('')
 const activeProfileActionsProfileId = ref<string | null>(null)
 const automationLine = ref<AutomationLine>()
-const canUseAutomations = computed(() => hasFeature(FEATURE.simAutomations))
 const scheduleModemId = computed(() => {
-  if (!canUseAutomations.value || modem.value?.id !== modemId.value) return
+  if (modem.value?.id !== modemId.value) return
   if (isEsimModem.value || isPhysicalModem.value) return modemId.value
 })
 const { schedules: automationSchedules, refresh: refreshAutomationSchedules } =
@@ -604,7 +603,6 @@ void fetchCapabilities()
         :se-info="seInfo"
       />
       <EsimProfileSection
-        :automations-available="canUseAutomations"
         :automation-schedules="automationSchedules"
         @open-automations="openESIMAutomations"
         :sim-pin-available="simPin.available.value"
@@ -674,7 +672,7 @@ void fetchCapabilities()
         {{ t('modemDetail.reminder.title') }}
       </Button>
       <Button
-        v-if="canUseAutomations && modem.sim.identifier"
+        v-if="modem.sim.identifier"
         type="button"
         variant="outline"
         class="justify-start gap-2"

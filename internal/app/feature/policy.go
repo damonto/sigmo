@@ -5,11 +5,10 @@ package feature
 type Name string
 
 const (
-	WiFiCalling    Name = "wifiCalling"
-	VoLTE          Name = "volte"
-	ESIMTransfer   Name = "esimTransfer"
-	MDN            Name = "mdn"
-	SIMAutomations Name = "simAutomations"
+	WiFiCalling  Name = "wifiCalling"
+	VoLTE        Name = "volte"
+	ESIMTransfer Name = "esimTransfer"
+	MDN          Name = "mdn"
 )
 
 // Policy evaluates the current user's entitlement on every request.
@@ -26,8 +25,6 @@ func (p Policy) Allows(name Name) bool {
 
 func allows(name Name, authorized bool) bool {
 	switch name {
-	case SIMAutomations:
-		return true
 	case WiFiCalling, VoLTE, ESIMTransfer, MDN:
 		return authorized
 	default:
