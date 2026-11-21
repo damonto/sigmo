@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 
@@ -29,6 +29,15 @@ const logout = async () => {
 const { t } = useI18n()
 const { load } = provideSettingsContext()
 const backTo = computed(() => (route.name === 'settings' ? { name: 'home' } : { name: 'settings' }))
+const content = useTemplateRef<HTMLElement>('content')
+
+watch(
+  () => route.name,
+  () => {
+    if (content.value) content.value.scrollTop = 0
+  },
+  { flush: 'post' },
+)
 
 onMounted(() => {
   void load()
@@ -36,12 +45,14 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="grid min-w-0 gap-6 lg:grid-cols-(--desktop-workspace-columns) lg:items-start">
+  <div
+    class="grid min-w-0 gap-6 lg:h-(--desktop-workspace-height) lg:grid-cols-(--desktop-workspace-columns)"
+  >
     <SettingsDesktopNav />
 
-    <div class="min-w-0">
+    <div class="min-w-0 lg:flex lg:min-h-0 lg:flex-col">
       <div
-        class="mb-4 flex items-center justify-between gap-3 lg:justify-end"
+        class="mb-4 flex items-center justify-between gap-3 lg:shrink-0 lg:justify-end"
         :class="{ 'lg:hidden': !auth.configuration || auth.configuration.mode === 'none' }"
       >
         <BackButton
@@ -65,7 +76,10 @@ onMounted(() => {
         {{ t('errors.revoke_session_failed') }}
       </p>
 
-      <main>
+      <main
+        ref="content"
+        class="lg:-ms-1 lg:-me-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:ps-1 lg:pe-3 lg:pb-1 lg:scrollbar-thin lg:scrollbar-thumb-muted-foreground/75 lg:scrollbar-gutter-stable"
+      >
         <RouterView />
       </main>
     </div>

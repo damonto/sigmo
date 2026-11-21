@@ -5,6 +5,7 @@ import SettingsChannelPicker from '@/components/settings/SettingsChannelPicker.v
 import SettingsHeader from '@/components/settings/SettingsHeader.vue'
 import SettingsNotificationSection from '@/components/settings/SettingsNotificationSection.vue'
 import SettingsSaveButton from '@/components/settings/SettingsSaveButton.vue'
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Spinner } from '@/components/ui/spinner'
 import { useSettingsContext } from '@/composables/useSettingsContext'
 
@@ -41,30 +42,34 @@ const {
       <span class="sr-only">{{ t('settings.loading') }}</span>
     </div>
 
-    <section
+    <Card
       v-if="isReady && values"
-      class="space-y-3 rounded-xl bg-card p-4"
+      class="gap-4 border-0 py-4 shadow-sm"
     >
-      <h2 class="text-sm font-semibold">{{ t('settings.notificationRouting') }}</h2>
-      <p class="text-sm text-muted-foreground">
-        {{ t('settings.notificationRoutingDescription') }}
-      </p>
-      <SettingsChannelPicker
-        id="settings-notifications-channels"
-        v-model="values.notifications.channels"
-        :channels="configuredChannelSchemas"
-        :disabled="isSaving"
-      />
-      <div class="flex justify-end border-t pt-4">
-        <SettingsSaveButton
-          id="settings-notifications-save"
-          class="w-full sm:w-auto"
+      <CardHeader class="px-4">
+        <h2 class="text-sm font-semibold">{{ t('settings.notificationRouting') }}</h2>
+        <CardDescription class="text-xs leading-5">
+          {{ t('settings.notificationRoutingDescription') }}
+        </CardDescription>
+      </CardHeader>
+      <CardContent class="space-y-4 px-4">
+        <SettingsChannelPicker
+          id="settings-notifications-channels"
+          v-model="values.notifications.channels"
+          :channels="configuredChannelSchemas"
           :disabled="isSaving"
-          :saving="isSavingNotifications"
-          @save="saveNotifications"
         />
-      </div>
-    </section>
+        <div class="flex justify-end border-t pt-4">
+          <SettingsSaveButton
+            id="settings-notifications-save"
+            class="w-full sm:w-auto"
+            :disabled="isSaving"
+            :saving="isSavingNotifications"
+            @save="saveNotifications"
+          />
+        </div>
+      </CardContent>
+    </Card>
     <SettingsNotificationSection
       v-if="isReady"
       :channels="channels"

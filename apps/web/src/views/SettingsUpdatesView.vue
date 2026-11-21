@@ -9,7 +9,14 @@ import SettingsHeader from '@/components/settings/SettingsHeader.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -180,7 +187,7 @@ onUnmounted(() => {
       <Alert v-if="isContainer">
         <Download />
         <AlertTitle>{{ t('settings.updates.containerTitle') }}</AlertTitle>
-        <AlertDescription class="space-y-2">
+        <AlertDescription class="min-w-0 space-y-2">
           <p>{{ t('settings.updates.containerDescription') }}</p>
           <pre class="overflow-x-auto rounded bg-muted p-2 text-xs">
 docker compose pull &amp;&amp; docker compose up -d</pre>
@@ -193,11 +200,11 @@ docker compose pull &amp;&amp; docker compose up -d</pre>
         <AlertDescription>{{ unsupportedDescription }}</AlertDescription>
       </Alert>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{{ t('settings.updates.preferences') }}</CardTitle>
+      <Card class="gap-4 border-0 py-4 shadow-sm">
+        <CardHeader class="px-4">
+          <CardTitle class="text-sm">{{ t('settings.updates.preferences') }}</CardTitle>
         </CardHeader>
-        <CardContent class="space-y-5">
+        <CardContent class="space-y-4 px-4">
           <div class="flex items-center justify-between gap-4 rounded-lg border p-3">
             <div>
               <Label>{{ t('settings.updates.automatic') }}</Label>
@@ -236,22 +243,24 @@ docker compose pull &amp;&amp; docker compose up -d</pre>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader class="flex-row items-start justify-between gap-3">
-          <div>
-            <CardTitle>{{ t('settings.updates.versionTitle') }}</CardTitle>
-            <CardDescription>{{
-              t('settings.updates.checkedAt', { value: formatDate(snapshot.checkedAt) })
-            }}</CardDescription>
-          </div>
-          <Badge :variant="snapshot.updateAvailable ? 'default' : 'secondary'">{{
-            snapshot.updateAvailable
-              ? t('settings.updates.available')
-              : t('settings.updates.current')
-          }}</Badge>
+      <Card class="gap-4 border-0 py-4 shadow-sm">
+        <CardHeader class="px-4">
+          <CardTitle class="text-sm">{{ t('settings.updates.versionTitle') }}</CardTitle>
+          <CardDescription class="text-xs leading-5">
+            {{ t('settings.updates.checkedAt', { value: formatDate(snapshot.checkedAt) }) }}
+          </CardDescription>
+          <CardAction>
+            <Badge :variant="snapshot.updateAvailable ? 'default' : 'secondary'">
+              {{
+                snapshot.updateAvailable
+                  ? t('settings.updates.available')
+                  : t('settings.updates.current')
+              }}
+            </Badge>
+          </CardAction>
         </CardHeader>
-        <CardContent class="space-y-4">
-          <dl class="grid gap-3 text-sm sm:grid-cols-2">
+        <CardContent class="space-y-4 px-4">
+          <dl class="grid gap-3 text-sm wrap-anywhere sm:grid-cols-2">
             <div class="rounded-lg border p-3">
               <dt class="text-muted-foreground">{{ t('settings.updates.installedVersion') }}</dt>
               <dd class="mt-1 font-mono">{{ snapshot.current.version }}</dd>
@@ -338,13 +347,17 @@ docker compose pull &amp;&amp; docker compose up -d</pre>
         </CardContent>
       </Card>
 
-      <Card v-if="snapshot.license">
-        <CardHeader
-          ><CardTitle class="flex items-center gap-2"
-            ><ShieldCheck class="size-4" />{{ t('settings.updates.licensedTo') }}</CardTitle
-          ></CardHeader
-        >
-        <CardContent class="space-y-1 text-sm">
+      <Card
+        v-if="snapshot.license"
+        class="gap-4 border-0 py-4 shadow-sm"
+      >
+        <CardHeader class="px-4">
+          <CardTitle class="flex items-center gap-2 text-sm">
+            <ShieldCheck class="size-4" />
+            {{ t('settings.updates.licensedTo') }}
+          </CardTitle>
+        </CardHeader>
+        <CardContent class="space-y-1 px-4 text-sm wrap-anywhere">
           <p class="font-medium">
             {{ snapshot.license.displayName }}
             <span

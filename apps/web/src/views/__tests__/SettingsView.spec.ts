@@ -762,7 +762,7 @@ describe('Settings notifications', () => {
   it('renders each channel as a card and expands the first configured channel', async () => {
     const { wrapper } = await mountSettings('/settings/notifications')
 
-    expect(wrapper.findAll('main [data-slot="card"]')).toHaveLength(2)
+    expect(wrapper.findAll('main [data-slot="card"][data-channel]')).toHaveLength(2)
     expect(wrapper.find('#settings-channel-telegram-recipients[role="listbox"]').exists()).toBe(
       true,
     )
