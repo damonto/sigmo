@@ -226,6 +226,36 @@ jobs:
             -channel "${CHANNEL}" -version "${VERSION}" -commit "${GITHUB_SHA}" \
             -notes-file release-notes.txt -output sigmo-update.json -compression gzip \
             -public-key-env SIGMO_RELEASE_PUBLIC_KEY "${args[@]}"
+      - name: Generate Dev release notes
+        id: dev_notes
+        if: needs.metadata.outputs.channel == 'dev'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          stable_tag=$(gh api graphql -F owner='{owner}' -F name='{repo}' -f query='
+            query($owner: String!, $name: String!) {
+              repository(owner: $owner, name: $name) {
+                latestRelease { tagName }
+              }
+            }' --jq '.data.repository.latestRelease.tagName // empty')
+          notes_file="${RUNNER_TEMP}/dev-release-notes.md"
+          if [[ -z "${stable_tag}" ]]; then
+            printf 'No stable release has been published yet.\n' > "${notes_file}"
+          else
+            stable_ref="refs/tags/${stable_tag}"
+            if ! git show-ref --verify --quiet "${stable_ref}"; then
+              git fetch --no-tags origin "${stable_ref}:${stable_ref}"
+            fi
+            repo_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+            commits=$(git log --format="- [%h](${repo_url}/commit/%H) %s" "${stable_ref}..${GITHUB_SHA}" --)
+            {
+              printf '## Changes since %s\n\n%s\n\n' "${stable_tag}" "${commits:-No new commits.}"
+              printf '**Full Changelog**: [%s...dev](%s/compare/%s...%s)\n' \
+                "${stable_tag}" "${repo_url}" "${stable_tag}" "${GITHUB_SHA}"
+            } > "${notes_file}"
+          fi
+          printf 'path=%s\n' "${notes_file}" >> "${GITHUB_OUTPUT}"
       - name: Move development tag
         if: needs.metadata.outputs.channel == 'dev'
         env:
@@ -242,7 +272,10 @@ jobs:
           name: ${{ needs.metadata.outputs.version }}
           prerelease: ${{ needs.metadata.outputs.channel == 'dev' }}
           make_latest: ${{ needs.metadata.outputs.channel == 'stable' }}
-          generate_release_notes: true
+          # The action appends auto-generated notes to existing release bodies.
+          generate_release_notes: ${{ needs.metadata.outputs.channel == 'stable' }}
+          body_path: ${{ steps.dev_notes.outputs.path }}
+          append_body: false
           fail_on_unmatched_files: true
           preserve_order: true
           # The Dev change check uses the manifest as the publication marker.
