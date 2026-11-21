@@ -194,6 +194,23 @@ final class MessagesFlowTests: XCTestCase {
         capture(app, "Inactive line history")
     }
 
+    func testMessageCopyMenuIsLocalized() {
+        for (chinese, copyTitle) in [(false, "Copy"), (true, "复制")] {
+            let app = launch(chinese: chinese)
+            let conversation = app.buttons["conversation-conversation-active"]
+            XCTAssertTrue(conversation.waitForExistence(timeout: 5))
+            conversation.tap()
+
+            let message = app.staticTexts["Welcome to Sigmo / 欢迎使用 Sigmo"]
+            XCTAssertTrue(message.waitForExistence(timeout: 5))
+            message.press(forDuration: 1)
+
+            XCTAssertTrue(app.buttons[copyTitle].waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertFalse(app.buttons["common.copy"].exists)
+            app.terminate()
+        }
+    }
+
     func testComposeAndCancelRetainsDraft() {
         let app = launch()
         app.buttons["new-message"].tap()

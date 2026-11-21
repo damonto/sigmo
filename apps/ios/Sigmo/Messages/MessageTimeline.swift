@@ -100,7 +100,7 @@ private struct MessageBubble: View {
                     .tint(message.incoming ? .blue : .white)
                     .background(message.incoming ? Color(uiColor: .secondarySystemBackground) : Color.green,
                                 in: RoundedRectangle(cornerRadius: 20))
-                    .contextMenu { Button("common.copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text } }
+                    .contextMenu { Button("detail.copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = message.text } }
                 HStack(spacing: 5) {
                     if let timestamp = message.timestamp { Text(timestamp, format: .dateTime.hour().minute()) }
                     if !message.incoming { Text(status) }

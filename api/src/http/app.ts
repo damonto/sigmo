@@ -30,7 +30,6 @@ import {
   registerSubscription,
 } from '../push/service';
 import { PushDatabase } from '../storage/push';
-import { download, latestRelease } from '../releases/service';
 import { telegramWebhook } from '../telegram/webhook';
 import { carrierLogo } from '../logos/service';
 import { appleAssociation, nativeCallback } from './native-auth';
@@ -168,16 +167,6 @@ app.post(
 app.get(
   '/v1/configurations/current',
   business((c, ctx) => configuration(c.req.raw, ctx)),
-);
-app.get(
-  '/v1/release-channels/:channel/releases/latest',
-  business((c, ctx) =>
-    latestRelease(c.req.raw, ctx, routeParameter(c, 'channel')),
-  ),
-);
-app.get(
-  '/v1/downloads/:ticket',
-  business((c, ctx) => download(c.req.raw, ctx, routeParameter(c, 'ticket'))),
 );
 app.post(
   '/v1/push-installations',

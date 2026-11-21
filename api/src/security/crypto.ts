@@ -89,44 +89,6 @@ export async function signEd25519(
   );
 }
 
-export async function signHmac(secret: string, value: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    TEXT_ENCODER.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  return encodeBase64(
-    await crypto.subtle.sign('HMAC', key, TEXT_ENCODER.encode(value)),
-    true,
-  );
-}
-
-export async function verifyHmac(
-  secret: string,
-  value: string,
-  signature: string,
-): Promise<boolean> {
-  try {
-    const key = await crypto.subtle.importKey(
-      'raw',
-      TEXT_ENCODER.encode(secret),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['verify'],
-    );
-    return await crypto.subtle.verify(
-      'HMAC',
-      key,
-      decodeBase64(signature),
-      TEXT_ENCODER.encode(value),
-    );
-  } catch {
-    return false;
-  }
-}
-
 export function randomToken(bytes = 24): string {
   return encodeBase64(crypto.getRandomValues(new Uint8Array(bytes)), true);
 }

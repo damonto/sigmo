@@ -6,7 +6,6 @@ import {
 import { afterEach, assert, describe, expect, it, vi } from 'vitest';
 
 import {
-  decodeBase64,
   encodeBase64,
   randomToken,
   sha256,
@@ -18,10 +17,7 @@ import { deviceId } from '../src/license/service';
 import { Database } from '../src/storage/authorization';
 import { rotationMessage } from '../src/license/service';
 import { telegramAdmins } from '../src/telegram/access';
-import { createTicket, parseTicket } from '../src/releases/tickets';
-import type { DownloadTicket, ReleaseChannel } from '../src/releases/types';
 import type { SignedLease } from '../src/license/types';
-import { manifest as parseManifest } from '../src/releases/validation';
 
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
@@ -68,11 +64,7 @@ interface TelegramMessage {
   text: string;
   parse_mode: 'MarkdownV2';
   reply_markup?: {
-    inline_keyboard: Array<
-      Array<
-        { text: string; url: string } | { text: string; callback_data: string }
-      >
-    >;
+    inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
   };
 }
 
@@ -89,15 +81,6 @@ type TelegramMethodCall =
   | { method: 'sendMessage'; body: TelegramMessage }
   | { method: 'editMessageText'; body: TelegramMessageEdit }
   | { method: 'answerCallbackQuery'; body: TelegramCallbackAnswer };
-
-const BOOTSTRAP_TARGETS = [
-  'linux-amd64',
-  'linux-amd64-musl',
-  'linux-arm64',
-  'linux-arm64-musl',
-  'linux-arm',
-  'linux-arm-musl',
-] as const;
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -194,49 +177,6 @@ function mockTelegram(): TelegramMessage[] {
   return messages;
 }
 
-async function publishRelease(
-  channel: ReleaseChannel,
-  version: string,
-  targets: readonly string[] = BOOTSTRAP_TARGETS,
-): Promise<void> {
-  const commit = '0123456789abcdef0123456789abcdef01234567';
-  const manifest = JSON.stringify({
-    schemaVersion: 1,
-
-    channel,
-    version,
-    commit,
-    publishedAt: '2026-08-09T12:00:00Z',
-    notes: 'release notes',
-    artifacts: targets.map((target) => ({
-      target,
-      name: `sigmo-${target}.gz`,
-      compression: 'gzip' as const,
-      size: 10,
-      sha256: '0'.repeat(64),
-      executableSize: 8,
-      executableSha256: '1'.repeat(64),
-    })),
-  });
-  await env.BUCKET.put(`${channel}/latest/manifest.json`, manifest);
-  await env.BUCKET.put(
-    `${channel}/versions/${version}/manifest.json.sig`,
-    await signEd25519(
-      env.SIGMO_LICENSE_PRIVATE_KEY,
-      TEXT_ENCODER.encode(manifest),
-    ),
-  );
-}
-
-function downloadButtons(message: TelegramMessage): Array<{
-  text: string;
-  url: string;
-}> {
-  return (message.reply_markup?.inline_keyboard.flat() ?? []).filter(
-    (button): button is { text: string; url: string } => 'url' in button,
-  );
-}
-
 function mockTelegramMethods(): TelegramMethodCall[] {
   const calls: TelegramMethodCall[] = [];
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
@@ -261,13 +201,6 @@ function mockTelegramMethods(): TelegramMethodCall[] {
     return Response.json({ ok: true });
   });
   return calls;
-}
-
-function tamperTicketSignature(ticket: string): string {
-  const [payload, signature, extra] = ticket.split('.');
-  assert(payload && signature && extra === undefined);
-  const replacement = signature.startsWith('A') ? 'B' : 'A';
-  return `${payload}.${replacement}${signature.slice(1)}`;
 }
 
 function mockTelegramCommands(
@@ -491,18 +424,16 @@ async function signedHeaders(
   identity: DeviceIdentity,
   proof: SignedLease,
   method: string,
-  rawUrl: string,
-  additional: HeadersInit = {},
+  path: string,
 ): Promise<Headers> {
-  const url = new URL(rawUrl, 'https://updates.example');
   const timestamp = String(Math.floor(Date.now() / 1000));
-  const message = `${method}\n${url.pathname}${url.search}\n${timestamp}`;
+  const message = `${method}\n${path}\n${timestamp}`;
   const signature = await crypto.subtle.sign(
     'Ed25519',
     identity.privateKey,
     TEXT_ENCODER.encode(message),
   );
-  const headers = new Headers(additional);
+  const headers = new Headers();
   headers.set('x-sigmo-device-id', identity.deviceId);
   headers.set(
     'x-sigmo-lease',
@@ -513,172 +444,36 @@ async function signedHeaders(
   return headers;
 }
 
-describe('release manifests', () => {
-  it('requires gzip artifacts and executable metadata', () => {
-    const artifact = {
-      target: 'linux-amd64',
-      name: 'sigmo-linux-amd64.gz',
-      compression: 'gzip',
-      size: 10,
-      sha256: '0'.repeat(64),
-      executableSize: 8,
-      executableSha256: '1'.repeat(64),
-    };
-    const manifest = {
-      schemaVersion: 1,
-
-      channel: 'stable',
-      version: 'v1.0.0',
-      commit: '0123456789abcdef0123456789abcdef01234567',
-      publishedAt: '2026-08-09T12:00:00Z',
-      notes: 'release notes',
-      artifacts: [artifact],
-    };
-    expect(parseManifest(manifest)).not.toBeNull();
-
-    const invalidArtifacts = [
-      { ...artifact, compression: 'none' },
-      { ...artifact, name: 'sigmo-linux-amd64' },
-      { ...artifact, executableSize: 0 },
-      { ...artifact, executableSha256: 'invalid' },
-    ];
-    for (const invalid of invalidArtifacts) {
-      expect(parseManifest({ ...manifest, artifacts: [invalid] })).toBeNull();
-    }
-  });
-});
-
-describe('download tickets', () => {
-  it.each(['.', '..', '..ignored'])(
-    'rejects extra ticket segments: %s',
-    async (suffix) => {
-      const ticket = await createTicket(env.SIGMO_DOWNLOAD_TICKET_SECRET, {
-        deviceId: 'test-device',
-        channel: 'stable',
-        version: 'v1.0.0',
-        target: 'linux-amd64',
-        path: 'stable/versions/v1.0.0/sigmo-linux-amd64.gz',
-        expiresAt: Math.floor(Date.now() / 1000) + 300,
-      });
-      expect(
-        await parseTicket(env.SIGMO_DOWNLOAD_TICKET_SECRET, ticket + suffix),
-      ).toBeNull();
-    },
-  );
-
-  it('binds the signed payload and rejects expiry', async () => {
-    const secret = 's'.repeat(32);
-    const ticket = await createTicket(secret, {
-      deviceId: 'device-1',
-      channel: 'dev',
-      version: 'dev-01234567',
-      target: 'linux-amd64',
-      path: 'dev/versions/dev-01234567/sigmo-linux-amd64.gz',
-      expiresAt: 200,
-    });
-    await expect(parseTicket(secret, ticket, 100_000)).resolves.toMatchObject({
-      deviceId: 'device-1',
-      channel: 'dev',
-    });
-    const [payload] = ticket.split('.');
-    const wireTicket = JSON.parse(
-      new TextDecoder().decode(decodeBase64(payload)),
-    ) as Record<string, unknown>;
-    expect(wireTicket).not.toHaveProperty('purpose');
-    expect(wireTicket).not.toHaveProperty('telegramId');
-    await expect(parseTicket(secret, ticket, 201_000)).resolves.toBeNull();
-    await expect(parseTicket('wrong', ticket, 100_000)).resolves.toBeNull();
-  });
-
-  it('validates Bootstrap ticket signatures, expiry, and fields', async () => {
-    const secret = 's'.repeat(32);
-    const fields = {
-      purpose: 'bootstrap' as const,
-      jti: 'bootstrap-ticket-1',
-      telegramId: 1234,
-      channel: 'stable' as const,
-      version: 'v1.0.0',
-      target: 'linux-amd64',
-      path: 'stable/versions/v1.0.0/sigmo-linux-amd64.gz',
-      expiresAt: 200,
-    };
-    const ticket = await createTicket(secret, fields);
-
-    await expect(parseTicket(secret, ticket, 100_000)).resolves.toEqual(fields);
-    const tampered = tamperTicketSignature(ticket);
-    await expect(parseTicket(secret, tampered, 100_000)).resolves.toBeNull();
-    await expect(parseTicket(secret, ticket, 200_000)).resolves.toBeNull();
-
-    const wrongPath = await createTicket(secret, {
-      ...fields,
-      path: 'dev/versions/v1.0.0/sigmo-linux-amd64.gz',
-    });
-    await expect(parseTicket(secret, wrongPath, 100_000)).resolves.toBeNull();
-    const mixedIdentity = await createTicket(secret, {
-      ...fields,
-      deviceId: 'device-1',
-    } as unknown as DownloadTicket);
-    await expect(
-      parseTicket(secret, mixedIdentity, 100_000),
-    ).resolves.toBeNull();
-  });
-
-  it('rejects a weak ticket signing secret', async () => {
-    await expect(
-      createTicket('short', {
-        deviceId: 'device-1',
-        channel: 'stable',
-        version: 'v1.0.0',
-        target: 'linux-amd64',
-        path: 'stable/versions/v1.0.0/sigmo-linux-amd64.gz',
-        expiresAt: 200,
-      }),
-    ).rejects.toThrow('at least 32 characters');
-  });
-});
-
 describe('Telegram pairing', () => {
-  it('cleans expired download grants during scheduled maintenance', async () => {
-    const telegramId = 3199;
-    await grant(telegramId);
-    const expired = randomToken();
-    const valid = randomToken();
+  it('cleans expired pairings and challenges during scheduled maintenance', async () => {
+    const { identity, proof } = await authorizedDevice(9_000_000_123);
+    await createRotationRequest(identity, proof);
+    const expired = await createPairing(await createIdentity());
+    const active = await createPairing(await createIdentity());
+    const timestamp = new Date(Date.now() - 60_000).toISOString();
+    await env.DB.batch([
+      env.DB.prepare(
+        'UPDATE pairings SET expires_at = ? WHERE pairing_id = ?',
+      ).bind(timestamp, expired.id),
+      env.DB.prepare(
+        'UPDATE challenges SET expires_at = ? WHERE device_id = ?',
+      ).bind(timestamp, identity.deviceId),
+    ]);
     const db = new Database(env.DB);
-    try {
-      await db.insertDownloadGrants([
-        {
-          jti: expired,
-          telegramId,
-          objectPath: 'expired.gz',
-          expiresAt: new Date(Date.now() - 1000).toISOString(),
-        },
-        {
-          jti: valid,
-          telegramId,
-          objectPath: 'valid.gz',
-          expiresAt: new Date(Date.now() + 60_000).toISOString(),
-        },
-      ]);
-      mockTelegramCommands();
+    mockTelegramCommands();
 
-      await runScheduled();
+    await runScheduled();
 
-      const rows = await env.DB.prepare(
-        'SELECT jti FROM download_grants WHERE jti IN (?, ?)',
-      )
-        .bind(expired, valid)
-        .all<{ jti: string }>();
-      expect(rows.results).toEqual([{ jti: valid }]);
-    } finally {
-      await env.DB.batch([
-        env.DB.prepare(
-          'DELETE FROM download_grants WHERE telegram_id = ?',
-        ).bind(telegramId),
-        env.DB.prepare('DELETE FROM entitlements WHERE telegram_id = ?').bind(
-          telegramId,
-        ),
-      ]);
-    }
+    await expect(db.findPairing(expired.id)).resolves.toBeNull();
+    await expect(db.findPairing(active.id)).resolves.toMatchObject({
+      status: 'pending',
+    });
+    const challenge = await env.DB.prepare(
+      'SELECT challenge_hash FROM challenges WHERE device_id = ?',
+    )
+      .bind(identity.deviceId)
+      .first();
+    expect(challenge).toBeNull();
   });
 
   it('registers described command menus for users and administrators', async () => {
@@ -693,7 +488,6 @@ describe('Telegram pairing', () => {
     );
     expect(userRegistration?.commands?.map(({ command }) => command)).toEqual([
       'start',
-      'download',
       'devices',
       'revoke_device',
     ]);
@@ -704,7 +498,6 @@ describe('Telegram pairing', () => {
     expect(adminRegistration?.scope).toEqual({ type: 'chat', chat_id: 1001 });
     expect(adminRegistration?.commands?.map(({ command }) => command)).toEqual([
       'start',
-      'download',
       'grant',
       'revoke',
       'status',
@@ -777,7 +570,7 @@ describe('Telegram pairing', () => {
     expect(methods).toEqual(['sendMessage']);
   });
 
-  it('shows the Telegram ID, entitlement status, and download commands from /start', async () => {
+  it('shows the Telegram ID and entitlement status from /start', async () => {
     const activeTelegramId = 3202;
     const inactiveTelegramId = 3203;
     await grant(activeTelegramId);
@@ -791,9 +584,6 @@ describe('Telegram pairing', () => {
       `*Telegram ID*\n\`${activeTelegramId}\``,
     );
     expect(messages[0].text).toContain('*Entitlement*\nActive');
-    expect(messages[0].text).toContain('/download');
-    expect(messages[0].text).toContain('*Dev*: `/download dev`');
-    expect(messages[0].text).not.toContain('`/download`');
     expect(messages[1].text).toContain(
       `*Telegram ID*\n\`${inactiveTelegramId}\``,
     );
@@ -802,165 +592,20 @@ describe('Telegram pairing', () => {
       messages.every(({ parse_mode }) => parse_mode === 'MarkdownV2'),
     ).toBe(true);
     expect(messages.every((message) => !message.reply_markup)).toBe(true);
-  });
-
-  it('returns Stable downloads in the fixed architecture and libc order', async () => {
-    const telegramId = 3211;
-    await grant(telegramId);
-    await publishRelease('stable', 'v3.0.0', [...BOOTSTRAP_TARGETS].reverse());
-    const messages = mockTelegram();
-    const issuedAfter = Math.floor(Date.now() / 1000);
-
-    await activatePairing({ id: 'unused' }, telegramId, '/download');
-    await activatePairing({ id: 'unused' }, telegramId, '/download stable');
-
-    expect(messages).toHaveLength(2);
-    for (const message of messages) {
-      expect(message.parse_mode).toBe('MarkdownV2');
-      expect(message.text).toContain('*Channel*\nStable');
-      expect(message.text).toContain('*Version*\n`v3.0.0`');
-      expect(message.text).toContain('expire in 5 minutes');
-      expect(message.text).toContain('gzip -d');
-      expect(message.text).toContain('chmod +x');
-      expect(
-        message.reply_markup?.inline_keyboard.map((row) =>
-          row.map(({ text }) => text),
-        ),
-      ).toEqual([
-        ['amd64', 'amd64 (musl)'],
-        ['arm64', 'arm64 (musl)'],
-        ['arm', 'arm (musl)'],
-      ]);
-    }
-
-    const buttons = downloadButtons(messages[0]);
-    expect(buttons).toHaveLength(6);
-    const tickets = await Promise.all(
-      buttons.map(async ({ url }) => {
-        const downloadUrl = new URL(url);
-        expect(downloadUrl.protocol).toBe('https:');
-        expect(downloadUrl.origin).toBe('https://updates.example');
-        const ticketValue = downloadUrl.pathname.split('/').at(-1) ?? '';
-        return parseTicket(env.SIGMO_DOWNLOAD_TICKET_SECRET, ticketValue);
-      }),
+    expect(messages.every(({ text }) => !text.includes('/download'))).toBe(
+      true,
     );
-    expect(tickets.map((ticket) => ticket?.target)).toEqual(BOOTSTRAP_TARGETS);
-    for (const ticket of tickets) {
-      expect(ticket).toMatchObject({
-        purpose: 'bootstrap',
-        telegramId,
-        channel: 'stable',
-        version: 'v3.0.0',
-      });
-      expect(ticket?.expiresAt).toBeGreaterThanOrEqual(issuedAfter + 299);
-      expect(ticket?.expiresAt).toBeLessThanOrEqual(
-        Math.floor(Date.now() / 1000) + 300,
-      );
-    }
   });
 
-  it('returns Dev downloads to every active entitlement', async () => {
-    const telegramId = 3212;
-    await grant(telegramId);
-    await publishRelease('dev', 'dev-01234567');
+  it('returns the authorization command help for the retired download command', async () => {
     const messages = mockTelegram();
 
-    await activatePairing({ id: 'unused' }, telegramId, '/download dev');
+    await activatePairing({ id: 'unused' }, 3204, '/download');
 
     expect(messages).toHaveLength(1);
-    expect(messages[0].text).toContain('*Channel*\nDev');
-    expect(messages[0].text).toContain('*Version*\n`dev-01234567`');
-    expect(downloadButtons(messages[0])).toHaveLength(6);
-  });
-
-  it('returns one button for an exact channel and target', async () => {
-    const telegramId = 3213;
-    await grant(telegramId);
-    await publishRelease('stable', 'v3.1.0', ['linux-arm64-musl']);
-    const messages = mockTelegram();
-
-    await activatePairing(
-      { id: 'unused' },
-      telegramId,
-      '/download stable linux-arm64-musl',
-    );
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0].reply_markup?.inline_keyboard).toEqual([
-      [expect.objectContaining({ text: 'arm64 (musl)' })],
-    ]);
-    const [button] = downloadButtons(messages[0]);
-    const ticketValue = new URL(button.url).pathname.split('/').at(-1) ?? '';
-    await expect(
-      parseTicket(env.SIGMO_DOWNLOAD_TICKET_SECRET, ticketValue),
-    ).resolves.toMatchObject({
-      purpose: 'bootstrap',
-      telegramId,
-      channel: 'stable',
-      target: 'linux-arm64-musl',
-    });
-  });
-
-  it('returns download usage and legal targets for unknown arguments', async () => {
-    const messages = mockTelegram();
-
-    await activatePairing({ id: 'unused' }, 3214, '/download beta');
-    await activatePairing(
-      { id: 'unused' },
-      3214,
-      '/download stable windows-amd64',
-    );
-
-    expect(messages).toHaveLength(2);
-    for (const message of messages) {
-      expect(message.text).toContain('*Download usage*');
-      expect(message.text).toContain('`/download [stable|dev]`');
-      expect(message.text).toContain(`\`${BOOTSTRAP_TARGETS.join(', ')}\``);
-      expect(message.reply_markup).toBeUndefined();
-    }
-  });
-
-  it('does not mint downloads without an active entitlement', async () => {
-    await publishRelease('stable', 'v3.2.0');
-    const messages = mockTelegram();
-
-    await activatePairing({ id: 'unused' }, 3215, '/download');
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0].text).toContain(
-      'does not have an active Sigmo Pro entitlement',
-    );
-    expect(messages[0].reply_markup).toBeUndefined();
-  });
-
-  it('does not mint downloads when a release is missing', async () => {
-    const telegramId = 3216;
-    await grant(telegramId);
-    await env.BUCKET.delete('dev/latest/manifest.json');
-    const messages = mockTelegram();
-
-    await activatePairing({ id: 'unused' }, telegramId, '/download dev');
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0].text).toContain('is not available yet');
-    expect(messages[0].reply_markup).toBeUndefined();
-  });
-
-  it('does not mint a link when the requested target is missing', async () => {
-    const telegramId = 3217;
-    await grant(telegramId);
-    await publishRelease('stable', 'v3.3.0', ['linux-amd64']);
-    const messages = mockTelegram();
-
-    await activatePairing(
-      { id: 'unused' },
-      telegramId,
-      '/download stable linux-arm-musl',
-    );
-
-    expect(messages).toHaveLength(1);
-    expect(messages[0].text).toContain('does not include the requested target');
-    expect(messages[0].text).toContain('*Target*\n`linux-arm-musl`');
+    expect(messages[0].text).toContain('*Available commands*');
+    expect(messages[0].text).toContain('/devices');
+    expect(messages[0].text).not.toContain('/download');
     expect(messages[0].reply_markup).toBeUndefined();
   });
 
@@ -1327,7 +972,6 @@ describe('Telegram pairing', () => {
       [
         '*Available commands*',
         '/start\nShow Pro status or authorize a device\n*Usage*: `/start [pairing_id]`',
-        '/download\nDownload Sigmo Pro\n*Usage*: `/download [stable|dev] [target]`',
         '/devices\nList linked devices\n*Usage*: `/devices`',
         '/revoke\\_device\nRevoke a linked device by ID\n*Usage*: `/revoke_device <device_id>`',
       ].join('\n\n'),
@@ -1777,163 +1421,6 @@ describe('device authorization', () => {
       response.json<{ error_code: string; detail: string }>(),
     ).resolves.toMatchObject({ error_code: 'license_device_unauthorized' });
   });
-});
-
-describe('private releases', () => {
-  it('consumes a Bootstrap download once under concurrent requests', async () => {
-    const telegramId = 5801;
-    await grant(telegramId);
-    await publishRelease('stable', 'v4.0.0', ['linux-amd64']);
-    await env.BUCKET.put(
-      'stable/versions/v4.0.0/sigmo-linux-amd64.gz',
-      '0123456789',
-      {
-        httpMetadata: {
-          contentType: 'application/octet-stream',
-          contentEncoding: 'gzip',
-        },
-      },
-    );
-    const messages = mockTelegram();
-    await activatePairing(
-      { id: 'unused' },
-      telegramId,
-      '/download stable linux-amd64',
-    );
-    const [button] = downloadButtons(messages[0]);
-    assert(button);
-
-    const consume = vi.spyOn(Database.prototype, 'consumeDownloadGrant');
-    const objectRead = vi.spyOn(env.BUCKET, 'get');
-    const head = await request(button.url, {
-      method: 'HEAD',
-      headers: { range: 'bytes=3-6' },
-    });
-    expect(head.status).toBe(200);
-    expect(head.headers.get('content-length')).toBe('10');
-    expect(head.headers.get('accept-ranges')).toBe('none');
-    expect(await head.text()).toBe('');
-    expect(consume).not.toHaveBeenCalled();
-    expect(objectRead).not.toHaveBeenCalled();
-    const concurrentResponses = await Promise.all([
-      request(button.url, { headers: { range: 'bytes=3-6' } }),
-      request(button.url, { headers: { range: 'bytes=3-6' } }),
-    ]);
-    expect(
-      concurrentResponses
-        .map((response) => response.status)
-        .sort((left, right) => left - right),
-    ).toEqual([200, 403]);
-    const fullResponse = concurrentResponses.find(
-      (response) => response.status === 200,
-    );
-    const rejectedResponse = concurrentResponses.find(
-      (response) => response.status === 403,
-    );
-    assert(fullResponse && rejectedResponse);
-    await expect(
-      rejectedResponse.json<{ error_code: string }>(),
-    ).resolves.toMatchObject({ error_code: 'download_ticket_invalid' });
-    expect(fullResponse.status).toBe(200);
-    expect(fullResponse.headers.get('cache-control')).toBe('private, no-store');
-    expect(fullResponse.headers.get('content-type')).toBe('application/gzip');
-    expect(fullResponse.headers.get('content-encoding')).toBeNull();
-    expect(fullResponse.headers.get('content-disposition')).toBe(
-      'attachment; filename="sigmo-linux-amd64.gz"',
-    );
-    expect(new TextDecoder().decode(await fullResponse.arrayBuffer())).toBe(
-      '0123456789',
-    );
-
-    const rangeResponse = await request(button.url, {
-      headers: { range: 'bytes=3-6' },
-    });
-    expect(rangeResponse.status).toBe(403);
-    await expect(
-      rangeResponse.json<{ error_code: string }>(),
-    ).resolves.toMatchObject({ error_code: 'download_ticket_invalid' });
-
-    const replayResponse = await request(button.url);
-    expect(replayResponse.status).toBe(403);
-    await expect(
-      replayResponse.json<{ error_code: string }>(),
-    ).resolves.toMatchObject({ error_code: 'download_ticket_invalid' });
-
-    await env.DB.prepare(
-      `UPDATE entitlements SET status = 'revoked' WHERE telegram_id = ?`,
-    )
-      .bind(telegramId)
-      .run();
-    const revokedResponse = await request(button.url);
-    expect(revokedResponse.status).toBe(403);
-    await expect(
-      revokedResponse.json<{ error_code: string; detail: string }>(),
-    ).resolves.toMatchObject({
-      error_code: 'license_entitlement_inactive',
-    });
-  });
-
-  it('does not mint downloads from a release with an invalid signature', async () => {
-    const telegramId = 5851;
-    const { identity, proof } = await authorizedDevice(telegramId);
-    await publishRelease('stable', 'v4.1.0', ['linux-amd64']);
-    await env.BUCKET.put(
-      'stable/versions/v4.1.0/manifest.json.sig',
-      'invalid-signature',
-    );
-
-    const messages = mockTelegram();
-    await activatePairing(
-      { id: 'unused' },
-      telegramId,
-      '/download stable linux-amd64',
-    );
-    expect(messages).toHaveLength(1);
-    expect(messages[0].text).toContain('is not available yet');
-    expect(downloadButtons(messages[0])).toHaveLength(0);
-
-    const path =
-      '/v1/release-channels/stable/releases/latest?target=linux-amd64';
-    const response = await request(path, {
-      headers: await signedHeaders(identity, proof, 'GET', path),
-    });
-    expect(response.status).toBe(502);
-    await expect(
-      response.json<{ error_code: string }>(),
-    ).resolves.toMatchObject({ error_code: 'release_signature_invalid' });
-  });
-
-  it('rejects tampered, expired, and malformed Bootstrap tickets', async () => {
-    const expiresAt = Math.floor(Date.now() / 1000) + 300;
-    const fields = {
-      purpose: 'bootstrap' as const,
-      jti: 'bootstrap-ticket-2',
-      telegramId: 5802,
-      channel: 'stable' as const,
-      version: 'v4.1.0',
-      target: 'linux-amd64',
-      path: 'stable/versions/v4.1.0/sigmo-linux-amd64.gz',
-      expiresAt,
-    };
-    const valid = await createTicket(env.SIGMO_DOWNLOAD_TICKET_SECRET, fields);
-    const tampered = tamperTicketSignature(valid);
-    const expired = await createTicket(env.SIGMO_DOWNLOAD_TICKET_SECRET, {
-      ...fields,
-      expiresAt: Math.floor(Date.now() / 1000) - 1,
-    });
-    const malformed = await createTicket(env.SIGMO_DOWNLOAD_TICKET_SECRET, {
-      ...fields,
-      deviceId: 'device-1',
-    } as unknown as DownloadTicket);
-
-    for (const ticket of [tampered, expired, malformed]) {
-      const response = await request(`/v1/downloads/${ticket}`);
-      expect(response.status).toBe(403);
-      await expect(
-        response.json<{ error_code: string; detail: string }>(),
-      ).resolves.toMatchObject({ error_code: 'download_ticket_invalid' });
-    }
-  });
 
   it('returns an explicit code for a verified expired lease', async () => {
     const { identity, proof } = await authorizedDevice(5901);
@@ -1951,8 +1438,7 @@ describe('private releases', () => {
         TEXT_ENCODER.encode(JSON.stringify(lease)),
       ),
     };
-    const path =
-      '/v1/release-channels/stable/releases/latest?target=linux-amd64';
+    const path = '/v1/configurations/current';
     const response = await request(path, {
       headers: await signedHeaders(identity, expiredProof, 'GET', path),
     });
@@ -1966,8 +1452,7 @@ describe('private releases', () => {
   it('rejects a lease that exceeds the protocol validity limits', async () => {
     const { identity, proof } = await authorizedDevice(5951);
     const issuedAt = Date.now() - 60_000;
-    const path =
-      '/v1/release-channels/stable/releases/latest?target=linux-amd64';
+    const path = '/v1/configurations/current';
     const invalidLeases = [
       {
         ...proof.lease,
@@ -2002,151 +1487,31 @@ describe('private releases', () => {
     }
   });
 
-  it('selects the latest version signature and streams byte ranges', async () => {
+  it('authenticates configuration HEAD without marking the device seen', async () => {
     const { identity, proof } = await authorizedDevice(6001);
-    const manifest = JSON.stringify({
-      schemaVersion: 1,
-
-      channel: 'stable',
-      version: 'v2.0.0',
-      commit: '0123456789abcdef0123456789abcdef01234567',
-      publishedAt: '2026-08-09T12:00:00Z',
-      notes: 'release notes',
-      artifacts: [
-        {
-          target: 'linux-amd64',
-          name: 'sigmo-linux-amd64.gz',
-          compression: 'gzip',
-          size: 10,
-          sha256: '0'.repeat(64),
-          executableSize: 8,
-          executableSha256: '1'.repeat(64),
-        },
-      ],
-    });
-    await env.BUCKET.put('stable/latest/manifest.json', manifest);
-    await env.BUCKET.put(
-      'stable/versions/v1.0.0/manifest.json.sig',
-      await signEd25519(
-        env.SIGMO_LICENSE_PRIVATE_KEY,
-        TEXT_ENCODER.encode('old manifest'),
-      ),
-    );
-    await env.BUCKET.put(
-      'stable/versions/v2.0.0/manifest.json.sig',
-      await signEd25519(
-        env.SIGMO_LICENSE_PRIVATE_KEY,
-        TEXT_ENCODER.encode(manifest),
-      ),
-    );
-    await env.BUCKET.put(
-      'stable/versions/v2.0.0/sigmo-linux-amd64.gz',
-      '0123456789',
-    );
-
-    const releasePath =
-      '/v1/release-channels/stable/releases/latest?target=linux-amd64';
+    const path = '/v1/configurations/current';
     const markSeen = vi.spyOn(Database.prototype, 'markDeviceSeen');
-    const releaseHead = await request(releasePath, {
+
+    const unauthorized = await request(path, {
       method: 'HEAD',
-      headers: await signedHeaders(identity, proof, 'HEAD', releasePath),
+      headers: await signedHeaders(identity, proof, 'GET', path),
     });
-    expect(releaseHead.status).toBe(200);
-    expect(await releaseHead.text()).toBe('');
+    expect(unauthorized.status).toBe(401);
+
+    const head = await request(path, {
+      method: 'HEAD',
+      headers: await signedHeaders(identity, proof, 'HEAD', path),
+    });
+    // Authentication succeeded, and the route now requires a recipient.
+    expect(head.status).toBe(400);
+    expect(await head.text()).toBe('');
     expect(markSeen).not.toHaveBeenCalled();
-    const releaseResponse = await request(releasePath, {
-      headers: await signedHeaders(identity, proof, 'GET', releasePath),
-    });
-    expect(releaseResponse.status).toBe(200);
-    const release = await releaseResponse.json<{
-      manifest: string;
-      signature: string;
-      downloadUrl: string;
-    }>();
-    expect(release.manifest).toBe(manifest);
-    expect(release.signature).toBe(
-      await signEd25519(
-        env.SIGMO_LICENSE_PRIVATE_KEY,
-        TEXT_ENCODER.encode(manifest),
-      ),
-    );
-    const deviceTicketValue = new URL(release.downloadUrl).pathname
-      .split('/')
-      .at(-1);
-    assert(deviceTicketValue);
-    const deviceTicket = await parseTicket(
-      env.SIGMO_DOWNLOAD_TICKET_SECRET,
-      deviceTicketValue,
-    );
-    expect(deviceTicket).toMatchObject({
-      deviceId: identity.deviceId,
-      channel: 'stable',
-      version: 'v2.0.0',
-      target: 'linux-amd64',
-    });
-    expect(deviceTicket && 'purpose' in deviceTicket).toBe(false);
 
-    const downloadResponse = await request(release.downloadUrl, {
-      headers: await signedHeaders(
-        identity,
-        proof,
-        'GET',
-        release.downloadUrl,
-        { range: 'bytes=2-5' },
-      ),
+    const get = await request(path, {
+      headers: await signedHeaders(identity, proof, 'GET', path),
     });
-    expect(downloadResponse.status).toBe(206);
-    expect(downloadResponse.headers.get('content-range')).toBe('bytes 2-5/10');
-    expect(downloadResponse.headers.get('cache-control')).toBe(
-      'private, no-store',
-    );
-    expect(downloadResponse.headers.get('content-type')).toBe(
-      'application/gzip',
-    );
-    expect(downloadResponse.headers.get('content-encoding')).toBeNull();
-    expect(new TextDecoder().decode(await downloadResponse.arrayBuffer())).toBe(
-      '2345',
-    );
-
-    const downloadHead = await request(release.downloadUrl, {
-      method: 'HEAD',
-      headers: await signedHeaders(
-        identity,
-        proof,
-        'HEAD',
-        release.downloadUrl,
-        { range: 'bytes=20-' },
-      ),
-    });
-    expect(downloadHead.status).toBe(200);
-    expect(downloadHead.headers.get('content-length')).toBe('10');
-    expect(await downloadHead.text()).toBe('');
-    for (const [range, status, body, contentRange] of [
-      ['bytes=20-', 416, undefined, 'bytes */10'],
-      ['bytes=-3', 206, '789', 'bytes 7-9/10'],
-      ['bytes=0-1,5-6', 200, '0123456789', null],
-      ['unsupported=1-2', 200, '0123456789', null],
-    ] as const) {
-      const response = await request(release.downloadUrl, {
-        headers: await signedHeaders(
-          identity,
-          proof,
-          'GET',
-          release.downloadUrl,
-          { range },
-        ),
-      });
-      expect(response.status).toBe(status);
-      expect(response.headers.get('content-range')).toBe(contentRange);
-      if (body !== undefined) {
-        expect(await response.text()).toBe(body);
-      } else {
-        expect(await response.json()).toMatchObject({
-          error_code: 'range_not_satisfiable',
-          status: 416,
-        });
-      }
-    }
+    expect(get.status).toBe(400);
+    expect(markSeen).toHaveBeenCalledOnce();
   });
 });
 
@@ -2186,16 +1551,6 @@ describe('request boundaries', () => {
       error_code: 'method_not_allowed',
       detail: 'This resource supports POST, OPTIONS.',
     });
-  });
-
-  it('returns a channel-specific error for unknown release channels', async () => {
-    const response = await request(
-      '/v1/release-channels/nightly/releases/latest',
-    );
-    expect(response.status).toBe(404);
-    await expect(
-      response.json<{ error_code: string; detail: string }>(),
-    ).resolves.toMatchObject({ error_code: 'release_channel_not_found' });
   });
 
   it('uses numeric administrator IDs and secure random tokens', () => {

@@ -33,12 +33,12 @@ func TestUpdateSnapshotHidesUpstreamDetails(t *testing.T) {
 		},
 		{
 			name: "download transport error",
-			err:  &url.Error{Op: "Get", URL: "https://worker.example/v1/downloads/secret-ticket", Err: errors.New("private transport details")},
+			err:  &url.Error{Op: "Get", URL: "https://release-assets.example/sigmo-linux-amd64.gz?token=secret-marker", Err: errors.New("private transport details")},
 			code: "upstream_unavailable",
 		},
 		{
 			name: "download timeout",
-			err:  &url.Error{Op: "Get", URL: "https://worker.example/v1/downloads/secret-ticket", Err: context.DeadlineExceeded},
+			err:  &url.Error{Op: "Get", URL: "https://release-assets.example/sigmo-linux-amd64.gz?token=secret-marker", Err: context.DeadlineExceeded},
 			code: "upstream_timeout",
 		},
 	}
@@ -65,7 +65,7 @@ func TestUpdateSnapshotHidesUpstreamDetails(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(string(body), "secret-ticket") || strings.Contains(string(body), "private") {
+			if strings.Contains(string(body), "secret-marker") || strings.Contains(string(body), "private") {
 				t.Fatalf("snapshot exposes upstream details: %s", body)
 			}
 			source.err = nil

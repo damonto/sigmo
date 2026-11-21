@@ -8,7 +8,7 @@ import { devicePageCallback, entitlementPageCallback } from './pagination';
 const IDENTITY_DISPLAY_LIMIT = 64;
 
 export type TelegramInlineKeyboard = Array<
-  Array<{ text: string; url: string } | { text: string; callback_data: string }>
+  Array<{ text: string; callback_data: string }>
 >;
 
 export interface TelegramReply {

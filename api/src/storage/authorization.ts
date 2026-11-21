@@ -113,13 +113,6 @@ export interface SessionRotation {
   timestamp: string;
 }
 
-interface DownloadGrant {
-  jti: string;
-  telegramId: number;
-  objectPath: string;
-  expiresAt: string;
-}
-
 interface EntitlementGrant {
   telegramId: number;
   expiresAt: string | null;
@@ -196,9 +189,6 @@ export class Database {
         .bind(timestamp),
       this.session
         .prepare('DELETE FROM challenges WHERE expires_at <= ?')
-        .bind(timestamp),
-      this.session
-        .prepare('DELETE FROM download_grants WHERE expires_at <= ?')
         .bind(timestamp),
     ]);
   }
@@ -580,57 +570,6 @@ export class Database {
       return 'retry';
     }
     return 'superseded';
-  }
-
-  async insertDownloadGrants(grants: readonly DownloadGrant[]): Promise<void> {
-    if (grants.length === 0) {
-      return;
-    }
-    await this.session.batch(
-      grants.map((grant) =>
-        this.session
-          .prepare(
-            `INSERT INTO download_grants
-               (jti, telegram_id, object_path, expires_at, consumed_at)
-             VALUES (?, ?, ?, ?, NULL)`,
-          )
-          .bind(grant.jti, grant.telegramId, grant.objectPath, grant.expiresAt),
-      ),
-    );
-  }
-
-  async downloadGrantAvailable(
-    jti: string,
-    telegramId: number,
-    objectPath: string,
-    timestamp: string,
-  ): Promise<boolean> {
-    const row = await this.session
-      .prepare(
-        `SELECT jti FROM download_grants WHERE jti = ? AND telegram_id = ? AND object_path = ?
-       AND consumed_at IS NULL AND expires_at > ?`,
-      )
-      .bind(jti, telegramId, objectPath, timestamp)
-      .first<{ jti: string }>();
-    return row !== null;
-  }
-
-  async consumeDownloadGrant(
-    jti: string,
-    telegramId: number,
-    objectPath: string,
-    timestamp: string,
-  ): Promise<boolean> {
-    const result = await this.session
-      .prepare(
-        `UPDATE download_grants
-         SET consumed_at = ?
-         WHERE jti = ? AND telegram_id = ? AND object_path = ?
-           AND consumed_at IS NULL AND expires_at > ?`,
-      )
-      .bind(timestamp, jti, telegramId, objectPath, timestamp)
-      .run();
-    return result.meta.changes === 1;
   }
 
   async upsertEntitlement(grant: EntitlementGrant): Promise<void> {

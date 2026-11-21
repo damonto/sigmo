@@ -35,8 +35,7 @@ const RESOURCES = [
   ['/v1/license-pairings/id', ['GET', 'HEAD', 'OPTIONS']],
   ['/v1/license-challenges', ['POST', 'OPTIONS']],
   ['/v1/license-leases', ['POST', 'OPTIONS']],
-  ['/v1/release-channels/stable/releases/latest', ['GET', 'HEAD', 'OPTIONS']],
-  ['/v1/downloads/ticket', ['GET', 'HEAD', 'OPTIONS']],
+  ['/v1/configurations/current', ['GET', 'HEAD', 'OPTIONS']],
   ['/v1/push-installations', ['POST', 'OPTIONS']],
   ['/v1/push-installations/id', ['GET', 'HEAD', 'PUT', 'DELETE', 'OPTIONS']],
   ['/v1/push-subscriptions', ['POST', 'OPTIONS']],
@@ -75,19 +74,22 @@ describe('HTTP contract', () => {
     },
   );
 
-  it.each(['/unknown', '/v1/license-pairings/', '/v1/push-installations/a/b'])(
-    'keeps strict unknown paths at 404: %s',
-    async (path) => {
-      for (const method of ['GET', 'OPTIONS']) {
-        const response = await send(path, { method });
-        expect(response.status).toBe(404);
-        expect(response.headers.get('allow')).toBeNull();
-        expect(await response.json()).toMatchObject({
-          error_code: 'resource_not_found',
-        });
-      }
-    },
-  );
+  it.each([
+    '/unknown',
+    '/v1/license-pairings/',
+    '/v1/push-installations/a/b',
+    '/v1/release-channels/stable/releases/latest',
+    '/v1/downloads/retired-ticket',
+  ])('returns 404 for unregistered routes: %s', async (path) => {
+    for (const method of ['GET', 'OPTIONS']) {
+      const response = await send(path, { method });
+      expect(response.status).toBe(404);
+      expect(response.headers.get('allow')).toBeNull();
+      expect(await response.json()).toMatchObject({
+        error_code: 'resource_not_found',
+      });
+    }
+  });
 
   it('keeps business 404 and identifies methods the server does not implement', async () => {
     const business = await send('/v1/license-pairings/missing');
@@ -237,9 +239,9 @@ describe('HTTP contract', () => {
     expect(push.headers.get('www-authenticate')).toBe(
       'Bearer realm="sigmo-push"',
     );
-    const release = await send('/v1/release-channels/stable/releases/latest');
-    expect(release.status).toBe(401);
-    expect(release.headers.get('www-authenticate')).toBe(
+    const configuration = await send('/v1/configurations/current');
+    expect(configuration.status).toBe(401);
+    expect(configuration.headers.get('www-authenticate')).toBe(
       'SigmoLease realm="sigmo-pro"',
     );
   });

@@ -4,16 +4,10 @@ import { isActive } from '../license/service';
 import { apiError, json } from '../http/response';
 import { logError } from '../observability/log';
 import { parseJson } from '../http/body';
-import { createBootstrapDownloads } from '../releases/service';
 import { telegramAdmins } from './access';
 import { sendTelegram } from './client';
 import { availableCommands } from './commands';
-import {
-  boldMarkdownV2,
-  codeMarkdownV2,
-  escapeMarkdownV2,
-  preformattedMarkdownV2,
-} from './markdown';
+import { escapeMarkdownV2 } from './markdown';
 import {
   fieldMarkdownV2,
   inlineFieldMarkdownV2,
@@ -26,32 +20,10 @@ import {
   entitlementPage,
   handleTelegramPageCallback,
 } from './pages';
-import type { TelegramInlineKeyboard, TelegramReply } from './messages';
-import type { ReleaseChannel } from '../releases/types';
+import type { TelegramReply } from './messages';
 import type { TelegramUser } from './types';
 import { isRfc3339 } from '../http/validation';
 import { telegramUpdate as parseTelegramUpdate } from './validation';
-
-const BOOTSTRAP_TARGETS = [
-  { target: 'linux-amd64', label: 'amd64' },
-  { target: 'linux-amd64-musl', label: 'amd64 (musl)' },
-  { target: 'linux-arm64', label: 'arm64' },
-  { target: 'linux-arm64-musl', label: 'arm64 (musl)' },
-  { target: 'linux-arm', label: 'arm' },
-  { target: 'linux-arm-musl', label: 'arm (musl)' },
-] as const;
-
-const DOWNLOAD_USAGE = titledMessage('Download usage', [
-  [
-    boldMarkdownV2('Commands'),
-    codeMarkdownV2('/download [stable|dev]'),
-    codeMarkdownV2('/download <stable|dev> <target>'),
-  ].join('\n'),
-  [
-    boldMarkdownV2('Targets'),
-    codeMarkdownV2(BOOTSTRAP_TARGETS.map(({ target }) => target).join(', ')),
-  ].join('\n'),
-]);
 
 export function displayName(user: TelegramUser): string {
   return (
@@ -200,117 +172,7 @@ async function startCommand(
     titledMessage('Sigmo Pro', [
       fieldMarkdownV2('Entitlement', status),
       fieldMarkdownV2('Telegram ID', String(user.id), 'code'),
-      [
-        boldMarkdownV2('Downloads'),
-        escapeMarkdownV2('/download'),
-        `${boldMarkdownV2('Dev')}: ${codeMarkdownV2('/download dev')}`,
-      ].join('\n'),
     ]),
-  );
-}
-
-function parseDownloadArgs(
-  args: string[],
-): { channel: ReleaseChannel; target?: string } | null {
-  if (args.length === 0) {
-    return { channel: 'stable' };
-  }
-  const channel = args[0]?.toLowerCase();
-  if (channel !== 'stable' && channel !== 'dev') {
-    return null;
-  }
-  if (args.length === 1) {
-    return { channel };
-  }
-  if (args.length !== 2) {
-    return null;
-  }
-  const target = args[1]?.toLowerCase();
-  if (!BOOTSTRAP_TARGETS.some((candidate) => candidate.target === target)) {
-    return null;
-  }
-  return { channel, target };
-}
-
-function channelName(channel: ReleaseChannel): string {
-  return channel === 'stable' ? 'Stable' : 'Dev';
-}
-
-async function downloadCommand(
-  request: Request,
-  context: RequestContext,
-  user: TelegramUser,
-  args: string[],
-): Promise<TelegramReply> {
-  const parsed = parseDownloadArgs(args);
-  if (!parsed) {
-    return markdownReply(DOWNLOAD_USAGE);
-  }
-  const selectedTargets = parsed.target
-    ? BOOTSTRAP_TARGETS.filter(({ target }) => target === parsed.target)
-    : BOOTSTRAP_TARGETS;
-  const result = await createBootstrapDownloads(request, context, {
-    telegramId: user.id,
-    channel: parsed.channel,
-    targets: selectedTargets.map(({ target }) => target),
-  });
-  if (!result.ok) {
-    if (result.reason === 'entitlement_inactive') {
-      return markdownReply(
-        titledMessage('Entitlement required', [
-          escapeMarkdownV2(
-            'This Telegram account does not have an active Sigmo Pro entitlement.',
-          ),
-        ]),
-      );
-    }
-    if (result.reason === 'release_unavailable') {
-      return markdownReply(
-        titledMessage('Release unavailable', [
-          escapeMarkdownV2(
-            `Sigmo Pro ${channelName(parsed.channel)} is not available yet. Please try again later.`,
-          ),
-        ]),
-      );
-    }
-    return markdownReply(
-      titledMessage('Target unavailable', [
-        escapeMarkdownV2(
-          `The Sigmo Pro ${channelName(parsed.channel)} release does not include the requested target.`,
-        ),
-        fieldMarkdownV2('Target', result.target ?? 'Unknown', 'code'),
-      ]),
-    );
-  }
-
-  const downloads = new Map(
-    result.downloads.map((download) => [download.target, download.url]),
-  );
-  const buttons = selectedTargets.map(({ target, label }) => ({
-    text: label,
-    url: downloads.get(target) ?? '',
-  }));
-  if (buttons.some(({ url }) => !url)) {
-    throw new Error('bootstrap download result is missing a requested target');
-  }
-  const inlineKeyboard: TelegramInlineKeyboard = [];
-  for (let index = 0; index < buttons.length; index += 2) {
-    inlineKeyboard.push(buttons.slice(index, index + 2));
-  }
-
-  return markdownReply(
-    titledMessage('Sigmo Pro download', [
-      fieldMarkdownV2('Channel', channelName(result.channel)),
-      fieldMarkdownV2('Version', result.version, 'code'),
-      escapeMarkdownV2(
-        'Links expire in 5 minutes and can be used once. Choose your platform below.',
-      ),
-      [
-        boldMarkdownV2('After downloading'),
-        preformattedMarkdownV2('gzip -d <file>.gz\nchmod +x <file>'),
-      ].join('\n'),
-    ]),
-    inlineKeyboard,
   );
 }
 
@@ -455,7 +317,6 @@ async function revokeDeviceCommand(
 }
 
 async function botCommand(
-  request: Request,
   context: RequestContext,
   user: TelegramUser,
   command: string,
@@ -463,8 +324,6 @@ async function botCommand(
 ): Promise<TelegramReply> {
   const isAdmin = telegramAdmins(context.env).has(user.id);
   switch (command) {
-    case '/download':
-      return downloadCommand(request, context, user, args);
     case '/grant':
       if (isAdmin) {
         return markdownReply(await grantCommand(context, args));
@@ -551,7 +410,7 @@ export async function telegramWebhook(
   const reply =
     command === '/start'
       ? await startCommand(context, message.from, args)
-      : await botCommand(request, context, message.from, command, args);
+      : await botCommand(context, message.from, command, args);
   execution.waitUntil(
     sendTelegram(env.SIGMO_TELEGRAM_BOT_TOKEN, message.chat.id, reply).catch(
       (caught: unknown) => {

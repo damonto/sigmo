@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -46,6 +47,7 @@ func TestRunWritesVerifiableManifest(t *testing.T) {
 		channel: "stable", version: "v1.2.3",
 		commit: "0123456789abcdef0123456789abcdef01234567", publishedAt: "2026-08-09T12:00:00Z",
 		output: output, privateKey: base64.RawStdEncoding.EncodeToString(privateKey),
+		publicKey: base64.RawStdEncoding.EncodeToString(publicKey),
 		artifacts: []string{"linux-amd64=" + artifact},
 	})
 	if err != nil {
@@ -71,6 +73,38 @@ func TestRunWritesVerifiableManifest(t *testing.T) {
 		artifactMetadata.ExecutableSize != artifactMetadata.Size ||
 		artifactMetadata.ExecutableSHA256 != artifactMetadata.SHA256 {
 		t.Fatalf("artifact metadata = %+v", artifactMetadata)
+	}
+}
+
+func TestRunRejectsMismatchedReleaseKeyBeforeWriting(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	artifact := filepath.Join(dir, "sigmo-linux-amd64")
+	if err := os.WriteFile(artifact, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(dir, "sigmo-update.json")
+	err = run(config{
+		channel: "stable", version: "v1.2.3",
+		commit: "0123456789abcdef0123456789abcdef01234567",
+		output: output, privateKey: base64.RawStdEncoding.EncodeToString(privateKey),
+		publicKey: base64.RawStdEncoding.EncodeToString(publicKey),
+		artifacts: []string{"linux-amd64=" + artifact},
+	})
+	if !errors.Is(err, appupdate.ErrInvalidSignature) {
+		t.Fatalf("run() error = %v, want invalid manifest signature", err)
+	}
+	for _, path := range []string{output, output + ".sig"} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("os.Stat(%q) error = %v, want file absent", path, err)
+		}
 	}
 }
 

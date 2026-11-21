@@ -4,7 +4,6 @@ import {
   boldMarkdownV2,
   codeMarkdownV2,
   escapeMarkdownV2,
-  preformattedMarkdownV2,
 } from '../src/telegram/markdown';
 
 describe('Telegram MarkdownV2', () => {
@@ -32,12 +31,6 @@ describe('Telegram MarkdownV2', () => {
       render: codeMarkdownV2,
       input: 'path\\`value',
       want: '`path\\\\\\`value`',
-    },
-    {
-      name: 'preformatted text',
-      render: preformattedMarkdownV2,
-      input: 'one\\two\n`three`',
-      want: '```\none\\\\two\n\\`three\\`\n```',
     },
   ])('renders $name', ({ render, input, want }) => {
     expect(render(input)).toBe(want);

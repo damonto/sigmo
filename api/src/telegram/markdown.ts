@@ -11,7 +11,3 @@ export function boldMarkdownV2(value: string): string {
 export function codeMarkdownV2(value: string): string {
   return `\`${value.replace(/[`\\]/g, '\\$&')}\``;
 }
-
-export function preformattedMarkdownV2(value: string): string {
-  return `\`\`\`\n${value.replace(/[`\\]/g, '\\$&')}\n\`\`\``;
-}

@@ -70,8 +70,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CHANNEL: ${{ steps.release.outputs.channel }}
           PUBLISH: ${{ steps.release.outputs.publish }}
+          TARGETS: ${{ steps.release.outputs.targets }}
           FORCE: ${{ inputs.force }}
         run: |
+          set -o pipefail
           should_build=true
           if [[ "${CHANNEL}" == "dev" && "${PUBLISH}" == "true" && "${FORCE}" != "true" ]]; then
             release_file="${RUNNER_TEMP}/dev-release.json"
@@ -81,19 +83,29 @@ jobs:
               "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/tags/dev")
             case "${status}" in
               200)
-                # Use the published manifest; the moving tag may precede a failed release.
-                manifest_url=$(jq -er '.assets[] | select(.name == "sigmo-update.json") | .url' "${release_file}")
-                previous_commit=$(gh api --header 'Accept: application/octet-stream' "${manifest_url}" \
-                  | jq -er '.commit | select(test("^[0-9a-f]{40}$"))')
-                if ! git cat-file -e "${previous_commit}^{commit}"; then
-                  git fetch --no-tags origin "${previous_commit}"
-                fi
-                git diff --name-only "${previous_commit}" "${GITHUB_SHA}" -- \
-                  . ':(exclude,glob)**/*.md' ':(exclude,glob)apps/ios/**' ':(exclude,glob)api/**' \
-                  > "${RUNNER_TEMP}/dev-changes.txt"
-                if [[ ! -s "${RUNNER_TEMP}/dev-changes.txt" ]]; then
-                  should_build=false
-                  echo "No release files have changed since ${previous_commit}; skipping Dev release."
+                # An interrupted upload can leave assets from different builds under the dev tag.
+                manifest_url=$(jq -r 'first(.assets[] | select(.name == "sigmo-update.json" and .state == "uploaded") | .url) // empty' "${release_file}")
+                if [[ -z "${manifest_url}" ]] || ! previous_commit=$(
+                  gh api --header 'Accept: application/octet-stream' "${manifest_url}" \
+                    | jq -er --argjson targets "${TARGETS}" --slurpfile release "${release_file}" '
+                      ($release[0].assets | map(select(.state == "uploaded")) | INDEX(.name)) as $assets
+                      | select(.channel == "dev" and $assets["sigmo-update.json.sig"] != null)
+                      | select((.artifacts | map(.target) | sort) == ($targets | sort))
+                      | select(all(.artifacts[]; $assets[.name].digest == "sha256:\(.sha256)"))
+                      | .commit | select(test("^[0-9a-f]{40}$"))'
+                ); then
+                  echo "The Dev release is incomplete or inconsistent; rebuilding."
+                else
+                  if ! git cat-file -e "${previous_commit}^{commit}"; then
+                    git fetch --no-tags origin "${previous_commit}"
+                  fi
+                  git diff --name-only "${previous_commit}" "${GITHUB_SHA}" -- \
+                    . ':(exclude,glob)**/*.md' ':(exclude,glob)apps/ios/**' ':(exclude,glob)api/**' \
+                    > "${RUNNER_TEMP}/dev-changes.txt"
+                  if [[ ! -s "${RUNNER_TEMP}/dev-changes.txt" ]]; then
+                    should_build=false
+                    echo "No release files have changed since ${previous_commit}; skipping Dev release."
+                  fi
                 fi
                 ;;
               404)
@@ -182,20 +194,25 @@ jobs:
           pattern: sigmo-*
           merge-multiple: true
       - name: Compress artifacts
+        env:
+          TARGETS: ${{ needs.metadata.outputs.targets }}
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          artifacts=(sigmo-linux-*)
-          if [ "${#artifacts[@]}" -eq 0 ]; then
-            echo "no artifacts found" >&2
-            exit 1
-          fi
-          for artifact in "${artifacts[@]}"; do
-            gzip -9 -n "${artifact}"
-          done
+          targets=$(jq -er '.[]' <<< "${TARGETS}")
+          artifacts=()
+          while IFS= read -r target; do
+            artifact="sigmo-${target}"
+            if [[ ! -s "${artifact}" ]]; then
+              echo "Missing release artifact ${artifact}" >&2
+              exit 1
+            fi
+            artifacts+=("${artifact}")
+          done <<< "${targets}"
+          gzip -9 -n -- "${artifacts[@]}"
       - name: Generate signed manifest
         env:
           SIGMO_RELEASE_PRIVATE_KEY: ${{ secrets.SIGMO_RELEASE_PRIVATE_KEY }}
+          SIGMO_RELEASE_PUBLIC_KEY: ${{ secrets.SIGMO_RELEASE_PUBLIC_KEY }}
           CHANNEL: ${{ needs.metadata.outputs.channel }}
           VERSION: ${{ needs.metadata.outputs.version }}
         run: |
@@ -207,38 +224,8 @@ jobs:
           done
           go run ./cmd/updatemanifest \
             -channel "${CHANNEL}" -version "${VERSION}" -commit "${GITHUB_SHA}" \
-            -notes-file release-notes.txt -output sigmo-update.json -compression gzip "${args[@]}"
-      - name: Upload immutable release and switch latest
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.SIGMO_R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.SIGMO_R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          SIGMO_R2_ACCOUNT_ID: ${{ secrets.SIGMO_R2_ACCOUNT_ID }}
-          SIGMO_R2_BUCKET: sigmo
-          CHANNEL: ${{ needs.metadata.outputs.channel }}
-          VERSION: ${{ needs.metadata.outputs.version }}
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          : "${SIGMO_R2_ACCOUNT_ID:?SIGMO_R2_ACCOUNT_ID is required}"
-          : "${SIGMO_R2_BUCKET:?SIGMO_R2_BUCKET is required}"
-          endpoint="https://${SIGMO_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          prefix="${CHANNEL}/versions/${VERSION}"
-          artifacts=(sigmo-linux-*.gz)
-          if [ "${#artifacts[@]}" -eq 0 ]; then
-            echo "no artifacts found" >&2
-            exit 1
-          fi
-          for artifact in "${artifacts[@]}"; do
-            aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
-              --key "${prefix}/${artifact}" --body "${artifact}" --content-type application/gzip
-          done
-          aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
-            --key "${prefix}/manifest.json" --body sigmo-update.json --content-type application/json
-          aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
-            --key "${prefix}/manifest.json.sig" --body sigmo-update.json.sig --content-type text/plain
-          aws s3api put-object --endpoint-url "${endpoint}" --bucket "${SIGMO_R2_BUCKET}" \
-            --key "${CHANNEL}/latest/manifest.json" --body sigmo-update.json --content-type application/json
+            -notes-file release-notes.txt -output sigmo-update.json -compression gzip \
+            -public-key-env SIGMO_RELEASE_PUBLIC_KEY "${args[@]}"
       - name: Move development tag
         if: needs.metadata.outputs.channel == 'dev'
         env:
@@ -256,7 +243,10 @@ jobs:
           prerelease: ${{ needs.metadata.outputs.channel == 'dev' }}
           make_latest: ${{ needs.metadata.outputs.channel == 'stable' }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
+          preserve_order: true
+          # The Dev change check uses the manifest as the publication marker.
           files: |
             sigmo-linux-*.gz
-            sigmo-update.json
             sigmo-update.json.sig
+            sigmo-update.json

@@ -1,13 +1,12 @@
 # Sigmo API
 
 This Worker provides encrypted carrier configurations, carrier logos, native
-push, and the iOS sign-in callback. It also owns Telegram device pairing, signed
-Pro leases, release metadata, and short-lived R2 download tickets.
+push, and the iOS sign-in callback. It also owns Telegram device pairing and
+signed Pro leases.
 See [carrier configuration publishing](../README.md#carrier-configuration-publishing)
 for the storage secret, upload script, and deployment commands. The R2 bucket must
 stay private: do not enable an `r2.dev` hostname, public bucket access, or a custom
-domain for it. Binaries are read only through the `BUCKET` Worker
-binding. The Worker keeps a normalized carrier catalog at
+domain for it. The Worker keeps a normalized carrier catalog at
 `carrier-logos/catalog.json` and serves proxied PNGs through `/logo/:plmn`.
 
 The default API address is `https://sigmo.952007.xyz`.
@@ -73,7 +72,6 @@ see the [iOS client guide](../apps/ios/README.md).
 | ---------------- | ---------------------------------------------------------------- |
 | `http/`          | Hono routes, middleware, Problem Details, bounded JSON parsing   |
 | `license/`       | Pairing, challenges, leases, device proof and validation         |
-| `releases/`      | Release manifests, download tickets and streaming downloads      |
 | `push/`          | Installation/subscription resources, delivery and APNs transport |
 | `storage/`       | Typed, prepared D1 queries and atomic state changes              |
 | `security/`      | Cryptographic primitives                                         |
@@ -91,8 +89,6 @@ bunx wrangler secret put SIGMO_TELEGRAM_WEBHOOK_SECRET
 bunx wrangler secret put SIGMO_LICENSE_PRIVATE_KEY
 bunx wrangler secret put SIGMO_LICENSE_PUBLIC_KEY
 bunx wrangler secret put SIGMO_CONFIG_ENCRYPTION_KEY
-bunx wrangler secret put SIGMO_RELEASE_PUBLIC_KEY
-bunx wrangler secret put SIGMO_DOWNLOAD_TICKET_SECRET
 bunx wrangler secret put SIGMO_ADMIN_TELEGRAM_IDS
 ```
 
@@ -101,10 +97,6 @@ Formats:
 - `SIGMO_CONFIG_ENCRYPTION_KEY`: Base64-encoded 32-byte AES key for encrypted carrier objects.
 - `SIGMO_LICENSE_PRIVATE_KEY`: Base64-encoded Ed25519 PKCS#8 private key.
 - `SIGMO_LICENSE_PUBLIC_KEY`: Base64-encoded 32-byte raw Ed25519 public key.
-- `SIGMO_RELEASE_PUBLIC_KEY`: Base64-encoded 32-byte raw Ed25519 public key
-  used to verify release manifests before issuing downloads.
-- `SIGMO_DOWNLOAD_TICKET_SECRET`: independently generated high-entropy HMAC
-  secret of at least 32 characters.
 - `SIGMO_ADMIN_TELEGRAM_IDS`: comma-separated positive Telegram numeric user
   IDs.
 
@@ -112,18 +104,16 @@ The license key pair signs device leases. It must be different from the release
 key pair used by CI to sign update manifests. CI accepts a Base64 raw 64-byte
 Ed25519 private key or Base64 PKCS#8 key as `SIGMO_RELEASE_PRIVATE_KEY`; release
 binaries embed the corresponding Base64 raw 32-byte public key through
-`SIGMO_RELEASE_PUBLIC_KEY`.
+`SIGMO_RELEASE_PUBLIC_KEY`. CI verifies the manifest with that public key
+before uploading the GitHub release.
 
 Also configure these repository values for publishing:
 
 - Secrets: `SIGMO_RELEASE_PRIVATE_KEY`, `SIGMO_RELEASE_PUBLIC_KEY`,
-  `SIGMO_LICENSE_PUBLIC_KEY`, `SIGMO_R2_ACCESS_KEY_ID`,
-  `SIGMO_R2_SECRET_ACCESS_KEY`, and `SIGMO_R2_ACCOUNT_ID`.
-- Variable: `SIGMO_WORKER_URL`. The publishing workflow uses the `sigmo` bucket.
+  and `SIGMO_LICENSE_PUBLIC_KEY`.
+- Variable: `SIGMO_WORKER_URL` for device authorization and carrier configuration.
 - Variable: `SIGMO_PUSH_GATEWAY_URL` for a separate native push gateway. Both
   API URLs default to `https://sigmo.952007.xyz` when unset or empty.
-
-The R2 access key should be scoped only to the `sigmo` bucket.
 
 ## Telegram webhook
 
@@ -158,21 +148,12 @@ Users can interact with the Bot through:
 
 ```text
 /start [pairing_id]
-/download [stable|dev]
-/download <stable|dev> <target>
 /devices
 /revoke_device <device_id>
 ```
 
-Running `/start` without a pairing ID shows the user's numeric Telegram ID,
-current entitlement status, and the Stable and Dev download commands. An active
-entitlement can download either channel. `/download` defaults to Stable and
-returns six Linux target buttons when the release is complete; the explicit
-form returns one target button. Bootstrap links expire after 5 minutes and can
-be consumed only once.
-
-The Bot mints Bootstrap tickets only while handling a command received through
-the verified Telegram webhook. There is no public ticket-minting HTTP API.
+Running `/start` without a pairing ID shows the user's numeric Telegram ID and
+current entitlement status.
 
 The Worker reconciles Telegram's command menu every hour through a Cron Trigger.
 Regular private chats receive the user commands, while each configured
@@ -242,54 +223,14 @@ JSON access. Prettier checks source formatting; run `bun run format` to apply it
 Worker and Vitest entry points retain the default exports required by their
 runtimes. Generated types and external JSON field names follow their providers.
 
-## R2 release layout and retention
+## Pro feature activation
 
-CI uploads all artifacts to a versioned prefix, uploads the signed manifest,
-then switches the channel's fixed `latest` manifest:
-
-```text
-stable/latest/manifest.json
-stable/versions/v1.2.3/manifest.json
-stable/versions/v1.2.3/manifest.json.sig
-stable/versions/v1.2.3/sigmo-<target>.gz
-
-dev/latest/manifest.json
-dev/versions/dev-01234567/manifest.json
-dev/versions/dev-01234567/manifest.json.sig
-dev/versions/dev-01234567/sigmo-<target>.gz
-```
-
-After the switch succeeds, CI removes every other version prefix in that
-channel. Stable and Dev therefore retain one complete release each. Automatic
-updates use five-minute tickets bound to the device, channel, version, target,
-and R2 object path. First installation uses five-minute, single-use Bootstrap
-tickets bound to the Telegram user, channel, version, target, and object path.
-Every Bootstrap download rechecks the entitlement, so revocation or expiry
-takes effect immediately. Bootstrap downloads require a full GET; device
-updates continue to support Range responses. The R2 bucket remains private and
-is never exposed through a presigned direct URL. Every artifact is a
-gzip-compressed executable; the Worker returns
-the compressed bytes with `Content-Type: application/gzip` and never sets
-`Content-Encoding`.
-
-## Bootstrap order
-
-1. Deploy D1, private R2, Worker secrets, Worker, and Telegram webhook.
-2. Publish complete Pro Stable and Dev releases, including each channel's
-   `latest/manifest.json` and six Linux artifacts.
-3. Import existing Telegram users as active entitlements; grant new users from
-   the administrator Bot commands.
-4. Ask the user to open the Bot and run `/start` to verify their Telegram ID and
-   entitlement status.
-5. The user runs `/download stable` (or `/download dev`) and downloads the
-   matching `.gz` artifact from the 5-minute Worker link. After downloading,
-   run `gzip -d sigmo-<target>.gz` and `chmod +x sigmo-<target>`.
-6. On first startup, the Pro client opens `/start <pairing_id>` and completes
-   device authorization.
-7. The authorized device continues through the existing lease-based automatic
-   update flow.
-8. Remove legacy Telegram file-distribution secrets and scripts after the Bot
-   download flow is verified in production.
+1. Deploy D1, private R2, Worker secrets, the Worker, and the Telegram webhook.
+2. Import existing Telegram users or grant an entitlement with the administrator
+   Bot commands. Users can run `/start` to confirm their Telegram ID and status.
+3. Install Sigmo from [GitHub Releases](https://github.com/damonto/sigmo/releases).
+4. Start device activation in Sigmo and open the Bot link. The Bot authorizes
+   the device through `/start <pairing_id>`.
 
 ## Native sign-in callback
 

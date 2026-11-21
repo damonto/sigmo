@@ -22,12 +22,6 @@ const TELEGRAM_COMMANDS = [
     access: 'user',
   },
   {
-    command: 'download',
-    description: 'Download Sigmo Pro',
-    usage: '/download [stable|dev] [target]',
-    access: 'user',
-  },
-  {
     command: 'grant',
     description: 'Grant a Pro entitlement',
     usage: '/grant <telegram_id> [max_devices] [expires_at]',

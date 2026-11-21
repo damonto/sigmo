@@ -32,7 +32,7 @@ func (f *artifactFlags) Set(value string) error {
 func main() {
 	var artifacts artifactFlags
 	var channel, version, commit, notes, notesFile, output, privateKeyEnv, compression string
-	var publishedAt string
+	var publishedAt, publicKeyEnv string
 	flag.StringVar(&channel, "channel", "", "stable or dev")
 	flag.StringVar(&version, "version", "", "release version")
 	flag.StringVar(&commit, "commit", "", "full Git commit SHA")
@@ -41,14 +41,24 @@ func main() {
 	flag.StringVar(&publishedAt, "published-at", "", "RFC3339 publication time; defaults to now")
 	flag.StringVar(&output, "output", "sigmo-update.json", "manifest output path")
 	flag.StringVar(&privateKeyEnv, "private-key-env", "SIGMO_RELEASE_PRIVATE_KEY", "environment variable containing the signing key")
+	flag.StringVar(&publicKeyEnv, "public-key-env", "", "environment variable containing the required verification key")
 	flag.StringVar(&compression, "compression", appupdate.ArtifactCompressionNone, "artifact compression: none or gzip")
 	flag.Var(&artifacts, "artifact", "target=path; repeat for every artifact")
 	flag.Parse()
 
+	var publicKey string
+	if publicKeyEnv != "" {
+		publicKey = strings.TrimSpace(os.Getenv(publicKeyEnv))
+		if publicKey == "" {
+			fmt.Fprintf(os.Stderr, "release public key is missing from %s\n", publicKeyEnv)
+			os.Exit(1)
+		}
+	}
 	if err := run(config{
 		channel: channel, version: version, commit: commit,
 		notes: notes, notesFile: notesFile, publishedAt: publishedAt,
-		output: output, privateKey: os.Getenv(privateKeyEnv), compression: compression, artifacts: artifacts,
+		output: output, privateKey: os.Getenv(privateKeyEnv), publicKey: publicKey,
+		compression: compression, artifacts: artifacts,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -58,7 +68,7 @@ func main() {
 type config struct {
 	channel, version, commit      string
 	notes, notesFile, publishedAt string
-	output, privateKey            string
+	output, privateKey, publicKey string
 	compression                   string
 	artifacts                     []string
 }
@@ -123,10 +133,15 @@ func run(cfg config) error {
 	if err != nil {
 		return err
 	}
+	signature := base64.RawStdEncoding.EncodeToString(ed25519.Sign(privateKey, data)) + "\n"
+	if cfg.publicKey != "" {
+		if _, _, err := appupdate.ParseManifest(data, signature, cfg.publicKey); err != nil {
+			return fmt.Errorf("verify update manifest with release public key: %w", err)
+		}
+	}
 	if err := os.WriteFile(cfg.output, data, 0o644); err != nil {
 		return fmt.Errorf("write update manifest: %w", err)
 	}
-	signature := base64.RawStdEncoding.EncodeToString(ed25519.Sign(privateKey, data)) + "\n"
 	if err := os.WriteFile(cfg.output+".sig", []byte(signature), 0o644); err != nil {
 		return fmt.Errorf("write update signature: %w", err)
 	}

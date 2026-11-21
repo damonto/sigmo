@@ -61,7 +61,7 @@ Sigmo is distributed as a static binary. You do not need to install Node.js or G
 
 ### 1. Download Binary
 
-Grab the latest release for your architecture from the [GitHub Releases](https://github.com/damonto/sigmo/releases/latest).
+Download the binary for your architecture from the [latest Stable release](https://github.com/damonto/sigmo/releases/latest) or the [Dev prerelease](https://github.com/damonto/sigmo/releases/tag/dev).
 
 ```bash
 # Example for Linux AMD64
@@ -86,6 +86,11 @@ Start the service.
 ```
 
 Visit `http://localhost:9527` to access the UI.
+
+Standalone releases check for and download signed updates from GitHub Releases.
+If your installed binary still uses the former Pro download service, stop Sigmo,
+replace the executable with a GitHub release, and restart with the same database
+path. Keep the `device.identity` file beside the database to retain device authorization.
 
 ### Docker Compose
 

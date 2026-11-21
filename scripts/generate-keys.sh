@@ -17,5 +17,4 @@ openssl pkey -in release-private.pem -pubout -outform DER \
   | tail -c 32 | base64 -w 0 > release-public.raw.b64
 
 openssl rand -hex 32 | tr -d '\n' > telegram-webhook-secret.txt
-openssl rand -base64 48 | tr -d '\n' > download-ticket-secret.txt
 chmod 0600 ./*
