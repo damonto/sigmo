@@ -98,18 +98,6 @@ func (h *Handler) Update(c *echo.Context) error {
 	return c.JSON(http.StatusOK, ResponseFromCall(call))
 }
 
-func (h *Handler) Hangup(c *echo.Context) error {
-	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, "hangup_call_failed")
-	}
-	call, err := h.calls.Hangup(c.Request().Context(), modem, callIDParam(c))
-	if err != nil {
-		return callActionError(c, err, "hangup_call_failed")
-	}
-	return c.JSON(http.StatusOK, ResponseFromCall(call))
-}
-
 func (h *Handler) SendDTMF(c *echo.Context) error {
 	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
 	if err != nil {
@@ -125,17 +113,6 @@ func (h *Handler) SendDTMF(c *echo.Context) error {
 		Digits:   req.Digits,
 	}); err != nil {
 		return callActionError(c, err, "send_dtmf_failed")
-	}
-	return c.NoContent(http.StatusNoContent)
-}
-
-func (h *Handler) Delete(c *echo.Context) error {
-	modem, err := h.registry.Find(c.Request().Context(), c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, "delete_call_failed")
-	}
-	if err := h.calls.Delete(c.Request().Context(), modem, callIDParam(c)); err != nil {
-		return callActionError(c, err, "delete_call_failed")
 	}
 	return c.NoContent(http.StatusNoContent)
 }

@@ -802,6 +802,7 @@
 "connection.wifiProxy.switchProxy" = "切换代理";
 "connection.wifiProxy.namePlaceholder" = "办公室代理";
 "connection.wifiProxy.hostPlaceholder" = "proxy.example.com";
+"connection.wifiProxy.invalidPaste" = "请粘贴有效的 SOCKS5 链接，或使用「主机:端口」格式。";
 "connection.wifiProxy.portPlaceholder" = "1080";
 "connection.wifiProxy.usernamePlaceholder" = "输入代理用户名";
 "connection.wifiProxy.passwordPlaceholder" = "输入代理密码";

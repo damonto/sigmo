@@ -29,17 +29,6 @@ type NativeSubscription struct {
 	AuthSessionID  string `json:"-"`
 }
 
-// NativeSubscriptionUpdate changes selected preferences and renews backend access.
-// Nil preferences preserve their stored values; gateway credentials are not editable here.
-type NativeSubscriptionUpdate struct {
-	SMS           *bool
-	Reminders     *bool
-	Calls         *bool
-	Enabled       *bool
-	Label         *string
-	AuthSessionID string
-}
-
 // PushContent is encrypted before it leaves the owning Sigmo backend.
 type PushContent struct {
 	CallID         string `json:"callId,omitempty"`
@@ -207,60 +196,6 @@ func nativeSubscriptionFromRow(row query.NativePushSubscription) NativeSubscript
 	}
 }
 
-// UpdateNativeSubscription keeps preference changes and their badge in one transaction.
-// It cannot restore a deleted grant or overwrite credentials from a concurrent registration.
-func (s *Store) UpdateNativeSubscription(ctx context.Context, id string, update NativeSubscriptionUpdate) (NativeSubscription, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return NativeSubscription{}, fmt.Errorf("begin push preference update: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }() // A committed update has nothing to roll back.
-	queries := query.New(tx)
-	row, err := queries.NativeSubscription(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return NativeSubscription{}, ErrNotFound
-	}
-	if err != nil {
-		return NativeSubscription{}, fmt.Errorf("read native subscription: %w", err)
-	}
-	sub := nativeSubscriptionFromRow(row)
-	previous := sub
-	if update.SMS != nil {
-		sub.SMS = *update.SMS
-	}
-	if update.Reminders != nil {
-		sub.Reminders = *update.Reminders
-	}
-	if update.Calls != nil {
-		sub.Calls = *update.Calls
-	}
-	if update.Enabled != nil {
-		sub.Enabled = *update.Enabled
-	}
-	if update.Label != nil {
-		sub.Label = *update.Label
-	}
-	sub.AuthSessionID = update.AuthSessionID
-	if sub.SMS == previous.SMS && sub.Reminders == previous.Reminders &&
-		sub.Calls == previous.Calls && sub.Enabled == previous.Enabled &&
-		sub.Label == previous.Label && sub.AuthSessionID == previous.AuthSessionID {
-		return sub, nil
-	}
-	if err := queries.UpdateNativeSubscription(ctx, query.UpdateNativeSubscriptionParams{
-		Sms: sub.SMS, Reminders: sub.Reminders, Calls: sub.Calls, Enabled: sub.Enabled,
-		Label: sub.Label, AuthSessionID: sub.AuthSessionID, ID: id,
-	}); err != nil {
-		return NativeSubscription{}, fmt.Errorf("update push preferences: %w", err)
-	}
-	if err := advanceMessageState(ctx, tx); err != nil {
-		return NativeSubscription{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return NativeSubscription{}, fmt.Errorf("commit push preference update: %w", err)
-	}
-	return sub, nil
-}
-
 // NativeSubscriptions lists registrations; its JSON representation excludes secrets.
 func (s *Store) NativeSubscriptions(ctx context.Context) ([]NativeSubscription, error) {
 	rows, err := query.New(s.db).NativeSubscriptions(ctx)
@@ -272,14 +207,6 @@ func (s *Store) NativeSubscriptions(ctx context.Context) ([]NativeSubscription, 
 		result = append(result, nativeSubscriptionFromRow(row))
 	}
 	return result, nil
-}
-
-// DeleteNativeSubscription also cancels its pending deliveries.
-func (s *Store) DeleteNativeSubscription(ctx context.Context, id string) error {
-	if err := query.New(s.db).DeleteNativeSubscription(ctx, id); err != nil {
-		return fmt.Errorf("delete native subscription: %w", err)
-	}
-	return nil
 }
 
 // DeleteNativeSubscriptionIfCurrent revokes only the credential used by an

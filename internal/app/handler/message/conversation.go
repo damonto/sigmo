@@ -1,27 +1,6 @@
 package message
 
-import (
-	"cmp"
-	"slices"
-
-	"github.com/damonto/sigmo/internal/pkg/storage"
-)
-
-func buildConversationResponses(messages []storage.Message) []MessageResponse {
-	response := ResponsesFromMessages(messages)
-	slices.SortFunc(response, func(a, b MessageResponse) int {
-		return cmp.Compare(b.ID, a.ID)
-	})
-	return response
-}
-
-func buildThreadResponses(messages []storage.Message) []MessageResponse {
-	response := ResponsesFromMessages(messages)
-	slices.SortFunc(response, func(a, b MessageResponse) int {
-		return cmp.Compare(a.ID, b.ID)
-	})
-	return response
-}
+import "github.com/damonto/sigmo/internal/pkg/storage"
 
 // ResponsesFromMessages preserves order and represents an empty result as a JSON array.
 func ResponsesFromMessages(messages []storage.Message) []MessageResponse {

@@ -10,7 +10,6 @@ import type {
   HistoryPage,
   ThreadMessage,
   MessageThread,
-  CommunicationPreference,
   HistoryFilter,
 } from '@/types/communication'
 
@@ -55,7 +54,6 @@ const lines = (cached = true): Promise<{ items: SIMLine[] }> => {
 /** Requests inherit the existing backend authentication and error handling. */
 export const communicationApi = {
   contacts: (q = '') => value<{ items: Contact[] }>(`contacts?q=${encodeURIComponent(q)}`),
-  contact: (id: string) => value<Contact>(`contacts/${encodeURIComponent(id)}`),
   saveContact: (contact: Contact) =>
     value<Contact>(
       contact.id ? `contacts/${encodeURIComponent(contact.id)}` : 'contacts',
@@ -80,10 +78,6 @@ export const communicationApi = {
   removeAvatar: (id: string) =>
     value<Contact>(`contacts/${encodeURIComponent(id)}/avatar`, { method: 'DELETE' }),
   lines,
-  preference: (participant: string) =>
-    value<CommunicationPreference>(
-      `communication-preferences?participant=${encodeURIComponent(participant)}`,
-    ),
   assign: async (source: string, target: string) => {
     await fetchJson<void>(
       `sim-profiles/${encodeURIComponent(source)}/history-assignment`,
@@ -101,11 +95,6 @@ export const communicationApi = {
     value<CommunicationBadge>(
       `message-threads/${encodeURIComponent(id)}`,
       body('PATCH', { messageIds }),
-    ),
-  markUnread: (id: string) =>
-    value<ThreadPage>(
-      `message-threads/${encodeURIComponent(id)}`,
-      body('PATCH', { markedUnread: true }),
     ),
   deleteThread: (id: string) =>
     fetchJson<void>(`message-threads/${encodeURIComponent(id)}`, { method: 'DELETE' }),

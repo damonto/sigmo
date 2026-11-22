@@ -12,8 +12,6 @@ import type {
 import { useModemMessageThread } from '@/composables/useModemMessageThread'
 
 const api = vi.hoisted(() => ({
-  getMessagesByParticipant: vi.fn(),
-  deleteMessagesByParticipant: vi.fn(),
   sendMessage: vi.fn(),
   getConversations: vi.fn(),
   getConversationMessages: vi.fn(),
@@ -106,7 +104,6 @@ describe('useModemMessageThread', () => {
   })
   beforeEach(() => {
     vi.resetAllMocks()
-    api.getMessagesByParticipant.mockResolvedValue({ data: { value: [] } })
     api.sendMessage.mockResolvedValue({
       data: { value: { to: '+8613800138000', conversationId: 'conversation-a' } },
     })

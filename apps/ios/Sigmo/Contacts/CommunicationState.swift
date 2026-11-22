@@ -8,12 +8,14 @@ final class CommunicationState {
     var search = "" {
         didSet { if search != oldValue { resetHistory() } }
     }
+    var unreadOnly = false
     var missedOnly = false {
         didSet { if missedOnly != oldValue { resetHistory() } }
     }
     private(set) var lines: [CommunicationLine] = []
-    private(set) var hasLoadedMore = false
-    var failure: BackendFailure?
+    private var hasLoadedMore = false
+    private(set) var failure: BackendFailure?
+    var deletionFailure: BackendFailure?
     private(set) var loading = false
     private(set) var threads: [CommunicationThread] = []
     private(set) var calls: [CallRecord] = []
@@ -34,6 +36,22 @@ final class CommunicationState {
         }
     }
 
+    var filteredThreads: [CommunicationThread] {
+        unreadOnly ? threads.filter { $0.unreadCount > 0 || $0.markedUnread } : threads
+    }
+
+    var filteredCalls: [CallRecord] {
+        missedOnly ? calls.filter(\.missed) : calls
+    }
+
+    var isEmpty: Bool {
+        switch section {
+        case .contacts: contacts.isEmpty
+        case .messages: filteredThreads.isEmpty
+        case .calls: filteredCalls.isEmpty
+        }
+    }
+
     private func resetHistory() {
         // Invalidate ownership immediately, including the debounce before the next request.
         generation += 1
@@ -45,9 +63,10 @@ final class CommunicationState {
         failure = nil
     }
 
-    func load(more: Bool = false, force: Bool = false) async {
+    func load(more: Bool = false, force: Bool = false, automatic: Bool = false) async {
         guard session.canAccessDevices, !Task.isCancelled else { return }
         guard !more || (!loading && !cursor.isEmpty) else { return }
+        guard !automatic || (session.foreground && !loading && !hasLoadedMore) else { return }
         generation += 1
         let current = generation
         let access = session.accessRevision
@@ -63,28 +82,32 @@ final class CommunicationState {
                 try await session.refreshContacts(force: force)
             case .messages:
                 let page = try await session.protectedRequest { api, token in try await api.messageThreads(search: search, cursor: cursor, token: token) }
-                guard current == generation, access == session.accessRevision, !Task.isCancelled else { return }
+                guard ownsLoad(current, accessRevision: access) else { return }
                 threads = more ? threads + page.items : page.items
                 self.cursor = page.nextCursor
                 hasLoadedMore = more
             case .calls:
                 let page = try await session.protectedRequest { api, token in try await api.callHistory(search: search, cursor: cursor, missed: missed, token: token) }
-                guard current == generation, access == session.accessRevision, !Task.isCancelled else { return }
+                guard ownsLoad(current, accessRevision: access) else { return }
                 calls = more ? calls + page.items : page.items
                 self.cursor = page.nextCursor
                 hasLoadedMore = more
             }
-            guard current == generation, access == session.accessRevision, !Task.isCancelled else { return }
+            guard ownsLoad(current, accessRevision: access) else { return }
             loading = false
             failure = nil
             let inventory = await metadata
-            guard current == generation, access == session.accessRevision, !Task.isCancelled else { return }
+            guard ownsLoad(current, accessRevision: access) else { return }
             if let inventory { lines = inventory }
         } catch {
-            if current == generation, access == session.accessRevision, !Task.isCancelled {
+            if ownsLoad(current, accessRevision: access) {
                 failure = .wrapping(error)
             }
         }
+    }
+
+    private func ownsLoad(_ request: Int, accessRevision: Int) -> Bool {
+        request == generation && accessRevision == session.accessRevision && !Task.isCancelled
     }
 
     private func loadMetadata(force: Bool) async -> [CommunicationLine]? {
@@ -98,6 +121,7 @@ final class CommunicationState {
     }
 
     func delete(_ id: String) async {
+        deletionFailure = nil
         do {
             let section = section
             try await session.protectedRequest { api, token in
@@ -107,9 +131,14 @@ final class CommunicationState {
                 case .calls: try await api.deleteCallHistory(id, token: token)
                 }
             }
-            await load(force: true)
-            if section == .messages { await session.refreshUnreadCounts() }
-        } catch { if !Task.isCancelled { failure = .wrapping(error) } }
+        } catch {
+            if !Task.isCancelled { deletionFailure = .wrapping(error) }
+            return
+        }
+        threads.removeAll { $0.id == id }
+        calls.removeAll { $0.id == id }
+        await load(force: true)
+        if section == .messages { await session.refreshUnreadCounts() }
     }
 }
 

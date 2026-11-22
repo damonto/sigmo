@@ -13,18 +13,23 @@ enum PreviewBackends {
 
     static func store(scenario: String) -> BackendStore {
         let file = ConfigurationFile(url: URL.applicationSupportDirectory.appending(path: "UITests/\(scenario)/backends.json"))
-        let server = PreviewBackendServer(multipleDevices: scenario == "cards", airplaneMode: scenario == "airplane", imsEnabled: scenario != "ims-disabled", tracksRefreshes: scenario == "refresh")
+        let communicationUnavailable = scenario == "communication-unavailable"
+        let server = PreviewBackendServer(multipleDevices: scenario == "cards", airplaneMode: scenario == "airplane",
+                                          imsEnabled: scenario != "ims-disabled", tracksRefreshes: scenario == "refresh",
+                                          failsCommunicationReads: communicationUnavailable)
         var tokens: [UUID: String] = [:]
         let credentials = BackendCredentials(read: { tokens[$0] }, write: { tokens[$0] = $1 })
         let store = BackendStore(file: file, credentials: credentials, makeAPI: { configuration in
-            if scenario.hasPrefix("communication") {
+            if scenario.hasPrefix("communication") && !communicationUnavailable {
                 let modemNames = configuration.id == studioID ? ["device-1": "Studio Modem", "device-2": "Studio Source Modem"] : [:]
+                let unreadCount: Int? = scenario == "communication-multiple" ? (configuration.id == studioID ? 7 : 2) : nil
                 let fixture = CommunicationFixture(
                     contactName: configuration.id == studioID ? "Studio Contact" : "Alice",
                     includesHistory: ["communication-history", "communication-multiple"].contains(scenario),
                     modemContacts: scenario == "communication-modem",
                     modemNames: modemNames,
-                    historyAssignment: CommunicationFixture.HistoryAssignmentScenario(rawValue: scenario)
+                    historyAssignment: CommunicationFixture.HistoryAssignmentScenario(rawValue: scenario),
+                    unreadCount: unreadCount
                 )
                 return BackendAPI(configuration: configuration, transport: { try await fixture.respond($0) })
             }
@@ -91,6 +96,9 @@ enum PreviewBackends {
                     store.saveBackend(id: homeID, name: "Home", address: "https://home.sigmo.test")
                     if ["communication-multiple", "calls-multiple"].contains(scenario) {
                         store.saveBackend(id: studioID, name: "Studio", address: "https://studio.sigmo.test")
+                    } else if communicationUnavailable {
+                        store.saveBackend(id: offlineID, name: "Offline", address: "https://offline.sigmo.test")
+                        store.saveBackend(id: lockedID, name: "Locked", address: "https://locked.sigmo.test")
                     } else if !["single", "airplane", "ims-disabled", "messages", "refresh"].contains(scenario) && !scenario.hasPrefix("communication") && !scenario.hasPrefix("calls") && !scenario.hasPrefix("messages") {
                         store.saveBackend(id: studioID, name: "Studio", address: "https://studio.sigmo.test")
                         store.saveBackend(id: lockedID, name: "Locked", address: "https://locked.sigmo.test")
@@ -134,7 +142,7 @@ enum PreviewBackends {
             let unavailable = CallLine(backendID: UUID(), modemID: line.modemID, profileID: line.profileID,
                                        backendName: "Removed", label: line.label, region: line.region, address: line.address)
             calls.rememberCallbackRoute(number: number, line: unavailable, startedAt: Date.now.ISO8601Format())
-            UserDefaults.standard.set(homeID.uuidString, forKey: "communication.backend")
+            UserDefaults.standard.set(studioID.uuidString, forKey: "communication.backend")
         default:
             return
         }
@@ -156,16 +164,19 @@ actor PreviewBackendServer {
     private let airplaneMode: Bool
     private let imsEnabled: Bool
     private let tracksRefreshes: Bool
+    private let failsCommunicationReads: Bool
     private var modemReads = 0
     private var paired = false
     private var polls = 0
     private var settingsServers: [String: SettingsFixtureServer] = [:]
 
-    init(multipleDevices: Bool = false, airplaneMode: Bool = false, imsEnabled: Bool = true, tracksRefreshes: Bool = false) {
+    init(multipleDevices: Bool = false, airplaneMode: Bool = false, imsEnabled: Bool = true,
+         tracksRefreshes: Bool = false, failsCommunicationReads: Bool = false) {
         self.multipleDevices = multipleDevices
         self.airplaneMode = airplaneMode
         self.imsEnabled = imsEnabled
         self.tracksRefreshes = tracksRefreshes
+        self.failsCommunicationReads = failsCommunicationReads
     }
 
     func respond(_ request: URLRequest) throws -> BackendHTTPResponse {
@@ -201,6 +212,10 @@ actor PreviewBackendServer {
             return reply(200, host == "home.sigmo.test" ? #"{"features":["wifiCalling","esimTransfer","volte"]}"# : #"{"features":[]}"#)
         }
         if request.httpMethod == "GET" {
+            if failsCommunicationReads, host == "home.sigmo.test",
+               ["/contacts", "/message-threads", "/api/v1/calls"].contains(where: path.hasSuffix) {
+                return HTTPProblem.response(status: 503, code: "remote_error", detail: "Communication unavailable")
+            }
             if path.hasSuffix("/contacts") || path.hasSuffix("/sim-profiles") { return reply(200, #"{"items":[]}"#) }
             if path.hasSuffix("/message-threads") || path.hasSuffix("/api/v1/calls") { return reply(200, #"{"items":[],"nextCursor":""}"#) }
             if path.hasSuffix("/calls") { return reply(200, "[]") }

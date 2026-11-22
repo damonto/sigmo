@@ -88,52 +88,7 @@ func (h *Handler) Register(c *echo.Context) error {
 	if err := h.store.UpsertNativeSubscription(c.Request().Context(), sub); err != nil {
 		return httpapi.Internal(c, "register_native_push_failed", err)
 	}
-	httpapi.SetResourceLocation(c, sub.ID)
 	return c.JSON(http.StatusCreated, sub)
-}
-
-// Update changes preferences for an already registered installation.
-func (h *Handler) Update(c *echo.Context) error {
-	var req struct {
-		SMS       *bool   `json:"sms"`
-		Reminders *bool   `json:"reminders"`
-		Calls     *bool   `json:"calls"`
-		Enabled   *bool   `json:"enabled"`
-		Label     *string `json:"label"`
-	}
-	if err := httpapi.BindJSON(c, &req, "invalid_native_push_subscription"); err != nil {
-		return err
-	}
-	if req.Label != nil && len(*req.Label) > 128 {
-		return httpapi.UnprocessableEntity(c, "invalid_native_push_subscription", errors.New("push device name is too long"))
-	}
-	binding, err := h.requestSession(c)
-	if err != nil {
-		return httpapi.Internal(c, "bind_push_session_failed", err)
-	}
-	sub, err := h.store.UpdateNativeSubscription(c.Request().Context(), c.Param("subscriptionId"), storage.NativeSubscriptionUpdate{
-		SMS:           req.SMS,
-		Reminders:     req.Reminders,
-		Calls:         req.Calls,
-		Enabled:       req.Enabled,
-		Label:         req.Label,
-		AuthSessionID: binding,
-	})
-	if errors.Is(err, storage.ErrNotFound) {
-		return httpapi.Error(c, http.StatusNotFound, "native_push_subscription_not_found", "push subscription not found")
-	}
-	if err != nil {
-		return httpapi.Internal(c, "update_native_push_failed", err)
-	}
-	return c.JSON(http.StatusOK, sub)
-}
-
-// Delete cancels pending deliveries as well as the local registration.
-func (h *Handler) Delete(c *echo.Context) error {
-	if err := h.store.DeleteNativeSubscription(c.Request().Context(), c.Param("subscriptionId")); err != nil {
-		return httpapi.Internal(c, "delete_native_push_failed", err)
-	}
-	return c.NoContent(http.StatusNoContent)
 }
 
 func (h *Handler) requestSession(c *echo.Context) (string, error) {

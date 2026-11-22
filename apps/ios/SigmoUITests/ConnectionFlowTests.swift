@@ -222,6 +222,33 @@ final class ConnectionFlowTests: XCTestCase {
         expectToggle("wifiCallingEnabled", value: "1", in: app)
     }
 
+    func testWiFiCallingProxyHostAcceptsCopiedSOCKS5URL() {
+        let app = launch("detail-connection-proxy-check")
+        tap(app.buttons["profileInternet"], in: app)
+        tap(app.buttons["copySOCKSProxy"], in: app)
+        back(app)
+        tap(app.buttons["profileWiFiCalling"], in: app)
+        tap(app.buttons["wifiCallingUplink"], in: app)
+        tap(app.buttons["Add Proxy"], in: app)
+
+        let host = app.textFields["wifiProxyHost"]
+        replace(host, with: "draft.test", in: app)
+        host.press(forDuration: 1)
+        let paste = app.descendants(matching: .any)["Paste"].firstMatch
+        XCTAssertTrue(paste.waitForExistence(timeout: 5))
+        paste.tap()
+        let filled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "2001:db8::1"), object: host)
+        XCTAssertEqual(XCTWaiter.wait(for: [filled], timeout: 5), .completed)
+        XCTAssertEqual(app.textFields["wifiProxyName"].value as? String, "2001:db8::1")
+        XCTAssertEqual(app.textFields["wifiProxyPort"].value as? String, "1080")
+        XCTAssertEqual(app.textFields["wifiProxyUsername"].value as? String, "proxy")
+        XCTAssertTrue(app.buttons["Save Proxy"].isEnabled)
+
+        tap(app.buttons["Cancel"], in: app)
+        expectToggle("wifiProxyEnabled", value: "0", in: app)
+        XCTAssertFalse(app.buttons["Edit Proxy"].exists)
+    }
+
     func testWiFiCallingSOCKS5ProxyCanBeTestedBeforeApplying() {
         let app = launch("detail-connection-proxy-check")
         tap(app.buttons["profileWiFiCalling"], in: app)

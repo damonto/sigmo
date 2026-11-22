@@ -140,36 +140,25 @@ private final class BackendFilterSegments: UISegmentedControl {
 // A connection stays the filtering unit; its active SIM labels provide context.
 struct CommunicationBackendFilter: View {
     @Environment(BackendStore.self) private var store
-    @Binding var selection: UUID?
-    private var selectedName: String {
-        store.orderedSessions().first { $0.id == selection }?.configuration.name ?? detailText("home.all")
-    }
+    let selected: BackendSession
+    let select: (UUID) -> Void
 
     var body: some View {
         Menu {
-            Button { selection = nil } label: {
-                Label {
-                    Text("home.all")
-                } icon: {
-                    if selection == nil { Image(systemName: "checkmark") }
-                }
-            }
-            .accessibilityIdentifier("communication-backend-all")
-            .accessibilityAddTraits(selection == nil ? .isSelected : [])
             ForEach(store.orderedSessions()) { session in
-                Button { selection = session.id } label: {
+                Button { select(session.id) } label: {
                     Label {
                         Text(session.configuration.name)
                         Text(session.modems.map(\.communicationLabel).joined(separator: " · "))
                     } icon: {
-                        if selection == session.id { Image(systemName: "checkmark") }
+                        if selected.id == session.id { Image(systemName: "checkmark") }
                     }
                 }
                 .accessibilityIdentifier("communication-backend-\(session.configuration.name)")
-                .accessibilityAddTraits(selection == session.id ? .isSelected : [])
+                .accessibilityAddTraits(selected.id == session.id ? .isSelected : [])
             }
         } label: {
-            Label("\(detailText("communication.chooseBackend")): \(selectedName)", systemImage: "line.3.horizontal.decrease")
+            Label("\(detailText("communication.chooseBackend")): \(selected.configuration.name)", systemImage: "line.3.horizontal.decrease")
         }
         .accessibilityIdentifier("communication-backend-filter")
     }

@@ -151,8 +151,6 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			h := hnativepush.New(deps.Storage)
 			protected.GET("/push-subscriptions", h.List)
 			protected.POST("/push-subscriptions", h.Register)
-			protected.PATCH("/push-subscriptions/:subscriptionId", h.Update)
-			protected.DELETE("/push-subscriptions/:subscriptionId", h.Delete)
 		}
 		{
 			protected.GET("/settings", settingsReader.Get)
@@ -214,10 +212,7 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			protected.GET("/conversations/:conversationId/messages", h.ConversationMessages)
 			protected.PATCH("/conversations/:conversationId", h.UpdateConversation)
 			protected.DELETE("/conversations/:conversationId", h.DeleteConversation)
-			protected.GET("/modems/:id/message-conversations", h.List)
-			protected.GET("/modems/:id/message-conversations/:participant/messages", h.ListByParticipant)
 			protected.POST("/modems/:id/messages", h.Send)
-			protected.DELETE("/modems/:id/message-conversations/:participant", h.DeleteByParticipant)
 		}
 
 		{
@@ -227,7 +222,6 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 
 		{
 			h := network.NewHandler(deps.Network)
-			protected.GET("/modems/:id/networks", h.List)
 			protected.POST("/modems/:id/network-scans", h.StartNetworkScan)
 			protected.GET("/modems/:id/network-scans/:scanID", h.GetNetworkScan)
 			protected.GET("/modems/:id/network-settings/airplane-mode", h.AirplaneMode)
@@ -278,7 +272,6 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 		{
 			profiles := communication.NewSIMProfileHandler(simprofile.New(deps.Storage, deps.Registry, deps.ESIM))
 			protected.GET("/sim-profiles", profiles.Lines)
-			protected.GET("/communication-preferences", profiles.Preference)
 			protected.PUT("/sim-profiles/:profileId/history-assignment", profiles.AssignHistory)
 		}
 
@@ -307,7 +300,6 @@ func Register(e *echo.Echo, deps RegisterConfig) error {
 			h := hwebpush.New(deps.WebPush)
 			protected.GET("/web-push", h.Get)
 			protected.PUT("/web-push", h.Update)
-			protected.GET("/web-push/subscriptions", h.ListSubscriptions)
 			protected.POST("/web-push/subscriptions", h.Register)
 			protected.PATCH("/web-push/subscriptions/:subscriptionId", h.Rename)
 			protected.DELETE("/web-push/subscriptions/:subscriptionId", h.Delete)
@@ -351,7 +343,6 @@ func CallRoutes(calls *call.Calls, media *call.Media) Extension {
 		mediaHandler := call.NewMediaHandler(deps.Registry, media)
 		callHandler := call.NewHandler(deps.Registry, calls)
 		group.GET("/calls", history.History)
-		group.GET("/calls/:callID", history.HistoryRecord)
 		group.DELETE("/calls/:callID", history.DeleteHistory)
 		group.GET("/call-media/ice-servers", mediaHandler.WebRTCICEServers)
 		group.GET("/modems/:id/calls", callHandler.List)
@@ -361,7 +352,6 @@ func CallRoutes(calls *call.Calls, media *call.Media) Extension {
 		group.GET("/modems/:id/calls/:callID/webrtc/sessions", mediaHandler.WebRTCSession)
 		group.POST("/modems/:id/calls/:callID/dtmf-events", callHandler.SendDTMF)
 		group.PATCH("/modems/:id/calls/:callID", callHandler.Update)
-		group.DELETE("/modems/:id/calls/:callID", callHandler.Delete)
 		return nil
 	}
 }

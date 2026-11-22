@@ -10,7 +10,7 @@ import (
 	"github.com/damonto/sigmo/internal/pkg/storage"
 )
 
-// SIMProfileHandler exposes inventory, communication preferences, and history handovers.
+// SIMProfileHandler exposes inventory and history handovers.
 type SIMProfileHandler struct{ service *simprofile.Service }
 
 // NewSIMProfileHandler creates SIM profile endpoints using the shared inventory service.
@@ -27,15 +27,6 @@ func (h *SIMProfileHandler) Lines(c *echo.Context) error {
 	return c.JSON(http.StatusOK, struct {
 		Items []storage.SIMLine `json:"items"`
 	}{lines})
-}
-
-// Preference returns the preferred SIM profile for a participant.
-func (h *SIMProfileHandler) Preference(c *echo.Context) error {
-	preference, err := h.service.Preference(c.Request().Context(), c.QueryParam("participant"))
-	if err != nil {
-		return writeError(c, err)
-	}
-	return c.JSON(http.StatusOK, preference)
 }
 
 // AssignHistory transfers archived communication history between SIM profiles.

@@ -1,7 +1,8 @@
 import SwiftUI
 
 private struct CommunicationActionSheet: ViewModifier {
-    @Binding var action: BackendCommunicationAction?
+    @Binding var action: CommunicationAction?
+    let session: BackendSession
     var sent: () -> Void
     @Environment(CallsState.self) private var calls
     @State private var pending: (String, CallLine)?
@@ -11,21 +12,14 @@ private struct CommunicationActionSheet: ViewModifier {
             self.pending = nil
             Task { await calls.dial(number: pending.0, line: pending.1) }
         }) { action in
-            CommunicationComposerView(session: action.session, action: action.action, sent: sent) { pending = ($0, $1) }
+            CommunicationComposerView(session: session, action: action, sent: sent) { pending = ($0, $1) }
         }
     }
 }
 
 extension View {
     func communicationActions(_ action: Binding<CommunicationAction?>, session: BackendSession, sent: @escaping () -> Void = {}) -> some View {
-        communicationActions(Binding(
-            get: { action.wrappedValue.map { BackendCommunicationAction(session: session, action: $0) } },
-            set: { action.wrappedValue = $0?.action }
-        ), sent: sent)
-    }
-
-    func communicationActions(_ action: Binding<BackendCommunicationAction?>, sent: @escaping () -> Void = {}) -> some View {
-        modifier(CommunicationActionSheet(action: action, sent: sent))
+        modifier(CommunicationActionSheet(action: action, session: session, sent: sent))
     }
 }
 

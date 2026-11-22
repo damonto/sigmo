@@ -26,19 +26,6 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{registry: service.registry, networks: service.networks}
 }
 
-func (h *Handler) List(c *echo.Context) error {
-	ctx := c.Request().Context()
-	modem, err := h.registry.Find(ctx, c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, "list_networks_failed")
-	}
-	response, err := h.networks.List(ctx, modem)
-	if err != nil {
-		return httpapi.Internal(c, "list_networks_failed", err)
-	}
-	return c.JSON(http.StatusOK, response)
-}
-
 func (h *Handler) StartNetworkScan(c *echo.Context) error {
 	header := c.Response().Header()
 	header.Set("Cache-Control", "no-store")

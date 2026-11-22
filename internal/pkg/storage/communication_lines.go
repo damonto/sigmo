@@ -121,43 +121,6 @@ func (s *Store) ReconcileProfileDeletion(ctx context.Context, change ProfileReco
 	return true, nil
 }
 
-// CommunicationPreference belongs to a correspondent, independently of contact records.
-type CommunicationPreference struct {
-	Participant string `json:"participant"`
-	ProfileID   string `json:"profileId"`
-	UpdatedAt   string `json:"updatedAt"`
-}
-
-// RememberCommunication records only a confirmed outgoing operation.
-func (s *Store) RememberCommunication(ctx context.Context, preference CommunicationPreference) error {
-	preference.Participant = ParticipantKey(preference.Participant, "")
-	if preference.Participant == "" || preference.ProfileID == "" {
-		return nil
-	}
-	if preference.UpdatedAt == "" {
-		preference.UpdatedAt = nowText()
-	}
-	err := query.New(s.db).RememberCommunication(ctx, query.RememberCommunicationParams{Participant: preference.Participant, ProfileID: preference.ProfileID, UpdatedAt: preference.UpdatedAt})
-	if err != nil {
-		return fmt.Errorf("remember communication line: %w", err)
-	}
-	return nil
-}
-
-// PreferredCommunication returns an empty selection when this correspondent has no history.
-func (s *Store) PreferredCommunication(ctx context.Context, participant string) (CommunicationPreference, error) {
-	result := CommunicationPreference{Participant: ParticipantKey(participant, "")}
-	row, err := query.New(s.db).PreferredCommunication(ctx, result.Participant)
-	if errors.Is(err, sql.ErrNoRows) {
-		return result, nil
-	}
-	if err != nil {
-		return result, fmt.Errorf("read preferred line: %w", err)
-	}
-	result.ProfileID, result.UpdatedAt = row.ProfileID, row.UpdatedAt
-	return result, nil
-}
-
 // HistoryAssignment names an already-deleted source and a freshly verified target.
 type HistoryAssignment struct {
 	SourceProfileID string
@@ -177,7 +140,7 @@ func (s *Store) AssignHistory(ctx context.Context, assignment HistoryAssignment)
 	if err != nil {
 		return fmt.Errorf("begin history assignment: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }() // Histories and preferences move together or not at all.
+	defer func() { _ = tx.Rollback() }()
 	queries := query.New(tx)
 	origin, err := queries.ReadAssignmentSource(ctx, source)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -204,9 +167,6 @@ func (s *Store) AssignHistory(ctx context.Context, assignment HistoryAssignment)
 	}
 	if err := queries.AssignCallHistory(ctx, query.AssignCallHistoryParams{Target: target, Source: source}); err != nil {
 		return fmt.Errorf("assign call history: %w", err)
-	}
-	if err := queries.AssignCommunicationPreferences(ctx, query.AssignCommunicationPreferencesParams{Target: target, Source: source}); err != nil {
-		return fmt.Errorf("assign communication preferences: %w", err)
 	}
 	if err := queries.AssignProfileSuccessors(ctx, query.AssignProfileSuccessorsParams{Target: target, Source: source}); err != nil {
 		return fmt.Errorf("assign profile successors: %w", err)

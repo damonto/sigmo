@@ -5,6 +5,36 @@ import XCTest
 final class ConnectionTests: XCTestCase {
     private let profileID = "se-a:8986000000000000001"
 
+    func testWiFiProxyPasteParsesSupportedAddresses() {
+        let inputs: [(String, WiFiProxyAddress)] = [
+            (" SOCKS5H://u%40ser:p:%2F%E6%B5%8B@[2001:db8::1]:1081\n",
+             .init(host: "2001:db8::1", port: 1081, username: "u@ser", password: "p:/测")),
+            ("socks5://192.0.2.1", .init(host: "192.0.2.1", port: 1080, username: "", password: "")),
+            ("socks5://xn--bcher-kva.example/", .init(host: "xn--bcher-kva.example", port: 1080, username: "", password: "")),
+            ("proxy.test:9000", .init(host: "proxy.test", port: 9000, username: "", password: "")),
+            ("[2001:db8::2]:9000", .init(host: "2001:db8::2", port: 9000, username: "", password: ""))
+        ]
+        for (input, address) in inputs {
+            XCTAssertEqual(WiFiProxyPaste(input), .address(address))
+        }
+    }
+
+    func testWiFiProxyPasteDistinguishesInvalidAddressesFromPlainHosts() {
+        let invalid = [
+            "http://other:secret@proxy.test:1080", "socks5://user@proxy.test", "socks5://user:%GG@proxy.test",
+            "socks5://[2001:::1]:1080", "socks5://proxy.test/path", "socks5://proxy.test:",
+            "socks5://proxy.test:999999999999999999999", "socks5:/user:secret@proxy.test",
+            "proxy.test:1080:8080", "proxy.test:65536", "socks5://user:line%0Aend@proxy.test",
+            "socks5://user:\(String(repeating: "%E5%AF%86", count: 86))@proxy.test"
+        ]
+        for input in invalid {
+            XCTAssertEqual(WiFiProxyPaste(input), .invalid)
+        }
+        for input in ["proxy.test", "192.0.2.1", "2001:db8::1", "fe80::1%eth0"] {
+            XCTAssertEqual(WiFiProxyPaste(input), .text)
+        }
+    }
+
     private func make(_ server: DetailFixtureServer, host: String = "connections.example") async throws -> ModemDetailState {
         let configuration = BackendConfiguration(name: host, address: try BackendAddress.normalize("https://\(host)/prefix"))
         let session = BackendSession(configuration: configuration, credentials: MemoryCredentials().store,

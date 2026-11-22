@@ -129,7 +129,7 @@ func TestThreadsKeepPerMessageReadsAndDeleteHistory(t *testing.T) {
 	}
 }
 
-func TestHistoryAssignmentPreservesSourceAndMovesPreferences(t *testing.T) {
+func TestHistoryAssignmentPreservesSourceIdentity(t *testing.T) {
 	s := testStore(t)
 	insertThreadMessage(t, s, "a", "10086", "old")
 	for _, id := range []string{"a", "b", "c"} {
@@ -142,9 +142,6 @@ func TestHistoryAssignmentPreservesSourceAndMovesPreferences(t *testing.T) {
 	}
 	before, err := s.Call(t.Context(), "call-a")
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.RememberCommunication(t.Context(), CommunicationPreference{Participant: "10086", ProfileID: "a"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.AssignHistory(t.Context(), HistoryAssignment{SourceProfileID: "a", TargetProfileID: "b"}); !errors.Is(err, ErrInvalidAssignment) {
@@ -167,10 +164,6 @@ func TestHistoryAssignmentPreservesSourceAndMovesPreferences(t *testing.T) {
 	messages, err := s.ThreadMessages(t.Context(), ThreadID("10086"), HistoryFilter{ProfileID: "c"})
 	if err != nil || len(messages.Items) != 1 || messages.Items[0].ProfileID != "a" || messages.Items[0].Read {
 		t.Fatalf("assigned messages = %+v, %v", messages, err)
-	}
-	pref, err := s.PreferredCommunication(t.Context(), "10086")
-	if err != nil || pref.ProfileID != "c" {
-		t.Fatalf("preference = %+v, %v", pref, err)
 	}
 }
 
@@ -290,16 +283,9 @@ func TestLateHistoryFollowsCompletedAssignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	insertThreadMessage(t, s, "a", "10086", "late")
-	if err := s.RememberCommunication(t.Context(), CommunicationPreference{Participant: "10086", ProfileID: "a"}); err != nil {
-		t.Fatal(err)
-	}
 	page, err := s.ThreadMessages(t.Context(), ThreadID("10086"), HistoryFilter{ProfileID: "b"})
 	if err != nil || len(page.Items) != 1 || page.Items[0].ProfileID != "a" {
 		t.Fatalf("late history = %+v, %v", page, err)
-	}
-	pref, err := s.PreferredCommunication(t.Context(), "10086")
-	if err != nil || pref.ProfileID != "b" {
-		t.Fatalf("late preference = %+v, %v", pref, err)
 	}
 	call, saved, err := s.SaveCallPreservingTerminal(t.Context(), Call{
 		ID: "late-call", ProfileID: "a", ModemID: "a", Number: "10086",

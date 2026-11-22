@@ -450,19 +450,16 @@ final class CallsFlowTests: XCTestCase {
         XCTAssertFalse(app.sheets["Choose a Sigmo backend"].exists)
     }
 
-    func testUnavailableSystemCallbackShowsAllBackendsBeforeDialing() {
+    func testUnavailableSystemCallbackPrefillsDialerOnSelectedBackend() {
         let app = launchCallback(scenario: "communication-multiple", mode: "unavailable-line")
-        let chooser = app.sheets["Choose a Sigmo backend"]
-        let home = chooser.buttons["Home"]
-        let studio = chooser.buttons["Studio"]
-        XCTAssertTrue(home.waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(studio.exists)
-        XCTAssertFalse(app.buttons["calls-end"].exists)
-        studio.tap()
         let number = app.textFields["calls-number"]
-        XCTAssertTrue(number.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(number.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertEqual(number.value as? String, "10086")
-        XCTAssertFalse(app.buttons["calls-end"].exists, "Choosing a backend still requires explicit dialing")
+        XCTAssertFalse(app.buttons["calls-end"].exists, "The prefilled number still requires explicit dialing")
+        let modem = app.buttons["communication-modem-picker"]
+        XCTAssertTrue(modem.waitForExistence(timeout: 5)); modem.tap()
+        XCTAssertTrue(app.collectionViews.buttons["Studio Modem"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.collectionViews.buttons["Home Modem"].exists)
     }
 
     func testInCallKeypadFitsLargeTextAndLandscapeWithoutScrolling() {

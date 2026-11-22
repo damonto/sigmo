@@ -685,12 +685,15 @@ func TestHangupEndsWiFiCallingCallLocally(t *testing.T) {
 				SIM:                 &mmodem.SIM{Identifier: call.ProfileID},
 			}
 
-			ended, err := service.Hangup(ctx, modem, call.ID)
+			ended, err := service.UpdateForClient(ctx, modem, ClientUpdate{
+				CallID: call.ID,
+				Update: UpdateRequest{State: StateEnded},
+			})
 			if err != nil {
-				t.Fatalf("Hangup() error = %v", err)
+				t.Fatalf("UpdateForClient() error = %v", err)
 			}
 			if ended.State != StateEnded || ended.EndedAt.IsZero() || !ended.UpdatedAt.Equal(ended.EndedAt) {
-				t.Fatalf("Hangup() = %+v, want locally ended call", ended)
+				t.Fatalf("UpdateForClient() = %+v, want locally ended call", ended)
 			}
 
 			stored, err := store.Call(ctx, call.ID)
@@ -746,17 +749,20 @@ func TestHangupDoesNotWaitForWiFiCallingCleanup(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := service.Hangup(ctx, modem, call.ID)
+		_, err := service.UpdateForClient(ctx, modem, ClientUpdate{
+			CallID: call.ID,
+			Update: UpdateRequest{State: StateEnded},
+		})
 		done <- err
 	}()
 
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("Hangup() error = %v", err)
+			t.Fatalf("UpdateForClient() error = %v", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Hangup() waited for Wi-Fi Calling cleanup")
+		t.Fatal("UpdateForClient() waited for Wi-Fi Calling cleanup")
 	}
 	select {
 	case <-hangupStarted:

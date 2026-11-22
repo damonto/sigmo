@@ -111,8 +111,7 @@ enum SystemCallbackDestination: Equatable, Sendable {
 struct CommunicationDialRequest: Identifiable, Equatable, Sendable {
     let id = UUID()
     let number: String
-    let backendID: UUID?
-    let modemID: String?
+    let sessionID: UUID
 }
 
 struct ModemDialRequest: Identifiable, Equatable, Sendable {

@@ -5,7 +5,6 @@ import type {
   BandsResponse,
   ModesResponse,
   NetworkScanResponse,
-  NetworksResponse,
   RegistrationResponse,
   SetAirplaneModeRequest,
   SetCurrentBandsRequest,
@@ -14,10 +13,6 @@ import type {
 } from '@/types/network'
 
 export const useNetworkApi = () => {
-  const scanNetworks = (id: string) => {
-    return fetchJson<NetworksResponse>(`modems/${id}/networks`)
-  }
-
   const startNetworkScan = (id: string) => {
     return fetchJson<NetworkScanResponse>(`modems/${id}/network-scans`, {
       method: 'POST',
@@ -75,7 +70,6 @@ export const useNetworkApi = () => {
   }
 
   return {
-    scanNetworks,
     startNetworkScan,
     getNetworkScan,
     getRegistration,

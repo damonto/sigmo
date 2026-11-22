@@ -34,6 +34,11 @@ final class BackendStore {
         }
     }
 
+    func communicationSession(preferredID: UUID?) -> BackendSession? {
+        if let preferredID, let session = sessions[preferredID] { return session }
+        return orderedSessions().first
+    }
+
     func reloadConfiguration() {
         do {
             let loaded = try file.load()

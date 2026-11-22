@@ -6,8 +6,6 @@ import { useModemMessages } from '@/composables/useModemMessages'
 import type { Conversation } from '@/types/message'
 
 const api = vi.hoisted(() => ({
-  getMessages: vi.fn(),
-  deleteMessagesByParticipant: vi.fn(),
   getConversations: vi.fn(),
   deleteConversation: vi.fn(),
 }))
@@ -87,8 +85,6 @@ describe('useModemMessages', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    api.getMessages.mockResolvedValue({ data: ref([]) })
-    api.deleteMessagesByParticipant.mockResolvedValue({ data: ref(undefined) })
     api.getConversations.mockResolvedValue({
       data: ref({ backendId: 'backend', revision: 1, unreadCount: 0, items: [] }),
     })

@@ -3,6 +3,34 @@ import XCTest
 
 @MainActor
 final class HomeTests: XCTestCase {
+    func testCommunicationBackendUsesConfiguredOrderAndKeepsAnExplicitSelection() async throws {
+        let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let offline = BackendStub(), online = BackendStub()
+        let first = UUID(), second = UUID()
+        let store = BackendStore(file: ConfigurationFile(url: directory.appending(path: "connections.json")),
+                                 credentials: MemoryCredentials().store, makeAPI: { configuration in
+            let stub = configuration.id == first ? offline : online
+            return BackendAPI(configuration: configuration) { try await stub.respond($0) }
+        })
+        XCTAssertNil(store.communicationSession(preferredID: nil))
+        XCTAssertTrue(store.saveBackend(id: first, name: "Home", address: "https://one.example"))
+        XCTAssertTrue(store.saveBackend(id: second, name: "Studio", address: "https://two.example"))
+        await offline.setOffline(true)
+        await store.refreshAll()
+
+        XCTAssertEqual(store.onlineSessions.map(\.id), [second])
+        XCTAssertEqual(store.communicationSession(preferredID: nil)?.id, first)
+        XCTAssertEqual(store.communicationSession(preferredID: second)?.id, second)
+
+        store.moveBackends(from: IndexSet(integer: 1), to: 0)
+        XCTAssertEqual(store.communicationSession(preferredID: nil)?.id, second)
+        XCTAssertEqual(store.communicationSession(preferredID: first)?.id, first)
+
+        store.deleteBackend(first)
+        XCTAssertEqual(store.communicationSession(preferredID: first)?.id, second)
+    }
+
     func testHomeHidesUnavailableConnectionsUntilRefreshRecovers() async throws {
         let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -15,7 +15,6 @@ const api = vi.hoisted(() => ({
   getModems: vi.fn(),
   getModem: vi.fn(),
   lines: vi.fn(),
-  preference: vi.fn(),
   send: vi.fn(),
   saveContact: vi.fn(),
   saveAvatar: vi.fn(),
@@ -101,7 +100,6 @@ describe('communication modem choice', () => {
       if (mode === 'message') expect(api.send).toHaveBeenCalledWith(target, '10010', 'Hello')
       else expect(dial).toHaveBeenCalledWith('10010', target)
       expect(api.lines).not.toHaveBeenCalled()
-      expect(api.preference).not.toHaveBeenCalled()
       scope.stop()
     },
   )

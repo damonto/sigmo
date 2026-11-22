@@ -33,15 +33,6 @@ func (h *HistoryHandler) History(c *echo.Context) error {
 	}{ResponsesFromCalls(items), cursor})
 }
 
-// HistoryRecord returns one archived call.
-func (h *HistoryHandler) HistoryRecord(c *echo.Context) error {
-	record, err := h.history.Get(c.Request().Context(), c.Param("callID"))
-	if err != nil {
-		return callActionError(c, err, "list_calls_failed")
-	}
-	return c.JSON(http.StatusOK, ResponseFromCall(record))
-}
-
 // DeleteHistory removes a terminal call from history.
 func (h *HistoryHandler) DeleteHistory(c *echo.Context) error {
 	if err := h.history.Delete(c.Request().Context(), c.Param("callID")); err != nil {

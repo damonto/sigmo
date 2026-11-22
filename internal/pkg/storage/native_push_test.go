@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
 
-func TestUpdateNativeSubscriptionPreservesRegistration(t *testing.T) {
+func TestNativeSubscriptionReregistrationIsIdempotent(t *testing.T) {
 	s := testStore(t)
 	sub := NativeSubscription{
 		ID:             "subscription",
@@ -36,19 +35,23 @@ func TestUpdateNativeSubscriptionPreservesRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sms, label := false, "renamed phone"
-	update := NativeSubscriptionUpdate{SMS: &sms, Label: &label, AuthSessionID: "renewed-login"}
-	got, err := s.UpdateNativeSubscription(t.Context(), sub.ID, update)
+	sub.SMS = false
+	sub.Label = "renamed phone"
+	sub.AuthSessionID = "renewed-login"
+	if err := s.UpsertNativeSubscription(t.Context(), sub); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.NativeSubscription(t.Context(), sub.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.SMS || got.Label != label || got.AuthSessionID != update.AuthSessionID {
+	if got.SMS || got.Label != sub.Label || got.AuthSessionID != sub.AuthSessionID {
 		t.Fatal("preference update did not apply the requested fields")
 	}
 	if got.SendToken != sub.SendToken || !bytes.Equal(got.EncryptionKey, sub.EncryptionKey) ||
 		got.InstallationID != sub.InstallationID || got.BackendName != sub.BackendName ||
 		!got.Calls || !got.Reminders || !got.Enabled {
-		t.Fatal("preference update overwrote registration or omitted preferences")
+		t.Fatal("registration did not preserve the supplied credentials and preferences")
 	}
 	after, err := s.MessagesState(t.Context())
 	if err != nil {
@@ -57,7 +60,7 @@ func TestUpdateNativeSubscriptionPreservesRegistration(t *testing.T) {
 	if after.Revision != before.Revision+1 {
 		t.Fatalf("revision = %d, want %d", after.Revision, before.Revision+1)
 	}
-	if _, err := s.UpdateNativeSubscription(t.Context(), sub.ID, update); err != nil {
+	if err := s.UpsertNativeSubscription(t.Context(), sub); err != nil {
 		t.Fatal(err)
 	}
 	repeated, err := s.MessagesState(t.Context())
@@ -69,36 +72,7 @@ func TestUpdateNativeSubscriptionPreservesRegistration(t *testing.T) {
 	}
 }
 
-func TestUpdateNativeSubscriptionDoesNotCreateGrants(t *testing.T) {
-	for _, name := range []string{"missing", "deleted"} {
-		t.Run(name, func(t *testing.T) {
-			s := testStore(t)
-			sub := NativeSubscription{
-				ID:             "subscription",
-				InstallationID: "phone",
-				SendToken:      strings.Repeat("s", 32),
-				EncryptionKey:  make([]byte, 32),
-			}
-			if name == "deleted" {
-				if err := s.UpsertNativeSubscription(t.Context(), sub); err != nil {
-					t.Fatal(err)
-				}
-				if err := s.DeleteNativeSubscription(t.Context(), sub.ID); err != nil {
-					t.Fatal(err)
-				}
-			}
-			enabled := true
-			if _, err := s.UpdateNativeSubscription(t.Context(), sub.ID, NativeSubscriptionUpdate{Enabled: &enabled}); !errors.Is(err, ErrNotFound) {
-				t.Fatalf("UpdateNativeSubscription() error = %v, want %v", err, ErrNotFound)
-			}
-			if _, err := s.NativeSubscription(t.Context(), sub.ID); !errors.Is(err, ErrNotFound) {
-				t.Fatalf("NativeSubscription() error = %v, want %v", err, ErrNotFound)
-			}
-		})
-	}
-}
-
-func TestUpdateNativeSubscriptionRollsBackWithBadge(t *testing.T) {
+func TestNativeSubscriptionRegistrationRollsBackWithBadge(t *testing.T) {
 	s := testStore(t)
 	sub := NativeSubscription{
 		ID:             "subscription",
@@ -121,9 +95,9 @@ func TestUpdateNativeSubscriptionRollsBackWithBadge(t *testing.T) {
 	`); err != nil {
 		t.Fatal(err)
 	}
-	sms := false
-	if _, err := s.UpdateNativeSubscription(t.Context(), sub.ID, NativeSubscriptionUpdate{SMS: &sms}); err == nil {
-		t.Fatal("UpdateNativeSubscription() succeeded despite a badge write failure")
+	sub.SMS = false
+	if err := s.UpsertNativeSubscription(t.Context(), sub); err == nil {
+		t.Fatal("UpsertNativeSubscription() succeeded despite a badge write failure")
 	}
 	got, err := s.NativeSubscription(t.Context(), sub.ID)
 	if err != nil {
@@ -138,38 +112,6 @@ func TestUpdateNativeSubscriptionRollsBackWithBadge(t *testing.T) {
 	}
 	if after != before {
 		t.Fatalf("failed update changed state: %+v, want %+v", after, before)
-	}
-}
-
-func TestConcurrentNativePreferenceUpdatesPreserveBothChanges(t *testing.T) {
-	s := testStore(t)
-	sub := NativeSubscription{
-		ID:             "subscription",
-		InstallationID: "phone",
-		SendToken:      strings.Repeat("s", 32),
-		EncryptionKey:  make([]byte, 32),
-		SMS:            true,
-		Enabled:        true,
-	}
-	if err := s.UpsertNativeSubscription(t.Context(), sub); err != nil {
-		t.Fatal(err)
-	}
-	sms, calls := false, true
-	var wg sync.WaitGroup
-	for _, update := range []NativeSubscriptionUpdate{{SMS: &sms}, {Calls: &calls}} {
-		wg.Go(func() {
-			if _, err := s.UpdateNativeSubscription(t.Context(), sub.ID, update); err != nil {
-				t.Errorf("UpdateNativeSubscription() error = %v", err)
-			}
-		})
-	}
-	wg.Wait()
-	got, err := s.NativeSubscription(t.Context(), sub.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.SMS || !got.Calls {
-		t.Fatalf("SMS, Calls = %t, %t; want false, true", got.SMS, got.Calls)
 	}
 }
 

@@ -1396,6 +1396,7 @@ const en = {
         switchProxy: 'Switch Proxy',
         namePlaceholder: 'Office proxy',
         hostPlaceholder: 'proxy.example.com',
+        invalidPaste: 'Paste a valid SOCKS5 URL or a host and port.',
         portPlaceholder: '1080',
         usernamePlaceholder: 'Enter proxy username',
         passwordPlaceholder: 'Enter proxy password',

@@ -2,11 +2,13 @@ import XCTest
 
 @MainActor
 final class CommunicationFlowTests: XCTestCase {
-    private func launch(multiple: Bool = false, chinese: Bool = false, history: Bool = false, modem: Bool = false) -> XCUIApplication {
+    private func launch(multiple: Bool = false, chinese: Bool = false, history: Bool = false, modem: Bool = false,
+                        scenario: String? = nil) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchEnvironment["SIGMO_UI_SCENARIO"] = multiple ? "communication-multiple" : (history ? "communication-history" : "communication")
         if modem { app.launchEnvironment["SIGMO_UI_SCENARIO"] = "communication-modem" }
+        if let scenario { app.launchEnvironment["SIGMO_UI_SCENARIO"] = scenario }
         app.launchEnvironment["SIGMO_UI_RESET"] = "1"
         app.launchEnvironment["SIGMO_UI_APPEARANCE"] = chinese ? "dark" : "light"
         app.launchArguments = ["-AppleLanguages", chinese ? "(zh-Hans)" : "(en)", "-AppleLocale", chinese ? "zh_CN" : "en_US", "-UIPreferredContentSizeCategoryName", chinese ? "UICTContentSizeCategoryAccessibilityXXXL" : "UICTContentSizeCategoryL"]
@@ -82,24 +84,59 @@ final class CommunicationFlowTests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Sigmo"].waitForExistence(timeout: 5))
     }
 
+    func testUnavailableBackendsShowCommunicationEmptyStates() {
+        let app = launch(scenario: "communication-unavailable")
+        let tabs = app.tabBars.buttons
+        XCTAssertTrue(tabs["Messages"].waitForExistence(timeout: 10))
+        let filter = app.buttons["communication-backend-filter"]
+        let pages = [("Messages", "No messages yet."), ("Calls", "No calls yet."),
+                     ("Contacts", "No contacts yet. Add your first contact.")]
+
+        for backend in ["Home", "Offline"] {
+            tabs["Messages"].tap()
+            if backend == "Offline" {
+                filter.tap()
+                app.buttons["communication-backend-Offline"].tap()
+            }
+            for (tab, empty) in pages {
+                tabs[tab].tap()
+                XCTAssertTrue(app.staticTexts[empty].waitForExistence(timeout: 5), app.debugDescription)
+                let name = app.staticTexts[backend]
+                let showsName = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true"), object: name)
+                showsName.isInverted = true
+                XCTAssertEqual(XCTWaiter.wait(for: [showsName], timeout: 1), .completed, app.debugDescription)
+                XCTAssertTrue(filter.isHittable)
+            }
+        }
+
+        filter.tap()
+        app.buttons["communication-backend-Locked"].tap()
+        XCTAssertTrue(app.buttons["Log In"].waitForExistence(timeout: 5))
+    }
+
     func testBackendMenuSharesAndRemembersCommunicationSelection() {
         let app = launch(multiple: true)
         let contacts = app.tabBars.buttons["Contacts"]
         XCTAssertTrue(contacts.waitForExistence(timeout: 10)); contacts.tap()
         XCTAssertTrue(app.staticTexts["Alice"].waitForExistence(timeout: 10))
-        capture(app, name: "Initial all contacts")
-        XCTAssertTrue(app.staticTexts["Studio Contact"].waitForExistence(timeout: 10), app.debugDescription)
-        XCTAssertTrue(app.buttons["communication-backend-filter"].label.contains("All"))
-        let segments = app
-        XCTAssertFalse(segments.buttons["All"].exists)
-        app.buttons["communication-backend-filter"].tap()
-        XCTAssertTrue(app.buttons["communication-backend-all"].exists)
-        segments.buttons["communication-backend-Studio"].tap()
+        XCTAssertFalse(app.staticTexts["Studio Contact"].exists)
+        let filter = app.buttons["communication-backend-filter"]
+        XCTAssertTrue(filter.label.contains("Home"))
+        let messages = app.tabBars.buttons["Messages"]
+        let homeBadge = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value MATCHES %@", #"2(\D.*)?"#), object: messages)
+        XCTAssertEqual(XCTWaiter.wait(for: [homeBadge], timeout: 5), .completed, app.debugDescription)
+        filter.tap()
+        XCTAssertTrue(app.buttons["communication-backend-Home"].exists)
+        XCTAssertFalse(app.buttons["communication-backend-all"].exists)
+        XCTAssertFalse(app.buttons["All"].exists)
+        app.buttons["communication-backend-Studio"].tap()
         XCTAssertTrue(app.staticTexts["Studio Contact"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Alice"].exists)
+        let studioBadge = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value MATCHES %@", #"7(\D.*)?"#), object: messages)
+        XCTAssertEqual(XCTWaiter.wait(for: [studioBadge], timeout: 5), .completed, app.debugDescription)
         for tab in ["Messages", "Calls", "Contacts"] {
             app.tabBars.buttons[tab].tap()
-            XCTAssertTrue(app.buttons["communication-backend-filter"].label.contains("Studio"))
+            XCTAssertTrue(filter.label.contains("Studio"))
         }
         capture(app, name: "Shared backend selection")
         app.terminate()
@@ -107,35 +144,35 @@ final class CommunicationFlowTests: XCTestCase {
         app.launch()
         app.tabBars.buttons["Contacts"].tap()
         XCTAssertTrue(app.staticTexts["Studio Contact"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["communication-backend-filter"].label.contains("Studio"))
-        app.buttons["communication-backend-filter"].tap()
-        segments.buttons["communication-backend-Home"].tap()
+        XCTAssertTrue(filter.label.contains("Studio"))
+        filter.tap()
+        app.buttons["communication-backend-Home"].tap()
         XCTAssertTrue(app.staticTexts["Alice"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Studio Contact"].exists)
-        app.buttons["communication-backend-filter"].tap()
-        app.buttons["communication-backend-all"].tap()
-        XCTAssertTrue(app.staticTexts["Studio Contact"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Alice"].exists)
     }
 
-    func testAllBackendsKeepHistoryAndContactActionsOnTheirSource() {
+    func testHistoryAndContactActionsFollowSelectedBackend() {
         let app = launch(multiple: true)
         XCTAssertTrue(app.tabBars.buttons["Messages"].waitForExistence(timeout: 10))
         app.tabBars.buttons["Messages"].tap()
         XCTAssertTrue(app.staticTexts["Alice"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Studio Contact"].exists)
+        app.buttons["communication-backend-filter"].tap()
+        app.buttons["communication-backend-Studio"].tap()
         XCTAssertTrue(app.staticTexts["Studio Contact"].firstMatch.waitForExistence(timeout: 10))
-        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "conversation-archive-thread").count, 2)
+        XCTAssertFalse(app.staticTexts["Alice"].exists)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "conversation-archive-thread").count, 1)
         app.staticTexts["Studio Contact"].firstMatch.tap()
         let modem = app.buttons["communication-modem-picker"]
         XCTAssertTrue(modem.waitForExistence(timeout: 10))
         XCTAssertEqual(modem.label, "Studio Modem")
         chooseStudioModem(app)
-        capture(app, name: "All backends message source")
+        capture(app, name: "Selected backend message source")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.tabBars.buttons["Calls"].tap()
         XCTAssertTrue(app.staticTexts["Studio Contact"].firstMatch.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Alice"].firstMatch.waitForExistence(timeout: 10))
-        XCTAssertEqual(app.buttons.matching(identifier: "call-record-archive-call").count, 2)
+        XCTAssertFalse(app.staticTexts["Alice"].exists)
+        XCTAssertEqual(app.buttons.matching(identifier: "call-record-archive-call").count, 1)
         app.staticTexts["Studio Contact"].firstMatch.tap()
         app.buttons["call-detail-call"].tap()
         XCTAssertTrue(modem.waitForExistence(timeout: 10))
@@ -145,7 +182,7 @@ final class CommunicationFlowTests: XCTestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.tabBars.buttons["Contacts"].tap()
         XCTAssertTrue(app.staticTexts["Studio Contact"].firstMatch.waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Alice"].firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["Alice"].exists)
         app.staticTexts["Studio Contact"].firstMatch.tap()
         app.buttons["Edit Contact"].tap()
         XCTAssertTrue(app.textFields["Name"].waitForExistence(timeout: 5))
@@ -153,65 +190,51 @@ final class CommunicationFlowTests: XCTestCase {
         capture(app, name: "Editing Studio contact")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label == %@ OR label == %@", "Studio", "Backend, Studio")).firstMatch.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertFalse(app.buttons["contact-backend-picker"].exists)
-        capture(app, name: "All backends contact source")
     }
 
-    func testAllBackendsChooseDestinationOnlyWhenCreating() {
+    func testNewMessageAndCallOpenOnSelectedBackend() {
         let app = launch(multiple: true)
         XCTAssertTrue(app.tabBars.buttons["Contacts"].waitForExistence(timeout: 10))
         app.tabBars.buttons["Contacts"].tap()
+        app.buttons["communication-backend-filter"].tap()
+        app.buttons["communication-backend-Studio"].tap()
         XCTAssertTrue(app.staticTexts["Studio Contact"].waitForExistence(timeout: 10))
-        app.buttons["modem-contact-actions"].tap()
-        app.buttons["New contact"].tap()
-        XCTAssertTrue(app.buttons.matching(identifier: "communication-create-Studio").firstMatch.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.textFields["Name"].exists)
-        capture(app, name: "Backend selection before cancel")
-        if app.buttons["Cancel"].exists {
-            app.buttons["Cancel"].tap()
-        } else {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.8)).tap()
-        }
-        XCTAssertTrue(app.buttons.matching(identifier: "communication-create-Studio").firstMatch.waitForNonExistence(timeout: 5))
-        XCTAssertFalse(app.textFields["Name"].exists)
-        app.buttons["modem-contact-actions"].tap()
-        app.buttons["New contact"].tap()
-        app.buttons.matching(identifier: "communication-create-Studio").firstMatch.tap()
-        let name = app.textFields["Name"]
-        XCTAssertTrue(name.waitForExistence(timeout: 5))
-        name.tap(); name.typeText("Created from All")
-        app.buttons["Save"].tap()
-        XCTAssertTrue(app.staticTexts["Created from All"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["communication-backend-filter"].label.contains("All"))
         for (tab, compose) in [("Messages", "New message"), ("Calls", "Call")] {
             app.tabBars.buttons[tab].tap()
             let button = app.buttons[compose].firstMatch
             XCTAssertTrue(button.waitForExistence(timeout: 5)); button.tap()
-            XCTAssertTrue(app.buttons.matching(identifier: "communication-create-Studio").firstMatch.waitForExistence(timeout: 5))
-            capture(app, name: "All backends choose destination \(tab)")
-            app.buttons.matching(identifier: "communication-create-Studio").firstMatch.tap()
             chooseStudioModem(app)
+            capture(app, name: "Selected backend composer \(tab)")
             app.buttons["Cancel"].tap()
         }
-        app.tabBars.buttons["Contacts"].tap()
-        app.buttons["communication-backend-filter"].tap()
-        app.buttons["communication-backend-Home"].tap()
-        XCTAssertTrue(app.staticTexts["Alice"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["Created from All"].exists)
     }
 
-    func testCommunicationFiltersUseDeviceSearchSpacing() {
+    func testCommunicationFiltersKeepSearchSpacingAndWorkAfterRefresh() {
         let app = launch(multiple: true)
         let devicesFilter = app.segmentedControls["backendFilterSegments"]
         XCTAssertTrue(devicesFilter.waitForExistence(timeout: 10))
         let deviceGap = devicesFilter.frame.minY - app.searchFields.firstMatch.frame.maxY
-        for (tab, identifier) in [("Messages", "messages-unread-filter"), ("Calls", "calls-filter")] {
+        let cases = [
+            ("Messages", "messages-unread-filter", "Unread", "conversation-archive-thread"),
+            ("Calls", "calls-filter", "Missed", "call-record-archive-call")
+        ]
+        for (tab, identifier, option, recordID) in cases {
             app.tabBars.buttons[tab].tap()
-            let filter = app.segmentedControls[identifier]
+            let list = app.collectionViews.containing(.segmentedControl, identifier: identifier).firstMatch
+            let filter = list.segmentedControls[identifier]
             XCTAssertTrue(filter.waitForExistence(timeout: 5))
             let gap = filter.frame.minY - app.searchFields.firstMatch.frame.maxY
             XCTAssertGreaterThanOrEqual(gap, 0)
-            XCTAssertLessThanOrEqual(gap, deviceGap + 4)
+            XCTAssertLessThanOrEqual(gap, deviceGap + 4, "\(tab) filter spacing")
             capture(app, name: "Search spacing \(tab)")
+
+            let record = list.descendants(matching: .any).matching(identifier: recordID).firstMatch
+            XCTAssertTrue(record.waitForExistence(timeout: 5))
+            list.swipeDown()
+            filter.buttons[option].tap()
+            XCTAssertTrue(record.waitForNonExistence(timeout: 5))
+            filter.buttons["All"].tap()
+            XCTAssertTrue(record.waitForExistence(timeout: 5))
         }
     }
 
@@ -281,7 +304,9 @@ final class CommunicationFlowTests: XCTestCase {
         let messageAction = app.buttons["call-detail-message"]
         XCTAssertEqual(callAction.frame.width, messageAction.frame.width, accuracy: 1)
         XCTAssertEqual(callAction.frame.height, messageAction.frame.height, accuracy: 1)
-        XCTAssertEqual(callAction.frame.minX - messageAction.frame.maxX, 16, accuracy: 2)
+        XCTAssertEqual(callAction.frame.midY, messageAction.frame.midY, accuracy: 1)
+        // XCTest measures accessibility bounds, which can differ from the glass buttons' layout frames.
+        XCTAssertLessThan(messageAction.frame.maxX, callAction.frame.minX)
         XCTAssertTrue(app.descendants(matching: .any)["call-detail-event"].firstMatch.exists)
         XCTAssertTrue(app.staticTexts["Line"].exists)
         XCTAssertFalse(app.staticTexts["Device"].exists)

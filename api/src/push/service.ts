@@ -45,14 +45,12 @@ async function authorizeInstallation(
 export async function registerInstallation(
   request: Request,
   db: PushDatabase,
-  pathId?: string,
 ): Promise<Response> {
   const body = await parseJson(request);
   const credential = bearerToken(request);
   if (
     !isRecord(body) ||
     !isPushId(body.id) ||
-    (pathId !== undefined && pathId !== body.id) ||
     !isPushToken(credential) ||
     (body.deviceToken !== undefined &&
       (typeof body.deviceToken !== 'string' ||
@@ -71,9 +69,6 @@ export async function registerInstallation(
   const existing = await db.installation(body.id);
   const hash = await sha256(credential);
   if (existing && !(await secureEqual(hash, existing.managementHash))) {
-    return unauthorized();
-  }
-  if (!existing && pathId !== undefined) {
     return unauthorized();
   }
   if (!existing && !body.deviceToken && !body.voipToken) {
@@ -321,19 +316,6 @@ export async function getInstallation(
     });
   }
   return json({ id: installation.id, ...(await db.badge(installation.id)) });
-}
-
-export async function deleteInstallation(
-  request: Request,
-  db: PushDatabase,
-  id: string,
-): Promise<Response> {
-  const installation = await authorizeInstallation(request, db, id);
-  if (!installation) {
-    return unauthorized();
-  }
-  await db.deleteInstallation(installation.id);
-  return new Response(null, { status: 204 });
 }
 
 export async function deleteSubscription(

@@ -88,13 +88,6 @@ export class PushDatabase {
     return result.meta.changes === 1;
   }
 
-  async deleteInstallation(id: string): Promise<void> {
-    await this.db
-      .prepare('DELETE FROM push_installations WHERE id = ?')
-      .bind(id)
-      .run();
-  }
-
   subscription(id: string): Promise<PushSubscription | null> {
     return this.db
       .prepare(

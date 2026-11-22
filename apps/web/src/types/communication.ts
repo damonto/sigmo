@@ -61,11 +61,6 @@ export interface MessageThread {
   unreadCount: number
   markedUnread: boolean
 }
-export interface CommunicationPreference {
-  participant: string
-  profileId: string
-  updatedAt: string
-}
 export interface HistoryPage<T> {
   items: T[]
   nextCursor: string

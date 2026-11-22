@@ -50,7 +50,6 @@ export const useCalls = (
   const liveCalls = ref<CallRecord[]>([])
   const isLoading = ref(false)
   const isDialing = ref(false)
-  const isDeletingCallID = ref('')
   const errorMessage = ref('')
 
   let ws: WebSocket | null = null
@@ -491,32 +490,6 @@ export const useCalls = (
     return task
   }
 
-  const deleteRecord = async (call: CallRecord) => {
-    const id = modemId.value
-    if (!id || id === 'unknown' || isDeletingCallID.value) return false
-    const revision = connectionRevision
-    isDeletingCallID.value = call.callID
-    errorMessage.value = ''
-    try {
-      const wasIncoming = incomingCall.value?.callID === call.callID
-      await callApi.deleteCall(id, call.callID)
-      if (revision !== connectionRevision) return false
-      calls.value = calls.value.filter((item) => item.callID !== call.callID)
-      liveCalls.value = liveCalls.value.filter((item) => item.callID !== call.callID)
-      if (wasIncoming) {
-        stopRing()
-        closeIncomingNotification(call.callID)
-      }
-      return true
-    } catch (err) {
-      if (revision !== connectionRevision) return false
-      errorMessage.value = err instanceof Error ? err.message : 'Delete failed'
-      return false
-    } finally {
-      if (revision === connectionRevision) isDeletingCallID.value = ''
-    }
-  }
-
   watch(
     modemId,
     () => {
@@ -524,7 +497,6 @@ export const useCalls = (
       loadRequestID++
       isLoading.value = false
       isDialing.value = false
-      isDeletingCallID.value = ''
       errorMessage.value = ''
       dtmfQueue = Promise.resolve()
       calls.value = []
@@ -563,7 +535,6 @@ export const useCalls = (
     incomingCall,
     isLoading,
     isDialing,
-    isDeletingCallID,
     errorMessage,
     dial,
     answer,
@@ -573,7 +544,6 @@ export const useCalls = (
     resume,
     toggleHold,
     sendDTMF,
-    deleteRecord,
     loadCalls,
   }
 }

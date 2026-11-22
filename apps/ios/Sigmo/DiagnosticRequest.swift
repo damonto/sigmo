@@ -63,13 +63,13 @@ struct DiagnosticRequest: Sendable {
     }
 
     private static let pathSegments: Set<String> = [
-        "app", "capabilities", "license", "pairings", "modems", "secure-elements", "esim-profiles", "active-esim-profile", "sim-slot-selection", "network-settings", "message-conversations", "sim-profiles", "settings",
-        "activation", "nickname", "notifications", "esim-discoveries", "esim-transfers", "esim-transfer-requests", "remote-sessions", "events", "decisions", "sources", "source-profiles",
-        "networks", "registration", "network-scans", "internet-connections", "current", "preferences", "public",
+        "app", "capabilities", "license", "pairings", "modems", "secure-elements", "esim-profiles", "active-esim-profile", "sim-slot-selection", "network-settings", "sim-profiles", "settings",
+        "nickname", "notifications", "esim-discoveries", "esim-transfers", "esim-transfer-requests", "remote-sessions", "events", "decisions", "sources", "source-profiles",
+        "registration", "network-scans", "internet-connections", "current", "preferences", "public",
         "wifi-calling", "volte", "sessions", "websheets", "emergency-address-websheets", "resources", "callback",
         "messages", "conversations", "contacts", "avatar", "cached", "calls", "events", "webrtc", "call-media", "ice-servers", "dtmf-events", "ussd",
-        "communication-preferences", "message-threads", "history-assignment", "airplane-mode", "bands", "modes",
-        "current-bands", "current-modes", "sim-pin", "sim-pin-changes", "sim-unlocks", "sim-application", "protection",
+        "message-threads", "history-assignment", "airplane-mode", "bands", "modes",
+        "sim-pin", "sim-pin-changes", "sim-unlocks", "sim-application", "protection",
         "push-subscriptions", "push-installations", "mcp", "api-keys", "audit-events", "auth-tests", "channels",
         "enabled", "skills", "sigmo-control", "updates", "update-checks", "update-installations",
         "auth", "methods", "otp", "challenges", "browser-sessions", "session-refreshes",

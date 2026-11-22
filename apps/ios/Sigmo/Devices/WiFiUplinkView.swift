@@ -187,8 +187,16 @@ private struct WiFiProxyForm: View {
     @State private var auth: Bool
     @State private var username: String
     @State private var password = ""
+    @State private var invalidPaste = false
     @State private var saving = false
     @State private var failure: BackendFailure?
+
+    private var hostInput: Binding<String> {
+        Binding(get: { host }, set: { value in
+            host = value
+            invalidPaste = false
+        })
+    }
 
     init(entry: WiFiProxyEditor, save: @escaping @MainActor (String?, WiFiProxySettings) async throws -> Void) {
         self.entry = entry
@@ -208,10 +216,20 @@ private struct WiFiProxyForm: View {
                         .accessibilityIdentifier("wifiProxyName")
                 }
                 LabeledContent("connection.wifiProxy.host") {
-                    TextField("connection.wifiProxy.host", text: $host, prompt: Text("connection.wifiProxy.hostPlaceholder"))
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("wifiProxyHost")
+                    if entry.proxy == nil {
+                        WiFiProxyHostField(text: hostInput, onPaste: applyPaste)
+                    } else {
+                        TextField("connection.wifiProxy.host", text: $host, prompt: Text("connection.wifiProxy.hostPlaceholder"))
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .accessibilityIdentifier("wifiProxyHost")
+                    }
+                }
+                if invalidPaste {
+                    Text("connection.wifiProxy.invalidPaste")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.leading)
                 }
                 LabeledContent("connection.wifiProxy.port") {
                     TextField("connection.wifiProxy.port", text: $port, prompt: Text("connection.wifiProxy.portPlaceholder"))
@@ -225,6 +243,7 @@ private struct WiFiProxyForm: View {
                                   prompt: Text("connection.wifiProxy.usernamePlaceholder"))
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            .accessibilityIdentifier("wifiProxyUsername")
                     }
                     LabeledContent("connection.wifiProxy.password") {
                         SecureField("connection.wifiProxy.password", text: $password,
@@ -253,8 +272,22 @@ private struct WiFiProxyForm: View {
         .interactiveDismissDisabled(saving)
     }
 
+    private func applyPaste(_ paste: WiFiProxyPaste) {
+        invalidPaste = paste == .invalid
+        guard case .address(let address) = paste else { return }
+
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            name = String(address.host.prefix(128))
+        }
+        port = String(address.port)
+        auth = !address.username.isEmpty
+        username = address.username
+        password = address.password
+    }
+
     private func submit() async {
-        guard !saving, let port = port.isEmpty ? 1080 : Int(port), (1...65535).contains(port) else { return }
+        guard !saving, let port = port.isEmpty ? WiFiProxyPaste.defaultPort : Int(port),
+              (1...65535).contains(port) else { return }
         saving = true
         defer { saving = false }
         do {

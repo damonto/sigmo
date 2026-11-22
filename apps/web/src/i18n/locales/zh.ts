@@ -1353,6 +1353,7 @@ const zh = {
         switchProxy: '切换代理',
         namePlaceholder: '办公室代理',
         hostPlaceholder: 'proxy.example.com',
+        invalidPaste: '请粘贴有效的 SOCKS5 链接，或使用「主机:端口」格式。',
         portPlaceholder: '1080',
         usernamePlaceholder: '输入代理用户名',
         passwordPlaceholder: '输入代理密码',

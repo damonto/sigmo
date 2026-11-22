@@ -37,7 +37,7 @@ const RESOURCES = [
   ['/v1/license-leases', ['POST', 'OPTIONS']],
   ['/v1/configurations/current', ['GET', 'HEAD', 'OPTIONS']],
   ['/v1/push-installations', ['POST', 'OPTIONS']],
-  ['/v1/push-installations/id', ['GET', 'HEAD', 'PUT', 'DELETE', 'OPTIONS']],
+  ['/v1/push-installations/id', ['GET', 'HEAD', 'OPTIONS']],
   ['/v1/push-subscriptions', ['POST', 'OPTIONS']],
   ['/v1/push-subscriptions/id', ['DELETE', 'OPTIONS']],
   ['/v1/push-deliveries', ['POST', 'OPTIONS']],

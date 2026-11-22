@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"regexp"
 	"strings"
 
@@ -78,14 +77,8 @@ func (c *Calls) dialForClientReserved(ctx context.Context, modem *mmodem.Modem, 
 	if err != nil {
 		return call, err
 	}
-	call = latest
-	c.events.publish(Event{Call: call})
-	if call.State != StateFailed {
-		if err := c.records.store.RememberCommunication(ctx, storage.CommunicationPreference{Participant: call.Number, ProfileID: call.ProfileID, UpdatedAt: storage.CommunicationTime(call.StartedAt)}); err != nil {
-			slog.WarnContext(ctx, "remember dialed line", "error", err)
-		}
-	}
-	return call, nil
+	c.events.publish(Event{Call: latest})
+	return latest, nil
 }
 
 // UpdateForClient serializes competing answers with SIM changes and media opens.

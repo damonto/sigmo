@@ -22,7 +22,6 @@ import {
   getPairing,
 } from '../license/service';
 import {
-  deleteInstallation,
   deleteSubscription,
   deliver,
   getInstallation,
@@ -178,26 +177,6 @@ app.get(
   '/v1/push-installations/:id{[A-Za-z0-9_-]+}',
   business((c, ctx) =>
     getInstallation(
-      c.req.raw,
-      new PushDatabase(ctx.env.DB),
-      routeParameter(c, 'id'),
-    ),
-  ),
-);
-app.put(
-  '/v1/push-installations/:id{[A-Za-z0-9_-]+}',
-  business((c, ctx) =>
-    registerInstallation(
-      c.req.raw,
-      new PushDatabase(ctx.env.DB),
-      routeParameter(c, 'id'),
-    ),
-  ),
-);
-app.delete(
-  '/v1/push-installations/:id{[A-Za-z0-9_-]+}',
-  business((c, ctx) =>
-    deleteInstallation(
       c.req.raw,
       new PushDatabase(ctx.env.DB),
       routeParameter(c, 'id'),

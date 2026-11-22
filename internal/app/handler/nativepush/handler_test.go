@@ -41,6 +41,9 @@ func TestSubscriptionMetadataDoesNotExposeCredentials(t *testing.T) {
 	if res.Code != 201 {
 		t.Fatalf("register=%d: %s", res.Code, res.Body.String())
 	}
+	if location := res.Header().Get("Location"); location != "" {
+		t.Fatalf("registration points to an unavailable subscription resource: %q", location)
+	}
 	res = httptest.NewRecorder()
 	e.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/subscriptions", nil))
 	if res.Code != 200 {

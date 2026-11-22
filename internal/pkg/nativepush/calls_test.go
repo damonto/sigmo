@@ -37,7 +37,10 @@ func TestCallInvitationRechecksStateAndSubscription(t *testing.T) {
 				sub.Calls = change != "calls disabled"
 				err = s.UpsertNativeSubscription(t.Context(), sub)
 			case "subscription removed":
-				err = s.DeleteNativeSubscription(t.Context(), sub.ID)
+				removed, removeErr := s.DeleteNativeSubscriptionIfCurrent(t.Context(), sub)
+				if removeErr != nil || !removed {
+					t.Fatalf("revoke subscription: removed=%v, error=%v", removed, removeErr)
+				}
 			case "answered", "ended", "call deleted":
 				call.State = "ended"
 				if change == "answered" {

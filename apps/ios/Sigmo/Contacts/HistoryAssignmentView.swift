@@ -3,7 +3,6 @@ import SwiftUI
 struct HistoryAssignmentSection: View {
     let session: BackendSession
     let lines: [CommunicationLine]
-    var showsBackend = false
     let reload: () async -> Void
     @State private var selected: CommunicationLine?
     @State private var reloadID = 0
@@ -11,12 +10,7 @@ struct HistoryAssignmentSection: View {
         Section {
             ForEach(lines.filter(\.hasAssignableHistory)) { line in
                 Button { selected = line } label: {
-                    Label {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(line.title)
-                            if showsBackend { Text(session.configuration.name).font(.caption).foregroundStyle(.secondary) }
-                        }
-                    } icon: { Image(systemName: "simcard") }
+                    Label(line.title, systemImage: "simcard")
                     .badge(Text("communication.assign"))
                 }
                 .accessibilityIdentifier("historyAssignmentSource-" + line.id)

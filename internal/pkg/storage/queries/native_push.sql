@@ -45,16 +45,8 @@ WHERE installation_id <> excluded.installation_id OR label <> excluded.label
 -- name: NativeSubscription :one
 SELECT * FROM native_push_subscriptions WHERE id = ?;
 
--- name: UpdateNativeSubscription :exec
-UPDATE native_push_subscriptions
-SET sms = ?, reminders = ?, calls = ?, enabled = ?, label = ?, auth_session_id = ?
-WHERE id = ?;
-
 -- name: NativeSubscriptions :many
 SELECT * FROM native_push_subscriptions ORDER BY label, id;
-
--- name: DeleteNativeSubscription :exec
-DELETE FROM native_push_subscriptions WHERE id = ?;
 
 -- name: DeleteNativeSubscriptionIfCurrent :execrows
 DELETE FROM native_push_subscriptions

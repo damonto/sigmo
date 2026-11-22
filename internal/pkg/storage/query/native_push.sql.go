@@ -43,15 +43,6 @@ func (q *Queries) DeleteExpiredNativeDeliveries(ctx context.Context, expiresAt i
 	return err
 }
 
-const deleteNativeSubscription = `-- name: DeleteNativeSubscription :exec
-DELETE FROM native_push_subscriptions WHERE id = ?
-`
-
-func (q *Queries) DeleteNativeSubscription(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, deleteNativeSubscription, id)
-	return err
-}
-
 const deleteNativeSubscriptionIfCurrent = `-- name: DeleteNativeSubscriptionIfCurrent :execrows
 DELETE FROM native_push_subscriptions
 WHERE id = ? AND installation_id = ? AND send_token = ? AND auth_session_id = ?
@@ -278,35 +269,6 @@ func (q *Queries) RetryNativeDelivery(ctx context.Context, arg RetryNativeDelive
 		arg.SubscriptionID,
 		arg.EventID,
 		arg.Revision,
-	)
-	return err
-}
-
-const updateNativeSubscription = `-- name: UpdateNativeSubscription :exec
-UPDATE native_push_subscriptions
-SET sms = ?, reminders = ?, calls = ?, enabled = ?, label = ?, auth_session_id = ?
-WHERE id = ?
-`
-
-type UpdateNativeSubscriptionParams struct {
-	Sms           bool
-	Reminders     bool
-	Calls         bool
-	Enabled       bool
-	Label         string
-	AuthSessionID string
-	ID            string
-}
-
-func (q *Queries) UpdateNativeSubscription(ctx context.Context, arg UpdateNativeSubscriptionParams) error {
-	_, err := q.db.ExecContext(ctx, updateNativeSubscription,
-		arg.Sms,
-		arg.Reminders,
-		arg.Calls,
-		arg.Enabled,
-		arg.Label,
-		arg.AuthSessionID,
-		arg.ID,
 	)
 	return err
 }

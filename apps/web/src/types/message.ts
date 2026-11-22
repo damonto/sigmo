@@ -11,8 +11,6 @@ export type MessageResponse = {
   wifiCalling: boolean
 }
 
-export type MessagesResponse = MessageResponse[]
-
 export type SendMessageResponse = {
   to: string
   conversationId?: string

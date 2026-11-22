@@ -4,9 +4,10 @@ private enum HomeTab: Hashable { case devices, messages, calls, contacts }
 
 struct HomeView: View {
     private struct CommunicationIdentity: Hashable {
-        let session: ObjectIdentifier
-        let backendID: String
+        let sessionID: UUID
+        let serverID: String
         let accessRevision: Int
+        let callbackID: UUID?
     }
 
     @State private var homeTab = HomeTab.devices
@@ -22,6 +23,7 @@ struct HomeView: View {
     @State private var search = ""
     @State private var refreshFailure: BackendFailure?
     @State private var communicationDial: CommunicationDialRequest?
+    @State private var callNavigationID: UUID?
     @State private var modemDial: ModemDialRequest?
 
     init() {
@@ -44,13 +46,16 @@ struct HomeView: View {
         .modifier(PeerTransferPresentation())
         .sheet(isPresented: $adding) { BackendEditor() }
         .onChange(of: store.settings.backends.map(\.id), initial: true) { _, ids in
-            if !ids.contains(where: { $0.uuidString == communicationBackend }) { communicationBackend = "" }
+            if let id = UUID(uuidString: communicationBackend), !ids.contains(id) { communicationBackend = "" }
             if let id = selectedDevice?.backendID, !ids.contains(id) { selectedDevice = nil }
             if let removed = path.firstIndex(where: { destination in
                 destination.backendID.map { !ids.contains($0) } ?? false
             }) {
                 path.removeSubrange(removed...)
             }
+        }
+        .onChange(of: communicationSession?.incarnationID) { _, sessionID in
+            if let request = communicationDial, request.sessionID != sessionID { communicationDial = nil }
         }
         .onChange(of: store.onlineSessions.map(\.id)) { _, ids in
             if ids.count < 2 || selectedBackendID.map({ !ids.contains($0) }) == true {
@@ -68,39 +73,45 @@ struct HomeView: View {
     }
 
     private var homeTabs: some View {
-        TabView(selection: $homeTab) {
+        let session = communicationSession
+        return TabView(selection: $homeTab) {
             Tab("communication.devices", systemImage: "server.rack", value: HomeTab.devices) { homeNavigation }
-            Tab("communication.messages", systemImage: "message", value: HomeTab.messages) { communicationTab(.messages) }
-                .badge(communicationSessions.reduce(0) { $0 + $1.unreadMessageCount })
-            Tab("communication.calls", systemImage: "phone", value: HomeTab.calls) { communicationTab(.calls) }
-            Tab("communication.contacts", systemImage: "person.crop.circle", value: HomeTab.contacts) { communicationTab(.contacts) }
+            Tab("communication.messages", systemImage: "message", value: HomeTab.messages) { communicationTab(.messages, session: session) }
+                .badge(session?.unreadMessageCount ?? 0)
+            Tab("communication.calls", systemImage: "phone", value: HomeTab.calls) { communicationTab(.calls, session: session) }
+            Tab("communication.contacts", systemImage: "person.crop.circle", value: HomeTab.contacts) { communicationTab(.contacts, session: session) }
         }
     }
 
-    private var communicationSessions: [BackendSession] {
-        store.orderedSessions(backendID: UUID(uuidString: communicationBackend))
+    private var communicationSession: BackendSession? {
+        store.communicationSession(preferredID: UUID(uuidString: communicationBackend))
     }
 
-    private func communicationTab(_ section: CommunicationSection) -> some View {
+    private func communicationTab(_ section: CommunicationSection, session: BackendSession?) -> some View {
         NavigationStack {
-            let sessions = communicationSessions
-            CommunicationWorkspace(sessions: sessions, section: section,
-                                   callbackDial: section == .calls ? $communicationDial : .constant(nil))
-                .id(sessions.map {
-                    CommunicationIdentity(session: ObjectIdentifier($0), backendID: $0.communicationBackendID,
-                                          accessRevision: $0.accessRevision)
-                })
-                .toolbar {
-                    if store.settings.backends.count > 1 {
-                        ToolbarItem(placement: .topBarLeading) {
-                            CommunicationBackendFilter(selection: Binding(
-                                get: { UUID(uuidString: communicationBackend) },
-                                set: { communicationBackend = $0?.uuidString ?? "" }
-                            ))
+            if let session {
+                CommunicationWorkspace(session: session, section: section,
+                                       callbackDial: section == .calls ? $communicationDial : .constant(nil))
+                    .toolbar {
+                        if store.settings.backends.count > 1 {
+                            ToolbarItem(placement: .topBarLeading) {
+                                CommunicationBackendFilter(selected: session) { id in
+                                    communicationBackend = id.uuidString
+                                }
+                            }
                         }
                     }
-                }
-        }.id(communicationBackend)
+            } else {
+                ContentUnavailableView("backends.empty.title", systemImage: "server.rack",
+                                       description: Text("backends.empty.description"))
+                    .navigationTitle(section.title)
+            }
+        }
+        .id(session.map {
+            CommunicationIdentity(sessionID: $0.incarnationID, serverID: $0.communicationBackendID,
+                                  accessRevision: $0.accessRevision,
+                                  callbackID: section == .calls ? callNavigationID : nil)
+        })
     }
 
     // Device tabs own their navigation stacks; keeping Home outside them also
@@ -220,9 +231,15 @@ struct HomeView: View {
         case .home(let number, let backendID):
             route = "home"
             homeTab = .calls
-            let existingBackend = backendID.flatMap { store.sessions[$0] == nil ? nil : $0 }
-            communicationBackend = existingBackend?.uuidString ?? ""
-            communicationDial = CommunicationDialRequest(number: number, backendID: existingBackend, modemID: nil)
+            // Present the dialer even if a call detail is open for this backend.
+            callNavigationID = request.id
+            let original = backendID.flatMap { store.sessions[$0] }
+            if let original {
+                communicationBackend = original.id.uuidString
+            }
+            communicationDial = (original ?? communicationSession).flatMap { session in
+                session.canAccessDevices ? CommunicationDialRequest(number: number, sessionID: session.incarnationID) : nil
+            }
             modemDial = nil
             calls.consumeSystemCallback(request)
         case .modem(let number, let backendID, let modemID):
@@ -236,6 +253,8 @@ struct HomeView: View {
             route = "dial"
             homeTab = .calls
             communicationBackend = line.backendID.uuidString
+            communicationDial = nil
+            modemDial = nil
             await calls.dial(number: number, line: line)
             guard calls.systemCallback?.id == request.id else { return }
             calls.consumeSystemCallback(request)

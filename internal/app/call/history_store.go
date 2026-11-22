@@ -17,14 +17,9 @@ func (h *History) List(ctx context.Context, filter storage.HistoryFilter) ([]sto
 	return h.records.store.CallHistory(ctx, filter)
 }
 
-// Get returns a single archived call.
-func (h *History) Get(ctx context.Context, id string) (storage.Call, error) {
-	return h.records.store.Call(ctx, id)
-}
-
 // Delete removes a terminal call while preserving active call records.
 func (h *History) Delete(ctx context.Context, id string) error {
-	record, err := h.Get(ctx, id)
+	record, err := h.records.store.Call(ctx, id)
 	if err != nil {
 		return err
 	}

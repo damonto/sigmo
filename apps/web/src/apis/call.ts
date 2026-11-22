@@ -156,10 +156,6 @@ export const useCallApi = () => {
     return requestCallMediaApi<WebRTCICEServersPayload>('/ice-servers')
   }
 
-  const deleteCall = (id: string, callID: string) => {
-    return requestCallApi<void>(id, `/${encodeURIComponent(callID)}`, { method: 'DELETE' })
-  }
-
   return {
     listCalls,
     dialCall,
@@ -171,6 +167,5 @@ export const useCallApi = () => {
     resumeCall,
     sendDTMF,
     getWebRTCICEServers,
-    deleteCall,
   }
 }

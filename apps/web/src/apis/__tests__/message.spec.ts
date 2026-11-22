@@ -8,21 +8,21 @@ describe('useMessageApi', () => {
     vi.unstubAllGlobals()
   })
 
-  it('adds encoded search queries to message list requests', async () => {
+  it('adds modem filters and encoded search queries to conversation list requests', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(
-        new Response(JSON.stringify([]), {
+        new Response(JSON.stringify({ items: [] }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }),
       )
     vi.stubGlobal('fetch', fetchMock)
 
-    await useMessageApi().getMessages('modem-1', 'balance + data')
+    await useMessageApi().getConversations({ modemId: 'modem-1', q: 'balance + data' })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/api/v1/modems/modem-1/message-conversations?q=balance+%2B+data'),
+      expect.stringContaining('/api/v1/conversations?modemId=modem-1&q=balance+%2B+data'),
       expect.any(Object),
     )
   })

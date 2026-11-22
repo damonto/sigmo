@@ -15,7 +15,6 @@ const api = vi.hoisted(() => ({
   holdCall: vi.fn(),
   resumeCall: vi.fn(),
   sendDTMF: vi.fn(),
-  deleteCall: vi.fn(),
 }))
 
 vi.mock('@/apis/call', () => ({
@@ -209,7 +208,6 @@ describe('useCalls', () => {
     api.holdCall.mockResolvedValue({ data: ref(call({ state: 'active', hold: 'local' })) })
     api.resumeCall.mockResolvedValue({ data: ref(call({ state: 'active', hold: 'none' })) })
     api.sendDTMF.mockResolvedValue({ data: ref(undefined) })
-    api.deleteCall.mockResolvedValue({ data: ref(undefined) })
   })
 
   it('opens call events and surfaces incoming calls with a foreground notification', async () => {
@@ -268,13 +266,12 @@ describe('useCalls', () => {
     ['hangup', 'hangupCall'],
     ['hold', 'holdCall'],
     ['resume', 'resumeCall'],
-    ['deleteRecord', 'deleteCall'],
   ] as const)('isolates a late %s response from the next modem', async (action, request) => {
     const { wrapper, phone, modemId } = mountComposable()
     await flushPromises()
     const response = deferred<{ data: ReturnType<typeof ref<CallRecord>> }>()
     api[request].mockReturnValueOnce(response.promise)
-    const pending = phone[action](call({ state: action === 'deleteRecord' ? 'ended' : 'active' }))
+    const pending = phone[action](call({ state: 'active' }))
     modemId.value = 'modem-2'
     await flushPromises()
     // Backend call IDs can coincide; the previous request still must not update it.
@@ -287,7 +284,6 @@ describe('useCalls', () => {
     await pending
     expect(phone.activeCall.value).toEqual(current)
     expect(phone.recentCalls.value).toEqual([current])
-    expect(phone.isDeletingCallID.value).toBe('')
     wrapper.unmount()
   })
 
@@ -339,7 +335,6 @@ describe('useCalls', () => {
       api.holdCall,
       api.resumeCall,
       api.sendDTMF,
-      api.deleteCall,
     ]) {
       expect(action).not.toHaveBeenCalled()
     }
@@ -652,20 +647,6 @@ describe('useCalls', () => {
 
     expect(sent).toBe(false)
     expect(phone.errorMessage.value).toBe('call is on hold')
-  })
-
-  it('deletes terminal records from the local list', async () => {
-    api.listCalls.mockResolvedValueOnce({
-      data: ref([call({ state: 'ended', endedAt: '2026-05-27T00:00:10Z' })]),
-    })
-    const { phone } = mountComposable()
-    await flushPromises()
-
-    const deleted = await phone.deleteRecord(phone.recentCalls.value[0]!)
-
-    expect(deleted).toBe(true)
-    expect(api.deleteCall).toHaveBeenCalledWith('modem-1', 'call-1')
-    expect(phone.recentCalls.value).toHaveLength(0)
   })
 
   it('clears the incoming banner when an incoming call becomes active', async () => {

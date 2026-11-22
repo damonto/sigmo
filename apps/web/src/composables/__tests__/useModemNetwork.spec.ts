@@ -4,7 +4,6 @@ import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { useModemNetwork } from '@/composables/useModemNetwork'
 
 const api = vi.hoisted(() => ({
-  scanNetworks: vi.fn(),
   startNetworkScan: vi.fn(),
   getNetworkScan: vi.fn(),
   getRegistration: vi.fn(),

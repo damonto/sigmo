@@ -5,7 +5,6 @@ import type {
   ConversationMessagesResponse,
   ConversationsResponse,
   MessageState,
-  MessagesResponse,
   SendMessageResponse,
 } from '@/types/message'
 
@@ -17,34 +16,7 @@ export interface ConversationFilter {
   unassigned?: boolean
 }
 
-const messagesPath = (id: string, query?: string) => {
-  const path = `modems/${id}/message-conversations`
-  const params = new URLSearchParams()
-  const trimmed = query?.trim()
-  if (trimmed) {
-    params.set('q', trimmed)
-  }
-  const search = params.toString()
-  return search ? `${path}?${search}` : path
-}
-
 export const useMessageApi = () => {
-  const getMessages = (id: string, query?: string) => {
-    return fetchJson<MessagesResponse>(messagesPath(id, query))
-  }
-
-  const getMessagesByParticipant = (id: string, participant: string) => {
-    const encoded = encodeURIComponent(participant)
-    return fetchJson<MessagesResponse>(`modems/${id}/message-conversations/${encoded}/messages`)
-  }
-
-  const deleteMessagesByParticipant = (id: string, participant: string) => {
-    const encoded = encodeURIComponent(participant)
-    return fetchJson<void>(`modems/${id}/message-conversations/${encoded}`, {
-      method: 'DELETE',
-    })
-  }
-
   const sendMessage = (id: string, to: string, text: string, expectedProfileId?: string) => {
     return fetchJson<SendMessageResponse>(`modems/${id}/messages`, {
       method: 'POST',
@@ -79,9 +51,6 @@ export const useMessageApi = () => {
     fetchJson<void>(`conversations/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
   return {
-    getMessages,
-    getMessagesByParticipant,
-    deleteMessagesByParticipant,
     sendMessage,
     getConversations,
     getConversationMessages,

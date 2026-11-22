@@ -1,68 +1,45 @@
 import SwiftUI
 
-private struct BackendContactDraft: Identifiable {
-    let session: BackendSession
-    let draft: ContactDraft
-    var id: UUID { draft.id }
-}
-
-private enum CommunicationCreation {
-    case contact, importContact, message, call(CommunicationDialRequest?)
-}
-
 struct CommunicationWorkspace: View {
-    private struct SourceIdentity: Equatable {
+    private struct RefreshIdentity: Equatable {
+        let search: String
+        let missedOnly: Bool
         let accessRevision: Int
         let accessible: Bool
     }
 
-    private struct RefreshIdentity: Equatable {
-        let search: String
-        let missedOnly: Bool
-        let sources: [SourceIdentity]
-    }
-
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    let section: CommunicationSection
+    @Environment(\.defaultMinListRowHeight) private var minimumRowHeight
     let modemID: String?
     @Binding private var callbackDial: CommunicationDialRequest?
-    @State private var state: CommunicationOverviewState
-    @State private var editor: BackendContactDraft?
-    @State private var importSession: BackendSession?
-    @State private var imported: BackendContactDraft?
-    @State private var action: BackendCommunicationAction?
-    @State private var creation: CommunicationCreation?
-    @State private var deleting: CommunicationRecordID?
-    @State private var selectedCall: CommunicationRecord<CallRecord>?
-    @State private var selectedContact: CommunicationRecord<SigmoContact>?
+    @State private var state: CommunicationState
+    @State private var editor: ContactDraft?
+    @State private var importing = false
+    @State private var imported: ContactDraft?
+    @State private var action: CommunicationAction?
+    @State private var deleting: String?
+    @State private var selectedCall: CallRecord?
+    @State private var selectedContactID: String?
+
+    private var session: BackendSession { state.session }
+    private var section: CommunicationSection { state.section }
+    private var needsLogin: Bool { session.authentication == .required && session.failure == nil }
 
     init(session: BackendSession, section: CommunicationSection, modemID: String? = nil,
          callbackDial: Binding<CommunicationDialRequest?> = .constant(nil)) {
-        self.init(sessions: [session], section: section, modemID: modemID, callbackDial: callbackDial)
-    }
-
-    init(sessions: [BackendSession], section: CommunicationSection, modemID: String? = nil,
-         callbackDial: Binding<CommunicationDialRequest?> = .constant(nil)) {
-        self.section = section
         self.modemID = modemID
         _callbackDial = callbackDial
-        _state = State(initialValue: CommunicationOverviewState(sessions: sessions, section: section))
+        _state = State(initialValue: CommunicationState(session: session, section: section))
     }
 
     var body: some View {
         Group {
-            if state.sources.isEmpty {
-                ContentUnavailableView("backends.empty.title", systemImage: "server.rack",
-                                       description: Text("backends.empty.description"))
-            } else if state.sources.count == 1, let source = state.sources.first, !source.session.canAccessDevices {
-                SettingsAccessView(session: source.session) { EmptyView() }
-            } else {
+            if session.canAccessDevices {
                 list
-            }
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if section != .contacts {
-                filters.padding(.horizontal, 16).padding(.bottom, 8)
+            } else if needsLogin {
+                SettingsAccessView(session: session) { EmptyView() }
+            } else {
+                unavailableList
             }
         }
         .navigationTitle(section.title)
@@ -73,45 +50,43 @@ struct CommunicationWorkspace: View {
         .autocorrectionDisabled()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                composeButton.disabled(state.creationSessions.isEmpty)
+                composeButton.disabled(!session.canAccessDevices)
             }
         }
-        .navigationDestination(item: $selectedContact) { item in
-            SigmoContactDetail(session: item.session, contactID: item.value.id, modemID: modemID)
+        .navigationDestination(item: $selectedContactID) { contactID in
+            SigmoContactDetail(session: session, contactID: contactID, modemID: modemID)
         }
-        .navigationDestination(item: $selectedCall) { item in
-            CommunicationCallDetail(session: item.session, record: item.value,
-                                    sourceLine: lines(for: item.session).first { $0.id == item.value.profileId })
+        .navigationDestination(item: $selectedCall) { record in
+            CommunicationCallDetail(session: session, record: record,
+                                    sourceLine: state.lines.first { $0.id == record.profileId })
         }
-        .sheet(item: $editor) { destination in
-            ContactEditView(session: destination.session, draft: destination.draft)
+        .sheet(item: $editor) { draft in
+            ContactEditView(session: session, draft: draft)
         }
-        .sheet(item: $importSession, onDismiss: { editor = imported; imported = nil }) { session in
-            SystemContactImport { draft in
-                imported = BackendContactDraft(session: session, draft: draft)
+        .sheet(isPresented: $importing, onDismiss: { editor = imported; imported = nil }) {
+            SystemContactImport { imported = $0 }
+        }
+        .communicationActions($action, session: session, sent: { Task { await state.load() } })
+        .detailErrorAlert($state.deletionFailure)
+        .task(id: callbackDial?.id) { [request = callbackDial] in
+            if let request { applyCallbackDial(request) }
+        }
+        .refreshable {
+            if session.canAccessDevices {
+                await state.load(force: true)
+            } else {
+                await session.refresh(force: true)
             }
         }
-        .communicationActions($action, sent: { Task { await state.load() } })
-        .confirmationDialog("communication.chooseBackend", isPresented: Binding(
-            get: { creation != nil }, set: { if !$0 { creation = nil } }
-        ), titleVisibility: .visible, presenting: creation) { operation in
-            ForEach(state.creationSessions) { session in
-                Button(session.configuration.name) {
-                    create(operation, session: session)
-                    creation = nil
-                }
-                .accessibilityIdentifier("communication-create-\(session.configuration.name)")
-            }
-            Button("common.cancel", role: .cancel) { creation = nil }
+        .foregroundTask {
+            if !session.canAccessDevices && !needsLogin { await session.refresh(force: true) }
         }
-        .detailErrorAlert($state.failure)
-        .task(id: callbackDial?.id) { applyCallbackDial() }
         .foregroundTask(id: refreshIdentity) {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             await state.load(automatic: true)
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(15)) } catch { return }
-                if !state.loading { await state.load(automatic: true) }
+                await state.load(automatic: true)
             }
         }
         .alert("communication.delete", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { id in
@@ -126,33 +101,54 @@ struct CommunicationWorkspace: View {
     }
 
     private var refreshIdentity: RefreshIdentity {
-        RefreshIdentity(search: state.search, missedOnly: state.missedOnly, sources: state.sources.map {
-            SourceIdentity(accessRevision: $0.session.accessRevision,
-                           accessible: $0.session.canAccessDevices)
-        })
+        RefreshIdentity(search: state.search, missedOnly: state.missedOnly,
+                        accessRevision: session.accessRevision, accessible: session.canAccessDevices)
+    }
+
+    private var unavailableList: some View {
+        List {
+            Group {
+                if session.isRefreshing && session.failure == nil {
+                    ProgressView("communication.loading").frame(maxWidth: .infinity)
+                } else {
+                    emptyState
+                }
+            }
+            .listRowSeparator(.hidden)
+        }
+        .listStyle(.plain)
+        .contentMargins(.top, 0, for: .scrollContent)
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableView(section.emptyTitle, systemImage: section.icon)
     }
 
     private var list: some View {
         List {
-            backendStatus
             if section != .contacts {
-                ForEach(state.availableSources, id: \.session.id) { source in
-                    HistoryAssignmentSection(session: source.session, lines: source.lines, showsBackend: state.sources.count > 1) {
-                        await source.load(force: true)
-                    }
+                filters
+                    .padding(.bottom, 8)
+                    .frame(minHeight: minimumRowHeight, alignment: .top)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    .listRowSeparator(.hidden)
+            }
+            if section != .contacts {
+                HistoryAssignmentSection(session: session, lines: state.lines) {
+                    await state.load(force: true)
                 }
             }
             switch section {
             case .contacts:
                 ForEach(ContactIndexSection.sections(state.contacts)) { group in
                     Section {
-                        ForEach(group.contacts) { item in
-                            Button { selectedContact = item } label: {
+                        ForEach(group.contacts) { contact in
+                            Button { selectedContactID = contact.id } label: {
                                 HStack(spacing: 12) {
-                                    ContactAvatarView(session: item.session, contact: item.value, size: 36)
+                                    ContactAvatarView(session: session, contact: contact, size: 36)
                                     VStack(alignment: .leading, spacing: 3) {
-                                        Text(item.value.displayName).font(.body.weight(.medium)).foregroundStyle(.primary)
-                                        Text(item.session.configuration.name).font(.caption).foregroundStyle(.secondary)
+                                        Text(contact.displayName).font(.body.weight(.medium)).foregroundStyle(.primary)
+                                        Text(session.configuration.name).font(.caption).foregroundStyle(.secondary)
                                     }
                                     Spacer(minLength: 0)
                                 }
@@ -167,48 +163,48 @@ struct CommunicationWorkspace: View {
                     .sectionIndexLabel(group.title)
                 }
             case .messages:
-                let threads = state.threads
-                ForEach(threads) { item in
+                let threads = state.filteredThreads
+                ForEach(threads) { thread in
                     NavigationLink {
-                        CommunicationThreadView(session: item.session, thread: item.value, lines: lines(for: item.session))
+                        CommunicationThreadView(session: session, thread: thread, lines: state.lines)
                     } label: {
-                        messageRow(item)
+                        messageRow(thread)
                     }
-                    .listRowSeparator(item.id == threads.first?.id ? .hidden : .automatic, edges: .top)
-                    .accessibilityIdentifier("conversation-\(item.value.id)")
+                    .listRowSeparator(thread.id == threads.first?.id ? .hidden : .automatic, edges: .top)
+                    .accessibilityIdentifier("conversation-\(thread.id)")
                     .swipeActions(allowsFullSwipe: false) {
-                        Button { deleting = item.id } label: { Image(systemName: "trash") }
+                        Button { deleting = thread.id } label: { Image(systemName: "trash") }
                             .tint(.red)
                             .accessibilityLabel(Text("communication.delete"))
                     }
                 }
             case .calls:
-                let calls = state.calls
-                ForEach(calls) { item in
-                    callRow(item)
-                        .listRowSeparator(item.id == calls.first?.id ? .hidden : .automatic, edges: .top)
+                let calls = state.filteredCalls
+                ForEach(calls) { call in
+                    callRow(call)
+                        .listRowSeparator(call.id == calls.first?.id ? .hidden : .automatic, edges: .top)
                         .swipeActions(allowsFullSwipe: false) {
-                            if item.value.terminal {
-                                Button { deleting = item.id } label: { Image(systemName: "trash") }
+                            if call.terminal {
+                                Button { deleting = call.id } label: { Image(systemName: "trash") }
                                     .tint(.red)
                                     .accessibilityLabel(Text("communication.delete"))
                             }
                         }
                 }
             }
-            if state.isEmpty && !state.availableSources.isEmpty {
+            if state.isEmpty {
                 Group {
                     if state.loading {
                         ProgressView("communication.loading").frame(maxWidth: .infinity)
-                    } else if !state.search.isEmpty {
+                    } else if !state.search.isEmpty && state.failure == nil {
                         ContentUnavailableView.search(text: state.search)
                     } else {
-                        ContentUnavailableView(section.emptyTitle, systemImage: section.icon)
+                        emptyState
                     }
                 }
                 .listRowSeparator(.hidden)
             }
-            if state.hasMore {
+            if !state.cursor.isEmpty {
                 Button("communication.more") { Task { await state.load(more: true) } }
                     .frame(maxWidth: .infinity)
                     .disabled(state.loading)
@@ -218,45 +214,22 @@ struct CommunicationWorkspace: View {
         .listSectionIndexVisibility(section == .contacts && !state.isEmpty ? .visible : .hidden)
         .contentMargins(.top, 0, for: .scrollContent)
         .scrollDismissesKeyboard(.interactively)
-        .refreshable { await state.load(force: true) }
     }
 
-    @ViewBuilder private var backendStatus: some View {
-        ForEach(state.sources, id: \.session.id) { source in
-            if !source.session.canAccessDevices {
-                NavigationLink {
-                    SettingsAccessView(session: source.session) { EmptyView() }
-                } label: {
-                    LabeledContent(source.session.configuration.name) { Text(LocalizedStringKey(source.session.statusKey)) }
-                }
-            } else if let failure = source.failure {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(source.session.configuration.name)
-                    Text(failure.message).font(.footnote).foregroundStyle(.secondary)
-                }
-            }
-        }
+    private func messageRow(_ thread: CommunicationThread) -> some View {
+        MessageConversationRow(session: session, participant: thread.participant,
+                               preview: thread.latestMessage.text, timestamp: CallRecord.date(thread.latestMessage.timestamp),
+                               unread: thread.unreadCount > 0 || thread.markedUnread,
+                               line: "\(session.configuration.name) · \(thread.latestMessage.lineTitle)", showsDisclosure: false)
     }
 
-    private func lines(for session: BackendSession) -> [CommunicationLine] {
-        state.source(for: session.id)?.lines ?? []
-    }
-
-    private func messageRow(_ item: CommunicationRecord<CommunicationThread>) -> some View {
-        let thread = item.value
-        return MessageConversationRow(session: item.session, participant: thread.participant,
-                                      preview: thread.latestMessage.text, timestamp: CallRecord.date(thread.latestMessage.timestamp),
-                                      unread: thread.unreadCount > 0 || thread.markedUnread,
-                                      line: "\(item.session.configuration.name) · \(thread.latestMessage.lineTitle)", showsDisclosure: false)
-    }
-
-    private func callRow(_ item: CommunicationRecord<CallRecord>) -> some View {
-        let call = item.value, session = item.session
+    private func callRow(_ call: CallRecord) -> some View {
+        let line = state.lines.first { $0.id == call.profileId }
         return CallHistoryRow(record: call, session: session,
-                              region: lines(for: session).first { $0.id == call.profileId }?.region,
-                              source: "\(session.configuration.name) · \(call.lineLabel ?? lines(for: session).first { $0.id == call.profileId }?.displayLabel ?? session.modems.first { $0.id == call.modemId }?.communicationLabel ?? detailText("common.unknown"))",
-                              select: { selectedCall = item },
-                              callback: { action = BackendCommunicationAction(session: session, action: CommunicationAction(number: call.number, calling: true, preferredModemID: call.modemId)) })
+                              region: line?.region,
+                              source: "\(session.configuration.name) · \(call.lineLabel ?? line?.displayLabel ?? session.modems.first { $0.id == call.modemId }?.communicationLabel ?? detailText("common.unknown"))",
+                              select: { selectedCall = call },
+                              callback: { action = CommunicationAction(number: call.number, calling: true, preferredModemID: call.modemId) })
     }
 
     @ViewBuilder private var filters: some View {
@@ -280,60 +253,29 @@ struct CommunicationWorkspace: View {
     @ViewBuilder private var composeButton: some View {
         if section == .contacts {
             Menu {
-                Button("communication.newContact", systemImage: "person.crop.circle.badge.plus") { begin(.contact) }
-                Button("communication.import", systemImage: "person.crop.circle") { begin(.importContact) }
+                Button("communication.newContact", systemImage: "person.crop.circle.badge.plus") {
+                    editor = ContactDraft(contact: SigmoContact())
+                }
+                Button("communication.import", systemImage: "person.crop.circle") { importing = true }
             } label: {
                 Label("communication.contactOptions", systemImage: "plus")
             }
             .accessibilityIdentifier("modem-contact-actions")
         } else {
-            Button { begin(section == .calls ? .call(nil) : .message) } label: {
+            Button {
+                action = CommunicationAction(number: "", calling: section == .calls, modemID: modemID)
+            } label: {
                 Label(section == .calls ? LocalizedStringKey("communication.dial") : LocalizedStringKey("communication.newMessage"), systemImage: section == .calls ? "circle.grid.3x3.fill" : "square.and.pencil")
             }
         }
     }
 
-    private func begin(_ operation: CommunicationCreation) {
-        let sessions = state.creationSessions
-        guard let session = sessions.first else { return }
-        if sessions.count == 1 {
-            create(operation, session: session)
-        } else {
-            creation = operation
-        }
-    }
-
-    private func create(_ operation: CommunicationCreation, session: BackendSession) {
-        switch operation {
-        case .contact:
-            editor = BackendContactDraft(session: session, draft: ContactDraft(contact: SigmoContact()))
-        case .importContact:
-            importSession = session
-        case .message:
-            action = BackendCommunicationAction(session: session, action: CommunicationAction(number: "", modemID: modemID))
-        case .call(let request):
-            action = BackendCommunicationAction(
-                session: session,
-                action: CommunicationAction(number: request?.number ?? "", calling: true, modemID: request?.modemID ?? modemID)
-            )
-        }
-    }
-
-    private func applyCallbackDial() {
-        guard section == .calls, let request = callbackDial else { return }
+    private func applyCallbackDial(_ request: CommunicationDialRequest) {
+        guard !Task.isCancelled, section == .calls, request.id == callbackDial?.id,
+              request.sessionID == session.incarnationID else { return }
         callbackDial = nil
-
-        if let backendID = request.backendID,
-           let session = state.creationSessions.first(where: { $0.id == backendID }) {
-            create(.call(request), session: session)
-            return
-        }
-        let sessions = state.creationSessions
-        if sessions.count == 1, let session = sessions.first {
-            create(.call(request), session: session)
-        } else if !sessions.isEmpty {
-            creation = .call(request)
-        }
+        guard session.canAccessDevices else { return }
+        action = CommunicationAction(number: request.number, calling: true, modemID: modemID)
     }
 }
 

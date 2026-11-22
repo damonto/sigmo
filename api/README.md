@@ -232,6 +232,12 @@ runtimes. Generated types and external JSON field names follow their providers.
 4. Start device activation in Sigmo and open the Bot link. The Bot authorizes
    the device through `/start <pairing_id>`.
 
+## Native push registration
+
+Use `POST /v1/push-installations` to register an installation or update its
+tokens. Read the installation's badge state with `GET /v1/push-installations/:id`.
+Revoke delivery for a backend with `DELETE /v1/push-subscriptions/:id`.
+
 ## Native sign-in callback
 
 The Worker hosts `/auth/callback` and `/.well-known/apple-app-site-association` on

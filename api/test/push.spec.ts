@@ -278,8 +278,8 @@ describe('base push registration', () => {
       const db = new PushDatabase(env.DB);
       const before = await db.installation(competitor.id);
       const response = await request(
-        `push-installations/${competitor.id}`,
-        'PUT',
+        'push-installations',
+        'POST',
         competitor.token,
         {
           ...competitor.body,
@@ -612,7 +612,7 @@ describe('APNs relay', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       expect(
         (
-          await request(`push-installations/${owner.id}`, 'PUT', owner.token, {
+          await request('push-installations', 'POST', owner.token, {
             ...owner.body,
             deviceToken: newToken,
           })

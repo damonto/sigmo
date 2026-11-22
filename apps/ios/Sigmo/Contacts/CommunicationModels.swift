@@ -32,10 +32,6 @@ struct CommunicationLine: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
-struct CommunicationPreference: Decodable, Sendable {
-    let participant, profileId, updatedAt: String
-}
-
 struct CommunicationMessage: Decodable, Identifiable, Hashable, Sendable {
     let id: Int64
     let conversationId, profileId, historyProfileId, modemId: String
@@ -94,10 +90,4 @@ struct CommunicationAction: Identifiable {
     var calling = false
     var modemID: String?
     var preferredModemID: String?
-}
-
-struct BackendCommunicationAction: Identifiable {
-    let session: BackendSession
-    var action: CommunicationAction
-    var id: UUID { action.id }
 }

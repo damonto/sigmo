@@ -45,11 +45,6 @@ func (s *Service) List(ctx context.Context, refresh bool) ([]storage.SIMLine, er
 	return s.inventory(ctx)
 }
 
-// Preference returns the preferred SIM profile for a communication participant.
-func (s *Service) Preference(ctx context.Context, participant string) (storage.CommunicationPreference, error) {
-	return s.store.PreferredCommunication(ctx, participant)
-}
-
 // AssignHistory validates the current target before assigning archived history.
 func (s *Service) AssignHistory(ctx context.Context, sourceID, targetID string) error {
 	lines, err := s.inventory(ctx)

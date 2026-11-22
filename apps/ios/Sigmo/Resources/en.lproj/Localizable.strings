@@ -802,6 +802,7 @@
 "connection.wifiProxy.switchProxy" = "Switch Proxy";
 "connection.wifiProxy.namePlaceholder" = "Office proxy";
 "connection.wifiProxy.hostPlaceholder" = "proxy.example.com";
+"connection.wifiProxy.invalidPaste" = "Paste a valid SOCKS5 URL or a host and port.";
 "connection.wifiProxy.portPlaceholder" = "1080";
 "connection.wifiProxy.usernamePlaceholder" = "Enter proxy username";
 "connection.wifiProxy.passwordPlaceholder" = "Enter proxy password";

@@ -23,20 +23,6 @@ func (q *Queries) AssignCallHistory(ctx context.Context, arg AssignCallHistoryPa
 	return err
 }
 
-const assignCommunicationPreferences = `-- name: AssignCommunicationPreferences :exec
-UPDATE communication_preferences SET profile_id = ?1 WHERE profile_id = ?2
-`
-
-type AssignCommunicationPreferencesParams struct {
-	Target string
-	Source string
-}
-
-func (q *Queries) AssignCommunicationPreferences(ctx context.Context, arg AssignCommunicationPreferencesParams) error {
-	_, err := q.db.ExecContext(ctx, assignCommunicationPreferences, arg.Target, arg.Source)
-	return err
-}
-
 const assignMessageHistory = `-- name: AssignMessageHistory :exec
 UPDATE messages SET history_profile_id = ?1 WHERE history_profile_id = ?2
 `
@@ -264,22 +250,6 @@ func (q *Queries) MarkProfileDeletion(ctx context.Context, arg MarkProfileDeleti
 	return err
 }
 
-const preferredCommunication = `-- name: PreferredCommunication :one
-SELECT profile_id, updated_at FROM communication_preferences WHERE participant = ?
-`
-
-type PreferredCommunicationRow struct {
-	ProfileID string
-	UpdatedAt string
-}
-
-func (q *Queries) PreferredCommunication(ctx context.Context, participant string) (PreferredCommunicationRow, error) {
-	row := q.db.QueryRowContext(ctx, preferredCommunication, participant)
-	var i PreferredCommunicationRow
-	err := row.Scan(&i.ProfileID, &i.UpdatedAt)
-	return i, err
-}
-
 const readAssignmentSource = `-- name: ReadAssignmentSource :one
 SELECT deletion_state, successor_id FROM sim_profiles WHERE profile_id = ?
 `
@@ -332,24 +302,6 @@ func (q *Queries) ReconcileProfileDeletion(ctx context.Context, arg ReconcilePro
 		return 0, err
 	}
 	return result.RowsAffected()
-}
-
-const rememberCommunication = `-- name: RememberCommunication :exec
-INSERT INTO communication_preferences(participant, profile_id, updated_at)
-VALUES (?1, COALESCE(NULLIF((SELECT p.successor_id FROM sim_profiles p WHERE p.profile_id = ?2), ''), ?2), ?3)
-ON CONFLICT(participant) DO UPDATE SET profile_id = excluded.profile_id, updated_at = excluded.updated_at
-WHERE julianday(excluded.updated_at) >= julianday(communication_preferences.updated_at)
-`
-
-type RememberCommunicationParams struct {
-	Participant string
-	ProfileID   string
-	UpdatedAt   string
-}
-
-func (q *Queries) RememberCommunication(ctx context.Context, arg RememberCommunicationParams) error {
-	_, err := q.db.ExecContext(ctx, rememberCommunication, arg.Participant, arg.ProfileID, arg.UpdatedAt)
-	return err
 }
 
 const validAssignmentTarget = `-- name: ValidAssignmentTarget :one

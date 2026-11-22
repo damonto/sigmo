@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"strings"
 
@@ -167,7 +166,7 @@ func (s *Messenger) send(ctx context.Context, device modemDevice, to, text strin
 	return s.sendUsing(ctx, device, to, text, sendRoute{})
 }
 
-func (s *Messenger) sendUsing(ctx context.Context, device modemDevice, to, text string, route sendRoute) (recipient string, sendErr error) {
+func (s *Messenger) sendUsing(ctx context.Context, device modemDevice, to, text string, route sendRoute) (string, error) {
 	if strings.TrimSpace(to) == "" {
 		return "", ErrRecipientRequired
 	}
@@ -183,16 +182,6 @@ func (s *Messenger) sendUsing(ctx context.Context, device modemDevice, to, text 
 	if err != nil {
 		return "", err
 	}
-	// A deferred success check covers legacy and pinned sends, including IMS fallback.
-	defer func() {
-		if sendErr != nil {
-			return
-		}
-		if err := s.store.RememberCommunication(ctx, storage.CommunicationPreference{Participant: recipient, ProfileID: profileID}); err != nil {
-			// The carrier already accepted the SMS; a send failure would invite duplicates.
-			slog.WarnContext(ctx, "remember sent message line", "error", err)
-		}
-	}()
 	if route.check != nil {
 		if err := route.check(ctx); err != nil {
 			return "", err

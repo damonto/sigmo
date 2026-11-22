@@ -20,15 +20,6 @@ UPDATE sim_profiles SET deletion_state = sqlc.arg(new_state),
 WHERE profile_id = sqlc.arg(profile_id) AND deletion_state = sqlc.arg(expected_state)
     AND successor_id = sqlc.arg(expected_successor);
 
--- name: RememberCommunication :exec
-INSERT INTO communication_preferences(participant, profile_id, updated_at)
-VALUES (sqlc.arg(participant), COALESCE(NULLIF((SELECT p.successor_id FROM sim_profiles p WHERE p.profile_id = sqlc.arg(profile_id)), ''), sqlc.arg(profile_id)), sqlc.arg(updated_at))
-ON CONFLICT(participant) DO UPDATE SET profile_id = excluded.profile_id, updated_at = excluded.updated_at
-WHERE julianday(excluded.updated_at) >= julianday(communication_preferences.updated_at);
-
--- name: PreferredCommunication :one
-SELECT profile_id, updated_at FROM communication_preferences WHERE participant = ?;
-
 -- name: ReadAssignmentSource :one
 SELECT deletion_state, successor_id FROM sim_profiles WHERE profile_id = ?;
 
@@ -40,9 +31,6 @@ UPDATE messages SET history_profile_id = sqlc.arg(target) WHERE history_profile_
 
 -- name: AssignCallHistory :exec
 UPDATE calls SET history_profile_id = sqlc.arg(target) WHERE history_profile_id = sqlc.arg(source);
-
--- name: AssignCommunicationPreferences :exec
-UPDATE communication_preferences SET profile_id = sqlc.arg(target) WHERE profile_id = sqlc.arg(source);
 
 -- name: AssignProfileSuccessors :exec
 UPDATE sim_profiles SET successor_id = sqlc.arg(target) WHERE successor_id = sqlc.arg(source);

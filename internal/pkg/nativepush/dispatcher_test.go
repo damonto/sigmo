@@ -252,8 +252,9 @@ func TestSMSDeliveryUsesCurrentSubscription(t *testing.T) {
 				sub.SMS = false
 			}
 			if change == "removed" {
-				if err := s.DeleteNativeSubscription(t.Context(), sub.ID); err != nil {
-					t.Fatal(err)
+				removed, err := s.DeleteNativeSubscriptionIfCurrent(t.Context(), sub)
+				if err != nil || !removed {
+					t.Fatalf("revoke subscription: removed=%v, error=%v", removed, err)
 				}
 			} else if err := s.UpsertNativeSubscription(t.Context(), sub); err != nil {
 				t.Fatal(err)

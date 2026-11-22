@@ -164,10 +164,6 @@ func (c *Calls) SetHold(ctx context.Context, modem *mmodem.Modem, callID string,
 	return c.actions.SetHold(ctx, modem, callID, hold)
 }
 
-func (c *Calls) Hangup(ctx context.Context, modem *mmodem.Modem, callID string) (storage.Call, error) {
-	return c.actions.Hangup(ctx, modem, callID)
-}
-
 func (c *Calls) SendDTMF(ctx context.Context, modem *mmodem.Modem, callID string, digits string) error {
 	return c.actions.SendDTMF(ctx, modem, callID, digits)
 }

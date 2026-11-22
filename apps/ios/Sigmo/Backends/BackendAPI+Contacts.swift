@@ -22,9 +22,6 @@ extension BackendAPI {
         let result: CommunicationItems<CommunicationLine> = try await decode(["sim-profiles"], token: token, query: cached ? [URLQueryItem(name: "cached", value: "true")] : [])
         return result.items
     }
-    func communicationPreference(_ participant: String, token: String?) async throws -> CommunicationPreference {
-        try await decode(["communication-preferences"], token: token, query: [.init(name: "participant", value: participant)])
-    }
     func assignHistory(source: String, target: String, token: String?) async throws {
         struct Body: Encodable { let targetProfileId: String }
         _ = try await request(["sim-profiles", source, "history-assignment"], method: "PUT", body: JSONEncoder().encode(Body(targetProfileId: target)), token: token)

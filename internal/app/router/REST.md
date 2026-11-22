@@ -7,13 +7,13 @@ for methods, middleware, and handler bindings.
 
 | Resource | Read | Write |
 | --- | --- | --- |
-| Available network operators | `GET /modems/:id/networks` | Network scans are created separately under `/modems/:id/network-scans`. |
+| Available network operators | `GET /modems/:id/network-scans/:scanID` reads the scan state and results. | `POST /modems/:id/network-scans` starts or reuses a scan. |
 | Network configuration | `GET /modems/:id/network-settings/{registration,airplane-mode,modes,bands}` | `PUT` on the same URI replaces the writable configuration. |
 | Physical SIM selection | Included in the modem representation | `PUT /modems/:id/sim-slot-selection` with `{"slot":2}`. Repeating the selected slot succeeds without switching again. |
 | Secure elements | `GET /modems/:id/secure-elements` | Installed profiles live under `/modems/:id/secure-elements/:seId/esim-profiles/:iccid`. |
 | eSIM inventory | `GET /modems/:id/esim-profiles` | Activation is a selection: `PUT /modems/:id/secure-elements/:seId/active-esim-profile` with `{"iccid":"..."}`. |
 | SIM automations | `GET /sim-profiles/:profileId/automations` lists the configuration for each binding of that profile. `GET /modems/:id/automations` summarizes configured actions with `nextAt` set to null when there is no upcoming run. | `POST` creates one automation per modem, ICCID, and secure element and returns `409` if it already exists. `PUT` edits it and `DELETE` clears it at `/sim-profiles/:profileId/automations/:automationId`. |
-| Modem message conversations | `GET /modems/:id/message-conversations` and `GET /modems/:id/message-conversations/:participant/messages` | Delete a modem conversation at `/modems/:id/message-conversations/:participant`. Send SMS with `POST /modems/:id/messages`. |
+| Modem message conversations | `GET /conversations?modemId=...` lists conversations. `GET /conversations/:conversationId/messages` pages their messages. | Delete a conversation at `DELETE /conversations/:conversationId`. Send SMS with `POST /modems/:id/messages`. |
 
 Mode and band configuration responses retain `supported` metadata and the
 `current` setting. Writes replace `current`: `{"current":{"allowed":4,"preferred":0}}`
@@ -54,9 +54,18 @@ also retain their protocol-specific contracts.
 ## Breaking migration
 
 The Web and iOS clients migrate together with the backend. Old SIM slot,
-`/ses`, `/esims`, `/networks/*` configuration, and modem message-conversation
-paths have no compatibility aliases. The `ses` JSON response property is a
-separate wire-model name and remains unchanged.
+`/ses`, `/esims`, and `/networks/*` configuration paths have no compatibility
+aliases. Use network scan tasks in place of synchronous network scans and
+conversation IDs in place of modem-scoped participant paths. The `ses` JSON
+response property remains part of the modem representation.
+
+Use `GET /calls` for archived call history and `DELETE /calls/:callID` to remove
+an archived call. Hang up a live call with `PATCH /modems/:id/calls/:callID`
+and `{"state":"ended"}`.
+
+Read browser push subscriptions from `GET /web-push`. Register or update native
+subscriptions with `POST /push-subscriptions`. Revoke native push delivery for
+a backend through `DELETE /v1/push-subscriptions/:id` on the Worker.
 
 These conventions apply HTTP method semantics from
 [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html#section-9) and WebSocket

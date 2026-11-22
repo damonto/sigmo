@@ -25,10 +25,13 @@ actor CommunicationFixture {
     private var requests: [URLRequest] = []
     private var lines = [CommunicationFixture.line("a"), CommunicationFixture.line("b", available: false)]
     private let includesHistory: Bool
-    init(contactName: String = "Alice", includesHistory: Bool = false, modemContacts: Bool = false, modemNames: [String: String] = [:], historyAssignment: HistoryAssignmentScenario? = nil) {
+    private let badgeBackendID = UUID().uuidString
+    private let unreadCount: Int?
+    init(contactName: String = "Alice", includesHistory: Bool = false, modemContacts: Bool = false, modemNames: [String: String] = [:], historyAssignment: HistoryAssignmentScenario? = nil, unreadCount: Int? = nil) {
         devices = DetailFixtureServer(modemNames: modemNames)
         contacts[0].name = contactName
         self.includesHistory = includesHistory
+        self.unreadCount = unreadCount
         if modemContacts {
             lines = [Self.line("8986000000000000001"), Self.line("a", modemID: "device-2")]
         }
@@ -109,7 +112,6 @@ actor CommunicationFixture {
             await holdIfNeeded("/sim-profiles")
             return response
         }
-        if path.hasSuffix("/communication-preferences") { return raw(#"{"participant":"10086","profileId":"a","updatedAt":""}"#) }
         if path.hasSuffix("/history-assignment") {
             if assignmentStatus >= 400 {
                 return HTTPProblem.response(status: assignmentStatus, code: "remote_error", detail: "Assignment unavailable")
@@ -129,6 +131,9 @@ actor CommunicationFixture {
                 present: source.present, active: source.active, canMessage: source.canMessage, canCall: source.canCall
             )
             return BackendHTTPResponse(data: Data(), status: assignmentStatus)
+        }
+        if let unreadCount, path.hasSuffix("/conversations") {
+            return raw(#"{"backendId":"\#(badgeBackendID)","revision":0,"unreadCount":\#(unreadCount),"items":[]}"#)
         }
         if includesHistory {
             let message = #"{"id":1,"conversationId":"source-conversation","profileId":"a","historyProfileId":"a","modemId":"device-1","sender":"+14155552671","recipient":"+14155550000","text":"Fixture history message","timestamp":"2026-10-13T08:00:00Z","incoming":true,"read":true,"status":"received","lineLabel":"Home","lineNumber":"+14155550000"}"#

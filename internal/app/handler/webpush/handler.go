@@ -45,14 +45,6 @@ func (h *Handler) Update(c *echo.Context) error {
 	return h.Get(c)
 }
 
-func (h *Handler) ListSubscriptions(c *echo.Context) error {
-	overview, err := h.client.Overview(c.Request().Context())
-	if err != nil {
-		return httpapi.Internal(c, "read_web_push_failed", err)
-	}
-	return c.JSON(http.StatusOK, subscriptionsFromStorage(overview.Subscriptions))
-}
-
 func (h *Handler) Register(c *echo.Context) error {
 	var req push.RegisterRequest
 	if err := httpapi.BindJSON(c, &req, "register_web_push_subscription_invalid"); err != nil {

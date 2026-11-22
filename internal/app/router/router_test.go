@@ -191,9 +191,9 @@ func TestRESTResourceBindingsKeepAuthentication(t *testing.T) {
 		{http.MethodGet, "/secure-elements", "/secure-elements"},
 		{http.MethodGet, "/esim-profiles", "/esim-profiles"},
 		{http.MethodPut, "/secure-elements/se0/active-esim-profile", "/secure-elements/:seId/active-esim-profile"},
-		{http.MethodGet, "/message-conversations", "/message-conversations"},
-		{http.MethodGet, "/message-conversations/person/messages", "/message-conversations/:participant/messages"},
-		{http.MethodDelete, "/message-conversations/person", "/message-conversations/:participant"},
+		{http.MethodPost, "/network-scans", "/network-scans"},
+		{http.MethodGet, "/network-scans/scan", "/network-scans/:scanID"},
+		{http.MethodPost, "/messages", "/messages"},
 	} {
 		t.Run(resource.method+" "+resource.path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -210,16 +210,25 @@ func TestRESTResourceBindingsKeepAuthentication(t *testing.T) {
 
 func TestReplacedRESTPathsHaveNoCompatibilityAliases(t *testing.T) {
 	e := echo.New()
-	if err := Register(e, newTestConfig(t)); err != nil {
+	deps := newTestConfig(t)
+	deps.Extensions = []Extension{CallRoutes(call.New(deps.Storage, nil), nil)}
+	if err := Register(e, deps); err != nil {
 		t.Fatal(err)
 	}
 	for _, resource := range []struct{ method, path string }{
 		{http.MethodPut, "/sim-slots/2"},
 		{http.MethodGet, "/networks/airplane-mode"},
 		{http.MethodPut, "/networks/current-modes"},
+		{http.MethodPut, "/networks/current-bands"},
 		{http.MethodGet, "/ses"},
 		{http.MethodGet, "/esims"},
+		{http.MethodPut, "/ses/se0/esims/profile/activation"},
 		{http.MethodGet, "/messages"},
+		{http.MethodGet, "/networks"},
+		{http.MethodGet, "/message-conversations"},
+		{http.MethodGet, "/message-conversations/person/messages"},
+		{http.MethodDelete, "/message-conversations/person"},
+		{http.MethodDelete, "/calls/call"},
 	} {
 		t.Run(resource.method+" "+resource.path, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -228,5 +237,18 @@ func TestReplacedRESTPathsHaveNoCompatibilityAliases(t *testing.T) {
 				t.Fatalf("removed route status = %d: %s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+
+	routes := e.Router().Routes()
+	for _, resource := range []struct{ method, pattern string }{
+		{http.MethodGet, "/web-push/subscriptions"},
+		{http.MethodGet, "/communication-preferences"},
+		{http.MethodGet, "/calls/:callID"},
+		{http.MethodPatch, "/push-subscriptions/:subscriptionId"},
+		{http.MethodDelete, "/push-subscriptions/:subscriptionId"},
+	} {
+		if _, err := routes.FindByMethodPath(resource.method, "/api/v1"+resource.pattern); err == nil {
+			t.Errorf("removed route still registered: %s %s", resource.method, resource.pattern)
+		}
 	}
 }

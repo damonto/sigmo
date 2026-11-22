@@ -128,10 +128,6 @@ actor DemoBackend {
         if parts.first == "contacts" { return try contactRequest(request, parts: parts) }
         if path == "modems" { return try await reply([currentModem()]) }
         if path == "sim-profiles" { return try await reply(DemoItems(items: lines())) }
-        if path == "communication-preferences" {
-            let profile = messages.last { $0.participant == value("participant") }?.profileId ?? ""
-            return try reply(["participant": value("participant"), "profileId": profile, "updatedAt": ""])
-        }
         if parts.first == "sim-profiles", parts.last == "history-assignment", parts.count == 3 {
             let target = try decode([String: String].self, request)["targetProfileId"] ?? ""
             guard try await lines().contains(where: { $0.profileId == target }) else { return error("communication_not_found", status: 404) }
@@ -377,7 +373,6 @@ extension DemoBackend {
         }
         guard let index = calls.firstIndex(where: { $0.id == parts[1] }) else { return error("call_not_found", status: 404) }
         if method == "GET" { return try reply(calls[index]) }
-        if method == "DELETE", calls[index].terminal { calls.remove(at: index); return empty() }
         if parts.last == "dtmf-events" { return empty() }
         struct Update: Decodable { let clientId: String; let state, hold: String? }
         let update = try decode(Update.self, request)

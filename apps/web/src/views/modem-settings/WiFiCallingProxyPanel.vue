@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useWiFiCallingProxies } from '@/composables/useWiFiCallingProxies'
+import { DEFAULT_WIFI_PROXY_PORT, useWiFiProxyPaste } from '@/composables/useWiFiProxyPaste'
 import type { WiFiProxy, WiFiProxyCheckStep, WiFiProxySettings } from '@/types/modem'
 
 const props = defineProps<{
@@ -51,7 +52,9 @@ type Editor = {
 }
 
 const editor = ref<Editor>()
+const { invalidPaste, clearPasteError, readProxyPaste } = useWiFiProxyPaste()
 const edit = (proxy?: WiFiProxy) => {
+  clearPasteError()
   editor.value = {
     id: proxy?.id ?? '',
     settings: {
@@ -66,12 +69,26 @@ const edit = (proxy?: WiFiProxy) => {
   }
 }
 
+const pasteHost = (event: ClipboardEvent) => {
+  const entry = editor.value
+  if (!entry || entry.id || saving.value) return
+
+  const address = readProxyPaste(event)
+  if (!address) return
+
+  entry.settings = {
+    name: entry.settings.name.trim() ? entry.settings.name : address.host.slice(0, 128),
+    ...address,
+  }
+  entry.auth = Boolean(address.username)
+}
+
 const saveEditor = async () => {
   const entry = editor.value
   if (!entry || saving.value) return
   const settings = {
     ...entry.settings,
-    port: entry.settings.port === '' ? 1080 : Number(entry.settings.port),
+    port: entry.settings.port === '' ? DEFAULT_WIFI_PROXY_PORT : Number(entry.settings.port),
   }
   if (!entry.auth) {
     settings.username = ''
@@ -189,7 +206,11 @@ const udpAddress = (step: WiFiProxyCheckStep) => {
               id="wifi-proxy-host"
               v-model="editor.settings.host"
               :placeholder="t(prefix + 'hostPlaceholder')"
+              :aria-describedby="invalidPaste ? 'wifi-proxy-paste-error' : undefined"
+              :disabled="saving"
               required
+              @input="clearPasteError"
+              @paste="pasteHost"
             />
           </div>
           <div class="space-y-1">
@@ -204,6 +225,14 @@ const udpAddress = (step: WiFiProxyCheckStep) => {
             />
           </div>
         </div>
+        <p
+          v-if="invalidPaste"
+          id="wifi-proxy-paste-error"
+          role="alert"
+          class="text-sm text-destructive"
+        >
+          {{ t(prefix + 'invalidPaste') }}
+        </p>
         <div class="flex items-center gap-3">
           <Switch
             id="wifi-proxy-auth"

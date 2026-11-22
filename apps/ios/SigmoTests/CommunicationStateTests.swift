@@ -2,8 +2,8 @@ import XCTest
 @testable import Sigmo
 
 @MainActor
-final class CommunicationOverviewTests: XCTestCase {
-    private func session(_ name: String, server: OverviewHistoryFixture) async throws -> BackendSession {
+final class CommunicationStateTests: XCTestCase {
+    private func session(_ name: String, server: HistoryFixture) async throws -> BackendSession {
         let configuration = BackendConfiguration(name: name, address: try BackendAddress.normalize("https://\(name.lowercased()).example"))
         let session = BackendSession(configuration: configuration, credentials: MemoryCredentials().store,
                                      api: BackendAPI(configuration: configuration, transport: { try await server.respond($0) }))
@@ -11,146 +11,161 @@ final class CommunicationOverviewTests: XCTestCase {
         return session
     }
 
-    func testContactsWithIdenticalIDsRemainSeparateAndDeleteOnlyTheirSource() async throws {
-        let firstServer = OverviewHistoryFixture(name: "First"), secondServer = OverviewHistoryFixture(name: "Second")
+    func testContactsWithIdenticalIDsStayOnTheirBackend() async throws {
+        let firstServer = HistoryFixture(name: "First"), secondServer = HistoryFixture(name: "Second")
         let first = try await session("First", server: firstServer), second = try await session("Second", server: secondServer)
-        let state = CommunicationOverviewState(sessions: [second, first], section: .contacts)
+        let state = CommunicationState(session: first, section: .contacts)
         await state.load()
-        XCTAssertEqual(state.contacts.map(\.value.name), ["First", "Second"])
-        XCTAssertEqual(state.contacts.map(\.value.id), ["alice", "alice"])
-        XCTAssertEqual(Set(state.contacts.map(\.id)).count, 2)
-        XCTAssertEqual(state.creationSessions.map(\.id), [second.id, first.id])
-
-        let target = try XCTUnwrap(state.contacts.first)
-        await state.delete(target.id)
-        XCTAssertEqual(state.contacts.map(\.session.id), [second.id])
-        let secondRequests = await secondServer.allRequests()
-        XCTAssertFalse(secondRequests.contains { $0.httpMethod == "DELETE" })
-        state.search = "missing"
-        await state.load()
-        XCTAssertTrue(state.contacts.isEmpty)
+        XCTAssertEqual(state.contacts.map(\.name), ["First"])
         state.search = "Second"
-        await state.load()
-        XCTAssertEqual(state.contacts.map(\.session.id), [second.id])
+        XCTAssertTrue(state.contacts.isEmpty)
+        state.search = "First"
+        XCTAssertEqual(state.contacts.map(\.id), ["alice"])
+        await state.delete("alice")
+        XCTAssertTrue(state.contacts.isEmpty)
+        let secondRequests = await secondServer.allRequests()
+        XCTAssertFalse(secondRequests.contains { $0.url?.path.contains("/contacts") == true })
+
+        let other = CommunicationState(session: second, section: .contacts)
+        await other.load()
+        XCTAssertEqual(other.contacts.map(\.name), ["Second"])
+        XCTAssertEqual(other.contacts.map(\.id), ["alice"])
     }
 
-    func testCallsAndComposerAreAvailableWithoutLicensedFeatures() async throws {
-        let server = OverviewHistoryFixture(name: "Backend", days: [3])
+    func testCallsAreAvailableWithoutLicensedFeatures() async throws {
+        let server = HistoryFixture(name: "Backend", days: [3])
         let session = try await session("Backend", server: server)
-        let state = CommunicationOverviewState(sessions: [session], section: .calls)
+        let state = CommunicationState(session: session, section: .calls)
         XCTAssertEqual(session.capabilities, [])
         await state.load()
         XCTAssertEqual(state.calls.count, 1)
-        XCTAssertEqual(state.creationSessions.map(\.id), [session.id])
     }
 
-    func testHistoryMergesChronologicallyWithIndependentPaginationAndFilters() async throws {
+    func testHistoryPaginationAndFiltersUseTheSelectedBackend() async throws {
         for section in [CommunicationSection.messages, .calls] {
-            let firstServer = OverviewHistoryFixture(name: "First", days: [3, 1])
-            let secondServer = OverviewHistoryFixture(name: "Second", days: [4])
+            let firstServer = HistoryFixture(name: "First", days: [4, 3])
+            let secondServer = HistoryFixture(name: "Second", days: [2])
             let first = try await session("First", server: firstServer), second = try await session("Second", server: secondServer)
-            let state = CommunicationOverviewState(sessions: [first, second], section: section)
+            let state = CommunicationState(session: first, section: section)
             await state.load()
-            if section == .messages {
-                XCTAssertEqual(state.threads.map(\.session.id), [second.id, first.id])
-                XCTAssertEqual(Set(state.threads.map(\.id)).count, 2)
-            } else {
-                XCTAssertEqual(state.calls.map(\.session.id), [second.id, first.id])
-                XCTAssertEqual(Set(state.calls.map(\.id)).count, 2)
-            }
-            XCTAssertTrue(state.hasMore)
+            XCTAssertEqual(state.cursor, "First-1")
             await state.load(more: true)
-            XCTAssertFalse(state.hasMore)
-            let requests = await secondServer.allRequests().filter { $0.url?.path.hasSuffix(section == .messages ? "/message-threads" : "/calls") == true }
-            XCTAssertEqual(requests.count, 1, "An exhausted backend must not reload its first page.")
+            XCTAssertTrue(state.cursor.isEmpty)
             await state.load(automatic: true)
             let expandedRequests = await firstServer.historyRequests()
             XCTAssertEqual(expandedRequests.count, 2, "Automatic refresh must preserve appended history pages.")
+            let otherRequests = await secondServer.historyRequests()
+            XCTAssertTrue(otherRequests.isEmpty)
             if section == .messages {
-                XCTAssertEqual(state.threads.map(\.session.id), [second.id, first.id, first.id])
+                XCTAssertEqual(state.threads.map(\.id), ["record-0", "record-1"])
                 state.unreadOnly = true
-                XCTAssertEqual(state.threads.map(\.value.latestMessage.timestamp), ["2026-10-03T00:00:00Z", "2026-10-01T00:00:00Z"])
+                XCTAssertEqual(state.filteredThreads.map(\.id), ["record-1"])
             } else {
-                XCTAssertEqual(state.calls.map(\.session.id), [second.id, first.id, first.id])
+                XCTAssertEqual(state.calls.map(\.id), ["record-0", "record-1"])
                 state.missedOnly = true
                 await state.load()
-                XCTAssertEqual(state.calls.map(\.session.id), [first.id])
-                XCTAssertTrue(state.calls.allSatisfy { $0.value.missed })
+                XCTAssertEqual(state.filteredCalls.map(\.id), ["record-1"])
             }
+
+            let other = CommunicationState(session: second, section: section)
+            await other.load()
+            XCTAssertEqual(section == .messages ? other.threads.map(\.id) : other.calls.map(\.id), ["record-0"])
+            XCTAssertTrue(other.cursor.isEmpty)
         }
     }
 
-    func testUnavailableBackendDoesNotHideOtherHistoryAndDeletionStaysScoped() async throws {
+    func testDeletingHistoryWithIdenticalIDsOnlyChangesItsBackend() async throws {
         for section in [CommunicationSection.messages, .calls] {
-            let firstServer = OverviewHistoryFixture(name: "First", days: [3])
-            let secondServer = OverviewHistoryFixture(name: "Second", days: [4])
+            let firstServer = HistoryFixture(name: "First", days: [3])
+            let secondServer = HistoryFixture(name: "Second", days: [4])
             let first = try await session("First", server: firstServer), second = try await session("Second", server: secondServer)
-            await secondServer.setUnavailable(true)
-            let state = CommunicationOverviewState(sessions: [first, second], section: section)
+            let state = CommunicationState(session: first, section: section)
             await state.load()
-            XCTAssertNotNil(state.source(for: second.id)?.failure)
-            XCTAssertNil(state.source(for: first.id)?.failure)
-            XCTAssertEqual(section == .messages ? state.threads.count : state.calls.count, 1)
-            await secondServer.setUnavailable(false)
-            await state.load()
-            XCTAssertEqual(section == .messages ? state.threads.count : state.calls.count, 2)
-            await state.delete(CommunicationRecordID(backendID: first.id, recordID: "record-0"))
-            XCTAssertEqual(section == .messages ? state.threads.map(\.session.id) : state.calls.map(\.session.id), [second.id])
+            XCTAssertFalse(state.isEmpty)
+            await state.delete("record-0")
+            XCTAssertTrue(state.isEmpty)
+            XCTAssertNil(state.deletionFailure)
+            let other = CommunicationState(session: second, section: section)
+            await other.load()
+            XCTAssertFalse(other.isEmpty)
             let secondRequests = await secondServer.allRequests()
             XCTAssertFalse(secondRequests.contains { $0.httpMethod == "DELETE" })
         }
     }
 
-    func testSlowBackendDoesNotDelayContactsFromAnotherBackend() async throws {
-        let firstServer = OverviewHistoryFixture(name: "First"), secondServer = OverviewHistoryFixture(name: "Second")
-        let first = try await session("First", server: firstServer), second = try await session("Second", server: secondServer)
-        let state = CommunicationOverviewState(sessions: [first, second], section: .contacts)
-        await firstServer.holdContacts()
-        let pending = Task { await state.load() }
-        await firstServer.waitForContactRead()
-        try await second.refreshContacts()
-        XCTAssertEqual(state.contacts.map(\.session.id), [second.id])
-        XCTAssertTrue(state.loading)
-        await firstServer.releaseContacts()
-        await pending.value
-        XCTAssertEqual(state.contacts.count, 2)
+    func testSuccessfulDeletionRemainsVisibleWhenHistoryRefreshFails() async throws {
+        for section in [CommunicationSection.messages, .calls] {
+            let server = HistoryFixture(name: "First", days: [4])
+            let session = try await session("First", server: server)
+            let state = CommunicationState(session: session, section: section)
+            await state.load()
+            XCTAssertFalse(state.isEmpty)
+
+            await server.setUnavailable(true)
+            await state.delete("record-0")
+            XCTAssertTrue(state.isEmpty)
+            XCTAssertNil(state.deletionFailure)
+            XCTAssertNotNil(state.failure)
+        }
     }
 
-    func testRevokedBackendCannotRestoreItsLateContactsInAll() async throws {
-        let firstServer = OverviewHistoryFixture(name: "First"), secondServer = OverviewHistoryFixture(name: "Second")
-        let first = try await session("First", server: firstServer), second = try await session("Second", server: secondServer)
-        let state = CommunicationOverviewState(sessions: [first, second], section: .contacts)
+    func testLateHistoryFromPreviousBackendDoesNotAffectCurrentState() async throws {
+        for section in [CommunicationSection.messages, .calls] {
+            let firstServer = HistoryFixture(name: "First", days: [3, 2])
+            let first = try await session("First", server: firstServer)
+            let previous = CommunicationState(session: first, section: section)
+            await firstServer.holdNextHistoryRead()
+            let pending = Task { await previous.load() }
+            await firstServer.waitForHistoryRead()
+            pending.cancel()
+
+            let secondServer = HistoryFixture(name: "Second", days: [4])
+            let second = try await session("Second", server: secondServer)
+            let current = CommunicationState(session: second, section: section)
+            await current.load()
+            await firstServer.releaseHistoryRead()
+            await pending.value
+            XCTAssertTrue(previous.isEmpty)
+            XCTAssertTrue(current.cursor.isEmpty)
+            let date = section == .messages ? current.threads.first?.latestMessage.timestamp : current.calls.first?.startedAt
+            XCTAssertEqual(date, "2026-10-04T00:00:00Z")
+        }
+    }
+
+    func testRevokedAccessCannotRestoreLateContacts() async throws {
+        let server = HistoryFixture(name: "First")
+        let session = try await session("First", server: server)
+        let state = CommunicationState(session: session, section: .contacts)
         await state.load()
-        await firstServer.holdContacts()
+        await server.holdContacts()
         let pending = Task { await state.load(force: true) }
-        await firstServer.waitForContactRead()
-        await first.logout()
-        XCTAssertEqual(state.contacts.map(\.session.id), [second.id])
-        XCTAssertEqual(state.creationSessions.map(\.id), [second.id])
-        await firstServer.releaseContacts()
+        await server.waitForContactRead()
+        await session.logout()
+        XCTAssertTrue(state.contacts.isEmpty)
+        await server.releaseContacts()
         await pending.value
-        XCTAssertEqual(state.contacts.map(\.session.id), [second.id])
+        XCTAssertTrue(state.contacts.isEmpty)
     }
 
     func testSearchChangeDiscardsCursorsBeforeTheNextLoad() async throws {
         for section in [CommunicationSection.messages, .calls] {
-            let server = OverviewHistoryFixture(name: "First", days: [4, 3])
+            let server = HistoryFixture(name: "First", days: [4, 3])
             let session = try await session("First", server: server)
-            let state = CommunicationOverviewState(sessions: [session], section: section)
+            let state = CommunicationState(session: session, section: section)
             await state.load()
-            XCTAssertTrue(state.hasMore)
+            XCTAssertFalse(state.cursor.isEmpty)
             XCTAssertFalse(state.isEmpty)
 
             state.search = "no-match"
             XCTAssertTrue(state.isEmpty)
-            XCTAssertFalse(state.hasMore)
+            XCTAssertTrue(state.cursor.isEmpty)
             await state.load(more: true)
             let beforeReload = await server.historyRequests()
             XCTAssertEqual(beforeReload.count, 1, "Load more cannot use a previous search's cursor.")
 
             await state.load()
             XCTAssertTrue(state.isEmpty)
-            XCTAssertFalse(state.hasMore)
+            XCTAssertTrue(state.cursor.isEmpty)
             let requests = await server.historyRequests()
             let last = try XCTUnwrap(requests.last?.url)
             let query = URLComponents(url: last, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -161,9 +176,9 @@ final class CommunicationOverviewTests: XCTestCase {
 
     func testLateHistoryPageCannotRestorePreviousSearch() async throws {
         for section in [CommunicationSection.messages, .calls] {
-            let server = OverviewHistoryFixture(name: "First", days: [4, 3])
+            let server = HistoryFixture(name: "First", days: [4, 3])
             let session = try await session("First", server: server)
-            let state = CommunicationOverviewState(sessions: [session], section: section)
+            let state = CommunicationState(session: session, section: section)
             await state.load()
             await server.holdNextHistoryRead()
             let pending = Task { await state.load(more: true) }
@@ -173,23 +188,24 @@ final class CommunicationOverviewTests: XCTestCase {
             await server.releaseHistoryRead()
             await pending.value
             XCTAssertTrue(state.isEmpty, "The old page must be rejected even before the new search starts.")
-            XCTAssertFalse(state.hasMore)
+            XCTAssertTrue(state.cursor.isEmpty)
             await state.load()
             XCTAssertTrue(state.isEmpty)
-            XCTAssertNil(state.sources.first?.failure)
+            XCTAssertNil(state.failure)
         }
     }
 
-    func testConcurrentLoadMoreDoesNotAppendTheSamePageTwice() async throws {
+    func testPendingPageIgnoresDuplicateLoadsAndAutomaticRefresh() async throws {
         for section in [CommunicationSection.messages, .calls] {
-            let server = OverviewHistoryFixture(name: "First", days: [4, 3])
+            let server = HistoryFixture(name: "First", days: [4, 3])
             let session = try await session("First", server: server)
-            let state = CommunicationOverviewState(sessions: [session], section: section)
+            let state = CommunicationState(session: session, section: section)
             await state.load()
             await server.holdNextHistoryRead()
             let pending = Task { await state.load(more: true) }
             await server.waitForHistoryRead()
             await state.load(more: true)
+            await state.load(automatic: true)
             await server.releaseHistoryRead()
             await pending.value
 
@@ -198,35 +214,35 @@ final class CommunicationOverviewTests: XCTestCase {
             let ids = section == .messages ? state.threads.map(\.id) : state.calls.map(\.id)
             XCTAssertEqual(ids.count, 2)
             XCTAssertEqual(Set(ids).count, 2)
-            XCTAssertFalse(state.hasMore)
+            XCTAssertTrue(state.cursor.isEmpty)
         }
     }
 
     func testFailedLoadMoreDoesNotDisableAutomaticRefresh() async throws {
         for section in [CommunicationSection.messages, .calls] {
-            let server = OverviewHistoryFixture(name: "First", days: [4, 3])
+            let server = HistoryFixture(name: "First", days: [4, 3])
             let session = try await session("First", server: server)
-            let state = CommunicationOverviewState(sessions: [session], section: section)
+            let state = CommunicationState(session: session, section: section)
             await state.load()
             await server.setUnavailable(true)
             await state.load(more: true)
-            XCTAssertNotNil(state.sources.first?.failure)
+            XCTAssertNotNil(state.failure)
             XCTAssertFalse(state.isEmpty)
 
             await server.setUnavailable(false)
             await state.load(automatic: true)
-            XCTAssertNil(state.sources.first?.failure)
+            XCTAssertNil(state.failure)
             let requests = await server.historyRequests()
             XCTAssertEqual(requests.count, 3)
-            XCTAssertTrue(state.hasMore)
+            XCTAssertFalse(state.cursor.isEmpty)
         }
     }
 
     func testBackgroundPausesAutomaticRefreshWithoutDiscardingPendingRead() async throws {
         for section in [CommunicationSection.messages, .calls] {
-            let server = OverviewHistoryFixture(name: "First", days: [4])
+            let server = HistoryFixture(name: "First", days: [4])
             let session = try await session("First", server: server)
-            let state = CommunicationOverviewState(sessions: [session], section: section)
+            let state = CommunicationState(session: session, section: section)
             await server.holdNextHistoryRead()
             let pending = Task { await state.load(automatic: true) }
             await server.waitForHistoryRead()
@@ -246,7 +262,7 @@ final class CommunicationOverviewTests: XCTestCase {
     }
 }
 
-private actor OverviewHistoryFixture {
+private actor HistoryFixture {
     private let contacts: CommunicationFixture
     private let name: String
     private let days: [Int]

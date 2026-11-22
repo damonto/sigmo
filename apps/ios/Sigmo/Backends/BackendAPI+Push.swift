@@ -8,8 +8,4 @@ extension BackendAPI {
     func registerPush(_ registration: NativePushRegistration, token: String?) async throws {
         _ = try await request(["push-subscriptions"], method: "POST", body: JSONEncoder().encode(registration), token: token)
     }
-
-    func removePush(_ id: String, token: String?) async throws {
-        _ = try await request(["push-subscriptions", id], method: "DELETE", token: token)
-    }
 }

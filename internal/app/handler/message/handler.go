@@ -2,9 +2,7 @@ package message
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
-	"net/url"
 
 	"github.com/labstack/echo/v5"
 
@@ -26,42 +24,6 @@ func New(registry *mmodem.Registry, store *storage.Store, route pmessage.Route) 
 		messages: pmessage.New(store, route),
 		store:    store,
 	}
-}
-
-func (h *Handler) List(c *echo.Context) error {
-	ctx := c.Request().Context()
-	modem, err := h.registry.Find(ctx, c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, "list_messages_failed")
-	}
-	response, err := h.messages.ListConversations(ctx, modem, c.QueryParam("q"))
-	if err != nil {
-		return httpapi.Internal(c, "list_messages_failed", err)
-	}
-	return c.JSON(http.StatusOK, buildConversationResponses(response))
-}
-
-func (h *Handler) ListByParticipant(c *echo.Context) error {
-	ctx := c.Request().Context()
-	modem, err := h.registry.Find(ctx, c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, "list_message_thread_failed")
-	}
-	participant, err := participantFromParam(c)
-	if err != nil {
-		if errors.Is(err, pmessage.ErrParticipantRequired) {
-			return httpapi.BadRequest(c, "participant_required", err)
-		}
-		return httpapi.BadRequest(c, "invalid_participant", err)
-	}
-	response, err := h.messages.ListByParticipant(ctx, modem, participant)
-	if err != nil {
-		if errors.Is(err, pmessage.ErrParticipantRequired) {
-			return httpapi.BadRequest(c, "participant_required", err)
-		}
-		return httpapi.Internal(c, "list_message_thread_failed", err)
-	}
-	return c.JSON(http.StatusOK, buildThreadResponses(response))
 }
 
 func (h *Handler) Send(c *echo.Context) error {
@@ -109,38 +71,4 @@ func writeSendMessageError(c *echo.Context, err error) error {
 		return httpapi.Error(c, http.StatusServiceUnavailable, "message_route_not_connected", err.Error())
 	}
 	return httpapi.Internal(c, "send_message_failed", err)
-}
-
-func (h *Handler) DeleteByParticipant(c *echo.Context) error {
-	ctx := c.Request().Context()
-	modem, err := h.registry.Find(ctx, c.Param("id"))
-	if err != nil {
-		return httpapi.ModemLookupError(c, err, "delete_message_thread_failed")
-	}
-	participant, err := participantFromParam(c)
-	if err != nil {
-		if errors.Is(err, pmessage.ErrParticipantRequired) {
-			return httpapi.BadRequest(c, "participant_required", err)
-		}
-		return httpapi.BadRequest(c, "invalid_participant", err)
-	}
-	if err := h.messages.DeleteByParticipant(ctx, modem, participant); err != nil {
-		if errors.Is(err, pmessage.ErrParticipantRequired) {
-			return httpapi.BadRequest(c, "participant_required", err)
-		}
-		return httpapi.Internal(c, "delete_message_thread_failed", err)
-	}
-	return c.NoContent(http.StatusNoContent)
-}
-
-func participantFromParam(c *echo.Context) (string, error) {
-	raw := c.Param("participant")
-	if raw == "" {
-		return "", pmessage.ErrParticipantRequired
-	}
-	participant, err := url.PathUnescape(raw)
-	if err != nil {
-		return "", fmt.Errorf("invalid participant %q: %w", raw, err)
-	}
-	return participant, nil
 }
