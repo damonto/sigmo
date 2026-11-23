@@ -455,7 +455,7 @@ const zh = {
     notificationSaveSuccess: '通知渠道已保存。',
     updates: {
       title: '更新设置',
-      description: '选择更新渠道、检查新版本并管理自动安装。',
+      description: '检查新版本。',
       preferences: '更新偏好',
       automatic: '自动更新',
       automaticDescription: '启动两分钟后检查，并每六小时检查一次；发现新版本后验签安装。',
@@ -833,6 +833,18 @@ const zh = {
   },
   modemDetail: {
     navigation: '当前设备的功能',
+    connection: {
+      connected: '已连接',
+      disconnected: '离线',
+    },
+    overview: {
+      network: '网络状态',
+      networkDetails: '网络详情',
+      voice: '语音服务',
+      simSlot: 'SIM 卡槽',
+      device: '设备信息',
+      euicc: 'eUICC 信息',
+    },
     back: '返回列表',
     kicker: 'Sigmo',
     subtitle: '查看 Modem 详情与 eSIM 配置。',
@@ -919,7 +931,7 @@ const zh = {
     },
     esim: {
       lineNoNumber: '无号码',
-      listTitle: 'eSIMs',
+      listTitle: 'eSIM 配置',
       noProfiles: '暂无 eSIM Profile。',
       installButton: '安装 eSIM',
       installTitle: '安装 eSIM',
@@ -1023,7 +1035,8 @@ const zh = {
       resend: '重发',
       cancel: '取消',
       confirm: '确认',
-      copy: '复制',
+      copyIdentifier: '复制 {field}',
+      identifierCopied: '已复制 {field}',
       update: '更新',
       loading: '加载中',
     },

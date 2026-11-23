@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { formatByteSize } from '@/lib/formatByteSize'
 import type { SEItem } from '@/types/se'
 
 const props = defineProps<{
@@ -10,15 +11,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'update:selectedSeId', value: string): void
 }>()
-
-const formatBytes = (bytes?: number) => {
-  if (bytes === null || bytes === undefined) return 'N/A'
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KiB', 'MiB', 'GiB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return `${Math.round((bytes / Math.pow(k, i)) * 100) / 100} ${sizes[i]}`
-}
 
 const selectSE = (value: string) => {
   if (!props.ses.some((item) => item.id === value)) return
@@ -48,7 +40,7 @@ const selectSE = (value: string) => {
           {{ item.eid || 'N/A' }}
         </span>
         <span class="block text-xs text-muted-foreground">
-          Storage Remaining {{ formatBytes(item.freeSpace) }}
+          Storage Remaining {{ formatByteSize(item.freeSpace) }}
         </span>
       </span>
     </label>

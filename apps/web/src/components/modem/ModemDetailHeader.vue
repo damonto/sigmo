@@ -4,11 +4,11 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
 import BackButton from '@/components/BackButton.vue'
-import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
 import ModemStickyTopBar from '@/components/modem/ModemStickyTopBar.vue'
 import ModemTitleSwitcher from '@/components/modem/ModemTitleSwitcher.vue'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { displayModemName, isModemConnected } from '@/composables/useModemDisplay'
 import { useModems } from '@/composables/useModems'
 import { useStickyTopBar } from '@/composables/useStickyTopBar'
 import { formatPhoneDisplay } from '@/lib/phoneNumberInput'
@@ -49,10 +49,9 @@ const subtitle = computed(() => {
   return t('modemDetail.subtitlePhysical')
 })
 const currentModemId = computed(() => props.modem?.id ?? '')
-const title = computed(() => {
-  if (!props.modem) return t('modemDetail.unknown')
-  return props.modem.name.trim() || props.modem.sim.operatorName || props.modem.id
-})
+const title = computed(() =>
+  props.modem ? displayModemName(props.modem) : t('modemDetail.unknown'),
+)
 const simKindLabel = computed(() => {
   if (props.modem?.simKind === 'euicc') return t('labels.esim')
   if (props.modem?.simKind === 'physical') return t('labels.psim')
@@ -62,6 +61,16 @@ const phoneNumber = computed(() => {
   const modem = props.modem
   if (!modem?.number?.trim()) return ''
   return formatPhoneDisplay(modem.number)
+})
+const desktopConnected = computed(() => !!props.modem && isModemConnected(props.modem))
+const desktopMetadata = computed(() => {
+  if (!props.modem) return []
+  const entries = [
+    props.modem.sim.operatorName.trim(),
+    props.modem.manufacturer.trim(),
+    phoneNumber.value,
+  ]
+  return [...new Set(entries)].filter((entry) => entry && entry !== title.value)
 })
 
 const handleTitleClick = () => {
@@ -100,40 +109,63 @@ const handleModemSwitch = (modem: Modem) => {
 <template>
   <header
     v-if="props.variant === 'desktop'"
-    class="min-w-0 space-y-1.5"
+    class="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-2"
   >
     <Skeleton
       v-if="props.isLoading"
       class="h-9 w-48 rounded bg-muted"
     />
     <template v-else>
-      <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+      <div class="min-w-0">
         <h1
-          class="min-w-0 text-2xl font-semibold wrap-anywhere tracking-tight"
+          class="text-3xl font-bold wrap-anywhere tracking-tight"
           @click="handleTitleClick"
         >
           {{ title }}
         </h1>
-        <Badge
+        <div
           v-if="props.modem"
-          variant="outline"
-          >{{ simKindLabel }}</Badge
+          class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
         >
+          <template
+            v-for="(entry, index) in desktopMetadata"
+            :key="entry"
+          >
+            <span
+              v-if="index > 0"
+              aria-hidden="true"
+              >·</span
+            >
+            <span class="wrap-anywhere">{{ entry }}</span>
+          </template>
+          <Badge
+            variant="outline"
+            class="text-muted-foreground"
+            >{{ simKindLabel }}</Badge
+          >
+        </div>
       </div>
-      <div
+      <span
         v-if="props.modem"
-        class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
+        :class="
+          desktopConnected
+            ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-300'
+            : 'bg-muted text-muted-foreground'
+        "
+        class="mt-1 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium"
       >
-        <ModemSignalStatus
-          :signal-quality="props.modem.signalQuality"
-          :registration-state="props.modem.registrationState"
-          :access-technology="props.modem.accessTechnology"
-          :wifi-calling-connected="props.modem.wifiCallingConnected"
-          :airplane-mode="props.modem.airplaneMode"
-          :show-signal-value="false"
+        <span
+          class="size-1.5 rounded-full bg-current"
+          aria-hidden="true"
         />
-        <span v-if="phoneNumber">{{ phoneNumber }}</span>
-      </div>
+        {{
+          t(
+            desktopConnected
+              ? 'modemDetail.connection.connected'
+              : 'modemDetail.connection.disconnected',
+          )
+        }}
+      </span>
     </template>
   </header>
   <div

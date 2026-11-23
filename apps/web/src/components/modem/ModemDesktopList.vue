@@ -8,6 +8,7 @@ import CarrierLogo from '@/components/CarrierLogo.vue'
 import DesktopWorkspaceSidebar from '@/components/DesktopWorkspaceSidebar.vue'
 import ModemSignalStatus from '@/components/modem/ModemSignalStatus.vue'
 import { Skeleton } from '@/components/ui/skeleton'
+import { displayModemName, isModemConnected } from '@/composables/useModemDisplay'
 import type { Modem } from '@/types/modem'
 
 const props = defineProps<{
@@ -21,10 +22,15 @@ const { t } = useI18n()
 const route = useRoute()
 const devices = computed(() =>
   props.modems.map((modem) => {
-    const name = modem.name.trim()
-    const title = modem.sim.operatorName.trim() || name || modem.id
-    const subtitle = name && name !== title ? name : modem.id
-    return { modem, title, subtitle: subtitle === title ? '' : subtitle }
+    const operator = modem.sim.operatorName.trim()
+    const title = displayModemName(modem)
+    const subtitle = operator && operator !== title ? operator : modem.id
+    return {
+      modem,
+      title,
+      subtitle: subtitle === title ? '' : subtitle,
+      connected: isModemConnected(modem),
+    }
   }),
 )
 </script>
@@ -34,8 +40,9 @@ const devices = computed(() =>
     :to="{ name: 'settings', state: { settingsReturnTo: route.fullPath } }"
     :label="t('home.globalSettings')"
     :icon="Settings"
+    embedded
   >
-    <div class="flex shrink-0 items-baseline justify-between gap-2 px-2 py-3">
+    <div class="flex shrink-0 items-center justify-between gap-2 px-2 py-2">
       <h2
         id="desktop-device-list-title"
         class="text-sm font-semibold"
@@ -44,18 +51,19 @@ const devices = computed(() =>
       </h2>
       <span
         v-if="!isLoading"
-        class="text-xs text-muted-foreground"
+        class="rounded-full border bg-card px-2 text-xs tabular-nums text-muted-foreground"
       >
-        {{ t('home.subtitle', { count: modems.length }) }}
+        <span aria-hidden="true">{{ modems.length }}</span>
+        <span class="sr-only">{{ t('home.subtitle', { count: modems.length }) }}</span>
       </span>
     </div>
     <nav
       aria-labelledby="desktop-device-list-title"
       :aria-busy="isLoading"
-      class="min-h-0 space-y-1 overflow-y-auto"
+      class="min-h-0 flex-1 space-y-2 overflow-y-auto pb-3"
     >
       <RouterLink
-        v-for="{ modem, title, subtitle } in devices"
+        v-for="{ modem, title, subtitle, connected } in devices"
         :key="modem.id"
         :to="
           modem.id === modemId
@@ -65,13 +73,13 @@ const devices = computed(() =>
         :aria-current="modem.id === modemId ? 'true' : undefined"
         :class="
           modem.id === modemId
-            ? 'border-primary/20 bg-primary/10'
-            : 'border-transparent hover:bg-muted'
+            ? 'border-primary/25 bg-sidebar-accent before:absolute before:inset-y-3 before:-start-px before:w-0.5 before:rounded-full before:bg-sidebar-primary'
+            : 'border-sidebar-border bg-card hover:border-primary/30 hover:bg-sidebar-accent/50'
         "
-        class="flex min-w-0 items-center gap-2 rounded-lg border px-2 py-2.5 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        class="relative flex min-h-15 min-w-0 items-center gap-2 rounded-xl border px-2.5 py-2 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring"
       >
         <span
-          class="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-background"
+          class="grid size-8 shrink-0 place-items-center overflow-hidden rounded-lg border border-sidebar-border bg-background"
           aria-hidden="true"
         >
           <CarrierLogo
@@ -83,7 +91,7 @@ const devices = computed(() =>
         </span>
         <span class="min-w-0 flex-1">
           <span
-            class="block truncate text-sm font-medium"
+            class="block truncate text-sm font-semibold"
             :title="title"
             >{{ title }}</span
           >
@@ -94,24 +102,38 @@ const devices = computed(() =>
             >{{ subtitle }}</span
           >
         </span>
-        <ModemSignalStatus
-          variant="stacked"
-          :signal-quality="modem.signalQuality"
-          :registration-state="modem.registrationState"
-          :access-technology="modem.accessTechnology"
-          :wifi-calling-connected="modem.wifiCallingConnected"
-          :volte-connected="modem.volteConnected"
-          :airplane-mode="modem.airplaneMode"
-          :show-signal-value="false"
-        />
+        <div class="flex shrink-0 flex-col items-end gap-0.5">
+          <ModemSignalStatus
+            variant="stacked"
+            :signal-quality="modem.signalQuality"
+            :registration-state="modem.registrationState"
+            :access-technology="connected ? modem.accessTechnology : null"
+            :wifi-calling-connected="modem.wifiCallingConnected"
+            :volte-connected="modem.volteConnected"
+            :airplane-mode="modem.airplaneMode"
+            :show-signal-value="false"
+          />
+          <span :class="connected ? 'sr-only' : 'text-xs text-muted-foreground'">
+            {{
+              t(
+                connected
+                  ? 'modemDetail.connection.connected'
+                  : 'modemDetail.connection.disconnected',
+              )
+            }}
+          </span>
+        </div>
       </RouterLink>
-      <template v-if="isLoading && !modems.length">
+      <div
+        v-if="isLoading && !modems.length"
+        class="space-y-1"
+      >
         <Skeleton
           v-for="index in 3"
           :key="index"
-          class="h-14 w-full"
+          class="h-15 w-full bg-sidebar-accent"
         />
-      </template>
+      </div>
     </nav>
   </DesktopWorkspaceSidebar>
 </template>

@@ -6,9 +6,10 @@ import { RouterLink, useRoute } from 'vue-router'
 import { Button } from '@/components/ui/button'
 import type { NavigationItem } from '@/types/navigation'
 
-const props = defineProps<{ items: NavigationItem[]; label?: string }>()
+const props = defineProps<{ items: NavigationItem[]; label?: string; variant?: 'underline' }>()
 const route = useRoute()
 const { t } = useI18n()
+const underlined = computed(() => props.variant === 'underline')
 const tabs = computed(() =>
   props.items.map((item) => ({
     ...item,
@@ -20,7 +21,8 @@ const tabs = computed(() =>
 
 <template>
   <nav
-    class="flex items-center gap-1"
+    class="flex items-center"
+    :class="underlined ? 'gap-x-4' : 'gap-1'"
     :aria-label="props.label ?? t('communication.navigation')"
   >
     <Button
@@ -28,11 +30,11 @@ const tabs = computed(() =>
       :key="item.key"
       as-child
       variant="ghost"
-      class="h-9 gap-2 rounded-lg px-3"
+      class="text-muted-foreground hover:text-foreground aria-[current=page]:font-semibold aria-[current=page]:text-primary aria-[current=page]:hover:text-primary"
       :class="
-        item.active
-          ? 'bg-primary/10 text-primary hover:bg-primary/10 dark:bg-primary/15'
-          : 'text-muted-foreground hover:text-foreground'
+        underlined
+          ? 'h-10 gap-1.5 rounded-none border-b-2 border-transparent px-1 hover:bg-transparent aria-[current=page]:border-primary dark:hover:bg-transparent'
+          : 'h-9 gap-2 rounded-lg px-3 aria-[current=page]:bg-primary/10 aria-[current=page]:hover:bg-primary/10 dark:aria-[current=page]:bg-primary/15'
       "
     >
       <RouterLink

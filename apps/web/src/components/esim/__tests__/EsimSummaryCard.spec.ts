@@ -2,15 +2,16 @@ import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 
 import EsimSummaryCard from '@/components/esim/EsimSummaryCard.vue'
+import { writeClipboardText } from '@/lib/clipboard'
 import type { Modem } from '@/types/modem'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
-    t: (key: string) => {
+    t: (key: string, values?: { field: string }) => {
       if (key === 'modemDetail.fields.imei') return 'IMEI'
       if (key === 'modemDetail.fields.eid') return 'EID'
       if (key === 'modemDetail.fields.storageRemaining') return 'Storage Remaining'
-      if (key === 'modemDetail.actions.copy') return 'Copy'
+      if (key === 'modemDetail.actions.copyIdentifier') return `Copy ${values?.field}`
       return key
     },
   }),
@@ -56,7 +57,7 @@ const modem: Modem = {
 }
 
 describe('EsimSummaryCard', () => {
-  it('shows dual SE EIDs and storage summary', () => {
+  it('shows both SEs and copies the selected EID', async () => {
     const wrapper = mount(EsimSummaryCard, {
       props: {
         modem,
@@ -92,5 +93,28 @@ describe('EsimSummaryCard', () => {
     expect(text).toContain('200 KiB')
     expect(text).not.toContain('SE 1 Storage Remaining')
     expect(text).not.toContain('SE 2 Storage Remaining')
+
+    await wrapper.get('button[aria-label="Copy EID2"]').trigger('click')
+    expect(writeClipboardText).toHaveBeenCalledExactlyOnceWith('eid-2')
+    wrapper.unmount()
+  })
+
+  it('distinguishes an unavailable capacity from zero free bytes', () => {
+    const wrapper = mount(EsimSummaryCard, {
+      props: {
+        modem,
+        seInfo: {
+          ses: [
+            { id: 'se0', label: 'SE1', eid: 'eid-1' },
+            { id: 'se1', label: 'SE2', freeSpace: 0 },
+          ],
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('SE1: N/A')
+    expect(wrapper.text()).toContain('SE2: 0 B')
+    expect(wrapper.get('button[aria-label="Copy EID2"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
   })
 })

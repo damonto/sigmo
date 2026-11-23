@@ -1,4 +1,23 @@
-import { Ban, MessageSquare, SignalHigh, SignalLow, SignalMedium, SignalZero, type LucideIcon } from 'lucide-vue-next'
+import {
+  Ban,
+  MessageSquare,
+  SignalHigh,
+  SignalLow,
+  SignalMedium,
+  SignalZero,
+  type LucideIcon,
+} from 'lucide-vue-next'
+
+import type { Modem } from '@/types/modem'
+
+/** Returns the first usable device label, falling back to the modem ID. */
+export const displayModemName = (modem: Modem) =>
+  modem.name.trim() || modem.sim.operatorName.trim() || modem.id
+
+/** Reports whether a device has cellular registration, a data bearer, or Wi-Fi Calling. */
+export const isModemConnected = (modem: Modem) =>
+  modem.wifiCallingConnected === true ||
+  (!modem.airplaneMode && (modem.state === 'registered' || modem.state === 'connected'))
 
 export const useModemDisplay = () => {
   /**
@@ -20,7 +39,7 @@ export const useModemDisplay = () => {
     if (percentage >= 70) return 'text-emerald-500'
     if (percentage >= 50) return 'text-lime-500'
     if (percentage >= 30) return 'text-amber-500'
-    return 'text-rose-500'
+    return 'text-destructive'
   }
 
   /**
@@ -52,7 +71,7 @@ export const useModemDisplay = () => {
    */
   const registrationStateTone = (state: string): string => {
     const normalized = state.trim()
-    if (normalized === 'Denied') return 'text-rose-500'
+    if (normalized === 'Denied') return 'text-destructive'
     if (normalized.includes('SMS Only')) return 'text-blue-500'
     if (normalized === 'Roaming' || normalized.includes('Roaming')) return 'text-amber-500'
     return 'text-muted-foreground'
@@ -63,7 +82,7 @@ export const useModemDisplay = () => {
    */
   const getSignalColorOverride = (state: string): string | null => {
     const normalized = state.trim()
-    if (normalized === 'Emergency Only') return 'text-rose-500'
+    if (normalized === 'Emergency Only') return 'text-destructive'
     if (normalized === 'Unknown' || normalized === 'Idle' || !normalized) {
       return 'text-muted-foreground'
     }

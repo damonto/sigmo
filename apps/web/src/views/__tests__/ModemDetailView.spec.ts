@@ -320,7 +320,7 @@ const mountView = () =>
           props: ['refreshModem'],
           emits: ['edit-phone-number', 'profile-actions-open-change'],
           template:
-            '<section data-testid="esim-profiles"><button data-testid="edit-msisdn" type="button" @click="$emit(\'edit-phone-number\', {})">edit</button><button data-testid="refresh-after-profile-switch" type="button" @click="refreshModem()">switch profile</button></section>',
+            '<section data-testid="esim-profiles"><slot name="actions" /><button data-testid="edit-msisdn" type="button" @click="$emit(\'edit-phone-number\', {})">edit</button><button data-testid="refresh-after-profile-switch" type="button" @click="refreshModem()">switch profile</button></section>',
         },
         DraggableFab: {
           props: ['disabled'],
@@ -534,7 +534,10 @@ describe('ModemDetailView SIM PIN unlock', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    const desktopInstall = wrapper.get('[data-testid="esim-profiles"] button')
     expect(wrapper.find('[data-testid="install-esim"]').attributes('disabled')).toBeDefined()
+    expect(desktopInstall.text()).toBe('modemDetail.esim.installButton')
+    expect(desktopInstall.attributes('disabled')).toBeDefined()
 
     if (detailHarness.isSELoading) {
       detailHarness.isSELoading.value = false
@@ -547,6 +550,9 @@ describe('ModemDetailView SIM PIN unlock', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.find('[data-testid="install-esim"]').attributes('disabled')).toBeUndefined()
+    expect(desktopInstall.attributes('disabled')).toBeUndefined()
+    await desktopInstall.trigger('click')
+    expect(wrapper.findComponent({ name: 'EsimInstallDialog' }).props('open')).toBe(true)
   })
 
   it('shows SIM Application for physical SIM only when available', async () => {

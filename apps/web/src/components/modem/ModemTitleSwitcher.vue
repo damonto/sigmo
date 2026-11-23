@@ -11,6 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { displayModemName } from '@/composables/useModemDisplay'
 import type { Modem } from '@/types/modem'
 
 const props = defineProps<{
@@ -29,10 +30,6 @@ const { t } = useI18n()
 const currentModemId = computed(() => props.currentModem?.id ?? '')
 const canSwitchModems = computed(() => Boolean(props.currentModem) && props.modems.length > 1)
 const isCompact = computed(() => props.variant === 'compact')
-
-const displayModemName = (modem: Modem) => {
-  return modem.name.trim() || modem.sim.operatorName || modem.id
-}
 
 const title = computed(() =>
   props.currentModem ? displayModemName(props.currentModem) : t('modemDetail.unknown'),

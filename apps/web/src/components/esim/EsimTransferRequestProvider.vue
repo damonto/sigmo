@@ -470,7 +470,7 @@ const handleOpenChange = (open: boolean) => {
           </Button>
           <Button
             data-testid="approve-transfer-request"
-            class="h-auto min-h-11 min-w-0 flex-1 rounded-xl py-2.5 whitespace-normal dark:bg-rose-400 dark:text-rose-950 dark:hover:bg-rose-300"
+            class="h-auto min-h-11 min-w-0 flex-1 rounded-xl py-2.5 whitespace-normal"
             :disabled="busy || !selection"
             @click="decide(current, true, selection)"
           >

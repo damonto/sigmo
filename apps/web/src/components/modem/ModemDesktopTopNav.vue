@@ -20,7 +20,7 @@ const currentModem = computed(() => modem.value ?? props.modem)
 </script>
 
 <template>
-  <div class="mb-4 shrink-0 space-y-3 border-b pb-2">
+  <div class="mb-4 shrink-0 space-y-3 border-b">
     <ModemDetailHeader
       :modem="currentModem"
       :is-loading="isLoading && !currentModem"
@@ -29,7 +29,8 @@ const currentModem = computed(() => modem.value ?? props.modem)
     <DesktopTabNav
       :items="props.items"
       :label="t('modemDetail.navigation')"
-      class="flex-wrap"
+      variant="underline"
+      class="-mb-px flex-wrap"
     />
   </div>
 </template>

@@ -85,8 +85,8 @@ const restoreListFocus = (event: Event) => {
       class="grid min-w-0 gap-6 lg:min-h-0 lg:flex-1 lg:overflow-hidden"
       :class="
         modemId
-          ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]'
-          : 'lg:grid-cols-[22rem_minmax(0,1fr)]'
+          ? 'lg:grid-cols-(--modem-communication-columns)'
+          : 'lg:grid-cols-[15rem_minmax(0,1fr)]'
       "
     >
       <section

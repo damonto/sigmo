@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
-import { ContactRound, Info, MessageSquare, Phone, Settings } from 'lucide-vue-next'
+import { ContactRound, LayoutDashboard, MessageSquare, Phone, Settings } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 
@@ -17,6 +17,7 @@ const { t } = useI18n()
 const desktop = useMediaQuery('(min-width: 64rem)')
 const { modems, fetchModems, isLoading } = useModems()
 const mounted = ref(false)
+const content = useTemplateRef<HTMLElement>('content')
 
 const modemId = computed(() => (typeof route.params.id === 'string' ? route.params.id : ''))
 const firstModemId = computed(() => modems.value[0]?.id)
@@ -44,6 +45,14 @@ watch(
   { flush: 'post' },
 )
 
+watch(
+  [modemId, () => route.name],
+  () => {
+    if (desktop.value && content.value) content.value.scrollTop = 0
+  },
+  { flush: 'post' },
+)
+
 const tabItems = computed<NavigationItem[]>(() => [
   {
     key: 'detail',
@@ -51,7 +60,7 @@ const tabItems = computed<NavigationItem[]>(() => [
     activeRouteNames: ['modem-notifications'],
     to: { name: 'modem-detail', params: { id: modemId.value } },
     label: t('modemDetail.tabs.detail'),
-    icon: Info,
+    icon: LayoutDashboard,
   },
   {
     key: 'messages',
@@ -95,7 +104,7 @@ const tabItems = computed<NavigationItem[]>(() => [
 
 <template>
   <div
-    class="lg:grid lg:h-(--desktop-workspace-height) lg:grid-cols-[minmax(17rem,1fr)_minmax(0,5fr)] lg:gap-6"
+    class="lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-(--desktop-workspace-columns) lg:grid-rows-[minmax(0,1fr)] lg:rounded-2xl lg:border"
   >
     <ModemDesktopList
       v-if="desktop"
@@ -104,7 +113,7 @@ const tabItems = computed<NavigationItem[]>(() => [
       :is-loading="isLoading"
       :switch-route-name="switchRouteName"
     />
-    <div class="flex min-w-0 flex-col lg:min-h-0">
+    <div class="flex min-w-0 flex-col lg:min-h-0 lg:px-6 lg:pt-5 lg:pb-4">
       <ModemDesktopTopNav
         v-if="desktop && modemId"
         :items="tabItems"
@@ -112,6 +121,7 @@ const tabItems = computed<NavigationItem[]>(() => [
         :modem-id="modemId"
       />
       <div
+        ref="content"
         class="@container/modem flex min-w-0 flex-col gap-4 lg:-me-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pe-3 lg:scrollbar-thin lg:scrollbar-thumb-muted-foreground/75 lg:scrollbar-gutter-stable lg:[--modem-desktop-content-height:100%]"
       >
         <RouterView />

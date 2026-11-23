@@ -105,7 +105,8 @@ const items = computed(() => [
             <span class="block truncate text-sm font-medium">{{ item.title }}</span>
             <span
               :data-testid="`settings-nav-description-${item.key}`"
-              class="mt-0.5 block whitespace-normal wrap-break-word text-xs leading-4 opacity-80"
+              class="mt-0.5 block text-xs leading-4 opacity-80"
+              :class="item.key === 'updates' ? 'truncate' : 'whitespace-normal wrap-break-word'"
             >
               {{ item.description }}
             </span>

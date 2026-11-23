@@ -12,6 +12,7 @@ const { t } = useI18n()
 const route = useRoute()
 const isSettings = computed(() => route.matched.some((record) => record.path === '/settings'))
 const isModemPage = computed(() => route.matched.some((record) => record.path === '/modems/:id'))
+const isModemWorkspace = computed(() => isModemPage.value || route.name === 'home')
 const tabs = computed<NavigationItem[]>(() => [
   {
     key: 'devices',
@@ -62,9 +63,12 @@ const tabs = computed<NavigationItem[]>(() => [
 </script>
 
 <template>
-  <div class="min-h-dvh bg-background">
+  <div
+    class="min-h-dvh bg-background"
+    :class="{ 'lg:h-dvh lg:overflow-clip': isModemWorkspace }"
+  >
     <header
-      v-if="route.name !== 'home' && !isModemPage && !isSettings"
+      v-if="!isModemWorkspace && !isSettings"
       class="sticky top-0 z-20 hidden border-b border-border bg-background/85 backdrop-blur-xl backdrop-saturate-125 lg:block"
     >
       <div class="mx-auto flex h-16 w-full max-w-7xl items-center gap-5 px-8">
@@ -82,8 +86,11 @@ const tabs = computed<NavigationItem[]>(() => [
     <div
       class="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 py-4 lg:px-8 lg:py-6 lg:pb-8"
       :class="[
-        isModemPage || isSettings || route.name === 'home' ? 'lg:max-w-[112rem]' : 'lg:max-w-7xl',
-        { 'pb-[calc(5rem+env(safe-area-inset-bottom))]': !isSettings },
+        isModemWorkspace || isSettings ? 'lg:max-w-[112rem]' : 'lg:max-w-7xl',
+        {
+          'lg:h-full': isModemWorkspace,
+          'pb-[calc(5rem+env(safe-area-inset-bottom))]': !isSettings,
+        },
       ]"
     >
       <RouterView />

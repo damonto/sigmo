@@ -94,6 +94,10 @@ const emit = defineEmits<{
   (event: 'profile-actions-open-change', profile: EsimProfile, open: boolean): void
   (event: 'open-sim-application', profile: EsimProfile): void
 }>()
+defineSlots<{
+  actions?(): unknown
+  summary?(): unknown
+}>()
 const profiles = defineModel<EsimProfile[]>('profiles', { required: true })
 const { t } = useI18n()
 const esimApi = useEsimApi()
@@ -402,17 +406,17 @@ watch(detailsOpen, (value) => {
     :source-id="historySource"
   />
   <section class="space-y-3">
-    <div class="flex items-center justify-between">
-      <h2 class="text-sm font-semibold text-muted-foreground">
-        {{ t('modemDetail.esim.listTitle') }}
-      </h2>
-      <Badge
-        variant="outline"
-        class="text-[10px] uppercase tracking-[0.2em]"
-      >
-        {{ isLoading ? '...' : profileCount }}
-      </Badge>
+    <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+      <div class="flex items-center gap-2">
+        <h2 class="text-sm font-semibold">{{ t('modemDetail.esim.listTitle') }}</h2>
+        <Badge variant="outline" class="text-muted-foreground tabular-nums">
+          {{ isLoading ? '...' : profileCount }}
+        </Badge>
+      </div>
+      <slot name="actions" />
     </div>
+
+    <slot name="summary" />
 
     <div
       v-if="isLoading"
@@ -421,7 +425,7 @@ watch(detailsOpen, (value) => {
       <div
         v-for="i in 3"
         :key="`esim-profile-skeleton-${i}`"
-        class="flex items-center justify-between rounded-lg bg-card px-4 py-3 shadow-sm"
+        class="flex items-center justify-between rounded-lg bg-card px-4 py-3 shadow-sm lg:rounded-none lg:border-t lg:px-0 lg:shadow-none"
       >
         <div class="flex min-w-0 items-center gap-3">
           <Skeleton class="h-11 w-11 shrink-0 rounded-md bg-muted/80" />
@@ -448,11 +452,11 @@ watch(detailsOpen, (value) => {
       <div
         v-for="group in profileGroups"
         :key="group.id"
-        class="space-y-2"
+        class="space-y-2 lg:space-y-0"
       >
         <div
           v-if="hasMultipleSEs"
-          class="flex min-w-0 items-center justify-between gap-3 px-1"
+          class="flex min-w-0 items-center justify-between gap-3 px-1 lg:pb-2"
         >
           <p class="min-w-0 truncate text-xs font-semibold text-muted-foreground">
             {{ group.label }}: {{ group.eid || 'N/A' }}
@@ -467,7 +471,7 @@ watch(detailsOpen, (value) => {
         <div
           v-for="{ profile, automation } in group.profiles"
           :key="profile.id"
-          class="rounded-lg border bg-card px-4 py-3 shadow-sm transition"
+          class="rounded-lg border bg-card px-4 py-3 shadow-sm transition lg:rounded-none lg:border-x-0 lg:border-b-0 lg:border-t-border lg:bg-transparent lg:px-0 lg:shadow-none"
           :class="profile.enabled ? 'border-primary/40 bg-primary/5' : 'border-transparent'"
         >
           <div class="flex items-center justify-between gap-3">
@@ -604,7 +608,7 @@ watch(detailsOpen, (value) => {
           </div>
           <div
             v-if="profile.reminder || automation"
-            class="mt-3 space-y-1.5 border-t border-border/60 pt-2"
+            class="mt-3 flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-2"
           >
             <ReminderBadge
               v-if="profile.reminder"

@@ -119,8 +119,34 @@ describe('device workspace', { timeout: 20_000 }, () => {
     const device = wrapper.get('aside nav a[aria-current="true"]')
     expect(
       device.findAll('[title="Carrier"], [title="RM520N"]').map((label) => label.text()),
-    ).toEqual(['Carrier', 'RM520N'])
+    ).toEqual(['RM520N', 'Carrier'])
     expect(harness.fetchModems).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows each device connection state and keeps the selected device addressable', async () => {
+    harness.modems = [
+      { ...modem('offline', 'Spare'), state: 'disabled', airplaneMode: true },
+      modem('first', 'RM520N'),
+      {
+        ...modem('wifi', 'Office'),
+        state: 'disabled',
+        airplaneMode: true,
+        wifiCallingConnected: true,
+      },
+    ]
+    const wrapper = await mountRoute('/modems/offline')
+    const sidebar = wrapper.get('aside')
+    expect(sidebar.get('a[href="/modems/first"]').text()).toContain(
+      'modemDetail.connection.connected',
+    )
+    expect(sidebar.get('a[href="/modems/wifi"]').text()).toContain(
+      'modemDetail.connection.connected',
+    )
+    expect(sidebar.get('a[aria-current="true"]').text()).toContain('Spare')
+    expect(sidebar.get('a[aria-current="true"]').text()).toContain(
+      'modemDetail.connection.disconnected',
+    )
+    expect(wrapper.get('header').text()).toContain('modemDetail.connection.disconnected')
   })
 
   it('swaps the sidebar menu and returns to the device page that opened settings', async () => {
@@ -159,6 +185,8 @@ describe('device workspace', { timeout: 20_000 }, () => {
   ])('switches devices within the current section from $path', async ({ path, target }) => {
     const wrapper = await mountRoute(path)
     const sidebar = wrapper.get('aside')
+    const content = wrapper.get('[class~="@container/modem"]').element
+    content.scrollTop = 80
     expect(router.currentRoute.value.fullPath).toBe(path)
     expect(sidebar.get('a[aria-current="true"]').text()).toContain('RM520N')
     expect(sidebar.get('a[aria-current="true"]').attributes('href')).toBe(path)
@@ -170,6 +198,7 @@ describe('device workspace', { timeout: 20_000 }, () => {
     })
     expect(wrapper.get('h1').text()).toBe('Office')
     expect(sidebar.get('a[aria-current="true"]').text()).toContain('Office')
+    expect(content.scrollTop).toBe(0)
   })
 
   it('keeps home available on mobile', async () => {

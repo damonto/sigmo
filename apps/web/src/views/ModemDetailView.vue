@@ -7,6 +7,7 @@ import {
   Download,
   EllipsisVertical,
   Info,
+  Plus,
 } from 'lucide-vue-next'
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -30,6 +31,7 @@ import DraggableFab from '@/components/fab/DraggableFab.vue'
 import AutomationScheduleBadge from '@/components/modem/AutomationScheduleBadge.vue'
 import ModemDetailCard from '@/components/modem/ModemDetailCard.vue'
 import ModemDetailHeader from '@/components/modem/ModemDetailHeader.vue'
+import ModemNetworkSummary from '@/components/modem/ModemNetworkSummary.vue'
 import ModemLineMsisdnDialog from '@/components/modem/settings/ModemLineMsisdnDialog.vue'
 import SimAutomationsDialog from '@/components/modem/SimAutomationsDialog.vue'
 import SimApplicationDialog from '@/components/modem/SimApplicationDialog.vue'
@@ -579,181 +581,209 @@ void fetchCapabilities()
     </AlertDescription>
   </Alert>
 
-  <!-- SIM Slot Switcher -->
-  <SimSlotSwitcher
-    v-if="modem && !needsPinUnlock"
-    v-model="currentSimSlot"
-    :slots="simSlots"
-    :signal-quality="modem.signalQuality"
-    :registration-state="modem.registrationState"
-    :access-technology="modem.accessTechnology"
-    :registered-operator-name="modem.registeredOperator.name"
-    :wifi-calling-connected="modem.wifiCallingConnected"
-    :airplane-mode="modem.airplaneMode"
-    :on-switch="handleSimSwitch"
-  />
-
   <div
-    v-if="modem && isEsimModem"
-    class="grid gap-4 @modem-detail/modem:grid-cols-[minmax(22rem,1fr)_clamp(16rem,27vw,26rem)]"
+    v-if="modem"
+    class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_clamp(14rem,27%,23rem)] lg:items-start"
   >
-    <div class="min-w-0 space-y-3">
-      <EsimSummaryCard
-        :modem="modem"
-        :se-info="seInfo"
+    <ModemNetworkSummary
+      :modem="modem"
+      class="lg:col-span-2"
+    >
+      <SimSlotSwitcher
+        v-if="!needsPinUnlock"
+        v-model="currentSimSlot"
+        :slots="simSlots"
+        :signal-quality="modem.signalQuality"
+        :registration-state="modem.registrationState"
+        :access-technology="modem.accessTechnology"
+        :registered-operator-name="modem.registeredOperator.name"
+        :wifi-calling-connected="modem.wifiCallingConnected"
+        :airplane-mode="modem.airplaneMode"
+        :on-switch="handleSimSwitch"
       />
-      <EsimProfileSection
-        :automation-schedules="automationSchedules"
-        @open-automations="openESIMAutomations"
-        :sim-pin-available="simPin.available.value"
-        :sim-pin-profile-iccid="modem.sim.identifier"
-        @open-sim-pin="simPin.show"
-        v-model:profiles="esimProfiles"
-        :loading="isEsimProfilesLoading"
-        :modem-id="modemId"
-        :refresh-modem="refreshAfterSimSwitch"
-        :internet-connected="isInternetConnected"
-        :internet-busy="isInternetBusy"
-        :wifi-calling-available="canUseWiFiCalling"
-        :wifi-calling-enabled="settingsWiFiCallingEnabled"
-        :wifi-calling-connected="settingsWiFiCallingConnected"
-        :wifi-calling-busy="isWiFiCallingBusy"
-        :sim-application-available="simApplicationAvailable"
-        :sim-application-profile-iccid="simApplicationProfileIccid"
-        @success="showSuccess"
-        @toggle-network="handleNetworkQuickToggle"
-        @toggle-wifi-calling="handleWiFiCallingQuickToggle"
-        @edit-phone-number="openMsisdnDialog"
-        @profile-actions-open-change="handleProfileActionsOpenChange"
-        @open-sim-application="openSimApplication"
+    </ModemNetworkSummary>
+
+    <template v-if="isEsimModem">
+      <div class="min-w-0 lg:rounded-xl lg:border lg:bg-card lg:p-4">
+        <EsimProfileSection
+          :automation-schedules="automationSchedules"
+          @open-automations="openESIMAutomations"
+          :sim-pin-available="simPin.available.value"
+          :sim-pin-profile-iccid="modem.sim.identifier"
+          @open-sim-pin="simPin.show"
+          v-model:profiles="esimProfiles"
+          :loading="isEsimProfilesLoading"
+          :modem-id="modemId"
+          :refresh-modem="refreshAfterSimSwitch"
+          :internet-connected="isInternetConnected"
+          :internet-busy="isInternetBusy"
+          :wifi-calling-available="canUseWiFiCalling"
+          :wifi-calling-enabled="settingsWiFiCallingEnabled"
+          :wifi-calling-connected="settingsWiFiCallingConnected"
+          :wifi-calling-busy="isWiFiCallingBusy"
+          :sim-application-available="simApplicationAvailable"
+          :sim-application-profile-iccid="simApplicationProfileIccid"
+          @success="showSuccess"
+          @toggle-network="handleNetworkQuickToggle"
+          @toggle-wifi-calling="handleWiFiCallingQuickToggle"
+          @edit-phone-number="openMsisdnDialog"
+          @profile-actions-open-change="handleProfileActionsOpenChange"
+          @open-sim-application="openSimApplication"
+        >
+          <template #actions>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              class="hidden text-primary hover:text-primary lg:inline-flex"
+              :disabled="isInstallDisabled"
+              @click="openInstallDialog"
+            >
+              <Plus
+                class="size-4"
+                aria-hidden="true"
+              />
+              {{ t('modemDetail.esim.installButton') }}
+            </Button>
+          </template>
+          <template #summary>
+            <EsimSummaryCard
+              :modem="modem"
+              :se-info="seInfo"
+              class="@modem-detail/modem:hidden lg:hidden"
+            />
+          </template>
+        </EsimProfileSection>
+      </div>
+
+      <div class="hidden min-w-0 rounded-xl border bg-card p-4 @modem-detail/modem:block lg:block">
+        <ModemDetailCard
+          :modem="modem"
+          :se-info="seInfo"
+          variant="overview"
+        />
+      </div>
+    </template>
+
+    <!-- Physical modem: show detail card -->
+    <div
+      v-else-if="isPhysicalModem"
+      class="min-w-0 space-y-3 lg:col-span-2"
+    >
+      <div class="flex flex-wrap items-center gap-2">
+        <DropdownMenu v-if="simPin.available.value">
+          <DropdownMenuTrigger as-child>
+            <Button
+              variant="outline"
+              size="icon"
+              :aria-label="t('simPin.simActions')"
+              ><EllipsisVertical class="size-4"
+            /></Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            class="w-56"
+          >
+            <DropdownMenuItem @click="simPin.show">{{ t('simPin.title') }}</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button
+          v-if="modem.sim.identifier"
+          type="button"
+          variant="outline"
+          class="justify-start gap-2"
+          @click="physicalReminderOpen = true"
+        >
+          <Bell class="size-4" />
+          {{ t('modemDetail.reminder.title') }}
+        </Button>
+        <Button
+          v-if="modem.sim.identifier"
+          type="button"
+          variant="outline"
+          class="justify-start gap-2"
+          @click="openPhysicalAutomations"
+        >
+          <CalendarClock
+            class="size-4"
+            aria-hidden="true"
+          />
+          {{ t('automation.title') }}
+        </Button>
+        <Button
+          v-if="simApplicationAvailable"
+          type="button"
+          variant="outline"
+          class="justify-start gap-2"
+          @click="openSimApplication"
+        >
+          <CreditCard class="size-4" />
+          {{ t('modemDetail.simApplication.title') }}
+        </Button>
+      </div>
+      <button
+        v-if="modem.sim.reminder"
+        type="button"
+        aria-haspopup="dialog"
+        class="flex w-full items-start gap-3 rounded-lg border bg-card px-4 py-3 text-left text-sm text-card-foreground transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        @click="physicalReminderOpen = true"
+      >
+        <Bell
+          class="mt-0.5 size-4 shrink-0 text-primary"
+          aria-hidden="true"
+        />
+        <span class="min-w-0 flex-1">
+          <span class="block font-medium">{{ t('modemDetail.reminder.title') }}</span>
+          <span class="mt-0.5 block space-y-1 leading-relaxed text-muted-foreground">
+            <span class="block">
+              {{ t('modemDetail.reminder.nextAt') }}:
+              <time :datetime="modem.sim.reminder.nextAt">{{
+                formatReminderTimestamp(modem.sim.reminder.nextAt)
+              }}</time>
+            </span>
+            <span class="block">
+              {{
+                modem.sim.reminder.repeatDays
+                  ? t('modemDetail.reminder.everyDays', { days: modem.sim.reminder.repeatDays })
+                  : t('modemDetail.reminder.once')
+              }}
+            </span>
+            <span class="block whitespace-pre-wrap wrap-break-word">{{
+              modem.sim.reminder.content
+            }}</span>
+          </span>
+        </span>
+        <ChevronRight
+          class="size-4 shrink-0 self-center text-muted-foreground"
+          aria-hidden="true"
+        />
+      </button>
+      <div
+        v-if="physicalAutomation"
+        class="rounded-lg border bg-card px-4 py-3"
+      >
+        <AutomationScheduleBadge
+          :automation="physicalAutomation"
+          @edit="openPhysicalAutomations"
+        />
+      </div>
+      <ModemDetailCard
+        :modem="modem"
+        :se-info="null"
+        class="lg:rounded-xl lg:border lg:bg-card lg:p-4"
       />
     </div>
 
-    <aside
-      class="hidden min-w-0 self-start rounded-xl border bg-card p-4 @modem-detail/modem:block lg:block"
+    <div
+      v-else-if="isSIMKindUnknown"
+      class="min-w-0 lg:col-span-2"
     >
       <ModemDetailCard
         :modem="modem"
-        :se-info="seInfo"
-      />
-    </aside>
-  </div>
-
-  <!-- Physical modem: show detail card -->
-  <div
-    v-else-if="modem && isPhysicalModem"
-    class="space-y-3"
-  >
-    <div class="flex flex-wrap items-center gap-2">
-      <DropdownMenu v-if="simPin.available.value">
-        <DropdownMenuTrigger as-child>
-          <Button
-            variant="outline"
-            size="icon"
-            :aria-label="t('simPin.simActions')"
-            ><EllipsisVertical class="size-4"
-          /></Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="start"
-          class="w-56"
-        >
-          <DropdownMenuItem @click="simPin.show">{{ t('simPin.title') }}</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <Button
-        v-if="modem.sim.identifier"
-        type="button"
-        variant="outline"
-        class="justify-start gap-2"
-        @click="physicalReminderOpen = true"
-      >
-        <Bell class="size-4" />
-        {{ t('modemDetail.reminder.title') }}
-      </Button>
-      <Button
-        v-if="modem.sim.identifier"
-        type="button"
-        variant="outline"
-        class="justify-start gap-2"
-        @click="openPhysicalAutomations"
-      >
-        <CalendarClock
-          class="size-4"
-          aria-hidden="true"
-        />
-        {{ t('automation.title') }}
-      </Button>
-      <Button
-        v-if="simApplicationAvailable"
-        type="button"
-        variant="outline"
-        class="justify-start gap-2"
-        @click="openSimApplication"
-      >
-        <CreditCard class="size-4" />
-        {{ t('modemDetail.simApplication.title') }}
-      </Button>
-    </div>
-    <button
-      v-if="modem.sim.reminder"
-      type="button"
-      aria-haspopup="dialog"
-      class="flex w-full items-start gap-3 rounded-lg border bg-card px-4 py-3 text-left text-sm text-card-foreground transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      @click="physicalReminderOpen = true"
-    >
-      <Bell
-        class="mt-0.5 size-4 shrink-0 text-primary"
-        aria-hidden="true"
-      />
-      <span class="min-w-0 flex-1">
-        <span class="block font-medium">{{ t('modemDetail.reminder.title') }}</span>
-        <span class="mt-0.5 block space-y-1 leading-relaxed text-muted-foreground">
-          <span class="block">
-            {{ t('modemDetail.reminder.nextAt') }}:
-            <time :datetime="modem.sim.reminder.nextAt">{{
-              formatReminderTimestamp(modem.sim.reminder.nextAt)
-            }}</time>
-          </span>
-          <span class="block">
-            {{
-              modem.sim.reminder.repeatDays
-                ? t('modemDetail.reminder.everyDays', { days: modem.sim.reminder.repeatDays })
-                : t('modemDetail.reminder.once')
-            }}
-          </span>
-          <span class="block whitespace-pre-wrap wrap-break-word">{{
-            modem.sim.reminder.content
-          }}</span>
-        </span>
-      </span>
-      <ChevronRight
-        class="size-4 shrink-0 self-center text-muted-foreground"
-        aria-hidden="true"
-      />
-    </button>
-    <div
-      v-if="physicalAutomation"
-      class="rounded-lg border bg-card px-4 py-3"
-    >
-      <AutomationScheduleBadge
-        :automation="physicalAutomation"
-        @edit="openPhysicalAutomations"
+        :se-info="null"
+        class="lg:rounded-xl lg:border lg:bg-card lg:p-4"
       />
     </div>
-    <ModemDetailCard
-      :modem="modem"
-      :se-info="null"
-      class="lg:rounded-xl lg:border lg:bg-card lg:p-4"
-    />
-  </div>
-
-  <div v-else-if="modem && isSIMKindUnknown">
-    <ModemDetailCard
-      :modem="modem"
-      :se-info="null"
-      class="lg:rounded-xl lg:border lg:bg-card lg:p-4"
-    />
   </div>
 
   <Dialog v-model:open="detailDialogOpen">
@@ -813,6 +843,7 @@ void fetchCapabilities()
 
   <DraggableFab
     v-if="modem && isEsimModem"
+    class="lg:hidden"
     :ariaLabel="t('modemDetail.esim.installButton')"
     :title="t('modemDetail.esim.installButton')"
     :disabled="isInstallDisabled"

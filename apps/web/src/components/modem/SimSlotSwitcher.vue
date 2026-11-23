@@ -117,15 +117,17 @@ const slotOptionClass = (slot: SlotInfo) => {
 
 <template>
   <div
-    class="flex min-w-0 items-center gap-2 rounded-lg bg-card/90 px-3 py-2 shadow-sm backdrop-blur-xl dark:bg-card/70 dark:shadow-none"
+    class="flex min-w-0 items-center gap-2 rounded-lg bg-card/90 px-3 py-2 shadow-sm backdrop-blur-xl lg:mt-1 lg:rounded-none lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none dark:bg-card/70 dark:shadow-none dark:lg:bg-transparent"
   >
     <RadioGroup
+      v-if="slots.length"
       :model-value="selectedSlot"
       :disabled="!hasMultipleSlots"
-      class="inline-flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto"
+      :aria-label="t('modemDetail.overview.simSlot')"
+      class="inline-flex min-w-0 items-center gap-1 overflow-x-auto lg:flex-wrap lg:overflow-visible"
       @update:model-value="handleSelect"
     >
-      <div v-for="slot in slots" :key="slot.slot" class="relative flex items-center">
+      <div v-for="slot in slots" :key="slot.slot" class="relative flex shrink-0 items-center">
         <Label
           :for="`sim-slot-${slot.slot}`"
           class="inline-flex h-7 select-none items-center gap-2 rounded-md px-2 text-xs font-semibold uppercase transition-colors"
@@ -140,6 +142,7 @@ const slotOptionClass = (slot: SlotInfo) => {
         </Label>
       </div>
     </RadioGroup>
+    <span v-else class="hidden font-medium lg:inline">—</span>
 
     <ModemSignalStatus
       v-if="showSignalStatus"
@@ -151,7 +154,7 @@ const slotOptionClass = (slot: SlotInfo) => {
       :airplane-mode="props.airplaneMode"
       :show-signal-value="false"
       size="sm"
-      class="ml-auto"
+      class="ml-auto lg:hidden"
     />
   </div>
 

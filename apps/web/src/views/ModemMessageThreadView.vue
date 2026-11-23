@@ -155,7 +155,7 @@ watch(
 
 <template>
   <div
-    class="grid h-[calc(100dvh-6.5rem-env(safe-area-inset-bottom))] gap-4 overflow-hidden lg:h-(--modem-desktop-content-height) lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]"
+    class="grid h-[calc(100dvh-6.5rem-env(safe-area-inset-bottom))] gap-4 overflow-hidden lg:h-(--modem-desktop-content-height) lg:grid-cols-(--modem-communication-columns)"
   >
     <div class="hidden min-h-0 min-w-0 lg:block">
       <ModemMessagesPanel

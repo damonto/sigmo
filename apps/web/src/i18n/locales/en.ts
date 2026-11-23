@@ -477,7 +477,7 @@ const en = {
     notificationSaveSuccess: 'Notification channel saved.',
     updates: {
       title: 'Updates',
-      description: 'Choose an update channel, check releases, and manage automatic installation.',
+      description: 'Check for updates.',
       preferences: 'Update settings',
       automatic: 'Automatic updates',
       automaticDescription:
@@ -863,6 +863,18 @@ const en = {
     failed: 'Could not create an activation link.',
   },
   modemDetail: {
+    connection: {
+      connected: 'Connected',
+      disconnected: 'Offline',
+    },
+    overview: {
+      network: 'Network status',
+      networkDetails: 'Network details',
+      voice: 'Voice services',
+      simSlot: 'SIM slot',
+      device: 'Device information',
+      euicc: 'eUICC Information',
+    },
     navigation: 'Device sections',
     back: 'Back',
     kicker: 'Sigmo',
@@ -950,7 +962,7 @@ const en = {
     },
     esim: {
       lineNoNumber: 'No Number',
-      listTitle: 'eSIMs',
+      listTitle: 'eSIM profiles',
       noProfiles: 'No eSIM profiles found.',
       installButton: 'Install eSIM',
       installTitle: 'Install eSIM',
@@ -1056,7 +1068,8 @@ const en = {
       resend: 'Resend',
       cancel: 'Cancel',
       confirm: 'Confirm',
-      copy: 'Copy',
+      copyIdentifier: 'Copy {field}',
+      identifierCopied: '{field} copied',
       update: 'Update',
       loading: 'Loading',
     },
