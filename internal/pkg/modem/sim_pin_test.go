@@ -15,14 +15,22 @@ type pinDeviceFake struct {
 	reads, writes, powers       int
 	pin, replacement            string
 	writeErr, readErr, powerErr error
+	onReadInfo                  func()
+	onReadStatus                func()
 	onWrite                     func()
 }
 
 func (d *pinDeviceFake) SIMInfo(context.Context) (wwan.SIMInfo, error) {
 	d.reads++
+	if d.onReadInfo != nil {
+		d.onReadInfo()
+	}
 	return d.info, d.readErr
 }
 func (d *pinDeviceFake) SIMPINStatus(context.Context) (wwan.SIMPINStatus, error) {
+	if d.onReadStatus != nil {
+		d.onReadStatus()
+	}
 	return d.status, d.readErr
 }
 func (d *pinDeviceFake) mutate(pin, newPIN string) error {
@@ -205,6 +213,60 @@ func TestSIMPINReservationCancellation(t *testing.T) {
 	}
 	if d.writes != 0 {
 		t.Fatal("canceled request reached device")
+	}
+}
+
+func TestSIMPINCanceledReadDiscardsResult(t *testing.T) {
+	tests := []struct {
+		name       string
+		cancelRead func(*pinDeviceFake, context.CancelFunc)
+	}{
+		{
+			name: "SIM info",
+			cancelRead: func(d *pinDeviceFake, cancel context.CancelFunc) {
+				// SIMInfo can return a partial observation with a nil error.
+				d.info.ICCID = ""
+				d.onReadInfo = cancel
+			},
+		},
+		{
+			name: "PIN status",
+			cancelRead: func(d *pinDeviceFake, cancel context.CancelFunc) {
+				d.status.Enabled = false
+				d.onReadStatus = cancel
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, d, initial := pinFixture(t, wwan.SIMLockNone)
+			before := m.Snapshot()
+			d.info.PINStatus = before.SIM.PINStatus
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			tt.cancelRead(d, cancel)
+			if _, err := m.SIMPINStatus(ctx); !errors.Is(err, context.Canceled) {
+				t.Errorf("SIMPINStatus() error = %v, want context.Canceled", err)
+			}
+			after := m.Snapshot()
+			if after.SIMIdentity != before.SIMIdentity {
+				t.Error("canceled read changed the active SIM identity")
+			}
+			if after.SIM == nil || after.SIM.PINStatus != before.SIM.PINStatus {
+				t.Error("canceled read changed the stored PIN status")
+			}
+
+			d.info.ICCID = before.SIMIdentity.ICCID
+			d.onReadInfo, d.onReadStatus = nil, nil
+			status, err := m.SIMPINStatus(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.SIMToken != initial.SIMToken {
+				t.Error("canceled read invalidated the PIN token")
+			}
+		})
 	}
 }
 

@@ -103,12 +103,19 @@ func (m *Modem) SIMPINStatus(ctx context.Context) (SIMPINStatus, error) {
 func (m *Modem) readSIMPINStatus(ctx context.Context) (SIMPINStatus, error) {
 	device := m.pinDevice()
 	info, err := device.SIMInfo(ctx)
+	// SIMInfo can return partial data with a nil error after cancellation.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return SIMPINStatus{}, ctxErr
+	}
 	if err != nil {
 		return SIMPINStatus{}, ErrSIMPINUnavailable
 	}
 	m.applySIMInfo(info)
-	identity := m.Snapshot().SIMIdentity
+	identity := m.SIMIdentity()
 	status, err := device.SIMPINStatus(ctx)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return SIMPINStatus{}, ctxErr
+	}
 	if errors.Is(err, wwanmodem.ErrNotSupported) {
 		status, err = wwanmodem.SIMPINStatus{Lock: wwanmodem.SIMLockUnknown}, nil
 	}
